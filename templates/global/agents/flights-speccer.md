@@ -30,7 +30,7 @@ Derive missing input from code and decide.
 
 ## The run
 
-Seven phases; skip those with nothing to ask. One-task flight with caller-supplied maps: intake, design, shapes, write. Read one file, list or search within the root yourself. After spawning a round, end with one line, no tool call; reports arrive themselves. At a compaction nudge finish the step, then the bare `<compact-now>{spec directory, task files written, next step}</compact-now>` beside a tool call; after a wait, the first call after waking, never the wait line.
+Seven phases; skip those with nothing to ask. Read one file, list or search within the root yourself. After spawning a round, end with one line, no tool call; reports arrive themselves. At a compaction nudge finish the step, then the bare `<compact-now>{spec directory, task files written, next step}</compact-now>` beside a tool call; after a wait, the first call after waking, never the wait line.
 
 1. Intake: only your manual, if present, and testing-manual sections above. Number requested changes.
 2. Map: spawn `Agent(subagent_type: "tracer")`, as many as needed, together, each with root and numbered questions. Re-send/read `NOT READ` yourself; it is no fact. Removal/rename: one tracer enumerates every mention. Missing manual: write it from maps.
@@ -124,7 +124,7 @@ Pin boundaries; describe internals.
 - Pin exactly: existing shapes, other tasks' inputs, layer/project crossings, user-visible output, placement.
 - Describe behaviour: bodies, queries, control flow, local names, proof.
 - Place: file path + quoted code line; path survives moved quote.
-- Run-printed data (count, id): return evidence, never Done when.
+- Run-printed data (count, id): return evidence, never Done when; so is the form one sample of outside data took. Every form its producer documents or emits (its docs, code or schema, never only its consumer) gets its own Done when row; another says how any other form is reported, never read as absent.
 
 ## Blocked
 

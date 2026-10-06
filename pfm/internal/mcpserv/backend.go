@@ -7,12 +7,14 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
@@ -43,6 +45,10 @@ type backend struct {
 	warnings             io.Writer
 	allowAmbientIdentity bool
 	runtimeIdentity      string
+	// runner is the exec seam chat_digest crosses; nil is the real one.
+	runner deps.Runner
+	// digestTimeout bounds one chat_digest run; zero is digestRunTimeout.
+	digestTimeout time.Duration
 }
 
 func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error) {

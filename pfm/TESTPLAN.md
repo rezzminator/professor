@@ -727,6 +727,7 @@ Each row is one **session kind** crossed with the operations that touch it. This
 | `chat_find` needle extraction identical to chat.sh's awk pass | JAIL | `mcpserv/search.go:33-68` vs `chat.sh:455-456` | |
 | `chat_find` excludes the asking session unless `include_self` | JAIL | `mcpserv/search.go:70-98` vs `chat.sh:462` | |
 | `chat_read` bounds: `last_n` ≤200, `max_bytes` ≤1Mi, Claude and Codex turn shapes | JAIL | `mcpserv/read.go:18-21,49-70,199-273` | |
+| `chat_digest` runs `transcript.py show` over a path or id: header and events returned, `max_bytes` cuts at a line end, a filter matching nothing is `shown 0 of N` while an unresolved source and a bad flag value are tool errors naming NOT FOUND or the field | JAIL | `mcpserv/chat_digest.go`, `TestChatDigest*` | |
 | `chat_status summary=true` reaches the typed chat verb and returns `summary` + `summary_cached` | JAIL | `TestChatStatusSummaryReachesTheVerbAndReturnsField` | |
 
 ## H — `pfm chat`: subcommands, guards, `--then`, exit codes

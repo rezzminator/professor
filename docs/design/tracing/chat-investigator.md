@@ -73,6 +73,7 @@ An investigation brief without a cap fanned out to 17 agents three levels deep i
 | Left out | Reason |
 | --- | --- |
 | `chat_read` | It reads backwards from the end, counts tool turns, and drops tool results; `transcript.py show` with `--lines`, `--since` or `--grep` reads any window with results |
+| `chat_digest` | The same `transcript.py show` digest, but the whole result lands in the investigator's context on every read; `show --out` writes it once and `grep` and `sed` read a slice of it |
 | `chat_capture`, `chat_resolve` | The pane and the tmux address answer live-control questions, not what a chat did; `chat_status` and `chat_last` carry the state and the newest answer |
 | Writing a report file | Its caller consumes the final message; a file would be a second copy with no reader |
 

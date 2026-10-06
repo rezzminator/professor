@@ -231,3 +231,4 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |
 | `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
+| `{HHMMSS}` | `global/agents/agent-optimizer.md` | the UTC time of the report's write, hours, minutes and seconds |

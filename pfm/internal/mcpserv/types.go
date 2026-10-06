@@ -189,6 +189,32 @@ type ReadInput struct {
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 65536 and maximum 1048576"`
 }
 
+// DigestInput requests transcript.py's one-line-per-event digest of one
+// transcript. Every optional field maps onto one `transcript.py show` flag.
+type DigestInput struct {
+	Source     string `json:"source" jsonschema:"chat_find id, Claude or Codex session or agent id (or prefix), transcript path, or a Claude chat's title"`
+	Lines      string `json:"lines,omitempty" jsonschema:"transcript line range FROM-TO, FROM- or one line number; the events those records produced"`
+	Since      string `json:"since,omitempty" jsonschema:"window start: HH:MM[:SS] UTC, an ISO time, +5m from the transcript start, -15m from its end"`
+	Until      string `json:"until,omitempty" jsonschema:"window end, same forms as since"`
+	Grep       string `json:"grep,omitempty" jsonschema:"keep events whose full text (input, result, prose) matches this regular expression"`
+	IgnoreCase bool   `json:"ignore_case,omitempty" jsonschema:"match grep case-insensitively"`
+	Only       string `json:"only,omitempty" jsonschema:"event kinds, comma-separated: prompt, reply, call, note, final; error alone keeps only failed calls"`
+	Tool       string `json:"tool,omitempty" jsonschema:"keep only calls of these tool names, comma-separated"`
+	Results    string `json:"results,omitempty" jsonschema:"call results shown: brief (default), none, full or tail:N lines"`
+	First      int    `json:"first,omitempty" jsonschema:"keep the first N events after every other filter"`
+	Last       int    `json:"last,omitempty" jsonschema:"keep the last N events after every other filter"`
+	Text       int    `json:"text,omitempty" jsonschema:"characters kept of a prompt or reply, default 500"`
+	MaxBytes   int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, cut at a line end; default 65536 and maximum 1048576"`
+}
+
+// DigestOutput is chat_digest's bounded digest text.
+type DigestOutput struct {
+	Text       string `json:"text"`
+	Bytes      int    `json:"bytes"`
+	TotalBytes int    `json:"total_bytes"`
+	Truncated  bool   `json:"truncated"`
+}
+
 // Turn is one visible user, assistant, tool, or summary transcript record.
 // A tool call carries the tool's name in Tool and its condensed input as Text
 // — the transcript records no prose for it, and a turn with an empty Text

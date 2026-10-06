@@ -38,7 +38,7 @@ const (
 )
 
 var chatToolNames = []string{
-	"chat_capture", "chat_find", "chat_inject",
+	"chat_capture", "chat_digest", "chat_find", "chat_inject",
 	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
 	"chat_new", "chat_open", "chat_read", "chat_resolve",
 	"chat_save", "chat_status", "chat_unkill",
@@ -46,7 +46,7 @@ var chatToolNames = []string{
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. branch, end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+const chatInstructions = "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_digest; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. branch, end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -176,14 +176,19 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("chat_whoami", service.chatWhoami))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_find",
-		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_read. Only Claude transcripts are searched. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
+		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_digest. Only Claude transcripts are searched. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_find", service.chatFind))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_read",
-		Description: "Reads the recent visible turns of an indexed transcript — \"what happened in that chat\", after chat_find or with a known id. Call chat_read{source:\"<id from chat_find>\", last_n:20}. Returns turns (role, text, timestamp) with count and truncated; turns empty with count 0 = the transcript has no visible turns yet; a tool error = no transcript by that id or path. For a LIVE chat's current answer, chat_last.",
+		Description: "Reads the recent visible turns of an indexed transcript — \"what happened in that chat\", after chat_find or with a known id. Call chat_read{source:\"<id from chat_find>\", last_n:20}. Returns turns (role, text, timestamp) with count and truncated; turns empty with count 0 = the transcript has no visible turns yet; a tool error = no transcript by that id or path. For a LIVE chat's current answer, chat_last. For a window, a filter or tool results, chat_digest.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_read", service.chatRead))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_digest",
+		Description: "Digests a transcript, one line per event — prompts, replies, each tool call with its result, notes — \"what did that chat or sub-agent do\", \"its failed calls\", \"what happened 14:00–14:30\". Call chat_digest{source:\"<chat_find id, session or agent id, path, or chat title>\", grep:\"deploy\", last:40}. Returns text: a header (file, span, calls by tool, FILTER line), then the events; \"shown 0 of N\" = nothing matched. A tool error = the source did not resolve (NOT FOUND, or AMBIGUOUS with candidates) or the digest failed. chat_read: recent turns only, no results; a live chat's newest answer, chat_last.",
+		Annotations: readOnly,
+	}, obs.Tool("chat_digest", service.chatDigest))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_last",
 		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure); a turn still in progress is a tool error that says so. For screen text, chat_capture; for older turns, chat_read.",

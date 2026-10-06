@@ -121,6 +121,7 @@ Toggled by `mcp.servers.chat.enabled`; `servicedesk` belongs to this family and 
 | `chat_new` | ✚ | `{name?, prompt?, engine?, account?, model?, effort?, agentRole?, cwd?, 1h?, attach?, await?, progress?, settle?, timeout?}` | Spawned chat identity; name optional inside a workbench. |
 | `chat_open` | ✚ | `{target}` | Open result. |
 | `chat_read` | ◆ | `{source, last_n?, max_bytes?}` | Transcript text (converges onto CLI `read`). |
+| `chat_digest` | ◆ | `{source, lines?, since?, until?, grep?, ignore_case?, only?, tool?, results?, first?, last?, text?, max_bytes?}` | `transcript.py show`'s one-line-per-event digest of any Claude or Codex transcript (prompts, replies, each call with its result): `text`, `bytes`, `total_bytes`, `truncated`. The script runs as `python3 -I … show --flag=value… -- source`, its path from the source clone, else `~/.claude/skills/transcript/`; a source that does not resolve (NOT FOUND, AMBIGUOUS with candidates) or a failed run is a tool error, a filter matching nothing is a digest saying `shown 0 of N`. |
 | `chat_last` | ✚ | `{target}` | Newest entry. |
 | `chat_status` | ✚ | `{target, summary?, ask?, engine?, model?}` | Liveness/state. `summary` recaps the last exchange (cached); `ask` reports current state from the live pane (never cached). |
 | `chat_inject` | ● | `{target, message, then?, force_now?}` | Delivery report (signing rules apply). |

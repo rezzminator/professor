@@ -1014,6 +1014,18 @@ if requires; then
   else
     bad="$bad M11: chat_read unknown: $MCP_WHY;"
   fi
+  # M11b chat_digest — the same transcript digested: a grep for the needle shows its event, an unknown source is a tool error
+  if [ -n "$TRANSCRIPT" ] && mcp_call http professor chat_digest "$(jq -cn --arg s "$TRANSCRIPT" --arg n "$find_needle" '{source: $s, grep: $n}')"; then
+    [ "$MCP_ISERR" = false ] && grep -qF "$find_needle" <<<"$(sfield .text)" && grep -q 'shown [1-9]' <<<"$(sfield .text)" ||
+      bad="$bad M11b: chat_digest of $TRANSCRIPT answered isError=$MCP_ISERR without an event carrying $find_needle: $(one_line "$MCP_TEXT" | cut -c1-120);"
+  else
+    bad="$bad M11b: chat_digest: ${MCP_WHY:-no transcript path from M11};"
+  fi
+  if mcp_call http professor chat_digest '{"source":"lane-m-no-such-transcript-id"}'; then
+    [ "$MCP_ISERR" = true ] && grep -q 'NOT FOUND' <<<"$MCP_TEXT" || bad="$bad M11b: chat_digest on an unknown source answered isError=$MCP_ISERR '$(one_line "$MCP_TEXT" | cut -c1-120)' (want a tool error naming NOT FOUND);"
+  else
+    bad="$bad M11b: chat_digest unknown: $MCP_WHY;"
+  fi
   # M12 chat_last — the newest answer; the needle belongs to the user record above.
   if mcp_call http professor chat_last "$(jq -cn --arg t "$CHAT" '{target: $t}')"; then
     [ "$MCP_ISERR" = false ] && [ -n "$(sfield .text)" ] ||

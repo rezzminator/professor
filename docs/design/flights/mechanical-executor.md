@@ -43,11 +43,11 @@ Friction: `Files` lists missed callers, and the drift was found mid-edit, with a
 
 ### Tests: one red run, one green run
 
-One test per `Done when` row, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names:
+Each decision is tested once, in the test of the unit its row names, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names: a unit's rows are cases of one table-driven test, or assertions of one test, in its existing test file (a new one only where the source file has no test home, the manual's test home then); every assertion that fits one render or one call goes in one test; each `Given` line gets its test too; a caller's test covers only what the caller decides; user-visible text is asserted whole, once, where the copy is the behaviour; no assertion catches nothing. Step 2, before any test, reads every row and `Given` line: one that makes an error look like absence or contradicts the project contract returns `SPEC-DRIFT {id}: {row}: {why}`, nothing written for it, ahead of and over the rule for a row read two ways. Then:
 
-- tests before code, never after: each row's unit test, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; no test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example;
-- every row's test is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; all the new tests run in one command against the unfixed tree, each failing on its assertion (a build error proves nothing), the log kept; then the Steps are applied and the same command runs green once;
-- a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log and the commit or `run.md` line that introduced the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or committed code to watch a test fail, even where the testing manual asks for a re-break or mutation proof; a new gate proves its bite on a fixture or a `mktemp` copy;
+- tests before code, never after: each row's case or assertion, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; no test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example;
+- every row's case or assertion is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; every new or extended test runs in one command against the unfixed tree, each test or table case failing on an assertion (a build error proves nothing), rows batched in one test sharing its failing line, the log kept; then the Steps are applied and the same command runs green once;
+- a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log (its case or assertion never shares a test with this round's new rows) and the commit or `run.md` line that introduced the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or committed code to watch a test fail, even where the testing manual asks for a re-break or mutation proof; a new gate proves its bite on a fixture or a `mktemp` copy;
 - a task with no behaviour change (a rename, a move, a deletion, the doc references one carries) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history or in a hit named under Outside defects, are its proof.
 
 Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break code for the proof; one reverted to the last commit in a worktree holding sibling tasks' uncommitted work, and one temporary break of a shared file turned a sibling's run red. An audit of 13 Codex executors measured the per-row red, fix, green cycle and its re-breaks at 62 red-run and 47 re-break calls, 68 of 275 minutes, some re-breaking rows already watched red. One red run and one green run per task keep the guarantee that every new test failed before its fix; code already in the tree is never the executor's to break.
@@ -86,7 +86,7 @@ Friction: 47 of 130 flight runs and 18 of 21 general runs put a sentence ("All g
 
 ### The cap
 
-80 calls, as for every flight tier. 41 of 130 audited runs passed it, used 68% of all input tokens, and none returned `FAILED {id}: cap`: a count the model must hold in its head is not held. The body answers with stops it can observe — the pre-edit search, the bounded reds — and never spawns a sub-agent.
+150 tool calls, as for every flight tier, raised from 80 when tasks were batched one executor per project and area. Under the 80-call cap, 41 of 130 audited runs passed it, used 68% of all input tokens, and none returned `FAILED {id}: cap`: a count the model must hold in its head is not held. The body answers with stops it can observe — the pre-edit search, the bounded reds — and never spawns a sub-agent.
 
 ## What the body leaves out
 
@@ -106,9 +106,10 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A sibling's file, an unreached test or a pre-existing finding is red | Outside defects; finish `DONE` — or, when it stops its own tests, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
 | Any other red | Read the error and the lines it names; `SPEC-DRIFT` or `FAILED` with the cause or "cause unknown" |
 | A row that reads two ways | The reading today's code and the Steps support, named in the return; `SPEC-DRIFT` only when neither settles it and they build different code |
+| A row that makes an error look like absence or contradicts the project contract, read before any test | `SPEC-DRIFT {id}: {row}: {why}`; nothing written for it |
 | A brief naming the full suite, a whole-tree sweep or a review | Refused, named in the return |
 | A decision it cannot make | `BLOCKED {id}: {question}` |
-| 80 calls | `FAILED {id}: cap` with what is done, what is left, the next step |
+| 150 tool calls | `FAILED {id}: cap` with what is done, what is left, the next step |
 
 ## The general twin
 

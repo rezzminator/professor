@@ -221,6 +221,8 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 					switch {
 					case item.DiffError != "":
 						fmt.Fprintf(stdout, "      upstream change UNREADABLE — %s\n", item.DiffError)
+					case item.DiffSkipped != "":
+						writeUnavailablePinHistory(stdout, r, item)
 					case strings.TrimSpace(item.Diff) == "":
 						fmt.Fprintf(
 							stdout,

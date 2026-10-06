@@ -159,3 +159,38 @@ func TestUpdateRollbackJoinsStepFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateRejectsOverlappingOwners(t *testing.T) {
+	for _, boundary := range []string{"host", "source"} {
+		t.Run(boundary, func(t *testing.T) {
+			repo := newUpdateGitFixture(t)
+			runtime := updateTestRuntime(t)
+			stubUpdatePipeline(t, runtime)
+			otherRepo, otherRuntime := repo, runtime
+			if boundary == "host" {
+				otherRepo = newUpdateGitFixture(t)
+			} else {
+				otherRuntime = updateTestRuntime(t)
+			}
+			build := updateBuildCandidate
+			updateBuildCandidate = func(ctx context.Context, staged, target, output string) error {
+				var nestedOut, nestedErr bytes.Buffer
+				code := Run([]string{"--repo", otherRepo, "--to", "v8.88.88"}, &nestedOut, &nestedErr, otherRuntime)
+				if code != 5 || !strings.Contains(nestedErr.String(), "update already in progress") {
+					t.Errorf("overlap at %s = %d %q; want owner refusal", boundary, code, nestedErr.String())
+				}
+				return build(ctx, staged, target, output)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+				t.Fatalf("owner = %d %s", code, stderr.String())
+			}
+			updateBuildCandidate = build
+			stdout.Reset()
+			stderr.Reset()
+			if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+				t.Fatalf("lock release = %d %s", code, stderr.String())
+			}
+		})
+	}
+}

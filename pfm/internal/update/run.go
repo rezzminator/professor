@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -138,6 +139,28 @@ func updateRepository(
 	stdout, stderr io.Writer,
 	runtime config.Runtime,
 ) (err error) {
+	hostRoot := installer.ManagedRoot(runtime.Paths.Home)
+	if mkdirErr := os.MkdirAll(hostRoot, 0o700); mkdirErr != nil {
+		return fmt.Errorf("prepare update ownership root: %w", mkdirErr)
+	}
+	hostLock, lockErr := acquireUpdateOwnership(filepath.Join(hostRoot, "update.lock"))
+	if lockErr != nil {
+		return lockErr
+	}
+	defer func() { err = errors.Join(err, releaseUpdateOwnership(hostLock)) }()
+	commonDir, gitErr := updateGitOutput(ctx, repo, "rev-parse", "--git-common-dir")
+	if gitErr != nil {
+		return fmt.Errorf("resolve source update ownership: %w", gitErr)
+	}
+	commonDir = strings.TrimSpace(commonDir)
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(repo, commonDir)
+	}
+	sourceLock, lockErr := acquireUpdateOwnership(filepath.Join(commonDir, "pfm-update.lock"))
+	if lockErr != nil {
+		return lockErr
+	}
+	defer func() { err = errors.Join(err, releaseUpdateOwnership(sourceLock)) }()
 	previousRef, err := updateGitOutput(ctx, repo, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return fmt.Errorf("resolve current revision: %w", err)
@@ -664,4 +687,29 @@ func runUpdateBaselineDoctor(
 		return doctorOutcome{}, fmt.Errorf("resolve current binary for baseline doctor: %w", err)
 	}
 	return runUpdateDoctor(ctx, self, runtime, runtime.Config.Path, skipHarvest, stdout, stderr)
+}
+
+// acquireUpdateOwnership claims an inode shared across processes before any
+// source, binary, or installer state is read. The lock file is never removed.
+func acquireUpdateOwnership(path string) (*os.File, error) {
+	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open update ownership %s: %w", path, err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		closeErr := lock.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errors.Join(fmt.Errorf("update already in progress at %s", path), closeErr)
+		}
+		return nil, errors.Join(fmt.Errorf("claim update ownership %s: %w", path, err), closeErr)
+	}
+	return lock, nil
+}
+
+func releaseUpdateOwnership(lock *os.File) error {
+	unlockErr := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if err := errors.Join(unlockErr, lock.Close()); err != nil {
+		return fmt.Errorf("release update ownership %s: %w", lock.Name(), err)
+	}
+	return nil
 }

@@ -34,6 +34,9 @@ type updateFileSnapshot struct {
 	after        []byte
 	afterExisted bool
 	afterErr     error
+	afterPath    string
+	afterObject  fs.FileInfo
+	afterTarget  fs.FileInfo
 }
 
 func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, error) {
@@ -98,7 +101,13 @@ func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, err
 func recordUpdateOwnedFilesAfter(snapshots []updateFileSnapshot) {
 	for index := range snapshots {
 		snapshot := &snapshots[index]
+		snapshot.afterPath = snapshot.path
 		snapshot.after, _, snapshot.afterExisted, snapshot.afterErr = snapshot.readOwnedFile()
+		if snapshot.afterExisted && snapshot.afterErr == nil {
+			snapshot.afterPath, snapshot.afterObject, snapshot.afterTarget, snapshot.afterErr = updateFileIdentity(
+				snapshot.path,
+			)
+		}
 	}
 }
 
@@ -111,7 +120,15 @@ func restoreUpdateOwnedFiles(snapshots []updateFileSnapshot, stderr io.Writer) e
 			residue = errors.Join(residue, err)
 			continue
 		}
-		if existed == snapshot.beforeExisted && bytes.Equal(current, snapshot.before) {
+		if snapshot.afterErr == nil && snapshot.afterExisted == snapshot.beforeExisted &&
+			bytes.Equal(snapshot.after, snapshot.before) {
+			continue
+		}
+		physical, object, target, identityErr := updateFileIdentity(snapshot.path)
+		if identityErr != nil || (snapshot.afterExisted &&
+			(physical != snapshot.afterPath || object == nil || target == nil ||
+				!os.SameFile(object, snapshot.afterObject) || !os.SameFile(target, snapshot.afterTarget))) {
+			residue = errors.Join(residue, errors.New(updateResidueMessage(snapshot, existed)), identityErr)
 			continue
 		}
 		if snapshot.afterErr != nil || existed != snapshot.afterExisted || !bytes.Equal(current, snapshot.after) {
@@ -119,9 +136,9 @@ func restoreUpdateOwnedFiles(snapshots []updateFileSnapshot, stderr io.Writer) e
 			continue
 		}
 		if snapshot.beforeExisted {
-			err = atomicfile.Write(snapshot.path, snapshot.before, snapshot.beforeMode)
+			err = atomicfile.Write(snapshot.afterPath, snapshot.before, snapshot.beforeMode)
 		} else {
-			err = removeUpdateCreatedFile(snapshot.path)
+			err = os.Remove(snapshot.afterPath)
 		}
 		if err != nil {
 			residue = errors.Join(residue, fmt.Errorf("restore %s %s: %w", snapshot.kind, snapshot.path, err))
@@ -132,15 +149,25 @@ func restoreUpdateOwnedFiles(snapshots []updateFileSnapshot, stderr io.Writer) e
 	return residue
 }
 
-// removeUpdateCreatedFile removes a file the install created. A path that was a
-// dangling symlink at snapshot time now resolves to the file the install wrote
-// through it: that file goes, and the operator's link stays.
-func removeUpdateCreatedFile(path string) error {
+// updateFileIdentity records both the path object and its physical target;
+// equal bytes alone cannot prove the candidate still owns either object.
+func updateFileIdentity(path string) (string, fs.FileInfo, fs.FileInfo, error) {
+	object, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return path, nil, nil, nil
+	}
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("inspect rollback object %s: %w", path, err)
+	}
 	physical, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return fmt.Errorf("resolve %s: %w", path, err)
+		return "", object, nil, fmt.Errorf("resolve rollback object %s: %w", path, err)
 	}
-	return os.Remove(physical)
+	target, err := os.Stat(physical)
+	if err != nil {
+		return physical, object, nil, fmt.Errorf("inspect rollback target %s: %w", physical, err)
+	}
+	return physical, object, target, nil
 }
 
 func updateResidueMessage(snapshot updateFileSnapshot, existed bool) string {

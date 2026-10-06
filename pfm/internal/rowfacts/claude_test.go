@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/statusline"
 )
 
 func assistant(model, stop string) string {
@@ -149,5 +150,64 @@ func BenchmarkReadClaudeTail(b *testing.B) {
 		if tail, err := readClaudeTail(path); err != nil || tail.model != "claude-opus-5-5" || tail.working {
 			b.Fatalf("readClaudeTail = %+v, %v", tail, err)
 		}
+	}
+}
+
+func TestClaudeFactsCachesUnchangedSourcesAndRefreshesChanges(t *testing.T) {
+	sid, root := t.TempDir(), t.TempDir()
+	transcript := filepath.Join(root, "session.jsonl")
+	recordPath := filepath.Join(sid, "statusline-effort-session")
+	agents := filepath.Join(root, "session", "subagents")
+	writeFile(t, transcript, assistant("model-tail", "tool_use")+"\n")
+	writeFile(t, recordPath, `{"model":"model-old","level":"high"}`)
+	writeFile(t, filepath.Join(agents, "agent-one.jsonl"), assistant("model-agent", "tool_use")+"\n")
+	reader := NewReader(sid)
+	statusReads, directoryReads := 0, 0
+	reader.readSession = func(dir, id string) (statusline.SessionRecord, error) {
+		statusReads++
+		return statusline.ReadSession(dir, id)
+	}
+	reader.readDirectory = func(path string) ([]os.DirEntry, error) { directoryReads++; return os.ReadDir(path) }
+	row := compose.Row{ID: "session", Path: transcript, Kind: compose.LiveClaude}
+	now := time.Now().UnixNano()
+	for i := 0; i < 2; i++ {
+		facts, err := reader.claudeFacts(&row, now)
+		if err != nil || facts.Model != "model-old" || facts.Effort != "high" || facts.AgentsWorking != 1 {
+			t.Fatalf("facts = %+v, %v", facts, err)
+		}
+	}
+	if statusReads != 1 || directoryReads != 1 {
+		t.Errorf("cache reads = status %d directory %d; want 1 each", statusReads, directoryReads)
+	}
+	writeFile(t, recordPath, `{"model":"model-newer","level":"xhigh"}`)
+	writeFile(t, filepath.Join(agents, "agent-two.jsonl"), assistant("model-agent", "tool_use")+"\n")
+	updated := time.Unix(0, now+int64(time.Millisecond))
+	if err := os.Chtimes(agents, updated, updated); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := reader.claudeFacts(&row, now)
+	if err != nil || facts.Model != "model-newer" || facts.Effort != "xhigh" || facts.AgentsWorking != 2 ||
+		statusReads != 2 ||
+		directoryReads != 2 {
+		t.Errorf("fresh facts = %+v, %v, reads %d/%d", facts, err, statusReads, directoryReads)
+	}
+	writeFile(t, filepath.Join(agents, "agent-two.jsonl"), assistant("model-agent", "end_turn")+"\n")
+	if err := os.Chtimes(filepath.Join(agents, "agent-two.jsonl"), updated, updated); err != nil {
+		t.Fatal(err)
+	}
+	facts, err = reader.claudeFacts(&row, now)
+	if err != nil || facts.AgentsWorking != 1 {
+		t.Errorf("changed agent content = %+v, %v; want one working", facts, err)
+	}
+	facts, err = reader.claudeFacts(&row, now+agentFreshNS+int64(time.Second))
+	if err != nil || facts.AgentsWorking != 0 {
+		t.Errorf("aged facts = %+v, %v; want idle agents", facts, err)
+	}
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatal(err)
+	}
+	facts, err = reader.claudeFacts(&row, now)
+	if err != nil || facts.Model != "model-tail" || facts.Effort != "" {
+		t.Errorf("removed record = %+v, %v; want transcript fallback", facts, err)
 	}
 }

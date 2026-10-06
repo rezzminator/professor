@@ -128,28 +128,21 @@ func (reader *Reader) claudeFacts(row *compose.Row, nowNS int64) (Facts, error) 
 // and it wrote within agentFreshNS.
 func (reader *Reader) workingAgents(transcript string, nowNS int64) (int, error) {
 	dir := strings.TrimSuffix(transcript, filepath.Ext(transcript)) + string(filepath.Separator) + "subagents"
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return 0, nil
-	}
+	names, err := reader.agentNames(dir)
 	if err != nil {
-		return 0, fmt.Errorf("list sub-agents in %s: %w", dir, err)
+		return 0, err
 	}
 	working, examined := 0, 0
 	var firstErr error
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".jsonl") {
-			continue
-		}
-		info, err := entry.Info()
+	for _, name := range names {
+		info, err := os.Lstat(filepath.Join(dir, name))
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("stat sub-agent %s: %w", name, err)
 			}
 			continue
 		}
-		if nowNS-info.ModTime().UnixNano() > agentFreshNS {
+		if info.IsDir() || nowNS-info.ModTime().UnixNano() > agentFreshNS {
 			continue
 		}
 		examined++

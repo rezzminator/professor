@@ -2,14 +2,14 @@ package professor
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"path/filepath"
 	"regexp"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // renderProjectReport is the one report-writing path both entries share: it
@@ -52,6 +52,21 @@ func captureProjectDiffs(report *projectReport) (anyFailed bool) {
 		if err != nil {
 			item.DiffError = err.Error()
 			anyFailed = true
+			continue
+		}
+		raw, missing, pinErr := adoptGitShowTemplate(
+			report.Store.runner,
+			report.Store.Root,
+			item.Pin.PinnedSHA,
+			item.Template,
+		)
+		if pinErr != nil {
+			item.DiffError = pinErr.Error()
+			anyFailed = true
+			continue
+		}
+		if missing || fmt.Sprintf("sha256:%x", sha256.Sum256(raw)) != item.Pin.TemplateHash {
+			item.DiffSkipped = "pin was taken from uncommitted or untracked template bytes; committed history cannot show its exact change"
 			continue
 		}
 		item.Diff = diff
@@ -103,10 +118,7 @@ func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
 		deps.Executable("git"), "diff", "--no-ext-diff", "--no-textconv", "--no-color",
 		item.Pin.PinnedSHA, "--", "templates/" + item.Template,
 	}
-	env := deps.WithoutGitRepoVars(os.Environ())
-	if gitDir, useFenceGit := pfmpaths.DevRepoGitDir(store.Root); useFenceGit {
-		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+store.Root)
-	}
+	env := storeGitEnv(store.Root)
 	result, err := store.runner.Run(context.Background(), argv, deps.RunOptions{Dir: store.Root, Env: env})
 	if err == nil && result.ExitCode != 0 {
 		err = gitExitError{code: result.ExitCode}
@@ -150,4 +162,17 @@ func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer)
 	}
 	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout)
 	return projectReportExit(reviewRequired, failed)
+}
+
+func writeUnavailablePinHistory(stdout io.Writer, report projectReport, item projectReportItem) {
+	fmt.Fprintf(
+		stdout,
+		"      upstream change UNAVAILABLE — %s; compare by hand: diff %s %s\n",
+		item.DiffSkipped,
+		filepath.Join(
+			report.Root,
+			filepath.FromSlash(item.Local),
+		),
+		filepath.Join(report.Store.Templates, filepath.FromSlash(item.Template)),
+	)
 }

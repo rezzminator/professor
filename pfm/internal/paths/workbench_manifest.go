@@ -24,6 +24,9 @@ func HasWorkbenchManifest(dir string) (bool, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return false, nil
 		}
+		if candidate == path && !info.Mode().IsRegular() {
+			return false, fmt.Errorf("inspect workbench %s: not a regular file", path)
+		}
 	}
 	return true, nil
 }

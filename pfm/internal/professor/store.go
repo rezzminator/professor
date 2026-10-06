@@ -171,7 +171,7 @@ func adoptGit(runner deps.Runner, root string, args ...string) (string, string, 
 	result, err := runner.Run(
 		context.Background(),
 		append([]string{deps.Executable("git")}, args...),
-		deps.RunOptions{Dir: root, Env: deps.WithoutGitRepoVars(os.Environ())},
+		deps.RunOptions{Dir: root, Env: storeGitEnv(root)},
 	)
 	if err != nil {
 		return string(result.Stdout), string(result.Stderr), err
@@ -203,4 +203,12 @@ func adoptGitShowTemplate(runner deps.Runner, root, ref, template string) ([]byt
 		return nil, true, nil
 	}
 	return nil, false, adoptGitFailure(fmt.Sprintf("show %s at %s", template, ref), gitErr, stderrText)
+}
+
+func storeGitEnv(root string) []string {
+	env := deps.WithoutGitRepoVars(os.Environ())
+	if gitDir, useFenceGit := pfmpaths.DevRepoGitDir(root); useFenceGit {
+		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
+	}
+	return env
 }

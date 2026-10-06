@@ -227,6 +227,8 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 	}
 }
 
+var stdioProbeDaemon = probeDaemonContext
+
 // runStdioTransport forwards to the daemon's config.MCPPathProfessor when it
 // mounts exactly the locally enabled families and, when chat is enabled, runs
 // the same chat runtime; otherwise it serves the combined server in process
@@ -256,9 +258,9 @@ func (professor *Professor) runStdioTransport(
 	if address == "" {
 		return inProcess("daemon address missing")
 	}
-	status, probeErr := probeDaemonContext(ctx, address)
+	status, probeErr := stdioProbeDaemon(ctx, address)
 	if ctx.Err() != nil {
-		return fmt.Errorf("pfm mcp stdio: daemon probe cancelled: %w", probeErr)
+		return fmt.Errorf("pfm mcp stdio: daemon probe cancelled: %w", ctx.Err())
 	}
 	if errors.Is(probeErr, ErrDaemonAbsent) {
 		return inProcess(fmt.Sprintf("daemon absent at %s (%v)", address, probeErr))

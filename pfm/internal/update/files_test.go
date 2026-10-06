@@ -30,6 +30,7 @@ func TestUpdateRollbackOwnedFiles(t *testing.T) {
 		want            map[string]string
 		removed         string
 		installDir      string
+		installRemoved  string
 		snapshotDir     string
 		symlink         bool
 		restored        string
@@ -41,6 +42,12 @@ func TestUpdateRollbackOwnedFiles(t *testing.T) {
 			before:   map[string]string{"hooks": hooksBefore},
 			after:    map[string]string{"hooks": hooksAfter},
 			restored: "hooks", checkPriorState: true,
+		},
+		{
+			name:           "candidate removes a preexisting file",
+			before:         map[string]string{"hooks": hooksBefore},
+			after:          map[string]string{"hooks": hooksBefore},
+			installRemoved: "hooks", restored: "hooks", checkPriorState: true,
 		},
 		{
 			name:  "files absent before the install",
@@ -159,6 +166,11 @@ func TestUpdateRollbackOwnedFiles(t *testing.T) {
 				for key, content := range testcase.after {
 					path := paths[key]
 					writeProjectFixtureFile(t, filepath.Dir(path), filepath.Base(path), content)
+				}
+				if testcase.installRemoved != "" {
+					if err := os.Remove(paths[testcase.installRemoved]); err != nil {
+						t.Fatal(err)
+					}
 				}
 				if testcase.installDir != "" {
 					path := paths[testcase.installDir]
@@ -298,4 +310,57 @@ func updateRollbackAfterInstall(
 		t.Fatalf("Run() code = %d, stdout = %q, stderr = %q; want 5", code, stdout.String(), stderr.String())
 	}
 	return stderr.String()
+}
+
+func TestUpdateRollbackPreservesReplacedObjects(t *testing.T) {
+	for _, kind := range []string{"symlink", "retargeted dangling link", "same-byte regular replacement"} {
+		t.Run(kind, func(t *testing.T) {
+			runtime := updateTestRuntime(t)
+			home := runtime.Paths.Home
+			path := filepath.Join(home, "owned.json")
+			target := filepath.Join(home, "candidate.json")
+			unrelated := filepath.Join(home, "operator.json")
+			runtime.Config.Path = path
+			if kind == "retargeted dangling link" {
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshots, err := snapshotUpdateOwnedFiles(runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("same bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			recordUpdateOwnedFilesAfter(snapshots)
+			if err := os.WriteFile(unrelated, []byte("same bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "same-byte regular replacement" {
+				if err := os.Rename(unrelated, path); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(unrelated, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = restoreUpdateOwnedFiles(snapshots, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "changed after the update") {
+				t.Errorf("rollback = %v; want replacement residue", err)
+			}
+			if raw, readErr := os.ReadFile(path); readErr != nil || string(raw) != "same bytes" {
+				t.Errorf("operator object = %q, %v; want preserved", raw, readErr)
+			}
+			if kind != "same-byte regular replacement" {
+				if raw, readErr := os.ReadFile(unrelated); readErr != nil || string(raw) != "same bytes" {
+					t.Errorf("unrelated target = %q, %v; want preserved", raw, readErr)
+				}
+			}
+		})
+	}
 }

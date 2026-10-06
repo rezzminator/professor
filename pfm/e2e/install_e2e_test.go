@@ -292,7 +292,24 @@ func runInstallE2E(t *testing.T) {
 		if err != nil {
 			t.Fatalf("snapshot updated install: %v", err)
 		}
-		differences, err := snapshotDifferences(fresh, updated)
+		// Update keeps its ownership inode so concurrent invocations cannot
+		// acquire different locks after a successful update.
+		lockPath := filepath.Join(home, e2eManagedRoot, "update.lock")
+		lockInfo, err := os.Lstat(lockPath)
+		if err != nil || !lockInfo.Mode().IsRegular() || lockInfo.Mode().Perm() != 0o600 {
+			t.Fatalf("update ownership lock is not a regular mode-0600 file: info=%v, err=%v", lockInfo, err)
+		}
+		lockBody, err := os.ReadFile(lockPath)
+		if err != nil || len(lockBody) != 0 {
+			t.Fatalf("update ownership lock is not empty: bytes=%d, err=%v", len(lockBody), err)
+		}
+		expected := surfaceSnapshot{}
+		for path, value := range fresh {
+			expected[path] = value
+		}
+		emptyHash := sha256.Sum256(nil)
+		expected[e2eManagedRoot+"/update.lock"] = "file:" + hex.EncodeToString(emptyHash[:])
+		differences, err := snapshotDifferences(expected, updated)
 		if err != nil {
 			t.Fatal(err)
 		}

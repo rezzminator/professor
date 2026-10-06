@@ -358,3 +358,24 @@ func TestRunStdioCancelledDaemonProbe(t *testing.T) {
 		t.Fatal("cancelled stdio start stayed blocked on the daemon probe")
 	}
 }
+
+func TestRunStdioCancellationAfterSuccessfulProbe(t *testing.T) {
+	previous := stdioProbeDaemon
+	t.Cleanup(func() { stdioProbeDaemon = previous })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stdioProbeDaemon = func(context.Context, string) (DaemonStatus, error) { cancel(); return DaemonStatus{PID: 1}, nil }
+	var warnings proxyTestBuffer
+	service := stdioTestService("cancel-after-probe", &warnings)
+	professor := stdioTestProfessor(t, service)
+	r, w := io.Pipe()
+	defer func() {
+		if closeErr := errors.Join(r.Close(), w.Close()); closeErr != nil {
+			t.Errorf("close cancelled stdio pipes: %v", closeErr)
+		}
+	}()
+	err := professor.runStdioTransport(ctx, io.NopCloser(strings.NewReader("")), w, stdioTestOptions(service, "unused"))
+	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "%!w") {
+		t.Fatalf("stdio error = %v; want actual context cancellation", err)
+	}
+}

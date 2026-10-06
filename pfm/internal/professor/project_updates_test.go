@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -363,5 +364,72 @@ func TestProjectUpdatesMissingBaselineNamesAdoptCommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "pfm update adopt pins an existing install") {
 		t.Fatalf("missing baseline stdout=%q, want it to name pfm update adopt", stdout.String())
+	}
+}
+
+func TestProjectUpdatesDistinguishesDirtyPinHistory(t *testing.T) {
+	for _, kind := range []string{"dirty pin", "untracked pin"} {
+		t.Run(kind, func(t *testing.T) {
+			store := newGitScaffoldStore(t)
+			project, home := newUpdatedGitStoreProject(t, store)
+			local, template := "CLAUDE.md", "project/CLAUDE.md"
+			if kind == "untracked pin" {
+				local, template = "extra.md", "project/extra.md"
+				if err := os.WriteFile(filepath.Join(project, local), []byte("local"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(
+					filepath.Join(store, "templates", filepath.FromSlash(template)),
+					[]byte("dirty B\n"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"--root", project, local}
+			if kind == "untracked pin" {
+				args = []string{"--root", project, "--template", template, local}
+			}
+			var stdout, stderr bytes.Buffer
+			if code := RunProjectUpdate("pin", args, &stdout, &stderr, config.Runtime{}); code != 0 {
+				t.Fatalf("pin = %d %s", code, stderr.String())
+			}
+			if err := os.WriteFile(
+				filepath.Join(store, "templates", filepath.FromSlash(template)),
+				[]byte("upstream C\n"),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			stdout.Reset()
+			if code := RunProjectUpdates(project, home, true, &stdout); code != 1 {
+				t.Fatalf("report = %d %s", code, stdout.String())
+			}
+			var payload struct {
+				Items []projectReportItem `json:"items"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, item := range payload.Items {
+				if item.Local == local {
+					found = true
+					if item.Status != projectUpdated || item.Diff != "" ||
+						!strings.Contains(item.DiffSkipped, "uncommitted or untracked") {
+						t.Errorf("dirty history = %+v; want explicitly unavailable pin diff", item)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("missing pinned item")
+			}
+			stdout.Reset()
+			RunProjectUpdates(project, home, false, &stdout)
+			if !strings.Contains(stdout.String(), "upstream change UNAVAILABLE") ||
+				!strings.Contains(stdout.String(), "compare by hand") {
+				t.Errorf("human report lacks dirty history warning: %s", stdout.String())
+			}
+		})
 	}
 }

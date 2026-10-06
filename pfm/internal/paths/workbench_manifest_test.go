@@ -11,10 +11,11 @@ import (
 
 func TestHasWorkbenchManifest(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		setup     func(*testing.T, string) string
-		want      bool
-		wantError bool
+		name       string
+		setup      func(*testing.T, string) string
+		want       bool
+		wantError  bool
+		nonregular bool
 	}{
 		{name: "nothing there"},
 		{name: ".professor without manifest", setup: func(t *testing.T, dir string) string {
@@ -55,6 +56,21 @@ func TestHasWorkbenchManifest(t *testing.T) {
 			}
 			return dir
 		}},
+		{name: "directory marker", nonregular: true, setup: func(t *testing.T, dir string) string {
+			if err := os.MkdirAll(WorkbenchManifest(dir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			return dir
+		}},
+		{name: "FIFO marker", nonregular: true, setup: func(t *testing.T, dir string) string {
+			if err := os.Mkdir(filepath.Join(dir, ".professor"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Mkfifo(WorkbenchManifest(dir), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return dir
+		}},
 		{name: "real manifest", want: true, setup: func(t *testing.T, dir string) string {
 			if err := os.Mkdir(filepath.Join(dir, ".professor"), 0o700); err != nil {
 				t.Fatal(err)
@@ -74,12 +90,17 @@ func TestHasWorkbenchManifest(t *testing.T) {
 				dir = tc.setup(t, dir)
 			}
 			got, err := HasWorkbenchManifest(dir)
-			if tc.wantError {
+			switch {
+			case tc.nonregular:
+				if got || err == nil || !strings.Contains(err.Error(), "not a regular file") {
+					t.Fatalf("marker = %v, %v; want visible nonregular error", got, err)
+				}
+			case tc.wantError:
 				if got || !errors.Is(err, syscall.ENAMETOOLONG) ||
 					!strings.HasPrefix(err.Error(), "inspect workbench "+filepath.Join(dir, ".professor")+": ") {
 					t.Fatalf("HasWorkbenchManifest(%q) = %v, %v, want named ENAMETOOLONG", dir, got, err)
 				}
-			} else if got != tc.want || err != nil {
+			case got != tc.want || err != nil:
 				t.Fatalf("HasWorkbenchManifest(%q) = %v, %v, want %v, nil", dir, got, err, tc.want)
 			}
 		})

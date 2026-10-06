@@ -75,7 +75,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"mcp-needs-auth-cache.json",
 		"telemetry",
 		"feedback",
-		".last-update-result.json",
+		".last-update-result.json", ".pfm-launches",
 	}
 	if !reflect.DeepEqual(AccountEntries, accounts) {
 		t.Fatalf("accounts=%v", AccountEntries)
@@ -880,4 +880,85 @@ func TestWireClaudeStoreAccountOrder(t *testing.T) {
 			t.Fatalf("report=%+v", report)
 		}
 	})
+}
+
+func TestRepointPreservesRacedOperatorFile(t *testing.T) {
+	home := t.TempDir()
+	account := filepath.Join(home, "account")
+	path := filepath.Join(account, "agents")
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "old", "agents"), path); err != nil {
+		t.Fatal(err)
+	}
+	writer := &storeMutationWriter{match: "  change  repoint " + path, mutate: func() {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, path, "operator bytes")
+	}}
+	e := &engine{
+		apply: true,
+		options: Options{
+			Home:           home,
+			ConfigDir:      ClaudeStore(home),
+			ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}},
+			Stdout:         writer,
+		},
+	}
+	err := e.wireClaudeStore()
+	if err == nil {
+		t.Error("operator replacement must be reported")
+	}
+	assertContent(t, path, "operator bytes")
+}
+
+func TestStoreRepointExcludesPostScanLaunch(t *testing.T) {
+	home := t.TempDir()
+	account := filepath.Join(home, "account")
+	path := filepath.Join(account, "agents")
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "old", "agents"), path); err != nil {
+		t.Fatal(err)
+	}
+	launched := false
+	writer := &storeMutationWriter{match: "  change  repoint " + path, mutate: func() {
+		guard, err := os.Open(account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if closeErr := guard.Close(); closeErr != nil {
+				t.Error(closeErr)
+			}
+		}()
+		err = syscall.Flock(int(guard.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			launched = true
+			if unlockErr := syscall.Flock(int(guard.Fd()), syscall.LOCK_UN); unlockErr != nil {
+				t.Fatal(unlockErr)
+			}
+		} else if !errors.Is(err, syscall.EWOULDBLOCK) {
+			t.Fatal(err)
+		}
+	}}
+	e := &engine{
+		apply: true,
+		options: Options{
+			Home:           home,
+			ConfigDir:      ClaudeStore(home),
+			ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}},
+			Stdout:         writer,
+		},
+	}
+	if err := e.wireClaudeStore(); err != nil {
+		t.Fatal(err)
+	}
+	if launched {
+		t.Fatal("launch crossed the post-scan account rewire ownership boundary")
+	}
+	assertLink(t, path, filepath.Join(ClaudeStore(home), "agents"))
 }

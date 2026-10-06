@@ -194,6 +194,7 @@ func TestRemoveRumdlUserConfig(t *testing.T) {
 	}{
 		{name: "pfm", content: wantRumdlUserConfig, present: true},
 		{name: "vanished", content: wantRumdlUserConfig, present: true},
+		{name: "operator-identical", content: wantRumdlUserConfig, present: true},
 		{name: "operator", content: "[global]\nline-length = 120\n", present: true},
 		{name: "absent"},
 		{name: "unreadable", directory: true},
@@ -208,6 +209,9 @@ func TestRemoveRumdlUserConfig(t *testing.T) {
 				if err := os.MkdirAll(config, 0o755); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if tc.name == "pfm" || tc.name == "vanished" {
+				writeFixture(t, filepath.Join(managedRootForHome(home), "rumdl-user-config.json"), "\""+config+"\"\n")
 			}
 			if tc.name == "vanished" {
 				// Another uninstall removes it between the read and the remove.

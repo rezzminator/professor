@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -19,14 +21,29 @@ func runProcess(
 	runner deps.Runner,
 	argv []string,
 	options deps.StartOptions,
-) error {
+) (returnErr error) {
 	if runner == nil {
 		runner = obs.Runner(deps.RealRunner{})
 	}
-	process, err := runner.Start(ctx, argv, options)
+	guard, err := gather.AcquireAccountGuard(claudelaunch.ConfigDirFromEnv(options.Env), true)
 	if err != nil {
 		return err
 	}
+	process, err := runner.Start(ctx, argv, options)
+	if err != nil {
+		return errors.Join(err, guard.Abort(), guard.Close())
+	}
+	if err := guard.Record(process.Pid()); err != nil {
+		killErr := process.KillGroup()
+		if killErr == nil {
+			return errors.Join(err, process.Wait(), guard.Abort(), guard.Close())
+		}
+		return errors.Join(err, killErr, guard.Close())
+	}
+	if err := guard.Close(); err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, guard.Abort()) }()
 	done := make(chan error, 1)
 	go func() { done <- process.Wait() }()
 	select {

@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -150,6 +151,19 @@ func (installer *engine) ensureRumdlUserConfig() {
 		installer.skip(fmt.Sprintf("rumdl user config NOT written: write %s: %v", path, err))
 		return
 	}
+	receipt, err := json.Marshal(path)
+	if err != nil {
+		installer.skip(fmt.Sprintf("rumdl config ownership NOT recorded: %v", err))
+		return
+	}
+	if err := atomicfile.Write(
+		filepath.Join(managedRootForHome(installer.options.Home), "rumdl-user-config.json"),
+		append(receipt, '\n'),
+		0o600,
+	); err != nil {
+		installer.skip(fmt.Sprintf("rumdl config ownership NOT recorded: %v", err))
+		return
+	}
 	_ = installer.change("write rumdl user config -> "+path, nil)
 }
 
@@ -162,11 +176,25 @@ func (installer *engine) removeRumdlUserConfig() error {
 	if err != nil {
 		return fmt.Errorf("read rumdl user config %s: %w", path, err)
 	}
-	if bytes.Equal(raw, []byte(rumdlUserConfig)) {
+	receiptPath := filepath.Join(managedRootForHome(installer.options.Home), "rumdl-user-config.json")
+	receipt, readErr := os.ReadFile(receiptPath)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		return fmt.Errorf("read rumdl ownership %s: %w", receiptPath, readErr)
+	}
+	var recorded string
+	if readErr == nil {
+		if err := json.Unmarshal(receipt, &recorded); err != nil {
+			return fmt.Errorf("parse rumdl ownership %s: %w", receiptPath, err)
+		}
+	}
+	if recorded == path && bytes.Equal(raw, []byte(rumdlUserConfig)) {
 		return installer.change("remove rumdl user config "+path, func() error {
 			// Gone between the read and the remove is the outcome asked for.
 			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("remove rumdl user config %s: %w", path, err)
+			}
+			if err := os.Remove(receiptPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("remove rumdl ownership %s: %w", receiptPath, err)
 			}
 			return nil
 		})

@@ -244,12 +244,13 @@ func TestInstallDeferredConfigSeedDryRunAndApply(t *testing.T) {
 			writeFixture(t, example, `{"version":2}`)
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{
-				Mode:          mode,
-				Home:          home,
-				Runner:        &fakeRunner{},
-				Stdout:        &output,
-				ConfigSeed:    example,
-				MCPConfigPath: target,
+				Mode:              mode,
+				Home:              home,
+				Runner:            &fakeRunner{},
+				Stdout:            &output,
+				ConfigSeed:        example,
+				ConfigSeedContent: []byte(`{"version":2}`),
+				MCPConfigPath:     target,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -285,11 +286,12 @@ func TestInstallDeferredSchedulerRefusalPrecedesSeed(t *testing.T) {
 	example, target := filepath.Join(t.TempDir(), "example.json"), filepath.Join(home, "cfg", "pfm.config.json")
 	writeFixture(t, example, `{"version":2}`)
 	_, err := Run(context.Background(), Options{
-		Mode:          ModeApply,
-		Home:          home,
-		Runner:        &fakeRunner{nameSyncActive: true},
-		ConfigSeed:    example,
-		MCPConfigPath: target,
+		Mode:              ModeApply,
+		Home:              home,
+		Runner:            &fakeRunner{nameSyncActive: true},
+		ConfigSeed:        example,
+		ConfigSeedContent: []byte(`{"version":2}`),
+		MCPConfigPath:     target,
 	})
 	if !errors.Is(err, ErrNameSyncRunning) {
 		t.Fatalf("install error=%v, want name-sync refusal", err)
@@ -358,5 +360,48 @@ func TestUninstallDeferredPrunesClaudeAndRemovesCodexHookLedger(t *testing.T) {
 	}
 	if _, err := os.Stat(ledgerPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("uninstall ledger remains: %v", err)
+	}
+}
+
+func TestInstallDeferredApplyFailuresLandLaterSteps(t *testing.T) {
+	for _, scenario := range []string{"managed", "hooks", "mcp"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			var output bytes.Buffer
+			options, err := normalizeInstallerOptions(
+				Options{
+					Mode:                  ModeApply,
+					Home:                  home,
+					Runner:                &fakeRunner{},
+					Stdout:                &output,
+					MCPConfigPath:         testConfigPath(t),
+					RequireManagedCleanup: scenario == "managed",
+					ManagedSettingsDir:    filepath.Join(home, "managed"),
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "managed" {
+				options.writeManaged = func(string, []byte) error { return errors.New("disk full") }
+			}
+			if scenario == "hooks" {
+				options.CodexHomes = []string{filepath.Join(home, "codex")}
+				writeFixture(t, settingsHookOwnershipPath(managedRootForHome(home)), "{")
+			}
+			if scenario == "mcp" {
+				options.MCPEnabled = map[string]bool{"chat": true}
+				options.MCPConfigPath = filepath.Join(home, "invalid-config")
+				writeFixture(t, options.MCPConfigPath, "{")
+			}
+			e := &engine{apply: true, stamp: "test", managedRoot: managedRootForHome(home), options: options}
+			err = e.install(context.Background())
+			if err == nil && len(e.deferred) == 0 {
+				t.Fatal("apply failure must be returned or aggregated")
+			}
+			if _, err := os.Stat(filepath.Join(managedRootForHome(home), binaryOwnershipName)); err != nil {
+				t.Fatalf("later metadata did not land after %s: %v\n%s", scenario, err, output.String())
+			}
+		})
 	}
 }

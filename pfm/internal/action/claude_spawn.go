@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -123,10 +124,37 @@ func (spawn ClaudeSpawn) runner() deps.Runner {
 }
 
 func (command *ProcessCommand) start(stdout, stderr io.Writer) (deps.Process, error) {
-	return command.runner.Start(command.ctx, command.Args, deps.StartOptions{
-		Env: command.Env, Dir: command.Dir, Stdin: command.Stdin,
-		Stdout: stdout, Stderr: stderr,
+	guard, err := gather.AcquireAccountGuard(claudelaunch.ConfigDirFromEnv(command.Env), true)
+	if err != nil {
+		return nil, err
+	}
+	process, startErr := command.runner.Start(command.ctx, command.Args, deps.StartOptions{
+		Env: command.Env, Dir: command.Dir, Stdin: command.Stdin, Stdout: stdout, Stderr: stderr, ProcessGroup: true,
 	})
+	if startErr != nil {
+		return nil, errors.Join(startErr, guard.Abort(), guard.Close())
+	}
+	if err := guard.Record(process.Pid()); err != nil {
+		killErr := process.KillGroup()
+		if killErr == nil {
+			waitErr := process.Wait()
+			return nil, errors.Join(err, waitErr, guard.Abort(), guard.Close())
+		}
+		return nil, errors.Join(err, killErr, guard.Close())
+	}
+	if err := guard.Close(); err != nil {
+		return nil, err
+	}
+	return accountClaimProcess{Process: process, guard: guard}, nil
+}
+
+type accountClaimProcess struct {
+	deps.Process
+	guard *gather.AccountGuard
+}
+
+func (process accountClaimProcess) Wait() error {
+	return errors.Join(process.Process.Wait(), process.guard.Abort())
 }
 
 func (command *ProcessCommand) Run() error {

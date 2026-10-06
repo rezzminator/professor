@@ -38,6 +38,10 @@ func TestLoadSeedMatchesLoadOfSeededTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if string(seeded.SeedContent) != content {
+		t.Fatalf("seed snapshot=%q", seeded.SeedContent)
+	}
+	seeded.SeedContent = nil
 	if !reflect.DeepEqual(seeded, loaded) {
 		t.Fatalf("seed preview differs from the seeded load:\nseed=%#v\nload=%#v", seeded, loaded)
 	}

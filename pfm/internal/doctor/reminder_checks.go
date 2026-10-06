@@ -74,7 +74,10 @@ func printReminderDoctor(
 	}()
 	schedule := configuredReminderScheduleProbe(ctx, runner)
 	var drift reminderScheduleDrift
-	drift.Path, drift.Drifted, drift.Err = installer.ReminderScheduleDrift(values.Home)
+	drift.Path, drift.Drifted, drift.Err = installer.ReminderScheduleDrift(
+		values.Home,
+		reminderScheduleArmed(schedule.Unit),
+	)
 	return renderReminderDoctor(ctx, stdout, schedule, drift, store, now)
 }
 

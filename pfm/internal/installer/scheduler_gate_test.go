@@ -486,15 +486,11 @@ func TestAwaitSchedulerGate(t *testing.T) {
 	}
 }
 
-func TestCheckSchedulerReturnsRunningReminder(t *testing.T) {
+func TestCheckSchedulerWaitsForShortReminder(t *testing.T) {
 	t.Parallel()
 	runner := &fakeRunner{nameSyncIdle: true, reminderStates: []string{"activating", "inactive"}}
-	wantErr := ErrReminderRunning
-	if schedulerIsLaunchd {
-		wantErr = ErrReminderAgentRunning
-	}
-	unprobed, err := CheckScheduler(context.Background(), runner)
-	if unprobed != "" || !errors.Is(err, wantErr) || len(runner.calls) != 2 {
-		t.Fatalf("check=(%q,%v) calls=%v, want running reminder after one probe", unprobed, err, runner.calls)
+	unprobed, err := CheckScheduler(context.Background(), runner, func(time.Duration) {})
+	if unprobed != "" || err != nil {
+		t.Fatalf("check=(%q,%v); want short reminder to finish", unprobed, err)
 	}
 }

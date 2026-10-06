@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -155,6 +156,10 @@ func TestNewSessionConfigureErrorOmitsTheCommandLine(t *testing.T) {
 	if err == nil {
 		t.Fatal("NewSession accepted a server whose configure step failed")
 	}
+	var partial *SessionCreatedError
+	if !errors.As(err, &partial) {
+		t.Fatalf("configured server lost creation ownership: %v", err)
+	}
 	if strings.Contains(err.Error(), sentinel) {
 		t.Fatalf("error leaked spec.Run's prompt body: %v", err)
 	}
@@ -239,5 +244,53 @@ func TestNewSessionReturnsCancellationDuringCreate(t *testing.T) {
 	}
 	if !strings.HasPrefix(err.Error(), "create chat server:") {
 		t.Fatalf("NewSession error = %v, want create cancellation", err)
+	}
+}
+
+func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
+	for _, scenario := range []string{"create cleanup", "create unresolved", "query cleanup", "query unresolved"} {
+		t.Run(scenario, func(t *testing.T) {
+			account, dir := t.TempDir(), t.TempDir()
+			createStatus, killStatus := "0", "0"
+			if strings.HasPrefix(scenario, "create") {
+				createStatus = "1"
+			}
+			if strings.HasSuffix(scenario, "unresolved") {
+				killStatus = "1"
+			}
+			binary := filepath.Join(dir, "tmux")
+			script := "#!/bin/sh\nfor a in \"$@\"; do\n case \"$a\" in\n new-session) exit " + createStatus + ";;\n display-message) echo invalid-pid; exit 0;;\n kill-server) exit " + killStatus + ";;\n esac\ndone\nexit 0\n"
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			err := (TmuxSpawner{Binary: binary, TmuxDir: dir}).NewSession(context.Background(), SessionSpec{
+				Socket: "failed", Session: "failed", Window: "w", CWD: dir,
+				Run: "env CLAUDE_CONFIG_DIR=" + account + " claude --resume example",
+			})
+			if err == nil {
+				t.Fatal("failed launch reported success")
+			}
+			var partial *SessionCreatedError
+			if errors.As(err, &partial) != strings.HasSuffix(scenario, "unresolved") {
+				t.Fatalf("creation ownership marker does not match cleanup proof: %v", err)
+			}
+			guard, err := gather.AcquireAccountGuard(account, false)
+			if err != nil {
+				t.Fatalf("failed launch held lock: %v", err)
+			}
+			defer func() {
+				if err := guard.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			live, claimErr := guard.Active(gather.NewProcFS(""))
+			if strings.HasSuffix(scenario, "unresolved") {
+				if claimErr == nil {
+					t.Fatal("unproven child termination lost its claim")
+				}
+			} else if claimErr != nil || len(live) != 0 {
+				t.Fatalf("terminated launch claim remained: %v %v", live, claimErr)
+			}
+		})
 	}
 }

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -263,7 +264,7 @@ func openDetachedRow(
 			row.CWD = effective.Paths.Home
 		}
 	}
-	executor, request, err := prepareOpen(
+	executor, request, claim, err := prepareOpen(
 		ctx,
 		row, primary, effective.Config.EffectiveClaude(primary).Cache1H, "", stderr, effective,
 	)
@@ -271,8 +272,8 @@ func openDetachedRow(
 		return action.OpenResult{}, err
 	}
 	result, err := executor.OpenDetached(ctx, request)
-	if err != nil {
-		return action.OpenResult{}, err
+	if err := claim.settle(err == nil, err); err != nil {
+		return result, err
 	}
 	result.Detail = relocated
 	return result, nil
@@ -304,13 +305,13 @@ func OpenRow(
 			}
 		}
 	}
-	executor, request, err := prepareOpen(ctx, row, primary, cache1H, prompt, stderr, effective)
+	executor, request, claim, err := prepareOpen(ctx, row, primary, cache1H, prompt, stderr, effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
 	line, err := executor.Open(ctx, request)
-	if err != nil {
+	if err := claim.settle(err == nil, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
@@ -363,13 +364,13 @@ func prepareOpen(
 	prompt string,
 	stderr io.Writer,
 	effective config.Runtime,
-) (*action.Executor, action.Request, error) {
-	launchName := ""
+) (*action.Executor, action.Request, NameReservation, error) {
+	var claim NameReservation
 	if row.Kind == compose.NewClaude && row.Workbench != "" {
 		var err error
-		launchName, _, err = WorkbenchName(ctx, row.CWD, stderr, &effective)
+		claim, _, err = ReserveWorkbenchName(ctx, row.CWD, stderr, &effective)
 		if err != nil {
-			return nil, action.Request{}, err
+			return nil, action.Request{}, NameReservation{}, err
 		}
 	}
 	healCodexRoot := effective.Paths.FirstRoot(pfmengine.Codex)
@@ -383,15 +384,17 @@ func prepareOpen(
 		},
 	})
 	if err != nil {
-		return nil, action.Request{}, err
+		err = errors.Join(err, claim.Release())
+		return nil, action.Request{}, NameReservation{}, err
 	}
 	fresh, err := socketForKind(row.Kind)
 	if err != nil {
-		return nil, action.Request{}, err
+		err = errors.Join(err, claim.Release())
+		return nil, action.Request{}, NameReservation{}, err
 	}
 	return executor, action.Request{
 		Row:            row,
-		LaunchName:     launchName,
+		LaunchName:     claim.Name,
 		Prompt:         prompt,
 		PrimaryAccount: primary,
 		Cache1H:        cache1H,
@@ -400,7 +403,7 @@ func prepareOpen(
 		FreshSocket:    fresh,
 		CurrentTMUX:    (paths.OSEnv{}).Get("TMUX"),
 		Config:         effective.Config,
-	}, nil
+	}, claim, nil
 }
 
 func socketForKind(kind compose.Kind) (string, error) {

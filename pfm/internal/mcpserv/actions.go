@@ -104,7 +104,7 @@ func (service *Service) chatNew(
 	ctx context.Context,
 	request *mcp.CallToolRequest,
 	input NewInput,
-) (*mcp.CallToolResult, ActionOutput, error) {
+) (result *mcp.CallToolResult, output ActionOutput, returnErr error) {
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
 		return nil, ActionOutput{}, err
@@ -137,6 +137,7 @@ func (service *Service) chatNew(
 	} else if directory == "" && caller.valid {
 		directory = self.CWD
 	}
+	var nameClaim chat.NameReservation
 	if strings.TrimSpace(input.Name) == "" {
 		if directory == "" {
 			return nil, ActionOutput{}, fmt.Errorf(
@@ -152,12 +153,17 @@ func (service *Service) chatNew(
 		for name := range service.pendingNames {
 			reserved = append(reserved, name)
 		}
-		name, found, err := chat.WorkbenchName(ctx, directory, service.backend.warnings, &effective, reserved...)
+		claim, found, err := chat.ReserveWorkbenchName(
+			ctx,
+			directory,
+			service.backend.warnings,
+			&effective,
+			reserved...)
 		if err == nil && found {
 			if service.pendingNames == nil {
 				service.pendingNames = make(map[string]struct{})
 			}
-			service.pendingNames[name] = struct{}{}
+			service.pendingNames[claim.Name] = struct{}{}
 		}
 		service.nameMutex.Unlock()
 		if err != nil {
@@ -166,10 +172,23 @@ func (service *Service) chatNew(
 		if !found {
 			return nil, ActionOutput{}, fmt.Errorf("name is required outside a workbench")
 		}
-		input.Name = name
+		input.Name = claim.Name
+		nameClaim = claim
+		ctx = chat.WithWorkbenchNameReservation(ctx, claim)
 		defer func() {
+			if releaseErr := claim.Release(); releaseErr != nil {
+				returnErr = errors.Join(
+					returnErr,
+					fmt.Errorf("chat_new: release automatic name %s: %w", claim.Name, releaseErr),
+				)
+				output.Status = statusError
+				if output.Code == 0 {
+					output.Code = 1
+				}
+				output.Message = returnErr.Error()
+			}
 			service.nameMutex.Lock()
-			delete(service.pendingNames, name)
+			delete(service.pendingNames, claim.Name)
 			service.nameMutex.Unlock()
 		}()
 	}
@@ -224,7 +243,14 @@ func (service *Service) chatNew(
 	if input.Prompt != "" {
 		args = append(args, input.Prompt)
 	}
-	return service.cliAction(ctx, args...)
+	result, output, returnErr = service.cliAction(ctx, args...)
+	if nameClaim.Name != "" && returnErr == nil && output.Code == 0 {
+		if commitErr := nameClaim.Commit(); commitErr != nil {
+			returnErr = fmt.Errorf("chat_new: commit automatic name %s: %w", nameClaim.Name, commitErr)
+			output = ActionOutput{Status: statusError, Code: 1, Message: returnErr.Error()}
+		}
+	}
+	return result, output, returnErr
 }
 
 // chatOpen never routes through cliTargetAction/Dispatch: that seam ends in

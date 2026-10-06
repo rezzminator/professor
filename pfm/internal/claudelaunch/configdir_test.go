@@ -117,3 +117,25 @@ func TestEveryLaunchStripsTheLoginDefaultSentinel(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigDirFromRunHandlesRegistryAssignments(t *testing.T) {
+	for _, tc := range []struct {
+		run, want string
+		broken    bool
+	}{
+		{`CLAUDE_CONFIG_DIR='/account with spaces' claude`, "/account with spaces", false},
+		{`env -u KEY 'CLAUDE_CONFIG_DIR=/account' claude`, "/account", false},
+		{`tmux wait-for ready && env 'CLAUDE_CONFIG_DIR=/account' claude; exit 0`, "/account", false},
+		{`sleep 1`, "", false},
+		{`CLAUDE_CONFIG_DIR= claude`, "", true},
+		{`env CLAUDE_CONFIG_DIR=$(cat /missing) claude`, "", true},
+		{`CLAUDE_CONFIG_DIR=/one claude; CLAUDE_CONFIG_DIR=/two claude`, "", true},
+	} {
+		t.Run(tc.run, func(t *testing.T) {
+			got, err := ConfigDirFromRun(tc.run)
+			if (err != nil) != tc.broken || (!tc.broken && got != tc.want) {
+				t.Fatalf("dir=%q err=%v want=%q broken=%t", got, err, tc.want, tc.broken)
+			}
+		})
+	}
+}

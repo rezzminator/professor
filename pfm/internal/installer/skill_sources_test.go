@@ -3,7 +3,9 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -773,4 +775,32 @@ func TestSkillStoreUnlockReleasesForkedCopies(t *testing.T) {
 		t.Fatalf("lock after release with a forked copy open: busy=%t err=%v", busy, err)
 	}
 	relock()
+}
+
+func TestSkillRetirementCleansRecordedDirectories(t *testing.T) {
+	home := t.TempDir()
+	old := filepath.Join(home, "previous", "skills")
+	store := filepath.Join(skillStoreRoot(home), "sample")
+	writeFixture(t, filepath.Join(store, "SKILL.md"), "# sample")
+	if err := os.MkdirAll(old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(store, filepath.Join(old, "sample")); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(skillLinkLedger{Version: 1, LinkDirs: []string{old}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, skillLinkLedgerPath(home), string(raw))
+	e := &engine{
+		apply:   true,
+		options: Options{Home: home, ConfigDir: filepath.Join(home, "current"), Stdout: io.Discard},
+	}
+	if err := e.retireSkillSources(map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(old, "sample")); err == nil {
+		t.Fatalf("recorded link stranded -> %s", target)
+	}
 }

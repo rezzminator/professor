@@ -101,7 +101,8 @@ type Options struct {
 	CodexBinary string
 	// ConfigSeed is the example.pfm.config.json path a first install seeds
 	// MCPConfigPath from; empty means nothing is seeded.
-	ConfigSeed string
+	ConfigSeed        string
+	ConfigSeedContent []byte
 	// RosterConfigDirs lists every roster Claude account's config dir, whether
 	// or not --config-dir is given; nil on a host with no roster. Live-chat
 	// guards are its only readers.

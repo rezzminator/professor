@@ -154,6 +154,7 @@ func TestSeedConfig(t *testing.T) {
 			var output bytes.Buffer
 			installer := logDefaultEngine(t, target, scenario != "dry run", &output)
 			installer.options.ConfigSeed = example
+			installer.options.ConfigSeedContent = content
 			if scenario == "nothing" {
 				installer.options.ConfigSeed = ""
 			}
@@ -188,6 +189,42 @@ func TestSeedConfig(t *testing.T) {
 				}
 			} else if _, err := os.Stat(target); !os.IsNotExist(err) {
 				t.Fatalf("target exists: %v", err)
+			}
+		})
+	}
+}
+
+func TestSeedConfigPreservesValidatedBytesAndConcurrentTarget(t *testing.T) {
+	for _, scenario := range []string{"changed example", "concurrent target"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			example := filepath.Join(home, "example.json")
+			target := filepath.Join(home, "config", pfmconfig.FileName)
+			content := []byte(`{"version":2,"theme":"validated"}`)
+			writeFixture(t, example, string(content))
+			config, err := pfmconfig.LoadSeed(example, target, home, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			e := logDefaultEngine(t, target, true, &output)
+			e.options.ConfigSeed = example
+			e.options.ConfigSeedContent = config.SeedContent
+			writeFixture(t, example, `{"version":2,"theme":"changed"}`)
+			if scenario == "concurrent target" {
+				writeFixture(t, target, "operator bytes")
+			}
+			err = e.seedConfig()
+			if scenario == "concurrent target" {
+				if err == nil {
+					t.Error("target created meanwhile must be reported")
+				}
+				assertContent(t, target, "operator bytes")
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertContent(t, target, string(content))
 			}
 		})
 	}

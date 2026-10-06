@@ -24,6 +24,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -152,8 +153,29 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		}
 		stamped = append(stamped, claudeLaunchPIDEnv+"="+ownPID)
 		environment = stamped
+		var guard *gather.AccountGuard
+		if launchStartsSession(arguments) {
+			account := claudelaunch.ConfigDirFromEnv(environment)
+			if account == "" {
+				account = config.AmbientClaudeConfigDir()
+			}
+			var guardErr error
+			guard, guardErr = gather.AcquireAccountGuard(account, true)
+			if guardErr != nil {
+				fmt.Fprintf(stderr, "pfm internal launch: %v\n", guardErr)
+				return 1
+			}
+			if guardErr = guard.Record(os.Getpid()); guardErr != nil {
+				fmt.Fprintf(stderr, "pfm internal launch: %v\n", errors.Join(guardErr, guard.Abort(), guard.Close()))
+				return 1
+			}
+			if guardErr = guard.Close(); guardErr != nil {
+				fmt.Fprintf(stderr, "pfm internal launch: %v\n", guardErr)
+				return 1
+			}
+		}
 		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), environment); err != nil {
-			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", err)
+			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", errors.Join(err, guard.Abort()))
 			return 1
 		}
 		return 0

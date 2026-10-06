@@ -164,6 +164,9 @@ func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 	default:
 		return fmt.Errorf("preflight unknown installer mode %d", mode)
 	}
+	if mode == ModeApply && len(preview.deferred) != 0 {
+		planErr = errors.Join(append([]error{planErr}, preview.deferred...)...)
+	}
 	if len(preview.planErrors) != 0 {
 		planErr = errors.Join(append([]error{planErr}, preview.planErrors...)...)
 	}
@@ -180,94 +183,42 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.seedConfig(); err != nil {
 		return err
 	}
-	if err := installer.installHarvest(ctx); err != nil {
-		return err
-	}
-	if err := installer.installMarkdownTool(ctx); err != nil {
-		return err
-	}
+	installer.deferFailure(installer.installHarvest(ctx))
+	installer.deferFailure(installer.installMarkdownTool(ctx))
 	installer.installThemes(ctx)
 	assets, err := assetFiles()
 	if err != nil {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
 	systemdAssetChanged, err := installer.stageAssets(assets)
-	if err != nil {
-		return err
-	}
-	if err := installer.installManagedCleanup(ctx); err != nil {
-		return err
-	}
-	if err := installer.wireClaudeLauncher(); err != nil {
-		return err
-	}
-	if err := installer.pruneClaudeVersions(); err != nil {
-		return err
-	}
-	if err := installer.wireHostOverlays(); err != nil {
-		return err
-	}
-	if err := installer.migrateOldState(); err != nil {
-		return err
-	}
-	if err := installer.migrateLegacyCarrier(ctx); err != nil {
-		return err
-	}
-	if err := installer.wireClaudeStore(); err != nil {
-		return err
-	}
-	if err := installer.retireStoreEntries(); err != nil {
-		return err
-	}
-	if err := installer.retirePredecessors(); err != nil {
-		return err
-	}
-	if err := installer.retireRenamedGlobalAgents(); err != nil {
-		return err
-	}
-	if err := installer.retireBBInstall(); err != nil {
-		return err
-	}
-	if err := installer.retireChatCommands(); err != nil {
-		return err
-	}
-	if err := installer.retireStagedManagedSurfaces(false); err != nil {
-		return err
-	}
-	if err := installer.wireCommands(assets); err != nil {
-		return err
-	}
-	if err := installer.wireSkills(assets); err != nil {
-		return err
-	}
-	if err := installer.wireGlobalCommands(); err != nil {
-		return err
-	}
-	if err := installer.retireDeadRegistryLinks(); err != nil {
-		return err
-	}
-	if err := installer.wireGlobalSkills(); err != nil {
-		return err
-	}
-	if err := installer.retireLegacySwapCommand(); err != nil {
-		return err
-	}
-	if err := installer.wireCodexAgents(); err != nil {
-		return err
-	}
+	installer.deferFailure(err)
+	installer.deferFailure(installer.installManagedCleanup(ctx))
+	installer.deferFailure(installer.wireClaudeLauncher())
+	installer.deferFailure(installer.pruneClaudeVersions())
+	installer.deferFailure(installer.wireHostOverlays())
+	installer.deferFailure(installer.migrateOldState())
+	installer.deferFailure(installer.migrateLegacyCarrier(ctx))
+	installer.deferFailure(installer.wireClaudeStore())
+	installer.deferFailure(installer.retireStoreEntries())
+	installer.deferFailure(installer.retirePredecessors())
+	installer.deferFailure(installer.retireRenamedGlobalAgents())
+	installer.deferFailure(installer.retireBBInstall())
+	installer.deferFailure(installer.retireChatCommands())
+	installer.deferFailure(installer.retireStagedManagedSurfaces(false))
+	installer.deferFailure(installer.wireCommands(assets))
+	installer.deferFailure(installer.wireSkills(assets))
+	installer.deferFailure(installer.wireGlobalCommands())
+	installer.deferFailure(installer.retireDeadRegistryLinks())
+	installer.deferFailure(installer.wireGlobalSkills())
+	installer.deferFailure(installer.retireLegacySwapCommand())
+	installer.deferFailure(installer.wireCodexAgents())
 	if len(installer.codexHomes()) == 0 {
 		installer.skip("no Codex accounts configured — command mirror has nothing to write")
 		installer.skip("no Codex accounts configured — agent mirror has nothing to write")
 	} else {
-		if err := installer.reconcileCodexCommands(assets); err != nil {
-			return err
-		}
-		if err := installer.wireCodexDefaults(); err != nil {
-			return err
-		}
-		if err := installer.retireOrphanCodexAgents(); err != nil {
-			return err
-		}
+		installer.deferFailure(installer.reconcileCodexCommands(assets))
+		installer.deferFailure(installer.wireCodexDefaults())
+		installer.deferFailure(installer.retireOrphanCodexAgents())
 	}
 	// The periodic name-sync has one job and two schedulers. Linux gets the
 	// systemd units; macOS gets a launchd agent that carries both triggers.
@@ -281,26 +232,16 @@ func (installer *engine) install(ctx context.Context) error {
 				installer.ok("launch-agent gate: name-sync is not mid-execution")
 			}
 		}
-		if err := installer.ensureLaunchdLogDir(); err != nil {
-			return err
-		}
-		if err := installer.wireLaunchAgent(ctx); err != nil {
-			return err
-		}
-		if err := installer.wireReminderLaunchAgent(ctx); err != nil {
-			return err
-		}
-		if err := installer.wireMCPLaunchAgent(ctx); err != nil {
-			return err
-		}
+		installer.deferFailure(installer.ensureLaunchdLogDir())
+		installer.deferFailure(installer.wireLaunchAgent(ctx))
+		installer.deferFailure(installer.wireReminderLaunchAgent(ctx))
+		installer.deferFailure(installer.wireMCPLaunchAgent(ctx))
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
 			installer.skip(nameSyncGateUnprobedNote)
 		}
 		unitChanged, err := installer.wireUnits(ctx)
-		if err != nil {
-			return err
-		}
+		installer.deferFailure(err)
 		reload := systemdAssetChanged || unitChanged
 		if !reload && installer.apply {
 			for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit} {
@@ -319,9 +260,7 @@ func (installer *engine) install(ctx context.Context) error {
 	// after every later step has landed.
 	installer.deferFailure(installer.ensureClaudePlugins(ctx))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
-	if err := installer.wireCodexHooks(); err != nil {
-		return err
-	}
+	installer.deferFailure(installer.wireCodexHooks())
 	if err := installer.removeRetiredNudgeState(); err != nil {
 		installer.warnRetiredNudge("retired compact-nudge state", err)
 	}
@@ -335,24 +274,12 @@ func (installer *engine) install(ctx context.Context) error {
 	if !schedulerIsLaunchd && installer.apply && installer.mcpAnyEnabled() && installer.userManagerAvailable(ctx) {
 		installer.deferFailure(installer.restartMCPUnit(ctx))
 	}
-	if mcpErr != nil {
-		return mcpErr
-	}
-	if err := installer.wireOpenCodeInstructions(); err != nil {
-		return err
-	}
-	if err := installer.wireLogDefault(); err != nil {
-		return err
-	}
-	if err := installer.wireShell(false); err != nil {
-		return err
-	}
-	if err := installer.wireVSCode(); err != nil {
-		return err
-	}
-	if err := installer.writeUpdateMetadata(); err != nil {
-		return err
-	}
+	installer.deferFailure(mcpErr)
+	installer.deferFailure(installer.wireOpenCodeInstructions())
+	installer.deferFailure(installer.wireLogDefault())
+	installer.deferFailure(installer.wireShell(false))
+	installer.deferFailure(installer.wireVSCode())
+	installer.deferFailure(installer.writeUpdateMetadata())
 	// Like a failed plugin install, a refused login default is reported at
 	// once and fails the run after every other step has landed.
 	installer.deferFailure(installer.wireLoginDefault(false))
@@ -837,9 +764,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if managerAvailable && installer.apply {
 		installer.runSystemctl(ctx, "daemon-reload")
 	}
-	if err := installer.wireCodexHooks(); err != nil {
-		return err
-	}
+	installer.deferFailure(installer.wireCodexHooks())
 	if err := installer.wireMCP(); err != nil {
 		return err
 	}

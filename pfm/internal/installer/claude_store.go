@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -63,7 +65,7 @@ var AccountEntries = []string{
 	".credentials.json", ".claude.json", ".claude.json.backup", "backups",
 	"sessions", "daemon", "daemon.log", "daemon-auth-status.json",
 	"daemon-auth-cooldown", "jobs", "cache", "state", "mcp-needs-auth-cache.json",
-	"telemetry", "feedback", ".last-update-result.json",
+	"telemetry", "feedback", ".last-update-result.json", gather.AccountLaunchClaimsName,
 }
 
 var IgnoredEntries = []string{"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName}
@@ -278,66 +280,94 @@ func (installer *engine) wireClaudeStore() error {
 		accounts = append(accounts, account)
 	}
 	for _, account := range accounts {
-		var live []string
-		liveRead := false
-		for _, link := range account.Links {
-			target := filepath.Join(store, link.Entry)
-			switch link.State {
-			case "ok":
-				installer.ok(link.Path)
-			case stateUnreadable:
-				return fmt.Errorf("inspect account link %s: %w", link.Path, link.Err)
-			case stateForeign:
-				installer.skip(
-					fmt.Sprintf(
-						"%s links to %s outside the store — pfm doctor names its merge",
-						link.Path,
-						link.Target,
-					),
-				)
-			case "real":
-				info, err := os.Lstat(link.Path)
+		accountErr := func() (returnErr error) {
+			var guard *gather.AccountGuard
+			if installer.apply {
+				var err error
+				guard, err = gather.AcquireAccountGuard(account.Dir, false)
+				if errors.Is(err, syscall.EWOULDBLOCK) {
+					installer.skip("account " + account.Dir + " is starting a chat; rerun pfm install --yes")
+					return nil
+				}
 				if err != nil {
-					return fmt.Errorf("inspect real account entry %s: %w", link.Path, err)
+					return err
 				}
-				kind := "file"
-				if info.IsDir() {
-					kind = "dir"
-				}
-				installer.skip(fmt.Sprintf("%s is a real %s — pfm doctor names its merge", link.Path, kind))
-			case string(HostOverlayMissing):
-				if err := installer.change(fmt.Sprintf("link %s -> %s", link.Path, target), func() error {
-					return os.Symlink(target, link.Path)
-				}); err != nil {
-					return fmt.Errorf("link account entry %s -> %s: %w", link.Path, target, err)
-				}
-			case stateElsewhere:
-				if !liveRead {
-					var err error
-					live, err = liveChatPIDs(installer.options.ProcRoot, account.Dir)
-					if err != nil {
-						return fmt.Errorf("read live chats in %s: %w", account.Dir, err)
-					}
-					liveRead = true
-				}
-				if len(live) > 0 {
+				defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
+			}
+			var live []string
+			liveRead := false
+			for _, link := range account.Links {
+				target := filepath.Join(store, link.Entry)
+				switch link.State {
+				case "ok":
+					installer.ok(link.Path)
+				case stateUnreadable:
+					return fmt.Errorf("inspect account link %s: %w", link.Path, link.Err)
+				case stateForeign:
 					installer.skip(
 						fmt.Sprintf(
-							"repoint %s: live chats %s on %s — close them and rerun pfm install --yes",
+							"%s links to %s outside the store — pfm doctor names its merge",
 							link.Path,
-							strings.Join(live, ","),
-							account.Dir,
+							link.Target,
 						),
 					)
-					continue
-				}
-				message := fmt.Sprintf("repoint %s -> %s (was %s)", link.Path, target, link.Target)
-				if err := installer.change(message, func() error {
-					return installer.repointAccountLink(target, link.Path)
-				}); err != nil {
-					return fmt.Errorf("link account entry %s -> %s: %w", link.Path, target, err)
+				case "real":
+					info, err := os.Lstat(link.Path)
+					if err != nil {
+						return fmt.Errorf("inspect real account entry %s: %w", link.Path, err)
+					}
+					kind := "file"
+					if info.IsDir() {
+						kind = "dir"
+					}
+					installer.skip(fmt.Sprintf("%s is a real %s — pfm doctor names its merge", link.Path, kind))
+				case string(HostOverlayMissing):
+					if err := installer.change(fmt.Sprintf("link %s -> %s", link.Path, target), func() error {
+						return os.Symlink(target, link.Path)
+					}); err != nil {
+						return fmt.Errorf("link account entry %s -> %s: %w", link.Path, target, err)
+					}
+				case stateElsewhere:
+					if !liveRead {
+						var err error
+						live, err = liveChatPIDs(installer.options.ProcRoot, account.Dir)
+						if err != nil {
+							return fmt.Errorf("read live chats in %s: %w", account.Dir, err)
+						}
+						if guard != nil {
+							claims, claimErr := guard.Active(gather.NewProcFS(installer.options.ProcRoot))
+							if claimErr != nil {
+								return claimErr
+							}
+							for _, pid := range claims {
+								live = append(live, fmt.Sprint(pid))
+							}
+						}
+						liveRead = true
+					}
+					if len(live) > 0 {
+						installer.skip(
+							fmt.Sprintf(
+								"repoint %s: live chats %s on %s — close them and rerun pfm install --yes",
+								link.Path,
+								strings.Join(live, ","),
+								account.Dir,
+							),
+						)
+						continue
+					}
+					message := fmt.Sprintf("repoint %s -> %s (was %s)", link.Path, target, link.Target)
+					if err := installer.change(message, func() error {
+						return installer.repointAccountLink(target, link.Path, link.Target)
+					}); err != nil {
+						return fmt.Errorf("link account entry %s -> %s: %w", link.Path, target, err)
+					}
 				}
 			}
+			return nil
+		}()
+		if accountErr != nil {
+			return accountErr
 		}
 	}
 	return nil
@@ -345,13 +375,21 @@ func (installer *engine) wireClaudeStore() error {
 
 // repointAccountLink replaces a link in one rename, preserving a directory
 // that races into its place and removing the scratch link on failure.
-func (installer *engine) repointAccountLink(target, path string) error {
+func (installer *engine) repointAccountLink(target, path, inspected string) error {
 	scratch := filepath.Join(
 		filepath.Dir(path),
 		fmt.Sprintf(".%s.pfm-link-%d-%016x", filepath.Base(path), os.Getpid(), rand.Uint64()),
 	)
 	if err := os.Symlink(target, scratch); err != nil {
 		return err
+	}
+	current, readErr := os.Readlink(path)
+	if readErr != nil || current != inspected {
+		removeErr := os.Remove(scratch)
+		return errors.Join(
+			fmt.Errorf("account entry %s changed since inspection; kept operator entry: %v", path, readErr),
+			removeErr,
+		)
 	}
 	if err := os.Rename(scratch, path); err != nil {
 		if removeErr := os.Remove(scratch); removeErr != nil {

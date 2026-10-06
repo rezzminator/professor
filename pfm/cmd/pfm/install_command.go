@@ -176,6 +176,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	}
 	options := withFlags(newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime))
 	options.ConfigSeed = seeded
+	options.ConfigSeedContent = installConfig.SeedContent
 	code = runInstallerCommand(installCommand, options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
 		if preflight != 0 {

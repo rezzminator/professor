@@ -312,6 +312,68 @@ func TestChatNewWorkbench(t *testing.T) {
 }
 
 func TestChatNewWorkbenchReservations(t *testing.T) {
+	t.Run("capability handed to CLI and retained after creation failure", func(t *testing.T) {
+		root, dir := chatNewWorkbenchFixture(t)
+		var capability chat.NameReservation
+		service := newService(
+			"test",
+			&backend{
+				warnings: io.Discard,
+				paths:    paths.Values{TmuxDir: filepath.Join(root, "tmux")},
+				dispatch: func(ctx context.Context, args []string, _, stderr io.Writer) int {
+					capability = chat.WorkbenchReservation(ctx, args[3])
+					if capability.Name != args[3] {
+						t.Errorf("CLI received no automatic-name capability: %q", capability.Name)
+						return 1
+					}
+					if err := capability.Commit(); err != nil {
+						t.Errorf("commit created seat: %v", err)
+						return 1
+					}
+					_, err := io.WriteString(stderr, "created seat but boot failed")
+					if err != nil {
+						t.Error(err)
+					}
+					return 1
+				},
+			},
+		)
+		if _, _, err := service.chatNew(context.Background(), nil, NewInput{CWD: dir}); err == nil {
+			t.Fatal("post-creation failure hidden")
+		}
+		next, _, err := chat.WorkbenchName(context.Background(), dir, io.Discard, nil)
+		if err != nil || next == capability.Name {
+			t.Fatalf("parent cleanup lost handed-off created claim: %q %v", next, err)
+		}
+	})
+	t.Run("explicit name receives no capability", func(t *testing.T) {
+		root, dir := chatNewWorkbenchFixture(t)
+		pending, _, err := chat.ReserveWorkbenchName(context.Background(), dir, io.Discard, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		service := newService(
+			"test",
+			&backend{
+				warnings: io.Discard,
+				paths:    paths.Values{TmuxDir: filepath.Join(root, "tmux")},
+				dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
+					if claim := chat.WorkbenchReservation(ctx, args[3]); claim.Name != "" {
+						t.Errorf("explicit name acquired another producer's capability: %q", claim.Name)
+					}
+					return 1
+				},
+			},
+		)
+		if _, _, err := service.chatNew(context.Background(), nil, NewInput{CWD: dir, Name: pending.Name}); err == nil {
+			t.Fatal("failed explicit dispatch hidden")
+		}
+		next, _, err := chat.WorkbenchName(context.Background(), dir, io.Discard, nil)
+		if err != nil || next == pending.Name {
+			t.Fatalf("explicit MCP cleanup lost another claim: %q %v", next, err)
+		}
+	})
+
 	t.Run("concurrent", func(t *testing.T) {
 		root, dir := chatNewWorkbenchFixture(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -388,6 +450,49 @@ func TestChatNewWorkbenchReservations(t *testing.T) {
 			}
 		case <-ctx.Done():
 			t.Fatal("first unnamed chat did not finish after release")
+		}
+	})
+	t.Run("validation failure releases name", func(t *testing.T) {
+		root, dir := chatNewWorkbenchFixture(t)
+		var calls [][]string
+		service := newService("test", &backend{
+			warnings: io.Discard,
+			paths:    paths.Values{TmuxDir: filepath.Join(root, "tmux")},
+			dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
+				calls = append(calls, append([]string(nil), args...))
+				return 0
+			},
+		})
+		if _, _, err := service.chatNew(context.Background(), nil, NewInput{CWD: dir, Cache: "invalid"}); err == nil {
+			t.Fatal("invalid cache accepted")
+		}
+		_, _, err := service.chatNew(context.Background(), nil, NewInput{CWD: dir})
+		want := []string{"chat", "new", "--name", "_SCRIBE:1", "--cwd", dir}
+		if err != nil || !reflect.DeepEqual(calls, [][]string{want}) {
+			t.Fatalf("chat_new after validation failure = %v, calls %q; want pending name reused", err, calls)
+		}
+	})
+	t.Run("success keeps committed name across services", func(t *testing.T) {
+		root, dir := chatNewWorkbenchFixture(t)
+		var calls [][]string
+		for i := 0; i < 2; i++ {
+			service := newService("test", &backend{
+				warnings: io.Discard, paths: paths.Values{TmuxDir: filepath.Join(root, "tmux")},
+				dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
+					calls = append(calls, append([]string(nil), args...))
+					return 0
+				},
+			})
+			if _, _, err := service.chatNew(context.Background(), nil, NewInput{CWD: dir}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want := [][]string{
+			{"chat", "new", "--name", "_SCRIBE:1", "--cwd", dir},
+			{"chat", "new", "--name", "_SCRIBE:2", "--cwd", dir},
+		}
+		if !reflect.DeepEqual(calls, want) {
+			t.Fatalf("independent successful launches = %q; want committed claim retained", calls)
 		}
 	})
 	t.Run("failed launch releases name", func(t *testing.T) {

@@ -250,7 +250,7 @@ func TestHookTrustStateDistinguishesMissingRecordedAndUnreadable(t *testing.T) {
 			path := hookReceiptPath(account)
 			switch state {
 			case "file":
-				writeReceiptFile(t, account, `{}`)
+				writeReceiptFile(t, account, `{"`+account+`/hooks.json:session_start:0:0":"sha256:abcd"}`)
 			case "self-symlink":
 				if err := os.Symlink(path, path); err != nil {
 					t.Fatal(err)
@@ -266,6 +266,29 @@ func TestHookTrustStateDistinguishesMissingRecordedAndUnreadable(t *testing.T) {
 				}
 			} else if err != nil || recorded != (state == "file") {
 				t.Fatalf("state=(%v, %v), want recorded=%v", recorded, err, state == "file")
+			}
+		})
+	}
+}
+
+func TestHookTrustStateValidatesReceipt(t *testing.T) {
+	for _, raw := range []string{"{", "null", "{}", `{ "foreign": "sha256:a" }`, `{ "@HOOK@": "" }`, `{ "@HOOK@:wrong": "hash" }`, "directory"} {
+		t.Run(raw, func(t *testing.T) {
+			account := t.TempDir()
+			path := hookReceiptPath(account)
+			if raw == "directory" {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				raw = strings.ReplaceAll(raw, "@HOOK@", account+"/hooks.json:session_start:0:0")
+				if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			recorded, err := HookTrustState(account)
+			if recorded || err == nil {
+				t.Fatalf("invalid receipt = %t, %v", recorded, err)
 			}
 		})
 	}

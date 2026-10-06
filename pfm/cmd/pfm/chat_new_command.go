@@ -104,7 +104,7 @@ func runRun(
 		return 1
 	}
 	if *name == "" {
-		auto, found, nameErr := pfmchat.WorkbenchName(ctx, directory, stderr, &runtime)
+		auto, found, nameErr := pfmchat.ReserveWorkbenchName(ctx, directory, stderr, &runtime)
 		if nameErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", nameErr)
 			return 1
@@ -113,8 +113,10 @@ func runRun(
 			flags.Usage()
 			return 2
 		}
-		*name = auto
+		*name = auto.Name
+		ctx = pfmchat.WithWorkbenchNameReservation(ctx, auto)
 	}
+	defer pfmchat.ReleaseUnusedWorkbenchName(ctx, *name, stderr)
 	requestedEngine, _ := pfmengine.Parse(*engine)
 	if *role != "" && requestedEngine == pfmengine.OpenCode {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", agentrole.ValidateSeatPromptPolicy(requestedEngine, ""))
@@ -295,7 +297,7 @@ func runRun(
 		Height:              action.HeadlessHeight,
 		Timings:             runSpawnTimings,
 	})
-	if err != nil {
+	if err = pfmchat.CommitWorkbenchLaunch(ctx, result.Socket != "", *name, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
 	}

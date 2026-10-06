@@ -25,7 +25,7 @@ const (
 )
 
 // ReminderScheduleDrift compares installed scheduler files with the install assets.
-func ReminderScheduleDrift(home string) (path string, drifted bool, err error) {
+func ReminderScheduleDrift(home string, required ...bool) (path string, drifted bool, err error) {
 	if home == "" {
 		return "", false, fmt.Errorf("reminder schedule drift: no home directory")
 	}
@@ -33,12 +33,25 @@ func ReminderScheduleDrift(home string) (path string, drifted bool, err error) {
 	if schedulerIsLaunchd {
 		assets = []string{reminderLaunchdAsset}
 	}
+	installed := len(required) > 0 && required[0]
+	for _, name := range assets {
+		path := filepath.Join(home, ".config", "systemd", "user", filepath.Base(name))
+		if schedulerIsLaunchd {
+			path = reminderLaunchAgentFile(home)
+		}
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, fs.ErrNotExist) {
+			installed = true
+		}
+	}
 	for _, name := range assets {
 		path := filepath.Join(home, ".config", "systemd", "user", filepath.Base(name))
 		if schedulerIsLaunchd {
 			path = reminderLaunchAgentFile(home)
 		}
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			if installed {
+				return path, true, nil
+			}
 			continue
 		} else if err != nil {
 			return "", false, fmt.Errorf("read %s: %w", path, err)

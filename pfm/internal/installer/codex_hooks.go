@@ -244,6 +244,18 @@ func (installer *engine) wireCodexHooks() error {
 	if err != nil {
 		return fmt.Errorf("read settings hook ownership %s: %w", ownershipPath, err)
 	}
+	configuredHomes := map[string]bool{}
+	for _, home := range installer.codexHomes() {
+		configuredHomes[physicalSettingsPath(filepath.Join(home, "hooks.json"))] = true
+	}
+	for path, owned := range ownership {
+		if filepath.Base(path) == "hooks.json" && !configuredHomes[path] && len(owned) > 0 {
+			return fmt.Errorf(
+				"retired Codex account still owns hooks at %s; restore that account to the roster and uninstall its hooks before removing it",
+				path,
+			)
+		}
+	}
 	seen := map[string]bool{}
 	// carriesHook records, per physical hooks.json, whether the file the install
 	// leaves behind holds the owned resume-unkill handler — the precondition of

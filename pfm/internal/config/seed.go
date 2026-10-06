@@ -44,6 +44,7 @@ func LoadSeed(example, target, home string, projectRoots []string, codexHomes ..
 	if err != nil {
 		return Config{}, fmt.Errorf("load seed config %s for %s: %w", example, target, err)
 	}
+	loaded.SeedContent = append([]byte(nil), content...)
 	loaded.Path = filepath.Clean(target)
 	loaded.Harvester.Path = harvester
 	return loaded, nil

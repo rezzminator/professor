@@ -106,7 +106,7 @@ func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
 }
 
 func TestInstallCheckPreChangeChecks(t *testing.T) {
-	for _, scenario := range []string{"quiet", "running", "reminder running", "unprobed", "dependency", "explicit missing"} {
+	for _, scenario := range []string{"quiet", "running", "short reminder", "unprobed", "dependency", "explicit missing"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, _, _ := installCheckHome(t, false)
 			bin, _ := writeManagerFakes(
@@ -130,17 +130,12 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				}
 				wantCode, wantErr = 4, installer.SchedulerRefusal(installCommand, schedulerErr)+"\n"
 			}
-			if scenario == "reminder running" {
+			if scenario == "short reminder" {
 				bin, _ = writeManagerFakes(
 					t,
-					"case \"$*\" in *pfm-reminder.service*) echo activating;; *ActiveState*) echo inactive;; esac\nexit 0",
-					"case \"$*\" in *com.professor.pfm.reminder*) echo 'state = running';; *) echo 'state = not running';; esac",
+					`case "$*" in *pfm-reminder.service*) if [ -e "$0.once" ]; then echo inactive; else : > "$0.once"; echo activating; fi;; *ActiveState*) echo inactive;; esac`+"\nexit 0",
+					`case "$*" in *com.professor.pfm.reminder*) if [ -e "$0.once" ]; then echo 'state = not running'; else : > "$0.once"; echo 'state = running'; fi;; *) echo 'state = not running';; esac`,
 				)
-				schedulerErr := installer.ErrReminderRunning
-				if runtime.GOOS == "darwin" {
-					schedulerErr = installer.ErrReminderAgentRunning
-				}
-				wantCode, wantErr = 4, installer.SchedulerRefusal(installCommand, schedulerErr)+"\n"
 			}
 			if scenario == "unprobed" {
 				bin, _ = writeManagerFakes(t,
@@ -186,12 +181,12 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				t.Fatal("check changed home")
 			}
 			switch scenario {
-			case "quiet":
+			case "quiet", "short reminder":
 				if out.String() != "install check: ok — pfm install --yes would pass its pre-change checks\n" ||
 					errOut.Len() != 0 {
 					t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 				}
-			case "running", "reminder running":
+			case "running":
 				if errOut.String() != wantErr {
 					t.Fatalf("stderr=%q want=%q", errOut.String(), wantErr)
 				}

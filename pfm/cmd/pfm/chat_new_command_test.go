@@ -268,3 +268,39 @@ func TestChatNewWorkbench(t *testing.T) {
 		})
 	}
 }
+
+func TestChatNewExplicitNamePreservesAnotherProducersReservation(t *testing.T) {
+	jail := newRunJail(t)
+	dir, _ := newWorkbenchRunFixture(t, jail)
+	name, found, err := pfmchat.WorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || !found {
+		t.Fatal(name, found, err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{
+			"chat",
+			"new",
+			"--name",
+			name,
+			"--cwd",
+			dir,
+			"--prompt-file",
+			filepath.Join(jail.root, "missing-prompt"),
+		},
+		&stdout,
+		&stderr,
+	)
+	if code == 0 {
+		t.Fatal("missing prompt unexpectedly launched")
+	}
+	next, _, err := pfmchat.WorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || next == name {
+		t.Fatalf(
+			"explicit failure released another producer's claim: next=%q err=%v stderr=%q",
+			next,
+			err,
+			stderr.String(),
+		)
+	}
+}

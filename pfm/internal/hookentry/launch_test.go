@@ -8,11 +8,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -348,5 +350,39 @@ func TestLauncherSeatAccountIgnoresTheLoginDefault(t *testing.T) {
 				t.Fatalf("launcherSeatAccount = (%s, %d), want (%s, %d)", dir, account, test.wantDir, test.wantAccount)
 			}
 		})
+	}
+}
+
+func TestLaunchPassthroughWaitsForParentAccountRegistration(t *testing.T) {
+	account := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", account)
+	t.Setenv("PFM_LAUNCH_PASSTHROUGH", "1")
+	parent, err := gather.AcquireAccountGuard(account, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := LaunchExec
+	t.Cleanup(func() { LaunchExec = previous })
+	LaunchExec = func(string, []string, []string) error { return nil }
+	// The parent publishes its child's generation and releases ownership while
+	// the managed child launcher is starting, before that child execs Claude.
+	released := make(chan error, 1)
+	time.AfterFunc(20*time.Millisecond, func() { released <- parent.Close() })
+	var out, stderr bytes.Buffer
+	code := Launch(
+		[]string{"--real", "/bin/echo", "--", "--resume", "fixture-session"},
+		&out,
+		&stderr,
+		config.Runtime{},
+		paths.OSEnv{},
+	)
+	if err := <-released; err != nil {
+		t.Fatal(err)
+	}
+	if err := parent.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("parent registration rejected healthy managed child: code=%d stderr=%q", code, stderr.String())
 	}
 }

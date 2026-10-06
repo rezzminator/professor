@@ -77,7 +77,11 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 		`{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"pfm internal clear-hide"}]},`+
 			`{"matcher":"resume","hooks":[{"type":"command","command":"`+resumeUnkillCommand(home)+`"}]}]}}`,
 	)
-	writeFixture(t, filepath.Join(codex, ".professor-hook-trust.json"), `{"k":"sha256:abc"}`)
+	writeFixture(
+		t,
+		filepath.Join(codex, ".professor-hook-trust.json"),
+		`{"`+codex+`/hooks.json:session_start:1:0":"sha256:abc"}`,
+	)
 	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codex}}}
 	var output bytes.Buffer
 	_, failures := ReportHooks(&output, home, machine, false)
@@ -170,7 +174,11 @@ func TestProbeCodexHooksReportsAnUntrustedResumeUnkillHookAndPassesATrustedOne(t
 		t.Fatalf("warnings=%d failures=%d output=%s", warnings, failures, output.String())
 	}
 
-	writeFixture(t, filepath.Join(home, ".codex", ".professor-hook-trust.json"), `{"k":"sha256:abc"}`)
+	writeFixture(
+		t,
+		filepath.Join(home, ".codex", ".professor-hook-trust.json"),
+		`{"`+filepath.Join(home, ".codex")+`/hooks.json:session_start:0:0":"sha256:abc"}`,
+	)
 	ledger, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
 		physicalSettingsPath(hooksPath): {
 			settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}: 1,
@@ -201,5 +209,29 @@ func TestProbeCodexHooksReportsUnreadableTrustReceipt(t *testing.T) {
 	rows := probeCodexHooks(home, machine, filepath.Join(home, ".local", "bin", "pfm"))
 	if len(rows) != 1 || rows[0].State != stateUnreadable || !strings.Contains(rows[0].Error, receipt) {
 		t.Fatalf("rows=%+v, want one unreadable trust receipt row", rows)
+	}
+}
+
+func TestHookTrustReceiptMustNameExpectedHandler(t *testing.T) {
+	for _, suffix := range []string{"1:0", "0:1", "wrong:0"} {
+		t.Run(suffix, func(t *testing.T) {
+			home, machine, hooksPath := stageCodexProbeHome(t, "")
+			writeFixture(t, hooksPath, resumeUnkillHooksBody(home))
+			writeFixture(
+				t,
+				filepath.Join(filepath.Dir(hooksPath), ".professor-hook-trust.json"),
+				`{"`+hooksPath+`:session_start:`+suffix+`":"opaque-native-hash"}`,
+			)
+			rows := ProbeExpectedHooks(home, machine)
+			found := false
+			for _, row := range rows {
+				if row.State == stateUnreadable && strings.Contains(row.Error, "fingerprint") {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("wrong-handler receipt accepted: %+v", rows)
+			}
+		})
 	}
 }

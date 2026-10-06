@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -112,8 +113,10 @@ func TestMCPWireFailureStillRefreshesRunningLinuxDaemon(t *testing.T) {
 		},
 		apply: true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"), stamp: "fixture",
 	}
-	if err := installer.install(context.Background()); err == nil {
-		t.Fatal("fixture did not trigger wireMCP failure")
+	if err := errors.Join(
+		append([]error{installer.install(context.Background())}, installer.deferred...)...); err == nil ||
+		!strings.Contains(err.Error(), "load MCP config for legacy auth cleanup") {
+		t.Fatalf("fixture did not retain deferred wireMCP failure: %v", err)
 	}
 	if calls := strings.Join(runner.calls, "\n"); !strings.Contains(calls, "systemctl --user restart "+mcpUnitName) {
 		t.Fatalf("wireMCP failure left running daemon stale:\n%s", calls)

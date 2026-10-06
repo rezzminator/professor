@@ -585,13 +585,22 @@ func runSkillGitContext(
 ) (string, error) {
 	env := make([]string, 0, len(os.Environ())+4)
 	sshConfigured := false
+	sshCommand := ""
 	for _, entry := range deps.WithoutGitRepoVars(os.Environ()) {
-		name, _, _ := strings.Cut(entry, "=")
+		name, value, _ := strings.Cut(entry, "=")
+		if name == "GIT_SSH_COMMAND" {
+			sshCommand = value
+		}
 		sshConfigured = sshConfigured || name == "GIT_SSH_COMMAND" || name == "GIT_SSH"
 		env = append(env, entry)
 	}
 	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=",
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
+	if sshConfigured && !strings.Contains(sshCommand, "BatchMode=yes") {
+		return "", fmt.Errorf(
+			"source-fetched skills require a noninteractive SSH command; set GIT_SSH_COMMAND with -o BatchMode=yes (custom GIT_SSH alone cannot prove noninteractive behavior)",
+		)
+	}
 	if !sshConfigured {
 		env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
@@ -636,7 +645,12 @@ func (installer *engine) skillSourceLinkDirs() []string {
 // record. Uninstall passes an empty set.
 func (installer *engine) retireSkillSources(active map[string]bool) error {
 	storeRoot := skillStoreRoot(installer.options.Home)
-	for _, dir := range installer.skillSourceLinkDirs() {
+	recorded, _, ledgerErr := readSkillLinkLedger(installer.options.Home)
+	if ledgerErr != nil {
+		return ledgerErr
+	}
+	dirs := append(installer.skillSourceLinkDirs(), recorded...)
+	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue

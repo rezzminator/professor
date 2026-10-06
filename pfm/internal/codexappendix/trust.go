@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -47,12 +48,57 @@ func HookTrustRecorded(account string) bool {
 }
 
 // HookTrustState distinguishes an absent receipt from one that cannot be inspected.
-func HookTrustState(account string) (recorded bool, err error) {
+func HookTrustState(account string, expectedCommand ...string) (recorded bool, err error) {
 	path := hookReceiptPath(account)
 	_, err = os.Stat(path)
 	switch {
 	case err == nil:
-		return true, nil
+		receipt, readErr := readHookReceipt(account)
+		if readErr != nil {
+			return false, readErr
+		}
+		physical, resolveErr := filepath.EvalSymlinks(account)
+		if resolveErr != nil {
+			return false, fmt.Errorf("resolve hook trust account %s: %w", account, resolveErr)
+		}
+		prefix := filepath.Join(physical, "hooks.json") + ":session_start:"
+		for key, hash := range receipt {
+			if hash == "" || !strings.HasPrefix(key, prefix) {
+				continue
+			}
+			indices := strings.Split(strings.TrimPrefix(key, prefix), ":")
+			if len(indices) != 2 {
+				continue
+			}
+			matcher, matcherErr := strconv.Atoi(indices[0])
+			handler, handlerErr := strconv.Atoi(indices[1])
+			if matcherErr != nil || handlerErr != nil || matcher < 0 || handler < 0 {
+				continue
+			}
+			if len(expectedCommand) > 0 {
+				raw, readErr := os.ReadFile(filepath.Join(physical, "hooks.json"))
+				if readErr != nil {
+					return false, fmt.Errorf("read trusted hook source: %w", readErr)
+				}
+				var document struct {
+					Hooks map[string][]struct {
+						Matcher string
+						Hooks   []struct{ Command string }
+					}
+				}
+				if err := json.Unmarshal(raw, &document); err != nil {
+					return false, fmt.Errorf("parse trusted hook source: %w", err)
+				}
+				entries := document.Hooks["SessionStart"]
+				if matcher >= len(entries) || entries[matcher].Matcher != "resume" ||
+					handler >= len(entries[matcher].Hooks) ||
+					entries[matcher].Hooks[handler].Command != expectedCommand[0] {
+					continue
+				}
+			}
+			return true, nil
+		}
+		return false, fmt.Errorf("hook trust receipt %s has no valid SessionStart handler fingerprint", path)
 	case errors.Is(err, os.ErrNotExist):
 		return false, nil
 	default:

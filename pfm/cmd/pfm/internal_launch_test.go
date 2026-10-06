@@ -270,7 +270,7 @@ func TestInternalLaunchFreshAndExplicitRecordBeforeTmux(t *testing.T) {
 			writeExecutable(
 				t,
 				filepath.Join(bin, "tmux"),
-				"#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CC_TMUX_ARGUMENTS\"\nprintf 'fixture tmux refused' >&2\nexit 9\n",
+				"#!/bin/sh\ncase \" $* \" in\n *' new-session '*) printf '%s\\n' \"$*\" > \"$CC_TMUX_ARGUMENTS\"; printf 'fixture tmux refused' >&2; exit 9;;\n *' display-message '*) echo \"$PPID\";;\n *' kill-server '*) exit 0;;\n esac\n",
 			)
 			realBinary := filepath.Join(bin, "claude")
 			writeExecutable(t, realBinary, "#!/bin/sh\nexit 0\n")

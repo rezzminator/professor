@@ -1,10 +1,15 @@
 package claudelaunch
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/syntax"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -76,4 +81,72 @@ func InspectConfigDir(store, dir string) ConfigDir {
 		return ConfigDir{State: ConfigDirStore, Real: resolved}
 	}
 	return ConfigDir{State: ConfigDirOK, Real: resolved}
+}
+
+// ConfigDirFromEnv reads the last account assignment, as the process does.
+func ConfigDirFromEnv(env []string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		if value, found := strings.CutPrefix(env[i], configDirEnv+"="); found {
+			return value
+		}
+	}
+	return ""
+}
+
+// ConfigDirFromRun reads the registry's literal account assignment from a
+// generated launch shell command. It handles quoting and compound launcher
+// commands through the shell parser, without evaluating any shell code.
+func ConfigDirFromRun(run string) (string, error) {
+	file, err := syntax.NewParser().Parse(strings.NewReader(run), "launch")
+	if err != nil {
+		return "", fmt.Errorf("parse account launch command: %w", err)
+	}
+	var dir string
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if err != nil {
+			return false
+		}
+		if assign, ok := node.(*syntax.Assign); ok && assign.Name != nil && assign.Name.Value == configDirEnv {
+			if assign.Value == nil {
+				err = fmt.Errorf("account launch assignment has no value")
+				return false
+			}
+			value, valueErr := expand.Literal(nil, assign.Value)
+			if valueErr != nil || value == "" {
+				err = fmt.Errorf("read account launch assignment: %v", valueErr)
+				return false
+			}
+			if dir != "" && dir != value {
+				err = fmt.Errorf("launch command names multiple Claude accounts")
+				return false
+			}
+			dir = value
+			return false
+		}
+		word, ok := node.(*syntax.Word)
+		if !ok {
+			return true
+		}
+		value, valueErr := expand.Literal(nil, word)
+		if valueErr != nil {
+			var rendered bytes.Buffer
+			if printErr := syntax.NewPrinter().Print(&rendered, word); printErr != nil {
+				err = fmt.Errorf("inspect account launch word: %w", printErr)
+				return false
+			}
+			if strings.Contains(rendered.String(), configDirEnv+"=") {
+				err = fmt.Errorf("account launch assignment must be literal: %w", valueErr)
+			}
+			return false
+		}
+		if candidate, found := strings.CutPrefix(value, configDirEnv+"="); found {
+			if candidate == "" || (dir != "" && dir != candidate) {
+				err = fmt.Errorf("launch command has an invalid Claude account assignment")
+				return false
+			}
+			dir = candidate
+		}
+		return false
+	})
+	return dir, err
 }

@@ -396,7 +396,7 @@ func Run(
 			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
 		}
 	}
-	if err := tmux.Respawn(ctx, request.SocketPath, request.Pane, request.CWD, run); err != nil {
+	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
 	carryReminders(ctx, leftBehind, request.SessionID, stderr)

@@ -608,6 +608,12 @@ func TestRunSkillGitSSHEnvironment(t *testing.T) {
 				t.TempDir(),
 				"ls-remote",
 			)
+			if tc.command != "" || tc.program != "" {
+				if err == nil || !strings.Contains(err.Error(), "noninteractive") {
+					t.Fatalf("custom ssh error=%v", err)
+				}
+				return
+			}
 			if err != nil || got != tc.want {
 				t.Fatalf("git ssh command = %q, err=%v; want %q", got, err, tc.want)
 			}

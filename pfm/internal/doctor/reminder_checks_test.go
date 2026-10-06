@@ -243,7 +243,8 @@ func TestPrintReminderDoctorRealStateOverdue(t *testing.T) {
 	var out strings.Builder
 	got := printReminderDoctor(ctx, &out, &deps.FakeRunner{}, values, now)
 	want := "doctor: reminders scheduler=systemd unit=pfm-reminder.timer armed=true state=active " +
-		"due=1 overdue=1 failed=0 — 1 reminder(s) due longer than 15m0s: nothing is firing them\n"
+		"drift=" + missingReminderAsset(dir) + " due=1 overdue=1 failed=0 — run pfm install --yes; " +
+		"1 reminder(s) due longer than 15m0s: nothing is firing them\n"
 	if out.String() != want {
 		t.Fatalf("output =\n%q\nwant\n%q", out.String(), want)
 	}
@@ -267,16 +268,23 @@ func TestPrintReminderDoctorUnreadableState(t *testing.T) {
 	got := printReminderDoctor(context.Background(), &out, &deps.FakeRunner{}, values, time.Now())
 	line := out.String()
 	if !strings.HasPrefix(line, "doctor: reminders scheduler=systemd unit=pfm-reminder.timer armed=true state=active "+
-		"db=unreadable error=") || !strings.HasSuffix(line,
-		" — reminder state unknown; the doctor: shared store row counts it\n") {
+		"drift="+missingReminderAsset(dir)+" db=unreadable error=") || !strings.HasSuffix(line,
+		" — run pfm install --yes; reminder state unknown; the doctor: shared store row counts it\n") {
 		t.Fatalf("output = %q", line)
 	}
 	if strings.Contains(line, "due=") || strings.Count(line, "\n") != 1 {
 		t.Fatalf("an unreadable database must render one line without counts: %q", line)
 	}
-	if got != 0 {
-		t.Fatalf("warnings = %d, want 0", got)
+	if got != 1 {
+		t.Fatalf("warnings = %d, want 1 for the missing armed schedule", got)
 	}
+}
+
+func missingReminderAsset(home string) string {
+	if goRuntime.GOOS == "darwin" {
+		return filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")
+	}
+	return filepath.Join(home, ".config", "systemd", "user", "pfm-reminder.timer")
 }
 
 func TestPrintReminderDoctorScheduleDrift(t *testing.T) {

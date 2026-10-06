@@ -192,10 +192,10 @@ func TestReminderUnitsSurviveInstallUninstallReinstall(t *testing.T) {
 }
 
 func TestReminderScheduleDrift(t *testing.T) {
-	scenarios := []string{"no drift", "drifted unit", "nothing installed", "unreadable unit", "no home"}
+	scenarios := []string{"no drift", "drifted unit", "nothing installed", "armed none", "unreadable unit", "no home"}
 	if !schedulerIsLaunchd {
 		// Only systemd units are links into the managed root.
-		scenarios = append(scenarios, "dangling unit link")
+		scenarios = append(scenarios, "dangling unit link", "missing service")
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario, func(t *testing.T) {
@@ -204,7 +204,8 @@ func TestReminderScheduleDrift(t *testing.T) {
 			if schedulerIsLaunchd {
 				path = filepath.Join(home, "Library", "LaunchAgents", reminderLaunchdLabel+".plist")
 			}
-			if scenario == "no drift" || scenario == "drifted unit" || scenario == "dangling unit link" {
+			if scenario == "no drift" || scenario == "drifted unit" || scenario == "dangling unit link" ||
+				scenario == "missing service" {
 				if schedulerIsLaunchd {
 					installer := engine{apply: true, stamp: "test", options: Options{
 						Home: home, Runner: &fakeRunner{}, Stdout: io.Discard, Sleep: func(time.Duration) {},
@@ -238,6 +239,12 @@ func TestReminderScheduleDrift(t *testing.T) {
 					}
 				}
 			}
+			if scenario == "missing service" {
+				path = filepath.Join(home, ".config", "systemd", "user", reminderServiceUnit)
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if scenario == "dangling unit link" {
 				target, err := os.Readlink(path)
 				if err != nil {
@@ -255,7 +262,7 @@ func TestReminderScheduleDrift(t *testing.T) {
 			if scenario == "no home" {
 				home = ""
 			}
-			gotPath, drifted, err := ReminderScheduleDrift(home)
+			gotPath, drifted, err := ReminderScheduleDrift(home, scenario == "armed none")
 			switch scenario {
 			case "no home":
 				if err == nil || err.Error() != "reminder schedule drift: no home directory" || drifted ||
@@ -266,7 +273,7 @@ func TestReminderScheduleDrift(t *testing.T) {
 				if err == nil || !strings.HasPrefix(err.Error(), "read "+path+":") || drifted || gotPath != "" {
 					t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
 				}
-			case "drifted unit", "dangling unit link":
+			case "drifted unit", "dangling unit link", "missing service", "armed none":
 				if err != nil || !drifted || gotPath != path {
 					t.Fatalf("path=%q drifted=%t err=%v want drift=%s", gotPath, drifted, err, path)
 				}

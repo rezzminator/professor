@@ -90,11 +90,11 @@ func (installer *engine) seedConfig() error {
 	}
 	example, target := installer.options.ConfigSeed, installer.options.MCPConfigPath
 	return installer.change("seed "+target+" from "+example, func() error {
-		content, err := os.ReadFile(example)
-		if err != nil {
-			return fmt.Errorf("read install example %s: %w", example, err)
+		content := installer.options.ConfigSeedContent
+		if content == nil {
+			return fmt.Errorf("seed install config %s: validated example bytes are missing", target)
 		}
-		if err := atomicfile.Write(target, content, 0o600); err != nil {
+		if err := atomicfile.Create(target, content, 0o600); err != nil {
 			return fmt.Errorf("write install config %s: %w", target, err)
 		}
 		return nil

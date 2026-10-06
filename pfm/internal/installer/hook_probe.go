@@ -220,7 +220,7 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 		case codexHookHandlerCount(document, expected) == 0:
 			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
 		default:
-			recorded, err := codexappendix.HookTrustState(account.Home)
+			recorded, err := codexappendix.HookTrustState(account.Home, expected.Command)
 			if err != nil {
 				unreadable(err)
 			} else if !recorded {

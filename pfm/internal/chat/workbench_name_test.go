@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -148,5 +149,72 @@ func TestWorkbenchNameReportsInvalidManifest(t *testing.T) {
 	want := paths.WorkbenchManifest(dir) + `: "prompt" is required`
 	if err == nil || err.Error() != want || name != "" || found {
 		t.Fatalf("invalid name = %q, %t, %v; want %q", name, found, err, want)
+	}
+}
+
+func TestWorkbenchNameClaimsAcrossIndependentProducers(t *testing.T) {
+	root := testjail.Fleet(t)
+	dir := chatWorkbenchFixture(t, root)
+	first, found, err := WorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || !found {
+		t.Fatal(first, found, err)
+	}
+	second, found, err := WorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || !found || second == first {
+		t.Fatalf("separate producers chose %q and %q: %v", first, second, err)
+	}
+}
+
+func TestWorkbenchNameSurvivesPostCreationFailure(t *testing.T) {
+	root := testjail.Fleet(t)
+	dir := chatWorkbenchFixture(t, root)
+	claim, found, err := ReserveWorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || !found {
+		t.Fatal(claim, found, err)
+	}
+	launchErr := errors.New("chat born but boot probe failed")
+	if err := CommitWorkbenchLaunch(
+		WithWorkbenchNameReservation(context.Background(), claim),
+		true,
+		claim.Name,
+		launchErr,
+	); !errors.Is(
+		err,
+		launchErr,
+	) {
+		t.Fatalf("launch error lost: %v", err)
+	}
+	if err := claim.Release(); err != nil {
+		t.Fatal(err)
+	}
+	next, _, err := WorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || next == claim.Name {
+		t.Fatalf("live but unnamed chat lost reservation: %q %v", next, err)
+	}
+}
+
+func TestWorkbenchStaleReleasePreservesReplacementClaim(t *testing.T) {
+	root := testjail.Fleet(t)
+	dir := chatWorkbenchFixture(t, root)
+	first, _, err := ReserveWorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Release(); err != nil {
+		t.Fatal(err)
+	}
+	replacement, _, err := WorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || replacement != first.Name {
+		t.Fatal(replacement, err)
+	}
+	if err := first.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Commit(); err == nil {
+		t.Fatal("stale capability committed another producer claim")
+	}
+	next, _, err := WorkbenchName(context.Background(), dir, io.Discard, nil)
+	if err != nil || next == replacement {
+		t.Fatalf("stale release removed replacement claim: next=%q err=%v", next, err)
 	}
 }

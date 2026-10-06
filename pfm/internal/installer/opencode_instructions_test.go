@@ -249,10 +249,10 @@ func TestOpenCodeInstructionsOtherClones(t *testing.T) {
 				filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts", "opencode.md"),
 				"./house-rules.md",
 			}
-			want := []string{composed, "./house-rules.md"}
+			want := []string{composed, entries[0], "./house-rules.md"}
 			if mode == ModeUninstall {
 				entries = append(entries, composed)
-				want = []string{"./house-rules.md"}
+				want = []string{entries[0], "./house-rules.md", composed}
 			}
 			raw, err := json.Marshal(map[string]any{"instructions": entries})
 			if err != nil {
@@ -296,7 +296,72 @@ func TestOpenCodeInstructionsUninstallWithoutMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{"operator.md"}) || installer.report.Skipped != 0 {
+	if !reflect.DeepEqual(got, []string{"/srv/old-clone/pfm/harness-prompts/composed/opencode.md", "operator.md"}) ||
+		installer.report.Skipped != 0 {
 		t.Fatalf("instructions = %v, report = %+v, output = %q", got, installer.report, output.String())
+	}
+}
+
+func TestOpenCodeReceiptFailureRetryRecoversOwnershipAndKeepsForeignInstructions(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	config := OpenCodeConfigPath(home)
+	writeFixture(t, config, `{"instructions":["operator.md"]}`)
+	receipt := filepath.Join(managedRootForHome(home), "opencode-instructions.json")
+	writer := &storeMutationWriter{match: "  change  rewrite " + config, mutate: func() {
+		if err := os.MkdirAll(receipt, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	e := &engine{
+		apply:   true,
+		options: Options{Mode: ModeApply, Home: home, SourceRepo: clone, OpenCodeConfigPath: config, Stdout: writer},
+	}
+	if err := e.editOpenCodeInstructions(true); err == nil {
+		t.Fatal("receipt publication failure was hidden")
+	}
+	if err := os.Remove(receipt); err != nil {
+		t.Fatal(err)
+	}
+	e.options.Stdout = io.Discard
+	if err := e.editOpenCodeInstructions(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.editOpenCodeInstructions(false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, readFixture(t, config)), config)
+	if err != nil || !reflect.DeepEqual(got, []string{"operator.md"}) {
+		t.Fatalf("retry lost ownership or foreign instructions: %v %v", got, err)
+	}
+}
+
+func TestOpenCodePreexistingComposedInstructionRemainsOperatorOwned(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	config := OpenCodeConfigPath(home)
+	composed := filepath.Join(clone, "pfm", "harness-prompts", "composed", "opencode.md")
+	raw, err := json.Marshal(map[string]any{"instructions": []string{"operator.md", composed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, config, string(raw))
+	e := &engine{
+		apply: true,
+		options: Options{
+			Mode:               ModeApply,
+			Home:               home,
+			SourceRepo:         clone,
+			OpenCodeConfigPath: config,
+			Stdout:             io.Discard,
+		},
+	}
+	if err := e.editOpenCodeInstructions(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.editOpenCodeInstructions(false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, readFixture(t, config)), config)
+	if err != nil || !reflect.DeepEqual(got, []string{composed, "operator.md"}) {
+		t.Fatalf("preexisting operator instruction reclaimed: %v %v", got, err)
 	}
 }

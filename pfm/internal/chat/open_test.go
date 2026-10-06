@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -26,8 +28,9 @@ import (
 // records every chat server the detached door asks for and never touches a
 // real socket.
 type fakeOpenTmux struct {
-	alive   map[string]bool
-	created []action.ChatServer
+	alive     map[string]bool
+	created   []action.ChatServer
+	createErr error
 }
 
 func (fake *fakeOpenTmux) ListPanes(context.Context, string) ([]action.ActionPane, error) {
@@ -48,7 +51,7 @@ func (fake *fakeOpenTmux) SelectWindow(context.Context, string, int) error { ret
 
 func (fake *fakeOpenTmux) CreateChatServer(_ context.Context, server action.ChatServer) error {
 	fake.created = append(fake.created, server)
-	return nil
+	return fake.createErr
 }
 
 // emptyProcesses is an action.ProcessTable that reports no processes: a jailed
@@ -446,44 +449,67 @@ func TestOpenDetachedIDKeepsUnseenReminder(t *testing.T) {
 }
 
 func TestOpenWorkbenchLaunchName(t *testing.T) {
-	for _, detached := range []bool{false, true} {
-		t.Run(map[bool]string{false: "open", true: "detached"}[detached], func(t *testing.T) {
-			root := testjail.Fleet(t)
-			dir := chatWorkbenchFixture(t, root)
-			seedClaudeChat(
-				t,
-				root,
-				"a1111111-1111-4111-8111-111111111111",
-				`{"type":"custom-title","customTitle":"_SCRIBE:1"}`,
+	for _, partial := range []bool{false, true} {
+		for _, detached := range []bool{false, true} {
+			t.Run(
+				map[bool]string{false: "open", true: "detached"}[detached]+map[bool]string{false: "/success", true: "/unresolved-child"}[partial],
+				func(t *testing.T) {
+					root := testjail.Fleet(t)
+					dir := chatWorkbenchFixture(t, root)
+					seedClaudeChat(
+						t,
+						root,
+						"a1111111-1111-4111-8111-111111111111",
+						`{"type":"custom-title","customTitle":"_SCRIBE:1"}`,
+					)
+					seedClaudeChat(
+						t,
+						root,
+						"b2222222-2222-4222-8222-222222222222",
+						`{"type":"custom-title","customTitle":"_SCRIBE:2"}`,
+					)
+					runtime, err := config.RuntimeOrDefault(nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					fake := &fakeOpenTmux{}
+					if partial {
+						fake.createErr = &spawn.SessionCreatedError{
+							Err: errors.New("pane query failed; termination unproven"),
+						}
+					}
+					stubOpenExecutor(t, fake)
+					row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
+					var stderr, stdout bytes.Buffer
+					if detached {
+						_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
+					} else {
+						if code := OpenRow(
+							context.Background(),
+							row,
+							1,
+							false,
+							"",
+							&stdout,
+							&stderr,
+							&runtime,
+						); (code != 0) != partial {
+							t.Fatalf("open=%d: %s", code, stderr.String())
+						}
+					}
+					if detached && (err != nil) != partial {
+						t.Fatalf("partial=%t error=%v", partial, err)
+					}
+					if len(fake.created) != 1 || !strings.Contains(fake.created[0].Run, "'--name' '_SCRIBE:3'") {
+						t.Fatalf("launch name=%#v", fake.created)
+					}
+					next, _, err := WorkbenchName(context.Background(), dir, io.Discard, &runtime)
+					if err != nil || next != "_SCRIBE:4" {
+						t.Fatalf("possibly born seat lost its name: next=%q err=%v", next, err)
+					}
+				},
 			)
-			seedClaudeChat(
-				t,
-				root,
-				"b2222222-2222-4222-8222-222222222222",
-				`{"type":"custom-title","customTitle":"_SCRIBE:2"}`,
-			)
-			runtime, err := config.RuntimeOrDefault(nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fake := &fakeOpenTmux{}
-			stubOpenExecutor(t, fake)
-			row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
-			var stderr, stdout bytes.Buffer
-			if detached {
-				_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
-			} else {
-				if code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, &runtime); code != 0 {
-					t.Fatalf("open=%d: %s", code, stderr.String())
-				}
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(fake.created) != 1 || !strings.Contains(fake.created[0].Run, "'--name' '_SCRIBE:3'") {
-				t.Fatalf("launch name=%#v", fake.created)
-			}
-		})
+		}
 	}
 }
 
@@ -537,7 +563,7 @@ func TestPrepareOpenWorkbenchNonClaudeName(t *testing.T) {
 	runtime.Paths.CacheDB = filepath.Join(blocker, "cache.db")
 	stubOpenExecutor(t, &fakeOpenTmux{})
 	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
-		_, request, err := prepareOpen(
+		_, request, _, err := prepareOpen(
 			context.Background(),
 			compose.Row{Kind: kind, CWD: dir, Workbench: dir},
 			1,

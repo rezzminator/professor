@@ -444,3 +444,24 @@ func TestCodexHookLedgerKeepsAHooksFileLinkedUnderAnotherName(t *testing.T) {
 		t.Fatalf("ledger=%v after a failed earlier home, want ownership of %s kept", ledger, physical)
 	}
 }
+
+func TestCodexHooksRefusesRetiredAccountOwnership(t *testing.T) {
+	home := t.TempDir()
+	old := filepath.Join(home, "retired", "hooks.json")
+	doc := settingsHookOwnershipDocument{
+		Version: 1,
+		Hooks: []settingsHookOwnershipRecord{
+			{Path: old, Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home), Count: 1},
+		},
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, settingsHookOwnershipPath(managedRootForHome(home)), string(raw))
+	e := resumeUnkillEngine(home, filepath.Join(home, "current"), "", ModeUninstall, &bytes.Buffer{})
+	err = e.wireCodexHooks()
+	if err == nil || !strings.Contains(err.Error(), old) {
+		t.Fatalf("retired account ownership error = %v", err)
+	}
+}

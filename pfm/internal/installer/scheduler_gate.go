@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/reminder"
@@ -35,11 +36,19 @@ func schedulerServiceRunning(ctx context.Context, runner CommandRunner, unit str
 	return unitStateRunning(state)
 }
 
-func CheckScheduler(ctx context.Context, runner CommandRunner) (unprobed string, err error) {
+func CheckScheduler(
+	ctx context.Context,
+	runner CommandRunner,
+	sleepers ...func(time.Duration),
+) (unprobed string, err error) {
 	if runner == nil {
 		runner = execCommandRunner{}
 	}
-	probed, err := schedulerGate(ctx, runner)
+	options := Options{Runner: runner, Stdout: io.Discard}
+	if len(sleepers) > 0 {
+		options.Sleep = sleepers[0]
+	}
+	probed, err := awaitSchedulerGate(ctx, options)
 	if !probed {
 		if schedulerIsLaunchd {
 			return launchGateUnprobedNote, err

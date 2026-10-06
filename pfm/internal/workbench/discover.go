@@ -17,6 +17,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
+const (
+	professorDirName   = ".professor"
+	workbenchesDirName = ".workbenches"
+)
+
 // WalkError identifies a directory discovery could not inspect.
 type WalkError struct {
 	Root, Path string
@@ -79,7 +84,7 @@ func eligibleBench(root, dir string) bool {
 	}
 	current := root
 	for _, segment := range segments {
-		if (strings.HasPrefix(segment, ".") && segment != ".professor") ||
+		if (strings.HasPrefix(segment, ".") && segment != professorDirName && segment != workbenchesDirName) ||
 			segment == "node_modules" || segment == "vendor" || segment == "venv" {
 			return false
 		}

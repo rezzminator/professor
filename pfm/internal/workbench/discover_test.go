@@ -16,9 +16,10 @@ import (
 func TestDiscoverEligibility(t *testing.T) {
 	root, scribe := benchFixture(t)
 	lab := filepath.Join(root, ".professor", "lab")
+	workbenchesLab := filepath.Join(root, ".workbenches", "lab")
 	for _, rel := range []string{
-		".professor/lab", "node_modules/x", ".git/x", ".worktrees/f/docs/scribe",
-		"a/b/c/d/e/f/g", "vendor/x", "venv/x", ".hidden/x", ".",
+		".professor/lab", ".workbenches/lab", "node_modules/x", ".git/x", ".worktrees/f/docs/scribe",
+		"a/b/c/d/e/f/g", "vendor/x", "venv/x", ".hidden/x", ".other/x", ".",
 	} {
 		seedBench(t, filepath.Join(root, rel), exampleManifest)
 	}
@@ -32,12 +33,17 @@ func TestDiscoverEligibility(t *testing.T) {
 	for _, bench := range got {
 		dirs = append(dirs, bench.Dir)
 	}
-	if len(walkErrors) != 0 || !reflect.DeepEqual(dirs, []string{lab, scribe}) {
-		t.Fatalf("Discover = %v, errors %v; want only %v", dirs, walkErrors, []string{lab, scribe})
+	if len(walkErrors) != 0 || !reflect.DeepEqual(dirs, []string{lab, workbenchesLab, scribe}) {
+		t.Fatalf("Discover = %v, errors %v; want only %v", dirs, walkErrors, []string{lab, workbenchesLab, scribe})
 	}
-	for _, rel := range []string{"node_modules/x", ".git/x", ".worktrees/f/docs/scribe", "a/b/c/d/e/f/g", "vendor/x", "venv/x", ".hidden/x", "linked"} {
+	for _, rel := range []string{"node_modules/x", ".git/x", ".worktrees/f/docs/scribe", "a/b/c/d/e/f/g", "vendor/x", "venv/x", ".hidden/x", ".other/x", "linked"} {
 		if bench, found, err := Nearest(filepath.Join(root, rel)); found || err != nil {
 			t.Errorf("Nearest(%s) = %#v, %t, %v; want ineligible", rel, bench, found, err)
+		}
+	}
+	for _, dir := range []string{lab, workbenchesLab} {
+		if bench, found, err := Nearest(dir); !found || err != nil || bench.Dir != dir {
+			t.Errorf("Nearest(%s) = %#v, %t, %v; want the bench at %s", dir, bench, found, err, dir)
 		}
 	}
 }

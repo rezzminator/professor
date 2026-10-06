@@ -153,6 +153,47 @@ test("--flight: the call cap comes from the agent type name — executor 150, la
   assert.match(f.md, /\| 85 \|.*\| ok\/150 \|/);
 });
 
+// The over-cap path needs runs past the caps. They are built in a temp copy of the fixtures,
+// never in fixtures/ itself: other tests count the shared transcripts' calls.
+function overCapFlight() {
+  const root = path.join(fs.mkdtempSync(path.join(TMP, "overcap-")), "projects");
+  fs.cpSync(CLAUDE_ROOT, root, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(TMP, "overcap-flight-"));
+  fs.cpSync(flightDir("flight"), dir, { recursive: true });
+  const sub = path.join(root, "-tmp-demo-proj", "sess-main", "subagents");
+  const extend = (agent, n, model, start) => {
+    const at = (i) => new Date(Date.parse(start) + i * 1000).toISOString();
+    const lines = [];
+    for (let i = 0; i < n; i++) {
+      lines.push({ type: "assistant", timestamp: at(i), cwd: "/tmp/demo-proj", requestId: `ocr-${agent}-${i}`, message: { id: `ocm-${agent}-${i}`, model,
+        content: [{ type: "tool_use", id: `oct-${agent}-${i}`, name: "Bash", input: { command: "true" } }],
+        usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 } } } });
+      lines.push({ type: "user", timestamp: at(i), cwd: "/tmp/demo-proj", message: { content: [{ type: "tool_result", tool_use_id: `oct-${agent}-${i}`, content: "done", is_error: false }] } });
+    }
+    fs.appendFileSync(path.join(sub, `agent-${agent}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  };
+  extend("b2", 70, "claude-sonnet-5", "2026-09-20T10:29:00.000Z"); // executor 1-d: 85 + 70 = 155, over its 150
+  extend("c3", 170, "claude-unobtanium-9", "2026-09-20T09:06:00.000Z"); // lander 1-e: 2 + 170 = 172, under its 200
+  return { root, dir };
+}
+
+test("--flight: an executor past 150 calls reads OVER 150, a lander at 172 reads ok/200, and the totals count one over", () => {
+  const { root, dir } = overCapFlight();
+  // only the copied root: the shared fixture root holds the same agent ids with their original calls
+  const md = path.join(dir, "metrics.md"), js = path.join(dir, "report.json");
+  const r = run(["--flight", dir, "--root", root, "--codex-root", CODEX_ROOT, "--metrics-out", md, "--out", js]);
+  assert.equal(r.code, 0, r.err);
+  const f = { md: fs.readFileSync(md, "utf8"), json: JSON.parse(fs.readFileSync(js, "utf8")) };
+  const d = rowOf(f.json, "1-d"), e = rowOf(f.json, "1-e");
+  assert.equal(d.calls, 155);
+  assert.equal(d.overCap, true, "155 calls by an executor is over the 150 cap");
+  assert.equal(e.calls, 172);
+  assert.equal(e.overCap, false, "172 calls by a lander is under the 200 cap");
+  assert.match(f.md, /\| 155 \|.*\| OVER 150 \|/);
+  assert.match(f.md, /\| 172 \|.*\| ok\/200 \|/);
+  assert.match(f.md, /over cap 1 of \d+/);
+});
+
 test("--flight: an unpriced model renders n/a with its tokens still counted, never $0", () => {
   const f = flight("flight");
   const e = rowOf(f.json, "1-e");

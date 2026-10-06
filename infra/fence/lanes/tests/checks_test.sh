@@ -163,7 +163,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.token-audit,templates.flight-index,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.token-audit,templates.flight-index,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -200,6 +200,11 @@ if gate_run templates >"$T/templates.out" &&
   graph_order templates; then
   ok 'templates graph runs its tests before static checks'
 else bad 'templates graph' "$(cat "$T/registered")"; fi
+unit_script_rows="$(printf 'templates.%s-tests checks_templates_unit_script %s\n' check-pfm check-pfm check-templates check-templates test-pfm test-pfm test-templates test-templates unit-path unit-path)"
+if [ "$(grep '^templates\.[a-z-]*-tests checks_templates_unit_script ' "$T/registered.args" | tail -5)" = "$unit_script_rows" ] &&
+  grep -Fxq 'templates.unit-path-tests checks_templates_unit_script unit-path' "$T/registered.args"; then
+  ok 'each unit-script suite is a gate step handed its own name: templates.unit-path-tests runs checks_templates_unit_script unit-path'
+else bad 'unit-script step registration' "$(grep 'checks_templates_unit_script' "$T/registered.args")"; fi
 
 # The pfm that pfm.unit prebuilds is kept in <run>/bin: check-map and the mirrors are handed it.
 if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then
@@ -642,6 +647,26 @@ done
 if [ "$(cat "$T/mirrors-args.out")" = "$(printf 'opencode-arg [%s]\nopencode-arg []' "$T/some-pfm")" ]; then
   ok 'checks_templates_mirrors passes its pfm argument to the opencode check, and none when called bare'
 else bad 'mirrors argument' "$(cat "$T/mirrors-args.out")"; fi
+
+# checks_templates_unit_script: one suite of .claude/scripts under its own label; a red suite is run's FAIL, so its status passes through.
+out="$( ( run() { printf 'run [%s]\n' "$*"; }; head_() { printf 'head [%s]\n' "$*"; }; REPO_ROOT=/repo; checks_templates_unit_script unit-path ) 2>&1 )"
+if [ "$out" = "$(printf 'head [templates — test-unit-path.sh self-test]\nrun [templates: test-unit-path.sh self-test -- bash /repo/scripts/test-unit-path.sh]')" ]; then
+  ok 'checks_templates_unit_script runs bash scripts/test-<name>.sh under the label "templates: test-<name>.sh self-test"'
+else bad 'checks_templates_unit_script run' "$out"; fi
+out="$( ( run() { return 3; }; head_() { :; }; REPO_ROOT=/repo; checks_templates_unit_script check-pfm; echo "rc=$?" ) 2>&1 )"
+if [ "$out" = 'rc=3' ]; then ok "checks_templates_unit_script returns run's status, a red suite is not swallowed"
+else bad 'checks_templates_unit_script red suite' "$out"; fi
+
+# checks_templates (CI's iso test templates): the five suites follow format-md, in order, before the opencode mirror check.
+out="$( (
+  for f in $(declare -F | awk '{print $3}' | grep '^checks_templates_'); do
+    eval "$f() { printf '%s%s\\n' '$f' \"\${*:+ \$*}\"; }"
+  done
+  checks_templates
+) 2>&1 | sed -n '/^checks_templates_format_md$/,/^checks_templates_mirrors_opencode$/p' | paste -sd, -)"
+if [ "$out" = 'checks_templates_format_md,checks_templates_unit_script check-pfm,checks_templates_unit_script check-templates,checks_templates_unit_script test-pfm,checks_templates_unit_script test-templates,checks_templates_unit_script unit-path,checks_templates_mirrors_opencode' ]; then
+  ok 'checks_templates calls the five unit-script suites in order, right after format-md'
+else bad 'checks_templates serial list' "$out"; fi
 
 # The RUN DIR line (dev.sh's EXIT trap, so it is the output's last line): the run dir this invocation
 # made, by its HOST path — inside the fence /pfm-timing is the bind of PFM_TEST_TIMING_HOST.

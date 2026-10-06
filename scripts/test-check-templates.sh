@@ -17,24 +17,21 @@ SUT="${1:-$HERE/.claude/scripts/check-templates.sh}"
 SHTEST_TAG=check-templates
 # shellcheck source=scripts/shtest.sh
 source "$HERE/scripts/shtest.sh"
+shtest_isolate_host
 
 PROJECT="ctroot$$"
 R="$T/.$PROJECT"
 REC="$T/rec"
-trap 'if [ "${BASHPID:-$$}" = "$SHTEST_PID" ]; then rm -rf -- "$T" "/tmp/$PROJECT"; fi' EXIT
+shtest_clean_also "/tmp/$PROJECT"
 # The EXIT trap keeps shtest.sh's PID guard: run by a forked shell it must leave the suite's scratch alone.
-trap -p EXIT > "$T/exit-trap"
-TRAPF="$T/exit-trap"; mkdir -p "$T/guard-probe"
-T="$T/guard-probe" PROJECT="guardprobe$$" SHTEST_PID="$SHTEST_PID" bash -c 'eval "$(cat "$1")"; exit 0' _ "$TRAPF"
-if [ -d "$T/guard-probe" ]; then ok "trap: a forked shell running the EXIT trap leaves the scratch alone"
-else bad "trap: a forked shell running the EXIT trap removed the scratch"; fi
+shtest_probe_trap_guard "/tmp/$PROJECT"
 USAGE='Name the files you changed.'
 INSTALL='FAIL install (templates has no installed dependencies — run: pfm install --yes && bash infra/fence/tools.sh)'
 
 # PATH = stubs, then symlinks to the real basics. The stub records name, arguments, cwd and
 # LEAK_TERMS, prints STUB_LINES numbered lines, and exits with the next code of $REC/rc.<name>.<first
 # arg> or rc.<name>.
-mkdir -p "$T/bin" "$T/real" "$T/home" "$T/toolsbin" "$R/.claude/scripts" "$R/infra/fence" "$R/scripts" "$R/docs" "$R/pfm/internal/a"
+mkdir -p "$T/bin" "$T/real" "$T/home" "$R/.claude/scripts" "$R/infra/fence" "$R/scripts" "$R/docs" "$R/pfm/internal/a"
 for c in bash env git dirname basename realpath mkdir date cat tail head mktemp rm tr grep sed awk sort comm xargs wc seq cut uniq tee sh; do
   ln -s "$(command -v "$c")" "$T/real/$c"
 done
@@ -53,11 +50,11 @@ exit 0
 STUB
 chmod +x "$T/stub.sh"
 for t in node python3 jq rumdl; do cp "$T/stub.sh" "$T/bin/$t"; done
-cp "$T/stub.sh" "$T/toolsbin/jscpd"
 for f in scripts/clone-check.sh scripts/leak-check.sh scripts/description-check.sh infra/check-self-hosted-manifest.sh; do
   mkdir -p "$R/$(dirname "$f")"; cp "$T/stub.sh" "$R/$f"
 done
-printf '#!/usr/bin/env bash\ncase "$1" in --print-bin) echo "$TOOLSBIN" ;; esac\n' > "$R/infra/fence/tools.sh"
+# clone-check's --resolve answers from STUB_RESOLVE_RC, unrecorded, so the rc queues stay the clone check's.
+sed -i '1a [ "${1:-}" != --resolve ] || exit "${STUB_RESOLVE_RC:-0}"' "$R/scripts/clone-check.sh"
 # The catalogue stub exercises the shims: head_, ok, info, run, repo_git, fail_step, TMP_BASE, REPO_ROOT.
 cat > "$R/infra/fence/checks.sh" <<'STUB'
 checks_templates_placeholders() {
@@ -84,7 +81,7 @@ R="$(cd "$R" && pwd -P)"
 
 reset() { rm -rf "$REC"; mkdir -p "$REC"; }
 rcseq() { local key="$1"; shift; printf '%s\n' "$@" > "$REC/rc.$key"; }
-go() { OUT="$(cd "${CWD:-$R}" && env -i PATH="$T/bin:$T/real" HOME="$T/home" TOOLSBIN="$T/toolsbin" STUB_REC="$REC" ${TEST_LEAK_TERMS:+LEAK_TERMS="$TEST_LEAK_TERMS"} \
+go() { OUT="$(cd "${CWD:-$R}" && env -i PATH="$T/bin:$T/real" HOME="$T/home" STUB_REC="$REC" ${STUB_RESOLVE_RC:+STUB_RESOLVE_RC="$STUB_RESOLVE_RC"} ${TEST_LEAK_TERMS:+LEAK_TERMS="$TEST_LEAK_TERMS"} \
   ${STUB_PH:+STUB_PH=1} ${STUB_SP_CRASH:+STUB_SP_CRASH=1} ${STUB_SP_RC:+STUB_SP_RC="$STUB_SP_RC"} ${STUB_LINES:+STUB_LINES="$STUB_LINES"} \
   bash "$R/.claude/scripts/check-templates.sh" "$@" 2>&1)"; RC=$?; }
 want() { printf '%s' "$1"; shift; [ "$#" = 0 ] || printf ' %q' "$@"; }
@@ -204,14 +201,11 @@ chk "install: rumdl on neither PATH nor the uv tool dir" bash -c '[ "$1" = 1 ] &
 mkdir -p "$T/home/.local/share/uv/tools/rumdl/bin"; cp "$T/stub.sh" "$T/home/.local/share/uv/tools/rumdl/bin/rumdl"
 reset; go docs/a.md
 chk "install: rumdl found in the uv tool dir passes and is the one run" bash -c '[ "$1" = 0 ] && grep -qxF "rumdl check --output-format concise docs/a.md" "$2/calls"' "$OUT" "$RC" "$REC"
-rm "$T/toolsbin/jscpd"
+reset; STUB_RESOLVE_RC=2 go docs/a.md
+chk "install: clone-check cannot resolve the pinned jscpd" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
 reset; go docs/a.md
-chk "install: jscpd absent from the tools dir and PATH" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
-cp "$T/stub.sh" "$T/bin/jscpd"
-reset; go docs/a.md
-chk "install: jscpd found on PATH passes" bash -c '[ "$1" = 0 ]' "$OUT" "$RC"
-rm "$T/bin/jscpd"
-reset; go nope.md
+chk "install: clone-check resolves the pinned jscpd, install passes" bash -c '[ "$1" = 0 ]' "$OUT" "$RC"
+reset; STUB_RESOLVE_RC=2 go nope.md
 chk "install: no FAIL path line beside the install line" bash -c '[ "$0" = "$1" ]' "$OUT" "$INSTALL"
 
 shtest_end

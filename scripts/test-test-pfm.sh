@@ -17,6 +17,7 @@ SUT="${1:-$HERE/.claude/scripts/test-pfm.sh}"
 SHTEST_TAG=test-test-pfm
 # shellcheck source=scripts/shtest.sh
 source "$HERE/scripts/shtest.sh"
+shtest_isolate_host
 
 NAME="tpfm$$"
 # shellcheck source=scripts/stub-root.sh
@@ -123,8 +124,9 @@ run "$R" docs/only.md
 expect "a root file is outside pfm, exit 2 naming it" 2 "test-pfm.sh: docs/only.md is outside pfm"
 run "$R" docs/x.md
 expect "a spelling that resolves to two files exits 2 naming both" 2 "test-pfm.sh: docs/x.md resolves to two files: docs/x.md and pfm/docs/x.md"
-run "$R" /etc/hostname
-expect "an absolute path outside the repository is outside pfm, exit 2" 2 "test-pfm.sh: /etc/hostname is outside pfm"
+: >"$T/outside.txt"
+run "$R" "$T/outside.txt"
+expect "an absolute path outside the repository is outside pfm, exit 2" 2 "test-pfm.sh: $T/outside.txt is outside pfm"
 run "$R" pfm/internal/a/nope_test.go
 expect "a path that is no file exits 2 naming it" 2 "test-pfm.sh: pfm/internal/a/nope_test.go is no such file in pfm"
 no_dev "a path that is no file never reaches dev.sh"

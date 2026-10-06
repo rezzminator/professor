@@ -11,7 +11,7 @@ ignore_paths = [
   "pfm/internal/obs/recover_test.go",
   "pfm/internal/obs/scrub_test.go",
   # HARDCODED_SECRET's generic token and api-key assignment rules matching
-  # environment-variable NAMES, not values: lines 44-45 name
+  # environment-variable NAMES, not values: its constants name
   # ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY.
   "pfm/internal/claudelaunch/knobs.go",
 ]

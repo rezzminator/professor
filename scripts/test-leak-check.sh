@@ -15,6 +15,8 @@ cat > "$T/bin/git" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$*" == 'rev-parse --show-toplevel' ]]; then
   printf '%s\n' "$TEST_REPO"
+elif [[ "${1:-}" == 'diff' ]]; then
+  cat "$GIT_DIFF_FILE"
 else
   exit 3
 fi
@@ -25,21 +27,54 @@ for arg in "$@"; do
   if [[ -n "${GREP_FAIL_FILE:-}" && "$arg" == "$GREP_FAIL_FILE" ]]; then
     exit 2
   fi
+  if [[ -n "${GREP_FAIL_SUFFIX:-}" && "$arg" == *"$GREP_FAIL_SUFFIX" ]]; then
+    exit 2
+  fi
 done
+# GREP_NOFOLD_LOCALE names a caller locale whose -i misses a case pair, as GNU grep 3.11 does on a real host:
+# GREP_NOFOLD_SCOPE=ascii stands for tr_TR.UTF-8 (I and i are no pair), nonascii for zh_CN.GB18030 (a two-byte
+# letter reads as one character, but É and é are no pair). Under it -i is dropped from every grep whose
+# arguments are all ASCII (ascii) or hold a non-ASCII byte (nonascii).
+if [[ -n "${GREP_NOFOLD_LOCALE:-}" && "${LC_ALL:-}" == "$GREP_NOFOLD_LOCALE" ]]; then
+  nonascii=0
+  for arg in "$@"; do
+    if printf '%s' "$arg" | LC_ALL=C /usr/bin/grep -q '[^ -~]'; then nonascii=1; fi
+  done
+  if [[ "$GREP_NOFOLD_SCOPE" == ascii && "$nonascii" == 0 || "$GREP_NOFOLD_SCOPE" == nonascii && "$nonascii" == 1 ]]; then
+    args=()
+    for arg in "$@"; do
+      [[ "$arg" =~ ^-[A-Za-z]+$ ]] && arg="${arg//i/}"
+      [[ "$arg" == - ]] || args+=("$arg")
+    done
+    set -- "${args[@]}"
+  fi
+fi
+if [[ -n "${GREP_FORCE_C:-}" ]]; then
+  LC_ALL=C exec /usr/bin/grep "$@"
+fi
 exec /usr/bin/grep "$@"
 EOF
 chmod +x "$T/bin/git" "$T/bin/grep"
 
-run_check() {
-  local fail_file="${GREP_FAIL_FILE:-}"
+# leak_run <leak-check args>: LC_ALL=C.UTF-8 is the fence image's own locale (LEAK_LC_ALL names another
+# caller locale), and stdin is /dev/null so a grep that reads a file name as an option fails instead of hanging.
+# TERMS names a second terms file; GREP_FAIL_FILE and GREP_FAIL_SUFFIX drive the grep stub, and GREP_FORCE_C
+# makes the stub run every grep under LC_ALL=C (no UTF-8 locale reaches it); GREP_NOFOLD_LOCALE and
+# GREP_NOFOLD_SCOPE make it drop -i under one caller locale.
+leak_run() {
+  local terms="${TERMS:-$T/terms}"
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE \
-    TEST_REPO="$T/repo" GREP_FAIL_FILE="$fail_file" \
-    LEAK_TERMS="$T/terms" PATH="$T/bin:$PATH" \
-    bash "$ROOT/scripts/leak-check.sh" --files "$@" > "$T/out" 2> "$T/err"
+    TEST_REPO="$T/repo" GREP_FAIL_FILE="${GREP_FAIL_FILE:-}" GREP_FAIL_SUFFIX="${GREP_FAIL_SUFFIX:-}" \
+    GREP_FORCE_C="${GREP_FORCE_C:-}" GREP_NOFOLD_LOCALE="${GREP_NOFOLD_LOCALE:-}" GREP_NOFOLD_SCOPE="${GREP_NOFOLD_SCOPE:-}" \
+    GIT_DIFF_FILE="$T/diff" LEAK_TERMS="$terms" LC_ALL="${LEAK_LC_ALL:-C.UTF-8}" \
+    PATH="$T/bin:$PATH" \
+    bash "$ROOT/scripts/leak-check.sh" "$@" > "$T/out" 2> "$T/err" < /dev/null
   rc=$?
   out="$(cat "$T/out")"
   err="$(cat "$T/err")"
 }
+run_check() { leak_run --files "$@"; }
+run_range() { leak_run --range A B; }
 
 printf 'ordinary fixture 1\n' > "$T/repo/clean-1.txt"
 
@@ -113,6 +148,241 @@ if [[ "$rc" -eq 1 && "$out" == 'LEAK odd:name.txt: syntheticsecret: detail' ]]; 
   ok 'a colon in the file name survives the hit parser'
 else
   bad 'a colon in the file name survives the hit parser' "rc=$rc; out=$out; err=$err"
+fi
+
+# ---- binary and undecodable files are scanned as text -------------------------
+# The suite is itself leak-scanned, so the address and the home path are assembled here.
+printf 'caf\351 syntheticsecret\n' > "$T/repo/latin1.txt"
+run_check latin1.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK latin1.txt: caf"$'\xe9'" syntheticsecret" ]]; then
+  ok 'an undecodable file is scanned and its hit keeps the raw byte'
+else
+  bad 'an undecodable file is scanned and its hit keeps the raw byte' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'head\0syntheticsecret\n' > "$T/repo/nul.bin"
+run_check nul.bin
+if [[ "$rc" -eq 1 && "$out" == 'LEAK nul.bin: '*syntheticsecret* && "$out" != *$'\n'* ]]; then
+  ok 'a NUL-byte file is scanned and reports one hit line'
+else
+  bad 'a NUL-byte file is scanned and reports one hit line' "rc=$rc; out=$out; err=$err"
+fi
+
+run_check nul.bin hit.txt
+first="${out%%$'\n'*}"
+second="${out#*$'\n'}"
+if [[ "$rc" -eq 1 && "$first" == 'LEAK nul.bin: '* && "$second" == 'LEAK hit.txt: syntheticsecret' ]]; then
+  ok 'a binary file beside a text hit keeps both hit lines paired with their files'
+else
+  bad 'a binary file beside a text hit keeps both hit lines paired with their files' "rc=$rc; out=$out; err=$err"
+fi
+
+gm_addr="$(printf 'someone@%s.com' gmail)"
+printf '%s\n' "$gm_addr" > "$T/repo/gm.txt"
+run_check gm.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK gm.txt: $gm_addr" && "$err" == *'+ 4 structural pattern(s)'* ]]; then
+  ok 'a personal mailbox is a structural hit'
+else
+  bad 'a personal mailbox is a structural hit' "rc=$rc; out=$out; err=$err"
+fi
+
+# ---- a terms file the gate cannot compile is refused in both modes ------------
+printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+syntheticsecret\n' > "$T/diff"
+printf 'syntheticsecret\n!ignore-token bad#token\n' > "$T/terms-token"
+token_line="leak-check: FAILED — unusable ignore token in $T/terms-token: bad#token (sed -E rejects it; a token is a lowercase ERE without '#')"
+TERMS="$T/terms-token" run_check hit.txt
+if [[ "$rc" -eq 1 && -z "$out" && "$err" == *"$token_line"* ]]; then
+  ok 'an unusable ignore token refuses a --files scan'
+else
+  bad 'an unusable ignore token refuses a --files scan' "rc=$rc; out=$out; err=$err"
+fi
+
+TERMS="$T/terms-token" run_range
+if [[ "$rc" -eq 1 && -z "$out" && "$err" == *"$token_line"* ]]; then
+  ok 'an unusable ignore token refuses a --range scan'
+else
+  bad 'an unusable ignore token refuses a --range scan' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'syntheticsecret\n!ignore-token bad#token\n!ignore-path fixtures/ignore/*\n' > "$T/terms-order"
+order_line="leak-check: FAILED — unusable ignore token in $T/terms-order: bad#token (sed -E rejects it; a token is a lowercase ERE without '#')"
+TERMS="$T/terms-order" run_check hit.txt
+if [[ "$rc" -eq 1 && "$err" == 'leak-check: 1 configured path ignore(s) — NOT scanned: fixtures/ignore/*'$'\n'*"$order_line"* ]]; then
+  ok 'the configured path ignore notice prints before a refusal'
+else
+  bad 'the configured path ignore notice prints before a refusal' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'syntheticsecret\nbad(\n' > "$T/terms-bad"
+terms_line="leak-check: FAILED — the terms in $T/terms-bad do not compile as one extended regex (grep rc=2); refusing to scan"
+TERMS="$T/terms-bad" run_range
+if [[ "$rc" -eq 1 && -z "$out" && "$err" == *"$terms_line"* ]]; then
+  ok 'an uncompilable term refuses a --range scan'
+else
+  bad 'an uncompilable term refuses a --range scan' "rc=$rc; out=$out; err=$err"
+fi
+
+TERMS="$T/terms-bad" run_check hit.txt
+if [[ "$rc" -eq 1 && -z "$out" && "$err" == *"$terms_line"* ]]; then
+  ok 'an uncompilable term refuses a --files scan without a per-file error'
+else
+  bad 'an uncompilable term refuses a --files scan without a per-file error' "rc=$rc; out=$out; err=$err"
+fi
+
+# ---- every judging failure names its source file ------------------------------
+judge_line() { printf "SCAN-ERROR %s: leak-check could NOT judge this file's matched lines (grep rc=2) — treated as FAILURE, never as clean" "$1"; }
+GREP_FAIL_SUFFIX=.normalized run_check hit.txt hit-two.txt
+if [[ "$rc" -eq 1 && "$out" == "$(judge_line hit.txt)"$'\n'"$(judge_line hit-two.txt)" ]]; then
+  ok 'a judging failure names each matched source file, never a temp path'
+else
+  bad 'a judging failure names each matched source file, never a temp path' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'syntheticsecret one\nsyntheticsecret two\n' > "$T/repo/multi.txt"
+GREP_FAIL_SUFFIX=.normalized run_check multi.txt
+if [[ "$rc" -eq 1 && "$out" == "$(judge_line multi.txt)" ]]; then
+  ok 'a source file with several matched lines is named on one judging error'
+else
+  bad 'a source file with several matched lines is named on one judging error' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'syntheticsecret\n' > "$T/repo/-i"
+GREP_FAIL_FILE=bad.txt run_check bad.txt -i
+if [[ "$rc" -eq 1 && "$out" == $'SCAN-ERROR bad.txt: leak-check could NOT read this file (grep rc=2) — treated as FAILURE, never as clean\nLEAK -i: syntheticsecret' ]]; then
+  ok 'an option-shaped file name is read as a file by the per-file fallback'
+else
+  bad 'an option-shaped file name is read as a file by the per-file fallback' "rc=$rc; out=$out; err=$err"
+fi
+
+# ---- a term matches multibyte letters under a UTF-8 locale ---------------------
+# Every fixture is written as octal escapes so this suite stays ASCII: \303\251 is the lowercase
+# e-acute, \303\211 its capital, \303\266 the lowercase o-umlaut, \303\226 the capital one.
+printf 'syntheticsecret\njos\303\251\n\303\251t\303\251\n' > "$T/terms-utf8"
+
+printf 'JOS\303\211 here\n' > "$T/repo/upper.txt"
+upper_text="$(printf 'JOS\303\211 here')"
+TERMS="$T/terms-utf8" run_check upper.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK upper.txt: $upper_text" ]]; then
+  ok 'an uppercase form of a non-ASCII term is a --files hit'
+else
+  bad 'an uppercase form of a non-ASCII term is a --files hit' "rc=$rc; out=$out; err=$err"
+fi
+
+printf '\303\211T\303\251\n' > "$T/repo/mixed.txt"
+mixed_text="$(printf '\303\211T\303\251')"
+TERMS="$T/terms-utf8" run_check mixed.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK mixed.txt: $mixed_text" ]]; then
+  ok 'a form that mixes case per letter is a --files hit'
+else
+  bad 'a form that mixes case per letter is a --files hit' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+JOS\303\211 here\n' > "$T/diff"
+TERMS="$T/terms-utf8" run_range
+if [[ "$rc" -eq 1 && "$out" == "LEAK r.txt: $upper_text" ]]; then
+  ok 'an uppercase form of a non-ASCII term is a --range hit'
+else
+  bad 'an uppercase form of a non-ASCII term is a --range hit' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'syntheticsecret\nkn.del\n' > "$T/terms-dot"
+printf 'syntheticsecret\nkn[\303\266o]del\n' > "$T/terms-bracket"
+printf 'Kn\303\226del here\n' > "$T/repo/kn.txt"
+kn_text="$(printf 'Kn\303\226del here')"
+
+TERMS="$T/terms-dot" run_check kn.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK kn.txt: $kn_text" ]]; then
+  ok 'a dot in a term matches one multibyte letter'
+else
+  bad 'a dot in a term matches one multibyte letter' "rc=$rc; out=$out; err=$err"
+fi
+
+TERMS="$T/terms-bracket" run_check kn.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK kn.txt: $kn_text" ]]; then
+  ok 'a bracket with a non-ASCII letter matches its other case in --files'
+else
+  bad 'a bracket with a non-ASCII letter matches its other case in --files' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+Kn\303\226del here\n' > "$T/diff"
+TERMS="$T/terms-bracket" run_range
+if [[ "$rc" -eq 1 && "$out" == "LEAK r.txt: $kn_text" ]]; then
+  ok 'a bracket with a non-ASCII letter matches its other case in --range'
+else
+  bad 'a bracket with a non-ASCII letter matches its other case in --range' "rc=$rc; out=$out; err=$err"
+fi
+
+LEAK_LC_ALL=C TERMS="$T/terms-dot" run_check kn.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK kn.txt: $kn_text" ]]; then
+  ok 'a caller under the C locale still matches multibyte letters'
+else
+  bad 'a caller under the C locale still matches multibyte letters' "rc=$rc; out=$out; err=$err"
+fi
+
+GREP_FORCE_C=1 run_check hit.txt
+if [[ "$rc" -eq 1 && -z "$out" && "$err" == *"leak-check: FAILED — no UTF-8 locale for grep (tried: C.UTF-8 UTF-8); under a byte locale a term's '.' or bracket misses a multibyte letter; refusing to scan"* ]]; then
+  ok 'no UTF-8 locale for grep refuses the scan'
+else
+  bad 'no UTF-8 locale for grep refuses the scan' "rc=$rc; out=$out; err=$err"
+fi
+
+# A caller's UTF-8-reading locale whose -i misses a case pair is passed over for C.UTF-8 (the stub's C.utf8
+# stands for it): tr_TR.UTF-8 folds no ASCII I/i, zh_CN.GB18030 reads a two-byte letter as one character
+# but folds no É/é.
+printf 'SYNTHETICSECRET here\n' > "$T/repo/upper-ascii.txt"
+GREP_NOFOLD_LOCALE=C.utf8 GREP_NOFOLD_SCOPE=ascii LEAK_LC_ALL=C.utf8 run_check upper-ascii.txt
+if [[ "$rc" -eq 1 && "$out" == 'LEAK upper-ascii.txt: SYNTHETICSECRET here' ]]; then
+  ok 'a caller locale whose -i folds no ASCII I/i is passed over and an uppercase ASCII term still hits'
+else
+  bad 'a caller locale whose -i folds no ASCII I/i is passed over and an uppercase ASCII term still hits' "rc=$rc; out=$out; err=$err"
+fi
+GREP_NOFOLD_LOCALE=C.utf8 GREP_NOFOLD_SCOPE=nonascii LEAK_LC_ALL=C.utf8 TERMS="$T/terms-utf8" run_check upper.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK upper.txt: $upper_text" ]]; then
+  ok 'a caller locale whose -i folds no non-ASCII letter is passed over and an uppercase non-ASCII term still hits'
+else
+  bad 'a caller locale whose -i folds no non-ASCII letter is passed over and an uppercase non-ASCII term still hits' "rc=$rc; out=$out; err=$err"
+fi
+
+printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+caf\351 syntheticsecret\n' > "$T/diff"
+run_range
+if [[ "$rc" -eq 1 && "$out" == "LEAK r.txt: caf"$'\xe9'" syntheticsecret" ]]; then
+  ok 'an undecodable line in a --range diff is scanned and its hit reported'
+else
+  bad 'an undecodable line in a --range diff is scanned and its hit reported' "rc=$rc; out=$out; err=$err"
+fi
+
+# ---- a pushed binary file is scanned as text ----------------------------------
+# A real repository, as the pre-push hook sees it: git diffs a NUL-byte file as
+# "Binary files … differ" unless told to treat it as text, and that line holds no hit.
+pushed="$T/pushed"
+shtest_isolate_host
+pgit() { git -C "$pushed" -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
+git init -q "$pushed" && printf 'ordinary\n' > "$pushed/base.txt" && pgit add base.txt && pgit commit -q -m base
+printf 'head\0syntheticsecret\n' > "$pushed/blob.bin"
+pgit add blob.bin && pgit commit -q -m blob
+# pushed_range: leak-check --range over the pushed repository's last commit, as the pre-push hook runs it.
+pushed_range() {
+  out="$(PFM_DEV_REPO_GIT_DIR="$pushed/.git" PFM_DEV_REPO_WORK_TREE="$pushed" LEAK_TERMS="$T/terms" LC_ALL=C.UTF-8 \
+    bash "$ROOT/scripts/leak-check.sh" --range HEAD~1 HEAD 2> "$T/err" < /dev/null)"
+  rc=$?
+  err="$(cat "$T/err")"
+}
+pushed_range
+if [[ "$rc" -eq 1 && "$out" == 'LEAK blob.bin: '*syntheticsecret* && "$out" != *$'\n'* ]]; then
+  ok 'a NUL-byte file in a pushed range is scanned and its hit reported'
+else
+  bad 'a NUL-byte file in a pushed range is scanned and its hit reported' "rc=$rc; out=$out; err=$err"
+fi
+
+# An added line that starts with "++" reaches the -U0 diff as "+++ …", the shape of a file header. Inside a
+# hunk it is content: it is judged, and the lines after it stay credited to their own file.
+printf '++ syntheticsecret\nordinary\n' > "$pushed/plus.txt"
+pgit add plus.txt && pgit commit -q -m plus
+pushed_range
+if [[ "$rc" -eq 1 && "$out" == 'LEAK plus.txt: ++ syntheticsecret' ]]; then
+  ok 'an added line starting with "++" in a pushed range is judged as content, never read as a file header'
+else
+  bad 'an added line starting with "++" in a pushed range is judged as content, never read as a file header' "rc=$rc; out=$out; err=$err"
 fi
 
 shtest_end

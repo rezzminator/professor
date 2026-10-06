@@ -19,11 +19,12 @@ SUT="${1:-$HERE/.claude/scripts/test-templates.sh}"
 SHTEST_TAG=test-templates
 # shellcheck source=scripts/shtest.sh
 source "$HERE/scripts/shtest.sh"
+shtest_isolate_host
 
 PROJECT="ttroot$$"
 R="$T/.$PROJECT"
 REC="$T/rec"
-trap 'if [ "${BASHPID:-$$}" = "$SHTEST_PID" ]; then rm -rf -- "$T" "/tmp/$PROJECT"; fi' EXIT
+shtest_clean_also "/tmp/$PROJECT"
 USAGE='usage: test-templates.sh ALL | <test file>[::<test id>]...'
 GREEN1='A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.'
 GREEN2='Green. When your work is done, run .claude/scripts/check-templates.sh <your task'"'"'s files> once, then write your return.'
@@ -80,11 +81,7 @@ go() { OUT="$(cd "${CWD:-$R}" && PATH="$T/bin:$PATH" STUB_REC="$REC" bash "$R/.c
 want() { printf '%s' "$1"; shift; [ "$#" = 0 ] || printf ' %q' "$@"; }
 chk() { local n="$1"; shift; if "$@"; then ok "$n"; else bad "$n" "rc=$RC" "$OUT"; fi; }
 # The EXIT trap keeps shtest.sh's PID guard: run by a forked shell it must leave the suite's scratch alone.
-trap -p EXIT > "$T/exit-trap"
-TRAPF="$T/exit-trap"; mkdir -p "$T/guard-probe"
-T="$T/guard-probe" PROJECT="guardprobe$$" SHTEST_PID="$SHTEST_PID" bash -c 'eval "$(cat "$1")"; exit 0' _ "$TRAPF"
-if [ -d "$T/guard-probe" ]; then ok "trap: a forked shell running the EXIT trap leaves the scratch alone"
-else bad "trap: a forked shell running the EXIT trap removed the scratch"; fi
+shtest_probe_trap_guard "/tmp/$PROJECT"
 no_runner() { [ ! -e "$REC/dev.argv" ]; }
 refused() { [ "$RC" = 2 ] && grep -qxF -- "$1" <<<"$OUT" && no_runner; }
 ran() { [ "$RC" = "$1" ] && grep -qxF -- "$2" "$REC/calls"; }

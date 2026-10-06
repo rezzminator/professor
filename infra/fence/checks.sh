@@ -331,6 +331,11 @@ checks_templates_format_md() {
 
 }
 
+checks_templates_unit_script() { # <name>: scripts/test-<name>.sh, the self-test of .claude/scripts/<name>.sh, on its default script
+  head_ "templates — test-$1.sh self-test"
+  run "templates: test-$1.sh self-test" -- bash "$REPO_ROOT/scripts/test-$1.sh"
+}
+
 checks_templates_mirrors_opencode() { # optional: an executable pfm already built from this tree
   local prebuilt="${1:-}" build_opencode
   head_ "templates — native opencode mirror"
@@ -428,6 +433,11 @@ checks_templates() {
   checks_templates_pfm_guard
   checks_templates_dev_report
   checks_templates_format_md
+  checks_templates_unit_script check-pfm
+  checks_templates_unit_script check-templates
+  checks_templates_unit_script test-pfm
+  checks_templates_unit_script test-templates
+  checks_templates_unit_script unit-path
   checks_templates_mirrors_opencode
   checks_templates_opencode_writer_tests
   checks_templates_skill_tests
@@ -866,6 +876,11 @@ gate_run() { # pfm, templates, or all
     steps_add templates.pfm-guard checks_templates_pfm_guard
     steps_add templates.dev-report checks_templates_dev_report
     steps_add templates.format-md checks_templates_format_md
+    steps_add templates.check-pfm-tests checks_templates_unit_script check-pfm
+    steps_add templates.check-templates-tests checks_templates_unit_script check-templates
+    steps_add templates.test-pfm-tests checks_templates_unit_script test-pfm
+    steps_add templates.test-templates-tests checks_templates_unit_script test-templates
+    steps_add templates.unit-path-tests checks_templates_unit_script unit-path
     steps_add templates.opencode-writer-tests checks_templates_opencode_writer_tests
     steps_add templates.skill-tests checks_templates_skill_tests
     steps_add templates.opencode-writer-refs checks_templates_opencode_writer_refs

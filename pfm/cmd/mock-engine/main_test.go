@@ -70,6 +70,42 @@ func TestBuiltBinaryAnswersByTheNameItIsInstalledUnder(t *testing.T) {
 	}
 }
 
+// TestRunMockAnswersInProcess drives the exec shell's body in this process, the
+// door the built-binary test reaches only through a child built without -cover.
+func TestRunMockAnswersInProcess(t *testing.T) {
+	scenario := filepath.Join(t.TempDir(), "scenario.json")
+	if err := (mockengine.Scenario{Version: "9.9.9 (Fixture)"}).Write(scenario); err != nil {
+		t.Fatal(err)
+	}
+	env := func(key string) string {
+		if key == mockengine.EnvScenario {
+			return scenario
+		}
+		return ""
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runMock("claude", []string{"--version"}, strings.NewReader(""), &stdout, &stderr, env)
+	if code != 0 || stdout.String() != "9.9.9 (Fixture)\n" || stderr.Len() != 0 {
+		t.Fatalf(
+			"claude --version: code=%d stdout=%q stderr=%q, want 0 and the version line",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+
+	// An argv[0] that names no engine is refused with the usage code, never
+	// silently one engine.
+	stdout.Reset()
+	stderr.Reset()
+	code = runMock("2.1.238", []string{"--version"}, strings.NewReader(""), &stdout, &stderr, env)
+	if code != mockengine.ExitUsage || stdout.Len() != 0 || !strings.Contains(stderr.String(), "2.1.238") {
+		t.Fatalf("stray name: code=%d stdout=%q stderr=%q, want exit %d naming the basename",
+			code, stdout.String(), stderr.String(), mockengine.ExitUsage)
+	}
+}
+
 func TestHangupReleasesTheJailSeat(t *testing.T) {
 	root := t.TempDir()
 	binary, err := testjail.MockEngineBinary("../..", root)

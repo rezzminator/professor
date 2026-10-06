@@ -19,6 +19,11 @@ set -euo pipefail
 #   - no ROOT given: NO-ROOT, exit 2, nothing verified.
 #   - no scoped project given: NO-ROSTER, exit 2, nothing verified.
 #   - git/jq/sort missing: TOOLCHAIN-MISSING <tool>, exit 1.
+#   - sha256sum and shasum both missing: `TOOLCHAIN-MISSING sha256sum or shasum`, exit 1.
+#   - `--write` output not valid JSON: `--write produced unreadable JSON (not applied)`,
+#     exit 1, manifest untouched.
+#   - `answers.roster` unreadable by jq: `cannot enumerate answers.roster`, a fail
+#     line, exit 1.
 #   - repo-root/manifest/VERSION files absent: `missing <path>`, exit 1.
 #   - manifest is not valid JSON: `unreadable JSON: <path>`, exit 1.
 #   - a tracked, installed-surface file that cannot be hashed (not a regular

@@ -62,4 +62,12 @@ STUB_CHECK_RC=1 STUB_CHECK_OUT='src/b.md:1:1: [MD041] x' hook "$R/src/b.md"
 if [[ $RC == 0 && -z $ERR ]]; then ok "a file outside the owned paths is left alone"
 else bad "a file outside the owned paths" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
+# no rumdl on the hook's PATH: one stderr line naming the file and the fix, exit 0 — never a silent skip
+mkdir -p "$T/nobin"
+for c in bash jq git cat dirname; do ln -s "$(command -v "$c")" "$T/nobin/$c"; done
+PATH="$T/nobin" hook "$R/docs/dev/a.md"
+want='format-md: rumdl not found — docs/dev/a.md left unformatted (`pfm install` provisions it)'
+if [[ $RC == 0 && $ERR == "$want" ]]; then ok "a missing rumdl exits 0 with the one stderr line naming the file"
+else bad "a missing rumdl" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
+
 shtest_end

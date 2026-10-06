@@ -17,6 +17,7 @@ SUT="${1:-$HERE/.claude/scripts/check-pfm.sh}"
 SHTEST_TAG=test-check-pfm
 # shellcheck source=scripts/shtest.sh
 source "$HERE/scripts/shtest.sh"
+shtest_isolate_host
 
 NAME="cpfm$$"
 # shellcheck source=scripts/stub-root.sh
@@ -121,10 +122,15 @@ if grep -q '^log: /tmp/'"$NAME"'/check-pfm/[0-9]\{8\}T[0-9]\{6\}Z-[0-9]\+\.log$'
 # --- the formatter: the pinned one tools.sh names, else PATH ------------------------------------------------
 mkdir -p "$R/infra/fence" "$R/pinbin"
 # shellcheck disable=SC2016 # the fixtures' bodies are literal: $PINBIN, $* and $REC expand when they run
-printf '#!/usr/bin/env bash\necho "$PINBIN"\n' >"$R/infra/fence/tools.sh"
+printf '#!/usr/bin/env bash\ncase "$1" in --print-bin) echo "$PINBIN" ;; *) echo "tools.sh stub: refused${*:+ $*}" >&2; exit 3 ;; esac\n' >"$R/infra/fence/tools.sh"
 # shellcheck disable=SC2016 # as above
 printf '#!/usr/bin/env bash\necho "pinned-lint $*" >>"$REC"\n' >"$R/pinbin/golangci-lint"
 chmod +x "$R/pinbin/golangci-lint"
+# the tools.sh stub names the pinned bin for --print-bin and refuses any other call: the suite never runs the installer
+OUT="$(PINBIN="$R/pinbin" bash "$R/infra/fence/tools.sh" --print-bin 2>&1)" && RC=0 || RC=$?
+if [ "$RC" = 0 ] && [ "$OUT" = "$R/pinbin" ]; then ok "the tools.sh stub prints \$PINBIN for --print-bin, exit 0"; else bad "the tools.sh stub prints \$PINBIN for --print-bin, exit 0" "rc=$RC" "$OUT"; fi
+OUT="$(PINBIN="$R/pinbin" bash "$R/infra/fence/tools.sh" 2>&1 >/dev/null)" && RC=0 || RC=$?
+if [ "$RC" = 3 ] && [ "$OUT" = "tools.sh stub: refused" ]; then ok "the tools.sh stub refuses the installer: stderr 'tools.sh stub: refused', exit 3"; else bad "the tools.sh stub refuses the installer: stderr 'tools.sh stub: refused', exit 3" "rc=$RC" "$OUT"; fi
 reset; : >"$REC"
 OUT="$(cd "$R" && env PFM_DEV_FENCE=1 PINBIN="$R/pinbin" PATH="$BIN" REC="$REC" RULES="$RULES" STUBLIB="$STUBLIB" "$R/.claude/scripts/check-pfm.sh" "$A" 2>&1)" && RC=0 || RC=$?
 if grep -qxF 'pinned-lint fmt --diff internal/a/a.go' "$REC"; then ok "fmt runs the pinned formatter tools.sh --print-bin names"; else bad "fmt runs the pinned formatter tools.sh --print-bin names" "$(cat "$REC")"; fi

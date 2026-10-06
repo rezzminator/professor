@@ -10,10 +10,11 @@ SUT="${1:-$HERE/.claude/scripts/unit-path.sh}"
 SHTEST_TAG=unit-path
 # shellcheck source=scripts/shtest.sh
 source "$HERE/scripts/shtest.sh"
+shtest_isolate_host
 
 R="$T/.ulroot$$"
 PROJECT="ulroot$$"
-trap 'if [ "${BASHPID:-$$}" = "$SHTEST_PID" ]; then rm -rf -- "$T" "/tmp/$PROJECT"; fi' EXIT
+shtest_clean_also "/tmp/$PROJECT"
 mkdir -p "$R/pfm/internal/a" "$R/pfm/gonedir" "$R/pfm/docs" "$R/docs" "$R/pfmx"
 for f in pfm/gonedir/f.go pfm/internal/a/a.go pfm/internal/a/a_test.go pfm/internal/a/gone_test.go pfm/docs/x.md docs/x.md docs/y.md pfmx/y.md; do
   echo x > "$R/$f"
@@ -56,8 +57,9 @@ resolve "$R" test pfm pfmx/y.md
 expect "the full path decides outside: pfmx/ is not pfm/" 2 "unit-path.sh: pfmx/y.md is outside pfm"
 resolve "$R" check templates pfm/internal/a/a.go
 expect "a pfm file is outside templates" 2 "unit-path.sh: pfm/internal/a/a.go is outside templates"
-resolve "$R" test pfm /etc/hostname
-expect "an absolute path outside the repository is outside" 2 "unit-path.sh: /etc/hostname is outside pfm"
+: > "$T/outside.txt"
+resolve "$R" test pfm "$T/outside.txt"
+expect "an absolute path outside the repository is outside" 2 "unit-path.sh: $T/outside.txt is outside pfm"
 resolve "$R" test pfm docs/x.md
 expect "two existing files exit 2 naming both" 2 "unit-path.sh: docs/x.md resolves to two files: docs/x.md and pfm/docs/x.md"
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # The stub fake root scripts/test-test-pfm.sh and scripts/test-check-pfm.sh share: sourced after
 # scripts/shtest.sh with NAME set. Builds $R (a fake repository named $NAME, so its logs land under
-# /tmp/$NAME, removed at exit), $BIN (tool stubs that record argv to $REC and exit as $RULES says),
+# /tmp/$NAME, removed at exit by shtest_clean_also), $BIN (tool stubs that record argv to $REC and exit as $RULES says),
 # and a stub .claude/scripts/dev.sh whose `iso run` executes its command string with PFM_DEV_FENCE=1.
 # A `go test -v` call no rule matched prints one `--- PASS` line, as a real run of a test does; a
-# matching rule prints only its own output. The EXIT trap keeps shtest.sh's PID guard: a command forked
-# from the suite and TERMed before its exec never deletes the suite's scratch.
+# matching rule prints only its own output. The cleanup is shtest_clean_also, which keeps shtest.sh's PID
+# guard: a command forked from the suite and TERMed before its exec never deletes the suite's scratch.
 # BROKEN STATE: an unset NAME, T or SHTEST_PID stops the sourcing suite under set -u before any assertion.
 R="$T/$NAME"
 BIN="$T/bin"
 REC="$T/rec"
 RULES="$T/rules"
 STUBLIB="$T/stublib.sh"
-trap 'if [ "${BASHPID:-$$}" = "$SHTEST_PID" ]; then rm -rf -- "$T" "/tmp/$NAME"; fi' EXIT
+shtest_clean_also "/tmp/$NAME"
 mkdir -p "$BIN" "$R/.claude/scripts"
 : >"$REC"; : >"$REC.env"; : >"$RULES"
 

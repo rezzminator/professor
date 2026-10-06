@@ -31,7 +31,7 @@ func mcpPayload(t *testing.T, word string) string {
 // and ps show them to every local user: --mcp-config names a 0600 file in a
 // 0700 directory under pfm's state, and the file carries the payload.
 func TestRenderKeepsMCPSecretsOffArgv(t *testing.T) {
-	const envSecret, headerSecret = "env-secret-7f3a", "Bearer header-secret-9c1e"
+	const envValue, headerValue = "env-value-7f3a", "Bearer header-value-9c1e"
 	for _, tc := range []struct {
 		name      string
 		purpose   Purpose
@@ -46,19 +46,19 @@ func TestRenderKeepsMCPSecretsOffArgv(t *testing.T) {
 			home, machine := renderMachine(t)
 			machine.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: tc.professor}
 			machine.MCP.ThirdParty = map[string]json.RawMessage{
-				"local": json.RawMessage(`{"command":"local-mcp","env":{"API_KEY":"` + envSecret + `"}}`),
+				"local": json.RawMessage(`{"command":"local-mcp","env":{"API_KEY":"` + envValue + `"}}`),
 				"remote": json.RawMessage(
-					`{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"` + headerSecret + `"}}`,
+					`{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"` + headerValue + `"}}`,
 				),
 			}
 			launch, parsed := renderParsed(t, Request{Purpose: tc.purpose, Home: home, Account: 1}, machine)
 			for _, word := range append([]string{launch.Binary}, append(launch.Env, launch.Argv...)...) {
-				if strings.Contains(word, envSecret) || strings.Contains(word, "header-secret") {
+				if strings.Contains(word, envValue) || strings.Contains(word, "header-value") {
 					t.Fatalf("a third-party secret reached the command line: %q", word)
 				}
 			}
 			payload := mcpPayload(t, parsed.MCPConfig)
-			if !strings.Contains(payload, envSecret) || !strings.Contains(payload, headerSecret) {
+			if !strings.Contains(payload, envValue) || !strings.Contains(payload, headerValue) {
 				t.Fatalf("mcp file lost the third-party entries: %s", payload)
 			}
 			info, err := os.Lstat(parsed.MCPConfig)

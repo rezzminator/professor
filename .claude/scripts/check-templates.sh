@@ -2,7 +2,7 @@
 # check-templates.sh — the static checks of the templates unit (every path outside pfm/), on the host.
 #   .claude/scripts/check-templates.sh <file>...
 # Installed tools only, never one that fetches a tool. Not installed (node, python3 + PyYAML, jq, git,
-# rumdl, jscpd): only `FAIL install (...)`, no check run, exit 1. Else one PASS/FAIL/SKIP line per check,
+# rumdl, jscpd at the pinned version (scripts/clone-check.sh --resolve)): only `FAIL install (...)`, no check run, exit 1. Else one PASS/FAIL/SKIP line per check,
 # every check run even after one fails: file-scoped rumdl (named .md files) and leak (every named file);
 # unit-wide clone, placeholders, scratch-paths, descriptions, manifest, codex-markers,
 # opencode-writer-refs. Output goes to /tmp/{project}/check-templates/{UTC}-{pid}.log (path printed).
@@ -27,12 +27,8 @@ usage() { echo 'Name the files you changed.' >&2; exit 2; }
 
 RUMDL="$(command -v rumdl || true)"
 [ -n "$RUMDL" ] || { [ -x "$HOME/.local/share/uv/tools/rumdl/bin/rumdl" ] && RUMDL="$HOME/.local/share/uv/tools/rumdl/bin/rumdl"; } || true
-jscpd_resolvable() { # exactly as scripts/clone-check.sh resolves it
-  local bin candidate=
-  if [ -n "${TOOLS_BIN:-}" ]; then candidate="$TOOLS_BIN/jscpd"
-  elif bin="$(bash "$ROOT/infra/fence/tools.sh" --print-bin 2>/dev/null)"; then candidate="$bin/jscpd"; fi
-  if [ -n "$candidate" ] && [ -x "$candidate" ]; then return 0; fi
-  command -v jscpd > /dev/null 2>&1
+jscpd_resolvable() { # clone-check.sh's own resolver: installed and at the pinned version
+  bash "$ROOT/scripts/clone-check.sh" --resolve > /dev/null 2>&1
 }
 installed() {
   local t

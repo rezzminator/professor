@@ -131,10 +131,11 @@ else
   base="$T/timing-base/nested"
   out=$(bash -c 'umask 077; source "$1"; timing_run_dir "$2"' _ "$TRD" "$base" 2>"$T/trd.err"); rc=$?
   mode=$( [[ -n "$out" && -d "$out" ]] && ls -ld "$out" | cut -c1-10 )
-  if [[ $rc -eq 0 && "$out" == "$base"/run.* && -d "$out" && "$mode" == "drwxr-xr-x" ]]; then
-    ok "timing_run_dir creates an absent base and a 0755 run dir under umask 077"
+  base_mode=$( [[ -d "$base" ]] && ls -ld "$base" | cut -c1-10 )
+  if [[ $rc -eq 0 && "$out" == "$base"/run.* && -d "$out" && "$mode" == "drwxr-xr-x" && "$base_mode" == "drwxr-xr-x" ]]; then
+    ok "timing_run_dir makes an absent base and its run dir 0755 under umask 077"
   else
-    bad "timing_run_dir did not create a 0755 run dir under umask 077 (rc $rc, mode ${mode:-none})" "stdout: ${out:-<none>}" "stderr: $(cat "$T/trd.err")"
+    bad "timing_run_dir did not make an absent base and its run dir 0755 under umask 077 (rc $rc, run dir ${mode:-none}, base ${base_mode:-none})" "stdout: ${out:-<none>}" "stderr: $(cat "$T/trd.err")"
   fi
   : > "$T/plain-file"
   base="$T/plain-file/timing"

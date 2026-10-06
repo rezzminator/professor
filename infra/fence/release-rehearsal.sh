@@ -85,10 +85,10 @@ start_from() {
 }
 
 cmd_up() {
-  exists && die "container $NAME already exists — 'down' it or 'revert' to the snapshot"
   # shellcheck source=housekeeping.sh
   . "$REPO_ROOT/infra/fence/housekeeping.sh"
   fence_housekeeping
+  exists && die "container $NAME already exists — 'down' it or 'revert' to the snapshot"
   docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >/dev/null \
     || die "build image $IMAGE failed"
   start_from

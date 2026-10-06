@@ -46,7 +46,7 @@ chmod +x "$T/bin/jscpd"
 clone() {
   env PATH="$T/path:/usr/bin:/bin" TOOLS_BIN="$1" \
     JSCPD_STUB_VERSION="${2:-$JSCPD_VERSION}" JSCPD_STUB_MODE="${3:-pass}" \
-    JSCPD_SCAN_MARKER="$T/scanned" bash "$ROOT/scripts/clone-check.sh" 2>&1
+    JSCPD_SCAN_MARKER="$T/scanned" bash "$ROOT/scripts/clone-check.sh" ${4:+"$4"} 2>&1
 }
 
 out=$(clone "$T/absent"); rc=$?
@@ -85,6 +85,37 @@ if [[ $rc -eq 1 && "$out" == *'late-new-left'* && "$out" == *'late-new-right'* ]
   ok 'a new clone after the known listing names both files'
 else
   bad 'a new clone after the known listing names both files' "rc=$rc; $out"
+fi
+
+rm -f "$T/scanned"
+out=$(clone "$T/bin" "$JSCPD_VERSION" pass --resolve); rc=$?
+if [[ $rc -eq 0 && "$out" == "$T/bin/jscpd" && ! -e "$T/scanned" ]]; then
+  ok '--resolve prints the pinned jscpd and does not scan'
+else
+  bad '--resolve prints the pinned jscpd and does not scan' "rc=$rc; $out"
+fi
+
+rm -f "$T/scanned"
+out=$(clone "$T/absent" "$JSCPD_VERSION" pass --resolve); rc=$?
+if [[ $rc -eq 2 && "$out" == 'CLONES ERROR TOOLCHAIN-MISSING — jscpd not installed; run infra/fence/tools.sh (make -C pfm tools)' && ! -e "$T/scanned" ]]; then
+  ok '--resolve names a missing jscpd and returns 2'
+else
+  bad '--resolve names a missing jscpd and returns 2' "rc=$rc; $out"
+fi
+
+rm -f "$T/scanned"
+out=$(clone "$T/bin" 9.9.9 pass --resolve); rc=$?
+if [[ $rc -eq 2 && "$out" == "CLONES ERROR TOOLCHAIN-MISSING — jscpd 9.9.9 is not JSCPD_VERSION $JSCPD_VERSION; run infra/fence/tools.sh (make -C pfm tools)" && ! -e "$T/scanned" ]]; then
+  ok '--resolve names a wrong jscpd version and returns 2'
+else
+  bad '--resolve names a wrong jscpd version and returns 2' "rc=$rc; $out"
+fi
+
+out=$(clone "$T/bin" "$JSCPD_VERSION" pass --bogus); rc=$?
+if [[ $rc -eq 2 && "$out" == 'usage: clone-check.sh [--measure|--resolve]' ]]; then
+  ok 'an unknown mode prints the usage and returns 2'
+else
+  bad 'an unknown mode prints the usage and returns 2' "rc=$rc; $out"
 fi
 
 out=$(env TOOLS_BIN="$T/selected-bin" bash "$TOOLS_SCRIPT" --print-bin 2>&1); rc=$?

@@ -30,6 +30,17 @@
 # that only knows two capitalisations of a word does not know the word.
 set -euo pipefail
 
+# EVERY TOOL RUNS UNDER C EXCEPT THE GREP THAT MATCHES THE PATTERN: sed, tr and bash read bytes, and BSD
+# sed under a UTF-8 locale rejects an invalid byte. The grep that matches the pattern (match_grep) runs under
+# a UTF-8 locale — the caller's, else C.UTF-8, else UTF-8 — proven at load, so a '.' or a bracket in a term
+# matches one multibyte letter and -i folds non-ASCII letters. That grep carries --binary-files=text: under
+# a UTF-8 locale GNU grep otherwise skips the matching lines of a binary (NUL-byte) or undecodable file,
+# exits 0 and says so only on stderr, and a leak in such a file would pass the gate. Every git diff carries
+# --text, or git prints "Binary files … differ" for a NUL-byte file and no line of it is ever judged. With no
+# UTF-8 locale the scan refuses.
+caller_locale="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+export LC_ALL=C
+
 # Named nowhere, identifying nobody — safe to keep in the public file.
 STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]|@gmail[.]com'
 STRUCTURAL_COUNT=$(( $(printf '%s' "$STRUCTURAL_PATTERN" | tr -cd '|' | wc -c) + 1 ))
@@ -51,6 +62,11 @@ STRUCTURAL_COUNT=$(( $(printf '%s' "$STRUCTURAL_PATTERN" | tr -cd '|' | wc -c) +
 #                     notes; a private term that is a substring of it must not fail them
 BENIGN_TOKENS='(/home/account-42|~/work/professor|mreza0100|/home/tester|~/work/alpha|/home/test|~/work/Foo|/home/me|/home/x)'
 
+# The one door for a grep that matches PATTERN: UTF-8 locale for that command only, binary files read as text.
+match_grep() {
+  LC_ALL="$match_locale" grep --binary-files=text "$@"
+}
+
 # True when the line still matches PATTERN after benign tokens and the configured
 # ignore tokens are removed. Ignore tokens are lowercase regexes (the terms-file
 # convention), so they are applied to the lowercased line; PATTERN matches with -i.
@@ -63,7 +79,7 @@ line_is_real_hit() {
       line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")"
     done
   fi
-  grep -qiE "$PATTERN" <<<"$line"
+  match_grep -qiE "$PATTERN" <<<"$line"
 }
 
 usage() {
@@ -135,8 +151,50 @@ if (( ${#terms[@]} == 0 )); then
   exit 1
 fi
 
+# The locale match_grep runs under: the first of the caller's own, C.UTF-8 and UTF-8 (the macOS name) under
+# which a two-byte letter reads as one character and -i pairs both ASCII and non-ASCII letters. None does:
+# refuse, never scan under a byte locale.
+match_locale=""
+tried_locales=""
+for candidate in "$caller_locale" C.UTF-8 UTF-8; do
+  [[ -n "$candidate" ]] || continue
+  [[ " $tried_locales " == *" $candidate "* ]] && continue
+  tried_locales="${tried_locales:+$tried_locales }$candidate"
+  match_locale="$candidate"
+  # A two-byte letter is one character, and -i pairs É/é and I/i: zh_CN.GB18030 passes the first alone,
+  # tr_TR.UTF-8 pairs no I/i, and under either a term's other case would scan clean.
+  if printf '\303\251\n' | match_grep -qE '^.$' \
+    && printf '\303\211\n' | match_grep -qiE $'^\303\251$' \
+    && printf 'I\n' | match_grep -qiE '^i$'; then
+    break
+  fi
+  match_locale=""
+done
+if [[ -z "$match_locale" ]]; then
+  echo "leak-check: FAILED — no UTF-8 locale for grep (tried: $tried_locales); under a byte locale a term's '.' or bracket misses a multibyte letter; refusing to scan" >&2
+  exit 1
+fi
+
 terms_alt="$(IFS='|'; printf '%s' "${terms[*]}")"
 PATTERN="(${terms_alt}|${STRUCTURAL_PATTERN})"
+
+# Validate at data entry: a term or ignore token the tools cannot compile would otherwise
+# fail open — every --range hit judged "suppressed", a --range grep that "finds nothing".
+# Both checks run before any mode touches git or a file, and an unusable terms file stops
+# the gate the same way in every mode.
+if (( ${#ignore_tokens[@]} > 0 )); then
+  for tok in "${ignore_tokens[@]}"; do
+    if ! printf '' | sed -E "s#${tok}#<IGNORED>#g" > /dev/null; then
+      echo "leak-check: FAILED — unusable ignore token in $terms_file: $tok (sed -E rejects it; a token is a lowercase ERE without '#')" >&2
+      exit 1
+    fi
+  done
+fi
+match_grep -qiE "$PATTERN" < /dev/null && rc=0 || rc=$?
+if (( rc >= 2 )); then
+  echo "leak-check: FAILED — the terms in $terms_file do not compile as one extended regex (grep rc=$rc); refusing to scan" >&2
+  exit 1
+fi
 
 if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" || -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
   if [[ -z "${PFM_DEV_REPO_GIT_DIR:-}" || -z "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
@@ -201,12 +259,20 @@ scan_diff_stream() {
   local -a files=()
   local -a contents=()
 
+  # A `+++` line is a file header only between `diff --git` and the file's first `@@`: inside a hunk an
+  # added line that itself starts with "++" reads "+++ …" too, and it is content to judge. A hunk's lines
+  # all carry a one-character prefix, so `diff --git` and `@@` at column 0 are always headers.
+  local in_hunk=0
   while IFS= read -r line; do
-    if [[ "$line" == "+++ /dev/null" ]]; then
+    if [[ "$line" == "diff --git "* ]]; then
+      in_hunk=0
+    elif [[ "$line" == "@@ "* ]]; then
+      in_hunk=1
+    elif (( ! in_hunk )) && [[ "$line" == "+++ /dev/null" ]]; then
       file=""
-    elif [[ "$line" == "+++ b/"* ]]; then
+    elif (( ! in_hunk )) && [[ "$line" == "+++ b/"* ]]; then
       file="${line#+++ b/}"
-    elif [[ "$line" == "+++"* ]]; then
+    elif (( ! in_hunk )) && [[ "$line" == "+++"* ]]; then
       file="${line#+++ }"
     elif [[ "$line" == "+"* ]]; then
       contents+=("${line#+}")
@@ -247,7 +313,7 @@ scan_diff_stream() {
     done
 
     local matches
-    matches="$(printf '%s\n' "${contents[@]}" | grep -niE "$PATTERN" || true)"
+    matches="$(printf '%s\n' "${contents[@]}" | match_grep -niE "$PATTERN" || true)"
     if [[ -n "$matches" ]]; then
       local idx content
       while IFS=: read -r idx content; do
@@ -279,11 +345,11 @@ trap 'rm -f "$hits_file" "$coverage_file"' EXIT
 
 case "$mode" in
   staged)
-    repo_git diff --cached -U0 --no-color -- . "${diff_excludes[@]}" \
+    repo_git diff --cached --text -U0 --no-color -- . "${diff_excludes[@]}" \
       | scan_diff_stream > "$hits_file"
     ;;
   range)
-    repo_git diff "$range_old" "$range_new" -U0 --no-color -- . "${diff_excludes[@]}" \
+    repo_git diff "$range_old" "$range_new" --text -U0 --no-color -- . "${diff_excludes[@]}" \
       | scan_diff_stream > "$hits_file"
     ;;
   files)
@@ -317,10 +383,10 @@ case "$mode" in
       fi
     done
     if (( ${#regular[@]} > 0 )); then
-      grep -niEH --null -e "$PATTERN" -- "${regular[@]}" > "$coverage_file" 2>/dev/null && rc=0 || rc=$?
+      match_grep -niEH --null -e "$PATTERN" -- "${regular[@]}" > "$coverage_file" 2>/dev/null && rc=0 || rc=$?
       if (( rc >= 2 )); then
         for f in "${regular[@]}"; do
-          matches="$(grep -niE "$PATTERN" "$f")" && rc=0 || rc=$?
+          matches="$(match_grep -niE -e "$PATTERN" -- "$f")" && rc=0 || rc=$?
           if (( rc >= 2 )); then
             printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$f" "$rc" >> "$hits_file"
           elif [[ -n "$matches" ]]; then
@@ -357,9 +423,18 @@ case "$mode" in
             done
             sed -E "${sed_args[@]}" "$lower_file" > "$normalized_file"
           fi
-          grep -niE "$PATTERN" "$normalized_file" > "$real_file" && rc=0 || rc=$?
+          match_grep -niE "$PATTERN" "$normalized_file" > "$real_file" && rc=0 || rc=$?
           if (( rc >= 2 )); then
-            printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$normalized_file" "$rc" >> "$hits_file"
+            # The matched lines could not be judged: name every source file they came from,
+            # once each, never the temp file the judge read. First-seen order, same
+            # newline-delimited seen-string as scan_diff_stream (bash 3.2 has no associative arrays).
+            judge_seen=$'\n'
+            for f in "${matched_files[@]}"; do
+              if [[ "$judge_seen" != *$'\n'"$f"$'\n'* ]]; then
+                judge_seen+="$f"$'\n'
+                printf "SCAN-ERROR %s: leak-check could NOT judge this file's matched lines (grep rc=%d) — treated as FAILURE, never as clean\n" "$f" "$rc" >> "$hits_file"
+              fi
+            done
           else
             real_indices=()
             while IFS=: read -r lnum content; do

@@ -23,7 +23,7 @@ The spawn prompt carries the flight; what is absent you derive from the code and
 - Boundaries (out of scope, files another owner holds): no task touches them.
 - Standing rules: your specs stay inside them. They and the `CLAUDE.md` contract reach every executor without you: a task file omits both.
 - The testing manual of each project touched (your manual's or the caller's path, else `.claude/commands/{project}-testing-manual.md`): at intake open Tiers, Where a test lives, Lanes and registries, Gates and floors, and What not to test's removal clause; its facts enter tasks as `Decisions`, `Files` and `Done when` lines, never `reads`; no manual: a NOTES line.
-- Your manual, `$HOME/.local/state/pfm/flights/{project}/speccer-manual.md`: static facts with paths (build units in inside-out order with their testing manuals and gates, the shared contract and what it generates, test homes, hot files). Rewrite a line you find wrong; the code wins over it; never a source of shapes.
+- Your manual, `$HOME/.local/state/pfm/flights/{project}/speccer-manual.md`: static facts with paths (projects, i.e. build units, in inside-out order with their testing manuals and gates, the shared contract and what it generates, test homes, hot files). Rewrite a line you find wrong; the code wins over it; never a source of shapes.
 - Only the format below: a caller's format or an existing spec directory's style is ignored.
 - An existing spec directory plus a reason → § Revising. A batch plan naming your batch → § Nesting, as a child.
 - One run per directory; a planner's children aside.
@@ -124,7 +124,7 @@ Pin what crosses a boundary; describe what stays inside one.
 - Pinned exactly: existing shapes, what another task consumes, what crosses a layer or project, what the user sees, where things live.
 - Described as behaviour: bodies, queries, control flow, local names, how the outcome is proven.
 - A place is a file path plus a quoted line of code; the path is the fallback when the quote moved.
-- A value a run printed about its data (a count, an id) is evidence for the return, never a Done when row; so is the form one sample of outside data took. Pin every form its producer documents or emits (its docs, own code or schema, never only the consumer being changed); a Done when row says how any other form is reported, never read as absent.
+- A value a run printed about its data (a count, an id) is evidence for the return, never a Done when row; so is the form one sample of outside data took. Every form its producer documents or emits (its docs, code or schema, never only its consumer) is pinned with its own Done when row; another says how any other form is reported, never read as absent.
 
 ## Blocked
 

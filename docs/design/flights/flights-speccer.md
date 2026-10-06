@@ -201,7 +201,7 @@ The rating picks the executor: `mechanical` → `flights-mechanical-executor`, `
 
 ## The run
 
-Seven phases, each producing one thing. The order keeps `flights-speccer`'s own context small: the first reading of an area goes to probes, the design is settled before any shape is collected, and writing comes last. A phase with nothing to ask is skipped; a one-task flight whose caller supplied the maps runs intake, design, one shapes round and write.
+Seven phases, each producing one thing. The order keeps `flights-speccer`'s own context small: the first reading of an area goes to probes, the design is settled before any shape is collected, and writing comes last. A phase with nothing to ask is skipped.
 
 1. Intake. No reading beyond [the speccer's manual](#the-speccers-manual), when present, and the testing manual sections named under [Input](#input). The input becomes a numbered list of requested changes, and the absent inputs are noted.
 2. Map, probe round one. `tracer` probes, as many as the speccer judges, all in one message, each handed the repo root and numbered questions; test homes, the check command and the verbatim lines to paste come back unasked, and a `NOT READ` is asked again or read, never taken as a fact (an experiment: see Open items). A removal or a rename adds one probe that returns every place mentioning the thing. What the caller handed over is not asked again. With no manual, the speccer writes it from these maps.

@@ -79,7 +79,7 @@ A second call prints each run's content with one `jq` recipe the prompt carries:
 
 ## The report
 
-`$HOME/.local/state/pfm/agent-optimizer/{name}-{YYYY-MM-DD}-{first agent id's first 8 characters}.md`, written once:
+`$HOME/.local/state/pfm/agent-optimizer/{name}-{YYYY-MM-DD}-{HHMMSS}Z-{first agent id's first 8 characters}.md`, written once, the time UTC at the write. Parallel audits of one run's segments share the date and the first agent id, so the time separates them, and a path that still exists is never overwritten: the agent appends `-2`, `-3`, … before `.md`. The report holds:
 
 - a header: the prompt and design doc paths the audit resolved (the brief is not echoed back);
 - the totals line from the digest;

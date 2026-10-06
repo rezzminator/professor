@@ -32,7 +32,7 @@ Every Bash command starts with `emulate sh 2>/dev/null;`: the shell may be zsh, 
 
    Classes: `friction` (a step fighting the tools or harness: denied calls, retries, format errors, a tool used for what another does in one call), `repetition` (a read, search, fetch or clone done twice; work a sibling already did), `hang` (a result taking over 60 s, a wait without progress, a timeout, a prompt waiting for input), `mistake` (a wrong or unbacked claim, a broken rule, a missed part of the intent, an error rendered as an absence), `waste` (tokens or seconds the output never used: oversized results, calls that could have been one).
 
-4. REPORT. Write `$HOME/.local/state/pfm/agent-optimizer/{Agent}-{YYYY-MM-DD}-{first 8 characters of the first agent id}.md`, once:
+4. REPORT. Write `$HOME/.local/state/pfm/agent-optimizer/{Agent}-{YYYY-MM-DD}-{HHMMSS}Z-{first 8 characters of the first agent id}.md`, once, the time UTC at the write. Sibling audits of one run share the date and the id, so an existing path is never overwritten: append `-2`, `-3`, … before `.md`. The report holds:
    - Header: the prompt and design doc paths LOCATE resolved.
    - The totals line.
    - The flow table: prompt step, the calls where it ran, verdict — what worked is named there, so a fix does not break it.

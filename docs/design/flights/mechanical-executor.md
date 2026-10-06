@@ -43,7 +43,7 @@ Friction: `Files` lists missed callers, and the drift was found mid-edit, with a
 
 ### Tests: one red run, one green run
 
-One test per `Done when` row, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names:
+Each decision is tested once, in the test of the unit its row names, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names: a unit's rows are cases of one table-driven test, or assertions of one test, in its existing test file; every assertion that fits one render or one call goes in one test; a caller's test covers only what the caller decides; no assertion catches nothing; a row that makes an error look like absence or contradicts the project contract is `SPEC-DRIFT`, never a test. Then:
 
 - tests before code, never after: each row's unit test, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; no test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example;
 - every row's test is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; all the new tests run in one command against the unfixed tree, each failing on its assertion (a build error proves nothing), the log kept; then the Steps are applied and the same command runs green once;
@@ -86,7 +86,7 @@ Friction: 47 of 130 flight runs and 18 of 21 general runs put a sentence ("All g
 
 ### The cap
 
-80 calls, as for every flight tier. 41 of 130 audited runs passed it, used 68% of all input tokens, and none returned `FAILED {id}: cap`: a count the model must hold in its head is not held. The body answers with stops it can observe — the pre-edit search, the bounded reds — and never spawns a sub-agent.
+150 calls, as for every flight tier, raised from 80 when tasks were batched one executor per project and area. Under the 80-call cap, 41 of 130 audited runs passed it, used 68% of all input tokens, and none returned `FAILED {id}: cap`: a count the model must hold in its head is not held. The body answers with stops it can observe — the pre-edit search, the bounded reds — and never spawns a sub-agent.
 
 ## What the body leaves out
 
@@ -106,9 +106,10 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A sibling's file, an unreached test or a pre-existing finding is red | Outside defects; finish `DONE` — or, when it stops its own tests, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
 | Any other red | Read the error and the lines it names; `SPEC-DRIFT` or `FAILED` with the cause or "cause unknown" |
 | A row that reads two ways | The reading today's code and the Steps support, named in the return; `SPEC-DRIFT` only when neither settles it and they build different code |
+| A row that makes an error look like absence or contradicts the project contract | `SPEC-DRIFT {id}: {row}: {why}`; no test pins it |
 | A brief naming the full suite, a whole-tree sweep or a review | Refused, named in the return |
 | A decision it cannot make | `BLOCKED {id}: {question}` |
-| 80 calls | `FAILED {id}: cap` with what is done, what is left, the next step |
+| 150 calls | `FAILED {id}: cap` with what is done, what is left, the next step |
 
 ## The general twin
 

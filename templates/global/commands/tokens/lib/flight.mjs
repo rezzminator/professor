@@ -58,6 +58,9 @@ export function loadFlightPlan(opts) {
   opts.hours = Math.max(1, (opts.now - opts.since) / 3600e3);
 }
 
+// the call cap comes from the agent type name: a lander 200, everything else 150
+export const callCap = (type) => (/lander/i.test(type) ? 200 : 150);
+
 // ---------- --flight: one row per agent the flight spawned, bounded whatever its size
 export function runFlight(opts) {
   const { flight: FLIGHT, metricsOut: METRICS_OUT, out: OUT, since: SINCE } = opts;
@@ -66,7 +69,6 @@ export function runFlight(opts) {
   const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const roleMatch = (a, b) => { const x = norm(a), y = norm(b); if (!x || !y) return false;
     return x.includes(y) || y.includes(x) || x.split(" ").pop() === y.split(" ").pop(); };
-  const capFor = (type) => (/lander/i.test(type) ? 150 : 80); // executor 80, lander 150, from the type name
   const claudeAgents = RUNS.filter((r) => r.kind === "agent");
   const byAgentId = new Map(); for (const r of claudeAgents) byAgentId.set(r.agentId, r);
 
@@ -127,13 +129,13 @@ export function runFlight(opts) {
     "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   const sorted = [...rows].sort((a, b) => b.run.usd - a.run.usd);
   for (const { led, run, how } of sorted.slice(0, MAX_ROWS)) {
-    const cap = capFor(led.agentType || run.agentType);
+    const cap = callCap(led.agentType || run.agentType);
     out.push(`| ${led.taskId} | ${led.agentType || run.agentType || "?"} | ${run.engine} | ${shortModel(codexShort(run.model))} | ${run.calls} | ${mins(run)} | ${K(run.ctxFirst)} | ${K(run.ctxPeak)} | ${growth(run)} | ${K(run.tok.in + run.tok.cw5 + run.tok.cw1)} | ${K(run.tok.cr)} | ${K(run.tok.out)} | ${ttlMix(run.tok)} | ${cash(run)} | ${run.failedCmds} | ${run.pollN} | ${run.rereadN} | ${run.contractReads} | ${run.resets} | ${run.calls > cap ? `OVER ${cap}` : `ok/${cap}`} | ${how} |`);
   }
   if (sorted.length > MAX_ROWS) out.push(`| … | ${sorted.length - MAX_ROWS} further agents folded into the totals below | | | | | | | | | | | | | | | | | | | |`);
   const fold = (rs) => rs.reduce((a, x) => ({ n: a.n + 1, calls: a.calls + x.run.calls, usd: a.usd + x.run.usd, unpriced: a.unpriced + (x.run.unpriced ? 1 : 0),
     in: a.in + x.run.tok.in + x.run.tok.cw5 + x.run.tok.cw1, cr: a.cr + x.run.tok.cr, out: a.out + x.run.tok.out, fail: a.fail + x.run.failedCmds, poll: a.poll + x.run.pollN,
-    reread: a.reread + x.run.rereadN, contract: a.contract + x.run.contractReads, compact: a.compact + x.run.resets, over: a.over + (x.run.calls > capFor(x.led.agentType || x.run.agentType) ? 1 : 0),
+    reread: a.reread + x.run.rereadN, contract: a.contract + x.run.contractReads, compact: a.compact + x.run.resets, over: a.over + (x.run.calls > callCap(x.led.agentType || x.run.agentType) ? 1 : 0),
     peak: Math.max(a.peak, x.run.ctxPeak), lc: a.lc + (x.run.usdLC || x.run.usd) }), { n: 0, calls: 0, usd: 0, unpriced: 0, in: 0, cr: 0, out: 0, fail: 0, poll: 0, reread: 0, contract: 0, compact: 0, over: 0, peak: 0, lc: 0 });
   const byType = {}; for (const x of rows) (byType[x.led.agentType || x.run.agentType || "(untyped)"] ??= []).push(x);
   out.push("", "## totals by agent type", "", "| agent type | n | calls | input | cached | output | $ | fail | poll | reread | contract | compact | over cap |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|");
@@ -166,7 +168,7 @@ export function runFlight(opts) {
     fs.writeFileSync(OUT, JSON.stringify({ v: 1, flight: path.basename(dir), source: FLIGHT_PLAN.source, baseline: FLIGHT_PLAN.baseline, window: [startISO, endISO], scan: SCAN, total: T,
       rows: sorted.map(({ led, run, how }) => ({ ...led, how, engine: run.engine, model: run.model, calls: run.calls, wallMs: run.t1 - run.t0, ctxFirst: run.ctxFirst, ctxPeak: run.ctxPeak,
         tok: run.tok, usd: run.unpriced ? null : +run.usd.toFixed(4), failedCmds: run.failedCmds, pollN: run.pollN, rereadN: run.rereadN, contractReads: run.contractReads, compactions: run.resets,
-        overCap: run.calls > capFor(led.agentType || run.agentType) })), unmatched, unledgered: { n: U.n, usd: +U.usd.toFixed(4), unpriced: U.unpriced } }, null, 1));
+        overCap: run.calls > callCap(led.agentType || run.agentType) })), unmatched, unledgered: { n: U.n, usd: +U.usd.toFixed(4), unpriced: U.unpriced } }, null, 1));
     console.log(`full data → ${OUT}`); }
   // UNMATCHED is a reported condition, not a failure. A read error is: it means we failed
   // to LOOK, and a report built over a root we could not read must not read as success.

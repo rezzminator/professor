@@ -41,8 +41,8 @@ The agent is pinned `model: opus`, `effort: high`.
 
    The `{effort}` slot is also the Codex mapping's second source form: `pfm/internal/codexgen/review.go` compiles a written level into a `codex review` at that baked effort scoped to one task's files, and the slot form into a flight-scoped review whose `model_reasoning_effort` stays `{effort}` for the lander to fill at run time.
 4. The attack map, closed-world: every changed hunk gets one line — an attack hypothesis (the real product traffic or state that could break this hunk and the wrong behaviour that results), an explicit no-attack justification, or `RETIRE: {tests}`. A hunk absent from the map is uncovered. Attacks drive states the product can reach, never inputs it cannot send.
-5. The validity sweep: every test file the diff adds or touches, read against the placement, tier, economy and validity laws of its own project's manual. Each violation is a finding in its class.
-6. Adversarial tests, written into the module that owns the contract — there is no lander-owned directory. A test is accepted only after it was watched failing against the code it attacks.
+5. The validity sweep: every test file the diff adds or touches, read against the placement, tier, economy and validity laws of its own project's manual. Each violation is a finding in its class. Its economy half folds the flight's duplicate tests (a decision tested in two units keeps the test of the unit that makes it) and deletes the assertions that catch nothing (a test id that only exists, an echo of a mock call, copy asserted in every variant or locale, a snapshot of the fixture); it never only adds.
+6. Adversarial tests, written into the module that owns the contract, as cases or assertions of its existing test where one fits — there is no lander-owned directory. A test is accepted only after it was watched failing against the code it attacks.
 7. Fixes (next section), then the affected tests.
 8. Close each project's gate: the full suite once more, and the manual's floors (coverage minimums and the like) checked as rows of this gate. A floor is the lander's, never a task's `Done when` row. Exactly two full runs per project; a full run is never looped to chase a fix.
 
@@ -63,7 +63,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 - One lander per flight, spawned once after the last verdict, covering every project the flight touched.
 - Two full-suite runs per project.
-- 150 tool calls; past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
+- 200 tool calls, raised from 150 with the executors' batching; past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
 - Every verdict names its executed artifact: the run log, the report file or the pinning test. A suite not watched running is not a pass.
 
 ## The ledger and the return
@@ -78,6 +78,7 @@ The return is also a file. The lander's last act before returning writes it, ver
 
 - `tools: Read, Write, Edit, Bash, Glob, Grep, Skill` — `Skill` is carried because `/code-review` needs it; nothing else beyond the executor's list.
 - It reads the diff and the hunks' surroundings by range, never the task files' `Steps` or `Shapes`.
+- `autoCompact`, iteration 0: forced at 350k, nudged from 150k and every 60k after; at a nudge the lander finishes the step in hand and writes `<compact-now>{focus}</compact-now>` beside a tool call, the focus naming `gate.md` as its ledger, each project's gate runs done and left with their log paths, and the next step.
 - One lander per flight holds every project's manual and suite in one context: the price of one review that sees both sides of every contract change together. It is on the watch list ([Open items](flights.md#open-items)).
 
 ## The accepted risk
@@ -99,3 +100,4 @@ A lander certifies its own fixes. The research collected for this design condemn
 - Adopter QA ledgers: 63 findings, about 27 production defects; a QA run averages 168 calls and 30.8M input tokens; 59M to 155M tokens per production defect; one wave with none.
 - Review against QA over three waves: 47 findings against 57, 6 in common; the review caught a critical crash the QA missed; one change passed both and still needed a production fix.
 - 5 of 8 nested chains ended in a round that found nothing.
+- Tests audit of goals-tab, topics-tab and workbench: of 24 in-flight defects the landers found, executor tests caught none, and 3 executor tests pinned a defect in place.

@@ -77,17 +77,19 @@ What it does not hold: anything about one project. Project law reaches it throug
 
 ## Tests
 
-The executor writes the covering tests itself, one per `Done when` row, in the project's pattern. A row is a matrix row or a `Given` line, on every tier:
+The executor writes the covering tests itself, in the project's pattern, a row being a matrix row or a `Given` line, on every tier. Each decision is tested once, in the test of the unit whose code makes it, the unit its row names: a unit's rows are cases of one table-driven test, or assertions of one test, added to its existing test file the task names, a new test file only for a new source file with no test home; every assertion that fits one render or one call goes in one test; a caller's test covers only what the caller decides (wiring, ordering, side effects, lifecycle, handling of the dependency's errors), one representative dependency output per branch, never the dependency's cases again, against the real boundary (a real cache, filesystem, re-render) where talking to it is the caller's job; no assertion catches nothing (a test id that only exists, an echo of a mock call, copy asserted in every variant or locale, a snapshot of the fixture). Then:
 
 - before the first test it opens the project's testing manual, the path named in the orchestrator's brief, and follows its tiers, test home, lane or registry duty, mock boundary, run commands and traps;
 - tests before code, never after: each row's unit test, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly, only the framework's idiom the executor's own; a `precise` or `smart` judgment's test is written with them. No test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example;
 - red once per task: every row's test is written first, each name the task creates stubbed so it compiles; all the new tests run in one command against the unfixed tree, each failing on its assertion (a build error proves nothing), the log kept; the fix goes in and the same command runs green once. A row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log and the commit or `run.md` line that introduced the behaviour, and the orchestrator records `DONE` only with both cited. No executor re-breaks, stashes, reverts or mutates finished or committed code to watch a test fail, even where the testing manual asks for a re-break or mutation proof; a new gate proves its bite on a fixture or a `mktemp` copy;
 - a row with no behaviour change (a rename, a move, a deletion, the doc references one carries) or one a written deliverable meets is proven by its check line, plus the quoted line that meets it for a written deliverable; the orchestrator accepts that in place of a red-log line, and every other row needs one or the `pre-existing, no red proof` mark;
 - it runs only the affected tests as it goes; the testing manual's static-check command runs once, as the last step after the work is finished and before the return is written, given the task's `Files` list, a red fixed and the same command run again; a manual naming no single command has its checks run as one command, same rule; a ratchet its diff pushes over is its to bring back under — the full suite is the lander's;
-- a test that exists but did not run is missing; when a test and a row disagree the code is wrong, never the row;
+- a test that exists but did not run is missing; when a test and a row disagree the code is wrong, never the row, unless the row makes an error look like absence or contradicts the project contract: that row is a spec fault, returned as `SPEC-DRIFT`, and no test pins it;
 - a row read two ways takes the reading today's code supports, named in the return; `SPEC-DRIFT` only when neither reading settles it and they build different code.
 
 Bias of an author testing its own code is real and accepted here: the executor's tests prove the rows, and the independent attack is [`flights-lander`](flights-lander.md)'s.
+
+The unit line replaced one test per row at each layer. On goals-tab, topics-tab and workbench the landers found 24 in-flight defects and no executor test caught one: 11 were a missing row in the unit's own table, 8 the caller's own logic untested, and 3 were pinned in place by executor tests (a mocked fetch policy echoed back, an assertion that a failed as-of shows no since, a table case pinning a failed aggregation that hid the tree). Each was caught by a row of the unit's own table or by a test of the caller's own decision, usually against a real boundary.
 
 ## Layout laws at write time
 
@@ -108,13 +110,14 @@ The design-time laws (unit of change, anatomy, registries, cross-project alignme
 Cost is calls times context, and an executor's starting context is re-sent on every call.
 
 - `tools: Read, Write, Edit, Bash, Glob, Grep` — no `Skill`, no `Agent`, no MCP tool. Listing `Skill` injects the skills listing, a measured 7.4K tokens per call; an MCP tool outside the allowlist costs nothing.
-- The bodies are 8.6 KB (`mechanical`), 10.3 KB (`precise`) and 11.5 KB (`smart`). They exceed the earlier 5 KB ceiling by the tier-specific rules the transcript audits measured as stopping over-stops and misses; a rule that stops no measured failure is cut.
+- The bodies are 9.8 KB (`mechanical`), 11.5 KB (`precise`) and 12.7 KB (`smart`). They exceed the earlier 5 KB ceiling by the tier-specific rules the transcript audits measured as stopping over-stops and misses; a rule that stops no measured failure is cut.
 - The brief is a file carrying the task file path, its `reads`, the pasted `DONE` lines of its `needs`, the `RETRO` lines so far, the standing rules, the testing-manual path and the worktree. Everything else the old brief restated is in the agent.
 - The project contract is injected by the harness into every sub-agent and no setting stops it; its size is the project's to keep small.
+- `autoCompact` in each tier's frontmatter, iteration 0, tuned later from callmeter peaks: forced at 300k, nudged from 120k and every 60k after. At a nudge the executor finishes the step in hand and writes `<compact-now>{focus}</compact-now>` beside a tool call, the focus naming the task file, the rows done and left, the red and green log paths and the next step. Codex seats ignore both.
 
 ## The cap
 
-80 tool calls. Past it the executor stops and returns `FAILED {id}: cap` with the handoff: what is done, what is left, the next step. The number is in the agent, not in the brief; the speccer sizes tasks to it (a task that needs 150 calls is three tasks). A `smart` executor estimates its calls once its design is stated and returns `SPEC-DRIFT {id}: too large` with the split it would make, nothing changed; the orchestrator records it as `{id} TOO-LARGE · {the split it proposes}` — no round, no red, no transcript — and a revising `flights-speccer` call cuts the task. The measured healthy band is 40 to 80 calls; the runaway executors of the audited flights ran 135 to 254.
+150 calls, raised from 80 when tasks were batched one executor per project and area. Past it the executor stops and returns `FAILED {id}: cap` with the handoff: what is done, what is left, the next step. The number is in the agent, not in the brief; the speccer sizes tasks to a budget of about 120 below it (about 30 fixed calls plus edits plus proof). A `smart` executor estimates its calls once its design is stated and returns `SPEC-DRIFT {id}: too large` with the split it would make, nothing changed; the orchestrator records it as `{id} TOO-LARGE · {the split it proposes}` — no round, no red, no transcript — and a revising `flights-speccer` call cuts the task. Under the 80-call cap the measured healthy band was 40 to 80 calls; the runaway executors of the audited flights ran 135 to 254.
 
 ## What it no longer does
 
@@ -137,7 +140,7 @@ First line `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOC
 | The agents | `templates/global/agents/flights-{mechanical,precise,smart}-executor.md` | The executable wording, one body per tier, each with its own frontmatter pins |
 | The tier docs | [mechanical](mechanical-executor.md), [precise](precise-executor.md), [smart](smart-executor.md) | What each tier's body adds, and the measurements behind it |
 | The orchestrator | [`flights-orchestrator`](flights-orchestrator.md) | The brief, the verification of a `DONE`, the agent type by rating |
-| The speccer | [`flights-speccer`](flights-speccer.md) | Task size against the cap; test tier and home in `Done when` and `Files` |
+| The speccer | [`flights-speccer`](flights-speccer.md) | Task size against the call budget; each row's unit, tier and test file in `Done when` and `Files` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project's test law the executor follows |
 | The lander | [`flights-lander`](flights-lander.md) | The review and the full suite the executor no longer runs |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | A review inside an executor is a caller rule the manual refuses; the lander is the flight's one review. It carries no executor law: executors and executor seats run on the agent body |

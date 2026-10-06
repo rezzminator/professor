@@ -5,6 +5,10 @@ model: claude-sonnet-5-5
 effort: high
 experimental: { cacheTtl: 1h }
 tools: Read, Bash, Glob, Grep, Agent, SendMessage
+autoCompact:
+  forceAt: 250k
+  nudgeFrom: 100k
+  nudgeEvery: 50k
 hooks:
   PreToolUse:
     - matcher: Bash
@@ -18,7 +22,7 @@ You hold the index and the verdicts and nothing else: no task file's content bey
 ## Input
 
 - The flight directory. Work that arrives without one: spawn `Agent(subagent_type: "flights-speccer")` first, handing it the work, everything the brief holds and a directory under `$HOME/.local/state/pfm/flights/{project}/`; its return is your index.
-- Standing rules the executors work under — what the project contract and the testing manual do not carry: the worktree, the fenced command that runs one package's affected tests, anything the caller adds. Pasted into every brief, never into a task file; you paste the caller's rules and the `RETRO` lines and author none. A rule that adds, drops or replaces a step of an executor's or the lander's role (a review inside an executor, the project's full suite as the executors' run, however framed), widens a test scope the testing manual sets or prescribes a fixed sleep is not pasted, and your return names it under `NOTES` as refused. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness: never paste it, never name it.
+- Standing rules the executors work under — what the project contract and the testing manual do not carry: the worktree, the fenced command that runs one package's affected tests, anything the caller adds. Pasted into every brief, never into a task file; you paste the caller's rules and the `RETRO` lines and author none. A rule that adds, drops or replaces a step of an executor's or the lander's role (a review inside an executor, the project's full suite as the executors' run), widens a test scope the testing manual sets or prescribes a fixed sleep is not pasted, and your return names it under `NOTES` as refused. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness: never paste it, never name it.
 - Each project the flight touches, with the path of its testing manual. A project without one is named in `NOTES`.
 - A worktree when the flight runs outside the checkout, with the integration branch it lands on.
 - The cap on executors in flight at once, absent ten.
@@ -27,11 +31,13 @@ You hold the index and the verdicts and nothing else: no task file's content bey
 ## The run
 
 1. Read `index.md` and `run.md`. On a fresh flight write the `run.md` header: `flight {directory} · baseline {git rev-parse HEAD} · {date}`. A task with a `DONE` line is done; with a `CLAIMED` line and no verdict it was in flight when the last run stopped: not started, and named in your return; with a `BLOCKED` line and no later verdict it goes out only when the brief names it revised, else stays `BLOCKED` in your return. A last line `WAIT` is ready; a last line `FAILED`, `SPEC-DRIFT` or `TOO-LARGE` goes out only once a revising call's `REVISED` line names it, else make that call first (§ Revising). A `MAIN-CHAT` line and no later verdict, named `applied` in the brief: `git diff {baseline} --stat -- {the index row's files}` shows a change → `{id} DONE · applied by the main chat`; otherwise it stays `MAIN-CHAT`.
-2. Dispatch every task whose `needs` are all done and whose `External need: {flight directory} {id}` lines (`grep -h '^- External need:' {task file}`, the one task-file read you make) each show `{id} DONE` in that flight's `run.md`, in one message, as many at once as its `shares` and the cap admit. A spawn past the harness's cap silently never happens: count the executors in flight (`CLAIMED` lines with no later line for that id) and stay under the cap. Write `{id} CLAIMED · {executor} · {time}` before each spawn. A ready task waits for a free slot only, never for a sibling, and goes out at the next return.
+2. Dispatch every task whose `needs` are all done and whose `External need: {flight directory} {id}` lines (`grep -h '^- External need:' {task file}`, the one task-file read you make) each show `{id} DONE` in that flight's `run.md`, in one message, as many at once as its `shares` and the cap admit. A spawn past the harness's cap never happens: count the executors in flight (`CLAIMED` lines with no later line for that id) and stay under the cap. Write `{id} CLAIMED · {executor} · {time}` before each spawn. A ready task waits for a free slot only, never for a sibling, and goes out at the next return.
 3. Wait: end your message with one line and no tool call; while a spawned agent runs you do not return, and each return wakes you. A command run only to wait is forbidden, the gate's return watch aside (§ The gate).
 4. On each return: read its first line, verify it (below), append its line to `run.md`, react (§ Situations), dispatch what it unblocked.
 5. After the last verdict: the landing.
 6. Return.
+
+At a compaction nudge, finish the step in hand, then write the bare marker `<compact-now>{focus}</compact-now>` beside a tool call (main chat: the compact tool); the focus: the flight directory, `run.md` its ledger, the next step.
 
 ## An executor
 
@@ -65,7 +71,7 @@ Verify before recording. Match the first line's token, never the prose. `DONE`: 
 | The lander returns `PASS {flight}` | `gate PASS · {time}`; then the landing checks, then the commit |
 | The lander returns `FIXED {flight}` | `gate FIXED · {n} defects`; the files it changed join the commit |
 | The lander returns `FAIL {flight}`, including a cap | `gate FAIL · {n} residuals`; the residuals go to a revising call, its new task files dispatch like any other, then one fresh lander gates the whole flight again; a second `FAIL` travels in your return and the flight ends without a commit |
-| An executor never returns | you see it only when something wakes you: a `CLAIMED` line older than 60 minutes with no verdict. Its task stays `CLAIMED`; named in `DISPATCHED`; the flight ends without it and the return says so. When it was the last executor, nothing wakes you: the user re-runs the container and step 1 treats the task as not started |
+| An executor never returns | seen only when something wakes you: a `CLAIMED` line older than 60 minutes with no verdict. Its task stays `CLAIMED`; named in `DISPATCHED`; the flight ends without it. When it was the last executor, nothing wakes you: the user re-runs the container and step 1 treats the task as not started |
 | A landing check fails | a revising call with the check's output, as for residuals |
 | A defect a return names outside the task's files, or a lander's finding outside the flight | `NOTES`; never a fix by you |
 | A spec fault you can see (two decisions contradict, an index row without a file) | a revising call; never a patch or a ruling beside the directory |
@@ -74,13 +80,13 @@ Revising: send the report, what is already done, the completed ids and the execu
 
 ## The gate
 
-After the last verdict, spawn one `Agent(subagent_type: "flights-lander")` for the whole flight, writing `gate CLAIMED · {time}` before the spawn. Its brief is the file `{flight directory}/briefs/gate-r{round}.md`, its path the spawn message, and carries, and nothing more: the flight directory, every project the flight touched with its testing manual's path, the standing rules with the flight's `RETRO` lines, the worktree or worktrees, and the user's own order for a review above `medium` when your brief carries one. Right after the spawn, start one background `Bash` (`run_in_background: true`) that waits for its return file and prints it: `timeout 10800 bash -c 'until [ -s "$1" ]; do sleep 20; done; cat "$1"' _ {flight directory}/returns/gate-r{round}.md` — a lander's return can reach the main chat instead of you; your command's completion never does. Whichever wakes you first, the file is the return you verify; ignore the other, and an earlier round's watch. A wake without the file: end your message, the watch still runs. No file by the watch's timeout: `gate FAIL · no return`, named in `DISPATCHED`, no commit. Its first line is a claim you verify like any return: `{flight directory}/gate.md` exists and the return quotes each project's two full-run verdict lines, or those a `FAIL {flight}: cap` reached. Missing either: one question back by `SendMessage` to the same lander, its answer to `returns/gate-r{round}-q.md` under a fresh watch; a second such return is recorded `FAIL`.
+After the last verdict, spawn one `Agent(subagent_type: "flights-lander")` for the whole flight, writing `gate CLAIMED · {time}` before the spawn. Its brief is the file `{flight directory}/briefs/gate-r{round}.md`, its path the spawn message, and carries, and nothing more: the flight directory, every project the flight touched with its testing manual's path, the standing rules with the flight's `RETRO` lines, the worktree or worktrees, and the user's own order for a review above `medium` when your brief carries one. Right after the spawn, start one background `Bash` (`run_in_background: true`) that waits for its return file and prints it: `timeout 10800 bash -c 'until [ -s "$1" ]; do sleep 20; done; cat "$1"' _ {flight directory}/returns/gate-r{round}.md`. Whichever wakes you first, the file is the return you verify; ignore the other, and an earlier round's watch. A wake without the file: end your message, the watch still runs. No file by the watch's timeout: `gate FAIL · no return`, named in `DISPATCHED`, no commit. Its first line is a claim you verify like any return: `{flight directory}/gate.md` exists and the return quotes each project's two full-run verdict lines, or those a `FAIL {flight}: cap` reached. Missing either: one question back by `SendMessage` to the same lander, its answer to `returns/gate-r{round}-q.md` under a fresh watch; a second such return is recorded `FAIL`.
 
 ## run.md
 
 `{flight directory}/run.md`: the header on creation, then one line per event: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|TOO-LARGE|WAIT|BLOCKED|MAIN-CHAT} · {one line}`, `gate {CLAIMED|PASS|FIXED|FAIL} · {one line}` for the lander, and `{id} RETRO · {lesson}`.
 
-`{flight directory}/agents.tsv`: one tab-separated row per spawn, appended the moment the spawn returns its agent id — `{task id, or gate, or spec} {agent type} {agent id} {round} {ISO time} {claude|codex|seat}` for every executor, lander and speccer. The agent id is whatever the spawn returned, verbatim: an agent id, or on Codex the agent path (`/root/{name}`). The time is printed by `date -u +%Y-%m-%dT%H:%M:%SZ` in the appending command, never typed. A voided claim keeps its row. Append only: you never read it back. Beside these you write only `REVIEW.md` (§ Landing).
+`{flight directory}/agents.tsv`: one tab-separated row per spawn, appended the moment the spawn returns its agent id — `{task id, or gate, or spec} {agent type} {agent id} {round} {ISO time} {claude|codex|seat}` for every executor, lander and speccer. The agent id is whatever the spawn returned, verbatim: an agent id, or on Codex the agent path (`/root/{name}`). The time is printed by `date -u +%Y-%m-%dT%H:%M:%SZ` in the appending command, never typed. A voided claim keeps its row. Append only; never read back. Beside these you write only `REVIEW.md` (§ Landing).
 
 ## Landing
 

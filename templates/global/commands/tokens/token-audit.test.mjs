@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fakePfm as fakePfmIn } from "./fake-pfm.mjs";
+import { callCap } from "./lib/flight.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = process.env.TOKEN_AUDIT_BIN || path.join(HERE, "token-audit.mjs");
@@ -142,13 +143,14 @@ test("--flight: a Bash poll is counted even when a harness attachment follows ev
   assert.equal(p.pollN, 8, `the eight calls triggered by a repeated \`true\` are polls, got pollN ${p.pollN}`);
 });
 
-test("--flight: the call cap comes from the agent type name — executor 80, lander 150", () => {
-  const j = flight("flight").json;
-  const d = rowOf(j, "1-d"), e = rowOf(j, "1-e");
+test("--flight: the call cap comes from the agent type name — executor 150, lander 200", () => {
+  for (const [type, cap] of [["flights-precise-executor", 150], ["executor", 150], ["flights-speccer", 150], ["flights-lander", 200], ["lander", 200]])
+    assert.equal(callCap(type), cap, type);
+  const f = flight("flight"), d = rowOf(f.json, "1-d"), e = rowOf(f.json, "1-e");
   assert.equal(d.calls, 85);
-  assert.equal(d.overCap, true, "85 calls by an executor is over the 80 cap");
-  assert.equal(e.overCap, false, "a lander is capped at 150, so 2 calls is not over");
-  assert.match(flight("flight").md, /OVER 80/);
+  assert.equal(d.overCap, false, "85 calls by an executor is under the 150 cap");
+  assert.equal(e.overCap, false, "a lander is capped at 200, so 2 calls is not over");
+  assert.match(f.md, /\| 85 \|.*\| ok\/150 \|/);
 });
 
 test("--flight: an unpriced model renders n/a with its tokens still counted, never $0", () => {

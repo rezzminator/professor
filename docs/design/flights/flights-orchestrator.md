@@ -38,7 +38,7 @@ The same body is the only description of the protocol. A second copy for the liv
 | Standing rules the executors work under | Where and with what the executors work, pasted into every brief: [Standing rules](#standing-rules) |
 | The projects and their testing manuals | Each project the flight touches, with its manual's path: it travels in every executor's and lander's brief. A project without one is a `NOTES` line |
 | A worktree | Used when the flight runs outside the checkout; otherwise the checkout |
-| The cap | Executors in flight at once; absent, ten. An executor's own cap (80 calls) lives in its agent; a `CLAIMED` line is stale after 60 minutes, the nested container's bound; a cross-harness seat is watched instead, by Monitors on its return file and on its `pfm chat watch` transitions |
+| The cap | Executors in flight at once; absent, ten. An executor's own cap (150 calls) lives in its agent; a `CLAIMED` line is stale after 60 minutes, the nested container's bound; a cross-harness seat is watched instead, by Monitors on its return file and on its `pfm chat watch` transitions |
 | The landing | Which checks run after the gate, whether gitter commits. Absent: no checks beyond the gate, no commit. The gate itself is never optional and its review effort is the lander's to size, unless the user ordered a level above `medium`: that order travels to the lander as given |
 
 ### Standing rules
@@ -221,7 +221,7 @@ The rulings above rest on measured results, collected in the runtime research of
 | Orchestrator calls | About two per task plus the landing | Polling, or per-step reads |
 | Executors dispatched vs returns | Equal | A silent loss |
 | Ready tasks left waiting | None, except for a free slot | A batch that waited for a sibling |
-| Executor calls | Between about 40 and 80 | Under: tasks cut too small; over: a task that should have been cut, or a cap that never fired |
+| Executor calls | Between about 40 and 120, the speccer's budget | Under: tasks cut too small; over: a task that should have been cut, or a cap that never fired |
 | Revising rounds | Rare | Specs that contradict themselves, or a stale directory |
 | Review findings left in a return | Few, all outside the task's files | A finding inside the task's files left unfixed |
 
@@ -229,7 +229,7 @@ The rulings above rest on measured results, collected in the runtime research of
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs on `claude-sonnet-5-5`, effort `high` |
+| The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs on `claude-sonnet-5-5`, effort `high`; `autoCompact` forced at 250k, nudged from 100k and every 50k after, the focus the flight directory with `run.md` its ledger |
 | The wait guard | `pfm internal orchestrator-wait`, attached in the agent's frontmatter | A Bash call that only waits (`echo`, `printf`, `true`, `:`, `sleep N`) is denied; design in [hooks.md](../hooks/hooks.md#agent-attached-hooks-not-machine-global) |
 | The containers | `templates/global/commands/flights/orchestrate-{nested,live,cross-harness}.md` | The substitutions, nothing of the manual restated; the nested command's roads for a `BLOCKED` ruling, a `MAIN-CHAT` task and a `LANDED` or `NOT LANDED` row |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The ladder's third rung ends here; the universal laws; the lander as the only review |
@@ -240,7 +240,7 @@ The rulings above rest on measured results, collected in the runtime research of
 
 ## Open items
 
-- The caps (80 tool calls per executor, 150 per lander, ten executors in flight at once) are first values, held by prompt alone: no hook enforces them, by ruling. Measure against the next flight.
+- The caps (150 calls per executor, 200 per lander, ten executors in flight at once) are first values, held by prompt alone: no hook enforces them, by ruling. Measure against the next flight.
 - The cross-harness seats watch's `--quiet-after 900` is a first value: ordinary working seats go quiet for 20 seconds and more; measure against the next flight.
 - Whether `/code-review` runs inside a `flights-lander` sub-agent (the Skill tool at depth); verify on the next nested flight, and measure the gate's cost per flight.
 - The lander carries no `shares`: it runs alone after the last verdict, and each flight has its own worktree or runs on the main branch, so nothing contends with it. No gate points inside a large flight: the gate runs once, at the landing.

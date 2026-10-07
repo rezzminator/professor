@@ -181,3 +181,29 @@ Amend: judgment — a behaviour probe through `chat_new` runs one chat, reads it
 ## 2026-10-02 — two pfm surfaces answer "fine" when they failed
 Observed: `pfm chat new` returned `the chat drew nothing within 30s` (exit 1) for ttl-n-5m-1 and ttl-s-1h-2, both running normally; `--settle 90` did not change the 30s check. `.claude/scripts/dev.sh iso run bash -c 'cd pfm && go test …'` printed `go: cannot find main module` and then `all steps passed`.
 Amend: pfm chat new — the draw check honours `settle` and confirms the pane before reporting a failed launch; .claude/scripts/dev.sh#iso run — exit and report the command's own status, never "all steps passed" after it failed.
+
+## 2026-10-07 — v0.79.0 update: host conflicts survive the rollback
+
+Observed: updating from `0.79.0-alpha` with `pfm update --to v0.79.0` exited 1. The candidate installer exited 4 on account identity entries in the shared Claude store. Source and binary rolled back, but reapplying the previous installer also exited 4 on the same host; the updater correctly printed `rollback residue`. Post-rollback `pfm doctor` exited 3 with six failures and 110 warnings, while `pfm config validate` exited 0. A restored source revision and version string did not mean that host integration had been restored.
+
+Recovery: inspect the actual account/store paths and live-process config directories; compare stable identity fields without exposing their values; quarantine conflicting entries with verified file/tree manifests instead of executing the printed removal commands. Preserve the established account data. Five misplaced store entries and one account cache were preserved intact. The retry exited 0, installed `v0.79.0`, and a subsequent `pfm install --yes` exited 0. All three accounts retained their identity fields. Unrelated untracked work was stashed by explicit path, restored, and checked byte-for-byte on both attempts.
+
+Amend: investigate preflight before a binary/source swap when the current host already has operator-owned conflicts. Keep source rollback, binary rollback and installer-state restoration as separately evidenced results. A failed reapply must retain its exact diagnostics and name the remaining operator action; do not reduce it to "rolled back safely". Prove the failure and recovery with a fixture containing valid account data plus misplaced store identity, without live credentials. These are follow-up requirements, not a claim that the updater repair has shipped.
+
+## 2026-10-07 — an account cache changes ownership across the update
+
+Observed: the installed alpha classified `.last-update-result.json` as shared data and blocked a real copy in an account directory. Stable v0.79.0 classifies it as per-account data and retires the shared copy. Satisfying the old host check with a shared-store link therefore left two new `retired-store-entry` warnings after the successful update. The new installer explicitly skipped retirement because that account had live chats; rerunning installation while those chats remained live still exited 0 with the migration skipped.
+
+Amend: cover this exact old-to-new ownership transition in the adopter rehearsal. Explain the live-chat precondition before updating, and distinguish a successfully installed binary from deferred migration work. Retain and restore the original account cache when appropriate; never overwrite account-owned data or bypass the live-account guard. Verify archival and unlinking after the account becomes idle. Determine whether the old-binary precheck can avoid a temporary repair that the target release immediately retires.
+
+## 2026-10-07 — the source clone gets inconsistent project-update verdicts
+
+Observed: after the successful v0.79.0 update, the updater printed `NOT-MANAGED` and explained that a missing `.professor/baseline.json` is expected in the Professor source clone. Running the recommended `pfm doctor --project-updates` in that same clone exited 3 with `FAILED` and suggested `pfm update adopt` or `pfm init`. No baseline was created: this was the framework source, not an adopted project.
+
+Amend: make the source-clone distinction consistent across the updater and standalone project report. An adopted project with a missing baseline must still report its real failure; the source clone should not be steered into scaffolding or adoption. Add a paired source-clone/adopter fixture and preserve exit/output parity for both commands.
+
+## 2026-10-07 — successful installation is not a zero-warning health result
+
+Observed: the repaired update and explicit installer both exited 0, but final `pfm doctor` exited 1 with 112 warnings and no failure rows. Account links were healthy, managed plugins were healthy, and the reminder scheduler was armed with no overdue or failed jobs. Two warnings were the deferred account-cache migration above; the remainder included retained operator/plugin files and backups, stale state, an orphaned-kill audit, an unfollowable pane, and a browser worker that reprovisions on its next browser fetch. The release's blanket "doctor exits 0" action was not achieved. No unrelated operator data was deleted or warning filter changed to manufacture a clean result.
+
+Amend: release actions should distinguish blocking failures, actionable migration warnings, explicitly retained operator state and deferred runtime provisioning. Preserve the full private diagnostic record; publish only a sanitized incident summary. Installation success, migration completion and a zero-warning doctor are three different acceptance checks.

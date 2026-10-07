@@ -36,7 +36,7 @@ The agent is pinned `model: opus`, `effort: high`.
 ## The run
 
 1. Read every testing manual, `requirements.md` and the diff.
-2. Open each project's gate: format, lint, type check and the full suite, once each, watched; the projects' gates may run in parallel as background commands. What they report is fixed.
+2. Open each project's gate: its testing manual's static-check command over the flight's files in it, and the full suite with the manual's floors, once each, watched; the projects' gates may run in parallel as background commands. What they report is fixed, rerunning only the failing test until it is green.
 3. `/code-review {effort}` once over the flight's whole diff, every project in it, so both sides of every contract change are read together, at a level the lander sizes itself from `git diff {baseline} --stat` over the flight's files: `low`, or `medium` beyond 15 files or 800 changed lines, and a level above `medium` runs only on the user's own order carried in the brief. The measured cases: a lander that stepped a `smart` task past `high` into `max` spent more on one review than on every executor of its flight together, and one capped at `xhigh` still launched `xhigh` on a small port because the diff it sized carried a pre-existing uncommitted feature. Absent that order, the brief names no effort. The review runs forked in the background: the lander ends its turn and takes the findings from the review's return; a lander that looped over transcript mtimes to guess the review's end waited on a heuristic any busy sibling agent defeats. Every finding inside the flight's files is fixed; one outside them is recorded untouched.
 
    The `{effort}` slot is also the Codex mapping's second source form: `pfm/internal/codexgen/review.go` compiles a written level into a `codex review` at that baked effort scoped to one task's files, and the slot form into a flight-scoped review whose `model_reasoning_effort` stays `{effort}` for the lander to fill at run time.
@@ -44,7 +44,7 @@ The agent is pinned `model: opus`, `effort: high`.
 5. The validity sweep: every test file the diff adds or touches, read against the placement, tier, economy and validity laws of its own project's manual. Each violation is a finding in its class. Its economy half folds the duplicate tests it finds (a decision tested in two units keeps the test of the unit that makes it, every case the fold removes kept as a case of that test) and deletes the assertions it finds catching nothing (a test id that only exists, an echo of a mock call, copy asserted in every variant or locale, a snapshot of the fixture); finding none, it removes nothing.
 6. Adversarial tests, written into the module that owns the contract, as cases or assertions of its existing test where one fits — there is no lander-owned directory. A test is accepted only after it was watched failing against the code it attacks.
 7. Fixes (next section), then the affected tests.
-8. Close each project's gate: the full suite once more, and the manual's floors (coverage minimums and the like) checked as rows of this gate. A floor is the lander's, never a requirement row. Exactly two full runs per project; a full run is never looped to chase a fix.
+8. Close each project's gate. After the last fix in a project, its static-check command once more over the files changed there; a red fixed and the same command run again. A project whose last full run passed is closed by it, its floors (coverage minimums and the like) checked on that run; a floor is the lander's, never a requirement row. Later fixes are proven by their own tests. A project whose last full run failed runs the full suite once more after each of its fixes is green alone, until a full run passes.
 
 ## It fixes what it finds
 
@@ -62,7 +62,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 ## Bounds
 
 - One lander per flight, spawned once after the last verdict, covering every project the flight touched.
-- Two full-suite runs per project.
+- One full-suite run per project; another only after a failed one.
 - 200 tool calls, raised from 150 with the executors' batching; past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
 - Every verdict names its executed artifact: the run log, the report file or the pinning test. A suite not watched running is not a pass.
 
@@ -70,7 +70,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 `{flight directory}/gate.md`: the attack map, then one row per finding — project · source (checks, review, attack, sweep) · area · failing test · reproduction · expected · status (fixed, residual, outside the flight).
 
-The return's first line is `PASS {flight}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {flight}: {n} defects fixed` or `FAIL {flight}: {n} residuals`, `{flight}` being the flight directory's name; then each project's two full-run verdict lines as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([the foreman's return](flights-foreman.md#return)).
+The return's first line is `PASS {flight}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {flight}: {n} defects fixed` or `FAIL {flight}: {n} residuals`, `{flight}` being the flight directory's name; then each project's last full-run verdict line as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([the foreman's return](flights-foreman.md#return)).
 
 The return is also a file. The lander's last act before returning writes it, verbatim, to `{flight directory}/returns/gate-r{round}.md`, `{round}` read from its brief file's name: the directory created, the text written under a dot-prefixed temporary name in it and moved onto that name, so the file appears whole and a directory watcher's glob never sees the temporary. An answer to a question back goes the same way to the file the question names. The lander ends turns mid-gate (its gate runs may be background commands, and its review runs forked), and a return sent after such a turn can reach the main chat instead of the root foreman; the foreman's own background wait on this file always reaches it ([flights-foreman](flights-foreman.md#waiting)). The background gate runs stay allowed.
 

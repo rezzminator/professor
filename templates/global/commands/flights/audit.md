@@ -22,7 +22,7 @@ An anchor you cannot read is a finding ("failed to look"), never an absence ("no
 | `audit.md` | the directory | The previous audit, for a delta |
 | Git | `git diff {baseline} --stat`, `git diff {baseline} -- {unit}`, `git log {baseline}..HEAD`, `git status --porcelain` | What changed, per unit and outside every unit |
 | Transcripts | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-*.jsonl`, default `~/.claude`, one flat directory whatever the depth; the `.meta.json` beside each names its `agentType` and `spawnDepth`; a seat's through `chat_read` | Calls per agent against its cap, peak context, what each foreman read and when, waits, children spawned |
-| The gate | `gate.md` and the `flights-lander` transcript of each round: each project's two full runs, the `/code-review` run and its effort, the attack map, the tests it wrote; the return's `GATE` row is the claim checked against them | Every changed hunk mapped; findings and their terminal state |
+| The gate | `gate.md` and the `flights-lander` transcript of each round: each project's full runs (a second only after a failed one), the `/code-review` run and its effort, the attack map, the tests it wrote; the return's `GATE` row is the claim checked against them | Every changed hunk mapped; findings and their terminal state |
 | `REVIEW.md` | the directory, for a flight that merged | Every `gate.md` finding as `F{n}` with its status; one missing or contradicted is a finding |
 | Spend | your own run of `node ~/.claude/commands/tokens/token-audit.mjs --flight {directory} --metrics-out {a scratch file}`; `metrics.md` and the `COST` row are claims compared against it | Per agent: calls, context, tokens, price, failed commands, poll calls, re-reads, compactions, over cap; an `UNMATCHED` row is a finding |
 
@@ -35,7 +35,7 @@ An anchor you cannot read is a finding ("failed to look"), never an absence ("no
 5. Conformance spot-check on the highest-stakes rows (protected-data channels, contracts): each row against the code and its test, mechanically where it can be, by reading where it cannot.
 6. Cost and cadence: calls per foreman against its 250 cap, the lander against 200; a cap reached that returned `DONE`; poll chains (`sleep`, `echo idle`, a repeated log peek); a turn ended while a child, a watch or a gate still ran; any per-step report.
 7. Liveness, in flight only: a transcript still growing, a seat's watch lines, a pane captured full-screen and judged from process evidence; an empty capture is a failed probe, never a quiet seat.
-8. Landing: one lander for the flight; `gate.md` holds both full runs of every project touched; each new lander test was watched failing; every finding is terminal; the commit sha exists and its diff matches the flight's; a landed sha is on the integration branch it names.
+8. Landing: one lander for the flight; `gate.md` holds every project's last full run, passed; each new lander test was watched failing; every finding is terminal; the commit sha exists and its diff matches the flight's; a landed sha is on the integration branch it names.
 
 ## Report
 

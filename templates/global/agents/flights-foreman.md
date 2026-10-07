@@ -69,7 +69,7 @@ A bulk edit whose every line you already fixed (a rename across many files) may 
 
 ## Landing
 
-Spawn one `Agent(subagent_type: "flights-lander")` for the whole flight, writing `gate CLAIMED · {time}` first. Its brief file `{flight directory}/briefs/gate-r{round}.md` carries only: the flight directory, every touched unit with its testing manual's path, the standing rules with the flight's `RETRO` lines, the worktree, and the user's own order for a review above `medium` when the request carries one. Right after the spawn, start the same background watch on `{flight directory}/returns/gate-r{round}.md`. Whichever wakes you first, the file is the return you verify; a wake without the file: end your message, the watch still runs; no file by the watch's timeout is `gate FAIL · no return`. Its first line is a claim: `{flight directory}/gate.md` exists and the return quotes each project's two full-run verdict lines. Missing either: one question back by `SendMessage` to the same lander, its answer to `returns/gate-r{round}-q.md` under a fresh watch; a second such return is `gate FAIL`. Record `gate PASS|FIXED|FAIL` in `run.md`; write `REVIEW.md` from `gate.md` (each finding as `F{n}` with `status: resolved @{sha}` or `status: waived — outside the flight`) when the caller's landing merges through a git writer that reads it; a commit or merge goes to the repository's git writer only when the caller ordered it and the gate is `PASS` or `FIXED`.
+Spawn one `Agent(subagent_type: "flights-lander")` for the whole flight, writing `gate CLAIMED · {time}` first. Its brief file `{flight directory}/briefs/gate-r{round}.md` carries only: the flight directory, every touched unit with its testing manual's path, the standing rules with the flight's `RETRO` lines, the worktree, and the user's own order for a review above `medium` when the request carries one. Right after the spawn, start the same background watch on `{flight directory}/returns/gate-r{round}.md`. Whichever wakes you first, the file is the return you verify; a wake without the file: end your message, the watch still runs; no file by the watch's timeout is `gate FAIL · no return`. Its first line is a claim: `{flight directory}/gate.md` exists and the return quotes each project's last full-run verdict line. Missing either: one question back by `SendMessage` to the same lander, its answer to `returns/gate-r{round}-q.md` under a fresh watch; a second such return is `gate FAIL`. Record `gate PASS|FIXED|FAIL` in `run.md`; write `REVIEW.md` from `gate.md` (each finding as `F{n}` with `status: resolved @{sha}` or `status: waived — outside the flight`) when the caller's landing merges through a git writer that reads it; a commit or merge goes to the repository's git writer only when the caller ordered it and the gate is `PASS` or `FIXED`.
 
 ## run.md
 
@@ -100,7 +100,7 @@ DECIDE {design} · rejected: {alternative — why}, … | ruled
 DOORS {symbol}: {path:line} built, {path:line} out — {why}, … | none
 UNITS {unit} · {owner: me | child agent id} · {verdict} · {check line as printed}, …
 TESTS {test name} · red {its failing line in the red log} · green rc=0, …
-GATE {PASS|FIXED|FAIL} · {each project's two full-run verdict lines} · {residuals} | child
+GATE {PASS|FIXED|FAIL} · {each project's last full-run verdict line} · {residuals} | child
 UNPROVEN {what} | none
 OUTSIDE {defect found beyond the request, untouched} | none
 MAP {project-map line found wrong} | none

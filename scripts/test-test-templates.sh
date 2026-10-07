@@ -63,7 +63,7 @@ chmod +x "$T/stub.sh" "$R/.claude/scripts/dev.sh"
 cp "$T/stub.sh" "$T/bin/node"; cp "$T/stub.sh" "$T/bin/python3"
 cp "$HERE/.claude/scripts/unit-path.sh" "$R/.claude/scripts/unit-path.sh"
 cp "$SUT" "$R/.claude/scripts/test-templates.sh" || echo "test-test-templates: cannot copy $SUT" >&2
-for f in scripts/test-pfm-guard.sh scripts/test-codex-sync.sh scripts/test-format-md.sh scripts/test-dev-report.sh \
+for f in scripts/test-pfm-guard.sh scripts/test-codex-sync.sh scripts/test-format-md.sh scripts/test-dev-report.sh scripts/test-flight-templates.sh \
   scripts/test-plain.sh scripts/test-x.py infra/fence/lanes/tests/y_test.sh; do
   mkdir -p "$R/$(dirname "$f")"; cp "$T/stub.sh" "$R/$f"
 done
@@ -179,6 +179,9 @@ sut_case scripts/test-codex-sync.sh templates/project/scripts/codex-sync.sh .cla
 sut_case scripts/test-pfm-guard.sh templates/project/scripts/pfm-guard.sh .claude/scripts/pfm-guard.sh
 sut_case scripts/test-format-md.sh templates/project/scripts/format-md.sh .claude/scripts/format-md.sh
 sut_case scripts/test-dev-report.sh .claude/scripts/dev.sh
+
+reset; go scripts/test-flight-templates.sh
+chk "route: flight contracts run once as a plain shell suite" ran 0 "$(want test-flight-templates.sh)"
 
 reset; go "$X" scripts/test-plain.sh scripts/test-x.py
 chk "one container: every invocation of a selection runs inside ONE iso run" bash -c '[ "$(wc -l < "$0/dev.argv")" = 1 ] && grep -q "^dev iso run " "$0/dev.argv" && [ "$(wc -l < "$0/calls")" = 3 ]' "$REC"

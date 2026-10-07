@@ -432,6 +432,56 @@ SID_B = "bbbbbbbb-1111-2222-3333-444444444444"
 
 
 class NameTest(Fixture):
+    def test_broken_project_link_refuses_unique_and_absent_names(self):
+        self.session(SID_A, ("custom-title", "Audit Desk"))
+        link = os.path.join(self.home, ".claude", "projects", "unreadable-project")
+        os.symlink(os.path.join(self.home, "missing-project"), link)
+        for name in ("Audit Desk", "Nobody Here"):
+            with self.subTest(name=name):
+                proc = self.run_tp("locate", name)
+                self.assertEqual(proc.returncode, 2, proc.stdout)
+                self.assertIn("INCOMPLETE", proc.stderr)
+                self.assertIn(link, proc.stderr)
+
+    def test_linked_project_discovery_includes_duplicates_and_stops_cycles(self):
+        root = os.path.join(self.home, ".claude", "projects")
+        linked = os.path.join(self.home, "linked-project")
+        path = os.path.join(linked, f"{SID_B}.jsonl")
+        write_jsonl(path, session_records(SID_B, ("custom-title", "Linked Desk")))
+        os.symlink(linked, os.path.join(root, "linked"))
+        os.symlink(linked, os.path.join(root, "alias"))
+        os.symlink(root, os.path.join(linked, "cycle"))
+        with self.subTest(matches="linked only, aliases and cycle"):
+            self.assertEqual(self.ok("locate", "Linked Desk").strip(), path)
+        other = self.session(SID_A, ("custom-title", "Linked Desk"))
+        with self.subTest(matches="real and linked"):
+            proc = self.run_tp("locate", "Linked Desk")
+            self.assertEqual(proc.returncode, 2, proc.stdout)
+            self.assertIn("AMBIGUOUS Linked Desk — 2 transcripts", proc.stderr)
+            self.assertIn(path, proc.stderr)
+            self.assertIn(other, proc.stderr)
+
+    def test_root_discovery_errors_refuse_unique_and_absent_names(self):
+        self.session(SID_A, ("custom-title", "Audit Desk"))
+        configured = os.path.join(self.home, "configured")
+        root = os.path.join(configured, "projects")
+        os.makedirs(root)
+        scope = runpy.run_path(SCRIPT)
+        original_stat = os.stat
+        for error in (PermissionError("injected root stat failure"),
+                      OSError("injected root IO failure"),
+                      FileNotFoundError("injected configured root missing")):
+            def probe(candidate, *args, **kwargs):
+                if os.fspath(candidate) == root:
+                    raise error
+                return original_stat(candidate, *args, **kwargs)
+            for name in ("Audit Desk", "Nobody Here"):
+                with self.subTest(error=error, name=name), \
+                        mock.patch.dict(os.environ, {"HOME": self.home, "CLAUDE_CONFIG_DIR": configured}), \
+                        mock.patch.object(os, "stat", side_effect=probe):
+                    with self.assertRaisesRegex(scope["Failure"], "INCOMPLETE.*injected"):
+                        scope["by_name"](name, [])
+
     def test_explicit_name_roots_include_nested_sessions_and_deduplicate_aliases(self):
         root = os.path.join(self.home, "extra")
         path = os.path.join(root, "nested", "project", f"{SID_A}.jsonl")
@@ -450,7 +500,7 @@ class NameTest(Fixture):
             if candidate == other:
                 raise OSError("injected read failure")
             return original(candidate)
-        with self.subTest(candidate="file"), mock.patch.dict(lookup.__globals__, {"claude_roots": lambda: [os.path.dirname(os.path.dirname(path))],
+        with self.subTest(candidate="file"), mock.patch.dict(lookup.__globals__, {"claude_roots": lambda unreadable=None: [os.path.dirname(os.path.dirname(path))],
                                                  "tail_bytes": read}):
             with self.assertRaisesRegex(scope["Failure"], "INCOMPLETE.*injected read failure"):
                 lookup("Audit Desk", [])
@@ -461,7 +511,7 @@ class NameTest(Fixture):
             if candidate == unreadable:
                 raise PermissionError("injected directory failure")
             return original_scan(candidate)
-        with self.subTest(candidate="directory"), mock.patch.dict(lookup.__globals__, {"claude_roots": lambda: [os.path.dirname(os.path.dirname(path))]}), \
+        with self.subTest(candidate="directory"), mock.patch.dict(lookup.__globals__, {"claude_roots": lambda unreadable=None: [os.path.dirname(os.path.dirname(path))]}), \
                 mock.patch.object(os, "scandir", side_effect=scan):
             with self.assertRaisesRegex(scope["Failure"], "INCOMPLETE.*injected directory failure"):
                 lookup("Audit Desk", [os.path.dirname(unreadable)])

@@ -57,7 +57,7 @@ func skillSSHCommandNoninteractive(command string) bool {
 				if index >= len(words) {
 					return false
 				}
-			} else if len(word) != 2 || !strings.HasPrefix(word, "-") || strings.IndexByte("46AaCfgKkMNnqsTtVXxYy", word[1]) < 0 {
+			} else if len(word) != 2 || !strings.HasPrefix(word, "-") || strings.IndexByte("46AaCfgKkMNnqsTtvVXxYy", word[1]) < 0 {
 				return false
 			}
 			continue

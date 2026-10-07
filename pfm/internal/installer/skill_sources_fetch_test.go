@@ -718,6 +718,10 @@ func TestSkillGitSSHTransportAndOptions(t *testing.T) {
 	}{
 		{name: "spoofed-option", command: "ssh -i /keys/BatchMode=yes", args: []string{"ls-remote", "--", "git@example.invalid:repo", "HEAD"}, errText: "noninteractive"},
 		{name: "real-option", command: "ssh -o BatchMode=yes -i '/keys/private key'", args: []string{"ls-remote", "--", "ssh://example.invalid/repo", "HEAD"}, want: "ssh -o BatchMode=yes -i '/keys/private key'"},
+		{name: "verbose-option", command: "ssh -v -o BatchMode=yes", args: []string{"ls-remote", "--", "git@example.invalid:repo", "HEAD"}, want: "ssh -v -o BatchMode=yes"},
+		{name: "repeated-verbose-option", command: "ssh -v -v -v -o BatchMode=yes", args: []string{"ls-remote", "--", "git@example.invalid:repo", "HEAD"}, want: "ssh -v -v -v -o BatchMode=yes"},
+		{name: "verbose-interactive", command: "ssh -v -o BatchMode=no -o BatchMode=yes", args: []string{"ls-remote", "--", "git@example.invalid:repo", "HEAD"}, errText: "noninteractive"},
+		{name: "verbose-spoofed-option", command: "ssh -v -i /keys/BatchMode=yes", args: []string{"ls-remote", "--", "git@example.invalid:repo", "HEAD"}, errText: "noninteractive"},
 		{name: "https-custom-command", command: "ssh -i key", args: []string{"ls-remote", "--", "https://example.invalid/repo", "HEAD"}, want: "ssh -o BatchMode=yes"},
 		{name: "local-custom-wrapper", program: "wrapper", args: []string{"rev-parse", "HEAD"}, want: "unset"},
 		{name: "first-option-wins", command: "ssh -o BatchMode=no -o BatchMode=yes", args: []string{"clone", "--", "git@example.invalid:repo", "target"}, errText: "noninteractive"},

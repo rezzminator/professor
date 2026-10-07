@@ -318,12 +318,17 @@ checks_templates_dev_report() {
 
 checks_templates_format_md() {
   head_ "templates — format-md hook hands rumdl's unfixed issues to the agent"
-  if bash "$REPO_ROOT/scripts/test-format-md.sh" "$REPO_ROOT/templates/project/scripts/format-md.sh" && bash "$REPO_ROOT/scripts/test-format-md.sh" "$REPO_ROOT/.claude/scripts/format-md.sh"; then
+  if bash "$REPO_ROOT/scripts/test-format-md-readiness.sh" && bash "$REPO_ROOT/scripts/test-format-md.sh" "$REPO_ROOT/templates/project/scripts/format-md.sh" && bash "$REPO_ROOT/scripts/test-format-md.sh" "$REPO_ROOT/.claude/scripts/format-md.sh"; then
     ok "format-md exits 2 with one UNFIXED line per issue rumdl cannot fix, 0 on a clean file"
   else
     fail_step "format-md regression FAILED — an unfixed rumdl issue must reach the agent as exit 2 with UNFIXED lines (see output)"
   fi
 
+}
+
+checks_templates_flight_templates() {
+  head_ "templates — flight prompt contracts"
+  run "templates: flight prompt contracts" -- bash "$REPO_ROOT/scripts/test-flight-templates.sh"
 }
 
 checks_templates_unit_script() { # <name>: scripts/test-<name>.sh, the self-test of .claude/scripts/<name>.sh, on its default script
@@ -427,6 +432,7 @@ checks_templates() {
   checks_templates_pfm_guard
   checks_templates_dev_report
   checks_templates_format_md
+  checks_templates_flight_templates
   checks_templates_unit_script check-pfm
   checks_templates_unit_script check-templates
   checks_templates_unit_script test-pfm
@@ -869,6 +875,7 @@ gate_run() { # pfm, templates, or all
     steps_add templates.pfm-guard checks_templates_pfm_guard
     steps_add templates.dev-report checks_templates_dev_report
     steps_add templates.format-md checks_templates_format_md
+    steps_add templates.flight-templates checks_templates_flight_templates
     steps_add templates.check-pfm-tests checks_templates_unit_script check-pfm
     steps_add templates.check-templates-tests checks_templates_unit_script check-templates
     steps_add templates.test-pfm-tests checks_templates_unit_script test-pfm

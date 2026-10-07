@@ -28,7 +28,7 @@ case "$1" in
   fmt)
     if [[ -n ${STUB_FMT_GATE:-} ]]; then
       printf 'ready\n' > "$STUB_FMT_GATE/ready"
-      read -r release < "$STUB_FMT_GATE/release"
+      while [[ ! -f "$STUB_FMT_GATE/release" ]]; do sleep 0.1; done
     fi
     exit "${STUB_FMT_RC:-0}" ;;
   check)
@@ -122,13 +122,30 @@ else bad "a missing rumdl" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
 # Both hooks report standing uncommitted diagnostics once per session.
 gate="$T/overlap"
-mkdir -p "$gate" && mkfifo "$gate/ready" "$gate/release" || exit 2
+mkdir -p "$gate" || exit 2
 printf '{"session_id":"overlap","tool_input":{"file_path":"%s"}}' "$C/docs/dev/a.md" |
   STUB_FMT_GATE="$gate" STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" \
     timeout 15 bash "$HOOK" > "$gate/first.out" 2> "$gate/first.err" &
 first_hook=$!
 # The formatter seam parks the first actor inside its snapshot transaction.
-read -r ready < "$gate/ready"
+for ((tick=0; tick<50; tick++)); do
+  [[ ! -f "$gate/ready" ]] || break
+  kill -0 "$first_hook" 2>/dev/null || break
+  sleep 0.1
+done
+if [[ ! -f "$gate/ready" ]]; then
+  if kill -0 "$first_hook" 2>/dev/null; then
+    reason='timed out waiting for formatter'
+    kill -TERM "$first_hook" 2>/dev/null || true
+    wait "$first_hook" || true
+  else
+    wait "$first_hook"; first_rc=$?
+    reason="hook exited before formatter readiness (exit $first_rc)"
+  fi
+  bad "formatter readiness FAILED — $reason" "$(cat "$gate/first.err")"
+  shtest_end
+  exit 1
+fi
 ln -s a.md "$C/docs/dev/alias.md" || exit 2
 STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=0 TMPDIR="$T/cache" HOOK_SESSION=overlap hook "$T/link/docs/dev/alias.md"
 if [[ $RC == 2 && $ERR == *'diagnostic snapshot busy'* ]]; then ok "an overlapping alias hook refuses the active snapshot transaction"

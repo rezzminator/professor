@@ -47,10 +47,41 @@ def fail(msg):
 
 # ---------------------------------------------------------------- resolution
 
-def claude_roots():
-    bases = [os.environ["CLAUDE_CONFIG_DIR"]] if os.environ.get("CLAUDE_CONFIG_DIR") else []
-    bases += [os.path.expanduser("~/.claude")] + sorted(glob.glob(os.path.expanduser("~/.cc/*")))
-    return unique(os.path.join(b, "projects") for b in bases if os.path.isdir(os.path.join(b, "projects")))
+def claude_roots(unreadable=None):
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    bases = [configured] if configured else []
+    bases.append(os.path.expanduser("~/.claude"))
+    accounts = os.path.expanduser("~/.cc")
+    def record(path, error):
+        if unreadable is not None:
+            unreadable.append(f"{path} ({error})")
+    try:
+        with os.scandir(accounts) as entries:
+            for entry in entries:
+                try:
+                    if stat.S_ISDIR(entry.stat().st_mode):
+                        bases.append(entry.path)
+                except OSError as error:
+                    record(entry.path, error)
+    except FileNotFoundError as error:
+        if os.path.lexists(accounts):
+            record(accounts, error)
+    except OSError as error:
+        record(accounts, error)
+    roots = []
+    for base in unique(bases):
+        path = os.path.join(base, "projects")
+        try:
+            if stat.S_ISDIR(os.stat(path).st_mode):
+                roots.append(path)
+            else:
+                record(path, "not a directory")
+        except FileNotFoundError as error:
+            if base == configured or os.path.lexists(path):
+                record(path, error)
+        except OSError as error:
+            record(path, error)
+    return roots
 
 
 def codex_homes():
@@ -125,10 +156,24 @@ def chat_name(tail):
 def by_name(target, extra_roots):
     """A target that is no id, prefix or path is a Claude chat name (Codex names are not looked up)."""
     files, unreadable = [], []
-    for root in unique(os.path.realpath(r) for r in claude_roots() + list(extra_roots)):
-        for folder, _, names in os.walk(root, onerror=lambda error: unreadable.append(str(error))):
-            files += [os.path.join(folder, name) for name in names
-                      if name.endswith(".jsonl") and not name.startswith(("agent-", "rollout-"))]
+    pending, visited = claude_roots(unreadable) + list(extra_roots), set()
+    while pending:
+        folder = os.path.realpath(pending.pop())
+        if folder in visited:
+            continue
+        visited.add(folder)
+        try:
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    try:
+                        if stat.S_ISDIR(entry.stat().st_mode):
+                            pending.append(entry.path)
+                        elif entry.name.endswith(".jsonl") and not entry.name.startswith(("agent-", "rollout-")):
+                            files.append(entry.path)
+                    except OSError as error:
+                        unreadable.append(f"{entry.path} ({error})")
+        except OSError as error:
+            unreadable.append(f"{folder} ({error})")
     files = unique(os.path.realpath(f) for f in files)
     wanted, hits = target.casefold(), []
     for path in files:

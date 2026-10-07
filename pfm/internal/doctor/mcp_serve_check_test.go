@@ -456,6 +456,25 @@ func TestMCPServeProcessesDoctorScopesCommandReadsByIdentity(t *testing.T) {
 		notWant      string
 	}{
 		{
+			name:         "confirmed zombie cannot serve MCP",
+			pid:          50000700,
+			identity:     gather.ProcessIdentity{EffectiveUID: currentUID, Command: "pfm", Zombie: true},
+			commandErr:   syscall.EINVAL,
+			wantWarnings: 0,
+			want:         []string{"doctor: mcp-serve clean checked=0"},
+			notWant:      "UNREAD",
+		},
+		{
+			name:         "live EINVAL is unreadable",
+			pid:          50000709,
+			identity:     gather.ProcessIdentity{EffectiveUID: currentUID, Command: "pfm"},
+			commandErr:   syscall.EINVAL,
+			wantReads:    1,
+			wantWarnings: 1,
+			want:         []string{"doctor: mcp-serve UNREAD"},
+			notWant:      "clean",
+		},
+		{
 			name:         "other owner is excluded before command read",
 			pid:          50000701,
 			identity:     gather.ProcessIdentity{EffectiveUID: currentUID + 1, Command: "pfm"},

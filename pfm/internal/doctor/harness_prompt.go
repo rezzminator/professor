@@ -507,6 +507,13 @@ func captureHarnessPromptWithDeps(
 		captured, err := decodeHarnessCapture(body)
 		captured.CLIVersion = version
 		if verboseDir != "" {
+			if writeErr := deps.WriteVerboseFile(
+				verboseDir,
+				"harness-prompt-"+model+".request.json",
+				body,
+			); writeErr != nil {
+				return captured, errors.Join(err, fmt.Errorf("write harness capture request evidence: %w", writeErr))
+			}
 			if hitsErr := writeHarnessSinkHits(verboseDir, model, hits); hitsErr != nil {
 				return captured, errors.Join(err, fmt.Errorf("write harness sink hit evidence: %w", hitsErr))
 			}

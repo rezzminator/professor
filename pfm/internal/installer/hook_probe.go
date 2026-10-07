@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,8 +172,9 @@ func executableVerdict(path string) string {
 }
 
 // probeCodexHooks reads every configured Codex home's hooks.json for the one
-// hook pfm owns there and for pfm residue. It reads Codex native hook state without writing a
-// file: an absent file or a missing SessionStart "resume" resume-unkill handler
+// hook pfm owns there and for pfm residue. It writes no file and starts no
+// model turn: native trust is read through Codex app-server hooks/list. An
+// absent file or a missing SessionStart "resume" resume-unkill handler
 // is a MISSING row, a handler with no recorded hook trust an UNTRUSTED row
 // naming `pfm install --yes`, a healthy account none; STALE and UNREADABLE
 // rows report residue and files that could not be read.
@@ -223,8 +225,18 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 		case codexHookHandlerCount(document, expected) == 0:
 			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
 		default:
-			recorded, err := codexappendix.HookTrustState(account.Home, expected.Command, config.Codex.Binary)
+			recorded, err := codexappendix.NativeHookTrustState(
+				context.Background(),
+				config.EffectiveCodex(account.ID).Binary,
+				account.Home,
+				expected.Command,
+			)
 			switch {
+			case errors.Is(err, codexappendix.ErrNativeHookUntrusted):
+				results = append(
+					results,
+					HookProbeResult{Hook: expectedHook, State: stateUntrusted, Error: err.Error()},
+				)
 			case errors.Is(err, codexappendix.ErrNativeHookTrustUnknown):
 				results = append(results, HookProbeResult{
 					Hook: expectedHook, State: stateNativeTrustUnknown, Error: err.Error(),

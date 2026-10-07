@@ -24,19 +24,19 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 	sum := sha256.Sum256([]byte(captured))
 	matching := hex.EncodeToString(sum[:])
 
-	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.280.md", captured, nil)
-	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.280.md") {
+	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.292.md", captured, nil)
+	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.292.md") {
 		t.Fatalf("match outcome = (%q, %v), want an ok line", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.280.md", captured, nil)
+	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.292.md", captured, nil)
 	if !warn || !strings.Contains(line, "DRIFT") {
 		t.Fatalf("drift outcome = (%q, %v), want a DRIFT warning", line, warn)
 	}
 
 	line, warn = harnessPromptVerdict(
 		matching,
-		"harness-original-v2.1.280.md",
+		"harness-original-v2.1.292.md",
 		"",
 		errors.New("no API request reached the capture sink"),
 	)
@@ -45,7 +45,7 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 		t.Fatalf("capture-failure outcome = (%q, %v), want a distinct CHECK FAILED warning", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.280.md", "", errClaudeAbsent)
+	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.292.md", "", errClaudeAbsent)
 	if warn || line != "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare" {
 		t.Fatalf("absence outcome = (%q, %v), want the named skip with no warning", line, warn)
 	}

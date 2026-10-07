@@ -185,6 +185,8 @@ func snapshotMCPServeProcesses(
 			switch {
 			case err != nil:
 				identityErr = err
+			case identity.Zombie:
+				continue
 			case identity.EffectiveUID != effectiveUID || identity.Command != "" && identity.Command != "pfm":
 				continue
 			case identity.Command == "":

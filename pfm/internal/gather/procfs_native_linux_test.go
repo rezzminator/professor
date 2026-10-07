@@ -10,20 +10,29 @@ import (
 )
 
 func TestLinuxProcFSProcessIdentity(t *testing.T) {
-	root := t.TempDir()
-	statusPath := filepath.Join(root, "42", "status")
-	if err := os.MkdirAll(filepath.Dir(statusPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(statusPath, []byte("Name:\tpfm\nUid:\t1000\t1200\t1300\t1400\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	identity, err := (linuxProcFS{RealProcFS: RealProcFS{Root: root}}).ProcessIdentity(42)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if identity.Command != "pfm" || identity.EffectiveUID != 1200 {
-		t.Fatalf("ProcessIdentity(42) = %#v, want command pfm and effective uid 1200", identity)
+	for _, state := range []string{"", "Z (zombie)", "S (sleeping)", "? (unknown)"} {
+		t.Run(state, func(t *testing.T) {
+			root := t.TempDir()
+			statusPath := filepath.Join(root, "42", "status")
+			if err := os.MkdirAll(filepath.Dir(statusPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			status := "Name:\tpfm\nUid:\t1000\t1200\t1300\t1400\n"
+			if state != "" {
+				status += "State:\t" + state + "\n"
+			}
+			if err := os.WriteFile(statusPath, []byte(status), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			identity, err := (linuxProcFS{RealProcFS: RealProcFS{Root: root}}).ProcessIdentity(42)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if identity.Command != "pfm" || identity.EffectiveUID != 1200 ||
+				identity.Zombie != strings.HasPrefix(state, "Z ") {
+				t.Fatalf("ProcessIdentity(42)=%#v for state %q", identity, state)
+			}
+		})
 	}
 }
 

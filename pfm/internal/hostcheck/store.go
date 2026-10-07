@@ -418,12 +418,12 @@ func sharedEntryFix(store, path, name string) string {
 
 func unclassified(env Env) ([]Row, error) {
 	var rows []Row
-	plugins := installedPlugins(&rows, env)
+	known := runtimeEntries(&rows, env)
 	for _, dir := range claudeDirs(env) {
 		for _, entry := range readDir(&rows, classUnclassified, dir) {
 			name := entry.Name()
 			if installer.EntryClass(name) != classUnclassified || backupName(name) ||
-				strings.HasPrefix(name, ".claude.json.tmp.") || plugins[name] {
+				strings.HasPrefix(name, ".claude.json.tmp.") || known[paths.PhysicalPath(filepath.Join(dir, name))] {
 				continue
 			}
 			rows = append(
@@ -443,19 +443,18 @@ func unclassified(env Env) ([]Row, error) {
 
 // installedPlugins names every plugin the store's registry lists, the part of
 // each "name@marketplace" key before the @: a top-level entry of that name is
-// the plugin's own (its logs). A registry that cannot be read is a row, so the
-// entries it would classify report unclassified, never silently.
+// the plugin's own (its logs). A registry that cannot be read, or whose plugins
+// object, registrations or keys are malformed, is a row, so the entries it
+// would classify report unclassified, never silently.
 func installedPlugins(rows *[]Row, env Env) map[string]bool {
 	registry := filepath.Join(env.Store, "plugins", "installed_plugins.json")
 	raw, err := os.ReadFile(registry)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	var document struct {
-		Plugins map[string]json.RawMessage `json:"plugins"`
-	}
+	var names map[string]bool
 	if err == nil {
-		err = json.Unmarshal(raw, &document)
+		names, err = pluginNames(raw)
 	}
 	if err != nil {
 		if store, statErr := os.Stat(env.Store); statErr != nil || !store.IsDir() {
@@ -471,13 +470,44 @@ func installedPlugins(rows *[]Row, env Env) map[string]bool {
 		})
 		return nil
 	}
-	names := map[string]bool{}
-	for key := range document.Plugins {
-		if name, _, _ := strings.Cut(key, "@"); name != "" {
-			names[name] = true
-		}
-	}
 	return names
+}
+
+// pluginNames reads the registry's plugins object: every key is
+// "name@marketplace" with a plain name, every value a list of registrations
+// (possibly empty, never null), each a non-empty object. Any other shape is an
+// error, never a partial list.
+func pluginNames(raw []byte) (map[string]bool, error) {
+	var document struct {
+		Plugins map[string]json.RawMessage `json:"plugins"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	if document.Plugins == nil {
+		return nil, errors.New("missing plugins object")
+	}
+	names := map[string]bool{}
+	for key, value := range document.Plugins {
+		var registrations []map[string]json.RawMessage
+		if err := json.Unmarshal(value, &registrations); err != nil {
+			return nil, fmt.Errorf("invalid registrations for plugin %q: %w", key, err)
+		}
+		if registrations == nil {
+			return nil, fmt.Errorf("invalid registrations for plugin %q: null", key)
+		}
+		for _, entry := range registrations {
+			if len(entry) == 0 {
+				return nil, fmt.Errorf("empty registration for plugin %q", key)
+			}
+		}
+		name, market, ok := strings.Cut(key, "@")
+		if !ok || name == "" || market == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+			return nil, fmt.Errorf("invalid plugin key %q", key)
+		}
+		names[name] = true
+	}
+	return names, nil
 }
 
 func staleStateTmp(env Env) ([]Row, error) {

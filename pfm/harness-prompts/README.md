@@ -87,6 +87,8 @@ no model inference occurs. Render system blocks with
 `jq -r '.system | map(.text) | join("\n\n=== SYSTEM BLOCK ===\n\n")'` before normalization.
 Re-pinning requires human review of instruction differences, followed by updating the prompt,
 SHA256, and model provenance together. Never automatically accept a newly captured prompt.
+`pfm doctor --verbose` retains each successful request as a private
+`harness-prompt-<alias>.request.json` in its printed verbose directory for that review.
 
 `claude.systemPrompt` values: `production` (default — the CLI's own prompt, untouched), `lean` (the CLI's
 built-in minimal prompt via `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`), `professor` (inject the clone's

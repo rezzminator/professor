@@ -26,6 +26,10 @@ func (proc linuxProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 	foundName := false
 	foundUID := false
 	for _, line := range strings.Split(string(content), "\n") {
+		if value, found := strings.CutPrefix(line, "State:"); found {
+			fields := strings.Fields(value)
+			identity.Zombie = len(fields) > 0 && fields[0] == "Z"
+		}
 		if value, found := strings.CutPrefix(line, "Name:"); found {
 			identity.Command = strings.TrimSpace(value)
 			foundName = identity.Command != ""

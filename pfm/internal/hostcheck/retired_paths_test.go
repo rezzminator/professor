@@ -73,13 +73,18 @@ func TestRetiredPathsHoldAPathAwaitingItsMove(t *testing.T) {
 }
 
 // TestRetiredPathsKeepLivePaths pins what is never stale: the account dir the
-// config names, a backup without pfm's marker, the config dir in use.
+// config names, a backup without pfm's marker, the config dir in use, doctor's
+// own move-aside dirs, an unstamped file in an archive dir.
 func TestRetiredPathsKeepLivePaths(t *testing.T) {
 	env := retiredPathEnv(t)
 	env.ConfigPath = filepath.Join(env.LegacyConfigDir, config.FileName)
 	writeRetired(t, env.ConfigPath)
 	writeRetired(t, filepath.Join(env.Accounts[0].ConfigDir, "settings.json"))
 	writeRetired(t, filepath.Join(env.Store, "settings.json.bak-20300101"))
+	state := filepath.Dir(env.StateDB)
+	writeRetired(t, filepath.Join(state, "stale-backup", "20300101-000000", ".zshrc"))
+	writeRetired(t, filepath.Join(state, "stray-claude-state", "20300101-000000", ".claude.json"))
+	writeRetired(t, filepath.Join(state, "retired-store-entries", "notes.txt"))
 	env.Accounts = append(env.Accounts, config.Account{ID: 2, ConfigDir: config.DefaultAccountDir(env.Home, 2)})
 	if err := os.MkdirAll(env.Accounts[1].ConfigDir, 0o700); err != nil {
 		t.Fatal(err)

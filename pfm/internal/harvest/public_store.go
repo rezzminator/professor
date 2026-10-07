@@ -177,7 +177,11 @@ func (h *Harvester) writeAtomic(path string, data []byte, mode os.FileMode) (ret
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	h.afterCacheWrite()
+	return nil
 }
 
 func (h *Harvester) ensurePrivateHandleDir(root, dir string) error {

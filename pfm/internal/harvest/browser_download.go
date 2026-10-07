@@ -162,6 +162,7 @@ func (h *Harvester) keepBrowserFile(
 	if err != nil {
 		return false, fmt.Errorf("%s: cache file: %w", rung, err)
 	}
+	h.afterCacheWrite()
 	cache := cacheStatusMiss
 	if req.options.Refresh {
 		cache = cacheStatusRefresh

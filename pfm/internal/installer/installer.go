@@ -271,6 +271,8 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.removeRetiredNudgeState(); err != nil {
 		installer.warnRetiredNudge("retired compact-nudge state", err)
 	}
+	installer.retireMigrationJournal()
+	installer.expireStateBackups()
 	mcpErr := installer.wireMCP()
 	// A host build replaces the binary without changing the unit file, and MCP
 	// client wiring can change without changing either. enable --now leaves an
@@ -863,6 +865,7 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 	check, checkErr := provider.Check(ctx, root, platform)
 	if checkErr == nil && check.Healthy {
 		installer.ok("harvestpy environment already healthy (Check fast-path; no download)")
+		installer.reportHarvestPrune(harvestpy.PruneEnvironments(ctx, root, platform, installer.options.ProcRoot))
 		return installer.stageHarvestModels(ctx, provider, root, platform)
 	}
 	if checkErr != nil {
@@ -875,6 +878,7 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 		Cache:    filepath.Join(root, "cache"),
 		Platform: platform,
 		Offline:  installer.options.HarvestOffline,
+		ProcRoot: installer.options.ProcRoot,
 	})
 	if provisionErr != nil {
 		if errors.Is(provisionErr, harvestpy.ErrOfflineUnavailable) {
@@ -889,7 +893,25 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
 	}
 	installer.ok("harvestpy environment provisioned digest=" + result.Digest)
+	installer.reportHarvestPrune(result.Pruned)
 	return installer.stageHarvestModels(ctx, provider, root, platform)
+}
+
+// reportHarvestPrune prints a prune of superseded harvestpy environments:
+// each removal with the bytes it freed, each kept env with its reason, each
+// failure one warn line that never fails the install.
+func (installer *engine) reportHarvestPrune(report harvestpy.PruneReport) {
+	for _, env := range report.Removed {
+		_ = installer.change(
+			fmt.Sprintf("remove superseded harvestpy environment %s (freed %d bytes)", env.Path, env.Bytes), nil,
+		)
+	}
+	for _, kept := range report.Kept {
+		installer.skip("keep superseded harvestpy environment " + kept.Path + ": " + kept.Reason)
+	}
+	for _, failure := range report.Failed {
+		installer.warnStateExpiry(failure.Path, failure.Err)
+	}
 }
 
 func (installer *engine) uninstallHarvest() error {

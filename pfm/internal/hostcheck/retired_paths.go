@@ -54,13 +54,12 @@ func RetiredPathDetectors() []Detector {
 			), nil
 		}},
 		{checkInstallBackup, staleInstallBackups},
-		{"migration-backup", staleMigrationBackups},
-		{"retired-archive", func(env Env) ([]Row, error) {
+		{"state-backup", staleStateBackups},
+		{"retired-migration-journal", func(env Env) ([]Row, error) {
 			return stalePresent(
-				"retired-archive",
-				"pfm install's archive of retired files",
-				installer.RetiredStoreArchive(env.Home),
-				filepath.Join(env.Home, ".local", "state", "pfm", "retired-commands"),
+				"retired-migration-journal",
+				"the deleted journaled migration's journal",
+				installer.RetiredMigrationJournal(env.Home),
 			), nil
 		}},
 		{"dead-registry-link", staleDeadRegistryLinks},
@@ -194,16 +193,25 @@ func staleInstallBackups(env Env) ([]Row, error) {
 	return rows, nil
 }
 
-// staleMigrationBackups: fleetdb's pre-migration copy {db}.bak-before-v{N}.
-func staleMigrationBackups(env Env) ([]Row, error) {
+// stateBackupProblems names each kind installer.StateBackups lists.
+var stateBackupProblems = map[string]string{
+	"migration-backup":    "pre-migration database copy",
+	"retired-fleet-db":    "backup of the retired fleet.db",
+	"retired-chat-skills": "an older pfm's chat-skill retirement dir",
+	"retired-archive":     "pfm install's archive of a retired file",
+}
+
+// staleStateBackups lists the backups pfm install expires after 30 days
+// (installer.StateBackups, the one registry both read), whatever their age,
+// except doctor's own move-aside dirs: --purge cannot move a dir into itself.
+func staleStateBackups(env Env) ([]Row, error) {
 	var rows []Row
-	for _, db := range uniquePaths([]string{env.StateDB, env.CacheDB}) {
-		matches, err := filepath.Glob(db + ".bak-before-v*")
-		if err != nil {
-			return rows, fmt.Errorf("glob migration backups of %s: %w", db, err)
-		}
-		for _, path := range matches {
-			rows = append(rows, staleRow("migration-backup", path, "pre-migration database copy"))
+	for _, backup := range installer.StateBackups(env.Home, env.StateDB, env.CacheDB) {
+		switch {
+		case backup.Err != nil:
+			rows = append(rows, unreadable(backup.Check, backup.Path, backup.Err))
+		case !backup.DoctorAside:
+			rows = append(rows, staleRow(backup.Check, backup.Path, stateBackupProblems[backup.Check]))
 		}
 	}
 	return rows, nil

@@ -86,6 +86,9 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 	seeded[filepath.Join(installer.RetiredStoreArchive(home), ".last-update-result.json"+staleStamp)] = "retired-archive"
 	seeded[filepath.Join(home, ".local", "state", "pfm", "retired-commands", "cc-ls"+staleStamp)] = "retired-archive"
 	seeded[filepath.Join(config.DefaultAccountDir(home, 9), "settings.json")] = "dead-account-dir"
+	seeded[filepath.Join(home, ".local", "state", "pfm", "fleet.db.bak-before-v8")] = "retired-fleet-db"
+	seeded[filepath.Join(home, ".local", "state", "pfm", "retired-chat-skills.X8Z7oiYZ", "SKILL.md")] = "retired-chat-skills"
+	seeded[filepath.Join(installer.RetiredMigrationJournal(home), "20260928T100205Z", "journal.json")] = "retired-migration-journal"
 	for path := range seeded {
 		seedStaleFile(t, path)
 	}
@@ -104,8 +107,10 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 // the retired directory holding it.
 func listedPath(seeded, kind string) string {
 	switch kind {
-	case "legacy-config-dir", "legacy-harvester-cache", "staged-prompts", "retired-archive", "dead-account-dir":
+	case "legacy-config-dir", "legacy-harvester-cache", "staged-prompts", "dead-account-dir", "retired-chat-skills":
 		return filepath.Dir(seeded)
+	case "retired-migration-journal":
+		return filepath.Dir(filepath.Dir(seeded))
 	}
 	return seeded
 }

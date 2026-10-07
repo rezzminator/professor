@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -330,5 +331,75 @@ func TestUninstallHarvestRemovesOnlyManagedRuntimeAndCache(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "remove managed harvestpy runtime and cache") {
 		t.Fatalf("uninstall did not state explicit managed change:\n%s", output.String())
+	}
+}
+
+// TestInstallHarvestPrunesSupersededEnvironments pins both prune doors of
+// pfm install: a healthy host (the Check fast path, which never calls
+// Provision) is pruned directly, and a provision's own prune report is
+// printed — each removal with the bytes it freed, each kept env with its
+// reason, each failure one warn line that leaves the run green.
+func TestInstallHarvestPrunesSupersededEnvironments(t *testing.T) {
+	t.Parallel()
+	platform := harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}
+	home := t.TempDir()
+	envRoot := filepath.Join(home, ".local", "state", "pfm", "harvest-python", "env", platform.String())
+	current, superseded := filepath.Join(envRoot, "current-digest"), filepath.Join(envRoot, "old-digest")
+	writeFixture(t, filepath.Join(current, "python", "bin", "python3"), "fixture")
+	writeFixture(t, filepath.Join(superseded, "python", "bin", "python3"), "fixture")
+	if err := os.Symlink("current-digest", filepath.Join(envRoot, "current")); err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	options := Options{
+		MCPConfigPath:    testConfigPath(t),
+		Mode:             ModeApply,
+		Home:             home,
+		Stdout:           &output,
+		Runner:           &fakeRunner{},
+		ProcRoot:         t.TempDir(),
+		ProvisionHarvest: true,
+		HarvestPlatform:  platform,
+		HarvestProvisioner: &harvestProvisionerFake{
+			plan:  linuxHarvestPlan(),
+			check: harvestpy.CheckReport{Healthy: true},
+		},
+	}
+	if _, err := Run(context.Background(), options); err != nil {
+		t.Fatalf("healthy apply: %v\n%s", err, output.String())
+	}
+	want := "  change  remove superseded harvestpy environment " + superseded + " (freed 7 bytes)\n"
+	if runtime.GOOS != "linux" {
+		want = "  skip    keep superseded harvestpy environment " + superseded + ": liveness unreadable: "
+	}
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("fast path output misses %q:\n%s", want, output.String())
+	}
+	if _, err := os.Stat(filepath.Join(current, "python", "bin", "python3")); err != nil {
+		t.Fatalf("current env touched: %v", err)
+	}
+
+	output.Reset()
+	options.Home = t.TempDir()
+	options.MCPConfigPath = testConfigPath(t)
+	options.HarvestProvisioner = &harvestProvisionerFake{
+		plan: linuxHarvestPlan(), checkErr: errors.New("environment missing"),
+		provision: harvestpy.ProvisionResult{Digest: "new", Pruned: harvestpy.PruneReport{
+			Removed: []harvestpy.PrunedEnvironment{{Path: "/env/old", Bytes: 1600}},
+			Kept:    []harvestpy.KeptEnvironment{{Path: "/env/live", Reason: "pid 4242 runs from it"}},
+			Failed:  []harvestpy.PruneFailure{{Path: "/env/stuck", Err: errors.New("permission denied")}},
+		}},
+	}
+	if _, err := Run(context.Background(), options); err != nil {
+		t.Fatalf("provision apply failed on a failed prune: %v\n%s", err, output.String())
+	}
+	for _, line := range []string{
+		"  change  remove superseded harvestpy environment /env/old (freed 1600 bytes)\n",
+		"  skip    keep superseded harvestpy environment /env/live: pid 4242 runs from it\n",
+		"  warn    /env/stuck: permission denied\n",
+	} {
+		if !strings.Contains(output.String(), line) {
+			t.Fatalf("provision output misses %q:\n%s", line, output.String())
+		}
 	}
 }

@@ -21,6 +21,7 @@ func (h *Harvester) storeResult(
 	if err != nil {
 		return Result{Source: source, Kind: kind, Error: err.Error(), Rungs: rungs}
 	}
+	h.afterCacheWrite()
 	status := cacheStatusMiss
 	if options.Refresh {
 		status = cacheStatusRefresh

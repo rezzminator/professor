@@ -285,6 +285,7 @@ func (h *Harvester) fileAttempt(
 	if err != nil {
 		return Result{}, status, fmt.Errorf("cache file: %w", err)
 	}
+	h.afterCacheWrite()
 	cache := cacheStatusMiss
 	if req.options.Refresh {
 		cache = cacheStatusRefresh

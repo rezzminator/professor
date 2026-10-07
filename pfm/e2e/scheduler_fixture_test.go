@@ -50,7 +50,7 @@ case "${1-}" in
   ;;
  print|bootout)
   label="${2##*/}"
-  case "$label" in com.professor.pfm.name-sync|com.professor.pfm.mcp) ;; *) exit 64 ;; esac
+  case "$label" in com.professor.pfm.name-sync|com.professor.pfm.mcp|com.professor.pfm.reminder) ;; *) exit 64 ;; esac
   if [ "$1" = bootout ]; then rm -f "$state/$label"; exit 0; fi
   [ -f "$state/$label" ] || exit 113
   printf 'state = not running\nlast exit code = 0\n'

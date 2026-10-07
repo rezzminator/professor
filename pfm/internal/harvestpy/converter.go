@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -35,6 +36,17 @@ type Runtime struct {
 	// only the install's staging run sets it; every read runs offline.
 	ModelRoot    string
 	ModelStaging bool
+	// Workers bounds the live conversion workers (harvester.config.json
+	// convert.workers); 0 derives it from the CPUs and memory
+	// (converterPoolSize). Queue bounds the conversions waiting for one
+	// (convert.queue); 0 is eight per worker. Timeout is one conversion's base
+	// deadline and the longest a conversion waits in the queue
+	// (convert.timeoutSeconds); 0 is 180 s. IdleTimeout reaps a worker idle
+	// that long; 0 is 10 minutes.
+	Workers     int
+	Queue       int
+	Timeout     time.Duration
+	IdleTimeout time.Duration
 }
 
 // modelRootFor derives the staged-model directory from an interpreter living
@@ -146,12 +158,18 @@ var ErrConverterFailed = errors.New("harvestpy conversion failed")
 // message is the EMPTY-text contract the fetch ladder already reads.
 var ErrConverterEmpty = errors.New("harvestpy worker returned empty markdown (EMPTY-text conversion)")
 
-// Converter runs exactly one pinned Python worker path.  There is no Go
-// fallback converter: a worker or dependency failure is returned to the caller.
+// Converter runs the pinned Python worker script on a bounded pool of worker
+// processes (converterPool): conversions run in parallel, each under its own
+// deadline, and a worker that times out, is cancelled or desyncs is killed and
+// replaced alone. There is no Go fallback converter: a worker or dependency
+// failure is returned to the caller.
 type Converter struct {
 	runtime Runtime
-	mu      sync.Mutex
-	worker  *workerProcess
+	pool    *converterPool
+	// shared is the process-wide pool entry this converter holds
+	// (SharedConverter); nil for a private pool.
+	shared    *sharedPool
+	closeOnce sync.Once
 }
 
 type workerProcess struct {
@@ -170,15 +188,35 @@ type workerProcess struct {
 // read it MID-FLIGHT to decorate their messages. A bare bytes.Buffer there is
 // a data race between that copy goroutine's Write and stderrTail's String —
 // the -race sweep catches it in both the conversion and the browser worker.
+// It keeps at least the last stderrKeepBytes and never more than twice that:
+// native output on fd 1 now lands on stderr too, and a long-lived worker's
+// whole transcript in the daemon's memory is one chatty library away from
+// unbounded. Trimming only past twice the cap keeps a write O(len(p)) on
+// average instead of a 64 KiB copy per line.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
 }
 
+// stderrKeepBytes is how much of a worker's stderr tail lockedBuffer keeps:
+// far more than stderrTail's 500 bytes, far less than a runaway.
+const stderrKeepBytes = 64 << 10
+
 func (buffer *lockedBuffer) Write(p []byte) (int, error) {
 	buffer.mu.Lock()
 	defer buffer.mu.Unlock()
-	return buffer.buf.Write(p)
+	if len(p) >= stderrKeepBytes {
+		buffer.buf.Reset()
+		buffer.buf.Write(p[len(p)-stderrKeepBytes:])
+		return len(p), nil
+	}
+	buffer.buf.Write(p)
+	if size := buffer.buf.Len(); size > 2*stderrKeepBytes {
+		kept := append([]byte(nil), buffer.buf.Bytes()[size-stderrKeepBytes:]...)
+		buffer.buf.Reset()
+		buffer.buf.Write(kept)
+	}
+	return len(p), nil
 }
 
 func (buffer *lockedBuffer) String() string {
@@ -227,12 +265,14 @@ func stopWorkerProcess(worker *workerProcess, label string) error {
 	return cleanupErr
 }
 
+// NewConverter answers a converter on its own private pool; SharedConverter
+// answers one on the process-wide pool for the same runtime.
 func NewConverter(runtime Runtime) *Converter {
-	return &Converter{runtime: runtime}
+	return &Converter{runtime: runtime, pool: newConverterPool(runtime)}
 }
 
-func (converter *Converter) scriptPath() (string, error) {
-	path := converter.runtime.Script
+func converterScriptPath(runtime Runtime) (string, error) {
+	path := runtime.Script
 	if path == "" {
 		return "", errors.New("harvestpy converter script path is empty; use the provisioned managed script")
 	}
@@ -276,7 +316,7 @@ func (converter *Converter) run(ctx context.Context, request Request) (Result, e
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal harvestpy request: %w", err)
 	}
-	line, stderr, err := converter.request(ctx, body)
+	line, stderr, err := converter.request(ctx, body, requestBudget(converter.runtime, request))
 	if err != nil {
 		return Result{}, err
 	}
@@ -314,96 +354,24 @@ func converterFailure(class, message, stderr string) error {
 	return fmt.Errorf("%w (%s): %s (stderr: %s)", ErrConverterFailed, class, message, stderrTail(stderr))
 }
 
-// request sends one JSON line through the long-lived worker. Requests are
-// serialized so lazy imports and the Docling singleton persist exactly like
-// the old MCP process. A crash or cancellation discards the process; the next
-// request starts a clean worker with the original environment snapshot.
-func (converter *Converter) request(ctx context.Context, body []byte) (line []byte, tail string, returnErr error) {
-	converter.mu.Lock()
-	defer converter.mu.Unlock()
-	worker, err := converter.ensureWorkerLocked()
-	if err != nil {
-		return nil, "", err
-	}
-	end := worker.obs.Request("convert")
-	defer func() { end(len(line), returnErr) }()
-	payload := append(append([]byte(nil), body...), '\n')
-	writeResult := make(chan error, 1)
-	go func() {
-		_, err := worker.stdin.Write(payload)
-		writeResult <- err
-	}()
-	select {
-	case err := <-writeResult:
-		if err != nil {
-			stderr := stderrTail(worker.stderr.String())
-			cleanupErr := converter.stopWorkerLocked()
-			return nil, stderr, fmt.Errorf(
-				"harvestpy worker write failed: %w (stderr: %s; cleanup: %v)",
-				err,
-				stderr,
-				cleanupErr,
-			)
-		}
-	case <-ctx.Done():
-		cleanupErr := converter.stopWorkerLocked()
-		if cleanupErr != nil {
-			return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
-		}
-		return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w", ctx.Err())
-	}
-	result := make(chan struct {
-		line []byte
-		err  error
-	}, 1)
-	go func() {
-		line, err := readLineBounded(worker.stdout, converterResponseLimit)
-		result <- struct {
-			line []byte
-			err  error
-		}{line: bytes.TrimSpace(line), err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		cleanupErr := converter.stopWorkerLocked()
-		if cleanupErr != nil {
-			return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
-		}
-		return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w", ctx.Err())
-	case response := <-result:
-		if response.err != nil {
-			stderr := stderrTail(worker.stderr.String())
-			cleanupErr := converter.stopWorkerLocked()
-			return nil, stderr, fmt.Errorf(
-				"harvestpy worker read failed: %w (stderr: %s; cleanup: %v)",
-				response.err,
-				stderr,
-				cleanupErr,
-			)
-		}
-		return response.line, stderrTail(worker.stderr.String()), nil
-	}
-}
-
-func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
-	if converter.worker != nil {
-		return converter.worker, nil
-	}
-	if strings.TrimSpace(converter.runtime.Python) == "" {
+// startConverterWorker spawns one conversion worker process with the
+// runtime's environment snapshot, in its own process group.
+func startConverterWorker(runtime Runtime) (*workerProcess, error) {
+	if strings.TrimSpace(runtime.Python) == "" {
 		return nil, errors.New("harvestpy interpreter path is empty; use the provisioned managed interpreter")
 	}
-	script, err := converter.scriptPath()
+	script, err := converterScriptPath(runtime)
 	if err != nil {
 		return nil, err
 	}
-	runner := converter.runtime.Runner
+	runner := runtime.Runner
 	if runner == nil {
 		runner = obs.Runner(deps.RealRunner{})
 	}
 	processObs := obs.NewProcess(context.Background(), "converter")
 	stderr := &lockedBuffer{}
-	process, err := runner.Start(context.Background(), []string{converter.runtime.Python, script}, deps.StartOptions{
-		Env:        workerEnv(os.Environ(), converter.runtime),
+	process, err := runner.Start(context.Background(), []string{runtime.Python, script}, deps.StartOptions{
+		Env:        workerEnv(os.Environ(), runtime),
 		StdinPipe:  true,
 		StdoutPipe: true,
 		// Its OWN process group, like the browser worker's: a conversion
@@ -430,37 +398,32 @@ func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
 		_ = process.Wait()
 		return nil, fmt.Errorf("open harvestpy worker stdout: %w", err)
 	}
-	worker := &workerProcess{
+	return &workerProcess{
 		process:    process,
 		stdin:      stdin,
 		stdout:     bufio.NewReader(stdout),
 		stdoutPipe: stdout,
 		stderr:     stderr,
 		obs:        processObs,
-	}
-	converter.worker = worker
-	return worker, nil
+	}, nil
 }
 
-func (converter *Converter) stopWorkerLocked() error {
-	if converter.worker == nil {
-		return nil
-	}
-	worker := converter.worker
-	converter.worker = nil
-	return stopWorkerProcess(worker, "converter worker")
-}
-
-// Close terminates the managed worker and is safe to call repeatedly.
+// Close stops every worker of the converter's pool, or drops its hold on the
+// shared pool. It is safe to call repeatedly; a private pool stays usable and
+// starts a fresh worker on its next request.
 func (converter *Converter) Close() error {
-	converter.mu.Lock()
-	defer converter.mu.Unlock()
-	return converter.stopWorkerLocked()
+	if converter.shared == nil {
+		return converter.pool.drain()
+	}
+	var err error
+	converter.closeOnce.Do(func() { err = releaseShared(converter.shared) })
+	return err
 }
 
 // Smoke invokes the same worker with a no-download import check.
 func (converter *Converter) Smoke(ctx context.Context) (map[string]any, error) {
-	line, stderr, err := converter.request(ctx, []byte("{\"op\":\"smoke\"}"))
+	budget := conversionBudget(converter.runtime.Timeout, false, 0)
+	line, stderr, err := converter.request(ctx, []byte(`{"op":"smoke"}`), budget)
 	if err != nil {
 		return nil, fmt.Errorf("harvestpy smoke subprocess: %w", err)
 	}

@@ -15,13 +15,13 @@ import (
 // tree at once.
 func TestLockProvisionRootSerializesTwoHolders(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "env-browser", "linux-amd64")
-	first, err := lockProvisionRoot(root)
+	first, err := lockProvisionRoot(context.Background(), root)
 	if err != nil {
 		t.Fatalf("lockProvisionRoot() error = %v", err)
 	}
 	second := make(chan error, 1)
 	go func() {
-		release, err := lockProvisionRoot(root)
+		release, err := lockProvisionRoot(context.Background(), root)
 		if err == nil {
 			err = release()
 		}
@@ -45,6 +45,37 @@ func TestLockProvisionRootSerializesTwoHolders(t *testing.T) {
 	}
 }
 
+// TestLockProvisionRootGivesUpWithItsContext: a browser fetch waiting on a
+// provision another process runs is bounded by its own context (the browser
+// rung's hard deadline, an MCP client's cancel), never parked in flock(2)
+// until the other provision ends.
+func TestLockProvisionRootGivesUpWithItsContext(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "env-browser", "linux-amd64")
+	first, err := lockProvisionRoot(context.Background(), root)
+	if err != nil {
+		t.Fatalf("lockProvisionRoot() error = %v", err)
+	}
+	// Released after 3 s only so a lock that ignores its context fails on the
+	// assertion below rather than hanging the package.
+	timer := time.AfterFunc(3*time.Second, func() { _ = first() })
+	defer func() {
+		if timer.Stop() {
+			_ = first()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	release, err := lockProvisionRoot(ctx, root)
+	if err == nil {
+		_ = release()
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 2*time.Second {
+		t.Fatalf("lockProvisionRoot() under a 200ms context = %v after %s, want its deadline at once",
+			err, time.Since(started))
+	}
+}
+
 // TestProvisionWaitsForTheLock is the conversion-environment sibling of
 // TestProvisionBrowserWaitsForTheLock below: Provision (the docling/pymupdf
 // closure) took no lock at all — only the browser provisioner did — so two
@@ -55,7 +86,7 @@ func TestProvisionWaitsForTheLock(t *testing.T) {
 	platform := Platform{GOOS: "linux", GOARCH: "amd64"}
 	targets, cache := fakeProvisionInputs(t, root, platform)
 	envRoot := filepath.Join(root, "env", platform.String())
-	release, err := lockProvisionRoot(envRoot)
+	release, err := lockProvisionRoot(context.Background(), envRoot)
 	if err != nil {
 		t.Fatalf("lockProvisionRoot() error = %v", err)
 	}
@@ -105,7 +136,7 @@ func TestProvisionBrowserWaitsForTheLock(t *testing.T) {
 	platform := Platform{GOOS: "linux", GOARCH: "amd64"}
 	targets, cache := fakeProvisionInputs(t, root, platform)
 	envRoot := filepath.Join(root, "env-browser", platform.String())
-	release, err := lockProvisionRoot(envRoot)
+	release, err := lockProvisionRoot(context.Background(), envRoot)
 	if err != nil {
 		t.Fatalf("lockProvisionRoot() error = %v", err)
 	}

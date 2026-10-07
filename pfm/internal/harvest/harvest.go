@@ -22,40 +22,12 @@ func (h *Harvester) FetchWithOptions(ctx context.Context, source string, options
 			}
 			return cached
 		}
-		h.flightMu.Lock()
-		if flight, ok := h.flights[key]; ok {
-			h.flightMu.Unlock()
-			select {
-			case <-flight.done:
-				result := flight.result
-				if options.SizeOnly {
-					result.Content = ""
-				}
-				return result
-			case <-ctx.Done():
-				return Result{Source: source, Error: ctx.Err().Error()}
-			}
-		}
-		flight := &fetchFlight{done: make(chan struct{})}
-		h.flights[key] = flight
-		h.flightMu.Unlock()
-		result := h.fetchUnshared(ctx, source, options)
-		h.flightMu.Lock()
-		flight.result = result
-		close(flight.done)
-		delete(h.flights, key)
-		h.flightMu.Unlock()
-		if result.Error != "" {
-			h.neg.put(key, result)
-		}
-		h.recordStat(source, result) // scoreboard: every terminal outcome lands in stats.jsonl
-		if options.SizeOnly && result.Error == "" {
-			result.Content = ""
-		}
-		return result
+		return h.fetchShared(ctx, key, source, options)
 	}
-	result := h.fetchUnshared(ctx, source, options)
-	h.recordStat(source, result)
+	result, abandoned, refused := h.walk(ctx, source, options)
+	if !abandoned && !refused {
+		h.recordStat(source, result)
+	}
 	return result
 }
 

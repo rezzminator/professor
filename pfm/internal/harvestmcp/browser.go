@@ -138,6 +138,13 @@ func (converter pythonConverter) inBrowser(
 		return nil
 	}
 
+	// The wait for a render slot has its own bound: time queued behind other
+	// renders never comes out of this render's hard deadline.
+	releaseSlot, err := converter.browserSlot(ctx, browserHardDeadline)
+	if err != nil {
+		return err
+	}
+	defer releaseSlot()
 	fetchCtx, cancel := context.WithTimeout(ctx, browserHardDeadline)
 	defer cancel()
 	proxyURL, stopProxy, err := converter.browserProxy(fetchCtx)
@@ -160,6 +167,31 @@ func (converter pythonConverter) inBrowser(
 		return fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, opErr)
 	}
 	return opErr
+}
+
+// browserSlot waits for one of the daemon's browser render slots, at most
+// wait or until ctx ends, and answers its release. Each render is a worker
+// process plus a Chrome (hundreds of MB): thirty chats fanning reads out eight
+// at a time would otherwise launch dozens at once. Slots that stayed full past
+// wait while ctx lived are the server's load, not the page: the walk is marked
+// refused (harvest.NoteRefusedForLoad) and never cached as the site's failure.
+// A converter with no slots (a test's) is unbounded.
+func (converter pythonConverter) browserSlot(ctx context.Context, wait time.Duration) (func(), error) {
+	if converter.browserSlots == nil {
+		return func() {}, nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	select {
+	case converter.browserSlots <- struct{}{}:
+		return func() { <-converter.browserSlots }, nil
+	case <-waitCtx.Done():
+		if ctx.Err() == nil {
+			harvest.NoteRefusedForLoad(ctx)
+		}
+		return nil, fmt.Errorf("browser rung: all %d render slots stayed busy: %w",
+			cap(converter.browserSlots), waitCtx.Err())
+	}
 }
 
 // browserProxy answers with the proxy Chrome is launched behind, and the

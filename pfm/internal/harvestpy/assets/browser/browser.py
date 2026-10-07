@@ -1291,11 +1291,42 @@ async def handle_fetch(request):
     return {"ok": True, "html": html, "status": status, "final_url": report.get("final_url", "")}
 
 
+# The JSON-lines protocol's private channels, set by main() through
+# _protocol_channels(); every response and guard ask goes through them.
+_PROTO_IN = None
+_PROTO_OUT = None
+
+
+def _protocol_channels():
+    """Take the JSON-lines protocol off fds 0/1 before Chrome or any child runs.
+
+    Native code and child processes write straight to fd 1 and read fd 0; on
+    the protocol pipe that output desyncs the response and a child reading
+    fd 0 steals a guard ask's reply. The protocol keeps private duplicates
+    (os.dup's are close-on-exec, so no child inherits them); fd 1 becomes
+    stderr, fd 0 /dev/null. converter.py does the same.
+    """
+    proto_in = os.fdopen(os.dup(0), "r", encoding="utf-8", errors="replace")
+    proto_out = os.fdopen(os.dup(1), "w", encoding="utf-8")
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+    os.dup2(2, 1)
+    sys.stdin = open(os.devnull, "r")
+    sys.stdout = sys.stderr
+    return proto_in, proto_out
+
+
+def _reply(payload):
+    """Write one protocol line to Go."""
+    _PROTO_OUT.write(json.dumps(payload) + "\n")
+    _PROTO_OUT.flush()
+
+
 def _blocking_ask(target):
-    """Emit one guard ask and block on exactly one stdin reply line."""
-    sys.stdout.write(json.dumps({"ask": "fetchable", "url": target}) + "\n")
-    sys.stdout.flush()
-    line = sys.stdin.readline()
+    """Emit one guard ask and block on exactly one reply line."""
+    _reply({"ask": "fetchable", "url": target})
+    line = _PROTO_IN.readline()
     if not line:
         raise RuntimeError("go closed the ask channel mid-guard")
     reply = json.loads(line)
@@ -1303,14 +1334,16 @@ def _blocking_ask(target):
 
 
 def main():
-    for raw in sys.stdin:
+    global _PROTO_IN, _PROTO_OUT
+    _PROTO_IN, _PROTO_OUT = _protocol_channels()
+    for raw in _PROTO_IN:
         raw = raw.strip()
         if not raw:
             continue
         try:
             request = json.loads(raw)
         except json.JSONDecodeError as e:
-            print(json.dumps({"ok": False, "error": f"bad request JSON: {e}"}), flush=True)
+            _reply({"ok": False, "error": f"bad request JSON: {e}"})
             continue
         op = request.get("op")
         if op == "smoke":
@@ -1318,24 +1351,23 @@ def main():
                 response = smoke()
             except Exception as e:  # noqa: BLE001 — a broken patchright install is an answer, not a crash
                 response = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-            print(json.dumps(response), flush=True)
+            _reply(response)
             continue
         if op == "download":
             try:
                 response = asyncio.run(handle_download(request))
             except Exception as e:  # noqa: BLE001 — a crash discards only this response
                 response = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-            print(json.dumps(response), flush=True)
+            _reply(response)
             continue
         if op != "fetch":
-            print(json.dumps({"ok": False, "error": f"unknown op {op!r}"}), flush=True)
+            _reply({"ok": False, "error": f"unknown op {op!r}"})
             continue
         try:
             response = asyncio.run(handle_fetch(request))
         except Exception as e:  # noqa: BLE001 — a crash discards only this response
             response = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-        sys.stdout.write(json.dumps(response) + "\n")
-        sys.stdout.flush()
+        _reply(response)
 
 
 if __name__ == "__main__":

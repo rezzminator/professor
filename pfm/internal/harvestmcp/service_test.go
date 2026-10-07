@@ -2,12 +2,19 @@ package harvestmcp
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -133,5 +140,74 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("service runtime %s = %q, want %q", tc.name, tc.got, tc.want)
 		}
+	}
+}
+
+// convertFunc adapts a function to harvest.Converter.
+type convertFunc func(ctx context.Context, kind, source string, body []byte) (string, error)
+
+func (convert convertFunc) Convert(ctx context.Context, kind, source string, body []byte) (string, error) {
+	return convert(ctx, kind, source, body)
+}
+
+// TestLoadRefusalsStayOutOfTheCache: the converter pool's busy refusal and
+// browser render slots that stayed full are the server's load, so the read
+// after them walks again (noteLoadRefusal, browserSlot); a conversion its
+// deadline cut (the pool wraps the caller's context error) is the document's
+// walk failing and stays the source's cached failure.
+func TestLoadRefusalsStayOutOfTheCache(t *testing.T) {
+	t.Parallel()
+	convertFailure := func(err error) func(context.Context) error {
+		return func(ctx context.Context) error {
+			noteLoadRefusal(ctx, err)
+			return err
+		}
+	}
+	cases := map[string]struct {
+		fail       func(context.Context) error
+		wantCached bool
+	}{
+		"converter busy walks again": {convertFailure(fmt.Errorf("acquire: %w", harvestpy.ErrConverterBusy)), false},
+		"conversion deadline stays cached": {
+			convertFailure(fmt.Errorf("harvestpy worker request cancelled: %w", context.DeadlineExceeded)), true,
+		},
+		"render slots full walks again": {func(ctx context.Context) error {
+			full := pythonConverter{browserSlots: make(chan struct{}, 1)}
+			full.browserSlots <- struct{}{}
+			_, err := full.browserSlot(ctx, time.Millisecond)
+			return err
+		}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var failing atomic.Bool
+			failing.Store(true)
+			harvester, err := harvest.New(harvest.Options{
+				CacheDir: t.TempDir(),
+				Converter: convertFunc(func(ctx context.Context, _, _ string, _ []byte) (string, error) {
+					if failing.Load() {
+						return "", tc.fail(ctx)
+					}
+					return strings.Repeat("real article content ", 80), nil
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "doc.html")
+			body := "<html><body>" + strings.Repeat("real article content ", 80) + "</body></html>"
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if first := harvester.Fetch(context.Background(), path); first.Error == "" {
+				t.Fatal("Fetch() with a failing converter returned no error")
+			}
+			failing.Store(false)
+			second := harvester.Fetch(context.Background(), path)
+			if cached := second.Error != ""; cached != tc.wantCached {
+				t.Fatalf("read after the failure: cached = %v (Error=%q), want %v", cached, second.Error, tc.wantCached)
+			}
+		})
 	}
 }

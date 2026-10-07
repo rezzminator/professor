@@ -72,6 +72,12 @@ type Runtime struct {
 	Browser   bool
 	PDFOCR    bool
 	PDFLayout bool
+	// ConvertWorkers / ConvertQueue / ConvertTimeout size the converter's
+	// worker pool (convert.workers, convert.queue, convert.timeoutSeconds;
+	// 0 = harvestpy's derived defaults).
+	ConvertWorkers int
+	ConvertQueue   int
+	ConvertTimeout time.Duration
 
 	// CacheTTL / NegativeTTL / NegativeTransientTTL carry harvester.config.json
 	// values when TTLsConfigured is set, where 0 is a real zero (never expire /
@@ -209,13 +215,18 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 			runtime.Script = filepath.Join(current, "project", "converter.py")
 		}
 	}
-	worker := harvestpy.NewConverter(
+	// One pool per process: the daemon's loopback and external services share
+	// its workers, so convert.workers bounds the whole daemon.
+	worker := harvestpy.SharedConverter(
 		harvestpy.Runtime{
 			Python:    runtime.Python,
 			Script:    runtime.Script,
 			Runner:    runtime.Runner,
 			PDFOCR:    runtime.PDFOCR,
 			PDFLayout: runtime.PDFLayout,
+			Workers:   runtime.ConvertWorkers,
+			Queue:     runtime.ConvertQueue,
+			Timeout:   runtime.ConvertTimeout,
 		},
 	)
 	browserRoot, rootErr := harvestStateRoot(runtime)
@@ -223,10 +234,11 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 		return nil, nil, rootErr
 	}
 	converter := pythonConverter{
-		worker:      worker,
-		browserRoot: browserRoot,
-		runner:      runtime.Runner,
-		proxyURL:    runtime.ProxyURL,
+		worker:       worker,
+		browserRoot:  browserRoot,
+		runner:       runtime.Runner,
+		proxyURL:     runtime.ProxyURL,
+		browserSlots: browserRenderSlots,
 	}
 	browser := runtime.Browser
 	harvester, err := harvest.New(harvest.Options{
@@ -346,7 +358,15 @@ type pythonConverter struct {
 	browserRoot string
 	runner      deps.Runner
 	proxyURL    string
+	// browserSlots bounds the concurrent browser renders (browserSlot); nil is
+	// unbounded.
+	browserSlots chan struct{}
 }
+
+// browserRenderSlots are the process's browser render slots: every service
+// of one daemon (loopback and external) draws from them, so the bound is the
+// daemon's, like the shared converter pool's.
+var browserRenderSlots = make(chan struct{}, max(2, goRuntime.NumCPU()/4))
 
 func (converter pythonConverter) Convert(
 	ctx context.Context,
@@ -415,12 +435,23 @@ func (converter pythonConverter) convertScratch(
 	}
 	result, convertErr := converter.worker.Convert(ctx, request)
 	if convertErr != nil {
+		noteLoadRefusal(ctx, convertErr)
 		return "", convertErr
 	}
 	return result.Markdown, nil
 }
 
 var _ harvest.FullDOMConverter = pythonConverter{}
+
+// noteLoadRefusal marks the harvester walk behind ctx refused for load when
+// err is the converter pool's own refusal (harvestpy.ErrConverterBusy), so the
+// walk's failure is neither cached nor scored as the source's. A deadline, a
+// cancel or a crash is the document's walk failing and stays the source's.
+func noteLoadRefusal(ctx context.Context, err error) {
+	if errors.Is(err, harvestpy.ErrConverterBusy) {
+		harvest.NoteRefusedForLoad(ctx)
+	}
+}
 
 // Server exposes the SDK server for in-memory protocol tests.
 func (service *Service) Server() *mcp.Server { return service.server }
@@ -451,7 +482,8 @@ func (service *Service) ToolNames() []string {
 // struct: the SDK derives the output schema from it and sends
 // structuredContent beside the readable Content text. RegisteredToolNames
 // (toolnames.go) moves with it. Every professor server carrying the harvester
-// family registers through here, bound to this one service.
+// family registers through here, bound to this one service; each tool's
+// context also ends when its HTTP client disconnects (untilClientGone).
 func (service *Service) RegisterTools(server *mcp.Server) {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	readTool := &mcp.Tool{Name: toolRead, Description: readDescription, Annotations: readOnly}
@@ -459,17 +491,17 @@ func (service *Service) RegisterTools(server *mcp.Server) {
 		readTool.Description = readRemoteDescription
 		readTool.InputSchema = remoteReadSchema()
 	}
-	mcp.AddTool(server, readTool, obs.Tool(toolRead, service.read))
+	mcp.AddTool(server, readTool, obs.Tool(toolRead, untilClientGone(service.read)))
 	mcp.AddTool(server,
 		&mcp.Tool{Name: toolDownloadFile, Description: downloadFileDescription, Annotations: readOnly},
-		obs.Tool(toolDownloadFile, service.downloadFile))
+		obs.Tool(toolDownloadFile, untilClientGone(service.downloadFile)))
 	mcp.AddTool(server,
 		&mcp.Tool{Name: toolSearchLiterature, Description: searchLiteratureDescription, Annotations: readOnly},
-		obs.Tool(toolSearchLiterature, service.searchLiterature))
+		obs.Tool(toolSearchLiterature, untilClientGone(service.searchLiterature)))
 	if runtimeSearchEnabled(service.runtime) {
 		mcp.AddTool(server,
 			&mcp.Tool{Name: toolSearchWeb, Description: searchWebDescription, Annotations: readOnly},
-			obs.Tool(toolSearchWeb, service.searchWeb))
+			obs.Tool(toolSearchWeb, untilClientGone(service.searchWeb)))
 	}
 	if service.runtime.Remote {
 		server.AddResourceTemplate(&mcp.ResourceTemplate{

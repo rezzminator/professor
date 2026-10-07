@@ -49,16 +49,18 @@ func (process *Process) Started(pid int, err error) {
 }
 
 // Request opens one request to the sidecar under subcmd and returns the
-// function that records its answer: the bytes read back, dur_ms, and err (at
-// ERROR when set). Call it exactly once per request.
-func (process *Process) Request(subcmd string) func(size int, err error) {
+// function that records its answer: the bytes read back, dur_ms, attrs (the
+// converter pool's wait_ms, queue and workers), and err (at ERROR when set).
+// Call it exactly once per request.
+func (process *Process) Request(subcmd string, attrs ...slog.Attr) func(size int, err error) {
 	started := process.timing.Now()
 	return func(size int, err error) {
-		process.log("request", err,
+		record := append([]slog.Attr{
 			slog.String("subcmd", subcmd),
 			slog.Int("bytes", size),
 			slog.Int64(FieldDur, process.timing.Now().Sub(started).Milliseconds()),
-		)
+		}, attrs...)
+		process.log("request", err, record...)
 	}
 }
 
@@ -167,6 +169,10 @@ func (process *Process) log(op string, err error, attrs ...slog.Attr) {
 	process.logger.LogAttrs(process.ctx, level, "harvestpy."+op, record...)
 }
 
+// maxPartialLine is the longest unterminated stderr line lineWriter holds
+// before emitting it as one line.
+const maxPartialLine = 16 << 10
+
 // lineWriter tees every byte to next and hands each complete line (CR and LF
 // stripped) to emit. exec copies a child's stderr from its own goroutine, so
 // the buffer is locked.
@@ -182,6 +188,12 @@ func (writer *lineWriter) Write(chunk []byte) (int, error) {
 	writer.mutex.Lock()
 	defer writer.mutex.Unlock()
 	writer.partial.Write(chunk[:written])
+	if writer.partial.Len() > maxPartialLine && !bytes.Contains(writer.partial.Bytes(), []byte{'\n'}) {
+		// A sidecar spewing with no line end (native output on its fd 1, which
+		// is stderr now) would otherwise grow this buffer for its whole life.
+		writer.emit(writer.partial.String())
+		writer.partial.Reset()
+	}
 	for {
 		line, rest, found := bytes.Cut(writer.partial.Bytes(), []byte{'\n'})
 		if !found {

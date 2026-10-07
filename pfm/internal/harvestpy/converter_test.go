@@ -3,6 +3,7 @@ package harvestpy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -167,10 +168,12 @@ func TestConverterFallsBackToDirectKillWhenGroupKillFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	converter := NewConverter(Runtime{Python: "fake-python", Script: script, Runner: runner})
-	if _, err := converter.ensureWorkerLocked(); err != nil {
-		t.Fatalf("ensureWorkerLocked() error = %v", err)
+	worker, _, err := converter.pool.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire() error = %v", err)
 	}
-	err := converter.Close()
+	converter.pool.release(worker)
+	err = converter.Close()
 	if err == nil || !strings.Contains(err.Error(), "kill converter worker process group") {
 		t.Fatalf("Close() error = %v, want a contextual group-kill error", err)
 	}
@@ -208,10 +211,11 @@ func TestConverterRequestCapsStderrTheSameWayTheBrowserWorkerDoes(t *testing.T) 
 		t.Fatal(err)
 	}
 	converter := NewConverter(Runtime{Python: "fake-python", Script: script, Runner: runner})
-	worker, err := converter.ensureWorkerLocked()
+	worker, _, err := converter.pool.acquire(context.Background())
 	if err != nil {
-		t.Fatalf("ensureWorkerLocked() error = %v", err)
+		t.Fatalf("acquire() error = %v", err)
 	}
+	converter.pool.release(worker)
 	// Simulate an oversized sidecar stderr the way a real docling stack trace
 	// would accumulate one, byte by byte, in the buffer obs.Process.Stderr
 	// wires the child's stderr pipe to. 2000 bytes is well past stderrTail's
@@ -221,7 +225,7 @@ func TestConverterRequestCapsStderrTheSameWayTheBrowserWorkerDoes(t *testing.T) 
 	if _, err := worker.stderr.Write([]byte(overLong)); err != nil {
 		t.Fatal(err)
 	}
-	_, tail, err := converter.request(context.Background(), []byte(`{"op":"convert"}`))
+	_, tail, err := converter.request(context.Background(), []byte(`{"op":"convert"}`), 0)
 	if err == nil {
 		t.Fatal("a write on a closed stdin pipe returned no error")
 	}
@@ -710,5 +714,30 @@ func TestHTMLMetadataDateComesFromMarkupOnly(t *testing.T) {
 				t.Errorf("Published = %q, want %q; markdown:\n%s", published, tc.want, result.Markdown)
 			}
 		})
+	}
+}
+
+// TestLockedBufferKeepsABoundedTail: a worker's stderr is kept for the error
+// messages that quote its tail, never whole: a chatty native library's
+// thousands of lines leave between stderrKeepBytes and twice that, ending
+// with the latest line, and one write past the cap keeps its own last bytes.
+func TestLockedBufferKeepsABoundedTail(t *testing.T) {
+	t.Parallel()
+	var buffer lockedBuffer
+	for line := range 5000 {
+		if _, err := fmt.Fprintf(&buffer, "line %05d of a chatty native library\n", line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tail := buffer.String(); len(tail) < stderrKeepBytes || len(tail) > 2*stderrKeepBytes ||
+		!strings.HasSuffix(tail, "line 04999 of a chatty native library\n") {
+		t.Fatalf("after 5000 lines the buffer holds %d bytes ending %q; want %d..%d ending with the last line",
+			len(tail), tail[max(0, len(tail)-40):], stderrKeepBytes, 2*stderrKeepBytes)
+	}
+	if _, err := buffer.Write([]byte(strings.Repeat("y", 3*stderrKeepBytes) + "END")); err != nil {
+		t.Fatal(err)
+	}
+	if tail := buffer.String(); len(tail) != stderrKeepBytes || !strings.HasSuffix(tail, "END") {
+		t.Fatalf("after one oversized write the buffer holds %d bytes; want its last %d", len(tail), stderrKeepBytes)
 	}
 }

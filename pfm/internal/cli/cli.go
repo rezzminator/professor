@@ -45,6 +45,32 @@ func ParseFlagsAnywhere(flags *flag.FlagSet, args []string) ([]string, int, bool
 	}
 }
 
+// ParseFlagsAroundName reads flags on both sides of one positional name:
+// `pfm chat new seat --engine cx` keeps --engine. When *name is already set by
+// its flag, every positional is returned as it stands. Otherwise the first
+// positional becomes *name, flags after it are read, and the rest starts at the
+// first word that is not a flag; `--` ends flag parsing, so a word that looks
+// like a flag (`explain the -h output`) stays positional instead of printing
+// usage or arming a flag.
+func ParseFlagsAroundName(flags *flag.FlagSet, name *string, args []string) ([]string, int, bool) {
+	if code, ok := ParseFlags(flags, args); !ok {
+		return nil, code, false
+	}
+	positional := flags.Args()
+	terminated := len(positional) < len(args) && args[len(args)-len(positional)-1] == "--"
+	if *name != "" || len(positional) == 0 {
+		return positional, 0, true
+	}
+	*name = positional[0]
+	if terminated {
+		return positional[1:], 0, true
+	}
+	if code, ok := ParseFlags(flags, positional[1:]); !ok {
+		return nil, code, false
+	}
+	return flags.Args(), 0, true
+}
+
 func CloseResource(closer io.Closer, label string, stderr io.Writer, exitCode *int) {
 	if err := closer.Close(); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", label, err)

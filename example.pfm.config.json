@@ -1,0 +1,74 @@
+{
+  "version": 2,
+  "theme": "default",
+  "state": {
+    "db": "~/.local/state/pfm/pfm.db",
+    "cacheDb": "~/.local/state/pfm/pfm-cache.db"
+  },
+  "claude": {
+    "permissionMode": "bypass",
+    "binary": "claude",
+    "theme": null,
+    "cache1h": true,
+    "nativeCursor": false,
+    "systemPrompt": null,
+    "webSearchesPerSession": 9007199254740991,
+    "autoCompactWindow": 100000,
+    "tmuxTruecolor": true,
+    "cleanupPeriodDays": 36500,
+    "requireManagedCleanup": true,
+    "maxSubagentSpawnDepth": 8,
+    "maxConcurrentSubagents": null
+  },
+  "codex": {
+    "yolo": true,
+    "binary": "codex"
+  },
+  "opencode": {
+    "binary": "opencode"
+  },
+  "tmux": {
+    "titles": {
+      "enabled": true
+    }
+  },
+  "nameSync": {
+    "interval": "15m0s"
+  },
+  "mcp": {
+    "servers": {
+      "chat": {
+        "enabled": false
+      }
+    },
+    "http": {
+      "port": 18377
+    },
+    "thirdParty": {},
+    "authToken": null
+  },
+  "ask": {
+    "claude": {
+      "model": "claude-haiku-4-5",
+      "effort": "low"
+    },
+    "codex": {
+      "model": "gpt-5.6-luna",
+      "effort": "low"
+    },
+    "opencode": {
+      "model": "gpt-5.6-luna",
+      "effort": "low"
+    }
+  },
+  "log": {
+    "level": null,
+    "components": {},
+    "keepFiles": 5,
+    "maxMB": 8,
+    "keepDays": 30
+  },
+  "doctor": {
+    "ignoreWarnings": []
+  }
+}

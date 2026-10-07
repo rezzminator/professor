@@ -23,8 +23,15 @@ func readMCPFile(path string) ([]byte, bool, error) {
 	return raw, err == nil, err
 }
 
-// Recheck the planned preimage before preserving a backup and atomically writing
-// the physical file. Native clients may update their registry during installation.
+// changeMCPFile reports one writeMCPFile write.
+func (installer *engine) changeMCPFile(message, path string, original, wanted []byte, existed bool) error {
+	return installer.change(message, func() error {
+		return installer.writeMCPFile(path, original, wanted, existed)
+	})
+}
+
+// writeMCPFile rechecks the planned preimage before preserving a backup and
+// atomically writing the physical file. Native clients may update their registry.
 func (installer *engine) writeMCPFile(path string, original, wanted []byte, existed bool) error {
 	latest, present, err := readMCPFile(path)
 	if err != nil || present != existed || !bytes.Equal(latest, original) {

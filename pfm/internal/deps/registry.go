@@ -35,6 +35,14 @@ type Entry struct {
 	InstallHint    string
 	Harvest        bool
 	SelfDoctorArgs []string
+	// ProbeHome runs the version and self-doctor probes in a throwaway engine
+	// home (NewEngineProbeHome), never the ambient account.
+	ProbeHome bool
+	// AccountChecks names the self-doctor rows that judge the account, not the
+	// binary. A throwaway home has no login, so they fail there by
+	// construction; pfm judges the account in its own rows (codex-login), and
+	// a self-doctor failing only these rows is a healthy binary.
+	AccountChecks []string
 }
 
 // Options materializes the config- and platform-owned registry entries.
@@ -207,14 +215,19 @@ func Registry(options ...Options) []Entry {
 			binary = descriptor.Binary
 		}
 		doctorArgs := []string{"doctor"}
+		var accountChecks []string
 		if id == pfmengine.Codex {
 			doctorArgs = append(doctorArgs, "--summary", "--ascii", "--no-color")
+			accountChecks = []string{"auth"}
 		}
 		entries = append(entries, Entry{
 			Name: descriptor.LongName, Command: binary, Engine: id,
 			Purpose:     "configured " + descriptor.Short + " engine",
 			VersionArgs: []string{versionFlag}, Parse: firstVersion,
 			InstallHint: "install the configured " + descriptor.Short + " CLI", SelfDoctorArgs: doctorArgs,
+			// The probes judge the binary, never an account: every engine
+			// run writes its home, so each runs in a throwaway one.
+			ProbeHome: true, AccountChecks: accountChecks,
 		})
 	}
 	harvestRoot := filepath.Join(resolved.Home, ".local", "state", "pfm", "harvest-python")

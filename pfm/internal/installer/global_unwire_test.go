@@ -12,33 +12,26 @@ import (
 )
 
 // stageGlobalSource writes one recorded clone's machine-global sources: two
-// commands (a file and a directory), one template skill, and the in-tree
-// deep-rr workflow skill — exactly the four shapes wireGlobalCommands and
-// wireGlobalSkills fan out across every configured account.
+// commands (a file and a directory) and one template skill — exactly the
+// three shapes wireGlobalCommands and wireGlobalSkills link in the store.
 func stageGlobalSource(t *testing.T, repo string) {
 	t.Helper()
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tokens.md"), "# tokens command\n")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tools", "go.md"), "# go command\n")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "skills", "pcm", "SKILL.md"), "# pcm skill\n")
-	writeFixture(t, filepath.Join(repo, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
 }
 
-// TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink is the uninstall
-// half of wireGlobalCommands/wireGlobalSkills, and a REGRESSION test for the
-// state that shipped before it: `pfm uninstall` unwired pfm's own /reload and
-// handoff links and the Codex agent twins, but left every machine-global
-// command and skill link behind, so a removed install still resolved
-// /flights:*, /quality:* and the global skills into the clone from every
-// account — against INSTALL.md's promise that uninstall removes the
-// installer-owned links.
+// TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink checks store teardown, including a dead retired skill.
 func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	stageGlobalSource(t, repo)
-	accounts := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2")}
+	accounts := []string{ClaudeStore(home)}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -52,13 +45,17 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 		assertLink(t,
 			filepath.Join(config, "skills", "pcm"),
 			filepath.Join(repo, "templates", "global", "skills", "pcm"))
-		assertLink(t,
+		if err := os.Symlink(
+			filepath.Join(repo, "workflows", "deep-rr"),
 			filepath.Join(config, "skills", "deep-rr"),
-			filepath.Join(repo, "workflows", "deep-rr"))
+		); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,33 +74,27 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 	}
 }
 
-// TestUninstallRemovesGlobalAgentLinks is the regression for the one
-// registry unwireGlobalRegistries had not yet learned to visit: wireCodexAgents
-// (installer.go, via codexgen.RunGlobalAgents) links every
-// <clone>/templates/global/agents/<name>.md into {config}/agents/<name>.md
-// for every configured account, the same fan-out wireGlobalCommands and
-// wireGlobalSkills already get unwired — but unwireGlobalRegistries only
-// walked the commands/ and skills/ registries, so `pfm uninstall` left every
-// ~/.claude/agents/<name>.md symlink behind, against INSTALL.md § Uninstall's
-// promise that every installer-owned link is removed.
+// TestUninstallRemovesGlobalAgentLinks checks store agent links are unwired.
 func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	agentsSource := filepath.Join(repo, "templates", "global", "agents")
-	for _, name := range []string{"mapper", "tracer"} {
+	for _, name := range []string{"collector", "tracer"} {
 		body := "---\nname: " + name + "\ndescription: " + name + " role.\n---\n\nbody\n"
 		writeFixture(t, filepath.Join(agentsSource, name+".md"), body)
 	}
-	accounts := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2")}
+	accounts := []string{ClaudeStore(home)}
 	codexHomes := []string{filepath.Join(home, ".codex")}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	for _, config := range accounts {
-		for _, name := range []string{"mapper", "tracer"} {
+		for _, name := range []string{"collector", "tracer"} {
 			assertLink(t,
 				filepath.Join(config, "agents", name+".md"),
 				filepath.Join(repo, "templates", "global", "agents", name+".md"))
@@ -111,12 +102,13 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	for _, config := range accounts {
-		for _, name := range []string{"mapper", "tracer"} {
+		for _, name := range []string{"collector", "tracer"} {
 			path := filepath.Join(config, "agents", name+".md")
 			if _, err := os.Lstat(path); !os.IsNotExist(err) {
 				t.Fatalf("uninstall left the machine-global agent link %s: %v", path, err)
@@ -133,6 +125,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 // The foreign same-named link is also NAMED in the transcript, so a kept
 // entry is a reported decision rather than a silent omission.
 func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	stageGlobalSource(t, repo)
@@ -152,8 +145,8 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 
 	var transcript bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: []string{config},
-		Runner: &fakeRunner{}, CodexHomes: []string{}, Stdout: &transcript,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{}, Stdout: &transcript,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,19 +165,21 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 // TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory: a
 // variant's link resolves into the pfm-owned generated directory, not the
 // clone, so the ownership-by-target rule has to know that directory too —
-// otherwise uninstall leaves a working super-* agent in every account.
+// otherwise uninstall leaves a working super-* agent in the store.
 func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	agentsSource := filepath.Join(home, ".professor", "templates", "global", "agents")
 	writeFixture(t, filepath.Join(agentsSource, "lead.md"),
 		"---\nname: lead\ndescription: lead role.\neffort: low\n---\n\nbody\n")
 	writeFixture(t, filepath.Join(agentsSource, "variants.json"), `{"super-lead":{"from":"lead","effort":"medium"}}`)
-	accounts := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2")}
+	accounts := []string{ClaudeStore(home)}
 	codexHomes := []string{filepath.Join(home, ".codex")}
 	generated := paths.GeneratedClaudeAgentsDir(home)
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +188,8 @@ func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *te
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}

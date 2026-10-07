@@ -463,7 +463,7 @@ func PublicFailure(source string, result Result) Result {
 	kind := publicErrorKind(result)
 	out := Result{Source: PublicSourceLabel(source), Error: PublicFailureMessage(result), ErrorKind: kind}
 	out.RetryAfter = result.RetryAfter
-	if result.HTTPStatus >= 400 && result.HTTPStatus < 600 {
+	if (result.HTTPStatus >= 400 && result.HTTPStatus < 600) || result.HTTPStatus == statusBotBlock {
 		out.HTTPStatus = result.HTTPStatus
 	}
 	if kind == errorKindChallenge {
@@ -505,6 +505,8 @@ func publicErrorKind(result Result) string {
 		return errorKindInternal
 	case errorKindExport:
 		return errorKindExport
+	case errorKindAmbiguous:
+		return errorKindAmbiguous
 	}
 	if result.Challenge {
 		return errorKindChallenge
@@ -550,8 +552,6 @@ func publicErrorKind(result Result) string {
 		strings.Contains(err, "unsupported url"),
 		strings.Contains(err, "source is empty"):
 		return errorKindInvalid
-	case strings.Contains(err, "harvester_search_literature"), strings.Contains(err, "title — use"):
-		return "ambiguous"
 	case strings.Contains(err, "with `harvester_download_file`"):
 		return errorKindWrongKind
 	case strings.Contains(err, cacheLabel), strings.Contains(err, "storage"), strings.Contains(err, "read local file"):
@@ -574,8 +574,11 @@ func PublicFailureMessage(result Result) string {
 	case errorKindCancelled:
 		return "The request was cancelled before it finished. Send it again."
 	case errorKindInvalid:
+		if isPubMedSearchURL(result.Source) {
+			return "A PubMed search URL lists works; it is not an article. Use harvester_search_literature to get candidate works, and read one's handle with harvester_read in publications."
+		}
 		return "The input is invalid. Give harvester_read a web URL in urls, a local path in files, or a DOI, arXiv id, PMID, PMCID, ISBN or a harvester_search_literature handle in publications."
-	case "ambiguous":
+	case errorKindAmbiguous:
 		return "The title is ambiguous. Use harvester_search_literature, select a result, and read its handle with harvester_read in publications."
 	case errorKindWrongKind:
 		return wrongKindMessage(result.Kind)

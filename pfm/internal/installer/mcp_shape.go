@@ -23,16 +23,3 @@ func withoutEmptyEnv(registration map[string]any) map[string]any {
 	}
 	return neutral
 }
-
-// sameClaudeRegistration compares a registry's entry with a ledger receipt
-// through withoutEmptyEnv, so Claude's own `"env": {}` never turns pfm's
-// receipt into a manual conflict.
-func sameClaudeRegistration(current, recorded any) bool {
-	if registration, ok := current.(map[string]any); ok {
-		current = withoutEmptyEnv(registration)
-	}
-	if registration, ok := recorded.(map[string]any); ok {
-		recorded = withoutEmptyEnv(registration)
-	}
-	return sameJSONValue(current, recorded)
-}

@@ -1,8 +1,9 @@
 package installer
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,284 +13,169 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
+func TestMCPWiresCodexAndOpenCodeWithoutClaudeRegistry(t *testing.T) {
 	home := t.TempDir()
-	primary := filepath.Join(home, ".claude")
-	secondary := filepath.Join(home, "account-two")
-	paths := []string{filepath.Join(home, ".claude.json"), filepath.Join(secondary, ".claude.json")}
-	for _, path := range paths {
-		writeFixture(
-			t,
-			path,
-			`{"oauthAccount":{"accountUuid":"private"},"mcpServers":{"foreign":{"command":"custom"}}}`,
-		)
+	registry := filepath.Join(home, ".claude.json")
+	original := `{"mcpServers":{"other":{"command":"operator"}}}`
+	writeFixture(t, registry, original)
+	codex := filepath.Join(home, ".codex")
+	opencode := OpenCodeConfigPath(home)
+	e := engine{
+		options: Options{
+			Home: home, CodexHomes: []string{codex}, OpenCodeConfigPath: opencode,
+			MCPEnabled: map[string]bool{"chat": true, "harvester": true}, MCPPort: 8377, Stdout: io.Discard,
+		},
+		apply: true, managedRoot: managedRootForHome(home), stamp: "fixture",
 	}
-	options := Options{
-		Home:       home,
-		ConfigDir:  primary,
-		ConfigDirs: []string{primary, secondary},
-		CodexHomes: []string{},
-		Mode:       ModeApply,
-		Runner:     &fakeRunner{},
-		Stdout:     io.Discard,
-		MCPEnabled: map[string]bool{"chat": true},
-		MCPPort:    8377,
-	}
-	if _, err := Run(context.Background(), options); err != nil {
+	if err := e.wireMCP(); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range paths {
-		var doc map[string]any
-		if err := json.Unmarshal([]byte(readFixture(t, path)), &doc); err != nil {
-			t.Fatal(err)
+	if got := readFixture(t, registry); got != original {
+		t.Fatalf("Claude registry changed: %s", got)
+	}
+	for _, path := range []string{filepath.Join(codex, "config.toml"), opencode} {
+		content, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(content), professorName) {
+			t.Fatalf("%s lacks the professor MCP server: %s err=%v", path, content, err)
 		}
-		servers := doc["mcpServers"].(map[string]any)
-		if servers[professorName] == nil || servers["foreign"] == nil || doc["oauthAccount"] == nil {
-			t.Errorf("registry %s lost wiring or private state: %#v", path, doc)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
-		t.Errorf("empty Codex roster wrote .codex: %v", err)
-	}
-	// A user replacement after installation is preserved on uninstall.
-	replacement := `{"oauthAccount":{"accountUuid":"private"},"mcpServers":{"professor":{"command":"manual"},"foreign":{"command":"custom"}}}`
-	writeFixture(t, paths[1], replacement)
-	options.Mode = ModeUninstall
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(readFixture(t, paths[0]), `"professor"`) {
-		t.Error("owned primary registration survived uninstall")
-	}
-	if got := readFixture(t, paths[1]); got != replacement {
-		t.Errorf("manual replacement was changed: %s", got)
 	}
 }
 
-// TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough
-// pins issue #24 finding 5: a `claude` typed into a shell that exports
-// CLAUDE_CONFIG_DIR reads THAT directory's .claude.json, not the implicit
-// account's $HOME/.claude.json a bare account-driven fanout would assume —
-// the launcher shim passes the ambient var straight through
-// (internal_launch.go), so the registry resolver must list both files, each
-// naming why it is a registry pfm cares about.
-func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(t *testing.T) {
-	home := t.TempDir()
-	ambient := filepath.Join(home, ".cc", "1")
-	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: ambient, Implicit: true}}
-
-	registries := ClaudeUserRegistries(home, accounts, ambient)
-
-	if len(registries) != 2 {
-		t.Fatalf("registries=%#v, want exactly 2 (implicit account + ambient)", registries)
-	}
-	implicitPath := filepath.Join(home, ".claude.json")
-	if registries[0].Path != implicitPath {
-		t.Fatalf("registries[0].Path=%s, want the implicit account's %s", registries[0].Path, implicitPath)
-	}
-	if registries[0].Reason != "account 1 (pfm spawns it without CLAUDE_CONFIG_DIR)" {
-		t.Fatalf("registries[0].Reason=%q, want the implicit-account reason", registries[0].Reason)
-	}
-	ambientPath := filepath.Join(ambient, ".claude.json")
-	if registries[1].Path != ambientPath {
-		t.Fatalf("registries[1].Path=%s, want the ambient CLAUDE_CONFIG_DIR file %s", registries[1].Path, ambientPath)
-	}
-	wantReason := "ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)"
-	if registries[1].Reason != wantReason {
-		t.Fatalf("registries[1].Reason=%q, want %q", registries[1].Reason, wantReason)
-	}
-}
-
-// TestWriteMCPClientJSONRefusesAnUnreadableOwnershipLedger pins the honesty
-// rule on the one ledger that says which MCP registrations are pfm's to
-// remove: a ledger that cannot be decoded — including the zero-byte file a
-// truncated write leaves — is an error naming it, never the empty ownership
-// that would silently disown every registration pfm has to clean up. The
-// inline reader this call site used to carry treated a zero-byte ledger as
-// "nothing owned"; it now shares loadMCPOwnership with the rest of the
-// package.
-func TestWriteMCPClientJSONRefusesAnUnreadableOwnershipLedger(t *testing.T) {
-	for name, ledger := range map[string]string{"empty": "", "malformed": "{not json"} {
-		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
-			installer := &engine{
-				options: Options{
-					Home: home, ConfigDir: filepath.Join(home, ".claude"), CodexHomes: []string{},
-					Mode: ModeApply, Stdout: io.Discard, MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377,
-				},
-				managedRoot: managedRootForHome(home),
-				apply:       true,
-			}
-			writeFixture(t, installer.mcpOwnershipPath(), ledger)
-			if _, err := installer.writeMCPClientJSON([]string{professorName}); err == nil {
-				t.Fatal("an undecodable MCP ownership ledger read as an empty ownership")
-			} else if !strings.Contains(err.Error(), "MCP ownership") {
-				t.Fatalf("error did not name the MCP ownership ledger: %v", err)
-			}
-			if _, err := os.Stat(filepath.Join(home, ".claude.json")); !os.IsNotExist(err) {
-				t.Fatalf("a registry was written past an unreadable ledger: %v", err)
-			}
-		})
-	}
-}
-
-// TestMCPInstallNamesAMalformedScanOnlyRegistryAndContinues pins that a
-// registry visited only to remove pfm's legacy entries (~/.mcp.json with no
-// ledger claiming it) never stops the install when it cannot be scanned:
-// install names the file and the error and wires everything else. A registry
-// pfm registers into still fails the install.
-func TestMCPInstallNamesAMalformedScanOnlyRegistryAndContinues(t *testing.T) {
-	for name, content := range map[string]string{
-		"empty":         "",
-		"unparseable":   "{",
-		"null servers":  `{"mcpServers":null}`,
-		"not an object": `[]`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("CLAUDE_CONFIG_DIR", "")
-			home := t.TempDir()
-			scanOnly := filepath.Join(home, ".mcp.json")
-			writeFixture(t, scanOnly, content)
-			applied := applyChatMCP(t, home)
-			want := "could not scan " + physicalSettingsPath(scanOnly) + " for pfm legacy MCP entries: "
-			if !strings.Contains(applied, want) {
-				t.Fatalf("install output lacks %q:\n%s", want, applied)
-			}
-			if readFixture(t, scanOnly) != content {
-				t.Fatalf("install rewrote the unscannable %s", scanOnly)
-			}
-			servers := readClaudeServers(t, filepath.Join(home, ".claude.json"))
-			if !sameJSONValue(servers[professorName], claudeProfessorShape(home)) {
-				t.Fatalf("install stopped before registering professor: %#v", servers)
-			}
-		})
-	}
-	t.Run("an owned registry still fails", func(t *testing.T) {
-		t.Setenv("CLAUDE_CONFIG_DIR", "")
-		home := t.TempDir()
-		canonical := filepath.Join(home, ".claude")
-		writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
-		writeFixture(t, filepath.Join(home, ".claude.json"), "{")
-		_, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, ConfigDir: canonical, ConfigDirs: []string{canonical},
-			MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377, Runner: &fakeRunner{}, Stdout: io.Discard,
-		})
-		if err == nil || !strings.Contains(err.Error(), "read MCP registry") {
-			t.Fatalf("install over a malformed registry it registers into: err=%v, want the read failure", err)
-		}
-	})
-}
-
-// TestMCPInstallTreatsClaudesEmptyEnvAsShapeNeutral pins the live-host
-// defects: Claude Code adds `"env": {}` when it rewrites its config, so an
-// empty env must never make pfm's own entry foreign — the legacy chat still
-// goes, the owned professor is neither rewritten nor a conflict — while a
-// non-empty env stays foreign; and $HOME/.claude.json, the registry a plain
-// `claude` reads, is swept of pfm's legacy entries even when every account has
-// its own ConfigDir, gaining no professor.
-func TestMCPInstallTreatsClaudesEmptyEnvAsShapeNeutral(t *testing.T) {
-	stdioChat := `"chat":{"type":"stdio","command":"BIN","args":["mcp","chat","serve"],"env":ENV}`
-	professor := `"professor":{"type":"stdio","command":"BIN","args":["mcp","serve","--stdio"]}`
-	for _, testCase := range []struct {
-		name, configDir, servers, wantServers, wantLine, forbidLine string
-		ownProfessor, unchanged                                     bool
-		wantStates                                                  map[string]string
+func TestWireMCPDropsClaudeOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		mode       Mode
+		apply      bool
+		enabled    bool
+		opencode   bool
+		unreadable bool
 	}{
-		{
-			name: "legacy stdio chat with an empty env is removed", configDir: ".claude",
-			servers:     strings.ReplaceAll(stdioChat, "ENV", "{}"),
-			wantServers: professor,
-			wantLine:    "remove pfm's legacy MCP clients chat",
-			wantStates:  map[string]string{chatName: MCPClientAbsent, professorName: MCPClientPFM},
-		},
-		{
-			name: "legacy chat with a non-empty env is preserved as a conflict", configDir: ".claude",
-			servers:     strings.ReplaceAll(stdioChat, "ENV", `{"DEBUG":"1"}`),
-			wantServers: strings.ReplaceAll(stdioChat, "ENV", `{"DEBUG":"1"}`) + "," + professor,
-			forbidLine:  "remove pfm's legacy MCP clients",
-			wantStates:  map[string]string{chatName: MCPClientForeignRegistration, professorName: MCPClientPFM},
-		},
-		{
-			name: "owned professor with an empty env stays pfm's", configDir: ".claude",
-			servers:      strings.TrimSuffix(professor, "}") + `,"env":{}}`,
-			ownProfessor: true, unchanged: true,
-			forbidLine: "preserve conflicting manual MCP client",
-			wantStates: map[string]string{professorName: MCPClientPFM},
-		},
-		{
-			name: "unwired home registry loses only pfm's legacy entries", configDir: "account-one",
-			servers: strings.ReplaceAll(stdioChat, "ENV", "{}") +
-				`,"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"},"foreign":{"command":"custom"}`,
-			wantServers: `"foreign":{"command":"custom"}`,
-			wantLine:    "remove pfm's legacy MCP clients chat,harvester",
-			wantStates: map[string]string{
-				chatName: MCPClientAbsent, mcpServerHarvester: MCPClientAbsent, professorName: MCPClientAbsent,
-			},
-		},
+		{"uninstall", ModeUninstall, true, false, false, false},
+		{"disabled-install", ModeApply, true, false, false, false},
+		{"install-keeps-opencode", ModeApply, true, true, true, false},
+		{"dry-run", ModeApply, false, true, true, false},
+		{"unreadable-ledger", ModeUninstall, true, false, false, true},
 	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Setenv("CLAUDE_CONFIG_DIR", "")
+		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
-			bin := filepath.Join(home, ".local", "bin", "pfm")
+			var stdout bytes.Buffer
+			e := engine{
+				options: Options{Home: home, Mode: test.mode, MCPPort: 8377, Stdout: &stdout},
+				apply:   test.apply, managedRoot: managedRootForHome(home), stamp: "fixture",
+			}
+			if test.enabled {
+				e.options.MCPEnabled = map[string]bool{"chat": true}
+			}
 			registry := filepath.Join(home, ".claude.json")
-			original := `{"theme":"dark","mcpServers":{` + strings.ReplaceAll(testCase.servers, "BIN", bin) + `}}`
-			writeFixture(t, registry, original)
-			if testCase.ownProfessor {
-				ledger, _ := json.Marshal(mcpOwnership{Registrations: map[string]map[string]any{
-					registry: {professorName: claudeProfessorShape(home)},
-				}})
-				writeFixture(
-					t,
-					filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName),
-					string(ledger),
-				)
+			originalRegistry := `{"mcpServers":{"owned":{"command":"invented"}}}`
+			writeFixture(t, registry, originalRegistry)
+			ownership := mcpOwnership{
+				Registrations: map[string]map[string]any{registry: {"owned": map[string]any{"command": "invented"}}},
+				Pending: map[string]map[string]any{
+					registry: {"pending": map[string]any{"command": "invented-pending"}},
+				},
 			}
-			configDir := filepath.Join(home, testCase.configDir)
-			writeFixture(t, filepath.Join(configDir, "settings.json"), `{}`)
-			var applied strings.Builder
-			if _, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: home, ConfigDir: configDir,
-				ConfigDirs: []string{configDir}, MCPEnabled: map[string]bool{"chat": true},
-				MCPPort: 8377, Runner: &fakeRunner{}, Stdout: &applied,
-			}); err != nil {
-				t.Fatalf("apply: %v\n%s", err, applied.String())
-			}
-			output := applied.String()
-			if testCase.wantLine != "" && !strings.Contains(output, testCase.wantLine) {
-				t.Errorf("install output does not name %q:\n%s", testCase.wantLine, output)
-			}
-			if testCase.forbidLine != "" && strings.Contains(output, testCase.forbidLine) {
-				t.Errorf("install output names %q:\n%s", testCase.forbidLine, output)
-			}
-			got := readFixture(t, registry)
-			if testCase.unchanged {
-				if got != original {
-					t.Errorf("registry rewritten to %s, want byte-identical %s", got, original)
+			if test.opencode {
+				e.options.OpenCodeConfigPath = OpenCodeConfigPath(home)
+				registration := e.mcpOpenCodeRegistration()
+				ownership.OpenCodeRegistrations = map[string]map[string]any{
+					e.options.OpenCodeConfigPath: {professorName: registration},
 				}
-			} else {
-				var want, document map[string]any
-				wantJSON := `{"theme":"dark","mcpServers":{` + strings.ReplaceAll(
-					testCase.wantServers,
-					"BIN",
-					bin,
-				) + `}}`
-				if err := json.Unmarshal([]byte(wantJSON), &want); err != nil {
+				raw, err := json.Marshal(map[string]any{"mcp": map[string]any{professorName: registration}})
+				if err != nil {
 					t.Fatal(err)
 				}
-				if err := json.Unmarshal([]byte(got), &document); err != nil {
+				writeFixture(t, e.options.OpenCodeConfigPath, string(raw))
+			}
+			raw, err := json.Marshal(ownership)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledger := e.mcpOwnershipPath()
+			writeFixture(t, ledger, string(raw))
+			if test.unreadable {
+				if err := os.Rename(ledger, ledger+".fixture"); err != nil {
 					t.Fatal(err)
 				}
-				if !sameJSONValue(document, want) {
-					t.Errorf("registry=%s, want %s", got, wantJSON)
+				if err := os.Mkdir(ledger, 0o700); err != nil {
+					t.Fatal(err)
 				}
 			}
-			for name, state := range testCase.wantStates {
-				for _, report := range InspectClaudeServers(registry, home, 8377, name) {
-					if report.State != state {
-						t.Errorf("doctor classifies %s as %s, want %s", name, report.State, state)
-					}
+			err = e.wireMCP()
+			if test.unreadable {
+				assertProbePath(t, err, ledger)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := readFixture(t, registry); got != originalRegistry {
+				t.Fatalf("Claude registry=%s want=%s", got, originalRegistry)
+			}
+			if !test.apply {
+				if got := readFixture(t, ledger); got != string(raw) {
+					t.Fatalf("dry-run ledger=%s want=%s", got, raw)
 				}
+				return
+			}
+			if !test.opencode {
+				if _, err := os.Stat(ledger); !os.IsNotExist(err) {
+					t.Fatalf("retired ledger stat=%v want=not-exist", err)
+				}
+				want := fmt.Sprintf("  change  remove %s\n", ledger)
+				if got := stdout.String(); got != want {
+					t.Fatalf("output=%q want=%q", got, want)
+				}
+				return
+			}
+			got, err := e.loadMCPOwnership()
+			if err != nil || len(got.Registrations) != 0 || len(got.Pending) != 0 ||
+				!sameJSONValue(got.OpenCodeRegistrations, ownership.OpenCodeRegistrations) {
+				t.Fatalf("ledger=%+v err=%v want OpenCode registrations=%v", got, err, ownership.OpenCodeRegistrations)
+			}
+			var document map[string]any
+			if err := json.Unmarshal([]byte(readFixture(t, ledger)), &document); err != nil {
+				t.Fatal(err)
+			}
+			if _, present := document["registrations"]; present {
+				t.Fatal("saved ledger carries Claude registrations")
+			}
+			if _, present := document["pending"]; present {
+				t.Fatal("saved ledger carries Claude pending registrations")
+			}
+			want := fmt.Sprintf("  change  write %s\n", ledger)
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("output=%q lacks=%q", stdout.String(), want)
 			}
 		})
+	}
+}
+
+func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	accountDir := pfmconfig.DefaultAccountDir(home, 1)
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: accountDir}}
+	for _, ambient := range []string{accountDir, filepath.Join(home, "ambient")} {
+		registries := ClaudeUserRegistries(home, accounts, ambient)
+		count := 1
+		if ambient != accountDir {
+			count = 2
+		}
+		if len(registries) != count {
+			t.Fatalf("registries=%#v, want %d", registries, count)
+		}
+		wantPath := filepath.Join(accountDir, ".claude.json")
+		wantReason := "account 1 (CLAUDE_CONFIG_DIR=" + accountDir + " when pfm spawns it)"
+		if registries[0].Path != wantPath || registries[0].Reason != wantReason || registries[0].Account != 1 {
+			t.Fatalf("account registry=%#v, want path=%s reason=%q account=1", registries[0], wantPath, wantReason)
+		}
+		if ambient != accountDir {
+			wantReason = "ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)"
+			if registries[1].Path != filepath.Join(ambient, ".claude.json") || registries[1].Reason != wantReason ||
+				registries[1].Account != 0 {
+				t.Fatalf("ambient registry=%#v, want dir=%s reason=%q account=0", registries[1], ambient, wantReason)
+			}
+		}
 	}
 }

@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm update check|adopt|pin|ignore|drop`), `pfm codex build|check`, `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → /pcm.
+description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop`), `pfm codex build|check`, `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → /pcm.
 argument-hint: [verb|question]
 ---
 
@@ -10,12 +10,14 @@ $ARGUMENTS
 
 `pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, the harvester, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store: `{BLUEPRINT_CLONE_PATH}` (default `~/.professor`; `.professor/manifest.json` can point elsewhere).
 
+For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`.
+
 ## Verb map
 
 Operator verbs:
 
 - ls: list or pick fleet chats (`--killed` for the graveyard)
-- chat: operate on one chat — new, open, status, last, read, stream, inject, self-compact, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve
+- chat: operate on one chat — new, open, status, last, read, stream, inject, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, reminder
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
 - index: refresh the transcript index
@@ -26,8 +28,8 @@ Operator verbs:
 - heal: report or repair wedged Codex history projections
 - install: wire the self-contained host integration (`--yes` non-interactive)
 - uninstall: remove it
-- update: bare form updates the binary from its source clone; `check|adopt|pin|ignore|drop` manage this project's template baseline
-- init: scaffold project templates once and pin their baselines (`pfm init [dir] [--force]`)
+- update: bare form updates the binary from its source clone; `adopt|pin|ignore|drop` manage this project's template baseline (`pfm doctor --project-updates` reports it)
+- init: scaffold project templates once and pin their baselines (`pfm init [dir] [--force]`); `pfm init --render [dir]` fills install-time tokens once from `.professor/manifest.json`
 - config: `init | show | validate` machine configuration
 - doctor: fleet database and jail health — exit 0 clean, 1 warnings, 3 failures
 - version: print the pfm version
@@ -38,12 +40,12 @@ Wiring verbs (hooks and services call these; you rarely type them): name-sync, s
 
 The blueprint never rewrites a project file after `pfm init`; every upstream change is hand-applied.
 
-1. `pfm update check` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, or `LOCAL-DELETED`, with the exact `git diff` command to read per item; it writes nothing. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-check.
-2. Read each printed diff. Decide per file what belongs locally.
-3. Hand-apply what belongs through `/pcm` (the guarded framework-edit flow).
+1. `pfm doctor --project-updates` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, or `LOCAL-DELETED`, and prints under each `UPDATED` row the upstream diff since its pin; it writes nothing and exits 0 clean, 1 review, 3 failure. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-run the report.
+2. Read what upstream changed in each printed diff — the intent of the change — and decide per file what applies locally; install-time values are never read on update.
+3. Port what applies through `/pcm`, keeping the project's own edits (the guarded framework-edit flow).
 4. Advance the pin: `pfm update pin <local>...` (or `--all`); a `NEW` template you adopt: `pfm update pin --template <template> <local>`; one you will never take: `pfm update ignore <template>...` (`--undo` reverses); a `GONE-UPSTREAM` or `LOCAL-DELETED` file you keep or forget: `pfm update drop <local>...`.
 
-`pfm update` (bare) advances the source clone to the latest release tag (or `--to vX.Y.Z`), rebuilds and installs the binary, runs `pfm doctor` (rolling back on failure), then prints this project's `update check` report — start step 1 from there.
+`pfm update` (bare) advances the source clone to the latest release tag (or `--to vX.Y.Z`), rebuilds and installs the binary, runs `pfm doctor` (rolling back on failure), then prints the same report `pfm doctor --project-updates` prints for this project — start step 2 from there.
 
 ## Codex mirror
 
@@ -55,7 +57,7 @@ The blueprint never rewrites a project file after `pfm init`; every upstream cha
 
 ## Chat: MCP first, shell for the rest
 
-Inside a chat, the `chat_*` MCP tools are the preferred surface for inject, read, last, find, ls, status, whoami, new, save, and self-compact (`chat_inject`, `chat_read`, `chat_last`, `chat_find`, `chat_ls`, `chat_status`, `chat_whoami`, `chat_new`, `chat_save`, `chat_self_compact`). `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat inject` refuses `/compact` — compaction is `self-compact`. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
+Inside a chat, the `chat_*` MCP tools are the preferred surface for inject, read, digest, last, find, ls, status, whoami, new, and save (`chat_inject`, `chat_read`, `chat_digest`, `chat_last`, `chat_find`, `chat_ls`, `chat_status`, `chat_whoami`, `chat_new`, `chat_save`). `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat inject` refuses `/compact`: pfm never types a compaction. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
 
 ## Harvest: MCP first, CLI for batches
 
@@ -63,4 +65,4 @@ Inside a chat, the professor MCP's `harvester_*` tools (`harvester_read` (its `f
 
 ## Config
 
-`pfm config show` prints the config path (`~/.config/pfm/pfm.config.json` by default; `pfm --config PATH` overrides) and every effective key with its source (file or default) — accounts, `claude.systemPrompt` (`production | lean | professor`), `claude.permissionMode`, `mcp.servers.*`, `harvester.enabled`, `ask.*`. `pfm config validate` checks the file; `pfm config init [--force]` writes a fresh one.
+`pfm config show` prints the config path (`{clone}/pfm.config.json` by default; `pfm --config PATH` or `PFM_CONFIG` overrides) and every effective key with its source (file or default) — accounts, `claude.systemPrompt` (`production | lean | professor`), `claude.permissionMode`, `mcp.servers.*`, `harvester.enabled`, `ask.*`. `pfm config claude [--account N]` prints the resolved Claude launch settings. `pfm config validate` checks the file; `pfm config init [--force]` writes a fresh one.

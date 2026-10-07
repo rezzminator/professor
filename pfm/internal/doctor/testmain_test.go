@@ -72,7 +72,10 @@ func stageHarnessPromptBaseline(t *testing.T, home string) {
 func jailTest(t *testing.T) string {
 	t.Helper()
 	root := testjail.InstalledHome(t)
-	stageHarnessPromptBaseline(t, filepath.Join(root, "home"))
+	dirs, files := storeLayout()
+	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
+	stageStorePlugins(t, filepath.Join(root, "home"))
+	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
 	return root
 }
 
@@ -139,20 +142,14 @@ func TestMain(m *testing.M) {
 		}
 		return results
 	}
-	installer.HookProbeOverride = func(home string, machine config.Config) []installer.HookProbeResult {
-		expected := installer.ExpectedHooks(home, machine)
-		results := make([]installer.HookProbeResult, 0, len(expected))
-		for _, hook := range expected {
-			results = append(results, installer.HookProbeResult{Hook: hook, State: "ok"})
-		}
-		return results
-	}
+	installer.HookProbeOverride = func(string, config.Config) []installer.HookProbeResult { return nil }
 	HarnessCaptureOverride = func(_ context.Context, _ string, _ config.Config, alias, _ string) (HarnessCapture, error) {
+		prompt, err := testjail.ShippedHarnessPrompt(alias)
 		return HarnessCapture{
-			Prompt:        harnessPromptFixtureCaptured,
+			Prompt:        prompt,
 			ResolvedModel: "claude-" + alias + "-5",
 			CLIVersion:    "fixture",
-		}, nil
+		}, err
 	}
 	os.Exit(testjail.Run(m))
 }
@@ -165,4 +162,27 @@ type fourthMatcher struct{}
 
 func (fourthMatcher) IsCommand(argv []string, _ ...string) bool {
 	return len(argv) != 0 && filepath.Base(argv[0]) == "zed"
+}
+
+func storeLayout() ([]string, map[string]string) {
+	var names []string
+	files := make(map[string]string)
+	for _, entry := range installer.StoreEntries {
+		if entry.Dir {
+			names = append(names, entry.Name)
+		} else {
+			files[entry.Name] = entry.Seed
+		}
+	}
+	return names, files
+}
+
+func stageStorePlugins(t *testing.T, home string) {
+	t.Helper()
+	storeDir := installer.ClaudeStore(home)
+	ids, err := installer.ClaudePluginsNotInstalled(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testjail.StageClaudePlugins(t, storeDir, ids)
 }

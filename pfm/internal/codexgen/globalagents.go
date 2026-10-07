@@ -450,6 +450,62 @@ func writeGlobalAgentFile(path string, content []byte) error {
 	return nil
 }
 
+// claudeInheritModel is the Claude agent model value meaning "the session's model".
+const claudeInheritModel = "inherit"
+
+type codexRole struct {
+	Model, Effort, Sandbox string
+}
+
+func codexRoleSettings(fields, modelMap map[string]string, source string) (codexRole, error) {
+	role := codexRole{Effort: strings.TrimSpace(fields["effort"])}
+	if override, ok := fields["codex-model"]; ok {
+		role.Model = strings.TrimSpace(override)
+	} else if model := strings.TrimSpace(fields["model"]); model != "" {
+		mapped, ok := modelMap[model]
+		if !ok && model == claudeInheritModel {
+			// Claude's "inherit" is the session's model: a Codex role with no
+			// model line runs on its session's model too.
+			mapped, ok = "", true
+		}
+		if !ok {
+			keys := make([]string, 0, len(modelMap))
+			for key := range modelMap {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			return codexRole{}, fmt.Errorf(
+				"%s: unmapped model %q (modelMap keys: %s)",
+				source,
+				model,
+				strings.Join(keys, ", "),
+			)
+		}
+		role.Model = mapped
+	}
+	if override, ok := fields["codex-effort"]; ok {
+		role.Effort = strings.TrimSpace(override)
+		switch role.Effort {
+		case codeReviewBareEffort, codexMediumEffort, codexHighEffort, codeReviewTopEffort:
+		default:
+			return codexRole{}, fmt.Errorf(
+				"%s: invalid codex-effort %q (want low, medium, high, or xhigh)",
+				source,
+				role.Effort,
+			)
+		}
+	}
+	if sandbox, ok := fields["codex-sandbox"]; ok {
+		if strings.TrimSpace(sandbox) != "workspace-write" {
+			return codexRole{}, fmt.Errorf("%s: invalid codex-sandbox %q (want workspace-write)", source, sandbox)
+		}
+		role.Sandbox = "workspace-write"
+	} else if codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(source), ".md")) {
+		role.Sandbox = "read-only"
+	}
+	return role, nil
+}
+
 // codexReadOnly reports whether a role compiles to sandbox_mode = "read-only",
 // at either tier: read-only unless the Claude tools line grants a write tool,
 // the line is absent, or the role's base filename (without .md) is gitter.
@@ -495,23 +551,22 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	// tier map is the compiler's default: this path loads no project config.
 	description = rewriteCodeReview(description, nil)
 	body = rewriteCodeReview(body, nil)
-	model := strings.TrimSpace(fields["model"])
-	if mapped, ok := defaultConfig().ModelMap[model]; ok {
-		model = mapped
+	role, err := codexRoleSettings(fields, defaultConfig().ModelMap, mdPath)
+	if err != nil {
+		return "", "", err
 	}
-	effort := strings.TrimSpace(fields["effort"])
 
 	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n"
-	if model != "" {
-		content += "model = \"" + globalAgentEscape(model) + "\"\n"
+	if role.Model != "" {
+		content += "model = \"" + globalAgentEscape(role.Model) + "\"\n"
 	}
-	if effort != "" {
-		content += "model_reasoning_effort = \"" + globalAgentEscape(effort) + "\"\n"
+	if role.Effort != "" {
+		content += "model_reasoning_effort = \"" + globalAgentEscape(role.Effort) + "\"\n"
 	}
-	if codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(mdPath), ".md")) {
-		content += "sandbox_mode = \"read-only\"\n"
+	if role.Sandbox != "" {
+		content += "sandbox_mode = \"" + globalAgentEscape(role.Sandbox) + "\"\n"
 	}
 	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
 

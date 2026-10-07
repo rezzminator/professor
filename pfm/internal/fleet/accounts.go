@@ -15,8 +15,8 @@ import (
 )
 
 // PrimaryAccount resolves the fleet DB's meta row first, then the
-// ~/.claude-primary mirror, and maps anything off the roster to the first
-// configured account.
+// ~/.claude-primary mirror, and maps anything off the roster to the implicit
+// account.
 //
 // Reading the mirror alone is how the picker came up showing a different
 // account from the one the launchers used: primary-set writes both, but a
@@ -41,10 +41,7 @@ func PrimaryAccount(values paths.Values, configs ...pfmconfig.Config) (int, erro
 			return account, nil
 		}
 	}
-	if len(machine.Accounts) != 0 {
-		return machine.Accounts[0].ID, nil
-	}
-	return 1, nil
+	return machine.ImplicitAccount(), nil
 }
 
 // SetPrimaryAccount validates the operator-facing roster before committing
@@ -74,28 +71,20 @@ func CurrentSocketFrom(env paths.Env) string {
 	return filepath.Base(value)
 }
 
-func accountRoots(accounts []pfmconfig.Account) []compose.AccountRoot {
-	roots := make([]compose.AccountRoot, 0, len(accounts))
+func claudeSeats(accounts []pfmconfig.Account) []compose.ClaudeSeat {
+	seats := make([]compose.ClaudeSeat, 0, len(accounts))
 	for _, account := range accounts {
-		path := account.ProjectDir
-		if resolved, err := filepath.EvalSymlinks(account.ProjectDir); err == nil {
-			path = resolved
-		} else if absolute, err := filepath.Abs(account.ProjectDir); err == nil {
-			path = absolute
-		}
-		roots = append(roots, compose.AccountRoot{
-			Account:   account.ID,
-			Path:      filepath.Clean(path),
-			ConfigDir: account.ConfigDir,
+		seats = append(seats, compose.ClaudeSeat{
+			Account: account.ID, ConfigDir: account.ConfigDir,
 		})
 	}
-	return roots
+	return seats
 }
 
 func codexAccountRoots(accounts []pfmconfig.CodexAccount) []compose.AccountRoot {
 	result := make([]compose.AccountRoot, 0, len(accounts))
 	for _, account := range accounts {
-		result = append(result, compose.AccountRoot{Account: account.ID, Path: account.Home, ConfigDir: account.Home})
+		result = append(result, compose.AccountRoot{Account: account.ID, Path: account.Home})
 	}
 	return result
 }

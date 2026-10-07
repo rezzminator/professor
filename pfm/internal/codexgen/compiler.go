@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
 // Mode selects whether the reconciler may change the filesystem.
@@ -27,9 +30,10 @@ type Options struct {
 }
 
 type Result struct {
-	OK       bool
-	Warnings []string
-	Problems []string
+	OK          bool
+	Warnings    []string
+	Problems    []string
+	Rebuildable []string
 	// Dangling records sources that vanished, as a TYPED condition rather than
 	// a substring of rendered prose. Build reports these as warnings and still
 	// writes; Check promotes them to Problems. Classifying by scanning warning
@@ -37,6 +41,7 @@ type Result struct {
 	// silently disarms the gate, and an unrelated warning that happens to carry
 	// the word arms it against nothing.
 	Dangling  []string
+	leafLinks []sourceEntry // unresolvable leaf source links (unresolved.go)
 	Wrote     int
 	Unchanged int
 	Deleted   int
@@ -94,6 +99,11 @@ func Run(options Options) (Result, error) {
 	cfg, err := loadConfig(root, cli)
 	if err != nil {
 		return Result{}, err
+	}
+	if found, err := paths.HasWorkbenchManifest(root); err != nil {
+		return Result{}, err
+	} else if found {
+		cfg.GlobalCommands = false
 	}
 	result := Result{Warnings: []string{}, Problems: []string{}, Dangling: []string{}}
 	outputs := make([]generatedFile, 0)
@@ -173,7 +183,7 @@ func Run(options Options) (Result, error) {
 		}
 	}
 	for _, output := range outputs {
-		if strings.HasSuffix(output.Path, ".toml") {
+		if output.Kept == nil && strings.HasSuffix(output.Path, ".toml") {
 			if parseErr := validateTOML(output.Content); parseErr != nil {
 				problem(fmt.Sprintf("UNPARSEABLE generated %s: %v", output.Path, parseErr))
 			}
@@ -191,6 +201,7 @@ func Run(options Options) (Result, error) {
 	}
 	result.Warnings = append(result.Warnings, reconciled.Warnings...)
 	result.Problems = append(result.Problems, reconciled.Problems...)
+	result.Rebuildable = append(result.Rebuildable, reconciled.Rebuildable...)
 	result.Wrote = reconciled.Wrote
 	result.Unchanged = reconciled.Unchanged
 	result.Deleted = reconciled.Deleted
@@ -243,6 +254,7 @@ func RunGlobalCommands(options GlobalCommandsOptions) (Result, error) {
 	}
 	result.Warnings = append(result.Warnings, reconciled.Warnings...)
 	result.Problems = append(result.Problems, reconciled.Problems...)
+	result.Rebuildable = append(result.Rebuildable, reconciled.Rebuildable...)
 	result.Wrote = reconciled.Wrote
 	result.Unchanged = reconciled.Unchanged
 	result.Deleted = reconciled.Deleted
@@ -301,31 +313,6 @@ func generatedLine(source string) string {
 	return generatedMarker + " from " + source + "; do not edit — edit the source, then re-run: pfm codex build"
 }
 
-func discoverProjects(root string, cfg Config, result *Result) []string {
-	projects := []string{"."}
-	if cfg.Projects != nil {
-		for _, project := range cfg.Projects {
-			if project != "." && hasClaude(filepath.Join(root, project)) {
-				projects = append(projects, project)
-			}
-		}
-	} else if entries, err := os.ReadDir(root); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() || excluded(cfg.ExcludeProjects, entry.Name()) || entry.Name() == ".claude" ||
-				entry.Name() == ".codex" {
-				continue
-			}
-			if hasClaude(filepath.Join(root, entry.Name())) {
-				projects = append(projects, entry.Name())
-			}
-		}
-	} else {
-		result.Problems = append(result.Problems, fmt.Sprintf("read repository root %s: %v", root, err))
-	}
-	sort.Strings(projects[1:])
-	return projects
-}
-
 func hasClaude(dir string) bool {
 	info, err := os.Stat(filepath.Join(dir, "CLAUDE.md"))
 	return err == nil && info.Mode().IsRegular()
@@ -360,12 +347,6 @@ func discoverCommandRosterIn(sourceRoot string, exclusions []string, result *Res
 		roster[name] = "$" + flatName(filepath.ToSlash(rel))
 	}
 	return roster
-}
-
-type sourceEntry struct {
-	path     string
-	rel      string
-	skillDir bool
 }
 
 func discoverMarkdown(dir string, excludes []string, result *Result) []sourceEntry {
@@ -407,7 +388,7 @@ func discoverMarkdown(dir string, excludes []string, result *Result) []sourceEnt
 			info, statErr := os.Stat(path)
 			if item.Type()&os.ModeSymlink != 0 {
 				if statErr != nil {
-					result.danglingSource(path, statErr)
+					result.unresolvedLeaf(path, rel, statErr)
 					continue
 				}
 			}
@@ -465,8 +446,8 @@ func compileAgents(
 	seen := map[string]bool{}
 	for _, project := range projects {
 		dir := filepath.Join(root, project, ".claude", "agents")
-		for _, entry := range discoverMarkdown(dir, nil, result) {
-			if entry.skillDir {
+		for _, entry := range markdownSources(dir, nil, result) {
+			if entry.skillDir || entry.dirLink {
 				continue
 			}
 			name := strings.TrimSuffix(filepath.Base(entry.path), ".md")
@@ -498,6 +479,10 @@ func compileAgents(
 				continue
 			}
 			seen[name] = true
+			if entry.target != "" {
+				add(keptTwin(filepath.Join(root, ".codex", "agents", name+".toml"), entry))
+				continue
+			}
 			raw, err := os.ReadFile(entry.path)
 			if err != nil {
 				problem(fmt.Sprintf("read %s: %v", entry.path, err))
@@ -510,33 +495,33 @@ func compileAgents(
 				problem(fmt.Sprintf("parse %s: %v", entry.path, parseErr))
 				continue
 			}
-			modelAlias := fields["model"]
-			model := modelAlias
-			if mapped, ok := cfg.ModelMap[modelAlias]; ok {
-				model = mapped
+			role, err := codexRoleSettings(fields, cfg.ModelMap, entry.path)
+			if err != nil {
+				problem(err.Error())
+				continue
 			}
+			modelAlias := fields["model"]
 			tomlName := strings.ReplaceAll(name, "-", "_")
-			readOnly := codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(entry.path), ".md"))
 			instructions := strings.ReplaceAll(cfg.AgentPreamble, "${name}", tomlName)
 			instructions += transformMarkdown(strings.TrimSpace(body), options)
 			toml := "# " + generatedLine(filepath.ToSlash(rel)) + "\n"
-			if model != "" {
-				toml += "# tier: " + tomlEscape(model)
-				if modelAlias != "" && modelAlias != model {
+			if role.Model != "" {
+				toml += "# tier: " + tomlEscape(role.Model)
+				if modelAlias != "" && modelAlias != role.Model {
 					toml += " (Claude alias: " + tomlEscape(modelAlias) + ")"
 				}
 				toml += "\n"
 			}
 			description := transformMarkdown(fields["description"], options)
 			toml += "name = " + tomlString(tomlName) + "\ndescription = " + tomlString(description) + "\n"
-			if model != "" {
-				toml += "model = " + tomlString(model) + "\n"
+			if role.Model != "" {
+				toml += "model = " + tomlString(role.Model) + "\n"
 			}
-			if effort := strings.TrimSpace(fields["effort"]); effort != "" {
-				toml += "model_reasoning_effort = " + tomlString(effort) + "\n"
+			if role.Effort != "" {
+				toml += "model_reasoning_effort = " + tomlString(role.Effort) + "\n"
 			}
-			if readOnly {
-				toml += "sandbox_mode = \"read-only\"\n"
+			if role.Sandbox != "" {
+				toml += "sandbox_mode = " + tomlString(role.Sandbox) + "\n"
 			}
 			toml += "developer_instructions = \"\"\"\n" + tomlMultiline(instructions) + "\"\"\"\n"
 			add(generatedFile{Path: filepath.Join(root, ".codex", "agents", name+".toml"), Content: toml})
@@ -554,7 +539,17 @@ func compileRepoCommands(
 	result *Result,
 ) {
 	sourceRoot := filepath.Join(root, ".claude", "commands")
-	for _, entry := range discoverMarkdown(sourceRoot, cfg.ExcludeDirs, result) {
+	for _, entry := range markdownSources(sourceRoot, cfg.ExcludeDirs, result) {
+		if entry.target != "" {
+			if entry.dirLink || strings.HasSuffix(entry.rel, ".md") {
+				for _, twin := range keptDirTwins(root, entry, problem) {
+					add(twin)
+				}
+				continue
+			}
+			add(keptCommandTwin(root, entry))
+			continue
+		}
 		if entry.skillDir {
 			dst := filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)))
 			add(generatedFile{Path: dst, Link: relativeLink(dst, entry.path)})
@@ -585,7 +580,13 @@ func compileGlobalCommands(
 	result *Result,
 ) {
 	sourceRoot := filepath.Join(sourceHome, ".claude", "commands")
-	for _, entry := range discoverMarkdown(sourceRoot, nil, result) {
+	for _, entry := range markdownSources(sourceRoot, nil, result) {
+		if entry.target != "" {
+			for _, twin := range keptGlobalCommandTwins(outputHome, entry, problem) {
+				add(twin)
+			}
+			continue
+		}
 		if entry.skillDir {
 			dst := filepath.Join(outputHome, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)))
 			link := entry.path
@@ -721,15 +722,18 @@ func compileRepoSkills(root string, add func(generatedFile), problem func(string
 	}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
+		dst := filepath.Join(root, ".codex", "skills", entry.Name())
 		info, statErr := os.Stat(path)
 		if statErr != nil {
 			result.danglingSource(path, statErr)
+			if entry.Type()&os.ModeSymlink != 0 {
+				add(keptTwin(dst, sourceEntry{path: path, rel: entry.Name(), target: sourcelink.LinkTarget(path)}))
+			}
 			continue
 		}
 		if !info.IsDir() {
 			continue
 		}
-		dst := filepath.Join(root, ".codex", "skills", entry.Name())
 		add(generatedFile{Path: dst, Link: relativeLink(dst, path)})
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
@@ -104,13 +105,12 @@ func Run(
 	}()
 
 	request := scanRequest{
-		View: view,
-		// Fleet-wide picker: no chat chosen yet, so no per-account override applies.
-		Cache1H: runtime.Config.InitialCache1H(0),
-		NoSky:   *noSky,
-		Safe:    *safe,
-		Runtime: &runtime,
-		Comms:   sharedState,
+		View:      view,
+		NoSky:     *noSky,
+		Safe:      *safe,
+		Runtime:   &runtime,
+		Comms:     sharedState,
+		Reminders: sharedState,
 	}
 	var scan scanResult
 	var outcome ui.Outcome
@@ -119,6 +119,9 @@ func Run(
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
+		}
+		if scan.Snapshot.ReminderError != "" {
+			fmt.Fprintf(stderr, "pfm ls: %s\n", scan.Snapshot.ReminderError)
 		}
 		var picker ui.Picker
 		if *plain {
@@ -134,6 +137,11 @@ func Run(
 		if updateNotice != "" {
 			fmt.Fprintln(stderr, updateNotice)
 		}
+		// Row facts feed the picker's live gauge, so only the interactive picker
+		// reads them; the scripted listings stay as composed.
+		// The Reader caches each file by size and modification time: a refresh
+		// re-stats each row's files and reads again only a file that changed.
+		request.Facts = rowfacts.NewReader(runtime.Paths.SIDDir)
 		scan, err = scanFleetCached(ctx, database, request)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
@@ -158,6 +166,7 @@ func Run(
 		)
 		statsSampler.Limits = pfmstats.NewLimitsSampler(limitAccounts(runtime))
 		statsSampler.Limits.TTL = pfmstats.LiveLimitsTTL
+		statsSampler.Limits.Version = runtime.Version
 		// Codex's own fetch execs `codex app-server` (unlike Claude's cheap
 		// disk-cache-backed HTTP path) — see CodexLiveLimitsTTL.
 		statsSampler.Limits.CodexTTL = pfmstats.CodexLiveLimitsTTL
@@ -170,17 +179,18 @@ func Run(
 		// so it is buffered here and flushed only once Pick has released
 		// the terminal.
 		var warnings bufferedWarnings
-		// Opening the picker IS an interaction, so the clock starts stamped
-		// and the first frames refresh at full cadence. Every keystroke
-		// restamps it; going quiet is what makes the stream back off.
+		// The clock opens stamped so the first frames use the full cadence.
+		// Every real keystroke restamps and wakes it; going quiet is what
+		// makes the stream back off.
 		activity := ui.NewActivityClock(clock.Real.Now())
 		scan.Snapshot.Activity = activity
+		request.RepoRoots = scan.Output.RepoRoots()
 		go streamFleetRefreshes(
 			refreshContext,
 			database,
 			request,
 			warnings.add,
-			stderr,
+			&warnings,
 			updates,
 			activity,
 		)
@@ -458,7 +468,11 @@ func killApplier(
 	}
 	return func(change ui.KillChange) error {
 		if !change.Killed {
-			return manager.Unkill(ctx, change.ID)
+			removed, err := manager.Unkill(ctx, change.ID)
+			if err == nil && !removed {
+				return fmt.Errorf("%s is not killed; nothing was unkilled", change.ID)
+			}
+			return err
 		}
 		request := kill.Request{
 			ID: change.ID,

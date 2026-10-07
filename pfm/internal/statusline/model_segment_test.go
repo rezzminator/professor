@@ -30,16 +30,3 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		})
 	}
 }
-
-// TestEffortLabelWearsTheEffortEmoji pins each level to its emoji; a level
-// the statusline does not know still gets the generic 🔆, never bare text.
-func TestEffortLabelWearsTheEffortEmoji(t *testing.T) {
-	for level, want := range map[string]string{
-		"low": "🚲 low", "medium": "🏍️ medium", "high": "🏎️ high", "xhigh": "🚀 xhigh", "max": "🛰️ max",
-		"turbo": "🔆 turbo",
-	} {
-		if got := effortLabel(level); got != want {
-			t.Errorf("effortLabel(%q) = %q, want %q", level, got, want)
-		}
-	}
-}

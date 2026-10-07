@@ -35,6 +35,10 @@ type Tmux interface {
 	NewSession(ctx context.Context, spec SessionSpec) error
 	Capture(ctx context.Context, socket, target string) (string, error)
 	SendLiteral(ctx context.Context, socket, target, text string) error
+	// SendPaste delivers text as one bracketed paste (tmux paste-buffer -p),
+	// the transport for a launch prompt: byte-safe at any size and length,
+	// and never read by the engine as a burst of typed keys.
+	SendPaste(ctx context.Context, socket, target, text string) error
 	SendKey(ctx context.Context, socket, target, key string) error
 }
 
@@ -49,8 +53,9 @@ type Request struct {
 	Run    string
 	// Binary mirrors SessionSpec.Binary: the executable word Run launches,
 	// preflighted before the server exists. Empty skips the preflight.
-	Binary string
-	Prompt string
+	Binary    string
+	CodexHome string
+	Prompt    string
 	// PromptOnCommandLine means the launch command already carries Prompt;
 	// the spawner records delivery without typing into the TUI.
 	PromptOnCommandLine bool
@@ -158,5 +163,10 @@ type Result struct {
 	Name     string
 	Named    bool
 	Prompted bool
-	Warnings []string
+	// TrustHeld is Claude Code's folder-trust dialog standing on the fresh
+	// pane. Run returned before renaming or typing anything: the dialog's
+	// default row is "No, exit", and trusting a folder is the human's call, so
+	// the session is left alive for them to answer.
+	TrustHeld bool
+	Warnings  []string
 }

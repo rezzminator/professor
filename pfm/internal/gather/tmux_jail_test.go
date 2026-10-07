@@ -92,7 +92,7 @@ func setGatherTestEnv(t *testing.T, root, tmuxDir string) {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvDB, filepath.Join(root, "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, sidDir)
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude-projects"))
 	t.Setenv(paths.EnvCodexHome, codexHome)
@@ -473,9 +473,6 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 		snapshot.ClaudeProcesses[0].PID != agentPID ||
 		snapshot.ClaudeProcesses[0].Socket != ccSocket {
 		t.Fatalf("Gather().ClaudeProcesses = %#v", snapshot.ClaudeProcesses)
-	}
-	if !reflect.DeepEqual(snapshot.Cache1HSockets, []string{ccSocket}) {
-		t.Fatalf("Gather().Cache1HSockets = %q", snapshot.Cache1HSockets)
 	}
 	if len(snapshot.Renames) != 1 ||
 		snapshot.Renames[0].TargetName != strings.Repeat("界", 24) {

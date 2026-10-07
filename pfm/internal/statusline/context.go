@@ -36,21 +36,59 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	contextTokens := data.ContextWindow.CurrentUsage.CacheReadInputTokens +
 		data.ContextWindow.CurrentUsage.CacheCreationInputTokens +
 		data.ContextWindow.CurrentUsage.InputTokens
-	if (runtime.Columns == 0 || runtime.Columns >= 100) && contextTokens > 0 {
+	if runtime.Engine == pfmengine.Codex && (runtime.Columns == 0 || runtime.Columns >= 100) && contextTokens > 0 {
 		l2 += sep + cTokens + "🧮" + formatContextTokens(contextTokens) + reset
 		if gauge.humanPrompts > 0 {
 			l2 += " " + dim + "✎" + strconv.Itoa(gauge.humanPrompts) + reset
 		}
 	}
-	// Never width-gated: an absent cache timer is indistinguishable from an
-	// expired one. The segment reports transcript readability itself.
-	// Codex reports no cache split: the tail is Claude's alone.
+	if runtime.Engine != pfmengine.Codex {
+		l2 += sep + sessionSpendSegment(data)
+	}
+	// Never width-gated: a recorded launch reports its cache window and
+	// transcript readability. Codex reports no cache split.
 	hit := -1
 	if runtime.Engine != pfmengine.Codex {
 		usage := data.ContextWindow.CurrentUsage
 		hit = cacheHitPercent(usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.InputTokens)
 	}
-	return gauge, l2 + cacheWindowSegment(runtime, now, data.TranscriptPath, hit, data.PromptCache), contextTokens
+	return gauge, l2 + cacheWindowSegment(
+		runtime,
+		now,
+		data.TranscriptPath,
+		hit,
+		data.PromptCache,
+		data.SessionID,
+	), contextTokens
+}
+
+// sessionSpendSegment is the main line's "💰$3.20/1.2M/40K/88": Claude Code's
+// own session cost, then the prompt and output tokens and the tool calls of
+// this chat's transcript and every sub-agent's beside it — the scope that cost
+// covers. A floor carries "+?"; a transcript that cannot be read is "?/?/?".
+func sessionSpendSegment(data input) string {
+	cost := data.Cost.TotalCostUSD
+	color := dim
+	if cost >= 10 {
+		color = red
+	} else if cost >= 2 {
+		color = yellow
+	}
+	line := color + "💰" + fmt.Sprintf("$%.2f", cost) + reset + cMuted + "/" + reset
+	if strings.TrimSpace(data.TranscriptPath) == "" {
+		return line + cWarn + "?/?/?" + reset
+	}
+	spend, err := sessionSpend(data.TranscriptPath)
+	if err != nil {
+		return line + cWarn + "?/?/?" + reset
+	}
+	line += cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
+		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
+		cTools + strconv.Itoa(spend.tools) + reset
+	if spend.partial {
+		line += cWarn + "+?" + reset
+	}
+	return line
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.

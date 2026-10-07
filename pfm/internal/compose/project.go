@@ -1,10 +1,8 @@
 package compose
 
 import (
-	"path/filepath"
-	"strings"
-
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // projectName is the project label a chat lists under: the basename of the
@@ -21,30 +19,30 @@ type projectRef struct {
 }
 
 func resolveProject(cwd string) projectRef {
-	if cwd == "" {
-		return projectRef{name: "?"}
-	}
-	root := gitroot.RepoRoot(cwd)
-	trimmed := strings.TrimRight(root, string(filepath.Separator))
-	project := trimmed[strings.LastIndexByte(trimmed, byte(filepath.Separator))+1:]
-	if project == "." || project == ".." || project == "" {
-		project = "?"
-	}
-	return projectRef{root: root, name: project}
+	root, name := gitroot.Project(cwd)
+	return projectRef{root: root, name: name}
 }
 
 // projectNames memoizes resolveProject per cwd for one compose run: hundreds
 // of rows share a handful of cwds, and each resolution reads the filesystem.
 // A nil map resolves without caching.
-type projectNames map[string]projectRef
+type projectNames struct {
+	resolved map[string]projectRef
+	benches  []workbench.Bench
+}
 
 func (names projectNames) resolve(cwd string) projectRef {
-	if ref, found := names[cwd]; found {
+	if ref, found := names.resolved[cwd]; found {
 		return ref
 	}
 	ref := resolveProject(cwd)
-	if names != nil {
-		names[cwd] = ref
+	if cwd != "" && len(names.benches) != 0 {
+		if bench, found := workbench.Owner(names.benches, cwd); found {
+			ref = projectRef{root: bench.Dir, name: bench.Key}
+		}
+	}
+	if names.resolved != nil {
+		names.resolved[cwd] = ref
 	}
 	return ref
 }

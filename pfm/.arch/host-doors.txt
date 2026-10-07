@@ -1,6 +1,7 @@
 cmd/pfm/mcp_serve_command.go 2
 internal/agentopen/agentopen.go 2
 internal/binwatch/binwatch.go 3
+internal/codexappendix/trust.go 1
 internal/codexgen/compiler.go 1
 internal/doctor/doctor.go 2
 internal/gather/tmuxprobe.go 2
@@ -18,5 +19,6 @@ internal/spawn/socket.go 1
 internal/stats/docker_identity.go 1
 internal/statusline/process.go 1
 internal/statusline/runtime.go 2
+internal/testjail/profile.go 3
 internal/testjail/testjail.go 3
 internal/ui/model.go 2

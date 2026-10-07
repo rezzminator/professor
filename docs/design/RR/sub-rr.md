@@ -1,6 +1,6 @@
 # sub-rr
 
-`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and returns a quote-anchored finding per sub-query plus every rabbit hole its sources raised. It is spawned only by `rr`, `super-rr` and `heavy-rr`, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
+`sub-rr` is the family's digger: it answers one numbered batch of sub-queries for a lead and returns a quote-anchored finding per sub-query plus every rabbit hole its sources raised. It is spawned only by `rr`, `rr-pro` and `rr-pro-max`, never delegated to directly. This file holds every decision of the digger; the lead's side of the exchange (grouping, the stop rule, verification) is in `rr.md` in this directory.
 
 ## Contents
 
@@ -24,7 +24,7 @@
 | Spawns | nothing — it holds no `Agent` |
 | Writes | nothing — it holds no `Write`, `Edit` or `Bash` |
 
-Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, super-rr and heavy-rr, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
+Description, verbatim: `RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro and rr-pro-max, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.`
 
 ## The brief it receives
 

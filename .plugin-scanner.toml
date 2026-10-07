@@ -1,0 +1,17 @@
+# HOL AI Plugin Scanner config, auto-discovered by .github/workflows/plugin-scan.yml.
+#
+# Each path is named exactly, never globbed, so a secret-shaped string in any
+# other file still fails the scan. None of these files holds a real key.
+[scanner]
+ignore_paths = [
+  # Test files that plant fake, credential-shaped strings on purpose: each test
+  # proves the code under test scrubs, refuses or never prints a credential.
+  "infra/fence/lanes/tests/cred-scan_test.sh",
+  "pfm/internal/harvestmcp/auth_test.go",
+  "pfm/internal/obs/recover_test.go",
+  "pfm/internal/obs/scrub_test.go",
+  # HARDCODED_SECRET's generic token and api-key assignment rules matching
+  # environment-variable NAMES, not values: its constants name
+  # ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY.
+  "pfm/internal/claudelaunch/knobs.go",
+]

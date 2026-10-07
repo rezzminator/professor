@@ -12,6 +12,7 @@ import (
 // the first Markdown link on its origin whose path ends in .pdf — a PDF on
 // another origin and a same-origin page link are passed over.
 func TestPageFullTextLinkFollowsOnlyTheSameOriginPDF(t *testing.T) {
+	t.Parallel()
 	page := "https://record.test/rec-1"
 	for name, tc := range map[string]struct {
 		content string

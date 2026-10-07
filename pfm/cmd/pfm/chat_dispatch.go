@@ -68,15 +68,6 @@ func runHeadless(
 	return runChatWithRuntime(args, os.Stdin, stdout, stderr, runtime, context.Background())
 }
 
-func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm: config: %v\n", err)
-		return 1
-	}
-	return runChatWithRuntime(args, stdin, stdout, stderr, runtime, context.Background())
-}
-
 func runChatWithRuntime(
 	args []string,
 	stdin io.Reader,
@@ -104,8 +95,6 @@ func runChatWithRuntime(
 		return runHeadlessStream(rest, stdout, stderr, runtime)
 	case "inject":
 		return runHeadlessInject(rest, stdout, stderr, runtime)
-	case "self-compact":
-		return runHeadlessSelfCompact(rest, stdout, stderr, runtime)
 	case askAction:
 		return runHeadlessAsk(rest, stdout, stderr, clock.Real, runtime)
 	case "watch":
@@ -124,6 +113,8 @@ func runChatWithRuntime(
 		return runChatUnkillContext(ctx, rest, stdout, stderr, runtime)
 	case "end":
 		return runChatEnd(rest, stdout, stderr, runtime)
+	case "reminder":
+		return runChatReminder(rest, stdout, stderr, runtime)
 	case "reload":
 		return runChatReloadWithRuntime(rest, stdout, stderr, runtime, paths.OSEnv{})
 	case whoamiCommand:
@@ -158,7 +149,6 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  read        read the chat's transcript")
 	fmt.Fprintln(w, "  stream      follow the transcript as it is written")
 	fmt.Fprintln(w, "  inject      deliver a message to the chat")
-	fmt.Fprintln(w, "  self-compact  compact this chat in place after its own turn settles")
 	fmt.Fprintln(w, "  ask         deliver a message and wait for the answer")
 	fmt.Fprintln(w, "  watch       block, reporting IDLE / EXIT / DEAD")
 	fmt.Fprintln(w, "  capture     print a live chat's tmux scrollback")
@@ -168,6 +158,7 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  kill        kill a chat, optionally closing it")
 	fmt.Fprintln(w, "  unkill      remove a chat kill")
 	fmt.Fprintln(w, "  end         end a chat's tmux server")
+	fmt.Fprintln(w, "  reminder    recurring alarms that wake a chat: set | ls | rm")
 	fmt.Fprintln(w, "  reload      reboot a Claude chat in place under another configured account/cache mode")
 	fmt.Fprintln(w, "  find/save/branch/history/ls/resolve")
 	fmt.Fprintln(w)
@@ -438,7 +429,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 	flags := cli.NewFlagSet(
 		"chat inject",
 		"usage: pfm chat inject [--force-now] [--then STEER]... [--file PATH] [--allow-unsigned] <target> <message>\n"+
-			"       `/compact` is refused here — use `pfm chat self-compact`",
+			"       `/compact` is refused here — pfm never types a compaction",
 		stderr,
 	)
 	var force, retiredNoSig, allowUnsigned bool
@@ -625,71 +616,6 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 	return writeInjectResult(result, targetName, stdout, stderr)
 }
 
-// singleSteer collects at most one --then flag. A self-compaction carries
-// exactly one continuation steer, by the operator's rule; a second --then is
-// a usage error (rc 2), never a chain.
-type singleSteer struct {
-	value string
-	set   bool
-}
-
-func (single *singleSteer) String() string {
-	return single.value
-}
-
-func (single *singleSteer) Set(value string) error {
-	if single.set {
-		return fmt.Errorf("--then may be given at most once")
-	}
-	if value == "" {
-		return fmt.Errorf("a then steer must be non-empty")
-	}
-	single.value = value
-	single.set = true
-	return nil
-}
-
-// runHeadlessSelfCompact shares the MCP tool's ScheduleSelfCompact path, which
-// waits for the caller's turn to end instead of racing a live /compact.
-func runHeadlessSelfCompact(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := cli.NewFlagSet(
-		"chat self-compact",
-		// ScheduleSelfCompact requires exactly one continuation steer.
-		"usage: pfm chat self-compact --then STEER <focus>",
-		stderr,
-	)
-	var steer singleSteer
-	flags.Var(
-		&steer,
-		thenAction,
-		"the one mandatory post-compact steer, typed into the reborn chat once compaction settles",
-	)
-	if code, ok := cli.ParseFlags(flags, args); !ok {
-		return code
-	}
-	if flags.NArg() < 1 {
-		flags.Usage()
-		return 2
-	}
-	focus := strings.Join(flags.Args(), " ")
-	ctx := context.Background()
-	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat self-compact: %v\n", err)
-		return codeUndelivered
-	}
-	var then []string
-	if steer.value != "" {
-		then = []string{steer.value}
-	}
-	result, err := engine.ScheduleSelfCompact(ctx, focus, then)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat self-compact: %v\n", err)
-		return codeUndelivered
-	}
-	return writeInjectResult(result, "self", stdout, stderr)
-}
-
 func writeInjectResult(
 	result inject.Result,
 	target string,
@@ -725,7 +651,6 @@ func writeInjectResult(
 	}
 	fmt.Fprintln(stdout, result.Message)
 	if result.Proof != "" {
-		// Scheduled self-compaction has no proof until it is typed.
 		fmt.Fprintln(stdout, "--- delivery proof: target pane tail ---")
 		fmt.Fprintln(stdout, result.Proof)
 		fmt.Fprintln(stdout, "--- end delivery proof ---")

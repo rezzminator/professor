@@ -2,6 +2,7 @@ package fleetdb
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 // The schema is a compatibility surface for existing fleet databases, so its
 // columns and constraints stay exact.
 func TestSharedSchemaIsComplete(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	ctx := context.Background()
 
@@ -20,7 +22,7 @@ func TestSharedSchemaIsComplete(t *testing.T) {
 SELECT name FROM sqlite_master
 WHERE type='table' AND name NOT LIKE 'sqlite_%'
 ORDER BY name`)
-	want := []string{"chat", "children", "comms", "hidden", "issues", "meta"}
+	want := []string{"chat", "children", "comms", "hidden", "issues", "launch", "meta", "reminders"}
 	if !reflect.DeepEqual(tables, want) {
 		t.Fatalf("shared tables = %v, want %v", tables, want)
 	}
@@ -53,6 +55,20 @@ ORDER BY name`)
 	}) {
 		t.Fatalf("issues columns = %v", columns)
 	}
+	columns = queryColumn(t, state, "SELECT name FROM pragma_table_info('launch')")
+	if !reflect.DeepEqual(
+		columns,
+		[]string{"session_id", "engine", "account", "cache1h", "launched_at", "updated_at"},
+	) {
+		t.Fatalf("launch columns = %v", columns)
+	}
+	var version int
+	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
+		t.Fatalf("user_version = %d, %v; want %d", version, err, SchemaVersion)
+	}
+	if _, err := os.Stat(state.path + ".bak-before-v2"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("fresh database backup = %v", err)
+	}
 
 	// Initialization stamps the schema version.
 	if version, found, err := state.Meta(ctx, "schema_version"); err != nil ||
@@ -76,22 +92,47 @@ ORDER BY name`)
 	}
 }
 
-func TestKillDoesNotRecreateTheRetiredCarrier(t *testing.T) {
-	state, values := openTestStore(t)
-	legacyCarrier := filepath.Join(
-		values.Home,
-		".claude",
-		".cc-ls-hidden",
-	)
-	if err := state.Kill(context.Background(), "database-only", 42); err != nil {
+func TestUnkillReportsDeletedRow(t *testing.T) {
+	t.Parallel()
+	state, _ := openTestStore(t)
+	ctx := context.Background()
+	const id = "shared-unkill"
+	if err := state.Kill(ctx, id, 42); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(legacyCarrier); !os.IsNotExist(err) {
-		t.Fatalf("Kill recreated retired carrier %s: %v", legacyCarrier, err)
+	if removed, err := state.Unkill(ctx, id); err != nil || !removed {
+		t.Fatalf("first Unkill() = %v, %v; want true, nil", removed, err)
+	}
+	if removed, err := state.Unkill(ctx, id); err != nil || removed {
+		t.Fatalf("second Unkill() = %v, %v; want false, nil", removed, err)
+	}
+}
+
+func TestReassertKillKeepsOriginalTimeAndMakesClearPermanent(t *testing.T) {
+	t.Parallel()
+	state, _ := openTestStore(t)
+	ctx := context.Background()
+	const id = "shared-reassert"
+	if reasserted, err := state.ReassertKill(ctx, id); err != nil || reasserted {
+		t.Fatalf("missing ReassertKill() = %v, %v; want false, nil", reasserted, err)
+	}
+	if err := state.KillUntilPrompt(ctx, id, 42, 3); err != nil {
+		t.Fatal(err)
+	}
+	if reasserted, err := state.ReassertKill(ctx, id); err != nil || !reasserted {
+		t.Fatalf("standing ReassertKill() = %v, %v; want true, nil", reasserted, err)
+	}
+	records, err := state.KilledRecords(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := records[id]; got.KilledAt != 42 || got.AtPayload != nil {
+		t.Fatalf("reasserted kill = %#v; want original time and permanent payload", got)
 	}
 }
 
 func TestClearKillBaselineIsMonotonicAndRaceSafe(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	ctx := context.Background()
 	const id = "11111111-1111-4111-8111-111111111111"
@@ -137,13 +178,14 @@ func TestClearKillBaselineIsMonotonicAndRaceSafe(t *testing.T) {
 }
 
 func TestDegradedStoreRejectsOperatorStateChanges(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	blocker := filepath.Join(root, "not-a-directory")
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	values := paths.Values{
-		FleetDB: filepath.Join(blocker, "fleet.db"),
+		StateDB: filepath.Join(blocker, "pfm.db"),
 		Home:    filepath.Join(root, "home"),
 	}
 	ctx := context.Background()
@@ -165,6 +207,7 @@ func TestDegradedStoreRejectsOperatorStateChanges(t *testing.T) {
 // a bare socket for a detached teammate (chat.sh:1362) and "<socket>\t<pane>"
 // for one sharing this chat's server (chat.sh:435).
 func TestChildrenRoundTripInCCDBShShapes(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	ctx := context.Background()
 
@@ -210,6 +253,7 @@ func TestChildrenRoundTripInCCDBShShapes(t *testing.T) {
 // PrimaryAccount reads the database first and the ~/.claude-primary mirror
 // only when the database has no row.
 func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
+	t.Parallel()
 	state, values := openTestStore(t)
 	ctx := context.Background()
 
@@ -250,6 +294,7 @@ func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
 // account, and answered every query with the roster's first configured
 // account instead of surfacing the outage.
 func TestClaudePrimaryAccountSurfacesAQueryFailureNotNotFound(t *testing.T) {
+	t.Parallel()
 	state, values := openTestStore(t)
 	ctx := context.Background()
 	if err := state.SetMeta(ctx, PrimaryAccountKey, "2", 99); err != nil {
@@ -271,6 +316,7 @@ func TestClaudePrimaryAccountSurfacesAQueryFailureNotNotFound(t *testing.T) {
 }
 
 func TestBranchSeatMarkersRoundTripWithoutChangingTheSchema(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	ctx := context.Background()
 	const socket = "cc-1800000000-42-7"
@@ -296,24 +342,26 @@ func TestBranchSeatMarkersRoundTripWithoutChangingTheSchema(t *testing.T) {
 // The reader must not be what creates the state store: a missing database is a
 // missing database, not an empty one.
 func TestPrimaryAccountNeverCreatesTheDatabase(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	values := paths.Values{
-		FleetDB: filepath.Join(root, "state", "fleet.db"),
+		StateDB: filepath.Join(root, "state", "pfm.db"),
 		Home:    filepath.Join(root, "home"),
 	}
 	if account, found, err := ClaudePrimaryAccount(context.Background(), values); found || err != nil {
 		t.Fatalf("PrimaryAccount() = %d, %v, %v, want not found, nil", account, found, err)
 	}
-	if _, err := os.Stat(values.FleetDB); !os.IsNotExist(err) {
-		t.Fatalf("reading the primary account created %s: %v", values.FleetDB, err)
+	if _, err := os.Stat(values.StateDB); !os.IsNotExist(err) {
+		t.Fatalf("reading the primary account created %s: %v", values.StateDB, err)
 	}
 }
 
 func TestSetPrimaryAccountKeepsDatabaseAndMirrorInLockstep(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	values := paths.Values{
 		Home:    root,
-		FleetDB: filepath.Join(root, ".cc", "fleet.db"),
+		StateDB: filepath.Join(root, ".local", "state", "pfm", "pfm.db"),
 	}
 	if err := SetClaudePrimaryAccount(context.Background(), values, 2, 123); err != nil {
 		t.Fatal(err)
@@ -335,7 +383,7 @@ func openTestStore(t *testing.T) (*Store, paths.Values) {
 
 	root := t.TempDir()
 	values := paths.Values{
-		FleetDB: filepath.Join(root, "cc", "fleet.db"),
+		StateDB: filepath.Join(root, "cc", "pfm.db"),
 		Home:    filepath.Join(root, "home"),
 	}
 	state := OpenSharedState(context.Background(), values)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -26,6 +27,13 @@ var ErrNameSyncRunning = errors.New("the pfm name-sync service is running")
 // ErrLaunchAgentRunning is the macOS half of the same narrow refusal: a
 // mutating install must not rewrite the agent and its binary mid-execution.
 var ErrLaunchAgentRunning = errors.New("the pfm name-sync launch agent is running")
+
+// ErrReminderRunning refuses a mutating install while the Linux reminder fire
+// is executing, for the same reason: its unit and binary must not move under it.
+var ErrReminderRunning = errors.New("the pfm reminder service is running")
+
+// ErrReminderAgentRunning is the macOS half of the reminder refusal.
+var ErrReminderAgentRunning = errors.New("the pfm reminder launch agent is running")
 
 type Mode uint8
 
@@ -67,30 +75,40 @@ type OutputRunner interface {
 }
 
 type Options struct {
-	Mode      Mode
-	Home      string
-	ConfigDir string
-	// ConfigDirs is the config-driven settings fanout. A nil value retains
-	// the historical discovery of existing .cc account settings for callers
-	// that construct Options directly.
-	ConfigDirs []string
-	// ClaudeRegistries carries actual user-scope paths, including implicit accounts.
-	// Nil derives legacy paths from ConfigDirs; empty means no Claude clients.
-	ClaudeRegistries []string
-	// ClaudeRegistryReasons explains, for a path also present in
-	// ClaudeRegistries, why that file is a registry a pfm-launched Claude
-	// reads (see ClaudeUserRegistries). A path with no entry writes with the
-	// historical unreasoned message; callers that populate ClaudeRegistries
-	// from ClaudeUserRegistries populate this too.
-	ClaudeRegistryReasons map[string]string
+	Mode                  Mode
+	ManagedSettingsDir    string
+	CleanupPeriodDays     int
+	RequireManagedCleanup bool
+	// writeManaged is the atomic managed-drop-in writer; nil uses atomicfile.Write.
+	writeManaged     func(string, []byte) error
+	Home             string
+	StateDB          string
+	ConfigDir        string
+	PrimaryConfigDir string
 	// CodexHomes is the config-driven hooks.json fanout. A nil value retains
 	// the historical single ~/.codex target for direct legacy callers; an
 	// explicitly empty roster installs no Codex hook.
 	CodexHomes []string
+	// ClaudeAccounts is the configured Claude account roster whose registries
+	// (ClaudeUserRegistries) the fullscreen canary clear visits; nil visits none.
+	ClaudeAccounts []pfmconfig.Account
+	// ClaudeRosterHost is set when the config lists Claude accounts, with or
+	// without --config-dir, which leaves ClaudeAccounts nil; the plugin step
+	// reads it to refuse a dir that resolves to the store, and the login default
+	// reads it to leave itself as it is on a --config-dir install.
+	ClaudeRosterHost bool
 	// CodexBinary enables native hook trust registration for command callers.
 	CodexBinary string
-	Clock       clock.Clock
-	Env         paths.Env
+	// ConfigSeed is the example.pfm.config.json path a first install seeds
+	// MCPConfigPath from; empty means nothing is seeded.
+	ConfigSeed        string
+	ConfigSeedContent []byte
+	// RosterConfigDirs lists every roster Claude account's config dir, whether
+	// or not --config-dir is given; nil on a host with no roster. Live-chat
+	// guards are its only readers.
+	RosterConfigDirs []string
+	Clock            clock.Clock
+	Env              paths.Env
 	// SourceRepo is the clone whose templates and binary are being installed.
 	// Empty preserves an existing marker when install is invoked elsewhere.
 	SourceRepo string
@@ -114,7 +132,6 @@ type Options struct {
 	// callers may leave it empty to opt out of OpenCode wiring.
 	OpenCodeConfigPath string
 	ClaudeBinary       string
-	CodexYolo          map[int]bool
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches
@@ -141,10 +158,13 @@ type Options struct {
 	// ProvisionHarvest makes install/uninstall own the pinned conversion
 	// environment. The command sets this for real user actions; existing
 	// installer unit tests leave it false and inject no network-capable worker.
-	ProvisionHarvest   bool
-	HarvestProvisioner HarvestProvisioner
-	HarvestPlatform    harvestpy.Platform
-	HarvestOffline     bool
+	ProvisionHarvest bool
+	// SkillSourcesOffline skips fetching the source-fetched global skills
+	// (paths.EnvSkillSourcesOffline); an existing store copy is still linked.
+	SkillSourcesOffline bool
+	HarvestProvisioner  HarvestProvisioner
+	HarvestPlatform     harvestpy.Platform
+	HarvestOffline      bool
 
 	// ProcRoot is the process table pruneClaudeVersions reads to tell a
 	// version a live chat is executing from one it is safe to remove. Empty
@@ -157,6 +177,9 @@ type Options struct {
 	// Command callers set it by default; unit callers opt in explicitly so a
 	// test can never acquire network access by accident.
 	InstallThemes bool
+	// ThemesOffline skips remote theme manifests and palettes while allowing
+	// bundled palettes from SourceRepo to install.
+	ThemesOffline bool
 	// ThemeManifestURL is the release-matched fallback used when SourceRepo is
 	// unavailable (for example, the checksum-verified binary install path).
 	ThemeManifestURL string
@@ -178,6 +201,7 @@ type Report struct {
 	Skipped int
 }
 
+// execCommandRunner runs a command through the observed real runner.
 type execCommandRunner struct{}
 
 type commandExitError struct {
@@ -216,8 +240,13 @@ func (installer *engine) processRunner() deps.Runner {
 	return obs.Runner(deps.RealRunner{})
 }
 
-func (execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
-	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+func (runner execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
+	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+		return fmt.Errorf("run %q: %w", name, lookErr)
+	}
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		ctx, append([]string{name}, args...), deps.RunOptions{},
+	)
 	if err != nil {
 		return err
 	}
@@ -227,8 +256,13 @@ func (execCommandRunner) Run(ctx context.Context, name string, args ...string) e
 	return nil
 }
 
-func (execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+func (runner execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+		return nil, fmt.Errorf("run %q: %w", name, lookErr)
+	}
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		ctx, append([]string{name}, args...), deps.RunOptions{},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +273,13 @@ func (execCommandRunner) Output(ctx context.Context, name string, args ...string
 }
 
 func normalizeInstallerOptions(options Options) (Options, error) {
+	if options.SourceRepo != "" {
+		abs, err := filepath.Abs(options.SourceRepo)
+		if err != nil {
+			return options, fmt.Errorf("resolve source repository %q: %w", options.SourceRepo, err)
+		}
+		options.SourceRepo = paths.PhysicalPath(abs)
+	}
 	if options.Clock == nil {
 		options.Clock = clock.Real
 	}
@@ -252,6 +293,13 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 			return options, err
 		}
 	}
+	if options.StateDB == "" {
+		var err error
+		options.StateDB, _, err = pfmconfig.StatePathsFrom(options.Env, options.Home)
+		if err != nil {
+			return options, fmt.Errorf("resolve state database: %w", err)
+		}
+	}
 	if options.ConfigDir == "" {
 		options.ConfigDir = options.Home + "/.claude"
 	}
@@ -263,9 +311,6 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	}
 	if options.MCPPort == 0 {
 		options.MCPPort = pfmconfig.DefaultMCPPort
-	}
-	if options.CodexYolo == nil {
-		options.CodexYolo = map[int]bool{1: true, 2: true, 3: true}
 	}
 	if options.Now == nil {
 		options.Now = options.Clock.Now

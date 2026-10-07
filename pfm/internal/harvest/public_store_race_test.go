@@ -11,6 +11,7 @@ import (
 // fresh cache race to create .private/handles; the loser of the race must see
 // the directory the winner made, never fail with "file exists".
 func TestPrivateHandleDirSurvivesConcurrentCreation(t *testing.T) {
+	t.Parallel()
 	for round := range 50 {
 		root := filepath.Join(t.TempDir(), "cache")
 		h := &Harvester{options: Options{CacheDir: root}}
@@ -39,6 +40,7 @@ func TestPrivateHandleDirSurvivesConcurrentCreation(t *testing.T) {
 
 // TestPublicNamespaceSurvivesConcurrentCreation: the same race on public/.
 func TestPublicNamespaceSurvivesConcurrentCreation(t *testing.T) {
+	t.Parallel()
 	for round := range 50 {
 		root := t.TempDir()
 		start := make(chan struct{})

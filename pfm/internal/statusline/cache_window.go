@@ -2,7 +2,9 @@ package statusline
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,25 +13,105 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // cacheWindowSegment renders the prompt cache's time left and the share of
-// the last call's prompt read from it: 💾1h✓59m:28s 94%. The window's length is the one the
-// newest cache write actually used (usage.cache_creation), not an assumption;
-// the environment decides it only for a transcript that records none.
-// hit < 0 means the harness reported no usage yet, and drops the tail; a
-// lapsed window renders the hit as history, was 99%.
-// Claude Code's own prompt_cache (its request clock and TTL) wins whenever it
-// carries an expiry; the transcript is read only when it does not.
-func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string, hit int, harness *promptCache) string {
-	text, lapsed, ok := harness.windowText(now)
-	if !ok {
-		text, lapsed = cacheWindowText(runtime, now, transcriptPath)
+// the last call's prompt read from it: 💾1h✓59m:28s 94%. The window's length
+// comes first from Claude Code's own prompt_cache (its request clock and TTL);
+// when the payload carries no TTL the launch record decides it, never the
+// statusline's own environment; a session pfm never launched falls to the
+// transcript's newest cache write (usage.cache_creation), else no marker. The
+// countdown runs to the payload's expiry, else from the transcript's newest
+// request. A failed launch read renders 💾⚠ with its cause on stderr, and a
+// machine config that failed to load 💾⚠config: the launch record lives where
+// the config's state.db says. hit < 0 means the harness reported no usage yet,
+// and drops the tail; a lapsed window renders the hit as history, was 99%.
+func cacheWindowSegment(
+	runtime Runtime,
+	now time.Time,
+	transcriptPath string,
+	hit int,
+	harness *promptCache,
+	sessionID string,
+) string {
+	label := harness.ttlLabel()
+	var text string
+	var lapsed bool
+	if harness.expires() && label != "" {
+		text, lapsed = countdownText(label, time.Unix(*harness.ExpiresAt, 0), now)
+		return withHit(text, hit, lapsed)
 	}
+	launch, found, failure := launchCache(runtime, sessionID)
+	if failure != "" {
+		return failure
+	}
+	switch {
+	case found && harness.expires():
+		text, lapsed = countdownText(launchLabel(launch), time.Unix(*harness.ExpiresAt, 0), now)
+	case found:
+		text, lapsed = launchWindowText(runtime, now, transcriptPath, launch.Cache1H)
+	default:
+		var ok bool
+		text, lapsed, ok = unlaunchedWindowText(runtime, now, transcriptPath, harness)
+		if !ok {
+			return ""
+		}
+	}
+	return withHit(text, hit, lapsed)
+}
+
+// withHit joins the window and the last call's hit share into the segment.
+func withHit(text string, hit int, lapsed bool) string {
 	if hit < 0 {
 		return sep + text
 	}
 	return sep + text + " " + cacheHitText(hit, lapsed)
+}
+
+// launchCache reads the session's launch record from the state database the
+// config resolved (PFM_STATE_DB still overrides it). found is false for a
+// session pfm never launched, or none named; a non-empty failure is the
+// rendered warning for a read that failed, its cause already on stderr.
+func launchCache(runtime Runtime, sessionID string) (launch fleetdb.Launch, found bool, failure string) {
+	if sessionID == "" {
+		return fleetdb.Launch{}, false, ""
+	}
+	if runtime.ConfigError != nil {
+		return fleetdb.Launch{}, false, sep + cBad + "💾⚠config" + reset
+	}
+	stateDB := runtime.getenv(paths.EnvStateDB)
+	if stateDB == "" {
+		stateDB = runtime.StateDB
+	}
+	if stateDB == "" {
+		stateDB = paths.DefaultStateDB(runtime.Home)
+	}
+	launches, err := fleetdb.OpenLaunches(context.Background(), paths.Values{StateDB: stateDB})
+	if err == nil {
+		defer func() {
+			if closeErr := launches.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "statusline: close launch record: %v\n", closeErr)
+			}
+		}()
+		launch, err = launches.LaunchFor(context.Background(), sessionID)
+	}
+	if errors.Is(err, fleetdb.ErrNoLaunch) {
+		return fleetdb.Launch{}, false, ""
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "statusline: launch record %s: %v\n", sessionID, err)
+		return fleetdb.Launch{}, false, sep + cBad + "💾⚠" + reset
+	}
+	return launch, true, ""
+}
+
+func launchLabel(launch fleetdb.Launch) string {
+	if launch.Cache1H {
+		return "1h"
+	}
+	return "5m"
 }
 
 // promptCache is the statusline payload's prompt_cache object: Claude Code
@@ -39,29 +121,29 @@ type promptCache struct {
 	ExpiresAt *int64 `json:"expires_at"`
 }
 
-// windowText renders the harness's cache window and whether it has lapsed; ok
-// is false when the payload carries no expiry (no cached request yet, or a
-// build without the field).
-func (cache *promptCache) windowText(now time.Time) (text string, lapsed, ok bool) {
-	if cache == nil || cache.ExpiresAt == nil {
-		return "", false, false
-	}
-	label := strings.TrimSpace(cache.TTL)
-	if label == "" {
-		label = "?"
-	}
-	text, lapsed = countdownText(label, time.Unix(*cache.ExpiresAt, 0), now)
-	return text, lapsed, true
+// expires reports whether the payload carries an expiry; it does not before
+// the first cached request, or on a build without the field.
+func (cache *promptCache) expires() bool {
+	return cache != nil && cache.ExpiresAt != nil
 }
 
-// cacheWindowText renders the transcript's cache window and whether it has
+// ttlLabel is the payload's own window length, "" when it names none.
+func (cache *promptCache) ttlLabel() string {
+	if cache == nil {
+		return ""
+	}
+	return strings.TrimSpace(cache.TTL)
+}
+
+// launchWindowText renders a launched chat's window: the launch record's
+// length, counted from the transcript's newest request, and whether it has
 // lapsed; an unmeasurable window never counts as lapsed.
-func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) (string, bool) {
-	ttl := time.Hour
-	label := "1h"
-	if runtime.getenv("FORCE_PROMPT_CACHING_5M") == "1" {
-		ttl = 5 * time.Minute
-		label = "5m"
+func launchWindowText(runtime Runtime, now time.Time, transcriptPath string, cache1h bool) (string, bool) {
+	ttl := 5 * time.Minute
+	label := "5m"
+	if cache1h {
+		ttl = time.Hour
+		label = "1h"
 	}
 	// A transcript we could not read is NOT a chat without a cache window, and
 	// the two must never share a rendering. Returning "" here made the segment
@@ -73,12 +155,67 @@ func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) (str
 	// "!" is deliberately not "?": "?" means the transcript WAS read and simply
 	// carries no user turn to anchor on, which is a fact about the chat. "!" is
 	// a fact about us — we could not look.
-	if transcriptPath == "" {
+	window, readable := transcriptWindow(runtime, transcriptPath)
+	if !readable {
 		return cBad + "💾" + label + "!" + reset, false
+	}
+	if window.anchor.IsZero() {
+		if label == "1h" {
+			return cWarn + "💾1h∞" + reset, false
+		}
+		return cWarn + "💾" + label + "?" + reset, false
+	}
+	return countdownText(label, window.anchor.Add(ttl), now)
+}
+
+// unlaunchedWindowText renders the window of a session pfm never launched:
+// the length its transcript's newest cache write used, counted to the
+// payload's expiry or from the newest request. ok is false when nothing names
+// a length — no marker. A named transcript that cannot be read is our failure
+// to look, 💾!, never an absent segment; a payload without one names nothing.
+func unlaunchedWindowText(
+	runtime Runtime,
+	now time.Time,
+	transcriptPath string,
+	harness *promptCache,
+) (string, bool, bool) {
+	if transcriptPath == "" {
+		return "", false, false
+	}
+	window, readable := transcriptWindow(runtime, transcriptPath)
+	if !readable {
+		return cBad + "💾!" + reset, false, true
+	}
+	var label string
+	switch window.ttl {
+	case time.Hour:
+		label = "1h"
+	case 5 * time.Minute:
+		label = "5m"
+	default:
+		return "", false, false
+	}
+	if harness.expires() {
+		text, lapsed := countdownText(label, time.Unix(*harness.ExpiresAt, 0), now)
+		return text, lapsed, true
+	}
+	if window.anchor.IsZero() {
+		return cWarn + "💾" + label + "?" + reset, false, true
+	}
+	text, lapsed := countdownText(label, window.anchor.Add(window.ttl), now)
+	return text, lapsed, true
+}
+
+// transcriptWindow reads the main chat's cache window from its transcript,
+// through the per-transcript anchor cache keyed on its size and mtime.
+// readable is false when the transcript is unnamed, missing or a directory.
+func transcriptWindow(runtime Runtime, transcriptPath string) (cacheWindow, bool) {
+	if transcriptPath == "" {
+		return cacheWindow{}, false
 	}
 	info, err := os.Stat(transcriptPath)
 	if err != nil || info.IsDir() {
-		return cBad + "💾" + label + "!" + reset, false
+		return cacheWindow{}, false
 	}
 	cachePath := filepath.Join(
 		runtime.CacheDir,
@@ -90,20 +227,7 @@ func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) (str
 		window = cacheAnchor(transcriptPath)
 		_ = atomicfile.Write(cachePath, []byte(key+" "+window.encode()), 0o600)
 	}
-	if window.ttl > 0 {
-		ttl = window.ttl
-		label = "1h"
-		if ttl == 5*time.Minute {
-			label = "5m"
-		}
-	}
-	if window.anchor.IsZero() {
-		if label == "1h" {
-			return cWarn + "💾1h∞" + reset, false
-		}
-		return cWarn + "💾" + label + "?" + reset, false
-	}
-	return countdownText(label, window.anchor.Add(ttl), now)
+	return window, true
 }
 
 // countdownText renders a live or lapsed cache window, 💾1h✓59m:28s or
@@ -168,9 +292,9 @@ func cacheHitPercent(read, created, uncached int64) int {
 	return int(read * 100 / total)
 }
 
-// cacheWindow is what the transcript says about the main chat's prompt cache:
-// the moment it was last used (anchor) and the lifetime of its newest write
-// (ttl; 0 when no record carries the breakdown).
+// cacheWindow carries the transcript's newest request anchor and the length
+// its newest cache write used: a sub-agent row and a session pfm never
+// launched take their window from it; a launched chat uses its launch record.
 type cacheWindow struct {
 	anchor time.Time
 	ttl    time.Duration

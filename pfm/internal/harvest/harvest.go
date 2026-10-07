@@ -22,40 +22,12 @@ func (h *Harvester) FetchWithOptions(ctx context.Context, source string, options
 			}
 			return cached
 		}
-		h.flightMu.Lock()
-		if flight, ok := h.flights[key]; ok {
-			h.flightMu.Unlock()
-			select {
-			case <-flight.done:
-				result := flight.result
-				if options.SizeOnly {
-					result.Content = ""
-				}
-				return result
-			case <-ctx.Done():
-				return Result{Source: source, Error: ctx.Err().Error()}
-			}
-		}
-		flight := &fetchFlight{done: make(chan struct{})}
-		h.flights[key] = flight
-		h.flightMu.Unlock()
-		result := h.fetchUnshared(ctx, source, options)
-		h.flightMu.Lock()
-		flight.result = result
-		close(flight.done)
-		delete(h.flights, key)
-		h.flightMu.Unlock()
-		if result.Error != "" {
-			h.neg.put(key, result)
-		}
-		h.recordStat(source, result) // scoreboard: every terminal outcome lands in stats.jsonl
-		if options.SizeOnly && result.Error == "" {
-			result.Content = ""
-		}
-		return result
+		return h.fetchShared(ctx, key, source, options)
 	}
-	result := h.fetchUnshared(ctx, source, options)
-	h.recordStat(source, result)
+	result, abandoned, refused := h.walk(ctx, source, options)
+	if !abandoned && !refused {
+		h.recordStat(source, result)
+	}
 	return result
 }
 
@@ -169,9 +141,10 @@ func (h *Harvester) fetchURLWithPolicy(
 	}
 	if isPubMedSearchURL(source) {
 		return Result{
-			Source: source,
+			Source:    source,
+			ErrorKind: errorKindInvalid, // classified by its producer, never by the address it quotes
 			Error: fmt.Sprintf(
-				"%s is a PubMed search/results URL, not an article — use the `harvester_search_literature` tool%s to get candidate works, each with a handle to read with `harvester_read` (publications).",
+				"%s"+pubMedSearchMarker+" — use the `harvester_search_literature` tool%s to get candidate works, each with a handle to read with `harvester_read` (publications).",
 				source,
 				SearchHint(h.settings.searchAvailable,
 					" (or `harvester_search_web`)",
@@ -438,7 +411,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// original HTML-source kind for cache/type semantics.
 			converted, convErr := quoraReaderPage(source, pageText(stripJinaEnvelope(string(body)))), error(nil)
 			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
-				!sameAsShell(appShellText, converted) {
+				!sameAsShell(appShellText, converted) && !loaders.readerGateOnly(source, converted) {
 				stored := h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders)
 				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
 			}
@@ -454,8 +427,9 @@ func (h *Harvester) fetchURLWithPolicy(
 		if err == nil && status < 400 && !isChallenge(body, status) {
 			converted := pageText(stripDefuddleEnvelope(string(body)))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
+			gate := loaders.readerGateOnly(source, converted) // recorded even for a copy not longer
 			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
-				!sameAsShell(appShellText, converted) {
+				!sameAsShell(appShellText, converted) && !gate {
 				return h.storeResult(
 					source,
 					kindHTML,
@@ -623,10 +597,11 @@ func (h *Harvester) fetchURLWithPolicy(
 				// recursion rejects it before it is stored.
 				snapshotCtx = context.WithValue(ctx, appShellKey{}, appShellText)
 			}
-			if result := h.fetchURLWithPolicy(snapshotCtx, snapshot, options, false); result.Error == "" {
-				result.Source = source
-				result.Rungs = append([]string(nil), rungs...)
-				return result
+			// The recursion judges the archive's address, never the original's: an
+			// archived sign-up wall is refused here by the original address.
+			if result := h.fetchURLWithPolicy(snapshotCtx, snapshot, options, false); result.Error == "" &&
+				!loaders.readerGateOnly(source, result.Content) {
+				return h.storeWaybackCopy(source, snapshot, result, rungs, options)
 			}
 		}
 	}
@@ -768,6 +743,9 @@ func (h *Harvester) fetchURLWithPolicy(
 		appShellFailure,
 	)
 	message = withRungs(loaders.loginWallNote(source, gaps.fail(message)), rungs) // a refused redirect (landing.go)
+	if (gaps.login || loaders.loginGateOnly) && !decisiveFailure(lastErrorKind, lastChallenge) {
+		lastErrorKind = errorKindLogin // the message leads with the login redirect or gate: the kind is its class
+	}
 	return Result{
 		Source:       source,
 		HTTPStatus:   lastStatus,
@@ -778,15 +756,6 @@ func (h *Harvester) fetchURLWithPolicy(
 		ContentChars: lastContentChars,
 		Rungs:        rungs,
 	}
-}
-
-func isPubMedSearchURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || !strings.EqualFold(u.Hostname(), "pubmed.ncbi.nlm.nih.gov") {
-		return false
-	}
-	return strings.Contains(strings.ToLower(u.Path), "/search") ||
-		strings.Contains(strings.ToLower(u.RawQuery), "term=")
 }
 
 func isPrivateURL(source string) bool {

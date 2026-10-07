@@ -49,9 +49,9 @@ Three different facts with three different mechanisms. Name the fact, then use t
 
 - MANDATORY — the model MUST load or route here at a step some law names. No harness flag expresses an obligation, so the token in the description is the whole mechanism and always stays.
 - `{CALLER}-ONLY` — exactly one named entity invokes it. The token stops every other reader; the caller's own prompt carries the invocation.
-- USER-ONLY — a person types it. `disable-model-invocation: true` IS the mechanism: the harness drops the entry from the model's registry, so self-invocation is unreachable rather than merely forbidden, and the description costs the model nothing. Two things follow. The description stops arguing with the model: keep the `USER-ONLY` token as the human's menu label, cut the prose ban no model will read. And it stops advertising spoken triggers — a hidden entry that lists "or says …" phrasings offers a route nothing can take, so either the triggers go or the flag does.
+- USER-ONLY — a person types it. `disable-model-invocation: true` IS the mechanism for commands and skills alike: the harness drops the entry from the model's registry, so self-invocation is unreachable rather than merely forbidden, and the description costs the model nothing. Two things follow. The description stops arguing with the model: keep the `USER-ONLY` token as the human's menu label, cut the prose ban no model will read. And it stops advertising spoken triggers — a hidden entry that lists "or says …" phrasings offers a route nothing can take, so either the triggers go or the flag does.
 
-Two cases have no flag to reach for, and there the token is the only signal: a skill, which has no such field (its caller-side `tools:` allowlist is the real enforcement), and an entity a user may ASK for in prose rather than type, where hiding it would make a request the user actually made unroutable.
+One case has no flag to reach for, and there the token is the only signal: an entity a user may ASK for in prose rather than type, where hiding it would make a request the user actually made unroutable.
 
 ## MCP tools — self-contained, because there is no body
 

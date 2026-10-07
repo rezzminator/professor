@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestCheckInterpreterFailureIncludesStderr(t *testing.T) {
@@ -41,7 +42,7 @@ func readyFixtureEnvironment(t *testing.T, root string, platform Platform, sourc
 	}
 	write := func(path, body string, mode os.FileMode) {
 		t.Helper()
-		if err := os.WriteFile(path, []byte(body), mode); err != nil {
+		if err := testjail.WriteExecutable(path, []byte(body), mode); err != nil {
 			t.Fatal(err)
 		}
 	}

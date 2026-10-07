@@ -10,24 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// TestProvisionCommandExitIsNeverRecordedAsZero is the harvestpy Exited() gap:
-// deps.Runner reports an ordinary non-zero exit in RunResult.ExitCode with a
-// NIL error, and both provisioning recorders handed that nil straight to
-// obs.Process.Exited — so a `uv pip check` that exited 1 was recorded as
-// exit=0 at INFO, a failure written down as a success.
-//
-// The record's own shape is WARN with the exit code and no err field — the
-// duck-typed "any error naming its own exit code" contract
-// internal/obs/process.go's Exited reads commandExitStatus through
-// (interface{ ExitCode() int }), the same shape a bare *exec.ExitError takes:
-// a completed command's own non-zero exit is the command ANSWERING, not an
-// error of the wrapper. The failure text itself still reaches the CALLER —
-// runCommandWithRunner's own returned error, asserted below — never the
-// activity log.
 func TestProvisionCommandExitIsNeverRecordedAsZero(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	runner := &deps.FakeRunner{}
@@ -87,7 +74,7 @@ func TestDownloadFileStopsAtItsCeiling(t *testing.T) {
 		server.Close()
 	})
 
-	err := downloadFile(context.Background(), server.URL, filepath.Join(t.TempDir(), "artifact"), 0)
+	err := downloadFile(context.Background(), clock.Real, server.URL, filepath.Join(t.TempDir(), "artifact"), 0)
 	if err == nil {
 		t.Fatal("a download whose server stalled mid-body returned no error")
 	}
@@ -116,7 +103,7 @@ func TestDownloadFileReportsACallerCancellationAsItself(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- downloadFile(ctx, server.URL, filepath.Join(t.TempDir(), "artifact"), 0)
+		done <- downloadFile(ctx, clock.Real, server.URL, filepath.Join(t.TempDir(), "artifact"), 0)
 	}()
 	cancel()
 	err := <-done

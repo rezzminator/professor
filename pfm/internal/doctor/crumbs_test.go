@@ -1,14 +1,98 @@
 package doctor
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestDoctorLeakedProbeHomes(t *testing.T) {
+	now := time.Date(2026, time.October, 6, 12, 0, 0, 0, time.UTC)
+	for _, name := range []string{"stale", "missing", "scan fails", "entry info fails"} {
+		t.Run(name, func(t *testing.T) {
+			sidDir := filepath.Join(t.TempDir(), "sid")
+			var output bytes.Buffer
+			want, wantWarnings := "", 0
+			readDir := os.ReadDir
+			switch name {
+			case "stale":
+				if err := os.Mkdir(sidDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				for _, fixture := range []struct {
+					name string
+					age  time.Duration
+				}{
+					{"pfm-probe-home-a", 11 * time.Minute},
+					{"pfm-probe-home-b", time.Minute},
+					{"pfm-probe-home-boundary", 10 * time.Minute},
+					{paths.SIDHarnessConfigDirPrefix + "old", time.Hour},
+				} {
+					path := filepath.Join(sidDir, fixture.name)
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					at := now.Add(-fixture.age)
+					if err := os.Chtimes(path, at, at); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(
+					filepath.Join(sidDir, "pfm-probe-home-file"),
+					[]byte("file"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(sidDir, "pfm-probe-home-a")
+				want = "doctor: warning probe_home " + path +
+					" left 11m0s ago by a probe that never cleaned up — remove it: rm -rf " + path + "\n"
+				wantWarnings = 1
+			case "scan fails":
+				if err := os.WriteFile(sidDir, []byte("file"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, err := os.ReadDir(sidDir)
+				want = fmt.Sprintf("doctor: warning probe_home could not look: %v\n", err)
+				wantWarnings = 1
+			case "entry info fails":
+				path := filepath.Join(sidDir, "pfm-probe-home-a")
+				if err := os.MkdirAll(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				readDir = func(path string) ([]os.DirEntry, error) {
+					entries, err := os.ReadDir(path)
+					if err != nil {
+						return nil, err
+					}
+					if err := os.Rename(path, path+"-moved"); err != nil {
+						t.Fatal(err)
+					}
+					_, err = entries[0].Info()
+					want = fmt.Sprintf("doctor: warning probe_home could not look: %v\n", err)
+					return entries, nil
+				}
+				wantWarnings = 1
+			}
+			var warnings int
+			if name == "entry info fails" {
+				warnings = printLeakedProbeHomesWith(&output, sidDir, now, readDir)
+			} else {
+				warnings = printLeakedProbeHomes(&output, sidDir, now)
+			}
+			if warnings != wantWarnings || output.String() != want {
+				t.Fatalf("warnings=%d output=%q, want %d/%q", warnings, output.String(), wantWarnings, want)
+			}
+		})
+	}
+}
 
 func TestDoctorRecognizesThenFailedAsSatelliteMetadata(t *testing.T) {
 	root := jailTest(t)
@@ -119,12 +203,10 @@ func TestDoctorCrumbsAcceptLiveRolePrompts(t *testing.T) {
 	}
 }
 
-// TestDoctorCrumbsAcceptHarnessCaptureConfigDirs pins the harness-prompt
-// capture's config directory, in flight or left by a crash, as pfm's own.
-func TestDoctorCrumbsAcceptHarnessCaptureConfigDirs(t *testing.T) {
+func TestDoctorCrumbsAcceptHarnessPromptRecords(t *testing.T) {
 	root := jailTest(t)
 	sidDir := filepath.Join(root, "sid")
-	if _, err := os.MkdirTemp(sidDir, paths.SIDHarnessConfigDirPrefix); err != nil {
+	if err := agentrole.WriteHarnessPromptRecord(sidDir, "cc-1", "", filepath.Join(root, "alt.md")); err != nil {
 		t.Fatal(err)
 	}
 	entries, invalid, err := crumbHealth(sidDir)
@@ -132,7 +214,28 @@ func TestDoctorCrumbsAcceptHarnessCaptureConfigDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if entries != 1 || invalid != 0 {
-		t.Fatalf("crumbHealth() entries=%d invalid=%d, want the harness config dir accepted", entries, invalid)
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want the harness prompt record accepted", entries, invalid)
+	}
+}
+
+// TestDoctorCrumbsAcceptHarnessCaptureConfigDirs pins the harness-prompt
+// capture's config directory, in flight or left by a crash, as pfm's own.
+func TestDoctorCrumbsAcceptHarnessCaptureConfigDirs(t *testing.T) {
+	root := jailTest(t)
+	sidDir := filepath.Join(root, "sid")
+	// The harness capture's config dir and a dependency probe's throwaway
+	// engine home: both live only while their run does, a crash leaves one.
+	for _, prefix := range []string{paths.SIDHarnessConfigDirPrefix, paths.SIDEngineProbeHomePrefix} {
+		if _, err := os.MkdirTemp(sidDir, prefix); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, invalid, err := crumbHealth(sidDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries != 2 || invalid != 0 {
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want both throwaway config dirs accepted", entries, invalid)
 	}
 }
 

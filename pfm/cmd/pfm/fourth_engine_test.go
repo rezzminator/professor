@@ -28,6 +28,7 @@ const fourthEngineHelper = "PFM_FOURTH_ENGINE_HELPER"
 
 func TestFourthEngineNeedsOnlyItsOwnPackage(t *testing.T) {
 	if os.Getenv(fourthEngineHelper) != "1" {
+		t.Parallel()
 		command := exec.Command(os.Args[0], "-test.run=^TestFourthEngineNeedsOnlyItsOwnPackage$")
 		command.Env = append(os.Environ(), fourthEngineHelper+"=1")
 		output, err := command.CombinedOutput()

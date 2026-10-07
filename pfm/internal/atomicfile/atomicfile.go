@@ -29,6 +29,12 @@ func Write(path string, content []byte, mode fs.FileMode) (err error) {
 	})
 }
 
+// Create publishes a complete file only if path is still absent. It never
+// replaces a concurrently created file or follows a destination symlink.
+func Create(path string, content []byte, mode fs.FileMode) error {
+	return publish(path, mode, func(scratch *os.File) error { _, err := scratch.Write(content); return err }, true)
+}
+
 // ErrTooLarge reports a WriteFrom stream that ran past its limit; the target
 // is left untouched and no scratch remains.
 var ErrTooLarge = errors.New("content exceeds the size limit")
@@ -61,7 +67,7 @@ func WriteFrom(path string, r io.Reader, mode fs.FileMode, limit int64) (written
 // publish is the one scratch-then-rename sequence Write and WriteFrom share:
 // fill writes the scratch file, which is then synced, closed and renamed over
 // path; any failure removes the scratch and leaves path as it was.
-func publish(path string, mode fs.FileMode, fill func(*os.File) error) (err error) {
+func publish(path string, mode fs.FileMode, fill func(*os.File) error, exclusive ...bool) (err error) {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("write %s: create directory: %w", path, err)
@@ -94,6 +100,16 @@ func publish(path string, mode fs.FileMode, fill func(*os.File) error) (err erro
 	}
 	if err := scratch.Close(); err != nil {
 		return fmt.Errorf("write %s: close scratch: %w", path, err)
+	}
+	if len(exclusive) > 0 && exclusive[0] {
+		if err := os.Link(scratchPath, path); err != nil {
+			return fmt.Errorf("create %s: publish: %w", path, err)
+		}
+		if err := removeScratch(scratchPath); err != nil {
+			return fmt.Errorf("create %s: remove scratch: %w", path, err)
+		}
+		published = true
+		return nil
 	}
 	if err := os.Rename(scratchPath, path); err != nil {
 		return fmt.Errorf("write %s: replace: %w", path, err)

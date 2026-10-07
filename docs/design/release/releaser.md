@@ -45,7 +45,7 @@ Nothing else: the range, the prior verdicts and the review state are read from `
 
 `delta` mode, after fix commits: `BASE` = `DIR/review/HEAD`; the scope of the delta in `DIR/review/scope-delta-{sha7}.md`, while `scope.md` stays the full range every later reader takes; a `reviewer` only for each area the delta touches, with the same `REPORT_PATH`, so it updates the report in place (a verified fix flips to `status: resolved @{sha}`, a new defect appends); the seams sweep over the delta's removals, plus a re-run of each open `S{n}`'s grep and a re-check of each open `P{n}` at HEAD, flipping each that no longer holds to `status: resolved @{sha}` — otherwise a fixed seam or reconcile finding would hold READY forever; then steps 5–6.
 
-A range too large for the areas' reviewers is split by the script, never by the agent: `scope` packs tier-1 paths into areas of at most 600 hunks, a reviewer's four lanes of about 150.
+A range too large for the areas' reviewers is split by the script, never by the agent: `scope` packs tier-1 paths into areas of at most 600 hunks, a reviewer's hunters of about 100 hunks each, six at most.
 
 ## NOTES
 

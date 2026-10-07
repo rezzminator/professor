@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,11 +12,17 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
+func TestWorkbenchManifest(t *testing.T) {
+	if got := WorkbenchManifest("/work/acme/docs/scribe"); got != "/work/acme/docs/scribe/.professor/workbench.json" {
+		t.Fatalf("WorkbenchManifest = %q", got)
+	}
+}
+
 func TestResolveOverrides(t *testing.T) {
 	testRoot := t.TempDir()
 	t.Setenv("TMUX_TMPDIR", filepath.Join(testRoot, "t"))
 	home := filepath.Join(testRoot, "home")
-	db := filepath.Join(testRoot, "fleet.db")
+	db := filepath.Join(testRoot, "pfm-cache.db")
 	sidDir := filepath.Join(testRoot, "sid")
 	claudeRoots := []string{
 		filepath.Join(testRoot, "claude-1"),
@@ -25,11 +32,12 @@ func TestResolveOverrides(t *testing.T) {
 	tmuxDir := filepath.Join(testRoot, "tmux")
 	procRoot := filepath.Join(testRoot, "proc")
 	cgroupRoot := filepath.Join(testRoot, "cgroup")
-	fleetDB := filepath.Join(testRoot, "shared", "fleet.db")
+	managedSettingsDir := filepath.Join(testRoot, "managed-settings.d")
+	stateDB := filepath.Join(testRoot, "shared", "pfm.db")
 
 	t.Setenv(EnvHome, home)
-	t.Setenv(EnvDB, db)
-	t.Setenv(EnvFleetDB, fleetDB)
+	t.Setenv(EnvCacheDB, db)
+	t.Setenv(EnvStateDB, stateDB)
 	t.Setenv(EnvSIDDir, sidDir)
 	t.Setenv(EnvClaudeRoots, strings.Join(claudeRoots, string(os.PathListSeparator)))
 	t.Setenv(EnvCodexHome, codexHome)
@@ -38,14 +46,15 @@ func TestResolveOverrides(t *testing.T) {
 	t.Setenv(EnvTmuxDir, tmuxDir)
 	t.Setenv(EnvProcRoot, procRoot)
 	t.Setenv(EnvCgroupRoot, cgroupRoot)
+	t.Setenv(EnvManagedSettingsDir, managedSettingsDir)
 
 	got, err := Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	want := Values{
-		DB:      db,
-		FleetDB: fleetDB,
+		CacheDB: db,
+		StateDB: stateDB,
 		SIDDir:  sidDir,
 		Roots: map[pfmengine.ID][]string{
 			pfmengine.Claude:   claudeRoots,
@@ -56,10 +65,11 @@ func TestResolveOverrides(t *testing.T) {
 		Home:    home,
 		// The carrier and the archive have no override of their own: both are
 		// defined relative to Home, and jailing Home jails them.
-		ArchiveDir: filepath.Join(home, ".claude-archive"),
-		ProcRoot:   procRoot,
-		CgroupRoot: cgroupRoot,
-		LogFile:    filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
+		ArchiveDir:         filepath.Join(home, ".claude-archive"),
+		ProcRoot:           procRoot,
+		CgroupRoot:         cgroupRoot,
+		ManagedSettingsDir: managedSettingsDir,
+		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)
@@ -111,25 +121,24 @@ func TestDevRepoGitDirLogsPhysicalResolutionFailureBeforeCleanFallback(t *testin
 	}
 }
 
-// The fleet state store defaults to ~/.cc/fleet.db, never the private cache's
-// directory, and the two overrides must not collide.
-func TestResolveFleetStoreDefaultsOutsideThePrivateCache(t *testing.T) {
+// The state and cache databases have distinct names in the pfm state directory.
+func TestResolveStateAndCacheDefaults(t *testing.T) {
 	testRoot := t.TempDir()
 	home := filepath.Join(testRoot, "home")
 	t.Setenv(EnvHome, home)
-	t.Setenv(EnvDB, filepath.Join(testRoot, "cache", "fleet.db"))
-	t.Setenv(EnvFleetDB, "")
+	t.Setenv(EnvCacheDB, filepath.Join(testRoot, "cache", "pfm-cache.db"))
+	t.Setenv(EnvStateDB, "")
 
 	got, err := Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	want := filepath.Join(home, ".cc", "fleet.db")
-	if got.FleetDB != want {
-		t.Fatalf("Resolve().FleetDB = %q, want %q", got.FleetDB, want)
+	want := DefaultStateDB(home)
+	if got.StateDB != want {
+		t.Fatalf("Resolve().StateDB = %q, want %q", got.StateDB, want)
 	}
-	if got.FleetDB == got.DB {
-		t.Fatalf("fleet store and private cache resolved to the same file %q", got.DB)
+	if got.StateDB == got.CacheDB {
+		t.Fatalf("fleet store and private cache resolved to the same file %q", got.CacheDB)
 	}
 }
 
@@ -170,7 +179,7 @@ func TestResolveOpenCodeRootDefaultsUnderHome(t *testing.T) {
 func TestResolveUsesScratchTmuxBase(t *testing.T) {
 	testRoot := t.TempDir()
 	t.Setenv(EnvHome, filepath.Join(testRoot, "home"))
-	t.Setenv(EnvDB, filepath.Join(testRoot, "fleet.db"))
+	t.Setenv(EnvCacheDB, filepath.Join(testRoot, "pfm-cache.db"))
 	t.Setenv(EnvSIDDir, filepath.Join(testRoot, "sid"))
 	t.Setenv(EnvClaudeRoots, filepath.Join(testRoot, "claude"))
 	t.Setenv(EnvCodexHome, filepath.Join(testRoot, "codex"))
@@ -240,5 +249,206 @@ func TestResolveLogFileHangsOffTheHomesStateDirectory(t *testing.T) {
 	}
 	if second.LogFile == resolved.LogFile {
 		t.Fatalf("two homes resolved to one activity log: %s", second.LogFile)
+	}
+}
+
+func TestResolveIgnoresRetiredDatabaseEnvironment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+	t.Setenv(EnvStateDB, "")
+	t.Setenv(EnvCacheDB, "")
+	t.Setenv("PFM_"+"DB", filepath.Join(home, "retired-cache.db"))
+	t.Setenv("PFM_FLEET_"+"DB", filepath.Join(home, "retired-state.db"))
+	got, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.StateDB != DefaultStateDB(home) || got.CacheDB != DefaultCacheDB(home) {
+		t.Fatalf("paths = %q, %q", got.StateDB, got.CacheDB)
+	}
+}
+
+func TestHarnessBaselineDirUsesRecordedClone(t *testing.T) {
+	home := t.TempDir()
+	repo := t.TempDir()
+	if _, err := HarnessBaselineDir(home); !errors.Is(err, ErrNoSourceRepoMarker) {
+		t.Fatalf("missing marker error = %v", err)
+	}
+	if err := WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	got, err := HarnessBaselineDir(home)
+	want := filepath.Join(repo, "pfm", "harness-prompts", "claude", "baselines")
+	if err != nil || got != want {
+		t.Fatalf("baseline dir = %q, %v; want %q", got, err, want)
+	}
+	legacy := filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
+	if got := LegacyHarnessPromptsDir(home); got != legacy {
+		t.Fatalf("legacy dir = %q; want %q", got, legacy)
+	}
+}
+
+func TestSourceRepoMarkerContentResolvesAlias(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(repo, alias); err != nil {
+		t.Fatal(err)
+	}
+	content, err := SourceRepoMarkerContent(alias)
+	if err != nil || string(content) != repo+"\n" {
+		t.Fatalf("content=%q err=%v, want %q", content, err, repo+"\n")
+	}
+	missing := filepath.Join(root, "missing")
+	if _, err := SourceRepoMarkerContent(missing); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing error=%v", err)
+	}
+}
+
+func TestResolveManagedSettingsDirUsesJailOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+	t.Setenv(EnvManagedSettingsDir, filepath.Join(home, "managed-settings.d"))
+	got, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ManagedSettingsDir != filepath.Join(home, "managed-settings.d") {
+		t.Fatalf("managed settings dir=%q", got.ManagedSettingsDir)
+	}
+	t.Setenv(EnvManagedSettingsDir, "")
+	got, err = Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ManagedSettingsDir != wantDefaultManagedSettingsDir {
+		t.Fatalf("default managed settings dir=%q", got.ManagedSettingsDir)
+	}
+}
+
+func TestCheckLegacyPending(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	present := filepath.Join(root, "present.db")
+	if err := os.WriteFile(present, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	absent := filepath.Join(root, "absent.db")
+	unreadable := filepath.Join(blocker, "fleet.db") // ENOTDIR, even for root
+	tests := []struct {
+		name, target, legacy string
+		pending              bool
+		wantText             []string
+	}{
+		{name: "target exists", target: present, legacy: present},
+		{name: "fresh home", target: absent, legacy: filepath.Join(root, "absent-legacy.db")},
+		{
+			name: "legacy waits", target: absent, legacy: present, pending: true,
+			wantText: []string{absent, present, "run pfm doctor for the fix"},
+		},
+		{name: "legacy unreadable", target: absent, legacy: unreadable, wantText: []string{"inspect " + unreadable}},
+		{name: "target unreadable", target: unreadable, legacy: present, wantText: []string{"inspect " + unreadable}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			err := CheckLegacyPending(test.target, test.legacy)
+			if len(test.wantText) == 0 {
+				if err != nil {
+					t.Fatalf("CheckLegacyPending = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("CheckLegacyPending = nil, want an error")
+			}
+			if errors.Is(err, ErrLegacyPending) != test.pending {
+				t.Fatalf("errors.Is(%v, ErrLegacyPending) = %v, want %v", err, !test.pending, test.pending)
+			}
+			if test.pending {
+				want := ErrLegacyPending.Error() + ": " + test.target + " not created while legacy " + test.legacy + " still exists — run pfm doctor for the fix"
+				if err.Error() != want {
+					t.Fatalf("error=%q, want %q", err, want)
+				}
+			}
+			for _, want := range test.wantText {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q lacks %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLegacyDatabasePaths(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join(t.TempDir(), "home")
+	if got, want := LegacyStateDB(home), filepath.Join(home, ".cc", "fleet.db"); got != want {
+		t.Fatalf("LegacyStateDB = %q, want %q", got, want)
+	}
+	if got, want := LegacyCacheDB(home), filepath.Join(home, ".local", "state", "pfm", "fleet.db"); got != want {
+		t.Fatalf("LegacyCacheDB = %q, want %q", got, want)
+	}
+}
+
+// TestResolveRefusesARelativeManagedSettingsDir proves the override is
+// validated at entry: a relative dir would write the managed drop-in
+// relative to the working directory.
+func TestResolveRefusesARelativeManagedSettingsDir(t *testing.T) {
+	t.Setenv(EnvHome, t.TempDir())
+	t.Setenv(EnvManagedSettingsDir, "managed-settings.d")
+	if _, err := Resolve(); err == nil || !strings.Contains(err.Error(), EnvManagedSettingsDir) {
+		t.Fatalf("Resolve() err = %v, want the relative %s refused", err, EnvManagedSettingsDir)
+	}
+}
+
+func TestTestProfileAccessorsReadTheirOwnVariable(t *testing.T) {
+	lookups := []struct {
+		env string
+		get func() (string, bool)
+	}{
+		{EnvTestArtifactDir, TestArtifactDir},
+		{EnvTestProfileParent, TestProfileParent},
+		{EnvTestDeadlineEpoch, TestDeadlineEpoch},
+		{EnvTestProfile, func() (string, bool) { return TestProfileMode(), TestProfileMode() != "" }},
+	}
+	for _, lookup := range lookups {
+		t.Run(lookup.env, func(t *testing.T) {
+			t.Setenv(lookup.env, "")
+			if err := os.Unsetenv(lookup.env); err != nil {
+				t.Fatalf("unset %s: %v", lookup.env, err)
+			}
+			if got, ok := lookup.get(); ok || got != "" {
+				t.Fatalf("%s unset: got (%q, %v), want (\"\", false)", lookup.env, got, ok)
+			}
+			t.Setenv(lookup.env, "value-"+lookup.env)
+			if got, ok := lookup.get(); !ok || got != "value-"+lookup.env {
+				t.Fatalf("%s set: got (%q, %v), want (%q, true)", lookup.env, got, ok, "value-"+lookup.env)
+			}
+		})
+	}
+}
+
+func TestWorkbenchCacheBesideCacheDB(t *testing.T) {
+	for _, path := range []string{"/work/state/index.db", "/work/other/cache.db"} {
+		want := filepath.Join(filepath.Dir(path), "workbenches.json")
+		if got := WorkbenchCache(Values{CacheDB: path}); got != want {
+			t.Fatalf("WorkbenchCache = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestOpenCodeWorkbenchPlugin(t *testing.T) {
+	home := "/work/test"
+	want := filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-workbench-plugin.mjs")
+	if got := OpenCodeWorkbenchPlugin(home); got != want {
+		t.Fatalf("plugin = %q, want %q", got, want)
 	}
 }

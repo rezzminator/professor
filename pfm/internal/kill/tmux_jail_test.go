@@ -16,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type killTmuxJail struct {
@@ -60,7 +61,7 @@ func newKillTmuxJail(t *testing.T) *killTmuxJail {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", jail.root)
 	t.Setenv("PFM_HOME", jail.home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
 	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
@@ -101,7 +102,7 @@ func (jail *killTmuxJail) startReader(
 			" >> " + shellQuote(transcriptPath) + "\n"
 	}
 	content += "exit 0\n"
-	if err := os.WriteFile(scriptPath, []byte(content), 0o700); err != nil {
+	if err := testjail.WriteExecutable(scriptPath, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	command := jail.command(

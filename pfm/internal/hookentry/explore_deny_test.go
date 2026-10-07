@@ -37,7 +37,7 @@ func TestExploreDenyFailsOpenAndSteersExploreToTracer(t *testing.T) {
 // TestExploreDenyLogsAMalformedPayloadInsteadOfSwallowingIt pins L3-F18:
 // fail-open is right for a PreToolUse hook, but the missing stderr line
 // left a malformed payload indistinguishable from "nothing to deny" — every
-// sibling (ExitClose, CompactNudge, EpicInject, ReloadIntercept,
+// sibling (ExitClose, EpicInject, ReloadIntercept,
 // ExitIntercept) logs its decode error in the same
 // "pfm internal <hook>: decode hook payload (fail-open): %v" voice;
 // ExploreDeny now does too.

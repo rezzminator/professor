@@ -5,7 +5,7 @@ import "testing"
 func TestNewRowsFollowEngineRosterMatrix(t *testing.T) {
 	tests := []struct {
 		name         string
-		claude       []AccountRoot
+		claude       []ClaudeSeat
 		codex        []int
 		openCode     []int
 		wantKinds    []Kind
@@ -14,7 +14,7 @@ func TestNewRowsFollowEngineRosterMatrix(t *testing.T) {
 		{name: "zero zero"},
 		{
 			name:         "claude only",
-			claude:       []AccountRoot{{Account: 2, Path: "/cc/2"}, {Account: 4, Path: "/cc/4"}},
+			claude:       []ClaudeSeat{{Account: 2, ConfigDir: "/cc/2"}, {Account: 4, ConfigDir: "/cc/4"}},
 			wantKinds:    []Kind{NewClaude},
 			wantAccounts: []int{4},
 		},
@@ -26,14 +26,14 @@ func TestNewRowsFollowEngineRosterMatrix(t *testing.T) {
 		},
 		{
 			name:         "both",
-			claude:       []AccountRoot{{Account: 2, Path: "/cc/2"}, {Account: 4, Path: "/cc/4"}},
+			claude:       []ClaudeSeat{{Account: 2, ConfigDir: "/cc/2"}, {Account: 4, ConfigDir: "/cc/4"}},
 			codex:        []int{7, 9},
 			wantKinds:    []Kind{NewClaude, NewCodex},
 			wantAccounts: []int{4, 9},
 		},
 		{
 			name:         "all three",
-			claude:       []AccountRoot{{Account: 2, Path: "/cc/2"}},
+			claude:       []ClaudeSeat{{Account: 2, ConfigDir: "/cc/2"}},
 			codex:        []int{7},
 			openCode:     []int{1},
 			wantKinds:    []Kind{NewClaude, NewCodex, NewOpenCode},
@@ -43,7 +43,7 @@ func TestNewRowsFollowEngineRosterMatrix(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			output := Compose(Input{
-				AccountRoots: test.claude,
+				ClaudeSeats: test.claude,
 				Options: Options{
 					CurrentDir:          "/work/project",
 					PrimaryAccount:      4,

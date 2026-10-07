@@ -1,0 +1,255 @@
+package claudelaunch
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+)
+
+func TestParseRoundTripEveryKnob(t *testing.T) {
+	home, machine := renderMachine(t)
+	machine.Claude.Theme = "dark"
+	machine.Claude.NativeCursor = true
+	machine.Claude.MaxConcurrentSubagents = 3
+	machine.Claude.SystemPrompt = "professor"
+	machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: true}
+	prompt := filepath.Join(t.TempDir(), "prompt.md")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		Purpose:    PurposeInteractive,
+		Home:       home,
+		Account:    2,
+		SessionID:  "S",
+		Resume:     "R",
+		Fork:       true,
+		Name:       "named",
+		Model:      "opus",
+		Effort:     "high",
+		PromptFile: prompt,
+		Args:       []string{"hello"},
+	}
+	writeAccountSettings(t, machine.Accounts[1].ConfigDir, `{"tui":"fullscreen"}`)
+	launch, parsed := renderParsed(t, request, machine)
+	if !slices.Equal(parsed.Rest, request.Args) {
+		t.Errorf("rest=%q", parsed.Rest)
+	}
+	for _, knob := range Knobs {
+		t.Run(knob.Name, func(t *testing.T) {
+			if knob.Wire == WireUnset {
+				if !slices.Contains(launch.Unset, knob.Target) {
+					t.Errorf("unset lacks %s", knob.Target)
+				}
+				return
+			}
+			switch knob.Name {
+			case "configDir":
+				if !slices.Contains(launch.Env, "CLAUDE_CONFIG_DIR="+machine.Accounts[1].ConfigDir) {
+					t.Error("config dir missing")
+				}
+			case "binary":
+				if launch.Binary != machine.Claude.Binary {
+					t.Errorf("binary=%q", launch.Binary)
+				}
+			case "cache1h":
+				if !slices.Contains(launch.Env, "CACHE_LIVE_CONTROL_MAIN_TTL=1h") {
+					t.Error("cache missing")
+				}
+			case "shell":
+				// The jail pins a usable CLAUDE_CODE_SHELL (or none without a
+				// bash), so the launch keeps it and adds nothing; shell_test.go
+				// covers the assignment itself.
+				for _, entry := range launch.Env {
+					if strings.HasPrefix(entry, "CLAUDE_CODE_SHELL=") {
+						t.Errorf("inherited shell overridden by %q", entry)
+					}
+				}
+			case "systemPrompt":
+				if parsed.PromptFile != prompt {
+					t.Errorf("prompt=%q", parsed.PromptFile)
+				}
+			case "nativeCursor":
+				if parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"] != "1" {
+					t.Error("cursor missing")
+				}
+			case "maxSubagentSpawnDepth":
+				if parsed.SettingsEnv["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] != "8" {
+					t.Error("depth missing")
+				}
+			case "maxConcurrentSubagents":
+				if parsed.SettingsEnv["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] != "3" {
+					t.Error("concurrency missing")
+				}
+			case "webSearchesPerSession":
+				if parsed.SettingsEnv["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] != "9007199254740991" {
+					t.Error("web cap missing")
+				}
+			case "autoCompactWindow":
+				if parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "100000" {
+					t.Error("auto compact window missing")
+				}
+			case "tmuxTruecolor":
+				if parsed.SettingsEnv["CLAUDE_CODE_TMUX_TRUECOLOR"] != "1" {
+					t.Error("truecolor missing")
+				}
+			case "noFlicker":
+				if parsed.SettingsEnv["CLAUDE_CODE_NO_FLICKER"] != "1" {
+					t.Error("no-flicker missing")
+				}
+			case "agentTeams":
+				if parsed.SettingsEnv["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] != "0" {
+					t.Error("agent teams missing")
+				}
+			case "functionHooks":
+				if parsed.SettingsEnv["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"] != "1" {
+					t.Error("function hooks missing")
+				}
+			case "outputStyle":
+				if parsed.Settings["outputStyle"] != "default" {
+					t.Error("output style missing")
+				}
+			case "theme":
+				if parsed.Settings["theme"] != "dark" {
+					t.Error("theme missing")
+				}
+			case "cleanupPeriodDays":
+				if parsed.Settings["cleanupPeriodDays"] != float64(36500) {
+					t.Error("cleanup missing")
+				}
+			case "hooks":
+				if len(parsed.Hooks) != 11 {
+					t.Errorf("hooks=%d", len(parsed.Hooks))
+				}
+				for _, hook := range parsed.Hooks {
+					if hook.Name == "" {
+						t.Errorf("unnamed hook: %#v", hook)
+					}
+				}
+			case "statusLine", "subagentStatusLine":
+				if parsed.Settings[knob.Name] == nil {
+					t.Error("status line missing")
+				}
+			case "mcp":
+				assertProfessorMCP(t, home, parsed.MCPConfig)
+			case "permissionMode":
+				if !parsed.Autonomy {
+					t.Error("autonomy missing")
+				}
+			case "model":
+				if parsed.Model != "opus" {
+					t.Errorf("model=%q", parsed.Model)
+				}
+			case "effort":
+				if parsed.Effort != "high" {
+					t.Errorf("effort=%q", parsed.Effort)
+				}
+			case "sessionID":
+				if parsed.SessionID != "S" {
+					t.Errorf("session=%q", parsed.SessionID)
+				}
+			case "resume":
+				if parsed.Resume != "R" {
+					t.Errorf("resume=%q", parsed.Resume)
+				}
+			case "fork":
+				if !parsed.Fork {
+					t.Error("fork missing")
+				}
+			case "name":
+				if parsed.Name != "named" {
+					t.Errorf("name=%q", parsed.Name)
+				}
+			default:
+				t.Errorf("uncovered knob %s", knob.Name)
+			}
+		})
+	}
+}
+
+func TestParseMalformedJSONNamesFlag(t *testing.T) {
+	for _, flag := range []string{"--settings", "--mcp-config"} {
+		_, err := Parse([]string{"claude", flag, "{"})
+		if err == nil || !strings.Contains(err.Error(), flag) {
+			t.Errorf("%s error=%v", flag, err)
+		}
+	}
+}
+
+func TestParseUnknownFlagPairs(t *testing.T) {
+	parsed, err := Parse([]string{"claude", "agents", "--format", "json", "--strange=yes", "tail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(parsed.Rest, []string{"agents", "--format", "json", "--strange=yes", "tail"}) {
+		t.Errorf("rest=%q", parsed.Rest)
+	}
+}
+
+func TestParseValueFlags(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		argv []string
+		want Parsed
+		err  string
+	}{
+		{
+			name: "equals form",
+			argv: []string{"claude", "--system-prompt-file=/srv/p.md", "--resume=abc", `--settings={"outputStyle":"default"}`},
+			want: Parsed{PromptFile: "/srv/p.md", Resume: "abc", Resumed: true, Settings: map[string]any{"outputStyle": "default"}},
+		},
+		{
+			name: "bare resume before flag",
+			argv: []string{"claude", "--resume", "--settings", `{"outputStyle":"default"}`},
+			want: Parsed{Resumed: true, Settings: map[string]any{"outputStyle": "default"}},
+		},
+		{name: "bare resume last", argv: []string{"claude", "--resume"}, want: Parsed{Resumed: true}},
+		{name: "required flag followed by flag", argv: []string{"claude", "--model", "--settings", "{}"}, err: "--model requires a value"},
+		{name: "required flag last", argv: []string{"claude", "--model"}, err: "--model requires a value"},
+		{name: "required empty equals value", argv: []string{"claude", "--system-prompt-file="}, err: "--system-prompt-file requires a value"},
+		{
+			name: "settings file",
+			argv: []string{"claude", "--settings", "/srv/claude/settings.json"},
+			want: Parsed{SettingsFile: "/srv/claude/settings.json", Rest: []string{"--settings", "/srv/claude/settings.json"}},
+		},
+		{
+			name: "settings file equals",
+			argv: []string{"claude", "--settings=/srv/settings.json"},
+			want: Parsed{SettingsFile: "/srv/settings.json", Rest: []string{"--settings", "/srv/settings.json"}},
+		},
+		{
+			name: "remaining equals flags",
+			argv: []string{"claude", "--session-id=sid", "--name=seat", "--model=sonnet", "--effort=high", "--mcp-config=/srv/mcp.json"},
+			want: Parsed{SessionID: "sid", Name: "seat", Model: "sonnet", Effort: "high", MCPConfig: "/srv/mcp.json"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := Parse(test.argv)
+			if test.err != "" {
+				if err == nil || err.Error() != test.err {
+					t.Fatalf("Parse error=%v, want %q", err, test.err)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("Parse=%#v, error=%v; want %#v", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestNewSessionIDIsV4(t *testing.T) {
+	id, err := NewSessionID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+		t.Errorf("id=%q", id)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestBootingRowJailedTSV is the red-first, gather-through-render proof for
@@ -179,6 +181,7 @@ func bootingRowsFromTSV(t *testing.T) map[string]string {
 // action.Dispatch's own terminal branch execs tmux directly — no zsh/eval
 // wrapper is needed for a TMUX= line).
 func TestBootingRowInteractivePickerJailed(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -194,7 +197,7 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 		scriptPath := filepath.Join(jail.root, "kill.sh")
 		script := "#!/bin/sh\n" + shellQuote(jail.binary) + " ls\n" +
 			"echo RC=$? > " + shellQuote(marker) + "\n"
-		if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		driverSocket := "driver-boot-kill-" + strconv.Itoa(os.Getpid())
@@ -252,7 +255,7 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 
 		scriptPath := filepath.Join(jail.root, "attach.sh")
 		script := "#!/bin/sh\nexec " + shellQuote(jail.binary) + " ls\n"
-		if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		driverSocket := "driver-boot-attach-" + strconv.Itoa(os.Getpid())
@@ -350,7 +353,7 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 	wrapper := "#!/bin/sh\nexec " + shellQuote(executable) +
 		" -test.run '^TestPFMAttachHelper$' -- \"$@\"\n"
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := os.WriteFile(binary, []byte(wrapper), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(wrapper), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(home, ".local", "bin") + string(os.PathListSeparator) +
@@ -363,7 +366,7 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 		"TMUX":             "",
 		"TMUX_TMPDIR":      root,
 		"PFM_HOME":         home,
-		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_CACHE_DB":     filepath.Join(root, "pfm-cache.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
 		"PFM_CODEX_ROOT":   codexHome,

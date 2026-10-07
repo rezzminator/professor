@@ -12,373 +12,355 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// updateConfigMigrationTestRuntime is updateRollbackTestRuntime, plus a
-// pre-split legacy config.json on disk and a runtime whose Config.Path names
-// it — the shape a host has right before the candidate's own `install --yes`
-// runs the v0.74.0 migration (config.json -> pfm.config.json) inside the
-// candidate process only.
-func updateConfigMigrationTestRuntime(
-	t *testing.T,
-) (runtime pfmconfig.Runtime, repo, legacyPath, migratedPath string, originalContent []byte) {
-	t.Helper()
-	runtime, repo = updateRollbackTestRuntime(t)
-	configDir := filepath.Join(runtime.Paths.Home, ".config", "pfm")
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
-		t.Fatal(err)
+func TestUpdateRollbackOwnedFiles(t *testing.T) {
+	const (
+		hooksBefore = "{\"hooks\":{}}\n"
+		hooksAfter  = "{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"pfm internal new-hook\"}]}]}}\n"
+		candidate   = "written by the candidate install\n"
+		operator    = "{\"operator\":\"saved while the update ran\"}\n"
+	)
+	for _, testcase := range []struct {
+		name            string
+		before          map[string]string
+		after           map[string]string
+		between         func(*testing.T, map[string]string)
+		want            map[string]string
+		removed         string
+		installDir      string
+		installRemoved  string
+		snapshotDir     string
+		symlink         bool
+		restored        string
+		residue         string
+		checkPriorState bool
+	}{
+		{
+			name:     "hook added on a new event",
+			before:   map[string]string{"hooks": hooksBefore},
+			after:    map[string]string{"hooks": hooksAfter},
+			restored: "hooks", checkPriorState: true,
+		},
+		{
+			name:           "candidate removes a preexisting file",
+			before:         map[string]string{"hooks": hooksBefore},
+			after:          map[string]string{"hooks": hooksBefore},
+			installRemoved: "hooks", restored: "hooks", checkPriorState: true,
+		},
+		{
+			name:  "files absent before the install",
+			after: map[string]string{"openCode": candidate, "mcpLedger": candidate, "hookLedger": candidate},
+		},
+		{
+			name: "registrations and config restored",
+			before: map[string]string{
+				"claudeRegistry": "{\"mcpServers\":{}}\n", "codexConfig": "model = \"operator\"\n",
+				"hookTrust": "{}\n", "config": "{\"version\":2}\n",
+			},
+			after: map[string]string{
+				"claudeRegistry": candidate, "codexConfig": candidate, "hookTrust": candidate, "config": candidate,
+			},
+		},
+		{
+			name: "rewritten after the install",
+			before: map[string]string{
+				"claudeRegistry": "{\"mcpServers\":{}}\n", "codexConfig": "model = \"operator\"\n",
+				"hookTrust": "{}\n", "config": "{\"version\":2}\n",
+			},
+			after: map[string]string{
+				"claudeRegistry": candidate, "codexConfig": candidate, "hookTrust": candidate, "config": candidate,
+			},
+			between: func(t *testing.T, paths map[string]string) {
+				path := paths["claudeRegistry"]
+				writeProjectFixtureFile(t, filepath.Dir(path), filepath.Base(path), operator)
+			},
+			want: map[string]string{"claudeRegistry": operator}, residue: "claudeRegistry",
+		},
+		{
+			name:   "removed after the install",
+			before: map[string]string{"codexConfig": "model = \"operator\"\n"},
+			after:  map[string]string{"codexConfig": candidate},
+			between: func(t *testing.T, paths map[string]string) {
+				if err := os.Remove(paths["codexConfig"]); err != nil {
+					t.Fatal(err)
+				}
+			},
+			removed: "codexConfig", residue: "codexConfig",
+		},
+		{
+			name:       "after-state unreadable",
+			before:     map[string]string{"codexConfig": "model = \"operator\"\n"},
+			after:      map[string]string{"codexConfig": candidate},
+			installDir: "codexConfig", residue: "codexConfig",
+		},
+		{
+			name:    "symlinked file",
+			before:  map[string]string{"hooks": hooksBefore},
+			after:   map[string]string{"hooks": hooksAfter},
+			symlink: true, restored: "hookTarget",
+		},
+		{
+			name:    "dangling symlinked file",
+			after:   map[string]string{"hooks": hooksAfter},
+			symlink: true,
+		},
+		{
+			name:        "a candidate path cannot be snapshotted",
+			snapshotDir: "hooks",
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			runtime, repo := updateRollbackTestRuntime(t)
+			home := runtime.Paths.Home
+			codexHome := filepath.Join(home, ".codex-1")
+			runtime.Config = pfmconfig.Config{
+				Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1")}},
+				CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
+			}
+			paths := map[string]string{
+				"hooks":          filepath.Join(codexHome, "hooks.json"),
+				"hookTarget":     filepath.Join(home, "dotfiles", "hooks.json"),
+				"codexConfig":    filepath.Join(codexHome, "config.toml"),
+				"hookTrust":      filepath.Join(codexHome, ".professor-hook-trust.json"),
+				"claudeRegistry": filepath.Join(home, ".cc", "1", ".claude.json"),
+				"config":         filepath.Join(home, "cfg", "pfm.config.json"),
+				"openCode":       installer.OpenCodeConfigPath(home),
+				"mcpLedger":      filepath.Join(installer.ManagedRoot(home), "mcp-ownership.json"),
+				"hookLedger":     filepath.Join(installer.ManagedRoot(home), "settings-hook-ownership.json"),
+			}
+			if _, ok := testcase.before["config"]; ok {
+				runtime.Config.Path, runtime.Config.Exists = paths["config"], true
+			}
+			for key, content := range testcase.before {
+				path := paths[key]
+				if testcase.symlink && key == "hooks" {
+					path = paths["hookTarget"]
+				}
+				writeProjectFixtureFile(t, filepath.Dir(path), filepath.Base(path), content)
+			}
+			if testcase.symlink {
+				for _, dir := range []string{codexHome, filepath.Dir(paths["hookTarget"])} {
+					if err := os.MkdirAll(dir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.Symlink(paths["hookTarget"], paths["hooks"]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if testcase.snapshotDir != "" {
+				if err := os.MkdirAll(paths[testcase.snapshotDir], 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var between func()
+			if testcase.between != nil {
+				between = func() { testcase.between(t, paths) }
+			}
+			installCalled := false
+			stderr := updateRollbackAfterInstall(t, runtime, repo, func() error {
+				installCalled = true
+				for key, content := range testcase.after {
+					path := paths[key]
+					writeProjectFixtureFile(t, filepath.Dir(path), filepath.Base(path), content)
+				}
+				if testcase.installRemoved != "" {
+					if err := os.Remove(paths[testcase.installRemoved]); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if testcase.installDir != "" {
+					path := paths[testcase.installDir]
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if between != nil {
+					return nil
+				}
+				return errors.New("injected install failure")
+			}, between, func() {
+				if testcase.checkPriorState {
+					if got, err := os.ReadFile(paths["hooks"]); err != nil || string(got) != hooksBefore {
+						t.Errorf("previous install sees hooks = %q, %v; want %q", got, err, hooksBefore)
+					}
+				}
+			})
+			for key := range testcase.after {
+				path := paths[key]
+				if key == testcase.installDir {
+					if info, err := os.Stat(path); err != nil || !info.IsDir() {
+						t.Errorf("%s after rollback = %v, %v; want the directory left as is", path, info, err)
+					}
+					continue
+				}
+				want, existed := testcase.before[key]
+				if override, ok := testcase.want[key]; ok {
+					want, existed = override, true
+				}
+				if key == testcase.removed {
+					existed = false
+				}
+				if !existed {
+					if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("%s after rollback: stat error = %v; want absent", path, err)
+					}
+					continue
+				}
+				if got, err := os.ReadFile(path); err != nil || string(got) != want {
+					t.Errorf("%s after rollback = %q, %v; want %q", path, got, err, want)
+				}
+			}
+			if testcase.restored != "" {
+				physical, err := filepath.EvalSymlinks(paths[testcase.restored])
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "pfm update: restored " + physical + " to its pre-update state"
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr = %q; want %q", stderr, want)
+				}
+			}
+			if testcase.residue != "" {
+				physicalHome, err := filepath.EvalSymlinks(home)
+				if err != nil {
+					t.Fatal(err)
+				}
+				relative, err := filepath.Rel(home, paths[testcase.residue])
+				if err != nil {
+					t.Fatal(err)
+				}
+				physical := filepath.Join(physicalHome, relative)
+				want := "MCP registration " + physical +
+					" changed after the update's install wrote it; left as is — reconcile it by hand"
+				if testcase.removed != "" {
+					want = "MCP registration " + physical +
+						" was removed after the update's install wrote it; reconcile it by hand"
+				} else if testcase.installDir != "" {
+					want = physical
+				}
+				if !strings.Contains(stderr, "rollback residue: ") || !strings.Contains(stderr, want) {
+					t.Errorf("stderr = %q; want rollback residue naming %q", stderr, want)
+				}
+			}
+			if testcase.symlink {
+				if info, err := os.Lstat(paths["hooks"]); err != nil || info.Mode()&os.ModeSymlink == 0 {
+					t.Errorf("hooks.json after rollback = %v, %v; want its symlink preserved", info, err)
+				}
+			}
+			if testcase.snapshotDir != "" {
+				if installCalled || !strings.Contains(stderr, "snapshot update-owned files before install: ") {
+					t.Errorf(
+						"install called = %v, stderr = %q; want snapshot failure before install",
+						installCalled,
+						stderr,
+					)
+				}
+				canonical := filepath.Join(home, ".local", "bin", "pfm")
+				if got, err := os.ReadFile(canonical); err != nil || string(got) != "old\n" {
+					t.Errorf("owned binary after snapshot failure = %q, %v; want old", got, err)
+				}
+			}
+		})
 	}
-	legacyPath = filepath.Join(configDir, pfmconfig.LegacyFileName)
-	migratedPath = filepath.Join(configDir, pfmconfig.FileName)
-	originalContent = []byte(`{"version":2,"theme":"tokyo-night"}`)
-	if err := os.WriteFile(legacyPath, originalContent, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runtime.Config = pfmconfig.Config{Path: legacyPath, Exists: true}
-	return runtime, repo, legacyPath, migratedPath, originalContent
 }
 
-// TestUpdateCandidateDoctorReceivesTheMigratedConfigPath is a REGRESSION
-// test for issue #24 finding 4 (M3 change C): the candidate's own
-// `install --yes` renames config.json -> pfm.config.json INSIDE the
-// candidate process only, so the updater's runtime.Config.Path (resolved
-// before the install ran) names a file that no longer exists by the time the
-// post-install doctor runs. Unfixed, the gating doctor is handed the stale
-// legacy path and judges the host entirely on defaults.
-func TestUpdateCandidateDoctorReceivesTheMigratedConfigPath(t *testing.T) {
-	runtime, repo, legacyPath, migratedPath, originalContent := updateConfigMigrationTestRuntime(t)
-
-	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
-	t.Cleanup(func() {
-		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
-	})
-	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
-	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		// Simulates the candidate's install migrating the pre-split config.
-		return os.Rename(legacyPath, migratedPath)
-	}
-	var capturedConfigPath string
-	updateRunDoctor = func(_ context.Context, _ string, _ pfmconfig.Runtime, configPath string, _ bool, _, _ io.Writer) (doctorOutcome, error) {
-		capturedConfigPath = configPath
-		return doctorOutcome{}, nil
-	}
-	stubUpdateBaselineDoctor(t, doctorOutcome{})
-
-	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf("Run() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if capturedConfigPath != migratedPath {
-		t.Fatalf("candidate doctor --config=%q, want the migrated path %q", capturedConfigPath, migratedPath)
-	}
-	if !strings.Contains(stdout.String(), "config migrated by the update: "+legacyPath+" → "+migratedPath) {
-		t.Fatalf("stdout=%q, want the config-migrated note", stdout.String())
-	}
-	if got, err := os.ReadFile(migratedPath); err != nil || !bytes.Equal(got, originalContent) {
-		t.Fatalf(
-			"migrated config=%q err=%v, want the original bytes %q untouched by this test",
-			got,
-			err,
-			originalContent,
-		)
-	}
-}
-
-// TestUpdateRollbackRestoresTheConfigFilesTheMigrationRenamed is a
-// REGRESSION test for issue #24 finding 3 (M3 change D): when the candidate
-// doctor fails and the update rolls back, the config files the candidate's
-// own install renamed must be restored BEFORE the previous release's
-// installer runs — otherwise that installer's `install --yes --config
-// <legacy path>` finds nothing there, converges on defaults, and tears down
-// the MCP launch agent it reads as "unconfigured". Unfixed: pfm.config.json
-// remains and config.json stays absent after rollback.
-func TestUpdateRollbackRestoresTheConfigFilesTheMigrationRenamed(t *testing.T) {
-	runtime, repo, legacyPath, migratedPath, originalContent := updateConfigMigrationTestRuntime(t)
-
-	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
-	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
-	t.Cleanup(func() {
-		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
-		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
-	})
-	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
-	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		return os.Rename(legacyPath, migratedPath)
-	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
-	}
-	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		return nil
-	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{}, nil
-	}
-
-	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf("Run() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
-	}
-	if got, err := os.ReadFile(legacyPath); err != nil || !bytes.Equal(got, originalContent) {
-		t.Fatalf("config.json after rollback=%q err=%v, want the original bytes %q restored", got, err, originalContent)
-	}
-	if _, err := os.Stat(migratedPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("pfm.config.json after rollback: stat err=%v, want it gone (the migration's rename undone)", err)
-	}
-	physicalLegacyPath, err := filepath.EvalSymlinks(legacyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stderr.String(), "restored "+physicalLegacyPath+" to its pre-update state") {
-		t.Fatalf("stderr=%q, want the restored-config-file report", stderr.String())
-	}
-}
-
-// TestUpdateRollbackInstallSeesAnExistingConfigPath is a REGRESSION test for
-// issue #24 finding 3 (M3 change D, the door-table guarantee): by the time
-// the previous release's installer runs `install --yes --config
-// <runtime.Config.Path>`, that file must already exist again — restoreUpdateHookFiles
-// (D) runs before updateRollbackInstall specifically so the old binary never
-// converges on defaults. Unfixed, the config file the migration renamed is
-// never in the snapshot set, so it is still absent here.
-func TestUpdateRollbackInstallSeesAnExistingConfigPath(t *testing.T) {
-	runtime, repo, legacyPath, migratedPath, _ := updateConfigMigrationTestRuntime(t)
-
-	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
-	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
-	t.Cleanup(func() {
-		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
-		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
-	})
-	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
-	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		return os.Rename(legacyPath, migratedPath)
-	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
-	}
-	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	rollbackInstallSawConfig := false
-	updateRollbackInstall = func(_ context.Context, _, _, _ string, rollbackRuntime pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
-		if _, err := os.Stat(rollbackRuntime.Config.Path); err == nil {
-			rollbackInstallSawConfig = true
-		}
-		return nil
-	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{}, nil
-	}
-
-	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf("Run() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
-	}
-	if !rollbackInstallSawConfig {
-		t.Fatalf("rollback install ran with runtime.Config.Path=%q missing from disk", runtime.Config.Path)
-	}
-}
-
-// TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError is a
-// REGRESSION test for issue #24 F2: updateConfigPathAfterInstall used to
-// treat ANY os.Stat error on the original config path — not only
-// fs.ErrNotExist — as "gone", falling through to the migrated-path probe
-// and then to the "config is gone" note, silently handing the candidate
-// doctor an empty configPath. A non-ENOENT stat error (here: the config's
-// parent directory loses execute permission, so the kernel refuses to even
-// traverse into it) must surface as an error the caller treats as a failed
-// update step, never as a path handoff.
-func TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory permissions")
-	}
-	runtime := updateTestRuntime(t)
-	parent := filepath.Join(t.TempDir(), "locked")
-	if err := os.MkdirAll(parent, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	original := filepath.Join(parent, pfmconfig.FileName)
-	if err := os.WriteFile(original, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(parent, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chmod(parent, 0o700); err != nil {
-			t.Errorf("restore parent permissions: %v", err)
-		}
-	})
-	runtime.Config = pfmconfig.Config{Path: original, Exists: true}
-
-	path, note, err := updateConfigPathAfterInstall(runtime)
-	if err == nil {
-		t.Fatalf(
-			"updateConfigPathAfterInstall(...) = (%q, %q, nil), want a non-nil error for a non-ENOENT stat failure",
-			path,
-			note,
-		)
-	}
-	if !strings.Contains(err.Error(), original) {
-		t.Fatalf("error=%v, want it to name the path %q", err, original)
-	}
-}
-
-// updateRollbackAfterInstall runs a real Run whose candidate install is
-// install and whose gating doctor runs between and then fails, so the update
-// rolls back; it returns stderr.
 func updateRollbackAfterInstall(
 	t *testing.T,
 	runtime pfmconfig.Runtime,
 	repo string,
 	install func() error,
-	between func(),
+	between, beforeRollbackInstall func(),
 ) string {
 	t.Helper()
-	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldBuild, oldInstall, oldDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
 	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
 	t.Cleanup(func() {
-		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldDoctor
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return install()
 	}
 	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		between()
-		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
+		if between != nil {
+			between()
+		}
+		return doctorOutcome{Exit: 3, Failures: 1}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+		beforeRollbackInstall()
 		return nil
 	}
 	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf("Run() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 5 {
+		t.Fatalf("Run() code = %d, stdout = %q, stderr = %q; want 5", code, stdout.String(), stderr.String())
 	}
 	return stderr.String()
 }
 
-func writeUpdateFixtureFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// The MCP registration files install rewrites — a Codex config.toml, the
-// OpenCode opencode.jsonc, a Claude registry, ~/.mcp.json and the MCP
-// ownership ledger — are snapshotted: rollback restores each one untouched
-// since install to its pre-update bytes (removing one absent before), and
-// names one changed since install as an MCP registration left as is.
-func TestUpdateRollbackRestoresTheMCPRegistrationsTheInstallRewrote(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	runtime, repo := updateRollbackTestRuntime(t)
-	home := runtime.Paths.Home
-	codexHome := filepath.Join(home, ".codex")
-	runtime.Config = pfmconfig.Config{
-		Accounts:      []pfmconfig.Account{{ID: 1, Implicit: true}},
-		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
-	}
-	codexConfig := filepath.Join(codexHome, "config.toml")
-	claudeRegistry := filepath.Join(home, ".claude.json")
-	mcpJSON := filepath.Join(home, ".mcp.json")
-	openCode := installer.OpenCodeConfigPath(home)
-	ledger := filepath.Join(home, ".local", "share", "pfm", "install", "mcp-ownership.json")
-	before := map[string]string{
-		codexConfig:    "model = \"operator\"\n",
-		claudeRegistry: "{\"mcpServers\":{}}\n",
-		mcpJSON:        "{\"mcpServers\":{\"operator\":{}}}\n",
-	}
-	for path, content := range before {
-		writeUpdateFixtureFile(t, path, content)
-	}
-	stderr := updateRollbackAfterInstall(t, runtime, repo, func() error {
-		for _, path := range []string{codexConfig, claudeRegistry, mcpJSON, openCode, ledger} {
-			writeUpdateFixtureFile(t, path, "written by the candidate install\n")
-		}
-		return nil
-	}, func() {
-		writeUpdateFixtureFile(t, claudeRegistry, "{\"operator\":\"saved while the update ran\"}\n")
-	})
-	for _, path := range []string{codexConfig, mcpJSON} {
-		if got, err := os.ReadFile(path); err != nil || string(got) != before[path] {
-			t.Fatalf("%s after rollback = %q, %v; want its pre-update bytes %q", path, got, err, before[path])
-		}
-	}
-	for _, path := range []string{openCode, ledger} {
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("%s after rollback: stat err=%v, want it removed (absent before the update)", path, err)
-		}
-	}
-	got, err := os.ReadFile(claudeRegistry)
-	if err != nil || !strings.Contains(string(got), "saved while the update ran") {
-		t.Fatalf("Claude registry after rollback = %q, %v; want the concurrent edit kept", got, err)
-	}
-	physical, err := filepath.EvalSymlinks(claudeRegistry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "MCP registration " + physical +
-		" changed after the update's install wrote it; left as is — reconcile it by hand"
-	if !strings.Contains(stderr, want) {
-		t.Fatalf("stderr=%q, want %q", stderr, want)
-	}
-}
-
-// A config JSON changed after the update's install is named as a config file,
-// not as a hook file.
-func TestUpdateRollbackResidueNamesAChangedConfigFileAsAConfigFile(t *testing.T) {
-	runtime, repo, legacyPath, migratedPath, _ := updateConfigMigrationTestRuntime(t)
-	stderr := updateRollbackAfterInstall(t, runtime, repo, func() error {
-		return os.Rename(legacyPath, migratedPath)
-	}, func() {
-		writeUpdateFixtureFile(t, migratedPath, "{\"version\":2,\"theme\":\"edited while the update ran\"}")
-	})
-	physical, err := filepath.EvalSymlinks(migratedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "config file " + physical +
-		" changed after the update's install wrote it; left as is — reconcile it by hand"
-	if !strings.Contains(stderr, want) {
-		t.Fatalf("stderr=%q, want %q", stderr, want)
-	}
-}
-
-// $HOME/.claude.json is rewritten by install even when no account wires it
-// (every account has its own ConfigDir): pfm's legacy entries there go. The
-// snapshot therefore covers it too, and rollback restores its pre-update bytes.
-func TestUpdateRollbackRestoresTheHomeClaudeRegistryNoAccountWires(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	runtime, repo := updateRollbackTestRuntime(t)
-	home := runtime.Paths.Home
-	runtime.Config = pfmconfig.Config{
-		Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1")}},
-	}
-	homeRegistry := filepath.Join(home, ".claude.json")
-	before := "{\"mcpServers\":{\"chat\":{\"command\":\"pfm\"}}}\n"
-	writeUpdateFixtureFile(t, homeRegistry, before)
-	updateRollbackAfterInstall(t, runtime, repo, func() error {
-		writeUpdateFixtureFile(t, homeRegistry, "{\"mcpServers\":{}}\n")
-		return nil
-	}, func() {})
-	if got, err := os.ReadFile(homeRegistry); err != nil || string(got) != before {
-		t.Fatalf("%s after rollback = %q, %v; want its pre-update bytes %q", homeRegistry, got, err, before)
+func TestUpdateRollbackPreservesReplacedObjects(t *testing.T) {
+	for _, kind := range []string{"symlink", "retargeted dangling link", "same-byte regular replacement"} {
+		t.Run(kind, func(t *testing.T) {
+			runtime := updateTestRuntime(t)
+			home := runtime.Paths.Home
+			path := filepath.Join(home, "owned.json")
+			target := filepath.Join(home, "candidate.json")
+			unrelated := filepath.Join(home, "operator.json")
+			runtime.Config.Path = path
+			if kind == "retargeted dangling link" {
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshots, err := snapshotUpdateOwnedFiles(runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("same bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			recordUpdateOwnedFilesAfter(snapshots)
+			if err := os.WriteFile(unrelated, []byte("same bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "same-byte regular replacement" {
+				if err := os.Rename(unrelated, path); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(unrelated, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = restoreUpdateOwnedFiles(snapshots, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "changed after the update") {
+				t.Errorf("rollback = %v; want replacement residue", err)
+			}
+			if raw, readErr := os.ReadFile(path); readErr != nil || string(raw) != "same bytes" {
+				t.Errorf("operator object = %q, %v; want preserved", raw, readErr)
+			}
+			if kind != "same-byte regular replacement" {
+				if raw, readErr := os.ReadFile(unrelated); readErr != nil || string(raw) != "same bytes" {
+					t.Errorf("unrelated target = %q, %v; want preserved", raw, readErr)
+				}
+			}
+		})
 	}
 }

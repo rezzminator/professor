@@ -22,11 +22,12 @@ func TestHeadlessPlansCarryTheEngineBinaryWord(t *testing.T) {
 		{"codex", pfmengine.Codex, "codex"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
+			home := t.TempDir()
 			plan, err := headlessWithTestConfig(HeadlessRequest{
 				Engine:         testCase.engine,
 				Name:           "worker",
 				CWD:            "/work/alpha",
-				Home:           "/home/tester",
+				Home:           home,
 				PrimaryAccount: 1,
 			})
 			if err != nil {
@@ -50,14 +51,15 @@ func TestHeadlessPlansCarryTheEngineBinaryWord(t *testing.T) {
 }
 
 func TestHeadlessForkCarriesTheEngineBinaryWord(t *testing.T) {
+	home := t.TempDir()
 	plan, err := HeadlessFork(HeadlessForkRequest{
 		Engine:         pfmengine.Claude,
 		SessionID:      "b1111111-1111-4111-8111-111111111111",
 		Name:           "fork",
 		CWD:            "/work/alpha",
-		Home:           "/home/tester",
+		Home:           home,
 		PrimaryAccount: 1,
-		Config:         testMachineConfig("/home/tester"),
+		Config:         testMachineConfig(home),
 	})
 	if err != nil {
 		t.Fatalf("HeadlessFork() = %v", err)

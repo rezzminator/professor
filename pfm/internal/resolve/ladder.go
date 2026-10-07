@@ -110,6 +110,9 @@ func (ladder Ladder) Resolve(
 		}
 		return SeatFromParts(socket, name, ladder.Env), 0, "", nil
 	}
+	// miss is the answer when every rung misses: a roster miss that names a
+	// dead chat says so instead of reading as no chat at all.
+	miss := fmt.Sprintf("target %q matched no live chat", name)
 	if ladder.Roster != nil {
 		seat, code, detail, err := ladder.Roster.ResolveRoster(ctx, name, options.RequiredEngine)
 		if err != nil {
@@ -121,6 +124,9 @@ func (ladder Ladder) Resolve(
 		case CodeAmbiguous:
 			return Seat{}, CodeAmbiguous, detail, nil
 		case CodeUnknown:
+			if detail != "" {
+				miss = detail
+			}
 		default:
 			return Seat{}, CodeUndelivered, "", fmt.Errorf(
 				"roster resolver returned unsupported code %d", code,
@@ -128,7 +134,7 @@ func (ladder Ladder) Resolve(
 		}
 	}
 	if ladder.Raw == nil {
-		return Seat{}, CodeUnknown, fmt.Sprintf("target %q matched no live chat", name), nil
+		return Seat{}, CodeUnknown, miss, nil
 	}
 	kinds := options.Kinds
 	if len(kinds) == 0 {
@@ -165,7 +171,7 @@ func (ladder Ladder) Resolve(
 			return Seat{}, CodeAmbiguous, outcome.Stderr, nil
 		}
 	}
-	return Seat{}, CodeUnknown, fmt.Sprintf("target %q matched no live chat", name), nil
+	return Seat{}, CodeUnknown, miss, nil
 }
 
 func (ladder Ladder) resolveSelf(ctx context.Context) (Seat, int, string, error) {

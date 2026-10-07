@@ -66,6 +66,7 @@ func TestAssertFetchableStrictRechecksDNSImmediatelyBeforeBrowserApproval(t *tes
 // hop earlier (.internal, .ts.net), or a 302 to an internal vault slips
 // through.
 func TestAssertFetchableAppliesTheSuffixList(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{
 		"http://vault.internal/secret",
 		"http://home.ts.net/admin",

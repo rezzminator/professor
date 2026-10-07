@@ -14,6 +14,7 @@ import (
 // pins is the proof this site can take: wrapping an already-wrapped client
 // returns the exact same Transport, never a second layer.
 func TestNewDOHResolverWrapsItsClient(t *testing.T) {
+	t.Parallel()
 	resolver := newDOHResolver()
 	rewrapped := obs.WrapClient(resolver.client)
 	if rewrapped.Transport != resolver.client.Transport {

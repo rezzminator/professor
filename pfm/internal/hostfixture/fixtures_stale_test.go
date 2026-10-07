@@ -48,7 +48,7 @@ func TestStaleArtifactsStalePIDNamesAnAlreadyExitedProcess(t *testing.T) {
 func TestStaleArtifactsWALAndReloadLockExistAtTheExpectedPaths(t *testing.T) {
 	fixture := StaleArtifacts(t)
 
-	if got, want := fixture.WALFile, fixture.Values.FleetDB+"-wal"; got != want {
+	if got, want := fixture.WALFile, fixture.Values.StateDB+"-wal"; got != want {
 		t.Fatalf("WALFile = %q, want %q", got, want)
 	}
 	if _, err := os.Stat(fixture.WALFile); err != nil {

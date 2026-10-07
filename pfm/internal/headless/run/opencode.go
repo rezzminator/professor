@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -278,7 +279,9 @@ func openCodeServerHealthy(
 ) (healthy bool, probeErr error) {
 	attemptCtx, cancel := context.WithTimeout(ctx, openCodeProbeTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, address+"/global/health", http.NoBody)
+	request, err := http.NewRequestWithContext(
+		obs.Presence(attemptCtx), http.MethodGet, address+"/global/health", http.NoBody,
+	)
 	if err != nil {
 		return false, fmt.Errorf("build OpenCode health request: %w", err)
 	}
@@ -297,14 +300,18 @@ func openCodeServerHealthy(
 			probeErr = errors.Join(probeErr, fmt.Errorf("close OpenCode health response: %w", closeErr))
 		}
 	}()
-	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 	if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
 		return true, nil
 	}
 	if response.StatusCode >= http.StatusInternalServerError {
 		return false, nil
 	}
-	return false, fmt.Errorf("OpenCode health request failed with HTTP status %d", response.StatusCode)
+	return false, fmt.Errorf(
+		"OpenCode health request failed with HTTP status %d: %s",
+		response.StatusCode,
+		openCodeRefusalReason(responseBody),
+	)
 }
 
 // openCodeToolCatalog forces OpenCode's ToolRegistry to initialize. The
@@ -324,7 +331,7 @@ func openCodeToolCatalog(
 	query := endpoint.Query()
 	query.Set("directory", cwd)
 	endpoint.RawQuery = query.Encode()
-	request, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, endpoint.String(), http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(attemptCtx), http.MethodGet, endpoint.String(), http.NoBody)
 	if err != nil {
 		return false, fmt.Errorf("build OpenCode tool catalog request: %w", err)
 	}
@@ -347,14 +354,18 @@ func openCodeToolCatalog(
 		return false, errors.New("OpenCode tool catalog endpoint is unavailable")
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		if response.StatusCode >= http.StatusInternalServerError {
 			return false, fmt.Errorf(
-				"OpenCode tool catalog request failed with HTTP status %d after server became healthy",
-				response.StatusCode,
+				"OpenCode tool catalog request failed with HTTP status %d after server became healthy: %s",
+				response.StatusCode, openCodeRefusalReason(responseBody),
 			)
 		}
-		return false, fmt.Errorf("OpenCode tool catalog request failed with HTTP status %d", response.StatusCode)
+		return false, fmt.Errorf(
+			"OpenCode tool catalog request failed with HTTP status %d: %s",
+			response.StatusCode,
+			openCodeRefusalReason(responseBody),
+		)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
@@ -490,16 +501,48 @@ func openCodeJSON(
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return nil, fmt.Errorf(
-			"OpenCode API %s %s failed with HTTP status %d",
+			"OpenCode API %s %s failed with HTTP status %d: %s",
 			method,
 			parsed.Path,
 			response.StatusCode,
+			openCodeRefusalReason(responseBody),
 		)
 	}
 	if len(responseBody) == 0 && method != http.MethodDelete {
 		return nil, fmt.Errorf("OpenCode API %s %s returned an empty response", method, parsed.Path)
 	}
 	return responseBody, nil
+}
+
+func openCodeRefusalReason(body []byte) string {
+	reason := strings.TrimSpace(string(body))
+	if reason == "" {
+		return "(empty response body)"
+	}
+	var parsed struct {
+		Data struct {
+			Message string `json:"message"`
+		} `json:"data"`
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if json.Unmarshal(body, &parsed) == nil {
+		for _, candidate := range []string{parsed.Data.Message, parsed.Message, parsed.Error} {
+			if strings.TrimSpace(candidate) != "" {
+				reason = candidate
+				break
+			}
+		}
+	}
+	reason = strings.Join(strings.Fields(reason), " ")
+	if len(reason) <= 512 {
+		return reason
+	}
+	cut := 512
+	for cut > 0 && !utf8.RuneStart(reason[cut]) {
+		cut--
+	}
+	return reason[:cut] + "…"
 }
 
 func openCodeModelReference(model string) (map[string]string, error) {

@@ -55,62 +55,6 @@ func DetectKind(source string) string {
 	return kindHTML
 }
 
-// SniffKind mirrors detect._sniff_kind. Empty string means the response is
-// explicitly HTML/text or has no recognizable non-text format.
-func SniffKind(contentType string, head []byte) string {
-	ct := baseContentType(contentType)
-	switch {
-	case ct == mediaTypePDF:
-		return kindPDF
-	case ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-		return kindDOCX
-	case ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		return kindXLSX
-	case ct == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-		return kindPPTX
-	case ct == "application/epub+zip":
-		return kindEPUB
-	case ct == "application/zip", ct == "application/x-zip-compressed", ct == "application/x-zip":
-		return kindZIP
-	case ct == "application/x-7z-compressed":
-		return kind7Z
-	case ct == "application/x-rar-compressed", ct == "application/vnd.rar":
-		return kindRAR
-	case ct == "application/x-tar",
-		ct == "application/gzip",
-		ct == "application/x-gzip",
-		ct == "application/x-bzip2",
-		ct == "application/x-xz":
-		return kindTAR
-	case strings.Contains(ct, "openxmlformats-officedocument"):
-		switch {
-		case strings.Contains(ct, "wordprocessingml"):
-			return kindDOCX
-		case strings.Contains(ct, "spreadsheetml"):
-			return kindXLSX
-		case strings.Contains(ct, "presentationml"):
-			return kindPPTX
-		default:
-			return kindZIP
-		}
-	case strings.HasPrefix(ct, "image/"):
-		return kindImage
-	case ct == mediaTypeJSON, ct == "text/json", ct == "application/ld+json":
-		return kindJSON
-	case ct == "text/csv", ct == "application/csv":
-		return kindCSV
-	case ct == mediaTypeHTML,
-		ct == mediaTypePlain,
-		ct == mediaTypeXHTML,
-		ct == mediaTypeXML,
-		ct == mediaTypeTextXML,
-		ct == mediaTypeMarkdown:
-		return ""
-	default:
-		return SniffMagic(head)
-	}
-}
-
 // SniffMagic mirrors detect.sniff_magic. Images intentionally collapse to the
 // generic image kind here; the transport classifier can refine by extension or
 // exact image content type when it needs a cache suffix.

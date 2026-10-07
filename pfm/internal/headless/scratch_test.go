@@ -1,11 +1,13 @@
 package headless
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -136,5 +138,81 @@ func TestPreparedScratchDirResolutionFailureIsAnErrorNotAGuess(t *testing.T) {
 			cwd,
 			statErr,
 		)
+	}
+}
+
+// A Codex seat writes commentary between the tool calls of one turn, so an
+// assistant entry newest is not a finished exchange: only the rollout's
+// task_complete or turn_aborted ends the turn. Claude, and a Codex rollout
+// holding no turn record, keep the newest-entry rule.
+func TestReadLatestExchangeHoldsACodexTurnUntilItsEndRecord(t *testing.T) {
+	midTurn := []string{
+		codexTurnStartLine,
+		codexUserLine,
+		codexToolLine,
+		codexSaid("checking the next file"),
+		codexToolLine,
+	}
+	commentary := append(append([]string{}, midTurn[:4]...), codexToolLine, codexSaid("still looking"))
+	for _, testCase := range []struct {
+		name     string
+		engine   pfmengine.ID
+		lines    []string
+		complete bool
+	}{
+		{
+			name:     "codex commentary between tool calls is mid-turn",
+			engine:   pfmengine.Codex,
+			lines:    commentary,
+			complete: false,
+		},
+		{
+			name:     "codex task_complete ends the turn",
+			engine:   pfmengine.Codex,
+			lines:    append(append([]string{}, commentary...), codexTurnCompleteLine),
+			complete: true,
+		},
+		{
+			name:     "codex turn_aborted ends the turn",
+			engine:   pfmengine.Codex,
+			lines:    append(append([]string{}, commentary...), codexAbortLine),
+			complete: true,
+		},
+		{
+			name:     "codex tool call newest stays partial",
+			engine:   pfmengine.Codex,
+			lines:    midTurn,
+			complete: false,
+		},
+		{
+			name:     "codex without turn records keeps the newest-entry rule",
+			engine:   pfmengine.Codex,
+			lines:    []string{codexUserLine, codexToolLine, codexSaid("answered")},
+			complete: true,
+		},
+		{
+			name:     "claude is unchanged",
+			engine:   pfmengine.Claude,
+			lines:    []string{user("hello"), tool("Read"), assistant("answered")},
+			complete: true,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rollout.jsonl")
+			if err := os.WriteFile(path, []byte(strings.Join(testCase.lines, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			exchange, found, err := readLatestExchange(context.Background(), Chat{
+				Name:   "seat",
+				Engine: testCase.engine,
+				Path:   path,
+			})
+			if err != nil || !found {
+				t.Fatalf("readLatestExchange() found=%v err=%v, want the exchange", found, err)
+			}
+			if exchange.complete != testCase.complete {
+				t.Fatalf("readLatestExchange().complete = %v, want %v", exchange.complete, testCase.complete)
+			}
+		})
 	}
 }

@@ -17,19 +17,28 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+type stdioTestRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip stdioTestRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
 
 // A client holds a stdio server's input open for the whole session, so a read
 // on it never returns. Ending the context must still end RunStdio: the
@@ -62,7 +71,10 @@ func stdioTestConfigurePort(t *testing.T, port int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := pfmconfig.ResolvePath(home)
+	path, err := pfmconfig.ResolvePath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -410,6 +422,89 @@ func TestRunStdioNamesAbsentDaemonFallback(t *testing.T) {
 		if !strings.Contains(line, part) {
 			t.Errorf("absent fallback warning %q does not name %q", line, part)
 		}
+	}
+}
+
+func TestRunStdioNamesUnresponsiveDaemonFallback(t *testing.T) {
+	shortenDaemonProbeTimeout(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := listener.Close(); closeErr != nil {
+			t.Errorf("close silent listener: %v", closeErr)
+		}
+	})
+	port := listener.Addr().(*net.TCPAddr).Port
+	stdioTestConfigurePort(t, port)
+
+	var warnings bytes.Buffer
+	local := stdioTestService("local", &warnings)
+	address := listener.Addr().String()
+	if marker := stdioTestRun(t, local, address).Message; marker != "local" {
+		t.Fatalf("unresponsive daemon marker = %q, want in-process local marker", marker)
+	}
+	line := warnings.String()
+	assertNoProxyMarker(t, local)
+	for _, part := range []string{"daemon unresponsive at " + address + " (", "; using in-process MCP; "} {
+		if !strings.Contains(line, part) {
+			t.Errorf("unresponsive fallback warning %q does not name %q", line, part)
+		}
+	}
+	if strings.Contains(line, "daemon absent") || strings.Contains(line, "foreign service") {
+		t.Fatalf("unresponsive fallback warning used another outcome: %q", line)
+	}
+}
+
+func TestSendWithRetryRetriesUnresponsiveReplayProbe(t *testing.T) {
+	shortenDaemonProbeTimeout(t)
+	_, recorder := obs.Test(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := listener.Close(); closeErr != nil {
+			t.Errorf("close silent listener: %v", closeErr)
+		}
+	})
+	address := listener.Addr().String()
+	posts := 0
+	proxy := &stdioProxy{
+		address:  address,
+		endpoint: "http://" + address + pfmconfig.MCPPathProfessor,
+		warnings: io.Discard,
+		client: &http.Client{Transport: stdioTestRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			posts++
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		})},
+		clock:                   clock.Real,
+		retryWindow:             250 * time.Millisecond,
+		retryDelay:              5 * time.Millisecond,
+		expectedRuntimeIdentity: "opaque",
+	}
+	_, err = proxy.sendWithRetry(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`), true)
+	if !errors.Is(err, ErrDaemonUnresponsive) || errors.Is(err, ErrDaemonAbsent) {
+		t.Fatalf("replay probe error = %v, want wrapped unresponsive timeout", err)
+	}
+	want := "pfm MCP daemon " + address + " held its port without answering pfm's status probe for 250ms; stop the process listening there ("
+	if !strings.HasPrefix(err.Error(), want) ||
+		!strings.Contains(err.Error(), "lsof -iTCP@"+address+" -sTCP:LISTEN") ||
+		strings.Contains(err.Error(), "pfm mcp serve") {
+		t.Fatalf("replay probe remedy = %q, want occupied-port remedy starting %q", err, want)
+	}
+	if posts != 1 {
+		t.Fatalf("POST attempts = %d, want only the original before timed-out probes", posts)
+	}
+	probes := 0
+	for _, record := range recorder.Records() {
+		if host, found := record.Field("host"); found && host == address {
+			probes++
+		}
+	}
+	if probes < 2 {
+		t.Fatalf("status probes = %d, want retries inside the retry window: %s", probes, recorder.Raw())
 	}
 }
 

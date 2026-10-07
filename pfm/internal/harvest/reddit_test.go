@@ -16,6 +16,7 @@ import (
 )
 
 func TestRedditThreadExtractorRendersTheTreeAndNamesEveryGap(t *testing.T) {
+	t.Parallel()
 	doc, err := html.Parse(strings.NewReader(wallFixture(t, "reddit-thread-rendered.html")))
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +69,7 @@ func TestRedditThreadExtractorRendersTheTreeAndNamesEveryGap(t *testing.T) {
 // the ladder spends the browser rung — skipping the readers, which cannot load
 // more — and the fuller browser render wins.
 func TestRedditSSRPageEscalatesToTheBrowserRung(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{
 		html:      wallFixture(t, "reddit-thread-rendered.html"),
 		status:    http.StatusOK,
@@ -92,6 +94,7 @@ func TestRedditSSRPageEscalatesToTheBrowserRung(t *testing.T) {
 }
 
 func TestRedditPartialPageIsKeptAndFlaggedWhenTheBrowserCannotDoBetter(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		browser *bool
@@ -137,6 +140,7 @@ func TestRedditPartialPageIsKeptAndFlaggedWhenTheBrowserCannotDoBetter(t *testin
 // first card rendered as a comment-less "thread", flagged partial against
 // that card's comment count.
 func TestRedditListingPageIsNotReadAsAThread(t *testing.T) {
+	t.Parallel()
 	listing := `<html><body><main><shreddit-feed>` +
 		`<article><shreddit-post permalink="/r/examplesub/comments/aaa111/first_card/" comment-count="40"` +
 		` post-title="First card title" subreddit-prefixed-name="r/examplesub"` +
@@ -181,6 +185,7 @@ func redditThreadHTML(stated int, bodies []string, loader bool) string {
 // marker and no gap list, so it is SHORTER than the flagged page — it must
 // still win, never lose to the incomplete artifact on length.
 func TestRedditCompleteBrowserRenderBeatsTheFlaggedPage(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	bodies := []string{long, long, long}
 	spy := &browserSpyConverter{
@@ -201,6 +206,7 @@ func TestRedditCompleteBrowserRenderBeatsTheFlaggedPage(t *testing.T) {
 // TestRedditSearchLinkFilterKeepsOtherDomainsLinks: only Reddit's own search
 // links render as bare text; a host merely ending in "reddit.com" keeps its link.
 func TestRedditSearchLinkFilterKeepsOtherDomainsLinks(t *testing.T) {
+	t.Parallel()
 	page := redditThreadHTML(1, []string{
 		`See <a href="https://notreddit.com/search?q=tides">a search elsewhere</a> and ` +
 			`<a href="https://www.reddit.com/search/?q=tides">tides</a>.`,
@@ -228,6 +234,7 @@ func TestRedditSearchLinkFilterKeepsOtherDomainsLinks(t *testing.T) {
 // without spending the browser or the readers. A thread with a loader Go
 // failed to follow, and a generic page the recall gate flags, still escalate.
 func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	bodies := []string{long, long, long}
 	continueLink := `<a href="/r/examplesub/comments/ccc333/loader_thread/c0/">Continue this thread</a>` +
@@ -291,6 +298,7 @@ func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
 // floor catches JS shells and bot walls; a page the Reddit extractor claimed
 // is neither, so its artifact is stored at the HTTP rung, never dropped.
 func TestAShortCompleteRedditThreadIsStoredFromTheExtractor(t *testing.T) {
+	t.Parallel()
 	page := redditThreadHTML(1, []string{"Same here, thanks."}, false)
 	for _, tc := range []struct {
 		name    string
@@ -321,6 +329,7 @@ func TestAShortCompleteRedditThreadIsStoredFromTheExtractor(t *testing.T) {
 // "longer than the earlier rungs" test catch JS shells and walls; a render
 // the Reddit extractor claimed is neither, so it is stored, never dropped.
 func TestAShortCompleteRedditThreadRenderedByTheBrowserIsStored(t *testing.T) {
+	t.Parallel()
 	wallText := strings.Repeat("Your request has been blocked by network security. ", 12)
 	spy := &browserSpyConverter{
 		html:   redditThreadHTML(1, []string{"Same here, thanks."}, false),
@@ -574,6 +583,7 @@ func commentHeaders(markdown string) []string {
 // loader stood — so the thread renders whole, in thread order and nesting,
 // with the one comment Reddit does not serve named rather than flagged.
 func TestRedditLoadersAreFollowedIntoTheTree(t *testing.T) {
+	t.Parallel()
 	site := walkedThread()
 	h, pacing := site.harvester(t, &browserSpyConverter{}, browserOff())
 	result := h.FetchWithOptions(context.Background(), loaderThread, FetchOptions{Refresh: true})
@@ -655,6 +665,7 @@ func TestRedditLoadersAreFollowedIntoTheTree(t *testing.T) {
 // comment's page. Both are followed, page after page, until the deepest live
 // reply is in the tree; the hidden copies are never fetched.
 func TestRedditFoldedRepliesInLoadedBranchesAreFollowed(t *testing.T) {
+	t.Parallel()
 	charlie := "Charlie, at the loader answer's fold."
 	delta := "Delta, past the continued page's depth."
 	site := &redditSite{
@@ -709,6 +720,7 @@ func TestRedditFoldedRepliesInLoadedBranchesAreFollowed(t *testing.T) {
 // could load them, so the remainder is Reddit's unserved comments, named in
 // the count line — the artifact is not flagged partial for them.
 func TestRedditRemainderWithNoLoaderLeftIsNamedNotFlagged(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	spy := &browserSpyConverter{}
 	h := pageHarvester(t, redditThreadHTML(5, []string{long, long, long}, false), spy, browserOn())
@@ -730,6 +742,7 @@ func TestRedditRemainderWithNoLoaderLeftIsNamedNotFlagged(t *testing.T) {
 // of what Reddit does not serve. A page that is not that comment's tree at
 // all is still a failed link, flagged.
 func TestRedditContinuedThreadServedEmptyIsNotAGap(t *testing.T) {
+	t.Parallel()
 	empty := `<html><head><title>Reddit - The heart of the internet</title></head><body>` +
 		`<shreddit-post permalink="/r/examplesub/comments/ddd444/loader_walk/" comment-count="4"></shreddit-post>` +
 		`<shreddit-comment-tree-stats total-comments="0"></shreddit-comment-tree-stats>` +

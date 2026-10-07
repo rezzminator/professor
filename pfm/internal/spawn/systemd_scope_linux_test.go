@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestChatSpawnInsideUserServiceUsesTransientScope(t *testing.T) {
@@ -76,7 +78,7 @@ func TestChatSpawnInsideUserServiceRefusesWithoutSystemdRun(t *testing.T) {
 
 func writeExecutable(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

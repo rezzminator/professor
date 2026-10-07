@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type resolveJail struct {
@@ -51,7 +53,7 @@ func newResolveJail(t *testing.T) *resolveJail {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", jail.root)
 	t.Setenv("PFM_HOME", jail.home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -88,7 +90,7 @@ func (jail *resolveJail) script(t *testing.T, label string) string {
 	content := "#!/bin/sh\nprintf '%s\\n' " +
 		shellSingleQuote("🥇 │ 🔖 "+label+" │ status") +
 		"\nexec sleep 120\n"
-	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

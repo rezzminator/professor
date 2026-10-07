@@ -10,12 +10,26 @@ services:
       # Named explicitly, never left to stage order: pfm-sim shares this
       # Dockerfile, and a dev lane handed the Chrome image tests the wrong machine.
       target: pfm-dev
+      # infra/fence/image-key.sh computes this from the resolved build inputs;
+      # an ordinary builder leaves an unkeyed image for the next fence start.
+      labels:
+        pfm.fence.inputs: ${PFM_DEV_INPUTS_KEY:-unkeyed}
     image: professor-pfm-dev
     # A real machine has an init that reaps orphans; a bare container does
     # not, so a double-forked descendant lingers as a zombie and the
     # proc-jailer stress reads "still exists" for a process that is
     # already dead. tini closes that gap.
     init: true
+    # A hard memory ceiling: RAM and swap together never exceed 3 GB, so one
+    # fence cannot starve the host or the containers beside it. pfm-sim
+    # inherits it through extends.
+    mem_limit: 3g
+    memswap_limit: 3g
+    # Fence housekeeping (infra/fence/housekeeping.sh) removes only containers
+    # carrying this label: exited ones, and running ones past their age limit
+    # unless `iso shell` or the demo also set pfm.fence.long-lived=1.
+    labels:
+      pfm.fence: "1"
     volumes:
       # Read-only by law: files are edited on the HOST; the container only builds
       # and tests. Build/test outputs land in the cache volumes and container-HOME,
@@ -26,7 +40,7 @@ services:
       - ${PFM_DEV_GIT_COMMON:?set by dev.sh iso — the common Git directory}:/pfm-git-common:ro
       - pfm-dev-gocache:/root/.cache/go-build
       - pfm-dev-gomod:/root/go/pkg/mod
-      - pfm-dev-npm-cache:/root/.npm
+      - pfm-dev-lintcache:/root/.cache/golangci-lint
     working_dir: /worktree
     environment:
       PFM_DEV_FENCE: "1"
@@ -57,7 +71,23 @@ services:
       # cross-volume copy would cost the environment's full size per edit.
       UV_CACHE_DIR: /root/.local/state/pfm/harvest-python/.uv-cache
 
+# The caches are shared by bare name with plain `docker run -v` mounters, so
+# compose never creates or prefixes them (a compose-made fence_… copy is never
+# shared, and a volume compose did not create draws a warning on every run):
+# they are external, and dev.sh iso and infra/demo/up.sh create them first
+# (fence_volumes_ensure, infra/fence/housekeeping.sh). Bare-name mounters:
+#   pfm-dev-gocache    lanes/container.sh, release-rehearsal.sh
+#   pfm-dev-gomod      lanes/container.sh, release-rehearsal.sh
+#   pfm-dev-lintcache  docker-compose.yml (pfm-dev, pfm-sim by extends)
+#   pfm-lane-harvest-cache  lanes/root.sh (via lanes/container.sh)
+#   pfm-lane-uv-cache       lanes/root.sh (via lanes/container.sh)
 volumes:
   pfm-dev-gocache:
+    external: true
+    name: pfm-dev-gocache
   pfm-dev-gomod:
-  pfm-dev-npm-cache:
+    external: true
+    name: pfm-dev-gomod
+  pfm-dev-lintcache:
+    external: true
+    name: pfm-dev-lintcache

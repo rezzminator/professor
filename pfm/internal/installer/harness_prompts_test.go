@@ -9,10 +9,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // readHarnessPromptPart reads one part of the embedded tree through the same
@@ -21,7 +21,7 @@ import (
 // against a second on-disk twin.
 func readHarnessPromptPart(t *testing.T, relative string) []byte {
 	t.Helper()
-	content, err := readAsset(path.Join(harnessPromptsDirName, relative))
+	content, err := harnessprompts.ReadPart(relative)
 	if err != nil {
 		t.Fatalf("read harness prompt part %s: %v", relative, err)
 	}
@@ -29,6 +29,7 @@ func readHarnessPromptPart(t *testing.T, relative string) []byte {
 }
 
 func TestHarnessBaselineAssetPairIsCoherent(t *testing.T) {
+	t.Parallel()
 	for _, stem := range []string{"harness-original", "harness-opus"} {
 		t.Run(stem, func(t *testing.T) {
 			baselines := path.Join("claude", "baselines")
@@ -54,92 +55,69 @@ func TestHarnessBaselineAssetPairIsCoherent(t *testing.T) {
 // The tree's README is embedded so doctor can compare both trees whole, and
 // must never reach an operator's managed root as a staged asset.
 func TestHarnessPromptReadmeIsEmbeddedButNeverStaged(t *testing.T) {
-	if _, err := readAsset(path.Join(harnessPromptsDirName, harnessPromptReadme)); err != nil {
-		t.Fatalf("read embedded %s: %v", harnessPromptReadme, err)
+	t.Parallel()
+	if _, err := harnessprompts.ReadPart("README.md"); err != nil {
+		t.Fatalf("read embedded README.md: %v", err)
 	}
 	assets, err := assetFiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	staged := path.Join(harnessPromptsDirName, harnessPromptReadme)
-	parts := 0
 	for _, asset := range assets {
-		if _, isPart := harnessPromptAssetName(asset.path); !isPart {
-			continue
+		if asset.path == path.Join(harnessprompts.DirName, "README.md") {
+			t.Fatalf("README is listed as a staged asset")
 		}
-		parts++
-		if asset.path == staged {
-			t.Fatalf("%s is listed as a staged asset", staged)
-		}
-	}
-	if parts == 0 {
-		t.Fatal("no harness prompt parts listed among the staged assets")
 	}
 }
 
-// A fresh apply stages one prompt per engine, and each one is its three parts
-// with exactly one blank line at each seam. The expectation is spelled out
-// here from the embedded parts rather than taken from composeHarnessPrompt,
-// so a change to the joining rule has to be made twice to pass.
-func TestInstallStagesComposedHarnessPrompts(t *testing.T) {
+// Applying to a clean home leaves the clone's prompts in place and preserves
+// any pre-existing legacy directory owned by the operator.
+func TestInstallUsesClonePromptsWithoutStaging(t *testing.T) {
 	home := t.TempDir()
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(home, "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, configPath)
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: io.Discard,
+		Mode:          ModeApply,
+		Home:          home,
+		SourceRepo:    clone,
+		MCPConfigPath: configPath,
+		Runner:        &fakeRunner{},
+		Stdout:        io.Discard,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	head := string(readHarnessPromptPart(t, path.Join("share", "head.md")))
-	tail := string(readHarnessPromptPart(t, path.Join("share", "tail.md")))
-	for _, id := range harnessPromptEngines {
-		long := pfmengine.MustLookup(id).LongName
-		t.Run(long, func(t *testing.T) {
-			middle := string(readHarnessPromptPart(t, path.Join(long, "professor.md")))
-			staged := filepath.Join(home, ".local", "share", "pfm", "install", harnessPromptsDirName, long+".md")
-			actual, err := os.ReadFile(staged)
-			if err != nil {
-				t.Fatalf("staged %s prompt: %v", long, err)
-			}
-			if id == pfmengine.Codex {
-				// Codex's prompt is the same three parts with one mapping
-				// applied at compose time: Claude's /code-review names a
-				// command no Codex seat has, and an unmapped seat falls
-				// through to Codex's whole-branch review. Head and middle
-				// carry no invocation, so the seams are still asserted
-				// byte-for-byte and only the tail is allowed to differ.
-				prefix := strings.TrimRight(head, "\n") + "\n\n" + strings.TrimRight(middle, "\n") + "\n\n"
-				if !strings.HasPrefix(string(actual), prefix) {
-					t.Fatalf("staged %s.md is not head + middle + a tail", long)
-				}
-				mappedTail := strings.TrimPrefix(string(actual), prefix)
-				if strings.Contains(mappedTail, "/code-review") {
-					t.Fatalf("staged %s.md still spells /code-review:\n%s", long, mappedTail)
-				}
-				return
-			}
-			want := strings.TrimRight(head, "\n") + "\n\n" +
-				strings.TrimRight(middle, "\n") + "\n\n" +
-				strings.TrimRight(tail, "\n") + "\n"
-			if string(actual) != want {
-				t.Fatalf("staged %s.md is not head + middle + tail", long)
-			}
-			// The parts each end in a single newline today, so the seams are
-			// also plain concatenation — a second, independent reading of
-			// "exactly one blank line, no other bytes added".
-			if string(actual) != head+"\n"+middle+"\n"+tail {
-				t.Fatalf("staged %s.md seams are not one blank line over the parts as shipped", long)
-			}
-		})
+	legacy := paths.LegacyHarnessPromptsDir(home)
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("install created legacy prompt dir: %v", err)
 	}
-	// The parts and the Claude drift baselines stage beside the composed
-	// prompts, in the one place doctor is pointed at.
-	for _, relative := range []string{
-		filepath.Join("share", "head.md"),
-		filepath.Join("claude", "baselines", "harness-original.sha256"),
-		filepath.Join("claude", "baselines", "harness-opus.sha256"),
-	} {
-		staged := filepath.Join(home, ".local", "share", "pfm", "install", harnessPromptsDirName, relative)
-		if _, err := os.Stat(staged); err != nil {
-			t.Fatalf("staged %s: %v", relative, err)
-		}
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(legacy, "operator-file")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(
+		context.Background(),
+		Options{
+			Mode:          ModeApply,
+			Home:          home,
+			SourceRepo:    clone,
+			MCPConfigPath: configPath,
+			Runner:        &fakeRunner{},
+			Stdout:        io.Discard,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "keep" {
+		t.Fatalf("existing legacy dir changed: %q %v", raw, err)
 	}
 }

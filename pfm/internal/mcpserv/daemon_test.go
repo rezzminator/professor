@@ -20,6 +20,7 @@ import (
 // inside the bound must still arrive whole — an inject prompt is legitimate
 // input and must not be clipped.
 func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
+	t.Parallel()
 	var readErr error
 	var readBytes int
 	mounted := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -69,6 +70,7 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 // daemon handler itself, so without the middleware around it they were the
 // only HTTP answers on this process that left no record at all.
 func TestDaemonHandlerLeavesAnHTTPInRecordForEveryAnswerItGivesItself(t *testing.T) {
+	// obs.Test replaces the process logger, which other tests also use.
 	ctx, recorder := obs.Test(t)
 	handler := NewDaemonHandler(DaemonOptions{Version: "test"})
 	origin := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/professor", http.NoBody)
@@ -120,6 +122,7 @@ func TestDaemonHandlerLeavesAnHTTPInRecordForEveryAnswerItGivesItself(t *testing
 // mounted server reads it: the MCP transport underneath answers a clipped read
 // with a bare "failed to read body", which tells the caller nothing.
 func TestDaemonHandlerNamesADeclaredOversizedBody(t *testing.T) {
+	t.Parallel()
 	reached := false
 	mounted := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
 	handler := NewDaemonHandler(DaemonOptions{Professor: mounted, Chat: mounted, Harvester: mounted})

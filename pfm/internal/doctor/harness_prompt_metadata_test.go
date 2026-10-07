@@ -141,16 +141,74 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 		name          string
 		breakBaseline func(dir string) error
 		cause         string
+		state         string
 	}{
+		{
+			name:          "baseline file missing",
+			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, model.Stem+".sha256")) },
+			cause:         "no such file or directory",
+			state:         "baseline file missing",
+		},
+		{
+			name: "baseline file unreadable",
+			breakBaseline: func(dir string) error {
+				path := filepath.Join(dir, model.Stem+".sha256")
+				if err := os.Remove(path); err != nil {
+					return err
+				}
+				return os.Mkdir(path, 0o700)
+			},
+			cause: "is a directory",
+			state: "baseline file unreadable",
+		},
+		{
+			name: "wrong field count",
+			breakBaseline: func(dir string) error {
+				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), []byte("not-two-fields\n"), 0o600)
+			},
+			cause: `want "<sha256> <body file>", found 1 field(s)`,
+			state: "baseline file malformed",
+		},
+		{
+			name: "bad digest",
+			breakBaseline: func(dir string) error {
+				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), []byte("zz harness-prompt-fixture.md\n"), 0o600)
+			},
+			cause: "encoding/hex: invalid byte",
+			state: "baseline digest malformed",
+		},
+		{
+			name: "short digest",
+			breakBaseline: func(dir string) error {
+				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), []byte("00 harness-prompt-fixture.md\n"), 0o600)
+			},
+			cause: "decoded digest has 1 byte(s), want 32",
+			state: "baseline digest malformed",
+		},
+		{
+			name: "body not a base name",
+			breakBaseline: func(dir string) error {
+				raw, err := os.ReadFile(filepath.Join(dir, model.Stem+".sha256"))
+				if err != nil {
+					return err
+				}
+				raw = []byte(strings.Replace(string(raw), "harness-prompt-fixture.md", "nested/body.md", 1))
+				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), raw, 0o600)
+			},
+			cause: `body file "nested/body.md" is not a base name`,
+			state: "baseline digest malformed",
+		},
 		{
 			name:          "model file missing",
 			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, model.Stem+".model")) },
 			cause:         model.Stem + ".model: no such file or directory",
+			state:         "baseline inconsistent",
 		},
 		{
 			name:          "pinned body missing",
 			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, "harness-prompt-fixture.md")) },
 			cause:         "harness-prompt-fixture.md: no such file or directory",
+			state:         "baseline inconsistent",
 		},
 		{
 			name: "digest mismatch",
@@ -158,12 +216,16 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 				return os.WriteFile(filepath.Join(dir, "harness-prompt-fixture.md"), []byte("edited\n"), 0o600)
 			},
 			cause: "does not match",
+			state: "baseline inconsistent",
 		},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			home := t.TempDir()
 			stageHarnessPromptBaseline(t, home)
-			dir := paths.HarnessBaselineDir(home)
+			dir, err := paths.HarnessBaselineDir(home)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := scenario.breakBaseline(dir); err != nil {
 				t.Fatal(err)
 			}
@@ -175,10 +237,14 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 				"path=" + filepath.Join(dir, model.Stem+".sha256"),
 				"error=",
 				scenario.cause,
+				"— " + scenario.state + "; update or restore the clone at " + dir,
 			} {
 				if code != 1 || !strings.Contains(line, want) {
 					t.Fatalf("code=%d, row does not carry %q: %s", code, want, line)
 				}
+			}
+			if !strings.Contains(line, "identity="+model.Stem+" model=\""+model.Alias+"\"") {
+				t.Fatalf("row lost requested identity: %s", line)
 			}
 		})
 	}

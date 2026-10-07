@@ -7,40 +7,105 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestResolvePathUsesAbsoluteXDGOrHomeConfig(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
+func TestConfigLoadsWithoutCodexLogin(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "pfm.config.json")
+	if err := os.WriteFile(
+		configPath,
+		[]byte(`{"version":2,"codex":{"homes":[{"id":2,"home":"`+filepath.Join(home, "codex")+`"}]}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(configPath, home, nil)
+	if err != nil {
+		t.Fatalf("Load() refused a configured Codex home without login: %v", err)
+	}
+	if len(loaded.CodexAccounts) != 1 || loaded.CodexAccounts[0].ID != 2 {
+		t.Fatalf("Codex accounts = %#v, want id 2", loaded.CodexAccounts)
+	}
+}
 
-	t.Run("absolute XDG", func(t *testing.T) {
-		xdg := filepath.Join(t.TempDir(), "xdg")
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		want := filepath.Join(xdg, "pfm", FileName)
-		if got := ResolvePath(home); got != want {
-			t.Fatalf("ResolvePath(%q) = %q, want %q", home, got, want)
-		}
-	})
+func TestResolvePathUsesOverrideAndCloneMarker(t *testing.T) {
+	home := t.TempDir()
+	override := filepath.Join(t.TempDir(), "custom.json")
+	t.Setenv("PFM_CONFIG", override)
+	if got, err := ResolvePath(home); err != nil || got != override {
+		t.Fatalf("override path = %q, %v; want %q", got, err, override)
+	}
+	t.Setenv("PFM_CONFIG", "relative.json")
+	if _, err := ResolvePath(home); err == nil || !strings.Contains(err.Error(), "PFM_CONFIG") {
+		t.Fatalf("relative override error = %v, want PFM_CONFIG", err)
+	}
+	t.Setenv("PFM_CONFIG", "")
+	repo := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ResolvePath(home); err != nil || got != filepath.Join(repo, FileName) {
+		t.Fatalf("clone path = %q, %v", got, err)
+	}
+}
 
-	for _, tc := range []struct {
-		name string
-		xdg  string
-	}{
-		{name: "relative XDG", xdg: "relative-config"},
-		{name: "empty XDG", xdg: ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", tc.xdg)
-			want := filepath.Join(home, ".config", "pfm", FileName)
-			if got := ResolvePath(home); got != want {
-				t.Fatalf("ResolvePath(%q) = %q, want %q", home, got, want)
-			}
-		})
+func TestLoadWithoutMarkerIgnoresLegacyConfigAndHasNoWriterPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvConfig, "")
+	legacy := filepath.Join(home, ".config", "pfm", FileName)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`{"version":2,"theme":"tokyo-night"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load("", home, nil)
+	if err != nil || loaded.Path != "" || loaded.Exists || loaded.Theme == "tokyo-night" {
+		t.Fatalf(
+			"legacy-only Load = path %q exists %t theme %q error %v",
+			loaded.Path,
+			loaded.Exists,
+			loaded.Theme,
+			err,
+		)
+	}
+	if err := WriteDefault(
+		"",
+		home,
+		nil,
+		false,
+	); err == nil ||
+		!strings.Contains(err.Error(), "no source repo recorded") {
+		t.Fatalf("WriteDefault without marker = %v", err)
+	}
+}
+
+func TestUnusableMarkerIsALoadError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvConfig, "")
+	marker := paths.SourceRepoPath(home)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(home, "missing-clone")
+	if err := os.WriteFile(marker, []byte(missing+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load("", home, nil)
+	if loaded.Path != "" || loaded.Exists || !errors.Is(err, paths.ErrSourceRepoUnusable) ||
+		!strings.Contains(err.Error(), missing) ||
+		!strings.Contains(err.Error(), "run pfm install from the clone, or set PFM_CONFIG") {
+		t.Fatalf("unusable marker Load = path %q exists %t error %v", loaded.Path, loaded.Exists, err)
+	}
+	if err := WriteDefault("", home, nil, false); err == nil || !strings.Contains(err.Error(), missing) ||
+		!strings.Contains(err.Error(), paths.EnvConfig) {
+		t.Fatalf("unusable marker writer error = %v", err)
 	}
 }
 
@@ -57,27 +122,29 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 	}
 	wantAccounts := []Account{
 		{
-			ID:         1,
-			ConfigDir:  filepath.Join(home, ".cc", "one"),
-			ProjectDir: filepath.Join(home, ".cc", "one", "projects"),
-			Implicit:   true,
-			Emoji:      "🥇",
+			ID:        1,
+			ConfigDir: filepath.Join(home, ".cc", "one"),
+
+			Emoji: "🥇",
 		},
 		{
-			ID:         2,
-			ConfigDir:  filepath.Join(home, ".cc", "two"),
-			ProjectDir: filepath.Join(home, ".cc", "two", "projects"),
-			Emoji:      "🥈",
+			ID:        2,
+			ConfigDir: filepath.Join(home, ".cc", "two"),
+			Emoji:     "🥈",
 		},
 	}
 	if !reflect.DeepEqual(got.Accounts, wantAccounts) {
 		t.Fatalf("Accounts = %#v, want %#v", got.Accounts, wantAccounts)
 	}
 	if got.Claude != (Claude{
-		PermissionMode: PermissionBypass,
-		Binary:         "claude",
-		Cache1H:        true,
-		CompactNudge:   DefaultCompactNudge(),
+		PermissionMode:        PermissionBypass,
+		Binary:                "claude",
+		WebSearchesPerSession: 9007199254740991,
+		AutoCompactWindow:     100000,
+		TmuxTruecolor:         true,
+		CleanupPeriodDays:     36500,
+		RequireManagedCleanup: true,
+		Cache1H:               true,
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -97,20 +164,6 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		if got.Source(key) != SourceDefault {
 			t.Errorf("Source(%q) = %q, want %q", key, got.Source(key), SourceDefault)
 		}
-	}
-}
-
-func TestDefaultsRegisterHarvesterDisabledByDefault(t *testing.T) {
-	got := Defaults(filepath.Join(t.TempDir(), "home"), nil)
-	server, ok := got.MCPServers["harvester"]
-	if !ok {
-		t.Fatal("harvester MCP server is not registered")
-	}
-	if server.Enabled {
-		t.Fatal("harvester MCP server is enabled by default")
-	}
-	if got.Source("mcp.servers.harvester.enabled") != SourceDefault {
-		t.Fatalf("harvester source = %q, want default", got.Source("mcp.servers.harvester.enabled"))
 	}
 }
 
@@ -138,7 +191,7 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 		if err := os.MkdirAll(configDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if account == 4 {
+		if account == 1 || account == 4 {
 			continue
 		}
 		credentials := `{"claudeAiOauth":{"accessToken":"fixture","refreshToken":"fixture"}}`
@@ -149,23 +202,20 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 	got := Defaults(home, nil)
 	want := []Account{
 		{
-			ID:         1,
-			ConfigDir:  filepath.Join(home, ".cc", "1"),
-			ProjectDir: filepath.Join(home, ".cc", "1", "projects"),
-			Implicit:   true,
-			Emoji:      "🥇",
+			ID:        1,
+			ConfigDir: filepath.Join(home, ".cc", "1"),
+
+			Emoji: "🥇",
 		},
 		{
-			ID:         2,
-			ConfigDir:  filepath.Join(home, ".cc", "2"),
-			ProjectDir: filepath.Join(home, ".cc", "2", "projects"),
-			Emoji:      "🥈",
+			ID:        2,
+			ConfigDir: filepath.Join(home, ".cc", "2"),
+			Emoji:     "🥈",
 		},
 		{
-			ID:         3,
-			ConfigDir:  filepath.Join(home, ".cc", "3"),
-			ProjectDir: filepath.Join(home, ".cc", "3", "projects"),
-			Emoji:      "🥉",
+			ID:        3,
+			ConfigDir: filepath.Join(home, ".cc", "3"),
+			Emoji:     "🥉",
 		},
 	}
 	if !reflect.DeepEqual(got.Accounts, want) {
@@ -223,22 +273,19 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 	}
 	want := []Account{
 		{
-			ID:         9,
-			ConfigDir:  filepath.Join(home, "account-nine"),
-			ProjectDir: filepath.Join(home, "account-nine", "projects"),
-			Emoji:      "·",
+			ID:        9,
+			ConfigDir: filepath.Join(home, "account-nine"),
+			Emoji:     "·",
 		},
 		{
-			ID:         2,
-			ConfigDir:  filepath.Join(home, "account-two"),
-			ProjectDir: filepath.Join(home, "account-two", "projects"),
-			Emoji:      "🥈",
+			ID:        2,
+			ConfigDir: filepath.Join(home, "account-two"),
+			Emoji:     "🥈",
 		},
 		{
-			ID:         17,
-			ConfigDir:  "/srv/claude/account-seventeen",
-			ProjectDir: "/srv/claude/account-seventeen/projects",
-			Emoji:      "·",
+			ID:        17,
+			ConfigDir: "/srv/claude/account-seventeen",
+			Emoji:     "·",
 		},
 	}
 	if !reflect.DeepEqual(got.Accounts, want) {
@@ -248,10 +295,14 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		t.Fatalf("AccountIDs = %#v, want [9 2 17]", got.AccountIDs())
 	}
 	if got.Claude != (Claude{
-		PermissionMode: PermissionPrompt,
-		Binary:         "claude-custom",
-		Cache1H:        true,
-		CompactNudge:   DefaultCompactNudge(),
+		PermissionMode:        PermissionPrompt,
+		Binary:                "claude-custom",
+		WebSearchesPerSession: 9007199254740991,
+		AutoCompactWindow:     100000,
+		TmuxTruecolor:         true,
+		CleanupPeriodDays:     36500,
+		RequireManagedCleanup: true,
+		Cache1H:               true,
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -325,13 +376,19 @@ func TestSkipsOutsideDirPreservesUnrelatedDiscoveryFailures(t *testing.T) {
 func TestLoadUsesResolvePathWhenPathIsEmpty(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	xdg := filepath.Join(root, "xdg")
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	path := filepath.Join(xdg, "pfm", "config.json")
+	repo := filepath.Join(root, "clone")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, "")
+	path := filepath.Join(repo, FileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"version":1}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -391,6 +448,44 @@ func TestLoadRejectsUnknownKeysAtEveryConfigLevel(t *testing.T) {
 				t.Fatalf("error = %q, want it to name %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadAcceptsRetiredCompactNudgeWithoutChangingOtherPreferences(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	base := `{"version":2,"claude":{"permissionMode":"prompt","cache1h":false},` +
+		`"accounts":[{"id":1,"configDir":"` + filepath.Join(home, "account") +
+		`","claude":{"theme":"ocean"}}]}`
+	if err := os.WriteFile(path, []byte(base), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{`{"enabled":false,"start":0,"step":101}`, `false`, `null`, `[1,"old"]`} {
+		retired := `{"version":2,"claude":{"permissionMode":"prompt","cache1h":false,"compactNudge":` + value + `},` +
+			`"accounts":[{"id":1,"configDir":"` + filepath.Join(home, "account") +
+			`","claude":{"theme":"ocean","compactNudge":` + value + `}}]}`
+		if err := os.WriteFile(path, []byte(retired), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Load(path, home, nil)
+		if err != nil {
+			t.Fatalf("retired value %s: %v", value, err)
+		}
+		if !reflect.DeepEqual(got.Claude, want.Claude) || !reflect.DeepEqual(got.Accounts, want.Accounts) ||
+			!reflect.DeepEqual(got.Sources, want.Sources) {
+			t.Fatalf("retired value %s changed effective preferences or sources", value)
+		}
+		encoded, err := Marshal(got, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), "compactNudge") {
+			t.Fatalf("serializer wrote retired key: %s", encoded)
+		}
 	}
 }
 
@@ -462,145 +557,6 @@ func TestLoadRejectsInvalidAccountRoster(t *testing.T) {
 	}
 }
 
-func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
-	registered := map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
-	}
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(
-		path,
-		[]byte(`{"version":1,"mcp":{"servers":{"harvester":{"enabled":true}}}}`),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("Load(mcp) error = %v", err)
-	}
-	if got.MCPServers["chat"].Enabled {
-		t.Fatal("chat became enabled when only harvester was configured")
-	}
-	if !got.MCPServers["harvester"].Enabled {
-		t.Fatal("harvester did not take its configured enabled value")
-	}
-	if got.Source("mcp.servers.chat.enabled") != SourceDefault {
-		t.Fatalf("chat source = %q, want default", got.Source("mcp.servers.chat.enabled"))
-	}
-	// A pre-split file's mcp.servers.harvester is honored, but reported as
-	// legacy so `pfm config show` / doctor point at the migration.
-	if got.MCPServerSource("harvester") != SourceLegacy {
-		t.Fatalf("harvester source = %q, want %q", got.MCPServerSource("harvester"), SourceLegacy)
-	}
-}
-
-func TestSetMCPServerIsIndependentAtomicAndIdempotent(t *testing.T) {
-	registered := map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
-	}
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "deep", "machine.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{
-  "version": 1,
-  "claude": {"binary": "claude-custom"},
-  "mcp": {"servers": {"chat": {"enabled": false}, "harvester": {"enabled": false}}}
-}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("initial Load error = %v", err)
-	}
-
-	changed, err := SetMCPServer(loaded, "chat", true)
-	if err != nil || !changed {
-		t.Fatalf("enable chat = changed:%v err:%v, want changed true", changed, err)
-	}
-	afterChat, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("Load(after chat) error = %v", err)
-	}
-	if !afterChat.MCPServers["chat"].Enabled || afterChat.MCPServers["harvester"].Enabled {
-		t.Fatalf("after chat toggle MCPServers = %#v, want chat true and harvester false", afterChat.MCPServers)
-	}
-	if afterChat.Claude.Binary != "claude-custom" {
-		t.Fatal("SetMCPServer discarded unrelated configuration")
-	}
-	beforeNoop, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed, err = SetMCPServer(afterChat, "chat", true)
-	if err != nil || changed {
-		t.Fatalf("repeat enable chat = changed:%v err:%v, want no-op", changed, err)
-	}
-	afterNoop, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(afterNoop, beforeNoop) {
-		t.Fatal("idempotent SetMCPServer rewrote the config")
-	}
-
-	changed, err = SetMCPServer(afterChat, "harvester", true)
-	if err != nil || !changed {
-		t.Fatalf("enable harvester = changed:%v err:%v, want changed true", changed, err)
-	}
-	afterHarvester, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("Load(after harvester) error = %v", err)
-	}
-	if !afterHarvester.MCPServers["chat"].Enabled || !afterHarvester.MCPServers["harvester"].Enabled {
-		t.Fatalf("after harvester toggle MCPServers = %#v, want both enabled", afterHarvester.MCPServers)
-	}
-
-	entries, err := os.ReadDir(filepath.Dir(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".config.json.tmp-") {
-			t.Errorf("atomic scratch file remains: %s", entry.Name())
-		}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("config mode = %o, want 600", info.Mode().Perm())
-	}
-}
-
-func TestSetMCPServerRejectsUnknownServerWithoutWriting(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "config.json")
-	loaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed, err := SetMCPServer(loaded, "not-registered", true); err == nil || changed {
-		t.Fatalf("unknown server = changed:%v err:%v, want error and no change", changed, err)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("unknown server created config: stat error = %v", err)
-	}
-}
-
-func TestRegisteredMCPServersIsSorted(t *testing.T) {
-	got := RegisteredMCPServers()
-	if !sort.StringsAreSorted(got) || !reflect.DeepEqual(got, []string{"chat", "harvester"}) {
-		t.Fatalf("RegisteredMCPServers() = %#v, want sorted production registry", got)
-	}
-}
-
 func TestLoadRejectsMissingVersionAndWrongVersion(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	for _, tc := range []struct {
@@ -621,30 +577,6 @@ func TestLoadRejectsMissingVersionAndWrongVersion(t *testing.T) {
 				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
 		})
-	}
-}
-
-func TestSetMCPServerWritesValidJSON(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "new", "config.json")
-	loaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed, err := SetMCPServer(loaded, "chat", true)
-	if err != nil || !changed {
-		t.Fatalf("SetMCPServer = changed:%v err:%v", changed, err)
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(content, &decoded); err != nil {
-		t.Fatalf("written config is not JSON: %v", err)
-	}
-	if got, ok := decoded["version"].(float64); !ok || got != Version {
-		t.Fatalf("written version = %#v, want %d", decoded["version"], Version)
 	}
 }
 
@@ -837,6 +769,9 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	if !strings.Contains(string(content), "\"level\": \"info\"") {
 		t.Fatalf("default config carries no log.level default: %s", content)
 	}
+	if !strings.Contains(string(content), "\"autoCompactWindow\": 100000") {
+		t.Fatalf("default config carries no auto compact window: %s", content)
+	}
 	if _, err := Load(path, home, nil); err != nil {
 		// The strict loader check below needs the bytes on disk; this assertion
 		// intentionally documents that MarshalDefault itself does not install.
@@ -859,34 +794,201 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	}
 }
 
-func TestRemoveLegacyMCPAuthTokenPreservesUnrelatedConfig(t *testing.T) {
+func TestLoadRejectsInvalidStateDB(t *testing.T) {
 	home := t.TempDir()
-	path := filepath.Join(home, ".config", "pfm", "config.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
+	for _, raw := range []string{`12`, `""`, `"relative.db"`} {
+		t.Run(raw, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pfm.config.json")
+			content := `{"version":2,"state":{"db":` + raw + `}}`
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path, home, nil)
+			if err == nil || !strings.Contains(err.Error(), "state.db") || !strings.Contains(err.Error(), path) {
+				t.Fatalf("Load error = %v", err)
+			}
+		})
 	}
-	legacy := `{"version":2,"theme":"midnight","mcp":{"authToken":"retired-secret","http":{"port":8456},"servers":{"harvester":{"enabled":true}}}}`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	config, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatalf("legacy config must remain loadable for cleanup: %v", err)
-	}
-	changed, err := RemoveMCPAuthToken(config)
-	if err != nil || !changed {
-		t.Fatalf("RemoveMCPAuthToken changed=%t err=%v", changed, err)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(body), "authToken") || strings.Contains(string(body), "retired-secret") {
-		t.Fatalf("legacy auth survived cleanup: %s", body)
-	}
-	for _, retained := range []string{`"theme": "midnight"`, `"port": 8456`, `"harvester"`} {
-		if !strings.Contains(string(body), retained) {
-			t.Fatalf("cleanup dropped unrelated config %q: %s", retained, body)
+}
+
+func TestDefaultsKeepPrimaryAccountWithoutCredentials(t *testing.T) {
+	for _, roots := range []string{"empty", "default"} {
+		for _, configured := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/configured=%t", roots, configured), func(t *testing.T) {
+				home := filepath.Join(t.TempDir(), "home")
+				var projects []string
+				if roots == "default" {
+					projects = []string{filepath.Join(home, ".claude", "projects")}
+				}
+				path := filepath.Join(t.TempDir(), "config.json")
+				if configured {
+					if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				got, err := Load(path, home, projects)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := []Account{{ID: 1, ConfigDir: DefaultAccountDir(home, 1), Emoji: DefaultEmoji(1)}}
+				if !reflect.DeepEqual(got.Accounts, want) || len(got.AccountSkips) != 0 {
+					t.Fatalf("accounts=%#v skips=%#v, want %#v and no skips", got.Accounts, got.AccountSkips, want)
+				}
+			})
 		}
+	}
+}
+
+func TestDefaultsDiscoversSeatsWithDefaultRoots(t *testing.T) {
+	home := t.TempDir()
+	for _, id := range []int{1, 2, 3} {
+		dir := DefaultAccountDir(home, id)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if id == 2 {
+			if err := os.WriteFile(
+				filepath.Join(dir, ".credentials.json"),
+				[]byte(`{"claudeAiOauth":{"accessToken":"fixture"}}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, roots := range [][]string{nil, {filepath.Join(home, ".claude", "projects")}} {
+		got := Defaults(home, roots)
+		want := []Account{
+			{ID: 1, ConfigDir: DefaultAccountDir(home, 1), Emoji: DefaultEmoji(1)},
+			{ID: 2, ConfigDir: DefaultAccountDir(home, 2), Emoji: DefaultEmoji(2)},
+		}
+		skips := []AccountSkip{{ID: 3, ConfigDir: DefaultAccountDir(home, 3), Reason: "no valid credentials"}}
+		if !reflect.DeepEqual(got.Accounts, want) || !reflect.DeepEqual(got.AccountSkips, skips) {
+			t.Fatalf(
+				"roots=%v accounts=%#v skips=%#v, want %#v/%#v",
+				roots,
+				got.Accounts,
+				got.AccountSkips,
+				want,
+				skips,
+			)
+		}
+	}
+}
+
+func TestLoadRejectsDuplicateAccountDirs(t *testing.T) {
+	home := t.TempDir()
+	dir := DefaultAccountDir(home, 2)
+	for _, tc := range []struct{ name, json, want string }{
+		{"duplicate", fmt.Sprintf(`{"version":2,"accounts":[{"id":2,"configDir":%q},{"id":7,"configDir":%q}]}`, dir, dir+"/projects/.."), fmt.Sprintf("entry 2 configDir %s duplicates entry 1", dir)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path, home, nil)
+			want := "config " + path + ": accounts: " + tc.want
+			if err == nil || err.Error() != want {
+				t.Fatalf("Load error=%v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestLoadThirdParty(t *testing.T) {
+	for _, tc := range []struct {
+		name, mcp, wantError string
+		want                 map[string]json.RawMessage
+		file                 bool
+	}{
+		{"absent", `{}`, "", nil, false},
+		{"empty", `{"thirdParty":{}}`, "", map[string]json.RawMessage{}, true},
+		{"entries", `{"thirdParty":{"browser":{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}},"remote":{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"invented-token"}}}}`, "", map[string]json.RawMessage{
+			"browser": json.RawMessage(`{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}}`),
+			"remote":  json.RawMessage(`{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"invented-token"}}`),
+		}, true},
+		{"professor", `{"thirdParty":{"professor":{"type":"stdio","command":"x"}}}`, "mcp.thirdParty.professor: the name professor is pfm's own server", nil, false},
+		{"string", `{"thirdParty":{"x":"y"}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"null", `{"thirdParty":{"x":null}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"array", `{"thirdParty":{"x":[]}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"number", `{"thirdParty":{"x":1}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"boolean", `{"thirdParty":{"x":false}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, FileName)
+			if err := os.WriteFile(path, []byte(`{"version":2,"mcp":`+tc.mcp+`}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load(path, home, nil)
+			if tc.wantError != "" {
+				want := "config " + path + ": " + tc.wantError
+				if err == nil || err.Error() != want {
+					t.Fatalf("Load error = %v, want %q", err, want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.MCP.ThirdParty, tc.want) {
+				t.Fatalf("thirdParty = %s, want %s", got.MCP.ThirdParty, tc.want)
+			}
+			wantSource := SourceDefault
+			if tc.file {
+				wantSource = SourceFile
+			}
+			if got.Source("mcp.thirdParty") != wantSource {
+				t.Fatalf("source = %s, want %s", got.Source("mcp.thirdParty"), wantSource)
+			}
+		})
+	}
+}
+
+func TestMarshalThirdParty(t *testing.T) {
+	home := t.TempDir()
+	machine := Defaults(home, nil)
+	machine.MCP.ThirdParty = map[string]json.RawMessage{
+		"browser": json.RawMessage(
+			`{"type":"stdio","command":"x","args":["--flag"],"env":{"API_TOKEN":"invented-secret","PLAIN":"value"},"custom":{"future":true}}`,
+		),
+		"remote": json.RawMessage(
+			`{"type":"http","url":"https://example.invalid/mcp","headers":{"X-Example":"value"}}`,
+		),
+	}
+	for _, redact := range []bool{false, true} {
+		t.Run(strconv.FormatBool(redact), func(t *testing.T) {
+			content, err := Marshal(machine, redact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), FileName)
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := Load(path, home, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(loaded.MCP.ThirdParty) != len(machine.MCP.ThirdParty) {
+				t.Fatalf("round trip entries = %s", loaded.MCP.ThirdParty)
+			}
+			for name, raw := range machine.MCP.ThirdParty {
+				var want, got any
+				if redact {
+					raw = RedactSecrets(raw)
+				}
+				if err := json.Unmarshal(raw, &want); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(loaded.MCP.ThirdParty[name], &got); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("round trip %s = %#v, want %#v", name, got, want)
+				}
+			}
+		})
 	}
 }

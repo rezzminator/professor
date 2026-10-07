@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # daemon.sh — runs INSIDE the demo fence container: keeps the pfm MCP HTTP daemon
 # up. On a real host `pfm install` wires it as a systemd/launchd unit; the fence
-# has no init system: every chat's `pfm mcp serve --stdio` forwards to this
-# daemon; with no daemon each serves in process.
+# has no init system: every chat's `pfm mcp serve --stdio` (Claude's carried
+# through --mcp-config) forwards to this daemon; with no daemon each serves in
+# process.
 #
 # Idempotent: a daemon already answering on the port is left alone. Called by
 # setup.sh install and by every spawning script before its first spawn.
@@ -10,7 +11,8 @@
 # BROKEN STATE: exits 1 with the daemon's log tail when the port never answers.
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
-PORT="$(jq -r '.mcp.port // 18377' "$HOME/.config/pfm/pfm.config.json" 2>/dev/null || echo 18377)"
+: "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
+PORT="$(jq -r '.mcp.http.port // 18377' "$PFM_CONFIG" 2>/dev/null || echo 18377)"
 LOG=/tmp/pfm-mcp.log
 up() { [ "$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$PORT/mcp/professor" || true)" != 000 ]; }
 # A daemon started before setup.sh tools rebuilt pfm still runs the OLD binary

@@ -33,6 +33,7 @@ _cc_run() { :; }
 _cc_primary() { :; }
 _cc_auto_open() { :; }
 _pfm_eval() { :; }
+_pfm_primary() { :; }
 ccache() { :; }
 alias cc2=true
 alias cc-swap=true
@@ -43,7 +44,7 @@ cc-open() { :; }
 _cc_selfswitch() { :; }
 alias cc-revive=true
 source ` + shim + `
-for retired in cc cc1 cc2 cc-ls cc-open cc-swap cc-revive _cc_run _cc_primary _cc_auto_open _cc_selfswitch _pfm_eval; do
+for retired in cc cc1 cc2 cc-ls cc-open cc-swap cc-revive _cc_run _cc_primary _cc_auto_open _cc_selfswitch _pfm_eval _pfm_primary; do
   if (( ${+functions[$retired]} || ${+aliases[$retired]} )); then print -r -- "retained=$retired"; fi
 done
 print -r -- "compiler=$(whence -p cc)"

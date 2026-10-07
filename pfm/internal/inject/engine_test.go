@@ -103,85 +103,6 @@ func (fake *fakeSpawner) spawned() []SteerSpawn {
 	return append([]SteerSpawn(nil), fake.calls...)
 }
 
-func TestScheduleAfterCurrentTurnDoesNotQueueACompactAsModelInput(t *testing.T) {
-	fake := &fakeTmux{capture: "Working (10s)\n› Ask Codex to do anything"}
-	spawner := &fakeSpawner{}
-	engine := newTestEngineWith(t, "cx-scheduled-compact", fake, spawner)
-	result, err := engine.ScheduleAfterCurrentTurn(context.Background(), Request{
-		Target:  "chat",
-		Message: "/compact preserve the live findings",
-		Then:    []string{"resume after real compaction"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Code != 0 || result.Status != "scheduled" || result.Typed || result.Steers != 1 {
-		t.Fatalf("scheduled compact result = %+v", result)
-	}
-	if len(fake.literals) != 0 || len(fake.keys) != 0 {
-		t.Fatalf("scheduler typed into the busy model turn: literals=%q keys=%q", fake.literals, fake.keys)
-	}
-	calls := spawner.spawned()
-	if len(calls) != 1 || !reflect.DeepEqual(calls[0].Steers, []string{
-		"/compact preserve the live findings",
-		"resume after real compaction",
-	}) {
-		t.Fatalf("detached compact chain = %+v", calls)
-	}
-}
-
-// TestScheduleAfterCurrentTurnComposedSelfCompactKeepsThenAndNoticeOnce pins
-// two invariants Task D's mcpserv focus-composition fix must not disturb:
-// isCompactCommand's "^/compact(\s|$)" match still recognises the composed
-// "/compact <focus>" form Target:"self" now carries (so the T1/notice logic
-// still treats it as a self-compaction), the caller's Then steers ride along
-// unchanged after the composed primary, and SelfCompactStopNotice — which
-// this engine appends, not the MCP layer — rides exactly once on the
-// result. This does not regress against the pre-fix bare "/compact": that
-// literal string also matches the same pattern (the "$" branch), so this is
-// a boundary pin, not a fix-defect regression.
-//
-// "self" resolves through engine.whoami (ambient tmux identity via
-// resolve.NewWhoami), never through the injected Resolver — see
-// engine.go's resolve() — so it is fixed here with fakeSelf, exactly as
-// TestSelfCompactScheduleTellsTheCallerToStop (then_edge_test.go) already
-// does. Leaving whoami at New()'s real ambient default is a jail leak: it
-// happened to resolve on a host already running inside a real tmux/chat
-// session, then correctly refused inside the isolated fence container
-// (Code 4, "self target has no live tmux seat") — watched directly.
-func TestScheduleAfterCurrentTurnComposedSelfCompactKeepsThenAndNoticeOnce(t *testing.T) {
-	fake := &fakeTmux{capture: "conversation\n❯ "}
-	spawner := &fakeSpawner{}
-	engine := newTestEngineWith(t, "cc-self-compact-schedule", fake, spawner)
-	engine.whoami = fakeSelf{identity: resolve.Identity{
-		Session:    "cc-self-compact-schedule",
-		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-schedule"),
-		Pane:       "%1",
-		Engine:     "claude",
-		Source:     "test",
-	}}
-	then := []string{"resume the acceptance test", "confirm the ledger is clean"}
-	result, err := engine.ScheduleAfterCurrentTurn(context.Background(), Request{
-		Target:  "self",
-		Message: "/compact wave three closeout",
-		Then:    then,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Code != 0 || result.Status != "scheduled" || result.Steers != len(then) {
-		t.Fatalf("scheduled self compact result = %+v", result)
-	}
-	if count := strings.Count(result.Message, SelfCompactStopNotice); count != 1 {
-		t.Fatalf("SelfCompactStopNotice appeared %d time(s) in %q, want exactly 1", count, result.Message)
-	}
-	calls := spawner.spawned()
-	wantSteers := append([]string{"/compact wave three closeout"}, then...)
-	if len(calls) != 1 || !reflect.DeepEqual(calls[0].Steers, wantSteers) {
-		t.Fatalf("detached self-compact chain = %+v, want steers %q", calls, wantSteers)
-	}
-}
-
 func (fake *fakeTmux) Capture(
 	_ context.Context,
 	_, _ string,
@@ -406,14 +327,8 @@ func newTestEngineWith(
 	return engine
 }
 
-// injectChain drives the engine's internal chain-eligible delivery path
-// directly — the same entry point DeliverThen's detached waiter uses
-// (Chain: true) — the only production route left to a /compact primary now
-// that the public Inject() (chat_inject) refuses one outright (Task C:
-// /compact is never injected, only scheduled via chat_self_compact /
-// `pfm chat self-compact`). Tests pinning the paced-literal and
-// full-transcript delivery guarantees for a /compact command call this
-// instead of Inject().
+// injectChain drives the internal chain delivery spawned by inject --then.
+// Tests pinning /compact delivery call this instead of public Inject().
 func (engine *Engine) injectChain(ctx context.Context, request Request) (Result, error) {
 	ctx = withSender(ctx, engine.sender(ctx))
 	request.Chain = true
@@ -820,8 +735,8 @@ func TestInjectPasteBoundaryAndKillerBody(t *testing.T) {
 // mid-body. Whether a REAL pane treats an embedded newline as literal text
 // rather than an early Enter is a bracketed-paste property of the target
 // composer (Claude/Codex requesting the terminal mode via \e[?2004h); this
-// fake models tmux's argument boundary, not real terminal negotiation — see
-// the report's REAL-SESSION gap.
+// fake models tmux's argument boundary, not real terminal negotiation, which
+// stays an UNPLAYED gap (TESTPLAN.md § Composer transport boundaries).
 func TestMultiLineLongMessageSurvivesPasteByteExactWithoutMidBodyEnter(t *testing.T) {
 	fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
 	engine := newTestEngine(t, "cc-multiline-paste", fake)
@@ -1554,29 +1469,6 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-// TestResolveAcceptsAQuotedTargetFromTheReplyHint pins both readings of the
-// footer. A spaced label is advertised as chat_inject "Delivery Trust"
-// <message> so the CLI form sees one argument; a recipient going through the
-// MCP tool passes the target as a JSON string and would carry those quotes
-// straight into the target. Both must reach the same chat, and neither may
-// strip quotes out of a label that genuinely contains them mid-string.
-func TestResolveAcceptsAQuotedTargetFromTheReplyHint(t *testing.T) {
-	for _, test := range []struct{ in, want string }{
-		{`"Delivery Trust"`, "Delivery Trust"},
-		{`Delivery Trust`, "Delivery Trust"},
-		{`  "P:DO"  `, "P:DO"},
-		{`P:DO`, "P:DO"},
-		{`cc-1787705979-3980493-30867`, "cc-1787705979-3980493-30867"},
-		{`say "hi" now`, `say "hi" now`},
-		{`"`, `"`},
-		{``, ``},
-	} {
-		if got := unquoteTarget(test.in); got != test.want {
-			t.Fatalf("unquoteTarget(%q) = %q, want %q", test.in, got, test.want)
-		}
-	}
-}
-
 // TestInjectRefusesATypingHumanUnlessForced pins the typist guard (Task A):
 // a human at the keyboard is not a safe queue surface, busy or idle. Revert
 // the guard block in engine.go's inject() (the ClientActivity call right
@@ -1691,15 +1583,14 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 	}
 }
 
-// TestInjectRefusesCompactPrimaryPointingToSelfCompact pins Task C's public
-// entry point: Inject() refuses ANY /compact primary, with or without a
-// then steer, before checkSteerChain or resolve ever run, and its remedy
-// names both the MCP tool and the CLI twin. injectChain — the internal path
+// TestInjectRefusesACompactPrimaryByName pins the public entry point:
+// Inject() refuses any /compact primary before checking steers or resolving.
+// injectChain — the internal path
 // DeliverThen's waiter drives — still accepts a /compact primary; that half
 // of the guarantee is pinned elsewhere (then_test.go). Revert the ban block
 // at the top of Inject() and this fails: the refusal disappears and the
 // engine types the primary instead.
-func TestInjectRefusesCompactPrimaryPointingToSelfCompact(t *testing.T) {
+func TestInjectRefusesCompactPrimary(t *testing.T) {
 	fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
 	spawner := &fakeSpawner{}
 	engine := newTestEngineWith(t, "cc-compact-ban", fake, spawner)
@@ -1722,7 +1613,7 @@ func TestInjectRefusesCompactPrimaryPointingToSelfCompact(t *testing.T) {
 			if result.Code != CodeUndelivered || result.Typed {
 				t.Fatalf("Inject() = %+v", result)
 			}
-			for _, want := range []string{"chat_self_compact", "pfm chat self-compact"} {
+			for _, want := range []string{"/compact is never injected", "pfm never types a compaction"} {
 				if !strings.Contains(result.Message, want) {
 					t.Fatalf("refusal %q lacks %q", result.Message, want)
 				}

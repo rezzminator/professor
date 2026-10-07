@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // GlobalLinkState is the on-disk shape check found at one desired global
@@ -160,8 +162,8 @@ func resolveGlobalLink(path, raw string) string {
 }
 
 func withinGlobalLinkRoot(candidate, root string) bool {
-	candidate = filepath.Clean(candidate)
-	root = filepath.Clean(root)
+	candidate = paths.PhysicalPath(candidate)
+	root = paths.PhysicalPath(root)
 	if candidate == root {
 		return true
 	}

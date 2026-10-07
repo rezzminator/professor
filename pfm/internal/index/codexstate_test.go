@@ -201,7 +201,7 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 	)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
 	t.Setenv(paths.EnvCodexHome, codexHome)
@@ -727,8 +727,8 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 	buildCodexState(t, filepath.Join(codexHome, "state_5.sqlite"), threads...)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(root, "cc", "pfm.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
 	t.Setenv(paths.EnvCodexHome, codexHome)
@@ -896,8 +896,8 @@ func setupPaginatedContentFixture(t *testing.T) string {
 	buildCodexState(t, filepath.Join(codexHome, "state_5.sqlite"), threads...)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(root, "cc", "pfm.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
 	t.Setenv(paths.EnvCodexHome, codexHome)

@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type missingGitOutputRunner struct{}
@@ -30,8 +33,9 @@ var (
 // an existing source-repo marker is reported ok, naming the kept repo, and
 // never silently skipped.
 func TestReportSourceRepoMarkerPresentReportsOK(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	if err := WriteSourceRepoMarker(home, t.TempDir()); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
@@ -57,6 +61,7 @@ func TestReportSourceRepoMarkerPresentReportsOK(t *testing.T) {
 // at all when it was missing. reportSourceRepoMarker must instead render
 // that absence as a NAMED skip line, never as if nothing were expected there.
 func TestReportSourceRepoMarkerAbsentReportsNamedSkip(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var stdout bytes.Buffer
 	installer := &engine{options: Options{Home: home, Stdout: &stdout}}
@@ -81,8 +86,9 @@ func TestReportSourceRepoMarkerAbsentReportsNamedSkip(t *testing.T) {
 // must be RETURNED as a real error, never folded into the same skip line an
 // absent marker gets — an error is never "nothing there".
 func TestReportSourceRepoMarkerOtherErrorIsReturnedNeverSkipped(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	markerPath := SourceRepoPath(home)
+	markerPath := paths.SourceRepoPath(home)
 	// A directory in the marker's place fails os.ReadFile with something
 	// other than fs.ErrNotExist (EISDIR), the shape reportSourceRepoMarker
 	// must return rather than skip.
@@ -112,6 +118,7 @@ func TestReportSourceRepoMarkerOtherErrorIsReturnedNeverSkipped(t *testing.T) {
 // installer.reportSourceRepoMarker()` branch; this pins that writeUpdateMetadata
 // itself (not just the helper in isolation) reports the named skip.
 func TestWriteUpdateMetadataWithNoSourceRepoReportsTheMarkerSkip(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var stdout bytes.Buffer
 	installer := &engine{options: Options{Home: home, Stdout: &stdout}, apply: true}
@@ -129,13 +136,18 @@ func TestWriteUpdateMetadataWithNoSourceRepoReportsTheMarkerSkip(t *testing.T) {
 // preserving install's documented behavior, even though the runner wraps the
 // process lookup failure in exec.ErrNotFound.
 func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := t.TempDir()
 	hooks := filepath.Join(clone, ".githooks")
 	if err := os.MkdirAll(hooks, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		filepath.Join(hooks, "pre-push"),
+		[]byte("#!/bin/sh\nexit 0\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
@@ -162,12 +174,13 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 // which one it held — and an error to LOOK read as the absence of anything to
 // look at. Each outcome now carries its own sentinel.
 func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.T) {
+	t.Parallel()
 	t.Run("no marker recorded", func(t *testing.T) {
-		_, err := ReadSourceRepoMarker(t.TempDir())
-		if !errors.Is(err, ErrNoSourceRepoMarker) {
-			t.Fatalf("err = %v, want ErrNoSourceRepoMarker", err)
+		_, err := paths.ReadSourceRepoMarker(t.TempDir())
+		if !errors.Is(err, paths.ErrNoSourceRepoMarker) {
+			t.Fatalf("err = %v, want paths.ErrNoSourceRepoMarker", err)
 		}
-		if errors.Is(err, ErrSourceRepoUnusable) {
+		if errors.Is(err, paths.ErrSourceRepoUnusable) {
 			t.Fatalf("an absent marker also claimed an unusable clone: %v", err)
 		}
 		if !errors.Is(err, os.ErrNotExist) {
@@ -181,17 +194,17 @@ func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.
 		if err := os.MkdirAll(clone, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteSourceRepoMarker(home, clone); err != nil {
+		if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Remove(clone); err != nil {
 			t.Fatal(err)
 		}
-		_, err := ReadSourceRepoMarker(home)
-		if !errors.Is(err, ErrSourceRepoUnusable) {
-			t.Fatalf("err = %v, want ErrSourceRepoUnusable", err)
+		_, err := paths.ReadSourceRepoMarker(home)
+		if !errors.Is(err, paths.ErrSourceRepoUnusable) {
+			t.Fatalf("err = %v, want paths.ErrSourceRepoUnusable", err)
 		}
-		if errors.Is(err, ErrNoSourceRepoMarker) {
+		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
 			t.Fatalf("a recorded-but-vanished clone reported as no marker at all: %v", err)
 		}
 		if !strings.Contains(err.Error(), clone) {
@@ -201,23 +214,23 @@ func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.
 
 	t.Run("marker holds more than one path", func(t *testing.T) {
 		home := t.TempDir()
-		writeFixture(t, SourceRepoPath(home), "/one\n/two\n")
-		_, err := ReadSourceRepoMarker(home)
-		if !errors.Is(err, ErrSourceRepoUnusable) {
-			t.Fatalf("err = %v, want ErrSourceRepoUnusable", err)
+		writeFixture(t, paths.SourceRepoPath(home), "/one\n/two\n")
+		_, err := paths.ReadSourceRepoMarker(home)
+		if !errors.Is(err, paths.ErrSourceRepoUnusable) {
+			t.Fatalf("err = %v, want paths.ErrSourceRepoUnusable", err)
 		}
 	})
 
 	t.Run("marker cannot be read at all", func(t *testing.T) {
 		home := t.TempDir()
-		if err := os.MkdirAll(SourceRepoPath(home), 0o700); err != nil {
+		if err := os.MkdirAll(paths.SourceRepoPath(home), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		_, err := ReadSourceRepoMarker(home)
+		_, err := paths.ReadSourceRepoMarker(home)
 		if err == nil {
 			t.Fatal("a marker path that is a directory read clean")
 		}
-		if errors.Is(err, ErrNoSourceRepoMarker) || errors.Is(err, ErrSourceRepoUnusable) {
+		if errors.Is(err, paths.ErrNoSourceRepoMarker) || errors.Is(err, paths.ErrSourceRepoUnusable) {
 			t.Fatalf("a failed look claimed one of the two answered states: %v", err)
 		}
 	})
@@ -229,12 +242,13 @@ func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.
 // absent marker prints — that would tell an operator to record a clone they
 // already recorded, and hide that the recorded one moved.
 func TestReportSourceRepoMarkerNamesAnUnusableCloneApartFromAbsence(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := filepath.Join(t.TempDir(), "moved-away")
 	if err := os.MkdirAll(clone, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(clone); err != nil {
@@ -424,5 +438,51 @@ func TestInstallSkipsArmingInsideTheFenceWhenTheGateIsUnarmed(t *testing.T) {
 		if strings.Contains(call, "config core.hooksPath .githooks") {
 			t.Fatalf("a write was attempted on the read-only fence mount: %q", call)
 		}
+	}
+}
+
+func TestUpdateMetadataResolvesAliasOnce(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(repo, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(paths.SourceRepoPath(home)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.SourceRepoPath(home), []byte(alias+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installer := &engine{
+		options:     Options{Home: home, Stdout: &bytes.Buffer{}},
+		apply:       true,
+		stamp:       "test",
+		managedRoot: managedRootForHome(home),
+	}
+	installer.options.SourceRepo = alias
+	if err := installer.writeUpdateMetadata(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(paths.SourceRepoPath(home))
+	if err != nil || string(content) != repo+"\n" {
+		t.Fatalf("marker=%q err=%v", content, err)
+	}
+	idle := &engine{
+		options:     Options{Home: home, Stdout: &bytes.Buffer{}},
+		apply:       true,
+		stamp:       "test",
+		managedRoot: managedRootForHome(home),
+	}
+	idle.options.SourceRepo = alias
+	if err := idle.writeUpdateMetadata(); err != nil {
+		t.Fatal(err)
+	}
+	repos, err := installer.recordedProfessorSourceRepos()
+	if err != nil || len(repos) != 1 || repos[0] != repo {
+		t.Fatalf("repos=%q err=%v", repos, err)
 	}
 }

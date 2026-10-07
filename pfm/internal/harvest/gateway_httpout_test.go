@@ -43,7 +43,7 @@ func (tripper *recordingTripper) RoundTrip(request *http.Request) (*http.Respons
 // harvest's http.out door (spec § Middleware): every rung's single attempt
 // runs through gatewayRequestClient, whose per-request clone is wrapped —
 // one record per attempt — while the shared client's Transport stays exactly
-// what configureProxy, setUserAgent and IsPinnedClient inspect.
+// what configureProxy and setUserAgent inspect.
 func TestGatewayAttemptWritesAnHTTPOutRecordWithoutTouchingTheSharedClient(t *testing.T) {
 	_, recorder := obs.Test(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

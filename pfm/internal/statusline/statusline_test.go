@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 func TestEngineFromEnvironmentRefusesMissingEngine(t *testing.T) {
@@ -265,6 +267,9 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 				"__TRANSCRIPT__",
 				writeGoldenTranscript(t, root, now.Add(-12*time.Minute), sample.engine),
 			))
+			if sample.engine == "claude" {
+				cacheLaunch(t, root, "11111111-1111-4111-8111-111111111111", true)
+			}
 			engineID, parseErr := pfmengine.Parse(sample.engine)
 			if parseErr != nil {
 				t.Fatal(parseErr)
@@ -375,7 +380,7 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	for _, want := range []string{
 		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·🏎️ high", "sample",
-		"42%", "🧮10.3K", "💰$3.42", "⏳ 5m32s", "·2 ·1",
+		"42%", "💰$3.42/", "⏳ 5m32s", "·2 ·1",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("render lacks %q:\n%q", want, got)
@@ -499,7 +504,8 @@ func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T)
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "25%") || strings.Contains(plain, "77%") || !strings.Contains(plain, "🧮1.0K ✎2") {
+	if !strings.Contains(plain, "25%") || strings.Contains(plain, "77%") ||
+		!strings.Contains(plain, "💰$0.00/250.0K/0/0") {
 		t.Fatalf("measured transcript gauge or prompt count missing:\n%q", plain)
 	}
 	floor, err := os.ReadFile(filepath.Join(root, ".cache", "pfm-statusline", "claude-work-sample.txt"))
@@ -510,6 +516,7 @@ func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T)
 
 func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 	root := t.TempDir()
+	cacheLaunch(t, root, "S", true)
 	transcriptPath := filepath.Join(root, "session.jsonl")
 	if err := os.WriteFile(
 		transcriptPath,
@@ -518,15 +525,14 @@ func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	// Env is pinned empty on purpose: a chat spawned by the fleet carries
-	// FORCE_PROMPT_CACHING_5M=1, and reading the ambient environment made this
-	// assertion depend on where the suite was run rather than on the default.
+	// The record makes a new 1h chat's empty anchor explicit.
 	segment := cacheWindowSegment(
 		Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}},
 		time.Now(),
 		transcriptPath,
 		-1,
 		nil,
+		"S",
 	)
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(segment, "")
 	if !strings.Contains(plain, "💾1h∞") || strings.Contains(plain, "1h?") {
@@ -570,27 +576,30 @@ func TestCodexEngineOwnsCodexUsageIndependentOfAccountID(t *testing.T) {
   "context_window":{"used_percentage":10,"current_usage":{"input_tokens":136000}},
   "cost":{"total_cost_usd":99,"total_duration_ms":1000}
 }`)
-	got, err := Render(context.Background(), input, Runtime{
-		Now:       func() time.Time { return time.Unix(1_786_838_400, 0) },
-		Home:      root,
-		ConfigDir: filepath.Join(root, ".cc", "2"),
-		CacheDir:  filepath.Join(root, "cache"),
-		TmuxDir:   filepath.Join(root, "tmux"),
-		ProcRoot:  filepath.Join(root, "proc"),
-		Columns:   120,
-		UID:       1000,
-		Engine:    pfmengine.Codex,
-		Env:       map[string]string{"ANTHROPIC_MODEL": "gpt-5.6-sol[1m]"},
-		Command:   quietRunner{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "🥈 ") ||
-		!strings.Contains(got, "🍀 gpt-5.6-sol") ||
-		!strings.Contains(got, "50%") ||
-		strings.Contains(got, "💰$99.00") {
-		t.Fatalf("Codex-engine rendering drifted:\n%q", got)
+	// Every model family the Codex proxy serves has a 272K window: 136K used is 50%.
+	for _, model := range []string{"gpt-5.6-sol[1m]", "gpt-6.1-sol[1m]", "gpt-6-luna"} {
+		got, err := Render(context.Background(), input, Runtime{
+			Now:       func() time.Time { return time.Unix(1_786_838_400, 0) },
+			Home:      root,
+			ConfigDir: filepath.Join(root, ".cc", "2"),
+			CacheDir:  filepath.Join(root, "cache"),
+			TmuxDir:   filepath.Join(root, "tmux"),
+			ProcRoot:  filepath.Join(root, "proc"),
+			Columns:   120,
+			UID:       1000,
+			Engine:    pfmengine.Codex,
+			Env:       map[string]string{"ANTHROPIC_MODEL": model},
+			Command:   quietRunner{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, "🥈 ") ||
+			!strings.Contains(got, "🍀 "+strings.TrimSuffix(model, "[1m]")) ||
+			!strings.Contains(got, "50%") ||
+			strings.Contains(got, "💰$99.00") {
+			t.Fatalf("Codex-engine rendering drifted for %s:\n%q", model, got)
+		}
 	}
 }
 
@@ -637,6 +646,7 @@ func TestFleetSnapshotCountsOnlySocketsPresentInProcOnLinux(t *testing.T) {
 // always on says nothing either.
 func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 	root := t.TempDir()
+	cacheLaunch(t, root, "S", false)
 	now := time.Unix(1_786_838_400, 0)
 	live := filepath.Join(root, "live.jsonl")
 	turn := `{"type":"user","timestamp":"` +
@@ -669,7 +679,7 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			input := []byte(`{"model":{"display_name":"Opus 4"},` +
+			input := []byte(`{"session_id":"S","model":{"display_name":"Opus 4"},` +
 				`"workspace":{"current_dir":"/work/sample"},` +
 				`"context_window":{"used_percentage":10},` +
 				`"transcript_path":` + string(encoded) + `}`)
@@ -681,7 +691,7 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 				ProcRoot: filepath.Join(root, "proc"),
 				Columns:  columns,
 				UID:      1000,
-				Env:      map[string]string{"FORCE_PROMPT_CACHING_5M": "1"},
+				Env:      map[string]string{},
 				Command:  quietRunner{},
 			})
 			if err != nil {
@@ -762,5 +772,112 @@ func TestStatuslineQuotaSnapshotCarriesTheScopedFableWindow(t *testing.T) {
 	}
 	if snapshot.FiveHourUsed != 31 || snapshot.FableUsed != 62 || snapshot.FableResetsAt != fableResets.Unix() {
 		t.Fatalf("snapshot=%#v, want five_hour 31 and Fable 62 resetting at %d", snapshot, fableResets.Unix())
+	}
+}
+
+// 0% is a real reading: a fresh five-hour window at 0% used to write no
+// snapshot at all, so the usage door fell through to the endpoint on exactly
+// the seats that had just started. The snapshot now carries every window the
+// stdin payload did under `windows` — scoped Fable and the gateway's
+// spend_limit included — beside the flat keys an older build's reader
+// expects, and a null window or a non-window key (model_scoped) neither fails
+// the render nor lands as a window.
+func TestStatuslineQuotaSnapshotRecordsAZeroFiveHourReadingAndEveryWindow(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".cc", "2")
+	rateDir := filepath.Join(root, "rates")
+	now := time.Now().Truncate(time.Second)
+	fiveReset := now.Add(4 * time.Hour).Unix()
+	sevenReset := now.Add(6 * 24 * time.Hour).Unix()
+	spendReset := now.Add(20 * 24 * time.Hour).Unix()
+	fableReset := now.Add(5 * 24 * time.Hour).UTC()
+	runtime := Runtime{
+		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+		CacheDir: filepath.Join(root, "cache"), RateLimitDir: rateDir,
+		SIDDir: filepath.Join(root, "sid"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000,
+		AccountDirs: map[string]int{configDir: 2}, Env: map[string]string{}, Command: quietRunner{},
+	}
+	input := []byte(fmt.Sprintf(`{
+  "model":{"display_name":"Opus 4"},
+  "session_id":"fresh-session",
+  "rate_limits":{
+    "five_hour":{"used_percentage":0,"resets_at":%d},
+    "seven_day":{"used_percentage":0,"resets_at":%d},
+    "spend_limit":{"used_percentage":12.5,"resets_at":%d},
+    "seven_day_sonnet":null,
+    "seven_day_opus":{"used_percentage":3,"resets_at":%d},
+    "model_scoped":[{"model":"opus","used_percentage":3}],
+    "limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":0,"resets_at":%q,"is_active":true}]
+  }
+}`, fiveReset, sevenReset, spendReset, sevenReset, fableReset.Format(time.RFC3339)))
+	if _, err := Render(context.Background(), input, runtime); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(rateDir, "acct-2.fresh-session.json"))
+	if err != nil {
+		t.Fatalf("read account 2 quota snapshot: %v", err)
+	}
+	type window struct {
+		UsedPercentage float64 `json:"used_percentage"`
+		ResetsAt       int64   `json:"resets_at"`
+	}
+	var snapshot struct {
+		FiveHourUsed     *int64            `json:"five_hour_used"`
+		FiveHourResetsAt int64             `json:"five_hour_resets_at"`
+		Windows          map[string]window `json:"windows"`
+	}
+	if err := json.Unmarshal(body, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]window{
+		"five_hour":       {0, fiveReset},
+		"seven_day":       {0, sevenReset},
+		"spend_limit":     {12.5, spendReset},
+		"seven_day_opus":  {3, sevenReset},
+		"seven_day_fable": {0, fableReset.Unix()},
+	}
+	if len(snapshot.Windows) != len(want) {
+		t.Fatalf("snapshot windows=%v, want exactly %v", snapshot.Windows, want)
+	}
+	for key, expected := range want {
+		if got, ok := snapshot.Windows[key]; !ok || got != expected {
+			t.Fatalf("snapshot window %s=%v (present=%v), want %v", key, got, ok, expected)
+		}
+	}
+	if snapshot.FiveHourUsed == nil || *snapshot.FiveHourUsed != 0 || snapshot.FiveHourResetsAt != fiveReset {
+		t.Fatalf(
+			"legacy five-hour keys=%v/%d, want 0 resetting at %d",
+			snapshot.FiveHourUsed, snapshot.FiveHourResetsAt, fiveReset,
+		)
+	}
+	usage, _, found, err := usagehook.ReadStatuslineSnapshot(rateDir, 2, configDir, now, time.Minute)
+	if err != nil || !found || usage.FiveHour.Utilization == nil || *usage.FiveHour.Utilization != 0 {
+		t.Fatalf("read back found=%v err=%v five_hour=%v, want the 0%% reading", found, err, usage.FiveHour)
+	}
+}
+
+// TestEngineFromEnvironmentIgnoresTheLoginDefault: the login default is no
+// engine signal; a real Claude seat still names itself by its session id.
+func TestEngineFromEnvironmentIgnoresTheLoginDefault(t *testing.T) {
+	const dir = "/home/test/.cc/1"
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+		want pfmengine.ID
+	}{
+		{"neither set", map[string]string{}, ""},
+		{"login default", map[string]string{"CLAUDE_CONFIG_DIR": dir, claudelaunch.ConfigDirDefaultEnv: dir}, ""},
+		{"explicit", map[string]string{"CLAUDE_CONFIG_DIR": dir}, pfmengine.Claude},
+		{"login default inside a Claude seat", map[string]string{
+			"CLAUDE_CONFIG_DIR": dir, claudelaunch.ConfigDirDefaultEnv: dir, "CLAUDE_CODE_SESSION_ID": "s",
+		}, pfmengine.Claude},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := EngineFromEnvironment(func(key string) string { return test.env[key] })
+			if got != test.want || (test.want == "") != errors.Is(err, ErrNoEngineInEnvironment) {
+				t.Fatalf("EngineFromEnvironment(%q) = (%q, %v), want %q", test.env, got, err, test.want)
+			}
+		})
 	}
 }

@@ -10,6 +10,7 @@ import (
 // inline Markdown — a link, italics, and bold kept or, for a toggle's
 // summary (bold already), left out — its runs joined as the site shows them.
 func TestNotionRichTextKeepsItsMarks(t *testing.T) {
+	t.Parallel()
 	var records struct {
 		RecordMap notionRecordMap `json:"recordMap"`
 	}

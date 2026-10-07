@@ -13,6 +13,8 @@ import (
 )
 
 func TestStoreSHAWithRunnerUsesScriptedGit(t *testing.T) {
+	t.Setenv("GIT_DIR", "/foreign/.git")
+	t.Setenv("GIT_INDEX_FILE", "/foreign/index")
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -30,6 +32,11 @@ func TestStoreSHAWithRunnerUsesScriptedGit(t *testing.T) {
 	calls := fake.Calls()
 	if len(calls) != 1 || calls[0].Opts.Dir != root {
 		t.Fatalf("Git calls = %#v, want one call in %q", calls, root)
+	}
+	for _, entry := range calls[0].Opts.Env {
+		if strings.HasPrefix(entry, "GIT_DIR=") || strings.HasPrefix(entry, "GIT_INDEX_FILE=") {
+			t.Fatalf("inherited repository entry = %q", entry)
+		}
 	}
 }
 
@@ -70,6 +77,7 @@ func TestStoreSHAWithRunnerReportsGitExitAndStartFailures(t *testing.T) {
 }
 
 func TestStoreSHAWithRunnerPassesFenceGitEnvironment(t *testing.T) {
+	t.Setenv("GIT_DIR", "/foreign/.git")
 	root := t.TempDir()
 	gitDir := filepath.Join(t.TempDir(), "git-common")
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
@@ -99,11 +107,39 @@ func TestStoreSHAWithRunnerPassesFenceGitEnvironment(t *testing.T) {
 	if calls[0].Opts.Dir != root {
 		t.Fatalf("Git Dir = %q, want %q", calls[0].Opts.Dir, root)
 	}
+	gitDirs := 0
+	for _, entry := range calls[0].Opts.Env {
+		if strings.HasPrefix(entry, "GIT_DIR=") {
+			gitDirs++
+		}
+	}
+	if gitDirs != 1 {
+		t.Fatalf("GIT_DIR entries = %d, want exactly one: %q", gitDirs, calls[0].Opts.Env)
+	}
 	if got := environmentValue(calls[0].Opts.Env, "GIT_DIR"); got != gitDir {
 		t.Fatalf("GIT_DIR = %q, want %q", got, gitDir)
 	}
 	if got := environmentValue(calls[0].Opts.Env, "GIT_WORK_TREE"); got != root {
 		t.Fatalf("GIT_WORK_TREE = %q, want %q", got, root)
+	}
+}
+
+func TestAdoptGitFiltersInheritedRepository(t *testing.T) {
+	t.Setenv("GIT_DIR", "/foreign/.git")
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{deps.Executable("git"), "rev-parse", "HEAD"}, deps.RunResult{Stdout: []byte("sha\n")}, nil)
+	root := t.TempDir()
+	if _, _, err := adoptGit(fake, root, "rev-parse", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 || calls[0].Opts.Env == nil {
+		t.Fatalf("Git calls = %#v, want one call with an explicit environment", calls)
+	}
+	for _, entry := range calls[0].Opts.Env {
+		if strings.HasPrefix(entry, "GIT_DIR=") {
+			t.Fatalf("inherited repository entry = %q", entry)
+		}
 	}
 }
 

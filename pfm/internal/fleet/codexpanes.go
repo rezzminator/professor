@@ -104,6 +104,10 @@ type CodexPaneAction struct {
 	// a prompt baseline. Empty on a seed, because a pane pfm was not already
 	// following cannot have been observed to clear.
 	ClearKill string
+	// BindRoot is the lineage root of Bind, set beside ClearKill: the id the
+	// chat's row carries once the pane moved, where the reminders of the
+	// cleared chat follow it.
+	BindRoot string
 	// Skip names why the pane was left alone. Never empty when Bind is.
 	Skip string
 	// Forget erases this pane's binding outright. It is the repair for a
@@ -286,7 +290,7 @@ func decideCodexPane(
 			action.Skip = CodexPaneSameLineage
 			return action
 		}
-		action.ClearKill = observation.Bound
+		action.ClearKill, action.BindRoot = observation.Bound, currentRoot
 		return action
 	}
 
@@ -344,7 +348,7 @@ func decideCodexPane(
 			return action
 		}
 		action.Bind = target
-		action.ClearKill = observation.Bound
+		action.ClearKill, action.BindRoot = observation.Bound, currentRoot
 		return action
 	}
 

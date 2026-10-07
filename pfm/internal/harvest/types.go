@@ -377,12 +377,16 @@ func (h *Harvester) nowClock() clock.Clock {
 type fetchFlight struct {
 	done   chan struct{}
 	result Result
+	// abandoned marks a walk that failed once its leader's context ended:
+	// joined callers walk again rather than read its result
+	// (Harvester.fetchShared).
+	abandoned bool
 }
 
 // New constructs a Harvester. A nil Converter is valid for callers that only
 // need archive listing, search, or raw transport tests; converted fetches then
 // report a useful error instead of silently returning bytes. It fails when no
-// CacheDir was given and the one default (<home>/.professor/.cache) cannot be
+// CacheDir was given and the one default (<home>/.professor/.harvester-cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
 	if options.Clock == nil {
@@ -567,24 +571,4 @@ func NewDirectClient(
 		}
 	}
 	return client
-}
-
-// IsPinnedClient reports whether client's transport is harvest's own pinned
-// direct dialer — userAgentTransport wrapping a *http.Transport whose
-// DialContext is pinnedDialContext — rather than a bare, unpinned transport.
-// It lets an adapter package (harvestmcp) assert its client was built via
-// NewDirectClient without reaching into harvest's unexported transport types.
-func IsPinnedClient(client *http.Client) bool {
-	if client == nil {
-		return false
-	}
-	wrapped, ok := client.Transport.(*userAgentTransport)
-	if !ok || wrapped.chrome {
-		return false
-	}
-	transport, ok := wrapped.base.(*http.Transport)
-	if !ok {
-		return false
-	}
-	return transport.DialContext != nil
 }

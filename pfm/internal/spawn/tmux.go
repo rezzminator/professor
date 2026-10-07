@@ -8,13 +8,25 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
+
+// SessionCreatedError reports creation whose child has not been proven terminated.
+// Callers must retain launch ownership even when no successful result is returned.
+type SessionCreatedError struct {
+	Err error
+}
+
+func (err *SessionCreatedError) Error() string { return err.Err.Error() }
+func (err *SessionCreatedError) Unwrap() error { return err.Err }
 
 // TmuxSpawner invokes tmux only through the configured socket directory, the
 // same jailed shape action.TmuxExecutor uses.
@@ -77,13 +89,28 @@ func preflightBinary(binary string) error {
 func (tmux TmuxSpawner) NewSession(
 	ctx context.Context,
 	spec SessionSpec,
-) error {
+) (returnErr error) {
 	if err := preflightBinary(spec.Binary); err != nil {
 		return err
 	}
 	if err := paths.EnsureTmuxDir(tmux.TmuxDir); err != nil {
 		return err
 	}
+	account, err := claudelaunch.ConfigDirFromRun(spec.Run)
+	if err != nil {
+		return err
+	}
+	guard, err := gather.AcquireAccountGuard(account, true)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
+	started := false
+	defer func() {
+		if !started {
+			returnErr = errors.Join(returnErr, guard.Abort())
+		}
+	}()
 	arguments := append(paths.TmuxConfigArguments(),
 		"new-session", "-d",
 		"-s", spec.Session,
@@ -110,8 +137,31 @@ func (tmux TmuxSpawner) NewSession(
 	if err != nil {
 		return errors.Join(fmt.Errorf("create chat server: %w", err), launch.Discard())
 	}
+	// A failed client call may already have created its server. Retain the
+	// pending claim unless a fresh cleanup call proves it terminated.
+	started = guard != nil
 	if output, err := command.CombinedOutput(); err != nil {
-		return errors.Join(fmt.Errorf("create chat server: %w: %s", err, output), launch.Discard())
+		createErr := fmt.Errorf("create chat server: %w: %s", err, output)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			createErr = fmt.Errorf("create chat server: %w", ctxErr)
+		}
+		return errors.Join(tmux.terminateUnrecorded(guard, spec.Socket, createErr), launch.Discard())
+	}
+	started = true
+	if guard != nil {
+		output, queryErr := tmux.command(ctx, spec.Socket, "display-message", "-p", "-t", spec.Session+":", "#{pane_pid}").
+			Output()
+		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(output)))
+		recordErr := queryErr
+		if recordErr == nil && parseErr != nil {
+			recordErr = fmt.Errorf("read account launch pane pid: %w", parseErr)
+		}
+		if recordErr == nil {
+			recordErr = guard.Record(pid)
+		}
+		if recordErr != nil {
+			return tmux.terminateUnrecorded(guard, spec.Socket, recordErr)
+		}
 	}
 	for _, options := range pfmconfig.ChatServerOptions(tmux.Titles) {
 		if output, err := tmux.command(
@@ -119,21 +169,38 @@ func (tmux TmuxSpawner) NewSession(
 			spec.Socket,
 			options...,
 		).CombinedOutput(); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return &SessionCreatedError{Err: fmt.Errorf("configure chat server: %w", ctxErr)}
+			}
 			// A server that vanished between creation and configuration died
 			// with its only pane — name the pane command's SHAPE, because
 			// that is where the death almost always started. spec.Run can
 			// carry a prompt body (action.HeadlessRun appends it to the
 			// launch line), so the error names the binary and word count,
-			// never the command line itself.
-			return fmt.Errorf(
+			// never the command line itself. Cancellation returns as itself.
+			return &SessionCreatedError{Err: fmt.Errorf(
 				"configure chat server: %w: %s — the server died before it could be configured; its pane command likely exited at launch (%s)",
 				err,
 				output,
 				runShape(spec),
-			)
+			)}
 		}
 	}
 	return nil
+}
+
+// terminateUnrecorded keeps protection if the child could still be alive.
+func (tmux TmuxSpawner) terminateUnrecorded(guard *gather.AccountGuard, socket string, launchErr error) error {
+	if guard == nil {
+		return &SessionCreatedError{Err: launchErr}
+	}
+	// A canceled launch still owns its child; cleanup uses a fresh context.
+	if err := tmux.command(context.Background(), socket, "kill-server").Run(); err != nil {
+		return &SessionCreatedError{
+			Err: errors.Join(launchErr, fmt.Errorf("terminate unrecorded chat server: %w", err)),
+		}
+	}
+	return errors.Join(launchErr, guard.Abort())
 }
 
 // runShape is the pane command's SHAPE for an error message: the binary's
@@ -197,6 +264,34 @@ func (tmux TmuxSpawner) SendLiteral(
 		"send-keys", "-t", target, "-l", "--", text,
 	).Run()
 }
+
+// SendPaste loads text into a private one-shot tmux buffer and pastes it
+// with -p, so an engine that enables bracketed paste receives it as a single
+// paste event; -d deletes the buffer once pasted.
+func (tmux TmuxSpawner) SendPaste(
+	ctx context.Context,
+	socket, target, text string,
+) error {
+	buffer := fmt.Sprintf("pfm-spawn-%d-%d", os.Getpid(), pasteSequence.Add(1))
+	load := tmux.command(ctx, socket, "load-buffer", "-b", buffer, "-")
+	load.Stdin = strings.NewReader(text)
+	if err := load.Run(); err != nil {
+		return fmt.Errorf("load the prompt into tmux buffer %s: %w", buffer, err)
+	}
+	if err := tmux.command(
+		ctx, socket, "paste-buffer", "-d", "-p", "-b", buffer, "-t", target,
+	).Run(); err != nil {
+		if deleteErr := tmux.command(ctx, socket, "delete-buffer", "-b", buffer).Run(); deleteErr != nil {
+			return fmt.Errorf("paste tmux buffer %s: %w (delete it: %v)", buffer, err, deleteErr)
+		}
+		return fmt.Errorf("paste tmux buffer %s: %w", buffer, err)
+	}
+	return nil
+}
+
+// pasteSequence keeps concurrent spawns in one process off each other's
+// paste buffers.
+var pasteSequence atomic.Uint64
 
 func (tmux TmuxSpawner) SendKey(
 	ctx context.Context,

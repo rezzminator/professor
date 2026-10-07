@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
@@ -36,22 +38,16 @@ const (
 	statusDead = "dead"
 )
 
-// selfCompactDescription is a named const so the registered text and the test
-// that pins it read the same string. The STOP clause is not decoration: the
-// --then waiter recognises the compaction turn by watching this pane yield and
-// then go busy again, and a caller that keeps working erases that boundary.
-const selfCompactDescription = "Compacts THIS chat in place after its turn settles and KEEPS the session (crons, sub-agents, pane) — the only answer to \"compact yourself\" / \"self-compact at this milestone\", this tool and nothing else, never a hand-typed /compact. Call chat_self_compact{focus:\"one line\", then:\"one steer\"} — exactly ONE post-compact steer, a string never a list. Only focus and then cross the boundary — write durable state to disk FIRST. END THE TURN IMMEDIATELY after it returns, run no further tool; more work lands the steer beside the compaction. Main chat only — a sub-agent has no pane."
-
 var chatToolNames = []string{
-	"chat_capture", "chat_find", "chat_inject",
+	"chat_capture", "chat_digest", "chat_find", "chat_inject",
 	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
 	"chat_new", "chat_open", "chat_read", "chat_resolve",
-	"chat_save", "chat_self_compact", "chat_status", "chat_unkill",
+	"chat_save", "chat_status", "chat_unkill",
 	"chat_whoami", "servicedesk",
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; compact myself at a milestone → chat_self_compact; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands."
+const chatInstructions = "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_digest; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. branch, end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -62,8 +58,10 @@ func ToolNames() []string {
 
 // Service owns one MCP server and its long-lived SQLite handle.
 type Service struct {
-	server  *mcp.Server
-	backend *backend
+	server       *mcp.Server
+	backend      *backend
+	nameMutex    sync.Mutex
+	pendingNames map[string]struct{}
 }
 
 // Runtime is the already-loaded machine policy the stdio server shares with
@@ -165,11 +163,6 @@ func (service *Service) registerTools(server *mcp.Server) {
 		Annotations: mutating,
 	}, obs.Tool("chat_inject", service.chatInject))
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "chat_self_compact",
-		Description: selfCompactDescription,
-		Annotations: mutating,
-	}, obs.Tool("chat_self_compact", service.chatSelfCompact))
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_keys",
 		Description: "Presses tmux keys in a live chat — \"press Escape / Enter in chat X\", accept a modal, interrupt a turn. Call chat_keys{target:\"my-chat\", keys:[\"Escape\"]}; raw text is keys:[\"y\"] with literal:true. For a whole message use chat_inject; a sub-agent never drives its parent's pane. Returns status ok with count sent; not_found = no such chat; dead = the pane vanished mid-sequence, count says how many landed; a tool error = an unknown key name, the valid ones listed.",
 		Annotations: mutating,
@@ -186,28 +179,39 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("chat_whoami", service.chatWhoami))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_find",
-		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_read. Only Claude transcripts are searched. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
+		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_digest. Only Claude transcripts are searched. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_find", service.chatFind))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_read",
-		Description: "Reads the recent visible turns of an indexed transcript — \"what happened in that chat\", after chat_find or with a known id. Call chat_read{source:\"<id from chat_find>\", last_n:20}. Returns turns (role, text, timestamp) with count and truncated; turns empty with count 0 = the transcript has no visible turns yet; a tool error = no transcript by that id or path. For a LIVE chat's current answer, chat_last.",
+		Description: "Reads the recent visible turns of an indexed transcript — \"what happened in that chat\", after chat_find or with a known id. Call chat_read{source:\"<id from chat_find>\", last_n:20}. Returns turns (role, text, timestamp) with count and truncated; turns empty with count 0 = the transcript has no visible turns yet; a tool error = no transcript by that id or path. For a LIVE chat's current answer, chat_last. For a window, a filter or tool results, chat_digest.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_read", service.chatRead))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_digest",
+		Description: "Digests a transcript, one line per event — prompts, replies, each tool call with its result, notes — \"what did that chat or sub-agent do\", \"its failed calls\", \"what happened 14:00–14:30\". Call chat_digest{source:\"<chat_find id, session or agent id, path, or chat title>\", grep:\"deploy\", last:40}. Returns text: a header (file, span, calls by tool, FILTER line), then the events; \"shown 0 of N\" = nothing matched. A tool error = the source did not resolve (NOT FOUND, or AMBIGUOUS with candidates) or the digest failed. chat_read: recent turns only, no results; a live chat's newest answer, chat_last.",
+		Annotations: readOnly,
+	}, obs.Tool("chat_digest", service.chatDigest))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_last",
-		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure). For screen text, chat_capture; for older turns, chat_read.",
+		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure); on Codex a turn still in progress is a tool error that says so; Claude and OpenCode return the newest answer written so far. For screen text, chat_capture; for older turns, chat_read.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_last", service.chatLast))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_status",
-		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle), context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
+		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle or error), context_pct and last; state error is a turn the model server ended (error names its kind, e.g. server_overloaded) and the chat waits at its prompt; state blocked is a chat held by a permission dialog, question or modal on its screen, waiting for its human to answer it; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_status", service.chatStatus))
+	newInputSchema, err := jsonschema.For[NewInput](nil)
+	if err != nil {
+		panic(fmt.Sprintf("chat_new input schema: %v", err))
+	}
+	newInputSchema.Properties["cache"].Enum = []any{"1h", "5m"}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_new",
-		Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.",
+		Description: "MANDATORY for every chat or model run this chat starts — a seat, a worker, a probe, at any model, effort or agent role; never claude -p or pfm headless exec. Call chat_new{name:\"auth-review\", model:\"claude-sonnet-5-5\", effort:\"xhigh\", agentRole:\"flights-foreman\", prompt:\"…\", await:true}. chat_kill it once its job is done, or it stays listed in pfm ls. Returns status ok with the launch message, or with await the first answer; a tool error = the launch failed, its stderr in the message. Not for a helper inside THIS chat → a harness sub-agent.",
 		Annotations: mutating,
+		InputSchema: newInputSchema,
 	}, obs.Tool("chat_new", service.chatNew))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_open",
@@ -286,20 +290,6 @@ const noAmbientCallerRemedy = "MCP request has no _meta.threadId, and this " +
 	"equivalent `pfm chat ...` command from the chat's own shell instead — " +
 	"that process IS the chat. A Codex chat should resolve automatically; " +
 	"if it does not, its MCP client is not attaching _meta.threadId to this call."
-
-// selfCompactNoAmbientRemedy replaces noAmbientCallerRemedy for
-// chat_self_compact alone: the generic message's remedy — "run the
-// equivalent `pfm chat ...` command" — never says which subcommand.
-// chat_self_compact's CLI twin is `pfm chat self-compact`, which shares this
-// tool's engine method (Engine.ScheduleSelfCompact) and its wait-for-the-
-// caller's-own-turn-to-end contract — never a live /compact keystroke.
-const selfCompactNoAmbientRemedy = "MCP request has no _meta.threadId, and " +
-	"this server is pfm's shared HTTP daemon (one process serving every chat " +
-	"on the machine), so it cannot derive who is calling: Claude Code does " +
-	"not attach per-call caller identity over this transport. From the " +
-	"chat's own shell, run `pfm chat self-compact --then '<steer>' " +
-	"'<focus>'`. A Codex chat should resolve automatically; if it does not, " +
-	"its MCP client is not attaching _meta.threadId to this call."
 
 func (service *Service) selfCallerRefusal(caller callerIdentity) (bool, string) {
 	if caller.valid {
@@ -526,47 +516,6 @@ func (service *Service) chatInject(
 	return nil, outputFromInject(result), err
 }
 
-func (service *Service) chatSelfCompact(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input SelfCompactInput,
-) (*mcp.CallToolResult, InjectOutput, error) {
-	focus := strings.TrimSpace(input.Focus)
-	if focus == "" || strings.ContainsAny(focus, "\r\n\x00") {
-		return nil, InjectOutput{}, fmt.Errorf("focus must be one non-empty line")
-	}
-	injector, caller, err := service.injectorForRequest(ctx, request)
-	if err != nil {
-		return nil, InjectOutput{}, err
-	}
-	if refused, detail := service.selfCallerRefusal(caller); refused {
-		if detail == noAmbientCallerRemedy {
-			detail = selfCompactNoAmbientRemedy
-		}
-		return nil, InjectOutput{
-			Status: statusNotFound, Code: inject.CodeUnknown, Message: detail,
-		}, nil
-	}
-	// One steer, by the operator's rule. The engine's own guards still run on
-	// it — a steer is required, and it must not start with /compact — and a
-	// blank string reaches them as no steer at all rather than as an empty one.
-	var then []string
-	if steer := strings.TrimSpace(input.Then); steer != "" {
-		then = []string{steer}
-	}
-	// Composition ("/compact " + focus, the Codex bare-command exception) is
-	// the engine's own job now (Task D: Engine.ScheduleSelfCompact) — the one
-	// implementation `pfm chat self-compact` shares. focus is re-validated
-	// there too; the check above stays because this handler must return a
-	// tool-call error for a bad focus, not an InjectOutput refusal.
-	result, err := injector.ScheduleSelfCompact(ctx, focus, then)
-	// The stop notice is appended by the engine itself
-	// (inject.SelfCompactStopNotice), which is the single writer for every
-	// caller — MCP tool and `pfm chat self-compact` alike. Restating it here
-	// would double it on the MCP path only.
-	return nil, outputFromInject(result), err
-}
-
 // mcpUnsignedMessage restates inject.ErrUnsigned's refusal for an MCP
 // caller. The engine's own wording (inject/body.go) is CLI-oriented — it
 // tells the reader to set an environment variable or pass --allow-unsigned,
@@ -760,40 +709,4 @@ func tailBytes(text string, budget int) string {
 		cut++
 	}
 	return text[cut:]
-}
-
-func (service *Service) chatFind(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input FindInput,
-) (*mcp.CallToolResult, FindOutput, error) {
-	self := ""
-	if !input.IncludeSelf {
-		caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
-		if err != nil {
-			return nil, FindOutput{}, err
-		}
-		switch {
-		case caller.valid && caller.row.Engine == pfmengine.Claude && caller.identity.ID != "":
-			self = caller.identity.ID
-		case !caller.present && service.backend.allowAmbientIdentity:
-			self = chat.AskingSession()
-		}
-	}
-	output, err := service.backend.find(ctx, input, self)
-	return nil, output, err
-}
-
-func (service *Service) chatRead(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input ReadInput,
-) (*mcp.CallToolResult, ReadOutput, error) {
-	var err error
-	ctx, input.Source, err = service.cliTargetForRequest(ctx, request, input.Source)
-	if err != nil {
-		return nil, ReadOutput{}, err
-	}
-	output, err := service.backend.read(ctx, input)
-	return nil, output, err
 }

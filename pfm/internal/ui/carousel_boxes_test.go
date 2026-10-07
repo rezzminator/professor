@@ -10,13 +10,10 @@ import (
 // as → is pressed.
 func TestCarouselBoxesShowsEveryActionAtOnce(t *testing.T) {
 	boxes := carouselBoxes(0)
-	for _, label := range []string{"open", "reboot", "1h", "kill", "deactive"} {
+	for _, label := range []string{"open", "reboot", "kill", "deactive"} {
 		if !strings.Contains(boxes, label) {
 			t.Fatalf("carouselBoxes(0) = %q, missing the %q action", boxes, label)
 		}
-	}
-	if strings.Contains(boxes, "reload") {
-		t.Fatalf("carouselBoxes(0) = %q, contains removed reload action", boxes)
 	}
 	if strings.Count(boxes, "[")+strings.Count(boxes, "◖") != len(carouselActions) {
 		t.Fatalf("carouselBoxes(0) = %q, want one box per action", boxes)
@@ -29,8 +26,8 @@ func TestCarouselBoxesFillsOnlyTheCurrentAction(t *testing.T) {
 	for index, want := range map[int]string{
 		0: "◖▶ open◗",
 		1: "◖⚡ reboot◗",
-		3: "◖✖ kill◗",
-		4: "◖⏸ deactive◗",
+		2: "◖✖ kill◗",
+		3: "◖⏸ deactive◗",
 	} {
 		boxes := carouselBoxes(index)
 		if !strings.Contains(boxes, want) {

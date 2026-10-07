@@ -7,11 +7,17 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // gatewayExemptFiles are the ONLY files allowed to perform HTTP egress without
@@ -77,6 +83,67 @@ var (
 	}
 )
 
+var gatewayExports struct {
+	once   sync.Once
+	files  map[string]string
+	stderr string
+	err    error
+}
+
+func gatewayExportLookup(path string) (io.ReadCloser, error) {
+	gatewayExports.once.Do(func() {
+		_, source, _, ok := runtime.Caller(0)
+		if !ok {
+			gatewayExports.err = fmt.Errorf("locate the harvest package for go list: caller unavailable")
+			return
+		}
+		cmd := exec.Command("go", "list", "-export", "-deps", "-f", `{{.ImportPath}}{{"\t"}}{{.Export}}`, ".")
+		cmd.Dir = filepath.Dir(source)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		output, err := cmd.Output()
+		gatewayExports.stderr = stderr.String()
+		if err != nil {
+			gatewayExports.err = fmt.Errorf("go list -export -deps: %w", err)
+			return
+		}
+		gatewayExports.files = make(map[string]string)
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			importPath, exportFile, ok := strings.Cut(line, "\t")
+			if !ok || importPath == "" {
+				gatewayExports.err = fmt.Errorf("malformed go list export row %q", line)
+				return
+			}
+			if exportFile != "" {
+				gatewayExports.files[importPath] = exportFile
+			}
+		}
+	})
+	if gatewayExports.err != nil {
+		return nil, fmt.Errorf(
+			"export lookup for import %q: %w; go list stderr: %q",
+			path,
+			gatewayExports.err,
+			gatewayExports.stderr,
+		)
+	}
+	exportFile, ok := gatewayExports.files[path]
+	if !ok {
+		return nil, fmt.Errorf("no export file for import %q; go list stderr: %q", path, gatewayExports.stderr)
+	}
+	file, err := os.Open(exportFile)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"open export file %q for import %q: %w; go list stderr: %q",
+			exportFile,
+			path,
+			err,
+			gatewayExports.stderr,
+		)
+	}
+	return file, nil
+}
+
 // scanGatewayEgress type-checks files as one synthetic package and returns
 // every call that issues, or could issue, outbound HTTP: a method
 // Do/Get/Post/Head/PostForm on *net/http.Client, RoundTrip on any
@@ -87,7 +154,7 @@ var (
 // importer error or an unparsed file must never silently report zero
 // offenders, because that renders exactly like a clean scan.
 func scanGatewayEgress(fset *token.FileSet, files []*ast.File) ([]gatewayEgressFinding, error) {
-	conf := &types.Config{Importer: importer.ForCompiler(fset, "source", nil)}
+	conf := &types.Config{Importer: importer.ForCompiler(fset, "gc", gatewayExportLookup)}
 	info := &types.Info{
 		Uses:       make(map[*ast.Ident]types.Object),
 		Selections: make(map[*ast.SelectorExpr]*types.Selection),
@@ -187,6 +254,7 @@ func scanGatewayEgress(fset *token.FileSet, files []*ast.File) ([]gatewayEgressF
 // passing on an empty enumeration — "we could not look" must never render as
 // "there is nothing there".
 func TestEveryEgressGoesThroughTheGateway(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -243,6 +311,7 @@ func TestEveryEgressGoesThroughTheGateway(t *testing.T) {
 // matched only ".Do(" and "http.NewRequest", so a fixture call like
 // client.Get(...), http.Head(...), or rt.RoundTrip(...) passed it silently.
 func TestGatewayEgressEnumeratorCatchesEveryShape(t *testing.T) {
+	t.Parallel()
 	const fixture = `package fixture
 
 import "net/http"
@@ -299,6 +368,7 @@ func exercise() {
 // url.Values too, and a textual match would flag both as gateway bypasses.
 // scanGatewayEgress must resolve the receiver type and flag neither.
 func TestGatewayEgressEnumeratorIgnoresLookalikeMethods(t *testing.T) {
+	t.Parallel()
 	const fixture = `package fixture
 
 import (
@@ -329,6 +399,7 @@ func exercise(h http.Header, v url.Values) {
 // type-checked must never report zero offenders — that is indistinguishable
 // from a clean scan. scanGatewayEgress must return an error instead.
 func TestGatewayEgressEnumeratorFailsOnBrokenPackage(t *testing.T) {
+	t.Parallel()
 	const broken = `package fixture
 
 func exercise() {
@@ -342,5 +413,76 @@ func exercise() {
 	}
 	if _, err := scanGatewayEgress(fset, []*ast.File{file}); err == nil {
 		t.Fatal("scanGatewayEgress error = nil for an unresolvable package, want a type-check failure")
+	}
+}
+
+func TestGatewayExportLookupFailureIsCached(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("GATEWAY_EXPORT_TEST_CHILD") == "1" {
+		const fixture = "package fixture\nimport \"net/http\"\nvar _ = http.Get\n"
+		for range 2 {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "fixture.go", fixture, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = scanGatewayEgress(fset, []*ast.File{file})
+			if err == nil || !strings.Contains(err.Error(), "net/http") ||
+				!strings.Contains(err.Error(), "deliberate go list failure") {
+				t.Fatalf("scan error = %v, want import path and go list stderr", err)
+			}
+		}
+		return
+	}
+
+	dir := t.TempDir()
+	goScript := filepath.Join(dir, "go")
+	const failingGo = `#!/bin/sh
+printf 'call\n' >> "$GATEWAY_GO_LIST_COUNT"
+printf 'deliberate go list failure\n' >&2
+exit 19
+`
+	if err := testjail.WriteExecutable(goScript, []byte(failingGo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	countPath := filepath.Join(dir, "count")
+	cmd := exec.Command(exe, "-test.run=^TestGatewayExportLookupFailureIsCached$")
+	cmd.Env = append(
+		os.Environ(),
+		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GATEWAY_EXPORT_TEST_CHILD=1",
+		"GATEWAY_GO_LIST_COUNT="+countPath,
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("lookup failure child: %v\n%s", err, output)
+	}
+	calls, err := os.ReadFile(countPath)
+	if err != nil {
+		t.Fatalf("read go list call count: %v", err)
+	}
+	if got := strings.Count(string(calls), "call\n"); got != 1 {
+		t.Fatalf("go list calls = %d, want one; child output = %q", got, calls)
+	}
+}
+
+func TestGatewayExportLookupReportsMissingExport(t *testing.T) {
+	// Serial: deletes and restores gatewayExports.files["net/http"], a package map the parallel enumerator tests read.
+	file, err := gatewayExportLookup("net/http")
+	if err != nil {
+		t.Fatalf("load net/http export: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close net/http export: %v", err)
+	}
+	exportFile := gatewayExports.files["net/http"]
+	delete(gatewayExports.files, "net/http")
+	defer func() { gatewayExports.files["net/http"] = exportFile }()
+	if _, err := gatewayExportLookup("net/http"); err == nil || !strings.Contains(err.Error(), "net/http") ||
+		!strings.Contains(err.Error(), "go list stderr") {
+		t.Fatalf("lookup without an export file = %v, want import path and go list stderr", err)
 	}
 }

@@ -35,7 +35,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
 	})
 	// Two SEPARATE sessions, one per fake chat: a real kill now really closes
-	// the pane it targets (runResolvedChatKill's ConfirmExit verifies and, if
+	// the pane it targets (runResolvedChatKillContext's ConfirmExit verifies and, if
 	// needed, force-closes it), and two independent live chats never actually
 	// share one pane — sharing one here would have the first kill's pane
 	// close take the second fixture's socket down with it.
@@ -109,7 +109,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 
 	// F1 regression: runChatKill now resolves EVERY target — uuid or name —
 	// through pfmchat.Resolve first, and a resolved row that is Live with a
-	// non-empty Socket and Pane is closed through runResolvedChatKill(...,
+	// non-empty Socket and Pane is closed through runResolvedChatKillContext(...,
 	// true, ...), not merely tombstoned. The old code short-circuited
 	// resolution entirely for a well-formed uuid target (both agentID and
 	// codexID are uuids) and only ever passed --exit when the CLI caller
@@ -252,12 +252,13 @@ func newKillCLIJail(t *testing.T) *killCLIJail {
 	writeJailedCodexAuth(t, root)
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", claudeRoot)
 	t.Setenv("PFM_CODEX_ROOT", codexHome)
 	t.Setenv("PFM_TMUX_DIR", tmuxDir)
 	t.Setenv("PFM_PROC_ROOT", procRoot)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
+	t.Setenv("PFM_TEST_KILL_CONFIRM_EVERY_MS", "10")
 	return &killCLIJail{root: root, home: home, procRoot: procRoot}
 }

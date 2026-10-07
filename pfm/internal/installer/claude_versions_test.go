@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeVersionsProcFS serves a hand-built process table with real
@@ -77,12 +78,13 @@ func goneSignal(int, syscall.Signal) error { return syscall.ESRCH }
 
 func writeExecutable(t *testing.T, path string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestInspectClaudeVersionsMarksLiveNewestConfiguredAndUnparsed(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -145,6 +147,7 @@ func TestInspectClaudeVersionsMarksLiveNewestConfiguredAndUnparsed(t *testing.T)
 }
 
 func TestPlanClaudeVersionPruneRefusesEverythingWhenTheImageProbeFails(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -185,6 +188,7 @@ func TestPlanClaudeVersionPruneRefusesEverythingWhenTheImageProbeFails(t *testin
 // whole scan. A non-candidate pid's Image is never even called — its argv[0]
 // names something else entirely.
 func TestProbeLiveClaudeVersionsSkipsNonCandidatePidsEvenWhenTheirImageErrors(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -230,6 +234,7 @@ func TestProbeLiveClaudeVersionsSkipsNonCandidatePidsEvenWhenTheirImageErrors(t 
 // must still refuse the whole prune — a live build pfm could not identify is
 // the unsafe direction to guess "unused" about.
 func TestProbeLiveClaudeVersionsRefusesWhenACandidatePidsImageErrorsAndItIsStillAlive(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -264,6 +269,7 @@ func TestProbeLiveClaudeVersionsRefusesWhenACandidatePidsImageErrorsAndItIsStill
 // pins the ESRCH carve-out precedent internal/stale.Find also relies on: a
 // candidate pid that exited mid-scan is skipped, not refused.
 func TestProbeLiveClaudeVersionsSkipsACandidateWhoseImageFailsBecauseThePidIsGone(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -291,6 +297,7 @@ func TestProbeLiveClaudeVersionsSkipsACandidateWhoseImageFailsBecauseThePidIsGon
 }
 
 func TestPlanClaudeVersionPruneKeepsNewestTwoAndRemovesTheRest(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -353,6 +360,7 @@ func TestPlanClaudeVersionPruneKeepsNewestTwoAndRemovesTheRest(t *testing.T) {
 // direction — InspectClaudeVersions must refuse outright, not silently treat
 // the path as unconfigured.
 func TestInspectClaudeVersionsRefusesWhenIdentifyingTheConfiguredBinaryFailsForAReasonOtherThanAbsence(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {

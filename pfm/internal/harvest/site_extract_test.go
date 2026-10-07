@@ -14,6 +14,7 @@ import (
 // TestSiteExtractorLeavesOtherSitesOnTheGenericPath: the same markup on a
 // host no extractor owns goes through the injected converter.
 func TestSiteExtractorLeavesOtherSitesOnTheGenericPath(t *testing.T) {
+	t.Parallel()
 	doc, err := html.Parse(strings.NewReader(wallFixture(t, "reddit-thread-rendered.html")))
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +35,7 @@ func TestSiteExtractorLeavesOtherSitesOnTheGenericPath(t *testing.T) {
 // load-more buttons only on a host whose registered extractor asks for it;
 // every other host, an IP and an unparsable URL are read-only.
 func TestSitePressesLoadersOnlyForARegisteredSite(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		source string
 		want   bool
@@ -59,6 +61,7 @@ func TestSitePressesLoadersOnlyForARegisteredSite(t *testing.T) {
 // their markup (detect) that set pressLoaders would silently never press —
 // the registry holds no such entry.
 func TestNoMarkupClaimedExtractorPressesLoaders(t *testing.T) {
+	t.Parallel()
 	for _, extractor := range siteExtractors {
 		if extractor.detect != nil && extractor.pressLoaders {
 			t.Errorf("extractor %q claims pages by markup and sets pressLoaders, which SitePressesLoaders "+
@@ -135,6 +138,7 @@ func TestSiteExtractParseFailuresAreLogged(t *testing.T) {
 // per-site extractors share: headings, ordered and nested lists, hard breaks,
 // quotes, code and relative links resolved against the site.
 func TestMarkdownRendererKeepsRichTextStructure(t *testing.T) {
+	t.Parallel()
 	fragment := `<div><h2>Steps</h2><ol><li><p>Install it</p><ul><li>with <em>care</em></li></ul></li>` +
 		`<li>Run <code>tool --go</code></li></ol><p>line one<br>line two</p>` +
 		`<blockquote><p>quoted</p></blockquote><p>See <a href="/wiki/faq">the FAQ</a>.</p>` +

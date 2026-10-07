@@ -7,11 +7,23 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/mockengine"
 )
 
 func main() {
-	os.Exit(mockengine.Main(context.Background(), os.Args[0], os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
+	os.Exit(runMock(os.Args[0], os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
+}
+
+// runMock runs mockengine.Main under a context a hangup or terminate signal
+// cancels, releases the signal registration and returns Main's exit code.
+func runMock(argv0 string, args []string, stdin io.Reader, stdout, stderr io.Writer, env func(string) string) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGHUP, syscall.SIGTERM)
+	code := mockengine.Main(ctx, argv0, args, stdin, stdout, stderr, env)
+	stop()
+	return code
 }

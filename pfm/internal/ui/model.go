@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
@@ -52,11 +51,6 @@ const (
 type projectGroup struct {
 	name    string
 	indices []int
-}
-
-type nameGroup struct {
-	name  string
-	count int
 }
 
 type orderedSearch struct {
@@ -104,6 +98,7 @@ type Model struct {
 	killedCount          int
 	suppressedCount      int
 	refreshing           bool
+	reminderError        string
 	primary              int
 	initialPrimary       int
 	accountIDs           []int
@@ -113,6 +108,7 @@ type Model struct {
 	openCodePrimary      int
 	openCodeAccountIDs   []int
 	cache1H              bool
+	cache1HByAccount     map[int]bool
 	tab                  Tab
 	statsSubtab          StatsSubtab
 	statsFocus           StatsFocus
@@ -196,6 +192,9 @@ type Model struct {
 	applyDeactivate    func(compose.Row) error
 	deactivatedSockets map[string]bool
 	killStatus         string
+	// deck is the deck layer's own state: the reader's home and the arrival
+	// clock of chats that appeared while the picker was open (deckstate.go).
+	deck deckState
 }
 
 // NewModel builds the first frame entirely from cached state.
@@ -220,6 +219,7 @@ func NewModel(snapshot Snapshot) Model {
 		killedCount:         snapshot.KilledCount,
 		suppressedCount:     snapshot.SuppressedCount,
 		refreshing:          snapshot.Refreshing,
+		reminderError:       snapshot.ReminderError,
 		primary:             validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		initialPrimary:      validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		accountIDs:          normalizedAccountIDs(snapshot.AccountIDs),
@@ -229,6 +229,7 @@ func NewModel(snapshot Snapshot) Model {
 		openCodePrimary:     validAccount(snapshot.OpenCodePrimaryAccount, snapshot.OpenCodeAccountIDs),
 		openCodeAccountIDs:  normalizedAccountIDs(snapshot.OpenCodeAccountIDs),
 		cache1H:             snapshot.Cache1H,
+		cache1HByAccount:    snapshot.Cache1HByAccount,
 		query:               input,
 		initialKilled:       make(map[string]bool),
 		killChanges:         make(map[string]KillChange),
@@ -255,6 +256,10 @@ func NewModel(snapshot Snapshot) Model {
 			statsRefreshMaxInterval,
 		),
 		mergeNewChat: snapshot.MergeNewChat,
+		deck: deckState{
+			home: snapshot.Home, rev: 1, agg: &deckAgg{}, freshNS: snapshot.NowNS,
+			factsError: snapshot.FactsError,
+		},
 		newChatEngine: defaultNewChatEngine(
 			snapshot.AccountIDs,
 			snapshot.CodexAccountIDs,
@@ -281,63 +286,6 @@ var (
 	configuredCodexAccountEmojis map[int]string
 )
 
-func defaultNewChatEngine(claude, codex, openCode []int) pfmengine.ID {
-	if len(normalizedAccountIDs(claude)) != 0 ||
-		(len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(openCode)) == 0) {
-		return pfmengine.Claude
-	}
-	if len(normalizedAccountIDs(codex)) != 0 {
-		return pfmengine.Codex
-	}
-	return pfmengine.OpenCode
-}
-
-func copyEmojis(values map[int]string) map[int]string {
-	if len(values) == 0 {
-		return nil
-	}
-	result := make(map[int]string, len(values))
-	for id, emoji := range values {
-		result[id] = emoji
-	}
-	return result
-}
-
-func positiveOr(value, fallback int) int {
-	if value > 0 {
-		return value
-	}
-	return fallback
-}
-
-func validAccount(account int, roster []int) int {
-	ids := normalizedAccountIDs(roster)
-	for _, id := range ids {
-		if account == id {
-			return account
-		}
-	}
-	if len(ids) == 0 {
-		return 0
-	}
-	return ids[0]
-}
-
-func normalizedAccountIDs(values []int) []int {
-	if len(values) == 0 {
-		return nil
-	}
-	result := make([]int, 0, len(values))
-	seen := make(map[int]bool, len(values))
-	for _, value := range values {
-		if value > 0 && !seen[value] {
-			seen[value] = true
-			result = append(result, value)
-		}
-	}
-	return result
-}
-
 // Init starts the wall clock and optional animation. Provider and resource
 // sampling starts only when its tab is selected.
 func (model Model) Init() tea.Cmd {
@@ -349,6 +297,12 @@ func (model Model) Init() tea.Cmd {
 
 // Update applies one message without touching the outside world.
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch message.(type) {
+	case tea.KeyMsg, tea.PasteMsg, RefreshMsg:
+		// Only these can change the fleet a frame is drawn from (deckAgg).
+		model.deck.rev++
+	}
+	model.deck.noteMessage(message)
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		model.width = positiveOr(message.Width, model.width)
@@ -356,7 +310,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.query.SetWidth(maxInt(8, model.width/2))
 		return model, nil
 	case RefreshMsg:
+		arrivals := model.deck.arrivalCount
 		model.applyRefresh(message.Snapshot)
+		if model.deck.arrivalCount > arrivals {
+			// A chat just arrived: wake the ambient tick so its flare plays out
+			// even if the picker had parked.
+			command := model.wakeSky()
+			return model, command
+		}
 		return model, nil
 	case clockTickMsg:
 		if model.tab == TabCosmos && model.skyEnabled {
@@ -443,13 +404,21 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		model.activity.Stamp(time.Now())
 		model.updateQuery(model.query.Value() + message.Content)
-		command := model.wakeSky()
-		return model, command
+		return model, batchCommands(model.wakeSky(), model.startSweep())
 	case tea.KeyMsg:
-		model.activity.Stamp(time.Now())
+		now := time.Now()
+		model.activity.Stamp(now)
+		model.deck.touch(now.UnixNano())
+		// The status line is the receipt of the LAST keystroke: this one retires
+		// the previous receipt, and sets its own if it has one.
+		model.killStatus = ""
 		wake := model.wakeSky()
+		sweep := model.startSweep()
 		updated, cmd := model.updateKey(message)
-		return updated, batchCommands(cmd, wake)
+		return updated, batchCommands(cmd, wake, sweep)
+	case sweepTickMsg:
+		command := model.advanceSweep(message.nowNS)
+		return model, command
 	default:
 		return model, nil
 	}
@@ -514,30 +483,11 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				model.outcomeEngine = model.newChatEngine
 				return model, tea.Quit
 			}
-			if row.Kind == compose.ProfessorUpdateFailed {
+			if isLaunchFailureNotice(row.Kind) {
 				return model, nil // notice only, no chat to open — see professor_update_failed_row.go
 			}
 			if model.mergeNewChat && isNewChatActionKind(row.Kind) {
-				switch model.newChatEngine {
-				case pfmengine.Codex:
-					row.Kind = compose.NewCodex
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.Codex).Short + " chat"
-				case pfmengine.Claude:
-					row.Kind = compose.NewClaude
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.Claude).Short + " chat"
-				case pfmengine.OpenCode:
-					row.Kind = compose.NewOpenCode
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.OpenCode).Short + " chat"
-				default:
-					model.killStatus = "new chat is not available for " + pfmengine.MustLookup(
-						model.newChatEngine,
-					).Short
-					return model, nil
-				}
-				row.Account = model.accountForKind(row.Kind)
-				model.outcome = OutcomeSelected
-				model.outcomeRow = row
-				return model, tea.Quit
+				return model.selectNewChat(row)
 			}
 			switch model.actionIndex {
 			case 1:
@@ -547,12 +497,9 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return model, tea.Quit
 				}
 			case 2:
-				model.cache1H = !model.cache1H
-				return model, nil
-			case 3:
 				model.toggleKilled()
 				return model, nil
-			case 4:
+			case 3:
 				switch {
 				case row.Kind == compose.LiveSplit:
 					model.killStatus = "deactive refused — split live window; deactivate its chats individually"
@@ -726,7 +673,7 @@ func batchCommands(commands ...tea.Cmd) tea.Cmd {
 func (model Model) navigateChatHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if row, ok := model.selectedRow(); ok && model.mergeNewChat &&
 		(isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
-		model.newChatEngine = adjacentID(model.newChatEngine, direction, model.newChatEngines())
+		model.newChatEngine = adjacentID(model.effectiveNewChatEngine(row), direction, model.newChatEnginesFor(row))
 		return model, nil
 	}
 	model.actionIndex = (model.actionIndex + len(carouselActions) + direction) % len(carouselActions)
@@ -771,6 +718,9 @@ func (model Model) newChatEngines() []pfmengine.ID {
 	}
 	for index := range model.rows {
 		row := &model.rows[index]
+		if row.Workbench != "" {
+			continue
+		}
 		switch row.Kind {
 		case compose.NewClaude:
 			appendUnique(pfmengine.Claude)
@@ -809,7 +759,7 @@ func (model *Model) cycleSelectedAccount() {
 	}
 	engine := compose.EngineForKind(row.Kind)
 	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
-		engine = model.newChatEngine
+		engine = model.effectiveNewChatEngine(row)
 	}
 	if engine == pfmengine.Codex {
 		model.codexPrimary = nextAccount(model.codexPrimary, model.codexAccountIDs)
@@ -820,18 +770,9 @@ func (model *Model) cycleSelectedAccount() {
 		return
 	}
 	model.primary = nextAccount(model.primary, model.accountIDs)
-}
-
-func nextAccount(current int, ids []int) int {
-	if len(ids) == 0 {
-		return 0
+	if choice, ok := model.cache1HByAccount[model.primary]; ok {
+		model.cache1H = choice
 	}
-	for index, id := range ids {
-		if id == current {
-			return ids[(index+1)%len(ids)]
-		}
-	}
-	return ids[0]
 }
 
 func (model Model) accountForKind(kind compose.Kind) int {
@@ -1141,6 +1082,9 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 			}
 		}
 	}
+	if model.skyEnabled {
+		model.deck.noteArrivals(model.rows, rows, max(model.nowNS, snapshot.NowNS))
+	}
 	model.rows = append(model.rows[:0], rows...)
 	model.adoptClock(snapshot.NowNS)
 	if snapshot.Cosmos.Err != "" {
@@ -1157,6 +1101,8 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.killedCount = snapshot.KilledCount
 	model.suppressedCount = snapshot.SuppressedCount
 	model.refreshing = snapshot.Refreshing
+	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError)
+	model.reminderError = snapshot.ReminderError
 	for index := range model.rows {
 		id := model.rows[index].ID
 		if id != "" {
@@ -1222,6 +1168,9 @@ func (model *Model) toggleKilled() {
 		return
 	case row.Kind == compose.ProfessorUpdateFailed:
 		model.killStatus = "⌃X refused — the update-check failure row is a notice, not a chat"
+		return
+	case row.Kind == compose.WorkbenchInvalid:
+		model.killStatus = "⌃X refused — the workbench error row is a notice, not a chat"
 		return
 	case row.Kind == compose.Booting:
 		model.killStatus = "⌃X refused — " + row.Name +
@@ -1321,16 +1270,17 @@ func (model *Model) rebuildOrder() {
 	for _, group := range model.groups {
 		for _, index := range group.indices {
 			row := model.rows[index]
-			if !model.visibleInView(row) || !isNameGroupRow(row.Kind) {
+			if row.Reminded || !model.visibleInView(row) || !isNameGroupRow(row.Kind) {
 				continue
 			}
-			if prefix, ok := nameGroupPrefix(row.Name); ok {
-				members[prefix] = append(members[prefix], index)
+			if key, _, ok := workbenchNameGroup(row); ok {
+				members[key] = append(members[key], index)
 			}
 		}
 	}
 	emitted := make(map[string]bool)
 	pinned := make(map[int]bool)
+	model.pinRemindedRows(pinned)
 	if model.mergeNewChat {
 		// The update notice is an extra global action above the ordinary new-chat
 		// row. Neither row belongs to project activity order: pinning both keeps
@@ -1344,7 +1294,7 @@ func (model *Model) rebuildOrder() {
 		}
 		for index := range model.rows {
 			row := &model.rows[index]
-			if isNewChatActionKind(row.Kind) && model.visibleInView(*row) {
+			if isFleetNewChatRow(*row) && model.visibleInView(*row) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 				newChatEmitted = true
@@ -1360,13 +1310,13 @@ func (model *Model) rebuildOrder() {
 			if !model.visibleInView(model.rows[index]) {
 				continue
 			}
-			if model.mergeNewChat && isNewChatActionKind(model.rows[index].Kind) {
+			if model.mergeNewChat && isFleetNewChatRow(model.rows[index]) {
 				if newChatEmitted {
 					continue
 				}
 				newChatEmitted = true
 			}
-			prefix, grouped := nameGroupPrefix(model.rows[index].Name)
+			key, prefix, grouped := workbenchNameGroup(model.rows[index])
 			// ONE member is a group. A chat named GROUP:NAME has already
 			// declared where it belongs, and the panel is what makes that
 			// readable — so it gets the header and the indent immediately
@@ -1379,17 +1329,17 @@ func (model *Model) rebuildOrder() {
 			// called for.
 			grouped = grouped &&
 				isNameGroupRow(model.rows[index].Kind) &&
-				len(members[prefix]) >= 1
+				len(members[key]) >= 1
 			if !grouped {
 				model.order = append(model.order, index)
 				continue
 			}
-			if emitted[prefix] {
+			if emitted[key] {
 				continue
 			}
-			emitted[prefix] = true
-			for _, member := range members[prefix] {
-				model.nameGroups[member] = nameGroup{name: prefix, count: len(members[prefix])}
+			emitted[key] = true
+			for _, member := range members[key] {
+				model.nameGroups[member] = nameGroup{name: prefix, count: len(members[key])}
 				model.order = append(model.order, member)
 			}
 		}
@@ -1398,39 +1348,6 @@ func (model *Model) rebuildOrder() {
 
 func isNewChatActionKind(kind compose.Kind) bool {
 	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
-}
-
-// nameGroupPrefix reads a GROUP:NAME declaration off a chat name.
-//
-// The shape is exact on purpose: a non-empty prefix with NO whitespace in it,
-// a colon, and a non-empty remainder that does not start with whitespace.
-// "P:BUILDER" declares a group; "fix: the bug" is a sentence with a colon in
-// it and declares nothing, and neither does "wave 3: rework".
-//
-// The strictness became load-bearing when a single member started opening a
-// panel. Under the old two-member threshold a prose colon was mostly harmless
-// — it took two of them to invent a group — so the rule could afford to be
-// loose. It cannot now: every stray colon would become a header.
-func nameGroupPrefix(name string) (string, bool) {
-	prefix, rest, found := strings.Cut(cleanField(name), ":")
-	if !found || prefix == "" || rest == "" {
-		return "", false
-	}
-	if strings.ContainsFunc(prefix, unicode.IsSpace) {
-		return "", false
-	}
-	if unicode.IsSpace(rune(rest[0])) {
-		return "", false
-	}
-	return prefix, true
-}
-
-// isNameGroupRow admits every kind a GROUP:NAME can fold into a panel: live,
-// Agent, Booting, and every resumable kind — a resumable SOLO:BUILD groups
-// with its live namesakes exactly like a live row would.
-func isNameGroupRow(kind compose.Kind) bool {
-	return kind.IsAddressable() ||
-		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpenCode
 }
 
 func (model *Model) refilter(follow string, fallback int) {

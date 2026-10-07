@@ -1,12 +1,12 @@
 """Consent seam test — a consent banner never blocks the browser render, and
 never silently.
 
-The pure cases run with NO browser and NO patchright: the reject-label
-pattern presses only a privacy-preserving choice, and a scroll that did not
+The pure cases run with NO browser and NO patchright: a scroll that did not
 move is never "stable" — it is unblocked once, and a page that stays blocked
 is stopped "blocked" and stamped incomplete.
 
-The live cases (BROWSER_LIVE=1) render local fixture pages in a real Chrome
+The live cases (BROWSER_LIVE=1) prove a real page presses only a
+privacy-preserving label, and render local fixture pages in a real Chrome
 through render_page: a scroll-locking consent overlay dismissed by "Reject
 all", one with only "Accept" removed without accepting, a banner inside a
 cross-origin iframe, a page whose lock cannot be undone, and a page that
@@ -24,6 +24,7 @@ import os
 import sys
 import tempfile
 import threading
+from html import escape as html_escape
 
 import browser
 from browser import mark_incomplete, render_page, scroll_until_stable
@@ -45,18 +46,6 @@ def counting_clock():
 
 async def settle():
     return None
-
-
-def test_reject_labels_press_only_the_privacy_preserving_choice():
-    for label in ("Reject all", "REJECT ALL", "Decline", "Decline all cookies", "Only necessary", "Necessary only",
-                  "Use necessary cookies only", "Accept only essential cookies", "Deny", "Continue without accepting",
-                  "Alle ablehnen", "Nur notwendige Cookies", "Tout refuser", "Continuer sans accepter",
-                  "Rechazar todo", "Rifiuta tutto", "Alles weigeren", "Refuse all", "I do not accept"):
-        assert browser.is_reject_label(label), f"a reject control was not recognised: {label!r}"
-    for label in ("Accept", "Accept all", "Accept all cookies", "I accept", "Agree", "Allow all", "Alle akzeptieren",
-                  "Tout accepter", "Aceptar todo", "Accetta tutto", "Manage options", "More options", "Settings",
-                  "Reject all and subscribe to read", ""):
-        assert not browser.is_reject_label(label), f"a non-reject control would be pressed: {label!r}"
 
 
 def test_a_scroll_that_never_moves_is_blocked_never_stable():
@@ -293,6 +282,60 @@ def live_test_a_lock_that_cannot_be_undone_is_stamped_blocked():
 def live_test_an_inner_scroll_container_is_scrolled():
     html, _, outcome = live("container.html")
     assert_every_block(html, outcome, "container.html")
+
+
+REJECT_LABELS = (
+    "Reject all", "REJECT ALL", "Decline", "Decline all cookies", "Only necessary", "Necessary only",
+    "Use necessary cookies only", "Accept only essential cookies", "Deny", "Continue without accepting",
+    "Alle ablehnen", "Nur notwendige Cookies", "Tout refuser", "Continuer sans accepter",
+    "Rechazar todo", "Rifiuta tutto", "Alles weigeren", "Refuse all", "I do not accept",
+)
+OTHER_LABELS = (
+    "Accept", "Accept all", "Accept all cookies", "I accept", "Agree", "Allow all", "Alle akzeptieren",
+    "Tout accepter", "Aceptar todo", "Accetta tutto", "Manage options", "More options", "Settings",
+    "Reject all and subscribe to read", "",
+)
+LABEL_RESULTS = {}
+
+
+async def dismiss_label_pages():
+    from patchright.async_api import async_playwright  # type: ignore[import-not-found]
+    if not browser.chrome_binary():
+        raise AssertionError("BROWSER_LIVE=1 but no system Chrome resolves")
+    results = {}
+    async with async_playwright() as p:
+        chrome = await p.chromium.launch(channel="chrome", headless=True)
+        try:
+            context = await chrome.new_context()
+            try:
+                page = await context.new_page()
+                for label in REJECT_LABELS + OTHER_LABELS:
+                    button = f"<button>{html_escape(label)}</button>"
+                    await page.set_content(f"<html><body>{overlay(button)}</body></html>")
+                    results[label] = (await browser.dismiss_consent(page))["pressed"]
+            finally:
+                await context.close()
+        finally:
+            await chrome.close()
+    return results
+
+
+def live_label_results():
+    if not LABEL_RESULTS:
+        LABEL_RESULTS.update(run(dismiss_label_pages()))
+    return LABEL_RESULTS
+
+
+def live_test_reject_labels_are_pressed():
+    results = live_label_results()
+    wrong = [(label, results[label]) for label in REJECT_LABELS if results[label] != [label]]
+    assert not wrong, f"reject labels not pressed as named: {wrong!r}"
+
+
+def live_test_other_labels_are_never_pressed():
+    results = live_label_results()
+    wrong = [(label, results[label]) for label in OTHER_LABELS if results[label]]
+    assert not wrong, f"other labels were pressed: {wrong!r}"
 
 
 if __name__ == "__main__":

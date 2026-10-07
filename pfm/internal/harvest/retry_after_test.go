@@ -13,6 +13,7 @@ import (
 // server gave — seconds or a date — in the error text and as RetryAfter, on
 // the core result and the public failure alike; absent when it gave none.
 func TestRateLimitNamesTheServersRetryAfter(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"120":                           "120 s",
 		"Wed, 21 Oct 2026 07:28:00 GMT": "Wed, 21 Oct 2026 07:28:00 UTC",

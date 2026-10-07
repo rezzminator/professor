@@ -2,13 +2,16 @@
 package paths
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -26,6 +29,10 @@ const (
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
 	// a crash can leave one behind, so the crumb audit accepts it.
 	SIDHarnessConfigDirPrefix = "pfm-harness-configdir-"
+	// SIDEngineProbeHomePrefix names the throwaway engine home a version or
+	// self-doctor probe runs in (deps.NewEngineProbeHome, os.MkdirTemp in the
+	// SID dir); a crash can leave one behind, so the crumb audit accepts it.
+	SIDEngineProbeHomePrefix = "pfm-probe-home-"
 	// SIDExchangeScratchPattern is the os.CreateTemp pattern of the prepared
 	// exchange headless.writePreparedExchange writes into the SID dir.
 	SIDExchangeScratchPattern = "exchange-*.md"
@@ -39,8 +46,9 @@ const (
 func SIDScratchDirs() []string { return []string{SIDScratchDoctor, SIDScratchChatLoads} }
 
 const (
-	EnvDB          = "PFM_DB"
-	EnvFleetDB     = "PFM_FLEET_DB"
+	EnvConfig      = "PFM_CONFIG"
+	EnvCacheDB     = "PFM_CACHE_DB"
+	EnvStateDB     = "PFM_STATE_DB"
 	EnvSIDDir      = "PFM_SID_DIR"
 	EnvClaudeRoots = "PFM_CLAUDE_ROOTS"
 	EnvCodexHome   = "PFM_CODEX_ROOT"
@@ -49,19 +57,43 @@ const (
 	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
 	EnvTmuxDir      = "PFM_TMUX_DIR"
 	EnvHome         = "PFM_HOME"
+	// EnvSkillSourcesOffline=1 stops pfm install from fetching the
+	// source-fetched global skills (templates/global/skills/sources.json):
+	// an existing store copy is still linked, and pfm doctor reports an
+	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
+	// it so no test reaches a public repository.
+	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
+	// EnvThemesOffline=1 stops pfm install from fetching a release theme
+	// manifest or remote theme file; themes bundled in the source clone still install.
+	// The test harness sets it so no test fetches themes from a public repository.
+	EnvThemesOffline = "PFM_THEMES_OFFLINE"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
 	// test` is refused the real home rather than handed it silently.
-	EnvRealHome = "PFM_TEST_REAL_HOME"
-	// EnvTestJailHome names the package-wide jailed home internal/testjail
-	// built. A test that moves PFM_HOME to a directory of its own still
-	// inherits the jail's XDG_CONFIG_HOME, which is safe: it is this home's.
-	EnvTestJailHome    = "PFM_TEST_JAIL_HOME"
-	EnvProcRoot        = "PFM_PROC_ROOT"
-	EnvCgroupRoot      = "PFM_CGROUP_ROOT"
-	EnvDevRepoGitDir   = "PFM_DEV_REPO_GIT_DIR"
-	EnvDevRepoWorkTree = "PFM_DEV_REPO_WORK_TREE"
+	EnvRealHome             = "PFM_TEST_REAL_HOME"
+	EnvTestPFMBinary        = "PFM_TEST_PFM_BINARY"
+	EnvTestMockEngineBinary = "PFM_TEST_MOCK_ENGINE_BINARY"
+	EnvProcRoot             = "PFM_PROC_ROOT"
+	EnvManagedSettingsDir   = "PFM_MANAGED_SETTINGS_DIR"
+	EnvCgroupRoot           = "PFM_CGROUP_ROOT"
+	EnvDevRepoGitDir        = "PFM_DEV_REPO_GIT_DIR"
+	EnvDevRepoWorkTree      = "PFM_DEV_REPO_WORK_TREE"
+	// EnvTestArtifactDir names the directory every Go test process writes its
+	// profile under (internal/testjail); unset, profiling writes nothing and a
+	// red run says so once on stderr. EnvTestProfile=0 turns profiling off;
+	// EnvTestProfile=cpu adds a CPU profile, opt-in only: its SIGPROF interval
+	// timer survives execve, so a test whose child execs another program (zsh, a
+	// re-exec'd pfm) sees that child killed by "profiling timer expired".
+	// EnvTestProfileParent is exported by the first profiled process: a test
+	// binary inheriting it is a helper, recorded but never a failure bundle,
+	// since helpers exit non-zero on purpose. EnvTestDeadlineEpoch is the step
+	// deadline in decimal epoch seconds, which the profiler's watchdog fires
+	// before.
+	EnvTestArtifactDir   = "PFM_TEST_ARTIFACT_DIR"
+	EnvTestProfile       = "PFM_TEST_PROFILE"
+	EnvTestProfileParent = "PFM_TEST_PROFILE_PARENT"
+	EnvTestDeadlineEpoch = "PFM_TEST_DEADLINE_EPOCH"
 	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
 	// the way a real chat runs — the server loads ~/.tmux.conf like every other
 	// terminal on the machine, because a chat IS a terminal the user lives in:
@@ -78,6 +110,101 @@ const (
 	EnvLogMirror     = "PFM_LOG"
 	defaultTmpDir    = "/tmp"
 )
+
+const sourceRepoMarkerName = "source-repo"
+
+// The two answered outcomes of reading the source-repo marker. They are
+// distinct because the remedies are opposite: ErrNoSourceRepoMarker means no
+// install ever recorded a clone (record one), ErrSourceRepoUnusable means one
+// was recorded and no longer names a usable directory (the clone moved, was
+// deleted, or the marker was hand-edited). A third outcome — the marker could
+// not be read at all — carries NEITHER sentinel: that is "we failed to look",
+// and a caller that folds it into either answer is reporting a guess.
+var (
+	ErrNoSourceRepoMarker = errors.New("no source repository recorded")
+	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
+)
+
+// SourceRepoPath returns the install-owned clone marker location.
+func SourceRepoPath(home string) string {
+	return filepath.Join(filepath.Join(home, ".local", "share", "pfm", "install"), sourceRepoMarkerName)
+}
+
+// WriteSourceRepoMarker records exactly one normalized clone path.
+func WriteSourceRepoMarker(home, repo string) error {
+	content, err := SourceRepoMarkerContent(repo)
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(SourceRepoPath(home), content, 0o600)
+}
+
+func SourceRepoMarkerContent(repo string) ([]byte, error) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return nil, errors.New("source repository path is empty")
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source repository %q: %w", repo, err)
+	}
+	abs, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source repo %s: %w", abs, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("inspect source repository %s: %w", abs, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("source repository %s is not a directory", abs)
+	}
+	return []byte(abs + "\n"), nil
+}
+
+// ReadSourceRepoMarker reads the one-line clone marker and verifies that it
+// still names a directory. Its three outcomes are told apart by the caller
+// with errors.Is: ErrNoSourceRepoMarker (nothing recorded),
+// ErrSourceRepoUnusable (recorded, but the path is gone, not a directory, or
+// not one path), and a plain wrapped error for a marker that could not be
+// read at all. fs.ErrNotExist is kept in the chain of the first so callers
+// written against the older single shape keep working.
+func ReadSourceRepoMarker(home string) (string, error) {
+	path := SourceRepoPath(home)
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("read source repository marker %s: %w: %w", path, ErrNoSourceRepoMarker, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read source repository marker %s: %w", path, err)
+	}
+	repo := strings.TrimSpace(string(raw))
+	if repo == "" || strings.ContainsAny(repo, "\r\n") {
+		return "", fmt.Errorf("source repository marker %s is not one path: %w", path, ErrSourceRepoUnusable)
+	}
+	info, err := os.Stat(repo)
+	if err != nil {
+		return "", fmt.Errorf("inspect recorded source repository %s: %w: %w", repo, ErrSourceRepoUnusable, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("recorded source repository %s is not a directory: %w", repo, ErrSourceRepoUnusable)
+	}
+	return repo, nil
+}
+
+// ComposedHarnessPrompt locates the installed engine prompt in the recorded clone.
+func ComposedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
+	repo, err := ReadSourceRepoMarker(home)
+	if err != nil {
+		return "", fmt.Errorf("resolve composed harness prompt: %w", err)
+	}
+	return ComposedHarnessPromptIn(repo, id), nil
+}
+
+// ComposedHarnessPromptIn locates the engine prompt in the given clone.
+func ComposedHarnessPromptIn(repo string, id pfmengine.ID) string {
+	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md")
+}
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,
 // or nothing at all so tmux loads the user's own config.
@@ -114,21 +241,22 @@ func EnsureTmuxDir(directory string) error {
 
 // Values contains the filesystem locations used by pfm.
 //
-// DB is this binary's own derived cache (transcripts, rollouts, names) and
-// nothing else reads it. FleetDB is the authoritative operator state: kills,
+// CacheDB is this binary's own derived cache (transcripts, rollouts, names) and
+// nothing else reads it. StateDB is the authoritative operator state: kills,
 // teammates, and the primary account.
 type Values struct {
-	DB      string
-	FleetDB string
+	CacheDB string
+	StateDB string
 	SIDDir  string
 	Roots   map[pfmengine.ID][]string
 	TmuxDir string
 	Home    string
 	// ArchiveDir is ~/.claude-archive: where archived transcripts and rollouts
 	// go, with the manifest that puts them back. It is defined relative to Home.
-	ArchiveDir string
-	ProcRoot   string
-	CgroupRoot string
+	ArchiveDir         string
+	ProcRoot           string
+	ManagedSettingsDir string
+	CgroupRoot         string
 	// LogFile is the home's activity log, the JSON-lines file internal/obs
 	// writes and `pfm log` reads. It hangs off the same pfm state directory
 	// as the fleet cache, so a jail, a fence and the live host each keep
@@ -150,6 +278,17 @@ func EnvOrFrom(env Env, name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// SIDDirFrom is the SID directory resolved over an injected Env: PFM_SID_DIR,
+// else /tmp/cc-sid. Resolve and every caller holding its own Env share it.
+func SIDDirFrom(env Env) string {
+	return EnvOrFrom(env, EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid"))
+}
+
+// WorkbenchManifest is the marker declaring a nested workbench.
+func WorkbenchManifest(dir string) string {
+	return filepath.Join(dir, ".professor", "workbench.json")
 }
 
 // DevRepoGitDir returns the fence-mounted git directory when root is the
@@ -191,11 +330,11 @@ func DevRepoGitDir(root string) (string, bool) {
 // set up its jail, which is refused.
 //
 // A test that never set up its jail would otherwise resolve to the
-// OPERATOR'S OWN home: the fleet.db their live chats are indexed in,
+// OPERATOR'S OWN home: the pfm-cache.db their live chats are indexed in,
 // the ~/.claude/projects their transcripts live in. That is not a
 // hypothetical — one `go test ./...` run outside the fence has written
 // fixture transcripts into a real account and held write transactions
-// on a real fleet.db until the TUI could no longer open it.
+// on a real pfm-cache.db until the TUI could no longer open it.
 //
 // Resolving is silent by design: it computes pathnames and touches
 // nothing, so a jailed run and an escaped one are byte-identical here
@@ -231,24 +370,81 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
-// ConfigHomeFrom resolves the XDG config-home root pfm's own on-disk state
-// hangs from: an absolute XDG_CONFIG_HOME wins, else home's own .config
-// subdirectory. internal/config's ResolvePath composes pfm's config.json
-// path under this same root — the single place it is computed, so a config
-// resolver and a jail's own pin (internal/testjail) can never drift about
-// which .config a caller meant (L3-F9).
-func ConfigHomeFrom(env Env, home string) string {
-	if root := env.Get("XDG_CONFIG_HOME"); filepath.IsAbs(root) {
-		return filepath.Clean(root)
-	}
-	return filepath.Join(home, ".config")
-}
-
-// ConfigHome is ConfigHomeFrom over the real process environment.
-func ConfigHome(home string) string { return ConfigHomeFrom(OSEnv{}, home) }
-
 // Resolve returns the standard host paths with all K4 test-jail overrides
 // applied. It only computes pathnames; it does not access the filesystem.
+func DefaultStateDB(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "pfm.db")
+}
+
+// OpenCodeWorkbenchPlugin is the seat plugin staged beside the fleet cache.
+func OpenCodeWorkbenchPlugin(home string) string {
+	return filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-workbench-plugin.mjs")
+}
+
+func DefaultCacheDB(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
+}
+
+// legacyDBName is the one name both pre-layout databases shared.
+const legacyDBName = "fleet.db"
+
+// ErrLegacyPending marks a database create refused because the legacy
+// database it replaces still waits for the operator to apply pfm doctor's fix.
+var ErrLegacyPending = errors.New("legacy database not migrated")
+
+// LegacyStateDB names the old state database; pfm doctor gives the fix for
+// moving it to DefaultStateDB.
+func LegacyStateDB(home string) string {
+	return filepath.Join(home, ".cc", legacyDBName)
+}
+
+// HarvesterCacheDir is the harvester's one default cache directory (used when
+// harvester.config.json sets no cache.dir): <home>/.professor/.harvester-cache.
+// It holds persistent harvester_read handles, so it lives under the home, never
+// a temp directory.
+func HarvesterCacheDir(home string) string {
+	return filepath.Join(home, ".professor", ".harvester-cache")
+}
+
+// LegacyHarvesterCacheDir names the pre-rename default cache directory;
+// pfm doctor gives the fix for moving it to HarvesterCacheDir.
+func LegacyHarvesterCacheDir(home string) string {
+	return filepath.Join(home, ".professor", ".cache")
+}
+
+// LegacyCacheDB names the old cache database; pfm doctor gives the fix for
+// moving it to DefaultCacheDB.
+func LegacyCacheDB(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", legacyDBName)
+}
+
+// CheckLegacyPending refuses to let a caller create target while legacy still
+// waits for the operator to apply pfm doctor's fix: a fresh target beside legacy
+// data forks the state. An existing target, or no legacy file, is nil. A stat
+// that fails for any reason but not-exist is an error, never read as absence.
+func CheckLegacyPending(target, legacy string) error {
+	_, err := os.Lstat(target)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect %s: %w", target, err)
+	}
+	_, err = os.Lstat(legacy)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", legacy, err)
+	}
+	return fmt.Errorf(
+		"%w: %s not created while legacy %s still exists — run pfm doctor for the fix",
+		ErrLegacyPending,
+		target,
+		legacy,
+	)
+}
+
 func Resolve() (Values, error) {
 	home, err := Home()
 	if err != nil {
@@ -267,19 +463,22 @@ func Resolve() (Values, error) {
 
 	tmuxBase := EnvOr("TMUX_TMPDIR", defaultTmpDir)
 
+	managed := EnvOr(EnvManagedSettingsDir, defaultManagedSettingsDir)
+	if !filepath.IsAbs(managed) {
+		return Values{}, fmt.Errorf("%s=%q is not an absolute path", EnvManagedSettingsDir, managed)
+	}
 	return Values{
-		DB: EnvOr(EnvDB, filepath.Join(home, ".local", "state", "pfm", "fleet.db")),
-		// The fleet database defaults to $HOME/.cc/fleet.db. PFM_DB already
-		// overrides the private cache, so the fleet handle gets a distinct name.
-		FleetDB:    EnvOr(EnvFleetDB, filepath.Join(home, ".cc", "fleet.db")),
-		SIDDir:     EnvOr(EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid")),
-		Roots:      roots,
-		TmuxDir:    EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
-		Home:       home,
-		ArchiveDir: filepath.Join(home, ".claude-archive"),
-		LogFile:    filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
-		ProcRoot:   EnvOr(EnvProcRoot, "/proc"),
-		CgroupRoot: EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
+		CacheDB:            EnvOr(EnvCacheDB, DefaultCacheDB(home)),
+		StateDB:            EnvOr(EnvStateDB, DefaultStateDB(home)),
+		SIDDir:             SIDDirFrom(OSEnv{}),
+		Roots:              roots,
+		TmuxDir:            EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
+		Home:               home,
+		ArchiveDir:         filepath.Join(home, ".claude-archive"),
+		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
+		ProcRoot:           EnvOr(EnvProcRoot, "/proc"),
+		ManagedSettingsDir: managed,
+		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil
 }
 
@@ -303,29 +502,28 @@ func GeneratedClaudeAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
 }
 
-// HarnessPromptsDir is where `pfm install` stages the fleet's system-prompt
-// layer: one composed prompt per engine, beside the parts it was composed
-// from and the Claude drift baselines.
-func HarnessPromptsDir(home string) string {
+// ClaudeMCPConfigDir is the private (0700) directory holding each Claude
+// launch's --mcp-config file (claudelaunch.Render): third-party MCP entries
+// carry env values and headers that must never reach argv.
+func ClaudeMCPConfigDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "mcp-config")
+}
+
+// LegacyHarnessPromptsDir identifies the former managed prompt directory.
+func LegacyHarnessPromptsDir(home string) string {
 	return filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
 }
 
-// HarnessPromptPath is the staged prompt ONE engine reads — claude.md,
-// codex.md, opencode.md — composed at stage time from the shared head, that
-// engine's middle and the shared tail. Claude takes it as
-// --system-prompt-file, Codex as its SessionStart appendix, OpenCode through
-// its config's `instructions` array. Three readers in three packages; one
-// spelling of where the file is.
-func HarnessPromptPath(home string, id pfmengine.ID) string {
-	return filepath.Join(HarnessPromptsDir(home), pfmengine.MustLookup(id).LongName+".md")
-}
-
-// HarnessBaselineDir is the one staged location the harness-prompt drift
-// doctor reads its pins, bodies and model provenance from. The baselines are
-// captures of Claude Code's own built-in prompt, so they live under the
-// Claude engine's directory rather than beside the shared parts.
-func HarnessBaselineDir(home string) string {
-	return filepath.Join(HarnessPromptsDir(home), pfmengine.MustLookup(pfmengine.Claude).LongName, "baselines")
+// HarnessBaselineDir resolves Claude's captured baselines in the recorded clone.
+func HarnessBaselineDir(home string) (string, error) {
+	repo, err := ReadSourceRepoMarker(home)
+	if err != nil {
+		return "", fmt.Errorf("resolve harness baseline directory: %w", err)
+	}
+	return filepath.Join(
+		repo, "pfm", "harness-prompts",
+		pfmengine.MustLookup(pfmengine.Claude).LongName, "baselines",
+	), nil
 }
 
 // SocketPath resolves a chat's tmux socket to an absolute path: an absolute
@@ -365,4 +563,64 @@ func (values Values) FirstRoot(id pfmengine.ID) string {
 		return roots[0]
 	}
 	return ""
+}
+
+// SkillSourcesOffline reports EnvSkillSourcesOffline=1: pfm install fetches no
+// source-fetched global skill and pfm doctor reports an unfetched one OFFLINE.
+func SkillSourcesOffline() bool {
+	return SkillSourcesOfflineIn(OSEnv{})
+}
+
+// SkillSourcesOfflineIn is SkillSourcesOffline read from env, the environment
+// a caller was handed.
+func SkillSourcesOfflineIn(env Env) bool {
+	return env.Get(EnvSkillSourcesOffline) == "1"
+}
+
+// ThemesOffline reports EnvThemesOffline=1: pfm install reads bundled themes
+// from the source clone but skips remote theme fetches.
+func ThemesOffline() bool {
+	return ThemesOfflineIn(OSEnv{})
+}
+
+// ThemesOfflineIn is ThemesOffline read from env, the environment a caller was handed.
+func ThemesOfflineIn(env Env) bool {
+	return env.Get(EnvThemesOffline) == "1"
+}
+
+// PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.
+func PrebuiltPFMBinary() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestPFMBinary)
+}
+
+// PrebuiltMockEngineBinary is the mock-engine binary a unit run built once.
+func PrebuiltMockEngineBinary() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestMockEngineBinary)
+}
+
+// TestArtifactDir is the profile root of this Go test process, when one is set.
+func TestArtifactDir() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestArtifactDir)
+}
+
+// TestProfileMode is the profiling mode of this Go test process: "" (the
+// default), "0" (off) or "cpu" (adds a CPU profile).
+func TestProfileMode() string {
+	return OSEnv{}.Get(EnvTestProfile)
+}
+
+// TestProfileParent is the pid of the profiled process that started this one,
+// when this one is its helper.
+func TestProfileParent() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestProfileParent)
+}
+
+// TestDeadlineEpoch is the step deadline in decimal epoch seconds, when one is set.
+func TestDeadlineEpoch() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestDeadlineEpoch)
+}
+
+// WorkbenchCache names the discovery cache beside the fleet index.
+func WorkbenchCache(values Values) string {
+	return filepath.Join(filepath.Dir(values.CacheDB), "workbenches.json")
 }

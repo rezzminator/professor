@@ -17,6 +17,7 @@ import (
 // was therefore a stale binary finding. Keep the local-server pin so a future
 // build cannot regress the read path unnoticed.
 func TestCacheRoundTripDoesNotTouchDiskOrNetwork(t *testing.T) {
+	t.Parallel()
 	hits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		hits++
@@ -58,6 +59,7 @@ func TestCacheRoundTripDoesNotTouchDiskOrNetwork(t *testing.T) {
 }
 
 func TestVolatileCacheTTLBackdatedStampAndZeroOverride(t *testing.T) {
+	t.Parallel()
 	hits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		hits++

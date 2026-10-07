@@ -18,6 +18,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -44,6 +45,17 @@ type Options struct {
 	Client      *http.Client
 	Endpoint    string
 	Log         io.Writer
+	// Version is the running pfm's version, named in a usage request's
+	// User-Agent as `pfm/{Version}` only when the account's Claude Code
+	// version is unknown (Options.userAgent).
+	Version string
+	// ClaudeBinary is the account's Claude Code binary, asked for its version
+	// (claudeCodeVersion) when a request is about to go out; empty means `claude`.
+	ClaudeBinary string
+	// BypassBackoff, when set, is a caller's one authorized live retry: a
+	// fresh cache no longer answers, and neither does an active backoff whose
+	// replayed error it accepts (a credential failure the caller just repaired).
+	BypassBackoff func(error) bool
 }
 
 // Window is one model usage window returned by Anthropic's OAuth endpoint.
@@ -178,14 +190,14 @@ func (usage Usage) fableWindow(now time.Time) (Window, bool) {
 	return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true
 }
 
-type (
-	usage       = Usage
-	usageWindow = Window
-)
+type usageWindow = Window
 
 type credentials struct {
 	OAuth struct {
 		AccessToken string `json:"accessToken"`
+		// ExpiresAt is the access token's expiry, Unix milliseconds; 0 when
+		// the credential carries none.
+		ExpiresAt int64 `json:"expiresAt"`
 	} `json:"claudeAiOauth"`
 }
 
@@ -208,28 +220,13 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		return "", err
 	}
 	now := options.Now()
-	cachePath := CachePath(options.CacheDir, account)
-	record, readErr := ReadCacheRecord(cachePath)
-	matches := readErr == nil && record.MatchesConfigDir(options.ConfigDir)
-	// Only this account's record can defer a refresh, including through a
-	// peer's backoff. Numeric account IDs can be reassigned to another seat.
-	backoff := matches && record.Backoff != nil && now.Before(record.Backoff.RetryAfter)
-	if !matches || (cacheAge(record, cachePath, now) >= options.TTL && !backoff) {
-		if err := refresh(ctx, options, cachePath); err != nil {
-			fmt.Fprintf(options.Log, "pfm usage-hook: refresh failed; trying stale cache: %v\n", err)
-		}
-	}
-	record, err := ReadCacheRecord(cachePath)
-	if os.IsNotExist(err) {
-		return "", nil
-	}
+	cached, confirmedAt, err := Fetch(ctx, options, account)
 	if err != nil {
-		return "", err
+		fmt.Fprintf(options.Log, "pfm usage-hook: refresh failed; trying stale cache: %v\n", err)
 	}
-	if !record.MatchesConfigDir(options.ConfigDir) || cacheAge(record, cachePath, now) > time.Hour {
+	if confirmedAt.IsZero() || now.Sub(confirmedAt) > StaleHorizon {
 		return "", nil
 	}
-	cached := record.Usage
 	five := currentUtilization(cached.FiveHour, now, 0)
 	seven := currentUtilization(cached.SevenDay, now, 0)
 	opus := currentUtilization(cached.SevenOpus, now, -1)
@@ -371,6 +368,9 @@ func normalize(options Options) Options {
 	if options.Log == nil {
 		options.Log = io.Discard
 	}
+	if options.Version == "" {
+		options.Version = pfmconfig.DevelopmentVersion
+	}
 	return options
 }
 
@@ -427,11 +427,25 @@ func DefaultCacheDir() string {
 	return cacheDirForEnv(paths.OSEnv{})
 }
 
-func cacheDirForEnv(env paths.Env) string {
-	if jailHome := env.Get(paths.EnvHome); jailHome != "" {
-		return UsageCacheDir(filepath.Join(jailHome, "tmp"), os.Getuid())
+// CacheDirFor is DefaultCacheDir under env, a caller's host-environment seam
+// (nil is the real process environment).
+func CacheDirFor(env paths.Env) string {
+	if env == nil {
+		env = paths.OSEnv{}
 	}
-	return UsageCacheDir(os.TempDir(), os.Getuid())
+	return cacheDirForEnv(env)
+}
+
+func cacheDirForEnv(env paths.Env) string {
+	return UsageCacheDir(tempBase(env.Get(paths.EnvHome)), os.Getuid())
+}
+
+// tempBase is the host temp directory, or a PFM_HOME jail's own tmp.
+func tempBase(jailHome string) string {
+	if jailHome != "" {
+		return filepath.Join(jailHome, "tmp")
+	}
+	return os.TempDir()
 }
 
 // CredentialPath is the one filesystem rule for an account's OAuth credential
@@ -448,6 +462,12 @@ func CredentialPath(configDir string) string {
 // writes, and the one `stats.LimitsSampler` reads and writes too.
 func CachePath(cacheDir string, account int) string {
 	return filepath.Join(cacheDir, fmt.Sprintf("acct-%d.json", account))
+}
+
+// RefreshLockPath is the cross-process refresh lock beside CachePath: the process
+// that creates it with O_EXCL is the one allowed to request this account.
+func RefreshLockPath(cacheDir string, account int) string {
+	return filepath.Join(cacheDir, fmt.Sprintf("acct-%d.lock", account))
 }
 
 // CachedFableWindow reads pfm's own usage cache for account — the cache this
@@ -484,10 +504,27 @@ func CachedFableWindow(base string, uid, account int, configDir string, now time
 // reader of the shared cache — this hook, and every `pfm ls` Limits tab —
 // skips its own request until RetryAfter instead of each picker process
 // rediscovering the same failure independently.
+//
+// Credential is the fingerprint of the credential the failure was recorded
+// against (CredentialFingerprint), so a changed credential lifts it; Refusal
+// keeps a 401 or 403 typed, so a replay classifies exactly like the live
+// answer.
 type CacheBackoff struct {
-	Message    string    `json:"message"`
-	RetryAfter time.Time `json:"retry_after"`
-	RecordedAt time.Time `json:"recorded_at"`
+	Message    string       `json:"message"`
+	RetryAfter time.Time    `json:"retry_after"`
+	RecordedAt time.Time    `json:"recorded_at"`
+	Credential string       `json:"credential,omitempty"`
+	Refusal    *StatusError `json:"refusal,omitempty"`
+}
+
+// replay is the failure the backoff recorded: the typed refusal when it kept
+// one, the message otherwise.
+func (backoff *CacheBackoff) replay() error {
+	if backoff.Refusal != nil {
+		refusal := *backoff.Refusal
+		return &refusal
+	}
+	return errors.New(backoff.Message)
 }
 
 // CacheRecord binds shared usage and backoff to a config directory. Legacy
@@ -497,6 +534,30 @@ type CacheRecord struct {
 	ConfigDir string        `json:"config_dir,omitempty"`
 	FetchedAt *time.Time    `json:"fetched_at,omitempty"`
 	Backoff   *CacheBackoff `json:"backoff,omitempty"`
+	// Unchanged counts the fetches in a row that read exactly what the one
+	// before them read; it stretches the record's freshness (FreshFor).
+	Unchanged int `json:"unchanged,omitempty"`
+}
+
+// adaptiveCeiling bounds how far an idle account's freshness stretches: the
+// careful pollers keep 90-300 s between requests and slow down when idle
+// (RR claude-oauth-usage-429-pollers § 5.5), so an account whose readings stop
+// moving is asked at most every five minutes, and the first changed reading
+// brings the caller's own interval back.
+const adaptiveCeiling = 5 * time.Minute
+
+// FreshFor is how long the record answers without a request for a caller
+// whose interval is ttl: ttl doubled per unchanged fetch in a row, up to
+// adaptiveCeiling, never below ttl.
+func (record CacheRecord) FreshFor(ttl time.Duration) time.Duration {
+	fresh := ttl
+	for range min(record.Unchanged, 8) {
+		if fresh >= adaptiveCeiling {
+			break
+		}
+		fresh *= 2
+	}
+	return max(ttl, min(fresh, adaptiveCeiling))
 }
 
 // MatchesConfigDir rejects legacy unbound records and reused account numbers.
@@ -539,6 +600,9 @@ func WriteCacheRecord(path string, record CacheRecord) error {
 // server sent none or an unparseable value — callers apply their own floor.
 type RateLimitError struct {
 	RetryAfter time.Duration
+	// ErrorType is the body's error type ("rate_limit_error"), empty when
+	// the body named none.
+	ErrorType string
 }
 
 func (err *RateLimitError) Error() string {
@@ -581,91 +645,6 @@ func EnsurePrivateDir(path string) error {
 		return fmt.Errorf("usage cache is not owned by this uid")
 	}
 	return os.Chmod(path, 0o700)
-}
-
-func refresh(ctx context.Context, options Options, cachePath string) (returnErr error) {
-	credential, err := loadCredential(ctx, options.ConfigDir)
-	if err != nil {
-		return err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, http.NoBody)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Authorization", "Bearer "+credential.OAuth.AccessToken)
-	request.Header.Set("anthropic-beta", "oauth-2025-04-20")
-	response, err := options.Client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := response.Body.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close usage response: %w", err))
-		}
-	}()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("usage endpoint returned %s", response.Status)
-	}
-	fresh, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	var decoded usage
-	if err := json.Unmarshal(fresh, &decoded); err != nil {
-		return err
-	}
-	logUnknownUsageKeys(fresh, options.Log)
-	if decoded.FiveHour.Utilization == nil {
-		return fmt.Errorf("usage response omitted %s utilization", fiveHourKey)
-	}
-	fetchedAt := options.Now()
-	return WriteCacheRecord(cachePath, CacheRecord{
-		Usage: decoded, ConfigDir: options.ConfigDir, FetchedAt: &fetchedAt,
-	})
-}
-
-// Fetch reads one account's current OAuth usage without touching the warning
-// cache. It is the shared fetch seam for the Limits tab and the prompt hook.
-func Fetch(ctx context.Context, options Options) (usageResult Usage, returnErr error) {
-	options = normalize(options)
-	credential, err := loadCredential(ctx, options.ConfigDir)
-	if err != nil {
-		return Usage{}, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, http.NoBody)
-	if err != nil {
-		return Usage{}, fmt.Errorf("build usage request: %w", err)
-	}
-	request.Header.Set("Authorization", "Bearer "+credential.OAuth.AccessToken)
-	request.Header.Set("anthropic-beta", "oauth-2025-04-20")
-	response, err := options.Client.Do(request)
-	if err != nil {
-		return Usage{}, fmt.Errorf("fetch usage endpoint: %w", err)
-	}
-	defer func() {
-		if err := response.Body.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close usage response: %w", err))
-		}
-	}()
-	if response.StatusCode == http.StatusTooManyRequests {
-		return Usage{}, &RateLimitError{RetryAfter: ParseRetryAfter(response.Header.Get("Retry-After"), options.Now())}
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return Usage{}, fmt.Errorf("usage endpoint returned %s", response.Status)
-	}
-	fresh, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if err != nil {
-		return Usage{}, fmt.Errorf("read usage response: %w", err)
-	}
-	var decoded Usage
-	if err := json.Unmarshal(fresh, &decoded); err != nil {
-		return Usage{}, fmt.Errorf("decode usage response: %w", err)
-	}
-	logUnknownUsageKeys(fresh, options.Log)
-	if decoded.FiveHour.Utilization == nil {
-		return Usage{}, fmt.Errorf("usage response omitted %s utilization", fiveHourKey)
-	}
-	return decoded, nil
 }
 
 func logUnknownUsageKeys(body []byte, logger io.Writer) {

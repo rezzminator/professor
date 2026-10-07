@@ -50,6 +50,17 @@ func RepoRoot(dir string) string {
 	}
 }
 
+// Project returns the repository root and the picker's project label for dir.
+func Project(dir string) (root, name string) {
+	root = RepoRoot(dir)
+	trimmed := strings.TrimRight(root, string(filepath.Separator))
+	name = filepath.Base(trimmed)
+	if name == "." || name == ".." || name == "" {
+		name = "?"
+	}
+	return root, name
+}
+
 // MainCheckout maps a linked worktree root (a directory whose .git is a file)
 // to its repository's main checkout: the .git file's gitdir, that gitdir's
 // commondir, and the common dir's parent. ok is false when root is not a

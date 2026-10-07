@@ -14,7 +14,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/ui"
@@ -29,7 +28,7 @@ var startProfessorUpdateCheck = func(ctx context.Context, argv []string, options
 }
 
 func professorUpdateCachePath(runtime pfmconfig.Runtime) string {
-	return filepath.Join(filepath.Dir(runtime.Paths.DB), "update-check.json")
+	return filepath.Join(filepath.Dir(runtime.Paths.CacheDB), "update-check.json")
 }
 
 func cachedProfessorUpdateRow(runtime pfmconfig.Runtime) (compose.Row, bool) {
@@ -40,7 +39,7 @@ func cachedProfessorUpdateRow(runtime pfmconfig.Runtime) (compose.Row, bool) {
 	if err != nil || !found {
 		return compose.Row{}, false
 	}
-	repo, err := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	repo, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if err != nil {
 		return compose.Row{}, false
 	}
@@ -70,7 +69,7 @@ func cachedProfessorUpdateFailureRow(runtime pfmconfig.Runtime, hasUpdate bool) 
 	if err != nil || !failing {
 		return compose.Row{}, false
 	}
-	repo, err := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	repo, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if err != nil {
 		return compose.Row{}, false
 	}
@@ -115,7 +114,7 @@ func professorUpdateCheckNotice(runtime pfmconfig.Runtime) string {
 	if err != nil {
 		return fmt.Sprintf("pfm ls: could not read the Professor update cache: %v", err)
 	}
-	_, markerErr := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	_, markerErr := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if found {
 		// An update IS available — cachedProfessorUpdateRow renders it as its
 		// own picker row only when the source-repo marker reads; a second
@@ -221,6 +220,7 @@ func professorUpdatePrompt(row compose.Row) string {
 		"A release whose note carries a `#### → Stop:` line is a required stop: update to it first, finish its actions, then continue from it. " +
 		"Merge the `#### → For:` actions into one checklist per update: each names its timing — `before update`, `after update` or `per project` — and the surface it touches, and a later release's action supersedes an earlier one on the same surface; an older note's action that names no timing, including one written `#### For:` or `#### → For adopters …:`, gets the timing you judge. " +
 		"Then present a concise overview of every change and migration impact, with that checklist. " +
-		"Ask the user for explicit approval before making any change. Only after approval, do the before-update actions, run `pfm update --to " + target + "` (or the stop's tag), do the after-update actions, run `pfm doctor`, then in each adopted project run `pfm update check`, hand-apply each `UPDATED` diff and run `pfm update pin <local>`, then do the `per project` actions; report the exact result of each step. " +
+		"Ask the user for explicit approval before making any change. Only after approval, do the before-update actions, run `pfm update --to " + target + "` (or the stop's tag), do the after-update actions, run `pfm doctor`, " +
+		"then in each adopted project run `pfm doctor --project-updates`, read what upstream changed under each `UPDATED` row, carry what applies into the local file keeping the project's own edits, and run `pfm update pin <local>`, then do the `per project` actions; report the exact result of each step. " +
 		"Do not push, tag, publish, release, or edit the source manually."
 }

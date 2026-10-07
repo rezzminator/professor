@@ -72,7 +72,7 @@ type InjectInput struct {
 	Target   string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
 	Message  string   `json:"message" jsonschema:"message to type and submit"`
 	ForceNow bool     `json:"force_now,omitempty" jsonschema:"interrupt a busy target with Escape before delivery"`
-	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here; use chat_self_compact"`
+	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here"`
 }
 
 // InjectOutput is a stable MCP representation of inject.Result.
@@ -93,31 +93,6 @@ type InjectOutput struct {
 	Unsigned      bool   `json:"unsigned,omitempty"`
 	AutoFilePath  string `json:"auto_file_path,omitempty"`
 	LiteralChunks int    `json:"literal_chunks,omitempty"`
-}
-
-// SelfCompactInput safely compacts the requesting chat and carries the ONE
-// turn that resumes work after compaction. Focus is retained in the tool-call
-// history for the compactor AND composed onto the delivered command
-// ("/compact " + focus) by Engine.ScheduleSelfCompact — the single
-// implementation `pfm chat self-compact` shares — whose single-line,
-// control-character-free validation is exactly what makes that
-// concatenation safe. A target known to be Codex still receives the bare
-// command: an earlier investigation recorded that Codex accepts no inline
-// arguments on /compact, and nothing here re-tests it, so that constraint is
-// held rather than assumed away. See Engine.ScheduleSelfCompact
-// (internal/inject/engine.go) for the full reasoning and what would retire
-// it.
-//
-// Focus and Then are the ONLY things that survive. A caller holding durable
-// state of its own — a ledger, a state file, a chat-specific memory — writes
-// to it before calling, because nothing here can carry that state across.
-//
-// Then is a single string by the operator's rule — one steer, never a list.
-// The engine still takes a slice (chat_inject legitimately chains several);
-// this tool is the one caller that must not.
-type SelfCompactInput struct {
-	Focus string `json:"focus" jsonschema:"single-line compact focus authored after inspecting the requesting chat's current context and in-flight work"`
-	Then  string `json:"then" jsonschema:"the ONE mandatory post-compact steer, typed into the reborn chat once the compaction settles — a single string, never a list; must not start with /compact"`
 }
 
 // KeysInput requests tmux keypresses for one resolved live chat. Keys are
@@ -214,6 +189,32 @@ type ReadInput struct {
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 65536 and maximum 1048576"`
 }
 
+// DigestInput requests transcript.py's one-line-per-event digest of one
+// transcript. Every optional field maps onto one `transcript.py show` flag.
+type DigestInput struct {
+	Source     string `json:"source" jsonschema:"chat_find id, Claude or Codex session or agent id (or prefix), transcript path, or a Claude chat's title"`
+	Lines      string `json:"lines,omitempty" jsonschema:"transcript line range FROM-TO, FROM- or one line number; the events those records produced"`
+	Since      string `json:"since,omitempty" jsonschema:"window start: HH:MM[:SS] UTC, an ISO time, +5m from the transcript start, -15m from its end"`
+	Until      string `json:"until,omitempty" jsonschema:"window end, same forms as since"`
+	Grep       string `json:"grep,omitempty" jsonschema:"keep events whose full text (input, result, prose) matches this regular expression"`
+	IgnoreCase bool   `json:"ignore_case,omitempty" jsonschema:"match grep case-insensitively"`
+	Only       string `json:"only,omitempty" jsonschema:"event kinds, comma-separated: prompt, reply, call, note, final; error alone keeps only failed calls"`
+	Tool       string `json:"tool,omitempty" jsonschema:"keep only calls of these tool names, comma-separated"`
+	Results    string `json:"results,omitempty" jsonschema:"call results shown: brief (default), none, full or tail:N lines"`
+	First      int    `json:"first,omitempty" jsonschema:"keep the first N events after every other filter"`
+	Last       int    `json:"last,omitempty" jsonschema:"keep the last N events after every other filter"`
+	Text       int    `json:"text,omitempty" jsonschema:"characters kept of a prompt or reply, default 500"`
+	MaxBytes   int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, cut at a line end; default 65536 and maximum 1048576"`
+}
+
+// DigestOutput is chat_digest's bounded digest text.
+type DigestOutput struct {
+	Text       string `json:"text"`
+	Bytes      int    `json:"bytes"`
+	TotalBytes int    `json:"total_bytes"`
+	Truncated  bool   `json:"truncated"`
+}
+
 // Turn is one visible user, assistant, tool, or summary transcript record.
 // A tool call carries the tool's name in Tool and its condensed input as Text
 // — the transcript records no prose for it, and a turn with an empty Text
@@ -266,6 +267,7 @@ type StatusOutput struct {
 	Socket        string       `json:"socket,omitempty"`
 	ContextPct    float64      `json:"context_pct,omitempty"`
 	Last          string       `json:"last,omitempty"`
+	Error         string       `json:"error,omitempty"`
 	Summary       string       `json:"summary,omitempty"`
 	SummaryCached bool         `json:"summary_cached,omitempty"`
 	Ask           string       `json:"ask,omitempty"`
@@ -282,19 +284,20 @@ type NameInput struct {
 }
 
 type NewInput struct {
-	Name     string `json:"name"`
-	Engine   string `json:"engine,omitempty"`
-	CWD      string `json:"cwd,omitempty"`
-	Account  int    `json:"account,omitempty"`
-	Cache1H  bool   `json:"1h,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"effort,omitempty"`
-	Prompt   string `json:"prompt,omitempty"`
-	Await    bool   `json:"await,omitempty"`
-	Timeout  int    `json:"timeout,omitempty"`
-	Settle   int    `json:"settle,omitempty"`
-	Progress bool   `json:"progress,omitempty"`
-	Attach   bool   `json:"attach,omitempty"`
+	Name      string `json:"name,omitempty" jsonschema:"the chat's name in pfm ls and the target chat_inject, chat_status and chat_kill take; inside a workbench, empty takes its next {name}:{n}"`
+	Engine    string `json:"engine,omitempty" jsonschema:"cc/claude, cx/codex or ox/opencode; the caller's engine when empty"`
+	CWD       string `json:"cwd,omitempty" jsonschema:"working directory, relative to the caller's; the caller's directory when empty"`
+	Account   int    `json:"account,omitempty" jsonschema:"account number to launch on; pfm picks when 0"`
+	Cache     string `json:"cache,omitempty" jsonschema:"prompt cache for this launch: 1h or 5m"`
+	Model     string `json:"model,omitempty" jsonschema:"model alias or full id, e.g. claude-sonnet-5-5; the engine's default when empty"`
+	Effort    string `json:"effort,omitempty" jsonschema:"reasoning effort, e.g. high or xhigh; the engine's default when empty"`
+	AgentRole string `json:"agentRole,omitempty" jsonschema:"registered agent the chat runs as, e.g. flights-foreman: its role prompt joins the fleet prompt; not on OpenCode"`
+	Prompt    string `json:"prompt,omitempty" jsonschema:"first message; the chat opens idle without one"`
+	Await     bool   `json:"await,omitempty" jsonschema:"wait for the first answer and return it instead of the launch message"`
+	Timeout   *int   `json:"timeout,omitempty" jsonschema:"with await: seconds to wait, 0 waits forever; 600 when unset"`
+	Settle    int    `json:"settle,omitempty" jsonschema:"with await: seconds of quiet that end the answer; 3 when unset"`
+	Progress  bool   `json:"progress,omitempty" jsonschema:"with await: the chat's turns go to stderr while waiting"`
+	Attach    bool   `json:"attach,omitempty" jsonschema:"attach a terminal to the new chat; not with await"`
 }
 
 type ActionOutput struct {

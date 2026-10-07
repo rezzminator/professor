@@ -26,51 +26,29 @@ for _pfm_retired in cc cc1 cc2 cc3 cc4 cc-clean cc-ls cc-open cc-revive cc-swap 
   cc_mem cc_mtime cc_mtime0 cc_pane_of cc_penv cc_pfiles cc_ppid cc_pstart \
   cc_sed_i cc_session_live cc_size cc_size0 cc_timeout cc_trylock cc_unlock \
   cc_master_item cc_account_meta cc_item_sfx cc_read_item cc_expires_of \
-  cc_freshest_token cc_promote _pfm_eval; do
+  cc_freshest_token cc_promote _pfm_eval _pfm_primary; do
   unfunction "$_pfm_retired" 2>/dev/null || true
   unalias "$_pfm_retired" 2>/dev/null || true
 done
 unset _pfm_retired _cc_auto_what PFM_CLAUDE_PROMPTED
 
-typeset -gA PFM_CODEX_YOLO=()
-# CC_ENDPOINT_UNSET — every launch strips any inherited API endpoint. A chat
-# born inside another chat's Bash tool inherits that chat's environment, so a shell pointed at a
-# local translating proxy would hand the next launch a foreign endpoint and it would answer from a
-# foreign model under an Anthropic medal. The launcher's verdict is the account; the environment
-# gets no vote.
-typeset -ga CC_ENDPOINT_UNSET=(
-  -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL
-  -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK
-  -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY
-)
-# CC_SESSION_UNSET — the inherited SESSION IDENTITY, stripped by every path that starts a chat.
-# A chat born inside another chat's Bash tool inherits that chat's markers, and each one lies in a
-# different way: CLAUDE_CODE_SESSION_ID makes the newborn answer to its parent's id, CLAUDECODE
-# makes it believe it is already inside a harness, and CLAUDE_CODE_CHILD_SESSION marks it a
-# SUBORDINATE — which silently turns transcript saving OFF. That last one is the quiet one: the
-# chat runs perfectly, and only the footer whispers "Transcript saving is off", so the loss is
-# discovered when someone goes looking for a conversation that was never written. Stripping the
-# marker restores the default; forcing persistence back on with
-# CLAUDE_CODE_FORCE_SESSION_PERSISTENCE would paper over an identity the chat should never have
-# had. One array, three launch paths — a list written three times is a list that gets fixed twice.
-typeset -ga CC_SESSION_UNSET=(-u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION)
-_pfm_primary() { local n; n="$("$HOME/.local/bin/pfm" internal primary-get 2>/dev/null)"; case "$n" in 1|2) ;; *) n=1 ;; esac; echo "$n"; }
 # cx — a CODEX chat on the same per-chat-server pattern, socket prefix cx-* instead of cc-*.
 # The prefix IS the engine marker: codex writes no statusline breadcrumbs and no ~/.claude
 # transcript, so pfm recognizes (and lists) a live Codex chat by socket name alone. Claude
 # accounts / ⚡1h don't apply — codex has its own single auth (~/.codex).
 cx() {
+  # A non-interactive shell (an agent tool shell replaying a snapshot, a script) has no terminal
+  # to attach or hand back, and a snapshot may have dropped every `_`-prefixed helper — so cx
+  # refuses there, loudly, and names the door that starts a detached Codex chat instead.
+  [[ -o interactive ]] || {
+    print -u2 -r -- "cx: needs an interactive terminal; from a script use: pfm chat new {name} --engine codex"
+    return 1
+  }
   local sock="cx-$(date +%s)-$$-$RANDOM"
-  local acct; acct="$(_pfm_primary)"
-  local -a codex_flags=()
-  if [[ "${PFM_CODEX_YOLO[$acct]:-1}" == 1 ]]; then
-    codex_flags=(--dangerously-bypass-approvals-and-sandbox)
-  fi
-  # same launch hygiene as claude: a codex born inside a Claude chat must not inherit its identity.
   # PER-ELEMENT quoting, then join: "${(q)@}" joins the
   # array into ONE word FIRST and quotes that, so `cx --resume abc123` arrives as a single
   # escaped argv element ("--resume\ abc123") and codex rejects it as one unknown flag.
-  local run="env ${CC_SESSION_UNSET} -u CLAUDE_CONFIG_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M ${CC_ENDPOINT_UNSET} codex ${(j: :)${(@q)codex_flags}} ${(j: :)${(@q)@}}"
+  local run="\"$HOME/.local/bin/pfm\" internal codex-launch ${(j: :)${(@q)@}}"
   _cx_server "$sock" "$PWD" "$run" || return
   if _pfm_selfswitch "$sock"; then :                          # already inside it → switch, never nest
   elif _pfm_in_bunker; then TMUX= exec tmux -L "$sock" attach # viewport dies with the tab
@@ -143,19 +121,40 @@ _pfm_tui_call() {
 # chat does. claude bypasses recursion by calling the managed absolute launcher path, while
 # codex uses `command` to resolve the external command without re-entering this wrapper.
 # Only this shell's own typing is affected — pfm, hooks and scripts exec the binary and never
-# see these functions.
+# see these functions. An agent tool shell replays a snapshot that keeps `claude`/`codex` but drops
+# every `_`-prefixed helper, and is not interactive — the guard keeps it from calling them.
 claude() {
   "$HOME/.local/bin/claude" "$@"
   local exit_status=$?
-  _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
+  [[ -o interactive ]] && _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
   return "$exit_status"
 }
 
 codex() {
   command codex "$@"
   local exit_status=$?
-  _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
+  [[ -o interactive ]] && _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
   return "$exit_status"
+}
+
+# pfm — the picker typed into a bare terminal hands that terminal to the chat it opens, as `cx`
+# does. With stdout captured, pfm draws the picker on /dev/tty and prints the chosen action as
+# one line (action.Dispatch); this shell runs it, then closes when the chat ends or is detached,
+# so no prompt is left behind to read the terminal's late colour-query replies as typed input.
+# Esc prints nothing and returns to the prompt; a failed pfm returns its status. Any argument, a
+# script, a shell inside another tmux, or a snapshot shell without the helpers runs pfm as is.
+pfm() {
+  if (( $# )) || [[ ! -o interactive ]] || (( ! ${+functions[_pfm_owns_terminal]} )) ||
+    ! _pfm_owns_terminal; then
+    "$HOME/.local/bin/pfm" "$@"
+    return
+  fi
+  local line exit_status
+  line="$("$HOME/.local/bin/pfm")"
+  exit_status=$?
+  (( exit_status == 0 )) && [[ -n "$line" ]] || return "$exit_status"
+  eval "$line"
+  _pfm_own_terminal $?
 }
 
 # _pfm_selfswitch prevents attaching a Codex server inside itself.
@@ -212,7 +211,7 @@ if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:
     local cmd
     case "$_pfm_auto_what" in
       cx|codex)     cmd=cx ;;                 # a fresh Codex chat
-      *)           cmd="$HOME/.local/bin/pfm" ;; # retired and unknown values open the picker
+      *)           cmd=pfm ;;                # retired and unknown values open the picker
     esac
     unset _pfm_auto_what
     $cmd

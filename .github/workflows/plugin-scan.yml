@@ -43,8 +43,13 @@ jobs:
           (cd pfm && go run ./cmd/pfm opencode build ..)
 
       - name: Scan
-        uses: hashgraph-online/ai-plugin-scanner-action@caba2e96aa8ad2feb6cf6fca52442b52e22e779f # v1.2.635
+        uses: hashgraph-online/ai-plugin-scanner-action@ff72bdc87402c9751fe9be6977de41c0cfcc514b # v1.2.706
         with:
           plugin_dir: "."
           min_score: 80
           fail_on_severity: high
+          # .plugin-scanner.toml (fixture paths that plant fake credentials)
+          # counts only where the author already holds push rights: a push, or
+          # a pull request from this repository. A fork's pull request is
+          # scanned with no repository suppressions.
+          trust_repository_policy: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}

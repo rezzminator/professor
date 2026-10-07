@@ -181,7 +181,7 @@ func provisionWithTargets(
 	// one of them reads a tree the other is halfway through replacing —
 	// ProvisionBrowser's own lock (provision_browser.go) guards its sibling
 	// root the same way.
-	release, err := lockProvisionRoot(envRoot)
+	release, err := lockProvisionRoot(ctx, envRoot)
 	if err != nil {
 		return ProvisionResult{}, err
 	}
@@ -463,7 +463,7 @@ func ensureInputWithClock(ctx context.Context, path string, input Artifact, offl
 	}
 	if download == nil {
 		download = func(ctx context.Context, url, destination string) error {
-			return downloadFile(ctx, url, destination, input.Size)
+			return downloadFile(ctx, now, url, destination, input.Size)
 		}
 	}
 	staging := path + fmt.Sprintf(".download-%d", now.Now().UnixNano())
@@ -490,7 +490,7 @@ func ensureInputWithClock(ctx context.Context, path string, input Artifact, offl
 }
 
 // downloadCeiling bounds ONE pinned-artifact download end to end — connect,
-// headers and body. Nothing else in installer.Run → installHarvest →
+// headers, body, retries and waits. Nothing else in installer.Run → installHarvest →
 // Provision carries a deadline, so a server that stalls mid-body hung
 // `pfm install` forever. The largest pinned input is the ~31 MB standalone
 // CPython archive (assets/targets.json), which 20 minutes covers on a link as
@@ -511,10 +511,21 @@ func downloadTimeoutError(parent, bounded context.Context, err error) error {
 	)
 }
 
-func downloadFile(ctx context.Context, url, path string, expectedSize int64) (returnErr error) {
+func downloadFile(ctx context.Context, timing clock.Clock, url, path string, expectedSize int64) error {
 	bounded, cancelCeiling := context.WithTimeout(ctx, downloadCeiling)
 	defer cancelCeiling()
-	request, err := http.NewRequestWithContext(bounded, http.MethodGet, url, http.NoBody)
+	return retryDownload(ctx, bounded, timing, url, path, expectedSize)
+}
+
+type downloadStatusError struct {
+	code   int
+	status string
+}
+
+func (err downloadStatusError) Error() string { return "download returned HTTP " + err.status }
+
+func downloadAttempt(ctx, bounded context.Context, url, path string, expectedSize int64) (returnErr error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
 	}
@@ -532,7 +543,7 @@ func downloadFile(ctx context.Context, url, path string, expectedSize int64) (re
 		}
 	}()
 	if response.StatusCode/100 != 2 {
-		return fmt.Errorf("download returned HTTP %s", response.Status)
+		return downloadStatusError{code: response.StatusCode, status: response.Status}
 	}
 	if expectedSize > 0 && response.ContentLength > expectedSize {
 		return fmt.Errorf("download content length %d exceeds pinned size %d", response.ContentLength, expectedSize)

@@ -2,19 +2,22 @@ package harvestmcp
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
-// TestResolverClientIsPinned pins newHTTPClient (spec doh-seams-spec.md,
-// change B.2): the MCP Resolver's client must be built on harvest's pinned
-// (DoH-resolved, SSRF-checked) transport instead of a bare
-// http.DefaultTransport clone, and the runtime User-Agent the caller-facing
-// wrapper sets must still reach the wire. The pinned-transport identity is
-// asserted through harvest's own exported probe rather than reaching into
-// harvest's unexported transport types from this package.
-func TestResolverClientIsPinned(t *testing.T) {
+// TestResolverClientRefusesALoopbackTarget proves the resolver client and its
+// pinned base transport reject private destinations before a request arrives.
+func TestResolverClientRefusesALoopbackTarget(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
 	client, err := newHTTPClient(Runtime{UserAgent: "ua-x"})
 	if err != nil {
 		t.Fatal(err)
@@ -27,9 +30,31 @@ func TestResolverClientIsPinned(t *testing.T) {
 		t.Fatalf("outer User-Agent = %q, want ua-x", outer.value)
 	}
 	inner := &http.Client{Transport: outer.base}
-	if !harvest.IsPinnedClient(inner) {
-		t.Fatal(
-			"newHTTPClient's base transport is not harvest's pinned (DoH-resolved) client; want it built via harvest.NewDirectClient",
-		)
+	for _, test := range []struct {
+		name   string
+		client *http.Client
+	}{
+		{name: "MCP wrapper", client: client},
+		{name: "pinned base", client: inner},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := test.client.Get(server.URL)
+			if response != nil {
+				_ = response.Body.Close()
+				t.Fatalf(
+					"loopback request returned response %v; MCP resolver client must dial only through harvest's pinned, SSRF-checked transport",
+					response.Status,
+				)
+			}
+			if err == nil || !strings.Contains(err.Error(), "refusing private/internal host 127.0.0.1") {
+				t.Fatalf("loopback refusal = %v, want the SSRF refusal itself", err)
+			}
+			if got := requests.Load(); got != 0 {
+				t.Fatalf(
+					"loopback server received %d requests; MCP resolver client must dial only through harvest's pinned, SSRF-checked transport",
+					got,
+				)
+			}
+		})
 	}
 }

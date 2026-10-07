@@ -1,0 +1,14 @@
+[Unit]
+Description=Fire due pfm reminders every 5 minutes
+
+[Timer]
+# Wall-clock ticks at :00, :05, ... — the fixed cadence, so no install-time
+# marker; the launchd agent's StartInterval carries the same 300 s.
+OnCalendar=*:0/5
+# A tick missed while the host slept or the user manager was down fires once at
+# the next start.
+Persistent=true
+Unit=pfm-reminder.service
+
+[Install]
+WantedBy=timers.target

@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -208,4 +210,59 @@ func codexCLISnapshot(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return result.String()
+}
+
+func TestCodexRepoRootProbeFailure(t *testing.T) {
+	jailTest(t)
+	deep := t.TempDir()
+	for remaining := 4088 - len(deep); remaining > 0; {
+		n := min(200, remaining-1)
+		if remaining-(n+1) == 1 {
+			n--
+		}
+		deep = filepath.Join(deep, strings.Repeat("x", n))
+		remaining -= n + 1
+	}
+	if err := os.MkdirAll(deep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(deep)
+	got, err := codexRepoRoot()
+	if got != "" || !errors.Is(err, syscall.ENAMETOOLONG) {
+		t.Fatalf("root=%q err=%v, want empty root and ENAMETOOLONG", got, err)
+	}
+}
+
+func TestCodexBuildInsideWorkbench(t *testing.T) {
+	jailTest(t)
+	root := filepath.Join(t.TempDir(), "acme")
+	bench := filepath.Join(root, "docs", "scribe")
+	writeCodexCLIFile(t, filepath.Join(root, ".git", "HEAD"), "ref: refs/heads/fixture\n")
+	writeCodexCLIFile(t, filepath.Join(root, "CLAUDE.md"), "Parent.\n")
+	writeCodexCLIFile(t, filepath.Join(bench, "CLAUDE.md"), "Scribe.\n")
+	writeCodexCLIFile(t, filepath.Join(bench, ".professor", "workbench.json"), `{}`)
+	notes := filepath.Join(bench, "notes")
+	if err := os.MkdirAll(notes, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(notes)
+	got, err := codexRepoRoot()
+	if err != nil || got != bench {
+		t.Errorf("root=%q err=%v, want %q", got, err, bench)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"codex", "build"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("bare build=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(bench, "AGENTS.md")); err != nil {
+		t.Errorf("bare build did not compile bench: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"codex", "build", root}, &stdout, &stderr); code != 0 {
+		t.Fatalf("explicit build=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Errorf("explicit positional changed: %v", err)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -52,6 +53,18 @@ func (installer *engine) wireCodexDefaults() error {
 			return err
 		}
 		wanted := string(raw)
+		_, _, yielded, err := installer.codexMCPYield(wanted)
+		if err != nil {
+			return fmt.Errorf("read Codex MCP config %s: %w", path, err)
+		}
+		change := "merge Professor defaults into " + path
+		if tables := yieldedCodexMCPTables(wanted, yielded); len(tables) != 0 {
+			for index, name := range tables {
+				tables[index] = "mcp_servers." + name
+			}
+			change += "; remove pfm's MCP tables: " + strings.Join(tables, ", ")
+		}
+		wanted = yielded
 		if defaults != "" {
 			if wanted, err = mergeCodexDefaults(wanted, defaults); err != nil {
 				return fmt.Errorf("merge Codex defaults into %s: %w", path, err)
@@ -65,13 +78,35 @@ func (installer *engine) wireCodexDefaults() error {
 			installer.skip(path + ": " + foreign)
 		}
 		if err := installer.writeCodexConfig(path, raw, existed, wanted, codexConfigEdit{
-			change:  "merge Professor defaults into " + path,
+			change:  change,
 			settled: path + " defaults",
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func yieldedCodexMCPTables(raw, yielded string) []string {
+	retained := map[string]int{}
+	for _, line := range strings.Split(yielded, "\n") {
+		if strings.HasPrefix(line, "[mcp_servers.") && strings.HasSuffix(line, "]") {
+			retained[line]++
+		}
+	}
+	var removed []string
+	for _, line := range strings.Split(raw, "\n") {
+		if !strings.HasPrefix(line, "[mcp_servers.") || !strings.HasSuffix(line, "]") {
+			continue
+		}
+		if retained[line] != 0 {
+			retained[line]--
+			continue
+		}
+		removed = append(removed, strings.TrimSuffix(strings.TrimPrefix(line, "[mcp_servers."), "]"))
+	}
+	sort.Strings(removed)
+	return removed
 }
 
 // removeCodexDeveloperInstructions takes pfm's fleet-prompt block back out on

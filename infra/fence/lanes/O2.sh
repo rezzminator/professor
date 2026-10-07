@@ -38,7 +38,7 @@ LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$LANES_DIR/lib.sh"
 lane_preamble
 
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 MANAGED="$HOME/.local/share/pfm/install"
 BLUEPRINT="$HOME/.professor"
 E1_MAIN="${E1_CHAT:-E1_MAIN}"
@@ -68,7 +68,7 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   lane_abort "no working directory for the chats to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
   "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
-  "bash /worktree/infra/demo/daemon.sh" ||
+  "lane_daemon_up" ||
   lane_abort "the professor MCP daemon never answered on :$PORT — no Codex chat can call a chat_* tool"
 
 # open_e1_main — E1's own `chat new` line (E1.sh open_main), so a solo O2 asserts
@@ -82,16 +82,26 @@ open_e2_main() {
   pfm chat new --name "$E2_MAIN" --engine cx --cwd "$CWD" --await --timeout 300 \
     "You are $E2_MAIN, the Codex chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." 2>&1
 }
-# make_graveyard — F's storm raised and killed (infra/demo/storm.sh then
-# kill-storm.sh): the ended STORM rows become the killed ledger O2.02 archives.
+# make_graveyard — the ended STORM rows become O2.02's killed ledger.
+storm_ready_to_end() {
+  [ "$(pfm chat status "$1" --json 2>/dev/null | jq -r '.state // empty')" = idle ] &&
+    grep -q . <<<"$(pfm chat last "$1" 2>/dev/null)" &&
+    { [ "$1" != STORM_1 ] || grep -qF 'lane storm seed' <<<"$(pfm chat read "$1" --tail 4 --json 2>/dev/null)"; }
+}
 make_graveyard() {
-  STORM_CC_ACCOUNT="$SEAT" bash /worktree/infra/demo/storm.sh start 2 1 2>&1 || return 1
-  sleep 20
-  bash /worktree/infra/demo/kill-storm.sh 2>&1
+  STORM_CC_ACCOUNT="$SEAT" lane_storm_start 2 1 || return 1
+  wait_for 60 'storm_ready_to_end STORM_1' ||
+    { echo "storm: STORM_1 did not finish its seed turn: $LANE_WAIT_WHY" >&2; return 1; }
+  # lane_storm_start injects STORM_2's seed into STORM_1; STORM_2 finishes its initial turn.
+  wait_for 60 'storm_ready_to_end STORM_2' ||
+    { echo "storm: STORM_2 did not finish its initial turn: $LANE_WAIT_WHY" >&2; return 1; }
+  lane_storm_kill || return 1
+  wait_for 30 "grep -q . <<<\"\$(pfm ls --killed 2>/dev/null)\"" ||
+    { echo "storm: killed-chat graveyard did not appear: $LANE_WAIT_WHY" >&2; return 1; }
 }
 need "E1's chat $E1_MAIN" "live_chat '$E1_MAIN'" 'open_e1_main' || true
 need "E2's chat $E2_MAIN (Codex)" "live_chat '$E2_MAIN'" 'open_e2_main' || true
-need "a killed-chat graveyard (F's storm, ended and hidden)" "pfm ls --killed 2>/dev/null | grep -q ." 'make_graveyard' || true
+need "a killed-chat graveyard (F's storm, ended and hidden)" "grep -q . <<<\"\$(pfm ls --killed 2>/dev/null)\"" 'make_graveyard' || true
 lane_reopen 'open_e1_main'
 
 install_again() { (cd "$BLUEPRINT" && pfm install --yes 2>&1); }
@@ -133,7 +143,7 @@ corpse() {
   pid="$(tmux -S "$TMUX_DIR/$1" display-message -p '#{pid}' 2>/dev/null)"
   [ -n "$pid" ] || return 1
   kill -9 "$pid" 2>/dev/null
-  sleep 1
+  wait_for 10 "! server_up '$1'" || { echo "corpse: $1 server still answers after SIGKILL: $LANE_WAIT_WHY" >&2; return 1; }
   [ -S "$TMUX_DIR/$1" ] || return 1
   [ -n "${2:-}" ] && touch -d "@$(( $(date +%s) - $2 ))" "$TMUX_DIR/$1"
   return 0
@@ -145,17 +155,16 @@ corpse() {
 hold_attach() {
   tmux -S "$TMUX_DIR/$1" -f /dev/null new-session -d -s hold -x 200 -y 50 \
     "TMUX= exec tmux -S '$2' attach-session" >/dev/null 2>&1 || return 1
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    [ "$(tmux -S "$2" display-message -p '#{session_attached}' 2>/dev/null)" -ge 1 ] 2>/dev/null && return 0
-    sleep 1
-  done
-  return 1
+  # A fleet anchor probe would sweep the aged dead socket planted for this beat.
+  LANE_ANCHOR= wait_for 10 "[ \"\$(tmux -S '$2' display-message -p '#{session_attached}' 2>/dev/null)\" -ge 1 ]"
 }
 reap_cleanup() {
   local s
   for s in $HOLDERS; do tmux -S "$TMUX_DIR/$s" kill-server >/dev/null 2>&1; rm -f "$TMUX_DIR/$s"; done
   for s in $PLANTED; do kill_planted "$s"; done
+  [ -n "${fork_sock:-}" ] && kill_planted "$fork_sock"
   live_chat "$FORK_CHAT" && pfm chat end "$FORK_CHAT" >/dev/null 2>&1
+  rm -f /tmp/o2-reap-hold /tmp/o2-quiet.json
   return 0
 }
 
@@ -174,18 +183,21 @@ if requires; then
   for s in cx-lane-orph cc-new-lane-mate cc-lane-nocrumb; do
     out="$(plant_shell "$s")" || bad="$bad could not plant $s: $(one_line "$out");"
   done
+  # PAYLOAD: the planted non-chat process makes cx-lane-hosts ineligible for reap.
   out="$(plant_cmd cx-lane-hosts 'sleep 3600')" || bad="$bad could not plant cx-lane-hosts: $(one_line "$out");"
-  corpse cc-lane-dead 7200 || bad="$bad could not leave a dead socket file cc-lane-dead behind;"
-  corpse cc-lane-fresh || bad="$bad could not leave a fresh empty socket file cc-lane-fresh behind;"
+  corpse cc-lane-fresh || bad="$bad could not leave a fresh empty socket file cc-lane-fresh behind${LANE_WAIT_WHY:+: $LANE_WAIT_WHY};"
   for s in cx-lane-orph cc-new-lane-mate cc-lane-nocrumb cx-lane-hosts; do
     server_up "$s" || bad="$bad planted server $s does not answer list-sessions;"
   done
   # 2. busy (L11) / active (L12): a real turn on E1's chat, the sweep run inside it.
-  stim="$(pfm chat inject --allow-unsigned "$E1_MAIN" \
-    "Count from 1 to 30, one number per line, pausing about a second between numbers. Do not stop early. Then reply with exactly one word: COUNT-DONE" 2>&1)" ||
+  : >/tmp/o2-reap-hold
+  stim="$(CHAT_SENDER_LABEL="$E2_MAIN" CHAT_SENDER_SESSION="$(live_field "$E2_MAIN" 11)" CHAT_SENDER_SID="$(live_field "$E2_MAIN" 2)" \
+    pfm chat inject "$E1_MAIN" "$(mock_steps '{"type":"hold","until_gone":"/tmp/o2-reap-hold"}')" 2>&1)" ||
     bad="$bad the busy stimulus was refused: $(one_line "$stim");"
-  sleep 6
-  j="$(pfm reap --json --busy-recent 1 2>"$err")"
+  wait_prompt "$E1_MAIN" o2-reap-hold 60 || bad="$bad held turn never reached a user record: ${LANE_WAIT_WHY:-no wait reason};"
+  wait_for 10 "[ \"\$(pfm chat status '$E1_MAIN' --json 2>/dev/null | jq -r '.state // empty')\" = working ]" ||
+    bad="$bad held turn never read busy before pfm reap: $LANE_WAIT_WHY;"
+  j="$(pfm reap --json 2>"$err")"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad pfm reap --json mid-turn exited $rc: $(one_line "$(cat "$err")");"
   st="$(reap_field "$j" "$e1_name" state)"
@@ -193,9 +205,10 @@ if requires; then
     busy | active) noted="$noted mid-turn $E1_MAIN=$st;" ;;
     *) bad="$bad mid-turn $E1_MAIN read '${st:-<no row>}' (want busy or active; reason '$(reap_field "$j" "$e1_name" reason)'; stderr: $(one_line "$(cat "$err")"));" ;;
   esac
-  if ! wait_last "$E1_MAIN" COUNT-DONE 240; then
-    bad="$bad the counting turn never ended: ${LANE_WAIT_WHY:-no wait reason recorded};"
-  fi
+  rm -f /tmp/o2-reap-hold
+  idle=0
+  wait_for 30 "[ \"\$(pfm chat status '$E1_MAIN' --json 2>/dev/null | jq -r '.state // empty')\" = idle ]" && idle=1
+  [ "$idle" -eq 1 ] || bad="$bad the held turn did not return to idle after its gate was removed: $LANE_WAIT_WHY;"
   j="$(pfm reap --json 2>"$err")"
   st="$(reap_field "$j" "$e1_name" state)"
   if [ "$st" = active ]; then noted="$noted just-after $E1_MAIN=active;"; else
@@ -203,18 +216,28 @@ if requires; then
   fi
   # 3. the fork (L14): a real detached /chat:branch seat off E1's session.
   e1_sid="$(live_field "$E1_MAIN" 2)"
-  fork_out="$(timeout 120 pfm chat branch --engine claude --session-id "$e1_sid" --cwd "$CWD" --name "$FORK_CHAT" 2>&1)"
+  jq '. + {quiet:true}' /root/.local/share/pfm-lanes/default.json >/tmp/o2-quiet.json
+  before_fork="$(find "$TMUX_DIR" -maxdepth 1 -name 'cc-*' -print | sort)"
+  fork_out="$(MOCK_ENGINE_SCENARIO=/tmp/o2-quiet.json timeout 120 pfm chat branch --engine claude --session-id "$e1_sid" --cwd "$CWD" --name "$FORK_CHAT" 2>&1)"
   fork_rc=$?
   fork_sock=""
   if [ "$fork_rc" -eq 0 ]; then
-    sleep 8
-    fork_sock="$(live_field "$FORK_CHAT" 11)"
-    [ -n "$fork_sock" ] && fork_sock="$(basename "$fork_sock")"
+    after_fork="$(find "$TMUX_DIR" -maxdepth 1 -name 'cc-*' -print | sort)"
+    fork_sock="$(comm -13 <(printf '%s\n' "$before_fork") <(printf '%s\n' "$after_fork") | head -1)"
+    fork_sock="$(basename "${fork_sock:-/}")"
+    [ "$fork_sock" != / ] || fork_sock=""
+    [ -n "$fork_sock" ] || bad="$bad branch returned no new Claude socket: $(one_line "$fork_out");"
   else
     _lane_log_only "   O2.01: pfm chat branch exited $fork_rc: $(one_line "$fork_out") — the fork state is not observable this run"
   fi
   # 4. the quiet dry run (L8 self via \$TMUX, L10, L13, L15, L18, L19, L22 default = dry).
-  sleep 3
+  e1_transcript="$(find "$HOME/.claude/projects" -type f -name "$e1_sid.jsonl" -print -quit 2>/dev/null)"
+  if [ -z "$e1_transcript" ]; then
+    bad="$bad could not find $E1_MAIN's transcript to check --busy-recent 1;"
+  elif ! wait_for 10 "[ \"\$(date +%s)\" -ge \"\$(( \$(stat -c %Y '$e1_transcript') + 2 ))\" ]"; then
+    bad="$bad $E1_MAIN's transcript stayed inside --busy-recent 1: $LANE_WAIT_WHY;"
+  fi
+  corpse cc-lane-dead 7200 || bad="$bad could not leave a dead socket file cc-lane-dead behind${LANE_WAIT_WHY:+: $LANE_WAIT_WHY};"
   j="$(TMUX="$TMUX_DIR/cx-lane-orph,1,0" pfm reap --json --busy-recent 1 2>"$err")"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad the quiet pfm reap --json exited $rc: $(one_line "$(cat "$err")");"
@@ -225,7 +248,7 @@ if requires; then
     reason="$(reap_field "$1" "$2" reason)"
     if [ "$got" != "$3" ]; then
       bad="$bad $2 read '${got:-<no row>}' (want $3; reason '$reason');"
-    elif [ -n "${4:-}" ] && ! printf '%s' "$reason" | grep -qF -- "$4"; then
+    elif [ -n "${4:-}" ] && ! grep -qF -- "$4" <<<"$reason"; then
       bad="$bad $2 is $3 but its reason '$reason' does not name '$4';"
     fi
   }
@@ -239,6 +262,8 @@ if requires; then
   if [ -n "$fork_sock" ]; then
     fork_state="$(reap_field "$j" "$fork_sock" state)"
     fork_state="${fork_state:-<no row for $fork_sock>}"
+    [ "$fork_state" = fork ] || bad="$bad $fork_sock read '$fork_state' (want fork / untouched detached fork);"
+    [ "$(reap_field "$j" "$fork_sock" reason)" = 'untouched detached fork' ] || bad="$bad $fork_sock fork reason was '$(reap_field "$j" "$fork_sock" reason)' (want untouched detached fork);"
     noted="$noted fork seat $fork_sock=$fork_state;"
   fi
   # The text table and the flag surface (L24 --horizon, L25 --busy-recent, L26 --json).
@@ -246,7 +271,7 @@ if requires; then
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad the text pfm reap exited $rc: $(one_line "$txt");"
   for needle in '-- REAP (' '-- SPARED (' '-- UNKNOWN (' 'KEEP:' 'dry run — nothing changed'; do
-    printf '%s' "$txt" | grep -qF -- "$needle" || bad="$bad the text report lacks '$needle';"
+    grep -qF -- "$needle" <<<"$txt" || bad="$bad the text report lacks '$needle';"
   done
   pfm reap --horizon 1h --busy-recent 5 --json >/dev/null 2>"$err" ||
     bad="$bad pfm reap --horizon 1h --busy-recent 5 --json was refused: $(one_line "$(cat "$err")");"
@@ -261,11 +286,11 @@ if requires; then
   [ "$rc" -eq 2 ] || bad="$bad pfm reap with a positional argument exited $rc (want 2, usage);"
   # 5. keep (L9): a real client attached to each lane chat — and the GUARD before
   # --apply: a lane chat that would be reaped stops the apply cold, by name.
-  hold_attach lane-hold-e1 "$e1_sock" || bad="$bad could not attach a holder client to $E1_MAIN's server ($e1_sock);"
+  hold_attach lane-hold-e1 "$e1_sock" || bad="$bad could not attach a holder client to $E1_MAIN's server ($e1_sock): $LANE_WAIT_WHY;"
   if [ -n "$e2_sock" ]; then
-    hold_attach lane-hold-e2 "$e2_sock" || bad="$bad could not attach a holder client to $E2_MAIN's server ($e2_sock);"
+    hold_attach lane-hold-e2 "$e2_sock" || bad="$bad could not attach a holder client to $E2_MAIN's server ($e2_sock): $LANE_WAIT_WHY;"
   fi
-  j_dry="$(pfm reap --json 2>"$err")"
+  j_dry="$(pfm reap --json --busy-recent 1 2>"$err")"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad the pre-apply pfm reap --json exited $rc: $(one_line "$(cat "$err")");"
   expect_state "$j_dry" "$e1_name" keep "attached"
@@ -277,7 +302,7 @@ if requires; then
   done
   if [ "$apply_ok" -eq 1 ]; then
     # 6. --apply (L17 KILL, L21 actions, L23, L22 plan parity): the same sweep, performed.
-    j_apply="$(pfm reap --apply --json 2>"$err")"
+    j_apply="$(pfm reap --apply --json --busy-recent 1 2>"$err")"
     rc=$?
     [ "$rc" -eq 0 ] || bad="$bad pfm reap --apply --json exited $rc (failed=$(printf '%s' "$j_apply" | jq -r '.failed' 2>/dev/null)): $(one_line "$(cat "$err")");"
     [ "$(printf '%s' "$j_apply" | jq -r '.apply' 2>/dev/null)" = true ] || bad="$bad --apply --json reports apply!=true;"
@@ -289,9 +314,11 @@ if requires; then
     expect_state "$j_apply" cc-lane-dead dead
     [ "$(printf '%s' "$j_apply" | jq -r '.killed' 2>/dev/null)" -ge 1 ] 2>/dev/null || bad="$bad --apply reports killed=$(printf '%s' "$j_apply" | jq -r '.killed' 2>/dev/null) (want ≥1: cx-lane-orph);"
     [ "$(printf '%s' "$j_apply" | jq -r '.dead_files' 2>/dev/null)" -ge 1 ] 2>/dev/null || bad="$bad --apply reports dead_files=$(printf '%s' "$j_apply" | jq -r '.dead_files' 2>/dev/null) (want ≥1: cc-lane-dead);"
-    sleep 1
-    [ ! -e "$TMUX_DIR/cc-lane-dead" ] || bad="$bad the dead socket file cc-lane-dead is still on disk after --apply;"
-    server_up cx-lane-orph && bad="$bad cx-lane-orph's server still answers after --apply reported it KILLed;"
+    apply_wait_why=""
+    wait_for 10 "[ ! -e '$TMUX_DIR/cc-lane-dead' ] && ! server_up cx-lane-orph" || apply_wait_why="$LANE_WAIT_WHY"
+    [ -z "$apply_wait_why" ] || bad="$bad --apply did not prove the dead socket and orphan server gone within the bound: $apply_wait_why;"
+    [ ! -e "$TMUX_DIR/cc-lane-dead" ] || bad="$bad the dead socket file cc-lane-dead is still on disk after --apply${apply_wait_why:+: $apply_wait_why};"
+    server_up cx-lane-orph && bad="$bad cx-lane-orph's server still answers after --apply reported it KILLed${apply_wait_why:+: $apply_wait_why};"
     server_up cc-lane-nocrumb || bad="$bad --apply took the SKIP socket cc-lane-nocrumb (busy-unknown must never be reaped);"
     server_up cx-lane-hosts || bad="$bad --apply took the hosts socket cx-lane-hosts (a socket hosting non-chat processes is never reapable);"
     server_up cc-new-lane-mate || bad="$bad --apply took the mate socket cc-new-lane-mate;"
@@ -299,9 +326,14 @@ if requires; then
     live_chat "$E1_MAIN" || bad="$bad $E1_MAIN has no live row after --apply — the attached lane chat was reaped;"
   fi
   reap_cleanup
-  live_chat "$FORK_CHAT" && bad="$bad the fork seat $FORK_CHAT is still live after cleanup;"
-  unprovoked="IDLE (an attached client idle 1h+ with the transcript's last record past the 48h horizon), UNKN (an attached socket whose client-activity probe answers nobody, or an unreadable transcript)"
-  [ "$fork_state" = fork ] || unprovoked="fork (the branch seat read '$fork_state' — a crumb lands before the sweep sees it untouched), $unprovoked"
+  fork_wait_why=""
+  wait_for 10 "! live_chat '$FORK_CHAT'" || fork_wait_why="$LANE_WAIT_WHY"
+  fork_still_live=0
+  live_chat "$FORK_CHAT" && fork_still_live=1
+  if [ "$fork_still_live" -eq 1 ] || [ -n "$fork_wait_why" ]; then
+    bad="$bad the fork seat $FORK_CHAT is still live after cleanup${fork_wait_why:+: $fork_wait_why};"
+  fi
+  unprovoked="IDLE, UNKN need a client idle ≥1h of wall clock (runner.go:40 defaultClientActive); pfm reap sets no clock"
   if [ -n "$bad" ]; then
     fail "$bad"
   else
@@ -309,17 +341,12 @@ if requires; then
   fi
 fi
 
-# ─── O2.01b — the three states no live fleet can provoke ────────────────────
-# fork needs a branch seat the sweep sees before its crumb lands; IDLE and UNKN
-# need an attached client idle for 1h+ or a transcript made unreadable under a
-# live chat — a scripted engine (Wave 7's mock-engine) AND a clock door (`pfm
-# reap` has no --now). Named here so O2.01's sixteen real assertions can be
-# green while these three stay a visible gap, never a silent one.
+# ─── O2.01b — fork is asserted; IDLE and UNKN need a clock door ─────────────
 
 beat O2.01b-reap-unprovokable
 spends none
 if requires O2.01-reap; then
-  blocked wave7-mock-engine "unprovoked without a scripted engine and a clock door (pfm reap has no --now): ${unprovoked:-fork, IDLE, UNKN}"
+  blocked clock-door "fork asserted; ${unprovoked:-IDLE and UNKN need a clock door}"
 fi
 
 # ─── O2.02 — archive over a real history ────────────────────────────────────
@@ -337,16 +364,16 @@ else
   plan="$(pfm archive 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad pfm archive (dry run) exited $rc: $(one_line "$plan");"
-  printf '%s' "$plan" | grep -qF 'mode: killed chats' || bad="$bad the dry run does not name its mode: $(one_line "$plan");"
-  printf '%s' "$plan" | grep -qF 'dry run — nothing moved' || bad="$bad the dry run does not say it moved nothing;"
-  n_plan="$(printf '%s\n' "$plan" | grep -c '^  plan ')"
+  grep -qF 'mode: killed chats' <<<"$plan" || bad="$bad the dry run does not name its mode: $(one_line "$plan");"
+  grep -qF 'dry run — nothing moved' <<<"$plan" || bad="$bad the dry run does not say it moved nothing;"
+  n_plan="$(printf '%s' "$plan" | grep -c '^  plan ')"
   [ "$n_plan" -ge 1 ] || bad="$bad the dry run planned no move over $(printf '%s\n' "$killed_rows" | grep -c .) killed row(s): $(one_line "$plan");"
   applied="$(pfm archive --apply 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad pfm archive --apply exited $rc: $(one_line "$applied");"
-  n_moved="$(printf '%s\n' "$applied" | grep -c '^  moved ')"
+  n_moved="$(printf '%s' "$applied" | grep -c '^  moved ')"
   [ "$n_moved" -eq "$n_plan" ] || bad="$bad --apply moved $n_moved file(s) but the dry run planned $n_plan — the plan and the run disagree;"
-  printf '%s' "$applied" | grep -qE 'kills retired: [0-9]+' || bad="$bad --apply printed no 'kills retired' count;"
+  grep -qE 'kills retired: [0-9]+' <<<"$applied" || bad="$bad --apply printed no 'kills retired' count;"
   manifest="$(printf '%s\n' "$applied" | sed -n 's/^manifest: //p' | tail -1)"
   if [ -z "$manifest" ]; then
     bad="$bad --apply named no manifest path;"
@@ -365,30 +392,30 @@ else
     if [ "$rc" -ne 0 ]; then
       bad="$bad pfm archive --restore $last_id exited $rc: $(one_line "$restored");"
     else
-      printf '%s' "$restored" | grep -qF "restored $last_id -> $last_orig" || bad="$bad --restore did not report 'restored <id> -> <orig>': $(one_line "$restored");"
+      grep -qF "restored $last_id -> $last_orig" <<<"$restored" || bad="$bad --restore did not report 'restored <id> -> <orig>': $(one_line "$restored");"
       [ -f "$last_orig" ] || bad="$bad --restore exited 0 but $last_orig is not back on disk;"
       pfm chat kill "$last_id" >/dev/null 2>&1 # re-hide the row the restore brought back
     fi
     twice="$(pfm archive --restore "$last_id" 2>&1)"
     rc=$?
     [ "$rc" -ne 0 ] || bad="$bad a second --restore of $last_id was ACCEPTED (exit 0) though the original is back in place;"
-    printf '%s' "$twice" | grep -qiE 'already exists|not in the archive manifest|missing' ||
+    grep -qiE 'already exists|not in the archive manifest|missing' <<<"$twice" ||
       bad="$bad the refused second --restore did not say why: $(one_line "$twice");"
   fi
   sub="$(pfm archive --subagents --older-than 0 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad pfm archive --subagents --older-than 0 exited $rc: $(one_line "$sub");"
-  printf '%s' "$sub" | grep -qF 'mode: sidechain transcripts' || bad="$bad --subagents does not name its mode: $(one_line "$sub");"
-  printf '%s' "$sub" | grep -qE 'younger than the age gate \(left alone\): [0-9]+' || bad="$bad --subagents printed no age-gate count;"
-  printf '%s' "$sub" | grep -qF 'dry run — nothing moved' || bad="$bad --subagents without --apply did not say it moved nothing;"
+  grep -qF 'mode: sidechain transcripts' <<<"$sub" || bad="$bad --subagents does not name its mode: $(one_line "$sub");"
+  grep -qE 'younger than the age gate \(left alone\): [0-9]+' <<<"$sub" || bad="$bad --subagents printed no age-gate count;"
+  grep -qF 'dry run — nothing moved' <<<"$sub" || bad="$bad --subagents without --apply did not say it moved nothing;"
   prune="$(pfm archive --prune-orphans 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad pfm archive --prune-orphans exited $rc: $(one_line "$prune");"
-  printf '%s' "$prune" | grep -qE 'orphaned kill\(s\); re-run with --yes to delete' || bad="$bad --prune-orphans did not report its count and the --yes hint: $(one_line "$prune");"
+  grep -qE 'orphaned kill\(s\); re-run with --yes to delete' <<<"$prune" || bad="$bad --prune-orphans did not report its count and the --yes hint: $(one_line "$prune");"
   pruned="$(pfm archive --prune-orphans --yes 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad pfm archive --prune-orphans --yes exited $rc: $(one_line "$pruned");"
-  printf '%s' "$pruned" | grep -qE 'pruned [0-9]+ orphaned kill\(s\)' || bad="$bad --prune-orphans --yes did not report what it pruned: $(one_line "$pruned");"
+  grep -qE 'pruned [0-9]+ orphaned kill\(s\)' <<<"$pruned" || bad="$bad --prune-orphans --yes did not report what it pruned: $(one_line "$pruned");"
   pfm archive --yes >/dev/null 2>&1
   rc=$?
   [ "$rc" -eq 2 ] || bad="$bad --yes without --prune-orphans exited $rc (want 2, usage);"
@@ -405,7 +432,7 @@ bad=""
 idx="$(pfm index 2>&1)"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad pfm index exited $rc: $(one_line "$idx");"
-printf '%s' "$idx" | grep -qE '^files=[0-9]+ skipped=[0-9]+ delta=[0-9]+ full=[0-9]+ deleted=[0-9]+ touched=[0-9]+ bytes=[0-9]+ cx_names=(true|false)$' ||
+grep -qE '^files=[0-9]+ skipped=[0-9]+ delta=[0-9]+ full=[0-9]+ deleted=[0-9]+ touched=[0-9]+ bytes=[0-9]+ cx_names=(true|false)$' <<<"$idx" ||
   bad="$bad pfm index did not print its counters line: $(one_line "$idx");"
 files="$(printf '%s' "$idx" | sed -n 's/^files=\([0-9]*\) .*/\1/p')"
 [ "${files:-0}" -ge 1 ] || bad="$bad pfm index saw files=${files:-<none>} — a fleet with a live chat and a graveyard has transcripts to index;"
@@ -432,7 +459,7 @@ bad=""
 hl_err=/tmp/o2-headless.err
 cc_json="$(pfm headless exec --engine claude --account "$SEAT" --cwd /tmp --timeout 300 --output-format json \
   --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence \
-  --prompt "Reply with exactly one word: HEADLESS-CC" 2>"$hl_err")"
+  --prompt "$(mock_steps '{"type":"turn","reply":"HEADLESS-CC"}')" 2>"$hl_err")"
 rc=$?
 if [ "$rc" -ne 0 ]; then
   bad="$bad headless exec --engine claude exited $rc: $(one_line "$(cat "$hl_err")");"
@@ -442,12 +469,12 @@ else
   [ "$(printf '%s' "$cc_json" | jq -r '.engine')" = cc ] || bad="$bad the claude envelope reports engine=$(printf '%s' "$cc_json" | jq -r '.engine') (want cc);"
   [ "$(printf '%s' "$cc_json" | jq -r '.is_error')" = false ] || bad="$bad the claude envelope reports is_error=true;"
   [ "$(printf '%s' "$cc_json" | jq -r '.exit_code')" = 0 ] || bad="$bad the claude envelope reports exit_code=$(printf '%s' "$cc_json" | jq -r '.exit_code');"
-  printf '%s' "$cc_json" | jq -r '.result' | grep -qF HEADLESS-CC || bad="$bad the claude result carries no HEADLESS-CC needle: $(one_line "$(printf '%s' "$cc_json" | jq -r '.result')");"
+  grep -qF HEADLESS-CC <<<"$(printf '%s' "$cc_json" | jq -r '.result')" || bad="$bad the claude result carries no HEADLESS-CC needle: $(one_line "$(printf '%s' "$cc_json" | jq -r '.result')");"
 fi
 schema='{"type":"object","properties":{"word":{"type":"string"}},"required":["word"],"additionalProperties":false}'
 cc_schema="$(pfm headless exec --engine claude --account "$SEAT" --cwd /tmp --timeout 300 --output-format json \
   --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence --json-schema "$schema" \
-  --prompt "Return a JSON object whose word field is HEADLESS-SCHEMA" 2>"$hl_err")"
+  --prompt "$(mock_steps '{"type":"turn","structured":{"word":"HEADLESS-SCHEMA"}}')" 2>"$hl_err")"
 rc=$?
 if [ "$rc" -ne 0 ]; then
   bad="$bad headless exec --json-schema on claude exited $rc: $(one_line "$(cat "$hl_err")");"
@@ -458,28 +485,23 @@ fi
 pfm headless exec --engine claude --json-schema '{not json' --prompt x >/dev/null 2>"$hl_err"
 rc=$?
 [ "$rc" -eq 2 ] || bad="$bad an invalid --json-schema exited $rc (want 2): $(one_line "$(cat "$hl_err")");"
-# Codex: the isolation controls are UNSUPPORTED there and must be refused by
-# name, then accepted only under --allow-unsupported with a diagnostic.
-expect-log 'unsupported'
-pfm headless exec --engine codex --cwd /tmp --timeout 30 --tools "" --prompt "x" >/dev/null 2>"$hl_err"
-rc=$?
-if [ "$rc" -eq 0 ]; then
-  bad="$bad headless exec --engine codex --tools '' was ACCEPTED (exit 0) — Codex cannot honour tools isolation;"
-elif ! grep -qF -- '--allow-unsupported' "$hl_err"; then
-  bad="$bad the codex --tools refusal (exit $rc) does not name --allow-unsupported: $(one_line "$(cat "$hl_err")");"
-fi
-cx_json="$(pfm headless exec --engine codex --cwd /tmp --timeout 300 --output-format json --allow-unsupported --strict-mcp-config \
-  --prompt "Reply with exactly one word: HEADLESS-CX" 2>"$hl_err")"
+# The codex selector runs through OpenCode's server, played by the mock.
+cx_json="$(pfm headless exec --engine codex --cwd /tmp --timeout 300 --output-format json --tools "" --strict-mcp-config \
+  --prompt "$(mock_steps '{"type":"turn","reply":"HEADLESS-CX","tokens":{"input":40,"output":8}}')" 2>"$hl_err")"
 rc=$?
 if [ "$rc" -ne 0 ]; then
   bad="$bad headless exec --engine codex exited $rc: $(one_line "$(cat "$hl_err")");"
 elif ! printf '%s' "$cx_json" | jq -e . >/dev/null 2>&1; then
   bad="$bad --output-format json on codex is not JSON: $(one_line "$cx_json");"
 else
-  [ "$(printf '%s' "$cx_json" | jq -r '.engine')" = cx ] || bad="$bad the codex envelope reports engine=$(printf '%s' "$cx_json" | jq -r '.engine') (want cx);"
-  printf '%s' "$cx_json" | jq -r '.result' | grep -qF HEADLESS-CX || bad="$bad the codex result carries no HEADLESS-CX needle: $(one_line "$(printf '%s' "$cx_json" | jq -r '.result')");"
-  printf '%s' "$cx_json" | jq -r '.diagnostics[]? // empty' | grep -qF 'unsupported control not applied for Codex: --strict-mcp-config' ||
-    bad="$bad the codex envelope under --allow-unsupported carries no diagnostic naming --strict-mcp-config: $(one_line "$(printf '%s' "$cx_json" | jq -c '.diagnostics')");"
+  [ "$(printf '%s' "$cx_json" | jq -r '.engine')" = ox ] || bad="$bad the codex selector envelope reports engine=$(printf '%s' "$cx_json" | jq -r '.engine') (want ox);"
+  [ "$(printf '%s' "$cx_json" | jq -r '.is_error')" = false ] || bad="$bad the codex selector envelope reports is_error=$(printf '%s' "$cx_json" | jq -r '.is_error') (want false);"
+  [ "$(printf '%s' "$cx_json" | jq -r '.exit_code')" = 0 ] || bad="$bad the codex selector envelope reports exit_code=$(printf '%s' "$cx_json" | jq -r '.exit_code') (want 0);"
+  grep -qF HEADLESS-CX <<<"$(printf '%s' "$cx_json" | jq -r '.result')" || bad="$bad the codex result carries no HEADLESS-CX needle: $(one_line "$(printf '%s' "$cx_json" | jq -r '.result')");"
+  [ "$(printf '%s' "$cx_json" | jq -r '.usage.input_tokens')" = 40 ] || bad="$bad the codex selector reports usage.input_tokens=$(printf '%s' "$cx_json" | jq -r '.usage.input_tokens') (want 40);"
+  [ "$(printf '%s' "$cx_json" | jq -r '.usage.output_tokens')" = 8 ] || bad="$bad the codex selector reports usage.output_tokens=$(printf '%s' "$cx_json" | jq -r '.usage.output_tokens') (want 8);"
+  printf '%s' "$cx_json" | jq -e 'has("diagnostics") | not' >/dev/null ||
+    bad="$bad the codex selector envelope carries diagnostics: $(one_line "$(printf '%s' "$cx_json" | jq -c '.diagnostics')");"
 fi
 # K17: the scripting front — `headless run` IS `chat new`, `headless transcript` IS `chat read`.
 run_help="$(pfm headless run --help 2>&1)"
@@ -501,7 +523,7 @@ else
   bad="$bad $E1_MAIN has no live row — the transcript alias was NOT asserted (no chat to read);"
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude: JSON envelope + HEADLESS-CC, --json-schema structured_output.word='$word', invalid schema exit 2 · codex: --tools refused naming --allow-unsupported, then HEADLESS-CX with the diagnostic · run/transcript aliases match chat new/read"
+  pass "claude: JSON envelope + HEADLESS-CC, --json-schema structured_output.word='$word', invalid schema exit 2 · codex selector → ox via OpenCode's server, HEADLESS-CX, usage 40/8 · run/transcript aliases match chat new/read"
 fi
 
 # ─── O2.05 — the internal plumbing verbs ────────────────────────────────────
@@ -512,9 +534,10 @@ bad=""
 int_err=/tmp/o2-internal.err
 # X21 claude-version: the newest retained native Claude version's path, or 127
 # when the native versions dir holds none — the fence installs Claude from npm
-# (infra/demo/setup.sh tools), so 127 with that dir ABSENT is the correct answer
+# so 127 with that dir ABSENT is the correct answer
 # here; 127 with versions on disk, or a path that does not exist, is not.
 versions_dir="$HOME/.local/share/claude/versions"
+expect-log '"hook":"claude-version","decision":"error","exit":127'
 cv="$(pfm internal claude-version 2>"$int_err")"
 rc=$?
 case "$rc" in
@@ -548,7 +571,7 @@ grep -qiE 'identify chat|window name|not inside tmux|no tmux' "$int_err" ||
 gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git worktree add x"},"cwd":"/tmp"}' | pfm internal git-guard 2>&1)"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad git-guard exited $rc: $(one_line "$gg");"
-printf '%s' "$gg" | grep -q '"permissionDecision":"deny"' && printf '%s' "$gg" | grep -q 'subagent_type: \\"gitter\\"' ||
+grep -q '"permissionDecision":"deny"' <<<"$gg" && grep -q 'subagent_type: \\"gitter\\"' <<<"$gg" ||
   bad="$bad git-guard did not deny a main-chat worktree add naming gitter: $(one_line "$gg");"
 gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git worktree add x"},"cwd":"/tmp","agent_type":"gitter"}' | pfm internal git-guard 2>&1)"
 [ -z "$gg" ] || bad="$bad git-guard blocked gitter: $(one_line "$gg");"
@@ -560,7 +583,7 @@ rc=$?
 [ "$rc" -eq 0 ] || bad="$bad explore-deny exited $rc: $(one_line "$deny");"
 [ "$(printf '%s' "$deny" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)" = deny ] ||
   bad="$bad explore-deny did not deny a sonnet Explore: $(one_line "$deny");"
-printf '%s' "$deny" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null | grep -qF 'tracer' ||
+grep -qF 'tracer' <<<"$(printf '%s' "$deny" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null)" ||
   bad="$bad the Explore denial does not point at the tracer agent;"
 allow="$(printf '{"tool_input":{"subagent_type":"Explore","model":"haiku"}}' | pfm internal explore-deny 2>&1)"
 [ -z "$allow" ] || bad="$bad explore-deny blocked a haiku Explore: $(one_line "$allow");"
@@ -584,11 +607,12 @@ rc=$?
 # X33/X34 primary-get / primary-set: the roster gate, then the value round-trips, then restored.
 primary0="$(pfm internal primary-get 2>&1)"
 rc=$?
-[ "$rc" -eq 0 ] && printf '%s' "$primary0" | grep -qE '^[0-9]+$' || bad="$bad primary-get exited $rc with '$(one_line "$primary0")' (want an account number);"
+[ "$rc" -eq 0 ] && grep -qE '^[0-9]+$' <<<"$primary0" || bad="$bad primary-get exited $rc with '$(one_line "$primary0")' (want an account number);"
+expect-log '"hook":"primary-set","decision":"error","exit":1'
 ps_out="$(pfm internal primary-set 999 2>&1)"
 rc=$?
 [ "$rc" -eq 1 ] || bad="$bad primary-set 999 (not in the roster) exited $rc (want 1);"
-printf '%s' "$ps_out" | grep -qF 'not in the configured roster' || bad="$bad primary-set 999 did not name the roster: $(one_line "$ps_out");"
+grep -qF 'not in the configured roster' <<<"$ps_out" || bad="$bad primary-set 999 did not name the roster: $(one_line "$ps_out");"
 pfm internal primary-set >/dev/null 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || bad="$bad primary-set without an account exited $rc (want 2, usage);"
@@ -596,14 +620,14 @@ pfm internal primary-set "$SEAT" >/dev/null 2>"$int_err"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad primary-set $SEAT exited $rc: $(one_line "$(cat "$int_err")");"
 [ "$(pfm internal primary-get 2>/dev/null)" = "$SEAT" ] || bad="$bad primary-get reads $(pfm internal primary-get 2>/dev/null) after primary-set $SEAT;"
-if printf '%s' "$primary0" | grep -qE '^[0-9]+$'; then
+if grep -qE '^[0-9]+$' <<<"$primary0"; then
   pfm internal primary-set "$primary0" >/dev/null 2>&1 || bad="$bad could not restore the primary account to $primary0;"
 fi
 # X37 stale: a report either way — 'none' or STALE rows — never silence.
 st="$(pfm internal stale 2>"$int_err")"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad pfm internal stale exited $rc: $(one_line "$(cat "$int_err")") $(one_line "$st");"
-printf '%s' "$st" | grep -qE '^stale: (none|[0-9]+ process)' || bad="$bad stale printed no verdict line: $(one_line "$st");"
+grep -qE '^stale: (none|[0-9]+ process)' <<<"$st" || bad="$bad stale printed no verdict line: $(one_line "$st");"
 pfm internal stale --bogus >/dev/null 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || bad="$bad stale with an unknown flag exited $rc (want 2);"
@@ -628,8 +652,8 @@ sl_b_rc=$?
 sa="$(printf '%s' '{"columns":100,"tasks":[{"id":"lane-t39","label":"lane","model":"claude-sonnet-5","contextWindowSize":1000000,"tokenCount":250000}]}' | pfm internal statusline --subagents 2>&1)"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad pfm internal statusline --subagents exited $rc: $(one_line "$sa");"
-printf '%s' "$sa" | grep -qF '"id":"lane-t39"' || bad="$bad --subagents did not answer row lane-t39: $(one_line "$sa");"
-printf '%s' "$sa" | grep -qF '25%' || bad="$bad --subagents row does not carry the 25% gauge: $(one_line "$sa");"
+grep -qF '"id":"lane-t39"' <<<"$sa" || bad="$bad --subagents did not answer row lane-t39: $(one_line "$sa");"
+grep -qF '25%' <<<"$sa" || bad="$bad --subagents row does not carry the 25% gauge: $(one_line "$sa");"
 # T37: the installed /reload card carries reload.Usage itself, never the token.
 card="$SEAT_DIR/commands/reload.md"
 usage1="$(pfm chat reload --help 2>&1 | head -1)"
@@ -638,8 +662,9 @@ if [ ! -f "$card" ]; then
 else
   grep -qF '{{RELOAD_USAGE}}' "$card" && bad="$bad $card still carries the unsubstituted {{RELOAD_USAGE}} token;"
   grep -qF 'usage: pfm chat reload [--account N]' "$card" || bad="$bad $card does not carry reload.Usage's first line;"
-  printf '%s' "$usage1" | grep -qF 'usage: pfm chat reload [--account N]' || bad="$bad pfm chat reload --help does not print reload.Usage: $(one_line "$usage1");"
+  grep -qF 'usage: pfm chat reload [--account N]' <<<"$usage1" || bad="$bad pfm chat reload --help does not print reload.Usage: $(one_line "$usage1");"
 fi
+expect-log '"hook":"no-such-verb","decision":"error","exit":1'
 pfm internal no-such-verb >/dev/null 2>"$int_err"
 rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
@@ -683,45 +708,6 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "pfm log --since 60m: $n_all record(s), --level error: $n_err · unknown --comp and --level exit 2 naming the accepted set · a positional argument exits 2"
 fi
 
-# ─── O2.05c — the call store's reader ───────────────────────────────────────
-
-beat O2.05c-callmeter
-spends none
-bad=""
-# A scratch home and config: the fleet's own store, seats and transcripts stay untouched.
-cm_home="$(mktemp -d /tmp/o2-callmeter.XXXXXX)"
-cm_cfg="$cm_home/claude"
-cm_work="$cm_home/work"
-cm_err="$cm_home/err"
-cm_store="$cm_home/.local/state/pfm/callmeter.db"
-mkdir -p "$cm_cfg/projects/-lane-callmeter" "$cm_work"
-printf 'one\ntwo\n' > "$cm_work/hooked.md"
-printf '{"version":1,"accounts":[{"id":1,"configDir":"%s"}]}\n' "$cm_cfg" > "$cm_home/machine.json"
-cm() { HOME="$cm_home" PFM_HOME="$cm_home" pfm --config "$cm_home/machine.json" "$@"; }
-# X43 absence is its own line and creates nothing — never an empty table.
-out="$(cm callmeter report files 2>"$cm_err")"
-rc=$?
-[ "$rc" -eq 0 ] || bad="$bad report with no store exited $rc: $(one_line "$(cat "$cm_err")");"
-printf "%s\n" "$out" | grep -qF "callmeter: no store at $cm_store: nothing recorded yet" ||
-  bad="$bad report with no store did not print the no-store line: $(one_line "$out");"
-[ ! -e "$cm_store" ] || bad="$bad report with no store created $cm_store;"
-# X44 the hook records a Read that the report then names.
-printf '{"hook_event_name":"PostToolUse","session_id":"lane-cm","transcript_path":"%s","cwd":"%s","tool_name":"Read","tool_use_id":"toolu_lane_hook","tool_input":{"file_path":"%s"},"tool_response":{"type":"text","file":{"filePath":"%s","content":"one\\ntwo\\n","numLines":2,"startLine":1,"totalLines":2}},"duration_ms":3}\n' \
-  "$cm_cfg/projects/-lane-callmeter/lane-cm.jsonl" "$cm_work" "$cm_work/hooked.md" "$cm_work/hooked.md" |
-  HOME="$cm_home" PFM_HOME="$cm_home" pfm --config "$cm_home/machine.json" internal callmeter 2>"$cm_err" ||
-  bad="$bad pfm internal callmeter exited $?: $(one_line "$(cat "$cm_err")");"
-out="$(cm callmeter report files 2>"$cm_err")"
-rc=$?
-[ "$rc" -eq 0 ] || bad="$bad report files after the hook exited $rc: $(one_line "$(cat "$cm_err")");"
-printf "%s\n" "$out" | grep -qF "$cm_work/hooked.md" || bad="$bad report files does not name the hook-recorded file: $(one_line "$out");"
-cm callmeter report lane-no-such-topic >/dev/null 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || bad="$bad report with an unknown topic exited $rc (want 2, usage);"
-rm -rf "$cm_home"
-if [ -n "$bad" ]; then fail "$bad"; else
-  pass "no store: the no-store line, exit 0, nothing created · the hook's Read is in report files · an unknown topic exits 2"
-fi
-
 # ─── O2.06 — doctor's codex_pane rows while E2's chat lives ─────────────────
 
 beat O2.06-doctor-codex-pane
@@ -736,16 +722,16 @@ else
   [ "$doc_rc" -le 1 ] || bad="$bad pfm doctor exited $doc_rc, so its codex_pane rows cannot be trusted: $(one_line "$(printf '%s\n' "$doc" | grep -m1 -E 'unhealthy|broken|error=' || printf '%s' "$doc" | tail -1)");"
   bind="$(printf '%s\n' "$doc" | grep -m1 '^doctor: codex_pane_bindings total=')"
   panes="$(printf '%s\n' "$doc" | grep -m1 '^doctor: codex_panes live=')"
-  warns="$(printf '%s\n' "$doc" | grep -E '^doctor: warning codex_pane')"
+  warns="$(printf '%s' "$doc" | grep -E '^doctor: warning codex_pane')"
   [ -n "$bind" ] || bad="$bad doctor printed no 'codex_pane_bindings total=' row;"
   [ -n "$panes" ] || bad="$bad doctor printed no 'codex_panes live=' row;"
   case "$panes" in
     *"live=0"*) bad="$bad doctor reads codex_panes live=0 while $E2_MAIN has a live row ($(one_line "$(live_row "$E2_MAIN")")) — the pane roster missed it;" ;;
   esac
-  printf '%s' "$bind" | grep -qE ' contested=0 ' || bad="$bad a contested binding while one Codex chat lives: $bind;"
-  printf '%s' "$bind" | grep -qE ' retired=0 ' || bad="$bad a retired-thread binding while one Codex chat lives: $bind;"
-  printf '%s' "$bind" | grep -qE ' undecodable=0$' || bad="$bad an undecodable binding: $bind;"
-  printf '%s' "$panes" | grep -qE ' unfollowable=0$' || bad="$bad an unfollowable Codex pane: $panes;"
+  grep -qE ' contested=0 ' <<<"$bind" || bad="$bad a contested binding while one Codex chat lives: $bind;"
+  grep -qE ' retired=0 ' <<<"$bind" || bad="$bad a retired-thread binding while one Codex chat lives: $bind;"
+  grep -qE ' undecodable=0$' <<<"$bind" || bad="$bad an undecodable binding: $bind;"
+  grep -qE ' unfollowable=0$' <<<"$panes" || bad="$bad an unfollowable Codex pane: $panes;"
   [ -z "$warns" ] || bad="$bad codex_pane warning row(s): $(one_line "$warns");"
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "exit $doc_rc · $bind · $panes · no codex_pane warning"
@@ -763,40 +749,65 @@ if requires; then
   # as `pfm ls --tsv` spelled it (E1.08 does the same); a reboot in place must
   # leave that value unchanged.
   sock="$(live_field "$E1_MAIN" 11)"
-  stim="$(pfm chat inject --allow-unsigned "$E1_MAIN" \
-    "Count from 1 to 30, one number per line, pausing about a second between numbers. Do not stop early. Then reply with exactly one word: OP-COUNT-DONE" 2>&1)"
+  gate=/tmp/o2-reload-hold
+  : >"$gate"
+  sender_sock="$(live_field "$E2_MAIN" 11)"
+  sender_sid="$(live_field "$E2_MAIN" 2)"
+  stim="$(CHAT_SENDER_LABEL="$E2_MAIN" CHAT_SENDER_SESSION="$sender_sock" CHAT_SENDER_SID="$sender_sid" \
+    pfm chat inject "$E1_MAIN" "$(mock_steps '{"type":"hold","until_gone":"/tmp/o2-reload-hold"}')" 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad the busy stimulus was refused (exit $rc): $(one_line "$stim");"
-  sleep 6
-  queued="$(pfm chat inject --allow-unsigned "$E1_MAIN" "reply with exactly one word: OP-QUEUED" 2>&1)"
+  wait_prompt "$E1_MAIN" o2-reload-hold 60 || bad="$bad held reload turn never reached a user record: ${LANE_WAIT_WHY:-no wait reason};"
+  wait_for 10 "[ \"\$(pfm chat status '$E1_MAIN' --json 2>/dev/null | jq -r '.state // empty')\" = working ]" ||
+    bad="$bad held reload turn never read busy before OP-QUEUED: $LANE_WAIT_WHY;"
+  queued="$(CHAT_SENDER_LABEL="$E2_MAIN" CHAT_SENDER_SESSION="$sender_sock" CHAT_SENDER_SID="$sender_sid" \
+    pfm chat inject "$E1_MAIN" "OP-QUEUED" 2>&1)"
   q_rc=$?
   if [ "$q_rc" -ne 0 ]; then
     bad="$bad the inject during the busy turn was refused (exit $q_rc): $(one_line "$queued");"
-  elif ! printf '%s' "$queued" | grep -q '^queued'; then
+  elif ! grep -q '^queued' <<<"$queued"; then
     bad="$bad pfm's own inject report does not start with 'queued' — the turn had already ended or the guard read the pane wrong: $(one_line "$queued");"
   fi
-  rl="$(pfm chat reload --sock "$sock" --then "reply with exactly one word: OP-RELOADED" 2>&1)"
+  rl="$(pfm chat reload --sock "$sock" --then "OP-RELOADED" 2>&1)"
   rl_rc=$?
   rl_log="$(printf '%s\n' "$rl" | sed -n 's/.*reload scheduled in place (log \(.*\)).*/\1/p' | head -1)"
   [ "$rl_rc" -eq 0 ] || bad="$bad pfm chat reload --sock $sock during the busy turn exited $rl_rc: $(one_line "$rl");"
   [ -n "$rl_log" ] || bad="$bad pfm chat reload did not report 'reload scheduled in place (log …)': $(one_line "$rl");"
-  if ! wait_last "$E1_MAIN" OP-RELOADED 420; then
+  held=0
+  if [ -n "$rl_log" ]; then
+    wait_for 30 "grep -qF 'holding /exit until it ends' '$rl_log'" && held=1
+  fi
+  rm -f "$gate"
+  [ "$held" -eq 1 ] || bad="$bad reload worker never reported holding /exit while the gate existed: ${LANE_WAIT_WHY:-no worker log path};"
+  if ! wait_prompt "$E1_MAIN" OP-QUEUED 120; then
+    bad="$bad queued OP-QUEUED never reached a user record: ${LANE_WAIT_WHY:-no wait reason recorded};"
+  fi
+  if ! wait_prompt "$E1_MAIN" OP-RELOADED 120; then
     bad="$bad no OP-RELOADED in 420s after the operator-side reload: ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$E1_MAIN" 2>&1)");"
   fi
-  pfm chat read "$E1_MAIN" 2>/dev/null | grep -qF OP-QUEUED ||
-    bad="$bad the queued OP-QUEUED never reached the transcript (pfm chat read) — queued but not delivered;"
+  respawn_wait_why=""
+  if [ -n "$rl_log" ]; then
+    LANE_ANCHOR="sock:$sock" wait_for 60 "grep -qE 'respawned in place|rebooted FRESH' '$rl_log'" || respawn_wait_why="$LANE_WAIT_WHY"
+  fi
   if [ -n "$rl_log" ]; then
     if [ ! -f "$rl_log" ]; then
       bad="$bad the reload worker log $rl_log pfm named was never written;"
     else
       grep -qF 'holding /exit until it ends' "$rl_log" ||
         bad="$bad the worker log carries no hold line ('the chat's turn is still running — holding /exit until it ends') — the worker did not see the busy turn: $(one_line "$(tail -3 "$rl_log")");"
-      grep -qE 'respawned in place|rebooted FRESH' "$rl_log" ||
-        bad="$bad the worker log never reports the reboot ('respawned in place'): $(one_line "$(tail -3 "$rl_log")");"
+      respawn_seen=0
+      grep -qE 'respawned in place|rebooted FRESH' "$rl_log" && respawn_seen=1
+      if [ "$respawn_seen" -ne 1 ] || [ -n "$respawn_wait_why" ]; then
+        bad="$bad the worker log never reports the reboot ('respawned in place'): $(one_line "$(tail -3 "$rl_log")")${respawn_wait_why:+: $respawn_wait_why};"
+      fi
     fi
   fi
-  [ "$(live_field "$E1_MAIN" 11)" = "$sock" ] ||
-    bad="$bad after the reboot $E1_MAIN sits on socket $(live_field "$E1_MAIN" 11), not the one reloaded ($sock) — not a reboot IN PLACE;"
+  socket_wait_why=""
+  LANE_ANCHOR="sock:$sock" wait_for 10 "[ \"\$(live_field '$E1_MAIN' 11)\" = '$sock' ]" || socket_wait_why="$LANE_WAIT_WHY"
+  after_sock="$(live_field "$E1_MAIN" 11)"
+  if [ "$after_sock" != "$sock" ] || [ -n "$socket_wait_why" ]; then
+    bad="$bad after the reboot $E1_MAIN sits on socket $after_sock, not the one reloaded ($sock) — not a reboot IN PLACE${socket_wait_why:+: $socket_wait_why};"
+  fi
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "inject during the turn: '$(one_line "$queued" | cut -c1-80)' · reload scheduled (log $rl_log) held /exit until the turn ended, respawned in place on $sock, and its --then steer landed"
   fi
@@ -823,37 +834,38 @@ else
     drop_out="$(install_again)"
     drop_rc=$?
     [ "$drop_rc" -eq 0 ] || bad="$bad the install after the drop exited $drop_rc: $(one_line "$(printf '%s\n' "$drop_out" | tail -3)");"
-    spare_hooks="$(hook_commands "$SPARE_DIR/settings.json" | grep -c 'pfm')"
-    [ "$spare_hooks" -eq 0 ] || bad="$bad the dropped seat $SPARE still carries $spare_hooks pfm hook(s);"
     # The RUNTIME side: the chat on the dropped seat keeps working.
     live_chat "$SPARE_CHAT" || bad="$bad $SPARE_CHAT lost its live row when its seat was dropped;"
     st_out="$(pfm chat status "$SPARE_CHAT" 2>&1)"
     st_rc=$?
     [ "$st_rc" -eq 0 ] || bad="$bad pfm chat status $SPARE_CHAT exited $st_rc after the drop: $(one_line "$st_out");"
-    pfm chat inject --allow-unsigned "$SPARE_CHAT" "reply with exactly one word: SPARE-ALIVE" >/dev/null 2>&1 ||
+    CHAT_SENDER_LABEL="$E1_MAIN" CHAT_SENDER_SESSION="$(live_field "$E1_MAIN" 11)" CHAT_SENDER_SID="$(live_field "$E1_MAIN" 2)" \
+      pfm chat inject "$SPARE_CHAT" SPARE-ALIVE >/dev/null 2>&1 ||
       bad="$bad inject into $SPARE_CHAT was refused after the drop;"
-    wait_last "$SPARE_CHAT" SPARE-ALIVE 240 || bad="$bad $SPARE_CHAT did not answer after its seat was dropped: ${LANE_WAIT_WHY:-no wait reason};"
+    wait_prompt "$SPARE_CHAT" SPARE-ALIVE 120 || bad="$bad $SPARE_CHAT did not receive the inject after its seat was dropped: ${LANE_WAIT_WHY:-no wait reason};"
     acct_dropped="$(live_field "$SPARE_CHAT" 9)"
     # The LEDGER side: doctor's roster no longer names the seat, and doctor still runs.
     doc="$(pfm doctor 2>&1)"
     doc_rc=$?
     acct_row="$(printf '%s\n' "$doc" | grep -m1 '^doctor: config accounts=')"
     [ -n "$acct_row" ] || bad="$bad doctor printed no 'config accounts=' row;"
-    printf '%s' "$acct_row" | grep -qE "accounts=([^ ]*,)?$SPARE:" && bad="$bad doctor's roster still names the dropped seat $SPARE: $acct_row;"
-    printf '%s' "$acct_row" | grep -qE "accounts=([^ ]*,)?$SEAT:" || bad="$bad doctor's roster lost the KEPT seat $SEAT: $acct_row;"
+    grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$acct_row" && bad="$bad doctor's roster still names the dropped seat $SPARE: $acct_row;"
+    grep -qE "accounts=([^ ]*,)?$SEAT:" <<<"$acct_row" || bad="$bad doctor's roster lost the KEPT seat $SEAT: $acct_row;"
     [ "$doc_rc" -le 1 ] || bad="$bad pfm doctor exited $doc_rc with a live chat on the dropped seat; first failure row: $(one_line "$(printf '%s\n' "$doc" | grep -m1 -E 'unhealthy|broken|error=' || true)");"
     # Restore: config back, install, the seat's hooks and the row's account return.
     mv "$CONFIG.lane-backup" "$CONFIG"
     restore_out="$(install_again)"
     restore_rc=$?
     [ "$restore_rc" -eq 0 ] || bad="$bad the restoring install exited $restore_rc: $(one_line "$(printf '%s\n' "$restore_out" | tail -3)");"
-    spare_back="$(hook_commands "$SPARE_DIR/settings.json" | grep -c 'pfm')"
-    [ "$spare_back" -gt 0 ] || bad="$bad seat $SPARE did not get its hooks back after the config was restored;"
+    restore_doc="$(pfm doctor 2>&1)"
+    restore_row="$(printf '%s\n' "$restore_doc" | grep -m1 '^doctor: config accounts=')"
+    grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$restore_row" ||
+      bad="$bad doctor's roster did not relist seat $SPARE after restore: $restore_row;"
     acct_after="$(live_field "$SPARE_CHAT" 9)"
     [ "$acct_after" = "$SPARE" ] || bad="$bad after the restore $SPARE_CHAT's row reports account '$acct_after' (was $acct_before, want $SPARE);"
     pfm chat end "$SPARE_CHAT" >/dev/null 2>&1 || bad="$bad pfm chat end $SPARE_CHAT failed — the spare chat is left running;"
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "seat $SPARE dropped under $SPARE_CHAT: the chat answered status and a turn (row account $acct_before → '$acct_dropped' while dropped → $acct_after restored), doctor's roster dropped it and exited $doc_rc, the seat lost $spare_hooks pfm hooks and got $spare_back back"
+      pass "seat $SPARE dropped under $SPARE_CHAT: status and an inject reached the live chat (row account $acct_before → '$acct_dropped' while dropped → $acct_after restored), doctor's roster dropped and restored it"
     fi
   fi
 fi
@@ -866,10 +878,55 @@ if gap_applies O2.09-harvester; then
   known O2.09-harvester
 else
   bad=""
+  # Public-source probes under --network none deliberately fail DNS. Match
+  # only their resolver and fallback endpoints; other ERROR records stay red.
+  expect-log '"msg":"http.out.request","cmd":"harvest".*"comp":"http.out".*"host":"cloudflare-dns.com","path":"/dns-query","err":"dial DoH resolver:'
+  while read -r host path; do
+    expect-log "\"msg\":\"http.out.request\",\"cmd\":\"harvest\".*\"comp\":\"http.out\".*\"host\":\"$host\",\"path\":\"$path\",\"err\":\"DNS resolution failed for $host:"
+  done <<'END_HARVEST_ENDPOINTS'
+www.rfc-editor.org /rfc/rfc2324.txt
+www.w3.org /WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf
+archive.org /wayback/available
+r.jina.ai /https://www.rfc-editor.org/rfc/rfc2324.txt
+defuddle.md /https://www.rfc-editor.org/rfc/rfc2324.txt
+api.openalex.org /works/https://doi.org/10.1371/journal.pmed.0020124
+api.crossref.org /works/10.1371/journal.pmed.0020124
+api.semanticscholar.org /graph/v1/paper/DOI:10.1371/journal.pmed.0020124
+zenodo.org /api/records
+doaj.org /api/search/articles/doi:10.1371/journal.pmed.0020124
+api.core.ac.uk /v3/works/10.1371/journal.pmed.0020124
+api.openaire.eu /search/publications
+journals.plos.org /pmed/article/file
+r.jina.ai /https://journals.plos.org/pmed/article/file
+defuddle.md /https://journals.plos.org/pmed/article/file
+pmc.ncbi.nlm.nih.gov /tools/idconv/api/v1/articles/
+europepmc.org /articles/PMC1182327
+pmc.ncbi.nlm.nih.gov /articles/PMC1182327/
+www.ebi.ac.uk /europepmc/webservices/rest/PMC1182327/fullTextXML
+r.jina.ai /https://europepmc.org/articles/PMC1182327
+defuddle.md /https://europepmc.org/articles/PMC1182327
+www.ncbi.nlm.nih.gov /pmc/utils/oa/oa.fcgi
+r.jina.ai /https://pmc.ncbi.nlm.nih.gov/articles/PMC1182327/
+defuddle.md /https://pmc.ncbi.nlm.nih.gov/articles/PMC1182327/
+r.jina.ai /https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1182327/fullTextXML
+defuddle.md /https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1182327/fullTextXML
+library.oapen.org /rest/search
+openlibrary.org /isbn/9780262033848.json
+directory.doabooks.org /rest/items/find-by-metadata-field
+catalog.hathitrust.org /api/volumes/brief/isbn/9780262033848.json
+END_HARVEST_ENDPOINTS
   hv_err=/tmp/o2-harvest.err
+  hv_config="${CONFIG%/*}/harvester.config.json"
+  if with_restored "$hv_config"; then
+    jq '.cache.dir = "/root/.local/state/pfm/o2-harvest-cache"' "$hv_config" >"$hv_config.tmp" &&
+      mv "$hv_config.tmp" "$hv_config" || bad="$bad could not set a writable lane harvester cache in $hv_config;"
+  else
+    bad="$bad could not back up $hv_config before setting a writable cache;"
+  fi
   url_txt="https://www.rfc-editor.org/rfc/rfc2324.txt"
   url_pdf="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-  local_doc=/tmp/o2-harvest-local.md
+  local_doc="$CWD/o2-harvest-local.txt"
+  local_pdf=/worktree/pfm/internal/harvestpy/testdata/corpus/raw/binary/scholar-breast-cancer.pdf
   printf '# Lane O2 local harvest source\n\nThe needle is LOCAL-HARVEST-OK.\n' >"$local_doc"
   harvest_one() { # harvest_one <what> <source> <must-succeed 0|1> [content-needle] — one --json fetch, judged
     local what="$1" src="$2" must="$3" needle="${4:-}" out rc err kind status
@@ -887,6 +944,8 @@ else
         bad="$bad $what ($src) failed (exit $rc, kind '${kind:-<none>}'): $err;"
       elif [ -z "$kind" ] || [ "$kind" = invalid ]; then
         bad="$bad $what ($src) was not classified as its identifier kind — error_kind '${kind:-<none>}': $err;"
+      elif [ -n "$needle" ] && [ "$kind" != "$needle" ]; then
+        bad="$bad $what ($src) error_kind='$kind' (want $needle): $err;"
       else
         noted="$noted $what: resolver reached, named error kind '$kind';"
       fi
@@ -894,57 +953,60 @@ else
     fi
     [ "$rc" -eq 0 ] || bad="$bad $what ($src) reported no error but pfm harvest exited $rc;"
     [ -n "$status" ] || bad="$bad $what ($src) succeeded without a cached field;"
-    if [ -n "$needle" ] && ! printf '%s' "$out" | jq -r '.[0].content // ""' | grep -qF -- "$needle"; then
+    if [ "$must" -eq 1 ] && [ -z "$(printf '%s' "$out" | jq -r '.[0].content // empty')" ]; then
+      bad="$bad $what ($src) succeeded without content;"
+    elif [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$(printf '%s' "$out" | jq -r '.[0].content // ""')"; then
       bad="$bad $what ($src) content lacks '$needle' (kind $(printf '%s' "$out" | jq -r '.[0].kind // "?"'), $(printf '%s' "$out" | jq -r '.[0].chars // 0') chars);"
     fi
     noted="$noted $what: ok ($(printf '%s' "$out" | jq -r '.[0].kind // "?"'), $status);"
   }
   noted=""
-  expect-log 'harvest'
-  harvest_one "URL" "$url_txt" 1 "Hyper Text Coffee Pot Control Protocol"
+  harvest_one "URL" "$url_txt" 0 dns
   harvest_one "local path" "$local_doc" 1 "LOCAL-HARVEST-OK"
-  # H9: a PDF is not HTML — its text only exists if the pinned Python sidecar converted it.
-  harvest_one "PDF via sidecar" "$url_pdf" 1 "Dummy PDF file"
-  harvest_one "DOI" "10.1371/journal.pmed.0020124" 1
+  # H9: a local PDF's text exists only if the pinned Python sidecar converted it.
+  harvest_one "PDF via sidecar" "$local_pdf" 1
+  harvest_one "PDF URL" "$url_pdf" 0 dns
+  harvest_one "DOI" "10.1371/journal.pmed.0020124" 0 no_open_copy
   harvest_one "PMID" "pmid:16060722" 0
   harvest_one "PMCID" "PMC1182327" 0
   harvest_one "ISBN" "9780262033848" 0
-  # --include-content=false and --refresh on the text URL: the cache answers, then is bypassed.
-  size="$(pfm harvest --include-content=false "$url_txt" 2>&1)"
+  # --include-content=false and --refresh on the local text: the cache answers, then is bypassed.
+  size="$(pfm harvest --include-content=false "$local_doc" 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad --include-content=false exited $rc: $(one_line "$size");"
-  printf '%s' "$size" | grep -qE 'tokens: [0-9]+ / chars: [0-9]+ / path: .+ / cached: (true|false)' ||
+  grep -qE 'tokens: [0-9]+ / chars: [0-9]+ / path: .+ / cached: (true|false)' <<<"$size" ||
     bad="$bad --include-content=false did not print the tokens/chars/path/cached line: $(one_line "$size");"
-  printf '%s' "$size" | grep -qF 'cached: true' || bad="$bad a second fetch of $url_txt was not a cache hit: $(one_line "$size");"
-  refresh="$(pfm harvest --json --refresh "$url_txt" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
+  grep -qF 'cached: true' <<<"$size" || bad="$bad a second fetch of $local_doc was not a cache hit: $(one_line "$size");"
+  refresh="$(pfm harvest --json --refresh "$local_doc" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
   [ "$refresh" = false ] || bad="$bad --refresh reported cached '${refresh:-<none>}' (want false: the cache was bypassed);"
   pfm harvest >/dev/null 2>&1
   rc=$?
   [ "$rc" -eq 2 ] || bad="$bad pfm harvest with no source exited $rc (want 2, usage);"
-  # H2: ask — a real model turn over the harvested document; the evidence is
-  # pfm's exit code and its own usage line, never the answer's words.
-  ask_out="$(pfm harvest ask --engine claude -p "Answer in one word: which beverage does this RFC's protocol control?" "$url_txt" 2>"$hv_err")"
+  # H2: ask over a local document; the evidence is pfm's usage line.
+  ask_out="$(pfm harvest ask --engine claude -p "$(mock_steps '{"type":"turn","reply":"HARVEST-ASK","tokens":{"input":100,"output":20}}')" "$local_doc" 2>"$hv_err")"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     bad="$bad pfm harvest ask exited $rc: $(one_line "$(cat "$hv_err")");"
   else
     [ -n "$ask_out" ] || bad="$bad pfm harvest ask exited 0 but printed no answer;"
-    grep -qE 'pfm harvest ask: usage input=[0-9]+ cached_input=[0-9]+ output=[0-9]+' "$hv_err" ||
-      bad="$bad pfm harvest ask printed no usage line on stderr: $(one_line "$(cat "$hv_err")");"
+    grep -qxF 'pfm harvest ask: usage input=100 cached_input=0 cache_creation=0 output=20' "$hv_err" ||
+      bad="$bad pfm harvest ask printed no usage line with the scripted counts on stderr: $(one_line "$(cat "$hv_err")");"
   fi
-  pfm harvest ask "$url_txt" >/dev/null 2>&1
+  pfm harvest ask "$local_doc" >/dev/null 2>&1
   rc=$?
   [ "$rc" -eq 2 ] || bad="$bad pfm harvest ask without -p exited $rc (want 2, usage);"
   # H9/H12: the sidecar's provisioning as doctor reports it — landed, not skipped.
   doc="$(pfm doctor 2>&1)"
-  hp="$(printf '%s\n' "$doc" | grep '^doctor: harvestpy')"
+  hp="$(printf '%s' "$doc" | grep '^doctor: harvestpy')"
   [ -n "$hp" ] || bad="$bad pfm doctor printed no harvestpy row — the sidecar's provisioning is unreported;"
-  printf '%s' "$hp" | grep -qF 'harvestpy skipped' && bad="$bad doctor reports the harvestpy runtime SKIPPED — setup fell back to --skip-harvest;"
-  printf '%s' "$hp" | grep -qE 'harvestpy interpreter=\(file\) .* version=' || bad="$bad doctor names no provisioned harvestpy interpreter: $(one_line "$hp");"
-  printf '%s' "$hp" | grep -qF 'live_smoke=(file) healthy' || bad="$bad doctor's harvestpy live smoke is not healthy: $(one_line "$(printf '%s\n' "$hp" | grep -E 'live_smoke|broken' | head -2)");"
-  printf '%s' "$hp" | grep -qE 'harvestpy .*(broken|unavailable|blocked)' && bad="$bad a broken harvestpy row: $(one_line "$(printf '%s\n' "$hp" | grep -E 'broken|unavailable|blocked' | head -1)");"
+  grep -qF 'harvestpy skipped' <<<"$hp" && bad="$bad doctor reports the harvestpy runtime SKIPPED — setup fell back to --skip-harvest;"
+  grep -qE 'harvestpy interpreter=\(file\) .* version=' <<<"$hp" || bad="$bad doctor names no provisioned harvestpy interpreter: $(one_line "$hp");"
+  grep -qF 'live_smoke=(file) healthy' <<<"$hp" || bad="$bad doctor's harvestpy live smoke is not healthy: $(one_line "$(printf '%s' "$hp" | grep -E 'live_smoke|broken' | head -2)");"
+  grep -qE 'harvestpy .*(broken|unavailable|blocked)' <<<"$hp" && bad="$bad a broken harvestpy row: $(one_line "$(printf '%s' "$hp" | grep -E 'broken|unavailable|blocked' | head -1)");"
+  rm -f "$local_doc"
+  restore_now "$hv_config" || bad="$bad could not restore $hv_config;"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "$(uname -s | tr 'A-Z' 'a-z')-$(uname -m):$noted size-only hit, --refresh refresh; ask answered with a usage line; doctor: $(one_line "$(printf '%s\n' "$hp" | grep -E 'interpreter|live_smoke' | tr '\n' ' ')" | cut -c1-160)"
+    pass "$(uname -s | tr 'A-Z' 'a-z')-$(uname -m):$noted size-only hit, --refresh refresh; ask answered with a usage line; doctor: $(one_line "$(printf '%s' "$hp" | grep -E 'interpreter|live_smoke' | tr '\n' ' ')" | cut -c1-160)"
   fi
 fi
 
@@ -957,28 +1019,27 @@ FOREIGN_HOOK="echo lane-foreign-hook"
 own_cmd="$SEAT_DIR/commands/lane-own.md"
 # Plant BEFORE the last install: a hook pfm did not write, and an operator's own
 # command file — then re-install so the ownership ledger is written with both present.
+settings_tmp="$(mktemp)"
 jq --arg c "$FOREIGN_HOOK" '.hooks = (.hooks // {}) | .hooks.Stop = ((.hooks.Stop // []) + [{"hooks": [{"type": "command", "command": $c}]}])' \
-  "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tmp" && mv "$SEAT_DIR/settings.json.tmp" "$SEAT_DIR/settings.json" ||
+  "$SEAT_DIR/settings.json" >"$settings_tmp" && cat "$settings_tmp" >"$SEAT_DIR/settings.json" ||
   bad="$bad could not plant the foreign hook into $SEAT_DIR/settings.json;"
+rm -f "$settings_tmp"
 printf -- '---\ndescription: an operator-owned command the lane planted\n---\nSay hello.\n' >"$own_cmd"
 pre="$(install_again)"
 pre_rc=$?
 [ "$pre_rc" -eq 0 ] || bad="$bad the install before uninstall exited $pre_rc: $(one_line "$(printf '%s\n' "$pre" | tail -3)");"
-hook_commands "$SEAT_DIR/settings.json" | grep -qxF "$FOREIGN_HOOK" || bad="$bad the foreign hook did not survive the install that preceded uninstall;"
-pfm_hooks_before="$(hook_commands "$SEAT_DIR/settings.json" | grep -c 'pfm')"
-[ "$pfm_hooks_before" -gt 0 ] || bad="$bad seat $SEAT carried no pfm hook before uninstall — there was nothing to remove;"
+grep -qxF "$FOREIGN_HOOK" <<<"$(hook_commands "$SEAT_DIR/settings.json")" || bad="$bad the foreign hook did not survive the install that preceded uninstall;"
 express_before=""
 for p in "$EXPRESS/CLAUDE.md" "$EXPRESS/.claude" "$EXPRESS/.professor"; do [ -e "$p" ] && express_before="$express_before $p"; done
-n_backups_before="$(find "$SEAT_DIR" -maxdepth 1 -name 'settings.json.pre-professor-*' 2>/dev/null | wc -l | tr -d ' ')"
 seat_dirs="$(jq -r '.accounts[].configDir' "$CONFIG" | sed "s|^~|$HOME|")"
 
 un="$( (cd "$BLUEPRINT" && pfm uninstall 2>&1) )"
 un_rc=$?
-un_summary="$(printf '%s\n' "$un" | grep -E '^summary changed=' | tail -1)"
-[ "$un_rc" -eq 0 ] || bad="$bad pfm uninstall exited $un_rc: $(one_line "$(printf '%s\n' "$un" | grep -iE 'error|refuse|failed' | head -2)") $(one_line "$(printf '%s\n' "$un" | tail -2)");"
-printf '%s' "$un" | grep -qF 'MODE: uninstall' || bad="$bad pfm uninstall did not announce MODE: uninstall;"
+un_summary="$(printf '%s' "$un" | grep -E '^summary changed=' | tail -1)"
+[ "$un_rc" -eq 0 ] || bad="$bad pfm uninstall exited $un_rc: $(one_line "$(printf '%s' "$un" | grep -iE 'error|refuse|failed' | head -2)") $(one_line "$(printf '%s\n' "$un" | tail -2)");"
+grep -qF 'MODE: uninstall' <<<"$un" || bad="$bad pfm uninstall did not announce MODE: uninstall;"
 [ -n "$un_summary" ] || bad="$bad pfm uninstall printed no 'summary changed=' line;"
-printf '%s' "$un_summary" | grep -qE 'changed=[1-9]' || bad="$bad pfm uninstall reports it changed nothing: ${un_summary:-<no summary>};"
+grep -qE 'changed=[1-9]' <<<"$un_summary" || bad="$bad pfm uninstall reports it changed nothing: ${un_summary:-<no summary>};"
 # I82/I83/I87: the managed root — every staged file gone, the ledger gone, nothing forced.
 for f in settings-hook-ownership.json source-repo mcp-auth-token mcp-ownership.json; do
   [ ! -e "$MANAGED/$f" ] || bad="$bad $MANAGED/$f is still on disk (the ledger/metadata must be gone);"
@@ -1017,10 +1078,11 @@ while IFS= read -r dir; do
 done <<EOF
 $seat_dirs
 EOF
-hook_commands "$SEAT_DIR/settings.json" | grep -qxF "$FOREIGN_HOOK" || bad="$bad the FOREIGN hook '$FOREIGN_HOOK' was stripped from $SEAT_DIR/settings.json;"
+grep -qxF "$FOREIGN_HOOK" <<<"$(hook_commands "$SEAT_DIR/settings.json")" || bad="$bad the FOREIGN hook '$FOREIGN_HOOK' was stripped from $SEAT_DIR/settings.json;"
 [ -f "$own_cmd" ] || bad="$bad the operator's own command file $own_cmd was removed;"
-n_backups_after="$(find "$SEAT_DIR" -maxdepth 1 -name 'settings.json.pre-professor-*' 2>/dev/null | wc -l | tr -d ' ')"
-[ "$n_backups_after" -gt "$n_backups_before" ] || bad="$bad no new settings.json.pre-professor-<stamp> backup beside the rewritten $SEAT_DIR/settings.json ($n_backups_before before, $n_backups_after after);"
+# The theme target is the shared Claude home, not an individual seat.
+[ -z "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
+  bad="$bad an installer-owned professor theme remains under $HOME/.claude/themes;"
 # I75/I78/I79: the Codex side — command mirror, hooks.json, config.toml.
 if [ -f "$CODEX_HOME/config.toml" ]; then
   grep -qE 'BEGIN pfm developer_instructions|mcp_servers\.chat|mcp_servers\.harvester' "$CODEX_HOME/config.toml" &&
@@ -1043,7 +1105,7 @@ vsix="$(find "$HOME/.vscode" "$HOME/.vscode-server" "$HOME/.vscode-oss" -maxdept
 for p in $express_before; do [ -e "$p" ] || bad="$bad uninstall removed the project scaffold $p;"; done
 # I89 is a documented UNKNOWN (no pruning routine): the retention is REPORTED, not judged.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "exit $un_rc · $un_summary · managed root, ledger, overlays, /reload + handoff links, themes, harvestpy env+cache, MCP registrations, Codex wiring, pfm.zsh line all gone from $(printf '%s\n' "$seat_dirs" | grep -c .) seat(s); the foreign hook and $own_cmd kept; ${express_before:-no express scaffold present} untouched; backups $n_backups_before → $n_backups_after (I89: no pruning routine exists, count reported)"
+  pass "exit $un_rc · $un_summary · managed root, ledger, overlays, /reload + handoff links, themes, harvestpy env+cache, MCP registrations, Codex wiring, pfm.zsh line all gone from $(printf '%s\n' "$seat_dirs" | grep -c .) seat(s); the foreign hook and $own_cmd kept; ${express_before:-no express scaffold present} untouched"
 fi
 
 lane_end

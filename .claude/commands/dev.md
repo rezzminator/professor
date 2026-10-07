@@ -17,7 +17,7 @@ Run it, then report what it printed. No arguments = `status all`.
 | Project | Directory | Stack | What `verify` means |
 | --- | --- | --- | --- |
 | `templates` | `templates/` | markdown + shell, no build | `leak-check.sh` over changed public files + the placeholder-registry gate |
-| `pfm` | `pfm/` | Go 1.24 | `go vet ./...` |
+| `pfm` | `pfm/` | Go 1.27 | `go vet ./...` |
 
 ## The law
 

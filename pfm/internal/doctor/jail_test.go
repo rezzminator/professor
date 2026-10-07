@@ -12,10 +12,34 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+func TestDoctorJailRecordsCheckoutForPromptReaders(t *testing.T) {
+	dirs, files := storeLayout()
+	runtime := testjail.CleanHome(t, dirs, files)
+	clone, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := paths.ComposedHarnessPrompt(runtime.Paths.Home, engine.Claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(prompt); err != nil {
+		t.Fatalf("clone %s prompt %s: %v", clone, prompt, err)
+	}
+	dir, err := paths.HarnessBaselineDir(runtime.Paths.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(filepath.Join(dir, "harness-original.sha256")); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // buildCleanDoctorHome stages the fixture a healthy target HOME carries —
 // the canonical binary, the Claude launcher, both host overlays, and every
@@ -25,8 +49,9 @@ import (
 func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Helper()
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
-	runtime := testjail.CleanHome(t)
-	stageHarnessPromptBaseline(t, runtime.Paths.Home)
+	dirs, files := storeLayout()
+	runtime := testjail.CleanHome(t, dirs, files)
+	stageStorePlugins(t, runtime.Paths.Home)
 	return runtime
 }
 
@@ -36,7 +61,13 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("fresh target HOME doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "doctor: clean") {
+	// claude_plugins ok proves doctor judged the store the plugins live in
+	// (installer.ClaudeStore), not a dir with no settings.json that only
+	// ever prints the skipped line.
+	if !strings.Contains(stdout.String(), "doctor: clean") ||
+		!strings.Contains(stdout.String(), "doctor: claude_plugins ok\n") ||
+		!strings.Contains(stdout.String(), "host-check: ok (22 checks)") ||
+		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 22 entries)") {
 		t.Fatalf("fresh target HOME doctor output=%q", stdout.String())
 	}
 }
@@ -59,7 +90,7 @@ func TestDoctorReportsClaudeVersionCountBytesAndPrunable(t *testing.T) {
 	live := filepath.Join(versions, "2.1.263")
 	prunable := filepath.Join(versions, "2.1.250")
 	for _, path := range []string{newest, live, prunable} {
-		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -234,10 +265,10 @@ func TestPFMPathWarningsIgnoreHostShimsOutsideTargetHome(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(canonicalDir, "pfm"), []byte("target-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(canonicalDir, "pfm"), []byte("target-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -261,11 +292,11 @@ func TestPFMPathWarningsReportHostShimsOutsideHomeWithoutAJail(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(canonicalDir, "pfm"), []byte("canonical-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(canonicalDir, "pfm"), []byte("canonical-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	hostShim := filepath.Join(hostShimDir, "pfm")
-	if err := os.WriteFile(hostShim, []byte("shadowing-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(hostShim, []byte("shadowing-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -321,27 +352,38 @@ func clearRetiredHarvesterEnv(t *testing.T) {
 	}
 }
 
-// TestDoctorEarlyExitPrintsItsFailureCount: a database doctor cannot open ends
-// the run early with exit 3 — and `pfm update` reads the failure only from the
-// `doctor: failures=N` line, so the early exit prints it too.
-func TestDoctorEarlyExitPrintsItsFailureCount(t *testing.T) {
+// TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd: a cache database doctor cannot
+// open is a failure row and exit 3, and doctor reads on to the host checks —
+// `pfm update` reads the failure only from the `doctor: failures=N` line.
+func TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	blocked := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvDB, filepath.Join(blocked, "fleet.db"))
+	// Both resolutions doctor reads — the store's own and the runtime's — name the unopenable path.
+	runtime.Paths.CacheDB = filepath.Join(blocked, "pfm-cache.db")
+	t.Setenv(paths.EnvCacheDB, runtime.Paths.CacheDB)
 
 	var stdout, stderr bytes.Buffer
 	code := runDoctor(nil, &stdout, &stderr, runtime)
+	output := stdout.String()
 	if code != 3 {
-		t.Fatalf("unopenable database doctor code=%d, want 3\nstdout=%s", code, stdout.String())
+		t.Fatalf("unopenable database doctor code=%d, want 3\nstdout=%s", code, output)
 	}
-	if !strings.Contains(stdout.String(), "doctor: unhealthy database: ") {
-		t.Fatalf("the unhealthy database row is missing:\n%s", stdout.String())
+	if !strings.Contains(output, "doctor: unhealthy database: ") {
+		t.Fatalf("the unhealthy database row is missing:\n%s", output)
 	}
-	if !strings.HasSuffix(stdout.String(), "doctor: failures=1\n") {
-		t.Fatalf("the early exit did not end with doctor: failures=1:\n%s", stdout.String())
+	_, unhealthy, _ := strings.Cut(output, "doctor: unhealthy database: ")
+	unhealthy, _, _ = strings.Cut(unhealthy, "\n")
+	if !strings.Contains(unhealthy, runtime.Paths.CacheDB) {
+		t.Fatalf("the unhealthy database row does not name cache %s:\n%s", runtime.Paths.CacheDB, output)
+	}
+	if !strings.Contains(output, "host-check: ") || !strings.Contains(output, "doctor: rows could not look: ") {
+		t.Fatalf("doctor stopped at the database instead of reading on:\n%s", output)
+	}
+	if !strings.Contains(output, "\ndoctor: failures=") {
+		t.Fatalf("doctor printed no failure count:\n%s", output)
 	}
 }
 
@@ -379,5 +421,96 @@ func TestDoctorUsesTheInjectedRunnerAndEnv(t *testing.T) {
 	}
 	if code == 0 || strings.Contains(stdout.String(), "doctor: clean") {
 		t.Fatalf("a refused override ended doctor clean (code=%d):\n%s", code, stdout.String())
+	}
+}
+
+// homeSnapshot maps each path under root to its mode and, for a file, its
+// bytes or, for a symlink, its target, so two snapshots compare byte for byte.
+func homeSnapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	snapshot := map[string]string{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		entry := info.Mode().String()
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			entry += " -> " + target
+		case info.Mode().IsRegular():
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			entry += " " + string(content)
+		}
+		snapshot[path] = entry
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot %s: %v", root, err)
+	}
+	return snapshot
+}
+
+// TestDoctorLeavesHomeByteIdenticalWithALoggedOutClaude: on a migrated host one
+// plain pfm doctor ran a logged-out claude with the ambient env, which
+// recreated ~/.claude/backups in the shared store plus $HOME/.claude.json; the
+// host check then reported store-identity and install refused. Doctor's claude
+// runs each get a throwaway home, so $HOME, the store included, is unchanged.
+func TestDoctorLeavesHomeByteIdenticalWithALoggedOutClaude(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	home := runtime.Paths.Home
+	// The real dependency probe, so its claude runs reach the fake.
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
+	DependencyProbeOverride = nil
+	// Production's SID dir is /tmp/cc-sid, outside HOME.
+	sid := filepath.Join(t.TempDir(), "sid")
+	t.Setenv(paths.EnvSIDDir, sid)
+	scratch := t.TempDir()
+	record := filepath.Join(scratch, "config-dirs.log")
+	bin := filepath.Join(scratch, "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := testjail.WriteLoggedOutClaude(
+		filepath.Join(bin, engine.MustLookup(engine.Claude).Binary), record, "",
+	); err != nil {
+		t.Fatal(err)
+	}
+	codexRecord := filepath.Join(scratch, "codex-homes.log")
+	if err := testjail.WriteLoggedOutCodex(
+		filepath.Join(bin, engine.MustLookup(engine.Codex).Binary), codexRecord, "",
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	before := homeSnapshot(t, home)
+	var stdout, stderr bytes.Buffer
+	runDoctor(nil, &stdout, &stderr, runtime)
+	after := homeSnapshot(t, home)
+	for path, entry := range after {
+		if before[path] != entry {
+			t.Errorf("doctor changed %s", path)
+		}
+	}
+	for path := range before {
+		if _, ok := after[path]; !ok {
+			t.Errorf("doctor removed %s", path)
+		}
+	}
+	if runs := testjail.AssertClaudeRanInThrowawayHomes(t, home, sid, record); runs == 0 {
+		t.Errorf("doctor never ran the fake claude; stdout:\n%s", stdout.String())
+	}
+	if runs := testjail.AssertCodexRanInThrowawayHomes(t, home, sid, codexRecord); runs == 0 {
+		t.Errorf("doctor never ran the fake codex; stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "account rows left to pfm: auth") {
+		t.Errorf("the logged-out throwaway home's auth row was judged as the binary's:\n%s", stdout.String())
 	}
 }

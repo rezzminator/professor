@@ -27,6 +27,15 @@ type Target struct {
 	PaneID     string
 }
 
+// AddressOnly reports whether target names WHERE a chat is, never WHICH chat:
+// it carries no session id, or its id is the very socket name it lives on. No
+// tombstone may be written for it — the key means nothing once the seat's
+// session is pinned down, the composer refuses to apply it, and nobody can
+// unkill it. It subsumes engine.SocketKeyedID's OpenCode case.
+func AddressOnly(target Target) bool {
+	return target.ID == "" || (target.SocketName != "" && target.ID == target.SocketName)
+}
+
 // Request describes a public kill invocation.
 type Request struct {
 	ID   string

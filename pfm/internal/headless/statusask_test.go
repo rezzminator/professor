@@ -87,11 +87,16 @@ func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 	)
 	bin := filepath.Join(root, "bin")
 	counter := filepath.Join(root, "calls")
-	writeSummaryStub(t, bin, "claude", "printf x >> \"$ASK_COUNTER\"\nprintf 'nothing has changed\\n'")
+	writeSummaryStub(
+		t,
+		bin,
+		"claude",
+		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"nothing has changed\"}'",
+	)
 	t.Setenv("PATH", bin)
 	t.Setenv("ASK_COUNTER", counter)
 	tempDir := filepath.Join(root, "tmp", "chat-status")
-	options := AskOptions{Config: summaryMachine("claude"), TempDir: tempDir}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}
 
 	first := Ask(context.Background(), chat, options)
@@ -127,12 +132,12 @@ set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
 [ "$#" -eq 1 ]
 [ -f "$1" ]
 rm "$1"
-printf 'cleanup-resistant answer\n'`)
+printf '%s\n' '{"result":"cleanup-resistant answer"}'`)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
 
 	result := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, AskOptions{
-		Config: summaryMachine("claude"), TempDir: tempDir,
+		Config: summaryMachine(t, "claude"), TempDir: tempDir,
 	})
 	if result.Text != "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): cleanup-resistant answer" ||
 		strings.HasPrefix(result.Text, "failed (") {
@@ -159,11 +164,11 @@ func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
 		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
 	)
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "printf 'answer\\n'")
+	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"answer\"}'")
 	// Prepend, not replace: the capture-failure call below still needs the
 	// REAL tmux binary to reach (and be refused by) the empty socket path.
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	options := AskOptions{Config: summaryMachine("claude"), TempDir: filepath.Join(root, "tmp")}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "tmp")}
 
 	notLive := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}, options)
 	if !strings.Contains(notLive.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture)") {
@@ -201,12 +206,12 @@ func TestAskCapturesLivePaneAndReportsPaneOnlyWithoutExchange(t *testing.T) {
 	socketPath, session := startHeadlessTmuxSession(t)
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "cat >/dev/null\nprintf 'quietly idling\\n'")
+	writeSummaryStub(t, bin, "claude", "cat >/dev/null\nprintf '%s\\n' '{\"result\":\"quietly idling\"}'")
 	// Prepend, not replace: capturePane still needs the REAL tmux binary
 	// from the ambient PATH to reach the session started above.
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	tempDir := filepath.Join(root, "tmp")
-	options := AskOptions{Config: summaryMachine("claude"), TempDir: tempDir}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir}
 	chat := Chat{
 		Name: "seat", Engine: "cc", Path: "", Live: true,
 		Socket: socketPath, Session: session,
@@ -233,7 +238,7 @@ func TestAskUnavailableNamesBothReasons(t *testing.T) {
 	// succeed, so a mistaken engine call cannot masquerade as this case.
 	t.Setenv("PATH", bin)
 	tempDir := filepath.Join(root, "tmp")
-	options := AskOptions{Config: summaryMachine("claude"), TempDir: tempDir}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir}
 	chat := Chat{Name: "seat", Engine: "cc", Path: "", Live: false}
 
 	result := Ask(context.Background(), chat, options)
@@ -265,7 +270,7 @@ func TestAskReportsEngineBinaryMissingAndCleansUpOnEveryErrorReturn(t *testing.T
 	tempDir := filepath.Join(root, "tmp", "chat-status")
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}
 
-	machine := summaryMachine("codex")
+	machine := summaryMachine(t, "codex")
 	machine.Codex.Binary = "absent-codex"
 	missing := Ask(context.Background(), chat, AskOptions{Config: machine, TempDir: tempDir})
 	if missing.Text != "unavailable (codex binary MISSING)" {
@@ -280,14 +285,14 @@ func TestAskReportsEngineBinaryMissingAndCleansUpOnEveryErrorReturn(t *testing.T
 	assertNoLeakedTempFiles(t, tempDir)
 
 	writeSummaryStub(t, bin, "claude", "printf 'provider crashed\\n' >&2\nexit 9")
-	failed := Ask(context.Background(), chat, AskOptions{Config: summaryMachine("claude"), TempDir: tempDir})
+	failed := Ask(context.Background(), chat, AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir})
 	if !strings.HasPrefix(failed.Text, "failed (") || !strings.Contains(failed.Text, "provider crashed") {
 		t.Fatalf("failed ask=%+v", failed)
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	writeSummaryStub(t, bin, "claude", "printf 'all clear\\n'")
-	ok := Ask(context.Background(), chat, AskOptions{Config: summaryMachine("claude"), TempDir: tempDir})
+	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"all clear\"}'")
+	ok := Ask(context.Background(), chat, AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir})
 	if !strings.HasPrefix(ok.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): ") {
 		t.Fatalf("ok ask=%+v", ok)
 	}

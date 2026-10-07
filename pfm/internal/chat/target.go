@@ -51,6 +51,10 @@ var (
 	ErrNoTranscript = errors.New("chat has not written a transcript")
 	// ErrNoAnswer: the chat's transcript holds no assistant turn yet.
 	ErrNoAnswer = errors.New("chat has not answered")
+	// ErrTurnInProgress: the chat's newest Codex turn is still running, so
+	// what it said last is commentary, not an answer. Never ErrNoAnswer, and
+	// never an older turn's answer served in its place.
+	ErrTurnInProgress = errors.New("mid-turn: no final answer yet")
 )
 
 // TargetError is a verb's failure to resolve its target. Err is
@@ -353,14 +357,16 @@ func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 		candidates = append(candidates, resolve.RosterCandidate{
 			Name: row.Name, ID: row.ID, Socket: row.Socket,
 			Session: row.SessionName, Pane: row.PaneID,
-			Engine: string(compose.EngineForKind(row.Kind)), Live: row.Kind.IsAddressable(),
+			Engine: string(compose.EngineForKind(row.Kind)),
+			Live:   row.Kind.IsAddressable() && !row.Killed, ActivityNS: row.ActivityNS,
 		})
 	}
 	return candidates
 }
 
-// Match applies the roster matching rule to rows: exact before prefix, live
-// before resumable, a genuine collision refused as ambiguous.
+// Match applies the roster matching rule to rows: exact before prefix, a live
+// seat before any dead or killed row, the newest dead row when none is live,
+// a genuine collision of live seats refused as ambiguous.
 func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	match, found, err := resolve.ResolveRosterName(RosterCandidates(rows), name)
 	if err != nil || !found {

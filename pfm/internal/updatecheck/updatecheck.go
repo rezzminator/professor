@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -155,7 +156,7 @@ func performCheck(
 	if client == nil {
 		client = obs.WrapClient(&http.Client{Timeout: 12 * time.Second})
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodHead, latestURL, http.NoBody)
 	if err != nil {
 		return failureNetwork, fmt.Errorf("build latest-release request: %w", err)
 	}
@@ -172,7 +173,7 @@ func performCheck(
 		return failureNetwork, err
 	}
 	if hop := renameHopURL(request.URL, resolved); hop != "" {
-		hopRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, hop, http.NoBody)
+		hopRequest, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodHead, hop, http.NoBody)
 		if err != nil {
 			return failureNetwork, fmt.Errorf("build renamed Professor release request: %w", err)
 		}
@@ -211,7 +212,40 @@ func recordFailure(path string, at time.Time, class failureClass, cause error) e
 	if markErr := writeFailure(path, FailureMarker{At: at, Class: class, Reason: cause.Error()}); markErr != nil {
 		return errors.Join(cause, fmt.Errorf("record update check failure: %w", markErr))
 	}
+	var noAnswer *noAnswerError
+	if errors.As(cause, &noAnswer) {
+		return &recordedUnreachableError{cause}
+	}
 	return cause
+}
+
+type noAnswerError struct{ cause error }
+
+func (e *noAnswerError) Error() string { return e.cause.Error() }
+func (e *noAnswerError) Unwrap() error { return e.cause }
+
+func networkUnreachable(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var timeout interface{ Timeout() bool }
+	return (errors.As(err, &timeout) && timeout.Timeout()) || errors.Is(err, context.DeadlineExceeded)
+}
+
+type recordedUnreachableError struct{ cause error }
+
+func (e *recordedUnreachableError) Error() string { return e.cause.Error() }
+func (e *recordedUnreachableError) Unwrap() error { return e.cause }
+
+// Unreachable reports a dial, DNS or timeout failure whose marker was written successfully.
+func Unreachable(err error) bool {
+	var recorded *recordedUnreachableError
+	return errors.As(err, &recorded)
 }
 
 // failurePath is where the durable failure marker lives, beside the cache
@@ -332,7 +366,11 @@ func follow(
 ) (resolved *url.URL, location string, returnErr error) {
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, "", fmt.Errorf("request latest Professor release: %w", err)
+		cause := fmt.Errorf("request latest Professor release: %w", err)
+		if networkUnreachable(err) {
+			return nil, "", &noAnswerError{cause}
+		}
+		return nil, "", cause
 	}
 	defer func() {
 		if err := response.Body.Close(); err != nil {

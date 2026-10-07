@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -55,6 +56,7 @@ type KillServerFunc func(ctx context.Context, socket string) error
 // default; a test supplies its own.
 type Dependencies struct {
 	Paths          paths.Values
+	Config         pfmconfig.Config
 	Tmux           Tmux
 	Proc           gather.ProcFS
 	Busy           BusyProbe
@@ -135,7 +137,7 @@ func New(dependencies Dependencies) (*Runner, error) {
 	resolved := dependencies.Paths
 	if resolved.TmuxDir == "" {
 		var err error
-		resolved, err = paths.Resolve()
+		resolved, err = pfmconfig.ResolvePaths()
 		if err != nil {
 			return nil, fmt.Errorf("resolve reap paths: %w", err)
 		}
@@ -154,7 +156,7 @@ func New(dependencies Dependencies) (*Runner, error) {
 	}
 	busy := dependencies.Busy
 	if busy == nil {
-		busy = NewClaudeAgents(resolved)
+		busy = NewClaudeAgents(resolved, dependencies.Config)
 	}
 	if dependencies.KillServer == nil {
 		return nil, errors.New("reap needs a kill-server implementation")

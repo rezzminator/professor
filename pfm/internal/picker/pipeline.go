@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -17,8 +19,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 const (
@@ -49,6 +53,11 @@ var (
 	// use their own slower cadence.
 	fleetRefreshParkPollInterval  = 2 * time.Second
 	fleetRefreshCodexPollInterval = 10 * time.Second
+	// fleetRefreshStaleAfter is how old the last attempt must be before
+	// a keystroke is allowed to start the next one on the spot. A driven picker
+	// refreshes every fleetRefreshInterval, so this only ever fires for a
+	// picker that backed off or parked and is being used again.
+	fleetRefreshStaleAfter = ui.RefreshStaleAfter
 )
 
 // refreshCadence is one refresh stream's backoff state. It starts at
@@ -98,8 +107,9 @@ func (cadence *refreshCadence) next() time.Duration {
 // refresh goroutine while an interactive picker owns the terminal (runLS),
 // releasing them to stderr only once flush is called after Pick returns.
 type bufferedWarnings struct {
-	mu       sync.Mutex
-	warnings []string
+	mu         sync.Mutex
+	warnings   []string
+	rawEntries []string
 }
 
 func (buffer *bufferedWarnings) add(warning string) {
@@ -113,30 +123,55 @@ func (buffer *bufferedWarnings) add(warning string) {
 	buffer.warnings = append(buffer.warnings, warning)
 }
 
+func (buffer *bufferedWarnings) Write(p []byte) (int, error) {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	raw := string(p)
+	for _, existing := range buffer.rawEntries {
+		if existing == raw {
+			return len(p), nil
+		}
+	}
+	buffer.rawEntries = append(buffer.rawEntries, raw)
+	return len(p), nil
+}
+
 // flush prints every warning collected so far and clears the buffer, so a
 // caller that flushes between picker frames never
 // prints the same warning twice.
 func (buffer *bufferedWarnings) flush(stderr io.Writer) {
 	buffer.mu.Lock()
 	pending := buffer.warnings
+	rawEntries := buffer.rawEntries
 	buffer.warnings = nil
+	buffer.rawEntries = nil
 	buffer.mu.Unlock()
 	for _, warning := range pending {
 		fmt.Fprintf(stderr, "pfm: tmux probe warning: %s\n", warning)
 	}
+	for _, raw := range rawEntries {
+		fmt.Fprint(stderr, raw)
+	}
 }
 
 type scanRequest struct {
-	View     compose.View
-	Query    string
-	ReadOnly bool
-	Cache1H  bool
-	NoSky    bool
+	RepoRoots []string
+	View      compose.View
+	Query     string
+	ReadOnly  bool
+	NoSky     bool
 	// Safe is the --safe flag verbatim (auto|on|off); resolveCosmosSafe
 	// turns it into the snapshot's CosmosSafe bool at build time.
 	Safe    string
 	Runtime *pfmconfig.Runtime
 	Comms   commsReader
+	// Reminders reads which sessions have an unseen reminder; nil leaves every
+	// row unmarked.
+	Reminders unseenReminderReader
+	// Facts reads each chat's model, effort and working state from its
+	// transcript tail; nil — every non-interactive caller, so --plain and --tsv
+	// stay byte-identical — leaves the rows as composed.
+	Facts *rowfacts.Reader
 }
 
 // resolveCosmosSafe decides whether the cosmos tab renders in vscode-safe
@@ -159,6 +194,10 @@ type commsReader interface {
 	CommsSince(context.Context, int64, int) ([]fleetdb.CommsEvent, error)
 }
 
+type unseenReminderReader interface {
+	UnseenReminderSessionIDs(context.Context) (map[string]bool, error)
+}
+
 type cosmosSampler struct{ reader commsReader }
 
 func (sampler cosmosSampler) Sample(ctx context.Context, sinceNS int64) ([]fleetdb.CommsEvent, error) {
@@ -176,7 +215,7 @@ type scanResult struct {
 // fleetRequest is the scan scope inside a picker request; the rest of
 // scanRequest shapes the snapshot the picker renders.
 func (request scanRequest) fleetRequest() fleet.Request {
-	return fleet.Request{View: request.View, ReadOnly: request.ReadOnly, Runtime: request.Runtime}
+	return fleet.Request{View: request.View, ReadOnly: request.ReadOnly, Runtime: request.Runtime, Workbenches: true}
 }
 
 // scanFleet is fleet.Scan plus the picker snapshot over its rows.
@@ -210,6 +249,9 @@ func scanFleetCached(
 	if err != nil {
 		return scanResult{}, err
 	}
+	// The first frame is the index as it stands: reading every transcript tail
+	// is the refresh's job, so the picker opens before it is done.
+	request.Facts = nil
 	snapshot := buildSnapshot(ctx, result.Env, request, result.Output)
 	snapshot.Refreshing = true
 	return scanResult{Output: result.Output, Snapshot: snapshot, Paths: result.Env.Paths}, nil
@@ -239,9 +281,39 @@ func buildSnapshot(
 			}
 		}
 	}
+	rows := output.Rows
+	reminderError := ""
+	if request.Reminders != nil {
+		unseen, err := request.Reminders.UnseenReminderSessionIDs(ctx)
+		if err != nil {
+			reminderError = fmt.Errorf("read reminder flags: %w", err).Error()
+		} else {
+			// Clone: output.Rows is shared with scanResult.Output.
+			rows = slices.Clone(output.Rows)
+			for index := range rows {
+				if rows[index].ID != "" {
+					rows[index].Reminded = unseen[rows[index].ID]
+				}
+			}
+		}
+	}
+	factsError := ""
+	if request.Facts != nil {
+		var failures []error
+		rows, failures = request.Facts.Enrich(rows, environment.NowNS)
+		if len(failures) > 0 {
+			factsError = fmt.Sprintf("%d unreadable, first: %v", len(failures), failures[0])
+		}
+	}
 	machine := environment.Config
+	cacheByAccount := make(map[int]bool)
+	for _, account := range machine.AccountIDs() {
+		cacheByAccount[account] = machine.EffectiveClaude(account).Cache1H
+	}
 	return ui.Snapshot{
-		Rows:                   output.Rows,
+		Rows:                   rows,
+		ReminderError:          reminderError,
+		FactsError:             factsError,
 		View:                   request.View,
 		KilledCount:            output.KilledCount,
 		SuppressedCount:        output.SuppressedCount,
@@ -254,7 +326,9 @@ func buildSnapshot(
 		OpenCodePrimaryAccount: machine.PrimaryOpenCodeAccount(),
 		OpenCodeAccountIDs:     machine.OpenCodeAccountIDs(),
 		Theme:                  machine.Theme,
-		Cache1H:                request.Cache1H,
+		Home:                   environment.Paths.Home,
+		Cache1H:                machine.EffectiveClaude(environment.Primary).Cache1H,
+		Cache1HByAccount:       cacheByAccount,
 		NowNS:                  environment.NowNS,
 		InitialQuery:           request.Query,
 		NoSky:                  request.NoSky,
@@ -268,6 +342,7 @@ type indexRunner interface {
 }
 
 type refreshDependencies struct {
+	discover   func([]string) ([]workbench.Bench, []workbench.WalkError)
 	newIndexer func(*store.Store) (indexRunner, error)
 	// activity is the picker's presence clock. Nil — every non-interactive
 	// caller and every existing stream test — reads as permanently active and
@@ -317,6 +392,20 @@ func streamFleetRefreshesWith(
 	dependencies refreshDependencies,
 ) {
 	defer close(updates)
+	if ctx.Err() != nil {
+		return
+	}
+	if err := refreshWorkbenches(request, dependencies.discover); err != nil {
+		writeRefreshError(ctx, stderr, " workbenches", err)
+	}
+	refreshClock := dependencies.clock
+	if refreshClock == nil {
+		refreshClock = clock.Real
+	}
+	// lastAttempt records each pass's start, including a failed pass. Even
+	// when a stale fleet's passes fail, keys start at most one per bound.
+	// Parked Codex probes are not full passes and leave the stamp alone.
+	lastAttempt := refreshClock.Now()
 	environment, err := fleet.ResolveEnv(request.fleetRequest())
 	if err != nil {
 		writeRefreshError(ctx, stderr, "", err)
@@ -405,10 +494,6 @@ func streamFleetRefreshesWith(
 	}
 
 	cadence := newRefreshCadence(dependencies.activity)
-	refreshClock := dependencies.clock
-	if refreshClock == nil {
-		refreshClock = clock.Real
-	}
 	timer := refreshClock.NewTimer(cadence.interval)
 	defer timer.Stop()
 	// parked survives across iterations: once the cadence backs off past
@@ -417,6 +502,7 @@ func streamFleetRefreshesWith(
 	// interacting in Codex does not stamp the picker's activity clock. A clear
 	// wakes a full pass to publish the new binding and hidden predecessor.
 	parked := false
+	wake := dependencies.activity.Wake()
 	// A failed publication must be retried even if reconciliation already
 	// committed the binding and therefore reports no further identity change.
 	pendingRefresh := false
@@ -436,6 +522,13 @@ func streamFleetRefreshesWith(
 		case <-ctx.Done():
 			return
 		case <-timer.C():
+		case <-wake:
+			// A keystroke lands here, not on the timer. A fleet refreshed
+			// moments ago is fresh enough; one the backoff left behind is
+			// refreshed now, without waiting out the park poll.
+			if refreshClock.Now().Sub(lastAttempt) < fleetRefreshStaleAfter {
+				continue
+			}
 		}
 		// Rearm BEFORE the pass, never after it. The body below leaves through
 		// several `continue`s on transient errors, and a Reset parked at the
@@ -495,6 +588,8 @@ func streamFleetRefreshesWith(
 			timer.Reset(next)
 		}
 		pendingRefresh = true
+		passStart := refreshClock.Now()
+		lastAttempt = passStart
 		environment, err = fleet.ResolveEnv(request.fleetRequest())
 		if err != nil {
 			writeRefreshError(ctx, stderr, "", err)
@@ -619,6 +714,46 @@ func primaryWriteback(kind ui.OutcomeKind, account, current int) (int, bool) {
 	return account, true
 }
 
-func inBunker() bool {
-	return fleet.CurrentSocket() == "vsct"
+func refreshWorkbenches(request scanRequest, discover func([]string) ([]workbench.Bench, []workbench.WalkError)) error {
+	var values paths.Values
+	if request.Runtime != nil {
+		values = request.Runtime.Paths
+	} else {
+		resolved, err := pfmconfig.ResolvePaths()
+		if err != nil {
+			return fmt.Errorf("resolve workbench cache paths: %w", err)
+		}
+		values = resolved
+	}
+	dirs := append([]string(nil), request.RepoRoots...)
+	var roots []string
+	var faults []workbench.WalkError
+	currentDir, err := os.Getwd()
+	if err != nil {
+		faults = append(faults, workbench.WalkError{
+			Root: ".", Path: ".", Err: fmt.Errorf("read workbench discovery directory: %w", err),
+		})
+	} else {
+		dirs = append(dirs, currentDir)
+	}
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		managed, err := workbench.ManagedRoots([]string{dir})
+		if err != nil {
+			faults = append(faults, workbench.WalkError{Root: dir, Path: dir, Err: err})
+			continue
+		}
+		for _, root := range managed {
+			if !seen[root] {
+				roots = append(roots, root)
+				seen[root] = true
+			}
+		}
+	}
+	slices.Sort(roots)
+	if discover == nil {
+		discover = workbench.Discover
+	}
+	benches, walkErrors := discover(roots)
+	return workbench.WriteCache(paths.WorkbenchCache(values), benches, append(faults, walkErrors...))
 }

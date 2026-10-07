@@ -14,6 +14,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 const chatCommand = "chat"
@@ -84,18 +85,26 @@ func (service *Service) chatStatus(
 	if err != nil {
 		return nil, StatusOutput{}, fmt.Errorf("chat_status: %w", err)
 	}
-	return nil, StatusOutput(status), nil
+	return nil, statusOutput(status), nil
+}
+
+// statusOutput copies the JSON contract of a status field by field: headless.Status
+// also carries json:"-" evidence (PendingTool, QuietSeconds) the tool never returns.
+func statusOutput(status headless.Status) StatusOutput {
+	return StatusOutput{
+		Name: status.Name, State: status.State, IdleSeconds: status.IdleSeconds,
+		Engine: status.Engine, Model: status.Model, CWD: status.CWD,
+		SessionID: status.SessionID, Socket: status.Socket, ContextPct: status.ContextPct,
+		Last: status.Last, Error: status.Error, Summary: status.Summary,
+		SummaryCached: status.SummaryCached, Ask: status.Ask,
+	}
 }
 
 func (service *Service) chatNew(
 	ctx context.Context,
 	request *mcp.CallToolRequest,
 	input NewInput,
-) (*mcp.CallToolResult, ActionOutput, error) {
-	if strings.TrimSpace(input.Name) == "" {
-		return nil, ActionOutput{}, fmt.Errorf("name is required")
-	}
-	args := []string{chatCommand, "new", "--name", input.Name}
+) (result *mcp.CallToolResult, output ActionOutput, returnErr error) {
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
 		return nil, ActionOutput{}, err
@@ -113,37 +122,99 @@ func (service *Service) chatNew(
 		}
 		ctx = chat.WithResolvedSelf(ctx, self)
 	}
+	directory := input.CWD
+	if directory != "" && caller.valid && !filepath.IsAbs(directory) {
+		if strings.TrimSpace(self.CWD) == "" {
+			return nil, ActionOutput{}, fmt.Errorf(
+				"chat_new: caller working directory is required to resolve relative cwd %q",
+				directory,
+			)
+		}
+		if !filepath.IsAbs(self.CWD) {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: caller working directory %q is not absolute", self.CWD)
+		}
+		directory = filepath.Join(self.CWD, directory)
+	} else if directory == "" && caller.valid {
+		directory = self.CWD
+	}
+	var nameClaim chat.NameReservation
+	if strings.TrimSpace(input.Name) == "" {
+		if directory == "" {
+			return nil, ActionOutput{}, fmt.Errorf(
+				"name is required: no working directory is known to look up a workbench",
+			)
+		}
+		effective, err := pfmconfig.LoadRuntime("")
+		if err != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
+		}
+		service.nameMutex.Lock()
+		reserved := make([]string, 0, len(service.pendingNames))
+		for name := range service.pendingNames {
+			reserved = append(reserved, name)
+		}
+		claim, found, err := chat.ReserveWorkbenchName(
+			ctx,
+			directory,
+			service.backend.warnings,
+			&effective,
+			reserved...)
+		if err == nil && found {
+			if service.pendingNames == nil {
+				service.pendingNames = make(map[string]struct{})
+			}
+			service.pendingNames[claim.Name] = struct{}{}
+		}
+		service.nameMutex.Unlock()
+		if err != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
+		}
+		if !found {
+			return nil, ActionOutput{}, fmt.Errorf("name is required outside a workbench")
+		}
+		input.Name = claim.Name
+		nameClaim = claim
+		ctx = chat.WithWorkbenchNameReservation(ctx, claim)
+		defer func() {
+			if releaseErr := claim.Release(); releaseErr != nil {
+				returnErr = errors.Join(
+					returnErr,
+					fmt.Errorf("chat_new: release automatic name %s: %w", claim.Name, releaseErr),
+				)
+				output.Status = statusError
+				if output.Code == 0 {
+					output.Code = 1
+				}
+				output.Message = returnErr.Error()
+			}
+			service.nameMutex.Lock()
+			delete(service.pendingNames, claim.Name)
+			service.nameMutex.Unlock()
+		}()
+	}
+	args := []string{chatCommand, "new", "--name", input.Name}
 	if input.Engine != "" {
 		args = append(args, "--engine", input.Engine)
 	} else if caller.valid && caller.row.Engine != "" {
-		args = append(args, "--engine", string(caller.row.Engine))
-	}
-	if input.CWD != "" {
-		directory := input.CWD
-		if caller.valid && !filepath.IsAbs(directory) {
-			if strings.TrimSpace(self.CWD) == "" {
-				return nil, ActionOutput{}, fmt.Errorf(
-					"chat_new: caller working directory is required to resolve relative cwd %q",
-					directory,
-				)
-			}
-			if !filepath.IsAbs(self.CWD) {
-				return nil, ActionOutput{}, fmt.Errorf(
-					"chat_new: caller working directory %q is not absolute",
-					self.CWD,
-				)
-			}
-			directory = filepath.Join(self.CWD, directory)
+		bench, found, err := workbench.Nearest(directory)
+		if err != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: resolve workbench: %w", err)
 		}
+		if !found || bench.Err != nil || bench.Enables(caller.row.Engine) {
+			args = append(args, "--engine", string(caller.row.Engine))
+		}
+	}
+	if strings.TrimSpace(directory) != "" {
 		args = append(args, "--cwd", directory)
-	} else if caller.valid && strings.TrimSpace(self.CWD) != "" {
-		args = append(args, "--cwd", self.CWD)
 	}
 	if input.Account != 0 {
 		args = append(args, "--account", fmt.Sprint(input.Account))
 	}
-	if input.Cache1H {
-		args = append(args, "--1h")
+	if input.Cache != "" {
+		if input.Cache != "1h" && input.Cache != "5m" {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: cache must be 1h|5m")
+		}
+		args = append(args, "--cache", input.Cache)
 	}
 	if input.Model != "" {
 		args = append(args, "--model", input.Model)
@@ -151,11 +222,14 @@ func (service *Service) chatNew(
 	if input.Effort != "" {
 		args = append(args, "--effort", input.Effort)
 	}
+	if input.AgentRole != "" {
+		args = append(args, "--agent-role", input.AgentRole)
+	}
 	if input.Await {
 		args = append(args, "--await")
 	}
-	if input.Timeout != 0 {
-		args = append(args, "--timeout", fmt.Sprint(input.Timeout))
+	if input.Timeout != nil {
+		args = append(args, "--timeout", fmt.Sprint(*input.Timeout))
 	}
 	if input.Settle != 0 {
 		args = append(args, "--settle", fmt.Sprint(input.Settle))
@@ -169,7 +243,14 @@ func (service *Service) chatNew(
 	if input.Prompt != "" {
 		args = append(args, input.Prompt)
 	}
-	return service.cliAction(ctx, args...)
+	result, output, returnErr = service.cliAction(ctx, args...)
+	if nameClaim.Name != "" && returnErr == nil && output.Code == 0 {
+		if commitErr := nameClaim.Commit(); commitErr != nil {
+			returnErr = fmt.Errorf("chat_new: commit automatic name %s: %w", nameClaim.Name, commitErr)
+			output = ActionOutput{Status: statusError, Code: 1, Message: returnErr.Error()}
+		}
+	}
+	return result, output, returnErr
 }
 
 // chatOpen never routes through cliTargetAction/Dispatch: that seam ends in

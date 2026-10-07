@@ -150,7 +150,7 @@ func TestPlainQueries(t *testing.T) {
 	if len(killedChats) != 2 || killedChats[1].BaselinePrompts != nil {
 		t.Fatalf("KilledChats() = %#v, want two rows and a nil lazy baseline", killedChats)
 	}
-	if err := store.Unkill(ctx, killed.ID); err != nil {
+	if _, err := store.Unkill(ctx, killed.ID); err != nil {
 		t.Fatalf("Unkill() error = %v", err)
 	}
 	if _, found, err := store.Killed(ctx, killed.ID); err != nil || found {
@@ -357,7 +357,7 @@ func TestDefaultRolloutsKilledOnAnyLineageMember(t *testing.T) {
 		t.Fatalf("counts after member kill = %+v, want killed=1", counts)
 	}
 
-	if err := database.Unkill(ctx, "child-old"); err != nil {
+	if _, err := database.Unkill(ctx, "child-old"); err != nil {
 		t.Fatal(err)
 	}
 	_, rollouts, _, err = database.DefaultCandidates(ctx, 10, 10)
@@ -468,12 +468,12 @@ func hasOpenCodeSessionsAssistantCount(t *testing.T, db *sql.DB) bool {
 	return false
 }
 
-// TestFreshStoreEnsuresAssistantCountAtSchema8 pins the D1 ruling: the
-// assistant_count column is additive and ENSURED, never versioned. A fresh
-// store settles at user_version 8 (the hardcoded literal, not the symbolic
-// SchemaVersion — a database an older pfm on the same machine must still be
-// able to open) with the column already present.
-func TestFreshStoreEnsuresAssistantCountAtSchema8(t *testing.T) {
+// TestFreshStoreEnsuresAssistantCountAtSchema9 pins the cache's v9 migration.
+// Since 1-a, older pfm binaries read ~/.local/state/pfm/fleet.db and never
+// open pfm-cache.db; the cache is derived, so upgrading it strands no older
+// binary.
+// assistant_count remains an additive, idempotently ensured column.
+func TestFreshStoreEnsuresAssistantCountAtSchema9(t *testing.T) {
 	setStoreTestJail(t)
 	fresh := openTestStore(t)
 	t.Cleanup(func() { _ = fresh.Close() })
@@ -481,9 +481,9 @@ func TestFreshStoreEnsuresAssistantCountAtSchema8(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 8 {
+	if got != 9 {
 		t.Fatalf(
-			"UserVersion() = %d, want the hardcoded 8 — a schema bump for one additive column strands every older pfm on this machine",
+			"UserVersion() = %d, want the hardcoded 9 for the derived cache",
 			got,
 		)
 	}

@@ -71,8 +71,8 @@ func TestEpicInjectDedupeFollowsSessionAndEpicRename(t *testing.T) {
 func setStoreTestJailForHookEntry(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(root, "cc", "pfm.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
 	t.Setenv(paths.EnvCodexHome, filepath.Join(root, "codex"))

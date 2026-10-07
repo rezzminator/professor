@@ -75,10 +75,3 @@ func unsetEnv(t *testing.T, base Base, name string) {
 	t.Setenv(name, "")
 	delete(base.Env.Values, name)
 }
-
-// isRoot reports whether this process itself runs as root — the dev fence
-// runs its containers that way, which makes a filesystem-permission fixture
-// like ReadOnlyHome unenforceable: root ignores 0o555 the same way it
-// ignores every other permission bit, so the fixture must be skipped by
-// name there rather than silently pass for the wrong reason.
-func isRoot() bool { return os.Geteuid() == 0 }

@@ -10,25 +10,39 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
 type reconcileResult struct {
 	Wrote, Unchanged, Deleted int
 	Warnings, Problems        []string
+	Rebuildable               []string
 	Actions                   []Action
 }
 
-func reconcileOpenCode(outputs []generatedFile, mode Mode, root, home string) reconcileResult {
+func reconcileOpenCode(outputs []generatedFile, mode Mode, root, home string, workbench bool) reconcileResult {
 	result := reconcileResult{}
 	managed := []string{
 		filepath.Join(root, ".opencode", "agent"),
 		filepath.Join(root, ".opencode", "command"),
 		filepath.Join(root, ".opencode", "skills"),
-		filepath.Join(home, ".config", openCodeName(), "command"),
+	}
+	if !workbench {
+		managed = append(managed, filepath.Join(home, ".config", openCodeName(), "command"))
 	}
 	wanted := map[string]bool{}
 	for _, output := range outputs {
 		wanted[managedOpenCodeEntry(output.Path, managed)] = true
+		if output.Kept != nil {
+			warning, problem := sourcelink.KeepTwin(output.Path, output.Kept.Path, output.Kept.Target)
+			if warning != "" {
+				result.Warnings = append(result.Warnings, warning)
+			}
+			if problem != "" {
+				result.Problems = append(result.Problems, problem)
+			}
+			continue
+		}
 		if output.Link != "" {
 			reconcileOpenCodeLink(&result, output, mode)
 		} else {
@@ -72,10 +86,9 @@ func reconcileOpenCodeLink(result *reconcileResult, output generatedFile, mode M
 		}
 	}
 	if mode != ModeBuild {
-		result.Problems = append(
-			result.Problems,
-			fmt.Sprintf("%s %s (want symlink → %s)", outputState(exists), output.Path, output.Link),
-		)
+		problem := fmt.Sprintf("%s %s (want symlink → %s)", outputState(exists), output.Path, output.Link)
+		result.Problems = append(result.Problems, problem)
+		result.Rebuildable = append(result.Rebuildable, problem)
 		result.Actions = append(result.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
 		return
 	}
@@ -191,17 +204,18 @@ func reconcileOpenCodeFile(result *reconcileResult, output generatedFile, mode M
 	}
 	if mode != ModeBuild {
 		if modeOnlyDrift {
-			result.Problems = append(
-				result.Problems,
-				fmt.Sprintf("MODE %s (want %04o, have %04o)", output.Path, wantMode, haveMode),
-			)
+			problem := fmt.Sprintf("MODE %s (want %04o, have %04o)", output.Path, wantMode, haveMode)
+			result.Problems = append(result.Problems, problem)
+			result.Rebuildable = append(result.Rebuildable, problem)
 			result.Actions = append(
 				result.Actions,
 				Action{Kind: actionChmod, Path: output.Path, Target: fmt.Sprintf("%04o", wantMode)},
 			)
 			return
 		}
-		result.Problems = append(result.Problems, fmt.Sprintf("%s %s", outputState(exists), output.Path))
+		problem := fmt.Sprintf("%s %s", outputState(exists), output.Path)
+		result.Problems = append(result.Problems, problem)
+		result.Rebuildable = append(result.Rebuildable, problem)
 		result.Actions = append(result.Actions, Action{Kind: actionWrite, Path: output.Path})
 		return
 	}
@@ -252,6 +266,7 @@ func reconcileOpenCodeOrphans(result *reconcileResult, dir string, wanted map[st
 		}
 		if mode != ModeBuild {
 			result.Problems = append(result.Problems, "ORPHAN "+path)
+			result.Rebuildable = append(result.Rebuildable, "ORPHAN "+path)
 			result.Actions = append(result.Actions, Action{Kind: actionDelete, Path: path})
 			continue
 		}

@@ -10,12 +10,14 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestComposeStress(t *testing.T) {
 	if os.Getenv("PFM_STRESS") != "1" {
 		t.Skip("set PFM_STRESS=1 to run the WP5 stress phase")
 	}
+	testjail.PauseFlightRecorder(t)
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 
 	input := composeStressInput()
@@ -286,9 +288,9 @@ func composeStressInput() Input {
 		},
 		Transcripts: transcripts,
 		Killed:      killed,
-		AccountRoots: []AccountRoot{{
-			Account: 1,
-			Path:    "/accounts/1",
+		ClaudeSeats: []ClaudeSeat{{
+			Account:   1,
+			ConfigDir: "/accounts/1",
 		}},
 		Options: Options{
 			View:           DefaultView,

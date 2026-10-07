@@ -14,25 +14,42 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-func TestUpdateRefusesDirtyWorktree(t *testing.T) {
+func TestUpdateStopsBeforeSelfUpdate(t *testing.T) {
 	repo := newUpdateGitFixture(t)
 	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("dirty\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
 	runtime := updateTestRuntime(t)
-	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf(
-			"Run() code = 0, want dirty-worktree refusal; stdout=%q stderr=%q",
-			stdout.String(),
-			stderr.String(),
-		)
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(stderr.String(), "dirty worktree") {
-		t.Fatalf("Run() stderr = %q, want dirty-worktree diagnostic", stderr.String())
+	t.Setenv(paths.EnvConfig, path)
+	for _, tc := range []struct {
+		name, diagnostic string
+		args             []string
+		config           bool
+	}{
+		{"dirty source", "dirty worktree", []string{"--repo", repo}, false},
+		{"missing marker", "pfm update: ", []string{"--skip-harvest"}, false},
+		{"bare config", "pfm update: config: ", []string{"--skip-harvest"}, true},
+		{"project config", "pfm update: config: ", []string{"pin", "CLAUDE.md"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtimes := []pfmconfig.Runtime{runtime}
+			if tc.config {
+				runtimes = nil
+			}
+			var stdout, stderr bytes.Buffer
+			if code := Run(tc.args, &stdout, &stderr, runtimes...); code != 5 ||
+				!strings.HasPrefix(stderr.String(), "pfm update: ") ||
+				!strings.Contains(stderr.String(), tc.diagnostic) {
+				t.Fatalf("code = %d, want 5; stderr = %q, want %q", code, stderr.String(), tc.diagnostic)
+			}
+		})
 	}
 }
 
@@ -90,7 +107,7 @@ func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -105,7 +122,7 @@ func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
 		updateRunDoctor = oldDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -216,7 +233,13 @@ func TestPreferredUpdateSourceRepoPreservesRecordedAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	aliasRepo := filepath.Join(aliasRoot, filepath.Base(realRepo))
-	if err := installer.WriteSourceRepoMarker(home, aliasRepo); err != nil {
+	// A marker an earlier release recorded through the alias; this release
+	// records the resolved path (paths.SourceRepoMarkerContent).
+	marker := paths.SourceRepoPath(home)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte(aliasRepo+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,27 +257,21 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(unowned, []byte("unowned\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(unowned, []byte("unowned\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
 		t.Fatal(err)
 	}
 
-	oldBuild := updateBuildCandidate
-	oldInstall := updateApplyInstall
-	oldDoctor := updateRunDoctor
-	oldRollbackInstall := updateRollbackInstall
-	oldRollbackDoctor := updateRollbackDoctor
+	oldBuild, oldInstall, oldDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
 	t.Cleanup(func() {
-		updateBuildCandidate = oldBuild
-		updateApplyInstall = oldInstall
-		updateRunDoctor = oldDoctor
-		updateRollbackInstall = oldRollbackInstall
-		updateRollbackDoctor = oldRollbackDoctor
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldDoctor
+		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	builds := 0
 	updateBuildCandidate = func(_ context.Context, _, version, output string) error {
@@ -262,7 +279,7 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		if version != "v0.10.0" {
 			t.Fatalf("build version=%q, want selected release v0.10.0", version)
 		}
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	installCalls, doctorCalls := 0, 0
 	updateApplyInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ pfmconfig.Runtime, skipHarvest bool, _, _ io.Writer) error {
@@ -362,7 +379,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -382,7 +399,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		updateRollbackDoctor = oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	managedMutation := filepath.Join(runtime.Paths.Home, ".local", "share", "pfm", "install", "new-asset")
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
@@ -422,8 +439,8 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf("Run() code=0, want failure; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 5 {
+		t.Fatalf("Run() code=%d, want 5; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if got, err := os.ReadFile(canonical); err != nil || string(got) != "old\n" {
 		t.Fatalf("canonical after rollback=%q err=%v, want old", got, err)
@@ -472,7 +489,7 @@ func updateRollbackTestRuntime(t *testing.T) (runtime pfmconfig.Runtime, repo st
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -500,7 +517,7 @@ func TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings(t *testing.
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -553,7 +570,7 @@ func TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure(t *testing.T) {
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -593,7 +610,7 @@ func TestUpdateNamesNewWarningRowsIntroducedByTheCandidate(t *testing.T) {
 		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -640,7 +657,7 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
@@ -666,7 +683,7 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
 		t.Fatalf("Run() code=0, want failure; stdout=%q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "rolled back update-owned changes") {
+	if !strings.Contains(stderr.String(), "rolled back what the lines above name, then re-ran the previous install") {
 		t.Fatalf("stderr=%q, want the no-residue rollback message", stderr.String())
 	}
 	if strings.Contains(stderr.String(), "rollback residue") {
@@ -694,7 +711,7 @@ func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *test
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
@@ -974,120 +991,5 @@ func TestBuildUpdateCandidateSurvivesAStrayGitDirectoryAboveTheWorktree(t *testi
 	printed, err := exec.Command(candidate).CombinedOutput()
 	if err != nil || strings.TrimSpace(string(printed)) != "v9.9.9" {
 		t.Fatalf("candidate printed %q, %v; want the stamped v9.9.9", printed, err)
-	}
-}
-
-// updateHookRollbackFixture drives a real `runUpdate` whose candidate install
-// rewrites an account's Claude settings with a hook only the newer release
-// knows, then fails at doctor. between runs after that install and before the
-// rollback — the window in which something other than the update may write.
-func updateHookRollbackFixture(
-	t *testing.T,
-	between func(settings string),
-) (settings string, original []byte, stderr string) {
-	t.Helper()
-	repo := newUpdateGitFixture(t)
-	runtime := updateTestRuntime(t)
-	home := runtime.Paths.Home
-	runtime.Config = pfmconfig.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")})
-	settings = filepath.Join(home, ".cc", "1", "settings.json")
-	canonical := filepath.Join(home, ".local", "bin", "pfm")
-	original = []byte("{\n  \"hooks\": {}\n}\n")
-	for path, content := range map[string][]byte{canonical: []byte("old\n"), settings: original} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, content, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.Chmod(canonical, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := installer.RecordCanonicalBinary(home); err != nil {
-		t.Fatal(err)
-	}
-
-	saved := []any{
-		updateBuildCandidate,
-		updateApplyInstall,
-		updateRunDoctor,
-		updateRollbackInstall,
-		updateRollbackDoctor,
-	}
-	t.Cleanup(func() {
-		updateBuildCandidate = saved[0].(func(context.Context, string, string, string) error)
-		updateApplyInstall = saved[1].(func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error)
-		updateRunDoctor = saved[2].(func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error))
-		updateRollbackInstall = saved[3].(func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error)
-		updateRollbackDoctor = saved[4].(func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error))
-	})
-	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
-	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		return os.WriteFile(
-			settings,
-			[]byte(
-				"{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal hook-only-the-new-release-knows\"}]}]}\n}\n",
-			),
-			0o600,
-		)
-	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		between(settings)
-		return doctorOutcome{Exit: 3, Failures: 1}, nil
-	}
-	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	// The previous release's installer recognises only hooks IT generates, so
-	// it leaves the newer hook alone — exactly the live behaviour.
-	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		return nil
-	}
-	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{}, nil
-	}
-
-	var stdout, stderrBuffer bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderrBuffer, runtime); code == 0 {
-		t.Fatalf("Run() code=0, want failure; stderr=%q", stderrBuffer.String())
-	}
-	return settings, original, stderrBuffer.String()
-}
-
-// TestUpdateRollbackRestoresHookFilesTheCandidateInstallChanged pins the
-// rollback-residue regression: a hook only the newer release registered
-// survived the rollback and ran a subcommand the restored binary lacks —
-// "UserPromptSubmit operation blocked by hook" on every prompt, twice live.
-func TestUpdateRollbackRestoresHookFilesTheCandidateInstallChanged(t *testing.T) {
-	settings, original, stderr := updateHookRollbackFixture(t, func(string) {})
-	if got, err := os.ReadFile(settings); err != nil || !bytes.Equal(got, original) {
-		t.Fatalf("settings after rollback = %q, %v; want the pre-update bytes %q", got, err, original)
-	}
-	physicalSettings, err := filepath.EvalSymlinks(settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stderr, "restored "+physicalSettings) {
-		t.Fatalf("rollback did not report the restored hook file: %q", stderr)
-	}
-}
-
-// TestUpdateRollbackLeavesAHookFileSomethingElseRewroteAndReportsIt pins the
-// race guard: a live chat can save its settings while the update runs, and a
-// byte restore would erase that edit. A file that no longer holds exactly
-// what the candidate's install wrote is left as is and named as residue.
-func TestUpdateRollbackLeavesAHookFileSomethingElseRewroteAndReportsIt(t *testing.T) {
-	edited := []byte("{\n  \"hooks\": {},\n  \"theme\": \"saved by a live chat\"\n}\n")
-	settings, _, stderr := updateHookRollbackFixture(t, func(settings string) {
-		if err := os.WriteFile(settings, edited, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if got, err := os.ReadFile(settings); err != nil || !bytes.Equal(got, edited) {
-		t.Fatalf("settings after rollback = %q, %v; want the concurrent edit kept %q", got, err, edited)
-	}
-	if !strings.Contains(stderr, settings) || !strings.Contains(stderr, "rollback residue") {
-		t.Fatalf("rollback did not name the untouched file as residue: %q", stderr)
 	}
 }

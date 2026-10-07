@@ -14,11 +14,11 @@ func TestReportRootsWarnsOnUnreachableClaudeAndCodexHomes(t *testing.T) {
 	if err := os.MkdirAll(reachable, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	accounts := []Account{{ID: 1, ProjectDir: reachable}, {ID: 2, ProjectDir: filepath.Join(home, "gone")}}
+	roots := []string{reachable, filepath.Join(home, "gone")}
 	codexAccounts := []CodexAccount{{ID: 1, Home: filepath.Join(home, "codex-gone")}}
 
 	var output bytes.Buffer
-	warnings := ReportRoots(&output, accounts, codexAccounts, false)
+	warnings := ReportRoots(&output, roots, codexAccounts, false)
 	if warnings != 2 {
 		t.Fatalf("warnings=%d, want 2\n%s", warnings, output.String())
 	}
@@ -39,11 +39,11 @@ func TestReportRootsWarnsOnUnreachableClaudeAndCodexHomes(t *testing.T) {
 // root that genuinely does not exist still warns exactly as before.
 func TestReportRootsSkipsClaudeRootsWhenClaudeAbsentButLeavesCodexUnchanged(t *testing.T) {
 	home := t.TempDir()
-	accounts := []Account{{ID: 1, ProjectDir: filepath.Join(home, "claude-gone")}}
+	roots := []string{filepath.Join(home, "claude-gone")}
 	codexAccounts := []CodexAccount{{ID: 1, Home: filepath.Join(home, "codex-gone")}}
 
 	var output bytes.Buffer
-	warnings := ReportRoots(&output, accounts, codexAccounts, true)
+	warnings := ReportRoots(&output, roots, codexAccounts, true)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1 (only the Codex root)\n%s", warnings, output.String())
 	}

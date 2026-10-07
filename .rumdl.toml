@@ -12,6 +12,8 @@
 
 [global]
 respect-gitignore = true
+# The result cache goes to the gitignored tmp/ (resolved from the project root).
+cache-dir = "tmp/rumdl"
 
 # MD014 strips `$` from shell examples. MD036 rewrites bold labels into headings,
 # restructuring prompts that use them as inline labels. MD040 appends `text` to
@@ -62,7 +64,6 @@ exclude = [
   ".worktrees",
   "node_modules",
   "**/node_modules/**",
-  ".rumdl_cache",
 ]
 
 # The reflow engine, not a length gate. line-length is set past any real line so
@@ -92,7 +93,7 @@ terms = ["Last updated", "Last Updated", "FIXME", "TBD"]
 # Category map — every professor-owned markdown path, and what it is exempt from
 #
 #   prompt  .claude/**, CLAUDE.md, templates/**  — an LLM reads it at runtime
-#   doc     docs/**, pfm/**, workflows/**        — an agent greps then reads it
+#   doc     docs/**, pfm/**                      — an agent greps then reads it
 #   public  README.md, INSTALL.md               — a person reads it rendered;
 #                                                 README.md exempt from MD033
 #   generated / record                           — in `exclude` above

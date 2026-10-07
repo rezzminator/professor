@@ -260,19 +260,7 @@ func registeredDaemonSession(
 	machine pfmconfig.Config,
 	id string,
 ) (string, bool, error) {
-	configs := make([]string, 0, len(resolved.Roots[pfmengine.Claude]))
-	seen := make(map[string]bool)
-	for _, root := range resolved.Roots[pfmengine.Claude] {
-		if filepath.Base(root) != "projects" {
-			continue
-		}
-		config := filepath.Dir(root)
-		if seen[config] {
-			continue
-		}
-		seen[config] = true
-		configs = append(configs, config)
-	}
+	configs := machine.ClaudeConfigDirs()
 	if len(configs) == 0 {
 		return "", false, nil
 	}

@@ -1,17 +1,14 @@
 package mcpserv
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,9 +22,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-var originalTestHome = os.Getenv("HOME")
+var (
+	fleetBinaryOnce sync.Once
+	fleetBinaryDir  string
+	fleetBinaryPath string
+	fleetBinaryErr  error
+)
 
 type protocolClient struct {
 	clientSession *mcp.ClientSession
@@ -124,14 +127,6 @@ func (resolveGateInjector) Inject(context.Context, inject.Request) (inject.Resul
 	return inject.Result{}, nil
 }
 
-func (resolveGateInjector) ScheduleAfterCurrentTurn(context.Context, inject.Request) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
-func (resolveGateInjector) ScheduleSelfCompact(context.Context, string, []string) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
 func TestChatResolveEveryKindUsesTheInjectionResolutionGate(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", t.TempDir())
 	t.Setenv("PFM_SID_DIR", t.TempDir())
@@ -200,7 +195,7 @@ func setupBackendFixture(t *testing.T) string {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, sid)
 	t.Setenv(paths.EnvClaudeRoots, claude)
 	t.Setenv(paths.EnvCodexHome, codex)
@@ -224,6 +219,7 @@ func writeJSONL(t *testing.T, path string, records []any) {
 }
 
 func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -231,7 +227,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Skip("python3 is not installed")
 	}
 	jail := newStdioJail(t)
-	binary := buildFleetBinary(t, jail.root)
+	binary := buildFleetBinary(t)
 	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, jail.root), "mcp", "serve", "--stdio")
 	command.Env = jail.environment()
 	var serverStderr bytes.Buffer
@@ -281,7 +277,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Dir:     "/work/fixture",
 		Project: "fixture",
 		Name:    "Fixture Chat",
-		Account: 1,
+		Account: 0,
 		Kind:    "live-claude",
 		Socket:  jail.socket,
 		Pane:    jail.pane,
@@ -325,8 +321,10 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		LastN:    2,
 		MaxBytes: 1000,
 	})
+	// The human's interrupt is a turn end, kept in the record the way a
+	// model-server error is (transcript.interruptedTurn).
 	wantTurns := []Turn{
-		{Role: "assistant", Text: "Assistant visible"},
+		{Role: "assistant", Text: "[turn aborted: interrupted]"},
 		{Role: "user", Text: "Final prompt"},
 	}
 	if !reflect.DeepEqual(read.Turns, wantTurns) ||
@@ -426,8 +424,33 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	// TestInjectBodyAboveFormerAbsoluteCapUsesPaste for the byte-exact unit
 	// coverage; this end-to-end fixture proves the same contract over a
 	// real jailed MCP + tmux round trip.
+	oversizeCommand := exec.Command(binary, "--config", writeEnabledMCPConfig(t, jail.root), "mcp", "serve", "--stdio")
+	oversizeCommand.Env = append(jail.environment(),
+		"CHAT_INJECT_ENTER_SETTLE=0.4",
+		"CHAT_INJECT_PROOF_SETTLE=0.5",
+	)
+	var oversizeStderr bytes.Buffer
+	oversizeCommand.Stderr = &oversizeStderr
+	oversizeClient := mcp.NewClient(&mcp.Implementation{
+		Name:    "stdio-oversize-test",
+		Version: "test",
+	}, nil)
+	oversizeCtx, oversizeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer oversizeCancel()
+	oversizeSession, err := oversizeClient.Connect(oversizeCtx, &mcp.CommandTransport{
+		Command:           oversizeCommand,
+		TerminateDuration: 2 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("oversize stdio handshake: %v\nstderr:\n%s", err, oversizeStderr.String())
+	}
+	defer func() {
+		if err := oversizeSession.Close(); err != nil {
+			t.Errorf("close oversize session: %v", err)
+		}
+	}()
 	oversizeBody := strings.Repeat("x", 1<<20)
-	oversize := callTool[InjectOutput](t, session, "chat_inject", InjectInput{
+	oversize := callTool[InjectOutput](t, oversizeSession, "chat_inject", InjectInput{
 		Target:  "Fixture Label",
 		Message: oversizeBody,
 	})
@@ -512,7 +535,7 @@ func newStdioJail(t *testing.T) *stdioJail {
 		sid:             filepath.Join(root, "s"),
 		proc:            filepath.Join(root, "p"),
 		tmuxBase:        filepath.Join(root, "t"),
-		database:        filepath.Join(root, "d", "fleet.db"),
+		database:        filepath.Join(root, "d", "pfm-cache.db"),
 		socket:          "cc-1700000000-1-1",
 		session:         "fixture-session",
 		selectorSocket:  "cc-1700000001-1-2",
@@ -617,7 +640,7 @@ while True:
         sys.stdout.buffer.write(ch)
         sys.stdout.flush()
 `
-	if err := os.WriteFile(uiPath, []byte(ui), 0o700); err != nil {
+	if err := testjail.WriteExecutable(uiPath, []byte(ui), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	jail.startUI(t, jail.socket, jail.session, uiPath, "normal", "Fixture Label", "❯", "")
@@ -708,7 +731,7 @@ func (jail *stdioJail) environment() []string {
 		"TMUX=",
 		"TMUX_TMPDIR="+jail.tmuxBase,
 		paths.EnvHome+"="+jail.home,
-		paths.EnvDB+"="+jail.database,
+		paths.EnvCacheDB+"="+jail.database,
 		paths.EnvSIDDir+"="+jail.sid,
 		paths.EnvClaudeRoots+"="+jail.claude,
 		paths.EnvCodexHome+"="+jail.codex,
@@ -724,279 +747,73 @@ func (jail *stdioJail) environment() []string {
 		inject.SenderSessionEnv+"=cc-1700000000-1-1",
 		inject.SenderLabelEnv+"=mcp-jail-fixture",
 		inject.SenderIDEnv+"=00000000-0000-4000-8000-000000000000",
+		"CHAT_INJECT_POLL=0.01",
+		"CHAT_INJECT_ENTER_SETTLE=0.02",
+		"CHAT_INJECT_PROOF_SETTLE=0.02",
 	)
 }
 
-func buildFleetBinary(t *testing.T, destination string) string {
+func buildFleetBinary(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
+	fleetBinaryOnce.Do(func() {
+		var err error
+		fleetBinaryDir, err = os.MkdirTemp("", "pfm-mcpserv-bin-")
+		if err != nil {
+			fleetBinaryErr = fmt.Errorf("create shared pfm build directory: %w", err)
+			return
+		}
+		root, err := filepath.Abs(filepath.Join("..", ".."))
+		if err != nil {
+			fleetBinaryErr = fmt.Errorf("locate pfm source: %w", err)
+			return
+		}
+		fleetBinaryPath, fleetBinaryErr = testjail.PFMBinary(root, fleetBinaryDir)
+	})
+	if fleetBinaryErr != nil {
+		t.Fatal(fleetBinaryErr)
+	}
+	return fleetBinaryPath
+}
+
+func TestBuildFleetBinaryUsesPrebuiltPFM(t *testing.T) {
+	if want := os.Getenv("TEST_EXPECT_FLEET_BINARY"); want != "" {
+		if got := buildFleetBinary(t); got != want {
+			t.Fatalf("buildFleetBinary() = %q, want prebuilt %q", got, want)
+		}
+		return
+	}
+	goDir := t.TempDir()
+	if err := testjail.WriteExecutable(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 41\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	binary := filepath.Join(destination, "pfm-test")
-	command := exec.Command(
-		"go",
-		"build",
-		"-trimpath",
-		"-o",
-		binary,
-		"./cmd/pfm",
-	)
-	command.Dir = root
-	command.Env = append(
-		os.Environ(),
-		"HOME="+originalTestHome,
-		"CGO_ENABLED=0",
-		"GOTOOLCHAIN=local",
-		"GOTELEMETRY=off",
+	prebuilt := filepath.Join(t.TempDir(), "pfm")
+	if err := testjail.WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestBuildFleetBinaryUsesPrebuiltPFM$")
+	command.Env = append(os.Environ(),
+		"PATH="+goDir, paths.EnvTestPFMBinary+"="+prebuilt, "TEST_EXPECT_FLEET_BINARY="+prebuilt,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("build pfm: %v\n%s", err, output)
+		t.Fatalf("run with prebuilt pfm: %v\n%s", err, output)
 	}
-	return binary
-}
-
-func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
-	setupBackendFixture(t)
-	service := newFixtureService(t)
-	defer func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
-		}
-	}()
-	client := connectInMemory(t, service.Server())
-	_ = callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{
-		Excerpt: "alpha unique",
-	})
-	runtime.GC()
-	beforeGoroutines := runtime.NumGoroutine()
-	beforeFDs := openFDs(t)
-	beforeRSS := rssBytes(t)
-	started := time.Now()
-	for iteration := 0; iteration < 200; iteration++ {
-		output := callTool[FindOutput](
-			t,
-			client.clientSession,
-			"chat_find",
-			FindInput{Excerpt: "alpha unique"},
-		)
-		if output.Count != 1 || output.Candidates[0].ID != "alpha" {
-			t.Fatalf("iteration %d cross-talk: %+v", iteration, output)
-		}
-	}
-	elapsed := time.Since(started)
-	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
-	afterGoroutines := runtime.NumGoroutine()
-	afterFDs := openFDs(t)
-	afterRSS := rssBytes(t)
-	if delta := afterGoroutines - beforeGoroutines; delta > 4 {
-		t.Fatalf("goroutine leak: before=%d after=%d", beforeGoroutines, afterGoroutines)
-	}
-	if delta := afterFDs - beforeFDs; delta > 2 {
-		t.Fatalf("fd leak: before=%d after=%d", beforeFDs, afterFDs)
-	}
-	if delta := afterRSS - beforeRSS; delta > 32<<20 {
-		t.Fatalf("RSS grew by %d bytes", delta)
-	}
-	if os.Getenv("PFM_STRESS_STRICT") == "1" && elapsed > 5*time.Second {
-		t.Fatalf("strict sequential MCP stress took %s", elapsed)
-	}
-	t.Logf(
-		"STRESS mcp_sequential calls=200 elapsed_ms=%d goroutines=%d->%d fds=%d->%d rss_bytes=%d->%d",
-		elapsed.Milliseconds(),
-		beforeGoroutines,
-		afterGoroutines,
-		beforeFDs,
-		afterFDs,
-		beforeRSS,
-		afterRSS,
-	)
-}
-
-func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
-	setupBackendFixture(t)
-	service := newFixtureService(t)
-	defer func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
-		}
-	}()
-	clients := make([]protocolClient, 8)
-	for index := range clients {
-		clients[index] = connectInMemory(t, service.Server())
-	}
-	started := time.Now()
-	var wait sync.WaitGroup
-	errors := make(chan error, 8)
-	for worker := range clients {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			query := "alpha unique"
-			want := "alpha"
-			if worker%2 == 1 {
-				query = "beta unique"
-				want = "beta"
-			}
-			for iteration := 0; iteration < 25; iteration++ {
-				ctx, cancel := context.WithTimeout(
-					context.Background(),
-					15*time.Second,
-				)
-				result, err := clients[worker].clientSession.CallTool(
-					ctx,
-					&mcp.CallToolParams{
-						Name: "chat_find",
-						Arguments: FindInput{
-							Excerpt: query,
-						},
-					},
-				)
-				cancel()
-				if err != nil {
-					errors <- fmt.Errorf("worker %d: %w", worker, err)
-					return
-				}
-				content, _ := json.Marshal(result.StructuredContent)
-				var output FindOutput
-				if err := json.Unmarshal(content, &output); err != nil ||
-					output.Count != 1 ||
-					output.Candidates[0].ID != want {
-					errors <- fmt.Errorf(
-						"worker %d cross-talk: %s err=%v",
-						worker,
-						content,
-						err,
-					)
-					return
-				}
-			}
-		}()
-	}
-	wait.Wait()
-	close(errors)
-	for err := range errors {
-		t.Error(err)
-	}
-	elapsed := time.Since(started)
-	if os.Getenv("PFM_STRESS_STRICT") == "1" && elapsed > 8*time.Second {
-		t.Fatalf("strict concurrent MCP stress took %s", elapsed)
-	}
-	t.Logf(
-		"STRESS mcp_concurrent clients=8 calls=200 elapsed_ms=%d cross_talk=0",
-		elapsed.Milliseconds(),
-	)
-}
-
-func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
-	setupBackendFixture(t)
-	service := newFixtureService(t)
-	defer func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
-		}
-	}()
-	client := connectInMemory(t, service.Server())
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	unknown, unknownErr := client.clientSession.CallTool(
-		ctx,
-		&mcp.CallToolParams{Name: "unknown_tool"},
-	)
-	if unknownErr == nil && (unknown == nil || !unknown.IsError) {
-		t.Fatalf("unknown tool returned success: result=%+v error=%v", unknown, unknownErr)
-	}
-	huge := callTool[InjectOutput](t, client.clientSession, "chat_inject", InjectInput{
-		Target:  "missing",
-		Message: strings.Repeat("x", 1<<20),
-	})
-	if huge.Code != 4 || huge.Typed || huge.Status != "refused" ||
-		!strings.Contains(huge.Message, "matched no live chat") {
-		t.Fatalf("huge injection = %+v", huge)
+	if _, err := os.Stat(prebuilt); err != nil {
+		t.Fatalf("mcpserv TestMain removed prebuilt binary %q: %v", prebuilt, err)
 	}
 }
 
-func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
-	root := setupBackendFixture(t)
-	binary := buildFleetBinary(t, root)
-	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, root), "mcp", "serve", "--stdio")
-	command.Env = os.Environ()
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
+func TestBuildFleetBinaryRejectsBrokenPrebuiltPFM(t *testing.T) {
+	if os.Getenv("TEST_BROKEN_FLEET_BINARY") != "" {
+		buildFleetBinary(t)
+		return
 	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = stdin.Close()
-		_ = command.Process.Kill()
-		_ = command.Wait()
-	}()
-	if _, err := io.WriteString(
-		stdin,
-		"{malformed json-rpc}\n"+
-			`{"jsonrpc":"2.0","id":7,"method":"unknown/method"}`+"\n",
-	); err != nil {
-		t.Fatal(err)
-	}
-	lineChannel := make(chan []string, 1)
-	go func() {
-		reader := bufio.NewReader(stdout)
-		lines := make([]string, 0, 2)
-		for len(lines) < 2 {
-			line, readErr := reader.ReadString('\n')
-			if readErr != nil {
-				break
-			}
-			var envelope struct {
-				Method string `json:"method"`
-				Error  any    `json:"error"`
-			}
-			if json.Unmarshal([]byte(line), &envelope) == nil &&
-				envelope.Method != "" &&
-				envelope.Error == nil {
-				// The SDK may publish tools/list_changed between request
-				// responses. Notifications have no request ID and are not a
-				// malformed-frame response.
-				continue
-			}
-			lines = append(lines, line)
-		}
-		lineChannel <- lines
-	}()
-	select {
-	case lines := <-lineChannel:
-		if len(lines) != 2 {
-			t.Fatalf("malformed frame responses = %q", lines)
-		}
-		for index, line := range lines {
-			var response struct {
-				JSONRPC string `json:"jsonrpc"`
-				Error   any    `json:"error"`
-			}
-			if err := json.Unmarshal([]byte(line), &response); err != nil ||
-				response.JSONRPC != "2.0" ||
-				response.Error == nil {
-				t.Fatalf(
-					"malformed frame response[%d] = %q parsed=%+v err=%v stderr=%s",
-					index,
-					line,
-					response,
-					err,
-					stderr.String(),
-				)
-			}
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("server did not answer malformed frame; stderr=%s", stderr.String())
+	missing := filepath.Join(t.TempDir(), "missing-pfm")
+	command := exec.Command(os.Args[0], "-test.run=^TestBuildFleetBinaryRejectsBrokenPrebuiltPFM$")
+	command.Env = append(os.Environ(), paths.EnvTestPFMBinary+"="+missing, "TEST_BROKEN_FLEET_BINARY=1")
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), paths.EnvTestPFMBinary) ||
+		!strings.Contains(string(output), missing) {
+		t.Fatalf("buildFleetBinary broken prebuilt = %v, %q; want named failure", err, output)
 	}
 }
 
@@ -1011,73 +828,4 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestChatReadBudgetsAndJunkFilter(t *testing.T) {
-	root := setupBackendFixture(t)
-	path := filepath.Join(root, "claude", "project-alpha", "budget.jsonl")
-	writeJSONL(t, path, []any{
-		map[string]any{
-			"type": "user", "cwd": "/work/alpha",
-			"message": map[string]any{"content": "<system-reminder>killed"},
-		},
-		map[string]any{
-			"type": "user", "cwd": "/work/alpha",
-			"message": map[string]any{"content": "first visible"},
-		},
-		map[string]any{
-			"type":    "assistant",
-			"message": map[string]any{"content": strings.Repeat("z", 100)},
-		},
-		map[string]any{
-			"type": "user", "cwd": "/work/alpha",
-			"message": map[string]any{"content": "last visible"},
-		},
-	})
-	service := newFixtureService(t)
-	defer func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
-		}
-	}()
-	client := connectInMemory(t, service.Server())
-	output := callTool[ReadOutput](t, client.clientSession, "chat_read", ReadInput{
-		Source:   "budget",
-		LastN:    3,
-		MaxBytes: 30,
-	})
-	if output.Bytes > 30 || !output.Truncated {
-		t.Fatalf("budget output = %+v", output)
-	}
-	for _, turn := range output.Turns {
-		if strings.Contains(turn.Text, "system-reminder") {
-			t.Fatalf("junk prompt leaked: %+v", output)
-		}
-	}
-}
-
-func openFDs(t *testing.T) int {
-	t.Helper()
-	entries, err := os.ReadDir("/proc/self/fd")
-	if err != nil {
-		t.Skipf("cannot count fds: %v", err)
-	}
-	return len(entries)
-}
-
-func rssBytes(t *testing.T) int64 {
-	t.Helper()
-	content, err := os.ReadFile("/proc/self/statm")
-	if err != nil {
-		t.Skipf("cannot read RSS: %v", err)
-	}
-	fields := strings.Fields(string(content))
-	if len(fields) < 2 {
-		t.Fatalf("malformed statm: %q", content)
-	}
-	pages, err := strconv.ParseInt(fields[1], 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pages * int64(os.Getpagesize())
 }

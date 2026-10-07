@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// writeFakeHarnessClaude stages a shell `claude` stand-in used ONLY by the
-// three regression tests below: real REAL-SESSION coverage stays in
-// harness_prompt_native_test.go (PFM_TEST_CLAUDE_NATIVE), this fixture never
-// touches a network endpoint that is not pfm's own loopback sink.
+// writeFakeHarnessClaude stages a shell `claude` stand-in used only by the
+// capture regression tests in this file. It never touches a network endpoint
+// other than pfm's own loopback sink.
 func writeFakeHarnessClaude(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -31,7 +31,7 @@ func writeFakeHarnessClaude(t *testing.T, body string) string {
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = --version ]; then printf '2.1.270 (Claude Code)\\n'; exit 0; fi\n" +
 		body
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -106,6 +106,30 @@ func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 	}
 }
 
+func TestHarnessCaptureUsesRegistryProbeEnvironment(t *testing.T) {
+	shortenHarnessCaptureSinkGrace(t)
+	path := filepath.Join(t.TempDir(), "environment")
+	t.Setenv("PFM_TEST_PROBE_ENV", path)
+	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+	binary := writeFakeHarnessClaude(t, `if printenv CLAUDE_CODE_USE_BEDROCK >/dev/null; then
+  printf 'leaked\n' >> "$PFM_TEST_PROBE_ENV"
+else
+  printf 'clean\n' >> "$PFM_TEST_PROBE_ENV"
+fi
+exit 1
+`)
+	machine := config.Config{}
+	machine.Claude.Binary = binary
+	_, _ = captureHarnessPrompt(t.Context(), t.TempDir(), machine, "sonnet", "")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "clean" {
+		t.Fatalf("probe environment = %q, want registry hygiene", got)
+	}
+}
+
 // TestDoctorVerboseKeepsTheHarnessRunOutput pins change A: --verbose keeps
 // the harness run's own stdout/stderr under /tmp/{project}/doctor/ — today
 // that evidence is discarded and a timeout renders as bare prose no one can
@@ -152,12 +176,12 @@ func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
 // name the list does not carry passes through.
 func TestHarnessCaptureEnvStripsTheFleetHygieneList(t *testing.T) {
 	const inherited = "inherited-sentinel"
-	names := append(action.HygieneNames(), "ANTHROPIC_API_KEY")
+	names := claudelaunch.Hygiene()
 	environ := []string{"KEEP_ME=1"}
 	for _, name := range names {
 		environ = append(environ, name+"="+inherited)
 	}
-	got := harnessCaptureEnv(environ, "http://127.0.0.1:1", "/fixture/config")
+	got := claudelaunch.ProbeEnv(environ, "http://127.0.0.1:1", "/fixture/config")
 	present := map[string]bool{}
 	for _, entry := range got {
 		name, value, _ := strings.Cut(entry, "=")

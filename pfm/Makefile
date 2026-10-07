@@ -24,9 +24,13 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 REPO    := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..)
+# Scratch outside the tree, where dev.sh writes it: /tmp/<project>, <project>
+# the repo directory's basename with any leading dot stripped.
+TMP_BASE := /tmp/$(patsubst .%,%,$(notdir $(REPO)))
 DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
-LOCAL   := pfm.dev
+# The local build artifact lives in the repo's gitignored tmp/, never in the tree.
+LOCAL   := $(REPO)/tmp/bin/pfm.dev
 UNIT    := pfm-mcp.service
 # The macOS twin of UNIT: the launch agent pfm install wires for the daemon.
 AGENT   := com.professor.pfm.mcp
@@ -47,14 +51,14 @@ COVER := $(firstword $(wildcard $(TOOLS_BIN)/go-test-coverage) $(shell command -
 # Coverage outputs: the fence mounts the tree read-only, so dev.sh iso points
 # COVER_DIR at container HOME; on the host it lands in gitignored tmp/.
 COVER_DIR ?= $(REPO)/tmp/cover
-# lint-new judges lines changed since this ref: a wave against develop; CI
-# passes origin/main so a release is judged on everything since the last one.
-LINT_BASE ?= origin/develop
-# The first provisional fenced capture uses conservative serial concurrency;
-# W5 re-measures the sweep and may ratchet this toward the observed knee.
-TESTFLAGS ?= -p 1 -parallel 1
+# lint-new judges lines changed since this ref — origin/main, the last release,
+# for every caller (dev.sh, the gate, CI), so a local green is a CI green.
+LINT_BASE ?= origin/main
+# The fenced unit captures in docs/dev/testing/concurrency-sweep.md pin these flags.
+# The tagged e2e suite keeps its own -p 1 in dev.sh.
+TESTFLAGS ?= -p 6 -parallel 4
 
-.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover test testflags iso timing sweep gate install host-install rollback \
+.PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
@@ -68,8 +72,15 @@ help: ## List every target
 
 # ---------------------------------------------------------------- build ----
 
-build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
+build: ## Compile to tmp/bin/pfm.dev (a local artifact, never the shipped path); its absolute path is the last line
+	@mkdir -p $(dir $(LOCAL))
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
+	@echo "built: $(LOCAL)"
+
+# The composer runs here, so it builds for the host even when a cross build
+# exports GOOS/GOARCH (else: "exec format error").
+prompts: ## Compose the tracked harness prompts from their parts
+	GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run ./harness-prompts/compose
 
 tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
 	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh
@@ -80,20 +91,18 @@ define need-tool
 	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/fence/tools.env)" >&2; exit 1; }
 endef
 
-fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt), both kernels
+fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt)
 	$(call need-tool,LINT)
-	@# Build-tagged files load only for the current GOOS, so each supported
-	@# kernel is formatted in turn; golines splits a long line and gofumpt
-	@# regroups the result, so a pass can leave a file the next pass still
-	@# changes: run until a pass is a no-op.
+	@# golangci-lint fmt sees files for both kernels in one pass, including
+	@# build-tagged files. Golines and gofumpt can need another pass to settle.
 	@for pass in 1 2 3; do \
-	  for goos in linux darwin; do GOOS=$$goos $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; done; \
-	  if [ -z "$$(GOOS=linux $(LINT) fmt --diff ./... 2>/dev/null)$$(GOOS=darwin $(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
+	  $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; \
+	  if [ -z "$$($(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
 	done; echo "fmt: did not converge in 3 passes — a formatter fight; run 'make fmt-check' to see the files" >&2; exit 1
 
-fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
+fmt-check: ## Fail if anything is unformatted, naming the files
 	$(call need-tool,LINT)
-	@diff="$$(for goos in linux darwin; do GOOS=$$goos $(LINT) fmt --diff ./... 2>&1 || true; done)"; \
+	@diff="$$($(LINT) fmt --diff ./... 2>&1)" || true; \
 	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||' | sort -u || true)"; \
 	if [ -n "$$files" ]; then \
 	  echo "UNFORMATTED — $$(echo "$$files" | wc -l | tr -d ' ') file(s), run 'make fmt' (first 20):"; \
@@ -101,7 +110,7 @@ fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
 	elif [ -n "$$diff" ]; then \
 	  echo "fmt-check: golangci-lint fmt did not run cleanly — NO file was checked:"; echo "$$diff" | tail -5; exit 2; \
 	fi; \
-	echo "fmt: clean (linux + darwin)"
+	echo "fmt: clean"
 
 lint: ## Every finding in the module — the burn-down view
 	$(call need-tool,LINT)
@@ -112,9 +121,12 @@ lint: ## Every finding in the module — the burn-down view
 # `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
 # fence-wide it hijacks every `git init` the test suite runs.
 FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
-lint-new: ## Findings on lines changed since LINT_BASE (origin/develop) — the gate view
+# GOMEMLIMIT: a change to a widely imported package (testjail, deps) leaves the
+# lint cache cold for its importers; golangci-lint then peaked at 1752 MiB and
+# was OOM-killed in the 2 GiB fence. Capped at 1000MiB it peaked at 1289 MiB.
+lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gate view
 	$(call need-tool,LINT)
-	$(FENCE_GIT) $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
+	$(FENCE_GIT) GOMEMLIMIT=1000MiB $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 
 vet: ## go vet the whole module
 	go vet ./...
@@ -141,9 +153,6 @@ arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new 
 # e2e row the same way. TESTFLAGS travels through the environment so this
 # file stays a delegate, never a second definition of `go test`'s flags.
 
-test: ## Host test suite (delegates to dev.sh; TESTFLAGS -> `go test`, piped through the timing check)
-	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh test pfm
-
 testflags:
 	@printf '%s\n' '$(TESTFLAGS)'
 
@@ -151,14 +160,14 @@ iso: ## Containerised test suite (delegates to dev.sh iso; same TESTFLAGS)
 	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh iso test pfm
 
 timing: ## Print the most recently written suite timing TSV
-	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(REPO)/tmp/timing"
+	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(TMP_BASE)/timing"
 
 sweep: ## Measure the fenced concurrency sweep and publish its report
 	bash scripts/test-sweep.sh --preflight
 	cd "$(REPO)" && bash .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-sweep.sh --run --wait-quiet --label fence --out /pfm-timing/sweep-fence.tsv --json /pfm-timing/sweep-json'
-	bash scripts/test-sweep.sh --report "$(REPO)/tmp/timing/sweep-fence.tsv"
+	bash scripts/test-sweep.sh --report "$(TMP_BASE)/timing/sweep-fence.tsv"
 
-gate: fmt-check lint-new vet arch test iso ## Everything a change must pass before it merges
+gate: fmt-check lint-new vet arch iso ## Everything a change must pass before it merges
 	@echo "gate: all passed"
 
 # -------------------------------------------------------------- install ----
@@ -179,7 +188,7 @@ install: ## Swap in a new build, restart the daemon, sweep obsolete processes, a
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1
+host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
 	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
 	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
 	@# build even starts — $(BIN) is never touched. FORCE=1 in the
@@ -192,21 +201,36 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap
 	reported="$$("$$tmp" --version 2>&1)" || { echo "host-install: smoke test FAILED ($$reported) — $(BIN) untouched" >&2; exit 1; }; \
 	case "$$reported" in *"$(VERSION)"*) ;; \
 	  *) echo "host-install: smoke test reported '$$reported', not $(VERSION) — $(BIN) untouched" >&2; exit 1;; esac; \
+	if [ "$${SKIP_INSTALL_CHECK:-}" = 1 ]; then \
+	  echo "host-install: SKIPPED the install check (SKIP_INSTALL_CHECK=1) — pfm install --check not run" >&2; \
+	else \
+	  checkrc=0; checked="$$("$$tmp" install --check 2>&1)" || checkrc=$$?; \
+	  if [ $$checkrc -eq 0 ]; then echo "$$checked"; else \
+	    printf '%s\n' "$$checked" >&2; \
+	    echo "host-install: the new binary's install check refuses this host (exit $$checkrc) — $(BIN) untouched; build it with make -C $(REPO)/pfm build and run its doctor for the fixes, or swap anyway with SKIP_INSTALL_CHECK=1" >&2; \
+	    exit 1; \
+	  fi; \
+	fi; \
 	kept=""; if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev" && kept="; previous kept at $(BIN).prev"; fi; \
 	mv -f "$$tmp" "$(BIN)"; \
 	echo "installed: $(BIN) ($$reported$$kept)"
+	@# The new binary answers `pfm install --check` before the swap. Any
+	@# refusal keeps $(BIN) untouched and prints the check's own answer.
+	@# SKIP_INSTALL_CHECK=1 skips the check; FORCE=1 is the downgrade guard's.
 	@# Never write onto the running path directly: an executing binary gives
 	@# ETXTBSY. The build lands BESIDE the target — same directory, same
 	@# filesystem — so the final mv is a rename(2): atomic, never a
 	@# copy-over-the-running-image. Processes already running keep their own
 	@# image, which is exactly why the sweep below has to exist.
 
-rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically and restart the daemon on it
+rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically, rerun its pfm install --yes, and restart the daemon on it
 	@[ -x "$(BIN).prev" ] || { echo "rollback: no $(BIN).prev to restore — $(BIN) left as is" >&2; exit 1; }
 	@tmp="$$(mktemp "$(BIN).rollback.XXXXXX")"; \
 	cp -f "$(BIN).prev" "$$tmp" && chmod 755 "$$tmp" && mv -f "$$tmp" "$(BIN)" \
 	  || { rm -f "$$tmp"; echo "rollback: FAILED to restore $(BIN) from $(BIN).prev" >&2; exit 1; }; \
 	echo "rollback: restored $(BIN) from $(BIN).prev"
+	@"$(BIN)" install --yes \
+	  || echo "rollback: the restored binary's pfm install --yes failed — run pfm doctor" >&2
 	@$(MAKE) --no-print-directory mcp-restart \
 	  || echo "rollback: the daemon did not come back on the restored binary either — make mcp-status" >&2
 
@@ -220,6 +244,8 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  state="$$(systemctl --user is-active $(UNIT) || true)"; \
 	  if [ "$$state" != "active" ]; then \
 	    echo "MCP-RESTART-FAILED: $(UNIT) is '$$state' after restart — the fleet has NO professor MCP server" >&2; \
+	    echo "mcp: last log lines of $(UNIT):" >&2; \
+	    journalctl --user -u $(UNIT) -n 20 --no-pager >&2 || echo "(journalctl unavailable)" >&2; \
 	    exit 1; \
 	  fi; \
 	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
@@ -235,6 +261,8 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  done; \
 	  if [ -z "$$pid" ]; then \
 	    echo "MCP-RESTART-FAILED: $(AGENT) has no NEW pid 5s after kickstart (was $${old:-none}) — the fleet may have NO fresh professor MCP server" >&2; \
+	    echo "mcp: last log lines of $(HOME)/Library/Logs/pfm/mcp.log:" >&2; \
+	    tail -n 20 "$(HOME)/Library/Logs/pfm/mcp.log" >&2 || echo "(log unavailable)" >&2; \
 	    exit 1; \
 	  fi; \
 	  echo "mcp: $(AGENT) restarted, pid $$pid"; \

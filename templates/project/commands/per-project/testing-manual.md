@@ -1,6 +1,6 @@
 ---
 name: {project}-testing-manual
-description: The testing law of {project} ({PROJECT_ROLE}) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by flights-speccer at intake, by every flight or general executor before its first test, by flights-lander whole; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
+description: The testing law of {project} ({PROJECT_ROLE}) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by every flights-foreman and flights-mechanical-executor before its first test, by flights-lander whole; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
 ---
 
 # {project} testing manual
@@ -36,6 +36,7 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 - Affected, an executor's only run (flight or general): `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
 - Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
+- Static check, an executor's only one, run once, last, given its task's files: {the one static-check command that takes a list of files}; a red is fixed and the same command run again.
 - Type check `{PROJECT_TYPECHECK}` · lint `{PROJECT_LINT}` · format `{PROJECT_FORMAT}`.
 
 ## Concurrency
@@ -59,3 +60,4 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 - Tests this project refuses: {kinds}.
 - The refused shapes, in any unit, hermetic or live test, its harness and its checks: a fail-open verdict; a weak or tautological oracle; an unscoped read of a shared store; a wall-clock wait; a consuming probe; the toolchain tested as product; shipped migration content in a test; a source invariant tested instead of linted; a self-skip; a double or a test path in production code; a second logging path; a line-anchored exemption; a host path, process id or captured log in a fixture. This stack's spelling of each: {shape → spelling}.
 - A removed feature, field, route, flag, environment variable or prompt section takes its tests with it, never inverted into an absence assertion.
+- That an event did not happen (a network call, a DNS query, a sleep, a spawned process): a test asserts what the code does, never an absence.

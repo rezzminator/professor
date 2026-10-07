@@ -24,7 +24,11 @@ func (installer *engine) wireLogDefault() error {
 		installer.skip("log default: no pfm.config.json path known — nothing to write")
 		return nil
 	}
-	content, changed, err := pfmconfig.LogDefaultInsertion(path)
+	source := path
+	if !installer.apply && installer.options.ConfigSeed != "" {
+		source = installer.options.ConfigSeed
+	}
+	content, changed, err := pfmconfig.LogDefaultInsertion(source)
 	if errors.Is(err, fs.ErrNotExist) {
 		installer.skip("log default: " + path + " does not exist (pfm config init creates it)")
 		return nil

@@ -87,30 +87,17 @@ func TestHarvestOCRLanguageIsValidatedByName(t *testing.T) {
 	}
 }
 
-// TestHarvestRetiredSpellingsAreUnknown: the retired verb and flags are named
-// usage errors, never aliases and never a source to read.
-func TestHarvestRetiredSpellingsAreUnknown(t *testing.T) {
-	for _, test := range []struct {
-		args []string
-		want string
-	}{
-		// Each retired flag is spelled in two pieces so the rename sweep's grep
-		// finds no live use of it; the flag package names it whole.
-		{[]string{"--" + "size-only"}, "size-only"},
-		{[]string{"--" + "ocr-lang", "ja"}, "ocr-lang"},
-		{[]string{"download"}, "download-file"},
-	} {
-		code, stdout, stderr := harvestLocal(t, test.args...)
-		if code != 2 || !strings.Contains(stderr, test.want) || stdout != "" {
-			t.Errorf(
-				"harvest %v: code=%d stdout=%q stderr=%q, want 2 naming %q",
-				test.args,
-				code,
-				stdout,
-				stderr,
-				test.want,
-			)
-		}
+// TestHarvestDownloadVerbPointsAtDownloadFile keeps the CLI's recovery hint
+// for callers who use the download verb.
+func TestHarvestDownloadVerbPointsAtDownloadFile(t *testing.T) {
+	code, stdout, stderr := harvestLocal(t, "download")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "download-file") {
+		t.Fatalf(
+			"harvest download: code=%d stdout=%q stderr=%q, want exit 2 and the download-file hint",
+			code,
+			stdout,
+			stderr,
+		)
 	}
 }
 

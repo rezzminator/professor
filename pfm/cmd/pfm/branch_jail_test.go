@@ -15,8 +15,10 @@ import (
 	"time"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller is the hard
@@ -35,7 +37,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	claudeRoot := filepath.Join(root, "home", ".claude", "projects")
 	binDir := filepath.Join(root, "bin")
-	for _, directory := range []string{tmuxDir, claudeRoot, binDir, filepath.Join(root, "sid")} {
+	for _, directory := range []string{tmuxDir, claudeRoot, binDir, filepath.Join(root, "sid"), pfmconfig.DefaultAccountDir(filepath.Join(root, "home"), 1)} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -46,16 +48,19 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	const branchSocket = "probe-branch-detached"
 	argsPath := filepath.Join(root, "claude.args")
 	fakeClaude := filepath.Join(binDir, "claude")
-	if err := os.WriteFile(fakeClaude, []byte(
-		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\nexec sleep 120\n",
+	if err := testjail.WriteExecutable(fakeClaude, []byte(
+		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\n"+
+			// the fork's SID crumb, so the session-id wait resolves at once
+			"printf '/fork/f1000000-0000-4000-8000-000000000001.jsonl\\n' > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n"+
+			"exec sleep 120\n",
 	), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 	t.Setenv("PFM_HOME", filepath.Join(root, "home"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", claudeRoot)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))

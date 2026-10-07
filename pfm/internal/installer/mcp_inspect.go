@@ -45,42 +45,23 @@ type mcpClientRegistration struct {
 	Env     map[string]string `json:"env" toml:"env"`
 }
 
-// InspectHarvesterClientCutover inspects both supported client config files.
+// InspectHarvesterClientCutover inspects Codex and the historical project file.
 // It never mutates a foreign registration; doctor turns non-PFM states into an
 // actionable warning for the operator completing the standalone migration.
-// registries is mandatory: a nil list is a programming error (the caller must
-// resolve the actual registry roster — installer.ClaudeUserRegistries for
-// Claude's account fanout — never a silent single-file guess), and reports a
-// single MCPClientUnreadable naming the missing list rather than inspecting
-// an unrelated default. An explicitly empty (non-nil) slice means "no Claude
-// registries to inspect" and is valid.
-func InspectHarvesterClientCutover(home string, port int, registries, codexHomes []string) []MCPClientCutover {
-	if registries == nil {
-		return []MCPClientCutover{{
-			Client: pfmengine.MustLookup(pfmengine.Claude).LongName,
-			Name:   mcpServerHarvester,
-			State:  MCPClientUnreadable,
-			Error:  errors.New("no Claude registries supplied"),
-		}}
-	}
+func InspectHarvesterClientCutover(home string, port int, codexHomes []string) []MCPClientCutover {
 	if codexHomes == nil {
 		codexHomes = []string{filepath.Join(home, ".codex")}
 	}
-	reports := []MCPClientCutover{}
-	seen := map[string]bool{}
-	for _, path := range registries {
-		if !seen[path] {
-			reports = append(reports, InspectClaudeServers(path, home, port, mcpServerHarvester)...)
-			seen[path] = true
-		}
-	}
+	reports := make([]MCPClientCutover, 0, len(codexHomes)+1)
 	for _, dir := range codexHomes {
 		reports = append(
 			reports,
 			InspectCodexServers(filepath.Join(dir, "config.toml"), home, port, mcpServerHarvester)...)
 	}
-	// Root .mcp.json is historical/project-scope evidence, not Claude user scope.
-	reports = append(reports, InspectClaudeServers(filepath.Join(home, ".mcp.json"), home, port, mcpServerHarvester)...)
+	// Root .mcp.json is historical project-scope standalone-harvester evidence.
+	reports = append(
+		reports,
+		inspectProjectMCPServers(filepath.Join(home, ".mcp.json"), home, port, mcpServerHarvester)...)
 	return reports
 }
 
@@ -225,14 +206,11 @@ func legacyMCPURL(port int, key string) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/mcp/%s", port, key)
 }
 
-// InspectClaudeServers classifies every name's registration in path's
+// inspectProjectMCPServers classifies every name's registration in the project
 // mcpServers object, one report per name (in the order given). A missing or
 // unreadable file/document reports every name Absent/Unreadable identically —
-// there is only one file to blame, not one per server. It is
-// InspectHarvesterClientCutover's per-registry, per-server primitive, exported
-// for doctor's registry+reason row, which needs "professor" and the legacy
-// "chat" and "harvester" classified for the same path in one call.
-func InspectClaudeServers(path, home string, port int, names ...string) []MCPClientCutover {
+// there is only one file to blame, not one per server.
+func inspectProjectMCPServers(path, home string, port int, names ...string) []MCPClientCutover {
 	client := pfmengine.MustLookup(pfmengine.Claude).LongName
 	base := func(name string) MCPClientCutover {
 		return MCPClientCutover{Client: client, Name: name, State: MCPClientAbsent, Path: path}
@@ -414,7 +392,7 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 }
 
 // isRetiredPFMHeaders is true for no headers, or exactly pfm's retired
-// `Authorization: Bearer <64 hex>` (isPFMHTTPClient's shape).
+// `Authorization: Bearer <64 hex>` (isPFMHTTPShape's shape).
 func isRetiredPFMHeaders(headers map[string]string) bool {
 	if len(headers) == 0 {
 		return true

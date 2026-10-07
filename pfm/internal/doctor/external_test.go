@@ -13,6 +13,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // installedCodexConfig is a Codex config carrying what `pfm install` writes
@@ -28,9 +29,36 @@ func installedCodexConfig(t *testing.T, rest string) string {
 	return "developer_instructions = '''\n" + prompt + "'''\n" + rest
 }
 
+func writeDoctorCodexAuth(t *testing.T, home string) {
+	t.Helper()
+	path := filepath.Join(home, ".codex", "auth.json")
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"tokens":{"access_token":"fixture-access-token","account_id":"fixture-account-id"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stageExternalDoctorAccount keeps fleet scratch files outside the account scanned by host checks.
+func stageExternalDoctorAccount(t *testing.T, home string) string {
+	t.Helper()
+	account := pfmconfig.DefaultAccountDir(home, 42)
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	testjail.StageGlobalAgents(t, home)
+	dirs, files := storeLayout()
+	testjail.StageAccountLinks(t, home, account, dirs, files)
+	stageStorePlugins(t, home)
+	return account
+}
+
 func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	root := jailTest(t)
 	home := filepath.Join(root, "home")
+	account := stageExternalDoctorAccount(t, home)
 	if err := os.WriteFile(
 		filepath.Join(home, ".mcp.json"),
 		[]byte(
@@ -43,6 +71,7 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeDoctorCodexAuth(t, home)
 	if err := os.WriteFile(
 		filepath.Join(home, ".codex", "config.toml"),
 		[]byte(installedCodexConfig(
@@ -58,6 +87,7 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
 	runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 	var stdout, stderr bytes.Buffer
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
@@ -77,10 +107,12 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *testing.T) {
 	root := jailTest(t)
 	home := filepath.Join(root, "home")
+	account := stageExternalDoctorAccount(t, home)
 	codexPath := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeDoctorCodexAuth(t, home)
 	write := func(path, content string) {
 		t.Helper()
 		if path == codexPath {
@@ -96,6 +128,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
+		runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(nil, &stdout, &stderr, runtime); code != wantCode {
@@ -108,10 +141,12 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		mcpJSON := filepath.Join(home, ".mcp.json")
 		write(mcpJSON, `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n")
-		output := run(t, 1)
+		// The pfm-mcp host check reports the same pfm-shaped entry as a failure.
+		output := run(t, 3)
 		for _, want := range []string{
 			"doctor: mcp client=claude harvester=legacy-pfm remediation=run pfm install --yes path=" + mcpJSON + "\n",
 			"doctor: mcp client=codex harvester=legacy-pfm remediation=run pfm install --yes path=" + codexPath + "\n",
+			"host-check: BLOCK pfm-mcp " + mcpJSON + " — carries pfm mcpServers.harvester\n",
 		} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("legacy pfm route output missing %q:\n%s", want, output)
@@ -140,6 +175,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
+		runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
@@ -168,6 +204,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
+		runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
@@ -193,15 +230,27 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
+		runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
-		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
+		// The pfm-mcp host check reports the same unparseable file as a failure.
+		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 3 {
 			t.Fatalf(
-				"doctor code=%d stdout=%q stderr=%q, want unreadable warning",
+				"doctor code=%d stdout=%q stderr=%q, want unreadable warning and pfm-mcp failure",
 				code,
 				stdout.String(),
 				stderr.String(),
 			)
+		}
+		unreadable := "host-check: BLOCK pfm-mcp " + filepath.Join(
+			home,
+			".mcp.json",
+		) + " — UNREADABLE " + filepath.Join(
+			home,
+			".mcp.json",
+		) + ": "
+		if !strings.Contains(stdout.String(), unreadable) {
+			t.Fatalf("pfm-mcp unreadable line missing:\n%s", stdout.String())
 		}
 		if !strings.Contains(stdout.String(), "doctor: mcp client=claude harvester=unreadable error=") {
 			t.Fatalf("malformed Claude JSON was not distinguished from absence:\n%s", stdout.String())
@@ -218,6 +267,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
+		runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		// The same unparseable file is also the one the fleet prompt lives
@@ -242,13 +292,15 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	})
 }
 
-func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
+func TestDoctorEnumeratesExternalDependencies(t *testing.T) {
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	jailTest(t)
 	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
+	account := stageExternalDoctorAccount(t, runtime.Paths.Home)
+	runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
 	var stdout, stderr bytes.Buffer
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf(
@@ -258,10 +310,7 @@ func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
 			stderr.String(),
 		)
 	}
-	for _, wanted := range []string{
-		"doctor: dep tmux ",
-		"doctor: hook claude[1] ",
-	} {
+	for _, wanted := range []string{"doctor: dep tmux "} {
 		if !strings.Contains(stdout.String(), wanted) {
 			t.Fatalf("doctor output missing %q:\n%s", wanted, stdout.String())
 		}
@@ -335,14 +384,24 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 	nonPfm := filepath.Join(home, "opt", "claude")
 
 	cases := []struct {
-		name       string
-		path       string
-		exitCode   int
-		wantMissed bool
+		name                     string
+		path                     string
+		exitCode                 int
+		wantMissed               bool
+		probeHomeErr, verboseErr string
+		wantWarnings             int
 	}{
-		{"pfms launcher absent", launcher, 127, true},
-		{"pfms launcher broken", launcher, 1, false},
-		{"non-pfm claude at 127", nonPfm, 127, false},
+		{name: "pfms launcher absent", path: launcher, exitCode: 127, wantMissed: true},
+		{name: "pfms launcher broken", path: launcher, exitCode: 1},
+		{name: "non-pfm claude at 127", path: nonPfm, exitCode: 127},
+		{
+			name: "absent with probe home residue", path: launcher, exitCode: 127, wantMissed: true,
+			probeHomeErr: "remove /srv/sid/pfm-probe-home-1: device busy", wantWarnings: 1,
+		},
+		{
+			name: "absent with verbose failure", path: launcher, exitCode: 127, wantMissed: true,
+			verboseErr: "write /srv/sid/pfm-doctor/claude.log: device busy", wantWarnings: 1,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -350,24 +409,32 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 				return []deps.Result{{
 					Entry: entry, State: deps.StateBroken, Path: testCase.path,
 					ExitCode: testCase.exitCode, Error: fmt.Sprintf("exit status %d", testCase.exitCode),
+					ProbeHomeErr: testCase.probeHomeErr, VerboseErr: testCase.verboseErr,
 				}}
 			}
 			var output bytes.Buffer
-			_, failures, claudeAbsent := PrintDependencies(
+			warnings, failures, claudeAbsent := PrintDependencies(
 				context.Background(),
 				&output,
 				home,
 				[]deps.Entry{entry},
 				deps.ProbeOptions{},
 			)
-			if claudeAbsent != testCase.wantMissed {
-				t.Fatalf("claudeAbsent=%v, want %v", claudeAbsent, testCase.wantMissed)
+			if claudeAbsent != testCase.wantMissed || warnings != testCase.wantWarnings {
+				t.Fatalf("claudeAbsent=%v warnings=%d, want %v/%d", claudeAbsent, warnings,
+					testCase.wantMissed, testCase.wantWarnings)
 			}
 			if testCase.wantMissed {
 				if failures != 0 {
 					t.Fatalf("failures=%d, want 0\n%s", failures, output.String())
 				}
 				want := "doctor: dep claude path=" + testCase.path + " MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n"
+				if testCase.verboseErr != "" {
+					want += "doctor: dep claude verbose broken error=" + testCase.verboseErr + "\n"
+				}
+				if testCase.probeHomeErr != "" {
+					want += "doctor: dep claude probe-home residue error=" + testCase.probeHomeErr + "\n"
+				}
 				if output.String() != want {
 					t.Fatalf("output=%q, want %q", output.String(), want)
 				}

@@ -126,6 +126,7 @@ func TestCallerHeadersReachTheTargetNeverTheReader(t *testing.T) {
 // carries none of the caller's headers and gets the default User-Agent back;
 // on the target's origin a caller User-Agent overrides the default.
 func TestCallerHeadersStayOnTheTargetOrigin(t *testing.T) {
+	t.Parallel()
 	seen := newHeaderSeen()
 	site := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen.record(r)
@@ -170,6 +171,7 @@ func TestCallerHeadersStayOnTheTargetOrigin(t *testing.T) {
 // TestCallerHeadersRefusedAtEntry: each breach is a named error that never
 // carries the value, and no request is sent.
 func TestCallerHeadersRefusedAtEntry(t *testing.T) {
+	t.Parallel()
 	many := map[string]string{}
 	for index := range 33 {
 		many[fmt.Sprintf("X-H%d", index)] = probeValue
@@ -213,6 +215,7 @@ func TestCallerHeadersRefusedAtEntry(t *testing.T) {
 // TestCallerHeadersPartitionTheCache: the same URL read with and without a
 // header is two cache entries; the same header again is a cache hit.
 func TestCallerHeadersPartitionTheCache(t *testing.T) {
+	t.Parallel()
 	seen := newHeaderSeen()
 	site := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen.record(r)
@@ -251,6 +254,7 @@ func TestCallerHeadersPartitionTheCache(t *testing.T) {
 // caller's header to the target and never to the Wayback copy, and names the
 // headerless rung in partial.
 func TestCallerHeadersReachTheFileTargetNeverWayback(t *testing.T) {
+	t.Parallel()
 	seen := newHeaderSeen()
 	site := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen.record(r)

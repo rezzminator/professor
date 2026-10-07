@@ -39,6 +39,8 @@
 set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=mcp-stdio.sh
+. "$HERE/mcp-stdio.sh"
 MAP="$HERE/map.tsv"
 PENDING="$HERE/pending.txt"
 PFM="" DERIVE=1
@@ -101,8 +103,9 @@ fi
 # ─── 2. the machine-derived surface ─────────────────────────────────────────
 
 names="$(awk -F'\t' 'NR > 1 && NF == 3 { print $1 }' "$MAP" | sort -u)"
+framed_names=$'\n'"$names"$'\n'
 # mapped <name> — 0 when a row names it or one of its subcommands
-mapped() { printf '%s\n' "$names" | grep -qE "^$1( |$)"; }
+mapped() { [[ "$framed_names" == *$'\n'"$1"$'\n'* || "$framed_names" == *$'\n'"$1 "* ]]; }
 
 if [ "$DERIVE" -eq 0 ]; then
   say "derive: NOT RUN (--no-derive) — pfm's command tree and MCP tool surface were NOT checked against the map"
@@ -122,13 +125,13 @@ JSON
     printf '%s\n' '{"search": {"searxngURL": "http://127.0.0.1:9"}}' >"$JAIL/harvester.config.json"
     # Jailed: the derive must never touch the host's fleet, socket dir or tmux.
     pfm_jailed() {
-      env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" PFM_FLEET_DB="$JAIL/fleet.db" \
+      env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" PFM_CONFIG="$JAIL/pfm.config.json" \
         PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
         "$PFM" --config "$JAIL/pfm.config.json" "$@"
     }
     with_timeout() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
     pfm_jailed_timed() {
-      with_timeout 10 env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" PFM_FLEET_DB="$JAIL/fleet.db" \
+      with_timeout 10 env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" PFM_CONFIG="$JAIL/pfm.config.json" \
         PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
         "$PFM" --config "$JAIL/pfm.config.json" "$@"
     }
@@ -161,24 +164,22 @@ JSON
     # tools/list over `pfm mcp serve --stdio`, the one stdio server, with both
     # families enabled in the jail config (no daemon in the jail, so it serves
     # the combined server in process): the served surface itself. The frames are
-    # written newline-terminated and stdin is HELD OPEN for a moment after them —
-    # on EOF the server closes at once ("server is closing: EOF") and a response
-    # still in flight is lost, which reads exactly like a server with no tools.
+    # written newline-terminated; stdin stays open until the id-2 reply arrives.
+    # Closing it earlier loses a response still in flight.
     tools_ok=0 all_tools=""
-    tools_out="$( {
-      printf '%s\n' \
+    tools_frames="$(printf '%s\n' \
         '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check-map","version":"0"}}}' \
         '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-        '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-      sleep 5
-    } | with_timeout 60 env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" \
-      PFM_FLEET_DB="$JAIL/fleet.db" PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
-      "$PFM" --config "$JAIL/pfm.config.json" mcp serve --stdio 2>"$JAIL/stdio.err")"
-    printf '%s\n' "$tools_out" >"$JAIL/stdio.frames"
+        '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')"
+    mcp_stdio_exchange 2 60 "$tools_frames" with_timeout 60 env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" \
+      PFM_CONFIG="$JAIL/pfm.config.json" PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
+      "$PFM" --config "$JAIL/pfm.config.json" mcp serve --stdio 2>"$JAIL/stdio.err" >"$JAIL/stdio.frames"
+    stdio_rc=$?
+    tools_out="$(cat "$JAIL/stdio.frames")"
     tools="$(printf '%s\n' "$tools_out" | jq -r 'select(.id == 2) | .result.tools[]?.name' 2>/dev/null)"
     n_tools="$(printf '%s\n' "$tools" | grep -c .)"
-    if [ "$n_tools" -eq 0 ]; then
-      derive_fail "pfm mcp serve --stdio listed no tool — stderr: $(tr '\n' ' ' <"$JAIL/stdio.err" 2>/dev/null | cut -c1-200); frames it did answer: $(tr '\n' ' ' <"$JAIL/stdio.frames" 2>/dev/null | cut -c1-200)"
+    if [ "$stdio_rc" -ne 0 ] || [ "$n_tools" -eq 0 ]; then
+      derive_fail "pfm mcp serve --stdio listed no tool — ${MCP_STDIO_WHY:-reply carried no tools}; stderr: $(tr '\n' ' ' <"$JAIL/stdio.err" 2>/dev/null | cut -c1-200); frames it did answer: $(tr '\n' ' ' <"$JAIL/stdio.frames" 2>/dev/null | cut -c1-200)"
     else
       tools_ok=1 all_tools="$tools"
       bad_tools=0
@@ -195,27 +196,43 @@ JSON
     # surface that was actually read, never against a failed derive.
     if [ "$cmds_ok" -eq 1 ] && [ "$tools_ok" -eq 1 ]; then
       stale=0 hidden=0
+      framed_cmds=$'\n'"$cmds"$'\n'
+      framed_subs=$'\n'"$subs"$'\n'
+      framed_tools=$'\n'"$all_tools"$'\n'
+      probe_limit="$(nproc)"
+      probe_pids=() unmatched_names=() unmatched_results=()
       for n in $(printf '%s\n' "$names" | tr ' ' '~'); do
         n="${n//\~/ }"
         set -- $n
         case "$1 ${2:-}" in
-          "pfm chat") [ -n "${3:-}" ] && printf '%s\n' "$subs" | grep -qxF "$3" && continue ;;
+          "pfm chat") [ -n "${3:-}" ] && [[ "$framed_subs" == *$'\n'"$3"$'\n'* ]] && continue ;;
           "pfm internal") ;;
-          pfm\ *) [ $# -eq 2 ] && printf '%s\n' "$cmds" | grep -qxF "$2" && continue ;;
-          *) [ $# -eq 1 ] && printf '%s\n' $all_tools | grep -qxF "$1" && continue ;;
+          pfm\ *) [ $# -eq 2 ] && [[ "$framed_cmds" == *$'\n'"$2"$'\n'* ]] && continue ;;
+          *) [ $# -eq 1 ] && [[ "$framed_tools" == *$'\n'"$1"$'\n'* ]] && continue ;;
         esac
         # Outside the help tree (an internal verb, a hidden verb or alias):
         # pfm's own dispatcher decides; only its "unknown" answer is stale.
         if [ "$1" = pfm ] && [ $# -ge 2 ]; then
           shift
-          # Captured first: `grep -q` quitting early would SIGPIPE the writer,
-          # and pipefail would read that as "not unknown".
-          answer="$(pfm_jailed_timed "$@" --help </dev/null 2>&1)"
-          if ! printf '%s\n' "$answer" | grep -qE 'unknown (sub)?command'; then
-            hidden=$((hidden + 1)); continue
+          probe_file="$JAIL/probe.${#unmatched_names[@]}"
+          unmatched_names+=("$n") unmatched_results+=("$probe_file")
+          pfm_jailed_timed "$@" --help </dev/null >"$probe_file" 2>&1 &
+          probe_pids+=("$!")
+          if [ "${#probe_pids[@]}" -ge "$probe_limit" ]; then
+            wait "${probe_pids[0]}" || true
+            probe_pids=("${probe_pids[@]:1}")
           fi
+        else
+          unmatched_names+=("$n") unmatched_results+=("")
         fi
-        red "STALE-NAME: $n — a $(basename "$MAP") row names a command or tool pfm does not serve"
+      done
+      for pid in "${probe_pids[@]}"; do wait "$pid" || true; done
+      for i in "${!unmatched_names[@]}"; do
+        if [ -n "${unmatched_results[i]}" ] &&
+          ! grep -qE 'unknown (sub)?command' "${unmatched_results[i]}"; then
+          hidden=$((hidden + 1)); continue
+        fi
+        red "STALE-NAME: ${unmatched_names[i]} — a $(basename "$MAP") row names a command or tool pfm does not serve"
         stale=$((stale + 1))
       done
       say "map names: $(printf '%s\n' "$names" | grep -c .) · $stale stale · $hidden judged by pfm's dispatcher (verbs the help tree does not list)"

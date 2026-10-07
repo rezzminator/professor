@@ -13,7 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/modelglyph"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // subagentInput is the row context Claude Code's subagentStatusLine setting
@@ -22,6 +26,7 @@ type subagentInput struct {
 	SessionID      string         `json:"session_id"`
 	TranscriptPath string         `json:"transcript_path"`
 	Cwd            string         `json:"cwd"`
+	Columns        int            `json:"columns"`
 	Tasks          []subagentTask `json:"tasks"`
 }
 
@@ -49,11 +54,14 @@ type subagentRow struct {
 
 // agentActivity is what a sub-agent's own files add to the payload: its role
 // from agent-<id>.meta.json, the rest from agent-<id>.jsonl. cacheHit is -1
-// until the first model turn lands; err means the transcript could not be
+// until the first model turn lands; effort is the level its latest request
+// went out at, "" until one records it; err means the transcript could not be
 // read and roleErr the meta file, each rendering "?" — never as zero or empty.
+// spend is its own billing plus every agent's below it.
 type agentActivity struct {
 	role        string
 	roleErr     error
+	effort      string
 	tools       int
 	errors      int
 	compactions int
@@ -62,6 +70,7 @@ type agentActivity struct {
 	last        time.Time
 	err         error
 	nest        agentNesting
+	spend       agentSpend
 }
 
 const (
@@ -77,10 +86,70 @@ const (
 	finishedCollapse = time.Minute
 	entryAssistant   = "assistant"
 	entryUser        = "user"
+	blockToolUse     = "tool_use"
 	// stallAfter is the quiet time before a running agent's row says idle:
 	// shorter gaps are ordinary model latency.
 	stallAfter = time.Minute
+	// rowSep joins a row's segments tight: the panel is narrow.
+	rowSep = dim + "│" + reset
+	// rowPrefixWidth is what Claude Code draws before a row body ("  ❯ ⏺ "),
+	// measured on a live 125-column pane, plus a two-column margin.
+	rowPrefixWidth = 8
 )
+
+// Drop ranks, in the order a row too wide for its panel gives parts up: the
+// cwd, the cache, the compactions, then the effort (the model
+// family stays). Unranked parts — nesting, gauge and spend, identity, status,
+// idle, errors, label — always stay; the label is last, so Claude Code's own
+// truncation cuts only it.
+const (
+	_ = iota // 0: a part that always stays
+	dropCwd
+	dropCache
+	dropCompactions
+	dropEffort
+)
+
+// rowPart is one segment of a full row; short is what it becomes once its
+// drop rank is reached ("" removes it).
+type rowPart struct {
+	text, short string
+	drop        int
+}
+
+func appendRowSegment(line, segment string) string {
+	switch {
+	case segment == "":
+		return line
+	case line == "":
+		return segment
+	}
+	return line + rowSep + segment
+}
+
+// fitRow joins the parts and, while the row is wider than columns leaves for
+// it, gives parts up rank by rank. columns 0 (no width in the payload) keeps
+// the full row.
+func fitRow(parts []rowPart, columns int) string {
+	join := func() string {
+		line := ""
+		for _, part := range parts {
+			line = appendRowSegment(line, part.text)
+		}
+		return line
+	}
+	line := join()
+	budget := columns - rowPrefixWidth
+	for rank := dropCwd; columns > 0 && rank <= dropEffort && ansi.StringWidth(line) > budget; rank++ {
+		for index := range parts {
+			if parts[index].drop == rank {
+				parts[index].text = parts[index].short
+			}
+		}
+		line = join()
+	}
+	return line
+}
 
 // ansiSGR matches one colour escape: a muted row drops them all and wears one.
 var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -89,14 +158,21 @@ var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // row context in, one {id,content} JSON line per agent-panel row out.
 // Fail-open like the main line — any error prints nothing and exits 0, so
 // every row keeps Claude Code's own body instead of the harness logging a
-// failed command each tick.
-func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, sidDir string) int {
+// failed command each tick. The price table is the one beside pfmConfigPath;
+// one that cannot load leaves every row's dollars "$?", its cause on stderr.
+func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, sidDir, pfmConfigPath string) int {
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: read input (fail-open): %v\n", err)
 		return 0
 	}
-	rows, err := RenderSubagents(raw, clock.Real.Now(), sidDir, stderr)
+	var prices *pricing.Table
+	if table, err := pricing.Effective(pfmConfigPath); err != nil {
+		fmt.Fprintf(stderr, "pfm statusline --subagents: price table (rows show $?): %v\n", err)
+	} else {
+		prices = &table
+	}
+	rows, err := RenderSubagents(raw, clock.Real.Now(), sidDir, prices, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: render (fail-open): %v\n", err)
 		return 0
@@ -110,8 +186,9 @@ func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, sidDir string) in
 // RenderSubagents turns one subagentStatusLine payload into the JSON lines
 // Claude Code reads back, one per task that reports a model or a token count;
 // a task it omits keeps Claude Code's own row body. A sub-agent transcript
-// that cannot be read renders "?" in its row and its cause goes to warn.
-func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (string, error) {
+// that cannot be read renders "?" in its row and its cause goes to warn. A nil
+// prices leaves every row's dollars unpriced.
+func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.Table, warn io.Writer) (string, error) {
 	var data subagentInput
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("parse subagent row context: %w", err)
@@ -134,8 +211,9 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 			if tree == nil {
 				tree = scanAgentTree(data.TranscriptPath)
 			}
-			read := readAgentActivity(data.TranscriptPath, task.ID)
+			read := readAgentActivity(data.TranscriptPath, task.ID, prices)
 			read.nest = tree.nesting(task.ID)
+			read.spend.add(tree.nestedSpend(task.ID, prices))
 			for _, cause := range tree.drainWarnings() {
 				fmt.Fprintf(warn, "pfm statusline --subagents: row %s: nested agents: %s\n", task.ID, cause)
 			}
@@ -146,7 +224,10 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 			}
 			activity = &read
 		}
-		row := subagentRow{ID: task.ID, Content: subagentContent(task, activity, data.Cwd, inherited, now)}
+		row := subagentRow{
+			ID:      task.ID,
+			Content: subagentContent(task, activity, data.Cwd, data.Columns, inherited, now),
+		}
 		if err := encoder.Encode(row); err != nil {
 			return "", fmt.Errorf("encode subagent row %s: %w", task.ID, err)
 		}
@@ -154,7 +235,7 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 	return out.String(), nil
 }
 
-// subagentContent renders nested → gauge → name·role → model·effort → status
+// subagentContent renders nested → gauge and spend → name·role → model·effort → status
 // and time → idle → tools → errors → cache → compactions → cwd → label; the
 // nested count (working/all) leads because it is what a parent row is read for, and the
 // label goes last because Claude Code truncates the row's tail.
@@ -168,10 +249,11 @@ func subagentContent(
 	task *subagentTask,
 	activity *agentActivity,
 	sessionCwd string,
+	columns int,
 	inherited sessionEffortRecord,
 	now time.Time,
 ) string {
-	line := activeContent(task, activity, sessionCwd, inherited, now)
+	line := fitRow(activeContent(task, activity, sessionCwd, inherited, now), columns)
 	if !rowFinished(task, activity) {
 		return rowOpen + line
 	}
@@ -192,11 +274,14 @@ func subagentContent(
 	}
 	ago := formatDuration(now.Sub(ended).Milliseconds())
 	collapsed := statusColor + status + reset + cMuted + " " + ago + " ago" + reset
+	if activity != nil {
+		collapsed = appendRowSegment(collapsed, cMuted+ansiSGR.ReplaceAllString(spendSegment(*activity), "")+reset)
+	}
 	if identity := ansiSGR.ReplaceAllString(subagentIdentity(task.Name, activity), ""); identity != "" {
-		collapsed = appendSegment(collapsed, cMuted+identity+reset)
+		collapsed = appendRowSegment(collapsed, cMuted+identity+reset)
 	}
 	if label := rowLabel(task); label != "" {
-		collapsed = appendSegment(collapsed, cMuted+label+reset)
+		collapsed = appendRowSegment(collapsed, cMuted+label+reset)
 	}
 	return collapsed
 }
@@ -220,14 +305,15 @@ func rowLabel(task *subagentTask) string {
 	return strings.TrimSpace(task.Description)
 }
 
-// activeContent is the full row, without its opening: see subagentContent.
+// activeContent is the full row's parts, without its opening: see
+// subagentContent.
 func activeContent(
 	task *subagentTask,
 	activity *agentActivity,
 	sessionCwd string,
 	inherited sessionEffortRecord,
 	now time.Time,
-) string {
+) []rowPart {
 	gauge := cTokens + formatContextTokens(task.TokenCount) + reset
 	if task.ContextWindowSize > 0 {
 		percent := int(task.TokenCount * 100 / task.ContextWindowSize)
@@ -235,25 +321,34 @@ func activeContent(
 			percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " +
 			gauge + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
 	}
-	line := ""
+	var parts []rowPart
 	if activity != nil {
-		line = nestingSegment(activity.nest)
+		parts = append(parts, rowPart{text: nestingSegment(activity.nest)})
+		gauge += " " + spendSegment(*activity)
 	}
-	line = appendSegment(line, gauge)
-	line = appendSegment(line, subagentIdentity(task.Name, activity))
-	line = appendSegment(line, subagentModel(task.Model, task.Effort, inherited))
-	line = appendSegment(line, subagentStatus(task, activity, now))
+	parts = append(parts, rowPart{text: gauge}, rowPart{text: subagentIdentity(task.Name, activity)})
+	recorded := ""
 	if activity != nil {
-		line = appendSegment(line, activitySegments(*activity, task.Status == taskRunning, now))
+		recorded = activity.effort
+	}
+	parts = append(parts,
+		rowPart{
+			text:  subagentModel(task.Model, recorded, task.Effort, inherited),
+			short: subagentModel(task.Model, "", nil, sessionEffortRecord{}),
+			drop:  dropEffort,
+		},
+		rowPart{text: subagentStatus(task, activity, now)})
+	if activity != nil {
+		parts = append(parts, activitySegments(*activity, task.Status == taskRunning, now)...)
 	}
 	cwd := strings.TrimSpace(task.Cwd)
 	if cwd != "" && filepath.Clean(cwd) != filepath.Clean(strings.TrimSpace(sessionCwd)) {
-		line = appendSegment(line, cCwd+filepath.Base(cwd)+reset)
+		parts = append(parts, rowPart{text: cCwd + filepath.Base(cwd) + reset, drop: dropCwd})
 	}
 	if label := rowLabel(task); label != "" {
-		line = appendSegment(line, cLabel+label+reset)
+		parts = append(parts, rowPart{text: cLabel + label + reset})
 	}
-	return line
+	return parts
 }
 
 // subagentIdentity renders name·role: the agent's name when it was given one,
@@ -278,15 +373,19 @@ func subagentIdentity(name string, activity *agentActivity) string {
 }
 
 // subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·🏎️ high. An effort that is not a JSON string is left out. A row without
-// its own effort shows the session's recorded effort (inherited), exactly as
+// opus·🏎️ high. The level its transcript recorded for its latest request
+// (recorded) wins: it is the effort that request went out at, after any
+// plugin pinned it, so it renders plainly on any model. Without one, the
+// payload's effort shows; one that is not a JSON string is left out. A row
+// with neither shows the session's recorded effort (inherited), exactly as
 // a payload effort on the model it was recorded for and muted on another,
 // where Claude Code may resolve a different level.
-func subagentModel(model string, effort json.RawMessage, inherited sessionEffortRecord) string {
+func subagentModel(model, recorded string, effort json.RawMessage, inherited sessionEffortRecord) string {
 	family := modelFamily(model)
-	var level string
+	level := strings.TrimSpace(recorded)
 	color := cEffort
-	if len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "" {
+	if level == "" &&
+		(len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "") {
 		level = ""
 		if len(effort) == 0 {
 			level = inherited.Level
@@ -297,9 +396,9 @@ func subagentModel(model string, effort json.RawMessage, inherited sessionEffort
 	}
 	if level != "" {
 		if family == "" {
-			return color + effortLabel(level) + reset
+			return color + modelglyph.EffortLabel(level) + reset
 		}
-		return cModel + family + reset + cMuted + "·" + reset + color + effortLabel(level) + reset
+		return cModel + family + reset + cMuted + "·" + reset + color + modelglyph.EffortLabel(level) + reset
 	}
 	if family == "" {
 		return ""
@@ -371,27 +470,27 @@ func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) 
 // something. The cache segment has the main line's shape: the time left on the
 // agent's own prompt cache, then the share of its newest call's prompt read
 // from it. A transcript that could not be read shows "tools ?" and "💾!".
-func activitySegments(activity agentActivity, running bool, now time.Time) string {
+func activitySegments(activity agentActivity, running bool, now time.Time) []rowPart {
 	if activity.err != nil {
-		return cWarn + "tools ?" + reset + sep + cBad + "💾!" + reset
+		return []rowPart{{text: cBad + "💾!" + reset}}
 	}
-	line := ""
+	var parts []rowPart
 	if quiet := now.Sub(activity.last); running && !activity.last.IsZero() && quiet >= stallAfter {
 		color := cWarn
 		if quiet >= 5*stallAfter {
 			color = cBad
 		}
-		line = color + "idle " + formatDuration(quiet.Milliseconds()) + reset
+		parts = append(parts, rowPart{text: color + "idle " + formatDuration(quiet.Milliseconds()) + reset})
 	}
-	line = appendSegment(line, cTools+plural(activity.tools, "tool")+reset)
 	if activity.errors > 0 {
-		line = appendSegment(line, cBad+plural(activity.errors, "error")+reset)
+		parts = append(parts, rowPart{text: cBad + plural(activity.errors, "error") + reset})
 	}
-	line = appendSegment(line, agentCacheText(activity.transcript, activity.cacheHit, now))
+	parts = append(parts, rowPart{text: agentCacheText(activity.transcript, activity.cacheHit, now), drop: dropCache})
 	if activity.compactions > 0 {
-		line = appendSegment(line, cCompaction+fmt.Sprintf("⟲%d", activity.compactions)+reset)
+		compactions := cCompaction + fmt.Sprintf("⟲%d", activity.compactions) + reset
+		parts = append(parts, rowPart{text: compactions, drop: dropCompactions})
 	}
-	return line
+	return parts
 }
 
 func plural(count int, noun string) string {
@@ -404,10 +503,10 @@ func plural(count int, noun string) string {
 // readAgentActivity reads the sub-agent's own files, which Claude Code keeps
 // beside the session's: <session>/subagents/agent-<id>.{meta.json,jsonl}. It
 // counts distinct tool_use blocks, errored tool results and compact
-// boundaries, takes the cache hit from the newest assistant usage, and the
-// newest entry timestamp. A torn final line — the agent is
-// mid-write — is skipped, not an error.
-func readAgentActivity(sessionTranscript, id string) agentActivity {
+// boundaries, takes the cache hit and the effort from the newest assistant
+// entry that carries each, the newest entry timestamp, and what its responses
+// billed. A torn final line — the agent is mid-write — is skipped, not an error.
+func readAgentActivity(sessionTranscript, id string, prices *pricing.Table) agentActivity {
 	activity := agentActivity{cacheHit: -1}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		activity.err = errors.New("payload names no session transcript")
@@ -426,11 +525,12 @@ func readAgentActivity(sessionTranscript, id string) agentActivity {
 	defer func() { _ = file.Close() }() // read-only handle; a close error loses nothing
 
 	seen := map[string]struct{}{}
+	spend := newSpendScan(prices)
 	reader := bufio.NewReaderSize(file, 1<<16)
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			recordTranscriptLine(line, seen, &activity)
+			recordTranscriptLine(line, seen, &activity, spend)
 		}
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
@@ -440,6 +540,8 @@ func readAgentActivity(sessionTranscript, id string) agentActivity {
 		}
 	}
 	activity.tools = len(seen)
+	activity.spend = spend.total()
+	activity.spend.tools = activity.tools
 	return activity
 }
 
@@ -461,18 +563,17 @@ func readAgentRole(path string) (string, error) {
 	return meta.AgentType, nil
 }
 
-func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agentActivity) {
+func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agentActivity, spend *spendScan) {
 	var entry struct {
 		Type      string    `json:"type"`
 		Subtype   string    `json:"subtype"`
 		Timestamp time.Time `json:"timestamp"`
+		Effort    any       `json:"effort"`
 		Message   struct {
+			ID      string          `json:"id"`
+			Model   string          `json:"model"`
 			Content json.RawMessage `json:"content"`
-			Usage   *struct {
-				Input         int64 `json:"input_tokens"`
-				CacheRead     int64 `json:"cache_read_input_tokens"`
-				CacheCreation int64 `json:"cache_creation_input_tokens"`
-			} `json:"usage"`
+			Usage   *billedUsage    `json:"usage"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &entry) != nil {
@@ -496,7 +597,7 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if json.Unmarshal(entry.Message.Content, &blocks) == nil {
 		for _, block := range blocks {
 			switch {
-			case entry.Type == entryAssistant && block.Type == "tool_use" && block.ID != "":
+			case entry.Type == entryAssistant && block.Type == blockToolUse && block.ID != "":
 				seen[block.ID] = struct{}{}
 			case entry.Type == entryUser && block.Type == "tool_result" && block.IsError:
 				activity.errors++
@@ -506,6 +607,11 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if entry.Type != entryAssistant {
 		return
 	}
+	// The level the request went out at; a model that takes none leaves it out.
+	if level, ok := entry.Effort.(string); ok && strings.TrimSpace(level) != "" {
+		activity.effort = strings.TrimSpace(level)
+	}
+	spend.record(entry.Message.ID, entry.Message.Model, entry.Message.Usage)
 	if usage := entry.Message.Usage; usage != nil {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
 			activity.cacheHit = hit

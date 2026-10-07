@@ -50,9 +50,3 @@ func TestSetEnvAndUnsetEnvMutateBothTheRealProcessAndTheMirror(t *testing.T) {
 		t.Fatal("Env mirror still holds the key after unsetEnv")
 	}
 }
-
-func TestIsRootAgreesWithGeteuid(t *testing.T) {
-	if got, want := isRoot(), os.Geteuid() == 0; got != want {
-		t.Fatalf("isRoot() = %v, want %v (os.Geteuid()=%d)", got, want, os.Geteuid())
-	}
-}

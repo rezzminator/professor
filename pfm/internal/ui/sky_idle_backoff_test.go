@@ -193,10 +193,16 @@ func TestSkyTickMsgParksThenWakes(t *testing.T) {
 	if model.skyParked {
 		t.Fatal("skyParked still true immediately after the waking keypress")
 	}
-	if msg := wake(); msg == nil {
-		t.Fatal("wake command produced no message")
-	} else if _, ok := msg.(skyTickMsg); !ok {
-		t.Fatalf("wake command produced %T, want skyTickMsg", msg)
+	// The same key also starts the masthead's fast clock, so the command is a
+	// batch: the sky tick must be one of its messages.
+	skyTick := false
+	for _, msg := range commandMessages(wake) {
+		if _, ok := msg.(skyTickMsg); ok {
+			skyTick = true
+		}
+	}
+	if !skyTick {
+		t.Fatal("wake command produced no skyTickMsg")
 	}
 	if model.skyCadence.interval != skyTickBaseInterval {
 		t.Fatalf(

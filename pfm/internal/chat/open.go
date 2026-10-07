@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/heal"
 	"github.com/rezzminator/professor/pfm/internal/kill"
@@ -46,7 +48,7 @@ func KillResolved(
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 		return 1
 	}
-	recorded := !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName)
+	recorded := !kill.AddressOnly(target)
 	if exit && target.SocketName != "" && target.PaneID != "" {
 		if err := manager.ConfirmExit(ctx, target); err != nil {
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
@@ -96,7 +98,7 @@ func OpenID(
 				ctx,
 				*row,
 				effective.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
-				effective.Config.InitialCache1H(primary),
+				effective.Config.EffectiveClaude(primary).Cache1H,
 				"",
 				stdout,
 				stderr,
@@ -253,19 +255,25 @@ func openDetachedRow(
 	relocated := ""
 	if !row.Kind.IsLiveSeat() {
 		if info, err := os.Stat(row.CWD); err != nil || !info.IsDir() {
+			if row.Workbench != "" {
+				return action.OpenResult{}, fmt.Errorf("open: workbench directory %s is missing", row.CWD)
+			}
 			relocated = fmt.Sprintf(
 				"opened in %s: its own directory %s is gone", effective.Paths.Home, row.CWD,
 			)
 			row.CWD = effective.Paths.Home
 		}
 	}
-	executor, request, err := prepareOpen(row, primary, effective.Config.InitialCache1H(primary), "", stderr, effective)
+	executor, request, claim, err := prepareOpen(
+		ctx,
+		row, primary, effective.Config.EffectiveClaude(primary).Cache1H, "", stderr, effective,
+	)
 	if err != nil {
 		return action.OpenResult{}, err
 	}
 	result, err := executor.OpenDetached(ctx, request)
-	if err != nil {
-		return action.OpenResult{}, err
+	if err := claim.settle(err == nil, err); err != nil {
+		return result, err
 	}
 	result.Detail = relocated
 	return result, nil
@@ -288,21 +296,28 @@ func OpenRow(
 	}
 	if !row.Kind.IsLiveSeat() {
 		if info, statErr := os.Stat(row.CWD); statErr != nil || !info.IsDir() {
+			if row.Workbench != "" {
+				fmt.Fprintf(stderr, "open: workbench directory %s is missing\n", row.CWD)
+				return 1
+			}
 			if currentDir, cwdErr := os.Getwd(); cwdErr == nil {
 				row.CWD = currentDir
 			}
 		}
 	}
-	executor, request, err := prepareOpen(row, primary, cache1H, prompt, stderr, effective)
+	executor, request, claim, err := prepareOpen(ctx, row, primary, cache1H, prompt, stderr, effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
 	line, err := executor.Open(ctx, request)
-	if err != nil {
+	if err := claim.settle(err == nil, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
+	// Dispatch execs tmux or zsh when stdout is a terminal and never returns,
+	// so the unseen flag clears before it.
+	markRemindersSeen(ctx, effective.Paths, row.ID, stderr)
 	if line != "" {
 		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
@@ -310,6 +325,24 @@ func OpenRow(
 		}
 	}
 	return 0
+}
+
+// markRemindersSeen clears the unseen-reminder flag of a chat a human is now
+// opening. A failed clear is reported and the open proceeds: the chat is
+// already open, and the flag stays visible as a still-marked row.
+func markRemindersSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
+	if id == "" {
+		return
+	}
+	state := fleetdb.OpenSharedState(ctx, values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			fmt.Fprintf(stderr, "pfm chat open: close shared state: %v\n", err)
+		}
+	}()
+	if _, err := state.ClearReminderUnseen(ctx, id); err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: clear reminder flag of %s: %v\n", id, err)
+	}
 }
 
 // newOpenExecutor is action.New, the one executor constructor both open doors
@@ -324,13 +357,22 @@ var newOpenExecutor = action.New
 // K1 eval line it yields, OpenDetachedID drives the detached door with it, and
 // neither may drift from the other's idea of how a chat is opened.
 func prepareOpen(
+	ctx context.Context,
 	row compose.Row,
 	primary int,
 	cache1H bool,
 	prompt string,
 	stderr io.Writer,
 	effective config.Runtime,
-) (*action.Executor, action.Request, error) {
+) (*action.Executor, action.Request, NameReservation, error) {
+	var claim NameReservation
+	if row.Kind == compose.NewClaude && row.Workbench != "" {
+		var err error
+		claim, _, err = ReserveWorkbenchName(ctx, row.CWD, stderr, &effective)
+		if err != nil {
+			return nil, action.Request{}, NameReservation{}, err
+		}
+	}
 	healCodexRoot := effective.Paths.FirstRoot(pfmengine.Codex)
 	if account, found := effective.Config.CodexAccountByID(primary); found {
 		healCodexRoot = account.Home
@@ -342,14 +384,17 @@ func prepareOpen(
 		},
 	})
 	if err != nil {
-		return nil, action.Request{}, err
+		err = errors.Join(err, claim.Release())
+		return nil, action.Request{}, NameReservation{}, err
 	}
 	fresh, err := socketForKind(row.Kind)
 	if err != nil {
-		return nil, action.Request{}, err
+		err = errors.Join(err, claim.Release())
+		return nil, action.Request{}, NameReservation{}, err
 	}
 	return executor, action.Request{
 		Row:            row,
+		LaunchName:     claim.Name,
 		Prompt:         prompt,
 		PrimaryAccount: primary,
 		Cache1H:        cache1H,
@@ -358,7 +403,7 @@ func prepareOpen(
 		FreshSocket:    fresh,
 		CurrentTMUX:    (paths.OSEnv{}).Get("TMUX"),
 		Config:         effective.Config,
-	}, nil
+	}, claim, nil
 }
 
 func socketForKind(kind compose.Kind) (string, error) {

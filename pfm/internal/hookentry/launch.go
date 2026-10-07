@@ -16,21 +16,34 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // LaunchExec is the process-replacing seam used by launch and codex-launch.
 var LaunchExec = syscall.Exec
 
 const launcherWaitTimeout = 7 * 24 * time.Hour
+
+// claudeLaunchPIDEnv carries the pid of the launcher that exec'd the real
+// Claude path. exec keeps the pid, so a launcher -> shim -> launcher exec chain
+// re-enters with its own pid in this marker and is refused, while a real
+// Claude's child `claude` run through the shim always has a different pid and
+// passes: no binary classification is needed.
+const claudeLaunchPIDEnv = "PFM_CLAUDE_LAUNCH_PID"
 
 var nonInteractiveClaudeSubcommands = map[string]bool{
 	"agents": true, "mcp": true, "update": true, "install": true,
@@ -48,7 +61,7 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 	}
 	for _, argument := range arguments {
 		switch argument {
-		case "-p", "--print", "--output-format", "-h", "--help", "--version", "-v":
+		case "-p", "--print", "--output-format", "-h", helpFlag, versionFlag, "-v":
 			return true
 		}
 		if strings.HasPrefix(argument, "--output-format=") {
@@ -62,6 +75,22 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 		return nonInteractiveClaudeSubcommands[argument]
 	}
 	return false
+}
+
+func launchStartsSession(arguments []string) bool {
+	for _, argument := range arguments {
+		switch argument {
+		case "-h", helpFlag, versionFlag, "-v":
+			return false
+		}
+	}
+	for _, argument := range arguments {
+		if argument == "--" || strings.HasPrefix(argument, "-") {
+			continue
+		}
+		return !nonInteractiveClaudeSubcommands[argument]
+	}
+	return true
 }
 
 // Launch is the managed Claude launcher entry.
@@ -84,9 +113,69 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		flags.Usage()
 		return 2
 	}
+	ownPID := strconv.Itoa(os.Getpid())
+	if env.Get(claudeLaunchPIDEnv) == ownPID {
+		fmt.Fprintf(stderr, "pfm claude launcher re-entered itself via %s; refusing to loop\n", *realBinary)
+		return 127
+	}
 	if launchPassThrough(arguments, env.Get("TMUX"), env.Get("PFM_LAUNCH_PASSTHROUGH") == "1") {
-		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), os.Environ()); err != nil {
-			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", err)
+		environment := os.Environ()
+		if launchStartsSession(arguments) {
+			prefs := runtime.Config.Claude
+			configDir := config.AmbientClaudeConfigDir()
+			for _, account := range runtime.Config.Accounts {
+				if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
+					prefs = runtime.Config.EffectiveClaude(account.ID)
+					break
+				}
+			}
+			sessionEnv := claudelaunch.SessionEnv(prefs)
+			replaced := make(map[string]bool, len(sessionEnv))
+			for _, entry := range sessionEnv {
+				name, _, _ := strings.Cut(entry, "=")
+				replaced[name] = true
+			}
+			filtered := make([]string, 0, len(environment)+len(sessionEnv))
+			for _, entry := range environment {
+				name, _, _ := strings.Cut(entry, "=")
+				if !replaced[name] {
+					filtered = append(filtered, entry)
+				}
+			}
+			filtered = append(filtered, sessionEnv...)
+			environment = filtered
+		}
+		stamped := make([]string, 0, len(environment)+1)
+		for _, entry := range environment {
+			if !strings.HasPrefix(entry, claudeLaunchPIDEnv+"=") {
+				stamped = append(stamped, entry)
+			}
+		}
+		stamped = append(stamped, claudeLaunchPIDEnv+"="+ownPID)
+		environment = stamped
+		var guard *gather.AccountGuard
+		if launchStartsSession(arguments) {
+			account := claudelaunch.ConfigDirFromEnv(environment)
+			if account == "" {
+				account = config.AmbientClaudeConfigDir()
+			}
+			var guardErr error
+			guard, guardErr = gather.AcquireAccountGuard(account, true)
+			if guardErr != nil {
+				fmt.Fprintf(stderr, "pfm internal launch: %v\n", guardErr)
+				return 1
+			}
+			if guardErr = guard.Record(os.Getpid()); guardErr != nil {
+				fmt.Fprintf(stderr, "pfm internal launch: %v\n", errors.Join(guardErr, guard.Abort(), guard.Close()))
+				return 1
+			}
+			if guardErr = guard.Close(); guardErr != nil {
+				fmt.Fprintf(stderr, "pfm internal launch: %v\n", guardErr)
+				return 1
+			}
+		}
+		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), environment); err != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", errors.Join(err, guard.Abort()))
 			return 1
 		}
 		return 0
@@ -109,14 +198,52 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: read primary account: %v\n", primaryErr)
 		return 1
 	}
-	configDir := config.AmbientClaudeConfigDir()
-	if configDir == "" {
-		if account, found := runtime.Config.AccountByID(primary); found && !account.Implicit {
-			configDir = account.ConfigDir
+	configDir, accountID := launcherSeatAccount(runtime, primary, paths.OSEnv{})
+	identity, resuming, continuing := action.LauncherIdentity(arguments)
+	mode := workbench.New
+	if resuming || continuing {
+		mode = workbench.Resume
+	}
+	persona, err := action.WorkbenchPersona(workingDir, pfmengine.Claude, mode)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
+		return 1
+	}
+	freshID := ""
+	if identity == "" && !continuing {
+		var idErr error
+		freshID, idErr = claudelaunch.NewSessionID()
+		if idErr != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: new session id: %v\n", idErr)
+			return 1
+		}
+		identity = freshID
+	}
+	// A resumed or forked chat keeps its pfm label as Claude's --name, so
+	// Remote Control shows the name the picker shows. A fresh launch has none.
+	name := ""
+	if target := action.LauncherResumeTarget(arguments); target != "" {
+		label, labelErr := store.SessionLabel(context.Background(), target, store.WithWarningWriter(stderr))
+		if labelErr != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm internal launch: resolve the label of session %s: %v — Claude names this chat itself\n",
+				target, labelErr,
+			)
+		} else {
+			name = label
 		}
 	}
-	realRun, err := action.LauncherRun(
-		*realBinary, arguments, configDir, runtime.Paths.Home, runtime.Config.EffectiveClaude(primary),
+	realRun, err := action.LauncherRunAs(
+		persona,
+		*realBinary,
+		arguments,
+		configDir,
+		runtime.Paths.Home,
+		runtime.Config,
+		runtime.Config.EffectiveClaude(accountID),
+		name,
+		freshID,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
@@ -163,6 +290,14 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	titles := runtime.Config.Tmux.Titles
 	client := spawn.TmuxSpawner{Binary: tmuxBinary, TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}
 	ctx := context.Background()
+	if identity != "" {
+		cache := runtime.Config.EffectiveClaude(accountID).Cache1H
+		if recordErr := fleetdb.RecordLaunch(ctx, runtime.Paths, fleetdb.Launch{
+			SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: cache,
+		}, clock.Real.Now().Unix()); recordErr != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, recordErr)
+		}
+	}
 	if err := client.NewSession(ctx, spawn.SessionSpec{
 		Socket: socket, Session: session, Window: spawn.WindowName(""), CWD: workingDir, Run: gateRun,
 		Width: action.HeadlessWidth, Height: action.HeadlessHeight,
@@ -178,18 +313,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	}()
 	if interactive {
 		failed = false
-		arguments := []string{
-			pfmtmux.Binary,
-			"-S",
-			socketPath,
-			"wait-for",
-			"-S",
-			startChannel,
-			";",
-			"attach-session",
-			"-t",
-			session,
-		}
+		arguments := attachArguments(socketPath, startChannel, session, env.Get("TMUX") != "")
 		if err := LaunchExec(tmuxBinary, arguments, deps.EnvironmentWith("TMUX", "")); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: attach tmux session: %v\n", err)
 			return 1
@@ -243,6 +367,31 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	return status
 }
 
+// attachArguments releases the gated pane and attaches this terminal to the
+// seat. Nested inside a tmux pfm does not own, the outer pane already keeps the
+// chat alive, so the seat also takes destroy-unattached: killing that pane or
+// its server ends the chat instead of leaving a detached seat holding a Claude
+// process nobody can see. The option is set after attach-session, so the seat
+// is never unattached while it is on.
+func attachArguments(socketPath, startChannel, session string, nested bool) []string {
+	arguments := []string{
+		pfmtmux.Binary,
+		"-S",
+		socketPath,
+		"wait-for",
+		"-S",
+		startChannel,
+		";",
+		"attach-session",
+		"-t",
+		session,
+	}
+	if nested {
+		arguments = append(arguments, ";", "set-option", "-t", session, "destroy-unattached", "on")
+	}
+	return arguments
+}
+
 func launcherStatusRun(startWait, realRun, tmuxBinary, socketPath, doneChannel, statusPath string) string {
 	signalDone := "TMUX= " + action.Quote(tmuxBinary) + " -S " + action.Quote(socketPath) +
 		" wait-for -S " + action.Quote(doneChannel)
@@ -268,4 +417,29 @@ func readLaunchStatus(path string) (int, error) {
 
 func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *pfmtmux.Cmd {
 	return pfmtmux.Exec(ctx, binary, socketPath, args...)
+}
+
+// launcherSeatAccount picks the config dir and account a bare `claude` seat
+// launches on: the ambient CLAUDE_CONFIG_DIR the shell exported, else the
+// fleet primary's dir; the account is the roster entry owning that dir, else
+// the primary. The login default is no choice of the operator's: it counts as
+// unset, so the fleet primary wins over it.
+func launcherSeatAccount(runtime config.Runtime, primary int, env paths.Env) (string, int) {
+	configDir := config.AmbientClaudeConfigDirFrom(env)
+	if claudelaunch.InheritedConfigDir(env.Get) {
+		configDir = ""
+	}
+	if configDir == "" {
+		if account, found := runtime.Config.AccountByID(primary); found {
+			configDir = account.ConfigDir
+		}
+	}
+	accountID := primary
+	for _, account := range runtime.Config.Accounts {
+		if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
+			accountID = account.ID
+			break
+		}
+	}
+	return configDir, accountID
 }

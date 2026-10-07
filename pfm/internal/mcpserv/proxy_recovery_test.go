@@ -96,6 +96,7 @@ func proxyRecoveryError(t *testing.T, frame map[string]any) (float64, string) {
 // A: Claude Code probes server/discover before initialize. The probe must be
 // answered locally and never cost the session, even after the retry window.
 func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	daemon := proxyTestDaemon(proxyTestService("daemon", nil, &calls))
 	var discoverPosts atomic.Int32
@@ -145,6 +146,7 @@ func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
 // B: a daemon 4xx that is not a lost session is the request's answer, at once;
 // the session survives it.
 func TestStdioProxyReturnsDaemonRejectionAndKeepsSession(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name, body string
 		code       float64
@@ -199,6 +201,7 @@ func TestStdioProxyReturnsDaemonRejectionAndKeepsSession(t *testing.T) {
 
 // C: no non-initialize frame leaves without a session while a handshake is stored.
 func TestStdioProxyReplaysHandshakeBeforeSessionlessCall(t *testing.T) {
+	t.Parallel()
 	daemon := &proxyRecoveryDaemon{answer: func(_ proxyFrame, sessionID string) *http.Response {
 		if sessionID == "" {
 			return proxyRecoveryJSON(http.StatusOK, proxyRecoveryUninitialized)
@@ -226,6 +229,7 @@ func TestStdioProxyReplaysHandshakeBeforeSessionlessCall(t *testing.T) {
 // D: a 200 "invalid during session initialization" means the session is lost:
 // re-initialize and replay once; a second one goes back to the client as-is.
 func TestStdioProxyReinitializesOnceOnUninitializedSession(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name      string
 		recovers  bool
@@ -268,6 +272,7 @@ func TestStdioProxyReinitializesOnceOnUninitializedSession(t *testing.T) {
 }
 
 func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
+	t.Parallel()
 	var initialCalls, returnedCalls [][]string
 	initial := proxyTestDaemon(proxyTestService("initial", nil, &initialCalls))
 	returned := proxyTestDaemon(proxyTestService("returned", nil, &returnedCalls))
@@ -320,4 +325,60 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 		t.Fatalf("call after retry-window recovery = %v, want returned", got)
 	}
 	<-restored
+}
+
+func TestStdioProxyRetriesOnlyConnectPhaseFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		op    string
+		err   error
+		retry bool
+	}{
+		{name: "dial refused", op: "dial", err: syscall.ECONNREFUSED, retry: true},
+		{name: "dial reset", op: "dial", err: syscall.ECONNRESET, retry: true},
+		{name: "dial timeout", op: "dial", err: syscall.ETIMEDOUT, retry: true},
+		{name: "read reset", op: "read", err: syscall.ECONNRESET},
+		{name: "write reset", op: "write", err: syscall.ECONNRESET},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			proxy := newStdioProxy(context.Background(), "127.0.0.1:1", io.Discard)
+			proxy.client = &http.Client{Transport: proxyTestTransport(func(*http.Request) (*http.Response, error) {
+				calls.Add(1)
+				return nil, &net.OpError{Op: test.op, Net: "tcp", Err: test.err}
+			})}
+			proxy.retryWindow = 60 * time.Millisecond
+			proxy.retryDelay = 5 * time.Millisecond
+
+			_, err := proxy.sendWithRetry(
+				context.Background(),
+				[]byte(proxyTestToolCall(2, "chat_new", `{"name":"child"}`)),
+				false,
+			)
+			if err == nil {
+				t.Fatal("sendWithRetry returned no error")
+			}
+			if test.retry {
+				if got := calls.Load(); got <= 1 {
+					t.Errorf("transport calls = %d, want retries", got)
+				}
+				if !strings.HasPrefix(
+					err.Error(),
+					"pfm MCP daemon 127.0.0.1:1 stayed unreachable for 60ms; start it with `pfm mcp serve` and retry:",
+				) {
+					t.Errorf("retry error = %q, want the unreachable-daemon verdict", err)
+				}
+				return
+			}
+			if got := calls.Load(); got != 1 {
+				t.Errorf("transport calls = %d, want one", got)
+			}
+			if !strings.Contains(err.Error(), "was not replayed") {
+				t.Errorf("uncertain-delivery error = %q, want no-replay verdict", err)
+			}
+		})
+	}
 }

@@ -2,21 +2,120 @@ package updatecheck
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
+
+func TestUnreachable(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	url := closed.URL
+	closed.Close()
+	answered := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer answered.Close()
+	untagged := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "/releases/latest")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer untagged.Close()
+	release := make(chan struct{})
+	timeout := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-release
+	}))
+	t.Cleanup(func() {
+		close(release)
+		timeout.Close()
+	})
+	tls := httptest.NewTLSServer(http.NotFoundHandler())
+	defer tls.Close()
+
+	for _, tc := range []struct {
+		name, url, current string
+		unwritable, want   bool
+		client             *http.Client
+	}{
+		{name: "transport", url: url, current: "v1.0.0", want: true},
+		{
+			name: "timeout", url: timeout.URL, current: "v1.0.0", want: true,
+			client: &http.Client{Timeout: 50 * time.Millisecond},
+		},
+		{name: "TLS failure", url: tls.URL, current: "v1.0.0"},
+		{name: "unsupported URL", url: "ftp://127.0.0.1/latest", current: "v1.0.0"},
+		{name: "answered", url: answered.URL, current: "v1.0.0"},
+		{name: "untagged", url: untagged.URL, current: "v1.0.0"},
+		{name: "bad current", url: url, current: "broken"},
+		{name: "marker write failed", url: url, current: "v1.0.0", unwritable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := filepath.Join(t.TempDir(), "update.json")
+			if tc.unwritable {
+				if err := os.Mkdir(cache+".failure", 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := CheckForUpdate(context.Background(), cache, tc.current, tc.url, tc.client)
+			if tc.want || tc.name == "TLS failure" {
+				marker, found, markerErr := ReadFailure(cache)
+				if markerErr != nil || !found || marker.Class != failureNetwork || marker.Reason == "" {
+					t.Fatalf("failure marker = %#v, %t, %v", marker, found, markerErr)
+				}
+			}
+			if err == nil || Unreachable(err) != tc.want {
+				t.Fatalf("err=%v unreachable=%t want=%t", err, Unreachable(err), tc.want)
+			}
+			if tc.want {
+				var netErr interface{ Timeout() bool }
+				if !errors.As(err, &netErr) {
+					t.Fatalf("transport error not wrapped: %v", err)
+				}
+			}
+		})
+	}
+	if Unreachable(nil) {
+		t.Fatal("nil error is unreachable")
+	}
+}
 
 // TestCheckForUpdateWritesAnHTTPOutRecord proves the HEAD lookup's client is
 // wrapped with obs.WrapClient (item 8): a real round trip through
 // CheckForUpdate writes one http.out.request record, host and path only,
 // never the query string. hookentry's own caller is proved separately by
 // TestUpdateCheckWritesAnHTTPOutRecord in internal/hookentry/update_check_test.go.
+func TestCheckForUpdateOfflineRecordsWarn(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	server := httptest.NewServer(http.NotFoundHandler())
+	url := server.URL
+	server.Close()
+	cache := filepath.Join(t.TempDir(), "update.json")
+	if err := CheckForUpdate(ctx, cache, "v0.61.1", url, nil); err == nil {
+		t.Fatal("wanted network failure")
+	}
+	if _, err := os.Stat(failurePath(cache)); err != nil {
+		t.Fatalf("failure marker: %v", err)
+	}
+	records := 0
+	for _, record := range recorder.Records() {
+		if record.Message == "http.out.request" {
+			records++
+			if record.Level != "WARN" {
+				t.Fatalf("level=%s: %s", record.Level, recorder.Raw())
+			}
+		}
+	}
+	if records == 0 {
+		t.Fatalf("no http.out request: %s", recorder.Raw())
+	}
+}
+
 func TestCheckForUpdateWritesAnHTTPOutRecord(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.61.2")

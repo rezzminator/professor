@@ -10,11 +10,11 @@ Before writing any tests, take the change delta — worktree: `git diff main...H
 
 Acceptance gates for every test written.
 
-- Reuse first: grep for a test already covering the contract, then extend or parametrize it instead of adding a near-copy (root CLAUDE.md § Reuse before you write, applied to tests).
-- Fail-without-fix: accept a regression test only after observing it fail against the unfixed code — or against a deliberate safe re-break when the fix already landed. One that passes either way pins nothing.
+- Reuse first: grep for a test already covering the contract, then extend or parametrize it instead of adding a near-copy (root CLAUDE.md § Code, its no-duplication rule, applied to tests).
+- Fail-without-fix: accept a regression test only after observing it fail against the unfixed code — when the fix already landed, against a mktemp copy holding the unfixed code (e.g. the base revision's files), never by breaking working code; a new gate proves its bite on a fixture or a mktemp copy. One that passes either way pins nothing.
 - Parametrize siblings: three or more cases in one class/describe differing only in a literal become one parametrized test, each case id carrying its original test name verbatim (`test_scan[large_payload]`) so a failure names the case.
 - Extend, don't accumulate: write into the existing module owning the contract area; add a module only when none covers it.
-- Retire by the same gate: break the contract an existing test claims to guard; a test that still passes pins nothing — remove it and name the test that catches that break instead. A test whose contract cannot be broken (prompt text, schema, {DOMAIN_ADJ} value-set, absence guard) is judged by reading, never by this gate.
+- Retire by the same gate: break the contract an existing test claims to guard, on a scratch copy or a fixture, never the working tree; a test that still passes pins nothing — remove it and name the test that catches that break instead. A test whose contract cannot be broken (prompt text, schema, {DOMAIN_ADJ} value-set, absence guard) is judged by reading, never by this gate.
 - Report the net: state tests added, tests removed, and the project's test:production LOC ratio beside the coverage figure.
 
 ## Test validity
@@ -46,7 +46,7 @@ Applies when the project's integration suite is lane-shaped (designed with `/qua
 
 ## Affected-first
 
-Root CLAUDE.md § Zero-Tolerance Tests governs: run the tests/scripts you wrote or changed, plus the directly affected ones, first; only once green, proceed to the scope's run — TARGETED re-runs failing+affected only; FULL/POST-MERGE runs the full suite once as the gate, never looped to chase a fix.
+Run the tests/scripts you wrote or changed, plus the directly affected ones, first; only once green, proceed to the scope's run — TARGETED re-runs failing+affected only; FULL/POST-MERGE runs the full suite once as the gate, never looped to chase a fix.
 
 ## Isolation on suspicion
 

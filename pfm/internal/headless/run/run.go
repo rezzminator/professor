@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -79,6 +80,7 @@ type Request struct {
 	Sealed               bool
 	AllowUnsupported     bool
 	Args                 []string
+	Settings             map[string]any
 	Env                  []string
 	// WithoutAccount is reserved for controlled diagnostic/native captures.
 	// It requires a complete explicit Env and never derives identity from a
@@ -204,6 +206,11 @@ func Resolve(request Request) (Request, error) {
 	} else if !rosterPresent {
 		return Request{}, fmt.Errorf("%s account roster is empty; configure an account", request.Engine)
 	}
+	if request.Engine == pfmengine.Claude && request.ConfigDir != "" {
+		if err := claudelaunch.CheckConfigDir(request.Account, request.ConfigDir); err != nil {
+			return Request{}, err
+		}
+	}
 	binaryPath, err := obs.Runner(deps.RealRunner{}).LookPath(binary)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
@@ -218,7 +225,7 @@ func Resolve(request Request) (Request, error) {
 	request.binaryPath = binaryPath
 	// OpenCode needs a model even for a native pass-through: its `run` has no
 	// configured default the way Claude's and Codex's CLIs do.
-	if !request.Native || request.Engine == pfmengine.OpenCode {
+	if request.Engine != pfmengine.Claude && (!request.Native || request.Engine == pfmengine.OpenCode) {
 		prefs := request.Config.Ask.PrefsFor(request.Engine)
 		if request.Engine == pfmengine.OpenCode {
 			codexPrefs := request.Config.Ask.PrefsFor(pfmengine.Codex)
@@ -401,6 +408,9 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		return Result{Engine: request.Engine, ExitCode: -1}, err
 	}
 	request = resolved
+	if err := checkCodexRunLogin(request); err != nil {
+		return Result{Engine: request.Engine, ExitCode: -1}, err
+	}
 	result.Engine, result.Model, result.Effort, result.ExitCode = request.Engine, request.Model, request.Effort, -1
 	for _, option := range request.unsupportedOptions {
 		result.Diagnostics = append(result.Diagnostics, "unsupported control not applied for Codex: "+option)
@@ -497,9 +507,7 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	if request.Env != nil {
 		environment = append([]string(nil), request.Env...)
 	}
-	setEnvironment(
-		environment, request.Engine, request.ConfigDir, request.Env != nil, &environment, subagentCaps(request)...,
-	)
+	setEnvironment(environment, request.Engine, request.ConfigDir, request.Env != nil, &environment)
 	var openCode openCodeRun
 	if request.Engine == pfmengine.OpenCode {
 		openCode, err = startOpenCode(ctx, &request, environment, cwd)
@@ -675,30 +683,23 @@ func arguments(request Request) ([]string, error) {
 		return nil, fmt.Errorf("engine %s does not support headless runs", request.Engine)
 	}
 	args = append(args, request.Args...)
-	// LaunchArgs carries the argv words every launch of this engine must
-	// carry — for Claude, --settings {"outputStyle":"default"}, merged with
-	// the account's resolved theme (empty for WithoutAccount, which reads no
-	// roster) the same binary-pattern EffectiveClaude call action.ClaudeSpawn
-	// makes. A headless run is a door of its own, so it disables Claude
-	// Code's own output style too. These trail the caller's own Args so a
-	// caller-supplied --output-format stays adjacent to the flags it came with.
-	settings := ""
-	if request.Engine == pfmengine.Claude && !request.WithoutAccount {
-		settings = pfmengine.ClaudeSettingsPayload(request.Config.EffectiveClaude(request.Account).Theme)
+	if request.Engine == pfmengine.Claude {
+		callerSettings := false
+		for _, arg := range request.Args {
+			if arg == "--settings" || strings.HasPrefix(arg, "--settings=") {
+				callerSettings = true
+				break
+			}
+		}
+		if !callerSettings {
+			settings, err := claudelaunch.RenderHeadless(request.Settings)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, "--settings", settings)
+		}
 	}
-	args = append(args, pfmengine.LaunchArgsWithSettings(request.Engine, request.Args, settings)...)
 	return args, nil
-}
-
-// subagentCaps is the headless door's share of the sub-agent capacity policy.
-// A headless run spawns sub-agents like any other Claude chat, so it carries
-// the same caps the tmux-borne launches get from action.ClaudeSpawn; Codex and
-// OpenCode never read these names and get nothing.
-func subagentCaps(request Request) []string {
-	if request.Engine != pfmengine.Claude {
-		return nil
-	}
-	return request.Config.EffectiveClaude(request.Account).SubagentEnv()
 }
 
 func setEnvironment(
@@ -707,21 +708,34 @@ func setEnvironment(
 	configDir string,
 	explicit bool,
 	target *[]string,
-	extra ...string,
 ) {
-	dropped := map[string]struct{}{
-		"CLAUDE_CODE_SESSION_ID": {}, "CLAUDECODE": {}, "CLAUDE_CODE_CHILD_SESSION": {},
-		"CLAUDE_CONFIG_DIR": {}, "CODEX_THREAD_ID": {}, "TMUX": {}, "TMUX_PANE": {},
+	dropped := map[string]struct{}{"TMUX": {}, "TMUX_PANE": {}}
+	names := claudelaunch.Hygiene()
+	if explicit {
+		names = claudelaunch.IdentityHygiene()
+	}
+	for _, name := range names {
+		// Preserve the non-Claude doors' existing environment contract.
+		if id != pfmengine.Claude && name == "CLAUDE_PROJECT_DIR" {
+			continue
+		}
+		dropped[name] = struct{}{}
 	}
 	if !explicit {
-		for _, name := range []string{
-			"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M",
-			"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL",
-			"OPENAI_API_KEY", "OPENAI_BASE_URL", "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
-			"CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-			"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
-		} {
+		for _, name := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"} {
 			dropped[name] = struct{}{}
+		}
+		if id == pfmengine.Claude {
+			for _, knob := range claudelaunch.Knobs {
+				if knob.Wire != claudelaunch.WireSettings {
+					continue
+				}
+				for _, target := range strings.Split(knob.Target, "|") {
+					if name, ok := strings.CutPrefix(target, "env."); ok {
+						dropped[name] = struct{}{}
+					}
+				}
+			}
 		}
 	}
 	name := pfmengine.MustLookup(id).HomeEnv
@@ -736,11 +750,12 @@ func setEnvironment(
 		}
 		filtered = append(filtered, value)
 	}
+	if id == pfmengine.Claude {
+		filtered = withLaunchShell(filtered)
+	}
 	if configDir != "" && name != "" {
 		filtered = append(filtered, name+"="+configDir)
 	}
-	filtered = append(filtered, pfmengine.MustLookup(id).LaunchEnv...)
-	filtered = append(filtered, extra...)
 	*target = filtered
 }
 

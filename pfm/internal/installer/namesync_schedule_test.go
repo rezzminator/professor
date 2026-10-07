@@ -15,6 +15,7 @@ import (
 // One value, two schedulers. A host that lowers nameSync.interval and later
 // switches managers must not discover a second, older poll waiting for it.
 func TestNameSyncIntervalRendersIntoBothSchedulers(t *testing.T) {
+	t.Parallel()
 	options := Options{NameSyncInterval: 3 * time.Minute}
 
 	plist, err := readAsset(launchdAsset)
@@ -49,6 +50,7 @@ func TestNameSyncIntervalRendersIntoBothSchedulers(t *testing.T) {
 }
 
 func TestNameSyncSchedulersInvokeApply(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	service, err := readAsset("systemd/pfm-name-sync.service")
 	if err != nil {
@@ -85,6 +87,7 @@ func TestNameSyncSchedulersInvokeApply(t *testing.T) {
 // A caller with no machine config (a direct Options literal) gets the poll the
 // fleet shipped with, never a zero that would make systemd refuse the unit.
 func TestNameSyncIntervalFallsBackToTheShippedDefault(t *testing.T) {
+	t.Parallel()
 	for _, interval := range []time.Duration{0, -time.Hour, time.Second} {
 		options := Options{NameSyncInterval: interval}
 		if got := nameSyncInterval(options); got != pfmconfig.DefaultNameSyncInterval {
@@ -106,12 +109,14 @@ func TestNameSyncIntervalFallsBackToTheShippedDefault(t *testing.T) {
 
 // The timer the renderer names and the unit the installer links are one unit.
 func TestNameSyncTimerUnitIsAManagedUnit(t *testing.T) {
+	t.Parallel()
 	if !slices.Contains(unitNames, nameSyncTimerUnit) {
 		t.Fatalf("unitNames = %v, want it to contain %q", unitNames, nameSyncTimerUnit)
 	}
 }
 
 func TestNameSyncScheduleSummaryReportsBothSchedulers(t *testing.T) {
+	t.Parallel()
 	summary := nameSyncScheduleSummary(Options{NameSyncInterval: 90 * time.Second})
 	for _, want := range []string{"1m30s", "StartInterval=90", "OnUnitInactiveSec=1m30s"} {
 		if !strings.Contains(summary, want) {
@@ -124,12 +129,14 @@ func TestNameSyncScheduleSummaryReportsBothSchedulers(t *testing.T) {
 // must be gone by the time the file lands in the managed root — an unrendered
 // OnUnitInactiveSec is a unit systemd refuses to load at all.
 func TestApplyStagesTheTimerWithTheConfiguredInterval(t *testing.T) {
+	t.Parallel()
 	if schedulerIsLaunchd {
 		t.Skip("systemd units are not staged on a launchd host")
 	}
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		NameSyncInterval: 4 * time.Minute,
 	}); err != nil {
 		t.Fatal(err)

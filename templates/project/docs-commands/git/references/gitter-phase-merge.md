@@ -56,15 +56,18 @@ For each roster project, compare worktree `.env.local`/`.env.test` with main; ap
 
 ## 5. Archive the audit trail, then clean up worktree — UNCONDITIONAL
 
-**This step runs in the SAME dispatch as the merge itself — a MERGE that returns with `.worktrees/{name}` still on disk is INCOMPLETE.** The DOCS-COMMIT `Archive:` parameter governs docs archival only — `Archive: none` never skips this step. Salvage before removal: any build doc dirty INSIDE the worktree's copy (`$WORKTREE/docs/dev/builds/**` — executors sometimes write through worktree-relative paths) diffs against its root counterpart; unique or differing content is copied root-side first. Removal never touches the BRANCH (`pipeline/{name}` stays as the revert path).
+**This step runs in the SAME dispatch as the merge itself — a MERGE that returns with `.worktrees/{name}` still on disk is INCOMPLETE.** The DOCS-COMMIT `Archive:` parameter governs docs archival only — `Archive: none` never skips this step. Salvage before removal: any build doc dirty INSIDE the worktree's copy (`$WORKTREE/docs/dev/builds/**` — executors sometimes write through worktree-relative paths) diffs against its root counterpart; unique or differing content is copied root-side first. Removal deletes the merged `pipeline/{name}` branch unless the brief says to keep it; the merge commit on main is the revert path.
 
 ```bash
 bash .claude/scripts/checkpoint.sh archive "$WORKTREE" "$DOCS/audit-trail.json"
-./.claude/scripts/worktree.sh remove $PIPELINE
+./.claude/scripts/worktree.sh remove $PIPELINE --delete-branch
 ls .worktrees/   # VERIFY: $PIPELINE must be absent — if listed, the merge is not done; retry/report, never proceed silently
+git branch --list "pipeline/$PIPELINE"  # VERIFY: must print nothing unless the brief says to keep the branch
 ```
 
-The completion report's final line states `worktree removed: {name}` — the orchestrator treats a MERGE report without it as unfinished.
+When the brief says to keep the branch, run `./.claude/scripts/worktree.sh remove $PIPELINE` instead. A branch still listed when deletion was required means the MERGE is unfinished: report the failure, even if the script printed "Branch deleted".
+
+The completion report's final line states `worktree removed: {name} · branch {deleted|kept}` — the orchestrator treats a MERGE report without it as unfinished.
 
 ## 6. Update § Gotchas (only if needed)
 

@@ -244,3 +244,23 @@ func TestProcessKilledWithAnErrorIsAnErrorRecord(t *testing.T) {
 	wantField(t, records[1], "op", "kill")
 	wantField(t, records[1], FieldErr, "kill process group: operation not permitted")
 }
+
+// TestProcessStderrEmitsAnUnterminatedSpewOnceItPassesTheCap: a sidecar
+// writing to stderr with no line end (native output on its fd 1, which is
+// stderr now) is emitted as a line past maxPartialLine instead of growing the
+// partial-line buffer for the sidecar's whole life.
+func TestProcessStderrEmitsAnUnterminatedSpewOnceItPassesTheCap(t *testing.T) {
+	t.Parallel()
+	var lines []string
+	writer := &lineWriter{next: io.Discard, emit: func(line string) { lines = append(lines, line) }}
+	chunk := bytes.Repeat([]byte("x"), 1<<10)
+	for range 3 * maxPartialLine / len(chunk) {
+		if _, err := writer.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(lines) == 0 || writer.partial.Len() > maxPartialLine+len(chunk) {
+		t.Fatalf("after %d KiB with no newline: %d lines emitted, %d bytes held; want the spew emitted at the cap",
+			3*maxPartialLine>>10, len(lines), writer.partial.Len())
+	}
+}

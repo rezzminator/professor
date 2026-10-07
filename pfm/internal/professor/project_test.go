@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestProfessorDoctorProjectLine(t *testing.T) {
@@ -78,8 +80,8 @@ func TestGoneUpstreamReportRecommendsDeletingRetiredFile(t *testing.T) {
 
 // TestProfessorDoctorReviewRequiredMovesWarningTally pins L3-F15: `pfm doctor`
 // must not stay clean while a managed project has review-required drift.
-// `pfm update check` already returns exit 3 in this exact state
-// (renderProjectCheck); PrintDoctor's return value feeds straight into
+// `pfm doctor --project-updates` already returns exit 1 in this exact state
+// (RunProjectUpdates); PrintDoctor's return value feeds straight into
 // doctor's own warning tally (doctor.go's `tally.warnings +=
 // professor.PrintDoctor(...)`), so PrintDoctor returning 0 here is the bug —
 // not a missing wire-up downstream.
@@ -121,7 +123,7 @@ func TestProfessorDoctorReviewRequiredMovesWarningTally(t *testing.T) {
 
 	// Upstream moves the template forward — the project's pin is now stale,
 	// so buildProjectReport classifies it projectUpdated and reviewRequired()
-	// is 1, exactly the state `pfm update check` reports with exit 3.
+	// is 1, exactly the state `pfm doctor --project-updates` reports with exit 1.
 	if err := os.WriteFile(template, []byte("current v2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +135,7 @@ func TestProfessorDoctorReviewRequiredMovesWarningTally(t *testing.T) {
 	}
 	if warnings == 0 {
 		t.Fatalf(
-			"PrintDoctor() warnings=%d with review-required drift outstanding — doctor stays clean while `pfm update check` exits 3 in the same state",
+			"PrintDoctor() warnings=%d with review-required drift outstanding — doctor stays clean while `pfm doctor --project-updates` exits 1 in the same state",
 			warnings,
 		)
 	}
@@ -227,11 +229,116 @@ func TestSelfHostedPinReviewLineAgainstAGitStorePrintsTheLocalFileDiff(t *testin
 	}
 }
 
+// TestUpdatedRowPrintsUpstreamDiffHeadingIndentedLinesAndGuidance pins the
+// 0-contracts § A `UPDATED` row body: the git heading, every diff line
+// indented six spaces, then the port-and-pin guidance line.
+func TestUpdatedRowPrintsUpstreamDiffHeadingIndentedLinesAndGuidance(t *testing.T) {
+	report := projectReport{
+		Root:   "/work/project",
+		Store:  Store{Root: "/work/blueprint", Templates: "/work/blueprint/templates/project", SHA: "def5678"},
+		Counts: map[projectStatus]int{projectUpdated: 1},
+		Items: []projectReportItem{{
+			Status:   projectUpdated,
+			Local:    "CLAUDE.md",
+			Template: "CLAUDE.md",
+			Pin:      FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"},
+			Diff:     "-old line\n+new line\n",
+		}},
+	}
+	var output bytes.Buffer
+	writeProjectHuman(&output, report)
+	text := output.String()
+	for _, want := range []string{
+		"upstream change: git -C /work/blueprint diff abc1234 -- templates/CLAUDE.md",
+		"      -old line",
+		"      +new line",
+		"port what applies into CLAUDE.md, keep the project's own edits, then: pfm update pin CLAUDE.md",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("UPDATED row missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants pins the two diff
+// failure/empty variants: an unreadable diff replaces the heading and body
+// with one UNREADABLE line, and an empty diff replaces it with one EMPTY
+// line naming a runnable hand comparison — both keep the guidance line.
+func TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants(t *testing.T) {
+	base := func(item projectReportItem) projectReport {
+		return projectReport{
+			Root:   "/work/project",
+			Store:  Store{Root: "/work/blueprint", Templates: "/work/blueprint/templates/project", SHA: "def5678"},
+			Counts: map[projectStatus]int{projectUpdated: 1},
+			Items:  []projectReportItem{item},
+		}
+	}
+
+	var unreadable bytes.Buffer
+	writeProjectHuman(&unreadable, base(projectReportItem{
+		Status:    projectUpdated,
+		Local:     "CLAUDE.md",
+		Template:  "CLAUDE.md",
+		Pin:       FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"},
+		DiffError: "git diff: git exited with status 128: fatal: bad revision 'abc1234'",
+	}))
+	unreadableText := unreadable.String()
+	if !strings.Contains(
+		unreadableText,
+		"upstream change UNREADABLE — git diff: git exited with status 128: fatal: bad revision 'abc1234'",
+	) {
+		t.Fatalf("UPDATED row missing the UNREADABLE line:\n%s", unreadableText)
+	}
+	if !strings.Contains(
+		unreadableText,
+		"port what applies into CLAUDE.md, keep the project's own edits, then: pfm update pin CLAUDE.md",
+	) {
+		t.Fatalf("UNREADABLE row missing the guidance line:\n%s", unreadableText)
+	}
+	withNew := base(projectReportItem{
+		Status: projectUpdated, Local: "CLAUDE.md", Template: "CLAUDE.md",
+		Pin: FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"}, DiffError: "bad revision",
+	})
+	withNew.Counts[projectNew] = 1
+	withNew.Items = append(withNew.Items, projectReportItem{Status: projectNew, Template: "project/NEW.md"})
+	var precedence bytes.Buffer
+	writeProjectHuman(&precedence, withNew)
+	wantFailed := "FAILED — 1 item(s) could not be read; nothing was written."
+	if got := strings.TrimSpace(precedence.String()); !strings.HasSuffix(got, wantFailed) {
+		t.Fatalf("unreadable diff plus NEW terminal = %q", got)
+	}
+
+	var empty bytes.Buffer
+	writeProjectHuman(&empty, base(projectReportItem{
+		Status:   projectUpdated,
+		Local:    "CLAUDE.md",
+		Template: "CLAUDE.md",
+		Pin:      FilePin{Template: "CLAUDE.md", PinnedSHA: "abc1234"},
+		Diff:     "",
+	}))
+	emptyText := empty.String()
+	want := "upstream change EMPTY — the pin was taken from an uncommitted or untracked store file, " +
+		"so git cannot show the change; compare by hand: diff " +
+		"/work/project/CLAUDE.md /work/blueprint/templates/project/CLAUDE.md"
+	if !strings.Contains(emptyText, want) {
+		t.Fatalf("UPDATED row missing the EMPTY line %q:\n%s", want, emptyText)
+	}
+	if !strings.Contains(
+		emptyText,
+		"port what applies into CLAUDE.md, keep the project's own edits, then: pfm update pin CLAUDE.md",
+	) {
+		t.Fatalf("EMPTY row missing the guidance line:\n%s", emptyText)
+	}
+	if got := strings.TrimSpace(emptyText); !strings.HasSuffix(got, "REVIEW REQUIRED — 1 items; nothing was written.") {
+		t.Fatalf("EMPTY diff terminal = %q", got)
+	}
+}
+
 func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 	var human bytes.Buffer
 	writeProjectUnmanaged(&human, false)
 	if got := human.String(); !strings.HasPrefix(got, "NOT-MANAGED — ") ||
-		!strings.Contains(got, "pfm update check") || strings.Contains(got, "pfm init") {
+		!strings.Contains(got, "pfm doctor --project-updates") || strings.Contains(got, "pfm init") {
 		t.Fatalf("WriteProjectUnmanaged(human) = %q", got)
 	}
 
@@ -244,5 +351,26 @@ func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 	terminal, ok := object["terminal"].(string)
 	if !ok || !strings.HasPrefix(terminal, "NOT-MANAGED — ") {
 		t.Fatalf("JSON terminal=%#v", object["terminal"])
+	}
+}
+
+func TestRunPostUpdateUnreadableRoot(t *testing.T) {
+	root := t.TempDir()
+	baseline := BaselinePath(root)
+	if err := os.MkdirAll(filepath.Dir(baseline), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(baseline, baseline); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := RunProjectUpdate("", []string{"--root", root}, &stdout, &stderr, config.Runtime{})
+	if code != 3 || !strings.HasPrefix(stdout.String(), "FAILED — UNREADABLE ") {
+		t.Fatalf(
+			"RunProjectUpdate() code=%d stdout=%q stderr=%q, want 3 and FAILED — UNREADABLE",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }

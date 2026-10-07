@@ -86,6 +86,9 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 			return err
 		}
 	}
+	// This pass is where a continued-in handoff is recorded, so it is where
+	// the chat's reminders follow it into the new session.
+	database.CarryContinuedReminders(ctx)
 	return nil
 }
 

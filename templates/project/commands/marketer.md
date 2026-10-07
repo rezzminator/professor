@@ -204,9 +204,9 @@ Marketing dev tasks for the flight pipeline.
 
 - Read first: `{PROJECT}/CLAUDE.md`, `app/`, `messages/*.json`, `src/components/`, Officer posture, positioning, competitive intel. Tasks written without that context are guesses.
 - Ask the user: goal (waitlist, conference, awareness)? audience priority? social proof available? web-only or broader? deadlines? new certifications to market?
-- Each task states what, why, key behaviors, and boundaries; group by category (SEO & Technical, Content & Copy, Conversion, Analytics, i18n), number sequentially, and flag compliance inline as `[WATCH: ...]` or `[BLOCKED: ...]`. Routing, size and flight names stay out — `flights-speccer` decides those.
-- Produce the task list as `# Tasks`, then `## {Category} ({N} tasks)`, then one numbered line per task carrying its file refs and flags; save it to `/tmp/marketer-flight-{YYYY-MM-DD}.md` as the record — the flight directory belongs to `flights-speccer` alone, and spec's input is a task-list argument, never a direct flight-directory write.
-- Report the path and task count, then hand the same task list to `/flights:spec {task list}` (spec's bare `<tasks>` inline-argument form) — the flight continues `/flights:spec` → `flights-speccer` (which writes the flight directory) → an orchestrate command.
+- Each task states what, why, key behaviors, and boundaries; group by category (SEO & Technical, Content & Copy, Conversion, Analytics, i18n), number sequentially, and flag compliance inline as `[WATCH: ...]` or `[BLOCKED: ...]`. Routing, size and flight names stay out — `flights-foreman` decides those.
+- Produce the task list as `# Tasks`, then `## {Category} ({N} tasks)`, then one numbered line per task carrying its file refs and flags; save it to `/tmp/marketer-flight-{YYYY-MM-DD}.md` as the record — spec's input is a task-list argument, never a direct flight-directory write.
+- Report the path and task count, then hand the same task list to `/flights:spec {task list}` (spec's inline-argument form) — the flight continues `/flights:spec` → `flights-foreman` → `flights-lander`.
 
 ## Competitive Messaging
 
@@ -254,16 +254,6 @@ Segments — motivator, blocker, channel:
 ## Response shape
 
 Diagnosis, then prescription, then the numbers where they exist, then 1–3 next actions the user can take today. Scale down for short questions; diagnosis plus prescription is the floor.
-
-## Ghostwriter
-
-High-stakes external copy — one-pagers, investor materials, conference abstracts, partnership proposals, key LinkedIn posts, founder-voice pieces — goes through the ghostwriter skill (`~/.claude/skills/ghostwriter/SKILL.md`) once the marketing draft is done: pick the profile, run Mode B, keep the "Rules applied" note.
-
-- `paul-graham` → investor decks, one-pagers, conference abstracts, partnership proposals, founder LinkedIn posts.
-- `human` (the base layer under every profile) → {USER_PERSONA}-facing web copy, {MARKET_SEGMENT} materials, email sequences to {USER_PERSONA}s; PG's register is too startup-bro for a professional buyer at the end of a long day.
-- Other profiles: `~/.claude/skills/ghostwriter/profiles/`.
-
-Skip it for internal analysis, keyword reports, flight task files, and quick feedback.
 
 ## Constraints
 

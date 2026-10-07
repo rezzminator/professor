@@ -4,6 +4,8 @@
 
 Every regeneration agent reads this file and applies it uniformly. One canonical token per concept — never invent a synonym.
 
+`pfm init --render` substitutes every token registered above § Runtime metavariables from `.professor/manifest.json` `tokens`, once at install, only in scaffolded files still as scaffolded; it finds the runtime list by that heading, so the heading text starts `## Runtime metavariables`; a multi-project install's per-roster-entry tokens and pattern blocks stay the interview's; no update ever re-renders.
+
 ## Identity
 
 | Source value | Placeholder |
@@ -185,7 +187,7 @@ This makes the codex-touched files a 3-way merge — read all three:
 2. **Current blueprint template** (re-inject the Codex sections/lines/refs that live deleted).
 3. **This map** (apply placeholders).
 
-Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), `commands/pcm.md` (keep ALL Codex-management: every Critical invariant, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` OUT of the allow-list — generated mirrors are rebuilt by their compiler, never formatted; a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
+Codex-touched shipped templates: root `CLAUDE.md` (keep the `# Runtime` → `## Codex` section + `.codex/` refs), `commands/pcm.md` (keep ALL Codex-management: every Critical invariant, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` OUT of the allow-list — generated mirrors are rebuilt by their compiler, never formatted; a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
 
 ## Ignored artifacts (do NOT ship, drop references)
 
@@ -200,7 +202,7 @@ These slot into the concept families above — registered here to close prior ga
 | the AI service's own name / codename (the source's internal AI-service brand) | `{AI_SERVICE_NAME}` | Identity |
 | the test database name (e.g. `<project>_test`) | `{TEST_DB_NAME}` | Tech stack |
 | transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
-| illustrative persona example — a domain risk (Three lenses at once, § MANDATORY Rules → Meta) | `{DOMAIN_RISK_EXAMPLE}` | Persona |
+| illustrative persona example — a domain risk (Three lenses at once, § Rules → Meta) | `{DOMAIN_RISK_EXAMPLE}` | Persona |
 | the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
 | the Codex model id named per tier in `templates/project/scripts/build-codex.mjs`'s `MODEL_MAP` (smart / mechanical / collector) | `{CODEX_MODEL_SMART}` / `{CODEX_MODEL_MECHANICAL}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
 | the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
@@ -228,3 +230,5 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |
+| `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
+| `{HHMMSS}` | `global/agents/agent-optimizer.md` | the UTC time of the report's write, hours, minutes and seconds |

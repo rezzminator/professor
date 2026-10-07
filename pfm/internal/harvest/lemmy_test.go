@@ -71,6 +71,7 @@ func lemmyWant(t *testing.T) []string {
 // renders once, a reply nested under its parent; the counts reconcile, the
 // artifact is complete, and a second harvest is identical.
 func TestLemmyPostLoadsEveryComment(t *testing.T) {
+	t.Parallel()
 	for host, page := range map[string]string{
 		"lemmy.world": "lemmy/challenge.html", "lemmy.example": "lemmy/post-page.html",
 	} {
@@ -119,6 +120,7 @@ func TestLemmyPostLoadsEveryComment(t *testing.T) {
 // shape: content empty, deleted true) renders as a mark its replies still
 // nest under, named apart from the stated count, which leaves it out.
 func TestLemmyDeletedCommentIsNamed(t *testing.T) {
+	t.Parallel()
 	site := lemmySite(t, "lemmy.example", "lemmy/post-page.html")
 	var page lemmyFixturePage
 	if err := json.Unmarshal([]byte(site.answers[lemmyCommentsKey("lemmy.example", 1)]), &page); err != nil {
@@ -154,6 +156,7 @@ func TestLemmyDeletedCommentIsNamed(t *testing.T) {
 // TestLemmyUnansweredPageFlagsThePartial: a comment page the API would not answer
 // is named, and the comments it held count as not loaded.
 func TestLemmyUnansweredPageFlagsThePartial(t *testing.T) {
+	t.Parallel()
 	site := lemmySite(t, "lemmy.example", "lemmy/post-page.html")
 	site.status = map[string]int{lemmyCommentsKey("lemmy.example", 2): http.StatusInternalServerError}
 	result := site.harvester(t).FetchWithOptions(context.Background(), "https://lemmy.example"+lemmyPath,

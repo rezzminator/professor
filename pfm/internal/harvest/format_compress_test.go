@@ -20,6 +20,7 @@ const bz2Document = "QlpoOTFBWSZTWa60UbkAAALZgAAQQAIQAD4j3hAgACKBhA09T1CmTEyDIwI
 // decompressed and routed by its inner bytes. Watched FAILING before
 // format_compress.go: each was refused as an archive.
 func TestFormatCompressedDocumentIsUnpacked(t *testing.T) {
+	t.Parallel()
 	bz2, err := base64.StdEncoding.DecodeString(bz2Document)
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +60,7 @@ func TestFormatCompressedDocumentIsUnpacked(t *testing.T) {
 // the cap is a named failure stating the cap, for a page and a local file.
 // Watched FAILING before format_compress.go (an archive refusal, no cap).
 func TestFormatDecompressionBombIsNamed(t *testing.T) {
+	t.Parallel()
 	bomb := formatGzip(t, make([]byte, compressedDocumentCapForTest+1))
 	h, root := formatLocal(t, tagStripConverter(), map[string][]byte{"bomb.txt.gz": bomb})
 	got := h.FetchPublic(context.Background(), filepath.Join(root, "bomb.txt.gz"), FetchOptions{Refresh: true})

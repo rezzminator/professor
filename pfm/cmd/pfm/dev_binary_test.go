@@ -9,7 +9,7 @@ import (
 )
 
 func TestDevBinaryIsAbsentOrBuiltFromCurrentModule(t *testing.T) {
-	path := filepath.Join("..", "..", "pfm.dev")
+	path := filepath.Join("..", "..", "..", "tmp", "bin", "pfm.dev")
 	_, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return

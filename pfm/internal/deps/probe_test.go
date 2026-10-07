@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+const hungProbeTimeout = 250 * time.Millisecond
+
+// slowSelfDoctorTimeout bounds the slow-but-healthy self-doctor. The same bound
+// covers its quick `doctor --help`, and the first exec of a freshly written stub
+// costs up to ~553ms on macOS under suite load, so 1s stays above that and
+// still far below the 30 s sleep the summary call must outrun.
+const slowSelfDoctorTimeout = 1 * time.Second
+
 func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	directory := t.TempDir()
 	writeProbeStub(t, directory, "tmux-ok", "printf 'tmux 3.4\\n'")
@@ -40,13 +48,12 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 		},
 		{Name: "garbage", Command: "garbage", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
 		{Name: "missing", Command: "absent", Required: true},
-		{Name: "timeout", Command: "timeout", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
 		{Name: "failed", Command: "failed", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
 	}
 	results := Probe(context.Background(), entries, ProbeOptions{
 		GOOS: "linux", Timeout: ProbeTimeout,
 	})
-	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateTimeout, StateBroken}
+	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateBroken}
 	for index := range want {
 		if results[index].State != want[index] {
 			t.Errorf(
@@ -62,11 +69,15 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	if results[0].Version != "3.4" || results[1].Version != "1.7" {
 		t.Fatalf("parsed versions ok=%q old=%q", results[0].Version, results[1].Version)
 	}
-	if !strings.HasPrefix(results[4].Error, "timeout (") || !strings.Contains(results[4].Error, ProbeTimeout.String()) {
+	hung := Probe(context.Background(), []Entry{{Name: "timeout", Command: "timeout", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}}, ProbeOptions{GOOS: "linux", Timeout: hungProbeTimeout})[0]
+	if hung.State != StateTimeout {
+		t.Fatalf("hung state=%s error=%q, want StateTimeout", hung.State, hung.Error)
+	}
+	if !strings.HasPrefix(hung.Error, "timeout (") || !strings.Contains(hung.Error, hungProbeTimeout.String()) {
 		t.Fatalf(
 			"timeout error=%q, want it to name the enforced bound %q rather than a bare sentinel",
-			results[4].Error,
-			ProbeTimeout,
+			hung.Error,
+			hungProbeTimeout,
 		)
 	}
 }
@@ -83,27 +94,24 @@ func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
 	writeProbeStub(t, directory, "broken", "printf 'permission denied by fixture\\n'; exit 7")
 	t.Setenv("PATH", directory)
 
-	entries := []Entry{
-		{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
-		{Name: "broken", Command: "broken", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
-	}
-	results := Probe(context.Background(), entries, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})
+	hung := Probe(context.Background(), []Entry{{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}}, ProbeOptions{GOOS: "linux", Timeout: hungProbeTimeout})[0]
+	broken := Probe(context.Background(), []Entry{{Name: "broken", Command: "broken", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}}, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})[0]
 
-	if results[0].State != StateTimeout {
+	if hung.State != StateTimeout {
 		t.Fatalf(
 			"hung state=%s error=%q, want StateTimeout — an outran bound must not read as broken",
-			results[0].State,
-			results[0].Error,
+			hung.State,
+			hung.Error,
 		)
 	}
-	if !strings.HasPrefix(results[0].Error, "timeout (") || !strings.Contains(results[0].Error, ProbeTimeout.String()) {
-		t.Fatalf("hung error=%q, want the enforced bound named", results[0].Error)
+	if !strings.HasPrefix(hung.Error, "timeout (") || !strings.Contains(hung.Error, hungProbeTimeout.String()) {
+		t.Fatalf("hung error=%q, want the enforced bound named", hung.Error)
 	}
-	if results[1].State != StateBroken {
+	if broken.State != StateBroken {
 		t.Fatalf(
 			"broken state=%s error=%q, want StateBroken — a genuinely broken tool must not be relabelled as a timeout",
-			results[1].State,
-			results[1].Error,
+			broken.State,
+			broken.Error,
 		)
 	}
 }
@@ -406,14 +414,6 @@ exit 2`)
 	}
 }
 
-func TestRegistryDoesNotAdvertiseRetiredGCloud(t *testing.T) {
-	for _, entry := range Registry(Options{Home: t.TempDir(), GOOS: "linux", GOARCH: "amd64"}) {
-		if entry.Name == "gcloud" || entry.Command == "gcloud" {
-			t.Fatalf("retired gcloud dependency remains registered: %#v", entry)
-		}
-	}
-}
-
 func TestResolveRejectsRegisteredOffPlatformCommand(t *testing.T) {
 	var command string
 	switch runtime.GOOS {
@@ -501,26 +501,21 @@ exec /bin/sleep 30`)
 			SelfDoctorArgs: []string{"doctor"},
 		},
 	}
-	// The separation that matters is between the bound and the hung command's
-	// 30s sleep, never between the bound and a healthy stub's startup. A 250ms
-	// self-doctor bound sat BELOW this platform's own cost to launch the very
-	// fixtures written above — on macOS the first exec of a freshly written
-	// script costs ~120ms median and ~553ms peak against ~6ms warm — so under
-	// suite load the unsupported stub's --help was cancelled before it could
-	// answer, and a healthy fixture reported itself as a broken engine. Match
-	// production's ProbeTimeout, exactly as the sibling regression below does:
-	// still six times clear of the 30s sleep the hung fixture must outrun,
-	// while no longer racing the operating system to start a shell.
-	results := Probe(context.Background(), entries, ProbeOptions{
+	unsupported := Probe(context.Background(), entries[:1], ProbeOptions{
 		GOOS:              "linux",
 		Timeout:           ProbeTimeout,
 		SelfDoctorTimeout: ProbeTimeout,
-	})
-	if results[0].State != StateOK || results[0].SelfDoctor != "unavailable" {
-		t.Fatalf("unsupported self-doctor=%#v", results[0])
+	})[0]
+	hung := Probe(context.Background(), entries[1:], ProbeOptions{
+		GOOS:              "linux",
+		Timeout:           ProbeTimeout,
+		SelfDoctorTimeout: hungProbeTimeout,
+	})[0]
+	if unsupported.State != StateOK || unsupported.SelfDoctor != "unavailable" {
+		t.Fatalf("unsupported self-doctor=%#v", unsupported)
 	}
-	if results[1].State != StateBroken || results[1].SelfDoctor != "broken" {
-		t.Fatalf("hung self-doctor=%#v", results[1])
+	if hung.State != StateBroken || hung.SelfDoctor != "broken" {
+		t.Fatalf("hung self-doctor=%#v", hung)
 	}
 }
 
@@ -574,16 +569,6 @@ func TestFirstVersionParsesRealCommandVersionStrings(t *testing.T) {
 // broken engine and block install preflight; it must be named as a timeout
 // distinct from a real failure.
 func TestProbeSelfDoctorTimeoutIsNotConflatedWithBroken(t *testing.T) {
-	// Subprocess startup competes with every other package during `go test
-	// ./...`; 200ms made the quick --version/--help probes fail under ordinary
-	// suite contention before this test ever reached the deliberate timeout.
-	// On macOS the first exec of a freshly written executable — exactly what
-	// writeProbeStub hands each subtest — costs ~120ms median and ~553ms peak
-	// (vs ~6ms warm, measured over 60 stubs on an idle box), and `go test
-	// ./...` execs dozens of those concurrently; matching production's
-	// ProbeTimeout leaves ample scheduling room instead of re-deriving a
-	// shorter number that flakes under load.
-	const timeout = ProbeTimeout
 	durationPattern := regexp.MustCompile(`\d+(\.\d+)?\s*(ms|s|m)\b`)
 
 	t.Run("slow but healthy self-doctor stays ok and is named as a timeout", func(t *testing.T) {
@@ -602,7 +587,7 @@ exit 2`)
 			Parse:          firstVersion,
 			SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"},
 		}
-		result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: timeout})[0]
+		result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout, SelfDoctorTimeout: slowSelfDoctorTimeout})[0]
 		if result.State != StateOK {
 			t.Fatalf(
 				"state=%s error=%q, want ok — a self-doctor that outran the probe timeout must not read as a broken engine",
@@ -639,7 +624,7 @@ exit 2`)
 			Parse:          firstVersion,
 			SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"},
 		}
-		result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: timeout})[0]
+		result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})[0]
 		if result.State != StateBroken || result.SelfDoctor != "broken" {
 			t.Fatalf("result=%#v, want StateBroken with self_doctor=broken", result)
 		}
@@ -700,7 +685,7 @@ func TestProbeRecordsEachVersionProbe(t *testing.T) {
 func writeProbeStub(t *testing.T, directory, name, body string) {
 	t.Helper()
 	path := filepath.Join(directory, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+	if err := writeExecutableUnderForkLock(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

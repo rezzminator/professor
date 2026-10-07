@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".local", "bin", "claude")
 	nativeOne := filepath.Join(home, ".local", "share", "claude", "versions", "1.0.0")
@@ -18,7 +21,7 @@ func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(binary), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -32,7 +35,8 @@ func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
 	apply := func() {
 		t.Helper()
 		if _, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -80,6 +84,7 @@ func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
 }
 
 func TestClaudeLauncherAssetIsExactExecShim(t *testing.T) {
+	t.Parallel()
 	raw, err := readAsset("bin/claude")
 	if err != nil {
 		t.Fatal(err)
@@ -103,13 +108,20 @@ func TestClaudeLauncherAssetIsExactExecShim(t *testing.T) {
 	t.Fatal("bin/claude missing from staged assets")
 }
 
-func TestAssetRenderersRefuseMissingTemplateMarkers(t *testing.T) {
-	if _, err := renderShimAsset([]byte("marker drift\n"), Options{}); err == nil {
-		t.Fatal("shim renderer silently accepted missing markers")
+func TestStaticShimIsNotStaged(t *testing.T) {
+	assets, err := assetFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range assets {
+		if asset.path == "shim/pfm.zsh" {
+			t.Fatal("static clone shim staged under managed root")
+		}
 	}
 }
 
 func TestResolveClaudeBinaryUsesConfiguredThenNewestThenPATH(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -147,6 +159,7 @@ func TestResolveClaudeBinaryUsesConfiguredThenNewestThenPATH(t *testing.T) {
 }
 
 func TestResolveClaudeBinaryUsesRelativeConfiguredCommandFromSuppliedPATH(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -168,6 +181,7 @@ func TestResolveClaudeBinaryUsesRelativeConfiguredCommandFromSuppliedPATH(t *tes
 }
 
 func TestResolveClaudeBinaryMissingRelativeConfiguredCommandFails(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	newest := filepath.Join(home, ".local", "share", "claude", "versions", "9.9.9")
 	if err := os.MkdirAll(filepath.Dir(newest), 0o700); err != nil {
@@ -191,6 +205,7 @@ func TestResolveClaudeBinaryMissingRelativeConfiguredCommandFails(t *testing.T) 
 }
 
 func TestResolveClaudeBinaryDefaultNameStillUsesNativeFallback(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	newest := filepath.Join(home, ".local", "share", "claude", "versions", "9.9.9")
 	if err := os.MkdirAll(filepath.Dir(newest), 0o700); err != nil {
@@ -205,6 +220,7 @@ func TestResolveClaudeBinaryDefaultNameStillUsesNativeFallback(t *testing.T) {
 }
 
 func TestResolveClaudeBinarySkipsManagedAliasesAndHonorsPATHOrder(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := managedClaudeLauncher(home)
 	if err := os.MkdirAll(filepath.Dir(managed), 0o700); err != nil {
@@ -258,6 +274,7 @@ func TestResolveClaudeBinaryTreatsEmptyPATHComponentAsCurrentDirectory(t *testin
 }
 
 func TestResolveClaudeBinaryNamesAbsenceAndInspectionFailure(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	if resolved, err := ResolveClaudeBinary(
 		home,
@@ -283,6 +300,7 @@ func TestResolveClaudeBinaryNamesAbsenceAndInspectionFailure(t *testing.T) {
 }
 
 func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := canonicalClaudeLauncher(home)
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
@@ -300,6 +318,7 @@ func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
 }
 
 func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := canonicalClaudeLauncher(home)
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
@@ -308,7 +327,7 @@ func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(managedClaudeLauncher(home)), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(managedClaudeLauncher(home), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(managedClaudeLauncher(home), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managedClaudeLauncher(home), canonical); err != nil {
@@ -318,7 +337,7 @@ func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(elsewhere), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(elsewhere, []byte("#!/bin/sh\nexit 127\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(elsewhere, []byte("#!/bin/sh\nexit 127\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -330,5 +349,73 @@ func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
 	}
 	if ClaudeAbsent(home, elsewhere, 127) {
 		t.Fatal("a non-pfm claude at exit 127 was wrongly treated as absent")
+	}
+}
+
+func TestResolveClaudeBinaryNeverReturnsAnyHomesLauncherShim(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir() // owns no launcher: rejection cannot lean on this home
+	shimBody, err := readAsset("bin/claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := managedClaudeLauncher(filepath.Join(t.TempDir(), "other-home"))
+	if err := os.MkdirAll(filepath.Dir(foreign), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, foreign)
+	dirA, dirB, dirC := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.Symlink(foreign, filepath.Join(dirA, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	copied := filepath.Join(dirB, "claude")
+	if err := testjail.WriteExecutable(copied, shimBody, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realClaude := filepath.Join(dirC, "claude")
+	writeExecutable(t, realClaude)
+
+	join := func(directories ...string) string { return strings.Join(directories, string(os.PathListSeparator)) }
+	resolved, err := ResolveClaudeBinary(home, "", join(dirA, dirB, dirC))
+	if err != nil || resolved != realClaude {
+		t.Fatalf("resolution=%q err=%v, want the real binary %q past both shims", resolved, err, realClaude)
+	}
+	if resolved, err := ResolveClaudeBinary(home, "", join(dirA, dirB)); !errors.Is(err, ErrClaudeBinaryNotFound) {
+		t.Fatalf("shims only: resolution=%q err=%v, want ErrClaudeBinaryNotFound", resolved, err)
+	}
+	if resolved, err := ResolveClaudeBinary(home, copied, join(dirA, dirB)); err == nil && resolved == copied {
+		t.Fatalf("configured shim copy %q was returned", copied)
+	}
+}
+
+func TestResolveClaudeBinaryAcceptsALargeBinaryMentioningTheShimMarker(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	directory := t.TempDir()
+	body := "#!/bin/sh\n# internal claude-launch\n" + strings.Repeat("x", claudeShimMaxBytes) + "\n"
+	big := filepath.Join(directory, "claude")
+	if err := testjail.WriteExecutable(big, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveClaudeBinary(home, "", directory)
+	if err != nil || resolved != big {
+		t.Fatalf("resolution=%q err=%v, want the oversized binary %q accepted", resolved, err, big)
+	}
+}
+
+func TestResolveClaudeBinaryUnreadableCandidate(t *testing.T) {
+	home, dir := t.TempDir(), t.TempDir()
+	path := filepath.Join(dir, "claude")
+	if err := testjail.WriteExecutable(path, []byte("0123456789"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := readClaudeShim
+	readClaudeShim = func(string) ([]byte, error) { return nil, errors.New("input/output error") }
+	t.Cleanup(func() { readClaudeShim = original })
+	if !isPfmClaudeShim(path) {
+		t.Error("unreadable candidate did not count as a shim")
+	}
+	if resolved, err := ResolveClaudeBinary(home, "", dir); !errors.Is(err, ErrClaudeBinaryNotFound) {
+		t.Errorf("resolution = %q, error = %v; want ErrClaudeBinaryNotFound", resolved, err)
 	}
 }

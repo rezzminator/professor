@@ -1,10 +1,10 @@
 // Package harnessprompts owns the fleet's harness-prompt tree and embeds it
 // into the binary: the shared head and tail, one middle per engine, and
 // Claude's drift baselines. The tree lives HERE and nowhere else — the
-// installer composes and stages from this package, and `pfm doctor` hashes
+// installer composes from this package, and `pfm doctor` hashes
 // what a binary carries against this same directory in the blueprint clone,
 // so a binary older than the templates is NAMED rather than left quietly
-// staging last month's prompt.
+// using last month's prompt.
 package harnessprompts
 
 import (
@@ -15,8 +15,7 @@ import (
 )
 
 // DirName is this directory's own name — the tree sits at pfm/<DirName> in
-// the blueprint clone, and the composed prompts stage into <DirName> under
-// the managed root. Every caller spells it from here.
+// the blueprint clone. Every caller spells it from here.
 const DirName = "harness-prompts"
 
 // tree is the embedded tree, rooted at this directory: "README.md",
@@ -25,11 +24,10 @@ const DirName = "harness-prompts"
 // named one at a time rather than swept up by a wildcard, which would also
 // match this package's own sources, and a directory pattern silently skips
 // any name beginning with "." or "_" — so a new engine directory has to be
-// added here too, and until it is, the binary neither stages it nor compares
+// added here too, and until it is, the binary neither embeds it nor compares
 // it: doctor's embed row holds every clone entry outside TopLevel out of the
 // comparison. The README is embedded like every other file, which is
-// what lets doctor compare the two trees whole; staging is where it is held
-// back (harnessPromptAssetFiles).
+// what lets doctor compare the two trees whole.
 //
 //go:embed README.md claude codex opencode share
 var tree embed.FS

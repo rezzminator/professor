@@ -10,18 +10,19 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
 const (
-	checkAction    = "check"
 	doctorCommand  = "doctor"
 	updateCommand  = "update"
 	installCommand = "install"
@@ -43,11 +44,13 @@ var (
 func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) int {
 	if len(args) > 0 {
 		switch args[0] {
-		case checkAction, "adopt", "pin", "ignore", "drop":
+		case "check":
+			return runUpdateCheckAlias(args[1:], stdout, stderr, runtimes)
+		case "adopt", "pin", "ignore", "drop":
 			runtime, err := config.OptionalRuntime(runtimes)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
-				return 1
+				return 5
 			}
 			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime)
 		}
@@ -73,24 +76,24 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	runtime, err := config.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
-		return 1
+		return 5
 	}
 	repo := strings.TrimSpace(*repoFlag)
 	if repo == "" {
-		repo, err = installer.ReadSourceRepoMarker(runtime.Paths.Home)
+		repo, err = paths.ReadSourceRepoMarker(runtime.Paths.Home)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm update: %v\n", err)
-			return 1
+			return 5
 		}
 	}
 	repo, err = filepath.Abs(repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm update: resolve repository: %v\n", err)
-		return 1
+		return 5
 	}
 	if err := updateRepository(context.Background(), repo, *target, *skipHarvest, stdout, stderr, runtime); err != nil {
 		fmt.Fprintf(stderr, "pfm update: %v\n", err)
-		return 1
+		return 5
 	}
 	postArgs := []string{"--root", *projectRoot}
 	if *jsonOutput {
@@ -136,6 +139,28 @@ func updateRepository(
 	stdout, stderr io.Writer,
 	runtime config.Runtime,
 ) (err error) {
+	hostRoot := installer.ManagedRoot(runtime.Paths.Home)
+	if mkdirErr := os.MkdirAll(hostRoot, 0o700); mkdirErr != nil {
+		return fmt.Errorf("prepare update ownership root: %w", mkdirErr)
+	}
+	hostLock, lockErr := acquireUpdateOwnership(filepath.Join(hostRoot, "update.lock"))
+	if lockErr != nil {
+		return lockErr
+	}
+	defer func() { err = errors.Join(err, releaseUpdateOwnership(hostLock)) }()
+	commonDir, gitErr := updateGitOutput(ctx, repo, "rev-parse", "--git-common-dir")
+	if gitErr != nil {
+		return fmt.Errorf("resolve source update ownership: %w", gitErr)
+	}
+	commonDir = strings.TrimSpace(commonDir)
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(repo, commonDir)
+	}
+	sourceLock, lockErr := acquireUpdateOwnership(filepath.Join(commonDir, "pfm-update.lock"))
+	if lockErr != nil {
+		return lockErr
+	}
+	defer func() { err = errors.Join(err, releaseUpdateOwnership(sourceLock)) }()
 	previousRef, err := updateGitOutput(ctx, repo, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return fmt.Errorf("resolve current revision: %w", err)
@@ -180,7 +205,7 @@ func updateRepository(
 		}
 	}
 
-	managedRoot := filepath.Dir(installer.SourceRepoPath(runtime.Paths.Home))
+	managedRoot := filepath.Dir(paths.SourceRepoPath(runtime.Paths.Home))
 	stage, err := os.MkdirTemp(filepath.Dir(managedRoot), "update-")
 	if err != nil {
 		return fmt.Errorf("stage update beside managed root: %w", err)
@@ -260,9 +285,9 @@ func updateRepository(
 		}
 		replacements = append(replacements, updateReplacement{target: targetPath, backup: backup})
 	}
-	hookSnapshots, err := snapshotUpdateOwnedFiles(runtime)
+	snapshots, err := snapshotUpdateOwnedFiles(runtime)
 	if err != nil {
-		return fmt.Errorf("snapshot hook files before install: %w", err)
+		return fmt.Errorf("snapshot update-owned files before install: %w", err)
 	}
 	// Read current health before replacement so candidate deltas exclude old warnings.
 	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, skipHarvest, stdout, stderr)
@@ -312,7 +337,7 @@ func updateRepository(
 	}
 
 	installErr := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr)
-	recordUpdateHookAfter(hookSnapshots)
+	recordUpdateOwnedFilesAfter(snapshots)
 	if installErr != nil {
 		return updateFailure(
 			fmt.Errorf("install --yes after staging: %w", installErr),
@@ -323,41 +348,19 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
 				stderr,
 			),
 		)
-	}
-	candidateConfigPath, candidateConfigNote, configPathErr := updateConfigPathAfterInstall(runtime)
-	if configPathErr != nil {
-		return updateFailure(
-			fmt.Errorf("locate config after update: %w", configPathErr),
-			rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				hookSnapshots,
-				runtime,
-				skipHarvest,
-				stdout,
-				stderr,
-			),
-		)
-	}
-	if candidateConfigNote != "" {
-		fmt.Fprintln(stdout, candidateConfigNote)
 	}
 	candidateOutcome, doctorErr := updateRunDoctor(
 		ctx,
 		candidateA,
 		runtime,
-		candidateConfigPath,
+		runtime.Config.Path,
 		skipHarvest,
 		stdout,
 		stderr,
@@ -372,7 +375,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -391,7 +394,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -428,7 +431,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -471,7 +474,7 @@ func updateRepository(
 func releaseNotesForUpdate(
 	ctx context.Context,
 	repo, previousRef, target string,
-) (previous string, paths []string, err error) {
+) (previous string, notePaths []string, err error) {
 	previousTag, err := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
 	if err != nil {
 		return "", nil, fmt.Errorf("describe previous release: %w", err)
@@ -481,123 +484,12 @@ func releaseNotesForUpdate(
 	if err != nil {
 		return previousTag, nil, fmt.Errorf("list release notes at %s: %w", target, err)
 	}
-	paths, err = ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
-	return previousTag, paths, err
-}
-
-type updateReplacement struct {
-	target   string
-	backup   string
-	replaced bool
-}
-
-func updateFailure(primary, rollbackErr error) error {
-	if rollbackErr != nil {
-		return fmt.Errorf(
-			"%w; rollback residue: %v; manually repair the reported update-owned state",
-			primary,
-			rollbackErr,
-		)
-	}
-	return fmt.Errorf("%w; rolled back update-owned changes", primary)
-}
-
-func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writer) error {
-	var rollbackErr error
-	for index := len(replacements) - 1; index >= 0; index-- {
-		replacement := replacements[index]
-		if !replacement.replaced {
-			continue
-		}
-		if err := copyUpdateFile(replacement.backup, replacement.target); err != nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%s: %w", replacement.target, err))
-			continue
-		}
-		fmt.Fprintf(stderr, "pfm update: rolled back %s\n", replacement.target)
-	}
-	return rollbackErr
-}
-
-// rollbackUpdateState first restores every owned binary and the source, then
-// the hook files the candidate's install rewrote, and only then uses the prior
-// binary's embedded installer to converge installer-owned host wiring back to
-// the previous release. The hook restore has to come first: that installer
-// recognises only hooks IT generates, so a hook only the newer release knows
-// would survive it. A clean doctor is part of rollback proof; without it,
-// updateFailure reports residue instead of claiming a safe rollback.
-func rollbackUpdateState(
-	ctx context.Context,
-	repo, installSourceRepo, previousRef string,
-	sourceAdvanced bool,
-	replacements []updateReplacement,
-	hookSnapshots []updateFileSnapshot,
-	runtime config.Runtime,
-	skipHarvest bool,
-	stdout, stderr io.Writer,
-) error {
-	rollbackErr := rollbackUpdateReplacements(replacements, stderr)
-	if sourceAdvanced {
-		if err := updateGitRun(ctx, repo, "reset", "--keep", previousRef); err != nil {
-			return errors.Join(rollbackErr, fmt.Errorf("restore source revision %s: %w", previousRef, err))
-		}
-		fmt.Fprintf(stderr, "pfm update: rolled back source to %s\n", previousRef)
-	}
-	rollbackErr = errors.Join(rollbackErr, restoreUpdateHookFiles(hookSnapshots, runtime.Paths.Home, stderr))
-	if len(replacements) == 0 {
-		return errors.Join(rollbackErr, errors.New("no previous binary is available to restore installer state"))
-	}
-	previousBinary := replacements[0].backup
-	if err := updateRollbackInstall(
-		ctx,
-		previousBinary,
-		repo,
-		installSourceRepo,
-		runtime,
-		skipHarvest,
-		stdout,
-		stderr,
-	); err != nil {
-		return errors.Join(rollbackErr, fmt.Errorf("reapply previous installer state: %w", err))
-	}
-	rollbackOutcome, doctorErr := updateRollbackDoctor(
-		ctx,
-		previousBinary,
-		runtime,
-		runtime.Config.Path,
-		skipHarvest,
-		stdout,
-		stderr,
-	)
-	if doctorErr != nil {
-		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: %w", doctorErr))
-	}
-	switch rollbackOutcome.Exit {
-	case 0:
-		// Clean — nothing to report.
-	case 1:
-		// Warnings alone are never residue; they are reported (via the tee to
-		// stdout above), not claimed as a rollback failure. A rollback to a
-		// binary that predates M2's failure tiers ALSO exits 1 on warnings
-		// alone, so that case is named rather than misreported as residue.
-		if rollbackDoctorPredatesFailureTiers(rollbackOutcome.Output) {
-			return errors.Join(
-				rollbackErr,
-				errors.New(
-					"doctor after rollback exited 1 (an older pfm exits 1 on warnings alone; read the rows above before repairing anything)",
-				),
-			)
-		}
-	default:
-		return errors.Join(
-			rollbackErr,
-			fmt.Errorf("doctor after rollback: exited %d — see the doctor rows above", rollbackOutcome.Exit),
-		)
-	}
-	return rollbackErr
+	notePaths, err = ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
+	return previousTag, notePaths, err
 }
 
 func preferredUpdateSourceRepo(home, repo string) string {
-	recorded, err := installer.ReadSourceRepoMarker(home)
+	recorded, err := paths.ReadSourceRepoMarker(home)
 	if err != nil {
 		return repo
 	}
@@ -610,23 +502,18 @@ func preferredUpdateSourceRepo(home, repo string) string {
 }
 
 func updateGitRun(ctx context.Context, repo string, args ...string) error {
-	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo})
-	if err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf(
-			"git %s: exited %d: %s",
-			strings.Join(args, " "),
-			result.ExitCode,
-			strings.TrimSpace(string(result.Stdout)+string(result.Stderr)),
-		)
-	}
-	return nil
+	_, err := updateGitOutput(ctx, repo, args...)
+	return err
 }
 
 func updateGitOutput(ctx context.Context, repo string, args ...string) (string, error) {
-	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo})
+	// Source ownership, reads and writes select the same requested repository.
+	// Preserve transport settings, and restore only the explicit fence mapping.
+	env := deps.WithoutGitRepoVars(os.Environ())
+	if gitDir, useFenceGit := paths.DevRepoGitDir(repo); useFenceGit {
+		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+repo)
+	}
+	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo, Env: env})
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
@@ -689,10 +576,8 @@ func copyUpdateFile(source, target string) error {
 }
 
 // applyUpdateInstall runs a candidate or rollback binary's `install --yes`,
-// forwarding --config only when runtime.Config.Path actually exists — a
-// defaults-only host (nothing to migrate or restore) must not have that
-// forwarded path read as operator-explicit and trip install_command.go's B
-// refusal; a real file is still forwarded so migration/restore keep working.
+// forwarding --config only when runtime.Config.Exists, so a defaults-only
+// host's path is not read as operator-explicit by install_command.go.
 func applyUpdateInstall(
 	ctx context.Context,
 	candidate, repo, sourceRepo string,
@@ -704,14 +589,10 @@ func applyUpdateInstall(
 	if skipHarvest {
 		args = append(args, "--skip-harvest")
 	}
-	configPath := ""
-	if runtime.Config.Exists {
-		configPath = runtime.Config.Path
-	}
 	return runUpdateCandidateCommand(
 		ctx,
 		candidate,
-		configPath,
+		updateInstallConfigPath(runtime),
 		repo,
 		sourceRepo,
 		stdout,
@@ -720,14 +601,20 @@ func applyUpdateInstall(
 		args...)
 }
 
+// updateInstallConfigPath is the --config an install is given, only when it exists.
+func updateInstallConfigPath(runtime config.Runtime) string {
+	if runtime.Config.Exists {
+		return runtime.Config.Path
+	}
+	return ""
+}
+
 // runUpdateDoctor runs candidate's `doctor` and turns its exit code and
 // captured stdout into a doctorOutcome. A non-zero doctor exit is a verdict,
 // not a Go error — runUpdateCandidateCommand hands it back as a
 // *doctorExitError precisely so this seam can read it as one; only a genuine
 // spawn failure (candidate never ran at all) returns a non-nil error here.
-// configPath is the caller's explicit choice (updateConfigPathAfterInstall's
-// re-resolved path for the post-install candidate doctor, runtime.Config.Path
-// otherwise) — never derived from runtime here.
+// configPath is the caller's explicit choice — never derived from runtime here.
 func runUpdateDoctor(
 	ctx context.Context,
 	candidate string,
@@ -795,4 +682,29 @@ func runUpdateBaselineDoctor(
 		return doctorOutcome{}, fmt.Errorf("resolve current binary for baseline doctor: %w", err)
 	}
 	return runUpdateDoctor(ctx, self, runtime, runtime.Config.Path, skipHarvest, stdout, stderr)
+}
+
+// acquireUpdateOwnership claims an inode shared across processes before any
+// source, binary, or installer state is read. The lock file is never removed.
+func acquireUpdateOwnership(path string) (*os.File, error) {
+	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open update ownership %s: %w", path, err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		closeErr := lock.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errors.Join(fmt.Errorf("update already in progress at %s", path), closeErr)
+		}
+		return nil, errors.Join(fmt.Errorf("claim update ownership %s: %w", path, err), closeErr)
+	}
+	return lock, nil
+}
+
+func releaseUpdateOwnership(lock *os.File) error {
+	unlockErr := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if err := errors.Join(unlockErr, lock.Close()); err != nil {
+		return fmt.Errorf("release update ownership %s: %w", lock.Name(), err)
+	}
+	return nil
 }

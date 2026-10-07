@@ -1,15 +1,13 @@
 package installer
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
 func TestInstallPhysicalPathStableAcrossCreation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -30,44 +28,8 @@ func TestInstallPhysicalPathStableAcrossCreation(t *testing.T) {
 	}
 }
 
-// TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript is a
-// REGRESSION test for the one installer diagnostic that wrote to raw
-// os.Stderr: it bypassed say/skip, the Report counts and the activity ledger,
-// and — because preflight plans the identical pass with its stdout discarded
-// while stderr is not — printed twice on every `--yes` run. It now goes
-// through the run's own transcript, exactly once per unresolvable directory
-// no matter how many times claudeConfigDirs() is called.
-func TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript(t *testing.T) {
-	root := t.TempDir()
-	broken := filepath.Join(root, "broken-config")
-	if err := os.Symlink(filepath.Join(root, "missing-target"), broken); err != nil {
-		t.Fatal(err)
-	}
-	_, evalErr := filepath.EvalSymlinks(broken)
-	if evalErr == nil {
-		t.Fatal("broken symlink unexpectedly resolved")
-	}
-
-	var transcript bytes.Buffer
-	installer := &engine{options: Options{Home: root, ConfigDir: broken, Stdout: &transcript}}
-	dirs := installer.claudeConfigDirs()
-	installer.claudeConfigDirs()
-
-	if len(dirs) != 1 || dirs[0] != broken {
-		t.Fatalf("claudeConfigDirs=%q, want fallback path %q", dirs, broken)
-	}
-	if !strings.Contains(transcript.String(), broken) || !strings.Contains(transcript.String(), evalErr.Error()) {
-		t.Fatalf("transcript=%q, want path %q and full EvalSymlinks error %q", transcript.String(), broken, evalErr)
-	}
-	if got := strings.Count(transcript.String(), "resolve config directory"); got != 1 {
-		t.Fatalf("the unresolvable config directory was reported %d times, want exactly 1", got)
-	}
-	if installer.report.Skipped != 1 {
-		t.Fatalf("report.Skipped = %d, want the unresolved directory counted once", installer.report.Skipped)
-	}
-}
-
 func TestInstallHookOwnershipCanonicalizesLegacyAliases(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -113,37 +75,5 @@ func TestInstallHookOwnershipCanonicalizesLegacyAliases(t *testing.T) {
 				t.Fatalf("ownership=%v", got)
 			}
 		})
-	}
-}
-
-func TestInstallClaudeSettingsLeafSymlinkSurvivesLifecycle(t *testing.T) {
-	home := t.TempDir()
-	config := filepath.Join(home, "account")
-	target := filepath.Join(home, "personal-settings.json")
-	link := filepath.Join(config, "settings.json")
-	writeFixture(t, target, `{"private":"keep"}`)
-	if err := os.MkdirAll(config, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
-	e := engine{
-		options:     Options{Home: home, ConfigDirs: []string{config}, CodexHomes: []string{}, Stdout: io.Discard},
-		managedRoot: filepath.Join(home, "managed"),
-		apply:       true,
-		stamp:       "fixture",
-	}
-	for _, mode := range []Mode{ModeApply, ModeUninstall} {
-		e.options.Mode = mode
-		if err := e.wireSettings(); err != nil {
-			t.Fatal(err)
-		}
-		if got, err := os.Readlink(link); err != nil || got != target {
-			t.Fatalf("mode=%v link=%q err=%v", mode, got, err)
-		}
-	}
-	if !strings.Contains(readFixture(t, target), `"private": "keep"`) {
-		t.Fatal("private setting lost")
 	}
 }

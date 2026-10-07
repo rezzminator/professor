@@ -140,10 +140,13 @@ func (s *Store) DeleteOrphanedKills(ctx context.Context) (int, error) {
 	}
 	deleted := 0
 	for _, id := range ids {
-		if err := s.state.Unkill(ctx, id); err != nil {
+		removed, err := s.state.Unkill(ctx, id)
+		if err != nil {
 			return deleted, err
 		}
-		deleted++
+		if removed {
+			deleted++
+		}
 	}
 	return deleted, nil
 }

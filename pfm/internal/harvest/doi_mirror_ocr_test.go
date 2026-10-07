@@ -109,6 +109,7 @@ func TestDOIMirrorForcedOCRDeadlineCoversDoclingsLimit(t *testing.T) {
 // The deadline formula itself: docling's limit plus the margin, exactly, and
 // the named cap past it or for an unknown page count.
 func TestDOIMirrorOCRTimeoutFormula(t *testing.T) {
+	t.Parallel()
 	for pages, want := range map[int]time.Duration{
 		0:    doiMirrorOCRCap,
 		1:    40 * time.Second,

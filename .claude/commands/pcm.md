@@ -1,7 +1,7 @@
 ---
 name: pcm
 description: MANDATORY — route every change to CLAUDE.md, .claude/**, the .codex/ mirror or templates/** here. `/pcm {change request}` applies it; `/pcm audit [scope|all]` reports framework consistency, read-only; `/pcm retro` folds the .professor/retro.md inbox. Publishing the blueprint → /pfm:release; the pfm CLI itself → /pfm; context budget → /context-meter.
-argument-hint: [change request|audit]
+argument-hint: "[change request|audit [scope|all]|retro]"
 ---
 
 # PCM — Professor Change Manager
@@ -12,7 +12,7 @@ $ARGUMENTS
 
 ## Mandatory skill load (before any prompt-file edit)
 
-Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/prompt.md` is READ this session (Read auto-stamps the quality marker). Its rules govern prose leanness for ANY prompt; `/quality:description` governs every `description:` field and loads before one is written; **§ Claude-harness prompt law** below carries the harness-specific file rules (size limits, voice location, hooks, routing); **§ Authoring conventions** below governs the file skeleton (frontmatter + shape).
+Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/prompt.md` (machine-global `/quality:prompt`) is READ this session (Read auto-stamps the quality marker). Its rules govern prose leanness for ANY prompt; `/quality:description` governs every `description:` field and loads before one is written; **§ Claude-harness prompt law** below carries the harness-specific file rules (size limits, voice location, hooks, routing); **§ Authoring conventions** below governs the file skeleton (frontmatter + shape).
 
 ---
 
@@ -20,8 +20,8 @@ Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/pro
 
 ### How the pieces connect
 
-- `CLAUDE.md` — the law + guards + routing; names mandatory-load obligations; carries no rosters of commands or skills (§ Authoring conventions, no-rosters law)
-- `.claude/commands/**/*.md` — slash commands (`/pcm`, `/pfm:release`, `/quality:*`, `/dev`; `/context-meter`, `/pfm` are global)
+- `CLAUDE.md` — the orientation file: Vocabulary, Runtime, Rules; shaped by `/quality:claude-md`
+- `.claude/commands/**/*.md` — slash commands (`/pcm`, `/pfm:release`, `/dev`; `/quality:*`, `/context-meter`, `/pfm`, `/pfm:workbench` are global)
 - `.claude/agents/*.md` — registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set; source-fetched per `templates/project/skills/sources.json`, never vendored)
 - `.claude/scripts/*.{sh,mjs}` — dev.sh, pfm-guard.sh, guard-stamp.sh, format-md.sh, codex-sync.sh (mirror auto-compile; the Codex compiler itself is `pfm codex build`)
@@ -33,12 +33,12 @@ Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/pro
 - **Path variables** — files use `$CDOCS`, `$REFS`, `$RESEARCH`, never hardcoded doc paths. Defined in root `CLAUDE.md` § Path vars.
 - **Two audiences, one law** — a rule you write into `.claude/**` binds this repo; the same rule in `templates/**` binds every adopter. Never let the two drift silently: if a fix belongs upstream, it lands in the template too, and the commit message names the adopter-facing change — the release's `changelogger` writes the notes from it.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
-- **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
+- **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: `/quality:claude-md`.
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
 - **Never hardcode names, counts, or rosters that change** — table names, enum values, chain names, agent/queue/chain tallies evolve. Tell agents WHERE to discover (`ls`, a registry file, the owning script), not WHAT the values are.
 - **Frontmatter features need registration** — `hooks:`/`model:`/`effort:` load ONLY when an agent is spawned as a registered type via its `subagent_type`; a protocol file read by a general-purpose agent never loads frontmatter. A protocol needing frontmatter features needs a thin registered wrapper: registration shell in `.claude/agents/`, protocol in the file it reads.
 - **Registries read at session start** — agent types, settings.json hooks, and the injected fleet prompt load at session start; mid-session file changes land at natural boundaries (next spawn, next session). When a long-running session will consume an edited file, add a transitional fallback clause (brief-wins, registry-fallback) rather than assuming hot reload.
-- **A subagent holds no `Workflow` tool** — a protocol that drives a Workflow structurally cannot be an agent; that is the line `deep-rr` (a skill driving its engine) and `agents/rr.md` are split along. Check it before proposing to convert a command into an agent.
+- **A subagent holds no `Workflow` tool** — a protocol that drives a Workflow structurally cannot be an agent. Check it before proposing to convert a command into an agent.
 
 ### Inventory (derive, never recall)
 
@@ -59,7 +59,7 @@ In the Claude Code harness the LLM reads one concatenated context: root `CLAUDE.
 
 ### Hard thresholds (Anthropic-published)
 
-- CLAUDE.md (any): ≤ 200 lines
+- CLAUDE.md (any): the line and byte budget of `/quality:claude-md`
 - SKILL.md body: ≤ 500 lines — split via progressive disclosure above this
 - Sub-agent body: no formal cap — Anthropic's own examples run 20–35 lines
 
@@ -67,7 +67,7 @@ Above threshold = split into a referenced file (one level deep, with a Table of 
 
 ### Voice location
 
-Voice lives in the fleet prompt (`pfm/harness-prompts/`: `share/head.md` + the engine's `professor.md` + `share/tail.md`, composed by `pfm install`; Claude injects it under `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
+Voice lives in the fleet prompt (`pfm/harness-prompts/`: `share/head.md` + the engine's `professor.md` + `share/tail.md`, composed at build into `pfm/harness-prompts/composed/`; Claude injects it under `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
 
 ### Hooks vs prompts
 
@@ -126,7 +126,7 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 
 ### Step 3 — Plan
 
-Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Route the work by the fleet prompt § Orchestration ladder: direct work is done here or by one or two agents; a batch of clear tasks goes to `general-orchestrator`; only work whose solution is not in hand goes to `flights-speccer`, and `flights-orchestrator` runs one executor per task file. Edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here, from the brief or the task file that names them.
+Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Route the work by the fleet prompt § Orchestration ladder: direct work is done here or by one sub-agent; anything larger goes to `flights-foreman`, with `/flights:spec` first when the requirements are not settled. Edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here, from the return that names them.
 
 ### Step 4 — Execute
 
@@ -141,13 +141,13 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 
 **CLAUDE.md rules:**
 
-- Keep section hierarchy — agents/commands reference sections by name
-- Keep non-negotiable rules exactly as they are
+- Load `/quality:claude-md` first — spine, admission, budget; a heading other files cite is renamed only with every citer
+- Keep every sacred-ground rule's meaning; carry every other rule per `/quality:claude-md` write step 5
 
 **Command rules:**
 
 - Any change to a body's entry points is followed by a `/quality:description` pass over its `description:`
-- A command that dispatches an agent names the `subagent_type` and the five briefing fields (root `CLAUDE.md` § Subagent dispatch)
+- A command that dispatches an agent names the `subagent_type` and the five briefing fields (root `CLAUDE.md` § Dispatch)
 
 **Script rules:**
 
@@ -212,7 +212,7 @@ Ask: "Want me to fix these issues?"
 
 **Full rename:** Grep ALL occurrences (including `templates/**`, `README.md`, `BLUEPRINT.md`, `SETUP.md`, `refresh-map.json`) → update agents → update CLAUDE.md → final grep for zero stale refs → recompile the Codex mirror.
 
-**New agent:** Create `.claude/agents/{name}.md` — its `description:` is the registry entry, its `model:` pins the tier (root `CLAUDE.md` § Subagent dispatch carries no roster) → `pfm codex build .` (it compiles a `.codex/agents/{name}.toml`) → decide whether it ships upstream as `templates/project/agents/{name}.md`.
+**New agent:** Create `.claude/agents/{name}.md` — its `description:` is the registry entry, its `model:` pins the tier (root `CLAUDE.md` carries no roster: `/quality:claude-md`) → `pfm codex build .` (it compiles a `.codex/agents/{name}.toml`) → decide whether it ships upstream as `templates/project/agents/{name}.md`.
 
 **New skill:** Create `.claude/skills/{name}/SKILL.md` → no CLAUDE.md edit needed (skills self-index from `description:` frontmatter). A skill meant for adopters is registered in `templates/project/skills/sources.json` and lives in its OWN public repo — the blueprint never vendors one.
 
@@ -234,17 +234,13 @@ The `description:` is all the model sees at routing time — the harness injects
 
 Shape: match the existing files of the same kind — the live registry is the template.
 
-- **Sub-agents** (`.claude/agents/*.md`): frontmatter `name` (kebab-case), `description` (§ Descriptions — it carries the auto-delegation routing weight), `tools` (minimal allowlist), `model: inherit|opus|sonnet|haiku`. Body IS the system prompt — role sentence, numbered procedure, short checklist, output format; subagents see only their own prompt + env.
+- **Sub-agents** (`.claude/agents/*.md`): frontmatter `name` (kebab-case), `description` (§ Descriptions — it carries the auto-delegation routing weight), `tools` (minimal allowlist), `model:` an alias (`inherit|opus|sonnet|haiku|fable`) or a full model ID (`claude-sonnet-5-5`). Body IS the system prompt — role sentence, numbered procedure, short checklist, output format; subagents see only their own prompt + env.
 - **Slash commands** (`.claude/commands/*.md`): frontmatter `name`, `description` (§ Descriptions), `argument-hint`, `disable-model-invocation: true` on user-triggered-by-design commands. `$ARGUMENTS`/`$1`/`$N` substitute at invocation; a bang-prefixed backticked command (!`cmd`) injects live shell output before Claude sees the prompt.
 - **Skills** (`.claude/skills/*/SKILL.md`): frontmatter `name` (lowercase-hyphenated, ≤64 chars, no reserved words anthropic/claude), `description` (§ Descriptions; third person, highest-signal case first). Body: role line, triggers, behavioral steps, 3–5 diverse `### Example` sections, only non-obvious constraints. Skill content stays in context all session and re-attaches after compaction — every line is a recurring tax.
 
 ### CLAUDE.md (root + child)
 
-Keep: bash commands Claude can't guess, code-style rules that differ from defaults, architectural decisions / invariants, non-obvious gotchas, repo etiquette / test runners.
-
-NOT: standard language conventions, file-by-file descriptions, "write clean code" platitudes, info Claude can read from the code. **Placement by scope:** root CLAUDE.md carries only rules binding 2+ projects — a rule scoped to one project lives in that project's CLAUDE.md. Child CLAUDE.md files keep only the project-specific delta — never re-declare workspace rules already in root.
-
-**No skill/command rosters.** Claude Code indexes skills and commands itself — it reads every `SKILL.md` and command `description:` at startup and loads a body only on a match. A list of skills or commands in CLAUDE.md is dead weight that rots on every add, so leave it out. CLAUDE.md carries only what auto-indexing can't: **guards** (what's forbidden or must route through a command), **routing decisions** (which handler wins for an ambiguous intent), and **mandatory-load obligations** (when a skill is required at a step). Existence is the filesystem's job; obligation is CLAUDE.md's.
+Law: `/quality:claude-md`.
 
 ---
 

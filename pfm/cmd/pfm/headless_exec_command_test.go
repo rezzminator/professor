@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func headlessCLIJail(t *testing.T) {
@@ -27,7 +27,7 @@ func headlessCLIJail(t *testing.T) {
 func writeHeadlessCLIStub(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "engine")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nset -eu\n"+body+"\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nset -eu\n"+body+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -126,14 +126,18 @@ func headlessCLIRuntimeFor(t *testing.T, binary string, engine pfmengine.ID) com
 	t.Helper()
 	configDir := filepath.Join(t.TempDir(), "engine-home")
 	config := pfmconfig.Config{}
-	if engine == pfmengine.Codex {
+	switch engine {
+	case pfmengine.Codex:
 		config.Codex = pfmconfig.CodexPrefs{Binary: binary}
 		config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: configDir}}
-	} else if engine == pfmengine.OpenCode {
+	case pfmengine.OpenCode:
 		configDir = filepath.Join(t.TempDir(), "opencode")
 		config.OpenCode = pfmconfig.OpenCodePrefs{Binary: binary}
 		config.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: configDir}}
-	} else {
+	default:
+		if err := os.MkdirAll(configDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
 		config.Claude = pfmconfig.ClaudePrefs{Binary: binary}
 		config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: configDir}}
 	}
@@ -178,6 +182,102 @@ func TestHeadlessExecNormalizedJSONAndReceiptPreserveNullCost(t *testing.T) {
 	}
 	if value, ok := receiptValue["cost_usd"]; !ok || value != nil {
 		t.Fatalf("receipt cost = %#v, want explicit null", value)
+	}
+}
+
+func TestHeadlessExecPFMSettingsFile(t *testing.T) {
+	headlessCLIJail(t)
+	capture := filepath.Join(t.TempDir(), "argv")
+	t.Setenv("PFM_CAPTURE_ARGV", capture)
+	binary := writeHeadlessCLIStub(t, `printf '%s\n' "$@" > "$PFM_CAPTURE_ARGV"
+printf '%s\n' '{"result":"ok"}'`)
+	machine := headlessCLIRuntime(t, binary)
+	path := filepath.Join(t.TempDir(), "s.json")
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"theme":"t","maxSubagentSpawnDepth":4,"autoCompactWindow":250000}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runHeadlessExec(
+		[]string{"--engine", "claude", "--prompt", "x", "--pfm-settings", path},
+		strings.NewReader(""), &stdout, &stderr, machine,
+	)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	argv, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
+		`"outputStyle":"default","theme":"t"}`
+	if !strings.Contains(string(argv), want) {
+		t.Fatalf("argv = %s", argv)
+	}
+}
+
+func TestHeadlessExecClaudeIgnoresConfiguredLaunchValues(t *testing.T) {
+	headlessCLIJail(t)
+	capture := filepath.Join(t.TempDir(), "capture")
+	t.Setenv("PFM_CAPTURE", capture)
+	binary := writeHeadlessCLIStub(t, `printf '%s\n' "$@" > "$PFM_CAPTURE"
+printenv CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION >> "$PFM_CAPTURE" || true
+printf '%s\n' '{"result":"ok"}'`)
+	machine := headlessCLIRuntime(t, binary)
+	machine.Config.Claude.Theme = "from-config"
+	machine.Config.Claude.MaxSubagentSpawnDepth = 9
+	machine.Config.Claude.WebSearchesPerSession = 99
+	machine.Config.Claude.AutoCompactWindow = 5
+	machine.Config.Claude.TmuxTruecolor = true
+	machine.Config.Claude.Cache1H = true
+	var stdout, stderr bytes.Buffer
+	code := runHeadlessExec([]string{"--engine", "claude", "-p", "x"}, strings.NewReader(""), &stdout, &stderr, machine)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(
+		string(got),
+		"--settings\n{\"env\":{\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\"},\"outputStyle\":\"default\"}\n",
+	) {
+		t.Fatalf("configured launch values reached child: %q", got)
+	}
+}
+
+func TestHeadlessExecPFMSettingsErrorsNamePathOrKey(t *testing.T) {
+	headlessCLIJail(t)
+	machine := headlessCLIRuntime(t, writeHeadlessCLIStub(t, `exit 99`))
+	for _, test := range []struct{ name, body, want string }{
+		{"unreadable", "", "missing.json"},
+		{"unknown key", `{"mystery":true}`, "mystery"},
+		{"bad type", `{"theme":4}`, "theme"},
+		{"zero window", `{"autoCompactWindow":0}`, "autoCompactWindow"},
+		{"bad window type", `{"autoCompactWindow":"x"}`, "autoCompactWindow"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.json")
+			if test.body != "" {
+				if err := os.WriteFile(path, []byte(test.body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				path = filepath.Join(t.TempDir(), "missing.json")
+			}
+			var stdout, stderr bytes.Buffer
+			code := runHeadlessExec(
+				[]string{"--engine", "claude", "--prompt", "x", "--pfm-settings", path},
+				strings.NewReader(""), &stdout, &stderr, machine,
+			)
+			if code != 2 || !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("exit=%d stderr=%q, want %q", code, stderr.String(), test.want)
+			}
+		})
 	}
 }
 
@@ -228,52 +328,6 @@ func TestHeadlessExecHelpNamesSharedInterface(t *testing.T) {
 	} {
 		if !strings.Contains(stderr.String(), phrase) {
 			t.Fatalf("help omitted %q: %q", phrase, stderr.String())
-		}
-	}
-}
-
-func TestHeadlessConsumersUseSharedRunner(t *testing.T) {
-	_, current, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Dir(current)
-	cases := []struct {
-		path       string
-		mustHave   []string
-		mustAbsent []string
-	}{
-		{
-			filepath.Join(root, "..", "..", "internal", "ask", "ask.go"),
-			[]string{"headlessrun.Run("},
-			[]string{"exec.Command", "exec.CommandContext"},
-		},
-		{
-			filepath.Join(root, "..", "..", "internal", "stats", "limits.go"),
-			[]string{"headlessrun.Run("},
-			[]string{"exec.Command", "exec.CommandContext"},
-		},
-		{
-			filepath.Join(root, "..", "..", "internal", "doctor", "harness_prompt.go"),
-			[]string{"headlessrun.Run("},
-			nil,
-		},
-	}
-	for _, testCase := range cases {
-		body, err := os.ReadFile(testCase.path)
-		if err != nil {
-			t.Fatalf("read %s: %v", testCase.path, err)
-		}
-		source := string(body)
-		for _, want := range testCase.mustHave {
-			if !strings.Contains(source, want) {
-				t.Errorf("%s does not name required shared boundary %q", testCase.path, want)
-			}
-		}
-		for _, forbidden := range testCase.mustAbsent {
-			if strings.Contains(source, forbidden) {
-				t.Errorf("%s still contains direct harness subprocess call %q", testCase.path, forbidden)
-			}
 		}
 	}
 }

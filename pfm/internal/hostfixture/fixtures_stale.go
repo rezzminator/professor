@@ -18,12 +18,12 @@ type StaleArtifactsFixture struct {
 	DeadSocket   string // a tmux socket file with no server behind it
 	StalePIDFile string // names StalePID, a process that has already exited
 	StalePID     int
-	WALFile      string // fleet.db-wal left by a crashed writer
+	WALFile      string // pfm.db-wal left by a crashed writer
 	ReloadLock   string // a reload lock naming StalePID
 }
 
 // StaleArtifacts jails a fleet holding a dead tmux socket file, a pid file
-// naming an already-exited process, a fleet.db-wal left by a crashed
+// naming an already-exited process, a pfm.db-wal left by a crashed
 // writer, and a leftover reload lock — the state reap, stale, fleetdb and
 // reload.InFlight must clear rather than treat as a live claim.
 func StaleArtifacts(t *testing.T) StaleArtifactsFixture {
@@ -42,12 +42,12 @@ func StaleArtifacts(t *testing.T) StaleArtifactsFixture {
 		t.Fatalf("hostfixture: write stale pid file: %v", err)
 	}
 
-	wal := base.Values.FleetDB + "-wal"
+	wal := base.Values.StateDB + "-wal"
 	if err := os.MkdirAll(filepath.Dir(wal), 0o700); err != nil {
-		t.Fatalf("hostfixture: create fleet.db directory: %v", err)
+		t.Fatalf("hostfixture: create pfm.db directory: %v", err)
 	}
 	if err := os.WriteFile(wal, []byte("stale-wal-frames"), 0o600); err != nil {
-		t.Fatalf("hostfixture: write stale fleet.db-wal: %v", err)
+		t.Fatalf("hostfixture: write stale pfm.db-wal: %v", err)
 	}
 
 	lock := filepath.Join(base.Root, "reload.lock")

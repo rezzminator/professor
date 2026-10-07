@@ -4,7 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeClaudeAgentsBinary writes a `claude` stand-in that plays `agents
@@ -20,7 +26,7 @@ func fakeClaudeAgentsBinary(t *testing.T, body string, fail bool) string {
 	} else {
 		script += "printf '%s' " + shQuote(body) + "\n"
 	}
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -98,5 +104,91 @@ func TestClaudeAgentsBusySessionsRefusesWithNoConfigDirs(t *testing.T) {
 	}
 	if busy != nil {
 		t.Fatalf("busy = %v, want nil alongside the error", busy)
+	}
+}
+
+func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
+	home := t.TempDir()
+	dirs := []string{
+		pfmconfig.DefaultAccountDir(home, 1),
+		filepath.Join(home, ".cc", "2"),
+		filepath.Join(home, ".cc", "3"),
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logPath := filepath.Join(home, "queries.log")
+	binary := filepath.Join(home, "claude")
+	script := "#!/bin/sh\nprintf '%s|%s\\n' \"$CLAUDE_CONFIG_DIR\" \"$*\" >> \"$PFM_TEST_QUERY_LOG\"\n" +
+		"case \"$CLAUDE_CONFIG_DIR\" in\n" +
+		"  */2) printf '[{\"sessionId\":\"second\",\"status\":\"busy\"}]' ;;\n" +
+		"  */3) printf '[{\"sessionId\":\"third\",\"status\":\"busy\"}]' ;;\n" +
+		"  *) printf '[]' ;;\n" +
+		"esac\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_QUERY_LOG", logPath)
+	machine := pfmconfig.Config{
+		Claude: pfmconfig.Claude{Binary: binary},
+		Accounts: []pfmconfig.Account{
+			{ID: 1, ConfigDir: dirs[0]},
+			{ID: 2, ConfigDir: dirs[1]},
+			{ID: 3, ConfigDir: dirs[2]},
+			{ID: 4, ConfigDir: dirs[2]},
+		},
+	}
+	agents := NewClaudeAgents(paths.Values{Home: home, Roots: map[pfmengine.ID][]string{
+		pfmengine.Claude: {filepath.Join(home, "transcripts", "projects")},
+	}}, machine)
+	busy, err := agents.BusySessions(context.Background())
+	if err != nil || len(busy) != 2 {
+		t.Fatalf("busy=%v err=%v", busy, err)
+	}
+	for _, id := range []string{"second", "third"} {
+		if _, found := busy[id]; !found {
+			t.Fatalf("busy=%v lacks %q", busy, id)
+		}
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("queries=%q, want one per distinct account config dir", raw)
+	}
+	for index, line := range lines {
+		if !strings.HasPrefix(line, dirs[index]+"|") {
+			t.Fatalf("query[%d]=%q, want dir %q", index, line, dirs[index])
+		}
+	}
+}
+
+func TestClaudeAgentsQueryUsesRegistryReadShape(t *testing.T) {
+	home := t.TempDir()
+	logPath := filepath.Join(home, "query.log")
+	binary := filepath.Join(home, "claude")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$PFM_TEST_QUERY_LOG\"\nprintf '[]'\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_QUERY_LOG", logPath)
+	agents := ClaudeAgents{Binary: binary, ConfigDirs: []string{home}}
+	if _, err := agents.BusySessions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := string(raw)
+	if !strings.Contains(query, "agents --json --settings ") ||
+		strings.Contains(query, "--system-prompt-file") || strings.Contains(query, "--mcp-config") ||
+		strings.Contains(query, "--dangerously-skip-permissions") ||
+		strings.Contains(query, "\"hooks\"") || strings.Contains(query, "\"statusLine\"") {
+		t.Fatalf("agent query argv=%q", query)
 	}
 }

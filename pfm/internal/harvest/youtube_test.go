@@ -38,6 +38,7 @@ func youtubeSite(t *testing.T) *socialSite {
 // counted (a line-break append is not one); the comments are named unloaded
 // with the page's stated count; a second harvest is identical.
 func TestYouTubeVideoLoadsTranscript(t *testing.T) {
+	t.Parallel()
 	site := youtubeSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), youtubeURL, FetchOptions{Refresh: true})
@@ -83,6 +84,7 @@ func TestYouTubeVideoLoadsTranscript(t *testing.T) {
 // TestYouTubeVideoTakesTheManualTrack: a manual track in the page's language
 // is read before the automatic one, and named as such.
 func TestYouTubeVideoTakesTheManualTrack(t *testing.T) {
+	t.Parallel()
 	site := youtubeSite(t)
 	player := site.answers[youtubePlayerAPI]
 	asr := `{"baseUrl":"https://www.youtube.com/api/timedtext?v=abcDEF12345&ei=placeholder&caps=asr`
@@ -104,6 +106,7 @@ func TestYouTubeVideoTakesTheManualTrack(t *testing.T) {
 // TestYouTubeVideoWithoutCaptionsNamesTheGap: a video whose page names no
 // caption track is rendered with the gap named, no caption request sent.
 func TestYouTubeVideoWithoutCaptionsNamesTheGap(t *testing.T) {
+	t.Parallel()
 	site := youtubeSite(t)
 	page := site.answers["www.youtube.com/watch?v=abcDEF12345"]
 	start := strings.Index(page, `"captions":`)

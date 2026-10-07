@@ -8,7 +8,44 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestRefreshSeatPromptReadsComposedClaudePrompt(t *testing.T) {
+	repo, home, sidDir := t.TempDir(), t.TempDir(), t.TempDir()
+	mustWrite(t, filepath.Join(repo, ".claude", "agents", "reader.md"), "---\nname: reader\n---\nROLE\n")
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(clone, "pfm", "harness-prompts", "composed", "claude.md")
+	mustWrite(t, prompt, "FLEET\n")
+	if err := WriteSeatPrompt(sidDir, "cc-role", "", "<!-- pfm agent-role: reader -->\nSTALE"); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := RefreshSeatPrompt(pfmengine.Claude, sidDir, "cc-role", "", repo, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(channel)
+	if err != nil || !strings.Contains(string(raw), "FLEET") {
+		t.Fatalf("seat prompt = %q, %v", raw, err)
+	}
+	if err := os.Remove(prompt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RefreshSeatPrompt(
+		pfmengine.Claude,
+		sidDir,
+		"cc-role",
+		"",
+		repo,
+		home,
+	); err == nil ||
+		!strings.Contains(err.Error(), "agent role: read Claude prompt "+prompt) {
+		t.Fatalf("unreadable prompt error = %v", err)
+	}
+}
 
 // mustMkdir and mustWrite are the two filesystem primitives every test below
 // builds its jail out of. Every directory lives under t.TempDir(): never the
@@ -427,4 +464,69 @@ func TestResolveArtifactPathIsAbsolute(t *testing.T) {
 			t.Fatalf("Artifact.Path = %q, want %q", artifact.Path, wantPath)
 		}
 	})
+}
+
+func TestWorkbenchRoleAndReload(t *testing.T) {
+	for _, name := range []string{"Codex role", "reload no role", "reload Codex", "reload role", "reload disabled", "reload invalid", "role outside"} {
+		t.Run(name, func(t *testing.T) {
+			root, dir, home := roleWorkbenchFixture(t)
+			sid := t.TempDir()
+			engine := pfmengine.Claude
+			if name == "Codex role" || name == "reload Codex" || name == "reload disabled" {
+				engine = pfmengine.Codex
+			}
+			if name == "Codex role" || name == "reload Codex" {
+				mustWrite(t, paths.WorkbenchManifest(dir), `{"prompt":"scribe.md","engines":["codex","claude"]}`)
+			}
+			if name == "role outside" {
+				body, _, err := Resolve(engine, "r", root, home)
+				base, baseErr := BasePrompt(engine, root, home)
+				got, composeErr := ComposeSeatPrompt(engine, "r", body, base)
+				want := "<!-- pfm agent-role: r -->\nFLEET\n\n---\n\nROLE R"
+				if err != nil || baseErr != nil || composeErr != nil || got != want {
+					t.Fatalf("outside role = %q, %v/%v/%v; want %q", got, err, baseErr, composeErr, want)
+				}
+				return
+			}
+			if name == "Codex role" {
+				got, _, err := Resolve(engine, "r", dir, home)
+				if err != nil || got != "You are scribe.\n---\n\nROLE R" {
+					t.Fatalf("Codex role = %q, %v", got, err)
+				}
+				return
+			}
+			if name == "reload role" {
+				if err := WriteSeatPrompt(sid, "cc-r", "", "<!-- pfm agent-role: r -->\nSTALE"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if name == "reload invalid" {
+				mustWrite(t, paths.WorkbenchManifest(dir), `{"prompt":""}`)
+			}
+			got, err := RefreshSeatPrompt(engine, sid, "cc-r", "", dir, home)
+			if name == "reload invalid" {
+				if err == nil || err.Error() != paths.WorkbenchManifest(dir)+`: "prompt" is required` {
+					t.Fatalf("reload invalid = %q, %v", got, err)
+				}
+				return
+			}
+			want := filepath.Join(dir, ".professor", "scribe.md")
+			switch name {
+			case "reload Codex":
+				want = "You are scribe."
+			case "reload disabled":
+				want = ""
+			case "reload role":
+				raw, readErr := os.ReadFile(got)
+				want = "<!-- pfm agent-role: r -->\nYou are scribe.\n\n---\n\nROLE R"
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				got = string(raw)
+			}
+			if err != nil || got != want {
+				t.Fatalf("reload = %q, %v; want %q", got, err, want)
+			}
+		})
+	}
 }

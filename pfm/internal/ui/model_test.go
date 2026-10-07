@@ -14,6 +14,30 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
+func TestNewClaudeCacheFollowsSelectedAccount(t *testing.T) {
+	snapshot := Snapshot{
+		Rows:           []compose.Row{{Kind: compose.NewClaude, Name: "New Claude chat"}},
+		PrimaryAccount: 1, AccountIDs: []int{1, 2},
+		Cache1H: true, Cache1HByAccount: map[int]bool{1: true, 2: false},
+	}
+	model := NewModel(snapshot)
+	if !model.Cache1H() {
+		t.Fatal("account 1 should start with 1h")
+	}
+	model, _ = applyKey(t, model, controlKey('s'))
+	if model.PrimaryAccount() != 2 || model.Cache1H() {
+		t.Fatalf("account 2 = primary %d cache %t, want 2/5m", model.PrimaryAccount(), model.Cache1H())
+	}
+	model, _ = applyKey(t, model, controlKey('e'))
+	if !model.Cache1H() {
+		t.Fatal("toggle did not choose 1h for this launch")
+	}
+	model, _ = applyKey(t, model, controlKey('s'))
+	if model.PrimaryAccount() != 1 || !model.Cache1H() {
+		t.Fatalf("account 1 = primary %d cache %t, want 1/1h", model.PrimaryAccount(), model.Cache1H())
+	}
+}
+
 func TestModelKeysKillModifiersAndCancel(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.InitialCursorID = snapshot.Rows[1].ID
@@ -178,7 +202,7 @@ func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
 	}
 
 	model = NewModel(snapshot)
-	for step := 0; step < 4; step++ {
+	for step := 0; step < 3; step++ {
 		model, command = applyKey(t, model, specialKey(tea.KeyRight))
 		if command != nil {
 			t.Fatalf("deactive carousel step %d returned command", step)
@@ -335,7 +359,7 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 		Width: 120, Height: 20,
 	}
 	model := NewModel(snapshot)
-	line := model.renderRow(snapshot.Rows[0], false, 118)
+	line := model.renderGroupedRow(snapshot.Rows[0], false, 118, false)
 	plain := ansi.Strip(line)
 	for _, want := range []string{"✦ PROFESSOR UPDATE ✦", "v0.61.2", "◖ Claude ◗", "[ Codex ]", "[ OpenCode ]", "guided upgrade"} {
 		if !strings.Contains(plain, want) {
@@ -347,7 +371,7 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 	}
 	model.nowNS += int64(500 * time.Millisecond)
 	if next := ansi.Strip(
-		model.renderRow(snapshot.Rows[0], false, 118),
+		model.renderGroupedRow(snapshot.Rows[0], false, 118, false),
 	); !strings.Contains(
 		next,
 		"✧ PROFESSOR UPDATE ✧",
@@ -709,15 +733,6 @@ func TestAccountsOffTheRosterFallBackToTheFirst(t *testing.T) {
 	}
 }
 
-func TestValidAccountUsesRosterOnly(t *testing.T) {
-	if got := validAccount(3, nil); got != 0 {
-		t.Fatalf("validAccount(3, nil) = %d, want 0", got)
-	}
-	if got := validAccount(3, []int{1, 2}); got != 1 {
-		t.Fatalf("validAccount(3, [1 2]) = %d, want 1", got)
-	}
-}
-
 func TestFuzzyFilterAndRefreshCursorFollow(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.InitialCursorID = snapshot.Rows[3].ID
@@ -814,54 +829,6 @@ func TestEnteringStatsTabDefaultsFocusToSubtabs(t *testing.T) {
 	}
 	if model.statsSubtab != StatsDocker {
 		t.Fatalf("right from subtab focus statsSubtab = %d, want StatsDocker", model.statsSubtab)
-	}
-}
-
-func TestColonNameGroupsClusterInsideProject(t *testing.T) {
-	snapshot := fixtureSnapshot(120)
-	snapshot.Rows = []compose.Row{
-		{Kind: compose.LiveClaude, ID: "b1", Name: "BUILDER:1", Project: "alpha", ActivityNS: 100},
-		{Kind: compose.LiveClaude, ID: "b2", Name: "BUILDER:2", Project: "alpha", ActivityNS: 90},
-		{Kind: compose.LiveCodex, ID: "flat", Name: "fix: the bug", Project: "alpha", ActivityNS: 80},
-		{Kind: compose.LiveClaude, ID: "b3", Name: "BUILDER:3", Project: "alpha", ActivityNS: 70},
-	}
-	model := NewModel(snapshot)
-	rows := model.VisibleRows()
-	want := []string{"BUILDER:1", "BUILDER:2", "BUILDER:3", "fix: the bug"}
-	if len(rows) != len(want) {
-		t.Fatalf("visible rows = %#v", rows)
-	}
-	for index := range want {
-		if rows[index].Name != want[index] {
-			t.Fatalf("row %d = %q, want %q", index, rows[index].Name, want[index])
-		}
-	}
-	plain := ansi.Strip(model.View().Content)
-	if strings.Count(plain, "BUILDER (3)") != 1 || strings.Contains(plain, "fix (1)") {
-		t.Fatalf("group rendering:\n%s", plain)
-	}
-}
-
-func TestColonNameGroupsClusterAcrossProjects(t *testing.T) {
-	snapshot := fixtureSnapshot(120)
-	snapshot.Rows = []compose.Row{
-		{Kind: compose.LiveClaude, ID: "orch", Name: "P:CCC", Project: "professor", ActivityNS: 100},
-		{Kind: compose.LiveCodex, ID: "builder", Name: "P:BUILDER", Project: "limits-own-tab", ActivityNS: 90},
-	}
-	model := NewModel(snapshot)
-	rows := model.VisibleRows()
-	want := []string{"P:CCC", "P:BUILDER"}
-	if len(rows) != len(want) {
-		t.Fatalf("visible rows = %#v", rows)
-	}
-	for index := range want {
-		if rows[index].Name != want[index] {
-			t.Fatalf("row %d = %q, want %q", index, rows[index].Name, want[index])
-		}
-	}
-	plain := ansi.Strip(model.View().Content)
-	if strings.Count(plain, "P (2)") != 1 {
-		t.Fatalf("group rendering did not fold across projects:\n%s", plain)
 	}
 }
 

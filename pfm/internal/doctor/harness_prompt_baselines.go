@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +60,7 @@ func printHarnessPromptDoctorWithDeps(
 // printModelHarnessPromptDoctor re-captures the live Claude CLI's built-in system
 // prompt through a localhost sink — the request dies at the listener, so no
 // tokens are spent and nothing leaves the machine — and compares its sha256
-// to the staged baseline. Match, instruction drift, unavailable baseline, and
+// to the clone's baseline. Match, instruction drift, unavailable baseline, and
 // failed capture are distinct outcomes. Failed capture is never reported as drift.
 func printModelHarnessPromptDoctor(
 	ctx context.Context,
@@ -87,33 +89,62 @@ func printModelHarnessPromptDoctorWithDeps(
 	dependencies Dependencies,
 ) int {
 	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.Alias)
-	baselinePath := filepath.Join(paths.HarnessBaselineDir(home), model.Stem+".sha256")
+	dir, dirErr := paths.HarnessBaselineDir(home)
+	if dirErr != nil {
+		if errors.Is(dirErr, paths.ErrNoSourceRepoMarker) {
+			fmt.Fprintf(
+				stdout,
+				"doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q dir=(unresolved) — no source repo recorded, run pfm install from the clone\n",
+				model.Stem,
+				model.Alias,
+			)
+			return 1
+		}
+		fmt.Fprintf(
+			stdout,
+			"doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q dir=(unresolved) error=%v — the recorded clone is unusable: restore it, or run pfm install from a working clone\n",
+			model.Stem,
+			model.Alias,
+			dirErr,
+		)
+		return 1
+	}
+	baselinePath := filepath.Join(dir, model.Stem+".sha256")
 	raw, err := os.ReadFile(baselinePath)
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: harness-prompt: baseline unreadable (%v) — run pfm install\n", err)
-		return 1
+		state := "baseline file unreadable"
+		if errors.Is(err, fs.ErrNotExist) {
+			state = "baseline file missing"
+		}
+		return printHarnessBaselineUnavailable(stdout, model, dir, baselinePath, state, err)
 	}
 	fields := strings.Fields(string(raw))
 	if len(fields) != 2 {
-		fmt.Fprintf(stdout, "doctor: harness-prompt: baseline malformed at %s — run pfm install\n", baselinePath)
-		return 1
+		return printHarnessBaselineUnavailable(stdout, model, dir, baselinePath, "baseline file malformed",
+			fmt.Errorf("want \"<sha256> <body file>\", found %d field(s)", len(fields)))
 	}
 	decoded, decodeErr := hex.DecodeString(fields[0])
-	if decodeErr != nil || len(decoded) != sha256.Size || filepath.Base(fields[1]) != fields[1] {
-		fmt.Fprintln(stdout, "doctor: harness-prompt: baseline malformed — run pfm install")
-		return 1
+	if decodeErr == nil {
+		switch {
+		case len(decoded) != sha256.Size:
+			decodeErr = fmt.Errorf("decoded digest has %d byte(s), want %d", len(decoded), sha256.Size)
+		case filepath.Base(fields[1]) != fields[1]:
+			decodeErr = fmt.Errorf("body file %q is not a base name", fields[1])
+		}
+	}
+	if decodeErr != nil {
+		return printHarnessBaselineUnavailable(stdout, model, dir, baselinePath, "baseline digest malformed", decodeErr)
 	}
 	baselineModel, baseline, unavailable := readHarnessBaseline(baselinePath, model.Stem, fields[0], fields[1])
 	if unavailable != nil {
-		fmt.Fprintf(
+		return printHarnessBaselineUnavailable(
 			stdout,
-			"doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q path=%s error=%v — missing, unreadable or inconsistent baseline; run pfm install\n",
-			fields[1],
-			baselineModel,
+			model,
+			dir,
 			baselinePath,
-			unavailable,
+			"baseline inconsistent",
+			fmt.Errorf("captured model=%q body=%q: %w", baselineModel, fields[1], unavailable),
 		)
-		return 1
 	}
 	captured, captureErr := configuredHarnessCaptureWithDeps(ctx, home, machine, model.Alias, verboseDir, dependencies)
 	resolved, version := captured.ResolvedModel, captured.CLIVersion
@@ -149,6 +180,26 @@ func printModelHarnessPromptDoctorWithDeps(
 		return 1
 	}
 	return 0
+}
+
+func printHarnessBaselineUnavailable(
+	stdout io.Writer,
+	model HarnessPromptModel,
+	dir, path, state string,
+	cause error,
+) int {
+	fmt.Fprintf(
+		stdout,
+		"doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q dir=%s path=%s error=%v — %s; update or restore the clone at %s\n",
+		model.Stem,
+		model.Alias,
+		dir,
+		path,
+		cause,
+		state,
+		dir,
+	)
+	return 1
 }
 
 // readHarnessBaseline reads the pinned model name and the pinned body beside

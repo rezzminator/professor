@@ -26,8 +26,9 @@ type LastResult struct {
 }
 
 // Last reads the target's newest assistant turn. A chat with no transcript
-// yet is ErrNoTranscript and one that has not answered is ErrNoAnswer; both
-// carry the resolved chat in the result.
+// yet is ErrNoTranscript, one that has not answered is ErrNoAnswer, and a
+// Codex chat whose newest turn is still open is ErrTurnInProgress — never the
+// turn's commentary nor an older turn's answer; all carry the resolved chat.
 func LastAnswer(ctx context.Context, runtime *pfmconfig.Runtime, request LastRequest) (LastResult, error) {
 	target, err := Target(ctx, request.Target, runtime)
 	if err != nil {
@@ -35,6 +36,13 @@ func LastAnswer(ctx context.Context, runtime *pfmconfig.Runtime, request LastReq
 	}
 	if target.Path == "" {
 		return LastResult{Chat: target}, fmt.Errorf("%w: %q", ErrNoTranscript, target.Name)
+	}
+	open, err := codexTurnOpen(target)
+	if err != nil {
+		return LastResult{Chat: target}, err
+	}
+	if open {
+		return LastResult{Chat: target}, fmt.Errorf("chat %q is %w", target.Name, ErrTurnInProgress)
 	}
 	entries, _, err := transcript.Tail(ctx, target.Path, string(target.Engine), lastWindow, 0)
 	if err != nil {

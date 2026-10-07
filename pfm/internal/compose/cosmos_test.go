@@ -308,7 +308,7 @@ func TestBuildCosmosUnknownKindWarnsInsteadOfVanishingSilently(t *testing.T) {
 
 // TestBuildCosmosRetiredGroupKindSkipsSilently pins the retired chat-group
 // feature's historical-row contract: internal/fleetdb no longer has a
-// KindGroup const, but a fleet.db row recorded before the purge can still
+// KindGroup const, but a pfm.db row recorded before the purge can still
 // carry the literal string "group" forever. That is known history, not an
 // unknown kind, so BuildCosmos must skip it with no node, no edge, and — on
 // the orchestrator's ruling — no warning either: cosmos warnings pin to the

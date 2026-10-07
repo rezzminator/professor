@@ -11,8 +11,8 @@ import (
 
 // blindExitTmux never shows the typed /exit rendered — no context deadline
 // cuts it short, so waitExitRendered runs out its own retries and refuses to
-// press Enter blind. The composer it typed into (already stashed empty by
-// C-s) must come back out clean.
+// press Enter blind. The composer it typed into (empty before the /exit)
+// must come back out clean.
 type blindExitTmux struct {
 	fakeReloadTmux
 	backspaces int

@@ -12,6 +12,36 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+func TestGlobalAgentCodexFrontmatterOverridesModelAndEffort(t *testing.T) {
+	agentsDir := t.TempDir()
+	path := filepath.Join(agentsDir, "worker.md")
+	raw := "---\nname: worker\ndescription: Worker.\nmodel: sonnet\neffort: medium\ncodex-model: gpt-6-sol\ncodex-effort: high\n---\n\nWork.\n"
+	_, got, err := renderGlobalAgentTOML(path, raw, agentsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "model = \"gpt-6-sol\"\nmodel_reasoning_effort = \"high\"\n") {
+		t.Fatalf("Codex overrides missing from TOML:\n%s", got)
+	}
+	if strings.Contains(got, "codex-model") || strings.Contains(got, "codex-effort") {
+		t.Fatalf("Codex-only frontmatter leaked into TOML:\n%s", got)
+	}
+}
+
+func TestGlobalAgentBadCodexEffortNamesSource(t *testing.T) {
+	agentsDir := t.TempDir()
+	path := filepath.Join(agentsDir, "worker.md")
+	for _, effort := range []string{"", "max", "HIGH"} {
+		t.Run(effort, func(t *testing.T) {
+			raw := "---\nname: worker\ndescription: Worker.\ncodex-effort: " + effort + "\n---\n\nWork.\n"
+			_, _, err := renderGlobalAgentTOML(path, raw, agentsDir)
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "codex-effort") {
+				t.Fatalf("error = %v, want source path and codex-effort", err)
+			}
+		})
+	}
+}
+
 // TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution covers the
 // two-file happy path: both .md sources compile to a sibling .toml, both get
 // installed into {home}/.claude/agents (raw source) and {home}/.codex/agents
@@ -149,7 +179,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		"; do not edit — edit the source, then re-run: pfm codex build\n" +
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
-		"model = \"gpt-5.6-sol\"\n" +
+		"model = \"gpt-6.1-sol\"\n" +
 		"model_reasoning_effort = \"high\"\n" +
 		"sandbox_mode = \"read-only\"\n" +
 		"developer_instructions = \"\"\"\n"
@@ -242,6 +272,9 @@ func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
 			}
 			if first != second {
 				t.Fatalf("renderGlobalAgentTOML is not deterministic:\nfirst:\n%q\nsecond:\n%q", first, second)
+			}
+			if strings.Contains(first, "model = \"claude-") {
+				t.Fatalf("Claude model ID in Codex role:\n%s", first)
 			}
 
 			var document struct {
@@ -755,6 +788,11 @@ func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
 		want, wantAbsent  []string
 	}{
 		{
+			file:        "tracer-rr.md",
+			frontmatter: "name: tracer-rr\ndescription: Reads.\ntools: Bash, Read\nmodel: opus\ncodex-sandbox: workspace-write\n",
+			want:        []string{"model = \"gpt-6.1-sol\"\n", "sandbox_mode = \"workspace-write\"\n"},
+		},
+		{
 			file:        "scout.md",
 			frontmatter: "name: scout\ndescription: Reads.\ntools: Read, Grep, Glob, Bash\n",
 			want:        []string{"sandbox_mode = \"read-only\"\n"},
@@ -805,5 +843,66 @@ func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
 				t.Fatalf("emitted TOML does not parse: %v\n%s", err, got)
 			}
 		})
+	}
+}
+
+func TestCodexRoleSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		fields    map[string]string
+		modelMap  map[string]string
+		source    string
+		want      codexRole
+		wantError string
+	}{
+		{name: "codex-model wins", fields: map[string]string{"model": "claude-sonnet-5-5", "codex-model": "gpt-6-luna"}, source: "/a/orch.md", want: codexRole{Model: "gpt-6-luna"}},
+		{name: "Claude ID refused", fields: map[string]string{"model": "claude-sonnet-5-5"}, source: "/a/orch.md", wantError: "claude-sonnet-5-5"},
+		{name: "inherit keeps the session model", fields: map[string]string{"model": "inherit", "effort": "high"}, source: "/a/x.md", want: codexRole{Effort: "high"}},
+		{name: "configured key maps", fields: map[string]string{"model": "fast"}, modelMap: map[string]string{"fast": "gpt-fixture"}, source: "/a/x.md", want: codexRole{Model: "gpt-fixture"}},
+		{name: "codex-effort overrides", fields: map[string]string{"model": "opus", "effort": "high", "codex-effort": "xhigh"}, source: "/a/x.md", want: codexRole{Model: "gpt-6.1-sol", Effort: "xhigh"}},
+		{name: "bad codex-effort", fields: map[string]string{"codex-effort": "max"}, source: "/a/x.md", wantError: "max"},
+		{name: "workspace-write", fields: map[string]string{"tools": "Bash, Read, Grep, Glob", "codex-sandbox": "workspace-write"}, source: "/a/tracer-rr.md", want: codexRole{Sandbox: "workspace-write"}},
+		{name: "bad codex-sandbox", fields: map[string]string{"codex-sandbox": "danger-full-access"}, source: "/a/x.md", wantError: "danger-full-access"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modelMap := tc.modelMap
+			if modelMap == nil {
+				modelMap = defaultConfig().ModelMap
+			}
+			got, err := codexRoleSettings(tc.fields, modelMap, tc.source)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.source) ||
+					!strings.Contains(err.Error(), tc.wantError) ||
+					got != (codexRole{}) {
+					t.Fatalf(
+						"settings = %#v, %v, want no role and error naming %s and %s",
+						got,
+						err,
+						tc.source,
+						tc.wantError,
+					)
+				}
+				if tc.name == "Claude ID refused" && !strings.Contains(err.Error(), "fable, haiku, opus, sonnet") {
+					t.Fatalf("unmapped model error lacks sorted map keys: %v", err)
+				}
+			} else if err != nil || got != tc.want {
+				t.Fatalf("settings = %#v, %v, want %#v, nil", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestGlobalAgentsRefusesClaudeModel(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".professor", "templates", "global", "agents", "orch.md")
+	raw := "---\nname: orch\ndescription: O.\nmodel: claude-sonnet-5-5\n---\nOrchestrate.\n"
+	writeTestFile(t, source, raw)
+	_, _, renderErr := renderGlobalAgentTOML(source, raw, filepath.Dir(source))
+	if renderErr == nil || !strings.Contains(renderErr.Error(), source) {
+		t.Errorf("render error = %v, want source %s", renderErr, source)
+	}
+	_, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
+	if err == nil || !strings.Contains(err.Error(), source) {
+		t.Fatalf("RunGlobalAgents error = %v, want source %s", err, source)
 	}
 }

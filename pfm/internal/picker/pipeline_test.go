@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 type fakeCommsReader struct {
@@ -28,6 +29,31 @@ type fakeCommsReader struct {
 	err     error
 	sinceNS int64
 	limit   int
+}
+
+func TestBuildSnapshotInitialCacheMatchesPrimaryAccount(t *testing.T) {
+	machine := config.Config{
+		Claude: config.ClaudePrefs{Cache1H: true},
+		Accounts: []config.Account{
+			{ID: 1},
+			{ID: 2, Claude: &config.ClaudePrefs{Cache1H: false}},
+		},
+	}
+	for _, testCase := range []struct {
+		account int
+		want    bool
+	}{{1, true}, {2, false}} {
+		snapshot := buildSnapshot(
+			context.Background(),
+			fleet.Env{Config: machine, Primary: testCase.account},
+			scanRequest{},
+			compose.Output{},
+		)
+		if snapshot.Cache1H != testCase.want || snapshot.Cache1HByAccount[testCase.account] != testCase.want {
+			t.Fatalf("account %d snapshot cache = %t map = %t, want %t", testCase.account,
+				snapshot.Cache1H, snapshot.Cache1HByAccount[testCase.account], testCase.want)
+		}
+	}
 }
 
 func (reader *fakeCommsReader) CommsSince(_ context.Context, sinceNS int64, limit int) ([]fleetdb.CommsEvent, error) {
@@ -90,6 +116,87 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 			t.Fatalf("cap warnings = %v", warnings)
 		}
 	})
+}
+
+type fakeReminderReader struct {
+	unseen map[string]bool
+	err    error
+}
+
+func (reader fakeReminderReader) UnseenReminderSessionIDs(context.Context) (map[string]bool, error) {
+	return reader.unseen, reader.err
+}
+
+func TestBuildSnapshotMarksRemindedRows(t *testing.T) {
+	output := compose.Output{Rows: []compose.Row{{ID: "idA"}, {ID: "idB"}, {}}}
+	snapshot := buildSnapshot(
+		context.Background(),
+		fleet.Env{},
+		scanRequest{Reminders: fakeReminderReader{unseen: map[string]bool{"idA": true, "": true}}},
+		output,
+	)
+	if snapshot.ReminderError != "" {
+		t.Fatalf("ReminderError = %q, want none", snapshot.ReminderError)
+	}
+	if len(snapshot.Rows) != 3 || !snapshot.Rows[0].Reminded || snapshot.Rows[1].Reminded || snapshot.Rows[2].Reminded {
+		t.Fatalf("snapshot rows Reminded = %v, want only idA", remindedFlags(snapshot.Rows))
+	}
+	for index, row := range output.Rows {
+		if row.Reminded {
+			t.Fatalf("buildSnapshot mutated the composed output: row %d is Reminded", index)
+		}
+	}
+}
+
+func TestBuildSnapshotReportsReminderReadFailure(t *testing.T) {
+	output := compose.Output{Rows: []compose.Row{{ID: "idA"}, {ID: "idB"}}}
+	snapshot := buildSnapshot(
+		context.Background(),
+		fleet.Env{},
+		scanRequest{Reminders: fakeReminderReader{err: errors.New("database unavailable")}},
+		output,
+	)
+	if !strings.Contains(snapshot.ReminderError, "read reminder flags") ||
+		!strings.Contains(snapshot.ReminderError, "database unavailable") {
+		t.Fatalf("ReminderError = %q, want the wrapped read failure", snapshot.ReminderError)
+	}
+	if len(snapshot.Rows) != 2 || snapshot.Rows[0].Reminded || snapshot.Rows[1].Reminded {
+		t.Fatalf("rows after a failed read = %v, want both present and none Reminded", remindedFlags(snapshot.Rows))
+	}
+}
+
+// TestBuildSnapshotReportsDegradedReminderStore proves a state database that
+// cannot open reads as an error at the snapshot, never as "no reminders".
+func TestBuildSnapshotReportsDegradedReminderStore(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("a regular file, not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	state := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: filepath.Join(blocker, "state.db")})
+	t.Cleanup(func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close degraded shared state: %v", err)
+		}
+	})
+	snapshot := buildSnapshot(
+		ctx, fleet.Env{}, scanRequest{Reminders: state}, compose.Output{Rows: []compose.Row{{ID: "idA"}}},
+	)
+	if snapshot.ReminderError == "" {
+		t.Fatal("a degraded reminder store produced no ReminderError: a broken database reads as no reminders")
+	}
+	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Reminded {
+		t.Fatalf("rows with a degraded store = %v, want the row present, not Reminded", remindedFlags(snapshot.Rows))
+	}
+}
+
+func remindedFlags(rows []compose.Row) []bool {
+	flags := make([]bool, len(rows))
+	for index := range rows {
+		flags[index] = rows[index].Reminded
+	}
+	return flags
 }
 
 type slowIndexRunner struct {
@@ -304,7 +411,7 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 	if strict {
 		limit = 100 * time.Millisecond
 	}
-	request := scanRequest{Cache1H: true}
+	request := scanRequest{}
 	started := time.Now()
 	cached, err := scanFleetCached(context.Background(), database, request)
 	if err != nil {
@@ -538,7 +645,7 @@ func TestPrimaryAccountSetGetDirectly(t *testing.T) {
 	home := t.TempDir()
 	values := paths.Values{
 		Home:    home,
-		FleetDB: filepath.Join(home, ".cc", "fleet.db"),
+		StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 	}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
@@ -607,7 +714,7 @@ func TestPrimaryWritebackIgnoresTheUnsetSentinel(t *testing.T) {
 // primaryWriteback's whole point is keeping that call from ever happening.
 func TestPrimaryWritebackSentinelNeverHitsTheRosterCheck(t *testing.T) {
 	home := t.TempDir()
-	values := paths.Values{Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db")}
+	values := paths.Values{Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db")}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
 		filepath.Join(home, ".cc", "2", "projects"),
@@ -624,5 +731,226 @@ func TestPrimaryWritebackSentinelNeverHitsTheRosterCheck(t *testing.T) {
 	}
 	if _, should := primaryWriteback(ui.OutcomeSelected, 0, current); should {
 		t.Fatal("primaryWriteback let the unset sentinel through — runLS would still crash")
+	}
+}
+
+func pickerWorkbenchFixture(t *testing.T) (string, string, *store.Store, paths.Values) {
+	t.Helper()
+	jailTest(t)
+	root := filepath.Join(t.TempDir(), "acme")
+	dir := filepath.Join(root, "docs", "scribe")
+	for _, sub := range []string{filepath.Join(root, ".git"), filepath.Join(root, ".professor"), filepath.Join(dir, ".professor")} {
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{
+		filepath.Join(root, ".professor", "baseline.json"): "{}",
+		paths.WorkbenchManifest(dir):                       `{"prompt":"scribe.md","title":"Scribe"}`,
+		filepath.Join(dir, ".professor", "scribe.md"):      "You are scribe.",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	values, err := config.ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, dir, database, values
+}
+
+func TestPickerWorkbenchCachedFirstFrame(t *testing.T) {
+	root, dir, database, values := pickerWorkbenchFixture(t)
+	if err := workbench.WriteCache(
+		paths.WorkbenchCache(values),
+		[]workbench.Bench{workbench.LoadBench(dir, root)},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := scanFleetCached(context.Background(), database, scanRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range cached.Snapshot.Rows {
+		if row.Workbench == dir && row.Kind == compose.NewClaude && row.Project == "acme › Scribe" {
+			return
+		}
+	}
+	t.Fatalf("first frame lacks cached bench: %#v", cached.Snapshot.Rows)
+}
+
+func TestPickerWorkbenchRefreshDiscoversAndCaches(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(fmt.Sprint(corrupt), func(t *testing.T) {
+			root, dir, database, values := pickerWorkbenchFixture(t)
+			t.Chdir(t.TempDir())
+			if corrupt {
+				if err := os.WriteFile(
+					filepath.Join(filepath.Dir(values.CacheDB), "workbenches.json"),
+					[]byte("{broken"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := database.UpsertTranscript(
+				context.Background(),
+				store.Transcript{UUID: "A", Path: "/jail/A.jsonl", CWD: root, Size: 10, PromptCount: 1, MTimeNS: 900},
+			); err != nil {
+				t.Fatal(err)
+			}
+			cached, err := scanFleetCached(context.Background(), database, scanRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := scanRequest{RepoRoots: cached.Output.RepoRoots()}
+			ctx, cancel := context.WithCancel(context.Background())
+			updates := make(chan ui.Snapshot, 1)
+			var stderr bytes.Buffer
+			go streamFleetRefreshesWith(
+				ctx,
+				database,
+				request,
+				fleet.PrintWarn(&stderr),
+				&stderr,
+				updates,
+				refreshDependencies{
+					newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
+				},
+			)
+			var first ui.Snapshot
+			select {
+			case first = <-updates:
+			case <-time.After(10 * time.Second):
+				cancel()
+				for range updates {
+				}
+				t.Fatal("refresh timed out")
+			}
+			cancel()
+			for range updates {
+			}
+			found := false
+			for _, row := range first.Rows {
+				if row.Workbench == dir && row.Kind == compose.NewClaude {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("first refresh lacks discovered bench: %#v; %s", first.Rows, stderr.String())
+			}
+			benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+			if err != nil || len(benches) != 1 || benches[0].Dir != dir || len(faults) != 0 {
+				t.Fatalf("refresh cache = %v, %v, %v", benches, faults, err)
+			}
+		})
+	}
+}
+
+func TestPickerWorkbenchRefreshWalkErrors(t *testing.T) {
+	root, dir, database, values := pickerWorkbenchFixture(t)
+	t.Chdir(root)
+	fault := workbench.WalkError{
+		Root: root,
+		Path: filepath.Join(root, "docs", "locked"),
+		Err:  errors.New("permission denied"),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	updates := make(chan ui.Snapshot, 1)
+	var stderr bytes.Buffer
+	go streamFleetRefreshesWith(
+		ctx,
+		database,
+		scanRequest{},
+		fleet.PrintWarn(&stderr),
+		&stderr,
+		updates,
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
+			discover: func(roots []string) ([]workbench.Bench, []workbench.WalkError) {
+				benches, _ := workbench.Discover(roots)
+				return benches, []workbench.WalkError{fault}
+			},
+		},
+	)
+	var first ui.Snapshot
+	select {
+	case first = <-updates:
+	case <-time.After(10 * time.Second):
+		cancel()
+		for range updates {
+		}
+		t.Fatal("refresh timed out")
+	}
+	cancel()
+	for range updates {
+	}
+	found := false
+	for _, row := range first.Rows {
+		if row.Kind == compose.WorkbenchInvalid && row.Project == "acme" && row.Name == fault.Error() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("refresh lacks walk error: %#v; %s", first.Rows, stderr.String())
+	}
+	benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+	if err != nil || len(benches) != 1 || benches[0].Dir != dir || len(faults) != 1 ||
+		faults[0].Error() != fault.Error() {
+		t.Fatalf("walk error cache = %v, %v, %v", benches, faults, err)
+	}
+}
+
+// A repo root whose managed root cannot be resolved still names the directory
+// the walk could not read, so the picker's error row says where to look.
+func TestPickerWorkbenchRefreshNamesUnresolvableRoot(t *testing.T) {
+	_, _, _, values := pickerWorkbenchFixture(t)
+	t.Chdir(t.TempDir())
+	looped := filepath.Join(t.TempDir(), "zeta")
+	if err := os.MkdirAll(looped, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".professor", filepath.Join(looped, ".professor")); err != nil {
+		t.Fatal(err)
+	}
+	none := func([]string) ([]workbench.Bench, []workbench.WalkError) { return nil, nil }
+	if err := refreshWorkbenches(scanRequest{RepoRoots: []string{looped}}, none); err != nil {
+		t.Fatal(err)
+	}
+	_, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+	if err != nil || len(faults) != 1 || faults[0].Root != looped || faults[0].Path != looped ||
+		!strings.Contains(faults[0].Error(), "could not read "+looped+": ") {
+		t.Fatalf("cached faults = %#v, %v; want one naming %s", faults, err, looped)
+	}
+}
+
+func TestPickerWorkbenchRefreshCachesDeletedDirectory(t *testing.T) {
+	root, dir, _, values := pickerWorkbenchFixture(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if err := os.Remove(cwd); err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshWorkbenches(scanRequest{RepoRoots: []string{root}}, nil); err != nil {
+		t.Fatalf("refresh with a deleted discovery directory: %v", err)
+	}
+	benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+	if err != nil || len(benches) != 1 || benches[0].Dir != dir {
+		t.Fatalf("cached benches = %#v, %v; want %s", benches, err, dir)
+	}
+	if len(faults) != 1 || faults[0].Root != "." || faults[0].Path != "." ||
+		!strings.Contains(faults[0].Error(), "read workbench discovery directory") {
+		t.Fatalf("cached faults = %#v; want one naming the unreadable discovery directory", faults)
 	}
 }

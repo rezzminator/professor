@@ -16,21 +16,23 @@ import (
 	config "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-func TestUpdateCheckReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
+func TestProjectUpdatesReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	before := projectTreeDigest(t, fixture.project)
-	var stdout, stderr bytes.Buffer
-	code := Run([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime)
-	if code != 3 {
-		t.Fatalf("Run(check) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	var stdout bytes.Buffer
+	code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout)
+	if code != 1 {
+		t.Fatalf("RunProjectUpdates() code=%d stdout=%q", code, stdout.String())
 	}
 	for _, want := range []string{
 		"current       1", "ignored       0", "UPDATED       2", "NEW           1", "GONE-UPSTREAM 1",
 		"retired upstream — delete it and pfm update drop .claude/gone.md; keep it and drop only its pin",
 		"LOCAL-DELETED 1",
-		"review: git -C " + fixture.store,
+		"upstream change: git -C " + fixture.store,
+		"port what applies into .claude/updated-one.md, keep the project's own edits, then: pfm update pin .claude/updated-one.md",
 		"REVIEW REQUIRED — 5 items",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -43,7 +45,7 @@ func TestUpdateCheckReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
 	if strings.Contains(stdout.String(), "UNKNOWN") {
 		t.Fatalf("check invented an unknown status:\n%s", stdout.String())
 	}
-	t.Logf("fixture pfm update check output:\n%s", stdout.String())
+	t.Logf("fixture pfm doctor --project-updates output:\n%s", stdout.String())
 }
 
 func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testing.T) {
@@ -70,14 +72,10 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run(
-		[]string{"check", "--root", fixture.project},
-		&stdout,
-		&stderr,
-		fixture.runtime,
-	); code != 3 || !strings.Contains(stdout.String(), "UPDATED       1") ||
+	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 ||
+		!strings.Contains(stdout.String(), "UPDATED       1") ||
 		!strings.Contains(stdout.String(), ".claude/updated-two.md") {
-		t.Fatalf("deferred check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("deferred check code=%d stdout=%q", code, stdout.String())
 	}
 
 	newLocal := filepath.Join(fixture.project, ".claude", "new.md")
@@ -127,27 +125,19 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run(
-		[]string{"check", "--root", fixture.project},
-		&stdout,
-		&stderr,
-		fixture.runtime,
-	); code != 0 ||
+	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 0 ||
 		!strings.HasSuffix(stdout.String(), "clean\n") {
-		t.Fatalf("clean check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("clean check code=%d stdout=%q", code, stdout.String())
 	}
 }
 
-func TestUpdateCheckJSONIsOneObjectAndUnreadableBaselineFails(t *testing.T) {
+func TestProjectUpdatesJSONIsOneObjectCarriesDiffAndUnreadableBaselineFails(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
-	var stdout, stderr bytes.Buffer
-	if code := Run(
-		[]string{"check", "--json", "--root", fixture.project},
-		&stdout,
-		&stderr,
-		fixture.runtime,
-	); code != 3 {
-		t.Fatalf("json check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	var stdout bytes.Buffer
+	if code := professor.RunProjectUpdates(
+		fixture.project, fixture.runtime.Paths.Home, true, &stdout,
+	); code != 1 {
+		t.Fatalf("json check code=%d stdout=%q", code, stdout.String())
 	}
 	var object map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &object); err != nil {
@@ -156,20 +146,33 @@ func TestUpdateCheckJSONIsOneObjectAndUnreadableBaselineFails(t *testing.T) {
 	if object["reviewRequired"] != float64(5) {
 		t.Fatalf("reviewRequired=%#v", object["reviewRequired"])
 	}
+	items, ok := object["items"].([]any)
+	if !ok {
+		t.Fatalf("items=%#v, want an array", object["items"])
+	}
+	sawUpdatedDiff := false
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok || item["status"] != "UPDATED" {
+			continue
+		}
+		if diff, ok := item["diff"].(string); ok && strings.TrimSpace(diff) != "" {
+			sawUpdatedDiff = true
+		}
+	}
+	if !sawUpdatedDiff {
+		t.Fatalf("no UPDATED item carries a non-empty diff field:\n%s", stdout.String())
+	}
 
 	if err := os.WriteFile(professor.BaselinePath(fixture.project), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	stdout.Reset()
-	stderr.Reset()
-	if code := Run(
-		[]string{"check", "--root", fixture.project},
-		&stdout,
-		&stderr,
-		fixture.runtime,
-	); code != 1 ||
+	if code := professor.RunProjectUpdates(
+		fixture.project, fixture.runtime.Paths.Home, false, &stdout,
+	); code != 3 ||
 		!strings.Contains(stdout.String(), "FAILED — BASELINE-MALFORMED") {
-		t.Fatalf("malformed check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("malformed check code=%d stdout=%q", code, stdout.String())
 	}
 }
 
@@ -230,8 +233,8 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	// carries templates/project/commands/per-project/testing-manual.md — a file
 	// planInitCopies deliberately skips, so it is never in plan and is
 	// never absent, but check still counts it NEW: NEW = plan size - 2 + 1.
-	if code := Run([]string{"check", "--root", project}, &stdout, &stderr, runtime); code != 3 {
-		t.Fatalf("check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := professor.RunProjectUpdates(project, runtime.Paths.Home, false, &stdout); code != 1 {
+		t.Fatalf("check code=%d stdout=%q", code, stdout.String())
 	}
 	wantNew := planSize - 2 + 1
 	for _, want := range []string{"current       2", fmt.Sprintf("NEW           %d", wantNew)} {
@@ -242,7 +245,7 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 }
 
 func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
-	store, oldSHA, headSHA := newAdoptAtStoreFixture(t)
+	store, oldSHA, _ := newAdoptAtStoreFixture(t)
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
 		t.Fatal(err)
@@ -287,12 +290,17 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run([]string{"check", "--root", project}, &stdout, &stderr, runtime); code != 3 {
-		t.Fatalf("check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := professor.RunProjectUpdates(project, runtime.Paths.Home, false, &stdout); code != 1 {
+		t.Fatalf("check code=%d stdout=%q", code, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), ".claude/commands/dev.md   project/commands/dev.md  pinned @"+oldSHA) ||
-		!strings.Contains(stdout.String(), fmt.Sprintf("review: git -C %s diff %s..%s", store, oldSHA, headSHA)) {
-		t.Fatalf("check did not report dev.md UPDATED with the expected review line:\n%s", stdout.String())
+	for _, want := range []string{
+		".claude/commands/dev.md   project/commands/dev.md  pinned @" + oldSHA,
+		fmt.Sprintf("upstream change: git -C %s diff %s -- templates/project/commands/dev.md", store, oldSHA),
+		"-old", "+new",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("check missing %q in dev.md UPDATED report:\n%s", want, stdout.String())
+		}
 	}
 	if !strings.Contains(stdout.String(), "project/commands/later.md — adopt:") {
 		t.Fatalf("check did not report later.md NEW:\n%s", stdout.String())
@@ -373,8 +381,8 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 3 {
-		t.Fatalf("check after ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 {
+		t.Fatalf("check after ignore code=%d stdout=%q", code, stdout.String())
 	}
 	for _, want := range []string{"NEW           0", "ignored       1", "REVIEW REQUIRED — 4 items"} {
 		if !strings.Contains(stdout.String(), want) {
@@ -384,13 +392,10 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run(
-		[]string{"check", "--json", "--root", fixture.project},
-		&stdout,
-		&stderr,
-		fixture.runtime,
-	); code != 3 {
-		t.Fatalf("check --json after ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := professor.RunProjectUpdates(
+		fixture.project, fixture.runtime.Paths.Home, true, &stdout,
+	); code != 1 {
+		t.Fatalf("check --json after ignore code=%d stdout=%q", code, stdout.String())
 	}
 	var object map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &object); err != nil {
@@ -438,14 +443,9 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run(
-		[]string{"check", "--root", fixture.project},
-		&stdout,
-		&stderr,
-		fixture.runtime,
-	); code != 3 ||
+	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 ||
 		!strings.Contains(stdout.String(), "NEW           1") {
-		t.Fatalf("check after undo code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("check after undo code=%d stdout=%q", code, stdout.String())
 	}
 
 	stdout.Reset()
@@ -475,23 +475,6 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 	}
 	if len(baseline.Ignored) != 0 {
 		t.Fatalf("baseline.Ignored=%#v after pinning a formerly ignored template, want empty", baseline.Ignored)
-	}
-}
-
-// TestUpdateCheckMissingBaselineNamesAdoptCommand is a REGRESSION test for
-// the "no baseline" message text: watched failing against the old text
-// ".professor/baseline.json not found" (no "pfm update adopt" guidance) —
-// see the RED-first record in the qa report.
-func TestUpdateCheckMissingBaselineNamesAdoptCommand(t *testing.T) {
-	dir := t.TempDir()
-	home := t.TempDir()
-	runtime := config.Runtime{Paths: paths.Values{Home: home}}
-	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"check", "--root", dir}, &stdout, &stderr, runtime); code != 1 {
-		t.Fatalf("missing baseline check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "pfm update adopt pins an existing install") {
-		t.Fatalf("missing baseline stdout=%q, want it to name pfm update adopt", stdout.String())
 	}
 }
 
@@ -1038,7 +1021,7 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(fixture.content), fixture.mode); err != nil {
+		if err := testjail.WriteExecutable(path, []byte(fixture.content), fixture.mode); err != nil {
 			t.Fatal(err)
 		}
 	}

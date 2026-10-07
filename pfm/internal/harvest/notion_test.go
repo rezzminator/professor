@@ -173,6 +173,7 @@ func notionFixtureOracle(t *testing.T) notionOracle {
 // reconcile with the API's own; the artifact is complete, and a second
 // harvest is identical.
 func TestNotionPageLoadsEveryBlock(t *testing.T) {
+	t.Parallel()
 	site := newNotionSite(t)
 	oracle := notionFixtureOracle(t)
 	h := site.harvester(t, false)
@@ -231,6 +232,7 @@ func TestNotionPageLoadsEveryBlock(t *testing.T) {
 // renders what was served, and the partial marker names the rest, stated ·
 // loaded.
 func TestNotionBlocksNotServedAreNamed(t *testing.T) {
+	t.Parallel()
 	oracle := notionFixtureOracle(t)
 	t.Run("unserved", func(t *testing.T) {
 		site := newNotionSite(t)
@@ -272,6 +274,7 @@ func TestNotionBlocksNotServedAreNamed(t *testing.T) {
 // not rendered from nothing: it falls through to the generic path, which
 // names why the tree did not load.
 func TestNotionTreeNotLoadedFallsThrough(t *testing.T) {
+	t.Parallel()
 	site := newNotionSite(t)
 	site.refused["/api/v3/loadPageChunk"] = http.StatusForbidden
 	result := site.harvester(t, true).FetchWithOptions(context.Background(), notionURL, FetchOptions{Refresh: true})

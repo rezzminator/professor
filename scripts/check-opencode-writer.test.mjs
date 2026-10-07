@@ -30,9 +30,10 @@ const ENV = { ...process.env };
 for (const k of ["PFM_DEV_REPO_GIT_DIR", "PFM_DEV_REPO_WORK_TREE", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"])
   delete ENV[k];
 
-function tree(files, { git = true } = {}) {
+function tree(files, { git = true, omit = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "opencode-writer-"));
   for (const [path, body] of Object.entries({ ...SURFACES, ...files })) {
+    if (omit.includes(path)) continue;
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), body);
   }
@@ -114,4 +115,30 @@ test("inside the fence the checker lists through PFM_DEV_REPO_GIT_DIR, as the ot
   assert.equal(r.status, 1, r.out);
   assert.match(r.out, /opencode-writer: FAIL docs\/a\.md:1 — stale deleted writer reference/);
   assert.doesNotMatch(r.out, /could not list the tree/);
+});
+
+test("a half-set fence contract fails naming the pair, never scans another tree", (t) => {
+  const root = tree({ "docs/a.md": "nothing stale\n" });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = check(root, { ...ENV, PFM_DEV_REPO_GIT_DIR: join(root, ".git") });
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /opencode-writer: FAIL PFM_DEV_REPO_GIT_DIR and PFM_DEV_REPO_WORK_TREE must be set together; scan did not run/);
+  assert.doesNotMatch(r.out, /opencode-writer: clean/);
+});
+
+test("a surface without its native command fails by name", (t) => {
+  const root = tree({ "INSTALL.md": "Install from the current build.\n" });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = check(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /INSTALL\.md — missing native remediation: pfm opencode build \./);
+});
+
+test("a missing surface fails as unreadable, never clean", (t) => {
+  const root = tree({}, { omit: ["INSTALL.md"] });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = check(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /INSTALL\.md — could not be read/);
+  assert.doesNotMatch(r.out, /opencode-writer: clean/);
 });

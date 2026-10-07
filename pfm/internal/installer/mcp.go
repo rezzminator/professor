@@ -71,6 +71,9 @@ func (installer *engine) mcpOwnershipPath() string {
 }
 
 func (installer *engine) wireMCP() error {
+	if err := installer.dropClaudeMCPOwnership(); err != nil {
+		return err
+	}
 	if installer.options.Mode == ModeUninstall {
 		return installer.removeMCPClientRegistrations()
 	}
@@ -81,14 +84,10 @@ func (installer *engine) wireMCP() error {
 		return err
 	}
 	names := enabledMCPNames(installer.options.MCPEnabled)
-	wiredNames, err := installer.writeMCPClientJSON(names)
-	if err != nil {
+	if err := installer.writeMCPCodeConfig(names); err != nil {
 		return err
 	}
-	if err := installer.writeMCPCodeConfig(wiredNames); err != nil {
-		return err
-	}
-	if err := installer.writeMCPOpenCodeJSON(wiredNames); err != nil {
+	if err := installer.writeMCPOpenCodeJSON(names); err != nil {
 		return err
 	}
 	if err := installer.removeLegacyMCPCredential(); err != nil {
@@ -121,17 +120,6 @@ func isHex(value string) bool {
 	return err == nil
 }
 
-// mcpClientRegistration is the Claude registration of professor. Every engine
-// registers the stdio command; Codex's _meta.threadId passes through the
-// forwarder unchanged.
-func (installer *engine) mcpClientRegistration() map[string]any {
-	return map[string]any{
-		configTypeKey:    stdioProtocol,
-		configCommandKey: installer.mcpChatCommand(),
-		configArgsKey:    append([]string{}, mcpStdioArgs...),
-	}
-}
-
 // mcpChatCommand is the absolute path to the pfm binary this install owns —
 // the same canonical ~/.local/bin/pfm path canonicalBinaryOwnershipContent
 // records and updateCodexHooks already migrates hook commands to. The
@@ -142,33 +130,9 @@ func (installer *engine) mcpChatCommand() string {
 	return filepath.Join(installer.options.Home, ".local", "bin", "pfm")
 }
 
-// isPFMClient recognizes a registration as pfm's OWN, in whichever of the two
-// shapes mcpClientRegistration produces for name, so writeMCPClientJSON can
-// tell "ours, safe to maintain" from "a manual conflict, preserve as-is."
-func (installer *engine) isPFMClient(name string, registration map[string]any) bool {
-	return installer.isPFMHTTPClient(name, registration) || installer.isPFMStdioClient(name, registration)
-}
-
-// isPFMStdioClient recognizes pfm's own stdio "professor" registration — the
-// shape mcpClientRegistration writes — so a later install can maintain it
-// instead of forever treating it as a manual conflict. A registration that
-// merely LOOKS similar (a hand-written entry using a bare "pfm" command, say)
-// does not match this exact shape and is correctly left as a manual conflict —
-// recognizing only what this installer itself would write is the whole point.
-func (installer *engine) isPFMStdioClient(name string, registration map[string]any) bool {
-	return name == professorName && installer.isExactStdioRegistration(registration, mcpStdioArgs)
-}
-
-// isPFMLegacyClient recognizes pfm's own registrations under the keys it wrote
-// before the one professor server: the stdio chat entry (mcpLegacyChatArgs),
-// and the loopback HTTP chat and harvester entries (bearer shape included).
-func (installer *engine) isPFMLegacyClient(name string, registration map[string]any) bool {
-	return isPFMLegacyClaudeShape(name, registration, installer.mcpChatCommand(), installer.options.MCPPort)
-}
-
-// isPFMLegacyClaudeShape is the one exact test of pfm's legacy Claude shapes,
-// shared by install (which removes what it matches) and doctor (which
-// prescribes that install only for what it matches).
+// isPFMLegacyClaudeShape is the one exact test of pfm's legacy Claude-format
+// shapes (the project ~/.mcp.json inspection): doctor prescribes
+// `pfm install --yes` only for what it matches.
 func isPFMLegacyClaudeShape(name string, registration map[string]any, bin string, port int) bool {
 	switch name {
 	case chatName:
@@ -184,12 +148,8 @@ func isPFMLegacyClaudeShape(name string, registration map[string]any, bin string
 	return false
 }
 
-// isExactStdioRegistration is true for exactly {type: stdio, command: the
-// absolute pfm path, args: want} and nothing more.
-func (installer *engine) isExactStdioRegistration(registration map[string]any, want []string) bool {
-	return isExactStdioShape(registration, installer.mcpChatCommand(), want)
-}
-
+// isExactStdioShape is true for exactly {type: stdio, command: bin, args: want}
+// and nothing more (Claude's shape-neutral empty env aside).
 func isExactStdioShape(registration map[string]any, bin string, want []string) bool {
 	registration = withoutEmptyEnv(registration)
 	if len(registration) != 3 {
@@ -232,10 +192,6 @@ func sameStrings(values []any, want []string) bool {
 	return true
 }
 
-func (installer *engine) isPFMHTTPClient(name string, registration map[string]any) bool {
-	return isPFMHTTPShape(registration, installer.mcpURL(name))
-}
-
 func isPFMHTTPShape(registration map[string]any, url string) bool {
 	registration = withoutEmptyEnv(registration)
 	if registration[configTypeKey] != httpProtocol || registration["url"] != url {
@@ -261,6 +217,18 @@ func isPFMHTTPShape(registration map[string]any, url string) bool {
 	return len(token) == 64 && isHex(token)
 }
 
+// pfmClaudeMCPShape is the one by-shape test of an entry pfm wrote into a
+// Claude file (an account .claude.json or ~/.mcp.json): the legacy chat and
+// harvester shapes, or the exact professor stdio shape. Only chat, harvester
+// and professor are ever matched.
+func pfmClaudeMCPShape(name string, registration map[string]any, home string, port int) bool {
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	if isPFMLegacyClaudeShape(name, registration, bin, port) {
+		return true
+	}
+	return name == professorName && isExactStdioShape(registration, bin, mcpStdioArgs)
+}
+
 func (installer *engine) writeMCPCodeConfig(names []string) error {
 	for _, home := range installer.codexHomes() {
 		if err := installer.writeMCPCodeConfigAt(filepath.Join(home, "config.toml"), names); err != nil {
@@ -275,24 +243,17 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	if err != nil {
 		return err
 	}
-	var lines []string
-	if len(raw) != 0 {
-		lines = strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	kept, foreign, _, err := installer.codexMCPYield(string(raw))
+	if err != nil {
+		return fmt.Errorf("read Codex MCP config %s: %w", path, err)
 	}
 	body, err := codexStdioBody(installer.mcpChatCommand())
 	if err != nil {
 		return fmt.Errorf("encode Codex MCP registration for %s: %w", path, err)
 	}
-	kept := stripPFMCodexLines(lines, installer.options.MCPPort, body)
-	var foreign struct {
-		Servers map[string]any `toml:"mcp_servers"`
-	}
-	if _, err := toml.Decode(strings.Join(kept, "\n"), &foreign); err != nil {
-		return fmt.Errorf("parse unmanaged Codex MCP config %s: %w", path, err)
-	}
 	var generated []string
 	for _, name := range names {
-		if _, present := foreign.Servers[name]; present {
+		if _, present := foreign[name]; present {
 			installer.skip("preserve conflicting manual MCP client " + name + " in " + path)
 			continue
 		}
@@ -310,9 +271,46 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 		installer.ok(path + " wiring")
 		return nil
 	}
-	return installer.change(changeDescription(path, existed), func() error {
-		return installer.writeMCPFile(path, raw, []byte(wanted), existed)
-	})
+	return installer.changeMCPFile(changeDescription(path, existed), path, raw, []byte(wanted), existed)
+}
+
+// codexMCPYield reads the hand-written view before any install step decodes
+// the complete config. A matching manual table makes pfm yield its fenced
+// registration; wireMCP uses the same view to preserve that table.
+func (installer *engine) codexMCPYield(raw string) ([]string, map[string]any, string, error) {
+	var lines []string
+	if raw != "" {
+		lines = strings.Split(strings.TrimSuffix(raw, "\n"), "\n")
+	}
+	body, err := codexStdioBody(installer.mcpChatCommand())
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("encode Codex MCP registration: %w", err)
+	}
+	kept := stripPFMCodexLines(lines, installer.options.MCPPort, body)
+	var foreign struct {
+		Servers map[string]any `toml:"mcp_servers"`
+	}
+	if _, err := toml.Decode(strings.Join(kept, "\n"), &foreign); err != nil {
+		return nil, nil, "", fmt.Errorf("parse unmanaged Codex MCP config: %w", err)
+	}
+	yielded := raw
+	inside := false
+	for _, line := range lines {
+		switch line {
+		case mcpFenceBegin:
+			inside = true
+		case mcpFenceEnd:
+			inside = false
+		default:
+			if inside && strings.HasPrefix(line, "[mcp_servers.") && strings.HasSuffix(line, "]") {
+				name := strings.TrimSuffix(strings.TrimPrefix(line, "[mcp_servers."), "]")
+				if _, present := foreign.Servers[name]; present {
+					yielded = strings.TrimRight(strings.Join(kept, "\n"), "\n") + "\n"
+				}
+			}
+		}
+	}
+	return kept, foreign.Servers, yielded, nil
 }
 
 // codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
@@ -561,9 +559,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 		if len(removedLegacy) > 0 {
 			message += " — remove pfm's legacy MCP clients " + strings.Join(removedLegacy, ",")
 		}
-		if err := installer.change(message, func() error {
-			return installer.writeMCPFile(path, original, wantedRaw, existed)
-		}); err != nil {
+		if err := installer.changeMCPFile(message, path, original, wantedRaw, existed); err != nil {
 			return err
 		}
 	} else {
@@ -667,13 +663,12 @@ func editOpenCodeServer(raw []byte, name string, value []byte, remove bool) ([]b
 		if remove {
 			return raw, nil
 		}
-		servers := map[string]any{}
-		var registration map[string]any
-		if err := json.Unmarshal(value, &registration); err != nil {
-			return nil, err
+		// The caller's bytes go in verbatim, as the existing-object branch
+		// writes them, so a second edit finds nothing to change.
+		if !json.Valid(value) {
+			return nil, errors.New("OpenCode mcp registration is not valid JSON")
 		}
-		servers[name] = registration
-		encoded, err := json.Marshal(map[string]any{"mcp": servers})
+		encoded, err := json.Marshal(map[string]json.RawMessage{name: value})
 		if err != nil {
 			return nil, err
 		}
@@ -693,9 +688,6 @@ func editOpenCodeServer(raw []byte, name string, value []byte, remove bool) ([]b
 }
 
 func (installer *engine) removeMCPClientRegistrations() error {
-	if _, err := installer.writeMCPClientJSON(nil); err != nil {
-		return err
-	}
 	if err := installer.removeMCPCodeConfig(); err != nil {
 		return err
 	}
@@ -723,7 +715,8 @@ func (installer *engine) removeLegacyMCPConfigAuth() error {
 	if !changed {
 		return nil
 	}
-	return installer.change("remove retired MCP authToken from "+installer.options.MCPConfigPath, func() error {
+	message := "remove retired MCP authToken from " + installer.options.MCPConfigPath
+	return installer.change(message, func() error {
 		_, err := pfmconfig.RemoveMCPAuthToken(effective)
 		return err
 	})
@@ -759,9 +752,7 @@ func (installer *engine) removeMCPCodeConfigAt(path string) error {
 	if wanted == string(raw) {
 		return nil
 	}
-	return installer.change("rewrite "+path+" (remove pfm MCP registration)", func() error {
-		return installer.writeMCPFile(path, raw, []byte(wanted), true)
-	})
+	return installer.changeMCPFile("rewrite "+path+" (remove pfm MCP registration)", path, raw, []byte(wanted), true)
 }
 
 func sameJSONValue(left, right any) bool {

@@ -12,6 +12,7 @@ import (
 // newest turns returned four {"role":"tool","text":""} blanks and bytes=0,
 // which reads as a chat that said nothing rather than one that called tools.
 func TestBoundTurnsCarriesToolCalls(t *testing.T) {
+	t.Parallel()
 	entries := []transcript.Entry{
 		{Role: transcript.RoleUser, Text: "run the gate", Timestamp: "2026-01-01T00:00:00Z"},
 		{Role: transcript.RoleTool, Tool: "Bash", Input: "dev.sh verify pfm", Timestamp: "2026-01-01T00:00:01Z"},
@@ -48,6 +49,7 @@ func TestBoundTurnsCarriesToolCalls(t *testing.T) {
 // applies to whatever text a turn emits, the tool input included, and that the
 // cut turn is kept rather than dropped.
 func TestBoundTurnsCutsAToolInputToTheRemainingBudget(t *testing.T) {
+	t.Parallel()
 	entries := []transcript.Entry{
 		{Role: transcript.RoleTool, Tool: "Read", Input: "0123456789", Timestamp: "2026-01-01T00:00:00Z"},
 	}

@@ -20,6 +20,7 @@ import (
 // this run's plan, while a still-declared variant's link and file survive
 // untouched.
 func TestRetireOrphanGlobalAgentsPrunesUndeclaredVariants(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	generatedDir := paths.GeneratedClaudeAgentsDir(home)
 	keepFile := filepath.Join(generatedDir, "keep.md")
@@ -67,13 +68,14 @@ func TestRetireOrphanGlobalAgentsPrunesUndeclaredVariants(t *testing.T) {
 	}
 }
 
-// TestRetireOrphanGlobalAgentsPrunesDanglingOriginals pins the original-agent
+// TestRetireDeadRegistryLinksPrunesDanglingOriginalAgents pins the original-agent
 // half of the same promise: a link resolving at <recorded professor repo>/
 // templates/global/agents/<its own name> retires only once that source no
 // longer exists, while a live original link, a plain regular file, and a
 // dangling link pointing outside the blueprint entirely all survive — the
-// same preservation rule retireOrphanGlobalCommands holds to for commands.
-func TestRetireOrphanGlobalAgentsPrunesDanglingOriginals(t *testing.T) {
+// same preservation rule retireDeadRegistryLinks holds to for commands.
+func TestRetireDeadRegistryLinksPrunesDanglingOriginalAgents(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	liveSource := filepath.Join(repo, "templates", "global", "agents", "alpha.md")
@@ -108,7 +110,7 @@ func TestRetireOrphanGlobalAgentsPrunesDanglingOriginals(t *testing.T) {
 		apply:   true,
 	}
 
-	if err := installer.retireOrphanGlobalAgents(nil); err != nil {
+	if err := installer.retireDeadRegistryLinks(); err != nil {
 		t.Fatalf("retireOrphanGlobalAgents: %v", err)
 	}
 
@@ -130,12 +132,10 @@ func TestRetireOrphanGlobalAgentsPrunesDanglingOriginals(t *testing.T) {
 	}
 }
 
-// TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess mirrors
-// TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess: a registry
-// retireOrphanGlobalAgents cannot even READ must surface a wrapped error
-// naming its path, never render as the silent no-op success of a registry
-// that simply had no orphan.
+// TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess checks that an
+// unreadable store registry returns its path rather than reporting no orphans.
 func TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip(
 			"running as root: chmod-denied directory reads are a no-op for root, so this failure cannot be forced genuinely here",
@@ -169,13 +169,14 @@ func TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess(t *testing.T) 
 }
 
 // TestClaudeGlobalAgentsLinkAndRetireWhateverTheCodexRoster is a REGRESSION
-// test: the Claude-side agent fan-out (links, dangling-original retirement,
+// test: the Claude-side store wiring (links, dangling-original retirement,
 // undeclared-variant retirement) rode inside the Codex-roster gate, so an
 // install with no Codex home (`--skip-codex`, an empty roster) left a
 // dangling ~/.claude/agents link and an undeclared generated variant behind
 // and never linked a newly shipped agent. Both rosters must serve Claude; only
 // the configured one may write a Codex role.
 func TestClaudeGlobalAgentsLinkAndRetireWhateverTheCodexRoster(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		roster func(home string) []string
@@ -202,14 +203,14 @@ func TestClaudeGlobalAgentsLinkAndRetireWhateverTheCodexRoster(t *testing.T) {
 			roster := tc.roster(home)
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: home, Stdout: &output,
+				Mode: ModeApply, Home: home, Stdout: &output, MCPConfigPath: testConfigPath(t),
 				Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: roster,
 			})
 			if err != nil {
 				t.Fatalf("install: %v\n%s", err, output.String())
 			}
 			for _, wanted := range []string{
-				"retired global agent — " + filepath.Join(agents, "flights-gater.md") + " no longer ships",
+				"dead pfm link -> " + filepath.Join(agents, "flights-gater.md"),
 				"undeclared generated agent variant",
 			} {
 				if !strings.Contains(output.String(), wanted) {

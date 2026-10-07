@@ -8,10 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
 	"golang.org/x/net/html"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // Fixtures under testdata/walls are hand-built from the structure of live
@@ -96,6 +99,7 @@ func pageHarvester(t *testing.T, page string, converter Converter, browserRung *
 // extractor skips inert content by spec, so without the pre-pass the page
 // converts to its teaser and the article is lost.
 func TestDeferredTemplateContentReachesTheConverter(t *testing.T) {
+	t.Parallel()
 	h := pageHarvester(t, wallFixture(t, "deferred-article.html"), inertSkippingConverter(), browserOff())
 	result := h.Fetch(context.Background(), "https://docs.example.test/scheduler/")
 	if result.Error != "" || result.Method != rungDirect {
@@ -118,6 +122,7 @@ func TestDeferredTemplateContentReachesTheConverter(t *testing.T) {
 // rendered, deferred content is surfaced once, and a JSON-LD articleBody the
 // page does not show joins the body.
 func TestInertUnwrapSurfacesOnlyUnseenDeferredContent(t *testing.T) {
+	t.Parallel()
 	visible := strings.Repeat("the rendered story names the harbour, the ferry and the lighthouse keeper ", 4)
 	deferred := strings.Repeat("a deferred chapter about tides, charts and night crossings of the bay ", 4)
 	island := strings.Repeat("an island only chapter about storms, beacons and rescue boats on the coast ", 4)
@@ -164,7 +169,13 @@ func TestInertUnwrapSurfacesOnlyUnseenDeferredContent(t *testing.T) {
 // the shown text the next probe searches, so the bookkeeping must grow with
 // the words surfaced — a page of 2N distinct deferred containers may cost at
 // most about twice the bytes of a page of N, never the square.
+//
+// Serial on purpose: it reads the process-wide runtime.MemStats.TotalAlloc, so
+// every parallel test allocating beside it lands in its measurement and can push
+// the 2N/N ratio past the bound. A serial test runs before any parallel one is
+// released.
 func TestInertBookkeepingGrowsLinearly(t *testing.T) {
+	testjail.PauseFlightRecorder(t)
 	page := func(containers int) string {
 		var b strings.Builder
 		b.WriteString(`<html><body><p>The visible lede of the page.</p>`)
@@ -187,21 +198,28 @@ func TestInertBookkeepingGrowsLinearly(t *testing.T) {
 		if got := unwrapInertContainers(context.Background(), doc); got != containers {
 			t.Fatalf("surfaced %d of %d distinct unseen containers", got, containers)
 		}
-		result := testing.Benchmark(func(b *testing.B) {
-			for range b.N {
-				b.StopTimer()
-				doc, err := html.Parse(strings.NewReader(markup))
+		const copies = 5
+		var smallest int64
+		for round := 0; round < 3; round++ {
+			var docs [copies]*html.Node
+			for index := range docs {
+				docs[index], err = html.Parse(strings.NewReader(markup))
 				if err != nil {
-					b.Fatal(err)
+					t.Fatal(err)
 				}
-				b.StartTimer()
+			}
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			for _, doc := range docs {
 				unwrapInertContainers(context.Background(), doc)
 			}
-		})
-		if result.N == 0 {
-			t.Fatalf("the allocation benchmark over %d containers did not run or failed", containers)
+			runtime.ReadMemStats(&after)
+			perCall := int64(after.TotalAlloc-before.TotalAlloc) / copies
+			if round == 0 || perCall < smallest {
+				smallest = perCall
+			}
 		}
-		return result.AllocedBytesPerOp()
+		return smallest
 	}
 	const n = 400
 	single, double := allocated(n), allocated(2*n)
@@ -217,6 +235,7 @@ func TestInertBookkeepingGrowsLinearly(t *testing.T) {
 // container must surface too — never stay inert, dropped by the extractor and
 // unseen by the recall gate.
 func TestANestedDeferredTemplateSurfacesWithItsParent(t *testing.T) {
+	t.Parallel()
 	words := func(prefix string) string {
 		var b strings.Builder
 		for word := 0; word < 40; word++ {
@@ -250,6 +269,7 @@ func TestANestedDeferredTemplateSurfacesWithItsParent(t *testing.T) {
 // surface — the comment above this block promises "a nested container of
 // content surfaces with it", whatever its own word count.
 func TestANestedShortDeferredTemplateSurfacesWithItsParent(t *testing.T) {
+	t.Parallel()
 	words := func(prefix string) string {
 		var b strings.Builder
 		for word := 0; word < 40; word++ {
@@ -277,6 +297,7 @@ func TestANestedShortDeferredTemplateSurfacesWithItsParent(t *testing.T) {
 // same text (a JSON-LD articleBody, a <noscript> fallback) is not recognised
 // as already shown and the body is duplicated in the stored artifact.
 func TestShadowRootWordsJoinShown(t *testing.T) {
+	t.Parallel()
 	body := strings.Repeat("the shadow rendered article text about a harbour and its lighthouse keeper ", 4)
 	page := `<html><body><div><template shadowrootmode="open"><p>` + body + `</p></template></div>` +
 		`<script type="application/ld+json">{"@type":"Article","articleBody":"` + body + `"}</script>` +
@@ -302,6 +323,7 @@ func TestShadowRootWordsJoinShown(t *testing.T) {
 // always calls) must stay roughly constant as the page grows, not scale with
 // its word count.
 func TestNoInertContainerSkipsTheWindowScan(t *testing.T) {
+	testjail.PauseFlightRecorder(t)
 	buildDoc := func(t *testing.T, words int) *html.Node {
 		t.Helper()
 		var b strings.Builder
@@ -327,6 +349,7 @@ func TestNoInertContainerSkipsTheWindowScan(t *testing.T) {
 		return total - baseline
 	}
 	small, large := extra(t, 50), extra(t, 5000)
+	t.Logf("allocs beyond visibleWords: 50 words +%.0f, 5000 words +%.0f", small, large)
 	if large > small+50 {
 		t.Fatalf("unwrapInertContainers' cost beyond visibleWords grew with page size on a container-free page "+
 			"(50 words: +%.0f allocs, 5000 words: +%.0f allocs): the initial probe-window scan ran "+
@@ -342,6 +365,7 @@ func TestNoInertContainerSkipsTheWindowScan(t *testing.T) {
 // pins the chosen fix: a candidate surfaces whenever its OWN words extend
 // past the run that matches, whatever its opening shares with shown text.
 func TestATeaserSharingOnlyItsPrefixLetsTheFullBodySurface(t *testing.T) {
+	t.Parallel()
 	prefix := strings.Repeat("shared ", 15) // >= inertProbeWords, shared with the teaser
 	teaser := prefix + "teaser ends here"
 	tail := strings.Repeat("unique tail word only in the full body ", 6) // >= inertProbeWords, unique

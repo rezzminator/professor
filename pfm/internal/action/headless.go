@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // HeadlessWidth and HeadlessHeight are the geometry a detached chat is born
@@ -18,14 +21,8 @@ const (
 	HeadlessHeight = 50
 )
 
-// headlessHygiene adds CODEX_THREAD_ID to the launch-environment strip. The
-// interactive routes are eval'd by the user's own shell, which never carries
-// one; `run` is called from inside other chats and from scripts, where an
-// inherited thread id would make the new chat answer `whoami` — and therefore
-// `kill --self` — with its PARENT's identity.
-var headlessHygieneNames = append(append([]string{}, hygieneNames...), "CODEX_THREAD_ID")
-
-var headlessHygiene = envStripWords(headlessHygieneNames)
+// Detached Codex commands share the registry's identity strip.
+var headlessHygiene = envStripWords(claudelaunch.Hygiene())
 
 // HeadlessRequest is one detached, named chat to start.
 type HeadlessRequest struct {
@@ -39,7 +36,7 @@ type HeadlessRequest struct {
 	PromptChannel  string
 	Home           string
 	PrimaryAccount int
-	Cache1H        bool
+	Cache1H        *bool // nil uses the selected account's configured cache
 	Config         pfmconfig.Config
 	// Model and Effort pin the seat's tier at birth. A seat that inherits
 	// whatever the account config holds that day is a seat whose cost and
@@ -110,15 +107,17 @@ func CodexDeveloperInstructionsArg(prompt string) []string {
 	return []string{"-c", "developer_instructions=\"\"\"\n" + escaped + "\"\"\""}
 }
 
-// HeadlessPlan is the pure result: the command the tmux session runs, and
-// whether the prompt travelled on it.
+// HeadlessPlan is the pure result: the command the tmux session runs, its
+// optional launch record, and whether the prompt travelled on the command.
 type HeadlessPlan struct {
-	Run string
+	Run    string
+	Record *fleetdb.Launch
 	// Binary is the unquoted executable word Run launches, stated so the
 	// spawn layer can prove it resolves BEFORE a tmux server is created
 	// around it — a pane that dies on "command not found" takes the fresh
 	// server with it and the engine is never named in the wreckage.
-	Binary string
+	Binary    string
+	CodexHome string
 	// PromptOnCommandLine is false when the prompt must be typed into the
 	// running TUI instead — Codex is named through its own rename UI, and a
 	// prompt on the command line would start a turn before that can happen.
@@ -138,6 +137,7 @@ type HeadlessForkRequest struct {
 	Cache1H        bool
 	Model          string
 	Config         pfmconfig.Config
+	Persona        workbench.Persona
 }
 
 // HeadlessFork synthesizes the command for a real Claude or Codex fork.
@@ -159,19 +159,12 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 				request.PrimaryAccount,
 			)
 		}
-		arguments := []string{"--resume", request.SessionID, "--fork-session"}
-		if request.Model != "" {
-			arguments = append(arguments, "--model", request.Model)
-		}
-		arguments = append(arguments, "--name", request.Name)
-		run, err := claudeCommandWith(
-			PurposeResume,
-			headlessHygieneNames,
-			request.Home,
-			request.PrimaryAccount,
-			request.Cache1H,
-			machine,
-			arguments...)
+		run, err := (ClaudeSpawn{
+			Purpose: PurposeResume, Home: request.Home, Account: request.PrimaryAccount,
+			Cache1H: &request.Cache1H, Resume: request.SessionID, Fork: true,
+			Name: request.Name, Model: request.Persona.ModelOr(request.Model), Machine: machine,
+			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
+		}).ShellCommand()
 		if err != nil {
 			return HeadlessPlan{}, err
 		}
@@ -181,15 +174,22 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 			PromptOnCommandLine: true,
 		}, nil
 	case pfmengine.Codex:
-		if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
+		account, found := machine.CodexAccountByID(request.PrimaryAccount)
+		if !found {
 			return HeadlessPlan{}, fmt.Errorf(
 				"requested Codex account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
 		arguments := make([]string, 0, 3)
-		if request.Model != "" {
-			arguments = append(arguments, "--model", request.Model)
+		if model := request.Persona.ModelOr(request.Model); model != "" {
+			arguments = append(arguments, "--model", model)
+		}
+		if request.Persona.Effort != "" {
+			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
+		}
+		if request.Persona.Applies() {
+			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
 		}
 		arguments = append(arguments, "fork", request.SessionID)
 		return HeadlessPlan{
@@ -198,6 +198,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 				machine,
 				request.PrimaryAccount,
 				arguments...),
+			CodexHome:           account.Home,
 			Binary:              codexBinaryWord(machine, request.PrimaryAccount),
 			PromptOnCommandLine: true,
 		}, nil
@@ -245,29 +246,39 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
-	arguments := []string{"--name", request.Name}
-	if request.Model != "" {
-		arguments = append(arguments, "--model", request.Model)
+	id, err := claudelaunch.NewSessionID()
+	if err != nil {
+		return HeadlessPlan{}, fmt.Errorf("new Claude session id: %w", err)
 	}
-	if effort != "" {
-		arguments = append(arguments, "--effort", effort)
-	}
+	arguments := []string{}
 	if request.Prompt != "" {
 		arguments = append(arguments, request.Prompt)
 	}
 	run, err := (ClaudeSpawn{
 		Purpose: PurposeInteractive, Account: request.PrimaryAccount,
-		Cache1H: request.Cache1H, Args: arguments, Home: request.Home,
-		Machine: machine, PromptFile: request.PromptChannel, strip: headlessHygieneNames,
+		Cache1H: request.Cache1H, SessionID: id, Name: request.Name,
+		Model: request.Model, Effort: effort, Args: arguments, Home: request.Home,
+		Machine: machine, PromptFile: request.PromptChannel,
 	}).ShellCommand()
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
 	return HeadlessPlan{
-		Run:                 run,
+		Run: run,
+		Record: &fleetdb.Launch{
+			SessionID: id, Engine: pfmengine.Claude, Account: request.PrimaryAccount,
+			Cache1H: resolvedCache1H(machine, request.PrimaryAccount, request.Cache1H),
+		},
 		Binary:              claudeBinaryWord(machine),
 		PromptOnCommandLine: true,
 	}, nil
+}
+
+func resolvedCache1H(machine pfmconfig.Config, account int, choice *bool) bool {
+	if choice != nil {
+		return *choice
+	}
+	return machine.EffectiveClaude(account).Cache1H
 }
 
 // PlanCodex contains the command synthesis used by Codex's planner.
@@ -276,7 +287,8 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 		return HeadlessPlan{}, err
 	}
 	machine := normalizedMachineConfig(request.Config, request.Home)
-	if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
+	account, found := machine.CodexAccountByID(request.PrimaryAccount)
+	if !found {
 		return HeadlessPlan{}, fmt.Errorf(
 			"requested Codex account %d is not in the configured roster",
 			request.PrimaryAccount,
@@ -297,7 +309,8 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 		arguments = append(arguments, CodexDeveloperInstructionsArg(request.PromptChannel)...)
 	}
 	return HeadlessPlan{
-		Run:    codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),
-		Binary: codexBinaryWord(machine, request.PrimaryAccount),
+		Run:       codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),
+		Binary:    codexBinaryWord(machine, request.PrimaryAccount),
+		CodexHome: account.Home,
 	}, nil
 }

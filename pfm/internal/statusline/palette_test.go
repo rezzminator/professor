@@ -21,7 +21,6 @@ func TestMainLineWearsTheSubagentPalette(t *testing.T) {
 		{"model", l1, cModel + "◆ Opus 4"},
 		{"effort", l1, cEffort + "🏎️ high"},
 		{"label", l1, cLabel + "🔖 BUILDER:1"},
-		{"tokens", l2, cTokens + "🧮10.3K"},
 		{"elapsed", l2, cElapsed + "⏳ 5m32s"},
 	} {
 		if !strings.Contains(want.line, want.text) {
@@ -41,12 +40,13 @@ func TestMainLineWearsTheSubagentPalette(t *testing.T) {
 		t.Fatal(err)
 	}
 	cacheRuntime := Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}}
+	cacheLaunch(t, root, "S", true)
 	for _, want := range []struct{ role, path, color string }{
 		{"cache good", live, cGood + "💾1h✓"},
 		{"cache warn", quiet, cWarn + "💾1h∞"},
 		{"cache bad", "", cBad + "💾1h!"},
 	} {
-		if got := cacheWindowSegment(cacheRuntime, now, want.path, -1, nil); !strings.Contains(got, want.color) {
+		if got := cacheWindowSegment(cacheRuntime, now, want.path, -1, nil, "S"); !strings.Contains(got, want.color) {
 			t.Fatalf("%s: segment %q lacks %q", want.role, got, want.color)
 		}
 	}

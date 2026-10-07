@@ -8,26 +8,17 @@ import (
 	"path/filepath"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 var statuslineCodexOptions = func() statusline.CodexOptions {
 	return statusline.CodexOptions{}
-}
-
-func runStatusline(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm statusline: load config (fail-open): %v\n", err)
-		return 0
-	}
-	return runStatuslineWithRuntime(args, stdin, stdout, stderr, runtime, paths.OSEnv{})
 }
 
 func runStatuslineWithRuntime(
@@ -50,13 +41,13 @@ func runStatuslineWithRuntime(
 		return 2
 	}
 	if *subagents {
-		return statusline.ServeSubagents(stdin, stdout, stderr, machine.Paths.SIDDir)
+		return statusline.ServeSubagents(stdin, stdout, stderr, machine.Paths.SIDDir, machine.Config.Path)
 	}
 
 	ctx := context.Background()
 	if *refreshCodex {
 		options := statuslineCodexOptions()
-		account := accountForCodexHome(machine.Config, env.Get("CODEX_HOME"))
+		account := reload.CodexHomeAccount(machine.Config, env.Get("CODEX_HOME"))
 		options.Binary = machine.Config.EffectiveCodex(account).Binary
 		if err := statusline.RefreshCodex(ctx, options); err != nil {
 			fmt.Fprintf(stderr, "pfm statusline: refresh GPT cache: %v\n", err)
@@ -83,6 +74,7 @@ func runStatuslineWithRuntime(
 		fmt.Fprintf(stderr, "pfm statusline: resolve runtime (fail-open): %v\n", err)
 		return 0
 	}
+	runtime.UseConfig(machine)
 	if runtime.Engine == pfmengine.Codex {
 		runtime.AccountDirs = make(map[string]int, len(machine.Config.CodexAccounts))
 		runtime.AccountEmojis = make(map[int]string, len(machine.Config.CodexAccounts))
@@ -122,15 +114,6 @@ func canonicalAccountPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func runUsageHook(args []string, stdout, stderr io.Writer) int {
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm usage-hook: load config (fail-open): %v\n", err)
-		return 0
-	}
-	return runUsageHookWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
-}
-
 func runUsageHookWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,
@@ -154,8 +137,13 @@ func runUsageHookWithRuntime(
 	for _, account := range runtime.Config.Accounts {
 		accountDirs[account.ConfigDir] = account.ID
 	}
+	// The hook's log is stderr: a failed refresh is named there, while stdout
+	// stays the prompt text alone.
 	message, err := usagehook.Evaluate(context.Background(), usagehook.Options{
-		AccountDirs: accountDirs,
+		AccountDirs:  accountDirs,
+		Version:      runtime.Version,
+		ClaudeBinary: runtime.Config.Claude.Binary,
+		Log:          stderr,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm usage-hook: evaluate (fail-open): %v\n", err)

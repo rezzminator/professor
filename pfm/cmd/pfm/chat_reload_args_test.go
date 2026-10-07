@@ -16,8 +16,10 @@ func TestReloadRejectsProseAndNamesTheRightFlag(t *testing.T) {
 		args []string
 		want string
 	}{
-		{args: []string{"cache", "off"}, want: "--1h on|off"},
-		{args: []string{"--cache", "off"}, want: "--1h on|off"},
+		{args: []string{"cache", "off"}, want: "--cache 1h|5m"},
+		{args: []string{"1h"}, want: "--cache 1h|5m"},
+		{args: []string{"ttl"}, want: "--cache 1h|5m"},
+		{args: []string{"--cache", "weekly"}, want: "1h|5m"},
 		{args: []string{"account", "2"}, want: "--account N"},
 		{args: []string{"then", "keep going"}, want: "--then"},
 		{args: []string{"socket"}, want: "--sock"},
@@ -45,12 +47,11 @@ func TestReloadAccountFlag(t *testing.T) {
 		name    string
 		args    []string
 		wantErr string
-		want    int
 	}{
-		{name: "flag form", args: []string{"--account", "2"}, want: 2},
-		{name: "flag form with other flags", args: []string{"--1h", "off", "--account", "3"}, want: 3},
-		{name: "bare positional still accepted", args: []string{"2"}, want: 2},
-		{name: "no account", args: []string{"--1h", "off"}, want: 0},
+		{name: "flag form", args: []string{"--account", "2"}},
+		{name: "flag form with other flags", args: []string{"--cache", "1h", "--account", "3"}},
+		{name: "bare positional still accepted", args: []string{"2"}},
+		{name: "no account", args: []string{"--cache", "5m"}},
 		{name: "missing value", args: []string{"--account"}, wantErr: "--account needs an account number"},
 		{name: "non-numeric value", args: []string{"--account", "personal"}, wantErr: "account NUMBER"},
 		{name: "zero is not an account", args: []string{"--account", "0"}, wantErr: "account NUMBER"},
@@ -68,30 +69,24 @@ func TestReloadAccountFlag(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got := reloadRequestedAccount(test.args); got != test.want {
-				t.Fatalf("account = %d, want %d", got, test.want)
-			}
 		})
 	}
 }
 
 // A value that happens to look like a flag name must never be re-read as one.
-// `--then "--account 4"` asks to send that text to the reborn chat; it does not
-// ask to switch seats.
+// TestChatReloadWorkerNeverReadsAThenPayloadAsASeat proves that
+// `--then "--account 4"` reaches the reborn chat as text.
 func TestReloadFlagValuesAreNotReparsedAsFlags(t *testing.T) {
-	args := []string{"--then", "--account 4", "--1h", "off"}
+	args := []string{"--then", "--account 4", "--cache", "5m"}
 	if err := validateReloadArgs(args); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := reloadRequestedAccount(args); got != 0 {
-		t.Fatalf("account = %d, want 0 — a --then payload was read as a seat switch", got)
-	}
 }
 
-// --new is a bare flag (no value): accepted once, rejected twice, invisible
-// to reloadRequestedAccount (it must never swallow the account that follows
-// it), and a caller who spells it as the bare word "fresh" gets pointed at
-// the real flag the same way "cache"/"account"/"then"/"sock" already are.
+// --new is a bare flag (no value): accepted once, rejected twice, and a caller
+// who spells it as the bare word "fresh" gets pointed at the real flag the
+// same way "cache"/"account"/"then"/"sock" already are. The worker test covers
+// the account after --new and --hide.
 // The retired --fresh spelling is refused by name, like every other rejected
 // word, and its refusal names --new as the replacement.
 func TestReloadNewFlag(t *testing.T) {
@@ -103,9 +98,6 @@ func TestReloadNewFlag(t *testing.T) {
 	); err == nil ||
 		!strings.Contains(err.Error(), "new specified twice") {
 		t.Fatalf("--new --new error=%v, want it to say \"new specified twice\"", err)
-	}
-	if got := reloadRequestedAccount([]string{"--new", "--account", "2"}); got != 2 {
-		t.Fatalf("account=%d, want 2 — --new must not swallow the account flag that follows it", got)
 	}
 	if err := validateReloadArgs(
 		[]string{"fresh"},
@@ -125,8 +117,7 @@ func TestReloadNewFlag(t *testing.T) {
 // behind is hidden from the picker instead of lingering as a resumable row.
 // A bare flag, accepted once in either order beside --new, meaningless
 // without it (a reload that resumes the same conversation cannot hide it),
-// invisible to reloadRequestedAccount, and the bare word "hide" points at
-// the flag the same way "fresh" does.
+// and the bare word "hide" points at the flag the same way "fresh" does.
 func TestReloadHideFlag(t *testing.T) {
 	if err := validateReloadArgs([]string{"--new", "--hide"}); err != nil {
 		t.Fatalf("--new --hide rejected: %v", err)
@@ -146,9 +137,6 @@ func TestReloadHideFlag(t *testing.T) {
 		!strings.Contains(err.Error(), "hide specified twice") {
 		t.Fatalf("--hide --hide error=%v, want it to say \"hide specified twice\"", err)
 	}
-	if got := reloadRequestedAccount([]string{"--new", "--hide", "--account", "2"}); got != 2 {
-		t.Fatalf("account=%d, want 2 — --hide must not swallow the account flag that follows it", got)
-	}
 	if err := validateReloadArgs(
 		[]string{"--new", "hide"},
 	); err == nil ||
@@ -164,7 +152,7 @@ func TestReloadUsageTeachesTheFlagsAndTheSocketDefault(t *testing.T) {
 	haystack := reload.Usage
 	for _, needle := range []string{
 		"--account N",
-		"--1h on|off",
+		"--cache 1h|5m",
 		"--new",
 		"--hide",
 		"--then",
@@ -176,5 +164,36 @@ func TestReloadUsageTeachesTheFlagsAndTheSocketDefault(t *testing.T) {
 		if !strings.Contains(haystack, needle) {
 			t.Errorf("reload.Usage is missing %q:\n%s", needle, reload.Usage)
 		}
+	}
+}
+
+// The spelling a user actually typed, twice, before the refusal was traced:
+// `/reload --1h on`. Every cache spelling a person reaches for lands on the
+// one canonical --cache 1h|5m before validation, the worker included.
+func TestReloadNormalizesCacheSpellings(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want []string
+	}{
+		{args: []string{"--1h", "on"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--1h"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--5m"}, want: []string{"--cache", "5m"}},
+		{args: []string{"--5m", "on"}, want: []string{"--cache", "5m"}},
+		{args: []string{"--cache", "on"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--cache", "off"}, want: []string{"--cache", "5m"}},
+		{args: []string{"--cache", "1H"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--account", "2", "--1h", "on", "--new"}, want: []string{"--account", "2", "--cache", "1h", "--new"}},
+		{args: []string{"--then", "--1h", "--5m"}, want: []string{"--then", "--1h", "--cache", "5m"}},
+		{args: []string{"--account", "2"}, want: []string{"--account", "2"}},
+	} {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			got := normalizeReloadArgs(test.args)
+			if strings.Join(got, "\x00") != strings.Join(test.want, "\x00") {
+				t.Fatalf("normalizeReloadArgs(%q) = %q, want %q", test.args, got, test.want)
+			}
+			if err := validateReloadArgs(got); err != nil {
+				t.Fatalf("normalized %q still refused: %v", got, err)
+			}
+		})
 	}
 }

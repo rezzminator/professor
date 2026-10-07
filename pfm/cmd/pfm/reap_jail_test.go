@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // The reaper KILLS things, so its fixtures run against real tmux servers on
@@ -32,11 +34,12 @@ func reapJail(t *testing.T) string {
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	socketDir := filepath.Join(root, "t", "tmux-"+strconv.Itoa(os.Getuid()))
-	accountRoot := filepath.Join(root, "home", ".cc", "1", "projects")
+	accountRoot := filepath.Join(root, "home", ".claude", "projects")
 	for _, directory := range []string{
 		socketDir,
 		filepath.Join(root, "sid"),
 		accountRoot,
+		pfmconfig.DefaultAccountDir(filepath.Join(root, "home"), 1),
 		filepath.Join(root, "codex"),
 		filepath.Join(root, "bin"),
 	} {
@@ -55,8 +58,8 @@ func reapJail(t *testing.T) string {
 	t.Setenv("PFM_HOME", filepath.Join(root, "home"))
 	t.Setenv("PFM_CLAUDE_ROOTS", accountRoot)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_TMUX_CONF", "/dev/null")
 	// The reaper reads the REAL /proc here on purpose: the jail's panes are
 	// real processes, and the non-chat guard is only proved by a real process
@@ -66,7 +69,7 @@ func reapJail(t *testing.T) string {
 	// answer the sweep fails closed and would kill nothing — which would make
 	// this fixture pass for the wrong reason.
 	stub := filepath.Join(root, "bin", "claude")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho '[]'\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(stub, []byte("#!/bin/sh\necho '[]'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Join(root, "bin")+":"+os.Getenv("PATH"))
@@ -209,7 +212,7 @@ func TestReapNeverKillsASocketHostingNonChatWork(t *testing.T) {
 	// that is not the one under test.
 	for _, socket := range []string{hosting, orphan} {
 		crumb := filepath.Join(root, "sid", socket)
-		transcript := filepath.Join(root, "home", ".cc", "1", "projects", socket+".jsonl")
+		transcript := filepath.Join(root, "home", ".claude", "projects", socket+".jsonl")
 		if err := os.WriteFile(crumb, []byte(transcript+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -259,7 +262,7 @@ func TestReapKeepsAChatWhoseTranscriptIsBeingWritten(t *testing.T) {
 	root := reapJail(t)
 	const socket = "cc-1800000003-42-3"
 	startShellPane(t, root, socket)
-	transcript := filepath.Join(root, "home", ".cc", "1", "projects", "live.jsonl")
+	transcript := filepath.Join(root, "home", ".claude", "projects", "live.jsonl")
 	if err := os.WriteFile(transcript, []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

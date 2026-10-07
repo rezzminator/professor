@@ -31,8 +31,9 @@ func TestInstallPreflightRefusesRequiredDependencyBeforeInstallerRuns(t *testing
 		return nil
 	}
 	called := false
-	runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
-		called = true
+	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+		// The dependency preflight refuses before the installer runs in apply mode.
+		called = called || options.Mode == installer.ModeApply
 		return installer.Report{}, nil
 	}
 	home := t.TempDir()

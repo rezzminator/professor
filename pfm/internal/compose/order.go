@@ -21,7 +21,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 func withNewRows(output Output) Output {
 	chatRows := output.Rows
 	for len(chatRows) > 0 &&
-		isNewChatKind(chatRows[0].Kind) {
+		isNewChatKind(chatRows[0].Kind) && chatRows[0].Workbench == "" {
 		chatRows = chatRows[1:]
 	}
 	newCount := boolInt(output.includeNewClaude) + boolInt(output.includeNewCodex) + boolInt(output.includeNewOpenCode)
@@ -67,7 +67,11 @@ func newTarget(output Output) (string, string) {
 	if project == "" {
 		project = output.projects.of(output.fallbackDir)
 	}
+	project, familyDir := output.workbenchTarget(project)
 	directory := output.ProjectDirs[project]
+	if familyDir != "" {
+		directory = familyDir
+	}
 	if directory == "" {
 		directory = output.fallbackDir
 	}
@@ -172,7 +176,7 @@ func sortProjectRows(rows []Row) ([]Row, []string) {
 }
 
 func projectDirs(input Input) map[string]string {
-	names := projectNames{}
+	names := projectNames{resolved: make(map[string]projectRef), benches: input.Workbenches}
 	directories := make(map[string]projectDir)
 	if input.Options.CurrentDir != "" {
 		project := names.of(input.Options.CurrentDir)

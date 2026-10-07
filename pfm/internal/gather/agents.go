@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -51,7 +52,12 @@ func detectAgentsFrom(
 		if err != nil {
 			continue
 		}
+		// A Claude started outside pfm carries no CLAUDE_CONFIG_DIR, or the
+		// login default; either way no pfm crumb names it, so with a session
+		// in its argv it is no agent. Its dir stays what it truly runs on.
 		configDir := environment["CLAUDE_CONFIG_DIR"]
+		outsideFleet := configDir == "" ||
+			claudelaunch.InheritedConfigDir(func(name string) string { return environment[name] })
 		if configDir == "" {
 			configDir = primaryRoot
 		}
@@ -69,7 +75,7 @@ func detectAgentsFrom(
 				continue
 			}
 			sessionIDs = []string{sessionID}
-		} else if filepath.Clean(configDir) == primaryRoot {
+		} else if outsideFleet || filepath.Clean(configDir) == primaryRoot {
 			continue
 		}
 

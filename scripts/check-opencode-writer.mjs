@@ -52,17 +52,24 @@ const gitPrefix =
   fenceGitDir && fenceTree && resolve(fenceTree) === ROOT
     ? [`--git-dir=${fenceGitDir}`, `--work-tree=${ROOT}`, "-c", `safe.directory=${ROOT}`]
     : [];
+// Half the contract names no repository: refuse it, as leak-check.sh and
+// release-check.mjs do, rather than list whatever tree plain git finds.
+const halfSet = Boolean(fenceGitDir) !== Boolean(fenceTree);
 
 let paths = [];
-try {
-  const out = execFileSync(
-    "git",
-    [...gitPrefix, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-    { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 },
-  );
-  paths = out.split("\0").filter(Boolean);
-} catch (error) {
-  fail(`git ls-files — could not list the tree (${error.message}); scan did not run`);
+if (halfSet) {
+  fail("PFM_DEV_REPO_GIT_DIR and PFM_DEV_REPO_WORK_TREE must be set together; scan did not run");
+} else {
+  try {
+    const out = execFileSync(
+      "git",
+      [...gitPrefix, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 },
+    );
+    paths = out.split("\0").filter(Boolean);
+  } catch (error) {
+    fail(`git ls-files — could not list the tree (${error.message}); scan did not run`);
+  }
 }
 
 for (const path of paths) {

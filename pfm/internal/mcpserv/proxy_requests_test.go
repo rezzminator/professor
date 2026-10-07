@@ -26,6 +26,7 @@ func (testClock *proxyAdmissionClock) NewTimer(delay time.Duration) clock.Timer 
 }
 
 func TestStdioProxyAdmitsUnrelatedRequestAfterAdmissionWindow(t *testing.T) {
+	t.Parallel()
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -68,6 +69,7 @@ func TestStdioProxyAdmitsUnrelatedRequestAfterAdmissionWindow(t *testing.T) {
 }
 
 func TestStdioProxyAdmitsPendingRequestBeforeNextFrame(t *testing.T) {
+	t.Parallel()
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	secondStarted := make(chan struct{})
@@ -117,6 +119,7 @@ func TestStdioProxyAdmitsPendingRequestBeforeNextFrame(t *testing.T) {
 }
 
 func TestStdioProxyForwardsCancellationWhileCallRuns(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
 	release := make(chan struct{})
@@ -156,6 +159,7 @@ func TestStdioProxyForwardsCancellationWhileCallRuns(t *testing.T) {
 }
 
 func TestStdioProxyCancelsQueuedRequestBeforeDaemonSubmission(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	release := make(chan struct{})
 	daemonSawCancellation := make(chan struct{}, 1)
@@ -212,6 +216,7 @@ func TestStdioProxyCancelsQueuedRequestBeforeDaemonSubmission(t *testing.T) {
 }
 
 func TestStdioProxyDistinguishesStringAndNumericCancellationIDs(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	release := make(chan struct{})
 	cancellationForwarded := make(chan struct{})
@@ -261,6 +266,7 @@ func TestStdioProxyDistinguishesStringAndNumericCancellationIDs(t *testing.T) {
 }
 
 func TestStdioProxyReusesCancelledRequestIDAfterCleanup(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var reusedCalls atomic.Int32
@@ -306,6 +312,7 @@ func TestStdioProxyReusesCancelledRequestIDAfterCleanup(t *testing.T) {
 }
 
 func TestStdioProxyLateCancellationPrecedesReusedRequestID(t *testing.T) {
+	t.Parallel()
 	cancellationStarted := make(chan struct{})
 	releaseCancellation := make(chan struct{})
 	reusedStarted := make(chan struct{}, 1)

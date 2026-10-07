@@ -1,40 +1,44 @@
-package deps
+package deps_test
 
 import (
-	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestMain jails PFM_HOME for the whole package, so a test that never builds a
 // jail of its own cannot resolve the operator's real home.
 //
-// It cannot use internal/testjail the way the other packages do: testjail
-// imports THIS package, and an internal test file importing it back is a cycle
-// Go rejects. The jail is therefore spelled out here instead of shared.
+// It lives in the external test package: that is what lets it share
+// internal/testjail with every other package, even though testjail imports
+// this one.
 //
-// BROKEN STATE: if the directory cannot be created this says so on stderr and
-// leaves PFM_HOME unset, which makes paths.Resolve() refuse — the tests fail
-// loudly rather than reaching a live account.
-func TestMain(m *testing.M) {
-	home, err := os.MkdirTemp("", "pfm-deps-home-")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "deps: no jailed home: %v\n", err)
-		os.Exit(m.Run())
+// BROKEN STATE: if the jail cannot be set up, testjail.Run says so on stderr
+// and returns a non-zero code — the package fails loudly rather than reaching
+// a live account.
+func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
+
+// TestPackageHomeIsTheTestjailJail: a deps test resolves PFM_HOME to the jail
+// testjail.Run builds, with the config file it seeds beside it — not to an
+// unset home, which paths.Resolve refuses, and not to a directory this package
+// made for itself.
+func TestPackageHomeIsTheTestjailJail(t *testing.T) {
+	home := os.Getenv(paths.EnvHome)
+	if home == "" {
+		t.Fatalf("%s is unset: the package ran outside the testjail jail", paths.EnvHome)
 	}
-	if err := os.Setenv(paths.EnvHome, home); err != nil {
-		fmt.Fprintf(os.Stderr, "deps: jail home environment: %v\n", err)
-		if cleanupErr := os.RemoveAll(home); cleanupErr != nil {
-			fmt.Fprintf(os.Stderr, "deps: clean unused jailed home: %v\n", cleanupErr)
-		}
-		os.Exit(1)
+	info, err := os.Stat(home)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("%s=%q is not an existing directory: %v", paths.EnvHome, home, err)
 	}
-	code := m.Run()
-	if err := os.RemoveAll(home); err != nil {
-		fmt.Fprintf(os.Stderr, "deps: clean jailed home: %v\n", err)
-		code = 1
+	wantConfig := filepath.Join(home, "pfm.config.json")
+	if got := os.Getenv(paths.EnvConfig); got != wantConfig {
+		t.Fatalf("%s=%q, want the config testjail seeds in the jail home: %q", paths.EnvConfig, got, wantConfig)
 	}
-	os.Exit(code)
+	if _, err := os.Stat(wantConfig); err != nil {
+		t.Fatalf("the jail's seeded config is missing: %v", err)
+	}
 }

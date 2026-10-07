@@ -2,22 +2,31 @@ package installer
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // openCodeInstructionsKey is the machine-scope config array OpenCode reads
 // extra system-prompt files from. OpenCode has no --system-prompt-file and no
 // appendix hook: `Instruction.systemPaths` resolves every entry of this array
 // (absolute paths globbed, `~/` expanded) and `Instruction.system` reads each
-// one into the session's system array, so naming the staged prompt here is
+// one into the session's system array, so naming the composed prompt here is
 // the ONE door pfm has into an OpenCode system prompt.
 const openCodeInstructionsKey = "instructions"
 
-// wireOpenCodeInstructions points OpenCode's config at the staged OpenCode
+// wireOpenCodeInstructions points OpenCode's config at the clone's composed
 // prompt, preserving every other key and every entry the operator wrote. Our
 // entry leads, so the Professor arrives ahead of an operator's additions.
 func (installer *engine) wireOpenCodeInstructions() error {
@@ -27,19 +36,50 @@ func (installer *engine) wireOpenCodeInstructions() error {
 	return installer.editOpenCodeInstructions(true)
 }
 
-func (installer *engine) editOpenCodeInstructions(wanted bool) error {
+func (installer *engine) editOpenCodeInstructions(wanted bool) (returnErr error) {
+	ownershipRoot, err := managedConfigOwnershipRoot(installer.options.Home)
+	if err != nil {
+		return err
+	}
+	if installer.apply && strings.TrimSpace(installer.options.OpenCodeConfigPath) != "" {
+		guard, err := gather.AcquireAccountGuard(paths.PhysicalPath(installer.options.Home), false)
+		if err != nil {
+			return fmt.Errorf("OpenCode instruction ownership busy or unreadable: %w", err)
+		}
+		defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
+	}
 	path := strings.TrimSpace(installer.options.OpenCodeConfigPath)
 	if path == "" {
 		installer.skip("no OpenCode config path configured — prompt wiring has nothing to write")
 		return nil
 	}
+
+	// The clone being installed wins: a first install records the marker
+	// only later in this same run, as at wireShell.
+	var composed string
+	if wanted {
+		var err error
+		if repo := strings.TrimSpace(installer.options.SourceRepo); repo != "" {
+			var content []byte
+			content, err = paths.SourceRepoMarkerContent(repo)
+			if err == nil {
+				composed = paths.ComposedHarnessPromptIn(strings.TrimSpace(string(content)), pfmengine.OpenCode)
+			}
+		} else {
+			composed, err = paths.ComposedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
+		}
+		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
+			installer.skip("skip opencode instructions: no source repo recorded")
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("resolve OpenCode prompt: %w", err)
+		}
+	}
 	path = physicalSettingsPath(path)
 	original, existed, err := readMCPFile(path)
 	if err != nil {
 		return fmt.Errorf("read OpenCode config %s: %w", path, err)
-	}
-	if !existed && !wanted {
-		return nil
 	}
 	base := original
 	if !existed {
@@ -49,17 +89,78 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 	if err != nil {
 		return fmt.Errorf("parse OpenCode config %s: %w", path, err)
 	}
-	staged := installer.stagedHarnessPromptPath(pfmengine.MustLookup(pfmengine.OpenCode).LongName)
+	receiptPath := filepath.Join(ownershipRoot, "opencode-instructions.json")
+	receipt, readErr := os.ReadFile(receiptPath)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		return fmt.Errorf("read OpenCode instruction ownership %s: %w", receiptPath, readErr)
+	}
+	var owned openCodeInstructionOwnership
+	if readErr == nil {
+		if err := json.Unmarshal(receipt, &owned); err != nil {
+			return fmt.Errorf("parse OpenCode instruction ownership %s: %w", receiptPath, err)
+		}
+	}
+	intentPath := receiptPath + ".pending"
+	intent, err := readOpenCodeInstructionIntent(intentPath)
+	if err != nil {
+		return err
+	}
+	if intent != nil && intent.Ownership.Config != path {
+		return fmt.Errorf("pending OpenCode ownership names another config: %s", intentPath)
+	}
+	if !wanted && !existed {
+		if installer.apply {
+			if err := removeOpenCodeInstructionIntent(intentPath); err != nil {
+				return err
+			}
+			if owned.Config == path {
+				if err := os.Remove(receiptPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return fmt.Errorf("remove OpenCode instruction ownership %s: %w", receiptPath, err)
+				}
+			}
+		}
+		return nil
+	}
+	if intent != nil {
+		fingerprint := fmt.Sprintf("%x", sha256.Sum256(base))
+		switch fingerprint {
+		case intent.After:
+			owned = intent.Ownership
+			if installer.apply {
+				if err := publishOpenCodeInstructionOwnership(receiptPath, owned); err != nil {
+					return err
+				}
+				if err := removeOpenCodeInstructionIntent(intentPath); err != nil {
+					return err
+				}
+			}
+		case intent.Before:
+			if !wanted && installer.apply {
+				if err := removeOpenCodeInstructionIntent(intentPath); err != nil {
+					return err
+				}
+			}
+		default:
+			return fmt.Errorf(
+				"OpenCode config changed during pending ownership publication: %s; reconcile %s before retry",
+				path,
+				intentPath,
+			)
+		}
+	}
+	legacy := filepath.Join(paths.LegacyHarnessPromptsDir(installer.options.Home), "opencode.md")
 	current, err := openCodeInstructionEntries(document, path)
 	if err != nil {
 		return err
 	}
+	claimComposed := wanted &&
+		((owned.Config == path && owned.Instruction == composed) || !slices.Contains(current, composed))
 	next := make([]string, 0, len(current)+1)
 	if wanted {
-		next = append(next, staged)
+		next = append(next, composed)
 	}
 	for _, entry := range current {
-		if entry == staged {
+		if entry == legacy || (owned.Config == path && entry == owned.Instruction) || (wanted && entry == composed) {
 			continue
 		}
 		next = append(next, entry)
@@ -68,13 +169,113 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 	if err != nil {
 		return fmt.Errorf("plan OpenCode config %s: %w", path, err)
 	}
-	if bytes.Equal(base, wantedRaw) {
+	if !bytes.Equal(base, wantedRaw) {
+		if installer.apply && claimComposed {
+			intent = &openCodeInstructionIntent{
+				Ownership: openCodeInstructionOwnership{Config: path, Instruction: composed},
+				Before:    fmt.Sprintf("%x", sha256.Sum256(base)), After: fmt.Sprintf("%x", sha256.Sum256(wantedRaw)),
+			}
+			content, err := json.Marshal(intent)
+			if err != nil {
+				return fmt.Errorf("encode OpenCode ownership intent: %w", err)
+			}
+			if err := atomicfile.Write(intentPath, content, 0o600); err != nil {
+				return fmt.Errorf("write OpenCode ownership intent %s: %w", intentPath, err)
+			}
+		}
+		if err := installer.changeMCPFile(
+			changeDescription(path, existed),
+			path,
+			original,
+			wantedRaw,
+			existed,
+		); err != nil {
+			return err
+		}
+	} else {
 		installer.ok(path + " OpenCode prompt wiring")
+	}
+	if !installer.apply {
 		return nil
 	}
-	return installer.change(changeDescription(path, existed), func() error {
-		return installer.writeMCPFile(path, original, wantedRaw, existed)
-	})
+	if wanted {
+		if !claimComposed {
+			return nil
+		}
+		owned = openCodeInstructionOwnership{Config: path, Instruction: composed}
+		if err := publishOpenCodeInstructionOwnership(receiptPath, owned); err != nil {
+			return err
+		}
+		return removeOpenCodeInstructionIntent(intentPath)
+	}
+	if owned.Config == path {
+		if err := os.Remove(receiptPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove OpenCode instruction ownership %s: %w", receiptPath, err)
+		}
+	}
+	return nil
+}
+
+// managedConfigOwnershipRoot keeps journals in the ownership domain protected
+// by the canonical HOME lock. Shared-store aliases cannot safely use that lock.
+func managedConfigOwnershipRoot(home string) (string, error) {
+	physicalHome := paths.PhysicalPath(home)
+	root := paths.PhysicalPath(managedRootForHome(home))
+	if root != managedRootForHome(physicalHome) {
+		return "", fmt.Errorf(
+			"shared managed ownership root %s is unsupported for home %s; kept configuration and ownership journals",
+			root,
+			physicalHome,
+		)
+	}
+	return root, nil
+}
+
+type openCodeInstructionOwnership struct {
+	Config      string `json:"config"`
+	Instruction string `json:"instruction"`
+}
+type openCodeInstructionIntent struct {
+	Ownership openCodeInstructionOwnership `json:"ownership"`
+	Before    string                       `json:"before"`
+	After     string                       `json:"after"`
+}
+
+func readOpenCodeInstructionIntent(path string) (*openCodeInstructionIntent, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read OpenCode ownership intent %s: %w", path, err)
+	}
+	var intent openCodeInstructionIntent
+	if err := json.Unmarshal(raw, &intent); err != nil {
+		return nil, fmt.Errorf("parse OpenCode ownership intent %s: %w", path, err)
+	}
+	if intent.Before == "" || intent.After == "" || intent.Ownership.Config == "" ||
+		intent.Ownership.Instruction == "" {
+		return nil, fmt.Errorf("invalid OpenCode ownership intent %s", path)
+	}
+	return &intent, nil
+}
+
+func publishOpenCodeInstructionOwnership(path string, owned openCodeInstructionOwnership) error {
+	raw, err := json.Marshal(owned)
+	if err != nil {
+		return fmt.Errorf("encode OpenCode instruction ownership: %w", err)
+	}
+	if err := atomicfile.Write(path, append(raw, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write OpenCode instruction ownership %s: %w", path, err)
+	}
+	return nil
+}
+
+func removeOpenCodeInstructionIntent(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove OpenCode ownership intent %s: %w", path, err)
+	}
+	return nil
 }
 
 // openCodeInstructionEntries reads the existing array. A present-but-wrong

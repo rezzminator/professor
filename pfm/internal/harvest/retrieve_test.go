@@ -18,6 +18,7 @@ const retrievePNG = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00
 // HTML and stored as binary characters marked successful. Watched FAILING
 // before the guard (each body came back with Error "" and Kind html).
 func TestRetrieveBinaryGuardNamesAFileUnderWantPage(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, path, contentType, body, detected string
 	}{
@@ -54,6 +55,7 @@ func TestRetrieveBinaryGuardNamesAFileUnderWantPage(t *testing.T) {
 // side: a latin-1 HTML page still converts, and a zip keeps its own named
 // archive refusal.
 func TestRetrieveBinaryGuardLeavesPagesAndArchivesAlone(t *testing.T) {
+	t.Parallel()
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(request.URL.Path, ".zip") {
 			return response(request, http.StatusOK, "application/zip", "PK\x03\x04\x14\x00\x00\x00"), nil
@@ -108,6 +110,7 @@ func (b *countingBrowser) DownloadBrowser(context.Context, string, string, int64
 // the page as Referer, and no rung ever starts a browser. Watched FAILING
 // before PolicyInlineImage (the one-rung fetch left the image remote).
 func TestRetrieveInlineImagePolicyFallsToChromeAndNeverStartsABrowser(t *testing.T) {
+	t.Parallel()
 	const page = "https://203.0.113.10/article"
 	var mu sync.Mutex
 	var referers []string
@@ -151,6 +154,7 @@ func TestRetrieveInlineImagePolicyFallsToChromeAndNeverStartsABrowser(t *testing
 // read from the Wayback raw copy (the id_ form). Watched FAILING before
 // PolicyFile (Download stopped at Chrome impersonation).
 func TestRetrieveFileTriesWaybackRaw(t *testing.T) {
+	t.Parallel()
 	var archived string
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Host == "web.archive.org" {
@@ -197,6 +201,7 @@ func sizedResponse(request *http.Request, body string, declared int64) *http.Res
 // Chrome impersonation; a transport failure on direct falls to the next rung
 // and the kept rung is the one named.
 func TestRetrieveFileRungOrderFallsToChrome(t *testing.T) {
+	t.Parallel()
 	down := roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("connection reset") })
 	chrome := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return sizedResponse(request, "PK\x03\x04payload", -1), nil
@@ -206,9 +211,12 @@ func TestRetrieveFileRungOrderFallsToChrome(t *testing.T) {
 		Client:   &http.Client{Transport: down},
 		Chrome:   &http.Client{Transport: chrome},
 	})
-	got, err := h.Retrieve(context.Background(), "https://203.0.113.10/bundle.zip", WantFile, PolicyFile)
+	got, err := h.retrieveWith(
+		context.Background(),
+		retrieveRequest{target: "https://203.0.113.10/bundle.zip", want: WantFile, policy: PolicyFile},
+	)
 	if err != nil {
-		t.Fatalf("Retrieve(file): %v", err)
+		t.Fatalf("retrieveWith(file): %v", err)
 	}
 	if got.Result.Method != rungChromeImpersonation ||
 		strings.Join(got.Rungs, ",") != rungDirect+","+rungChromeImpersonation {
@@ -223,6 +231,7 @@ func TestRetrieveFileRungOrderFallsToChrome(t *testing.T) {
 // failure, whether the server declared its size or streamed past the cap, and
 // nothing is left in the cache.
 func TestRetrieveFileCapIsANamedFailure(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		declared int64
@@ -242,7 +251,10 @@ func TestRetrieveFileCapIsANamedFailure(t *testing.T) {
 				Chrome:           &http.Client{Transport: site},
 				MaxDownloadBytes: 16,
 			})
-			got, err := h.Retrieve(context.Background(), "https://203.0.113.10/big.bin", WantFile, PolicyFile)
+			got, err := h.retrieveWith(
+				context.Background(),
+				retrieveRequest{target: "https://203.0.113.10/big.bin", want: WantFile, policy: PolicyFile},
+			)
 			if !errors.Is(err, errDownloadTooLarge) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("over-cap body: err=%v, want errDownloadTooLarge naming %q", err, tc.want)
 			}
@@ -264,6 +276,7 @@ func TestRetrieveFileCapIsANamedFailure(t *testing.T) {
 // TestRetrieveWantAndPolicyMustAgree: a page policy never downloads a file and
 // a file policy never reads a page; each mismatch is a named error.
 func TestRetrieveWantAndPolicyMustAgree(t *testing.T) {
+	t.Parallel()
 	h := mustNew(t, Options{CacheDir: t.TempDir()})
 	for _, tc := range []struct {
 		want   Want
@@ -271,8 +284,11 @@ func TestRetrieveWantAndPolicyMustAgree(t *testing.T) {
 	}{
 		{WantFile, PolicyPage}, {WantPage, PolicyFile}, {WantPage, PolicyInlineImage}, {WantPage, Policy("bogus")},
 	} {
-		if _, err := h.Retrieve(context.Background(), "https://203.0.113.10/x", tc.want, tc.policy); err == nil {
-			t.Fatalf("Retrieve(want %d, policy %q) accepted a mismatch", tc.want, tc.policy)
+		if _, err := h.retrieveWith(
+			context.Background(),
+			retrieveRequest{target: "https://203.0.113.10/x", want: tc.want, policy: tc.policy},
+		); err == nil {
+			t.Fatalf("retrieveWith(want %d, policy %q) accepted a mismatch", tc.want, tc.policy)
 		}
 	}
 }
@@ -281,6 +297,7 @@ func TestRetrieveWantAndPolicyMustAgree(t *testing.T) {
 // policy runs direct → Chrome → headless browser on a wall; the same wall on a
 // file stops before the browser, which renders HTML and has no bytes to give.
 func TestRetrieveGatewayClimbsToTheBrowserForAPageNeverForAFile(t *testing.T) {
+	t.Parallel()
 	wall := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", gatewayWallBody), nil
 	})
@@ -294,7 +311,10 @@ func TestRetrieveGatewayClimbsToTheBrowserForAPageNeverForAFile(t *testing.T) {
 		Converter:   browser,
 		BrowserRung: enabled(),
 	})
-	page, err := h.Retrieve(context.Background(), "https://203.0.113.10/record", WantPage, PolicyGateway)
+	page, err := h.retrieveWith(
+		context.Background(),
+		retrieveRequest{target: "https://203.0.113.10/record", want: WantPage, policy: PolicyGateway},
+	)
 	if err != nil || !strings.Contains(string(page.Body), "Record") {
 		t.Fatalf("gateway page: err=%v body=%q rungs=%v", err, page.Body, page.Rungs)
 	}
@@ -302,7 +322,10 @@ func TestRetrieveGatewayClimbsToTheBrowserForAPageNeverForAFile(t *testing.T) {
 		t.Fatalf("gateway page rungs %v, want direct, chrome-impersonation, browser-headless", page.Rungs)
 	}
 	before := len(browser.requests())
-	file, _ := h.Retrieve(context.Background(), "https://203.0.113.10/paper.pdf", WantFile, PolicyGateway)
+	file, _ := h.retrieveWith(
+		context.Background(),
+		retrieveRequest{target: "https://203.0.113.10/paper.pdf", want: WantFile, policy: PolicyGateway},
+	)
 	if len(browser.requests()) != before || !file.Challenge {
 		t.Fatalf("gateway file started the browser (%d → %d) or lost the wall (challenge=%v)",
 			before, len(browser.requests()), file.Challenge)

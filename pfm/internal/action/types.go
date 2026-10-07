@@ -6,6 +6,8 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // Route is the legacy picker action letter.
@@ -26,6 +28,15 @@ const (
 // Request is every value needed to synthesize and prepare one selected row.
 type Request struct {
 	Row compose.Row
+	// Persona is the owning workbench's launch persona; zero outside a workbench.
+	Persona workbench.Persona
+	// LaunchName is the pfm name a fresh Claude chat is born with; empty leaves it unnamed.
+	LaunchName string
+	// OpenCodePlugin is the staged seat plugin an OpenCode persona launch loads.
+	OpenCodePlugin string
+	// OpenCodeFleetPrompt is the composed fleet prompt an OpenCode persona launch
+	// removes, empty when no clone is recorded.
+	OpenCodeFleetPrompt string
 	// Prompt is optional initial work for a fresh engine picker row. Resume and
 	// live routes reject/ignore no hidden input: cmd/pfm uses it only for the
 	// explicit Professor-update banner.
@@ -64,6 +75,7 @@ type Plan struct {
 	Run        string
 	Line       string
 	ChatServer *ChatServer
+	Record     *fleetdb.Launch
 }
 
 // Pane is the tmux state needed by solo and self-switch.

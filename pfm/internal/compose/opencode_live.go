@@ -90,7 +90,6 @@ func (current *composer) liveOpenCodeRow(
 	row.ServerCount = 1
 	row.Attached = pane.Attached
 	row.Here = seat.Socket == current.input.Options.CurrentSocket
-	_, row.C1H = current.cacheSockets[seat.Socket]
 	if row.CWD == "" {
 		row.CWD = firstNonEmpty(seat.CWD, pane.CurrentPath)
 		row.Project = current.projects.of(row.CWD)

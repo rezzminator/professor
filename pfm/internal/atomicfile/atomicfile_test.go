@@ -107,3 +107,42 @@ func TestWriteFromStreamsUnderTheLimitAndRefusesPastIt(t *testing.T) {
 		t.Fatalf("scratch left behind after a refused stream: %v, %v", entries, err)
 	}
 }
+
+func TestCreatePublishesOnceAndPreservesExistingTarget(t *testing.T) {
+	for _, shape := range []string{"file", "symlink", "directory"} {
+		t.Run(shape, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "target")
+			if err := Create(path, []byte("original"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if shape != "file" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if shape == "directory" {
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if err := os.Symlink("absent", path); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if err := Create(path, []byte("replacement"), 0o600); !errors.Is(err, os.ErrExist) {
+				t.Fatalf("exclusive create error=%v", err)
+			}
+			if shape == "file" {
+				raw, err := os.ReadFile(path)
+				if err != nil || string(raw) != "original" {
+					t.Fatalf("target=%q err=%v", raw, err)
+				}
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("scratch remains: %v, %v", entries, err)
+			}
+		})
+	}
+}

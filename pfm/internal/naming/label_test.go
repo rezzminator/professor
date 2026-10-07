@@ -80,3 +80,34 @@ func TestBookmarkLabelIgnoresADeliveredFooterOnACodexPane(t *testing.T) {
 		t.Fatalf("BookmarkLabel = %q, want \"\": a codex pane has no 🔖 of its own", label)
 	}
 }
+
+func TestLaunchName(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		label string
+		want  string
+	}{
+		{"plain", "Fix login", "Fix login"},
+		{"empty", "", ""},
+		{"blank", " \t\r\n ", ""},
+		{"unnamed sentinel", Unnamed, ""},
+		{"whitespace runs collapse", "fix\n  login\t\tnow\r\n", "fix login now"},
+		{"control runes drop", "fi\x00x\x1b lo\x7fgin", "fix login"},
+		{"control-only", "\x00\x1b", ""},
+		{"trimmed", "  padded  ", "padded"},
+		{"kill marker verbatim", "_KILL worker 3", "_KILL worker 3"},
+		{"legacy kill marker verbatim", "_HIDE worker 3", "_HIDE worker 3"},
+		{"clipped at the cap", strings.Repeat("é", LaunchNameRunes+50), strings.Repeat("é", LaunchNameRunes)},
+		{
+			"clip leaves no trailing space",
+			strings.Repeat("a", LaunchNameRunes-1) + " tail",
+			strings.Repeat("a", LaunchNameRunes-1),
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := LaunchName(testCase.label); got != testCase.want {
+				t.Fatalf("LaunchName(%q) = %q, want %q", testCase.label, got, testCase.want)
+			}
+		})
+	}
+}

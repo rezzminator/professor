@@ -9,12 +9,12 @@ DIR	gamma	/work/gamma
 DIR	newest	/work/newest
 ROW	new-claude		New Claude chat	alpha	/work/alpha			0	0	0	0	2		0	0	0	0	0	0	0
 ROW	new-codex		New Codex chat	alpha	/work/alpha			0	0	0	0	1		0	0	0	0	0	0	0
-ROW	live-claude	pane	Pane Wins	alpha	/work/alpha	cc-200-1-1	%2	200	7	1000	4000	2		0	0	1	1	1	1	0
-ROW	live-claude	live-socket	Socket Live	alpha	/work/alpha	cc-100-1-1	%1	100	5	900	4100	1		0	0	0	0	0	1	0
+ROW	live-claude	pane	Pane Wins	alpha	/work/alpha	cc-200-1-1	%2	200	7	1000	4000	0		0	0	0	1	1	1	0
+ROW	live-claude	live-socket	Socket Live	alpha	/work/alpha	cc-100-1-1	%1	100	5	900	4100	0		0	0	0	0	0	1	0
 ROW	live-codex	cx-live	Codex Live	codex	/work/codex	cx-300-1-1	%3	300	8	1300	3700	0		0	0	0	0	0	1	0
-ROW	resume-claude	resume	Resume	newest	/work/newest			100	4	1200	3800	1		0	0	0	0	0	0	0
+ROW	resume-claude	resume	Resume	newest	/work/newest			100	4	1200	3800	0		0	0	0	0	0	0	0
 ROW	agent	agent	Worker	agents	/work/agents	cc-400-1-1	%4	0	0	1100	3900	3		0	1	0	0	0	1	0
-ROW	resume-claude	grown	Grown Killed	gamma	/work/gamma			100	5	700	4300	1		0	0	0	0	0	0	0
+ROW	resume-claude	grown	Grown Killed	gamma	/work/gamma			100	5	700	4300	0		0	0	0	0	0	0	0
 ROW	resume-codex	cx-resume	Codex Resume	beta	/work/beta			250	6	650	4350	0		0	0	0	0	0	0	0
 
 SCENARIO	all
@@ -28,18 +28,18 @@ DIR	gamma	/work/gamma
 DIR	newest	/work/newest
 ROW	new-claude		New Claude chat	alpha	/work/alpha			0	0	0	0	2		0	0	0	0	0	0	0
 ROW	new-codex		New Codex chat	alpha	/work/alpha			0	0	0	0	1		0	0	0	0	0	0	0
-ROW	live-claude	pane	Pane Wins	alpha	/work/alpha	cc-200-1-1	%2	200	7	1000	4000	2		0	0	1	1	1	1	0
-ROW	live-claude	live-socket	Socket Live	alpha	/work/alpha	cc-100-1-1	%1	100	5	900	4100	1		0	0	0	0	0	1	0
+ROW	live-claude	pane	Pane Wins	alpha	/work/alpha	cc-200-1-1	%2	200	7	1000	4000	0		0	0	0	1	1	1	0
+ROW	live-claude	live-socket	Socket Live	alpha	/work/alpha	cc-100-1-1	%1	100	5	900	4100	0		0	0	0	0	0	1	0
 ROW	live-codex	cx-live	Codex Live	codex	/work/codex	cx-300-1-1	%3	300	8	1300	3700	0		0	0	0	0	0	1	0
-ROW	resume-claude	resume	Resume	newest	/work/newest			100	4	1200	3800	1		0	0	0	0	0	0	0
+ROW	resume-claude	resume	Resume	newest	/work/newest			100	4	1200	3800	0		0	0	0	0	0	0	0
 ROW	agent	agent	Worker	agents	/work/agents	cc-400-1-1	%4	0	0	1100	3900	3		0	1	0	0	0	1	0
-ROW	resume-claude	killed	Killed	beta	/work/beta			100	3	800	4200	1		1	0	0	0	0	0	0
+ROW	resume-claude	killed	Killed	beta	/work/beta			100	3	800	4200	0		1	0	0	0	0	0	0
 ROW	resume-codex	cx-resume	Codex Resume	beta	/work/beta			250	6	650	4350	0		0	0	0	0	0	0	0
-ROW	resume-claude	bg	BG Twin	beta	/work/beta			100	2	600	4400	1		0	1	0	0	0	0	0
+ROW	resume-claude	bg	BG Twin	beta	/work/beta			100	2	600	4400	0		0	1	0	0	0	0	0
 ROW	resume-codex	cx-killed	Codex Killed	beta	/work/beta			150	2	550	4450	0		1	0	0	0	0	0	0
-ROW	resume-claude	zero	Zero	beta	/work/beta			0	0	500	4500	1		0	0	0	0	0	0	0
-ROW	resume-claude	grown	Grown Killed	gamma	/work/gamma			100	5	700	4300	1		0	0	0	0	0	0	0
-ROW	resume-claude	promptless	Promptless	delta	/work/delta			100	0	400	4600	1		0	0	0	0	0	0	0
+ROW	resume-claude	zero	Zero	beta	/work/beta			0	0	500	4500	0		0	0	0	0	0	0	0
+ROW	resume-claude	grown	Grown Killed	gamma	/work/gamma			100	5	700	4300	0		0	0	0	0	0	0	0
+ROW	resume-claude	promptless	Promptless	delta	/work/delta			100	0	400	4600	0		0	0	0	0	0	0	0
 
 SCENARIO	killed
 META	killed=2	empty=3	projects=alpha,beta
@@ -50,7 +50,7 @@ DIR	codex	/work/codex
 DIR	delta	/work/delta
 DIR	gamma	/work/gamma
 DIR	newest	/work/newest
-ROW	resume-claude	killed	Killed	beta	/work/beta			100	3	800	4200	1		1	0	0	0	0	0	0
+ROW	resume-claude	killed	Killed	beta	/work/beta			100	3	800	4200	0		1	0	0	0	0	0	0
 ROW	resume-codex	cx-killed	Codex Killed	beta	/work/beta			150	2	550	4450	0		1	0	0	0	0	0	0
 
 SCENARIO	split-and-multiserver
@@ -58,55 +58,55 @@ META	killed=0	empty=0	projects=split,dup
 DIR	dup	/work/dup
 DIR	split	/work/split
 ROW	new-claude		New Claude chat	split	/work/split			0	0	0	0	1		0	0	0	0	0	0	0
-ROW	live-split		One+Two	split	/work/split	cc-100-1-1		350	5	200	0	0	1,2	0	0	0	0	0	1	2
-ROW	live-claude	duplicate	Duplicate	dup	/work/dup	cc-300-1-1	%4	500	8	300	0	1		0	0	0	0	0	2	0
+ROW	live-split		One+Two	split	/work/split	cc-100-1-1		350	5	200	0	0		0	0	0	0	0	1	2
+ROW	live-claude	duplicate	Duplicate	dup	/work/dup	cc-300-1-1	%4	500	8	300	0	0		0	0	0	0	0	2	0
 
 SCENARIO	caps-overflow
 META	killed=0	empty=10	projects=caps
 DIR	caps	/work/caps
 ROW	new-claude		New Claude chat	caps	/work/caps			0	0	0	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-34	Claude-34	caps	/work/caps			100	1	35	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-33	Claude-33	caps	/work/caps			100	1	34	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-32	Claude-32	caps	/work/caps			100	1	33	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-31	Claude-31	caps	/work/caps			100	1	32	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-30	Claude-30	caps	/work/caps			100	1	31	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-29	Claude-29	caps	/work/caps			100	1	30	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-28	Claude-28	caps	/work/caps			100	1	29	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-27	Claude-27	caps	/work/caps			100	1	28	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-26	Claude-26	caps	/work/caps			100	1	27	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-25	Claude-25	caps	/work/caps			100	1	26	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-24	Claude-24	caps	/work/caps			100	1	25	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-23	Claude-23	caps	/work/caps			100	1	24	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-22	Claude-22	caps	/work/caps			100	1	23	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-21	Claude-21	caps	/work/caps			100	1	22	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-20	Claude-20	caps	/work/caps			100	1	21	0	1		0	0	0	0	0	0	0
-ROW	resume-claude	claude-19	Claude-19	caps	/work/caps			100	1	20	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-34	Claude-34	caps	/work/caps			100	1	35	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-33	Claude-33	caps	/work/caps			100	1	34	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-32	Claude-32	caps	/work/caps			100	1	33	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-31	Claude-31	caps	/work/caps			100	1	32	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-30	Claude-30	caps	/work/caps			100	1	31	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-29	Claude-29	caps	/work/caps			100	1	30	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-28	Claude-28	caps	/work/caps			100	1	29	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-27	Claude-27	caps	/work/caps			100	1	28	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-26	Claude-26	caps	/work/caps			100	1	27	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-25	Claude-25	caps	/work/caps			100	1	26	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-24	Claude-24	caps	/work/caps			100	1	25	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-23	Claude-23	caps	/work/caps			100	1	24	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-22	Claude-22	caps	/work/caps			100	1	23	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-21	Claude-21	caps	/work/caps			100	1	22	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-20	Claude-20	caps	/work/caps			100	1	21	0	0		0	0	0	0	0	0	0
+ROW	resume-claude	claude-19	Claude-19	caps	/work/caps			100	1	20	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-19	Codex-19	caps	/work/caps			100	1	20	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-18	Claude-18	caps	/work/caps			100	1	19	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-18	Claude-18	caps	/work/caps			100	1	19	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-18	Codex-18	caps	/work/caps			100	1	19	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-17	Claude-17	caps	/work/caps			100	1	18	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-17	Claude-17	caps	/work/caps			100	1	18	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-17	Codex-17	caps	/work/caps			100	1	18	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-16	Claude-16	caps	/work/caps			100	1	17	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-16	Claude-16	caps	/work/caps			100	1	17	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-16	Codex-16	caps	/work/caps			100	1	17	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-15	Claude-15	caps	/work/caps			100	1	16	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-15	Claude-15	caps	/work/caps			100	1	16	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-15	Codex-15	caps	/work/caps			100	1	16	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-14	Claude-14	caps	/work/caps			100	1	15	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-14	Claude-14	caps	/work/caps			100	1	15	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-14	Codex-14	caps	/work/caps			100	1	15	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-13	Claude-13	caps	/work/caps			100	1	14	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-13	Claude-13	caps	/work/caps			100	1	14	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-13	Codex-13	caps	/work/caps			100	1	14	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-12	Claude-12	caps	/work/caps			100	1	13	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-12	Claude-12	caps	/work/caps			100	1	13	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-12	Codex-12	caps	/work/caps			100	1	13	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-11	Claude-11	caps	/work/caps			100	1	12	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-11	Claude-11	caps	/work/caps			100	1	12	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-11	Codex-11	caps	/work/caps			100	1	12	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-10	Claude-10	caps	/work/caps			100	1	11	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-10	Claude-10	caps	/work/caps			100	1	11	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-10	Codex-10	caps	/work/caps			100	1	11	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-09	Claude-09	caps	/work/caps			100	1	10	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-09	Claude-09	caps	/work/caps			100	1	10	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-09	Codex-09	caps	/work/caps			100	1	10	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-08	Claude-08	caps	/work/caps			100	1	9	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-08	Claude-08	caps	/work/caps			100	1	9	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-08	Codex-08	caps	/work/caps			100	1	9	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-07	Claude-07	caps	/work/caps			100	1	8	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-07	Claude-07	caps	/work/caps			100	1	8	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-07	Codex-07	caps	/work/caps			100	1	8	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-06	Claude-06	caps	/work/caps			100	1	7	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-06	Claude-06	caps	/work/caps			100	1	7	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-06	Codex-06	caps	/work/caps			100	1	7	0	0		0	0	0	0	0	0	0
-ROW	resume-claude	claude-05	Claude-05	caps	/work/caps			100	1	6	0	1		0	0	0	0	0	0	0
+ROW	resume-claude	claude-05	Claude-05	caps	/work/caps			100	1	6	0	0		0	0	0	0	0	0	0
 ROW	resume-codex	codex-05	Codex-05	caps	/work/caps			100	1	6	0	0		0	0	0	0	0	0	0

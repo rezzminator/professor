@@ -10,11 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // RefreshKind names one detached cache refresher the render path may arm.
@@ -69,6 +72,12 @@ type Runtime struct {
 	// A non-nil Env is a closed test environment. Nil reads the real process environment.
 	Env map[string]string
 
+	// StateDB is the fleet database the config loader resolved — --config,
+	// then PFM_CONFIG, then the clone marker's state.db, else the default.
+	// PFM_STATE_DB still overrides it. ConfigError is that load's failure.
+	StateDB     string
+	ConfigError error
+
 	Command CommandRunner
 	Spawn   func(RefreshKind) error
 }
@@ -91,7 +100,7 @@ func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
 		configDir = filepath.Join(resolved.Home, ".claude")
 	}
 	cacheDir := filepath.Dir(CodexStatuslineCachePath(env.Get(paths.EnvHome), os.Getuid()))
-	rateDir := ClaudeRateLimitDir(env.Get(paths.EnvHome), os.Getuid())
+	rateDir := usagehook.ClaudeRateLimitDir(env.Get(paths.EnvHome))
 	return Runtime{
 		Now:          clock.Real.Now,
 		Home:         resolved.Home,
@@ -122,6 +131,11 @@ func EngineFromEnvironment(getenv func(string) string) (pfmengine.ID, error) {
 	}
 	for _, id := range pfmengine.All() {
 		d := pfmengine.MustLookup(id)
+		if id == pfmengine.Claude && claudelaunch.InheritedConfigDir(getenv) {
+			// The login default names no seat: a real Claude seat carries its
+			// session id, matched above.
+			continue
+		}
 		if d.HomeEnv != "" && strings.TrimSpace(getenv(d.HomeEnv)) != "" {
 			return id, nil
 		}
@@ -140,11 +154,11 @@ func CodexStatuslineCachePath(jailHome string, uid int) string {
 	return filepath.Join(cacheDir, "cc-gpt-usage-"+strconv.Itoa(uid)+".json")
 }
 
-// ClaudeRateLimitDir is the one filesystem rule for provider-confirmed Claude
-// windows harvested from statusline input. Limits readers use the same path so
-// the statusline writer remains the single owner of this cache.
-func ClaudeRateLimitDir(jailHome string, uid int) string {
-	return filepath.Join(filepath.Dir(CodexStatuslineCachePath(jailHome, uid)), "cc-rate-limits")
+// UseConfig takes the state database and any load error from the machine
+// runtime the config loader produced, so a render never re-resolves either.
+func (runtime *Runtime) UseConfig(machine pfmconfig.Runtime) {
+	runtime.StateDB = machine.Paths.StateDB
+	runtime.ConfigError = machine.ConfigError
 }
 
 func (runtime Runtime) getenv(name string) string {

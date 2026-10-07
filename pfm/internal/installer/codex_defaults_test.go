@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,18 +13,29 @@ import (
 )
 
 func TestCodexDefaultsInstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\ndefault_wait_timeout_ms = 750000\n")
 	config := filepath.Join(home, ".codex", "config.toml")
 	original := "# local preference\nmodel = 'custom'\ndeveloper_instructions = '''Keep my rules.\n[not.a.table]\n\n<!-- BEGIN Professor subagent coordination -->\nUse the agent mailbox.\n<!-- END Professor subagent coordination -->\n'''\n[features.multi_agent_v2]\ndefault_wait_timeout_ms = 900000\n# BEGIN pfm mcp\n[mcp_servers.chat]\nurl = 'http://localhost:1234'\n# END pfm mcp\n"
 	writeFixture(t, config, original)
-	options := Options{Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}}
+	var output strings.Builder
+	options := Options{
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun,
+		Home:          home,
+		Runner:        &fakeRunner{},
+		Stdout:        &output,
+	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, config); got != original {
 		t.Fatal("dry run modified config")
+	}
+	if !strings.Contains(output.String(), "  change  merge Professor defaults into "+config+"\n") {
+		t.Fatalf("defaults report = %q, want unchanged label", output.String())
 	}
 	options.Mode = ModeApply
 	if _, err := Run(context.Background(), options); err != nil {
@@ -58,14 +70,60 @@ func TestCodexDefaultsInstall(t *testing.T) {
 	}
 }
 
+func TestCodexDefaultsNamesYieldedMCPTables(t *testing.T) {
+	home := t.TempDir()
+	config := filepath.Join(home, ".codex", "config.toml")
+	writeFixture(
+		t,
+		config,
+		codexProfessorFence(home)+"[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n",
+	)
+	var output strings.Builder
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeDryRun, Home: home,
+		Runner: &fakeRunner{}, Stdout: &output, MCPEnabled: map[string]bool{chatName: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := "  change  merge Professor defaults into " + config + "; remove pfm's MCP tables: mcp_servers.professor\n"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("defaults report = %q, want %q", output.String(), want)
+	}
+}
+
+func TestYieldedCodexMCPTables(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, yielded string
+		want               []string
+	}{
+		{name: "unchanged", raw: "[mcp_servers.professor]\n", yielded: "[mcp_servers.professor]\n"},
+		{name: "duplicate retained", raw: "[mcp_servers.professor]\n[mcp_servers.professor]\n", yielded: "[mcp_servers.professor]\n", want: []string{"professor"}},
+		{name: "sorted multiset", raw: "[mcp_servers.zeta]\n[mcp_servers.alpha]\n[mcp_servers.alpha]\n[mcp_servers.professor]\n[mcp_servers.professor]\n", yielded: "[mcp_servers.professor]\n", want: []string{"alpha", "alpha", "professor", "zeta"}},
+		{name: "literal headers", raw: " [mcp_servers.indented]\n[mcp_servers.trailing] # comment\n[features]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := yieldedCodexMCPTables(tc.raw, tc.yielded); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("yielded tables = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCodexDefaultsFreshHomes(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
 	homes := []string{filepath.Join(home, "account-one"), filepath.Join(home, "account-two")}
 	if _, err := Run(
 		context.Background(),
-		Options{Mode: ModeApply, Home: home, CodexHomes: homes, Runner: &fakeRunner{}},
+		Options{
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply,
+			Home:          home,
+			CodexHomes:    homes,
+			Runner:        &fakeRunner{},
+		},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +144,7 @@ func TestCodexDefaultsFreshHomes(t *testing.T) {
 }
 
 func TestCodexDefaultsMergeLayouts(t *testing.T) {
+	t.Parallel()
 	defaults := "[features.multi_agent_v2]\nwait_agent_enabled = true\n"
 	for _, input := range []string{
 		"", "# keep this comment", "developer_instructions = 'Use mailbox.'",
@@ -131,6 +190,7 @@ func TestCodexDefaultsMergeLayouts(t *testing.T) {
 }
 
 func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
@@ -155,6 +215,7 @@ func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
 }
 
 func TestCodexDefaultsRejectsInconsistentTimeouts(t *testing.T) {
+	t.Parallel()
 	defaults := "[features.multi_agent_v2]\nmin_wait_timeout_ms = 150000\ndefault_wait_timeout_ms = 750000\nmax_wait_timeout_ms = 1500000\n"
 	for _, value := range []string{"30000", "-1", "3600001", "'wrong type'"} {
 		if _, err := mergeCodexDefaults(
@@ -169,6 +230,7 @@ func TestCodexDefaultsRejectsInconsistentTimeouts(t *testing.T) {
 // Codex clamps every command wait at ~31s unless both long-yield keys are set,
 // which turns one wait into a poll loop; a user's own value still wins.
 func TestCodexDefaultsLongCommandWaits(t *testing.T) {
+	t.Parallel()
 	defaults := "[features.multi_agent_v2]\nwait_agent_enabled = true\n"
 	for _, testCase := range []struct {
 		name       string
@@ -222,6 +284,7 @@ func TestCodexDefaultsLongCommandWaits(t *testing.T) {
 }
 
 func TestCodexDefaultsRefusesDanglingConfigSymlink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
@@ -244,6 +307,7 @@ func TestCodexDefaultsRefusesDanglingConfigSymlink(t *testing.T) {
 }
 
 func TestCodexDefaultsRemovesOnlyManagedInstructions(t *testing.T) {
+	t.Parallel()
 	input := "developer_instructions = '<!-- BEGIN Professor subagent coordination -->old<!-- END Professor subagent coordination -->' # keep note\nmodel = 'personal'\n"
 	got, err := mergeCodexDefaults(input, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
 	if err != nil {

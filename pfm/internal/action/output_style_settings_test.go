@@ -3,12 +3,14 @@ package action
 import (
 	"bytes"
 	"context"
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestClaudeSpawnCommandUsesRunnerStartBoundary(t *testing.T) {
@@ -39,6 +41,26 @@ func TestClaudeSpawnCommandUsesRunnerStartBoundary(t *testing.T) {
 	}
 }
 
+func TestClaudeSpawnRendersRegistryPayload(t *testing.T) {
+	home := t.TempDir()
+	machine := configuredMachinePolicy(home)
+	spawn := ClaudeSpawn{Purpose: PurposeInteractive, Account: 42, Home: home, Machine: machine}
+	command, err := spawn.Command(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := claudelaunch.Parse(command.Args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(command.Env, "CACHE_LIVE_CONTROL_MAIN_TTL=5m") {
+		t.Fatalf("process env lacks CACHE_LIVE_CONTROL_MAIN_TTL=5m: %q", command.Env)
+	}
+	if value, ok := parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"]; ok {
+		t.Fatalf("settings env carries CACHE_LIVE_CONTROL_MAIN_TTL=%q; a settings reload would undo /cache", value)
+	}
+}
+
 // pfm stages its own system prompt (--system-prompt-file); Claude Code's own
 // output style (a project or user "outputStyle" setting) would otherwise
 // double-apply a persona on top of it. Every purpose the door recognizes —
@@ -46,31 +68,33 @@ func TestClaudeSpawnCommandUsesRunnerStartBoundary(t *testing.T) {
 // {"outputStyle":"default"} on both renderers, since a probe or a query still
 // starts a real Claude process even though it carries no prompt material of
 // its own.
-func TestClaudeSpawnCarriesOutputStyleDefaultSettings(t *testing.T) {
+func TestClaudeSpawnCarriesDefaultOutputStyle(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
-	want := "'--settings' " + Quote(pfmengine.OutputStyleDefaultSettings)
-	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeProbe, PurposeQuery} {
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 
 		shell, err := spawn.ShellCommand()
 		if err != nil {
-			t.Fatalf("%s shell spawn: %v", purpose, err)
+			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
-		if !strings.Contains(shell, want) {
-			t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, want)
+		if got := parsedShell(t, shell).Settings["outputStyle"]; got != "default" {
+			t.Fatalf("%v shell output style = %#v", purpose, got)
 		}
 
 		command, err := spawn.Command(context.Background())
 		if err != nil {
-			t.Fatalf("%s command spawn: %v", purpose, err)
+			t.Fatalf("%v command spawn: %v", purpose, err)
 		}
-		if !containsFlagPair(command.Args, "--settings", pfmengine.OutputStyleDefaultSettings) {
+		parsed, err := claudelaunch.Parse(command.Args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if parsed.Settings["outputStyle"] != "default" {
 			t.Fatalf(
-				"%s command argv %#v lacks --settings %s",
+				"%v command argv %#v lacks outputStyle default",
 				purpose,
 				command.Args,
-				pfmengine.OutputStyleDefaultSettings,
 			)
 		}
 	}
@@ -83,33 +107,30 @@ func TestClaudeSpawnCarriesOutputStyleDefaultSettings(t *testing.T) {
 // through pfm's launcher had it overridden by the fleet's pair with no
 // warning. Both renderers must now keep the caller's file and carry exactly
 // ONE --settings word, not the fleet's default payload.
-func TestClaudeSpawnKeepsACallerSuppliedSettingsFlag(t *testing.T) {
+func TestClaudeSpawnCarriesRegistrySettingsAfterCallerFlag(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
 	spawn := ClaudeSpawn{
 		Purpose: PurposeInteractive, Account: 42, Home: home, Machine: machine,
-		Args: []string{"--settings", "/tmp/mine.json"},
+		Args: []string{"--settings", `{"outputStyle":"mine"}`},
 	}
 
 	shell, err := spawn.ShellCommand()
 	if err != nil {
 		t.Fatalf("shell spawn: %v", err)
 	}
-	if !strings.Contains(shell, "'--settings' '/tmp/mine.json'") {
+	if !strings.Contains(shell, "'--settings' '{\"outputStyle\":\"mine\"}'") {
 		t.Fatalf("shell spawn %q lacks the caller's --settings value", shell)
 	}
-	if strings.Contains(shell, Quote(pfmengine.OutputStyleDefaultSettings)) {
-		t.Fatalf("shell spawn %q still carries the fleet's default settings payload", shell)
-	}
-	if got := strings.Count(shell, "'--settings'"); got != 1 {
-		t.Fatalf("shell spawn %q carries %d '--settings' words, want exactly 1", shell, got)
+	if got := parsedShell(t, shell).Settings["outputStyle"]; got != "default" {
+		t.Fatalf("registry output style = %#v", got)
 	}
 
 	command, err := spawn.Command(context.Background())
 	if err != nil {
 		t.Fatalf("command spawn: %v", err)
 	}
-	if !containsFlagPair(command.Args, "--settings", "/tmp/mine.json") {
+	if !containsFlagPair(command.Args, "--settings", `{"outputStyle":"mine"}`) {
 		t.Fatalf("command argv %#v lacks the caller's --settings value", command.Args)
 	}
 	settingsCount := 0
@@ -118,8 +139,8 @@ func TestClaudeSpawnKeepsACallerSuppliedSettingsFlag(t *testing.T) {
 			settingsCount++
 		}
 	}
-	if settingsCount != 1 {
-		t.Fatalf("command argv %#v carries %d --settings words, want exactly 1", command.Args, settingsCount)
+	if settingsCount != 2 {
+		t.Fatalf("command argv %#v carries %d --settings words, want 2", command.Args, settingsCount)
 	}
 }
 
@@ -127,15 +148,53 @@ func TestClaudeSpawnKeepsACallerSuppliedSettingsFlag(t *testing.T) {
 // settings flag would double-apply a persona; the launcher-run door
 // (action.LauncherRun, the argv-preserving shim spawn) must carry the flag
 // too, since it is a distinct constructor from ClaudeSpawn's exported fields.
-func TestLauncherRunCarriesOutputStyleDefaultSettings(t *testing.T) {
+func TestLauncherRunCarriesDefaultOutputStyle(t *testing.T) {
 	home := t.TempDir()
-	shell, err := LauncherRun("/opt/claude/real", nil, "/home/tester/.cc/1", home, pfmconfig.ClaudePrefs{})
+	shell, err := LauncherRun(
+		"/opt/claude/real",
+		nil,
+		t.TempDir(),
+		home,
+		pfmconfig.Config{},
+		pfmconfig.ClaudePrefs{},
+		"",
+	)
 	if err != nil {
 		t.Fatalf("LauncherRun() error = %v", err)
 	}
-	want := "'--settings' " + Quote(pfmengine.OutputStyleDefaultSettings)
-	if !strings.Contains(shell, want) {
-		t.Fatalf("launcher run %q lacks %q", shell, want)
+	if got := parsedShell(t, shell).Settings["outputStyle"]; got != "default" {
+		t.Fatalf("launcher output style = %#v", got)
+	}
+}
+
+func TestLauncherRunSessionRouting(t *testing.T) {
+	for _, scenario := range []struct {
+		name, wantSession, wantResume string
+		args                          []string
+		fresh                         bool
+	}{
+		{name: "fresh", fresh: true},
+		{name: "resume", args: []string{"--resume", "R"}, wantResume: "R"},
+		{name: "explicit", args: []string{"--session-id", "S"}, wantSession: "S"},
+		{name: "continue", args: []string{"--continue"}},
+		{name: "short continue", args: []string{"-c"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			run, err := LauncherRun("/bin/claude", scenario.args, "", t.TempDir(),
+				pfmconfig.Config{}, pfmconfig.ClaudePrefs{PermissionMode: pfmconfig.PermissionBypass}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed := parsedShell(t, run)
+			if parsed.Autonomy || parsed.Resume != scenario.wantResume ||
+				(!scenario.fresh && parsed.SessionID != scenario.wantSession) ||
+				(scenario.fresh && parsed.SessionID == "") {
+				t.Fatalf("session=%q resume=%q autonomy=%t", parsed.SessionID, parsed.Resume, parsed.Autonomy)
+			}
+			if scenario.wantSession != "" && strings.Count(run, "'--session-id'") != 1 {
+				t.Fatalf("duplicate session flag: %q", run)
+			}
+		})
 	}
 }
 
@@ -146,4 +205,58 @@ func containsFlagPair(args []string, key, value string) bool {
 		}
 	}
 	return false
+}
+
+func shellWords(t *testing.T, run string) []string {
+	t.Helper()
+	run, _, _ = strings.Cut(run, " || ")
+	output, err := exec.Command("sh", "-c", "set -- "+run+"; printf '%s\\000' \"$@\"").Output()
+	if err != nil {
+		t.Fatalf("parse shell launch: %v", err)
+	}
+	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+}
+
+func parsedShell(t *testing.T, run string) claudelaunch.Parsed {
+	t.Helper()
+	parsed, err := claudelaunch.Parse(append([]string{"claude"}, shellWords(t, run)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+// launchEnv is the environment a launch line assigns its Claude process: the
+// NAME=value operands of the leading env word, up to the binary.
+func launchEnv(t *testing.T, run string) map[string]string {
+	t.Helper()
+	env := map[string]string{}
+	words := shellWords(t, run)
+	for index := 0; index < len(words); index++ {
+		switch word := words[index]; {
+		case index == 0 && word == "env":
+		case word == "-u":
+			index++
+		default:
+			name, value, found := strings.Cut(word, "=")
+			if !found || name == "" || strings.Contains(name, "/") {
+				return env
+			}
+			env[name] = value
+		}
+	}
+	return env
+}
+
+func parsedSpawn(t *testing.T, spawn ClaudeSpawn) claudelaunch.Parsed {
+	t.Helper()
+	command, err := spawn.Command(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := claudelaunch.Parse(command.Args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }

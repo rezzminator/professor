@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,44 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
+
+func TestComposeFleetLaunchReadFailureKeepsRow(t *testing.T) {
+	stateDB := filepath.Join(t.TempDir(), "pfm.db")
+	db, err := sqlitedb.OpenStore(context.Background(), stateDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE launch(session_id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output := ComposeFleet(
+		Env{Paths: paths.Values{StateDB: stateDB}},
+		compose.AllView,
+		Data{
+			Transcripts: []store.Transcript{
+				{UUID: "S", Path: "/home/.claude/projects/S.jsonl", PromptCount: 1, Size: 1},
+			},
+		},
+		gather.Snapshot{},
+	)
+	for _, row := range output.Rows {
+		if row.ID == "S" {
+			if !row.LaunchUnread || row.C1H {
+				t.Fatalf("row = %#v, want launch warning without badge", row)
+			}
+			return
+		}
+	}
+	t.Fatal("launch read failure dropped the row")
+}
 
 // TestScanRecordsATransition: Scan walks the state door (spec § Middleware,
 // `state`) — stale to scanned, comp=state, kind=fleet — never the composed
@@ -61,7 +97,7 @@ func jailRuntime(t *testing.T) *pfmconfig.Runtime {
 	home := t.TempDir()
 	return &pfmconfig.Runtime{
 		Config: pfmconfig.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")}),
-		Paths:  paths.Values{Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db")},
+		Paths:  paths.Values{Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db")},
 	}
 }
 
@@ -110,5 +146,106 @@ func TestComposeCarriesTheDefaultViewsCachedCounts(t *testing.T) {
 	}
 	if env := (Env{Paths: paths.Values{Home: "h"}}); env.Runtime().Paths.Home != "h" {
 		t.Fatalf("Env.Runtime() dropped the paths: %+v", env.Runtime())
+	}
+}
+
+func TestResolveEnvWorkbenchCacheOptIn(t *testing.T) {
+	runtime := jailRuntime(t)
+	runtime.Paths.CacheDB = filepath.Join(t.TempDir(), "index.db")
+	root := filepath.Join(t.TempDir(), "acme")
+	dir := filepath.Join(root, "docs", "scribe")
+	if err := os.MkdirAll(filepath.Join(dir, ".professor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		paths.WorkbenchManifest(dir),
+		[]byte(`{"prompt":"scribe.md","title":"Scribe"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, ".professor", "scribe.md"),
+		[]byte("You are scribe."),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := workbench.WriteCache(
+		paths.WorkbenchCache(runtime.Paths),
+		[]workbench.Bench{workbench.LoadBench(dir, root)},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	env, err := ResolveEnv(Request{Runtime: runtime, Workbenches: true})
+	if err != nil || len(env.Workbenches) != 1 {
+		t.Fatalf("workbench environment = %+v, %v", env, err)
+	}
+	output := ComposeFleet(env, compose.AllView, Data{}, gather.Snapshot{})
+	found := false
+	for _, row := range output.Rows {
+		if row.Workbench == dir && row.Kind == compose.NewClaude {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cache not composed: %#v", output.Rows)
+	}
+	env, err = ResolveEnv(Request{Runtime: runtime})
+	if err != nil || len(env.Workbenches) != 0 {
+		t.Fatalf("chat environment = %+v, %v", env, err)
+	}
+}
+
+func TestResolveEnvWorkbenchUnreadableCache(t *testing.T) {
+	runtime := jailRuntime(t)
+	runtime.Paths.CacheDB = filepath.Join(t.TempDir(), "index.db")
+	cachePath := paths.WorkbenchCache(runtime.Paths)
+	if err := os.WriteFile(cachePath, []byte(`{"version":2,"workbenches":[],"errors":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, interactive := range []bool{true, false} {
+		name := "plain"
+		if interactive {
+			name = "interactive"
+		}
+		t.Run(name, func(t *testing.T) {
+			env, err := ResolveEnv(Request{Runtime: runtime, Workbenches: interactive})
+			if err != nil || len(env.Workbenches) != 0 {
+				t.Fatalf("environment = %+v, %v; want no benches and nil error", env, err)
+			}
+			if !interactive {
+				if len(env.WorkbenchErrors) != 0 {
+					t.Fatalf("plain scan faults = %#v; want none", env.WorkbenchErrors)
+				}
+				return
+			}
+			if len(env.WorkbenchErrors) != 1 {
+				t.Fatalf("cache faults = %#v; want one visible error", env.WorkbenchErrors)
+			}
+			fault := env.WorkbenchErrors[0]
+			if fault.Root != env.CurrentDir || fault.Path != cachePath ||
+				!strings.Contains(
+					fault.Error(),
+					cachePath,
+				) || !strings.Contains(fault.Error(), "unsupported version 2") {
+				t.Fatalf(
+					"cache fault = %#v (%s); want current directory, cache path and version error",
+					fault,
+					fault.Error(),
+				)
+			}
+			output := ComposeFleet(env, compose.AllView, Data{}, gather.Snapshot{})
+			var invalid []compose.Row
+			for _, row := range output.Rows {
+				if row.Kind == compose.WorkbenchInvalid {
+					invalid = append(invalid, row)
+				}
+			}
+			if len(invalid) != 1 || invalid[0].Name != fault.Error() {
+				t.Fatalf("invalid workbench rows = %#v; want one named %q", invalid, fault.Error())
+			}
+		})
 	}
 }

@@ -2,12 +2,12 @@ package inject
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestCommandThenSpawnerDefaultRunnerRecordsTheWaiterLaunch proves the nil
@@ -18,7 +18,7 @@ func TestCommandThenSpawnerDefaultRunnerRecordsTheWaiterLaunch(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	scratch := t.TempDir()
 	stub := filepath.Join(scratch, "setsid-stub")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(stub, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	spawner := CommandThenSpawner{Executable: filepath.Join(scratch, "pfm"), Setsid: stub}

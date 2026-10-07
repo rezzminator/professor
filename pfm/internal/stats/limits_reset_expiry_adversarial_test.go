@@ -36,7 +36,7 @@ func TestUsageWindowsTreatsUnknownResetAsUnknownNotExpired(t *testing.T) {
 				t.Fatalf("resets_at=%q: window=%#v, want the reading kept and no expiry note", resets, window)
 			}
 		}
-		if !reusableClaudeUsage(usage, now) {
+		if !usagehook.HasCurrentWindow(usage, now) {
 			t.Fatalf("resets_at=%q: payload with unknown resets was treated as expired", resets)
 		}
 	}

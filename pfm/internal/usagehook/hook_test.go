@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestUsageParsesScopedFableAndDropsUnknownWindows(t *testing.T) {
@@ -141,6 +142,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	}
 	options := Options{
 		Now:       func() time.Time { return time.Unix(1_786_838_400, 0) },
+		Env:       &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}},
 		Home:      root,
 		ConfigDir: configDir,
 		CacheDir:  cacheDir,
@@ -159,6 +161,12 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 			`,"resets_at":"2030-01-03T08:00:00Z"},` +
 			`"seven_day_opus":{"utilization":null}}`)
 		if err := os.WriteFile(filepath.Join(cacheDir, "acct-1.json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// The record predates fetched_at and ages by its mtime; stamp it at
+		// this test's clock, since a confirmation after now is refused.
+		stamp := options.Now()
+		if err := os.Chtimes(filepath.Join(cacheDir, "acct-1.json"), stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -197,6 +205,10 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 			`"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},` +
 			`"percent":` + fable + `,"resets_at":"2030-01-03T08:00:00Z","is_active":true}]}`)
 		if err := os.WriteFile(filepath.Join(cacheDir, "acct-1.json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := options.Now()
+		if err := os.Chtimes(filepath.Join(cacheDir, "acct-1.json"), stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -535,8 +547,9 @@ func TestRefreshUsesHeaderAndAcceptsOnlyAUsagePayload(t *testing.T) {
 
 func TestMissingCredentialsAndPoisonPayloadFailOpen(t *testing.T) {
 	root := t.TempDir()
+	env := &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}}
 	message, err := Evaluate(context.Background(), Options{
-		Home: root, ConfigDir: filepath.Join(root, ".claude"), CacheDir: filepath.Join(root, "cache"),
+		Env: env, Home: root, ConfigDir: filepath.Join(root, ".claude"), CacheDir: filepath.Join(root, "cache"),
 	})
 	if err != nil || message != "" {
 		t.Fatalf("missing credentials: message=%q err=%v", message, err)
@@ -558,14 +571,20 @@ func TestMissingCredentialsAndPoisonPayloadFailOpen(t *testing.T) {
 	}))
 	defer server.Close()
 	message, err = Evaluate(context.Background(), Options{
-		Home: root, ConfigDir: configDir, CacheDir: filepath.Join(root, "cache"),
+		Env: env, Home: root, ConfigDir: configDir, CacheDir: filepath.Join(root, "cache"),
 		Client: server.Client(), Endpoint: server.URL,
 	})
 	if err != nil || message != "" {
 		t.Fatalf("poison payload: message=%q err=%v", message, err)
 	}
-	if _, statErr := os.Stat(filepath.Join(root, "cache", "acct-1.json")); !os.IsNotExist(statErr) {
-		t.Fatalf("invalid payload replaced cache: %v", statErr)
+	// The failed refresh may leave its shared backoff, but the poison payload
+	// itself never lands as usage.
+	record, readErr := ReadCacheRecord(filepath.Join(root, "cache", "acct-1.json"))
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("read cache after poison payload: %v", readErr)
+	}
+	if readErr == nil && (record.FiveHour.Utilization != nil || record.Backoff == nil) {
+		t.Fatalf("invalid payload replaced cache: %+v", record)
 	}
 }
 

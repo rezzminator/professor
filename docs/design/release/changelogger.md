@@ -30,8 +30,8 @@ The bullet label names the route by which a change reaches an adopter, because t
 
 | Label | Paths | Reaches the adopter | An action is needed when |
 | --- | --- | --- | --- |
-| `Global` | `templates/global/**`, `workflows/**` | the moment the clone moves: machine-global originals are symlinked live; Codex roles recompile at the update's `pfm install` | something outside the clone must change: a setting, a file the installer does not remove, a command the adopter types by habit |
-| `Project` | `templates/project/**` | never by itself: `pfm update check` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and the adopter hand-applies and pins | always: the bullet names the template path and whether to adopt; the action is `per project` |
+| `Global` | `templates/global/**` | the moment the clone moves: machine-global originals are symlinked live; Codex roles recompile at the update's `pfm install` | something outside the clone must change: a setting, a file the installer does not remove, a command the adopter types by habit |
+| `Project` | `templates/project/**` | never by itself: `pfm doctor --project-updates` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and the adopter carries what applies into the local file and pins | always: the bullet names the template path and whether to adopt; the action is `per project` |
 | `pfm` | `pfm/**`, including the embedded fleet prompt and installer assets | with `pfm update`'s rebuild and install | a config key, hook, environment variable, installed file, command or flag is added, renamed or removed |
 | `Repo` | everything else: CI, docs, infra, scripts, tests | never at runtime | never; the bullet is informational and short |
 
@@ -68,7 +68,7 @@ A commit reaches a bullet by naming the bullet's section and its label-and-scope
 
 ## Grammar decisions
 
-- Actions carry a timing, one of `before update`, `after update`, `per project`. The reader already sorts actions into before and after; a timing in the text replaces a guess with a token. `per project` is the third timing because project actions run in each adopted project, after the machine update, alongside `pfm update check`.
+- Actions carry a timing, one of `before update`, `after update`, `per project`. The reader already sorts actions into before and after; a timing in the text replaces a guess with a token. `per project` is the third timing because project actions run in each adopted project, after the machine update, alongside `pfm doctor --project-updates`.
 - Actions carry a surface: the path, key, command or template the action touches. A later release's action on the same surface supersedes an earlier one only when the reader can see they share it.
 - Actions ride under their bullet, so the reader holds the why beside the what to do.
 - `#### → Stop:` sits under the lead paragraph, before any section: it changes the order of the whole update, not one bullet's.

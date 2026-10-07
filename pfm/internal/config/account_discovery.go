@@ -8,33 +8,83 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// hasValidCodexCredentials reports whether home/auth.json is the real Codex
-// CLI shape: access_token and account_id both live INSIDE tokens. An absent
-// file is the ordinary "no account here" case (ok=false, err=nil). Any other
-// read failure (permission denied, etc.) is NOT folded into that silence —
-// it comes back as a non-nil error the caller must surface, never swallow.
+// hasValidCodexCredentials uses the launch validator's supported login modes
+// for default-home discovery. A logged-out home is absence; an unreadable or
+// malformed credential/config file remains an explicit discovery error.
 func hasValidCodexCredentials(home string) (bool, error) {
-	body, err := os.ReadFile(filepath.Join(home, "auth.json"))
-	if errors.Is(err, os.ErrNotExist) {
+	err := CodexLoginError(home)
+	if errors.Is(err, ErrCodexLoggedOut) {
 		return false, nil
 	}
+	return err == nil, err
+}
+
+// ErrCodexLoggedOut identifies a Codex home with no runtime login.
+var ErrCodexLoggedOut = errors.New("codex home is logged out")
+
+type codexLoggedOutError struct {
+	path string
+}
+
+func (err codexLoggedOutError) Error() string {
+	return err.path +
+		" must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"
+}
+
+func (err codexLoggedOutError) Is(target error) bool { return target == ErrCodexLoggedOut }
+
+// CodexLoginError checks runtime login state for a configured Codex home.
+// Configuration loading validates the home's shape, not its credentials.
+func CodexLoginError(home string) error {
+	path := filepath.Join(home, "auth.json")
+	body, err := os.ReadFile(path)
+	if err == nil {
+		var credentials struct {
+			Tokens *struct {
+				AccessToken string `json:"access_token"`
+				AccountID   string `json:"account_id"`
+			} `json:"tokens"`
+			OpenAIAPIKey string `json:"OPENAI_API_KEY"`
+		}
+		if err := json.Unmarshal(body, &credentials); err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+		validTokens := credentials.Tokens != nil &&
+			strings.TrimSpace(credentials.Tokens.AccessToken) != "" &&
+			strings.TrimSpace(credentials.Tokens.AccountID) != ""
+		if validTokens || strings.TrimSpace(credentials.OpenAIAPIKey) != "" {
+			return nil
+		}
+		return codexLoggedOutError{path: path}
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+
+	configPath := filepath.Join(home, "config.toml")
+	body, err = os.ReadFile(configPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return codexLoggedOutError{path: path}
+	}
 	if err != nil {
-		return false, err
+		return fmt.Errorf("read %s: %w", configPath, err)
 	}
-	var marker struct {
-		Tokens struct {
-			AccessToken string `json:"access_token"`
-			AccountID   string `json:"account_id"`
-		} `json:"tokens"`
+	var preferences struct {
+		CLIAuthCredentialsStore string `toml:"cli_auth_credentials_store"`
 	}
-	valid := json.Unmarshal(body, &marker) == nil &&
-		strings.TrimSpace(marker.Tokens.AccessToken) != "" &&
-		strings.TrimSpace(marker.Tokens.AccountID) != ""
-	return valid, nil
+	if err := toml.Unmarshal(body, &preferences); err != nil {
+		return fmt.Errorf("parse %s: %w", configPath, err)
+	}
+	if preferences.CLIAuthCredentialsStore == "keyring" || preferences.CLIAuthCredentialsStore == "auto" {
+		return nil
+	}
+	return codexLoggedOutError{path: path}
 }
 
 // openCodeStoreExists recognizes both a materialized session database and an

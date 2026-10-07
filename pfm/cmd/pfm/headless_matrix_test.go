@@ -97,8 +97,11 @@ func TestRunPromptSourcesAreExclusive(t *testing.T) {
 // TestModelAndEffortReachBothEngines proves item 4 of the order: a seat is
 // born with its tier, on the engine's own spelling.
 func TestModelAndEffortReachBothEngines(t *testing.T) {
-	home := "/home/tester"
-	machine := pfmconfig.Defaults(home, []string{pfmconfig.DefaultAccountProjectDir(home, 1)})
+	home := t.TempDir()
+	if err := os.MkdirAll(pfmconfig.DefaultAccountDir(home, 1), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	machine := pfmconfig.Defaults(home, []string{filepath.Join(pfmconfig.DefaultAccountDir(home, 1), "projects")})
 	machine.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: home + "/.codex"}}
 	claude, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:         "cc",
@@ -190,7 +193,7 @@ func TestScanFailureIsRc2NeverUnknownChat(t *testing.T) {
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvDB, filepath.Join(blocker, "index.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 	for _, args := range [][]string{{"chat", "status", "ghost", "--json"}, {"chat", "last", "ghost"}} {
 		var stdout, stderr bytes.Buffer
 		code := run(args, &stdout, &stderr)

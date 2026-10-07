@@ -5,9 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Transcript is a Claude transcript opened for ONE guarded append: exclusive
@@ -133,4 +139,72 @@ func TranscriptCWD(path string) (string, error) {
 		return "", fmt.Errorf("close reload transcript %q: %w", path, err)
 	}
 	return cwd, nil
+}
+
+// SessionTranscript locates the on-disk transcript of chat id for engine: a
+// Claude session file under the configured roots, or a Codex rollout under
+// any configured Codex home. "" with a nil error means none exists yet.
+func SessionTranscript(
+	resolved paths.Values,
+	machine pfmconfig.Config,
+	engine pfmengine.ID,
+	id string,
+) (string, error) {
+	switch engine {
+	case pfmengine.OpenCode:
+		return "", errors.New("OpenCode does not support in-place reload")
+	case pfmengine.Claude:
+		return findClaudeTranscript(resolved.Roots[pfmengine.Claude], id)
+	case pfmengine.Codex:
+		// Continue below: Codex searches every configured rollout home.
+	default:
+		return "", fmt.Errorf("unknown reload engine %q", engine)
+	}
+	for _, account := range machine.CodexAccounts {
+		found := ""
+		err := filepath.WalkDir(
+			filepath.Join(account.Home, "sessions"),
+			func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if entry != nil && !entry.IsDir() && strings.Contains(filepath.Base(path), id) &&
+					filepath.Ext(path) == ".jsonl" {
+					found = path
+					return filepath.SkipAll
+				}
+				return nil
+			},
+		)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("search Codex rollouts under %q: %w", account.Home, err)
+		}
+		if found != "" {
+			return found, nil
+		}
+	}
+	return "", nil
+}
+
+func findClaudeTranscript(roots []string, id string) (string, error) {
+	for _, root := range roots {
+		found := ""
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry != nil && !entry.IsDir() && filepath.Base(path) == id+".jsonl" {
+				found = path
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("search Claude transcripts under %q: %w", root, err)
+		}
+		if found != "" {
+			return found, nil
+		}
+	}
+	return "", nil
 }

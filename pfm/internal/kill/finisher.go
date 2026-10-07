@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/index"
@@ -81,10 +80,7 @@ func NewFinisher(
 	if refresher == nil {
 		claudeRoots := dependencies.ClaudeRoots
 		if len(claudeRoots) == 0 {
-			claudeRoots = pfmconfig.Defaults(
-				resolved.Home,
-				resolved.Roots[pfmengine.Claude],
-			).ProjectRoots()
+			claudeRoots = resolved.Roots[pfmengine.Claude]
 		}
 		refresher = indexRefresher{
 			database:    database,
@@ -247,24 +243,13 @@ func (finisher *Finisher) closeViewports(ctx context.Context, viewports []string
 	}
 }
 
-// recordPostExitKill re-asserts the kill after the post-exit index refresh so
-// the chat stays killed whatever the exit flush wrote, keeping the original
-// kill time.
+// recordPostExitKill makes a standing kill permanent after the post-exit index
+// refresh, without undoing an unkill that landed during the refresh.
 func (finisher *Finisher) recordPostExitKill(
 	ctx context.Context,
 	args ExitArgs,
 ) error {
-	killedAt := finisher.now().Unix()
-	if killed, exists, err := finisher.database.Killed(ctx, args.ID); err != nil {
-		return err
-	} else if exists {
-		killedAt = killed.KilledAt
-	}
-	if err := finisher.database.Kill(ctx, store.Killed{
-		ID:       args.ID,
-		Engine:   args.Engine,
-		KilledAt: killedAt,
-	}); err != nil {
+	if _, err := finisher.database.ReassertKill(ctx, args.ID); err != nil {
 		return fmt.Errorf("record post-exit kill: %w", err)
 	}
 	return nil

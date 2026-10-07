@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +55,7 @@ func TestChatInstructionsRouteComplaintsToServicedesk(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = clientSession.Close() })
 
-	want := "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; compact myself at a milestone → chat_self_compact; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands."
+	want := "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_digest; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. branch, end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 	got := clientSession.InitializeResult().Instructions
 	if got != want {
 		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", got, want)
@@ -219,15 +218,6 @@ func TestIssueReporterSeparatesAFailedIdentityLookupFromNoIdentity(t *testing.T)
 	}
 }
 
-// TestToolNamesHoldsServicedesk pins the roster entry directly, independent
-// of the jailed stdio protocol test.
-func TestToolNamesHoldsServicedesk(t *testing.T) {
-	names := ToolNames()
-	if !slices.Contains(names, "servicedesk") {
-		t.Fatalf("ToolNames() = %v, want it to hold %q", names, "servicedesk")
-	}
-}
-
 // TestServicedeskCallableByNameOverInMemorySession exercises the tool the
 // way a real client does: connected in-memory to the service's own server,
 // calling it by its registered name rather than the Go method directly.
@@ -314,6 +304,7 @@ func TestServicedeskCallMissingTitleOrDetailIsToolError(t *testing.T) {
 // changes at all, which is deliberate: any addition must be reviewed against
 // exactly this invariant before the list below is updated.
 func TestIssueInputCarriesNoReporterIdentityField(t *testing.T) {
+	t.Parallel()
 	fieldType := reflect.TypeOf(IssueInput{})
 	names := make([]string, 0, fieldType.NumField())
 	for index := 0; index < fieldType.NumField(); index++ {

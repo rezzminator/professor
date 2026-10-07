@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type actionTmuxJail struct {
@@ -52,7 +54,7 @@ func newActionTmuxJail(t *testing.T) *actionTmuxJail {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", jail.root)
 	t.Setenv("PFM_HOME", jail.home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -293,7 +295,7 @@ func fakeEngine(t *testing.T, source, target string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(target, content, 0o755); err != nil {
+	if err := testjail.WriteExecutable(target, content, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if runtime.GOOS != "darwin" {

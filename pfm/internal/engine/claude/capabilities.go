@@ -24,6 +24,13 @@ type Launcher struct{}
 
 func (Launcher) ComposerReady(string) bool { return true }
 
+// Rename types nothing at boot: a Claude chat's name rides --name on its launch
+// argv. spawn.Run's Claude callers both plan it there — `pfm chat new` through
+// action.PlanClaude, `pfm chat branch` through action.HeadlessFork — so a
+// /rename typed here would only repeat it into a composer still settling. A
+// live rename goes through `pfm chat name` or MCP chat_name, which inject
+// /rename (internal/chat/target.go DeliverName) and read it back
+// (cmd/pfm/chat_name_confirm.go).
 func (Launcher) Rename(
 	context.Context,
 	spawn.Tmux,

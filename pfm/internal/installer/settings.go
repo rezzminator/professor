@@ -1,194 +1,13 @@
 package installer
 
 import (
-	"encoding/json"
-	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 )
-
-// configAsyncKey is the hook-object field that makes the harness run a hook
-// in the background.
-const configAsyncKey = "async"
 
 // subagentStatusLineKey is Claude Code's settings key for the per-row body
 // of its agent panel.
 const subagentStatusLineKey = "subagentStatusLine"
-
-// SubagentStatusLineCommand is the subagentStatusLine.command value pfm
-// install owns: the statusLine overlay in its `--subagents` mode.
-func SubagentStatusLineCommand(home string) string {
-	return StatusLineOverlayCommand(home) + " --subagents"
-}
-
-func updateSettings(
-	raw []byte,
-	home string,
-	uninstall bool,
-	owned settingsHookCounts,
-) ([]byte, bool, settingsHookCounts, error) {
-	var document map[string]any
-	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return nil, false, nil, err
-	}
-	oldBinary := home + "/.local/bin/cc-fleet"
-	pfmBinary := home + "/.local/bin/pfm"
-	expected := claudeHookTemplates(home)
-	overlayStatusCommand := StatusLineOverlayCommand(home)
-	usageCommand := commandByName(expected, "usage")
-	exploreDenyCommand := commandByName(expected, "explore-deny")
-
-	changed := false
-	before := countSettingsHookCommands(document)
-	if uninstall {
-		if removeOwnedSettingsHooks(document, owned) {
-			changed = true
-		}
-	} else {
-		changed = rewriteCommandFields(document, func(command string) string {
-			switch {
-			case strings.Contains(command, "explore-deny.sh"):
-				return exploreDenyCommand
-			case command == oldBinary || strings.HasPrefix(command, oldBinary+" "):
-				return pfmBinary + strings.TrimPrefix(command, oldBinary)
-			default:
-				return command
-			}
-		})
-	}
-	if removeRetiredHookCommands(document, pfmBinary) {
-		changed = true
-	}
-	if _, present := document["cleanupPeriodDays"]; !present && !uninstall {
-		document["cleanupPeriodDays"] = float64(36500)
-		changed = true
-	}
-
-	// pfm's own `pfm statusline` historically read token usage from stale
-	// internal state; overlayStatusCommand (~/.local/bin/pfm-statusline,
-	// wired by wireHostOverlays) recomputes true occupancy and passes the
-	// line through unmodified on any internal error, so it can never render
-	// worse than the raw command. Every form this installer or its
-	// predecessors have ever pointed statusLine.command at — empty, the
-	// legacy shell script, or RawStatusLineCommand's bare/absolute
-	// `pfm statusline` (the same two forms `pfm doctor` names by exact
-	// string, so a host it flags red and a host `pfm install` repairs are
-	// always in agreement) — converges on the overlay; a genuinely custom
-	// command (an operator's own statusline) is left exactly as it is.
-	status, _ := document["statusLine"].(map[string]any)
-	currentStatus, _ := status[configCommandKey].(string)
-	switch {
-	case uninstall:
-		if currentStatus == overlayStatusCommand || RawStatusLineCommand(home, currentStatus) {
-			delete(document, "statusLine")
-			changed = true
-		}
-	case currentStatus == "":
-		document["statusLine"] = map[string]any{
-			configTypeKey:          commandType,
-			configCommandKey:       overlayStatusCommand,
-			"padding":              float64(0),
-			"refreshInterval":      float64(3),
-			"hideVimModeIndicator": true,
-		}
-		changed = true
-	case currentStatus != overlayStatusCommand &&
-		(strings.Contains(currentStatus, "statusline-command.sh") || RawStatusLineCommand(home, currentStatus)):
-		status[configTypeKey] = commandType
-		status[configCommandKey] = overlayStatusCommand
-		changed = true
-	}
-
-	// subagentStatusLine renders each agent-panel row's body — the sub-agent's
-	// context gauge — through the same overlay. Written only when absent and
-	// removed only when it is exactly ours: an operator's own command stays.
-	subagentStatusCommand := SubagentStatusLineCommand(home)
-	subagentStatus, _ := document[subagentStatusLineKey].(map[string]any)
-	currentSubagentStatus, _ := subagentStatus[configCommandKey].(string)
-	switch {
-	case uninstall:
-		if currentSubagentStatus == subagentStatusCommand {
-			delete(document, subagentStatusLineKey)
-			changed = true
-		}
-	case currentSubagentStatus == "":
-		document[subagentStatusLineKey] = map[string]any{
-			configTypeKey:    commandType,
-			configCommandKey: subagentStatusCommand,
-		}
-		changed = true
-	}
-
-	if !uninstall {
-		for _, entry := range hookEntries(document, hookEventUserPromptSubmit, false) {
-			hooks, _ := entry["hooks"].([]any)
-			for _, hookValue := range hooks {
-				hook, _ := hookValue.(map[string]any)
-				command, _ := hook[configCommandKey].(string)
-				if strings.Contains(command, "cc-usage-hook.sh") {
-					hook[configCommandKey] = usageCommand
-					hook[configTypeKey] = commandType
-					changed = true
-				}
-			}
-		}
-	}
-	pruneEmptyHooks(document, hookEventUserPromptSubmit)
-	if !uninstall {
-		for _, entry := range hookEntries(document, hookEventPreToolUse, true) {
-			hooks, _ := entry["hooks"].([]any)
-			for _, hookValue := range hooks {
-				hook, _ := hookValue.(map[string]any)
-				command, _ := hook[configCommandKey].(string)
-				if command == exploreDenyCommand {
-					if entry["matcher"] != hookExploreMatcher {
-						if settingsHookEntryHasMixedOwnership(entry, pfmBinary) {
-							continue
-						}
-						entry["matcher"] = hookExploreMatcher
-						changed = true
-					}
-				}
-			}
-		}
-	}
-	pruneEmptyHooks(document, "SessionEnd")
-
-	if !uninstall {
-		if dropMisplacedTemplateHooks(document, expected, pfmBinary) {
-			changed = true
-		}
-		preserved := mixedTemplateCopies(document, expected, pfmBinary)
-		for _, wanted := range expected {
-			if !hasHookCommandWithMatcher(hookEntries(document, wanted.Event, true), wanted.Command, wanted.Matcher) &&
-				!hasPreservedCopy(preserved, wanted.Event, wanted.Command) {
-				appendTemplateHook(document, wanted)
-				changed = true
-			}
-		}
-		if normalizeExpectedHookTypes(document, expected) {
-			changed = true
-		}
-	}
-	nextOwned := nextSettingsHookOwnership(
-		before,
-		countSettingsHookCommands(document),
-		owned,
-		pfmBinary,
-		uninstall,
-		settingsDocumentHasMixedOwnershipEntry(document, pfmBinary),
-	)
-
-	if !changed {
-		return raw, false, nextOwned, nil
-	}
-	updated, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return nil, false, nil, fmt.Errorf("encode settings: %w", err)
-	}
-	return append(updated, '\n'), true, nextOwned, nil
-}
 
 func rewriteCommandFields(value any, rewrite func(string) string) bool {
 	changed := false
@@ -218,122 +37,18 @@ func rewriteCommandFields(value any, rewrite func(string) string) bool {
 	return changed
 }
 
-// rewriteMemoryHelperHookPaths changes only complete, no-argument shell
-// command forms for a memory-wire helper whose old file was independently
-// proven installer-owned and paired with a ready destination. It deliberately
-// does not use rewriteCommandFields: command-looking values outside hooks and
-// compound shell commands are operator content.
-func rewriteMemoryHelperHookPaths(raw []byte, paths map[string]string, home string) ([]byte, bool, error) {
-	var document map[string]any
-	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return nil, false, err
-	}
-	if document == nil {
-		return nil, false, fmt.Errorf("settings must be an object")
-	}
-	commands := make(map[string]string)
-	for oldPath, newPath := range paths {
-		addMemoryHelperCommandForms(commands, oldPath, newPath)
-		defaultOld := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
-		if filepath.Clean(oldPath) == filepath.Clean(defaultOld) {
-			addMemoryHelperCommandForms(
-				commands,
-				"$HOME/.claude/scripts/cc-memory-wire.sh",
-				"$HOME/.claude/scripts/memory-wire.sh",
-			)
-		}
-	}
-
-	changed := false
-	events, ok := document["hooks"].(map[string]any)
-	if _, present := document["hooks"]; present && !ok {
-		return nil, false, fmt.Errorf("settings hooks must be an object")
-	}
-	for _, eventValue := range events {
-		entries, ok := eventValue.([]any)
-		if !ok {
-			return nil, false, fmt.Errorf("settings hook event must be an array")
-		}
-		for _, entryValue := range entries {
-			entry, ok := entryValue.(map[string]any)
-			if !ok {
-				return nil, false, fmt.Errorf("settings hook entry must be an object")
-			}
-			hooks, ok := entry["hooks"].([]any)
-			if !ok {
-				return nil, false, fmt.Errorf("settings hook entry hooks must be an array")
-			}
-			for _, hookValue := range hooks {
-				hook, ok := hookValue.(map[string]any)
-				if !ok {
-					return nil, false, fmt.Errorf("settings hook must be an object")
-				}
-				command, _ := hook[configCommandKey].(string)
-				if replacement, ok := commands[command]; ok && hook[configTypeKey] == commandType {
-					hook[configCommandKey] = replacement
-					changed = true
-				} else {
-					// Refusal is intentionally more conservative than rewriting:
-					// split quotes and alternate HOME spellings still reference the
-					// same owned helper, even though we do not parse shell programs.
-					unquoted := strings.NewReplacer(`"`, "", "'", "").Replace(command)
-					for oldPath := range paths {
-						referencesOld := strings.Contains(unquoted, oldPath)
-						if relative, err := filepath.Rel(
-							home,
-							oldPath,
-						); err == nil && relative != ".." &&
-							!strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-							for _, prefix := range []string{"$HOME/", "${HOME}/", "~/"} {
-								referencesOld = referencesOld ||
-									strings.Contains(unquoted, prefix+filepath.ToSlash(relative))
-							}
-						}
-						if referencesOld {
-							return nil, false, fmt.Errorf(
-								"memory helper hook requires manual migration before retiring %s: %q",
-								oldPath,
-								command,
-							)
-						}
-					}
-				}
-			}
-		}
-	}
-	if !changed {
-		return raw, false, nil
-	}
-	updated, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return nil, false, fmt.Errorf("encode settings: %w", err)
-	}
-	return append(updated, '\n'), true, nil
-}
-
-func addMemoryHelperCommandForms(commands map[string]string, oldPath, newPath string) {
-	for _, shell := range []string{"", "sh ", "bash "} {
-		for _, quote := range []string{"", `"`, `'`} {
-			commands[shell+quote+oldPath+quote] = shell + quote + newPath + quote
-		}
-	}
-}
-
-// retiredHookCommands is the installer's single table of subcommands a
-// settings.json or Codex hooks.json hook entry may still carry from before a
-// rename or a full retirement. Both wiring loops below strip any hook whose
-// command matches one of these — from either binary name, prefixed by any
-// path, or invoked bare via $PATH — and ProbeExpectedHooks reads the same
-// table over every probed Claude settings.json and every configured Codex
-// home's hooks.json to flag a live host that still carries one as STALE
-// rather than saying nothing about it at all.
+// retiredHookCommands is the shared table of subcommands old account settings
+// or Codex hooks may carry. The pfm-settings host check reports them in account settings;
+// the Codex hook writer removes them and the Codex doctor probe reports them as STALE.
 var retiredHookCommands = []struct {
 	Name       string
 	Subcommand string
 }{
 	{Name: "bb", Subcommand: "bb"},
 	{Name: "bb", Subcommand: "chat bb"},
+	{Name: "callmeter", Subcommand: "internal callmeter"},
 	{Name: "clear-hide", Subcommand: "internal clear-hide"},
+	{Name: "compact-nudge", Subcommand: "internal compact-nudge"},
 	{Name: "dream-agent-inject", Subcommand: "dream hook agent-inject"},
 	{Name: "dream-nudge", Subcommand: "dream hook nudge"},
 	{Name: "dream-codex-subagent-inject", Subcommand: "dream hook codex-subagent-inject"},
@@ -350,6 +65,19 @@ var retiredHookShimHints = []struct {
 	{Name: "bb", Hint: "bb-hook.sh"},
 	{Name: "dream-agent-inject", Hint: "dreamer-agent-inject.sh"},
 	{Name: "dream-nudge", Hint: "dreamer-nudge.sh"},
+}
+
+// RetiredInternalHook reports whether name is a `pfm internal` subcommand an
+// older pfm registered as a hook and this one retired. Install refuses while account settings carry it (host check pfm-settings),
+// but a Claude session keeps the hooks it read at start
+// and still runs it until that session restarts.
+func RetiredInternalHook(name string) bool {
+	for _, retired := range retiredHookCommands {
+		if retired.Subcommand == "internal "+name {
+			return true
+		}
+	}
+	return false
 }
 
 // retiredHookCommandName reports whether command matches a retired hook
@@ -484,46 +212,6 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 	return name, true
 }
 
-// UnknownPFMHookCommands parses a settings.json or Codex hooks.json document
-// and returns the names (unknownPFMHookCommand's shape) of every hook
-// command present that is of pfm's own shape but names a subcommand this
-// binary neither implements nor recognizes as retired — the residue a
-// stranded rollback leaves (issue #24 finding 2). A document this binary
-// cannot parse returns its decode error — an unchecked file, never a clean
-// one; a clean document returns nil, nil.
-func UnknownPFMHookCommands(raw []byte, home string) ([]string, error) {
-	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, fmt.Errorf("decode hook document: %w", err)
-	}
-	pfmBinary := filepath.Join(home, ".local", "bin", "pfm")
-	seen := map[string]bool{}
-	events, _ := document["hooks"].(map[string]any)
-	for _, eventValue := range events {
-		entries, _ := eventValue.([]any)
-		for _, entryValue := range entries {
-			entry, _ := entryValue.(map[string]any)
-			hooks, _ := entry["hooks"].([]any)
-			for _, hookValue := range hooks {
-				hook, _ := hookValue.(map[string]any)
-				command, _ := hook[configCommandKey].(string)
-				if name, ok := unknownPFMHookCommand(command, pfmBinary); ok {
-					seen[name] = true
-				}
-			}
-		}
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		return nil, nil
-	}
-	return names, nil
-}
-
 func isRetiredHookCommand(command, pfmBinary string) bool {
 	if _, retired := retiredHookCommandName(command); retired {
 		return true
@@ -615,69 +303,6 @@ func hookEntries(document map[string]any, event string, create bool) []map[strin
 		}
 	}
 	return entries
-}
-
-func hasHookCommandWithMatcher(entries []map[string]any, wanted, matcher string) bool {
-	for _, entry := range entries {
-		if entry["matcher"] != matcher {
-			continue
-		}
-		hooks, _ := entry["hooks"].([]any)
-		for _, value := range hooks {
-			hook, _ := value.(map[string]any)
-			if hook[configCommandKey] == wanted {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// normalizeExpectedHookTypes converges the shape of every template hook at its
-// expected (event, matcher): its type is "command", and an Async template's
-// hook object carries "async": true. Fields the template does not name are
-// left as they are.
-func normalizeExpectedHookTypes(document map[string]any, expected []ExpectedHook) bool {
-	changed := false
-	for _, wanted := range expected {
-		for _, entry := range hookEntries(document, wanted.Event, false) {
-			matcher, _ := entry["matcher"].(string)
-			if matcher != wanted.Matcher {
-				continue
-			}
-			hooks, _ := entry["hooks"].([]any)
-			for _, hookValue := range hooks {
-				hook, _ := hookValue.(map[string]any)
-				if hook[configCommandKey] != wanted.Command {
-					continue
-				}
-				if hook[configTypeKey] != commandType {
-					hook[configTypeKey] = commandType
-					changed = true
-				}
-				if wanted.Async && hook[configAsyncKey] != true {
-					hook[configAsyncKey] = true
-					changed = true
-				}
-			}
-		}
-	}
-	return changed
-}
-
-func appendHookWithMatcher(document map[string]any, event, matcher, command string) {
-	hooks, _ := document["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-		document["hooks"] = hooks
-	}
-	values, _ := hooks[event].([]any)
-	hooks[event] = append(values, map[string]any{
-		"matcher": matcher,
-		"hooks": []any{map[string]any{
-			configTypeKey: commandType, configCommandKey: command,
-		}},
-	})
 }
 
 func pruneEmptyHooks(document map[string]any, event string) {

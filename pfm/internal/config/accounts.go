@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -72,18 +73,23 @@ func (config Config) PrimaryAccountFor(engine pfmengine.ID, claudePrimary int) i
 	}
 }
 
+// ImplicitAccount prefers account 1, then the first configured account, then 1.
+func (config Config) ImplicitAccount() int {
+	for _, account := range config.Accounts {
+		if account.ID == 1 {
+			return 1
+		}
+	}
+	if len(config.Accounts) != 0 {
+		return config.Accounts[0].ID
+	}
+	return 1
+}
+
 // AccountForConfigDir returns the Claude account represented by configDir.
 func (config Config) AccountForConfigDir(configDir string) int {
-	if len(config.Accounts) == 0 {
-		return 1
-	}
-	if configDir == "" {
-		for _, account := range config.Accounts {
-			if account.Implicit {
-				return account.ID
-			}
-		}
-		return config.Accounts[0].ID
+	if configDir == "" || len(config.Accounts) == 0 {
+		return config.ImplicitAccount()
 	}
 	if resolved, err := filepath.EvalSymlinks(configDir); err == nil {
 		configDir = resolved
@@ -98,7 +104,7 @@ func (config Config) AccountForConfigDir(configDir string) int {
 			return account.ID
 		}
 	}
-	return config.Accounts[0].ID
+	return config.ImplicitAccount()
 }
 
 // OpenCodeAccountIDs lists every OpenCode account id, in roster order.
@@ -116,4 +122,34 @@ func (config Config) PrimaryOpenCodeAccount() int {
 		return 0
 	}
 	return config.OpenCodeAccounts[0].ID
+}
+
+func validateAccounts(values []rawAccount, home string) ([]Account, error) {
+	seen := make(map[int]bool, len(values))
+	seenDirs := make(map[string]int, len(values))
+	accounts := make([]Account, 0, len(values))
+	for index, value := range values {
+		if value.ID < 1 {
+			return nil, fmt.Errorf("entry %d id must be positive", index+1)
+		}
+		if seen[value.ID] {
+			return nil, fmt.Errorf("duplicate id %d", value.ID)
+		}
+		seen[value.ID] = true
+		configDir, err := expandHomePath(value.ConfigDir, home)
+		if err != nil {
+			return nil, fmt.Errorf("entry %d configDir: %w", index+1, err)
+		}
+		configDir = filepath.Clean(configDir)
+		if earlier, found := seenDirs[configDir]; found {
+			return nil, fmt.Errorf("entry %d configDir %s duplicates entry %d", index+1, configDir, earlier)
+		}
+		seenDirs[configDir] = index + 1
+		accounts = append(accounts, Account{
+			ID:        value.ID,
+			ConfigDir: configDir,
+			Emoji:     DefaultEmoji(value.ID),
+		})
+	}
+	return accounts, nil
 }

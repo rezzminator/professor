@@ -9,6 +9,7 @@ import (
 )
 
 func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		formats  map[string]string
@@ -75,6 +76,7 @@ func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
 // files ahead of a lower-priority HathiTrust volume, sorted by Priority
 // ascending, per sortCandidates.
 func TestResolveBookOrdersISBNCandidatesByPriorityAndDedupes(t *testing.T) {
+	t.Parallel()
 	const isbn = "9780306406157"
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		u := r.URL.String()
@@ -134,6 +136,7 @@ func TestResolveBookOrdersISBNCandidatesByPriorityAndDedupes(t *testing.T) {
 // "Full view" (public domain) items may become candidates — a lending-only
 // "Search only" hit must never leak through as a downloadable copy.
 func TestResolverHathitrustKeepsOnlyFullViewVolumes(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if !strings.Contains(r.URL.String(), "catalog.hathitrust.org/api/volumes/brief/isbn/9780306406157.json") {
 			t.Fatalf("unexpected hathitrust request: %s", r.URL)
@@ -160,6 +163,7 @@ func TestResolverHathitrustKeepsOnlyFullViewVolumes(t *testing.T) {
 // the error back too, distinguishing "the lookup failed" from "no copy
 // exists".
 func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 500,
@@ -186,6 +190,7 @@ func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 // "malformed JSON" when the real story is the byte ceiling. Routed through
 // getJSONBody (oversizeTruncate: false), the failure must name the ceiling.
 func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
+	t.Parallel()
 	oversize := strings.Repeat("a", 10<<20+1<<20)
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return jsonResponse(
@@ -236,6 +241,7 @@ func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 // never happens for "nothing found" vs "the lookup failed". Watched FAILING
 // before the fix (err was nil for a query with zero live providers).
 func TestResolveBookAllProvidersDownReturnsError(t *testing.T) {
+	t.Parallel()
 	down := errors.New("provider unreachable")
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, down
@@ -254,6 +260,7 @@ func TestResolveBookAllProvidersDownReturnsError(t *testing.T) {
 // path: one provider failing while another succeeds must still return that
 // provider's candidates with no error, matching ResolveDOI's own precedent.
 func TestResolveBookPartialFailureStillReturnsCandidates(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if strings.Contains(r.URL.Host, "gutendex.com") {
 			return jsonResponse(
@@ -274,6 +281,7 @@ func TestResolveBookPartialFailureStillReturnsCandidates(t *testing.T) {
 }
 
 func TestResolverHathitrustSkipsNonISBNQueries(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("hathitrust must not make a network call for a non-ISBN query, requested %s", r.URL)
 		return nil, nil

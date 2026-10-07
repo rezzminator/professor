@@ -30,7 +30,7 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvDB, filepath.Join(root, "pfm.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
 	t.Setenv(paths.EnvCodexHome, codexHome)

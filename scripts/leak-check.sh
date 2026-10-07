@@ -19,8 +19,9 @@
 # Structural patterns stay inline because they name nobody. Their discriminator: a home
 # path is a leak only when it names a CONCRETE directory, so the blueprint's own
 # documented defaults (`~/work/<project>`, `$HOME/work/{MEMORY_VAULT_DIR}`) pass while a
-# real directory under the same root does not. Written as a bracket class, these three
-# patterns also cannot match their own source text — which is why this file passes the
+# real directory under the same root does not. A personal mailbox (a gmail address) is
+# PII whoever owns it; a fixture carries an invented address instead. Written with a
+# bracket class, these four patterns also cannot match their own source text — which is why this file passes the
 # scan it now submits itself to.
 #
 # MATCHED CASE-INSENSITIVELY (grep -i), and that is load-bearing: the pattern once spelled
@@ -29,8 +30,20 @@
 # that only knows two capitalisations of a word does not know the word.
 set -euo pipefail
 
+# EVERY TOOL RUNS UNDER C EXCEPT THE GREP THAT MATCHES THE PATTERN: sed, tr and bash read bytes, and BSD
+# sed under a UTF-8 locale rejects an invalid byte. The grep that matches the pattern (match_grep) runs under
+# a UTF-8 locale — the caller's, else C.UTF-8, else UTF-8 — proven at load, so a '.' or a bracket in a term
+# matches one multibyte letter and -i folds non-ASCII letters. That grep carries --binary-files=text: under
+# a UTF-8 locale GNU grep otherwise skips the matching lines of a binary (NUL-byte) or undecodable file,
+# exits 0 and says so only on stderr, and a leak in such a file would pass the gate. Every git diff carries
+# --text, or git prints "Binary files … differ" for a NUL-byte file and no line of it is ever judged. With no
+# UTF-8 locale the scan refuses.
+caller_locale="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+export LC_ALL=C
+
 # Named nowhere, identifying nobody — safe to keep in the public file.
-STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]'
+STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]|@gmail[.]com'
+STRUCTURAL_COUNT=$(( $(printf '%s' "$STRUCTURAL_PATTERN" | tr -cd '|' | wc -c) + 1 ))
 
 # Tokens that MATCH a structural pattern but name nobody. Each is removed from a line
 # before the line is judged, so a line carrying a real path ALONGSIDE one still fails.
@@ -49,19 +62,24 @@ STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]'
 #                     notes; a private term that is a substring of it must not fail them
 BENIGN_TOKENS='(/home/account-42|~/work/professor|mreza0100|/home/tester|~/work/alpha|/home/test|~/work/Foo|/home/me|/home/x)'
 
+# The one door for a grep that matches PATTERN: UTF-8 locale for that command only, binary files read as text.
+match_grep() {
+  LC_ALL="$match_locale" grep --binary-files=text "$@"
+}
+
 # True when the line still matches PATTERN after benign tokens and the configured
 # ignore tokens are removed. Ignore tokens are lowercase regexes (the terms-file
 # convention), so they are applied to the lowercased line; PATTERN matches with -i.
 line_is_real_hit() {
   local line tok
-  line="$(printf '%s ' "$1" | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g")"
+  line="$(printf '%s ' "$1" | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g")" || return 2
   if (( ${#ignore_tokens[@]} > 0 )); then
-    line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
+    line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')" || return 2
     for tok in "${ignore_tokens[@]}"; do
-      line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")"
+      line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")" || return 2
     done
   fi
-  printf '%s' "$line" | grep -qiE "$PATTERN"
+  match_grep -qiE "$PATTERN" <<<"$line"
 }
 
 usage() {
@@ -133,8 +151,50 @@ if (( ${#terms[@]} == 0 )); then
   exit 1
 fi
 
+# The locale match_grep runs under: the first of the caller's own, C.UTF-8 and UTF-8 (the macOS name) under
+# which a two-byte letter reads as one character and -i pairs both ASCII and non-ASCII letters. None does:
+# refuse, never scan under a byte locale.
+match_locale=""
+tried_locales=""
+for candidate in "$caller_locale" C.UTF-8 UTF-8; do
+  [[ -n "$candidate" ]] || continue
+  [[ " $tried_locales " == *" $candidate "* ]] && continue
+  tried_locales="${tried_locales:+$tried_locales }$candidate"
+  match_locale="$candidate"
+  # A two-byte letter is one character, and -i pairs É/é and I/i: zh_CN.GB18030 passes the first alone,
+  # tr_TR.UTF-8 pairs no I/i, and under either a term's other case would scan clean.
+  if printf '\303\251\n' | match_grep -qE '^.$' \
+    && printf '\303\211\n' | match_grep -qiE $'^\303\251$' \
+    && printf 'I\n' | match_grep -qiE '^i$'; then
+    break
+  fi
+  match_locale=""
+done
+if [[ -z "$match_locale" ]]; then
+  echo "leak-check: FAILED — no UTF-8 locale for grep (tried: $tried_locales); under a byte locale a term's '.' or bracket misses a multibyte letter; refusing to scan" >&2
+  exit 1
+fi
+
 terms_alt="$(IFS='|'; printf '%s' "${terms[*]}")"
 PATTERN="(${terms_alt}|${STRUCTURAL_PATTERN})"
+
+# Validate at data entry: a term or ignore token the tools cannot compile would otherwise
+# fail open — every --range hit judged "suppressed", a --range grep that "finds nothing".
+# Both checks run before any mode touches git or a file, and an unusable terms file stops
+# the gate the same way in every mode.
+if (( ${#ignore_tokens[@]} > 0 )); then
+  for tok in "${ignore_tokens[@]}"; do
+    if ! printf '' | sed -E "s#${tok}#<IGNORED>#g" > /dev/null; then
+      echo "leak-check: FAILED — unusable ignore token in $terms_file: $tok (sed -E rejects it; a token is a lowercase ERE without '#')" >&2
+      exit 1
+    fi
+  done
+fi
+match_grep -qiE "$PATTERN" < /dev/null && rc=0 || rc=$?
+if (( rc >= 2 )); then
+  echo "leak-check: FAILED — the terms in $terms_file do not compile as one extended regex (grep rc=$rc); refusing to scan" >&2
+  exit 1
+fi
 
 if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" || -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
   if [[ -z "${PFM_DEV_REPO_GIT_DIR:-}" || -z "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
@@ -199,12 +259,20 @@ scan_diff_stream() {
   local -a files=()
   local -a contents=()
 
+  # A `+++` line is a file header only between `diff --git` and the file's first `@@`: inside a hunk an
+  # added line that itself starts with "++" reads "+++ …" too, and it is content to judge. A hunk's lines
+  # all carry a one-character prefix, so `diff --git` and `@@` at column 0 are always headers.
+  local in_hunk=0
   while IFS= read -r line; do
-    if [[ "$line" == "+++ /dev/null" ]]; then
+    if [[ "$line" == "diff --git "* ]]; then
+      in_hunk=0
+    elif [[ "$line" == "@@ "* ]]; then
+      in_hunk=1
+    elif (( ! in_hunk )) && [[ "$line" == "+++ /dev/null" ]]; then
       file=""
-    elif [[ "$line" == "+++ b/"* ]]; then
+    elif (( ! in_hunk )) && [[ "$line" == "+++ b/"* ]]; then
       file="${line#+++ b/}"
-    elif [[ "$line" == "+++"* ]]; then
+    elif (( ! in_hunk )) && [[ "$line" == "+++"* ]]; then
       file="${line#+++ }"
     elif [[ "$line" == "+"* ]]; then
       contents+=("${line#+}")
@@ -244,15 +312,30 @@ scan_diff_stream() {
       fi
     done
 
-    local matches
-    matches="$(printf '%s\n' "${contents[@]}" | grep -niE "$PATTERN" || true)"
+    local matches rc
+    matches="$(printf '%s\n' "${contents[@]}" | match_grep -niE "$PATTERN")" && rc=0 || rc=$?
+    if (( rc >= 2 )); then
+      local error_seen=$'\n'
+      for f in "${files[@]}"; do
+        if [[ "$error_seen" != *$'\n'"$f"$'\n'* ]]; then
+          error_seen+="$f"$'\n'
+          printf 'SCAN-ERROR %s: %s diff matcher failed (rc=%d) — refusing clean\n' "${f:-<unattributed>}" "$mode" "$rc" >&2
+        fi
+      done
+      return 1
+    fi
     if [[ -n "$matches" ]]; then
       local idx content
       while IFS=: read -r idx content; do
         if line_is_real_hit "$content"; then
           printf 'LEAK %s: %s\n' "${files[idx-1]}" "$content"
         else
-          suppressed=$((suppressed + 1))
+          rc=$?
+          if (( rc >= 2 )); then
+            printf 'SCAN-ERROR %s: matched line could not be judged (rc=%d) — refusing clean\n' "${files[idx-1]}" "$rc"
+          else
+            suppressed=$((suppressed + 1))
+          fi
         fi
       done <<< "$matches"
     fi
@@ -262,7 +345,7 @@ scan_diff_stream() {
     printf 'added_lines=%d\n' "$added_lines"
     printf 'distinct_files=%d\n' "$distinct_files"
     printf 'term_count=%d\n' "${#terms[@]}"
-    printf 'structural_patterns=3\n'
+    printf 'structural_patterns=%d\n' "$STRUCTURAL_COUNT"
     printf 'suppressed=%d\n' "$suppressed"
     printf 'unattributed=%d\n' "$unattributed"
   } > "$coverage_file"
@@ -277,11 +360,11 @@ trap 'rm -f "$hits_file" "$coverage_file"' EXIT
 
 case "$mode" in
   staged)
-    repo_git diff --cached -U0 --no-color -- . "${diff_excludes[@]}" \
+    repo_git diff --cached --text -U0 --no-color -- . "${diff_excludes[@]}" \
       | scan_diff_stream > "$hits_file"
     ;;
   range)
-    repo_git diff "$range_old" "$range_new" -U0 --no-color -- . "${diff_excludes[@]}" \
+    repo_git diff "$range_old" "$range_new" --text -U0 --no-color -- . "${diff_excludes[@]}" \
       | scan_diff_stream > "$hits_file"
     ;;
   files)
@@ -300,6 +383,7 @@ case "$mode" in
     skipped=0
     excluded=0
     suppressed=0
+    regular=()
     for f in "${files[@]}"; do
       if is_excluded_path "$f"; then
         excluded=$((excluded + 1))
@@ -307,29 +391,92 @@ case "$mode" in
       fi
       if [[ -f "$f" ]]; then
         scanned=$((scanned + 1))
-        matches="$(grep -niE "$PATTERN" "$f")" && rc=0 || rc=$?
-        if (( rc >= 2 )); then
-          printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$f" "$rc" >> "$hits_file"
-        elif [[ -n "$matches" ]]; then
-          while IFS=: read -r lnum content; do
-            if line_is_real_hit "$content"; then
-              printf 'LEAK %s: %s\n' "$f" "$content" >> "$hits_file"
-            else
-              suppressed=$((suppressed + 1))
-            fi
-          done <<< "$matches"
-        fi
+        regular+=("$f")
       else
         skipped=$((skipped + 1))
         printf 'NOT-SCANNED %s: not a regular file (deleted or misnamed) — examined by nothing, counted as clean by nothing\n' "$f" >&2
       fi
     done
+    if (( ${#regular[@]} > 0 )); then
+      match_grep -niEH --null -e "$PATTERN" -- "${regular[@]}" > "$coverage_file" 2>/dev/null && rc=0 || rc=$?
+      if (( rc >= 2 )); then
+        for f in "${regular[@]}"; do
+          matches="$(match_grep -niE -e "$PATTERN" -- "$f")" && rc=0 || rc=$?
+          if (( rc >= 2 )); then
+            printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$f" "$rc" >> "$hits_file"
+          elif [[ -n "$matches" ]]; then
+            while IFS=: read -r lnum content; do
+              if line_is_real_hit "$content"; then
+                printf 'LEAK %s: %s\n' "$f" "$content" >> "$hits_file"
+              else
+                rc=$?
+                if (( rc >= 2 )); then
+                  printf 'SCAN-ERROR %s: matched line could not be judged (rc=%d) — refusing clean\n' "$f" "$rc" >> "$hits_file"
+                else
+                  suppressed=$((suppressed + 1))
+                fi
+              fi
+            done <<< "$matches"
+          fi
+        done
+      else
+        matched_files=()
+        matched_contents=()
+        while IFS= read -r -d '' f && IFS=: read -r lnum content; do
+          matched_files+=("$f")
+          matched_contents+=("$content")
+        done < "$coverage_file"
+        if (( ${#matched_files[@]} > 0 )); then
+          # Apply line_is_real_hit's substitutions to the candidate lines together;
+          # forking its sed and grep pipeline per line dominates a whole-tree scan.
+          normalized_file="$coverage_file.normalized"
+          lower_file="$coverage_file.lower"
+          real_file="$coverage_file.real"
+          trap 'rm -f "$hits_file" "$coverage_file" "$normalized_file" "$lower_file" "$real_file"' EXIT
+          printf '%s \n' "${matched_contents[@]}" \
+            | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g" > "$normalized_file"
+          if (( ${#ignore_tokens[@]} > 0 )); then
+            tr '[:upper:]' '[:lower:]' < "$normalized_file" > "$lower_file"
+            sed_args=()
+            for tok in "${ignore_tokens[@]}"; do
+              sed_args+=(-e "s#${tok}#<IGNORED>#g")
+            done
+            sed -E "${sed_args[@]}" "$lower_file" > "$normalized_file"
+          fi
+          match_grep -niE "$PATTERN" "$normalized_file" > "$real_file" && rc=0 || rc=$?
+          if (( rc >= 2 )); then
+            # The matched lines could not be judged: name every source file they came from,
+            # once each, never the temp file the judge read. First-seen order, same
+            # newline-delimited seen-string as scan_diff_stream (bash 3.2 has no associative arrays).
+            judge_seen=$'\n'
+            for f in "${matched_files[@]}"; do
+              if [[ "$judge_seen" != *$'\n'"$f"$'\n'* ]]; then
+                judge_seen+="$f"$'\n'
+                printf "SCAN-ERROR %s: leak-check could NOT judge this file's matched lines (grep rc=%d) — treated as FAILURE, never as clean\n" "$f" "$rc" >> "$hits_file"
+              fi
+            done
+          else
+            real_indices=()
+            while IFS=: read -r lnum content; do
+              real_indices[lnum]=1
+            done < "$real_file"
+            for (( i=0; i<${#matched_files[@]}; i++ )); do
+              if [[ -n "${real_indices[i+1]:-}" ]]; then
+                printf 'LEAK %s: %s\n' "${matched_files[i]}" "${matched_contents[i]}" >> "$hits_file"
+              else
+                suppressed=$((suppressed + 1))
+              fi
+            done
+          fi
+        fi
+      fi
+    fi
     if (( scanned == 0 && skipped > 0 )); then
       printf 'SCAN-ERROR: --files named %d path(s), %d excluded by design, and every one of the remaining %d was NOT a regular file — nothing was examined, refusing to report clean\n' \
         "${#files[@]}" "$excluded" "$skipped" >> "$hits_file"
     fi
     printf 'leak-check: scanned %d file(s) (%d excluded by design, %d not a regular file) against %d private term(s) + %d structural pattern(s); %d benign-token line(s) suppressed\n' \
-      "$scanned" "$excluded" "$skipped" "${#terms[@]}" 3 "$suppressed" >&2
+      "$scanned" "$excluded" "$skipped" "${#terms[@]}" "$STRUCTURAL_COUNT" "$suppressed" >&2
     ;;
 esac
 

@@ -13,196 +13,267 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
-	const layer = int64(1_700_000_000)
-	for _, testCase := range []struct {
-		name        string
-		observation spawnObservation
-		want        spawnVerdict
-		wantReason  string
-	}{
-		{
-			name: "professor prompt file in argv",
-			observation: spawnObservation{
-				Argv: []string{
-					"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
-					"--settings", `{"outputStyle":"default"}`,
-				},
-				Environ:     map[string]string{},
-				StartedUnix: layer + 60,
-			},
-			want:       spawnInjected,
-			wantReason: "--system-prompt-file",
-		},
-		{
-			name: "lean arm in the environment",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--settings", `{"outputStyle":"default"}`},
-				Environ:     map[string]string{"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT": "1"},
-				StartedUnix: layer + 60,
-			},
-			want:       spawnInjected,
-			wantReason: "lean prompt armed",
-		},
-		{
-			// The staged prompt without the settings flag double-applies a
-			// persona — Claude Code's own output style still runs on top of
-			// it — so this is its own violation, distinct from injecting
-			// nothing at all.
-			name: "professor prompt file without the settings flag",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
-				Environ:     map[string]string{},
-				StartedUnix: layer + 60,
-			},
-			want:       spawnViolation,
-			wantReason: "missing --settings",
-		},
-		{
-			// A --settings that IS there but whose payload does not parse is
-			// named as malformed, not as missing: the spawn site passed the
-			// flag and broke its value, a different bug than never passing it.
-			name: "professor prompt file with a malformed settings payload",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--system-prompt-file", "/p.md", "--settings", `{"outputStyle":`},
-				Environ:     map[string]string{},
-				StartedUnix: layer + 60,
-			},
-			want:       spawnViolation,
-			wantReason: "argv carries a malformed --settings payload (",
-		},
-		{
-			// Same missing-settings argv, but this seat was born well BEFORE
-			// the current spawn door went live: it carries the argv of the pfm
-			// that launched it and predates the --settings flag exactly as it
-			// predates the prompt itself. A reload fixes it, not a bug hunt —
-			// this is the exact defect the fix closes (it used to return
-			// VIOLATION unconditionally here regardless of age).
-			name: "professor prompt file without the settings flag, seat older than the layer",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
-				Environ:     map[string]string{},
-				StartedUnix: layer - 3600,
-			},
-			want:       spawnPredatesLayer,
-			wantReason: "reload to carry it",
-		},
-		{
-			// Missing settings AND no usable age signal (StartedUnix unknown):
-			// an unreadable age must never read as "old and therefore
-			// forgiven" — it must still be a violation.
-			name: "professor prompt file without the settings flag, unknown start time",
-			observation: spawnObservation{
-				Argv:    []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
-				Environ: map[string]string{},
-			},
-			want:       spawnViolation,
-			wantReason: "missing --settings",
-		},
-		{
-			// A correctly-flagged seat (prompt file AND --settings) is never
-			// downgraded by age: even one born well before the layer stamp
-			// still classifies as INJECTED, never predates-layer or a
-			// violation.
-			name: "professor prompt file with the settings flag, seat older than the layer",
-			observation: spawnObservation{
-				Argv: []string{
-					"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
-					"--settings", `{"outputStyle":"default"}`,
-				},
-				Environ:     map[string]string{},
-				StartedUnix: layer - 3600,
-			},
-			want:       spawnInjected,
-			wantReason: "--system-prompt-file",
-		},
-		{
-			// Missing settings, a real (old) start time, but the layer stamp
-			// itself is unavailable on this host (0): an unusable stamp must
-			// also never read as "old and therefore forgiven".
-			name: "professor prompt file without the settings flag, no layer stamp available",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
-				Environ:     map[string]string{},
-				StartedUnix: layer - 3600,
-			},
-			want:       spawnViolation,
-			wantReason: "missing --settings",
-		},
-		{
-			name: "flagless chat older than the layer",
-			observation: spawnObservation{
-				Argv:        []string{"claude"},
-				Environ:     map[string]string{},
-				StartedUnix: layer - 3600,
-			},
-			want:       spawnPredatesLayer,
-			wantReason: "before this host's current spawn door was installed",
-		},
-		{
-			name: "flagless resume with no usable age signal",
-			observation: spawnObservation{
-				Argv:    []string{"claude", "--resume", "abc"},
-				Environ: map[string]string{},
-			},
-			want:       spawnPredatesLayer,
-			wantReason: "reborn before the door",
-		},
-		{
-			name: "fresh flagless launch",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--name", "seat"},
-				Environ:     map[string]string{},
-				StartedUnix: layer + 3600,
-			},
-			want:       spawnViolation,
-			wantReason: "bypassed the door",
-		},
-		{
-			// The lean arm lives only in the environment, so an unreadable
-			// environment cannot clear a seat. It must not read as clean.
-			name: "fresh flagless launch with an unreadable environment",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--name", "seat"},
-				EnvironErr:  errors.New("permission denied"),
-				StartedUnix: layer + 3600,
-			},
-			want:       spawnViolation,
-			wantReason: "verdict unproven",
-		},
-		{
-			// An absent stamp must never turn an ordinary fresh chat into a
-			// "predates the layer" excuse.
-			name: "no layer stamp leaves the argv verdict standing",
-			observation: spawnObservation{
-				Argv:        []string{"claude", "--name", "seat"},
-				Environ:     map[string]string{},
-				StartedUnix: layer - 3600,
-			},
-			want:       spawnViolation,
-			wantReason: "bypassed the door",
-		},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			stamp := layer
-			if testCase.name == "no layer stamp leaves the argv verdict standing" ||
-				testCase.name == "professor prompt file without the settings flag, no layer stamp available" {
-				stamp = 0
+func TestSpawnAuditRegistryPayload(t *testing.T) {
+	home := t.TempDir()
+	prompt := filepath.Join(home, "p.md")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []string{config.SystemPromptProfessor, config.SystemPromptLean, config.SystemPromptProduction} {
+		t.Run(policy, func(t *testing.T) {
+			machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: policy}}
+			launch, err := claudelaunch.Render(
+				claudelaunch.Request{Home: home, PromptFile: prompt, Resume: "abc"},
+				machine,
+			)
+			if err != nil {
+				t.Fatal(err)
 			}
-			verdict, reason := classifySpawn(testCase.observation, stamp)
-			if verdict != testCase.want {
-				t.Fatalf("classifySpawn = %s (%s), want %s", verdict, reason, testCase.want)
+			observation := spawnObservation{Argv: append([]string{launch.Binary}, launch.Argv...), StartedUnix: 200}
+			parsed, err := claudelaunch.Parse(observation.Argv)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !strings.Contains(reason, testCase.wantReason) {
-				t.Fatalf("reason %q does not name the deciding signal %q", reason, testCase.wantReason)
+			verdict, reason := classifySpawn(parsed, observation, machine.EffectiveClaude(1), home, 100, nil)
+			if verdict != spawnInjected {
+				t.Fatalf("%s: %s", verdict, reason)
 			}
 		})
 	}
+}
+
+func TestSpawnAuditHookDrift(t *testing.T) {
+	home := t.TempDir()
+	machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}}
+	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := claudelaunch.Parse(append([]string{launch.Binary}, launch.Argv...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func([]claudelaunch.Hook) []claudelaunch.Hook{
+		"missing": func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return hooks[1:] },
+		"extra":   func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return append(hooks, hooks[0]) },
+		"moved":   func(hooks []claudelaunch.Hook) []claudelaunch.Hook { hooks[0].Matcher = "other"; return hooks },
+		"async flipped": func(hooks []claudelaunch.Hook) []claudelaunch.Hook {
+			hooks[0].Async = !hooks[0].Async
+			return hooks
+		},
+	} {
+		for _, started := range []int64{50, 200} {
+			t.Run(fmt.Sprintf("%s/born_%d", name, started), func(t *testing.T) {
+				changed := parsed
+				changed.Hooks = change(append([]claudelaunch.Hook(nil), parsed.Hooks...))
+				verdict, reason := classifySpawn(
+					changed,
+					spawnObservation{StartedUnix: started},
+					machine.EffectiveClaude(1),
+					home,
+					100,
+					nil,
+				)
+				want := spawnViolation
+				if started < 100 {
+					want = spawnPredatesLayer
+				}
+				if verdict != want || !strings.Contains(reason, "hook set differs from the registry") {
+					t.Fatalf("%s: %s", verdict, reason)
+				}
+			})
+		}
+	}
+}
+
+func TestSpawnAuditBypassAndUndecodable(t *testing.T) {
+	home := t.TempDir()
+	prefs := config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}
+	observation := spawnObservation{Socket: "cc-bypassed", PID: 45, Argv: []string{"claude"}, StartedUnix: 200}
+	parsed := mustParseSpawn(t, observation.Argv)
+	if verdict, reason := classifySpawn(
+		parsed,
+		observation,
+		prefs,
+		home,
+		100,
+		nil,
+	); verdict != spawnViolation ||
+		!strings.Contains(reason, "bypassed") {
+		t.Fatalf("%s: %s", verdict, reason)
+	}
+	undecodable := spawnObservation{Socket: "cc-broken", PID: 46, Argv: []string{"claude", "--settings", "{"}}
+	if warning := decodeSpawn(&undecodable); !strings.Contains(warning, "cc-broken pid=46: argv undecodable:") {
+		t.Fatalf("warning = %q", warning)
+	} else if warnings := spawnAuditUnreadWarnings(&bytes.Buffer{}, []string{warning}); warnings == 0 {
+		t.Fatal("undecodable argv did not count as unread")
+	}
+}
+
+func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
+	root := t.TempDir()
+	accountDir := filepath.Join(root, "accounts", "2")
+	if err := os.MkdirAll(accountDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(accountDir, link); err != nil {
+		t.Fatal(err)
+	}
+	machine := config.Config{
+		Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+		Accounts: []config.Account{
+			{ID: 1, ConfigDir: "/accounts/1", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor}},
+			{ID: 2, ConfigDir: accountDir, Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
+		},
+	}
+	for _, test := range []struct {
+		dir    string
+		want   int
+		reason string
+	}{
+		{accountDir, 2, ""},
+		{accountDir + "/", 2, ""},
+		{link, 2, ""},
+		{"/accounts/1/", 1, ""},
+		{"/unknown", 0, "account unmatched; policy unverified"},
+		{"", 0, "account unmatched; policy unverified"},
+	} {
+		t.Run(test.dir, func(t *testing.T) {
+			got, reason := spawnAccount(
+				machine,
+				1,
+				spawnObservation{Environ: map[string]string{"CLAUDE_CONFIG_DIR": test.dir}},
+			)
+			if got != test.want || reason != test.reason {
+				t.Fatalf("dir %s: account=%d reason=%q", test.dir, got, reason)
+			}
+		})
+	}
+	got, reason := spawnAccount(machine, 1, spawnObservation{EnvironErr: errors.New("denied")})
+	if got != 0 || !strings.Contains(reason, "unreadable") {
+		t.Fatalf("account=%d reason=%q", got, reason)
+	}
+	t.Run("empty roster", func(t *testing.T) {
+		got, reason := spawnAccount(
+			config.Config{},
+			1,
+			spawnObservation{Environ: map[string]string{"CLAUDE_CONFIG_DIR": "/srv/acct"}},
+		)
+		if got != 1 || reason != "" {
+			t.Fatalf("empty roster: account=%d reason=%q", got, reason)
+		}
+	})
+}
+
+func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
+	home := t.TempDir()
+	for _, test := range []struct {
+		name      string
+		prefs     config.ClaudePrefs
+		started   int64
+		promptErr error
+		verdict   spawnVerdict
+		reason    string
+	}{
+		{
+			name:      "composed prompt unavailable",
+			prefs:     config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+			started:   200,
+			promptErr: errors.New("resolve composed harness prompt: no source repository recorded"),
+			verdict:   spawnViolation,
+			reason:    "no --system-prompt-file prompt material — composed prompt unavailable (resolve composed harness prompt: no source repository recorded); every door omits the flag until it exists: update or restore the clone, then reload",
+		},
+		{
+			name:    "age carried",
+			prefs:   config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
+			started: 50,
+			verdict: spawnPredatesLayer,
+			reason:  "missing --settings outputStyle default (born 50s before the current spawn door)",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observation := spawnObservation{Argv: []string{"claude"}, StartedUnix: test.started}
+			verdict, reason := classifySpawn(
+				mustParseSpawn(t, observation.Argv),
+				observation,
+				test.prefs,
+				home,
+				100,
+				test.promptErr,
+			)
+			if verdict != test.verdict || reason != test.reason {
+				t.Fatalf("%s: %s; want %s: %s", verdict, reason, test.verdict, test.reason)
+			}
+		})
+	}
+}
+
+func TestPrintSpawnAuditCountsUndecodableSeats(t *testing.T) {
+	home := t.TempDir()
+	machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}}
+	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := spawnObservationsProbe
+	t.Cleanup(func() { spawnObservationsProbe = previous })
+	for _, test := range []struct {
+		name   string
+		unread []string
+		row    string
+	}{
+		{name: "undecodable seat", row: "1 seat(s) could NOT be audited: cc-a pid=1: argv undecodable"},
+		{name: "other probe warning", unread: []string{"cc-c pid=3: environment unreadable"}, row: "2 seat(s) could NOT be audited: cc-a pid=1: argv undecodable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spawnObservationsProbe = func(context.Context, paths.Values, config.Config, clock.Clock) ([]spawnObservation, []string, error) {
+				return []spawnObservation{
+					{Socket: "cc-a", PID: 1, Argv: []string{"claude", "--settings", "{"}},
+					{
+						Socket:  "cc-b",
+						PID:     2,
+						Argv:    append([]string{launch.Binary}, launch.Argv...),
+						Environ: map[string]string{},
+					},
+				}, append([]string(nil), test.unread...), nil
+			}
+			var out bytes.Buffer
+			warnings := printSpawnAuditDoctorWithClock(
+				t.Context(),
+				&out,
+				paths.Values{Home: home},
+				machine,
+				1,
+				clock.Real,
+			)
+			if warnings != 1 ||
+				!strings.Contains(out.String(), "chats=2 injected=1 predates-layer=0 violations=0 undecodable=1") ||
+				!strings.Contains(out.String(), test.row) {
+				t.Fatalf("warnings=%d output=%s", warnings, out.String())
+			}
+		})
+	}
+}
+
+func doctorProfessorPromptPath(t *testing.T, home string) string {
+	t.Helper()
+	if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	path, err := action.ProfessorPromptPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestClassifyRolePromptSeparatesSoundMismatchAndUnreadable(t *testing.T) {
@@ -288,12 +359,12 @@ func TestPrintSpawnRoleAuditReportsRowsCountsAndWarnings(t *testing.T) {
 		t.Fatal(err)
 	}
 	unreadablePath := mustDoctorSeatPromptPath(t, sidDir, "cc-deleted", "")
-	stagedPath := action.ProfessorPromptPath(t.TempDir())
+	stagedPath := doctorProfessorPromptPath(t, t.TempDir())
 
 	proc := fakeProcFS{
 		cmdlines: map[int][]string{
 			101: {"claude", "--system-prompt-file", soundPath},
-			102: {"claude", "--system-prompt-file=" + mismatchPath},
+			102: {"claude", "--system-prompt-file", mismatchPath},
 			103: {"claude", "--system-prompt-file", unreadablePath},
 			104: {"claude", "--system-prompt-file", stagedPath},
 		},
@@ -334,7 +405,7 @@ func TestPrintSpawnRoleAuditReportsRowsCountsAndWarnings(t *testing.T) {
 		}
 	}
 	if strings.Contains(output, stagedPath) || strings.Contains(output, "cc-role-104") {
-		t.Fatalf("ordinary staged prompt produced a role row: %q", output)
+		t.Fatalf("ordinary composed prompt produced a role row: %q", output)
 	}
 }
 
@@ -374,7 +445,7 @@ func TestPrintSpawnRoleAuditSaysNothingWithoutRoleSeats(t *testing.T) {
 	observations := []spawnObservation{{
 		Socket: "cc-ordinary",
 		PID:    41,
-		Argv:   []string{"claude", "--system-prompt-file", action.ProfessorPromptPath(t.TempDir())},
+		Argv:   []string{"claude", "--system-prompt-file", doctorProfessorPromptPath(t, t.TempDir())},
 	}}
 	if warnings := printSpawnRoleAudit(&stdout, observations); warnings != 0 {
 		t.Fatalf("ordinary seats warned %d times", warnings)
@@ -387,18 +458,22 @@ func TestPrintSpawnRoleAuditSaysNothingWithoutRoleSeats(t *testing.T) {
 // Production configures no prompt material, so an audit that classified every
 // seat would report a fleet-wide violation. The check must say it has nothing
 // to assert instead — and must never print the clean-audit wording.
-func TestSpawnAuditIsInertUnderProductionPolicy(t *testing.T) {
+func TestSpawnAuditRunsUnderProductionPolicy(t *testing.T) {
 	var stdout bytes.Buffer
 	machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}}
-	if warnings := printSpawnAuditDoctor(context.Background(), &stdout, paths.Values{}, machine, 1); warnings != 0 {
-		t.Fatalf("production policy warned %d times: %q", warnings, stdout.String())
+	resolved := paths.Values{Home: t.TempDir(), TmuxDir: filepath.Join(t.TempDir(), "not-a-directory")}
+	if err := os.WriteFile(resolved.TmuxDir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	line := stdout.String()
-	if !strings.Contains(line, "nothing to audit") {
-		t.Fatalf("production line = %q", line)
-	}
-	if strings.Contains(line, "VIOLATION") || strings.Contains(line, "no live Claude chats found") {
-		t.Fatalf("production policy borrowed an audited verdict: %q", line)
+	if warnings := printSpawnAuditDoctor(
+		context.Background(),
+		&stdout,
+		resolved,
+		machine,
+		1,
+	); warnings == 0 ||
+		!strings.Contains(stdout.String(), "CHECK FAILED to run") {
+		t.Fatalf("production audit did not probe: %q", stdout.String())
 	}
 }
 
@@ -493,7 +568,7 @@ func TestResolveClaudeProcessMatchesVersionNamedBinary(t *testing.T) {
 // pfm update rolled itself back.
 func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) {
 	home := t.TempDir()
-	prompt := action.ProfessorPromptPath(home)
+	prompt := doctorProfessorPromptPath(t, home)
 	binary := filepath.Join(t.TempDir(), "pfm")
 	for _, path := range []string{prompt, binary} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -514,8 +589,9 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 	t.Cleanup(func() { spawnDoorExecutable = previous })
 	spawnDoorExecutable = func() (string, error) { return binary, nil }
 
-	stamp, signal := spawnDoorStamp(home)
-	if stamp != binaryAt.Unix() || !strings.Contains(signal, prompt) || !strings.Contains(signal, binary) {
+	stamp, signal, promptErr := spawnDoorStamp(home)
+	if promptErr != nil || stamp != binaryAt.Unix() || !strings.Contains(signal, prompt) ||
+		!strings.Contains(signal, binary) {
 		t.Fatalf("spawnDoorStamp = %d %q; want the binary's %d with both inputs named", stamp, signal, binaryAt.Unix())
 	}
 	// Launched by an older pfm between the prompt and the binary: prompt
@@ -525,19 +601,33 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 		Environ:     map[string]string{},
 		StartedUnix: promptAt.Unix() + 3600,
 	}
-	if verdict, reason := classifySpawn(seat, stamp); verdict != spawnPredatesLayer {
+	if verdict, reason := classifySpawn(
+		mustParseSpawn(t, seat.Argv),
+		seat,
+		config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+		home,
+		stamp,
+		nil,
+	); verdict != spawnPredatesLayer {
 		t.Fatalf("older seat = %s (%s), want %s", verdict, reason, spawnPredatesLayer)
 	}
 	// Born after the binary landed and still flagless: the door is broken.
 	seat.StartedUnix = binaryAt.Unix() + 60
-	if verdict, reason := classifySpawn(seat, stamp); verdict != spawnViolation {
+	if verdict, reason := classifySpawn(
+		mustParseSpawn(t, seat.Argv),
+		seat,
+		config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+		home,
+		stamp,
+		nil,
+	); verdict != spawnViolation {
 		t.Fatalf("fresh seat = %s (%s), want %s", verdict, reason, spawnViolation)
 	}
 	// The binary unreadable: the prompt still stands and the signal says why.
 	spawnDoorExecutable = func() (string, error) { return "", errors.New("no executable path") }
-	if stamp, signal := spawnDoorStamp(
+	if stamp, signal, promptErr := spawnDoorStamp(
 		home,
-	); stamp != promptAt.Unix() ||
+	); promptErr != nil || stamp != promptAt.Unix() ||
 		!strings.Contains(signal, "no executable path") {
 		t.Fatalf(
 			"unreadable binary: spawnDoorStamp = %d %q; want the prompt's %d and the reason",
@@ -548,62 +638,116 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 	}
 }
 
-// TestArgvCarriesOutputStyleDefaultAcceptsAThemedPayload pins the JSON-parse
-// rewrite: a themed --settings value still carries the disabled output style
-// (an extra "theme" key is accepted), the plain const still carries it, a
-// payload missing outputStyle does not, and malformed JSON (or a --settings
-// with no payload) never counts as present and is reported as malformed.
-func TestArgvCarriesOutputStyleDefaultAcceptsAThemedPayload(t *testing.T) {
+func TestSpawnDoorStampUsesBinaryWhenComposedPromptUnreadable(t *testing.T) {
+	home := t.TempDir()
+	prompt := doctorProfessorPromptPath(t, home)
+	binary := filepath.Join(t.TempDir(), "pfm")
+	if err := testjail.WriteExecutable(binary, []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(binary, at, at); err != nil {
+		t.Fatal(err)
+	}
+	previous := spawnDoorExecutable
+	t.Cleanup(func() { spawnDoorExecutable = previous })
+	spawnDoorExecutable = func() (string, error) { return binary, nil }
 	for _, test := range []struct {
-		name          string
-		argv          []string
-		want          bool
-		wantMalformed bool
+		name string
+		home string
+		want string
 	}{
-		{
-			name: "themed payload as a word pair",
-			argv: []string{"claude", "--settings", `{"outputStyle":"default","theme":"dark"}`},
-			want: true,
-		},
-		{
-			name: "plain const as a word pair",
-			argv: []string{"claude", "--settings", `{"outputStyle":"default"}`},
-			want: true,
-		},
-		{
-			name: "themed payload in --settings= form",
-			argv: []string{"claude", `--settings={"outputStyle":"default","theme":"dark"}`},
-			want: true,
-		},
-		{
-			name: "missing outputStyle key",
-			argv: []string{"claude", "--settings", `{"theme":"dark"}`},
-			want: false,
-		},
-		{
-			name: "another outputStyle value",
-			argv: []string{"claude", "--settings", `{"outputStyle":"lean"}`},
-			want: false,
-		},
-		{
-			name:          "malformed JSON",
-			argv:          []string{"claude", "--settings", `{"outputStyle":`},
-			want:          false,
-			wantMalformed: true,
-		},
-		{
-			name:          "--settings with no following word",
-			argv:          []string{"claude", "--settings"},
-			want:          false,
-			wantMalformed: true,
-		},
+		{name: "missing prompt", home: home, want: "no such file or directory"},
+		{name: "prompt directory", home: home, want: "not a regular file"},
+		{name: "no source repository", home: t.TempDir(), want: "no source repository recorded"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, malformed := argvCarriesOutputStyleDefault(test.argv)
-			if got != test.want || (malformed != nil) != test.wantMalformed {
-				t.Fatalf("argvCarriesOutputStyleDefault(%#v) = %v, %v; want %v, malformed=%v",
-					test.argv, got, malformed, test.want, test.wantMalformed)
+			if test.name == "prompt directory" {
+				if err := os.MkdirAll(prompt, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stamp, signal, promptErr := spawnDoorStamp(test.home)
+			if promptErr == nil || !strings.Contains(promptErr.Error(), test.want) || stamp != at.Unix() ||
+				!strings.Contains(signal, "prompt layer") || !strings.Contains(signal, binary) {
+				t.Fatalf("stamp=%d signal=%q error=%v; want binary stamp and %s", stamp, signal, promptErr, test.want)
 			}
 		})
+	}
+}
+
+func mustParseSpawn(t *testing.T, argv []string) claudelaunch.Parsed {
+	t.Helper()
+	parsed, err := claudelaunch.Parse(argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+func TestSpawnAuditUnverifiablePayload(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		argv   []string
+		want   spawnVerdict
+		reason string
+	}{
+		{"file settings", []string{"claude", "--settings", "/srv/settings.json"}, spawnVerdict("UNVERIFIED"), "file-backed settings"},
+		{"bare resume", []string{"claude", "--resume"}, spawnVerdict("UNVERIFIED"), "resumed argv"},
+		{"historical bare resume", []string{"claude", "--resume"}, spawnPredatesLayer, "before the current spawn door"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := mustParseSpawn(t, tc.argv)
+			start := int64(200)
+			if strings.HasPrefix(tc.name, "historical") {
+				start = 50
+			}
+			got, reason := classifySpawn(
+				parsed,
+				spawnObservation{StartedUnix: start},
+				config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
+				t.TempDir(),
+				100,
+				nil,
+			)
+			if got != tc.want || !strings.Contains(reason, tc.reason) {
+				t.Fatalf("%s: %s", got, reason)
+			}
+		})
+	}
+}
+
+func TestPrintSpawnAuditUnknownAccountStaysUnverified(t *testing.T) {
+	home := t.TempDir()
+	machine := config.Config{
+		Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+		Accounts: []config.Account{
+			{ID: 1, ConfigDir: "/accounts/1", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor}},
+			{ID: 2, ConfigDir: "/accounts/2", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
+		},
+	}
+	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := spawnObservationsProbe
+	t.Cleanup(func() { spawnObservationsProbe = previous })
+	for _, environ := range []map[string]string{nil, {}, {"CLAUDE_CONFIG_DIR": "/unknown"}} {
+		spawnObservationsProbe = func(context.Context, paths.Values, config.Config, clock.Clock) ([]spawnObservation, []string, error) {
+			return []spawnObservation{
+				{
+					Socket:  "cc-unknown",
+					PID:     22,
+					Argv:    append([]string{launch.Binary}, launch.Argv...),
+					Environ: environ,
+				},
+			}, nil, nil
+		}
+		var out bytes.Buffer
+		warnings := printSpawnAuditDoctorWithClock(t.Context(), &out, paths.Values{Home: home}, machine, 1, clock.Real)
+		if warnings != 1 || !strings.Contains(out.String(), "UNVERIFIED cc-unknown") ||
+			!strings.Contains(out.String(), "violations=0 undecodable=0 unverified=1") {
+			t.Fatalf("warnings=%d output=%s", warnings, out.String())
+		}
 	}
 }

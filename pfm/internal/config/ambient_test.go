@@ -1,7 +1,11 @@
 package config
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -30,71 +34,83 @@ func TestAmbientClaudeConfigDirCleansOrReportsUnset(t *testing.T) {
 	}
 }
 
-// TestRefuseAmbientConfigHomeFromAllowsTheJailsOwnPin pins the L3-F9 write
-// half's non-firing case: internal/testjail's jailHome/Fleet/CleanHome all
-// pin XDG_CONFIG_HOME to exactly home's own .config subdirectory, so that
-// pin must never be refused.
-func TestRefuseAmbientConfigHomeFromAllowsTheJailsOwnPin(t *testing.T) {
-	home := "/jailed/home"
-	env := &paths.MapEnv{Values: map[string]string{"XDG_CONFIG_HOME": filepath.Join(home, ".config")}}
+// A test must refuse the current checkout if a marker would point there.
+func TestRefuseAmbientConfigHomeFromRefusesCurrentClone(t *testing.T) {
+	home := t.TempDir()
+	repo, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	env := &paths.MapEnv{Values: map[string]string{}}
+	if err := RefuseAmbientConfigHomeFrom(env, home); err == nil || !strings.Contains(err.Error(), paths.EnvConfig) {
+		t.Fatalf("current-clone marker error = %v, want a jailed override remedy", err)
+	}
+	env.Values[paths.EnvConfig] = "  "
+	if err := RefuseAmbientConfigHomeFrom(env, home); err == nil ||
+		!strings.HasPrefix(err.Error(), "refusing ambient config in real clone") {
+		t.Fatalf("blank override guard = %v, want ambient refusal", err)
+	}
+	env.Values[paths.EnvConfig] = filepath.Join(home, "pfm.config.json")
 	if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
-		t.Fatalf("RefuseAmbientConfigHomeFrom() = %v, want nil for the jail's own pin", err)
+		t.Fatalf("jailed override refused: %v", err)
 	}
 }
 
-// TestRefuseAmbientConfigHomeFromAllowsUnsetOrRelativeXDG pins the case
-// ConfigHomeFrom itself already falls back to home for: nothing to refuse
-// when XDG_CONFIG_HOME carries no absolute override at all.
-func TestRefuseAmbientConfigHomeFromAllowsUnsetOrRelativeXDG(t *testing.T) {
-	home := "/jailed/home"
-	for _, xdg := range []string{"", "relative"} {
-		env := &paths.MapEnv{Values: map[string]string{"XDG_CONFIG_HOME": xdg}}
-		if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
-			t.Fatalf("RefuseAmbientConfigHomeFrom() with XDG=%q = %v, want nil", xdg, err)
-		}
+func TestConfigMarkerErrorUnreadable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvConfig, "")
+	marker := paths.SourceRepoPath(home)
+	if err := os.MkdirAll(marker, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load("", home, nil)
+	if !errors.Is(err, syscall.EISDIR) || !strings.Contains(err.Error(), marker) ||
+		!strings.Contains(err.Error(), "run pfm install from the clone") {
+		t.Fatalf("unreadable marker load = %v, want the marker path and remedy", err)
 	}
 }
 
-// TestRefuseAmbientConfigHomeFromRefusesAnAmbientLeak pins L3-F9's write
-// half: an absolute XDG_CONFIG_HOME that does not derive from the jailed
-// home is exactly the operator's real config reaching a jailed test, and
-// must be refused with a named error, never silently accepted.
-func TestRefuseAmbientConfigHomeFromRefusesAnAmbientLeak(t *testing.T) {
-	home := "/jailed/home"
-	env := &paths.MapEnv{Values: map[string]string{"XDG_CONFIG_HOME": "/operators/real/config"}}
-	err := RefuseAmbientConfigHomeFrom(env, home)
-	if err == nil {
-		t.Fatal("RefuseAmbientConfigHomeFrom() accepted an XDG_CONFIG_HOME outside the jailed home")
-	}
-}
-
-// TestRefuseAmbientConfigHomeFromOptsOutWithRealHome pins the same escape
-// hatch HomeFrom already offers: PFM_TEST_REAL_HOME=1 lets a test that
-// genuinely must read the host's real config opt back in.
-func TestRefuseAmbientConfigHomeFromOptsOutWithRealHome(t *testing.T) {
-	home := "/jailed/home"
-	env := &paths.MapEnv{Values: map[string]string{
-		"XDG_CONFIG_HOME": "/operators/real/config",
-		paths.EnvRealHome: "1",
-	}}
+func TestRefuseAmbientConfigHomeFromAllowsNoMarkerAndRealHomeOptOut(t *testing.T) {
+	home := t.TempDir()
+	env := &paths.MapEnv{Values: map[string]string{}}
 	if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
-		t.Fatalf("RefuseAmbientConfigHomeFrom() with %s=1 = %v, want nil", paths.EnvRealHome, err)
+		t.Fatal(err)
+	}
+	repo, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	env.Values[paths.EnvRealHome] = "1"
+	if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// A test that moves PFM_HOME to its own directory still inherits the package
-// jail's XDG_CONFIG_HOME. That pin is a jailed path and must pass; naming a
-// jail home must not wave through any other config home.
-func TestRefuseAmbientConfigHomeFromAllowsThePackageJailPinAfterHomeMoved(t *testing.T) {
-	env := &paths.MapEnv{Values: map[string]string{
-		"XDG_CONFIG_HOME":     "/tmp/pfm-jail-home-1/.config",
-		paths.EnvTestJailHome: "/tmp/pfm-jail-home-1",
-	}}
-	if err := RefuseAmbientConfigHomeFrom(env, "/tmp/TestX/001"); err != nil {
-		t.Fatalf("the package jail's own pin was refused: %v", err)
+func TestRefuseAmbientConfigHomeFromAlias(t *testing.T) {
+	home := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
 	}
-	env.Values["XDG_CONFIG_HOME"] = "/operators/real/config"
-	if err := RefuseAmbientConfigHomeFrom(env, "/tmp/TestX/001"); err == nil {
-		t.Fatal("a named jail home waved through an operator's config home")
+	physical, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(physical)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(parent, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, filepath.Join(alias, filepath.Base(physical))); err != nil {
+		t.Fatal(err)
+	}
+	if err := RefuseAmbientConfigHomeFrom(&paths.MapEnv{Values: map[string]string{}}, home); err == nil {
+		t.Fatal("alias marker allowed ambient config")
 	}
 }

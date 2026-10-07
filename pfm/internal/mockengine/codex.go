@@ -1,10 +1,12 @@
 package mockengine
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -42,11 +44,13 @@ type codexInvocation struct {
 	threadID   string
 	resumed    bool
 	prompt     string
+	ephemeral  bool
 }
 
 var codexValueFlags = map[string]bool{
 	flagModel: true, "-m": true, "-c": true, "--config": true, "--sandbox": true, "-s": true, "-a": true,
 	"--ask-for-approval": true, "--profile": true, "-p": true, "--cd": true, "-C": true, "--image": true, "-i": true,
+	"--output-schema": true, "--color": true,
 }
 
 func parseCodexArgs(args []string) codexInvocation {
@@ -76,6 +80,9 @@ func parseCodexArgs(args []string) codexInvocation {
 		if name == flagModel || name == "-m" {
 			call.model = value
 		}
+		if name == "--ephemeral" {
+			call.ephemeral = true
+		}
 		index = next
 	}
 	return call
@@ -84,27 +91,27 @@ func parseCodexArgs(args []string) codexInvocation {
 // codexSession is the Codex engine behind the shared pane loop: one thread's
 // rollout, its session_index rows, hooks.json and the MCP client.
 type codexSession struct {
-	proc      *process
-	call      codexInvocation
-	codexHome string
-	threadID  string
-	rollout   string
-	model     string
-	hooks     hookSet
-	environ   []string
-	seat      *seat
+	proc        *process
+	call        codexInvocation
+	codexHome   string
+	threadID    string
+	rollout     string
+	rolloutFile *os.File
+	model       string
+	threadName  string
+	hooks       hookSet
+	environ     []string
+	seat        *seat
+	mcpError    string
 }
 
 func serveCodex(proc *process) int {
 	call := parseCodexArgs(proc.args)
 	switch call.subcommand {
-	case "exec":
-		warn(proc.stderr, "codex exec JSONL events are unpinned in this mock — internal/headless/run/run.go:773 "+
-			"reads them; a scenario door lands with the Tier B capture")
-		return ExitUnpinned
-	case "app-server", "mcp-server":
-		warn(proc.stderr, "codex %s JSON-RPC is unpinned in this mock — internal/statusline/refresh_codex.go:87 "+
-			"reads rateLimits; a scenario door lands with the Tier B capture", call.subcommand)
+	case "app-server":
+		return codexAppServer(proc)
+	case "mcp-server":
+		warn(proc.stderr, "codex mcp-server JSON-RPC is unpinned in this mock")
 		return ExitUnpinned
 	}
 	codexHome := proc.env("CODEX_HOME")
@@ -119,6 +126,11 @@ func serveCodex(proc *process) int {
 	session := &codexSession{
 		proc: proc, call: call, codexHome: codexHome, model: proc.script.Model, hooks: hooks, environ: os.Environ(),
 	}
+	defer func() {
+		if err := session.finish("other"); err != nil {
+			warn(proc.stderr, "finish codex: %v", err)
+		}
+	}()
 	if call.model != "" {
 		session.model = call.model
 	}
@@ -129,10 +141,142 @@ func serveCodex(proc *process) int {
 	if session.threadID == "" {
 		session.threadID = newUUID()
 	}
+	if call.subcommand == "exec" {
+		return session.headless()
+	}
 	return runPane(proc, session, call.prompt, call.resumed)
 }
 
+func codexAppServer(proc *process) int {
+	if len(proc.script.RateLimits) == 0 {
+		warn(proc.stderr, "codex app-server JSON-RPC is unpinned — supply rate_limits in the scenario")
+		return ExitUnpinned
+	}
+	scanner := bufio.NewScanner(proc.stdin)
+	scanner.Buffer(make([]byte, 64*1024), 1<<20)
+	encoder := json.NewEncoder(proc.stdout)
+	for scanner.Scan() {
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		reply := map[string]any{"jsonrpc": "2.0"}
+		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
+			warn(proc.stderr, "decode app-server request: %v", err)
+			reply["id"] = nil
+			reply["error"] = map[string]any{"code": -32700, "message": "parse app-server request: " + err.Error()}
+		} else {
+			if len(request.ID) == 0 {
+				continue
+			}
+			reply["id"] = request.ID
+			switch request.Method {
+			case "initialize":
+				reply["result"] = map[string]any{}
+			case "account/rateLimits/read":
+				reply["result"] = map[string]any{"rateLimits": proc.script.RateLimits}
+			default:
+				reply["error"] = map[string]any{"code": -32601, "message": "unknown method " + request.Method}
+			}
+		}
+		if err := encoder.Encode(reply); err != nil {
+			warn(proc.stderr, "write app-server reply: %v", err)
+			return ExitUsage
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		warn(proc.stderr, "read app-server requests: %v", err)
+		return ExitUsage
+	}
+	return 0
+}
+
+func (session *codexSession) headless() int {
+	proc := session.proc
+	prompt := session.call.prompt
+	if prompt == "" {
+		content, err := io.ReadAll(io.LimitReader(proc.stdin, 1<<20))
+		if err != nil {
+			warn(proc.stderr, "read exec prompt: %v", err)
+			return ExitUsage
+		}
+		prompt = strings.TrimSpace(string(content))
+	}
+	if !session.call.ephemeral {
+		if err := session.start(false); err != nil {
+			warn(proc.stderr, "start exec: %v", err)
+			return ExitUsage
+		}
+		if err := session.recordUser(prompt); err != nil {
+			warn(proc.stderr, "record exec prompt: %v", err)
+			return ExitUsage
+		}
+		if err := session.rename(firstWords(prompt)); err != nil {
+			warn(proc.stderr, "name exec session: %v", err)
+			return ExitUsage
+		}
+	}
+	encoder := json.NewEncoder(proc.stdout)
+	for _, event := range []map[string]any{{keyType: "thread.started", "thread_id": session.threadID}, {keyType: "turn.started"}} {
+		if err := encoder.Encode(event); err != nil {
+			warn(proc.stderr, "write exec start: %v", err)
+			return ExitUsage
+		}
+	}
+	running := proc.script.forPrompt(prompt)
+	step := running.next()
+	for !step.terminal() {
+		if step.sideEffecting() {
+			warn(proc.stderr, "codex exec fast-forwards past scripted %s step", step.Type)
+		}
+		step = running.next()
+	}
+	if step.Type == StepCrash {
+		return step.ExitCode
+	}
+	if step.Type == StepExit {
+		return step.ExitCode
+	}
+	reply, busyMS, usage := running.turnReply(step)
+	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
+		warn(proc.stderr, "exec cancelled: %v", proc.ctx.Err())
+		return ExitUsage
+	}
+	if len(step.Structured) > 0 {
+		reply = string(step.Structured)
+	}
+	if !session.call.ephemeral {
+		if err := session.recordAssistant(reply, usage); err != nil {
+			warn(proc.stderr, "record exec reply: %v", err)
+			return ExitUsage
+		}
+	}
+	for _, event := range []map[string]any{
+		{keyType: "item.completed", "item": map[string]any{keyType: "agent_message", "text": reply}},
+		{keyType: "turn.completed", "usage": map[string]int64{codexInputTokens: usage.Input, codexOutputTokens: usage.Output, "cached_input_tokens": usage.CacheRead, "cache_creation_input_tokens": usage.CacheCreation}},
+	} {
+		if err := encoder.Encode(event); err != nil {
+			warn(proc.stderr, "write exec result: %v", err)
+			return ExitUsage
+		}
+	}
+	return 0
+}
+
 func (session *codexSession) composerGlyph() string { return "›" }
+
+// composerPlaceholder opts only Codex into internal/spawn/spawn.go's idle
+// composer and rename-dialog protocol.
+func (session *codexSession) composerPlaceholder() string { return "Ask Codex to do anything" }
+
+const codexCompactMS = 5000
+
+func (session *codexSession) compactBusyDuration(step Step) time.Duration {
+	if step.BusyMS > 0 {
+		return time.Duration(step.BusyMS) * time.Millisecond
+	}
+	return codexCompactMS * time.Millisecond
+}
 
 // busyLine and compactedLine are the scenario's words: Codex's own are UNPINNED
 // (testdata/shapes/codex/*.txt) and runPane refuses to render without them.
@@ -147,6 +291,8 @@ const (
 	recordResponseItem = "response_item"
 	recordEventMsg     = "event_msg"
 	payloadMessage     = "message"
+	codexInputTokens   = "input_tokens"
+	codexOutputTokens  = "output_tokens"
 )
 
 // codexRecord is one rollout line: internal/codexmeta/header.go:37-40's
@@ -178,7 +324,25 @@ func (session *codexSession) write(record codexRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode rollout record: %w", err)
 	}
-	return appendLine(session.rollout, encoded)
+	if session.rolloutFile == nil {
+		return fmt.Errorf("rollout %s is not open", session.rollout)
+	}
+	if _, err := session.rolloutFile.Write(append(encoded, '\n')); err != nil {
+		return fmt.Errorf("append rollout %s: %w", session.rollout, err)
+	}
+	return nil
+}
+
+func (session *codexSession) openRollout() error {
+	if err := os.MkdirAll(filepath.Dir(session.rollout), 0o700); err != nil {
+		return fmt.Errorf("create rollout directory: %w", err)
+	}
+	file, err := os.OpenFile(session.rollout, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("open rollout %s: %w", session.rollout, err)
+	}
+	session.rolloutFile = file
+	return nil
 }
 
 // rolloutFor is the rollout path for a thread: sessions/YYYY/MM/DD/
@@ -239,8 +403,14 @@ func (session *codexSession) start(resumed bool) error {
 		}
 		session.rollout = existing
 	}
-	if session.rollout == "" {
+	fresh := session.rollout == ""
+	if fresh {
 		session.rollout = session.rolloutFor(session.threadID, now)
+	}
+	if err := session.openRollout(); err != nil {
+		return err
+	}
+	if fresh {
 		if err := session.write(session.sessionMeta(session.threadID, "", now)); err != nil {
 			return err
 		}
@@ -265,6 +435,7 @@ func (session *codexSession) start(resumed bool) error {
 		payload,
 		session.proc.cwd,
 		session.environ,
+		session.proc.stderr,
 	)
 	if err != nil {
 		return err
@@ -293,7 +464,7 @@ func (session *codexSession) turnContext() codexRecord {
 	}}
 }
 
-func (session *codexSession) prompt(string) (string, error) { return "", nil }
+func (session *codexSession) prompt(string) (string, error) { session.mcpError = ""; return "", nil }
 
 func (session *codexSession) recordUser(text string) error {
 	return session.write(codexRecord{Type: recordResponseItem, Payload: codexMessage{
@@ -309,10 +480,14 @@ func (session *codexSession) recordAssistant(reply string, usage Tokens) error {
 		{Type: recordEventMsg, Payload: map[string]any{keyType: "agent_message", payloadMessage: reply}},
 		{Type: recordEventMsg, Payload: map[string]any{keyType: "token_count", "info": map[string]any{
 			"total_token_usage": map[string]any{
-				"input_tokens": usage.Input, "output_tokens": usage.Output, "total_tokens": usage.Input + usage.Output,
+				codexInputTokens:  usage.Input,
+				codexOutputTokens: usage.Output,
+				"total_tokens":    usage.Input + usage.Output,
 			},
 			"last_token_usage": map[string]any{
-				"input_tokens": usage.Input, "output_tokens": usage.Output, "total_tokens": usage.Input + usage.Output,
+				codexInputTokens:  usage.Input,
+				codexOutputTokens: usage.Output,
+				"total_tokens":    usage.Input + usage.Output,
 			},
 			"model_context_window": usage.ContextWindow,
 		}}},
@@ -372,7 +547,11 @@ func (session *codexSession) rename(name string) error {
 	if err != nil {
 		return fmt.Errorf("encode session index row: %w", err)
 	}
-	return appendLine(filepath.Join(session.codexHome, codexmeta.SessionIndexFile), encoded)
+	if err := appendLine(filepath.Join(session.codexHome, codexmeta.SessionIndexFile), encoded); err != nil {
+		return err
+	}
+	session.threadName = name
+	return nil
 }
 
 // background spawns a subagent thread: its own rollout whose session_meta
@@ -382,6 +561,14 @@ func (session *codexSession) background(step Step) (string, error) {
 	child := &codexSession{proc: session.proc, codexHome: session.codexHome, threadID: newUUID(), model: session.model}
 	now := time.Now()
 	child.rollout = child.rolloutFor(child.threadID, now)
+	if err := child.openRollout(); err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := child.finish("other"); err != nil {
+			warn(session.proc.stderr, "finish subagent: %v", err)
+		}
+	}()
 	if err := child.write(session.sessionMeta(child.threadID, session.threadID, now)); err != nil {
 		return "", err
 	}
@@ -397,6 +584,41 @@ func (session *codexSession) background(step Step) (string, error) {
 // test to compare against the server's. Closing the session closes the
 // child's stdin, which ends it.
 func (session *codexSession) mcp(step Step) error {
+	if step.Tool == "" {
+		_, err := session.callMCP(step)
+		return err
+	}
+	input := step.Input
+	if len(input) == 0 {
+		input = json.RawMessage(`{}`)
+	}
+	callID := "call_" + newUUID()[:8]
+	if err := session.write(codexRecord{Type: recordResponseItem, Payload: map[string]any{
+		keyType: "function_call", "name": step.Tool, "arguments": string(input), "call_id": callID,
+	}}); err != nil {
+		return err
+	}
+	answer, callErr := session.callMCP(step)
+	if callErr != nil {
+		answer = &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: callErr.Error()}}}
+	}
+	encoded, err := json.Marshal(answer)
+	if err != nil {
+		return fmt.Errorf("encode MCP %s result: %w", step.Tool, err)
+	}
+	if answer.IsError {
+		session.mcpError = "MCP " + step.Tool + " failed: " + string(encoded)
+		warn(session.proc.stderr, "%s", session.mcpError)
+	}
+	if err := session.proc.recorder.write("mcp-call-"+step.Tool+".json", string(encoded)+"\n"); err != nil {
+		return err
+	}
+	return session.write(codexRecord{Type: recordResponseItem, Payload: map[string]any{
+		keyType: "function_call_output", "call_id": callID, "output": string(encoded),
+	}})
+}
+
+func (session *codexSession) callMCP(step Step) (*mcp.CallToolResult, error) {
 	name := step.Server
 	if name == "" {
 		name = pfmconfig.MCPServerProfessor
@@ -409,23 +631,32 @@ func (session *codexSession) mcp(step Step) error {
 	}
 	path := filepath.Join(session.codexHome, "config.toml")
 	if _, err := toml.DecodeFile(path, &config); err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	server, ok := config.Servers[name]
 	if !ok || server.Command == "" {
-		return fmt.Errorf("%s has no [mcp_servers.%s] command", path, name)
+		return nil, fmt.Errorf("%s has no [mcp_servers.%s] command", path, name)
 	}
 	bounded, cancel := mcpBoundedContext(session.proc.ctx)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "mock-engine", Version: session.proc.script.Version}, nil)
 	launched := strings.Join(append([]string{server.Command}, server.Args...), " ")
+	command := exec.CommandContext(bounded, server.Command, server.Args...)
+	command.Dir = session.proc.cwd
+	command.Env = append(
+		append([]string(nil), session.environ...),
+		"TMUX="+session.proc.env("TMUX"),
+		"TMUX_PANE="+session.proc.env("TMUX_PANE"),
+		"CODEX_HOME="+session.codexHome,
+		"CODEX_THREAD_ID="+session.threadID,
+	)
 	connection, err := client.Connect(
 		bounded,
-		&mcp.CommandTransport{Command: exec.Command(server.Command, server.Args...)},
+		&mcp.CommandTransport{Command: command},
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf("initialize against %s: %w", launched, err)
+		return nil, fmt.Errorf("initialize against %s: %w", launched, err)
 	}
 	defer func() {
 		if err := connection.Close(); err != nil {
@@ -434,7 +665,7 @@ func (session *codexSession) mcp(step Step) error {
 	}()
 	tools, err := connection.ListTools(bounded, nil)
 	if err != nil {
-		return fmt.Errorf("tools/list against %s: %w", launched, err)
+		return nil, fmt.Errorf("tools/list against %s: %w", launched, err)
 	}
 	names := make([]string, 0, len(tools.Tools))
 	for _, tool := range tools.Tools {
@@ -442,9 +673,23 @@ func (session *codexSession) mcp(step Step) error {
 	}
 	encoded, err := json.Marshal(names)
 	if err != nil {
-		return fmt.Errorf("encode tool names: %w", err)
+		return nil, fmt.Errorf("encode tool names: %w", err)
 	}
-	return session.proc.recorder.write("mcp-"+name+".json", string(encoded)+"\n")
+	if err := session.proc.recorder.write("mcp-"+name+".json", string(encoded)+"\n"); err != nil {
+		return nil, err
+	}
+	if step.Tool == "" {
+		return nil, nil
+	}
+	input := step.Input
+	if len(input) == 0 {
+		input = json.RawMessage(`{}`)
+	}
+	answer, err := connection.CallTool(bounded, &mcp.CallToolParams{Name: step.Tool, Arguments: input})
+	if err != nil {
+		return nil, fmt.Errorf("tools/call %s on MCP %s: %w", step.Tool, name, err)
+	}
+	return answer, nil
 }
 
 func (session *codexSession) clear() error {
@@ -452,13 +697,30 @@ func (session *codexSession) clear() error {
 }
 
 func (session *codexSession) finish(string) error {
-	if session.seat == nil {
-		return nil
+	var closeErr, seatErr error
+	if session.rolloutFile != nil {
+		if err := session.rolloutFile.Close(); err != nil {
+			closeErr = fmt.Errorf("close rollout %s: %w", session.rollout, err)
+		}
+		session.rolloutFile = nil
 	}
-	err := session.seat.release()
-	session.seat = nil
-	return err
+	if session.seat != nil {
+		seatErr = session.seat.release()
+		session.seat = nil
+	}
+	return errors.Join(closeErr, seatErr)
 }
 
-// statusLine is empty: Codex's status row is unpinned pane text.
-func (session *codexSession) statusLine(Tokens) (string, error) { return "", nil }
+// statusLine is internal/spawn/spawn.go's idle footer, keeping MCP failures
+// on a separate line after the turn completes.
+func (session *codexSession) statusLine(Tokens) (string, error) {
+	label := session.threadName
+	if label == "" {
+		label = session.model
+	}
+	line := label + " · " + session.proc.cwd
+	if session.mcpError != "" {
+		line += "\r\n" + session.mcpError
+	}
+	return line, nil
+}

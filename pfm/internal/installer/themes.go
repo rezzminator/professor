@@ -20,7 +20,10 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 const (
@@ -29,6 +32,8 @@ const (
 	themeOwnerPlaceholder = "{GH_USER}"
 	maxThemeDownloadBytes = 10 << 20
 )
+
+var errThemesOfflineFetch = fmt.Errorf("fetch failed: fetch skipped: %s=1", paths.EnvThemesOffline)
 
 type themeManifest struct {
 	Comment       string                  `json:"_comment,omitempty"`
@@ -93,7 +98,25 @@ func (installer *engine) installThemes(ctx context.Context) {
 		return
 	}
 
-	bases := map[string][]byte{} // fetched base palettes, one download per run
+	type themeLoad struct {
+		content []byte
+		err     error
+	}
+	loads := map[string]themeLoad{}
+	load := func(name string) themeLoad {
+		if cached, ok := loads[name]; ok {
+			return cached
+		}
+		content, err := loadThemeContent(
+			ctx,
+			installer.options.ThemeHTTPClient,
+			sources[name],
+			installer.options.ThemesOffline,
+		)
+		result := themeLoad{content: content, err: err}
+		loads[name] = result
+		return result
+	}
 	for _, name := range sortedThemeNames(sources) {
 		source := sources[name]
 		target, targetErr := themeTarget(installer.options.Home, source.Target)
@@ -124,6 +147,16 @@ func (installer *engine) installThemes(ctx context.Context) {
 		}
 
 		if !installer.apply {
+			if installer.options.ThemesOffline {
+				if source.local == "" {
+					installer.skip("theme " + name + " " + errThemesOfflineFetch.Error())
+					continue
+				}
+				if source.base != "" && sources[source.base].local == "" {
+					installer.skip("theme " + name + " base " + source.base + " " + errThemesOfflineFetch.Error())
+					continue
+				}
+			}
 			if owned && exists {
 				installer.ok("theme " + name + " currently installed; apply checks its source for updates")
 			} else {
@@ -138,22 +171,19 @@ func (installer *engine) installThemes(ctx context.Context) {
 			continue
 		}
 
-		content, loadErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, source)
-		if loadErr != nil {
-			installer.skip("theme " + name + " " + loadErr.Error())
+		loaded := load(name)
+		if loaded.err != nil {
+			installer.skip("theme " + name + " " + loaded.err.Error())
 			continue
 		}
+		content := loaded.content
 		if source.base != "" {
-			base, cached := bases[source.base]
-			if !cached {
-				fetched, baseErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, sources[source.base])
-				if baseErr != nil {
-					installer.skip("theme " + name + " base " + source.base + " " + baseErr.Error())
-					continue
-				}
-				base, bases[source.base] = fetched, fetched
+			base := load(source.base)
+			if base.err != nil {
+				installer.skip("theme " + name + " base " + source.base + " " + base.err.Error())
+				continue
 			}
-			merged, mergeErr := mergeThemeOverlay(base, content)
+			merged, mergeErr := mergeThemeOverlay(base.content, content)
 			if mergeErr != nil {
 				installer.skip("theme " + name + " overlay onto " + source.base + " failed: " + mergeErr.Error())
 				continue
@@ -168,17 +198,20 @@ func (installer *engine) installThemes(ctx context.Context) {
 
 		next := cloneThemeOwnership(ownership)
 		next[name] = themeOwnershipRecord{Path: target, SHA256: digest}
-		if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
-			installer.skip("theme " + name + " install failed: write " + target + ": " + writeErr.Error())
-			continue
-		}
-		if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
-			rollbackErr := rollbackTheme(target, existing, exists)
-			message := "theme " + name + " install failed: record ownership: " + ledgerErr.Error()
-			if rollbackErr != nil {
-				message += "; rollback failed: " + rollbackErr.Error()
+		if err := func() error {
+			if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
+				return fmt.Errorf("write %s: %w", target, writeErr)
 			}
-			installer.skip(message)
+			if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
+				rollbackErr := rollbackTheme(target, existing, exists)
+				if rollbackErr != nil {
+					return fmt.Errorf("record ownership: %w; rollback failed: %v", ledgerErr, rollbackErr)
+				}
+				return fmt.Errorf("record ownership: %w", ledgerErr)
+			}
+			return nil
+		}(); err != nil {
+			installer.skip("theme " + name + " install failed: " + err.Error())
 			continue
 		}
 		ownership = next
@@ -262,7 +295,7 @@ func (installer *engine) uninstallThemes() {
 // loadThemeContent returns a theme's palette bytes: a bundled palette from the
 // source clone is read from disk ("read failed: ..." names the path), anything
 // else is downloaded ("fetch failed: ..."); either way non-JSON is refused.
-func loadThemeContent(ctx context.Context, client *http.Client, source themeSource) ([]byte, error) {
+func loadThemeContent(ctx context.Context, client *http.Client, source themeSource, offline bool) ([]byte, error) {
 	var content []byte
 	if source.local != "" {
 		read, err := os.ReadFile(source.local)
@@ -271,6 +304,9 @@ func loadThemeContent(ctx context.Context, client *http.Client, source themeSour
 		}
 		content = read
 	} else {
+		if offline {
+			return nil, errThemesOfflineFetch
+		}
 		fetched, err := fetchTheme(ctx, client, source.Raw)
 		if err != nil {
 			return nil, fmt.Errorf("fetch failed: %w", err)
@@ -315,8 +351,20 @@ func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
 	return append(content, '\n'), nil
 }
 
+// ThemeManifestURL is the release-matched theme manifest URL for
+// currentVersion ("main" for a development or empty version) — install's
+// Options.ThemeManifestURL, and the {GH_USER} fallback pfm doctor resolves a
+// source-fetched skills registry with, as install does.
+func ThemeManifestURL(currentVersion string) string {
+	reference := strings.TrimSpace(currentVersion)
+	if reference == "" || reference == pfmconfig.DevelopmentVersion {
+		reference = "main"
+	}
+	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"
+}
+
 // releaseManifestUnpublishedAlpha reports whether a release theme manifest
-// URL names an -alpha version reference. professorThemeManifestURL builds
+// URL names an -alpha version reference. ThemeManifestURL builds
 // this URL from VERSION, and pfm never publishes an -alpha tag on GitHub, so
 // that raw.githubusercontent.com URL 404s every time; loadThemeSources turns
 // that predictable failure into a named refusal instead of a bare HTTP
@@ -359,6 +407,13 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 					localErr,
 				)
 			}
+			if options.ThemesOffline {
+				return nil, fmt.Errorf(
+					"local theme manifest unavailable: %v; fetch skipped: %s=1",
+					localErr,
+					paths.EnvThemesOffline,
+				)
+			}
 			content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 			if err != nil {
 				return nil, fmt.Errorf(
@@ -379,17 +434,17 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 				"release manifest for an unpublished -alpha build; run pfm install from the source clone",
 			)
 		}
+		if options.ThemesOffline {
+			return nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
+		}
 		content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 		if err != nil {
 			return nil, fmt.Errorf("fetch release manifest %s: %w", origin, err)
 		}
 	}
-	if bytes.Contains(content, []byte(themeOwnerPlaceholder)) {
-		owner, ownerErr := themeManifestOwner(options)
-		if ownerErr != nil {
-			return nil, fmt.Errorf("resolve registered placeholder %s: %w", themeOwnerPlaceholder, ownerErr)
-		}
-		content = bytes.ReplaceAll(content, []byte(themeOwnerPlaceholder), []byte(owner))
+	content, err = resolveOwnerPlaceholder(content, options.SourceRepo, options.ThemeManifestURL)
+	if err != nil {
+		return nil, err
 	}
 	var manifest themeManifest
 	decoder := json.NewDecoder(bytes.NewReader(content))
@@ -466,9 +521,28 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 	return sources, nil
 }
 
-func themeManifestOwner(options Options) (string, error) {
-	if strings.TrimSpace(options.SourceRepo) != "" {
-		manifestPath := filepath.Join(options.SourceRepo, ".professor", "manifest.json")
+// resolveOwnerPlaceholder replaces the registered {GH_USER} placeholder in a
+// source-fetched registry (the theme manifest, the global skill sources) with
+// the blueprint repo owner registeredOwner resolves. Content without the
+// placeholder is returned untouched; a resolution failure is an error naming
+// the placeholder, never a silently unresolved URL.
+func resolveOwnerPlaceholder(content []byte, sourceRepo, manifestURL string) ([]byte, error) {
+	if !bytes.Contains(content, []byte(themeOwnerPlaceholder)) {
+		return content, nil
+	}
+	owner, err := registeredOwner(sourceRepo, manifestURL)
+	if err != nil {
+		return nil, fmt.Errorf("resolve registered placeholder %s: %w", themeOwnerPlaceholder, err)
+	}
+	return bytes.ReplaceAll(content, []byte(themeOwnerPlaceholder), []byte(owner)), nil
+}
+
+// registeredOwner resolves {GH_USER}: the owner in the source clone's
+// .professor/manifest.json installed_from.repo, else the owner segment of the
+// release manifest URL.
+func registeredOwner(sourceRepo, manifestURL string) (string, error) {
+	if strings.TrimSpace(sourceRepo) != "" {
+		manifestPath := filepath.Join(sourceRepo, ".professor", "manifest.json")
 		content, err := os.ReadFile(manifestPath)
 		if err == nil {
 			var manifest struct {
@@ -488,13 +562,13 @@ func themeManifestOwner(options Options) (string, error) {
 			return "", fmt.Errorf("read %s: %w", manifestPath, err)
 		}
 	}
-	parsed, err := url.Parse(strings.TrimSpace(options.ThemeManifestURL))
+	parsed, err := url.Parse(strings.TrimSpace(manifestURL))
 	if err != nil {
 		return "", fmt.Errorf("parse release manifest URL: %w", err)
 	}
 	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(segments) < 2 || strings.TrimSpace(segments[0]) == "" {
-		return "", fmt.Errorf("release manifest URL %q does not name an owner/repository", options.ThemeManifestURL)
+		return "", fmt.Errorf("release manifest URL %q does not name an owner/repository", manifestURL)
 	}
 	return segments[0], nil
 }
@@ -532,7 +606,7 @@ func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, e
 	if client == nil {
 		client = obs.WrapClient(&http.Client{Timeout: 30 * time.Second})
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodGet, raw, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("create GET %s: %w", raw, err)
 	}

@@ -304,15 +304,7 @@
   .rlterm .tbody { transition: opacity 400ms; }
   .swap { animation: swapIn 500ms ease-out; color: #d97757 !important; }
   @keyframes swapIn { from { opacity: 0; transform: translateY(-6px); } }
-  .cmpchips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .cchip { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; padding: 5px 10px; border: 1px solid var(--line); color: var(--muted); transition: all 300ms; }
-  .cchip.on[data-k="mile"] { color: #0b0d0c; background: #d97757; border-color: #d97757; }
-  .cchip.on[data-k="keep"] { color: #0b0d0c; background: #6fc3a5; border-color: #6fc3a5; }
-  .cchip.on[data-k="drop"] { color: #0b0d0c; background: #e07a62; border-color: #e07a62; }
-  .cchip.on[data-k="steer"] { color: #0b0d0c; background: var(--blue); border-color: var(--blue); }
-  .ln2.fade { opacity: 0; max-height: 0; overflow: hidden; margin-block: -5px; transition: opacity 500ms, max-height 700ms, margin 700ms; }
-  .kw { color: #6fc3a5; } .dw { color: #e07a62; } .sw { color: var(--blue); }
-  .meter { color: #d97757; } .meter.low { color: #6fc3a5; }
+  .meter { color: #d97757; }
   .ln2.div { display: block; color: #d97757; font-size: 11.5px; text-align: center; border-top: 1px dashed #5a3a2e; padding-top: 6px; }
   @media (max-width: 900px) { .wallgrid { grid-template-columns: minmax(0, 1fr); } .rnum { font-size: 40px; } .rrow { grid-template-columns: 70px minmax(0, 1fr) 80px; } }
 
@@ -945,7 +937,7 @@
         <span class="fg" style="color:#8fa099">●</span><span class="lbl">project</span>
       </div>
     </div>
-    <div class="cue"><code>pfm</code> → <code>tab</code> to cosmos: every chat orbits its project, every inject is a comet, a self-compact implodes, a new chat is born in a ring — the fleet, watched from above</div>
+    <div class="cue"><code>pfm</code> → <code>tab</code> to cosmos: every chat orbits its project, every inject is a comet, a new chat is born in a ring — the fleet, watched from above</div>
     <div class="sky">
       <div class="skystats">
         <div><b id="fChats">0</b><span class="lbl">chats</span></div>
@@ -996,47 +988,22 @@
     </div>
     <div class="pklegend"><span><b>CLAUDE.md</b> → AGENTS.md the same way</span><span><b>.claude/commands/*</b> → .codex/skills · .opencode/command</span><span><b>never hand-edited</b> — every mirror file opens with "do not edit"</span></div>
   </section>
-  <section class="reloadx" id="cmpx">
-    <div class="chainhead"><h2>It compacts itself, so it runs longer</h2></div>
-    <div class="pwh">
-      <div class="prob"><span class="k">Problem</span><p>Compact summarizes the conversation so you can continue — but only the model knows <i>when</i> to fire it and what to keep or lose. Not you.</p></div>
-      <div class="what"><span class="k"><b>Professor</b></span><p>The model compacts itself at every milestone, with a one-line focus and one steer for after.</p></div>
-      <div class="why"><span class="k">Why</span><p>Fewer tokens per turn, sharper function, and the chat runs for days instead of dying at the wall.</p></div>
-      <div class="how"><span class="k">How</span><p>A nudge at 35% context, then every 10%: <i>get to a milestone</i> → <code>chat_self_compact</code>. A reminder, never an order.</p></div>
-    </div>
-    <div class="cue">say <code>compact yourself at this milestone</code> → it calls <code>chat_self_compact</code> with a focus line and a steer; or wait — it does it on its own at every milestone</div>
-    <div class="cmpchips"><span class="cchip" data-k="mile">milestone reached</span><span class="cchip" data-k="keep">keep</span><span class="cchip" data-k="drop">drop</span><span class="cchip" data-k="steer">steer</span></div>
-    <div class="term cc rlterm vz" id="cmpTerm" style="height: 560px;">
-      <button class="btn rp" id="cmpReplay" type="button">Replay</button>
-      <div class="thead"><div class="ccban"><pre class="cclogo"> ▐▛███▛█
-▝▜██████▀
-  ▝▝ ▝▝</pre><div><div><b>Claude Code</b> <span class="dim">v2.1.270</span></div><div class="dim">Opus 5 with xhigh effort · Claude Max</div><div class="dim">~/.professor</div></div></div></div>
-      <div class="tbody" id="cmpB"></div>
-      <div class="tfoot">
-        <div class="ccrule"><span></span><em>FLIGHT-RUN</em><span class="short"></span></div>
-        <div class="ccin"><span class="cp">❯</span><span id="cmpIn"></span><span class="caret" id="cmpCaret"></span></div>
-        <div class="ccrule"><span></span></div>
-        <div class="sl" id="cmpSl"></div>
-      </div>
-      <div class="sweep" id="cmpSweep"></div>
-    </div>
-  </section>
   <section class="wavex" id="wavex" data-slide="The flight">
     <div class="chainhead"><h2>A flight: one feature, spec to merge</h2></div>
     <div class="pwh">
       <div class="prob"><span class="k">Problem</span><p>One big chat building a feature drifts from what you asked — by the end it has built something else.</p></div>
-      <div class="what"><span class="k"><b>Professor</b></span><p>A flight: the feature broken into small tasks, built step by step, each one closed before the next.</p></div>
+      <div class="what"><span class="k"><b>Professor</b></span><p>A flight: the agent that reads the code builds it, one per project, against an interface frozen first.</p></div>
       <div class="why"><span class="k">Why</span><p>Zero gap at every step — so what comes out the other end is <b>exactly</b> what you refined and asked for.</p></div>
-      <div class="how"><span class="k">How</span><p><code>/flights:spec</code> → flights-speccer reconciles → an orchestrate command runs the build cycle per task → <code>/flights:audit</code> walks the landed flight against the spec.</p></div>
+      <div class="how"><span class="k">How</span><p><code>/flights:spec</code> → flights-foreman freezes the interface and builds → one child foreman per project → <code>/flights:audit</code> walks the landed flight against the requirements.</p></div>
     </div>
-    <div class="cue"><code>/flights:spec</code> → flights-speccer writes the index → an orchestrate command dispatches → <code>/flights:audit</code> conformance walk</div>
+    <div class="cue"><code>/flights:spec</code> → flights-foreman builds → child foremen in parallel → <code>/flights:audit</code> conformance walk</div>
     <div class="wtrack"><div class="wline"></div><div class="wpkt" id="wPkt"></div></div>
     <div class="wvgrid" id="wgrid">
       <div class="wst" data-i="0"><div class="wsh"><span class="wsn">1</span><b>Specify</b><code>/flights:spec</code></div></div>
-      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Reconcile</b><code>flights-speccer · five checks</code></div></div>
-      <div class="wst" data-i="2"><div class="wsh"><span class="wsn">3</span><b>Index</b><code>index.md · order · dependencies</code></div></div>
-      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Orchestrate</b><code>/flights:orchestrate-*</code></div></div>
-      <div class="wst" data-i="4"><div class="wsh"><span class="wsn">5</span><b>Build</b><code>the cycle, per task ↓</code></div></div>
+      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Read</b><code>flights-foreman · doors · data shapes</code></div></div>
+      <div class="wst" data-i="2"><div class="wsh"><span class="wsn">3</span><b>Freeze</b><code>the interface · inside-out</code></div></div>
+      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Split</b><code>one child foreman per project</code></div></div>
+      <div class="wst" data-i="4"><div class="wsh"><span class="wsn">5</span><b>Build</b><code>the cycle, per unit ↓</code></div></div>
       <div class="wst" data-i="5"><div class="wsh"><span class="wsn">6</span><b>Audit</b><code>/flights:audit</code></div></div>
     </div>
     <div class="wlife vz" id="wlife">
@@ -1175,7 +1142,7 @@
       <div class="why"><span class="k">Why</span><p>The order of authority decides who wins at 2 a.m. — your discipline sits on top.</p></div>
       <div class="how"><span class="k">How</span><p><code>pfm</code> launches every Claude chat with <code>--system-prompt-file professor.md</code>; Codex and OpenCode get compiled mirrors.</p></div>
     </div>
-    <div class="cue"><code>cat ~/.local/share/pfm/install/harness-prompts/claude.md</code> — pfm hands it to every Claude chat as <code>--system-prompt-file</code>, above the harness's own prose</div>
+    <div class="cue"><code>cat ~/.professor/pfm/harness-prompts/composed/claude.md</code> — pfm hands it to every Claude chat as <code>--system-prompt-file</code>, above the harness's own prose</div>
     <div class="towers">
       <div class="axis"><span class="lbl">high</span><div class="axisbar"><i class="axisdot"></i></div><span class="lbl">low</span></div>
 
@@ -1251,7 +1218,7 @@
 </div>
 
 <nav class="rail" id="rail" aria-label="Slides"></nav>
-<div class="slidectr"><b id="slideN">1 / 11</b><span><kbd>→</kbd> next</span><span><kbd>←</kbd> back</span></div>
+<div class="slidectr"><b id="slideN">1 / 10</b><span><kbd>→</kbd> next</span><span><kbd>←</kbd> back</span></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script>
@@ -1544,7 +1511,7 @@
     var chats = [];
     function addChat(name, rt, sys, born) {
       var c = { name: name, rt: rt, sys: sys, rad: SYS[sys].r * (0.45 + Math.random() * 0.55), a: Math.random() * 6.28,
-        sp: (Math.random() * 0.5 + 0.25) * (Math.random() < .5 ? -1 : 1) * 0.0022, born: born || 0, flash: 0, compact: 0, dead: 0 };
+        sp: (Math.random() * 0.5 + 0.25) * (Math.random() < .5 ? -1 : 1) * 0.0022, born: born || 0, flash: 0, dead: 0 };
       chats.push(c); return c;
     }
     [['HARV_ORCH', 'claude', 0], ['HARV_REVIEW', 'codex', 0], ['HARV_DOCS', 'claude', 0], ['HARV_QA', 'opencode', 0],
@@ -1604,10 +1571,9 @@
         var n = addChat(SYS[a.sys].name.slice(0, 5).toUpperCase() + '_W' + spawnN, rt, a.sys, 0);
         rings.push({ c: n, t: 0, kind: 'birth', col: RT[rt].c }); logRow(a, 'chat_new', n); msgs++; },
       function () { var a = pick(function (c) { return /ORCH/.test(c.name); }), b = pick(function (c) { return c.sys === (a && a.sys) && c !== a; }); if (a && b) send(a, b, 'chat_goal', '#e3a13a', true); },
-      function () { var a = pick(function () { return true; }); if (a) { a.compact = 1; rings.push({ c: a, t: 0, kind: 'implode', col: RT[a.rt].c }); logRow(a, 'chat_self_compact'); msgs++; } },
       function () { var l = live().filter(function (c) { return /_W\d/.test(c.name); }); if (l.length > 2) { var d = l[0]; d.dead = 1; logRow(d, 'chat_kill'); msgs++; } }
     ];
-    var WEIGHTS = [0, 0, 0, 1, 1, 2, 3, 0, 4, 5, 0, 1, 6, 0, 3, 7];
+    var WEIGHTS = [0, 0, 0, 1, 1, 2, 3, 0, 4, 5, 0, 1, 0, 3, 6];
     var wi = 0, nextAt = 600, running = true, last = performance.now();
     var reduce2 = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -1616,7 +1582,7 @@
       if (running) {
         nextAt -= dt;
         if (nextAt <= 0) { EVENTS[WEIGHTS[wi++ % WEIGHTS.length]](); nextAt = (reduce2 ? 2600 : 900 + Math.random() * 700); }
-        chats.forEach(function (c) { if (!reduce2) c.a += c.sp * dt * .06; if (c.born < 1) c.born = Math.min(1, c.born + dt / 900); if (c.flash > 0) c.flash -= dt / 700; if (c.compact > 0) c.compact -= dt / 1200; });
+        chats.forEach(function (c) { if (!reduce2) c.a += c.sp * dt * .06; if (c.born < 1) c.born = Math.min(1, c.born + dt / 900); if (c.flash > 0) c.flash -= dt / 700; });
       }
       ctx.clearRect(0, 0, W, H);
       // starfield
@@ -1658,11 +1624,11 @@
       });
       // rings
       rings = rings.filter(function (r) {
-        if (running) r.t += dt / (r.kind === 'implode' ? 1100 : 800);
+        if (running) r.t += dt / 800;
         if (r.t >= 1) return false;
         var p = pos(r.c), rad;
-        if (r.kind === 'implode') rad = 34 * (1 - r.t); else if (r.kind === 'birth') rad = 6 + 46 * r.t; else rad = 6 + 26 * r.t;
-        ctx.strokeStyle = r.col; ctx.globalAlpha = r.kind === 'implode' ? r.t : (1 - r.t);
+        if (r.kind === 'birth') rad = 6 + 46 * r.t; else rad = 6 + 26 * r.t;
+        ctx.strokeStyle = r.col; ctx.globalAlpha = 1 - r.t;
         ctx.lineWidth = r.kind === 'birth' ? 2 : 1.4;
         if (r.kind === 'ping') ctx.setLineDash([3, 4]);
         ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, 6.29); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
@@ -1676,7 +1642,7 @@
         g.addColorStop(0, rt.c); g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.globalAlpha = .35 * s + (c.flash > 0 ? c.flash * .4 : 0); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, glow, 0, 6.29); ctx.fill();
         ctx.globalAlpha = s;
-        var fs = 15 * (c.compact > 0 ? 1 - c.compact * .45 : 1) * (.4 + .6 * s);
+        var fs = 15 * (.4 + .6 * s);
         ctx.font = fs + 'px "IBM Plex Mono", Menlo, monospace'; ctx.fillStyle = rt.c; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(rt.g, p.x, p.y);
         ctx.font = '11.5px "IBM Plex Mono", Menlo, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -1779,71 +1745,6 @@
     }
     document.getElementById('reloadReplay').addEventListener('click', play);
     onView(document.getElementById('reloadx'), play);
-  })();
-
-  // ---------- self-compact ----------
-  (function () {
-    var sc = scene(), box = document.getElementById('cmpB'), term = document.getElementById('cmpTerm');
-    var inp = document.getElementById('cmpIn'), caret = document.getElementById('cmpCaret'), sl = document.getElementById('cmpSl'), sweep = document.getElementById('cmpSweep');
-    var chips = {}; document.querySelectorAll('#cmpx .cchip').forEach(function (c) { chips[c.dataset.k] = c; });
-    var KEEP = 'keep the flight-3 spec at $HOME/.local/state/pfm/flights/{project}/flight-3/, merge sha a66c690d, the two open review issues';
-    var DROP = 'drop the flight-1/2 build logs, grep dumps, and the resolved debugging';
-    var STEER = 'Continue flight 3 from $HOME/.local/state/pfm/flights/{project}/flight-3/: dispatch dev on step 1, keep both review issues open.';
-    var HIST = [
-      ['u', '❯', 'Run flights 1 to 3, merge each one to develop.'],
-      ['say', '⏺', 'Flight 1 built in the fence, QA green, merged.'],
-      ['called', null, '⎿ 412 lines of go test output · 38 grep hits · 3 build logs'],
-      ['say', '⏺', 'Flight 2: fixed the nil-map panic in the resolver after two dead ends.'],
-      ['called', null, '⎿ stack traces, a reverted attempt, 1,900 lines of tool output'],
-      ['say', '⏺', 'Flight 2 merged to develop as a66c690d. Two review issues stay open for flight 3.']
-    ];
-    function meter(pct) { sl.innerHTML = '🥈 ✦ Opus 5 │ 🔖 FLIGHT-RUN │ 🔹 xhigh │ <span class="meter' + (pct < 30 ? ' low' : '') + '">ctx ' + pct + '%</span>'; }
-    function chip(k, on) { chips[k].classList.toggle('on', on); }
-    function reset() {
-      box.innerHTML = ''; HIST.forEach(function (h) { ln(box, h[0], h[1], h[2]); });
-      inp.textContent = ''; caret.style.display = ''; meter(78); Object.keys(chips).forEach(function (k) { chip(k, false); });
-    }
-    reset();
-    async function play() {
-      var my = sc.next(); reset();
-      if (!(await sc.wait(700, my))) return;
-      chip('mile', true);
-      ln(box, 'say', '⏺', 'Milestone: flight 2 is merged. Checkpointed the plan to $HOME/.local/state/pfm/flights/{project}/flight-3/; compacting before flight 3.');
-      if (!(await sc.wait(1000, my))) return;
-      ln(box, 'say', '⏺', '<b>chat - chat_self_compact</b> (MCP)(focus: "Flight 2 done; keep … drop …", then: ["Continue flight 3 …"])');
-      if (!(await sc.wait(500, my))) return;
-      ln(box, 'called', null, '⎿ queued · /compact fires when this turn ends, the steer lands after it settles');
-      if (!(await sc.wait(900, my))) return;
-      ln(box, 'baked', '✻', 'Baked for 3m 41s');
-      if (!(await sc.wait(700, my))) return;
-      caret.style.display = 'none';
-      if (!(await typeInto(null, inp, '/compact Flight 2 done; ', sc, my, 30))) return;
-      chip('keep', true); var keep = document.createElement('span'); keep.className = 'kw'; inp.appendChild(keep);
-      if (!(await typeInto(null, keep, KEEP + '; ', sc, my, 34))) return;
-      chip('drop', true); var drop = document.createElement('span'); drop.className = 'dw'; inp.appendChild(drop);
-      if (!(await typeInto(null, drop, DROP, sc, my, 34))) return;
-      if (!(await sc.wait(700, my))) return;
-      inp.textContent = '';
-      term.classList.add('boot'); sweep.classList.remove('on'); void sweep.offsetWidth; sweep.classList.add('on');
-      Array.prototype.forEach.call(box.children, function (c) { c.classList.add('fade'); });
-      if (!(await sc.wait(1100, my))) return;
-      box.innerHTML = ''; term.classList.remove('boot');
-      ln(box, 'div', null, '✻ Conversation compacted · ctrl+o for history');
-      ln(box, 'called', null, '⎿ kept: <span class="kw">$HOME/.local/state/pfm/flights/{project}/flight-3/ · a66c690d · 2 open review issues</span>');
-      meter(9);
-      if (!(await sc.wait(1100, my))) return;
-      chip('steer', true);
-      var s = document.createElement('span'); s.className = 'sw'; inp.appendChild(s);
-      if (!(await typeInto(null, s, STEER, sc, my, 40))) return;
-      if (!(await sc.wait(500, my))) return;
-      inp.textContent = ''; caret.style.display = '';
-      ln(box, 'u', '❯', '<span class="sw">' + STEER + '</span>');
-      if (!(await sc.wait(900, my))) return;
-      var d = ln(box, 'say', '⏺', ''), t = d.querySelector('.t');
-      if (!(await typeInto(box, t, 'Resuming flight 3, step 1: dispatching dev with the spec from $HOME/.local/state/pfm/flights/{project}/flight-3/.', sc, my, 60))) return;
-    }
-    document.getElementById('cmpReplay').addEventListener('click', play);
-    onView(document.getElementById('cmpx'), play);
   })();
 
   // ---------- cross-harness orchestration: one Fable, three workers ----------
@@ -2163,7 +2064,7 @@
       ['effort', 'effort', '🔹 low · 🔶 medium · 💠 high · 💎 xhigh · 👑 max; 💤 when thinking is off.'],
       ['git', 'git', 'Branch and dirty count, refreshed every render with a 750 ms budget — never a stale branch under your feet.'],
       ['fleet', 'fleet', '✦4 ·1 — four Claude chats and one Codex chat live on this machine right now.'],
-      ['ctx', 'context', 'Used context: 🟢 under 50 %, ⚡ from 50, 🔥 from 80, 🚨 from 95 — the milestone-compact rule reads this.'],
+      ['ctx', 'context', 'Used context: 🟢 under 50 %, ⚡ from 50, 🔥 from 80, 🚨 from 95.'],
       ['tok', 'tokens', 'Tokens actually in the window: cache reads + cache writes + fresh input.'],
       ['cache', 'cache timer', 'Anchored on the last real API turn — not on /cost or a compact receipt. ✓ counting down means the next turn is served from cache; ✗ counting up means it went cold and the whole context is re-read at full price.'],
       ['cost', 'cost · time', 'Session cost turns yellow at $2, red at $10; ⏳ is wall time.'],
@@ -2195,7 +2096,7 @@
         if (step === 20) row('you come back after 6 minutes: an idle chat is normal work');
         if (!dead5 && t5 <= 0) { dead5 = true; row('✗ default cache went cold at 5m — the next turn re-reads the whole context at full price', 'x'); }
         if (step === 34) { row('❯ next prompt at 34m idle', 'u'); row('⚡ 1h window still warm — served from cache, pennies', 'ok'); t5 = 300; t1 = 3600; dead5 = false; }
-        if (step === 50) { row('⚡ pfm chat reload --1h on · /reload --1h on — the mode is per chat, and the timer is how you see it', 'ok'); }
+        if (step === 50) { row('⚡ pfm chat reload --cache 1h|5m · /reload --cache 1h|5m — the choice is per chat, and the timer is how you see it', 'ok'); }
         if (!(await sc.wait(600, my))) return;
         idle += 60; t5 -= 60; t1 -= 60; paint();
       }

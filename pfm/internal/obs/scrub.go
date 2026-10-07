@@ -104,6 +104,9 @@ var declaredKeys = map[string]bool{
 	"retries": true,
 	"line":    true, // Lane B: one harvestpy stderr line (Process.Stderr), added only when comp=harvestpy logs at DEBUG
 	"class":   true, // harvestpy.stderr's default-level stand-in for line: its bounded leading word
+	"wait_ms": true, // harvestpy.request: how long the conversion queued for a worker
+	"queue":   true, // harvestpy.request: the queue length the conversion found
+	"workers": true, // harvestpy.request: the converter pool's live workers
 }
 
 // Declared reports whether key is on the activity log's allow-list.

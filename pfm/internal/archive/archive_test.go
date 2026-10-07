@@ -146,20 +146,19 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestConfiguredArchiveRootsExcludeLegacyPrimaryAlias(t *testing.T) {
+func TestArchiveUsesRuntimeClaudeRoots(t *testing.T) {
 	values := archiveJail(t)
 	runner, err := New(Dependencies{
-		Paths:            values,
-		Kills:            &fakeKills{},
-		Proc:             emptyProc{},
-		ExactClaudeRoots: true,
+		Paths: values,
+		Kills: &fakeKills{},
+		Proc:  emptyProc{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	roots := runner.claudeRoots()
 	if len(roots) != 1 || roots[0] != values.Roots[pfmengine.Claude][0] {
-		t.Fatalf("configured archive roots = %#v, want exact roster %#v", roots, values.Roots[pfmengine.Claude])
+		t.Fatalf("archive roots = %#v, want runtime roots %#v", roots, values.Roots[pfmengine.Claude])
 	}
 }
 

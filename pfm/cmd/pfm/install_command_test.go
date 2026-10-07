@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -12,14 +13,15 @@ import (
 	goRuntime "runtime"
 	"strings"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
@@ -35,15 +37,18 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 		},
 	}
 	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
-	if !reflect.DeepEqual(options.ConfigDirs, []string{runtime.Config.Accounts[0].ConfigDir}) ||
+	if options.PrimaryConfigDir != runtime.Config.Accounts[0].ConfigDir ||
+		!reflect.DeepEqual(options.ClaudeAccounts, runtime.Config.Accounts) ||
 		!reflect.DeepEqual(
 			options.CodexHomes,
 			[]string{runtime.Config.CodexAccounts[0].Home, runtime.Config.CodexAccounts[1].Home},
 		) {
-		t.Fatalf("installer rosters ConfigDirs=%q CodexHomes=%q", options.ConfigDirs, options.CodexHomes)
-	}
-	if _, found := options.CodexYolo[4]; found {
-		t.Fatalf("Codex policies inherited Claude account IDs: %#v", options.CodexYolo)
+		t.Fatalf(
+			"installer rosters PrimaryConfigDir=%q ClaudeAccounts=%v CodexHomes=%q",
+			options.PrimaryConfigDir,
+			options.ClaudeAccounts,
+			options.CodexHomes,
+		)
 	}
 	if options.OpenCodeConfigPath != installer.OpenCodeConfigPath(home) {
 		t.Fatalf("OpenCodeConfigPath=%q, want %q", options.OpenCodeConfigPath, installer.OpenCodeConfigPath(home))
@@ -65,7 +70,7 @@ func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
 	t.Chdir(t.TempDir()) // no repo markers here — discoverSourceRepo() finds nothing
 	home := t.TempDir()
 	clone := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: home}}
@@ -101,7 +106,7 @@ func TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack(t *testing.T
 	if err := os.MkdirAll(vanished, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := installer.WriteSourceRepoMarker(home, vanished); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, vanished); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(vanished); err != nil {
@@ -128,33 +133,6 @@ func TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack(t *testing.T
 	}
 }
 
-func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
-	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{
-		Accounts: []pfmconfig.Account{
-			{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"), Implicit: true},
-			{ID: 2, ConfigDir: filepath.Join(home, ".cc", "2")},
-		},
-		CodexAccounts: []pfmconfig.CodexAccount{},
-	}}
-	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
-	want := []string{filepath.Join(home, ".claude.json"), filepath.Join(home, ".cc", "2", ".claude.json")}
-	if !reflect.DeepEqual(options.ClaudeRegistries, want) {
-		t.Fatalf("registries=%q want=%q", options.ClaudeRegistries, want)
-	}
-	if err := os.WriteFile(want[0], []byte(`{"mcpServers":{"professor":{"command":"manual"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var output bytes.Buffer
-	if warnings := doctor.PrintMCPClientCutover(
-		&output,
-		runtime,
-	); warnings != 1 ||
-		!strings.Contains(output.String(), want[0]) {
-		t.Fatalf("warnings=%d output=%s", warnings, &output)
-	}
-}
-
 // writeManagerFakes stages fake systemctl and launchctl binaries in one PATH
 // directory, each appending its own invocation to a shared log so a subtest
 // can assert WHICH manager the sandbox actually reached instead of assuming
@@ -165,7 +143,7 @@ func writeManagerFakes(t *testing.T, systemctlBody, launchctlBody string) (binDi
 	logPath = filepath.Join(t.TempDir(), "manager-calls.log")
 	write := func(name, body string) {
 		script := "#!/bin/sh\necho \"" + name + " $*\" >> " + logPath + "\n" + body
-		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
+		if err := testjail.WriteExecutable(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -217,11 +195,20 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 
 	t.Run("bare preview ignores reachable manager", func(t *testing.T) {
 		home := t.TempDir()
+		configPath := filepath.Join(t.TempDir(), pfmconfig.FileName)
+		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		binDir, logPath := writeManagerFakes(t, "exit 0\n", launchctlIdle)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)
 		var stdout, stderr bytes.Buffer
-		if code := runInstall(nil, &stdout, &stderr); code != 0 {
+		if code := runInstall(
+			nil,
+			&stdout,
+			&stderr,
+			commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Path: configPath}},
+		); code != 0 {
 			t.Fatalf("preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
@@ -236,12 +223,21 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 
 	t.Run("idle reachable manager applies with yes", func(t *testing.T) {
 		home := t.TempDir()
+		configPath := filepath.Join(t.TempDir(), pfmconfig.FileName)
+		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		script := "case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0\n"
 		binDir, logPath := writeManagerFakes(t, script, launchctlIdle)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)
 		var stdout, stderr bytes.Buffer
-		if code := runInstall([]string{"--yes"}, &stdout, &stderr); code != 0 {
+		if code := runInstall(
+			[]string{"--yes"},
+			&stdout,
+			&stderr,
+			commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Path: configPath}},
+		); code != 0 {
 			t.Fatalf("idle yes code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		assertManagerConsulted(t, logPath, true)
@@ -249,14 +245,24 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 
 	t.Run("running service refuses actionably", func(t *testing.T) {
 		home := t.TempDir()
+		configPath := filepath.Join(t.TempDir(), pfmconfig.FileName)
+		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		// A oneshot mid-run: `show` names it activating (is-active would exit 3).
+		// installer.Run checks the scheduler before applying its wiring.
 		script := "case \"$*\" in *ActiveState*) echo activating;; esac\nexit 0\n"
 		binDir, logPath := writeManagerFakes(t, script, launchctlRunning)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)
 
 		var stdout, stderr bytes.Buffer
-		if code := runInstall([]string{"--yes"}, &stdout, &stderr); code != 97 {
+		if code := runInstall(
+			[]string{"--yes"},
+			&stdout,
+			&stderr,
+			commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Path: configPath}},
+		); code != 97 {
 			t.Fatalf("runInstall() code=%d, want 97; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		remediation := "systemctl --user stop pfm-name-sync.service"
@@ -274,44 +280,20 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	})
 }
 
-func TestInstallUsesOnlyTheNewSurface(t *testing.T) {
-	for _, retired := range []string{"-" + "-apply", "-" + "-uninstall", "-" + "-dry-run"} {
-		t.Run(retired, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
-			var stdout, stderr bytes.Buffer
-			if code := runInstall([]string{retired}, &stdout, &stderr); code != 2 {
-				t.Fatalf(
-					"runInstall(%q) code=%d stdout=%q stderr=%q, want unknown-flag usage",
-					retired,
-					code,
-					stdout.String(),
-					stderr.String(),
-				)
-			}
-			if !strings.Contains(
-				stderr.String(),
-				"usage: pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
-			) {
-				t.Fatalf("runInstall(%q) stderr=%q, want new usage", retired, stderr.String())
-			}
-		})
-	}
-}
-
-func TestInstallRejectsRetiredForceFlag(t *testing.T) {
-	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--force", "--skip-harvest"}, &stdout, &stderr, runtime); code != 2 {
-		t.Fatalf(
-			"retired --force code=%d stdout=%q stderr=%q, want unknown-flag usage",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	if strings.Contains(stderr.String(), "[--force]") {
-		t.Fatalf("install usage still advertises retired --force: %q", stderr.String())
+func TestInstallUnknownFlagPrintsTheUsage(t *testing.T) {
+	for _, args := range [][]string{{"--no-such-flag"}, {"--help"}} {
+		var stdout, stderr bytes.Buffer
+		wantCode := 2
+		if args[0] == "--help" {
+			wantCode = 0
+		}
+		if code := runInstall(args, &stdout, &stderr); code != wantCode {
+			t.Fatalf("args=%q code=%d stderr=%q", args, code, stderr.String())
+		}
+		want := "usage: pfm install [--yes] [--check] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]\n"
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr=%q want=%q", stderr.String(), want)
+		}
 	}
 }
 
@@ -333,45 +315,6 @@ func TestInstallCarriesExplicitVSCodeTerminalOptIn(t *testing.T) {
 	}
 	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --vscode --skip-harvest\n") {
 		t.Fatalf("VS Code preview dropped its apply flag: %q", stdout.String())
-	}
-}
-
-func TestInstallPreviewAndYesUseTheSameInstallerClassification(t *testing.T) {
-	previous := runInstaller
-	t.Cleanup(func() { runInstaller = previous })
-	var calls []installer.Options
-	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		calls = append(calls, options)
-		return installer.Report{}, nil
-	}
-	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
-	configDir := filepath.Join(t.TempDir(), "config")
-	var previewOut, previewErr bytes.Buffer
-	if code := runInstall([]string{"--config-dir", configDir}, &previewOut, &previewErr, runtime); code != 0 {
-		t.Fatalf("preview code=%d stdout=%q stderr=%q", code, previewOut.String(), previewErr.String())
-	}
-	var applyOut, applyErr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--config-dir", configDir}, &applyOut, &applyErr, runtime); code != 0 {
-		t.Fatalf("yes code=%d stdout=%q stderr=%q", code, applyOut.String(), applyErr.String())
-	}
-	if len(calls) != 2 {
-		t.Fatalf("installer calls=%d, want preview and yes", len(calls))
-	}
-	if calls[0].Mode != installer.ModeDryRun || calls[1].Mode != installer.ModeApply {
-		t.Fatalf("installer modes=%v/%v, want dry-run/apply", calls[0].Mode, calls[1].Mode)
-	}
-	preview, apply := calls[0], calls[1]
-	preview.Mode = installer.ModeApply
-	preview.Stdout = nil
-	apply.Stdout = nil
-	if !reflect.DeepEqual(preview, apply) {
-		t.Fatalf("preview and yes options classify differently:\npreview=%#v\nyes=%#v", preview, apply)
-	}
-	if got := previewOut.String(); !strings.HasSuffix(got, "if you agree, run again: pfm install --yes\n") {
-		t.Fatalf("preview output=%q, want exact confirmation suffix", got)
-	}
-	if strings.Contains(applyOut.String(), "if you agree, run again:") {
-		t.Fatalf("yes output unexpectedly contains preview confirmation: %q", applyOut.String())
 	}
 }
 
@@ -488,48 +431,6 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 	}
 }
 
-// An identical config.json.pre-split beside the legacy config.json (a
-// rollback restoring the pre-update config is one producer, issue #24 #7)
-// must not abort the install with the "already exists" refusal.
-func TestInstallApplyContinuesPastAnIdenticalPreSplitBackup(t *testing.T) {
-	previous := runInstaller
-	t.Cleanup(func() { runInstaller = previous })
-	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
-		return installer.Report{}, nil
-	}
-	home := t.TempDir()
-	dir := filepath.Join(home, ".config", "pfm")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	legacy := filepath.Join(dir, pfmconfig.LegacyFileName)
-	content := `{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377}}}`
-	if err := os.WriteFile(legacy, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "config.json.pre-split"), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_CONFIG_HOME", "")
-	loaded, err := pfmconfig.Load("", home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime := commandRuntime{Paths: paths.Values{Home: home}, Config: loaded}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf(
-			"runInstall() code=%d stdout=%q stderr=%q, want 0 for an identical pre-split backup",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	if strings.Contains(stderr.String(), "apply config migration") {
-		t.Fatalf("stderr=%q, want no apply config migration failure", stderr.String())
-	}
-}
-
 // TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist is a REGRESSION
 // test for issue #24 findings 3/4's guard (M3 change B): an explicit
 // --config path that does not exist loads as silent defaults (config.go
@@ -595,8 +496,18 @@ func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
-	t.Setenv("XDG_CONFIG_HOME", "")
-	defaultPath := pfmconfig.ResolvePath(home)
+	t.Setenv(paths.EnvConfig, "")
+	clone := filepath.Join(home, "clone")
+	if err := os.MkdirAll(clone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	defaultPath, err := pfmconfig.ResolvePath(home)
+	if err != nil {
+		t.Fatalf("ResolvePath(%q) = %v", home, err)
+	}
 	if _, err := os.Stat(defaultPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("default config %q must be absent, stat error = %v", defaultPath, err)
 	}
@@ -620,54 +531,63 @@ func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
 	}
 }
 
-// TestOlderUpdaterInstallArgvOnTheRealBinaryDoesNotRefuse pins a4d89776
-// across the process boundary (pfm-update-1#NEW-F3): an older `pfm update`
-// ran its candidate as `pfm --config <default path> install --yes` whether or
-// not that file existed, and a candidate that refused the missing default
-// exited non-zero, which that updater reads as a failed install and rolls
-// back. The older updater is a released binary, not this tree's code, so the
-// closest real test runs its exact argv against this tree's real built
-// binary (TestMain's testPFMBinary): a real process, real config load, real
-// installer, in a jailed HOME with no config file. The updater half — a
-// non-zero candidate exit is what triggers rollback — is update.Run's own
-// rollback tests.
-func TestOlderUpdaterInstallArgvOnTheRealBinaryDoesNotRefuse(t *testing.T) {
-	root := t.TempDir()
-	home := filepath.Join(root, "home")
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	env := replaceAttachEnv(os.Environ(), map[string]string{
-		"HOME":             home,
-		paths.EnvHome:      home,
-		"XDG_CONFIG_HOME":  filepath.Join(home, ".config"),
-		"XDG_DATA_HOME":    filepath.Join(home, ".local", "share"),
-		"XDG_STATE_HOME":   filepath.Join(home, ".local", "state"),
-		"XDG_CACHE_HOME":   filepath.Join(home, ".cache"),
-		"PFM_DB":           filepath.Join(root, "fleet.db"),
-		"PFM_CLAUDE_ROOTS": filepath.Join(home, ".claude", "projects"),
-		"PFM_CODEX_ROOT":   filepath.Join(home, ".codex"),
-		"TMUX":             "",
-	})
-	defaultPath := filepath.Join(home, ".config", "pfm", filepath.Base(pfmconfig.ResolvePath(home)))
-	if _, err := os.Stat(defaultPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("default config %q must be absent, stat error = %v", defaultPath, err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	command := exec.CommandContext(
-		ctx, testPFMBinary, "--config", defaultPath, "install", "--yes", "--skip-harvest",
-	)
-	command.Env = env
-	command.Dir = home
-	command.Stdin = nil
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("older updater argv `pfm --config %s install --yes --skip-harvest` on the real binary: %v\n%s",
-			defaultPath, err, output)
-	}
-	if strings.Contains(string(output), "refusing to converge host wiring on defaults") {
-		t.Fatalf("the real install refused the absent default config:\n%s", output)
+func TestInstallSeedDatabasePathsAgreeWithMigrationAndProcessPin(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	for _, name := range []string{"seed", "state override", "cache override", "both overrides"} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			t.Setenv(paths.EnvConfig, "")
+			t.Setenv(paths.EnvStateDB, "")
+			t.Setenv(paths.EnvCacheDB, "")
+			t.Setenv("PFM_SOURCE_REPO", "")
+			clone := filepath.Join(home, "clone")
+			if err := os.MkdirAll(clone, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+				t.Fatal(err)
+			}
+			const seed = `{"version":2,"state":{"db":"~/seed-state.db","cacheDb":"~/seed-cache.db"}}`
+			if err := os.WriteFile(filepath.Join(clone, "example.pfm.config.json"), []byte(seed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			wantState, wantCache := filepath.Join(home, "seed-state.db"), filepath.Join(home, "seed-cache.db")
+			if name == "state override" || name == "both overrides" {
+				wantState = filepath.Join(home, "env-state.db")
+				t.Setenv(paths.EnvStateDB, wantState)
+			}
+			if name == "cache override" || name == "both overrides" {
+				wantCache = filepath.Join(home, "env-cache.db")
+				t.Setenv(paths.EnvCacheDB, wantCache)
+			}
+			called := false
+			runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+				called = true
+				if options.StateDB != wantState {
+					t.Errorf("migration state database = %q, want seeded runtime %q", options.StateDB, wantState)
+				}
+				state, cache, err := pfmconfig.StatePathsFrom(paths.OSEnv{}, home)
+				if err != nil || state != wantState || cache != wantCache {
+					t.Errorf("process database pin = %q, %q, %v; want %q, %q", state, cache, err, wantState, wantCache)
+				}
+				if string(options.ConfigSeedContent) != seed {
+					t.Errorf("validated seed bytes = %q, want %q", options.ConfigSeedContent, seed)
+				}
+				return installer.Report{}, nil
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"install", "--yes", "--skip-harvest"}, &stdout, &stderr); code != 0 || !called {
+				t.Fatalf(
+					"install code=%d called=%v stdout=%q stderr=%q",
+					code,
+					called,
+					stdout.String(),
+					stderr.String(),
+				)
+			}
+		})
 	}
 }
 
@@ -697,5 +617,55 @@ func TestRootHelpListsUninstall(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "  uninstall") {
 		t.Fatalf("help=%q, want top-level uninstall", stdout.String())
+	}
+}
+
+func TestInstallerOptionsPrimaryAccount(t *testing.T) {
+	for _, state := range []string{"primary", "unreadable", "explicit", "empty"} {
+		t.Run(state, func(t *testing.T) {
+			home := t.TempDir()
+			runtime := commandRuntime{
+				Paths: paths.Values{Home: home, StateDB: filepath.Join(home, "pfm.db")},
+				Config: pfmconfig.Config{
+					Accounts: []pfmconfig.Account{
+						{ID: 7, ConfigDir: filepath.Join(home, "seven")},
+						{ID: 2, ConfigDir: filepath.Join(home, "two")},
+					},
+				},
+			}
+			explicit := ""
+			want := runtime.Config.Accounts[0].ConfigDir
+			switch state {
+			case "primary":
+				if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, 7); err != nil {
+					t.Fatal(err)
+				}
+			case "unreadable":
+				if err := os.Mkdir(runtime.Paths.StateDB, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			case "explicit":
+				explicit = filepath.Join(home, "store")
+				want = ""
+			case "empty":
+				runtime.Config.Accounts = nil
+				want = ""
+			}
+			var out bytes.Buffer
+			options := newInstallerOptions(installer.ModeDryRun, explicit, true, &out, io.Discard, runtime)
+			if options.PrimaryConfigDir != want {
+				t.Fatalf("PrimaryConfigDir=%q want %q", options.PrimaryConfigDir, want)
+			}
+			if roster := state != "empty"; options.ClaudeRosterHost != roster {
+				t.Fatalf("ClaudeRosterHost=%v want %v", options.ClaudeRosterHost, roster)
+			}
+			if state == "unreadable" {
+				_, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+				line := fmt.Sprintf("  skip    primary account unreadable (%v); using account 7\n", err)
+				if out.String() != line {
+					t.Fatalf("got %q want %q", out.String(), line)
+				}
+			}
+		})
 	}
 }

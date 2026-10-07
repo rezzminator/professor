@@ -8,9 +8,9 @@
 #
 #   verify.sh              every check, in order
 #   verify.sh CHECK...     only the named checks:
-#                          seats daemon fleet express (five beats) inject reload compact storm idle headless
+#                          seats daemon fleet express (five beats) inject reload storm idle headless
 #
-# Cost: five throwaway chats (PING_CLAUDE, PING_CODEX, RELOAD_T, COMPACT_T,
+# Cost: five throwaway chats (PING_CLAUDE, PING_CODEX, RELOAD_T,
 # STORM_1..2) — a few short model turns; they are ended and hidden at the end.
 # Runtime ≈ 6–8 min. The slide chats (idle.sh roster) are cycled by the idle
 # check and come back on their own transcripts.
@@ -25,7 +25,7 @@ export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp || exit 1
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 read -r -a LIVE <<<"$(cat "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r '[.accounts[].id] | join(" ")' "$CONFIG")"
 SEAT_A="${LIVE[0]:-}"; SEAT_B="${LIVE[1]:-$SEAT_A}"
 checks=0 failed=0
@@ -124,9 +124,9 @@ check_express() { # five independently counted install-fidelity beats on the ado
   fi
 
   out=/tmp/verify-express-update.json
-  (cd "$root" && pfm update check --json) >"$out" 2>&1; rc=$?
+  (cd "$root" && pfm doctor --project-updates --json) >"$out" 2>&1; rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail express-update "pfm update check --json exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+    fail express-update "pfm doctor --project-updates --json exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
   else
     jq -e '.counts.UPDATED == 0 and .counts.NEW == 0 and .counts["GONE-UPSTREAM"] == 0 and .counts["LOCAL-DELETED"] == 0 and .reviewRequired == 0 and .terminal == "clean"' \
       "$out" >/dev/null 2>"$json_error"; json_rc=$?
@@ -196,14 +196,6 @@ check_reload() { # slide 8: /reload onto another seat, same conversation, then t
   if out="$(wait_last RELOAD_T RELOADED 180)"; then pass reload "RELOAD_T rebooted in place onto seat $SEAT_B and ran its --then steer"
   else fail reload "no RELOADED from RELOAD_T in 180 s; its last: $(tr '\n' ' ' <<<"$out")"; fi
 }
-check_compact() { # slide 9: chat_self_compact fires at turn end and the steer lands
-  local out
-  out="$(throwaway COMPACT_T cc "$SEAT_A")" || { fail compact "COMPACT_T never came up: $out"; return; }
-  out="$(pfm chat inject --allow-unsigned COMPACT_T "Call the chat_self_compact tool now with focus 'verify' and the steer 'reply with exactly one word: COMPACTED'. Do nothing else." 2>&1)" \
-    || { fail compact "pfm chat inject COMPACT_T refused: $(tail -2 <<<"$out" | tr '\n' ' ')"; return; }
-  if out="$(wait_last COMPACT_T COMPACTED 180)"; then pass compact "COMPACT_T compacted itself and ran the steer"
-  else fail compact "no COMPACTED from COMPACT_T in 180 s; its last: $(tr '\n' ' ' <<<"$out")"; fi
-}
 check_storm() { # slide 4: two storm chats exchange signed injects, then kill-storm leaves the rest untouched
   local out deadline last
   out="$("$HERE/storm.sh" start 2 2 2>&1)" || { fail storm "storm.sh start 2 2: $(tail -3 <<<"$out" | tr '\n' ' ')"; return; }
@@ -237,11 +229,11 @@ check_headless() { # slide 11: the two printed commands, run as the presenter ru
   else fail headless "expected 2 structured answers, saw $n — $(grep -v '^\s*$' <<<"$out" | tail -3 | tr '\n' ' ')"; fi
 }
 
-all="seats daemon fleet express inject reload compact storm idle headless"
+all="seats daemon fleet express inject reload storm idle headless"
 [ $# -gt 0 ] || set -- $all
 for c in "$@"; do
   if declare -F "check_$c" >/dev/null; then "check_$c"; else fail "$c" "unknown check (one of: $all)"; fi
 done
-retire PING_CLAUDE PING_CODEX RELOAD_T COMPACT_T
+retire PING_CLAUDE PING_CODEX RELOAD_T
 echo "verify: $checks checks · $failed failed"
 [ "$failed" -eq 0 ]

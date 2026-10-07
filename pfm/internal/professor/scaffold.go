@@ -108,8 +108,8 @@ func Scaffold(source, target string, force bool, stdout io.Writer) (count int, e
 // pass already wrote durably to disk before returning cause (L3-F8): without
 // this, a per-entry failure orphaned earlier entries from the baseline
 // forever — a retry (`pfm init --force`) would hit `CONFLICT … exists` on
-// them and they would never be pinned, so `pfm update check` reported them
-// NEW forever with no hint they were pfm's own output. cause is always what
+// them and they would never be pinned, so `pfm doctor --project-updates`
+// reported them NEW forever with no hint they were pfm's own output. cause is always what
 // is returned; a Save failure here is reported alongside it, never in place
 // of it.
 func persistScaffoldFailure(target string, baseline Baseline, cause error) (int, error) {

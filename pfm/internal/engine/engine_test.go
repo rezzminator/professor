@@ -92,55 +92,6 @@ func TestRegisterRefusesAmbiguousLongNamesAndSocketPrefixes(t *testing.T) {
 	}
 }
 
-// TestLaunchArgsForDropsAFlagTheCallerAlreadyStates is the regression for the
-// silently-discarded --settings bug: the spawn doors append LaunchArgs AFTER
-// the caller's own argv, and --settings is single-value, so appending the
-// fleet's own pair behind a caller who already typed --settings would make
-// theirs win the last-occurrence race and vanish with no error. LaunchArgsFor
-// must drop the fleet's flag instead whenever the caller already states it —
-// by name, `--settings=X` counting the same as `--settings X` — and leave it
-// alone otherwise.
-func TestLaunchArgsForDropsAFlagTheCallerAlreadyStates(t *testing.T) {
-	full := MustLookup(Claude).LaunchArgs
-	if len(full) != 2 || full[0] != "--settings" {
-		t.Fatalf("Claude LaunchArgs = %#v, want [--settings, <payload>]", full)
-	}
-	for _, testCase := range []struct {
-		name string
-		args []string
-		want []string
-	}{
-		{name: "no caller flag returns the pair unchanged", args: nil, want: full},
-		{name: "caller flag with a separate value suppresses it", args: []string{"--settings", "/tmp/mine.json"}, want: []string{}},
-		{name: "caller flag with an = value suppresses it too", args: []string{"--settings=/tmp/mine.json"}, want: []string{}},
-		{name: "a merely similar flag does not suppress", args: []string{"--settingsfoo", "x"}, want: full},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			got := LaunchArgsFor(Claude, testCase.args)
-			if len(got) != len(testCase.want) {
-				t.Fatalf("LaunchArgsFor(Claude, %#v) = %#v, want %#v", testCase.args, got, testCase.want)
-			}
-			for index := range got {
-				if got[index] != testCase.want[index] {
-					t.Fatalf("LaunchArgsFor(Claude, %#v) = %#v, want %#v", testCase.args, got, testCase.want)
-				}
-			}
-		})
-	}
-}
-
-// TestLaunchArgsForOnAnEngineWithNoLaunchArgsIsAlwaysEmpty covers Codex, which
-// carries no LaunchArgs at all: no caller argv can suppress what was never
-// there, and the function must never invent something for an engine that
-// declares nothing.
-func TestLaunchArgsForOnAnEngineWithNoLaunchArgsIsAlwaysEmpty(t *testing.T) {
-	for _, args := range [][]string{nil, {"--settings", "/tmp/mine.json"}, {"--anything"}} {
-		if got := LaunchArgsFor(Codex, args); len(got) != 0 {
-			t.Fatalf("LaunchArgsFor(Codex, %#v) = %#v, want empty", args, got)
-		}
-	}
-}
-
 func TestFromSocketRecognizesEveryEngine(t *testing.T) {
 	for _, id := range All() {
 		name := MustLookup(id).SocketPrefix + "session"

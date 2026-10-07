@@ -2,12 +2,12 @@ package gather
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestTmuxProbeCommandsRecordUnderTheTmuxComponent: every TmuxProbe
@@ -18,7 +18,7 @@ func TestTmuxProbeCommandsRecordUnderTheTmuxComponent(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	binary := filepath.Join(t.TempDir(), "tmux")
 	script := "#!/bin/sh\ncase \"$3\" in capture-pane) echo 'PLANTED pane text';; show) echo on;; esac\nexit 0\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	client := TmuxProbe{Binary: binary, TmuxTmpDir: t.TempDir()}

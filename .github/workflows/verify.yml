@@ -88,36 +88,14 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
-      # This matrix is the regression test for the defect that shipped last
-      # night: code that builds fine on Linux but breaks on Darwin. pfm ships
-      # a real Darwin platform matrix (darwin/arm64 fully supported,
-      # darwin/amd64 with a runtime-level pinned-Python lock) — a Darwin-only
-      # compile break must fail CI here, not surface after a tag is pushed.
-      #
-      # Building the SAME target twice with identical flags/env and diffing
-      # sha256 doubles as the reproducibility gate: an inherited GOFLAGS once
-      # minted a binary that silently diverged from a clean rebuild.
-      # `env -u GOFLAGS` refuses to trust whatever the runner happened to
-      # have set and pins the flags this step actually asserts.
-      - name: Build twice, assert identical sha256 (compile + reproducibility)
+      # dev.sh owns the cross-platform compile and reproducibility verdict.
+      - name: Build and assert a reproducible sha256 (dev.sh build pfm)
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         shell: bash
-        run: |
-          set -euo pipefail
-          out1="$RUNNER_TEMP/pfm_a"
-          out2="$RUNNER_TEMP/pfm_b"
-          env -u GOFLAGS go -C pfm build -trimpath -ldflags "-X main.version=verify" -o "$out1" ./cmd/pfm
-          env -u GOFLAGS go -C pfm build -trimpath -ldflags "-X main.version=verify" -o "$out2" ./cmd/pfm
-          sha1="$(sha256sum "$out1" | cut -d' ' -f1)"
-          sha2="$(sha256sum "$out2" | cut -d' ' -f1)"
-          echo "sha256 = $sha1"
-          if [[ "$sha1" != "$sha2" ]]; then
-            echo "reproducibility FAILED: $sha1 != $sha2" >&2
-            exit 1
-          fi
+        run: .claude/scripts/dev.sh build pfm
 
   verify:
     name: fmt / vet / test / leak-check / codex-markers
@@ -140,59 +118,14 @@ jobs:
           name="$(basename "$GITHUB_WORKSPACE")"; name="${name#.}"
           echo "TMP_BASE=/tmp/$name" >> "$GITHUB_ENV"
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: pfm/go.mod
-          cache-dependency-path: pfm/go.sum
+      - name: Fetch the lint base
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
 
-      # The pinned tools (infra/fence/tools.env) — the same versions the fence image
-      # carries, so this job and `dev.sh iso verify pfm` give one verdict.
-      - name: pinned tools (golangci-lint, go-test-coverage)
-        run: make -C pfm tools
+      - name: Verify pfm through the isolated fence
+        run: .claude/scripts/dev.sh iso verify pfm
 
-      - name: fmt-check (gofumpt + gci + golines, must report nothing)
-        run: make -C pfm fmt-check
-
-      # Judged against origin/main: a release may not add a lint finding on
-      # any line it changed. Needs the full history (fetch-depth: 0 above).
-      - name: lint-new (golangci-lint, lines changed since main)
-        run: git fetch --no-tags origin main:refs/remotes/origin/main && make -C pfm lint-new LINT_BASE=origin/main
-
-      - name: go vet
-        run: |
-          go -C pfm vet ./...
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C pfm vet ./...
-
-      # pfm shells out to an interactive zsh for its terminal actions, and the
-      # runner image does not ship one. Install it rather than skipping the
-      # test: the developer box has zsh as its login shell, so a skip here
-      # would make CI silently weaker than the machine it is meant to protect.
-      - name: install zsh (required by the terminal-action tests)
-        run: sudo apt-get update && sudo apt-get install -y zsh
-
-      # Every package runs, including the harvester ones. `pfm harvest` ships
-      # as beta with open acceptance work (see releases/v0.58.0.md), but its
-      # tests PASS today — excluding a passing package buys nothing and makes
-      # the run read as broader coverage than it has. If a harvester test ever
-      # fails here, fix it or mark it skipped in the package with a reason;
-      # never restore a filter at this level, which hides the failure from the
-      # one place that reports it.
-      #
-      # The same fenced entry point owns unit, tagged e2e and timing verdicts.
-      - name: timing tool fixtures (fenced)
-        run: |
-          .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-timing_test.sh && bash pfm/scripts/test-sweep_test.sh'
-
-      - name: pfm suites and timing budgets (fenced)
+      - name: Test pfm through the isolated fence
         run: .claude/scripts/dev.sh iso test pfm
-
-      # The fenced suite runs as root and leaves 0700 run directories the
-      # runner user cannot scan; open them before the upload reads them.
-      - name: open the fenced timing files to the runner
-        if: always()
-        run: |
-          if [ -d "$TMP_BASE/timing" ]; then sudo chmod -R a+rX "$TMP_BASE/timing"; fi
 
       - name: upload test-timing TSV
         if: always()
@@ -202,19 +135,6 @@ jobs:
           path: |
             ${{ env.TMP_BASE }}/timing/**/*.tsv
             ${{ env.TMP_BASE }}/timing/**/*.json
+            ${{ env.TMP_BASE }}/timing/**/profile/**
           if-no-files-found: warn
           retention-days: 14
-
-      - name: leak-check (secrets / machine-absolute paths, full tracked tree)
-        env:
-          PFM_PRIVATE_LEAK_TERMS: ${{ secrets.PFM_PRIVATE_LEAK_TERMS }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$PFM_PRIVATE_LEAK_TERMS" || { echo "Missing repository secret PFM_PRIVATE_LEAK_TERMS" >&2; exit 1; }
-          umask 077
-          printf '%s\n' "$PFM_PRIVATE_LEAK_TERMS" > scripts/leak-terms.txt
-          ./scripts/leak-check.sh --files $(git ls-files)
-
-      - name: codex generated-marker gate
-        run: node scripts/check-codex-markers.mjs

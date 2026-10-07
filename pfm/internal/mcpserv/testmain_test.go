@@ -1,6 +1,7 @@
 package mcpserv
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -24,5 +25,14 @@ func TestMain(m *testing.M) {
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.OpenCode, opencodeengine.Matcher{})
-	os.Exit(testjail.Run(m))
+	code := testjail.Run(m)
+	if fleetBinaryDir != "" {
+		if err := os.RemoveAll(fleetBinaryDir); err != nil {
+			fmt.Fprintf(os.Stderr, "mcpserv: remove shared pfm build %s: %v\n", fleetBinaryDir, err)
+			if code == 0 {
+				code = 1
+			}
+		}
+	}
+	os.Exit(code)
 }

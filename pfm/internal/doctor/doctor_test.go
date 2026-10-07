@@ -11,24 +11,23 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/nudge"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestDoctorCrumbHealthAcceptsNudgeMetadataAndRejectsAnEmptyIdentity(t *testing.T) {
+func TestDoctorCrumbHealthAcceptsEffortMetadataAndRejectsAnEmptyIdentity(t *testing.T) {
 	dir := t.TempDir()
-	if err := nudge.RecordContext(dir, "session-a", 45); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(dir, paths.SIDEffortPrefix+"session-a"), []byte(`{"level":"high"}`), 0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := nudge.Decide(dir, "session-a", 45, 35, 10); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "nudge-ctx-"), []byte("45\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, paths.SIDEffortPrefix), []byte(`{"level":"high"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	entries, invalid, err := crumbHealth(dir)
-	if err != nil || entries != 3 || invalid != 1 {
+	if err != nil || entries != 2 || invalid != 1 {
 		t.Fatalf(
-			"entries=%d invalid=%d err=%v; legitimate sample/band must pass, empty identity must fail",
+			"entries=%d invalid=%d err=%v; legitimate effort must pass, empty identity must fail",
 			entries,
 			invalid,
 			err,

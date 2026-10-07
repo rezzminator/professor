@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -24,194 +25,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
-
-// stubRecorder is the half of a stub engine that makes it a CHAT rather than a
-// screen: it writes the engine's own transcript and the evidence that binds it
-// to this tmux socket — a sid crumb for Claude, an open rollout descriptor
-// under a jailed /proc for Codex.
-//
-// Without it a stub can only prove that keystrokes were sent. pfm now
-// refuses to call a prompt delivered until the ENGINE has recorded being
-// asked, so a jail that writes no transcript can no longer tell a delivered
-// prompt from one that vanished into a modal — which is the whole failure
-// being defended against.
-const stubRecorder = `
-_esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
-_sock() { if [ -n "$TMUX" ]; then basename "${TMUX%%,*}"; else printf '%s' "$STUB_SOCKET"; fi; }
-_append() { printf '%s\n' "$1" >> "$STUB_TRANSCRIPT"; }
-cx_user()  { _append "{\"timestamp\":\"2026-08-12T00:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"$(_esc "$1")\"}]}}"; }
-cx_agent() { _append "{\"timestamp\":\"2026-08-12T00:00:01.000Z\",\"payload\":{\"type\":\"agent_message\",\"message\":\"$(_esc "$1")\"}}"; }
-cc_user()  { _append "{\"type\":\"user\",\"cwd\":\"$(_esc "$PWD")\",\"message\":{\"content\":\"$(_esc "$1")\"}}"; }
-cc_agent() { _append "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"$(_esc "$1")\"}]}}"; }
-answer() {
-  if [ "$STUB_KIND" = cx ]; then cx_agent "${STUB_REPLY:-ack}: $1"; else cc_agent "${STUB_REPLY:-ack}: $1"; fi
-}
-turn() {
-  [ -z "$STUB_TRANSCRIPT" ] && return 0
-  if [ "$STUB_KIND" = cx ]; then cx_user "$1"; else cc_user "$1"; fi
-  [ -n "$STUB_MUTE" ] && return 0
-  if [ -n "$STUB_DELAY" ]; then ( sleep "$STUB_DELAY"; answer "$1" ) & else answer "$1"; fi
-  return 0
-}
-_fakeproc() {
-  [ -z "$PFM_PROC_ROOT" ] && return 0
-  mkdir -p "$PFM_PROC_ROOT/$$/fd"
-  printf '%s\0--jailed\0' "$1" > "$PFM_PROC_ROOT/$$/cmdline"
-  printf '%s (%s) S %s 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 0 20 0 100\n' "$$" "$1" "$PPID" \
-    > "$PFM_PROC_ROOT/$$/stat"
-  : > "$PFM_PROC_ROOT/$$/environ"
-  # The entry goes when the engine does, so a chat that exits stops looking
-  # alive to the very scan that has to notice it died.
-  trap 'rm -rf "$PFM_PROC_ROOT/$$"' EXIT
-  return 0
-}
-codex_live() {
-  STUB_KIND=cx
-  [ -z "$CX_STUB_ROLLOUT" ] && return 0
-  STUB_TRANSCRIPT="$CX_STUB_ROLLOUT"
-  mkdir -p "$(dirname "$STUB_TRANSCRIPT")"
-  if [ ! -s "$STUB_TRANSCRIPT" ]; then
-    rollout_name="${STUB_TRANSCRIPT##*/}"
-    rollout_id="${rollout_name%.jsonl}"
-    rollout_id="${rollout_id: -36}"
-    printf '{"type":"session_meta","payload":{"id":"%s","source":"cli","thread_source":"user"}}\n' "$rollout_id" >> "$STUB_TRANSCRIPT"
-  fi
-  _fakeproc codex
-  ln -sf "$STUB_TRANSCRIPT" "$PFM_PROC_ROOT/$$/fd/7"
-  return 0
-}
-claude_live() {
-  STUB_KIND=cc
-  [ -z "$CC_STUB_TRANSCRIPT" ] && return 0
-  STUB_TRANSCRIPT="$CC_STUB_TRANSCRIPT"
-  mkdir -p "$(dirname "$STUB_TRANSCRIPT")" "$PFM_SID_DIR"
-  : >> "$STUB_TRANSCRIPT"
-  printf '%s' "$STUB_TRANSCRIPT" > "$PFM_SID_DIR/$(_sock)"
-  _fakeproc claude
-  return 0
-}
-`
-
-// stubCodex is a Codex TUI reduced to the four states pfm's rename
-// choreography navigates, driven over a REAL tty inside a REAL tmux server:
-// canonical mode is turned off so a partial "/rename" is seen before Enter
-// (exactly how the engine's own slash-command popup behaves), and every state
-// repaints the screen so a marker that should be gone really leaves the
-// capture.
-const stubCodex = `#!/usr/bin/env bash
-printf '%s\n' "$*" > "${CX_STUB_ARGV:-/dev/null}"
-stty -icanon -echo -ixon min 1 time 0 2>/dev/null
-` + stubRecorder + `
-codex_live
-stage=composer; buf=""; name=""
-status='  019f · ~/work · Full Access · Context 0% used · 0 in · 0 out
-'
-modals="${CX_STUB_MODALS:-1}"
-render() {
-  printf '\033[2J\033[H'
-  if [ "$modals" -gt 0 ]; then
-    # The selection cursor is the same glyph the composer draws, and the
-    # status line is gone: the exact screen that fooled the first fix.
-    printf 'codex\n  Hooks\n  1 hook needs review before it can run.\n'
-    printf '\u203a 2. Trust all and continue\n'
-    printf '  Press enter to confirm or esc to go back\n'
-    return
-  fi
-  case "$stage" in
-    offered) printf 'codex\n› %s\n  /rename  rename the current thread\n%s' "$buf" "$status" ;;
-    prompt)  printf 'codex\n| Name thread\n| Type a name and press Enter\n' ;;
-    *)       if [ -n "$name" ]; then printf '* Session renamed to %s.\n' "$name"; fi
-             printf 'codex\n› %s\n%s' "$buf" "$status" ;;
-  esac
-}
-render
-# -d '' -n1, never -N1: the darwin CI runner's /bin/bash is 3.2, whose read has no -N.
-while IFS= read -r -d '' -n1 ch; do
-  if [ "$modals" -gt 0 ]; then
-    # A startup overlay: ONLY Escape gets out of it, everything else vanishes
-    # into it exactly as the real hooks/trust modals swallow keystrokes.
-    [ "$ch" = $'\033' ] && modals=$((modals - 1))
-    render
-    continue
-  fi
-  case "$ch" in
-    $'\n'|$'\r')
-      case "$stage" in
-        offered) stage=prompt; buf="" ;;
-        prompt)  name="$buf"; printf '%s' "$buf" > "$CX_STUB_NAME"; stage=composer; buf="" ;;
-        *)       if [ -n "$buf" ]; then
-                   printf '%s\n' "$buf" >> "$CX_STUB_PROMPT"
-                   turn "$buf"
-                 fi
-                 buf="" ;;
-      esac ;;
-    $'\023')
-      : ;;
-    $'\177'|$'\b')
-      buf="${buf%?}" ;;
-    *)
-      buf="$buf$ch"
-      if [ "$stage" = composer ] && [ "$buf" = "/rename" ] &&
-         [ -z "$CX_STUB_NO_RENAME" ]; then stage=offered; fi ;;
-  esac
-  render
-done
-`
-
-// stubClaude records the argv it was launched with, answers the prompt that
-// travelled on it, and then behaves like a composer: Claude's name and first
-// prompt need no keystrokes, but every LATER message does, and a chat that
-// cannot be spoken to a second time is not a conversation.
-//
-// CC_STUB_DEAF models the failure this whole verification exists for: the
-// launch prompt arrives on the command line and is never recorded, exactly as
-// a startup dialog eating it would look from the outside.
-//
-// CC_STUB_OVERLAY models the recoverable shape of that same failure: the
-// prompt is held unsent behind a startup overlay, and an Escape followed by
-// an Enter submits it. Deaf is unrecoverable, overlay is what a retry saves.
-const stubClaude = `#!/usr/bin/env bash
-printf '%s\n' "$*" > "$CC_STUB_ARGV"
-stty -icanon -echo -ixon min 1 time 0 2>/dev/null
-` + stubRecorder + `
-claude_live
-prompt=""
-skip=0
-for argument in "$@"; do
-  if [ "$skip" = 1 ]; then skip=0; continue; fi
-  case "$argument" in
-    --name|--model|--effort) skip=1 ;;
-    -*) ;;
-    *) prompt="$argument"; break ;;
-  esac
-done
-buf=""; note=""
-render() {
-  printf '\033[2J\033[H'; printf 'claude ready\n'
-  [ -n "$note" ] && printf '%s\n' "$note"
-  printf '❯ %s\n' "$buf"
-}
-if [ -n "$prompt" ] && [ -z "$CC_STUB_DEAF" ] && [ -z "$CC_STUB_OVERLAY" ]; then turn "$prompt"; fi
-pending=""; dismissed=0
-if [ -n "$CC_STUB_OVERLAY" ]; then pending="$prompt"; fi
-render
-# -d '' -n1, never -N1: the darwin CI runner's /bin/bash is 3.2, whose read has no -N.
-while IFS= read -r -d '' -n1 ch; do
-  case "$ch" in
-    $'\033') dismissed=1 ;;
-    $'\n'|$'\r')
-      if [ -n "$buf" ]; then turn "$buf"
-      elif [ "$dismissed" = 1 ] && [ -n "$pending" ]; then turn "$pending"; pending=""; fi
-      buf=""; note="" ;;
-    $'\023') buf=""; note="  draft stashed" ;;
-    $'\177'|$'\b') buf="${buf%?}" ;;
-    *) buf="$buf$ch" ;;
-  esac
-  render
-done
-`
 
 type runJail struct {
 	root    string
@@ -223,13 +39,13 @@ type runJail struct {
 	transcript string
 }
 
-func TestRunJailPinsXDGConfigHome(t *testing.T) {
-	foreign := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", foreign)
+func TestRunJailPinsPFMConfig(t *testing.T) {
+	foreign := filepath.Join(t.TempDir(), "pfm.config.json")
+	t.Setenv(paths.EnvConfig, foreign)
 	jail := newRunJail(t)
-	want := filepath.Join(jail.root, "home", ".config")
-	if got := os.Getenv("XDG_CONFIG_HOME"); got != want {
-		t.Fatalf("XDG_CONFIG_HOME=%q, want jailed config root %q", got, want)
+	want := filepath.Join(jail.root, "home", pfmconfig.FileName)
+	if got := os.Getenv(paths.EnvConfig); got != want {
+		t.Fatalf("PFM_CONFIG=%q, want jailed config %q", got, want)
 	}
 }
 
@@ -238,8 +54,8 @@ func newRunJail(t *testing.T) *runJail {
 	previousTimings := runSpawnTimings
 	runSpawnTimings = spawn.Timings{
 		Poll:  10 * time.Millisecond,
-		Boot:  time.Second,
-		Step:  time.Second,
+		Boot:  10 * time.Second,
+		Step:  5 * time.Second,
 		Typed: 10 * time.Millisecond,
 	}
 	t.Cleanup(func() { runSpawnTimings = previousTimings })
@@ -273,6 +89,7 @@ func newRunJail(t *testing.T) *runJail {
 		jail.tmuxDir,
 		jail.binDir,
 		filepath.Join(root, "home"),
+		pfmconfig.DefaultAccountDir(filepath.Join(root, "home"), 1),
 		filepath.Join(root, "claude"),
 		filepath.Join(root, "codex"),
 		filepath.Join(root, "sid"),
@@ -284,7 +101,7 @@ func newRunJail(t *testing.T) *runJail {
 		}
 	}
 	write := func(name, body string) {
-		if err := os.WriteFile(
+		if err := testjail.WriteExecutable(
 			filepath.Join(jail.binDir, name),
 			[]byte(body),
 			0o700,
@@ -301,15 +118,18 @@ func newRunJail(t *testing.T) *runJail {
 	); err != nil {
 		t.Fatal(err)
 	}
-	configDir := filepath.Join(root, "home", ".config", "pfm")
+	configDir := filepath.Join(root, "home")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(configDir, "config.json"),
+		filepath.Join(configDir, pfmconfig.FileName),
 		[]byte(`{"version":2,"ask":{"engine":"claude"}}`),
 		0o600,
 	); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(configDir, filepath.Join(root, "work")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -318,6 +138,7 @@ func newRunJail(t *testing.T) *runJail {
 	// chat must not inherit its tmux server, pane, or chat identity.
 	t.Setenv("PATH", jail.binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv(paths.EnvConfig, filepath.Join(configDir, pfmconfig.FileName))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "home", ".config"))
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
@@ -325,7 +146,7 @@ func newRunJail(t *testing.T) *runJail {
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("PFM_HOME", filepath.Join(root, "home"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -452,7 +273,7 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 		t.Fatalf("codex window=%q, want inline launch name", got)
 	}
 	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		FleetDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
+		StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
 	})
 	t.Cleanup(func() { _ = state.Close() })
 	events, err := state.CommsSince(context.Background(), 0, 10)
@@ -478,6 +299,41 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 	}
 }
 
+// TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay is the rename under
+// a loaded machine: the engine repaints late after the Escape that clears its
+// startup overlay, so pfm, seeing the overlay hold, sends it spare Escapes.
+// Codex reads those as keys on an empty composer, and the chat is still named
+// and prompted.
+func TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	t.Setenv("CX_STUB_SLOW_DISMISS", "0.5")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new",
+		"--engine", "codex",
+		"--name", "slow worker",
+		"--cwd", filepath.Join(jail.root, "work"),
+		"read the incident report",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if got := jail.await(t, "cx-name", "slow"); got != "slow worker" {
+		t.Fatalf("thread name = %q, want %q (stderr=%q)", got, "slow worker", stderr.String())
+	}
+	if got := jail.await(t, "cx-prompt", "incident"); strings.TrimSpace(got) != "read the incident report" {
+		t.Fatalf("delivered prompt = %q", got)
+	}
+	if report := stdout.String(); !strings.Contains(report, "\tnamed\t") {
+		t.Fatalf("run report = %q", report)
+	}
+}
+
 // TestRunReportsACodexBuildThatCannotBeRenamed is the version-drift drill: a
 // Codex that does not offer /rename must leave a WORKING chat that says so —
 // non-zero exit, UNNAMED in the report — and the abandoned command must never
@@ -487,6 +343,7 @@ func TestRunReportsACodexBuildThatCannotBeRenamed(t *testing.T) {
 		t.Skip("tmux is not installed")
 	}
 	jail := newRunJail(t)
+	runSpawnTimings.Step = 250 * time.Millisecond
 	defer jail.killSockets(t)
 	t.Setenv("CX_STUB_NO_RENAME", "1")
 
@@ -561,6 +418,106 @@ func TestChatNewSpawnsAClaudeChatWithItsNameOnTheCommandLine(t *testing.T) {
 	}
 }
 
+func TestChatNewRecordsAssignedSessionAndAccountCache(t *testing.T) {
+	for _, testCase := range []struct {
+		name, configCache, cache, ambient string
+		want                              bool
+	}{
+		{name: "configured default", configCache: "true", want: true},
+		{name: "1h choice", configCache: "false", cache: "1h", want: true},
+		{name: "5m choice", configCache: "true", cache: "5m", want: false},
+		{name: "ambient cache ignored", configCache: "false", ambient: "1", want: false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := exec.LookPath("tmux"); err != nil {
+				t.Skip("tmux is not installed")
+			}
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			if testCase.ambient != "" {
+				t.Setenv("CC_ARM_1H", testCase.ambient)
+			}
+			for _, directory := range []string{filepath.Join(jail.root, "account1"), filepath.Join(jail.root, "account2")} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			config := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q},`+
+				`{"id":2,"configDir":%q,"claude":{"cache1h":%s}}]}`,
+				filepath.Join(jail.root, "account1"), filepath.Join(jail.root, "account2"), testCase.configCache)
+			if err := os.WriteFile(os.Getenv(paths.EnvConfig), []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{
+				"chat", "new", "--engine", "claude", "--name", "recorded-worker",
+				"--account", "2", "--cwd", filepath.Join(jail.root, "work"),
+			}
+			if testCase.cache != "" {
+				args = append(args, "--cache", testCase.cache)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != 0 {
+				t.Fatalf("chat new rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			argv := jail.await(t, "cc-argv", "--session-id")
+			fields := strings.Fields(argv)
+			id := ""
+			for index, word := range fields {
+				if word == "--session-id" && index+1 < len(fields) {
+					id = fields[index+1]
+				}
+			}
+			if id == "" || !strings.Contains(argv, "--name recorded-worker") {
+				t.Fatalf("launch argv=%q", argv)
+			}
+			resolved, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			launches, err := fleetdb.OpenLaunches(context.Background(), resolved)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = launches.Close() }()
+			record, err := launches.LaunchFor(context.Background(), id)
+			if err != nil || record.Account != 2 || record.Cache1H != testCase.want || record.Engine != "cc" {
+				t.Fatalf("launch record=%#v err=%v", record, err)
+			}
+		})
+	}
+}
+
+func TestChatNewRejectsInvalidCacheChoice(t *testing.T) {
+	jailTest(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"chat", "new", "--name", "invalid", "--cache", "x"}, &stdout, &stderr)
+	if code != 2 || stderr.String() != "pfm chat new: --cache must be 1h or 5m\n" {
+		t.Fatalf("invalid cache code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	blocker := filepath.Join(jail.root, "state-blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvStateDB, filepath.Join(blocker, "pfm.db"))
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new", "--engine", "claude", "--name", "record-failure-worker",
+		"--cwd", filepath.Join(jail.root, "work"),
+	}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stderr.String(), "pfm: record launch ") ||
+		!strings.Contains(jail.await(t, "cc-argv", "--session-id"), "--name record-failure-worker") {
+		t.Fatalf("chat new rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 // TestMachineConfigChangesTheActualLaunchCommands is the machine-config
 // acceptance seam: it grades the argv recorded by the engine processes, not
 // merely the decoded config struct. The default-path tests above separately
@@ -569,13 +526,15 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		engine    string
+		proofFile string
 		argvFile  string
 		forbidden []string
 	}{
 		{
-			name:     "claude prompt permissions",
-			engine:   "claude",
-			argvFile: "cc-argv",
+			name:      "claude prompt permissions",
+			engine:    "claude",
+			proofFile: "cc-argv",
+			argvFile:  "cc-argv",
 			forbidden: []string{
 				"--allow-dangerously-skip-permissions",
 				"--dangerously-skip-permissions",
@@ -584,6 +543,7 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 		{
 			name:      "codex workspace sandbox",
 			engine:    "codex",
+			proofFile: "cx-prompt",
 			argvFile:  "cx-argv",
 			forbidden: []string{"--dangerously-bypass-approvals-and-sandbox"},
 		},
@@ -597,6 +557,11 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 			t.Setenv("CX_STUB_ARGV", filepath.Join(jail.root, "cx-argv"))
 
 			configPath := filepath.Join(jail.root, "config.json")
+			for _, account := range []string{"1", "2", "3"} {
+				if err := os.MkdirAll(filepath.Join(jail.root, "accounts", account), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			content, err := json.Marshal(map[string]any{
 				"version": 1,
 				"accounts": []map[string]any{
@@ -631,7 +596,14 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("run exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
-			argv := jail.await(t, test.argvFile, "inspect")
+			proof := jail.await(t, test.proofFile, "inspect")
+			if !strings.Contains(proof, "inspect") {
+				t.Fatalf("launch evidence %q lacks inspect: %q", test.proofFile, proof)
+			}
+			argv := jail.read(t, test.argvFile)
+			if strings.TrimSpace(argv) == "" {
+				t.Fatalf("configured %s argv file %q is empty or absent", test.engine, test.argvFile)
+			}
 			for _, value := range test.forbidden {
 				if strings.Contains(argv, value) {
 					t.Fatalf("configured %s argv still contains %q: %q", test.engine, value, argv)
@@ -724,7 +696,7 @@ func assertJailedSpawnLineage(t *testing.T, jail *runJail, parent, forbiddenPare
 	}
 	socket := entries[0].Name()
 	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		FleetDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
+		StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
 	})
 	t.Cleanup(func() { _ = state.Close() })
 	children, found, err := state.Children(context.Background(), fleetdb.KindNew, parent)
@@ -845,7 +817,7 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 	t.Run("during await", func(t *testing.T) {
 		jail := newRunJail(t)
 		defer jail.killSockets(t)
-		t.Setenv("CC_STUB_MUTE", "1")
+		t.Setenv("STUB_MUTE", "1")
 		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
@@ -874,5 +846,59 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 			strings.Contains(stderr.String(), "died at birth") {
 			t.Fatalf("cancelled await exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
+		content, err := os.ReadFile(jail.transcript)
+		if err != nil {
+			t.Fatalf("read cancelled await transcript: %v", err)
+		}
+		if strings.Contains(string(content), "ack: cancel await") {
+			t.Fatalf("cancelled await transcript contains stub answer: %q", content)
+		}
 	})
+}
+
+func TestChatNewCodexRequiresLogin(t *testing.T) {
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.Remove(filepath.Join(home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-logged-out-new")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--config", configPath, "chat", "new", "--engine", "codex", "x"}, &stdout, &stderr)
+	entries, err := os.ReadDir(jail.tmuxDir)
+	if code != 1 || !strings.Contains(stderr.String(), "run codex login") || err != nil || len(entries) != 0 {
+		t.Fatalf("chat new code=%d stderr=%q sockets=%v error=%v", code, stderr.String(), entries, err)
+	}
+}
+
+func TestChatNewCodexAdmitsAnAPIKeyHome(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.WriteFile(
+		filepath.Join(home, "auth.json"),
+		[]byte(`{"OPENAI_API_KEY":"sk-fixture","tokens":null}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-api-key-new")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--config", configPath, "chat", "new", "--engine", "codex",
+		"--cwd", filepath.Join(jail.root, "work"), "x",
+	}, &stdout, &stderr)
+	if code != 0 || strings.Contains(stderr.String(), "run codex login") ||
+		!strings.Contains(stdout.String(), "attach: tmux -L cx-") {
+		t.Fatalf("chat new code=%d stdout=%q stderr=%q; want API-key home to launch",
+			code, stdout.String(), stderr.String())
+	}
 }

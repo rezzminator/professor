@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,9 @@ type Result struct {
 	Error      string
 	Raw        string
 	VerboseErr string
+	// ProbeHomeErr is the error removing the engine's throwaway probe home
+	// left behind; the probe's verdict stands, the residue is reported.
+	ProbeHomeErr string
 	// ExitCode is the version probe's process exit code, or -1 when the
 	// failure never reached one (lookup, timeout, cancellation).
 	ExitCode int
@@ -131,8 +135,8 @@ func Probe(ctx context.Context, entries []Entry, options ProbeOptions) []Result 
 	return results
 }
 
-func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
-	result := Result{Entry: entry, ExitCode: -1}
+func probeOne(ctx context.Context, entry Entry, options ProbeOptions) (result Result) {
+	result = Result{Entry: entry, ExitCode: -1}
 	path, err := options.LookPath(entry.Command)
 	if err != nil {
 		result.State = StateMissing
@@ -152,8 +156,25 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 		return result
 	}
 	result.Path = path
+	versionEnvironment, selfDoctorEnvironment := []string(nil), terminalEnvironment()
+	if entry.ProbeHome {
+		home, homeErr := NewEngineProbeHome(entry.Engine)
+		if homeErr != nil {
+			result.State = StateBroken
+			result.Error = homeErr.Error()
+			return result
+		}
+		defer func() {
+			if removeErr := home.Remove(); removeErr != nil {
+				result.ProbeHomeErr = removeErr.Error()
+			}
+		}()
+		versionEnvironment = home.Env(os.Environ())
+		selfDoctorEnvironment = home.Env(selfDoctorEnvironment)
+	}
 	if len(entry.VersionArgs) != 0 {
-		output, runErr := boundedOutput(ctx, options.Timeout, options.Runner, path, entry.VersionArgs...)
+		output, runErr := boundedOutputWithEnvironment(
+			ctx, options.Timeout, versionEnvironment, options.Runner, path, entry.VersionArgs...)
 		result.Raw = string(output)
 		if verboseErr := writeVerbose(options.VerboseDir, entry.Name+"-version", output); verboseErr != nil {
 			result.VerboseErr = verboseErr.Error()
@@ -201,6 +222,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 			entry,
 			options.VerboseDir,
 			selfDoctorTimeout(options),
+			selfDoctorEnvironment,
 			options.Runner,
 		)
 		if err != nil {
@@ -241,10 +263,11 @@ func probeSelfDoctor(
 	entry Entry,
 	verboseDir string,
 	timeout time.Duration,
+	environment []string,
 	runner Runner,
 ) (string, string, error) {
 	helpArgs := []string{entry.SelfDoctorArgs[0], "--help"}
-	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, terminalEnvironment(), runner, path, helpArgs...)
+	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, environment, runner, path, helpArgs...)
 	if err := writeVerbose(verboseDir, entry.Name+"-self-doctor-help", help); err != nil {
 		return "", "", err
 	}
@@ -264,7 +287,7 @@ func probeSelfDoctor(
 	output, err := boundedOutputWithEnvironment(
 		ctx,
 		timeout,
-		terminalEnvironment(),
+		environment,
 		runner,
 		path,
 		entry.SelfDoctorArgs...)
@@ -282,16 +305,66 @@ func probeSelfDoctor(
 			strings.Contains(strings.ToLower(string(output)), "interactive") {
 			return "unavailable (interactive-only)", "", nil
 		}
-		return string(StateBroken), selfDoctorFailureLine(string(output)), nil
+		failing := selfDoctorFailingChecks(string(output))
+		if len(failing) != 0 && onlyAccountChecks(failing, entry.AccountChecks) {
+			return "ok (account rows left to pfm: " + strings.Join(failing, ",") + ")", "", nil
+		}
+		return string(StateBroken), selfDoctorFailureLine(string(output), entry.AccountChecks), nil
 	}
 	return "ok", "", nil
 }
 
-func selfDoctorFailureLine(output string) string {
+// selfDoctorFailRow returns the check a self-doctor summary line fails —
+// `[FAIL] auth …`, Codex's ASCII `[XX] auth …`, or `✗ auth …` — lowercased,
+// and whether the line is a failing row at all.
+func selfDoctorFailRow(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	lower := strings.ToLower(trimmed)
+	for _, label := range []string{"[fail]", "[xx]", "✗"} {
+		if rest, ok := strings.CutPrefix(lower, label); ok {
+			fields := strings.Fields(rest)
+			if len(fields) == 0 {
+				return "", true
+			}
+			return fields[0], true
+		}
+	}
+	return "", false
+}
+
+// selfDoctorFailingChecks lists each check the summary fails, once, in order.
+func selfDoctorFailingChecks(output string) []string {
+	var checks []string
+	for line := range strings.SplitSeq(output, "\n") {
+		if check, failing := selfDoctorFailRow(line); failing && !slices.Contains(checks, check) {
+			checks = append(checks, check)
+		}
+	}
+	return checks
+}
+
+func onlyAccountChecks(failing, account []string) bool {
+	for _, check := range failing {
+		if !slices.Contains(account, check) {
+			return false
+		}
+	}
+	return true
+}
+
+// selfDoctorFailureLine names the first failing row that is not one of the
+// account rows, which a throwaway home fails by construction.
+func selfDoctorFailureLine(output string, accountChecks []string) string {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		lower := strings.ToLower(trimmed)
+		if check, failing := selfDoctorFailRow(trimmed); failing {
+			if !slices.Contains(accountChecks, check) {
+				return trimmed
+			}
+			continue
+		}
 		if strings.Contains(trimmed, "✗") || strings.Contains(lower, "[fail]") ||
 			strings.HasPrefix(lower, "fail") || strings.Contains(lower, "error:") {
 			return trimmed
@@ -318,16 +391,6 @@ func effectiveTimeout(timeout time.Duration) time.Duration {
 		return ProbeTimeout
 	}
 	return timeout
-}
-
-func boundedOutput(
-	parent context.Context,
-	timeout time.Duration,
-	runner Runner,
-	path string,
-	args ...string,
-) ([]byte, error) {
-	return boundedOutputWithEnvironment(parent, timeout, nil, runner, path, args...)
 }
 
 // boundedOutputWithEnvironment runs path+args through runner (nil defaults to

@@ -1,6 +1,6 @@
 // Package agentrole is the one resolver for "make this seat BE a registered
 // agent role from birth." It reads the constitution a --role seat is born
-// having read — the Codex fleet prompt plus the compiled role's
+// having read — the Codex base prompt plus the compiled role's
 // developer_instructions for a cx seat, the
 // .claude/agents/<role>.md body for a cc seat — and returns it as plain text
 // for the caller to fold into the launch prompt, or an error naming exactly
@@ -24,32 +24,51 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // RefreshSeatPrompt re-resolves the marker role, atomically rewrites its
 // prompt file, and returns the engine-ready prompt channel.
 func RefreshSeatPrompt(engine pfmengine.ID, sidDir, socket, pane, cwd, home string) (string, error) {
-	role, _, path, found, err := ReadSeatPrompt(sidDir, socket, pane)
-	if err != nil || !found {
-		return "", err
-	}
-	constitution, _, err := Resolve(engine, role, cwd, home)
+	harnessPath, harnessFound, err := ReadHarnessPromptRecord(sidDir, socket, pane)
 	if err != nil {
 		return "", err
 	}
-	var stagedFleetPrompt string
-	if engine == pfmengine.Claude {
-		path := action.ProfessorPromptPath(home)
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return "", fmt.Errorf("agent role: read staged Claude prompt %s: %w", path, readErr)
+	var harnessBody string
+	if harnessFound {
+		if engine != pfmengine.Claude {
+			return "", fmt.Errorf(
+				"agent role: seat %s records harness prompt %s, which only a claude seat carries",
+				socket,
+				harnessPath,
+			)
 		}
-		stagedFleetPrompt = string(raw)
+		if _, harnessBody, err = LoadHarnessPrompt(harnessPath); err != nil {
+			return "", fmt.Errorf("agent role: seat %s was launched on a harness prompt: %w", socket, err)
+		}
 	}
-	body, err := ComposeSeatPrompt(engine, role, constitution, stagedFleetPrompt)
+	role, _, path, found, err := ReadSeatPrompt(sidDir, socket, pane)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		if harnessFound {
+			return harnessPath, nil
+		}
+		persona, err := workbench.ForLaunch(cwd, engine, workbench.Resume)
+		if err != nil {
+			return "", err
+		}
+		if persona.Applies() {
+			if engine == pfmengine.Claude {
+				return persona.Prompt, nil
+			}
+			return persona.Body, nil
+		}
+		return "", nil
+	}
+	body, constitution, err := ResolveSeatPrompt(engine, role, cwd, home, harnessBody)
 	if err != nil {
 		return "", err
 	}
@@ -137,7 +156,7 @@ func Resolve(engineID pfmengine.ID, role, cwd, home string) (string, Artifact, e
 		path := filepath.Join(dir, role+kind.ext)
 		info, statErr := os.Stat(path)
 		if statErr == nil && !info.IsDir() {
-			text, err := readArtifact(engineID, path)
+			text, err := readArtifact(engineID, path, cwd, home)
 			if err != nil {
 				return "", Artifact{}, err
 			}
@@ -169,12 +188,12 @@ func Resolve(engineID pfmengine.ID, role, cwd, home string) (string, Artifact, e
 // readArtifact reads and validates the constitution once the ladder has
 // already found which file it is; it never falls through to the other
 // engine's artifact shape.
-func readArtifact(engineID pfmengine.ID, path string) (string, error) {
+func readArtifact(engineID pfmengine.ID, path, cwd, home string) (string, error) {
 	switch engineID {
 	case pfmengine.Claude:
 		return readMarkdownConstitution(path)
 	case pfmengine.Codex:
-		return readTOMLConstitution(path)
+		return readTOMLConstitution(path, cwd, home)
 	default:
 		return "", fmt.Errorf("agent role: engine %q has no registered agent artifact ladder", engineID)
 	}
@@ -221,7 +240,7 @@ type roleTOML struct {
 	DeveloperInstructions string `toml:"developer_instructions"`
 }
 
-func readTOMLConstitution(path string) (string, error) {
+func readTOMLConstitution(path, cwd, home string) (string, error) {
 	var doc roleTOML
 	if _, err := toml.DecodeFile(path, &doc); err != nil {
 		return "", fmt.Errorf("agent role: parse %s: %w", path, err)
@@ -232,10 +251,10 @@ func readTOMLConstitution(path string) (string, error) {
 	// A seat's -c developer_instructions REPLACES the config-level fleet
 	// prompt (codex-rs/core/src/agent/role.rs build_next_config), and a
 	// compiled role file carries only its own body — so the seat's
-	// constitution is the fleet prompt, then the role.
-	fleetPrompt, err := codexgen.FleetPrompt()
+	// constitution is the base prompt, then the role.
+	fleetPrompt, err := BasePrompt(pfmengine.Codex, cwd, home)
 	if err != nil {
-		return "", fmt.Errorf("agent role: compose the Codex fleet prompt for %s: %w", path, err)
+		return "", fmt.Errorf("agent role: compose the Codex base prompt for %s: %w", path, err)
 	}
 	return fleetPrompt + "\n---\n\n" + doc.DeveloperInstructions, nil
 }

@@ -7,16 +7,20 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate")
+		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate | claude [--account N]")
 		return 2
 	}
 	switch args[0] {
@@ -32,6 +36,8 @@ func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		}
 		printResolvedConfig(stdout, runtime)
 		return 0
+	case pfmengine.MustLookup(pfmengine.Claude).LongName:
+		return runConfigClaude(args[1:], stdout, stderr, runtime)
 	case "validate":
 		if len(args) != 1 {
 			fmt.Fprintln(stderr, "usage: pfm config validate")
@@ -45,9 +51,53 @@ func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		fmt.Fprintf(stdout, "config valid: %s\n", loaded.Path)
 		return 0
 	default:
-		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate")
+		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate | claude [--account N]")
 		return 2
 	}
+}
+
+func runConfigClaude(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+	flags := cli.NewFlagSet("config claude", "usage: pfm config claude [--account N]", stderr)
+	account := flags.Int("account", 0, "Claude account roster ID")
+	if code, ok := cli.ParseFlags(flags, args); !ok {
+		return code
+	}
+	if flags.NArg() != 0 || *account < 0 {
+		flags.Usage()
+		return 2
+	}
+	if *account != 0 {
+		if _, found := runtime.Config.AccountByID(*account); !found {
+			ids := make([]int, 0, len(runtime.Config.Accounts))
+			for _, entry := range runtime.Config.Accounts {
+				ids = append(ids, entry.ID)
+			}
+			sort.Ints(ids)
+			configured := make([]string, 0, len(ids))
+			for _, id := range ids {
+				configured = append(configured, strconv.Itoa(id))
+			}
+			fmt.Fprintf(
+				stderr,
+				"pfm config claude: account %d is not configured (configured: %s)\n",
+				*account,
+				strings.Join(configured, ","),
+			)
+			return 2
+		}
+	}
+	for _, row := range claudelaunch.Resolve(runtime.Config, *account) {
+		fmt.Fprintf(
+			stdout,
+			"%s wire=%s target=%s value=%s source=%s\n",
+			row.Knob.Name,
+			row.Knob.Wire,
+			row.Knob.Target,
+			row.Value,
+			row.Won,
+		)
+	}
+	return 0
 }
 
 func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
@@ -59,6 +109,11 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	if flags.NArg() != 0 {
 		flags.Usage()
 		return 2
+	}
+	if runtime.Config.Path == "" {
+		_, markerErr := pfmconfig.ResolvePath(runtime.Paths.Home)
+		fmt.Fprintf(stderr, "pfm config init: %v\n", pfmconfig.NoConfigPathError(markerErr))
+		return 1
 	}
 	harvesterPath := pfmconfig.HarvesterPath(runtime.Config.Path)
 	if !*force {
@@ -93,10 +148,6 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	fmt.Fprintln(stdout, "  claude.permissionMode: bypass or prompted; account values override this default")
 	fmt.Fprintln(
 		stdout,
-		"  claude.compactNudge: the milestone self-compact reminder — enabled, start %, step % (main Claude chat only; a reminder, never an order); account values override",
-	)
-	fmt.Fprintln(
-		stdout,
 		"  codex.yolo: whether Codex launches with approval bypass; account values override this default",
 	)
 	fmt.Fprintln(
@@ -126,10 +177,10 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	)
 	fmt.Fprintln(stdout, "  scholarly: googleScholarURL — optional Google Scholar base URL; empty disables it")
 	fmt.Fprintln(stdout, "  fetch: browser (the opt-in real-browser rung), userAgent, proxyURL")
-	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout — handed to the pinned Python converter")
+	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout, workers, queue, timeoutSeconds — the Python converter's pool")
 	fmt.Fprintln(
 		stdout,
-		"  cache: dir (default ~/.professor/.cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)",
+		"  cache: dir (default ~/.professor/.harvester-cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)",
 	)
 	fmt.Fprintln(stdout, "  output: maxInlineChars")
 	return 0
@@ -146,6 +197,13 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
+	for index, value := range []string{runtime.Paths.StateDB, runtime.Paths.CacheDB} {
+		source := config.Source([]string{"state.db", "state.cacheDb"}[index])
+		if (paths.OSEnv{}).Get([]string{paths.EnvStateDB, paths.EnvCacheDB}[index]) != "" {
+			source = "env"
+		}
+		fmt.Fprintf(stdout, "config state.%s=%s (%s)\n", []string{"db", "cacheDb"}[index], value, source)
+	}
 	accounts := make([]string, 0, len(config.Accounts))
 	for index, account := range config.Accounts {
 		accounts = append(accounts, fmt.Sprintf("%d:%s:%s", account.ID, account.ConfigDir, config.EmojiFor(account.ID)))
@@ -156,32 +214,17 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		}
 	}
 	fmt.Fprintf(stdout, "config accounts=%s (%s)\n", strings.Join(accounts, ","), config.Source("accounts"))
-	fmt.Fprintf(
-		stdout,
-		"config claude.permissionMode=%s (%s)\n",
-		config.Claude.PermissionMode,
-		config.Source("claude.permissionMode"),
-	)
-	fmt.Fprintf(stdout, "config claude.binary=%s (%s)\n", config.Claude.Binary, config.Source("claude.binary"))
-	fmt.Fprintf(stdout, "config claude.theme=%s (%s)\n", config.Claude.Theme, config.Source("claude.theme"))
-	fmt.Fprintf(
-		stdout,
-		"config claude.compactNudge.enabled=%t (%s)\n",
-		config.Claude.CompactNudge.Enabled,
-		config.Source("claude.compactNudge.enabled"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.compactNudge.start=%d (%s)\n",
-		config.Claude.CompactNudge.Start,
-		config.Source("claude.compactNudge.start"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.compactNudge.step=%d (%s)\n",
-		config.Claude.CompactNudge.Step,
-		config.Source("claude.compactNudge.step"),
-	)
+	printClaude := func(key string, value any) {
+		fmt.Fprintf(stdout, "config claude.%s=%v (%s)\n", key, value, config.Source("claude."+key))
+	}
+	printClaude("permissionMode", config.Claude.PermissionMode)
+	printClaude("binary", config.Claude.Binary)
+	printClaude("theme", config.Claude.Theme)
+	printClaude("webSearchesPerSession", config.Claude.WebSearchesPerSession)
+	printClaude("autoCompactWindow", config.Claude.AutoCompactWindow)
+	printClaude("tmuxTruecolor", config.Claude.TmuxTruecolor)
+	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
+	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",
@@ -194,9 +237,24 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.NameSync.Interval,
 		config.Source("nameSync.interval"),
 	)
+	ignored := strings.Join(config.Doctor.IgnoreWarnings, ",")
+	if ignored == "" {
+		ignored = "none"
+	}
+	fmt.Fprintf(stdout, "config doctor.ignoreWarnings=%s (%s)\n", ignored, config.Source("doctor.ignoreWarnings"))
 	fmt.Fprintf(stdout, "config codex.yolo=%t (%s)\n", config.Codex.Yolo, config.Source("codex.yolo"))
 	fmt.Fprintf(stdout, "config codex.binary=%s (%s)\n", config.Codex.Binary, config.Source("codex.binary"))
 	fmt.Fprintf(stdout, "config mcp.http.port=%d (%s)\n", config.MCP.HTTP.Port, config.Source("mcp.http.port"))
+	thirdParty := make([]string, 0, len(config.MCP.ThirdParty))
+	for name := range config.MCP.ThirdParty {
+		thirdParty = append(thirdParty, name)
+	}
+	sort.Strings(thirdParty)
+	names, source := strings.Join(thirdParty, ","), config.Source("mcp.thirdParty")
+	if len(thirdParty) == 0 {
+		names = "none"
+	}
+	fmt.Fprintf(stdout, "config mcp.thirdParty=%s (%s)\n", names, source)
 	for _, name := range pfmconfig.RegisteredMCPServers() {
 		fmt.Fprintf(
 			stdout,

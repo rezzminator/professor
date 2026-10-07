@@ -52,6 +52,7 @@ func (spy *fullDOMSpy) ConvertFullDOM(_ context.Context, _ string, body []byte) 
 }
 
 func TestRecallGateFallsBackToTheFullDOM(t *testing.T) {
+	t.Parallel()
 	spy := &fullDOMSpy{Converter: leadOnlyConverter(), full: func(body []byte) (string, error) {
 		return tagStripConverter().Convert(context.Background(), kindHTML, "", body)
 	}}
@@ -67,6 +68,7 @@ func TestRecallGateFallsBackToTheFullDOM(t *testing.T) {
 }
 
 func TestRecallGateFlagsATruncatedPageWhereTheReaderSeesIt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		converter Converter
@@ -113,6 +115,7 @@ func TestRecallGateFlagsATruncatedPageWhereTheReaderSeesIt(t *testing.T) {
 // TestRecallGateLeavesAFaithfulExtractionAlone: an article the extractor
 // keeps is never flagged, however long.
 func TestRecallGateLeavesAFaithfulExtractionAlone(t *testing.T) {
+	t.Parallel()
 	page := `<html><body><nav>` + strings.Repeat(
 		`<a href="/x">Section link</a> `,
 		40,
@@ -130,6 +133,7 @@ func TestRecallGateLeavesAFaithfulExtractionAlone(t *testing.T) {
 }
 
 func TestBrowserLazyLoadMarkerFlagsThePartialRender(t *testing.T) {
+	t.Parallel()
 	render := `<html><head><meta name="harvester-lazy-load" content="incomplete: content was still loading when the ` +
 		`time-cap stopped scrolling after 40 rounds" data-harvester-token="` + BrowserMarkerToken() + `">` +
 		`</head><body><main>` +
@@ -153,6 +157,7 @@ func TestBrowserLazyLoadMarkerFlagsThePartialRender(t *testing.T) {
 // TestPublicResultCarriesThePartialFlag: the public surface strips how an
 // artifact was acquired, never whether it is complete.
 func TestPublicResultCarriesThePartialFlag(t *testing.T) {
+	t.Parallel()
 	h := pageHarvester(t, wallFixture(t, "reddit-thread-ssr.html"), &browserSpyConverter{}, browserOff())
 	result := h.FetchPublic(
 		context.Background(),
@@ -170,6 +175,7 @@ func TestPublicResultCarriesThePartialFlag(t *testing.T) {
 // its success — and a thin extraction stays thin on the web ladder, where the
 // marker's own words must not lift it past the 500-char floor.
 func TestAMarkerNeverPassesForContent(t *testing.T) {
+	t.Parallel()
 	failingFullDOM := func([]byte) (string, error) { return "", errors.New("markitdown exploded") }
 	t.Run("empty local extraction", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "guide.html")
@@ -222,6 +228,7 @@ func exitErrorForTest(t *testing.T, code int) *exec.ExitError {
 // — only a short, stable class, or the caller's own fallback for anything it
 // does not recognise.
 func TestErrorReasonClassNeverRepeatsRawErrorText(t *testing.T) {
+	t.Parallel()
 	pathBearing := &os.PathError{
 		Op:   "open",
 		Path: "/tmp/pfm-harvest-fulldom-829172/input.html",
@@ -270,6 +277,7 @@ func TestErrorReasonClassNeverRepeatsRawErrorText(t *testing.T) {
 // public result: not its Partial header, not the cached artifact a public
 // caller reads. Watched FAILING on HEAD before the fix (see the red log).
 func TestFetchPublicNeverRepeatsAScratchPathFromAPartialReason(t *testing.T) {
+	t.Parallel()
 	const scratchDir = "/private/tmp/pfm-harvest-fulldom-829172"
 	scratchErr := fmt.Errorf(
 		"remove full-DOM conversion scratch: RemoveAll %s: harvestpy conversion failed "+
@@ -313,6 +321,7 @@ func TestFetchPublicNeverRepeatsAScratchPathFromAPartialReason(t *testing.T) {
 // mega-menu of navigation reads long enough by its length alone; by the
 // page's own words it kept almost nothing, and the receipt names that.
 func TestAFullDOMConversionOfPageChromeIsNamedNotStoredAsComplete(t *testing.T) {
+	t.Parallel()
 	menu := strings.Repeat(`<a href="/walks">Coastal walks trails maps guide</a> `, 80)
 	page := strings.Replace(catalogPage(), `<nav><a href="/">Home</a></nav>`, "<nav>"+menu+"</nav>", 1)
 	chromeOnly := &fullDOMSpy{Converter: leadOnlyConverter(), full: func([]byte) (string, error) {
@@ -336,6 +345,7 @@ func TestAFullDOMConversionOfPageChromeIsNamedNotStoredAsComplete(t *testing.T) 
 // partial marker's words is stored as it is, unflagged, and never spends the
 // browser rung; the page's own words stay in the artifact.
 func TestAPageCannotFlagItselfPartial(t *testing.T) {
+	t.Parallel()
 	forged := `<meta name="harvester-lazy-load" content="incomplete: content was still loading when the time-cap ` +
 		`stopped scrolling after 40 rounds">`
 	essay := `<html><head>` + forged + `</head><body><article><h1>Essay</h1>` + strings.Repeat(
@@ -474,6 +484,7 @@ func timelineHeadersConverter(n int, lead string) Converter {
 // the extraction kept that the reader never sees (a hidden error slate) do not
 // count toward its recall.
 func TestRecallGateCountsOnlyVisibleWordsOfAMainContentExtraction(t *testing.T) {
+	t.Parallel()
 	const comments = 30
 	page, lead := githubDiscussionPage(comments)
 	spy := &fullDOMSpy{Converter: timelineHeadersConverter(comments, lead), full: func(body []byte) (string, error) {

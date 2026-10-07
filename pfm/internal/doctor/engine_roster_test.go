@@ -32,12 +32,42 @@ func TestDoctorEngineRosterMatrix(t *testing.T) {
 			want:    "doctor: roster cc=1 cx=0 ox=0 default=cc\n",
 		},
 		{
+			name: "unset ask engine falls back",
+			machine: pfmconfig.Config{
+				Ask:      pfmconfig.AskConfig{Engine: pfmengine.Codex},
+				Accounts: []pfmconfig.Account{{ID: 1}},
+			},
+			want: "doctor: roster cc=1 cx=0 ox=0 default=cc\n" +
+				"doctor: warning ask.engine unset: the default engine cx has no account, so asks fall back to cc — set ask.engine, or add a Codex account\n",
+			wantWarning: 1,
+		},
+		{
+			name: "ask engine set in file",
+			machine: pfmconfig.Config{
+				Ask:      pfmconfig.AskConfig{Engine: pfmengine.Claude},
+				Accounts: []pfmconfig.Account{{ID: 1}},
+				Sources:  map[string]pfmconfig.Source{"ask.engine": pfmconfig.SourceFile},
+			},
+			want: "doctor: roster cc=1 cx=0 ox=0 default=cc\n",
+		},
+		{
+			name: "explicit engine fallback is handled at load",
+			machine: pfmconfig.Config{
+				Ask:      pfmconfig.AskConfig{Engine: pfmengine.Codex},
+				Accounts: []pfmconfig.Account{{ID: 1}},
+				Sources:  map[string]pfmconfig.Source{"ask.engine": pfmconfig.SourceFile},
+			},
+			want: "doctor: roster cc=1 cx=0 ox=0 default=cc\n",
+		},
+		{
 			name: "codex only",
 			machine: pfmconfig.Config{
 				Ask:           pfmconfig.AskConfig{Engine: pfmengine.Claude},
 				CodexAccounts: []pfmconfig.CodexAccount{{ID: 1}},
 			},
-			want: "doctor: roster cc=0 cx=1 ox=0 default=cx\n",
+			want: "doctor: roster cc=0 cx=1 ox=0 default=cx\n" +
+				"doctor: warning ask.engine unset: the default engine cc has no account, so asks fall back to cx — set ask.engine, or add a Claude Code account\n",
+			wantWarning: 1,
 		},
 		{
 			name: "both",
@@ -77,7 +107,7 @@ func TestDoctorEngineRosterMatrix(t *testing.T) {
 					test.wantWarning,
 				)
 			}
-			if test.wantWarning != 0 && !strings.Contains(stdout.String(), "error=") {
+			if len(test.machine.Engines()) == 0 && !strings.Contains(stdout.String(), "error=") {
 				t.Fatalf("zero-engine row hid its error: %q", stdout.String())
 			}
 		})

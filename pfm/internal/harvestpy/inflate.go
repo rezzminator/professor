@@ -27,7 +27,8 @@ func (converter *Converter) Inflate(ctx context.Context, codec, path, out string
 	if err != nil {
 		return fmt.Errorf("marshal harvestpy inflate request: %w", err)
 	}
-	line, stderr, err := converter.request(ctx, body)
+	budget := requestBudget(converter.runtime, Request{Path: path, Kind: codec})
+	line, stderr, err := converter.request(ctx, body, budget)
 	if err != nil {
 		return err
 	}

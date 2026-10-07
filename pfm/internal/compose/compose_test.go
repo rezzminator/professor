@@ -1,8 +1,6 @@
 package compose
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -11,39 +9,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
-
-func TestComposeCanonicalizesSymlinkedAccountRoots(t *testing.T) {
-	root := t.TempDir()
-	physical := filepath.Join(root, "physical")
-	alias := filepath.Join(root, "alias")
-	if err := os.MkdirAll(filepath.Join(physical, "projects"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(physical, alias); err != nil {
-		t.Fatal(err)
-	}
-	transcripts := []store.Transcript{
-		transcript("one", filepath.Join(alias, "projects", "one.jsonl"), "/work/one", "one", 1, 1, 1),
-		transcript("two", filepath.Join(root, "two", "projects", "two.jsonl"), "/work/two", "two", 1, 1, 2),
-	}
-	output := Compose(Input{
-		Transcripts: transcripts,
-		AccountRoots: []AccountRoot{
-			{Account: 1, Path: filepath.Join(alias, "projects")},
-			{Account: 2, Path: filepath.Join(root, "two", "projects")},
-		},
-		Options: Options{View: AllView},
-	})
-	for _, want := range []struct {
-		id      string
-		account int
-	}{{"one", 1}, {"two", 2}} {
-		row, ok := rowByID(output.Rows, want.id)
-		if !ok || row.Account != want.account {
-			t.Fatalf("row %s = %#v, want account %d", want.id, row, want.account)
-		}
-	}
-}
 
 func TestPromptBaselineKillLiftsButPermanentKillDoesNot(t *testing.T) {
 	baseline := int64(2)
@@ -212,7 +177,7 @@ func TestSplitMergeAndNewestServerCollapse(t *testing.T) {
 		split[0].PromptCount != 5 ||
 		split[0].SplitCount != 2 ||
 		split[0].Killed ||
-		!reflect.DeepEqual(split[0].Accounts, []int{1, 2}) {
+		len(split[0].Accounts) != 0 {
 		t.Fatalf("merged split = %#v", split[0])
 	}
 
@@ -260,7 +225,7 @@ func splitFixtureInput() Input {
 			{ID: "split-one", Engine: "cc", BaselinePrompts: &baseline},
 			{ID: "split-two", Engine: "cc", BaselinePrompts: &baseline},
 		},
-		AccountRoots: fixtureAccountRoots(),
+		ClaudeSeats: fixtureClaudeSeats(),
 		Snapshot: gather.Snapshot{
 			Panes: []gather.ProbePane{
 				{Socket: "cc-100-1-1", PaneID: "%1", PaneTitle: "one"},
@@ -462,8 +427,8 @@ func TestLiveCodexRequiresProcessAndCurrentPane(t *testing.T) {
 
 func capsFixtureInput() Input {
 	input := Input{
-		AccountRoots: fixtureAccountRoots(),
-		Options:      Options{CurrentDir: "/work/caps"},
+		ClaudeSeats: fixtureClaudeSeats(),
+		Options:     Options{CurrentDir: "/work/caps"},
 	}
 	for index := 0; index < 35; index++ {
 		input.Transcripts = append(input.Transcripts, transcript(
@@ -666,7 +631,7 @@ func fixtureInput(view View) Input {
 				Engine: "cx",
 			},
 		},
-		AccountRoots: fixtureAccountRoots(),
+		ClaudeSeats: fixtureClaudeSeats(),
 		Snapshot: gather.Snapshot{
 			Panes: []gather.ProbePane{
 				{
@@ -729,7 +694,6 @@ func fixtureInput(view View) Input {
 				SessionID: "agent",
 				ConfigDir: "/accounts/3",
 			}},
-			Cache1HSockets: []string{"cc-200-1-1"},
 		},
 		Options: Options{
 			View:                view,
@@ -760,11 +724,11 @@ func transcript(
 	}
 }
 
-func fixtureAccountRoots() []AccountRoot {
-	return []AccountRoot{
-		{Account: 1, Path: "/accounts/1"},
-		{Account: 2, Path: "/accounts/2"},
-		{Account: 3, Path: "/accounts/3"},
+func fixtureClaudeSeats() []ClaudeSeat {
+	return []ClaudeSeat{
+		{Account: 1, ConfigDir: "/accounts/1"},
+		{Account: 2, ConfigDir: "/accounts/2"},
+		{Account: 3, ConfigDir: "/accounts/3"},
 	}
 }
 

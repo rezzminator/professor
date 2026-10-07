@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,10 +16,225 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+func TestDoctorReportsMissingCodexLogin(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex")
+	runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
+	var output bytes.Buffer
+	PrintConfig(&output, runtime)
+	want := "doctor: codex-login codex[2] " + filepath.Join(home, "auth.json") + " missing — run codex login"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("PrintConfig() = %q, want %q", output.String(), want)
+	}
+}
+
+func TestDoctorReportsCodexLoginStates(t *testing.T) {
+	for _, tc := range []struct {
+		name, auth, config, want string
+		failures                 int
+	}{
+		{name: "missing", want: "missing — run codex login", failures: 1},
+		{name: "invalid", auth: `{}`, want: "has no tokens.access_token and tokens.account_id — run codex login", failures: 1},
+		{name: "corrupt", auth: `{`, want: "UNREADABLE error=unexpected end of JSON input — run codex login", failures: 1},
+		{
+			name:     "wrong shape",
+			auth:     `{"tokens":"fixture"}`,
+			want:     "UNREADABLE error=json: cannot unmarshal string into Go struct field ",
+			failures: 1,
+		},
+		{name: "valid", auth: `{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`, want: "ok", failures: 0},
+		{
+			name:     "corrupt config.toml",
+			config:   `cli_auth_credentials_store = `,
+			want:     "UNREADABLE error=parse {home}/config.toml: ",
+			failures: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tc.auth != "" {
+				if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(tc.auth), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.config != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
+			var output bytes.Buffer
+			_, failures := PrintConfig(&output, runtime)
+			want := "doctor: codex-login codex[2] "
+			if tc.name != "valid" {
+				path := filepath.Join(home, "auth.json")
+				if tc.config != "" {
+					path = filepath.Join(home, "config.toml")
+				}
+				want += path + " "
+			}
+			want += strings.ReplaceAll(tc.want, "{home}", home)
+			if failures != tc.failures || !strings.Contains(output.String(), want) {
+				t.Fatalf("failures=%d output=%q, want failures=%d row=%q", failures, output.String(), tc.failures, want)
+			}
+		})
+	}
+	t.Run("unreadable", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.Mkdir(filepath.Join(home, "auth.json"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
+		var output bytes.Buffer
+		_, failures := PrintConfig(&output, runtime)
+		want := "doctor: codex-login codex[2] " + filepath.Join(home, "auth.json") + " UNREADABLE error="
+		if failures != 1 || !strings.Contains(output.String(), want) {
+			t.Fatalf("failures=%d output=%q, want failure and row %q", failures, output.String(), want)
+		}
+	})
+}
+
+func TestDoctorConfigFileRows(t *testing.T) {
+	t.Setenv(paths.EnvConfig, "")
+	root := t.TempDir()
+	path := filepath.Join(root, "pfm.config.json")
+	var output bytes.Buffer
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(output.String(), "config: missing "+path+" — run pfm install") {
+		t.Fatalf("missing file row absent: %s", output.String())
+	}
+	// A legacy config waits behind the host gate, which refuses pfm install
+	// until it moves: the row names the host check's fix, never pfm install.
+	// Under an explicit --config the host check skips it, and so does the row.
+	home := filepath.Join(root, "home")
+	legacy := filepath.Join(config.LegacyConfigDir(paths.OSEnv{}, home), config.FileName)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}, Paths: paths.Values{Home: home}})
+	if !strings.Contains(
+		output.String(),
+		"config: legacy file "+legacy+" is not read — apply the host-check legacy-config fix\n",
+	) {
+		t.Fatalf("legacy file row: %s", output.String())
+	}
+	output.Reset()
+	PrintConfig(
+		&output,
+		config.Runtime{Config: config.Config{Path: path}, Paths: paths.Values{Home: home}, ConfigExplicit: true},
+	)
+	if strings.Contains(output.String(), "legacy file") {
+		t.Fatalf("explicit config legacy row: %s", output.String())
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(output.String(), "config: unreadable "+path) {
+		t.Fatalf("unreadable file row absent: %s", output.String())
+	}
+	for _, tc := range []struct {
+		name, content, override, want string
+		counted, directory            bool
+		warnings, failures            int
+	}{
+		{
+			name: "malformed already counted", content: "{", counted: true,
+			want: "doctor: config: unreadable %s error=unexpected end of JSON input",
+		},
+		{
+			name: "malformed uncounted", content: "{", failures: 1,
+			want: "doctor: config: unreadable %s error=unexpected end of JSON input",
+		},
+		{
+			name: "null", content: "null", failures: 1,
+			want: "doctor: config: unreadable %s error=config is JSON null, not an object",
+		},
+		{
+			name: "read failure already counted", directory: true, counted: true,
+		},
+		{
+			name: "no source repo", warnings: 1,
+			want: "doctor: config: missing (no source repo recorded) — run pfm install",
+		},
+		{
+			name: "resolved not loaded", override: "/srv/cfg/pfm.config.json", warnings: 1,
+			want: "doctor: config: missing (resolves to /srv/cfg/pfm.config.json, not loaded) — run pfm install",
+		},
+		{
+			name: "invalid override", override: "relative.json", warnings: 1,
+			want: `doctor: config: missing (PFM_CONFIG must be an absolute path: "relative.json") — run pfm install`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(paths.EnvConfig, tc.override)
+			runtime := config.Runtime{Paths: paths.Values{Home: t.TempDir()}}
+			want := tc.want
+			if tc.content != "" || tc.directory {
+				runtime.Config.Path = filepath.Join(runtime.Paths.Home, "pfm.config.json")
+				if tc.directory {
+					if err := os.Mkdir(runtime.Config.Path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					_, err := os.ReadFile(runtime.Config.Path)
+					want = fmt.Sprintf("doctor: config: unreadable %s error=%v", runtime.Config.Path, err)
+				} else {
+					if err := os.WriteFile(runtime.Config.Path, []byte(tc.content), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					want = fmt.Sprintf(want, runtime.Config.Path)
+				}
+			}
+			if tc.counted {
+				runtime.ConfigError = errors.New("config " + runtime.Config.Path + ": unexpected end of JSON input")
+			}
+			var output bytes.Buffer
+			warnings, failures := PrintConfig(&output, runtime)
+			row, _, _ := strings.Cut(output.String(), "\n")
+			if row != want || warnings != tc.warnings || failures != tc.failures {
+				t.Fatalf("row=%q warnings=%d failures=%d, want %q %d/%d",
+					row, warnings, failures, want, tc.warnings, tc.failures)
+			}
+		})
+	}
+}
+
+func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	warnings, failures := PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(
+		output.String(),
+		"config: missing key claude.webSearchesPerSession (default 9007199254740991)",
+	) {
+		t.Fatalf("missing-key row absent: %s", output.String())
+	}
+	want := "doctor: config: missing key claude.autoCompactWindow (default 100000) — informational: unset, its default applies\n"
+	if !strings.Contains(output.String(), want) || warnings != 0 || failures != 0 {
+		t.Fatalf("missing-key row=%q warnings=%d failures=%d, want %q 0/0", output.String(), warnings, failures, want)
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(output.String(), "config: unreadable "+path) ||
+		strings.Contains(output.String(), "config: missing key") {
+		t.Fatalf("malformed file produced missing keys: %s", output.String())
+	}
+}
+
 func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	first := filepath.Join(home, ".claude")
+	first := config.DefaultAccountDir(home, 1)
 	second := filepath.Join(home, ".cc", "2")
 	if err := os.MkdirAll(first, 0o700); err != nil {
 		t.Fatal(err)
@@ -26,7 +242,7 @@ func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {
 	if err := os.MkdirAll(second, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{filepath.Join(home, ".claude.json"), filepath.Join(second, ".claude.json")} {
+	for _, path := range []string{filepath.Join(first, ".claude.json"), filepath.Join(second, ".claude.json")} {
 		if err := os.WriteFile(
 			path,
 			[]byte(`{"oauthAccount":{"emailAddress":"fixture@example.invalid"}}`),
@@ -36,7 +252,7 @@ func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {
 		}
 	}
 	machine := config.Config{Accounts: []config.Account{
-		{ID: 1, ConfigDir: first, Implicit: true},
+		{ID: 1, ConfigDir: first},
 		{ID: 2, ConfigDir: second},
 	}}
 	runtime := config.Runtime{Paths: paths.Values{Home: home}, Config: machine}
@@ -126,25 +342,22 @@ func TestDoctorSortsDuplicateSeatLoginAdvisoriesByEmail(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	accounts := []config.Account{
-		{ID: 1, Implicit: true},
+		{ID: 1, ConfigDir: config.DefaultAccountDir(home, 1)},
 		{ID: 2, ConfigDir: filepath.Join(home, ".cc", "2")},
 		{ID: 3, ConfigDir: filepath.Join(home, ".cc", "3")},
 		{ID: 4, ConfigDir: filepath.Join(home, ".cc", "4")},
 	}
 	for _, account := range accounts {
 		directory := account.ConfigDir
-		if account.Implicit {
-			directory = home
-		}
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for path, email := range map[string]string{
-		filepath.Join(home, ".claude.json"):             "z@example.invalid",
-		filepath.Join(home, ".cc", "2", ".claude.json"): "a@example.invalid",
-		filepath.Join(home, ".cc", "3", ".claude.json"): "a@example.invalid",
-		filepath.Join(home, ".cc", "4", ".claude.json"): "z@example.invalid",
+		filepath.Join(config.DefaultAccountDir(home, 1), ".claude.json"): "z@example.invalid",
+		filepath.Join(home, ".cc", "2", ".claude.json"):                  "a@example.invalid",
+		filepath.Join(home, ".cc", "3", ".claude.json"):                  "a@example.invalid",
+		filepath.Join(home, ".cc", "4", ".claude.json"):                  "z@example.invalid",
 	} {
 		if err := os.WriteFile(
 			path,
@@ -166,22 +379,16 @@ func TestDoctorSortsDuplicateSeatLoginAdvisoriesByEmail(t *testing.T) {
 	}
 }
 
-func TestDoctorWarnsOnRetiredHarvesterEnvAndPreSplitLayout(t *testing.T) {
+func TestDoctorWarnsOnRetiredHarvesterEnv(t *testing.T) {
 	clearRetiredHarvesterEnv(t)
 	t.Setenv("SEARXNG_URL", "http://127.0.0.1:8888")
 	t.Setenv("HARVESTER_LOCAL_ROOTS", "/srv")
 	runtime := config.Runtime{Config: config.Defaults(t.TempDir(), nil)}
-	runtime.Config.Path = filepath.Join(t.TempDir(), config.LegacyFileName)
-	runtime.Config.Harvester.Path = filepath.Join(filepath.Dir(runtime.Config.Path), config.HarvesterFileName)
-	runtime.Config.Exists = true
-	if err := os.WriteFile(runtime.Config.Path, []byte(`{"version":2}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	var stdout bytes.Buffer
-	if warnings := printHarvesterConfigDoctor(&stdout, runtime); warnings != 3 {
-		t.Fatalf("warnings=%d, want 3\n%s", warnings, stdout.String())
+	if warnings := printHarvesterConfigDoctor(&stdout, runtime); warnings != 2 {
+		t.Fatalf("warnings=%d, want 2\n%s", warnings, stdout.String())
 	}
-	for _, want := range []string{"layout=pre-split", "retired_env=SEARXNG_URL", "search.searxngURL", "retired_env=HARVESTER_LOCAL_ROOTS", "never honored"} {
+	for _, want := range []string{"retired_env=SEARXNG_URL", "search.searxngURL", "retired_env=HARVESTER_LOCAL_ROOTS", "never honored"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, stdout.String())
 		}

@@ -27,19 +27,21 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("make Claude root absolute %q: %w", root, err)
 		}
-		resolved, err := filepath.EvalSymlinks(absolute)
+		_, err = os.Stat(absolute)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("resolve Claude root %q: %w", root, err)
+			return nil, fmt.Errorf("stat Claude root %q: %w", root, err)
 		}
-		if _, duplicate := seenRoots[resolved]; duplicate {
+		if _, duplicate := seenRoots[absolute]; duplicate {
 			continue
 		}
-		seenRoots[resolved] = struct{}{}
+		seenRoots[absolute] = struct{}{}
 
-		err = filepath.WalkDir(resolved, func(path string, entry fs.DirEntry, walkErr error) error {
+		// The trailing "/." makes WalkDir descend a symlinked root; filepath.Join would clean it away.
+		walkRoot := fmt.Sprintf("%s%c.", absolute, os.PathSeparator)
+		err = filepath.WalkDir(walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -47,7 +49,7 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 				return err
 			}
 
-			relative, err := filepath.Rel(resolved, path)
+			relative, err := filepath.Rel(walkRoot, path)
 			if err != nil {
 				return err
 			}
@@ -71,6 +73,7 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 			if err != nil {
 				return err
 			}
+			path = filepath.Clean(path)
 			filesByPath[path] = diskFile{
 				ID:      strings.TrimSuffix(entry.Name(), ".jsonl"),
 				Path:    path,
@@ -80,7 +83,7 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("walk Claude root %q: %w", resolved, err)
+			return nil, fmt.Errorf("walk Claude root %q: %w", absolute, err)
 		}
 	}
 

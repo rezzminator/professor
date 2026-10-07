@@ -11,10 +11,15 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // ExecCommands is the production command boundary. Every Claude invocation it
@@ -35,13 +40,7 @@ type ExecCommands struct {
 // seat's policy under another seat's config dir.
 func (commands ExecCommands) accountFor(configDir string) (int, error) {
 	for _, account := range commands.Machine.Accounts {
-		if account.Implicit {
-			if configDir == "" || filepath.Clean(configDir) == filepath.Clean(account.ConfigDir) {
-				return account.ID, nil
-			}
-			continue
-		}
-		if filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
+		if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
 			return account.ID, nil
 		}
 	}
@@ -59,10 +58,14 @@ func (commands ExecCommands) command(
 	if err != nil {
 		return nil, err
 	}
+	var cache *bool
+	if purpose != action.PurposeQuery {
+		cache = &cache1H
+	}
 	command, err := action.ClaudeSpawn{
 		Purpose: purpose,
 		Account: account,
-		Cache1H: cache1H,
+		Cache1H: cache,
 		Args:    args,
 		Home:    commands.Home,
 		Machine: commands.Machine,
@@ -90,11 +93,49 @@ func (commands ExecCommands) QueryAgents(ctx context.Context, configName string)
 }
 
 func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id string, cache1H bool) error {
-	command, err := commands.command(ctx, action.PurposeResume, configName, cache1H, "--resume", id)
+	persona, err := action.WorkbenchPersona(cwd, pfmengine.Claude, workbench.Resume)
 	if err != nil {
 		return fmt.Errorf("resume agent session: %w", err)
 	}
+	account, err := commands.accountFor(configName)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
+	}
+	stderr := commands.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	// The resumed chat keeps its pfm label as Claude's --name.
+	label, labelErr := store.SessionLabel(ctx, id, store.WithWarningWriter(stderr))
+	if labelErr != nil {
+		fmt.Fprintf(
+			stderr,
+			"pfm internal agent-open: resolve the label of session %s: %v — Claude names this chat itself\n",
+			id, labelErr,
+		)
+		label = ""
+	}
+	command, err := action.ClaudeSpawn{
+		Purpose: claudelaunch.PurposeResume,
+		Account: account, Cache1H: &cache1H, Resume: id, Name: label,
+		Home: commands.Home, Machine: commands.Machine,
+		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
+	}.Command(ctx)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
+	}
+	command.Stdout, command.Stderr = commands.Stdout, commands.Stderr
 	command.Dir = cwd
+	values, resolveErr := config.ResolvePaths()
+	if resolveErr == nil {
+		resolveErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
+			SessionID: id,
+			Engine:    pfmengine.Claude, Account: account, Cache1H: cache1H,
+		}, clock.Real.Now().Unix())
+	}
+	if resolveErr != nil {
+		fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", id, resolveErr)
+	}
 	return command.Run()
 }
 

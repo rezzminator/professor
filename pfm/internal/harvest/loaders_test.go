@@ -59,6 +59,7 @@ func (c *pacingClock) Sleep(ctx context.Context, d time.Duration) error {
 // loader is requested, and no browser render is spent working around it —
 // and the artifact is flagged partial naming the rate limit and the gaps.
 func TestLoaderFollowingStopsAtARateLimit(t *testing.T) {
+	t.Parallel()
 	site := walkedThread()
 	site.status = map[string]int{"c5": http.StatusTooManyRequests}
 	spy := &browserSpyConverter{html: site.page, status: http.StatusOK}
@@ -89,6 +90,7 @@ func TestLoaderFollowingStopsAtARateLimit(t *testing.T) {
 // cap is requested, each paced, the last stays a named gap, and the cap is
 // named as the reason. (The default cap: the Discourse test.)
 func TestLoaderFollowingStopsAtTheCap(t *testing.T) {
+	t.Parallel()
 	site := &redditSite{fragments: map[string]string{}}
 	var tree []string
 	for index := range redditLoaderCap + 1 {
@@ -127,6 +129,7 @@ func TestLoaderFollowingStopsAtTheCap(t *testing.T) {
 // following gives up after three in a row, never requests a loader pointing
 // off the site, and names both in the partial marker.
 func TestLoaderFollowingNamesFailures(t *testing.T) {
+	t.Parallel()
 	site := &redditSite{
 		page: loaderThreadHTML(10,
 			threadComment("c1", "alpha_placeholder", "Alpha.",
@@ -170,6 +173,7 @@ func TestLoaderFollowingNamesFailures(t *testing.T) {
 // never retried, and the partial marker names it; a comment merely quoting a
 // wall's phrase is still grafted.
 func TestLoaderFollowingStopsAtABotWall(t *testing.T) {
+	t.Parallel()
 	site := walkedThread()
 	site.walls = map[string]string{"cur-top": `<html><head><title>Reddit - Prove your humanity</title></head>` +
 		`<body><h1>Prove your humanity</h1></body></html>`}
@@ -199,6 +203,7 @@ func TestLoaderFollowingStopsAtABotWall(t *testing.T) {
 // (TestLoaderFollowingStopsAtABotWall's ""Reddit - Prove your humanity"")
 // still passes through whole; only a pathologically long one is capped.
 func TestLoaderGraftFailuresAreBoundedNotRawErrorText(t *testing.T) {
+	t.Parallel()
 	longTitle := "Reddit - " + strings.Repeat("x", 400)
 	site := walkedThread()
 	site.walls = map[string]string{"cur-top": `<html><head><title>` + longTitle + `</title></head>` +
@@ -225,6 +230,7 @@ func TestLoaderGraftFailuresAreBoundedNotRawErrorText(t *testing.T) {
 // for on an answer that failed is honoured like one on an answer kept — the
 // next request waits it out, not the plain pace.
 func TestABackoffOnAnErrorAnswerDelaysTheNextRequest(t *testing.T) {
+	t.Parallel()
 	const host = "api.example.test"
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path == "/refused" {

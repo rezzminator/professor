@@ -18,6 +18,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func headlessJail(t *testing.T) {
@@ -31,20 +32,27 @@ func writeEngineStub(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "engine")
 	script := "#!/bin/sh\nset -eu\n" + body + "\n"
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
 func claudeMachine(binary, configDir string) pfmconfig.Config {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		panic(fmt.Sprintf("fixture account dir %s: %v", configDir, err))
+	}
 	return pfmconfig.Config{
-		Claude:   pfmconfig.ClaudePrefs{Binary: binary},
-		Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: configDir}},
+		Claude: pfmconfig.ClaudePrefs{Binary: binary}, Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: configDir}},
 	}
 }
 
 func multiClaudeMachine(topBinary, accountBinary, firstDir, secondDir string) pfmconfig.Config {
+	for _, dir := range []string{firstDir, secondDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			panic(fmt.Sprintf("fixture account dir %s: %v", dir, err))
+		}
+	}
 	return pfmconfig.Config{
 		Claude: pfmconfig.ClaudePrefs{Binary: topBinary},
 		Accounts: []pfmconfig.Account{
@@ -55,9 +63,18 @@ func multiClaudeMachine(topBinary, accountBinary, firstDir, secondDir string) pf
 }
 
 func codexMachine(binary, home string) pfmconfig.Config {
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		panic(fmt.Sprintf("fixture Codex home %s: %v", home, err))
+	}
+	if err := os.WriteFile(
+		filepath.Join(home, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		panic(fmt.Sprintf("fixture Codex auth %s: %v", home, err))
+	}
 	return pfmconfig.Config{
-		Codex:         pfmconfig.CodexPrefs{Binary: binary},
-		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: home}},
+		Codex: pfmconfig.CodexPrefs{Binary: binary}, CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: home}},
 	}
 }
 
@@ -195,8 +212,7 @@ printf '%s\n' '{"result":"ok"}'`,
 	configDir := filepath.Join(t.TempDir(), "cc")
 	machine := claudeMachine(binary, configDir)
 	result, err := Run(context.Background(), Request{
-		Config: machine, Engine: pfmengine.Claude, Prompt: "ambient",
-		Env: nil,
+		Config: machine, Engine: pfmengine.Claude, Prompt: "ambient", Env: nil,
 	})
 	if err != nil {
 		t.Fatalf("ambient Run() error = %v", err)
@@ -209,7 +225,6 @@ printf '%s\n' '{"result":"ok"}'`,
 			t.Fatalf("ambient provider control leaked into child: %q", line)
 		}
 	}
-
 	if err := os.Remove(filepath.Join(capture, "env")); err != nil {
 		t.Fatal(err)
 	}
@@ -246,18 +261,17 @@ printf '%s\n' '{"result":"ok"}'`,
 }
 
 func TestResolveWithoutAccountUsesExplicitEngineHome(t *testing.T) {
+	configDir := t.TempDir()
 	headlessJail(t)
 	binary := writeEngineStub(t, "printf '%s\\n' '{\"result\":\"ok\"}'")
 	resolved, err := Resolve(Request{
-		Config:         pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{Binary: binary}},
-		Engine:         pfmengine.Claude,
-		WithoutAccount: true,
-		Env:            testEnv(t.TempDir(), "CLAUDE_CONFIG_DIR=explicit-config"),
+		Config: pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{Binary: binary}}, Engine: pfmengine.Claude,
+		WithoutAccount: true, Env: testEnv(t.TempDir(), "CLAUDE_CONFIG_DIR="+configDir),
 	})
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	if resolved.ConfigDir != "explicit-config" {
+	if resolved.ConfigDir != configDir {
 		t.Fatalf("config dir = %q, want explicit engine home", resolved.ConfigDir)
 	}
 }
@@ -369,10 +383,7 @@ func TestRunNormalizesClaudeAndCodexWithNullCost(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			binary := writeEngineStub(t, testCase.body)
 			request := Request{
-				Config: testCase.config(binary),
-				Engine: testCase.engine,
-				Prompt: "hello",
-				Schema: schema,
+				Config: testCase.config(binary), Engine: testCase.engine, Prompt: "hello", Schema: schema,
 			}
 			result, err := Run(context.Background(), request)
 			if err != nil {
@@ -405,8 +416,7 @@ func TestCodexReconnectDiagnosticCanRecover(t *testing.T) {
   '{"type":"item.completed","item":{"type":"agent_message","text":"recovered answer"}}' \
   '{"type":"turn.completed"}'`)
 	request := Request{
-		Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")),
-		Engine: pfmengine.Codex, Prompt: "hello",
+		Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")), Engine: pfmengine.Codex, Prompt: "hello",
 	}
 	result, err := Run(context.Background(), request)
 	if err != nil {
@@ -427,8 +437,7 @@ func TestCodexDiagnosticAfterCompletionIsFailure(t *testing.T) {
   '{"type":"turn.completed"}' \
   '{"type":"error","message":"late failure"}'`)
 	request := Request{
-		Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")),
-		Engine: pfmengine.Codex, Prompt: "hello",
+		Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")), Engine: pfmengine.Codex, Prompt: "hello",
 	}
 	result, err := Run(context.Background(), request)
 	if err == nil || !strings.Contains(err.Error(), "missing terminal") {
@@ -587,10 +596,8 @@ func TestCodexIsolationCapabilityErrorsHappenBeforeLaunch(t *testing.T) {
 			capture := t.TempDir()
 			binary := writeEngineStub(t, "printf started > \"$CAPTURE_DIR/started\"")
 			request := Request{
-				Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")),
-				Engine: pfmengine.Codex,
-				Prompt: "hello",
-				Env:    testEnv(capture),
+				Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")), Engine: pfmengine.Codex,
+				Prompt: "hello", Env: testEnv(capture),
 			}
 			testCase.mutate(&request)
 			_, err := Run(context.Background(), request)
@@ -611,19 +618,13 @@ func TestCodexAllowUnsupportedKeepsSupportedControlsAndReportsDiagnostics(t *tes
 printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"ok\":true}"}}' '{"type":"turn.completed"}'`)
 	system := "supported system"
 	request := Request{
-		Config:       codexMachine(binary, filepath.Join(t.TempDir(), "cx")),
-		Engine:       pfmengine.Codex,
-		Prompt:       "hello",
+		Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")), Engine: pfmengine.Codex, Prompt: "hello",
 		SystemPrompt: &system,
 		Schema: json.RawMessage(
 			`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`,
 		),
-		Tools:                stringPtr("none"),
-		SettingsSources:      stringPtr(""),
-		StrictMCP:            true,
-		NoSessionPersistence: true,
-		AllowUnsupported:     true,
-		Env:                  testEnv(capture),
+		Tools: stringPtr("none"), SettingsSources: stringPtr(""), StrictMCP: true, NoSessionPersistence: true,
+		AllowUnsupported: true, Env: testEnv(capture),
 	}
 	result, err := Run(context.Background(), request)
 	if err != nil {
@@ -758,10 +759,8 @@ func TestRunTimeoutKillsProcessGroup(t *testing.T) {
 echo "$!" > "$CAPTURE_DIR/child-pid"
 sleep 30`)
 	request := Request{
-		Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")),
-		Engine: pfmengine.Claude,
-		Prompt: "hello",
-		Env:    testEnv(capture),
+		Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude, Prompt: "hello",
+		Env: testEnv(capture),
 	}
 	ctx := newArmedDeadlineContext()
 	type outcome struct {
@@ -774,11 +773,9 @@ sleep 30`)
 		result, err := Run(ctx, request)
 		done <- outcome{result, err}
 	}()
-
 	pidPath := filepath.Join(capture, "child-pid")
 	waitForFile(t, pidPath, 3*time.Second)
 	ctx.arm()
-
 	var out outcome
 	select {
 	case out = <-done:
@@ -828,8 +825,7 @@ func TestArgumentsAllowFutureFlagsAndValidateSchemaBeforeLaunch(t *testing.T) {
 	headlessJail(t)
 	args, err := arguments(
 		Request{
-			Engine: pfmengine.Claude,
-			Args:   []string{"--new-future-flag", "value"},
+			Engine: pfmengine.Claude, Args: []string{"--new-future-flag", "value"},
 			Schema: json.RawMessage(`{"type":"string"}`),
 		},
 	)
@@ -845,8 +841,7 @@ func TestArgumentsAllowFutureFlagsAndValidateSchemaBeforeLaunch(t *testing.T) {
 	binary := writeEngineStub(t, "printf '%s\\n' '{\"result\":\"ok\"}'")
 	if _, err := Resolve(
 		Request{
-			Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")),
-			Engine: pfmengine.Claude,
+			Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude,
 			Schema: json.RawMessage(`not-json`),
 		},
 	); err == nil ||
@@ -926,4 +921,78 @@ func insideTempBase(t *testing.T, pwd, base string) bool {
 		}
 	}
 	return false
+}
+
+func TestClaudeMachineAccountDirs(t *testing.T) {
+	for _, multiple := range []bool{false, true} {
+		t.Run(fmt.Sprint(multiple), func(t *testing.T) {
+			first, second := filepath.Join(t.TempDir(), "first"), filepath.Join(t.TempDir(), "second")
+			machine := claudeMachine("claude", first)
+			if multiple {
+				machine = multiClaudeMachine("claude", "claude", first, second)
+			}
+			for _, account := range machine.Accounts {
+				info, err := os.Stat(account.ConfigDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !info.IsDir() || info.Mode().Perm() != 0o700 {
+					t.Fatalf("account dir %s: mode %v", account.ConfigDir, info.Mode())
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeMachineAccountDirFailure(t *testing.T) {
+	for index, makeMachine := range []func(string) pfmconfig.Config{
+		func(dir string) pfmconfig.Config { return claudeMachine("claude", dir) },
+		func(dir string) pfmconfig.Config { return multiClaudeMachine("claude", "claude", t.TempDir(), dir) },
+	} {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			blocked := filepath.Join(t.TempDir(), "blocked")
+			if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			wantErr := os.MkdirAll(blocked, 0o700)
+			defer func() {
+				got := fmt.Sprint(recover())
+				want := fmt.Sprintf("fixture account dir %s: %v", blocked, wantErr)
+				if got != want {
+					t.Fatalf("fixture panic = %q, want %q", got, want)
+				}
+			}()
+			makeMachine(blocked)
+		})
+	}
+}
+
+func TestRunCodexLoginSelection(t *testing.T) {
+	for _, name := range []string{"native roster logged out", "without account"} {
+		t.Run(name, func(t *testing.T) {
+			headlessJail(t)
+			home, capture := t.TempDir(), t.TempDir()
+			binary := writeEngineStub(t, `printf '%s\n' "$@" > "$CAPTURE_DIR/argv"`)
+			request := Request{
+				Engine: pfmengine.Codex, Native: true, Prompt: "hello",
+				Config: pfmconfig.Config{Codex: pfmconfig.CodexPrefs{Binary: binary}},
+				Env:    testEnv(capture, "CODEX_HOME="+home),
+			}
+			if name == "without account" {
+				request.WithoutAccount = true
+			} else {
+				request.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: home}}
+			}
+			result, err := Run(context.Background(), request)
+			_, argvErr := os.Stat(filepath.Join(capture, "argv"))
+			if name == "without account" {
+				if err != nil || result.ExitCode != 0 || result.IsError || argvErr != nil {
+					t.Fatalf("without-account result=%+v error=%v argv=%v", result, err, argvErr)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "run codex login") ||
+				result.ExitCode != -1 || !result.IsError || !os.IsNotExist(argvErr) {
+				t.Fatalf("logged-out result=%+v error=%v argv=%v", result, err, argvErr)
+			}
+		})
+	}
 }

@@ -51,8 +51,8 @@ Every call re-sends the whole context (§ Orchestration), so a call carries all 
 - Put everything the user needs in the final message; intermediate text may not be shown.
 - Report failures, skipped checks, and unverified outcomes faithfully; "done" means verified done.
 - Use pfm MCP over CLI.
-- "God speed" = full autonomy: resolve every ambiguity yourself, finish, report the decisions at the end; only failure = stop/ask.
 - "What's up / how's it going" = summarize everything since the last prompt.
+- "Amen" = approved, happy, on track: keep going as planned, and first answer with the next steps as a short numbered list, folding in any steer the message carries.
 
 # Boundaries
 

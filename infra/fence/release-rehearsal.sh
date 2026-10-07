@@ -10,12 +10,20 @@ set -euo pipefail
 # the snapshot volume; `revert` starts a fresh container from the base image and
 # restores that HOME, so every update attempt starts from the identical stable
 # install. A real adopter machine carries no PFM_DEV_FENCE, so neither does this.
+# `up` runs fence housekeeping (infra/fence/housekeeping.sh) before its image
+# build. The container carries --label pfm.fence=1 and
+# --label pfm.fence.long-lived=1: housekeeping removes it once exited but never
+# by age, so a release paused between rounds keeps its machine; `down` removes
+# it. It makes no host copy of a HOME: the stable HOME archive lives only in the
+# snapshot volume, which `down` also removes.
 #
 # BROKEN STATE: an unreachable docker daemon reports TOOLCHAIN-MISSING and exits
 # 1; every other failure exits non-zero naming the step that failed (a missing
 # container, a tag absent from upstream, a snapshot archive that is absent or
 # empty). No
 # path prints success for a step whose in-container check did not pass.
+# Housekeeping never fails `up`; each failed housekeeping step is one
+# `WARN fence housekeeping: …` line on stderr.
 
 # PFM_REHEARSAL_NAME runs a second machine beside the first (an adopter several releases behind).
 NAME="${PFM_REHEARSAL_NAME:-pfm-release-rehearsal}"
@@ -62,7 +70,7 @@ git_common() {
 }
 
 start_from() {
-  docker run -d --name "$NAME" --init \
+  docker run -d --name "$NAME" --init --label pfm.fence=1 --label pfm.fence.long-lived=1 \
     -v "$(git_common):/pfm-git-common:ro" \
     -v pfm-dev-gomod:/root/go/pkg/mod \
     -v pfm-dev-gocache:/root/.cache/go-build \
@@ -77,6 +85,9 @@ start_from() {
 }
 
 cmd_up() {
+  # shellcheck source=housekeeping.sh
+  . "$REPO_ROOT/infra/fence/housekeeping.sh"
+  fence_housekeeping
   exists && die "container $NAME already exists — 'down' it or 'revert' to the snapshot"
   docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >/dev/null \
     || die "build image $IMAGE failed"

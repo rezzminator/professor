@@ -4,7 +4,7 @@ Executed inside `/pfm:release prepare` (step 3). Re-derives the blueprint from t
 
 **Scope (incremental):** `templates/refresh-map.json` maps every template to its live source(s) + the SHA-256 of each as of the last sync. `scripts/refresh-scope.sh scan` proves unchanged sources untouched — their templates are skipped; re-derive only CHANGED templates; UNMAPPED-LIVE files get a mapping ruling. `curated` templates have no live source and are never auto-derived. `refresh-scope.sh regen` re-baselines the hashes at release end.
 
-**Update mechanism context:** Adopters install from a tagged blueprint. `pfm init` scaffolds project templates once and records per-file template pins in `.professor/baseline.json`; the local project files then own truth. `pfm update check` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` mappings without writing. The session reviews each printed template diff, hand-applies wanted changes, and advances accepted pins. Machine-global symlinks update through the blueprint clone, and engine mirrors rebuild from local sources.
+**Update mechanism context:** Adopters install from a tagged blueprint. `pfm init` scaffolds project templates once and records per-file template pins in `.professor/baseline.json`; the local project files then own truth. `pfm doctor --project-updates` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` mappings without writing, the upstream diff printed under each `UPDATED` row. The session reads each diff for its intent, carries what applies into the local file while keeping the project's own edits, and advances accepted pins with `pfm update pin <local>`. Machine-global symlinks update through the blueprint clone, and engine mirrors rebuild from local sources.
 
 Cross-conversation context persists via **Epics** — initiative-level manifest files (`docs/epics/{name}/manifest.md`) with lifecycle tracking (PLANNING → IN_PROGRESS → SHIPPED).
 
@@ -33,7 +33,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{init,spec,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
@@ -62,8 +62,8 @@ Character names (Professor, and any persona the install adds) ship as **default 
 
 From the project repo:
 
-- `CLAUDE.md` (root), `.claude/agents/*.md`, `.claude/commands/*.md` (Tier A+B, including command directories like `.claude/commands/pfm/`, `.claude/commands/audit/`, `.claude/commands/quality/`), `.claude/skills/*/SKILL.md` (bundled + domain-hydrated only — see next bullet), `.claude/scripts/*.sh`
-- **Source-fetched skills** (`360`, `ghostwriter`, `vision-factory`) — never vendor a `SKILL.md` copy for these; they live in their own canonical repos and a stale copy is the exact drift this avoids. Refresh maintains only `templates/project/skills/sources.json` (name → repo); SETUP clones each at install. `deep-rr` lives in-tree at `workflows/deep-rr/` (ships with the blueprint clone) — not source-fetched; it updates when the blueprint clone updates, not independently.
+- `CLAUDE.md` (root), `.claude/agents/*.md`, `.claude/commands/*.md` (Tier A+B, including command directories like `.claude/commands/pfm/`, `.claude/commands/audit/`), `.claude/skills/*/SKILL.md` (bundled + domain-hydrated only — see next bullet), `.claude/scripts/*.sh`
+- **Source-fetched skills** (host-global: `god-speed`) — never vendor a `SKILL.md` copy for these; they live in their own canonical repos and a stale copy is the exact drift this avoids. Refresh maintains only the registries, `templates/global/skills/sources.json` and `templates/project/skills/sources.json` (name → repo); `pfm install` fetches the host-global ones.
 - `docs/epics/` structure — Epics section of CLAUDE.md, manifest format, lifecycle, ownership rules
 - `docs/agents/` scaffold — the hub `_index.md` format, the `standards.md` skeleton, and the cluster convention (structure only, NEVER doc content — every adopter's documentation body is their own)
 - The source's per-project structure → mine it INTO the generic **roster PATTERN**: express each per-project file/section ONCE with `{project}` tokens (one representative project as the shape). NEVER bake the source's project count or role names into a template — the source's concrete roster (its N projects, those roles) is an install instance SETUP expands per entry, not template structure. A template must read correctly at roster size 1. See `PLACEHOLDERS.md` § "Project roster".
@@ -93,10 +93,10 @@ professor/            ← this repo
     ├── refresh-map.json
     ├── themes/       (curated statusline themes — no live source)
     ├── global/       (machine-global originals — agents/, commands/, skills/; `pfm install` symlinks them into engine registries; agent `.toml` twins are release-generated beside their originals and out of this map's scope)
-    └── project/      (per-install templates — CLAUDE.md, agents/, commands/, skills/, scripts/, docs-agents/, docs-commands/, workflows/, epics/, codex/)
+    └── project/      (per-install templates — CLAUDE.md, agents/, commands/, skills/, scripts/, docs-agents/, docs-commands/, epics/, codex/)
 ```
 
-Rosters live in the tree, not here — `ls` the scope dir and read `refresh-map.json` for each file's live source or `curated` ruling. Two annotations that govern the refresh pass: source-fetched skills (each scope's `skills/sources.json`) are cloned from their canonical repos at install and never vendored; deep-rr ships in-tree at `workflows/deep-rr/` (updates with the blueprint clone, not independently).
+Rosters live in the tree, not here — `ls` the scope dir and read `refresh-map.json` for each file's live source or `curated` ruling. One annotation governs the refresh pass: source-fetched skills (each scope's `skills/sources.json`) are cloned from their canonical repos at install and never vendored.
 
 ## 4. SETUP.md — interactive install interview
 
@@ -120,7 +120,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 | Skill | What's universal (ships) | What's project-specific (hydrated by RR) |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Three lenses at once (`templates/project/CLAUDE.md` § MANDATORY Rules → Meta) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
+| Three lenses at once (`templates/project/CLAUDE.md` § Rules → Meta) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
 | `audit:code-hygiene` | Category structure (ghost fields, dead code, stale deps, arch smells, type safety, naming, quality) | Per-category detection patterns, file paths, known hotspots, linter coverage gaps, project-specific report examples |
 | `audit:security` | OWASP category structure (8A-8I), severity guide, report format | Domain-specific PHI/data sensitivity rules, external API checks, framework-specific vulnerabilities, compliance-driven sub-categories |
 
@@ -134,7 +134,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 ## Category N — {category name}
 
 > **KNOWLEDGE BASE EMPTY** — This section needs project-specific detection patterns.
-> Run the three-lens review (`CLAUDE.md` § MANDATORY Rules → Meta, "Three lenses at once") or `/audit:code-hygiene` after the codebase has enough code to analyze.
+> Run the three-lens review (`CLAUDE.md` § Rules → Meta, "Three lenses at once") or `/audit:code-hygiene` after the codebase has enough code to analyze.
 > The Professor will surface this gap: "Knowledge base is empty, waiting for user specification to fill it in."
 ```
 
@@ -144,7 +144,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 **Phase 2.6 — Host tooling probe (git-host bridge):** Check the install machine for `gh` and `glab` (`command -v`). For each present, write a one-file host command at `.claude/commands/h/{gh|glab}.md` (the `h:` host namespace) whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: an adopter on GitLab forks + releases professor through `/h:glab`, a GitHub adopter through `/h:gh`, and `/pfm:release` and gitter read this marker to target the right host. These host-local bridges are KEEP-LOCAL — excluded from the portable blueprint. Absent tools get no command. Then resolve the blueprint repo target: if the user has push access to the canonical repo, set `{BLUEPRINT_REPO}`/`{GH_USER}`/`{BLUEPRINT_CLONE_PATH}` to it; otherwise have them fork it and use the fork.
 
-**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `/flights:orchestrate-live` task and watch its project checks.
+**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `flights-foreman` fix and watch its project checks.
 
 ## 5. Public README
 
@@ -163,7 +163,7 @@ One-paragraph pitch: portable .claude/ that turns Claude Code into a self-discip
 - Worktree isolation + port allocation
 - Single git owner (gitter)
 - Self-improvement at source (/pfm)
-- Scaffold-and-own updates (`pfm update check` — reported template diffs, reviewed hand application, per-file pins)
+- Scaffold-and-own updates (`pfm doctor --project-updates` — reported template diffs, ported by judgment, per-file pins)
 - Epics — cross-conversation context persistence via manifest files (PLANNING → IN_PROGRESS → SHIPPED)
 - Path conventions ($DOCS, $WORKTREE, $CDOCS)
 - Documentation discipline (one agent writes permanent docs)
@@ -172,7 +172,7 @@ One-paragraph pitch: portable .claude/ that turns Claude Code into a self-discip
 install pfm, cd your-project, `pfm init .`, claude → follow the printed SETUP.md install interview → customize → smoke test
 
 ## The cast — Tier A
-Professor, /pfm, /flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev
+Professor, /pfm, /flights:{init,spec,orchestrate-cross-harness,audit}, /dev
 
 ## Tier B (opt-in)
 /officer, /mentor, /marketer
@@ -279,7 +279,7 @@ Tier and effort per the fleet prompt § Model Selection: **mechanical (sonnet), 
 
 #### The worker brief
 
-Every dispatch carries all five briefing fields (root `CLAUDE.md` § Subagent dispatch), plus one input the 2-file cap makes it impossible for a worker to fetch:
+Every dispatch carries all five briefing fields (root `CLAUDE.md` § Dispatch), plus one input the 2-file cap makes it impossible for a worker to fetch:
 
 **Quote the source project's commit messages for this live file into the brief** — `git -C {live-root} log --format='%h %s%n%b' {last-sync}.. -- {source}`, where `{last-sync}` is the `Source:` trailer of the newest `release:` commit on `main`. Those messages are where that project ALREADY ruled the change framework-bound, and a worker that cannot see them will read a generic mechanism as install-specific topology and rule it LOCAL. A file with no commits since `{last-sync}` is briefed as such, so "no message quoted" means the orchestrator looked, not that it skipped.
 

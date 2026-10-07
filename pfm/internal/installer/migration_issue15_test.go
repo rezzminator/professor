@@ -44,6 +44,7 @@ func (r *bootstrapFailureRunner) Run(_ context.Context, name string, args ...str
 // the one outcome where the installer made things worse, and the operator
 // needs the command that puts it back.
 func TestLaunchAgentBootstrapFailureAfterStopSaysTheServiceIsDown(t *testing.T) {
+	t.Parallel()
 	runner := &bootstrapFailureRunner{}
 	installer := engine{
 		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
@@ -70,14 +71,14 @@ func TestLaunchAgentBootstrapFailureAfterStopSaysTheServiceIsDown(t *testing.T) 
 	}
 }
 
-func TestRetirementReachesSecondaryClaudeAndCodex(t *testing.T) {
+func TestRetirementReachesStoreAndCodex(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
-	secondary := filepath.Join(home, "account-two")
 	codexHome := filepath.Join(home, ".codex")
 	managed := filepath.Join(home, "install")
-	status := filepath.Join(secondary, "statusline-command.sh")
-	if err := os.MkdirAll(secondary, 0o700); err != nil {
+	status := filepath.Join(primary, "statusline-command.sh")
+	if err := os.MkdirAll(primary, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(primary, "gone-statusline.sh"), status); err != nil {
@@ -95,7 +96,6 @@ func TestRetirementReachesSecondaryClaudeAndCodex(t *testing.T) {
 		options: Options{
 			Home:       home,
 			ConfigDir:  primary,
-			ConfigDirs: []string{primary, secondary},
 			CodexHomes: []string{codexHome},
 			Stdout:     io.Discard,
 		},

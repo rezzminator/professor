@@ -12,10 +12,11 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestDoctorRejectsAnUnreadableOpenCodeSchema(t *testing.T) {
-	jailTest(t)
+	testjail.PinClaudeAsk(t, filepath.Join(jailTest(t), "home"))
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)

@@ -83,12 +83,23 @@ type Snapshot struct {
 	OpenCodePrimaryAccount int
 	OpenCodeAccountIDs     []int
 	Theme                  string
-	Cache1H                bool
-	NowNS                  int64
-	Width                  int
-	Height                 int
-	InitialQuery           string
-	InitialCursorID        string
+	// Home is the reader's home directory, so the dossier can write a path as
+	// ~/…; rendering never reads the environment itself.
+	Home             string
+	Cache1H          bool
+	Cache1HByAccount map[int]bool
+	NowNS            int64
+	Width            int
+	Height           int
+	InitialQuery     string
+	InitialCursorID  string
+	// ReminderError is a failed read of the unseen-reminder flags, shown in
+	// the Chats header so a broken read never renders as "no reminders".
+	ReminderError string
+	// FactsError is the first failure met reading the rows' model, effort and
+	// working state (internal/rowfacts), shown in the header: rows with no
+	// facts must read as "could not look", never as "nothing to show".
+	FactsError string
 	// MergeNewChat is used only by the interactive picker. Plain and TSV
 	// output leave it false so their existing two-row output remains stable.
 	MergeNewChat bool

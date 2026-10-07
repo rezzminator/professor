@@ -1,0 +1,806 @@
+[
+  {
+    "theme": "Persistent project memory",
+    "ask": "Keep project knowledge available across sessions and paths.",
+    "plugin": "A skill plus MCP store indexes project notes and retrieves relevant facts at session start; hooks warn when a store is missing.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      61270,
+      62026,
+      63001,
+      65173,
+      67369,
+      67383,
+      68593,
+      70855,
+      73699,
+      74740,
+      75334,
+      80646,
+      80761,
+      81833
+    ],
+    "thumbs_up": 6,
+    "reactions": 6,
+    "comments": 50,
+    "open": 2,
+    "top_issue": 62026
+  },
+  {
+    "theme": "Context compaction control",
+    "ask": "Preserve useful context and control handoffs as sessions grow.",
+    "plugin": "Function hooks inspect context and compaction events, save checkpoints, and load selected material after compaction.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      61838,
+      66246,
+      68889,
+      70364,
+      76966,
+      80269,
+      80751,
+      80938,
+      81700
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 24,
+    "open": 0,
+    "top_issue": 66246
+  },
+  {
+    "theme": "Session export and retention",
+    "ask": "Export and retain local Claude Code sessions.",
+    "plugin": "A bin command reads local transcripts and writes portable Markdown or JSON backups; a hook can make periodic copies.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      62476,
+      63841,
+      78578,
+      79758
+    ],
+    "thumbs_up": 27,
+    "reactions": 28,
+    "comments": 31,
+    "open": 1,
+    "top_issue": 62476
+  },
+  {
+    "theme": "Session organization",
+    "ask": "Find and label sessions consistently.",
+    "plugin": "A command indexes local session metadata and offers search, generated titles, and rename actions.",
+    "layer": "command",
+    "feasibility": "workaround",
+    "issues": [
+      62478,
+      65010,
+      67680,
+      69492,
+      80711,
+      81338
+    ],
+    "thumbs_up": 7,
+    "reactions": 7,
+    "comments": 11,
+    "open": 1,
+    "top_issue": 67680
+  },
+  {
+    "theme": "Cross-device setup sync",
+    "ask": "Carry Claude Code setup between machines.",
+    "plugin": "A bin sync tool versions and restores user skills, hooks, MCP configuration, and settings with conflict checks.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      66303,
+      69231
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 6,
+    "open": 0,
+    "top_issue": 66303
+  },
+  {
+    "theme": "Global and scoped configuration",
+    "ask": "Use separate defaults for users, roles, projects, and worktrees.",
+    "plugin": "Function hooks select scoped configuration and memory according to the active role and worktree.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      64417,
+      81990
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 3,
+    "open": 0,
+    "top_issue": 64417
+  },
+  {
+    "theme": "Model and effort routing",
+    "ask": "Keep chosen models and effort levels consistent by task and session.",
+    "plugin": "Function hooks read task policy and set model or effort at request time, including resumed sessions.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      66666,
+      77040,
+      80614,
+      81045,
+      81144,
+      81313,
+      81657
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 13,
+    "open": 0,
+    "top_issue": 77040
+  },
+  {
+    "theme": "Provider and key routing",
+    "ask": "Use custom provider credentials and attribute model costs.",
+    "plugin": "An MCP gateway or function hook routes supported model calls through configured providers and records usage.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      62465,
+      68840
+    ],
+    "thumbs_up": 8,
+    "reactions": 8,
+    "comments": 6,
+    "open": 0,
+    "top_issue": 68840
+  },
+  {
+    "theme": "Usage and cost visibility",
+    "ask": "See local usage and cost while working.",
+    "plugin": "A statusline and bin collector aggregate available local usage and telemetry, with alerts for thresholds.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      80446,
+      80725,
+      81019,
+      81679,
+      81768
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 8,
+    "open": 0,
+    "top_issue": 81679
+  },
+  {
+    "theme": "Costly action guard",
+    "ask": "Stop repeated actions that consume money or quota.",
+    "plugin": "A PreToolUse hook tracks repeated expensive operations and requires approval after a configurable budget.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      79817,
+      82275
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 79817
+  },
+  {
+    "theme": "MCP connection diagnostics",
+    "ask": "Diagnose and recover external MCP connections.",
+    "plugin": "A monitor checks server health, auth state, and tool discovery, then reports concrete repair steps or reconnects.",
+    "layer": "monitor",
+    "feasibility": "workaround",
+    "issues": [
+      64536,
+      76049,
+      77694,
+      79650,
+      79849,
+      80635,
+      81111,
+      81543,
+      81923
+    ],
+    "thumbs_up": 8,
+    "reactions": 8,
+    "comments": 23,
+    "open": 2,
+    "top_issue": 64536
+  },
+  {
+    "theme": "Workflow verification gate",
+    "ask": "Require evidence before an agent claims work is complete.",
+    "plugin": "A skill directs source inspection and a Stop hook checks that named validation ran before completion.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      61931,
+      64881,
+      75405,
+      79633,
+      79731,
+      80348,
+      80456,
+      80774,
+      80778,
+      80788,
+      80878,
+      80946,
+      81119,
+      81168,
+      81271,
+      81300,
+      81820,
+      81839,
+      81942,
+      82053
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 52,
+    "open": 1,
+    "top_issue": 79731
+  },
+  {
+    "theme": "Instruction and scope guard",
+    "ask": "Keep agent actions within user and project instructions.",
+    "plugin": "A skill restates scoped rules and deterministic PreToolUse hooks block prohibited tools and destructive commands.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      69850,
+      79947,
+      80528,
+      80658,
+      80840,
+      80873,
+      80998,
+      81038,
+      81480,
+      81533,
+      81633,
+      81746,
+      81988,
+      81999,
+      82184
+    ],
+    "thumbs_up": 6,
+    "reactions": 6,
+    "comments": 30,
+    "open": 2,
+    "top_issue": 80873
+  },
+  {
+    "theme": "Destructive operation approval",
+    "ask": "Require explicit approval before high-risk operations.",
+    "plugin": "A settings PreToolUse hook parses commands and asks for confirmation before dangerous database or Git actions.",
+    "layer": "settings-hook",
+    "feasibility": "full",
+    "issues": [
+      62460,
+      80730,
+      82165
+    ],
+    "thumbs_up": 0,
+    "reactions": 1,
+    "comments": 8,
+    "open": 1,
+    "top_issue": 82165
+  },
+  {
+    "theme": "Git worktree lifecycle",
+    "ask": "Create and clean worktrees and branches safely.",
+    "plugin": "A command and hooks track worktree ownership, choose safe base refs, and clean verified stale directories.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      63086,
+      64948,
+      80132
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 9,
+    "open": 1,
+    "top_issue": 64948
+  },
+  {
+    "theme": "Git attribution control",
+    "ask": "Control Git commit author and AI attribution metadata.",
+    "plugin": "A PreToolUse hook or commit command rewrites trailers according to user policy and verifies resulting commits.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      64704,
+      66506,
+      73511,
+      79909
+    ],
+    "thumbs_up": 4,
+    "reactions": 4,
+    "comments": 10,
+    "open": 1,
+    "top_issue": 73511
+  },
+  {
+    "theme": "Permission policy enforcement",
+    "ask": "Apply consistent tool permission policy.",
+    "plugin": "Settings hooks evaluate tool inputs against a user policy and block or approve operations at the permission boundary.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      62456,
+      62480,
+      79024,
+      80135,
+      80254,
+      80808,
+      80893,
+      81157,
+      81569,
+      81639,
+      81852,
+      82109,
+      82143,
+      82170
+    ],
+    "thumbs_up": 6,
+    "reactions": 7,
+    "comments": 24,
+    "open": 2,
+    "top_issue": 81157
+  },
+  {
+    "theme": "Prompt privacy and history",
+    "ask": "Keep sensitive session content out of unwanted contexts.",
+    "plugin": "Function hooks redact configured sensitive fields before model calls and manage local prompt history retention.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      79701,
+      81138
+    ],
+    "thumbs_up": 23,
+    "reactions": 28,
+    "comments": 12,
+    "open": 2,
+    "top_issue": 81138
+  },
+  {
+    "theme": "Prompt and context observability",
+    "ask": "Inspect what context the agent actually received.",
+    "plugin": "Function hooks record prompt assembly and expose a command showing loaded files, memory, and token use.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      68047,
+      68368,
+      71642,
+      79623,
+      82056
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 61,
+    "open": 1,
+    "top_issue": 82056
+  },
+  {
+    "theme": "Agent delegation control",
+    "ask": "Coordinate delegated work and its parent session.",
+    "plugin": "An agent workflow and function hooks track child tasks, blocking dependencies, and handoff events.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      79836,
+      79949,
+      80015,
+      80305,
+      80988
+    ],
+    "thumbs_up": 99,
+    "reactions": 117,
+    "comments": 68,
+    "open": 3,
+    "top_issue": 80988
+  },
+  {
+    "theme": "Browser control tools",
+    "ask": "Control browser tabs and sites reliably.",
+    "plugin": "An MCP browser server exposes focus and tab tools; hooks check destinations and retry limits.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      61709,
+      61723,
+      78315
+    ],
+    "thumbs_up": 6,
+    "reactions": 6,
+    "comments": 14,
+    "open": 0,
+    "top_issue": 78315
+  },
+  {
+    "theme": "Terminal display controls",
+    "ask": "Adjust terminal interaction and output visibility.",
+    "plugin": "Experimental function hooks customize Claude Code UI behavior and output rendering for key and display preferences.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      61831,
+      62462,
+      66399,
+      66746,
+      76071,
+      80262,
+      80629,
+      80712,
+      81082,
+      81881
+    ],
+    "thumbs_up": 16,
+    "reactions": 16,
+    "comments": 28,
+    "open": 3,
+    "top_issue": 62462
+  },
+  {
+    "theme": "Status and activity indicator",
+    "ask": "Show agent state and active working directory.",
+    "plugin": "A statusline script and hooks display Ready, Thinking, and Working state and emit terminal directory metadata.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      62464,
+      80590,
+      81659
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 62464
+  },
+  {
+    "theme": "Telemetry and tracing",
+    "ask": "Collect accurate local agent and tool telemetry.",
+    "plugin": "Hooks and a monitor record request, model, tool, and session events to an OpenTelemetry endpoint.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      72110,
+      80948,
+      82060
+    ],
+    "thumbs_up": 10,
+    "reactions": 10,
+    "comments": 7,
+    "open": 0,
+    "top_issue": 80948
+  },
+  {
+    "theme": "Plugin fleet management",
+    "ask": "Deploy and maintain plugin configuration across projects.",
+    "plugin": "A bin manager records desired plugin versions, checks local cache health, and updates installations.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      62475,
+      71377,
+      79892,
+      79950,
+      80304,
+      81217,
+      82068,
+      82145
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 15,
+    "open": 2,
+    "top_issue": 62475
+  },
+  {
+    "theme": "Hook lifecycle extension",
+    "ask": "Extend and debug hook lifecycle decisions.",
+    "plugin": "Experimental function hooks observe internal events and bridge them to plugin callbacks or structured reports.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      65825,
+      67278,
+      70370,
+      80543,
+      80686
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 11,
+    "open": 0,
+    "top_issue": 65825
+  },
+  {
+    "theme": "Skill progressive disclosure",
+    "ask": "Load the relevant part of a large skill when invoked.",
+    "plugin": "A skill and bin index split reference material into retrievable sections instead of inlining all content.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      64740,
+      81312
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 7,
+    "open": 1,
+    "top_issue": 81312
+  },
+  {
+    "theme": "Writing style control",
+    "ask": "Keep generated prose and comments within a chosen style.",
+    "plugin": "An output style and skill apply explicit style rules, with a Stop hook checking the result.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      82032,
+      82257
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 82032
+  },
+  {
+    "theme": "Interactive question controls",
+    "ask": "Choose how questions and answers behave in the terminal.",
+    "plugin": "Experimental function hooks adjust question UI input and keyboard behavior.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      79591,
+      80781,
+      82106
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 80781
+  },
+  {
+    "theme": "Spotify playlist operations",
+    "ask": "Create and verify Spotify playlists.",
+    "plugin": "An MCP server creates playlists and checks library visibility after the write.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      63915
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 63915
+  },
+  {
+    "theme": "Gmail operations",
+    "ask": "Search and retrieve complete Gmail threads and attachments.",
+    "plugin": "An MCP server calls Gmail APIs directly and validates full thread and attachment retrieval.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      76396
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 76396
+  },
+  {
+    "theme": "GitHub repository access",
+    "ask": "Access repository content and workflows through GitHub.",
+    "plugin": "An MCP server uses a scoped GitHub token to list repos, read files, and run repository workflows.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      70033
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 5,
+    "open": 0,
+    "top_issue": 70033
+  },
+  {
+    "theme": "Dashlane credential access",
+    "ask": "Use approved Dashlane credentials in a coding workflow.",
+    "plugin": "An MCP server exposes scoped credential lookup with user approval.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      71238
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 71238
+  },
+  {
+    "theme": "Google Drive document editing",
+    "ask": "Read and edit existing Google Docs.",
+    "plugin": "An MCP server implements Drive and Docs API write operations.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      72576
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 3,
+    "open": 0,
+    "top_issue": 72576
+  },
+  {
+    "theme": "Facebook Ads operations",
+    "ask": "Manage Facebook ads from Claude Code.",
+    "plugin": "An MCP server wraps Meta Ads APIs with scoped actions.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      61355
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 61355
+  },
+  {
+    "theme": "Atlassian integration",
+    "ask": "Operate Jira and Atlassian services from Claude Code.",
+    "plugin": "An MCP server implements the requested Jira actions and verifies writes.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      70412
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 70412
+  },
+  {
+    "theme": "Database documentation",
+    "ask": "Document stored procedures for a database module.",
+    "plugin": "A specialist skill inspects schemas and routines and generates verified reference notes.",
+    "layer": "skill",
+    "feasibility": "workaround",
+    "issues": [
+      66316
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 66316
+  },
+  {
+    "theme": "Ancient DNA workflow",
+    "ask": "Run ancient DNA alignment work reproducibly.",
+    "plugin": "A domain skill executes pinned alignment tools and records provenance and QC.",
+    "layer": "skill",
+    "feasibility": "workaround",
+    "issues": [
+      66600
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 66600
+  },
+  {
+    "theme": "Regression suite design",
+    "ask": "Build a cross-tenant isolation regression suite.",
+    "plugin": "A specialist skill maps tenant boundaries, writes focused tests, and verifies isolation.",
+    "layer": "skill",
+    "feasibility": "workaround",
+    "issues": [
+      80519
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 80519
+  },
+  {
+    "theme": "System process diagnostics",
+    "ask": "Inspect and analyze system processes.",
+    "plugin": "A monitor and MCP tools collect process metrics and report anomalies.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      80274
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 80274
+  },
+  {
+    "theme": "Notion to GitHub migration",
+    "ask": "Migrate Notion content into GitHub artifacts.",
+    "plugin": "An MCP workflow reads Notion content, transforms it, and creates verified GitHub files or issues.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      81113
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 81113
+  },
+  {
+    "theme": "Compliance workflow gate",
+    "ask": "Require deterministic compliance checks before tools run.",
+    "plugin": "PreToolUse hooks apply the configured policy and deny noncompliant actions.",
+    "layer": "settings-hook",
+    "feasibility": "full",
+    "issues": [
+      80211,
+      80762
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 1,
+    "top_issue": 80211
+  },
+  {
+    "theme": "Cross-device session sync",
+    "ask": "Carry local Claude Code sessions between machines.",
+    "plugin": "A bin sync tool exports local transcripts and session metadata into an encrypted user-controlled store, then restores them on another device.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      80636
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 80636
+  },
+  {
+    "theme": "WebFetch cache policy",
+    "ask": "Control reuse and expiration of fetched web content.",
+    "plugin": "A settings hook or MCP fetch proxy caches responses with configurable TTL and approval policy.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      62477
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 62477
+  }
+]

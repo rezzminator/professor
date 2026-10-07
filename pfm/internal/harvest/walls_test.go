@@ -36,6 +36,7 @@ const xBottomBar = `<div data-testid="BottomBar"><p>Don't miss what's happening.
 // nothing but the gate fails naming it; prose asking for a subscription alone
 // names nothing.
 func TestWallsAreNamedNeverStoredSilently(t *testing.T) {
+	t.Parallel()
 	const paywall = "paywalled: only the preview the site serves without a subscription was read"
 	const loginWall = "login wall: only what the site shows signed-out was read"
 	newsURL := "https://news.example.com/2023/12/27/business/lawsuit.html"
@@ -84,6 +85,23 @@ func TestWallsAreNamedNeverStoredSilently(t *testing.T) {
 				`<a href="/i/jf/onboarding/web?mode=login&amp;redirect_after_login=%2FNASA">Log in</a></div></body></html>`,
 			partial: loginWall,
 			kept:    "aerospace festival",
+		},
+		{
+			name:   "a logged-out directory page whose gate is the site's legacy join link",
+			source: "https://www.linkedin.com/pub/dir/Avery/Example",
+			page: `<html><body><main>` + articlePreview + `</main><p>` +
+				`<a href="/reg/join-context?_ed=0_abc&amp;trk=ndir_getpro">Join to see all 3,210 profiles.</a></p></body></html>`,
+			partial: loginWall,
+			kept:    "opening a new front",
+		},
+		{
+			name:   "a logged-out app page whose schema.org flag marks what a signed-out reader is not shown",
+			source: "https://www.linkedin.com/pulse/robot-fleet-notes-avery-example-0000",
+			page: `<html><head><script type="application/ld+json">{"@type":"Article",` +
+				`"hasPart":{"@type":"WebPageElement","isAccessibleForFree":false,"cssSelector":".details"}}</script>` +
+				`</head><body><article>` + articlePreview + `</article></body></html>`,
+			partial: loginWall,
+			kept:    "opening a new front",
 		},
 		{
 			name:    "a logged-out app page holding nothing but the gate",

@@ -257,3 +257,21 @@ func TestRoundTripperBeforeAnyLogIsOpenStaysSilent(t *testing.T) {
 		t.Fatalf("round trip = %v, %v", response, err)
 	}
 }
+
+func TestRoundTripperWarnsOnAPresenceTransportFailure(t *testing.T) {
+	ctx, recorder := Test(t)
+	cause := errors.New("connection refused")
+	request, err := http.NewRequestWithContext(Presence(ctx), http.MethodGet, "http://probe.example.test/", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := RoundTripper(&fakeTripper{err: cause}).RoundTrip(request)
+	if response != nil || !errors.Is(err, cause) {
+		t.Fatalf("response=%v err=%v", response, err)
+	}
+	record := onlyRecord(t, recorder)
+	if record.Level != "WARN" || record.Message != "http.out.request" {
+		t.Fatalf("record=%+v", record)
+	}
+	wantField(t, record, FieldErr, cause.Error())
+}

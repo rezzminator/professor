@@ -88,11 +88,13 @@ type LiveOpenCode struct {
 
 // ClaudeProcess maps one live Claude process onto its owning tmux pane.
 type ClaudeProcess struct {
-	PID     int
-	PanePID int
-	Socket  string
-	PaneID  string
-	TTY     string
+	PID              int
+	PanePID          int
+	Socket           string
+	PaneID           string
+	TTY              string
+	ConfigDir        string
+	ConfigUnreadable bool
 }
 
 // Agent is one non-primary live Claude session identity.
@@ -143,7 +145,6 @@ type Snapshot struct {
 	OpenCode        []LiveOpenCode
 	ClaudeProcesses []ClaudeProcess
 	Agents          []Agent
-	Cache1HSockets  []string
 	Renames         []WindowRename
 	CrumblessLive   []CrumblessLive
 	CorpseSwept     []string

@@ -16,7 +16,7 @@ All train/code work happens in a `git worktree` under `.worktrees/{train-or-wave
 
 ### 2. Container — a brand-new machine per run
 
-A dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.24, and pinned Node 22) mounts the worktree and behaves as a fresh box:
+A dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.27, and pinned Node 22) mounts the worktree and behaves as a fresh box:
 
 - Own `$HOME` inside the container — `pfm install --yes` runs against it, doctor runs in it, the shim sources into its zshrc. Ephemeral by default (fresh machine per run); a named volume when a task needs iterative state.
 - Own tmux server, own socket dir — fleet experiments (spawn/inject/capture) run against container-local chats, never the live `cc-*`/`cx-*` sockets. The live-box law gains teeth: it is now physically satisfied, not just promised.
@@ -38,10 +38,10 @@ gitter merges worktree → develop only after in-fence verification (project gat
 
 ## Mechanics
 
-- `dev.sh` provides `iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]` and `iso {run|sim} <command…>` through Docker Compose. The active checkout is read-only; Go and npm caches use container volumes. Every invocation builds the current Dockerfile before running. Docker absent → loud `TOOLCHAIN-MISSING`, never a silent host fallback.
+- `dev.sh` provides `iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]` and `iso {run|sim} <command…>` through Docker Compose. The active checkout is read-only; Go and golangci-lint caches use container volumes. An invocation builds the image only when the key of its build inputs (the build context's files, the resolved Compose build block and the platform) differs from the image's `pfm.fence.inputs` label. The base image is pinned by digest; a current image starts without a build or registry lookup. Docker absent → loud `TOOLCHAIN-MISSING`, never a silent host fallback.
 - **Broken-state report:** every `iso` run prints the container id and the in-container `$HOME` as its first line (an `iso sim` run prints its `sim:` line first, and a BOOTSTRAP-FAILED run stops before the command and its fence line) — a run that cannot prove it is inside the fence did not run inside the fence. A host-toolchain fallback is impossible by construction (the verb IS the docker invocation).
 - Builder briefs change one clause: all build/test through `dev.sh iso`; never build to the host's `~/.local/bin`; never run `pfm install` on the host.
-- The CLAUDE.md § Process "no worktree pipeline — deliberate scope choice" clause is reversed for code waves (a /ptm change, ordered by the user 2026-08-20). Blueprint/docs-only waves are markdown and cannot destabilize the box — see decision (a).
+- The former CLAUDE.md § Process "no worktree pipeline — deliberate scope choice" clause is reversed for code waves — § Process now builds code flights inside the fence (a /ptm change, ordered by the user 2026-08-20). Blueprint/docs-only waves are markdown and cannot destabilize the box — see decision (a).
 
 ## Unchanged
 

@@ -97,11 +97,8 @@ func acquireTargetLock(
 
 // lockTarget takes the pane's ONE inject lock — the same directory
 // engine.inject holds while it types, keyed by socket:pane — and returns the
-// refusal text for a caller to report when it could not be had. Both users of
-// the lock (a live inject, and ScheduleAfterCurrentTurn's check-and-arm) go
-// through here so the key, the timings and the wording cannot drift apart:
-// two schedules that observed the same unarmed pane is exactly the race the
-// armed record cannot close by itself.
+// refusal text for a caller to report when it could not be had. Live injects
+// share this lock so the key, timings and wording cannot drift apart.
 func (engine *Engine) lockTarget(ctx context.Context, target Target) (*targetLock, string) {
 	lock, err := acquireTargetLock(
 		ctx,

@@ -41,6 +41,10 @@ const (
 	codeReviewBareEffort = "low"
 	// codeReviewTopEffort is the highest effort codex-cli accepts.
 	codeReviewTopEffort = "xhigh"
+	// codexMediumEffort and codexHighEffort are the two codex-cli efforts
+	// between the bare and the top one.
+	codexMediumEffort = "medium"
+	codexHighEffort   = "high"
 )
 
 // codeReviewEfforts maps the level written after /code-review onto Codex's
@@ -51,8 +55,8 @@ const (
 // the Claude skill accepts has a row here.
 var codeReviewEfforts = map[string]string{
 	codeReviewBareEffort: codeReviewBareEffort,
-	"medium":             "medium",
-	"high":               "high",
+	codexMediumEffort:    codexMediumEffort,
+	codexHighEffort:      codexHighEffort,
 	codeReviewTopEffort:  codeReviewTopEffort,
 	"max":                codeReviewTopEffort,
 	"ultra":              codeReviewTopEffort,

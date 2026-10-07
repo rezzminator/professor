@@ -37,7 +37,7 @@ func TestCodexAgentsCommandCompilesAndInstalls(t *testing.T) {
 		"; do not edit — edit the source, then re-run: pfm codex build\n" +
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
-		"model = \"gpt-5.6-luna\"\n" +
+		"model = \"gpt-6-luna\"\n" +
 		"sandbox_mode = \"read-only\"\n" +
 		"developer_instructions = \"\"\"\n"
 	// The role's own body, escaped byte for byte, is the whole value.

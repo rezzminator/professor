@@ -9,6 +9,9 @@ import (
 	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
@@ -113,6 +116,11 @@ func Run(
 	if request.Socket == "" || request.Run == "" || request.CWD == "" {
 		return Result{}, errors.New("spawn requires a socket, command and directory")
 	}
+	if request.CodexHome != "" {
+		if err := pfmconfig.CodexLoginError(request.CodexHome); err != nil {
+			return Result{}, err
+		}
+	}
 	launcher, err := LauncherFor(request.Engine)
 	if err != nil {
 		return Result{}, err
@@ -153,6 +161,11 @@ func Run(
 		return result, err
 	}
 	trace.step("booted | %s", screen(boot))
+	if pfmengine.ClaudeTrustDialog(boot) {
+		trace.step("held at the folder-trust dialog: nothing typed or pressed")
+		result.TrustHeld = true
+		return result, nil
+	}
 	// Nothing is typed until a composer is on screen and STAYS there. A
 	// startup overlay swallows every keystroke sent to it — that is how a
 	// chat ended up unnamed AND unprompted, with its "/rename" and its first
@@ -160,6 +173,9 @@ func Run(
 	warning, renameErr := launcher.Rename(ctx, tmux, request.Socket, target, request.Name, timings, trace)
 	if renameErr != nil {
 		return result, renameErr
+	}
+	if err := untrustedFolderGuard(ctx, tmux, request, target); err != nil {
+		return result, err
 	}
 	result.Named = warning == ""
 	if warning != "" {
@@ -187,15 +203,11 @@ func Run(
 		)
 		return result, nil
 	}
-	if err := submitPrompt(
-		ctx,
-		tmux,
-		request.Socket,
-		target,
-		request.Prompt,
-		timings,
-		trace,
-	); err != nil {
+	err = submitPrompt(ctx, tmux, request.Socket, target, request.Prompt, timings, trace)
+	if guardErr := untrustedFolderGuard(ctx, tmux, request, target); guardErr != nil {
+		return result, guardErr
+	}
+	if err != nil {
 		result.Warnings = append(
 			result.Warnings,
 			fmt.Sprintf("the first prompt was not delivered: %v", err),
@@ -290,7 +302,8 @@ func composerReady(capture string) bool {
 // waitForCodexComposer returns once the composer is drawn, dismissing startup
 // overlays along the way. Most overlays dismiss with Escape, but Codex
 // 0.149's directory-trust dialog makes Escape quit the whole TUI; its exact
-// affirmative row is accepted with Enter. A key is sent only once the screen
+// affirmative row is accepted with Enter, and 0.159's "Trust this folder?" by
+// its option key (startupOverlayKey). A key is sent only once the screen
 // has stopped changing, so a slow paint is never mistaken for a stuck modal.
 func waitForCodexComposer(
 	ctx context.Context,
@@ -327,6 +340,10 @@ func waitForComposer(
 			// An overlay: dismiss it once the screen has stopped changing, so
 			// a half-drawn frame is never mistaken for a stuck modal.
 			held = 0
+			if codexFolderUntrusted(capture) && codexFolderTrustKey(capture) == "" {
+				trace.step("untrusted folder: nothing pressed | %s", screen(capture))
+				return false
+			}
 			trimmed := strings.TrimSpace(capture)
 			if trimmed != "" && trimmed == previous && dismissals < startupEscapes {
 				key := startupOverlayKey(capture)
@@ -347,13 +364,6 @@ func waitForComposer(
 			return false
 		}
 	}
-}
-
-func startupOverlayKey(capture string) string {
-	if strings.Contains(capture, codexTrustQuestion) && strings.Contains(capture, codexTrustYes) {
-		return "Enter"
-	}
-	return "Escape"
 }
 
 // nameCodexThread waits for a composer that holds, then renames — retrying the
@@ -462,9 +472,12 @@ func renameCodexThread(
 	if err := tmux.SendKey(ctx, socket, target, "Enter"); err != nil {
 		return false, fmt.Sprintf("could not open the rename prompt: %v", err), false
 	}
-	if !pollCapture(ctx, tmux, socket, target, timings, renameModalOpen) {
+	if !awaitRenameModal(ctx, tmux, socket, target, timings) {
 		capture, _ := tmux.Capture(ctx, socket, target)
 		trace.step("no name prompt | %s", screen(capture))
+		if codexFolderUntrusted(capture) {
+			return false, "Codex has no active thread to rename", true
+		}
 		_ = tmux.SendKey(ctx, socket, target, "Escape")
 		return false, "Codex never asked for a thread name — the chat is running unnamed", false
 	}
@@ -590,14 +603,21 @@ func confirmWait(timings Timings) time.Duration {
 	return wait
 }
 
-// submitPrompt types the launch prompt and PROVES it left the composer.
+// submitPrompt pastes the launch prompt and PROVES it left the composer.
 //
-// The pause between the text and the Enter is what keeps a TUI from receiving
-// the newline before it has processed the text — the same gap chat.sh leaves
-// when it injects. The re-sends after it are what keep a dropped newline from
-// passing as a delivery: an engine still finishing its MCP boot reads its
-// input in bursts, and the burst that carries a lone Enter is the one it
-// misses.
+// The prompt travels as ONE bracketed paste, never as typed keystrokes: Codex
+// (0.159) reads a typed burst as a paste of its own, holds the burst's tail
+// until the next key arrives and turns every Enter inside that window into a
+// newline, so a typed brief sat in the composer however many Enters followed
+// it. A bracketed paste reaches the composer whole, as text or as its
+// "[Pasted Content N chars]" placeholder, and the next Enter submits it.
+//
+// The pause between the paste and the Enter is what keeps a TUI from
+// receiving the newline before it has processed the text — the same gap
+// chat.sh leaves when it injects. The re-sends after it are what keep a
+// dropped newline from passing as a delivery: an engine still finishing its
+// MCP boot reads its input in bursts, and the burst that carries a lone Enter
+// is the one it misses.
 func submitPrompt(
 	ctx context.Context,
 	tmux Tmux,
@@ -605,7 +625,7 @@ func submitPrompt(
 	timings Timings,
 	trace tracer,
 ) error {
-	if err := tmux.SendLiteral(ctx, socket, target, text); err != nil {
+	if err := tmux.SendPaste(ctx, socket, target, text); err != nil {
 		return err
 	}
 	needle := composerNeedle(text)
@@ -627,7 +647,7 @@ func submitPrompt(
 			return err
 		}
 		if pollCapture(ctx, tmux, socket, target, step, func(capture string) bool {
-			return !composerHolds(capture, needle)
+			return composerReleased(capture, needle)
 		}) {
 			trace.step("prompt left the composer on press %d", press+1)
 			return nil
@@ -652,27 +672,28 @@ func composerNeedle(text string) string {
 	return naming.ClipRunes(flattenComposerText(first), composerNeedleMax)
 }
 
-// composerHolds reports whether the composer — the LAST marker line, below
-// every submitted turn Codex keeps on screen — still carries the fingerprint.
+// composerHolds reports whether the composer — the LAST line starting with
+// the composer glyph, below every submitted turn Codex keeps on screen — still
+// carries the prompt: its fingerprint, or the placeholder a long paste
+// collapses into.
 func composerHolds(capture, needle string) bool {
 	if needle == "" {
 		return false
 	}
-	line := lastLineContaining(capture, codexComposer)
+	line := inject.LastComposerLine(capture)
 	if line == "" {
 		return false
 	}
-	return strings.Contains(flattenComposerText(line), needle)
+	return strings.Contains(flattenComposerText(line), needle) ||
+		inject.HasPastePlaceholder(line)
 }
 
-func lastLineContaining(capture, marker string) string {
-	last := ""
-	for _, line := range strings.Split(capture, "\n") {
-		if strings.Contains(line, marker) {
-			last = line
-		}
-	}
-	return last
+// composerReleased is the submit proof: an idle composer row is on screen
+// and it no longer holds the prompt. A screen with no composer row proves
+// nothing — a draft taller than the pane pushes the row off the top, and
+// reading that as "submitted" is what let a typed-but-unsent brief pass.
+func composerReleased(capture, needle string) bool {
+	return inject.ComposerRowShown(capture) && !composerHolds(capture, needle)
 }
 
 func flattenComposerText(value string) string {

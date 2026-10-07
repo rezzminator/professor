@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -37,7 +39,7 @@ import (
 // verbatim into the `/reload` slash command's own description — the picker
 // shows the human exactly the flags this package's Run understands, never a
 // hand-maintained restatement that can drift from them.
-const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--1h on|off] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
+const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
 	"       with no --sock, the calling chat's own pane is detected automatically;\n" +
 	"       --hide (with --new) hides the conversation left behind from the picker"
 
@@ -55,6 +57,9 @@ type Tmux interface {
 	PaneInMode(context.Context, string, string) (bool, error)
 	CancelMode(context.Context, string, string) error
 	Capture(context.Context, string, string) (string, error)
+	// CaptureStyled is Capture with SGR attributes kept, so dim hint text in
+	// the composer can be told from a draft.
+	CaptureStyled(context.Context, string, string) (string, error)
 	SendKey(context.Context, string, string, string) error
 	SendLiteral(context.Context, string, string, string) error
 	Respawn(context.Context, string, string, string, string) error
@@ -69,24 +74,35 @@ type Process interface {
 }
 
 type Request struct {
-	Engine      pfmengine.ID
-	SocketPath  string
-	Pane        string
-	PanePID     int
-	SessionID   string
-	Transcript  string
-	CWD         string
-	Account     int
-	AccountIDs  []int
-	CodexHome   string
-	CodexBinary string
-	CodexYolo   bool
-	Cache1H     bool
-	Then        string
-	// Name is the display name the chat wore before a --new reboot; the
-	// reborn pane takes it over and the abandoned session is relabelled
-	// (followName). "" carries nothing — a chat named from its prompts.
+	Engine       pfmengine.ID
+	SocketPath   string
+	Pane         string
+	New          bool
+	AccountGiven bool
+	CacheGiven   bool
+	LeftBehind   string
+	SessionID    string
+	Transcript   string
+	CWD          string
+	Account      int
+	AccountIDs   []int
+	CodexHome    string
+	CodexBinary  string
+	CodexYolo    bool
+	Cache1H      bool
+	Then         string
+	// Name is the chat's pfm label, carried to Claude as --name: on --new the
+	// custom title the reborn chat inherits (followName also types /rename and
+	// relabels the session left behind). A same-pane Claude reboot owns it
+	// instead: prepareReload sets it from Label for the session it resumes.
+	// "" carries nothing.
 	Name string
+	// Label is set for a same-pane Claude reboot only: it resolves a session's
+	// pfm label (store.SessionLabel), and prepareReload asks it again whenever
+	// a handoff moves the reboot onto another session, so the reborn pane
+	// never wears the label of the session the pane used to show. When set it
+	// owns Name; "" carries no --name; the resolver reports its own failure.
+	Label func(sessionID string) string
 	// Model and Effort pin the reborn seat's tier — the same pair
 	// HeadlessRequest carries for a fresh launch (internal/action/headless.go).
 	// "" means "inherit whatever the CLI/account would have chosen on its
@@ -106,6 +122,7 @@ type Request struct {
 	// configured system prompt because this constructor never knew about one.
 	Home    string
 	Machine pfmconfig.Config
+	fresh   bool
 }
 
 type Options struct {
@@ -119,11 +136,14 @@ type Options struct {
 	ThenTries   int
 	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
 	Clock clock.Clock
+	// Paste delivers a Codex --then as one bracketed paste (then_paste.go).
+	Paste func(ctx context.Context, socket, pane, text string) error
 }
 
 type Result struct {
-	Account int
-	Cache1H bool
+	Account    int
+	Cache1H    bool
+	LeftBehind string
 	// New reports whether the reborn seat started a brand-new session id
 	// (--new was requested, or no transcript existed yet to resume).
 	New bool
@@ -154,9 +174,7 @@ func (o *Options) defaults() {
 	}
 }
 
-// LockPath is the pane mutex Run holds for the whole reboot — from before the
-// old process is sent /exit until the reborn one is up. The file persists;
-// the flock on it is the signal.
+// LockPath is the persistent pane mutex; its flock spans the whole reboot.
 func LockPath(sidDir, socketName, pane string) string {
 	return filepath.Join(sidDir, "."+socketName+"."+pane+".reloadlock")
 }
@@ -181,14 +199,12 @@ func InFlight(sidDir, socketName, pane string) (inFlight bool, returnErr error) 
 			)
 		}
 	}()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	// A shared probe conflicts with Run's exclusive lock, never with another probe.
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return true, nil
 		}
 		return false, fmt.Errorf("probe reload lock: %w", err)
-	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		return false, fmt.Errorf("release reload lock probe: %w", err)
 	}
 	return false, nil
 }
@@ -208,21 +224,13 @@ func Run(
 	trail := obs.NewTrail(ctx, "reload", "requested")
 	defer func() { trail.End(err) }()
 	options.defaults()
-	if request.SocketPath == "" || request.Pane == "" {
-		return Result{}, errors.New("reload requires a socket and pane")
-	}
-	if !rosterContains(request.AccountIDs, request.Account) {
-		return Result{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
-	}
-	run, err := engineRun(request)
-	if err != nil {
+	entry := options.Clock.Now()
+	if request, err = applyReloadWorkbench(request); err != nil {
 		return Result{}, err
 	}
-	if run == "" {
-		if descriptor, lookupErr := pfmengine.Lookup(request.Engine); lookupErr == nil {
-			return Result{}, fmt.Errorf("%s does not support in-place reload", descriptor.Short)
-		}
-		return Result{}, fmt.Errorf("engine %q does not support in-place reload", request.Engine)
+	request, run, wasNew, err := prepareReload(request)
+	if err != nil {
+		return Result{}, err
 	}
 	if stderr == nil {
 		stderr = io.Discard
@@ -231,7 +239,7 @@ func Run(
 	if err := os.MkdirAll(options.SIDDir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("create reload lock directory: %w", err)
 	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return Result{}, fmt.Errorf("open reload lock: %w", err)
 	}
@@ -240,21 +248,35 @@ func Run(
 			fmt.Fprintf(stderr, "pfm chat reload: close pane mutex: %v\n", err)
 		}
 	}()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+	for attempt := 0; ; attempt++ {
+		lockErr := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if lockErr == nil {
+			break
+		}
+		if !errors.Is(lockErr, syscall.EWOULDBLOCK) {
+			return Result{}, fmt.Errorf("lock reload pane: %w", lockErr)
+		}
+		if attempt+1 >= options.IdleTries {
 			return Result{}, errors.New("another reload of this pane is already in flight")
 		}
-		return Result{}, fmt.Errorf("lock reload pane: %w", err)
-	}
-	defer func() {
-		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: unlock pane mutex: %v\n", err)
+		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
+			return Result{}, err
 		}
-	}()
+	}
 	if tmux == nil {
 		return Result{}, errors.New("reload requires a tmux client")
 	}
 	trail.Reach("locked", "pane mutex held")
+	updated, continuedRun, leftBehind, continuedNew, err := continueFromHandoff(
+		lock, lockPath, request, entry, options.SIDDir, stderr,
+	)
+	if err != nil {
+		return Result{}, err
+	}
+	request = updated
+	if continuedRun != "" {
+		run, wasNew = continuedRun, continuedNew
+	}
 
 	if options.Delay > 0 {
 		if err := options.Clock.Sleep(ctx, options.Delay); err != nil {
@@ -292,10 +314,10 @@ func Run(
 		if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, abort); displayErr != nil {
 			return Result{}, errors.Join(cause, fmt.Errorf("display selector refusal: %w", displayErr))
 		}
-		return Result{}, cause
+		return Result{}, paneToldError{cause}
 	}
-	if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "C-s"); err != nil {
-		return Result{}, fmt.Errorf("stash pane draft: %w", err)
+	if err := stashDraft(ctx, request, options.Clock, tmux, capture, stderr); err != nil {
+		return Result{}, err
 	}
 	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, "/exit"); err != nil {
 		return Result{}, fmt.Errorf("send /exit: %w", err)
@@ -362,8 +384,27 @@ func Run(
 		return Result{}, exitIncomplete(ctx, request, options, tmux)
 	}
 	trail.Reach("dead", "pane exited")
-	if err := tmux.Respawn(ctx, request.SocketPath, request.Pane, request.CWD, run); err != nil {
+	if request.Engine == pfmengine.Claude && request.SessionID != "" {
+		values, recordErr := pfmconfig.ResolvePaths()
+		if recordErr == nil {
+			recordErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
+				SessionID: request.SessionID, Engine: pfmengine.Claude,
+				Account: request.Account, Cache1H: request.Cache1H,
+			}, clock.Real.Now().Unix())
+		}
+		if recordErr != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
+		}
+	}
+	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
+	}
+	carryReminders(ctx, leftBehind, request.SessionID, stderr)
+	if err := writeHandoff(lock, handoffRecord{
+		Engine: request.Engine, SessionID: request.SessionID, Account: request.Account,
+		LeftBehind: leftBehind, Cache1H: request.Cache1H, CWD: request.CWD, WrittenAt: options.Clock.Now(),
+	}); err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: record reload handoff: %v\n", err)
 	}
 	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, false); err != nil {
 		return Result{}, fmt.Errorf("clear pane remain-on-exit: %w", err)
@@ -379,56 +420,17 @@ func Run(
 			}
 		}
 		if err := deliverThen(ctx, request, options, tmux, proc, stderr); err != nil {
-			return Result{}, errors.Join(err, failThen(ctx, request, options.SIDDir, tmux, err.Error()))
+			if failErr := failThen(ctx, request, options.SIDDir, tmux, err.Error()); failErr != nil {
+				return Result{}, errors.Join(err, failErr)
+			}
+			return Result{}, paneToldError{err}
 		}
 		trail.Reach("then-delivered", "--then delivered")
 	}
-	if request.SessionID == "" {
+	if wasNew {
 		followName(ctx, request, options, tmux, proc, stderr)
 	}
-	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
-}
-
-func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmux Tmux, stderr io.Writer) error {
-	for attempt := 0; attempt < 40; attempt++ {
-		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: confirm typed /exit (try %d): %v\n", attempt+1, err)
-		} else if composerShowsExit(capture) {
-			return nil
-		}
-		if err := clk.Sleep(ctx, 50*time.Millisecond); err != nil {
-			return err
-		}
-	}
-	cause := errors.New("typed /exit never rendered — refusing blind Enter")
-	if err := clearTypedExit(ctx, request, tmux); err != nil {
-		return errors.Join(cause, err)
-	}
-	return cause
-}
-
-// clearTypedExit backspaces the "/exit" this worker itself just typed
-// (SendLiteral, over a composer C-s had already stashed empty) back out of
-// the composer, so a refusal to reboot never leaves that stray text sitting
-// there for a human to notice — or, worse, accidentally submit — then
-// confirms the composer actually cleared. Shared by waitExitRendered (never
-// confirmed rendering, so pressing Enter would be blind) and exitIncomplete
-// (rendered, then the pane never died on it).
-func clearTypedExit(ctx context.Context, request Request, tmux Tmux) error {
-	for range len("/exit") {
-		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "BSpace"); err != nil {
-			return fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err)
-		}
-	}
-	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
-	if err != nil {
-		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
-	}
-	if composerShowsExit(capture) {
-		return errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand")
-	}
-	return nil
+	return Result{Account: request.Account, Cache1H: request.Cache1H, New: wasNew, LeftBehind: leftBehind}, nil
 }
 
 // waitCallerIdle holds the /exit until the pane's current turn has ended.
@@ -555,7 +557,13 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 		}
 		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))
 	}
-	return errors.Join(cause, errors.New("the pane shows neither the typed /exit nor an exit dialog"))
+	return errors.Join(
+		cause,
+		fmt.Errorf(
+			"the pane shows neither the typed /exit nor an exit dialog (composer shows %q)",
+			composerDraftText(capture),
+		),
+	)
 }
 
 func sleepPoll(ctx context.Context, clk clock.Clock, poll time.Duration) error {
@@ -581,36 +589,6 @@ func (request Request) claudeBinary() string {
 	return pfmengine.MustLookup(pfmengine.Claude).Binary
 }
 
-// claudeRun is the respawn line for a Claude seat. It owns nothing: the strip,
-// the autonomy posture and the system prompt all come from the one spawn door,
-// so a chat that reboots in place comes back with exactly what a fresh launch
-// would have carried.
-func claudeRun(request Request) (string, error) {
-	arguments := []string(nil)
-	if request.SessionID != "" {
-		arguments = []string{"--resume", request.SessionID}
-	}
-	effort, err := action.ClaudeEffort(request.Effort)
-	if err != nil {
-		return "", fmt.Errorf("resolve claude respawn effort: %w", err)
-	}
-	run, err := action.ClaudeSpawn{
-		Purpose:    action.PurposeResume,
-		Account:    request.Account,
-		Cache1H:    request.Cache1H,
-		Args:       arguments,
-		Home:       request.Home,
-		Machine:    request.Machine,
-		Model:      request.Model,
-		Effort:     effort,
-		PromptFile: request.PromptChannel,
-	}.ShellCommand()
-	if err != nil {
-		return "", fmt.Errorf("render claude respawn command: %w", err)
-	}
-	return run, nil
-}
-
 func engineRun(request Request) (string, error) {
 	switch request.Engine {
 	case pfmengine.Claude:
@@ -627,9 +605,9 @@ func codexRun(request Request) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve codex respawn effort: %w", err)
 	}
-	parts := []string{
-		"env", "-u", "CODEX_THREAD_ID", "-u", "CLAUDE_CODE_SESSION_ID",
-		"-u", "CLAUDECODE", "-u", "CLAUDE_CONFIG_DIR",
+	parts := []string{"env"}
+	for _, name := range claudelaunch.Hygiene() {
+		parts = append(parts, "-u", name)
 	}
 	if request.CodexHome != "" {
 		parts = append(parts, "CODEX_HOME="+action.Quote(request.CodexHome))
@@ -678,9 +656,11 @@ func deliverThen(
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload --then: capture input box (try %d): %v\n", i+1, err)
+		} else if pfmengine.ClaudeTrustDialog(capture) {
+			return trustDialogError(request.Pane)
 		} else {
 			trustPrompt := false
-			for _, needle := range []string{"Trust this directory?", "trust this folder", "trust these settings"} {
+			for _, needle := range []string{"Trust this directory?", "trust these settings"} {
 				if strings.Contains(capture, needle) {
 					if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 						return fmt.Errorf("reload --then: accept trust prompt: %w", err)
@@ -714,6 +694,9 @@ ready:
 	}
 	if !live {
 		return fmt.Errorf("reload --then: no live %s on the pane", engineLabel(request.Engine))
+	}
+	if request.Engine == pfmengine.Codex {
+		return deliverCodexThen(ctx, request, options, tmux, stderr)
 	}
 	// A composer baseline captured BEFORE the send lets us tell a freshly
 	// typed paste placeholder from one left over from an earlier turn — a
@@ -862,6 +845,9 @@ func currentPanePID(ctx context.Context, socket, wanted string, tmux Tmux) (int,
 }
 
 func engineLabel(id pfmengine.ID) string {
+	if id == "" {
+		return "unknown-engine"
+	}
 	return pfmengine.MustLookup(id).Short
 }
 

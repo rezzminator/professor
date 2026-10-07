@@ -36,6 +36,8 @@ var ErrClaudeBinaryNotFound = errors.New("claude binary not found")
 // executable in its absolute location or the caller-supplied PATH.
 var ErrConfiguredClaudeBinaryNotFound = errors.New("configured Claude binary not found")
 
+var readClaudeShim = os.ReadFile
+
 func managedClaudeLauncher(home string) string {
 	return filepath.Join(
 		home,
@@ -61,7 +63,9 @@ func claudeLauncherStatePath(home string) string {
 // fails explicitly; otherwise the newest native version wins, followed by each
 // PATH component in order. The canonical and managed launchers, including
 // physical aliases of the managed file, are never returned because doing so
-// would recurse back into pfm.
+// would recurse back into pfm. Any pfm launcher shim, whatever home owns it, is
+// never returned either: a shim of another home, or a copy of the asset, execs
+// back into pfm just the same.
 func ResolveClaudeBinary(home, configuredBinary, pathEnv string) (string, error) {
 	managed := managedClaudeLauncher(home)
 	canonical := canonicalClaudeLauncher(home)
@@ -136,6 +140,9 @@ func eligibleClaudeBinary(candidate, canonical, managed string) (bool, error) {
 	if !candidateInfo.Mode().IsRegular() || candidateInfo.Mode().Perm()&0o111 == 0 {
 		return false, nil
 	}
+	if isPfmClaudeShim(candidate) {
+		return false, nil
+	}
 	managedInfo, err := os.Stat(managed)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -144,6 +151,35 @@ func eligibleClaudeBinary(candidate, canonical, managed string) (bool, error) {
 		return false, fmt.Errorf("inspect managed Claude launcher %s: %w", managed, err)
 	}
 	return !os.SameFile(candidateInfo, managedInfo), nil
+}
+
+const (
+	// claudeShimMaxBytes caps what isPfmClaudeShim reads: the launcher shim is
+	// two lines, while the native Claude binary and the npm cli.js are orders
+	// of magnitude larger and are never opened.
+	claudeShimMaxBytes = 4096
+	// claudeShimMarker is the subcommand the shim execs into pfm with.
+	claudeShimMarker = "internal claude-launch"
+)
+
+// isPfmClaudeShim reports whether path is a pfm Claude launcher shim, whichever
+// home owns it: it resolves to a managed launcher path under any home, or it is
+// a small script that execs pfm's claude-launch subcommand.
+// A candidate that stats but cannot be read counts as a shim: the loop guard fails closed.
+func isPfmClaudeShim(path string) bool {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil &&
+		strings.HasSuffix(resolved, string(filepath.Separator)+managedClaudeLauncher("")) {
+		return true
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Size() > claudeShimMaxBytes {
+		return false
+	}
+	body, err := readClaudeShim(path)
+	if err != nil {
+		return true
+	}
+	return strings.HasPrefix(string(body), "#!") && strings.Contains(string(body), claudeShimMarker)
 }
 
 func InspectClaudeLauncher(home string) (ClaudeLauncherStatus, error) {

@@ -6,6 +6,7 @@ import "testing"
 // adds it when it rewrites its config — while a non-empty env, or any other
 // value under the key, keeps the entry someone else's.
 func TestWithoutEmptyEnvDropsOnlyAnEmptyEnv(t *testing.T) {
+	t.Parallel()
 	base := func(env any) map[string]any {
 		return map[string]any{"type": "stdio", "command": "pfm", configEnvKey: env}
 	}
@@ -26,12 +27,5 @@ func TestWithoutEmptyEnvDropsOnlyAnEmptyEnv(t *testing.T) {
 		if _, still := tc.registration[configEnvKey]; name != "absent" && !still {
 			t.Fatalf("%s: the caller's map lost its env; want a copy", name)
 		}
-	}
-	recorded := map[string]any{"type": "stdio", "command": "pfm"}
-	if !sameClaudeRegistration(base(map[string]any{}), recorded) {
-		t.Fatal("a registration Claude rewrote with an empty env must match pfm's receipt")
-	}
-	if sameClaudeRegistration(base(map[string]any{"A": "1"}), recorded) {
-		t.Fatal("a registration with a non-empty env must not match pfm's receipt")
 	}
 }

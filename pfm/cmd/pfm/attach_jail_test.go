@@ -49,6 +49,7 @@ type attachJail struct {
 }
 
 func TestJailedEvalAttachFromPlainAndNestedTmux(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -59,30 +60,37 @@ func TestJailedEvalAttachFromPlainAndNestedTmux(t *testing.T) {
 		t.Skip("script(1) is not installed")
 	}
 
-	jail := newAttachJail(t)
-	index := exec.Command(filepath.Join(jail.home, ".local", "bin", "pfm"), "index", "--full")
-	index.Env = jail.env
-	if output, err := index.CombinedOutput(); err != nil {
-		t.Fatalf("index attach fixture: %v: %s", err, output)
-	}
-
 	for _, mode := range []string{"plain", "inside-tmux", "bunker"} {
 		for _, flow := range []string{"picker", "open"} {
 			t.Run("eval/"+mode+"/"+flow, func(t *testing.T) {
-				jail.proveAttach(t, "eval", mode, flow)
+				t.Parallel()
+				proveJailedAttach(t, "eval", mode, flow)
 			})
 		}
 	}
 	for _, mode := range []string{"plain", "inside-tmux"} {
 		for _, flow := range []string{"picker", "open"} {
 			t.Run("raw/"+mode+"/"+flow, func(t *testing.T) {
-				jail.proveAttach(t, "raw", mode, flow)
+				t.Parallel()
+				proveJailedAttach(t, "raw", mode, flow)
 			})
 		}
 	}
 	t.Run("raw/plain/bare", func(t *testing.T) {
-		jail.proveAttach(t, "raw", "plain", "bare")
+		t.Parallel()
+		proveJailedAttach(t, "raw", "plain", "bare")
 	})
+}
+
+func proveJailedAttach(t *testing.T, protocol, mode, flow string) {
+	t.Helper()
+	jail := newAttachJail(t)
+	index := exec.Command(filepath.Join(jail.home, ".local", "bin", "pfm"), "index", "--full")
+	index.Env = jail.env
+	if output, err := index.CombinedOutput(); err != nil {
+		t.Fatalf("index attach fixture: %v: %s", err, output)
+	}
+	jail.proveAttach(t, protocol, mode, flow)
 }
 
 func newAttachJail(t *testing.T) *attachJail {
@@ -105,6 +113,7 @@ func newAttachJail(t *testing.T) *attachJail {
 	codexHome := filepath.Join(root, "codex")
 	for _, directory := range []string{
 		filepath.Join(home, ".local", "bin"),
+		filepath.Join(home, ".claude"),
 		tmuxDir,
 		sidDir,
 		claudeRoot,
@@ -115,6 +124,12 @@ func newAttachJail(t *testing.T) *attachJail {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
+	}
+	configPath := filepath.Join(root, "pfm.config.json")
+	config := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q,"claude":{"cache1h":false}}]}`,
+		filepath.Join(home, ".claude"))
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	const id = "b1111111-1111-4111-8111-111111111111"
 	transcriptDir := filepath.Join(claudeRoot, "attach-project")
@@ -133,9 +148,9 @@ func newAttachJail(t *testing.T) *attachJail {
 		t.Fatal(err)
 	}
 	wrapper := "#!/bin/sh\nexec " + shellQuote(executable) +
-		" -test.run '^TestPFMAttachHelper$' -- \"$@\"\n"
+		" -test.run '^TestPFMAttachHelper$' -- --config " + shellQuote(configPath) + " \"$@\"\n"
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := os.WriteFile(binary, []byte(wrapper), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(wrapper), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	cwd, err := os.Getwd()
@@ -150,14 +165,13 @@ func newAttachJail(t *testing.T) *attachJail {
 		// correctly has no 1h birth marker to observe. Match that explicit 5m
 		// posture now that the product default is 1h; otherwise the cache gate
 		// deliberately forks instead of proving the attach path.
-		"CC_ARM_1H":        "0",
 		"HOME":             home,
 		"PATH":             path,
 		"TERM":             "xterm-256color",
 		"TMUX":             "",
 		"TMUX_TMPDIR":      root,
 		"PFM_HOME":         home,
-		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_CACHE_DB":     filepath.Join(root, "pfm-cache.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
 		"PFM_CODEX_ROOT":   codexHome,
@@ -233,7 +247,16 @@ func (jail *attachJail) proveAttach(
 	if mode == "inside-tmux" {
 		releasePath = filepath.Join(jail.root, suffix+".release")
 	}
-	script := "#!/usr/bin/env zsh\nsource " + shellQuote(jail.shim) + " || exit 97\n" +
+	terminalSize := ""
+	if mode == "plain" {
+		// script(1) opens its PTY at 0x0 when its own stdin is a pipe, and the
+		// picker (which paints through /dev/tty, this same PTY) renders an
+		// empty frame on a zero-cell screen. A real size makes every frame
+		// arrive in command.Stdout, so the live row can be waited on.
+		terminalSize = "stty rows 30 columns 120 || exit 96\n"
+	}
+	script := "#!/usr/bin/env zsh\n" + terminalSize +
+		"source " + shellQuote(jail.shim) + " || exit 97\n" +
 		commandText + "\nprint -r -- attached > " + shellQuote(marker) + "\n"
 	if releasePath != "" {
 		// The command may have handed a client to the target server while the
@@ -242,7 +265,7 @@ func (jail *attachJail) proveAttach(
 		// cleanup writes the same release file before killing the server.
 		script += "while [[ ! -e " + shellQuote(releasePath) + " ]]; do sleep 0.01; done\n"
 	}
-	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,16 +323,30 @@ func (jail *attachJail) proveAttach(
 		// gather goroutine can be CPU-starved; this functional proof must not
 		// press Enter while the deliberately stale first frame is still shown.
 		if mode == "plain" {
-			// The picker renders through its own /dev/tty handle
-			// (internal/ui/picker.go:Pick opens /dev/tty directly and hands it
-			// to bubbletea as both input and output), never through the
-			// process's stdout/stderr that command.Stdout captures here, and
-			// testjail.PTYCommand wraps script(1) with no separate PTY-master
-			// handle to poll instead. Confirmed live: even with the deadline
-			// widened to 20s, output never advances past the initial
-			// alt-screen setup escape sequence — the painted row is genuinely
-			// unobservable in plain mode, so this stays a bounded sleep.
-			time.Sleep(5 * time.Second)
+			// The picker's /dev/tty is script(1)'s PTY, so its frames reach
+			// command.Stdout as a diff stream of escape sequences; a line
+			// cannot be read back from it, but a glyph can. ● is
+			// ui.rowMarker's glyph for a live row only — the stale first
+			// frame paints the transcript as ↻ — and this jail holds exactly
+			// one chat, JAILATTACH, so ● in the stream means its live row was
+			// painted, after the model applied the gather's refresh. Keys
+			// typed from here are read after that refresh.
+			deadline := time.Now().Add(20 * time.Second)
+			live := false
+			for time.Now().Before(deadline) {
+				painted := output.String()
+				if strings.Contains(painted, "JAILATTACH") && strings.Contains(painted, "●") {
+					live = true
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			if !live {
+				t.Fatalf(
+					"plain picker never painted the JAILATTACH row live (● on the PTY) within 20s; output: %q",
+					output.String(),
+				)
+			}
 		} else {
 			deadline := time.Now().Add(5 * time.Second)
 			ready := false

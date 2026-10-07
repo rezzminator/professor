@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch reproduces the
@@ -35,7 +37,7 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		shellQuote(jail.binary) + " ls\n" +
 		"echo RC=$? > " + shellQuote(marker) + "\n"
-	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,7 +176,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		"TMUX":             "",
 		"TMUX_TMPDIR":      root,
 		"PFM_HOME":         home,
-		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_CACHE_DB":     filepath.Join(root, "pfm-cache.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
 		"PFM_CODEX_ROOT":   codexHome,

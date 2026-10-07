@@ -13,7 +13,10 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type fakeActionTmux struct {
@@ -25,6 +28,7 @@ type fakeActionTmux struct {
 	sized        []string
 	selected     []string
 	created      []ChatServer
+	onCreate     func()
 }
 
 func (tmux *fakeActionTmux) ListPanes(
@@ -109,11 +113,118 @@ func (tmux *fakeActionTmux) CreateChatServer(
 	_ context.Context,
 	server ChatServer,
 ) error {
+	if tmux.onCreate != nil {
+		tmux.onCreate()
+	}
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	tmux.created = append(tmux.created, server)
 	tmux.alive[server.Socket] = true
 	return nil
+}
+
+func TestOpenRecordsClaudeBeforePaneStarts(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.NewClaude, compose.ResumeClaude} {
+		for _, configKey := range []bool{false, true} {
+			name := kind.String()
+			if configKey {
+				name += " config key"
+			}
+			t.Run(name, func(t *testing.T) {
+				jailAction(t)
+				values, err := paths.Resolve()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if configKey {
+					values.StateDB = filepath.Join(values.Home, "configured", "pfm.db")
+					configPath := filepath.Join(values.Home, "pfm.config.json")
+					content := []byte(`{"version":2,"state":{"db":"` + values.StateDB + `"}}`)
+					if err := os.WriteFile(configPath, content, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					t.Setenv(paths.EnvConfig, configPath)
+					t.Setenv(paths.EnvStateDB, "")
+					t.Setenv(paths.EnvCacheDB, "")
+				}
+				tmux := &fakeActionTmux{alive: map[string]bool{}}
+				var record fleetdb.Launch
+				tmux.onCreate = func() {
+					launches, openErr := fleetdb.OpenLaunches(context.Background(), values)
+					if openErr != nil {
+						t.Fatal(openErr)
+					}
+					defer func() {
+						if err := launches.Close(); err != nil {
+							t.Error(err)
+						}
+					}()
+					id := "44444444-4444-4444-8444-444444444444"
+					if kind == compose.NewClaude {
+						id = "00000000-0000-4000-8000-000000000004"
+					}
+					record, openErr = launches.LaunchFor(context.Background(), id)
+					if openErr != nil {
+						t.Fatalf("record before pane: %v", openErr)
+					}
+				}
+				previous := newSessionID
+				newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+				t.Cleanup(func() { newSessionID = previous })
+				executor, err := New(Dependencies{
+					Tmux: tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
+					Runner: &captureRunner{}, Stderr: io.Discard,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				row := compose.Row{Kind: kind, ID: "44444444-4444-4444-8444-444444444444", CWD: "/work"}
+				if _, err := executor.Open(context.Background(), Request{
+					Row: row, PrimaryAccount: 1,
+					Home: values.Home, FreshSocket: "cc-record", Config: testMachineConfig(values.Home),
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if record.Account != 1 || record.Cache1H || string(record.Engine) != "cc" {
+					t.Fatalf("record = %#v", record)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenStartsPaneWhenLaunchRecordFails(t *testing.T) {
+	root := jailAction(t)
+	t.Setenv("PFM_STATE_DB", root)
+	tmux := &fakeActionTmux{alive: map[string]bool{}}
+	var stderr bytes.Buffer
+	executor, err := New(
+		Dependencies{
+			Tmux:      tmux,
+			Processes: &fakeProcesses{},
+			Gate:      fixedGate(false),
+			Runner:    &captureRunner{},
+			Stderr:    &stderr,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := newSessionID
+	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+	t.Cleanup(func() { newSessionID = previous })
+	_, err = executor.Open(context.Background(), Request{
+		Row:            compose.Row{Kind: compose.NewClaude, CWD: "/work"},
+		PrimaryAccount: 1, Home: filepath.Join(root, "home"), FreshSocket: "cc-record-error",
+		Config: testMachineConfig(filepath.Join(root, "home")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tmux.created) != 1 ||
+		!strings.Contains(stderr.String(), "pfm: record launch 00000000-0000-4000-8000-000000000004:") {
+		t.Fatalf("pane=%d stderr=%q", len(tmux.created), stderr.String())
+	}
 }
 
 type fakeProcesses struct {
@@ -370,6 +481,7 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
 			jailAction(t)
 			id := "77777777-7777-4777-8777-777777777777"
 			processes := &fakeProcesses{processes: []Process{
@@ -393,7 +505,7 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 					CWD:  "/work/resume",
 				},
 				PrimaryAccount: 1,
-				Home:           "/home/test",
+				Home:           home,
 				FreshSocket:    "cc-902-1-1",
 			})
 			if err != nil {
@@ -417,6 +529,7 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 // internal/obs (spec § Middleware, `state`) — requested to opened on a
 // successful open, comp=state, never the pane content it opened.
 func TestOpenRecordsATransition(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	ctx, recorder := obs.Test(t)
 	id := "88888888-8888-4888-8888-888888888888"
@@ -437,7 +550,7 @@ func TestOpenRecordsATransition(t *testing.T) {
 			CWD:  "/work/agent",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-950-1-1",
 	})
 	if err != nil {
@@ -464,6 +577,7 @@ func TestOpenRecordsATransition(t *testing.T) {
 }
 
 func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{
 		alive: map[string]bool{"cc-100-1-1": true},
@@ -499,7 +613,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 		},
 		PrimaryAccount: 1,
 		Cache1H:        true,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-900-1-1",
 	}
 	line, err := openWithTestConfig(executor, context.Background(), request)
@@ -510,7 +624,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 		t.Fatalf("live line = %q", line)
 	}
 	if runner.name != "pfm" || !reflect.DeepEqual(runner.args, []string{
-		"chat", "reload", "--sock", "cc-100-1-1", "1", "--1h", "1",
+		"chat", "reload", "--sock", "cc-100-1-1", "1", "--cache", "1h",
 	}) {
 		t.Fatalf("reload command = %q %q", runner.name, runner.args)
 	}
@@ -551,7 +665,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 			CWD:  "/work/codex",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cx-901-1-1",
 	}
 	line, err = openWithTestConfig(executor, context.Background(), codexRequest)
@@ -568,6 +682,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 }
 
 func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{
 		alive: map[string]bool{
@@ -607,7 +722,7 @@ func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
 		},
 		PrimaryAccount: 1,
 		FreshSocket:    "cx-fresh",
-		Home:           "/home/test",
+		Home:           home,
 	}
 	line, err := openWithTestConfig(executor, context.Background(), request)
 	if err != nil {
@@ -717,6 +832,7 @@ func TestSelfSwitchLogsAListPanesFailure(t *testing.T) {
 // Open must hard error instead of reaching the demotion code beneath the
 // id check.
 func TestOpenDeadLiveSplitWithNoResumableIDHardErrors(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{alive: map[string]bool{}}
 	var stderr bytes.Buffer
@@ -737,7 +853,7 @@ func TestOpenDeadLiveSplitWithNoResumableIDHardErrors(t *testing.T) {
 			Socket: "cc-dead-split-1-1-1",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-900-1-1",
 	}
 	line, err := openWithTestConfig(executor, context.Background(), request)
@@ -776,7 +892,7 @@ func jailAction(t *testing.T) string {
 		}
 	}
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "tmp"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -795,4 +911,59 @@ func stringsContainsAll(value string, fragments ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestOpenCodexRequiresLogin(t *testing.T) {
+	for _, name := range []string{"new missing auth", "resume empty auth", "live self-switch"} {
+		t.Run(name, func(t *testing.T) {
+			jailAction(t)
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			authPath := filepath.Join(home, ".codex", "auth.json")
+			if name == "resume empty auth" {
+				if err := os.WriteFile(authPath, []byte(`{}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Remove(authPath); err != nil {
+				t.Fatal(err)
+			}
+			tmux := &fakeActionTmux{
+				alive: map[string]bool{"cx-live": true},
+				panes: map[string][]ActionPane{"cx-live": {{WindowName: "Codex", CurrentCommand: "codex"}}},
+			}
+			heals := 0
+			executor, err := New(Dependencies{
+				Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
+				Heal: func(context.Context, string) string { heals++; return "healed" },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := Request{
+				Row:    compose.Row{Kind: compose.NewCodex, CWD: "/work"},
+				Config: machine, Home: home, PrimaryAccount: 1, FreshSocket: "cx-fresh",
+			}
+			switch name {
+			case "resume empty auth":
+				request.Row.Kind, request.Row.ID = compose.ResumeCodex, "t1"
+			case "live self-switch":
+				request.Row = compose.Row{Kind: compose.LiveCodex, Socket: "cx-live", Account: 1}
+				request.CurrentTMUX = filepath.Join(home, "cx-live") + ",1,0"
+			}
+			line, err := executor.Open(context.Background(), request)
+			if name == "live self-switch" {
+				if err != nil || line != "" || len(tmux.selected) != 1 {
+					t.Fatalf("live self-switch line=%q error=%v selected=%v", line, err, tmux.selected)
+				}
+			} else {
+				// the refusal's own text is CodexLoginError's (TestCodexLoginError); the door owns its prefix and home
+				want := "Codex account 1: " + authPath + " "
+				if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) ||
+					line != "" || len(tmux.created) != 0 || heals != 0 {
+					t.Fatalf("Open line=%q error=%v created=%d heals=%d; want %q before effects",
+						line, err, len(tmux.created), heals, want)
+				}
+			}
+		})
+	}
 }

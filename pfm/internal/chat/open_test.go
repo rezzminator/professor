@@ -1,18 +1,26 @@
 package chat
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -20,8 +28,9 @@ import (
 // records every chat server the detached door asks for and never touches a
 // real socket.
 type fakeOpenTmux struct {
-	alive   map[string]bool
-	created []action.ChatServer
+	alive     map[string]bool
+	created   []action.ChatServer
+	createErr error
 }
 
 func (fake *fakeOpenTmux) ListPanes(context.Context, string) ([]action.ActionPane, error) {
@@ -42,7 +51,7 @@ func (fake *fakeOpenTmux) SelectWindow(context.Context, string, int) error { ret
 
 func (fake *fakeOpenTmux) CreateChatServer(_ context.Context, server action.ChatServer) error {
 	fake.created = append(fake.created, server)
-	return nil
+	return fake.createErr
 }
 
 // emptyProcesses is an action.ProcessTable that reports no processes: a jailed
@@ -142,6 +151,54 @@ func TestOpenDetachedIDHealsACodexResume(t *testing.T) {
 	}
 	if result.State != "opened" {
 		t.Fatalf("result = %#v, want the resume reported as opened", result)
+	}
+}
+
+func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
+	root := testjail.Fleet(t)
+	const id = "33333333-3333-4333-8333-333333333333"
+	seedClaudeChat(t, root, id)
+	runtime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	runtime.Config = config.Defaults(home, []string{
+		filepath.Join(home, ".cc", "1", "projects"),
+		filepath.Join(home, ".cc", "2", "projects"),
+		filepath.Join(home, ".cc", "3", "projects"),
+	})
+	for _, account := range runtime.Config.Accounts {
+		if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, 2); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := fleetdb.RecordLaunch(ctx, runtime.Paths, fleetdb.Launch{
+		SessionID: id, Engine: pfmengine.Claude, Account: 3,
+	}, 1); err != nil {
+		t.Fatal(err)
+	}
+	tmux := &fakeOpenTmux{alive: map[string]bool{}}
+	stubOpenExecutor(t, tmux)
+	if _, err := OpenDetachedID(ctx, id, io.Discard, &runtime); err != nil {
+		t.Fatal(err)
+	}
+	wantDir := filepath.Join(home, ".cc", "3")
+	if len(tmux.created) != 1 || !strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+action.Quote(wantDir)) {
+		t.Fatalf("created = %+v; want account 3 config %q", tmux.created, wantDir)
+	}
+	launches, err := fleetdb.OpenLaunches(ctx, runtime.Paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = launches.Close() })
+	launch, err := launches.LaunchFor(ctx, id)
+	if err != nil || launch.Account != 3 {
+		t.Fatalf("launch = %+v, %v; want account 3", launch, err)
 	}
 }
 
@@ -265,5 +322,327 @@ func TestOpenDetachedTargetKeepsAgentRouterSemantics(t *testing.T) {
 	}
 	if len(processes.killed) != 0 {
 		t.Fatalf("opening the live agent terminated pids %v", processes.killed)
+	}
+}
+
+// seedUnseenReminder fires one reminder for sessionID in the jail's shared
+// state database, leaving the session's unseen flag set.
+func seedUnseenReminder(t *testing.T, runtime config.Runtime, sessionID string) {
+	t.Helper()
+	ctx := context.Background()
+	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close shared state: %v", err)
+		}
+	}()
+	created := time.Unix(1_800_000_000, 0)
+	reminderID, err := state.CreateReminder(ctx, fleetdb.Reminder{
+		SessionID: sessionID, Engine: "claude", Label: "worker", Prompt: "check the build",
+		Interval: time.Hour, Created: created,
+	})
+	if err != nil {
+		t.Fatalf("create reminder for %q: %v", sessionID, err)
+	}
+	if changed, err := state.MarkReminderFired(ctx, reminderID, created.Add(time.Hour)); err != nil || !changed {
+		t.Fatalf("MarkReminderFired(%d) = %v, %v", reminderID, changed, err)
+	}
+	requireUnseen(t, runtime, sessionID, true)
+}
+
+// requireUnseen fails unless the session's unseen-reminder flag reads want.
+func requireUnseen(t *testing.T, runtime config.Runtime, sessionID string, want bool) {
+	t.Helper()
+	ctx := context.Background()
+	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close shared state: %v", err)
+		}
+	}()
+	unseen, err := state.UnseenReminderSessionIDs(ctx)
+	if err != nil {
+		t.Fatalf("read unseen reminders: %v", err)
+	}
+	if unseen[sessionID] != want {
+		t.Fatalf("unseen reminder of %q = %t, want %t (all unseen: %v)", sessionID, unseen[sessionID], want, unseen)
+	}
+}
+
+func TestOpenRowClearsUnseenReminder(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		row  compose.Row
+		live bool
+	}{
+		{
+			name: "attach to a live seat",
+			row: compose.Row{
+				Kind: compose.LiveClaude, ID: "d1111111-1111-4111-8111-111111111111",
+				Name: "live", CWD: "/work/live", Socket: "cc-live", SessionName: "live", PaneID: "%3",
+			},
+			live: true,
+		},
+		{
+			name: "resume a stored chat",
+			row: compose.Row{
+				Kind: compose.ResumeClaude, ID: "d2222222-2222-4222-8222-222222222222",
+				Name: "stored", CWD: "/work/stored", Path: "/jail/stored.jsonl",
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			runtime, err := config.LoadRuntime("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedUnseenReminder(t, runtime, testCase.row.ID)
+			seedUnseenReminder(t, runtime, "other-session")
+			tmux := &fakeOpenTmux{alive: map[string]bool{"cc-live": testCase.live}}
+			stubOpenExecutor(t, tmux)
+			var stdout, stderr bytes.Buffer
+			code := OpenRow(context.Background(), testCase.row, 1, false, "", &stdout, &stderr, &runtime)
+			if code != 0 {
+				t.Fatalf("OpenRow() = %d, stderr %q", code, stderr.String())
+			}
+			requireUnseen(t, runtime, testCase.row.ID, false)
+			requireUnseen(t, runtime, "other-session", true)
+		})
+	}
+}
+
+func TestOpenIDClearsUnseenReminder(t *testing.T) {
+	root := testjail.Fleet(t)
+	const id = "d3333333-3333-4333-8333-333333333333"
+	seedClaudeChat(t, root, id)
+	runtime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedUnseenReminder(t, runtime, id)
+	stubOpenExecutor(t, &fakeOpenTmux{alive: map[string]bool{}})
+	var stdout, stderr bytes.Buffer
+	if code := OpenID(context.Background(), id, &stdout, &stderr, &runtime); code != 0 {
+		t.Fatalf("OpenID() = %d, stderr %q", code, stderr.String())
+	}
+	requireUnseen(t, runtime, id, false)
+}
+
+// TestOpenDetachedIDKeepsUnseenReminder pins that the detached door — the
+// reminder fire and the MCP agent open — is not a human looking: the flag the
+// fire just set must survive it.
+func TestOpenDetachedIDKeepsUnseenReminder(t *testing.T) {
+	root := testjail.Fleet(t)
+	const id = "d4444444-4444-4444-8444-444444444444"
+	seedClaudeChat(t, root, id)
+	runtime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedUnseenReminder(t, runtime, id)
+	stubOpenExecutor(t, &fakeOpenTmux{alive: map[string]bool{}})
+	if _, err := OpenDetachedID(context.Background(), id, io.Discard, &runtime); err != nil {
+		t.Fatalf("OpenDetachedID() error = %v", err)
+	}
+	requireUnseen(t, runtime, id, true)
+}
+
+func TestOpenWorkbenchLaunchName(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		for _, detached := range []bool{false, true} {
+			t.Run(
+				map[bool]string{false: "open", true: "detached"}[detached]+map[bool]string{false: "/success", true: "/unresolved-child"}[partial],
+				func(t *testing.T) {
+					root := testjail.Fleet(t)
+					dir := chatWorkbenchFixture(t, root)
+					seedClaudeChat(
+						t,
+						root,
+						"a1111111-1111-4111-8111-111111111111",
+						`{"type":"custom-title","customTitle":"_SCRIBE:1"}`,
+					)
+					seedClaudeChat(
+						t,
+						root,
+						"b2222222-2222-4222-8222-222222222222",
+						`{"type":"custom-title","customTitle":"_SCRIBE:2"}`,
+					)
+					runtime, err := config.RuntimeOrDefault(nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					fake := &fakeOpenTmux{}
+					if partial {
+						fake.createErr = &spawn.SessionCreatedError{
+							Err: errors.New("pane query failed; termination unproven"),
+						}
+					}
+					stubOpenExecutor(t, fake)
+					row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
+					var stderr, stdout bytes.Buffer
+					if detached {
+						_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
+					} else {
+						if code := OpenRow(
+							context.Background(),
+							row,
+							1,
+							false,
+							"",
+							&stdout,
+							&stderr,
+							&runtime,
+						); (code != 0) != partial {
+							t.Fatalf("open=%d: %s", code, stderr.String())
+						}
+					}
+					if detached && (err != nil) != partial {
+						t.Fatalf("partial=%t error=%v", partial, err)
+					}
+					if len(fake.created) != 1 || !strings.Contains(fake.created[0].Run, "'--name' '_SCRIBE:3'") {
+						t.Fatalf("launch name=%#v", fake.created)
+					}
+					next, _, err := WorkbenchName(context.Background(), dir, io.Discard, &runtime)
+					if err != nil || next != "_SCRIBE:4" {
+						t.Fatalf("possibly born seat lost its name: next=%q err=%v", next, err)
+					}
+				},
+			)
+		}
+	}
+}
+
+func TestOpenWorkbenchRosterFailure(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open", true: "detached"}[detached], func(t *testing.T) {
+			root := testjail.Fleet(t)
+			dir := chatWorkbenchFixture(t, root)
+			blocker := filepath.Join(root, "blocker")
+			if err := atomicfile.Write(blocker, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "cache.db"))
+			runtime, err := config.RuntimeOrDefault(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeOpenTmux{}
+			stubOpenExecutor(t, fake)
+			row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
+			var stderr, stdout bytes.Buffer
+			if detached {
+				_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
+				if err == nil {
+					t.Fatal("roster failure did not refuse detached launch")
+				}
+			} else {
+				if code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, &runtime); code == 0 {
+					t.Fatal("roster failure did not refuse launch")
+				}
+			}
+			if len(fake.created) != 0 {
+				t.Fatalf("created=%d", len(fake.created))
+			}
+		})
+	}
+}
+
+func TestPrepareOpenWorkbenchNonClaudeName(t *testing.T) {
+	root := testjail.Fleet(t)
+	dir := chatWorkbenchFixture(t, root)
+	runtime, err := config.RuntimeOrDefault(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A failing cache makes a roster read visible without an artificial reader seam.
+	blocker := filepath.Join(root, "blocker")
+	if err := atomicfile.Write(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.CacheDB = filepath.Join(blocker, "cache.db")
+	stubOpenExecutor(t, &fakeOpenTmux{})
+	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
+		_, request, _, err := prepareOpen(
+			context.Background(),
+			compose.Row{Kind: kind, CWD: dir, Workbench: dir},
+			1,
+			false,
+			"",
+			io.Discard,
+			runtime,
+		)
+		if err != nil || request.LaunchName != "" {
+			t.Fatalf("non-Claude name=%q, %v", request.LaunchName, err)
+		}
+	}
+}
+
+func TestOpenGoneWorkbench(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		for _, directory := range []bool{false, true} {
+			t.Run(
+				map[bool]string{false: "open", true: "detached"}[detached]+map[bool]string{false: "/gone", true: "/file"}[directory],
+				func(t *testing.T) {
+					root := testjail.Fleet(t)
+					dir := filepath.Join(root, "acme", "docs", "scribe")
+					if directory {
+						if err := atomicfile.Write(dir, nil, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					runtime, err := config.RuntimeOrDefault(nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					fake := &fakeOpenTmux{}
+					stubOpenExecutor(t, fake)
+					row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
+					want := "open: workbench directory " + dir + " is missing"
+					var stderr, stdout bytes.Buffer
+					if detached {
+						_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
+						if err == nil || err.Error() != want {
+							t.Fatalf("gone error=%v; want %q", err, want)
+						}
+					} else {
+						if code := OpenRow(
+							context.Background(),
+							row,
+							1,
+							false,
+							"",
+							&stdout,
+							&stderr,
+							&runtime,
+						); code == 0 ||
+							!strings.Contains(stderr.String(), want) {
+							t.Fatalf("gone code=%d, stderr=%s", code, stderr.String())
+						}
+					}
+					if len(fake.created) != 0 {
+						t.Fatalf("created=%d", len(fake.created))
+					}
+				},
+			)
+		}
+	}
+}
+
+func TestOpenPlainGoneDirectory(t *testing.T) {
+	root := testjail.Fleet(t)
+	fake := &fakeOpenTmux{}
+	stubOpenExecutor(t, fake)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr, stdout bytes.Buffer
+	row := compose.Row{Kind: compose.NewClaude, CWD: filepath.Join(root, "gone")}
+	if code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, nil); code != 0 {
+		t.Fatalf("open=%d: %s", code, stderr.String())
+	}
+	if len(fake.created) != 1 || fake.created[0].CWD != cwd {
+		t.Fatalf("plain fallback=%#v, want %s", fake.created, cwd)
 	}
 }

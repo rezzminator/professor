@@ -41,7 +41,8 @@ func (r *loadedRunner) Run(_ context.Context, name string, args ...string) error
 // (bootout then bootstrap) unconditionally, which is exactly what killed a
 // running `pfm mcp serve` on this host. Checked for both launchd labels.
 func TestReloadLaunchAgentLoadedUnchangedRestartsNothing(t *testing.T) {
-	for _, label := range []string{mcpLaunchdLabel, launchdLabel} {
+	t.Parallel()
+	for _, label := range []string{mcpLaunchdLabel, launchdLabel, reminderLaunchdLabel} {
 		t.Run(label, func(t *testing.T) {
 			runner := &loadedRunner{}
 			installer := engine{
@@ -76,6 +77,7 @@ func TestReloadLaunchAgentLoadedUnchangedRestartsNothing(t *testing.T) {
 // loaded job whose plist DID change must still be stopped and
 // re-registered, so the new file actually takes effect.
 func TestReloadLaunchAgentLoadedChangedReloads(t *testing.T) {
+	t.Parallel()
 	runner := &loadedRunner{}
 	installer := engine{
 		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
@@ -129,6 +131,7 @@ func (r *notLoadedRunner) Run(_ context.Context, name string, args ...string) er
 // started even though its plist did not change, and starting it must never
 // issue a bootout against a job that was never running.
 func TestReloadLaunchAgentNotLoadedBootstrapsWithoutBootout(t *testing.T) {
+	t.Parallel()
 	runner := &notLoadedRunner{}
 	installer := engine{
 		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
@@ -192,6 +195,7 @@ func (r *flakyBootstrapRunner) Run(_ context.Context, name string, args ...strin
 // can hit EIO against a label still on its way out. The retry must ride
 // that out rather than surface the first failure.
 func TestReloadLaunchAgentRetriesBootstrapThroughATeardownInFlight(t *testing.T) {
+	t.Parallel()
 	runner := &flakyBootstrapRunner{failCount: 2, loaded: true}
 	installer := engine{
 		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
@@ -236,6 +240,7 @@ func (r *alwaysFailsBootstrapRunner) Run(_ context.Context, name string, args ..
 // gets the plain "not loaded" wording, never the DOWN/restart wording
 // reserved for a job the installer itself stopped.
 func TestReloadLaunchAgentNeverLoadedBootstrapFailureStaysPlain(t *testing.T) {
+	t.Parallel()
 	runner := &alwaysFailsBootstrapRunner{}
 	installer := engine{
 		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},

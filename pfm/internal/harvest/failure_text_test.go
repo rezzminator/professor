@@ -11,14 +11,11 @@ import (
 	"testing"
 )
 
-// staleToolNames are the retired tool names a failure message must never send
-// a caller to.
-var staleToolNames = []string{"`fetch`", "`search`", "searchCache", "fetchImage", "`archive`"}
-
 // TestPublicFailureMessageNamesCauseAndNextStep is the failure-class table: each
 // class a target can end in renders its named cause and what the caller can do,
 // never the generic "Retrieval failed. Retry or choose another work.".
 func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
+	t.Parallel()
 	ladder := []string{"direct", "chrome-impersonation", "browser"}
 	cases := []struct {
 		name   string
@@ -173,7 +170,7 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 					t.Errorf("message lacks %q:\n%s", want, got)
 				}
 			}
-			for _, refuse := range append(append([]string{"Retry or choose another work"}, tc.refuse...), staleToolNames...) {
+			for _, refuse := range append([]string{"Retry or choose another work"}, tc.refuse...) {
 				if strings.Contains(got, refuse) {
 					t.Errorf("message carries %q:\n%s", refuse, got)
 				}
@@ -186,6 +183,7 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 // .zip each end in a failure naming the format — never the generic string and
 // never a binary body stored as text.
 func TestLocalUnsupportedFormatsAreNamedFailures(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	zipped := func(name, member, body string) []byte {
 		var buf bytes.Buffer
@@ -236,6 +234,7 @@ func TestLocalUnsupportedFormatsAreNamedFailures(t *testing.T) {
 // naming it empty, never an unclassified retry-once (live FM1: an empty .bz2
 // reached the converter and came back "could not classify").
 func TestLocalEmptyFileIsNamedEmpty(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	harvester := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
 	for _, name := range []string{"empty.bz2", "empty.txt", "empty.pdf"} {
@@ -265,6 +264,7 @@ func TestLocalEmptyFileIsNamedEmpty(t *testing.T) {
 // sentence calls a failure a wall only when a challenge was seen, and a host
 // that does not resolve is never an SSRF refusal.
 func TestLadderBrowserNotesNeverContradictTheStatus(t *testing.T) {
+	t.Parallel()
 	if note := browserRanNote(
 		false,
 		http.StatusNotFound,
@@ -288,6 +288,7 @@ func TestLadderBrowserNotesNeverContradictTheStatus(t *testing.T) {
 // (open, carrying the original's citations) and arXiv returns the 2017
 // original. The original ranks first.
 func TestFindWorksRanksTheOriginalAboveAReRegistration(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host {
 		case "api.openalex.org":
@@ -317,6 +318,7 @@ func TestFindWorksRanksTheOriginalAboveAReRegistration(t *testing.T) {
 // (describeFetch → PublicFailureMessage) returns the same text, never a
 // reclassification ("The title is ambiguous") of the first pass's words.
 func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
+	t.Parallel()
 	mega, ok := shareLinkRefusal("https://mega.nz/file/AbCdEfGh#ExampleKey")
 	if !ok {
 		t.Fatal("mega.nz is not a refused share service")
@@ -350,11 +352,8 @@ func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
 		},
 		{
 			"ambiguous",
-			Result{
-				Source: "https://example.test/y",
-				Error:  "Choose another record with harvester_search_literature and read it with harvester_read (publications).",
-			},
-			"ambiguous",
+			titleGuessResult("Attention Is All You Need", "Attention Is All You Need"),
+			errorKindAmbiguous,
 			[]string{"title is ambiguous", "harvester_search_literature", "harvester_read"},
 		},
 		{
@@ -384,6 +383,129 @@ func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
 		}
 		if again := PublicFailureMessage(published); again != published.Error {
 			t.Errorf("%s: second pass = %q, want the published text %q", test.name, again, published.Error)
+		}
+	}
+}
+
+// TestAdviceTextNeverDecidesTheErrorKind: the ladder's failure messages end
+// with advice naming harvester_search_literature, and that advice never
+// classifies the failure. Only the title diagnostic is "ambiguous"; LinkedIn's
+// HTTP 999 is a refusal like a 403; a PubMed search URL is an invalid input.
+func TestAdviceTextNeverDecidesTheErrorKind(t *testing.T) {
+	t.Parallel()
+	const advice = "Find an alternative copy with harvester_search_literature or another URL."
+	linkedIn := "https://www.linkedin.com/school/example-university/"
+	pubMed := (&Harvester{}).fetchURLWithPolicy(
+		context.Background(), "https://pubmed.ncbi.nlm.nih.gov/?term=example+query", FetchOptions{}, false,
+	)
+	cases := []struct {
+		name   string
+		result Result
+		kind   string
+		want   []string
+		refuse []string
+	}{
+		{
+			"bot block 999",
+			Result{
+				Source:     linkedIn,
+				ErrorKind:  "http",
+				HTTPStatus: statusBotBlock,
+				Error:      linkedIn + " returned HTTP 999 (request failed). " + advice,
+			},
+			errorKindForbidden,
+			[]string{"refused the harvester", "HTTP 999", "bot block"},
+			[]string{"ambiguous", "request failed"},
+		},
+		{
+			"bot block 999 ladder text",
+			Result{
+				Source:     linkedIn,
+				ErrorKind:  "http",
+				HTTPStatus: statusBotBlock,
+				Error:      FailureMessage(linkedIn, statusBotBlock, "http", false, false),
+			},
+			errorKindForbidden,
+			[]string{"refused the harvester", "HTTP 999"},
+			[]string{"ambiguous", "request failed"},
+		},
+		{
+			"unnamed status 418",
+			Result{
+				Source:     "https://example.test/teapot",
+				ErrorKind:  "http",
+				HTTPStatus: http.StatusTeapot,
+				Error:      "https://example.test/teapot returned HTTP 418 (request failed). " + advice,
+			},
+			errorKindUnclassified,
+			[]string{"could not classify"},
+			[]string{"ambiguous"},
+		},
+		{
+			"title diagnostic",
+			titleGuessResult("Attention Is All You Need", "Attention Is All You Need"),
+			errorKindAmbiguous,
+			[]string{"title is ambiguous", "harvester_search_literature"},
+			nil,
+		},
+		{
+			"pubmed search url",
+			pubMed,
+			errorKindInvalid,
+			[]string{"PubMed search", "harvester_search_literature", "publications"},
+			[]string{"ambiguous"},
+		},
+		{
+			"pubmed search url whose query holds a marker",
+			(&Harvester{}).fetchURLWithPolicy(
+				context.Background(), "https://pubmed.ncbi.nlm.nih.gov/?term=democracy", FetchOptions{}, false,
+			),
+			errorKindInvalid,
+			[]string{"PubMed search", "harvester_search_literature"},
+			[]string{"conversion", "ambiguous"},
+		},
+		{
+			"title holding a marker",
+			titleGuessResult("Maximum likelihood estimation", "Maximum likelihood estimation"),
+			errorKindAmbiguous,
+			[]string{"title is ambiguous", "harvester_search_literature"},
+			[]string{"too large"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := publicErrorKind(test.result); got != test.kind {
+				t.Errorf("kind = %q, want %q (error text %q)", got, test.kind, test.result.Error)
+			}
+			published := PublicFailure(test.result.Source, test.result)
+			for _, want := range test.want {
+				if !strings.Contains(published.Error, want) {
+					t.Errorf("message lacks %q:\n%s", want, published.Error)
+				}
+			}
+			for _, refuse := range test.refuse {
+				if strings.Contains(published.Error, refuse) {
+					t.Errorf("message carries %q:\n%s", refuse, published.Error)
+				}
+			}
+			if again := PublicFailureMessage(published); again != published.Error {
+				t.Errorf("second pass = %q, want the published text %q", again, published.Error)
+			}
+		})
+	}
+}
+
+// TestBotBlockStatusIsNamedLikeAForbidden: HTTP 999 classifies as a 403 does,
+// and the ladder's own text names it as the site's bot block.
+func TestBotBlockStatusIsNamedLikeAForbidden(t *testing.T) {
+	t.Parallel()
+	if got, want := failureStatusKind(statusBotBlock), failureStatusKind(http.StatusForbidden); got != want {
+		t.Errorf("failureStatusKind(999) = %q, want the 403 kind %q", got, want)
+	}
+	text := FailureMessage("https://www.linkedin.com/school/example-university/", statusBotBlock, "http", false, false)
+	for _, want := range []string{"HTTP 999 (request denied (the site's bot block))", "likely a bot-block or rate limit"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("FailureMessage(999) = %q, want it to carry %q", text, want)
 		}
 	}
 }

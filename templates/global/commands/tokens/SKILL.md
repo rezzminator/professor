@@ -18,10 +18,11 @@ node ~/.claude/commands/tokens/token-audit.mjs [flags]
 
 - Where did the last day go: no flags — the default report, bounded, with `data gaps:` and `CROSS-CHECK` lines.
 - A longer window, one repo: `--since 3d --project <substr>`.
-- Heaviest single runs: section `9 · TOP SINGLE RUNS`; heaviest agent groups: section `8`.
+- Heaviest single runs: section `9 · TOP SINGLE RUNS`; heaviest agent groups: section `8`; both carry each row's cache TTL (legend below, under `--flight`).
 - One chat and its agents: `--family <title|agent-type|session-id-prefix>`, or `--session <sid-prefix>` when a sub-agent orchestrated the work and no chat title exists.
 - Codex threads: `--codex` — one row per rollout thread, sub-agents attributed from `session_meta.source`.
 - One flight's agents: `--flight <dir>` — see below.
+- One agent run call by call: `--timeline <transcript.jsonl>` (repeatable) — whole file, no window; a header (agent type, models, effort, calls, wall, peak context, output, tool errors, results over 20 KB, USD) then one row per model call with its clock, wait since the last tool result, context, output, price and each tool it issued (`name: target`, result chars, `ERR`, wait).
 - The full dataset for a page or a diff: `--out FILE` (JSON).
 
 ## One flight — `--flight <dir>`
@@ -30,7 +31,7 @@ node ~/.claude/commands/tokens/token-audit.mjs [flags]
 node ~/.claude/commands/tokens/token-audit.mjs --flight $HOME/.local/state/pfm/flights/{project}/<name>
 ```
 
-Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report. One row per agent: task id, agent type, engine, model, calls, wall time, start and peak context, growth per call, input/cached/output tokens, price, failed commands, poll calls, re-reads, contract-file reads, compactions, over-cap, and how the row was matched. Then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line. The text stays under ~200 lines whatever the flight's size.
+Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report. One row per agent: task id, agent type, engine, model, calls, wall time, start and peak context, growth per call, input/cached/output tokens, cache TTL (`5m`, `1h`, `1h N%` when mixed, `—` for no cache writes or an engine that reports no split, as Codex), price, failed commands, poll calls, re-reads, contract-file reads, compactions, over-cap, and how the row was matched. Then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line. The text stays under ~200 lines whatever the flight's size.
 
 The join key is `<dir>/agents.tsv` — append-only, tab-separated, one row per spawn, header line optional:
 
@@ -47,9 +48,9 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 
 ## Reading the output
 
-- The `data gaps:` line is the report's own honesty: malformed lines, dropped synthetic calls, unpriced calls, cache writes with no 5m/1h split, duplicate files, read errors. `data gaps: none` means the scan was clean, not that nothing was checked. A read error exits non-zero.
-- A model with no `PRICING` row renders **`n/a`**, never `$0`: its tokens stay in every token total, its dollars stay out of every dollar total, and the gaps line names it.
-- Costs are list-price estimates from the editable `PRICING` table atop `token-audit.mjs`. Trust the ranking; verify absolute dollars against the provider's billing; update the rates when prices change. `scripts/check-token-pricing.mjs` resolves published model ids against that table.
-- `CROSS-CHECK` compares the estimate to the harness's own `cost-state` line for chats wholly inside the window, and prints a second number at the >200K long-context premium (a per-model rate in `PRICING`, and an estimate).
+- The `data gaps:` line is the report's own honesty: malformed lines, dropped synthetic calls, unpriced calls, cache writes with no 5m/1h split, calls copied from another transcript, duplicate files, read errors. `data gaps: none` means the scan was clean, not that nothing was checked. A read error exits non-zero.
+- A model with no row in pfm's price table (`pfm price`) renders **`n/a`**, never `$0`: its tokens stay in every token total, its dollars stay out of every dollar total, and the gaps line names it.
+- Costs are list-price estimates from pfm's price table (`pfm price`). Trust the ranking; verify absolute dollars against the provider's billing; when prices change, put the new rates in `pfm.prices.json`. The published-rates fixture is checked by pfm's Go test and `pricing.test.mjs`.
+- `CROSS-CHECK` compares the estimate to the harness's own `cost-state` line for chats wholly inside the window, and prints a second number at the >200K long-context premium (a per-model rate in pfm's price table, and an estimate).
 - Codex counts differently: `total_token_usage` is cumulative and **resets on resume and compaction**, so each segment's peak is summed. Cached input is a subset of input, billed at the cached rate; output already includes reasoning.
 - Transcript content can carry sensitive prompt text — read the report, never pipe or retain transcript bodies.

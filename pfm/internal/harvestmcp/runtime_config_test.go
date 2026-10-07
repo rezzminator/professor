@@ -2,6 +2,7 @@ package harvestmcp
 
 import (
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 )
@@ -21,5 +22,18 @@ func TestRuntimeFromConfigCarriesTheDownloadLimits(t *testing.T) {
 	if runtime.MaxDownloadBytes != 1<<20 || runtime.MaxResourceBytes != 1<<10 {
 		t.Fatalf("download limits not carried: download=%d resource=%d",
 			runtime.MaxDownloadBytes, runtime.MaxResourceBytes)
+	}
+}
+
+// TestRuntimeFromConfigCarriesTheConverterPool: convert.workers, convert.queue
+// and convert.timeoutSeconds reach the runtime the converter pool is sized
+// from.
+func TestRuntimeFromConfigCarriesTheConverterPool(t *testing.T) {
+	var harvester config.HarvesterConfig
+	harvester.Convert.Workers, harvester.Convert.Queue, harvester.Convert.Timeout = 3, 12, 4*time.Minute
+	runtime := RuntimeFromConfig("home", harvester)
+	if runtime.ConvertWorkers != 3 || runtime.ConvertQueue != 12 || runtime.ConvertTimeout != 4*time.Minute {
+		t.Fatalf("converter pool settings not carried: workers=%d queue=%d timeout=%s",
+			runtime.ConvertWorkers, runtime.ConvertQueue, runtime.ConvertTimeout)
 	}
 }

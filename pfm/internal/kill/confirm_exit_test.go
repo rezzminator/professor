@@ -81,3 +81,50 @@ func TestManagerConfirmExitSucceedsOncePaneGone(t *testing.T) {
 			tmux.killedPanes, tmux.killedServers)
 	}
 }
+
+func TestNewConfirmEveryTestKnob(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	for _, test := range []struct {
+		name      string
+		value     string
+		explicit  time.Duration
+		wantEvery time.Duration
+		wantError bool
+	}{
+		{name: "unset", wantEvery: 500 * time.Millisecond},
+		{name: "set", value: "10", wantEvery: 10 * time.Millisecond},
+		{name: "explicit wins", value: "10", explicit: 20 * time.Millisecond, wantEvery: 20 * time.Millisecond},
+		{name: "not a number", value: "abc", wantError: true},
+		{name: "zero", value: "0", wantError: true},
+		{name: "negative", value: "-5", wantError: true},
+		{name: "fraction", value: "1.5", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("PFM_TEST_KILL_CONFIRM_EVERY_MS", test.value)
+			manager, err := New(database, Dependencies{ConfirmEvery: test.explicit})
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), "PFM_TEST_KILL_CONFIRM_EVERY_MS") ||
+					!strings.Contains(err.Error(), test.value) {
+					t.Fatalf("New error = %v, want knob name and value %q", err, test.value)
+				}
+				if manager != nil {
+					t.Fatalf("New manager = %v, want nil on invalid knob", manager)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if manager.confirmEvery != test.wantEvery || manager.confirmAttempts != defaultConfirmAttempts {
+				t.Fatalf(
+					"New confirm pacing = %s, %d attempts; want %s, %d attempts",
+					manager.confirmEvery,
+					manager.confirmAttempts,
+					test.wantEvery,
+					defaultConfirmAttempts,
+				)
+			}
+		})
+	}
+}

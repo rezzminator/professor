@@ -10,8 +10,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -114,6 +117,13 @@ func (executor *Executor) Open(
 		}
 	}
 
+	// A workbench refusal comes before Solo closes any seat holding the chat.
+	if err := applyWorkbench(&request); err != nil {
+		return "", err
+	}
+	if err := checkCodexLaunch(request); err != nil {
+		return "", err
+	}
 	switch request.Row.Kind {
 	case compose.Agent:
 		if err := executor.Solo(ctx, request.Row.ID, "", true, request.Config.Claude.Binary); err != nil {
@@ -140,6 +150,7 @@ func (executor *Executor) Open(
 		return "", err
 	}
 	if plan.ChatServer != nil {
+		executor.recordLaunch(ctx, plan.Record)
 		if err := executor.tmux.CreateChatServer(
 			ctx,
 			*plan.ChatServer,
@@ -149,6 +160,34 @@ func (executor *Executor) Open(
 	}
 	trail.Reach("opened", "pane attached")
 	return plan.Line, nil
+}
+
+func checkCodexLaunch(request Request) error {
+	if request.Row.Kind != compose.NewCodex && request.Row.Kind != compose.ResumeCodex {
+		return nil
+	}
+	account, found := request.Config.CodexAccountByID(request.PrimaryAccount)
+	if !found {
+		return nil
+	}
+	if err := pfmconfig.CodexLoginError(account.Home); err != nil {
+		//nolint:staticcheck // Codex is the proper noun in the required login instruction.
+		return fmt.Errorf("Codex account %d: %w", account.ID, err)
+	}
+	return nil
+}
+
+func (executor *Executor) recordLaunch(ctx context.Context, record *fleetdb.Launch) {
+	if record == nil {
+		return
+	}
+	values, err := pfmconfig.ResolvePaths()
+	if err == nil {
+		err = fleetdb.RecordLaunch(ctx, values, *record, clock.Real.Now().Unix())
+	}
+	if err != nil {
+		fmt.Fprintf(executor.stderr, "pfm: record launch %s: %v\n", record.SessionID, err)
+	}
 }
 
 func (executor *Executor) verifiedCodexWindow(
@@ -199,9 +238,9 @@ func (executor *Executor) prepareLive(
 			return fmt.Errorf("open gate: %w", err)
 		}
 		if reboot {
-			cacheValue := "0"
+			cacheValue := "5m"
 			if request.Cache1H {
-				cacheValue = "1"
+				cacheValue = "1h"
 			}
 			arguments := []string{
 				"chat",
@@ -209,7 +248,7 @@ func (executor *Executor) prepareLive(
 				"--sock",
 				request.Row.Socket,
 				strconv.Itoa(request.PrimaryAccount),
-				"--1h",
+				"--cache",
 				cacheValue,
 			}
 			if request.Config.Path != "" {

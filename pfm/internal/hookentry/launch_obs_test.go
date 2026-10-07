@@ -2,11 +2,11 @@ package hookentry
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestLaunchTmuxCommandRecordsUnderTheTmuxComponent: the hook launcher's
@@ -15,7 +15,7 @@ import (
 func TestLaunchTmuxCommandRecordsUnderTheTmuxComponent(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	waiter := launchTmuxCommand(ctx, binary, "/sockets/cc-1", "wait-for", "pfm-done")

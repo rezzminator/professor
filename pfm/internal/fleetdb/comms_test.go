@@ -12,6 +12,7 @@ import (
 )
 
 func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	ctx := context.Background()
 	events := []CommsEvent{
@@ -64,6 +65,7 @@ func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
 }
 
 func TestCommsRejectsUnknownKind(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	err := state.RecordComms(context.Background(), CommsEvent{Kind: "reload", Message: "excluded"})
 	if err == nil || !strings.Contains(err.Error(), "record comms event") {
@@ -72,12 +74,13 @@ func TestCommsRejectsUnknownKind(t *testing.T) {
 }
 
 func TestDegradedStoreRejectsCommsWritesAndReads(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	blocker := filepath.Join(root, "not-a-directory")
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	state := OpenSharedState(context.Background(), paths.Values{FleetDB: filepath.Join(blocker, "fleet.db")})
+	state := OpenSharedState(context.Background(), paths.Values{StateDB: filepath.Join(blocker, "pfm.db")})
 	t.Cleanup(func() { _ = state.Close() })
 
 	if err := state.RecordComms(

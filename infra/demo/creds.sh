@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # creds.sh — copies REAL seats into the demo container: each Claude seat's OAuth
 # credential from the macOS Keychain (the entry Claude Code keeps per config
-# dir), the Codex home's auth.json, and OpenCode's auth.json (its ChatGPT
+# dir), the dedicated fence Codex home's auth.json, and OpenCode's auth.json (its ChatGPT
 # OAuth, under ~/.local/share/opencode). Everything travels over docker-exec
 # stdin; nothing is written to the host disk and nothing is printed.
 #
@@ -64,8 +64,12 @@ done
 
 if [ -n "$CODEX" ]; then
   host_home="${CODEX%%=*}"; cont_home="${CODEX#*=}"
-  [ -f "$host_home/auth.json" ] || { echo "creds: $host_home/auth.json not found — sign in to Codex on the host first" >&2; exit 1; }
-  jq -e '.tokens | objects' "$host_home/auth.json" >/dev/null 2>&1 || { echo "creds: $host_home/auth.json carries no tokens object" >&2; exit 1; }
+  fence_home="$HOME/.local/state/pfm/codex-fence"
+  [ "$host_home" = "$fence_home" ] || { echo "creds: BLOCKED — Codex credentials must come from $fence_home; a copied refresh token forks and the container's first refresh logs the host out" >&2; exit 1; }
+  [ -s "$host_home/auth.json" ] && jq -e '.tokens | objects' "$host_home/auth.json" >/dev/null 2>&1 || {
+    echo 'creds: codex home: BLOCKED — no fence login at ~/.local/state/pfm/codex-fence/auth.json; create it once: CODEX_HOME=~/.local/state/pfm/codex-fence codex login --device-auth' >&2
+    exit 1
+  }
   size="$(put "$cont_home/auth.json" < "$host_home/auth.json")"
   echo "creds: codex $host_home/auth.json → $cont_home/auth.json ($size bytes)"
 fi

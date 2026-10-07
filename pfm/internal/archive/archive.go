@@ -120,22 +120,20 @@ type Report struct {
 
 // Dependencies are the runner's collaborators.
 type Dependencies struct {
-	Paths            paths.Values
-	Kills            KillStore
-	Proc             gather.ProcFS
-	Now              func() time.Time
-	CodexBinary      string
-	ExactClaudeRoots bool
+	Paths       paths.Values
+	Kills       KillStore
+	Proc        gather.ProcFS
+	Now         func() time.Time
+	CodexBinary string
 }
 
 // Runner performs one archive pass.
 type Runner struct {
-	paths            paths.Values
-	kills            KillStore
-	proc             gather.ProcFS
-	now              func() time.Time
-	codexBinary      string
-	exactClaudeRoots bool
+	paths       paths.Values
+	kills       KillStore
+	proc        gather.ProcFS
+	now         func() time.Time
+	codexBinary string
 }
 
 // New fills real implementations for anything omitted.
@@ -160,12 +158,11 @@ func New(dependencies Dependencies) (*Runner, error) {
 		now = clock.Real.Now
 	}
 	return &Runner{
-		paths:            resolved,
-		kills:            dependencies.Kills,
-		proc:             proc,
-		now:              now,
-		codexBinary:      dependencies.CodexBinary,
-		exactClaudeRoots: dependencies.ExactClaudeRoots,
+		paths:       resolved,
+		kills:       dependencies.Kills,
+		proc:        proc,
+		now:         now,
+		codexBinary: dependencies.CodexBinary,
 	}, nil
 }
 
@@ -478,18 +475,12 @@ func (runner *Runner) findCodexRollout(id string) (string, error) {
 	return found, nil
 }
 
-// claudeRoots is every account's projects directory, plus the default account
-// spelled its other way: ~/.cc/1 is a symlink to ~/.claude on this machine,
-// and a kill written through one spelling must resolve through the other.
+// claudeRoots is the runtime's Claude transcript roots.
 func (runner *Runner) claudeRoots() []string {
-	roots := append(
+	return append(
 		[]string(nil),
 		runner.paths.Roots[pfmengine.Claude]...,
 	)
-	if !runner.exactClaudeRoots {
-		roots = append(roots, filepath.Join(runner.paths.Home, ".claude", "projects"))
-	}
-	return roots
 }
 
 // targetFor mirrors the source layout under the archive, so a restore is an

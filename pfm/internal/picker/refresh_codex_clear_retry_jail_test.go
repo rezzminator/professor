@@ -211,7 +211,7 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 	// The stream's first pass normally advances oldID to the status-line
 	// identity. Put the binding back so the next parked probe has one clear to
 	// retire, then give the fake live process a stable held current rollout.
-	if err := manager.Unkill(ctx, oldID); err != nil {
+	if _, err := manager.Unkill(ctx, oldID); err != nil {
 		t.Fatalf("remove first-pass clear retirement: %v", err)
 	}
 	if _, _, err := manager.AdvanceCodexPane(ctx, socket, "%0", oldID); err != nil {
@@ -227,7 +227,7 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 		t.Fatalf("hold current rollout in fake Codex process: %v", err)
 	}
 
-	faultDB, err := sql.Open("sqlite", database.SharedPath())
+	faultDB, err := sql.Open("sqlite", "file:"+database.SharedPath()+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

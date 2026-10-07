@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/hostfixture"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestCommandAddressesTheSocketAndClearsTMUX pins the runner's contract: the
@@ -16,7 +17,7 @@ import (
 func TestCommandAddressesTheSocketAndClearsTMUX(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/caller-server,1,0")
 	binary := filepath.Join(t.TempDir(), "tmux-fake")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	command := Command(context.Background(), binary, "/sockets/cc-1", "list-panes", "-a")
@@ -46,7 +47,11 @@ func TestCommandAddressesTheSocketAndClearsTMUX(t *testing.T) {
 // process-cached) path.
 func TestCommandRunsAConfiguredBinaryAsGiven(t *testing.T) {
 	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "tmux-configured"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		filepath.Join(directory, "tmux-configured"),
+		[]byte("#!/bin/sh\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -69,7 +74,7 @@ func TestCouldNotRunSeparatesAnUnstartableTmuxFromAFailingServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	exitsNonZero := filepath.Join(directory, "tmux-exits-1")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		exitsNonZero,
 		[]byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"),
 		0o700,

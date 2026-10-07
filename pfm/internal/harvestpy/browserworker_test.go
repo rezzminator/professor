@@ -424,6 +424,7 @@ func TestBrowserRouteGuardPythonSeam(t *testing.T) {
 	script := filepath.Join("assets", "browser", "browser_route_guard_test.py")
 	command := exec.Command(python, script)
 	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser route-guard seam failed: %v\n%s", err, output)
@@ -442,6 +443,7 @@ func TestBrowserRenderPythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_render_test.py"))
 	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser render seam failed: %v\n%s", err, output)
@@ -449,9 +451,8 @@ func TestBrowserRenderPythonSeam(t *testing.T) {
 }
 
 // TestBrowserConsentPythonSeam runs the consent seam's pure cases with NO
-// browser and NO patchright: only a privacy-preserving label is ever pressed,
-// and a scroll that did not move is unblocked once, then stopped "blocked" and
-// stamped incomplete — never "stable".
+// browser and NO patchright: a scroll that did not move is unblocked once,
+// then stopped "blocked" and stamped incomplete — never "stable".
 func TestBrowserConsentPythonSeam(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
@@ -459,10 +460,26 @@ func TestBrowserConsentPythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_consent_test.py"))
 	command.Dir = assetDirForTest()
-	command.Env = append(os.Environ(), "BROWSER_LIVE=0")
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=0"))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser consent seam failed: %v\n%s", err, output)
+	}
+}
+
+// TestBrowserRoutePythonSeam runs the hash-route seam's pure cases with NO
+// browser and NO patchright: the route waits for its view or reaches its cap.
+func TestBrowserRoutePythonSeam(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("named gap: python3 is unavailable on this host; the browser route seam test did not run")
+	}
+	command := exec.Command(python, filepath.Join("assets", "browser", "browser_route_test.py"))
+	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=0"))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("browser route seam failed: %v\n%s", err, output)
 	}
 }
 
@@ -483,5 +500,56 @@ func liveBrowserRuntime(root string) Runtime {
 	return Runtime{
 		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(current, "project", "browser.py"),
+	}
+}
+
+// browserSpewWorker runs the REAL embedded browser.py main() with smoke()
+// swapped for one that writes 200 KB plus a forged response straight to fd 1,
+// runs a child that echoes to fd 1 and reads fd 0, then makes one guard ask
+// through the protocol and reports the reply's reason.
+const browserSpewWorker = `
+import importlib.util, os, pathlib, subprocess, sys
+here = pathlib.Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location("harvest_browser", here / "browser.py")
+browser = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(browser)
+
+def smoke():
+    os.write(1, b"x" * 200000 + b"\n" + b'{"ok": true, "forged": true}\n')
+    subprocess.run(["sh", "-c", "echo child-noise; cat"], check=True)
+    allowed, reason = browser._blocking_ask("https://ask.example.test/")
+    return {"ok": True, "allowed": allowed, "reason": reason}
+
+browser.smoke = smoke
+browser.main()
+`
+
+// TestBrowserWorkerProtocolSurvivesNativeStdoutSpew is the browser sibling of
+// the converter's fd isolation: Chrome tooling and children writing to fd 1
+// or reading fd 0 neither desync the response nor steal a guard ask's reply.
+func TestBrowserWorkerProtocolSurvivesNativeStdoutSpew(t *testing.T) {
+	t.Parallel()
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("named gap: python3 is unavailable on this host; the browser fd isolation test did not run")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "browser.py"), BrowserWorkerSource(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "spew_worker.py")
+	if err := os.WriteFile(script, []byte(browserSpewWorker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewBrowserWorker(Runtime{Python: python, Script: script})
+	t.Cleanup(func() { _ = worker.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	response, err := worker.Smoke(ctx)
+	if err != nil {
+		t.Fatalf("Smoke() after native fd-1 output: %v", err)
+	}
+	if response["forged"] != nil || response["allowed"] != false || response["reason"] != "smoke never asks" {
+		t.Fatalf("Smoke() = %v, want its own answer carrying the ask reply", response)
 	}
 }

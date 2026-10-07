@@ -101,15 +101,22 @@ func (limits *rateLimits) UnmarshalJSON(content []byte) error {
 	if err := json.Unmarshal(content, &raw); err != nil {
 		return err
 	}
-	decoded := rateLimits{Windows: make(map[string]rateWindow, 2)}
-	for _, key := range []string{"five_hour", "seven_day"} {
-		value, ok := raw[key]
-		if !ok {
+	// Every window the harness sends is kept (five_hour, seven_day, a
+	// gateway's spend_limit, the undocumented per-model weeklies) so the quota
+	// snapshot can carry them all. Any window may be absent or null, and a key
+	// that is no window at all (model_scoped is an array) is skipped: only a
+	// malformed five_hour or seven_day, the two the render reads, fails it.
+	decoded := rateLimits{Windows: make(map[string]rateWindow, len(raw))}
+	for key, value := range raw {
+		if key == "limits" || string(value) == "null" {
 			continue
 		}
 		var window rateWindow
 		if err := json.Unmarshal(value, &window); err != nil {
-			return fmt.Errorf("decode %s rate limit: %w", key, err)
+			if key == "five_hour" || key == "seven_day" {
+				return fmt.Errorf("decode %s rate limit: %w", key, err)
+			}
+			continue
 		}
 		decoded.Windows[key] = window
 	}
@@ -234,15 +241,6 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	l1 += sep + sky.SnapshotCounts(fleetCounts(runtime))
 
 	gauge, l2, contextTokens := renderContextLine(runtime, data, directory, now)
-	if data.Cost.TotalCostUSD > 0 && runtime.Engine != pfmengine.Codex {
-		color := dim
-		if data.Cost.TotalCostUSD >= 10 {
-			color = red
-		} else if data.Cost.TotalCostUSD >= 2 {
-			color = yellow
-		}
-		l2 += sep + color + "💰" + fmt.Sprintf("$%.2f", data.Cost.TotalCostUSD) + reset
-	}
 	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
 	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
 	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.
@@ -336,10 +334,16 @@ func appendSegment(line, segment string) string {
 }
 
 func appendRateSegments(line string, now time.Time, data input) string {
-	// A response carrying no windows at all is an engine that does not report
-	// these quotas (Codex renders its own from a different source) — not a
-	// missing reading, so it renders nothing.
-	if len(data.RateLimits.Windows) == 0 {
+	// A response carrying none of the known windows is an engine that does not
+	// report these quotas (Codex renders its own from a different source; a
+	// gateway reports only its spend_limit) — not a missing reading, so it
+	// renders nothing.
+	reportsKnown := false
+	for _, descriptor := range usagehook.AllWindows() {
+		_, present := data.RateLimits.Windows[descriptor.Key]
+		reportsKnown = reportsKnown || present
+	}
+	if !reportsKnown {
 		return line
 	}
 	// Otherwise every known window renders, always. Skipping a window at 0%
@@ -651,15 +655,29 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 }
 
 func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) {
-	fiveWindow := data.RateLimits.Windows["five_hour"]
-	sevenWindow := data.RateLimits.Windows["seven_day"]
-	five := int(fiveWindow.UsedPercentage)
-	seven := int(sevenWindow.UsedPercentage)
-	fableWindow, hasFable := data.RateLimits.Windows["seven_day_fable"]
-	hasFable = hasFable && fableWindow.ResetsAt > now.Unix()
-	if ((five <= 0 && seven <= 0) || fiveWindow.ResetsAt <= now.Unix()) && !hasFable {
+	// Every window carrying a reset time is recorded under `windows`, 0% used
+	// included: 0% is a real reading, and a seat that has just started is
+	// exactly the one whose usage door should answer from this file instead of
+	// the endpoint. windowsAt has already folded the scoped `limits` array
+	// into this map, so the Fable window arrives here like the flat ones — and
+	// a reader that has fallen back to this file (a signed-out or unreachable
+	// account) can render no window this writer did not carry. A payload whose
+	// windows have all reset writes nothing.
+	windows := make(map[string]rateWindow, len(data.RateLimits.Windows))
+	live := false
+	for key, window := range data.RateLimits.Windows {
+		if window.ResetsAt <= 0 {
+			continue
+		}
+		windows[key] = window
+		live = live || window.ResetsAt > now.Unix()
+	}
+	if !live {
 		return
 	}
+	fiveWindow := windows["five_hour"]
+	sevenWindow := windows["seven_day"]
+	fableWindow := windows["seven_day_fable"]
 	if err := os.MkdirAll(runtime.RateLimitDir, 0o700); err != nil {
 		return
 	}
@@ -670,21 +688,16 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	payload := map[string]any{
 		"acct":                int64(account),
 		"config_dir":          filepath.Clean(runtime.ConfigDir),
-		"five_hour_used":      int64(five),
-		"seven_day_used":      int64(seven),
+		"windows":             windows,
+		"five_hour_used":      int64(fiveWindow.UsedPercentage),
+		"seven_day_used":      int64(sevenWindow.UsedPercentage),
 		"five_hour_resets_at": fiveWindow.ResetsAt,
 		"seven_day_resets_at": sevenWindow.ResetsAt,
 		"ts":                  now.Unix(),
 	}
-	// windowsAt has already folded the scoped `limits` array into this map, so
-	// the Fable window is available here exactly like the two flat ones. It is
-	// recorded whenever it is present and still in the future — 0% used is a
-	// real reading, not a missing one — because a reader that has fallen back
-	// to this file can render no Fable window this writer did not carry. That
-	// fallback is no longer the only door (usagehook reads the OS keychain
-	// directly now), but it is still the one a signed-out or unreachable
-	// account depends on.
-	if hasFable {
+	// The flat keys stay beside the map for the reader an older pfm build
+	// runs: a snapshot lives up to an hour, and that reader knows no map.
+	if fableWindow.ResetsAt > now.Unix() {
 		payload["fable_used"] = int64(fableWindow.UsedPercentage)
 		payload["fable_resets_at"] = fableWindow.ResetsAt
 	}
@@ -839,7 +852,7 @@ func codexSegment(
 	replacement := ""
 	window := int64(0)
 	baseModel := strings.TrimSuffix(model, "-fast")
-	if strings.HasPrefix(baseModel, "gpt-5.6-") {
+	if strings.HasPrefix(baseModel, "gpt-5.6-") || strings.HasPrefix(baseModel, "gpt-6") {
 		window = 272_000
 	} else {
 		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)

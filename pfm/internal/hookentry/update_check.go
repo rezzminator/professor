@@ -14,7 +14,8 @@ import (
 
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
-// UpdateCheck refreshes the release notice cache for the picker.
+// UpdateCheck refreshes the release notice cache for the picker. An unreachable
+// release lookup is recorded in the failure marker, logged WARN, and exits 0.
 func UpdateCheck(args []string, stderr io.Writer) int {
 	flags := cli.NewFlagSet(
 		"internal update-check",
@@ -36,6 +37,11 @@ func UpdateCheck(args []string, stderr io.Writer) int {
 	client := obs.WrapClient(&http.Client{Timeout: 12 * time.Second})
 	if err := updatecheck.CheckForUpdate(ctx, *cache, *current, *latestURL, client); err != nil {
 		fmt.Fprintf(stderr, "pfm internal update-check: %v\n", err)
+		if updatecheck.Unreachable(err) {
+			obs.Logger(ctx).Warn("update check: the latest Professor release is unreachable",
+				"cache", *cache, obs.FieldErr, err.Error())
+			return 0
+		}
 		return 1
 	}
 	return 0

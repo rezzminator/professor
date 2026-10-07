@@ -3,12 +3,12 @@ name: reload
 description: 'USER-ONLY — the user types /reload; never run this without the user''s permission. {{RELOAD_USAGE}}'
 ---
 
-# `/reload [--account N] [--model M] [--effort E] [--1h on|off] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
+# `/reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
 
 Run this ONCE via the Bash tool — and make it your LAST action, the chat is about to exit:
 
 ```
-~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--1h on|off] [--then "<prompt>"]
+~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--then "<prompt>"]
 ```
 
 **Every setting has a flag. There are no positional arguments.** Whatever words the request
@@ -16,8 +16,8 @@ used, map them to a flag first:
 
 | the request says | pass |
 | --- | --- |
-| "cache off", "5m cache", "short cache" | `--1h off` |
-| "cache on", "1h cache", "long cache" | `--1h on` |
+| "cache off", "5m cache", "short cache" | `--cache 5m` |
+| "cache on", "1h cache", "long cache" | `--cache 1h` |
 | "account 2", "switch seats", "other account" | `--account 2` |
 | "then continue with X" | `--then "X"` |
 | "on opus", "switch to sonnet", "reload as <model>" | `--model <model>` |
@@ -50,13 +50,15 @@ the chat still has not exited after 20s it takes back whatever it put on the scr
 or the typed `/exit` — leaves the chat running, and says so in `reload-<socket>.log`. In-flight
 sub-agents, background shells, and session crons die with the reboot.
 
-## Cache-only reboot — `/reload --1h on|off`
+## Cache-only reboot — `/reload --cache 1h|5m`
 
-For Claude, `--1h` flips the chat's prompt-cache TTL across the reboot: `on` = ⚡1h (`ENABLE_PROMPT_CACHING_1H=1`),
-`off` = 5m (`FORCE_PROMPT_CACHING_5M=1` — since CC 2.1.215 the harness defaults to 1h, so 5m must
-be forced, never assumed). With no `--account` the chat KEEPS its current account — `/reload --1h off`
-is the pure "restart this chat on the 5m cache" move. Without `--1h`, an account reload preserves
-the chat's existing cache mode (a flagless elder counts as 1h, the default it actually runs).
+For Claude, `--cache` selects the reborn chat's starting prompt-cache TTL,
+handed to the cache-live-control plugin as `CACHE_LIVE_CONTROL_MAIN_TTL=1h|5m`
+in the launch's process environment; the plugin owns every TTL from then on,
+main chat and sub-agents alike.
+With no `--account`, `/reload --cache 5m` keeps the current account.
+With no `--cache`, reload carries the chat's recorded cache choice. A chat
+without a launch record uses its selected account's configured cache.
 
 ## Fresh conversation — `/reload --new [--hide]`
 

@@ -261,12 +261,30 @@ func (installer *engine) pause(d time.Duration) {
 // asking anyone to predict how long a teardown takes, and it costs a healthy
 // host nothing: the first attempt succeeds and no wait is ever taken.
 func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, _ string) error {
+	pause := func(_ context.Context, d time.Duration) error {
+		installer.pause(d)
+		return nil
+	}
+	return launchctlBootstrapWithRetry(ctx, installer.options.Runner, pause, domain, path)
+}
+
+// launchctlBootstrapWithRetry is bootstrapWithRetry's loop over any runner:
+// every launchd bootstrap after a bootout goes through it, pausing between
+// attempts through pause.
+func launchctlBootstrapWithRetry(
+	ctx context.Context,
+	runner CommandRunner,
+	pause func(context.Context, time.Duration) error,
+	domain, path string,
+) error {
 	var err error
 	for attempt := 0; attempt < launchdBootstrapAttempts; attempt++ {
 		if attempt > 0 {
-			installer.pause(launchdBootstrapRetryInterval)
+			if pauseErr := pause(ctx, launchdBootstrapRetryInterval); pauseErr != nil {
+				return errors.Join(err, pauseErr)
+			}
 		}
-		if err = installer.options.Runner.Run(ctx, "launchctl", "bootstrap", domain, path); err == nil {
+		if err = runner.Run(ctx, "launchctl", "bootstrap", domain, path); err == nil {
 			return nil
 		}
 	}
@@ -314,8 +332,9 @@ func probeAnswered(err error) bool {
 	return deps.ExitCode(err) > 0
 }
 
-// launchAgentRunning reports whether the name-sync job is executing right now,
-// and whether the question could be asked at all.
+// launchAgentRunning reports whether the launch agent labelled label (name-sync
+// or the reminder fire) is executing right now, and whether the question could
+// be asked at all.
 //
 // "state = not running" contains "running", so the state line is compared whole
 // rather than searched — a substring match here would refuse every install on a
@@ -324,13 +343,13 @@ func probeAnswered(err error) bool {
 // does not know is not an error to report — nothing is installed yet, so
 // nothing can be mid-execution); anything else means the probe never got an
 // answer at all.
-func launchAgentRunning(ctx context.Context, runner CommandRunner) (running, probed bool) {
+func launchAgentRunning(ctx context.Context, runner CommandRunner, label string) (running, probed bool) {
 	reader, ok := runner.(OutputRunner)
 	if !ok {
 		return false, false
 	}
 	output, err := reader.Output(
-		ctx, "launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+launchdLabel,
+		ctx, "launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+label,
 	)
 	if err != nil {
 		if probeAnswered(err) {

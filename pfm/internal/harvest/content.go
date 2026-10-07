@@ -76,6 +76,7 @@ type carriedGaps struct {
 	wall      string
 	redirect  string
 	refused   string
+	login     bool // refused is a redirect to a login page (landing.go)
 	moved     string
 }
 

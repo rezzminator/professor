@@ -1,11 +1,8 @@
 package installer
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,6 +22,7 @@ func requireKeepsBeyondFloat64(t *testing.T, door string, rewritten []byte) {
 }
 
 func TestUnmarshalKeepingNumbersIsAsStrictAsUnmarshal(t *testing.T) {
+	t.Parallel()
 	var document map[string]any
 	if err := unmarshalKeepingNumbers([]byte(`{"counter":`+beyondFloat64+`}`), &document); err != nil {
 		t.Fatal(err)
@@ -42,54 +40,8 @@ func TestUnmarshalKeepingNumbersIsAsStrictAsUnmarshal(t *testing.T) {
 	}
 }
 
-func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
-	home := t.TempDir()
-	primary := filepath.Join(home, ".claude")
-	registry := filepath.Join(home, ".claude.json")
-	writeFixture(
-		t,
-		registry,
-		`{"counter":`+beyondFloat64+`,"mcpServers":{"foreign":{"type":"stdio","command":"foreign"}}}`,
-	)
-	options := Options{
-		Home:       home,
-		ConfigDir:  primary,
-		ConfigDirs: []string{primary},
-		CodexHomes: []string{},
-		Mode:       ModeApply,
-		Runner:     &fakeRunner{},
-		Stdout:     io.Discard,
-		MCPEnabled: map[string]bool{"chat": true},
-		MCPPort:    8377,
-	}
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	installed := readFixture(t, registry)
-	if !strings.Contains(installed, `"professor"`) {
-		t.Fatalf("install did not register professor: %s", installed)
-	}
-	requireKeepsBeyondFloat64(t, "MCP install", []byte(installed))
-	options.Mode = ModeUninstall
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	uninstalled := readFixture(t, registry)
-	if strings.Contains(uninstalled, `"professor"`) {
-		t.Fatalf("uninstall left the professor registration: %s", uninstalled)
-	}
-	requireKeepsBeyondFloat64(t, "MCP uninstall", []byte(uninstalled))
-}
-
-func TestClaudeSettingsRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
-	updated, changed, _, err := updateSettings([]byte(`{"counter":`+beyondFloat64+`}`), t.TempDir(), false, nil)
-	if err != nil || !changed {
-		t.Fatalf("updateSettings changed=%v err=%v; want a rewrite", changed, err)
-	}
-	requireKeepsBeyondFloat64(t, "updateSettings", updated)
-}
-
 func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
+	t.Parallel()
 	// The Codex hook file is rewritten only to take something away now, so
 	// the fixture carries the retired appendix hook for the pass to remove.
 	home := t.TempDir()
@@ -103,26 +55,8 @@ func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 	requireKeepsBeyondFloat64(t, "updateCodexHooks", updated)
 }
 
-func TestMemoryHelperHookRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
-	home := t.TempDir()
-	oldPath := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
-	newPath := filepath.Join(home, ".claude", "scripts", "memory-wire.sh")
-	raw := fmt.Sprintf(
-		`{"counter":%s,"hooks":{"Stop":[{"hooks":[{"type":"command","command":%q}]}]}}`,
-		beyondFloat64,
-		oldPath,
-	)
-	updated, changed, err := rewriteMemoryHelperHookPaths([]byte(raw), map[string]string{oldPath: newPath}, home)
-	if err != nil || !changed {
-		t.Fatalf("rewriteMemoryHelperHookPaths changed=%v err=%v; want a rewrite", changed, err)
-	}
-	if !strings.Contains(string(updated), newPath) {
-		t.Fatalf("hook command not rewritten: %s", updated)
-	}
-	requireKeepsBeyondFloat64(t, "rewriteMemoryHelperHookPaths", updated)
-}
-
 func TestJSONNumberIsMatchesEitherDecodedForm(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value any
 		want  bool

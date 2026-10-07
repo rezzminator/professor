@@ -171,7 +171,7 @@ func downloadResult(items []DownloadItem) *mcp.CallToolResult {
 	return result
 }
 
-// downloadOne downloads one source through harvest.Download (Retrieve's
+// downloadOne downloads one source through harvest.Download (retrieveWith's
 // file policy), hashes the stored file and records it in the store.
 func (service *Service) downloadOne(ctx context.Context, source string, headers harvest.CallerHeaders) DownloadItem {
 	if message := downloadMisroute(source); message != "" {

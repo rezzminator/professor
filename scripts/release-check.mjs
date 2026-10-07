@@ -46,7 +46,7 @@ const GRAMMAR_FIRST = "0.78.0"; // notes --all: the first release written to thi
 const TIER1 = [
   {
     area: "templates",
-    paths: ["templates/", "workflows/", "pfm/harness-prompts/"],
+    paths: ["templates/", "pfm/harness-prompts/"],
   },
   {
     area: "pfm-update",

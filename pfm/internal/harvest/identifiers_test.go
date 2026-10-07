@@ -8,6 +8,7 @@ import (
 )
 
 func TestIdentifiersAndOAOrdering(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
 		{"doi:10.1000/ABC.", "10.1000/ABC"},
 		{"https://doi.org/10.1000/abc", "10.1000/abc"},

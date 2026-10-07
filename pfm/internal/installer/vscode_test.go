@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	original := `{
@@ -26,7 +28,7 @@ func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.
 	writeFixture(t, settings, original)
 
 	options := Options{
-		Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t), Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	var preview bytes.Buffer
@@ -118,13 +120,15 @@ func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.
 }
 
 func TestVSCodeTerminalProfileRefusesAnOperatorProfileWithTheSameName(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}}}`
 	writeFixture(t, settings, original)
 
 	_, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	if err == nil || !strings.Contains(err.Error(), `profile "PFM" already exists and is not PFM-owned`) {
@@ -136,13 +140,15 @@ func TestVSCodeTerminalProfileRefusesAnOperatorProfileWithTheSameName(t *testing
 }
 
 func TestVSCodeProfileConflictRefusesApplyBeforeInstallerWrites(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}}}`
 	writeFixture(t, settings, original)
 
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	if err == nil || !strings.Contains(err.Error(), `profile "PFM" already exists and is not PFM-owned`) {
@@ -162,11 +168,13 @@ func TestVSCodeProfileConflictRefusesApplyBeforeInstallerWrites(t *testing.T) {
 }
 
 func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -198,11 +206,13 @@ func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
 // uninstall must leave it exactly as the operator left it rather than
 // restoring pfm's own remembered prior state.
 func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -232,10 +242,12 @@ func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
 }
 
 func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -257,13 +269,24 @@ func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
 }
 
 func TestVSCodeProfileUsesTheShimPickerValueExplicitly(t *testing.T) {
+	t.Parallel()
 	shim := readFixture(t, filepath.Join("assets", "shim", "pfm.zsh"))
-	if !strings.Contains(shim, `cmd="$HOME/.local/bin/pfm"`) {
-		t.Fatal("the installed PFM_AUTO_OPEN=pfm value is not routed to the absolute PFM picker")
+	// The value opens the shim's own pfm function, which hands the terminal to
+	// the chosen chat; both of its doors reach the absolute PFM binary, never a
+	// PATH lookup that could find another pfm.
+	for _, want := range []string{
+		`cmd=pfm ;;`,
+		`"$HOME/.local/bin/pfm" "$@"`,
+		`line="$("$HOME/.local/bin/pfm")"`,
+	} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("the installed PFM_AUTO_OPEN=pfm value is not routed to the absolute PFM picker: no %s", want)
+		}
 	}
 }
 
 func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
 	paths := (&engine{options: Options{Home: home, vscodePlatform: "darwin"}}).vscodeSettingsPaths()
@@ -271,7 +294,8 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 		t.Fatalf("darwin settings paths=%q, want %q", paths, settings)
 	}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "darwin", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -291,6 +315,7 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 }
 
 func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	oldPath := filepath.Join(home, "a-old-settings.json")
@@ -317,7 +342,8 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 	writeFixture(t, newPath, `{}`)
 	installer := engine{
 		options: Options{
-			Mode: ModeApply, Home: home, VSCode: true, Stdout: &bytes.Buffer{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, VSCode: true, Stdout: &bytes.Buffer{},
 			vscodePlatform: "linux", vscodeSettingsPaths: []string{newPath},
 		},
 		apply: true, managedRoot: managed, stamp: "fixture",
@@ -332,11 +358,13 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 }
 
 func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -372,12 +400,15 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 }
 
 func TestMalformedVSCodeSettingsSkipsVisiblyWithoutBlockingInstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
+	recordFixtureSourceRepo(t, home, t.TempDir())
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, "{broken\n")
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	if err != nil {
@@ -500,13 +531,15 @@ const realMalformedVSCodeSettings = `{
 // already carried — the other profiles, the automation profile, the tab
 // title — read back correctly.
 func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, realMalformedVSCodeSettings)
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatalf("merge refused the real malformed file: %v\n%s", err, output.String())
@@ -549,6 +582,7 @@ func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 // object (setJSONCProperty's insert path), not just decide nothing had
 // changed. The result must still be valid strict JSON at that object.
 func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	withoutPFM := strings.Replace(realMalformedVSCodeSettings, `    "PFM": {
@@ -568,7 +602,8 @@ func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T)
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatalf("merge refused the malformed file: %v\n%s", err, output.String())
@@ -595,6 +630,7 @@ func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T)
 }
 
 func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
@@ -602,7 +638,8 @@ func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -613,5 +650,350 @@ func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o644 {
 		t.Fatalf("VS Code merge changed settings mode to %o, want 644", got)
+	}
+}
+
+func TestVSCodeClaudeEnvironmentOwnership(t *testing.T) {
+	for _, initial := range []string{`{}`, `{"claudeCode.environmentVariables":[]}`, `{"claudeCode.environmentVariables":[{"name":"OTHER","value":"kept"},{"name":"CLAUDE_CONFIG_DIR","value":"previous"},{"name":"LAST","value":"last"}]}`} {
+		t.Run(initial, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "User", "settings.json")
+			machine := filepath.Join(home, "Machine", "settings.json")
+			inst := newVSCodeExtensionEngine(t, home, nil, true)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+			inst.options.vscodeSettingsPaths = []string{settings, machine}
+			for _, path := range inst.options.vscodeSettingsPaths {
+				writeFixture(t, path, initial)
+			}
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range inst.options.vscodeSettingsPaths {
+				doc, err := decodeJSONCObject([]byte(readFixture(t, path)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				env, ok := doc["claudeCode.environmentVariables"].([]any)
+				if !ok {
+					t.Fatalf("environment missing: %v", doc)
+				}
+				if len(env) == 0 {
+					t.Fatalf("environment empty: %v", doc)
+				}
+				index := 0
+				if strings.Contains(initial, "OTHER") {
+					index = 1
+					if env[0].(map[string]any)["value"] != "kept" || env[2].(map[string]any)["value"] != "last" {
+						t.Fatalf("order changed: %v", env)
+					}
+				}
+				if env[index].(map[string]any)["value"] != inst.options.PrimaryConfigDir {
+					t.Fatalf("env=%v", env)
+				}
+			}
+			ledger := readVSCodeLedgerFixture(t, inst.managedRoot)
+			if len(ledger.Files) != 2 || !ledger.Files[0].EnvOwned {
+				t.Fatalf("ownership=%+v", ledger)
+			}
+			inst.options.PrimaryConfigDir = filepath.Join(home, "next")
+			inst.options.VSCode = false
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(readFixture(t, settings), inst.options.PrimaryConfigDir) {
+				t.Fatal("primary not updated")
+			}
+			inst.options.Mode = ModeUninstall
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{settings, machine} {
+				got, err := decodeJSONCObject([]byte(readFixture(t, path)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want, _ := decodeJSONCObject([]byte(initial))
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("restored=%v want %v", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentOperatorEdit(t *testing.T) {
+	for _, edit := range []string{`[{"name":"CLAUDE_CONFIG_DIR","value":"operator"}]`, `[]`} {
+		t.Run(edit, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			inst := newVSCodeExtensionEngine(t, home, nil, true)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+			inst.options.vscodeSettingsPaths = []string{settings}
+			writeFixture(t, settings, `{}`)
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := setJSONCProperty([]byte(readFixture(t, settings)), 0, vscodeEnvironmentKey, []byte(edit))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFixture(t, settings, string(raw))
+			inst.options.PrimaryConfigDir = filepath.Join(home, "next")
+			inst.options.VSCode = false
+			for i := 0; i < 2; i++ {
+				if err := inst.wireVSCode(); err != nil {
+					t.Fatal(err)
+				}
+				if got := readFixture(t, settings); got != string(raw) {
+					t.Fatalf("operator edit changed on run %d: %s", i, got)
+				}
+				ledger := readVSCodeLedgerFixture(t, inst.managedRoot)
+				for _, record := range ledger.Files {
+					if record.EnvOwned {
+						t.Fatalf("ownership not dropped: %+v", record)
+					}
+				}
+			}
+			inst.options.Mode = ModeUninstall
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			doc, _ := decodeJSONCObject([]byte(readFixture(t, settings)))
+			var want any
+			_ = json.Unmarshal([]byte(edit), &want)
+			if !reflect.DeepEqual(doc["claudeCode.environmentVariables"], want) {
+				t.Fatal(doc)
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentMalformed(t *testing.T) {
+	for _, env := range []string{`{}`, `null`, `[1]`, `[{"name":"OTHER"}]`, `[{"name":3,"value":"x"}]`, `[{"name":"OTHER","value":3}]`} {
+		t.Run(env, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			initial := `{"claudeCode.environmentVariables":` + env + `}`
+			writeFixture(t, settings, initial)
+			inst := newVSCodeExtensionEngine(t, home, nil, true)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+			inst.options.vscodeSettingsPaths = []string{settings}
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := decodeJSONCObject([]byte(readFixture(t, settings)))
+			var want any
+			if err := json.Unmarshal([]byte(env), &want); err != nil {
+				t.Fatal(err)
+			}
+			if err != nil || !reflect.DeepEqual(doc[vscodeEnvironmentKey], want) {
+				t.Fatalf("env=%#v want %#v err=%v", doc[vscodeEnvironmentKey], want, err)
+			}
+			profiles, _ := doc["terminal.integrated.profiles.linux"].(map[string]any)
+			if !reflect.DeepEqual(profiles["PFM"], vscodeProfile()) ||
+				doc["terminal.integrated.defaultProfile.linux"] != "PFM" {
+				t.Fatalf("malformed env stopped profile/default upkeep: %#v", doc)
+			}
+			for _, key := range vscodeScalarKeys {
+				if doc[key] != vscodeScalarValue(key) {
+					t.Errorf("scalar %s=%v want %v", key, doc[key], vscodeScalarValue(key))
+				}
+			}
+			for _, record := range readVSCodeLedgerFixture(t, inst.managedRoot).Files {
+				if record.EnvOwned {
+					t.Fatalf("malformed environment owned: %+v", record)
+				}
+			}
+			reason := "claudeCode.environmentVariables must be an array"
+			switch env {
+			case `[1]`:
+				reason = "claudeCode.environmentVariables element 0 must be an object"
+			case `[{"name":"OTHER"}]`, `[{"name":3,"value":"x"}]`, `[{"name":"OTHER","value":3}]`:
+				reason = "claudeCode.environmentVariables element 0 requires string name and value"
+			}
+			line := "  skip    VS Code Claude environment skipped " + settings + ": malformed VS Code settings: " + reason + "\n"
+			if strings.Count(inst.options.Stdout.(*bytes.Buffer).String(), line) != 1 {
+				t.Fatalf("missing %q: %s", line, inst.options.Stdout)
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentReclaim(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		optIn, owned bool
+	}{
+		{"relinquished --vscode", true, false},
+		{"relinquished no --vscode", false, false},
+		{"owned edited --vscode", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			inst := newVSCodeExtensionEngine(t, home, nil, tc.optIn)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+			inst.options.vscodeSettingsPaths = []string{settings}
+			record := vscodeOwnershipRecord{Path: settings, Platform: "linux", EnvValue: "/old"}
+			value := "/op"
+			if tc.owned {
+				writeFixture(t, settings, `{}`)
+				if err := inst.wireVSCode(); err != nil {
+					t.Fatal(err)
+				}
+				record = readVSCodeLedgerFixture(t, inst.managedRoot).Files[0]
+				inst.options.PrimaryConfigDir = filepath.Join(home, "next")
+				value = "operator"
+			}
+			initial := `{"claudeCode.environmentVariables":[{"name":"CLAUDE_CONFIG_DIR","value":"` + value + `"}]}`
+			if tc.owned {
+				env := []byte(`[{"name":"CLAUDE_CONFIG_DIR","value":"operator"}]`)
+				raw, err := setJSONCProperty([]byte(readFixture(t, settings)), 0, vscodeEnvironmentKey, env)
+				if err != nil {
+					t.Fatal(err)
+				}
+				initial = string(raw)
+			}
+			writeFixture(t, settings, initial)
+			writeVSCodeOwnershipFixture(t, home, record)
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			ledger := readVSCodeLedgerFixture(t, inst.managedRoot)
+			if len(ledger.Files) != 1 {
+				t.Fatalf("ledger=%+v", ledger)
+			}
+			got := ledger.Files[0]
+			if !tc.optIn {
+				if readFixture(t, settings) != initial || !reflect.DeepEqual(got, record) {
+					t.Fatalf("relinquished settings/record changed: %+v", got)
+				}
+				return
+			}
+			primary := inst.options.PrimaryConfigDir
+			if !got.EnvOwned || got.EnvValue != primary || !got.HadEnv || got.PreviousEnv != value ||
+				got.EnvKeyAdded {
+				t.Fatalf("ownership=%+v want previous=%s primary=%s", got, value, primary)
+			}
+			report, err := InspectVSCode(home)
+			rows := report.Settings
+			if err != nil || len(rows) != 1 || rows[0].ClaudeConfigDir != primary || !rows[0].EnvOwned ||
+				rows[0].EnvRelinquished {
+				t.Fatalf("reclaimed inspection=%+v err=%v", report, err)
+			}
+			inst.options.Mode = ModeUninstall
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := decodeJSONCObject([]byte(readFixture(t, settings)))
+			want := []any{map[string]any{"name": claudeConfigDirEnv, "value": value}}
+			if err != nil || !reflect.DeepEqual(doc[vscodeEnvironmentKey], want) {
+				t.Fatalf("restored env=%#v want %#v err=%v", doc[vscodeEnvironmentKey], want, err)
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentDuplicates(t *testing.T) {
+	for name, owned := range map[string]bool{"owned": true, "unowned": false} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			inst := newVSCodeExtensionEngine(t, home, nil, !owned)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "next")
+			inst.options.vscodeSettingsPaths = []string{settings}
+			first, second := "/a", "/b"
+			if owned {
+				first, second = "/op", filepath.Join(home, "primary")
+				record := vscodeOwnershipRecord{Path: settings, Platform: "linux", EnvOwned: true, EnvValue: second}
+				writeVSCodeOwnershipFixture(t, home, record)
+			}
+			initial := `{"claudeCode.environmentVariables":[{"name":"CLAUDE_CONFIG_DIR","value":"` + first + `"},{"name":"CLAUDE_CONFIG_DIR","value":"` + second + `"}]}`
+			writeFixture(t, settings, initial)
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			if owned {
+				second = inst.options.PrimaryConfigDir
+			} else {
+				first = inst.options.PrimaryConfigDir
+			}
+			want := []any{
+				map[string]any{"name": claudeConfigDirEnv, "value": first},
+				map[string]any{"name": claudeConfigDirEnv, "value": second},
+			}
+			doc, err := decodeJSONCObject([]byte(readFixture(t, settings)))
+			if err != nil || !reflect.DeepEqual(doc[vscodeEnvironmentKey], want) {
+				t.Fatalf("duplicates=%#v want %#v err=%v", doc[vscodeEnvironmentKey], want, err)
+			}
+			ledger := readVSCodeLedgerFixture(t, inst.managedRoot)
+			if len(ledger.Files) != 1 || !ledger.Files[0].EnvOwned {
+				t.Fatalf("duplicate ownership=%+v", ledger)
+			}
+			if owned {
+				inst.options.Mode = ModeUninstall
+				if err := inst.wireVSCode(); err != nil {
+					t.Fatal(err)
+				}
+				doc, err = decodeJSONCObject([]byte(readFixture(t, settings)))
+				if err != nil || !reflect.DeepEqual(doc[vscodeEnvironmentKey], want[:1]) {
+					t.Fatalf("duplicate uninstall=%#v want %#v err=%v", doc[vscodeEnvironmentKey], want[:1], err)
+				}
+			}
+		})
+	}
+}
+
+func TestVSCodeMalformedEnvironmentProfileUpgrade(t *testing.T) {
+	for name, owned := range map[string]bool{"owned": true, "untouched": false} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			inst := newVSCodeExtensionEngine(t, home, nil, false)
+			inst.options.vscodeSettingsPaths = []string{settings}
+			record := vscodeOwnershipRecord{Path: settings, Platform: "linux", ProfileOwned: true, EnvOwned: owned}
+			if owned {
+				record.EnvValue = "/x"
+			}
+			writeVSCodeOwnershipFixture(t, home, record)
+			initial := `{"claudeCode.environmentVariables":{},"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm","TMUX":null,"TMUX_PANE":null,"CLAUDE_CODE_SESSION_ID":null,"CLAUDECODE":null,"CLAUDE_CODE_CHILD_SESSION":null}}}}`
+			writeFixture(t, settings, initial)
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := decodeJSONCObject([]byte(readFixture(t, settings)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(doc[vscodeEnvironmentKey], map[string]any{}) ||
+				!reflect.DeepEqual(doc["terminal.integrated.profiles.linux"].(map[string]any)["PFM"], vscodeProfile()) {
+				t.Fatalf("malformed env stopped profile upgrade or changed: %#v", doc)
+			}
+			ledger := readVSCodeLedgerFixture(t, inst.managedRoot)
+			if len(ledger.Files) != 1 || !reflect.DeepEqual(ledger.Files[0], record) {
+				t.Fatalf("env fields changed: %+v", ledger)
+			}
+			line := "  skip    VS Code Claude environment skipped " + settings + ": malformed VS Code settings: claudeCode.environmentVariables must be an array\n"
+			output := inst.options.Stdout.(*bytes.Buffer).String()
+			if (owned && strings.Count(output, line) != 1) ||
+				(!owned && strings.Contains(output, "skipped "+settings)) {
+				t.Fatalf("skip output=%q want owned=%v", output, owned)
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentRequiresOptInOrOwnership(t *testing.T) {
+	home := t.TempDir()
+	settings := filepath.Join(home, "settings.json")
+	writeFixture(t, settings, `{"editor.fontSize":17}`)
+	inst := newVSCodeExtensionEngine(t, home, nil, false)
+	inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+	inst.options.vscodeSettingsPaths = []string{settings}
+	if err := inst.wireVSCode(); err != nil {
+		t.Fatal(err)
+	}
+	if readFixture(t, settings) != `{"editor.fontSize":17}` {
+		t.Fatal("unmanaged settings rewritten")
 	}
 }

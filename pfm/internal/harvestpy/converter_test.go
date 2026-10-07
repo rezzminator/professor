@@ -3,6 +3,7 @@ package harvestpy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -167,10 +168,12 @@ func TestConverterFallsBackToDirectKillWhenGroupKillFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	converter := NewConverter(Runtime{Python: "fake-python", Script: script, Runner: runner})
-	if _, err := converter.ensureWorkerLocked(); err != nil {
-		t.Fatalf("ensureWorkerLocked() error = %v", err)
+	worker, _, err := converter.pool.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire() error = %v", err)
 	}
-	err := converter.Close()
+	converter.pool.release(worker)
+	err = converter.Close()
 	if err == nil || !strings.Contains(err.Error(), "kill converter worker process group") {
 		t.Fatalf("Close() error = %v, want a contextual group-kill error", err)
 	}
@@ -208,10 +211,11 @@ func TestConverterRequestCapsStderrTheSameWayTheBrowserWorkerDoes(t *testing.T) 
 		t.Fatal(err)
 	}
 	converter := NewConverter(Runtime{Python: "fake-python", Script: script, Runner: runner})
-	worker, err := converter.ensureWorkerLocked()
+	worker, _, err := converter.pool.acquire(context.Background())
 	if err != nil {
-		t.Fatalf("ensureWorkerLocked() error = %v", err)
+		t.Fatalf("acquire() error = %v", err)
 	}
+	converter.pool.release(worker)
 	// Simulate an oversized sidecar stderr the way a real docling stack trace
 	// would accumulate one, byte by byte, in the buffer obs.Process.Stderr
 	// wires the child's stderr pipe to. 2000 bytes is well past stderrTail's
@@ -221,7 +225,7 @@ func TestConverterRequestCapsStderrTheSameWayTheBrowserWorkerDoes(t *testing.T) 
 	if _, err := worker.stderr.Write([]byte(overLong)); err != nil {
 		t.Fatal(err)
 	}
-	_, tail, err := converter.request(context.Background(), []byte(`{"op":"convert"}`))
+	_, tail, err := converter.request(context.Background(), []byte(`{"op":"convert"}`), 0)
 	if err == nil {
 		t.Fatal("a write on a closed stdin pipe returned no error")
 	}
@@ -653,5 +657,87 @@ func TestHTMLFullDOMConversionDropsHiddenElements(t *testing.T) {
 	}
 	if t.Failed() {
 		t.Logf("markdown:\n%s", result.Markdown)
+	}
+}
+
+// TestHTMLMetadataDateComesFromMarkupOnly: htmldate's extensive search turned a
+// bare year ("© 2026") or a stray "Updated in 2019" into a Published line on
+// pages with no date markup. A page without date markup writes no Published
+// line; one whose meta tag carries the date writes it. It needs the pinned
+// interpreter (HARVESTPY_CORPUS_PYTHON).
+func TestHTMLMetadataDateComesFromMarkupOnly(t *testing.T) {
+	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
+	if python == "" {
+		t.Skip("HARVESTPY_CORPUS_PYTHON is not set; the metadata date check needs the pinned interpreter")
+	}
+	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
+	page := func(head string) string {
+		return `<!doctype html><html><head><title>Field notes on river gauges</title>` + head + `</head><body>` +
+			`<article><h1>Field notes on river gauges</h1>` +
+			`<p>The stilling well and the corrected staff gauge now agree to within two millimetres, which is inside` +
+			` the tolerance the network asks of a manual station.</p>` +
+			`<p>Updated in 2019</p>` +
+			`<p>Readings from the stilling well are logged each morning and compared against the staff gauge before` +
+			` the record is filed with the regional office.</p>` +
+			`</article><footer><p>© 2026 River Gauge Society</p></footer></body></html>`
+	}
+	cases := []struct {
+		name, head string
+		want       string
+	}{
+		{name: "no date markup", head: "", want: ""},
+		{
+			name: "meta published time",
+			head: `<meta property="article:published_time" content="2024-05-06T10:00:00Z">`,
+			want: "2024-05-06",
+		},
+	}
+	converter := testConverter(t, python)
+	t.Cleanup(func() { _ = converter.Close() })
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "page.html")
+			if err := os.WriteFile(path, []byte(page(tc.head)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			result, err := converter.Convert(context.Background(), Request{Path: path, Kind: "html"})
+			if err != nil {
+				t.Fatalf("convert: %v", err)
+			}
+			var published string
+			for _, line := range strings.Split(result.Markdown, "\n") {
+				if strings.HasPrefix(line, "**Published:**") {
+					published = strings.TrimSpace(strings.TrimPrefix(line, "**Published:**"))
+				}
+			}
+			if published != tc.want {
+				t.Errorf("Published = %q, want %q; markdown:\n%s", published, tc.want, result.Markdown)
+			}
+		})
+	}
+}
+
+// TestLockedBufferKeepsABoundedTail: a worker's stderr is kept for the error
+// messages that quote its tail, never whole: a chatty native library's
+// thousands of lines leave between stderrKeepBytes and twice that, ending
+// with the latest line, and one write past the cap keeps its own last bytes.
+func TestLockedBufferKeepsABoundedTail(t *testing.T) {
+	t.Parallel()
+	var buffer lockedBuffer
+	for line := range 5000 {
+		if _, err := fmt.Fprintf(&buffer, "line %05d of a chatty native library\n", line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tail := buffer.String(); len(tail) < stderrKeepBytes || len(tail) > 2*stderrKeepBytes ||
+		!strings.HasSuffix(tail, "line 04999 of a chatty native library\n") {
+		t.Fatalf("after 5000 lines the buffer holds %d bytes ending %q; want %d..%d ending with the last line",
+			len(tail), tail[max(0, len(tail)-40):], stderrKeepBytes, 2*stderrKeepBytes)
+	}
+	if _, err := buffer.Write([]byte(strings.Repeat("y", 3*stderrKeepBytes) + "END")); err != nil {
+		t.Fatal(err)
+	}
+	if tail := buffer.String(); len(tail) != stderrKeepBytes || !strings.HasSuffix(tail, "END") {
+		t.Fatalf("after one oversized write the buffer holds %d bytes; want its last %d", len(tail), stderrKeepBytes)
 	}
 }

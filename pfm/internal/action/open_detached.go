@@ -65,6 +65,13 @@ func (executor *Executor) OpenDetached(
 		}
 	}
 
+	// A workbench refusal comes before Solo closes any seat holding the chat.
+	if err := applyWorkbench(&request); err != nil {
+		return OpenResult{}, fmt.Errorf("open detached: %w", err)
+	}
+	if err := checkCodexLaunch(request); err != nil {
+		return OpenResult{}, fmt.Errorf("open detached: %w", err)
+	}
 	switch request.Row.Kind {
 	case compose.Agent, compose.ResumeClaude:
 		if err := executor.Solo(
@@ -95,6 +102,7 @@ func (executor *Executor) OpenDetached(
 		trail.Reach("opened", "already live")
 		return OpenResult{Name: request.Row.Name, Socket: request.Row.Socket, State: "live"}, nil
 	}
+	executor.recordLaunch(ctx, plan.Record)
 	if err := executor.tmux.CreateChatServer(ctx, *plan.ChatServer); err != nil {
 		return OpenResult{}, fmt.Errorf("open detached: %w", err)
 	}

@@ -12,7 +12,7 @@ import (
 // home directory. The escape is silent by construction: Resolve() computes
 // pathnames and touches nothing, so an unjailed test and a real run produce
 // byte-identical values right up to the moment something writes a fixture
-// transcript into a live account or opens the fleet.db a real chat is indexed
+// transcript into a live account or opens the pfm.db a real chat is indexed
 // in. Both have happened on a dev host, from one `go test ./...` run outside
 // the fence. Absence of a jail therefore has to be an ERROR here — this is the
 // last point at which it is distinguishable from an ordinary run.
@@ -29,7 +29,7 @@ func TestResolveRefusesTheOperatorsRealHomeInsideATest(t *testing.T) {
 		t.Fatalf(
 			"Resolve() without %s returned Home=%q (the operator's real home is %q) instead of refusing;\n"+
 				"an unjailed test can now open their live database at %q",
-			EnvHome, values.Home, realHome, values.DB,
+			EnvHome, values.Home, realHome, values.CacheDB,
 		)
 	}
 	for _, mustName := range []string{EnvHome, EnvRealHome} {

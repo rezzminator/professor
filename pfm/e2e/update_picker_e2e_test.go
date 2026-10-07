@@ -17,9 +17,11 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
+	t.Parallel()
 	requireE2EFence(t)
 	for _, binary := range []string{"go", "tmux", "zsh"} {
 		if _, err := exec.LookPath(binary); err != nil {
@@ -51,7 +53,6 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	tmuxDir := filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))
 	for _, dir := range []string{
 		home, professor, binDir, configDir, codexHome, opencodeHome, managed, state, tmuxDir,
-		filepath.Join(home, ".config", "pfm"),
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -77,7 +78,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(managed, "source-repo"), []byte(professor+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(home, ".config", "pfm", "config.json")
+	configPath := filepath.Join(home, "pfm.config.json")
 	configuration := map[string]any{
 		"version": pfmconfig.Version,
 		"accounts": []map[string]any{{
@@ -102,26 +103,23 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	}
 	moduleRoot := filepath.Dir(packageDir)
 	oldPFM := filepath.Join(binDir, "pfm")
-	build := exec.Command(
-		"go", "-C", moduleRoot, "build",
-		"-ldflags", "-X main.version=v0.61.1",
-		"-o", oldPFM, "./cmd/pfm",
-	)
-	build.Env = replaceUpdateE2EEnv(os.Environ(), map[string]string{"GOFLAGS": "-buildvcs=false"})
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build older pfm: %v: %s", err, output)
+	if err := testjail.GoBuild(moduleRoot, oldPFM, "./cmd/pfm", "-ldflags", "-X main.version=v0.61.1"); err != nil {
+		t.Fatalf("build older pfm: %v", err)
 	}
 
 	proof := filepath.Join(root, "engine-proof")
 	fakeCodex := "#!/bin/sh\n" +
-		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
+		// The proof lands whole (temp file, then rename): the test polls for a
+		// non-empty file and must never read it between the two writes.
+		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF.tmp\"\n" +
+		"mv \"$PFM_UPDATE_LAUNCH_PROOF.tmp\" \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
 		"sleep 2\n"
-	if err := os.WriteFile(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, engine := range []string{"opencode"} {
 		stub := "#!/bin/sh\nprintf 'unexpected engine=" + engine + "\\n' > \"$PFM_UPDATE_LAUNCH_PROOF\"\nsleep 2\n"
-		if err := os.WriteFile(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
+		if err := testjail.WriteExecutable(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -156,8 +154,9 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		"TMUX":                    "",
 		"TMUX_TMPDIR":             tmuxBase,
 		"PFM_HOME":                home,
-		"PFM_DB":                  filepath.Join(state, "fleet.db"),
-		"PFM_FLEET_DB":            filepath.Join(state, "shared.db"),
+		"PFM_CONFIG":              configPath,
+		"PFM_CACHE_DB":            filepath.Join(state, "pfm-cache.db"),
+		"PFM_STATE_DB":            filepath.Join(state, "shared.db"),
 		"PFM_SID_DIR":             filepath.Join(root, "sid"),
 		"PFM_CLAUDE_ROOTS":        filepath.Join(root, "claude"),
 		"PFM_CODEX_ROOT":          codexHome,

@@ -24,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // runSpawnTimings is zero in production, which makes spawn use its live
@@ -51,12 +52,16 @@ func runRun(
 	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		"chat new",
-		"usage: pfm chat new --name NAME [--engine cc|cx] [--cwd DIR] "+
-			"[--account N] [--1h] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
-			"[--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
+		"usage: pfm chat new [--name NAME] [--engine cc|cx] [--cwd DIR] "+
+			"[--account N] [--cache 1h|5m] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
+			"[--harness-prompt PATH] [--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
 		stderr,
 	)
-	name := flags.String("name", "", "chat name (a _KILL… name stays out of the list)")
+	name := flags.String(
+		"name",
+		"",
+		"chat name (optional inside a workbench: {name}:{n}; a _KILL… name stays out of the list)",
+	)
 	engine := flags.String(
 		"engine",
 		"",
@@ -64,27 +69,33 @@ func runRun(
 	)
 	cwd := flags.String("cwd", "", "project directory (default: the current one)")
 	account := flags.Int("account", 0, "Claude account (default: the primary one)")
-	cache1H := flags.Bool("1h", false, "arm 1h prompt caching")
+	cache := flags.String("cache", "", "prompt cache for this launch: 1h or 5m")
 	model := flags.String("model", "", "model the seat is born with")
 	effort := flags.String("effort", "", "reasoning effort the seat is born with")
 	promptFile := flags.String("prompt-file", "", "read the launch prompt from a file")
 	role := flags.String("agent-role", "", "registered agent role carried by the seat's prompt channel")
+	harnessPrompt := flags.String("harness-prompt", "", "claude only: system prompt file replacing the staged one")
 	await := flags.Bool("await", false, "wait for the first answer and print it (the launch summary moves to stderr)")
 	timeout := flags.Int("timeout", askTimeoutSeconds, "with --await: seconds to wait (0 waits forever)")
 	settle := flags.Int("settle", askSettleSeconds, "with --await: seconds of quiet before an answer is finished")
 	progress := flags.Bool("progress", false, "with --await: print the chat's turns to stderr while waiting")
 	attach := flags.Bool("attach", false, "attach this terminal after launch")
-	if code, ok := cli.ParseFlags(flags, args); !ok {
-		return code
+	positional, parseCode, ok := cli.ParseFlagsAroundName(flags, name, args)
+	if !ok {
+		return parseCode
 	}
-	positional := flags.Args()
-	if *name == "" && len(positional) > 0 {
-		*name = positional[0]
-		positional = positional[1:]
-	}
-	if *name == "" || *timeout < 0 || *settle < 0 || (*attach && *await) {
+	if *timeout < 0 || *settle < 0 || (*attach && *await) {
 		flags.Usage()
 		return 2
+	}
+	if *cache != "" && *cache != "1h" && *cache != "5m" {
+		fmt.Fprintln(stderr, "pfm chat new: --cache must be 1h or 5m")
+		return 2
+	}
+	var cache1H *bool
+	if *cache != "" {
+		choice := *cache == "1h"
+		cache1H = &choice
 	}
 	resolved := runtime.Paths
 	directory, err := runDir(*cwd)
@@ -92,6 +103,20 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
 	}
+	if *name == "" {
+		auto, found, nameErr := pfmchat.ReserveWorkbenchName(ctx, directory, stderr, &runtime)
+		if nameErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", nameErr)
+			return 1
+		}
+		if !found {
+			flags.Usage()
+			return 2
+		}
+		*name = auto.Name
+		ctx = pfmchat.WithWorkbenchNameReservation(ctx, auto)
+	}
+	defer pfmchat.ReleaseUnusedWorkbenchName(ctx, *name, stderr)
 	requestedEngine, _ := pfmengine.Parse(*engine)
 	if *role != "" && requestedEngine == pfmengine.OpenCode {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", agentrole.ValidateSeatPromptPolicy(requestedEngine, ""))
@@ -103,12 +128,66 @@ func runRun(
 		return 1
 	}
 	engineName, selectedAccount, err := resolveRunEngineAccount(*engine, *account, runtime.Config, fleetPrimary, env)
+	if *engine == "" {
+		bench, found, lookupErr := workbench.Nearest(directory)
+		if lookupErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", lookupErr)
+			return 2
+		}
+		if found && bench.Err == nil {
+			// An engine with an account but no headless planner is passed over,
+			// and taken only when nothing else is left, so its own refusal names it.
+			var unplanned pfmengine.ID
+			unplannedAccount := 0
+			picked, ok := workbench.PickEngine(bench, engineName, func(id pfmengine.ID) bool {
+				_, candidate, accountErr := resolveRunEngineIDAccount(id, *account, runtime.Config, fleetPrimary)
+				if accountErr != nil {
+					return false
+				}
+				if _, plannerErr := action.PlannerFor(id); plannerErr != nil {
+					if unplanned == "" {
+						unplanned, unplannedAccount = id, candidate
+					}
+					return false
+				}
+				selectedAccount = candidate
+				return true
+			})
+			if !ok && unplanned != "" {
+				picked, ok, selectedAccount = unplanned, true, unplannedAccount
+			}
+			if !ok {
+				words := make([]string, len(bench.Engines))
+				for i, id := range bench.Engines {
+					words[i] = pfmengine.MustLookup(id).LongName
+				}
+				fmt.Fprintf(
+					stderr,
+					"pfm chat new: workbench %s enables %s, and this machine has no account for any of them\n",
+					bench.Dir,
+					strings.Join(words, ", "),
+				)
+				return 2
+			}
+			engineName, err = picked, nil
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return 2
+	}
+	persona, err := workbench.ForLaunch(directory, engineName, workbench.New)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return 2
+	}
+	harnessPath, harnessBody, err := agentrole.LoadHarnessPromptFor(engineName, *harnessPrompt)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
 	socket := spawn.FreshSocket(engineName)
-	if *role != "" {
+	if *role != "" && harnessPath == "" && !persona.Applies() {
 		policy := runtime.Config.EffectiveClaude(selectedAccount).SystemPrompt
 		if policyErr := agentrole.ValidateSeatPromptPolicy(engineName, policy); policyErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", policyErr)
@@ -120,33 +199,24 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
-	var promptChannel string
-	rolePromptWritten := false
+	promptChannel := harnessPath
+	if harnessPath == "" && persona.Applies() {
+		promptChannel = persona.Body
+		if engineName == pfmengine.Claude {
+			promptChannel = persona.Prompt
+		}
+	}
+	seatStateWritten := false
 	defer func() {
-		if rolePromptWritten {
+		if seatStateWritten {
 			if removeErr := agentrole.RemoveSeatPrompt(resolved.SIDDir, socket, ""); removeErr != nil {
-				fmt.Fprintf(stderr, "pfm chat new: clean up unused role prompt: %v\n", removeErr)
+				fmt.Fprintf(stderr, "pfm chat new: clean up unused seat prompt state: %v\n", removeErr)
 			}
 		}
 	}()
 	if *role != "" {
-		constitution, _, err := agentrole.Resolve(engineName, *role, directory, resolved.Home)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
-			return 2
-		}
-		var stagedFleetPrompt string
-		if engineName == pfmengine.Claude {
-			stagedPath := action.ProfessorPromptPath(resolved.Home)
-			raw, readErr := os.ReadFile(stagedPath)
-			if readErr != nil {
-				fmt.Fprintf(stderr, "pfm chat new: read staged Claude prompt %s: %v\n", stagedPath, readErr)
-				return 2
-			}
-			stagedFleetPrompt = string(raw)
-		}
-		seatPrompt, composeErr := agentrole.ComposeSeatPrompt(
-			engineName, *role, constitution, stagedFleetPrompt,
+		seatPrompt, constitution, composeErr := agentrole.ResolveSeatPrompt(
+			engineName, *role, directory, resolved.Home, harnessBody,
 		)
 		if composeErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", composeErr)
@@ -161,11 +231,22 @@ func runRun(
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", writeErr)
 			return 2
 		}
-		rolePromptWritten = true
+		seatStateWritten = true
 		if engineName == pfmengine.Claude {
 			promptChannel = seatPromptPath
 		} else {
 			promptChannel = constitution
+		}
+	}
+	seatStateWritten = seatStateWritten || harnessPath != ""
+	if err := agentrole.WriteHarnessPromptRecord(resolved.SIDDir, socket, "", harnessPath); err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return 2
+	}
+	if engineName == pfmengine.Codex && persona.Applies() {
+		if err := workbench.EnsureMirror(persona.Bench, engineName, resolved.Home); err != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+			return 2
 		}
 	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
@@ -174,16 +255,21 @@ func runRun(
 		CWD:            directory,
 		Prompt:         prompt,
 		PromptChannel:  promptChannel,
-		Model:          *model,
-		Effort:         *effort,
+		Model:          persona.ModelOr(*model),
+		Effort:         persona.EffortOr(*effort),
 		Home:           resolved.Home,
 		PrimaryAccount: selectedAccount,
-		Cache1H:        *cache1H,
+		Cache1H:        cache1H,
 		Config:         runtime.Config,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
+	}
+	if plan.Record != nil {
+		if err := fleetdb.RecordLaunch(ctx, resolved, *plan.Record, clk.Now().Unix()); err != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", plan.Record.SessionID, err)
+		}
 	}
 
 	// PFM_SPAWN_TRACE turns on a step-by-step log of the TUI
@@ -198,20 +284,20 @@ func runRun(
 		TmuxDir: resolved.TmuxDir,
 		Titles:  &titles,
 	}, spawn.Request{
-		Trace:               trace,
-		Engine:              engineName,
-		Name:                *name,
-		Socket:              socket,
-		CWD:                 directory,
-		Run:                 plan.Run,
-		Binary:              plan.Binary,
+		Trace:  trace,
+		Engine: engineName,
+		Name:   *name,
+		Socket: socket,
+		CWD:    directory,
+		Run:    plan.Run,
+		Binary: plan.Binary, CodexHome: plan.CodexHome,
 		Prompt:              prompt,
 		PromptOnCommandLine: plan.PromptOnCommandLine,
 		Width:               action.HeadlessWidth,
 		Height:              action.HeadlessHeight,
 		Timings:             runSpawnTimings,
 	})
-	if err != nil {
+	if err = pfmchat.CommitWorkbenchLaunch(ctx, result.Socket != "", *name, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
 	}
@@ -228,9 +314,14 @@ func runRun(
 	printRunResult(summary, engineName, result)
 	if !result.Named {
 		pfmchat.RecordVerb(context.Background(), "new", 1)
+		if result.TrustHeld {
+			seatStateWritten = false // the live chat keeps its seat prompt state
+			fmt.Fprintf(stderr, "pfm chat new: %s\n", result.TrustRefusal(*name, directory))
+			return codeUndelivered
+		}
 		return 1
 	}
-	rolePromptWritten = false
+	seatStateWritten = false
 	pfmchat.RecordVerb(context.Background(), "new", 0)
 	spawnedAt := clk.Now()
 	parent := parentChatID(ctx, env)
@@ -434,7 +525,12 @@ func awaitLaunch(
 	if turn.Delivered {
 		return 0
 	}
-	if rescueLaunchPrompt(ctx, handle, stderr, clk, runtimes...) {
+	outcome := retryLaunchPrompt(ctx, handle, stderr, clk, runtimes...)
+	if outcome == inject.RescueTrustHeld {
+		fmt.Fprintf(stderr, "pfm chat new: %s\n", result.TrustRefusal(name, ""))
+		return codeUndelivered
+	}
+	if outcome == inject.RescueKeysPressed {
 		rescued, _ := headless.Await(
 			ctx,
 			chatResolver(handle, runtimes...),
@@ -486,39 +582,30 @@ func deliveryProofOptions(options headless.AwaitOptions, timeout time.Duration) 
 	return proof
 }
 
-// rescueLaunchPrompt presses the keys a human presses when a launch prompt is
-// sitting typed-but-unsent: Escape to clear the startup overlay that swallowed
-// the submit, then Enter. It reports whether the keys were delivered, not
-// whether the model answered — the caller re-proves that against the engine's
-// own transcript, because a keypress that reached tmux still proves nothing
-// about the model having been asked.
-func rescueLaunchPrompt(
+// retryLaunchPrompt retries a launch prompt sitting typed-but-unsent
+// (inject.RescueLaunchPrompt) and reports what it did, not whether the model
+// answered — the caller re-proves that against the engine's own transcript.
+func retryLaunchPrompt(
 	ctx context.Context,
 	handle string,
-	_ io.Writer,
+	stderr io.Writer,
 	clk clock.Clock,
 	runtimes ...commandRuntime,
-) bool {
+) inject.RescueOutcome {
 	chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
 	if err != nil || !found || !chat.Live {
-		return false
+		return inject.RescueNotSent
 	}
 	socketPath, err := chatSocketPath(chat.Socket)
 	if err != nil {
-		return false
+		return inject.RescueNotSent
 	}
 	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
-	tmux := inject.TmuxInjector{}
-	if err := tmux.SendKey(ctx, socketPath, pane, "Escape"); err != nil {
-		return false
+	outcome, err := inject.RescueLaunchPrompt(ctx, inject.TmuxInjector{}, socketPath, pane, clk, launchRescueSettle)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %s: dismiss-and-Enter retry: %v\n", handle, err)
 	}
-	if err := clk.Sleep(ctx, launchRescueSettle); err != nil {
-		return false
-	}
-	if err := tmux.SendKey(ctx, socketPath, pane, "Enter"); err != nil {
-		return false
-	}
-	return true
+	return outcome
 }
 
 // runPrompt takes the launch prompt from a file or from the command line,

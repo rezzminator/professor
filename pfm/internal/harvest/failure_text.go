@@ -21,7 +21,12 @@ const (
 	errorKindNoOpenCopy  = "no_open_copy"
 	errorKindLogin       = "login"
 	errorKindPaywall     = "paywall"
+	errorKindAmbiguous   = "ambiguous"
 )
+
+// statusBotBlock is the non-standard status LinkedIn answers a client it
+// refuses with: a bot block, classified as a 403 is.
+const statusBotBlock = 999
 
 // localEmptyFileText names a zero-byte local file: nothing to convert, and
 // no other copy or retry to suggest.
@@ -44,7 +49,7 @@ func failureStatusKind(status int) string {
 		return errorKindMissing
 	case status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout:
 		return errorKindTimeout
-	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+	case status == http.StatusUnauthorized || status == http.StatusForbidden || status == statusBotBlock:
 		return errorKindForbidden
 	case status == http.StatusTooManyRequests:
 		return errorKindRateLimited
@@ -54,8 +59,29 @@ func failureStatusKind(status int) string {
 	return ""
 }
 
+// failureStatusText is a status's reason phrase; the non-standard bot-block
+// status, which net/http leaves unnamed, reads as the refusal it is.
+func failureStatusText(status int) string {
+	if status == statusBotBlock {
+		return "Request Denied"
+	}
+	return http.StatusText(status)
+}
+
 // failureTextKind classifies an unnamed failure by the wording the core's
 // own error builders use; "" when the text names no class.
+// decisiveFailure reports whether a fetch's last failure kind, or a
+// challenge it met, is a distinct class a login wall seen on another rung
+// must not relabel: a tool outage, a network failure or a cancellation stays
+// its own kind, so its caching and its public text stay true.
+func decisiveFailure(kind string, challenge bool) bool {
+	switch kind {
+	case errorKindConvert, errorKindTimeout, errorKindConnect, errorKindDNS, errorKindCancelled:
+		return true
+	}
+	return challenge
+}
+
 func failureTextKind(err string) string {
 	switch {
 	case strings.Contains(err, "x509:"), strings.Contains(err, "tls:"), strings.Contains(err, "certificate"):
@@ -203,12 +229,12 @@ func publicFailureTable(result Result, kind string) string {
 			" Search for an author preprint with harvester_search_literature, or read the publisher's landing page with harvester_read (urls)."
 	case errorKindForbidden:
 		return fmt.Sprintf("The source refused the harvester (HTTP %d %s): a bot block or an access rule, "+
-			"which the harvester cannot tell apart, and it never signs in.%s %s.", status, http.StatusText(status), rungs, anotherCopyLead)
+			"which the harvester cannot tell apart, and it never signs in.%s %s.", status, failureStatusText(status), rungs, anotherCopyLead)
 	case errorKindRateLimited:
 		return "The source is rate-limiting the harvester (HTTP 429 Too Many Requests)." + rungs + " Retry later, or " + anotherCopy + "."
 	case errorKindServer:
 		return fmt.Sprintf("The source answered a server error (HTTP %d %s).%s Retry later, or %s.",
-			status, http.StatusText(status), rungs, anotherCopy)
+			status, failureStatusText(status), rungs, anotherCopy)
 	case errorKindMissing:
 		return missingMessage(result, rungs)
 	case errorKindOversized:

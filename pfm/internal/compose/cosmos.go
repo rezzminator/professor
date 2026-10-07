@@ -213,7 +213,7 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 			builder.addEdge(parent.Key, child.Key, event)
 			builder.warm(event.AtNS, child, parent)
 		case "group":
-			// Retired chat-group events: a historical fleet.db row of this
+			// Retired chat-group events: a historical pfm.db row of this
 			// kind is known history, not an unknown one — skip it silently,
 			// with no node, no edge, and no warning.
 		default:

@@ -1,10 +1,12 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 
-	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
@@ -19,12 +21,19 @@ const missingState = "missing"
 // AND the product's own index state, which the link alone cannot answer)
 // plus one row per owned settings file. installer.InspectVSCode is the same
 // reader `pfm install --vscode` itself uses, so doctor can never assert a
-// state the installer did not derive the same way.
-func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
+// state the installer did not derive the same way. Every warning row carries
+// a warningID and prints through filter, so doctor.ignoreWarnings can
+// silence it (warning_ids.go).
+func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warningFilter) int {
+	const installFix, vscodeFix = "run pfm install --yes", "run pfm install --yes --vscode"
 	report, err := installer.InspectVSCode(home)
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: vscode unreadable error=%v — run pfm install --yes\n", err)
-		return 1
+		return filter.warn(
+			stdout,
+			warnVSCodeInspect,
+			fmt.Sprintf("doctor: vscode unreadable error=%v", err),
+			installFix,
+		)
 	}
 	if !report.Managed {
 		fmt.Fprintln(stdout, "doctor: vscode not managed (pfm install --vscode never ran)")
@@ -33,71 +42,118 @@ func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
 
 	warnings := 0
 	for _, product := range report.Products {
+		row := "doctor: vscode product=" + product.Root
 		switch product.LinkState {
 		case "ok":
 			switch product.IndexState {
 			case "registered":
-				fmt.Fprintf(
-					stdout,
-					"doctor: vscode product=%s link=ok index=registered version=%s\n",
-					product.Root,
-					product.Version,
-				)
+				fmt.Fprintf(stdout, "%s link=ok index=registered version=%s\n", row, product.Version)
 			case missingState:
-				warnings++
-				fmt.Fprintf(
-					stdout,
-					"doctor: vscode product=%s link=ok index=MISSING — run pfm install --yes\n",
-					product.Root,
-				)
+				warnings += filter.warn(stdout, warnVSCodeIndex, row+" link=ok index=MISSING", installFix)
 			case unreadableState:
-				warnings++
-				fmt.Fprintf(
+				warnings += filter.warn(
 					stdout,
-					"doctor: vscode product=%s link=ok index=UNREADABLE error=%s\n",
-					product.Root,
-					product.IndexError,
+					warnVSCodeIndex,
+					fmt.Sprintf("%s link=ok index=UNREADABLE error=%s", row, product.IndexError),
+					"",
 				)
 			default:
 				// A state InspectVSCode did not derive is "we failed to
 				// look", never a silent clean row.
-				warnings++
-				fmt.Fprintf(
+				warnings += filter.warn(
 					stdout,
-					"doctor: vscode product=%s link=ok index=UNKNOWN(%s)\n",
-					product.Root,
-					product.IndexState,
+					warnVSCodeIndex,
+					fmt.Sprintf("%s link=ok index=UNKNOWN(%s)", row, product.IndexState),
+					"",
 				)
 			}
 		case brokenState:
-			warnings++
-			fmt.Fprintf(
+			warnings += filter.warn(
 				stdout,
-				"doctor: vscode product=%s link=BROKEN(%s) — run pfm install --yes\n",
-				product.Root,
-				product.LinkTarget,
+				warnVSCodeLink,
+				fmt.Sprintf("%s link=BROKEN(%s)", row, product.LinkTarget),
+				installFix,
 			)
 		case missingState:
-			warnings++
-			fmt.Fprintf(stdout, "doctor: vscode product=%s link=MISSING — run pfm install --yes\n", product.Root)
+			warnings += filter.warn(stdout, warnVSCodeLink, row+" link=MISSING", installFix)
 		default:
-			warnings++
-			fmt.Fprintf(stdout, "doctor: vscode product=%s link=UNKNOWN(%s)\n", product.Root, product.LinkState)
+			warnings += filter.warn(
+				stdout,
+				warnVSCodeLink,
+				fmt.Sprintf("%s link=UNKNOWN(%s)", row, product.LinkState),
+				"",
+			)
 		}
 	}
 	for _, settings := range report.Settings {
-		fmt.Fprintf(
-			stdout,
-			"doctor: vscode settings=%s profile=PFM(%s) default=%s\n",
+		settingsFix := vscodeFix
+		if settings.ProfileConflict {
+			// Install refuses an operator's PFM profile until it is cleared.
+			settingsFix = fmt.Sprintf(
+				`rename or remove the "PFM" terminal profile in %s, then %s`,
+				settings.Path,
+				vscodeFix,
+			)
+		}
+		row := fmt.Sprintf(
+			"doctor: vscode settings=%s profile=PFM(%s) default=%s",
 			settings.Path,
 			settings.Profile,
 			settings.Default,
 		)
+		if settings.Profile == missingState || settings.Profile == unreadableState || settings.ProfileConflict {
+			profileFix := ""
+			if settings.Profile == missingState || settings.ProfileConflict {
+				profileFix = settingsFix
+			}
+			warnings += filter.warn(stdout, warnVSCodeSettings, row, profileFix)
+		} else {
+			fmt.Fprintln(stdout, row)
+		}
+		if settings.Profile == missingState {
+			if _, err := os.Stat(settings.Path); errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+		}
+		if settings.Error == "" {
+			if settings.EnvError != "" {
+				warnings += filter.warn(
+					stdout,
+					warnVSCodeSettings,
+					"doctor: vscode settings="+settings.Path+" claudeCode.environmentVariables unreadable error="+settings.EnvError,
+					"",
+				)
+			} else if primaryDir != "" {
+				suffix := ""
+				if settings.EnvRelinquished {
+					suffix = " (pfm relinquished it after an operator edit)"
+				}
+				switch {
+				case settings.ClaudeConfigDir == "":
+					warnings += filter.warn(
+						stdout,
+						warnVSCodeSettings,
+						"doctor: vscode settings="+settings.Path+" CLAUDE_CONFIG_DIR missing"+suffix,
+						settingsFix,
+					)
+				case settings.ClaudeConfigDir != primaryDir:
+					warnings += filter.warn(
+						stdout,
+						warnVSCodeSettings,
+						fmt.Sprintf(
+							"doctor: vscode settings=%s CLAUDE_CONFIG_DIR=%s, want %s%s",
+							settings.Path,
+							settings.ClaudeConfigDir,
+							primaryDir,
+							suffix,
+						),
+						settingsFix,
+					)
+				}
+			}
+		}
 		if settings.Error != "" {
 			fmt.Fprintf(stdout, "doctor: vscode settings=%s error=%s\n", settings.Path, settings.Error)
-		}
-		if settings.Profile == missingState || settings.Profile == unreadableState {
-			warnings++
 		}
 	}
 	return warnings

@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -104,5 +105,17 @@ func TestNewSamplerWithDockerSocketWiresResolveDockerIdentities(t *testing.T) {
 	}
 	if containers[0].Name != "professor-web" || containers[0].Image != "registry.example/professor:web" {
 		t.Fatalf("resolved container = %+v", containers[0])
+	}
+}
+
+func TestDockerInspectorOfflineRecordsWarn(t *testing.T) {
+	_, recorder := obs.Test(t)
+	_, _, err := newDockerInspector(filepath.Join(t.TempDir(), "missing.sock"))("container")
+	if err == nil || !strings.Contains(err.Error(), "query Docker identity:") {
+		t.Fatalf("err=%v", err)
+	}
+	records := recorder.Records()
+	if len(records) != 1 || records[0].Level != "WARN" {
+		t.Fatalf("records=%s", recorder.Raw())
 	}
 }

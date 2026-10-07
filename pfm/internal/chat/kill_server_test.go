@@ -41,7 +41,7 @@ func TestKillServerRecordsAChatStateTransition(t *testing.T) {
 	resolved := paths.Values{
 		TmuxDir: tmuxDir,
 		SIDDir:  sidDir,
-		FleetDB: filepath.Join(root, "fleet.db"),
+		StateDB: filepath.Join(root, "pfm.db"),
 	}
 	ctx, recorder := obs.Test(t)
 	if err := KillServer(ctx, resolved, socket); err != nil {

@@ -12,6 +12,7 @@ import (
 // thread partial. The marks are the AppView's lexicon types
 // (app.bsky.feed.defs#notFoundPost, #blockedPost).
 func TestSocialThreadNamesUnavailableAndUnservedReplies(t *testing.T) {
+	t.Parallel()
 	root := bskySocialPost(&bskyNode{Type: bskyThreadType, Post: &bskyPost{URI: "at://did:plc:a/p/root"}}, "")
 	root.stated = 5
 	thread := socialThread{

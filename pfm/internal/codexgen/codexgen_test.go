@@ -313,6 +313,18 @@ func TestFrontmatterAndRosterTransform(t *testing.T) {
 	}
 }
 
+// A line naming both files states their relation; swapping its CLAUDE.md
+// makes it claim AGENTS.md is hand-edited and compiled from itself.
+func TestTransformMarkdownKeepsLinesNamingBothFiles(t *testing.T) {
+	both := "- `CLAUDE.md` is the one hand-edited orientation file; `AGENTS.md` is compiled from it."
+	pointer := "- pfm: the fleet engine · child `pfm/CLAUDE.md`"
+	got := transformMarkdown(both+"\n"+pointer+"\n", TransformOptions{ReplaceClaudeFile: true})
+	want := both + "\n- pfm: the fleet engine · child `pfm/AGENTS.md`\n"
+	if got != want {
+		t.Fatalf("transformMarkdown = %q, want %q", got, want)
+	}
+}
+
 func TestFrontmatterUnquotesYAMLScalars(t *testing.T) {
 	raw := "---\n" +
 		"single: 'a: b, \"c\" and it''s fine'\n" +
@@ -419,12 +431,12 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, ".claude", "agents", "unmapped.md"),
-		"---\ndescription: unmapped model\nmodel: something-else\n---\nunmapped\n",
+		"---\ndescription: unmapped model\ncodex-model: something-else\n---\nunmapped\n",
 	)
 	writeTestFile(
 		t,
 		filepath.Join(root, ".claude", "agents", "escaped.md"),
-		"---\ndescription: escaped values\nmodel: 'model\\path\"quoted'\neffort: 'effort\\path\"quoted'\n---\nescaped\n",
+		"---\ndescription: escaped values\ncodex-model: 'model\\path\"quoted'\neffort: 'effort\\path\"quoted'\n---\nescaped\n",
 	)
 	writeTestFile(t, filepath.Join(root, ".claude", "agents", "private.md"), "---\ndescription: private\n---\nno\n")
 	writeTestFile(
@@ -649,6 +661,51 @@ func TestReconcileFindingsAreNamedAndNonDestructive(t *testing.T) {
 	})
 }
 
+func TestProjectAgentCodexRoleSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, frontmatter string
+		refused                 bool
+	}{
+		{name: "project tier honours the keys", file: "lab.md", frontmatter: "model: opus\ncodex-model: gpt-fixture-lab\ncodex-effort: low\ncodex-sandbox: workspace-write\ntools: Read, Grep\n"},
+		{name: "project tier refusal", file: "orch.md", frontmatter: "model: claude-sonnet-5-5\n", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, home := t.TempDir(), t.TempDir()
+			writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
+			source := filepath.Join(root, ".claude", "agents", tc.file)
+			writeTestFile(t, source, "---\ndescription: Lab.\n"+tc.frontmatter+"---\nLab.\n")
+			result, err := Build(Options{Root: root, Home: home})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.refused {
+				if result.OK || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], source) ||
+					result.Wrote != 0 {
+					t.Fatalf("refusal = %#v, want one source problem and no writes", result)
+				}
+				if _, err := os.Lstat(filepath.Join(root, ".codex", "agents")); !os.IsNotExist(err) {
+					t.Fatalf("refused build materialized agents: %v", err)
+				}
+				return
+			}
+			if !result.OK {
+				t.Fatalf("build = %#v", result)
+			}
+			twin := filepath.Join(root, ".codex", "agents", "lab.toml")
+			assertTestFileContains(t, twin,
+				"# tier: gpt-fixture-lab (Claude alias: opus)\n",
+				"model = \"gpt-fixture-lab\"\nmodel_reasoning_effort = \"low\"\nsandbox_mode = \"workspace-write\"\n")
+			content := string(mustReadTestFile(t, twin))
+			if strings.Contains(content, "read-only") {
+				t.Fatalf("workspace-write role is read-only:\n%s", content)
+			}
+			if err := validateTOML(content); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func containsFinding(items []string, needle string) bool {
 	for _, item := range items {
 		if strings.Contains(strings.ToLower(item), strings.ToLower(needle)) {
@@ -719,4 +776,33 @@ func snapshotTestTree(t *testing.T, roots ...string) string {
 	}
 	sort.Strings(rows)
 	return strings.Join(rows, "\n")
+}
+
+func TestWorkbenchRootIgnoresGlobalCommands(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Scribe.\n")
+	writeTestFile(t, filepath.Join(root, ".professor", "workbench.json"), `{}`)
+	writeTestFile(t, filepath.Join(root, ".claude", "codex-build.json"), `{"version":1,"globalCommands":true}`)
+	writeTestFile(t, filepath.Join(root, ".claude", "agents", "clerk.md"), "---\ndescription: Clerk.\n---\nClerk.\n")
+	writeTestFile(t, filepath.Join(home, ".claude", "commands", "memo.md"), "---\ndescription: Memo.\n---\nMemo.\n")
+	sentinel := filepath.Join(home, ".codex", "prompts", "kept.md")
+	body := generatedHeader("fixture") + "\nKept.\n"
+	writeTestFile(t, sentinel, body)
+	result, err := Build(Options{Root: root, Home: home})
+	if err != nil || !result.OK {
+		t.Fatalf("build=%#v err=%v", result, err)
+	}
+	for _, path := range []string{filepath.Join(root, "AGENTS.md"), filepath.Join(root, ".codex", "agents", "clerk.toml")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Error(err)
+		}
+	}
+	for _, path := range []string{filepath.Join(home, ".codex", "prompts", "memo.md"), filepath.Join(home, ".codex", "skills", "memo")} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Errorf("home output %s: %v", path, err)
+		}
+	}
+	if data, err := os.ReadFile(sentinel); err != nil || string(data) != body {
+		t.Errorf("home sentinel=%q err=%v", data, err)
+	}
 }

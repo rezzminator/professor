@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -28,11 +29,23 @@ func readLatestExchange(ctx context.Context, chat Chat) (exchangeSnapshot, bool,
 	if !ok {
 		return exchangeSnapshot{}, false, nil
 	}
+	complete := len(entries) != 0 && assistantAnswered(entries[len(entries)-1].Role)
+	if complete && chat.Engine == pfmengine.Codex {
+		// Codex writes commentary between the tool calls of one turn, so an
+		// assistant entry newest is complete only once the rollout's turn
+		// record ends the turn — the end-record rule Await applies.
+		turn := codexTurnRead{at: -1}
+		open, err := turn.open(chat.Path, offset)
+		if err != nil {
+			return exchangeSnapshot{}, false, err
+		}
+		complete = !open
+	}
 	return exchangeSnapshot{
 		prompt:   prompt,
 		response: response,
 		offset:   offset,
-		complete: len(entries) != 0 && assistantAnswered(entries[len(entries)-1].Role),
+		complete: complete,
 	}, true, nil
 }
 

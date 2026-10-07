@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,7 +28,8 @@ func TestCodexHookAPIFixture(t *testing.T) {
 	}
 	var doc struct {
 		Hooks map[string][]struct {
-			Hooks []struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
 				Command string `json:"command"`
 			} `json:"hooks"`
 		} `json:"hooks"`
@@ -36,14 +38,15 @@ func TestCodexHookAPIFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks := []map[string]any{}
-	for _, group := range doc.Hooks["SessionStart"] {
-		for _, hook := range group.Hooks {
+	for groupIndex, group := range doc.Hooks["SessionStart"] {
+		for hookIndex, hook := range group.Hooks {
 			sum := sha256.Sum256([]byte(hook.Command))
 			hooks = append(
 				hooks,
 				map[string]any{
-					"key":         "fixture-hook",
+					"key":         fmt.Sprintf("%s:session_start:%d:%d", source, groupIndex, hookIndex),
 					"command":     hook.Command,
+					"matcher":     group.Matcher,
 					"sourcePath":  source,
 					"source":      "user",
 					"currentHash": hex.EncodeToString(sum[:]),
@@ -85,7 +88,8 @@ func TestCodexHookAPIFixture(t *testing.T) {
 			if err := json.Unmarshal(request.Params, &params); err != nil {
 				t.Fatal(err)
 			}
-			if len(hooks) != 1 || params.KeyPath != `hooks.state."fixture-hook"` || !params.Value.Enabled ||
+			if len(hooks) != 1 || params.KeyPath != "hooks.state."+quoteHookKey(t, hooks[0]["key"].(string)) ||
+				!params.Value.Enabled ||
 				params.Value.Hash != hooks[0]["currentHash"] {
 				t.Fatalf("unexpected trust request: %s", request.Params)
 			}
@@ -103,4 +107,13 @@ func TestCodexHookAPIFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func quoteHookKey(t *testing.T, key string) string {
+	t.Helper()
+	raw, err := json.Marshal(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }

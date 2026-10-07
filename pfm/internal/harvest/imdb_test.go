@@ -97,6 +97,7 @@ func (site *imdbSite) harvester(t *testing.T) *Harvester {
 // rating, spoiler flag, author as shown, date and text; the API's total is the
 // stated count; the artifact is complete, and a second harvest is identical.
 func TestIMDbReviewsLoadEveryReview(t *testing.T) {
+	t.Parallel()
 	site := newIMDbSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), imdbURL, FetchOptions{Refresh: true})
@@ -144,6 +145,7 @@ func TestIMDbReviewsLoadEveryReview(t *testing.T) {
 // stated total, the rest are named with the count, and the artifact is
 // partial; a review page that fails to load is named as well.
 func TestIMDbReviewsNotServedNameTheGap(t *testing.T) {
+	t.Parallel()
 	site := newIMDbSite(t)
 	site.answers[""] = strings.Replace(site.answers[""], `"total":4`, `"total":12037`, 1)
 	h := site.harvester(t)
@@ -175,6 +177,7 @@ func TestIMDbReviewsNotServedNameTheGap(t *testing.T) {
 // rung's copy (the few featured reviews, as the reader serves it live), and
 // the artifact is partial with the unread review list named.
 func TestIMDbReviewsUnloadedFallThroughNamed(t *testing.T) {
+	t.Parallel()
 	site := newIMDbSite(t)
 	site.status[""] = http.StatusForbidden
 	h := site.harvester(t)

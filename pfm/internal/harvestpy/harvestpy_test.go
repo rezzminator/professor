@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestTargetsPinEveryRequestedPlatformAndVerifyableInputs(t *testing.T) {
@@ -285,7 +286,7 @@ func TestProvisionConvergesAtomicallyAndIsIdempotent(t *testing.T) {
 			if strings.Contains(path, "python") {
 				body = pyBytes
 			}
-			return os.WriteFile(path, body, 0o700)
+			return testjail.WriteExecutable(path, body, 0o700)
 		},
 		Run: func(_ context.Context, _ string, _ []string, _ string) ([]byte, error) {
 			mu.Lock()
@@ -664,7 +665,7 @@ func TestCheckInventoryIgnoresUVsStderrBanner(t *testing.T) {
 	}
 	write := func(path, body string, mode os.FileMode) {
 		t.Helper()
-		if err := os.WriteFile(path, []byte(body), mode); err != nil {
+		if err := testjail.WriteExecutable(path, []byte(body), mode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -862,7 +863,7 @@ func TestCorpusPythonConversionOwnedPairsAreByteExact(t *testing.T) {
 			t.Errorf("%s oracle read failed: %v", item.ID, err)
 			continue
 		}
-		if result.Markdown != string(want) {
+		if redactFixtureEmails(result.Markdown) != string(want) {
 			t.Errorf("%s oracle mismatch: got %d bytes want %d", item.ID, len(result.Markdown), len(want))
 			continue
 		}
@@ -918,7 +919,7 @@ func TestCSVAndJSONConversionPathsAreByteExact(t *testing.T) {
 func fakePython(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-python")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		path,
 		[]byte("#!/bin/sh\nexec python3 -c '"+strings.ReplaceAll(body, "'", "'\\''")+"'\n"),
 		0o700,
@@ -931,7 +932,7 @@ func fakePython(t *testing.T, body string) string {
 func testConverter(t *testing.T, python string) *Converter {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "converter.py")
-	if err := os.WriteFile(script, ConverterSource(), 0o700); err != nil {
+	if err := testjail.WriteExecutable(script, ConverterSource(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return NewConverter(Runtime{Python: python, Script: script})

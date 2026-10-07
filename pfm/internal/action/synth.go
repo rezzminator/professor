@@ -6,43 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
-// hygiene is the launch-environment strip every fleet-born process carries
-// for both Claude and Codex. A chat born inside
-// another chat's Bash tool inherits that chat's session identity, config dir
-// and cache mode, so each one is unset and then re-decided by the launcher.
-//
-// The ANTHROPIC_*/CLAUDE_CODE_* tail is CC_ENDPOINT_UNSET:
-// a shell pointed at a local translating proxy would otherwise hand the next
-// launch a foreign endpoint, and it would answer from a foreign model under an
-// Anthropic medal. The launcher's verdict is the account; the environment gets
-// no vote.
-// The list is the source of truth and the shell string is derived from it, so
-// the two renderers in claude_spawn.go — a shell `env -u …` prefix and an
-// environment slice for direct execution — can never drift apart.
-var hygieneNames = []string{
-	"CLAUDE_CODE_SESSION_ID",
-	"CLAUDECODE",
-	"CLAUDE_CODE_CHILD_SESSION",
-	"CLAUDE_CONFIG_DIR",
-	"CLAUDE_PROJECT_DIR",
-	"ENABLE_PROMPT_CACHING_1H",
-	"FORCE_PROMPT_CACHING_5M",
-	"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
-	"ANTHROPIC_BASE_URL",
-	"ANTHROPIC_AUTH_TOKEN",
-	"ANTHROPIC_MODEL",
-	"ANTHROPIC_SMALL_FAST_MODEL",
-	"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-	"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
-	"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
-}
+// hygiene prints the registry's environment strip for non-Claude launchers.
+// ClaudeSpawn reads the same registry rows directly when it renders a launch.
+var hygieneNames = claudelaunch.Hygiene()
 
 // HygieneNames returns a copy of the fleet strip list, so a strip outside this
 // package (the doctor's harness capture) follows every name added here.
@@ -76,11 +50,30 @@ func envStripWords(names []string) string {
 // launches, but intentionally adds no autonomy or resume flags of its own.
 // home and claude carry the systemPrompt choice; the launcher re-decides it
 // every spawn (hygiene strips any inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).
+// machine supplies only its MCP servers and mcp.thirdParty, never its roster.
+// name is the chat's pfm label, carried as --name; "" carries nothing.
 func LauncherRun(
 	realBinary string,
 	args []string,
 	configDir, home string,
+	machine pfmconfig.Config,
 	claude pfmconfig.ClaudePrefs,
+	name string,
+	sessionID ...string,
+) (string, error) {
+	return LauncherRunAs(workbench.Persona{}, realBinary, args, configDir, home, machine, claude, name, sessionID...)
+}
+
+// LauncherRunAs carries the owning workbench's persona through the launcher.
+func LauncherRunAs(
+	persona workbench.Persona,
+	realBinary string,
+	args []string,
+	configDir, home string,
+	machine pfmconfig.Config,
+	claude pfmconfig.ClaudePrefs,
+	name string,
+	sessionID ...string,
 ) (string, error) {
 	values := append([]string{realBinary, configDir}, args...)
 	if hasNUL(values...) {
@@ -92,30 +85,109 @@ func LauncherRun(
 	// The launcher states its own binary and config dir — it has already
 	// resolved the real Claude behind the shim, and its config dir came from
 	// the environment rather than from an account row — so it hands the door a
-	// single implicit account carrying only the prompt policy. Account 0 is
-	// deliberately absent from that roster: the CLAUDE_CONFIG_DIR assignment
-	// below is the launcher's, not an account's.
+	// machine config with no roster, carrying the prompt policy and the
+	// machine's MCP servers (no account's .claude.json carries them; they ride
+	// --mcp-config). The CLAUDE_CONFIG_DIR assignment below is the launcher's
+	// own dir.
+	id := ""
+	explicit, _, continuing := LauncherIdentity(args)
+	if len(sessionID) != 0 {
+		id = sessionID[0]
+	} else if explicit == "" && !continuing {
+		var err error
+		id, err = newSessionID()
+		if err != nil {
+			return "", err
+		}
+	}
 	return ClaudeSpawn{
-		Purpose:           PurposeInteractive,
+		Purpose:           PurposeLauncher,
 		Home:              home,
 		Args:              args,
-		Machine:           pfmconfig.Config{Claude: claude},
+		SessionID:         id,
+		Name:              name,
+		PromptFile:        persona.Prompt,
+		Effort:            persona.Effort,
+		Model:             persona.Model,
+		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
 		explicitConfigDir: configDir,
 		binary:            realBinary,
-		quoteBinary:       true,
-		noAutonomy:        true,
 	}.ShellCommand()
 }
 
-// autonomyFlags is CC_AUTONOMY_FLAGS — the full-autonomy
-// posture every path that STARTS a Claude chat carries. `--allow-…` is the
-// enabling half (the harness refuses the bypass without it), `--dangerously-…`
-// the acting half; both are required. Chats run unattended overnight, so a
-// mid-task approval prompt is a stalled chat with nobody awake to clear it.
-//
-// Fresh and resumed Claude launches share ClaudeSpawn's policy. Codex carries
-// its own bypass flag and never these.
-const autonomyFlags = "--allow-dangerously-skip-permissions --dangerously-skip-permissions"
+var newSessionID = claudelaunch.NewSessionID
+
+const (
+	claudeResumeFlag  = "--resume"
+	claudeResumeShort = "-r"
+)
+
+// LauncherIdentity reports the session a launcher invocation will run under,
+// whether it came from a resume flag, and whether Claude continues a session
+// whose id pfm cannot know up front (--continue, the bare --resume picker, a
+// fork without its own --session-id). Only a fresh launch — no identity, not
+// continuing — may take a pfm-assigned --session-id; a fork never records its
+// parent's id as its own.
+func LauncherIdentity(args []string) (string, bool, bool) {
+	fork := false
+	for i, arg := range args {
+		if arg == "--fork-session" {
+			fork = true
+		}
+		if arg == "--session-id" && i+1 < len(args) {
+			return args[i+1], false, false
+		}
+		if value, ok := strings.CutPrefix(arg, "--session-id="); ok {
+			return value, false, false
+		}
+	}
+	for i, arg := range args {
+		switch arg {
+		case "--continue", "-c":
+			return "", false, true
+		case claudeResumeFlag, claudeResumeShort:
+			if fork || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return "", true, true
+			}
+			return args[i+1], true, false
+		}
+		if value, ok := strings.CutPrefix(arg, claudeResumeFlag+"="); ok {
+			if fork {
+				return "", true, true
+			}
+			return value, true, false
+		}
+	}
+	return "", false, fork
+}
+
+// LauncherResumeTarget is the session a launcher invocation resumes or forks
+// FROM: the value of --resume / -r (a separate word that is not a flag) or
+// --resume=. A value ending in .jsonl is a transcript path and yields its
+// basename without the extension. It returns "" unless the result is a session
+// UUID — a bare --resume, --continue and a named resume have no known source.
+func LauncherResumeTarget(args []string) string {
+	value := ""
+	for i, arg := range args {
+		if arg == claudeResumeFlag || arg == claudeResumeShort {
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				value = args[i+1]
+			}
+			break
+		}
+		if resumed, ok := strings.CutPrefix(arg, claudeResumeFlag+"="); ok {
+			value = resumed
+			break
+		}
+	}
+	if base, ok := strings.CutSuffix(value, ".jsonl"); ok {
+		value = filepath.Base(base)
+	}
+	if !pfmengine.IsUUID(value) {
+		return ""
+	}
+	return value
+}
 
 // Synthesize produces a deterministic action plan without touching tmux,
 // processes, the filesystem, stdin, stdout, or /dev/tty.
@@ -147,7 +219,8 @@ func Synthesize(request Request) (Plan, error) {
 			)
 		}
 	case NewCodex, ResumeCodex:
-		if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
+		_, found := machine.CodexAccountByID(request.PrimaryAccount)
+		if !found {
 			return Plan{}, fmt.Errorf(
 				"requested Codex account %d is not in the configured roster",
 				request.PrimaryAccount,
@@ -179,17 +252,27 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Prompt != "" {
 			arguments = append(arguments, request.Prompt)
 		}
-		run, err := claudeCommand(
-			PurposeInteractive,
-			request.Home,
-			request.PrimaryAccount,
-			request.Cache1H,
-			machine,
-			arguments...)
+		id, err := newSessionID()
+		if err != nil {
+			return Plan{}, fmt.Errorf("new Claude session id: %w", err)
+		}
+		run, err := ClaudeSpawn{
+			Purpose: PurposeInteractive, Home: request.Home,
+			Account: request.PrimaryAccount, Cache1H: &request.Cache1H,
+			SessionID: id, Args: arguments, Machine: machine,
+			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
+			Model: request.Persona.Model, Name: request.LaunchName,
+		}.ShellCommand()
 		if err != nil {
 			return Plan{}, err
 		}
 		plan.Run = run
+		plan.Record = &fleetdb.Launch{
+			SessionID: id,
+			Engine:    pfmengine.Claude,
+			Account:   request.PrimaryAccount,
+			Cache1H:   request.Cache1H,
+		}
 		plan = onChatServer(plan, request, machine, pfmengine.Claude)
 	case NewCodex:
 		if request.Row.CWD == "" {
@@ -208,6 +291,11 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		personaEnv, err := openCodePersonaEnv(request)
+		if err != nil {
+			return Plan{}, err
+		}
+		command.WriteString(personaEnv)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
@@ -231,6 +319,11 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		personaEnv, err := openCodePersonaEnv(request)
+		if err != nil {
+			return Plan{}, err
+		}
+		command.WriteString(personaEnv)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
@@ -270,13 +363,16 @@ func Synthesize(request Request) (Plan, error) {
 			machine.Path,
 			owningConfig,
 		)
-		resume, err := claudeCommand(
+		account := deadClaudeAccount(request, machine)
+		resume, err := claudeCommandForPersona(
 			PurposeResume,
 			request.Home,
-			request.PrimaryAccount,
+			account,
 			request.Cache1H,
 			machine,
-			"--resume",
+			request.Persona,
+			request.Row.Name,
+			claudeResumeFlag,
 			request.Row.ID,
 		)
 		if err != nil {
@@ -287,6 +383,12 @@ func Synthesize(request Request) (Plan, error) {
 			Quote("agent router failed — resuming fresh:") +
 			"; exec " + resume + "; }"
 		plan = onChatServer(plan, request, machine, pfmengine.Claude)
+		plan.Record = &fleetdb.Launch{
+			SessionID: request.Row.ID,
+			Engine:    pfmengine.Claude,
+			Account:   account,
+			Cache1H:   request.Cache1H,
+		}
 	case ResumeClaude:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
@@ -294,13 +396,16 @@ func Synthesize(request Request) (Plan, error) {
 				"resuming Claude requires id, cwd, and fresh socket",
 			)
 		}
-		resume, err := claudeCommand(
+		account := deadClaudeAccount(request, machine)
+		resume, err := claudeCommandForPersona(
 			PurposeResume,
 			request.Home,
-			request.PrimaryAccount,
+			account,
 			request.Cache1H,
 			machine,
-			"--resume",
+			request.Persona,
+			request.Row.Name,
+			claudeResumeFlag,
 			request.Row.ID,
 		)
 		if err != nil {
@@ -317,6 +422,12 @@ func Synthesize(request Request) (Plan, error) {
 			Quote("resume refused — session is live elsewhere:") +
 			"; " + agent + "; }"
 		plan = onChatServer(plan, request, machine, pfmengine.Claude)
+		plan.Record = &fleetdb.Launch{
+			SessionID: request.Row.ID,
+			Engine:    pfmengine.Claude,
+			Account:   account,
+			Cache1H:   request.Cache1H,
+		}
 	case ResumeCodex:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
@@ -324,11 +435,30 @@ func Synthesize(request Request) (Plan, error) {
 				"resuming Codex requires id, cwd, and fresh socket",
 			)
 		}
-		plan.Run = continuityBanner(request.Row) +
-			codexCommandFor(machine, request.PrimaryAccount, "resume", request.Row.ID)
+		var arguments []string
+		if request.Persona.Model != "" {
+			arguments = append(arguments, "--model", request.Persona.Model)
+		}
+		if request.Persona.Effort != "" {
+			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
+		}
+		if request.Persona.Body != "" {
+			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
+		}
+		arguments = append(arguments, "resume", request.Row.ID)
+		plan.Run = continuityBanner(request.Row) + codexCommandFor(machine, request.PrimaryAccount, arguments...)
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}
 	return plan, nil
+}
+
+func deadClaudeAccount(request Request, machine pfmconfig.Config) int {
+	if request.Row.Account != 0 {
+		if _, found := machine.Account(request.Row.Account); found {
+			return request.Row.Account
+		}
+	}
+	return request.PrimaryAccount
 }
 
 func routeForKind(kind compose.Kind) (Route, error) {
@@ -369,9 +499,10 @@ func claudeCommand(
 	account int,
 	cache1H bool,
 	machine pfmconfig.Config,
+	name string,
 	args ...string,
 ) (string, error) {
-	return claudeCommandWith(purpose, hygieneNames, home, account, cache1H, machine, args...)
+	return claudeCommandWith(purpose, claudelaunch.Hygiene(), home, account, cache1H, machine, name, args...)
 }
 
 // claudeCommandWith is claudeCommand over a caller-chosen environment strip,
@@ -386,24 +517,16 @@ func claudeCommandWith(
 	account int,
 	cache1H bool,
 	machine pfmconfig.Config,
+	name string,
 	args ...string,
 ) (string, error) {
-	return ClaudeSpawn{
-		Purpose: purpose,
-		Account: account,
-		Cache1H: cache1H,
-		Args:    args,
-		Home:    home,
-		Machine: machine,
-		strip:   strip,
-	}.ShellCommand()
+	_ = strip
+	return claudeCommandForPersona(purpose, home, account, cache1H, machine, workbench.Persona{}, name, args...)
 }
 
-// ProfessorPromptPath is the composed Claude prompt `pfm install` stages
-// under the managed root; claude.systemPrompt "professor" points every
-// managed launch at it via --system-prompt-file.
-func ProfessorPromptPath(home string) string {
-	return paths.HarnessPromptPath(home, pfmengine.Claude)
+// ProfessorPromptPath resolves the clone's composed Claude prompt.
+func ProfessorPromptPath(home string) (string, error) {
+	return claudelaunch.PromptFile(home)
 }
 
 // continuityBanner is the first thing a resumed Codex pane prints, above
@@ -547,11 +670,6 @@ func agentCommand(
 ) string {
 	var command strings.Builder
 	command.WriteString(hygiene)
-	if cache1H {
-		command.WriteString(" ENABLE_PROMPT_CACHING_1H=1")
-	} else {
-		command.WriteString(" FORCE_PROMPT_CACHING_5M=1")
-	}
 	command.WriteString(" pfm")
 	if machineConfigPath != "" {
 		command.WriteString(" --config ")
@@ -561,6 +679,12 @@ func agentCommand(
 	command.WriteString(Quote(id))
 	command.WriteString(" --cwd ")
 	command.WriteString(Quote(cwd))
+	cache := "5m"
+	if cache1H {
+		cache = "1h"
+	}
+	command.WriteString(" --cache ")
+	command.WriteString(cache)
 	if len(configDir) != 0 && configDir[0] != "" {
 		command.WriteString(" --config ")
 		command.WriteString(Quote(configDir[0]))

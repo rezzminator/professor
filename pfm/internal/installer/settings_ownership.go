@@ -116,46 +116,9 @@ func nextSettingsHookOwnership(
 			added = 0
 		}
 		count := owned[key] + added
-		// The delta above already covers a hook this run wrote at a NEW
-		// slot — including a legacy hook whose text `rewriteCommandFields`
-		// converts to canonical in place without moving it to the
-		// template's own event.
-		// What it never credits on its own is a hook nothing changed this
-		// run AND the ledger never recorded — an already fully-wired host
-		// predating the ownership ledger, or one converged by an install
-		// version before it existed for that hook
-		// (TestInstallOwnershipLedgerClaimsHooksAlreadyPresentInSettings,
-		// TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent).
-		// That hook belongs to the installer when — and ONLY when — it sits
-		// at exactly the canonical (event, matcher, command) triple a
-		// template wires (`installerOwnedHookKey` on THIS key), AND
-		// `hasMixedOwnershipEntry` is false: no hook ENTRY anywhere in this
-		// same file mixes an installer-owned-by-text command with a
-		// foreign one in the SAME matcher-group array
-		// (`settingsDocumentHasMixedOwnershipEntry`). That per-file gate,
-		// unlike whole-document purity, does not fire on a foreign hook
-		// that merely coexists in a SEPARATE entry at an event the
-		// installer also wires (a real host's monitoring/SessionStart/
-		// SessionEnd hooks alongside a fully-wired install — the exact
-		// defect TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent
-		// pins), but DOES fire the moment an operator's hook shares an
-		// entry with installer-adjacent text (the PostToolUse/
-		// UserPromptSubmit manual copies
-		// TestDreamHookPauseRetiresEveryCopyAndPreservesNeighbors
-		// pins as permanently NOT owned) — proof, anywhere in the file,
-		// that an operator hand-edited an installer-adjacent hook list, so
-		// an untouched-but-canonical-looking neighbor is no longer
-		// trustworthy evidence of a prior pfm install. It is computed from
-		// `after` (the converged document) alone, never from a before/after
-		// delta, so it is stable across repeat applies: an operator's
-		// foreign sibling is never removed by wiring, so a file once
-		// flagged mixed stays flagged on every later idle re-scan too —
-		// unlike a `before`-vs-`after` "did this call write anything"
-		// signal, which flips between a migrating first run and an idle
-		// second one and would make the ledger and its uninstall behavior
-		// depend on which apply happened to observe the file first.
-		// Uninstall only ever removes what `owned` lists, so a wrongly
-		// claimed key is a wrongly deleted operator hook.
+		// Historical ledger rows may predate the receipt. Claim a canonical
+		// template key only when no hook entry mixes it with operator hooks;
+		// a mixed entry cannot establish which command the operator owns.
 		if count == 0 && afterCount > 0 && !hasMixedOwnershipEntry && installerOwnedHookKey(key, pfmBinary) {
 			count = afterCount
 		}

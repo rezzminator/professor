@@ -17,15 +17,29 @@ import (
 )
 
 // TestMatchPrefersTheLiveSeat covers resolution: a name, an id, a socket, the
-// live row winning over its own resume twin, and a genuine collision being
-// refused rather than guessed.
+// live row winning over its own resume twin, the newest of two dead rows, and
+// a genuine collision of live seats being refused rather than guessed.
 func TestMatchPrefersTheLiveSeat(t *testing.T) {
 	rows := []compose.Row{
 		{Kind: compose.LiveCodex, ID: "019f-live", Name: "worker", Socket: "cx-1-2-3", Path: "/cx/live.jsonl"},
 		{Kind: compose.ResumeCodex, ID: "019f-live", Name: "worker", Path: "/cx/live.jsonl"},
 		{Kind: compose.ResumeClaude, ID: "b1111111-1111-4111-8111-111111111111", Name: "other"},
-		{Kind: compose.ResumeClaude, ID: "c2222222-2222-4222-8222-222222222222", Name: "twin"},
-		{Kind: compose.ResumeClaude, ID: "d3333333-3333-4333-8333-333333333333", Name: "twin"},
+		{Kind: compose.ResumeClaude, ID: "c2222222-2222-4222-8222-222222222222", Name: "twin", ActivityNS: 2},
+		{Kind: compose.ResumeClaude, ID: "d3333333-3333-4333-8333-333333333333", Name: "twin", ActivityNS: 1},
+		{
+			Kind:   compose.LiveClaude,
+			ID:     "e4444444-4444-4444-8444-444444444444",
+			Name:   "pair",
+			Socket: "cc-1",
+			PaneID: "%1",
+		},
+		{
+			Kind:   compose.LiveClaude,
+			ID:     "f5555555-5555-4555-8555-555555555555",
+			Name:   "pair",
+			Socket: "cc-2",
+			PaneID: "%2",
+		},
 	}
 	for _, testCase := range []struct {
 		name    string
@@ -39,7 +53,8 @@ func TestMatchPrefersTheLiveSeat(t *testing.T) {
 		{name: "by socket", query: "cx-1-2-3", wantID: "019f-live", live: true},
 		{name: "by id prefix", query: "b1111111", wantID: "b1111111-1111-4111-8111-111111111111"},
 		{name: "case folded", query: "OTHER", wantID: "b1111111-1111-4111-8111-111111111111"},
-		{name: "ambiguous", query: "twin", wantErr: true},
+		{name: "dead only means the newest", query: "twin", wantID: "c2222222-2222-4222-8222-222222222222"},
+		{name: "two live stay ambiguous", query: "pair", wantErr: true},
 		{name: "unknown", query: "ghost", missing: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -271,7 +286,7 @@ func TestTargetReportsAScanThatCouldNotLook(t *testing.T) {
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvDB, filepath.Join(blocker, "index.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 	_, err := Target(ctx, "ghost", nil)
 	var failure *TargetError
 	if !errors.As(err, &failure) || errors.Is(err, ErrUnknownChat) || failure.Name != "ghost" {

@@ -7,3 +7,7 @@ wait_agent_enabled = true
 min_wait_timeout_ms = 150000
 default_wait_timeout_ms = 750000
 max_wait_timeout_ms = 1500000
+# Agent threads open at once, the root included; a finished child holds its slot
+# until Codex unloads it. Codex's default of 4 cannot hold a flight's root, its
+# children, gitter and the lander.
+max_concurrent_threads_per_session = 10

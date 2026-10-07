@@ -93,7 +93,8 @@ func newDockerInspector(socketPath string) func(string) (string, string, error) 
 	}
 	client := obs.WrapClient(&http.Client{Transport: transport, Timeout: time.Second})
 	return func(id string) (string, string, error) {
-		request, err := http.NewRequest(
+		request, err := http.NewRequestWithContext(
+			obs.Presence(context.Background()),
 			http.MethodGet,
 			"http://docker/containers/"+url.PathEscape(id)+"/json",
 			http.NoBody,

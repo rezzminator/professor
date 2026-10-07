@@ -1,6 +1,0 @@
-# generated bundle (built by build.js — never hand-format)
-../workflow.js
-# deps + coverage + generated test artifacts
-node_modules
-coverage
-test/.gen

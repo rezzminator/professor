@@ -1,0 +1,2738 @@
+[
+ {
+  "name": "cat-append-heredoc-existing",
+  "covers": "cat >> f <<EOF, the heredoc prose data, never a part",
+  "cwd": "/tmp/demo-proj",
+  "command": "cat >> tmp/demo/checkpoint.md <<'EOF'\n- up.sh: removed the call to infra/prepare-mounts.sh (alpha beta gamma; delta never ran since). Rebuild relaunched: task alpha, monitor beta, log scratchpad/up.log.\nEOF\necho ok",
+  "parts": [
+   {
+    "program": "cat",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "ok"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cat-append-heredoc-missing",
+  "covers": "cat >> f <<EOF to an absolute path",
+  "cwd": "/tmp/demo-proj",
+  "command": "cat >> /tmp/demo-proj/tmp/bench/wall/CHECKPOINT.md <<'EOF'\n- T2 DONE alpha (9 files, clean). T2b DISPATCHED (beta, gamma) brief merge/T2b.md. Then: verify T2b -> commit -> T2c -> T3 -> T4.\nEOF",
+  "parts": [
+   {
+    "program": "cat",
+    "args": [],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-nonliteral-then-cat-write-python-script",
+  "covers": "cd \"$VAR\" kept as written; cat > f <<EOF, python3 script.py > out, wc and head",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd \"$TMPDIR/probe\" && cat > mkarg.py <<'EOF'\nimport json,sys\nprint(sys.argv[1]+\"=\"+json.dumps(open(sys.argv[2]).read()))\nEOF\nmkdir -p run1 && python3 mkarg.py developer_instructions /tmp/demo-proj/prompts/codex.md > arg_dev.txt && wc -c arg_dev.txt && head -c 200 arg_dev.txt",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "\"$TMPDIR/probe\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "mkdir",
+    "args": [
+     "-p",
+     "run1"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "python3",
+    "args": [
+     "mkarg.py",
+     "developer_instructions",
+     "/tmp/demo-proj/prompts/codex.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-c",
+     "arg_dev.txt"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-c",
+     "200",
+     "arg_dev.txt"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cat-gt-heredoc-then-gofmt",
+  "covers": "cat > f <<EOF, then gofmt naming the same file",
+  "cwd": "/tmp/demo-proj/pfm",
+  "command": "cat > /tmp/demo-proj/tmp/testfmt.go <<'EOF'\npackage main\n\nfunc sizeBadge(x int) string {\n\tif x == 1 { return \"a\" }\n\treturn \"b\"\n}\nEOF\ngofmt -l /tmp/demo-proj/tmp/testfmt.go\ngofmt /tmp/demo-proj/tmp/testfmt.go",
+  "parts": [
+   {
+    "program": "cat",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "gofmt",
+    "args": [
+     "-l",
+     "/tmp/demo-proj/tmp/testfmt.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "gofmt",
+    "args": [
+     "/tmp/demo-proj/tmp/testfmt.go"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-cat-empty-heredoc-rm-grep",
+  "covers": "cd X; cat > f <<EOF with an empty body, rm, grep -A piped to head",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm; cat > internal/resolve/resolve_couldnotrun_test.go.tmp <<'EOF'\nEOF\nrm internal/resolve/resolve_couldnotrun_test.go.tmp; grep -n \"^import (\" -A12 internal/resolve/resolve_test.go | head -14",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "rm",
+    "args": [
+     "internal/resolve/resolve_couldnotrun_test.go.tmp"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "^import (",
+     "-A12",
+     "internal/resolve/resolve_test.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-14"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "bash-c-for-glob-loop",
+  "covers": "bash -c with a for over a glob bound as written, $(…) inside, [ -n ] &&; then echo and a pipeline",
+  "cwd": "/tmp/demo-proj",
+  "command": "bash -c 'for s in /tmp/demo-proj/tmp/sock/c[cx]-*; do n=$(basename $s); w=$(tmux -S $s list-windows -F \"#{window_name}|#{set-titles}|#{set-titles-string}\" 2>/dev/null | head -1); [ -n \"$w\" ] && echo \"$n  window=[$w]\"; done'; echo; pfm ls --plain 2>/dev/null | head -12",
+  "parts": [
+   {
+    "program": "bash",
+    "args": [
+     "-c",
+     "for s in /tmp/demo-proj/tmp/sock/c[cx]-*; do n=$(basename $s); w=$(tmux -S $s list-windows -F \"#{window_name}|#{set-titles}|#{set-titles-string}\" 2>/dev/null | head -1); [ -n \"$w\" ] && echo \"$n  window=[$w]\"; done"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "basename",
+    "args": [
+     "/tmp/demo-proj/tmp/sock/c[cx]-*"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tmux",
+    "args": [
+     "-S",
+     "/tmp/demo-proj/tmp/sock/c[cx]-*",
+     "list-windows",
+     "-F",
+     "#{window_name}|#{set-titles}|#{set-titles-string}"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-1"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-n",
+     "\"$w\"",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"$n  window=[$w]\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "pfm",
+    "args": [
+     "ls",
+     "--plain"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-12"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "sed-then-bash-c-grep-r",
+  "covers": "sed -n range; bash -c with grep -r over . parsed in place",
+  "cwd": "/tmp/demo-proj",
+  "command": "sed -n 812,820p pfm/internal/harvestmcp/service.go; bash -c 'grep -rln \"ERROR:\" --include=\"*.py\" . 2>/dev/null | head; grep -rn \"alpha beta\\|gamma after delta\" --include=\"*.py\" --include=\"*.md\" . 2>/dev/null | grep -v node_modules | head'",
+  "parts": [
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "812,820p",
+     "pfm/internal/harvestmcp/service.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "bash",
+    "args": [
+     "-c",
+     "grep -rln \"ERROR:\" --include=\"*.py\" . 2>/dev/null | head; grep -rn \"alpha beta\\|gamma after delta\" --include=\"*.py\" --include=\"*.md\" . 2>/dev/null | grep -v node_modules | head"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-rln",
+     "ERROR:",
+     "--include=*.py",
+     "."
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-rn",
+     "alpha beta\\|gamma after delta",
+     "--include=*.py",
+     "--include=*.md",
+     "."
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     "node_modules"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "docker-exec-bash-c-never-parsed",
+  "covers": "docker exec … bash -c: a remote runner, its string never parsed",
+  "cwd": "/tmp/demo-proj",
+  "command": "docker exec demo bash -c 'cd /worktree/pfm && mkdir -p $HOME/.local/bin && go build -ldflags \"-X main.version=$(cat ../VERSION)\" -o $HOME/.local/bin/pfm ./cmd/pfm && export PATH=$HOME/.local/bin:$PATH && pfm --version && cd /worktree && pfm install --yes --skip-harvest --skip-themes --skip-engine codex 2>&1 | tail -30'",
+  "parts": [
+   {
+    "program": "docker",
+    "args": [
+     "exec",
+     "demo",
+     "bash",
+     "-c",
+     "cd /worktree/pfm && mkdir -p $HOME/.local/bin && go build -ldflags \"-X main.version=$(cat ../VERSION)\" -o $HOME/.local/bin/pfm ./cmd/pfm && export PATH=$HOME/.local/bin:$PATH && pfm --version && cd /worktree && pfm install --yes --skip-harvest --skip-themes --skip-engine codex 2>&1 | tail -30"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "dev-sh-iso-run-string-is-a-gap",
+  "covers": "cd X && dev.sh iso run \"…\": the runner string is one argument, never parsed (named gap); the script path is the program",
+  "cwd": "/tmp/demo-proj/pfm/internal/installer",
+  "command": "cd /tmp/demo-proj && .claude/scripts/dev.sh iso run \"go -C pfm test ./internal/callmeter/ -run TestFileColumns -count=1\" 2>&1 | tail -30",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": ".claude/scripts/dev.sh",
+    "args": [
+     "iso",
+     "run",
+     "go -C pfm test ./internal/callmeter/ -run TestFileColumns -count=1"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-30"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "timeout-dev-sh-iso-run-then-bash-script",
+  "covers": "timeout N wrapper over a script path; a runner string naming a file; bash script.sh",
+  "cwd": "/tmp/demo-proj",
+  "command": "timeout 900 .claude/scripts/dev.sh iso run \"make -C pfm fmt-check lint-new\" 2>&1 | grep -v \"^#\\| Container \\| Image \" | tail -30; bash pfm/scripts/arch-check.sh 2>&1 | grep -v \" PASS\" | tail -20",
+  "parts": [
+   {
+    "program": ".claude/scripts/dev.sh",
+    "args": [
+     "iso",
+     "run",
+     "make -C pfm fmt-check lint-new"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     "^#\\| Container \\| Image "
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-30"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "bash",
+    "args": [
+     "pfm/scripts/arch-check.sh"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     " PASS"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-20"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-for-literal-list-sed-grep",
+  "covers": "cd X && for f in literal names; sed -n $f | grep; ls ../; tail ../file",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/.cache/public && for f in da98cbc4e849.md 514e9eeb33f3.md; do sed -n '1,12p' $f | grep -iE 'method|rungs|source:' ; echo --; done; ls -t ../ 2>/dev/null | head -3; tail -3 ../stats.json",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/.cache/public"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "1,12p",
+     "da98cbc4e849.md",
+     "514e9eeb33f3.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-iE",
+     "method|rungs|source:"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "--"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     "-t",
+     "../"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-3"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-3",
+     "../stats.json"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-for-wc-stdin-and-grep",
+  "covers": "cd X; for over literal paths with $(wc -l < $f) inside a string and grep $f",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj; for f in templates/global/agents/flights-foreman.md templates/global/agents/flights-lander.md; do echo \"=== $f ($(wc -l < $f) lines)\"; grep -nEi 'alpha-suite|qa\\b|test pattern|convention|/quality|test' $f; done",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"=== $f ($(wc -l <$f) lines)\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-nEi",
+     "alpha-suite|qa\\b|test pattern|convention|/quality|test",
+     "templates/global/agents/flights-foreman.md",
+     "templates/global/agents/flights-lander.md"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "for-case-arms-conditional",
+  "covers": "for with $(…), case arms and [ ] && echo: every arm's program in source order",
+  "cwd": "/tmp/demo-proj",
+  "command": "for i in $(seq 1 60); do s=$(pfm chat status chain-probe 2>&1 | head -3); case \"$s\" in *idle*) echo \"$s\"; break;; *dead*) echo \"DEAD: $s\"; break;; esac; sleep 10; done; [ \"$i\" = 60 ] && echo \"TIMEOUT: $s\"",
+  "parts": [
+   {
+    "program": "seq",
+    "args": [
+     "1",
+     "60"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "pfm",
+    "args": [
+     "chat",
+     "status",
+     "chain-probe"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-3"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"$s\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "break",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"DEAD: $s\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "break",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "sleep",
+    "args": [
+     "10"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "\"$i\"",
+     "=",
+     "60",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"TIMEOUT: $s\""
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-glob-loop-while-read-link-check",
+  "covers": "cd X && for over a *.md glob bound as written; /usr/bin/grep by its path; sed; while read; [ ] || echo",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/docs/design/flights && for f in *.md; do /usr/bin/grep -o '](\\([^)]*\\))' \"$f\" | sed 's/](\\(.*\\))/\\1/' | /usr/bin/grep -v '^#' | while read -r p; do t=\"${p%%#*}\"; [ -z \"$t\" ] && continue; [ -e \"$t\" ] || echo \"BROKEN $f -> $p\"; done; done; echo \"(link check done)\"",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/docs/design/flights"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "/usr/bin/grep",
+    "args": [
+     "-o",
+     "](\\([^)]*\\))",
+     "*.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "s/](\\(.*\\))/\\1/"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "/usr/bin/grep",
+    "args": [
+     "-v",
+     "^#"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "read",
+    "args": [
+     "-r",
+     "p"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-z",
+     "\"$t\"",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "continue",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-e",
+     "\"$t\"",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"BROKEN $f -> $p\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "(link check done)"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "for-find-if-grep-q",
+  "covers": "cd X && for over $(find …); if grep -q \"$f\"; then echo; fi",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj && for f in $(find . -maxdepth 4 -name \"settings*.json\" -path \"*/.claude/*\" -not -path \"*/node_modules/*\" 2>/dev/null); do if grep -q \"alpha-test-output\\|scripts/notify.sh\" \"$f\" 2>/dev/null; then echo \"HIT: $f\"; fi; done 2>/dev/null | head -20",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "find",
+    "args": [
+     ".",
+     "-maxdepth",
+     "4",
+     "-name",
+     "settings*.json",
+     "-path",
+     "*/.claude/*",
+     "-not",
+     "-path",
+     "*/node_modules/*"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-q",
+     "alpha-test-output\\|scripts/notify.sh",
+     "\"$f\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"HIT: $f\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-20"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "grep-to-scratch-then-while-read-redirect",
+  "covers": "grep | sort > f; wc -l < f; while read … done < f with if inside: redirections are no part",
+  "cwd": "/tmp/demo-proj",
+  "command": "grep -oE '\\{[A-Z][A-Z0-9_]+\\}' docs/PLACEHOLDERS.md | sort -u > /tmp/demo-proj/tmp/toks.txt; wc -l < /tmp/demo-proj/tmp/toks.txt; echo \"=== unconsumed in templates/ ===\"; while read -r t; do n=$(grep -rF \"$t\" templates/ 2>/dev/null | wc -l | tr -d ' '); if [ \"$n\" = \"0\" ]; then echo \"UNCONSUMED $t\"; fi; done < /tmp/demo-proj/tmp/toks.txt",
+  "parts": [
+   {
+    "program": "grep",
+    "args": [
+     "-oE",
+     "\\{[A-Z][A-Z0-9_]+\\}",
+     "docs/PLACEHOLDERS.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sort",
+    "args": [
+     "-u"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "=== unconsumed in templates/ ==="
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "read",
+    "args": [
+     "-r",
+     "t"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-rF",
+     "\"$t\"",
+     "templates/"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tr",
+    "args": [
+     "-d",
+     " "
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "\"$n\"",
+     "=",
+     "0",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"UNCONSUMED $t\""
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "subshell-cd-restores-dir",
+  "covers": "cd X && …; wc -l f; ( cd Y && node --test f | grep ); the subshell cd is local",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/.worktrees/tokens-fix && git diff --stat HEAD | tail -4; wc -l templates/global/commands/tokens/token-ledger.test.mjs; (cd templates/global/commands/tokens && node --test token-ledger.test.mjs 2>&1 | grep -E \"^ℹ (tests|pass|fail)\" )",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/.worktrees/tokens-fix"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "git",
+    "args": [
+     "diff",
+     "--stat",
+     "HEAD"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-4"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l",
+     "templates/global/commands/tokens/token-ledger.test.mjs"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cd",
+    "args": [
+     "templates/global/commands/tokens"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "node",
+    "args": [
+     "--test",
+     "token-ledger.test.mjs"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-E",
+     "^ℹ (tests|pass|fail)"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "subshell-find-xargs-cat-then-grep",
+  "covers": "git status globs kept as written; ( cd X && find | xargs cat | wc ) unwraps xargs; grep",
+  "cwd": "/tmp/demo-proj",
+  "command": "git status --short pfm/cmd/pfm/doctor_global_agents* pfm/internal/installer/global_fanout*; (cd pfm && find cmd/pfm -name '*.go' ! -name '*_test.go' | xargs cat | wc -l); grep -n \"func ReportGlobalAgents\" pfm/internal/installer/global_fanout.go",
+  "parts": [
+   {
+    "program": "git",
+    "args": [
+     "status",
+     "--short",
+     "pfm/cmd/pfm/doctor_global_agents*",
+     "pfm/internal/installer/global_fanout*"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cd",
+    "args": [
+     "pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "find",
+    "args": [
+     "cmd/pfm",
+     "-name",
+     "*.go",
+     "!",
+     "-name",
+     "*_test.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "func ReportGlobalAgents",
+     "pfm/internal/installer/global_fanout.go"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-chain-sed-i-gofmt-glob-cd-back",
+  "covers": "cd A && sed -i && gofmt -w *.go && cd B && go vet && … && bash script | grep",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm/internal/callmeter/cmdparse && sed -i '' '/^\\t\"strings\"$/d' cmdparse_test.go && gofmt -w *.go && cd /tmp/demo-proj/pfm && go vet ./internal/callmeter/cmdparse/ && go test ./internal/callmeter/cmdparse/ -count=1 2>&1 | tail -2 && bash scripts/arch-check.sh 2>&1 | grep -E \"C13|cmdpa\"",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm/internal/callmeter/cmdparse"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-i",
+     "",
+     "/^\\t\"strings\"$/d",
+     "cmdparse_test.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "gofmt",
+    "args": [
+     "-w",
+     "*.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "go",
+    "args": [
+     "vet",
+     "./internal/callmeter/cmdparse/"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "go",
+    "args": [
+     "test",
+     "./internal/callmeter/cmdparse/",
+     "-count=1"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-2"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "bash",
+    "args": [
+     "scripts/arch-check.sh"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-E",
+     "C13|cmdpa"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-chain-make-cd-back-bash-script",
+  "covers": "cd A && make && cd B && bash script; unknown pfm",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm && make lint-new 2>&1 | tail -2 && cd /tmp/demo-proj && bash pfm/scripts/arch-check.sh 2>&1 | grep -v PASS | head -3; pfm install --yes 2>&1 | grep -iE \"config.toml|appendix\" | head -5",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "make",
+    "args": [
+     "lint-new"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-2"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "bash",
+    "args": [
+     "pfm/scripts/arch-check.sh"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     "PASS"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-3"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "pfm",
+    "args": [
+     "install",
+     "--yes"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-iE",
+     "config.toml|appendix"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-5"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-sed-echo-cat-grep-head-separators",
+  "covers": "cd X && sed -n; echo ---; cat; grep; echo ---; head -5; grep -c",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm && sed -n '1,60p' scripts/arch-check.sh; echo ---; cat .arch/cmd-budget.txt; grep -n 'doctor.go\\|installer.go' .arch/ceiling-src.txt; echo ---; head -5 .arch/untested-sources.txt; grep -c . .arch/untested-sources.txt",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "1,60p",
+     "scripts/arch-check.sh"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [
+     ".arch/cmd-budget.txt"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "doctor.go\\|installer.go",
+     ".arch/ceiling-src.txt"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-5",
+     ".arch/untested-sources.txt"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-c",
+     ".",
+     ".arch/untested-sources.txt"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-sed-echo-grep-A",
+  "covers": "cd X && sed -n A,Bp f; echo; grep -A f",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm && sed -n '1180,1290p' cmd/pfm/doctor.go; echo '=== host overlay doctor'; grep -n 'func printHostOverlayDoctor' -A 40 cmd/pfm/doctor.go",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "1180,1290p",
+     "cmd/pfm/doctor.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "=== host overlay doctor"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "func printHostOverlayDoctor",
+     "-A",
+     "40",
+     "cmd/pfm/doctor.go"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "command-v-ls-glob-sed-grep",
+  "covers": "command -v stays itself; ls with a glob kept as written; gh; sed -n; grep",
+  "cwd": "/tmp/demo-proj",
+  "command": "command -v vhs asciinema ttyd ffmpeg 2>&1; echo ---; ls LICENSE* 2>&1; echo ---; gh release view --json tagName -q .tagName 2>&1; echo ---; sed -n '1,12p' README.md; echo ---; grep -n \"^## \\|^### \\|Read before opting in\" README.md",
+  "parts": [
+   {
+    "program": "command",
+    "args": [
+     "-v",
+     "vhs",
+     "asciinema",
+     "ttyd",
+     "ffmpeg"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     "LICENSE*"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "gh",
+    "args": [
+     "release",
+     "view",
+     "--json",
+     "tagName",
+     "-q",
+     ".tagName"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "1,12p",
+     "README.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "^## \\|^### \\|Read before opting in",
+     "README.md"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "command-ls-var-glob-sed",
+  "covers": "VAR=path; sed -n over a $VAR glob, resolved and kept as written; command ls unwraps to ls; grep; pfm | grep -c",
+  "cwd": "/tmp/demo-proj",
+  "command": "R=/tmp/demo-proj/pfm; sed -n '78,106p' $R/internal/*/expected_hooks.go 2>/dev/null | head -40; command ls $R/internal/*/expected_hooks.go; grep -n 'ReportHooks' $R/internal/doctor/doctor.go; pfm doctor 2>&1 | grep -ci 'hook.*ok\\|ok.*hook'",
+  "parts": [
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "78,106p",
+     "/tmp/demo-proj/pfm/internal/*/expected_hooks.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-40"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     "/tmp/demo-proj/pfm/internal/*/expected_hooks.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "ReportHooks",
+     "/tmp/demo-proj/pfm/internal/doctor/doctor.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "pfm",
+    "args": [
+     "doctor"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-ci",
+     "hook.*ok\\|ok.*hook"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "command-grep-directory",
+  "covers": "command grep -rln over a directory: unwrapped to grep",
+  "cwd": "/tmp/demo-proj",
+  "command": "command grep -rln \"docs/dev/trains\" pfm/ 2>/dev/null",
+  "parts": [
+   {
+    "program": "grep",
+    "args": [
+     "-rln",
+     "docs/dev/trains",
+     "pfm/"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "subshell-command-codex-dev-null",
+  "covers": "S=$(mktemp); ( cd \"$S\" && command codex … </dev/null | head ): command unwraps to codex",
+  "cwd": "/tmp/demo-proj",
+  "command": "S=$(mktemp -d); (cd \"$S\" && command codex review --uncommitted -c model_reasoning_effort=low \"Review only a.txt\" </dev/null 2>&1 | head -6)",
+  "parts": [
+   {
+    "program": "mktemp",
+    "args": [
+     "-d"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cd",
+    "args": [
+     "\"$S\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "codex",
+    "args": [
+     "review",
+     "--uncommitted",
+     "-c",
+     "model_reasoning_effort=low",
+     "Review only a.txt"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-6"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-timeout-bash-script",
+  "covers": "cd X && timeout N bash script.sh | tail",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/.worktrees/tokens-fix && timeout 420 bash .claude/scripts/dev.sh test templates 2>&1 | tail -45",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/.worktrees/tokens-fix"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "bash",
+    "args": [
+     ".claude/scripts/dev.sh",
+     "test",
+     "templates"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-45"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-env-u-go-test",
+  "covers": "cd X && env -u VAR go test: env unwrapped to go",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm && env -u CLAUDE_CONFIG_DIR go test ./cmd/pfm/ -run 'TestDoctorFreshTargetHomeIsClean' -v 2>&1 | tail -10",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "go",
+    "args": [
+     "test",
+     "./cmd/pfm/",
+     "-run",
+     "TestDoctorFreshTargetHomeIsClean",
+     "-v"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-10"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "timeout-python-script-path",
+  "covers": "timeout N python3 script.py args: the wrapper unwraps to python3",
+  "cwd": "/tmp/demo-proj/templates/global",
+  "command": "timeout 600000 python3 /tmp/demo-proj/skills/ledger/ledger.py wait /tmp/demo-proj/tmp/ledger/run-002342 6",
+  "parts": [
+   {
+    "program": "python3",
+    "args": [
+     "/tmp/demo-proj/skills/ledger/ledger.py",
+     "wait",
+     "/tmp/demo-proj/tmp/ledger/run-002342",
+     "6"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "var-assign-python-script-lines",
+  "covers": "DIR=path newline python3 script.py verb $DIR, twice, echo between",
+  "cwd": "/tmp/demo-proj/templates/global/skills/ledger",
+  "command": "DIR=/tmp/demo-proj/tmp/ledger/run-223603\npython3 /tmp/demo-proj/skills/ledger/ledger.py verify $DIR\necho \"---WIDEN---\"\npython3 /tmp/demo-proj/skills/ledger/ledger.py widen $DIR",
+  "parts": [
+   {
+    "program": "python3",
+    "args": [
+     "/tmp/demo-proj/skills/ledger/ledger.py",
+     "verify",
+     "/tmp/demo-proj/tmp/ledger/run-223603"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---WIDEN---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "python3",
+    "args": [
+     "/tmp/demo-proj/skills/ledger/ledger.py",
+     "widen",
+     "/tmp/demo-proj/tmp/ledger/run-223603"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "bin-ls-stat-then-jq-var",
+  "covers": "/bin/ls by its path; b=$(/bin/ls glob) kept as written; [ -n ] && jq \"$b\"",
+  "cwd": "/tmp/demo-proj",
+  "command": "/bin/ls -lt /tmp/demo-proj/backups | head -5; b=$(/bin/ls -t /tmp/demo-proj/backups/.state.json* 2>/dev/null | head -1); echo \"latest=$b\"; [ -n \"$b\" ] && jq -r '.account | \"\\(.name) | org=\\(.team)\"' \"$b\"",
+  "parts": [
+   {
+    "program": "/bin/ls",
+    "args": [
+     "-lt",
+     "/tmp/demo-proj/backups"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-5"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "/bin/ls",
+    "args": [
+     "-t",
+     "/tmp/demo-proj/backups/.state.json*"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-1"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"latest=$b\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-n",
+     "\"$b\"",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "jq",
+    "args": [
+     "-r",
+     ".account | \"\\(.name) | org=\\(.team)\"",
+     "\"$b\""
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-escaped-space-for-bin-ls-tail",
+  "covers": "cd path\\ with\\ space && for literal dirs: /bin/ls $d; tail $d/f; grep -rh",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/logs/Code\\ Logs && for d in 20260911T173252 20260911T173251; do echo \"== $d\"; /bin/ls $d; tail -8 $d/main.log 2>/dev/null; done; echo; grep -rhiE 'quit|shutdown|kill|signal|exit' 20260914T054944/main.log | head -5",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/logs/Code Logs"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "== 20260911T173252",
+     "== 20260911T173251"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "/bin/ls",
+    "args": [
+     "20260911T173252",
+     "20260911T173251"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-8",
+     "20260911T173252/main.log",
+     "20260911T173251/main.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-rhiE",
+     "quit|shutdown|kill|signal|exit",
+     "20260914T054944/main.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-5"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-grep-globs-two-dirs",
+  "covers": "cd X && grep -rnE over two *.go globs kept as written | grep -v | head",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm && grep -rnE '\"browser\"|browser *=|settings\\.browser|Browser *\\*bool' internal/harvest/*.go internal/harvestmcp/*.go | grep -v _test | head -12",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-rnE",
+     "\"browser\"|browser *=|settings\\.browser|Browser *\\*bool",
+     "internal/harvest/*.go",
+     "internal/harvestmcp/*.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     "_test"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-12"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-wc-missing-then-ls-glob",
+  "covers": "cd X && wc -l over four files && ls *.go kept as written | tr",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj/pfm/internal/harvest && wc -l harvest.go content.go detect.go net.go && ls *.go | tr '\\n' ' '",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/pfm/internal/harvest"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l",
+     "harvest.go",
+     "content.go",
+     "detect.go",
+     "net.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     "*.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tr",
+    "args": [
+     "\\n",
+     " "
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "find-xargs-grep",
+  "covers": "find | xargs grep -l: xargs unwraps to grep",
+  "cwd": "/tmp/demo-proj",
+  "command": "find pfm/internal/engine -name \"*.go\" | xargs grep -l \"matchutil\\|Command\" | head -5",
+  "parts": [
+   {
+    "program": "find",
+    "args": [
+     "pfm/internal/engine",
+     "-name",
+     "*.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-l",
+     "matchutil\\|Command"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-5"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "git-show-status-unknown",
+  "covers": "git show && git status: git is its own program",
+  "cwd": "/tmp/demo-proj",
+  "command": "git show --stat HEAD && git status --short",
+  "parts": [
+   {
+    "program": "git",
+    "args": [
+     "show",
+     "--stat",
+     "HEAD"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "git",
+    "args": [
+     "status",
+     "--short"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "git-diff-show-cat-glob-ls",
+  "covers": "git diff -- f && git show REV:path | wc && cat glob kept as written | grep; ls .arch | head",
+  "cwd": "/tmp/demo-proj/pfm",
+  "command": "git diff --stat -- cmd/pfm/doctor.go && git show HEAD:pfm/cmd/pfm/doctor.go | wc -l && cat .arch/*C1* 2>/dev/null | grep -n 'doctor.go\\|service.go' | head; ls .arch | head -20",
+  "parts": [
+   {
+    "program": "git",
+    "args": [
+     "diff",
+     "--stat",
+     "--",
+     "cmd/pfm/doctor.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "git",
+    "args": [
+     "show",
+     "HEAD:pfm/cmd/pfm/doctor.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [
+     ".arch/*C1*"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "doctor.go\\|service.go"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     ".arch"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-20"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cp-cmp-chain-unknown",
+  "covers": "cp a b && cp a c && cmp b c && echo && git diff: each program with its operands",
+  "cwd": "/tmp/demo-proj",
+  "command": "cp tmp/prompt-draft.md templates/prompts/lead.md && cp tmp/prompt-draft.md pfm/internal/installer/assets/prompts/lead-prompt.md && cmp templates/prompts/lead.md pfm/internal/installer/assets/prompts/lead-prompt.md && echo TWINS-IDENTICAL && git diff --stat",
+  "parts": [
+   {
+    "program": "cp",
+    "args": [
+     "tmp/prompt-draft.md",
+     "templates/prompts/lead.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cp",
+    "args": [
+     "tmp/prompt-draft.md",
+     "pfm/internal/installer/assets/prompts/lead-prompt.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cmp",
+    "args": [
+     "templates/prompts/lead.md",
+     "pfm/internal/installer/assets/prompts/lead-prompt.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "TWINS-IDENTICAL"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "git",
+    "args": [
+     "diff",
+     "--stat"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "diff-process-substitution-jq",
+  "covers": "diff <(jq -S . f) <(jq -S . g); echo; diff <(…) <(…)",
+  "cwd": "/tmp/demo-proj",
+  "command": "diff <(jq -S . /tmp/demo-proj/cfg/a/settings.json) <(jq -S . /tmp/demo-proj/cfg/c/settings.json); echo ---; diff <(jq -S . /tmp/demo-proj/cfg/b/settings.json) <(jq -S . /tmp/demo-proj/cfg/c/settings.json)",
+  "parts": [
+   {
+    "program": "jq",
+    "args": [
+     "-S",
+     ".",
+     "/tmp/demo-proj/cfg/a/settings.json"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "jq",
+    "args": [
+     "-S",
+     ".",
+     "/tmp/demo-proj/cfg/c/settings.json"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "diff",
+    "args": [
+     "<(jq -S . /tmp/demo-proj/cfg/a/settings.json)",
+     "<(jq -S . /tmp/demo-proj/cfg/c/settings.json)"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "---"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "jq",
+    "args": [
+     "-S",
+     ".",
+     "/tmp/demo-proj/cfg/b/settings.json"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "jq",
+    "args": [
+     "-S",
+     ".",
+     "/tmp/demo-proj/cfg/c/settings.json"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "diff",
+    "args": [
+     "<(jq -S . /tmp/demo-proj/cfg/b/settings.json)",
+     "<(jq -S . /tmp/demo-proj/cfg/c/settings.json)"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "diff-two-files-unknown",
+  "covers": "diff a b: an unknown program with both operands",
+  "cwd": "/tmp/demo-proj",
+  "command": "diff /tmp/demo-proj/tmp/doctor_fixed.go /tmp/demo-proj/.worktrees/release/develop/pfm/cmd/pfm/doctor.go",
+  "parts": [
+   {
+    "program": "diff",
+    "args": [
+     "/tmp/demo-proj/tmp/doctor_fixed.go",
+     "/tmp/demo-proj/.worktrees/release/develop/pfm/cmd/pfm/doctor.go"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "script-path-exec",
+  "covers": "./script.sh --files path: the script path is the program",
+  "cwd": "/tmp/demo-proj",
+  "command": "./scripts/leak-check.sh --files /tmp/demo-proj/docs/design/hooks/hooks.md",
+  "parts": [
+   {
+    "program": "./scripts/leak-check.sh",
+    "args": [
+     "--files",
+     "/tmp/demo-proj/docs/design/hooks/hooks.md"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "script-redirect-write-append-grep",
+  "covers": "./script > log 2>&1; echo >> log; grep log: redirections are no argument",
+  "cwd": "/tmp/demo-proj",
+  "command": "./.claude/scripts/dev.sh iso all templates > tmp/gates-candidate-templates.log 2>&1; echo \"exit=$?\" >> tmp/gates-candidate-templates.log; grep -E 'fence:|FAIL|leak-check|all steps passed|step\\(s\\) failed|exit=' tmp/gates-candidate-templates.log | head -20",
+  "parts": [
+   {
+    "program": "./.claude/scripts/dev.sh",
+    "args": [
+     "iso",
+     "all",
+     "templates"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"exit=$?\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-E",
+     "fence:|FAIL|leak-check|all steps passed|step\\(s\\) failed|exit=",
+     "tmp/gates-candidate-templates.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-20"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "array-append-in-while-herestring",
+  "covers": "x=$(…); arr=(); while read; [ -f ] && arr+=(); done <<< \"$x\"; script \"${arr[@]}\"",
+  "cwd": "/tmp/demo-proj",
+  "command": "changed=$(git status --porcelain | awk '{print $NF}' | grep -v '/$'); present=(); while IFS= read -r c; do [ -f \"$c\" ] && present+=(\"$c\"); done <<< \"$changed\"; scripts/leak-check.sh --files \"${present[@]}\" 2>&1 | grep -v \"^leak-check: scanned\" | head -20",
+  "parts": [
+   {
+    "program": "git",
+    "args": [
+     "status",
+     "--porcelain"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "awk",
+    "args": [
+     "{print $NF}"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     "/$"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "read",
+    "args": [
+     "-r",
+     "c"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-f",
+     "\"$c\"",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "scripts/leak-check.sh",
+    "args": [
+     "--files",
+     "\"${present[@]}\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     "^leak-check: scanned"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-20"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "bin-bash-c-array-expansion",
+  "covers": "head; command -v; /bin/bash -c with a=() and \"${a[@]}\", then cd && bash -n script && echo",
+  "cwd": "/tmp/demo-proj/.worktrees/release/develop",
+  "command": "/bin/bash -c 'set -u; a=(); echo x ${a[@]+\"${a[@]}\"} y; a=(-v \"p q\"); printf \"[%s]\" ${a[@]+\"${a[@]}\"}; echo'; cd /tmp/demo-proj/.worktrees/release/develop && bash -n .claude/scripts/dev.sh && echo syntax-ok",
+  "parts": [
+   {
+    "program": "/bin/bash",
+    "args": [
+     "-c",
+     "set -u; a=(); echo x ${a[@]+\"${a[@]}\"} y; a=(-v \"p q\"); printf \"[%s]\" ${a[@]+\"${a[@]}\"}; echo"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "set",
+    "args": [
+     "-u"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "x",
+     "${a[@]+\"${a[@]}\"}",
+     "y"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "printf",
+    "args": [
+     "[%s]",
+     "${a[@]+\"${a[@]}\"}"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj/.worktrees/release/develop"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "bash",
+    "args": [
+     "-n",
+     ".claude/scripts/dev.sh"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "syntax-ok"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "mapfile-process-subst-array",
+  "covers": "mapfile -t ARR < <(…); echo ${#ARR[@]}; bash script --files \"${ARR[@]}\"",
+  "cwd": "/tmp/demo-proj",
+  "command": "mapfile -t CHANGED < <(git status --porcelain -- templates | awk '{print $2}')\necho \"count: ${#CHANGED[@]}\"\nbash scripts/leak-check.sh --files \"${CHANGED[@]}\" 2>&1 | tail -40; echo \"EXIT=${PIPESTATUS[0]}\"",
+  "parts": [
+   {
+    "program": "git",
+    "args": [
+     "status",
+     "--porcelain",
+     "--",
+     "templates"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "awk",
+    "args": [
+     "{print $2}"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "mapfile",
+    "args": [
+     "-t",
+     "CHANGED"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"count: ${#CHANGED[@]}\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "bash",
+    "args": [
+     "scripts/leak-check.sh",
+     "--files",
+     "\"${CHANGED[@]}\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-40"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"EXIT=${PIPESTATUS[0]}\""
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-ls-and-or-find-git",
+  "covers": "cd X newline ls f && echo || echo; ls; find -prune; git tag; git log -- f",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj\nls pfm/README.md 2>/dev/null && echo \"pfm README exists\" || echo \"no pfm/README.md\"\nls README.md\nfind . -path ./node_modules -prune -o -name \"*.yml\" -path \"*workflows*\" -print 2>/dev/null | grep -v worktree\ngit tag | sort -V | tail -3\ngit log -1 --format=%ad --date=iso pfm/go.mod 2>/dev/null",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     "pfm/README.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "pfm README exists"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "no pfm/README.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     "README.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "find",
+    "args": [
+     ".",
+     "-path",
+     "./node_modules",
+     "-prune",
+     "-o",
+     "-name",
+     "*.yml",
+     "-path",
+     "*workflows*",
+     "-print"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-v",
+     "worktree"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "git",
+    "args": [
+     "tag"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sort",
+    "args": [
+     "-V"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-3"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "git",
+    "args": [
+     "log",
+     "-1",
+     "--format=%ad",
+     "--date=iso",
+     "pfm/go.mod"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "and-or-chains-conditional",
+  "covers": "a && echo || echo; b && echo || echo: right-hand sides are conditional",
+  "cwd": "/tmp/demo-proj",
+  "command": "git merge-base --is-ancestor develop origin/develop && echo \"local is ancestor of origin (origin newer)\" || echo \"local NOT ancestor of origin\"; git merge-base --is-ancestor origin/develop develop && echo \"origin is ancestor of local (local newer)\" || echo \"origin NOT ancestor of local\"",
+  "parts": [
+   {
+    "program": "git",
+    "args": [
+     "merge-base",
+     "--is-ancestor",
+     "develop",
+     "origin/develop"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "local is ancestor of origin (origin newer)"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "local NOT ancestor of origin"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "git",
+    "args": [
+     "merge-base",
+     "--is-ancestor",
+     "origin/develop",
+     "develop"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "origin is ancestor of local (local newer)"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "origin NOT ancestor of local"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "printf-write-then-cat",
+  "covers": "printf … > f && cat f",
+  "cwd": "/tmp/demo-proj",
+  "command": "printf '# RR - first run\\n\\nFIRST RUN DOCUMENT - must survive a second run with the same name.\\n' > tmp/rr-collide-test.md && cat tmp/rr-collide-test.md",
+  "parts": [
+   {
+    "program": "printf",
+    "args": [
+     "# RR - first run\\n\\nFIRST RUN DOCUMENT - must survive a second run with the same name.\\n"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [
+     "tmp/rr-collide-test.md"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "cd-cat-sed-cut-grep-sed",
+  "covers": "cd X && cat f; sed -n f | cut; grep f; sed -n g | cut",
+  "cwd": "/tmp/demo-proj",
+  "command": "cd /tmp/demo-proj && cat docs/design/RR/_index.md; sed -n 1,60p docs/design/RR/rr.md | cut -c1-300; grep -n \"^#\" docs/design/RR/rr.md; sed -n 1,40p .claude/commands/quality/doc.md | cut -c1-400",
+  "parts": [
+   {
+    "program": "cd",
+    "args": [
+     "/tmp/demo-proj"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [
+     "docs/design/RR/_index.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "1,60p",
+     "docs/design/RR/rr.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cut",
+    "args": [
+     "-c1-300"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-n",
+     "^#",
+     "docs/design/RR/rr.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "1,40p",
+     ".claude/commands/quality/doc.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cut",
+    "args": [
+     "-c1-400"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "wc-stdin-then-awk",
+  "covers": "wc -l < f newline awk prog f | sort | uniq",
+  "cwd": "/tmp/demo-proj",
+  "command": "wc -l < tmp/template-restructure/numstat.txt\nawk '{split($3,a,\"/\"); print a[1]}' tmp/template-restructure/numstat.txt | sort | uniq -c | sort -rn",
+  "parts": [
+   {
+    "program": "wc",
+    "args": [
+     "-l"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "awk",
+    "args": [
+     "{split($3,a,\"/\"); print a[1]}",
+     "tmp/template-restructure/numstat.txt"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sort",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "uniq",
+    "args": [
+     "-c"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sort",
+    "args": [
+     "-rn"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "head-two-files",
+  "covers": "head -N over two files",
+  "cwd": "/tmp/demo-proj",
+  "command": "head -15 pfm/internal/inject/engine.go pfm/internal/agentopen/agentopen.go",
+  "parts": [
+   {
+    "program": "head",
+    "args": [
+     "-15",
+     "pfm/internal/inject/engine.go",
+     "pfm/internal/agentopen/agentopen.go"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "var-log-grep-quoted-var",
+  "covers": "L=path; grep \"$L\" | grep | head; echo; grep -c \"$L\"; grep \"$L\" | head: a literal variable resolved in every argument",
+  "cwd": "/tmp/demo-proj",
+  "command": "L=/tmp/demo-proj/tmp/scratchpad/gates2.log; grep -E 'VERIFY_EXIT|TEST_EXIT|^(FAIL|--- FAIL|ok |panic)|fence:|PASS|arch' \"$L\" | grep -vE '^ok ' | head -30; echo; grep -c '^ok ' \"$L\"; grep -E '^(FAIL|---)' \"$L\" | head",
+  "parts": [
+   {
+    "program": "grep",
+    "args": [
+     "-E",
+     "VERIFY_EXIT|TEST_EXIT|^(FAIL|--- FAIL|ok |panic)|fence:|PASS|arch",
+     "/tmp/demo-proj/tmp/scratchpad/gates2.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-vE",
+     "^ok "
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [
+     "-30"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-c",
+     "^ok ",
+     "/tmp/demo-proj/tmp/scratchpad/gates2.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-E",
+     "^(FAIL|---)",
+     "/tmp/demo-proj/tmp/scratchpad/gates2.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "head",
+    "args": [],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "loop-if-cat-exit",
+  "covers": "for; if [ -s f ]; then cat f; exit; fi; /bin/sleep: the cat is conditional",
+  "cwd": "/tmp/demo-proj",
+  "command": "for i in $(seq 1 60); do if [ -s /tmp/demo-proj/tmp/qa-cmd-withsession.txt ]; then cat /tmp/demo-proj/tmp/qa-cmd-withsession.txt; exit 0; fi; /bin/sleep 5; done; echo \"still running\"",
+  "parts": [
+   {
+    "program": "seq",
+    "args": [
+     "1",
+     "60"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-s",
+     "/tmp/demo-proj/tmp/qa-cmd-withsession.txt",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cat",
+    "args": [
+     "/tmp/demo-proj/tmp/qa-cmd-withsession.txt"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "exit",
+    "args": [
+     "0"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "/bin/sleep",
+    "args": [
+     "5"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "still running"
+    ],
+    "status": "ok"
+   }
+  ]
+ },
+ {
+  "name": "head-tail-stats-then-for-if-grep",
+  "covers": "tail f | cut; echo; pfm | grep; ls d | grep; for f in globs, bound as written; do [ -f ] && { echo; grep f | tail; }; done",
+  "cwd": "/tmp/demo-proj/pfm",
+  "command": "tail -1 /tmp/demo-proj/.cache/stats.jsonl | cut -c1-600; echo; pfm doctor 2>&1 | grep -i 'harvestpy_browser'; ls /tmp/demo-proj/logs 2>/dev/null | grep -i pfm; for f in /tmp/demo-proj/logs/pfm*/*.log /tmp/demo-proj/state/pfm/*.log; do [ -f \"$f\" ] && { echo \"== $f\"; grep -iE 'browser|app-shell' \"$f\" | tail -5; }; done 2>/dev/null",
+  "parts": [
+   {
+    "program": "tail",
+    "args": [
+     "-1",
+     "/tmp/demo-proj/.cache/stats.jsonl"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "cut",
+    "args": [
+     "-c1-600"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [],
+    "status": "ok"
+   },
+   {
+    "program": "pfm",
+    "args": [
+     "doctor"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-i",
+     "harvestpy_browser"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "ls",
+    "args": [
+     "/tmp/demo-proj/logs"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-i",
+     "pfm"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-f",
+     "/tmp/demo-proj/logs/pfm*/*.log",
+     "/tmp/demo-proj/state/pfm/*.log",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "== /tmp/demo-proj/logs/pfm*/*.log",
+     "== /tmp/demo-proj/state/pfm/*.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-iE",
+     "browser|app-shell",
+     "/tmp/demo-proj/logs/pfm*/*.log",
+     "/tmp/demo-proj/state/pfm/*.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-5"
+    ],
+    "status": "ok"
+   }
+  ]
+ }
+]

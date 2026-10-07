@@ -113,8 +113,8 @@ func TestChatInjectResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) 
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("TMPDIR", root)
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -129,7 +129,7 @@ func TestChatInjectResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) 
 	// socket and is the behavior under test.
 
 	script := filepath.Join(root, "ui.py")
-	if err := os.WriteFile(script, []byte(injectCLIUI), 0o700); err != nil {
+	if err := testjail.WriteExecutable(script, []byte(injectCLIUI), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	socket := "probe-inj-direct-sock"
@@ -193,7 +193,7 @@ func TestChatInjectResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) 
 	}
 
 	selectorScript := filepath.Join(root, "selector.py")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		selectorScript,
 		[]byte("import time\nprint('Question\\n❯ 1. Allow\\n  2. Deny', flush=True)\ntime.sleep(30)\n"),
 		0o700,
@@ -319,6 +319,8 @@ func TestChatInjectResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) 
 	if err := os.WriteFile(compatPath, []byte(compatBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("CHAT_INJECT_ENTER_SETTLE", "0.4")
+	t.Setenv("CHAT_INJECT_PROOF_SETTLE", "0.5")
 	stdout.Reset()
 	stderr.Reset()
 	code = run([]string{"chat", "inject", fileSession, "--file", compatPath}, &stdout, &stderr)
@@ -367,10 +369,24 @@ func TestChatInjectResumeLadderPathSessionAndExcerpt(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			home := filepath.Join(root, "home")
 			project := filepath.Join(root, "claude", "project")
-			for _, directory := range []string{home, project, filepath.Join(root, "tmux"), filepath.Join(root, "codex"), filepath.Join(root, "proc")} {
+			for _, directory := range []string{
+				home, project, filepath.Join(root, "tmux"),
+				filepath.Join(root, "codex"), filepath.Join(root, "proc"),
+			} {
 				if err := os.MkdirAll(directory, 0o700); err != nil {
 					t.Fatal(err)
 				}
+			}
+			claudeBinary := filepath.Join(home, ".local", "bin", "claude")
+			if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const registryStub = "#!/bin/sh\n" +
+				"if [ \"$1\" = agents ] && [ \"$2\" = --json ]; then\n" +
+				"  printf '[]\\n'\n" +
+				"else\n  exit 2\nfi\n"
+			if err := testjail.WriteExecutable(claudeBinary, []byte(registryStub), 0o700); err != nil {
+				t.Fatal(err)
 			}
 			transcript := filepath.Join(project, id+".jsonl")
 			line := fmt.Sprintf(
@@ -383,8 +399,8 @@ func TestChatInjectResumeLadderPathSessionAndExcerpt(t *testing.T) {
 			t.Setenv("HOME", home)
 			t.Setenv("TMUX", "")
 			t.Setenv("PFM_HOME", home)
-			t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-			t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+			t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+			t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 			t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 			t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 			t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -447,8 +463,8 @@ func TestChatInjectResumeRefusesAProcessHeldSessionAsDead(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("TMUX", "")
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -497,15 +513,19 @@ func TestChatInjectResumeRefusesDaemonRegistrySession(t *testing.T) {
 	}
 	claude := filepath.Join(bin, "claude")
 	registry := fmt.Sprintf(`[{"sessionId":%q,"id":"77777777","status":"busy"}]`, id)
-	if err := os.WriteFile(claude, []byte("#!/bin/sh\nprintf '%s\\n' '"+registry+"'\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		claude,
+		[]byte("#!/bin/sh\nprintf '%s\\n' '"+registry+"'\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("TMUX", "")
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", accountProjects)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -594,8 +614,8 @@ func TestChatInjectResumeRefusesLiveSocketCrumbSession(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", accountProjects)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))

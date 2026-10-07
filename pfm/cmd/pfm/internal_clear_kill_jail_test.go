@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -48,7 +49,7 @@ func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := jailTest(t)
 			sharedPath := filepath.Join(root, "shared.db")
-			t.Setenv("PFM_FLEET_DB", sharedPath)
+			t.Setenv("PFM_STATE_DB", sharedPath)
 			t.Setenv("TMUX", "")
 			t.Setenv("TMUX_PANE", "")
 			t.Setenv("CODEX_THREAD_ID", "")
@@ -107,7 +108,7 @@ func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 
 func TestClearKillHookDoubleFireIsIdempotent(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	id := "22222222-2222-4222-8222-222222222222"
 	transcriptPath := filepath.Join(root, "claude", "project", id+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
@@ -153,7 +154,116 @@ func TestClearKillHookDoubleFireIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestResumeUnkillHookLiftsAKillWhenTheThreadIsResumed reproduces the host
+// report: `pfm chat kill` wrote a permanent kill for a Claude thread, a pane
+// later resumed that thread under its own id, and `pfm chat ls` kept hiding the
+// live conversation until a hand-run unkill. Claude's SessionStart hook fires
+// with source "resume" for --resume, --continue and the in-app /resume alike,
+// so that one event lifts the kill; every other SessionStart leaves it standing.
+func TestResumeUnkillHookLiftsAKillWhenTheThreadIsResumed(t *testing.T) {
+	const id = "57974ea7-0000-4000-8000-000000000001"
+	for _, test := range []struct {
+		name       string
+		payload    string
+		wantKilled bool
+	}{
+		{
+			name:    "resumed killed thread leaves the killed set",
+			payload: `{"hook_event_name":"SessionStart","source":"resume","session_id":"` + id + `"}`,
+		},
+		{
+			name:       "fresh startup keeps the kill",
+			payload:    `{"hook_event_name":"SessionStart","source":"startup","session_id":"` + id + `"}`,
+			wantKilled: true,
+		},
+		{
+			name:       "clear SessionStart keeps the kill",
+			payload:    `{"hook_event_name":"SessionStart","source":"clear","session_id":"` + id + `"}`,
+			wantKilled: true,
+		},
+		{
+			name:       "compact SessionStart keeps the kill",
+			payload:    `{"hook_event_name":"SessionStart","source":"compact","session_id":"` + id + `"}`,
+			wantKilled: true,
+		},
+		{
+			name:       "SessionEnd keeps the kill",
+			payload:    `{"hook_event_name":"SessionEnd","reason":"resume","session_id":"` + id + `"}`,
+			wantKilled: true,
+		},
+		{
+			name:       "resume of another thread keeps the kill",
+			payload:    `{"hook_event_name":"SessionStart","source":"resume","session_id":"e125ce10-0000-4000-8000-000000000002"}`,
+			wantKilled: true,
+		},
+		{
+			name:       "a session id that is not a UUID keeps the kill",
+			payload:    `{"hook_event_name":"SessionStart","source":"resume","session_id":"../` + id + `"}`,
+			wantKilled: true,
+		},
+		{name: "malformed input fails open", payload: `{`, wantKilled: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := jailTest(t)
+			t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
+			database, err := store.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := database.UpsertTranscript(context.Background(), store.Transcript{
+				UUID: id, Path: filepath.Join(root, "claude", "project", id+".jsonl"),
+				CWD: "/work/example", Size: 1, PromptCount: 3,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.Kill(context.Background(), store.Killed{
+				ID: id, Engine: pfmengine.Claude, KilledAt: 1791050854,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			code, stdout, stderr := runInternalHookPayload(t, "resume-unkill", test.payload)
+
+			database, err = store.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
+			_, found, err := database.Killed(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found != test.wantKilled {
+				t.Fatalf("killed found=%v after %s (rc=%d stderr=%q), want %v",
+					found, test.payload, code, stderr, test.wantKilled)
+			}
+			killedChats, err := database.KilledChats(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hidden := len(killedChats) == 1; hidden != test.wantKilled {
+				t.Fatalf("ls killed set=%#v, want hidden=%v", killedChats, test.wantKilled)
+			}
+			if code != 0 || stdout != "" {
+				t.Fatalf("resume-unkill rc=%d stdout=%q stderr=%q, want a fail-open 0", code, stdout, stderr)
+			}
+		})
+	}
+}
+
 func runClearKillPayload(t *testing.T, payload string) (int, string, string) {
+	t.Helper()
+	return runInternalHookPayload(t, "clear-kill", payload)
+}
+
+func runInternalHookPayload(t *testing.T, entry, payload string) (int, string, string) {
 	t.Helper()
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -172,6 +282,6 @@ func runClearKillPayload(t *testing.T, payload string) (int, string, string) {
 		_ = reader.Close()
 	}()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"internal", "clear-kill"}, &stdout, &stderr)
+	code := run([]string{"internal", entry}, &stdout, &stderr)
 	return code, stdout.String(), strings.TrimSpace(stderr.String())
 }

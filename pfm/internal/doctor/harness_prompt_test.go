@@ -51,6 +51,36 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 	}
 }
 
+func TestDoctorBaselineUnavailableNamesCloneDirectoryAndMissingMarker(t *testing.T) {
+	model := HarnessPromptModels[0]
+	check := func(home, want string) {
+		t.Helper()
+		var out bytes.Buffer
+		if warnings := printModelHarnessPromptDoctor(
+			context.Background(),
+			&out,
+			home,
+			model,
+		); warnings != 1 ||
+			!strings.Contains(out.String(), want) {
+			t.Fatalf("warnings=%d output=%q; want %q", warnings, out.String(), want)
+		}
+	}
+	home, clone := t.TempDir(), t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(clone, "pfm", "harness-prompts", "claude", "baselines")
+	check(home, "BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir="+dir)
+	check(t.TempDir(), "no source repo recorded, run pfm install from the clone")
+	if err := os.RemoveAll(clone); err != nil {
+		t.Fatal(err)
+	}
+	check(home, "dir=(unresolved) error=resolve harness baseline directory: inspect recorded source repository")
+	check(home, "recorded source repository is unusable")
+	check(home, "— the recorded clone is unusable: restore it, or run pfm install from a working clone")
+}
+
 func TestHarnessPromptVerdictMasksBuildStamp(t *testing.T) {
 	baseline := "x-anthropic-billing-header: cc_version=*; cc_entrypoint=sdk-cli;\n\n=== SYSTEM BLOCK ===\n\nprose\n"
 	sum := sha256.Sum256([]byte(baseline))
@@ -169,12 +199,17 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 				HarnessCaptureOverride = refuseCapture(t)
 			},
 			wantWarn: true,
-			want:     "doctor: harness-prompt: baseline unreadable",
+			want:     "BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir=(unresolved) — no source repo recorded",
 		},
 		{
 			name: "malformed baseline is distinct from missing and never captures",
 			setup: func(t *testing.T, home string) {
-				path := filepath.Join(paths.HarnessBaselineDir(home), "harness-original.sha256")
+				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
+				dir, err := paths.HarnessBaselineDir(home)
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(dir, "harness-original.sha256")
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -184,10 +219,10 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 				HarnessCaptureOverride = refuseCapture(t)
 			},
 			wantWarn: true,
-			want:     "doctor: harness-prompt: baseline malformed",
+			want:     "baseline file malformed",
 		},
 		{
-			name: "override content matching the staged baseline reports clean",
+			name: "override content matching the clone baseline reports clean",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
 				HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
@@ -202,7 +237,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			want:     "doctor: harness-prompt: matches baseline fixture-baseline.md",
 		},
 		{
-			name: "override content diverging from the staged baseline reports DRIFT",
+			name: "override content diverging from the clone baseline reports DRIFT",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
 				HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
@@ -291,19 +326,6 @@ func TestHarnessPromptVerdictIgnoresOptionalEnvironmentMetadata(t *testing.T) {
 		); !warn ||
 			!strings.Contains(line, "DRIFT") {
 			t.Fatalf("behavioral change was hidden: %s", line)
-		}
-	}
-}
-
-func TestKnownSIDMetadataIncludesNudgeRecords(t *testing.T) {
-	for _, name := range []string{"nudge-ctx-11111111-2222-4333-8444-555555555555", "nudge-band-11111111-2222-4333-8444-555555555555", "nudge-ctx-session-a"} {
-		if !knownSIDMetadata(name) {
-			t.Errorf("valid nudge record %q rejected", name)
-		}
-	}
-	for _, name := range []string{"nudge-ctx-", "nudge-band-", "nudge-band-   "} {
-		if knownSIDMetadata(name) {
-			t.Errorf("invalid nudge record %q accepted", name)
 		}
 	}
 }

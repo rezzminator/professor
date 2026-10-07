@@ -29,3 +29,16 @@ func TestIdleCodexSparkleIsNotADraft(t *testing.T) {
 		}
 	}
 }
+
+// Truecolor foreground is "38;2;R;G;B": its 2 selects the colour model, not
+// dim. A draft painted in truecolor is a draft.
+func TestTruecolorDraftIsNotADimPlaceholder(t *testing.T) {
+	styled := "❯ \x1b[38;2;200;200;2mhalf-typed question\x1b[0m"
+	if isDimPlaceholder(styled) {
+		t.Fatalf("isDimPlaceholder(%q) = true, want false: truecolor is not dim", styled)
+	}
+	dim := "❯ \x1b[2mrun the integration suite\x1b[0m"
+	if !isDimPlaceholder(dim) {
+		t.Fatalf("isDimPlaceholder(%q) = false, want true", dim)
+	}
+}

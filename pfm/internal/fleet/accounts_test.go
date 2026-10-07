@@ -1,13 +1,31 @@
 package fleet
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestPrimaryAccountWithoutRecordedPrimary(t *testing.T) {
+	home := t.TempDir()
+	values := paths.Values{Home: home, StateDB: filepath.Join(home, "pfm.db")}
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(values.StateDB); err != nil {
+		t.Fatal(err)
+	}
+	machine := config.Config{Accounts: []config.Account{{ID: 7}, {ID: 1}}}
+	if got, err := PrimaryAccount(values, machine); got != 1 || err != nil {
+		t.Fatalf("PrimaryAccount() = %d, %v, want 1, nil", got, err)
+	}
+}
 
 // TestPrimaryAccountGoesThroughTheStateStore fixtures the OUTCOME of a picker
 // account change: the shared store validates the roster and mirrors the choice
@@ -16,7 +34,7 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	home := t.TempDir()
 	values := paths.Values{
 		Home:    home,
-		FleetDB: filepath.Join(home, ".cc", "fleet.db"),
+		StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 	}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
@@ -50,7 +68,7 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	}
 	bareValues := paths.Values{
 		Home:    bare,
-		FleetDB: filepath.Join(blocked, "fleet.db"),
+		StateDB: filepath.Join(blocked, "pfm.db"),
 	}
 	if err := SetPrimaryAccount(bareValues, machine, 2); err != nil {
 		t.Fatalf("fallback SetPrimaryAccount() = %v", err)
@@ -86,21 +104,14 @@ func TestCurrentSocketReadsTheCallersOwnTmuxServer(t *testing.T) {
 	}
 }
 
-// TestAccountRootsCanonicalizeProjectDirs pins that a symlinked project dir is
-// matched by its target — compose compares transcript paths against these.
-func TestAccountRootsCanonicalizeProjectDirs(t *testing.T) {
-	realHome := t.TempDir()
-	link := filepath.Join(t.TempDir(), "projects")
-	if err := os.Symlink(realHome, link); err != nil {
-		t.Fatal(err)
+func TestClaudeSeatsKeepConfiguredDirs(t *testing.T) {
+	seats := claudeSeats([]config.Account{{ID: 2, ConfigDir: "/x/seat"}})
+	if len(seats) != 1 || seats[0].Account != 2 || seats[0].ConfigDir != "/x/seat" {
+		t.Fatalf("claudeSeats() = %#v", seats)
 	}
-	canonical, err := filepath.EvalSymlinks(realHome)
-	if err != nil {
-		t.Fatal(err)
-	}
-	roots := accountRoots([]config.Account{{ID: 2, ProjectDir: link}})
-	if len(roots) != 1 || roots[0].Account != 2 || roots[0].Path != canonical {
-		t.Fatalf("accountRoots() = %#v, want account 2 at %q", roots, canonical)
+	first := claudeSeats([]config.Account{{ID: 1, ConfigDir: "/x/seat"}})
+	if len(first) != 1 || first[0].Account != 1 || first[0].ConfigDir != "/x/seat" {
+		t.Fatalf("account one claudeSeats() = %#v, want its configured dir", first)
 	}
 	codex := codexAccountRoots([]config.CodexAccount{{ID: 1, Home: "/x/codex"}})
 	if len(codex) != 1 || codex[0].Account != 1 || codex[0].Path != "/x/codex" {

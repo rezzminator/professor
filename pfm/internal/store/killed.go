@@ -49,10 +49,25 @@ func (s *Store) Kill(ctx context.Context, killed Killed) error {
 }
 
 // Unkill removes a kill from the shared store under the same busy policy.
-func (s *Store) Unkill(ctx context.Context, id string) error {
-	return s.killedWrite(ctx, "unkill", id, func() error {
-		return s.state.Unkill(ctx, id)
+func (s *Store) Unkill(ctx context.Context, id string) (bool, error) {
+	var removed bool
+	err := s.killedWrite(ctx, "unkill", id, func() error {
+		var writeErr error
+		removed, writeErr = s.state.Unkill(ctx, id)
+		return writeErr
 	})
+	return removed, err
+}
+
+// ReassertKill makes a standing kill permanent without recreating a removed row.
+func (s *Store) ReassertKill(ctx context.Context, id string) (bool, error) {
+	var reasserted bool
+	err := s.killedWrite(ctx, "reassert", id, func() error {
+		var writeErr error
+		reasserted, writeErr = s.state.ReassertKill(ctx, id)
+		return writeErr
+	})
+	return reasserted, err
 }
 
 func (s *Store) killedWrite(
@@ -370,7 +385,7 @@ SELECT id, ? FROM oc_sessions WHERE id IN (` + marks + `)`
 		}
 		engineID, err := pfmengine.Parse(engine)
 		if err != nil {
-			return fmt.Errorf("fleet.db row %s: %w", id, err)
+			return fmt.Errorf("pfm.db row %s: %w", id, err)
 		}
 		// A transcript wins a collision, whatever order the union arms come
 		// back in: SQL does not promise that order, and an id that resolved
@@ -408,7 +423,7 @@ func scanKilled(row rowScanner) (Killed, error) {
 	}
 	id, err := pfmengine.Parse(engine)
 	if err != nil {
-		return Killed{}, fmt.Errorf("fleet.db row %s: %w", killed.ID, err)
+		return Killed{}, fmt.Errorf("pfm.db row %s: %w", killed.ID, err)
 	}
 	killed.Engine = id
 	return killed, nil

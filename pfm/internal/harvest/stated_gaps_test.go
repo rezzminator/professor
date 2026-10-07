@@ -22,6 +22,7 @@ func commentItems(n int) string {
 // data above the items it carries, or an unpressed loader control — is
 // flagged partial naming what the page says; prose alone names nothing.
 func TestGenericThreadGapsAreNamed(t *testing.T) {
+	t.Parallel()
 	source := "https://forum.example.com/t/how-teams-use-ai-4g9c"
 	for _, tc := range []struct {
 		name, page string

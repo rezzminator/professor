@@ -16,7 +16,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -228,6 +227,8 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 	}
 }
 
+var stdioProbeDaemon = probeDaemonContext
+
 // runStdioTransport forwards to the daemon's config.MCPPathProfessor when it
 // mounts exactly the locally enabled families and, when chat is enabled, runs
 // the same chat runtime; otherwise it serves the combined server in process
@@ -257,9 +258,15 @@ func (professor *Professor) runStdioTransport(
 	if address == "" {
 		return inProcess("daemon address missing")
 	}
-	status, probeErr := ProbeDaemon(address)
+	status, probeErr := stdioProbeDaemon(ctx, address)
+	if ctx.Err() != nil {
+		return fmt.Errorf("pfm mcp stdio: daemon probe cancelled: %w", ctx.Err())
+	}
 	if errors.Is(probeErr, ErrDaemonAbsent) {
 		return inProcess(fmt.Sprintf("daemon absent at %s (%v)", address, probeErr))
+	}
+	if errors.Is(probeErr, ErrDaemonUnresponsive) {
+		return inProcess(fmt.Sprintf("daemon unresponsive at %s (%v)", address, probeErr))
 	}
 	if probeErr != nil {
 		return inProcess(fmt.Sprintf("foreign service at %s (%v)", address, probeErr))
@@ -310,7 +317,7 @@ func probeProfessorRoute(ctx context.Context, address string) error {
 	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	endpoint := "http://" + address + pfmconfig.MCPPathProfessor
-	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(probeCtx), http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build route probe for %s: %w", endpoint, err)
 	}
@@ -477,7 +484,7 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isHand
 		// its chat runtime is not the one this proxy was selected for; every
 		// other frame replays. The original send goes unprobed.
 		if attempt > 0 && proxy.expectedRuntimeIdentity != "" {
-			status, probeErr := ProbeDaemon(proxy.address)
+			status, probeErr := probeDaemonContext(ctx, proxy.address)
 			if probeErr != nil {
 				err = fmt.Errorf("verify daemon runtime before replay: %w", probeErr)
 			} else if (status.ChatRuntimeIdentity == "" ||
@@ -570,13 +577,6 @@ func (proxy *stdioProxy) handshakeSnapshot() ([]byte, []byte) {
 	return append([]byte(nil), proxy.initialize...), append([]byte(nil), proxy.initialized...)
 }
 
-func (proxy *stdioProxy) reinitialize(ctx context.Context) error {
-	proxy.reinitMutex.Lock()
-	defer proxy.reinitMutex.Unlock()
-	_, err := proxy.reinitializeLocked(ctx)
-	return err
-}
-
 func (proxy *stdioProxy) reinitializeLocked(ctx context.Context) (uint64, error) {
 	initialize, initialized := proxy.handshakeSnapshot()
 	if len(initialize) == 0 {
@@ -664,9 +664,12 @@ func (proxy *stdioProxy) post(ctx context.Context, frame []byte) (proxyPostResul
 	return result, nil
 }
 
+// retryableConnectionFailure retries every dial error: no request byte was written.
+// One call can overrun the retry window by one dial; a replay status probe
+// classifies any timeout, including a dial timeout, as unresponsive.
 func retryableConnectionFailure(err error) bool {
 	var network *net.OpError
-	return errors.As(err, &network) && errors.Is(network.Err, syscall.ECONNREFUSED)
+	return errors.As(err, &network) && network.Op == "dial"
 }
 
 func (proxy *stdioProxy) closeSession() {
@@ -676,7 +679,7 @@ func (proxy *stdioProxy) closeSession() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), proxyCloseTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, proxy.endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodDelete, proxy.endpoint, http.NoBody)
 	if err != nil {
 		proxy.warn("build daemon session close: %v", err)
 		return

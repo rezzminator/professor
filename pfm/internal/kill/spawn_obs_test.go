@@ -1,12 +1,12 @@
 package kill
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestCommandSpawnerDefaultRunnerRecordsTheFinisherLaunch proves the nil
@@ -17,7 +17,7 @@ func TestCommandSpawnerDefaultRunnerRecordsTheFinisherLaunch(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	root := t.TempDir()
 	setsid := filepath.Join(root, "setsid")
-	if err := os.WriteFile(setsid, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(setsid, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	spawner := CommandSpawner{Executable: filepath.Join(root, "pfm"), Setsid: setsid}

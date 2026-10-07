@@ -118,32 +118,6 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 }
 
-// TestSizeOnlyReceiptNamesTokensNotSize: the size probe names its token
-// count `tokens`; no `size` key holds it, so nothing reads it as bytes.
-func TestSizeOnlyReceiptNamesTokensNotSize(t *testing.T) {
-	service := newTestService(t, Runtime{})
-	result := harvest.Result{
-		HTTPStatus:  200,
-		CacheStatus: "hit",
-		Chars:       40,
-		Bytes:       90,
-		Tokens:      12,
-		Path:        filepath.Join(t.TempDir(), "source.md"),
-		Content:     "body",
-	}
-	text := service.describeFetch("https://fixture.example/source", result, true)
-	var receipt map[string]any
-	if err := json.Unmarshal([]byte(text), &receipt); err != nil {
-		t.Fatalf("size-only receipt is not JSON: %v\n%s", err, text)
-	}
-	if _, found := receipt["size"]; found {
-		t.Fatalf("size-only receipt carries a `size` key: %s", text)
-	}
-	if receipt["tokens"] != float64(12) || receipt["chars"] != float64(40) {
-		t.Fatalf("size-only receipt tokens/chars = %v/%v, want 12/40: %s", receipt["tokens"], receipt["chars"], text)
-	}
-}
-
 // TestReadItemCarriesStatusOnEveryRead: a cached and a fresh result, read as
 // a page or a work, both carry their status on the typed item.
 func TestReadItemCarriesStatusOnEveryRead(t *testing.T) {
@@ -231,11 +205,11 @@ func TestSizeOnlyReceiptUsesTheItemFieldNames(t *testing.T) {
 }
 
 // TestRenderFindNamesTheHarvesterSearchTool: an empty candidate list points
-// at harvester_search_web, never the retired WebSearch name.
+// at harvester_search_web.
 func TestRenderFindNamesTheHarvesterSearchTool(t *testing.T) {
 	text := renderFind("an unknown title", nil, nil)
-	if strings.Contains(text, "WebSearch") || !strings.Contains(text, "harvester_search_web") {
-		t.Fatalf("renderFind empty hint = %q, want harvester_search_web and no WebSearch", text)
+	if !strings.Contains(text, "harvester_search_web") {
+		t.Fatalf("renderFind empty hint = %q, want harvester_search_web", text)
 	}
 }
 

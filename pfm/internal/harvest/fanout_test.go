@@ -14,6 +14,7 @@ import (
 // (F1): a panic inside the deferred recover must reach set, and a normal
 // (non-panicking) defer run must never call set at all.
 func TestRecoverItemCapturesPanicIntoError(t *testing.T) {
+	t.Parallel()
 	var recovered error
 	func() {
 		defer recoverItem(func(e error) { recovered = e })
@@ -82,6 +83,7 @@ func TestFindWorksFanOutRecoversPanickingProvider(t *testing.T) {
 
 // TestLocalizeImagesRecoversPanickingDownload pins F1 at images.go:65.
 func TestLocalizeImagesRecoversPanickingDownload(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		panic("simulated image download panic")
 	})}
@@ -104,6 +106,7 @@ func TestLocalizeImagesRecoversPanickingDownload(t *testing.T) {
 
 // TestDoHQueryRecoversPanickingQueryType pins F1 at doh.go:368.
 func TestDoHQueryRecoversPanickingQueryType(t *testing.T) {
+	t.Parallel()
 	resolver := &dohResolver{
 		endpoint: "https://doh.example.test/dns-query",
 		client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

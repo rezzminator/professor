@@ -93,7 +93,7 @@ Step 3 is the one that matters. A merged sentinel fails loudly; a dissolved untr
 
 - Run rumdl FROM the repo root. `[per-file-ignores]` globs resolve against the current directory, not against the config's own location: with `-c /repo/.rumdl.toml` from elsewhere, every category exemption silently fails to match and a prompt file gets judged as a doc.
 - An unknown rule option does NOT fail the run: rumdl prints `Using default values for rule MDxxx` on stderr and formats with that rule's default, so a typo in a config value silently pads every table it was told to compact. Validate the config before trusting any run: `rumdl config -c .rumdl.toml --no-defaults --output toml 2>&1 | grep -iE 'invalid|using default'` must print nothing.
-- Results are cached in `.rumdl_cache/` (gitignored). A repeated run answers from cache: `rumdl clean` before any measurement whose number you will report.
+- Results are cached in the config's `cache-dir` (`tmp/rumdl/`, self-gitignored). A run that loads no project config falls back to `.rumdl_cache/` in the current directory, so `--no-config` always travels with `--no-cache`. A repeated run answers from cache: `rumdl clean` before any measurement whose number you will report.
 - A rule that never fires proves nothing. Any new gate is watched failing on a purpose-built control file first, then watched passing on the real tree.
 
 ## The hook

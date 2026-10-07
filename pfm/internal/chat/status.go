@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -23,10 +24,47 @@ type StatusRequest struct {
 	// Engine and Model override the configured ask runner for Summary/Ask.
 	Engine pfmengine.ID
 	Model  string
-	// Capture overrides the tmux pane read Status falls back to when the
-	// transcript cannot decide working-vs-idle (statusFromPane). Nil is the
-	// real capture.
+	// Capture overrides the tmux pane read InspectSeat falls back to when the
+	// transcript cannot decide working-vs-idle or blocked. Nil is the real
+	// capture.
 	Capture PaneCapture
+}
+
+// InspectSeat is the one inspection door `pfm chat status`, `pfm chat ls`, MCP
+// chat_status and `pfm chat watch` share: headless.Inspect's verdict from the
+// transcript and socket, then the pane evidence only the screen holds.
+//
+// headless.Inspect stays pure — transcript and socket only. A live chat it
+// could read no turn for (OpenCode writes no transcript this process reads; a
+// fresh Claude or Codex seat has not taken a turn yet) gets its state from the
+// one place the evidence exists: its own pane. A live chat stuck on a tool call
+// whose transcript has gone quiet reads the pane too, to tell a tool still
+// running from a dialog holding it for its human (blocked).
+func InspectSeat(
+	ctx context.Context,
+	runtime *pfmconfig.Runtime,
+	target headless.Chat,
+	now time.Time,
+	capture PaneCapture,
+) (headless.Status, error) {
+	status, err := headless.Inspect(ctx, target, now)
+	if err != nil {
+		return headless.Status{}, err
+	}
+	pane, err := needsPaneState(target, status)
+	if err != nil {
+		return headless.Status{}, err
+	}
+	switch {
+	case pane:
+		status, err = statusFromPane(ctx, target, status, capture, runtime)
+	case awaitsPane(target, status):
+		status, err = blockedFromPane(ctx, target, status, capture, runtime)
+	}
+	if err != nil {
+		return headless.Status{}, err
+	}
+	return status, nil
 }
 
 // Status inspects the target. A dead chat is a status, not an error: the
@@ -41,19 +79,9 @@ func Status(
 	if err != nil {
 		return headless.Status{}, err
 	}
-	status, err := headless.Inspect(ctx, target, clock.Real.Now())
+	status, err := InspectSeat(ctx, runtime, target, clock.Real.Now(), request.Capture)
 	if err != nil {
 		return headless.Status{}, err
-	}
-	// headless.Inspect stays pure — transcript and socket only. A live chat it
-	// could read no turn for (OpenCode writes no transcript this process
-	// reads; a fresh Claude or Codex seat has not taken a turn yet) gets its
-	// state from the one place the evidence exists: its own pane.
-	if needsPaneState(target, status) {
-		status, err = statusFromPane(ctx, target, status, request.Capture, runtime)
-		if err != nil {
-			return headless.Status{}, err
-		}
 	}
 	if !request.Summary && !request.Ask {
 		return status, nil

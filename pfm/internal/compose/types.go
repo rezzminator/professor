@@ -1,8 +1,13 @@
 package compose
 
 import (
+	"context"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // Kind identifies the action and visual treatment for a row.
@@ -50,6 +55,7 @@ const (
 	// only ever be listed as its own resume row — "resume-opencode", dead to
 	// every chat verb, while its TUI sat there answering keystrokes.
 	LiveOpenCode
+	WorkbenchInvalid
 )
 
 func (kind Kind) String() string {
@@ -82,6 +88,8 @@ func (kind Kind) String() string {
 		return "professor-update-failed"
 	case LiveOpenCode:
 		return "live-opencode"
+	case WorkbenchInvalid:
+		return "workbench-invalid"
 	default:
 		return "unknown"
 	}
@@ -129,13 +137,15 @@ const (
 	KilledView
 )
 
-// AccountRoot associates one transcript/config root with its fleet account.
+// AccountRoot associates one Codex rollout root with its fleet account.
 type AccountRoot struct {
 	Account int
 	Path    string
-	// ConfigDir is the seat's config dir (CLAUDE_CONFIG_DIR / CODEX_HOME). A
-	// live process names its seat by this, and it stays distinct when every
-	// seat's Path resolves to one shared transcript store.
+}
+
+// ClaudeSeat names a configured live process seat without using transcript paths.
+type ClaudeSeat struct {
+	Account   int
 	ConfigDir string
 }
 
@@ -154,14 +164,19 @@ type Options struct {
 
 // Input is the complete immutable input to one composition pass.
 type Input struct {
+	Workbenches      []workbench.Bench
+	WorkbenchErrors  []workbench.WalkError
 	Snapshot         gather.Snapshot
 	Transcripts      []store.Transcript
 	Rollouts         []store.Rollout
 	OpenCodeSessions []store.OpenCodeSession
 	CxNames          map[string]string
 	Killed           []store.Killed
-	AccountRoots     []AccountRoot
+	ClaudeSeats      []ClaudeSeat
 	CodexHomes       []AccountRoot
+	Launches         *fleetdb.Launches
+	LaunchError      error
+	Context          context.Context
 	Options          Options
 }
 
@@ -180,6 +195,8 @@ type Row struct {
 	WindowName  string
 	Name        string
 	LastPrompt  string
+	Workbench   string
+	Engines     []pfmengine.ID
 	Project     string
 	CWD         string
 	Size        int64
@@ -192,8 +209,21 @@ type Row struct {
 	ActivityNS     int64
 	AgeNS          int64
 	Account        int
-	Accounts       []int
-	Killed         bool
+	LaunchUnread   bool
+	// Reminded marks a chat with a fired reminder nobody has looked at yet
+	// (fleetdb reminders.unseen). The picker sets it from the shared state
+	// database; the row renders red and sorts above every other row.
+	Reminded bool
+	// Model, Effort, Working and AgentsWorking are read from the chat's
+	// transcript tail by the picker (internal/rowfacts), never by composition:
+	// the model id and effort level it runs at ("" when unknown), whether it is
+	// mid-turn right now, and how many sub-agents are mid-turn for it.
+	Model         string
+	Effort        string
+	Working       bool
+	AgentsWorking int
+	Accounts      []int
+	Killed        bool
 	// NameKilled marks a row killed by its "_KILL…" label rather than by a
 	// store row: the picker's kill key cannot toggle it, because the label —
 	// not the killed table — is what keeps it out of the list.

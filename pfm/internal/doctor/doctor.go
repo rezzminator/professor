@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -128,11 +127,12 @@ func Run(
 	dependencies = normalizeDependencies(dependencies)
 	flags := cli.NewFlagSet(
 		doctorCommand,
-		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
+		doctorUsage,
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
 	skipHarvest := flags.Bool("skip-harvest", false, "exclude the optional harvestpy runtime from health")
+	projectUpdates := bindProjectUpdatesFlags(flags)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -140,26 +140,35 @@ func Run(
 		flags.Usage()
 		return 2
 	}
+	if code, handled := projectUpdates.dispatch(flags, *verbose || *skipHarvest, runtime.Paths.Home, stdout); handled {
+		return code
+	}
 	resolved := runtime.Paths
 	tally := &doctorTally{}
 	if runtime.ConfigError != nil {
+		// PrintConfig names the unreadable file without counting this failure again.
 		fmt.Fprintf(stdout, "doctor: config error=%v\n", runtime.ConfigError)
 		tally.fail()
 	}
-	PrintConfig(stdout, runtime)
+	configWarnings, configFailures := PrintConfig(stdout, runtime)
+	tally.warnings += configWarnings
+	tally.failures += configFailures
 	tally.warnings += printHarvesterConfigDoctorWithEnv(stdout, runtime, dependencies.Env)
 	tally.warnings += printDuplicateSeatLogins(stdout, runtime, dependencies.Env)
+	tally.warnings += printPriceOverride(stdout, runtime)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
 	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	tally.warnings += PrintEngineCapabilities(stdout, dependencies)
 	tally.warnings += PrintMCPClientCutover(stdout, runtime)
 	tally.warnings += printMCPDaemonDoctor(stdout, runtime)
 	tally.warnings += printMCPServeProcessesDoctor(stdout, runtime, gather.NewProcFS(resolved.ProcRoot))
-	database, err := store.Open(store.WithWarningWriter(stderr))
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy database: %v\n", err)
+	// Read-only: doctor never creates or migrates a database (store.OpenWithoutMigrating),
+	// and an open that fails is a row (printDatabaseDoctor), never the end of the run:
+	// the host checks below carry the fix for a database doctor cannot open.
+	database, databaseErr := store.OpenWithoutMigrating(context.Background(), store.WithWarningWriter(stderr))
+	if database != nil {
+		defer func() { cli.CloseResource(database, "doctor: close database", stderr, &exitCode) }()
 	}
-	defer func() { cli.CloseResource(database, "doctor: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 	pathWarnings := pfmPathWarningsWithEnv(resolved.Home, dependencies.Env.Get("PATH"), dependencies.Env)
 	for _, warning := range pathWarnings {
@@ -177,7 +186,7 @@ func Run(
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
 	tally.warnings += printActivityLogDoctor(stdout, runtime, dependencies.Env)
-	tally.warnings += printServiceManagerDoctor(ctx, stdout, dependencies.Runner, runtime)
+	tally.warnings += printSupervisionDoctor(ctx, stdout, dependencies, runtime)
 	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
 	verboseDir := ""
 	if *verbose {
@@ -234,7 +243,8 @@ func Run(
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
 	}
-	tally.warnings += printVSCodeDoctor(stdout, resolved.Home, runtime.Config)
+	primary, _ := runtime.Config.AccountByID(primaryAccount)
+	tally.warnings += printIgnorableDoctor(stdout, runtime.Config, resolved.Home, primary.ConfigDir)
 	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(
 		stdout,
 		resolved.Home,
@@ -254,14 +264,14 @@ func Run(
 	)
 	tally.warnings += depWarnings
 	tally.failures += depFailures
-	overlayWarnings, overlayFailures := printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
-	tally.warnings += overlayWarnings
-	tally.failures += overlayFailures
-	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalAgents(
+	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
+	printClaudePluginsDoctor(stdout, installer.ClaudeStore(resolved.Home), tally)
+	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
+	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(
 		stdout,
 		resolved.Home,
-		runtime.Config.Accounts,
 		claudeAbsent,
+		dependencies.Env,
 		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings
@@ -269,96 +279,16 @@ func Run(
 	hookWarnings, hookFailures := installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
+	hostWarnings, hostFailures := printHostChecks(stdout, runtime, dependencies.Clock.Now())
+	tally.warnings += hostWarnings
+	tally.failures += hostFailures + printClaudeStoreChecks(stdout, runtime)
+	cleanupWarnings, cleanupFailures := printManagedCleanupChecks(stdout, runtime)
+	tally.warnings += cleanupWarnings
+	tally.failures += cleanupFailures
 
-	version, err := database.UserVersion(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy user_version: %v\n", err)
+	if code, aborted := printDatabaseDoctor(ctx, stdout, database, databaseErr, resolved, tally); aborted {
+		return code
 	}
-	check, err := database.QuickCheck(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy integrity: %v\n", err)
-	}
-	if version != store.SchemaVersion || check != "ok" {
-		tally.warn()
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: database user_version=%d expected=%d quick_check=%s\n",
-		version,
-		store.SchemaVersion,
-		check,
-	)
-
-	// Kills live in the fleet's shared database, not this binary's cache.
-	sharedState := "ok"
-	if degraded := database.SharedDegraded(); degraded != nil {
-		tally.warn()
-		sharedState = degraded.Error()
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: shared store=%s state=%s\n",
-		database.SharedPath(),
-		sharedState,
-	)
-
-	counts, err := database.Counts(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy row counts: %v\n", err)
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: rows transcripts=%d rollouts=%d cx_names=%d killed=%d orphaned_killed=%d\n",
-		counts.Transcripts,
-		counts.Rollouts,
-		counts.CxNames,
-		counts.Killed,
-		counts.OrphanedKills,
-	)
-	// The census row above counts orphans; it never calls one a defect. A
-	// warning nobody can read is the same as no warning at all — worse, it
-	// inflates `doctor: warnings=N` past every line the reader can point at —
-	// so the counted state names itself here.
-	if counts.OrphanedKills != 0 {
-		tally.warn()
-		fmt.Fprintf(
-			stdout,
-			"doctor: warning orphaned_killed=%d kills whose chat resolves to no transcript, rollout, or OpenCode session\n",
-			counts.OrphanedKills,
-		)
-		fmt.Fprintln(
-			stdout,
-			"doctor: remediation: list them with `pfm archive --prune-orphans`, then delete them with "+
-				"`pfm archive --prune-orphans --yes` (a deleted kill does not come back)",
-		)
-	}
-
-	walBytes := int64(0)
-	if info, err := os.Stat(database.Path() + "-wal"); err == nil {
-		walBytes = info.Size()
-	} else if !os.IsNotExist(err) {
-		tally.warn()
-		fmt.Fprintf(stdout, "doctor: warning WAL stat: %v\n", err)
-	}
-	fmt.Fprintf(stdout, "doctor: wal_bytes=%d\n", walBytes)
-
-	killWarnings, err := metaCounter(ctx, database, "busy_kill_warnings")
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err)
-	}
-	unkillWarnings, err := metaCounter(ctx, database, "busy_unkill_warnings")
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err)
-	}
-	if killWarnings != 0 || unkillWarnings != 0 {
-		tally.warn()
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: busy_warnings kill=%d unkill=%d\n",
-		killWarnings,
-		unkillWarnings,
-	)
 
 	// The process table is probed by READING it, not by stat'ing /proc. macOS has
 	// no /proc and never will — pfm reads its process table through sysctl there
@@ -372,10 +302,18 @@ func Run(
 		fmt.Fprintf(stdout, "doctor: process_table readable pids=%d\n", len(pids))
 	}
 
-	tally.warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
+	tally.warnings += config.ReportRoots(
+		stdout,
+		resolved.Roots[pfmengine.Claude],
+		runtime.Config.CodexAccounts,
+		claudeAbsent,
+	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
+	workbenchWarnings, workbenchFailures := printWorkbenchDoctor(stdout, ".", resolved.Home)
+	tally.warnings += workbenchWarnings
+	tally.failures += workbenchFailures
 
-	tally.warnings += PrintCodexPaneBinding(ctx, stdout, database, runtime)
+	tally.warnings += printCodexPaneDoctor(ctx, stdout, database, databaseErr, runtime)
 
 	crumbEntries, crumbInvalid, crumbErr := crumbHealth(resolved.SIDDir)
 	if crumbErr != nil {
@@ -392,6 +330,7 @@ func Run(
 			crumbInvalid,
 		)
 	}
+	tally.warnings += printLeakedProbeHomes(stdout, resolved.SIDDir, dependencies.Clock.Now())
 	if *skipHarvest {
 		fmt.Fprintln(stdout, "doctor: harvestpy skipped (--skip-harvest)")
 	} else {
@@ -694,6 +633,17 @@ func printEngineDoctor(stdout io.Writer, machine config.Config) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "doctor: roster %s default=%s\n", strings.Join(parts, " "), defaultEngine)
+	if machine.Source("ask.engine") != config.SourceFile && machine.Ask.Engine != "" &&
+		defaultEngine != machine.Ask.Engine {
+		fmt.Fprintf(
+			stdout,
+			"doctor: warning ask.engine unset: the default engine %s has no account, so asks fall back to %s — set ask.engine, or add a %s account\n",
+			machine.Ask.Engine,
+			defaultEngine,
+			pfmengine.MustLookup(machine.Ask.Engine).Name,
+		)
+		return 1
+	}
 	return 0
 }
 
@@ -828,7 +778,7 @@ func PrintDependencies(
 					entry.Name,
 					result.Path,
 				)
-				continue
+				break
 			} else if entry.Required {
 				unverified(gatesEngine)
 			}
@@ -898,26 +848,18 @@ func PrintDependencies(
 			warnings++
 			fmt.Fprintf(stdout, "doctor: dep %s verbose broken error=%s\n", entry.Name, result.VerboseErr)
 		}
+		if result.ProbeHomeErr != "" {
+			warnings++
+			fmt.Fprintf(stdout, "doctor: dep %s probe-home residue error=%s\n", entry.Name, result.ProbeHomeErr)
+		}
 	}
 	return warnings, failures, claudeAbsent
 }
 
-// printHostOverlayDoctor checks the two contracted ~/.local/bin overlay
-// scripts pfm install owns (installer.InspectHostOverlays), and — for every
-// configured Claude account's settings.json — that statusLine.command names
-// the pfm-statusline overlay rather than the raw `pfm statusline` an
-// unwired or pre-overlay install leaves behind. Every non-clean state here
-// is a FAILURE (warnings++), never a soft note: an absent or misdirected
-// overlay renders identically to a healthy plain statusline (issue #14 F1)
-// — the failure is invisible from the prompt itself, so doctor has to be
-// the thing that notices it.
-// printHostOverlayDoctor treats every non-clean row — a missing/displaced/
-// unknown overlay symlink and a settings.json statusLine.command still
-// naming the raw `pfm statusline` — as a FAILURE, never a soft warning: a
-// misdirected or absent overlay is invisible from the prompt itself (issue
-// #14 F1), and only a state `pfm install --yes` is responsible for producing
-// is reported here at all.
-func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config) (warnings, failures int) {
+// printHostOverlayDoctor treats every missing, displaced, or unknown overlay
+// symlink as a failure: a misdirected or absent overlay is invisible from the
+// prompt itself (issue #14 F1).
+func printHostOverlayDoctor(stdout io.Writer, home string) (failures int) {
 	for _, overlay := range installer.InspectHostOverlays(home) {
 		switch overlay.State {
 		case installer.HostOverlayOK:
@@ -943,8 +885,7 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 			)
 		}
 	}
-	failures += printStatusLineOverlayDoctor(stdout, home, machine)
-	return warnings, failures
+	return failures
 }
 
 // printClaudeVersionsDoctor reports the growth pfm's launcher causes by
@@ -1084,19 +1025,6 @@ func configuredHarvestDoctor() harvestDoctor {
 		return HarvestOverride
 	}
 	return pinnedHarvestDoctor{}
-}
-
-func printHarvestPythonDoctor(
-	ctx context.Context,
-	stdout io.Writer,
-	home string,
-	platform harvestpy.Platform,
-	doctor harvestDoctor,
-	browserGate bool,
-) int {
-	return printHarvestPythonDoctorWithRunner(
-		ctx, stdout, home, platform, doctor, browserGate, obs.Runner(deps.RealRunner{}),
-	)
 }
 
 func printHarvestPythonDoctorWithRunner(
@@ -1487,94 +1415,6 @@ func harvestDoctorCheck(report harvestpy.CheckReport, name string, checkErr erro
 		return false, checkErr.Error()
 	}
 	return false, "check did not report healthy"
-}
-
-// pfmPathWarnings checks both precedence and byte identity. A copied binary
-// later on PATH can become the next active binary after a shell/toolchain
-// change, so checking command resolution alone is insufficient.
-func pfmPathWarnings(home, pathEnvironment string) []string {
-	return pfmPathWarningsWithEnv(home, pathEnvironment, paths.OSEnv{})
-}
-
-func pfmPathWarningsWithEnv(home, pathEnvironment string, env paths.Env) []string {
-	canonical := filepath.Join(home, ".local", "bin", "pfm")
-	canonical, _ = filepath.Abs(canonical)
-	targetHome, _ := filepath.Abs(home)
-	jailed := env.Get(paths.EnvHome) != "" || env.Get("PFM_DEV_FENCE") != ""
-	canonicalHash, err := executableHash(canonical)
-	if err != nil {
-		return []string{fmt.Sprintf("pfm_canonical=%s error=%v", canonical, err)}
-	}
-
-	seen := make(map[string]bool)
-	candidates := make([]string, 0)
-	var warnings []string
-	for _, directory := range filepath.SplitList(pathEnvironment) {
-		if directory == "" {
-			directory = "."
-		}
-		candidate, err := filepath.Abs(filepath.Join(directory, "pfm"))
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("pfm_path_entry=%s error=%v", directory, err))
-			continue
-		}
-		candidate = filepath.Clean(candidate)
-		if seen[candidate] {
-			continue
-		}
-		seen[candidate] = true
-		if jailed {
-			relative, err := filepath.Rel(targetHome, candidate)
-			if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
-				continue
-			}
-		}
-		info, err := os.Stat(candidate)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				warnings = append(warnings, fmt.Sprintf("pfm_path_entry=%s error=%v", candidate, err))
-			}
-			continue
-		}
-		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	if len(candidates) == 0 {
-		warnings = append(warnings, "pfm_path_resolves=not-found canonical="+canonical)
-		return warnings
-	}
-	if candidates[0] != canonical {
-		warnings = append(warnings, fmt.Sprintf(
-			"pfm_path_resolves=%s canonical=%s",
-			candidates[0],
-			canonical,
-		))
-	}
-	for _, candidate := range candidates {
-		hash, err := executableHash(candidate)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("pfm_hash_read=%s error=%v", candidate, err))
-			continue
-		}
-		if hash != canonicalHash {
-			warnings = append(warnings, fmt.Sprintf(
-				"pfm_hash_mismatch=%s canonical=%s",
-				candidate,
-				canonical,
-			))
-		}
-	}
-	return warnings
-}
-
-func executableHash(path string) ([sha256.Size]byte, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return [sha256.Size]byte{}, err
-	}
-	return sha256.Sum256(content), nil
 }
 
 func liveCodexSnapshot(ctx context.Context, runtime config.Runtime, manager *kill.Manager) (gather.Snapshot, error) {

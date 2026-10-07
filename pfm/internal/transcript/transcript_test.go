@@ -66,6 +66,79 @@ func TestParseKeepsWhatWasSaidAndDropsTheRest(t *testing.T) {
 				"A the report is clean",
 			},
 		},
+		{
+			// A turn the model server ended: Codex writes no assistant
+			// message, only a task_complete carrying the error; a
+			// task_complete without one is no entry at all.
+			engine: "cx",
+			content: strings.Join([]string{
+				`{"type":"event_msg","payload":{"type":"user_message","message":"read the report"}}`,
+				`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"ls"}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0001","last_agent_message":null,"error":{"message":"Selected model is at capacity. Please try a different model.","codex_error_info":"server_overloaded"}}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0002","last_agent_message":"done","error":null}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0003","last_agent_message":"done"}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0004","error":{"message":"stream closed","codex_error_info":{"response_stream_disconnected":{"http_status_code":502}}}}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0005","error":{"message":"no kind"}}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U read the report",
+				"T exec|ls",
+				"E server_overloaded: Selected model is at capacity. Please try a different model.",
+				"E response_stream_disconnected: stream closed",
+				"E unknown: no kind",
+			},
+		},
+		{
+			// Claude's synthetic API-error message is the assistant entry it
+			// always was, now carrying its kind.
+			engine: "cc",
+			content: strings.Join([]string{
+				`{"type":"user","message":{"role":"user","content":"ship the fix"}}`,
+				`{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error: 429 rate limited"}]}}`,
+				`{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: no kind"}]}}`,
+				`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"tests are green"}]}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U ship the fix",
+				"E rate_limit: API Error: 429 rate limited",
+				"E unknown: API Error: no kind",
+				"A tests are green",
+			},
+		},
+		{
+			// An interrupted turn stands in the assistant's place on both
+			// engines: Codex writes turn_aborted, Claude a user record whose
+			// text is the interrupt marker (which IsJunkPrompt would drop).
+			engine: "cx",
+			content: strings.Join([]string{
+				`{"type":"event_msg","payload":{"type":"user_message","message":"read the report"}}`,
+				`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"sleep 600"}}`,
+				`{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-0001","reason":"interrupted"}}`,
+				`{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-0002"}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U read the report",
+				"T exec|sleep 600",
+				"A [turn aborted: interrupted]",
+				"A [turn aborted: interrupted]",
+			},
+		},
+		{
+			engine: "cc",
+			content: strings.Join([]string{
+				`{"type":"user","message":{"role":"user","content":"ship the fix"}}`,
+				`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{}}]}}`,
+				`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
+				`{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`,
+				`{"type":"user","message":{"role":"user","content":"[Request failed: not an interrupt]"}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U ship the fix",
+				"T Bash|{}",
+				"A [turn aborted: interrupted]",
+				"A [turn aborted: interrupted]",
+			},
+		},
 	} {
 		t.Run(testCase.engine, func(t *testing.T) {
 			path := writeTranscript(t, "chat.jsonl", testCase.content)
@@ -379,5 +452,40 @@ func TestParseCodexSkipsAgentMessageEventPairedWithResponseItem(t *testing.T) {
 	want := []string{"U read the report", "A the report is clean"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("entries\n got: %v\nwant: %v (agent_message event double-counted the reply)", got, want)
+	}
+}
+
+// A Codex rollout's newest turn record says whether its turn is still running:
+// assistant commentary between tool calls never ends one.
+func TestReadMetaFollowsTheNewestCodexTurnRecord(t *testing.T) {
+	const (
+		started    = `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`
+		completed  = `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":null}}`
+		aborted    = `{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-1","reason":"interrupted"}}`
+		prompt     = `{"type":"event_msg","payload":{"type":"user_message","message":"go"}}`
+		commentary = `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"running the tests next"}]}}`
+	)
+	for _, testCase := range []struct {
+		name  string
+		lines []string
+		want  CodexTurnState
+	}{
+		{"no turn record", []string{prompt, commentary}, CodexTurnUnrecorded},
+		{"commentary mid-turn", []string{started, prompt, commentary}, CodexTurnOpen},
+		{"task_complete", []string{started, prompt, commentary, completed}, CodexTurnEnded},
+		{"turn_aborted", []string{started, prompt, aborted}, CodexTurnEnded},
+		{"a prompt after the turn ended", []string{started, completed, prompt}, CodexTurnOpen},
+		{"the next turn started", []string{started, completed, started, commentary}, CodexTurnOpen},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := writeTranscript(t, "rollout.jsonl", strings.Join(testCase.lines, "\n")+"\n")
+			meta, err := ReadMeta(path, "cx")
+			if err != nil {
+				t.Fatalf("ReadMeta() error = %v", err)
+			}
+			if meta.CodexTurn != testCase.want {
+				t.Fatalf("CodexTurn = %d, want %d", meta.CodexTurn, testCase.want)
+			}
+		})
 	}
 }

@@ -10,13 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestShowGlobalOptionAndIdentityNudgeClassifyGoneServer(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "tmux")
 	script := "#!/bin/sh\necho 'no server running on fake socket' >&2\nexit 1\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	const socket = "cc-stale-1-2-3"
@@ -111,7 +112,7 @@ set-option)
 	;;
 esac
 `
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(state, []byte("#T\n"), 0o600); err != nil {

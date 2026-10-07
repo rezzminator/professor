@@ -31,7 +31,7 @@ The family splits the work by who is allowed to judge what: an agent that only w
 
 ## The reader
 
-The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_row.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview, and only on approval runs `pfm update --to {target}`, the checklist, and `pfm doctor`. Inside each adopted project it then runs `pfm update check`, hand-applies each `UPDATED` template diff and pins it.
+The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_row.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview, and only on approval runs `pfm update --to {target}`, the checklist, and `pfm doctor`. Inside each adopted project it then runs `pfm doctor --project-updates`, reads each `UPDATED` diff, ports what applies and pins it.
 
 Three facts about that reader shape every rule of the family:
 
@@ -182,7 +182,7 @@ A rule the script enforces is never restated as a prompt rule; the prompt names 
 
 ## Accepted risk
 
-A range of hundreds of commits cannot be reviewed hunk by hunk at release time: review effectiveness collapses past about 300 lines an hour (Evidence), and one `reviewer` run holds about 600 hunks. The release review therefore covers in full only the adopter contract, the tier-1 paths `release-check scope` names: `templates/**`, `workflows/**`, the fleet prompt, pfm's update, install, init, doctor and config paths, the public docs and the release gates. Everything else relies on the review it had when it landed on `develop`, on the full fenced gate at the candidate, and on the seams sweep, which finds every deleted or renamed name still referenced anywhere in the tree. A defect inside an internal package that its own tests do not catch and its landing review missed can ship; the rehearsal catches the part of it an adopter's update touches.
+A range of hundreds of commits cannot be reviewed hunk by hunk at release time: review effectiveness collapses past about 300 lines an hour (Evidence), and one `reviewer` run holds about 600 hunks. The release review therefore covers in full only the adopter contract, the tier-1 paths `release-check scope` names: `templates/**`, the fleet prompt, pfm's update, install, init, doctor and config paths, the public docs and the release gates. Everything else relies on the review it had when it landed on `develop`, on the full fenced gate at the candidate, and on the seams sweep, which finds every deleted or renamed name still referenced anywhere in the tree. A defect inside an internal package that its own tests do not catch and its landing review missed can ship; the rehearsal catches the part of it an adopter's update touches.
 
 ## Surfaces that stay in sync
 

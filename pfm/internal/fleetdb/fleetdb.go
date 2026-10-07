@@ -1,8 +1,8 @@
 // Package fleetdb is the fleet's authoritative state store — operator decisions: kills, comms, issues.
 //
-// The SQLite database at ~/.cc/fleet.db holds every operator decision: killed
+// The SQLite database at ~/.local/state/pfm/pfm.db holds every operator decision: killed
 // chats, spawned teammates, and the primary account. The transcript database
-// (paths.Values.DB) remains a derived cache that a rescan can rebuild.
+// (paths.Values.CacheDB) remains a derived cache that a rescan can rebuild.
 package fleetdb
 
 import (
@@ -109,13 +109,30 @@ type Store struct {
 	degraded error
 }
 
+// CheckLegacyState refuses a state database create while the legacy
+// database still waits for the operator to apply pfm doctor's fix (paths.ErrLegacyPending).
+// Hand-built values with no Home skip the check.
+func CheckLegacyState(values paths.Values) error {
+	if values.Home == "" {
+		return nil
+	}
+	if err := paths.CheckLegacyPending(values.StateDB, paths.LegacyStateDB(values.Home)); err != nil {
+		return fmt.Errorf("shared state database: %w", err)
+	}
+	return nil
+}
+
 // OpenSharedState records a database initialization failure in Degraded. Operations then
 // return that failure instead of pretending an operator decision was stored.
 func OpenSharedState(ctx context.Context, values paths.Values) *Store {
 	store := &Store{
-		path: values.FleetDB,
+		path: values.StateDB,
 	}
-	db, err := openDatabase(ctx, values.FleetDB)
+	if err := CheckLegacyState(values); err != nil {
+		store.degraded = err
+		return store
+	}
+	db, err := openDatabase(ctx, values.StateDB)
 	if err != nil {
 		store.degraded = err
 		return store
@@ -125,6 +142,11 @@ func OpenSharedState(ctx context.Context, values paths.Values) *Store {
 }
 
 func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
+	info, statErr := os.Stat(path)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect shared state database %s: %w", path, statErr)
+	}
+	existed := statErr == nil && info.Size() > 0
 	db, err := sqlitedb.OpenStore(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("open shared state database: %w", err)
@@ -135,6 +157,10 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize shared state schema: %w", err)
+	}
+	if err := migrate(ctx, db, path, existed); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate shared state database: %w", err)
 	}
 	return db, nil
 }
@@ -225,19 +251,40 @@ ON CONFLICT(uuid) DO UPDATE SET
 	return nil
 }
 
-// Unkill deletes one kill row.
-func (s *Store) Unkill(ctx context.Context, id string) error {
+// Unkill deletes one kill row and reports whether it existed.
+func (s *Store) Unkill(ctx context.Context, id string) (bool, error) {
 	if s.db == nil {
-		return fmt.Errorf("remove shared kill %q: %w", id, s.degraded)
+		return false, fmt.Errorf("remove shared kill %q: %w", id, s.degraded)
 	}
-	if _, err := s.exec(
+	result, err := s.exec(
 		ctx,
 		"DELETE FROM hidden WHERE uuid=?",
 		id,
-	); err != nil {
-		return fmt.Errorf("remove shared kill %q: %w", id, err)
+	)
+	if err != nil {
+		return false, fmt.Errorf("remove shared kill %q: %w", id, err)
 	}
-	return nil
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count removed shared kill %q: %w", id, err)
+	}
+	return removed == 1, nil
+}
+
+// ReassertKill makes an existing kill permanent without changing its time.
+func (s *Store) ReassertKill(ctx context.Context, id string) (bool, error) {
+	if s.db == nil {
+		return false, fmt.Errorf("reassert shared kill %q: %w", id, s.degraded)
+	}
+	result, err := s.exec(ctx, "UPDATE hidden SET at_payload=NULL WHERE uuid=?", id)
+	if err != nil {
+		return false, fmt.Errorf("reassert shared kill %q: %w", id, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count reasserted shared kill %q: %w", id, err)
+	}
+	return updated == 1, nil
 }
 
 // UnkillIfPayload expires only the clear-kill version the caller observed.
@@ -268,6 +315,10 @@ func (s *Store) UnkillIfPayload(
 
 // KilledRecords returns the complete shared kill state keyed by chat id.
 func (s *Store) KilledRecords(ctx context.Context) (records map[string]KilledRecord, returnErr error) {
+	if errors.Is(s.degraded, ErrAbsent) {
+		// Only a read-only open leaves a file absent: one never written holds no kills.
+		return map[string]KilledRecord{}, nil
+	}
 	if s.db == nil {
 		return nil, fmt.Errorf("query shared kills: %w", s.degraded)
 	}
@@ -532,7 +583,7 @@ func (s *Store) ClearBranchSeat(ctx context.Context, socket string) error {
 // account", which then quietly answered every query with the roster's first
 // configured account instead of surfacing the outage.
 func ClaudePrimaryAccount(ctx context.Context, values paths.Values) (int, bool, error) {
-	account, found, err := primaryFromDatabase(ctx, values.FleetDB)
+	account, found, err := primaryFromDatabase(ctx, values.StateDB)
 	if err != nil {
 		return 0, false, err
 	}
@@ -571,6 +622,11 @@ func SetClaudePrimaryAccount(
 			returnErr = errors.Join(returnErr, fmt.Errorf("close shared state: %w", err))
 		}
 	}()
+	// An unopenable database degrades to the mirror below, but a create refused
+	// while legacy state waits for pfm doctor's fix is never silently degraded.
+	if err := state.Degraded(); errors.Is(err, paths.ErrLegacyPending) {
+		return err
+	}
 	if err := state.SetMeta(
 		ctx,
 		PrimaryAccountKey,
@@ -615,13 +671,16 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool, error) {
 	}()
 	var value string
 	const primaryQuery = "SELECT val FROM meta WHERE key=?"
-	// The query error still reaches the db activity log unconditionally (obs
-	// is this package's designated door for that, C23) AND is now returned:
-	// sql.ErrNoRows is the legitimate "nothing set yet" absence, everything
-	// else is this lookup failing to look.
+	// Absence is a successful statement: sql.ErrNoRows means nothing is set
+	// yet. Every other scan error is this lookup failing to look and reaches
+	// both the activity record and the caller.
 	read := obs.SQL(ctx, kind, primaryQuery)
 	err = db.QueryRowContext(ctx, primaryQuery, PrimaryAccountKey).Scan(&value)
-	read.End(-1, err)
+	if errors.Is(err, sql.ErrNoRows) {
+		read.End(-1, nil)
+	} else {
+		read.End(-1, err)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil

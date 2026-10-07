@@ -12,8 +12,7 @@ stdout hello
 exec jail-pfm chat status worker
 stdout idle
 
-# Ending exits cleanly and removes the live row.
+# The row leaves once the chat's process has exited.
 exec jail-pfm chat end worker
 stdout ended
-exec jail-pfm chat ls --all
-! stdout worker
+exec jail-ls-lacks worker

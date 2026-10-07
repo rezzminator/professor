@@ -37,7 +37,7 @@ printf 'F\n' >"$LANES/pending.txt"
 # PATH with no pfm at all, so the derive cannot run unless a test provides one.
 BIN="$T/bin"
 mkdir -p "$BIN"
-for tool in bash awk sed grep sort uniq head tail cut tr wc find mktemp rm cat printf jq basename dirname expr date cp cmp diff env sleep timeout; do
+for tool in bash awk sed grep sort uniq head tail cut tr wc find mktemp mkfifo rm cat printf jq basename dirname expr date cp cmp diff env sleep timeout nproc; do
   real="$(command -v "$tool" 2>/dev/null)" || continue
   ln -sf "$real" "$BIN/$tool"
 done
@@ -49,9 +49,9 @@ run_sut() { OUT="$(env PATH="$BIN" bash "$SUT" "$@" 2>&1)"; RC=$?; }
 map "$CLEAN"
 run_sut --no-derive
 if [ "$RC" -eq 0 ] &&
-  printf '%s' "$OUT" | grep -q '3 map rows' &&
-  printf '%s' "$OUT" | grep -q 'lane E1: written · 1/1 mapped beats present' &&
-  printf '%s' "$OUT" | grep -q 'derive: NOT RUN (--no-derive)'; then
+  grep -q '3 map rows' <<<"$OUT" &&
+  grep -q 'lane E1: written · 1/1 mapped beats present' <<<"$OUT" &&
+  grep -q 'derive: NOT RUN (--no-derive)' <<<"$OUT"; then
   ok "clean map + --no-derive: exit 0, and the skipped derive is NAMED, not implied clean"
 else
   bad "clean map" "rc=$RC" "$OUT"
@@ -61,7 +61,7 @@ fi
 
 map 'pfm alpha\tE1\tE1.01-fixture\nchat_ls\tE1\tE1.99-ghost\n'
 run_sut --no-derive
-if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q "MISSING-BEAT: E1.99-ghost is mapped to lane E1 but E1.sh has no 'beat E1.99-ghost' line"; then
+if [ "$RC" -eq 1 ] && grep -q "MISSING-BEAT: E1.99-ghost is mapped to lane E1 but E1.sh has no 'beat E1.99-ghost' line" <<<"$OUT"; then
   ok "MISSING-BEAT: a mapped beat absent from its written lane is named"
 else
   bad "missing beat" "rc=$RC" "$OUT"
@@ -71,8 +71,8 @@ fi
 
 map "${CLEAN}pfm beta\tF\tF.01-later\n"
 run_sut --no-derive
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'lane F: NOT WRITTEN (1 beats pending) — declared in pending.txt' &&
-  printf '%s' "$OUT" | grep -q 'pending lanes: 1 — this list must reach 0'; then
+if [ "$RC" -eq 0 ] && grep -q 'lane F: NOT WRITTEN (1 beats pending) — declared in pending.txt' <<<"$OUT" &&
+  grep -q 'pending lanes: 1 — this list must reach 0' <<<"$OUT"; then
   ok "a pending lane is reported NOT WRITTEN with its beat count, exit still 0 while it is declared"
 else
   bad "pending lane" "rc=$RC" "$OUT"
@@ -82,7 +82,7 @@ fi
 
 printf 'F\nE1\n' >"$LANES/pending.txt"
 run_sut --no-derive
-if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'PENDING-STALE'; then
+if [ "$RC" -eq 1 ] && grep -q 'PENDING-STALE' <<<"$OUT"; then
   ok "PENDING-STALE: pending.txt naming a lane whose script exists is red"
 else
   bad "pending stale" "rc=$RC" "$OUT"
@@ -93,7 +93,7 @@ printf 'F\n' >"$LANES/pending.txt"
 
 map "${CLEAN}pfm beta\tQ9\tQ9.01-nowhere\n"
 run_sut --no-derive
-if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'UNDECLARED-LANE: Q9'; then
+if [ "$RC" -eq 1 ] && grep -q 'UNDECLARED-LANE: Q9' <<<"$OUT"; then
   ok "UNDECLARED-LANE: a mapped lane with no script and no pending line is red"
 else
   bad "undeclared lane" "rc=$RC" "$OUT"
@@ -109,10 +109,10 @@ run_sut --no-derive
 oldhdr_rc="$RC" oldhdr_out="$OUT"
 map ''
 run_sut --no-derive
-if [ "$missing_rc" -eq 2 ] && printf '%s' "$missing_out" | grep -q 'MAP-UNREADABLE — .*map.tsv does not exist' &&
-  [ "$oldhdr_rc" -eq 2 ] && printf '%s' "$oldhdr_out" | grep -q "MAP-UNREADABLE — line 1 of map.tsv is not the 'name<TAB>lane<TAB>beat' header" &&
-  [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep -q 'MAP-UNREADABLE — map.tsv has no' &&
-  ! printf '%s\n%s\n%s' "$missing_out" "$oldhdr_out" "$OUT" | grep -q '^check-map: clean'; then
+if [ "$missing_rc" -eq 2 ] && grep -q 'MAP-UNREADABLE — .*map.tsv does not exist' <<<"$missing_out" &&
+  [ "$oldhdr_rc" -eq 2 ] && grep -q "MAP-UNREADABLE — line 1 of map.tsv is not the 'name<TAB>lane<TAB>beat' header" <<<"$oldhdr_out" &&
+  [ "$RC" -eq 2 ] && grep -q 'MAP-UNREADABLE — map.tsv has no' <<<"$OUT" &&
+  ! grep -q '^check-map: clean' <<<"$(printf '%s\n%s\n%s' "$missing_out" "$oldhdr_out" "$OUT")"; then
   ok "MAP-UNREADABLE: a missing map, a wrong header and a header-only map each exit 2, never clean"
 else
   bad "unreadable map" "missing rc=$missing_rc, old header rc=$oldhdr_rc, empty rc=$RC" "$missing_out
@@ -124,7 +124,7 @@ fi
 
 map "${CLEAN}pfm beta E1\n"
 run_sut --no-derive
-if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'MALFORMED-ROW: line 5 of map.tsv is not three tab-separated fields'; then
+if [ "$RC" -eq 1 ] && grep -q 'MALFORMED-ROW: line 5 of map.tsv is not three tab-separated fields' <<<"$OUT"; then
   ok "MALFORMED-ROW: a row without three tab-separated fields is named by its line"
 else
   bad "malformed row" "rc=$RC" "$OUT"
@@ -135,9 +135,9 @@ fi
 map "$CLEAN"
 run_sut
 if [ "$RC" -eq 2 ] &&
-  printf '%s' "$OUT" | grep -q 'DERIVE-FAILED: no pfm binary to ask' &&
-  printf '%s' "$OUT" | grep -q 'this is not a clean verdict' &&
-  ! printf '%s' "$OUT" | grep -q '^check-map: clean'; then
+  grep -q 'DERIVE-FAILED: no pfm binary to ask' <<<"$OUT" &&
+  grep -q 'this is not a clean verdict' <<<"$OUT" &&
+  ! grep -q '^check-map: clean' <<<"$OUT"; then
   ok "DERIVE-FAILED: no pfm binary exits 2, names the reason, and refuses to say clean"
 else
   bad "derive failed" "rc=$RC" "$OUT"
@@ -148,11 +148,35 @@ fi
 printf '#!/usr/bin/env bash\nexit 1\n' >"$BIN/pfm"
 chmod +x "$BIN/pfm"
 run_sut
-if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep -q 'DERIVE-FAILED: pfm --help produced'; then
+if [ "$RC" -eq 2 ] && grep -q 'DERIVE-FAILED: pfm --help produced' <<<"$OUT"; then
   ok "DERIVE-FAILED: a binary that answers nothing to --help is named, not counted as zero commands"
 else
   bad "derive unreadable help" "rc=$RC" "$OUT"
 fi
+
+write_derive_stub() {
+  cat >"$BIN/pfm" <<'STUB'
+#!/usr/bin/env bash
+shift 2 # --config PATH
+case "$*" in
+  "--help") printf 'usage: pfm <command>\n  alpha\n  beta\n  chat\n  internal\n  mcp\n' ;;
+  "chat --help") printf 'usage: pfm chat <command>\n  new\n  ls\n  inject\n  status\n  kill/unkill\n' ;;
+STUB
+  printf '%s\n' "$1" >>"$BIN/pfm"
+  cat >>"$BIN/pfm" <<'STUB'
+  "chat secret --help") echo 'usage: pfm chat secret <x>'; exit 2 ;;
+  "internal hook-x --help") exit 0 ;;
+  "chat gone --help")
+    echo 'pfm chat: unknown command "gone"'
+    for ((i=0; i<7000; i++)); do echo 'unknown command: gone'; done
+    exit 2 ;;
+  chat\ *) echo "pfm chat: unknown command \"$2\""; exit 2 ;;
+  internal\ *) echo "pfm internal: unknown subcommand \"$2\""; exit 1 ;;
+  *) echo "pfm: unknown command \"$1\""; exit 2 ;;
+esac
+STUB
+  chmod +x "$BIN/pfm"
+}
 
 # ---- 10: the derive against a stub pfm ----------------------------------
 # The stub serves five top-level commands, five chat subcommands, two tools over
@@ -160,38 +184,115 @@ fi
 # knows, and answers `unknown command` for everything else — the real pfm's
 # answer for a verb it does not have.
 
-cat >"$BIN/pfm" <<'STUB'
-#!/usr/bin/env bash
-shift 2 # --config PATH
-case "$*" in
-  "--help") printf 'usage: pfm <command>\n  alpha\n  beta\n  chat\n  internal\n  mcp\n' ;;
-  "chat --help") printf 'usage: pfm chat <command>\n  new\n  ls\n  inject\n  status\n  kill/unkill\n' ;;
+write_derive_stub "$(cat <<'ARM'
   "mcp serve --stdio") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"chat_ls"},{"name":"harvester_read"}]}}' ;;
-  "chat secret --help") echo 'usage: pfm chat secret <x>'; exit 2 ;;
-  "internal hook-x --help") exit 0 ;;
-  chat\ *) echo "pfm chat: unknown command \"$2\""; exit 2 ;;
-  internal\ *) echo "pfm internal: unknown subcommand \"$2\""; exit 1 ;;
-  *) echo "pfm: unknown command \"$1\""; exit 2 ;;
-esac
-STUB
-chmod +x "$BIN/pfm"
+ARM
+)"
 FULL='pfm alpha\tE1\tE1.01-fixture\npfm beta\tE1\tE1.01-fixture\npfm internal hook-x\tE1\tE1.01-fixture\npfm mcp\tE1\tE1.01-fixture\npfm chat new\tO1\tO1.01-fixture\npfm chat ls\tO1\tO1.01-fixture\npfm chat inject\tO1\tO1.01-fixture\npfm chat status\tO1\tO1.01-fixture\npfm chat kill\tO1\tO1.01-fixture\npfm chat unkill\tO1\tO1.01-fixture\npfm chat secret\tO1\tO1.01-fixture\nchat_ls\tE1\tE1.01-fixture\nharvester_read\tE1\tE1.01-fixture\n'
 
 map "$FULL"
 run_sut
 if [ "$RC" -eq 0 ] &&
-  printf '%s' "$OUT" | grep -q 'derived commands: 5 top-level + 6 chat subcommands · 0 unmapped' &&
-  printf '%s' "$OUT" | grep -q '0 stale · 2 judged by pfm.s dispatcher' &&
-  printf '%s' "$OUT" | grep -q '^check-map: clean — .*no stale row'; then
+  grep -q 'derived commands: 5 top-level + 6 chat subcommands · 0 unmapped' <<<"$OUT" &&
+  grep -q '0 stale · 2 judged by pfm.s dispatcher' <<<"$OUT" &&
+  grep -q '^check-map: clean — .*no stale row' <<<"$OUT"; then
   ok "derive clean: every command and tool mapped, and the hidden verbs pass on the dispatcher's word"
 else
   bad "derive clean" "rc=$RC" "$OUT"
 fi
 
+# ---- 10b: mapped must keep an early match under pipefail -----------------
+
+burners=()
+cleanup() {
+  if [ "${#burners[@]}" -gt 0 ]; then
+    kill "${burners[@]}" 2>/dev/null || :
+    wait "${burners[@]}" 2>/dev/null || :
+  fi
+  rm -rf -- "$T"
+}
+trap cleanup EXIT
+
+mapped_line="$(grep '^mapped() {' "$SUT")"
+if [ -z "$mapped_line" ]; then
+  bad "mapped helper missing" "no line starting mapped() { in $SUT"
+else
+  eval "$mapped_line"
+  names="$(printf '%b' "$FULL" | cut -f1 | LC_ALL=C sort -u)"
+  names+="$(for ((i=0; i<7000; i++)); do printf '\nzz_fill_%06d' "$i"; done)"
+  framed_names=$'\n'"$names"$'\n'
+  if [ "${#names}" -gt 65536 ] && mapped harvester_read; then
+    ok "mapped wide list: harvester_read on line 2 is found in one call"
+  else
+    bad "mapped wide list" "bytes=${#names}; harvester_read was not found"
+  fi
+
+  names=$'exact\nparent child\nharvester_read\nliteralXX\nliteral.+'
+  framed_names=$'\n'"$names"$'\n'
+  if mapped exact && mapped parent && ! mapped harvester_rea &&
+    mapped 'literal.+' && ! mapped 'literal.*'; then
+    ok "mapped names: exact, subcommand and literal metacharacters match; a prefix does not"
+  else
+    bad "mapped names" "exact, subcommand, prefix or literal matching changed"
+  fi
+
+  names="$(printf '%b' "$FULL" | cut -f1 | LC_ALL=C sort -u)"
+  framed_names=$'\n'"$names"$'\n'
+  if [ -z "${LANE_CONTENTION_PROBE:-}" ]; then
+    printf 'SKIP  mapped contention: LANE_CONTENTION_PROBE unset\n'
+  elif [[ ! "$LANE_CONTENTION_PROBE" =~ ^[1-9][0-9]*$ ]]; then
+    bad "mapped contention" "LANE_CONTENTION_PROBE must be a positive integer"
+  else
+    cpus="$(nproc)"
+    [ "$cpus" -ge 2 ] || cpus=2
+    for ((i=0; i<cpus; i++)); do
+      while :; do :; done & burners+=("$!")
+    done
+    false=0
+    for ((i=0; i<LANE_CONTENTION_PROBE; i++)); do
+      mapped harvester_read || false=$((false + 1))
+    done
+    kill "${burners[@]}" 2>/dev/null || :
+    wait "${burners[@]}" 2>/dev/null || :
+    burners=()
+    if [ "$false" -eq 0 ]; then
+      ok "mapped contention: $LANE_CONTENTION_PROBE calls, $false false"
+    else
+      bad "mapped contention: $LANE_CONTENTION_PROBE calls, $false false"
+    fi
+  fi
+fi
+
+# ---- 10a: the server replies after the frames only while stdin stays open --
+
+cp "$BIN/pfm" "$T/pfm-immediate"
+write_derive_stub "$(cat <<'ARM'
+  "mcp serve --stdio")
+    read -r frame; read -r frame; read -r frame
+    read -t 0.2 -r frame
+    rc=$?
+    [ "$rc" -gt 128 ] || exit 0
+    echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"chat_ls"},{"name":"harvester_read"}]}}'
+    read -r frame
+    ;;
+ARM
+)"
+started="$(date +%s)"
+run_sut
+wall=$(( $(date +%s) - started ))
+if [ "$RC" -eq 0 ] && [ "$wall" -lt 5 ] &&
+  grep -q 'derived tools over pfm mcp serve --stdio: 2 · 0 unmapped' <<<"$OUT" &&
+  grep -q '^check-map: clean —' <<<"$OUT"; then
+  ok "delayed id-2 reply is read while stdin stays open (wall ${wall}s)"
+else
+  bad "delayed derive" "rc=$RC wall=$wall" "$OUT"
+fi
+cp "$T/pfm-immediate" "$BIN/pfm"
+
 map "$(printf '%b' "$FULL" | grep -v '^pfm beta')
 "
 run_sut
-if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'UNMAPPED-COMMAND: pfm beta — no row in map.tsv names it'; then
+if [ "$RC" -eq 1 ] && grep -q 'UNMAPPED-COMMAND: pfm beta — no row in map.tsv names it' <<<"$OUT"; then
   ok "UNMAPPED-COMMAND: a command in pfm's help tree with no row is named"
 else
   bad "unmapped command" "rc=$RC" "$OUT"
@@ -200,7 +301,7 @@ fi
 map "$(printf '%b' "$FULL" | grep -v '^harvester_read')
 "
 run_sut
-if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'UNMAPPED-TOOL: harvester_read — no row in map.tsv names it'; then
+if [ "$RC" -eq 1 ] && grep -q 'UNMAPPED-TOOL: harvester_read — no row in map.tsv names it' <<<"$OUT"; then
   ok "UNMAPPED-TOOL: a served MCP tool with no row is named"
 else
   bad "unmapped tool" "rc=$RC" "$OUT"
@@ -209,14 +310,44 @@ fi
 map "${FULL}pfm storm\tE1\tE1.01-fixture\npfm chat gone\tO1\tO1.01-fixture\npfm internal gone\tE1\tE1.01-fixture\nsearch_gone\tE1\tE1.01-fixture\n"
 run_sut
 if [ "$RC" -eq 1 ] &&
-  printf '%s' "$OUT" | grep -q 'STALE-NAME: pfm storm — a map.tsv row names a command or tool pfm does not serve' &&
-  printf '%s' "$OUT" | grep -q 'STALE-NAME: pfm chat gone' &&
-  printf '%s' "$OUT" | grep -q 'STALE-NAME: pfm internal gone' &&
-  printf '%s' "$OUT" | grep -q 'STALE-NAME: search_gone' &&
-  printf '%s' "$OUT" | grep -q '4 stale · 2 judged'; then
+  grep -q 'STALE-NAME: pfm storm — a map.tsv row names a command or tool pfm does not serve' <<<"$OUT" &&
+  grep -q 'STALE-NAME: pfm chat gone' <<<"$OUT" &&
+  grep -q 'STALE-NAME: pfm internal gone' <<<"$OUT" &&
+  grep -q 'STALE-NAME: search_gone' <<<"$OUT" &&
+  grep -q '4 stale · 2 judged' <<<"$OUT"; then
   ok "STALE-NAME: a row for a verb or tool pfm answers 'unknown' to is red, top-level, chat, internal and tool alike"
 else
   bad "stale name" "rc=$RC" "$OUT"
+fi
+
+# ---- 11: hidden probes overlap, while their findings stay in map order ---
+
+write_derive_stub "$(cat <<'ARM'
+  "mcp serve --stdio") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"chat_ls"},{"name":"harvester_read"}]}}' ;;
+  "chat a-wait --help")
+    for ((i=0; i<100; i++)); do
+      if [ -f "${PFM_CONFIG%/*}/peer-ready" ]; then echo 'usage: pfm chat a-wait'; exit 2; fi
+      sleep 0.01
+    done
+    echo 'unknown command: a-wait'; exit 2 ;;
+  "chat b-signal --help")
+    printf 'ready\n' >"${PFM_CONFIG%/*}/peer-ready"
+    echo 'usage: pfm chat b-signal'; exit 2 ;;
+  "chat c-slow --help") sleep 0.1; echo 'unknown command: c-slow'; exit 2 ;;
+  "chat d-fast --help") echo 'unknown command: d-fast'; exit 2 ;;
+ARM
+)"
+map "${FULL}pfm chat a-wait\tO1\tO1.01-fixture\npfm chat b-signal\tO1\tO1.01-fixture\npfm chat c-slow\tO1\tO1.01-fixture\npfm chat d-fast\tO1\tO1.01-fixture\n"
+run_sut
+slow_line="$(grep -n '^check-map: ✗ STALE-NAME: pfm chat c-slow ' <<<"$OUT" | cut -d: -f1)"
+fast_line="$(grep -n '^check-map: ✗ STALE-NAME: pfm chat d-fast ' <<<"$OUT" | cut -d: -f1)"
+if [ "$RC" -eq 1 ] && [ -n "$slow_line" ] && [ -n "$fast_line" ] &&
+  [ "$slow_line" -lt "$fast_line" ] &&
+  grep -q 'map names: .* · 2 stale ·' <<<"$OUT" &&
+  grep -q 'check-map: ✗ 2 finding(s)' <<<"$OUT"; then
+  ok "hidden probes overlap; slow and fast stale findings print in map order"
+else
+  bad "hidden probe order" "rc=$RC" "$OUT"
 fi
 
 shtest_end

@@ -33,9 +33,10 @@ var (
 	loginGateContainerPattern = regexp.MustCompile(
 		`(?i)^(loginbutton|signupbutton|bottombar)$|authwall|login[-_]?form|sign-?in-?modal|login-?modal`,
 	)
-	// loginGatePath is the sign-in or sign-up address a gate links.
+	// loginGatePath is the sign-in or sign-up address a gate links
+	// (LinkedIn's legacy directory pages link /reg/join-context).
 	loginGatePath = regexp.MustCompile(
-		`^/(login|signup|i/flow/(login|signup)|i/jf/onboarding|accounts/login|login\.php|uas/login)(/|$|\?)`,
+		`^/(login|signup|i/flow/(login|signup)|i/jf/onboarding|accounts/login|login\.php|uas/login|reg/join[a-z-]*)(/|$|\?)`,
 	)
 )
 
@@ -46,9 +47,14 @@ var loginWalledHosts = []string{"x.com", "twitter.com", "instagram.com", "facebo
 // logged-out app site, a login gate — or "" when its markup shows none.
 // Prose alone never counts: a paywall is schema.org's isAccessibleForFree
 // false, or a subscription call inside a paywall element; a login wall is a
-// gate element or a sign-in link on an app site.
+// gate element or a sign-in link on an app site. On an app site the paywall
+// markup (LinkedIn's isAccessibleForFree false over a post's details) marks
+// what a signed-out reader is not shown: its login wall, never a subscription.
 func pageWall(source string, doc *html.Node) string {
 	if paywalled(doc) {
+		if loginWalledHost(source) {
+			return loginWallReason
+		}
 		return paywallReason
 	}
 	if loginWalledHost(source) && hasNode(doc, loginGate) {
@@ -125,6 +131,19 @@ func hasNode(doc *html.Node, match func(*html.Node) bool) bool {
 // login gate, and records it on budget so the fetch's failure names it.
 func (budget *loaderBudget) gateOnly(wall, converted string) bool {
 	if wall != loginWallReason || contentChars(converted) >= loginGateThinChars {
+		return false
+	}
+	if budget != nil {
+		budget.loginGateOnly = true
+	}
+	return true
+}
+
+// readerGateOnly reports whether markdown, a reader rung's copy of source,
+// is the site's sign-up wall in place of the page (linkedInSignUpWall), and
+// records it on budget so the fetch's failure names the wall.
+func (budget *loaderBudget) readerGateOnly(source, markdown string) bool {
+	if !linkedInSignUpWall(source, markdown) {
 		return false
 	}
 	if budget != nil {

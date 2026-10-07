@@ -14,6 +14,7 @@ import (
 // response gets. Watched FAILING before the fix (Error had no transport
 // detail and ErrorKind was empty).
 func TestDownloadAllRungsFailingNamesTheOutage(t *testing.T) {
+	t.Parallel()
 	down := errors.New("connection refused")
 	fail := func(*http.Request) (*http.Response, error) { return nil, down }
 	// Two distinct client values (even with identical behavior): New()
@@ -42,6 +43,7 @@ func TestDownloadAllRungsFailingNamesTheOutage(t *testing.T) {
 // one — so a lingering ProvenanceReferer send would read as a wall, not a
 // pass.
 func TestDownloadSendsNoReferer(t *testing.T) {
+	t.Parallel()
 	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64)
 	var referers []string
 	hotlinkProtected := func(r *http.Request) (*http.Response, error) {

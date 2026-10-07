@@ -78,6 +78,16 @@ run() { # run <label> -- <cmd...>
 # repo_git: the one fence-aware git reader, shared with the arch ratchets.
 # shellcheck source=../../pfm/scripts/repo-git.sh
 source "$REPO_ROOT/pfm/scripts/repo-git.sh" || { echo "dev.sh: cannot source pfm/scripts/repo-git.sh" >&2; exit 2; }
+# The step runner and the check catalogue: the verify, test and gate rows live
+# in infra/fence/checks.sh; gate runs them as concurrent steps (steps.sh).
+# shellcheck source=../../infra/fence/steps.sh
+source "$REPO_ROOT/infra/fence/steps.sh" || { echo "dev.sh: cannot source infra/fence/steps.sh" >&2; exit 2; }
+# shellcheck source=../../infra/fence/checks.sh
+source "$REPO_ROOT/infra/fence/checks.sh" || { echo "dev.sh: cannot source infra/fence/checks.sh" >&2; exit 2; }
+# The last line of every run that made a timing run dir is `RUN DIR: <absolute host path>`
+# (timing_run_report in infra/fence/checks.sh) — printed on exit, after the footer and, under
+# iso, after the host's own lines (the gate-history ingest).
+trap timing_run_report EXIT
 
 # skip_gate <label> <go-test.json>: every skipped test must be named in
 # pfm/scripts/known-skips.tsv (scripts/skip-check.sh). An unlisted skip is a
@@ -90,6 +100,42 @@ skip_gate() {
     1) gap_step "$label — unlisted skipped test(s) named above" ;;
     *) fail_step "$label — the skips could not be read (exit $rc)" ;;
   esac
+}
+
+# timing_run_dir <base>: create <base> if absent and a fresh run.XXXXXX under
+# it, mode 0755 whatever the umask — the fence writes as root under the bind
+# mount and the host's non-root reader (`make -C pfm timing`, the CI artifact
+# upload) must still open it. Prints the run dir's absolute path. BROKEN STATE:
+# a base or run dir that cannot be made is non-zero with a stderr line naming
+# the base and prints no path, so a caller never runs a suite into nowhere.
+timing_run_dir() {
+  local base="$1" run abs
+  if [[ ! -d "$base" ]]; then
+    if ! mkdir -p "$base" 2>/dev/null || ! chmod 0755 "$base" 2>/dev/null; then
+      echo "timing_run_dir: the timing base $base could not be created" >&2; return 1
+    fi
+  fi
+  if ! run="$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)"; then
+    echo "timing_run_dir: no run directory could be created under $base" >&2; return 1
+  fi
+  if ! chmod 0755 "$run" || ! abs="$(cd "$run" && pwd)"; then
+    echo "timing_run_dir: the run directory under $base could not be opened to readers ($run)" >&2; return 1
+  fi
+  printf '%s\n' "$abs"
+}
+
+# pfm_e2e_rows <pfm-dir> <timing-run-dir>: the one definition of the tagged e2e
+# rows — `test` runs them after the unit rows, `e2e` runs them alone. Tagged
+# Tier A runs serially and has its own budget and artifact.
+pfm_e2e_rows() {
+  local d="$1" timing_run="$2"
+  run "pfm: e2e (tagged)" -- bash -c '
+    go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
+  ' _ "$d" "$timing_run/e2e.json"
+  go_test_report "$timing_run/e2e.json"
+  skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
+  run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
+    --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json"
 }
 
 # go_test_report <go-test.json>: the failure-biased read of a `go test -json`
@@ -127,9 +173,11 @@ go_test_report() {
       | grep -vE '^[[:space:]]*$' | tail -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
     info "log: $abs"; return
   fi
-  local failed failpkgs pkg test body total n=0
-  failed="$(jq -r 'select(.Action=="fail" and .Test != null) | .Package + "\t" + .Test' "$json" | sort -u)"
-  failpkgs="$(jq -r 'select(.Action=="fail" and .Test == null) | .Package' "$json" | sort -u)"
+  local fails failed failpkgs pkg test body total n=0
+  # One pass over the stream finds both kinds of failure; a green stream is read once more only by the probe above.
+  fails="$(jq -r 'select(.Action=="fail") | if .Test != null then "T\t" + .Package + "\t" + .Test else "P\t" + .Package end' "$json")"
+  failed="$(awk -F'\t' '$1=="T" { print $2 "\t" $3 }' <<< "$fails" | sort -u)"
+  failpkgs="$(awk -F'\t' '$1=="P" { print $2 }' <<< "$fails" | sort -u)"
   if [[ -n "$failed" ]]; then
     while IFS=$'\t' read -r pkg test; do
       [[ -z "$pkg" ]] && continue
@@ -223,6 +271,11 @@ node_test_suite() {
       return
     fi
   done
+  # Concurrent gate steps share the tap directory; no step may rely on another creating it.
+  if ! mkdir -p "$(dirname "$tap")"; then
+    fail_step "$label tests NOT RUN — the TAP directory for $tap could not be created"
+    return
+  fi
   if ! node --test --test-reporter=tap "$@" >"$tap" 2>&1; then
     cat "$tap"
     fail_step "$label tests FAILED — a test regressed, or node could not run the suite (see output)"
@@ -240,313 +293,10 @@ node_test_suite() {
 act_templates() { # the shipped product: mechanical gates, no build
   local action="$1"
   case "$action" in
-    install|build|typecheck|cover) info "templates: no $action step (markdown + shell)" ;;
+    install|build|typecheck|cover|e2e) info "templates: no $action step (markdown + shell)" ;;
     verify|test|all)
-      # Clone ratchet over the shell / JS / Python surface (scripts/clone-check.sh,
-      # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
-      # broken state is `CLONES ERROR` and rc 2, never a PASS.
-      run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
-      # The lane↔command map gate (infra/fence/lanes/check-map.sh). --no-derive
-      # skips the command/tool surface derive, which needs a built pfm; its own
-      # broken state is a named red line and rc 1/2, never a silent pass.
-      run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
-      run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
-      head_ "templates — leak gate"
-      # EVERY tracked file in this repo is published, so the changed set is the
-      # whole working tree — not a `templates scripts README INSTALL CHANGELOG
-      # releases` pathspec. Under that pathspec a change touching docs/,
-      # .claude/, .codex/, .professor/ or infra/ printed "leak-check clean (N
-      # changed file(s))" having scanned none of it, and the count made the
-      # claim look earned. Deleted paths are dropped and COUNTED here rather
-      # than handed to leak-check, whose --files mode correctly refuses to call
-      # a list of non-files clean.
-      local changed present gone
-      changed=$(repo_git status --porcelain | awk '{print $NF}' | grep -v '/$' || true)
-      present=()
-      gone=0
-      local candidate
-      while IFS= read -r candidate; do
-        [[ -z "$candidate" ]] && continue
-        if [[ -f "$candidate" ]]; then present+=("$candidate"); else gone=$((gone + 1)); fi
-      done <<<"$changed"
-      if (( ${#present[@]} > 0 )); then
-        if scripts/leak-check.sh --files "${present[@]}"; then
-          ok "leak-check clean (${#present[@]} changed file(s) scanned, ${gone} deleted path(s) skipped)"
-        else
-          fail_step "leak-check FAILED — brand / PII / machine-path string in a changed public file"
-        fi
-      elif (( gone > 0 )); then
-        ok "leak-check: every one of the ${gone} changed path(s) is a deletion — nothing to scan, nothing could leak"
-      else
-        info "working tree clean — scanning the whole tracked templates tree instead"
-        # shellcheck disable=SC2046
-        if repo_git ls-files templates README.md INSTALL.md | xargs scripts/leak-check.sh --files; then
-          ok "leak-check clean (full tracked scan of templates/ + README + INSTALL — NOT the whole repo)"
-        else
-          fail_step "leak-check FAILED — brand / PII / machine-path string in a public file"
-        fi
-      fi
-
-      head_ "templates — placeholder registry"
-      # Scope: markdown templates only. Shell/JS templates use {VAR} for their own
-      # runtime values, which are not install placeholders and never will be.
-      # PLACEHOLDERS.md registers BOTH classes a markdown template can carry —
-      # install placeholders SETUP fills, and the runtime metavariables it must
-      # NOT fill (its own § Runtime metavariables). So an unregistered token is
-      # genuinely unruled, not merely uncategorised, and FAILS: a warning here
-      # was read by nobody and let a token sit unruled release after release.
-      local used unregistered out
-      used=$(grep -rhoE '\{[A-Z][A-Z0-9_]+\}' --include='*.md' templates 2>/dev/null | sort -u || true)
-      if [[ -z "$used" ]]; then
-        fail_step "placeholder scan produced NO tokens at all — the SCAN is broken, not the templates"
-      else
-        unregistered=$(comm -23 <(printf '%s\n' "$used") \
-                                <(grep -ohE '\{[A-Z][A-Z0-9_]+\}' docs/PLACEHOLDERS.md | sort -u))
-        if [[ -z "$unregistered" ]]; then
-          ok "every markdown-template token is registered in PLACEHOLDERS.md ($(wc -l <<<"$used") tokens)"
-        else
-          if [[ -n "${PFM_DEV_FENCE:-}" ]]; then
-            out="$(mktemp)"
-          else
-            out="$TMP_BASE/templates/unregistered-tokens.txt"
-            mkdir -p "$TMP_BASE/templates"
-          fi
-          printf '%s\n' "$unregistered" > "$out"
-          fail_step "$(wc -l <<<"$unregistered") of $(wc -l <<<"$used") markdown-template tokens are absent from PLACEHOLDERS.md — register each as an install placeholder or under § Runtime metavariables"
-          info "most frequent 10 (full list: $out):"
-          grep -rhoE '\{[A-Z][A-Z0-9_]+\}' --include='*.md' templates \
-            | grep -xFf "$out" | sort | uniq -c | sort -rn | head -10 \
-            | while read -r n tok; do info "  ${n}x  $tok"; done
-        fi
-      fi
-
-      head_ "templates — scratch-path policy"
-      # Scratch artifacts belong in /tmp/<project>/<purpose>, never in a repo-local
-      # tmp/. This catches the straggler an edit pass missed, which is the whole
-      # point: it enumerates tracked files rather than trusting that the sweep was
-      # complete. Its own broken state is distinct — a git listing that cannot be
-      # read is a FAIL naming git, never an empty sweep reported clean.
-      # NUL-delimited through a file: a command substitution drops NUL bytes, so
-      # capturing `ls-files -z` into a variable silently collapses the list into
-      # one blob and the scan reports clean because it scanned nothing.
-      mkdir -p "$TMP_BASE/templates"
-      if ! repo_git ls-files -z > "$TMP_BASE/templates/tracked.z" 2>/dev/null; then
-        fail_step "scratch-path policy: the tracked-file list could not be read from git — nothing was scanned"
-      else
-        # Excluded, and SAID so rather than filtered in silence: shipped release
-        # notes, the retro ledger, generated mirrors, and the two measurement
-        # records that name where a past capture actually landed — rewriting
-        # those would misstate history. An exclusion that hides its own work is
-        # the next bug, so the count and the list are printed on every run.
-        local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|\.professor/retro\.md$|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
-        # grep needs /dev/null as a second operand: BSD xargs runs the utility
-        # even on empty input, and a bare `grep PATTERN` then reads stdin and
-        # hangs the gate forever instead of reporting an empty sweep.
-        all_hits=$(xargs -0 grep -lE '(^|[^/[:alnum:]_.-])tmp/(timing|flights|lanes|guard|professor_)' /dev/null \
-          < "$TMP_BASE/templates/tracked.z" 2>/dev/null || true)
-        strays=$(printf '%s\n' "$all_hits" | grep -vE "$exclude" | grep -v '^$' || true)
-        excluded=$(printf '%s\n' "$all_hits" | grep -cE "$exclude" || true)
-        info "scratch-path scan: $excluded historical-record path(s) excluded by name (release notes, retro ledger, mirrors, measurement records)"
-        if [[ -z "$strays" ]]; then
-          ok "no tracked file names a migrated scratch purpose under a repo-local tmp/"
-        else
-          fail_step "$(wc -l <<<"$strays" | tr -d ' ') tracked file(s) still name a repo-local tmp/ path — repoint them at /tmp/<project>/<purpose>"
-          while read -r f; do [[ -n "$f" ]] && info "  $f"; done <<< "$strays"
-        fi
-
-        # The sweep above only knows the purposes one migration moved. The policy
-        # itself is checked on CODE (prose that merely mentions a path is not a
-        # write): (A) a repo-rooted tmp/ — `$ROOT/tmp/`, `path.join(repoRoot, 'tmp')`,
-        # Go's cwd-relative `filepath.Join("tmp", …)`; (B) a fixed-name bare
-        # `/tmp/<name>` a host run shares with every other checkout. Allowed: the
-        # derived `/tmp/$PROJECT/…` forms, anonymous `mktemp` templates (XXXXXX),
-        # and tmux's own `/tmp/tmux-<uid>` socket dir. Container-only code (the
-        # fence and demo lanes, the e2e docker run) and test fixtures are excluded
-        # BY NAME and counted, never filtered in silence; zero code files scanned
-        # is a broken scan, not a clean tree. A comment line names a path, it does
-        # not write one, so hits whose text opens with #, // or * are dropped.
-        local code_ext='\.(sh|bash|mjs|js|ts|py|go)$'
-        local code_skip='^(infra/(fence|demo)/|scripts/e2e-linux\.sh$)|(_test\.go|\.test\.(mjs|js|ts))$|/testdata/'
-        local code_z="$TMP_BASE/templates/tracked-code.z" code_n code_skipped repo_local bare
-        grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zvE "$code_skip" > "$code_z" || true
-        code_n=$(tr -cd '\0' < "$code_z" | wc -c | tr -d ' ')
-        code_skipped=$(grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zcE "$code_skip" || true)
-        if [[ "$code_n" -eq 0 ]]; then
-          fail_step "scratch-path policy: NO tracked code file was scanned — the SCAN is broken, not the tree"
-        else
-          repo_local=$(xargs -0 grep -nE '(\$\{?(ROOT|REPO_ROOT|repo_root|repoRoot|WORKTREE)\}?|\{repo-root\})/tmp/|path\.join\([A-Za-z_]+, *['"'"'"]tmp['"'"'"]|filepath\.Join\("tmp"' \
-            /dev/null < "$code_z" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' || true)
-          bare=$(xargs -0 grep -nE '(^|[^A-Za-z0-9_}.-])/tmp/[A-Za-z0-9_.-]' /dev/null < "$code_z" 2>/dev/null \
-            | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' | grep -vE 'XXXXXX|/tmp/tmux-' || true)
-          info "scratch-path policy: $code_n code file(s) scanned; $code_skipped excluded by name (container-only lanes, the e2e docker run, test fixtures)"
-          if [[ -z "$repo_local$bare" ]]; then
-            ok "no tracked code writes a repo-local tmp/ or a fixed-name bare /tmp path"
-          else
-            fail_step "$(printf '%s\n%s\n' "$repo_local" "$bare" | grep -c . | tr -d ' ') scratch write(s) outside /tmp/<project>/<purpose> — derive the project dir, or use an anonymous mktemp"
-            while read -r hit; do info "  $hit"; done < <(printf '%s\n%s\n' "$repo_local" "$bare" | grep .)
-          fi
-        fi
-      fi
-
-      head_ "templates — description registry"
-      # A `description:` is the routing registry (/quality:description). An
-      # unquoted `: ` in one breaks the YAML: Claude Code's lenient parser still
-      # registers the entry, a stricter runtime silently drops it, and no prompt
-      # rule can see it. The script distinguishes its own broken state from a
-      # clean tree (exit 2 toolchain, 3 empty scan, 4 git could not list the
-      # repository, 1 real failure); any other exit is the script crashing.
-      if scripts/description-check.sh; then
-        ok "every tracked frontmatter parses; description budget reported above"
-      else
-        case $? in
-          1) fail_step "a tracked frontmatter does not parse as YAML — quote the value or remove the bare ': ' (see the list above)" ;;
-          2) fail_step "description-check could not run (python3/PyYAML absent) — NO frontmatter was parsed" ;;
-          3) fail_step "description-check scanned nothing — the SCAN is broken, not the tree" ;;
-          4) fail_step "description-check could not locate or list the repository through git — NO frontmatter was parsed" ;;
-          *) fail_step "description-check crashed (exit $?) — NOT a verdict on the tree" ;;
-        esac
-      fi
-
-      head_ "templates — generate the engine mirrors"
-      # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
-      # clone holds none, so verify generates them from the Claude sources
-      # before any gate reads them. Current mirrors are left alone (the fence
-      # mounts the tree read-only and CI generates on the host first); the
-      # tree's own compiler runs, never a host pfm binary (a stale host build
-      # rewrites what it does not understand).
-      if ! need_tool go templates || ! need_tool node templates; then
-        fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
-      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex check "$REPO_ROOT") >/dev/null 2>&1 \
-        && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode check "$REPO_ROOT") >/dev/null 2>&1; then
-        ok "engine mirrors current — nothing generated"
-      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex build "$REPO_ROOT") \
-        && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode build "$REPO_ROOT"); then
-        ok "engine mirrors generated from the Claude sources"
-      else
-        fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
-      fi
-
-      head_ "templates — codex generated-marker claim"
-      # The templates dir's shipped JS compiler and this repo's `pfm codex build`
-      # write the same $HOME/.codex outputs on adopter hosts. A copy that stops
-      # claiming the other's marker reports its files STALE forever; the gate
-      # also reconciles every marked file's declared source against disk, so a
-      # fossil generated from a deleted file fails BY NAME.
-      if node scripts/check-codex-markers.mjs; then
-        ok "compiler marker claims hold; every marked file has a live source"
-      else
-        fail_step "codex marker claim FAILED — a stranded marker or an orphaned generated file (see output)"
-      fi
-
-      head_ "templates — generated agent rosters"
-      if node scripts/check-agent-roster.mjs; then
-        ok "Codex and OpenCode agent rosters match their Claude sources"
-      else
-        fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
-      fi
-
-      head_ "templates — token-audit pricing"
-      if node scripts/check-token-pricing.mjs; then
-        ok "every published model id resolves to its intended rate"
-      else
-        fail_step "token pricing FAILED — a published model id resolves to the wrong rate, or the PRICING table could not be read (see output)"
-      fi
-
-      head_ "templates — token-audit tests"
-      # node --test exits 0 when it finds no tests, so a moved or renamed suite
-      # would read as a pass: enumerate the files and count the passes instead.
-      local token_tests=(templates/global/commands/tokens/*.test.mjs)
-      local token_out="$TMP_BASE/templates/token-audit.tap"
-      mkdir -p "$TMP_BASE/templates"
-      if [[ ! -f "${token_tests[0]}" ]]; then
-        fail_step "token-audit tests NOT RUN — templates/global/commands/tokens/*.test.mjs matched no file; the suite was never executed"
-      elif ! node --test --test-reporter=tap "${token_tests[@]}" >"$token_out" 2>&1; then
-        cat "$token_out"
-        fail_step "token-audit tests FAILED — a measure, the flight selection, or an error path regressed, or node could not run the suite (see output)"
-      elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$token_out"; then
-        cat "$token_out"
-        fail_step "token-audit tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
-      else
-        ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
-      fi
-
-      head_ "templates — release-check tests and the notes grammar"
-      node_test_suite "release-check" "$TMP_BASE/templates/release-check.tap" scripts/release-check.test.mjs
-      if node scripts/release-check.mjs notes --all releases >"$TMP_BASE/templates/release-notes.txt" 2>&1; then
-        ok "release notes from v0.78.0 on follow docs/RELEASE.md § Release notes ($(grep -m1 '^CHECKED' "$TMP_BASE/templates/release-notes.txt" || echo 'CHECKED line MISSING'))"
-      else
-        cat "$TMP_BASE/templates/release-notes.txt"
-        fail_step "release notes grammar FAILED — a note breaks docs/RELEASE.md § Release notes, or release-check could not run (exit 2 is an ERROR, see output)"
-      fi
-
-      head_ "templates — codex-sync missing compiler"
-      local cs_copy
-      for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
-        if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
-          ok "codex-sync ($cs_copy) names unavailable compiler and retains dirty flag"
-        else
-          fail_step "codex-sync regression FAILED ($cs_copy) — unavailable compiler must be named and dirty flag retained"
-        fi
-      done
-
-      head_ "templates — go test report under pipefail"
-      if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
-        ok "go_test_report reaches its log line on filtered and over-cap failure output"
-      else
-        fail_step "go_test_report regression FAILED — a failing stream aborted the report before its verdict (see output)"
-      fi
-
-      head_ "templates — native opencode mirror"
-      # Build the source-under-test inside the fence; verification must never
-      # depend on or install a host binary. The ignored artifact also gives this
-      # repo's Stop hook a current compiler while develop remains uninstalled.
-      # /pfm-timing exists only as the fence's bind mount; on the host the same
-      # scratch is $TMP_BASE/timing, so resolve it the way the timing ledger does.
-      local opencode_scratch="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
-      local opencode_bin="$opencode_scratch/pfm-dev-bin"
-      local opencode_home="$opencode_scratch/opencode-verify-home"
-      if need_tool go templates && mkdir -p "$opencode_scratch" \
-        && go -C pfm build -o "$opencode_bin" ./cmd/pfm \
-        && "$opencode_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
-        && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
-        ok "opencode mirror current and parseable"
-      else
-        fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
-      fi
-
-      head_ "templates — OpenCode writer check tests"
-      node_test_suite "opencode-writer check" "$TMP_BASE/templates/opencode-writer.tap" scripts/check-opencode-writer.test.mjs
-
-      head_ "templates — codeprobe skill tests"
-      local cp_out="$TMP_BASE/templates/codeprobe.txt"
-      if [[ ! -f templates/global/skills/codeprobe/codeprobe_test.py ]]; then
-        fail_step "codeprobe tests NOT RUN — templates/global/skills/codeprobe/codeprobe_test.py is missing"
-      elif ! python3 -m unittest templates/global/skills/codeprobe/codeprobe_test.py >"$cp_out" 2>&1; then
-        cat "$cp_out"
-        fail_step "codeprobe tests FAILED — a verb or probe command regressed, or python3 could not run the suite (see output)"
-      elif ! grep -Eq '^Ran [1-9][0-9]* tests?' "$cp_out"; then
-        cat "$cp_out"
-        fail_step "codeprobe tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
-      elif grep -Eq 'skipped=[1-9]' "$cp_out"; then
-        cat "$cp_out"
-        fail_step "codeprobe tests SKIPPED — a skipped test is a named gap, never a pass"
-      else
-        ok "codeprobe verbs and probe commands hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
-      fi
-
-      head_ "templates — OpenCode writer references"
-      if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then
-        ok "live surfaces use native pfm opencode"
-      else
-        fail_step "OpenCode writer reference FAILED — use native pfm opencode on every named surface"
-      fi
-      head_ "templates — self-hosted manifest"
-      if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm; then
-        ok "self-hosted manifest version, roster, and hashes match the repository"
-      else
-        fail_step "self-hosted manifest FAILED — its install ledger is stale or unreadable"
-      fi
-
+      # The rows: checks_templates in infra/fence/checks.sh.
+      checks_templates
       ;;
     *) return 0 ;;
   esac
@@ -559,54 +309,56 @@ act_pfm() {
   need_tool make pfm || return 0
   case "$action" in
     install) run "pfm: go mod download" -- go -C "$d" mod download ;;
-    build)   run "pfm: go build" -- go -C "$d" build ./... ;;
-    typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
-    verify)
-      run "pfm: go vet" -- go -C "$d" vet ./...
-      # Formatting and lint through the pinned golangci-lint (infra/fence/tools.env):
-      # the Makefile names TOOLCHAIN-MISSING when the tool is absent — `make
-      # tools` on the host; the fence image bakes it in. lint-new judges only
-      # lines changed since origin/develop; `make lint` is the full backlog.
-      run "pfm: fmt-check (gofumpt + gci + golines)" -- make -C "$d" --no-print-directory fmt-check
-      run "pfm: lint-new (golangci-lint, changed lines)" -- make -C "$d" --no-print-directory lint-new
-      # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
-      # is rc 2 (an enumerator or grep that could not run), never a PASS.
-      run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh"
-      # The gate scripts' own fixture suites: a ratchet nobody tests is trusted
-      # on faith. Each prints "N passed, M failed" and is non-zero on any FAIL.
-      run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d" ;;
-    # -count=1 is not optional: without it a package whose inputs are unchanged
-    # reports `ok  (cached)`, and this gate would call a run it never watched a
-    # pass. -timeout is measured, not guessed — internal/index's OpenCode WAL
-    # stress test alone takes ~4.5 minutes (268s watched), so the 10m default
-    # turns an ordinary loaded host into a red suite that names the wrong cause.
-    test)
-      local flags_text timing_base timing_run
-      local testflags=()
-      if ! flags_text="$(make -s -C "$d" --no-print-directory testflags)"; then
-        fail_step "pfm: TESTFLAGS could not be read from Makefile"; return
+    build)
+      run "pfm: make prompts" -- make -C "$d" prompts
+      run "pfm: go build" -- go -C "$d" build ./...
+      # Reproducible build: ./cmd/pfm compiled twice for the environment's
+      # GOOS/GOARCH with every input pinned (no cgo, no GOFLAGS, trimmed paths,
+      # no VCS stamp — the fence's linked-worktree .git names a host path) must
+      # hash identically. BROKEN STATE: no sha256 tool is TOOLCHAIN-MISSING and
+      # red, never a pass; a failed build or scratch dir is red naming the label.
+      local goos goarch label build_dir h1 h2 n
+      local sum_cmd=()
+      goos="$(go env GOOS)"; goarch="$(go env GOARCH)"
+      label="pfm: reproducible build ($goos/$goarch)"
+      if command -v sha256sum >/dev/null 2>&1; then sum_cmd=(sha256sum)
+      elif command -v shasum >/dev/null 2>&1; then sum_cmd=(shasum -a 256)
+      else fail_step "$label — TOOLCHAIN-MISSING: neither sha256sum nor shasum on PATH; the builds could not be compared"; return; fi
+      if ! mkdir -p "$TMP_BASE/build" || ! build_dir="$(mktemp -d "$TMP_BASE/build/repro.XXXXXX")"; then
+        fail_step "$label — no scratch directory could be created under $TMP_BASE/build"; return
       fi
-      read -r -a testflags <<< "$flags_text"
+      info "\$ CGO_ENABLED=0 go -C $d build -trimpath -buildvcs=false -ldflags \"-X main.version=verify\" -o $build_dir/pfm.{1,2} ./cmd/pfm"
+      for n in 1 2; do
+        env -u GOFLAGS CGO_ENABLED=0 go -C "$d" build -trimpath -buildvcs=false \
+          -ldflags "-X main.version=verify" -o "$build_dir/pfm.$n" ./cmd/pfm || break
+      done
+      if [[ ! -f "$build_dir/pfm.1" || ! -f "$build_dir/pfm.2" ]]; then
+        fail_step "$label — go build ./cmd/pfm failed (see output)"
+      else
+        h1="$("${sum_cmd[@]}" "$build_dir/pfm.1" | awk '{print $1}')"
+        h2="$("${sum_cmd[@]}" "$build_dir/pfm.2" | awk '{print $1}')"
+        if [[ -n "$h1" && "$h1" == "$h2" ]]; then
+          ok "$label — sha256 = $h1"
+        else
+          fail_step "$label — the two builds differ: sha256 ${h1:-<unreadable>} vs ${h2:-<unreadable>}"
+        fi
+      fi
+      rm -rf "$build_dir" ;;
+    typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
+    verify) checks_pfm_verify "$d" ;;
+    # The rows (unit sharded by pfm/scripts/test-shard.sh, then the e2e rows):
+    # checks_pfm_test in infra/fence/checks.sh.
+    test) checks_pfm_test "$d" ;;
+    # The tagged e2e suite alone, in its own timing run dir — the same rows
+    # `test` runs after the unit suite (pfm_e2e_rows).
+    e2e)
+      local timing_base timing_run
       timing_base="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
-      mkdir -p "$timing_base"
-      timing_run="$(mktemp -d "$timing_base/run.XXXXXX")"
-      # Positional arguments keep flags and output paths out of shell code.
-      # The JSON is retained even on failure; timing is a separate verdict.
-      run "pfm: go test" -- bash -c '
-        go -C "$1" test "${@:3}" -count=1 -timeout 25m -json ./... >"$2"
-      ' _ "$d" "$timing_run/unit.json" "${testflags[@]}"
-      go_test_report "$timing_run/unit.json"
-      skip_gate "pfm: skipped tests are all listed (unit)" "$timing_run/unit.json"
-      run "pfm: test timing (budget)" -- bash "$d/scripts/test-timing.sh" \
-        --check --suite unit --out "$timing_run/unit.tsv" "$timing_run/unit.json"
-      # Tagged Tier A runs serially and has its own budget and artifact.
-      run "pfm: e2e (tagged)" -- bash -c '
-        go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
-      ' _ "$d" "$timing_run/e2e.json"
-      go_test_report "$timing_run/e2e.json"
-      skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
-      run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
-        --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json" ;;
+      if ! timing_run="$(timing_run_dir "$timing_base")"; then
+        fail_step "pfm: timing run directory could not be created under $timing_base"; return
+      fi
+      timing_run_note "$timing_run"
+      pfm_e2e_rows "$d" "$timing_run" ;;
     # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
     # by pfm/.testcoverage.yml (a ratchet: measured, raised, never lowered).
     # COVER_DIR is where the profiles land — the fence sets it to container HOME
@@ -625,10 +377,10 @@ dispatch() { # dispatch <project> <action>
 
 # ─── iso — the container fence ───────────────────────────────────────────────
 # Runs a command inside the pfm-dev container (infra/fence/docker-compose.yml) with
-# THIS checkout — the worktree this script belongs to — mounted at /work: a
+# THIS checkout — the worktree this script belongs to — mounted at /worktree: a
 # fresh machine per run (own HOME, own tmux, no published ports). Files are
 # edited on the host; the container only builds and tests.
-# First output line is the fence proof (container hostname + HOME + /work).
+# First output line is the fence proof (container hostname + HOME + /worktree).
 # BROKEN STATE: docker missing, its DAEMON unreachable, or the compose file
 # missing = TOOLCHAIN-MISSING and a non-zero exit — never a host fallback; a run
 # that cannot print its fence proof did not run inside the fence. The daemon is
@@ -656,6 +408,15 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   if [[ ! -f "$compose" ]]; then
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
   fi
+  # infra/fence/housekeeping.sh: the image-building gate actions clear stale
+  # fence containers, images and caches first (status, run, shell and sim pay
+  # nothing); every action finds the cache volumes housekeeping.sh lists
+  # (FENCE_CACHE_VOLUMES). Neither call ever fails this script.
+  . "$REPO_ROOT/infra/fence/housekeeping.sh"
+  case "$action" in
+    install|build|typecheck|verify|test|e2e|cover|all|gate) fence_housekeeping ;;
+  esac
+  fence_volumes_ensure
 
   # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
   # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the demo
@@ -672,24 +433,55 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   # The worktree mount is read-only; coverage profiles land in container HOME.
   extra+=(-e COVER_DIR=/root/cover)
   # Only generated timing artifacts are writable; the source mount stays read-only.
+  # PFM_TEST_TIMING_HOST maps a fence run dir back to its host path; the fence writes that path
+  # to the note PFM_TEST_RUN_NOTE, and this script's EXIT trap prints it as the last line.
   mkdir -p "$TMP_BASE/timing"
-  extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
+  TIMING_RUN_NOTE="$(mktemp "$TMP_BASE/timing/.run-note.XXXXXX")" \
+    || { fail_step "iso: the run-dir note could not be created under $TMP_BASE/timing"; exit 1; }
+  extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing
+    -e "PFM_TEST_TIMING_HOST=$TMP_BASE/timing" -e "PFM_TEST_RUN_NOTE=/pfm-timing/${TIMING_RUN_NOTE##*/}")
   if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
+  # Profiling and step-scheduling knobs reach the fence when the caller set them.
+  local knob
+  for knob in STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
+    if [[ -n "${!knob+x}" ]]; then extra+=(-e "$knob=${!knob}"); fi
+  done
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
+  # infra/fence/image-key.sh: a service image is built only when the key of its
+  # build inputs differs from the pfm.fence.inputs label the image carries, so a
+  # current image starts with no build and no registry round trip.
+  case "$action" in
+    shell|install|build|typecheck|verify|test|e2e|cover|all|status|gate|run|sim)
+      local service=pfm-dev
+      [[ "$action" != sim ]] || service=pfm-sim
+      . "$REPO_ROOT/infra/fence/image-key.sh"
+      fence_image_prepare "$compose" "$service" || { fail_step "iso: the $service image could not be keyed — see the line above"; exit 1; } ;;
+  esac
   case "$action" in
     shell)
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
-    e2e)
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
-    install|build|typecheck|verify|test|cover|all|status)
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
+      # Interactive: housekeeping's age limit never ends a shell someone is in.
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} --label pfm.fence.long-lived=1 \
+        ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
+    install|build|typecheck|verify|test|e2e|cover|all|status)
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
+    gate)
+      # The flight gate: pfm and templates rows as concurrent steps in ONE
+      # container, the per-step table in the run dir under /pfm-timing. The
+      # whole gate runs under the egress recorder; its verdict is the last line.
+      local gate_rc=0
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; bash infra/fence/egress.sh run ./.claude/scripts/dev.sh gate ${2:-all}" || gate_rc=$?
+      # The permanent ledger lives on the host: append this run (and any real
+      # gate run not yet recorded) after the container is gone.
+      bash "$REPO_ROOT/infra/fence/gate-history.sh" ingest "$TMP_BASE/timing" --host-load-now \
+        || echo "gate-history: LEDGER-NOT-WRITTEN — ingest exited $? (the gate verdict above stands)" >&2
+      return "$gate_rc" ;;
     run)
       # An arbitrary command inside the fence, from the worktree root — for the
       # probes the fixed rows do not cover (`go test -json ./cmd/pfm`, a single
       # package, `make -C pfm lint`). Exit status is the command's own.
       local cmd="${*:2}"
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
     sim)
       # The real-simulation fence: `run` on the pfm-sim service — Google Chrome
       # (headless only), and pfm built + installed from this worktree with the
@@ -700,7 +492,7 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       local cmd="${*:2}"
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso sim <command…>" >&2; exit 2; }
       extra+=(-v "$(sim_volume):/root/.local/state/pfm/harvest-python")
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-sim bash -c "$proof; $cmd" ;;
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-sim bash -c "$proof; $cmd" ;;
     sim-reset)
       # Drops this worktree's harvester volume (several GB of provisioned
       # sidecars); the next `iso sim` provisions from scratch. An absent volume
@@ -712,7 +504,7 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       docker volume rm "$volume" >/dev/null || { fail_step "iso sim-reset: could not drop $volume (in use by a running sim?)"; exit 1; }
       ok "iso sim-reset: dropped $volume" ;;
     *)
-      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project] | iso {run|sim} <command…> | iso sim-reset" >&2; exit 2 ;;
+      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project] | iso gate [pfm|templates] | iso {run|sim} <command…> | iso sim-reset" >&2; exit 2 ;;
   esac
 }
 
@@ -727,12 +519,17 @@ commands:
   build                  compile
   typecheck              vet / tsc --noEmit
   verify                 pre-test gates (pfm: go vet, fmt-check, lint-new, architecture ratchet;
-                         templates: clone ratchet, leak + token gates)
-  test                   run the test suite
-  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml)
-  all                    verify + build + test for the project
+                         templates: clone ratchet, leak + token gates) — fence only
+  test                   run the test suite (pfm: unit rows, then the e2e rows) — fence only
+  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml) — fence only
+  all                    verify + build + test for the project — fence only
+  gate [project]         verify + test rows as concurrent steps in one run, a per-step
+                         table (step · verdict · seconds) in the timing dir — fence only
   iso <cmd> [project]    run any command above — plus e2e | shell — inside the
                          pfm-dev container fence (infra/), worktree mounted
+  iso gate [pfm|templates]
+                         the flight gate: both projects (or one) in ONE container,
+                         concurrent steps, the per-step table, the gate wall budget
   iso sim <command…>     run a command in the real-simulation fence: Google Chrome,
                          an X display, pfm installed from the worktree, browser rung on
   iso sim-reset          drop this worktree's sim harvester volume
@@ -748,9 +545,20 @@ EOF
 CMD="${1:-status}"
 TARGET="${2:-all}"
 
+# A suite never runs on the host: its tests spawn tmux sessions, git repos and
+# processes against whatever machine they run on. The fence sets
+# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh).
+case "$CMD" in
+  test|cover|all|verify|gate)
+    if [[ -z "${PFM_DEV_FENCE:-}" ]]; then
+      echo "FENCE-ONLY: dev.sh $CMD runs test suites and never on the host — run: .claude/scripts/dev.sh iso $CMD ${2:-}" >&2
+      exit 2
+    fi ;;
+esac
+
 case "$CMD" in
   status) cmd_status "$TARGET" ;;
-  install|build|test|typecheck|verify|cover|all)
+  install|build|test|e2e|typecheck|verify|cover|all)
     if [[ "$TARGET" == "all" ]]; then
       for p in "${PROJECTS[@]}"; do head_ "$p :: $CMD"; dispatch "$p" "$CMD"; done
     else
@@ -759,6 +567,11 @@ case "$CMD" in
       dispatch "$TARGET" "$CMD"
     fi ;;
   iso) cmd_iso "${@:2}" ;;
+  gate)
+    case "$TARGET" in
+      pfm|templates|all) gate_run "$TARGET" || FAILURES=$((FAILURES + 1)) ;;
+      *) echo "unknown gate target: $TARGET" >&2; usage ;;
+    esac ;;
   -h|--help|help) usage ;;
   *) echo "unknown command: $CMD" >&2; usage ;;
 esac

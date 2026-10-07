@@ -21,7 +21,7 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 SRC=/worktree
 HERE="$SRC/infra/demo"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 PROJECTS=(atlas lumen orbit harvester)
 phase="${1:-}"
 
@@ -42,10 +42,9 @@ tools)
   ;;
 install)
   [ -f "$CONFIG" ] || { echo "setup: $CONFIG missing — up.sh writes it before this phase" >&2; exit 1; }
-  # 1. Every seat needs a settings.json for pfm to wire, and a credential to be real.
+  # 1. Every seat needs its own identity directory and credentials.
   while read -r dir; do
     dir="$(expand "$dir")"; mkdir -p "$dir"
-    [ -f "$dir/settings.json" ] || echo '{}' > "$dir/settings.json"
     [ -s "$dir/.credentials.json" ] || { echo "setup: NOTE — seat $dir has no .credentials.json — it logs in inside the container (up.sh --login) or creds.sh copies it; up.sh probes every seat before the interview" >&2; true; }
   done < <(jq -r '.accounts[].configDir' "$CONFIG")
   while read -r home; do
@@ -53,14 +52,6 @@ install)
     [ -s "$home/auth.json" ] || { echo "setup: codex home $home has no auth.json — run creds.sh first" >&2; exit 1; }
   done < <(jq -r '.codex.homes[].home' "$CONFIG")
   [ -s "$HOME/.local/share/opencode/auth.json" ] || { echo "setup: OpenCode has no auth.json under ~/.local/share/opencode — run creds.sh --opencode first" >&2; exit 1; }
-  #    Seats share one transcript store, as the host does (~/.cc/N/projects → ~/.claude/projects):
-  #    /reload --account N resumes the SAME transcript under the new seat, and a seat
-  #    with its own projects/ dir would resume nothing and die at birth.
-  primary="$(expand "$(jq -r '.accounts[0].configDir' "$CONFIG")")"; mkdir -p "$primary/projects"
-  while read -r dir; do
-    dir="$(expand "$dir")"; [ "$dir" = "$primary" ] && continue
-    [ -L "$dir/projects" ] || { rm -rf "$dir/projects"; ln -s "$primary/projects" "$dir/projects"; }
-  done < <(jq -r '.accounts[].configDir' "$CONFIG")
   # 1b. OpenCode's own config, model only: pfm install (step 2 below) merges the
   #     `professor` registration (`pfm mcp serve --stdio`) and the `instructions`
   #     array into this same file, so the demo writes nothing under "mcp" itself.
@@ -73,7 +64,7 @@ install)
 EOF
   # 2. pfm install exactly as a user runs it from the clone, Claude Code themes included: the
   #    seats wear the professor palettes the presenter's machines wear.
-  #    ~/.professor is where pfm expects the blueprint clone (pfm update check,
+  #    ~/.professor is where pfm expects the blueprint clone (pfm doctor --project-updates,
   #    the global fan-out); on a real host it IS the checkout, here it links to the mount.
   [ -e "$HOME/.professor" ] || ln -s "$SRC" "$HOME/.professor"
   #    The harvester's Python sidecar can refuse a platform (a pinned CUDA wheel on
@@ -83,29 +74,27 @@ EOF
     echo "setup: WARNING — pfm install with the harvester failed (see above); retrying with --skip-harvest: the professor MCP's harvester tools are NOT available in this container" >&2
     (cd "$SRC" && pfm install --yes --skip-harvest)
   fi
+  # Shared settings use the primary seat's theme and the presenter's defaults.
+  primary_emoji="$(jq -r '.accounts[] | select(.id == 1) | .emoji' "$CONFIG")"
+  case "$primary_emoji" in 🥇) theme=professor-gold ;; 🥈) theme=professor-silver ;; 🥉) theme=professor-bronze ;; *) theme=tokyo-night ;; esac
+  settings_tmp="$(mktemp)"
+  jq --arg t "custom:$theme" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
+  cat "$settings_tmp" >"$HOME/.claude/settings.json"
+  rm -f "$settings_tmp"
   "$HERE/daemon.sh" # no init system in the fence: the MCP HTTP daemon runs from here
   # 3. Claude Code's first-run state: onboarding done, every demo project trusted, so no
   #    dialog stands between a spawn and a live chat. Merged, never overwritten — pfm
-  #    install may already have written mcpServers.professor into the same file.
+  #    install may already have written other owned keys into the same file.
   trust="$(printf '%s\n' "${PROJECTS[@]}" express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s 'from_entries')"
   #    The bypass-permissions warning is a second first-run screen whose default is
   #    "No, exit" — a spawn's typed prompt dies in it. Accepting it once writes
   #    skipDangerousModePermissionPrompt into settings.json; that is what is seeded.
-  #    The seat's Claude Code theme follows its medal (🥇 gold · 🥈 silver · 🥉 bronze):
-  #    the professor-* overlays pfm install placed in the primary seat's themes/, which
-  #    every other seat reaches through a symlink, as on the host.
   while IFS=$'\t' read -r dir emoji; do
     dir="$(expand "$dir")"; f="$dir/.claude.json"
     [ -s "$f" ] || echo '{}' > "$f"
     #    Claude Code's first run drops theme:"dark" into .claude.json, and that key
     #    beats settings.json's custom theme — dropped, as the presenter's host has it.
     jq --argjson trust "$trust" '. + {hasCompletedOnboarding: true} | del(.theme) | .projects = ((.projects // {}) + $trust)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-    case "$emoji" in 🥇) theme=professor-gold ;; 🥈) theme=professor-silver ;; 🥉) theme=professor-bronze ;; *) theme=tokyo-night ;; esac
-    #    The presenter's own Claude Code look and habits: fullscreen TUI (the
-    #    composer sits at the bottom, output above), low default effort, no
-    #    attribution lines, no feedback drafts, no workflow-usage nag.
-    jq --arg t "custom:$theme" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$dir/settings.json" > "$dir/settings.json.tmp" && mv "$dir/settings.json.tmp" "$dir/settings.json"
-    [ "$dir" = "$primary" ] || [ -e "$dir/themes" ] || ln -s "$primary/themes" "$dir/themes"
   done < <(jq -r '.accounts[] | "\(.configDir)\t\(.emoji)"' "$CONFIG")
   # 4. The shell: Starship's Catppuccin powerline after pfm's shim.
   [ -f "$HOME/.config/starship.toml" ] || starship preset catppuccin-powerline -o "$HOME/.config/starship.toml"

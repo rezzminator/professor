@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -129,6 +132,7 @@ func Await(
 	answers := make([]string, 0, 2)
 	newestRole := ""
 	quietSince := start
+	codexTurn := codexTurnRead{at: -1}
 	var chat Chat
 	found := false
 	resolvedAt := time.Time{}
@@ -168,8 +172,12 @@ func Await(
 			// The chat's record moved — a transcript that did not exist when
 			// the message was sent, or a resumed thread writing a new file.
 			// The frontier belonged to the old file, so the new one is read
-			// whole.
-			if path != "" {
+			// whole. A new SPELLING of the same file is not a move: a fresh
+			// Claude chat is named by its hook crumb's path until the index
+			// has it, then by the index's, and an account whose projects/ is
+			// a symlink spells the one file two ways. Reading it whole again
+			// would count the question twice.
+			if path != "" && !sameTranscriptFile(ctx, path, chat.Path) {
 				offset = 0
 			}
 			path = chat.Path
@@ -214,6 +222,13 @@ func Await(
 		answered := len(answers) > 0 &&
 			assistantAnswered(newestRole) &&
 			options.Now().Sub(quietSince) >= options.Settle
+		if answered && chat.Engine == pfmengine.Codex {
+			open, err := codexTurn.open(path, offset)
+			if err != nil {
+				return finish(turn, answers, start, options.Now()), err
+			}
+			answered = !open
+		}
 		if answered {
 			turn.State = StateIdle
 			return finish(turn, answers, start, options.Now()), nil
@@ -235,6 +250,30 @@ func Await(
 	}
 }
 
+// codexTurnRead holds a Codex rollout's turn record as last read, keyed by the
+// transcript offset it was read at, so a quiet file is scanned once, not once
+// per poll.
+type codexTurnRead struct {
+	at    int64
+	state transcript.CodexTurnState
+}
+
+// open says whether the rollout's newest turn record leaves a turn running —
+// the end-record rule Inspect applies (applyCodexTurnRecord). Codex writes
+// assistant commentary between the tool calls of one turn, so a quiet gap
+// after it is not an answer until a task_complete or a turn_aborted lands. A
+// rollout holding no turn record keeps the newest-entry rule.
+func (read *codexTurnRead) open(path string, offset int64) (bool, error) {
+	if read.at != offset {
+		meta, err := transcript.ReadMeta(path, string(pfmengine.Codex))
+		if err != nil {
+			return false, fmt.Errorf("read Codex turn records %s: %w", path, err)
+		}
+		read.at, read.state = offset, meta.CodexTurn
+	}
+	return read.state == transcript.CodexTurnOpen, nil
+}
+
 // Frontier is the transcript offset to record before speaking.
 func Frontier(chat Chat) (int64, error) {
 	return transcript.Size(chat.Path)
@@ -244,4 +283,25 @@ func finish(turn Turn, answers []string, start, now time.Time) Turn {
 	turn.Answer = strings.TrimSpace(strings.Join(answers, "\n\n"))
 	turn.WaitedSeconds = now.Sub(start).Seconds()
 	return turn
+}
+
+// sameTranscriptFile says whether two transcript paths name one file,
+// following symlinks. A path that cannot be resolved is compared as spelled,
+// and the failure is logged: treating it as a move costs a re-read, while
+// treating two files as one would lose a turn.
+func sameTranscriptFile(ctx context.Context, left, right string) bool {
+	return resolvedTranscriptPath(ctx, left) == resolvedTranscriptPath(ctx, right)
+}
+
+func resolvedTranscriptPath(ctx context.Context, path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		obs.Logger(ctx).Warn(
+			"await: transcript path could not be resolved; comparing it as spelled",
+			"path", path,
+			obs.FieldErr, err.Error(),
+		)
+		return filepath.Clean(path)
+	}
+	return resolved
 }

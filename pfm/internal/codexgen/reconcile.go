@@ -29,6 +29,10 @@ type generatedFile struct {
 	// means "use the package default" (0o644) — every existing caller
 	// leaves it unset, so this changes nothing until a caller sets it.
 	Mode os.FileMode
+	// Kept marks the twin of a source link that does not resolve right now
+	// (an uninitialised submodule): reconcile leaves the path as it is and
+	// never sweeps it as an orphan (unresolved.go).
+	Kept *sourceEntry
 }
 
 // defaultGeneratedFileMode is the permission every reconcileFile write has
@@ -38,6 +42,7 @@ const defaultGeneratedFileMode = os.FileMode(0o644)
 type reconcileResult struct {
 	Wrote, Unchanged, Deleted int
 	Problems, Warnings        []string
+	Rebuildable               []string
 	Actions                   []Action
 }
 
@@ -65,10 +70,24 @@ func reconcileManagedWithClaim(
 	owns func(string) bool,
 ) (reconcileResult, error) {
 	result := reconcileResult{}
+	claimed := map[string]bool{}
+	for _, output := range outputs {
+		if output.Kept == nil {
+			claimed[managedEntry(output.Path, managed)] = true
+		}
+	}
 	sort.Slice(outputs, func(i, j int) bool { return outputs[i].Path < outputs[j].Path })
 	wanted := map[string]bool{}
 	for _, output := range outputs {
-		wanted[managedEntry(output.Path, managed)] = true
+		entry := managedEntry(output.Path, managed)
+		if output.Kept != nil && claimed[entry] {
+			continue
+		}
+		wanted[entry] = true
+		if output.Kept != nil {
+			result.keepTwin(output)
+			continue
+		}
 		if output.Link != "" {
 			result.reconcileLink(output, mode, owns)
 			continue
@@ -115,7 +134,9 @@ func (r *reconcileResult) reconcileLink(output generatedFile, mode Mode, owns fu
 		if os.IsNotExist(err) {
 			state = "MISSING"
 		}
-		r.Problems = append(r.Problems, fmt.Sprintf("%s %s (want symlink → %s)", state, output.Path, output.Link))
+		problem := fmt.Sprintf("%s %s (want symlink → %s)", state, output.Path, output.Link)
+		r.Problems = append(r.Problems, problem)
+		r.Rebuildable = append(r.Rebuildable, problem)
 		r.Actions = append(r.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
 		return
 	}
@@ -176,21 +197,22 @@ func (r *reconcileResult) reconcileFile(output generatedFile, mode Mode, owns fu
 			return
 		}
 		if modeOnlyDrift {
-			r.Problems = append(
-				r.Problems,
-				fmt.Sprintf("MODE %s (want %04o, have %04o)", output.Path, wantMode, haveMode),
-			)
+			problem := fmt.Sprintf("MODE %s (want %04o, have %04o)", output.Path, wantMode, haveMode)
+			r.Problems = append(r.Problems, problem)
+			r.Rebuildable = append(r.Rebuildable, problem)
 			r.Actions = append(
 				r.Actions,
 				Action{Kind: actionChmod, Path: output.Path, Target: fmt.Sprintf("%04o", wantMode)},
 			)
 			return
 		}
+		state := "STALE"
 		if current == "" {
-			r.Problems = append(r.Problems, "MISSING "+output.Path)
-		} else {
-			r.Problems = append(r.Problems, "STALE "+output.Path)
+			state = "MISSING"
 		}
+		problem := state + " " + output.Path
+		r.Problems = append(r.Problems, problem)
+		r.Rebuildable = append(r.Rebuildable, problem)
 		r.Actions = append(r.Actions, Action{Kind: actionWrite, Path: output.Path})
 		return
 	}
@@ -244,6 +266,7 @@ func (r *reconcileResult) reconcileOrphans(dir string, wanted map[string]bool, m
 		}
 		if mode == ModeCheck {
 			r.Problems = append(r.Problems, "ORPHAN "+path)
+			r.Rebuildable = append(r.Rebuildable, "ORPHAN "+path)
 			r.Actions = append(r.Actions, Action{Kind: "delete", Path: path})
 			continue
 		}

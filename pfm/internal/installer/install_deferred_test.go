@@ -60,22 +60,23 @@ func TestInstallDeferredPluginFailureSurvivesLaterLedgerError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
 	store := filepath.Join(home, ".claude")
-	var output bytes.Buffer
+	// Inject after the plugin refusal, before the later ledger read; launchd
+	// has no systemd restart-settle sleep to use as an injection point.
+	output := &storeMutationWriter{match: "  FAIL    claude plugins in " + store + ": ", mutate: func() {
+		writeFixture(t, filepath.Join(managedRootForHome(home), vscodeOwnershipName), "{")
+	}}
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{manager: true}, Stdout: &output,
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{manager: true}, Stdout: output,
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{"chat": true},
 		ClaudeRosterHost: true, PrimaryConfigDir: store,
-		Sleep: func(time.Duration) {
-			writeFixture(t, filepath.Join(managedRootForHome(home), vscodeOwnershipName), "{")
-		},
 	})
 	failure := "claude plugins in " + store + ": "
 	if err == nil || !strings.Contains(err.Error(), failure) ||
 		!strings.Contains(err.Error(), "read VS Code ownership ") {
 		t.Fatalf("install error=%v, want plugin and VS Code ledger failures", err)
 	}
-	if !strings.Contains(output.String(), "  FAIL    "+failure) {
-		t.Fatalf("plugin failure was not printed:\n%s", output.String())
+	if !strings.Contains(output.output.String(), "  FAIL    "+failure) {
+		t.Fatalf("plugin failure was not printed:\n%s", output.output.String())
 	}
 }
 
@@ -288,12 +289,16 @@ func TestInstallDeferredSchedulerRefusalPrecedesSeed(t *testing.T) {
 	_, err := Run(context.Background(), Options{
 		Mode:              ModeApply,
 		Home:              home,
-		Runner:            &fakeRunner{nameSyncActive: true},
+		Runner:            &fakeRunner{nameSyncActive: true, reminderStates: []string{"inactive"}},
 		ConfigSeed:        example,
 		ConfigSeedContent: []byte(`{"version":2}`),
 		MCPConfigPath:     target,
 	})
-	if !errors.Is(err, ErrNameSyncRunning) {
+	want := ErrNameSyncRunning
+	if schedulerIsLaunchd {
+		want = ErrLaunchAgentRunning
+	}
+	if !errors.Is(err, want) {
 		t.Fatalf("install error=%v, want name-sync refusal", err)
 	}
 	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
@@ -306,10 +311,18 @@ func TestInstallDeferredReminderWaitThroughRun(t *testing.T) {
 	var output bytes.Buffer
 	var slept time.Duration
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{nameSyncIdle: true, reminderActive: true}, Stdout: &output,
-		MCPConfigPath: testConfigPath(t), Sleep: func(d time.Duration) { slept += d },
+		Mode:          ModeApply,
+		Home:          home,
+		Runner:        &fakeRunner{nameSyncIdle: true, reminderActive: true, reminderStates: []string{"activating"}},
+		Stdout:        &output,
+		MCPConfigPath: testConfigPath(t),
+		Sleep:         func(d time.Duration) { slept += d },
 	})
-	if !errors.Is(err, ErrReminderRunning) || slept != 90*time.Second ||
+	want := ErrReminderRunning
+	if schedulerIsLaunchd {
+		want = ErrReminderAgentRunning
+	}
+	if !errors.Is(err, want) || slept != 90*time.Second ||
 		!strings.Contains(
 			output.String(),
 			"  wait    the pfm reminder is delivering; waiting up to 1m30s for it to finish\n",
@@ -323,7 +336,11 @@ func TestInstallDeferredUnprobedGateUsesSharedNote(t *testing.T) {
 	_, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: t.TempDir(), Runner: &fakeRunner{}, Stdout: &output, MCPConfigPath: testConfigPath(t),
 	})
-	if err != nil || !strings.Contains(output.String(), "  skip    "+nameSyncGateUnprobedNote+"\n") {
+	note := nameSyncGateUnprobedNote
+	if schedulerIsLaunchd {
+		note = launchGateUnprobedNote
+	}
+	if err != nil || !strings.Contains(output.String(), "  skip    "+note+"\n") {
 		t.Fatalf("install error=%v output=%s", err, output.String())
 	}
 }

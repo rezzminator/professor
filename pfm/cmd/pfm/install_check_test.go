@@ -142,6 +142,11 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 					"case \"$*\" in *show*) exit 1;; esac\nexit 0",
 					"exit 1",
 				)
+				// launchctl's positive exit answers "unknown label", which is
+				// idle. A missing tool models a probe that could not run.
+				if err := os.Remove(filepath.Join(bin, "launchctl")); err != nil {
+					t.Fatal(err)
+				}
 			}
 			t.Setenv("PATH", bin)
 			savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller

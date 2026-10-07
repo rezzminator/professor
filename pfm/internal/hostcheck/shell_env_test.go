@@ -98,3 +98,22 @@ func TestShellClaudeEnvUnreadableOrUnparsableSettingsIsReportedNotClean(t *testi
 	}
 	assertContains(t, "problem", row.Problem, "cannot parse")
 }
+
+func TestShellClaudeEnvKeepsConfigurationWarningsWithInheritedRuntime(t *testing.T) {
+	env := fixtureEnv(t)
+	env.Environ = []string{
+		betasVar + "=1",
+		"CLAUDE_CODE_BRIDGE_SESSION_ID=session",
+		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CODE_EXECPATH=/opt/claude",
+		"CLAUDE_CODE_MESSAGING_SOCKET=/tmp/session.sock",
+		"CLAUDE_CODE_MESSAGING_TOKEN=secret",
+		"CLAUDE_CODE_SESSION_ATTENDED=1",
+		"CLAUDE_PID=123",
+		"CLAUDE_EFFORT=high",
+	}
+	rows := detect(t, "shell-claude-env", env)
+	if len(rows) != 1 || !strings.Contains(rows[0].Problem, betasVar) {
+		t.Fatalf("rows=%+v, want only the configurable beta warning", rows)
+	}
+}

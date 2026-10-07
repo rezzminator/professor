@@ -158,7 +158,7 @@ func thirdPartyMCP(env Env) ([]Row, error) {
 	}
 	candidates = append(candidates, filepath.Join(env.Home, ".claude.json"))
 	for _, path := range uniquePaths(candidates) {
-		raw, ok := readFile(&rows, "third-party-mcp", path)
+		raw, ok := readFile(&rows, checkThirdPartyMCP, path)
 		if !ok {
 			continue
 		}
@@ -166,12 +166,12 @@ func thirdPartyMCP(env Env) ([]Row, error) {
 			Servers map[string]json.RawMessage `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(raw, &document); err != nil {
-			rows = append(rows, unreadable("third-party-mcp", path, err))
+			rows = append(rows, unreadable(checkThirdPartyMCP, path, err))
 			continue
 		}
 		owned, err := installer.PFMMCPLeftovers(env.Home, env.MCPPort, path)
 		if err != nil {
-			appendProbeError(&rows, "third-party-mcp", path, err)
+			appendProbeError(&rows, checkThirdPartyMCP, path, err)
 			continue
 		}
 		excluded := map[string]bool{}
@@ -186,11 +186,31 @@ func thirdPartyMCP(env Env) ([]Row, error) {
 		}
 		sort.Strings(names)
 		for _, name := range names {
+			reason := ""
+			for _, item := range env.AcceptedMCP {
+				if item.Path == path && item.Server == name {
+					reason = item.Reason
+					break
+				}
+			}
+			if reason != "" {
+				rows = append(
+					rows,
+					Row{
+						Accepted,
+						checkThirdPartyMCP,
+						path,
+						"mcpServers." + name + " retained by doctor.acceptedMCP: " + reason,
+						"",
+					},
+				)
+				continue
+			}
 			rows = append(
 				rows,
 				Row{
 					Warn,
-					"third-party-mcp",
+					checkThirdPartyMCP,
 					path,
 					"mcpServers." + name + " is declared outside pfm",
 					fmt.Sprintf(

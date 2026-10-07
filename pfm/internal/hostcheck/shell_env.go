@@ -36,7 +36,7 @@ func shellClaudeEnv(env Env) ([]Row, error) {
 		}}, nil
 	}
 	launchSet := map[string]bool{}
-	for _, name := range claudelaunch.LaunchEnvNames() {
+	for _, name := range append(claudelaunch.LaunchEnvNames(), claudelaunch.RuntimeEnvNames()...) {
 		launchSet[name] = true
 	}
 	var shellOnly []string

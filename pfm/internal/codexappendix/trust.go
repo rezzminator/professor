@@ -52,6 +52,8 @@ func HookTrustRecorded(account string) bool {
 }
 
 // HookTrustState distinguishes an absent receipt from one that cannot be inspected.
+// expectedCommand optionally carries the owned command and native Codex binary;
+// with a binary, current hooks/list state judges enabled trust, not the receipt.
 func HookTrustState(account string, expectedCommand ...string) (recorded bool, err error) {
 	path := hookReceiptPath(account)
 	_, err = os.Stat(path)
@@ -99,6 +101,9 @@ func HookTrustState(account string, expectedCommand ...string) (recorded bool, e
 					entries[matcher].Hooks[handler].Command != expectedCommand[0] {
 					continue
 				}
+			}
+			if len(expectedCommand) > 1 && expectedCommand[1] != "" {
+				return readNativeHookTrust(expectedCommand[1], physical, expectedCommand[0], key)
 			}
 			return false, fmt.Errorf(
 				"%w for hook %s: historical receipt cannot verify current enabled state or trust hash; inspect the native Codex hook state (doctor has no native readback)",
@@ -168,7 +173,7 @@ func RegisterHookTrust(ctx context.Context, binary, account, event, matcher, com
 	if err != nil {
 		return err
 	}
-	if h.TrustStatus == trustedState && receipt[h.Key] == h.CurrentHash {
+	if h.Enabled && h.TrustStatus == trustedState && receipt[h.Key] == h.CurrentHash {
 		return nil
 	}
 	key, err := json.Marshal(h.Key)
@@ -301,4 +306,49 @@ func rpc(parent context.Context, binary, account, method string, params any) (js
 	case <-ctx.Done():
 		return nil, fmt.Errorf("native hook API: %w", ctx.Err())
 	}
+}
+
+// readNativeHookTrust uses the same native producer as installation. The
+// historical receipt identifies the handler; current discovery judges trust.
+func readNativeHookTrust(binary, account, command, key string) (bool, error) {
+	raw, err := rpc(context.Background(), binary, account, "hooks/list", map[string]any{"cwds": []string{account}})
+	if err != nil {
+		return false, fmt.Errorf("%w: list native hooks of %s: %v", ErrNativeHookTrustUnknown, account, err)
+	}
+	var listed struct {
+		Data []struct {
+			Hooks []hook `json:"hooks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return false, fmt.Errorf("%w: decode native hooks of %s: %v", ErrNativeHookTrustUnknown, account, err)
+	}
+	expectedSource, err := filepath.EvalSymlinks(filepath.Join(account, "hooks.json"))
+	if err != nil {
+		return false, fmt.Errorf("resolve trusted source: %w", err)
+	}
+	var matches []hook
+	for _, group := range listed.Data {
+		for index := range group.Hooks {
+			h := &group.Hooks[index]
+			source, err := filepath.EvalSymlinks(h.SourcePath)
+			if err != nil {
+				continue
+			}
+			if h.Key == key && source == expectedSource && h.Source == "user" && h.Command == command &&
+				h.Matcher == "resume" &&
+				h.EventName == "sessionStart" {
+				matches = append(matches, *h)
+			}
+		}
+	}
+	if len(matches) != 1 || matches[0].CurrentHash == "" {
+		return false, fmt.Errorf(
+			"%w: native handler %s unavailable or ambiguous (found %d)",
+			ErrNativeHookTrustUnknown,
+			key,
+			len(matches),
+		)
+	}
+	return matches[0].Enabled && matches[0].TrustStatus == trustedState, nil
 }

@@ -78,27 +78,37 @@ func CaptureCodexIdentity(
 	return identities
 }
 
-// parseCodexIdentity reads the last non-empty line of a captured codex pane
-// screen — Codex's TUI status line, fields separated by U+00B7 (·) — and
-// trims its first field. A field that parses as a thread id is the thread
-// id; anything else is the thread's name.
+// parseCodexIdentity reads the bottommost status row, whose first two fields
+// are the thread identity and directory. Shortcut and agent footers may follow
+// it. Stop at any other nonstatus row: modals can hide today's status while
+// an older status-shaped transcript remains above them. A status needs a
+// metadata field beyond identity and directory, not a bare transcript pair.
 func parseCodexIdentity(capture string) (name, threadID string) {
-	last := ""
-	for _, line := range strings.Split(capture, "\n") {
-		if strings.TrimSpace(line) == "" {
+	lines := strings.Split(capture, "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if line == "" || strings.HasPrefix(line, "? for shortcuts") ||
+			strings.HasPrefix(line, "← for agents") || strings.HasPrefix(line, "→ for agents") {
 			continue
 		}
-		last = line
+		fields := strings.Split(line, "·")
+		if len(fields) < 3 || strings.TrimSpace(fields[2]) == "" {
+			return "", ""
+		}
+		directory := strings.TrimSpace(fields[1])
+		windowsAbsolute := len(directory) > 2 && directory[1] == ':' && (directory[2] == '\\' || directory[2] == '/')
+		if directory != "~" && !strings.HasPrefix(directory, "~/") && !strings.HasPrefix(directory, "/") &&
+			!windowsAbsolute {
+			return "", ""
+		}
+		field := strings.TrimSpace(fields[0])
+		if field == "" {
+			return "", ""
+		}
+		if pfmengine.IsUUID(field) {
+			return "", field
+		}
+		return field, ""
 	}
-	if last == "" {
-		return "", ""
-	}
-	field := strings.TrimSpace(strings.SplitN(last, "·", 2)[0])
-	if field == "" {
-		return "", ""
-	}
-	if pfmengine.IsUUID(field) {
-		return "", field
-	}
-	return field, ""
+	return "", ""
 }

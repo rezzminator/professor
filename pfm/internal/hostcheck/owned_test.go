@@ -407,3 +407,47 @@ func TestThirdPartyMCP(t *testing.T) {
 		assertUnreadable(t, detect(t, "third-party-mcp", env), "third-party-mcp", path, jsonDecodeError("{"))
 	})
 }
+
+func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
+	for _, test := range []struct {
+		name, path, server, body string
+		accepted                 bool
+		warnings                 int
+	}{
+		{"exact", "", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, true, 0},
+		{"other server", "", "other", `{"mcpServers":{"agent-browser":{}}}`, false, 1},
+		{"other path", "/other/.claude.json", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, false, 1},
+		{"broken json", "", "agent-browser", `{`, false, 0},
+		{"mixed registry", "", "agent-browser", `{"mcpServers":{"agent-browser":{},"other":{"command":"invented"}}}`, true, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := fixtureEnv(t)
+			path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
+			writeFile(t, path, test.body)
+			acceptedPath := test.path
+			if acceptedPath == "" {
+				acceptedPath = path
+			}
+			env.AcceptedMCP = []config.AcceptedMCP{
+				{Path: acceptedPath, Server: test.server, Reason: "active user integration"},
+			}
+			rows := detect(t, "third-party-mcp", env)
+			if test.accepted {
+				if len(rows) != 1+test.warnings || rows[0].Severity != Accepted ||
+					!strings.Contains(rows[0].Problem, "active user integration") ||
+					Count(rows, Warn) != test.warnings {
+					t.Fatalf("accepted rows=%+v", rows)
+				}
+				if plan := NewPlan(1, rows); len(plan.Steps) != test.warnings || len(plan.Failed) != 0 {
+					t.Fatalf("accepted declaration offered as a fix: %+v", plan)
+				}
+				if strings.Contains(rows[0].Render("host-check: "), "fix:") {
+					t.Fatalf("accepted declaration prints a remedy: %+v", rows[0])
+				}
+			} else if len(rows) != 1 || Count(rows, Warn) != test.warnings ||
+				(test.warnings == 0 && rows[0].Severity != Block) {
+				t.Fatalf("unaccepted or unreadable rows=%+v", rows)
+			}
+		})
+	}
+}

@@ -105,6 +105,9 @@ func planFor(env Env, detectors []Detector) Plan {
 func NewPlan(ran int, rows []Row) Plan {
 	plan := Plan{Ran: ran}
 	for _, row := range rows {
+		if row.Severity == Accepted {
+			continue
+		}
 		if failedCheck(row) {
 			plan.Failed = append(plan.Failed, row)
 		} else {

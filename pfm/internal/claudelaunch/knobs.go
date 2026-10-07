@@ -345,3 +345,17 @@ func LaunchEnvNames() []string {
 	}
 	return names
 }
+
+// RuntimeEnvNames names Claude's per-session exports, not account policy.
+// The harness emits these to child shells and may leave them inherited after
+// a bridge launches another engine without CLAUDECODE. Persisting them would
+// reuse a stale identity, messaging credential, executable or turn effort.
+func RuntimeEnvNames() []string {
+	return []string{
+		envSessionID, envChildSession, envProjectDir,
+		"CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
+		"CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_MESSAGING_SOCKET",
+		"CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_SESSION_ATTENDED",
+		"CLAUDE_PID", "CLAUDE_EFFORT",
+	}
+}

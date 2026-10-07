@@ -78,3 +78,24 @@ func TestCaptureCodexIdentityFiltersToLiveCodexPanes(t *testing.T) {
 		t.Fatalf("CaptureCodexIdentity() = %#v, want no candidates", got)
 	}
 }
+
+func TestParseCodexIdentityFindsStatusAboveFooter(t *testing.T) {
+	for _, test := range []struct{ name, screen, wantName, wantID string }{
+		{"shortcut footer", "  BUILD · /work · Full Access · model\n  ? for shortcuts · 3 warnings\n", "BUILD", ""},
+		{"agent footer", "  11111111-1111-4111-8111-111111111111 · /work · Full Access\n  ← for agents · ? for shortcuts\n", "", "11111111-1111-4111-8111-111111111111"},
+		{"multiple status lines", "  OLD · /work · Full Access\ntranscript\n  NEW · /work · Full Access\n  ? for shortcuts\n", "NEW", ""},
+		{"modal transcript UUID", "Listed another thread:\n11111111-1111-4111-8111-111111111111 · /work\nChoose a session to resume\n? for shortcuts\n", "", ""},
+		{"transcript path pair", "BUILD · /work\n? for shortcuts\n", "", ""},
+		{"modal after historical status", "OLD · /work · Full Access\nChoose a session to resume\n? for shortcuts\n", "", ""},
+		{"home status", "BUILD · ~ · Full Access\n? for shortcuts\n", "BUILD", ""},
+		{"windows status", "BUILD · C:/work · Full Access\n? for shortcuts\n", "BUILD", ""},
+		{"no status", "Transcript answer · unrelated text\n  ? for shortcuts · 3 warnings\n", "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			name, id := parseCodexIdentity(test.screen)
+			if name != test.wantName || id != test.wantID {
+				t.Fatalf("identity=(%q,%q), want (%q,%q)", name, id, test.wantName, test.wantID)
+			}
+		})
+	}
+}

@@ -69,6 +69,7 @@
     "keepDays": 30
   },
   "doctor": {
-    "ignoreWarnings": []
+    "ignoreWarnings": [],
+    "acceptedMCP": []
   }
 }

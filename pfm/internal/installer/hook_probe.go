@@ -171,7 +171,7 @@ func executableVerdict(path string) string {
 }
 
 // probeCodexHooks reads every configured Codex home's hooks.json for the one
-// hook pfm owns there and for pfm residue. It never runs Codex or writes a
+// hook pfm owns there and for pfm residue. It reads Codex native hook state without writing a
 // file: an absent file or a missing SessionStart "resume" resume-unkill handler
 // is a MISSING row, a handler with no recorded hook trust an UNTRUSTED row
 // naming `pfm install --yes`, a healthy account none; STALE and UNREADABLE
@@ -223,7 +223,7 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 		case codexHookHandlerCount(document, expected) == 0:
 			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
 		default:
-			recorded, err := codexappendix.HookTrustState(account.Home, expected.Command)
+			recorded, err := codexappendix.HookTrustState(account.Home, expected.Command, config.Codex.Binary)
 			switch {
 			case errors.Is(err, codexappendix.ErrNativeHookTrustUnknown):
 				results = append(results, HookProbeResult{

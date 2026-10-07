@@ -6,12 +6,21 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+type fixtureHookTrust struct {
+	KeyPath string `json:"keyPath"`
+	Value   struct {
+		Enabled bool   `json:"enabled"`
+		Hash    string `json:"trusted_hash"`
+	} `json:"value"`
+}
 
 // The jailed native CLI implements only the hook discovery/trust protocol used
 // by installation. Re-entering this test binary keeps the fixture portable and
@@ -76,15 +85,27 @@ func TestCodexHookAPIFixture(t *testing.T) {
 		switch request.Method {
 		case "initialize":
 		case "hooks/list":
+			var trust fixtureHookTrust
+			state, err := os.ReadFile(filepath.Join(account, "fixture-hook-trust.json"))
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			if err == nil {
+				if err := json.Unmarshal(state, &trust); err != nil {
+					t.Fatal(err)
+				}
+				for _, hook := range hooks {
+					if trust.KeyPath == "hooks.state."+quoteHookKey(t, hook["key"].(string)) {
+						hook["enabled"] = trust.Value.Enabled
+						if trust.Value.Hash == hook["currentHash"] {
+							hook["trustStatus"] = "trusted"
+						}
+					}
+				}
+			}
 			result = map[string]any{"data": []any{map[string]any{"hooks": hooks}}}
 		case "config/value/write":
-			var params struct {
-				KeyPath string `json:"keyPath"`
-				Value   struct {
-					Enabled bool   `json:"enabled"`
-					Hash    string `json:"trusted_hash"`
-				} `json:"value"`
-			}
+			var params fixtureHookTrust
 			if err := json.Unmarshal(request.Params, &params); err != nil {
 				t.Fatal(err)
 			}

@@ -452,6 +452,7 @@ func defaultsWithMCPServers(
 		"tmux.titles.enabled":   SourceDefault,
 		"nameSync.interval":     SourceDefault,
 		keyDoctorIgnoreWarnings: SourceDefault,
+		keyDoctorAcceptedMCP:    SourceDefault,
 	}
 	for _, id := range pfmengine.All() {
 		name := pfmengine.MustLookup(id).LongName
@@ -1437,12 +1438,8 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
 	}
-	if len(config.Doctor.IgnoreWarnings) != 0 || config.Source(keyDoctorIgnoreWarnings) == SourceFile {
-		ids := config.Doctor.IgnoreWarnings
-		if ids == nil {
-			ids = []string{}
-		}
-		value["doctor"] = map[string]any{"ignoreWarnings": ids}
+	if doctor := marshalDoctor(config); len(doctor) != 0 {
+		value["doctor"] = doctor
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

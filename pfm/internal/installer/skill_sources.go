@@ -200,6 +200,20 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 	}
 	if rootExists {
 		dirs := installer.skillSourceLinkDirs()
+		recorded, _, err := readSkillLinkLedger(installer.options.Home)
+		if err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		for _, dir := range dirs {
+			seen[paths.PhysicalPath(dir)] = true
+		}
+		for _, dir := range recorded {
+			if !seen[paths.PhysicalPath(dir)] {
+				dirs = append(dirs, dir)
+				seen[paths.PhysicalPath(dir)] = true
+			}
+		}
 		content, err := json.MarshalIndent(skillLinkLedger{Version: skillLinkLedgerVersion, LinkDirs: dirs}, "", "  ")
 		if err != nil {
 			return fmt.Errorf("encode skill link ledger: %w", err)
@@ -596,13 +610,16 @@ func runSkillGitContext(
 	}
 	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=",
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
-	if sshConfigured && !strings.Contains(sshCommand, "BatchMode=yes") {
+	if sshConfigured && skillGitUsesSSH(args) && !skillSSHCommandNoninteractive(sshCommand) {
 		return "", fmt.Errorf(
 			"source-fetched skills require a noninteractive SSH command; set GIT_SSH_COMMAND with -o BatchMode=yes (custom GIT_SSH alone cannot prove noninteractive behavior)",
 		)
 	}
-	if !sshConfigured {
+	if !sshConfigured || (skillGitRemoteOperation(args) && !skillGitUsesSSH(args)) {
 		env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	}
+	if skillGitRemoteOperation(args) {
+		env = append(env, "GIT_SSH_VARIANT=ssh")
 	}
 	result, err := runner.Run(ctx, append([]string{git}, args...), deps.RunOptions{
 		Dir: dir, Env: env, WaitDelay: waitDelay,

@@ -53,7 +53,7 @@ func TestVSCodeExtensionIsRegisteredInEachProductsIndexNotOnlyLinked(t *testing.
 		t.Fatal(err)
 	}
 
-	installer := newVSCodeExtensionEngine(home, []string{rootEmptyArray, rootNoIndex, rootForeign}, true)
+	installer := newVSCodeExtensionEngine(t, home, []string{rootEmptyArray, rootNoIndex, rootForeign}, true)
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestVSCodeExtensionIndexUnreadableIsSkippedVisiblyAndTheLinkStillMade(t *te
 	}
 
 	var output bytes.Buffer
-	installer := newVSCodeExtensionEngine(home, []string{root}, true)
+	installer := newVSCodeExtensionEngine(t, home, []string{root}, true)
 	installer.options.Stdout = &output
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestVSCodeExtensionUninstallRemovesOnlyItsOwnIndexEntry(t *testing.T) {
 	}
 	roots := []string{root}
 
-	installer := newVSCodeExtensionEngine(home, roots, true)
+	installer := newVSCodeExtensionEngine(t, home, roots, true)
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestVSCodeExtensionUninstallRemovesOnlyItsOwnIndexEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	uninstaller := newVSCodeExtensionEngine(home, roots, false)
+	uninstaller := newVSCodeExtensionEngine(t, home, roots, false)
 	uninstaller.options.Mode = ModeUninstall
 	if err := uninstaller.wireVSCode(); err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t
 		}
 	})
 
-	installer := newVSCodeExtensionEngine(home, nil, true)
+	installer := newVSCodeExtensionEngine(t, home, nil, true)
 	ownership := map[string]vscodeOwnershipRecord{
 		readablePath:   {Path: readablePath, Platform: "linux", ProfileOwned: true},
 		unreadablePath: {Path: unreadablePath, Platform: "linux", ProfileOwned: true},

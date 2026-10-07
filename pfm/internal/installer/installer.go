@@ -143,6 +143,9 @@ func (installer *engine) deferFailure(err error) {
 // conflicts and future paths are computed before install or uninstall can
 // mutate the machine.
 func (installer *engine) preflight(ctx context.Context, mode Mode) error {
+	if _, err := managedConfigOwnershipRoot(installer.options.Home); err != nil {
+		return fmt.Errorf("preflight managed ownership: %w", err)
+	}
 	options := installer.options
 	options.Stdout = io.Discard
 	preview := &engine{
@@ -164,7 +167,7 @@ func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 	default:
 		return fmt.Errorf("preflight unknown installer mode %d", mode)
 	}
-	if mode == ModeApply && len(preview.deferred) != 0 {
+	if len(preview.deferred) != 0 {
 		planErr = errors.Join(append([]error{planErr}, preview.deferred...)...)
 	}
 	if len(preview.planErrors) != 0 {
@@ -205,8 +208,12 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retireBBInstall())
 	installer.deferFailure(installer.retireChatCommands())
 	installer.deferFailure(installer.retireStagedManagedSurfaces(false))
-	installer.deferFailure(installer.wireCommands(assets))
-	installer.deferFailure(installer.wireSkills(assets))
+	if err == nil {
+		installer.deferFailure(installer.wireCommands(assets))
+		installer.deferFailure(installer.wireSkills(assets))
+	} else {
+		installer.skip("managed command and skill wiring deferred: embedded assets failed staging")
+	}
 	installer.deferFailure(installer.wireGlobalCommands())
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
@@ -676,6 +683,10 @@ func copyPlanTree(source, target string) error {
 }
 
 func (installer *engine) uninstall(ctx context.Context) error {
+	// Recover instruction ownership before MCP edits the shared config.
+	if err := installer.wireOpenCodeInstructions(); err != nil {
+		return err
+	}
 	if err := installer.uninstallHarvest(); err != nil {
 		return err
 	}
@@ -766,9 +777,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	installer.deferFailure(installer.wireCodexHooks())
 	if err := installer.wireMCP(); err != nil {
-		return err
-	}
-	if err := installer.wireOpenCodeInstructions(); err != nil {
 		return err
 	}
 	if err := installer.removeCodexDeveloperInstructions(); err != nil {
@@ -1079,6 +1087,11 @@ func (installer *engine) removeManagedAssets(assets []assetFile) error {
 }
 
 func (installer *engine) ensureLink(source, target string) (bool, error) {
+	if installer.apply && installer.managedRoot != "" && withinGlobalSource(source, installer.managedRoot) {
+		if _, err := os.Stat(source); err != nil {
+			return false, fmt.Errorf("managed source not published %s: %w", source, err)
+		}
+	}
 	if current, linked := resolvedLink(target); linked && current == filepath.Clean(source) {
 		installer.ok(target)
 		return false, nil
@@ -1093,6 +1106,11 @@ func (installer *engine) ensureLink(source, target string) (bool, error) {
 		backup = availableBackup(target, installer.stamp)
 	}
 	return true, installer.change(description, func() error {
+		if installer.managedRoot != "" && withinGlobalSource(source, installer.managedRoot) {
+			if _, err := os.Stat(source); err != nil {
+				return fmt.Errorf("managed source not published %s: %w", source, err)
+			}
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}

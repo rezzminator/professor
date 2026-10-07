@@ -257,15 +257,22 @@ func TestHookTrustStateDistinguishesMissingRecordedAndUnreadable(t *testing.T) {
 				}
 			}
 			recorded, err := HookTrustState(account)
-			if state == "self-symlink" {
+			switch state {
+			case "self-symlink":
 				if recorded || err == nil || !strings.HasPrefix(err.Error(), "inspect hook trust receipt "+path+": ") {
 					t.Fatalf("state=(%v, %v), want unreadable receipt", recorded, err)
 				}
 				if !HookTrustRecorded(account) {
 					t.Fatal("uninstall must still attempt unreadable receipt cleanup")
 				}
-			} else if err != nil || recorded != (state == "file") {
-				t.Fatalf("state=(%v, %v), want recorded=%v", recorded, err, state == "file")
+			case "file":
+				if recorded || err == nil || !strings.Contains(err.Error(), "native trust") {
+					t.Fatalf("native state=(%v,%v), want visibly unknown", recorded, err)
+				}
+			default:
+				if err != nil || recorded {
+					t.Fatalf("state=(%v,%v), want absent receipt", recorded, err)
+				}
 			}
 		})
 	}
@@ -289,6 +296,34 @@ func TestHookTrustStateValidatesReceipt(t *testing.T) {
 			recorded, err := HookTrustState(account)
 			if recorded || err == nil {
 				t.Fatalf("invalid receipt = %t, %v", recorded, err)
+			}
+		})
+	}
+}
+
+func TestHookTrustStateReportsUnknownNativeTrust(t *testing.T) {
+	for _, native := range []string{"enabled=false\ntrusted_hash='sha256:old'\n", "enabled=true\ntrusted_hash='sha256:changed'\n"} {
+		t.Run(native, func(t *testing.T) {
+			account := t.TempDir()
+			key := account + "/hooks.json:session_start:0:0"
+			writeReceiptFile(t, account, `{"`+key+`":"sha256:old"}`)
+			if err := os.WriteFile(
+				filepath.Join(account, "hooks.json"),
+				[]byte(`{"hooks":{"SessionStart":[{"matcher":"resume","hooks":[{"command":"owned"}]}]}}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(account, "config.toml"),
+				[]byte("[hooks.state.\""+key+"\"]\n"+native),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			recorded, err := HookTrustState(account, "owned")
+			if recorded || err == nil || !strings.Contains(err.Error(), "native trust") {
+				t.Fatalf("historical receipt presented native trust as healthy: recorded=%v err=%v", recorded, err)
 			}
 		})
 	}

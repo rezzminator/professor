@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // TestRetireStoreEntries runs install's migration on the shape a retired entry
@@ -156,4 +157,75 @@ func assertAbsent(t *testing.T, path string) {
 	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("%s still present: %v", path, err)
 	}
+}
+
+func TestRetiredStoreEntriesRespectBusyAccountGuard(t *testing.T) {
+	home := t.TempDir()
+	store := ClaudeStore(home)
+	account := filepath.Join(home, "account")
+	name := RetiredStoreEntries[0]
+	writeFixture(t, filepath.Join(store, name), "shared bytes")
+	symlinkFixture(t, filepath.Join(store, name), filepath.Join(account, name))
+	guard, err := gather.AcquireAccountGuard(account, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := guard.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var output bytes.Buffer
+	e := &engine{
+		apply: true,
+		options: Options{
+			Home:           home,
+			ConfigDir:      store,
+			ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}},
+			Stdout:         &output,
+		},
+	}
+	if err := e.retireStoreEntries(); err != nil {
+		t.Fatal(err)
+	}
+	assertContent(t, filepath.Join(account, name), "shared bytes")
+	assertContent(t, filepath.Join(store, name), "shared bytes")
+	if !strings.Contains(output.String(), "starting a chat") {
+		t.Fatalf("busy retirement not reported: %s", output.String())
+	}
+}
+
+func TestRetiredStoreEntriesKeepReplacementBetweenOwnershipAndMutation(t *testing.T) {
+	home := t.TempDir()
+	store := ClaudeStore(home)
+	account := filepath.Join(home, "account")
+	name := RetiredStoreEntries[0]
+	path := filepath.Join(account, name)
+	operator := filepath.Join(home, "operator")
+	writeFixture(t, filepath.Join(store, name), "shared bytes")
+	writeFixture(t, operator, "operator bytes")
+	symlinkFixture(t, filepath.Join(store, name), path)
+	previous := retiredStoreReadlink
+	t.Cleanup(func() { retiredStoreReadlink = previous })
+	changed := false
+	retiredStoreReadlink = func(name string) (string, error) {
+		target, err := previous(name)
+		if name == path && !changed && err == nil {
+			changed = true
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			symlinkFixture(t, operator, path)
+		}
+		return target, err
+	}
+	e := &engine{apply: true, options: Options{
+		Home: home, ConfigDir: store,
+		ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}}, Stdout: &bytes.Buffer{},
+	}}
+	if err := e.retireStoreEntries(); err == nil {
+		t.Fatal("replacement between ownership and mutation was silently retired")
+	}
+	assertContent(t, path, "operator bytes")
+	assertContent(t, filepath.Join(store, name), "shared bytes")
 }

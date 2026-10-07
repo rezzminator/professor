@@ -168,7 +168,8 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm install: seed config: %v\n", configErr)
 		return 1
 	}
-	runtime.Config = installConfig
+	runtime = runtime.WithConfig(installConfig, paths.OSEnv{})
+	defer pfmconfig.UseConfigPath(runtime.Config.Path, runtime.Config.State)()
 	// An apply ran the dependency preflight before its first write.
 	preflight := 0
 	if mode != installer.ModeApply {

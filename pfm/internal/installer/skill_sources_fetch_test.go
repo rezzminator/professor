@@ -709,3 +709,105 @@ func TestRunSkillGitBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestSkillGitSSHTransportAndOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, program string
+		args                   []string
+		want, errText          string
+	}{
+		{name: "spoofed-option", command: "ssh -i /keys/BatchMode=yes", args: []string{"ls-remote", "--", "git@example.invalid:repo", "HEAD"}, errText: "noninteractive"},
+		{name: "real-option", command: "ssh -o BatchMode=yes -i '/keys/private key'", args: []string{"ls-remote", "--", "ssh://example.invalid/repo", "HEAD"}, want: "ssh -o BatchMode=yes -i '/keys/private key'"},
+		{name: "https-custom-command", command: "ssh -i key", args: []string{"ls-remote", "--", "https://example.invalid/repo", "HEAD"}, want: "ssh -o BatchMode=yes"},
+		{name: "local-custom-wrapper", program: "wrapper", args: []string{"rev-parse", "HEAD"}, want: "unset"},
+		{name: "first-option-wins", command: "ssh -o BatchMode=no -o BatchMode=yes", args: []string{"clone", "--", "git@example.invalid:repo", "target"}, errText: "noninteractive"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GIT_SSH_COMMAND", tc.command)
+			t.Setenv("GIT_SSH", tc.program)
+			for key, value := range map[string]string{"GIT_SSH_COMMAND": tc.command, "GIT_SSH": tc.program} {
+				if value == "" {
+					if err := os.Unsetenv(key); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			script := filepath.Join(t.TempDir(), "git")
+			if err := testjail.WriteExecutable(
+				script,
+				[]byte("#!/bin/sh\nprintf '%s' \"${GIT_SSH_COMMAND-unset}\"\n"),
+				0o700,
+			); err != nil {
+				t.Fatal(err)
+			}
+			got, err := runSkillGitWith(
+				deps.RealRunner{},
+				time.Second,
+				skillGitWaitDelay,
+				script,
+				t.TempDir(),
+				tc.args...)
+			if tc.errText != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.errText) {
+					t.Fatalf("SSH option validation: output=%q err=%v", got, err)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf(
+					"unrelated transport or valid SSH options rejected: output=%q err=%v want=%q",
+					got,
+					err,
+					tc.want,
+				)
+			}
+		})
+	}
+}
+
+type skillGitEnvironmentRunner struct {
+	deps.Runner
+	options deps.RunOptions
+}
+
+func (runner *skillGitEnvironmentRunner) Run(
+	_ context.Context,
+	_ []string,
+	options deps.RunOptions,
+) (deps.RunResult, error) {
+	runner.options = options
+	return deps.RunResult{Stdout: []byte("head")}, nil
+}
+
+func TestSkillGitTransportOverridePreservesRepositoryBoundary(t *testing.T) {
+	t.Setenv("GIT_DIR", "operator-repository")
+	t.Setenv("GIT_SSH_COMMAND", "ssh -i key")
+	t.Setenv("GIT_SSH_VARIANT", "plink")
+	runner := &skillGitEnvironmentRunner{}
+	dir := t.TempDir()
+	if _, err := runSkillGitWith(
+		runner,
+		time.Second,
+		skillGitWaitDelay,
+		"git",
+		dir,
+		"ls-remote",
+		"--",
+		"https://example.invalid/repo",
+		"HEAD",
+	); err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, entry := range runner.options.Env {
+		key, value, _ := strings.Cut(entry, "=")
+		values[key] = value
+	}
+	if _, present := values["GIT_DIR"]; present {
+		t.Fatal("inherited repository selector crossed git boundary")
+	}
+	if values["GIT_SSH_COMMAND"] != "ssh -o BatchMode=yes" || values["GIT_SSH_VARIANT"] != "ssh" ||
+		runner.options.Dir != dir {
+		t.Fatalf("transport override environment=%v dir=%s", values, runner.options.Dir)
+	}
+}

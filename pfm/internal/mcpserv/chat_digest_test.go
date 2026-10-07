@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -245,5 +246,57 @@ func TestChatDigestDescriptionsStayWithinTheToolBudget(t *testing.T) {
 				t.Errorf("chat_read description = %q, want the chat_digest pointer", tool.Description)
 			}
 		}
+	}
+}
+
+func TestChatDigestMaxBytesBeforeFirstLine(t *testing.T) {
+	service := newService("test", &backend{})
+	session, path := digestFixture(t, service)
+	whole := callTool[DigestOutput](t, session, "chat_digest", DigestInput{Source: path})
+	firstEnd := strings.IndexByte(whole.Text, '\n') + 1
+	for _, limit := range []int{1, firstEnd - 1, firstEnd} {
+		got := callTool[DigestOutput](t, session, "chat_digest", DigestInput{Source: path, MaxBytes: limit})
+		want := ""
+		if limit == firstEnd {
+			want = whole.Text[:firstEnd]
+		}
+		if got.Text != want || got.Bytes != len(want) || !got.Truncated || got.TotalBytes != len(whole.Text) {
+			t.Errorf("max_bytes=%d: got %+v, want complete lines %q and total=%d", limit, got, want, len(whole.Text))
+		}
+	}
+}
+
+func TestDigestScriptRejectsNonregularCandidates(t *testing.T) {
+	root := setupBackendFixture(t)
+	repo := filepath.Join(root, "source")
+	source := filepath.Join(repo, filepath.FromSlash(digestScriptUnderSource))
+	home := filepath.Join(root, "home", filepath.FromSlash(digestScriptUnderHome))
+	t.Setenv("PFM_SOURCE_REPO", repo)
+	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(home), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(home, []byte("installed script"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := digestScript()
+	if err != nil || got != home {
+		t.Errorf("nonregular source lookup=%q error=%v, want installed fallback %q", got, err, home)
+	}
+	if err := os.Remove(home); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, home); err != nil {
+		t.Fatal(err)
+	}
+	got, err = digestScript()
+	if err == nil || !strings.Contains(err.Error(), "not a regular file") || !strings.Contains(err.Error(), home) ||
+		!strings.Contains(err.Error(), source) {
+		t.Errorf("nonregular installed lookup=%q error=%v, want visible rejection naming both paths", got, err)
 	}
 }

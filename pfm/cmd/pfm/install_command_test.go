@@ -531,6 +531,66 @@ func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
 	}
 }
 
+func TestInstallSeedDatabasePathsAgreeWithMigrationAndProcessPin(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	for _, name := range []string{"seed", "state override", "cache override", "both overrides"} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			t.Setenv(paths.EnvConfig, "")
+			t.Setenv(paths.EnvStateDB, "")
+			t.Setenv(paths.EnvCacheDB, "")
+			t.Setenv("PFM_SOURCE_REPO", "")
+			clone := filepath.Join(home, "clone")
+			if err := os.MkdirAll(clone, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+				t.Fatal(err)
+			}
+			const seed = `{"version":2,"state":{"db":"~/seed-state.db","cacheDb":"~/seed-cache.db"}}`
+			if err := os.WriteFile(filepath.Join(clone, "example.pfm.config.json"), []byte(seed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			wantState, wantCache := filepath.Join(home, "seed-state.db"), filepath.Join(home, "seed-cache.db")
+			if name == "state override" || name == "both overrides" {
+				wantState = filepath.Join(home, "env-state.db")
+				t.Setenv(paths.EnvStateDB, wantState)
+			}
+			if name == "cache override" || name == "both overrides" {
+				wantCache = filepath.Join(home, "env-cache.db")
+				t.Setenv(paths.EnvCacheDB, wantCache)
+			}
+			called := false
+			runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+				called = true
+				if options.StateDB != wantState {
+					t.Errorf("migration state database = %q, want seeded runtime %q", options.StateDB, wantState)
+				}
+				state, cache, err := pfmconfig.StatePathsFrom(paths.OSEnv{}, home)
+				if err != nil || state != wantState || cache != wantCache {
+					t.Errorf("process database pin = %q, %q, %v; want %q, %q", state, cache, err, wantState, wantCache)
+				}
+				if string(options.ConfigSeedContent) != seed {
+					t.Errorf("validated seed bytes = %q, want %q", options.ConfigSeedContent, seed)
+				}
+				return installer.Report{}, nil
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"install", "--yes", "--skip-harvest"}, &stdout, &stderr); code != 0 || !called {
+				t.Fatalf(
+					"install code=%d called=%v stdout=%q stderr=%q",
+					code,
+					called,
+					stdout.String(),
+					stderr.String(),
+				)
+			}
+		})
+	}
+}
+
 func TestUninstallVerbAcceptsConfigDirAndUsesUninstallMode(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })

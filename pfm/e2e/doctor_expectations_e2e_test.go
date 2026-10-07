@@ -74,6 +74,8 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 		"doctor: pre-push gate=armed core.hooksPath=.githooks",
 		"doctor: harness-prompt: matches baseline",
 		"doctor: service-manager=",
+		"doctor: hook codex[1] hooks.json SessionStart resume-unkill NATIVE-TRUST-UNKNOWN",
+		"doctor has no native readback",
 	} {
 		if !strings.Contains(output, want) {
 			h.t.Fatalf(
@@ -84,7 +86,7 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 			)
 		}
 	}
-	wantWarnings := fmt.Sprintf("doctor: warnings=%d", 2+schedulerRowWarnings(output)+h.hostCheckRowWarnings(output))
+	wantWarnings := fmt.Sprintf("doctor: warnings=%d", 3+schedulerRowWarnings(output)+h.hostCheckRowWarnings(output))
 	if !strings.Contains("\n"+output, "\n"+wantWarnings+"\n") {
 		h.t.Fatalf("doctor omitted exact tally %q: %s", wantWarnings, output)
 	}

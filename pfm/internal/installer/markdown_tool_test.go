@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -526,5 +527,79 @@ func TestInstallMarkdownToolRumdlUserConfigErrorIsReportedNotFatal(t *testing.T)
 	}
 	if installer.report.Skipped != 1 || installer.report.Changed != 0 {
 		t.Fatalf("report=%+v, want Skipped=1 Changed=0", installer.report)
+	}
+}
+
+func TestRumdlOwnershipFailureRetryPreservesOperatorAndRecovers(t *testing.T) {
+	home := t.TempDir()
+	e, _ := presentRumdlEngine(t, home, &paths.MapEnv{})
+	receipt := filepath.Join(managedRootForHome(home), "rumdl-user-config.json")
+	if err := os.MkdirAll(receipt, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	e.ensureRumdlUserConfig()
+	if err := os.Remove(receipt); err != nil {
+		t.Fatal(err)
+	}
+	e.ensureRumdlUserConfig()
+	if err := e.removeRumdlUserConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(e.rumdlUserConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("receipt failure left unowned config after retry: %v", err)
+	}
+}
+
+func TestRumdlPendingPublicationRefusesChangedConfigAndStage(t *testing.T) {
+	for _, scenario := range []string{"operator-replacement", "stage-changed", "config-directory-changed"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			env := &paths.MapEnv{}
+			e, output := presentRumdlEngine(t, home, env)
+			receipt := filepath.Join(managedRootForHome(home), "rumdl-user-config.json")
+			if err := os.MkdirAll(receipt, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			e.ensureRumdlUserConfig()
+			config := e.rumdlUserConfigPath()
+			var intent rumdlConfigIntent
+			pendingRaw, err := os.ReadFile(receipt + ".pending")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(pendingRaw, &intent); err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Dir(intent.Stage) != filepath.Dir(config) {
+				t.Fatalf("stage must share config filesystem: %s", intent.Stage)
+			}
+			if err := os.Remove(receipt); err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "operator-replacement":
+				if err := os.Remove(config); err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, config, rumdlUserConfig)
+			case "stage-changed":
+				writeFixture(t, intent.Stage, "operator stage bytes")
+			case "config-directory-changed":
+				env.Values = map[string]string{"XDG_CONFIG_HOME": t.TempDir()}
+			}
+			output.Reset()
+			e.ensureRumdlUserConfig()
+			if !strings.Contains(output.String(), "NOT written") {
+				t.Fatalf("pending publication drift was silently claimed: %s", output.String())
+			}
+			if _, err := os.Stat(receipt + ".pending"); err != nil {
+				t.Fatalf("pending recovery record lost: %v", err)
+			}
+			if scenario == "stage-changed" {
+				assertContent(t, config, "operator stage bytes")
+			} else {
+				assertContent(t, config, rumdlUserConfig)
+			}
+		})
 	}
 }

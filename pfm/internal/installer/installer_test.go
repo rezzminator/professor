@@ -423,7 +423,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		managedShim := filepath.Join(managed, "bin", name)
 		assertLink(t, filepath.Join(home, ".local", "bin", name), managedShim)
 		if info, err := os.Stat(managedShim); err != nil || info.Mode().Perm() != 0o755 {
-			t.Fatalf("managed %s mode=%v err=%v, want 0755", name, info, err)
+			t.Fatalf("managed %s mode=%v err=%v, want 0o755", name, info, err)
 		}
 		shim := readFixture(t, managedShim)
 		want := "#!/usr/bin/env bash\n" + `exec "$HOME/.local/bin/pfm" internal ` + command + ` "$@"` + "\n"
@@ -1483,5 +1483,33 @@ func TestInstallerChangeWritesAndReports(t *testing.T) {
 				t.Fatalf("changed=%d, want one change", installer.report.Changed)
 			}
 		})
+	}
+}
+
+func TestEnsureLinkRefusesUnpublishedManagedAsset(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(managedRootForHome(home), "reload.command.md")
+	target := filepath.Join(home, "commands", "reload.md")
+	symlinkFixture(t, "old-owned-source", target)
+	e := &engine{
+		apply:       true,
+		managedRoot: managedRootForHome(home),
+		options:     Options{Home: home, Stdout: &bytes.Buffer{}},
+	}
+	if _, err := e.ensureLink(source, target); err == nil {
+		t.Fatal("registry linked an unpublished managed asset")
+	}
+	assertLink(t, target, filepath.Join(filepath.Dir(target), "old-owned-source"))
+}
+
+func stageVSCodeExtensionFixture(t *testing.T, managedRoot string) {
+	t.Helper()
+	for _, name := range []string{"package.json", "extension.js"} {
+		asset := vscodeExtensionSource + "/" + name
+		content, err := readAsset(asset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, filepath.Join(managedRoot, filepath.FromSlash(asset)), string(content))
 	}
 }

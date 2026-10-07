@@ -297,7 +297,7 @@ func TestWireClaudeStore(t *testing.T) {
 			if err := os.MkdirAll(account, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			old := filepath.Join(home, "gone")
+			old := filepath.Join(store, "gone")
 			if scenario == "wrong-entry" {
 				old = filepath.Join(store, "commands")
 			}
@@ -464,7 +464,7 @@ func TestInspectClaudeStore(t *testing.T) {
 			}
 			switch scenario {
 			case "elsewhere":
-				if err := os.Symlink("../old/agents", link); err != nil {
+				if err := os.Symlink(filepath.Join(store, "old", "agents"), link); err != nil {
 					t.Fatal(err)
 				}
 			case "relative-link":
@@ -554,7 +554,13 @@ func TestInspectClaudeStore(t *testing.T) {
 			if err := os.MkdirAll(account, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			path, target, want, reason := filepath.Join(account, "agents"), filepath.Join(home, "gone"), "elsewhere", ""
+			path, target, want, reason := filepath.Join(
+				account,
+				"agents",
+			), filepath.Join(
+				store,
+				"gone",
+			), "elsewhere", ""
 			index := 0
 			switch scenario {
 			case "foreign":
@@ -748,7 +754,7 @@ func TestWireClaudeStoreWriteErrors(t *testing.T) {
 					if err := os.MkdirAll(account, 0o700); err != nil {
 						t.Fatal(err)
 					}
-					if err := os.Symlink(filepath.Join(home, "old", "agents"), path); err != nil {
+					if err := os.Symlink(filepath.Join(ClaudeStore(home), "old", "agents"), path); err != nil {
 						t.Fatal(err)
 					}
 					match = "  change  repoint " + path
@@ -889,7 +895,7 @@ func TestRepointPreservesRacedOperatorFile(t *testing.T) {
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(home, "old", "agents"), path); err != nil {
+	if err := os.Symlink(filepath.Join(ClaudeStore(home), "old", "agents"), path); err != nil {
 		t.Fatal(err)
 	}
 	writer := &storeMutationWriter{match: "  change  repoint " + path, mutate: func() {
@@ -921,7 +927,7 @@ func TestStoreRepointExcludesPostScanLaunch(t *testing.T) {
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(home, "old", "agents"), path); err != nil {
+	if err := os.Symlink(filepath.Join(ClaudeStore(home), "old", "agents"), path); err != nil {
 		t.Fatal(err)
 	}
 	launched := false
@@ -961,4 +967,14 @@ func TestStoreRepointExcludesPostScanLaunch(t *testing.T) {
 		t.Fatal("launch crossed the post-scan account rewire ownership boundary")
 	}
 	assertLink(t, path, filepath.Join(ClaudeStore(home), "agents"))
+}
+
+func TestMissingForeignStoreLinkIsPreserved(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "account", "CLAUDE.md")
+	symlinkFixture(t, filepath.Join(home, "offline", "CLAUDE.md"), path)
+	link := InspectAccountLink(ClaudeStore(home), filepath.Dir(path), path, "CLAUDE.md")
+	if link.State != stateForeign {
+		t.Fatalf("offline operator link classified %s; want foreign", link.State)
+	}
 }

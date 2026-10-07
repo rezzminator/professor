@@ -659,7 +659,7 @@ func TestVSCodeClaudeEnvironmentOwnership(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, "User", "settings.json")
 			machine := filepath.Join(home, "Machine", "settings.json")
-			inst := newVSCodeExtensionEngine(home, nil, true)
+			inst := newVSCodeExtensionEngine(t, home, nil, true)
 			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
 			inst.options.vscodeSettingsPaths = []string{settings, machine}
 			for _, path := range inst.options.vscodeSettingsPaths {
@@ -726,7 +726,7 @@ func TestVSCodeClaudeEnvironmentOperatorEdit(t *testing.T) {
 		t.Run(edit, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, "settings.json")
-			inst := newVSCodeExtensionEngine(home, nil, true)
+			inst := newVSCodeExtensionEngine(t, home, nil, true)
 			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
 			inst.options.vscodeSettingsPaths = []string{settings}
 			writeFixture(t, settings, `{}`)
@@ -775,7 +775,7 @@ func TestVSCodeClaudeEnvironmentMalformed(t *testing.T) {
 			settings := filepath.Join(home, "settings.json")
 			initial := `{"claudeCode.environmentVariables":` + env + `}`
 			writeFixture(t, settings, initial)
-			inst := newVSCodeExtensionEngine(home, nil, true)
+			inst := newVSCodeExtensionEngine(t, home, nil, true)
 			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
 			inst.options.vscodeSettingsPaths = []string{settings}
 			if err := inst.wireVSCode(); err != nil {
@@ -831,7 +831,7 @@ func TestVSCodeClaudeEnvironmentReclaim(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, "settings.json")
-			inst := newVSCodeExtensionEngine(home, nil, tc.optIn)
+			inst := newVSCodeExtensionEngine(t, home, nil, tc.optIn)
 			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
 			inst.options.vscodeSettingsPaths = []string{settings}
 			record := vscodeOwnershipRecord{Path: settings, Platform: "linux", EnvValue: "/old"}
@@ -899,7 +899,7 @@ func TestVSCodeClaudeEnvironmentDuplicates(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, "settings.json")
-			inst := newVSCodeExtensionEngine(home, nil, !owned)
+			inst := newVSCodeExtensionEngine(t, home, nil, !owned)
 			inst.options.PrimaryConfigDir = filepath.Join(home, "next")
 			inst.options.vscodeSettingsPaths = []string{settings}
 			first, second := "/a", "/b"
@@ -949,7 +949,7 @@ func TestVSCodeMalformedEnvironmentProfileUpgrade(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, "settings.json")
-			inst := newVSCodeExtensionEngine(home, nil, false)
+			inst := newVSCodeExtensionEngine(t, home, nil, false)
 			inst.options.vscodeSettingsPaths = []string{settings}
 			record := vscodeOwnershipRecord{Path: settings, Platform: "linux", ProfileOwned: true, EnvOwned: owned}
 			if owned {
@@ -987,7 +987,7 @@ func TestVSCodeClaudeEnvironmentRequiresOptInOrOwnership(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{"editor.fontSize":17}`)
-	inst := newVSCodeExtensionEngine(home, nil, false)
+	inst := newVSCodeExtensionEngine(t, home, nil, false)
 	inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
 	inst.options.vscodeSettingsPaths = []string{settings}
 	if err := inst.wireVSCode(); err != nil {

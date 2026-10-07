@@ -228,6 +228,7 @@ func ReportGlobalRegistries(
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures
+	failures += reportTranscriptArtifact(w, home)
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
 		fmt.Fprintf(w, "doctor: registry dead-link check failed: %s\n", err)

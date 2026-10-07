@@ -1,12 +1,15 @@
 package installer
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -130,4 +133,76 @@ func (installer *engine) retireDeadRegistryLinks() error {
 		}
 	}
 	return nil
+}
+
+// reportTranscriptArtifact checks the installed dependency chat_digest uses,
+// independently of cwd discovery or the account's configured directory.
+// Equality is measured against the prior install's recorded source clone.
+func reportTranscriptArtifact(w io.Writer, home string) (failures int) {
+	installed := filepath.Join(ClaudeStore(home), "skills", "transcript", "transcript.py")
+	repo, err := GlobalSourceRepo(home)
+	if err != nil {
+		fmt.Fprintf(w, "doctor: transcript path=%s state=CHECK-FAILED error=%s\n", installed, err)
+		return 1
+	}
+	source := filepath.Join(repo, "templates", "global", "skills", "transcript", "transcript.py")
+	// A binary-only install has no clone-owned transcript to stage. A recorded
+	// source still implies an expected artifact, even when that source is gone.
+	if _, repoErr := os.Lstat(repo); errors.Is(repoErr, fs.ErrNotExist) {
+		if _, markerErr := os.Lstat(paths.SourceRepoPath(home)); errors.Is(markerErr, fs.ErrNotExist) {
+			fmt.Fprintf(w, "doctor: transcript path=%s source=%s state=NO-CLONE\n", installed, source)
+			return 0
+		}
+		fmt.Fprintf(w, "doctor: transcript path=%s source=%s state=CHECK-FAILED error=%s\n", installed, source, repoErr)
+		return 1
+	}
+	state, detail := "installed", ""
+	actual, err := readTranscriptArtifact(installed)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		state, detail = "MISSING", err.Error()
+	case err != nil:
+		state, detail = "CHECK-FAILED", err.Error()
+	default:
+		expected, sourceErr := readTranscriptArtifact(source)
+		if sourceErr != nil {
+			state, detail = "CHECK-FAILED", sourceErr.Error()
+		} else if !bytes.Equal(actual, expected) {
+			state, detail = "MISMATCH", "installed bytes differ from shipped source"
+		}
+	}
+	fmt.Fprintf(w, "doctor: transcript path=%s source=%s state=%s", installed, source, state)
+	if detail != "" {
+		fmt.Fprintf(w, " error=%s — run pfm install --yes", detail)
+		failures = 1
+	}
+	fmt.Fprintln(w)
+	return failures
+}
+
+// readTranscriptArtifact follows installed skill links, but validates the
+// opened object itself. O_NONBLOCK prevents a FIFO replacement from hanging
+// doctor between lookup and read; only regular-file bytes may prove parity.
+func readTranscriptArtifact(path string) (_ []byte, resultErr error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open transcript artifact %s: %w", path, err)
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close transcript artifact %s: %w", path, err))
+		}
+	}()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect transcript artifact %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("transcript artifact %s is not a regular file", path)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("read transcript artifact %s: %w", path, err)
+	}
+	return content, nil
 }

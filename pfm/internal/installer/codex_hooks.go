@@ -248,8 +248,18 @@ func (installer *engine) wireCodexHooks() error {
 	for _, home := range installer.codexHomes() {
 		configuredHomes[physicalSettingsPath(filepath.Join(home, "hooks.json"))] = true
 	}
+	claudePaths := map[string]bool{}
+	claudeDirs := []string{installer.options.ConfigDir, filepath.Join(installer.options.Home, ".claude")}
+	for _, account := range installer.options.ClaudeAccounts {
+		claudeDirs = append(claudeDirs, account.ConfigDir)
+	}
+	for _, dir := range claudeDirs {
+		for _, name := range []string{claudeSettingsName, claudeLocalSettingsName} {
+			claudePaths[physicalSettingsPath(filepath.Join(dir, name))] = true
+		}
+	}
 	for path, owned := range ownership {
-		if filepath.Base(path) == "hooks.json" && !configuredHomes[path] && len(owned) > 0 {
+		if !configuredHomes[path] && !claudePaths[path] && len(owned) > 0 {
 			return fmt.Errorf(
 				"retired Codex account still owns hooks at %s; restore that account to the roster and uninstall its hooks before removing it",
 				path,
@@ -360,7 +370,11 @@ func (installer *engine) wireCodexHooks() error {
 		configured[physicalSettingsPath(filepath.Join(codexHome, "hooks.json"))] = true
 	}
 	for path := range ownership {
-		if filepath.Base(path) != "hooks.json" && !configured[path] {
+		if claudePaths[path] && !configured[path] {
+			if err := installer.retireRecordedClaudeHooks(path, ownership[path]); err != nil {
+				loopErr = errors.Join(loopErr, err)
+				continue
+			}
 			delete(ownership, path)
 		}
 	}
@@ -453,4 +467,32 @@ func (installer *engine) wireResumeUnkillTrust(account string, carriesHook map[s
 		}
 		return nil
 	})
+}
+
+// retireRecordedClaudeHooks also covers a retired Codex alias of an active
+// Claude settings file: remove its exact recorded handlers before forgetting
+// ownership, while preserving every unrecorded handler and setting.
+func (installer *engine) retireRecordedClaudeHooks(path string, owned settingsHookCounts) error {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read recorded settings hooks %s: %w", path, err)
+	}
+	var document map[string]any
+	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
+		return fmt.Errorf("parse recorded settings hooks %s: %w", path, err)
+	}
+	if err := validateCodexHooks(document); err != nil {
+		return fmt.Errorf("inspect recorded settings hooks %s: %w", path, err)
+	}
+	if !removeOwnedSettingsHooks(document, owned) {
+		return nil
+	}
+	updated, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode recorded settings hooks %s: %w", path, err)
+	}
+	return installer.changeMCPFile("retire recorded hooks "+path, path, raw, append(updated, '\n'), true)
 }

@@ -26,6 +26,9 @@ const (
 	// stateUntrusted is a pfm Codex hook present with no recorded Codex trust:
 	// Codex may refuse to run an untrusted hook. A warning.
 	stateUntrusted = "untrusted"
+	// stateNativeTrustUnknown is a readable historical receipt without native
+	// readback. It is a warning, never evidence that current trust is healthy.
+	stateNativeTrustUnknown = "native-trust-unknown"
 	// stateHookDrift is a pfm hook present in a shape pfm install converges
 	// away: a wrong event or matcher, another binary path, an executable
 	// that does not resolve, a duplicate, a missing async flag. A failure.
@@ -221,9 +224,14 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
 		default:
 			recorded, err := codexappendix.HookTrustState(account.Home, expected.Command)
-			if err != nil {
+			switch {
+			case errors.Is(err, codexappendix.ErrNativeHookTrustUnknown):
+				results = append(results, HookProbeResult{
+					Hook: expectedHook, State: stateNativeTrustUnknown, Error: err.Error(),
+				})
+			case err != nil:
 				unreadable(err)
-			} else if !recorded {
+			case !recorded:
 				results = append(results, HookProbeResult{
 					Hook: expectedHook, State: stateUntrusted,
 					Error: "no Codex trust is recorded for the hook, so Codex may refuse to run it",
@@ -332,6 +340,9 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool
 		case stateUntrusted:
 			warnings++
 			fmt.Fprintf(stdout, "%s UNTRUSTED %s — run pfm install --yes\n", prefix, result.Error)
+		case stateNativeTrustUnknown:
+			warnings++
+			fmt.Fprintf(stdout, "%s NATIVE-TRUST-UNKNOWN %s\n", prefix, result.Error)
 		case stateStale:
 			failures++
 			fmt.Fprintf(stdout, "%s STALE %s — run pfm install\n", prefix, hook.Name)

@@ -106,10 +106,10 @@ Agents receive paths as variables:
 | Variable | Purpose | Example |
 | ------------ | ---------------------------------- | ---------------------------------------- |
 | `$PIPELINE` | Pipeline name (kebab-case, unique) | `{some-feature}` |
-| `$DOCS` | Pipeline docs from repo root | `docs/dev/tasks/{some-feature}` |
-| `$DOCS_REL` | Pipeline docs from worktree | `../../../docs/dev/tasks/{some-feature}` |
+| `$DOCS` | Flight records from any checkout | `$HOME/.local/state/pfm/flights/{project}/{some-feature}/` |
+| `$DOCS_REL` | Flight records from the worktree | `$HOME/.local/state/pfm/flights/{project}/{some-feature}/` |
 | `$WORKTREE` | Worktree directory | `.worktrees/{some-feature}` |
-| `$ARCHIVE` | Archive parent | `docs/dev/tasks/archive` |
+| `$ARCHIVE` | Retained flight records parent | `$HOME/.local/state/pfm/flights/{project}/` |
 | `$CDOCS` | Command-owned docs root | `docs/commands` |
 | `$REFS` | Reference docs subdir | `references` |
 | `$RESEARCH` | Research docs subdir | `research` |
@@ -142,7 +142,7 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
 2. **Only gitter runs git commands.**
 3. **Never commit broken code** — QA must pass first.
 4. **Never merge before QA passes** — both pre-merge and post-merge.
-5. **Never reuse pipeline names** — check `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` first.
+5. **Never reuse pipeline names** — check `$HOME/.local/state/pfm/flights/{project}/` and `.worktrees/` first.
 6. **Never run destructive git commands** — no `--force`, no `reset --hard`, no `clean -fdx` without explicit user approval.
 7. **Never swallow exceptions silently** — every catch logs the full traceback. Silent failures hide bugs.
 8. **No mocking internal dependencies within 1 hop** — mock only external services (paid APIs, third-party SaaS, anything flaky and outside your trust boundary). Real DB, real queue, real internal services.
@@ -224,18 +224,15 @@ your-project/
 ├── {dir}/.professor/workbench.json     ← (OPTIONAL) marks a workbench: /pfm:workbench
 ├── docs/
 │   ├── agents/                        ← cross-project permanent docs (architecture, API, map, features)
-│   ├── commands/{cmd}/                ← command-owned docs ($CDOCS root)
-│   │   ├── references/                ← must-know
-│   │   ├── research/                  ← looked-up material
-│   │   └── resources/                 ← static assets
-│   └── dev/
-│       ├── tasks/{pipeline}/          ← temp pipeline docs
-│       └── tasks/archive/             ← completed pipelines
+│   └── commands/{cmd}/                ← command-owned docs ($CDOCS root)
+│       ├── references/                ← must-know
+│       ├── research/                  ← looked-up material
+│       └── resources/                 ← static assets
 └── .worktrees/                        ← git worktree checkouts (gitignored)
     ├── {pipeline}/                    ← per-pipeline checkout
     └── .ports                         ← port allocation registry
 
-Scratch protocol state (flight specs, lane/timing artifacts, doctor captures)
+Scratch protocol state (lane/timing artifacts, doctor captures)
 lives outside the repo, at `/tmp/{project}/` (`{project}` = this repo's
 directory name, leading dot stripped) — never under a repo-local `tmp/`.
 A flight's own layout: `$HOME/.local/state/pfm/flights/{project}/{flight}/` — requirements.md,
@@ -252,13 +249,13 @@ For a single-project repo, drop the `{project-a}/`, `{project-b}/` layer — age
 A `.claude/` infrastructure — a **transplantable nervous system** — that turns Claude Code from "an AI that writes code when you ask" into **a self-disciplined engineering team with character**. Built by the Professor (the grandfatherly polymath behind the glass).
 
 - **Worktree isolation** — every feature gets its own git worktree branch + a unique port allocation. Multiple parallel pipelines on the same repo without collisions.
-- **A pipeline that refuses cowboy coding** — one task file per executor, every return verified against its diff, one `flights-lander` per flight blocking bad code from reaching `main`.
+- **A pipeline that refuses cowboy coding** — `requirements.md` guides foremen by build-unit ownership, every return verified against its diff, one `flights-lander` per flight blocking bad code from reaching `main`.
 - **One agent owns git** — only `gitter` runs `git add` / `commit` / `merge`. Centralized, auditable, safe.
 - **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The three-lens rule (Computer Science, domain, compliance) ships in the project `CLAUDE.md` template, § Rules → Meta, "Three lenses at once".
 - **Self-improvement** — `/pcm` is the change manager that edits its own pipeline rules at the source.
 - **Optional dual-runtime** — Codex (OpenAI) can mirror the Claude pipeline as a cheaper implementation layer. Same manuals, different runtime. Everything works without it.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths.
-- **Documentation discipline** — pipeline docs are temporary and archived; only the main-loop session writes to permanent project docs (a command-owned surface such as `docs/business/**` is written by its owning command), every write under the `/quality:doc` Approval gate.
+- **Documentation discipline** — flight records persist outside the checkout; only the main-loop session writes to permanent project docs (a command-owned surface such as `docs/business/**` is written by its owning command), every write under the `/quality:doc` Approval gate.
 - **Memory backup (opt-in)** — a `SessionEnd` hook auto-syncs Claude's persistent project memory to a private repo, so a machine wipe doesn't lose what Claude learned. Plain git, zero tokens. See `references/memory-backup.md`.
 
 ---

@@ -23,8 +23,8 @@ import (
 // vscode_test.go: vscodeSettingsPaths is pinned to an EMPTY (non-nil) slice
 // so the terminal-profile merge never runs, keeping every test here focused
 // on the extension link and its ledger.
-func newVSCodeExtensionEngine(home string, roots []string, vscodeFlag bool) *engine {
-	return &engine{
+func newVSCodeExtensionEngine(t *testing.T, home string, roots []string, vscodeFlag bool) *engine {
+	installer := &engine{
 		options: Options{
 			Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 			VSCode: vscodeFlag, vscodePlatform: "linux", vscodeSettingsPaths: []string{},
@@ -34,6 +34,8 @@ func newVSCodeExtensionEngine(home string, roots []string, vscodeFlag bool) *eng
 		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
 		stamp:       "fixture",
 	}
+	stageVSCodeExtensionFixture(t, installer.managedRoot)
+	return installer
 }
 
 func readVSCodeLedgerFixture(t *testing.T, managedRoot string) vscodeOwnershipDocument {
@@ -65,7 +67,7 @@ func TestVSCodeExtensionLinksIntoEveryPresentProductRootNeverAnAbsentOne(t *test
 		}
 	}
 
-	installer := newVSCodeExtensionEngine(home, []string{rootA, rootB, rootMissing}, true)
+	installer := newVSCodeExtensionEngine(t, home, []string{rootA, rootB, rootMissing}, true)
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +108,7 @@ func TestVSCodeExtensionReinstallIsIdempotent(t *testing.T) {
 	}
 	roots := []string{root}
 
-	first := newVSCodeExtensionEngine(home, roots, true)
+	first := newVSCodeExtensionEngine(t, home, roots, true)
 	if err := first.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +120,7 @@ func TestVSCodeExtensionReinstallIsIdempotent(t *testing.T) {
 	target := filepath.Join(root, "extensions", vscodeExtensionLinkName)
 	beforeLink, _ := resolvedLink(target)
 
-	second := newVSCodeExtensionEngine(home, roots, true)
+	second := newVSCodeExtensionEngine(t, home, roots, true)
 	if err := second.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +163,7 @@ func TestVSCodeExtensionBacksUpAndRestoresARealNonLinkTarget(t *testing.T) {
 	}
 	roots := []string{root}
 
-	installer := newVSCodeExtensionEngine(home, roots, true)
+	installer := newVSCodeExtensionEngine(t, home, roots, true)
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +186,7 @@ func TestVSCodeExtensionBacksUpAndRestoresARealNonLinkTarget(t *testing.T) {
 		t.Fatalf("backup lost the marker file: err=%v content=%q", err, got)
 	}
 
-	uninstaller := newVSCodeExtensionEngine(home, roots, false)
+	uninstaller := newVSCodeExtensionEngine(t, home, roots, false)
 	uninstaller.options.Mode = ModeUninstall
 	if err := uninstaller.wireVSCode(); err != nil {
 		t.Fatal(err)
@@ -216,7 +218,7 @@ func TestVSCodeExtensionUninstallSkipsAForeignRelinkedTargetButStillDeletesTheLe
 	}
 	roots := []string{root}
 
-	installer := newVSCodeExtensionEngine(home, roots, true)
+	installer := newVSCodeExtensionEngine(t, home, roots, true)
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +232,7 @@ func TestVSCodeExtensionUninstallSkipsAForeignRelinkedTargetButStillDeletesTheLe
 		t.Fatal(err)
 	}
 
-	uninstaller := newVSCodeExtensionEngine(home, roots, false)
+	uninstaller := newVSCodeExtensionEngine(t, home, roots, false)
 	uninstaller.options.Mode = ModeUninstall
 	var output bytes.Buffer
 	uninstaller.options.Stdout = &output
@@ -374,7 +376,7 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 	}
 	writeFixture(t, filepath.Join(managed, vscodeOwnershipName), string(encoded))
 
-	installer := newVSCodeExtensionEngine(home, []string{}, false)
+	installer := newVSCodeExtensionEngine(t, home, []string{}, false)
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -413,6 +415,7 @@ func TestVSCodeExtensionPortableLinksAtPortableRootAndSettingsPathUsesUserData(t
 		},
 		apply: true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"), stamp: "fixture",
 	}
+	stageVSCodeExtensionFixture(t, installer.managedRoot)
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
@@ -660,7 +663,7 @@ func TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile(t *test
 	}
 	run := func(mode Mode) {
 		t.Helper()
-		installer := newVSCodeExtensionEngine(home, []string{}, mode == ModeApply)
+		installer := newVSCodeExtensionEngine(t, home, []string{}, mode == ModeApply)
 		installer.options.Mode = mode
 		installer.options.vscodeSettingsPaths = []string{link}
 		if err := installer.wireVSCode(); err != nil {
@@ -734,7 +737,7 @@ func TestVSCodeDefaultTerminalIsASettingsProfileNeverAnExtensionContributedOne(t
 	writeFixture(t, settings, "{}\n")
 	run := func(vscodeFlag bool) (string, map[string]any) {
 		t.Helper()
-		installer := newVSCodeExtensionEngine(home, []string{}, vscodeFlag)
+		installer := newVSCodeExtensionEngine(t, home, []string{}, vscodeFlag)
 		if vscodeFlag {
 			installer.options.vscodeSettingsPaths = []string{settings}
 		}

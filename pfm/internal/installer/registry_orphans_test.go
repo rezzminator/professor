@@ -210,6 +210,11 @@ func TestRegistryDeadLinkDoctorRows(t *testing.T) {
 			}
 			var output bytes.Buffer
 			warnings, failures := ReportGlobalRegistries(&output, home, true, &paths.MapEnv{})
+			// This fixture has no clone, so transcript audit reports NO-CLONE
+			// without adding a failure to the aggregate doctor tally.
+			if !strings.Contains(output.String(), "doctor: transcript ") {
+				t.Fatalf("transcript dependency was not audited: %s", output.String())
+			}
 			var rows []string
 			for _, line := range strings.Split(output.String(), "\n") {
 				if strings.HasPrefix(line, "doctor: registry ") {
@@ -384,6 +389,121 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Dir(root)); err != nil {
 				t.Fatalf("directory above the registry removed: %v", err)
+			}
+		})
+	}
+}
+
+func TestTranscriptArtifactDoctorParity(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, state, detail string
+		wantFailures        int
+	}{
+		{"linked", "installed", "", 0},
+		{"identical copy", "installed", "", 0},
+		{"relative alias", "installed", "", 0},
+		{"missing installed", "MISSING", "", 1},
+		{"different copy", "MISMATCH", "", 1},
+		{"source missing", "CHECK-FAILED", "no such file", 1},
+		{"installed fifo", "CHECK-FAILED", "not a regular file", 1},
+		{"source fifo", "CHECK-FAILED", "not a regular file", 1},
+		{"installed loop", "CHECK-FAILED", "too many levels", 1},
+		{"source loop", "CHECK-FAILED", "too many levels", 1},
+		{"no-clone", "NO-CLONE", "", 0},
+		{"recorded missing clone", "CHECK-FAILED", "no such file", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			source := filepath.Join(home, ".professor", "templates", "global", "skills", "transcript", "transcript.py")
+			installed := filepath.Join(ClaudeStore(home), "skills", "transcript", "transcript.py")
+			writeFixture(t, source, "shipped transcript script\n")
+			if err := os.MkdirAll(filepath.Dir(installed), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			switch tc.name {
+			case "missing installed":
+			case "different copy":
+				writeFixture(t, installed, "unrelated script\n")
+			case "identical copy":
+				writeFixture(t, installed, "shipped transcript script\n")
+			case "installed fifo":
+				if err := syscall.Mkfifo(installed, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "installed loop":
+				if err := os.Symlink(installed, installed); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				target := source
+				if tc.name == "relative alias" {
+					var err error
+					target, err = filepath.Rel(filepath.Dir(installed), source)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.Symlink(target, installed); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.HasPrefix(tc.name, "source ") {
+				// Keep the installed artifact independent so source errors do not
+				// become installed-artifact absence through a dangling link.
+				if err := os.Remove(installed); err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, installed, "shipped transcript script\n")
+				if err := os.Remove(source); err != nil {
+					t.Fatal(err)
+				}
+				switch tc.name {
+				case "source fifo":
+					if err := syscall.Mkfifo(source, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				case "source loop":
+					if err := os.Symlink(source, source); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if tc.name == "no-clone" || tc.name == "recorded missing clone" {
+				if tc.name == "recorded missing clone" {
+					if err := paths.WriteSourceRepoMarker(home, filepath.Join(home, ".professor")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.RemoveAll(filepath.Join(home, ".professor")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var output bytes.Buffer
+			var failures int
+			if tc.name == "recorded missing clone" {
+				// Other registry audits independently report the same invalid marker.
+				failures = reportTranscriptArtifact(&output, home)
+				source = filepath.Join(home, ".professor")
+			} else {
+				_, failures = ReportGlobalRegistries(&output, home, true, &paths.MapEnv{})
+			}
+			var row string
+			for _, line := range strings.Split(output.String(), "\n") {
+				if strings.HasPrefix(line, "doctor: transcript ") {
+					row = line
+				}
+			}
+			if row == "" || !strings.Contains(row, "state="+tc.state) || !strings.Contains(row, installed) ||
+				!strings.Contains(row, source) || !strings.Contains(row, tc.detail) || failures != tc.wantFailures {
+				t.Fatalf(
+					"transcript parity: failures=%d row=%q, want state=%s detail=%q failures=%d",
+					failures,
+					row,
+					tc.state,
+					tc.detail,
+					tc.wantFailures,
+				)
 			}
 		})
 	}

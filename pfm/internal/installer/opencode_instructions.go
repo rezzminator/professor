@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -35,7 +36,18 @@ func (installer *engine) wireOpenCodeInstructions() error {
 	return installer.editOpenCodeInstructions(true)
 }
 
-func (installer *engine) editOpenCodeInstructions(wanted bool) error {
+func (installer *engine) editOpenCodeInstructions(wanted bool) (returnErr error) {
+	ownershipRoot, err := managedConfigOwnershipRoot(installer.options.Home)
+	if err != nil {
+		return err
+	}
+	if installer.apply && strings.TrimSpace(installer.options.OpenCodeConfigPath) != "" {
+		guard, err := gather.AcquireAccountGuard(paths.PhysicalPath(installer.options.Home), false)
+		if err != nil {
+			return fmt.Errorf("OpenCode instruction ownership busy or unreadable: %w", err)
+		}
+		defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
+	}
 	path := strings.TrimSpace(installer.options.OpenCodeConfigPath)
 	if path == "" {
 		installer.skip("no OpenCode config path configured — prompt wiring has nothing to write")
@@ -77,7 +89,7 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 	if err != nil {
 		return fmt.Errorf("parse OpenCode config %s: %w", path, err)
 	}
-	receiptPath := filepath.Join(managedRootForHome(installer.options.Home), "opencode-instructions.json")
+	receiptPath := filepath.Join(ownershipRoot, "opencode-instructions.json")
 	receipt, readErr := os.ReadFile(receiptPath)
 	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
 		return fmt.Errorf("read OpenCode instruction ownership %s: %w", receiptPath, readErr)
@@ -93,6 +105,9 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 	if err != nil {
 		return err
 	}
+	if intent != nil && intent.Ownership.Config != path {
+		return fmt.Errorf("pending OpenCode ownership names another config: %s", intentPath)
+	}
 	if !wanted && !existed {
 		if installer.apply {
 			if err := removeOpenCodeInstructionIntent(intentPath); err != nil {
@@ -107,9 +122,6 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 		return nil
 	}
 	if intent != nil {
-		if intent.Ownership.Config != path {
-			return fmt.Errorf("pending OpenCode ownership names another config: %s", intentPath)
-		}
 		fingerprint := fmt.Sprintf("%x", sha256.Sum256(base))
 		switch fingerprint {
 		case intent.After:
@@ -202,6 +214,21 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 		}
 	}
 	return nil
+}
+
+// managedConfigOwnershipRoot keeps journals in the ownership domain protected
+// by the canonical HOME lock. Shared-store aliases cannot safely use that lock.
+func managedConfigOwnershipRoot(home string) (string, error) {
+	physicalHome := paths.PhysicalPath(home)
+	root := paths.PhysicalPath(managedRootForHome(home))
+	if root != managedRootForHome(physicalHome) {
+		return "", fmt.Errorf(
+			"shared managed ownership root %s is unsupported for home %s; kept configuration and ownership journals",
+			root,
+			physicalHome,
+		)
+	}
+	return root, nil
 }
 
 type openCodeInstructionOwnership struct {

@@ -75,6 +75,9 @@ func TestGlobalWiringWritesTheStoreForThreeAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("assetFiles: %v", err)
 	}
+	if _, err := installer.stageAssets(assets); err != nil {
+		t.Fatalf("stageAssets: %v", err)
+	}
 
 	for _, step := range []struct {
 		name string

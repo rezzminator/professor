@@ -3,7 +3,6 @@ package installer
 import (
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
@@ -202,19 +201,15 @@ func InspectAccountLink(store, base, path, entry string) LinkState {
 		if physical == paths.PhysicalPath(filepath.Join(store, entry)) {
 			return link
 		}
-		_, err := os.Stat(path)
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			link.State = stateElsewhere
-		case err != nil:
+		if _, err := os.Stat(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			link.State, link.Err = stateUnreadable, err
-		default:
-			storeReal := paths.PhysicalPath(store)
-			if physical == storeReal || strings.HasPrefix(physical, storeReal+string(filepath.Separator)) {
-				link.State = stateElsewhere
-			} else {
-				link.State = stateForeign
-			}
+			return link
+		}
+		storeReal := paths.PhysicalPath(store)
+		if physical == storeReal || strings.HasPrefix(physical, storeReal+string(filepath.Separator)) {
+			link.State = stateElsewhere
+		} else {
+			link.State = stateForeign
 		}
 	}
 	return link
@@ -369,33 +364,6 @@ func (installer *engine) wireClaudeStore() error {
 		if accountErr != nil {
 			return accountErr
 		}
-	}
-	return nil
-}
-
-// repointAccountLink replaces a link in one rename, preserving a directory
-// that races into its place and removing the scratch link on failure.
-func (installer *engine) repointAccountLink(target, path, inspected string) error {
-	scratch := filepath.Join(
-		filepath.Dir(path),
-		fmt.Sprintf(".%s.pfm-link-%d-%016x", filepath.Base(path), os.Getpid(), rand.Uint64()),
-	)
-	if err := os.Symlink(target, scratch); err != nil {
-		return err
-	}
-	current, readErr := os.Readlink(path)
-	if readErr != nil || current != inspected {
-		removeErr := os.Remove(scratch)
-		return errors.Join(
-			fmt.Errorf("account entry %s changed since inspection; kept operator entry: %v", path, readErr),
-			removeErr,
-		)
-	}
-	if err := os.Rename(scratch, path); err != nil {
-		if removeErr := os.Remove(scratch); removeErr != nil {
-			return errors.Join(err, fmt.Errorf("remove scratch link %s: %w", scratch, removeErr))
-		}
-		return err
 	}
 	return nil
 }

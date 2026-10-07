@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // rumdlPinnedVersion is the rumdl release pfm provisions via `uv tool
@@ -123,7 +126,7 @@ func (installer *engine) rumdlUserConfigPath() string {
 	if !filepath.IsAbs(configRoot) {
 		configRoot = filepath.Join(installer.options.Home, ".config")
 	}
-	return filepath.Join(configRoot, "rumdl", "rumdl.toml")
+	return filepath.Join(paths.PhysicalPath(filepath.Join(configRoot, "rumdl")), "rumdl.toml")
 }
 
 // ensureRumdlUserConfig writes rumdlUserConfig when the host has no rumdl
@@ -131,43 +134,165 @@ func (installer *engine) rumdlUserConfigPath() string {
 // .rumdl_cache into its working directory. A present file is the user's and
 // is never rewritten; a failure to look or write is a named skip.
 func (installer *engine) ensureRumdlUserConfig() {
+	if err := installer.publishRumdlUserConfig(false); err != nil {
+		installer.skip("rumdl user config NOT written: " + err.Error())
+	}
+}
+
+type rumdlConfigIntent struct {
+	Config string `json:"config"`
+	Stage  string `json:"stage"`
+}
+
+// publishRumdlUserConfig journals a hard-linked staged inode before publication.
+// Recovery claims only that inode, never a preexisting identical operator file.
+func (installer *engine) publishRumdlUserConfig(removing bool) (returnErr error) {
+	ownershipRoot, err := managedConfigOwnershipRoot(installer.options.Home)
+	if err != nil {
+		return err
+	}
 	path := installer.rumdlUserConfigPath()
-	if _, err := os.Lstat(path); err == nil {
-		installer.skip("rumdl user config present, left untouched: " + path)
-		return
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		installer.skip(fmt.Sprintf("rumdl user config NOT written: stat %s: %v", path, err))
-		return
+	receiptPath := filepath.Join(
+		ownershipRoot,
+		"rumdl-user-config.json",
+	)
+	pending := receiptPath + ".pending"
+	stage := filepath.Join(filepath.Dir(path), fmt.Sprintf(".%s.pfm-staged-%016x", filepath.Base(path), rand.Uint64()))
+	if installer.apply {
+		guard, err := gather.AcquireAccountGuard(paths.PhysicalPath(installer.options.Home), false)
+		if err != nil {
+			return fmt.Errorf("rumdl ownership busy or unreadable: %w", err)
+		}
+		defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
+	}
+	intent, err := os.ReadFile(pending)
+	interrupted := err == nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read rumdl ownership intent %s: %w", pending, err)
+	}
+	if interrupted {
+		var recorded rumdlConfigIntent
+		if err := json.Unmarshal(intent, &recorded); err != nil {
+			return fmt.Errorf("parse rumdl ownership intent %s: %w", pending, err)
+		}
+		if recorded.Config != path {
+			return fmt.Errorf(
+				"rumdl ownership intent names %s, current config is %s; reconcile %s before retry",
+				recorded.Config,
+				path,
+				pending,
+			)
+		}
+		if filepath.Dir(recorded.Stage) != filepath.Dir(path) ||
+			!strings.HasPrefix(filepath.Base(recorded.Stage), "."+filepath.Base(path)+".pfm-staged-") {
+			return fmt.Errorf("invalid rumdl stage in ownership intent %s", pending)
+		}
+		stage = recorded.Stage
+	} else {
+		if removing {
+			return nil
+		}
+		if _, err := os.Lstat(path); err == nil {
+			installer.skip("rumdl user config present, left untouched: " + path)
+			return nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("stat %s: %w", path, err)
+		}
+		if !installer.apply {
+			return installer.change("write rumdl user config -> "+path, nil)
+		}
+		intent, err = json.Marshal(rumdlConfigIntent{Config: path, Stage: stage})
+		if err != nil {
+			return fmt.Errorf("encode rumdl ownership intent: %w", err)
+		}
+		if err := atomicfile.Create(pending, intent, 0o600); err != nil {
+			return fmt.Errorf("create rumdl ownership intent: %w", err)
+		}
 	}
 	if !installer.apply {
-		_ = installer.change("write rumdl user config -> "+path, nil)
-		return
+		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		installer.skip(fmt.Sprintf("rumdl user config NOT written: create %s: %v", filepath.Dir(path), err))
-		return
+	config, configErr := os.Lstat(path)
+	if configErr != nil && !errors.Is(configErr, fs.ErrNotExist) {
+		return fmt.Errorf("inspect rumdl config %s: %w", path, configErr)
 	}
-	if err := atomicfile.Write(path, []byte(rumdlUserConfig), 0o644); err != nil {
-		installer.skip(fmt.Sprintf("rumdl user config NOT written: write %s: %v", path, err))
-		return
+	if removing && errors.Is(configErr, fs.ErrNotExist) {
+		if err := os.Remove(stage); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove unpublished rumdl stage: %w", err)
+		}
+		if err := os.Remove(pending); err != nil {
+			return fmt.Errorf("remove unpublished rumdl intent: %w", err)
+		}
+		return nil
+	}
+	staged, stageErr := os.Lstat(stage)
+	if errors.Is(stageErr, fs.ErrNotExist) && configErr == nil {
+		receipt, err := os.ReadFile(receiptPath)
+		var recorded string
+		if err == nil {
+			err = json.Unmarshal(receipt, &recorded)
+		}
+		if err != nil || recorded != path {
+			return fmt.Errorf("rumdl pending publication has no staged inode; kept %s; reconcile %s", path, pending)
+		}
+		if err := os.Remove(pending); err != nil {
+			return fmt.Errorf("remove completed rumdl intent: %w", err)
+		}
+		return nil
+	}
+	if errors.Is(stageErr, fs.ErrNotExist) {
+		if err := atomicfile.Create(stage, []byte(rumdlUserConfig), 0o644); err != nil {
+			return fmt.Errorf("stage rumdl config: %w", err)
+		}
+		staged, stageErr = os.Lstat(stage)
+	}
+	if stageErr != nil {
+		return fmt.Errorf("inspect rumdl stage: %w", stageErr)
+	}
+	if !staged.Mode().IsRegular() {
+		return fmt.Errorf("rumdl stage is not a regular file: %s", stage)
+	}
+	stagedContent, err := os.ReadFile(stage)
+	if err != nil {
+		return fmt.Errorf("read rumdl stage %s: %w", stage, err)
+	}
+	if !bytes.Equal(stagedContent, []byte(rumdlUserConfig)) {
+		return fmt.Errorf("rumdl staged bytes changed; kept %s; reconcile %s", path, pending)
+	}
+	if configErr == nil && !os.SameFile(config, staged) {
+		return fmt.Errorf("rumdl config changed during publication; kept %s; staged bytes at %s", path, stage)
+	}
+	if errors.Is(configErr, fs.ErrNotExist) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+		}
+		if err := os.Link(stage, path); err != nil {
+			return fmt.Errorf("publish rumdl config %s: %w", path, err)
+		}
 	}
 	receipt, err := json.Marshal(path)
 	if err != nil {
-		installer.skip(fmt.Sprintf("rumdl config ownership NOT recorded: %v", err))
-		return
+		return fmt.Errorf("encode rumdl ownership: %w", err)
 	}
-	if err := atomicfile.Write(
-		filepath.Join(managedRootForHome(installer.options.Home), "rumdl-user-config.json"),
-		append(receipt, '\n'),
-		0o600,
-	); err != nil {
-		installer.skip(fmt.Sprintf("rumdl config ownership NOT recorded: %v", err))
-		return
+	if err := atomicfile.Write(receiptPath, append(receipt, '\n'), 0o600); err != nil {
+		return fmt.Errorf("record rumdl ownership: %w", err)
 	}
-	_ = installer.change("write rumdl user config -> "+path, nil)
+	if err := os.Remove(stage); err != nil {
+		return fmt.Errorf("remove rumdl stage: %w", err)
+	}
+	if err := os.Remove(pending); err != nil {
+		return fmt.Errorf("remove rumdl ownership intent: %w", err)
+	}
+	if !interrupted {
+		_ = installer.change("write rumdl user config -> "+path, nil)
+	}
+	return nil
 }
 
 func (installer *engine) removeRumdlUserConfig() error {
+	if err := installer.publishRumdlUserConfig(true); err != nil {
+		return err
+	}
 	path := installer.rumdlUserConfigPath()
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -176,7 +301,10 @@ func (installer *engine) removeRumdlUserConfig() error {
 	if err != nil {
 		return fmt.Errorf("read rumdl user config %s: %w", path, err)
 	}
-	receiptPath := filepath.Join(managedRootForHome(installer.options.Home), "rumdl-user-config.json")
+	receiptPath := filepath.Join(
+		paths.PhysicalPath(managedRootForHome(installer.options.Home)),
+		"rumdl-user-config.json",
+	)
 	receipt, readErr := os.ReadFile(receiptPath)
 	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
 		return fmt.Errorf("read rumdl ownership %s: %w", receiptPath, readErr)

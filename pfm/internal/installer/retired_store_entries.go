@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -15,6 +17,8 @@ import (
 // .last-update-result.json by temp file and rename at the account path, which
 // replaces a link with a real file. A future retirement is one more row here.
 var RetiredStoreEntries = []string{".last-update-result.json"}
+
+var retiredStoreReadlink = os.Readlink
 
 // RetiredStoreArchive is the directory install moves a retired entry's store
 // copy into.
@@ -25,24 +29,30 @@ func RetiredStoreArchive(home string) string {
 // RetiredStoreLink reports whether path is a link resolving to the store's
 // copy of its entry; base resolves a relative target.
 func RetiredStoreLink(store, base, path string) (bool, error) {
+	_, linked, err := inspectRetiredStoreLink(store, base, path)
+	return linked, err
+}
+
+func inspectRetiredStoreLink(store, base, path string) (string, bool, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
+		return "", false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("inspect retired store entry %s: %w", path, err)
+		return "", false, fmt.Errorf("inspect retired store entry %s: %w", path, err)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return false, nil
+		return "", false, nil
 	}
-	target, err := os.Readlink(path)
+	target, err := retiredStoreReadlink(path)
 	if err != nil {
-		return false, fmt.Errorf("read retired store link %s: %w", path, err)
+		return "", false, fmt.Errorf("read retired store link %s: %w", path, err)
 	}
+	inspected := target
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(base, target)
 	}
-	return paths.PhysicalPath(target) == paths.PhysicalPath(filepath.Join(store, filepath.Base(path))), nil
+	return inspected, paths.PhysicalPath(target) == paths.PhysicalPath(filepath.Join(store, filepath.Base(path))), nil
 }
 
 // retireStoreEntries migrates every retired entry: each account's link into
@@ -66,18 +76,49 @@ func (installer *engine) retireStoreEntries() error {
 			case string(HostOverlayMissing):
 				continue
 			}
-			path := filepath.Join(account.Dir, name)
-			linked, err := RetiredStoreLink(store, paths.PhysicalPath(account.Dir), path)
-			if err != nil {
-				return err
-			}
-			if !linked {
-				continue
-			}
-			if err := installer.change("unlink "+path+" (a per-account file now)", func() error {
-				return os.Remove(path)
-			}); err != nil {
-				return fmt.Errorf("unlink retired store entry %s: %w", path, err)
+			accountErr := func() (returnErr error) {
+				if installer.apply {
+					guard, err := gather.AcquireAccountGuard(account.Dir, false)
+					if errors.Is(err, syscall.EWOULDBLOCK) {
+						keep = "account " + account.Dir + " is starting a chat; rerun pfm install --yes"
+						installer.skip(keep)
+						return nil
+					}
+					if err != nil {
+						return err
+					}
+					defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
+					claims, err := guard.Active(gather.NewProcFS(installer.options.ProcRoot))
+					if err != nil {
+						return err
+					}
+					live, err := liveChatPIDs(installer.options.ProcRoot, account.Dir)
+					if err != nil {
+						return err
+					}
+					if len(claims) != 0 || len(live) != 0 {
+						keep = "account " + account.Dir + " has live chats; close them and rerun pfm install --yes"
+						installer.skip(keep)
+						return nil
+					}
+				}
+				path := filepath.Join(account.Dir, name)
+				inspected, linked, err := inspectRetiredStoreLink(store, paths.PhysicalPath(account.Dir), path)
+				if err != nil {
+					return err
+				}
+				if !linked {
+					return nil
+				}
+				if err := installer.change("unlink "+path+" (a per-account file now)", func() error {
+					return installer.repointAccountLink("", path, inspected)
+				}); err != nil {
+					return fmt.Errorf("unlink retired store entry %s: %w", path, err)
+				}
+				return nil
+			}()
+			if accountErr != nil {
+				return accountErr
 			}
 		}
 		if err := installer.archiveRetiredStoreEntry(filepath.Join(store, name), keep); err != nil {

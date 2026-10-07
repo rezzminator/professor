@@ -465,3 +465,59 @@ func TestCodexHooksRefusesRetiredAccountOwnership(t *testing.T) {
 		t.Fatalf("retired account ownership error = %v", err)
 	}
 }
+
+func TestCodexHooksRefusesRetiredPhysicalAliasOwnership(t *testing.T) {
+	home := t.TempDir()
+	old := filepath.Join(home, "dotfiles", "codex-hooks.json")
+	key := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
+	raw, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{old: {key: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := settingsHookOwnershipPath(managedRootForHome(home))
+	writeFixture(t, ledger, string(raw))
+	e := resumeUnkillEngine(home, filepath.Join(home, "current"), "", ModeUninstall, &bytes.Buffer{})
+	if err := e.wireCodexHooks(); err == nil || !strings.Contains(err.Error(), old) {
+		t.Fatalf("retired alias ownership error=%v", err)
+	}
+	assertContent(t, ledger, string(raw))
+}
+
+func TestCodexHookLedgerRetiresOwnedClaudeAliasBeforeDroppingReceipt(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	body := resumeUnkillHooksBody(home)
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	hooks := doc["hooks"].(map[string]any)
+	entries := hooks["SessionStart"].([]any)
+	hooks["SessionStart"] = append(
+		entries,
+		map[string]any{
+			"matcher": "resume",
+			"hooks":   []any{map[string]any{"type": "command", "command": "echo personal"}},
+		},
+	)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, path, string(raw))
+	key := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
+	ledger, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{path: {key: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, settingsHookOwnershipPath(managedRootForHome(home)), string(ledger))
+	e := resumeUnkillEngine(home, filepath.Join(home, "current"), "", ModeUninstall, &bytes.Buffer{})
+	if err := e.wireCodexHooks(); err != nil {
+		t.Fatal(err)
+	}
+	got := readFixture(t, path)
+	if hookCommandCount(t, got, "SessionStart", resumeUnkillCommand(home)) != 0 ||
+		hookCommandCount(t, got, "SessionStart", "echo personal") != 1 {
+		t.Fatalf("retired physical alias handler stranded or operator hook lost: %s", got)
+	}
+}

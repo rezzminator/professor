@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -363,5 +364,197 @@ func TestOpenCodePreexistingComposedInstructionRemainsOperatorOwned(t *testing.T
 	got, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, readFixture(t, config)), config)
 	if err != nil || !reflect.DeepEqual(got, []string{composed, "operator.md"}) {
 		t.Fatalf("preexisting operator instruction reclaimed: %v %v", got, err)
+	}
+}
+
+func TestOpenCodePendingOwnershipSurvivesFullUninstall(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	config := OpenCodeConfigPath(home)
+	e := &engine{
+		apply:       true,
+		managedRoot: managedRootForHome(home),
+		options: Options{
+			Mode:               ModeApply,
+			Home:               home,
+			OpenCodeConfigPath: config,
+			SourceRepo:         clone,
+			MCPPort:            8456,
+			Stdout:             io.Discard,
+		},
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	receipt := filepath.Join(e.managedRoot, "opencode-instructions.json")
+	e.options.Stdout = &storeMutationWriter{match: "  change  rewrite " + config, mutate: func() {
+		if err := os.MkdirAll(receipt, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	if err := e.editOpenCodeInstructions(true); err == nil {
+		t.Fatal("receipt failure not surfaced")
+	}
+	if err := os.Remove(receipt); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(
+		context.Background(),
+		Options{
+			Mode:               ModeUninstall,
+			Home:               home,
+			SourceRepo:         clone,
+			OpenCodeConfigPath: config,
+			MCPConfigPath:      testConfigPath(t),
+			Runner:             &fakeRunner{},
+			Stdout:             io.Discard,
+		},
+	)
+	if err != nil {
+		t.Fatalf("normal uninstall invalidated pending instruction recovery: %v", err)
+	}
+	doc := decodeOpenCodeFixture(t, readFixture(t, config))
+	entries, err := openCodeInstructionEntries(doc, config)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("owned instruction survives uninstall: %v %v", entries, err)
+	}
+}
+
+func TestOpenCodeOwnershipExcludesConcurrentPublisher(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	config := OpenCodeConfigPath(home)
+	writeFixture(t, config, `{}`)
+	alias := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(home, alias); err != nil {
+		t.Fatal(err)
+	}
+	competing := &engine{
+		apply: true,
+		options: Options{
+			Mode:               ModeApply,
+			Home:               alias,
+			OpenCodeConfigPath: config,
+			SourceRepo:         t.TempDir(),
+			Stdout:             io.Discard,
+		},
+	}
+	var competingErr error
+	writer := &storeMutationWriter{
+		match:  "  change  rewrite " + config,
+		mutate: func() { competingErr = competing.editOpenCodeInstructions(true) },
+	}
+	e := &engine{
+		apply:   true,
+		options: Options{Mode: ModeApply, Home: home, OpenCodeConfigPath: config, SourceRepo: clone, Stdout: writer},
+	}
+	err := e.editOpenCodeInstructions(true)
+	if competingErr == nil || !strings.Contains(competingErr.Error(), "busy") {
+		t.Fatalf("competing publisher crossed ownership boundary: %v; original=%v", competingErr, err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.editOpenCodeInstructions(false); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, readFixture(t, config)), config)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("serialized publication lost ownership: %v %v", entries, err)
+	}
+}
+
+func TestManagedConfigOwnershipRefusesSharedStoreAliases(t *testing.T) {
+	shared, clone := t.TempDir(), t.TempDir()
+	for _, apply := range []bool{false, true} {
+		for _, publisher := range []string{"opencode", "rumdl"} {
+			t.Run(fmt.Sprintf("%s/apply=%t", publisher, apply), func(t *testing.T) {
+				home := t.TempDir()
+				root := managedRootForHome(home)
+				if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(shared, root); err != nil {
+					t.Fatal(err)
+				}
+				config := OpenCodeConfigPath(home)
+				e := &engine{
+					apply:   apply,
+					options: Options{Home: home, SourceRepo: clone, OpenCodeConfigPath: config, Stdout: io.Discard},
+				}
+				journalName, configBytes := "opencode-instructions.json.pending", `{"theme":"personal"}`
+				if publisher == "rumdl" {
+					e.options.Env = &paths.MapEnv{}
+					config, configBytes = e.rumdlUserConfigPath(), rumdlUserConfig
+					journalName = "rumdl-user-config.json.pending"
+				}
+				writeFixture(t, config, configBytes)
+				journal := filepath.Join(shared, journalName)
+				writeFixture(t, journal, "existing journal bytes")
+				var err error
+				if publisher == "opencode" {
+					err = e.editOpenCodeInstructions(true)
+				} else {
+					err = e.publishRumdlUserConfig(false)
+				}
+				if err == nil || !strings.Contains(err.Error(), "shared managed ownership root") ||
+					!strings.Contains(err.Error(), shared) {
+					t.Fatalf("shared-store alias was not refused before ownership mutation: %v", err)
+				}
+				assertContent(t, config, configBytes)
+				assertContent(t, journal, "existing journal bytes")
+			})
+		}
+	}
+}
+
+func TestOpenCodePendingPublicationRefusesConfigDrift(t *testing.T) {
+	for _, scenario := range []string{"operator-edit", "different-config", "different-missing-config"} {
+		t.Run(scenario, func(t *testing.T) {
+			home, clone := t.TempDir(), t.TempDir()
+			config := OpenCodeConfigPath(home)
+			writeFixture(t, config, `{"instructions":["operator.md"]}`)
+			receipt := filepath.Join(managedRootForHome(home), "opencode-instructions.json")
+			writer := &storeMutationWriter{match: "  change  rewrite " + config, mutate: func() {
+				if err := os.MkdirAll(receipt, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}}
+			e := &engine{
+				apply: true,
+				options: Options{
+					Mode:               ModeApply,
+					Home:               home,
+					SourceRepo:         clone,
+					OpenCodeConfigPath: config,
+					Stdout:             writer,
+				},
+			}
+			if err := e.editOpenCodeInstructions(true); err == nil {
+				t.Fatal("receipt failure hidden")
+			}
+			if err := os.Remove(receipt); err != nil {
+				t.Fatal(err)
+			}
+			wanted := `{"instructions":["new operator.md"],"theme":"personal"}`
+			path := config
+			if scenario == "different-config" || scenario == "different-missing-config" {
+				path = filepath.Join(t.TempDir(), "other.jsonc")
+				e.options.OpenCodeConfigPath = path
+			}
+			if scenario != "different-missing-config" {
+				writeFixture(t, path, wanted)
+			}
+			e.options.Stdout = io.Discard
+			if err := e.editOpenCodeInstructions(false); err == nil {
+				t.Fatal("diverged pending publication was silently discarded")
+			}
+			if scenario == "different-missing-config" {
+				requireNoPath(t, path, "uninstall created changed config")
+			} else {
+				assertContent(t, path, wanted)
+			}
+			if _, err := os.Stat(receipt + ".pending"); err != nil {
+				t.Fatalf("diverged intent lost: %v", err)
+			}
+		})
 	}
 }

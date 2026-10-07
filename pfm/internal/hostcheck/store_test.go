@@ -591,13 +591,13 @@ func TestAccountEntryReal(t *testing.T) {
 			t.Fatal("environment roster reordered")
 		}
 	})
-	for _, scenario := range []string{"foreign", "dangling", "store-link", "unreadable-link"} {
+	for _, scenario := range []string{"foreign", "foreign-dangling", "dangling", "store-link", "unreadable-link"} {
 		t.Run(scenario, func(t *testing.T) {
 			env := fixtureEnv(t)
 			account := env.Accounts[0].ConfigDir
 			name, target := "CLAUDE.md", filepath.Join(env.Home, "dotfiles", "CLAUDE.md")
-			if scenario != "foreign" {
-				name, target = "agents", filepath.Join(env.Home, "gone")
+			if scenario != "foreign" && scenario != "foreign-dangling" {
+				name, target = "agents", filepath.Join(env.Store, "gone")
 			}
 			path := filepath.Join(account, name)
 			makeDir(t, account)
@@ -615,7 +615,7 @@ func TestAccountEntryReal(t *testing.T) {
 			}
 			rows := detect(t, "account-entry-real", env)
 			switch scenario {
-			case "foreign":
+			case "foreign", "foreign-dangling":
 				fix := "cat " + path + " >> " + env.Store + "/CLAUDE.md && rm " + path + "  # appended whole; prune " + env.Store + "/CLAUDE.md as you like"
 				assertRows(
 					t,

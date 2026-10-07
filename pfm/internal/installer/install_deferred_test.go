@@ -206,7 +206,7 @@ func TestInstallDeferredRerunRepairsInactiveTimerAndKeepsHealthyUnits(t *testing
 	}
 }
 
-func TestUninstallDeferredDamagedLoginFenceLandsCleanupAndVSCode(t *testing.T) {
+func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	writeFixture(t, settings, `{}`)
@@ -223,16 +223,16 @@ func TestUninstallDeferredDamagedLoginFenceLandsCleanupAndVSCode(t *testing.T) {
 	output.Reset()
 	_, err := Run(context.Background(), options)
 	if err == nil || !strings.Contains(err.Error(), "two pfm claude-config-dir begin markers") ||
-		!strings.Contains(output.String(), "  FAIL    login default: ") {
+		!strings.Contains(err.Error(), "preflight uninstall plan") {
 		t.Fatalf("uninstall error=%v output=%s, want damaged-fence failure", err, output.String())
 	}
 	for _, name := range []string{"source-repo", binaryOwnershipName} {
-		if _, err := os.Stat(filepath.Join(managedRootForHome(home), name)); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("uninstall metadata %s remains: %v", name, err)
+		if _, err := os.Stat(filepath.Join(managedRootForHome(home), name)); err != nil {
+			t.Errorf("preflight refusal removed installation metadata %s: %v", name, err)
 		}
 	}
-	if got := readFixture(t, settings); strings.Contains(got, `"PFM"`) {
-		t.Fatalf("VS Code uninstall did not land:\n%s", got)
+	if got := readFixture(t, settings); !strings.Contains(got, `"PFM"`) {
+		t.Fatalf("preflight refusal changed VS Code installation:\n%s", got)
 	}
 }
 
@@ -403,5 +403,55 @@ func TestInstallDeferredApplyFailuresLandLaterSteps(t *testing.T) {
 				t.Fatalf("later metadata did not land after %s: %v\n%s", scenario, err, output.String())
 			}
 		})
+	}
+}
+
+func TestUninstallPreflightRefusesOwnedHookBeforeTeardown(t *testing.T) {
+	home := t.TempDir()
+	old := filepath.Join(home, "retired", "hooks.json")
+	key := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
+	raw, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{old: {key: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, settingsHookOwnershipPath(managedRootForHome(home)), string(raw))
+	keep := filepath.Join(home, ".local", "bin", "claude")
+	symlinkFixture(t, "operator-launcher", keep)
+	_, err = Run(
+		context.Background(),
+		Options{
+			Mode:          ModeUninstall,
+			Home:          home,
+			Runner:        &fakeRunner{},
+			MCPConfigPath: testConfigPath(t),
+			Stdout:        &bytes.Buffer{},
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "preflight uninstall plan") {
+		t.Fatalf("known hook refusal reached teardown: %v", err)
+	}
+	assertLink(t, keep, filepath.Join(filepath.Dir(keep), "operator-launcher"))
+}
+
+func TestFailedAssetStageDoesNotWireDependentRegistries(t *testing.T) {
+	home := t.TempDir()
+	managed := managedRootForHome(home)
+	writer := &storeMutationWriter{match: "  change  write " + managed, mutate: func() {
+		if err := os.RemoveAll(managed); err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, managed, "blocked")
+	}}
+	_, err := Run(
+		context.Background(),
+		Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}, MCPConfigPath: testConfigPath(t), Stdout: writer},
+	)
+	if err == nil {
+		t.Fatal("staging failure was hidden")
+	}
+	for _, path := range []string{filepath.Join(home, ".claude", "commands", "reload.md"), filepath.Join(home, ".claude", "skills", "handoff", "SKILL.md")} {
+		if target, err := os.Readlink(path); err == nil {
+			t.Errorf("failed asset stage published dependent link %s -> %s", path, target)
+		}
 	}
 }

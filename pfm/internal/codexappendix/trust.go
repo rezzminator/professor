@@ -23,6 +23,10 @@ const (
 	trustedState = "trusted"
 )
 
+// ErrNativeHookTrustUnknown distinguishes unavailable native readback from a
+// failed receipt read. Historical registration can never prove current trust.
+var ErrNativeHookTrustUnknown = errors.New("native trust is unknown")
+
 // hook is one entry of the harness's hooks/list answer.
 type hook struct {
 	Key         string `json:"key"`
@@ -96,7 +100,11 @@ func HookTrustState(account string, expectedCommand ...string) (recorded bool, e
 					continue
 				}
 			}
-			return true, nil
+			return false, fmt.Errorf(
+				"%w for hook %s: historical receipt cannot verify current enabled state or trust hash; inspect the native Codex hook state (doctor has no native readback)",
+				ErrNativeHookTrustUnknown,
+				key,
+			)
 		}
 		return false, fmt.Errorf("hook trust receipt %s has no valid SessionStart handler fingerprint", path)
 	case errors.Is(err, os.ErrNotExist):

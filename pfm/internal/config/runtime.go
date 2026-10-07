@@ -64,6 +64,14 @@ type Runtime struct {
 	Version        string
 }
 
+// WithConfig applies a newly loaded install seed using the runtime's database
+// precedence, preserving independently overridden state and cache paths.
+func (runtime Runtime) WithConfig(config Config, env paths.Env) Runtime {
+	runtime.Config = config
+	applyStatePaths(&runtime.Paths, config, env)
+	return runtime
+}
+
 func (runtime Runtime) IsRelease() bool {
 	return runtime.Version != "" && runtime.Version != DevelopmentVersion
 }

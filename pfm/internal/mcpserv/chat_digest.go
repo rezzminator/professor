@@ -198,14 +198,14 @@ func digestScriptAt(candidate string) (bool, string) {
 	switch {
 	case err != nil:
 		return false, fmt.Sprintf("%s (%v)", candidate, err)
-	case info.IsDir():
-		return false, candidate + " (is a directory)"
+	case !info.Mode().IsRegular():
+		return false, candidate + " (not a regular file)"
 	}
 	return true, candidate
 }
 
-// cutAtLine keeps text up to the last newline at or before limit bytes; text
-// with no newline in that span is cut at a rune boundary instead.
+// cutAtLine keeps only complete lines within limit bytes. When the first
+// line exceeds the cap, the bounded digest is empty.
 func cutAtLine(text string, limit int) string {
 	if len(text) <= limit {
 		return text
@@ -213,7 +213,7 @@ func cutAtLine(text string, limit int) string {
 	if cut := strings.LastIndexByte(text[:limit], '\n'); cut >= 0 {
 		return text[:cut+1]
 	}
-	return cutBytes(text, limit)
+	return ""
 }
 
 // cutBytes keeps the first limit bytes of text without splitting a rune.

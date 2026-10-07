@@ -502,23 +502,18 @@ func preferredUpdateSourceRepo(home, repo string) string {
 }
 
 func updateGitRun(ctx context.Context, repo string, args ...string) error {
-	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo})
-	if err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf(
-			"git %s: exited %d: %s",
-			strings.Join(args, " "),
-			result.ExitCode,
-			strings.TrimSpace(string(result.Stdout)+string(result.Stderr)),
-		)
-	}
-	return nil
+	_, err := updateGitOutput(ctx, repo, args...)
+	return err
 }
 
 func updateGitOutput(ctx context.Context, repo string, args ...string) (string, error) {
-	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo})
+	// Source ownership, reads and writes select the same requested repository.
+	// Preserve transport settings, and restore only the explicit fence mapping.
+	env := deps.WithoutGitRepoVars(os.Environ())
+	if gitDir, useFenceGit := paths.DevRepoGitDir(repo); useFenceGit {
+		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+repo)
+	}
+	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo, Env: env})
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}

@@ -119,6 +119,9 @@ func TestClaudeStoreChecks(t *testing.T) {
 					want, failures = "account-link: "+link+" missing — run pfm install\n", 1
 				case "elsewhere", "foreign":
 					target := filepath.Join(home, "old", "agents")
+					if scenario == "elsewhere" {
+						target = filepath.Join(store, "old", "agents")
+					}
 					if scenario == "foreign" {
 						if err := os.MkdirAll(target, 0o700); err != nil {
 							t.Fatal(err)

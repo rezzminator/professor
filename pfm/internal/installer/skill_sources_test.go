@@ -804,3 +804,25 @@ func TestSkillRetirementCleansRecordedDirectories(t *testing.T) {
 		t.Fatalf("recorded link stranded -> %s", target)
 	}
 }
+
+func TestSkillLedgerRetainsActiveHistoricalDirectory(t *testing.T) {
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "skill"), map[string]string{"SKILL.md": "# sample"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"sample": "file://" + repo}))
+	old, current := filepath.Join(home, "old"), filepath.Join(home, "current")
+	runSkillInstall(t, home, ModeApply, func(o *Options) { o.ConfigDir = old })
+	runSkillInstall(t, home, ModeApply, func(o *Options) { o.ConfigDir = current })
+	dirs, _, err := readSkillLinkLedger(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, dir := range dirs {
+		found = found || dir == filepath.Join(old, "skills")
+	}
+	if !found {
+		t.Fatalf("active historical directory forgotten: %v", dirs)
+	}
+	runSkillInstall(t, home, ModeUninstall, func(o *Options) { o.ConfigDir = current })
+	requireNoPath(t, filepath.Join(old, "skills", "sample"), "historical link survived uninstall")
+}

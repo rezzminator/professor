@@ -70,7 +70,7 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 		t.Fatal(err)
 	}
 	codex := filepath.Join(home, ".codex")
-	// The owned hook is wired and trusted, so the stale handler is the only red.
+	// The receipt carries history; both its unknown native trust and the stale handler are visible.
 	writeFixture(
 		t,
 		filepath.Join(codex, "hooks.json"),
@@ -84,8 +84,9 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	)
 	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codex}}}
 	var output bytes.Buffer
-	_, failures := ReportHooks(&output, home, machine, false)
-	if failures != 1 ||
+	warnings, failures := ReportHooks(&output, home, machine, false)
+	if warnings != 2 || failures != 1 ||
+		!strings.Contains(output.String(), "native trust is unknown") ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json SessionStart clear-hide STALE") {
 		t.Fatalf("failures=%d output=%s", failures, output.String())
 	}
@@ -160,7 +161,7 @@ func TestProbeCodexHooksReportsTheResumeUnkillHookMissing(t *testing.T) {
 	}
 }
 
-func TestProbeCodexHooksReportsAnUntrustedResumeUnkillHookAndPassesATrustedOne(t *testing.T) {
+func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 	t.Parallel()
 	home, machine, _ := stageCodexProbeHome(t, "")
 	hooksPath := filepath.Join(home, ".codex", "hooks.json")
@@ -188,8 +189,23 @@ func TestProbeCodexHooksReportsAnUntrustedResumeUnkillHookAndPassesATrustedOne(t
 		t.Fatal(err)
 	}
 	writeFixture(t, settingsHookOwnershipPath(managedRootForHome(home)), string(ledger))
-	if rows := codexProbeRows(home, machine); len(rows) != 0 {
-		t.Fatalf("a wired, trusted hook produced rows: %+v", rows)
+	if rows := codexProbeRows(
+		home,
+		machine,
+	); len(rows) != 1 || rows[0].State != "native-trust-unknown" ||
+		!strings.Contains(rows[0].Error, "native trust is unknown") {
+		t.Fatalf("historical trust must stay visibly unknown: %+v", rows)
+	}
+	output.Reset()
+	warnings, failures = ReportHooks(&output, home, machine, false)
+	if warnings != 2 || failures != 0 || !strings.Contains(output.String(), "NATIVE-TRUST-UNKNOWN") ||
+		strings.Contains(output.String(), "pfm install --yes") {
+		t.Fatalf(
+			"unknown native trust must be an explicit warning, without promising readback: warnings=%d failures=%d output=%s",
+			warnings,
+			failures,
+			output.String(),
+		)
 	}
 	probed := ProbeExpectedHooks(home, machine)
 	for index := range probed {

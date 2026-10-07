@@ -62,9 +62,20 @@ case "$MODE" in
     FLAG="/tmp/$PROJECT/guard/codex_dirty"
     [[ -f "$FLAG" ]] || exit 0
     # The fence's templates lane builds this dev binary into the shared timing
-    # scratch for Linux; the host takes it only when it actually runs here.
+    # scratch for Linux; the host takes it only when it runs here and is current.
     PFM_BIN="/tmp/$PROJECT/timing/pfm-dev-bin"
-    { [[ -x "$PFM_BIN" ]] && "$PFM_BIN" --version >/dev/null 2>&1; } || PFM_BIN=$(command -v pfm 2>/dev/null || true)
+    PFM_COMMIT=$(git -C "$REPO_ROOT" log -1 --format=%ct -- pfm 2>/dev/null) || PFM_COMMIT=""
+    PFM_MTIME=$(stat -c %Y "$PFM_BIN" 2>/dev/null || stat -f %m "$PFM_BIN" 2>/dev/null || true)
+    PFM_FRESH=false
+    PFM_STALE=false
+    if [[ "$PFM_COMMIT" =~ ^[0-9]+$ && "$PFM_MTIME" =~ ^[0-9]+$ ]]; then
+      if (( PFM_MTIME >= PFM_COMMIT )); then PFM_FRESH=true; else PFM_STALE=true; fi
+    fi
+    { [[ "$PFM_FRESH" == true && -x "$PFM_BIN" ]] && "$PFM_BIN" --version >/dev/null 2>&1; } || PFM_BIN=$(command -v pfm 2>/dev/null || true)
+    PFM_NOTE=""
+    if [[ "$PFM_STALE" == true ]]; then
+      PFM_NOTE=" (binary: $PFM_BIN; stale dev binary skipped)"
+    fi
     if [[ -z "$PFM_BIN" || ! -x "$PFM_BIN" ]]; then
       jq -n --arg m 'codex-sync WARNING: compiler unavailable — mirrors were not checked; dirty flag retained' '{systemMessage: $m}'
       exit 0
@@ -96,10 +107,10 @@ case "$MODE" in
     if [[ "$STOP_ACTIVE" == "true" ]]; then
       # The model already had its repair turn for this stop: let the turn end,
       # warn the user, keep the flag so the next turn checks again.
-      jq -n --arg m "codex-sync WARNING: $FAILED still failing after the repair turn — the mirror is stale; the flag stays set and the check repeats next turn." '{systemMessage: $m}'
+      jq -n --arg m "codex-sync WARNING: $FAILED$PFM_NOTE still failing after the repair turn — the mirror is stale; the flag stays set and the check repeats next turn." '{systemMessage: $m}'
       exit 0
     fi
-    jq -n --arg r "codex-sync: $FAILED failed after this turn's framework edits — the mirror is stale. Repair it now, then end the turn: a dangling ~/.claude link → pfm install --yes (prunes orphaned global-command links; a stale ~/.claude/agents link is removed by hand); a stale or orphan mirror file → pfm codex build . and pfm opencode build .; then pfm codex check . and pfm opencode check . must both pass. Output of the failing stage(s):
+    jq -n --arg r "codex-sync: $FAILED$PFM_NOTE failed after this turn's framework edits — the mirror is stale. Repair it now, then end the turn: a dangling ~/.claude link → pfm install --yes (prunes orphaned global-command links; a stale ~/.claude/agents link is removed by hand); a stale or orphan mirror file → pfm codex build . and pfm opencode build .; then pfm codex check . and pfm opencode check . must both pass. Output of the failing stage(s):
 $DETAIL" '{decision: "block", reason: $r}'
     exit 0
     ;;

@@ -107,7 +107,7 @@
     ".claude/commands/pfm/release.md": "dbb98e48f8f03c460cd8662061c60f76609285179b0b45b711bc8bfbb7aaae41",
     ".claude/scripts/check-pfm.sh": "d0396e5c5b8044e26d22ac65ac7d91a0a623e960397757b01d71fc225c0b1dcd",
     ".claude/scripts/check-templates.sh": "13f6d2180c45713f03edeabd832187c5baa5e6ff27a30f3fa1920b5c0e354218",
-    ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
+    ".claude/scripts/codex-sync.sh": "19763efc32496fcbd35fd069c49c92f30c0418983b652990e21baad28481bb31",
     ".claude/scripts/dev.sh": "4a32e7251b21304641ce9c46a77a7995d14f71f52752a2feb1355013b568e6af",
     ".claude/scripts/format-md.sh": "92d0c09b66fb4d6809d881386e87916af5df3be25caeef5a5998f82e17cc3919",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",

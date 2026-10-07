@@ -79,7 +79,7 @@ func (levels Levels) For(comp string) LevelInForce {
 func ResolveLevels(policy Policy, env paths.Env) (Levels, error) {
 	var refused []error
 	global := LevelInForce{Level: slog.LevelInfo, Source: SourceBuild}
-	if strings.HasSuffix(strings.TrimSpace(policy.Version), AlphaSuffix) {
+	if AlphaBuild(policy.Version) {
 		global.Level = slog.LevelDebug
 	}
 	for _, candidate := range []struct{ source, setting, value string }{

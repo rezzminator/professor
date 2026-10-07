@@ -205,6 +205,8 @@ claude plugin install sub-agent-compact@professor
 - [buddy](https://github.com/rezzminator/buddy): a tiny ASCII companion above your prompt — Quack the duck, seven more characters or your own — that comments on each turn, suggests your next prompt and answers `/buddy` questions from what it remembers of the chat.
 - [callmeter](https://github.com/rezzminator/callmeter): records every tool call, model request, sub-agent turn and session event into one local SQLite store — counts and sizes, never your prompts or file contents — and answers which files, commands and agents cost the most.
 
+`pfm install` installs cache-live-control, sub-agent-compact and agent-effort from their GitHub marketplaces. An alpha build of pfm installs them instead from local checkouts when `claude.pluginCheckoutRoot` in `pfm.config.json` names the directory holding `{plugin}/plugins/{plugin}`: it copies each into `~/.local/share/{plugin}-dev`, installs `{plugin}@{plugin}-dev` and disables the GitHub copy. Claude reads the `-dev` copy in place, so `/reload-plugins` picks up a refresh. Every build keeps exactly one copy enabled: a release build, or an alpha build without a checkout, disables the `-dev` copy instead.
+
 ## Origin
 
 Extracted from a live production monorepo, not designed in the abstract. Every rule here exists because something went wrong without it — the gate that reads disk instead of chat exists because an agent once claimed green; the scoped-commit rule exists because two concurrent commits once swallowed each other's files; the prevention step exists because the same bug class shipped twice. The characters exist because a generic agent wasn't good enough to argue with.

@@ -24,6 +24,18 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
+	runtime := commandRuntime{
+		Paths:   paths.Values{Home: t.TempDir()},
+		Config:  pfmconfig.Config{Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins"}},
+		Version: "0.80.0-alpha",
+	}
+	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
+	if options.Version != "0.80.0-alpha" || options.ClaudePluginCheckoutRoot != "/opt/plugins" {
+		t.Fatalf("plugin options version=%q root=%q", options.Version, options.ClaudePluginCheckoutRoot)
+	}
+}
+
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 	home := t.TempDir()
 	runtime := commandRuntime{

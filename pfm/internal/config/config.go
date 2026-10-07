@@ -95,6 +95,9 @@ type ClaudePrefs struct {
 	// the unset sentinel on both.
 	MaxSubagentSpawnDepth  int
 	MaxConcurrentSubagents int
+	// PluginCheckoutRoot is claude.pluginCheckoutRoot, an absolute path; empty
+	// when unset. Machine-wide: an account may not set it.
+	PluginCheckoutRoot string
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -287,8 +290,9 @@ type rawClaude struct {
 	// RetiredCompactNudge accepts old config files; it is never read or written.
 	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
-	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
-	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
+	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
+	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
 }
 
 type rawOpenCode struct {
@@ -441,6 +445,7 @@ func defaultsWithMCPServers(
 		"claude.tmuxTruecolor":                               SourceDefault,
 		"claude.cleanupPeriodDays":                           SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
+		KeyClaudePluginCheckoutRoot:                          SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
@@ -727,6 +732,14 @@ func loadWithMCPServers(
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
+		}
+		if raw.Claude.PluginCheckoutRoot != nil {
+			root, err := expandHomePath(*raw.Claude.PluginCheckoutRoot, home)
+			if err != nil {
+				return Config{}, fmt.Errorf("config %s: %s %w", result.Path, KeyClaudePluginCheckoutRoot, err)
+			}
+			result.Claude.PluginCheckoutRoot = root
+			result.Sources[KeyClaudePluginCheckoutRoot] = SourceFile
 		}
 		if err := applySubagentCaps(
 			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
@@ -1406,6 +1419,11 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	if engine, err := config.DefaultEngine(); err == nil {
 		askValue["engine"] = pfmengine.MustLookup(engine).LongName
 	}
+	// An unset checkout root is null in the file, never "": "" fails Load.
+	var pluginRoot any
+	if config.Claude.PluginCheckoutRoot != "" {
+		pluginRoot = config.Claude.PluginCheckoutRoot
+	}
 	value := map[string]any{
 		keyVersion: config.Version,
 		keyTheme:   config.Theme,
@@ -1422,6 +1440,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			keyTheme:                themeMarshalValue(config.Claude.Theme),
 			"cache1h":               config.Claude.Cache1H,
 			"nativeCursor":          config.Claude.NativeCursor,
+			"pluginCheckoutRoot":    pluginRoot,
 		},
 		codexName: codexValue,
 		"tmux": map[string]any{

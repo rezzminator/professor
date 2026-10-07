@@ -379,7 +379,7 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	path := writeConfigFixture(
 		t,
 		root,
-		`{"version":2,"claude":{"webSearchesPerSession":17,"autoCompactWindow":250000,"tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false}}`,
+		`{"version":2,"claude":{"webSearchesPerSession":17,"autoCompactWindow":250000,"tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
 	)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
@@ -391,6 +391,7 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 		"config claude.tmuxTruecolor=false (file)",
 		"config claude.cleanupPeriodDays=31 (file)",
 		"config claude.requireManagedCleanup=false (file)",
+		"config claude.pluginCheckoutRoot=/opt/plugins (file)",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("config show lacks %q: %s", want, stdout.String())

@@ -10,10 +10,19 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// printClaudePluginsDoctor checks the shared store once.
-func printClaudePluginsDoctor(stdout io.Writer, store string, tally *doctorTally) {
+// printClaudePluginsDoctor checks the shared store once for the plugins build
+// ensures: the -dev ids and their copies on an -alpha build with checkouts, the
+// GitHub ids otherwise, each fallback named on its own informational line.
+func printClaudePluginsDoctor(stdout io.Writer, store string, build installer.ClaudePluginBuild, tally *doctorTally) {
+	targets := installer.ClaudePluginTargets(build)
+	for index := range targets {
+		target := &targets[index]
+		if target.Fallback != "" {
+			fmt.Fprintln(stdout, "doctor: claude_plugins "+target.FallbackNote())
+		}
+	}
 	path := filepath.Join(store, "settings.json")
-	gaps, err := installer.ClaudePluginGaps(path)
+	gaps, err := installer.ClaudePluginGaps(path, targets)
 	if errors.Is(err, installer.ErrClaudeSettingsAbsent) {
 		fmt.Fprintf(stdout, "doctor: claude_plugins skipped: %v (store never set up)\n", err)
 		return
@@ -23,10 +32,7 @@ func printClaudePluginsDoctor(stdout io.Writer, store string, tally *doctorTally
 		fmt.Fprintf(stdout, "doctor: claude_plugins could not read %s: %v\n", path, err)
 		return
 	}
-	for i := range gaps {
-		gaps[i] += " in " + path
-	}
-	missing, err := installer.ClaudePluginsNotInstalled(store)
+	missing, err := installer.ClaudePluginsNotInstalled(store, targets)
 	if err != nil {
 		tally.fail()
 		fmt.Fprintf(
@@ -38,7 +44,9 @@ func printClaudePluginsDoctor(stdout io.Writer, store string, tally *doctorTally
 		return
 	}
 	for _, id := range missing {
-		gaps = append(gaps, "plugin "+id+" not installed in "+store)
+		gaps = append(gaps, installer.ClaudePluginGap{
+			Problem: "plugin " + id + " not installed in " + store, Fix: installer.ClaudePluginRepair,
+		})
 	}
 	if len(gaps) == 0 {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
@@ -46,7 +54,7 @@ func printClaudePluginsDoctor(stdout io.Writer, store string, tally *doctorTally
 	}
 	for _, gap := range gaps {
 		tally.warn()
-		fmt.Fprintf(stdout, "doctor: claude_plugins %s — run pfm install --yes\n", gap)
+		fmt.Fprintf(stdout, "doctor: claude_plugins %s — %s\n", gap.Problem, gap.Fix)
 	}
 }
 

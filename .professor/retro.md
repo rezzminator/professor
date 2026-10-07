@@ -196,6 +196,8 @@ Observed: the installed alpha classified `.last-update-result.json` as shared da
 
 Amend: cover this exact old-to-new ownership transition in the adopter rehearsal. Explain the live-chat precondition before updating, and distinguish a successfully installed binary from deferred migration work. Retain and restore the original account cache when appropriate; never overwrite account-owned data or bypass the live-account guard. Verify archival and unlinking after the account becomes idle. Determine whether the old-binary precheck can avoid a temporary repair that the target release immediately retires.
 
+Recovery completed: after explicit authorization to finish the deferred migration, both affected chats were confirmed idle and ended with `pfm chat end`; their histories remained resumable. `pfm install --yes` exited 0, removed the retired account link and archived the shared copy. The original account-owned cache was restored from its verified backup, with no existing file overwritten. A fresh doctor run showed healthy account links, no blocking failures and no retired-store-entry warnings. Other pre-existing host warnings remained visible. The product follow-up above remains open; the host migration is complete.
+
 ## 2026-10-07 — the source clone gets inconsistent project-update verdicts
 
 Observed: after the successful v0.79.0 update, the updater printed `NOT-MANAGED` and explained that a missing `.professor/baseline.json` is expected in the Professor source clone. Running the recommended `pfm doctor --project-updates` in that same clone exited 3 with `FAILED` and suggested `pfm update adopt` or `pfm init`. No baseline was created: this was the framework source, not an adopted project.

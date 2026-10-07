@@ -5,7 +5,8 @@
 # default), readable back as `go version -m <binary>` -> a
 # `build	vcs.revision=<sha>` line. This script compares that revision
 # against the calling repo's HEAD and refuses to let host-install proceed
-# when the installed binary is not an ancestor of HEAD — unless FORCE=1.
+# when installed history is neither ancestral nor an ordered, whitespace-exact
+# rebase equivalent in HEAD-only history after divergence — unless FORCE=1.
 #
 # usage: install-downgrade-guard.sh <installed-binary-path> [repo-dir]
 #   repo-dir defaults to the git toplevel of this script's own tree.
@@ -89,6 +90,63 @@ if [ -z "$rev_full" ]; then
 fi
 rev_short="$(git_ rev-parse --short "$rev_full" 2>/dev/null)"
 
+# Only a complete installed-only linear series may substitute for ancestry.
+# --verbatim preserves whitespace (including source-string contents), unlike
+# ordinary patch-id; all old patches must appear in order in HEAD-only history.
+# Shared ancestors cannot prove a new installed replay of a reverted patch.
+# Merge/empty installed commits remain unverifiable and therefore refuse.
+REBASE_ERROR=""
+rebase_equivalent() {
+  local common commits old_patches new_patches line id commit extra rc
+  local count=0 next=0
+  local parents=() old_ids=()
+  common="$(git_ merge-base "$rev_full" "$head_sha" 2>/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ "$rc" -eq 1 ] && return 1
+    REBASE_ERROR="git merge-base failed (rc $rc) for $rev_full vs $head_sha"; return 2
+  fi
+  [ -n "$common" ] || { REBASE_ERROR="git merge-base returned no common commit"; return 2; }
+  commits="$(git_ rev-list --reverse --topo-order --parents "$head_sha..$rev_full")" || {
+    REBASE_ERROR="git could not enumerate installed-only history"; return 2;
+  }
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    read -r -a parents <<< "$line"
+    [ "${#parents[@]}" -eq 2 ] || return 1
+    count=$((count + 1))
+  done <<< "$commits"
+  [ "$count" -gt 0 ] || { REBASE_ERROR="installed-only history is unexpectedly empty"; return 2; }
+  old_patches="$(git_ log --reverse --topo-order --no-merges --format='commit %H' --patch \
+    --no-ext-diff --no-textconv --no-renames --binary --full-index --diff-algorithm=myers \
+    "$head_sha..$rev_full" | git_ patch-id --verbatim)" || {
+    REBASE_ERROR="git could not fingerprint installed-only history"; return 2;
+  }
+  while read -r id commit extra; do
+    [ -n "$id" ] || continue
+    if [[ ! "$id" =~ ^[[:xdigit:]]+$ || ! "$commit" =~ ^[[:xdigit:]]+$ || -n "$extra" ]]; then
+      REBASE_ERROR="git returned an invalid installed patch fingerprint"; return 2
+    fi
+    old_ids+=("$id")
+  done <<< "$old_patches"
+  [ "${#old_ids[@]}" -eq "$count" ] || return 1
+  new_patches="$(git_ log --reverse --topo-order --no-merges --format='commit %H' --patch \
+    --no-ext-diff --no-textconv --no-renames --binary --full-index --diff-algorithm=myers \
+    "$rev_full..$head_sha" | git_ patch-id --verbatim)" || {
+    REBASE_ERROR="git could not fingerprint candidate history"; return 2;
+  }
+  while read -r id commit extra; do
+    [ -n "$id" ] || continue
+    if [[ ! "$id" =~ ^[[:xdigit:]]+$ || ! "$commit" =~ ^[[:xdigit:]]+$ || -n "$extra" ]]; then
+      REBASE_ERROR="git returned an invalid candidate patch fingerprint"; return 2
+    fi
+    if [ "$id" = "${old_ids[$next]}" ]; then
+      next=$((next + 1))
+      [ "$next" -eq "$count" ] && return 0
+    fi
+  done <<< "$new_patches"
+  return 1
+}
+
 git_ merge-base --is-ancestor "$rev_full" "$head_sha"
 mb_rc=$?
 case "$mb_rc" in
@@ -97,6 +155,15 @@ case "$mb_rc" in
     exit 0
     ;;
   1)
+    rebase_equivalent; equivalent_rc=$?
+    if [ "$equivalent_rc" -eq 0 ]; then
+      echo "install-guard: ok — installed $rev_short has complete rebase-equivalent history in this tree (HEAD $head_short)"
+      exit 0
+    fi
+    if [ "$equivalent_rc" -eq 2 ]; then
+      echo "install-guard: ERROR $REBASE_ERROR" >&2
+      exit 2
+    fi
     subject="$(git_ log -1 --format=%s "$rev_full" 2>/dev/null)"
     refuse "REFUSED — installed pfm was built from $rev_short \"$subject\", which this tree's HEAD $head_short does not contain; installing would downgrade it. Rebase onto develop, or run FORCE=1 make host-install to override."
     ;;

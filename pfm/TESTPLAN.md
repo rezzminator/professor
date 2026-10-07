@@ -298,6 +298,12 @@ Legacy pfm hooks and status lines are BLOCK rows. Installation refuses before wr
 | --- | --- | --- | --- |
 | owned hooks and custom status lines | JAIL | name only pfm keys; failed ledger reads block | `internal/hostcheck/owned_test.go` (`TestPFMSettings`, `TestOwnershipLedgerUnreadable`), `internal/installer/account_files_test.go` (`TestCustomStatusLinePreserved`) |
 
+### Host install history guard
+
+| flow | safety | expected behavior | regression |
+| --- | --- | --- | --- |
+| Installed build revision after a local rebase | JAIL+sh | Ancestry passes; a complete installed-only linear series passes only when every whitespace-preserving patch appears in order in HEAD-only post-divergence history; shared reverted patches cannot prove a new installed replay; unknown, empty, missing or semantically different history refuses; Git fingerprint errors stay ERROR | `scripts/install-downgrade-guard_test.sh` |
+
 ### A.6 — Claude MCP launch wiring
 
 Claude receives pfm and `mcp.thirdParty` servers in each launch’s `--mcp-config`. Read-only host checks refuse owned legacy registrations in account files; doctor prints the edits. Account identity is private, and shared registries resolve to the store.

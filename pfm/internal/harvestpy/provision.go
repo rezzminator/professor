@@ -181,7 +181,7 @@ func provisionWithTargets(
 	// one of them reads a tree the other is halfway through replacing —
 	// ProvisionBrowser's own lock (provision_browser.go) guards its sibling
 	// root the same way.
-	release, err := lockProvisionRoot(envRoot)
+	release, err := lockProvisionRoot(ctx, envRoot)
 	if err != nil {
 		return ProvisionResult{}, err
 	}

@@ -176,7 +176,7 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	)
 	fmt.Fprintln(stdout, "  scholarly: googleScholarURL — optional Google Scholar base URL; empty disables it")
 	fmt.Fprintln(stdout, "  fetch: browser (the opt-in real-browser rung), userAgent, proxyURL")
-	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout — handed to the pinned Python converter")
+	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout, workers, queue, timeoutSeconds — the Python converter's pool")
 	fmt.Fprintln(
 		stdout,
 		"  cache: dir (default ~/.professor/.harvester-cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)",

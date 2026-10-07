@@ -377,6 +377,10 @@ func (h *Harvester) nowClock() clock.Clock {
 type fetchFlight struct {
 	done   chan struct{}
 	result Result
+	// abandoned marks a walk that failed once its leader's context ended:
+	// joined callers walk again rather than read its result
+	// (Harvester.fetchShared).
+	abandoned bool
 }
 
 // New constructs a Harvester. A nil Converter is valid for callers that only

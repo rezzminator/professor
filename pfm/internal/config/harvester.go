@@ -94,12 +94,21 @@ type HarvesterFetch struct {
 }
 
 // HarvesterConvert steers the pinned Python converter. Go hands both flags to
-// the worker process explicitly; converter.py itself is unchanged.
+// the worker process explicitly and sizes the worker pool from the rest.
 type HarvesterConvert struct {
 	// PDFOCR forces an OCR pass on every PDF (scanned/image-only documents).
 	PDFOCR bool
 	// PDFLayout keeps the PDF's physical layout in the extracted text.
 	PDFLayout bool
+	// Workers bounds the converter's parallel worker processes, each holding
+	// the docling models (about 2 GB); 0 derives it from the CPUs and memory.
+	Workers int
+	// Queue bounds the conversions waiting for a worker before a new one is
+	// refused as busy; 0 is eight per worker.
+	Queue int
+	// Timeout is one conversion's base deadline, scaled up by the input's size
+	// and longest wait for a worker; 0 is 180 seconds.
+	Timeout time.Duration
 }
 
 // HarvesterCache: an empty Dir resolves to harvest's single default,
@@ -173,8 +182,11 @@ type rawHarvesterFetch struct {
 }
 
 type rawHarvesterConvert struct {
-	PDFOCR    *bool `json:"pdfOcr,omitempty"`
-	PDFLayout *bool `json:"pdfLayout,omitempty"`
+	PDFOCR         *bool `json:"pdfOcr,omitempty"`
+	PDFLayout      *bool `json:"pdfLayout,omitempty"`
+	Workers        *int  `json:"workers,omitempty"`
+	Queue          *int  `json:"queue,omitempty"`
+	TimeoutSeconds *int  `json:"timeoutSeconds,omitempty"`
 }
 
 type rawHarvesterCache struct {
@@ -224,7 +236,8 @@ var harvesterSourceKeys = []string{
 	"harvester.scholarly.coreApiKey", "harvester.scholarly.semanticScholarApiKey",
 	"harvester.scholarly.googleScholarURL",
 	"harvester.fetch.browser", "harvester.fetch.userAgent", "harvester.fetch.proxyURL",
-	"harvester.convert.pdfOcr", "harvester.convert.pdfLayout",
+	"harvester.convert.pdfOcr", "harvester.convert.pdfLayout", "harvester.convert.workers",
+	"harvester.convert.queue", "harvester.convert.timeoutSeconds",
 	"harvester.cache.dir", "harvester.cache.ttlSeconds", "harvester.cache.negativeTtlSeconds",
 	"harvester.cache.negativeTransientTtlSeconds",
 	"harvester.output.maxInlineChars",
@@ -419,6 +432,27 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 		if convert.PDFLayout != nil {
 			harvester.Convert.PDFLayout = *convert.PDFLayout
 			file("convert.pdfLayout")
+		}
+		for _, pair := range []struct {
+			key string
+			raw *int
+			set func(int)
+		}{
+			{"workers", convert.Workers, func(value int) { harvester.Convert.Workers = value }},
+			{"queue", convert.Queue, func(value int) { harvester.Convert.Queue = value }},
+			{"timeoutSeconds", convert.TimeoutSeconds, func(value int) {
+				harvester.Convert.Timeout = time.Duration(value) * time.Second
+			}},
+		} {
+			if pair.raw == nil {
+				continue
+			}
+			if *pair.raw < 0 {
+				return fmt.Errorf("harvester config %s: convert.%s must be 0 or more (0 = derived default), got %d",
+					path, pair.key, *pair.raw)
+			}
+			pair.set(*pair.raw)
+			file("convert." + pair.key)
 		}
 	}
 	if cache := raw.Cache; cache != nil {
@@ -621,7 +655,11 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			"browser": harvester.Fetch.Browser, "userAgent": harvester.Fetch.UserAgent,
 			"proxyURL": harvester.Fetch.ProxyURL,
 		},
-		"convert": map[string]any{"pdfOcr": harvester.Convert.PDFOCR, "pdfLayout": harvester.Convert.PDFLayout},
+		"convert": map[string]any{
+			"pdfOcr": harvester.Convert.PDFOCR, "pdfLayout": harvester.Convert.PDFLayout,
+			"workers": harvester.Convert.Workers, "queue": harvester.Convert.Queue,
+			"timeoutSeconds": int(harvester.Convert.Timeout / time.Second),
+		},
 		"cache": map[string]any{
 			"dir":                         harvester.Cache.Dir,
 			"ttlSeconds":                  int(harvester.Cache.TTL / time.Second),

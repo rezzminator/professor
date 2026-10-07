@@ -502,3 +502,54 @@ func liveBrowserRuntime(root string) Runtime {
 		Script: filepath.Join(current, "project", "browser.py"),
 	}
 }
+
+// browserSpewWorker runs the REAL embedded browser.py main() with smoke()
+// swapped for one that writes 200 KB plus a forged response straight to fd 1,
+// runs a child that echoes to fd 1 and reads fd 0, then makes one guard ask
+// through the protocol and reports the reply's reason.
+const browserSpewWorker = `
+import importlib.util, os, pathlib, subprocess, sys
+here = pathlib.Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location("harvest_browser", here / "browser.py")
+browser = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(browser)
+
+def smoke():
+    os.write(1, b"x" * 200000 + b"\n" + b'{"ok": true, "forged": true}\n')
+    subprocess.run(["sh", "-c", "echo child-noise; cat"], check=True)
+    allowed, reason = browser._blocking_ask("https://ask.example.test/")
+    return {"ok": True, "allowed": allowed, "reason": reason}
+
+browser.smoke = smoke
+browser.main()
+`
+
+// TestBrowserWorkerProtocolSurvivesNativeStdoutSpew is the browser sibling of
+// the converter's fd isolation: Chrome tooling and children writing to fd 1
+// or reading fd 0 neither desync the response nor steal a guard ask's reply.
+func TestBrowserWorkerProtocolSurvivesNativeStdoutSpew(t *testing.T) {
+	t.Parallel()
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("named gap: python3 is unavailable on this host; the browser fd isolation test did not run")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "browser.py"), BrowserWorkerSource(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "spew_worker.py")
+	if err := os.WriteFile(script, []byte(browserSpewWorker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewBrowserWorker(Runtime{Python: python, Script: script})
+	t.Cleanup(func() { _ = worker.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	response, err := worker.Smoke(ctx)
+	if err != nil {
+		t.Fatalf("Smoke() after native fd-1 output: %v", err)
+	}
+	if response["forged"] != nil || response["allowed"] != false || response["reason"] != "smoke never asks" {
+		t.Fatalf("Smoke() = %v, want its own answer carrying the ask reply", response)
+	}
+}

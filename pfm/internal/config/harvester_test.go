@@ -56,7 +56,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
   "search": {"enabled": true, "searxngURL": "http://127.0.0.1:8888/", "braveApiKey": "brave"},
 	  "scholarly": {"contactEmail": "ops@example.com", "googleBooksApiKey": "g", "coreApiKey": "c", "semanticScholarApiKey": "s", "googleScholarURL": "https://scholar.example", "mirrors": {"doi-mirror": "  https://mirror.example/base  ", "ipfs-catalog": "https://ipfs-catalog.example", "doi-viewer": "https://doi-viewer.example", "md5-catalog": "https://md5-catalog.example"}},
   "fetch": {"browser": true, "userAgent": "UA/1", "proxyURL": "http://proxy.example:3128"},
-  "convert": {"pdfOcr": true, "pdfLayout": true},
+  "convert": {"pdfOcr": true, "pdfLayout": true, "workers": 3, "queue": 12, "timeoutSeconds": 240},
   "cache": {"dir": "~/cache", "ttlSeconds": 60, "negativeTtlSeconds": 5, "negativeTransientTtlSeconds": 2},
   "output": {"maxInlineChars": 1234},
   "harvest": {"maxDownloadBytes": 5000000, "maxResourceBytes": 7000000}
@@ -90,7 +90,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 		h.Cache.NegativeTransientTTL != 2*time.Second {
 		t.Fatalf("cache = %+v", h.Cache)
 	}
-	if !h.Convert.PDFOCR || !h.Convert.PDFLayout {
+	if h.Convert != (HarvesterConvert{PDFOCR: true, PDFLayout: true, Workers: 3, Queue: 12, Timeout: 240 * time.Second}) {
 		t.Fatalf("convert = %+v", h.Convert)
 	}
 	if h.Output.MaxInlineChars != 1234 {
@@ -203,7 +203,14 @@ func TestHarvesterFileRefusesUnsafeOrInvalidSettings(t *testing.T) {
 			0o600,
 			"query or fragment",
 		},
-		"negative ttl":          {`{"cache":{"ttlSeconds":-1}}`, 0o600, "0 or more"},
+		"negative ttl":     {`{"cache":{"ttlSeconds":-1}}`, 0o600, "0 or more"},
+		"negative workers": {`{"convert":{"workers":-1}}`, 0o600, "convert.workers must be 0 or more"},
+		"negative queue":   {`{"convert":{"queue":-2}}`, 0o600, "convert.queue must be 0 or more"},
+		"negative timeout": {
+			`{"convert":{"timeoutSeconds":-5}}`,
+			0o600,
+			"convert.timeoutSeconds must be 0 or more",
+		},
 		"zero inline":           {`{"output":{"maxInlineChars":0}}`, 0o600, "at least 1"},
 		"relative cache dir":    {`{"cache":{"dir":"cache"}}`, 0o600, "must be absolute"},
 		"unknown key":           {`{"search":{"searxng":"http://x"}}`, 0o600, "unknown field"},

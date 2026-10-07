@@ -109,10 +109,10 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		statePath = defaultAuthStatePath(service.runtime.CacheDir)
 	}
 	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath, runtime.Clock)
-	r.mcp = mcp.NewStreamableHTTPHandler(
+	r.mcp = LinkClientDisconnect(mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return service.Server() },
 		&mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true},
-	)
+	))
 	return r, nil
 }
 

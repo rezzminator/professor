@@ -2384,12 +2384,43 @@ def smoke() -> dict:
     }
 
 
+def _protocol_channels():
+    """Take the JSON-lines protocol off fds 0/1 before any conversion runs.
+
+    redirect_stdout only covers Python-level prints; native libraries and child
+    processes (tesseract, MuPDF, docling tooling) write straight to fd 1 and read
+    fd 0. On the protocol pipe that output desyncs the one-line-per-request
+    contract and, once 64 KiB sits unread, blocks the worker mid-write forever.
+    The protocol keeps private duplicates; fd 1 becomes stderr, fd 0 /dev/null.
+    """
+    proto_in = os.fdopen(os.dup(0), "r", encoding="utf-8", errors="replace")
+    proto_out = os.fdopen(os.dup(1), "w", encoding="utf-8")
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+    os.dup2(2, 1)
+    sys.stdin = open(os.devnull, "r")
+    sys.stdout = sys.stderr
+    return proto_in, proto_out
+
+
+def _answer(proto_out, payload: dict, request_id) -> None:
+    """Write one response line, echoing the request's id when it carried one:
+    the Go pool discards a worker whose answer names another request."""
+    if request_id is not None:
+        payload = {**payload, "id": request_id}
+    print(json.dumps(payload, ensure_ascii=False), file=proto_out, flush=True)
+
+
 def main() -> int:
-    for line in sys.stdin:
+    proto_in, proto_out = _protocol_channels()
+    for line in proto_in:
         if not line.strip():
             continue
+        request_id = None
         try:
             request = json.loads(line)
+            request_id = request.get("id") if isinstance(request, dict) else None
             if request.get("op") == "smoke":
                 result = smoke()
             elif request.get("op") == "inflate":
@@ -2402,14 +2433,13 @@ def main() -> int:
             # A malformed request or a crash outside convert() answers with the
             # same named shape convert()'s own failure branch uses, so the Go
             # side reads ONE failure contract rather than two.
-            print(
-                json.dumps(
-                    {"ok": False, "error_class": type(exc).__name__, "error": f"{type(exc).__name__}: {exc}"}
-                ),
-                flush=True,
+            _answer(
+                proto_out,
+                {"ok": False, "error_class": type(exc).__name__, "error": f"{type(exc).__name__}: {exc}"},
+                request_id,
             )
             continue
-        print(json.dumps(result, ensure_ascii=False), flush=True)
+        _answer(proto_out, result, request_id)
     return 0
 
 

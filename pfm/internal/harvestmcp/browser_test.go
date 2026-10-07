@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	goRuntime "runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
@@ -192,4 +194,26 @@ func TestFetchBrowserCarriesTheMarkerTokenAndTheLandingAddress(t *testing.T) {
 	if token, _ := request["marker_token"].(string); token == "" || token != harvest.BrowserMarkerToken() {
 		t.Fatalf("browser fetch marker_token = %q, want the harvester's own token: %v", token, request)
 	}
+}
+
+// TestBrowserSlotBoundsConcurrentRenders: each browser render is a worker
+// plus a Chrome; with every slot taken the next render waits, and gives up
+// after its own wait rather than launching another Chrome.
+func TestBrowserSlotBoundsConcurrentRenders(t *testing.T) {
+	t.Parallel()
+	converter := pythonConverter{browserSlots: make(chan struct{}, 1)}
+	release, err := converter.browserSlot(context.Background(), time.Minute)
+	if err != nil {
+		t.Fatalf("first slot: %v", err)
+	}
+	_, err = converter.browserSlot(context.Background(), 50*time.Millisecond)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second render while the slot is taken: err = %v, want its wait's deadline", err)
+	}
+	release()
+	again, err := converter.browserSlot(context.Background(), time.Minute)
+	if err != nil {
+		t.Fatalf("after the release: %v", err)
+	}
+	again()
 }

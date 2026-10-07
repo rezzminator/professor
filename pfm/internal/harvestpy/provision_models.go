@@ -98,7 +98,8 @@ func StageOCRModels(ctx context.Context, options OCRStageOptions) (OCRStaging, e
 	defer func() { _ = converter.Close() }()
 	bounded, cancel := context.WithTimeout(ctx, ocrStagingTimeout)
 	defer cancel()
-	line, stderr, err := converter.request(bounded, []byte(`{"op":"stage_models"}`))
+	// No deadline of the pool's own: ocrStagingTimeout bounds the download.
+	line, stderr, err := converter.request(bounded, []byte(`{"op":"stage_models"}`), 0)
 	if err != nil {
 		return staging, fmt.Errorf("stage OCR models into %s: %w", modelRoot, err)
 	}

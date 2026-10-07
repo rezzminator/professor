@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Fixture-driven tests for infra/fence/housekeeping.sh — its five steps
-# (containers, images, lane-images, legacy-volumes, gocache-budget), the cache
+# Fixture-driven tests for infra/fence/housekeeping.sh — its nine steps
+# (containers, images, lane-images, legacy-volumes, checkouts, build-cache,
+# cache-budget, scratch), the sim volume name, the cache
 # volume ensure, the caller-survival law under `set -euo pipefail`, the stamp's
 # home, and the fence's label + volume contract in docker-compose.yml and
 # pfm-dev.Dockerfile. docker is a stub, so no container, image or volume is
@@ -51,7 +52,9 @@ hashes aaa eee
 # roots "ID REF HASH", pins, volumes); a name/ref listed in $STUB_DIR/inuse is
 # refused by rm/rmi/volume rm the way the daemon refuses an object in use.
 # STUB_DOWN=1: every call fails · STUB_PRUNE=ok|busy|fail · STUB_DF=ok|fail ·
-# STUB_MB: the gocache size df reports ("" = none) · STUB_VOLUME=0: no such volume.
+# STUB_MB: the gocache size df reports ("" = none), STUB_GOMOD_MB / STUB_UV_MB the
+# gomod / uv sizes (default 10) · STUB_VOLUME=0: no such volume · STUB_BUILDER=ok|busy|fail ·
+# $STUB_DIR/fenceimg: the local fence image `docker run` removes root-owned scratch with.
 BIN="$T/bin"
 mkdir -p "$BIN"
 cat >"$BIN/docker-stub.bash" <<'STUB'
@@ -105,6 +108,7 @@ case "$1" in
             done <"$S/roots"
             ;;
           *pfm-lane-base*) _stub_f pins ;;
+          *label=pfm.fence=1*) _stub_f fenceimg ;;
         esac ;;
     esac ;;
   volume)
@@ -116,8 +120,19 @@ case "$1" in
     esac ;;
   system)
     [ "${STUB_DF:-ok}" = ok ] || { echo "Error response from daemon: df boom" >&2; return 1; }
-    [ -z "${STUB_MB:-}" ] || printf 'acme_pgdata\t9.5GB\npfm-dev-gocache\t%sMB\n' "$STUB_MB" ;;
+    [ -z "${STUB_MB:-}" ] || printf 'acme_pgdata\t9.5GB\npfm-dev-gocache\t%sMB\n' "$STUB_MB"
+    printf 'pfm-dev-gomod\t%sMB\npfm-dev-lintcache\t10MB\npfm-lane-uv-cache\t%sMB\npfm-lane-harvest-cache\t0B\n' "${STUB_GOMOD_MB:-10}" "${STUB_UV_MB:-10}" ;;
+  builder)
+    case "${STUB_BUILDER:-ok}" in
+      ok) echo "Total reclaimed space: 1.5GB" ;;
+      busy) echo "Error response from daemon: a prune operation is already running" >&2; return 1 ;;
+      *) echo "Error response from daemon: builder boom" >&2; return 1 ;;
+    esac ;;
   run) # the pre-fix sizer (`docker run … alpine du -sm /c`) fails with the df probe
+    case "$*" in *"--entrypoint rm"*)
+      all="$*"; a="${all#*-v }"; a="${a%%:/reap*}"; want="${all##*/reap/}"
+      chmod -R u+w "$a/$want" 2>/dev/null; /bin/rm -rf -- "${a:?}/$want"; return 0 ;;
+    esac
     [ "${STUB_DF:-ok}" = ok ] || return 125
     case "$*" in *"du -sm"*) [ -z "${STUB_MB:-}" ] || printf '%s\t/c\n' "$STUB_MB" ;; esac ;;
 esac
@@ -138,10 +153,10 @@ exec $(command -v git) "\$@"
 EOF
 chmod +x "$BIN/git"
 export PATH="$BIN:$PATH"
-export STUB_DOCKER_LOG="$T/docker.log" STUB_DIR="$T/stub" PFM_FENCE_STAMP_DIR="$T/stamp" PFM_FENCE_GOCACHE_MB=100
+export STUB_DOCKER_LOG="$T/docker.log" STUB_DIR="$T/stub" PFM_FENCE_STAMP_DIR="$T/stamp" PFM_FENCE_PROJECT_TMP="$T/ptmp" PFM_FENCE_GOCACHE_MB=100
 . "$BIN/docker-stub.bash"
 export -f docker _stub_f _stub_inuse
-STAMP="$PFM_FENCE_STAMP_DIR/gocache-budget.stamp"
+STAMP="$PFM_FENCE_STAMP_DIR/cache-budget.stamp"
 
 # shellcheck source=/dev/null
 . "$HK"
@@ -269,7 +284,7 @@ else bad "budget under" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 8 — budget: over but mounted → the daemon's refusal is a WARN naming size and reason, no stamp
 fresh; printf 'pfm-dev-gocache\n' >"$STUB_DIR/inuse"; STUB_MB=250 hk
-if warned gocache-budget && grep -q '250 MB' "$T/err" && grep -q 'in use' "$T/err" && [ ! -f "$STAMP" ]; then
+if warned cache-budget && grep -q '250 MB' "$T/err" && grep -q 'in use' "$T/err" && [ ! -f "$STAMP" ]; then
   ok "budget: a mounted over-budget cache warns with its size and reason and is retried"
 else bad "budget mounted" "$(cat "$T/err")"; fi
 
@@ -279,8 +294,8 @@ if ! grep -q '^system df\|^volume inspect pfm-dev-gocache\|^volume rm pfm-dev-go
 else bad "budget stamp" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 10 — budget: an unmeasurable size (df fails, or reports nothing) warns, never passes, no stamp
-fresh; STUB_DF=fail STUB_MB=250 hk; r1=0; warned gocache-budget && [ ! -f "$STAMP" ] && r1=1
-fresh; STUB_MB='' hk; r2=0; warned gocache-budget && [ ! -f "$STAMP" ] && r2=1
+fresh; STUB_DF=fail STUB_MB=250 hk; r1=0; warned cache-budget && [ ! -f "$STAMP" ] && r1=1
+fresh; STUB_MB='' hk; r2=0; warned cache-budget && [ ! -f "$STAMP" ] && r2=1
 if [ "$r1$r2" = 11 ]; then ok "budget: an unmeasurable size warns and leaves no stamp"
 else bad "budget unmeasurable" "df-fails=$r1 no-row=$r2" "$(cat "$T/err")"; fi
 
@@ -291,7 +306,7 @@ else bad "budget absent" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 12 — budget: an invalid PFM_FENCE_GOCACHE_MB warns and the 15000 default applies
 fresh; PFM_FENCE_GOCACHE_MB=15G STUB_MB=250 hk
-if warned gocache-budget && grep -q 'PFM_FENCE_GOCACHE_MB' "$T/err" && ! logged 'volume rm pfm-dev-gocache' && [ -f "$STAMP" ]; then
+if warned cache-budget && grep -q 'PFM_FENCE_GOCACHE_MB' "$T/err" && ! logged 'volume rm pfm-dev-gocache' && [ -f "$STAMP" ]; then
   ok "budget: PFM_FENCE_GOCACHE_MB=15G warns and the default applies"
 else bad "budget invalid" "$(cat "$T/err")" "$(cat "$STUB_DOCKER_LOG")"; fi
 
@@ -314,13 +329,13 @@ survives "an unwritable stamp dir" STUB_MB=40 PFM_FENCE_STAMP_DIR="$T/afile/sub"
 # 14 — the stamp lives in /tmp/{project}/fence/, {project} = the main checkout's
 #      name minus a leading dot, from the checkout and from a linked worktree
 fresh; rm -rf "/tmp/$FXNAME"
-env -u PFM_FENCE_STAMP_DIR STUB_MB=40 bash -c '. "$1"; fence_housekeeping' _ "$HK" 2>"$T/err"
-r1=0; [ -f "/tmp/$FXNAME/fence/gocache-budget.stamp" ] && r1=1
+env -u PFM_FENCE_STAMP_DIR -u PFM_FENCE_PROJECT_TMP STUB_MB=40 bash -c '. "$1"; fence_housekeeping' _ "$HK" 2>"$T/err"
+r1=0; [ -f "/tmp/$FXNAME/fence/cache-budget.stamp" ] && r1=1
 rm -rf "/tmp/$FXNAME"
 rm -f "$FX/infra/fence/lanes/hash"
 rm -rf "/tmp/$FXNAME" "/tmp/hkwt-$$"
-env -u PFM_FENCE_STAMP_DIR STUB_MB=40 bash -c '. "$1"; fence_housekeeping' _ "$SECOND/infra/fence/housekeeping.sh" 2>>"$T/err"
-r2=0; [ -f "/tmp/$FXNAME/fence/gocache-budget.stamp" ] && [ ! -e "/tmp/hkwt-$$/fence" ] && r2=1
+env -u PFM_FENCE_STAMP_DIR -u PFM_FENCE_PROJECT_TMP STUB_MB=40 bash -c '. "$1"; fence_housekeeping' _ "$SECOND/infra/fence/housekeeping.sh" 2>>"$T/err"
+r2=0; [ -f "/tmp/$FXNAME/fence/cache-budget.stamp" ] && [ ! -e "/tmp/hkwt-$$/fence" ] && r2=1
 rm -rf "/tmp/$FXNAME" "/tmp/hkwt-$$"
 hashes aaa eee
 if [ "$r1$r2" = 11 ]; then ok "stamp: /tmp/{project}/fence/ from the checkout and from a linked worktree"
@@ -355,5 +370,148 @@ else bad "compose contract" "$(cat "$T/err")"; fi
 if awk '/^FROM .* AS pfm-base/ { b = 1; next } /^FROM / { b = 0 } b && /^LABEL pfm\.fence=1$/ { f = 1 } END { exit !f }' "$FENCE/pfm-dev.Dockerfile"; then
   ok "Dockerfile: LABEL pfm.fence=1 in the base stage, so every builder's image carries it"
 else bad "Dockerfile label" "$(grep -n 'LABEL\|^FROM' "$FENCE/pfm-dev.Dockerfile")"; fi
+
+# 17 — checkouts: only sim volumes recorded by this clone can be removed.
+#      A mounted volume retains its ledger row for the next run.
+SIM_GONE="$T/hksimgone-$$"; SIM_BUSY="$T/hksimbusy-$$"
+git -C "$FX" worktree add -q "$SIM_GONE" 2>/dev/null
+git -C "$FX" worktree add -q "$SIM_BUSY" 2>/dev/null
+printf 'fff\n' >"$SIM_GONE/infra/fence/lanes/hash"
+printf '999\n' >"$SIM_BUSY/infra/fence/lanes/hash"
+FXK="$(fence_sim_volume "$FX")"; SK="$(fence_sim_volume "$SECOND")"
+GONEK="$(fence_sim_volume "$SIM_GONE")"; BUSYK="$(fence_sim_volume "$SIM_BUSY")"
+GONEROW="$SIM_GONE"$'\t'"$(_fence_hk_scratch_root "$SIM_GONE")"$'\t'"$GONEK"
+BUSYROW="$SIM_BUSY"$'\t'"$(_fence_hk_scratch_root "$SIM_BUSY")"$'\t'"$BUSYK"
+fresh; touch "$STAMP"
+printf '%s\n' "$FXK" "$SK" "$GONEK" "$BUSYK" >"$STUB_DIR/volumes"; hk
+if grep -qxF "$GONEROW" "$PFM_FENCE_STAMP_DIR/checkouts" && grep -qxF "$BUSYROW" "$PFM_FENCE_STAMP_DIR/checkouts" &&
+  ! grep -q '^volume rm' "$STUB_DOCKER_LOG" && nowarn; then
+  ok "checkouts: live checkout paths, scratch roots and sim volumes are recorded together"
+else bad "checkouts record ownership" "$(cat "$PFM_FENCE_STAMP_DIR/checkouts")" "$(cat "$T/err")"; fi
+cp "$PFM_FENCE_STAMP_DIR/checkouts" "$T/sim-ledger"
+git -C "$FX" worktree remove --force "$SIM_GONE"
+git -C "$FX" worktree remove --force "$SIM_BUSY"
+fresh; touch "$STAMP"; cp "$T/sim-ledger" "$PFM_FENCE_STAMP_DIR/checkouts"
+printf '%s\n' "$FXK" "$SK" "$GONEK" "$BUSYK" pfm-sim-harvest-other-clone-123 acme_pgdata pfm-dev-gomod >"$STUB_DIR/volumes"
+printf '%s\n' "$BUSYK" >"$STUB_DIR/inuse"; hk
+if ! logged 'volume rm pfm-sim-harvest-other-clone-123' &&
+  [ "$(grep '^volume rm ' "$STUB_DOCKER_LOG" | sort | tr '\n' ' ')" = "$(printf 'volume rm %s\n' "$GONEK" "$BUSYK" | sort | tr '\n' ' ')" ] &&
+  grep -q "removed $GONEK — its checkout is gone" "$T/err" && grep -q "kept $BUSYK" "$T/err" && nowarn; then
+  ok "checkouts: another clone's unrecorded sim volume stays; a recorded gone volume goes; a mounted one stays"
+else bad "checkouts sim ownership" "$(grep '^volume' "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+if grep -qxF "$BUSYROW" "$PFM_FENCE_STAMP_DIR/checkouts" && ! grep -qxF "$GONEROW" "$PFM_FENCE_STAMP_DIR/checkouts"; then
+  ok "checkouts: a mounted gone checkout's sim volume retains its ownership record"
+else bad "checkouts sim retry ledger" "$(cat "$PFM_FENCE_STAMP_DIR/checkouts")"; fi
+cp "$PFM_FENCE_STAMP_DIR/checkouts" "$T/sim-ledger"
+fresh; touch "$STAMP"; cp "$T/sim-ledger" "$PFM_FENCE_STAMP_DIR/checkouts"
+printf '%s\n' "$BUSYK" >"$STUB_DIR/volumes"; hk
+if logged "volume rm $BUSYK" && ! grep -qxF "$BUSYROW" "$PFM_FENCE_STAMP_DIR/checkouts" && nowarn; then
+  ok "checkouts: an unmounted recorded sim volume is retried and its completed row dropped"
+else bad "checkouts sim retry" "$(cat "$T/err")"; fi
+
+# 18 — checkouts: a gone checkout loses only stale timing/build/lanes/guard
+#      directories; young purpose directories, other content and unrecorded
+#      roots stay. An empty root can be removed and its row retired.
+THIRD="$T/hk3-$$"; R3="/tmp/hk3-$$"; STRAY="/tmp/hkstray-$$"
+shtest_clean_also "$R3" "$STRAY"
+git -C "$FX" worktree add -q "$THIRD" 2>/dev/null
+printf 'fff\n' >"$THIRD/infra/fence/lanes/hash"
+V3="$(fence_sim_volume "$THIRD")"; ROW3="$THIRD"$'\t'"$R3"$'\t'"$V3"
+fresh; touch "$STAMP"; mkdir -p "$R3/timing/run.x" "$STRAY/timing" "$PFM_FENCE_PROJECT_TMP/review"; hk
+cp "$PFM_FENCE_STAMP_DIR/checkouts" "$T/scratch-ledger"
+git -C "$FX" worktree remove --force "$THIRD"
+printf 'another owner\n' >"$R3/keep"
+for purpose in build lanes guard; do mkdir -p "$R3/$purpose"; : >"$R3/$purpose/f"; done
+find "$R3/build" "$R3/lanes" "$R3/guard" "$STRAY" -exec touch -d '2 days ago' {} +
+fresh; touch "$STAMP"; cp "$T/scratch-ledger" "$PFM_FENCE_STAMP_DIR/checkouts"; hk
+if [ -d "$R3/timing/run.x" ] && [ "$(cat "$R3/keep" 2>/dev/null)" = 'another owner' ] &&
+  [ -d "$STRAY/timing" ] && [ -d "$PFM_FENCE_PROJECT_TMP/review" ] && nowarn; then
+  ok "checkouts: gone checkout keeps young timing and non-purpose content; an unrecorded root stays"
+else bad "checkouts scratch preservation" "$(cat "$T/err")"; fi
+if [ ! -e "$R3/build" ] && [ ! -e "$R3/lanes" ] && [ ! -e "$R3/guard" ] &&
+  grep -q "removed $R3/build, freed" "$T/err" && grep -q "removed $R3/lanes, freed" "$T/err" && grep -q "removed $R3/guard, freed" "$T/err" &&
+  grep -qxF "$ROW3" "$PFM_FENCE_STAMP_DIR/checkouts"; then
+  ok "checkouts: only stale build, lanes and guard are removed; a nonempty root retains its ledger row"
+else bad "checkouts purpose cleanup" "$(cat "$T/err")"; fi
+mkdir -p "$R3/timing/run.x"; printf 'another owner\n' >"$R3/keep"
+find "$R3/timing" -exec touch -d '2 days ago' {} +
+fresh; touch "$STAMP"; cp "$T/scratch-ledger" "$PFM_FENCE_STAMP_DIR/checkouts"; hk
+if [ ! -e "$R3/timing" ] && [ -f "$R3/keep" ] && grep -q "removed $R3/timing, freed" "$T/err" &&
+  grep -qxF "$ROW3" "$PFM_FENCE_STAMP_DIR/checkouts" && nowarn; then
+  ok "checkouts: stale timing is removed while non-purpose content and its ledger row stay"
+else bad "checkouts stale timing" "$(cat "$T/err")"; fi
+rm -f "$R3/keep"; mkdir -p "$R3"
+fresh; touch "$STAMP"; cp "$T/scratch-ledger" "$PFM_FENCE_STAMP_DIR/checkouts"; hk
+if [ ! -e "$R3" ] && ! grep -qxF "$ROW3" "$PFM_FENCE_STAMP_DIR/checkouts" && grep -q "removed $R3.*freed 0 MB" "$T/err" && nowarn; then
+  ok "checkouts: an empty gone scratch root is removed and its completed ledger row dropped"
+else bad "checkouts empty root" "$(cat "$T/err")"; fi
+fresh; touch "$STAMP"; printf '%s\n' pfm-sim-harvest-other-clone-123 >"$STUB_DIR/volumes"; STUB_GIT_FAIL=1 hk
+if ! grep -q '^volume rm' "$STUB_DOCKER_LOG" && warned checkouts && warned scratch; then
+  ok "checkouts: a failed worktree listing removes nothing and warns"
+else bad "checkouts listing failure" "$(cat "$T/err")"; fi
+VICTIM="$T/victim"; DOTROOT="/tmp/.hkdot-$$"; mkdir -p "$VICTIM/keep" "$DOTROOT" "$R3/timing"
+shtest_clean_also "$DOTROOT"
+fresh; touch "$STAMP"
+printf '%s\n' "$VICTIM" "$DOTROOT" "$R3" "$THIRD"$'\t'"$R3"$'\t'pfm-sim-harvest-other-clone-123 "$ROW3"$'\t'extra >"$PFM_FENCE_STAMP_DIR/checkouts"
+printf '%s\n' pfm-sim-harvest-other-clone-123 >"$STUB_DIR/volumes"; hk
+if [ -d "$VICTIM/keep" ] && [ -d "$DOTROOT" ] && [ -d "$R3/timing" ] && warned checkouts &&
+  [ "$(grep -c 'ledger line.*dropped, nothing removed' "$T/err")" = 5 ] && ! grep -q '^volume rm' "$STUB_DOCKER_LOG" &&
+  ! grep -qF "$R3" "$PFM_FENCE_STAMP_DIR/checkouts"; then
+  ok "checkouts: malformed, legacy and mismatched ownership rows are dropped with WARN; no state is removed"
+else bad "checkouts ledger validation" "$(cat "$T/err")" "$(cat "$PFM_FENCE_STAMP_DIR/checkouts")"; fi
+rm -rf "$VICTIM" "$DOTROOT" "$R3" "$STRAY"
+
+# 19 — scratch: an entry untouched for 7 days goes, a young one stays, a young
+#      dir is walked one level; fence/ and tmp/tools are kept; a tree the host
+#      cannot remove goes through a local fence image
+old() { mkdir -p "$1"; : >"$1/f"; touch -d '10 days ago' "$1/f" "$1"; }
+fresh; touch "$STAMP"; P="$PFM_FENCE_PROJECT_TMP"; rm -rf "$P" "$FX/tmp"
+old "$P/oldpurpose"; mkdir -p "$P/young"; : >"$P/young/f"
+old "$P/timing/run.old"; mkdir -p "$P/timing/run.new"; : >"$P/timing/run.new/f"
+old "$P/fence"; old "$FX/tmp/tools"; old "$FX/tmp/qa-old"
+hk
+if [ ! -e "$P/oldpurpose" ] && [ ! -e "$P/timing/run.old" ] && [ ! -e "$FX/tmp/qa-old" ] &&
+  [ -d "$P/young" ] && [ -d "$P/timing/run.new" ] && [ -d "$P/fence" ] && [ -d "$FX/tmp/tools" ] &&
+  grep -q "removed $P/oldpurpose, freed [0-9]* MB" "$T/err" && nowarn; then
+  ok "scratch: 7-day-old entries and runs removed with their size; young entries, fence/ and tmp/tools kept"
+else bad "scratch age" "$(cd "$T" && find ptmp "$FX/tmp" 2>/dev/null | head -20)" "$(cat "$T/err")"; fi
+fresh; touch "$STAMP"; old "$P/rootowned"
+cat >"$BIN/rm" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in *rootowned*) echo "rm: cannot remove 'rootowned/f': Permission denied" >&2; exit 1 ;; esac
+exec /bin/rm "$@"
+EOF
+chmod +x "$BIN/rm"; hash -r; printf 'img1\n' >"$STUB_DIR/fenceimg"; hk
+r1=0; [ ! -e "$P/rootowned" ] && grep -q -- '--entrypoint rm img1 -rf -- /reap/rootowned' "$STUB_DOCKER_LOG" && nowarn && r1=1
+fresh; touch "$STAMP"; old "$P/rootowned"; hk
+r2=0; [ -d "$P/rootowned" ] && warned scratch && grep -q 'no local fence image' "$T/err" && r2=1
+/bin/rm -f "$BIN/rm"; hash -r; /bin/rm -rf "$P/rootowned"
+REALFIND="$(command -v find)"; fresh; touch "$STAMP"; old "$P/unreadable"
+printf '#!/usr/bin/env bash\ncase "$1" in *unreadable*) echo "find: $1/sub: Permission denied" >&2; exit 1 ;; esac\nexec %s "$@"\n' "$REALFIND" >"$BIN/find"
+chmod +x "$BIN/find"; hash -r; hk
+r3=0; [ -d "$P/unreadable" ] && warned scratch && grep -q "$P/unreadable" "$T/err" && r3=1
+/bin/rm -f "$BIN/find"; hash -r; /bin/rm -rf "$P/unreadable"
+if [ "$r1$r2$r3" = 111 ]; then ok "scratch: a root-owned tree goes through a local fence image; with none it is kept and warns; one find cannot read whole is kept and warns"
+else bad "scratch root-owned" "via-image=$r1 no-image-warns=$r2 unreadable-kept=$r3" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+
+# 20 — build cache: at most daily, last-use age 168 h by default; a concurrent
+#      prune is silent, a failure warns and leaves no stamp
+BSTAMP="$PFM_FENCE_STAMP_DIR/build-cache.stamp"
+fresh; touch "$STAMP"; hk
+r1=0; logged 'builder prune -f --filter until=168h' && [ -f "$BSTAMP" ] && grep -q 'removed build cache unused for 168h — Total reclaimed space: 1.5GB' "$T/err" && nowarn && r1=1
+hk; r2=0; [ "$(grep -c '^builder prune' "$STUB_DOCKER_LOG")" = 1 ] && r2=1
+fresh; touch "$STAMP"; STUB_BUILDER=fail hk; r3=0; warned build-cache && [ ! -f "$BSTAMP" ] && r3=1
+fresh; touch "$STAMP"; STUB_BUILDER=busy hk; r4=0; nowarn && r4=1
+fresh; touch "$STAMP"; PFM_FENCE_BUILDCACHE_HOURS=1w hk; r5=0; warned build-cache && logged 'builder prune -f --filter until=168h' && r5=1
+if [ "$r1$r2$r3$r4$r5" = 11111 ]; then ok "build cache: daily prune of cache unused for 168h; busy silent, failure warns unstamped, invalid hours default"
+else bad "build cache" "prune=$r1 daily=$r2 fail=$r3 busy=$r4 invalid=$r5" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+
+# 21 — cache budget: every shared volume has one; gomod over its 4000 MB goes,
+#      uv under its 8000 MB stays, from one df call
+fresh; STUB_MB=40 STUB_GOMOD_MB=4500 STUB_UV_MB=7000 hk
+if logged 'volume rm pfm-dev-gomod' && ! grep -q '^volume rm pfm-lane-uv-cache\|^volume rm pfm-dev-gocache' "$STUB_DOCKER_LOG" &&
+  [ "$(grep -c '^system df' "$STUB_DOCKER_LOG")" = 1 ] && grep -q 'removed pfm-dev-gomod, 4500 MB > 4000 MB budget, freed 4500 MB' "$T/err" && [ -f "$STAMP" ] && nowarn; then
+  ok "cache budget: gomod over 4000 MB removed, uv under 8000 MB kept, one sizing call"
+else bad "cache budget all volumes" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 shtest_end

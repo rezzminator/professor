@@ -1,12 +1,14 @@
 ---
 name: flights:orchestrate-cross-harness
-description: 'Child foremen on another engine — /flights:orchestrate-cross-harness {requirements.md or work} [engine claude|codex|opencode] [worktree {path}] [commit]: this chat acts as the root flights-foreman, one chat seat per child unit instead of a sub-agent, default engine codex. /flights:spec → here → child foreman seats, flights-lander.'
-argument-hint: <requirements.md | work> [engine <claude|codex|opencode>] [worktree <path>] [commit]
+description: 'Child foremen on another engine — /flights:orchestrate-cross-harness {requirements.md or work} [engine claude|codex] [worktree {path}] [commit]: this chat acts as the root flights-foreman, one chat seat per child unit instead of a sub-agent, default engine codex. /flights:spec → here → child foreman seats, flights-lander.'
+argument-hint: <requirements.md | work> [engine <claude|codex>] [worktree <path>] [commit]
 ---
 
 # Orchestrate, cross-harness — child foremen on chat seats
 
 Read the `flights-foreman` agent body from the registry (`~/.claude/agents/flights-foreman.md`) and be the root foreman for the rest of this flight, with the transport substituted and nothing else. Input: $ARGUMENTS — a `requirements.md` path or the work, the engine (default `codex`), the worktree, and `commit` when the user ordered the landing's commit.
+
+Role-bearing seats support `claude` and `codex`. An `opencode` request returns `BLOCKED: OpenCode chat new rejects --agent-role`; resolve the engine choice before spawning.
 
 | In the manual | Here |
 | --- | --- |
@@ -14,7 +16,7 @@ Read the `flights-foreman` agent body from the registry (`~/.claude/agents/fligh
 | Spawn the lander, or a mechanical executor | Unchanged: a sub-agent of this chat, never a seat |
 | The child's brief file | The same file, verbatim, as the seat's first turn through `--prompt-file`, never a later `chat_inject`. Its last item becomes: "your last act writes your return to `{flight directory}/returns/{unit}-r{round}.md` and sends it with `pfm chat inject {this chat's name} --file {path}`" — your name from `chat_whoami`; the return file is the return, and a trailing `**Verdict:**` line in it is ignored |
 | The return watch per child | The returns Monitor's `RETURN {path}` line; the seat's inject is a bonus, never the signal |
-| Verify from the return and `git diff {baseline} --stat -- {unit}` | The same; `chat_last` on the seat when the inject arrived cut short |
+| Verify from the return and § Change inventory | The same tracked and untracked inventory; `chat_last` on the seat when the inject arrived cut short |
 | A red back to the child by `SendMessage` | `chat_inject` on the same seat, closing with "continue, then write your return once more" |
 | The child's session | `pfm chat resolve {flight}-{unit}`, third column, read right after birth while the name resolves; on the `CLAIMED` line and on each verdict line as `transcript {session id}`, always before `chat_kill`. No third column: `transcript UNRESOLVED · {what resolve printed}` |
 | A question only the user can answer → `BLOCKED` | `AskUserQuestion` now; the answer appended to `requirements.md` `## Rulings`, the seat re-briefed by inject |

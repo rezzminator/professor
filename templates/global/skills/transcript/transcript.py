@@ -15,6 +15,7 @@ import glob
 import json
 import os
 import re
+import stat
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -77,7 +78,7 @@ def resolve(target, extra_roots):
     hits = []
     if re.fullmatch(r"[0-9A-Za-z_-]{6,}", tid):
         for root in claude_roots():
-            hits += glob.glob(f"{root}/*/{tid}*.jsonl") + glob.glob(f"{root}/*/*/subagents/agent-{tid}*.jsonl")
+            hits += glob.glob(f"{root}/*/{tid}*.jsonl") + glob.glob(f"{root}/*/*/subagents/**/agent-{tid}*.jsonl", recursive=True)
         for home in codex_homes():
             hits += glob.glob(f"{home}/sessions/*/*/*/rollout-*{tid}*.jsonl")
             hits += glob.glob(f"{home}/archived_sessions/rollout-*{tid}*.jsonl")
@@ -123,11 +124,13 @@ def chat_name(tail):
 
 def by_name(target, extra_roots):
     """A target that is no id, prefix or path is a Claude chat name (Codex names are not looked up)."""
-    files = []
-    for root in unique(os.path.realpath(r) for r in claude_roots()):
-        files += [f for f in glob.glob(f"{root}/*/*.jsonl") if not os.path.basename(f).startswith("agent-")]
+    files, unreadable = [], []
+    for root in unique(os.path.realpath(r) for r in claude_roots() + list(extra_roots)):
+        for folder, _, names in os.walk(root, onerror=lambda error: unreadable.append(str(error))):
+            files += [os.path.join(folder, name) for name in names
+                      if name.endswith(".jsonl") and not name.startswith(("agent-", "rollout-"))]
     files = unique(os.path.realpath(f) for f in files)
-    wanted, hits, unreadable = target.casefold(), [], []
+    wanted, hits = target.casefold(), []
     for path in files:
         try:
             tail = tail_bytes(path)
@@ -137,6 +140,8 @@ def by_name(target, extra_roots):
         name = chat_name(tail)
         if name and name.casefold() == wanted:
             hits.append((path, tail))
+    if unreadable:
+        fail(f"INCOMPLETE name lookup for {target!r} — {len(unreadable)} discovery/read errors: " + " ".join(unreadable))
     if len(hits) == 1:
         return hits[0][0]
     if hits:
@@ -146,9 +151,8 @@ def by_name(target, extra_roots):
             rows.append(f"{path} ({os.path.getsize(path)} bytes, last record {stamps[-1].decode() if stamps else 'without a timestamp'})")
         fail(f"AMBIGUOUS {target} — {len(hits)} transcripts named {target!r}: " + " ".join(rows))
     searched = ", ".join(claude_roots() + codex_homes() + list(extra_roots)) or "no root exists"
-    tail = f"; {len(unreadable)} session files unreadable: " + " ".join(unreadable) if unreadable else ""
     fail(f"NOT FOUND {target} — searched {searched} for an id or prefix; the name lookup over {len(files)} session files "
-         f"(the last {NAME_TAIL // 1024} KB of each) found no chat whose last title is {target!r}{tail} "
+         f"(the last {NAME_TAIL // 1024} KB of each) found no chat whose last title is {target!r} "
          f"(a seat name resolves to its id with `pfm chat resolve {target}`, third column)")
 
 
@@ -245,7 +249,7 @@ def parse_ts(ts):
         t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    return t.astimezone(timezone.utc) if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
 def flat(content):
@@ -917,9 +921,21 @@ def cmd_agents(path):
     sid = re.sub(r"\.jsonl$", "", name)
     folder = os.path.join(os.path.dirname(path), sid, "subagents")
     lines = [f"SESSION {sid} · {path}"]
-    if not os.path.isdir(folder):
+    try:
+        mode = os.stat(folder).st_mode
+    except FileNotFoundError:
         return "\n".join(lines + [f"AGENTS 0 — no subagents directory at {folder}"]) + "\n"
-    rows = [agent_row(p) for p in glob.glob(os.path.join(folder, "agent-*.jsonl"))]
+    except OSError as error:
+        fail(f"subagents stat failed at {folder}: {error}")
+    if not stat.S_ISDIR(mode):
+        fail(f"subagents path is not a directory: {folder}")
+    def walk_error(error):
+        fail(f"subagents enumeration failed at {folder}: {error}")
+    files = []
+    for directory, _, names in os.walk(folder, onerror=walk_error):
+        files += [os.path.realpath(os.path.join(directory, name)) for name in names
+                  if name.startswith("agent-") and name.endswith(".jsonl")]
+    rows = [agent_row(p) for p in unique(files)]
     far = datetime.max.replace(tzinfo=timezone.utc)
     rows.sort(key=lambda r: (r[0] or far, r[1]))
     return "\n".join(lines + [f"AGENTS {len(rows)}"] + [r[1] for r in rows]) + "\n"
@@ -929,7 +945,7 @@ def main(argv=None):
     ap = TranscriptArguments(prog="transcript.py", description="Mechanical reader of Claude Code and Codex transcripts.")
     ap.add_argument("verb", choices=("show", "counts", "types", "locate", "agents"))
     ap.add_argument("target", help="a transcript path, a session id or its prefix, a Claude agent id, a Codex agent path (/root/{name}), or a Claude chat name (its last title)")
-    ap.add_argument("--root", action="append", default=[], help="an extra directory searched for the id")
+    ap.add_argument("--root", action="append", default=[], help="an extra directory searched for the id or chat name")
     ap.add_argument("--only", default=DEFAULT_ONLY, help=f"event kinds, comma-separated: {', '.join(KINDS)}; 'error' alone keeps only failed calls")
     ap.add_argument("--tool", action="append", default=[], help="keep only calls of these tool names (comma or repeated)")
     ap.add_argument("--since", default="", help="HH:MM[:SS] UTC, an ISO time, +5m from the start, -15m from the end")

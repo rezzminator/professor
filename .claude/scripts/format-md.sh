@@ -33,6 +33,18 @@ FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 FILE_DIR=$(cd "$(dirname "$FILE_PATH")" && pwd -P) || exit 0
 FILE_PATH="$FILE_DIR/${FILE_PATH##*/}"
+LINK_HOPS=0
+while [[ -L "$FILE_PATH" ]]; do
+  LINK_HOPS=$((LINK_HOPS + 1))
+  if ((LINK_HOPS > 40)) || ! LINK_TARGET=$(readlink "$FILE_PATH"); then
+    echo "format-md: FAILED resolving file alias ${FILE_PATH}" >&2; exit 2
+  fi
+  case "$LINK_TARGET" in /*) FILE_PATH="$LINK_TARGET" ;; *) FILE_PATH="$FILE_DIR/$LINK_TARGET" ;; esac
+  if ! FILE_DIR=$(cd "$(dirname "$FILE_PATH")" && pwd -P); then
+    echo "format-md: FAILED resolving file alias ${FILE_PATH}" >&2; exit 2
+  fi
+  FILE_PATH="$FILE_DIR/${FILE_PATH##*/}"
+done
 REPO_ROOT=$(git -C "$FILE_DIR" rev-parse --show-toplevel 2>/dev/null) || exit 0
 REL_PATH="${FILE_PATH#"$REPO_ROOT"/}"
 
@@ -112,6 +124,22 @@ if [[ -n "$SESSION_ID" ]]; then
     echo "format-md: FAILED diagnostic snapshot directory for ${REL_PATH}" >&2; exit 2
   fi
   STATE_FILE="$STATE_DIR/$STATE_KEY"
+  STATE_LOCK="$STATE_FILE.lock"
+  if ! mkdir "$STATE_LOCK" 2>/dev/null; then
+    echo "format-md: diagnostic snapshot busy or lock unavailable for ${REL_PATH} at ${STATE_LOCK} — retry after the owner exits; inspect an abandoned lock before removing it" >&2
+    exit 2
+  fi
+  # Ownership spans read, format, compare and save/cleanup. Never steal a lock.
+  release_snapshot() {
+    local rc=$?
+    if ! rmdir "$STATE_LOCK"; then
+      echo "format-md: FAILED releasing diagnostic snapshot lock for ${REL_PATH}" >&2
+      rc=2
+    fi
+    exit "$rc"
+  }
+  trap release_snapshot EXIT
+  trap 'exit 2' HUP INT TERM
   if [[ -f "$STATE_FILE" ]]; then
     BASELINE_KEYS=()
     if ! { while IFS= read -r key; do BASELINE_KEYS+=("$key"); done < "$STATE_FILE"; }; then

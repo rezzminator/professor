@@ -9,6 +9,8 @@ Run `python3 ~/.claude/skills/transcript/transcript.py {verb} {target} [filters]
 
 A target is a transcript path, a session id or any unique prefix of one (a Codex rollout `…/sessions/YYYY/MM/DD/rollout-*-{id}.jsonl`, a Claude chat `…/projects/{slug}/{id}.jsonl`), a Claude sub-agent id, with or without `agent-` (`…/{session}/subagents/agent-{id}.jsonl`), a Claude chat name (case ignored; a chat's name is its last title record, so a renamed chat answers to its new name only, and several chats sharing one name are `AMBIGUOUS`), or a Codex agent path (`/root/{name}`), matched against each rollout's `session_meta` and unique within one thread tree only, so a reused path is `AMBIGUOUS`. The script searches `$CLAUDE_CONFIG_DIR`, `~/.claude`, `~/.cc/*`, `$CODEX_HOME` and `~/.codex`, plus each `--root DIR`; `~/.cc/*` link to one tree, so each file counts once. A Codex seat's name is not a target: `pfm chat resolve {name}` prints its session id in the third column while the seat is alive.
 
+Name lookup reads the last 256 KiB of each session; a title outside that tail is missed, so resolve older titles by id or path. A failed directory scan or unreadable session yields `INCOMPLETE name lookup` instead of a unique match or `NOT FOUND`.
+
 ## Verbs
 
 | Verb | Returns |
@@ -17,7 +19,7 @@ A target is a transcript path, a session id or any unique prefix of one (a Codex
 | `counts` | The header, then per tool for the calls kept by the filters: calls, errors, total and largest result, calls without a result |
 | `types` | Record types and dispositions (rendered, header, skipped) inside `--lines`, counted; the three counts sum to `RECORDS`. Other filters are refused |
 | `locate` | The resolved path |
-| `agents` | A session's sub-agents, oldest first: id · agent type · description · first → last timestamp · records · size · calls; `META ERROR {reason}` where its `.meta.json` is missing or unreadable; `AGENTS 0 — no subagents directory at {path}` for a session that spawned none |
+| `agents` | A session's sub-agents, including nested `subagents/workflows/wf_*/` files, oldest first: id · agent type · description · first → last UTC timestamp · records · size · calls; `META ERROR {reason}` where its `.meta.json` is missing or unreadable; `AGENTS 0 — no subagents directory at {path}` for a missing directory; a failed stat or enumeration exits 2 |
 
 ## Reading the digest
 

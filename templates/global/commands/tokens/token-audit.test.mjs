@@ -653,13 +653,25 @@ test("--timeline: a forkedFrom mark proves an inherited call even when its origi
   assert.match(tlHeader(r.out), /1 calls .*\$0\.0040/);
 });
 
-test("--timeline: copied-call gaps belong to each named file", () => {
+test("--timeline: copied-call and duplicate discovery gaps belong to each named file", () => {
   const root = forkPriceRoot(), dir = path.join(root, "-tmp-price-proj");
-  const r = runTl(["--timeline", path.join(dir, "sess-a.jsonl"), "--timeline", path.join(dir, "sess-b.jsonl")]);
-  assert.equal(r.code, 0, r.err);
-  assert.deepEqual(r.out.split("\n").filter((l) => l.startsWith("data gaps:")), [
-    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once within the ownership scan (named origin, else first unmarked holder in path order)", "data gaps: none",
-  ]);
+  const first = priceRoot("duplicate-discovery", { s: [{ id: "msg-first", model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 0 } }] });
+  const second = priceRoot("clean-discovery", { s: [{ id: "msg-second", model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 0 } }] });
+  const rel = path.join("-tmp-price-proj", "s.jsonl");
+  // ownershipFiles deduplicates the final three path components.
+  fs.cpSync(path.join(first, "-tmp-price-proj"), path.join(first, "alias", path.basename(first), "-tmp-price-proj"), { recursive: true });
+  for (const [files, gap] of [
+    [[path.join(dir, "sess-a.jsonl"), path.join(dir, "sess-b.jsonl")],
+      /^data gaps: 1 calls copied from another transcript \(forked\/resumed session\) — billed once within the ownership scan \(named origin, else first unmarked holder in path order\)$/],
+    [[path.join(first, rel), path.join(second, rel)], /^data gaps: 1 duplicate files skipped$/],
+  ]) {
+    const r = runTl(files.flatMap((file) => ["--timeline", file]));
+    assert.equal(r.code, 0, r.err);
+    const gaps = r.out.split("\n").filter((l) => l.startsWith("data gaps:"));
+    assert.equal(gaps.length, 2);
+    assert.match(gaps[0], gap);
+    assert.equal(gaps[1], "data gaps: none");
+  }
 });
 
 test("pricing: streamed lines without message.id share the namespaced requestId call key", () => {

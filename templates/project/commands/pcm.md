@@ -32,7 +32,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### Critical invariants
 
 - **Path variables** — agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- **Pipeline flow lives in the flights commands** (`/flights:spec` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
+- **Pipeline flow lives in the flights commands** (`/flights:spec` → `flights-foreman` → `flights-lander`; `/flights:orchestrate-cross-harness` substitutes child seats; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
 - **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: `/quality:claude-md`.
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
@@ -253,7 +253,7 @@ Files: `~/.claude/commands/flights/*.md` (machine-global: init, spec, orchestrat
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
 - **Verdict tokens ↔ their writers:** every token a command cites (`CLAIMED`, `DONE`, `PARTIAL`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `COMA`) is one `flights-foreman`, `flights-mechanical-executor` or `/flights:orchestrate-cross-harness` writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** spec → orchestrate → land across commands; executor → `flights-lander` → gitter within a flight — no step references an agent from a later phase
+- **Flow integrity:** spec → `flights-foreman` → `flights-lander` → gitter; cross-harness substitutes child seats — no step references an agent from a later phase
 
 ### `scripts` — Walk each script
 

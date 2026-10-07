@@ -25,7 +25,12 @@ printf '# T\n' > "$R/src/b.md"
 cat > "$T/bin/rumdl" <<'STUB'
 #!/usr/bin/env bash
 case "$1" in
-  fmt) exit "${STUB_FMT_RC:-0}" ;;
+  fmt)
+    if [[ -n ${STUB_FMT_GATE:-} ]]; then
+      printf 'ready\n' > "$STUB_FMT_GATE/ready"
+      read -r release < "$STUB_FMT_GATE/release"
+    fi
+    exit "${STUB_FMT_RC:-0}" ;;
   check)
     for arg in "$@"; do
       if [[ $arg == --stdin ]]; then
@@ -115,18 +120,44 @@ PATH="$T/nobin" hook "$R/docs/dev/a.md"
 if [[ $RC == 0 && -n $ERR && $ERR == *docs/dev/a.md* ]]; then ok "a missing rumdl exits 0 with stderr naming the file"
 else bad "a missing rumdl" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
-# The shipped hook reports standing uncommitted diagnostics once per session.
-if [[ "$HOOK" == */templates/project/scripts/format-md.sh ]]; then
-  for cache_repo in "$R" "$C"; do
-    STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
-    if [[ $RC == 2 && $ERR == *UNFIXED* ]]; then ok "first uncommitted diagnostic reports for $cache_repo"
-    else bad "first uncommitted diagnostic reports" "rc=$RC; err=$ERR"; fi
-    STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="${introduced/12:3/13:3}" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
-    if [[ $RC == 0 && -z $ERR ]]; then ok "later unrelated write suppresses standing uncommitted diagnostics for $cache_repo"
-    else bad "later unrelated write suppresses standing uncommitted diagnostics" "rc=$RC; err=$ERR"; fi
-    STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced$introduced" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
-    if [[ $RC == 2 && $ERR == *'1 issue(s)'* ]]; then ok "a later extra occurrence is reported for $cache_repo"
-    else bad "a later extra occurrence is reported" "rc=$RC; err=$ERR"; fi
-  done
-fi
+# Both hooks report standing uncommitted diagnostics once per session.
+gate="$T/overlap"
+mkdir -p "$gate" && mkfifo "$gate/ready" "$gate/release" || exit 2
+printf '{"session_id":"overlap","tool_input":{"file_path":"%s"}}' "$C/docs/dev/a.md" |
+  STUB_FMT_GATE="$gate" STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" \
+    timeout 15 bash "$HOOK" > "$gate/first.out" 2> "$gate/first.err" &
+first_hook=$!
+# The formatter seam parks the first actor inside its snapshot transaction.
+read -r ready < "$gate/ready"
+ln -s a.md "$C/docs/dev/alias.md" || exit 2
+STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=0 TMPDIR="$T/cache" HOOK_SESSION=overlap hook "$T/link/docs/dev/alias.md"
+if [[ $RC == 2 && $ERR == *'diagnostic snapshot busy'* ]]; then ok "an overlapping alias hook refuses the active snapshot transaction"
+else bad "an overlapping alias hook" "rc=$RC; err=$ERR"; fi
+printf 'release\n' > "$gate/release"
+wait "$first_hook"; first_rc=$?
+if [[ $first_rc == 2 ]] && [[ $(cat "$gate/first.err") == *UNFIXED* ]]; then ok "the snapshot owner finishes with its diagnostic"
+else bad "the snapshot owner" "rc=$first_rc"; fi
+STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" HOOK_SESSION=overlap hook "$C/docs/dev/a.md"
+if [[ $RC == 0 && -z $ERR ]]; then ok "the next actor reads the completed snapshot"
+else bad "the next actor reads the completed snapshot" "rc=$RC; err=$ERR"; fi
+STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=2 STUB_CHECK_OUT='injected failure' TMPDIR="$T/cache" HOOK_SESSION=overlap hook "$C/docs/dev/a.md"
+if [[ $RC == 2 && $ERR == *'FAILED rumdl check'* ]]; then ok "a failed check reports before releasing snapshot ownership"
+else bad "a failed check releases ownership" "rc=$RC; err=$ERR"; fi
+STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=0 TMPDIR="$T/cache" HOOK_SESSION=overlap hook "$C/docs/dev/a.md"
+if [[ $RC == 0 && -z $ERR ]]; then ok "a clean actor can clear the snapshot after a failed actor"
+else bad "a clean actor clears after failure" "rc=$RC; err=$ERR"; fi
+STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" HOOK_SESSION=overlap hook "$C/docs/dev/a.md"
+if [[ $RC == 2 && $ERR == *UNFIXED* ]]; then ok "a diagnostic reintroduced after cleanup is reported"
+else bad "a reintroduced diagnostic" "rc=$RC; err=$ERR"; fi
+for cache_repo in "$R" "$C"; do
+  STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
+  if [[ $RC == 2 && $ERR == *UNFIXED* ]]; then ok "first uncommitted diagnostic reports for $cache_repo"
+  else bad "first uncommitted diagnostic reports" "rc=$RC; err=$ERR"; fi
+  STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="${introduced/12:3/13:3}" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
+  if [[ $RC == 0 && -z $ERR ]]; then ok "later unrelated write suppresses standing uncommitted diagnostics for $cache_repo"
+  else bad "later unrelated write suppresses standing uncommitted diagnostics" "rc=$RC; err=$ERR"; fi
+  STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced$introduced" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
+  if [[ $RC == 2 && $ERR == *'1 issue(s)'* ]]; then ok "a later extra occurrence is reported for $cache_repo"
+  else bad "a later extra occurrence is reported" "rc=$RC; err=$ERR"; fi
+done
 shtest_end

@@ -10,7 +10,7 @@ export function runTimeline(opts) {
   let failed = 0;
   opts.timeline.forEach((given, i) => {
     // the gaps line speaks for THIS file only
-    Object.assign(SCAN, { badLines: 0, noTimestamp: 0, unpricedCalls: 0, unpricedModels: {}, tierUnknownCalls: 0, syntheticCalls: 0, identityUnknownRecords: 0, copiedCalls: 0, copiesOnly: [], readErrors: [], notes: [] });
+    Object.assign(SCAN, { roots: [], files: 0, skippedOld: 0, dupFiles: 0, badLines: 0, noTimestamp: 0, unpricedCalls: 0, unpricedModels: {}, tierUnknownCalls: 0, syntheticCalls: 0, identityUnknownRecords: 0, copiedCalls: 0, copiesOnly: [], readErrors: [], notes: [] });
     if (i) console.log("");
     let R; try { const file = path.resolve(given);
       const ownership = ownershipFiles(opts, file);

@@ -432,6 +432,40 @@ SID_B = "bbbbbbbb-1111-2222-3333-444444444444"
 
 
 class NameTest(Fixture):
+    def test_explicit_name_roots_include_nested_sessions_and_deduplicate_aliases(self):
+        root = os.path.join(self.home, "extra")
+        path = os.path.join(root, "nested", "project", f"{SID_A}.jsonl")
+        write_jsonl(path, session_records(SID_A, ("custom-title", "Extra Desk")))
+        alias = os.path.join(self.home, "alias")
+        os.symlink(root, alias)
+        self.assertEqual(self.ok("locate", "Extra Desk", "--root", root, "--root", alias).strip(), path)
+
+    def test_unreadable_name_candidate_refuses_a_unique_readable_hit(self):
+        path = self.session(SID_A, ("custom-title", "Audit Desk"))
+        other = self.session(SID_B)
+        scope = runpy.run_path(SCRIPT)
+        lookup = scope["by_name"]
+        original = scope["tail_bytes"]
+        def read(candidate):
+            if candidate == other:
+                raise OSError("injected read failure")
+            return original(candidate)
+        with self.subTest(candidate="file"), mock.patch.dict(lookup.__globals__, {"claude_roots": lambda: [os.path.dirname(os.path.dirname(path))],
+                                                 "tail_bytes": read}):
+            with self.assertRaisesRegex(scope["Failure"], "INCOMPLETE.*injected read failure"):
+                lookup("Audit Desk", [])
+        unreadable = os.path.join(self.home, "extra", "nested")
+        os.makedirs(unreadable)
+        original_scan = os.scandir
+        def scan(candidate):
+            if candidate == unreadable:
+                raise PermissionError("injected directory failure")
+            return original_scan(candidate)
+        with self.subTest(candidate="directory"), mock.patch.dict(lookup.__globals__, {"claude_roots": lambda: [os.path.dirname(os.path.dirname(path))]}), \
+                mock.patch.object(os, "scandir", side_effect=scan):
+            with self.assertRaisesRegex(scope["Failure"], "INCOMPLETE.*injected directory failure"):
+                lookup("Audit Desk", [os.path.dirname(unreadable)])
+
     def session(self, sid, *titles, second=0):
         path = os.path.join(self.home, ".claude/projects/-work-repo", f"{sid}.jsonl")
         write_jsonl(path, session_records(sid, *titles, second=second))
@@ -497,6 +531,45 @@ class PromptKindTest(Fixture):
 
 
 class AgentsTest(Fixture):
+    def test_agents_includes_nested_workflow_transcripts(self):
+        flat = self.agent("a1flat", 10, 0, None)
+        nested = self.agent("a2nested", 20, 0, None)
+        folder = os.path.join(self.subagents, "workflows", "wf_one")
+        os.makedirs(folder)
+        shutil.move(nested, folder)
+        os.symlink(flat, os.path.join(folder, "agent-alias.jsonl"))
+        out = self.ok("agents", self.session)
+        self.assertIn("\nAGENTS 2\n", out)
+        self.assertEqual([r.split()[0] for r in self.rows(out)], ["a1flat", "a2nested"])
+        nested_path = os.path.join(folder, os.path.basename(nested))
+        self.assertEqual(self.ok("locate", "a2nested").strip(), nested_path)
+        self.assertIn("TRANSCRIPT claude", self.ok("show", "a2nested"))
+
+    def test_agents_reports_stat_and_enumeration_errors(self):
+        self.agent("a1flat", 10, 0, None)
+        nested = os.path.join(self.subagents, "workflows", "wf_one")
+        os.makedirs(nested)
+        scope = runpy.run_path(SCRIPT)
+        for symbol, blocked in (("stat", self.subagents), ("scandir", self.subagents), ("scandir", nested)):
+            original = getattr(os, symbol)
+            def probe(path, *args, **kwargs):
+                if os.fspath(path) == blocked:
+                    raise PermissionError("injected directory failure")
+                return original(path, *args, **kwargs)
+            with self.subTest(symbol=symbol, path=blocked), mock.patch.object(os, symbol, side_effect=probe):
+                with self.assertRaisesRegex(scope["Failure"], "injected directory failure"):
+                    scope["cmd_agents"](self.session)
+
+    def test_agents_normalizes_offset_timestamps_to_utc(self):
+        path = self.agent("a1offset", 10, 0, None)
+        for timestamp, instant in (("2026-09-29T18:00:00+02:00", "2026-09-29 16:00:00Z"),
+                                   ("2026-09-29T23:00:00-07:00", "2026-09-30 06:00:00Z"),
+                                   ("2026-09-29T01:00:00+14:00", "2026-09-28 11:00:00Z")):
+            with self.subTest(timestamp=timestamp):
+                write_jsonl(path, [{"type": "user", "timestamp": timestamp, "message": {"content": "go"}}])
+                out = self.ok("agents", self.session)
+                self.assertIn(f"{instant} → {instant}", out)
+
     def setUp(self):
         super().setUp()
         self.session = os.path.join(self.home, ".claude/projects/-work-repo", f"{SID_A}.jsonl")

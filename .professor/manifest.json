@@ -109,7 +109,7 @@
     ".claude/scripts/check-templates.sh": "13f6d2180c45713f03edeabd832187c5baa5e6ff27a30f3fa1920b5c0e354218",
     ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
     ".claude/scripts/dev.sh": "4b0925780afaee09c8d74b3ca74e8bde10142bfd5d4e0e494a6594e8df05a82f",
-    ".claude/scripts/format-md.sh": "41e61b14718c96f0eda25373e2955b89a9ea3be369c85df8f291a69782fb222e",
+    ".claude/scripts/format-md.sh": "92d0c09b66fb4d6809d881386e87916af5df3be25caeef5a5998f82e17cc3919",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
     ".claude/scripts/pfm-guard.sh": "c6b58ba494ff2b7640d4a0a78f6c8e3f5e5f7f5aac93ed1adb8e30d8adab1314",
     ".claude/scripts/test-pfm.sh": "a3a1f9e91a22f7fa54a965c6b2cf3fa80ce56276354a7f5836afe27032a0c34d",

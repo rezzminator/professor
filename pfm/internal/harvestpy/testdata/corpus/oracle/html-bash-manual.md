@@ -1,7 +1,3 @@
-**Title:** Bash Features ¶
-
----
-
 This text is a brief description of the features that are present in the Bash shell (version 5.3, 18 May 2025). The Bash home page is [http://www.gnu.org/software/bash/](http://www.gnu.org/software/bash/).
 
 This is Edition 5.3, last updated 18 May 2025, of The GNU Bash Reference Manual, for `Bash`, Version 5.3.

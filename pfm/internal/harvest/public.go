@@ -15,7 +15,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -60,12 +63,21 @@ func (h *Harvester) FetchPublic(ctx context.Context, source string, options Fetc
 	}
 	ctx, options = withOCRLang(ctx, options)
 	ctx, note := withRetryAfterNote(ctx)
-	return h.PublicResult(source, note.apply(h.FetchWithOptions(ctx, resolved, options)), options.SizeOnly)
+	return h.exportResult(
+		source,
+		options.Field,
+		note.apply(h.FetchWithOptions(ctx, resolved, options)),
+		options.SizeOnly,
+	)
 }
 
 // PublicResult publishes a core result without exposing a provider (the
 // method is its rung class, PublicMethod), rung traces, cache metadata, or private filesystem paths.
 func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Result {
+	return h.exportResult(source, "", result, sizeOnly)
+}
+
+func (h *Harvester) exportResult(source, field string, result Result, sizeOnly bool) Result {
 	if result.Error != "" {
 		log.Printf(
 			"harvest: public result failure for %q: kind=%q status=%d challenge=%t error=%v",
@@ -80,20 +92,9 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 
 	out := publicSuccessSkeleton(source, result)
 	var body string
-	// Generated converter metadata is removed from the public body. Keep its
-	// size in the inline budget so stripping a long private Source line cannot
-	// turn a clipped core result into an apparently complete one.
-	inlineLimit := h.options.MaxInlineChars
-	metadataRemoved := 0
-	stripPublicMetadata := func(value string) string {
-		before := contentChars(value)
-		cleaned := stripGeneratedSourceMetadata(value)
-		after := contentChars(cleaned)
-		if before > after {
-			metadataRemoved += before - after
-		}
-		return cleaned
-	}
+	// stored is what the private artifact's frontmatter (or, for an archive
+	// member, its in-pipeline content) knows about the document.
+	stored := map[string]string{}
 	if result.Path != "" {
 		raw, err := h.readPublicArtifact(result.Path)
 		if err != nil {
@@ -129,10 +130,9 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 			out.Path = publicPath
 			out.Bytes = int64(len(raw))
 		} else {
-			fetchedAt := ""
 			body = string(raw)
-			meta, parsed := parseCacheFrontmatter(string(raw))
-			if strings.HasPrefix(string(raw), "---\n") && meta["source"] != frontmatterSourceHarvester &&
+			meta, _ := readFrontmatter(string(raw))
+			if strings.HasPrefix(string(raw), "---\n") && meta[keySource] != frontmatterSourceHarvester &&
 				(meta["url"] != "" || meta["method"] != "" || meta["rungs"] != "") {
 				return h.publicExportFailure(
 					source,
@@ -141,11 +141,11 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 					errors.New("artifact provenance is not a harvester document"),
 				)
 			}
-			if meta["source"] == frontmatterSourceHarvester {
-				body = parsed
-				fetchedAt = meta["fetched_at"]
+			if meta[keySource] == frontmatterSourceHarvester {
+				var gaps string
+				stored, gaps, body = storedArtifact(string(raw))
+				out.Partial = withReason(out.Partial, gaps)
 			}
-			body = stripPublicMetadata(body)
 			body, err = h.withPublicImages(source, body, publicImageBase(result), &out)
 			if err != nil {
 				return h.publicExportFailure(source, result, "export embedded image", err)
@@ -154,7 +154,11 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 			if err != nil {
 				return h.publicExportFailure(source, result, "choose public artifact path", err)
 			}
-			if err := h.writePublicMarkdown(publicPath, body, fetchedAt); err != nil {
+			if err := h.writePublicMarkdown(
+				publicPath,
+				body,
+				h.publicFrontmatter(source, field, stored, out, body),
+			); err != nil {
 				return h.publicExportFailure(source, result, "write public artifact", err)
 			}
 			out.Path = publicPath
@@ -180,7 +184,9 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 		if strings.EqualFold(result.Kind, kindArchive) {
 			body = h.rewriteArchiveSource(source, result.Source, body)
 		}
-		body = stripPublicMetadata(body)
+		var gaps string
+		stored, gaps, body = splitArtifact(body, false)
+		out.Partial = withReason(out.Partial, gaps)
 		var err error
 		body, err = h.withPublicImages(source, body, "", &out)
 		if err != nil {
@@ -190,7 +196,11 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 		if err != nil {
 			return h.publicExportFailure(source, result, "choose public artifact path", err)
 		}
-		if err := h.writePublicMarkdown(publicPath, body); err != nil {
+		if err := h.writePublicMarkdown(
+			publicPath,
+			body,
+			h.publicFrontmatter(source, field, stored, out, body),
+		); err != nil {
 			return h.publicExportFailure(source, result, "write public artifact", err)
 		}
 		out.Path = publicPath
@@ -199,13 +209,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 	out.Chars = contentChars(body)
 	out.ContentChars = out.Chars
 	out.Tokens = EstimateTokens(body)
-	if metadataRemoved > 0 && inlineLimit > 0 {
-		inlineLimit -= metadataRemoved
-		if inlineLimit < 1 {
-			inlineLimit = 1
-		}
-	}
-	out.Content = truncateInline(body, inlineLimit)
+	out.Content = truncateInline(body, h.options.MaxInlineChars)
 	if sizeOnly {
 		out.Content = ""
 	}
@@ -247,41 +251,61 @@ func (h *Harvester) rewriteArchiveSource(source, resolved, body string) string {
 	return body
 }
 
-// The Python HTML converter adds a short metadata block before the article.
-// Remove only its generated Source field, and only before that block's
-// separator; article citations later in the document remain untouched.
-func stripGeneratedSourceMetadata(body string) string {
-	lines := strings.Split(body, "\n")
-	separator := -1
-	for index, line := range lines {
-		if strings.TrimSpace(line) == "---" {
-			separator = index
-			break
+// isWebAddress reports whether value is an http(s) address.
+func isWebAddress(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// withReason is reasons with each of reason's gaps joined on, unless reasons
+// holds that very gap already (whole gaps compared, PublicGaps).
+func withReason(reasons, reason string) string {
+	have := PublicGaps(reasons)
+	for _, gap := range PublicGaps(reason) {
+		if !slices.Contains(have, gap) {
+			have = append(have, gap)
 		}
 	}
-	if separator < 0 {
-		return body
+	return strings.Join(have, "; ")
+}
+
+// publicFrontmatter is the public copy's frontmatter: the privacy projection
+// of the private record (README § Public results). The rung class (via) stands
+// for the method; the rung trace, the site name a mirror's markup carries and a
+// mirror's address never leave the private cache.
+func (h *Harvester) publicFrontmatter(
+	source, field string,
+	stored map[string]string,
+	out Result,
+	body string,
+) map[string]string {
+	fetchedAt := h.nowClock().Now().UTC().Format(time.RFC3339)
+	if _, err := time.Parse(time.RFC3339, stored["fetched_at"]); err == nil {
+		fetchedAt = stored["fetched_at"]
 	}
-	prefix := make([]string, 0, separator)
-	removed := false
-	for _, line := range lines[:separator] {
-		if strings.HasPrefix(strings.TrimSpace(line), "**Source:**") {
-			removed = true
-			continue
+	fields := map[string]string{
+		keySource:     frontmatterSourceHarvester,
+		keyRequest:    PublicSourceLabel(source),
+		"field":       field,
+		keyKind:       out.Kind,
+		"via":         out.Method,
+		"fetched_at":  fetchedAt,
+		"chars":       strconv.Itoa(contentChars(body)),
+		"token_count": strconv.Itoa(EstimateTokens(body)),
+		"gaps":        out.Partial,
+	}
+	if out.HTTPStatus > 0 {
+		fields["http_status"] = strconv.Itoa(out.HTTPStatus)
+	}
+	for _, key := range converterMetaKeys {
+		if key != keySite {
+			fields[key] = stored[key]
 		}
-		prefix = append(prefix, line)
 	}
-	if !removed {
-		return body
+	if url := stored["url"]; out.Method != "mirror" && isWebAddress(url) {
+		fields["url"] = PublicSourceLabel(url)
 	}
-	for len(prefix) > 0 && strings.TrimSpace(prefix[len(prefix)-1]) == "" {
-		prefix = prefix[:len(prefix)-1]
-	}
-	suffix := lines[separator+1:]
-	for len(suffix) > 0 && strings.TrimSpace(suffix[0]) == "" {
-		suffix = suffix[1:]
-	}
-	return strings.Join(append(prefix, suffix...), "\n")
+	return fields
 }
 
 func publicSuccessSkeleton(source string, result Result) Result {

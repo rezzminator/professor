@@ -9,11 +9,11 @@ import (
 )
 
 // fetchOne runs one read item in its own goroutine (readMany's per-item
-// fan-out): the misplaced-field check, the semaphore gate, cancellation, the
+// fan-out): the semaphore gate, cancellation, the
 // read itself and — L2-F1's per-item isolation half — a recovered panic,
 // folded into that ITEM's own error rather than the whole batch or,
 // unrecovered, the whole process (the SDK's request goroutine has no recover
-// of its own).
+// of its own). A publication is read as its workJob source.
 func (service *Service) fetchOne(
 	ctx context.Context,
 	semaphore chan struct{},
@@ -21,27 +21,18 @@ func (service *Service) fetchOne(
 	index int,
 	job readJob,
 	request readRequest,
-	contents []string,
-	items []ReadItem,
+	results []harvest.Result,
 ) {
 	defer wait.Done()
-	source := job.source
+	source := workJob(job).source
 	fail := func(message string) {
-		items[index] = ReadItem{Source: source, Gaps: []string{}, Error: message}
-		contents[index] = service.describeFetch(
-			source, harvest.Result{Source: source, Error: message}, request.options.SizeOnly,
-		)
+		results[index] = harvest.Result{Source: source, Error: message}
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			fail(obs.Recovered("harvester read item", recovered).Error())
 		}
 	}()
-	if message := misplaced(job.field, source, service.runtime.Remote); message != "" {
-		items[index] = ReadItem{Source: source, Gaps: []string{}, Error: message}
-		contents[index] = "# " + harvest.PublicSourceLabel(source) + "\nERROR: " + message
-		return
-	}
 	select {
 	case semaphore <- struct{}{}:
 	case <-ctx.Done():
@@ -62,10 +53,7 @@ func (service *Service) fetchOne(
 		fail(err.Error()) // no request was sent: the headers have no origin to go to
 		return
 	}
-	fetched := headers.MarkHeaderless(harvester.FetchPublic(scopedCtx, source, request.options))
-	items[index] = service.readItem(job, fetched, !request.options.SizeOnly)
-	if service.runtime.Remote {
-		fetched.Path = "" // no result of the remote server carries a server path
-	}
-	contents[index] = service.describeFetch(source, fetched, request.options.SizeOnly)
+	options := request.options
+	options.Field = job.field
+	results[index] = headers.MarkHeaderless(harvester.FetchPublic(scopedCtx, source, options))
 }

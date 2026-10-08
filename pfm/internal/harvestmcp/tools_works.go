@@ -18,7 +18,7 @@ const (
 	workTypeAny                 = "any"
 	workTypePaper               = "paper"
 	workTypeBook                = "book"
-	searchLiteratureDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call harvester_search_literature{query:"Attention Is All You Need"}; type:"paper" or "book" narrows it. Returns ranked candidates (title, authors, year, type, identifiers, open access) each with a handle — pass that value unchanged to ` + "`harvester_read`" + ` in publications. ` + "`sources`" + ` names each discovery source's status (answered, partial, failed, timed_out = still running at the 20 s deadline, or 2 s after the sources for the type finished, and cancelled): empty candidates with every source answered = nothing matched (give the exact title); a failed source is named, never read as an empty answer; a tool error = every source failed, retry later or read an exact identifier with ` + "`harvester_read`" + ` (publications).`
+	searchLiteratureDescription = `Finds papers and books — by TITLE or bibliographic query: "find the paper about X", "is there a PDF of <title>". Call harvester_search_literature{query:"Attention Is All You Need", type:"paper"}. Returns a ` + "`=== [n/N] {title}`" + ` block per ranked candidate — handle, type · authors · year, ids, open access; pass the handle unchanged to ` + "`harvester_read`" + ` in publications — then sources:, each one's status. "No candidate works found" with every source answered = nothing matched; a failed source is named, its records missing; an error result = every source failed, retry or read an exact identifier.`
 )
 
 // FindInput is search_literature's input.
@@ -48,29 +48,42 @@ type FindSource struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// FindOutput is search_literature's typed output.
+// FindOutput is what one search_literature call found: the candidates and
+// every source's status. The tool answers it as text (RenderFind); pfm
+// harvest search --json prints it.
 type FindOutput struct {
 	Candidates []WorkCandidate `json:"candidates"`
 	Sources    []FindSource    `json:"sources"`
 }
 
-func (service *Service) searchLiterature(
+func (service *Service) searchLiteratureTool(
 	ctx context.Context, _ *mcp.CallToolRequest, input FindInput,
-) (*mcp.CallToolResult, FindOutput, error) {
+) (*mcp.CallToolResult, any, error) {
+	found, err := service.SearchLiterature(ctx, input)
+	if err != nil {
+		return nil, nil, err
+	}
+	return textResult(RenderFind(input.Query, found), false), nil, nil
+}
+
+// SearchLiterature runs one search_literature query: the tool's and pfm
+// harvest search's one search. An error is a refused input, every source
+// failing, or the candidates' handles not being storable.
+func (service *Service) SearchLiterature(ctx context.Context, input FindInput) (FindOutput, error) {
 	if strings.TrimSpace(input.Query) == "" {
-		return nil, FindOutput{}, errors.New("query must not be empty")
+		return FindOutput{}, errors.New("query must not be empty")
 	}
 	if input.Limit == 0 {
 		input.Limit = 8
 	}
 	if input.Limit < 1 || input.Limit > maxFindResults {
-		return nil, FindOutput{}, fmt.Errorf("limit must be between 1 and %d", maxFindResults)
+		return FindOutput{}, fmt.Errorf("limit must be between 1 and %d", maxFindResults)
 	}
 	workType := strings.ToLower(strings.TrimSpace(input.Type))
 	switch workType {
 	case "", workTypeAny, workTypePaper, workTypeBook:
 	default:
-		return nil, FindOutput{}, fmt.Errorf(
+		return FindOutput{}, fmt.Errorf(
 			"type must be %s, %s or %s, got %q",
 			workTypeAny,
 			workTypePaper,
@@ -82,7 +95,7 @@ func (service *Service) searchLiterature(
 	found, err := service.resolver.FindWorksReportFor(ctx, input.Query, input.Limit, workType)
 	if err != nil {
 		log.Warn("harvester.search_literature.failed", obs.FieldErr, err.Error())
-		return nil, FindOutput{}, fmt.Errorf(
+		return FindOutput{}, fmt.Errorf(
 			"work discovery failed: every source failed — %s; retry later or read an exact identifier with `harvester_read` (publications)",
 			harvest.FailedText(found.Failed()),
 		)
@@ -107,24 +120,20 @@ func (service *Service) searchLiterature(
 	candidates, err := service.harvester.PublicCandidates(found.Candidates)
 	if err != nil {
 		log.Warn("harvester.search_literature.export", obs.FieldErr, err.Error())
-		return nil, FindOutput{}, handleFailure(err)
+		return FindOutput{}, handleFailure(err)
 	}
-	kept := make([]harvest.Candidate, 0, len(candidates))
 	out := make([]WorkCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
 		isBook := strings.Contains(strings.ToLower(candidate.Kind), workTypeBook)
 		if (workType == workTypeBook && !isBook) || (workType == workTypePaper && isBook) {
 			continue
 		}
-		kept = append(kept, candidate)
 		out = append(out, WorkCandidate{
 			Handle: candidate.URL, Title: candidate.Title, Authors: candidate.Authors, Year: candidate.Year,
 			Type: candidate.Kind, IDs: workIDs(candidate.URL), OpenAccess: candidate.Free != "",
 		})
 	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: renderFind(input.Query, kept, found.Failed())}},
-	}, FindOutput{Candidates: out, Sources: sources}, nil
+	return FindOutput{Candidates: out, Sources: sources}, nil
 }
 
 // handleFailure names why the discovered works got no retrieval handles: the

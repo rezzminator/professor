@@ -660,11 +660,48 @@ func TestHTMLFullDOMConversionDropsHiddenElements(t *testing.T) {
 	}
 }
 
+// TestHTMLScreenReaderAndTitleCopiesAreWrittenOnce: a post page that speaks its
+// post a second time to screen readers (an h1 the stylesheet hides, wrapping
+// the post in a "Name on Site:" label) and names it a third time in its
+// <title> wrote the post three times once trafilatura's fallback read the
+// whole document. The body is written once; the title travels in Meta. It
+// needs the pinned interpreter (HARVESTPY_CORPUS_PYTHON).
+func TestHTMLScreenReaderAndTitleCopiesAreWrittenOnce(t *testing.T) {
+	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
+	if python == "" {
+		t.Skip("HARVESTPY_CORPUS_PYTHON is not set; the repeated-copy fixture needs the pinned interpreter")
+	}
+	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
+	converter := testConverter(t, python)
+	t.Cleanup(func() { _ = converter.Close() })
+	result, err := converter.Convert(
+		context.Background(),
+		Request{Path: filepath.Join("testdata", "blocks", "screen-reader-copies.html"), Kind: "html"},
+	)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	const post = "The stilling well drifted four millimetres after the spring flood"
+	if got := strings.Count(result.Markdown, post); got != 1 {
+		t.Errorf("the post is written %d times, want once", got)
+	}
+	if strings.Contains(result.Markdown, "Ada Quill on Chirp") {
+		t.Error("the screen-reader / <title> label is written into the body")
+	}
+	if title := result.Meta["title"]; title != "Ada Quill (@adaquill) on Chirp" {
+		t.Errorf("meta title = %q, want the page's title; meta %v", title, result.Meta)
+	}
+	if t.Failed() {
+		t.Logf("markdown:\n%s", result.Markdown)
+	}
+}
+
 // TestHTMLMetadataDateComesFromMarkupOnly: htmldate's extensive search turned a
-// bare year ("© 2026") or a stray "Updated in 2019" into a Published line on
-// pages with no date markup. A page without date markup writes no Published
-// line; one whose meta tag carries the date writes it. It needs the pinned
-// interpreter (HARVESTPY_CORPUS_PYTHON).
+// bare year ("© 2026") or a stray "Updated in 2019" into a published date on
+// pages with no date markup. A page without date markup carries no published
+// date; one whose meta tag carries the date carries it. Either way the page's
+// metadata travels in Result.Meta and the body holds none of it. It needs the
+// pinned interpreter (HARVESTPY_CORPUS_PYTHON).
 func TestHTMLMetadataDateComesFromMarkupOnly(t *testing.T) {
 	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
 	if python == "" {
@@ -704,14 +741,21 @@ func TestHTMLMetadataDateComesFromMarkupOnly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("convert: %v", err)
 			}
-			var published string
-			for _, line := range strings.Split(result.Markdown, "\n") {
-				if strings.HasPrefix(line, "**Published:**") {
-					published = strings.TrimSpace(strings.TrimPrefix(line, "**Published:**"))
-				}
+			if published := result.Meta["published"]; published != tc.want {
+				t.Errorf("meta published = %q, want %q; meta %v", published, tc.want, result.Meta)
 			}
-			if published != tc.want {
-				t.Errorf("Published = %q, want %q; markdown:\n%s", published, tc.want, result.Markdown)
+			if title := result.Meta["title"]; title != "Field notes on river gauges" {
+				t.Errorf("meta title = %q, want the page title; meta %v", title, result.Meta)
+			}
+			for _, line := range strings.Split(result.Markdown, "\n") {
+				if strings.HasPrefix(line, "**Title:**") || strings.HasPrefix(line, "**Published:**") ||
+					strings.HasPrefix(line, "**Source:**") || strings.TrimSpace(line) == "---" {
+					t.Errorf(
+						"converter metadata %q is in the body; it belongs in Meta; markdown:\n%s",
+						line,
+						result.Markdown,
+					)
+				}
 			}
 		})
 	}

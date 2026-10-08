@@ -1,7 +1,3 @@
-**Title:** The Linux Kernel documentation
-
----
-
 - [Chinese (Simplified)](translations/zh_CN/index.html)
 - [Chinese (Traditional)](translations/zh_TW/index.html)
 - [Italian](translations/it_IT/index.html)

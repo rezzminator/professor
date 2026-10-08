@@ -22,7 +22,11 @@ For a web page, call `harvester_read` with the URL in `urls`. For an exact DOI, 
 
 CLI, MCP tools, and `harvest ask` return exported artifacts. Retrieval methods, mirror URLs, fallback traces, and internal cache filenames are kept out of those results. A direct discovered download URL becomes a persistent opaque `harvest:` handle. Bibliographic identity and article citations remain in the document.
 
-Complete exported Markdown and binary artifacts live under `<cache>/public/` with hashed filenames and private filesystem permissions. Inline limits do not truncate the saved document. Internal cache entries, handle mappings, and telemetry cannot be fetched through public Harvester calls, including through symlinks. The authenticated external gateway confines local reads to exported artifacts.
+Complete exported Markdown and binary artifacts live under `<cache>/public/` with hashed filenames and private filesystem permissions. Inline limits do not truncate the saved document.
+
+An exported Markdown artifact opens with frontmatter and its body is the document alone. The frontmatter keys, in order: `source`, `request`, `field`, `url` (an http(s) address, never a mirror's), `kind`, `via`, `http_status`, `fetched_at`, `title`, `author`, `published`, `license`, `chars`, `token_count`, `gaps` (why the artifact is incomplete, `; `-joined), `transformed` (`json-outline` when JSON was rendered as an outline). Every value is escaped (`%`, CR and LF as `%25`, `%0D`, `%0A`), so a page's own title or author never writes a second key. The private cache writes the same keys plus `method`, `rungs` and `site`, through the same writer (`frontmatter.go`). An artifact whose body opens with a partial banner or a metadata block (the older layout) still reads: both lift into its facts on read.
+
+The read tool and `pfm harvest` print each artifact as one block: `=== [n/N] {item}`, its path, a `partial:` or `truncated:` line when incomplete, then the body. Internal cache entries, handle mappings, and telemetry cannot be fetched through public Harvester calls, including through symlinks. The authenticated external gateway confines local reads to exported artifacts.
 
 Detailed retrieval diagnostics stay in the internal cache and process logs. Public errors distinguish failed retrieval, timeout, access refusal, challenge, conversion failure, and storage failure without including provider addresses. These output controls do not remove publisher attribution or citations contained in the original document, or replace operating-system access controls on logs.
 

@@ -438,7 +438,9 @@ func (converter pythonConverter) convertScratch(
 		noteLoadRefusal(ctx, convertErr)
 		return "", convertErr
 	}
-	return result.Markdown, nil
+	// What the converter read about the document travels ahead of its text
+	// for the harvester's store to lift into frontmatter.
+	return harvest.WithConverterMeta(result.Markdown, result.Meta), nil
 }
 
 var _ harvest.FullDOMConverter = pythonConverter{}
@@ -478,18 +480,20 @@ func (service *Service) ToolNames() []string {
 
 // RegisterTools adds the four tools (search_web only with a search backend; read
 // on the remote server without `files` in its schema) and, on the remote
-// server, the download resource template. Each tool returns its output
-// struct: the SDK derives the output schema from it and sends
-// structuredContent beside the readable Content text. RegisteredToolNames
+// server, the download resource template. Every tool answers text alone: its
+// handler's output type is any and it returns none, so the SDK advertises no
+// output schema and sends no structuredContent. RegisteredToolNames
 // (toolnames.go) moves with it. Every professor server carrying the harvester
 // family registers through here, bound to this one service; each tool's
 // context also ends when its HTTP client disconnects (untilClientGone).
 func (service *Service) RegisterTools(server *mcp.Server) {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
-	readTool := &mcp.Tool{Name: toolRead, Description: readDescription, Annotations: readOnly}
+	readTool := &mcp.Tool{
+		Name: toolRead, Description: readDescription, Annotations: readOnly,
+		InputSchema: readSchema(service.runtime.Remote),
+	}
 	if service.runtime.Remote {
 		readTool.Description = readRemoteDescription
-		readTool.InputSchema = remoteReadSchema()
 	}
 	mcp.AddTool(server, readTool, obs.Tool(toolRead, untilClientGone(service.read)))
 	mcp.AddTool(server,
@@ -497,7 +501,7 @@ func (service *Service) RegisterTools(server *mcp.Server) {
 		obs.Tool(toolDownloadFile, untilClientGone(service.downloadFile)))
 	mcp.AddTool(server,
 		&mcp.Tool{Name: toolSearchLiterature, Description: searchLiteratureDescription, Annotations: readOnly},
-		obs.Tool(toolSearchLiterature, untilClientGone(service.searchLiterature)))
+		obs.Tool(toolSearchLiterature, untilClientGone(service.searchLiteratureTool)))
 	if runtimeSearchEnabled(service.runtime) {
 		mcp.AddTool(server,
 			&mcp.Tool{Name: toolSearchWeb, Description: searchWebDescription, Annotations: readOnly},

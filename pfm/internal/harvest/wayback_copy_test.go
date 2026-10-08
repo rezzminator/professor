@@ -63,8 +63,8 @@ func TestWaybackCopyIsNamedAsTheArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the stored artifact %s: %v", result.Path, err)
 	}
-	if !strings.Contains(string(stored), partialMarkerPrefix+want) ||
-		!strings.Contains(string(stored), "stilling well") {
-		t.Fatalf("the stored artifact does not open with the archive's note:\n%.400s", stored)
+	if meta, body := readFrontmatter(string(stored)); !strings.Contains(meta["gaps"], want) ||
+		!strings.Contains(body, "stilling well") || strings.Contains(body, partialMarkerPrefix) {
+		t.Fatalf("the stored artifact does not name the archive in its frontmatter gaps:\n%.400s", stored)
 	}
 }

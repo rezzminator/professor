@@ -1,8 +1,3 @@
-**Title:** Node.js v26.7.0 documentation
-**Source:** Node.js v26.7.0 Documentation
-
----
-
 # Node.js v26.7.0 documentation
 
 - Node.js v26.7.0

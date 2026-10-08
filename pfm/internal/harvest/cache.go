@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +83,7 @@ func (c *Cache) load(source, kind string) (body string, meta map[string]string, 
 	if err != nil {
 		return "", nil, path, false
 	}
-	meta, body = parseCacheFrontmatter(string(raw))
+	meta, body = readFrontmatter(string(raw))
 	if c.stale(path, kind, meta) {
 		return "", meta, path, false
 	}
@@ -120,28 +121,36 @@ func (c *Cache) stale(path, kind string, meta map[string]string) bool {
 	return c.clock.Now().Sub(stamp) > c.ttl
 }
 
-// save stores body with its provenance. status is the HTTP status of the rung
+// save stores body with its provenance and facts (the converter's metadata and
+// gaps, splitArtifact) as frontmatter. status is the HTTP status of the rung
 // that delivered it; 0 (a local document, or a status never learned) writes no
 // status line, so a later hit reports none rather than a made-up one.
-func (c *Cache) save(source, kind, method, body string, status int, rungs []string) (path string, returnErr error) {
+func (c *Cache) save(
+	source, kind, method, body string,
+	status int,
+	rungs []string,
+	facts map[string]string,
+) (path string, returnErr error) {
 	path = c.path(source, kind)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return path, fmt.Errorf("create cache directory: %w", err)
 	}
-	// Frontmatter is line-oriented. Escape hostile source/method values so a
-	// URL cannot inject a second metadata key into a cache artifact.
-	safe := func(value string) string {
-		return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(value)
+	fields := map[string]string{}
+	for key, value := range facts {
+		fields[key] = value
 	}
-	meta := fmt.Sprintf("---\nurl: %s\nfetched_at: %s\nsource: harvester\nmethod: %s\ntoken_count: %d\n",
-		safe(source), c.clock.Now().UTC().Format(time.RFC3339), safe(method), EstimateTokens(body))
+	fields[keySource] = frontmatterSourceHarvester
+	fields["url"] = source
+	fields[keyKind] = kind
+	fields["method"] = method
+	fields["rungs"] = strings.Join(rungs, ", ")
+	fields["fetched_at"] = c.clock.Now().UTC().Format(time.RFC3339)
+	fields["chars"] = strconv.Itoa(contentChars(body))
+	fields["token_count"] = strconv.Itoa(EstimateTokens(body))
 	if status > 0 {
-		meta += fmt.Sprintf("http_status: %d\n", status)
+		fields["http_status"] = strconv.Itoa(status)
 	}
-	if len(rungs) > 0 {
-		meta += "rungs: " + strings.Join(rungs, ", ") + "\n"
-	}
-	meta += "---\n\n"
+	meta := renderFrontmatter(fields)
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".harvest-*")
 	if err != nil {
 		return path, fmt.Errorf("create cache temp: %w", err)
@@ -167,29 +176,6 @@ func (c *Cache) save(source, kind, method, body string, status int, rungs []stri
 		return path, fmt.Errorf("install cache: %w", err)
 	}
 	return path, nil
-}
-
-func parseCacheFrontmatter(raw string) (map[string]string, string) {
-	meta := map[string]string{}
-	if !strings.HasPrefix(raw, "---\n") {
-		return meta, raw
-	}
-	end := strings.Index(raw[4:], "\n---\n")
-	if end < 0 {
-		return meta, raw
-	}
-	head := raw[4 : 4+end]
-	for _, line := range strings.Split(head, "\n") {
-		key, value, found := strings.Cut(line, ":")
-		if found {
-			value = strings.TrimSpace(value)
-			value = strings.NewReplacer("%0D", "\r", "%0A", "\n", "%25", "%").Replace(value)
-			meta[strings.TrimSpace(key)] = value
-		}
-	}
-	body := raw[4+end+6:]
-	body = strings.TrimPrefix(body, "\n")
-	return meta, body
 }
 
 func EstimateTokens(text string) int {
@@ -253,6 +239,10 @@ func EstimateTokens(text string) int {
 	return int(total + 0.999999)
 }
 
+// InlineTruncationNote ends inline content truncateInline cut short; a
+// renderer that states the truncation itself cuts it off (strings.CutSuffix).
+const InlineTruncationNote = "\n\n[content truncated; read the cached path for the complete artifact]"
+
 func truncateInline(body string, limit int) string {
 	if limit <= 0 {
 		return body
@@ -261,7 +251,7 @@ func truncateInline(body string, limit int) string {
 	if len(runes) <= limit {
 		return body
 	}
-	return string(runes[:limit]) + "\n\n[content truncated; read the cached path for the complete artifact]"
+	return string(runes[:limit]) + InlineTruncationNote
 }
 
 var volatileKinds = map[string]bool{

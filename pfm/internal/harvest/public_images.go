@@ -22,15 +22,15 @@ var markdownImageWholeRE = regexp.MustCompile(`!\[([^\]]*)\]\(\s*([^\s)]+)(?:\s+
 
 // withPublicImages is body with its local images relocated into public/
 // (rewritePublicImages). An image that cannot be published is dropped, its alt
-// text kept, and the drop is named in out.Partial and in body's partial
-// marker; only a failure of the public store itself is an error.
+// text kept, and the drop is named in out.Partial (the public frontmatter's
+// gaps); only a failure of the public store itself is an error.
 func (h *Harvester) withPublicImages(source, body, basePath string, out *Result) (string, error) {
 	rewritten, dropped, err := h.rewritePublicImages(source, body, basePath)
 	if err != nil || dropped == 0 {
 		return rewritten, err
 	}
 	out.Partial = joinReasons(out.Partial, fmt.Sprintf("%d image(s) could not be published", dropped))
-	return withPartial(partialBody(rewritten), out.Partial), nil
+	return rewritten, nil
 }
 
 // rewritePublicImages copies each local image body embeds into public/ and

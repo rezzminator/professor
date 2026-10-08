@@ -28,6 +28,7 @@ github.com/rezzminator/professor/pfm/internal/harvestpy	TestFormatParsersRefuseB
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLConversionKeepsBlockStructure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLFullDOMConversionDropsHiddenElements	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLMetadataDateComesFromMarkupOnly	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLScreenReaderAndTitleCopiesAreWrittenOnce	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestInflateXZAndArabicOCRAvailable	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestLiveBrowserCallerHeadersStayOnTheOrigin	opt-in-live	real-browser rung; runs only with HARVESTER_BROWSER=1
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRMissingModelIsANamedFailure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable

@@ -320,6 +320,9 @@ type FetchOptions struct {
 	Refresh  bool
 	SizeOnly bool
 	OCRLang  string
+	// Field is the request field the source came in (urls, files,
+	// publications), recorded in the public artifact's frontmatter.
+	Field string
 }
 
 // Result is deliberately JSON-friendly so the MCP adapter can return it
@@ -344,8 +347,9 @@ type Result struct {
 	// Partial names why the artifact is known to be INCOMPLETE — a recall gate
 	// below its floor, lazy-loaded content still arriving when the browser
 	// rung's scroll cap hit, a thread whose comments are only partly in the
-	// page. It mirrors the marker line the content itself opens with
-	// (partialMarkerPrefix), so every surface that shows the content shows it.
+	// page. It is the artifact's frontmatter gaps; inside the ladder it
+	// travels as the marker line the content opens with (partialMarkerPrefix),
+	// which the store lifts off the body (splitArtifact).
 	Partial string `json:"partial,omitempty"`
 }
 

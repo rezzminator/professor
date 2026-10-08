@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 func (h *Harvester) resolvedCacheRoot() (string, error) {
@@ -112,18 +111,10 @@ func (h *Harvester) publicArtifactPath(source, kind, oldPath, ext string) (strin
 	return filepath.Join(root, publicDirName, hex.EncodeToString(key[:])+ext), nil
 }
 
-func (h *Harvester) writePublicMarkdown(path, body string, fetchedAt ...string) error {
-	stamp := h.nowClock().Now().UTC().Format(time.RFC3339)
-	if len(fetchedAt) > 0 {
-		candidate := strings.TrimSpace(fetchedAt[0])
-		if _, err := time.Parse(time.RFC3339, candidate); err == nil {
-			stamp = candidate
-		}
-	}
-	meta := "---\nfetched_at: " + stamp + "\ntoken_count: " + fmt.Sprint(
-		EstimateTokens(body),
-	) + "\nsource: harvester\n---\n\n"
-	return h.writePublicFile(path, []byte(meta+body))
+// writePublicMarkdown writes body under its public frontmatter
+// (publicFrontmatter) through the one frontmatter writer.
+func (h *Harvester) writePublicMarkdown(path, body string, fields map[string]string) error {
+	return h.writePublicFile(path, []byte(renderFrontmatter(fields)+body))
 }
 
 func (h *Harvester) writePublicFile(path string, data []byte) error {

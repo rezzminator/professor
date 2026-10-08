@@ -47,15 +47,19 @@ func harvestSearch(t *testing.T, args ...string) (int, string, string) {
 	return code, stdout.String(), stderr.String()
 }
 
-// TestHarvestSearchPrintsCandidatesWithTypeAndSources: the text answer names
-// each candidate's title, type and handle, then every source's status.
+// TestHarvestSearchPrintsCandidatesWithTypeAndSources: the text answer is the
+// harvester_search_literature tool's — a block per candidate, its title,
+// handle and type, then every source's status.
 func TestHarvestSearchPrintsCandidatesWithTypeAndSources(t *testing.T) {
 	fakeDiscovery(t)
 	code, stdout, stderr := harvestSearch(t, "Deep", "learning")
 	if code != 0 {
 		t.Fatalf("search code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	for _, want := range []string{`for "Deep learning"`, "1. Deep learning", "type: ", "handle: ", "sources:\n", ": answered, "} {
+	for _, want := range []string{
+		`1 candidate work(s) for "Deep learning"`, "\n\n=== [1/1] Deep learning\nhandle: ", "\npaper · 2015\n",
+		"\n\nsources: ", "OpenAlex answered (1)",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("search output omits %q:\n%s", want, stdout)
 		}

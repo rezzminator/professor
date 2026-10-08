@@ -1,7 +1,6 @@
 package harvestmcp
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,21 +41,14 @@ func TestRemoteReadImageLinksCarryNoServerPath(t *testing.T) {
 	}
 
 	session := connectHarvesterInProcess(t, newTestService(t, Runtime{Remote: true, CacheDir: cacheDir}))
-	var out ReadOutput
-	text := readText(t, session, map[string]any{"urls": []string{source}}, &out)
-	if len(out.URLs) != 1 || out.URLs[0].Error != "" {
-		t.Fatalf("read urls = %+v", out.URLs)
+	result, text := callText(t, session, toolRead, map[string]any{"urls": []string{source}})
+	if result.IsError {
+		t.Fatalf("read urls = %q", text)
 	}
-	encoded, err := json.Marshal(out)
-	if err != nil {
-		t.Fatal(err)
+	if strings.Contains(text, cacheDir) || strings.Contains(text, "](/") {
+		t.Fatalf("remote read result carries a server path (cache %q): %s", cacheDir, text)
 	}
-	for what, got := range map[string]string{"structured": string(encoded), "text": text} {
-		if strings.Contains(got, cacheDir) || strings.Contains(got, "](/") {
-			t.Fatalf("remote read %s result carries a server path (cache %q): %s", what, cacheDir, got)
-		}
-	}
-	if n := strings.Count(out.URLs[0].Content, "](./"); n != 2 {
-		t.Fatalf("published image links = %d, want 2: %q", n, out.URLs[0].Content)
+	if n := strings.Count(text, "](./"); n != 2 {
+		t.Fatalf("published image links = %d, want 2: %q", n, text)
 	}
 }

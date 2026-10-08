@@ -25,7 +25,7 @@ func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
 	clause5 := `save a file's bytes unparsed → harvester_download_file`
 	clause6 := `search the web for a topic → harvester_search_web`
 
-	const perItem = ` Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
+	const perItem = ` Answers are text, one "=== [n/N]" block per item: "No … found" is nothing found, an error is a failed lookup.`
 	const searchOff = ` Web search is not configured on this server — set search.searxngURL or search.braveApiKey in harvester.config.json to enable web search.`
 	join := func(clauses ...string) string { return strings.Join(clauses, "; ") + "." + perItem }
 	joinOff := func(clauses ...string) string { return join(clauses...) + searchOff }

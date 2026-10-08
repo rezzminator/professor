@@ -1,8 +1,3 @@
-**Title:** NumPy documentation#
-**Source:** NumPy v2.5 Manual
-
----
-
 # NumPy documentation
 
 **Version**: 2.5

@@ -1,9 +1,3 @@
-**Title:** Free Software Foundation
-**Published:** 2023-11-30
-**Source:** The GNU General Public License v3.0 - GNU Project
-
----
-
 ## GNU General Public License
 
 ![[GPLv3 Logo]](/graphics/gplv3-127x51.png)

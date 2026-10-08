@@ -400,21 +400,13 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("harvester_read: %v", err)
 	}
-	var readOutput harvestmcp.ReadOutput
-	encoded, err := json.Marshal(read.StructuredContent)
-	if err != nil {
-		t.Fatalf("encode harvester_read item: %v", err)
-	}
-	if err := json.Unmarshal(encoded, &readOutput); err != nil {
-		t.Fatalf("decode harvester_read item: %v", err)
-	}
-	if len(readOutput.Publications) != 1 ||
-		!strings.HasPrefix(readOutput.Publications[0].Error, "No open copy of this work could be retrieved:") {
-		t.Fatalf(
-			"harvester_read item = %+v, want the public exhausted DOI explanation; text: %q",
-			readOutput.Publications,
-			toolResultText(read),
-		)
+	if text := toolResultText(read); read.StructuredContent != nil ||
+		!strings.HasPrefix(
+			text,
+			"=== [1/1] doi:10.1000/never-match\nerror: No open copy of this work could be retrieved:",
+		) {
+		t.Fatalf("harvester_read = %q (structuredContent %v), want the public exhausted DOI explanation as text",
+			text, read.StructuredContent)
 	}
 	seen := map[string]bool{}
 	for len(seenAPIHosts) > 0 {

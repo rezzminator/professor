@@ -14,7 +14,7 @@ import (
 
 const (
 	maxSearchResults     = 20
-	searchWebDescription = `Searches the web — "search for X", "find pages about X" — ranked titles, URLs, snippets and the engine that found each, never the page itself. Call harvester_search_web{query:"…"}; harvester_search_web{query:"…", lang:"ja"} reaches a non-English literature. Pass a result URL to ` + "`harvester_read`" + ` in urls for the page. Empty results = nothing matched (broaden the query); an error result = the search backend failed, retry later. For a paper or book by title use harvester_search_literature.`
+	searchWebDescription = `Searches the web — "search for X", "find pages about X" — never fetching the page itself. Call harvester_search_web{query:"…"}; harvester_search_web{query:"…", lang:"ja"} reaches a non-English literature. Returns a ` + "`=== [n/N] {title}`" + ` block per ranked result: URL, snippet, engine. Pass a URL to ` + "`harvester_read`" + ` in urls for the page. "No results found" = nothing matched (broaden the query); an error result = the search backend failed, retry later. For a paper or book by title use harvester_search_literature.`
 )
 
 // SearchInput is search_web's input.
@@ -33,24 +33,17 @@ type WebResult struct {
 	Engine  string `json:"engine,omitempty"`
 }
 
-// SearchOutput is search_web's typed output; Error names a failed search, so
-// an empty Results list never stands for a failure.
-type SearchOutput struct {
-	Results []WebResult `json:"results"`
-	Error   string      `json:"error,omitempty"`
-}
-
 func (service *Service) searchWeb(
 	ctx context.Context, _ *mcp.CallToolRequest, input SearchInput,
-) (*mcp.CallToolResult, SearchOutput, error) {
+) (*mcp.CallToolResult, any, error) {
 	if strings.TrimSpace(input.Query) == "" {
-		return nil, SearchOutput{}, errors.New("query must not be empty")
+		return nil, nil, errors.New("query must not be empty")
 	}
 	if input.Limit == 0 {
 		input.Limit = 8
 	}
 	if input.Limit < 1 || input.Limit > maxSearchResults {
-		return nil, SearchOutput{}, fmt.Errorf("limit must be between 1 and %d", maxSearchResults)
+		return nil, nil, fmt.Errorf("limit must be between 1 and %d", maxSearchResults)
 	}
 	results, backend, err := harvest.Search(ctx, input.Query, harvest.SearchOptions{
 		SearXNGURL:    service.runtime.SearXNGURL,
@@ -66,11 +59,7 @@ func (service *Service) searchWeb(
 		// never raw to stderr; renderSearchFailure is the one safe rendering
 		// both stderr and the tool result share.
 		obs.Logger(obs.Component(ctx, "mcp")).Warn("harvester.search.failed", obs.FieldErr, err.Error())
-		safe := renderSearchFailure(err)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: safe}},
-			IsError: true,
-		}, SearchOutput{Results: []WebResult{}, Error: safe}, nil
+		return textResult(renderSearchFailure(err), true), nil, nil
 	}
 	out := make([]WebResult, 0, len(results))
 	for _, result := range results {
@@ -78,7 +67,5 @@ func (service *Service) searchWeb(
 			Title: result.Title, URL: result.URL, Snippet: result.Snippet, Engine: valueOr(result.Engine, backend),
 		})
 	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, "")}},
-	}, SearchOutput{Results: out}, nil
+	return textResult(renderSearch(input.Query, out), false), nil, nil
 }

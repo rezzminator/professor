@@ -1,8 +1,3 @@
-**Title:** 1. Situations Where SQLite Works Well
-**Published:** 2025-05-31
-
----
-
 Small. Fast. Reliable. Choose any three.
 
 Choose any three.

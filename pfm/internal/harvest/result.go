@@ -17,7 +17,11 @@ func (h *Harvester) storeResult(
 	rungs []string,
 	options FetchOptions,
 ) Result {
-	path, err := h.cache.save(source, kind, method, content, statusCode, rungs)
+	// The marker, the converter's metadata line and any legacy metadata block
+	// leave the body here: they are stored as frontmatter, the body alone as text.
+	facts, gaps, body := splitArtifact(content, false)
+	facts["gaps"] = gaps
+	path, err := h.cache.save(source, kind, method, body, statusCode, rungs, facts)
 	if err != nil {
 		return Result{Source: source, Kind: kind, Error: err.Error(), Rungs: rungs}
 	}
@@ -32,21 +36,21 @@ func (h *Harvester) storeResult(
 	if info, statErr := os.Stat(path); statErr == nil {
 		bytes = info.Size()
 	}
-	chars := contentChars(content)
+	chars := contentChars(body)
 	return Result{
 		Source:       source,
 		Kind:         kind,
-		Content:      truncateInline(content, h.options.MaxInlineChars),
+		Content:      truncateInline(body, h.options.MaxInlineChars),
 		Path:         path,
 		Method:       method,
 		CacheStatus:  status,
 		Bytes:        bytes,
 		Chars:        chars,
 		ContentChars: chars,
-		Tokens:       EstimateTokens(content),
+		Tokens:       EstimateTokens(body),
 		HTTPStatus:   statusCode,
 		Rungs:        rungs,
-		Partial:      partialReason(content),
+		Partial:      gaps,
 	}
 }
 
@@ -70,25 +74,65 @@ func (h *Harvester) storeResultAlias(
 	return stored
 }
 
-// storedContent is result's whole content: its stored artifact without the
-// cache frontmatter, or the inline content (which may be truncated,
-// truncateInline) when the artifact could not be read.
+// storedContent is result's whole content as the pipeline carries it — its
+// stored body with its gaps as the partial marker and its converter metadata
+// as the metadata line (storedArtifact), so a re-store keeps both — or the
+// inline content (which may be truncated, truncateInline) when the artifact
+// could not be read.
 func storedContent(result Result) string {
 	if result.Path == "" {
-		return result.Content
+		return inlineContent(result)
 	}
 	raw, err := os.ReadFile(result.Path)
 	if err != nil {
 		obs.Logger(context.Background()).
 			Warn("harvest: the stored artifact could not be read; its inline content stands in",
 				"path", result.Path, obs.FieldErr, err.Error())
+		return inlineContent(result)
+	}
+	return pipelineContent(storedArtifact(string(raw)))
+}
+
+// inlineContent is result's inline content as the ladder carries content: a
+// stored result's gaps live in Partial alone, so they go back on as the
+// partial marker; content already carrying the marker stands as it is.
+func inlineContent(result Result) string {
+	if partialReason(result.Content) != "" {
 		return result.Content
 	}
-	_, content := parseCacheFrontmatter(string(raw))
-	return content
+	return withPartial(result.Content, result.Partial)
+}
+
+// pipelineContent is a stored artifact as the ladder carries content: its gaps
+// as the partial marker and its converter metadata as the metadata line.
+func pipelineContent(meta map[string]string, gaps, body string) string {
+	converted := map[string]string{}
+	for _, key := range converterMetaKeys {
+		if meta[key] != "" {
+			converted[key] = meta[key]
+		}
+	}
+	return withPartial(WithConverterMeta(body, converted), gaps)
+}
+
+// storedArtifact reads a harvester artifact file: its frontmatter, its gaps and
+// its body. A legacy entry's banner and metadata block, still in its body, are
+// lifted the same way a fresh conversion's are.
+func storedArtifact(raw string) (map[string]string, string, string) {
+	meta, content := readFrontmatter(raw)
+	lifted, legacyGaps, body := splitArtifact(content, legacyEntry(meta))
+	for key, value := range lifted {
+		if meta[key] == "" {
+			meta[key] = value
+		}
+	}
+	return meta, joinReasons(meta["gaps"], legacyGaps), body
 }
 
 func (h *Harvester) resultFromCache(source, kind, content string, meta map[string]string, path string) Result {
+	// A legacy entry still carries its banner and metadata block in its body.
+	_, legacyGaps, content := splitArtifact(content, legacyEntry(meta))
+	gaps := joinReasons(meta["gaps"], legacyGaps)
 	rungs := []string{}
 	if raw := meta["rungs"]; raw != "" {
 		for _, rung := range strings.Split(raw, ",") {
@@ -127,7 +171,7 @@ func (h *Harvester) resultFromCache(source, kind, content string, meta map[strin
 		Tokens:       tokens,
 		HTTPStatus:   status,
 		Rungs:        rungs,
-		Partial:      partialReason(content),
+		Partial:      gaps,
 	}
 }
 

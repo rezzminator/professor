@@ -1288,10 +1288,37 @@ printf '# lane M local note\n\nSENTINEL-LANE-M-%s\n' "$$" >"$NOTE"
 if ! grep -qE '^harvester	true	' <<<"$(pfm mcp ls 2>/dev/null)"; then
   bad="$bad the harvester is disabled in this lane root (pfm mcp ls); no harvester tool can be driven;"
 fi
-# item <group> <n> <jq-path> — one field of the n-th typed item of a group:
-# read answers {urls, files, publications}, each in its input's order;
-# harvester_download_file answers items
-item() { printf '%s' "$MCP_STRUCT" | jq -r ".$1[$2]$3 | if . == null then empty else . end" 2>/dev/null; } # false stays false
+# The harvester answers text alone, never structuredContent: one
+# "=== [n/N] {item}" block per item, numbered over the call in input order
+# (read: urls, then files, then publications). A block is its header, the
+# stored artifact's absolute path when there is one, a status line (partial:,
+# truncated:, size: or error:) when one applies, then the content.
+block() { printf '%s\n' "$MCP_TEXT" | awk -v n="$1" '/^=== \[[0-9]+\/[0-9]+\] /{i++} i == n'; } # the n-th block
+block_count() { printf '%s\n' "$MCP_TEXT" | grep -c '^=== \[[0-9]*/[0-9]*\] '; }
+block_item() { block "$1" | sed -n '1s/^=== \[[0-9]*\/[0-9]*\] //p'; }                  # the item as passed
+block_path() { block "$1" | sed -n '2{/^\//p;}'; }                                      # its artifact's path
+block_status() { block "$1" | sed -n "2,4s/^$2: //p" | head -1; }                       # its <key>: line
+# artifact_key <path> <key> — one value of a stored artifact's frontmatter.
+artifact_key() {
+  awk -v k="$2" 'NR == 1 && $0 != "---" {exit} NR > 1 && $0 == "---" {exit}
+    NR > 1 && index($0, k ": ") == 1 {print substr($0, length(k) + 3); exit}' "$1" 2>/dev/null
+}
+# cached_read <args-json> — harvester_read begun on a fresh clock second.
+# CACHED=true when block 1's artifact was stored before the call began (its
+# frontmatter fetched_at precedes the call's first second): a cache hit, since
+# a fresh read stamps the second it ran in. 1 only on a transport failure.
+CACHED=""
+cached_read() {
+  local now began stamp
+  CACHED=false
+  now="$(date -u +%s)"
+  wait_for 3 "[ \"\$(date -u +%s)\" -gt $now ]"
+  began="$(date -u -d "@$(date -u +%s)" +%Y-%m-%dT%H:%M:%SZ)"
+  MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$1" || return 1
+  stamp="$(artifact_key "$(block_path 1)" fetched_at)"
+  [ -n "$stamp" ] && [[ "$stamp" < "$began" ]] && CACHED=true
+  return 0
+}
 offline_error() {
   case "$1" in
     *"DNS lookup failed"*|*"DNS resolution failed"*|*"The connection failed"*|*"network is unreachable"*|*"No open copy of this work could be retrieved"*|*"source failed"*) return 0 ;;
@@ -1301,33 +1328,33 @@ offline_error() {
 # M21 read {files} — a local document backs the content and cache assertions.
 if [ -z "$bad" ]; then
   if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f]}')"; then
-    if [ "$MCP_ISERR" != false ] || [ -z "$MCP_STRUCT" ]; then
-      bad="$bad M21: read $RFC_DIRECT isError=$MCP_ISERR or no structuredContent: $(one_line "$MCP_TEXT" | cut -c1-200);"
-    elif [ -n "$(item files 0 .error)" ]; then
-      bad="$bad M21: read $RFC_DIRECT failed: $(one_line "$(item files 0 .error)" | cut -c1-200);"
+    if [ "$MCP_ISERR" != false ] || [ -n "$MCP_STRUCT" ]; then
+      bad="$bad M21: read $RFC_DIRECT isError=$MCP_ISERR or answered structuredContent ($(one_line "$MCP_STRUCT" | cut -c1-80)): $(one_line "$MCP_TEXT" | cut -c1-200);"
+    elif [ -n "$(block_status 1 error)" ]; then
+      bad="$bad M21: read $RFC_DIRECT failed: $(one_line "$(block_status 1 error)" | cut -c1-200);"
     else
-      RFC_PATH="$(item files 0 .path)"
-      [ "$(item files 0 .source)" = "$RFC_DIRECT" ] || bad="$bad M21: the item's source is '$(item files 0 .source)', not $RFC_DIRECT;"
-      [ -f "$RFC_PATH" ] || bad="$bad M21: the item's path '$RFC_PATH' is not a file on disk;"
-      grep -qi 'coffee' <<<"$(item files 0 .content)" || bad="$bad M21: the local content does not mention coffee;"
-      [ "$(item files 0 '.gaps | type')" = array ] || bad="$bad M21: the item's gaps is not a list: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      [ "$(item files 0 .via)" = local ] || bad="$bad M21: the item names no local via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      [ "$(sfield '[keys[] | select(. != "files")] | length')" = 0 ] || bad="$bad M21: a files-only read answered other groups: $(sfield 'keys | join(",")');"
-      grep -qxF "$RFC_DIRECT" <<<"$(printf '%s\n' "$MCP_TEXT" | sed -n 's/^#\{1,\} //p')" || bad="$bad M21: the readable text carries no heading for $RFC_DIRECT: $(one_line "$MCP_TEXT" | cut -c1-160);"
-      [ "$(text_line 1)" = '## files (1)' ] || bad="$bad M21: the readable text does not open with its group heading '## files (1)': $(one_line "$(text_line 1)");"
+      RFC_PATH="$(block_path 1)"
+      [ "$(block_item 1)" = "$RFC_DIRECT" ] || bad="$bad M21: the block's item is '$(block_item 1)', not $RFC_DIRECT;"
+      [ -f "$RFC_PATH" ] || bad="$bad M21: the block's path '$RFC_PATH' is not a file on disk;"
+      grep -qi 'coffee' <<<"$(block 1)" || bad="$bad M21: the local content does not mention coffee;"
+      [ -z "$(block_status 1 partial)$(block_status 1 truncated)" ] || bad="$bad M21: a small complete document carries a partial or truncated line: $(one_line "$(block 1)" | cut -c1-160);"
+      [ "$(artifact_key "$RFC_PATH" via)" = local ] && [ "$(artifact_key "$RFC_PATH" field)" = files ] || bad="$bad M21: the artifact's frontmatter names no local via in field files: via '$(artifact_key "$RFC_PATH" via)' field '$(artifact_key "$RFC_PATH" field)';"
+      [ "$(block_count)" = 1 ] || bad="$bad M21: a one-file read answered $(block_count) blocks: $(one_line "$MCP_TEXT" | cut -c1-160);"
+      [ "$(text_line 1)" = "=== [1/1] $RFC_DIRECT" ] || bad="$bad M21: the readable text does not open with its item header '=== [1/1] $RFC_DIRECT': $(one_line "$(text_line 1)");"
     fi
   else
     bad="$bad M21: read: $MCP_WHY;"
   fi
   if [ -n "$RFC_PATH" ]; then
-    if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f]}')"; then
-      [ "$(item files 0 .cached)" = true ] || bad="$bad M21: the second read of the same file is not cached: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    if cached_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f]}')"; then
+      [ "$CACHED" = true ] && [ "$(block_path 1)" = "$RFC_PATH" ] || bad="$bad M21: the second read of the same file is not a cache hit on $RFC_PATH (fetched_at '$(artifact_key "$(block_path 1)" fetched_at)'): $(one_line "$MCP_TEXT" | cut -c1-160);"
     else
       bad="$bad M21: second read: $MCP_WHY;"
     fi
     if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f], include_content: false}')"; then
-      [ -z "$(item files 0 .content)" ] && [ "$(item files 0 .chars)" -gt 0 ] 2>/dev/null && [ "$(item files 0 .path)" = "$RFC_PATH" ] ||
-        bad="$bad M21: include_content false did not answer an item with chars and path and no content: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ "$(block 1 | wc -l)" -eq 3 ] && [ "$(block_path 1)" = "$RFC_PATH" ] &&
+        [[ "$(block_status 1 size)" =~ ^[1-9][0-9]*\ chars,\ ~[0-9]+\ tokens$ ]] ||
+        bad="$bad M21: include_content false did not answer its header, path and size line alone: $(one_line "$MCP_TEXT" | cut -c1-160);"
     else
       bad="$bad M21: include_content false: $MCP_WHY;"
     fi
@@ -1352,14 +1379,16 @@ if [ -z "$bad" ]; then
   # that one failed item does not erase another group's successful item.
   if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_PUBLIC" --arg f "$RFC_DIRECT" --arg p "$SCRATCH/no-such-document.md" '{urls: [$u, $p, "10.1038/nphys1170"], files: [$f]}')"; then
     [ "$MCP_ISERR" = false ] || bad="$bad M21: failing items made the whole call isError;"
-    [ "$(sfield '.urls | length')" = 3 ] || bad="$bad M21: three urls answered $(sfield '.urls | length') item(s), not one per url;"
-    [ "$(item urls 0 .source)" = "$RFC_PUBLIC" ] && offline_error "$(item urls 0 .error)" ||
-      bad="$bad M21: the public URL did not produce its own offline error: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    [ "$(item files 0 .source)" = "$RFC_DIRECT" ] && [ -z "$(item files 0 .error)" ] ||
-      bad="$bad M21: the local file failed beside the public error: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    [ "$(item urls 1 .error)" = 'this is a local path; put it in files.' ] || bad="$bad M29: a local path given in urls does not say 'this is a local path; put it in files.': $(one_line "$(item urls 1 .error)");"
-    [ "$(item urls 2 .error)" = 'this is a DOI; put it in publications.' ] || bad="$bad M29: a DOI given in urls does not say 'this is a DOI; put it in publications.': $(one_line "$(item urls 2 .error)");"
-    [ "$(text_line 1)" = '## urls (3)' ] || bad="$bad M21: three urls do not open the text with '## urls (3)': $(one_line "$(text_line 1)");"
+    [ -z "$MCP_STRUCT" ] || bad="$bad M21: a mixed read answered structuredContent;"
+    [ "$(block_count)" = 4 ] && [ "$(block_item 2)" = "$SCRATCH/no-such-document.md" ] && [ "$(block_item 3)" = 10.1038/nphys1170 ] ||
+      bad="$bad M21: three urls and a file answered $(block_count) block(s), not one per item in input order: $(one_line "$MCP_TEXT" | cut -c1-200);"
+    [ "$(block_item 1)" = "$RFC_PUBLIC" ] && offline_error "$(block_status 1 error)" ||
+      bad="$bad M21: the public URL did not produce its own offline error: $(one_line "$(block 1)" | cut -c1-160);"
+    [ "$(block_item 4)" = "$RFC_DIRECT" ] && [ -z "$(block_status 4 error)" ] && [ "$(block_path 4)" = "$RFC_PATH" ] ||
+      bad="$bad M21: the local file failed beside the public error: $(one_line "$(block 4)" | cut -c1-160);"
+    [ "$(block_status 2 error)" = 'this is a local path; put it in files.' ] || bad="$bad M29: a local path given in urls does not say 'this is a local path; put it in files.': $(one_line "$(block 2)");"
+    [ "$(block_status 3 error)" = 'this is a DOI; put it in publications.' ] || bad="$bad M29: a DOI given in urls does not say 'this is a DOI; put it in publications.': $(one_line "$(block 3)");"
+    [ "$(text_line 1)" = "=== [1/4] $RFC_PUBLIC" ] || bad="$bad M21: the mixed read does not open the text with '=== [1/4] $RFC_PUBLIC': $(one_line "$(text_line 1)");"
   else
     bad="$bad M29: read misplaced items: $MCP_WHY;"
   fi
@@ -1416,9 +1445,9 @@ if [ -z "$bad" ]; then
   # M25: download_file accepts HTTP URLs only; public fetches fail offline and
   # a local path tells the caller to use harvester_read(files).
   if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_download_file "$(jq -cn --arg u "$RFC_PUBLIC" --arg p "$NOTE" '{urls: [$u, $p]}')"; then
-    [ "$MCP_ISERR" = true ] && offline_error "$(item items 0 .error)" ||
+    [ "$MCP_ISERR" = true ] && [ -z "$MCP_STRUCT" ] && [ "$(block_item 1)" = "$RFC_PUBLIC" ] && offline_error "$(block_status 1 error)" ||
       bad="$bad M25: the public download did not name an offline item error: $(one_line "$MCP_TEXT" | cut -c1-160);"
-    [ "$(item items 1 .error)" = 'this is a local path; harvester_download_file takes URLs — read a local document with `harvester_read` (files).' ] || bad="$bad M29: a local path given to harvester_download_file does not name harvester_read's files: $(one_line "$(item items 1 .error)");"
+    [ "$(block_status 2 error)" = 'this is a local path; harvester_download_file takes URLs — read a local document with `harvester_read` (files).' ] || bad="$bad M29: a local path given to harvester_download_file does not name harvester_read's files: $(one_line "$(block 2)");"
   else
     bad="$bad M25: harvester_download_file: $MCP_WHY;"
   fi
@@ -1434,19 +1463,20 @@ if [ -z "$bad" ]; then
   # own error item; a URL names urls (M29)
   if mcp_call http professor harvester_read "$(jq -cn --arg n "$NOTE" --arg m "$SCRATCH/no-such-document.md" --arg u "$RFC_PUBLIC" '{files: [$n, $m, $u]}')"; then
     [ "$MCP_ISERR" = false ] || bad="$bad M26: read files isError: $(one_line "$MCP_TEXT" | cut -c1-160);"
-    grep -qF "SENTINEL-LANE-M-$$" <<<"$(item files 0 .content)" || bad="$bad M26: the local note did not come back with its sentinel: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    [ "$(item files 0 .via)" = local ] || bad="$bad M26: the local item's via is '$(item files 0 .via)', not local;"
-    [ -n "$(item files 1 .error)" ] || bad="$bad M26: the missing local path is not an error item;"
-    [ "$(item files 2 .error)" = 'this is a URL; put it in urls.' ] || bad="$bad M29: a URL given in files does not say 'this is a URL; put it in urls.': $(one_line "$(item files 2 .error)");"
-    [ "$(text_line 1)" = '## files (3)' ] || bad="$bad M26: three files do not open the text with '## files (3)': $(one_line "$(text_line 1)");"
+    grep -qF "SENTINEL-LANE-M-$$" <<<"$(block 1)" || bad="$bad M26: the local note did not come back with its sentinel: $(one_line "$(block 1)" | cut -c1-160);"
+    [ "$(artifact_key "$(block_path 1)" via)" = local ] || bad="$bad M26: the local artifact's via is '$(artifact_key "$(block_path 1)" via)', not local;"
+    [ "$(block_item 2)" = "$SCRATCH/no-such-document.md" ] && [ -n "$(block_status 2 error)" ] || bad="$bad M26: the missing local path is not its own error block: $(one_line "$(block 2)" | cut -c1-160);"
+    [ "$(block_status 3 error)" = 'this is a URL; put it in urls.' ] || bad="$bad M29: a URL given in files does not say 'this is a URL; put it in urls.': $(one_line "$(block 3)");"
+    [ "$(text_line 1)" = "=== [1/3] $NOTE" ] || bad="$bad M26: three files do not open the text with '=== [1/3] $NOTE': $(one_line "$(text_line 1)");"
   else
     bad="$bad M26: read files: $MCP_WHY;"
   fi
   # M27 read {publications} — an arXiv lookup fails by name offline.
   if MCP_HTTP_TIMEOUT=240 mcp_call http professor harvester_read '{"publications":["arXiv:1706.03762"],"include_content":false}'; then
-    [ "$MCP_ISERR" = true ] && offline_error "$(item publications 0 .error)" &&
-      [ "$(item publications 0 .ids.arxiv)" = 1706.03762 ] ||
-      bad="$bad M27: arXiv:1706.03762 did not carry its id and offline lookup error: $(one_line "$MCP_TEXT" | cut -c1-200);"
+    # Routed as a work, never refused as misplaced: its error is the lookup's.
+    [ "$MCP_ISERR" = true ] && [ "$(block_item 1)" = arXiv:1706.03762 ] && offline_error "$(block_status 1 error)" &&
+      ! grep -qE 'put it in|looks like a title' <<<"$(block_status 1 error)" ||
+      bad="$bad M27: arXiv:1706.03762 did not answer its own work lookup's offline error: $(one_line "$MCP_TEXT" | cut -c1-200);"
   else
     bad="$bad M27: read publications: $MCP_WHY;"
   fi
@@ -1460,6 +1490,9 @@ if [ -z "$bad" ]; then
     for t in harvester_search_literature harvester_search_web; do
       printf '%s' "$MCP_OUT" | jq -e --arg t "$t" '.result.tools[] | select(.name == $t) | .inputSchema.properties.headers' >/dev/null 2>&1 && bad="$bad M28: $t takes headers;"
     done
+    # Every harvester tool answers text alone, so none advertises an output schema.
+    with_schema="$(printf '%s' "$MCP_OUT" | jq -r '[.result.tools[] | select(.name | startswith("harvester_")) | select(.outputSchema != null) | .name] | join(",")' 2>/dev/null)"
+    [ -z "$with_schema" ] || bad="$bad M28: $with_schema advertise(s) an outputSchema;"
   else
     bad="$bad M28: harvester tools/list: $MCP_WHY;"
   fi
@@ -1469,22 +1502,24 @@ if [ -z "$bad" ]; then
     bad="$bad M28: read Host header: $MCP_WHY;"
   fi
   if mcp_call http professor harvester_read '{"publications":["arXiv:1706.03762"],"headers":{"X-Lane-M":"1"}}'; then
-    [ "$MCP_ISERR" = true ] && offline_error "$(item publications 0 .error)" &&
+    [ "$MCP_ISERR" = true ] && offline_error "$(block_status 1 error)" &&
       ! grep -qF 'lane-m-secret' <<<"$MCP_OUT" ||
-      bad="$bad M28: a headered identifier did not report its own offline lookup failure: $(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160);"
+      bad="$bad M28: a headered identifier did not report its own offline lookup failure: $(one_line "$MCP_TEXT" | cut -c1-160);"
   else
     bad="$bad M28: read publications with headers: $MCP_WHY;"
   fi
   if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_PUBLIC" --arg v "lane-m-secret-$$" '{urls: [$u], include_content: false, headers: {"X-Lane-M": $v}}')"; then
-    offline_error "$(item urls 0 .error)" && [ "$(item urls 0 .cached)" = false ] ||
-      bad="$bad M28: a headered public read did not report its own offline failure: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    # Its own cache partition: a fresh offline failure with no stored artifact,
+    # never an entry served from the cache.
+    offline_error "$(block_status 1 error)" && [ -z "$(block_path 1)" ] ||
+      bad="$bad M28: a headered public read did not report its own offline failure: $(one_line "$MCP_TEXT" | cut -c1-160);"
     grep -qF "lane-m-secret-$$" <<<"$MCP_OUT" && bad="$bad M28: the header value came back in the result;"
   else
     bad="$bad M28: headered read: $MCP_WHY;"
   fi
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "read local $RFC_DIRECT (typed content, via local, cached on re-read); public URL, literature, web, download and arXiv report named offline failures; caller headers and misplaced items refused by name"
+  pass "read local $RFC_DIRECT (text blocks, via local, cached on re-read); public URL, literature, web, download and arXiv report named offline failures; caller headers and misplaced items refused by name"
 fi
 
 # ─── M.12 — the cache and the search gate back the tools ────────────────────
@@ -1497,8 +1532,8 @@ if requires M.11-harvester-tools; then
   [ -n "$RFC_PATH" ] && [ -f "$RFC_PATH" ] || bad="$bad H10: no cached artifact path from M.11 ($RFC_PATH);"
   case "$RFC_PATH" in "$HOME"/*) ;; *) bad="$bad H10: the cache artifact $RFC_PATH lives outside \$HOME — not the local cache;" ;; esac
   grep -qi 'coffee' "$RFC_PATH" 2>/dev/null || bad="$bad H10: the cached markdown $RFC_PATH does not carry the document;"
-  if mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f], include_content: false}')"; then
-    [ "$(item files 0 .cached)" = true ] && [ "$(item files 0 .path)" = "$RFC_PATH" ] || bad="$bad H10: an include_content false re-read is not the cached artifact $RFC_PATH: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+  if cached_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f], include_content: false}')"; then
+    [ "$CACHED" = true ] && [ "$(block_path 1)" = "$RFC_PATH" ] || bad="$bad H10: an include_content false re-read is not a cache hit on the artifact $RFC_PATH (fetched_at '$(artifact_key "$(block_path 1)" fetched_at)'): $(one_line "$MCP_TEXT" | cut -c1-160);"
   else
     bad="$bad H10: read include_content false: $MCP_WHY;"
   fi
@@ -1621,8 +1656,8 @@ e2e_drive() {
 }
 # cache_lists <file> — a pfm-owned cache hit after the chat's own read.
 cache_lists() {
-  mcp_call http professor harvester_read "$(jq -cn --arg f "$1" '{files: [$f], include_content: false}')" || return 1
-  [ "$(item files 0 .cached)" = true ] && [ "$(item files 0 .source)" = "$1" ]
+  cached_read "$(jq -cn --arg f "$1" '{files: [$f], include_content: false}')" || return 1
+  [ "$CACHED" = true ] && [ "$(block_item 1)" = "$1" ]
 }
 # e2e_evidence <chat> <sid> <sock> <file> <rename> — the fleet's and the cache's
 # own records of the two calls; renames the chat back. Appends to $bad.
@@ -1632,7 +1667,7 @@ e2e_evidence() {
   [ "$(socket_field "$sock" 5)" = "$rename" ] ||
     bad="$bad $chat: the fleet row on $sock reads '$(socket_field "$sock" 5)', not '$rename' — its chat_name self call left no record;$label_wait_why"
   if ! cache_lists "$file"; then
-    bad="$bad $chat: the harvester cache carries no local read for $file after the chat's call (read include_content false: ${MCP_WHY:-$(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160)});"
+    bad="$bad $chat: the harvester cache carries no local read for $file after the chat's call (read include_content false: ${MCP_WHY:-$(one_line "$MCP_TEXT" | cut -c1-160)});"
   fi
   back="$(pfm chat name "$sid" "$chat" 2>&1)" || bad="$bad $chat: could not be renamed back (pfm chat name exited non-zero: $(one_line "$back"));"
   LANE_ANCHOR="sock:$sock" wait_for 10 "live_chat '$chat'" || back_wait_why=" ($LANE_WAIT_WHY)"

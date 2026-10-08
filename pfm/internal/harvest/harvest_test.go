@@ -354,6 +354,7 @@ func TestGoogleDriveFileViewFetchesCompleteDownloadInsteadOfPreviewHTML(t *testi
 		strings.Repeat("Drive preview page 1 through page 4 only\n", 20),
 		0,
 		[]string{"direct", "chrome-impersonation", "jina"},
+		nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +536,10 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 		t.Fatalf("redirect result=%#v", result)
 	}
 	path := filepath.Join(t.TempDir(), "meta.txt")
-	if _, err := h.cache.save("https://example.test/a\nmethod: injected", "txt", "direct", "body", 0, nil); err != nil {
+	if _, err := h.cache.save(
+		"https://example.test/a\nmethod: injected", "txt", "direct", "body", 0, nil,
+		map[string]string{"title": "Page title\nrungs: injected", "author": "Page author\r\nhttp_status: 999"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(
@@ -544,8 +548,10 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "\nmethod: injected\n") {
-		t.Fatalf("frontmatter injection survived: %q", raw)
+	for _, injected := range []string{"\nmethod: injected\n", "\nrungs: injected\n", "\nhttp_status: 999\n"} {
+		if strings.Contains(string(raw), injected) {
+			t.Fatalf("frontmatter injection survived: %q", raw)
+		}
 	}
 	_ = path
 }

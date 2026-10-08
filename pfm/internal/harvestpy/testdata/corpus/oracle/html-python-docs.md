@@ -1,8 +1,3 @@
-**Title:** Python 3.14 documentation
-**Source:** Python documentation
-
----
-
 # Python 3.14.7 documentation
 
 Welcome! This is the official documentation for Python 3.14.7.

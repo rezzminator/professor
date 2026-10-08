@@ -1,11 +1,3 @@
-**Title:** Portable Network Graphics (PNG) Specification (Third Edition)
-**Authors:** Chris Blume
-**Published:** 2025-06-24
-**Source:** w3.org
-**License:** permissive document license
-
----
-
 [![W3C](https://www.w3.org/StyleSheets/TR/2021/logos/W3C)](https://www.w3.org/)
 
 [W3C Recommendation](https://www.w3.org/standards/types#REC)

@@ -283,8 +283,10 @@ func TestPublicResultDropsAnImageThatCannotBePublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(stored), partialMarkerPrefix+"1 image(s) could not be published") {
-		t.Fatalf("the public artifact does not carry the partial marker: %q", stored)
+	meta, body := readFrontmatter(string(stored))
+	if !strings.Contains(meta["gaps"], "1 image(s) could not be published") ||
+		strings.Contains(body, partialMarkerPrefix) {
+		t.Fatalf("the public artifact does not name the dropped image in its frontmatter gaps alone: %q", stored)
 	}
 }
 

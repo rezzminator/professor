@@ -97,8 +97,15 @@ func TestRecallGateFlagsATruncatedPageWhereTheReaderSeesIt(t *testing.T) {
 			if strings.Contains(result.Partial, "markitdown exploded") {
 				t.Fatalf("the converter's own raw error text reached the partial reason: partial=%q", result.Partial)
 			}
-			if !strings.HasPrefix(result.Content, partialMarkerPrefix) {
-				t.Fatalf("the partial flag is not visible in the content: %.200q", result.Content)
+			if stored, err := os.ReadFile(result.Path); err != nil {
+				t.Fatalf("read the stored artifact: %v", err)
+			} else if meta, body := readFrontmatter(string(stored)); meta["gaps"] != result.Partial ||
+				strings.Contains(body, partialMarkerPrefix) || strings.Contains(result.Content, partialMarkerPrefix) {
+				t.Fatalf(
+					"the partial flag is not the stored frontmatter's gaps alone: gaps=%q body=%.200q",
+					meta["gaps"],
+					body,
+				)
 			}
 			cached := h.Fetch(context.Background(), "https://guide.example.test/birds")
 			if cached.CacheStatus != cacheStatusHit || cached.Partial != result.Partial {

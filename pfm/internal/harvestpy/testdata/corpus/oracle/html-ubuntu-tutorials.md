@@ -1,8 +1,3 @@
-**Title:** Tutorials | Ubuntu
-**Source:** Ubuntu
-
----
-
 # Tutorials
 
 These tutorials provide a step-by-step process to doing development and dev-ops activities on Ubuntu machines, servers or devices.

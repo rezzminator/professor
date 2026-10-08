@@ -1,10 +1,3 @@
-**Title:** W3C Accessibility Standards Overview
-**Published:** 2026-08-12
-**Source:** Web Accessibility Initiative (WAI)
-**License:** permissive license
-
----
-
 # W3C Accessibility Standards Overview
 
 ## Introduction

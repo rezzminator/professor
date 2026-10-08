@@ -1,8 +1,3 @@
-**Title:** HTML
-**Published:** 2026-08-11
-
----
-
 Living Standard — Last Updated 11 August 2026
 
 1. [1 Introduction](#toc-introduction)

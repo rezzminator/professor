@@ -41,7 +41,15 @@ _JUNK_AUTHORS = frozenset(
 )
 
 
-def html_metadata(raw: str) -> str:
+# What a conversion read ABOUT its document — title, author, published, site,
+# license; transformed when the body renders the source rather than quoting it
+# — travels beside the markdown in the response's "meta", never inside it: the
+# harvester writes it into the artifact's frontmatter. convert() clears it
+# before every request (one request at a time per worker).
+_RESULT_META: dict[str, str] = {}
+
+
+def html_metadata(raw: str) -> dict[str, str]:
     from trafilatura.metadata import extract_metadata
 
     try:
@@ -49,21 +57,20 @@ def html_metadata(raw: str) -> str:
         meta = extract_metadata(raw, extensive=False)
     except Exception as exc:
         print(f"metadata extraction failed: {exc}", file=sys.stderr)
-        return ""
+        return {}
     if meta is None:
-        return ""
+        return {}
     author = _clean(getattr(meta, "author", ""))
     if author.casefold() in _JUNK_AUTHORS:
         author = ""
     fields = (
-        ("Title", _clean(getattr(meta, "title", ""))),
-        ("Authors", author),
-        ("Published", _clean(getattr(meta, "date", ""))),
-        ("Source", _clean(getattr(meta, "sitename", ""))),
-        ("License", _clean(getattr(meta, "license", ""))),
+        ("title", _clean(getattr(meta, "title", ""))),
+        ("author", author),
+        ("published", _clean(getattr(meta, "date", ""))),
+        ("site", _clean(getattr(meta, "sitename", ""))),
+        ("license", _clean(getattr(meta, "license", ""))),
     )
-    lines = [f"**{label}:** {value}" for label, value in fields if value]
-    return "\n".join(lines) + "\n\n---\n\n" if lines else ""
+    return {key: value for key, value in fields if value}
 
 
 def convert_html(path: pathlib.Path) -> str:
@@ -82,6 +89,7 @@ def convert_html(path: pathlib.Path) -> str:
     if tree is not None:
         _drop_hidden(tree)
         _drop_repeated_excerpts(tree)
+        _drop_screen_reader_copies(tree)
         _mark_linked_images(tree)
         _unwrap_layout_tables(tree)
         _keep_notes(tree)
@@ -102,7 +110,8 @@ def convert_html(path: pathlib.Path) -> str:
         part = document.get if isinstance(document, dict) else lambda name: getattr(document, name, None)
         blocks = [_render_blocks(part("body")), _render_blocks(part("commentsbody"))]
         body = "\n\n".join(block for block in blocks if block)
-    return tidy_markdown(html_metadata(raw) + body)
+    _RESULT_META.update(html_metadata(raw))
+    return tidy_markdown(body)
 
 
 # trafilatura prunes the main-content subtree it selected by link density:
@@ -304,6 +313,56 @@ def _drop_repeated_excerpts(tree) -> None:
                 element.drop_tree()
                 break
             ancestor = ancestor.getparent()
+
+
+# A screen-reader-only element (an "sr-only" heading, a route announcer) speaks
+# text the page already shows: a post page wraps its post in an h1 the
+# stylesheet hides ('Name on Site: "the post"') beside the visible post.
+# Without the stylesheet both are on the page and the post is written twice.
+# One whose text repeats the page's visible text, or mostly holds it under a
+# short label, is dropped; one saying what the page shows nowhere else ("opens
+# in a new tab", a table's caption) stays. The document's <title> is page
+# metadata — html_metadata reads it from the raw page — never body text: an
+# extractor fallback reading the whole document wrote it as a first paragraph.
+_SCREEN_READER_CLASSES = frozenset(
+    {"sr-only", "visually-hidden", "visuallyhidden", "screen-reader-text", "screen-reader-only"}
+)
+_REPEAT_MIN_CHARS = 20
+_VISIBLE_TEXT = ".//text()[not(ancestor::script or ancestor::style or ancestor::noscript or ancestor::template)]"
+
+
+def _squashed_text(element) -> str:
+    return " ".join(" ".join(element.xpath(_VISIBLE_TEXT)).split())
+
+
+def _drop_screen_reader_copies(tree) -> None:
+    for title in tree.xpath("/html/head/title"):
+        title.drop_tree()
+    body = tree.find(".//body")
+    if body is None:
+        return
+    # The page's text changes only when an element is dropped: read it once,
+    # and again after each drop, never once per screen-reader element.
+    page = None
+    for element in body.xpath(".//*[@class]"):
+        if not _SCREEN_READER_CLASSES.intersection((element.get("class") or "").split()):
+            continue
+        text = _squashed_text(element)
+        if len(text) < _REPEAT_MIN_CHARS:
+            continue
+        if page is None:
+            page = _squashed_text(body)
+        if _repeats(text, page.replace(text, " ", 1)):
+            element.drop_tree()
+            page = None
+
+
+def _repeats(text: str, rest: str) -> bool:
+    if text in rest:
+        return True
+    pieces = [piece.strip(" \"'“”‘’«»") for piece in re.split(r"[\"“”«»:|]|(?<=[.!?])\s", text)]
+    covered = sum(len(piece) for piece in pieces if len(piece) >= _REPEAT_MIN_CHARS and piece in rest)
+    return covered * 2 >= len(text)
 
 
 # trafilatura keeps an <img> only when its src ends in an image file extension
@@ -789,13 +848,15 @@ def convert_html_full(path: pathlib.Path) -> str:
     else:
         _drop_hidden(tree)
         _drop_repeated_excerpts(tree)
+        _drop_screen_reader_copies(tree)
         source = lxml.html.tostring(tree, encoding="unicode")
     with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8") as visible:
         visible.write(source)
         visible.flush()
         with _quiet_stdout():
             body = MarkItDown().convert(visible.name).text_content or ""
-    return tidy_markdown(html_metadata(raw) + body)
+    _RESULT_META.update(html_metadata(raw))
+    return tidy_markdown(body)
 
 
 def tidy_markdown(markdown: str) -> str:
@@ -1310,17 +1371,85 @@ def convert_csv(path: pathlib.Path) -> str:
         return MarkItDown().convert(str(path)).text_content or ""
 
 
+# A JSON document is written as an outline a reader scans, not the source
+# re-printed: "key: value" lines, two spaces per level of nesting, "- " before
+# an array's items, strings unquoted, null kept as null; an array of two or more
+# flat objects sharing one set of keys is a markdown table. The body is then a
+# rendering of the source, and the meta says so (transformed: json-outline).
+# Text that does not parse is kept as it is, with the gap named.
 def convert_json(path: pathlib.Path) -> str:
+    text = path.read_text(encoding="utf-8", errors="ignore")
     try:
-        value = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
-        pretty = json.dumps(value, indent=2, ensure_ascii=False)
+        value = json.loads(text)
     except Exception as exc:
         # bounded_error, not the raw exception: an OSError here names the
         # document's FULL path, and Go splices this stderr tail into the error
         # a caller reads.
         print(f"JSON parse failed; passing through raw text: {bounded_error(exc, path)}", file=sys.stderr)
-        pretty = path.read_text(encoding="utf-8", errors="ignore")
-    return "```json\n" + pretty.strip() + "\n```\n"
+        return "_Converter gap: JSON could not be parsed; the raw text is shown_\n\n" + text.strip() + "\n"
+    _RESULT_META["transformed"] = "json-outline"
+    return "\n".join(_json_outline(value, "")) + "\n"
+
+
+def _json_scalar(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _json_text(value: object, indent: str) -> str:
+    return _json_scalar(value).replace("\n", "\n" + indent + "  ")
+
+
+def _json_table(value: list) -> list[str] | None:
+    if len(value) < 2 or not all(isinstance(row, dict) and row for row in value):
+        return None
+    keys = list(value[0])
+    if any(list(row) != keys for row in value) or any(
+        isinstance(cell, (dict, list)) for row in value for cell in row.values()
+    ):
+        return None
+
+    def cell(item: object) -> str:
+        return " ".join(_json_scalar(item).split()).replace("|", "\\|")
+
+    lines = ["| " + " | ".join(cell(key) for key in keys) + " |", "| " + " | ".join("---" for _ in keys) + " |"]
+    lines += ["| " + " | ".join(cell(row[key]) for key in keys) + " |" for row in value]
+    return lines
+
+
+def _json_outline(value: object, indent: str) -> list[str]:
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)) and item:
+                lines.append(f"{indent}{key}:")
+                lines += _json_outline(item, indent + "  ")
+            elif isinstance(item, (dict, list)):
+                lines.append(f"{indent}{key}: {'{}' if isinstance(item, dict) else '[]'}")
+            else:
+                lines.append(f"{indent}{key}: {_json_text(item, indent)}")
+        return lines or [indent + "{}"]
+    if isinstance(value, list):
+        table = _json_table(value)
+        if table is not None:
+            return [indent + line for line in table]
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)) and item:
+                nested = _json_outline(item, indent + "  ")
+                lines.append(indent + "- " + nested[0][len(indent) + 2 :])
+                lines += nested[1:]
+            elif isinstance(item, (dict, list)):
+                lines.append(f"{indent}- {'{}' if isinstance(item, dict) else '[]'}")
+            else:
+                lines.append(f"{indent}- {_json_text(item, indent)}")
+        return lines or [indent + "[]"]
+    return [indent + _json_text(value, indent)]
 
 
 def _flag(name: str) -> bool:
@@ -2360,6 +2489,7 @@ def convert(request: dict) -> dict:
         converter = _CONVERTERS.get(kind)
         if converter is None:
             raise ValueError(f"unsupported conversion kind: {kind!r}")
+        _RESULT_META.clear()
         markdown, features = converter(path, request)
     except Exception as exc:
         # A crashed pipeline is a FAILED conversion, never an empty document.
@@ -2379,7 +2509,10 @@ def convert(request: dict) -> dict:
             "error": summary,
         }
     markdown = tidy_markdown(markdown)
-    return {"ok": True, "markdown": markdown, "kind": kind, "features": features}
+    response = {"ok": True, "markdown": markdown, "kind": kind, "features": features}
+    if _RESULT_META:
+        response["meta"] = dict(_RESULT_META)
+    return response
 
 
 class DecompressionBomb(ValueError):

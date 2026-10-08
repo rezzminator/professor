@@ -45,7 +45,7 @@ func serverInstructions(searchAvailable, remote bool) string {
 		routes = append(routes, `search the web for a topic → harvester_search_web`)
 	}
 	text := strings.Join(routes, "; ") + "." +
-		` Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
+		` Answers are text, one "=== [n/N]" block per item: "No … found" is nothing found, an error is a failed lookup.`
 	if !searchAvailable {
 		text += " Web search is not configured on this server — set search.searxngURL or search.braveApiKey in " +
 			config.HarvesterFileName + " to enable web search."

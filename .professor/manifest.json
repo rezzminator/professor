@@ -97,7 +97,7 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "41e531546a363ea625726f908e7532e705c45c6dfe4fd443684d65285cead304",
-    ".claude/agents/gitter.md": "c220795d1265016ebbaf28d5f84dd4437d79b7641be3fe028d6acb84c237aa76",
+    ".claude/agents/gitter.md": "646096967d1bdd8cf461863e5feceefc22c3f656d6e2a787af1e37eeed7100c9",
     ".claude/agents/releaser.md": "5d892c434d1380c97e688be24feb67b0ebe246ba89e0dd4cbce2b8efc24f7b95",
     ".claude/codex-build.json": "363b2f38e38d577d2c0ead1d0ef49c6114631c6f60d7b632d18420ea92ca9ee1",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
@@ -118,7 +118,7 @@
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "333d7b9833b8f4c7acb40cf1293ad669c0581a075d89e723062a56d59b14c475",
-    "CLAUDE.md": "947ad7ad58ecb08a88f845a8bf724f88a8481b0d3033cbdbb781670c94e71eb1",
+    "CLAUDE.md": "0287119ecfd3de60018b0b24b15235553dbb611af327c87a083db632a785a98c",
     "docs/commands/pcm/references/audit-scopes.md": "3b60a73eaef4477265a18a8e125046c4a188b5b2bad7b48b2d1c0320fbb5d63a",
     "docs/commands/pcm/references/refresh.md": "a0a9aac0a6fd5ba51a87459b041d9af5460b520db2d7cf738ae2496bdc4df42c",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",

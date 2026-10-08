@@ -53,6 +53,7 @@ func TestLiveFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		indexed     string
+		windowName  string
 		paneTitle   string
 		sessionName string
 		lastPrompt  string
@@ -67,6 +68,47 @@ func TestLiveFallback(t *testing.T) {
 			lastPrompt:  "last",
 			isCCSock:    true,
 			want:        "indexed",
+		},
+		{
+			name:        "indexed transcript name wins over the launch window name",
+			indexed:     "indexed",
+			windowName:  "GATEWAY",
+			paneTitle:   "✳ GATEWAY",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "indexed",
+		},
+		{
+			name:        "Claude socket before its first prompt uses its launch window name",
+			windowName:  "GATEWAY",
+			paneTitle:   "✳ Claude Code",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "GATEWAY",
+		},
+		{
+			name:        "placeholder chat window falls through to the pane title",
+			windowName:  "chat",
+			paneTitle:   "operator title",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "operator title",
+		},
+		{
+			name:        "engine short window falls through to the pane title",
+			windowName:  "Claude",
+			paneTitle:   "operator title",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "operator title",
+		},
+		{
+			name:        "window named after its socket falls through to the last prompt",
+			windowName:  "cc-1-2-3",
+			sessionName: "cc-1-2-3",
+			lastPrompt:  "last real prompt",
+			isCCSock:    true,
+			want:        "last real prompt",
 		},
 		{
 			name:       "Claude socket uses pane title",
@@ -114,6 +156,7 @@ func TestLiveFallback(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got := LiveFallback(
 				test.indexed,
+				test.windowName,
 				test.paneTitle,
 				test.sessionName,
 				test.lastPrompt,

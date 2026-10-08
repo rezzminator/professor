@@ -602,7 +602,7 @@ func (current *composer) liveClaudeRow(
 		transcript.FirstPrompt,
 	)
 	row.Name = naming.LiveFallback(
-		indexed,
+		indexed, pane.WindowName,
 		pane.PaneTitle,
 		pane.SessionName,
 		transcript.LastPrompt,
@@ -654,7 +654,7 @@ func (current *composer) splitRow(
 			transcript.FirstPrompt,
 		)
 		name := naming.LiveFallback(
-			indexed,
+			indexed, "",
 			pane.PaneTitle,
 			pane.SessionName,
 			transcript.LastPrompt,
@@ -1102,7 +1102,9 @@ func defaultEligible(row Row) bool {
 	// renamed) caught live in a pane is still background work, not a chat,
 	// exactly like its resume-shape twin — the exemption is for genuinely
 	// empty content, never for who started the conversation.
-	if row.Kind == LiveCodex {
+	// A live Claude seat before its first prompt (a `pfm chat branch` fork)
+	// has a crumb but no transcript yet: the same exemption, the same BG half.
+	if row.Kind == LiveCodex || row.Kind == LiveClaude {
 		return !row.BG
 	}
 	// A LIVE OpenCode row is exempt for the same reason and one stronger: a

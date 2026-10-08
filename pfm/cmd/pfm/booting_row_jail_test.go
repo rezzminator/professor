@@ -111,6 +111,60 @@ func TestPromptlessNamedChatResolvesByItsLaunchName(t *testing.T) {
 	}
 }
 
+// A `pfm chat branch` fork is the next state: Claude has written its crumb
+// but, until its first prompt, no transcript. The fork stays a default-view
+// row under its launch name, and that name resolves to its session id, so
+// `pfm chat open NAME` and chat_resolve reach it.
+func TestPromptlessForkListsAndResolvesByItsLaunchName(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newKillCLIJail(t)
+	const forkID = "3d4d2b8a-6bf0-4200-9461-05a1dadcd4af"
+	socket := "cc-" + strconv.FormatInt(time.Now().Unix(), 10) +
+		"-" + strconv.Itoa(os.Getpid()) + "-18"
+	panePID := startNamedBootingPane(t, socket, "GATEWAY")
+	runTmuxOutput(t, socket, "select-pane", "-T", "✳ Claude Code")
+	writeFakeProcess(t, jail.procRoot, fakeProcessSpec{
+		pid:       92018,
+		parentPID: panePID,
+		comm:      "claude",
+		cmdline:   []string{"/opt/claude"},
+	})
+	paneID := strings.TrimSpace(runTmuxOutput(t, socket, "list-panes", "-F", "#{pane_id}"))
+	crumb := filepath.Join(jail.root, "sid", socket+"."+paneID)
+	if err := os.WriteFile(crumb, []byte("/nonexistent/fork/"+forkID+".jsonl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"ls", "--tsv"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("pfm ls --tsv code=%d stderr=%s", code, stderr.String())
+	}
+	listed := false
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) == 11 && fields[10] == socket {
+			if fields[0] != "live-claude" || fields[1] != forkID || fields[4] != "GATEWAY" {
+				t.Fatalf("promptless fork row = %q, want live-claude %s named GATEWAY", line, forkID)
+			}
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatalf("promptless fork on %s is missing from the default pfm ls:\n%s", socket, stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"chat", "resolve", "GATEWAY"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("resolve promptless fork rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if got, want := strings.TrimSpace(stdout.String()), socket+"\t"+socket+"\t"+forkID; got != want {
+		t.Fatalf("resolved promptless fork = %q, want %q", got, want)
+	}
+}
+
 func startBootingPane(t *testing.T, socket string) int {
 	return startNamedBootingPane(t, socket, socket)
 }

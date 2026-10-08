@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // KillPrefix is the label prefix that kills a chat from the default listing.
@@ -92,11 +94,18 @@ func DisplayName(customTitle, aiTitle, firstPrompt string) string {
 // chat by it — two unnamed chats are not one chat.
 const Unnamed = "(unnamed)"
 
+// PlaceholderWindow is the tmux window name pfm gives a seat launched without
+// a name; like an engine's short name, it names no chat.
+const PlaceholderWindow = "chat"
+
 // LiveFallback applies the live-row naming chain. Claude sockets own a
-// generated tmux session name, so their meaningful live fallback is the pane
+// generated tmux session name, so their meaningful live fallbacks are the
+// window name pfm launched the seat under (a `pfm chat branch` fork has no
+// transcript, so no indexed name, until its first prompt), then the pane
 // title; other socket types use their tmux session name.
 func LiveFallback(
 	indexed string,
+	windowName string,
 	paneTitle string,
 	sessionName string,
 	lastPrompt string,
@@ -106,6 +115,9 @@ func LiveFallback(
 		return indexed
 	}
 	if isCCSock {
+		if launchWindowName(windowName, sessionName) {
+			return windowName
+		}
 		if paneTitle != "" && paneTitle != "Claude Code" {
 			return paneTitle
 		}
@@ -116,6 +128,21 @@ func LiveFallback(
 		return lastPrompt
 	}
 	return Unnamed
+}
+
+// launchWindowName reports whether a window name is one a seat was launched
+// under: not empty, not the placeholder, not an engine's short name, and not
+// the generated session name.
+func launchWindowName(windowName, sessionName string) bool {
+	if windowName == "" || windowName == PlaceholderWindow || windowName == sessionName {
+		return false
+	}
+	for _, id := range pfmengine.All() {
+		if descriptor, err := pfmengine.Lookup(id); err == nil && descriptor.Short == windowName {
+			return false
+		}
+	}
+	return true
 }
 
 // IsJunkPrompt reports whether prompt starts with one of the injected-record

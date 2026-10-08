@@ -779,7 +779,7 @@ func WindowName(name string) string {
 	}
 	cleaned := strings.Join(strings.Fields(builder.String()), " ")
 	if cleaned == "" {
-		return "chat"
+		return naming.PlaceholderWindow
 	}
 	return naming.ClipRunes(cleaned, 40)
 }

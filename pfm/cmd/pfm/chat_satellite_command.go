@@ -395,13 +395,19 @@ func runChatBranch(
 		}
 		parentRecorded = err == nil
 	}
+	// The launch record, else the live seat's process: never the primary
+	// as a guess when the machine offers a choice of accounts.
 	requestedAccount := *account
-	if requestedAccount == 0 {
-		if engine == pfmengine.Claude && parentRecorded {
-			requestedAccount = parentLaunch.Account
-		} else if engine == pfmengine.Codex && parentFound {
-			requestedAccount = parent.Account
-		}
+	if requestedAccount == 0 && engine == pfmengine.Claude && parentRecorded {
+		requestedAccount = parentLaunch.Account
+	}
+	if requestedAccount == 0 && parentFound {
+		requestedAccount = parent.Account
+	}
+	if requestedAccount == 0 && runtime.Config.AccountChoices(engine) > 1 {
+		fmt.Fprintf(stderr, "pfm chat branch: the account of session %s could not be resolved "+
+			"(no launch record, no live seat naming it); pass --account N\n", *id)
+		return 1
 	}
 	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
 	if primaryErr != nil {
@@ -412,14 +418,6 @@ func runChatBranch(
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
 		return 1
-	}
-	if *account == 0 && ((engine == pfmengine.Claude && !parentRecorded) ||
-		(engine == pfmengine.Codex && (!parentFound || parent.Account == 0))) {
-		fmt.Fprintf(
-			stderr,
-			"pfm chat branch: parent account for session %s could not be resolved; forking on primary account %d\n",
-			transcript.Truncate(*id, 8), selectedAccount,
-		)
 	}
 	binary := runtime.Config.Claude.Binary
 	if engine == pfmengine.Codex {

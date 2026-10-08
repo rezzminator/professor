@@ -809,6 +809,8 @@ Each row is one **session kind** crossed with the operations that touch it. This
 | `chat end` kills only the resolved chat server | JAIL+tmux | `chat_command.go` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
 | `chat find`, `save`, `load`, `branch`, `ls`, and `history` are all native Go | JAIL | `chat_satellite_command.go`, `chat_satellite_command_test.go` | |
 | `chat branch [name]` creates a real detached Claude/Codex fork on an immutable socket, preserves caller layout/focus, names Codex through its rename UI, defaults to `<parent>-branch`, and is explicitly reapable while untouched | JAIL+tmux | `branch_jail_test.go`, `internal/action/headless_fork_test.go`, `internal/reap/reap_test.go`, `reap_jail_test.go` | |
+| a promptless `chat branch` fork (crumb written, transcript not yet) is a default-view live row named by its launch window and resolves by that name; a live Claude seat is exempt from the emptiness test, a background one is not | JAIL+tmux | `internal/naming/naming.go` (`LiveFallback`), `internal/compose/compose.go` (`defaultEligible`) | `cmd/pfm/booting_row_jail_test.go: TestPromptlessForkListsAndResolvesByItsLaunchName`, `internal/naming/naming_test.go: TestLiveFallback`, `internal/compose/eligible_test.go: TestDefaultEligibleSuppressesOnlyAnUnusedResumableClaudeRow` | |
+| `chat branch` takes `--account`, else the parent's launch record, else its live seat's account; with none and more than one configured account it refuses naming the session, with one it lands there | JAIL+tmux | `cmd/pfm/chat_satellite_command.go` (`runChatBranch`), `internal/config/accounts.go` (`AccountChoices`) | `cmd/pfm/chat_branch_inherit_test.go: TestChatBranchLiveParentAccountWithoutALaunchRecord, TestChatBranchUnresolvableParentAccountRefuses` | |
 | a bare fleet launch execs its tmux client so harness exit also ends the owning terminal | JAIL+PTY | `internal/installer/shim/shim_test.go`, `internal/installer/assets/shim/pfm.zsh` | |
 | `chat resolve <target>` prints immutable socket, tmux session and chat id | JAIL | `chat_command.go` | B1 | |
 | `chat reminder set --every <interval> --prompt <text> [chat]` stores a recurring alarm and prints its id alone; `--every` below 1m, an unreadable interval, a blank prompt or two chats → rc 2; an unknown chat → rc 4; no chat and no caller identity → rc 1 | JAIL | `internal/reminder/command.go`, `internal/reminder/interval_test.go`, `cmd/pfm/chat_reminder_command_test.go` | | |
@@ -1019,7 +1021,7 @@ The Go action policy owns fresh Claude launches. The binary executes selected ac
 20. Open gate for a live chat whose birth account differs from primary.
 21. Actual Claude reboot-in-place and `--then` delivery; E1 exercises pfm's side against the mock.
 22. Trust prompt on a fresh config-dir and cwd pair.
-23. Actual Claude `--fork-session` implementation; E1.22 covers pfm's branch path with the mock.
+23. Actual Claude `--fork-session` implementation; E1.22 covers pfm's branch path with the mock. The mock seeds the fork's transcript at launch, while Claude writes it at the fork's first prompt: `cmd/pfm/booting_row_jail_test.go` (`TestPromptlessForkListsAndResolvesByItsLaunchName`) plays that promptless shape.
 24. `pfm chat new NAME` teammate spawn and immutable socket identity in actual Claude.
 25. `⚡1h` badge read from an actual Claude launch record.
 26. Actual Claude composer behavior at the literal and bracketed-paste boundary; auto-file fixtures cover pfm's side.

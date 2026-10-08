@@ -178,7 +178,7 @@ Each door builds a `claudelaunch.Request` — account, purpose, door verbs, per-
 
 ### HeadlessFork
 
-`pfm chat branch`. Verbs: `--resume {id} --fork-session --name {name}`; model from the running chat. It records the launch once the fork's new session id resolves.
+`pfm chat branch`. Verbs: `--resume {id} --fork-session --name {name}`; model from the running chat. Its account is `--account`, else the parent's launch record, else the account its live seat runs on; with none of them and more than one configured account it refuses and asks for `--account`. It records the launch once the fork's new session id resolves. Claude writes the fork's transcript at its first prompt, so until then the fork is listed by its crumb under the window name it was launched with.
 
 ### Synthesize
 

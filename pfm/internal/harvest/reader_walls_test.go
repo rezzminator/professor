@@ -65,7 +65,7 @@ func TestReaderPagesPassTheWallCheck(t *testing.T) {
 			source:   paywallURL,
 			origin:   "<html><body><p>Access to this page has been denied.</p></body></html>",
 			markdown: readerWallFixture(t, "reader-paywalled.md"),
-			partial:  "its wall check could not run (the reader answered HTTP 503)",
+			partial:  "its wall check could not run (the page's HTML from the jina reader: it answered HTTP 503)",
 		},
 		{
 			name:       "a reader answering the HTML ask with its Markdown",
@@ -73,7 +73,8 @@ func TestReaderPagesPassTheWallCheck(t *testing.T) {
 			origin:     "<html><body><p>Access to this page has been denied.</p></body></html>",
 			markdown:   readerWallFixture(t, "reader-paywalled.md"),
 			readerHTML: readerWallFixture(t, "reader-paywalled.md"),
-			partial:    "its wall check could not run (the reader answered with Markdown in place of the page's HTML)",
+			partial: "its wall check could not run (the page's HTML from the jina reader: it answered with Markdown in place of " +
+				"the page's HTML)",
 		},
 		{
 			name:      "a reader answering the HTML ask with an empty body",
@@ -81,7 +82,7 @@ func TestReaderPagesPassTheWallCheck(t *testing.T) {
 			origin:    "<html><body><p>Access to this page has been denied.</p></body></html>",
 			markdown:  readerWallFixture(t, "reader-paywalled.md"),
 			emptyHTML: true,
-			partial:   "its wall check could not run (the reader answered with an empty body)",
+			partial:   "its wall check could not run (the page's HTML from the jina reader: it answered with an empty body)",
 		},
 		{
 			name:       "a reader's HTML with whitespace before its byte-order mark",
@@ -368,5 +369,57 @@ func TestSignUpWallFailuresNameTheirDecisiveKind(t *testing.T) {
 				t.Fatalf("the failure does not name the login wall: %q", result.Error)
 			}
 		})
+	}
+}
+
+// TestReaderCheckFailureNamesTheReaderAsked: the checks always ask the jina
+// reader for the page's HTML, whichever rung stored the page. When defuddle
+// stored it (HTTP 200) and jina refused both asks (HTTP 403), the page's
+// http_status stays the stored page's 200, and its gaps name the jina reader as
+// the one that answered 403, never "the reader", which would read as the
+// defuddle reader that delivered the page.
+func TestReaderCheckFailureNamesTheReaderAsked(t *testing.T) {
+	t.Parallel()
+	const source = "https://www.linkedin.com/company/microsoft"
+	markdown := readerWallFixture(t, "reader-loginwall.md")
+	origin := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "defuddle.md" {
+			return response(request, http.StatusOK, "text/markdown; charset=utf-8", markdown), nil
+		}
+		return response(request, http.StatusForbidden, "text/html; charset=UTF-8",
+			"<html><body><p>Access to this page has been denied.</p></body></html>"), nil
+	})
+	jina := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, http.StatusForbidden, "text/plain", "forbidden"), nil
+	})
+	h := mustNew(t, Options{
+		CacheDir: t.TempDir(),
+		Client:   &http.Client{Transport: origin},
+		Chrome:   &http.Client{Transport: origin},
+		Jina:     &http.Client{Transport: jina},
+		OA:       &http.Client{Transport: origin},
+		Converter: &browserSpyConverter{convertFn: func(context.Context, string, string, []byte) (string, error) {
+			return "Access to this page has been denied.", nil
+		}},
+		BrowserRung: browserOff(),
+		Clock:       newPacingClock(),
+	})
+	result := h.FetchWithOptions(context.Background(), source, FetchOptions{Refresh: true})
+	if result.Error != "" || result.Method != "defuddle-reader" {
+		t.Fatalf("the defuddle reader's page was not stored (method %q): %s", result.Method, result.Error)
+	}
+	if result.HTTPStatus != http.StatusOK {
+		t.Fatalf("http_status is %d, want the stored page's %d", result.HTTPStatus, http.StatusOK)
+	}
+	for _, want := range []string{
+		"its wall check could not run (the page's HTML from the jina reader: it answered HTTP 403)",
+		"the page's HTML from the jina reader could not be read (it answered HTTP 403)",
+	} {
+		if !strings.Contains(result.Partial, want) {
+			t.Fatalf("the gaps do not name the jina reader as the 403's source; want %q in %q", want, result.Partial)
+		}
+	}
+	if strings.Contains(result.Partial, "the reader answered") {
+		t.Fatalf("the gaps blame an unnamed reader, read as the defuddle reader that answered 200: %q", result.Partial)
 	}
 }

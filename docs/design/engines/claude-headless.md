@@ -80,13 +80,13 @@ See [Harness-prompt drift probe](#harness-prompt-drift-probe). `pfm doctor` also
 `pfm doctor` proves Claude Code's own built-in system prompt has not changed under the fleet since it was last reviewed.
 
 - **Baselines.** `pfm/harness-prompts/claude/baselines/` holds one reviewed capture per model — `harness-original-v{cli}.md` (Sonnet) and `harness-opus-v{cli}.md` (Opus) — each with a `.model` provenance file and a `.sha256` pin, captured in print mode with dynamic sections excluded (`pfm/harness-prompts/README.md:65-84`). The probe reads them from the repo, `{clone}/pfm/harness-prompts/claude/baselines/`; nothing is staged. The checked aliases are `HarnessPromptModels = {{"sonnet", "harness-original"}, {"opus", "harness-opus"}}` (`pfm/internal/doctor/harness_prompt_baselines.go:24`).
-- **Capture.** A local sink on `127.0.0.1:0` answers every request with HTTP 400 and keeps the first `/messages` body (`harness_prompt.go:356`, `:540-554`). The probe runs `WithoutAccount`, Native, a 20-second timeout, stdin `/dev/null`, in a throwaway config dir (`:373`, `:418-434`):
+- **Capture.** A local sink on `127.0.0.1:0` answers every request with HTTP 400 and keeps the first `/messages` body (`harness_prompt.go:396`, `:602-617`). The probe runs `WithoutAccount`, Native, a 20-second timeout, stdin `/dev/null`, in a throwaway config dir that is also its cwd (`:369`, `:413-428`, `:472`): the CLI loads `.claude/settings.json` in its cwd as project settings, and their `env` beats the probe environment's sink URL — run from `~`, that file is the user's own settings.
 
   ```text
   claude -p --model <alias> x --output-format json --strict-mcp-config --mcp-config {"mcpServers":{}} --max-turns 1 --exclude-dynamic-system-prompt-sections --settings {"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}
   ```
 
-- **Probe environment** (`claudelaunch.ProbeEnv`, `harness_prompt.go:386,432`): strips the registry's hygiene names; pins `ANTHROPIC_BASE_URL=<sink>`, `ANTHROPIC_API_KEY=pfm-doctor-sink`, `ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0`, `FORCE_PROMPT_CACHING_5M=1`, `CLAUDE_CONFIG_DIR=<tmp>`.
+- **Probe environment** (`claudelaunch.ProbeEnv`, `harness_prompt.go:436,482`): strips the registry's hygiene names; pins `ANTHROPIC_BASE_URL=<sink>`, `ANTHROPIC_API_KEY=pfm-doctor-sink`, `ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0`, `FORCE_PROMPT_CACHING_5M=1`, `CLAUDE_CONFIG_DIR=<tmp>`.
 - **Compare.** The captured system blocks are joined, normalized (the CLI version, model ids and names, and the environment identity and cutoff lines are masked, `:161-184`), hashed, and compared with the pinned SHA-256 (`:202-205`).
 
 | Verdict | Meaning |

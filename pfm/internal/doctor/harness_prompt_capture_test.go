@@ -106,6 +106,46 @@ func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 	}
 }
 
+// TestHarnessCaptureNeverLoadsTheCallersProjectSettings pins the probe's own
+// cwd: the CLI loads `.claude/settings.json` in its cwd as project settings,
+// and their env block beats the probe's process env — run from a home whose
+// user settings set ANTHROPIC_BASE_URL, the dummy key went to that URL and the
+// capture failed with a 401. The fake CLI reports what a real one would load.
+func TestHarnessCaptureNeverLoadsTheCallersProjectSettings(t *testing.T) {
+	shortenHarnessCaptureSinkGrace(t)
+	caller := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(caller, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:1"}}`
+	if err := os.WriteFile(filepath.Join(caller, ".claude", "settings.json"), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(caller)
+	record := filepath.Join(t.TempDir(), "project-settings-seen.txt")
+	t.Setenv("PFM_TEST_HARNESS_PROJECT_SETTINGS_RECORD", record)
+	binary := writeFakeHarnessClaude(
+		t,
+		"if [ -e .claude/settings.json ]; then seen=loaded; else seen=none; fi\n"+
+			"printf '%s %s' \"$seen\" \"$(pwd -P)\" > \"$PFM_TEST_HARNESS_PROJECT_SETTINGS_RECORD\"\nexit 1\n",
+	)
+	machine := config.Config{}
+	machine.Claude.Binary = binary
+
+	if _, err := captureHarnessPrompt(t.Context(), t.TempDir(), machine, "sonnet", ""); err == nil {
+		t.Fatal("fake CLI never reaches the sink, want a capture error")
+	}
+
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("fake CLI did not record its cwd: %v", err)
+	}
+	seen, cwd, _ := strings.Cut(string(raw), " ")
+	if seen != "none" {
+		t.Fatalf("capture ran in %q and its project settings would load, want a cwd of its own", cwd)
+	}
+}
+
 func TestHarnessCaptureUsesRegistryProbeEnvironment(t *testing.T) {
 	shortenHarnessCaptureSinkGrace(t)
 	path := filepath.Join(t.TempDir(), "environment")

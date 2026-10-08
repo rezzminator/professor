@@ -373,7 +373,9 @@ func harnessPromptDetail(
 // saw. The run launches under a throwaway CLAUDE_CONFIG_DIR, created here and
 // removed before return (change B): the documented Keychain scoping means
 // that directory is always logged out, so the dummy ANTHROPIC_API_KEY is the
-// only credential the CLI can find.
+// only credential the CLI can find. That directory is also the run's cwd: the
+// CLI loads `.claude/settings.json` in its cwd as project settings, whose env
+// beats ProbeEnv's sink URL — from `~`, the user's own settings file.
 func captureHarnessPrompt(
 	ctx context.Context,
 	home string,
@@ -467,7 +469,7 @@ func captureHarnessPromptWithDeps(
 	result, runErr := headlessrun.Run(ctx, headlessrun.Request{
 		Config: config.Config{Claude: config.Claude{Binary: binary}},
 		Engine: pfmengine.Claude, Model: model, Native: true, WithoutAccount: true,
-		Timeout: 20 * time.Second,
+		CWD: configDir, Timeout: 20 * time.Second,
 		// "x" travels as the CLI's own positional prompt argument, never on
 		// stdin — matching the documented `claude -p x ...` invocation
 		// exactly. Stdin is pinned to /dev/null so the CLI never waits on a

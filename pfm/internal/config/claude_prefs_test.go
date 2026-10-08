@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,55 @@ func TestClaudeLaunchPreferencesMergeAndValidateByScope(t *testing.T) {
 			t.Fatalf("invalid %s error = %v", tc.want, err)
 		} else if strings.Contains(tc.want, "autoCompactWindow") && err.Error() != "config "+path+": "+tc.want {
 			t.Fatalf("invalid %s error = %v, want exact scope and path", tc.want, err)
+		}
+	}
+}
+
+func TestClaudePluginCheckoutRoot(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), FileName)
+	for _, tc := range []struct {
+		content, want, err string
+		source             Source
+	}{
+		{`{"version":2,"claude":{"pluginCheckoutRoot":"~/src/plugins"}}`, filepath.Join(home, "src", "plugins"), "", SourceFile},
+		{`{"version":2,"claude":{"pluginCheckoutRoot":"/opt/plugins/"}}`, "/opt/plugins", "", SourceFile},
+		{`{"version":2,"claude":{"pluginCheckoutRoot":null}}`, "", "", SourceDefault},
+		{`{"version":2}`, "", "", SourceDefault},
+		{`{"version":2,"claude":{"pluginCheckoutRoot":"src"}}`, "", "claude.pluginCheckoutRoot must be absolute or start with ~/ or $HOME/, got \"src\"", ""},
+		{
+			`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"pluginCheckoutRoot":"/opt/plugins"}}]}`, "",
+			"accounts[0].pluginCheckoutRoot is machine-wide: set claude.pluginCheckoutRoot", "",
+		},
+	} {
+		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, home, nil)
+		if tc.err != "" {
+			if err == nil || err.Error() != "config "+path+": "+tc.err {
+				t.Fatalf("%s error = %v, want %q", tc.content, err, tc.err)
+			}
+			continue
+		}
+		if err != nil || loaded.Claude.PluginCheckoutRoot != tc.want ||
+			loaded.Source(KeyClaudePluginCheckoutRoot) != tc.source {
+			t.Fatalf("%s root=%q source=%q err=%v, want %q %q", tc.content, loaded.Claude.PluginCheckoutRoot,
+				loaded.Source(KeyClaudePluginCheckoutRoot), err, tc.want, tc.source)
+		}
+		encoded, err := Marshal(loaded, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value struct {
+			Claude map[string]any `json:"claude"`
+		}
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			t.Fatal(err)
+		}
+		if got, found := value.Claude["pluginCheckoutRoot"]; !found || (tc.want == "" && got != nil) ||
+			(tc.want != "" && got != tc.want) {
+			t.Fatalf("%s marshals pluginCheckoutRoot=%v (found %v), want %q", tc.content, got, found, tc.want)
 		}
 	}
 }

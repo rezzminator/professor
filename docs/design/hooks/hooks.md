@@ -153,12 +153,13 @@ An absent file or a file without pfm-owned keys produces no row. An unreadable f
 
 ### Codex hooks.json
 
-The Codex probe (`probeCodexHooks`, `pfm/internal/installer/hook_probe.go`) opens every configured Codex home's `hooks.json`, drawn from the machine config's Codex accounts, named `codex[{id}]`, de-duplicated by physical path. Each row keeps the prefix `doctor: hook {target} {file} {event} {name}`. It expects one handler per account, `resume-unkill` (`SessionStart`, matcher `resume`), and reads files only: it never runs Codex. It prints these states:
+The Codex probe (`probeCodexHooks`, `pfm/internal/installer/hook_probe.go`) opens every configured Codex home's `hooks.json`, drawn from the machine config's Codex accounts, named `codex[{id}]`, de-duplicated by physical path. Each row keeps the prefix `doctor: hook {target} {file} {event} {name}`. It expects one handler per account, `resume-unkill` (`SessionStart`, matcher `resume`), and validates the source file before querying native `hooks/list` through Codex app-server. This read-only query starts no model turn and writes no configuration. A matching receipt alone cannot prove current trust. It prints these states:
 
 | State | When | Prints | Tally |
 | --- | --- | --- | --- |
 | MISSING | `hooks.json` is absent, or holds no `resume-unkill` handler under a `SessionStart` entry with matcher `resume` | `… MISSING — run pfm install --yes` | failure |
-| UNTRUSTED | The handler is present but no hook-trust receipt (`{codex home}/.professor-hook-trust.json`) records its Codex trust | `… UNTRUSTED no Codex trust is recorded for the hook, so Codex may refuse to run it — run pfm install --yes` | warning |
+| UNTRUSTED | Missing receipt, disabled handler, changed fingerprint, or native trust not trusted | `… UNTRUSTED {cause} — run pfm install --yes` | warning |
+| NATIVE-TRUST-UNKNOWN | Native `hooks/list` could not run | `… NATIVE-TRUST-UNKNOWN {cause}` | warning |
 | STALE | A retired or unknown pfm hook is registered; the Codex-only retired shapes (the old `clear-kill` `SessionStart` hook and the retired appendix hook) are flagged only under `SessionStart` | `… STALE {name} — run pfm install` | failure |
 | UNREADABLE | The file or the ownership ledger exists but cannot be read or parsed, is a dangling symlink, or its `hooks` value has the wrong shape (a non-object `hooks`, a non-array event, a non-object entry, a non-string `matcher`, a non-array `hooks` list, a non-object hook, a missing or empty `command`) | one line per file, no per-hook rows: `doctor: hook {target} {file} UNREADABLE error={cause}`; for the ledger, target `ownership` | failure |
 | DRIFT (ledger) | The ledger owns an entry the file lacks, or one the installer no longer expects | `… DRIFT ledger ownership={n} file={m}`, `m` also `absent` or `not-expected` | warning |

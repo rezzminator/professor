@@ -35,6 +35,7 @@ type ProcFS interface {
 
 // ProcessIdentity is process metadata available without reading argv.
 type ProcessIdentity struct {
+	Zombie       bool
 	EffectiveUID uint32
 	Command      string
 }

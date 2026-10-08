@@ -11,6 +11,11 @@ const (
 	defaultAskLunaModel = "gpt-5.6-luna"
 )
 
+// KeyClaudePluginCheckoutRoot names the directory holding one checkout per
+// Claude plugin pfm install ensures ({root}/{plugin}/plugins/{plugin}): an
+// -alpha build installs each plugin from a copy of its checkout there.
+const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
+
 // KeyDefault describes a machine-config leaf and the value shown by the
 // tracked example when the key is unset. Roster arrays are intentionally
 // absent: accounts are discovered from the local machine.
@@ -39,6 +44,7 @@ func Keys() []KeyDefault {
 		{"claude.requireManagedCleanup", true},
 		{"claude.maxSubagentSpawnDepth", DefaultSubagentSpawnDepth},
 		{"claude.maxConcurrentSubagents", nil},
+		{KeyClaudePluginCheckoutRoot, nil},
 		{"codex.yolo", true},
 		{"codex.binary", pfmengine.MustLookup(pfmengine.Codex).Binary},
 		{"opencode.binary", pfmengine.MustLookup(pfmengine.OpenCode).Binary},

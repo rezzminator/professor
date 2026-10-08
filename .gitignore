@@ -31,6 +31,7 @@ node_modules/
 # fence), `templates/global/agents/*.md`.
 /AGENTS.md
 /pfm/AGENTS.md
+/plugins/AGENTS.md
 .codex/agents/
 .codex/skills/
 .opencode/agent/

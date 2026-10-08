@@ -58,13 +58,18 @@ func OCRLangFrom(ctx context.Context) string {
 }
 
 // convertedDocument is a converter's document text through pageText, flagged
-// partial when OCR read it as Latin only because it names no language.
+// partial for converter-reported losses and uncertain OCR language.
 func convertedDocument(converted string) string {
 	text := pageText(converted)
+	var gaps []string
 	for line := range strings.Lines(text) {
+		line = strings.TrimSpace(line)
+		if gap, ok := strings.CutPrefix(line, "_Converter gap: "); ok && strings.HasSuffix(gap, "_") {
+			gaps = append(gaps, strings.TrimSuffix(gap, "_"))
+		}
 		if strings.HasPrefix(line, converterNotePrefix) && strings.Contains(line, ocrAssumedNote) {
-			return withPartial(text, ocrAssumedPartial)
+			gaps = append(gaps, ocrAssumedPartial)
 		}
 	}
-	return text
+	return withPartial(text, strings.Join(gaps, "; "))
 }

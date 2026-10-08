@@ -18,7 +18,8 @@
     "cleanupPeriodDays": 36500,
     "requireManagedCleanup": true,
     "maxSubagentSpawnDepth": 8,
-    "maxConcurrentSubagents": null
+    "maxConcurrentSubagents": null,
+    "pluginCheckoutRoot": null
   },
   "codex": {
     "yolo": true,

@@ -250,6 +250,8 @@ func newInstallerOptions(
 		options.MCPConfigPath = runtime.Config.Path
 		options.OpenCodeConfigPath = installer.OpenCodeConfigPath(runtime.Paths.Home)
 		options.ClaudeBinary = runtime.Config.Claude.Binary
+		options.Version = runtime.Version
+		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
 		options.CodexBinary = runtime.Config.Codex.Binary
 		if options.CodexBinary == "" {
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary

@@ -55,6 +55,7 @@ func TestCodexHookAPIFixture(t *testing.T) {
 				map[string]any{
 					"key":         fmt.Sprintf("%s:session_start:%d:%d", source, groupIndex, hookIndex),
 					"command":     hook.Command,
+					"handlerType": "command",
 					"matcher":     group.Matcher,
 					"sourcePath":  source,
 					"source":      "user",

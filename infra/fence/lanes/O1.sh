@@ -457,4 +457,27 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "price table summary, columns and --check report; conflicting flags exit 2 with a named error"
 fi
 
+# ─── O1.15 — model-cost refuses before any fetch ──────────────────────────
+
+beat O1.15-model-cost
+spends none
+bad=""
+help_out="$(pfm model-cost --help 2>&1)"; help_rc=$?
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--all' <<<"$help_out"; then
+  bad="$bad pfm model-cost --help lacks its catalog flag (exit $help_rc): $(one_line "$help_out");"
+fi
+usage_out="$(pfm model-cost --all gpt-6.1-sol 2>&1)"; usage_rc=$?
+if [ "$usage_rc" -ne 2 ]; then
+  bad="$bad pfm model-cost with both a model and --all exited $usage_rc, want 2: $(one_line "$usage_out");"
+fi
+refuse_out="$(pfm model-cost unlisted-provider/model 2>&1)"; refuse_rc=$?
+if [ "$refuse_rc" -ne 1 ] || ! grep -qF 'unsupported provider' <<<"$refuse_out"; then
+  bad="$bad pfm model-cost did not refuse an unsupported provider by name (exit $refuse_rc): $(one_line "$refuse_out");"
+fi
+# Live prices need the network the lane does not have; parsing, both catalogs
+# and exact numbers are proven by the fixture tests of internal/pricing/modelcost.
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "model-cost help names --all; model plus --all exits 2; an unsupported provider is refused by name before any fetch"
+fi
+
 lane_end

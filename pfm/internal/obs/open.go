@@ -18,6 +18,12 @@ import (
 // while it happened — and a release build logs at info.
 const AlphaSuffix = "-alpha"
 
+// AlphaBuild reports whether version, the stamped build version, is a
+// pre-release: the one predicate every build-dependent default reads.
+func AlphaBuild(version string) bool {
+	return strings.HasSuffix(strings.TrimSpace(version), AlphaSuffix)
+}
+
 // StderrMirror is the value paths.EnvLogMirror takes to mirror every record
 // onto stderr for a foreground run.
 const StderrMirror = "stderr"

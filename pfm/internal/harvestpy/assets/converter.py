@@ -823,16 +823,55 @@ def _pymupdf4llm_markdown(path: pathlib.Path, layout: bool, pages: list[int] | N
     import pymupdf4llm
 
     if hasattr(pymupdf4llm, "use_layout"):
-        try:
-            pymupdf4llm.use_layout(layout)
-        except Exception as exc:
-            print(f"pymupdf4llm.use_layout({layout}) failed: {exc}", file=sys.stderr)
-            # The old converter logs this warning and continues with the
-            # library's current layout mode.
-    kwargs = {} if pages is None else {"pages": pages}
+        pymupdf4llm.use_layout(layout)
+    # Image bounding boxes can overlap caption glyphs outside the visible
+    # picture. The legacy renderer drops those lines, even with force_text.
+    # Images are not exported here; keep their boxes out of text selection.
+    kwargs = {"use_ocr": False} if layout else {"ignore_images": True}
+    if pages is not None:
+        kwargs["pages"] = pages
     with _quiet_stdout():
         result = pymupdf4llm.to_markdown(str(path), **kwargs)
-    return result if isinstance(result, str) else ""
+    if not isinstance(result, str):
+        raise TypeError("PDF Markdown converter returned a non-text result")
+    return result
+
+
+def _pdf_checked_text(page, markdown: str, ocr: bool) -> tuple[str, list[str]]:
+    """Zero-tolerance token recall against each page's independent text layer."""
+    from collections import Counter
+    import unicodedata
+
+    import pymupdf
+
+    flags = pymupdf.TEXTFLAGS_TEXT & ~pymupdf.TEXT_PRESERVE_LIGATURES
+    source = page.get_text("text", flags=flags, sort=True)
+
+    def tokens(text):
+        text = unicodedata.normalize("NFKC", text)
+        # Extra Markdown punctuation cannot count as missing source text,
+        # but symbols in the source (math, identifiers, paths) must be audited.
+        return Counter(re.findall(r"[^\W_]+|[^\w\s]|_", text))
+
+    missing = tokens(source) - tokens(markdown)
+    gaps = []
+    if missing:
+        gaps.append(f"PDF page {page.number + 1}: conversion omitted {sum(missing.values())} text-layer tokens")
+        # Keep a usable native layer when layout/OCR damaged it. A page
+        # number alone is not a substitute for a scanned page's OCR text.
+        substantive = missing.copy()
+        substantive.pop(str(page.number + 1), None)
+        unreadable = "\ufffd" in source or re.search(r"\(cid:\d+\)", source)
+        controls = sum(1 for ch in source if unicodedata.category(ch) == "Cc" and ch not in "\n\t\r")
+        if substantive and len(source.strip()) >= 20 and not unreadable and controls <= len(source) * OCR_CONTROL_SHARE:
+            markdown = source
+            recovery = "using the native text layer instead, Markdown layout was lost"
+            if ocr:
+                recovery += " and image-only OCR text was not retained"
+            gaps.append(f"PDF page {page.number + 1}: {recovery}")
+    if "\ufffd" in source or re.search(r"\(cid:\d+\)", source):
+        gaps.append(f"PDF page {page.number + 1}: font encoding leaves unreadable text")
+    return markdown, gaps
 
 
 def convert_pdf(path: pathlib.Path, request: dict) -> tuple[str, dict]:
@@ -847,30 +886,32 @@ def convert_pdf(path: pathlib.Path, request: dict) -> tuple[str, dict]:
     forced = _PDF_OCR or bool(request.get("ocr"))
     with pymupdf.open(str(path)) as document:
         flagged = [index for index, page in enumerate(document) if forced or ocr_page_needed(page_features(page))]
-        if not flagged:
-            return _pymupdf4llm_markdown(path, layout), {
-                "ocr": "not-needed",
-                "layout": "enabled" if layout else "disabled",
-                "models": "not-requested",
-            }
-        script, reason = choose_ocr_script(document, str(request.get("ocr_language") or ""))
-        ocr_pages, limits = _ocr_pages(document, flagged, script)
         page_count = document.page_count
-    parts = [_note(f"OCR read page(s) {_page_list(flagged)} of {page_count} as {_SCRIPT_NAMES[script]} ({reason})")]
-    parts += [_note(limit) for limit in limits]
-    for index in range(page_count):
-        if index in ocr_pages:
-            parts.append(ocr_pages[index])
-        elif index not in flagged:
-            parts.append(_pymupdf4llm_markdown(path, layout, [index]))
-    if not any(text.strip() for text in ocr_pages.values()) and len(flagged) == page_count and limits:
-        # Nothing was readable and a limit says why: a failure, never a
-        # document that "converted" to its own notes.
-        raise OCRUnavailable("; ".join(limits))
+        parts, gaps = [], []
+        ocr_pages = {}
+        if flagged:
+            script, reason = choose_ocr_script(document, str(request.get("ocr_language") or ""))
+            ocr_pages, limits = _ocr_pages(document, flagged, script)
+            if not any(text.strip() for text in ocr_pages.values()) and len(flagged) == page_count and limits:
+                raise OCRUnavailable("; ".join(limits))
+            parts.append(_note(f"OCR read page(s) {_page_list(flagged)} of {page_count} as {_SCRIPT_NAMES[script]} ({reason})"))
+            gaps.extend(limits)
+            gaps.append(f"OCR page(s) {_page_list(flagged)}: image-only text completeness cannot be verified")
+        images = []
+        for index, page in enumerate(document):
+            markdown = ocr_pages.get(index, "") if index in flagged else _pymupdf4llm_markdown(path, layout, [index])
+            markdown, losses = _pdf_checked_text(page, markdown, index in flagged)
+            gaps.extend(losses)
+            if index not in flagged and page.get_image_info():
+                images.append(index)
+            parts.append(markdown)
+        if images:
+            gaps.append(f"PDF page(s) {_page_list(images)}: images were not OCR-read, image-only text may be missing")
+        parts = [f"_Converter gap: {gap}_" for gap in gaps] + parts
     return "\n\n".join(part for part in parts if part.strip()), {
-        "ocr": "enabled",
+        "ocr": "enabled" if flagged else "not-needed",
         "layout": "enabled" if layout else "disabled",
-        "models": "staged",
+        "models": "staged" if flagged else "not-requested",
     }
 
 
@@ -934,13 +975,16 @@ def page_features(page) -> dict:
         cover += abs(pymupdf.Rect(info["bbox"]) & page.rect)
     cover = min(cover / area, 1.0) if area else 0.0
     invisible = total = 0
-    try:
-        for span in page.get_texttrace():
-            total += len(span["chars"])
-            if span.get("type") == 3:
-                invisible += len(span["chars"])
-    except Exception as exc:
-        print(f"texttrace failed on page {page.number + 1}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    # get_texttrace's native callback can abort CPython on large documents.
+    # Structured text carries the same filled/stroked visibility bits without
+    # that callback; an extraction failure must propagate, never mean no text.
+    for block in page.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                size = len(span["text"])
+                total += size
+                if not span["char_flags"] & (8 | 16):
+                    invisible += size
     control = sum(1 for ch in text if unicodedata.category(ch) == "Cc" and ch not in "\n\t\r")
     return {
         "chars": chars,

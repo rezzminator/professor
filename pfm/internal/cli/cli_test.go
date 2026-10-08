@@ -108,3 +108,11 @@ func TestParseFlagsAroundNameKeepsFlagLookingPromptWords(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteLinesPreservesUsageLines(t *testing.T) {
+	var out bytes.Buffer
+	WriteLines(&out, []string{"usage", "", "command"})
+	if out.String() != "usage\n\ncommand\n" {
+		t.Fatalf("usage = %q", out.String())
+	}
+}

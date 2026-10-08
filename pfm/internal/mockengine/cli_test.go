@@ -174,9 +174,12 @@ func pluginCLI(t *testing.T, fix *fixture, config string, args ...string) (int, 
 	return code, errs.String()
 }
 
+// releaseTargets are the plugins a release build ensures: the GitHub ids.
+var releaseTargets = installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
+
 func TestClaudePluginInstallReaderContract(t *testing.T) {
 	fix := newFixture(t)
-	ids, err := installer.ClaudePluginsNotInstalled(fix.configDir)
+	ids, err := installer.ClaudePluginsNotInstalled(fix.configDir, releaseTargets)
 	if err != nil || len(ids) == 0 {
 		t.Fatalf("fresh ids=%v err=%v", ids, err)
 	}
@@ -185,11 +188,11 @@ func TestClaudePluginInstallReaderContract(t *testing.T) {
 			t.Fatalf("exit=%d %s", code, msg)
 		}
 	}
-	missing, err := installer.ClaudePluginsNotInstalled(fix.configDir)
+	missing, err := installer.ClaudePluginsNotInstalled(fix.configDir, releaseTargets)
 	if err != nil || len(missing) != 0 {
 		t.Fatalf("missing=%v err=%v", missing, err)
 	}
-	gaps, err := installer.ClaudePluginGaps(filepath.Join(fix.configDir, "settings.json"))
+	gaps, err := installer.ClaudePluginGaps(filepath.Join(fix.configDir, "settings.json"), releaseTargets)
 	if err != nil || len(gaps) != 0 {
 		t.Fatalf("gaps=%v err=%v", gaps, err)
 	}

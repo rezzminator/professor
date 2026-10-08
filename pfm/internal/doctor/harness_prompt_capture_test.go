@@ -343,3 +343,55 @@ func (harnessCaptureHTTPProcess) StdoutPipe() (io.ReadCloser, error) {
 }
 func (harnessCaptureHTTPProcess) Kill() error      { return nil }
 func (harnessCaptureHTTPProcess) KillGroup() error { return nil }
+
+func TestVerboseHarnessCapturePreservesReviewEvidence(t *testing.T) {
+	for _, blocked := range []bool{false, true} {
+		t.Run(fmt.Sprint(blocked), func(t *testing.T) {
+			binary := deps.Executable("sh")
+			machine := config.Config{}
+			machine.Claude.Binary = binary
+			dir := t.TempDir()
+			path := filepath.Join(dir, "harness-prompt-sonnet.request.json")
+			if blocked {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			captured, err := captureHarnessPromptWithDeps(
+				t.Context(),
+				t.TempDir(),
+				machine,
+				"sonnet",
+				dir,
+				Dependencies{Runner: harnessCaptureHTTPRunner{binary: binary}},
+			)
+			if blocked {
+				if err == nil || !strings.Contains(err.Error(), "write harness capture request evidence") {
+					t.Fatalf("failed evidence write hidden: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := decodeHarnessCapture(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Prompt != captured.Prompt || decoded.ResolvedModel != captured.ResolvedModel {
+				t.Fatalf("review evidence differs: %+v vs %+v", decoded, captured)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o600 {
+				t.Fatalf("capture permission=%o", info.Mode().Perm())
+			}
+		})
+	}
+}

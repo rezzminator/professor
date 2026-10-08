@@ -180,7 +180,10 @@ func storeLayout() ([]string, map[string]string) {
 func stageStorePlugins(t *testing.T, home string) {
 	t.Helper()
 	storeDir := installer.ClaudeStore(home)
-	ids, err := installer.ClaudePluginsNotInstalled(t.TempDir())
+	ids, err := installer.ClaudePluginsNotInstalled(
+		t.TempDir(),
+		installer.ClaudePluginTargets(installer.ClaudePluginBuild{}),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

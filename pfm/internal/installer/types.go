@@ -132,6 +132,11 @@ type Options struct {
 	// callers may leave it empty to opt out of OpenCode wiring.
 	OpenCodeConfigPath string
 	ClaudeBinary       string
+	// Version is pfm's own stamped build version: an -alpha build ensures the
+	// Claude plugins from their local checkouts (ClaudePluginTargets).
+	Version string
+	// ClaudePluginCheckoutRoot is claude.pluginCheckoutRoot; empty when unset.
+	ClaudePluginCheckoutRoot string
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches

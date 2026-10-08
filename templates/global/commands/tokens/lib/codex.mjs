@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { die } from "./options.mjs";
 import { SCAN, gapsLine, linesOf, bump, foldCwd } from "./scan.mjs";
-import { LONG_CTX_TOKENS, RATE } from "./pricing.mjs";
+import { RATE } from "./pricing.mjs";
 
 // ---------- Codex CLI rollouts (~/.codex/sessions/**/rollout-*.jsonl)
 // COUNTING RULE: token_count carries a CUMULATIVE total_token_usage that RESETS on resume
@@ -66,7 +66,7 @@ export function codexRole(meta) { for (const v of [meta?.source, meta?.thread_so
   return ""; }
 // Codex bills a different shape: cached_input is a SUBSET of input, output already includes
 // reasoning, cache-write is always 0. null (→ "n/a") when unpriced, never an invented $0.
-function codexCostUSD(model, a) { const p = RATE(model);
+function codexCostUSD(model, a, context = 0) { const p = RATE(model, context, { in: Math.max(0, a.in - a.cached), rd: a.cached, out: a.out });
   if (!p) { SCAN.unpricedCalls++; bump(SCAN.unpricedModels, model || "(none)", 1); return null; }
   return Math.max(0, a.in - a.cached) * (p.in / 1e6) + a.cached * (p.rd / 1e6) + a.out * (p.out / 1e6); }
 // The segment-peak fold, shared by the fast scan and the full per-agent audit.
@@ -78,14 +78,15 @@ function codexPeaks() { const peaks = []; let prev = null, seg = null;
       return { agg: a, segments: peaks.length }; } }; }
 
 // Fast path for the --codex table: usage + models only, matched lines decoded.
-function codexUsageFast(file) { const models = new Set(), pk = codexPeaks(); let events = 0, last = null;
+function codexUsageFast(file) { const models = new Set(), pk = codexPeaks(); let events = 0, last = null, contextPeak = 0;
   scanCodexRollout(file, [CODEX_TOKEN_PAT, CODEX_TURNCTX_PAT], (line) => {
     let d; try { d = JSON.parse(line); } catch { SCAN.badLines++; return; }
     if (d.type === "turn_context") { if (d.payload?.model) models.add(d.payload.model); return; }
     const p = d.payload; if (!p || p.type !== "token_count" || !p.info) return;
+    contextPeak = Math.max(contextPeak, p.info.last_token_usage?.input_tokens || 0);
     const t = p.info.total_token_usage; if (!t || t.total_tokens === last) return;
     last = t.total_tokens; events++; pk.add(t); });
-  return { ...pk.done(), models, events }; }
+  return { ...pk.done(), models, events, contextPeak }; }
 
 // Full path for --flight: one rollout → one RUN-shaped row, every measure a Claude row carries.
 const RX_CX_READ = /(?:sed\s+-n\s+\S+|cat|nl(?:\s+-ba)?|head|tail|bat)\s+(?:-\w+\s+\S+\s+)*["']?([\w./@+-]+\.[\w]{1,6})["']?/g;
@@ -130,8 +131,8 @@ export function codexAuditRun(file, meta) {
   R.tok.in = Math.max(0, agg.in - agg.cached); R.tok.cr = agg.cached; R.tok.out = agg.out;
   R.models = [...models]; R.model = R.models[R.models.length - 1] || "unknown";
   if (models.size > 1) SCAN.notes.push(`${path.basename(file)} ran ${models.size} models (${R.models.join(", ")}) — priced entirely at "${R.model}"`);
-  const usd = codexCostUSD(R.model, agg);
-  if (usd === null) { R.unpriced = true; R.usd = 0; R.usdLC = 0; } else { R.usd = usd; const p = RATE(R.model); R.usdLC = R.ctxPeak > LONG_CTX_TOKENS ? usd * p.lcIn : usd; }
+  const usd = codexCostUSD(R.model, agg, R.ctxPeak);
+  if (usd === null) { R.unpriced = true; R.usd = 0; R.usdLC = 0; } else { R.usd = usd; R.usdLC = usd; }
   return R;
 }
 
@@ -150,7 +151,7 @@ export function runCodex(opts) {
     const model = [...u.models].pop() || "unknown";
     if (u.models.size > 1) SCAN.notes.push(`${path.basename(file)} ran ${u.models.size} models (${[...u.models].join(", ")}) — priced entirely at "${model}"`);
     rows.push({ id, at: Date.parse(meta?.timestamp || "") || parseRolloutName(file)?.at || st.mtimeMs, model, cwd, label: meta?.thread_source === "subagent" ? `subagent (${codexRole(meta) || "?"})` : codexRole(meta) || "main",
-      agg: u.agg, segments: u.segments, cost: codexCostUSD(model, u.agg) }); }
+      agg: u.agg, segments: u.segments, cost: codexCostUSD(model, u.agg, u.contextPeak) }); }
   SCAN.files = rows.length; if (old) SCAN.notes.push(`${old} rollouts older than the window`); if (offProject) SCAN.notes.push(`${offProject} rollouts outside --project ${PROJECT}`);
   rows.sort((a, b) => (b.cost || 0) - (a.cost || 0) || b.agg.total - a.agg.total);
   const tot = { in: 0, cached: 0, out: 0, reasoning: 0, total: 0 }; let cost = 0, unpriced = 0;

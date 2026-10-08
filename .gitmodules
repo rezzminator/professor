@@ -1,0 +1,25 @@
+[submodule "agent-effort"]
+	path = plugins/agent-effort
+	url = https://github.com/rezzminator/agent-effort.git
+	branch = develop
+	ignore = dirty
+[submodule "buddy"]
+	path = plugins/buddy
+	url = https://github.com/rezzminator/buddy.git
+	branch = develop
+	ignore = dirty
+[submodule "cache-live-control"]
+	path = plugins/cache-live-control
+	url = https://github.com/rezzminator/cache-live-control.git
+	branch = develop
+	ignore = dirty
+[submodule "callmeter"]
+	path = plugins/callmeter
+	url = https://github.com/rezzminator/callmeter.git
+	branch = develop
+	ignore = dirty
+[submodule "sub-agent-compact"]
+	path = plugins/sub-agent-compact
+	url = https://github.com/rezzminator/sub-agent-compact.git
+	branch = develop
+	ignore = dirty

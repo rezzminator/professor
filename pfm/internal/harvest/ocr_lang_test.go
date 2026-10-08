@@ -54,3 +54,25 @@ func TestOCRLangReachesTheConverterAndTheLatinDefaultIsFlagged(t *testing.T) {
 		t.Fatalf("ParseOCRLang(klingon) = %v, want a named error listing the staged scripts", err)
 	}
 }
+
+func TestConverterGapsSurviveLocalReadAndCache(t *testing.T) {
+	t.Parallel()
+	scan := filepath.Join(t.TempDir(), "caption.pdf")
+	if err := os.WriteFile(scan, []byte("%PDF-1.7\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const gap = "PDF page 2: conversion omitted 4 text-layer tokens"
+	converter := &browserSpyConverter{convertFn: func(context.Context, string, string, []byte) (string, error) {
+		return "_Converter gap: " + gap + "_\n\n[Figure 1.A] Remaining caption text.", nil
+	}}
+	h := mustNew(t, Options{CacheDir: t.TempDir(), Converter: converter, BrowserRung: browserOff()})
+	for _, label := range []string{"fresh", "cached"} {
+		result := h.FetchPublic(context.Background(), scan, FetchOptions{})
+		if result.Error != "" || result.Partial != gap {
+			t.Fatalf("%s: partial=%q error=%q, want named converter gap", label, result.Partial, result.Error)
+		}
+		if gaps := PublicGaps(result.Partial); len(gaps) != 1 || gaps[0] != gap {
+			t.Fatalf("%s: public gaps=%q", label, gaps)
+		}
+	}
+}

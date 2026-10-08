@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { die } from "./options.mjs";
 import { SCAN, G, RUNS, roots, walk, linesOf, bump, bump2, foldCwd, isHome } from "./scan.mjs";
-import { LONG_CTX_TOKENS, RATE, TOP4, usageOf, writesOf } from "./pricing.mjs";
+import { RATE, TOP4, usageOf, writesOf } from "./pricing.mjs";
 import { shortModel } from "./format.mjs";
 
 // ---------- categories: what a carried token is made of
@@ -152,11 +152,12 @@ export function auditFile(file, opts, origins = new Map()) {
         R.toolWaitMs += e.dur; }
       if (e.ts >= SINCE && e.att) { bump2(G.attach, e.att, "n", 1); bump2(G.attach, e.att, "chars", e.chars); bump2(R.attach, e.att, "n", 1); bump2(R.attach, e.att, "chars", e.chars); }
       continue; }
-    const { u, m, ts, effort, copied } = usage.get(e.call), r = RATE(m);
+    const { u, m, ts, effort, copied } = usage.get(e.call);
     const tlPush = (usd) => { if (TL) tlRows.push({ n: R.calls, ts, gap: Number.isNaN(lastToolTs) ? null : ts - lastToolTs, ctx, out, usd, tools: tlIssued.get(e.call) || [] }); };
     if (R.firstTs === undefined) R.firstTs = ts;
     const { cw5, cw1, split } = writesOf(u), cwAll = cw5 + cw1;
     const cr = u.cache_read_input_tokens || 0, inp = u.input_tokens || 0, out = u.output_tokens || 0, ctx = inp + cr + cwAll;
+    const r = RATE(m, ctx, { in: inp, out, rd: cr, w5: cw5, w1: cw1 });
     let reset = false;
     if (first) { const est = pending.map((p) => p.chars / 4), tot = est.reduce((a, b) => a + b, 0), f = tot > ctx * 0.8 ? ctx * 0.8 / tot : 1;
       prefixTok = ctx - tot * f; push(C_PREFIX, prefixTok); pending.forEach((p, i) => push(p.cat, est[i] * f)); first = false; }
@@ -165,7 +166,7 @@ export function auditFile(file, opts, origins = new Map()) {
         push(C_PREFIX, Math.min(prefixTok, ctx)); push(C_SUMMARY, ctx - have); }
       else if (fresh < 0) trim(-fresh);
       else { const o2 = Math.min(prevOut, fresh); push(C_OWN, o2); const rest = fresh - o2, tot = pending.reduce((a, p) => a + p.chars, 0);
-        if (rest > 0 && tot > 0) for (const p of pending) { const t = rest * p.chars / tot; push(p.cat, t); if (p.tool && t > 8000) landed.push({ tool: p.tool, target: p.target, tok: t, at: R.calls, m }); }
+        if (rest > 0 && tot > 0) for (const p of pending) { const t = rest * p.chars / tot; push(p.cat, t); if (p.tool && t > 8000) landed.push({ tool: p.tool, target: p.target, tok: t, at: R.calls, m, ctx }); }
         else if (rest > 0) push(C_UNEXPL, rest); } }
     compactPending = false;
     // a harness attachment (total_tokens_reminder) lands after most tool results: context, never the trigger
@@ -186,7 +187,7 @@ export function auditFile(file, opts, origins = new Map()) {
       prev = { ctx, ts, m }; continue; }
     if (cwAll && !split) SCAN.tierUnknownCalls++;
     // Rates are taken as multiples of `base`, the input rate; a free model (`in: 0`, valid in
-    // pfm.prices.json) uses base 1 so no ratio divides by zero; the uncached tail weighs un1 = in/base.
+    // a published free rate) uses base 1 so no ratio divides by zero; the uncached tail weighs un1 = in/base.
     const base = r.in || 1, ri = base / 1e6, rm = r.rd / base, un1 = r.in / base, W = cwAll ? (cw5 * r.w5 + cw1 * r.w1) / (cwAll * base) : r.w5 / base;
     const parts = { in: inp * r.in / 1e6, out: out * r.out / 1e6, cw5: cw5 * r.w5 / 1e6, cw1: cw1 * r.w1 / 1e6, cr: cr * r.rd / 1e6 }, usd = parts.in + parts.out + parts.cw5 + parts.cw1 + parts.cr;
     // attribute: charge everything as a cache read, then correct the tail beyond cr
@@ -199,7 +200,7 @@ export function auditFile(file, opts, origins = new Map()) {
     for (const k in parts) { R.usdBy[k] += parts[k]; G.usd[k] += parts[k]; }
     G.tok.in += inp; G.tok.out += out; G.tok.cw5 += cw5; G.tok.cw1 += cw1; G.tok.cr += cr; G.tok.think += u.output_tokens_details?.thinking_tokens || 0; G.calls++;
     R.tok.in += inp; R.tok.out += out; R.tok.cw5 += cw5; R.tok.cw1 += cw1; R.tok.cr += cr;
-    R.calls++; R.usd += usd; tlPush(usd); R.usdLC += ctx > LONG_CTX_TOKENS ? (usd - parts.out) * r.lcIn + parts.out * r.lcOut : usd;
+    R.calls++; R.usd += usd; tlPush(usd); R.usdLC += usd;
     const ib = R.calls <= 50 ? "1 · calls 1–50" : R.calls <= 150 ? "2 · calls 51–150" : R.calls <= 300 ? "3 · calls 151–300" : "4 · calls 301+";
     bump2(G.callIdx, `${R.kind} ${ib}`, "usd", usd); bump2(G.callIdx, `${R.kind} ${ib}`, "calls", 1); bump2(G.callIdx, `${R.kind} ${ib}`, "ctx", ctx);
     bump2(G.tier, R.kind, "cw5", parts.cw5); bump2(G.tier, R.kind, "cw1", parts.cw1);
@@ -230,7 +231,13 @@ export function auditFile(file, opts, origins = new Map()) {
   if (!R.calls) { if (copiedCalls) SCAN.copiesOnly.push({ file, sid }); return null; }
   if (TL) R.timeline = { rows: tlRows, t0: recT0, t1: recT1, big: tlBig };
   R.distinctRead = seenReads.size;
-  for (const l of landed) { const after = R.calls - l.at, rr = RATE(l.m); if (after > 0 && rr) G.landings.push({ usd: l.tok * after * rr.rd / 1e6, tokK: Math.round(l.tok / 1000), after, tool: l.tool, target: String(l.target).slice(0, 90), run: RUNS.length }); }
+  for (const l of landed) { const after = R.calls - l.at, rr = RATE(l.m, l.ctx);
+    if (after > 0) {
+      const usd = Number.isFinite(rr?.rd) ? l.tok * after * rr.rd / 1e6 : null;
+      if (usd === null) { const note = `tool-carry read-price estimate unavailable for ${l.m}`; if (!SCAN.notes.includes(note)) SCAN.notes.push(note); }
+      G.landings.push({ usd, tokK: Math.round(l.tok / 1000), after, tool: l.tool, target: String(l.target).slice(0, 90), run: RUNS.length });
+    }
+  }
   G.landings.sort((a, b) => b.usd - a.usd); G.landings.length = Math.min(G.landings.length, 200);
   for (const [cmd, n] of cmdCount) if (n >= 4) { const k = project + " · " + cmd; const g = (G.repeats[k] ??= { n: 0, maxInRun: 0, runs: 0 }); g.n += n; g.runs++; g.maxInRun = Math.max(g.maxInRun, n);
     if (!R.topRepeat || n > R.topRepeat.n) R.topRepeat = { cmd: cmd.slice(0, 90), n }; if (n >= 8) R.repeats.push([cmd.slice(0, 110), n]); }

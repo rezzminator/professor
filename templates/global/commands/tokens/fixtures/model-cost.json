@@ -1,0 +1,418 @@
+{
+  "catalogs": [
+    {
+      "provider": "anthropic",
+      "currency": "USD",
+      "models": [
+        {
+          "id": "claude-sonnet-5",
+          "tables": [
+            {
+              "heading": "Model pricing",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Base input tokens",
+                "5m cache writes",
+                "1h cache writes",
+                "Cache hits and refreshes",
+                "Output tokens"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "claude-sonnet-5",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$2 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$2.5 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$4 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.2 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$10 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "tables": [
+            {
+              "heading": "Model pricing",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Base input tokens",
+                "5m cache writes",
+                "1h cache writes",
+                "Cache hits and refreshes",
+                "Output tokens"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "claude-sonnet-4-6",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$3 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$3.75 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$6 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.3 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$15 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "claude-opus-5-5",
+          "tables": [
+            {
+              "heading": "Model pricing",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Base input tokens",
+                "5m cache writes",
+                "1h cache writes",
+                "Cache hits and refreshes",
+                "Output tokens"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "claude-opus-5-5",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$4 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$5 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$8 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.2 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$20 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "claude-fable-5-1",
+          "tables": [
+            {
+              "heading": "Model pricing",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Base input tokens",
+                "5m cache writes",
+                "1h cache writes",
+                "Cache hits and refreshes",
+                "Output tokens"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "claude-fable-5-1",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$10 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$12.5 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$20 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.25 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$50 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "claude-fable-5",
+          "tables": [
+            {
+              "heading": "Model pricing",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Base input tokens",
+                "5m cache writes",
+                "1h cache writes",
+                "Cache hits and refreshes",
+                "Output tokens"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "claude-fable-5",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$10 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$12.5 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$20 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$1 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$50 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "tables": [
+            {
+              "heading": "Model pricing",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Base input tokens",
+                "5m cache writes",
+                "1h cache writes",
+                "Cache hits and refreshes",
+                "Output tokens"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "claude-haiku-4-5-20251001",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$1 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$1.25 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$2 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.1 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$5 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "claude-3-5-haiku-20241022",
+          "tables": [
+            {
+              "heading": "Model pricing",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Base input tokens",
+                "5m cache writes",
+                "1h cache writes",
+                "Cache hits and refreshes",
+                "Output tokens"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "claude-3-5-haiku-20241022",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.8 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$1 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$1.6 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.08 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$4 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "tables": [],
+      "page_context": "Synthetic prices per 1M tokens. Short context: \u2264272K input tokens. Long context: >272K input tokens.",
+      "context_numbers": [],
+      "source": {
+        "url": "https://example.invalid/anthropic/pricing",
+        "fetched_at": "2026-01-01T00:00:00Z",
+        "sha256": "synthetic",
+        "markdown": "Synthetic pricing fixture, never a live source."
+      }
+    },
+    {
+      "provider": "openai",
+      "currency": "USD",
+      "models": [
+        {
+          "id": "gpt-5.6-sol",
+          "tables": [
+            {
+              "heading": "Standard pricing data",
+              "context": "Synthetic prices per 1M tokens.",
+              "line": 1,
+              "headers": [
+                "Model",
+                "Short context input",
+                "Short context cached input",
+                "Short context cache writes",
+                "Short context output",
+                "Long context input",
+                "Long context cached input",
+                "Long context cache writes",
+                "Long context output"
+              ],
+              "rows": [
+                [
+                  {
+                    "text": "gpt-5.6-sol",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$4 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.4 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$5 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$20 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$4 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$0.4 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$5 / MTok",
+                    "numbers": []
+                  },
+                  {
+                    "text": "$20 / MTok",
+                    "numbers": []
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "tables": [],
+      "page_context": "Synthetic prices per 1M tokens. Short context: \u2264272K input tokens. Long context: >272K input tokens.",
+      "context_numbers": [],
+      "source": {
+        "url": "https://example.invalid/openai/pricing",
+        "fetched_at": "2026-01-01T00:00:00Z",
+        "sha256": "synthetic",
+        "markdown": "Synthetic pricing fixture, never a live source."
+      }
+    }
+  ],
+  "coverage": "Synthetic fixture only."
+}

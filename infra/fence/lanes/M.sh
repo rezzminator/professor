@@ -335,10 +335,20 @@ bad=""
 sock="$(_lane_tmux_dir)/$(live_field "$CHAT" 11)"
 start="$(tmux -S "$sock" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
 [ -n "$start" ] || bad="$bad the live pane has no start command at $sock;"
-grep -Fq -- '--mcp-config' <<<"$start" || bad="$bad M31: the Claude launch has no --mcp-config payload;"
-grep -Fq 'mcpServers' <<<"$start" || bad="$bad M31: --mcp-config has no mcpServers object;"
-grep -Fq 'professor' <<<"$start" || bad="$bad M31: --mcp-config names no professor server;"
-grep -Eq 'mcp[^[:alnum:]]+serve[^[:alnum:]]+--stdio' <<<"$start" || bad="$bad M31: --mcp-config has no professor stdio server (pfm mcp serve --stdio);"
+# The payload rides a private 0600 file named on argv (claudelaunch.writeMCPFile),
+# never argv itself: the beat reads the file the live launch names.
+mcp_file="$(sed -nE "s/.*--mcp-config['\" ]+([^'\" ]+).*/\1/p" <<<"$start")"
+mcp_payload=""
+if [ -z "$mcp_file" ]; then
+  bad="$bad M31: the Claude launch has no --mcp-config payload;"
+elif ! mcp_payload="$(cat "$mcp_file" 2>&1)"; then
+  bad="$bad M31: --mcp-config names $mcp_file, which cannot be read: $(one_line "$mcp_payload");"
+else
+  jq -e '.mcpServers | type == "object"' <<<"$mcp_payload" >/dev/null 2>&1 || bad="$bad M31: --mcp-config has no mcpServers object;"
+  jq -e '.mcpServers.professor' <<<"$mcp_payload" >/dev/null 2>&1 || bad="$bad M31: --mcp-config names no professor server;"
+  jq -r '.mcpServers.professor | [.command] + (.args // []) | join(" ")' <<<"$mcp_payload" 2>/dev/null |
+    grep -Eq 'mcp[^[:alnum:]]+serve[^[:alnum:]]+--stdio' || bad="$bad M31: --mcp-config has no professor stdio server (pfm mcp serve --stdio);"
+fi
 # M30: with no mcp.servers key and no harvester file, BOTH servers read
 # disabled from the default layer — a probe over a config copy, never the real one.
 if defaults_cfg="$(tmp_config defaults 'del(.mcp.servers)' ABSENT)"; then
@@ -804,6 +814,7 @@ expect-log 'engine and model require summary=true or ask=true'
 expect-log '"tool":"chat_keys".*"target":"NO_SUCH_CHAT_LANE_M"'
 expect-log '"tool":"chat_keys".*"err":"send.*Escape'
 expect-log '"tool":"chat_read".*no chat named.*lane-m-no-such-transcript-id'
+expect-log '"tool":"chat_digest".*TRANSCRIPT FAILED — NOT FOUND lane-m-no-such-transcript-id'
 expect-log '"tool":"chat_last".*no chat named.*NO_SUCH_CHAT_LANE_M'
 expect-log '"tool":"chat_status".*no chat named.*NO_SUCH_CHAT_LANE_M'
 expect-log '"tool":"chat_new".*account 99 is not in the configured roster'

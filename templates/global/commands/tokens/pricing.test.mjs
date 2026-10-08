@@ -1,6 +1,4 @@
-// pricing.test.mjs — run with: node --test templates/global/commands/tokens/
-// lib/pricing.mjs against pfm's own files, read where pfm keeps them: the shipped table
-// pfm/internal/pricing/prices.json and the published-rates fixture beside it in testdata/.
+// Live catalog projection and refusals; every source is synthetic, no network.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -11,136 +9,131 @@ import * as P from "./lib/pricing.mjs";
 import { fakePfm as fakePfmIn } from "./fake-pfm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PRICES = path.join(HERE, "../../../../pfm/internal/pricing/prices.json");
-const PUBLISHED = JSON.parse(fs.readFileSync(path.join(HERE, "../../../../pfm/internal/pricing/testdata/published-rates.json"), "utf8")).ids;
-const SHIPPED = JSON.parse(fs.readFileSync(PRICES, "utf8")).rows;
+const PRICES = path.join(HERE, "fixtures/model-cost.json");
+const CATALOG = JSON.parse(fs.readFileSync(PRICES, "utf8"));
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "token-audit-pricing-test-"));
-const NO_PFM = path.join(TMP, "no-such-pfm");
-
-// A stand-in pfm: a shell script written into TMP.
 const fakePfm = (body) => fakePfmIn(TMP, body);
-const file = (name, text) => { const p = path.join(fs.mkdtempSync(path.join(TMP, "table-")), name); fs.writeFileSync(p, text); return p; };
-const row = (key, match, rate) => ({ key, engine: "claude", match, in: rate, out: 1, hit: 0, w5m: 0, w1h: 0, long_in: 1, long_out: 1 });
+const file = (doc) => { const p = path.join(fs.mkdtempSync(path.join(TMP, "catalog-")), "prices.json"); fs.writeFileSync(p, typeof doc === "string" ? doc : JSON.stringify(doc)); return p; };
+const loaded = (env) => { let result; assert.doesNotThrow(() => { result = P.loadTable(env); }, "a complete live catalog must load"); return result; };
+const table = (doc = CATALOG) => loaded({ TOKEN_AUDIT_PRICES: file(doc) });
+const copy = () => structuredClone(CATALOG);
+const cells = (values) => values.map((text) => ({ text, numbers: [] }));
+const openaiModel = (doc) => doc.catalogs[1].models[0];
 
-test("parity: every published id resolves over pfm's shipped table to its published rates", () => {
-  const table = { rows: SHIPPED, override: null };
-  for (const p of PUBLISHED) {
-    const r = P.rateOf(table, p.id);
-    assert.ok(r, `${p.id}: unpriced`);
-    const want = "hit" in p ? { in: p.in, out: p.out, rd: p.hit, w5: p.w5m, w1: p.w1h } : { in: p.in, out: p.out, rd: p.cached };
-    for (const [k, v] of Object.entries(want)) assert.equal(r[k], v, `${p.id}: ${k} is ${r[k]}, published ${v}`);
+test("live catalogs: exact model IDs preserve both Claude cache TTLs and OpenAI cache-write prices", () => {
+  const t = table();
+  for (const [id, expected] of [
+    ["claude-opus-5-5", [4, 20, .2, 5, 8]], ["claude-fable-5-1", [10, 50, .25, 12.5, 20]],
+    ["gpt-5.6-sol", [4, 20, .4, 5, null]],
+  ]) {
+    const r = P.rateOf(t, id);
+    assert.ok(r, id);
+    assert.deepEqual([r.in, r.out, r.rd, r.w5, r.w1], expected, id);
+  }
+  assert.equal(P.rateOf(t, "Anthropic/Claude-OPUS-5-5").in, 4);
+  for (const id of ["opus", "claude-opus-5-5-20270101", "gpt-5.6-sol-pro", "gpt-5.6-sol-20990101", undefined]) assert.equal(P.rateOf(t, id), null, String(id));
+});
+
+test("live catalogs: table dimensions select Standard, not Batch, audio, training or tool tariffs", () => {
+  const doc = copy(), m = openaiModel(doc), base = m.tables[0];
+  m.tables.unshift({ ...base, heading: "Batch pricing data", rows: [cells([m.id, "$1", "$0.1", "$1.25", "$5", "$2", "$0.2", "$2.5", "$7.5"])] });
+  m.tables.push({ ...base, heading: "Grouped Pricing Table data", headers: ["Model", "Input", "Cached input", "Output", "Training"], rows: [cells([m.id, "$99", "$9", "$199", "$299"])] });
+  assert.equal(P.rateOf(table(doc), m.id).in, 4);
+  doc.catalogs[1].models = [{ id: "gpt-audio", tables: [{ ...base, heading: "Audio tokens", rows: base.rows }] }];
+  assert.equal(P.rateOf(table(doc), "gpt-audio"), null);
+});
+
+test("live catalogs: specialized Standard text-token rows price Codex without importing Fast or modality tariffs", () => {
+  const doc = copy(), c = doc.catalogs[1];
+  const base = { heading: "Grouped Pricing Table data", context: "Specialized models\nPrices per 1M tokens.\nStandard", headers: ["Category", "Model", "Input", "Cached input", "Output"], rows: [cells(["Codex", "gpt-5.3-codex", "$1.75", "$0.175", "$14.00"])] };
+  c.models = [{ id: "gpt-5.3-codex", tables: [base, { ...base, context: "Fast", rows: [cells(["Codex", "gpt-5.3-codex", "$3.50", "$0.35", "$28.00"])] }] }];
+  const r = P.rateOf(table(doc), "gpt-5.3-codex", 1000);
+  assert.ok(r, "the published specialized Standard Codex row must be priced");
+  assert.deepEqual([r.in, r.rd, r.out], [1.75, .175, 14]);
+  c.models[0].tables = [{ ...base, context: "Standard\nPrior mode explanation\nFast" }];
+  assert.equal(P.rateOf(table(doc), "gpt-5.3-codex"), null);
+});
+
+test("live catalogs: published long context columns use the exact boundary and each rate", () => {
+  const doc = copy(), m = openaiModel(doc);
+  m.tables[0].rows = [cells([m.id, "$2.000", "$0.10", "$2.500", "$10.00", "$4.00", "$0.20", "$5.00", "$15.00"])];
+  const t = table(doc);
+  const short = P.rateOf(t, m.id, 272000), long = P.rateOf(t, m.id, 272001);
+  assert.deepEqual([short.in, short.rd, short.w5, short.out], [2, .1, 2.5, 10]);
+  assert.deepEqual([long.in, long.rd, long.w5, long.out], [4, .2, 5, 15]);
+  assert.equal(long.threshold, 272000);
+  assert.equal(P.rateOf(t, m.id, 200001).in, 2, "the old 200K constant must not select a 272K premium");
+  m.tables[0].rows[0][5].text = "-";
+  assert.equal(P.rateOf(table(doc), m.id, 272001), null, "a missing long rate is unavailable");
+});
+
+test("live catalogs: Claude prompt length rows select the correct cache and output rates", () => {
+  const doc = copy(), m = doc.catalogs[0].models[0];
+  m.id = "claude-haiku-5-5";
+  m.tables[0].rows = [cells(["Claude Haiku 5.5 (for prompts up to 100,000 tokens)", "$0.10 / MTok", "$0.125 / MTok", "$0.20 / MTok", "$0.01 / MTok", "$0.50 / MTok"]), cells(["Claude Haiku 5.5 (for prompts over 100,000 tokens)", "$0.50 / MTok", "$0.625 / MTok", "$1 / MTok", "$0.05 / MTok", "$2.50 / MTok"])];
+  const t = table(doc);
+  for (const [context, expected] of [[100000, [.1, .125, .2, .01, .5]], [100001, [.5, .625, 1, .05, 2.5]]]) {
+    const r = P.rateOf(t, m.id, context);
+    assert.deepEqual([r.in, r.w5, r.w1, r.rd, r.out], expected);
   }
 });
 
-test("rate shape: a Claude row maps hit/w5m/w1h, a Codex row derives writes from input, both carry the long-context multipliers", () => {
-  const claude = { key: "c", engine: "claude", match: ["c-model"], in: 3, out: 15, hit: 0.3, w5m: 3.75, w1h: 6, long_in: 2, long_out: 1.5 };
-  const codex = { key: "x", engine: "codex", match: ["x-model"], in: 2, out: 10, cached: 0.2, long_in: 1, long_out: 1 };
-  const table = { rows: [claude, codex], override: null };
-  assert.deepEqual(P.rateOf(table, "c-model"), { in: 3, out: 15, rd: 0.3, w5: 3.75, w1: 6, lcIn: 2, lcOut: 1.5 });
-  assert.deepEqual(P.rateOf(table, "x-model"), { in: 2, out: 10, rd: 0.2, w5: 2 * 1.25, w1: 2 * 2, lcIn: 1, lcOut: 1 });
-});
-
-test("order-free: the shipped rows reversed or shuffled resolve every published id identically", () => {
-  const base = { rows: SHIPPED, override: null };
-  let seed = 7;
-  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
-  const orders = [[...SHIPPED].reverse(), ...[1, 2, 3, 4, 5].map(() => [...SHIPPED].map((r) => [rand(), r]).sort((a, b) => a[0] - b[0]).map(([, r]) => r))];
-  for (const rows of orders) for (const { id } of PUBLISHED) assert.deepEqual(P.rateOf({ rows, override: null }, id), P.rateOf(base, id), `${id} resolves differently with rows ${rows.map((r) => r.key).join(",")}`);
-});
-
-test("tie / case / unpriced: equal-length patterns go to the earliest start; matching ignores case; an unknown id is null", () => {
-  for (const rows of [[row("beta", ["beta"], 2), row("alfa", ["alfa"], 1)], [row("alfa", ["alfa"], 1), row("beta", ["beta"], 2)]]) {
-    const t = { rows, override: null };
-    assert.equal(P.rateOf(t, "x-alfa-beta").in, 1, "alfa starts first in x-alfa-beta");
-    assert.equal(P.rateOf(t, "x-beta-alfa").in, 2, "beta starts first in x-beta-alfa");
+test("live catalogs: missing or malformed amounts are unavailable, footnote numbers are not prices", () => {
+  for (const text of ["-", "N/A", "", "$0.10–$0.20 / MTok", "$1 per image", "$oops", "$2 / 1K tokens"]) {
+    const doc = copy(); doc.catalogs[0].models[0].tables[0].rows[0][1].text = text;
+    assert.equal(P.rateOf(table(doc), "claude-sonnet-5"), null, text);
   }
-  assert.equal(P.rateOf({ rows: SHIPPED, override: null }, "Claude-OPUS-5-5").in, 4, "a mixed-case id resolves like its lowercase form");
-  assert.equal(P.rateOf({ rows: [row("m", ["Mixed-Pattern"], 9)], override: null }, "x-mixed-pattern-1").in, 9, "a mixed-case pattern matches its lowercase form");
-  assert.equal(P.rateOf({ rows: SHIPPED, override: null }, "unobtanium-9"), null);
-  assert.equal(P.rateOf({ rows: SHIPPED, override: null }, undefined), null);
+  const doc = copy(); doc.catalogs[0].models[0].tables[0].rows[0][4].text = "$0.25 / MTok<sup>1</sup>";
+  assert.equal(P.rateOf(table(doc), "claude-sonnet-5").rd, .25);
+  doc.catalogs[0].models[0].tables[0].rows[0][4].text = "-";
+  P.useTable(table(doc));
+  assert.equal(P.RATE("claude-sonnet-5", 100, { rd: 1 }), null, "used missing cache rate must be n/a");
+  assert.equal(P.RATE("claude-sonnet-5", 100, { in: 100 }).in, 2, "uncached usage can use published input/output");
 });
 
-test("useTable: RATE(m) consults the table set last", () => {
-  P.useTable({ rows: [row("a", ["model-a"], 1)], override: null });
-  assert.equal(P.RATE("model-a").in, 1);
-  P.useTable({ rows: [row("a", ["model-a"], 5)], override: null });
-  assert.equal(P.RATE("model-a").in, 5, "a cached rate must not outlive its table");
-  assert.equal(P.RATE("model-b"), null);
-});
-
-test("loadTable: TOKEN_AUDIT_PRICES reads the shipped prices.json or a saved `pfm price --json` document, and pfm is not spawned", () => {
-  const spawns = path.join(TMP, "spawns-file"), bin = fakePfm(`echo x >> '${spawns}'; exit 1`);
-  const shipped = P.loadTable({ TOKEN_AUDIT_PRICES: PRICES, TOKEN_AUDIT_PFM: bin });
-  assert.deepEqual(shipped, { rows: SHIPPED, override: null });
-  const override = { path: "/cfg/pfm.prices.json", rows: 1 };
-  const doc = file("price.json", JSON.stringify({ version: 1, override, rows: [{ ...row("a", ["model-a"], 1), source: "override" }] }));
-  assert.deepEqual(P.loadTable({ TOKEN_AUDIT_PRICES: doc, TOKEN_AUDIT_PFM: bin }).override, override);
-  assert.equal(fs.existsSync(spawns), false, "a table file must keep pfm unspawned");
-});
-
-test("loadTable: an unreadable TOKEN_AUDIT_PRICES names the variable, the path and the fault", () => {
-  const missing = path.join(TMP, "no-such-table.json");
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: missing, TOKEN_AUDIT_PFM: NO_PFM }), { message: new RegExp(`^TOKEN_AUDIT_PRICES ${missing}: .*ENOENT`) });
-  const notJson = file("bad.json", "{ not json");
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: notJson, TOKEN_AUDIT_PFM: NO_PFM }), { message: new RegExp(`^TOKEN_AUDIT_PRICES ${notJson}: \\S`) });
-  const v2 = file("v2.json", JSON.stringify({ version: 2, rows: [] }));
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: v2, TOKEN_AUDIT_PFM: NO_PFM }), { message: new RegExp(`^TOKEN_AUDIT_PRICES ${v2}: .*version`) });
-});
-
-test("loadTable: pfm's `price --json` document is the table, override included", () => {
-  const override = { path: "/cfg/pfm.prices.json", rows: 2 };
-  const doc = file("doc.json", JSON.stringify({ version: 1, override, rows: SHIPPED.map((r) => ({ ...r, source: "shipped" })) }));
-  const t = P.loadTable({ TOKEN_AUDIT_PFM: fakePfm(`[ "$1 $2" = "price --json" ] || exit 9; cat '${doc}'`) });
-  assert.deepEqual(t.override, override);
-  assert.equal(t.rows.length, SHIPPED.length);
-});
-
-test("loadTable: a missing pfm is named, with no fallback table", () => {
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: "", TOKEN_AUDIT_PFM: NO_PFM }),
-    { message: `pfm not found (${NO_PFM}) — prices come from \`pfm price --json\`; install pfm or set TOKEN_AUDIT_PFM` });
-});
-
-test("loadTable: a pfm that exits non-zero carries its exit code and trimmed stderr", () => {
-  const bin = fakePfm(`echo "  pfm: pfm.prices.json: unknown field  " >&2; exit 1`);
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: bin }), { message: `\`${bin} price --json\` failed (exit 1): pfm: pfm.prices.json: unknown field` });
-});
-
-test("loadTable: a hung pfm is killed at the requested timeout", () => {
-  const bin = fakePfm("exec sleep 5"), started = Date.now();
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: bin }, 200), { message: `\`${bin} price --json\` timed out after 0.2 s` });
-  assert.ok(Date.now() - started < 2000, "the loader must return before sleep completes");
-});
-
-test("loadTable: a pfm predating price names the failed command and the update", () => {
-  const bin = fakePfm(`echo 'pfm: unknown command "price"' >&2; exit 2`);
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: bin }),
-    { message: `\`${bin} price --json\` failed (exit 2): pfm: unknown command "price" — this pfm predates \`pfm price\`; update pfm` });
-});
-
-test("loadTable: every row requires its engine's finite numeric rates", () => {
-  const missingHit = file("missing-hit.json", '{"version":1,"rows":[{"key":"x","engine":"claude","match":["x"],"in":1,"out":1,"w5m":1,"w1h":1,"long_in":1,"long_out":1}]}');
-  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: missingHit }), { message: `TOKEN_AUDIT_PRICES ${missingHit}: row x: hit is not a number` });
-  for (const [r, fields] of [
-    [row("claude", ["c"], 1), ["in", "out", "hit", "w5m", "w1h", "long_in", "long_out"]],
-    [{ key: "codex", engine: "codex", match: ["x"], in: 1, out: 1, cached: 0, long_in: 1, long_out: 1 }, ["in", "out", "cached", "long_in", "long_out"]],
-  ]) for (const field of fields) for (const value of [undefined, null, "1", true, Infinity, NaN]) {
-    const doc = file("bad-rate.json", JSON.stringify({ version: 1, rows: [row("valid", ["valid"], 0), { ...r, [field]: value }] }));
-    assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: doc }), { message: `TOKEN_AUDIT_PRICES ${doc}: row ${r.key}: ${field} is not a number` });
+test("live catalogs: duplicate conflicting Standard rows are unavailable, never chosen by order", () => {
+  const doc = copy(), m = openaiModel(doc);
+  for (const text of ["$99", "-", "$oops"]) {
+    const variant = structuredClone(doc), conflictingModel = openaiModel(variant);
+    const conflict = structuredClone(m.tables[0]); conflict.rows[0][1].text = text; conflictingModel.tables.push(conflict);
+    assert.equal(P.rateOf(table(variant), m.id), null, text);
   }
 });
 
-test("rateOf: an empty pattern never prices a model", () => {
-  assert.equal(P.rateOf({ rows: [row("empty", [""], 9)], override: null }, "claude-opus-5-5"), null);
+test("useTable: cached model rates never outlive the loaded catalog", () => {
+  P.useTable(table()); assert.equal(P.RATE("gpt-5.6-sol").in, 4);
+  const doc = copy(); openaiModel(doc).tables[0].rows[0][1].text = "$9";
+  P.useTable(table(doc)); assert.equal(P.RATE("gpt-5.6-sol").in, 9);
 });
 
-test("loadTable: not JSON, version 2, or rows not an array is an unreadable table", () => {
-  for (const [out, fault] of [["price table", /\S/], ['{"version":2,"rows":[]}', /version/], ['{"version":1,"rows":{}}', /rows/]]) {
-    const bin = fakePfm(`echo '${out}'`);
-    assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: bin }), (e) => {
-      const head = `\`${bin} price --json\` returned an unreadable table: `;
-      assert.ok(e.message.startsWith(head), `${out}: ${e.message}`);
-      assert.match(e.message.slice(head.length), fault, `${out}: ${e.message}`);
-      return true;
-    });
-  }
+test("loadTable: pfm model-cost --json --all runs once and preserves its sources", () => {
+  const spawns = path.join(TMP, "spawns");
+  const bin = fakePfm(`[ "$1 $2 $3" = "model-cost --json --all" ] || exit 9; echo x >> '${spawns}'; cat '${PRICES}'`);
+  const t = loaded({ TOKEN_AUDIT_PFM: bin });
+  assert.equal(fs.readFileSync(spawns, "utf8"), "x\n");
+  assert.equal(t.override, null);
+  assert.equal(t.catalogs[0].source.fetched_at, CATALOG.catalogs[0].source.fetched_at);
+  assert.equal(P.rateOf(t, "gpt-5.6-sol").in, 4);
+});
+
+test("loadTable: a saved catalog keeps pfm unspawned and exposes its override path", () => {
+  const bin = fakePfm("exit 9"), t = loaded({ TOKEN_AUDIT_PRICES: PRICES, TOKEN_AUDIT_PFM: bin });
+  assert.equal(t.saved, PRICES);
+  assert.equal(t.override, null);
+});
+
+test("loadTable: failures, timeouts and old pfm are visible errors, never static fallback", () => {
+  const missing = path.join(TMP, "no-such-pfm");
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: missing }), /pfm not found.*model-cost --json --all/);
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: fakePfm('echo "model-cost: fetch HTTP 503" >&2; exit 3') }), /failed \(exit 3\): model-cost: fetch HTTP 503/);
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: fakePfm('echo \'unknown command "model-cost"\' >&2; exit 2') }), /predates `pfm model-cost`; update pfm/);
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: fakePfm("exec sleep 5") }, 200), /timed out after 0.2 s/);
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: missing }), /TOKEN_AUDIT_PRICES.*ENOENT/);
+});
+
+test("loadTable: malformed or incomplete catalogs fail visibly instead of empty prices", () => {
+  const malformed = ["{ not JSON", { catalogs: [] }, { catalogs: CATALOG.catalogs.slice(0, 1) }, { version: 1, rows: [] }];
+  for (const field of ["models", "tables", "source"]) { const doc = copy(); doc.catalogs[0][field] = null; malformed.push(doc); }
+  const cellsBad = copy(); cellsBad.catalogs[0].models[0].tables[0].rows[0][1] = { numbers: ["1"] }; malformed.push(cellsBad);
+  for (const doc of malformed) assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: file(doc) }), /TOKEN_AUDIT_PRICES.*(catalog|source|table|model|JSON|Unexpected|text)/i);
 });

@@ -320,7 +320,7 @@ func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			test.prepare(t, dir)
-			got, err := ClaudePluginsNotInstalled(dir)
+			got, err := ClaudePluginsNotInstalled(dir, ClaudePluginTargets(ClaudePluginBuild{}))
 			if test.wantErr != (err != nil) {
 				t.Fatalf("err=%v, wantErr=%t", err, test.wantErr)
 			}
@@ -511,6 +511,38 @@ func TestClaudePluginDoorLiveChatReadErrorNamesAccount(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("commands after unreadable live chats: %v", runner.calls)
+	}
+}
+
+// TestClaudePluginDoorLiveChatKeepsEarlierFailures: a live chat that defers a
+// later plugin never swallows a failure an earlier plugin already hit.
+func TestClaudePluginDoorLiveChatKeepsEarlierFailures(t *testing.T) {
+	root := t.TempDir()
+	inst, runner, out, home, first := alphaPluginEngine(t, root)
+	for _, p := range claudePlugins {
+		writePluginCheckout(t, root, p.Name)
+	}
+	broken := filepath.Join(root, claudePlugins[0].Name, "plugins", claudePlugins[0].Name, "hooks", "gone.ts")
+	if err := os.Symlink(filepath.Join(root, "nowhere"), broken); err != nil {
+		t.Fatal(err)
+	}
+	proc := filepath.Join(home, "proc")
+	if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(first, "sessions", "4242.json"), "{}")
+	inst.options.ProcRoot = proc
+	err := inst.ensureClaudePlugins(context.Background())
+	if err == nil || !strings.Contains(err.Error(), broken) || len(runner.calls) != 0 ||
+		!strings.Contains(out.String(), "live chats 4242") {
+		t.Fatalf("err=%v calls=%v\n%s", err, runner.calls, out.String())
+	}
+	// The deferral holds back commands only: every later copy is refreshed.
+	for _, p := range claudePlugins[1:] {
+		mirror := filepath.Join(home, ".local", "share", p.Name+"-dev", "plugins", p.Name, "hooks", "hook.ts")
+		if _, statErr := os.Stat(mirror); statErr != nil {
+			t.Fatalf("%s copy not refreshed under a deferral: %v\n%s", p.Name, statErr, out.String())
+		}
 	}
 }
 

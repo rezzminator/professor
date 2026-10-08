@@ -164,10 +164,12 @@ func (h *e2eHarness) assertInstalled(home string) {
 		}
 	}
 	store := installer.ClaudeStore(home)
-	if gaps, err := installer.ClaudePluginGaps(filepath.Join(store, "settings.json")); err != nil || len(gaps) != 0 {
+	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
+	settings := filepath.Join(store, "settings.json")
+	if gaps, err := installer.ClaudePluginGaps(settings, targets); err != nil || len(gaps) != 0 {
 		h.t.Fatalf("store plugin settings gaps=%v: %v", gaps, err)
 	}
-	if missing, err := installer.ClaudePluginsNotInstalled(store); err != nil || len(missing) != 0 {
+	if missing, err := installer.ClaudePluginsNotInstalled(store, targets); err != nil || len(missing) != 0 {
 		h.t.Fatalf("store plugins missing=%v: %v", missing, err)
 	}
 	for _, entry := range installer.StoreEntries {

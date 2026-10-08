@@ -51,6 +51,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 		}
 		prefs.Binary = *raw.Binary
 	}
+	if raw.PluginCheckoutRoot != nil && index >= 0 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.pluginCheckoutRoot is machine-wide: set %s",
+			path,
+			configScope(scope, index),
+			KeyClaudePluginCheckoutRoot,
+		)
+	}
 	if raw.Cache1H != nil {
 		prefs.Cache1H = *raw.Cache1H
 	}

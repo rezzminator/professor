@@ -59,7 +59,7 @@ var topLevelSubcommands = []string{
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
-	"price",
+	"price", "model-cost",
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
@@ -125,7 +125,6 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	if len(args) == 0 {
 		return picker.Run(nil, stdout, stderr, runtime)
 	}
-
 	switch args[0] {
 	case "version", "--version":
 		return runVersion(args[1:], stdout, stderr)
@@ -141,6 +140,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runIndex(args[1:], stdout, stderr, runtime, clock.Real)
 	case "log":
 		return runLog(args[1:], stdout, stderr, runtime)
+	case "model-cost":
+		return pricecmd.ModelCost(args[1:], stdout, stderr)
 	case "price":
 		return pricecmd.Price(args[1:], stdout, stderr, runtime)
 	case "doctor":
@@ -196,7 +197,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 }
 
 func printUsage(w io.Writer) {
-	for _, line := range []string{
+	cli.WriteLines(w, []string{
 		"usage: pfm [--config PATH] <command> [options]", "", "operator commands:",
 		"  ls        list or pick fleet chats",
 		"  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end",
@@ -215,6 +216,7 @@ func printUsage(w io.Writer) {
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
+		"  model-cost live Claude/OpenAI API prices: --json --all MODEL_ID",
 		"  price     print the model price table pfm owns: --json --check",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
@@ -223,9 +225,7 @@ func printUsage(w io.Writer) {
 		"  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)",
 		"  codex     compile or check the Codex project mirror",
 		"  opencode  compile, check, or inspect the OpenCode project mirror",
-	} {
-		fmt.Fprintln(w, line)
-	}
+	})
 }
 
 func diagnosticCommand(args []string) bool {

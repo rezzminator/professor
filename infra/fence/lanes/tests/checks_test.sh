@@ -707,4 +707,30 @@ if [ "$(printf '%s\n' "$out" | tail -1)" = 'RUN DIR: /tmp/gate-tip/timing/run.ab
   ok 'a note that cannot be written is named and the fence prints the line itself'
 else bad 'RUN DIR unwritable note' "$out"; fi
 
+# checks_templates_leak: a submodule's gitlink is another repository, counted as such, never scanned and never a deleted path.
+leak_repo="$T/leak-submodule"
+mkdir -p "$leak_repo/scripts" "$leak_repo/plugins/demo"
+printf 'clean\n' > "$leak_repo/kept.md"
+printf 'other repository\n' > "$leak_repo/plugins/demo/file.md"
+cat > "$leak_repo/scripts/leak-check.sh" <<'STUB'
+#!/usr/bin/env bash
+shift; printf '%s\n' "$@" >> "$LEAK_FILES_OUT"
+STUB
+chmod +x "$leak_repo/scripts/leak-check.sh"
+git -C "$leak_repo" init -q &&
+  git -C "$leak_repo" add kept.md scripts/leak-check.sh &&
+  git -C "$leak_repo" update-index --add --cacheinfo 160000,1111111111111111111111111111111111111111,plugins/demo &&
+  git -C "$leak_repo" -c user.name=fixture -c user.email=fixture.invalid commit -qm fixture ||
+  bad 'leak submodule fixture' 'git could not build the fixture repository'
+out="$( (
+  cd "$leak_repo" || exit 1
+  repo_git() { git "$@"; }; run() { :; }; head_() { :; }; info() { :; }
+  ok() { printf 'ok [%s]\n' "$*"; }; fail_step() { printf 'fail [%s]\n' "$*"; }
+  TMP_BASE="$T/leak-tmp" LEAK_FILES_OUT="$T/leak-files" checks_templates_leak
+) 2>&1 )"
+if [ "$out" = 'ok [leak-check clean (2 file(s): the whole tracked tree plus 0 changed, 0 deleted path(s) skipped, 1 submodule(s) left to their own repository'"'"'s gate)]' ] &&
+  [ "$(cat "$T/leak-files" 2>&1)" = "$(printf 'kept.md\nscripts/leak-check.sh')" ]; then
+  ok 'the leak gate scans the tracked files and counts a submodule as its own repository, not a deleted path'
+else bad 'leak gate submodule' "$out" "$(cat "$T/leak-files" 2>&1)"; fi
+
 shtest_end

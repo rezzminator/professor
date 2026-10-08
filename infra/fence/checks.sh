@@ -33,13 +33,19 @@ checks_templates_leak() {
   # once printed "clean" having scanned none of docs/, .claude/ or infra/,
   # and the count made the claim look earned. Deleted paths are dropped and
   # COUNTED rather than handed to leak-check, whose --files mode correctly
-  # refuses to call a list of non-files clean. BROKEN STATE: a git listing
-  # that could not be read is a red row, never a scan of nothing.
-  local tracked porcelain changed candidate leak_list
-  local present=0 changed_n=0 gone=0
-  if ! tracked="$(repo_git ls-files)" || ! porcelain="$(repo_git status --porcelain --untracked-files=all)"; then
+  # refuses to call a list of non-files clean. A submodule (a gitlink, mode
+  # 160000) is another repository, scanned by that repository's own gate: it
+  # is left out by name and COUNTED, never read as a deleted path. BROKEN
+  # STATE: a git listing that could not be read is a red row, never a scan of
+  # nothing.
+  local tracked stage gitlinks porcelain changed candidate leak_list
+  local present=0 changed_n=0 gone=0 submodules=0
+  if ! tracked="$(repo_git ls-files)" || ! stage="$(repo_git ls-files --stage)" ||
+    ! porcelain="$(repo_git status --porcelain --untracked-files=all)"; then
     fail_step "leak-check: the tracked or changed file list could not be read from git — nothing was scanned"
   else
+    gitlinks=$(awk -F '\t' '$1 ~ /^160000 / { print $2 }' <<<"$stage")
+    submodules=$(grep -c . <<<"$gitlinks" || true)
     changed=$(awk '{print $NF}' <<<"$porcelain" | grep -v '/$' || true)
     mkdir -p "$TMP_BASE/templates"
     leak_list="$TMP_BASE/templates/leak-candidates.z"
@@ -51,7 +57,7 @@ checks_templates_leak() {
       else
         gone=$((gone + 1))
       fi
-    done < <(printf '%s\n%s\n' "$tracked" "$changed" | sort -u)
+    done < <(printf '%s\n%s\n' "$tracked" "$changed" | sort -u | grep -vxF -f <(printf '%s\n' "$gitlinks"))
     while IFS= read -r candidate; do
       [[ -n "$candidate" && -f "$candidate" ]] && changed_n=$((changed_n + 1))
     done <<<"$changed"
@@ -60,7 +66,7 @@ checks_templates_leak() {
     # xargs batches the list so no argument list overflows; any red batch
     # makes xargs non-zero, and a non-empty list never yields an empty batch.
     elif xargs -0 scripts/leak-check.sh --files < "$leak_list"; then
-      ok "leak-check clean (${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped)"
+      ok "leak-check clean (${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped, ${submodules} submodule(s) left to their own repository's gate)"
     else
       fail_step "leak-check FAILED — brand / PII / machine-path string in a public file, or a batch could not be scanned"
     fi

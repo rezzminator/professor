@@ -28,6 +28,7 @@ var sharedStage = struct {
 var e2eStageRoot string
 
 func TestPrepareSourceRepoStagesEvenAReadyRepository(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "ready-source")
 	for _, relative := range []string{
 		"CLAUDE.md", "AGENTS.md", ".claude/settings.json",
@@ -60,6 +61,7 @@ func TestPrepareSourceRepoStagesEvenAReadyRepository(t *testing.T) {
 }
 
 func TestCopySourceTreePreservesInternalSymlinks(t *testing.T) {
+	t.Parallel()
 	source := filepath.Join(t.TempDir(), "source")
 	target := filepath.Join(t.TempDir(), "target")
 	linkedDir := filepath.Join(source, ".claude", "skills", "fixture")
@@ -99,6 +101,7 @@ func TestCopySourceTreePreservesInternalSymlinks(t *testing.T) {
 	}
 }
 
+// Serial: t.Setenv rewrites the process environment copySourceTree reads.
 func TestCopySourceTreeEnumeratesLinkedWorktreeWithFenceGitDir(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repository")
 	if err := os.MkdirAll(root, 0o700); err != nil {
@@ -144,6 +147,7 @@ func TestCopySourceTreeEnumeratesLinkedWorktreeWithFenceGitDir(t *testing.T) {
 }
 
 func TestCopySourceTreeSkipsTrackedDeletedPaths(t *testing.T) {
+	t.Parallel()
 	source := filepath.Join(t.TempDir(), "source")
 	target := filepath.Join(t.TempDir(), "target")
 	if err := os.MkdirAll(source, 0o700); err != nil {
@@ -172,6 +176,7 @@ func TestCopySourceTreeSkipsTrackedDeletedPaths(t *testing.T) {
 }
 
 func TestCopySourceTreeLeavesSubmodulesOut(t *testing.T) {
+	t.Parallel()
 	source := filepath.Join(t.TempDir(), "source")
 	target := filepath.Join(t.TempDir(), "target")
 	if err := os.MkdirAll(filepath.Join(source, "plugins", "demo"), 0o700); err != nil {
@@ -199,6 +204,7 @@ func TestCopySourceTreeLeavesSubmodulesOut(t *testing.T) {
 }
 
 func TestCopySourceTreeRejectsExternalSymlinks(t *testing.T) {
+	t.Parallel()
 	for name, linkTarget := range map[string]string{
 		"absolute": filepath.Join(string(filepath.Separator), "outside"),
 		"escape":   "../outside",

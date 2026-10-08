@@ -722,15 +722,30 @@ git -C "$leak_repo" init -q &&
   git -C "$leak_repo" update-index --add --cacheinfo 160000,1111111111111111111111111111111111111111,plugins/demo &&
   git -C "$leak_repo" -c user.name=fixture -c user.email=fixture.invalid commit -qm fixture ||
   bad 'leak submodule fixture' 'git could not build the fixture repository'
-out="$( (
-  cd "$leak_repo" || exit 1
-  repo_git() { git "$@"; }; run() { :; }; head_() { :; }; info() { :; }
-  ok() { printf 'ok [%s]\n' "$*"; }; fail_step() { printf 'fail [%s]\n' "$*"; }
-  TMP_BASE="$T/leak-tmp" LEAK_FILES_OUT="$T/leak-files" checks_templates_leak
-) 2>&1 )"
-if [ "$out" = 'ok [leak-check clean (2 file(s): the whole tracked tree plus 0 changed, 0 deleted path(s) skipped, 1 submodule(s) left to their own repository'"'"'s gate)]' ] &&
-  [ "$(cat "$T/leak-files" 2>&1)" = "$(printf 'kept.md\nscripts/leak-check.sh')" ]; then
+leak_gate() {
+  : > "$T/leak-files"
+  (
+    cd "$leak_repo" || exit 1
+    repo_git() { git "$@"; }; run() { :; }; head_() { :; }; info() { :; }
+    ok() { printf 'ok [%s]\n' "$*"; }; fail_step() { printf 'fail [%s]\n' "$*"; }
+    TMP_BASE="$T/leak-tmp" LEAK_FILES_OUT="$T/leak-files" checks_templates_leak
+  ) 2>&1
+}
+leak_clean='ok [leak-check clean (2 file(s): the whole tracked tree plus 0 changed, 0 deleted path(s) skipped, 1 submodule(s) left to their own repository'"'"'s gate)]'
+leak_scanned="$(printf 'kept.md\nscripts/leak-check.sh')"
+out="$(leak_gate)"
+if [ "$out" = "$leak_clean" ] && [ "$(cat "$T/leak-files" 2>&1)" = "$leak_scanned" ]; then
   ok 'the leak gate scans the tracked files and counts a submodule as its own repository, not a deleted path'
 else bad 'leak gate submodule' "$out" "$(cat "$T/leak-files" 2>&1)"; fi
+# The same plugin once it holds commits its gitlink lacks: status names the gitlink as changed, still neither scanned nor deleted.
+git -C "$leak_repo/plugins/demo" init -q &&
+  git -C "$leak_repo/plugins/demo" add file.md &&
+  git -C "$leak_repo/plugins/demo" -c user.name=fixture -c user.email=fixture.invalid commit -qm plugin ||
+  bad 'leak submodule commits fixture' 'git could not commit inside the fixture plugin'
+status="$(git -C "$leak_repo" status --porcelain 2>&1)"
+out="$(leak_gate)"
+if [ "$status" = ' M plugins/demo' ] && [ "$out" = "$leak_clean" ] && [ "$(cat "$T/leak-files" 2>&1)" = "$leak_scanned" ]; then
+  ok 'a submodule with new commits is a changed gitlink, never a changed file or a deleted path'
+else bad 'leak gate submodule with new commits' "$status" "$out" "$(cat "$T/leak-files" 2>&1)"; fi
 
 shtest_end

@@ -433,51 +433,35 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "version/config show/config validate/issues answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
 fi
 
-# ─── O1.14 — price table report and usage error ────────────────────────────
-
-beat O1.14-price
-spends none
-bad=""
-price_out="$(pfm price 2>&1)"; price_rc=$?
-if [ "$price_rc" -ne 0 ]; then
-  bad="$bad pfm price exited $price_rc: $(one_line "$price_out");"
-elif ! grep -qE '^price table: [0-9]+ rows · override: ' <<<"$price_out" ||
-  ! grep -qE '^KEY[[:space:]]+ENGINE[[:space:]]+MATCH[[:space:]]+IN[[:space:]]+OUT[[:space:]]+HIT[[:space:]]+CACHED[[:space:]]+W5M[[:space:]]+W1H[[:space:]]+LONG[[:space:]]+SOURCE$' <<<"$price_out"; then
-  bad="$bad pfm price omitted its summary or table header: $(one_line "$price_out");"
-fi
-check_out="$(pfm price --check 2>&1)"; check_rc=$?
-if [ "$check_rc" -ne 0 ] || ! grep -qE '^price table: ok · [0-9]+ rows · override: ' <<<"$check_out"; then
-  bad="$bad pfm price --check did not report a valid table (exit $check_rc): $(one_line "$check_out");"
-fi
-error_out="$(pfm price --json --check 2>&1)"; error_rc=$?
-if [ "$error_rc" -ne 2 ] || ! grep -qF 'pfm price: --json and --check are exclusive' <<<"$error_out"; then
-  bad="$bad pfm price conflicting flags did not name the usage error (exit $error_rc): $(one_line "$error_out");"
-fi
-if [ -n "$bad" ]; then fail "$bad"; else
-  pass "price table summary, columns and --check report; conflicting flags exit 2 with a named error"
-fi
-
-# ─── O1.15 — model-cost refuses before any fetch ──────────────────────────
+# ─── O1.15 — model-cost offline surface ────────────────────────────────────
 
 beat O1.15-model-cost
 spends none
 bad=""
 help_out="$(pfm model-cost --help 2>&1)"; help_rc=$?
-if [ "$help_rc" -ne 0 ] || ! grep -q -- '--all' <<<"$help_out"; then
-  bad="$bad pfm model-cost --help lacks its catalog flag (exit $help_rc): $(one_line "$help_out");"
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--all' <<<"$help_out" || ! grep -q -- '--force' <<<"$help_out" || ! grep -q -- '--check' <<<"$help_out"; then
+  bad="$bad pfm model-cost --help lacks --all, --force or --check (exit $help_rc): $(one_line "$help_out");"
 fi
 usage_out="$(pfm model-cost --all gpt-6.1-sol 2>&1)"; usage_rc=$?
 if [ "$usage_rc" -ne 2 ]; then
   bad="$bad pfm model-cost with both a model and --all exited $usage_rc, want 2: $(one_line "$usage_out");"
 fi
-refuse_out="$(pfm model-cost unlisted-provider/model 2>&1)"; refuse_rc=$?
-if [ "$refuse_rc" -ne 1 ] || ! grep -qF 'unsupported provider' <<<"$refuse_out"; then
-  bad="$bad pfm model-cost did not refuse an unsupported provider by name (exit $refuse_rc): $(one_line "$refuse_out");"
+json_out="$(pfm model-cost --check --json 2>&1)"; json_rc=$?
+if [ "$json_rc" -ne 2 ]; then
+  bad="$bad pfm model-cost --check --json exited $json_rc, want 2: $(one_line "$json_out");"
 fi
-# Live prices need the network the lane does not have; parsing, both catalogs
-# and exact numbers are proven by the fixture tests of internal/pricing/modelcost.
+check_out="$(PFM_PRICES_OFFLINE=1 pfm model-cost --check 2>&1)"; check_rc=$?
+if [ "$check_rc" -ne 0 ] || ! grep -qE '^prices: .* · refresh offline' <<<"$check_out"; then
+  bad="$bad pfm model-cost --check offline did not print its prices: summary (exit $check_rc): $(one_line "$check_out");"
+fi
+unknown_out="$(PFM_PRICES_OFFLINE=1 pfm model-cost lane-unpriced-model-9 2>&1)"; unknown_rc=$?
+if [ "$unknown_rc" -ne 1 ] || ! grep -qF 'pfm model-cost --all' <<<"$unknown_out"; then
+  bad="$bad pfm model-cost with an unknown id did not exit 1 naming pfm model-cost --all (exit $unknown_rc): $(one_line "$unknown_out");"
+fi
+# The lane has no network: refresh, derivation and exact rates are proven by the
+# fixture tests of internal/pricing and internal/pricing/modelcost.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "model-cost help names --all; model plus --all exits 2; an unsupported provider is refused by name before any fetch"
+  pass "model-cost help names --all/--force/--check; model plus --all and --check plus --json exit 2; offline --check prints its summary; an unknown id exits 1 naming --all"
 fi
 
 lane_end

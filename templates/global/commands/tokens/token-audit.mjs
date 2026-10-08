@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // token-audit.mjs — read-only audit of agent transcripts: where did the tokens go?
 // Claude Code JSONL transcripts AND Codex CLI rollouts, one pricing table for both.
-// Node builtins plus the pfm binary: live prices come from `pfm model-cost --json --all`. Bounded text report; --out FILE writes JSON.
+// Node builtins plus the pfm binary: prices come from `pfm model-cost --json --all`. Bounded text report; --out FILE writes JSON.
 //
 //   node token-audit.mjs [--since 24h|3d] [--root DIR]... [--project SUBSTR]
 //                        [--family SUBSTR] [--session SID] [--top N] [--out FILE]
@@ -12,7 +12,7 @@
 // Unit of analysis: a RUN = one transcript file = one main chat loop, one sub-agent,
 // or one Codex rollout thread. A FAMILY = a main chat plus every sub-agent it spawned.
 // Dollars are list-price estimates: they rank and compare, they are not a bill. A model
-// with no exact catalog ID or available rate renders "n/a" — never $0 — and its tokens still count.
+// with no priced key or available rate renders "n/a" — never $0 — and its tokens still count.
 import { parseOptions, die } from "./lib/options.mjs";
 import { loadTable, useTable } from "./lib/pricing.mjs";
 import { loadFlightPlan, runFlight } from "./lib/flight.mjs";

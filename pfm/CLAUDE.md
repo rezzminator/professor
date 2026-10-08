@@ -36,7 +36,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Environment Variables
 
-- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF` · `PFM_SKILL_SOURCES_OFFLINE` (install fetches no source-fetched skill; doctor reports OFFLINE).
+- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF` · `PFM_SKILL_SOURCES_OFFLINE` (install fetches no source-fetched skill; doctor reports OFFLINE) · `PFM_PRICES_OFFLINE` (no price refresh fetches, `--force` included; the embedded or clone table serves).
 - `PFM_TMUX_CONF` unset: a chat's tmux server loads the user's own `~/.tmux.conf`, since a chat is a terminal the user lives in; a jail sets it to `/dev/null` so a real machine config never steers a fixture.
 - Test knobs outside `internal/paths/`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`), `PFM_TEST_FRESH_SOCKET` (`internal/spawn/socket.go`).
 

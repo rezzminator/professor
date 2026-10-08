@@ -1,11 +1,12 @@
-// Package modelcost reads the current Claude and OpenAI API prices from the
-// two official pricing pages for `pfm model-cost`. Every lookup fetches both
-// pages; a fetch or parse failure is an error, never a stale or zero price.
+// Package modelcost refreshes the price table from the two official pricing
+// pages: it fetches and parses both pages, derives the table's rows from their
+// standard text-token tables, and persists them to the clone's prices.json at
+// most once a day. A fetch or parse failure is an error, never a stale or zero
+// price.
 package modelcost
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -27,70 +28,46 @@ const (
 	claudeURL         = "https://platform.claude.com/docs/en/about-claude/pricing.md"
 )
 
-// Input selects a published model or both complete provider catalogs.
-type Input struct {
-	Model string `json:"model,omitempty"`
-	All   bool   `json:"all,omitempty"`
-}
-
-// Cell preserves the publisher's text, including every exact numeric
-// spelling. Numbers are source tokens, not converted amounts: headers and
-// context establish their currencies, units, thresholds and conditions.
+// Cell is one table cell as the publisher wrote it.
 type Cell struct {
-	Text    string   `json:"text"`
-	Numbers []string `json:"numbers"`
+	Text string
 }
 
 // Table is a lossless table with its original headers and source lines.
 type Table struct {
-	Heading string   `json:"heading"`
-	Context string   `json:"context"`
-	Line    int      `json:"line"`
-	Headers []string `json:"headers"`
-	Rows    [][]Cell `json:"rows"`
+	Heading string
+	Context string
+	Line    int
+	Headers []string
+	Rows    [][]Cell
 }
 
 // Source is the exact successfully retrieved publisher document.
 type Source struct {
-	URL       string `json:"url"`
-	FetchedAt string `json:"fetched_at"`
-	SHA256    string `json:"sha256"`
-	Markdown  string `json:"markdown"`
+	URL       string
+	FetchedAt string
+	Markdown  string
 }
 
 // Model holds every row that explicitly names this published model.
 type Model struct {
-	ID     string  `json:"id"`
-	Tables []Table `json:"tables"`
+	ID     string
+	Tables []Table
 }
 
 // Catalog holds all models and ALL tables from one provider's page.
 // PageContext retains every non-table paragraph, including page-wide modifiers,
 // footnotes and examples that must not be mistaken for a particular model rate.
 type Catalog struct {
-	Provider       string   `json:"provider"`
-	Currency       string   `json:"currency"`
-	Models         []Model  `json:"models"`
-	Tables         []Table  `json:"tables"`
-	PageContext    string   `json:"page_context"`
-	ContextNumbers []string `json:"context_numbers"`
-	Source         Source   `json:"source"`
+	Provider    string
+	Currency    string
+	Models      []Model
+	Tables      []Table
+	PageContext string
+	Source      Source
 }
 
-// Output is a lookup or both complete catalogs, with cache freshness.
-type Output struct {
-	Model          string    `json:"model,omitempty"`
-	Provider       string    `json:"provider,omitempty"`
-	Currency       string    `json:"currency,omitempty"`
-	Tables         []Table   `json:"tables,omitempty"`
-	Source         *Source   `json:"source,omitempty"`
-	PageContext    string    `json:"page_context,omitempty"`
-	ContextNumbers []string  `json:"context_numbers,omitempty"`
-	Catalogs       []Catalog `json:"catalogs,omitempty"`
-	Coverage       string    `json:"coverage"`
-}
-
-// Fetcher retrieves and parses both official pricing pages on every lookup.
+// Fetcher retrieves and parses both official pricing pages.
 type Fetcher struct {
 	client *http.Client
 	clock  clock.Clock
@@ -107,94 +84,14 @@ func NewFetcher(client *http.Client, ticker clock.Clock) *Fetcher {
 	return &Fetcher{client: client, clock: ticker}
 }
 
-// Lookup returns one published model's rows, or both complete catalogs.
-func (s *Fetcher) Lookup(ctx context.Context, input Input) (Output, error) {
-	model, provider, err := Identity(input)
-	if err != nil {
-		return Output{}, err
-	}
-	catalogs, err := s.fetchCatalogs(ctx)
-	if err != nil {
-		return Output{}, err
-	}
-	out := Output{
-		Coverage: "Published direct API list prices on the two official pricing pages. All page tables and numeric text are preserved. Page context includes other models, platform-specific conditions and worked examples; apply only applicable conditions. Negotiated/account-specific prices and linked external platform tariffs are outside this catalog.",
-	}
-	if input.All {
-		out.Catalogs = catalogs
-		return out, nil
-	}
-	for catalogIndex := range catalogs {
-		catalog := &catalogs[catalogIndex]
-		if catalog.Provider != provider {
-			continue
-		}
-		for _, entry := range catalog.Models {
-			if entry.ID != model {
-				continue
-			}
-			out.Model, out.Provider, out.Currency = model, provider, catalog.Currency
-			source := catalog.Source
-			out.Source, out.PageContext, out.ContextNumbers = &source, catalog.PageContext, catalog.ContextNumbers
-			out.Tables = append([]Table{}, entry.Tables...)
-			for _, table := range catalog.Tables {
-				if modelColumn(table.Headers) < 0 {
-					out.Tables = append(out.Tables, table)
-				}
-			}
-			return out, nil
-		}
-	}
-	return Output{}, fmt.Errorf(
-		"model-cost: model %q is not published in the live %s pricing catalog; use --all for exact IDs (snapshot dates are never guessed)",
-		input.Model,
-		provider,
-	)
-}
-
-// Identity validates a request and returns its canonical model and provider.
-func Identity(input Input) (string, string, error) {
-	id := strings.ToLower(strings.TrimSpace(input.Model))
-	if input.All {
-		if id != "" {
-			return "", "", errors.New("model-cost: choose a model ID or --all, not both")
-		}
-		return "", "", nil
-	}
-	if id == "" {
-		return "", "", errors.New("model-cost: a model ID is required unless --all")
-	}
-	if len(id) > 160 || !regexp.MustCompile(`^[a-z0-9][a-z0-9./_-]*$`).MatchString(id) {
-		return "", "", errors.New("model-cost: provide a full model ID using letters, digits, dots and hyphens")
-	}
-	if prefix, rest, found := strings.Cut(id, "/"); found {
-		if prefix != providerOpenAI && prefix != providerAnthropic {
-			return "", "", fmt.Errorf("model-cost: unsupported provider %q; supported: openai, anthropic", prefix)
-		}
-		id = rest
-		if (prefix == providerAnthropic) != strings.HasPrefix(id, "claude-") {
-			return "", "", errors.New("model-cost: provider prefix does not match the full model ID")
-		}
-	}
-	if strings.HasPrefix(id, "claude-") {
-		return strings.ReplaceAll(id, ".", "-"), providerAnthropic, nil
-	}
-	for _, prefix := range []string{"gpt-", "chatgpt-", "chat-", "o1", "o3", "o4", "text-", "tts-", "whisper-", "dall-e-", "omni-", "davinci-", "babbage-", "sora-", "codex-"} {
-		if strings.HasPrefix(id, prefix) {
-			return id, providerOpenAI, nil
-		}
-	}
-	return "", "", errors.New(
-		"model-cost: unsupported or ambiguous model; provide a full model ID (claude-opus-5-5 or gpt-6.1-sol); supported providers: anthropic, openai",
-	)
-}
-
-func (s *Fetcher) fetchCatalogs(ctx context.Context) ([]Catalog, error) {
+// Fetch retrieves and parses both official pricing pages, Claude first; any
+// fetch or parse failure is an error, never a partial catalog.
+func (s *Fetcher) Fetch(ctx context.Context) ([]Catalog, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	catalogs := make([]Catalog, 0, 2)
 	for _, provider := range []struct{ name, url string }{{providerAnthropic, claudeURL}, {providerOpenAI, openAIURL}} {
-		source, err := s.fetch(ctx, provider.url)
+		source, err := s.fetchSource(ctx, provider.url)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +104,7 @@ func (s *Fetcher) fetchCatalogs(ctx context.Context) ([]Catalog, error) {
 	return catalogs, nil
 }
 
-func (s *Fetcher) fetch(ctx context.Context, sourceURL string) (Source, error) {
+func (s *Fetcher) fetchSource(ctx context.Context, sourceURL string) (Source, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, http.NoBody)
 	if err != nil {
 		return Source{}, fmt.Errorf("model-cost: request %s: %w", sourceURL, err)
@@ -255,13 +152,11 @@ func (s *Fetcher) fetch(ctx context.Context, sourceURL string) (Source, error) {
 	return Source{
 		URL:       sourceURL,
 		FetchedAt: s.clock.Now().UTC().Format(time.RFC3339Nano),
-		SHA256:    fmt.Sprintf("%x", sha256.Sum256(body)),
 		Markdown:  text,
 	}, nil
 }
 
 var (
-	numberPattern     = regexp.MustCompile(`\d+(?:,\d{3})*(?:\.\d+)?`)
 	linkPattern       = regexp.MustCompile(`\[([^]]+)\]\([^)]*\)`)
 	tagPattern        = regexp.MustCompile(`<[^>]*>`)
 	claudeNamePattern = regexp.MustCompile(`(?i)claude\s+[a-z]+(?:\s+\d+(?:\.\d+)?)?`)
@@ -324,11 +219,7 @@ func parseCatalog(provider string, source Source) (Catalog, error) {
 			}
 			row := make([]Cell, len(cells))
 			for j, cell := range cells {
-				numbers := numberPattern.FindAllString(cell, -1)
-				if numbers == nil {
-					numbers = []string{}
-				}
-				row[j] = Cell{Text: cell, Numbers: numbers}
+				row[j] = Cell{Text: cell}
 			}
 			table.Rows = append(table.Rows, row)
 			if column >= 0 {
@@ -366,10 +257,6 @@ func parseCatalog(provider string, source Source) (Catalog, error) {
 		catalog.Models = append(catalog.Models, Model{ID: id, Tables: models[id]})
 	}
 	catalog.PageContext = strings.Join(contextLines, "\n")
-	catalog.ContextNumbers = numberPattern.FindAllString(catalog.PageContext, -1)
-	if catalog.ContextNumbers == nil {
-		catalog.ContextNumbers = []string{}
-	}
 	return catalog, nil
 }
 

@@ -127,7 +127,7 @@ export function runReport(opts, agg) {
   if (!hc.length) L("  no chat qualifies — the estimate is UNCHECKED on this host");
   else { const mine = hc.reduce((a, x) => a + x.f.own + x.f.agents, 0), mineOwn = hc.reduce((a, x) => a + x.f.own, 0), theirs = hc.reduce((a, x) => a + x.r.harnessUsd, 0);
     const lc = hc.reduce((a, x) => a + x.r.usdLC + x.f.agentRuns.reduce((b, r) => b + r.usdLC, 0), 0);
-    L(`  at the published context tiers (per-model rate in the live pfm model-cost catalog — an estimate): ${$(lc)} (${(lc / theirs).toFixed(2)}x)`);
+    L(`  at the published context tiers (per-model rate in the pfm model-cost table — an estimate): ${$(lc)} (${(lc / theirs).toFixed(2)}x)`);
     L(`  ${hc.length} chats · harness says ${$(theirs)} · this audit says ${$(mine)} with agents (${(mine / theirs).toFixed(2)}x) / ${$(mineOwn)} main loops only (${(mineOwn / theirs).toFixed(2)}x)`); }
 
   if (OUT) { const slim = (r, i) => ({ ...r, i, file: path.relative(SCAN.roots[0], r.file), cats: Object.fromEntries(CATS.map((c, k) => [c, +r.cats[k].toFixed(4)]).filter((x) => x[1] > 0)), series: i < 25 ? r.series : undefined, tl: undefined, tlf: undefined, brief: undefined, land: undefined, usd: r.unpriced ? null : +r.usd.toFixed(4) });

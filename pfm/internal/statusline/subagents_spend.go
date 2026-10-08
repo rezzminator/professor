@@ -85,7 +85,7 @@ func (usage billedUsage) billed() pricing.ClaudeUsage {
 // count growing to the final one on the last, so per message id the last line
 // counts; a line with no id counts on its own.
 type spendScan struct {
-	prices    *pricing.Table
+	prices    *pricing.Prices
 	responses map[string]response
 	unkeyed   agentSpend
 	tools     map[string]struct{}
@@ -96,7 +96,7 @@ type response struct {
 	billed pricing.ClaudeUsage
 }
 
-func newSpendScan(prices *pricing.Table) *spendScan {
+func newSpendScan(prices *pricing.Prices) *spendScan {
 	return &spendScan{prices: prices, responses: map[string]response{}, tools: map[string]struct{}{}}
 }
 
@@ -134,11 +134,13 @@ func (scan *spendScan) price(model string, billed pricing.ClaudeUsage) agentSpen
 	if scan.prices != nil && model != "" {
 		row, ok = scan.prices.Resolve(model)
 	}
+	if ok {
+		spend.usd, ok = row.ClaudeCost(billed)
+	}
 	if !ok {
 		spend.partial = true
 		return spend
 	}
-	spend.usd = row.ClaudeCost(billed)
 	spend.priced = 1
 	return spend
 }
@@ -198,7 +200,7 @@ func sessionSpend(sessionTranscript string) (agentSpend, error) {
 
 // readTranscriptSpend prices a whole transcript; a torn final line is the
 // agent mid-write and is skipped.
-func readTranscriptSpend(path string, prices *pricing.Table) (agentSpend, error) {
+func readTranscriptSpend(path string, prices *pricing.Prices) (agentSpend, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return agentSpend{}, fmt.Errorf("open sub-agent transcript %s: %w", path, err)
@@ -224,7 +226,7 @@ func readTranscriptSpend(path string, prices *pricing.Table) (agentSpend, error)
 // transcript read once per render. A tree that could not be scanned, or a
 // transcript that could not be read, leaves the sum partial and its cause in
 // the tree's warnings.
-func (tree *agentTree) nestedSpend(id string, prices *pricing.Table) agentSpend {
+func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend {
 	if tree.err != nil {
 		return agentSpend{partial: true}
 	}

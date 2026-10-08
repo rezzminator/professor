@@ -17,6 +17,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
@@ -158,21 +159,27 @@ var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // row context in, one {id,content} JSON line per agent-panel row out.
 // Fail-open like the main line — any error prints nothing and exits 0, so
 // every row keeps Claude Code's own body instead of the harness logging a
-// failed command each tick. The price table is the one beside pfmConfigPath;
-// one that cannot load leaves every row's dollars "$?", its cause on stderr.
-func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, sidDir, pfmConfigPath string) int {
+// failed command each tick. The price table is the machine's served one
+// (pricing.LoadPrices: the clone file or the embedded copy, the override beside
+// pfmConfigPath merged), never fetched; one that cannot load leaves every
+// row's dollars "$?", its cause on stderr.
+func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, machine paths.Values, pfmConfigPath string) int {
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: read input (fail-open): %v\n", err)
 		return 0
 	}
-	var prices *pricing.Table
-	if table, err := pricing.Effective(pfmConfigPath); err != nil {
+	var prices *pricing.Prices
+	if table, err := pricing.LoadPrices(machine.Home, pfmConfigPath); err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: price table (rows show $?): %v\n", err)
 	} else {
 		prices = &table
+		if table.FileError != nil {
+			fmt.Fprintf(stderr, "pfm statusline --subagents: clone prices unusable, pricing from the %s table: %v\n",
+				table.From, table.FileError)
+		}
 	}
-	rows, err := RenderSubagents(raw, clock.Real.Now(), sidDir, prices, stderr)
+	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: render (fail-open): %v\n", err)
 		return 0
@@ -188,7 +195,7 @@ func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, sidDir, pfmConfig
 // a task it omits keeps Claude Code's own row body. A sub-agent transcript
 // that cannot be read renders "?" in its row and its cause goes to warn. A nil
 // prices leaves every row's dollars unpriced.
-func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.Table, warn io.Writer) (string, error) {
+func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.Prices, warn io.Writer) (string, error) {
 	var data subagentInput
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("parse subagent row context: %w", err)
@@ -506,7 +513,7 @@ func plural(count int, noun string) string {
 // boundaries, takes the cache hit and the effort from the newest assistant
 // entry that carries each, the newest entry timestamp, and what its responses
 // billed. A torn final line — the agent is mid-write — is skipped, not an error.
-func readAgentActivity(sessionTranscript, id string, prices *pricing.Table) agentActivity {
+func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) agentActivity {
 	activity := agentActivity{cacheHit: -1}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		activity.err = errors.New("payload names no session transcript")

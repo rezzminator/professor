@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
@@ -67,15 +68,25 @@ func subagentSession(t *testing.T, agents map[string][]string, roles map[string]
 	return session
 }
 
-// testPrices is the shipped price table, the one a machine without an override
-// renders with.
-func testPrices(t *testing.T) *pricing.Table {
+// testPrices is a served table holding the rows the fixtures' models resolve
+// to; claude-haiku-4 and claude-nonesuch-9 stay unpriced.
+func testPrices(t *testing.T) *pricing.Prices {
 	t.Helper()
-	table, err := pricing.Shipped()
+	table, err := pricing.DecodeTable([]byte(`{"version":2,"fetched_at":"2026-10-07T23:02:05Z",
+		"sources":[{"provider":"anthropic","url":"https://platform.claude.com/docs/en/about-claude/pricing.md"}],
+		"rows":[
+		{"key":"claude-opus-4-1","engine":"claude","in":15,"out":75,"hit":1.5,"w5m":18.75,"w1h":30},
+		{"key":"claude-opus-5-5","engine":"claude","in":4,"out":20,"hit":0.2,"w5m":5,"w1h":8},
+		{"key":"claude-sonnet-5","engine":"claude","in":2,"out":10,"hit":0.2,"w5m":2.5,"w1h":4},
+		{"key":"claude-sonnet-5-5","engine":"claude","in":2,"out":10,"hit":0.2,"w5m":2.5,"w1h":4}]}`), "status line test prices")
 	if err != nil {
-		t.Fatalf("shipped price table: %v", err)
+		t.Fatalf("test price table: %v", err)
 	}
-	return &table
+	prices, err := pricing.ServeTable(table, pricing.Origin{From: pricing.FromEmbedded}, "")
+	if err != nil {
+		t.Fatalf("serve test price table: %v", err)
+	}
+	return &prices
 }
 
 func jsonText(value any) string {
@@ -331,5 +342,33 @@ func TestRenderSubagentsCacheWindowFromItsOwnTranscript(t *testing.T) {
 		`{"id":"s1","type":"local_agent","status":"running","contextWindowSize":1000,"tokenCount":10}`)
 	if !strings.HasSuffix(got, "│💾1h✓59m:0s 48%") {
 		t.Fatalf("content = %q, want the agent's own 1h window from its sidechain records and 48%%", got)
+	}
+}
+
+// A clone prices.json that cannot be used leaves the rows priced from the
+// embedded copy; the cause still reaches stderr, never a silent fallback.
+func TestServeSubagentsNamesAnUnusableClonePricesFile(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	file := filepath.Join(clone, filepath.FromSlash(pricing.FileRel))
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	file, err := pricing.CloneFile(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	machine := paths.Values{Home: home, SIDDir: t.TempDir()}
+	if code := ServeSubagents(strings.NewReader(`{"tasks":[]}`), &stdout, &stderr, machine, ""); code != 0 {
+		t.Fatalf("ServeSubagents exit %d, want the fail-open 0", code)
+	}
+	if !strings.Contains(stderr.String(), file) {
+		t.Fatalf("stderr = %q, want the unusable clone prices file %s named", stderr.String(), file)
 	}
 }

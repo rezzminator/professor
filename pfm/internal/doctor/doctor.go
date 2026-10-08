@@ -30,6 +30,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/pricing/modelcost"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stats"
@@ -57,6 +58,9 @@ type Dependencies struct {
 	Env                        paths.Env
 	Runner                     deps.Runner
 	Listen                     func(string, string) (net.Listener, error)
+	// FetchPrices fetches the publishers' pricing pages for the price
+	// refresh; nil fetches the real pages.
+	FetchPrices func(context.Context) ([]modelcost.Catalog, error)
 }
 
 func normalizeDependencies(dependencies Dependencies) Dependencies {
@@ -165,7 +169,7 @@ func Run(
 	tally.failures += configFailures
 	tally.warnings += printHarvesterConfigDoctorWithEnv(stdout, runtime, dependencies.Env)
 	tally.warnings += printDuplicateSeatLogins(stdout, runtime, dependencies.Env)
-	tally.warnings += printPriceOverride(stdout, runtime)
+	tally.warnings += printPrices(stdout, runtime, dependencies)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
 	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	tally.warnings += PrintEngineCapabilities(stdout, dependencies)

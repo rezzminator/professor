@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/pricing/modelcost"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -215,6 +216,14 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			confirmation += " --skip-themes"
 		}
 		fmt.Fprintln(stdout, confirmation)
+	}
+	if code == 0 && mode == installer.ModeApply {
+		installer.RefreshPrices(stdout, modelcost.Options{
+			Home:       runtime.Paths.Home,
+			ConfigPath: runtime.Config.Path,
+			Offline:    paths.PricesOffline(),
+			Clock:      clock.Real,
+		})
 	}
 	return code
 }

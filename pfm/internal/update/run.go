@@ -187,6 +187,9 @@ func updateRepository(
 	if !slices.Contains(tags, target) {
 		return fmt.Errorf("target tag %q is not present after fetch", target)
 	}
+	if err := restoreRefreshedPrices(ctx, repo, stdout); err != nil {
+		return err
+	}
 	status, err := updateGitOutput(ctx, repo, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return fmt.Errorf("inspect worktree: %w", err)
@@ -308,6 +311,12 @@ func updateRepository(
 	}
 	sourceAdvanced := false
 	if !sourceAlreadyContainsTarget {
+		// Update's own children never refresh prices (updateSourceRepoEnv),
+		// but another pfm process may have since the dirty check: a table it
+		// rewrote goes back first, or the fast-forward refuses it.
+		if err := restoreRefreshedPrices(ctx, repo, stdout); err != nil {
+			return err
+		}
 		if err := updateGitRun(ctx, repo, "merge", "--ff-only", "--quiet", target); err != nil {
 			return fmt.Errorf("fast-forward source branch to %s: %w", target, err)
 		}

@@ -104,6 +104,14 @@ else bad "build network and Go proxy" "$(cat "$STUB_DOCKER_LOG")"; fi
 if grep -q -- '-e MOCK_ENGINE_SCENARIO=/root/.local/share/pfm-lanes/default.json' "$STUB_DOCKER_LOG"; then ok "every container receives the default mock scenario"
 else bad "scenario environment" "$(cat "$STUB_DOCKER_LOG")"; fi
 
+# 4b — pfm install, doctor and model-cost refresh prices unless PFM_PRICES_OFFLINE=1: the root
+# build and the network-less run container both carry it, so no lane step fetches.
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-build pfm-lane-base:cafe01
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01 none
+if [ "$(grep -c -- '^run -d .* -e PFM_PRICES_OFFLINE=1 ' "$STUB_DOCKER_LOG")" -eq 2 ]; then ok "the root build and the run container both set PFM_PRICES_OFFLINE=1"
+else bad "price refresh knob" "$(cat "$STUB_DOCKER_LOG")"; fi
+
 # 5 — optional docker arguments follow the network selector before the image.
 : >"$STUB_DOCKER_LOG"
 PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-build pfm-lane-base:cafe01 '' -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy

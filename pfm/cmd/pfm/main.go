@@ -22,7 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
-	pricecmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
+	modelcostcmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -59,7 +59,7 @@ var topLevelSubcommands = []string{
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
-	"price", "model-cost",
+	"model-cost",
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
@@ -141,9 +141,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	case "log":
 		return runLog(args[1:], stdout, stderr, runtime)
 	case "model-cost":
-		return pricecmd.ModelCost(args[1:], stdout, stderr)
-	case "price":
-		return pricecmd.Price(args[1:], stdout, stderr, runtime)
+		return modelcostcmd.ModelCost(args[1:], stdout, stderr, runtime)
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -216,8 +214,7 @@ func printUsage(w io.Writer) {
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
-		"  model-cost live Claude/OpenAI API prices: --json --all MODEL_ID",
-		"  price     print the model price table pfm owns: --json --check",
+		"  model-cost the model price table, refreshed daily: MODEL_ID --all --check --json --force",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
 		"  statusline render the native Claude status line",

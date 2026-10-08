@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 var updateRunner deps.Runner = obs.Runner(deps.RealRunner{})
@@ -194,6 +195,19 @@ func runUpdateCandidateCommand(
 	)
 }
 
+// updateSourceRepoEnv is every update child's environment (the baseline
+// doctor, the candidate install and doctor, a rollback's install): the source
+// repository explicit, and no price refresh — a child that rewrote the clone's
+// tracked prices.json would refuse the fast-forward and a rollback's
+// `git reset --keep`. The first refresh after the update fetches.
 func updateSourceRepoEnv(sourceRepo string) []string {
-	return deps.EnvironmentWith("PFM_SOURCE_REPO", sourceRepo)
+	offline := paths.EnvPricesOffline + "="
+	inherited := deps.EnvironmentWith("PFM_SOURCE_REPO", sourceRepo)
+	environment := make([]string, 0, len(inherited)+1)
+	for _, entry := range inherited {
+		if !strings.HasPrefix(entry, offline) {
+			environment = append(environment, entry)
+		}
+	}
+	return append(environment, offline+"1")
 }

@@ -67,6 +67,11 @@ const (
 	// manifest or remote theme file; themes bundled in the source clone still install.
 	// The test harness sets it so no test fetches themes from a public repository.
 	EnvThemesOffline = "PFM_THEMES_OFFLINE"
+	// EnvPricesOffline=1 stops every price refresh — pfm model-cost, pfm
+	// install, pfm doctor — from fetching the publishers' pricing pages; the
+	// served table stays the clone file or the embedded copy. The test harness
+	// and the fence lanes set it so no test fetches a pricing page.
+	EnvPricesOffline = "PFM_PRICES_OFFLINE"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
@@ -124,6 +129,12 @@ var (
 	ErrNoSourceRepoMarker = errors.New("no source repository recorded")
 	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
 )
+
+// PricesStampPath is the record of the last price check that confirmed the
+// clone's prices.json, kept outside the clone so a check never dirties it.
+func PricesStampPath(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "prices-checked")
+}
 
 // SourceRepoPath returns the install-owned clone marker location.
 func SourceRepoPath(home string) string {
@@ -586,6 +597,17 @@ func ThemesOffline() bool {
 // ThemesOfflineIn is ThemesOffline read from env, the environment a caller was handed.
 func ThemesOfflineIn(env Env) bool {
 	return env.Get(EnvThemesOffline) == "1"
+}
+
+// PricesOffline reports EnvPricesOffline=1: no price refresh fetches the
+// publishers' pricing pages.
+func PricesOffline() bool {
+	return PricesOfflineIn(OSEnv{})
+}
+
+// PricesOfflineIn is PricesOffline read from env, the environment a caller was handed.
+func PricesOfflineIn(env Env) bool {
+	return env.Get(EnvPricesOffline) == "1"
 }
 
 // PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.

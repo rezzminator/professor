@@ -41,7 +41,7 @@ func runStatuslineWithRuntime(
 		return 2
 	}
 	if *subagents {
-		return statusline.ServeSubagents(stdin, stdout, stderr, machine.Paths.SIDDir, machine.Config.Path)
+		return statusline.ServeSubagents(stdin, stdout, stderr, machine.Paths, machine.Config.Path)
 	}
 
 	ctx := context.Background()

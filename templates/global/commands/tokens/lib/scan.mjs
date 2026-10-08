@@ -22,7 +22,8 @@ export const SCAN = { roots: [], files: 0, skippedOld: 0, dupFiles: 0, badLines:
 // that exists only in --out JSON is a gap the text report claims not to have; the
 // synthetic-call drop used to be exactly that.
 export function gapsLine() {
-  const loud = [], ov = priceOverride();
+  const loud = [], ov = priceOverride(), catalog = priceCatalog();
+  if (catalog?.refresh?.status === "failed") loud.push(`price refresh failed (${catalog.refresh.error || "no cause given"}) — served the table fetched ${catalog.fetched_at}`);
   if (ov) loud.push(`price override active: ${ov.rows} rows from ${ov.path}`);
   if (SCAN.badLines) loud.push(`${SCAN.badLines} malformed lines`);
   if (SCAN.noTimestamp) loud.push(`${SCAN.noTimestamp} calls without a timestamp (dropped)`);
@@ -37,8 +38,7 @@ export function gapsLine() {
   for (const n of SCAN.notes.slice(0, 4)) loud.push(n);
   if (SCAN.notes.length > 4) loud.push(`${SCAN.notes.length - 4} further notes (see --out JSON scan.notes)`);
   if (SCAN.readErrors.length) loud.push(`${SCAN.readErrors.length} READ ERRORS: ${SCAN.readErrors.slice(0, 3).join(" | ")}`);
-  const catalog = priceCatalog();
-  const pricing = catalog ? `pricing: ${catalog.saved ? "saved catalog snapshot" : "current API list-price estimate"}; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); ${catalog.sources.map((s) => `${s.provider} fetched ${s.fetched_at}`).join("; ")}; not historical billing\n` : "";
+  const pricing = catalog ? `pricing: ${catalog.saved ? `saved table ${catalog.saved}` : "current API list prices"}; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched ${catalog.fetched_at} from ${catalog.sources.map((s) => s.provider).join(", ")}; not historical billing\n` : "";
   return pricing + (loud.length ? "data gaps: " + loud.join(" · ") : "data gaps: none");
 }
 export function walk(dir, out, opts) {

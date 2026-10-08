@@ -438,7 +438,7 @@ func (h *e2eHarness) environment(home string) []string {
 		"PFM_HARVESTPY_OFFLINE": "1",
 		// Keep the whole-home refusal snapshot free of diagnostic log writes.
 		"PFM_LOG_LEVEL":             "off",
-		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1",
+		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1", "PFM_PRICES_OFFLINE": "1",
 	}
 	return appendCleanEnv(os.Environ(), values)
 }

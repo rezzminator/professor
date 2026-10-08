@@ -5,7 +5,11 @@ import (
 )
 
 // harvestRuntime resolves this machine's harvester config into the MCP
-// adapter's runtime (harvestmcp.RuntimeFromConfig).
+// adapter's runtime (harvestmcp.RuntimeFromConfig), with the machine config
+// read's ask runs its engine under.
 func harvestRuntime(runtime commandRuntime) harvestmcp.Runtime {
-	return harvestmcp.RuntimeFromConfig(runtime.Paths.Home, runtime.Config.Harvester)
+	harvester := harvestmcp.RuntimeFromConfig(runtime.Paths.Home, runtime.Config.Harvester)
+	machine := runtime.Config
+	harvester.Machine = &machine
+	return harvester
 }

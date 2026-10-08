@@ -41,7 +41,7 @@ func NewProcess(ctx context.Context, kind string) *Process {
 }
 
 // Started records the start: op=start with the pid at INFO, or the start
-// error at ERROR when the process never came up.
+// error at ERROR when the process never came up (INFO for a caller's cancel).
 func (process *Process) Started(pid int, err error) {
 	process.pid = pid
 	process.started = process.timing.Now()
@@ -50,8 +50,8 @@ func (process *Process) Started(pid int, err error) {
 
 // Request opens one request to the sidecar under subcmd and returns the
 // function that records its answer: the bytes read back, dur_ms, attrs (the
-// converter pool's wait_ms, queue and workers), and err (at ERROR when set).
-// Call it exactly once per request.
+// converter pool's wait_ms, queue and workers), and err (at ERROR when set,
+// INFO for a caller's cancel). Call it exactly once per request.
 func (process *Process) Request(subcmd string, attrs ...slog.Attr) func(size int, err error) {
 	started := process.timing.Now()
 	return func(size int, err error) {
@@ -125,8 +125,9 @@ func (process *Process) Killed(err error) {
 
 // Exited records the terminal state from Wait's error: exit=0 at INFO for a
 // clean exit, the exit code at WARN for a non-zero status, and any other
-// error (a signal, a wait failure) at ERROR — with dur_ms since Started. Any
-// partial stderr line still buffered is flushed first.
+// error (a signal, a wait failure) at ERROR, a caller's cancel at INFO —
+// with dur_ms since Started. Any partial stderr line still buffered is
+// flushed first.
 func (process *Process) Exited(err error) {
 	if process.stderr != nil {
 		process.stderr.flush()
@@ -154,19 +155,18 @@ func (process *Process) Exited(err error) {
 	process.log("exit", err, attrs...)
 }
 
-// log writes one lifecycle record: op, kind, the pid once known, err at ERROR.
+// log writes one lifecycle record: op, kind, the pid once known, err at ERROR
+// — INFO when the caller cancelled the sidecar on purpose (processLevel).
 func (process *Process) log(op string, err error, attrs ...slog.Attr) {
 	record := []slog.Attr{slog.String("op", op), slog.String("kind", process.kind)}
 	if process.pid > 0 {
 		record = append(record, slog.Int(FieldPID, process.pid))
 	}
 	record = append(record, attrs...)
-	level := slog.LevelInfo
 	if err != nil {
-		level = slog.LevelError
 		record = append(record, slog.String(FieldErr, err.Error()))
 	}
-	process.logger.LogAttrs(process.ctx, level, "harvestpy."+op, record...)
+	process.logger.LogAttrs(process.ctx, processLevel(err), "harvestpy."+op, record...)
 }
 
 // maxPartialLine is the longest unterminated stderr line lineWriter holds

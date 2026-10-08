@@ -102,7 +102,10 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		if result, ok := tryScholar(); ok {
 			return result
 		}
-		failure := Result{Source: source, Error: err.Error(), ErrorKind: resolverFailureKind, Rungs: trace}
+		failure := Result{
+			Source: source, Error: err.Error(), ErrorKind: resolverFailureKind,
+			HTTPStatus: doiResolverHTTPStatus(err), Rungs: trace,
+		}
 		if doiMirrorFailure != nil {
 			failure = mergeResolverFailure(failure, *doiMirrorFailure)
 		}

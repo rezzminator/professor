@@ -1,0 +1,348 @@
+{
+ "status": {
+  "type": "status",
+  "url": "https://x.com/example_user/status/1000000000000000001",
+  "id": "1000000000000000001",
+  "text": "A first paragraph of the post.\n\nA second paragraph of the post.\n\nA third paragraph & its last line",
+  "raw_text": {
+   "text": "A first paragraph of the post.\n\nA second paragraph of the post.\n\nA third paragraph & its last line https://t.co/exampleAAA",
+   "display_text_range": [
+    0,
+    98
+   ],
+   "facets": [
+    {
+     "type": "media",
+     "indices": [
+      99,
+      122
+     ],
+     "id": "1000000000000000003",
+     "display": "pic.x.com/exampleAAA",
+     "original": "https://t.co/exampleAAA",
+     "replacement": "https://x.com/example_user/status/1000000000000000001/video/1"
+    }
+   ]
+  },
+  "author": {
+   "screen_name": "example_user",
+   "url": "https://x.com/example_user",
+   "id": "1000000000000000009",
+   "followers": 1000,
+   "following": 100,
+   "likes": 500,
+   "media_count": 10,
+   "statuses": 2000,
+   "name": "Example User",
+   "description": "",
+   "raw_description": {
+    "text": "",
+    "facets": []
+   },
+   "location": "",
+   "banner_url": "https://pbs.twimg.com/profile_banners/1000000000000000009/1700000000",
+   "avatar_url": "https://pbs.twimg.com/profile_images/1000000000000000009/example_200x200.jpg",
+   "joined": "Sat Jan 01 00:00:00 +0000 2011",
+   "protected": false,
+   "website": null,
+   "verification": {
+    "verified": true,
+    "verified_at": null,
+    "type": "individual"
+   },
+   "type": "profile"
+  },
+  "replies": 21,
+  "reposts": 17,
+  "likes": 40,
+  "bookmarks": 44,
+  "quotes": 6,
+  "embed_card": "player",
+  "created_at": "Sun Jul 26 18:55:44 +0000 2026",
+  "created_timestamp": 1785092144,
+  "possibly_sensitive": false,
+  "views": 1000,
+  "is_note_tweet": false,
+  "community_note": null,
+  "lang": "en",
+  "replying_to": null,
+  "media": {
+   "all": [
+    {
+     "id": "1000000000000000003",
+     "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+     "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1000000000000000003/img/example.jpg",
+     "duration": 188.1,
+     "width": 1280,
+     "height": 720,
+     "format": "video/mp4",
+     "type": "video",
+     "formats": [
+      {
+       "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+       "bitrate": 2176000,
+       "container": "mp4",
+       "codec": "h264"
+      }
+     ],
+     "publisher": null
+    }
+   ],
+   "videos": [
+    {
+     "id": "1000000000000000003",
+     "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+     "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1000000000000000003/img/example.jpg",
+     "duration": 188.1,
+     "width": 1280,
+     "height": 720,
+     "format": "video/mp4",
+     "type": "video",
+     "formats": [
+      {
+       "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+       "bitrate": 2176000,
+       "container": "mp4",
+       "codec": "h264"
+      }
+     ],
+     "publisher": null
+    }
+   ]
+  },
+  "provider": "twitter",
+  "reposted_by": null
+ },
+ "thread": [
+  {
+   "type": "status",
+   "url": "https://x.com/example_user/status/1000000000000000001",
+   "id": "1000000000000000001",
+   "text": "A first paragraph of the post.\n\nA second paragraph of the post.\n\nA third paragraph & its last line",
+   "raw_text": {
+    "text": "A first paragraph of the post.\n\nA second paragraph of the post.\n\nA third paragraph & its last line https://t.co/exampleAAA",
+    "display_text_range": [
+     0,
+     98
+    ],
+    "facets": [
+     {
+      "type": "media",
+      "indices": [
+       99,
+       122
+      ],
+      "id": "1000000000000000003",
+      "display": "pic.x.com/exampleAAA",
+      "original": "https://t.co/exampleAAA",
+      "replacement": "https://x.com/example_user/status/1000000000000000001/video/1"
+     }
+    ]
+   },
+   "author": {
+    "screen_name": "example_user",
+    "url": "https://x.com/example_user",
+    "id": "1000000000000000009",
+    "followers": 1000,
+    "following": 100,
+    "likes": 500,
+    "media_count": 10,
+    "statuses": 2000,
+    "name": "Example User",
+    "description": "",
+    "raw_description": {
+     "text": "",
+     "facets": []
+    },
+    "location": "",
+    "banner_url": "https://pbs.twimg.com/profile_banners/1000000000000000009/1700000000",
+    "avatar_url": "https://pbs.twimg.com/profile_images/1000000000000000009/example_200x200.jpg",
+    "joined": "Sat Jan 01 00:00:00 +0000 2011",
+    "protected": false,
+    "website": null,
+    "verification": {
+     "verified": true,
+     "verified_at": null,
+     "type": "individual"
+    },
+    "type": "profile"
+   },
+   "replies": 21,
+   "reposts": 17,
+   "likes": 40,
+   "bookmarks": 44,
+   "quotes": 6,
+   "embed_card": "player",
+   "created_at": "Sun Jul 26 18:55:44 +0000 2026",
+   "created_timestamp": 1785092144,
+   "possibly_sensitive": false,
+   "views": 1000,
+   "is_note_tweet": false,
+   "community_note": null,
+   "lang": "en",
+   "replying_to": null,
+   "media": {
+    "all": [
+     {
+      "id": "1000000000000000003",
+      "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1000000000000000003/img/example.jpg",
+      "duration": 188.1,
+      "width": 1280,
+      "height": 720,
+      "format": "video/mp4",
+      "type": "video",
+      "formats": [
+       {
+        "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+        "bitrate": 2176000,
+        "container": "mp4",
+        "codec": "h264"
+       }
+      ],
+      "publisher": null
+     }
+    ],
+    "videos": [
+     {
+      "id": "1000000000000000003",
+      "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1000000000000000003/img/example.jpg",
+      "duration": 188.1,
+      "width": 1280,
+      "height": 720,
+      "format": "video/mp4",
+      "type": "video",
+      "formats": [
+       {
+        "url": "https://video.twimg.com/amplify_video/1000000000000000003/vid/avc1/1280x720/example.mp4",
+        "bitrate": 2176000,
+        "container": "mp4",
+        "codec": "h264"
+       }
+      ],
+      "publisher": null
+     }
+    ]
+   },
+   "provider": "twitter",
+   "reposted_by": null
+  },
+  {
+   "type": "status",
+   "url": "https://x.com/example_user/status/1000000000000000002",
+   "id": "1000000000000000002",
+   "text": "https://example.org/project",
+   "raw_text": {
+    "text": "https://t.co/exampleBBB",
+    "display_text_range": [
+     0,
+     23
+    ],
+    "facets": [
+     {
+      "type": "url",
+      "indices": [
+       0,
+       23
+      ],
+      "original": "https://t.co/exampleBBB",
+      "replacement": "https://example.org/project",
+      "display": "example.org/project"
+     }
+    ]
+   },
+   "author": {
+    "screen_name": "example_user",
+    "url": "https://x.com/example_user",
+    "id": "1000000000000000009",
+    "followers": 1000,
+    "following": 100,
+    "likes": 500,
+    "media_count": 10,
+    "statuses": 2000,
+    "name": "Example User",
+    "description": "",
+    "raw_description": {
+     "text": "",
+     "facets": []
+    },
+    "location": "",
+    "banner_url": "https://pbs.twimg.com/profile_banners/1000000000000000009/1700000000",
+    "avatar_url": "https://pbs.twimg.com/profile_images/1000000000000000009/example_200x200.jpg",
+    "joined": "Sat Jan 01 00:00:00 +0000 2011",
+    "protected": false,
+    "website": null,
+    "verification": {
+     "verified": true,
+     "verified_at": null,
+     "type": "individual"
+    },
+    "type": "profile"
+   },
+   "replies": 2,
+   "reposts": 1,
+   "likes": 5,
+   "bookmarks": 3,
+   "quotes": 0,
+   "embed_card": "tweet",
+   "created_at": "Sun Jul 26 18:56:48 +0000 2026",
+   "created_timestamp": 1785092208,
+   "possibly_sensitive": false,
+   "views": 500,
+   "is_note_tweet": false,
+   "community_note": null,
+   "lang": null,
+   "replying_to": {
+    "screen_name": "example_user",
+    "status": "1000000000000000001",
+    "url": "https://x.com/example_user/status/1000000000000000001",
+    "profile_url": "https://x.com/example_user"
+   },
+   "media": {},
+   "card": {
+    "url": "https://example.org/project",
+    "title": "Example project: a page about the project",
+    "description": "A page describing the project.",
+    "domain": "example.org",
+    "image": {
+     "width": 800,
+     "height": 419,
+     "url": "https://pbs.twimg.com/card_img/1000000000000000004/example.jpg",
+     "alt": ""
+    }
+   },
+   "provider": "twitter",
+   "reposted_by": null
+  }
+ ],
+ "author": {
+  "screen_name": "example_user",
+  "url": "https://x.com/example_user",
+  "id": "1000000000000000009",
+  "followers": 1000,
+  "following": 100,
+  "likes": 500,
+  "media_count": 10,
+  "statuses": 2000,
+  "name": "Example User",
+  "description": "",
+  "raw_description": {
+   "text": "",
+   "facets": []
+  },
+  "location": "",
+  "banner_url": "https://pbs.twimg.com/profile_banners/1000000000000000009/1700000000",
+  "avatar_url": "https://pbs.twimg.com/profile_images/1000000000000000009/example_200x200.jpg",
+  "joined": "Sat Jan 01 00:00:00 +0000 2011",
+  "protected": false,
+  "website": null,
+  "verification": {
+   "verified": true,
+   "verified_at": null,
+   "type": "individual"
+  },
+  "type": "profile"
+ },
+ "code": 200
+}

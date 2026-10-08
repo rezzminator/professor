@@ -30,6 +30,10 @@ The read tool and `pfm harvest` print each artifact as one block: `=== [n/N] {it
 
 Detailed retrieval diagnostics stay in the internal cache and process logs. Public errors distinguish failed retrieval, timeout, access refusal, challenge, conversion failure, and storage failure without including provider addresses. These output controls do not remove publisher attribution or citations contained in the original document, or replace operating-system access controls on logs.
 
+## Asking over the items
+
+`harvester_read`'s optional `ask` is one question answered over every item of the call, and `pfm harvest ask -p` is the same step on the command line: both read the items, then hand them to one engine run through `internal/ask` (`harvestmcp.AskOver`), item N as the prompt's `[file N]` and a failed item as a temporary receipt of its public failure. The read tool prints the answer after the item blocks as `=== answer ({engine} {model})`, then the answer or an `error:` line; the items show their size, not their content, unless `include_content` is true. `engine` is `claude` (default) or `codex`; `model` is a Claude alias (`haiku`, `sonnet`, `opus`, `fable`, in any case, `[1m]` allowed; launched lower-cased) or a model id the price table lists for that engine, defaulting to `haiku` on Claude and the configured ask model on Codex. An unknown engine or a model its engine cannot run is refused by name before any item is read, as are `engine` or `model` without `ask`. The answer is not cached, and the remote server has no `ask`: its schema leaves the three fields out.
+
 ## Conversion
 
 The pinned local Python worker uses PyMuPDF4LLM for PDF, Trafilatura for HTML, Docling for DOCX/XLSX/PPTX, and Microsoft MarkItDown for EPUB/CSV. JSON uses the standard library; plain text passes through. Empty scanned PDFs can escalate to OCR. No LLM API is part of this conversion chain.

@@ -124,6 +124,11 @@ func TestToolsListNoToolHasAnOutputSchema(t *testing.T) {
 				if got := strings.Contains(string(raw), harvest.ReadableFormats); got != test.files {
 					t.Fatalf("read input schema names the file formats = %v, want %v: %s", got, test.files, raw)
 				}
+				for _, field := range []string{`"ask"`, `"engine"`, `"model"`} { // a local engine answers ask
+					if got := strings.Contains(string(raw), field); got != test.files {
+						t.Fatalf("read input schema lists %s = %v, want %v: %s", field, got, test.files, raw)
+					}
+				}
 				if !strings.Contains(string(raw), `"urls"`) || !strings.Contains(string(raw), `"publications"`) {
 					t.Fatalf("read input schema lacks urls or publications: %s", raw)
 				}

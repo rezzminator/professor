@@ -1,0 +1,149 @@
+{
+ "status": {
+  "type": "status",
+  "url": "https://x.com/example_user/status/1000000000000000001",
+  "id": "1000000000000000001",
+  "text": "Sentence 1 of a long note post, past the classic limit. Sentence 2 of a long note post, past the classic limit. Sentence 3 of a long note post, past the classic limit. Sentence 4 of a long note post, past the classic limit. Sentence 5 of a long note post, past the classic limit. Sentence 6 of a long note post, past the classic limit. Sentence 7 of a long note post, past the classic limit. Sentence 8 of a long note post, past the classic limit. Sentence 9 of a long note post, past the classic limit. Sentence 10 of a long note post, past the classic limit. Sentence 11 of a long note post, past the classic limit. Sentence 12 of a long note post, past the classic limit. Sentence 13 of a long note post, past the classic limit. Sentence 14 of a long note post, past the classic limit. Sentence 15 of a long note post, past the classic limit. Sentence 16 of a long note post, past the classic limit. Sentence 17 of a long note post, past the classic limit. Sentence 18 of a long note post, past the classic limit. Sentence 19 of a long note post, past the classic limit. Sentence 20 of a long note post, past the classic limit.",
+  "raw_text": {
+   "text": "Sentence 1 of a long note post, past the classic limit. Sentence 2 of a long note post, past the classic limit. Sentence 3 of a long note post, past the classic limit. Sentence 4 of a long note post, past the classic limit. Sentence 5 of a long note post, past the classic limit. Sentence 6 of a long note post, past the classic limit. Sentence 7 of a long note post, past the classic limit. Sentence 8 of a long note post, past the classic limit. Sentence 9 of a long note post, past the classic limit. Sentence 10 of a long note post, past the classic limit. Sentence 11 of a long note post, past the classic limit. Sentence 12 of a long note post, past the classic limit. Sentence 13 of a long note post, past the classic limit. Sentence 14 of a long note post, past the classic limit. Sentence 15 of a long note post, past the classic limit. Sentence 16 of a long note post, past the classic limit. Sentence 17 of a long note post, past the classic limit. Sentence 18 of a long note post, past the classic limit. Sentence 19 of a long note post, past the classic limit. Sentence 20 of a long note post, past the classic limit.",
+   "display_text_range": [
+    0,
+    1130
+   ],
+   "facets": []
+  },
+  "author": {
+   "screen_name": "example_user",
+   "url": "https://x.com/example_user",
+   "id": "1000000000000000009",
+   "followers": 1000,
+   "following": 100,
+   "likes": 500,
+   "media_count": 10,
+   "statuses": 2000,
+   "name": "Example User",
+   "description": "",
+   "raw_description": {
+    "text": "",
+    "facets": []
+   },
+   "location": "",
+   "banner_url": "https://pbs.twimg.com/profile_banners/1000000000000000009/1700000000",
+   "avatar_url": "https://pbs.twimg.com/profile_images/1000000000000000009/example_200x200.jpg",
+   "joined": "Sat Jan 01 00:00:00 +0000 2011",
+   "protected": false,
+   "website": null,
+   "verification": {
+    "verified": true,
+    "verified_at": null,
+    "type": "individual"
+   },
+   "type": "profile"
+  },
+  "replies": 1474,
+  "reposts": 3631,
+  "likes": 34149,
+  "bookmarks": 17834,
+  "quotes": 2534,
+  "embed_card": "tweet",
+  "created_at": "Sun Feb 02 23:17:15 +0000 2025",
+  "created_timestamp": 1738538235,
+  "views": 1000,
+  "is_note_tweet": true,
+  "community_note": null,
+  "lang": "en",
+  "replying_to": null,
+  "media": {},
+  "provider": "twitter",
+  "reposted_by": null
+ },
+ "thread": [
+  {
+   "type": "status",
+   "url": "https://x.com/example_user/status/1000000000000000001",
+   "id": "1000000000000000001",
+   "text": "Sentence 1 of a long note post, past the classic limit. Sentence 2 of a long note post, past the classic limit. Sentence 3 of a long note post, past the classic limit. Sentence 4 of a long note post, past the classic limit. Sentence 5 of a long note post, past the classic limit. Sentence 6 of a long note post, past the classic limit. Sentence 7 of a long note post, past the classic limit. Sentence 8 of a long note post, past the classic limit. Sentence 9 of a long note post, past the classic limit. Sentence 10 of a long note post, past the classic limit. Sentence 11 of a long note post, past the classic limit. Sentence 12 of a long note post, past the classic limit. Sentence 13 of a long note post, past the classic limit. Sentence 14 of a long note post, past the classic limit. Sentence 15 of a long note post, past the classic limit. Sentence 16 of a long note post, past the classic limit. Sentence 17 of a long note post, past the classic limit. Sentence 18 of a long note post, past the classic limit. Sentence 19 of a long note post, past the classic limit. Sentence 20 of a long note post, past the classic limit.",
+   "raw_text": {
+    "text": "Sentence 1 of a long note post, past the classic limit. Sentence 2 of a long note post, past the classic limit. Sentence 3 of a long note post, past the classic limit. Sentence 4 of a long note post, past the classic limit. Sentence 5 of a long note post, past the classic limit. Sentence 6 of a long note post, past the classic limit. Sentence 7 of a long note post, past the classic limit. Sentence 8 of a long note post, past the classic limit. Sentence 9 of a long note post, past the classic limit. Sentence 10 of a long note post, past the classic limit. Sentence 11 of a long note post, past the classic limit. Sentence 12 of a long note post, past the classic limit. Sentence 13 of a long note post, past the classic limit. Sentence 14 of a long note post, past the classic limit. Sentence 15 of a long note post, past the classic limit. Sentence 16 of a long note post, past the classic limit. Sentence 17 of a long note post, past the classic limit. Sentence 18 of a long note post, past the classic limit. Sentence 19 of a long note post, past the classic limit. Sentence 20 of a long note post, past the classic limit.",
+    "display_text_range": [
+     0,
+     1130
+    ],
+    "facets": []
+   },
+   "author": {
+    "screen_name": "example_user",
+    "url": "https://x.com/example_user",
+    "id": "1000000000000000009",
+    "followers": 1000,
+    "following": 100,
+    "likes": 500,
+    "media_count": 10,
+    "statuses": 2000,
+    "name": "Example User",
+    "description": "",
+    "raw_description": {
+     "text": "",
+     "facets": []
+    },
+    "location": "",
+    "banner_url": "https://pbs.twimg.com/profile_banners/1000000000000000009/1700000000",
+    "avatar_url": "https://pbs.twimg.com/profile_images/1000000000000000009/example_200x200.jpg",
+    "joined": "Sat Jan 01 00:00:00 +0000 2011",
+    "protected": false,
+    "website": null,
+    "verification": {
+     "verified": true,
+     "verified_at": null,
+     "type": "individual"
+    },
+    "type": "profile"
+   },
+   "replies": 1474,
+   "reposts": 3631,
+   "likes": 34149,
+   "bookmarks": 17834,
+   "quotes": 2534,
+   "embed_card": "tweet",
+   "created_at": "Sun Feb 02 23:17:15 +0000 2025",
+   "created_timestamp": 1738538235,
+   "views": 1000,
+   "is_note_tweet": true,
+   "community_note": null,
+   "lang": "en",
+   "replying_to": null,
+   "media": {},
+   "provider": "twitter",
+   "reposted_by": null
+  }
+ ],
+ "author": {
+  "screen_name": "example_user",
+  "url": "https://x.com/example_user",
+  "id": "1000000000000000009",
+  "followers": 1000,
+  "following": 100,
+  "likes": 500,
+  "media_count": 10,
+  "statuses": 2000,
+  "name": "Example User",
+  "description": "",
+  "raw_description": {
+   "text": "",
+   "facets": []
+  },
+  "location": "",
+  "banner_url": "https://pbs.twimg.com/profile_banners/1000000000000000009/1700000000",
+  "avatar_url": "https://pbs.twimg.com/profile_images/1000000000000000009/example_200x200.jpg",
+  "joined": "Sat Jan 01 00:00:00 +0000 2011",
+  "protected": false,
+  "website": null,
+  "verification": {
+   "verified": true,
+   "verified_at": null,
+   "type": "individual"
+  },
+  "type": "profile"
+ },
+ "code": 200
+}

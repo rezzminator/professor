@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// bookLookupSubject is ResolveBook's doiMetadataError subject; its Error
+// opens with it, which isBookLookupFailure reads back.
+const bookLookupSubject = "book"
+
 type doiMetadataFailure struct {
 	provider string
 	err      error
@@ -75,7 +79,9 @@ func doiMetadataFailureKind(err error) string {
 	case status == http.StatusTooManyRequests:
 		return errorKindConnect
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return errorKindBlocked
+		// The provider refused the harvester. errorKindBlocked is the harvester's
+		// own private-host refusal, published as the access-policy refusal.
+		return errorKindForbidden
 	case status >= 400 && status < 500:
 		return errorKindInvalid
 	case status >= 500:
@@ -99,6 +105,35 @@ func doiResolverErrorKind(err error) string {
 		return metadataErr.kind
 	}
 	return errorKind(err)
+}
+
+// doiResolverHTTPStatus is the status of the first provider whose failure
+// gave a doiMetadataError its kind (a refusing catalogue's 403), so the
+// published failure names it; 0 when no provider answered one.
+func doiResolverHTTPStatus(err error) int {
+	var metadataErr *doiMetadataError
+	if !errors.As(err, &metadataErr) {
+		return 0
+	}
+	for _, failure := range metadataErr.failures {
+		if doiMetadataFailureKind(failure.err) == metadataErr.kind {
+			return doiMetadataHTTPStatus(failure.err)
+		}
+	}
+	return 0
+}
+
+// bookNoOpenCopyLead opens the public text of a book lookup that found no
+// open copy (failure_text.go).
+const bookNoOpenCopyLead = "No open copy of this book was found:"
+
+// isBookLookupFailure: result is ResolveBook's failed lookup (every book
+// catalogue failed or listed no open copy), privately or as its public text:
+// the read tool and `pfm harvest` render a public result's message again
+// (harvestmcp itemFailure), and the book text must survive that pass.
+func isBookLookupFailure(result Result) bool {
+	return strings.HasPrefix(result.Error, bookLookupSubject+" lookup failed;") ||
+		strings.HasPrefix(result.Error, bookNoOpenCopyLead)
 }
 
 func mergeResolverFailure(failure, fallback Result) Result {

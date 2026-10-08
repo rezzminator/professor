@@ -93,6 +93,10 @@ type Runtime struct {
 	// expiring /files URL plus a resource_link served by the download
 	// resource template.
 	Remote bool
+
+	// Machine is the pfm config read's ask runs its engine under (accounts,
+	// binaries, ask preferences); nil on a harvester that answers no ask.
+	Machine *config.Config
 	// MaxDownloadBytes is harvest.maxDownloadBytes; MaxResourceBytes is
 	// harvest.maxResourceBytes, the largest blob resources/read sends. 0 = default.
 	MaxDownloadBytes int64

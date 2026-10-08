@@ -551,10 +551,7 @@ func publicErrorKind(result Result) string {
 	switch {
 	// The package's own policy refusals (net.go): named as refusals, never as
 	// a failure the caller is told to retry.
-	case strings.Contains(err, "refusing private/internal host"),
-		strings.Contains(err, "userinfo is not allowed"),
-		strings.Contains(err, "member name is absolute path"),
-		strings.Contains(err, "member name contains '..'"):
+	case isOwnRefusal(err):
 		return errorKindRefused
 	case strings.Contains(err, "context canceled"), strings.Contains(err, "context cancelled"):
 		return errorKindCancelled

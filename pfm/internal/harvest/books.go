@@ -304,7 +304,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 				break
 			}
 		}
-		return nil, &doiMetadataError{subject: "book", failures: failures, kind: kind}
+		return nil, &doiMetadataError{subject: bookLookupSubject, failures: failures, kind: kind}
 	}
 	return sortCandidates(out), nil
 }

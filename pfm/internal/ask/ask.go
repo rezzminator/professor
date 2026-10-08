@@ -8,12 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 const engineTimeout = 60 * time.Second
@@ -209,4 +211,42 @@ func (engine processEngine) Run(parent context.Context, input AskInput) (AskResu
 		return AskResult{}, fmt.Errorf("%s ask returned an empty answer", pfmengine.MustLookup(engine.engine).LongName)
 	}
 	return AskResult{Answer: answer, Usage: usage, Duration: result.Duration}, nil
+}
+
+// claudeModelAliases are the model aliases Claude Code's --model takes for
+// the latest model of a family (its --help names fable, opus and sonnet);
+// claudeLongContext is the suffix it takes on an alias for the 1M-token
+// context window (sonnet[1m]).
+var claudeModelAliases = []string{"fable", "opus", "sonnet", "haiku"}
+
+const claudeLongContext = "[1m]"
+
+// CheckModel refuses, by name, a model the engine id cannot run: Claude takes
+// one of its aliases (with or without the [1m] suffix) or a model id the
+// price table lists as a claude row; any other engine a model id the table
+// lists as its own. table is the machine's served price table
+// (pricing.LoadPrices), the repo's one model registry. It answers the model
+// to launch: trimmed, and an alias in the lower case Claude Code spells it.
+func CheckModel(id pfmengine.ID, model string, table pricing.Table) (string, error) {
+	descriptor, err := pfmengine.Lookup(id)
+	if err != nil {
+		return "", err
+	}
+	model = strings.TrimSpace(model)
+	if alias := strings.ToLower(model); id == pfmengine.Claude &&
+		slices.Contains(claudeModelAliases, strings.TrimSuffix(alias, claudeLongContext)) {
+		return alias, nil
+	}
+	if row, ok := table.Resolve(model); ok && row.Engine == descriptor.LongName {
+		return model, nil
+	}
+	if id == pfmengine.Claude {
+		return "", fmt.Errorf("model %q is not a claude model: name an alias (%s) or a model id the price table lists",
+			model, strings.Join(claudeModelAliases, ", "))
+	}
+	return "", fmt.Errorf(
+		"model %q is not a %s model: name a model id the price table lists",
+		model,
+		descriptor.LongName,
+	)
 }

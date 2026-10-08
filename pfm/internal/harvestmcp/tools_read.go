@@ -26,13 +26,20 @@ const (
 	fieldFiles        = "files"
 	fieldPublications = "publications"
 
+	// The ask fields (read_ask.go): a local engine answers them, so the
+	// remote gateway's schema leaves them out.
+	fieldAsk    = "ask"
+	fieldEngine = "engine"
+	fieldModel  = "model"
+
 	readDescriptionTail = `1–50 items, at most 20 publications. A title goes to harvester_search_literature first; a file wanted as bytes to harvester_download_file. Returns one text block per item, input order: ` +
 		"`=== [n/N] {item}`" + `, `
 	readDescriptionEnd = `a partial: or truncated: line when incomplete, then the content. A failed item is its header and an error: line; all failed = an error result.`
 
 	readDescription = `Reads pages, files and papers — web pages, local documents and scholarly works, as Markdown. ` +
 		`Call harvester_read{urls:["https://…"], files:["/path/to/file.pdf"], publications:["10.1038/nature14539"]}: ` +
-		readDescriptionTail + `the artifact's absolute path, ` + readDescriptionEnd
+		readDescriptionTail + `the artifact's absolute path, ` + readDescriptionEnd +
+		` Add ask:"question" for one answer over every item, in a last === answer block.`
 	readRemoteDescription = `Reads pages and papers — web pages and scholarly works, as Markdown. ` +
 		`Call harvester_read{urls:["https://…"], publications:["10.1038/nature14539"]}; this server reads no local files: ` +
 		readDescriptionTail + `no path line, ` + readDescriptionEnd
@@ -46,6 +53,9 @@ type ReadInput struct {
 	Refresh        bool              `json:"refresh,omitempty" jsonschema:"Bypass the cache: read every item again and overwrite its cached artifact."`
 	IncludeContent *bool             `json:"include_content,omitempty" jsonschema:"Default true. false: read and cache the full content, answering a size line in place of the body."`
 	OCRLanguage    string            `json:"ocr_language,omitempty" jsonschema:"Optional script for OCR of a scanned document: latin, zh, ja, ar, ru or he. By default the document's text layer, /Lang or metadata names it, else Latin; set it when a scan's gaps say it was read in Latin. Always a fresh read."`
+	Ask            string            `json:"ask,omitempty" jsonschema:"Optional question, answered once over every item read, after the item blocks; the items then show their size, not their content, unless include_content is true."`
+	Engine         string            `json:"engine,omitempty" jsonschema:"With ask: the engine that answers it, claude (default) or codex."`
+	Model          string            `json:"model,omitempty" jsonschema:"With ask: the model that answers it, an alias (haiku, sonnet, opus, fable) or a model id; default haiku on claude, the configured ask model on codex."`
 	Headers        map[string]string `json:"headers,omitempty" jsonschema:"Optional request headers (name → value) sent only to a url's own origin and a publication's landing origin, never with files; reader services, archives and resolver APIs never receive them. At most 32 headers, 8 KiB; no Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Trailer, Keep-Alive or Proxy-*. A caller header overrides the default of its name."`
 }
 
@@ -59,19 +69,22 @@ type readJob struct {
 type readRequest struct {
 	options harvest.FetchOptions
 	headers harvest.CallerHeaders // the caller's headers, validated at entry
+	ask     *readAsk              // the call's question; nil when it asks none
 }
 
 // readSchema is read's input schema. Locally `files` names every format it
 // parses (harvest.ReadableFormats). The remote gateway's schema has no
-// `files` and stays open to unlisted fields, so a remote call that sends
-// `files` reaches read, which refuses it by name.
+// `files`, `ask`, `engine` or `model` and stays open to unlisted fields, so a
+// remote call that sends one reaches read, which refuses it by name.
 func readSchema(remote bool) *jsonschema.Schema {
 	schema, err := jsonschema.For[ReadInput](nil)
 	if err != nil {
 		panic(fmt.Sprintf("harvestmcp: infer the read input schema: %v", err))
 	}
 	if remote {
-		delete(schema.Properties, fieldFiles)
+		for _, field := range []string{fieldFiles, fieldAsk, fieldEngine, fieldModel} {
+			delete(schema.Properties, field)
+		}
 		schema.AdditionalProperties = nil
 		return schema
 	}
@@ -107,6 +120,10 @@ func (service *Service) read(
 	if err != nil {
 		return readError(err), nil, nil
 	}
+	question, err := service.parseAsk(input)
+	if err != nil {
+		return readError(err), nil, nil
+	}
 	jobs := make([]readJob, 0, total)
 	for _, group := range []struct {
 		field   string
@@ -116,18 +133,23 @@ func (service *Service) read(
 			jobs = append(jobs, readJob{field: group.field, source: source})
 		}
 	}
-	sizeOnly := input.IncludeContent != nil && !*input.IncludeContent
+	// With ask, the answer stands in for the content unless the call asks
+	// for both.
+	sizeOnly := input.IncludeContent != nil && !*input.IncludeContent ||
+		question != nil && input.IncludeContent == nil
 	return service.readMany(ctx, jobs, readRequest{
 		headers: headers,
 		options: harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: sizeOnly, OCRLang: ocrLang},
+		ask:     question,
 	}), nil, nil
 }
 
 // readMany fans every job out at once (8 at a time, per-item isolation in
 // fetchOne) and answers one text: a block per item in input order (urls,
-// files, publications), each headed by the source as the caller passed it.
-// Every item failed: the call is an error, so a failed batch never reads as a
-// result; one item that read keeps the batch a result.
+// files, publications), each headed by the source as the caller passed it,
+// then the answer block when the call asks a question. Every item failed, or
+// the question went unanswered: the call is an error, so a failed batch never
+// reads as a result; one item that read keeps the batch a result.
 func (service *Service) readMany(ctx context.Context, jobs []readJob, request readRequest) *mcp.CallToolResult {
 	results := make([]harvest.Result, len(jobs))
 	misplacedBy := make([]string, len(jobs)) // a misplaced item fails alone, naming the field it belongs in
@@ -143,14 +165,24 @@ func (service *Service) readMany(ctx context.Context, jobs []readJob, request re
 	wait.Wait()
 	view := service.readView(request.options.SizeOnly)
 	blocks := make([]string, len(jobs))
+	failedItems := make([]bool, len(jobs))
+	sources := make([]string, len(jobs))
 	isError := true
 	for index, job := range jobs {
 		block, failed := RenderReadItem(index+1, len(jobs), job.source, results[index], view)
 		if misplacedBy[index] != "" {
 			block, failed = failedItem(index+1, len(jobs), job.source, misplacedBy[index]), true
+			results[index] = harvest.Result{Source: job.source, Error: misplacedBy[index], ErrorKind: "invalid"}
+		} else if failed && results[index].Error == "" { // a thin or empty page: its receipt names why
+			results[index].Error = itemFailure(harvest.PublicSourceLabel(job.source), results[index], view)
 		}
-		blocks[index] = block
+		blocks[index], failedItems[index], sources[index] = block, failed, job.source
 		isError = isError && failed
+	}
+	if request.ask != nil {
+		answer, failed := service.answerBlock(ctx, request.ask, sources, results, failedItems)
+		blocks = append(blocks, answer)
+		isError = isError || failed
 	}
 	return textResult(strings.Join(blocks, "\n\n"), isError)
 }

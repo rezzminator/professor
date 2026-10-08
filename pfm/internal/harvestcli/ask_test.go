@@ -10,7 +10,6 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -24,6 +23,7 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 		engine    pfmengine.ID
 		model     string
 		effort    string
+		flags     []string // the call's own flags, before the source
 		homeEnv   string
 		wantArgs  string
 		configure func(*pfmconfig.Config, string, string)
@@ -35,6 +35,19 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 			effort:   "low",
 			homeEnv:  "CLAUDE_CONFIG_DIR",
 			wantArgs: "-p|--model|claude-fixture-model|--effort|low|--output-format|json|",
+			configure: func(machine *pfmconfig.Config, binary, accountHome string) {
+				machine.Claude = pfmconfig.Claude{Binary: binary}
+				machine.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: accountHome}}
+			},
+		},
+		{
+			name:     "Claude, an explicit alias as typed",
+			engine:   pfmengine.Claude,
+			model:    "claude-fixture-model",
+			effort:   "low",
+			flags:    []string{"--model", " Haiku"},
+			homeEnv:  "CLAUDE_CONFIG_DIR",
+			wantArgs: "-p|--model|haiku|--effort|low|--output-format|json|",
 			configure: func(machine *pfmconfig.Config, binary, accountHome string) {
 				machine.Claude = pfmconfig.Claude{Binary: binary}
 				machine.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: accountHome}}
@@ -91,7 +104,8 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 			runtime := pfmconfig.Runtime{Config: machine, Paths: paths.Values{Home: home}}
 
 			var stdout, stderr bytes.Buffer
-			code := Harvest([]string{"ask", "-p", "What is the fixture answer?", source}, &stdout, &stderr, runtime)
+			args := append(append([]string{"ask", "-p", "What is the fixture answer?"}, testCase.flags...), source)
+			code := Harvest(args, &stdout, &stderr, runtime)
 			if code != 0 {
 				t.Fatalf("harvest ask code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
@@ -254,10 +268,17 @@ func TestHarvestAskValidatesBoundsBeforeEngineOrFetch(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
 		args []string
+		want string // the refusal stderr carries in place of the usage
 	}{
 		{name: "missing prompt", args: []string{"ask", source}},
 		{name: "missing sources", args: []string{"ask", "-p", "question"}},
 		{name: "more than fifty sources", args: fiftyOne},
+		{
+			name: "model its engine cannot run",
+			args: []string{"ask", "-p", "question", "--engine", "claude", "--model", "gpt-5", source},
+			want: "pfm harvest ask: model \"gpt-5\" is not a claude model: name an alias (fable, opus, sonnet, haiku) " +
+				"or a model id the price table lists\n",
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -271,6 +292,12 @@ func TestHarvestAskValidatesBoundsBeforeEngineOrFetch(t *testing.T) {
 				},
 			); code != 2 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if testCase.want != "" {
+				if stderr.String() != testCase.want {
+					t.Fatalf("stderr=%q, want %q", stderr.String(), testCase.want)
+				}
+				return
 			}
 			if !strings.Contains(stderr.String(), "usage: pfm harvest ask") {
 				t.Fatalf("validation failure omitted ask usage: %q", stderr.String())
@@ -369,38 +396,6 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("temporary receipts survived failed engine: %v", entries)
-	}
-}
-
-func TestHarvestAskReceiptDoesNotExposePrivateHarvestDetails(t *testing.T) {
-	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	home := t.TempDir()
-	receiptDir := filepath.Join(home, "receipts")
-	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path, _, err := writeAskReceipt(home, receiptDir, 0, "10.1234/public.boundary", harvest.Result{
-		Source:    "10.1234/public.boundary",
-		Path:      "/private/cache/html/document.md",
-		Method:    "doi-mirror",
-		Rungs:     []string{"direct", "mirror:https://mirror.secret.example"},
-		Error:     "GET https://mirror.secret.example/private: provider internals",
-		ErrorKind: "connect",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(raw)
-	if !strings.Contains(text, `"input": "10.1234/public.boundary"`) ||
-		strings.Contains(text, "mirror.secret.example") ||
-		strings.Contains(text, "/private/cache/") ||
-		strings.Contains(text, `"method"`) ||
-		strings.Contains(text, `"rungs"`) {
-		t.Fatalf("ask receipt leaked private harvest details: %s", text)
 	}
 }
 

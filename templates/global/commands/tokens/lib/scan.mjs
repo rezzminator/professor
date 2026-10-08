@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import { die } from "./options.mjs";
-import { priceOverride } from "./pricing.mjs";
+import { priceOverride, priceCatalog } from "./pricing.mjs";
 
 // ---------- discovery
 export function roots(opts) {
@@ -27,7 +27,7 @@ export function gapsLine() {
   if (SCAN.badLines) loud.push(`${SCAN.badLines} malformed lines`);
   if (SCAN.noTimestamp) loud.push(`${SCAN.noTimestamp} calls without a timestamp (dropped)`);
   if (SCAN.syntheticCalls) loud.push(`${SCAN.syntheticCalls} synthetic/zero-usage calls (dropped: the harness billed nothing for them)`);
-  if (SCAN.unpricedCalls) loud.push(`${SCAN.unpricedCalls} UNPRICED calls ${JSON.stringify(SCAN.unpricedModels)} — tokens counted, dollars "n/a"; add the model to pfm.prices.json`);
+  if (SCAN.unpricedCalls) loud.push(`${SCAN.unpricedCalls} UNPRICED calls ${JSON.stringify(SCAN.unpricedModels)} — tokens counted, dollars "n/a"; check exact IDs and available rates with pfm model-cost --json --all`);
   if (SCAN.tierUnknownCalls) loud.push(`${SCAN.tierUnknownCalls} cache writes with no 5m/1h split (priced as 5m)`);
   if (SCAN.identityUnknownRecords) loud.push(`${SCAN.identityUnknownRecords} assistant records without message.id or requestId — per-record billing may include streamed copies`);
   if (SCAN.copiedCalls) loud.push(`${SCAN.copiedCalls} calls copied from another transcript (forked/resumed session) — billed once within the ownership scan (named origin, else first unmarked holder in path order)`);
@@ -37,7 +37,9 @@ export function gapsLine() {
   for (const n of SCAN.notes.slice(0, 4)) loud.push(n);
   if (SCAN.notes.length > 4) loud.push(`${SCAN.notes.length - 4} further notes (see --out JSON scan.notes)`);
   if (SCAN.readErrors.length) loud.push(`${SCAN.readErrors.length} READ ERRORS: ${SCAN.readErrors.slice(0, 3).join(" | ")}`);
-  return loud.length ? "data gaps: " + loud.join(" · ") : "data gaps: none";
+  const catalog = priceCatalog();
+  const pricing = catalog ? `pricing: ${catalog.saved ? "saved catalog snapshot" : "current API list-price estimate"}; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); ${catalog.sources.map((s) => `${s.provider} fetched ${s.fetched_at}`).join("; ")}; not historical billing\n` : "";
+  return pricing + (loud.length ? "data gaps: " + loud.join(" · ") : "data gaps: none");
 }
 export function walk(dir, out, opts) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { SCAN.readErrors.push(`${dir}: ${e.message}`); return; }

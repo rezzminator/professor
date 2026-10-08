@@ -69,6 +69,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/picker: 16
       github.com/rezzminator/professor/pfm/internal/pricing: 2
       github.com/rezzminator/professor/pfm/internal/pricing/command: 2
+      github.com/rezzminator/professor/pfm/internal/pricing/modelcost: 2
       github.com/rezzminator/professor/pfm/internal/professor: 4
       github.com/rezzminator/professor/pfm/internal/reap: 2
       github.com/rezzminator/professor/pfm/internal/recovery: 2

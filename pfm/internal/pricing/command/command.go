@@ -1,5 +1,5 @@
 // Package command owns `pfm price`: the effective model price table, printed
-// as text, as the --json document token-audit reads, or validated by --check;
+// as text, as a --json document, or validated by --check;
 // cmd/pfm only hands it argv and the runtime it resolved.
 package command
 
@@ -29,7 +29,7 @@ func Price(args []string, stdout, stderr io.Writer, runtime pfmconfig.Runtime) i
 		}
 	}
 	flags := pfmcli.NewFlagSet("price", usage, stderr)
-	asJSON := flags.Bool("json", false, "print the table document token-audit reads")
+	asJSON := flags.Bool("json", false, "print the table document")
 	check := flags.Bool("check", false, "validate the table")
 	if code, ok := pfmcli.ParseFlags(flags, args); !ok {
 		return code

@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { die } from "./options.mjs";
 import { SCAN, RUNS, gapsLine } from "./scan.mjs";
-import { LONG_CTX_TOKENS } from "./pricing.mjs";
 import { codexRoot, findCodexRollouts, readCodexMeta, parseRolloutName, codexShort, codexRole, codexAuditRun } from "./codex.mjs";
 import { shortModel, ttlMix } from "./format.mjs";
 
@@ -157,7 +156,7 @@ export function runFlight(opts) {
   for (const g of FLIGHT_PLAN.gaps) SCAN.notes.push(g);
   if (unmatched.length) SCAN.notes.push(`${unmatched.length} UNMATCHED (see the unmatched section)`);
   out.push("", gapsLine(), "",
-    `cross-check: at the long-context premium (>${K(LONG_CTX_TOKENS)} context, per-model rate in pfm's price table — an estimate) this flight reads $${T.lc.toFixed(2)} (${T.usd ? (T.lc / T.usd).toFixed(2) : "n/a"}x the headline). ` +
+    `cross-check: at the published context tiers (per-model rate in the live pfm model-cost catalog — an estimate) this flight reads $${T.lc.toFixed(2)} (${T.usd ? (T.lc / T.usd).toFixed(2) : "n/a"}x the headline). ` +
     `The harness writes its own cost-state line only for a main chat, and a flight's agents are sub-runs, so these dollars are UNCHECKED against the harness on this host.`);
   const dest = METRICS_OUT ? path.resolve(METRICS_OUT) : path.join(dir, "metrics.md");
   fs.mkdirSync(path.dirname(dest), { recursive: true });

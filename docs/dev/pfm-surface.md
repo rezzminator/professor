@@ -8,6 +8,7 @@ Current operator and integration surface. Legend: **●** established · **◆**
 - [Top-level commands](#top-level-commands)
 - [`pfm chat` family](#pfm-chat-family)
 - [MCP surface](#mcp-surface)
+- [`pfm model-cost`](#pfm-model-cost)
 - [Shared engine `internal/ask`](#shared-engine-internalask)
 
 ## Global
@@ -40,7 +41,8 @@ Current operator and integration surface. Legend: **●** established · **◆**
 | ● `heal` | `pfm heal` | Codex projection heal. A wedged/midline cursor whose rollout is not canonically ordinalled is reported NONCANONICAL, and one whose rollout could not be read end to end is UNSCANNED — neither is ever deleted, since a rebuild from zero fails on the same record until Codex >= 0.154.0 projects past it. |
 | ● `reap` | `pfm reap …` | Unchanged. |
 | ✚ `issues` | `pfm issues [--all] [--json]` | Reads the servicedesk complaint ledger that agents file through `servicedesk`. Default view is open issues only; `--all` includes closed ones. The three states stay visibly distinct: an empty ledger prints `no open issues` and exits 0, a store that could not be read prints the cause on stderr and exits 1 (a failed look is never rendered as an empty one), and `--json` always emits an array so a script reading structured output gets `[]` rather than a prose sentence. |
-| ✚ `price` | `pfm price [--json\|--check]` | Prints the model price table pfm owns: the embedded `internal/pricing/prices.json` merged by model key with `pfm.prices.json` beside `pfm.config.json`; each row says shipped or override. `--json` feeds token-audit; `--check` validates and exits 1 naming the fault. |
+| ✚ `model-cost` | `pfm model-cost [--json] MODEL_ID \| --all` | Live Claude and OpenAI API catalogs; see [`pfm model-cost`](#pfm-model-cost). |
+| ✚ `price` | `pfm price [--json\|--check]` | Prints the model price table pfm owns: the embedded `internal/pricing/prices.json` merged by model key with `pfm.prices.json` beside `pfm.config.json`; each row says shipped or override. `--json` prints this static table; `--check` validates and exits 1 naming the fault. |
 | ● `run` | `pfm run …` | Chat-spawn plumbing (backs `chat new`). Unchanged. |
 | ● `agent` | `pfm agent open …` | Headless claude open path. Unchanged. |
 | ◆ `internal` | `pfm internal clear-kill\|explore-deny\|git-guard\|rr-dir\|epic-inject\|reload-intercept\|exit-intercept\|exit-close\|reminder-fire` | Hook backends: ✚ `explore-deny` (ports the shell script; stdin hook JSON → allow/deny), ✚ `git-guard` (PreToolUse, matcher `Bash`; rides every launch; stdin hook JSON → deny a shared git write to every agent but `gitter`, per `docs/design/hooks/git-guard.md`), ✚ `rr-dir` (SubagentStart, matcher `rr\|rr-pro\|rr-pro-max`; stdin hook JSON `cwd` → one `additionalContext` line: `RR-DIR: {nearest ancestor}/.professor/RR`, the same with `(fallback: …)` for the clone's own ledger, or `RR-DIR-ERROR: {reason}`; exit 0 on every path), ✚ `epic-inject` (see below), ✚ `reload-intercept` (see below), ✚ `exit-intercept` (see below), ✚ `exit-close` (see below), ✚ `reminder-fire` (see below). |
@@ -147,6 +149,16 @@ Toggled by `harvester.enabled`; the only family the external `/mcp` serves. Sett
 | `harvester_download_file` | ● | `{urls: [string], headers?}` | Files as bytes, unparsed: kind, type, size, sha256, via. Local: `path`, the absolute path of the stored file. Remote: `id` (the sha256), a signed `url` to `curl -fL -o` and `expires` (10 min; a server restart invalidates every url), plus a `resource_link` for `resources/read`; the url is served by `GET|HEAD /files/{sha256}` on the external port, outside the bearer (the HMAC signature is the access control). |
 | `harvester_search_literature` | ● | `{query, limit?, type?}` | Scholarly candidates (each with its `type`), each with a `handle` for `harvester_read`'s `publications`, and `sources`: each discovery source's status (answered, partial, failed) with its error, so a failed source never reads as nothing found. |
 | `harvester_search_web` | ● | `{query, limit?, lang?, engines?}` | Web search results; served only when SearXNG or Brave is configured. |
+
+## pfm model-cost
+
+**CLI:** `pfm model-cost --json gpt-6.1-sol` or `pfm model-cost --json --all` · **Consumer:** `token-audit.mjs`
+
+Every run retrieves both complete official pricing pages: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing.md) and [OpenAI pricing](https://developers.openai.com/api/docs/pricing.md). The command parses every table and preserves exact decimal spellings, headers, units, tiers, modalities, cache variants, local conditions and all non-table numeric text. `source` includes URL, `fetched_at`, SHA-256 and the full retrieved Markdown. A lookup returns rows explicitly naming the selected published model plus shared tables and page context; `--all` returns both complete provider catalogs. Page context can also describe other models, worked examples and platform tariffs; those conditions require interpretation. Unknown snapshots and ambiguous aliases are refused rather than assigned a guessed price.
+
+Nothing is cached in memory or on disk. A fetch or parse failure of either page exits 1 with the cause and prints no prices.
+
+Coverage is the direct API list prices on these pages, including every published model row. Negotiated rates, account-specific discounts and tariffs hosted on linked external provider pages are outside this catalog. `$tokens` estimates recorded usage at these current rates, includes available cache/context tiers and reports missing prices as unavailable; it does not claim historical billing amounts. `pfm price` and statusline accounting keep their independent static-table behavior.
 
 ## Shared engine `internal/ask`
 

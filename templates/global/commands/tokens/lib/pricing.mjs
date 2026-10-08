@@ -1,72 +1,141 @@
-// pricing.mjs — pfm's price table, read once per run, and the per-response usage it prices.
+// pricing.mjs — the live `pfm model-cost` catalogs and the usage they price.
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 
-// The table is pfm's (`pfm price --json`); this file carries no rates of its own. A missing,
-// failing or unreadable table is an Error whose message follows "token-audit: ", never a fallback.
-// TOKEN_AUDIT_PRICES names a saved `pfm price --json` document or the shipped prices.json and
-// keeps pfm unspawned; otherwise TOKEN_AUDIT_PFM, or `pfm` on PATH, is run.
-function loadTable(env, timeoutMs = 15000) {
+// The CLI owns provider fetching and its process-memory cache. Explicit saved catalogs
+// are useful for reproducible estimates; there is no bundled/static fallback.
+function loadTable(env, timeoutMs = 95000) {
   const file = env.TOKEN_AUDIT_PRICES;
   if (file) {
     let text; try { text = fs.readFileSync(file, "utf8"); } catch (e) { throw new Error(`TOKEN_AUDIT_PRICES ${file}: ${e.message}`); }
-    return tableOf(text, `TOKEN_AUDIT_PRICES ${file}: `);
+    const table = tableOf(text, `TOKEN_AUDIT_PRICES ${file}: `);
+    table.saved = file;
+    return table;
   }
-  const bin = env.TOKEN_AUDIT_PFM || "pfm", cmd = `\`${bin} price --json\``;
-  const r = spawnSync(bin, ["price", "--json"], { encoding: "utf8", timeout: timeoutMs });
-  if (r.error?.code === "ENOENT") throw new Error(`pfm not found (${bin}) — prices come from \`pfm price --json\`; install pfm or set TOKEN_AUDIT_PFM`);
+  const bin = env.TOKEN_AUDIT_PFM || "pfm", cmd = `\`${bin} model-cost --json --all\``;
+  const r = spawnSync(bin, ["model-cost", "--json", "--all"], { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 << 20 });
+  if (r.error?.code === "ENOENT") throw new Error(`pfm not found (${bin}) — prices come from \`pfm model-cost --json --all\`; install pfm or set TOKEN_AUDIT_PFM`);
   if (r.error?.code === "ETIMEDOUT") throw new Error(`${cmd} timed out after ${timeoutMs / 1000} s`);
   if (r.error) throw new Error(`${cmd} failed: ${r.error.message}`);
-  if (r.status !== 0) { const stderr = (r.stderr || "").trim(), older = stderr.includes('unknown command "price"');
-    throw new Error(`${cmd} failed (exit ${r.status ?? r.signal}): ${stderr}${older ? " — this pfm predates `pfm price`; update pfm" : ""}`); }
-  return tableOf(r.stdout, `${cmd} returned an unreadable table: `);
+  if (r.status !== 0) {
+    const stderr = (r.stderr || "").trim(), older = stderr.includes('unknown command "model-cost"');
+    throw new Error(`${cmd} failed (exit ${r.status ?? r.signal}): ${stderr}${older ? " — this pfm predates `pfm model-cost`; update pfm" : ""}`);
+  }
+  return tableOf(r.stdout, `${cmd} returned an unreadable catalog: `);
 }
-// Check the envelope and every rate used in billing. The shipped prices.json has no
-// `override`: it reads as null.
 function tableOf(text, fault) {
   let d; try { d = JSON.parse(text); } catch (e) { throw new Error(fault + e.message); }
-  if (d?.version !== 1) throw new Error(`${fault}version ${JSON.stringify(d?.version)}, want 1`);
-  if (!Array.isArray(d.rows)) throw new Error(`${fault}rows is not an array`);
-  for (const row of d.rows) {
-    const fields = row.engine === "codex" ? ["in", "out", "cached", "long_in", "long_out"] : ["in", "out", "hit", "w5m", "w1h", "long_in", "long_out"];
-    for (const field of fields) if (!Number.isFinite(row[field])) throw new Error(`${fault}row ${row.key}: ${field} is not a number`);
+  if (!Array.isArray(d?.catalogs) || d.catalogs.length !== 2) throw new Error(`${fault}catalogs must include both providers`);
+  const providers = new Set();
+  for (const catalog of d.catalogs) {
+    if (!["anthropic", "openai"].includes(catalog?.provider) || providers.has(catalog.provider) || catalog.currency !== "USD") throw new Error(`${fault}invalid catalog provider/currency`);
+    providers.add(catalog.provider);
+    if (!Array.isArray(catalog.models) || !catalog.models.length || !Array.isArray(catalog.tables) || typeof catalog.page_context !== "string") throw new Error(`${fault}incomplete catalog models/tables/context`);
+    if (!catalog.source || typeof catalog.source.url !== "string" || typeof catalog.source.fetched_at !== "string" || typeof catalog.source.markdown !== "string") throw new Error(`${fault}missing catalog source evidence`);
+    const ids = new Set();
+    for (const model of catalog.models) {
+      if (typeof model?.id !== "string" || !model.id || ids.has(model.id) || !Array.isArray(model.tables) || !model.tables.length) throw new Error(`${fault}invalid/duplicate catalog model`);
+      ids.add(model.id);
+      for (const table of model.tables) {
+        if (typeof table?.heading !== "string" || typeof table.context !== "string" || !Array.isArray(table.headers) || !table.headers.every((h) => typeof h === "string") || !Array.isArray(table.rows) || !table.rows.length) throw new Error(`${fault}invalid model table`);
+        for (const row of table.rows) if (!Array.isArray(row) || row.length !== table.headers.length || !row.every((c) => typeof c?.text === "string")) throw new Error(`${fault}invalid model table cell text`);
+      }
+    }
   }
-  return { rows: d.rows, override: d.override ?? null };
+  if (d.override != null && (typeof d.override.path !== "string" || !Number.isInteger(d.override.rows) || d.override.rows < 0)) throw new Error(`${fault}invalid override metadata`);
+  return { ...d, override: d.override ?? null };
 }
-
-// Resolution, the one rule pfm uses too: of every row pattern found in the lowercased id, the
-// longest wins and, at equal length, the one starting earlier; row order never matters. No
-// pattern found: null, which every caller renders "n/a", never $0.
-// A rate is USD per 1M tokens: rd is the Claude cache read or the Codex cached input (a SUBSET
-// of input there); w5/w1 the 5-minute and 1-hour cache writes; lcIn/lcOut the multipliers for a
-// call whose context passes LONG_CTX_TOKENS, feeding the CROSS-CHECK line only. A Codex rollout
-// has no cache writes; a Claude-format transcript naming a Codex model writes at 1.25x / 2x input.
-function rateOf(table, model) {
-  const id = String(model || "").toLowerCase();
-  let best = null, len = -1, at = 0;
-  for (const row of table.rows) for (const m of row.match || []) {
-    const p = String(m).toLowerCase(), i = id.indexOf(p);
-    if (!p) continue;
-    if (i >= 0 && (p.length > len || (p.length === len && i < at))) { best = row; len = p.length; at = i; }
-  }
-  if (!best) return null;
-  const r = best;
-  return r.engine === "codex"
-    ? { in: r.in, out: r.out, rd: r.cached, w5: r.in * 1.25, w1: r.in * 2, lcIn: r.long_in, lcOut: r.long_out }
-    : { in: r.in, out: r.out, rd: r.hit, w5: r.w5m, w1: r.w1h, lcIn: r.long_in, lcOut: r.long_out };
-}
-
-// The table RATE(m) consults, set once by the entry; a rate is resolved once per model id.
-let TABLE = null, MEMO = new Map();
-function useTable(table) { TABLE = table; MEMO = new Map(); }
-const priceOverride = () => TABLE?.override ?? null;
-const RATE = (m) => {
-  if (!TABLE) throw new Error("no price table: useTable(loadTable(env)) runs before any rate is read");
-  const id = String(m || "").toLowerCase();
-  if (!MEMO.has(id)) MEMO.set(id, rateOf(TABLE, id));
-  return MEMO.get(id);
+const plain = (s) => s.replace(/<[^>]*>/g, "").replace(/[*`]/g, "").trim();
+const amount = (s) => {
+  // Footnotes are annotations: a trailing <sup>1</sup> is never another price.
+  const text = s.replace(/<sup>[^<]*<\/sup>/gi, "").trim();
+  const m = /^\$\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)(?:\s*\/\s*(?:MTok|1M tokens))?$/i.exec(text);
+  const n = m ? Number(m[1].replaceAll(",", "")) : NaN;
+  return Number.isFinite(n) ? n : null;
 };
-const LONG_CTX_TOKENS = 200000;
+const thresholdNumber = (s) => {
+  const m = /([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*([kKmM]?)/.exec(s);
+  return m ? Number(m[1].replaceAll(",", "")) * ({ k: 1000, m: 1000000 }[m[2].toLowerCase()] || 1) : null;
+};
+// Only documented standard text-token tables feed transcript estimates. All other
+// tariffs remain in the `pfm model-cost` catalog for callers whose usage identifies them.
+function ratesOf(catalog, model) {
+  const variants = [];
+  for (const table of model.tables) {
+    const heading = plain(table.heading).toLowerCase(), headers = table.headers.map((h) => plain(h).toLowerCase());
+    const claude = catalog.provider === "anthropic";
+    const serviceMode = [...table.context.matchAll(/^\s*(Standard|Batch|Fast|Ultrafast)\s*$/gm)].at(-1)?.[1];
+    const specializedStandard = headers.includes("category") && headers.includes("input") && headers.includes("output") && serviceMode === "Standard";
+    if (claude ? heading !== "model pricing" : heading !== "standard pricing data" && !(heading === "grouped pricing table data" && (headers.includes("short context input") || specializedStandard))) continue;
+    const idx = (names) => headers.findIndex((h) => names.includes(h));
+    const indices = {
+      in: idx(claude ? ["base input tokens", "input tokens"] : ["short context input", "input"]),
+      out: idx(claude ? ["output tokens"] : ["short context output", "output"]),
+      rd: idx(claude ? ["cache hits and refreshes", "cache reads"] : ["short context cached input", "cached input"]),
+      w5: idx(claude ? ["5m cache writes"] : ["short context cache writes", "cache writes"]),
+      w1: idx(["1h cache writes"]),
+    };
+    if (indices.in < 0 || indices.out < 0 || (!claude && !/prices per 1m tokens/i.test(catalog.page_context))) continue;
+    for (const cells of table.rows) {
+      const rates = Object.fromEntries(Object.entries(indices).map(([key, i]) => [key, i < 0 ? null : amount(cells[i].text)]));
+      let min = 0, max = Infinity, threshold = Infinity;
+      const label = plain(cells[headers.indexOf("model")]?.text || "");
+      const condition = /for prompts (up to|over) ([\d,]+) tokens/i.exec(label);
+      if (condition) {
+        threshold = thresholdNumber(condition[2]);
+        if (condition[1].toLowerCase() === "over") min = threshold; else max = threshold;
+      } else if (/for prompts/i.test(label)) continue;
+      variants.push({ ...rates, min, max, threshold });
+      const longs = Object.fromEntries(["in", "out", "rd", "w5"].map((key) => {
+        const i = idx([`long context ${{ in: "input", out: "output", rd: "cached input", w5: "cache writes" }[key]}`]);
+        return [key, i < 0 ? null : amount(cells[i].text)];
+      }));
+      if (!claude && headers.includes("long context input")) {
+        const boundary = /long context:\s*>\s*([\d,.]+[kKmM]?)\s*input tokens/i.exec(catalog.page_context);
+        const limit = boundary ? thresholdNumber(boundary[1]) : null;
+        if (limit === null) { variants.pop(); continue; }
+        variants[variants.length - 1].max = limit;
+        variants[variants.length - 1].threshold = limit;
+        variants.push({ ...rates, ...longs, min: limit, max: Infinity, threshold: limit });
+      }
+    }
+  }
+  return variants;
+}
+const normalizedID = (model) => {
+  let id = String(model || "").trim().toLowerCase();
+  const slash = id.indexOf("/");
+  if (slash >= 0) {
+    const provider = id.slice(0, slash); id = id.slice(slash + 1);
+    if (!["anthropic", "openai"].includes(provider) || (provider === "anthropic") !== id.startsWith("claude-")) return "";
+  }
+  return id.startsWith("claude-") ? id.replaceAll(".", "-") : id;
+};
+const CANDIDATES = new WeakMap();
+function rateOf(table, model, context = 0) {
+  const id = normalizedID(model);
+  let memo = CANDIDATES.get(table); if (!memo) { memo = new Map(); CANDIDATES.set(table, memo); }
+  if (!memo.has(id)) {
+    const variants = [];
+    for (const catalog of table.catalogs) for (const entry of catalog.models) if (entry.id === id) variants.push(...ratesOf(catalog, entry));
+    memo.set(id, variants);
+  }
+  const applicable = memo.get(id).filter((r) => (context > r.min || (context === 0 && r.min === 0)) && context <= r.max);
+  if (!applicable.length) return null;
+  const [r] = applicable;
+  if (r.in === null || r.out === null || applicable.some((other) => ["in", "out", "rd", "w5", "w1"].some((key) => other[key] !== r[key]))) return null;
+  return r;
+}
+let TABLE = null;
+function useTable(table) { TABLE = table; }
+const priceOverride = () => TABLE?.override ?? null;
+const priceCatalog = () => TABLE ? { saved: TABLE.saved ?? null, sources: TABLE.catalogs.map((c) => ({ provider: c.provider, url: c.source.url, fetched_at: c.source.fetched_at })) } : null;
+const RATE = (model, context = 0, usage = {}) => {
+  if (!TABLE) throw new Error("no price catalog: useTable(loadTable(env)) runs before any rate is read");
+  const r = rateOf(TABLE, model, context);
+  if (!r || Object.entries(usage).some(([key, count]) => count > 0 && !Number.isFinite(r[key]))) return null;
+  return r;
+};
 // One response's usage as billed. A response can carry zeros in every top-level count and its
 // real counts only in usage.iterations[] (seen on claude-opus-5-5, 2026-09); otherwise the top
 // level already equals the iterations' sum and is used as is.
@@ -83,4 +152,4 @@ function usageOf(u) {
 function writesOf(u) { const all = u.cache_creation_input_tokens || 0, b5 = u.cache_creation?.ephemeral_5m_input_tokens || 0, b1 = u.cache_creation?.ephemeral_1h_input_tokens || 0;
   return { cw5: b5 + Math.max(0, all - b5 - b1), cw1: b1, split: b5 + b1 > 0 }; }
 
-export { loadTable, rateOf, useTable, priceOverride, LONG_CTX_TOKENS, RATE, TOP4, usageOf, writesOf };
+export { loadTable, rateOf, useTable, priceOverride, priceCatalog, RATE, TOP4, usageOf, writesOf };

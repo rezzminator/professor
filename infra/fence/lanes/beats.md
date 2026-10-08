@@ -138,6 +138,7 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 - `O1.12-doc-vs-code` · doc-vs-code confirmed behaviors (settings-global merge, project hooks, git-bridge skill, themes, MCP) · spends none
 - `O1.13-misc-ops` · misc ops CLI: version, config, issues, whoami, usage-hook · spends none
 - `O1.14-price` · `pfm price` reports a table header and valid-table summary; conflicting output flags fail with a named usage error · spends none
+- `O1.15-model-cost` · `pfm model-cost` help names `--all`; a model plus `--all` exits 2; an unsupported provider is refused by name before any fetch · spends none
 
 ## Lane O2 — ops & host, the destructive tail
 

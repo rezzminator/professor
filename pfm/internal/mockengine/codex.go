@@ -159,6 +159,7 @@ func codexAppServer(proc *process) int {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
 		reply := map[string]any{"jsonrpc": "2.0"}
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
@@ -175,6 +176,14 @@ func codexAppServer(proc *process) int {
 				reply["result"] = map[string]any{}
 			case "account/rateLimits/read":
 				reply["result"] = map[string]any{"rateLimits": proc.script.RateLimits}
+			case "hooks/list", "config/value/write":
+				result, err := codexHookRPC(proc, request.Method, request.Params)
+				if err != nil {
+					warn(proc.stderr, "%s: %v", request.Method, err)
+					reply["error"] = map[string]any{"code": -32602, "message": err.Error()}
+				} else {
+					reply["result"] = result
+				}
 			default:
 				reply["error"] = map[string]any{"code": -32601, "message": "unknown method " + request.Method}
 			}

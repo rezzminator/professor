@@ -18,8 +18,8 @@ const FIX = path.join(HERE, "fixtures");
 const CLAUDE_ROOT = path.join(FIX, "claude", "projects");
 const CODEX_ROOT = path.join(FIX, "codex");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "token-audit-test-"));
-// pfm's shipped table, read where pfm keeps it: every run prices from it unless env says otherwise.
-const PRICES = path.join(HERE, "../../../../pfm/internal/pricing/prices.json");
+// Saved synthetic live catalogs keep every test offline.
+const PRICES = path.join(HERE, "fixtures/model-cost.json");
 
 function run(args, env = {}) {
   const r = spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8", cwd: HERE, maxBuffer: 64 << 20, env: { ...process.env, TOKEN_AUDIT_PRICES: PRICES, ...env } });
@@ -201,7 +201,7 @@ test("--flight: an unpriced model renders n/a with its tokens still counted, nev
   assert.ok(e.tok.in + e.tok.cr + e.tok.out > 0, "its tokens must still be counted");
   assert.match(f.md, /\| n\/a \|/, "the $ column must read n/a");
   assert.doesNotMatch(f.md.split("## totals")[0], /\| \$0\.00 \|/, "no row may render an unknown price as $0.00");
-  assert.match(f.md, /data gaps:.*UNPRICED calls \{[^}]*unobtanium[^}]*\} — tokens counted, dollars "n\/a"; add the model to pfm\.prices\.json/);
+  assert.match(f.md, /data gaps:.*UNPRICED calls \{[^}]*unobtanium[^}]*\} — tokens counted, dollars "n\/a"; check exact IDs and available rates with pfm model-cost --json --all/);
 });
 
 test("--flight: the report stays bounded and carries the gaps and cross-check lines", () => {
@@ -213,7 +213,7 @@ test("--flight: the report stays bounded and carries the gaps and cross-check li
 
 test("--flight: the long-context premium is a per-model price-table rate, not a flat constant", () => {
   const f = flight("flight");
-  const m = /per-model rate in pfm's price table — an estimate\) this flight reads \$([\d.]+) \(([\d.]+)x the headline\)/.exec(f.md);
+  const m = /per-model rate in the live pfm model-cost catalog — an estimate\) this flight reads \$([\d.]+) \(([\d.]+)x the headline\)/.exec(f.md);
   assert.ok(m, `no cross-check ratio in:\n${f.md}`);
   // claude-sonnet-5 and gpt-5.6-sol bill their whole window at standard rates (long_in/long_out 1/1),
   // so a run past 200K reads 1.00x; a flat long-context constant would lift it above.
@@ -699,7 +699,7 @@ test("pricing: content-block lines of one message.id are one call even when a li
   assert.equal(j.calls, 1);
 });
 
-// ---------- prices: one `pfm price --json` per run. These runs clear TOKEN_AUDIT_PRICES and
+// ---------- prices: one `pfm model-cost --json --all` per run. These runs clear TOKEN_AUDIT_PRICES and
 // name a stand-in pfm, a shell script written into TMP.
 const fakePfm = (body) => fakePfmIn(TMP, body);
 const viaPfm = (bin) => ({ TOKEN_AUDIT_PRICES: "", TOKEN_AUDIT_PFM: bin });
@@ -716,15 +716,15 @@ test("prices: a missing pfm exits 2 naming it, with nothing on stdout", () => {
   const r = run(MODES.report(FIX), viaPfm(bin));
   assert.equal(r.code, 2, r.out);
   assert.equal(r.out, "");
-  assert.equal(r.err, `token-audit: pfm not found (${bin}) — prices come from \`pfm price --json\`; install pfm or set TOKEN_AUDIT_PFM\n`);
+  assert.equal(r.err, `token-audit: pfm not found (${bin}) — prices come from \`pfm model-cost --json --all\`; install pfm or set TOKEN_AUDIT_PFM\n`);
 });
 
 test("prices: a pfm that exits non-zero stops the run with its exit code and trimmed stderr", () => {
-  const bin = fakePfm(`echo "pfm: pfm.prices.json: row 3: unknown field \\"rate\\"" >&2; exit 3`);
+  const bin = fakePfm(`echo "pfm model-cost: pricing source HTTP 503: \\"rate\\"" >&2; exit 3`);
   const r = run(MODES.report(FIX), viaPfm(bin));
   assert.equal(r.code, 2, r.out);
   assert.equal(r.out, "");
-  assert.equal(r.err, `token-audit: \`${bin} price --json\` failed (exit 3): pfm: pfm.prices.json: row 3: unknown field "rate"\n`);
+  assert.equal(r.err, `token-audit: \`${bin} model-cost --json --all\` failed (exit 3): pfm model-cost: pricing source HTTP 503: "rate"\n`);
 });
 
 test("prices: a pfm that prints no JSON is an unreadable table", () => {
@@ -732,7 +732,7 @@ test("prices: a pfm that prints no JSON is an unreadable table", () => {
   const r = run(MODES.report(FIX), viaPfm(bin));
   assert.equal(r.code, 2, r.out);
   assert.equal(r.out, "");
-  assert.ok(r.err.startsWith(`token-audit: \`${bin} price --json\` returned an unreadable table: `), r.err);
+  assert.ok(r.err.startsWith(`token-audit: \`${bin} model-cost --json --all\` returned an unreadable catalog: `), r.err);
 });
 
 test("prices: an unreadable TOKEN_AUDIT_PRICES exits 2 naming it", () => {
@@ -748,7 +748,7 @@ test("prices: a bad flag is refused before pfm is looked for", () => {
   assert.equal(r.err, "token-audit: --since wants a number plus h or d, e.g. 24h or 3d\n");
 });
 
-test("prices: every mode runs `pfm price --json` once, before any transcript is read", () => {
+test("prices: every mode runs `pfm model-cost --json --all` once, before any transcript is read", () => {
   for (const [mode, args] of Object.entries(MODES)) {
     const dir = fs.mkdtempSync(path.join(TMP, "spawn-")), fix = path.join(dir, "fix"), spawns = path.join(dir, "spawns");
     // The fixtures appear only when pfm runs: a transcript read before the spawn finds nothing.
@@ -762,15 +762,15 @@ test("prices: every mode runs `pfm price --json` once, before any transcript is 
 
 test("prices: an active override leads every data-gaps line, naming its file and row count", () => {
   const doc = path.join(TMP, "override-table.json");
-  fs.writeFileSync(doc, JSON.stringify({ ...JSON.parse(fs.readFileSync(PRICES, "utf8")), override: { path: "/cfg/pfm.prices.json", rows: 2 } }));
-  const bin = fakePfm(`cat '${doc}'`);
+  fs.writeFileSync(doc, JSON.stringify({ ...JSON.parse(fs.readFileSync(PRICES, "utf8")), override: { path: doc, rows: 8 } }));
+  const bin = fakePfm("exit 9");
   for (const [mode, args] of Object.entries(MODES)) {
     const md = path.join(fs.mkdtempSync(path.join(TMP, "override-")), "metrics.md");
-    const r = run(args(FIX, md), { ...viaPfm(bin), HOME: path.dirname(md), CLAUDE_CONFIG_DIR: "" });
+    const r = run(args(FIX, md), { TOKEN_AUDIT_PRICES: doc, TOKEN_AUDIT_PFM: bin, HOME: path.dirname(md), CLAUDE_CONFIG_DIR: "" });
     assert.equal(r.code, 0, `${mode}: ${r.err}`);
     const gaps = (r.out + (fs.existsSync(md) ? fs.readFileSync(md, "utf8") : "")).split("\n").filter((l) => l.startsWith("data gaps:"));
     assert.ok(gaps.length, `${mode}: no data-gaps line in:\n${r.out}`);
-    for (const g of gaps) assert.match(g, /^data gaps: price override active: 2 rows from \/cfg\/pfm\.prices\.json( · |$)/, `${mode}: ${g}`);
+    for (const g of gaps) assert.ok(g.startsWith(`data gaps: price override active: 8 rows from ${doc}`), `${mode}: ${g}`);
   }
 });
 
@@ -795,4 +795,64 @@ test("pricing: missing response identity exposes per-record billing uncertainty"
     reqs: [null, null], blocks: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }] });
   const { out } = priced(root);
   assert.match(out, /2 assistant records without message.id or requestId.*billing may include streamed copies/);
+});
+
+
+test("pricing: published prompt tiers price every cache column at the request context", () => {
+  const doc = JSON.parse(fs.readFileSync(PRICES, "utf8")), m = doc.catalogs[0].models[0];
+  const cells = (texts) => texts.map((text) => ({ text, numbers: [] }));
+  m.id = "claude-haiku-5-5";
+  m.tables[0].rows = [cells(["Claude Haiku 5.5 (for prompts up to 100,000 tokens)", "$0.10 / MTok", "$0.125 / MTok", "$0.20 / MTok", "$0.01 / MTok", "$0.50 / MTok"]), cells(["Claude Haiku 5.5 (for prompts over 100,000 tokens)", "$0.50 / MTok", "$0.625 / MTok", "$1 / MTok", "$0.05 / MTok", "$2.50 / MTok"])];
+  const saved = path.join(TMP, "tier-catalog.json"), out = path.join(TMP, "tier-report.json");
+  fs.writeFileSync(saved, JSON.stringify(doc));
+  const root = priceRoot("live-tiers", { s: [{ id: "tier", model: m.id, usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 100000, cache_creation_input_tokens: 3, cache_creation: { ephemeral_5m_input_tokens: 1, ephemeral_1h_input_tokens: 2 } } }] });
+  const r = run(["--root", root, "--since", "99999d", "--out", out], { TOKEN_AUDIT_PRICES: saved });
+  assert.equal(r.code, 0, r.err);
+  cols(JSON.parse(fs.readFileSync(out, "utf8")), { in: .0000005, out: .000005, cr: .005, cw5: .000000625, cw1: .000002 });
+});
+
+test("pricing: a published model with an unavailable used rate keeps tokens and renders n/a", () => {
+  const doc = JSON.parse(fs.readFileSync(PRICES, "utf8")); doc.catalogs[0].models[0].tables[0].rows[0][4].text = "-";
+  const saved = path.join(TMP, "missing-cache-catalog.json"), out = path.join(TMP, "missing-cache-report.json");
+  fs.writeFileSync(saved, JSON.stringify(doc));
+  const root = priceRoot("missing-cache", { s: [{ id: "missing", model: "claude-sonnet-5", usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 100 } }] });
+  const r = run(["--root", root, "--since", "99999d", "--out", out], { TOKEN_AUDIT_PRICES: saved });
+  assert.equal(r.code, 0, r.err);
+  const j = JSON.parse(fs.readFileSync(out, "utf8"));
+  assert.equal(j.runs[0].unpriced, true);
+  assert.equal(j.runs[0].usd, null);
+  assert.equal(j.tok.cr, 100);
+  assert.match(r.out, /UNPRICED calls.*claude-sonnet-5/);
+  assert.match(r.out, /n\/a/);
+});
+
+
+test("pricing: unavailable read prices render tool-carry estimates n/a while uncached calls stay priced", () => {
+  const doc = JSON.parse(fs.readFileSync(PRICES, "utf8")); doc.catalogs[0].models[0].tables[0].rows[0][4].text = "-";
+  const saved = path.join(TMP, "missing-tool-read-catalog.json"), out = path.join(TMP, "missing-tool-read-report.json");
+  fs.writeFileSync(saved, JSON.stringify(doc));
+  const root = priceRoot("missing-tool-read", { s: [
+    { id: "tool-before", model: "claude-sonnet-5", blocks: [{ type: "tool_use", id: "read-big", name: "Read", input: { file_path: "/tmp/demo-proj/large.go" } }], usage: { input_tokens: 1000, output_tokens: 10 } },
+    { type: "user", timestamp: "2026-09-20T09:00:01.000Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "read-big", content: "x".repeat(40000) }] } },
+    { id: "tool-after", model: "claude-sonnet-5", usage: { input_tokens: 30000, output_tokens: 10 } },
+  ] });
+  const r = run(["--root", root, "--since", "99999d", "--out", out], { TOKEN_AUDIT_PRICES: saved });
+  assert.equal(r.code, 0, r.err);
+  const j = JSON.parse(fs.readFileSync(out, "utf8"));
+  assert.equal(j.runs[0].unpriced, false);
+  assert.ok(j.landings.length, "the large tool result must produce a carry estimate");
+  assert.equal(j.landings[0].usd, null);
+  assert.match(r.out, /n\/a.*tok carried.*Read/);
+  assert.match(r.out, /tool-carry read-price estimate unavailable.*claude-sonnet-5/);
+});
+
+test("pricing: exported page and brief rows preserve unavailable model dollars as null", () => {
+  const view = path.join(TMP, "unpriced-view.json"), briefs = path.join(TMP, "unpriced-briefs.json");
+  const r = run(["--root", CLAUDE_ROOT, "--since", "99999d", "--view", view, "--briefs", briefs]);
+  assert.equal(r.code, 0, r.err);
+  for (const rows of [JSON.parse(fs.readFileSync(view, "utf8")).projects.flatMap((p) => p.runs), JSON.parse(fs.readFileSync(briefs, "utf8"))]) {
+    const unpriced = rows.find((row) => row.m.includes("unobtanium"));
+    assert.ok(unpriced, "the unavailable fixture model must remain in both exported artifacts");
+    assert.equal(unpriced.usd, null);
+  }
 });

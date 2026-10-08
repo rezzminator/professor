@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { SCAN, G, RUNS, gapsLine } from "./scan.mjs";
-import { RATE } from "./pricing.mjs";
+import { RATE, priceCatalog } from "./pricing.mjs";
 import { CATS, C_PREFIX, C_READ1, C_READN, C_BREAD, C_BTEST, BANDS } from "./claude.mjs";
 import { shortModel, $, pct as pctOf, Mt, pad, cut, ttlMix } from "./format.mjs";
 
@@ -98,7 +98,7 @@ export function runReport(opts, agg) {
   L("  the same file, read again while already in context:");
   for (const [k, v] of Object.entries(G.rereads).sort((a, b) => b[1].chars - a[1].chars).slice(0, 8)) L(`  ${pad(v.n, 5)} re-reads · ${pad(Math.round(v.chars / 4000) + "K", 6)} tok · ${cut(k.replace(/^\S*\//, ""), 100)}`);
   L("  single tool results that were then carried the longest (estimate: tokens × later calls × read price):");
-  for (const l of G.landings.slice(0, 8)) L(`  ${pad($(l.usd), 8)} · ${pad(l.tokK + "K", 5)} tok carried ${pad(l.after, 4)} calls · ${l.tool} · ${cut(l.target, 80)}`);
+  for (const l of G.landings.slice(0, 8)) L(`  ${pad(l.usd === null ? "n/a" : $(l.usd), 8)} · ${pad(l.tokK + "K", 5)} tok carried ${pad(l.after, 4)} calls · ${l.tool} · ${cut(l.target, 80)}`);
 
   H("12 · BUSIEST HOURS (UTC)");
   for (const [h, v] of Object.entries(G.hourly).map(([h, v]) => [h, Object.values(v).reduce((a, b) => a + b, 0), v]).sort((a, b) => b[1] - a[1]).slice(0, 6))
@@ -127,13 +127,13 @@ export function runReport(opts, agg) {
   if (!hc.length) L("  no chat qualifies — the estimate is UNCHECKED on this host");
   else { const mine = hc.reduce((a, x) => a + x.f.own + x.f.agents, 0), mineOwn = hc.reduce((a, x) => a + x.f.own, 0), theirs = hc.reduce((a, x) => a + x.r.harnessUsd, 0);
     const lc = hc.reduce((a, x) => a + x.r.usdLC + x.f.agentRuns.reduce((b, r) => b + r.usdLC, 0), 0);
-    L(`  if calls over 200K context were billed at the long-context premium (per-model rate in pfm's price table — an estimate): ${$(lc)} (${(lc / theirs).toFixed(2)}x)`);
+    L(`  at the published context tiers (per-model rate in the live pfm model-cost catalog — an estimate): ${$(lc)} (${(lc / theirs).toFixed(2)}x)`);
     L(`  ${hc.length} chats · harness says ${$(theirs)} · this audit says ${$(mine)} with agents (${(mine / theirs).toFixed(2)}x) / ${$(mineOwn)} main loops only (${(mineOwn / theirs).toFixed(2)}x)`); }
 
-  if (OUT) { const slim = (r, i) => ({ ...r, i, file: path.relative(SCAN.roots[0], r.file), cats: Object.fromEntries(CATS.map((c, k) => [c, +r.cats[k].toFixed(4)]).filter((x) => x[1] > 0)), series: i < 25 ? r.series : undefined, tl: undefined, tlf: undefined, brief: undefined, land: undefined, usd: +r.usd.toFixed(4) });
+  if (OUT) { const slim = (r, i) => ({ ...r, i, file: path.relative(SCAN.roots[0], r.file), cats: Object.fromEntries(CATS.map((c, k) => [c, +r.cats[k].toFixed(4)]).filter((x) => x[1] > 0)), series: i < 25 ? r.series : undefined, tl: undefined, tlf: undefined, brief: undefined, land: undefined, usd: r.unpriced ? null : +r.usd.toFixed(4) });
     const ranked = topRuns.map(slim);
     fs.mkdirSync(path.dirname(path.resolve(OUT)), { recursive: true });
-    fs.writeFileSync(OUT, JSON.stringify({ v: 1, host: os.hostname(), at: new Date(NOW).toISOString(), hours: HOURS, scan: SCAN, total, usd: G.usd, tok: G.tok, calls: G.calls, cats: Object.fromEntries(CATS.map((c, i) => [c, G.cats[i]])), bands: G.bands, modelEffort: G.modelEffort,
+    fs.writeFileSync(OUT, JSON.stringify({ v: 1, pricing: priceCatalog(), host: os.hostname(), at: new Date(NOW).toISOString(), hours: HOURS, scan: SCAN, total, usd: G.usd, tok: G.tok, calls: G.calls, cats: Object.fromEntries(CATS.map((c, i) => [c, G.cats[i]])), bands: G.bands, modelEffort: G.modelEffort,
       rewrites: G.rewrites, rewriteTool: G.rewriteTool, tools: G.tools, bash: G.bash, attach: G.attach, hourly: G.hourly, repeats: Object.fromEntries(Object.entries(G.repeats).sort((a, b) => b[1].n - a[1].n).slice(0, 60)),
       rereads: Object.fromEntries(Object.entries(G.rereads).sort((a, b) => b[1].chars - a[1].chars).slice(0, 60)), landings: G.landings, byProject: Object.fromEntries(Object.entries(byProject).map(([k, v]) => [k, { ...v, cats: [...v.cats] }])),
       families: famList.map(({ agentRuns, ...f }) => f), groups: groupRows, runs: ranked }));
@@ -141,7 +141,7 @@ export function runReport(opts, agg) {
 
   // ---------- --view FILE: the compact per-project dataset the page draws (findings, runs, timeline)
   if (VIEW) {
-    const FK = ["fat", "small", "rw", "read", "inj", "model"], price = (m) => RATE(m)?.in ?? 0, r2 = (v) => +v.toFixed(2);
+    const FK = ["fat", "small", "rw", "read", "inj", "model"], price = (rs) => RATE(rs[0]?.model)?.in ?? null, r2 = (v) => +v.toFixed(2);
     const bucketize = (series, B = 80) => { const n = series.length, nb = Math.min(n, B), out = [];
       for (let b = 0; b < nb; b++) { const a = Math.floor(b * n / nb), z = Math.floor((b + 1) * n / nb); let ctx = 0; const acc = [0, 0, 0, 0, 0, 0];
         for (let i = a; i < z; i++) { ctx = Math.max(ctx, series[i][0]); for (let k = 0; k < 6; k++) acc[k] += series[i][k + 1]; }
@@ -154,7 +154,7 @@ export function runReport(opts, agg) {
       const byType = {}; for (const r of agents) ((byType[r.agentType || "(untyped)"] ??= {})[shortModel(r.model)] ??= []).push(r);
       const compare = [];
       for (const [ty, models] of Object.entries(byType)) { const ms = Object.entries(models).filter(([, rs]) => rs.length >= 5);
-        for (const [ma, ra] of ms) for (const [mb, rb] of ms) { if (!(price(ma) < price(mb))) continue;
+        for (const [ma, ra] of ms) for (const [mb, rb] of ms) { if (price(ra) === null || price(rb) === null || !(price(ra) < price(rb))) continue;
           const stat = (m, rs) => ({ model: m, n: rs.length, med: r2(q(rs.map((r) => r.usd), 0.5)), sum: r2(rs.reduce((a, r) => a + r.usd, 0)), calls: q(rs.map((r) => r.calls), 0.5), peakK: Math.round(q(rs.map((r) => r.ctxPeak / 1000), 0.5)), wall: Math.round(q(rs.map(wallMin), 0.5)) });
           const A = stat(ma, ra), Bm = stat(mb, rb), flagged = A.med >= 1.5 * Bm.med, excess = flagged ? r2(A.sum - A.n * Bm.med) : 0;
           if (flagged) for (const r of ra) { r.f[5] = Math.max(0, r.usd - Bm.med); r.cmp = ty; } if (flagged) for (const r of rb) r.cmp = ty;
@@ -182,7 +182,7 @@ export function runReport(opts, agg) {
       for (let k = 0; k < 6; k++) [...runs].sort((a, b) => b.f[k] - a.f[k]).slice(0, 8).forEach((r) => r.f[k] > 0 && pick.add(r));
       for (const c of compare.filter((x) => x.flagged)) for (const m of [c.cheap.model, c.dear.model]) agents.filter((r) => r.cmp === c.type && shortModel(r.model) === m).sort((a, b) => b.usd - a.usd).slice(0, 10).forEach((r) => pick.add(r));
       const out = [...pick].sort((a, b) => b.usd - a.usd).map((r) => ({ k: r.kind, ty: r.agentType || (r.kind === "main" ? "chat" : "agent"), m: shortModel(r.model), ef: r.effort, ti: (r.title || "").slice(0, 80), fam: r.kind === "agent" ? (families[r.sid]?.title || r.sid.slice(0, 8)) : "",
-        usd: r2(r.usd), f: r.f.map(r2), poll: r2(r.pollUsd), calls: r.calls, pk: Math.round(r.ctxPeak / 1000), c0: Math.round(r.ctxFirst / 1000), mn: Math.round(r.ctxSum / r.calls / 1000), wall: Math.round(wallMin(r)), tool: Math.round(r.toolWaitMs / 60e3),
+        usd: r.unpriced ? null : r2(r.usd), f: r.f.map(r2), poll: r2(r.pollUsd), calls: r.calls, pk: Math.round(r.ctxPeak / 1000), c0: Math.round(r.ctxFirst / 1000), mn: Math.round(r.ctxSum / r.calls / 1000), wall: Math.round(wallMin(r)), tool: Math.round(r.toolWaitMs / 60e3),
         t0: +((r.t0 - SINCE) / (HOURS * 3600e3) * 48).toFixed(2), t1: +((r.t1 - SINCE) / (HOURS * 3600e3) * 48).toFixed(2), at: r.t0, errs: r.errs, tests: r.bash[CATS[C_BTEST]]?.n || 0, rer: r.rereadN, rw: r.rewrites.n, resets: r.resets, cmp: r.cmp || "",
         rep: r.topRepeat ? [short(rel(r.topRepeat.cmd)), r.topRepeat.n] : null, cats: CATS.map((c, i) => [c.split(" (")[0], r2(r.cats[i])]).sort((a, b) => b[1] - a[1]).slice(0, 5), prof: bucketize(r.series) }));
       view.projects.push({ path: pPath, name: path.basename(pPath), usd: r2(pv.usd), mainUsd: r2(pv.main), agentUsd: r2(pv.agent), nMain: runs.length - agents.length, nAgent: agents.length, fin: fin.map(r2), tl: tl.map(r2), tlf: tlf.map((a) => a.map(r2)), ev, runs: out,
@@ -197,7 +197,7 @@ export function runReport(opts, agg) {
     const items = (t) => (t.match(/^\s*(\d+[.)]|[-*•]|#{1,4})\s+\S/gm) || []).length, paths = (t) => new Set(t.match(/[\w.@-]+(?:\/[\w.@\[\]-]+)+\.\w{1,5}\b/g) || []).size;
     const fams = famList.filter((f) => FAMRX.test(f.title || "")), rowsB = [];
     for (const f of fams) for (const r of f.agentRuns) { const t = r.brief || "", land = [...r.land], grow = land.reduce((a, b) => a + b, 0) - land[C_PREFIX];
-      rowsB.push({ fam: f.title, famSid: f.sid.slice(0, 8), project: path.basename(r.project), ty: r.agentType || "(untyped)", m: shortModel(r.model), depth: r.depth, ti: r.title, at: new Date(r.t0).toISOString().slice(0, 16), usd: +r.usd.toFixed(2), calls: r.calls, pkK: Math.round(r.ctxPeak / 1000), wall: Math.round(wallMin(r)),
+      rowsB.push({ fam: f.title, famSid: f.sid.slice(0, 8), project: path.basename(r.project), ty: r.agentType || "(untyped)", m: shortModel(r.model), depth: r.depth, ti: r.title, at: new Date(r.t0).toISOString().slice(0, 16), unpriced: r.unpriced, usd: +r.usd.toFixed(2), calls: r.calls, pkK: Math.round(r.ctxPeak / 1000), wall: Math.round(wallMin(r)),
         briefChars: t.length, briefItems: items(t), briefPaths: paths(t), briefFences: (t.match(/```/g) || []).length / 2, briefAccept: /accept|done when|definition of done|must pass|verify/i.test(t), briefNoBrief: r.brief === null,
         distinctRead: r.distinctRead, readsBeforeEdit: r.B.readsBeforeEdit, firstEditCall: r.B.firstEditCall, edits: r.B.edits, filesEdited: Object.keys(r.B.editFiles).length, maxEditsOneFile: Math.max(0, ...Object.values(r.B.editFiles)), testFilesEdited: Object.keys(r.B.editFiles).filter((p) => /test|spec/i.test(p)).length,
         tests: r.B.tests, testFails: r.B.testFails, rereads: r.rereadN, errs: r.errs, small: +r.smallUsd.toFixed(2), poll: +r.pollUsd.toFixed(2),
@@ -213,7 +213,7 @@ export function runReport(opts, agg) {
       L(`    ${cut(m, 10)} ${pad(xs.length, 4)} runs · ` + Object.entries(tot).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, v]) => `${c} ${pct(v, all)}`).join(" · ")); }
     L("  does a bigger brief make a dearer run? (all matching runs, by number of list items in the brief):");
     for (const [lo, hi, name] of [[0, 3, "0–3 items"], [4, 9, "4–9"], [10, 19, "10–19"], [20, 39, "20–39"], [40, 1e9, "40+"]]) { const xs = rowsB.filter((x) => x.briefItems >= lo && x.briefItems <= hi); if (xs.length) L(`    ${pad(name, 10)} ${pad(xs.length, 4)} runs · median ${pad($(med(xs.map((x) => x.usd))), 7)} · median calls ${pad(med(xs.map((x) => x.calls)), 4)} · median peak ${pad(med(xs.map((x) => x.pkK)), 4)}K · median brief ${pad(med(xs.map((x) => x.briefChars)), 6)} chars`); }
-    fs.mkdirSync(path.dirname(path.resolve(BRIEFS)), { recursive: true }); fs.writeFileSync(BRIEFS, JSON.stringify(rowsB.sort((a, b) => b.usd - a.usd)));
+    fs.mkdirSync(path.dirname(path.resolve(BRIEFS)), { recursive: true }); fs.writeFileSync(BRIEFS, JSON.stringify(rowsB.sort((a, b) => b.usd - a.usd).map((r) => ({ ...r, usd: r.unpriced ? null : r.usd }))));
     L(`briefs → ${BRIEFS} (${(fs.statSync(BRIEFS).size / 1e6).toFixed(1)} MB · ${rowsB.length} runs)`);
   }
 

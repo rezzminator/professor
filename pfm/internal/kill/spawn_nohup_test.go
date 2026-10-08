@@ -43,6 +43,7 @@ func TestCommandSpawnerUsesNohupWhenSetsidIsAbsent(t *testing.T) {
 		Setsid:     filepath.Join(root, "no-such-setsid-binary"),
 		Nohup:      nohupPath,
 		ConfigPath: "/jail/config/pfm.json",
+		LogDir:     root,
 	}
 	args := ExitArgs{
 		Engine:     pfmengine.Claude,

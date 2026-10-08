@@ -3,6 +3,7 @@ package kill
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -65,4 +66,36 @@ func TestTmuxKillerRecordsEveryInvocation(t *testing.T) {
 		t.Fatalf("records = %d, want 2: %s", len(recorder.Records()), recorder.Raw())
 	}
 	_ = context.Background
+}
+
+// TestTmuxKillerCaptureReadsOnlyTheScreen: the finisher parses Capture and
+// CaptureStyled as the pane's screen (footer, composer, exit dialog), so a
+// warning tmux writes to stderr must never join that text; a failed capture
+// still names tmux's own complaint.
+func TestTmuxKillerCaptureReadsOnlyTheScreen(t *testing.T) {
+	directory := t.TempDir()
+	warns := filepath.Join(directory, "tmux-warns")
+	script := "#!/bin/sh\nprintf '\\342\\235\\257 \\n'\necho 'tmux: terminal warning' >&2\nexit 0\n"
+	if err := testjail.WriteExecutable(warns, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fails := filepath.Join(directory, "tmux-fails")
+	failing := []byte("#!/bin/sh\necho \"can't find pane: %4\" >&2\nexit 1\n")
+	if err := testjail.WriteExecutable(fails, failing, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for name, capture := range map[string]func(TmuxKiller) (string, error){
+		"plain":  func(tmux TmuxKiller) (string, error) { return tmux.Capture(ctx, "/sockets/cc-1", "%4") },
+		"styled": func(tmux TmuxKiller) (string, error) { return tmux.CaptureStyled(ctx, "/sockets/cc-1", "%4") },
+	} {
+		screen, err := capture(TmuxKiller{Binary: warns})
+		if err != nil || screen != "\u276f \n" {
+			t.Fatalf("%s capture = %q, %v; want only the screen %q", name, screen, err, "\u276f \n")
+		}
+		_, err = capture(TmuxKiller{Binary: fails})
+		if err == nil || !strings.Contains(err.Error(), "can't find pane: %4") {
+			t.Fatalf("%s capture of a failing tmux = %v, want tmux's own complaint", name, err)
+		}
+	}
 }

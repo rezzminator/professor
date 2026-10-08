@@ -95,7 +95,7 @@ func (jail *killTmuxJail) startReader(
 ) string {
 	t.Helper()
 	scriptPath := filepath.Join(jail.root, socket+".sh")
-	content := "#!/bin/sh\nIFS= read -r line\n"
+	content := "#!/bin/sh\nprintf '❯ \\n────\\n'\nIFS= read -r line\n"
 	if appendPrompt {
 		content += "printf '%s\\n' " +
 			shellQuote(`{"type":"user","cwd":"/work/exit","message":{"content":"goodbye flush"}}`) +

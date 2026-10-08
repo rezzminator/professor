@@ -51,6 +51,36 @@ func TestSelectorLineExactChatShGuards(t *testing.T) {
 	}
 }
 
+// TestExitDialogOpenNeedsTheExitRowSelected is the one matcher both chat
+// closers press Enter on: reload's worker and the kill-exit finisher. Only
+// Claude Code's background-work confirmation with its Exit row selected
+// reads open — a human who moved the marker to Stay, or a permission
+// selector, gets no Enter.
+func TestExitDialogOpenNeedsTheExitRowSelected(t *testing.T) {
+	t.Parallel()
+	const dialog = "   Background work is running\n" +
+		"   The following will stop when you exit:\n" +
+		"   shell · sleep 25 && echo done\n"
+	tests := []struct {
+		name    string
+		capture string
+		want    bool
+	}{
+		{name: "exit row selected", capture: dialog + "   ❯ 1. Exit and stop tasks\n     2. Stay\n", want: true},
+		{name: "marker moved to stay", capture: dialog + "     1. Exit and stop tasks\n   ❯ 2. Stay\n"},
+		{name: "permission selector", capture: "Do you want to proceed?\n ❯ 1. Yes\n   2. No\n"},
+		{name: "idle composer", capture: "⏺ done\n────────\n❯ \n────────\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ExitDialogOpen(test.capture); got != test.want {
+				t.Fatalf("ExitDialogOpen(%q) = %v, want %v", test.capture, got, test.want)
+			}
+		})
+	}
+}
+
 func TestIsBusyExactMarkers(t *testing.T) {
 	t.Parallel()
 	for _, capture := range []string{

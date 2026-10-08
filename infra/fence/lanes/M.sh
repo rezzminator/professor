@@ -1096,7 +1096,7 @@ if requires; then
   fi
 fi
 
-# ─── M.10 — open / name / kill / unkill / save / servicedesk ──────────
+# ─── M.10 — open / name / kill / unkill / exit / save / servicedesk ───
 
 beat M.10-chat-tools-gap
 spends "cc:$SEAT"
@@ -1239,6 +1239,24 @@ else
       bad="$bad M19: chat_save with no transcript over the daemon did not refuse by name (no calling chat): isError=$MCP_ISERR $(one_line "$MCP_TEXT");"
   else
     bad="$bad M19: chat_save no transcript: $MCP_WHY;"
+  fi
+  # M17e chat_exit — the caller is only the request's own identity: over the
+  # shared daemon with no _meta it ends nothing and says so; any argument
+  # (a target among them) is refused by the empty schema.
+  if mcp_call http professor chat_exit '{}'; then
+    [ "$MCP_ISERR" = true ] && grep -qF 'MCP request has no _meta.threadId' <<<"$MCP_TEXT" ||
+      bad="$bad M17e: chat_exit with no caller identity over the daemon did not refuse by name: isError=$MCP_ISERR $(one_line "$MCP_TEXT");"
+  else
+    bad="$bad M17e: chat_exit no caller: $MCP_WHY;"
+  fi
+  # The schema, not the missing identity, must be what refuses it: a refusal
+  # naming the identity would read the same with the schema accepting target.
+  if mcp_call http professor chat_exit '{"target":"x"}'; then
+    { [ "$MCP_ISERR" = true ] || [ -n "$MCP_RPCERR" ]; } &&
+      grep -qF 'target' <<<"$MCP_TEXT $MCP_RPCERR" && ! grep -qF '_meta.threadId' <<<"$MCP_TEXT $MCP_RPCERR" ||
+      bad="$bad M17e: chat_exit{target} was not refused by its schema: isError=$MCP_ISERR rpc=$(one_line "$MCP_RPCERR") $(one_line "$MCP_TEXT");"
+  else
+    bad="$bad M17e: chat_exit with a target: $MCP_WHY;"
   fi
   # M20 servicedesk — filed under UNIDENTIFIED from the daemon, read back from pfm issues
   issue_title="lane M issue $$ $(date +%s)"

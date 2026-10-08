@@ -306,6 +306,10 @@ type ActionOutput struct {
 	Message string `json:"message,omitempty"`
 }
 
+// ExitInput is chat_exit's empty argument object: the target is always the
+// caller, so any field — a target among them — is refused by the schema.
+type ExitInput struct{}
+
 type KillInput struct {
 	Target string `json:"target"`
 	Exit   bool   `json:"exit,omitempty"`

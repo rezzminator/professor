@@ -3,15 +3,19 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"debug/buildinfo"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,6 +106,8 @@ func TestMain(m *testing.M) {
 		"jail-pfm":      runPFMCommand,
 		"jail-tmux":     runTmuxCommand,
 		"jail-until":    runSleepUntilCommand,
+		"jail-gone":     runUntilGoneCommand,
+		"jail-mcp-exit": runMCPExitCommand,
 		"jail-ls-lacks": runLSLacksCommand,
 		"jail-pfm-rc":   runPFMRCCommand,
 	})
@@ -517,6 +523,130 @@ func runSleepUntilCommand() {
 	}
 	fmt.Fprintf(os.Stderr, "sleep-until: timeout pattern=%q error=%v capture=%q\n", os.Args[3], lastErr, last)
 	os.Exit(1)
+}
+
+// runUntilGoneCommand waits for a scratch tmux server to have no pane left —
+// its last pane closed, so the server exited. The bound sits between a
+// graceful /exit (a few seconds) and the kill-exit finisher's fallback
+// kill-pane (its whole grace window): a pane only the fallback ends is a red.
+func runUntilGoneCommand() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: gone <socket>")
+		os.Exit(2)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	var last []byte
+	for time.Now().Before(deadline) {
+		command := exec.Command(
+			os.Getenv(e2eTmuxBinaryEnv), "-L", os.Args[1], "list-panes", "-a", "-F", "#{pane_id}",
+		)
+		output, err := command.CombinedOutput()
+		last = output
+		if err != nil && (strings.Contains(string(output), "no server running") ||
+			strings.Contains(string(output), "error connecting")) {
+			return
+		}
+		if err == nil && strings.TrimSpace(string(output)) == "" {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	screen, err := exec.Command(
+		os.Getenv(e2eTmuxBinaryEnv), "-L", os.Args[1], "capture-pane", "-p", "-J",
+	).CombinedOutput()
+	fmt.Fprintf(
+		os.Stderr, "gone: timeout socket=%q panes=%q screen=%q capture err=%v\n",
+		os.Args[1], last, screen, err,
+	)
+	os.Exit(1)
+}
+
+// runMCPExitCommand calls chat_exit{} through `pfm mcp serve --stdio` as the
+// chat on <socket> itself — the _meta.pfmProxy identity Claude Code's
+// per-chat proxy stamps on every call — and prints the tool's answer, then
+// whether that pane was still on the socket the moment the answer arrived
+// (the proxy's id field stays empty, as OpenCode's does: the seat's own
+// session id is minted at launch, and the live row supplies it):
+// chat_exit returns once the finisher is spawned, because its caller's pane
+// can close only after the very turn this call belongs to has ended.
+func runMCPExitCommand() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: mcp-exit <socket>")
+		os.Exit(2)
+	}
+	socket := os.Args[1]
+	tmuxBinary := os.Getenv(e2eTmuxBinaryEnv)
+	address, err := exec.Command(
+		tmuxBinary, "-L", socket, "display-message", "-p", "#{session_name}\t#{pane_id}",
+	).CombinedOutput()
+	session, pane, found := strings.Cut(strings.TrimSpace(string(address)), "\t")
+	if err != nil || !found {
+		fmt.Fprintf(os.Stderr, "mcp-exit: read the seat's address: %v: %q\n", err, address)
+		os.Exit(1)
+	}
+	call, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+		"params": map[string]any{
+			"name": "chat_exit", "arguments": map[string]any{},
+			"_meta": map[string]any{"pfmProxy": map[string]any{
+				"v":          1,
+				"session":    session,
+				"socketName": socket,
+				"socketPath": filepath.Join(os.Getenv("PFM_TMUX_DIR"), socket),
+				"pane":       pane,
+				"engine":     "claude",
+				"source":     "tmux",
+			}},
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-exit: encode the call: %v\n", err)
+		os.Exit(1)
+	}
+	server := exec.Command(os.Getenv(e2eScriptBinaryEnv), "mcp", "serve", "--stdio")
+	server.Stderr = os.Stderr
+	stdin, err := server.StdinPipe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-exit: stdin pipe: %v\n", err)
+		os.Exit(1)
+	}
+	stdout, err := server.StdoutPipe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-exit: stdout pipe: %v\n", err)
+		os.Exit(1)
+	}
+	if err := server.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-exit: start the stdio server: %v\n", err)
+		os.Exit(1)
+	}
+	frames := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",` +
+		`"capabilities":{},"clientInfo":{"name":"e2e","version":"0"}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n" + string(call) + "\n"
+	if _, err := io.WriteString(stdin, frames); err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-exit: write the frames: %v\n", err)
+		os.Exit(1)
+	}
+	answer := ""
+	lines := bufio.NewScanner(stdout)
+	lines.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for answer == "" && lines.Scan() {
+		if strings.Contains(lines.Text(), `"id":3`) {
+			answer = lines.Text()
+		}
+	}
+	panes, listErr := exec.Command(tmuxBinary, "-L", socket, "list-panes", "-a", "-F", "#{pane_id}").Output()
+	_ = stdin.Close()
+	waitErr := server.Wait()
+	if answer == "" {
+		fmt.Fprintf(os.Stderr, "mcp-exit: no id-3 answer (scan %v, server %v)\n", lines.Err(), waitErr)
+		os.Exit(1)
+	}
+	fmt.Println(answer)
+	if listErr == nil && slices.Contains(strings.Fields(string(panes)), pane) {
+		fmt.Printf("pane %s alive at return\n", pane)
+	} else {
+		fmt.Printf("pane %s gone at return (%v)\n", pane, listErr)
+	}
 }
 
 func runLSLacksCommand() {

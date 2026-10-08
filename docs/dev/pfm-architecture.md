@@ -121,7 +121,7 @@ One term per concept, spelled the same in the directory, the identifier, the wir
 | Account usage windows | limits | `internal/limits` · `limits.Sampler` | cache `cc-usage-<uid>/acct-N.json` (unchanged) | lives in `stats` beside resource sampling |
 | A one-time host migration | migration step | `internal/installer/migrations/v<ver>_<slug>.go` · `migrations.Steps` | — | 49 `retire*`/`migrate*`/`*Legacy*` funcs across 12 files |
 | Executable matching per engine | engine match | `engine.MatchCommand` | — | package `engine/matchutil` |
-| Removing a chat from the list (and ending it if live) | **Open ruling 4** | — | CLI `kill`, MCP `chat_kill` | CLI/package say `kill`, the UI and MCP description say `hide`, the SQL table says `hidden` |
+| Removing a chat from the list (and ending it if live) | **Open ruling 4** | — | CLI `kill`, MCP `chat_kill` and `chat_exit` (the caller itself) | CLI/package say `kill`, the UI and MCP description say `hide`, the SQL table says `hidden` |
 
 ## 4. Façades
 

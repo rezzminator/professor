@@ -1,6 +1,7 @@
 name	lane	beat
 chat_capture	M	M.09-chat-tools
 chat_digest	M	M.09-chat-tools
+chat_exit	M	M.10-chat-tools-gap
 chat_find	M	M.09-chat-tools
 chat_inject	M	M.09-chat-tools
 chat_keys	M	M.09-chat-tools

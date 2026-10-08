@@ -2,6 +2,7 @@ package kill
 
 import (
 	"context"
+	"io"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -83,14 +84,24 @@ type TmuxClient interface {
 	// false a caller could mistake for a confirmed exit.
 	PaneExists(ctx context.Context, socketPath, paneID string) (bool, error)
 	SendLine(ctx context.Context, socketPath, paneID, line string) error
+	// Capture reads the pane's visible screen, CaptureStyled the same with
+	// its styling; SendKey presses one named tmux key there. The finisher
+	// reads the footer and proves the composer empty before it types the
+	// exit command, and answers the exit confirmation with them.
+	Capture(ctx context.Context, socketPath, paneID string) (string, error)
+	CaptureStyled(ctx context.Context, socketPath, paneID string) (string, error)
+	SendKey(ctx context.Context, socketPath, paneID, key string) error
 	KillPane(ctx context.Context, socketPath, paneID string) error
 	KillServer(ctx context.Context, socketPath string) error
 	ClientTTYs(ctx context.Context, socketPath string) ([]string, error)
 	PanesByTTY(ctx context.Context, socketPath string) (map[string]string, error)
 }
 
-// ExitSpawner starts the detached internal finisher.
+// ExitSpawner starts the detached internal finisher. Prepare runs before Kill
+// writes anything and readies what can fail without a side effect (the
+// finisher's log), so its failure leaves nothing changed; Spawn launches.
 type ExitSpawner interface {
+	Prepare(args ExitArgs) error
 	Spawn(ctx context.Context, args ExitArgs) error
 }
 
@@ -113,7 +124,14 @@ type Dependencies struct {
 	Delay        time.Duration
 	PollEvery    time.Duration
 	PollAttempts int
-	Refresher    Refresher
+	// IdleAttempts bounds the finisher's wait, PollEvery apart, for the
+	// chat's running turn to end before it types the exit command.
+	IdleAttempts int
+	// Log takes the finisher's one line per run that typed no exit command,
+	// naming why; nil is the process's stderr, which CommandSpawner points
+	// at the chat's kill-exit log.
+	Log       io.Writer
+	Refresher Refresher
 	// ConfirmEvery and ConfirmAttempts bound Manager.ConfirmExit's own
 	// caller-side wait — short, because unlike the finisher's detached grace
 	// window this one blocks the interactive/MCP kill call.
@@ -142,6 +160,8 @@ type Finisher struct {
 	delay        time.Duration
 	pollEvery    time.Duration
 	pollAttempts int
+	idleAttempts int
+	log          io.Writer
 	paths        resolvedPaths
 }
 

@@ -560,6 +560,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	}
 	defer func() { cli.CloseResource(database, "pfm internal kill-exit: close database", stderr, &exitCode) }()
 	finisher, err := kill.NewFinisher(database, kill.Dependencies{
+		Log:         stderr,
 		Paths:       runtime.Paths,
 		ClaudeRoots: runtime.Paths.Roots[pfmengine.Claude],
 		CodexHomes:  runtime.Config.CodexHomes(),

@@ -15,6 +15,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -23,6 +24,10 @@ const (
 	defaultExitDelay    = 1500 * time.Millisecond
 	defaultPollEvery    = time.Second
 	defaultPollAttempts = 20
+	// defaultIdleAttempts bounds the wait for the chat's running turn to end
+	// before the exit command is typed: the caller of a self-exit was told to
+	// reply one line and end its turn.
+	defaultIdleAttempts = 20
 	// bunkerSocket is the one tmux server that hosts terminal tabs rather than
 	// chats (vsct.sh), so it is the only place a chat's viewport can be a pane.
 	bunkerSocket = "vsct"
@@ -100,7 +105,17 @@ func NewFinisher(
 	if pollAttempts == 0 {
 		pollAttempts = defaultPollAttempts
 	}
+	idleAttempts := dependencies.IdleAttempts
+	if idleAttempts == 0 {
+		idleAttempts = defaultIdleAttempts
+	}
+	log := dependencies.Log
+	if log == nil {
+		log = os.Stderr
+	}
 	return &Finisher{
+		idleAttempts: idleAttempts,
+		log:          log,
 		database:     database,
 		tmux:         tmux,
 		refresher:    refresher,
@@ -117,14 +132,17 @@ func NewFinisher(
 	}, nil
 }
 
-// exitCommands is the graceful-close command each engine's TUI answers to,
-// and the set of engines this finisher knows how to close at all. OpenCode's
-// command palette lists "/exit — close OpenCode" (its parser also accepts
-// /quit and :q); Codex spells the same thing /quit.
+// exitCommands is the set of engines this finisher knows how to close, each
+// with the exit command it types into a composer it can prove empty. "" is an
+// engine with no provable-empty composer, which therefore never gets one and
+// closes by the fallback kill alone — an intended outcome, since Enter on a
+// draft sends it as a prompt and the chat is ending hidden either way. Codex
+// draws its › row with no box beneath (a draft that wraps or starts with a
+// newline has no known end); pfm reads no OpenCode composer at all.
 var exitCommands = map[pfmengine.ID]string{
 	pfmengine.Claude:   "/exit",
-	pfmengine.Codex:    "/quit",
-	pfmengine.OpenCode: "/exit",
+	pfmengine.Codex:    "",
+	pfmengine.OpenCode: "",
 }
 
 // Run performs the delayed graceful close, fallback kill, cleanup, refresh,
@@ -143,17 +161,36 @@ func (finisher *Finisher) Run(
 	if err := waitContext(ctx, finisher.delay); err != nil {
 		return err
 	}
+	frame, turn, err := finisher.turnEnded(ctx, args)
+	if err != nil {
+		return err
+	}
 
 	// Read the viewports BEFORE the chat dies: its clients vanish with its server,
 	// and they are the only evidence of which panes were watching it.
 	viewports := finisher.viewportPanes(ctx, args.SocketPath)
 
-	_ = finisher.tmux.SendLine(ctx, args.SocketPath, args.PaneID, command)
-	landed, probeErr, err := pollPaneGone(
-		ctx, finisher.tmux, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
-	)
-	if err != nil {
-		return err
+	// The exit command goes only into a composer proven empty once the turn
+	// is over; every other run types nothing, and its one log line names why
+	// — the detached finisher's stderr is the chat's kill-exit log, so the
+	// reason is never absence. The fallback kill ends the pane either way.
+	landed := false
+	probeErr := finisher.exitRefusal(ctx, args, command, frame, turn)
+	if probeErr == nil {
+		_ = finisher.tmux.SendLine(ctx, args.SocketPath, args.PaneID, command)
+		landed, probeErr, err = pollPaneGone(
+			ctx, finisher.tmux, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
+			finisher.answerExitDialog(args),
+		)
+		if err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(
+			finisher.log,
+			"pfm internal kill-exit %s: no exit command typed — %v; the fallback kill-pane closes the pane\n",
+			args.ID, probeErr,
+		)
 	}
 	// The fallback kill always runs, matching the graceful-close-then-
 	// fallback-kill choreography regardless of what the grace window saw —
@@ -162,10 +199,17 @@ func (finisher *Finisher) Run(
 	// expected to fail ("can't find pane") and that is not itself evidence
 	// of anything. A kill the finisher has not seen land either way is
 	// never the one it records.
+	// A failed kill of a pane already gone (it died before the turn ended)
+	// is no evidence either way, so the pane is asked once more.
 	if killErr := finisher.tmux.KillPane(ctx, args.SocketPath, args.PaneID); killErr == nil {
 		landed = true
 	} else if !landed {
-		probeErr = errors.Join(probeErr, killErr)
+		exists, existsErr := finisher.tmux.PaneExists(ctx, args.SocketPath, args.PaneID)
+		if existsErr == nil && !exists {
+			landed = true
+		} else {
+			probeErr = errors.Join(probeErr, killErr, existsErr)
+		}
 	}
 	finisher.closeViewports(ctx, viewports)
 
@@ -195,6 +239,116 @@ func (finisher *Finisher) Run(
 		cleanupErrors = append(cleanupErrors, err)
 	}
 	return errors.Join(cleanupErrors...)
+}
+
+// turnState is what turnEnded saw: the turn over, still running at the
+// bound, or the pane already gone.
+type turnState int
+
+const (
+	turnRunning turnState = iota
+	turnOver
+	turnPaneGone
+)
+
+// turnEnded waits, idleAttempts polls at most, for the pane's footer to read
+// idle on two captures in a row — reload's worker's rule (waitCallerIdle): an
+// exit command typed into a running turn is conversation text, never a TUI
+// command, and a self-exit's caller was told to reply one line and end its
+// turn. A failed capture is no reading and resets the count, unless the pane
+// is already gone, which needs no wait. turnRunning at the bound. The frame
+// is the last idle capture, the one the composer is read from.
+func (finisher *Finisher) turnEnded(ctx context.Context, args ExitArgs) (string, turnState, error) {
+	quiet := 0
+	for attempt := 0; attempt < finisher.idleAttempts; attempt++ {
+		capture, err := finisher.tmux.Capture(ctx, args.SocketPath, args.PaneID)
+		switch {
+		case err == nil && !inject.IsFooterBusy(args.Engine, capture):
+			quiet++
+			if quiet >= 2 {
+				return capture, turnOver, nil
+			}
+		case err != nil:
+			quiet = 0
+			exists, probeErr := finisher.tmux.PaneExists(ctx, args.SocketPath, args.PaneID)
+			if probeErr == nil && !exists {
+				return "", turnPaneGone, nil
+			}
+		default:
+			quiet = 0
+		}
+		if attempt < finisher.idleAttempts-1 {
+			if err := waitContext(ctx, finisher.pollEvery); err != nil {
+				return "", turnRunning, err
+			}
+		}
+	}
+	return "", turnRunning, nil
+}
+
+// exitRefusal is nil only when the exit command may be typed: the turn over,
+// the engine one with a provable-empty composer (a non-empty command), and
+// the turn's last idle frame proving the composer empty — reload's rule
+// (composerEmpty), read by inject: the box drawn, no selector open on it, no
+// draft or only a dim suggestion on the marker row, and no text on any row down to the box's
+// closing rule. Anything else is the reason nothing is typed.
+func (finisher *Finisher) exitRefusal(
+	ctx context.Context,
+	args ExitArgs,
+	command, frame string,
+	turn turnState,
+) error {
+	switch {
+	case turn == turnRunning:
+		return errors.New("the turn was still running at the bound")
+	case turn == turnPaneGone:
+		return fmt.Errorf("pane %s was already gone when the turn ended", args.PaneID)
+	case command == "":
+		return fmt.Errorf("pfm cannot prove the %s composer empty", pfmengine.MustLookup(args.Engine).Short)
+	case inject.LastComposerLine(frame) == "":
+		return fmt.Errorf("pane %s drew no composer", args.PaneID)
+	case inject.SelectorLine(frame) != "":
+		// A permission prompt or menu parks the turn with an idle footer;
+		// its ❯ row is a selection, not a human's draft.
+		return fmt.Errorf("pane %s shows the open selector %q", args.PaneID, inject.SelectorLine(frame))
+	}
+	empty, draft, err := inject.ComposerEmpty(frame, func() (string, error) {
+		return finisher.tmux.CaptureStyled(ctx, args.SocketPath, args.PaneID)
+	})
+	switch {
+	case err != nil:
+		return fmt.Errorf("pane %s: %w", args.PaneID, err)
+	case !empty:
+		return fmt.Errorf("pane %s holds the draft %q", args.PaneID, draft)
+	case !inject.ComposerBoxEmpty(frame):
+		return fmt.Errorf(
+			"pane %s: the composer box holds text below its marker row or has no closing rule",
+			args.PaneID,
+		)
+	}
+	return nil
+}
+
+// answerExitDialog is the grace window's per-poll step while the pane lives:
+// /exit over background work (a background shell, a scheduled task, a
+// sub-agent) opens Claude Code's confirmation with "Exit and stop tasks"
+// preselected, and the chat exits only once Enter answers it — reload's
+// worker presses the same key on the same dialog. The background work stops
+// with the chat either way.
+func (finisher *Finisher) answerExitDialog(args ExitArgs) func(context.Context) error {
+	return func(ctx context.Context) error {
+		capture, err := finisher.tmux.Capture(ctx, args.SocketPath, args.PaneID)
+		if err != nil {
+			return fmt.Errorf("read pane %s for an exit dialog: %w", args.PaneID, err)
+		}
+		if !inject.ExitDialogOpen(capture) {
+			return nil
+		}
+		if err := finisher.tmux.SendKey(ctx, args.SocketPath, args.PaneID, "Enter"); err != nil {
+			return fmt.Errorf("confirm the exit dialog in pane %s: %w", args.PaneID, err)
+		}
+		return nil
+	}
 }
 
 // viewportPanes returns the bunker panes this chat is being watched through.
@@ -386,16 +540,20 @@ func waitContext(ctx context.Context, duration time.Duration) error {
 // whether paneID is still on socketPath. probeErr carries the last "could not
 // ask" failure — never folded into landed, because a transient tmux error
 // must not be read as a pane that already closed (the same distinction
-// TmuxClient.PaneExists documents). Both Finisher.Run's graceful-close window
-// and Manager.ConfirmExit's bounded caller-side check share this one loop so
-// "is it actually gone yet" has exactly one implementation.
+// TmuxClient.PaneExists documents) — joined with any error alive returned.
+// alive, when set, runs on each poll that saw the pane still there. Both
+// Finisher.Run's graceful-close window and Manager.ConfirmExit's bounded
+// caller-side check share this one loop so "is it actually gone yet" has
+// exactly one implementation.
 func pollPaneGone(
 	ctx context.Context,
 	tmux TmuxClient,
 	socketPath, paneID string,
 	attempts int,
 	every time.Duration,
+	alive func(context.Context) error,
 ) (landed bool, probeErr, waitErr error) {
+	var aliveErr error
 	for attempt := 0; attempt < attempts; attempt++ {
 		exists, err := tmux.PaneExists(ctx, socketPath, paneID)
 		switch {
@@ -403,6 +561,10 @@ func pollPaneGone(
 			probeErr = err
 		case !exists:
 			return true, nil, nil
+		case alive != nil:
+			if err := alive(ctx); err != nil {
+				aliveErr = err
+			}
 		}
 		if attempt < attempts-1 {
 			if err := waitContext(ctx, every); err != nil {
@@ -410,5 +572,5 @@ func pollPaneGone(
 			}
 		}
 	}
-	return false, probeErr, nil
+	return false, errors.Join(probeErr, aliveErr), nil
 }

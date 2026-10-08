@@ -42,7 +42,7 @@ func stashDraft(
 	capture string,
 	stderr io.Writer,
 ) error {
-	empty, draft, err := composerEmpty(ctx, request, tmux, capture)
+	empty, draft, err := inject.ComposerEmpty(capture, styledCapture(ctx, request, tmux))
 	if err != nil {
 		return fmt.Errorf("%w — /exit was not typed", err)
 	}
@@ -57,7 +57,7 @@ func stashDraft(
 		after, readErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if readErr == nil {
 			var left string
-			empty, left, readErr = composerEmpty(ctx, request, tmux, after)
+			empty, left, readErr = inject.ComposerEmpty(after, styledCapture(ctx, request, tmux))
 			if readErr == nil && empty {
 				return nil
 			}
@@ -83,19 +83,12 @@ func stashDraft(
 	return paneToldError{cause}
 }
 
-// composerEmpty reports whether the composer holds no draft — no text after
-// its marker, or only dim hint text — and returns the plain draft it read. A
-// styled capture that fails is an error, never an empty composer.
-func composerEmpty(ctx context.Context, request Request, tmux Tmux, capture string) (bool, string, error) {
-	draft := composerDraftText(capture)
-	if draft == "" {
-		return true, "", nil
+// styledCapture is inject.ComposerEmpty's styled read of this pane: asked only
+// when the plain capture shows a draft, to tell a dim suggestion from text.
+func styledCapture(ctx context.Context, request Request, tmux Tmux) func() (string, error) {
+	return func() (string, error) {
+		return tmux.CaptureStyled(ctx, request.SocketPath, request.Pane)
 	}
-	styled, err := tmux.CaptureStyled(ctx, request.SocketPath, request.Pane)
-	if err != nil {
-		return false, draft, fmt.Errorf("read composer styling (draft %q): %w", draft, err)
-	}
-	return inject.ComposerIsDimPlaceholder(styled), draft, nil
 }
 
 func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmux Tmux, stderr io.Writer) error {
@@ -109,7 +102,7 @@ func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmu
 		case composerShowsExit(capture):
 			return nil
 		default:
-			seen = fmt.Sprintf("composer showed %q", composerDraftText(capture))
+			seen = fmt.Sprintf("composer showed %q", inject.ComposerDraftText(capture))
 		}
 		if err := clk.Sleep(ctx, 50*time.Millisecond); err != nil {
 			return err
@@ -139,7 +132,7 @@ func clearTypedExit(ctx context.Context, request Request, tmux Tmux) error {
 	if err != nil {
 		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
 	}
-	empty, left, err := composerEmpty(ctx, request, tmux, capture)
+	empty, left, err := inject.ComposerEmpty(capture, styledCapture(ctx, request, tmux))
 	if err != nil {
 		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
 	}

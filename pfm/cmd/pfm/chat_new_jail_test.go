@@ -641,6 +641,10 @@ func (verbs chatNewCallerVerbs) Read(
 	return headless.Chat{}, nil, false, errors.New("unexpected chat read")
 }
 
+func (verbs chatNewCallerVerbs) Exit(context.Context, headless.Chat) (string, error) {
+	return "", errors.New("unexpected chat exit")
+}
+
 func callJailedChatNew(
 	t *testing.T,
 	runtime commandRuntime,

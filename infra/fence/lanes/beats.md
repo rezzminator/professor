@@ -95,7 +95,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `M.07-stdio-transports` · `pfm mcp serve --stdio`: forwards to the daemon, serves in process without one, the caller's ambient identity; malformed-frame parse error · spends none
 - `M.08-mcp-cli` · `pfm mcp` CLI surface: `ls`, `enable`/`disable`, the usage exit, `serve` dispatch · spends none
 - `M.09-chat-tools` · chat family tools driven by a direct MCP client against the loopback daemon's `/mcp/professor`, including dying-pane `chat_keys` reporting dead/3/partial · spends cc:$SEAT
-- `M.10-chat-tools-gap` · chat family tools with no dedicated test file: open/name/kill/unkill/save/`servicedesk` · spends cc:$SEAT
+- `M.10-chat-tools-gap` · chat family tools with no dedicated test file: open/name/kill/unkill/exit/save/`servicedesk` · spends cc:$SEAT
 - `M.11-harvester-tools` · harvester tools read local content and return named per-item errors for offline public sources; `pfm harvest download-file` is exercised · spends none
 - `M.12-harvester-cache-gate` · harvest local cache (an `include_content: false` `harvester_read` re-read is a cache hit: its artifact's frontmatter `fetched_at` precedes the re-read) + search-backend gating of `harvester_search_web` · spends none
 - `M.13-dropped-seat-roster` · a dropped seat's absence shows up in the daemon's own seat roster · spends none

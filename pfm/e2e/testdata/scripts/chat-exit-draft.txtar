@@ -1,0 +1,28 @@
+# A kill-exit over a composer holding a human's draft types nothing: Enter
+# would send "fix the/exit" as a prompt. The fallback kill-pane closes the
+# pane, and the detached finisher's one reason line lands in the chat's
+# kill-exit log beside reload's worker logs, never in /dev/null.
+exec sh -c 'sed -e "s|@PROC@|$PFM_PROC_ROOT|" -e "s|@SID@|$PFM_SID_DIR|" scenario.tmpl > scenario.json'
+env MOCK_ENGINE_SCENARIO=$WORK/scenario.json
+exec jail-pfm chat new --engine claude --name worker --cwd $WORK 'go'
+stdout 'worker'
+exec jail-until cc-1700000000-4242-7 cc-1700000000-4242-7 ready
+exec jail-tmux -L cc-1700000000-4242-7 send-keys -t cc-1700000000-4242-7 'fix the'
+exec jail-until cc-1700000000-4242-7 cc-1700000000-4242-7 'fix the'
+exec jail-pfm chat kill worker --exit
+stdout 'killed'
+exec jail-gone cc-1700000000-4242-7
+exec cat $PFM_SID_DIR/kill-exit-cc-1700000000-4242-7.log
+stdout 'no exit command typed — pane %[0-9]+ holds the draft "fix the"'
+
+-- scenario.tmpl --
+{
+  "version": "2.1.238 (Claude Code)",
+  "session_id": "b2222222-2222-4222-8222-222222222222",
+  "busy_ms": 0,
+  "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0, "context_window": 0},
+  "jail": {"proc_root": "@PROC@", "sid_dir": "@SID@"},
+  "steps": [
+    {"type": "turn", "reply": "ready"}
+  ]
+}

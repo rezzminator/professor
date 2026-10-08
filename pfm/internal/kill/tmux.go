@@ -2,7 +2,9 @@ package kill
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -96,6 +98,52 @@ func (tmux TmuxKiller) SendLine(
 		"Enter",
 	).CombinedOutput(); err != nil {
 		return fmt.Errorf("send Enter: %w: %s", err, output)
+	}
+	return nil
+}
+
+// Capture reads paneID's visible screen, joined lines, no history.
+func (tmux TmuxKiller) Capture(
+	ctx context.Context,
+	socketPath, paneID string,
+) (string, error) {
+	output, err := tmux.command(ctx, socketPath, "capture-pane", "-p", "-J", "-t", paneID).Output()
+	if err != nil {
+		return "", fmt.Errorf("capture pane %s: %w: %s", paneID, err, exitStderr(err))
+	}
+	return string(output), nil
+}
+
+// CaptureStyled is Capture with the escape sequences kept (-e): the dim
+// styling that tells a composer's suggestion from a typed draft.
+func (tmux TmuxKiller) CaptureStyled(
+	ctx context.Context,
+	socketPath, paneID string,
+) (string, error) {
+	output, err := tmux.command(ctx, socketPath, "capture-pane", "-p", "-J", "-e", "-t", paneID).Output()
+	if err != nil {
+		return "", fmt.Errorf("capture pane %s styled: %w: %s", paneID, err, exitStderr(err))
+	}
+	return string(output), nil
+}
+
+// exitStderr is what a failed tmux wrote to stderr. A capture reads stdout
+// alone: the screen is parsed, and a tmux warning must never join it.
+func exitStderr(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return strings.TrimSpace(string(exitErr.Stderr))
+	}
+	return ""
+}
+
+// SendKey presses one named tmux key (Enter, Escape) in paneID.
+func (tmux TmuxKiller) SendKey(
+	ctx context.Context,
+	socketPath, paneID, key string,
+) error {
+	if output, err := tmux.command(ctx, socketPath, "send-keys", "-t", paneID, key).CombinedOutput(); err != nil {
+		return fmt.Errorf("send key %s to pane %s: %w: %s", key, paneID, err, output)
 	}
 	return nil
 }

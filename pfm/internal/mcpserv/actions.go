@@ -345,6 +345,59 @@ func (service *Service) chatKill(
 	return service.cliAction(ctx, args...)
 }
 
+// chatExit ends the calling chat itself. The caller is only ever this
+// request's own identity (_meta.pfmProxy or _meta.threadId): a request with
+// none is refused even where cliTargetForRequest would let "self" fall
+// through to the CLI, because that ambient path reads the MCP server
+// process's environment, never the chat asking. The exit verb returns once
+// the finisher is spawned; it never waits for the pane, which closes only
+// after the caller's own turn ends.
+func (service *Service) chatExit(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	_ ExitInput,
+) (*mcp.CallToolResult, ActionOutput, error) {
+	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
+	if err != nil {
+		return nil, ActionOutput{}, fmt.Errorf("chat_exit: resolve caller: %w", err)
+	}
+	if !caller.valid {
+		detail := caller.detail
+		if !caller.present {
+			detail = noCallerIdentityForExit
+			if !service.backend.allowAmbientIdentity {
+				detail = noAmbientCallerRemedy
+			}
+		}
+		return nil, ActionOutput{}, fmt.Errorf("chat_exit: nothing ended: %s", detail)
+	}
+	self, err := service.resolvedSelf(ctx, caller)
+	if err != nil {
+		return nil, ActionOutput{}, fmt.Errorf("chat_exit: resolve caller: %w", err)
+	}
+	if service.backend.chat == nil {
+		return nil, ActionOutput{}, fmt.Errorf("chat_exit: chat verb layer is not configured")
+	}
+	outcome, err := service.backend.chat.Exit(ctx, self)
+	if err != nil {
+		output := ActionOutput{Status: statusError, Code: 1, Message: err.Error()}
+		return nil, output, fmt.Errorf("chat_exit: %w", err)
+	}
+	return nil, ActionOutput{
+		Status: "ok", Code: 0,
+		Message: "exit scheduled: " + strings.TrimSpace(outcome) +
+			" — reply one line and end this turn; the pane closes once the turn is over",
+	}, nil
+}
+
+// noCallerIdentityForExit is chat_exit's refusal on a server that would
+// otherwise answer "self" from its own process environment (stdio): that
+// environment belongs to whatever launched the server, so chat_exit never
+// reads it.
+const noCallerIdentityForExit = "this MCP request carries no caller identity " +
+	"(_meta.pfmProxy or _meta.threadId), and chat_exit never reads the server " +
+	"process's own environment; run `pfm chat kill self --exit` from this chat's own shell instead"
+
 func (service *Service) chatUnkill(
 	ctx context.Context,
 	request *mcp.CallToolRequest,

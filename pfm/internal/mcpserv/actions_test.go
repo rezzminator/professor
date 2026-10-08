@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -42,6 +43,9 @@ type fakeChatVerbs struct {
 	resolvedSelfIDs   []string
 	resolvedSelfPaths []string
 	resolvedStatusIDs []string
+	exits             []headless.Chat
+	exitMessage       string
+	exitErr           error
 }
 
 func (fake *fakeChatVerbs) Last(ctx context.Context, request chat.LastRequest) (chat.LastResult, error) {
@@ -77,6 +81,11 @@ func (fake *fakeChatVerbs) List(_ context.Context, request chat.ListRequest) (ch
 func (fake *fakeChatVerbs) Find(_ context.Context, request chat.FindRequest) ([]chat.TranscriptMatch, error) {
 	fake.finds = append(fake.finds, request)
 	return fake.found, fake.err
+}
+
+func (fake *fakeChatVerbs) Exit(_ context.Context, self headless.Chat) (string, error) {
+	fake.exits = append(fake.exits, self)
+	return fake.exitMessage, fake.exitErr
 }
 
 func (fake *fakeChatVerbs) Read(
@@ -757,5 +766,129 @@ func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
 		if output.Scope != want {
 			t.Errorf("listProjected(%q).Scope = %q, want %q", repo, output.Scope, want)
 		}
+	}
+}
+
+// TestChatExitEndsOnlyTheRequestScopedCaller is chat_exit's whole decision
+// table. The target is always the caller, and the caller is only ever the
+// request's own identity (_meta.pfmProxy or _meta.threadId): a request that
+// carries none is refused even on a server that allows ambient identity,
+// because the ambient identity is the MCP server process's own environment,
+// never the chat asking. Every refusal ends nothing — no exit verb, no
+// dispatched CLI kill.
+func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
+	t.Parallel()
+	row := compose.Row{
+		SessionName: "cc-seat", ID: "session-id", CWD: "/work/exit", Project: "exit",
+		Name: "Exit Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
+	}
+	proxy := mcp.Meta{"pfmProxy": map[string]any{
+		"v": ProxyWireVersion, "session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat",
+		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
+	}}
+	seat := headless.Chat{
+		Name: "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: "/work/exit",
+		Socket: "cc-seat", Session: "cc-seat", Pane: "%7", Live: true,
+	}
+	tests := []struct {
+		name      string
+		meta      mcp.Meta
+		arguments map[string]any
+		ambient   bool
+		exitErr   error
+		wantExits []headless.Chat
+		wantError string
+		wantText  string
+	}{
+		{
+			name: "proxied caller is exited", meta: proxy, arguments: map[string]any{},
+			wantExits: []headless.Chat{seat}, wantText: "exit scheduled",
+		},
+		{
+			name: "no identity on an ambient stdio server", arguments: map[string]any{}, ambient: true,
+			wantError: "no caller identity",
+		},
+		{
+			name: "no identity on the shared daemon", arguments: map[string]any{},
+			wantError: "MCP request has no _meta.threadId",
+		},
+		{
+			name: "malformed thread id", meta: mcp.Meta{"threadId": " bad "}, arguments: map[string]any{},
+			ambient: true, wantError: "MCP _meta.threadId must be",
+		},
+		{
+			name: "a target argument is refused", meta: proxy, arguments: map[string]any{"target": "x"},
+			wantError: "target",
+		},
+		{
+			name: "a failed exit is a tool error", meta: proxy, arguments: map[string]any{},
+			exitErr: errors.New("spawn finisher: boom"), wantExits: []headless.Chat{seat},
+			wantError: "spawn finisher: boom",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			verbs := &fakeChatVerbs{
+				listed:      chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
+				exitMessage: "killed session-id\tclosing pane %7 on socket cc-seat",
+				exitErr:     test.exitErr,
+			}
+			var dispatched [][]string
+			service := newService("test", &backend{
+				chat: verbs,
+				dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
+					dispatched = append(dispatched, append([]string(nil), args...))
+					_, _ = io.WriteString(stdout, "killed\n")
+					return 0
+				},
+				allowAmbientIdentity: test.ambient,
+			})
+			protocol := connectInMemory(t, service.Server())
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			result, err := protocol.clientSession.CallTool(ctx, &mcp.CallToolParams{
+				Meta: test.meta, Name: "chat_exit", Arguments: test.arguments,
+			})
+			text := ""
+			switch {
+			case err != nil:
+				text = err.Error()
+			case result.IsError:
+				content, marshalErr := json.Marshal(result.Content)
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				text = string(content)
+			default:
+				content, marshalErr := json.Marshal(result.StructuredContent)
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				text = string(content)
+			}
+			refused := err != nil || result.IsError
+			if test.wantError != "" {
+				if !refused || !strings.Contains(text, test.wantError) {
+					t.Fatalf(
+						"chat_exit answered refused=%v %s, want a refusal naming %q",
+						refused, text, test.wantError,
+					)
+				}
+			} else {
+				if refused || !strings.Contains(text, test.wantText) || !strings.Contains(text, `"status":"ok"`) {
+					t.Fatalf(
+						"chat_exit answered refused=%v %s, want status ok naming %q",
+						refused, text, test.wantText,
+					)
+				}
+			}
+			if !reflect.DeepEqual(verbs.exits, test.wantExits) {
+				t.Fatalf("exit verb calls = %+v, want %+v", verbs.exits, test.wantExits)
+			}
+			if len(dispatched) != 0 {
+				t.Fatalf("chat_exit dispatched %q, want no CLI kill: the exit verb is its only door", dispatched)
+			}
+		})
 	}
 }

@@ -39,7 +39,7 @@ const (
 )
 
 var chatToolNames = []string{
-	"chat_capture", "chat_digest", "chat_find", "chat_inject",
+	"chat_capture", "chat_digest", "chat_exit", "chat_find", "chat_inject",
 	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
 	"chat_new", "chat_open", "chat_read", "chat_resolve",
 	"chat_save", "chat_status", "chat_unkill",
@@ -47,7 +47,7 @@ var chatToolNames = []string{
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_digest; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. branch, end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+const chatInstructions = "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done, chat_exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_digest; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -101,6 +101,7 @@ type ChatVerbs interface {
 	List(context.Context, chat.ListRequest) (chat.ListResult, error)
 	Find(context.Context, chat.FindRequest) ([]chat.TranscriptMatch, error)
 	Read(ctx context.Context, target string, tail int) (headless.Chat, []transcript.Entry, bool, error)
+	Exit(ctx context.Context, self headless.Chat) (string, error)
 }
 
 // Dispatch is the in-process command dispatcher used by stateful chat tools.
@@ -228,6 +229,11 @@ func (service *Service) registerTools(server *mcp.Server) {
 		Description: "Hides a chat from the fleet — \"kill / hide / close chat X\". A live target is also ended (its pane and socket close); a resumable-only target is only hidden. Call chat_kill{target:\"my-chat\"}. Returns status ok; a tool error = the target did not resolve or the kill failed, message says which. Reverse with chat_unkill.",
 		Annotations: mutating,
 	}, obs.Tool("chat_kill", service.chatKill))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_exit",
+		Description: "Ends THIS chat itself — \"exit / quit / close this chat\". Call chat_exit{} as this chat's LAST action: then reply one line and end the turn — once the turn ends the pane closes, background work stops, and the chat is hidden from pfm ls; chat_unkill reverses the hide. Only the main chat calls it; a sub-agent returns to its parent instead. Returns status ok, the exit scheduled; a tool error = this call carries no caller identity or the kill failed — nothing ended, unless the error says the chat is hidden with its pane still open. Another chat → chat_kill.",
+		Annotations: mutating,
+	}, obs.Tool("chat_exit", service.chatExit))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_unkill",
 		Description: "Restores a killed chat to the fleet listing — \"unkill / unhide chat X\", the reverse of chat_kill. Call chat_unkill{target:\"my-chat\"}. Returns status ok; a tool error = no killed chat by that name or the restore failed. It does not relaunch a pane — chat_open does that.",

@@ -165,10 +165,12 @@ func knownSIDMetadata(name string) bool {
 			return strings.TrimSpace(session) != ""
 		}
 	}
-	const reloadPrefix = "reload-"
 	const logSuffix = ".log"
-	if strings.HasPrefix(name, reloadPrefix) && strings.HasSuffix(name, logSuffix) {
-		socket := strings.TrimSuffix(strings.TrimPrefix(name, reloadPrefix), logSuffix)
+	for _, prefix := range []string{"reload-", paths.SIDKillExitLogPrefix} {
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, logSuffix) {
+			continue
+		}
+		socket := strings.TrimSuffix(strings.TrimPrefix(name, prefix), logSuffix)
 		if _, paneID, ok := gather.ParseCrumbName(socket); ok && paneID == "" {
 			return true
 		}

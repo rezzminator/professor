@@ -3,8 +3,6 @@ package reload
 import (
 	"regexp"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/inject"
 )
@@ -31,36 +29,7 @@ func composerDrawn(capture string) bool {
 // BE /exit, not contain it: "old draft/exit" is a prompt, and Enter on it
 // submits the old draft to the model instead of ending the chat.
 func composerShowsExit(capture string) bool {
-	return composerDraftText(capture) == "/exit"
-}
-
-// composerDraftText is the active composer's draft, whitespace-normalised;
-// empty when the composer is empty or not drawn.
-func composerDraftText(capture string) string {
-	return strings.Join(strings.Fields(composerDraft(lastReloadComposerLine(capture))), " ")
-}
-
-// composerDraft is the text after a composer line's last ❯/› marker.
-func composerDraft(line string) string {
-	cut := -1
-	for index, character := range line {
-		if character == '❯' || character == '›' {
-			cut = index + utf8.RuneLen(character)
-		}
-	}
-	if cut < 0 {
-		return ""
-	}
-	return line[cut:]
-}
-
-// exitDialogPattern is the selected row of Claude Code's background-work
-// exit confirmation ("❯ 1. Exit and stop tasks"). The marker has to sit on
-// the Exit row: a human who moved it to "Stay" gets that choice respected.
-var exitDialogPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]*Exit`)
-
-func exitDialogOpen(capture string) bool {
-	return exitDialogPattern.MatchString(capture)
+	return inject.ComposerDraftText(capture) == "/exit"
 }
 
 func selectorOpen(capture string) bool {
@@ -102,30 +71,12 @@ func composerText(capture string) string {
 	}
 	block := lines[start : start+1]
 	for index := start + 1; index < len(lines); index++ {
-		if composerBoxRule(lines[index]) {
+		if inject.ComposerBoxRule(lines[index]) {
 			break
 		}
 		block = lines[start : index+1]
 	}
 	return strings.Join(block, "\n")
-}
-
-// composerBoxRule reports whether a captured line is one of the input box's
-// horizontal rules — visible content that is nothing but box-drawing glyphs.
-// Matching the CLASS (U+2500-U+257F) rather than one theme's glyph keeps a
-// restyled border from silently reopening the wrap bug.
-func composerBoxRule(line string) bool {
-	drawn := false
-	for _, character := range line {
-		switch {
-		case unicode.IsSpace(character):
-		case character >= 0x2500 && character <= 0x257F:
-			drawn = true
-		default:
-			return false
-		}
-	}
-	return drawn
 }
 
 // squashSpace drops every space so a comparison survives the composer's line

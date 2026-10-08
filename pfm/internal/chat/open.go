@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -40,10 +41,7 @@ func KillResolved(
 		return code
 	}
 	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
-	target, err := manager.Kill(ctx, kill.Request{
-		ID: chat.ID, Engine: chat.Engine, RolloutPath: chat.Path,
-		SocketName: chat.Socket, PaneID: chat.Pane, Exit: exit,
-	})
+	target, err := manager.Kill(ctx, resolvedKillRequest(chat, exit))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 		return 1
@@ -59,6 +57,43 @@ func KillResolved(
 	}
 	fmt.Fprintln(stdout, KillOutcome(target.ID, "", "", recorded))
 	return 0
+}
+
+// ExitResolved ends the live chat that asked to end itself: the kill is
+// recorded and the detached exit finisher spawned exactly as KillResolved
+// does with exit, and it returns at once, without ConfirmExit. Its caller is
+// that chat, mid-turn: the pane closes only after the turn this call belongs
+// to ends, so waiting here for the pane would hold that turn open until the
+// finisher's fallback kill-pane, and the chat would never read the answer.
+func ExitResolved(ctx context.Context, runtime *config.Runtime, chat headless.Chat) (outcome string, returnErr error) {
+	var runtimes []config.Runtime
+	if runtime != nil {
+		runtimes = append(runtimes, *runtime)
+	}
+	var stderr strings.Builder
+	database, manager, code := fleet.OpenKillManager(&stderr, runtimes...)
+	if code != 0 {
+		return "", fmt.Errorf("open the kill manager: %s", strings.TrimSpace(stderr.String()))
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close the kill database: %w", err))
+		}
+	}()
+	target, err := manager.Kill(ctx, resolvedKillRequest(chat, true))
+	if err != nil {
+		return "", err
+	}
+	return KillOutcome(target.ID, target.SocketName, target.PaneID, !kill.AddressOnly(target)), nil
+}
+
+// resolvedKillRequest is the one kill a resolved chat asks for: its exact id,
+// engine, transcript, socket and pane, so a split pane stays pane-scoped.
+func resolvedKillRequest(chat headless.Chat, exit bool) kill.Request {
+	return kill.Request{
+		ID: chat.ID, Engine: chat.Engine, RolloutPath: chat.Path,
+		SocketName: chat.Socket, PaneID: chat.Pane, Exit: exit,
+	}
 }
 
 // OpenID resolves an indexed chat ID through a read-only fleet scan and opens it.

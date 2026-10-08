@@ -25,6 +25,10 @@ const (
 	// SIDEffortPrefix names the statusline's per-session effort record,
 	// SIDEffortPrefix+sessionID, so the doctor's crumb audit accepts it.
 	SIDEffortPrefix = "statusline-effort-"
+	// SIDKillExitLogPrefix names the detached kill-exit finisher's log,
+	// SIDKillExitLogPrefix+socketName+".log", beside reload's worker logs
+	// (reload-{socket}.log); the doctor's crumb audit accepts both.
+	SIDKillExitLogPrefix = "kill-exit-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
 	// a crash can leave one behind, so the crumb audit accepts it.

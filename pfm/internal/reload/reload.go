@@ -354,7 +354,7 @@ func Run(
 		switch {
 		case captureErr != nil:
 			fmt.Fprintf(stderr, "pfm chat reload: confirm /exit submission (try %d): %v\n", i+1, captureErr)
-		case exitDialogOpen(capture):
+		case inject.ExitDialogOpen(capture):
 			// Claude Code answers /exit with a confirmation whenever the chat
 			// has background work — a scheduled task, a background shell, a
 			// sub-agent — with "Exit and stop tasks" preselected. Nothing the
@@ -527,7 +527,7 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 		)
 	}
 	switch {
-	case exitDialogOpen(capture):
+	case inject.ExitDialogOpen(capture):
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Escape"); err != nil {
 			return errors.Join(
 				cause,
@@ -542,7 +542,7 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 				cause,
 				fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err),
 			)
-		} else if exitDialogOpen(capture) {
+		} else if inject.ExitDialogOpen(capture) {
 			return errors.Join(
 				cause,
 				errors.New(
@@ -561,7 +561,7 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 		cause,
 		fmt.Errorf(
 			"the pane shows neither the typed /exit nor an exit dialog (composer shows %q)",
-			composerDraftText(capture),
+			inject.ComposerDraftText(capture),
 		),
 	)
 }

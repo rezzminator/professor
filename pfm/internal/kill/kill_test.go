@@ -159,6 +159,8 @@ type captureSpawner struct {
 	args []ExitArgs
 }
 
+func (spawner *captureSpawner) Prepare(ExitArgs) error { return nil }
+
 func (spawner *captureSpawner) Spawn(
 	_ context.Context,
 	args ExitArgs,
@@ -995,46 +997,6 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	}
 }
 
-func TestFinisherCodexUsesQuit(t *testing.T) {
-	jail := newKillJail(t)
-	database := jail.open(t)
-	ctx := context.Background()
-	id := "66666666-6666-4666-8666-666666666666"
-	path := filepath.Join(jail.codexHome, "sessions", "rollout-"+id+".jsonl")
-	if err := database.UpsertRollout(ctx, store.Rollout{
-		ID:          id,
-		Path:        path,
-		PromptCount: 4,
-		UserThread:  true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	tmux := &fakeTmux{}
-	finisher, err := NewFinisher(database, Dependencies{
-		Tmux:         tmux,
-		Refresher:    refreshFunc(func(context.Context) error { return nil }),
-		Delay:        time.Millisecond,
-		PollEvery:    time.Millisecond,
-		PollAttempts: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := finisher.Run(ctx, ExitArgs{
-		Engine:     pfmengine.Codex,
-		ID:         id,
-		DataPath:   path,
-		SocketPath: filepath.Join(jail.tmuxDir, "cx-500-1-1"),
-		SocketName: "cx-500-1-1",
-		PaneID:     "%10",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(tmux.sent, []string{"/quit"}) {
-		t.Fatalf("sent = %q, want /quit", tmux.sent)
-	}
-}
-
 func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh is not installed")
@@ -1054,6 +1016,7 @@ func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
 		Executable: "/jail/pfm",
 		Setsid:     setsidPath,
 		ConfigPath: "/jail/config/pfm.json",
+		LogDir:     t.TempDir(),
 	}
 	args := ExitArgs{
 		Engine:     pfmengine.Claude,

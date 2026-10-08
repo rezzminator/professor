@@ -724,3 +724,84 @@ func TestClaudePluginStepGuardsRosterDirs(t *testing.T) {
 		})
 	}
 }
+
+// TestClaudePluginMarketplaceGaps: a target whose marketplace is registered
+// from any source but the one pfm install adds is named; a matching source, an
+// unregistered marketplace and a store with no record name nothing.
+func TestClaudePluginMarketplaceGaps(t *testing.T) {
+	local := ClaudePluginTarget{Name: "p", ID: "p@p-dev", Source: "/share/p-dev", Local: true}
+	github := ClaudePluginTarget{Name: "q", ID: "q@q", Source: "owner/q"}
+	repair := "claude plugin marketplace remove "
+	for _, test := range []struct {
+		name    string
+		sources map[string]any
+		want    []ClaudePluginGap
+	}{
+		{"matching", map[string]any{
+			"p-dev": map[string]any{"source": "directory", "path": "/share/p-dev"},
+			"q":     map[string]any{"source": "github", "repo": "owner/q"},
+		}, nil},
+		{"unregistered", map[string]any{"other": map[string]any{"source": "github", "repo": "x/other"}}, nil},
+		{"directory elsewhere", map[string]any{
+			"p-dev": map[string]any{"source": "directory", "path": "/elsewhere/p-dev"},
+		}, []ClaudePluginGap{{
+			"plugin p@p-dev marketplace p-dev in {file} points at /elsewhere/p-dev, want /share/p-dev",
+			repair + "p-dev, then run pfm install --yes",
+		}}},
+		{"github for a local target", map[string]any{
+			"p-dev": map[string]any{"source": "github", "repo": "owner/p"},
+		}, []ClaudePluginGap{{
+			"plugin p@p-dev marketplace p-dev in {file} points at owner/p, want /share/p-dev",
+			repair + "p-dev, then run pfm install --yes",
+		}}},
+		{"git url", map[string]any{
+			"q": map[string]any{"source": "git", "url": "https://example.com/q.git"},
+		}, []ClaudePluginGap{{
+			"plugin q@q marketplace q in {file} points at git https://example.com/q.git, want owner/q",
+			repair + "q, then run pfm install --yes",
+		}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := t.TempDir()
+			file := filepath.Join(store, "plugins", "known_marketplaces.json")
+			known := map[string]any{}
+			for name, source := range test.sources {
+				known[name] = map[string]any{"source": source}
+			}
+			raw, _ := json.Marshal(known)
+			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gaps, err := ClaudePluginMarketplaceGaps(store, []ClaudePluginTarget{local, github})
+			for index := range test.want {
+				test.want[index].Problem = strings.ReplaceAll(test.want[index].Problem, "{file}", file)
+			}
+			if err != nil || fmt.Sprint(gaps) != fmt.Sprint(test.want) {
+				t.Fatalf("got %v, %v want %v", gaps, err, test.want)
+			}
+		})
+	}
+	t.Run("no record", func(t *testing.T) {
+		gaps, err := ClaudePluginMarketplaceGaps(t.TempDir(), []ClaudePluginTarget{local, github})
+		if err != nil || gaps != nil {
+			t.Fatalf("got %v, %v want no gap and no error", gaps, err)
+		}
+	})
+	t.Run("unparsable record", func(t *testing.T) {
+		store := t.TempDir()
+		file := filepath.Join(store, "plugins", "known_marketplaces.json")
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ClaudePluginMarketplaceGaps(store, []ClaudePluginTarget{local}); err == nil ||
+			!strings.Contains(err.Error(), file) {
+			t.Fatalf("got %v, want an error naming %s", err, file)
+		}
+	})
+}

@@ -48,6 +48,18 @@ func printClaudePluginsDoctor(stdout io.Writer, store string, build installer.Cl
 			Problem: "plugin " + id + " not installed in " + store, Fix: installer.ClaudePluginRepair,
 		})
 	}
+	marketplaceGaps, err := installer.ClaudePluginMarketplaceGaps(store, targets)
+	if err != nil {
+		tally.fail()
+		fmt.Fprintf(
+			stdout,
+			"doctor: claude_plugins could not read %s: %v\n",
+			filepath.Join(store, "plugins", "known_marketplaces.json"),
+			err,
+		)
+		return
+	}
+	gaps = append(gaps, marketplaceGaps...)
 	if len(gaps) == 0 {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -121,7 +122,8 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 
 // ClaudePluginGaps reads the store's settings.json and names every target id
 // not enabled, every plugin enabled from both its GitHub and its -dev
-// marketplace, and every local target whose copy is missing or a symlink. A
+// marketplace, every local target whose copy is missing or a symlink, and every
+// other plugin enabled under two or more keys. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -161,7 +163,7 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			}
 		}
 	}
-	return gaps, nil
+	return append(gaps, claudePluginDuplicateGaps(document, path, targets)...), nil
 }
 
 // ClaudePluginsNotInstalled reads one account's plugins/installed_plugins.json
@@ -201,6 +203,114 @@ func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) (
 		}
 	}
 	return missing, nil
+}
+
+// ClaudePluginMarketplaceGaps reads the store's plugins/known_marketplaces.json
+// and names every target whose marketplace is registered from a source other
+// than target.Source: `plugin marketplace add` answers "already added" for a
+// same-named marketplace, so pfm install keeps installing from the wrong source
+// until it is removed. A missing file or entry names nothing — the enabled and
+// installed checks cover a plugin never added; a file that cannot be read or
+// parsed returns its error, never an answer.
+func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
+	path := filepath.Join(store, "plugins", "known_marketplaces.json")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var known map[string]struct {
+		Source struct {
+			Kind string `json:"source"`
+			Repo string `json:"repo"`
+			Path string `json:"path"`
+			URL  string `json:"url"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &known); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var gaps []ClaudePluginGap
+	for index := range targets {
+		target := &targets[index]
+		_, marketplace, _ := strings.Cut(target.ID, "@")
+		entry, registered := known[marketplace]
+		if !registered {
+			continue
+		}
+		var got string
+		switch entry.Source.Kind {
+		case "github":
+			got = entry.Source.Repo
+		case "directory":
+			got = entry.Source.Path
+		default:
+			got = strings.TrimSpace(entry.Source.Kind + " " + entry.Source.URL)
+		}
+		if got == target.Source {
+			continue
+		}
+		gaps = append(gaps, ClaudePluginGap{
+			fmt.Sprintf(
+				"plugin %s marketplace %s in %s points at %s, want %s",
+				target.ID,
+				marketplace,
+				path,
+				got,
+				target.Source,
+			),
+			"claude plugin marketplace remove " + marketplace + ", then " + ClaudePluginRepair,
+		})
+	}
+	return gaps, nil
+}
+
+// claudePluginDuplicateGaps names every plugin enabled under two or more
+// name@marketplace keys in document, managed by pfm or not, sorted by name. A
+// managed plugin enabled as exactly its GitHub and -dev ids is left to
+// ClaudePluginGaps' own duplicate gap, whose repair pfm install owns.
+func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
+	enabled, _ := document["enabledPlugins"].(map[string]any)
+	byName := map[string][]string{}
+	for id, value := range enabled {
+		if value != true {
+			continue
+		}
+		name, _, _ := strings.Cut(id, "@")
+		byName[name] = append(byName[name], id)
+	}
+	managed := map[string][]string{}
+	for index := range targets {
+		pair := []string{targets[index].GitHubID, targets[index].DevID}
+		slices.Sort(pair)
+		managed[targets[index].Name] = pair
+	}
+	var gaps []ClaudePluginGap
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		ids := byName[name]
+		if len(ids) < 2 {
+			continue
+		}
+		slices.Sort(ids)
+		if slices.Equal(ids, managed[name]) {
+			continue
+		}
+		gaps = append(gaps, ClaudePluginGap{
+			fmt.Sprintf("plugin %s enabled %s (%s) in %s", name, timesWord(len(ids)), strings.Join(ids, " and "), path),
+			"keep one copy: claude plugin disable each other key",
+		})
+	}
+	return gaps
+}
+
+// timesWord spells how many keys enable one plugin.
+func timesWord(count int) string {
+	if count == 2 {
+		return "twice"
+	}
+	return strconv.Itoa(count) + " times"
 }
 
 func readClaudeSettingsDocument(path string) (map[string]any, error) {

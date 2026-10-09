@@ -48,6 +48,7 @@ func ledgerType(row flightRow) string {
 // flightFold is the totals over a set of matched rows.
 type flightFold struct {
 	n, calls, usd, unpriced, in, cr, out, fail, poll, reread, contract, compact, over, peak, lc float64
+	advisor                                                                                     advisorSpend // part of usd; not a data-block member
 }
 
 func foldRows(rows []flightRow) flightFold {
@@ -57,6 +58,7 @@ func foldRows(rows []flightRow) flightFold {
 		f.n++
 		f.calls += r.calls
 		f.usd += r.usd
+		f.advisor.merge(r.advisor)
 		if r.unpriced {
 			f.unpriced++
 		}
@@ -294,7 +296,7 @@ func (a *auditor) runFlight(ctx context.Context) (int, error) {
 	out = append(out, "", "## flight total", "",
 		num(total.n)+" agents · "+num(total.calls)+" calls · peak context "+flightTokens(total.peak)+" · input "+
 			flightTokens(total.in)+" · cached "+flightTokens(total.cr)+" · output "+flightTokens(total.out)+" · **$"+
-			fixed(total.usd, 2)+"**"+unpricedNote,
+			fixed(total.usd, 2)+"**"+advisorNote(total.advisor)+unpricedNote,
 		"failed commands "+num(total.fail)+" · poll calls "+num(total.poll)+" · re-reads "+num(total.reread)+
 			" · contract-file reads "+num(total.contract)+" · compactions "+num(total.compact)+" · over cap "+
 			num(total.over)+" of "+num(total.n))
@@ -391,6 +393,9 @@ func (a *auditor) writeFlightOut(dir, startISO, endISO string, total flightFold,
 			set("tok", r.tok.json()).set("usd", cost).set("failedCmds", r.failedCmds).set("pollN", r.pollN).
 			set("rereadN", r.rereadN).set("contractReads", r.contractReads).set("compactions", r.resets).
 			set("overCap", r.calls > callCap(firstText(row.led.agentType, r.agentType)))
+		if r.advisor.calls != 0 {
+			rows[i].set("advisor", r.advisor.json())
+		}
 	}
 	unmatchedList := append([]string{}, unmatched...)
 	document := newObject().set("v", 1).set("flight", filepath.Base(dir)).set("source", a.flight.source).

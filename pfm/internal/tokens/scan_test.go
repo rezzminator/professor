@@ -24,13 +24,15 @@ func TestGapsLineNamesEveryGapAndBoundsTheLists(t *testing.T) {
 	a.scan.badLines, a.scan.noTimestamp, a.scan.dupFiles = 3, 1, 2
 	a.scan.unpricedCalls = 1
 	a.scan.unpricedModels.set("gpt-x", 1.0)
+	a.scan.unknownIterations.set("fallback_message", 2.0)
 	a.scan.copiesOnly = []copyOnly{{"f1", "0123456789abcdef"}, {"f2", "b"}, {"f3", "c"}, {"f4", "d"}}
 	a.scan.notes = []string{"n1", "n2", "n3", "n4", "n5", "n6"}
 	a.scan.readErrors = []string{"e1", "e2", "e3", "e4"}
 	want := pricingLine + "data gaps: price refresh failed (no cause given) — served the table fetched " +
 		"2026-01-01T00:00:00Z · price override active: 2 rows from /cfg/prices.json · 3 malformed lines · " +
 		"1 calls without a timestamp (dropped) · 1 UNPRICED calls {\"gpt-x\":1} — tokens counted, dollars \"n/a\"; " +
-		"check exact IDs and available rates with pfm model-cost --json --all · 4 transcripts hold only copied " +
+		"check exact IDs and available rates with pfm model-cost --json --all · 2 usage iterations of a type pfm " +
+		"does not price apart {\"fallback_message\":2} — the response's own counts stand · 4 transcripts hold only copied " +
 		"calls: 0123456789ab, b, c · 2 duplicate files skipped · n1 · n2 · n3 · n4 · " +
 		"2 further notes (see --out JSON scan.notes) · 4 READ ERRORS: e1 | e2 | e3"
 	if got := a.gapsLine(); got != want {

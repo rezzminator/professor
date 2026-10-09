@@ -78,6 +78,7 @@ func failure(format string, args ...any) error {
 // globals are the totals every run adds to.
 type globals struct {
 	usd, tok                   tokenCounts
+	advisor                    advisorSpend
 	think, calls               float64
 	cats                       [categoryCount]float64
 	bands, modelEffort, hourly *object

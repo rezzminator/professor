@@ -16,6 +16,18 @@ func timelineTokens(value float64) string {
 	return num(round(value))
 }
 
+// timelineAdvisor marks the part of a call's or a run's dollars an advisor
+// consultation billed, "n/a" when the table could not price one, "" for none.
+func timelineAdvisor(advisor advisorSpend) string {
+	switch {
+	case advisor.calls == 0:
+		return ""
+	case advisor.unpriced != 0:
+		return " (advisor " + notPriced + ")"
+	}
+	return " (advisor $" + fixed(advisor.usd, 4) + ")"
+}
+
 func timelineCash(usd *float64) string {
 	if usd == nil {
 		return notPriced
@@ -84,13 +96,14 @@ func (a *auditor) printTimeline(r *run, given string) {
 	}
 	usd := notPriced
 	if !r.unpriced {
-		usd = "$" + fixed(r.usd, 4)
+		usd = "$" + fixed(r.usd, 4) + timelineAdvisor(r.advisor)
 	}
 	a.print("TIMELINE " + who + " · " + strings.Join(models, "+") + " · effort " +
 		strings.Join(r.efforts.ordered(), "/") + " · " + num(r.calls) + " calls · wall " +
 		num(round((r.recT1-r.recT0)/1000)) + "s · peak ctx " + timelineTokens(r.ctxPeak) + " · out " + num(r.tok.out) +
 		" tok · tool errors " + num(r.errs) + " · results >20KB " + num(r.big) + " · " + usd + " · " + given)
-	for _, row := range r.timeline {
+	for i := range r.timeline {
+		row := &r.timeline[i]
 		var tools []string
 		for _, slot := range row.tools {
 			result := "(no result)"
@@ -111,7 +124,15 @@ func (a *auditor) printTimeline(r *run, given string) {
 		if toolText == "" {
 			toolText = "(no tools)"
 		}
+		if row.consultOnly {
+			at := utf16Slice(isoTime(row.ts), 11, 19)
+			a.print("  advisor " + at + " · " + timelineCash(row.usd) + " · " + toolText)
+			continue
+		}
 		a.print("  #" + num(row.n) + " " + utf16Slice(isoTime(row.ts), 11, 19) + " after " + gap + " · ctx " +
-			timelineTokens(row.ctx) + " · out " + num(row.out) + " · " + timelineCash(row.usd) + " · " + toolText)
+			timelineTokens(
+				row.ctx,
+			) + " · out " + num(row.out) + " · " + timelineCash(row.usd) + timelineAdvisor(row.advisor) +
+			" · " + toolText)
 	}
 }

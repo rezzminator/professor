@@ -10,6 +10,7 @@ import (
 // project is one project's totals.
 type project struct {
 	usd, main, agent, runs, rewrites float64
+	advisor                          advisorSpend
 	cats                             [categoryCount]float64
 }
 
@@ -94,7 +95,7 @@ func (r *run) testRuns() float64 {
 func (a *auditor) aggregate() *totals {
 	g := a.global
 	t := &totals{
-		total:     g.usd.in + g.usd.out + g.usd.cw5 + g.usd.cw1 + g.usd.cr,
+		total:     g.usd.sum(),
 		byProject: newObject(), projects: map[string]*project{}, families: map[string]*family{},
 	}
 	familyOrder := newObject()
@@ -113,6 +114,7 @@ func (a *auditor) aggregate() *totals {
 		}
 		p.runs++
 		p.rewrites += r.rewrites.usd
+		p.advisor.merge(r.advisor)
 		for i, value := range r.cats {
 			p.cats[i] += value
 		}
@@ -201,6 +203,24 @@ func sortedEntries(o *object, field string) []entry {
 	return entries
 }
 
+// advisorNote is " · advisor $X" for a run set that consulted an advisor
+// ("n/a" when the table could not price a consultation), "" for none.
+func advisorNote(advisor advisorSpend) string {
+	if advisor.calls == 0 {
+		return ""
+	}
+	return " · advisor " + advisor.cash()
+}
+
+// meanContext is a run's mean context per call, 0 for a run that billed only
+// advisor consultations.
+func meanContext(r *run) float64 {
+	if r.calls == 0 {
+		return 0
+	}
+	return r.ctxSum / r.calls
+}
+
 func firstN[T any](items []T, n int) []T { return items[:max(0, min(n, len(items)))] }
 
 // categoryMix is the top categories of cats as "name share" pairs.
@@ -261,6 +281,15 @@ func (a *auditor) runReport(t *totals) (int, error) {
 		a.print("  " + padStart(dollars(class.usd), 9) + " " + padStart(pct(class.usd), 6) + "  " + class.name + " · " +
 			millions(class.tok) + " tok")
 	}
+	if g.advisor.calls != 0 {
+		share, unpriced := pct(g.advisor.usd), ""
+		if g.advisor.unpriced != 0 {
+			share, unpriced = notPriced, " · "+num(g.advisor.unpriced)+" unpriced (tokens counted, dollars n/a)"
+		}
+		a.print("  " + padStart(g.advisor.cash(), 9) + " " + padStart(share, 6) +
+			"  of which advisor spend (each consultation at its own model's rates) · " + num(g.advisor.calls) +
+			"× consulted · " + millions(g.advisor.tok.sum()) + " tok" + unpriced)
+	}
 	mainUSD := 0.0
 	for _, r := range a.runs {
 		if r.kind == kindMain {
@@ -268,7 +297,8 @@ func (a *auditor) runReport(t *totals) (int, error) {
 		}
 	}
 	a.print("  main chat loops " + dollars(mainUSD) + " (" + pct(mainUSD) + ") · sub-agents " + dollars(total-mainUSD) +
-		" (" + pct(total-mainUSD) + ") · thinking " + millions(g.think) + " of " + millions(g.tok.out) + " output tok")
+		" (" + pct(total-mainUSD) + ") · thinking " + millions(g.think) + " of " + millions(g.tok.out-g.advisor.tok.out) +
+		" output tok")
 	for _, item := range g.tier.entries() {
 		v := item.child()
 		a.print("  cache writes by " + item.key + " runs: 5-minute " + dollars(v.number("cw5")) + " · 1-hour " +
@@ -282,7 +312,8 @@ func (a *auditor) runReport(t *totals) (int, error) {
 		a.print("  " + padStart(dollars(v.usd), 9) + " " + padStart(pct(v.usd), 6) + "  " + cut(path, 44) + " main " +
 			dollars(
 				v.main,
-			) + " · agents " + dollars(v.agent) + " · " + num(v.runs) + " runs · rewrites " + dollars(v.rewrites))
+			) + " · agents " + dollars(v.agent) + " · " + num(v.runs) + " runs · rewrites " + dollars(v.rewrites) +
+			advisorNote(v.advisor))
 	}
 
 	heading("3 · BY KIND · MODEL · EFFORT")
@@ -303,6 +334,12 @@ func (a *auditor) runReport(t *totals) (int, error) {
 		if g.cats[i] > total*0.002 {
 			catRows = append(catRows, catRow{name, g.cats[i]})
 		}
+	}
+	if g.advisor.usd > total*0.002 {
+		catRows = append(
+			catRows,
+			catRow{"advisor consultations (a second model's whole context and answer)", g.advisor.usd},
+		)
 	}
 	stableSort(catRows, func(left, right catRow) float64 { return right.value - left.value })
 	for _, row := range catRows {
@@ -525,7 +562,7 @@ func (a *auditor) slimRun(r *run, i int) *object {
 	for k, repeat := range r.repeats {
 		repeats[k] = []any{repeat.cmd, repeat.n}
 	}
-	return newObject().set("file", file).set("kind", r.kind).set("sid", r.sid).set("project", r.project).
+	out := newObject().set("file", file).set("kind", r.kind).set("sid", r.sid).set("project", r.project).
 		set("engine", r.engine).
 		set("agentId", r.agentID).set("tok", r.tok.json()).set("contractReads", r.contractReads).
 		set("failedCmds", r.failedCmds).set("unpriced", r.unpriced).set("title", r.title).set("agentType", r.agentType).
@@ -542,6 +579,10 @@ func (a *auditor) slimRun(r *run, i int) *object {
 		set("smallUsd", r.smallUSD).set("smallN", r.smallN).set("pollUsd", r.pollUSD).set("pollN", r.pollN).
 		set("usdLC", r.usdLC).set("f", r.f[:]).set("attach", r.attach).set("repeats", repeats).
 		set("firstTs", r.firstTS).set("model", r.model).set("effort", r.effort).set("i", i)
+	if r.advisor.calls != 0 {
+		out.set("advisor", r.advisor.json())
+	}
+	return out
 }
 
 func seriesJSON(series [][]float64) []any {
@@ -568,8 +609,12 @@ func (row landingRow) json() *object {
 }
 
 func (p *project) json() *object {
-	return newObject().set("usd", p.usd).set(kindMain, p.main).set(kindAgent, p.agent).set("runs", p.runs).
+	out := newObject().set("usd", p.usd).set(kindMain, p.main).set(kindAgent, p.agent).set("runs", p.runs).
 		set("rewrites", p.rewrites).set("cats", p.cats[:])
+	if p.advisor.calls != 0 {
+		out.set("advisor", p.advisor.usdJSON())
+	}
+	return out
 }
 
 func (f *family) json() *object {
@@ -620,6 +665,9 @@ func (a *auditor) writeOut(t *totals, ranked []*run) error {
 		set("hourly", g.hourly).set("repeats", fromEntries(firstN(sortedEntries(g.repeats, "n"), 60))).
 		set("rereads", fromEntries(firstN(sortedEntries(g.rereads, "chars"), 60))).set("landings", landings).
 		set("byProject", byProject).set("families", families).set("groups", groups).set("runs", runs)
+	if g.advisor.calls != 0 {
+		document.set("advisor", g.advisor.json())
+	}
 	size, err := writeOutput(a.opts.out, stringify(document, 0))
 	if err != nil {
 		return err

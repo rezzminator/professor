@@ -41,12 +41,12 @@ func TestFoldRowsCountsOverCapAndTheLongContextPrice(t *testing.T) {
 			},
 		},
 		{run: &run{agentType: "tracer", calls: 160, usd: 1, unpriced: true, ctxPeak: 400, pollN: 2, resets: 1}},
-		{run: &run{agentType: "tracer", calls: 10, usd: 0.5}},
+		{run: &run{agentType: "tracer", calls: 10, usd: 0.5, advisor: advisorSpend{usd: 0.25, calls: 1}}},
 	}
 	f := foldRows(rows)
 	want := flightFold{
 		n: 3, calls: 470, usd: 3.5, unpriced: 1, in: 6, cr: 4, out: 5, poll: 2, compact: 1, over: 2,
-		peak: 900, lc: 4.5,
+		peak: 900, lc: 4.5, advisor: advisorSpend{usd: 0.25, calls: 1},
 	}
 	if f != want {
 		t.Errorf("foldRows = %+v, want %+v", f, want)

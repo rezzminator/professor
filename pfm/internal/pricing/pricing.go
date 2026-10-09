@@ -82,6 +82,20 @@ type ClaudeUsage struct {
 	Input, Output, CacheRead, Write5m, Write1h int64
 }
 
+// Context is the request's prompt tokens: uncached input, cache read and cache
+// writes. It selects the request's price tier.
+func (c ClaudeUsage) Context() int64 { return c.Input + c.CacheRead + c.Write5m + c.Write1h }
+
+func (c ClaudeUsage) plus(other ClaudeUsage) ClaudeUsage {
+	return ClaudeUsage{
+		Input:     c.Input + other.Input,
+		Output:    c.Output + other.Output,
+		CacheRead: c.CacheRead + other.CacheRead,
+		Write5m:   c.Write5m + other.Write5m,
+		Write1h:   c.Write1h + other.Write1h,
+	}
+}
+
 // UsageBlock is a Claude response's usage block as a transcript records it,
 // the one decoding every transcript reader shares.
 type UsageBlock struct {
@@ -91,6 +105,8 @@ type UsageBlock struct {
 	CacheCreation int64           `json:"cache_creation_input_tokens"`
 	Breakdown     *CacheBreakdown `json:"cache_creation"`
 	Iterations    []UsageBlock    `json:"iterations"`
+	Type          string          `json:"type"`
+	Model         string          `json:"model"`
 	OutputDetails *struct {
 		Thinking int64 `json:"thinking_tokens"`
 	} `json:"output_tokens_details"`
@@ -102,17 +118,22 @@ type CacheBreakdown struct {
 	Write1h int64 `json:"ephemeral_1h_input_tokens"`
 }
 
-// Billed is what the response billed. A response can carry zeros in every
-// top-level count and its real counts only in Iterations (seen on
+// Billed is what the response's own model billed. A response can carry zeros
+// in every top-level count and its real counts only in Iterations (seen on
 // claude-opus-5-5, 2026-09): then the iterations' counts are summed; otherwise
-// the top level already equals their sum. A cache write splits by TTL, and the
-// part of it the breakdown does not cover (none, or a short one) is the
-// default 5-minute TTL. split reports a write that carried a TTL breakdown.
+// the top level already equals their sum. An advisor iteration is never part
+// of either: it is billed to the advisor model (see Advisors). A cache write
+// splits by TTL, and the part of it the breakdown does not cover (none, or a
+// short one) is the default 5-minute TTL. split reports a write that carried a
+// TTL breakdown.
 func (u UsageBlock) Billed() (usage ClaudeUsage, split bool) {
 	folded := u
 	if u.Input+u.Output+u.CacheRead+u.CacheCreation == 0 && len(u.Iterations) > 0 {
 		folded = UsageBlock{Breakdown: &CacheBreakdown{}}
 		for _, iteration := range u.Iterations {
+			if iteration.IsAdvisor() {
+				continue
+			}
 			folded.Input += iteration.Input
 			folded.Output += iteration.Output
 			folded.CacheRead += iteration.CacheRead
@@ -136,6 +157,91 @@ func (u UsageBlock) Billed() (usage ClaudeUsage, split bool) {
 	}, write5m+write1h > 0
 }
 
+// AdvisorUsage is one advisor consultation inside a response: the counts the
+// advisor model billed, and the model that billed them.
+type AdvisorUsage struct {
+	Model string
+	Usage ClaudeUsage
+	Split bool
+}
+
+// IterationAdvisor is the type of an iteration the advisor tool billed to the
+// advisor's own model.
+const IterationAdvisor = "advisor_message"
+
+// IsAdvisor reports whether this iteration was billed to the advisor model.
+func (u UsageBlock) IsAdvisor() bool { return u.Type == IterationAdvisor }
+
+// Advisors is the response's advisor consultations, one per advisor iteration
+// that billed a token, in order. The executor's top-level counts never include
+// them; the model is the advisor's, empty when the iteration names none.
+func (u UsageBlock) Advisors() []AdvisorUsage {
+	var advisors []AdvisorUsage
+	for _, iteration := range u.Iterations {
+		if !iteration.IsAdvisor() {
+			continue
+		}
+		usage, split := iteration.Billed()
+		if usage == (ClaudeUsage{}) {
+			continue
+		}
+		advisors = append(advisors, AdvisorUsage{Model: iteration.Model, Usage: usage, Split: split})
+	}
+	return advisors
+}
+
+// IterationMessage is the type of an iteration the response's own model
+// billed: one request of the executor.
+const IterationMessage = "message"
+
+// isExecutor reports an iteration the response's own model billed: a message,
+// or an iteration naming no type (the shape seen on claude-opus-5-5, 2026-09).
+func (u UsageBlock) isExecutor() bool { return u.Type == "" || u.Type == IterationMessage }
+
+// Requests is the executor's requests the response billed, in order, each with
+// its own context: a response that consulted an advisor sums two or more
+// requests at its top level. A response whose top level is empty bills each
+// non-advisor iteration that billed a token; one whose message iterations sum
+// exactly to its top level bills those; any other response is one request, its
+// top level. A response that billed only its advisor made no request: none.
+func (u UsageBlock) Requests() []ClaudeUsage {
+	billed, _ := u.Billed()
+	empty := u.Input+u.Output+u.CacheRead+u.CacheCreation == 0
+	var requests []ClaudeUsage
+	var sum ClaudeUsage
+	for _, iteration := range u.Iterations {
+		if iteration.IsAdvisor() || !empty && !iteration.isExecutor() {
+			continue
+		}
+		request, _ := iteration.Billed()
+		if request == (ClaudeUsage{}) {
+			continue
+		}
+		requests = append(requests, request)
+		sum = sum.plus(request)
+	}
+	switch {
+	case empty:
+		return requests
+	case len(requests) > 0 && sum == billed:
+		return requests
+	}
+	return []ClaudeUsage{billed}
+}
+
+// UnknownIterations is the type of each iteration that is neither the
+// executor's nor an advisor's, in order: pfm cannot tell how its counts relate
+// to the top level, so it prices none of them apart.
+func (u UsageBlock) UnknownIterations() []string {
+	var unknown []string
+	for _, iteration := range u.Iterations {
+		if !iteration.isExecutor() && !iteration.IsAdvisor() {
+			unknown = append(unknown, iteration.Type)
+		}
+	}
+	return unknown
+}
+
 // Thinking is the response's thinking tokens, a part of Output.
 func (u UsageBlock) Thinking() int64 {
 	if u.OutputDetails == nil {
@@ -152,6 +258,16 @@ type ClaudeParts struct {
 // Total is the response's USD: the columns summed in one fixed order.
 func (p ClaudeParts) Total() float64 {
 	return p.Input + p.Output + p.Write5m + p.Write1h + p.CacheRead
+}
+
+func (p ClaudeParts) plus(other ClaudeParts) ClaudeParts {
+	return ClaudeParts{
+		Input:     p.Input + other.Input,
+		Output:    p.Output + other.Output,
+		Write5m:   p.Write5m + other.Write5m,
+		Write1h:   p.Write1h + other.Write1h,
+		CacheRead: p.CacheRead + other.CacheRead,
+	}
 }
 
 // CodexUsage is a Codex thread's billed counts: Input includes Cached, Output
@@ -487,7 +603,7 @@ func (r Row) ClaudeCostParts(usage ClaudeUsage) (ClaudeParts, bool) {
 	if r.Engine != EngineClaude {
 		return ClaudeParts{}, false
 	}
-	rates := r.RatesAt(usage.Input + usage.CacheRead + usage.Write5m + usage.Write1h)
+	rates := r.RatesAt(usage.Context())
 	var parts ClaudeParts
 	for _, part := range []struct {
 		count int64
@@ -507,6 +623,21 @@ func (r Row) ClaudeCostParts(usage ClaudeUsage) (ClaudeParts, bool) {
 			return ClaudeParts{}, false
 		}
 		*part.usd = float64(part.count) * *part.rate / 1e6
+	}
+	return parts, true
+}
+
+// ClaudeRequestsCostParts prices a response request by request, each at the
+// tier its own context selects, the columns summed; ok is false when any
+// request cannot be priced.
+func (r Row) ClaudeRequestsCostParts(requests []ClaudeUsage) (ClaudeParts, bool) {
+	var parts ClaudeParts
+	for _, request := range requests {
+		priced, ok := r.ClaudeCostParts(request)
+		if !ok {
+			return ClaudeParts{}, false
+		}
+		parts = parts.plus(priced)
 	}
 	return parts, true
 }

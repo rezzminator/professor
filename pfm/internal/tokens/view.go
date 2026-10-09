@@ -349,13 +349,21 @@ func (a *auditor) viewRun(t *totals, r *run, path string) *object {
 	if testBash, ok := r.bash.get(categories[catBashTest]); ok {
 		tests = testBash.(*object).number("n")
 	}
-	return newObject().set("k", r.kind).set("ty", agentType).set("m", modelStem(r.model)).set("ef", r.effort).
+	out := newObject().set("k", r.kind).set("ty", agentType).set("m", modelStem(r.model)).set("ef", r.effort).
 		set("ti", utf16Slice(r.title, 0, 80)).set("fam", familyTitle).set("usd", usd).set("f", round2All(r.f[:])).
 		set("poll", round2(r.pollUSD)).set("calls", r.calls).set("pk", round(r.ctxPeak/1000)).
-		set("c0", round(r.ctxFirst/1000)).set("mn", round(r.ctxSum/r.calls/1000)).set("wall", round(wallMinutes(r))).
+		set("c0", round(r.ctxFirst/1000)).set("mn", round(meanContext(r)/1000)).set("wall", round(wallMinutes(r))).
 		set("tool", round(r.toolWaitMs/60e3)).set("t0", slot(r.t0)).set("t1", slot(r.t1)).set("at", r.t0).
 		set("errs", r.errs).set("tests", tests).set("rer", r.rereadN).set("rw", r.rewrites.n).set("resets", r.resets).
 		set("cmp", r.cmp).set("rep", repeat).set("cats", cats).set("prof", bucketize(r.series))
+	if r.advisor.calls != 0 {
+		var adv any
+		if r.advisor.unpriced == 0 {
+			adv = round2(r.advisor.usd)
+		}
+		out.set("adv", adv)
+	}
+	return out
 }
 
 // evidence is a project's page evidence: where its dollars went by call

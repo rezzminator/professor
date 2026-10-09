@@ -3,6 +3,7 @@ package pricing
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -321,6 +322,184 @@ func TestUsageBlockBilled(t *testing.T) {
 	}
 	if block.Thinking() != 4 || (UsageBlock{}).Thinking() != 0 {
 		t.Fatalf("Thinking() = %d, want 4 (and 0 without details)", block.Thinking())
+	}
+}
+
+// advisorBlock is the usage block of a real Sonnet response that consulted the
+// Opus advisor once: its top level is the executor's two message iterations
+// summed, the advisor iteration is billed at the advisor's model beside it.
+const advisorBlock = `{"input_tokens":4,"cache_creation_input_tokens":1442,"cache_read_input_tokens":175106,
+"output_tokens":1240,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":552},
+"iterations":[
+{"input_tokens":2,"output_tokens":26,"cache_read_input_tokens":87277,"cache_creation_input_tokens":552,
+ "cache_creation":{"ephemeral_5m_input_tokens":552,"ephemeral_1h_input_tokens":0},"type":"message"},
+{"input_tokens":177,"output_tokens":1422,"cache_read_input_tokens":0,"cache_creation_input_tokens":89334,
+ "cache_creation":{"ephemeral_5m_input_tokens":89334,"ephemeral_1h_input_tokens":0},"type":"advisor_message","model":"claude-opus-5-5"},
+{"input_tokens":2,"output_tokens":1214,"cache_read_input_tokens":87829,"cache_creation_input_tokens":890,
+ "cache_creation":{"ephemeral_5m_input_tokens":890,"ephemeral_1h_input_tokens":0},"type":"message"}]}`
+
+func TestUsageBlockAdvisors(t *testing.T) {
+	decode := func(t *testing.T, text string) UsageBlock {
+		t.Helper()
+		var block UsageBlock
+		if err := json.Unmarshal([]byte(text), &block); err != nil {
+			t.Fatalf("decode %s: %v", text, err)
+		}
+		return block
+	}
+	t.Run(
+		"the advisor iteration is the advisor model's, the executor's billed counts stay the top level",
+		func(t *testing.T) {
+			block := decode(t, advisorBlock)
+			wantAdvisor := []AdvisorUsage{{
+				Model: "claude-opus-5-5", Usage: ClaudeUsage{Input: 177, Output: 1422, Write5m: 89334}, Split: true,
+			}}
+			if got := block.Advisors(); !reflect.DeepEqual(got, wantAdvisor) {
+				t.Fatalf("Advisors() = %+v; want %+v", got, wantAdvisor)
+			}
+			wantBilled := ClaudeUsage{Input: 4, Output: 1240, CacheRead: 175106, Write5m: 1442}
+			if got, split := block.Billed(); got != wantBilled || !split {
+				t.Fatalf("Billed() = %+v, %v; want %+v, true", got, split, wantBilled)
+			}
+		},
+	)
+	t.Run("an empty top level folds the executor's iterations only", func(t *testing.T) {
+		block := decode(t, `{"iterations":[{"input_tokens":5,"output_tokens":7,"type":"message"},`+
+			`{"input_tokens":1000,"output_tokens":900,"type":"advisor_message","model":"claude-opus-5-5"},`+
+			`{"input_tokens":1,"cache_read_input_tokens":300,"type":"message"}]}`)
+		want := ClaudeUsage{Input: 6, Output: 7, CacheRead: 300}
+		if got, _ := block.Billed(); got != want {
+			t.Fatalf("Billed() = %+v; want %+v, the advisor's tokens excluded", got, want)
+		}
+		if got := block.Advisors(); len(got) != 1 || got[0].Usage != (ClaudeUsage{Input: 1000, Output: 900}) {
+			t.Fatalf("Advisors() = %+v; want the one 1000-in 900-out consultation", got)
+		}
+	})
+	t.Run("a block without an advisor iteration has none", func(t *testing.T) {
+		block := decode(t, `{"output_tokens":4,"iterations":[{"input_tokens":99,"type":"message"}]}`)
+		if got := block.Advisors(); len(got) != 0 {
+			t.Fatalf("Advisors() = %+v; want none", got)
+		}
+	})
+	t.Run("an advisor iteration naming no model keeps the empty model for the caller to refuse", func(t *testing.T) {
+		block := decode(t, `{"output_tokens":4,"iterations":[{"input_tokens":9,"type":"advisor_message"}]}`)
+		if got := block.Advisors(); len(got) != 1 || got[0].Model != "" || got[0].Usage.Input != 9 {
+			t.Fatalf("Advisors() = %+v; want one consultation with no model", got)
+		}
+	})
+}
+
+// fallbackBlock is the usage block of a response the harness retried on a
+// fallback model: its top level is the fallback iteration's alone, so its
+// iterations do not itemize it.
+const fallbackBlock = `{"input_tokens":30,"output_tokens":6000,"cache_read_input_tokens":150000,"cache_creation_input_tokens":0,
+"iterations":[
+{"input_tokens":30,"output_tokens":1500,"cache_read_input_tokens":190000,"cache_creation_input_tokens":2800,
+ "cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":2800},"type":"message","model":"claude-fable-5-1"},
+{"input_tokens":30,"output_tokens":6000,"cache_read_input_tokens":150000,"cache_creation_input_tokens":0,
+ "cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"type":"fallback_message","model":"claude-opus-4-8"}]}`
+
+func TestUsageBlockRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name, block string
+		want        []ClaudeUsage
+	}{
+		{
+			"a response without iterations is one request",
+			`{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":40}`,
+			[]ClaudeUsage{{Input: 1, Output: 2, CacheRead: 3, Write5m: 40}},
+		},
+		{
+			"an advised response's message iterations are its requests, the advisor's none of them",
+			advisorBlock,
+			[]ClaudeUsage{
+				{Input: 2, Output: 26, CacheRead: 87277, Write5m: 552},
+				{Input: 2, Output: 1214, CacheRead: 87829, Write5m: 890},
+			},
+		},
+		{
+			"an empty top level's iterations are its requests, one that billed nothing none",
+			`{"iterations":[{"input_tokens":5,"output_tokens":7},{"output_tokens":0,"type":"message"},` +
+				`{"input_tokens":1,"cache_read_input_tokens":300,"type":"message"}]}`,
+			[]ClaudeUsage{{Input: 5, Output: 7}, {Input: 1, CacheRead: 300}},
+		},
+		{
+			"a response that billed only its advisor made no request",
+			`{"iterations":[{"input_tokens":0,"type":"message"},` +
+				`{"input_tokens":177,"output_tokens":9,"type":"advisor_message","model":"claude-opus-5-5"}]}`,
+			nil,
+		},
+		{
+			"iterations that do not sum to the top level leave it one request",
+			fallbackBlock,
+			[]ClaudeUsage{{Input: 30, Output: 6000, CacheRead: 150000}},
+		},
+		{
+			"an iteration without the top level's TTL split leaves it one request",
+			`{"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_1h_input_tokens":10},` +
+				`"iterations":[{"cache_creation_input_tokens":4,"type":"message"},{"cache_creation_input_tokens":6,"type":"message"}]}`,
+			[]ClaudeUsage{{Write1h: 10}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var block UsageBlock
+			if err := json.Unmarshal([]byte(tc.block), &block); err != nil {
+				t.Fatalf("decode %s: %v", tc.block, err)
+			}
+			if got := block.Requests(); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Requests() = %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUsageBlockUnknownIterations(t *testing.T) {
+	for _, tc := range []struct {
+		name, block string
+		want        []string
+	}{
+		{"a fallback iteration is a type pfm does not know", fallbackBlock, []string{"fallback_message"}},
+		{"message and advisor iterations are known", advisorBlock, nil},
+		{"an untyped iteration is the response's own", `{"iterations":[{"input_tokens":5}]}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var block UsageBlock
+			if err := json.Unmarshal([]byte(tc.block), &block); err != nil {
+				t.Fatalf("decode %s: %v", tc.block, err)
+			}
+			if got := block.UnknownIterations(); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("UnknownIterations() = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An advised response's requests each sit under the long tier's threshold
+// while their sum does not: each is priced at the tier its own context selects.
+func TestClaudeRequestsCostPartsPricesEachRequestAtItsOwnTier(t *testing.T) {
+	haiku := Row{
+		Key: "claude-haiku-5-5", Engine: EngineClaude,
+		Rates: Rates{In: ptr(1), Out: ptr(5), Hit: ptr(0.1), W5m: ptr(1.25), W1h: ptr(2)},
+		Long:  &Long{Above: 100000, Rates: Rates{In: ptr(2), Out: ptr(10), Hit: ptr(0.2), W5m: ptr(2.5), W1h: ptr(4)}},
+	}
+	requests := []ClaudeUsage{
+		{Input: 2, Output: 26, CacheRead: 87277, Write5m: 552},
+		{Input: 2, Output: 1214, CacheRead: 87829, Write5m: 890},
+	}
+	part := func(count int64, rate float64) float64 { return float64(count) * rate / 1e6 }
+	want := ClaudeParts{
+		Input:     part(2, 1) + part(2, 1),
+		Output:    part(26, 5) + part(1214, 5),
+		Write5m:   part(552, 1.25) + part(890, 1.25),
+		CacheRead: part(87277, 0.1) + part(87829, 0.1),
+	}
+	if parts, ok := haiku.ClaudeRequestsCostParts(requests); !ok || parts != want {
+		t.Fatalf("ClaudeRequestsCostParts = %+v, %v; want %+v, each request at the base tier", parts, ok, want)
+	}
+	unpublished := haiku
+	unpublished.W5m = nil
+	if _, ok := unpublished.ClaudeRequestsCostParts(requests); ok {
+		t.Fatal("ClaudeRequestsCostParts priced a request whose write rate is unpublished")
 	}
 }
 

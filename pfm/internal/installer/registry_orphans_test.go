@@ -26,7 +26,7 @@ func TestInspectDeadRegistryLinks(t *testing.T) {
 		want                                                    int
 	}{
 		{name: "dead command", registry: "commands", source: "repo", want: 1},
-		{name: "nested managed command", registry: "commands/chat/group", source: "managed", want: 1},
+		{name: "nested managed command", registry: "commands/legacy/group", source: "managed", want: 1},
 		{name: "retired skill", registry: "skills", source: "repo", want: 1},
 		{name: "dead agent", registry: "agents", source: "generated", want: 1},
 		{name: "live pfm link", registry: "commands", source: "repo", live: true},
@@ -60,7 +60,7 @@ func TestInspectDeadRegistryLinks(t *testing.T) {
 				case "repo":
 					target = filepath.Join(repo, "workflows", "deep-rr")
 				case "managed":
-					target = filepath.Join(managed, "chat", "group", "ls.command.md")
+					target = filepath.Join(managed, "legacy", "group", "ls.command.md")
 				case "generated":
 					target = filepath.Join(paths.GeneratedClaudeAgentsDir(home), "old.md")
 				default:
@@ -132,9 +132,9 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 			t.Run(fmt.Sprintf("apply=%t/keep=%t", apply, keep), func(t *testing.T) {
 				home := t.TempDir()
 				store, repo := ClaudeStore(home), filepath.Join(home, ".professor")
-				group := filepath.Join(store, "commands", "chat", "group")
+				group := filepath.Join(store, "commands", "legacy", "group")
 				link := filepath.Join(group, "ls.md")
-				target := filepath.Join(managedRootForHome(home), "chat", "group", "ls.command.md")
+				target := filepath.Join(managedRootForHome(home), "legacy", "group", "ls.command.md")
 				if err := os.MkdirAll(group, 0o700); err != nil {
 					t.Fatal(err)
 				}

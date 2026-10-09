@@ -125,58 +125,24 @@ func TestApplyRetiresDanglingBBLinksFromTheRecordedProfessorClone(t *testing.T) 
 	}
 }
 
-func TestApplyRetiresInstalledChatCommands(t *testing.T) {
-	home := t.TempDir()
-	managed := managedRootForHome(home)
-	source := filepath.Join(managed, "chat", "ls.command.md")
-	link := filepath.Join(home, ".claude", "commands", "chat", "ls.md")
-	writeFixture(t, source, "legacy command card\n")
-	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(source, link); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
-		CodexHomes: []string{}, MCPConfigPath: testConfigPath(t),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	for _, retired := range []string{link, source, filepath.Dir(source), filepath.Dir(link)} {
-		requireNoPath(t, retired, "retired /chat: surface remains")
-	}
-}
-
 func TestRetiredManagedSurfacesRefuseOperatorLeftovers(t *testing.T) {
 	home := t.TempDir()
 	managed := managedRootForHome(home)
-	fixtures := []struct{ path, content string }{
-		{"chat/stray-note.md", "operator chat note\n"},
-		{"codex-skills/bb/keepme.txt", "operator skill note\n"},
-		{"chat/ls.command.md", "legacy command card\n"},
-	}
-	for _, fixture := range fixtures {
-		writeFixture(t, filepath.Join(managed, filepath.FromSlash(fixture.path)), fixture.content)
-	}
+	path := filepath.Join(managed, "codex-skills", "bb", "keepme.txt")
+	const content = "operator skill note\n"
+	writeFixture(t, path, content)
 	_, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
 		CodexHomes: []string{}, MCPConfigPath: testConfigPath(t),
 	})
-	for _, relative := range []string{"chat/stray-note.md", "codex-skills/bb/keepme.txt"} {
-		path := filepath.Join(managed, filepath.FromSlash(relative))
-		want := "refuse to retire non-empty directory " + filepath.Dir(path) +
-			" — move or delete " + path + ", then rerun"
-		if err == nil || !strings.Contains(err.Error(), want) ||
-			!strings.Contains(err.Error(), "preflight apply plan") {
-			t.Errorf("install error=%v, want preflight refusal %q", err, want)
-		}
+	want := "refuse to retire non-empty directory " + filepath.Dir(path) +
+		" — move or delete " + path + ", then rerun"
+	if err == nil || !strings.Contains(err.Error(), want) ||
+		!strings.Contains(err.Error(), "preflight apply plan") {
+		t.Errorf("install error=%v, want preflight refusal %q", err, want)
 	}
-	for _, fixture := range fixtures {
-		path := filepath.Join(managed, filepath.FromSlash(fixture.path))
-		if got := readFixture(t, path); got != fixture.content {
-			t.Errorf("%s=%q, want %q", fixture.path, got, fixture.content)
-		}
+	if got := readFixture(t, path); got != content {
+		t.Errorf("%s=%q, want %q", path, got, content)
 	}
 }
 

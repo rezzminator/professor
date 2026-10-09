@@ -340,9 +340,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	// T4: /handoff is a global skill, linked the same way /reload is a
 	// global command.
 	assertLink(t, filepath.Join(config, "skills", "handoff", "SKILL.md"), filepath.Join(managed, "handoff.skill.md"))
-	if _, err := os.Lstat(filepath.Join(config, "commands", "chat", "group", "send.md")); !os.IsNotExist(err) {
-		t.Fatalf("install wired a retired /chat: command link: %v", err)
-	}
 	// One job, two schedulers: assert the one this platform actually installs,
 	// and that it did NOT leave the other platform's files behind.
 	if schedulerIsLaunchd {

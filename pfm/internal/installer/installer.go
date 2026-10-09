@@ -206,7 +206,6 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retirePredecessors())
 	installer.deferFailure(installer.retireRenamedGlobalAgents())
 	installer.deferFailure(installer.retireBBInstall())
-	installer.deferFailure(installer.retireChatCommands())
 	installer.deferFailure(installer.retireStagedManagedSurfaces(false))
 	if err == nil {
 		installer.deferFailure(installer.wireCommands(assets))
@@ -729,9 +728,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.retireBBInstall(); err != nil {
-		return err
-	}
-	if err := installer.retireChatCommands(); err != nil {
 		return err
 	}
 	if schedulerIsLaunchd {

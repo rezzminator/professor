@@ -102,20 +102,6 @@ func TestInstallReconcilesGlobalCodexCommands(t *testing.T) {
 			t.Fatalf("global Codex command mirror %s is not marker-owned:\n%s", path, content)
 		}
 	}
-	// The retired /chat: commands never reach ~/.claude/commands/chat/ at all,
-	// so their former Codex mirrors (chat-inject, chat-interrogate) must not
-	// exist either.
-	for _, path := range []string{
-		filepath.Join(home, ".codex", "prompts", "chat-inject.md"),
-		filepath.Join(home, ".codex", "prompts", "chat-interrogate.md"),
-		filepath.Join(home, ".codex", "skills", "chat-inject"),
-		filepath.Join(home, ".codex", "skills", "chat-interrogate"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("retired /chat: command left a Codex mirror at %s: %v", path, err)
-		}
-	}
-
 	foreign := filepath.Join(home, ".codex", "prompts", "operator.md")
 	writeFixture(t, foreign, "operator-owned prompt\n")
 	if _, err := Run(context.Background(), Options{

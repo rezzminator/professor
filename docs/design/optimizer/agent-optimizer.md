@@ -51,13 +51,13 @@ One report per agent type. A lead and its diggers are two audits: the lead's rep
 
 ## The digest
 
-A transcript can run to megabytes; it is never read whole. One call to `token-audit.mjs --timeline` (repeatable, one flag per transcript) turns every run into a timeline:
+A transcript can run to megabytes; it is never read whole. One call to `pfm tokens --timeline` (repeatable, one flag per transcript) turns every run into a timeline:
 
-- A header per run: agent type, model, effort, calls, wall time first to last record, peak context, output tokens, tool errors, results over 20 KB, and USD from the same replay and Professor's price table (`pfm model-cost --json --all`) as `token-audit`'s default report.
+- A header per run: agent type, model, effort, calls, wall time first to last record, peak context, output tokens, tool errors, results over 20 KB, and USD from the same replay and Professor's price table (`pfm model-cost --json --all`) as `pfm tokens`'s default report.
 - One row per model call (several `assistant` records sharing one `requestId` are one call): clock, seconds since the previous tool result, context (`input + cache read + cache write`), output, USD, and each tool the call issued with its target, result size, `ERR` and wait.
 - `UNREADABLE — {path}: {error}` or `NO CALLS — {path}` for a run it cannot digest, a mark the report carries rather than an estimate.
 
-A second call prints each run's content with `transcript.py show`, one call per run: one line per event with its transcript line number, holding the brief, every tool call with its target and result status, a failure's tail and the return. The timeline's tool targets are cut at 100 characters and often share one prefix, so without that view every audit built its own transcript dumper (about 21 calls over four self-audited runs). The prompt, a variant's source and the design doc are read whole with `cat -n` in the same first message, so later citations never re-grep for line numbers. Every Bash command opens with `emulate sh 2>/dev/null;`, since zsh aborts on `echo ====`. The transcript is opened beyond that only at a line number a finding needs. The installed script runs as `node ~/.claude/commands/tokens/token-audit.mjs --timeline {transcript} --timeline {transcript}…`; a worktree's prompt still comes in through `Prompt:`.
+A second call prints each run's content with `transcript.py show`, one call per run: one line per event with its transcript line number, holding the brief, every tool call with its target and result status, a failure's tail and the return. The timeline's tool targets are cut at 100 characters and often share one prefix, so without that view every audit built its own transcript dumper (about 21 calls over four self-audited runs). The prompt, a variant's source and the design doc are read whole with `cat -n` in the same first message, so later citations never re-grep for line numbers. Every Bash command opens with `emulate sh 2>/dev/null;`, since zsh aborts on `echo ====`. The transcript is opened beyond that only at a line number a finding needs. The installed script runs as `node ~/.claude/commands/tokens/pfm tokens --timeline {transcript} --timeline {transcript}…`; a worktree's prompt still comes in through `Prompt:`.
 
 ## The audit
 
@@ -110,5 +110,5 @@ The report path, then one line of totals, then the findings, one line each: clas
 | --- | --- |
 | The agent | `templates/global/agents/agent-optimizer.md` |
 | The transcript record shape it digests | Claude Code's `projects/{project}/{session}/subagents/agent-{id}.jsonl` and `.meta.json` |
-| The digest and dollar source | `templates/global/commands/tokens/token-audit.mjs --timeline` |
+| The digest and dollar source | `pfm tokens --timeline` |
 | The roster line | `docs/BLUEPRINT.md` |

@@ -250,27 +250,6 @@ checks_templates_mirrors_roster() {
 
 }
 
-checks_templates_token_audit() {
-  head_ "templates — token-audit tests"
-  # node --test exits 0 when it finds no tests, so a moved or renamed suite
-  # would read as a pass: enumerate the files and count the passes instead.
-  local token_tests=(templates/global/commands/tokens/*.test.mjs)
-  local token_out="$TMP_BASE/templates/token-audit.tap"
-  mkdir -p "$TMP_BASE/templates"
-  if [[ ! -f "${token_tests[0]}" ]]; then
-    fail_step "token-audit tests NOT RUN — templates/global/commands/tokens/*.test.mjs matched no file; the suite was never executed"
-  elif ! node --test --test-reporter=tap "${token_tests[@]}" >"$token_out" 2>&1; then
-    cat "$token_out"
-    fail_step "token-audit tests FAILED — a measure, the flight selection, or an error path regressed, or node could not run the suite (see output)"
-  elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$token_out"; then
-    cat "$token_out"
-    fail_step "token-audit tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
-  else
-    ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
-  fi
-
-}
-
 checks_templates_release_check() {
   head_ "templates — release-check tests and the notes grammar"
   node_test_suite "release-check" "$TMP_BASE/templates/release-check.tap" scripts/release-check.test.mjs
@@ -431,7 +410,6 @@ checks_templates() {
   checks_templates_mirrors_generate
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
-  checks_templates_token_audit
   checks_templates_release_check
   checks_templates_codex_sync
   checks_templates_refresh_scope
@@ -874,7 +852,6 @@ gate_run() { # pfm, templates, or all
     steps_add templates.scratch-paths checks_templates_scratch_paths
     steps_add templates.descriptions checks_templates_descriptions
     steps_add templates.mirrors checks_templates_mirrors "$run_dir/bin/pfm"
-    steps_add templates.token-audit checks_templates_token_audit
     steps_add templates.release-check checks_templates_release_check
     steps_add templates.codex-sync checks_templates_codex_sync
     steps_add templates.refresh-scope checks_templates_refresh_scope

@@ -25,7 +25,7 @@ An anchor that cannot be read is a finding ("failed to look"), never an absence.
 | Transcripts | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-*.jsonl`, the `.meta.json` beside each naming `agentType` and `spawnDepth`; a seat's session through `chat_read` | Calls per foreman against its cap, peak context, files read, waits, children spawned |
 | The gate | `gate.md` and the lander's transcript | Each project's full runs (a second only after a failed one), the review, the attack map, findings and their terminal state |
 | `REVIEW.md` | the flight directory | The merge-gating report against `gate.md` |
-| Spend | its own run of `token-audit.mjs --flight {directory}`; `metrics.md` is a claim compared against it | Per agent: calls, context, tokens, price, compactions, over cap |
+| Spend | its own run of `pfm tokens --flight {directory}`; `metrics.md` is a claim compared against it | Per agent: calls, context, tokens, price, compactions, over cap |
 
 ## The pieces
 

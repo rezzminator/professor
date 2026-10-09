@@ -20,7 +20,7 @@
 | Context gathered across sibling chats: "read the last three answers of each reviewer chat, then answer" | Every chat sharing a name prefix, each one's newest answers |
 | Liveness of running chats: "why is none of them working", "is it working" | State, idle time and the newest answer of each, the cause in the first line |
 | Another chat's runtime or configuration: its cache TTL, a command it does not list | The chat's transcript beside its process and settings evidence |
-| Metrics and judgement over many runs of one agent type: an executor's effort, a flight's slowest phase, past foreman runs | Sub-agent transcripts selected by `.meta.json`, timelines and dollars from `token-audit` |
+| Metrics and judgement over many runs of one agent type: an executor's effort, a flight's slowest phase, past foreman runs | Sub-agent transcripts selected by `.meta.json`, timelines and dollars from `pfm tokens` |
 | A claim checked: "did that agent really file the evidence" | The artifact on disk against the chat's own progress line |
 | A session found by what was said in it | `chat_find` hits, each confirmed by a quoted line |
 
@@ -56,7 +56,7 @@ Each rule and the failure in the audited runs it fixes:
 | Search `~/.claude/projects` itself, never through `~/.cc/*/projects` | Those are links: a plain `find` reported "no transcript file" for one that existed; `find -L` counted every run three times (396 for 72) and a per-file loop timed out at 120 s |
 | `transcript.py agents` lists a session's sub-agents in one call; one is chosen by what its calls read, never by its type | Half the sub-agents handed to one audit read no transcript |
 | One `transcript.py show --out` per target, then `grep` and `sed` on the digest | Hand-written parsers cost about 140 s; one investigator re-ran `show` six times on one file; `chat_read` counts tool turns and returns tool inputs without results |
-| Dollars from `token-audit` or a ledger, never a typed rate | An answer claimed prices "checked within 5%" while its own check printed $2.16 against $5.42 |
+| Dollars from `pfm tokens` or a ledger, never a typed rate | An answer claimed prices "checked within 5%" while its own check printed $2.16 against $5.42 |
 | `chat_status` without `summary` or `ask`; a `chat_ls` state is a hint | `summary:true` timed out at 63 s; a `chat_ls` row read idle while the chat was working |
 | A chat's progress line is its claim; the artifact on disk is the fact | "Filed its own evidence" relayed without a listing, beside a status that said the ask had failed |
 | A contrary datum stands beside the answer; an unread conclusion is `INFERRED` | A fresh-chat probe answering against the verdict was left out; "left out its own orchestration cost" was false, the chat had disclosed it |
@@ -83,6 +83,6 @@ An investigation brief without a cap fanned out to 17 agents three levels deep i
 | --- | --- |
 | The agent | `templates/global/agents/chat-investigator.md` |
 | The digest it reads through | `templates/global/skills/transcript/transcript.py` and its `SKILL.md` |
-| The timeline and dollar source | `templates/global/commands/tokens/token-audit.mjs --timeline` |
+| The timeline and dollar source | `pfm tokens --timeline` |
 | Name, sub-agent and liveness lookups | `transcript.py locate`, `transcript.py agents`, `pfm ls --all --tsv` |
 | The roster line and the transcript skill's readers | `docs/BLUEPRINT.md` |

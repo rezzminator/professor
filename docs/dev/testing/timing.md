@@ -194,7 +194,6 @@ templates.placeholders	PASS	0.1
 templates.scratch-paths	PASS	3.0
 templates.descriptions	PASS	0.7
 templates.mirrors	PASS	4.2
-templates.token-audit	PASS	3.0
 templates.flight-index	PASS	0.5
 templates.release-check	PASS	1.6
 templates.codex-sync	PASS	0.1

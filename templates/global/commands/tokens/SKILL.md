@@ -6,10 +6,10 @@ description: Ranks runtime spend — token audits of Claude chats, Codex threads
 
 # Token Audit
 
-The script reads both engines' transcripts; pfm retrieves official live pricing before the scan:
+`pfm tokens` reads both engines' transcripts and prices them from pfm's official live price table:
 
 ```bash
-node ~/.claude/commands/tokens/token-audit.mjs [flags]
+pfm tokens [flags]
 ```
 
 `~/.claude/commands/tokens/README.md` carries the mechanics, the schema notes and the counting rules.
@@ -28,7 +28,7 @@ node ~/.claude/commands/tokens/token-audit.mjs [flags]
 ## One flight — `--flight <dir>`
 
 ```bash
-node ~/.claude/commands/tokens/token-audit.mjs --flight $HOME/.local/state/pfm/flights/{project}/<name>
+pfm tokens --flight $HOME/.local/state/pfm/flights/{project}/<name>
 ```
 
 Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report. One row per agent: task id, agent type, engine, model, calls, wall time, start and peak context, growth per call, input/cached/output tokens, cache TTL (`5m`, `1h`, `1h N%` when mixed, `—` for no cache writes or an engine that reports no split, as Codex), price, failed commands, poll calls, re-reads, contract-file reads, compactions, over-cap, and how the row was matched. Then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line. The text stays under ~200 lines whatever the flight's size.
@@ -50,7 +50,7 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 
 - The `data gaps:` line is the report's own honesty: malformed lines, dropped synthetic calls, unpriced calls, cache writes with no 5m/1h split, calls copied from another transcript, duplicate files, read errors. `data gaps: none` means the scan was clean, not that nothing was checked. A read error exits non-zero.
 - A model id that resolves to no priced key, or a missing rate for a used token dimension, renders **`n/a`**, never `$0`; its tokens still count and the gaps line names it. A dated snapshot id resolves to its undated key; no family or substring match exists.
-- Prices come from `pfm model-cost --json --all`: pfm's one table, refreshed from both official provider pages at most once a day (`--force` refreshes now, `PFM_PRICES_OFFLINE=1` never fetches); a failed refresh is named in the gaps line. Estimates use Standard token/cache prices and each row's long-context tier. `TOKEN_AUDIT_PRICES` selects a saved `--json --all` document or pfm's `prices.json`; the report names the table's fetch time. Current-price estimates are not historical bills.
+- Prices come from pfm's one table, the one `pfm model-cost` prints, refreshed from both official provider pages at most once a day (`--force` refreshes now, `PFM_PRICES_OFFLINE=1` never fetches); a failed refresh is named in the gaps line. Estimates use Standard token/cache prices and each row's long-context tier. `--prices FILE` selects a saved `--json --all` document or pfm's `prices.json`; the report names the table's fetch time. Current-price estimates are not historical bills.
 - `CROSS-CHECK` compares published context-tier estimates to the harness's `cost-state` line for chats wholly inside the window.
 - Codex counts differently: `total_token_usage` is cumulative and **resets on resume and compaction**, so each segment's peak is summed. Cached input is a subset of input; output includes reasoning. Aggregate dollars use the run's peak-context tier, an approximation.
 - Transcript content can carry sensitive prompt text — read the report, never pipe or retain transcript bodies.

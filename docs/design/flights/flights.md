@@ -50,7 +50,7 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
   briefs/         one brief file per spawn                   written by the spawning foreman
   tasks/          one task file per mechanical bulk edit     written by the foreman that fixed it
   returns/        one return file per child foreman (sub-agent or seat) and per gate round   written by each child and by flights-lander
-  metrics.md      per-agent calls, context, tokens, price    written by token-audit.mjs at landing
+  metrics.md      per-agent calls, context, tokens, price    written by pfm tokens at landing
   gate.md         the gate's attack map and findings         written by flights-lander
   REVIEW.md       the merge-gating report, from gate.md      written by the root flights-foreman
   audit.md        the last audit's report                    written by /flights:audit

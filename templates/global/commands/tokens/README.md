@@ -1,13 +1,13 @@
-# token-audit
+# pfm tokens
 
-One read-only script over both engines' transcripts, one pricing table: **where did the tokens go?** Node builtins plus the `pfm` binary, which fetches official live pricing, nothing written outside `--out` / `--metrics-out` / a flight's own `metrics.md`.
+One read-only pfm verb over both engines' transcripts, one pricing table: **where did the tokens go?** Nothing is written outside `--out` / `--metrics-out` / a flight's own `metrics.md`.
 
 ```bash
-node .claude/commands/tokens/token-audit.mjs            # last 24h, every project
-node .claude/commands/tokens/token-audit.mjs --since 3d --project <substr>
-node .claude/commands/tokens/token-audit.mjs --codex    # Codex CLI threads
-node .claude/commands/tokens/token-audit.mjs --flight $HOME/.local/state/pfm/flights/{project}/<name>
-node .claude/commands/tokens/token-audit.mjs --timeline <…/subagents/agent-{id}.jsonl>
+pfm tokens            # last 24h, every project
+pfm tokens --since 3d --project <substr>
+pfm tokens --codex    # Codex CLI threads
+pfm tokens --flight $HOME/.local/state/pfm/flights/{project}/<name>
+pfm tokens --timeline <…/subagents/agent-{id}.jsonl>
 ```
 
 A RUN is one transcript file: one main chat loop, one sub-agent, or one Codex rollout thread. A FAMILY is a main chat plus every sub-agent it spawned.
@@ -24,13 +24,14 @@ A RUN is one transcript file: one main chat loop, one sub-agent, or one Codex ro
 | `--top <n>` | Rows per section (default 12). |
 | `--out <file>` | Full JSON dataset. |
 | `--codex` | Read Codex rollouts instead of Claude transcripts. |
-| `--codex-root <dir>` | Override `~/.codex`. |
+| `--codex-root <dir>` | Override pfm's Codex home (`PFM_CODEX_ROOT`, else `~/.codex`). |
 | `--flight <dir>` | Per-flight metrics report (below). |
 | `--metrics-out <file>` | Write the flight report here instead of `<dir>/metrics.md`. |
 | `--timeline <file>` | One run's per-call timeline and price (below); repeatable. |
 | `--view <file>` / `--briefs <file>` | Compact per-project page data / the briefs-and-behaviour dataset. |
+| `--prices <file>` | Price from a saved table instead of pfm's current one (below). |
 
-Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/projects`, `~/.claude/projects`, then every `~/.cc/*/projects`. Roots are resolved through symlinks and de-duplicated, and each file is de-duplicated by its last three path segments — one project tree shared by several accounts is never double-counted.
+Without `--root`, the Claude roots are pfm's resolved roots (`PFM_CLAUDE_ROOTS`, else `~/.claude/projects`, which each account's `~/.cc/{N}/projects` links to). Roots are resolved through symlinks and de-duplicated, and each file is de-duplicated by its last three path segments — one project tree shared by several accounts is never double-counted.
 
 ## What it reads
 
@@ -41,7 +42,7 @@ Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/pr
 - `tool_use` blocks are paired with their `tool_result` so every tool call, its size, its duration and its `is_error` are known — that is what makes the per-agent measures possible.
 - A `system`/`compact_boundary` line, or a context that shrinks below 60% of what is carried, resets the replay: that is a compaction.
 
-**Codex CLI.** `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/**`. The `~/.codex/` root itself is deliberately not scanned — it holds `rollout-backup-*.jsonl` copies that would double-count a thread.
+**Codex CLI.** `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/**`. The `~/.codex/` root itself is deliberately not scanned — it holds `rollout-backup-*.jsonl` copies that would double-count a thread. Symlinked rollouts are skipped.
 
 - Line 1 is `session_meta`: `id` (thread), `session_id` / `parent_thread_id` (the parent thread), `context_window.window_id`, `cwd`, `thread_source`, and `source.subagent` (the role) for a sub-agent thread. A Codex sub-agent writes its **own** rollout, so it is attributed individually.
 - `turn_context` carries the model; `token_count` carries the counters; `custom_tool_call` / `function_call` and their `*_output` carry the tools, their output size and their failures.
@@ -52,16 +53,16 @@ Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/pr
 - **Codex counters reset.** `info.total_token_usage` is cumulative but restarts on resume and on compaction, and duplicate events re-emit an identical cumulative. So: dedupe on the cumulative, split the thread wherever it drops, sum **each segment's peak**. The final counter alone undercounts a long thread by orders of magnitude; summing per-turn deltas double-counts. Cached input is a subset of input and bills at the cached rate; output already includes reasoning.
 - **Claude, per response:** input × input rate + output × output rate + `cache_creation.ephemeral_5m_input_tokens` × the published 5m write rate + `ephemeral_1h_input_tokens` × the 1h write rate + `cache_read_input_tokens` × the cache-read rate, at that response's own model and prompt length (input + cache reads + cache writes). Any part of `cache_creation_input_tokens` the TTL breakdown does not cover bills as the default 5-minute TTL; a write with no breakdown is counted in the gaps line. Zero top-level counts are priced from `usage.iterations[]`.
 - **Every dollar is traced to the context that caused it**: the replay charges `[0, cache_read)` at the read rate, `[cache_read, +cache_write)` at the write rate and the tail at 1x, then attributes each slice to the category that put it there.
-- **Prices come from `pfm model-cost --json --all`**, once before transcripts are read: pfm's one price table (`pfm/internal/pricing/prices.json` in the Professor clone, plus any `pfm.prices.json` override), refreshed from the official Anthropic and OpenAI pages at most once a day (`pfm model-cost --force` refreshes now; `PFM_PRICES_OFFLINE=1` never fetches). A refresh pfm could not complete leads the data-gaps line, naming the cause and the fetch time of the table served. `TOKEN_AUDIT_PFM` selects another pfm. Missing pfm, a pfm error and a malformed document exit 2 with the cause; no static fallback exists.
+- **Prices load once, before transcripts are read, through `pfm model-cost`'s own path:** pfm's one price table (`pfm/internal/pricing/prices.json` in the Professor clone, plus any `pfm.prices.json` override), refreshed from the official Anthropic and OpenAI pages at most once a day (`pfm model-cost --force` refreshes now; `PFM_PRICES_OFFLINE=1` never fetches). A refresh pfm could not complete leads the data-gaps line, naming the cause and the fetch time of the table served. A table that cannot load exits 1 with the cause; no static fallback exists.
 - **Exact IDs and dimensions:** a model id resolves by pfm's one rule — case, provider prefix, Bedrock and Vertex suffixes and Claude dots normalized, then its exact key, else its key without a trailing snapshot date; a family or substring never inherits another model's price. Estimates use the Standard input, output and cache rates, both Claude cache TTLs, and a row's `long` tier when the call's context is above its threshold. A missing rate for a nonzero usage dimension renders that call `n/a`.
-- **Saved tables:** `TOKEN_AUDIT_PRICES` reads a saved `pfm model-cost --json --all` document, or the `prices.json` file itself, and keeps pfm unspawned. A document's `override: {path, rows}` leads the data-gaps line. Every report's `pricing:` line names the saved table or current list prices, the table's fetch time and its providers. These current-price estimates are not historical billing truth.
+- **Saved tables:** `--prices FILE` reads a saved `pfm model-cost --json --all` document, or the `prices.json` file itself, and never refreshes; a document row without `source` is refused. A document's `override: {path, rows}` leads the data-gaps line. Every report's `pricing:` line names the saved table or current list prices, the table's fetch time and its providers. These current-price estimates are not historical billing truth.
 - **Codex context estimates:** the segment-peak counting rule stays unchanged. Its aggregate tokens are estimated at the run's peak-context price tier; per-call historical costs cannot be reconstructed from these counters. A mixed-model rollout is still priced at its last model and named in the gaps line.
 
 ## Honesty rules
 
 - **`data gaps:`** prints on every report: malformed lines, calls with no timestamp, dropped synthetic/zero-usage calls, unpriced calls with their models, cache writes with no tier split, calls copied from another transcript, duplicate files, and read errors. `data gaps: none` means the scan was clean.
 - **An unpriced model renders `n/a`, never `$0`.** Its tokens stay in every token total; its dollars stay out of every dollar total; the gaps line names the model.
-- **A read error is a failure to look, not an empty result.** It is named in the gaps line and the process exits non-zero; an unresolvable `--root` is a hard error before anything is reported.
+- **A read error is a failure to look, not an empty result.** It is named in the gaps line and the process exits 1 (a usage error exits 2); an unresolvable `--root` is a hard error before anything is reported.
 - **`CROSS-CHECK`** compares the estimate against the harness's own `cost-state` line for chats wholly inside the window, and prints the estimate with published context tiers applied. When no chat qualifies it says the estimate is UNCHECKED on this host.
 
 ## `--flight <dir>`
@@ -90,7 +91,7 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 
 ## `--timeline <file>`
 
-One transcript, the whole file — no window applies, and `--flight`, `--codex`, `--project` or `--since` beside it is refused. `<file>` is a sub-agent's `…/subagents/agent-{id}.jsonl` (its agent type comes from the `.meta.json` beside it) or a main session file; repeat the flag for several. The file goes through the same `auditFile` replay and price table as the default report, so the header's price equals that run's price there when both use the same `--root` ownership domain. Without `--root`, a timeline indexes the enclosing Claude transcript root, including project and subagent directories; a standalone file uses its own directory.
+One transcript, the whole file — no window applies, and `--flight`, `--codex`, `--project` or `--since` beside it is refused. `<file>` is a sub-agent's `…/subagents/agent-{id}.jsonl` (its agent type comes from the `.meta.json` beside it) or a main session file; repeat the flag for several. The file goes through the same replay and price table as the default report, so the header's price equals that run's price there when both use the same `--root` ownership domain. Without `--root`, a timeline indexes the enclosing Claude transcript root, including project and subagent directories; a standalone file uses its own directory.
 
 Per file, one header line — agent type, model(s), effort, calls, wall seconds from the first to the last timestamped record, peak context, output tokens, tool errors, tool results over 20 KB, USD — then one row per model call (a call written as several assistant lines sharing one `message.id` is one row): call number, clock time (UTC), seconds since the previous tool result, context (input + cache read + cache write), output tokens, the call's USD, and each tool the call issued as `name: target` (target cut to 100 chars) with its result chars, `ERR` when `is_error`, and the tool's wait; `(no result)` when none came back. Then the file's own `data gaps:` line.
 
@@ -98,8 +99,4 @@ An unpriced model renders `n/a` in the header and on every row, never `$0`. A pa
 
 ## Tests
 
-```bash
-.claude/scripts/test-templates.sh templates/global/commands/tokens/pricing.test.mjs templates/global/commands/tokens/token-audit.test.mjs
-```
-
-`token-audit.test.mjs` runs the CLI as a child process over the synthetic JSONL under `fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, and a flight ledger exercising an id match, a window match and a row with no transcript; `fixtures/timeline/` holds five sub-agent runs for `--timeline` (calls split across several assistant lines, a failed Bash, a result over 20 KB, an unpriced model, an all-malformed transcript, an empty transcript, and a valid transcript with no `.meta.json` beside it). Every CLI run reads the synthetic saved document in `fixtures/model-cost.json`; no network is used by tests. `pricing.test.mjs` checks id resolution against pfm's shared cases (`pfm/internal/pricing/testdata/resolve-cases.json`), the rate columns per engine, the long-tier boundary, unpublished rates, the report's pricing metadata and loader failures. Both test files take their stand-in pfm from `fake-pfm.mjs`. Set `TOKEN_AUDIT_BIN` to point the suite at another build. No fixture is markdown: every `.md` below the commands tree would compile into a slash command.
+The tests live in `pfm/internal/tokens/` and run the verb over the synthetic JSONL under `testdata/fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, and a flight ledger exercising an id match, a window match and a row with no transcript; `testdata/fixtures/timeline/` holds five sub-agent runs for `--timeline` (calls split across several assistant lines, a failed Bash, a result over 20 KB, an unpriced model, an all-malformed transcript, an empty transcript, and a valid transcript with no `.meta.json` beside it). `testdata/golden/` holds every mode's recorded output, which each run reproduces byte for byte. Every run reads the synthetic saved document `testdata/fixtures/model-cost.json`; no network is used by tests. Id resolution is tested in `pfm/internal/pricing` against its shared cases (`testdata/resolve-cases.json`).

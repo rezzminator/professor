@@ -63,7 +63,7 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	), contextTokens
 }
 
-// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 ledger≠cc": exactly ONE dollar
+// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 sink failed": exactly ONE dollar
 // amount in every state, then prompt tokens, output tokens and tool calls. With a cost ledger the
 // amount is the ledger's total — Claude Code's own price of every API call of the session, the
 // ones no transcript records included — and the tokens are the ledger's sums; the same total is the
@@ -94,11 +94,11 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks) 
 		if booked.partial {
 			line += cWarn + "+?" + reset
 		}
-		return line + markerText(spendMarker(books, total, booked.usd, 0, false))
+		return line + markerText(spendMarker(books, total, 0, false))
 	}
 	if !readable {
 		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset +
-			markerText(spendMarker(books, total, 0, 0, false))
+			markerText(spendMarker(books, total, 0, false))
 	}
 	logged := spend.priced > 0 || !spend.partial
 	line := spendDollars(spend.usd, logged)
@@ -109,7 +109,7 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks) 
 	if spend.partial && logged {
 		line += cWarn + "+?" + reset
 	}
-	return line + markerText(spendMarker(books, total, 0, spend.usd, logged))
+	return line + markerText(spendMarker(books, total, spend.usd, logged))
 }
 
 // spendTail is "1.0M/5.1K/46": prompt tokens, output tokens, tool calls.

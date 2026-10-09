@@ -178,10 +178,9 @@ A state the line must flag ends in one marker (`spendMarker`, `pfm/internal/stat
 | `ledger preempted` | `PFM_COST_LEDGER=preempted`: the user's own telemetry kept the ledger from starting |
 | `ledger off` | `PFM_COST_LEDGER=off`: `claude.costLedger` is `false` |
 | `ledger unreadable` | the ledger file exists and could not be read, or its session id is invalid; the line then shows Claude Code's total and the cause goes to the activity log |
-| `ledger≠cc` | a ledger exists, the payload's total is above zero, and the two differ by more than `max($0.01, 0.5% of Claude Code's total)`: the ledger is incomplete, or Claude Code's total moved after the last flush |
-| `unlogged` | no ledger, and the transcripts price below Claude Code's total by more than the same tolerance: calls no transcript records exist, and nothing measures them |
+| `unlogged` | no ledger, and the transcripts price below Claude Code's total by more than `max($0.01, 0.5% of Claude Code's total)`: calls no transcript records exist, and nothing measures them |
 
-A launch's own marker (`failed`, `preempted`, `off`) wins even when a ledger file of an earlier launch of the session exists: this launch is not logging, so the ledger is a floor. The amount stays the ledger's total, so the line keeps matching `pfm tokens` and callmeter. Not flagged: no ledger and transcripts priced above Claude Code's total, a payload with no total, and a sink armed whose ledger has no row yet. The amounts behind a marker (side-call spend, the ledger-minus-Claude-Code difference, the unlogged gap) are what [pfm tokens](#pfm-tokens) reports.
+A launch's own marker (`failed`, `preempted`, `off`) wins even when a ledger file of an earlier launch of the session exists: this launch is not logging, so the ledger is a floor. The amount stays the ledger's total, so the line keeps matching `pfm tokens` and callmeter. Not flagged: no ledger and transcripts priced above Claude Code's total, a payload with no total, and a sink armed whose ledger has no row yet. The line never compares the ledger with Claude Code's total (the user ruled the `ledger≠cc` marker out of the status line); that difference, like the side-call spend and the unlogged gap, is what [pfm tokens](#pfm-tokens) reports.
 
 ### Sub-agent row numbers
 
@@ -212,7 +211,7 @@ A chat with a ledger gets a block under `== COST LEDGER` (the flight report: `##
 | `N calls with no cost in the ledger` | rows with `cost_usd_micros` null: counted, named, not in the total |
 | `N torn ledger lines skipped` | `Ledger.Faults` |
 | `Claude Code says $X` | the main transcript's last `cost-state` line (`totalCostUSD`); `no cost-state line in this chat's transcript` when there is none (`pfm tokens` has no stdin payload, so the transcript is its only source of Claude Code's total) |
-| `ledger minus Claude Code: +$X` | shown when the two differ by half a cent or more; the amount behind the `ledger≠cc` marker. The report's threshold is half a cent, not the status line's `max($0.01, 0.5%)`, because both numbers print as dollars and cents here |
+| `ledger minus Claude Code: +$X` | shown when the two differ by half a cent or more; both numbers print as dollars and cents here, so the threshold is half a cent |
 | `by agent` | cost and share of the session total: the main thread's own calls, each top-level sub-agent as a tree (itself and everything it spawned, children indented), the calls of an agent the log never named (`?`) last. The parent is the ledger's `parent_agent_id`, else the meta file's `parentAgentId`; a parent that is no agent with calls, or a loop, makes the agent top-level. The main thread and the top-level rows sum to the session total |
 | `by query_source` | cost and share per `query_source`, dearest first: `repl_main_thread`, each `agent:builtin:{name}`, `web_search_tool`, `web_fetch_apply`, `agent_summary`, `prompt_suggestion`, `compact`, … |
 

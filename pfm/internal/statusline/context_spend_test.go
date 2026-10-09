@@ -116,11 +116,11 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 		},
 		{
 			name: "ledger below claude code beyond the tolerance", rows: spendRows(), marker: "on",
-			child: spendChildResponse, claudeCost: 9.5, want: "💰$8.00/1.0M/5.1K/1 ledger≠cc",
+			child: spendChildResponse, claudeCost: 9.5, want: "💰$8.00/1.0M/5.1K/1",
 		},
 		{
 			name: "ledger above claude code beyond the tolerance", rows: spendRows(), marker: "on",
-			child: spendChildResponse, claudeCost: 5, want: "💰$8.00/1.0M/5.1K/1 ledger≠cc",
+			child: spendChildResponse, claudeCost: 5, want: "💰$8.00/1.0M/5.1K/1",
 		},
 		{
 			name: "no claude code figure: the ledger leads, nothing to compare", rows: spendRows(), marker: "on",
@@ -224,45 +224,13 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			if at < 0 {
 				t.Fatalf("line %q has no spend segment", got)
 			}
+			if strings.Contains(got, "ledger≠cc") {
+				t.Fatalf("line %q carries the ledger≠cc marker: the main line never names that comparison", got)
+			}
 			if segment, _, _ := strings.Cut(got[at:], " │"); segment != tc.want {
 				t.Fatalf("spend segment %q, want %q (line %q)", segment, tc.want, got)
 			}
 		})
-	}
-}
-
-// The tolerance between the ledger and Claude Code is the larger of one cent
-// and half a percent of Claude Code's total.
-func TestLedgerAgainstClaudeCodeToleranceIsHalfAPercentOrACent(t *testing.T) {
-	big := []costledger.Row{{
-		RequestID: "req_big", TS: "2026-10-09T18:00:00.000Z", SessionID: spendSession, QuerySource: "repl_main_thread",
-		Model: "claude-opus-5-5", InputTokens: 10, OutputTokens: 5, CostUSDMicros: micros(100_000_000),
-		Join: costledger.JoinLogSpan,
-	}}
-	for _, tc := range []struct {
-		claude float64
-		want   string
-	}{
-		{claude: 100.4, want: ""},
-		{claude: 100.6, want: " ledger≠cc"},
-	} {
-		ledgerDir := t.TempDir()
-		writeSpendLedger(t, ledgerDir, big)
-		data := input{SessionID: spendSession}
-		data.Cost.TotalCostUSD = tc.claude
-		runtime := Runtime{
-			Home: t.TempDir(), Engine: pfmengine.Claude, Prices: testPrices(t),
-			Env: map[string]string{paths.EnvCostLedgerDir: ledgerDir, claudelaunch.EnvCostLedger: "on"},
-		}
-		_, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
-		if got := strings.Contains(stripANSICodes(line), "ledger≠cc"); got != (tc.want != "") {
-			t.Errorf(
-				"claude code $%v against a $100.00 ledger: marker shown = %v, want %v",
-				tc.claude,
-				got,
-				tc.want != "",
-			)
-		}
 	}
 }
 

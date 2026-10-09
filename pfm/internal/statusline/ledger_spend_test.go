@@ -137,22 +137,21 @@ func TestLedgerSpendsAddUpToTheSessionTotal(t *testing.T) {
 	}
 }
 
-// What the launch recorded outranks the comparison, an unreadable ledger outranks Claude Code's
-// total, and no marker is ever raised without a Claude Code total to compare.
+// What the launch recorded outranks everything, an unreadable ledger outranks Claude Code's total,
+// and no marker is ever raised without a Claude Code total to compare.
 func TestSpendMarkerPrecedence(t *testing.T) {
 	present := costledger.Ledger{Present: true}
 	cases := []struct {
 		name       string
 		books      ledgerBooks
 		claude     float64
-		ledgerUSD  float64
 		loggedUSD  float64
 		logged     bool
 		wantMarker string
 	}{
 		{
 			name: "sink failed beats a gap", books: ledgerBooks{ledger: present, marker: claudelaunch.CostLedgerFailed},
-			claude: 10, ledgerUSD: 1, wantMarker: markerSinkFailed,
+			claude: 10, wantMarker: markerSinkFailed,
 		},
 		{
 			name:       "preempted beats an unreadable ledger",
@@ -169,15 +168,7 @@ func TestSpendMarkerPrecedence(t *testing.T) {
 			name: "unreadable beats a gap", books: ledgerBooks{err: errors.New("x"), marker: claudelaunch.CostLedgerOn},
 			claude: 10, wantMarker: markerLedgerUnreadable,
 		},
-		{
-			name: "a gap on a ledger", books: ledgerBooks{ledger: present, marker: claudelaunch.CostLedgerOn},
-			claude: 10, ledgerUSD: 9, wantMarker: markerLedgerGap,
-		},
-		{
-			name: "a ledger above claude code is a gap too", books: ledgerBooks{ledger: present},
-			claude: 9, ledgerUSD: 10, wantMarker: markerLedgerGap,
-		},
-		{name: "no claude code total, nothing to compare", books: ledgerBooks{ledger: present}, ledgerUSD: 9},
+		{name: "a ledger below claude code raises no marker", books: ledgerBooks{ledger: present}, claude: 10},
 		{
 			name: "no ledger, transcripts below", books: ledgerBooks{}, claude: 10, loggedUSD: 9, logged: true,
 			wantMarker: markerUnlogged,
@@ -186,7 +177,7 @@ func TestSpendMarkerPrecedence(t *testing.T) {
 		{name: "no ledger, transcripts above claude code", books: ledgerBooks{}, claude: 5, loggedUSD: 9, logged: true},
 	}
 	for _, tc := range cases {
-		if got := spendMarker(tc.books, tc.claude, tc.ledgerUSD, tc.loggedUSD, tc.logged); got != tc.wantMarker {
+		if got := spendMarker(tc.books, tc.claude, tc.loggedUSD, tc.logged); got != tc.wantMarker {
 			t.Errorf("%s: marker %q, want %q", tc.name, got, tc.wantMarker)
 		}
 	}

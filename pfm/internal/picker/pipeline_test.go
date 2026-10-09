@@ -954,3 +954,30 @@ func TestPickerWorkbenchRefreshCachesDeletedDirectory(t *testing.T) {
 		t.Fatalf("cached faults = %#v; want one naming the unreadable discovery directory", faults)
 	}
 }
+
+// An `@` path that is missing or runs through a file is no place; one that
+// could not be looked at is an error the picker names, never "no match".
+func TestIsDirectorySeparatesNoPlaceFromAFailedLook(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		path    string
+		want    bool
+		wantErr bool
+	}{
+		{"a directory", root, true, false},
+		{"a missing path", filepath.Join(root, "missing"), false, false},
+		{"a file", file, false, false},
+		{"a path through a file", filepath.Join(file, "child"), false, false},
+		{"a name too long to look at", filepath.Join(root, strings.Repeat("n", 300)), false, true},
+	} {
+		got, err := isDirectory(test.path)
+		if got != test.want || (err != nil) != test.wantErr {
+			t.Errorf("%s: isDirectory = %t, %v; want %t, error %t", test.name, got, err, test.want, test.wantErr)
+		}
+	}
+}

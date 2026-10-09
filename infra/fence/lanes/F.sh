@@ -49,7 +49,6 @@ lane_begin F
 
 # ── prelude: what this lane needs, made when it is missing, no-op otherwise ──
 lane_require_seat "$CONFIG"
-ACCOUNT_IDS="$(jq -r '.accounts[].id' "$CONFIG" 2>/dev/null | tr '\n' ' ')"
 # The seat's medal, from pfm's own resolved config (`config accounts=1:<dir>:🥇 (default),…`).
 MEDAL="$(pfm config show 2>/dev/null | sed -n 's/^config accounts=//p' | tr ',' '\n' |
   awk -F: -v s="$SEAT" '$1 == s { print $3 }' | awk '{ print $1 }')"
@@ -144,8 +143,6 @@ default_engine_word() {
 tui_has() { grep -qF -- "$1" <<<"$(tui_pane)"; }
 tui_pane_e() { tmux -S "$TUI_SOCK" capture-pane -e -p -t tui 2>&1; }
 tui_cmd() { tmux -S "$TUI_SOCK" display -p -t tui '#{pane_current_command}' 2>/dev/null; }
-tui_cache() { tui_pane | grep -oE '⚡ 1h|🪫 5m' | head -1; }
-tui_account() { tui_pane | sed -n 's/.*account \([0-9][0-9]*\) ·.*/\1/p' | head -1; }
 # tui_left — the picker has left the pane (exit or exec): 0 when the pane's
 # command is no longer pfm within <secs>.
 tui_left() {
@@ -672,8 +669,8 @@ if requires; then
     frame="$(tui_pane)"
     grep -qF '● ' <<<"$frame" || bad="$bad TUI frame shows no ● live row;"
     grep -qF '↻ ' <<<"$frame" || bad="$bad TUI frame shows no ↻ resume row (-a view);"
-    grep -Eq '✦ .*Claude.*Codex' <<<"$frame" ||
-      bad="$bad TUI frame shows no merged ✦ Claude/Codex New-chat row: $(one_line "$frame" | cut -c1-240);"
+    grep -Eq '✦ New chat → .*(Claude|Codex)' <<<"$frame" ||
+      bad="$bad TUI frame shows no merged ✦ New-chat row naming its place and engine: $(one_line "$frame" | cut -c1-240);"
     case "$version" in
       *dev*|*-*)
         grep -qF '⬆' <<<"$frame" && bad="$bad K40 a ⬆ ProfessorUpdate row on a non-release build ($version);"
@@ -730,7 +727,8 @@ if requires; then
     # T18: the query editor — type, backspace/⌃H, ⌃W, ⌃U.
     tui_send_text "$CC"
     tui_wait 10 "find › $CC" || bad="$bad T18 typing did not reach the query line: $(one_line "$(tui_pane | grep -F 'find ›')");"
-    tui_has "› ● $CC" || bad="$bad T18 the query '$CC' did not select the $CC row: $(one_line "$(tui_selected)");"
+    # A chat mid-turn pulses its dot between ● and ◉ (deckrow.go liveMarker).
+    tui_has "› ● $CC" || tui_has "› ◉ $CC" || bad="$bad T18 the query '$CC' did not select the $CC row: $(one_line "$(tui_selected)");"
     tui_send BSpace
     wait_for 10 "tui_has 'find › F_C' && ! tui_has 'find › $CC'" || bad="$bad T18 backspace did not delete one char: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
     tui_keys C-h
@@ -739,7 +737,7 @@ if requires; then
     tui_keys C-w
     tui_has 'find › F_x' && ! tui_has 'find › F_x y' || bad="$bad T18 ⌃W did not delete the last word (want 'F_x'): $(one_line "$(tui_pane | grep -F 'find ›')");"
     tui_send C-u
-    wait_for 10 "grep -Eq 'find › type project or name +[0-9]+/[0-9]+ visible' <<<\"\$(tui_pane)\"" || bad="$bad T18 ⌃U did not clear the query: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
+    wait_for 10 "grep -Eq 'find › type to find · @ to go +[0-9]+/[0-9]+ visible' <<<\"\$(tui_pane)\"" || bad="$bad T18 ⌃U did not clear the query: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
     # T11: left/right walk the carousel on the selected live row.
     tui_send_text "$CC"
     wait_for 10 "tui_has 'find › $CC' && tui_has '◖▶ open◗'" || bad="$bad T11 the selected row shows no ◖▶ open◗ carousel: $(one_line "$(tui_selected)");"
@@ -749,12 +747,20 @@ if requires; then
     tui_wait 10 '◖✖ kill◗' || bad="$bad T11 second right did not reach kill: $(one_line "$(tui_selected)");"
     tui_keys Left; tui_send Left
     tui_wait 10 '◖▶ open◗' || bad="$bad T11 left did not return the carousel to open: $(one_line "$(tui_selected)");"
-    # T13: ⌃E toggles the 1h cache from the Chats tab.
-    cache0="$(tui_cache)"
-    tui_send C-e
-    wait_for 10 "[ \"\$(tui_cache)\" != '$cache0' ]" || bad="$bad T13 ⌃E did not flip the header cache ('$cache0'): $LANE_WAIT_WHY;"
-    tui_send C-e
-    wait_for 10 "[ \"\$(tui_cache)\" = '$cache0' ]" || bad="$bad T13 a second ⌃E did not flip it back: $LANE_WAIT_WHY;"
+    # T13: ⏎ on the ✦ row opens the new-chat steps inside the row; esc steps
+    # back out of them and leaves the picker open.
+    # ⏎ is sent only once the ✦ row is selected: on a chat row it would leave
+    # the picker for that chat and every later key would miss.
+    tui_keys C-u
+    tui_keys Home
+    if wait_for 10 "grep -qF 'New chat →' <<<\"\$(tui_selected)\""; then
+      tui_send Enter
+      tui_wait 10 'new chat · step 1 of' || bad="$bad T13 ⏎ on the ✦ row opened no new-chat step: $(one_line "$(tui_pane | tail -2)");"
+      tui_send Escape
+      wait_for 10 "! tui_has 'new chat · step' && [ \"\$(tui_cmd)\" = pfm ]" || bad="$bad T13 esc did not close the steps with the picker still open: $(one_line "$(tui_pane | tail -2)") $LANE_WAIT_WHY;"
+    else
+      bad="$bad T13 home on the cleared list did not select the ✦ row: $(one_line "$(tui_selected)") $LANE_WAIT_WHY;"
+    fi
     # T12: ⌃X kills the selected row NOW — receipt on the status line, store row
     # written. On a LIVE row the picker also sends /exit and kills the pane
     # (internal/kill finisher), so the key is driven on the ended '$GRP' resume
@@ -871,11 +877,22 @@ if requires; then
     fi
     tui_close
   fi
-  # T10: esc and ⌃C cancel; a pending ⌃S account switch is NOT written on cancel.
+  # T10: esc and ⌃C cancel; a choice pending in the new-chat steps is NOT
+  # written on cancel (⌃C is driven mid-walk: ⏎ on the ✦ row, → to another chip).
   for key in Escape C-c; do
     if tui_open 100 30 ls; then
-      tui_type "$CC"
-      tui_keys C-s
+      if [ "$key" = C-c ]; then
+        tui_keys Home
+        if wait_for 10 "grep -qF 'New chat →' <<<\"\$(tui_selected)\""; then
+          tui_keys Enter
+          tui_wait 10 'new chat · step 1 of' || bad="$bad T10 ⏎ on the ✦ row opened no new-chat step: $(one_line "$(tui_pane | tail -2)");"
+          tui_keys Right
+        else
+          bad="$bad T10 home did not select the ✦ row: $(one_line "$(tui_selected)") $LANE_WAIT_WHY;"
+        fi
+      else
+        tui_type "$CC"
+      fi
       tui_keys "$key"
       tui_left 10 || bad="$bad T10 $key did not close the picker;"
     else
@@ -883,22 +900,7 @@ if requires; then
     fi
   done
   [ "$(pfm internal primary-get 2>/dev/null)" = "$primary_before" ] ||
-    bad="$bad T10/T14 a ⌃S cancelled with esc/⌃C was written (primary $primary_before → $(pfm internal primary-get 2>/dev/null));"
-  # T14: ⌃S cycles the selected row's account through the configured roster.
-  if tui_open 100 30 ls; then
-    tui_type "$CC"
-    acct0="$(tui_account)"
-    tui_send C-s
-    want="$(printf '%s\n' $ACCOUNT_IDS | awk -v cur="$acct0" 'NR == 1 { first = $1 } { if (hit) { print; printed = 1; exit } if ($1 == cur) hit = 1 } END { if (hit && !printed) print first }')"
-    wait_for 10 "[ \"\$(tui_account)\" = '$want' ]" ||
-      bad="$bad T14 ⌃S did not move the header account to $want: $LANE_WAIT_WHY;"
-    acct1="$(tui_account)"
-    [ -n "$acct0" ] && [ "$acct1" = "$want" ] || bad="$bad T14 ⌃S moved the header account $acct0 → $acct1, want $want (roster: $ACCOUNT_IDS);"
-    tui_keys Escape
-    tui_left 10
-  else
-    bad="$bad T14 $TUI_WHY;"
-  fi
+    bad="$bad T10 a new-chat choice cancelled with esc/⌃C was written (primary $primary_before → $(pfm internal primary-get 2>/dev/null));"
   # T16: enter on the open action attaches — the picker execs into a client of the chat's server.
   cc_sock_path="$(socket_path "$(live_field "$CC" 11)")"
   if tui_open 100 30 ls; then
@@ -961,7 +963,7 @@ if requires; then
   fi
   tui_close
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "picker entry, four tabs both ways, no fullscreen view, query editing, carousel, ⌃E, ⌃X (hidden — $GRP), cursor keys, Stats rows + sorts, Limits card for seat $SEAT + scroll, cosmos select/focus/classic/scrub/play/now, T23 $t23, esc/⌃C drop a pending ⌃S, ⌃S cycles $acct0→$acct1, enter attached a client, ⌃O $reboot_note"
+    pass "picker entry, four tabs both ways, no fullscreen view, query editing, carousel, ✦ new-chat steps open and close, ⌃X (hidden — $GRP), cursor keys, Stats rows + sorts, Limits card for seat $SEAT + scroll, cosmos select/focus/classic/scrub/play/now, T23 $t23, esc/⌃C drop a pending new-chat choice, enter attached a client, ⌃O $reboot_note"
   fi
 fi
 
@@ -986,14 +988,14 @@ if requires; then
       n_frame="$(grep -c '' <<<"$frame")"
       # T28: the STATIC lines of the pinned frame — the tabs line (up to the sky
       # widget) verbatim, both footer lines once their state words (the ⌃X verb,
-      # the cache the ⌃E key flips to, the armed ⏎ action) are folded to a name,
+      # the armed ⏎ action) are folded to a name,
       # since those follow the selected row and the live config, never the
       # fixture. The dynamic lines are held to the golden's shape: the masthead,
       # the Chats context line, and three counts that agree.
       g_tabs="$(golden_line "$golden" 2 | sed 's/tab\/shift+tab.*/tab\/shift+tab/')"
       l_tabs="$(printf '%s\n' "$frame" | sed -n 2p | sed 's/tab\/shift+tab.*/tab\/shift+tab/')"
       [ "$g_tabs" = "$l_tabs" ] || bad="$bad T28 tabs line differs: golden '$g_tabs' vs live '$l_tabs';"
-      footer_shape() { sed -E -e 's/⌃X +(kill|hide|unhide)/⌃X <verb>/' -e 's/⌃E +1h cache (on|off)/⌃E <cache>/' -e 's/⏎ +(open|upgrade|start|—)/⏎ <act>/'; }
+      footer_shape() { sed -E -e 's/⌃X +(kill|hide|unhide)/⌃X <verb>/' -e 's/⏎ +(open|upgrade|start|choose|next|—)/⏎ <act>/'; }
       for n in $((g_lines - 1)) "$g_lines"; do
         g_foot="$(golden_line "$golden" "$n" | footer_shape)"
         l_foot="$(printf '%s\n' "$frame" | sed -n "${n}p" | sed 's/ *$//' | footer_shape)"
@@ -1399,7 +1401,7 @@ if requires; then
   fi
 fi
 
-# ─── F.17 — naming precedence and the TUI 1h toggle ─────────────────────────
+# ─── F.17 — naming precedence ───────────────────────────────────────────────
 
 beat F.17-additional-k-coverage
 spends none
@@ -1415,25 +1417,8 @@ if requires; then
     resume_name="$(pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v id="$GRP_ID" 'NR > 1 && $2 == id { print $5; exit }')"
     [ "$resume_name" = "$GRP" ] || bad="$bad K10 the resumable row $GRP_ID is named '$resume_name', want the custom title '$GRP';"
   fi
-  # K27: ⌃E in the picker toggles the 1h cache mode the header shows.
-  if tui_open 100 30 ls; then
-    c0="$(tui_cache)"
-    tui_keys C-e
-    wait_for 10 "[ -n \"\$(tui_cache)\" ] && [ \"\$(tui_cache)\" != '$c0' ]" ||
-      bad="$bad K27 ⌃E did not toggle the header cache: $LANE_WAIT_WHY;"
-    c1="$(tui_cache)"
-    tui_keys C-e
-    wait_for 10 "[ \"\$(tui_cache)\" = '$c0' ]" ||
-      bad="$bad K27 ⌃E did not toggle the header cache back: $LANE_WAIT_WHY;"
-    c2="$(tui_cache)"
-    [ -n "$c0" ] && [ "$c0" != "$c1" ] && [ "$c2" = "$c0" ] || bad="$bad K27 ⌃E did not toggle the header cache ('$c0' → '$c1' → '$c2');"
-    tui_keys Escape
-  else
-    bad="$bad K27 $TUI_WHY;"
-  fi
-  tui_close
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "live row named $CC (indexed label), resumable row $GRP_ID named '$GRP' (custom title), ⌃E toggled $c0 → $c1 → $c2"
+    pass "live row named $CC (indexed label), resumable row $GRP_ID named '$GRP' (custom title)"
   fi
 fi
 

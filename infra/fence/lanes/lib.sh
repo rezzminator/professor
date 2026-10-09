@@ -822,7 +822,7 @@ assert_opencode_mcp_registered() {
 # directory) before calling any of these. E3 used to carry its own byte-
 # identical copy of this subset ("Same shape as F.sh's tui_* helpers... not
 # shared via lib.sh") — the jscpd clone the gate flagged; F.sh keeps the extra
-# readers (tui_pane_e, tui_cmd, tui_cache, tui_account, tui_left) it alone needs.
+# readers (tui_pane_e, tui_cmd, tui_left) it alone needs.
 TUI_WHY=""
 tui_close() { tmux -S "$TUI_SOCK" kill-server >/dev/null 2>&1; rm -f "$TUI_SOCK"; }
 tui_pane() { tmux -S "$TUI_SOCK" capture-pane -p -t tui 2>&1; }

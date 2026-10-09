@@ -2,14 +2,19 @@ package picker
 
 import (
 	"context"
+	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {
@@ -115,5 +120,110 @@ func TestConfiguredOpenCodeLimitIsUnsupportedNotAbsent(t *testing.T) {
 	limits, warnings := pfmstats.NewLimitsSampler([]pfmstats.LimitAccount{configured}).Sample(context.Background())
 	if len(limits) != 1 || limits[0].Absent || !strings.Contains(limits[0].Status, "no usage source registered") {
 		t.Fatalf("configured OpenCode limits=%#v warnings=%v, want visible unsupported status", limits, warnings)
+	}
+}
+
+// A launch is remembered only when a new chat was really chosen: a resume, a
+// reboot and a cancelled picker leave the memory as it was.
+func TestRememberLaunchRecordsOnlyANewChatLaunch(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		outcome ui.Outcome
+		want    fleetdb.LaunchMemory
+	}{
+		{
+			"a new Claude chat keeps engine, account and cache",
+			ui.Outcome{Kind: ui.OutcomeSelected, Row: compose.Row{Kind: compose.NewClaude}, PrimaryAccount: 2, Cache1H: false},
+			fleetdb.LaunchMemory{
+				Engine: string(pfmengine.Claude), Accounts: map[string]int{string(pfmengine.Claude): 2},
+				Cache1H: map[int]bool{2: false},
+			},
+		},
+		{
+			"a new Codex chat keeps engine and account, no cache",
+			ui.Outcome{Kind: ui.OutcomeSelected, Row: compose.Row{Kind: compose.NewCodex}, PrimaryAccount: 3, Cache1H: true},
+			fleetdb.LaunchMemory{Engine: string(pfmengine.Codex), Accounts: map[string]int{string(pfmengine.Codex): 3}},
+		},
+		{
+			"resuming a chat records nothing",
+			ui.Outcome{Kind: ui.OutcomeSelected, Row: compose.Row{Kind: compose.ResumeCodex}, PrimaryAccount: 3},
+			fleetdb.LaunchMemory{},
+		},
+		{
+			"a cancelled picker records nothing",
+			ui.Outcome{Kind: ui.OutcomeCancelled, Row: compose.Row{Kind: compose.NewClaude}, PrimaryAccount: 2},
+			fleetdb.LaunchMemory{},
+		},
+		{
+			"a reboot records nothing",
+			ui.Outcome{Kind: ui.OutcomeReboot, Row: compose.Row{Kind: compose.LiveClaude}, PrimaryAccount: 2},
+			fleetdb.LaunchMemory{},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			ctx := context.Background()
+			state := fleetdb.OpenSharedState(ctx, paths.Values{Home: home, StateDB: filepath.Join(home, "pfm.db")})
+			defer func() {
+				if err := state.Close(); err != nil {
+					t.Errorf("close state: %v", err)
+				}
+			}()
+			if err := rememberLaunch(ctx, state, test.outcome); err != nil {
+				t.Fatalf("rememberLaunch: %v", err)
+			}
+			got, err := state.LaunchMemory(ctx)
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("memory after %s = %+v, %v; want %+v", test.name, got, err, test.want)
+			}
+		})
+	}
+}
+
+// OpenRow execs tmux or zsh on a terminal and never returns, so a launch is
+// remembered before its open runs; an open that fails puts the memory back.
+func TestOpenAndRememberRecordsBeforeTheOpenThatMayNotReturn(t *testing.T) {
+	claude, codex := string(pfmengine.Claude), string(pfmengine.Codex)
+	on := true
+	previous := fleetdb.LaunchMemory{
+		Engine: claude, Accounts: map[string]int{claude: 2}, Cache1H: map[int]bool{2: true},
+	}
+	launched := fleetdb.LaunchMemory{
+		Engine: codex, Accounts: map[string]int{claude: 2, codex: 3}, Cache1H: map[int]bool{2: true},
+	}
+	outcome := ui.Outcome{Kind: ui.OutcomeSelected, Row: compose.Row{Kind: compose.NewCodex}, PrimaryAccount: 3}
+	for _, test := range []struct {
+		name  string
+		code  int
+		after fleetdb.LaunchMemory
+	}{
+		{"an open that execs finds the launch already remembered", 0, launched},
+		{"a failed open leaves the memory as it was", 1, previous},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			ctx := context.Background()
+			state := fleetdb.OpenSharedState(ctx, paths.Values{Home: home, StateDB: filepath.Join(home, "pfm.db")})
+			defer func() {
+				if err := state.Close(); err != nil {
+					t.Errorf("close state: %v", err)
+				}
+			}()
+			if err := state.RememberLaunch(ctx, claude, 2, &on, 1); err != nil {
+				t.Fatalf("seed memory: %v", err)
+			}
+			var during fleetdb.LaunchMemory
+			var duringErr error
+			code := openAndRemember(ctx, state, outcome, io.Discard, func() int {
+				during, duringErr = state.LaunchMemory(ctx)
+				return test.code
+			})
+			if code != test.code || duringErr != nil || !reflect.DeepEqual(during, launched) {
+				t.Fatalf("code %d; memory while opening = %+v, %v; want %+v", code, during, duringErr, launched)
+			}
+			if after, err := state.LaunchMemory(ctx); err != nil || !reflect.DeepEqual(after, test.after) {
+				t.Fatalf("memory after the open = %+v, %v; want %+v", after, err, test.after)
+			}
+		})
 	}
 }

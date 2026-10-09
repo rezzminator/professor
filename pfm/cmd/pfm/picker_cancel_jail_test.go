@@ -14,7 +14,7 @@ import (
 
 // TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch reproduces the
 // picker-cancel bug: Esc/⌃C must cancel the interactive picker without
-// applying a pending ⌃X kill or a pending ⌃S primary-account switch. It
+// applying a pending ⌃X kill or writing a primary account. It
 // drives the REAL Bubble Tea picker inside a scratch tmux pane — the same
 // subprocess-reexec technique TestJailedEvalAttachFromPlainAndNestedTmux uses
 // (attach_jail_test.go) — because the bug lives in the command loop wired
@@ -58,7 +58,7 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	// risks landing on a frame that has not drawn the row yet
 	// (attach_jail_test.go:proveAttach uses the same wait for the same reason).
 	waitForTmuxPaneText(t, socket, jail.env, "PICKERCANCEL", 5*time.Second)
-	for _, key := range []string{"C-x", "C-s", "Escape"} {
+	for _, key := range []string{"C-x", "Escape"} {
 		send := exec.Command("tmux", "-L", socket, "send-keys", "-t", "picker", key)
 		send.Env = jail.env
 		if output, err := send.CombinedOutput(); err != nil {
@@ -80,7 +80,7 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(jail.home, ".claude-primary")); !os.IsNotExist(err) {
 		t.Fatalf(
-			"Esc wrote ~/.claude-primary after a pending ⌃S switch: stat err = %v",
+			"Esc wrote ~/.claude-primary: stat err = %v",
 			err,
 		)
 	}

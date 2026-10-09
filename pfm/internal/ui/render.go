@@ -143,6 +143,9 @@ func (model Model) render() string {
 	query := model.renderQuery(width)
 	footer := model.renderFooter(width)
 	bodyHeight := maxInt(4, height-6)
+	if model.tab == TabChats && model.mergeNewChat {
+		bodyHeight = maxInt(4, height-7) // the place rail
+	}
 	// Only one of these ever reaches the frame; building renderListPanel
 	// unconditionally then discarding it on every Stats/Limits/Cosmos frame
 	// paid for a full fleet-row layout nobody saw (2026-09-08: the Limits

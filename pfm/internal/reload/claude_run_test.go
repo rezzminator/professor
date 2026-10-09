@@ -1,18 +1,23 @@
 package reload
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestClaudeRunCarriesTheChatLabel(t *testing.T) {
@@ -167,4 +172,111 @@ func TestReloadFailedClaimCleanupPreservesUntrackedChildren(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestRunTellsTheStarterWhenTheReloadedChatLosesTheFleetPrompt(t *testing.T) {
+	staged := func(t *testing.T, home string) {
+		t.Helper()
+		if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		promptPath, err := action.ProfessorPromptPath(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(promptPath, []byte("professor prompt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		name    string
+		policy  string
+		stage   bool
+		warning bool
+		// terminal: stdin and stderr are a terminal; wait: held for Enter before the respawn.
+		terminal, wait bool
+	}{
+		{"professor policy with no source clone", pfmconfig.SystemPromptProfessor, false, true, true, true},
+		{"professor policy with no source clone off a terminal", pfmconfig.SystemPromptProfessor, false, true, false, false},
+		{"professor policy with the composed prompt staged", pfmconfig.SystemPromptProfessor, true, false, true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(paths.EnvHome, t.TempDir())
+			t.Setenv(paths.EnvStateDB, filepath.Join(t.TempDir(), "pfm.db"))
+			home := t.TempDir()
+			if test.stage {
+				staged(t, home)
+			}
+			tmux := &fakeReloadTmux{}
+			var stderr bytes.Buffer
+			enter := &enterProbe{tmux: tmux, data: strings.NewReader("\n")}
+			t.Cleanup(launchnotice.Replace(enter, test.terminal))
+			_, err := Run(
+				context.Background(),
+				Request{
+					Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-reload", Pane: "%7",
+					SessionID: "11111111-1111-4111-8111-111111111111", CWD: "/jail/project",
+					Account: 2, AccountIDs: []int{2}, Home: home, Machine: reloadTestMachine(test.policy, home),
+				},
+				Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
+				tmux, nil, &stderr,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if enter.read != test.wait || enter.respawnedFirst {
+				t.Fatalf(
+					"read Enter = %t (after the respawn: %t), want %t before it",
+					enter.read,
+					enter.respawnedFirst,
+					test.wait,
+				)
+			}
+			const want = "Claude started WITHOUT its system prompt file"
+			if got := strings.Contains(stderr.String(), want); got != test.warning {
+				t.Fatalf("stderr warns=%t, want %t: %q", got, test.warning, stderr.String())
+			}
+			shown := false
+			for _, display := range tmux.displays {
+				shown = shown || strings.Contains(display, want)
+			}
+			if shown != test.warning {
+				t.Fatalf("pane display warns=%t, want %t: %q", shown, test.warning, tmux.displays)
+			}
+		})
+	}
+	// A Codex chat's prompt rides its own config, never the Claude prompt file:
+	// reloading one under the professor policy with no clone recorded is not a
+	// Claude launch that lost its prompt.
+	t.Run("codex reload under professor policy with no source clone", func(t *testing.T) {
+		home := t.TempDir()
+		var stderr bytes.Buffer
+		if warning := warnPromptMissing(Request{
+			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-reload", Pane: "%7",
+			SessionID: "11111111-1111-4111-8111-111111111111", Account: 2, Home: home,
+			Machine: reloadTestMachine(pfmconfig.SystemPromptProfessor, home),
+		}, &stderr); warning != "" {
+			t.Fatalf("codex reload warned %q", warning)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("codex reload told stderr=%q, want nothing", stderr.String())
+		}
+	})
+}
+
+// enterProbe is the stdin a reload reads its acknowledgement from; it notes
+// whether the pane had already been respawned when it was read.
+type enterProbe struct {
+	tmux           *fakeReloadTmux
+	data           *strings.Reader
+	read           bool
+	respawnedFirst bool
+}
+
+func (probe *enterProbe) Read(p []byte) (int, error) {
+	probe.read, probe.respawnedFirst = true, probe.tmux.respawn != ""
+	return probe.data.Read(p)
 }

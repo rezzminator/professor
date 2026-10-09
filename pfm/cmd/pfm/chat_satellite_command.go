@@ -510,6 +510,7 @@ func runChatBranch(
 		}
 		return 1
 	}
+	plan.Report(stderr, "pfm chat branch")
 	// If Codex declines its startup rename, retry through guarded /rename.
 	if engine == pfmengine.Codex && len(branchWarnings) != 0 {
 		var renameStderr bytes.Buffer

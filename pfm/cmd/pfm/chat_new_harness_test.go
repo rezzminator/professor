@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -87,6 +91,89 @@ func TestChatNewHarnessPromptRefusalsHappenBeforeSpawnAndWriteNothing(t *testing
 						t.Fatalf("refused launch left %s in %s", entry.Name(), directory)
 					}
 				}
+			}
+		})
+	}
+}
+
+// A professor-policy chat that starts without the fleet prompt says so on the
+// starter's stderr, with the cause, and still starts; with the prompt staged it
+// says nothing.
+func TestChatNewWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	for _, entry := range []struct {
+		name   string
+		stage  bool
+		binary string // claude.binary in the config; one not on disk refuses the spawn
+		want   string
+		// attach: --attach; terminal: stdin and stderr are a terminal; wait: held for Enter.
+		attach, terminal, wait bool
+	}{
+		{"clone not recorded", false, "", "no source repository recorded", false, true, false},
+		{"prompt staged", true, "", "", false, true, false},
+		{"clone not recorded, spawn refused", false, "/nonexistent/claude", "", false, true, false},
+		{"clone not recorded, attached on a terminal", false, "", "no source repository recorded", true, true, true},
+		{"clone not recorded, attached off a terminal", false, "", "no source repository recorded", true, false, false},
+		{"prompt staged, attached on a terminal", true, "", "", true, true, false},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			home := filepath.Join(jail.root, "home")
+			claude := `{"systemPrompt":"professor"}`
+			if entry.binary != "" {
+				claude = fmt.Sprintf(`{"systemPrompt":"professor","binary":%q}`, entry.binary)
+			}
+			if err := os.WriteFile(
+				filepath.Join(home, "pfm.config.json"),
+				[]byte(`{"version":2,"claude":`+claude+`}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if entry.stage {
+				composed := paths.ComposedHarnessPromptIn(jail.root, pfmengine.Claude)
+				if err := os.MkdirAll(filepath.Dir(composed), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(composed, []byte("fleet prompt\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := paths.WriteSourceRepoMarker(home, jail.root); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Remove(paths.SourceRepoPath(home)); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(spawn.TestFreshSocketEnv, "cc-warn")
+			var stdout, stderr bytes.Buffer
+			input := strings.NewReader("\n")
+			t.Cleanup(launchnotice.Replace(input, entry.terminal))
+			arguments := []string{
+				"chat", "new", "--engine", "cc", "--name", "warn",
+				"--cwd", filepath.Join(jail.root, "work"),
+			}
+			if entry.attach {
+				arguments = append(arguments, "--attach")
+			}
+			code := run(arguments, &stdout, &stderr)
+			if (code != 0) != (entry.binary != "") {
+				t.Fatalf("chat new exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if waited := input.Len() == 0; waited != entry.wait {
+				t.Fatalf("read Enter = %t, want %t: stderr %q", waited, entry.wait, stderr.String())
+			}
+			if entry.want == "" {
+				if strings.Contains(stderr.String(), "WITHOUT") {
+					t.Fatalf("chat new stderr=%q, want no prompt warning", stderr.String())
+				}
+				return
+			}
+			if strings.Count(stderr.String(), "pfm chat new: Claude started WITHOUT its system prompt file") != 1 ||
+				!strings.Contains(stderr.String(), entry.want) {
+				t.Fatalf("chat new stderr=%q, want the prompt warning once, naming %q", stderr.String(), entry.want)
 			}
 		})
 	}

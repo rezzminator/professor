@@ -396,8 +396,12 @@ func Run(
 			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
 		}
 	}
+	promptWarning := warnPromptMissing(request, stderr)
 	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
+	}
+	if promptWarning != "" {
+		announcePane(ctx, request, tmux, stderr, "pfm reload: "+promptWarning)
 	}
 	carryReminders(ctx, leftBehind, request.SessionID, stderr)
 	if err := writeHandoff(lock, handoffRecord{

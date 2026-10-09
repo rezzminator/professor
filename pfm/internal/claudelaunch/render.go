@@ -151,16 +151,9 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		}
 		// A role seat's file is its constitution whatever the mode; the
 		// composed prompt stands in for it only under professor.
-		prompt := request.PromptFile
-		if prompt == "" && !argsPersonaFlag(request.Args, flagPromptFile) &&
-			prefs.SystemPrompt == pfmconfig.SystemPromptProfessor {
-			// A missing marker or composed file omits the flag by contract.
-			prompt, _ = PromptFile(request.Home)
-		}
-		if prompt != "" && !argsPersonaFlag(request.Args, flagPromptFile) {
-			if info, err := os.Stat(prompt); err == nil && !info.IsDir() {
-				result.Argv = append(result.Argv, flagPromptFile, prompt)
-			}
+		// A file it cannot carry omits the flag; PromptWarning says why.
+		if prompt, _ := wantedPromptFile(request, prefs); prompt != "" {
+			result.Argv = append(result.Argv, flagPromptFile, prompt)
 		}
 		if prefs.PermissionMode == pfmconfig.PermissionBypass && request.Purpose != PurposeLauncher {
 			result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
@@ -309,6 +302,55 @@ func mcpConfig(home string, machine pfmconfig.Config) map[string]any {
 		"args": []string{knobMCP, "serve", "--stdio"},
 	}
 	return servers
+}
+
+// wantedPromptFile is the system prompt file a launch should carry and the
+// reason it cannot: path is the file when it exists, why is set when a launch
+// that should carry a file has none. A caller that states --system-prompt-file
+// itself, a query, and a mode that asks for no composed prompt want nothing.
+func wantedPromptFile(request Request, prefs pfmconfig.ClaudePrefs) (path, why string) {
+	if request.Purpose == PurposeQuery || argsPersonaFlag(request.Args, flagPromptFile) {
+		return "", ""
+	}
+	path = request.PromptFile
+	if path == "" {
+		if prefs.SystemPrompt != pfmconfig.SystemPromptProfessor {
+			return "", ""
+		}
+		var err error
+		if path, err = PromptFile(request.Home); err != nil {
+			return "", fmt.Sprintf("the composed fleet prompt cannot be located: %v", err)
+		}
+	}
+	info, err := os.Stat(path)
+	switch {
+	case err != nil:
+		return "", fmt.Sprintf("the system prompt file %s cannot be read: %v", path, err)
+	case info.IsDir():
+		return "", fmt.Sprintf("the system prompt file %s is a directory", path)
+	}
+	return path, ""
+}
+
+// lostPromptWarning is the verdict for prefs already resolved to the account.
+//
+// A caller that states --system-prompt has replaced the prompt on purpose, so
+// it is never told it lost the file; the argv still carries whatever Render
+// places by wantedPromptFile, since prompt precedence is not decided here.
+func lostPromptWarning(request Request, prefs pfmconfig.ClaudePrefs) string {
+	_, why := wantedPromptFile(request, prefs)
+	if why == "" || argsPersonaFlag(request.Args, flagSystemPrompt) {
+		return ""
+	}
+	return "Claude started WITHOUT its system prompt file: " + why + " — fix the cause, then reload the chat"
+}
+
+// PromptWarning is the one verdict on a launch that should carry a system
+// prompt file and does not, empty when it carries one or wants none. It judges
+// with wantedPromptFile, the rule Render places the flag by, so a surface that
+// starts the chat tells the starter exactly when the flag was dropped.
+func PromptWarning(request Request, machine pfmconfig.Config) string {
+	return lostPromptWarning(request, machine.EffectiveClaude(request.Account))
 }
 
 func PromptFile(home string) (string, error) {

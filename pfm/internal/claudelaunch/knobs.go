@@ -75,6 +75,7 @@ const (
 	flagName                       = "--name"
 	flagNameShort                  = "-n"
 	flagPromptFile                 = "--system-prompt-file"
+	flagSystemPrompt               = "--system-prompt"
 	flagForkSession                = "--fork-session"
 	flagAllowBypass                = "--allow-dangerously-skip-permissions"
 	flagBypass                     = "--dangerously-skip-permissions"

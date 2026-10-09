@@ -1,0 +1,10 @@
+{
+ "args": [
+  "show",
+  "01a0eee7",
+  "--ignore-case",
+  "--grep",
+  "FAIL E1"
+ ],
+ "dirs": []
+}

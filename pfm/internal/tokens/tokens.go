@@ -51,7 +51,7 @@ type Options struct {
 	Env            paths.Env
 	Location       *time.Location
 	ClaudeRoots    []string
-	CodexHome      string
+	CodexHomes     []string
 	Served         modelcost.Options
 }
 
@@ -107,7 +107,7 @@ type auditor struct {
 	hours        float64
 	timelineMode bool
 	claudeRoots  []string
-	codexHome    string
+	codexHomes   []string
 	prices       *priceBook
 	scan         *scanState
 	global       *globals
@@ -140,13 +140,13 @@ func newAuditor(opts Options, parsed flags, host string) *auditor {
 	a := &auditor{
 		opts: parsed, stdout: opts.Stdout, stderr: opts.Stderr, loc: opts.Location, host: host, now: now,
 		since: now - float64(parsed.hours*3600e3), hours: parsed.hours, timelineMode: len(parsed.timeline) != 0,
-		claudeRoots: opts.ClaudeRoots, codexHome: opts.CodexHome, scan: newScanState(), global: newGlobals(),
+		claudeRoots: opts.ClaudeRoots, codexHomes: opts.CodexHomes, scan: newScanState(), global: newGlobals(),
 	}
 	if a.loc == nil {
 		a.loc = time.Local
 	}
 	if parsed.codexHome != "" {
-		a.codexHome = parsed.codexHome
+		a.codexHomes = []string{parsed.codexHome}
 	}
 	if a.timelineMode {
 		a.since = 0
@@ -202,7 +202,7 @@ func (a *auditor) print(line string) { fmt.Fprintln(a.stdout, line) }
 func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	return Audit(context.Background(), Options{
 		Args: args, Stdout: stdout, Stderr: stderr, Clock: clock.Real, Env: paths.OSEnv{}, Location: time.Local,
-		ClaudeRoots: runtime.Paths.Roots[pfmengine.Claude], CodexHome: runtime.Paths.FirstRoot(pfmengine.Codex),
+		ClaudeRoots: runtime.Paths.Roots[pfmengine.Claude], CodexHomes: runtime.Paths.Roots[pfmengine.Codex],
 		Served: modelcost.MachineOptions(runtime),
 	})
 }

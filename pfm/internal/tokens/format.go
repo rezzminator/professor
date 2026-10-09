@@ -9,6 +9,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/rezzminator/professor/pfm/internal/jsvalue"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // The report's text measures and cuts strings in UTF-16 code units, as the
@@ -223,51 +224,11 @@ func isJSSpace(r rune) bool {
 	return r >= 0x2000 && r <= 0x200a
 }
 
-// isoDate is the ISO date-time grammar Date.parse reads, plus the space
-// separator V8 also accepts.
-var isoDate = regexp.MustCompile(`^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?` +
-	`(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$`)
-
-// dateParse is Date.parse in milliseconds: a Z or offset reads as given, a
-// date-time without one in loc, a bare date as UTC; a day past the month's
-// end rolls over as V8 rolls it. ok is false for any other text.
+// dateParse is Date.parse in milliseconds, over the one timestamp parser.
 func dateParse(text string, loc *time.Location) (float64, bool) {
-	match := isoDate.FindStringSubmatch(text)
-	if match == nil {
+	at, ok := transcript.ParseTimestamp(text, loc)
+	if !ok {
 		return math.NaN(), false
 	}
-	field := func(index, fallback int) int {
-		if match[index] == "" {
-			return fallback
-		}
-		value, _ := strconv.Atoi(match[index])
-		return value
-	}
-	year, month, day := field(1, 0), field(2, 1), field(3, 1)
-	hour, minute, second := field(4, 0), field(5, 0), field(6, 0)
-	millis := 0
-	if fraction := match[7]; fraction != "" {
-		millis, _ = strconv.Atoi((fraction + "00")[:3])
-	}
-	if month < 1 || month > 12 || day < 1 || day > 31 || minute > 59 || second > 59 ||
-		hour > 24 || (hour == 24 && minute+second+millis > 0) {
-		return math.NaN(), false
-	}
-	zone := time.UTC
-	switch offset := match[8]; {
-	case offset == "Z":
-	case offset != "":
-		digits := strings.ReplaceAll(offset[1:], ":", "")
-		hours, _ := strconv.Atoi(digits[:2])
-		minutes, _ := strconv.Atoi(digits[2:])
-		seconds := (hours*60 + minutes) * 60
-		if offset[0] == '-' {
-			seconds = -seconds
-		}
-		zone = time.FixedZone("", seconds)
-	case match[4] != "":
-		zone = loc
-	}
-	at := time.Date(year, time.Month(month), day, hour, minute, second, millis*int(time.Millisecond), zone)
 	return float64(at.UnixMilli()), true
 }

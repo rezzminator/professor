@@ -1,0 +1,2 @@
+{"type": "user", "sessionId": "bbbbbbbb-1111-2222-3333-444444444444", "cwd": "/work/repo", "timestamp": "2026-09-29T20:00:00.000Z", "message": {"role": "user", "content": "Open the audit desk."}}
+{"type": "agent-name", "agentName": "Night Shift", "sessionId": "bbbbbbbb-1111-2222-3333-444444444444"}

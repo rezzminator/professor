@@ -1,0 +1,9 @@
+{
+ "args": [
+  "counts",
+  "{CLAUDE}",
+  "--lines",
+  "4-5"
+ ],
+ "dirs": []
+}

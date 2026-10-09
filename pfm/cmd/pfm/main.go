@@ -27,6 +27,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/tokens"
+	"github.com/rezzminator/professor/pfm/internal/transcript/digest"
 	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
@@ -49,6 +50,7 @@ const (
 	checkAction       = "check"
 	statuslineCommand = "statusline"
 	staleCommand      = "stale"
+	transcriptCommand = "transcript"
 )
 
 var version = config.DevelopmentVersion
@@ -60,7 +62,7 @@ var topLevelSubcommands = []string{
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
-	"model-cost", "tokens",
+	"model-cost", "tokens", transcriptCommand,
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
@@ -145,6 +147,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return modelcostcmd.ModelCost(args[1:], stdout, stderr, runtime)
 	case "tokens":
 		return tokens.Main(args[1:], stdout, stderr, runtime)
+	case "transcript":
+		return digest.Invoke(context.Background(), args[1:], stdout, stderr, digest.EnvOf(runtime.Paths))
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -219,6 +223,7 @@ func printUsage(w io.Writer) {
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
 		"  model-cost the model price table, refreshed daily: MODEL_ID --all --check --json --force",
 		"  tokens    audit agent transcripts: where did the tokens go (--codex, --flight DIR, --timeline FILE)",
+		"  transcript digest one Claude or Codex transcript: show, counts, types, locate, agents",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
 		"  statusline render the native Claude status line",

@@ -1,0 +1,4 @@
+RECORDS 13 in {HOME}/.claude/projects/-work-repo/11111111-2222-3333-4444-555555555555/subagents/agent-a0123456789abcdef.jsonl (claude)
+rendered 9: user 4 · assistant 4 · attachment.queued_command 1
+header 0: none
+skipped 4: attachment.total_tokens_reminder 1 · assistant.thinking 1 · weird_future_type 1 · unparseable line 1

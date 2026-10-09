@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
+	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -577,19 +578,15 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if entry.Type != entryAssistant && entry.Type != entryUser {
 		return
 	}
-	var blocks []struct {
-		Type    string `json:"type"`
-		ID      string `json:"id"`
-		IsError bool   `json:"is_error"`
-	}
-	if json.Unmarshal(entry.Message.Content, &blocks) == nil {
-		for _, block := range blocks {
-			switch {
-			case entry.Type == entryAssistant && block.Type == blockToolUse && block.ID != "":
-				seen[block.ID] = struct{}{}
-			case entry.Type == entryUser && block.Type == "tool_result" && block.IsError:
-				activity.errors++
-			}
+	blocks, _ := transcript.DecodeContent(entry.Message.Content)
+	for index := range blocks {
+		block := &blocks[index]
+		id, _ := pyvalue.String(block.ID)
+		switch {
+		case entry.Type == entryAssistant && block.Kind() == blockToolUse && id != "":
+			seen[id] = struct{}{}
+		case entry.Type == entryUser && block.Kind() == "tool_result" && string(block.IsError) == "true":
+			activity.errors++
 		}
 	}
 	if entry.Type != entryAssistant {

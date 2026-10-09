@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -128,5 +129,31 @@ func TestCollectCountsMalformedUndatedAndSyntheticLines(t *testing.T) {
 	if c.order != 1 || c.usage["message:m4"].usage.Output != 12 || c.title != "demo title" || c.cwd != "/w/demo" {
 		t.Errorf("calls %d, m4 output %d, title %q, cwd %q; want one call whose last line counts",
 			c.order, c.usage["message:m4"].usage.Output, c.title, c.cwd)
+	}
+}
+
+// TestClaudeContentDecodesEachBlockOnItsOwn: one odd element of a content list
+// never hides its siblings (INTENDED: the list used to fail whole and count
+// as its JSON, where the Node engine read each block by its type).
+func TestClaudeContentDecodesEachBlockOnItsOwn(t *testing.T) {
+	total, ok := blockChars(json.RawMessage(`[{"type":"text","text":"ab"},7]`))
+	if !ok || total != 3 {
+		t.Fatalf("blockChars = %v, %t; want 3 (the text's 2 and the number's JSON 1), true", total, ok)
+	}
+}
+
+// TestClaudeTitleIsTheSharedTitleRule: tokens names a transcript by
+// transcript.TitleOf, the last title record of either kind (INTENDED: an
+// agent-name used to lose to any earlier custom-title).
+func TestClaudeTitleIsTheSharedTitleRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "titled.jsonl")
+	content := `{"type":"custom-title","customTitle":"Desk"}` + "\n" + `{"type":"agent-name","agentName":"Agent"}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &auditor{scan: newScanState(), loc: testZone}
+	c, err := a.collect(path, map[string]string{})
+	if err != nil || c.title != "Agent" {
+		t.Fatalf("collect title = %+v, %v; want Agent", c, err)
 	}
 }

@@ -102,73 +102,26 @@ var bands = [...]struct {
 // timelineBig is the tool-result size, in characters, --timeline counts as big.
 const timelineBig = 20 * 1024
 
-// claudeLine is one transcript record. Every field but type is kept raw: a
-// record's fields vary by type, and a field of an unexpected shape must read
-// as absent, never fail the line.
-type claudeLine struct {
-	Type             string          `json:"type"`
-	Subtype          json.RawMessage `json:"subtype"`
-	Timestamp        json.RawMessage `json:"timestamp"`
-	CWD              json.RawMessage `json:"cwd"`
-	CustomTitle      json.RawMessage `json:"customTitle"`
-	AgentName        json.RawMessage `json:"agentName"`
-	AITitle          json.RawMessage `json:"aiTitle"`
-	TotalCostUSD     json.RawMessage `json:"totalCostUSD"`
-	Message          json.RawMessage `json:"message"`
-	RequestID        json.RawMessage `json:"requestId"`
-	UUID             json.RawMessage `json:"uuid"`
-	SessionID        json.RawMessage `json:"sessionId"`
-	NamedSession     json.RawMessage `json:"session_id"`
-	ForkedFrom       json.RawMessage `json:"forkedFrom"`
-	Effort           json.RawMessage `json:"effort"`
-	PerTurnEffort    json.RawMessage `json:"perTurnEffort"`
-	Origin           json.RawMessage `json:"origin"`
-	IsCompactSummary json.RawMessage `json:"isCompactSummary"`
-	IsMeta           json.RawMessage `json:"isMeta"`
-	Attachment       json.RawMessage `json:"attachment"`
-}
-
-type claudeMessage struct {
-	ID      json.RawMessage     `json:"id"`
-	Model   json.RawMessage     `json:"model"`
-	Usage   *pricing.UsageBlock `json:"usage"`
-	Content json.RawMessage     `json:"content"`
-}
-
-type contentBlock struct {
-	Type      string          `json:"type"`
-	ID        json.RawMessage `json:"id"`
-	Name      json.RawMessage `json:"name"`
-	Input     json.RawMessage `json:"input"`
-	ToolUseID json.RawMessage `json:"tool_use_id"`
-	Content   json.RawMessage `json:"content"`
-	IsError   json.RawMessage `json:"is_error"`
-	Text      json.RawMessage `json:"text"`
-}
-
-// message decodes the record's message object; nil when it is none.
-func (line *claudeLine) message() *claudeMessage {
-	var message claudeMessage
-	if len(line.Message) == 0 || line.Message[0] != '{' || json.Unmarshal(line.Message, &message) != nil {
-		return nil
+// claudeMessage is the record's message with its usage decoded: nil, nil
+// when the record carries no message object or its usage is malformed — the
+// ported reader skips such a message whole, content included.
+func claudeMessage(line *transcript.ClaudeRecord) (*transcript.ClaudeMessage, *pricing.UsageBlock) {
+	message := line.DecodeMessage()
+	if message == nil {
+		return nil, nil
 	}
-	return &message
+	usage, err := message.UsageBlock()
+	if err != nil {
+		return nil, nil
+	}
+	return message, usage
 }
 
 // callKey is the record's response key: one API response is one call however
 // many content-block lines repeat its usage.
-func (line *claudeLine) callKey(message *claudeMessage, file string, number int) string {
+func callKey(line *transcript.ClaudeRecord, message *transcript.ClaudeMessage, file string, number int) string {
 	return transcript.ResponseKey(jsString(message.ID), jsString(line.RequestID), jsString(line.UUID),
 		file+":"+strconv.Itoa(number))
-}
-
-// blocks decodes a content array; nil for a string or any other form.
-func blocks(raw json.RawMessage) ([]contentBlock, bool) {
-	var list []contentBlock
-	if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &list) != nil {
-		return nil, false
-	}
-	return list, true
 }
 
 // jsString is raw's string value, "" for any other form.
@@ -273,28 +226,22 @@ func resultChars(raw json.RawMessage) float64 {
 }
 
 // blockChars is resultChars of a content-block list, each item decoded once;
-// ok is false when raw is no list of objects.
+// ok is false when raw is no list.
 func blockChars(raw json.RawMessage) (float64, bool) {
-	var items []json.RawMessage
-	if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &items) != nil {
+	list, isList := transcript.DecodeContent(raw)
+	if !isList {
 		return 0, false
 	}
 	total := 0.0
-	for _, item := range items {
-		var block struct {
-			Type string          `json:"type"`
-			Text json.RawMessage `json:"text"`
-		}
-		if json.Unmarshal(item, &block) != nil {
-			return 0, false
-		}
-		switch block.Type {
+	for k := range list {
+		block := &list[k]
+		switch block.Kind() {
 		case blockText:
 			total += float64(utf16Len(jsString(block.Text)))
 		case "image":
 			total += 6000
 		default:
-			total += stringifiedLength(item)
+			total += stringifiedLength(block.Raw)
 		}
 	}
 	return total, true
@@ -450,8 +397,9 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 	slots := map[string]*timelineSlot{}
 	err := eachLine(file, func(raw []byte) {
 		c.lines++
-		var line claudeLine
-		if json.Unmarshal(raw, &line) != nil {
+		line, decoded := transcript.DecodeClaudeRecord(raw)
+		kind, typed := line.Kind()
+		if !decoded || !typed {
 			a.scan.badLines++
 			c.bad++
 			return
@@ -466,15 +414,10 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 		if c.cwd == "" && truthy(line.CWD) {
 			c.cwd = keyString(line.CWD)
 		}
-		switch line.Type {
-		case "custom-title":
-			if truthy(line.CustomTitle) {
-				c.title = keyString(line.CustomTitle)
-			}
-			return
-		case "agent-name":
-			if c.title == "" {
-				c.title = firstOf(line.AgentName)
+		switch kind {
+		case "custom-title", "agent-name":
+			if title, named := line.Title(); named {
+				c.title = title
 			}
 			return
 		case "ai-title":
@@ -494,13 +437,13 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 				return
 			}
 		}
-		message := line.message()
+		message, usage := claudeMessage(&line)
 		switch {
-		case line.Type == "assistant" && message != nil && message.Usage != nil:
-			a.collectCall(c, &line, message, file, ts, toolUses, slots, owners)
-		case line.Type == "user":
+		case kind == "assistant" && usage != nil:
+			a.collectCall(c, &line, message, usage, file, ts, toolUses, slots, owners)
+		case kind == "user":
 			a.collectUser(c, &line, message, ts, toolUses, slots)
-		case line.Type == "attachment" && jsString(attachmentType(line.Attachment)) != "prompt_snapshot":
+		case kind == "attachment" && jsString(attachmentType(line.Attachment)) != "prompt_snapshot":
 			att := firstOf(attachmentType(line.Attachment))
 			if att == "" {
 				att = "?"
@@ -532,10 +475,10 @@ func attachmentType(attachment json.RawMessage) json.RawMessage {
 }
 
 func (a *auditor) collectCall(
-	c *collected, line *claudeLine, message *claudeMessage, file string, ts float64,
-	toolUses map[string]toolUse, slots map[string]*timelineSlot, owners map[string]string,
+	c *collected, line *transcript.ClaudeRecord, message *transcript.ClaudeMessage, block *pricing.UsageBlock,
+	file string, ts float64, toolUses map[string]toolUse, slots map[string]*timelineSlot, owners map[string]string,
 ) {
-	usage, split := message.Usage.Billed()
+	usage, split := block.Billed()
 	model := jsString(message.Model)
 	if model == "<synthetic>" || usage.Input+usage.Output+usage.CacheRead+usage.Write5m+usage.Write1h == 0 {
 		a.scan.syntheticCalls++
@@ -548,7 +491,7 @@ func (a *auditor) collectCall(
 	if !truthy(message.ID) && !truthy(line.RequestID) {
 		a.scan.identityUnknownRecords++
 	}
-	id := line.callKey(message, file, c.lines)
+	id := callKey(line, message, file, c.lines)
 	var forked struct {
 		SessionID json.RawMessage `json:"sessionId"`
 	}
@@ -571,23 +514,23 @@ func (a *auditor) collectCall(
 		effort = keyString(value)
 	}
 	c.usage[id] = &callUsage{
-		usage: usage, split: split, thinking: message.Usage.Thinking(), model: model,
+		usage: usage, split: split, thinking: block.Thinking(), model: model,
 		noModel: len(message.Model) == 0 || string(message.Model) == jsNull, ts: ts, effort: effort, copied: copied,
 	}
-	list, _ := blocks(message.Content)
+	list, _ := transcript.DecodeContent(message.Content)
 	for k := range list {
-		block := &list[k]
-		if block.Type != "tool_use" {
+		use := &list[k]
+		if use.Kind() != "tool_use" {
 			continue
 		}
-		input := block.Input
+		input := use.Input
 		if !truthy(input) {
 			input = json.RawMessage(`{}`)
 		}
-		blockID := keyString(block.ID)
-		toolUses[blockID] = toolUse{name: keyString(block.Name), input: input, ts: ts}
+		blockID := keyString(use.ID)
+		toolUses[blockID] = toolUse{name: keyString(use.Name), input: input, ts: ts}
 		if c.timelineRun {
-			slot := &timelineSlot{name: keyString(block.Name), target: toolTarget(input)}
+			slot := &timelineSlot{name: keyString(use.Name), target: toolTarget(input)}
 			slots[blockID] = slot
 			c.issued[id] = append(c.issued[id], slot)
 		}
@@ -595,7 +538,7 @@ func (a *auditor) collectCall(
 }
 
 func (a *auditor) collectUser(
-	c *collected, line *claudeLine, message *claudeMessage, ts float64,
+	c *collected, line *transcript.ClaudeRecord, message *transcript.ClaudeMessage, ts float64,
 	toolUses map[string]toolUse, slots map[string]*timelineSlot,
 ) {
 	var content json.RawMessage
@@ -618,7 +561,7 @@ func (a *auditor) collectUser(
 	case truthy(line.IsMeta):
 		textCat = catHarness
 	}
-	list, isList := blocks(content)
+	list, isList := transcript.DecodeContent(content)
 	if c.brief == nil && c.isSub && !notification && !truthy(line.IsMeta) {
 		if isString(content) {
 			brief := jsString(content)
@@ -627,7 +570,7 @@ func (a *auditor) collectUser(
 			var texts []string
 			for k := range list {
 				block := &list[k]
-				if block.Type == blockText {
+				if block.Kind() == blockText {
 					texts = append(texts, jsString(block.Text))
 				}
 			}
@@ -646,9 +589,9 @@ func (a *auditor) collectUser(
 	}
 	for k := range list {
 		block := &list[k]
-		switch block.Type {
+		switch block.Kind() {
 		case "tool_result":
-			c.seq = append(c.seq, a.toolResult(c, *block, ts, toolUses))
+			c.seq = append(c.seq, a.toolResult(c, block, ts, toolUses))
 			if c.timelineRun {
 				result := c.seq[len(c.seq)-1]
 				if result.chars > timelineBig {
@@ -669,7 +612,9 @@ func (a *auditor) collectUser(
 	}
 }
 
-func (a *auditor) toolResult(c *collected, block contentBlock, ts float64, toolUses map[string]toolUse) event {
+func (a *auditor) toolResult(
+	c *collected, block *transcript.ContentBlock, ts float64, toolUses map[string]toolUse,
+) event {
 	use, known := toolUses[keyString(block.ToolUseID)]
 	name := "?"
 	if known && use.name != "" {

@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--first",
+  "-1"
+ ],
+ "dirs": []
+}

@@ -1,0 +1,9 @@
+{
+ "args": [
+  "types",
+  "{CLAUDE}",
+  "--tool",
+  "Bash"
+ ],
+ "dirs": []
+}

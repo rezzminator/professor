@@ -3,6 +3,7 @@ package jsvalue
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +61,19 @@ func TestStringifyRawRewritesParsedJSON(t *testing.T) {
 	}
 	if want := `{"1":null,"z":[1,100,"A/"],"t":true}`; got != want {
 		t.Fatalf("StringifyRaw = %s, want %s", got, want)
+	}
+}
+
+func TestInsertionMembersKeepWrittenOrder(t *testing.T) {
+	members, ok := InsertionMembers(json.RawMessage(`{"b":1,"10":2,"a":3,"b":5}`))
+	if !ok {
+		t.Fatal("InsertionMembers refused an object")
+	}
+	var keys []string
+	for _, member := range members {
+		keys = append(keys, member.Key+"="+string(member.Value))
+	}
+	if got := strings.Join(keys, ","); got != "b=5,10=2,a=3" {
+		t.Errorf("InsertionMembers = %s, want b=5,10=2,a=3", got)
 	}
 }

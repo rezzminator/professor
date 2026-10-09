@@ -27,23 +27,47 @@ var (
 	turnContextMark = []byte(`"type":"turn_context"`)
 )
 
-// codexLine is one rollout record, decoded loosely: every member a reader
-// tests is kept raw.
+// codexLine is one rollout line as the reader requires it: its type, its
+// stamp, its payload (never nil) with the payload's type, and the decoded
+// token info.
 type codexLine struct {
-	Type      string          `json:"type"`
-	Timestamp json.RawMessage `json:"timestamp"`
-	Payload   *codexPayload   `json:"payload"`
+	kind, payloadKind string
+	timestamp         json.RawMessage
+	payload           *transcript.CodexPayload
+	info              *transcript.CodexTokenInfo
 }
 
-type codexPayload struct {
-	Type      string                     `json:"type"`
-	Model     json.RawMessage            `json:"model"`
-	Info      *transcript.CodexTokenInfo `json:"info"`
-	Name      json.RawMessage            `json:"name"`
-	CallID    json.RawMessage            `json:"call_id"`
-	Input     json.RawMessage            `json:"input"`
-	Arguments json.RawMessage            `json:"arguments"`
-	Output    json.RawMessage            `json:"output"`
+// codexRecord decodes one rollout line; ok is false for a line that is no
+// object or whose type, payload, payload type or token info is of another
+// form — a malformed line to every count.
+func codexRecord(raw []byte) (line codexLine, ok bool) {
+	record, decoded := transcript.DecodeCodexRecord(raw)
+	if !decoded {
+		return codexLine{}, false
+	}
+	kind, typed := record.Kind()
+	payload, isObject := record.DecodePayload()
+	if !typed || !isObject {
+		return codexLine{}, false
+	}
+	if payload == nil {
+		payload = &transcript.CodexPayload{}
+	}
+	payloadKind, typed := payload.Kind()
+	if !typed {
+		return codexLine{}, false
+	}
+	info, err := payload.TokenInfo()
+	if err != nil {
+		return codexLine{}, false
+	}
+	return codexLine{
+		kind:        kind,
+		payloadKind: payloadKind,
+		timestamp:   record.Timestamp,
+		payload:     payload,
+		info:        info,
+	}, true
 }
 
 // codexUsage is a thread's usage: each segment's peak, summed.
@@ -141,25 +165,24 @@ func (a *auditor) codexUsageFast(file string) fastUsage {
 		if !complete || (!bytes.Contains(line, tokenCountMark) && !bytes.Contains(line, turnContextMark)) {
 			return
 		}
-		var record codexLine
-		if json.Unmarshal(line, &record) != nil {
+		record, ok := codexRecord(line)
+		if !ok {
 			a.scan.badLines++
 			return
 		}
-		payload := record.Payload
-		if record.Type == "turn_context" {
-			if payload != nil && truthy(payload.Model) {
-				result.models.add(keyString(payload.Model))
+		if record.kind == "turn_context" {
+			if truthy(record.payload.Model) {
+				result.models.add(keyString(record.payload.Model))
 			}
 			return
 		}
-		if payload == nil || payload.Type != "token_count" || payload.Info == nil {
+		if record.payloadKind != "token_count" || record.info == nil {
 			return
 		}
-		if lastUsage := payload.Info.LastTokenUsage; lastUsage != nil {
+		if lastUsage := record.info.LastTokenUsage; lastUsage != nil {
 			result.contextPeak = max(result.contextPeak, lastUsage.InputTokens)
 		}
-		if total := payload.Info.TotalTokenUsage; total == nil || !peaks.add(*total) {
+		if total := record.info.TotalTokenUsage; total == nil || !peaks.add(*total) {
 			return
 		}
 		result.events++
@@ -209,16 +232,25 @@ func (a *auditor) codexMeta(file string) *codexmeta.Fields {
 	return nil
 }
 
-// rollouts lists the Codex home's sessions/ and archived_sessions/ rollouts
-// (the home itself also holds rollout-backup-* copies that would
-// double-count a thread); every place the walk failed to look is a read error.
+// rollouts lists each Codex home's sessions/ and archived_sessions/ rollouts
+// (a home itself also holds rollout-backup-* copies that would double-count a
+// thread); every place the walk failed to look is a read error.
 func (a *auditor) rollouts(ctx context.Context) []codexmeta.Rollout {
-	if a.codexHome == "" {
+	if len(a.codexHomes) == 0 {
 		// an empty home would walk ./sessions of wherever the command runs
 		a.scan.readErrors = append(a.scan.readErrors, "no Codex home is configured; pass --codex-root DIR")
 		return nil
 	}
-	found, errs := codexmeta.WalkRollouts(ctx, a.codexHome, codexmeta.SessionsDir, codexmeta.ArchivedSessionsDir)
+	var all []codexmeta.Rollout
+	for _, home := range a.codexHomes {
+		all = append(all, a.homeRollouts(ctx, home)...)
+	}
+	return all
+}
+
+// homeRollouts lists one Codex home's rollouts.
+func (a *auditor) homeRollouts(ctx context.Context, home string) []codexmeta.Rollout {
+	found, errs := codexmeta.WalkRollouts(ctx, home, codexmeta.SessionsDir, codexmeta.ArchivedSessionsDir)
 	for _, err := range errs {
 		if pathErr, ok := pathError(err); ok {
 			a.scan.readErrors = append(a.scan.readErrors, pathErr.Path+": "+describe(err))
@@ -275,7 +307,7 @@ type codexRow struct {
 
 // runCodex prints one bounded row per Codex thread in the window.
 func (a *auditor) runCodex(ctx context.Context) (int, error) {
-	root := a.codexHome
+	root := strings.Join(a.codexHomes, ", ")
 	all := a.rollouts(ctx)
 	if len(all) == 0 {
 		// an empty walk that failed somewhere names where: an error never reads as absence
@@ -283,7 +315,11 @@ func (a *auditor) runCodex(ctx context.Context) (int, error) {
 		if len(a.scan.readErrors) != 0 {
 			cause = "; READ ERRORS: " + strings.Join(a.scan.readErrors, " | ")
 		}
-		return 1, failure("no Codex rollouts under %s/sessions or %s/archived_sessions%s", root, root, cause)
+		places := make([]string, len(a.codexHomes))
+		for index, home := range a.codexHomes {
+			places[index] = home + "/sessions or " + home + "/archived_sessions"
+		}
+		return 1, failure("no Codex rollouts under %s%s", strings.Join(places, " or "), cause)
 	}
 	var rows []codexRow
 	byID := map[string]bool{}
@@ -413,32 +449,7 @@ var (
 	writeStdin   = regexp.MustCompile(`write_stdin`)
 	emptyChars   = jsRegexp(`chars:\s*""`)
 	sleepCommand = jsRegexp(`\bsleep\s+\d`)
-	scriptFailed = regexp.MustCompile(`(?m)^Script (failed|error)`)
-	// JavaScript's multiline ^ also starts a line after \r, U+2028 and U+2029
-	lineStarts = strings.NewReplacer("\r", "\n", " ", "\n", " ", "\n")
 )
-
-// codexOutputText is a tool output as the failure rule reads it: a string as
-// itself, a list by its first block carrying text; any other form holds no
-// line that could start "Script".
-func codexOutputText(output json.RawMessage) string {
-	if isString(output) {
-		return jsString(output)
-	}
-	var blocks []json.RawMessage
-	if len(output) == 0 || output[0] != '[' || json.Unmarshal(output, &blocks) != nil {
-		return ""
-	}
-	for _, block := range blocks {
-		var member struct {
-			Text json.RawMessage `json:"text"`
-		}
-		if len(block) != 0 && block[0] == '{' && json.Unmarshal(block, &member) == nil && truthy(member.Text) {
-			return keyString(member.Text)
-		}
-	}
-	return ""
-}
 
 // codexAuditRun replays one rollout into a RUN-shaped row carrying every
 // measure a --flight row reads.
@@ -473,23 +484,20 @@ func (a *auditor) codexAuditRun(file string, meta *codexmeta.Fields) *run {
 	calls := map[string]string{}
 	seenRead := map[string]int{}
 	err := eachLine(file, func(raw []byte) {
-		var record codexLine
-		if json.Unmarshal(raw, &record) != nil {
+		record, ok := codexRecord(raw)
+		if !ok {
 			malformed++
 			return
 		}
-		payload := record.Payload
-		if payload == nil {
-			payload = &codexPayload{}
-		}
+		payload := record.payload
 		switch {
-		case record.Type == "compacted" || payload.Type == "compacted":
+		case record.kind == "compacted" || record.payloadKind == "compacted":
 			r.resets++
-		case record.Type == "turn_context":
+		case record.kind == "turn_context":
 			if truthy(payload.Model) {
 				models.add(keyString(payload.Model))
 			}
-		case payload.Type == "custom_tool_call" || payload.Type == "function_call":
+		case record.payloadKind == "custom_tool_call" || record.payloadKind == "function_call":
 			input := ""
 			if value := coalesce(payload.Input, payload.Arguments); value != nil {
 				input = keyString(value)
@@ -515,20 +523,20 @@ func (a *auditor) codexAuditRun(file string, meta *codexmeta.Fields) *run {
 					r.contractReads++
 				}
 			}
-		case payload.Type == "custom_tool_call_output" || payload.Type == "function_call_output":
-			if scriptFailed.MatchString(lineStarts.Replace(codexOutputText(payload.Output))) {
+		case record.payloadKind == "custom_tool_call_output" || record.payloadKind == "function_call_output":
+			if _, failed := transcript.CodexToolOutput(payload.Output); failed {
 				r.failedCmds++
 				r.errs++
 				if name, ok := calls[keyString(payload.CallID)]; ok {
 					r.tools.childWith(name, "n", "err").bump("err", 1)
 				}
 			}
-		case payload.Type == "token_count" && payload.Info != nil:
-			if total := payload.Info.TotalTokenUsage; total == nil || !peaks.add(*total) {
+		case record.payloadKind == "token_count" && record.info != nil:
+			if total := record.info.TotalTokenUsage; total == nil || !peaks.add(*total) {
 				return
 			}
 			ctx := 0.0
-			if lastUsage := payload.Info.LastTokenUsage; lastUsage != nil {
+			if lastUsage := record.info.LastTokenUsage; lastUsage != nil {
 				ctx = float64(lastUsage.InputTokens)
 			}
 			r.calls++
@@ -542,8 +550,8 @@ func (a *auditor) codexAuditRun(file string, meta *codexmeta.Fields) *run {
 			r.ctxPeak = max(r.ctxPeak, ctx)
 			r.ctxSum += ctx
 			stamp := ""
-			if truthy(record.Timestamp) {
-				stamp = keyString(record.Timestamp)
+			if truthy(record.timestamp) {
+				stamp = keyString(record.timestamp)
 			}
 			if ts, ok := dateParse(stamp, a.loc); ok {
 				if r.t0 == 0 {

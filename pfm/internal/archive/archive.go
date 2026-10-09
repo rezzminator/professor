@@ -30,6 +30,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // sidechainMarker is the first-record field that tells a subagent's transcript
@@ -424,24 +425,19 @@ func (runner *Runner) findTranscript(chat KilledChat) (string, pfmengine.ID, err
 	return "", "", nil
 }
 
+// findClaudeTranscript is the session transcript {id}.jsonl one project
+// below a Claude root (transcript.FindSessions); "" when no root holds it. A
+// place the search could not read is an error when nothing was found, so an
+// unreadable root never reads as no transcript.
 func (runner *Runner) findClaudeTranscript(id string) (string, error) {
-	for _, root := range runner.claudeRoots() {
-		entries, err := os.ReadDir(root)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
+	found, errs := transcript.FindSessions(runner.claudeRoots(), id)
+	for _, path := range found {
+		if filepath.Base(path) == id+".jsonl" {
+			return path, nil
 		}
-		if err != nil {
-			return "", fmt.Errorf("read %s for a claude transcript: %w", root, err)
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			candidate := filepath.Join(root, entry.Name(), id+".jsonl")
-			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				return candidate, nil
-			}
-		}
+	}
+	if len(errs) != 0 {
+		return "", fmt.Errorf("search for claude transcript %s: %w", id, errors.Join(errs...))
 	}
 	return "", nil
 }

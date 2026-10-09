@@ -1,0 +1,11 @@
+{
+ "args": [
+  "show",
+  "{HOME}/.claude/projects/-work-repo/cccccccc-1111-2222-3333-444444444444.jsonl",
+  "--results",
+  "full",
+  "--text",
+  "0"
+ ],
+ "dirs": []
+}

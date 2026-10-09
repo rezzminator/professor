@@ -34,7 +34,7 @@
 | Tools | `Read, Grep, Glob, Bash`, and `chat_ls`, `chat_find`, `chat_status`, `chat_last` from the professor MCP |
 | Budget | 40 tool calls |
 | Spawns | nothing |
-| Writes | digests under `/tmp/chat-investigator/`, through `transcript.py show --out`; the answer is its final message |
+| Writes | digests under `/tmp/chat-investigator/`, through `pfm transcript show --out`; the answer is its final message |
 
 ## The brief
 
@@ -51,11 +51,11 @@ Each rule and the failure in the audited runs it fixes:
 | Rule | The open-hand failure |
 | --- | --- |
 | The first line is the answer, never a question | A "why is none of them working" turn spent 15 calls and $3.09, then asked nine questions at once before naming the cause |
-| A name resolves through `transcript.py locate`, which matches each chat's latest title; every chat sharing it is a candidate, the ones left out are named; `pfm ls --all --tsv` answers whether it is live, resumable or killed | `chat_ls` scoped to the caller's project hid the target; `all:true` returned a 100 KB error; two names each shared by two chats were resolved without saying so |
+| A name resolves through `pfm transcript locate`, which matches each chat's latest title; every chat sharing it is a candidate, the ones left out are named; `pfm ls --all --tsv` answers whether it is live, resumable or killed | `chat_ls` scoped to the caller's project hid the target; `all:true` returned a 100 KB error; two names each shared by two chats were resolved without saying so |
 | `chat_find` is a supplement: a hit counts once a quoted line confirms it, an error is retried once and then reported | A daemon mismatch never retried; a paraphrased excerpt returned eight confirmed, unrelated hits; one search found 4 of 22 transcripts |
 | Search `~/.claude/projects` itself, never through `~/.cc/*/projects` | Those are links: a plain `find` reported "no transcript file" for one that existed; `find -L` counted every run three times (396 for 72) and a per-file loop timed out at 120 s |
-| `transcript.py agents` lists a session's sub-agents in one call; one is chosen by what its calls read, never by its type | Half the sub-agents handed to one audit read no transcript |
-| One `transcript.py show --out` per target, then `grep` and `sed` on the digest | Hand-written parsers cost about 140 s; one investigator re-ran `show` six times on one file; `chat_read` counts tool turns and returns tool inputs without results |
+| `pfm transcript agents` lists a session's sub-agents in one call; one is chosen by what its calls read, never by its type | Half the sub-agents handed to one audit read no transcript |
+| One `pfm transcript show --out` per target, then `grep` and `sed` on the digest | Hand-written parsers cost about 140 s; one investigator re-ran `show` six times on one file; `chat_read` counts tool turns and returns tool inputs without results |
 | Dollars from `pfm tokens` or a ledger, never a typed rate | An answer claimed prices "checked within 5%" while its own check printed $2.16 against $5.42 |
 | `chat_status` without `summary` or `ask`; a `chat_ls` state is a hint | `summary:true` timed out at 63 s; a `chat_ls` row read idle while the chat was working |
 | A chat's progress line is its claim; the artifact on disk is the fact | "Filed its own evidence" relayed without a listing, beside a status that said the ask had failed |
@@ -72,8 +72,8 @@ An investigation brief without a cap fanned out to 17 agents three levels deep i
 
 | Left out | Reason |
 | --- | --- |
-| `chat_read` | It reads backwards from the end, counts tool turns, and drops tool results; `transcript.py show` with `--lines`, `--since` or `--grep` reads any window with results |
-| `chat_digest` | The same `transcript.py show` digest, but the whole result lands in the investigator's context on every read; `show --out` writes it once and `grep` and `sed` read a slice of it |
+| `chat_read` | It reads backwards from the end, counts tool turns, and drops tool results; `pfm transcript show` with `--lines`, `--since` or `--grep` reads any window with results |
+| `chat_digest` | The same `pfm transcript show` digest, but the whole result lands in the investigator's context on every read; `show --out` writes it once and `grep` and `sed` read a slice of it |
 | `chat_capture`, `chat_resolve` | The pane and the tmux address answer live-control questions, not what a chat did; `chat_status` and `chat_last` carry the state and the newest answer |
 | Writing a report file | Its caller consumes the final message; a file would be a second copy with no reader |
 
@@ -82,7 +82,7 @@ An investigation brief without a cap fanned out to 17 agents three levels deep i
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/chat-investigator.md` |
-| The digest it reads through | `templates/global/skills/transcript/transcript.py` and its `SKILL.md` |
+| The digest it reads through | `pfm transcript` (`pfm/internal/transcript/digest/`) and `templates/global/skills/transcript/SKILL.md` |
 | The timeline and dollar source | `pfm tokens --timeline` |
-| Name, sub-agent and liveness lookups | `transcript.py locate`, `transcript.py agents`, `pfm ls --all --tsv` |
+| Name, sub-agent and liveness lookups | `pfm transcript locate`, `pfm transcript agents`, `pfm ls --all --tsv` |
 | The roster line and the transcript skill's readers | `docs/BLUEPRINT.md` |

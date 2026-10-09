@@ -313,7 +313,7 @@ type codexRecord struct {
 }
 
 // codexMessage is a response_item message in the block shape
-// internal/naming.FlattenPromptText and internal/transcript.Visible read.
+// internal/transcript.FlattenPromptText and internal/transcript.Visible read.
 type codexMessage struct {
 	Type    string         `json:"type"`
 	Role    string         `json:"role"`

@@ -491,3 +491,29 @@ func TestArchiveMarksUnresolvedWhenTheTranscriptLookupCannotRun(t *testing.T) {
 		t.Fatalf("an unresolved lookup's kill was retired: %v", kills.unkilled)
 	}
 }
+
+// TestArchiveFindsAClaudeTranscriptBehindASymlinkedProject: the lookup is
+// transcript.FindSessions, so a project directory that is a symlink is read
+// like any other (INTENDED: it used to be skipped as no directory).
+func TestArchiveFindsAClaudeTranscriptBehindASymlinkedProject(t *testing.T) {
+	values := archiveJail(t)
+	const id = "22222222-2222-4222-8222-222222222222"
+	elsewhere := filepath.Join(t.TempDir(), "-work-linked")
+	if err := os.MkdirAll(elsewhere, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(elsewhere, id+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(values.Roots[pfmengine.Claude][0], "-work-linked")
+	if err := os.Symlink(elsewhere, project); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(Dependencies{Paths: values, Kills: &fakeKills{}, Proc: emptyProc{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, err := runner.findClaudeTranscript(id); err != nil || path != filepath.Join(project, id+".jsonl") {
+		t.Fatalf("findClaudeTranscript = %q, %v; want the transcript behind the linked project", path, err)
+	}
+}

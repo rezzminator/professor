@@ -189,8 +189,8 @@ type ReadInput struct {
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 65536 and maximum 1048576"`
 }
 
-// DigestInput requests transcript.py's one-line-per-event digest of one
-// transcript. Every optional field maps onto one `transcript.py show` flag.
+// DigestInput requests the one-line-per-event digest of one transcript. Every
+// optional field maps onto one `pfm transcript show` flag.
 type DigestInput struct {
 	Source     string `json:"source" jsonschema:"chat_find id, Claude or Codex session or agent id (or prefix), transcript path, or a Claude chat's title"`
 	Lines      string `json:"lines,omitempty" jsonschema:"transcript line range FROM-TO, FROM- or one line number; the events those records produced"`

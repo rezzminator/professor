@@ -1,7 +1,9 @@
 ---
 name: tracer-rr
 description: RR-ONLY digs a repository's code — spawned by rr-pro and rr-pro-max with a repo URL and numbered sub-queries, never delegated to directly. Returns its result file path, then a code-quoted finding per sub-query, then rabbit holes.
-available-to: [rr-pro, rr-pro-max]
+visibility:
+  visible-to:
+    include: [rr-pro, rr-pro-max]
 tools: Bash, Read, Grep, Glob
 model: opus
 effort: medium

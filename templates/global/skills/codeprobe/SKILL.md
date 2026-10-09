@@ -1,6 +1,9 @@
 ---
 name: codeprobe
 description: Internal kit of collector — codeprobe.py copies code verbatim for numbered orders and prints their manifest. Not invoked directly — ask collector.
+visibility:
+  visible-to:
+    include: [collector]
 ---
 
 # codeprobe

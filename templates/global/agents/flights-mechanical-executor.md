@@ -1,7 +1,9 @@
 ---
 name: flights-mechanical-executor
 description: 'FLIGHTS-ONLY — spawned by flights-foreman, or the main chat acting as one, for one bulk edit it fixed line by line in a task file: the code and covering tests. Pass the brief file, the task file and its reads paths. flights-foreman → here → flights-foreman. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line plus the red log path (or `pre-existing, no red proof`) per Done when row.'
-available-to: [main, flights-foreman]
+visibility:
+  visible-to:
+    include: [main, flights-foreman]
 model: claude-sonnet-5-5
 effort: high
 codex-model: gpt-6-luna

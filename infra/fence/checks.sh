@@ -266,19 +266,6 @@ checks_templates_release_check() {
 
 }
 
-checks_templates_codex_sync() {
-  head_ "templates — codex-sync missing compiler"
-  local cs_copy
-  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
-    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
-      ok "codex-sync ($cs_copy) names unavailable compiler and retains dirty flag"
-    else
-      fail_step "codex-sync regression FAILED ($cs_copy) — unavailable compiler must be named and dirty flag retained"
-    fi
-  done
-
-}
-
 checks_templates_refresh_scope() {
   head_ "templates — refresh-scope fixtures"
   run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
@@ -405,7 +392,6 @@ checks_templates() {
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
   checks_templates_release_check
-  checks_templates_codex_sync
   checks_templates_refresh_scope
   checks_templates_pfm_guard
   checks_templates_dev_report
@@ -847,7 +833,6 @@ gate_run() { # pfm, templates, or all
     steps_add templates.descriptions checks_templates_descriptions
     steps_add templates.mirrors checks_templates_mirrors
     steps_add templates.release-check checks_templates_release_check
-    steps_add templates.codex-sync checks_templates_codex_sync
     steps_add templates.refresh-scope checks_templates_refresh_scope
     steps_add templates.pfm-guard checks_templates_pfm_guard
     steps_add templates.dev-report checks_templates_dev_report

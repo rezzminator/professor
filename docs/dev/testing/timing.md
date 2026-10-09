@@ -196,7 +196,6 @@ templates.descriptions	PASS	0.7
 templates.mirrors	PASS	4.2
 templates.flight-index	PASS	0.5
 templates.release-check	PASS	1.6
-templates.codex-sync	PASS	0.1
 templates.refresh-scope	PASS	0.6
 templates.pfm-guard	PASS	0.2
 templates.dev-report	PASS	0.3

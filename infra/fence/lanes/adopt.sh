@@ -43,8 +43,7 @@ tokens.update({
     'DEV_PREREQS': ':', 'PORT_DEFAULTS': 'EXPRESS_PORT=3000',
     'SEED_PROJECT': '-', 'MIGRATIONS_DIR': '-', 'ROSTER_DOC_PATHS': 'docs/express',
     'PROJECT_TYPING_RULES': 'Use node assertions.', 'CODEX_MODEL': 'lane-fixture',
-    'CODEX_MODEL_SMART': 'lane-fixture', 'CODEX_MODEL_MECHANICAL': 'lane-fixture',
-    'CODEX_MODEL_COLLECTOR': 'lane-fixture', 'CODEX_REASONING_EFFORT': 'medium',
+    'CODEX_REASONING_EFFORT': 'medium',
 })
 Path('.professor/manifest.json').write_text(json.dumps({
     'tokens': tokens, 'interview': {'tech_commands': {'express': {'test': 'node --test'}}}

@@ -49,7 +49,7 @@ The blueprint never rewrites a project file after `pfm init`; every upstream cha
 
 ## Codex mirror
 
-`pfm codex build [repo-root]` is the SINGLE writer of `AGENTS.md`, `.codex/` and `$HOME/.codex/`; `pfm codex check` gates drift (non-zero names each MISSING, STALE, ORPHANed, or CONFLICTing artifact). The `codex-sync.sh` hooks run both after any Edit/Write to a Claude source; a Bash-driven write bypasses the hook, so run `pfm codex build . && pfm codex check .` yourself. `pfm codex agents` compiles the machine-global agent `.toml` twins.
+engine-sync, the `engine-sync` plugin's binary that `pfm codex build [repo-root]` forwards to, is the SINGLE writer of `AGENTS.md`, `.codex/` and `$HOME/.codex/`; `pfm codex check` gates drift (non-zero names each MISSING, STALE, ORPHANed, or CONFLICTing artifact). The `codex-sync.sh` hooks run both after any Edit/Write to a Claude source; a Bash-driven write bypasses the hook, so run `pfm codex build . && pfm codex check .` yourself. `pfm codex agents` compiles the machine-global agent `.toml` twins.
 
 ## Host integration
 

@@ -59,7 +59,7 @@ Every command, agent, and rule sorts into one of three tiers:
 - **codeprobe** — in-tree skill under `templates/global/skills/codeprobe/`: the extraction script `collector` runs.
 - **transcript** — in-tree skill under `templates/global/skills/transcript/`: digests one Claude or Codex session into one line per event; `agent-optimizer` and `chat-investigator` read runs through it.
 - **close-out** — in-tree skill under `templates/global/skills/close-out/`: the user's `/close-out` sweeps the whole chat for open threads, unfinished or unverified work, uncommitted changes and running agents, finishes what needs no ruling, asks for the rest, and ends with one closing report.
-- **god-speed** — say "god speed" and the agent finishes the request unattended, reporting every decision it took at the end.
+- **god-speed** — say "god speed" and the agent asks only the forks that are costly to get wrong, in one round before its first edit, then finishes the request unattended and reports every decision it took.
 
 **Bundled skills (ship with the blueprint):**
 

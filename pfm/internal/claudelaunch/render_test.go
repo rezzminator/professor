@@ -21,6 +21,7 @@ import (
 func renderMachine(t *testing.T) (string, pfmconfig.Config) {
 	t.Helper()
 	home := t.TempDir()
+	installFakePFM(t, home)
 	machine := pfmconfig.Defaults(
 		home,
 		[]string{filepath.Join(home, ".claude", "projects", "one"), filepath.Join(home, ".cc", "2", "projects", "two")},

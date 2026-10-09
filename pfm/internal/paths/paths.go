@@ -76,6 +76,11 @@ const (
 	// served table stays the clone file or the embedded copy. The test harness
 	// and the fence lanes set it so no test fetches a pricing page.
 	EnvPricesOffline = "PFM_PRICES_OFFLINE"
+	// EnvCostLedgerDir names the directory of the per-call cost ledger
+	// ({session_id}.jsonl, one line per API call) the cost sink writes and the
+	// status line, `pfm tokens` and callmeter read; unset, it hangs off the
+	// pfm state directory (CostLedgerDir).
+	EnvCostLedgerDir = "PFM_COST_LEDGER_DIR"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
@@ -522,6 +527,19 @@ func GeneratedClaudeAgentsDir(home string) string {
 // carry env values and headers that must never reach argv.
 func ClaudeMCPConfigDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "mcp-config")
+}
+
+// CostLedgerDir is the directory of the per-call cost ledger: EnvCostLedgerDir
+// when set, else cost-ledger under the pfm state directory. The cost sink
+// creates it 0700; callmeter reads the same path as optional data.
+func CostLedgerDir(env Env, home string) string {
+	return EnvOrFrom(env, EnvCostLedgerDir, filepath.Join(home, ".local", "state", "pfm", "cost-ledger"))
+}
+
+// CostSinkLog is the file the detached cost sink logs its failures to, beside
+// the activity log, so `pfm doctor` can show the cause of a sink that stopped.
+func CostSinkLog(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "log", "cost-sink.log")
 }
 
 // LegacyHarnessPromptsDir identifies the former managed prompt directory.

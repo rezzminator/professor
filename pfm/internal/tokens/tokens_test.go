@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -52,9 +53,23 @@ var usageRefusals = []string{
 
 // intended rewrites a Node golden into what pfm prints: the R3 deltas, each
 // named in the flight's run.md.
+var crossCheckBlock = regexp.MustCompile(`(\n== CROSS-CHECK \([^\n]*\)(?:\n {2}[^\n]*)+)`)
+
+var metricsLines = regexp.MustCompile(`(\nmetrics → [^\n]* \()(\d+)( lines\))`)
+
 func intended(text string) string {
 	text = strings.ReplaceAll(text, "token-audit: ", "pfm tokens: ")
 	text = strings.ReplaceAll(text, "TOKEN_AUDIT_PRICES ", "--prices ")
+	// R6: no cost ledger on the machine, so the report adds its one line after the cross-check block
+	text = crossCheckBlock.ReplaceAllString(text, "${1}\n"+noLedgerLine)
+	text = strings.ReplaceAll(text, "\n\ncross-check: at the published context tiers",
+		"\n\n"+noLedgerLine+"\n\ncross-check: at the published context tiers")
+	// the flight's metrics file grew by that line and the blank line after it
+	text = metricsLines.ReplaceAllStringFunc(text, func(match string) string {
+		parts := metricsLines.FindStringSubmatch(match)
+		lines, _ := strconv.Atoi(parts[2])
+		return parts[1] + strconv.Itoa(lines+2) + parts[3]
+	})
 	return nodeError.ReplaceAllStringFunc(text, func(match string) string {
 		parts := nodeError.FindStringSubmatch(match)
 		return nodeOps[parts[2]] + " " + parts[3] + ": " + parts[1]
@@ -309,6 +324,17 @@ func TestIntendedRewritesTheNodeDeltas(t *testing.T) {
 			"--root /r is not readable: lstat /r: no such file or directory",
 		},
 		{"/d: EACCES: permission denied, scandir '/d'", "/d: open /d: permission denied"},
+		{
+			"x\n== CROSS-CHECK (this estimate vs the harness's own cost-state line)\n  no chat qualifies\n\nfull data → /o",
+			"x\n== CROSS-CHECK (this estimate vs the harness's own cost-state line)\n  no chat qualifies\n" +
+				noLedgerLine + "\n\nfull data → /o",
+		},
+		{
+			"## flight total\n\ngaps\n\ncross-check: at the published context tiers (x)",
+			"## flight total\n\ngaps\n\n" + noLedgerLine + "\n\ncross-check: at the published context tiers (x)",
+		},
+		{"\nmetrics → /m.md (39 lines)\n", "\nmetrics → /m.md (41 lines)\n"},
+		{"a CROSS-CHECK mention\n  indented", "a CROSS-CHECK mention\n  indented"},
 	}
 	for _, c := range cases {
 		if got := intended(c.node); got != c.pfm {

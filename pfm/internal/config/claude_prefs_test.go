@@ -109,3 +109,56 @@ func TestClaudePluginCheckoutRoot(t *testing.T) {
 		}
 	}
 }
+
+// claude.costLedger is the machine-wide switch of the per-call cost ledger: on by default, an
+// account may not set it, and Marshal always writes the resolved value back.
+func TestClaudeCostLedgerSwitch(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), FileName)
+	for _, tc := range []struct {
+		content, err string
+		want         bool
+		source       Source
+	}{
+		{`{"version":2}`, "", true, SourceDefault},
+		{`{"version":2,"claude":{"costLedger":false}}`, "", false, SourceFile},
+		{`{"version":2,"claude":{"costLedger":true}}`, "", true, SourceFile},
+		{
+			`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"costLedger":false}}]}`,
+			"accounts[0].costLedger is machine-wide: set claude.costLedger", false, "",
+		},
+	} {
+		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, home, nil)
+		if tc.err != "" {
+			if err == nil || err.Error() != "config "+path+": "+tc.err {
+				t.Fatalf("%s error = %v, want %q", tc.content, err, tc.err)
+			}
+			continue
+		}
+		if err != nil || loaded.Claude.CostLedger != tc.want || loaded.Source(KeyClaudeCostLedger) != tc.source {
+			t.Fatalf("%s costLedger=%v source=%q err=%v, want %v %q", tc.content, loaded.Claude.CostLedger,
+				loaded.Source(KeyClaudeCostLedger), err, tc.want, tc.source)
+		}
+		encoded, err := Marshal(loaded, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value struct {
+			Claude map[string]any `json:"claude"`
+		}
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			t.Fatal(err)
+		}
+		if got := value.Claude["costLedger"]; got != tc.want {
+			t.Fatalf("%s marshals costLedger=%v, want %v", tc.content, got, tc.want)
+		}
+	}
+	for _, def := range Keys() {
+		if def.Key == KeyClaudeCostLedger && def.Default != true {
+			t.Fatalf("Keys() lists %s default %v, want true", def.Key, def.Default)
+		}
+	}
+}

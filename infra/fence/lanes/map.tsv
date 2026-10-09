@@ -93,6 +93,8 @@ pfm internal claude-launch	E1	E1.01-open-seat1
 pfm internal claude-version	O2	O2.05-internal-plumbing
 pfm internal clear-kill	O2	O2.05-internal-plumbing
 pfm internal codex-launch	E2	E2.10-codex-launch
+pfm internal cost-launch	O2	O2.05-internal-plumbing
+pfm internal cost-sink	O2	O2.05-internal-plumbing
 pfm internal epic-inject	O2	O2.05-internal-plumbing
 pfm internal exit-close	E1	E1.21-exit-close
 pfm internal exit-intercept	E1	E1.19-kill-unkill

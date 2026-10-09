@@ -208,7 +208,9 @@ func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) 
 // Claude Code reads back, one per task that reports a model or a token count;
 // a task it omits keeps Claude Code's own row body. A sub-agent transcript
 // that cannot be read renders "?" in its row and its cause goes to warn. A nil
-// prices leaves every row's dollars unpriced.
+// prices leaves every row's dollars unpriced. A session with a cost ledger prices each row from it:
+// the ledger rows of that agent and every agent below it (ledger_spend.go); an agent it holds no
+// row of yet keeps its transcripts' price.
 func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.Prices, warn io.Writer) (string, error) {
 	var data subagentInput
 	if err := json.Unmarshal(raw, &data); err != nil {
@@ -222,6 +224,7 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.P
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
 	var tree *agentTree // scanned once per render, on the first agent row
+	ledger := loadLedgerView(data.SessionID, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
 		if task.ID == "" || (task.TokenCount <= 0 && task.ContextWindowSize <= 0) {
@@ -235,6 +238,11 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.P
 			read := readAgentActivity(data.TranscriptPath, task.ID, prices)
 			read.nest = tree.nesting(task.ID)
 			read.spend.add(tree.nestedSpend(task.ID, prices))
+			if ledger != nil {
+				if booked, ok := ledger.spend(task.ID, tree.children); ok {
+					read.spend = read.spend.withLedger(booked)
+				}
+			}
 			for _, cause := range tree.drainWarnings() {
 				fmt.Fprintf(warn, "pfm statusline --subagents: row %s: nested agents: %s\n", task.ID, cause)
 			}

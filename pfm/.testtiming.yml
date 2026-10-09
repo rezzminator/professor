@@ -34,6 +34,8 @@ suites:
       github.com/rezzminator/professor/pfm/internal/codexmeta: 2
       github.com/rezzminator/professor/pfm/internal/compose: 6
       github.com/rezzminator/professor/pfm/internal/config: 6
+      github.com/rezzminator/professor/pfm/internal/costledger: 2
+      github.com/rezzminator/professor/pfm/internal/costsink: 2
       github.com/rezzminator/professor/pfm/internal/deps: 14
       github.com/rezzminator/professor/pfm/internal/doctor: 30
       github.com/rezzminator/professor/pfm/internal/engine: 4

@@ -52,7 +52,7 @@ type Knob struct {
 }
 ```
 
-`Knobs` lists every row. `Render(Request, pfmconfig.Config) (Launch, error)` resolves each row for one launch and returns `Launch{Unset, Env, Argv}`. `ClaudeSpawn.ShellCommand` (`pfm/internal/action/claude_spawn.go`) prints it as `env -u … NAME=value … claude <argv>` for a tmux pane; `ClaudeSpawn.Command` execs it directly. Neither adds a word of its own.
+`Knobs` lists every row. `Render(Request, pfmconfig.Config) (Launch, error)` resolves each row for one launch and returns `Launch{Unset, Env, Wrapper, Binary, Argv}`. `ClaudeSpawn.ShellCommand` (`pfm/internal/action/claude_spawn.go`) prints it as `env -u … NAME=value … [wrapper] claude <argv>` for a tmux pane; `ClaudeSpawn.Command` execs it directly, the wrapper first when there is one. Neither adds a word of its own. The wrapper is the cost ledger's launcher ([cost-ledger.md](cost-ledger.md#the-launch)); it execs Claude and keeps its pid, so the process a live chat shows is Claude's own.
 
 ## Wires
 
@@ -62,6 +62,8 @@ type Knob struct {
 | `WireEnv` | a process environment assignment | `CLAUDE_CONFIG_DIR`, the cache handoff `CACHE_LIVE_CONTROL_MAIN_TTL`, `CLAUDE_CODE_SHELL` |
 | `WireUnset` | `env -u NAME` before exec | the hygiene list |
 | `WireFlag` | a command-line flag | the prompt file, MCP config, autonomy pair, model, effort, session verbs |
+| `WireWrapper` | argv words in front of the binary (`Launch.Wrapper`) | `costLedger` |
+| `WireWrapperEnv` | a process environment value only the wrapper can set, because it depends on a socket the wrapper binds just before exec | the nine exporter variables, the `PFM_COST_LEDGER` marker and `PFM_COST_LEDGER_PID` |
 
 ## Knobs
 
@@ -86,6 +88,10 @@ type Knob struct {
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
 | status lines | settings `statusLine`, `subagentStatusLine` — `docs/design/context/statusline.md` | constant | — |
+| `costLedger` | wrapper `pfm internal cost-launch --` in front of the binary: it binds a loopback sink and execs Claude with the exporter variables below; `false`, or the user's own telemetry settings, launch without and record `PFM_COST_LEDGER=off` or `preempted` — [cost-ledger.md](cost-ledger.md#the-launch) | config (machine-wide) | `true` |
+| cost exporters | wrapper env `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_TRACES_EXPORTER=otlp`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_METRICS_EXPORTER=none`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:{port}`, `OTEL_LOGS_EXPORT_INTERVAL=1000`, `OTEL_BSP_SCHEDULE_DELAY=1000` | constant | — |
+| cost marker | wrapper env `PFM_COST_LEDGER=on\|off\|preempted\|failed`, the decision the status lines read | constant | — |
+| cost pid | wrapper env `PFM_COST_LEDGER_PID={pid}`, the process the armed sink serves: a second pass of that same process (the wrapper exec'd pfm's `claude` shim) keeps its sink | constant | — |
 | MCP | flag `--mcp-config {file}` — a per-launch 0600 file holding `professor` and third-party entries | config | — |
 | `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass` | config | `bypass` |
 | model | flag `--model` | launch | unset |
@@ -148,13 +154,15 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `autoCompactWindow` | `100000` | auto-compact window |
 | `tmuxTruecolor` | `true` | truecolor under tmux |
 | `noFlicker` | off | not a config key: on when the account's `settings.json` has top-level `"tui": "fullscreen"` |
+| `costLedger` | `true` | the per-call cost ledger ([cost-ledger.md](cost-ledger.md)); machine-wide, an account-level value is refused |
 | `cleanupPeriodDays` | `36500` | transcript retention (also the managed value) |
 | `requireManagedCleanup` | `true` | `pfm doctor` warns when the managed `cleanupPeriodDays` file is absent; `false` silences it |
 
 ## The rendered launch
 
 ```text
-env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} {binary} {door verbs} \
+env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} [PFM_COST_LEDGER=off|failed] \
+  [~/.local/bin/pfm internal cost-launch --] {binary} {door verbs} \
   --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
   [--mcp-config ~/.local/state/pfm/mcp-config/claude-mcp-{random}.json] \
   [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions]
@@ -204,7 +212,7 @@ A `claude` typed at a shell, through [the managed launcher](#the-managed-launche
 
 1. Render doors: `PlanClaude`, `HeadlessFork`, `Synthesize` (fresh, resume and agent fallback), `AgentOpen` resume, `claudeRun` and `LauncherRun` call `claudelaunch.Render`.
 2. Headless: `claudelaunch.RenderHeadless` supplies `--settings` for `pfm headless exec`, `pfm ask`, the limits ACK and the doctor capture.
-3. Passthrough that starts a session: `pfm internal launch` supplies the two plugin values in its process environment.
+3. Passthrough that starts a session: `pfm internal launch` supplies the two plugin values in its process environment and, for an interactive start, arms the cost ledger itself (`costsink.PrepareCurrent`: the exporter variables and the `PFM_COST_LEDGER` marker, [cost-ledger.md](cost-ledger.md#doors)).
 4. VS Code terminal: its `PATH` finds pfm's `claude` shim, so a typed session takes a render or passthrough door.
 
 Query-purpose `agents --json` and the exempt subcommands start no session.
@@ -217,7 +225,7 @@ The VS Code Claude extension's panel is not a pfm launch door. pfm never launche
 
 1. `~/.local/bin/claude` links to `~/.local/share/pfm/install/bin/claude`, which runs `pfm internal claude-launch "$@"`, first giving an unset `CLAUDE_CONFIG_DIR` the login default ([claude-config-dir.md](claude-config-dir.md#launches-outside-pfm)).
 2. `claude-launch` resolves the real binary — `claude.binary`, else the newest native version under `~/.local/share/claude/versions/`, else `PATH` — never the launcher itself.
-3. **Passthrough** — `PFM_LAUNCH_PASSTHROUGH=1`, already inside a pfm tmux socket, `-p`/`--print`/`--output-format`/`-h`/`--help`/`--version`/`-v`, or the subcommands `agents mcp update install doctor setup-token plugin config` — execs the real binary. Such a run carries no pfm settings except, when it starts a session, the two plugin env values in its process environment; the managed `cleanupPeriodDays` still applies to it.
+3. **Passthrough** — `PFM_LAUNCH_PASSTHROUGH=1`, already inside a pfm tmux socket, `-p`/`--print`/`--output-format`/`-h`/`--help`/`--version`/`-v`, or the subcommands `agents mcp update install doctor setup-token plugin config` — execs the real binary. Such a run carries no pfm settings except, when it starts a session, the two plugin env values in its process environment and, unless it is a print-mode run, the cost ledger's exporter variables and marker; the managed `cleanupPeriodDays` still applies to it.
 4. Otherwise it renders `LauncherRun` into a fresh `cc-` tmux socket.
 
 The `SessionStart` hook `launcher-repair` re-links a displaced launcher. Version retention keeps the newest two versions plus any a live process runs.
@@ -254,4 +262,5 @@ Values set through the `--settings` `env` block are read from argv, never from `
 - `claudelaunch.Knobs` ↔ `example.pfm.config.json` (every config-sourced knob has its key there) ↔ `pfm config claude` ↔ the mock engine's accepted flags (`pfm/internal/mockengine/claude.go`).
 - The hygiene rows ↔ the Codex launch's unset list (`pfm internal codex-launch`) ↔ the headless strip lists ↔ the doctor harness probe's capture environment — all read from the registry.
 - `outputStyle` constant ↔ the gate in `infra/check-self-hosted-manifest.sh`.
+- The cost rows (`costLedger`, the exporter variables, the `PFM_COST_LEDGER` marker) ↔ `pfm/internal/claudelaunch/cost.go` ↔ [cost-ledger.md](cost-ledger.md); `PFM_COST_LEDGER_DIR` (`pfm/internal/paths/paths.go`) names the ledger directory the sink writes and every reader opens.
 - `pfm/harness-prompts/composed/*.md` ↔ their parts.

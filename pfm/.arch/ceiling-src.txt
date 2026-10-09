@@ -1,6 +1,6 @@
 cmd/pfm/chat_satellite_command.go 828
 internal/compose/compose.go 1332
-internal/config/config.go 1471
+internal/config/config.go 1481
 internal/doctor/doctor.go 1507
 internal/harvest/mirror_providers.go 829
 internal/inject/engine.go 1621

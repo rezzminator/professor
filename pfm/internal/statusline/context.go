@@ -44,7 +44,7 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 		}
 	}
 	if runtime.Engine != pfmengine.Codex {
-		l2 += sep + sessionSpendSegment(data, runtime.Prices)
+		l2 += sep + sessionSpendSegment(data, runtime.Prices, readLedgerBooks(runtime, data.SessionID))
 	}
 	// Never width-gated: a recorded launch reports its cache window and
 	// transcript readability. Codex reports no cache split.
@@ -63,46 +63,67 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	), contextTokens
 }
 
-// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 +$1.87 unlogged".
-// The dollars are Claude Code's cost.total_cost_usd: the whole session at list
-// price, including the requests it makes that no transcript records (prompt
-// suggestions, summaries, titles). The tokens and tool calls are this chat's
-// transcript and every sub-agent's, priced at the served table the same way
-// as each sub-agent row; whatever the total holds beyond that is named
-// "+$X unlogged", so the rows and the line add up. A logged price above the
-// total is pfm's own error and renders "logged $X > total" in warning.
-// Without a Claude Code figure the logged price leads; a floor carries "+?";
-// a transcript that cannot be read is "?/?/?" after the total.
-func sessionSpendSegment(data input, prices *pricing.Prices) string {
+// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 ledger≠cc": exactly ONE dollar
+// amount in every state, then prompt tokens, output tokens and tool calls. With a cost ledger the
+// amount is the ledger's total — Claude Code's own price of every API call of the session, the
+// ones no transcript records included — and the tokens are the ledger's sums; the same total is the
+// main thread's rows plus every top-level sub-agent row, `pfm tokens`' session total and callmeter's
+// chat sum. Without one the amount is Claude Code's cost.total_cost_usd and the tokens are the
+// transcripts', this chat's and every sub-agent's, priced at the served table; with no Claude Code
+// figure the logged price leads. Tool calls are always the transcripts'. A floor carries "+?" (a
+// call whose cost never arrived, a model the table cannot price); a transcript that cannot be
+// read is "?" in its place. A state worth flagging ends in one marker with no amount in it
+// (spendMarker); the amounts behind a marker are `pfm tokens`'.
+func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks) string {
 	total := data.Cost.TotalCostUSD
-	if strings.TrimSpace(data.TranscriptPath) == "" {
-		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset
+	var spend agentSpend
+	readable := strings.TrimSpace(data.TranscriptPath) != ""
+	if readable {
+		var err error
+		if spend, err = sessionSpend(data.TranscriptPath, prices); err != nil {
+			readable = false
+		}
 	}
-	spend, err := sessionSpend(data.TranscriptPath, prices)
-	if err != nil {
-		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset
+	tools := cWarn + "?" + reset
+	if readable {
+		tools = cTools + strconv.Itoa(spend.tools) + reset
+	}
+	if books.ledger.Present {
+		booked := ledgerSpend(books.ledger.Rows)
+		line := spendDollars(booked.usd, true) + spendTail(booked.in, booked.out, tools)
+		if booked.partial {
+			line += cWarn + "+?" + reset
+		}
+		return line + markerText(spendMarker(books, total, booked.usd, 0, false))
+	}
+	if !readable {
+		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset +
+			markerText(spendMarker(books, total, 0, 0, false))
 	}
 	logged := spend.priced > 0 || !spend.partial
 	line := spendDollars(spend.usd, logged)
 	if total > 0 {
 		line = spendDollars(total, true)
 	}
-	line += cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
-		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
-		cTools + strconv.Itoa(spend.tools) + reset
+	line += spendTail(spend.in, spend.out, tools)
 	if spend.partial && logged {
 		line += cWarn + "+?" + reset
 	}
-	if total <= 0 || !logged {
-		return line
+	return line + markerText(spendMarker(books, total, 0, spend.usd, logged))
+}
+
+// spendTail is "1.0M/5.1K/46": prompt tokens, output tokens, tool calls.
+func spendTail(in, out int64, tools string) string {
+	return cTokens + formatContextTokens(in) + reset + cMuted + "/" + reset +
+		cTokens + formatContextTokens(out) + reset + cMuted + "/" + reset + tools
+}
+
+// markerText renders a spendMarker, "" for none.
+func markerText(marker string) string {
+	if marker == "" {
+		return ""
 	}
-	switch gap := total - spend.usd; {
-	case gap >= 0.005:
-		line += cMuted + fmt.Sprintf(" +$%.2f unlogged", gap) + reset
-	case gap <= -0.005:
-		line += cWarn + fmt.Sprintf(" logged $%.2f > total", spend.usd) + reset
-	}
-	return line
+	return cWarn + " " + marker + reset
 }
 
 // spendDollars is "💰$4.68/" coloured by size, or "💰$?/" when unknown.

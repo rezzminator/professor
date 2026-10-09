@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/costsink"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -68,7 +69,7 @@ var topLevelSubcommands = []string{
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
-	"codex-launch", "epic-inject", "reminder-fire",
+	"codex-launch", "cost-launch", "cost-sink", "epic-inject", "reminder-fire",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
 	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
@@ -433,6 +434,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "explore-deny" {
 		return hookentry.ExploreDeny(os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && (args[0] == "cost-launch" || args[0] == "cost-sink") {
+		return costsink.Main(args, stderr, paths.OSEnv{})
+	}
 	if len(args) != 0 && args[0] == "git-guard" {
 		return hookentry.GitGuard(os.Stdin, stdout, stderr)
 	}
@@ -514,7 +518,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|reminder-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|reminder-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

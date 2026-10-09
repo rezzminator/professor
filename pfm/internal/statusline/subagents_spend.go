@@ -30,6 +30,9 @@ type agentSpend struct {
 	tools           int
 	priced          int
 	partial         bool
+	// fromLedger means usd, in and out are the cost ledger's rows of the agent and every agent
+	// below it (ledgerSpend), not a price of its transcripts.
+	fromLedger bool
 }
 
 func (spend *agentSpend) add(other agentSpend) {
@@ -244,24 +247,30 @@ func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend
 }
 
 // spendSegment renders "$1.24/3.1M/42K/12": USD, prompt and output tokens,
-// then tool calls, for the agent and every agent below it; advisor spend, part
+// then tool calls, for the agent and every agent below it (with a cost ledger,
+// its rows' dollars and tokens: see agentSpend.fromLedger); advisor spend, part
 // of that USD, follows as " adv $0.30", or " adv n/a" when the table could not
 // price a consultation. A floor (partial) gets a "+?" in the
 // warning colour; with nothing priced at all the dollar part is "$?". An own
 // transcript that could not be read is "$?/?/?/?": nothing it says is a total.
 func spendSegment(activity agentActivity) string {
-	if activity.err != nil {
+	spend := activity.spend
+	if activity.err != nil && !spend.fromLedger {
 		return cWarn + "$?/?/?/?" + reset
 	}
-	spend := activity.spend
 	dollars := "$?"
 	if spend.priced > 0 || !spend.partial {
 		dollars = "$" + strconv.FormatFloat(spend.usd, 'f', 2, 64)
 	}
+	tools := cTools + strconv.Itoa(spend.tools) + reset
+	if activity.err != nil {
+		// The ledger priced the row; the transcript that holds its tool calls did not read.
+		tools = cWarn + "?" + reset
+	}
 	line := cCost + dollars + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
-		cTools + strconv.Itoa(spend.tools) + reset
+		tools
 	switch {
 	case spend.advisorUnpriced > 0:
 		line += cMuted + " adv " + reset + cWarn + "n/a" + reset

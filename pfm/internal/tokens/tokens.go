@@ -56,6 +56,8 @@ type Options struct {
 	CodexHomes     []string
 	OpenCodeRoots  []string
 	Served         modelcost.Options
+	// LedgerDir is the cost ledger directory; empty means no ledger can be found.
+	LedgerDir string
 }
 
 // exitError is a refusal or failure the run reports on one stderr line:
@@ -118,6 +120,11 @@ type auditor struct {
 	global       *globals
 	runs         []*run
 	flight       *flightPlan
+	// ledgerDir holds the cost ledgers; transcripts is every transcript the ownership walk found, whatever
+	// the window or --session replays, because a ledger row is held by any transcript of its session
+	ledgerDir   string
+	transcripts []string
+	ledgers     *ledgerReport
 }
 
 // Audit audits per opts.Args and returns the exit code.
@@ -146,7 +153,8 @@ func newAuditor(opts Options, parsed flags, host string) *auditor {
 		opts: parsed, stdout: opts.Stdout, stderr: opts.Stderr, loc: opts.Location, host: host, now: now,
 		since: now - float64(parsed.hours*3600e3), hours: parsed.hours, timelineMode: len(parsed.timeline) != 0,
 		claudeRoots: opts.ClaudeRoots, codexHomes: opts.CodexHomes, openCodeRoot: opts.OpenCodeRoots,
-		scan: newScanState(), global: newGlobals(),
+		ledgerDir: opts.LedgerDir,
+		scan:      newScanState(), global: newGlobals(),
 	}
 	if a.loc == nil {
 		a.loc = time.Local
@@ -216,5 +224,6 @@ func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 		Args: args, Stdout: stdout, Stderr: stderr, Clock: clock.Real, Env: paths.OSEnv{}, Location: time.Local,
 		ClaudeRoots: runtime.Paths.Roots[pfmengine.Claude], CodexHomes: runtime.Paths.Roots[pfmengine.Codex],
 		OpenCodeRoots: runtime.Paths.Roots[pfmengine.OpenCode], Served: modelcost.MachineOptions(runtime),
+		LedgerDir: paths.CostLedgerDir(paths.OSEnv{}, runtime.Paths.Home),
 	})
 }

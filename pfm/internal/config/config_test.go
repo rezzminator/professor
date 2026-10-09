@@ -145,6 +145,7 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
 		Cache1H:               true,
+		CostLedger:            true,
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -303,6 +304,7 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
 		Cache1H:               true,
+		CostLedger:            true,
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {

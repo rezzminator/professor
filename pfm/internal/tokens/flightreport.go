@@ -347,7 +347,10 @@ func (a *auditor) runFlight(ctx context.Context) (int, error) {
 	if total.usd != 0 {
 		ratio = fixed(total.lc/total.usd, 2)
 	}
-	out = append(out, "", a.gapsLine(), "",
+	ledger := a.flightLedgerLines(m.matched)
+	out = append(out, "", a.gapsLine(), "")
+	out = append(out, ledger...)
+	out = append(out, "",
 		"cross-check: at the published context tiers (per-model rate in the pfm model-cost table — an estimate) this "+
 			"flight reads $"+fixed(total.lc, 2)+" ("+ratio+"x the headline). The harness writes its own cost-state line "+
 			"only for a main chat, and a flight's agents are sub-runs, so these dollars are UNCHECKED against the harness "+
@@ -402,6 +405,9 @@ func (a *auditor) writeFlightOut(dir, startISO, endISO string, total flightFold,
 		set("baseline", a.flight.baseline).set("window", []string{startISO, endISO}).set("scan", a.scan.json()).
 		set("total", total.json()).set("rows", rows).set("unmatched", unmatchedList).
 		set("unledgered", newObject().set("n", len(unledgered)).set("usd", fixedNum(usd, 4)).set("unpriced", unpriced))
+	if sessions, ok := a.ledgerJSON(); ok {
+		document.set("costLedger", sessions)
+	}
 	if _, err := writeOutput(a.opts.out, stringify(document, 1)); err != nil {
 		return err
 	}

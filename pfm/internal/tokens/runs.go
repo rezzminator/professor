@@ -190,6 +190,7 @@ func (a *auditor) collectRuns() error {
 		return err
 	}
 	a.scan.roots = domain
+	a.transcripts = files
 	owners := a.callOrigins(files)
 	session := a.opts.session
 	skipped := 0

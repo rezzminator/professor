@@ -49,6 +49,24 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				}
 				return
 			}
+			if knob.Wire == WireWrapper {
+				if len(launch.Wrapper) != 4 || launch.Wrapper[1] != "internal" || launch.Wrapper[2] != "cost-launch" {
+					t.Errorf("wrapper=%q, want the cost launcher", launch.Wrapper)
+				}
+				return
+			}
+			if knob.Wire == WireWrapperEnv {
+				// Only the wrapper knows the sink's port, so Render itself sets none of these.
+				if !slices.Contains(CostEnvNames(), knob.Target) {
+					t.Errorf("%s is not among CostEnvNames", knob.Target)
+				}
+				for _, entry := range launch.Env {
+					if strings.HasPrefix(entry, knob.Target+"=") {
+						t.Errorf("Render set %s, which only the wrapper may set", entry)
+					}
+				}
+				return
+			}
 			switch knob.Name {
 			case "configDir":
 				if !slices.Contains(launch.Env, "CLAUDE_CONFIG_DIR="+machine.Accounts[1].ConfigDir) {

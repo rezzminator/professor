@@ -213,6 +213,8 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | `doctor` → refreshes the price table (24 h window) and prints one `doctor: prices rows=… refresh=…` row; a failed fetch, an unpersisted refresh, a stamp problem, an unusable clone file and an invalid override are each one named warning; `offline` and `current` are none | JAIL | `internal/doctor/price_checks.go`; `internal/doctor/price_checks_test.go` | |
 | `mcp` → stdio server; any arg → rc 2 | JAIL | `main.go:69-93` | |
 | `internal kill-exit --engine…` → detached finisher; missing flags → rc 2 | JAIL+tmux | `main.go:250-299`, `kill/finisher.go:94-144` | |
+| `internal cost-launch -- {claude} …` → arms a detached cost sink on 127.0.0.1, keeps its pid, execs Claude with the exporter env and a `PFM_COST_LEDGER` marker; the user's own telemetry settings pre-empt it; no arguments → rc 2, a missing Claude → rc 127 | JAIL | `costsink/launch.go`, `cmd/pfm/internal_cost_test.go` (`TestCostLaunchArmsASinkKeepsThePidAndHandsClaudeOnlyTheEnvironment`, `TestCostLaunchKeepsTheUsersOwnTelemetryAndRunsWithoutALedger`, `TestCostVerbsRefuseWithoutTheirArguments`) | no real Claude: a shell script records pid, env and fds |
+| `internal cost-sink --pid N --start S` → serves OTLP/HTTP JSON on the inherited fd 3, joins `api_request` logs and `llm_request` spans into `cost-ledger/{session}.jsonl`, drains and exits once process N is gone; no arguments → rc 2 | JAIL | `costsink/command.go`, `costsink/lifecycle.go`, `cmd/pfm/internal_cost_test.go` | the OTLP replay fixture is a sanitized capture (`costsink/testdata/`) |
 | `internal then …` → steer waiter | JAIL+tmux | `main.go:251-253`, `inject/then.go` | |
 
 ### A.2 — Doctor probe classification

@@ -7,12 +7,16 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/costledger"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/tokens"
@@ -309,5 +313,138 @@ func TestReadTranscriptSpendMarksAnUnknownIterationAsAFloor(t *testing.T) {
 	}
 	if !spend.partial || spend.priced != 1 || math.Abs(spend.usd-(1000*2.0+100*10.0)/1e6) > 1e-12 {
 		t.Errorf("%+v; want the top level priced and the sum a floor", spend)
+	}
+}
+
+const (
+	// ledgerSampleSession is the session of costledger's sample-15.jsonl: 15 rows, $1.2941 — the
+	// main thread $0.340251 and the top-level agent a..02 with its children a..01 and a..03
+	// $0.953849 (a..02 alone $0.787435, a..01 $0.078574, a..03 $0.08784).
+	ledgerSampleSession = "00000000-0000-4000-8000-0000000000a1"
+	ledgerAgentRoot     = "a0000000000000002"
+	ledgerAgentFirst    = "a0000000000000001"
+	ledgerAgentSecond   = "a0000000000000003"
+)
+
+// useLedgerSample copies the sample ledger into a fresh ledger directory, points the process at it,
+// and returns that directory.
+func useLedgerSample(t *testing.T) string {
+	t.Helper()
+	sample, err := os.ReadFile(filepath.Join("..", "costledger", "testdata", "sample-15.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ledgerSampleSession+".jsonl"), sample, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCostLedgerDir, dir)
+	return dir
+}
+
+func ledgerTask(id string) string {
+	return `{"id":"` + id + `","type":"local_agent","status":"running","startTime":1790244000000,` +
+		`"model":"claude-opus-5-5","contextWindowSize":1000000,"tokenCount":1000}`
+}
+
+// renderLedgerRows renders the tasks of one session and returns each row's content, ANSI stripped.
+func renderLedgerRows(t *testing.T, sessionID, session string, ids ...string) map[string]string {
+	t.Helper()
+	tasks := make([]string, 0, len(ids))
+	for _, id := range ids {
+		tasks = append(tasks, ledgerTask(id))
+	}
+	payload := `{"session_id":` + jsonText(sessionID) + `,"transcript_path":` + jsonText(session) +
+		`,"cwd":"/work/repo","tasks":[` + strings.Join(tasks, ",") + `]}`
+	var warn bytes.Buffer
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), &warn)
+	if err != nil {
+		t.Fatalf("RenderSubagents: %v", err)
+	}
+	rows := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		var row subagentRow
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("row is not JSON: %v: %q (warn %q)", err, line, warn.String())
+		}
+		rows[row.ID] = stripANSICodes(row.Content)
+	}
+	return rows
+}
+
+// With a ledger a row's dollars and tokens are the ledger rows of that agent and every agent below
+// it, side calls included, the tree taken from the rows' parent_agent_id (agent a..03 has no meta
+// file at all) and the meta files. The main line's one dollar amount is the ledger total, and it is
+// the main thread's own rows plus every top-level row.
+func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
+	useLedgerSample(t)
+	session := nestedSession(t,
+		map[string][]string{ledgerAgentRoot: agentTranscriptLines, ledgerAgentFirst: agentTranscriptLines},
+		map[string]string{ledgerAgentRoot: "", ledgerAgentFirst: ledgerAgentRoot})
+	rows := renderLedgerRows(t, ledgerSampleSession, session, ledgerAgentRoot, ledgerAgentFirst, ledgerAgentSecond)
+	for id, want := range map[string]string{
+		ledgerAgentRoot:   "$0.95/740.0K/3.2K/",
+		ledgerAgentFirst:  "$0.08/224.3K/1.2K/2",
+		ledgerAgentSecond: "$0.09/224.5K/1.4K/?",
+	} {
+		if !strings.Contains(rows[id], "1.0K/1.0M "+want) {
+			t.Errorf("row %s = %q, want the gauge followed by %q", id, rows[id], want)
+		}
+	}
+
+	var mainRows float64
+	ledger, err := costledger.ForSession(os.Getenv(paths.EnvCostLedgerDir), ledgerSampleSession)
+	if err != nil || len(ledger.Rows) != 15 {
+		t.Fatalf("sample ledger = %d rows, %v; want 15", len(ledger.Rows), err)
+	}
+	for _, row := range ledger.Rows {
+		if row.AgentID == "" {
+			mainRows += float64(*row.CostUSDMicros) / 1e6
+		}
+	}
+	data := input{SessionID: ledgerSampleSession}
+	runtime := Runtime{
+		Home:   t.TempDir(),
+		Engine: pfmengine.Claude,
+		Prices: testPrices(t),
+		Env: map[string]string{
+			paths.EnvCostLedgerDir:     os.Getenv(paths.EnvCostLedgerDir),
+			claudelaunch.EnvCostLedger: "on",
+		},
+	}
+	_, line, _ := renderContextLine(runtime, data, "", subagentNow)
+	amount := regexp.MustCompile(`\$(\d+\.\d{2})`)
+	totalText := amount.FindStringSubmatch(stripANSICodes(line))
+	topText := amount.FindStringSubmatch(rows[ledgerAgentRoot])
+	if totalText == nil || topText == nil {
+		t.Fatalf("no dollar amount: main line %q, root row %q", stripANSICodes(line), rows[ledgerAgentRoot])
+	}
+	total, _ := strconv.ParseFloat(totalText[1], 64)
+	top, _ := strconv.ParseFloat(topText[1], 64)
+	if math.Abs(mainRows+top-total) > 0.0051 {
+		t.Errorf("main rows $%.4f + top-level row $%.2f != ledger total $%.2f on the main line", mainRows, top, total)
+	}
+}
+
+// An agent the ledger has no row for yet (its calls reach the ledger up to 20 s late) keeps today's
+// transcript pricing; an advisor consulted by a ledger-priced agent stays its own "adv $X".
+func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
+	dir := useLedgerSample(t)
+	if err := costledger.Append(dir, costledger.Row{
+		RequestID: "req_adv", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "adv1",
+		QuerySource: "agent:builtin:general-purpose", Model: "claude-sonnet-5-5", InputTokens: 10, OutputTokens: 20,
+		CostUSDMicros: micros(1_000_000), Join: costledger.JoinLogSpan,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := nestedSession(t,
+		map[string][]string{"fresh": agentTranscriptLines, "adv1": {advisorResponse("claude-opus-5-5")}},
+		map[string]string{"fresh": "", "adv1": ""})
+	rows := renderLedgerRows(t, ledgerSampleSession, session, "fresh", "adv1")
+	if want := "1.0K/1.0M $0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
+		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
+	}
+	if want := "1.0K/1.0M $1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
+		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
 	}
 }

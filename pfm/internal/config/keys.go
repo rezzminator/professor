@@ -16,6 +16,10 @@ const (
 // -alpha build installs each plugin from a copy of its checkout there.
 const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
 
+// KeyClaudeCostLedger is the machine-wide switch of the per-call cost ledger:
+// false launches Claude without the OTel knobs and starts no cost sink.
+const KeyClaudeCostLedger = "claude.costLedger"
+
 // KeyDefault describes a machine-config leaf and the value shown by the
 // tracked example when the key is unset. Roster arrays are intentionally
 // absent: accounts are discovered from the local machine.
@@ -45,6 +49,7 @@ func Keys() []KeyDefault {
 		{"claude.maxSubagentSpawnDepth", DefaultSubagentSpawnDepth},
 		{"claude.maxConcurrentSubagents", nil},
 		{KeyClaudePluginCheckoutRoot, nil},
+		{KeyClaudeCostLedger, true},
 		{"codex.yolo", true},
 		{"codex.binary", pfmengine.MustLookup(pfmengine.Codex).Binary},
 		{"opencode.binary", pfmengine.MustLookup(pfmengine.OpenCode).Binary},

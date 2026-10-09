@@ -319,7 +319,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 		"templates/project/epics/TEMPLATE.md":                              "# Epic\n",
 		"templates/project/codex/config.toml":                              "model=\"x\"\n",
 		"templates/project/docs-commands/git/references/gitter-history.md": "# Gitter History\n",
-		"templates/project/docs-agents/_index.md":                          "# Agents\n",
+		"templates/project/docs-hub/_index.md":                             "# Documentation Hub\n",
 	} {
 		writeProjectFixtureFile(t, noGitStore, relative, content)
 	}
@@ -799,7 +799,7 @@ func newAdoptAtStoreFixture(t *testing.T) (store, oldSHA, headSHA string) {
 		"templates/project/epics/TEMPLATE.md":                              "# Epic\n",
 		"templates/project/codex/config.toml":                              "model = \"{TOKEN}\"\n",
 		"templates/project/docs-commands/git/references/gitter-history.md": "# Gitter History\n",
-		"templates/project/docs-agents/_index.md":                          "# Agents\n",
+		"templates/project/docs-hub/_index.md":                             "# Documentation Hub\n",
 	} {
 		writeProjectFixtureFile(t, root, relative, content)
 	}
@@ -1014,7 +1014,7 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "# Gitter History\n",
 			mode:    0o600,
 		},
-		"templates/project/docs-agents/_index.md": {content: "# Agents\n", mode: 0o600},
+		"templates/project/docs-hub/_index.md": {content: "# Documentation Hub\n", mode: 0o600},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))

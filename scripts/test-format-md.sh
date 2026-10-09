@@ -76,6 +76,20 @@ STUB_CHECK_RC=1 STUB_CHECK_OUT='src/b.md:1:1: [MD041] x' hook "$R/src/b.md"
 if [[ $RC == 0 && -z $ERR ]]; then ok "a file outside the owned paths is left alone"
 else bad "a file outside the owned paths" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
+# The docs hub owns docs/_index.md, docs/standards.md and its clusters; any other
+# docs/ root file is the adopter's own.
+mkdir -p "$R/docs/architecture/data" "$R/docs/api" "$R/docs/map"
+for owned in docs/_index.md docs/standards.md docs/architecture/data/flow.md docs/api/_index.md docs/map/_index.md; do
+  printf '# T\n' > "$R/$owned"
+  STUB_CHECK_RC=1 STUB_CHECK_OUT="$owned:1:1: [MD041] x" hook "$R/$owned"
+  if [[ $RC == 2 && $ERR == *"UNFIXED $owned:1:1 MD041"* ]]; then ok "the hub file $owned is formatted"
+  else bad "the hub file $owned" "rc $RC (want 2)" "stderr: ${ERR:-<empty>}"; fi
+done
+printf '# T\n' > "$R/docs/notes.md"
+STUB_CHECK_RC=1 STUB_CHECK_OUT='docs/notes.md:1:1: [MD041] x' hook "$R/docs/notes.md"
+if [[ $RC == 0 && -z $ERR ]]; then ok "a docs/ root file outside the hub is left alone"
+else bad "a docs/ root file outside the hub" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
+
 # A committed baseline belongs to a second repo; the cases above have no HEAD.
 C="$(cd "$T" && pwd -P)/committed"
 mkdir -p "$C/docs/dev" && git -C "$C" init -q &&

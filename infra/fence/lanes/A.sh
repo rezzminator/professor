@@ -244,7 +244,7 @@ for single in CLAUDE.md settings.json rumdl-policy.toml; do
   [ -f "$STORE_T/project/$single" ] && expected=$((expected + 1))
 done
 expected=$((expected + $(find "$STORE_T/project/agents" "$STORE_T/project/scripts" "$STORE_T/project/skills" \
-  "$STORE_T/project/epics" "$STORE_T/project/codex" "$STORE_T/project/docs-commands" "$STORE_T/project/docs-agents" \
+  "$STORE_T/project/epics" "$STORE_T/project/codex" "$STORE_T/project/docs-commands" "$STORE_T/project/docs-hub" \
   -type f 2>/dev/null | wc -l | tr -d ' ')))
 expected=$((expected + $(find "$STORE_T/project/commands" -type f -not -path "$STORE_T/project/commands/per-project/*" 2>/dev/null | wc -l | tr -d ' ')))
 out="$(cd "$INIT_DIR" && pfm init . 2>&1)"
@@ -258,10 +258,10 @@ grep -qF "follow $SOURCE_REPO/docs/SETUP.md § Install interview" <<<"$out" ||
   bad="$bad the handoff line does not name $SOURCE_REPO/docs/SETUP.md;"
 pinned="$(jq '.files | length' "$INIT_DIR/.professor/baseline.json" 2>/dev/null)"
 [ "$pinned" = "$expected" ] || bad="$bad baseline.json pins ${pinned:-<unreadable>} file(s), want $expected;"
-for local_path in CLAUDE.md .claude/settings.json .rumdl.toml .claude/agents/gitter.md; do
+for local_path in CLAUDE.md .claude/settings.json .rumdl.toml .claude/agents/gitter.md docs/_index.md; do
   [ -f "$INIT_DIR/$local_path" ] || bad="$bad $local_path not deployed;"
 done
-for dir in .claude/commands .claude/scripts .claude/skills docs/epics .codex docs/commands docs/agents; do
+for dir in .claude/commands .claude/scripts .claude/skills docs/epics .codex docs/commands; do
   [ -d "$INIT_DIR/$dir" ] || bad="$bad $dir/ not deployed;"
 done
 [ -e "$INIT_DIR/.claude/commands/per-project" ] && bad="$bad .claude/commands/per-project was deployed (P5: the testing manual is interview-deployed, one per roster entry);"

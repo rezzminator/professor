@@ -35,7 +35,7 @@ var initTemplatePaths = []struct {
 	{source: "project/epics", target: "docs/epics"},
 	{source: "project/codex", target: ".codex"},
 	{source: "project/docs-commands", target: "docs/commands"},
-	{source: "project/docs-agents", target: "docs/agents"},
+	{source: "project/docs-hub", target: "docs"},
 }
 
 type initCopy struct {
@@ -186,6 +186,19 @@ func planInitCopies(store Store) ([]initCopy, error) {
 		}
 	}
 	sort.Slice(plan, func(i, j int) bool { return plan[i].local < plan[j].local })
+	// Mappings nest (project/docs-hub deploys into docs/, the parent of
+	// docs/epics and docs/commands): two templates on one local path would
+	// overwrite each other's file and pin, so the store is refused.
+	for i := 1; i < len(plan); i++ {
+		if plan[i].local == plan[i-1].local {
+			return nil, fmt.Errorf(
+				"templates %s and %s both deploy to %s",
+				plan[i-1].template,
+				plan[i].template,
+				plan[i].local,
+			)
+		}
+	}
 	return plan, nil
 }
 

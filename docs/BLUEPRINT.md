@@ -224,7 +224,7 @@ your-project/
 │   └── .claude/agents/
 ├── {dir}/.professor/workbench.json     ← (OPTIONAL) marks a workbench: /pfm:workbench
 ├── docs/
-│   ├── agents/                        ← cross-project permanent docs (architecture, API, map, features)
+│   ├── _index.md                      ← docs hub: cross-project permanent docs (architecture, API, map, features), one docs/{cluster}/ each
 │   └── commands/{cmd}/                ← command-owned docs ($CDOCS root)
 │       ├── references/                ← must-know
 │       ├── research/                  ← looked-up material

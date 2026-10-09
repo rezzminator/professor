@@ -92,7 +92,7 @@
     "skills_source_fetched": {},
     "deliberately_absent": {
       "notify.sh + filter-test-output.sh": "not wired: no notification surface and no test-output filter on this host",
-      "docs/agents/ cluster + /documenter": "no permanent cross-project doc tree in a template repo"
+      "docs hub (docs/_index.md, docs/standards.md)": "no permanent cross-project doc tree in a template repo"
     }
   },
   "file_hashes": {
@@ -109,7 +109,7 @@
     ".claude/scripts/check-templates.sh": "13f6d2180c45713f03edeabd832187c5baa5e6ff27a30f3fa1920b5c0e354218",
     ".claude/scripts/codex-sync.sh": "19763efc32496fcbd35fd069c49c92f30c0418983b652990e21baad28481bb31",
     ".claude/scripts/dev.sh": "4a32e7251b21304641ce9c46a77a7995d14f71f52752a2feb1355013b568e6af",
-    ".claude/scripts/format-md.sh": "92d0c09b66fb4d6809d881386e87916af5df3be25caeef5a5998f82e17cc3919",
+    ".claude/scripts/format-md.sh": "14c70500c42a21ee2c4dcbd0e2f93035e8a0605090334aed5a9012e3be4cd3e0",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
     ".claude/scripts/pfm-guard.sh": "c6b58ba494ff2b7640d4a0a78f6c8e3f5e5f7f5aac93ed1adb8e30d8adab1314",
     ".claude/scripts/test-pfm.sh": "a3a1f9e91a22f7fa54a965c6b2cf3fa80ce56276354a7f5836afe27032a0c34d",
@@ -120,7 +120,7 @@
     ".gitignore": "63762ca24273ad79725a09efaf6188e376767987ce5603d549521fa681d1df12",
     "CLAUDE.md": "0287119ecfd3de60018b0b24b15235553dbb611af327c87a083db632a785a98c",
     "docs/commands/pcm/references/audit-scopes.md": "3b60a73eaef4477265a18a8e125046c4a188b5b2bad7b48b2d1c0320fbb5d63a",
-    "docs/commands/pcm/references/refresh.md": "a0a9aac0a6fd5ba51a87459b041d9af5460b520db2d7cf738ae2496bdc4df42c",
+    "docs/commands/pcm/references/refresh.md": "5cc0324655faedffda704d32b1a80e92d490018f3d08b09988b16253cb204daa",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
     "pfm/CLAUDE.md": "2b6da4c4d11332d9a20d9ab0e21e41576b181ac259544421236a41bb25d4a7ff"
   }

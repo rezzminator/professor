@@ -2,7 +2,7 @@
 
 Entry point for {PROJECT_NAME}'s documentation. This **Reference tier** records the current state of the system; the **Narrative tier** (`docs/epics/`) records why decisions were made; **Raw build artifacts** (`docs/dev/builds/`) preserve per-pipeline notes. Reference docs are clustered — read a cluster's `_index.md` (cheap), then open the one topic file you need.
 
-Cross-project docs live under `docs/agents/`; single-project internals live under each `{project}/docs/`.
+Cross-project docs live in the clusters below (`docs/{cluster}/`); single-project internals live under each `{project}/docs/`.
 
 <!-- INSTALL: the cluster rows below are the standard set. SETUP Phase 2.7 creates each
      cluster directory + its _index.md from the codebase. If a cluster is deferred (Phase 2.7,
@@ -10,7 +10,7 @@ Cross-project docs live under `docs/agents/`; single-project internals live unde
      a file that does not exist. A single-project install keeps this same hub; "cross-project"
      simply collapses to the one project. -->
 
-## Cross-Project Reference (`docs/agents/`)
+## Cross-Project Reference (`docs/{cluster}/`)
 
 | Area | Index | Covers |
 | ------------ | ------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -28,10 +28,10 @@ Cross-project docs live under `docs/agents/`; single-project internals live unde
 
 | Project | Index / Doc | Covers |
 | --------- | -------------------------------------------------- | ---------------------------------------- |
-| {project} | [architecture/\_index.md]({project}/docs/architecture/_index.md) | Project-internal architecture |
+| {project} | [architecture/\_index.md](../{project}/docs/architecture/_index.md) | Project-internal architecture |
 
 ## Other Doc Tiers
 
-- **Narrative — Epics** ([`docs/epics/`](../epics/)): initiative-level context; each has a `manifest.md` (Vision & Scope, Key Decisions, Progress Log, Discoveries).
+- **Narrative — Epics** ([`docs/epics/`](epics/)): initiative-level context; each has a `manifest.md` (Vision & Scope, Key Decisions, Progress Log, Discoveries).
 - **Command / tooling references** (`docs/commands/{cmd}/references/`): per-command protocol + resource docs.
 - **Raw build artifacts** (`docs/dev/builds/`): per-pipeline working notes from a build run.

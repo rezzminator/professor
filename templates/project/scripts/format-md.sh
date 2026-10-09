@@ -54,7 +54,7 @@ case "$REL_PATH" in
   CLAUDE.md) ;;
   .claude/*.md) ;;
   docs/commands/*.md) ;;
-  docs/agents/*.md) ;;
+  docs/_index.md|docs/standards.md|docs/architecture/*.md|docs/api/*.md|docs/map/*.md) ;;
   docs/references/*.md) ;;
   docs/features/*.md) ;;
   docs/runbooks/*.md) ;;

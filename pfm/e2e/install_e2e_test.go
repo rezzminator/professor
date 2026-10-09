@@ -613,7 +613,7 @@ func (h *e2eHarness) assertInit(project, source string) {
 		{"epics", "docs/epics", ""},
 		{"codex", ".codex", ""},
 		{"docs-commands", "docs/commands", ""},
-		{"docs-agents", "docs/agents", ""},
+		{"docs-hub", "docs", ""},
 	} {
 		sourceDir := filepath.Join(templates, mapping.source)
 		targetDir := filepath.Join(project, mapping.target)

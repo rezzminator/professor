@@ -76,7 +76,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 		writeProjectUpdatesFixture(t, store, relative, content)
 	}
 	for _, dir := range []string{
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-agents",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
 	} {
 		if err := os.MkdirAll(filepath.Join(store, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)

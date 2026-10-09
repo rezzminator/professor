@@ -61,7 +61,7 @@ Read, never write:
 - `docs/epics/legal/manifest.md` § Compliance Posture — compliance boundaries, regulatory classification
 - `{PROJECT}/messages/{{TARGET_LANGUAGE},en}.json` + `{PROJECT}/src/constants/landing-copy.ts` — live copy
 - `{PROJECT}/CLAUDE.md` — its conventions and Ethics rules
-- grep the code; `docs/agents/architecture/` (start at `_index.md`) and `docs/facts/` (ratified system invariants) — technical accuracy
+- grep the code; `docs/architecture/` (start at `_index.md`) and `docs/facts/` (ratified system invariants) — technical accuracy
 
 ## The Three-Layer Model
 

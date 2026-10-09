@@ -17,8 +17,8 @@
     ".claude/scripts/*.mjs",
     ".claude/workflows/*.js",
     "{project:backend}/CLAUDE.md",
-    "docs/agents/_index.md",
-    "docs/agents/standards.md",
+    "docs/_index.md",
+    "docs/standards.md",
     ".claude/skills/legal/**",
     "docs/references/*"
   ],
@@ -182,12 +182,6 @@
         ".claude/commands/rnd.md": "398a09d18a16b286d5552dd1b3ebb57fb908368107b5daa2da3e1d5425cc8506"
       }
     },
-    "project/docs-agents/_index.md": {
-      "curated": true
-    },
-    "project/docs-agents/standards.md": {
-      "curated": true
-    },
     "project/docs-commands/build/references/qa-commons.md": {
       "curated": true
     },
@@ -215,6 +209,12 @@
       "sources": {
         "docs/references/gitter-phase-setup.md": "0ad4ff2e1d174e8db9fcb652fd6bd42d4fd7679395cba7205f90e6a1bbe1502c"
       }
+    },
+    "project/docs-hub/_index.md": {
+      "curated": true
+    },
+    "project/docs-hub/standards.md": {
+      "curated": true
     },
     "project/epics/TEMPLATE.md": {
       "curated": true

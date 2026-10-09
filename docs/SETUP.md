@@ -253,7 +253,7 @@ Claude takes your answers and:
 
 7b-i. **Installs global settings** — `pfm install` manages `cleanupPeriodDays` in the Claude managed-settings directory, using sudo when required. It preserves other keys and writes no cleanup key into account `settings.json`; doctor inspects the managed file for missing, wrong and unreadable states.
 
-7c. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, `docs/agents/`, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files and generated mirrors are ignored. Add to `.claude/settings.json`:
+7c. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, the docs hub (`docs/_index.md`, `docs/standards.md`) and its `architecture/`, `api/`, `map/` and `features/` clusters, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files and generated mirrors are ignored. Add to `.claude/settings.json`:
 
     ```json
     {
@@ -285,7 +285,7 @@ Claude takes your answers and:
 
 7f. **Installs themes** — places each Claude Code theme listed in `templates/themes/sources.json` into `~/.claude/themes/`: `source_fetched` entries are fetched from their canonical public repo (the blueprint never vendors a copy, so it can't drift); `bundled` entries ship beside the manifest — today three overlays merged onto the fetched Tokyo Night, `professor-gold` / `professor-silver` / `professor-bronze`, one per fleet account medal (🥇🥈🥉), each changing only the input bar (`promptBorder` + `promptBorderShimmer`) — selected per account with `"theme": "custom:professor-gold"` in that account's `settings.json`. For `tokyo-night`: `mkdir -p ~/.claude/themes && curl -fsSL https://raw.githubusercontent.com/rezzminator/claude-code-tokyo-night/main/tokyo-night.json -o ~/.claude/themes/tokyo-night.json`. Activate with `/theme` → "Tokyo Night" (requires Claude Code v2.1.118+). Themes install to the user's home, so they are shared across all the user's projects. To match the terminal's own base background to the theme (VS Code `terminal.background`, or the profile background in iTerm2/Apple Terminal/Ghostty/Kitty/WezTerm), follow the theme repo README: <https://github.com/rezzminator/claude-code-tokyo-night#match-your-terminal-background-optional>.
 
-8. **Creates directory structure** — `docs/agents/`, `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored). Flight directories live in pfm's state directory: `$HOME/.local/state/pfm/flights/{project}/{flight}/` is created by the run itself, outside the repo entirely, and kept across reboots.
+8. **Creates directory structure** — `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored). Flight directories live in pfm's state directory: `$HOME/.local/state/pfm/flights/{project}/{flight}/` is created by the run itself, outside the repo entirely, and kept across reboots.
 
 8a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/build/references/qa-commons.md` → `docs/commands/build/references/qa-commons.md`), so commands that cite a reference doc find it on disk.
 
@@ -369,11 +369,11 @@ Claude takes your answers and:
 
 The `interview` field records the choices needed to understand the install; it is not an instruction to regenerate project files. `tokens` is read only by `pfm init --render`; an update never reads it. Per-file upstream comparison state lives only in `.professor/baseline.json`, whose hashes cover template bytes with tokens intact.
 
-### 2.7 Documentation scaffold (`docs/agents/`)
+### 2.7 Documentation scaffold (`docs/_index.md`)
 
 The main-loop session and every executor read a documentation hub that must exist on disk, or their references dangle. Seed it from the shipped skeletons:
 
-1. `pfm init` scaffolds `docs/agents/_index.md` and `docs/agents/standards.md` from `templates/project/docs-agents/`, and `pfm init --render` fills their `{PROJECT_NAME}` from `tokens`; fill their roster tokens in place like every other scaffolded file — never copy the template over the rendered file.
+1. `pfm init` scaffolds `docs/_index.md` and `docs/standards.md` from `templates/project/docs-hub/`, and `pfm init --render` fills their `{PROJECT_NAME}` from `tokens`; fill their roster tokens in place like every other scaffolded file — never copy the template over the rendered file.
 2. **If the project has enough code to document** → the main-loop session builds the clusters (architecture, api, map, features) from the codebase under `/quality:doc`, each with its own `_index.md`, and runs the Approval gate over each.
 3. **If the project is too new** (no code yet, or the adopter skipped stack details) → defer, mirroring the empty-skill hydration pattern: keep the seeded hub + standards skeleton, leave the cluster rows pointing at to-be-created indexes, and note that the main-loop session fills them when the codebase exists. The hub must never reference a cluster file that is absent without marking it deferred.
 
@@ -469,7 +469,7 @@ Same for adding a new Tier A archetype if you build one — `/pcm` copies the te
 1. **Worktree script can't find your tools.** Make sure your shell environment is loaded inside the script — `source ~/.zshrc`, use absolute paths, or pin tool versions in a script-local `PATH`.
 2. **Port allocation false positives.** `lsof -i :PORT` checks aren't always reliable across IPv4/IPv6 — adjust the script if you see false positives on your OS.
 3. **Gitter tries to merge with conflicts unresolved.** That's a gap in your gitter setup; the template handles it, but if you simplified, restore the conflict-detection block.
-4. **Agents writing to permanent docs.** Only the main-loop session should write to `docs/agents/` or `{project}/docs/`; a command-owned surface (`docs/business/**`) is written only by its owning command. If another agent tries, that's a `/pcm` fix at the source agent.
+4. **Agents writing to permanent docs.** Only the main-loop session should write to the docs hub (`docs/_index.md` and the clusters it links) or `{project}/docs/`; a command-owned surface (`docs/business/**`) is written only by its owning command. If another agent tries, that's a `/pcm` fix at the source agent.
 5. **`.worktrees/.ports` corrupted.** Manually edit; the format is one whitespace-separated line per pipeline.
 6. **Character feels generic after install.** You probably stripped voice instead of parameterizing content. Voice is non-negotiable — adapt content, preserve character. Invoke `/pcm` and tell it which command lost its voice.
 

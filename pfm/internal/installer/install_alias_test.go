@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInstallFromAliasUsesPhysicalCloneForShellAndGlobalLinks(t *testing.T) {
 	home, clone, alias := aliasInstallFixture(t)
+	record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
 	if _, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t), SourceRepo: alias,
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
@@ -28,9 +31,14 @@ func TestInstallFromAliasUsesPhysicalCloneForShellAndGlobalLinks(t *testing.T) {
 	for _, entry := range []struct{ target, source string }{
 		{filepath.Join(home, ".claude", "commands", "fixture.md"), filepath.Join(physical, "templates", "global", "commands", "fixture.md")},
 		{filepath.Join(home, ".claude", "skills", "fixture"), filepath.Join(physical, "templates", "global", "skills", "fixture")},
-		{filepath.Join(home, ".claude", "agents", "fixture.md"), filepath.Join(physical, "templates", "global", "agents", "fixture.md")},
 	} {
 		assertLink(t, entry.target, entry.source)
+	}
+	// The agents are engine-sync global's: it is handed the physical clone.
+	for _, call := range testjail.EngineSyncCalls(t, record) {
+		if !strings.Contains(call, " --source-repo "+physical+" ") {
+			t.Fatalf("engine-sync call %q does not name the physical clone %s", call, physical)
+		}
 	}
 }
 

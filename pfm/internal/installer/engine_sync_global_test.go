@@ -1,0 +1,325 @@
+package installer
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+)
+
+// engineSyncGlobalEngine is an installer over home whose source clone is
+// home/blueprint, its store home/.claude and its one Codex home home/.codex.
+func engineSyncGlobalEngine(t *testing.T, mode Mode, codexHomes []string) (*engine, *bytes.Buffer, string) {
+	t.Helper()
+	home := t.TempDir()
+	if codexHomes == nil {
+		codexHomes = []string{filepath.Join(home, ".codex")}
+	}
+	var output bytes.Buffer
+	return &engine{
+		options: Options{
+			Home:       home,
+			ConfigDir:  filepath.Join(home, ".claude"),
+			SourceRepo: filepath.Join(home, "blueprint"),
+			CodexHomes: codexHomes,
+			Mode:       mode,
+			Stdout:     &output,
+		},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       mode != ModeDryRun,
+		stamp:       "fixture",
+	}, &output, home
+}
+
+const everyEventReply = `{"ok":true,"events":[` +
+	`{"verb":"change","message":"link /h/.claude/agents/a.md -> /r/templates/global/agents/a.md"},` +
+	`{"verb":"retire","message":"retire /h/.codex/agents/x.toml (retired generated Codex agent)",` +
+	`"path":"/h/.codex/agents/x.toml"},` +
+	`{"verb":"skip","message":"no Codex accounts configured — agent mirror has nothing to write"},` +
+	`{"verb":"ok","message":"Codex global agents compiled=1 linked=1"}],"error":""}`
+
+func TestWireEngineSyncGlobalRendersEveryEvent(t *testing.T) {
+	installer, output, home := engineSyncGlobalEngine(t, ModeApply, nil)
+	record := testjail.FakeEngineSync(t, everyEventReply, 0)
+	if err := installer.wireEngineSyncGlobal(nil); err != nil {
+		t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
+	}
+	want := "  change  link /h/.claude/agents/a.md -> /r/templates/global/agents/a.md\n" +
+		"  change  retire /h/.codex/agents/x.toml (retired generated Codex agent)\n" +
+		"  skip    no Codex accounts configured — agent mirror has nothing to write\n" +
+		"  ok      Codex global agents compiled=1 linked=1\n"
+	if output.String() != want {
+		t.Fatalf("transcript:\n%s\nwant:\n%s", output.String(), want)
+	}
+	if report := installer.report; report.Changed != 2 || report.OK != 1 || report.Skipped != 1 {
+		t.Fatalf("report = %+v, want changed=2 ok=1 skipped=1", report)
+	}
+	if !installer.removedPaths["/h/.codex/agents/x.toml"] {
+		t.Fatalf("the retired path was not marked removed: %v", installer.removedPaths)
+	}
+	wantArgv := "global --home " + home + " --source-repo " + filepath.Join(home, "blueprint") +
+		" --claude-config-dir " + filepath.Join(home, ".claude") + " --codex-home " + filepath.Join(home, ".codex") +
+		" --json"
+	if calls := testjail.EngineSyncCalls(t, record); len(calls) != 1 || calls[0] != wantArgv {
+		t.Fatalf("engine-sync calls = %q, want [%q]", calls, wantArgv)
+	}
+}
+
+func TestWireEngineSyncGlobalArgv(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       Mode
+		codexHomes []string
+		want       []string
+		absent     []string
+	}{
+		{
+			name: "a dry run plans over the staged future commands",
+			mode: ModeDryRun,
+			want: []string{"--plan", "--source-home "},
+		},
+		{
+			name: "the empty roster", mode: ModeDryRun, codexHomes: []string{},
+			want: []string{"--no-codex-home", "--plan"}, absent: []string{"--source-home", "--codex-home"},
+		},
+		{name: "an uninstall", mode: ModeUninstall, want: []string{"--uninstall"}, absent: []string{"--plan"}},
+		{
+			name: "an uninstall preview", mode: ModeUninstall, want: []string{"--plan", "--uninstall"},
+			absent: []string{"--source-home"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			installer, output, _ := engineSyncGlobalEngine(t, testCase.mode, testCase.codexHomes)
+			if testCase.name == "an uninstall preview" {
+				installer.apply = false
+			}
+			record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+				t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
+			}
+			calls := testjail.EngineSyncCalls(t, record)
+			if len(calls) != 1 {
+				t.Fatalf("engine-sync calls = %q, want one", calls)
+			}
+			for _, want := range testCase.want {
+				if !strings.Contains(calls[0], want) {
+					t.Fatalf("argv %q lacks %q", calls[0], want)
+				}
+			}
+			for _, absent := range testCase.absent {
+				if strings.Contains(calls[0], absent) {
+					t.Fatalf("argv %q carries %q", calls[0], absent)
+				}
+			}
+			if _, staged, found := strings.Cut(calls[0], "--source-home "); found {
+				staged, _, _ = strings.Cut(staged, " ")
+				if _, err := os.Lstat(staged); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("the staged command source %s outlived the plan: %v", staged, err)
+				}
+			}
+		})
+	}
+}
+
+func TestWireEngineSyncGlobalConflictBlocksTheApplyAndIsAPlanError(t *testing.T) {
+	reply := `{"ok":false,"events":[{"verb":"conflict","message":"CONFLICT /h/.codex/prompts/a.md"}],"error":""}`
+	for _, mode := range []Mode{ModeApply, ModeDryRun} {
+		installer, output, _ := engineSyncGlobalEngine(t, mode, nil)
+		testjail.FakeEngineSync(t, reply, 1)
+		err := installer.wireEngineSyncGlobal(nil)
+		if !strings.Contains(output.String(), "  conflict CONFLICT /h/.codex/prompts/a.md\n") {
+			t.Fatalf("mode %d transcript lacks the conflict:\n%s", mode, output.String())
+		}
+		want := "engine-sync global: CONFLICT /h/.codex/prompts/a.md"
+		if mode == ModeApply && (err == nil || err.Error() != want) {
+			t.Fatalf("apply error = %v, want %q", err, want)
+		}
+		if mode == ModeDryRun &&
+			(err != nil || len(installer.planErrors) != 1 || installer.planErrors[0].Error() != want) {
+			t.Fatalf("dry run error = %v planErrors = %v, want one plan error %q", err, installer.planErrors, want)
+		}
+	}
+}
+
+func TestWireEngineSyncGlobalWithoutTheBinaryFailsTheStep(t *testing.T) {
+	installer, _, home := engineSyncGlobalEngine(t, ModeApply, nil)
+	t.Setenv("ENGINE_SYNC_BIN", "")
+	t.Setenv("ENGINE_SYNC_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	err := installer.wireEngineSyncGlobal(nil)
+	stable := filepath.Join(home, ".local", "share", "engine-sync", "bin", "engine-sync")
+	if err == nil || !strings.HasPrefix(err.Error(), "engine-sync binary unavailable: "+stable+": ") {
+		t.Fatalf("wireEngineSyncGlobal = %v, want the unavailable binary at %s", err, stable)
+	}
+}
+
+// targets.json names this install's roster, an empty one as an empty list,
+// is left alone when unchanged and retired by uninstall.
+func TestWireEngineSyncTargetsWritesThenRetires(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		roster []string
+	}{
+		{name: "one Codex home"},
+		{name: "the empty roster", roster: []string{}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			installer, output, home := engineSyncGlobalEngine(t, ModeApply, testCase.roster)
+			installer.options.Env = &paths.MapEnv{
+				Values: map[string]string{"XDG_CONFIG_HOME": filepath.Join(home, "xdg")},
+			}
+			path := filepath.Join(home, "xdg", "engine-sync", "targets.json")
+			if err := installer.wireEngineSyncTargets(); err != nil {
+				t.Fatal(err)
+			}
+			homes := "[]"
+			if testCase.roster == nil {
+				homes = "[\n    \"" + filepath.Join(home, ".codex") + "\"\n  ]"
+			}
+			want := "{\n  \"codexHomes\": " + homes + ",\n" +
+				"  \"claudeConfigDirs\": [\n    \"" + filepath.Join(home, ".claude") + "\"\n  ],\n" +
+				"  \"sourceRepo\": \"" + filepath.Join(home, "blueprint") + "\"\n}\n"
+			if got := readFixture(t, path); got != want {
+				t.Fatalf("targets.json:\n%s\nwant:\n%s", got, want)
+			}
+			if err := installer.wireEngineSyncTargets(); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(output.String(), "  ok      "+path+"\n") {
+				t.Fatalf("an unchanged targets.json was rewritten:\n%s", output.String())
+			}
+			installer.options.Mode = ModeUninstall
+			if err := installer.wireEngineSyncTargets(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("uninstall left %s: %v", path, err)
+			}
+		})
+	}
+}
+
+// pfm install and uninstall reach engine-sync global: the preflight plans,
+// the apply applies, and its events land in the install's own transcript.
+func TestInstallAndUninstallRunEngineSyncGlobal(t *testing.T) {
+	home := t.TempDir()
+	record := testjail.FakeEngineSync(t, everyEventReply, 0)
+	for _, mode := range []Mode{ModeApply, ModeUninstall} {
+		var output bytes.Buffer
+		if _, err := Run(context.Background(), Options{
+			MCPConfigPath: testConfigPath(t),
+			Mode:          mode, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		}); err != nil {
+			t.Fatalf("mode %d: %v\n%s", mode, err, output.String())
+		}
+		if !strings.Contains(output.String(), "  ok      Codex global agents compiled=1 linked=1\n") {
+			t.Fatalf("mode %d transcript lacks engine-sync's events:\n%s", mode, output.String())
+		}
+	}
+	var planned, applied, uninstalled bool
+	for _, call := range testjail.EngineSyncCalls(t, record) {
+		if !strings.HasPrefix(call, "global --home "+home+" ") {
+			t.Fatalf("unexpected engine-sync call %q", call)
+		}
+		switch {
+		case strings.Contains(call, " --uninstall"):
+			uninstalled = true
+		case strings.Contains(call, " --plan"):
+			planned = true
+		default:
+			applied = true
+		}
+	}
+	if !planned || !applied || !uninstalled {
+		t.Fatalf("planned=%t applied=%t uninstalled=%t, want all three", planned, applied, uninstalled)
+	}
+}
+
+func withoutEngineSync(t *testing.T) {
+	t.Helper()
+	t.Setenv("ENGINE_SYNC_BIN", "")
+	t.Setenv("ENGINE_SYNC_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+}
+
+// An uninstall preview with no engine-sync binary names what it will leave
+// and raises no plan error, so the preflight does not refuse the teardown.
+func TestWireEngineSyncGlobalUninstallPreviewWithoutTheBinarySkips(t *testing.T) {
+	installer, output, _ := engineSyncGlobalEngine(t, ModeUninstall, nil)
+	installer.apply = false
+	withoutEngineSync(t)
+	if err := installer.wireEngineSyncGlobal(nil); err != nil {
+		t.Fatalf("wireEngineSyncGlobal: %v", err)
+	}
+	if len(installer.planErrors) != 0 || len(installer.deferred) != 0 {
+		t.Fatalf("planErrors=%v deferred=%v, want none", installer.planErrors, installer.deferred)
+	}
+	if want := "  skip    " + engineSyncAbsentText + "\n"; output.String() != want {
+		t.Fatalf("transcript:\n%s\nwant:\n%s", output.String(), want)
+	}
+	if !installer.engineSyncAbsent {
+		t.Fatal("the absent binary was not remembered for the targets step")
+	}
+}
+
+// An absent binary on an uninstall apply is a deferred failure, never a
+// return: pfm tears down everything it owns, then exits non-zero naming it.
+func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T) {
+	home := t.TempDir()
+	runner := &fakeRunner{manager: true}
+	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targets := enginesync.TargetsPath(paths.OSEnv{}, home)
+	if _, err := os.Lstat(targets); err != nil {
+		t.Fatalf("install wrote no %s: %v", targets, err)
+	}
+	command := filepath.Join(home, ".claude", "commands", "reload.md")
+	if _, err := os.Lstat(command); err != nil {
+		t.Fatalf("install wired no command %s: %v", command, err)
+	}
+	withoutEngineSync(t)
+	runner.calls = nil
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &output, Runner: runner,
+	})
+	if err == nil || !strings.Contains(err.Error(), engineSyncAbsentText) ||
+		!strings.Contains(err.Error(), "engine-sync binary unavailable: ") ||
+		strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("uninstall error = %v, want the deferred %q", err, engineSyncAbsentText)
+	}
+	if _, statErr := os.Lstat(command); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("uninstall left the global command %s: %v", command, statErr)
+	}
+	if _, statErr := os.Lstat(targets); statErr != nil {
+		t.Fatalf("uninstall removed %s though engine-sync was absent: %v", targets, statErr)
+	}
+	teardown := "disable --now"
+	if schedulerIsLaunchd {
+		teardown = "launchctl bootout"
+	}
+	if joined := strings.Join(runner.calls, "\n"); !strings.Contains(joined, teardown) {
+		t.Fatalf(
+			"the unit teardown (%q) did not run after the engine-sync step:\n%s\n%s",
+			teardown,
+			joined,
+			output.String(),
+		)
+	}
+	if !strings.Contains(output.String(), "summary ") {
+		t.Fatalf("the uninstall did not finish:\n%s", output.String())
+	}
+}

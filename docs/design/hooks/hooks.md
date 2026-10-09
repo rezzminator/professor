@@ -82,9 +82,9 @@ Source `templates/project/settings.json`, scaffolded to `.claude/settings.json` 
 | `pfm-guard.sh` | `PreToolUse` | `Edit\|Write` | `templates/project/settings.json:19` | Denies an edit to `.claude/**` or any `CLAUDE.md` unless this session's `/pcm` and quality markers are fresh (`templates/project/scripts/pfm-guard.sh:4-15`) | Blocks: deny JSON and exit 2 (`pfm-guard.sh:78-79`); a missing or stale edited-repo quality marker falls back to the session's own project and must also be fresh (`pfm-guard.sh:54-62`); exits 0 when the path is out of scope |
 | `guard-stamp.sh` | `PostToolUse` | `Read` | `templates/project/settings.json:30` | Stamps the quality marker when `quality/prompt.md` is read (`templates/project/scripts/guard-stamp.sh:4-7`) | Silent |
 | `format-md.sh` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:39` | Formats the Professor-owned `.md` just written under `.rumdl.toml` (`templates/project/scripts/format-md.sh:4-6`) | Exits 2 with introduced UNFIXED lines against the committed file or a failed step; exits 0 when clean, when only standing issues remain, or when jq or rumdl is missing (with a stderr installation hint) (`format-md.sh:8-18`) |
-| `codex-sync.sh mark` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:43` | Marks the Codex and OpenCode mirrors dirty after a Claude source edit (`templates/project/scripts/codex-sync.sh:5-8`) | Silent |
+| `codex-sync.sh mark` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:43` | Runs `engine-sync hook claude mark`, which marks the Codex and OpenCode mirrors dirty after a Claude source edit (`templates/project/scripts/codex-sync.sh:7-9`) | Silent |
 | `guard-stamp.sh stop` | `Stop` | `""` | `templates/project/settings.json:54` | Reaps abandoned guard markers (`templates/project/scripts/guard-stamp.sh:8-12`) | Silent |
-| `codex-sync.sh sync` | `Stop` | `""`, timeout 60 | `templates/project/settings.json:58` | Builds and checks both mirrors when dirty (`templates/project/scripts/codex-sync.sh:9-10`) | Blocks the stop once with the reason, then lets it end with a warning (`codex-sync.sh:10-16`) |
+| `codex-sync.sh sync` | `Stop` | `""`, timeout 60 | `templates/project/settings.json:58` | Runs `engine-sync hook claude stop`, which builds and checks both mirrors when dirty (`templates/project/scripts/codex-sync.sh:10-14`) | Blocks the stop once with the reason, then lets it end with a warning; an unavailable engine-sync binary is a warning (`codex-sync.sh:15-20`) |
 
 This repo's own `.claude/settings.json` carries all six: `pfm-guard.sh` (`.claude/settings.json:28`), `guard-stamp.sh` (`:39`), `format-md.sh` (`:48`), `codex-sync.sh mark` (`:52`), `guard-stamp.sh stop` (`:63`) and `codex-sync.sh sync` (`:67`). A long-turn notification is the operator's own hook, never a template one.
 
@@ -182,7 +182,7 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 
 1. **The Codex adapter says "Codex has NO hook layer"** (`.claude/codex-build.json:8`). Codex has one, and pfm reads and writes `{codex home}/hooks.json`. The conclusion (the guard is absolute in Codex) still holds, because pfm installs no Codex guard hook.
 2. **`docs/BLUEPRINT.md` lists "statusline" among the hooks** in its tree diagram; it is a `statusLine` key in the launch payload, and the list omits the guard and the mirror sync.
-3. **Twins differ.** `pfm-guard.sh`, `guard-stamp.sh` and `codex-sync.sh` differ between `.claude/scripts/` and `templates/project/scripts/`; `format-md.sh` is identical. The difference is not reviewed here.
+3. **Twins differ.** `pfm-guard.sh` and `guard-stamp.sh` differ between `.claude/scripts/` and `templates/project/scripts/`; `format-md.sh` and `codex-sync.sh` are identical. The difference is not reviewed here.
 
 ## Surfaces that stay in sync
 

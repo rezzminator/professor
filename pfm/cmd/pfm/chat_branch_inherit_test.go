@@ -49,7 +49,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 			scribe, duo := newWorkbenchRunFixture(t, jail)
 			engine, dir, socket, argvFile := "claude", scribe, "cc-workbench-branch", "cc-argv"
 			parentID := "a1000000-1111-4111-8111-111111111111"
-			var wantError string
+			var wantError, mirrorRecord string
 			wantArgs := []string{
 				"--resume " + parentID,
 				"--fork-session",
@@ -79,10 +79,12 @@ func TestChatBranchWorkbench(t *testing.T) {
 				wantArgs = []string{
 					`--model gpt-x -c model_reasoning_effort="high" -c developer_instructions="""` + "\n" + `You are duo.""" fork ` + parentID,
 				}
+				reply, code := testjail.CleanMirrorReply, 0
 				if name == "mirror failure" {
-					if err := atomicfile.Write(filepath.Join(duo, ".mcp.json"), []byte("{"), 0o600); err != nil {
-						t.Fatal(err)
-					}
+					reply, code = testjail.FailedMirrorReply, 1
+				}
+				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
+				if name == "mirror failure" {
 					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
 					if err != nil {
 						t.Fatal(err)
@@ -151,9 +153,8 @@ func TestChatBranchWorkbench(t *testing.T) {
 				}
 			}
 			if name == "Codex" {
-				body, err := os.ReadFile(filepath.Join(duo, "AGENTS.md"))
-				if err != nil || !strings.Contains(string(body), "Duo.") {
-					t.Fatalf("branch mirror=%q, err=%v", body, err)
+				if !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
+					t.Fatalf("the branch built no codex mirror of %s", duo)
 				}
 			}
 		})

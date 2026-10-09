@@ -50,7 +50,7 @@ pfm/
     harvest/  README.md                # MOVED from pfm/HARVESTER.md
     headless/ README.md                # MOVED from pfm/HEADLESS.md; run/ is the one-shot process boundary
     harvestmcp/ harvestpy/             # unchanged (harvestpy is the pinned Python sidecar)
-    action agentopen agentrole archive ask binwatch codexappendix codexgen codexmeta compose fleet gather heal
+    action agentopen agentrole archive ask binwatch codexappendix codexmeta codexprompt compose fleet gather heal
     index inject kill mcpserv naming nudge professor reap recovery reload resolve sky spawn stale stats
     statusline testjail theme transcript ui update updatecheck usagehook     # unchanged
 ```
@@ -159,7 +159,7 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | `internal/engine/{claude,codex,opencode}/` | per-engine adapters, one importer (`cmd/pfm/engines.go`); grep-true already |
 | `internal/store/` → `indexdb` | architecture open ruling 4; a rename with a user-visible file rename attached (`fleet.db` → `index.db`), not layout |
 | `testdata/`, `e2e/`, `internal/installer/assets/**`, `internal/harvestpy/**` | § (a) |
-| `internal/codexgen`, `codexappendix`, `codexmeta` | three Codex concerns at three layers (installer compiler, retired-appendix cleanup, rollout reader); folding them would create a `codex/` umbrella with no unit of change |
+| `internal/codexprompt`, `codexappendix`, `codexmeta` | three Codex concerns at three layers (fleet-prompt fence, retired-appendix cleanup, rollout reader); folding them would create a `codex/` umbrella with no unit of change |
 
 ## (d) Import rules after the move
 
@@ -167,7 +167,7 @@ Layering, top to bottom; a package imports only downward. This is today's graph 
 
 1. `cmd/pfm` — imports anything under `internal/`; nothing imports it (C10 keeps `mcpserv` off argv into it).
 2. surfaces and orchestration: `mcpserv`, `harvestmcp`, `ui`, `installer`, `fleet`, `chat`, `headless`, `reload`, `reap`, `heal`, `archive`, `stats`, `statusline`, `agentopen`, `engine/{claude,codex,opencode}`.
-3. mechanisms over the fleet: `action`, `spawn`, `inject`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `harvest`, `harvestpy`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `agentrole`, `codexgen`, `codexappendix`, `ask`, `headless/run`.
+3. mechanisms over the fleet: `action`, `spawn`, `inject`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `harvest`, `harvestpy`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `agentrole`, `codexprompt`, `codexappendix`, `ask`, `headless/run`.
 4. façades and leaves: `tmux` (imports `deps` only), `sqlitedb`, `atomicfile`, `paths` (imports `engine`), `deps` (imports `engine`), `config`, `engine` (imports nothing in-module), `theme`, `sky`, `testjail`.
 
 Rules the executor and every later wave keep:

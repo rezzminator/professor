@@ -163,7 +163,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -206,14 +206,14 @@ for n in check-pfm check-templates test-pfm test-templates unit-path; do
   else bad "$n suite registration" "$(grep 'checks_templates_unit_script' "$T/registered.args")"; fi
 done
 
-# The pfm that pfm.unit prebuilds is kept in <run>/bin: check-map and the mirrors are handed it.
+# The pfm that pfm.unit prebuilds is kept in <run>/bin: check-map is handed it; the mirrors build engine-sync instead.
 if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then
   reuse_run="$(ls -d "$T/reuse"/run.* | head -1)"
   if grep -Fxq "pfm.unit checks_pfm_unit $REPO_ROOT/pfm $reuse_run" "$T/registered.args" &&
     grep -Fxq "templates.check-map checks_gate_check_map $reuse_run" "$T/registered.args" &&
-    grep -Fxq "templates.mirrors checks_templates_mirrors $reuse_run/bin/pfm" "$T/registered.args" &&
+    grep -Fxq "templates.mirrors checks_templates_mirrors" "$T/registered.args" &&
     [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] && [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ]; then
-    ok 'templates.mirrors is registered with <run>/bin/pfm and stays light; check-map and pfm.unit keep their arguments'
+    ok 'templates.mirrors is registered with no pfm and stays light; check-map and pfm.unit keep their arguments'
   else bad 'kept pfm registration' "$(grep -E '^(pfm.unit|templates.check-map|templates.mirrors) ' "$T/registered.args")"; fi
 else bad 'gate_run all (kept pfm registration)' "$(cat "$T/reuse.out")"; fi
 if [ -n "${reuse_run:-}" ] && [ "${TIMING_RUN_LAST:-}" = "$reuse_run" ]; then
@@ -613,40 +613,144 @@ if [ "$FAILURES" -eq 1 ] && [ ! -s "$T/unit.calls" ] && grep -Fxq 'FAILSTEP temp
   ok 'a failed check-map pfm build is one red step and no check-map run'
 else bad 'check-map build failure' "$(cat "$T/unit.calls")" "$(cat "$T/cm-build-fail.out")"; fi
 
-# checks_templates_mirrors_opencode: the same pfm copied to the scratch binary, or built there when none is given.
-: > "$T/go.calls"; : > "$MIRROR_CALLS"; FAILURES=0
-PFM_TEST_TIMING_DIR="$T/mirror-reuse" checks_templates_mirrors_opencode "$T/prebuilt-pfm" >"$T/mirror-reuse.out" 2>&1
-want="$(printf '%s\n%s' \
-  "$T/mirror-reuse/pfm-dev-bin opencode check $REPO_ROOT --home $T/mirror-reuse/opencode-verify-home" \
-  "$T/mirror-reuse/pfm-dev-bin opencode doctor $REPO_ROOT --home $T/mirror-reuse/opencode-verify-home")"
-if [ ! -s "$T/go.calls" ] && [ "$FAILURES" -eq 0 ] && [ "$(cat "$MIRROR_CALLS")" = "$want" ] && cmp -s "$T/prebuilt-pfm" "$T/mirror-reuse/pfm-dev-bin" &&
-  grep -Fq 'opencode mirror current and parseable' "$T/mirror-reuse.out"; then
-  ok 'the opencode mirror copies the prebuilt pfm to its scratch binary, then checks and doctors with it'
-else bad 'mirrors reuse' "$(cat "$T/go.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/mirror-reuse.out")"; fi
-for given in none-given "$T/no-such-pfm"; do
-  : > "$T/go.calls"; : > "$MIRROR_CALLS"; FAILURES=0
-  scratch="$T/mirror-build-$(basename "$given")"
-  # The stub go builds by writing the logging pfm to the -o path.
-  if [ "$given" = none-given ]; then args=(); else args=("$given"); fi
+# checks_templates_mirrors_generate and _opencode: engine-sync, built from the mounted source onto
+# $TMP_BASE/engine-sync/engine-sync, checks and builds the mirrors; a failed build is its own red line.
+cat > "$T/es-stub" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$MIRROR_CALLS"
+case "$1" in
+  check) exit "${STUB_ES_CHECK_RC:-0}" ;;
+  build) exit "${STUB_ES_BUILD_RC:-0}" ;;
+  global) # renders each name in STUB_ES_RENDER into the --home it is given, as the real binary does
+    while [ $# -gt 0 ]; do [ "$1" = --home ] && home="$2"; shift; done
+    printf 'HOME=%s XDG_CONFIG_HOME=%s XDG_STATE_HOME=%s XDG_DATA_HOME=%s ENGINE_SYNC_HOME=%s ENGINE_SYNC_STATE=%s CODEX_HOME=%s\n' \
+      "$HOME" "${XDG_CONFIG_HOME-unset}" "${XDG_STATE_HOME-unset}" "${XDG_DATA_HOME-unset}" \
+      "${ENGINE_SYNC_HOME-unset}" "${ENGINE_SYNC_STATE-unset}" "${CODEX_HOME-unset}" > "$MIRROR_CALLS.env"
+    if [ "${STUB_ES_GLOBAL_RC:-0}" -ne 0 ]; then
+      echo 'engine-sync global: variants.json: variant "beta-max" from beta.md: "replace" text "ghost" occurs 0 times in the body, want exactly 1'
+      exit "$STUB_ES_GLOBAL_RC"
+    fi
+    mkdir -p "$home/.claude/agents" "$home/.codex/agents"
+    for n in $STUB_ES_RENDER; do
+      printf 'x\n' > "$home/gen-$n.md"; printf 'x\n' > "$home/.codex/agents/$n.toml"; ln -s "$home/gen-$n.md" "$home/.claude/agents/$n.md"
+    done ;;
+  *) exit "${STUB_ES_OPENCODE_RC:-0}" ;;
+esac
+SH
+chmod +x "$T/es-stub"
+es_bin="$TMP_BASE/engine-sync/engine-sync"
+es_case() { # es_case <function> [VAR=value…]: run it with engine_sync_build stubbed; output in $T/es.out
+  local fn="$1"; shift
+  : > "$MIRROR_CALLS"; : > "$T/es-build.calls"; FAILURES=0
   (
-    go() { printf 'go %s\n' "$*" >> "$T/go.calls"; cp "$T/prebuilt-pfm" "${@: -2:1}"; }
-    PFM_TEST_TIMING_DIR="$scratch" checks_templates_mirrors_opencode ${args[@]+"${args[@]}"}
-  ) >"$T/mirror-build.out" 2>&1
-  if [ "$(cat "$T/go.calls")" = "go -C pfm build -o $scratch/pfm-dev-bin ./cmd/pfm" ] && [ "$(wc -l < "$MIRROR_CALLS" | tr -d ' ')" -eq 2 ] &&
-    grep -Fq 'opencode mirror current and parseable' "$T/mirror-build.out"; then
-    ok "the opencode mirror builds its scratch binary when no pfm is given ($(basename "$given"))"
-  else bad "mirrors build ($given)" "$(cat "$T/go.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/mirror-build.out")"; fi
+    [ $# -eq 0 ] || export "$@"
+    engine_sync_build() {
+      printf 'engine_sync_build %s\n' "$*" >> "$T/es-build.calls"
+      [ "${STUB_ES_BIN_RC:-0}" -eq 0 ] || { echo 'engine-sync: source unavailable: fixture' >&2; return 1; }
+      mkdir -p "$(dirname "$1")" && cp "$T/es-stub" "$1"
+    }
+    "$fn"
+    echo "FAILURES=$FAILURES"
+  ) >"$T/es.out" 2>&1
+}
+es_case checks_templates_mirrors_generate
+if [ "$(cat "$MIRROR_CALLS")" = "check $REPO_ROOT" ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
+  grep -Fq 'engine mirrors current — nothing generated' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
+  ok 'mirror generation checks both mirrors with the engine-sync it built, and generates nothing when current'
+else bad 'mirror generation, current' "$(cat "$T/es-build.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_generate STUB_ES_CHECK_RC=1
+if [ "$(cat "$MIRROR_CALLS")" = "$(printf 'check %s\nbuild %s' "$REPO_ROOT" "$REPO_ROOT")" ] &&
+  grep -Fq 'engine mirrors generated from the Claude sources' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
+  ok 'a stale mirror is generated by engine-sync build'
+else bad 'mirror generation, stale' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_generate STUB_ES_CHECK_RC=1 STUB_ES_BUILD_RC=1
+if grep -Fxq 'FAILSTEP mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'a failed engine-sync build of the mirrors is one red step'
+else bad 'mirror generation, build failure' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_generate STUB_ES_BIN_RC=1
+if [ ! -s "$MIRROR_CALLS" ] && grep -Fxq 'engine-sync: source unavailable: fixture' "$T/es.out" &&
+  grep -Fxq 'FAILSTEP mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'an engine-sync binary that cannot be built is named, and no mirror command runs'
+else bad 'mirror generation, no binary' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+# checks_templates_global_variants: every variant templates/global/agents/variants.json declares is rendered by the
+# engine-sync it built into a jail home; a render error, a short count and an unbuilt binary are each one red step.
+mkdir -p "$REPO_ROOT/templates/global/agents"
+printf '%s\n' '{"gamma-lite":{"from":"gamma"},"alpha-pro":{"from":"alpha"},"beta-max":{"from":"beta"}}' > "$REPO_ROOT/templates/global/agents/variants.json"
+gv_names='alpha-pro beta-max gamma-lite'
+gv_count=3
+gv_jailed() { [ -z "$(ls -A "$TMP_BASE/engine-sync" | grep '^global-variants\.')" ]; } # no jail left under $TMP_BASE
+es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names" HOME=/real-home XDG_CONFIG_HOME=/real-home/.config \
+  XDG_STATE_HOME=/real-home/.local/state XDG_DATA_HOME=/real-home/.local/share ENGINE_SYNC_HOME=/real-home/es \
+  ENGINE_SYNC_STATE=/real-home/es-state CODEX_HOME=/real-home/.codex
+if [ "$(wc -l < "$MIRROR_CALLS" | tr -d ' ')" -eq 1 ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
+  [[ "$(cat "$MIRROR_CALLS")" == "global --home $TMP_BASE/engine-sync/global-variants."*"/home --source-repo $REPO_ROOT --claude-config-dir $TMP_BASE/engine-sync/global-variants."*"/home/.claude --codex-home $TMP_BASE/engine-sync/global-variants."*"/home/.codex" ]] &&
+  [[ "$(cat "$MIRROR_CALLS.env")" == "HOME=$TMP_BASE/engine-sync/global-variants."*"/home XDG_CONFIG_HOME=unset XDG_STATE_HOME=unset XDG_DATA_HOME=unset ENGINE_SYNC_HOME=unset ENGINE_SYNC_STATE=unset CODEX_HOME=unset" ]] &&
+  grep -Fq "all $gv_count global agent variant(s) render through engine-sync into a jail home" "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out" &&
+  gv_jailed; then
+  ok "global agent variants: every declared variant renders into a jail home that no caller's HOME, XDG, engine-sync or Codex variable reaches, the count is named, the jail is removed ($gv_count)"
+else bad 'global variants, rendered' "$(cat "$MIRROR_CALLS")" "$(cat "$MIRROR_CALLS.env")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_global_variants STUB_ES_GLOBAL_RC=1
+if grep -Fq 'variant "beta-max" from beta.md' "$T/es.out" &&
+  grep -Fq 'FAILSTEP global agent variants FAILED to render (engine-sync global exit 1; variant named in the error: beta-max)' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+  ok 'a render error is one red step that names the variant, and the jail is removed'
+else bad 'global variants, render error' "$(cat "$T/es.out")"; fi
+short="${gv_names#* }"
+es_case checks_templates_global_variants "STUB_ES_RENDER=$short"
+if grep -Fq "FAILSTEP global agent variants: $((gv_count - 1)) of $gv_count declared variant(s) rendered — missing: ${gv_names%% *}" "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+  ok 'a rendered count short of the declared count is red and names the missing variant, and the jail is removed'
+else bad 'global variants, short count' "$(cat "$T/es.out")"; fi
+es_case checks_templates_global_variants "STUB_ES_RENDER="
+if grep -Fq "FAILSTEP global agent variants: 0 of $gv_count declared variant(s) rendered — missing: " "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'an engine-sync that renders nothing is red, never clean'
+else bad 'global variants, none rendered' "$(cat "$T/es.out")"; fi
+es_case checks_templates_global_variants STUB_ES_BIN_RC=1
+if [ ! -s "$MIRROR_CALLS" ] &&
+  grep -Fxq 'FAILSTEP global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'global agent variants without an engine-sync binary are NOT RENDERED, never a pass'
+else bad 'global variants, no binary' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+gv_decl="$REPO_ROOT/templates/global/agents/variants.json"
+for gv_state in missing unparseable empty array; do # a declaration that names nothing renderable is red before engine-sync runs
+  case "$gv_state" in
+    missing) rm -f "$gv_decl"; gv_want="FAILSTEP global agent variants NOT RENDERED — $gv_decl is missing, so nothing was looked up" ;;
+    unparseable) printf '%s\n' '{"alpha-pro":' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: ' ;;
+    empty) printf '%s\n' '{}' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json declares no variant, so nothing could render' ;;
+    array) printf '%s\n' '["alpha-pro"]' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: ' ;;
+  esac
+  es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names"
+  if [ ! -s "$MIRROR_CALLS" ] && grep -Fq "$gv_want" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+    ok "variants.json ($gv_state) is NOT RENDERED, red, with engine-sync never run"
+  else bad "global variants, $gv_state declaration" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 done
-# checks_templates_mirrors hands its argument on to the opencode check.
-(
-  checks_templates_mirrors_generate() { :; }; checks_templates_mirrors_marker() { :; }; checks_templates_mirrors_roster() { :; }
-  checks_templates_mirrors_manifest() { :; }
-  checks_templates_mirrors_opencode() { printf 'opencode-arg [%s]\n' "$*"; }
-  checks_templates_mirrors "$T/some-pfm"; checks_templates_mirrors
-) >"$T/mirrors-args.out" 2>&1
-if [ "$(cat "$T/mirrors-args.out")" = "$(printf 'opencode-arg [%s]\nopencode-arg []' "$T/some-pfm")" ]; then
-  ok 'checks_templates_mirrors passes its pfm argument to the opencode check, and none when called bare'
-else bad 'mirrors argument' "$(cat "$T/mirrors-args.out")"; fi
+printf '%s\n' '{"gamma-lite":{"from":"gamma"},"alpha-pro":{"from":"alpha"},"beta-max":{"from":"beta"}}' > "$gv_decl"
+gv_without_node() { need_tool() { [ "$1" != node ]; }; checks_templates_global_variants; }
+es_case gv_without_node "STUB_ES_RENDER=$gv_names"
+if [ ! -s "$MIRROR_CALLS" ] && [ ! -s "$T/es-build.calls" ] &&
+  grep -Fxq 'FAILSTEP global agent variants NOT RENDERED — the toolchain is missing' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'global agent variants without node are NOT RENDERED, nothing built or run'
+else bad 'global variants, no node' "$(cat "$T/es-build.calls")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_opencode
+want="$(printf '%s\n%s' \
+  "opencode check $REPO_ROOT --home $TMP_BASE/engine-sync/opencode-verify-home" \
+  "opencode doctor $REPO_ROOT --home $TMP_BASE/engine-sync/opencode-verify-home")"
+if [ "$(cat "$MIRROR_CALLS")" = "$want" ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
+  grep -Fq 'opencode mirror current and parseable' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
+  ok 'the opencode mirror is checked and doctored by the engine-sync it built, under its own scratch home'
+else bad 'opencode mirror' "$(cat "$T/es-build.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_opencode STUB_ES_OPENCODE_RC=1
+if grep -Fxq "FAILSTEP opencode mirror FAILED — run: engine-sync opencode build $REPO_ROOT" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'a failing opencode check names the engine-sync repair'
+else bad 'opencode mirror failure' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_opencode STUB_ES_BIN_RC=1
+if [ ! -s "$MIRROR_CALLS" ] &&
+  grep -Fxq 'FAILSTEP opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'an opencode check without an engine-sync binary is NOT CHECKED, never a pass'
+else bad 'opencode mirror, no binary' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 
 # checks_templates_unit_script: one suite of .claude/scripts under its own label; a red suite is run's FAIL, so its status passes through.
 out="$( ( run() { shift 2; printf 'run [%s]\n' "$*"; }; head_() { printf 'head [%s]\n' "$*"; }; REPO_ROOT=/repo; checks_templates_unit_script unit-path ) 2>&1 )"

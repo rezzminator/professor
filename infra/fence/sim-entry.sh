@@ -5,7 +5,8 @@
 # the harvester's browser rung on — then runs the caller's command.
 #
 #   1. pfm built from /worktree/pfm into ~/.local/bin (the code under test,
-#      rebuilt every run; the Go caches are volumes, so a warm build is quick).
+#      rebuilt every run; the Go caches are volumes, so a warm build is quick),
+#      and engine-sync from the /engine-sync mount, exported as ENGINE_SYNC_BIN.
 #   2. `pfm install` into the container HOME, which provisions the converter
 #      sidecar into the per-worktree harvest volume (a no-op once that
 #      worktree's pinned environment is present).
@@ -32,6 +33,12 @@ chrome="$(google-chrome-stable --version 2>/dev/null)" || fail "google-chrome-st
 mkdir -p "$HOME/.local/bin"
 go -C /worktree/pfm build -o "$HOME/.local/bin/pfm" ./cmd/pfm >/tmp/sim-build.log 2>&1 ||
   fail "go build ./cmd/pfm from /worktree" /tmp/sim-build.log
+# The Codex/OpenCode compiler pfm install and pfm codex|opencode exec, from the
+# engine-sync source docker-compose.yml mounts at /engine-sync.
+. /worktree/infra/fence/engine-sync.sh
+export ENGINE_SYNC_BIN="$HOME/.local/libexec/engine-sync/engine-sync"
+engine_sync_build "$ENGINE_SYNC_BIN" >/tmp/sim-engine-sync.log 2>&1 ||
+  fail "engine-sync build from /engine-sync" /tmp/sim-engine-sync.log
 
 export PFM_CONFIG="${PFM_CONFIG:-$HOME/.local/state/pfm/pfm.config.json}"
 mkdir -p "$(dirname "$PFM_CONFIG")"

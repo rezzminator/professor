@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -495,7 +496,9 @@ func TestManagedRootUninstallRetirement(t *testing.T) {
 			var output bytes.Buffer
 			options := Options{
 				Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &output,
-				CodexHomes: []string{}, MCPConfigPath: testConfigPath(t), Env: &paths.MapEnv{HomeDir: home},
+				CodexHomes: []string{}, MCPConfigPath: testConfigPath(t), Env: &paths.MapEnv{
+					HomeDir: home, Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()},
+				},
 			}
 			if _, err := Run(context.Background(), options); err != nil {
 				t.Fatalf("install: %v\n%s", err, output.String())

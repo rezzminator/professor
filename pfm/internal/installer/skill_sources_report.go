@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -193,14 +193,14 @@ func inspectSkillSource(
 	}
 	for _, dir := range linkDirs {
 		target := filepath.Join(dir, source.Name)
-		state, _, err := codexgen.ClassifyGlobalLink(target, store, storeRoot, codexgen.GlobalLinkDir)
+		state, _, err := globallink.ClassifyLink(target, store, storeRoot, globallink.Dir)
 		if err != nil {
 			status.State, status.Error = SkillSourceCheckFailed, err.Error()
 			return status
 		}
 		switch state {
-		case codexgen.GlobalLinkCorrect:
-		case codexgen.GlobalLinkCopy, codexgen.GlobalLinkConflict:
+		case globallink.Correct:
+		case globallink.Copy, globallink.Conflict:
 			status.Conflicts = append(status.Conflicts, target)
 		default:
 			status.Missing = append(status.Missing, target)
@@ -224,7 +224,7 @@ func ReportGlobalRegistries(
 	env paths.Env,
 	codexHomes ...string,
 ) (warnings, failures int) {
-	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, codexHomes...)
+	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, codexHomes...)
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures

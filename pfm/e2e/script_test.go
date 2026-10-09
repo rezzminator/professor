@@ -430,6 +430,7 @@ func setupScriptJail(env *testscript.Env, source string) error {
 		"PFM_SKILL_SOURCES_OFFLINE": "1",
 		"PFM_THEMES_OFFLINE":        "1",
 		"PFM_PRICES_OFFLINE":        "1",
+		"ENGINE_SYNC_BIN":           testjail.EngineSyncBin(),
 		mockengine.EnvScenario:      scenario,
 		mockengine.EnvEngine:        "claude",
 		"PATH":                      path,

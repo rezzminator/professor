@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -89,6 +90,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			personaArgs = append(personaArgs, action.CodexDeveloperInstructionsArg("You are duo.")...)
 			wantError := ""
 			mirror := true
+			mirrorRecord := testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
 			switch scenario {
 			case "resume":
 				args = []string{"resume", "--last"}
@@ -126,9 +128,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				}
 				wantError = "launch Codex: " + paths.WorkbenchManifest(duo) + `: "prompt" is required` + "\n"
 			case "mirror failure":
-				if err := os.Remove(filepath.Join(duo, "CLAUDE.md")); err != nil {
-					t.Fatal(err)
-				}
+				mirrorRecord = testjail.FakeEngineSync(t, testjail.FailedMirrorReply, 1)
 				persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.New)
 				if err != nil {
 					t.Fatal(err)
@@ -178,8 +178,8 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 					t.Fatalf("persona argv = %q, want %q", argv, want)
 				}
 				if mirror {
-					if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err != nil {
-						t.Fatalf("mirror before exec: %v", err)
+					if !testjail.MirrorBuilt(t, mirrorRecord, "codex", dir) {
+						t.Fatalf("exec ran before the codex mirror of %s was built", dir)
 					}
 				}
 				return nil

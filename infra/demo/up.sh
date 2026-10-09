@@ -73,7 +73,7 @@ FENCE_CALLER=demo . "$ROOT/infra/fence/fence-env.sh"
 fence_volumes_ensure
 if [ "$FRESH" -eq 1 ] || ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  docker compose -f "$ROOT/infra/fence/docker-compose.yml" run -d --build --name "$NAME" --label pfm.fence.long-lived=1 -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json pfm-dev sleep infinity >/dev/null
+  docker compose -f "$ROOT/infra/fence/docker-compose.yml" run -d --build --name "$NAME" --label pfm.fence.long-lived=1 -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json -e ENGINE_SYNC_BIN=/usr/local/libexec/engine-sync/engine-sync pfm-dev sleep infinity >/dev/null
   echo "demo: container $NAME started"
 else
   echo "demo: reusing running container $NAME"

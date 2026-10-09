@@ -221,9 +221,6 @@
     "project/scripts/alloc-ports.sh": {
       "curated": true
     },
-    "project/scripts/build-codex.mjs": {
-      "curated": true
-    },
     "project/scripts/checkpoint.sh": {
       "sources": {
         ".claude/scripts/checkpoint.sh": "8184d92715dd35504d17af80a5111d6ea1989047f59bd50c051f3fe65ec178dc"

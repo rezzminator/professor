@@ -29,6 +29,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
+// agentsCommand is `claude agents`, the registry read the resume probe runs.
+const agentsCommand = "agents"
+
 const transcriptRoleUser = "user"
 
 type resumeTarget struct {

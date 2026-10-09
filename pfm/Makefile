@@ -31,6 +31,9 @@ DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
 # The local build artifact lives in the repo's gitignored tmp/, never in the tree.
 LOCAL   := $(REPO)/tmp/bin/pfm.dev
+# The engine-sync checkout host-install builds into {engine-sync home}
+# (scripts/install-engine-sync.sh), the plugin submodule.
+ENGINE_SYNC_SRC := $(REPO)/plugins/engine-sync
 UNIT    := pfm-mcp.service
 # The macOS twin of UNIT: the launch agent pfm install wires for the daemon.
 AGENT   := com.professor.pfm.mcp
@@ -188,12 +191,16 @@ install: ## Swap in a new build, restart the daemon, sweep obsolete processes, a
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
+host-install: ## Build engine-sync from plugins/engine-sync into {engine-sync home}/versions/{version} and link bin/engine-sync; build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
 	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
 	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
 	@# build even starts — $(BIN) is never touched. FORCE=1 in the
 	@# environment (`FORCE=1 make host-install`) passes straight through to
 	@# the guard and prints a FORCED line instead of refusing.
+	@bash "$(REPO)/pfm/scripts/install-engine-sync.sh" "$(ENGINE_SYNC_SRC)"
+	@# engine-sync first: the new binary's install check below plans through
+	@# it (pfm execs engine-sync for every Codex and OpenCode artifact), so a
+	@# failed engine-sync build stops here with $(BIN) untouched.
 	@mkdir -p "$$(dirname "$(BIN)")"; \
 	tmp="$$(mktemp "$(BIN).new.XXXXXX")"; \
 	trap 'rm -f "$$tmp"' EXIT; \

@@ -83,6 +83,19 @@
       "homepage": "https://github.com/rezzminator/callmeter",
       "license": "MIT",
       "keywords": ["claude-code", "hooks", "telemetry", "tool-calls", "token-usage", "sqlite", "sub-agents", "observability", "professor"]
+    },
+    {
+      "name": "engine-sync",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/engine-sync.git",
+        "path": "plugins/engine-sync",
+        "ref": "main"
+      },
+      "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
+      "homepage": "https://github.com/rezzminator/engine-sync",
+      "license": "MIT",
+      "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"]
     }
   ]
 }

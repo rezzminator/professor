@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestRetireMigrationJournal pins the retire step's every door: apply removes
@@ -109,6 +111,7 @@ func TestInstallRetiresStateAndAFailedRemovalOnlyWarns(t *testing.T) {
 			paths.EnvStateDB:  filepath.Join(state, "pfm.db"),
 			paths.EnvCacheDB:  filepath.Join(state, "pfm-cache.db"),
 			paths.EnvProcRoot: filepath.Join(home, "proc"),
+			enginesync.EnvBin: testjail.EngineSyncBin(),
 		}},
 		Now:    func() time.Time { return now },
 		Stdout: &output,

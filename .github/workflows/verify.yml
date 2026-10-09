@@ -32,6 +32,11 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
+      # engine-sync writes the mirrors below, and the fence builds its own
+      # copy from the same checked-out source (infra/fence/fence-env.sh).
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
+
       # Generated mirrors (AGENTS.md, .codex/**, .opencode/**) are never
       # tracked — the fence worktree starts with none of them, and the
       # roster/marker/opencode gates the fence runs below read them from
@@ -42,10 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/professor-fence/pfm"
-          go run ./cmd/pfm codex build ..
-          cd "$RUNNER_TEMP/professor-fence"
-          (cd pfm && go run ./cmd/pfm opencode build ..)
+          "$ENGINE_SYNC_BIN" build "$RUNNER_TEMP/professor-fence"
 
       - name: Stage private leak-check policy
         env:

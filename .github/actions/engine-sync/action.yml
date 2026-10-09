@@ -1,0 +1,27 @@
+name: engine-sync binary
+description: >-
+  Builds engine-sync, the single writer of every Codex and OpenCode artifact
+  (pfm codex|opencode forward to it), from the plugins/engine-sync submodule
+  and exports ENGINE_SYNC_BIN. An absent source fails the job naming it, never
+  a skipped mirror step. Needs Go set up and the repository checked out.
+
+runs:
+  using: composite
+  steps:
+    - name: Build engine-sync from plugins/engine-sync
+      shell: bash
+      run: |
+        set -euo pipefail
+        src="$GITHUB_WORKSPACE/plugins/engine-sync"
+        cause=""
+        if [ ! -f "$src/go.mod" ]; then
+          cause="$(git -C "$GITHUB_WORKSPACE" submodule update --init -- plugins/engine-sync 2>&1)" || true
+        fi
+        if [ ! -f "$src/go.mod" ]; then
+          echo "::error::engine-sync source absent: plugins/engine-sync has no go.mod — CI cannot build the Codex and OpenCode compiler (git submodule update: ${cause:-no output})"
+          exit 1
+        fi
+        bin="$RUNNER_TEMP/engine-sync/engine-sync"
+        go -C "$src" build -o "$bin" ./cmd/engine-sync
+        "$bin" version
+        echo "ENGINE_SYNC_BIN=$bin" >> "$GITHUB_ENV"

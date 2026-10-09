@@ -31,6 +31,9 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
+
       # The scanner scores `.opencode/` as its own package, including its
       # generated LICENSE/SECURITY.md/opencode.jsonc — none of which are
       # tracked (see .gitignore). Generate both mirrors before it runs, or
@@ -39,8 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd pfm && go run ./cmd/pfm codex build ..)
-          (cd pfm && go run ./cmd/pfm opencode build ..)
+          "$ENGINE_SYNC_BIN" build .
 
       - name: Scan
         uses: hashgraph-online/ai-plugin-scanner-action@ff72bdc87402c9751fe9be6977de41c0cfcc514b # v1.2.706

@@ -229,8 +229,8 @@ func printUsage(w io.Writer) {
 		"  statusline render the native Claude status line",
 		"  usage-hook the fail-open usage-limit prompt hook",
 		"  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)",
-		"  codex     compile or check the Codex project mirror",
-		"  opencode  compile, check, or inspect the OpenCode project mirror",
+		"  codex     forwards to engine-sync codex (retiring: run engine-sync)",
+		"  opencode  forwards to engine-sync opencode (retiring: run engine-sync)",
 	})
 }
 

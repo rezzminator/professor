@@ -378,3 +378,17 @@ func expandHeadlessFileArgs(flags *flag.FlagSet, args []string) ([]string, bool)
 	}
 	return expanded, framed
 }
+
+// repeatString is a repeatable string flag; an empty value is refused.
+type repeatString []string
+
+func (list *repeatString) String() string { return strings.Join(*list, ",") }
+func (list *repeatString) Set(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("repeated option value must be non-empty")
+	}
+	*list = append(*list, value)
+	return nil
+}
+
+var _ flag.Value = (*repeatString)(nil)

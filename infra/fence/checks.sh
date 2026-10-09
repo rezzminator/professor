@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Check catalogue sourced by dev.sh. The serial blocks retain their original rows.
 
+# engine_sync_build: the fence's one way to get the engine-sync binary (infra/fence/engine-sync.sh).
+# shellcheck source=engine-sync.sh
+. "${BASH_SOURCE[0]%/*}/engine-sync.sh"
+
 checks_templates_clone() {
   # Clone ratchet over the shell / JS / Python surface (scripts/clone-check.sh,
   # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
@@ -204,20 +208,21 @@ checks_templates_descriptions() {
 }
 
 checks_templates_mirrors_generate() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync"
   head_ "templates — generate the engine mirrors"
   # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
   # clone holds none, so verify generates them from the Claude sources
   # before any gate reads them. Current mirrors are left alone (the fence
-  # mounts the tree read-only and CI generates on the host first); the
-  # tree's own compiler runs, never a host pfm binary (a stale host build
-  # rewrites what it does not understand).
+  # mounts the tree read-only and CI generates on the host first). The writer
+  # is engine-sync built from its mounted source, never a host binary (a stale
+  # host build rewrites what it does not understand).
   if ! need_tool go templates || ! need_tool node templates; then
     fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
-  elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex check "$REPO_ROOT") >/dev/null 2>&1 \
-    && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode check "$REPO_ROOT") >/dev/null 2>&1; then
+  elif ! engine_sync_build "$es_bin"; then
+    fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
+  elif "$es_bin" check "$REPO_ROOT" >/dev/null 2>&1; then
     ok "engine mirrors current — nothing generated"
-  elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex build "$REPO_ROOT") \
-    && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode build "$REPO_ROOT"); then
+  elif "$es_bin" build "$REPO_ROOT"; then
     ok "engine mirrors generated from the Claude sources"
   else
     fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
@@ -225,15 +230,81 @@ checks_templates_mirrors_generate() {
 
 }
 
+checks_templates_global_variants() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" decl="$REPO_ROOT/templates/global/agents/variants.json"
+  local jail home names declared name rendered=0 missing="" out rc=0 named=""
+  head_ "templates — global agent variants render"
+  # templates/global/agents/variants.json declares agents re-emitted from a
+  # source agent with swapped body text. A swap whose text drifted from its
+  # source fails only when engine-sync renders it, which an adopter's install
+  # does: this step renders every declared variant with the real binary, built
+  # from the mounted source, into a jail home and Codex home (the real $HOME is
+  # never read or written). Its own broken state is a red line: a declaration
+  # that cannot be read, one that declares nothing, a render error, or a
+  # rendered count that differs from the declared count (a lookup that found
+  # nothing would otherwise read as clean).
+  if ! need_tool go templates || ! need_tool node templates; then
+    fail_step "global agent variants NOT RENDERED — the toolchain is missing"
+    return
+  elif ! engine_sync_build "$es_bin"; then
+    fail_step "global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)"
+    return
+  elif [[ ! -f "$decl" ]]; then
+    fail_step "global agent variants NOT RENDERED — $decl is missing, so nothing was looked up"
+    return
+  elif ! names="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(d===null||typeof d!=="object"||Array.isArray(d))throw new Error("not an object of variants");console.log(Object.keys(d).sort().join("\n"))' "$decl" 2>&1)"; then
+    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: $names"
+    return
+  fi
+  declared=$(grep -c . <<<"$names" || true)
+  if (( declared == 0 )); then
+    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json declares no variant, so nothing could render"
+    return
+  fi
+  mkdir -p "$TMP_BASE/engine-sync"
+  if ! jail="$(mktemp -d "$TMP_BASE/engine-sync/global-variants.XXXXXX")"; then
+    fail_step "global agent variants NOT RENDERED — the jail home could not be created under $TMP_BASE/engine-sync"
+    return
+  fi
+  home="$jail/home"
+  mkdir -p "$home/.claude" "$home/.codex"
+  out="$jail/engine-sync-global.out"
+  env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u ENGINE_SYNC_HOME -u ENGINE_SYNC_STATE -u CODEX_HOME \
+    HOME="$home" "$es_bin" global --home "$home" --source-repo "$REPO_ROOT" \
+    --claude-config-dir "$home/.claude" --codex-home "$home/.codex" >"$out" 2>&1 || rc=$?
+  if (( rc != 0 )); then
+    cat "$out"
+    while IFS= read -r name; do
+      if grep -qF "variant \"$name\"" "$out"; then named="${named:+$named, }$name"; fi
+    done <<<"$names"
+    fail_step "global agent variants FAILED to render (engine-sync global exit $rc; variant named in the error: ${named:-none — read the output above})"
+  else
+    while IFS= read -r name; do
+      if [[ -f "$home/.codex/agents/$name.toml" && -L "$home/.claude/agents/$name.md" && -s "$home/.claude/agents/$name.md" ]]; then
+        rendered=$((rendered + 1))
+      else
+        missing="${missing:+$missing, }$name"
+      fi
+    done <<<"$names"
+    if (( rendered != declared )); then
+      cat "$out"
+      fail_step "global agent variants: $rendered of $declared declared variant(s) rendered — missing: $missing"
+    else
+      ok "all $declared global agent variant(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
+    fi
+  fi
+  rm -rf "$jail"
+
+}
+
 checks_templates_mirrors_marker() {
   head_ "templates — codex generated-marker claim"
-  # The templates dir's shipped JS compiler and this repo's `pfm codex build`
-  # write the same $HOME/.codex outputs on adopter hosts. A copy that stops
-  # claiming the other's marker reports its files STALE forever; the gate
-  # also reconciles every marked file's declared source against disk, so a
-  # fossil generated from a deleted file fails BY NAME.
+  # engine-sync never touches a file it does not recognize as generated, so a
+  # marked file whose source is gone is a fossil no build can heal: the gate
+  # reconciles every marked file's declared source, and every tracked symlink's
+  # target, against disk, and fails a fossil BY NAME.
   if node scripts/check-codex-markers.mjs; then
-    ok "compiler marker claims hold; every marked file has a live source"
+    ok "every marked file has a live source; every tracked symlink a tracked target"
   else
     fail_step "codex marker claim FAILED — a stranded marker or an orphaned generated file (see output)"
   fi
@@ -259,19 +330,6 @@ checks_templates_release_check() {
     cat "$TMP_BASE/templates/release-notes.txt"
     fail_step "release notes grammar FAILED — a note breaks docs/RELEASE.md § Release notes, or release-check could not run (exit 2 is an ERROR, see output)"
   fi
-
-}
-
-checks_templates_codex_sync() {
-  head_ "templates — codex-sync missing compiler"
-  local cs_copy
-  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
-    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
-      ok "codex-sync ($cs_copy) names unavailable compiler and retains dirty flag"
-    else
-      fail_step "codex-sync regression FAILED ($cs_copy) — unavailable compiler must be named and dirty flag retained"
-    fi
-  done
 
 }
 
@@ -321,28 +379,18 @@ checks_templates_unit_script() { # <name>: scripts/test-<name>.sh, the self-test
   run "templates: test-$1.sh self-test" -- bash "$REPO_ROOT/scripts/test-$1.sh"
 }
 
-checks_templates_mirrors_opencode() { # optional: an executable pfm already built from this tree
-  local prebuilt="${1:-}" build_opencode
+checks_templates_mirrors_opencode() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" opencode_home="$TMP_BASE/engine-sync/opencode-verify-home"
   head_ "templates — native opencode mirror"
-  # Build the source-under-test inside the fence; verification must never
-  # depend on or install a host binary. The ignored artifact also gives this
-  # repo's Stop hook a current compiler while develop remains uninstalled.
-  # /pfm-timing exists only as the fence's bind mount; on the host the same
-  # scratch is $TMP_BASE/timing, so resolve it the way the timing ledger does.
-  local opencode_scratch="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
-  local opencode_bin="$opencode_scratch/pfm-dev-bin"
-  local opencode_home="$opencode_scratch/opencode-verify-home"
-  # The gate's pfm.unit leaves its prebuilt pfm in the run dir (test-shard.sh --bin-dir): a copy of it
-  # is the same binary a build here would make. Absent (the verify path, a templates-only gate): build.
-  build_opencode=(go -C pfm build -o "$opencode_bin" ./cmd/pfm)
-  if [[ -n "$prebuilt" && -x "$prebuilt" ]]; then build_opencode=(cp "$prebuilt" "$opencode_bin"); fi
-  if need_tool go templates && mkdir -p "$opencode_scratch" \
-    && "${build_opencode[@]}" \
-    && "$opencode_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
-    && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
+  # engine-sync built from its mounted source checks and doctors the mirror
+  # under a scratch home; verification never depends on or installs a host binary.
+  if ! need_tool go templates || ! engine_sync_build "$es_bin"; then
+    fail_step "opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)"
+  elif "$es_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
+    && "$es_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
     ok "opencode mirror current and parseable"
   else
-    fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
+    fail_step "opencode mirror FAILED — run: engine-sync opencode build $REPO_ROOT"
   fi
 
 }
@@ -383,9 +431,9 @@ checks_templates_skill_tests() {
 checks_templates_opencode_writer_refs() {
   head_ "templates — OpenCode writer references"
   if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then
-    ok "live surfaces use native pfm opencode"
+    ok "live surfaces name the native writer, none the deleted one"
   else
-    fail_step "OpenCode writer reference FAILED — use native pfm opencode on every named surface"
+    fail_step "OpenCode writer reference FAILED — every named surface names engine-sync, the native writer, and none the deleted one (see output)"
   fi
 }
 
@@ -408,10 +456,10 @@ checks_templates() {
   checks_templates_scratch_paths
   checks_templates_descriptions
   checks_templates_mirrors_generate
+  checks_templates_global_variants
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
   checks_templates_release_check
-  checks_templates_codex_sync
   checks_templates_refresh_scope
   checks_templates_pfm_guard
   checks_templates_dev_report
@@ -517,7 +565,7 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   [[ -z "$history" ]] || shard_args=(--history "$history")
   # Positional arguments keep flags and output paths out of shell code.
   # The JSON is retained even on failure; timing is a separate verdict.
-  # --bin-dir keeps the prebuilt pfm in the run dir for the templates.check-map and templates.mirrors steps.
+  # --bin-dir keeps the prebuilt pfm in the run dir for the templates.check-map step.
   run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" --bin-dir "$run_dir/bin" "${shard_args[@]}" -- "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
   checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
@@ -740,11 +788,11 @@ gate_write_meta() {
   } > "$run_dir/gate.meta"
 }
 
-checks_templates_mirrors() { # optional: an executable pfm already built from this tree
+checks_templates_mirrors() {
   checks_templates_mirrors_generate
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
-  checks_templates_mirrors_opencode "${1:-}"
+  checks_templates_mirrors_opencode
   checks_templates_mirrors_manifest
 }
 
@@ -851,9 +899,9 @@ gate_run() { # pfm, templates, or all
     steps_add templates.placeholders checks_templates_placeholders
     steps_add templates.scratch-paths checks_templates_scratch_paths
     steps_add templates.descriptions checks_templates_descriptions
-    steps_add templates.mirrors checks_templates_mirrors "$run_dir/bin/pfm"
+    steps_add templates.mirrors checks_templates_mirrors
+    steps_add templates.global-variants checks_templates_global_variants
     steps_add templates.release-check checks_templates_release_check
-    steps_add templates.codex-sync checks_templates_codex_sync
     steps_add templates.refresh-scope checks_templates_refresh_scope
     steps_add templates.pfm-guard checks_templates_pfm_guard
     steps_add templates.dev-report checks_templates_dev_report

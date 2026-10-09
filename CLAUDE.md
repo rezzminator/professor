@@ -26,7 +26,8 @@ This repo is the framework, not an app that uses it: everything under `templates
 - retro inbox: the steering ledger `/pcm retro` folds · `.professor/retro.md`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
 - guard: the PreToolUse hook gating `.claude/**` and every `CLAUDE.md`, never a generated `AGENTS.md` · `.claude/scripts/pfm-guard.sh` · design `docs/design/hooks/`
-- engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by `pfm codex build .` and `pfm opencode build .`
+- engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary plus a Claude plugin from its own repo; pfm execs it and `pfm codex|opencode` forward to it; its stable link `~/.local/share/engine-sync/bin/engine-sync` is off PATH · `plugins/engine-sync/` · design `docs/design/engine-sync/`
+- engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - plugins: the plugins the marketplace lists, each a git submodule of its own repo on `develop`; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` copies cache-live-control, sub-agent-compact, agent-effort and tool-visibility-controller from them when `claude.pluginCheckoutRoot` names this directory · `plugins/{plugin}/`, `.gitmodules`
@@ -51,14 +52,13 @@ This repo is the framework, not an app that uses it: everything under `templates
 ## Codex
 
 - Reads `AGENTS.md`, whose § Codex adapter comes from `.claude/codex-build.json`, and `.codex/`.
-- `pfm codex build .` is the single writer of its mirror; `pfm codex check .` its check.
-- A role is a `.toml` twin `pfm install` (or `pfm codex agents`) writes as a marker-owned regular file into every Codex home's `{codex-home}/agents/` — Codex refuses a symlinked role — so a role changes at the next `pfm install`.
-- `templates/project/scripts/build-codex.mjs` builds an adopter's mirror only.
+- engine-sync writes its mirror, run as `pfm codex build .`; `pfm codex check .` its check.
+- A role is a `.toml` twin `pfm install` (through `engine-sync global`, or `pfm codex agents`) writes as a marker-owned regular file into every Codex home's `{codex-home}/agents/` — Codex refuses a symlinked role — so a role changes at the next `pfm install`.
 
 ## OpenCode
 
 - Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the guarded-file and non-gitter Git-write denies.
-- `pfm opencode build .` is the single writer; `pfm opencode {check|doctor} .` its checks.
+- engine-sync writes it, run as `pfm opencode build .`; `pfm opencode {check|doctor} .` its checks.
 
 ## Local
 

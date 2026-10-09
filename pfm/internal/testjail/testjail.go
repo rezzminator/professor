@@ -240,10 +240,21 @@ func jailHome(base string) (func(), error) {
 	if err != nil {
 		return func() {}, fmt.Errorf("create jailed home under %s: %w", base, err)
 	}
+	engineSync, err := os.MkdirTemp(base, "pfm-jail-engine-sync-")
+	if err != nil {
+		return func() {}, errors.Join(
+			fmt.Errorf("create the engine-sync fake directory under %s: %w", base, err), os.RemoveAll(home),
+		)
+	}
 	cleanup := func() {
-		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			warnSetup("remove jail home %s: %v", home, err)
+		for _, dir := range []string{home, engineSync} {
+			if err := os.RemoveAll(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				warnSetup("remove jail directory %s: %v", dir, err)
+			}
 		}
+	}
+	if err := installDefaultEngineSync(engineSync); err != nil {
+		return cleanup, err
 	}
 	accountDir := config.DefaultAccountDir(home, 1)
 	if err := os.MkdirAll(accountDir, 0o700); err != nil {

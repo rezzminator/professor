@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # setup.sh — runs INSIDE the demo fence container (up.sh drives it) in two phases:
-#   tools    pfm built from the mounted checkout with the release stamp, the REAL
-#            Claude Code and Codex from npm, Starship.
+#   tools    pfm built from the mounted checkout with the release stamp, engine-sync
+#            (the Codex/OpenCode compiler pfm execs) from the /engine-sync mount onto
+#            the ENGINE_SYNC_BIN up.sh sets, the REAL Claude Code and Codex from npm,
+#            Starship.
 #   install  pfm install from the checkout (professor MCP, statusline, hooks, the
 #            professor system prompt, the harvester), Claude Code's first-run
 #            state per seat, the demo projects (/work/demo is a `pfm init`
@@ -31,6 +33,8 @@ case "$phase" in
 tools)
   mkdir -p "$HOME/.local/bin"
   (cd "$SRC/pfm" && go build -ldflags "-X main.version=$(cat ../VERSION)" -o "$HOME/.local/bin/pfm" ./cmd/pfm)
+  . "$SRC/infra/fence/engine-sync.sh"
+  engine_sync_build "${ENGINE_SYNC_BIN:?up.sh sets ENGINE_SYNC_BIN on the container}"
   command -v claude >/dev/null && command -v codex >/dev/null || npm install -g @anthropic-ai/claude-code @openai/codex >/dev/null
   command -v opencode >/dev/null || npm install -g opencode-ai >/dev/null
   command -v starship >/dev/null || curl -fsSL https://starship.rs/install.sh | sh -s -- -y >/dev/null

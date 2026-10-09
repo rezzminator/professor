@@ -728,7 +728,7 @@ bad=""
 chk="$(in_express pfm codex check .)"
 chk_rc=$?
 [ "$chk_rc" -eq 0 ] && [ "$(printf '%s\n' "$chk" | tail -1)" = 'CODEX CHECK PASS' ] ||
-  bad="$bad pfm codex check exited $chk_rc without 'CODEX CHECK PASS' ($(one_line "$(printf '%s' "$chk" | grep 'pfm codex' | head -2)"));"
+  bad="$bad pfm codex check exited $chk_rc without 'CODEX CHECK PASS' ($(one_line "$(printf '%s' "$chk" | grep -E '(pfm|engine-sync) codex' | head -2)"));"
 agents_hash="$(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1)"
 [ -n "$agents_hash" ] || bad="$bad no $EXPRESS/AGENTS.md to compile into;"
 bld="$(in_express pfm codex build .)"
@@ -743,7 +743,7 @@ printf '\nLane A probe: stale %s\n' "$LANE_STAMP" >>"$EXPRESS/AGENTS.md"
 stale="$(in_express pfm codex check .)"
 stale_rc=$?
 [ "$stale_rc" -eq 1 ] || bad="$bad check over a hand-edited AGENTS.md exited $stale_rc, want 1;"
-grep -qF "pfm codex: STALE $EXPRESS/AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE $EXPRESS/AGENTS.md': $(one_line "$stale");"
+grep -qF "engine-sync codex: STALE $EXPRESS/AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE $EXPRESS/AGENTS.md': $(one_line "$stale");"
 grep -qxF 'CODEX CHECK PASS' <<<"$stale" && bad="$bad check printed CODEX CHECK PASS over a stale mirror;"
 rebuilt="$(in_express pfm codex build .)"
 rebuilt_rc=$?
@@ -872,6 +872,8 @@ else
     sid="$(live_field "$CHAT" 2)"
     EXPRESS_PROJECT="$(basename "$EXPRESS")"; EXPRESS_PROJECT="${EXPRESS_PROJECT#.}"
     GUARD_DIR="/tmp/$EXPRESS_PROJECT/guard"
+    # engine-sync hook claude mark's flag: {engine-sync state}/dirty/{project}-{root hash}.
+    DIRTY_GLOB="$HOME/.local/state/engine-sync/dirty/$EXPRESS_PROJECT-*"
     mkdir -p "$GUARD_DIR"
     ACTIVE="$GUARD_DIR/pfm_active.$sid"
     QUALITY="$GUARD_DIR/quality_loaded.$sid"
@@ -921,7 +923,7 @@ else
     guard_after="$(sha256sum "$EXPRESS/$GUARD_FILE" | cut -d' ' -f1)"
     [ "$guard_after" = "$guard_before" ] || bad="$bad $GUARD_FILE changed without a stamp;"
     [ ! -e "$ACTIVE" ] || bad="$bad the deny turn created $ACTIVE;"
-    [ ! -e "$GUARD_DIR/codex_dirty" ] || bad="$bad the denied Edit set codex_dirty without PostToolUse;"
+    ! compgen -G "$DIRTY_GLOB" >/dev/null || bad="$bad the denied Edit set the engine-sync dirty flag without PostToolUse;"
     # 2. With the stamp (the deny message's own unlock, written by the lane for
     #    this session id): the same Edit is ALLOWED, and Stop recompiles.
     date +%s >"$ACTIVE"
@@ -938,16 +940,16 @@ else
       bad="$bad stamped Edit was not admitted by PreToolUse: $(one_line "$allow_result");"
     wait_for 10 "[ -f '$QUALITY' ]" ||
       bad="$bad guard-stamp.sh PostToolUse(Read) did not set $QUALITY (${LANE_WAIT_WHY:-no wait reason});"
-    wait_for 10 "[ -f '$GUARD_DIR/codex_dirty' ]" ||
-      bad="$bad codex-sync.sh mark PostToolUse(Edit|Write) did not set codex_dirty (${LANE_WAIT_WHY:-no wait reason});"
+    wait_for 10 "compgen -G '$DIRTY_GLOB' >/dev/null" ||
+      bad="$bad codex-sync.sh mark PostToolUse(Edit|Write) did not set the engine-sync dirty flag $DIRTY_GLOB (${LANE_WAIT_WHY:-no wait reason});"
     printf '\nLane A probe: LANE-A-ALLOW-ROOT\n' >>"$EXPRESS/$ROOT_FILE" ||
       bad="$bad the lane could not append the allowed root probe;"
     rm -f "$gate"
     if ! wait_for 180 "grep -qF LANE-A-ALLOW-ROOT '$EXPRESS/AGENTS.md'"; then
       bad="$bad the Stop hook did not recompile AGENTS.md from the edited CLAUDE.md within 180s (${LANE_WAIT_WHY:-no wait reason}); AGENTS.md hash $(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1 | cut -c1-12) vs before ${agents_before:0:12};"
     fi
-    wait_for 30 "[ ! -f '$GUARD_DIR/codex_dirty' ]" ||
-      bad="$bad the codex_dirty flag is still set after the turn — codex-sync.sh sync did not clear it (${LANE_WAIT_WHY:-no wait reason});"
+    wait_for 30 "! compgen -G '$DIRTY_GLOB' >/dev/null" ||
+      bad="$bad the engine-sync dirty flag is still set after the turn — codex-sync.sh sync did not clear it (${LANE_WAIT_WHY:-no wait reason});"
     # Restore express: the committed files back, the mirror rebuilt from them,
     # the session markers gone.
     git -C "$EXPRESS" checkout -q -- "$GUARD_FILE" "$ROOT_FILE" 2>/dev/null || bad="$bad git checkout of $GUARD_FILE/$ROOT_FILE failed;"

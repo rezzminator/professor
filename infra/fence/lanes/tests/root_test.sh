@@ -272,6 +272,7 @@ mkdir -p "$H/infra/fence/lanes" "$H/infra/fence/jscpd" "$H/pfm/internal/alpha/te
 cp "$SUT" "$H/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$H/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$H/infra/fence/fence-env.sh"
+cp "$LANES/../image-key.sh" "$H/infra/fence/image-key.sh"
 cp "$R/infra/fence/housekeeping.sh" "$H/infra/fence/housekeeping.sh"
 for script in provision adopt cred-scan; do cp "$R/infra/fence/lanes/$script.sh" "$H/infra/fence/lanes/$script.sh"; done
 for file in E1.sh lib.sh beats.md; do printf 'fixture\n' >"$H/infra/fence/lanes/$file"; done
@@ -329,6 +330,31 @@ committed="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
 if [ "$dirty" != "$base" ] && [ "$dirty" = "$staged" ] && [ "$staged" = "$committed" ]; then
   ok "dirty, staged and committed build content has one hash"
 else bad "hash depends on index or commit state" "base=$base dirty=$dirty staged=$staged committed=$committed"; fi
+# 6b — the engine-sync source the root builds its binary from is a hash input; its tests are not.
+ES="$T/es-src"
+mkdir -p "$ES/cmd/engine-sync" "$ES/internal/x/testdata"
+printf 'module example.test/engine-sync\n' >"$ES/go.mod"
+printf 'package main\n' >"$ES/cmd/engine-sync/main.go"
+printf 'package x\n' >"$ES/internal/x/x_test.go"
+printf 'fixture\n' >"$ES/internal/x/testdata/input"
+(cd "$ES" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
+es_base="$(ENGINE_SYNC_SRC="$ES" bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+for file in cmd/engine-sync/main.go go.mod internal/x/x_test.go internal/x/testdata/input; do
+  printf 'edit\n' >>"$ES/$file"
+  changed="$(ENGINE_SYNC_SRC="$ES" bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+  case "$file" in *_test.go|*/testdata/*) expected=equal ;; *) expected=different ;; esac
+  if { [ "$expected" = equal ] && [ "$changed" = "$es_base" ]; } ||
+     { [ "$expected" = different ] && [ "$changed" != "$es_base" ]; }; then
+    ok "hash engine-sync $file is $expected after edit"
+  else bad "hash engine-sync $file should be $expected after edit" "base=$es_base" "changed=$changed"; fi
+  git -C "$ES" checkout -- "$file"
+done
+printf 'package main\n' >"$ES/cmd/engine-sync/extra.go"
+es_untracked="$(ENGINE_SYNC_SRC="$ES" bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+rm "$ES/cmd/engine-sync/extra.go"
+if [ "$es_untracked" != "$es_base" ] && [ "$es_base" != "$base" ]; then
+  ok "an untracked engine-sync source file and the source's presence both change the hash"
+else bad "engine-sync source presence" "base=$base es_base=$es_base es_untracked=$es_untracked"; fi
 HASH_BIN="$T/hash-bin"; mkdir -p "$HASH_BIN"
 cat >"$HASH_BIN/git" <<'EOF'
 #!/usr/bin/env bash

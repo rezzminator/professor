@@ -194,7 +194,7 @@ func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
 func renderRawSubagent(t *testing.T, session, task string, now time.Time) string {
 	t.Helper()
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + task + `]}`
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), &bytes.Buffer{})
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}

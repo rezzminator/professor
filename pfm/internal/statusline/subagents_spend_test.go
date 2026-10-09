@@ -116,7 +116,7 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 func TestRenderSubagentsSpendWithoutPrices(t *testing.T) {
 	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""})
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + parentTask + `]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), nil, &strings.Builder{})
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), nil, "", "", &strings.Builder{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func renderLedgerRows(t *testing.T, sessionID, session string, ids ...string) ma
 	payload := `{"session_id":` + jsonText(sessionID) + `,"transcript_path":` + jsonText(session) +
 		`,"cwd":"/work/repo","tasks":[` + strings.Join(tasks, ",") + `]}`
 	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), &warn)
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", "", &warn)
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}

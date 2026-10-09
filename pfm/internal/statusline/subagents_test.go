@@ -114,7 +114,7 @@ func renderSubagentWith(t *testing.T, session, task string, now time.Time, colum
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":` + jsonText(columns) +
 		`,"tasks":[` + task + `]}`
 	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), &warn)
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", "", &warn)
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}
@@ -185,6 +185,33 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			want: "4.2K│bot│haiku│running",
 		},
 		{
+			name: "a gpt- agent renders its tier then its version",
+			task: `{"id":"g1","name":"sol","status":"running","model":"gpt-6-sol","effort":"low",` +
+				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
+			want: "4.2K│sol│sol-6·🚲 low│running",
+		},
+		{
+			name: "a gpt- agent's dotted version survives",
+			task: `{"id":"g2","name":"bot","status":"running","model":"gpt-5.6-terra","effort":"high",` +
+				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
+			want: "4.2K│bot│terra-5.6·🏎️ high│running",
+		},
+		{
+			name: "a bare gpt- version has no tier and renders whole",
+			task: `{"id":"g3","name":"bot","status":"running","model":"gpt-6","tokenCount":10}`,
+			want: "10│bot│gpt-6│running",
+		},
+		{
+			name: "a gpt- agent on the priority tier renders its tier, not the -fast suffix",
+			task: `{"id":"g4","name":"bot","status":"running","model":"gpt-6-sol-fast[1m]","tokenCount":10}`,
+			want: "10│bot│sol-6│running",
+		},
+		{
+			name: "a bare gpt- version on the priority tier renders whole, without the -fast suffix",
+			task: `{"id":"g5","name":"bot","status":"running","model":"gpt-5.5-fast","tokenCount":10}`,
+			want: "10│bot│gpt-5.5│running",
+		},
+		{
 			name: "an agent in the session's own directory shows no cwd",
 			task: `{"id":"same","status":"running","cwd":"/work/repo/","model":"haiku","tokenCount":10,"label":"x"}`,
 			want: "10│haiku│running│x",
@@ -210,6 +237,166 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 				t.Fatalf("readable transcripts warned: %q", warned)
 			}
 		})
+	}
+}
+
+// A twin agent definition names the role it plays: the identity renders that
+// role, read from the project's definitions first — the session cwd's and its
+// parents' through the git root, never home's own — then the user's.
+func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
+	const task = `{"id":"a1","type":"local_agent","status":"running","model":"gpt-6-sol","effort":"high",` +
+		`"tokenCount":4200,"tokenSamples":[2100,4200]}`
+	definition := func(frontmatter string) string {
+		return "---\n" + frontmatter + "\n---\n\nbody\nrole: not-frontmatter\n"
+	}
+	cases := []struct {
+		name    string
+		project map[string]string // file name → body under <project>/.claude/agents
+		user    map[string]string // file name → body under the user agents dir
+		outer   map[string]string // path under home → body, outside the project
+		below   string            // the session cwd under <project>; "" = the project itself
+		noGit   bool              // the project is no git repository
+		want    string
+	}{
+		{
+			name: "the user's twin definition names its role",
+			user: map[string]string{
+				"gpt-foreman.md": definition("name: gpt-foreman\nmodel: gpt-6-sol\nrole: flights-foreman"),
+			},
+			want: "│flights-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name:    "the project's definition wins over the user's",
+			project: map[string]string{"gpt-foreman.md": definition("role: project-foreman")},
+			user:    map[string]string{"gpt-foreman.md": definition("role: flights-foreman")},
+			want:    "│project-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name: "a quoted role loses its quotes",
+			user: map[string]string{"gpt-foreman.md": definition(`role: "flights-foreman"`)},
+			want: "│flights-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name: "a definition with no role key keeps the agentType",
+			user: map[string]string{"gpt-foreman.md": definition("name: gpt-foreman")},
+			want: "│gpt-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name: "a role in the body is not a role",
+			user: map[string]string{"gpt-foreman.md": "no frontmatter\nrole: flights-foreman\n"},
+			want: "│gpt-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name: "no definition file keeps the agentType",
+			want: "│gpt-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name:    "a session below the project root reads the root's definition",
+			below:   filepath.Join("pfm", "internal"),
+			project: map[string]string{"gpt-foreman.md": definition("role: project-foreman")},
+			user:    map[string]string{"gpt-foreman.md": definition("role: flights-foreman")},
+			want:    "│project-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name: "a definition above the git root is no project's",
+			outer: map[string]string{
+				filepath.Join("work", ".claude", "agents", "gpt-foreman.md"): definition("role: outer-foreman"),
+			},
+			want: "│gpt-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name:  "outside a git repository home's own .claude is not a project's",
+			noGit: true,
+			outer: map[string]string{
+				filepath.Join(".claude", "agents", "gpt-foreman.md"): definition("role: home-foreman"),
+			},
+			want: "│gpt-foreman│sol-6·🏎️ high│",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines[:1]},
+				map[string]string{"a1": "gpt-foreman"})
+			home, userDir := t.TempDir(), t.TempDir()
+			project := filepath.Join(home, "work", "proj")
+			cwd := filepath.Join(project, tc.below)
+			if err := os.MkdirAll(cwd, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.noGit {
+				if err := os.Mkdir(filepath.Join(project, ".git"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			files := map[string]string{}
+			for name, body := range tc.project {
+				files[filepath.Join(project, ".claude", "agents", name)] = body
+			}
+			for name, body := range tc.user {
+				files[filepath.Join(userDir, name)] = body
+			}
+			for rel, body := range tc.outer {
+				files[filepath.Join(home, rel)] = body
+			}
+			for path, body := range files {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			payload := `{"transcript_path":` + jsonText(session) + `,"cwd":` + jsonText(cwd) +
+				`,"columns":200,"tasks":[` + task + `]}`
+			var warn bytes.Buffer
+			got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), home, userDir, &warn)
+			if err != nil {
+				t.Fatalf("RenderSubagents: %v", err)
+			}
+			var row subagentRow
+			if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
+				t.Fatalf("row %q: %v", got, err)
+			}
+			if content := stripANSICodes(row.Content); !strings.Contains(content, tc.want) {
+				t.Fatalf("content =\n  %q\nwant it to hold\n  %q", content, tc.want)
+			}
+			if warn.Len() != 0 {
+				t.Fatalf("readable definitions warned: %q", warn.String())
+			}
+		})
+	}
+}
+
+// An edited definition shows on the next render: nothing outlives one.
+func TestRenderSubagentsRoleIsReadAgainEachRender(t *testing.T) {
+	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines[:1]},
+		map[string]string{"a1": "gpt-foreman"})
+	userDir := t.TempDir()
+	path := filepath.Join(userDir, "gpt-foreman.md")
+	render := func() string {
+		payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":200,"tasks":[` +
+			`{"id":"a1","type":"local_agent","status":"running","model":"gpt-6-sol","tokenCount":10}]}`
+		var warn bytes.Buffer
+		got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", userDir, &warn)
+		if err != nil {
+			t.Fatalf("RenderSubagents: %v", err)
+		}
+		var row subagentRow
+		if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
+			t.Fatalf("row %q: %v", got, err)
+		}
+		return stripANSICodes(row.Content)
+	}
+	for _, step := range []struct{ body, want string }{
+		{"---\nrole: flights-foreman\n---\n", "│flights-foreman│sol-6│"},
+		{"---\nrole: flights-lander\n---\n", "│flights-lander│sol-6│"},
+	} {
+		if err := os.WriteFile(path, []byte(step.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := render(); !strings.Contains(got, step.want) {
+			t.Fatalf("content = %q, want it to hold %q", got, step.want)
+		}
 	}
 }
 
@@ -268,7 +455,7 @@ func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 	got, err := RenderSubagents([]byte(`{"tasks":[
 		{"id":"first","tokenCount":10,"contextWindowSize":100},
 		{"id":"skipped"},
-		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), &bytes.Buffer{})
+		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}
@@ -286,7 +473,7 @@ func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 }
 
 func TestRenderSubagentsRejectsMalformedInput(t *testing.T) {
-	got, err := RenderSubagents([]byte(`{"tasks":`), subagentNow, t.TempDir(), testPrices(t), &bytes.Buffer{})
+	got, err := RenderSubagents([]byte(`{"tasks":`), subagentNow, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatalf("malformed payload rendered %q with no error", got)
 	}
@@ -302,7 +489,7 @@ func TestRenderSubagentsRowIsBrightNotFaint(t *testing.T) {
 	payload := `{"transcript_path":` + jsonText(session) + `,"tasks":[{"id":"a1","type":"local_agent",` +
 		`"status":"running","label":"x","model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10,` +
 		`"tokenSamples":[5,10]}]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), &bytes.Buffer{})
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
@@ -152,6 +155,15 @@ func fitRow(parts []rowPart, columns int) string {
 	return line
 }
 
+// userAgentsDir is the user's agent definitions directory, where Claude Code
+// reads them: $CLAUDE_CONFIG_DIR/agents when that is set, else ~/.claude/agents.
+func userAgentsDir(home string) string {
+	if dir := pfmconfig.AmbientClaudeConfigDir(); dir != "" {
+		return filepath.Join(dir, "agents")
+	}
+	return filepath.Join(home, ".claude", "agents")
+}
+
 // ansiSGR matches one colour escape: a muted row drops them all and wears one.
 var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
@@ -170,7 +182,8 @@ func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, machine paths.Val
 		return 0
 	}
 	prices := LoadServedPrices(machine.Home, pfmConfigPath, stderr, "pfm statusline --subagents")
-	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, stderr)
+	userAgents := userAgentsDir(machine.Home)
+	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, machine.Home, userAgents, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: render (fail-open): %v\n", err)
 		return 0
@@ -210,8 +223,16 @@ func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) 
 // that cannot be read renders "?" in its row and its cause goes to warn. A nil
 // prices leaves every row's dollars unpriced. A session with a cost ledger prices each row from it:
 // the ledger rows of that agent and every agent below it (ledger_spend.go); an agent it holds no
-// row of yet keeps its transcripts' price.
-func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.Prices, warn io.Writer) (string, error) {
+// row of yet keeps its transcripts' price. An agent row's identity is the role its definition names
+// (roleLookup), found under the session cwd up to its git root, short of home, then in userAgents.
+func RenderSubagents(
+	raw []byte,
+	now time.Time,
+	sidDir string,
+	prices *pricing.Prices,
+	home, userAgents string,
+	warn io.Writer,
+) (string, error) {
 	var data subagentInput
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("parse subagent row context: %w", err)
@@ -224,6 +245,7 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.P
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
 	var tree *agentTree // scanned once per render, on the first agent row
+	roles := newRoleLookup(data.Cwd, home, userAgents, warn)
 	ledger := loadLedgerView(data.SessionID, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
@@ -236,6 +258,9 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.P
 				tree = scanAgentTree(data.TranscriptPath)
 			}
 			read := readAgentActivity(data.TranscriptPath, task.ID, prices)
+			if read.roleErr == nil {
+				read.role = roles.name(read.role, warn)
+			}
 			read.nest = tree.nesting(task.ID)
 			read.spend.add(tree.nestedSpend(task.ID, prices))
 			if ledger != nil {
@@ -445,9 +470,21 @@ func modelVersion(model string) string {
 	return model
 }
 
-// modelFamily is the model's family alone: claude-opus-5-5[1m] → opus.
+// modelFamily is the model's family alone: claude-opus-5-5[1m] → opus. A gpt-
+// id names its tier last and its version first, so it renders tier-version:
+// gpt-6-sol → sol-6, gpt-5.6-terra → terra-5.6; one with no tier renders
+// whole, gpt-6 → gpt-6. The gateway's priority-tier suffix is no tier and
+// drops like the window tag: gpt-6-sol-fast → sol-6, gpt-5.5-fast → gpt-5.5.
 func modelFamily(model string) string {
 	model = modelVersion(model)
+	if strings.HasPrefix(model, "gpt-") {
+		model = strings.TrimSuffix(model, "-fast")
+		rest := strings.TrimPrefix(model, "gpt-")
+		if cut := strings.LastIndexByte(rest, '-'); cut > 0 && cut < len(rest)-1 {
+			return rest[cut+1:] + "-" + rest[:cut]
+		}
+		return model
+	}
 	if cut := strings.IndexByte(model, '-'); cut > 0 {
 		model = model[:cut]
 	}
@@ -559,6 +596,90 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) age
 	activity.spend = spend.total()
 	activity.spend.tools = activity.tools
 	return activity
+}
+
+// roleLookup maps an agentType to the role its definition file names. It lives
+// for one render, so an edited definition shows on the next one.
+type roleLookup struct {
+	dirs  []string // the project's agent definitions, nearest first, then the user's
+	names map[string]string
+}
+
+// newRoleLookup lists the definition directories the way Claude Code collects
+// them: <dir>/.claude/agents for the cwd and each parent, nearest first, through
+// the git root (the first directory holding .git) and never home itself, whose
+// .claude is the user's config; then the user's agents directory.
+func newRoleLookup(cwd, home, userAgents string, warn io.Writer) *roleLookup {
+	lookup := &roleLookup{names: map[string]string{}}
+	if strings.TrimSpace(cwd) != "" {
+		if home != "" {
+			home = filepath.Clean(home)
+		}
+		for dir := filepath.Clean(cwd); dir != home; {
+			lookup.dirs = append(lookup.dirs, filepath.Join(dir, ".claude", "agents"))
+			_, err := os.Lstat(filepath.Join(dir, ".git"))
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, fs.ErrNotExist) {
+				fmt.Fprintf(warn, "pfm statusline --subagents: git root (definitions read past %s): %v\n", dir, err)
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	if userAgents != "" {
+		lookup.dirs = append(lookup.dirs, userAgents)
+	}
+	return lookup
+}
+
+// name is the `role:` of the first definition file that exists, searched the
+// way Claude Code resolves an agent (the project's, then the user's, symlinks
+// followed). A type with no file, no `role:` key or an unreadable file is its
+// own name; an unreadable one also reaches warn.
+func (lookup *roleLookup) name(agentType string, warn io.Writer) string {
+	if role, ok := lookup.names[agentType]; ok {
+		return role
+	}
+	role := agentType
+	if agentType != "" && !strings.ContainsAny(agentType, `/\`) && agentType != "." && agentType != ".." {
+		for _, dir := range lookup.dirs {
+			body, err := os.ReadFile(filepath.Join(dir, agentType+".md"))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				fmt.Fprintf(warn, "pfm statusline --subagents: agent definition (rows show %s): %v\n", agentType, err)
+			} else if named := definitionRole(string(body)); named != "" {
+				role = named
+			}
+			break
+		}
+	}
+	lookup.names[agentType] = role
+	return role
+}
+
+// definitionRole is the `role:` value in a definition's frontmatter, the block
+// between its leading "---" line and the next one; "" when there is none.
+func definitionRole(body string) string {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return ""
+	}
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			return ""
+		}
+		if value, ok := strings.CutPrefix(line, "role:"); ok {
+			return strings.Trim(strings.TrimSpace(value), `"'`)
+		}
+	}
+	return ""
 }
 
 // readAgentRole reads agentType from the sub-agent's meta file.

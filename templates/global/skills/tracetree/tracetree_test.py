@@ -365,6 +365,30 @@ class OpenTest(Repo):
         self.assertEqual(flagged[-2], "LEAD the handler refuses first @ app/srv/server.go:5 — run: node 1")
         self.assertEqual(flagged[-1], "NOT READ the wrapped error at app/kill/kill.go:6 — run: node 1 (grep only — read it)")
 
+    def test_a_line_range_a_verified_hop_of_any_node_holds_is_marked_held_never_dropped(self):
+        self.node("1", [])
+        self.node("2", ["NOT READ server.go lines 1-4 and 5-8 beyond what was needed",
+                        "NOT READ app/srv/server.go:1-4, the package header",
+                        "LEAD app/kill/kill.go lines 1-9 untouched"],
+                  hop=("app/kill/kill.go:6", "\t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)"))
+        out = self.wait("2").splitlines()
+        self.assertEqual(out[-4:], [
+            "OPEN",
+            "NOT READ server.go lines 1-4 and 5-8 beyond what was needed — run: node 2 "
+            "(held: node 1 verified app/srv/server.go:5)",
+            "NOT READ app/srv/server.go:1-4, the package header — run: node 2 (grep only — read it)",
+            "LEAD app/kill/kill.go lines 1-9 untouched — run: node 2 (held: node 2 verified app/kill/kill.go:6)"])
+
+    def test_counts_names_nodes_with_no_end_noend_so_it_never_reads_as_the_open_block(self):
+        self.store("1", hops("1", ["- x [app/srv/server.go:5]"],
+                             ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")"],
+                             ["NOT READ whether Run retries"]))
+        out = self.wait("1")
+        counts = next(l for l in out.splitlines() if l.startswith("COUNTS: "))
+        self.assertTrue(counts.endswith(" · noend=1"), counts)
+        self.assertNotIn("open=", counts)
+        self.assertEqual(out.splitlines()[-2:], ["OPEN", "NOT READ whether Run retries — run: node 1"])
+
     def test_nothing_to_list_prints_open_none_and_only_shown_nodes_are_listed(self):
         self.node("1", [])
         self.assertEqual(self.wait("1").splitlines()[-1], "OPEN: none")
@@ -601,6 +625,25 @@ class MapTest(Repo):
                          [("app/srv/server.go::Handle", "app/kill/kill.go::Run", "call")])
         self.assertEqual([s["c"] for s in data["threads"]["1"]["walk"]],
                          ["app/srv/server.go::Handle", "app/kill/kill.go::Run"])
+
+    def test_each_walk_step_carries_the_kind_of_link_from_the_step_before_it(self):
+        self.walk(extra=["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                         "= the error is wrapped",
+                         "@ app/log/log.go:4", "> \tprintln(msg)", "= the message is printed"])
+        self.write("2", hops("2", ["- make test runs check.sh [Makefile:2]"],
+                             ["@ Makefile:2", "> \t./scripts/check.sh all", "= make runs the check script",
+                              "@ scripts/check.sh:5", ">   go test ./...", "= the script runs go test"],
+                             ["END executed: go test @ scripts/check.sh:5"]))
+        data = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
+        self.assertEqual([(s["c"], s["link"]) for s in data["threads"]["1"]["walk"]],
+                         [("app/srv/server.go::Handle", None), ("app/kill/kill.go::Run", "call"),
+                          ("app/kill/kill.go::Run", "same"), ("app/log/log.go::Note", "then")])
+        self.assertEqual([s["link"] for s in data["threads"]["2"]["walk"]], [None, "names"])
+        page, inlined = self.page()
+        self.assertEqual([s["link"] for s in inlined["threads"]["1"]["walk"]], [None, "call", "same", "then"])
+        self.assertIn('s.link === "then"', page)
+        self.assertIn("Routes are the walkers' reading of the code; nothing was run — dashed: walk order only, "
+                      "no call or name in the code links them.", page)
 
     def test_html_is_written_only_on_request_and_loads_nothing_from_the_network(self):
         self.walk()
@@ -871,6 +914,14 @@ class WriteVerifyTest(Stored):
         self.assertFalse(os.path.exists(os.path.join(self.run_dir, "1.hops")))
         self.assertFalse(os.path.exists(os.path.join(self.run_dir, "1.write.json")))
         self.assertTrue(os.path.exists(os.path.join(self.run_dir, "1.refused")))
+
+    def test_a_quote_whose_indent_was_escaped_with_one_backslash_is_stored_on_the_first_write(self):
+        got = self.put("1", ["@ app/kill/kill.go:5", "> \\    " + EXEC.strip(), "@ app/kill/kill.go:6", "> \\" + ERRF])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.run_dir, "1.refused")))
+        self.assertEqual([(e["line"], e["status"]) for e in self.sidecar()], [(5, "verified"), (6, "verified")])
+        kept = self.put("2", ["@ app/kill/kill.go:5", "> \\" + EXEC.strip()])
+        self.assertEqual(kept.returncode, 2, "a backslash before no whitespace is part of the quote")
 
     def test_the_second_write_stores_the_file_with_that_hop_rejected_and_a_third_is_refused(self):
         hop_lines = ["@ app/srv/server.go:5", f"> {REQUIRED}", "@ app/kill/kill.go:6", f"> {self.GHOST}"]
@@ -1674,6 +1725,17 @@ class SeekTest(Repo):
         self.assertEqual(len(rest), 31, rest)
         self.assertTrue(all(l.startswith(f"PRIOR {prior} node 1: ") for l in rest[:30]))
         self.assertEqual(rest[30], f"PRIOR: 35 hops in 1 runs, 5 not shown — tt check {prior} --hops 1")
+
+    def test_seek_cuts_a_line_longer_than_160_characters_and_ends_it_with_dots(self):
+        long = "\tconfig := " + "\"" + "x" * 300 + "\""
+        with open(os.path.join(self.root, "app/srv/conf.go"), "w") as f:
+            f.write("package srv\n\nfunc Conf() {\n" + long + "\n}\n")
+        prior = self.sibling("20260101-000000-aaaa", hops("1", ["- x"], ["@ app/srv/conf.go:4", "> " + long], []))
+        _, rest = self.new("--seek", "conf\\.go")
+        head = f"PRIOR {prior} node 1: app/srv/conf.go:4  "
+        self.assertTrue(rest[0].startswith(head), rest[0])
+        self.assertEqual(rest[0][len(head):], long.strip()[:157] + "...")
+        self.assertEqual(len(rest[0]) - len(head), 160)
 
     def test_seek_names_a_run_it_could_not_read_in_the_summary(self):
         self.sibling("20260101-000000-aaaa", self.good("1"))

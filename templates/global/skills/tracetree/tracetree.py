@@ -104,6 +104,8 @@ BACKTICK = re.compile(r"`([^`]+)`")
 ADDR = re.compile(r"@\s*(\S+?):(\d+)(?:-(\d+))?\s*$")
 CITE = re.compile(r"\[([^\[\]\s]+?):(\d+)(?:-(\d+))?\]")
 XREF = re.compile(r"([\w./-]+\.\w+):(\d+)")
+# a line range a NOT READ or LEAD line names: `path:A-B`, or `path lines A-B, C and D-E`
+SPANS = re.compile(r"([\w./-]+\.\w+)(?::(\d+)-(\d+)|\s+lines?\s+(\d+(?:-\d+)?(?:(?:\s*,\s*|\s+and\s+)\d+(?:-\d+)?)*))")
 PLACEHOLDER = re.compile(r"\{[^{}]*\}")
 NODE_ID = re.compile(r"[0-9]+(?:\.[0-9]+)*")
 GAPS = re.compile(r"…|\.\.\.|<[^<>]*>|\{[^{}]*\}")
@@ -140,6 +142,7 @@ FOLLOWED_HOW = "followed a file moved since the walk"
 PAIRS_SHOWN = 3
 SEEK_HOURS = 6
 SEEK_SHOWN = 30
+PRIOR_CUT = 160
 CEILING = 28000
 
 
@@ -159,7 +162,7 @@ def parse_questions(text):
 
 def counters(names):
     return dict(nodes=len(names), hops=0, verified=0, moved=0, rejected=0, drifted=0, placed=0, followed=0, refused=0, partial=0, unseen=0,
-                answers=0, flagged=0, recited=0, missing=0, badaddr=0, open=0)
+                answers=0, flagged=0, recited=0, missing=0, badaddr=0, noend=0)
 
 
 def seek_prior(run, root, rx):
@@ -210,7 +213,8 @@ def seek_prior(run, root, rx):
                 if rx.search(w["shown"]) or rx.search(text):
                     hits.append((other, x, w["shown"], w["line"], text.strip()))
     for other, x, path, line, text in hits[:SEEK_SHOWN]:
-        print(f"PRIOR {other} node {x}: {path}:{line}  {text}")
+        shown = text if len(text) <= PRIOR_CUT else text[:PRIOR_CUT - 3] + "..."
+        print(f"PRIOR {other} node {x}: {path}:{line}  {shown}")
     tail = f", {unreadable} runs unreadable" if unreadable else ""
     if not hits:
         print(f"PRIOR: none in {len(scanned)} earlier runs on this root{tail}")
@@ -268,11 +272,16 @@ def loose(s):
 
 
 def candidates(q):
-    """The quote as written, without a pasted line-number prefix, without wrapping backticks."""
+    """The quote as written, without a pasted line-number prefix, without a backslash escaping its indentation
+    (`\\    def f():`), without wrapping backticks."""
     out = [q]
     m = PREFIX.match(q)
     if m:
         out.append(q[m.end():])
+    for c in list(out):
+        s = c.lstrip()
+        if s.startswith("\\") and s[1:2].isspace():
+            out.append(s[1:])
     for c in list(out):
         s = c.strip()
         if len(s) > 2 and s.startswith("`") and s.endswith("`"):
@@ -880,7 +889,7 @@ def verify(run, files, names, counts, drift=True):
                 line = f"{sym} {text}{mark}".strip()
                 n["struct"].append(line); n["hops"].append(line); n["full"].append(line)
         if not n["ended"] and not n["split"]:
-            counts["open"] += 1
+            counts["noend"] += 1
             n["struct"].append("(no END line: where the thread ends is not stated)")
     return nodes, ranges
 
@@ -1453,19 +1462,52 @@ def ceiling_view(run, head, warn, blocks, counts_line, map_line, opened):
     return text
 
 
+def held_marks(text, files, nodes, held_keys):
+    """The ` (held: node {ID} verified {path}:{lines})` marks of a line naming line ranges that verified hops of the
+    run hold, one per node and file, and the start offsets of its `path:A-B` ranges no hop holds."""
+    marks, unheld = {}, set()
+    for m in SPANS.finditer(text):
+        ref = m.group(1)
+        if m.group(2):
+            want = [(int(m.group(2)), int(m.group(3)))]
+        else:
+            want = [(int(a), int(b or a)) for a, b in re.findall(r"(\d+)(?:-(\d+))?", m.group(4))]
+        key, _ = files.find(ref, prefer=held_keys)
+        hit = False
+        for name, n in nodes.items():
+            for w in n["walk"]:
+                if w["t"] == "hop" and w["key"] == key and any(w["line"] <= hi and lo <= w["b"] for lo, hi in want):
+                    shown = os.path.relpath(key, files.root)
+                    marks.setdefault((name, shown), set()).add((w["line"], w["b"]))
+                    hit = True
+        if m.group(2) and not hit:
+            unheld.add(m.start())
+    text_marks = [f" (held: node {name} verified {shown}:"
+                  + ",".join(str(a) if a == b else f"{a}-{b}" for a, b in sorted(spans)) + ")"
+                  for (name, shown), spans in sorted(marks.items(), key=lambda x: (node_key(x[0][0]), x[0][1]))]
+    return "".join(text_marks), unheld
+
+
 def open_block(loaded, listed):
-    """OPEN, then every NOT READ and LEAD line of the listed nodes, each ending ` — run: node {ID}` and, when a
-    path:line in it is held by no verified hop of the whole run, ` (grep only — read it)`; `OPEN: none` when empty."""
+    """OPEN, then every NOT READ and LEAD line of the listed nodes, each ending ` — run: node {ID}`; when a
+    path:line in it is held by no verified hop of the whole run, ` (grep only — read it)`; when a line range it names
+    (`path:A-B`, `path lines A-B`) holds verified hops of any node, ` (held: node {ID} verified {path}:{lines})` — a
+    marker, the line stays. `OPEN: none` when empty."""
     _, _, _, files, nodes, ranges, _ = loaded
+    held_keys = {k for k, _, _ in ranges}
     out = []
     for name in listed:
         for text in nodes[name]["unsettled"]:
-            grep_only = False
-            for ref, ln in XREF.findall(text):
-                key, _ = files.find(ref)
-                if not key or not any(k == key and lo <= int(ln) <= hi for k, lo, hi in ranges):
+            held, unheld = held_marks(text, files, nodes, held_keys)
+            ranged = {m.start() for m in SPANS.finditer(text) if m.group(2)}
+            grep_only = bool(unheld)
+            for m in XREF.finditer(text):
+                if m.start() in ranged:
+                    continue
+                key, _ = files.find(m.group(1))
+                if not key or not any(k == key and lo <= int(m.group(2)) <= hi for k, lo, hi in ranges):
                     grep_only = True
-            out.append(f"{text} — run: node {name}" + (" (grep only — read it)" if grep_only else ""))
+            out.append(f"{text} — run: node {name}" + (" (grep only — read it)" if grep_only else "") + held)
     return ["OPEN", *out] if out else ["OPEN: none"]
 
 

@@ -73,7 +73,7 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 
 `new ROOT [--seek REGEX] [--questions]` creates the run directory, writes `ROOT` and prints the run's path. `--questions` reads stdin to EOF and fails unless it finds a question numbered `1.`, `1)` or `Q1`; it stores the text as `questions`. In a git work tree with a commit it writes `BASE`; a git that cannot answer is named on stderr, never fatal.
 
-`--seek` then lists every verified hop of an earlier run on the same ROOT, modified within the last 6 hours, running runs included, whose path or current line matches REGEX: `PRIOR {run} node {ID}: {path}:{line}  {text}`, newest run first, at most 30. The last line is `PRIOR: {n} hops in {k} runs — tt check {run} --hops {ID}`, naming any not shown and any run it could not read, or `PRIOR: none in {k} earlier runs on this root`, or `PRIOR: could not look — {reason}`.
+`--seek` then lists every verified hop of an earlier run on the same ROOT, modified within the last 6 hours, running runs included, whose path or current line matches REGEX: `PRIOR {run} node {ID}: {path}:{line}  {text}`, newest run first, at most 30; a text past 160 characters is cut to 157 and ends `...`. The last line is `PRIOR: {n} hops in {k} runs — tt check {run} --hops {ID}`, naming any not shown and any run it could not read, or `PRIOR: none in {k} earlier runs on this root`, or `PRIOR: could not look — {reason}`.
 
 ### start
 
@@ -115,7 +115,7 @@ The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s �
 
 ## The check
 
-Each hop's quote is re-read from the file at check time, in every view, so the printout shows the file's own text, never the node's. A quote line matches `exact`, else `loose` (whitespace collapsed), else as a `fragment` of at least 12 characters; a match short of exact is tagged.
+Each hop's quote is re-read from the file at check time, in every view, so the printout shows the file's own text, never the node's. A quote line matches `exact`, else `loose` (whitespace collapsed), else as a `fragment` of at least 12 characters; a match short of exact is tagged. A pasted line-number prefix, wrapping backticks and one backslash escaping the indentation (`> \    def f():`) are dropped before matching.
 
 | State | Printed | When |
 | --- | --- | --- |
@@ -141,7 +141,7 @@ The answers view checks each ANSWER line's cites against the verified hops. A ci
 | `✗ no such file` | The cite names no file |
 | `no [path:N] cite` | The line cites nothing |
 
-A flagged line is not evidence. Each node's block ends `hops: {v} verified, {r} rejected`, adding `{d} drifted` when any did. The last line of every view is `COUNTS:`, the whole run's tally: `nodes`, `hops`, `verified`, `moved`, `rejected`, `drifted`, `placed`, `followed`, `refused`, `partial`, `unseen`, `answers`, `flagged`, `recited`, `missing`, `badaddr`, `open`, joined by ` · `.
+A flagged line is not evidence. Each node's block ends `hops: {v} verified, {r} rejected`, adding `{d} drifted` when any did. The last line of every view is `COUNTS:`, the whole run's tally: `nodes`, `hops`, `verified`, `moved`, `rejected`, `drifted`, `placed`, `followed`, `refused`, `partial`, `unseen`, `answers`, `flagged`, `recited`, `missing`, `badaddr`, `noend` (nodes with neither END nor SPLIT), joined by ` · `.
 
 ## The resolver
 
@@ -237,7 +237,7 @@ In order:
 5. The `MAP` line.
 6. The OPEN block.
 
-The OPEN block lists every NOT READ and LEAD line of the shown nodes, each suffixed `— run: node {ID}`, plus `(grep only — read it)` when a `path:line` in it is held by no verified hop of the run; `OPEN: none` when empty.
+The OPEN block lists every NOT READ and LEAD line of the shown nodes, each suffixed `— run: node {ID}`, plus `(grep only — read it)` when a `path:line` or `path:A-B` in it is held by no verified hop of the run; a line range it names (`path:A-B`, `path lines A-B and C-D`) that verified hops of any node hold adds `(held: node {ID} verified {path}:{lines})`, one per node — a marker, never a drop; `OPEN: none` when empty.
 
 The full view always goes to `answers.txt`; when it cannot be written, `ANSWERS FAILED — {reason}` precedes the full view. At 28000 characters or more the printout keeps, in order:
 
@@ -294,7 +294,7 @@ The `MAP` line reads `MAP {RUN}/map.txt — {n} components in {f} files, {c} cal
 
 - NAME, for `--from` and `--to`, is an exact id, else a component name, else a file or its tail, else any id containing it, ignoring case. One matching nothing or more than 6 components exits 2 and says which.
 - `--from NAME` prints the tree of everything NAME reaches, `--to NAME` everything that reaches it.
-- `--json` prints `run`, `root`, `components` (each with its first and last line, `line` and `end`), `edges`, `threads` with each thread's `walk` (each step's `line` to `b`, its `status` — `verified`, `moved`, `placed` or `followed` — and the hop's flag), and `warnings`; with `--from` or `--to`, only that part.
+- `--json` prints `run`, `root`, `components` (each with its first and last line, `line` and `end`), `edges`, `threads` with each thread's `walk` (each step's `line` to `b`, its `status` — `verified`, `moved`, `placed` or `followed` — the hop's flag, and its `link` from the step before — `call`, `names`, `then`, `same` within one component, null on the first), and `warnings`; with `--from` or `--to`, only that part.
 - `--html OUT` writes `tracemap.html` with the data inlined, every `<` escaped so no file text closes its script: one self-contained page that loads nothing from the network, written only when a person asks to see it.
 
 ### The page
@@ -310,7 +310,7 @@ Beside the map data the page carries what `page_data` reads from the run:
 It draws three parts:
 
 - the ledger: the run, the warnings block, the evidence bar of how every hop holds, each question with its threads and their answers, every `[path:N]` a link to its line;
-- the code wall: one column per traced file, drawn to scale from its own text and grouped by directory, each thread's hops marked and its route drawn between them; zooming in reads the code itself, Fold collapses the lines no hop touches;
+- the code wall: one column per traced file, drawn to scale from its own text and grouped by directory, each thread's hops marked and its route drawn between them, solid where a call or a name in the code links two hops or they share a component, dashed and fainter for walk order only (`then`); the key says routes are the walkers' reading of the code, nothing run; zooming in reads the code itself, Fold collapses the lines no hop touches;
 - the clock: each node's bar from start to write; replay walks the threads in the order they ran.
 
 Search runs over the file text. Keys: `/` search, space replay, `←` `→` hops, `[` `]` threads, `z` Fold, `f` fit, `+` `-` zoom, `esc` clear.

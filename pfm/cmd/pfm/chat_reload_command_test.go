@@ -11,7 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -422,7 +422,7 @@ func TestReloadTargetAcceptsRecoveredCodexSeatWithoutAmbientTmux(t *testing.T) {
 // carries ahead of its compiled role body.
 func mustCodexFleetPrompt(t *testing.T) string {
 	t.Helper()
-	prompt, err := codexgen.FleetPrompt()
+	prompt, err := codexprompt.FleetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}

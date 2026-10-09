@@ -204,7 +204,6 @@ These slot into the concept families above — registered here to close prior ga
 | transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
 | illustrative persona example — a domain risk (Three lenses at once, § Rules → Meta) | `{DOMAIN_RISK_EXAMPLE}` | Persona |
 | the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
-| the Codex model id named per tier in `templates/project/scripts/build-codex.mjs`'s `MODEL_MAP` (smart / mechanical / collector) | `{CODEX_MODEL_SMART}` / `{CODEX_MODEL_MECHANICAL}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
 | the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
 | the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
 | the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |
@@ -232,3 +231,4 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |
 | `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
 | `{HHMMSS}` | `global/agents/agent-optimizer.md` | the UTC time of the report's write, hours, minutes and seconds |
+| `{RUN}` / `{ID}` / `{QUESTION}` | `global/agents/tracer.md`, `global/agents/sub-tracer.md`, `global/skills/read-tracer-run/SKILL.md` | the trace run's directory `tt new` printed; a sub-tracer's dotted node id; the card's `Q{n}` question number |

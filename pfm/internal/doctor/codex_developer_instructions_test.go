@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 )
 
 // Each broken state of the Codex fleet-prompt channel names ITSELF: absent,
@@ -15,7 +15,7 @@ import (
 // different lines, and only the installed prompt earns "ok". A check that
 // answered the same way for all of them would be a coincidence detector.
 func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
-	prompt, err := codexgen.FleetPrompt()
+	prompt, err := codexprompt.FleetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}

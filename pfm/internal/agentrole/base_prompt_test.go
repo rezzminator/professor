@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -47,7 +47,7 @@ func TestBasePrompt(t *testing.T) {
 			}
 			if name == "disabled" || name == "outside Codex" {
 				var err error
-				want, err = codexgen.FleetPrompt()
+				want, err = codexprompt.FleetPrompt()
 				if err != nil {
 					t.Fatal(err)
 				}

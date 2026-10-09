@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestRemoveRetiredNudgeStateReportsOneChangeAndPreservesOtherSIDFiles(t *testing.T) {
@@ -106,7 +108,9 @@ func TestInstallRetiresNudgeStateOnce(t *testing.T) {
 	options := Options{
 		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, MCPConfigPath: configPath,
 		CodexHomes: []string{}, Runner: &fakeRunner{nameSyncIdle: true},
-		Env:    &paths.MapEnv{HomeDir: home, Values: map[string]string{paths.EnvSIDDir: sidDir}},
+		Env: &paths.MapEnv{HomeDir: home, Values: map[string]string{
+			paths.EnvSIDDir: sidDir, enginesync.EnvBin: testjail.EngineSyncBin(),
+		}},
 		Now:    func() time.Time { return time.Date(2031, 2, 3, 4, 5, 6, 0, time.UTC) },
 		Stdout: &output,
 	}

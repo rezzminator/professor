@@ -14,8 +14,8 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -29,6 +29,9 @@ type engine struct {
 	outputErr   error
 	planErrors  []error
 	deferred    []error
+	// engineSyncAbsent is set when an uninstall found no engine-sync binary:
+	// the targets step then leaves targets.json with the Codex roles.
+	engineSyncAbsent bool
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).
@@ -216,15 +219,11 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
 	installer.deferFailure(installer.retireLegacySwapCommand())
-	installer.deferFailure(installer.wireCodexAgents())
-	if len(installer.codexHomes()) == 0 {
-		installer.skip("no Codex accounts configured — command mirror has nothing to write")
-		installer.skip("no Codex accounts configured — agent mirror has nothing to write")
-	} else {
-		installer.deferFailure(installer.reconcileCodexCommands(assets))
+	installer.deferFailure(installer.wireEngineSyncGlobal(assets))
+	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(installer.wireCodexDefaults())
-		installer.deferFailure(installer.retireOrphanCodexAgents())
 	}
+	installer.deferFailure(installer.wireEngineSyncTargets())
 	// The periodic name-sync has one job and two schedulers. Linux gets the
 	// systemd units; macOS gets a launchd agent that carries both triggers.
 	// Staging the other platform's files would leave an operator with a
@@ -293,69 +292,6 @@ func (installer *engine) install(ctx context.Context) error {
 	return nil
 }
 
-// wireCodexAgents runs on every install: it serves the Claude agent
-// registries (links, orphaned-link and undeclared-variant retirement) whatever
-// the codex roster, and compiles, writes and retires Codex roles only in the
-// Codex homes configured — an empty roster plans none.
-func (installer *engine) wireCodexAgents() error {
-	sourceRepo, err := installer.globalSourceRepoRoot()
-	if err != nil {
-		return fmt.Errorf("resolve Codex global agents source repository: %w", err)
-	}
-	source := filepath.Join(sourceRepo, "templates", "global", "agents")
-	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) {
-		installer.skip("Codex global agents source absent at " + source)
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("inspect Codex global agents source %s: %w", source, err)
-	}
-	plan, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
-		Home:             installer.options.Home,
-		SourceRepo:       sourceRepo,
-		ClaudeConfigDirs: []string{installer.options.ConfigDir},
-		CodexHomes:       installer.codexHomes(),
-		Mode:             codexgen.ModeCheck,
-	})
-	if err != nil {
-		return fmt.Errorf("plan pfm codex agents: %w", err)
-	}
-	for _, action := range plan.Actions {
-		message := action.Kind + " " + action.Path
-		if action.Target != "" {
-			message += " -> " + action.Target
-		}
-		if err := installer.change(message, nil); err != nil {
-			return err
-		}
-	}
-	for _, problem := range plan.Problems {
-		installer.skip(problem)
-	}
-	// Before the early dry-run return, so the preview IS the apply's plan:
-	// installer.retire only removes when this run applies.
-	if err := installer.retireOrphanCodexRoles(sourceRepo, plan.Roles); err != nil {
-		return err
-	}
-	if err := installer.retireOrphanGlobalAgents(plan.Installed); err != nil {
-		return err
-	}
-	if !installer.apply {
-		return nil
-	}
-	result, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
-		Home:             installer.options.Home,
-		SourceRepo:       sourceRepo,
-		ClaudeConfigDirs: []string{installer.options.ConfigDir},
-		CodexHomes:       installer.codexHomes(),
-		Mode:             codexgen.ModeBuild,
-	})
-	if err != nil {
-		return fmt.Errorf("run pfm codex agents: %w", err)
-	}
-	installer.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
-	return nil
-}
-
 // globalSourceRepoRoot resolves the clone every global agent/command/skill
 // symlink target and conflict check is anchored on: this run's explicit
 // --source-repo when set, else the marker a prior install recorded, else the
@@ -371,27 +307,6 @@ func (installer *engine) globalSourceRepoRoot() (string, error) {
 		return filepath.Clean(abs), nil
 	}
 	return GlobalSourceRepo(installer.options.Home)
-}
-
-// retireOrphanCodexAgents deletes the exactly two known strays a retired
-// "explorer" Codex agent left behind: its compiled TOML and any timestamped
-// backup an earlier copy-based install wrote before this installer learned
-// to symlink instead. Nothing else here is ever deleted.
-func (installer *engine) retireOrphanCodexAgents() error {
-	target := filepath.Join(installer.options.Home, ".codex", "agents", "explorer.toml")
-	if err := installer.retire(target, "retired explorer agent"); err != nil {
-		return err
-	}
-	matches, err := filepath.Glob(target + ".bak-*")
-	if err != nil {
-		return fmt.Errorf("glob retired explorer agent backups: %w", err)
-	}
-	for _, match := range matches {
-		if err := installer.retire(match, "retired explorer agent backup"); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // wireGlobalCommands links each top-level clone command into the store commands registry.
@@ -430,7 +345,7 @@ func (installer *engine) wireGlobalCommands() error {
 	return nil
 }
 
-// wireGlobalLink classifies target against source with codexgen's shared
+// wireGlobalLink classifies target against source with the shared
 // global-link machinery and reports/fixes it through this installer's own
 // change/ok/skip transcript — the same ensureLink pattern (correct link is a
 // no-op, anything else routed through installer.change so apply/dry-run
@@ -438,133 +353,26 @@ func (installer *engine) wireGlobalCommands() error {
 // is neither ours nor a link into the source repo is a conflict this
 // installer refuses to touch.
 func (installer *engine) wireGlobalLink(source, target, sourceRepoRoot string, isDir bool) error {
-	kind := codexgen.GlobalLinkFile
+	kind := globallink.File
 	if isDir {
-		kind = codexgen.GlobalLinkDir
+		kind = globallink.Dir
 	}
-	state, found, err := codexgen.ClassifyGlobalLink(target, source, sourceRepoRoot, kind)
+	state, found, err := globallink.ClassifyLink(target, source, sourceRepoRoot, kind)
 	if err != nil {
 		return fmt.Errorf("inspect global link %s: %w", target, err)
 	}
-	if state == codexgen.GlobalLinkCorrect {
+	if state == globallink.Correct {
 		installer.ok(target)
 		return nil
 	}
-	message := codexgen.DescribeGlobalLinkState(state, target, source, found)
-	if state == codexgen.GlobalLinkConflict {
+	message := globallink.DescribeState(state, target, source, found)
+	if state == globallink.Conflict {
 		installer.skip(message)
 		return nil
 	}
 	return installer.change(message, func() error {
-		return codexgen.ApplyGlobalLink(target, source, state)
+		return globallink.Apply(target, source, state)
 	})
-}
-
-func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
-	plan, err := installer.planCodexCommands(assets, !installer.apply)
-	if err != nil {
-		return err
-	}
-	for _, action := range plan.Actions {
-		message := action.Kind + " " + action.Path
-		if action.Target != "" {
-			message += " -> " + action.Target
-		}
-		if err := installer.change(message, nil); err != nil {
-			return err
-		}
-	}
-	if blockers := codexPlanBlockers(plan.Problems); len(blockers) != 0 {
-		for _, blocker := range blockers {
-			installer.say("  conflict %s", blocker)
-		}
-		conflictErr := fmt.Errorf("reconcile Codex global commands: %s", strings.Join(blockers, "; "))
-		if !installer.apply {
-			installer.planErrors = append(installer.planErrors, conflictErr)
-			return nil
-		}
-		return conflictErr
-	}
-	if !installer.apply {
-		return nil
-	}
-	sourceHome := ""
-	if installer.options.Mode == ModeUninstall {
-		// Uninstall must never WRITE a fresh Codex command mirror entry — only
-		// retire the ones this installer already owns. RunGlobalCommands derives
-		// its "wanted" set by scanning SourceHome/.claude/commands; pointing it
-		// at a fresh, guaranteed-empty directory makes that set unconditionally
-		// empty, so the ModeBuild call below can only ever delete managed
-		// entries, never create one for whatever still happens to sit in
-		// ~/.claude/commands at this point in the teardown — one of this
-		// installer's own not-yet-unwired commands, or a user's own foreign one
-		// sharing the directory.
-		empty, err := os.MkdirTemp("", "pfm-uninstall-codex-commands-")
-		if err != nil {
-			return fmt.Errorf("create empty Codex command source for uninstall: %w", err)
-		}
-		defer func() {
-			if removeErr := os.RemoveAll(empty); removeErr != nil {
-				installer.say("warning: remove temporary uninstall command source %s: %v", empty, removeErr)
-			}
-		}()
-		sourceHome = empty
-	}
-	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home:       installer.options.Home,
-		SourceHome: sourceHome,
-		Mode:       codexgen.ModeBuild,
-	})
-	if err != nil {
-		return fmt.Errorf("reconcile Codex global commands: %w", err)
-	}
-	if !result.OK {
-		return fmt.Errorf("reconcile Codex global commands: %s", strings.Join(result.Problems, "; "))
-	}
-	installer.ok(fmt.Sprintf(
-		"Codex global commands wrote=%d unchanged=%d deleted=%d",
-		result.Wrote,
-		result.Unchanged,
-		result.Deleted,
-	))
-	return nil
-}
-
-func codexPlanBlockers(problems []string) []string {
-	blockers := make([]string, 0)
-	for _, problem := range problems {
-		if strings.HasPrefix(problem, "MISSING ") || strings.HasPrefix(problem, "STALE ") ||
-			strings.HasPrefix(problem, "ORPHAN ") {
-			continue
-		}
-		blockers = append(blockers, problem)
-	}
-	return blockers
-}
-
-func (installer *engine) planCodexCommands(assets []assetFile, future bool) (result codexgen.Result, returnErr error) {
-	sourceHome := ""
-	cleanup := func() error { return nil }
-	if future && filepath.Clean(installer.options.ConfigDir) ==
-		filepath.Join(filepath.Clean(installer.options.Home), ".claude") {
-		var err error
-		sourceHome, cleanup, err = installer.futureCommandSource(assets)
-		if err != nil {
-			return codexgen.Result{}, err
-		}
-	}
-	defer func() {
-		if err := cleanup(); err != nil {
-			returnErr = errors.Join(returnErr, err)
-		}
-	}()
-	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home: installer.options.Home, SourceHome: sourceHome, Mode: codexgen.ModeCheck,
-	})
-	if err != nil {
-		return codexgen.Result{}, fmt.Errorf("plan Codex global commands: %w", err)
-	}
-	return result, nil
 }
 
 func (installer *engine) futureCommandSource(assets []assetFile) (string, func() error, error) {
@@ -708,20 +516,19 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.unwireSkills(assets); err != nil {
 		return err
 	}
-	// Before the Codex mirror is reconciled: that step's wanted set is
-	// derived from the Claude command registries this call just emptied, so
-	// unwiring first is what lets the mirror drop the same globals instead of
-	// recompiling them for an install that is going away.
+	// Before engine-sync retires the Codex mirror: unwiring the Claude
+	// registries first means no global is recompiled for an install that is
+	// going away.
 	if err := installer.unwireGlobalRegistries(); err != nil {
 		return err
 	}
 	if err := installer.retireDeadRegistryLinks(); err != nil {
 		return err
 	}
-	if err := installer.reconcileCodexCommands(nil); err != nil {
+	if err := installer.wireEngineSyncGlobal(nil); err != nil {
 		return err
 	}
-	if err := installer.unwireGeneratedCodexAgents(); err != nil {
+	if err := installer.wireEngineSyncTargets(); err != nil {
 		return err
 	}
 	if schedulerIsLaunchd {
@@ -2050,12 +1857,12 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 		}
 	}
 
-	return installer.retireRenamedCodexAgents()
+	return nil
 }
 
 // agentFrontmatterName reads the `name:` field out of an agent Markdown
 // file's leading YAML frontmatter block, empty when the file has none or
-// the field is absent — the same shape codexgen compiles agent identity
+// the field is absent — the same shape engine-sync compiles agent identity
 // from.
 func agentFrontmatterName(path string) (string, error) {
 	content, err := os.ReadFile(path)

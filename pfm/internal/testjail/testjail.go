@@ -240,10 +240,21 @@ func jailHome(base string) (func(), error) {
 	if err != nil {
 		return func() {}, fmt.Errorf("create jailed home under %s: %w", base, err)
 	}
+	engineSync, err := os.MkdirTemp(base, "pfm-jail-engine-sync-")
+	if err != nil {
+		return func() {}, errors.Join(
+			fmt.Errorf("create the engine-sync fake directory under %s: %w", base, err), os.RemoveAll(home),
+		)
+	}
 	cleanup := func() {
-		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			warnSetup("remove jail home %s: %v", home, err)
+		for _, dir := range []string{home, engineSync} {
+			if err := os.RemoveAll(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				warnSetup("remove jail directory %s: %v", dir, err)
+			}
 		}
+	}
+	if err := installDefaultEngineSync(engineSync); err != nil {
+		return cleanup, err
 	}
 	accountDir := config.DefaultAccountDir(home, 1)
 	if err := os.MkdirAll(accountDir, 0o700); err != nil {
@@ -407,12 +418,7 @@ func InstalledHome(t *testing.T) string {
 		t.Fatal(err)
 	}
 	canonical := filepath.Join(jailedHome, ".local", "bin", "pfm")
-	// The installed pfm is also the cost launcher every rendered Claude launch runs in front of
-	// Claude: here it arms no sink and execs Claude, so a launched pane runs its fake engine.
-	stub := "#!/bin/sh\n# jailed-pfm\n" +
-		"if [ \"$1\" = internal ] && [ \"$2\" = cost-launch ] && [ \"$3\" = -- ]; then shift 3; exec \"$@\"; fi\n" +
-		"echo \"jailed-pfm: $*: not a pfm\" >&2\nexit 127\n"
-	if err := WriteExecutable(canonical, []byte(stub), 0o700); err != nil {
+	if err := WriteExecutable(canonical, []byte(jailedPfmStub), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", claudeBinary)

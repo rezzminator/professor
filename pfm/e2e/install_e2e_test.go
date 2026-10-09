@@ -210,7 +210,8 @@ func runInstallE2E(t *testing.T) {
 			"init Codex check",
 			harness.pfm(freshHome, "codex", "check", "--home", freshHome, project),
 		)
-		harness.assertInitPath(filepath.Join(project, "AGENTS.md"), "AGENTS.md")
+		// The AGENTS.md those forwarders reach engine-sync to compile is
+		// engine-sync's to prove; the jail's stand-in writes none.
 	})
 
 	t.Run("launcher", func(t *testing.T) {

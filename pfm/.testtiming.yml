@@ -30,8 +30,8 @@ suites:
       github.com/rezzminator/professor/pfm/internal/cli: 2
       github.com/rezzminator/professor/pfm/internal/clock: 2
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2
-      github.com/rezzminator/professor/pfm/internal/codexgen: 6
       github.com/rezzminator/professor/pfm/internal/codexmeta: 2
+      github.com/rezzminator/professor/pfm/internal/codexprompt: 2
       github.com/rezzminator/professor/pfm/internal/compose: 6
       github.com/rezzminator/professor/pfm/internal/config: 6
       github.com/rezzminator/professor/pfm/internal/costledger: 2
@@ -42,10 +42,12 @@ suites:
       github.com/rezzminator/professor/pfm/internal/engine/claude: 2
       github.com/rezzminator/professor/pfm/internal/engine/codex: 2
       github.com/rezzminator/professor/pfm/internal/engine/opencode: 2
+      github.com/rezzminator/professor/pfm/internal/enginesync: 2
       github.com/rezzminator/professor/pfm/internal/fleet: 6
       github.com/rezzminator/professor/pfm/internal/fleetdb: 2
       github.com/rezzminator/professor/pfm/internal/gather: 4
       github.com/rezzminator/professor/pfm/internal/gitroot: 2
+      github.com/rezzminator/professor/pfm/internal/globallink: 2
       github.com/rezzminator/professor/pfm/internal/harvest: 20
       github.com/rezzminator/professor/pfm/internal/harvestcli: 2
       github.com/rezzminator/professor/pfm/internal/harvestmcp: 4
@@ -68,7 +70,6 @@ suites:
       github.com/rezzminator/professor/pfm/internal/modelglyph: 2
       github.com/rezzminator/professor/pfm/internal/naming: 2
       github.com/rezzminator/professor/pfm/internal/obs: 2
-      github.com/rezzminator/professor/pfm/internal/opencodegen: 2
       github.com/rezzminator/professor/pfm/internal/paths: 2
       github.com/rezzminator/professor/pfm/internal/picker: 16
       github.com/rezzminator/professor/pfm/internal/pricing: 2
@@ -84,7 +85,6 @@ suites:
       github.com/rezzminator/professor/pfm/internal/rowfacts: 2
       github.com/rezzminator/professor/pfm/internal/semver: 2
       github.com/rezzminator/professor/pfm/internal/sky: 2
-      github.com/rezzminator/professor/pfm/internal/sourcelink: 2
       github.com/rezzminator/professor/pfm/internal/spawn: 8
       github.com/rezzminator/professor/pfm/internal/sqlitedb: 2
       github.com/rezzminator/professor/pfm/internal/stale: 2

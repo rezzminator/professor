@@ -205,8 +205,11 @@ claude plugin install sub-agent-compact@professor
 - [tool-visibility-controller](https://github.com/rezzminator/tool-visibility-controller): one `visibility` field in agent, skill and command frontmatter decides, per agent, which sub-agents, skills, MCP tools and built-in tools it sees and may call — hidden from the listing and refused, never just discouraged.
 - [buddy](https://github.com/rezzminator/buddy): a tiny ASCII companion above your prompt — Quack the duck, seven more characters or your own — that comments on each turn, suggests your next prompt and answers `/buddy` questions from what it remembers of the chat.
 - [callmeter](https://github.com/rezzminator/callmeter): records every tool call, model request, sub-agent turn and session event into one local SQLite store — counts and sizes, never your prompts or file contents — and answers which files, commands and agents cost the most.
+- [engine-sync](https://github.com/rezzminator/engine-sync): carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode — `AGENTS.md`, `.codex/`, `.opencode/` and the role TOMLs in each Codex home — and keeps them in step after every turn; `pfm codex` and `pfm opencode` forward to it.
 
 `pfm install` installs cache-live-control, sub-agent-compact, agent-effort and tool-visibility-controller from their GitHub marketplaces. An alpha build of pfm installs them instead from local checkouts when `claude.pluginCheckoutRoot` in `pfm.config.json` names the directory holding `{plugin}/plugins/{plugin}` — in a clone, `plugins/`, where each plugin is a git submodule on its `develop` branch (`git submodule update --init`): it copies each into `~/.local/share/{plugin}-dev`, installs `{plugin}@{plugin}-dev` and disables the GitHub copy. Claude reads the `-dev` copy in place, so `/reload-plugins` picks up a refresh. Every build keeps exactly one copy enabled: a release build, or an alpha build without a checkout, disables the `-dev` copy instead.
+
+`pfm install` installs no engine-sync. Install the plugin (`claude plugin install engine-sync@professor`): at the next session start its wrapper downloads the release binary, checks it against the plugin's `SHA256SUMS`, and links it at `~/.local/share/engine-sync/bin/engine-sync`, the binary `pfm codex` and `pfm opencode` run.
 
 ## Origin
 

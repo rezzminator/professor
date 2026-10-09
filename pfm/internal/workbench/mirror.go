@@ -5,34 +5,28 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/opencodegen"
 )
 
-// EnsureMirror builds the enabled engine's mirror before a workbench launch.
+// mirrorEngines are the engines with a compiled mirror, in engine-sync's
+// spelling; every other engine reads its Claude sources directly.
+var mirrorEngines = map[pfmengine.ID]string{
+	pfmengine.Codex:    enginesync.EngineCodex,
+	pfmengine.OpenCode: enginesync.EngineOpenCode,
+}
+
+// EnsureMirror builds the enabled engine's mirror before a workbench launch
+// through `engine-sync {engine} build {bench} --home {home}`.
 func EnsureMirror(bench Bench, engine pfmengine.ID, home string) error {
-	var problems []string
-	var err error
-	switch engine {
-	case pfmengine.Codex:
-		var result codexgen.Result
-		result, err = codexgen.Build(codexgen.Options{Root: bench.Dir, Home: home})
-		if !result.OK {
-			problems = result.Problems
-		}
-	case pfmengine.OpenCode:
-		var result opencodegen.Result
-		result, err = opencodegen.Compile(opencodegen.Options{Root: bench.Dir, Home: home, Mode: opencodegen.ModeBuild})
-		if !result.OK {
-			problems = result.Problems
-		}
-	default:
+	name, mirrored := mirrorEngines[engine]
+	if !mirrored {
 		return nil
 	}
-	if err == nil && len(problems) != 0 {
-		err = fmt.Errorf("%s", strings.Join(problems, "; "))
+	result, err := enginesync.Runner{Home: home}.Mirror(context.Background(), name, enginesync.ActionBuild, bench.Dir)
+	if err == nil && !result.OK {
+		err = fmt.Errorf("%s", strings.Join(result.Problems, "; "))
 	}
 	if err != nil {
 		wrapped := fmt.Errorf(
@@ -53,20 +47,17 @@ type MirrorCheck struct {
 	Rebuildable, Failing []string
 }
 
-// CheckMirror returns every mirror problem, split by whether a build clears it.
+// CheckMirror returns every mirror problem, split by whether a build clears
+// it, from `engine-sync {engine} check {bench} --home {home}`.
 func CheckMirror(bench Bench, engine pfmengine.ID, home string) (check MirrorCheck, err error) {
-	var problems []string
-	switch engine {
-	case pfmengine.Codex:
-		var result codexgen.Result
-		result, err = codexgen.Check(codexgen.Options{Root: bench.Dir, Home: home})
-		problems, check.Rebuildable = result.Problems, result.Rebuildable
-	case pfmengine.OpenCode:
-		var result opencodegen.Result
-		result, err = opencodegen.Compile(opencodegen.Options{Root: bench.Dir, Home: home, Mode: opencodegen.ModeCheck})
-		problems, check.Rebuildable = result.Problems, result.Rebuildable
-	default:
+	name, mirrored := mirrorEngines[engine]
+	if !mirrored {
 		return MirrorCheck{}, nil
+	}
+	result, err := enginesync.Runner{Home: home}.Mirror(context.Background(), name, enginesync.ActionCheck, bench.Dir)
+	problems := result.Problems
+	if len(result.Rebuildable) != 0 {
+		check.Rebuildable = result.Rebuildable
 	}
 	if err != nil {
 		obs.Logger(context.Background()).

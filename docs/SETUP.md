@@ -194,7 +194,7 @@ If no, skip.
 
 > Do you also use OpenAI Codex? (Everything works without it — this adds a second runtime for cheaper implementation.)
 
-If yes: the interview creates `.codex/` as a pointer layer over the project's local Claude sources, then runs `pfm codex build` and `pfm codex check`. `AGENTS.md`, command and skill pointers, and `.codex/agents/*.toml` are generated; `config.toml` and `rules/*.rules` keep their hand-written portions. Claude and Codex read the same Professor contract; the pointer layer translates mechanics, not identity. Either runtime can orchestrate when invoked with the matching command surface.
+If yes: the interview creates `.codex/` as a pointer layer over the project's local Claude sources, then runs `pfm codex build` and `pfm codex check`, which forward to engine-sync, the compiler of the Codex and OpenCode mirrors. `AGENTS.md`, command and skill pointers, and `.codex/agents/*.toml` are generated; `config.toml` and `rules/*.rules` keep their hand-written portions. Claude and Codex read the same Professor contract; the pointer layer translates mechanics, not identity. Either runtime can orchestrate when invoked with the matching command surface.
 
 If no: skip — the entire Codex layer is omitted. No pipeline operation requires it.
 
@@ -500,7 +500,7 @@ New Professor versions ship as semver git tags. Each tier stays current from its
 | ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Machine-global commands, agents, and skills | Blueprint originals | Symlink-live. `pfm update` advances the recorded tagged clone, rebuilds the binary, runs `pfm install --yes`, and refreshes registrations. |
 | Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local file, full stop | Scaffolded once by `pfm init`. Upstream changes are reports to review and hand-apply; pfm never rewrites these files during update. |
-| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, including `pfm codex build` and `pfm codex check`, after changing its local sources. |
+| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, engine-sync (`pfm codex build` and `pfm codex check` forward to it), after changing its local sources. |
 
 Before either tier moves, read every release note between the installed and the target version and merge their `#### → For:` actions — the rule lives in `INSTALL.md` § Updating.
 

@@ -87,17 +87,11 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 	accounts := []string{ClaudeStore(home)}
 	codexHomes := []string{filepath.Join(home, ".codex")}
 
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: codexHomes,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// engine-sync global links the agents on install; the jail stages the
+	// links it would write, so the uninstall below is pfm's own unwire.
 	for _, config := range accounts {
 		for _, name := range []string{"collector", "tracer"} {
-			assertLink(t,
-				filepath.Join(config, "agents", name+".md"),
-				filepath.Join(repo, "templates", "global", "agents", name+".md"))
+			symlinkFixture(t, filepath.Join(agentsSource, name+".md"), filepath.Join(config, "agents", name+".md"))
 		}
 	}
 
@@ -162,11 +156,11 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 	}
 }
 
-// TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory: a
+// TestUninstallRemovesGlobalAgentVariantLinks: a
 // variant's link resolves into the pfm-owned generated directory, not the
 // clone, so the ownership-by-target rule has to know that directory too —
 // otherwise uninstall leaves a working super-* agent in the store.
-func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *testing.T) {
+func TestUninstallRemovesGlobalAgentVariantLinks(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	agentsSource := filepath.Join(home, ".professor", "templates", "global", "agents")
@@ -177,14 +171,12 @@ func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *te
 	codexHomes := []string{filepath.Join(home, ".codex")}
 	generated := paths.GeneratedClaudeAgentsDir(home)
 
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: codexHomes,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// engine-sync global renders the variant into the generated directory and
+	// links it on install; the jail stages both, so the uninstall below is
+	// pfm's own unwire. Retiring the directory itself is engine-sync's.
+	writeFixture(t, filepath.Join(generated, "super-lead.md"), "---\nname: super-lead\neffort: medium\n---\n\nbody\n")
 	for _, config := range accounts {
-		assertLink(t, filepath.Join(config, "agents", "super-lead.md"), filepath.Join(generated, "super-lead.md"))
+		symlinkFixture(t, filepath.Join(generated, "super-lead.md"), filepath.Join(config, "agents", "super-lead.md"))
 	}
 
 	if _, err := Run(context.Background(), Options{
@@ -198,8 +190,5 @@ func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *te
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("uninstall left the variant agent link %s: %v", path, err)
 		}
-	}
-	if _, err := os.Lstat(generated); !os.IsNotExist(err) {
-		t.Fatalf("uninstall left the generated Claude agents directory %s: %v", generated, err)
 	}
 }

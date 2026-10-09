@@ -1,43 +1,135 @@
 # tracer
 
-`tracer` answers a spec writer's numbered questions about a codebase from its code, in prose, each fact a `path:line` with the line quoted. It is a `general-purpose` reader made specific to that caller: the prompt keeps what an open-hand agent does well and fixes what it did wrong or wasted, measured against an independent key. It uses no script and writes no file; the final message is the answer. Exact text only goes to `collector`. It ships in three tiers of one body: `tracer` → `tracer-pro` → `tracer-pro-max`.
+`tracer` answers a spec writer's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller works the finished run with the `read-tracer-run` skill. Exact text without a question goes to `collector`. Three tiers share one body: `tracer` → `tracer-pro` → `tracer-pro-max`.
+
+The kit's commands, check states and run directory are in [tracetree.md](tracetree.md); every measurement a rule below cites is in [tracer-bench.md](tracer-bench.md).
 
 ## Contents
 
-- [The prompt](#the-prompt)
+- [Parts](#parts)
+- [Why a tree](#why-a-tree)
+- [A run](#a-run)
+- [Rules](#rules)
+- [Harness behaviour](#harness-behaviour)
 - [Tiers](#tiers)
 - [Open items](#open-items)
 
-## The prompt
+## Parts
 
-| Rule | The open-hand failure it fixes |
-| --- | --- |
-| Every read of a round in one message; a file read once is not read again | 30 tool calls reading one file each |
-| Read to the line that raises, returns, writes, prints or decides; a fact not read goes under NOT READ | Facts stated one hop past what was read |
-| A list claim names each item, or counts the share and names the exceptions; one read site never stands for a grep list | "All 12 catches give X" when 5 do not |
-| `grep -rn` over the whole repo unless the brief narrows it | Callers under `scripts/` missed |
-| Read-only, never run the project's code | A `uv run` that created a `.venv` |
-| No preamble, side-effect notes, restated question or summary | Output padding |
-| Always carry test homes, the scoped check command from the Makefile, anchors, and fenced verbatim lines to paste | The spec writer's recurring asks, so its brief can shrink to the questions |
+| Part | File | Model, effort |
+| --- | --- | --- |
+| Lead | `templates/global/agents/tracer.md` | `sonnet`, `high` |
+| Lead, tiers 2 and 3 | `templates/global/agents/variants.json` | `sonnet` `xhigh`; `opus` `medium` |
+| Reader | `templates/global/agents/sub-tracer.md` | `haiku`, `low` |
+| Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `tracemap.html`, `tracetree_test.py`, `SKILL.md` | — |
+| Caller's skill | `templates/global/skills/read-tracer-run/SKILL.md` | — |
 
-Budget 25 calls, every tier.
+`sub-tracer` and the `tracetree` skill are visible only to the three tiers and `sub-tracer` itself. In the prompts, `tt` stands for `python3 ~/.claude/skills/tracetree/tracetree.py`.
+
+## Why a tree
+
+Every call re-sends an agent's whole context, so a single agent pays for the code it holds at its own model's price: on bench brief B1, $0.181 of the single-agent body's $0.344 was context written to cache and $0.126 its output. A sub-tracer reads the same code on Haiku 5.5, about a twentieth of Sonnet 5.5's price per token, and hands the lead a checked answer of at most 15 lines instead of the code. The lead stays 60–80% of a run's cost.
+
+The tree pays where a brief makes one agent carry much code: on B4 it cost 29% less at an equal answer, and on five replayed heavy briefs it cost $2.99 against the $10.75 callers had paid, winning three of five blind judgments. On a short brief it ties the single agent on value at a higher cost and 2–3 times the latency ([Tree bench](tracer-bench.md#tree-bench), [Replay bench](tracer-bench.md#replay-bench)).
+
+## A run
+
+1. The lead's one Bash call: `tt new {root} --seek '{names}' --questions` creates the run directory `/tmp/{project}/tracer/{stamp}`, stores the brief's numbered questions and prints the `PRIOR` hops earlier runs on this root verified; the same call greps every symbol, file and string the brief names.
+2. The lead cuts threads, each with an ID, FUEL and a card, and spawns every one as a `sub-tracer` in one message whose last call is `tt wait {RUN} {IDs}`.
+3. Each sub-tracer's first call is `tt start`, which registers it and prints its question and FROM window. It walks hop by hop, spawns children `{ID}.1`, `{ID}.2`… where the thread forks into another file and fuel remains, stores its hops once through `tt write`, and returns one line.
+4. `tt wait` returns once every named and every started node has written and the run has been quiet 15 s. It prints the WARNINGS block, the answers view of the named nodes and their children, COUNTS, the `MAP` line and the OPEN block.
+5. The lead drills at most twice (`tt check --hops {ID}`), runs at most one gap round, reads what stays open through `tt read`, and writes the final.
+6. The final: the WARNINGS lines, if any; the answers by the brief's question numbers; `CHECK`, `TESTS`, `NOT READ`; the last wait's `MAP` line; `RUN {RUN} · {COUNTS}` with a runnable `check --hops | grep` command.
+7. The caller relays the WARNINGS lines to the user and, with `read-tracer-run`, asks the run before it asks tracer again or writes a NOT READ item as unsettled.
+
+## Rules
+
+Each rule holds in the prompts or the kit today; the clause after it is why.
+
+### The lead
+
+- Read-only: it never edits and never runs the project's code, tests, package manager or network; the run directory, written through `tt`, is the one thing written. The single-agent body once ran a `uv run` that created a `.venv`.
+- `tt` is written out in full in every call, never put in a shell variable: inside quotes `~` never expands, and probe 1 lost a call to `can't open file` ([Probe 1](tracer-bench.md#probe-1)).
+- Exactly one Bash call before spawning, holding `tt new` and the greps, each numbered as the file numbers it; the second call spawns. Code the lead reads costs twenty times a sub-tracer's price and rides every later call: one lead delegated nothing on B3, and a `medium` lead made four reads of its own and wrote 13 cites wrong ([Tree bench](tracer-bench.md#tree-bench)).
+- A question the `PRIOR` lines answer gets a drill of that node, never a thread. Probe 3's follow-up calls re-asked 14 threads' worth of held facts, $0.63, 26% of agent spend ([Probe 3](tracer-bench.md#probe-3)).
+- Every question gets a thread in the first message, and one thread always serves test homes and the check command. FUEL is 0 for a thread that will not branch and 3–6 for a chain that forks, at most 16 a round: the cap limits forks, never questions. Probe 2's 11 questions got 7 threads and the rest a second wave 83 s later ([Probe 2](tracer-bench.md#probe-2)).
+- A question asking for quotes and for behaviour is two threads: a thread asked for both returns part of the quote and leaves the lead to read the rest at its own price.
+- The card is RUN, ROOT, ID, FUEL, `QUESTION: Q{n}`, THREAD and FROM; `tt start` prints the question's text. Probe 3's cards repeating 350–500-character questions cost 4.5–7.6K output tokens and 28–96 s per lead.
+- Every spawn and `tt wait` go in one message, the Bash timeout at 600000; a sub-tracer's completion notification needs no reply. A lead counting wakes answered one of two completions 13 s apart and its final was lost ([Tree bench](tracer-bench.md#tree-bench), v3).
+- At most two drills, one ID each: probe 1's `for` loop over four `--hops` IDs poured 24.5K characters into every later call.
+- A node holding an OPEN item is drilled before the item is handed on. Probe 3 handed on 12 `run: node` items with 0 of 12 drills spent, and 3 came back as follow-up threads.
+- At most one gap round, for what is still open, from a narrower FROM; a thin answer is drilled, never respawned however its THREAD is reworded. Probe 1's gap round respawned three threads for $0.17.
+- The lead's own reads serve open sub-asks only: one `tt read` call a round, blocks of at most 30 lines that no hop holds; an OPEN line marked `(grep only — read it)` is read, never handed on; a pasted block comes from `tt check --full`. Probe 2's lead read 636 lines in three calls and still handed on the 20 lines the caller needed; in probe 3 the same bounds, as prose, failed in 4 of 6 leads, so the kit enforces them.
+- Every read is numbered by the file's own lines, `cat -n FILE | sed -n 'A,Bp'` or `grep -n -A`: on replay P20 a `sed -n | cat -n` read numbered from 1 and six cites landed 19 lines off ([Replay bench](tracer-bench.md#replay-bench)).
+- The lead runs at effort `high`: a `medium` lead dropped facts while writing the final, 23/33 on B1 and 14/21 on B3 against 30.5 and 18.
+
+### The sub-tracer
+
+- Its first call is `tt start`, and a SPLIT line names only a child it spawned. SPLIT lines naming children never spawned held the wait to its 540 s timeout (v5).
+- It reads only the code that decides where the thread goes, numbered by the file, and follows only what THREAD names. An error branch is a hop, and the walk ends in one END: returned, written, sent, executed, printed, dropped or unread.
+- Where the next hop is a function in another file and FUEL remains, it spawns the children of one split in one message, k children costing k fuel, keeps walking its own branch and never waits for a child; its own walk stops at 40 hops. Nodes without the file-boundary split and the cap spawned no grandchild and walked about 70 hops each (v1).
+- It runs at effort `low`: a `medium` node cost about $0.04, mostly thinking; `low` costs $0.01–0.02.
+- ANSWER comes first, at most 15 lines, each cite copied from its own hop's `@` line. A printed tree as large as the code put the lead's peak context at 61–69K tokens, against the single agent's 72K (v2).
+- Backticks hold only text copied whole from one line, and a quoted range skips no line and holds no `...`. In probe 1, 44 answer lines were flagged `?` for an argv assembled from several lines, and 71 of 509 hops kept one line because the quote skipped one.
+- A path is copied as the read printed it: 49 of the day's 239 rejected hops named an invented directory ([Rejected-hop survey](tracer-bench.md#rejected-hop-survey)).
+- One `tt write`; a refused write is fixed from the lines the refusal prints and written again, and the stored file is final. A node rewrote its file 45 s after its first write, finished after the lead's final and woke it (v4).
+- It returns one line and never opens a child's file.
+
+### The final
+
+- It opens with the last wait's `⚠` WARNINGS lines, copied whole; `WARNINGS: none` is not copied. A node that broke the hop contract is named where the caller reads, by the user's ruling after the engine trace ([Engine trace](tracer-bench.md#engine-trace)).
+- Facts come from unflagged answer lines, hops and the lead's own reads; a list claim names each item, or counts them and names the exceptions. The single-agent body wrote "all 12 catches give X" when 5 did not.
+- It always carries test homes, the check command and anchors. Fenced lines come only when the brief asks for quotes or writes task files, copied from `--full` with `path:A-B` above: probe 1's 2,903 fenced characters went unused.
+- NOT READ copies the last wait's unsettled OPEN lines with their suffix, and gives each sub-ask of the lead's own a next step: `run: node {ID}` only for what a drill left open or a node past the two drills, else `ask: {question}`. Probe 2's caller called 4 of 8 open items unsettled while the run held parts of 2; in probe 3, 12 of 34 items carried no next step.
+- The last two lines are the `MAP` line and `RUN {RUN} · {COUNTS} — before another tracer question or writing a NOT READ item as unsettled: … check {RUN} --hops | grep -n '{symbol}' shows what this run verified; /read-tracer-run has the rest`. The callers of probes 2 and 3 never loaded the skill a pointer named; a runnable command needs no skill.
+- A wake after the final is answered with the final again, unchanged: a late wake's reply replaces the final, and on v4 the lead rewrote it at 18K output tokens.
+
+### The caller
+
+`read-tracer-run` triggers before any follow-up question to tracer, before writing a tracer NOT READ item as unsettled, and on any answer ending `RUN` or `MAP`. It has the caller:
+
+- relay a final's WARNINGS lines to the user in its next reply, and drill an answer resting on them before using it;
+- ask the run (`check --hops | grep`) before opening a file, and paste task-file lines from `--full {ID}`;
+- hand a child the run and the node IDs covering its unit, never a re-trace;
+- send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
+- cite the repository's `path:line` in a tracked file, never the run, which is scratch.
+
+`flights-foreman` sends code it has not read to tracer at intake or any later step, carries `Skill` to load `read-tracer-run`, keeps the `RUN` through every compaction and puts `RUN` and node IDs in each child's brief (`templates/global/agents/flights-foreman.md:32`, `:57`, `:91`). `reviewer` spawns `subagent_type: tracer` for its tracer questions (`templates/global/agents/reviewer.md:39`).
+
+## Harness behaviour
+
+What the tree rests on, each observed in the lab:
+
+- A child runs asynchronously; its completion arrives as a notification that wakes its parent.
+- Notifications that arrive during a blocking tool call are absorbed into the parent's next request and wake nothing; several completions can arrive as one wake. So the lead waits inside `tt wait`, never on wakes.
+- A child finishing after the lead's final wakes the lead, and the lead's reply replaces the final.
+- A spawn past the harness's depth or concurrency cap does not happen, and nothing reports it; the fleet's default depth is 8 (`pfm/internal/config/subagents.go:19`). So `tt wait` reports a named node not started after 120 s as `never started`.
+- Agent types load at session start: an edited agent file runs in the next session.
 
 ## Tiers
 
-Price, accuracy and clean blocks are each tier's measured share of `tracer-pro-max`'s, from [tracer-bench.md](tracer-bench.md).
+Price, accuracy and clean blocks are each tier's share of `tracer-pro-max`'s, measured on the single-agent body before the tree ([Against tracer-pro-max](tracer-bench.md#against-tracer-pro-max)).
 
-| Agent | Kind | Model, effort | Price · accuracy · clean blocks | Pick it when |
+| Agent | Kind | Lead's model, effort | Price · accuracy · clean blocks | Pick it when |
 | --- | --- | --- | --- | --- |
 | `tracer` | original, `templates/global/agents/tracer.md` | `sonnet`, `high` | 43% · 98% · 58% | The default: the answer is the facts, and a quote is re-read before it is pasted |
 | `tracer-pro` | variant, `templates/global/agents/variants.json` | `sonnet`, `xhigh` | 79% · 101% · 92% | Its quoted lines go into task files |
 | `tracer-pro-max` | variant, `templates/global/agents/variants.json` | `opus`, `medium` | 100% · 100% · 100% | Every quoted line must paste exactly, at a steadier cost and latency |
 
-- A variant overrides `name`, `description`, `model` and `effort` only; it carries no `replace`, so the three bodies are one text.
+- A variant overrides `description`, `model` and `effort` only and carries no `replace`, so the three bodies are one text, `tools` included. Every tier's sub-tracers are `haiku` `low`.
 - The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
-- Codex: only the executors carry a Codex pin (`TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes`), so the tiers compile through the alias map: `tracer` and `tracer-pro` to `gpt-5.6-luna` at `high` and `xhigh`, `tracer-pro-max` to `gpt-5.6-sol` at `medium`. The Codex tiers are unmeasured.
-- A caller spawns `tracer` unless its prompt names a tier: `/flights:spec` and `reviewer` name none.
+- A caller spawns `tracer` unless it names a tier; `reviewer` names none.
+- Codex: `tracer` and `sub-tracer` carry `codex-sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not. The tiers compile through the host's model alias map and are unmeasured on Codex.
 
 ## Open items
 
-- Reading every item of a list the brief asks to classify: the rule is in the prompt, and the opus run still stopped at the grep hits.
-- The tier numbers rest on one run per setup, two for Sonnet at `xhigh`.
+- Run-to-run variance is as large as any prompt effect measured: one setup's two B1 runs scored 2.45 and 1.40 in value. A prompt change needs several runs per arm before it ships.
+- Splitting: on the installed B1 run no node split, and the lead passed over a needed branch a node had left as a LEAD. The v7 fix for both cost 40% more for half a facet and was reverted ([Tree bench](tracer-bench.md#tree-bench)); a cheaper fix is open.
+- `tracer-pro` and `tracer-pro-max` as leads over sub-tracers are unbenched: the tier table predates the tree.
+- Every tree number rests on one or two runs per setup, on briefs over one repository.
+- A lead answering a short brief itself, without spawning, is unbenched.
+- The 120 s `never started` window rests on lab starts 8–21 s after `tt new`; a harness-dropped spawn was never observed in a run, only proven by the kit's test.
+- One thread per item of a list the brief asks to classify does not hold yet: on replay P0 the lead grouped 24 docs into three threads of 8, left two unread and ran no gap round.
+- The read-numbering fix behind P20's 12 wrong line numbers is unbenched on a replay.
+- No caller probe has run since the round-3 mechanisms (`--seek` PRIOR, `Q{n}`, OPEN, the ceiling, `tt read`): whether callers now drill instead of re-asking is unmeasured.
+- 55 of the 88 rejected hops left after the resolver are one run on a submodule plugin since renamed: the resolver follows a moved file only where its basename, a sibling or a unique line places the quote ([Resolver and drift](tracer-bench.md#resolver-and-drift)).

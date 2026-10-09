@@ -1,5 +1,4 @@
 cmd/pfm
-internal/codexgen
 internal/engine/claude
 internal/engine/codex
 internal/engine/opencode

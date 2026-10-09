@@ -14,6 +14,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -306,27 +307,30 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 					t, `{"prompt":"scribe.md","effort":"xhigh","engines":["claude","codex","opencode"]}`,
 				)
 				request.Row.Kind = test.kind
-				var outputs []string
-				if test.kind == compose.ResumeCodex {
-					outputs = []string{filepath.Join(dir, "AGENTS.md")}
-				} else {
-					outputs = []string{
-						filepath.Join(dir, ".opencode", "opencode.jsonc"),
-						paths.OpenCodeWorkbenchPlugin(request.Home),
-					}
+				engine, outputs := "codex", []string(nil)
+				if test.kind == compose.NewOpenCode {
+					engine, outputs = "opencode", []string{paths.OpenCodeWorkbenchPlugin(request.Home)}
 				}
-				if test.fail {
-					blocker, body := filepath.Join(dir, ".claude", "codex-build.json"), []byte("{")
-					if test.kind == compose.NewOpenCode {
-						blocker, body = filepath.Join(request.Home, ".local", "state", "pfm"), nil
-					}
-					if err := atomicfile.Write(blocker, body, 0o600); err != nil {
+				reply, code := testjail.CleanMirrorReply, 0
+				if test.fail && test.kind == compose.ResumeCodex {
+					reply, code = testjail.FailedMirrorReply, 1
+				}
+				record := testjail.FakeEngineSync(t, reply, code)
+				if test.fail && test.kind == compose.NewOpenCode {
+					if err := atomicfile.Write(
+						filepath.Join(request.Home, ".local", "state", "pfm"),
+						nil,
+						0o600,
+					); err != nil {
 						t.Fatal(err)
 					}
 				}
 				tmux := &fakeActionTmux{alive: map[string]bool{}}
 				if !test.fail {
 					tmux.onCreate = func() {
+						if !testjail.MirrorBuilt(t, record, engine, dir) {
+							t.Errorf("not prepared before spawn: no %s mirror of %s", engine, dir)
+						}
 						for _, path := range outputs {
 							if _, err := os.Stat(path); err != nil {
 								t.Errorf("not prepared before spawn: %s: %v", path, err)

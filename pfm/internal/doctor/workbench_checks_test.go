@@ -8,10 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
-	"github.com/rezzminator/professor/pfm/internal/opencodegen"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -43,10 +42,6 @@ func doctorBenchFixtureAt(t *testing.T, base string) (root, dir, home string) {
 	)
 	writeDoctorBenchFile(t, filepath.Join(dir, ".professor", "scribe.md"), "You are scribe.")
 	writeDoctorBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Scribe.\n")
-	result, err := codexgen.Build(codexgen.Options{Root: dir, Home: home})
-	if err != nil || !result.OK {
-		t.Fatalf("build=%#v err=%v", result, err)
-	}
 	return root, dir, home
 }
 
@@ -62,24 +57,29 @@ func TestWorkbenchDoctorMirrors(t *testing.T) {
 			wantWarnings, wantFailures := 0, 0
 			switch state {
 			case "stale":
-				writeDoctorBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Edited scribe.\n")
-				result, err := codexgen.Check(codexgen.Options{Root: dir, Home: home})
-				if err != nil {
-					t.Fatal(err)
-				}
+				stale := "STALE " + filepath.Join(dir, "AGENTS.md")
+				testjail.FakeEngineSync(
+					t,
+					`{"ok":false,"problems":["`+stale+`"],"rebuildable":["`+stale+`"],"error":""}`,
+					1,
+				)
 				want = fmt.Sprintf(
 					"doctor: workbench %s codex mirror STALE: %s — the next launch there rebuilds it\n",
 					dir,
-					strings.Join(result.Problems, "; "),
+					stale,
 				) + want
 				wantWarnings = 1
 			case "broken":
-				writeDoctorBenchFile(t, filepath.Join(dir, ".claude", "codex-build.json"), "{")
-				_, err := codexgen.Check(codexgen.Options{Root: dir, Home: home})
-				if err == nil {
-					t.Fatal("broken fixture did not fail")
-				}
-				want = fmt.Sprintf("doctor: workbench %s codex mirror BROKEN: %v\n", dir, err)
+				testjail.FakeEngineSync(
+					t,
+					`{"ok":false,"problems":[],"rebuildable":[],"error":"parse codex-build.json: EOF"}`,
+					1,
+				)
+				want = fmt.Sprintf(
+					"doctor: workbench %s codex mirror BROKEN: engine-sync codex check %s: parse codex-build.json: EOF\n",
+					dir,
+					dir,
+				)
 				wantFailures = 1
 			case "invalid":
 				writeDoctorBenchFile(t, paths.WorkbenchManifest(dir), `{"prompt":""}`)
@@ -199,21 +199,22 @@ func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
 			wantFailures := 0
 			switch scenario {
 			case "Codex rebuildable":
-				source := filepath.Join(dir, ".claude", "agents", "old.md")
-				writeDoctorBenchFile(t, source, "---\nname: old\ndescription: Old.\n---\nOld.\n")
-				result, err := codexgen.Build(codexgen.Options{Root: dir, Home: home})
-				if err != nil || !result.OK {
-					t.Fatalf("seed=%#v err=%v", result, err)
-				}
-				if err := os.Remove(source); err != nil {
-					t.Fatal(err)
-				}
-				writeDoctorBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Edited scribe.\n")
-				want = fmt.Sprintf(
-					"doctor: workbench %s codex mirror STALE: STALE %s; ORPHAN %s — the next launch there rebuilds it\n",
+				stale, orphan := "STALE "+filepath.Join(
 					dir,
-					filepath.Join(dir, "AGENTS.md"),
-					filepath.Join(dir, ".codex", "agents", "old.toml"),
+					"AGENTS.md",
+				), "ORPHAN "+filepath.Join(
+					dir,
+					".codex",
+					"agents",
+					"old.toml",
+				)
+				testjail.FakeEngineSync(t, `{"ok":false,"problems":["`+stale+`","`+orphan+`"],`+
+					`"rebuildable":["`+stale+`","`+orphan+`"],"error":""}`, 1)
+				want = fmt.Sprintf(
+					"doctor: workbench %s codex mirror STALE: %s; %s — the next launch there rebuilds it\n",
+					dir,
+					stale,
+					orphan,
 				) +
 					fmt.Sprintf(
 						"doctor: workbench %s ok · engines claude,codex · prompt %s\n",
@@ -226,36 +227,19 @@ func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
 					paths.WorkbenchManifest(dir),
 					`{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"xhigh","engines":["claude","opencode"]}`,
 				)
-				source := filepath.Join(dir, ".claude", "commands", "local.md")
-				writeDoctorBenchFile(t, source, "---\ndescription: Local.\n---\nLocal.\n")
-				result, err := opencodegen.Compile(
-					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeBuild},
-				)
-				if err != nil || !result.OK {
-					t.Fatalf("seed=%#v err=%v", result, err)
-				}
-				writeDoctorBenchFile(t, source, "---\ndescription: Local.\n---\nEdited.\n")
-				writeDoctorBenchFile(
-					t,
-					filepath.Join(dir, ".claude", "commands", "hand.md"),
-					"---\ndescription: Hand.\n---\nHand.\n",
-				)
-				writeDoctorBenchFile(t, filepath.Join(dir, ".opencode", "command", "hand.md"), "hand\n")
-				conflict := "CONFLICT " + filepath.Join(
-					dir,
-					".opencode",
-					"command",
-					"hand.md",
-				) + " — exists without a generated marker; not touching it"
+				conflict := "CONFLICT " + filepath.Join(dir, ".opencode", "command", "hand.md") +
+					" — exists without a generated marker; not touching it"
 				stale := "STALE " + filepath.Join(dir, ".opencode", "command", "local.md")
+				testjail.FakeEngineSync(t, `{"ok":false,"problems":["`+conflict+`","`+stale+`"],`+
+					`"rebuildable":["`+stale+`"],"error":""}`, 1)
 				want = fmt.Sprintf(
-					"doctor: workbench %s opencode mirror FAILED: %s — the next launch there fails; fix it, then run pfm opencode build %s\n",
+					"doctor: workbench %s opencode mirror FAILED: %s — the next launch there fails; fix it, then run engine-sync opencode build %s\n",
 					dir,
 					conflict,
 					dir,
 				) +
 					fmt.Sprintf(
-						"doctor: workbench %s opencode mirror STALE: %s — rebuilt by pfm opencode build %s once the failures are fixed\n",
+						"doctor: workbench %s opencode mirror STALE: %s — rebuilt by engine-sync opencode build %s once the failures are fixed\n",
 						dir,
 						stale,
 						dir,

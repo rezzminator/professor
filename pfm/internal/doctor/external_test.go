@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -22,7 +22,7 @@ import (
 // row, which is a different failure than the one under test.
 func installedCodexConfig(t *testing.T, rest string) string {
 	t.Helper()
-	prompt, err := codexgen.FleetPrompt()
+	prompt, err := codexprompt.FleetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}

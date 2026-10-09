@@ -502,22 +502,12 @@ func Resolve() (Values, error) {
 	}, nil
 }
 
-// GeneratedCodexAgentsDir is where pfm compiles the machine-global Codex
-// agent .toml twins (codexgen.RunGlobalAgents) — pfm-owned state, never
-// inside the source clone a template's .md lives in, so a stale compiler on
-// any host can never rewrite a tracked file. A `~/.codex/agents/<name>.toml`
-// link points here; uninstall removes this whole directory along with the
-// links it owns.
-func LegacyGeneratedCodexAgentsDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "generated", "codex-agents")
-}
-
-// GeneratedClaudeAgentsDir is where pfm renders the machine-global Claude
-// agent VARIANTS templates/global/agents/variants.json declares
-// (codexgen.RunGlobalAgents) — one source agent re-emitted under another name
-// with overridden frontmatter. An original agent is linked straight from the
-// clone and never lands here; only a variant's `{config}/agents/<name>.md`
-// link points into this directory, and uninstall removes it with those links.
+// GeneratedClaudeAgentsDir is where engine-sync global renders the
+// machine-global Claude agent VARIANTS templates/global/agents/variants.json
+// declares — one source agent re-emitted under another name with overridden
+// frontmatter. An original agent is linked straight from the clone and never
+// lands here; only a variant's `{config}/agents/<name>.md` link points into
+// this directory, which pfm's unwire and orphan sweep recognise as pfm-owned.
 func GeneratedClaudeAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
 }

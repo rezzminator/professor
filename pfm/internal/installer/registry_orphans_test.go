@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInspectDeadRegistryLinks(t *testing.T) {
@@ -209,7 +211,12 @@ func TestRegistryDeadLinkDoctorRows(t *testing.T) {
 				}
 			}
 			var output bytes.Buffer
-			warnings, failures := ReportGlobalRegistries(&output, home, true, &paths.MapEnv{})
+			warnings, failures := ReportGlobalRegistries(
+				&output,
+				home,
+				true,
+				&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
+			)
 			var rows []string
 			for _, line := range strings.Split(output.String(), "\n") {
 				if strings.HasPrefix(line, "doctor: registry ") {

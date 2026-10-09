@@ -10,7 +10,7 @@ import (
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -33,7 +33,7 @@ func writeComposed(root string) error {
 		var err error
 		if id == pfmengine.Codex {
 			var prompt string
-			prompt, err = codexgen.FleetPrompt()
+			prompt, err = codexprompt.FleetPrompt()
 			content = []byte(prompt)
 		} else {
 			content, err = harnessprompts.Composed(engine)

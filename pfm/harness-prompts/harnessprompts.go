@@ -76,7 +76,7 @@ func composeParts(engineLongName string) [3]string {
 // move the seams — a composed prompt is the three parts and the two seams,
 // and nothing else. Composition lives HERE because more than one caller needs
 // the same bytes: the installer stages them per engine, writes Codex's copy
-// into config.toml, and codexgen prepends Codex's copy to every compiled role.
+// into config.toml, and a Codex --agent-role seat carries Codex's copy ahead of its role (codexprompt).
 func Composed(engineLongName string) ([]byte, error) {
 	var sections [3][]byte
 	for index, name := range composeParts(engineLongName) {

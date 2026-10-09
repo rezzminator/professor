@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -297,27 +297,27 @@ func (installer *engine) skillSourceLinkTargets(name string) []string {
 // directory at the target is the operator's (a hand-copied skill), never a
 // pfm copy to replace — it is a reported conflict and left untouched.
 func (installer *engine) wireSkillSourceLink(store, target, storeRoot string) error {
-	state, found, err := codexgen.ClassifyGlobalLink(target, store, storeRoot, codexgen.GlobalLinkDir)
+	state, found, err := globallink.ClassifyLink(target, store, storeRoot, globallink.Dir)
 	if err != nil {
 		return fmt.Errorf("inspect skill link %s: %w", target, err)
 	}
 	switch state {
-	case codexgen.GlobalLinkCorrect:
+	case globallink.Correct:
 		installer.ok(target)
 		return nil
-	case codexgen.GlobalLinkCopy:
+	case globallink.Copy:
 		installer.skip(
 			"CONFLICT " + target + ": a real directory, not ours; preserved (remove it to link -> " + store + ")",
 		)
 		return nil
-	case codexgen.GlobalLinkConflict:
-		installer.skip(codexgen.DescribeGlobalLinkState(state, target, store, found) + "; preserved")
+	case globallink.Conflict:
+		installer.skip(globallink.DescribeState(state, target, store, found) + "; preserved")
 		return nil
 	}
 	return installer.change(
-		codexgen.DescribeGlobalLinkState(state, target, store, found),
+		globallink.DescribeState(state, target, store, found),
 		func() error {
-			return codexgen.ApplyGlobalLink(target, store, state)
+			return globallink.Apply(target, store, state)
 		},
 	)
 }

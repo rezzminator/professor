@@ -47,6 +47,7 @@ type input struct {
 	CWD           string `json:"cwd"`
 	ContextWindow struct {
 		UsedPercentage    float64 `json:"used_percentage"`
+		ContextWindowSize int64   `json:"context_window_size"`
 		TotalInputTokens  int64   `json:"total_input_tokens"`
 		TotalOutputTokens int64   `json:"total_output_tokens"`
 		CurrentUsage      struct {

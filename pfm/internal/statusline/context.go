@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -64,57 +63,60 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	), contextTokens
 }
 
-// sessionSpendSegment is the main line's "💰$3.20/1.2M/40K/88": what this
-// chat and every sub-agent beside it billed — USD at the served price table,
-// prompt and output tokens, tool calls — the same scan and table as each
-// sub-agent row, so the line and the rows add up. Claude Code's own session
-// cost follows as " cc $37.31" only when pfm cannot price the session or the
-// two disagree by more than a tenth: its client prices from its own table,
-// which can lag a new model. A floor carries "+?"; a transcript that cannot
-// be read is "$?/?/?/?".
+// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 +$1.87 unlogged".
+// The dollars are Claude Code's cost.total_cost_usd: the whole session at list
+// price, including the requests it makes that no transcript records (prompt
+// suggestions, summaries, titles). The tokens and tool calls are this chat's
+// transcript and every sub-agent's, priced at the served table the same way
+// as each sub-agent row; whatever the total holds beyond that is named
+// "+$X unlogged", so the rows and the line add up. A logged price above the
+// total is pfm's own error and renders "logged $X > total" in warning.
+// Without a Claude Code figure the logged price leads; a floor carries "+?";
+// a transcript that cannot be read is "?/?/?" after the total.
 func sessionSpendSegment(data input, prices *pricing.Prices) string {
-	claudeCost := data.Cost.TotalCostUSD
+	total := data.Cost.TotalCostUSD
 	if strings.TrimSpace(data.TranscriptPath) == "" {
-		return cWarn + "💰$?/?/?/?" + reset + claudeCostSuffix(claudeCost, 0, false)
+		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset
 	}
 	spend, err := sessionSpend(data.TranscriptPath, prices)
 	if err != nil {
-		return cWarn + "💰$?/?/?/?" + reset + claudeCostSuffix(claudeCost, 0, false)
+		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset
 	}
-	priced := spend.priced > 0 || !spend.partial
-	color := dim
-	if spend.usd >= 10 {
-		color = red
-	} else if spend.usd >= 2 {
-		color = yellow
+	logged := spend.priced > 0 || !spend.partial
+	line := spendDollars(spend.usd, logged)
+	if total > 0 {
+		line = spendDollars(total, true)
 	}
-	dollars := "$?"
-	if priced {
-		dollars = fmt.Sprintf("$%.2f", spend.usd)
-	} else {
-		color = cWarn
-	}
-	line := color + "💰" + dollars + reset + cMuted + "/" + reset +
-		cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
+	line += cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
 		cTools + strconv.Itoa(spend.tools) + reset
-	if spend.partial && priced {
+	if spend.partial && logged {
 		line += cWarn + "+?" + reset
 	}
-	return line + claudeCostSuffix(claudeCost, spend.usd, priced)
+	if total <= 0 || !logged {
+		return line
+	}
+	switch gap := total - spend.usd; {
+	case gap >= 0.005:
+		line += cMuted + fmt.Sprintf(" +$%.2f unlogged", gap) + reset
+	case gap <= -0.005:
+		line += cWarn + fmt.Sprintf(" logged $%.2f > total", spend.usd) + reset
+	}
+	return line
 }
 
-// claudeCostSuffix is " cc $37.31", Claude Code's own session cost, when it
-// reported one and pfm has no price of its own or differs from it by more
-// than a tenth of the larger; otherwise nothing.
-func claudeCostSuffix(claudeCost, pfmCost float64, priced bool) string {
-	if claudeCost <= 0 {
-		return ""
+// spendDollars is "💰$4.68/" coloured by size, or "💰$?/" when unknown.
+func spendDollars(usd float64, known bool) string {
+	if !known {
+		return cWarn + "💰$?" + reset + cMuted + "/" + reset
 	}
-	if priced && math.Abs(claudeCost-pfmCost) <= 0.1*math.Max(claudeCost, pfmCost) {
-		return ""
+	color := dim
+	if usd >= 10 {
+		color = red
+	} else if usd >= 2 {
+		color = yellow
 	}
-	return cMuted + " cc " + reset + cWarn + fmt.Sprintf("$%.2f", claudeCost) + reset
+	return color + "💰" + fmt.Sprintf("$%.2f", usd) + reset + cMuted + "/" + reset
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.
@@ -164,6 +166,9 @@ func contextWindow(runtime Runtime, data input, meta transcript.Meta) int64 {
 	}
 	if runtime.Engine == pfmengine.Codex {
 		return meta.ContextWindow
+	}
+	if data.ContextWindow.ContextWindowSize > 0 {
+		return data.ContextWindow.ContextWindowSize
 	}
 	model := data.Model.ID
 	if model == "" {

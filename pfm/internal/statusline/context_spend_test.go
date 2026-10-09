@@ -11,10 +11,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
-// The main line's dollars come from the same table and transcripts as its
-// tokens and every sub-agent row, so the line and the rows can be compared;
-// Claude Code's own figure follows as "cc $…" only when it disagrees by more
-// than a tenth, or when pfm cannot price the session itself.
+// The main line's dollars are Claude Code's whole-session total; the share no
+// transcript logged is named beside it, so the line and the rows — priced
+// from the transcripts at the same table — add up.
 func TestSessionSpendSegmentPricesFromTheTable(t *testing.T) {
 	const (
 		// $8 on opus-5-5: one million tokens written to the 1-hour cache at $8.
@@ -57,29 +56,34 @@ func TestSessionSpendSegmentPricesFromTheTable(t *testing.T) {
 		want       string
 	}{
 		{
-			name: "claude code overprices: its figure follows", child: childResponse, claudeCost: 37.31,
-			want: "💰$8.00/1.0M/100/1 cc $37.31",
+			name: "the total holds requests no transcript logged", child: childResponse, claudeCost: 37.31,
+			want: "💰$37.31/1.0M/100/1 +$29.31 unlogged",
 		},
 		{
-			name: "claude code agrees within a tenth: no second figure", child: childResponse, claudeCost: 8.5,
+			name: "the total matches the logs", child: childResponse, claudeCost: 8.003,
 			want: "💰$8.00/1.0M/100/1",
 		},
 		{
-			name: "no price table: unpriced, claude code's figure follows", child: childResponse, noPrices: true,
-			claudeCost: 37.31, want: "💰$?/1.0M/100/1 cc $37.31",
+			name: "a logged price above the total is pfm's error", child: childResponse, claudeCost: 5,
+			want: "💰$5.00/1.0M/100/1 logged $8.00 > total",
 		},
 		{
-			name: "an unpriced model leaves a floor", child: unpricedResponse, claudeCost: 8.01,
-			want: "💰$8.00/1.0M/50/0+?",
-		},
-		{
-			name: "no transcript: claude code's figure is all there is", noSession: true, claudeCost: 3.42,
-			want: "💰$?/?/?/? cc $3.42",
-		},
-		{
-			name: "claude code reports nothing: no second figure", child: childResponse,
+			name: "no claude code figure: the logged price leads", child: childResponse,
 			want: "💰$8.00/1.0M/100/1",
 		},
+		{
+			name: "no price table: the total, no gap", child: childResponse, noPrices: true, claudeCost: 37.31,
+			want: "💰$37.31/1.0M/100/1",
+		},
+		{
+			name: "an unpriced model leaves a floor", child: unpricedResponse, claudeCost: 9,
+			want: "💰$9.00/1.0M/50/0+? +$1.00 unlogged",
+		},
+		{
+			name: "no transcript: the total alone", noSession: true, claudeCost: 3.42,
+			want: "💰$3.42/?/?/?",
+		},
+		{name: "no transcript, no total", noSession: true, want: "💰$?/?/?/?"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,6 +99,32 @@ func TestSessionSpendSegmentPricesFromTheTable(t *testing.T) {
 			got := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(sessionSpendSegment(data, prices), "")
 			if got != tc.want {
 				t.Fatalf("segment = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The context gauge divides by the window Claude Code reports for the model
+// it runs; the model-name guess serves only a payload that names none.
+func TestContextWindowTakesTheHarnessSize(t *testing.T) {
+	cases := []struct {
+		name  string
+		size  int64
+		model string
+		want  int64
+	}{
+		{name: "reported 200K on an opus", size: 200_000, model: "claude-opus-5-5", want: 200_000},
+		{name: "reported 1M on a haiku", size: 1_000_000, model: "claude-haiku-5-5", want: 1_000_000},
+		{name: "unreported haiku guesses 200K", model: "claude-haiku-5-5", want: 200_000},
+		{name: "unreported opus guesses 1M", model: "claude-opus-5-5", want: 1_000_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var data input
+			data.ContextWindow.ContextWindowSize = tc.size
+			data.Model.ID = tc.model
+			if got := contextWindow(Runtime{Env: map[string]string{}}, data, transcript.Meta{}); got != tc.want {
+				t.Fatalf("contextWindow = %d, want %d", got, tc.want)
 			}
 		})
 	}

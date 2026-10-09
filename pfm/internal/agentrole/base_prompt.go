@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -20,7 +20,7 @@ func BasePrompt(engine pfmengine.ID, cwd, home string) (string, error) {
 		return persona.Body, nil
 	}
 	if engine != pfmengine.Claude {
-		return codexgen.FleetPrompt()
+		return codexprompt.FleetPrompt()
 	}
 	path, err := action.ProfessorPromptPath(home)
 	if err != nil {

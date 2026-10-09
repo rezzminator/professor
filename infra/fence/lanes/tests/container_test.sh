@@ -85,7 +85,7 @@ else bad "a failed rmi returns 0 to the caller"; fi
 
 # 3 — every lane container carries the fence label housekeeping reaps by
 : >"$STUB_DOCKER_LOG"
-PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-x pfm-lane-root:cafe01
 if grep -q -- '^run -d .*--label pfm.fence=1 .*pfm-lane-root:cafe01 sleep infinity$' "$STUB_DOCKER_LOG"; then ok "lane_run labels the container pfm.fence=1"
 else bad "lane_run labels the container pfm.fence=1" "$(cat "$STUB_DOCKER_LOG")"; fi
 volumes="$(grep '^run -d ' "$STUB_DOCKER_LOG" | grep -oE -- '-v [a-z][a-z0-9-]*:' | sed -e 's/^-v //' -e 's/:$//' | LC_ALL=C sort | tr '\n' ' ')"
@@ -94,11 +94,11 @@ else bad "lane run named volumes" "got '$volumes'" "$(cat "$STUB_DOCKER_LOG")"; 
 
 # 4 — run containers can disable networking; root builds keep docker's default.
 : >"$STUB_DOCKER_LOG"
-PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01 none
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-x pfm-lane-root:cafe01 none
 if grep -q -- '--network none' "$STUB_DOCKER_LOG" && grep -q -- '-e GOPROXY=off' "$STUB_DOCKER_LOG"; then ok "lane_run none disables networking and the Go proxy at container start"
 else bad "run network and Go proxy" "$(cat "$STUB_DOCKER_LOG")"; fi
 : >"$STUB_DOCKER_LOG"
-PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-build pfm-lane-base:cafe01
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-build pfm-lane-base:cafe01
 if ! grep -qE -- '--network|-e GOPROXY=off' "$STUB_DOCKER_LOG"; then ok "root build uses docker's default network and Go proxy"
 else bad "build network and Go proxy" "$(cat "$STUB_DOCKER_LOG")"; fi
 if grep -q -- '-e MOCK_ENGINE_SCENARIO=/root/.local/share/pfm-lanes/default.json' "$STUB_DOCKER_LOG"; then ok "every container receives the default mock scenario"
@@ -107,16 +107,29 @@ else bad "scenario environment" "$(cat "$STUB_DOCKER_LOG")"; fi
 # 4b — pfm install, doctor and model-cost refresh prices unless PFM_PRICES_OFFLINE=1: the root
 # build and the network-less run container both carry it, so no lane step fetches.
 : >"$STUB_DOCKER_LOG"
-PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-build pfm-lane-base:cafe01
-PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01 none
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-build pfm-lane-base:cafe01
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-x pfm-lane-root:cafe01 none
 if [ "$(grep -c -- '^run -d .* -e PFM_PRICES_OFFLINE=1 ' "$STUB_DOCKER_LOG")" -eq 2 ]; then ok "the root build and the run container both set PFM_PRICES_OFFLINE=1"
 else bad "price refresh knob" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 5 — optional docker arguments follow the network selector before the image.
 : >"$STUB_DOCKER_LOG"
-PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-build pfm-lane-base:cafe01 '' -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-build pfm-lane-base:cafe01 '' -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy
 if grep -q -- '--label pfm.fence=1 -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy -v ' "$STUB_DOCKER_LOG"; then
   ok "lane_run passes optional docker arguments before the image"
 else bad "lane_run optional arguments" "$(cat "$STUB_DOCKER_LOG")"; fi
+
+# 6 — every lane container mounts the engine-sync source read-only at /engine-sync and
+# names the binary pfm execs; an absent source travels in as PFM_DEV_ENGINE_SYNC_MISSING.
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-x pfm-lane-root:cafe01 none
+if grep -q -- "^run -d .* -v $T/es:/engine-sync:ro .* -e ENGINE_SYNC_BIN=/usr/local/libexec/pfm-lanes/engine-sync .*-e PFM_DEV_ENGINE_SYNC_MISSING= .*pfm-lane-root:cafe01 sleep infinity\$" "$STUB_DOCKER_LOG"; then
+  ok "lane_run mounts the engine-sync source at /engine-sync and sets ENGINE_SYNC_BIN"
+else bad "lane_run engine-sync mount" "$(cat "$STUB_DOCKER_LOG")"; fi
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T" PFM_DEV_ENGINE_SYNC_MISSING='/m/plugins/engine-sync: no go.mod' lane_run lane-x pfm-lane-root:cafe01 none
+if grep -qF -- "-e PFM_DEV_ENGINE_SYNC_MISSING=/m/plugins/engine-sync: no go.mod " "$STUB_DOCKER_LOG"; then
+  ok "lane_run hands an absent engine-sync source's cause to the container"
+else bad "lane_run engine-sync absence" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 shtest_end

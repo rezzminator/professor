@@ -4,7 +4,7 @@
 #   root.sh [--rebuild] [--tag NAME] [--print-hash]
 #
 # From the pfm-dev fence image, in order:
-#   1. provision.sh tools — pfm and the mock linked as all three engines
+#   1. provision.sh tools — pfm, engine-sync, and the mock linked as all three engines
 #   2. provision.sh seats — two fixture seats and fixture Codex/OpenCode homes
 #   3. provision.sh install — pfm integration and invented local projects
 #   4. adopt.sh — deterministic adoption of /work/express
@@ -15,10 +15,12 @@
 # The hash covers exactly the image's build inputs: product files (pfm/**,
 # templates/**, VERSION, docs/SETUP.md, docs/PLACEHOLDERS.md, .githooks/pre-push),
 # fence image files (pfm-dev.Dockerfile, docker-compose.yml, tools.env, tools.sh,
-# fence-env.sh), and lane build files (root.sh, container.sh, provision.sh,
-# adopt.sh, cred-scan.sh, fixtures/, scenarios/). It hashes on-disk content,
-# identically whether dirty, staged or committed; test files, testdata and the
-# e2e tree are excluded. Lane scripts, lib.sh and registries load from /worktree
+# fence-env.sh, engine-sync.sh), lane build files (root.sh, container.sh,
+# provision.sh, adopt.sh, cred-scan.sh, fixtures/, scenarios/), and the
+# engine-sync source fence-env.sh resolves (the binary provision.sh builds; an
+# absent source hashes as absent). It hashes on-disk content, identically
+# whether dirty, staged or committed; test files, testdata and the pfm e2e tree
+# are excluded. Lane scripts, lib.sh and registries load from /worktree
 # at run time, so editing them reuses the root. Seats are lane inputs, not image inputs.
 # The image carries fixture credentials only and stays LOCAL ONLY. A registry
 # --tag is refused; this script never pushes.
@@ -34,7 +36,7 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 REBUILD=0 PRINT_HASH=0 TAG=""
-HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios"
+HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,35 +61,47 @@ sha256_stdin() {
 # One path, its on-disk git blob hash and executable bit per line; a symlink
 # carries its target text instead, as git stores it, dangling or not. A failed
 # listing or hash is fatal: a partial stream could silently reuse a stale image.
-hash_inputs() {
-  local paths files hashes path blob executable
-  # shellcheck disable=SC2086 # HASH_PATHS is the fixed, space-delimited input roster.
-  paths="$(git -C "$ROOT" ls-files --cached --others --exclude-standard -- $HASH_PATHS \
-    ':(exclude)pfm/**/*_test.go' ':(exclude)pfm/*_test.go' \
-    ':(exclude)pfm/**/testdata/**' ':(exclude)pfm/testdata/**' \
-    ':(exclude)pfm/e2e/**' \
-    ':(exclude)pfm/internal/harvestpy/assets/**/*_test.py' \
-    ':(exclude)pfm/internal/harvestpy/assets/*_test.py' |
+hash_tree() { # hash_tree <dir> <label prefix> <git ls-files pathspec…>
+  local dir="$1" prefix="$2" paths files hashes path blob executable
+  shift 2
+  paths="$(git -C "$dir" ls-files --cached --others --exclude-standard -- "$@" |
     LC_ALL=C sort -u |
     while IFS= read -r path; do
-      if [ -f "$ROOT/$path" ] || [ -L "$ROOT/$path" ]; then printf '%s\n' "$path"; fi
+      if [ -f "$dir/$path" ] || [ -L "$dir/$path" ]; then printf '%s\n' "$path"; fi
     done)" || return 1
   [ -n "$paths" ] || return 0
-  files="$(while IFS= read -r path; do [ -L "$ROOT/$path" ] || printf '%s\n' "$path"; done <<<"$paths")"
+  files="$(while IFS= read -r path; do [ -L "$dir/$path" ] || printf '%s\n' "$path"; done <<<"$paths")"
   hashes=""
   if [ -n "$files" ]; then
-    hashes="$(printf '%s\n' "$files" | git -C "$ROOT" hash-object --stdin-paths)" || return 1
+    hashes="$(printf '%s\n' "$files" | git -C "$dir" hash-object --stdin-paths)" || return 1
   fi
   while IFS= read -r path; do
-    if [ -L "$ROOT/$path" ]; then
-      printf '%s\tlink:%s\t0\n' "$path" "$(readlink "$ROOT/$path")"
+    if [ -L "$dir/$path" ]; then
+      printf '%s%s\tlink:%s\t0\n' "$prefix" "$path" "$(readlink "$dir/$path")"
       continue
     fi
     IFS= read -r blob <&3 || return 1
     executable=0
-    [ -x "$ROOT/$path" ] && executable=1
-    printf '%s\t%s\t%s\n' "$path" "$blob" "$executable"
+    [ -x "$dir/$path" ] && executable=1
+    printf '%s%s\t%s\t%s\n' "$prefix" "$path" "$blob" "$executable"
   done 3<<<"$hashes" <<<"$paths"
+}
+
+hash_inputs() {
+  # shellcheck disable=SC2086 # HASH_PATHS is the fixed, space-delimited input roster.
+  hash_tree "$ROOT" "" $HASH_PATHS \
+    ':(exclude)pfm/**/*_test.go' ':(exclude)pfm/*_test.go' \
+    ':(exclude)pfm/**/testdata/**' ':(exclude)pfm/testdata/**' \
+    ':(exclude)pfm/e2e/**' \
+    ':(exclude)pfm/internal/harvestpy/assets/**/*_test.py' \
+    ':(exclude)pfm/internal/harvestpy/assets/*_test.py' || return 1
+  if [ -n "$PFM_DEV_ENGINE_SYNC_MISSING" ]; then
+    printf 'engine-sync\tabsent\t0\n'
+  else
+    hash_tree "$PFM_DEV_ENGINE_SYNC_SRC" "engine-sync/" . \
+      ':(exclude)**/*_test.go' ':(exclude)*_test.go' \
+      ':(exclude)**/testdata/**' ':(exclude)testdata/**'
+  fi
 }
 
 root_hash() {
@@ -97,6 +111,12 @@ root_hash() {
   printf '%s' "$out" | sha256_stdin | cut -c1-12
 }
 
+# The fence image, its mounts and the container's env live in one place for both
+# root.sh and run.sh — lanes/container.sh; the engine-sync source it resolves is
+# a hash input.
+# shellcheck source=container.sh
+. "$HERE/container.sh"
+FENCE_CALLER=lanes-root lane_fence_env "$ROOT"
 HASH="$(root_hash)" || exit 2
 IMAGE="pfm-lane-root:$HASH"
 SUFFIX="${BASHPID}${RANDOM}${RANDOM}"
@@ -140,11 +160,6 @@ mkdir -p "$LANE_TMP" || fatal "the lane scratch directory could not be created: 
 STEP_LOG="$LANE_TMP/root-step-$SUFFIX.log"
 : >"$STEP_LOG" || fatal "the step output file could not be written: $STEP_LOG"
 
-# The fence image, its mounts and the container's env live in one place for both
-# root.sh and run.sh — lanes/container.sh.
-# shellcheck source=container.sh
-. "$HERE/container.sh"
-FENCE_CALLER=lanes-root lane_fence_env "$ROOT"
 # shellcheck source=../housekeeping.sh
 . "$HERE/../housekeeping.sh"
 fence_housekeeping "$HASH"
@@ -213,7 +228,7 @@ commit_lost_lease() { # commit_lost_lease <output-file>
     grep -Fq 'no such file or directory' "$1"
 }
 
-say "step 1/7 · pfm and mock engines (provision.sh tools)"
+say "step 1/7 · pfm, engine-sync and mock engines (provision.sh tools)"
 run_step "provision.sh tools" x "$BUILD" bash /worktree/infra/fence/lanes/provision.sh tools
 
 say "step 2/7 · two fixture seats (provision.sh seats)"

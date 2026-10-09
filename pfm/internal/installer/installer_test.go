@@ -538,16 +538,13 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 }
 
 func TestEmptyCodexRosterSkipsCommandAndAgentMirrors(t *testing.T) {
-	t.Parallel()
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".claude", "commands", "fixture.md"), "# Fixture command\n")
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "fixture.md"), `---
-name: fixture
-description: fixture agent
----
-
-# Fixture agent
-`)
+	skips := []string{
+		"no Codex accounts configured — command mirror has nothing to write",
+		"no Codex accounts configured — agent mirror has nothing to write",
+	}
+	record := testjail.FakeEngineSync(t, `{"ok":true,"events":[{"verb":"skip","message":"`+skips[0]+`"},`+
+		`{"verb":"skip","message":"`+skips[1]+`"}],"error":""}`, 0)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
@@ -556,21 +553,14 @@ description: fixture agent
 	if err != nil {
 		t.Fatalf("zero-Codex preview: %v\n%s", err, output.String())
 	}
-	for _, wanted := range []string{
-		"no Codex accounts configured — command mirror has nothing to write",
-		"no Codex accounts configured — agent mirror has nothing to write",
-	} {
-		if !strings.Contains(output.String(), wanted) {
+	for _, wanted := range skips {
+		if !strings.Contains(output.String(), "  skip    "+wanted+"\n") {
 			t.Errorf("zero-account mirror skip omitted %q:\n%s", wanted, output.String())
 		}
 	}
-	for _, forbidden := range []string{
-		filepath.Join(home, ".codex", "prompts"),
-		filepath.Join(home, ".codex", "skills"),
-		filepath.Join(home, ".codex", "agents"),
-	} {
-		if strings.Contains(output.String(), forbidden) {
-			t.Errorf("zero-account preview still plans Codex mirror %s:\n%s", forbidden, output.String())
+	for _, call := range testjail.EngineSyncCalls(t, record) {
+		if !strings.Contains(call, " --no-codex-home") || strings.Contains(call, " --codex-home ") {
+			t.Errorf("engine-sync call %q does not carry the empty roster", call)
 		}
 	}
 }
@@ -631,7 +621,6 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 }
 
 func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T) {
-	t.Parallel()
 	home := t.TempDir()
 	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -641,88 +630,25 @@ func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T)
 	if _, err := os.Lstat(command); err != nil {
 		t.Fatalf("install did not wire command fixture: %v", err)
 	}
-	operatorSource := filepath.Join(home, ".claude", "commands", "audit-fixture.md")
-	writeFixture(t, operatorSource, "# Operator command\n")
-	conflict := filepath.Join(home, ".codex", "prompts", "audit-fixture.md")
-	writeFixture(t, conflict, "operator-owned conflict\n")
+	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "audit-fixture.md")
+	record := testjail.FakeEngineSync(
+		t,
+		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
+		1,
+	)
 
 	options.Mode = ModeUninstall
 	_, err := Run(context.Background(), options)
-	if err == nil || !strings.Contains(err.Error(), "CONFLICT "+conflict) {
-		t.Fatalf("uninstall error=%v, want Codex conflict", err)
+	if err == nil || !strings.Contains(err.Error(), conflict) {
+		t.Fatalf("uninstall error=%v, want the engine-sync conflict", err)
 	}
 	if _, err := os.Lstat(command); err != nil {
 		t.Fatalf("uninstall conflict removed global command before aborting: %v", err)
 	}
-	if got := readFixture(t, conflict); got != "operator-owned conflict\n" {
-		t.Fatalf("uninstall conflict changed operator file: %q", got)
-	}
-}
-
-// TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads pins the install call
-// site's two promises apart: Claude's agent is a symlink to the clone, while
-// Codex — whose loader opens a role with O_NOFOLLOW — gets a REGULAR FILE
-// carrying the generated marker that proves pfm owns it.
-func TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
-		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	assertLink(t,
-		filepath.Join(home, ".claude", "agents", "alpha.md"),
-		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
-	assertOwnedCodexRole(t, filepath.Join(home, ".codex", "agents", "alpha.toml"))
-	twin := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")
-	if _, err := os.Lstat(twin); !os.IsNotExist(err) {
-		t.Fatalf("install wrote a .toml twin inside the source clone, lstat err=%v", err)
-	}
-}
-
-// TestWireCodexAgentsReportsAndPreservesAForeignConflict is the conflict-law
-// pin at the installer boundary: a symlink pointing entirely outside the
-// source repository is reported by the exact "CONFLICT ...: not ours"
-// wording and is never overwritten or deleted — and, critically, a conflict
-// never aborts the rest of the install.
-func TestWireCodexAgentsReportsAndPreservesAForeignConflict(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
-		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-	elsewhere := filepath.Join(home, "elsewhere.md")
-	writeFixture(t, elsewhere, "operator file\n")
-	foreignLink := filepath.Join(home, ".claude", "agents", "alpha.md")
-	if err := os.MkdirAll(filepath.Dir(foreignLink), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(elsewhere, foreignLink); err != nil {
-		t.Fatal(err)
-	}
-
-	var output bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatalf("apply refused on a conflict it must only report: %v\n%s", err, output.String())
-	}
-	want := "CONFLICT " + foreignLink + ": not ours"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("apply output omitted %q:\n%s", want, output.String())
-	}
-	resolved, err := os.Readlink(foreignLink)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != elsewhere {
-		t.Fatalf("conflict link was rewritten: now -> %s", resolved)
+	for _, call := range testjail.EngineSyncCalls(t, record) {
+		if !strings.Contains(call, " --plan") {
+			t.Fatalf("engine-sync ran %q past a planned conflict", call)
+		}
 	}
 }
 
@@ -835,36 +761,6 @@ func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "half-built")); !os.IsNotExist(err) {
 		t.Fatalf("a skill source without SKILL.md still produced a link: %v", err)
-	}
-}
-
-// TestRetireOrphanCodexAgentsDeletesExactlyTheKnownStrays pins bullet 4's
-// narrow, hardcoded sweep: the retired explorer agent's compiled TOML and
-// any timestamped backup are deleted; a genuinely unrelated agent file next
-// to them is never touched.
-func TestRetireOrphanCodexAgentsDeletesExactlyTheKnownStrays(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	explorer := filepath.Join(home, ".codex", "agents", "explorer.toml")
-	writeFixture(t, explorer, "stale explorer agent\n")
-	backup := explorer + ".bak-20300101"
-	writeFixture(t, backup, "stale backup\n")
-	keeper := filepath.Join(home, ".codex", "agents", "tracer.toml")
-	writeFixture(t, keeper, "keeper\n")
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	for _, retired := range []string{explorer, backup} {
-		if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-			t.Fatalf("orphan sweep left %s: %v", retired, err)
-		}
-	}
-	if got := readFixture(t, keeper); got != "keeper\n" {
-		t.Fatalf("orphan sweep touched an unrelated agent file: %q", got)
 	}
 }
 
@@ -1018,50 +914,27 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 		filepath.Join(elsewhere, "templates", "global", "skills", "pcm"))
 }
 
-func TestDryRunNamesFutureCodexWritesAndRefusesTheirConflicts(t *testing.T) {
-	t.Parallel()
+// An engine-sync global conflict is a dry run's error and refuses the apply
+// in its preflight, before pfm writes anything; the apply itself never runs.
+func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.md"), `---
-name: tracer
-description: Trace a target.
----
-Read only.
-`)
-	conflict := filepath.Join(home, ".codex", "prompts", "reload.md")
-	writeFixture(t, conflict, "operator-owned\n")
+	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "reload.md")
+	record := testjail.FakeEngineSync(
+		t,
+		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
+		1,
+	)
 
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
-	if err == nil || !strings.Contains(err.Error(), "CONFLICT "+conflict) {
-		t.Fatalf("dry-run error=%v, want future Codex conflict; output:\n%s", err, output.String())
+	if err == nil || !strings.Contains(err.Error(), conflict) {
+		t.Fatalf("dry-run error=%v, want the engine-sync conflict; output:\n%s", err, output.String())
 	}
-	for _, path := range []string{
-		conflict,
-		filepath.Join(home, ".claude", "agents", "tracer.md"),
-		filepath.Join(home, ".codex", "agents", "tracer.toml"),
-	} {
-		if !strings.Contains(output.String(), path) {
-			t.Errorf("dry-run omitted planned path %s:\n%s", path, output.String())
-		}
-	}
-	if strings.Contains(output.String(), "would reconcile") ||
-		strings.Contains(output.String(), "would run pfm codex agents") {
-		t.Fatalf("dry-run retained vague placeholders:\n%s", output.String())
-	}
-	if got := readFixture(t, conflict); got != "operator-owned\n" {
-		t.Fatalf("dry-run mutated conflict = %q", got)
-	}
-	for _, path := range []string{
-		filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.toml"),
-		filepath.Join(home, ".claude", "agents", "tracer.md"),
-		filepath.Join(home, ".codex", "agents", "tracer.toml"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("dry-run wrote agent artifact %s: %v", path, err)
-		}
+	if !strings.Contains(output.String(), "  conflict "+conflict+"\n") {
+		t.Fatalf("dry-run transcript lacks the conflict:\n%s", output.String())
 	}
 
 	output.Reset()
@@ -1070,20 +943,22 @@ Read only.
 		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
-		!strings.Contains(err.Error(), "CONFLICT "+conflict) {
-		t.Fatalf("apply error=%v, want pre-mutation conflict refusal; output:\n%s", err, output.String())
+		!strings.Contains(err.Error(), conflict) {
+		t.Fatalf("apply error=%v, want the pre-mutation conflict refusal; output:\n%s", err, output.String())
 	}
 	for _, path := range []string{
 		filepath.Join(home, ".local", "share", "pfm", "install"),
-		filepath.Join(home, ".claude", "agents", "tracer.md"),
+		filepath.Join(home, ".claude", "agents"),
 		binaryOwnershipPath(home),
 	} {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
-			t.Errorf("apply preflight wrote %s before refusing conflict: %v", path, statErr)
+			t.Errorf("apply preflight wrote %s before refusing the conflict: %v", path, statErr)
 		}
 	}
-	if got := readFixture(t, conflict); got != "operator-owned\n" {
-		t.Fatalf("apply preflight mutated conflict = %q", got)
+	for _, call := range testjail.EngineSyncCalls(t, record) {
+		if !strings.Contains(call, " --plan") {
+			t.Fatalf("engine-sync ran %q past a planned conflict", call)
+		}
 	}
 }
 

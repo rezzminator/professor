@@ -6,11 +6,17 @@ import (
 	"testing"
 )
 
-func TestStageGlobalAgentsUsesTheStore(t *testing.T) {
+func TestStageGlobalAgentsLinksTheSources(t *testing.T) {
 	home := t.TempDir()
 	StageGlobalAgents(t, home)
-	entries, err := os.ReadDir(filepath.Join(home, ".claude", "agents"))
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("store agents=%v error=%v", entries, err)
+	link := filepath.Join(home, ".claude", "agents", "gitter.md")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("store agent link %s: %v", link, err)
 	}
+	if want := filepath.Join(checkoutRoot(), "templates", "global", "agents", "gitter.md"); target != want {
+		t.Fatalf("%s -> %s, want %s", link, target, want)
+	}
+	// A second staging over the same home keeps the correct links.
+	StageGlobalAgents(t, home)
 }

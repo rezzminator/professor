@@ -38,6 +38,11 @@ services:
       # dev.sh resolves the active checkout's common Git directory and mounts it
       # read-only so both main and linked worktrees retain git-backed gates.
       - ${PFM_DEV_GIT_COMMON:?set by dev.sh iso — the common Git directory}:/pfm-git-common:ro
+      # The engine-sync source, read-only: the fence builds the Codex/OpenCode
+      # compiler pfm execs from it (infra/fence/engine-sync.sh). fence-env.sh
+      # resolves it; an absent source mounts the common Git directory instead
+      # and PFM_DEV_ENGINE_SYNC_MISSING names the absence.
+      - ${PFM_DEV_ENGINE_SYNC_SRC:?set by dev.sh iso — the engine-sync source}:/engine-sync:ro
       - pfm-dev-gocache:/root/.cache/go-build
       - pfm-dev-gomod:/root/go/pkg/mod
       - pfm-dev-lintcache:/root/.cache/golangci-lint
@@ -48,6 +53,7 @@ services:
       GOFLAGS: "-buildvcs=false"
       PFM_DEV_REPO_GIT_DIR: /pfm-git-common/${PFM_DEV_GIT_DIR_REL:?set by dev.sh iso — relative active gitdir}
       PFM_DEV_REPO_WORK_TREE: /worktree
+      PFM_DEV_ENGINE_SYNC_MISSING: ${PFM_DEV_ENGINE_SYNC_MISSING:-}
 
   # The real-simulation fence (`dev.sh iso sim`): pfm-dev's mounts and law plus
   # a real Google Chrome and the shared memory Chrome needs

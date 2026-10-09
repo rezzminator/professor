@@ -728,7 +728,7 @@ bad=""
 chk="$(in_express pfm codex check .)"
 chk_rc=$?
 [ "$chk_rc" -eq 0 ] && [ "$(printf '%s\n' "$chk" | tail -1)" = 'CODEX CHECK PASS' ] ||
-  bad="$bad pfm codex check exited $chk_rc without 'CODEX CHECK PASS' ($(one_line "$(printf '%s' "$chk" | grep 'pfm codex' | head -2)"));"
+  bad="$bad pfm codex check exited $chk_rc without 'CODEX CHECK PASS' ($(one_line "$(printf '%s' "$chk" | grep -E '(pfm|engine-sync) codex' | head -2)"));"
 agents_hash="$(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1)"
 [ -n "$agents_hash" ] || bad="$bad no $EXPRESS/AGENTS.md to compile into;"
 bld="$(in_express pfm codex build .)"
@@ -743,7 +743,7 @@ printf '\nLane A probe: stale %s\n' "$LANE_STAMP" >>"$EXPRESS/AGENTS.md"
 stale="$(in_express pfm codex check .)"
 stale_rc=$?
 [ "$stale_rc" -eq 1 ] || bad="$bad check over a hand-edited AGENTS.md exited $stale_rc, want 1;"
-grep -qF "pfm codex: STALE $EXPRESS/AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE $EXPRESS/AGENTS.md': $(one_line "$stale");"
+grep -qF "engine-sync codex: STALE $EXPRESS/AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE $EXPRESS/AGENTS.md': $(one_line "$stale");"
 grep -qxF 'CODEX CHECK PASS' <<<"$stale" && bad="$bad check printed CODEX CHECK PASS over a stale mirror;"
 rebuilt="$(in_express pfm codex build .)"
 rebuilt_rc=$?

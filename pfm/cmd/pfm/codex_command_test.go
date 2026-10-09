@@ -2,267 +2,85 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
-	"syscall"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-func TestCodexCommandHelpAndOnlyBuildCheckActions(t *testing.T) {
-	jailTest(t)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"codex", "help"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("codex help code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	for _, want := range []string{
-		"usage: pfm codex build|check",
-		"--home",
-		"--model alias=value",
-		"--root-adapter",
-		"--agent-preamble",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("codex help missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.Contains(stdout.String(), "--overrides-dir") {
-		t.Fatalf("codex help still advertises retired override support:\n%s", stdout.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(
-		[]string{"codex", "generate"},
-		&stdout,
-		&stderr,
-	); code != 2 ||
-		!strings.Contains(stderr.String(), "unknown action") {
-		t.Fatalf("retired codex generate route code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(
-		[]string{"codex", "doctor"},
-		&stdout,
-		&stderr,
-	); code != 2 ||
-		!strings.Contains(stderr.String(), "unknown action") {
-		t.Fatalf("retired codex doctor route code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
+// forwardCases are every forwarded action of both engines at each exit code
+// the interface defines; testForwarders runs them through pfm's own argv.
+var forwardCases = []struct {
+	name   string
+	args   []string
+	stdout string
+	code   int
+}{
+	{name: "codex build", args: []string{"codex", "build", ".", "--model", "opus=x"}, stdout: "CODEX BUILD PASS"},
+	{name: "codex check finding", args: []string{"codex", "check", "--home", "/h"}, code: 1},
+	{name: "codex agents", args: []string{"codex", "agents", "--home", "/h"}, stdout: "CODEX AGENTS PASS"},
+	{name: "codex usage", args: []string{"codex", "generate"}, code: 2},
+	{
+		name: "opencode build", args: []string{"opencode", "build", "."},
+		stdout: "OPENCODE BUILD PASS wrote=0 unchanged=1 deleted=0",
+	},
+	{name: "opencode check finding", args: []string{"opencode", "check"}, code: 1},
+	{name: "opencode doctor", args: []string{"opencode", "doctor", "--home", "/h"}, stdout: "OPENCODE DOCTOR PASS"},
 }
 
-func TestCodexCommandBuildCheckAndCheckIsReadOnly(t *testing.T) {
-	jailTest(t)
-	repo := filepath.Join(os.Getenv("PFM_HOME"), "repo")
-	writeCodexCLIFile(t, filepath.Join(repo, "CLAUDE.md"), "# Fixture\n\nUse /build.\n")
-
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"codex", "build", repo}, &stdout, &stderr); code != 0 {
-		t.Fatalf("codex build code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if _, err := os.Stat(filepath.Join(repo, "AGENTS.md")); err != nil {
-		t.Fatalf("build did not materialize AGENTS.md: %v", err)
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run([]string{"codex", "check", repo}, &stdout, &stderr); code != 0 {
-		t.Fatalf("current codex check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-
-	if err := os.Remove(filepath.Join(repo, "AGENTS.md")); err != nil {
-		t.Fatal(err)
-	}
-	before := codexCLISnapshot(t, repo)
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(
-		[]string{"codex", "check", repo},
-		&stdout,
-		&stderr,
-	); code != 1 ||
-		!strings.Contains(stderr.String(), "MISSING") {
-		t.Fatalf("missing-output check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	after := codexCLISnapshot(t, repo)
-	if before != after {
-		t.Fatalf("check changed the output tree:\n before=%s\n after=%s", before, after)
-	}
-}
-
-func TestCodexCommandStrictRepoConfigAndCLIModelValidation(t *testing.T) {
-	jailTest(t)
-	repo := filepath.Join(os.Getenv("PFM_HOME"), "strict-repo")
-	writeCodexCLIFile(t, filepath.Join(repo, "CLAUDE.md"), "# Fixture\n")
-	writeCodexCLIFile(t, filepath.Join(repo, ".claude", "codex-build.json"), `{"version":1,"unexpected":true}`)
-
-	var stdout, stderr bytes.Buffer
-	if code := run(
-		[]string{"codex", "build", repo},
-		&stdout,
-		&stderr,
-	); code != 1 ||
-		!strings.Contains(stderr.String(), "unexpected") {
-		t.Fatalf("unknown repo config key code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-
-	writeCodexCLIFile(
-		t,
-		filepath.Join(repo, ".claude", "codex-build.json"),
-		`{"version":1,"overridesDir":".claude/codex-overrides"}`,
-	)
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(
-		[]string{"codex", "build", repo},
-		&stdout,
-		&stderr,
-	); code != 1 ||
-		!strings.Contains(stderr.String(), "overridesDir") {
-		t.Fatalf("retired overridesDir config key code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(
-		[]string{"codex", "build", "--model", "broken", repo},
-		&stdout,
-		&stderr,
-	); code != 2 ||
-		!strings.Contains(stderr.String(), "alias=value") {
-		t.Fatalf("invalid model override code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
-func TestCodexCommandFlagsReachCompiler(t *testing.T) {
-	jailTest(t)
-	repo := filepath.Join(os.Getenv("PFM_HOME"), "flags-repo")
-	writeCodexCLIFile(t, filepath.Join(repo, "CLAUDE.md"), "# Fixture\n\n## Subagents\n\nUse sonnet.\n")
-
-	var stdout, stderr bytes.Buffer
-	args := []string{
-		"codex", "build", "--home", filepath.Join(os.Getenv("PFM_HOME"), "codex-home"),
-		"--model", "sonnet=gpt-test", "--root-adapter", "Fixture adapter",
-		"--agent-preamble", "Fixture preamble", "--exclude-dir", "skip",
-		"--exclude-project", "ignored", "--never-register", "secret",
-		"--suffix-mode", "project", "--suffix-prefix", "fixture-",
-		repo,
-	}
-	if code := run(args, &stdout, &stderr); code != 0 {
-		t.Fatalf("codex flag build code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	agents, err := os.ReadFile(filepath.Join(repo, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(agents), "Fixture adapter") {
-		t.Fatalf("root adapter flag did not reach compiler: %q", agents)
-	}
-}
-
-func writeCodexCLIFile(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func codexCLISnapshot(t *testing.T, root string) string {
-	t.Helper()
-	var result strings.Builder
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+func testForwarders(t *testing.T, engine string) {
+	for _, testCase := range forwardCases {
+		if testCase.args[0] != engine {
+			continue
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		if info.IsDir() {
-			return nil
-		}
-		result.WriteString(rel)
-		result.WriteByte('=')
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(path)
-			if err != nil {
-				return err
+		t.Run(testCase.name, func(t *testing.T) {
+			root := jailTest(t)
+			record := testjail.FakeEngineSync(t, testCase.stdout, testCase.code)
+			var stdout, stderr bytes.Buffer
+			if code := run(testCase.args, &stdout, &stderr); code != testCase.code {
+				t.Fatalf("pfm %q exit = %d, want %d; stderr=%q", testCase.args, code, testCase.code, stderr.String())
 			}
-			result.WriteString("link:")
-			result.WriteString(target)
-		} else {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return err
+			calls, want := testjail.EngineSyncCalls(t, record), []string{strings.Join(testCase.args, " ")}
+			if !slices.Equal(calls, want) {
+				t.Fatalf("engine-sync calls = %q, want %q", calls, want)
 			}
-			result.Write(content)
-		}
-		result.WriteByte('\n')
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result.String()
-}
-
-func TestCodexRepoRootProbeFailure(t *testing.T) {
-	jailTest(t)
-	deep := t.TempDir()
-	for remaining := 4088 - len(deep); remaining > 0; {
-		n := min(200, remaining-1)
-		if remaining-(n+1) == 1 {
-			n--
-		}
-		deep = filepath.Join(deep, strings.Repeat("x", n))
-		remaining -= n + 1
-	}
-	if err := os.MkdirAll(deep, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(deep)
-	got, err := codexRepoRoot()
-	if got != "" || !errors.Is(err, syscall.ENAMETOOLONG) {
-		t.Fatalf("root=%q err=%v, want empty root and ENAMETOOLONG", got, err)
+			home, err := os.ReadFile(record + ".home")
+			if err != nil || strings.TrimSpace(string(home)) != filepath.Join(root, "home") {
+				t.Fatalf(
+					"engine-sync HOME = %q (%v), want pfm's resolved home %q",
+					home,
+					err,
+					filepath.Join(root, "home"),
+				)
+			}
+			if want := testCase.stdout + "\n"; stdout.String() != want {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+			}
+			wantStderr := "pfm " + engine + ": deprecated, runs engine-sync " + strings.Join(testCase.args, " ") +
+				"\nusage: engine-sync\n"
+			if stderr.String() != wantStderr {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)
+			}
+		})
 	}
 }
 
-func TestCodexBuildInsideWorkbench(t *testing.T) {
-	jailTest(t)
-	root := filepath.Join(t.TempDir(), "acme")
-	bench := filepath.Join(root, "docs", "scribe")
-	writeCodexCLIFile(t, filepath.Join(root, ".git", "HEAD"), "ref: refs/heads/fixture\n")
-	writeCodexCLIFile(t, filepath.Join(root, "CLAUDE.md"), "Parent.\n")
-	writeCodexCLIFile(t, filepath.Join(bench, "CLAUDE.md"), "Scribe.\n")
-	writeCodexCLIFile(t, filepath.Join(bench, ".professor", "workbench.json"), `{}`)
-	notes := filepath.Join(bench, "notes")
-	if err := os.MkdirAll(notes, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(notes)
-	got, err := codexRepoRoot()
-	if err != nil || got != bench {
-		t.Errorf("root=%q err=%v, want %q", got, err, bench)
-	}
+func TestCodexCommandForwardsToEngineSync(t *testing.T) { testForwarders(t, "codex") }
+
+func TestCodexCommandWithoutEngineSyncIsExitOne(t *testing.T) {
+	root := jailTest(t)
+	t.Setenv("ENGINE_SYNC_BIN", "")
+	t.Setenv("ENGINE_SYNC_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"codex", "build"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("bare build=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := run([]string{"codex", "check", "."}, &stdout, &stderr); code != 1 {
+		t.Fatalf("pfm codex check without engine-sync exit = %d, want 1; stderr=%q", code, stderr.String())
 	}
-	if _, err := os.Stat(filepath.Join(bench, "AGENTS.md")); err != nil {
-		t.Errorf("bare build did not compile bench: %v", err)
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run([]string{"codex", "build", root}, &stdout, &stderr); code != 0 {
-		t.Fatalf("explicit build=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
-		t.Errorf("explicit positional changed: %v", err)
+	stable := filepath.Join(root, "home", ".local", "share", "engine-sync", "bin", "engine-sync")
+	if !strings.Contains(stderr.String(), "pfm codex: engine-sync binary unavailable: "+stable+": ") {
+		t.Fatalf("stderr = %q does not name the unavailable binary at %s", stderr.String(), stable)
 	}
 }

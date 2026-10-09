@@ -1,228 +1,133 @@
 package workbench
 
 import (
+	"errors"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/opencodegen"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+func readArgv(t *testing.T, record string) string {
+	t.Helper()
+	calls := testjail.EngineSyncCalls(t, record)
+	if len(calls) != 1 {
+		t.Fatalf("engine-sync calls = %q, want one", calls)
+	}
+	return calls[0]
+}
+
+const cleanMirrorReply = `{"ok":true,"problems":[],"rebuildable":[],"warnings":[],` +
+	`"wrote":1,"unchanged":0,"deleted":0,"error":""}`
+
 func TestEnsureMirror(t *testing.T) {
-	for _, engine := range []pfmengine.ID{pfmengine.Codex, pfmengine.OpenCode, pfmengine.Claude} {
-		t.Run(string(engine), func(t *testing.T) {
+	for _, testCase := range []struct {
+		engine pfmengine.ID
+		argv   string
+	}{
+		{engine: pfmengine.Codex, argv: "codex build"},
+		{engine: pfmengine.OpenCode, argv: "opencode build"},
+		{engine: pfmengine.Claude},
+	} {
+		t.Run(string(testCase.engine), func(t *testing.T) {
 			root, dir := benchFixture(t)
-			writeBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Scribe.\n")
 			bench, home := LoadBench(dir, root), t.TempDir()
-			if err := EnsureMirror(bench, engine, home); err != nil {
+			record := testjail.FakeEngineSync(t, cleanMirrorReply, 0)
+			if err := EnsureMirror(bench, testCase.engine, home); err != nil {
 				t.Fatal(err)
 			}
-			output := filepath.Join(dir, "AGENTS.md")
-			if engine == pfmengine.OpenCode {
-				output = filepath.Join(dir, ".opencode", "opencode.jsonc")
-			}
-			if engine == pfmengine.Claude {
-				for _, path := range []string{output, filepath.Join(dir, ".codex"), filepath.Join(dir, ".opencode")} {
-					if _, err := os.Stat(path); !os.IsNotExist(err) {
-						t.Errorf("claude mirror output %s: %v", path, err)
-					}
+			if testCase.argv == "" {
+				if _, err := os.Stat(record); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("a Claude launch ran engine-sync: %v", err)
 				}
-			} else if _, err := os.Stat(output); err != nil {
-				t.Errorf("mirror missing: %v", err)
+				return
+			}
+			if got, want := readArgv(t, record), testCase.argv+" "+dir+" --home "+home+" --json"; got != want {
+				t.Fatalf("engine-sync argv = %q, want %q", got, want)
 			}
 		})
 	}
 }
 
 func TestEnsureMirrorFails(t *testing.T) {
-	for _, tc := range []struct {
+	for _, testCase := range []struct {
+		name   string
 		engine pfmengine.ID
-		config string
-		body   string
-		word   string
+		reply  string
+		code   int
+		want   string
 	}{
-		{pfmengine.Codex, ".claude/codex-build.json", "{", "codex"},
-		{pfmengine.Codex, ".mcp.json", "{", "codex"},
-		{pfmengine.OpenCode, ".claude/opencode-build.json", "{", "opencode"},
+		{
+			name: "problems", engine: pfmengine.Codex, code: 1,
+			reply: `{"ok":false,"problems":["INVALID a","CONFLICT b"],"rebuildable":[],"warnings":[],"error":""}`,
+			want:  "INVALID a; CONFLICT b",
+		},
+		{
+			name: "a run failure", engine: pfmengine.OpenCode, code: 1,
+			reply: `{"ok":false,"problems":[],"rebuildable":[],"warnings":[],"error":"read config: unexpected EOF"}`,
+			want:  "read config: unexpected EOF",
+		},
+		{name: "a usage error", engine: pfmengine.Codex, code: 2, want: "exit 2: usage: engine-sync"},
 	} {
-		t.Run(tc.config, func(t *testing.T) {
+		t.Run(testCase.name, func(t *testing.T) {
 			root, dir := benchFixture(t)
-			writeBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Scribe.\n")
-			writeBenchFile(t, filepath.Join(dir, tc.config), tc.body)
 			bench, home := LoadBench(dir, root), t.TempDir()
-			var problem string
-			if tc.engine == pfmengine.Codex {
-				result, err := codexgen.Build(codexgen.Options{Root: dir, Home: home})
-				if err != nil {
-					problem = err.Error()
-				} else {
-					problem = strings.Join(result.Problems, "; ")
-				}
-			} else {
-				result, err := opencodegen.Compile(
-					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeBuild},
-				)
-				if err != nil {
-					problem = err.Error()
-				} else {
-					problem = strings.Join(result.Problems, "; ")
-				}
-			}
-			if problem == "" {
-				t.Fatal("fixture did not fail")
-			}
-			want := "build the " + tc.word + " mirror of workbench " + dir + ": " + problem
-			if err := EnsureMirror(bench, tc.engine, home); err == nil || err.Error() != want {
-				t.Fatalf("ensure=%v, want %q", err, want)
-			}
-		})
-	}
-}
-
-func TestCheckMirror(t *testing.T) {
-	for _, engine := range []pfmengine.ID{pfmengine.Codex, pfmengine.OpenCode} {
-		t.Run(string(engine), func(t *testing.T) {
-			root, dir := benchFixture(t)
-			writeBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Scribe.\n")
-			writeBenchFile(
-				t,
-				filepath.Join(dir, ".claude", "commands", "local.md"),
-				"---\ndescription: Local.\n---\nLocal.\n",
-			)
-			bench, home := LoadBench(dir, root), t.TempDir()
-			// Build directly: the check row must fail independently of EnsureMirror's stub.
-			if engine == pfmengine.Codex {
-				result, err := codexgen.Build(codexgen.Options{Root: dir, Home: home})
-				if err != nil || !result.OK {
-					t.Fatalf("build=%#v err=%v", result, err)
-				}
-			} else {
-				result, err := opencodegen.Compile(
-					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeBuild},
-				)
-				if err != nil || !result.OK {
-					t.Fatalf("build=%#v err=%v", result, err)
-				}
-			}
-			if check, err := CheckMirror(
-				bench,
-				engine,
-				home,
-			); len(check.Rebuildable) != 0 || len(check.Failing) != 0 ||
-				err != nil {
-				t.Errorf("fresh=%#v err=%v", check, err)
-			}
-			writeBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Edited scribe.\n")
-			writeBenchFile(
-				t,
-				filepath.Join(dir, ".claude", "commands", "local.md"),
-				"---\ndescription: Local.\n---\nEdited.\n",
-			)
-			var problems []string
-			if engine == pfmengine.Codex {
-				result, err := codexgen.Check(codexgen.Options{Root: dir, Home: home})
-				if err != nil {
-					t.Fatal(err)
-				}
-				problems = result.Problems
-			} else {
-				result, err := opencodegen.Compile(
-					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeCheck},
-				)
-				if err != nil {
-					t.Fatal(err)
-				}
-				problems = result.Problems
-			}
-			if check, err := CheckMirror(
-				bench,
-				engine,
-				home,
-			); !reflect.DeepEqual(check.Rebuildable, problems) || len(check.Failing) != 0 ||
-				err != nil {
-				t.Errorf("stale=%#v err=%v, want %q", check, err, problems)
-			}
-			config := "codex-build.json"
-			if engine == pfmengine.OpenCode {
-				config = "opencode-build.json"
-			}
-			writeBenchFile(t, filepath.Join(dir, ".claude", config), "{")
-			check, err := CheckMirror(bench, engine, home)
-			if engine == pfmengine.Codex {
-				_, want := codexgen.Check(codexgen.Options{Root: dir, Home: home})
-				if len(check.Rebuildable) != 0 || len(check.Failing) != 0 || err == nil || err.Error() != want.Error() {
-					t.Errorf("broken=%#v err=%v, want %v", check, err, want)
-				}
-			} else if len(check.Failing) == 0 || len(check.Rebuildable) != 0 || err != nil {
-				t.Errorf("OpenCode config problem is returned in Result: check=%#v err=%v", check, err)
+			testjail.FakeEngineSync(t, testCase.reply, testCase.code)
+			prefix := "build the " + pfmengine.MustLookup(
+				testCase.engine,
+			).LongName + " mirror of workbench " + dir + ": "
+			err := EnsureMirror(bench, testCase.engine, home)
+			if err == nil || !strings.HasPrefix(err.Error(), prefix) || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("EnsureMirror = %v, want %q then %q", err, prefix, testCase.want)
 			}
 		})
 	}
 }
 
 func TestCheckMirrorProblemSplit(t *testing.T) {
-	for _, scenario := range []string{"Codex orphan", "OpenCode mixed", "OpenCode config"} {
-		t.Run(scenario, func(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		engine  pfmengine.ID
+		reply   string
+		code    int
+		want    MirrorCheck
+		wantErr string
+	}{
+		{name: "fresh", engine: pfmengine.Codex, reply: cleanMirrorReply},
+		{
+			name: "a rebuildable multiset beside a failing line", engine: pfmengine.OpenCode, code: 1,
+			reply: `{"ok":false,"problems":["STALE a","CONFLICT b","STALE a"],"rebuildable":["STALE a"],"warnings":[],` +
+				`"error":""}`,
+			want: MirrorCheck{Rebuildable: []string{"STALE a"}, Failing: []string{"CONFLICT b", "STALE a"}},
+		},
+		{
+			name: "every problem rebuildable", engine: pfmengine.Codex, code: 1,
+			reply: `{"ok":false,"problems":["ORPHAN o"],"rebuildable":["ORPHAN o"],"warnings":[],"error":""}`,
+			want:  MirrorCheck{Rebuildable: []string{"ORPHAN o"}},
+		},
+		{name: "a check that could not run", engine: pfmengine.Codex, code: 2, wantErr: "exit 2"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
 			root, dir := benchFixture(t)
-			writeBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Scribe.\n")
 			bench, home := LoadBench(dir, root), t.TempDir()
-			engine := pfmengine.OpenCode
-			want := MirrorCheck{}
-			switch scenario {
-			case "Codex orphan":
-				engine = pfmengine.Codex
-				source := filepath.Join(dir, ".claude", "agents", "old.md")
-				writeBenchFile(t, source, "---\nname: old\ndescription: Old.\n---\nOld.\n")
-				result, err := codexgen.Build(codexgen.Options{Root: dir, Home: home})
-				if err != nil || !result.OK {
-					t.Fatalf("build=%#v err=%v", result, err)
+			record := testjail.FakeEngineSync(t, testCase.reply, testCase.code)
+			got, err := CheckMirror(bench, testCase.engine, home)
+			if testCase.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), testCase.wantErr) {
+					t.Fatalf("CheckMirror error = %v, want %q", err, testCase.wantErr)
 				}
-				if err := os.Remove(source); err != nil {
-					t.Fatal(err)
-				}
-				want.Rebuildable = []string{"ORPHAN " + filepath.Join(dir, ".codex", "agents", "old.toml")}
-			case "OpenCode mixed":
-				source := filepath.Join(dir, ".claude", "commands", "local.md")
-				writeBenchFile(t, source, "---\ndescription: Local.\n---\nLocal.\n")
-				result, err := opencodegen.Compile(
-					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeBuild},
-				)
-				if err != nil || !result.OK {
-					t.Fatalf("build=%#v err=%v", result, err)
-				}
-				writeBenchFile(t, source, "---\ndescription: Local.\n---\nEdited.\n")
-				writeBenchFile(
-					t,
-					filepath.Join(dir, ".claude", "commands", "hand.md"),
-					"---\ndescription: Hand.\n---\nHand.\n",
-				)
-				writeBenchFile(t, filepath.Join(dir, ".opencode", "command", "hand.md"), "hand\n")
-				want.Rebuildable = []string{"STALE " + filepath.Join(dir, ".opencode", "command", "local.md")}
-				want.Failing = []string{
-					"CONFLICT " + filepath.Join(
-						dir,
-						".opencode",
-						"command",
-						"hand.md",
-					) + " — exists without a generated marker; not touching it",
-				}
-			case "OpenCode config":
-				writeBenchFile(t, filepath.Join(dir, ".claude", "opencode-build.json"), "{")
-				result, err := opencodegen.Compile(
-					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeCheck},
-				)
-				if err != nil || len(result.Problems) == 0 {
-					t.Fatalf("config=%#v err=%v", result, err)
-				}
-				want.Failing = result.Problems
+				return
 			}
-			got, err := CheckMirror(bench, engine, home)
-			if err != nil || !reflect.DeepEqual(got, want) {
-				t.Fatalf("check=%#v err=%v, want %#v", got, err, want)
+			if err != nil || !reflect.DeepEqual(got, testCase.want) {
+				t.Fatalf("CheckMirror = %#v, %v; want %#v", got, err, testCase.want)
+			}
+			engine := map[pfmengine.ID]string{pfmengine.Codex: "codex", pfmengine.OpenCode: "opencode"}[testCase.engine]
+			if got, want := readArgv(t, record), engine+" check "+dir+" --home "+home+" --json"; got != want {
+				t.Fatalf("engine-sync argv = %q, want %q", got, want)
 			}
 		})
 	}

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 )
 
 func promptRoot(t *testing.T) string {
@@ -26,7 +26,7 @@ func TestComposedPromptsMatchSources(t *testing.T) {
 			var err error
 			if engine == "codex" {
 				var prompt string
-				prompt, err = codexgen.FleetPrompt()
+				prompt, err = codexprompt.FleetPrompt()
 				want = []byte(prompt)
 			} else {
 				want, err = harnessprompts.Composed(engine)

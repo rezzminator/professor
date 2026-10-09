@@ -26,9 +26,6 @@ internal/action/types.go
 internal/archive/manifest.go
 internal/chat/inject_engine.go
 internal/claudelaunch/doc.go
-internal/codexgen/compiler.go
-internal/codexgen/toml.go
-internal/codexgen/transform.go
 internal/compose/doc.go
 internal/compose/order.go
 internal/compose/types.go

@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -71,6 +72,7 @@ func TestChatNewWorkbench(t *testing.T) {
 			extra := []string{}
 			wantEffort, wantChannel := "xhigh", filepath.Join(dir, ".professor", "scribe.md")
 			wantCode, wantError := 0, ""
+			mirrorRecord := ""
 			switch name {
 			case "next number":
 				t.Setenv(spawn.TestFreshSocketEnv, "cc-first-workbench")
@@ -190,12 +192,12 @@ func TestChatNewWorkbench(t *testing.T) {
 			case "Codex", "mirror failure":
 				engine, socket, dir, wantName = "cx", "cx-workbench", duo, "DUO:1"
 				t.Setenv("CX_STUB_ARGV", filepath.Join(jail.root, "cx-argv"))
+				reply, code := testjail.CleanMirrorReply, 0
 				if name == "mirror failure" {
-					if err := os.WriteFile(filepath.Join(duo, ".mcp.json"), []byte("{"), 0o600); err != nil {
-						t.Fatal(err)
-					}
+					reply, code = testjail.FailedMirrorReply, 1
 					wantCode, wantError = 2, "pfm chat new: build the codex mirror of workbench "+duo+":"
 				}
+				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
 			case "role":
 				extra = []string{"--agent-role", "r"}
 			}
@@ -240,8 +242,8 @@ func TestChatNewWorkbench(t *testing.T) {
 				if !strings.Contains(argv, "developer_instructions=") || !strings.Contains(argv, "You are duo.") {
 					t.Fatalf("Codex argv = %q", argv)
 				}
-				if _, err := os.Stat(filepath.Join(duo, "AGENTS.md")); err != nil {
-					t.Fatalf("mirror: %v", err)
+				if !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
+					t.Fatalf("the launch built no codex mirror of %s", duo)
 				}
 			} else {
 				if name == "role" {

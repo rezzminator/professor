@@ -7,7 +7,7 @@ github.com/rezzminator/professor/pfm/e2e	TestClaudePluginInstallFixture	helper	r
 github.com/rezzminator/professor/pfm/e2e	TestClaudeHarnessCaptureFixture	helper	re-exec fixture: runs only as the jailed claude -p stub of its parent test (loopback sink only)
 github.com/rezzminator/professor/pfm/e2e	TestCodexHookAPIFixture	helper	re-exec fixture: runs only as the jailed codex app-server stub of its parent test
 github.com/rezzminator/professor/pfm/internal/agentrole	TestUnreadableDirectoryIsAnError	root-noop	the fence runs as root, where permission bits deny nothing
-github.com/rezzminator/professor/pfm/internal/codexgen	TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/globallink	TestClassifyUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/compose	TestCodexLineageStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/compose	TestComposeStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/deps	TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence	platform	darwin-only gate

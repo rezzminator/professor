@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -107,7 +107,7 @@ func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	fleetPrompt, err := codexgen.FleetPrompt()
+	fleetPrompt, err := codexprompt.FleetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestEmptyConstitutionIsAnError(t *testing.T) {
 
 // Test 9 — no cross-engine fallback. A role that exists ONLY as
 // .claude/agents/<role>.md, asked for on a cx seat, must error and name the
-// compile fix (pfm codex build <repo>) — never silently return the .md body.
+// compile fix (engine-sync codex build <repo>) — never silently return the .md body.
 func TestNoCrossEngineFallback(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -379,8 +379,8 @@ func TestNoCrossEngineFallback(t *testing.T) {
 		t.Fatal("the .claude source body leaked into a cx resolution")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "pfm codex build "+repo) {
-		t.Fatalf("error = %q, want it to name the compile fix %q", msg, "pfm codex build "+repo)
+	if !strings.Contains(msg, "engine-sync codex build "+repo) {
+		t.Fatalf("error = %q, want it to name the compile fix %q", msg, "engine-sync codex build "+repo)
 	}
 	if !strings.Contains(msg, "reviewer") {
 		t.Fatalf("error = %q, want it to name the role", msg)

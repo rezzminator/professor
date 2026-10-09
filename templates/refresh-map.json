@@ -58,6 +58,9 @@
     "global/commands/h/gh.md": {
       "curated": true
     },
+    "global/commands/housekeeping.md": {
+      "curated": true
+    },
     "global/commands/pfm.md": {
       "curated": true
     },

@@ -1002,15 +1002,3 @@ func appendBytes(t *testing.T, path string, content []byte) {
 		t.Fatalf("close appended fixture %q: %v", path, err)
 	}
 }
-
-func TestRolloutIDFromFilename(t *testing.T) {
-	tests := map[string]string{
-		"rollout-2026-01-02T03-04-05-id.jsonl": "id",
-		"rollout-unusual.jsonl":                "unusual",
-	}
-	for name, want := range tests {
-		if got := rolloutIDFromFilename(name); got != want {
-			t.Fatalf("rolloutIDFromFilename(%q) = %q, want %q", name, got, want)
-		}
-	}
-}

@@ -1,0 +1,24 @@
+{
+ "test": "pricing: an Opus 5.5 response writing both TTLs bills each column at its own rate, once per message.id",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-opus55-eVBE4g",
+  "--out",
+  "{TMP}/price-dmtr3objzll.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-dmtr3objzll.json",
+  "price-opus55-eVBE4g"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-dmtr3objzll.json"
+ }
+}

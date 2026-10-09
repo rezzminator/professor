@@ -9,6 +9,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // metaMaxLine bounds memory while leaving room for large tool and prompt
@@ -61,44 +62,36 @@ func (meta Meta) ContextPercent() float64 {
 	return percent
 }
 
-type usageRecord struct {
-	InputTokens         int64 `json:"input_tokens"`
-	OutputTokens        int64 `json:"output_tokens"`
-	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
-	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
-}
-
-func (usage usageRecord) contextTokens() int64 {
-	return usage.InputTokens + usage.CacheReadTokens + usage.CacheCreationTokens
+// contextOf is the context a Claude usage block reports: its prompt tokens.
+// A context is one request's, never a sum, so a response that carries its
+// counts only in iterations reports its last iteration, the request that ran
+// last.
+func contextOf(usage pricing.UsageBlock) int64 {
+	if n := len(usage.Iterations); usage.Input+usage.CacheRead+usage.CacheCreation == 0 && n > 0 {
+		usage = usage.Iterations[n-1]
+	}
+	return usage.Input + usage.CacheRead + usage.CacheCreation
 }
 
 type metaRecord struct {
-	Type             string      `json:"type"`
-	Subtype          string      `json:"subtype"`
-	IsMeta           bool        `json:"isMeta"`
-	IsSidechain      bool        `json:"isSidechain"`
-	IsCompactSummary bool        `json:"isCompactSummary"`
-	Usage            usageRecord `json:"usage"`
+	Type             string             `json:"type"`
+	Subtype          string             `json:"subtype"`
+	IsMeta           bool               `json:"isMeta"`
+	IsSidechain      bool               `json:"isSidechain"`
+	IsCompactSummary bool               `json:"isCompactSummary"`
+	Usage            pricing.UsageBlock `json:"usage"`
 	Message          struct {
-		Model   string          `json:"model"`
-		Content json.RawMessage `json:"content"`
-		Usage   usageRecord     `json:"usage"`
+		Model   string             `json:"model"`
+		Content json.RawMessage    `json:"content"`
+		Usage   pricing.UsageBlock `json:"usage"`
 	} `json:"message"`
 	CompactMetadata struct {
 		PostTokens int64 `json:"postTokens"`
 	} `json:"compactMetadata"`
 	Payload struct {
-		Type  string `json:"type"`
-		Model string `json:"model"`
-		Info  struct {
-			LastTokenUsage struct {
-				TotalTokens int64 `json:"total_tokens"`
-			} `json:"last_token_usage"`
-			TotalTokenUsage struct {
-				TotalTokens int64 `json:"total_tokens"`
-			} `json:"total_token_usage"`
-			ModelContextWindow int64 `json:"model_context_window"`
-		} `json:"info"`
+		Type  string          `json:"type"`
+		Model string          `json:"model"`
+		Info  *CodexTokenInfo `json:"info"`
 	} `json:"payload"`
 }
 
@@ -164,12 +157,16 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 			// total. The latter grows for the whole thread and can exceed the
 			// window many times over; it is only a compatibility fallback for
 			// older rollout records that predate last_token_usage.
-			if current := parsed.Payload.Info.LastTokenUsage.TotalTokens; current > 0 {
+			info := parsed.Payload.Info
+			if info == nil {
+				info = &CodexTokenInfo{}
+			}
+			if current := info.LastTokenUsage.Total(); current > 0 {
 				meta.ContextTokens = current
-			} else if total := parsed.Payload.Info.TotalTokenUsage.TotalTokens; total > 0 {
+			} else if total := info.TotalTokenUsage.Total(); total > 0 {
 				meta.ContextTokens = total
 			}
-			if window := parsed.Payload.Info.ModelContextWindow; window > 0 {
+			if window := info.ModelContextWindow; window > 0 {
 				meta.ContextWindow = window
 			}
 		}
@@ -200,12 +197,12 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 		meta.Model = parsed.Message.Model
 	}
 	usage := parsed.Usage
-	if usage.contextTokens() <= 0 {
+	if contextOf(usage) <= 0 {
 		usage = parsed.Message.Usage
 	}
 	// Claude's occupancy is what entered the model: direct input plus both
 	// cache classes. Output belongs to the response and is not in that gauge.
-	if used := usage.contextTokens(); used > 0 {
+	if used := contextOf(usage); used > 0 {
 		meta.ContextTokens = used
 		state.claudeUsageSeen = true
 		meta.CompactedAfterUsage = false

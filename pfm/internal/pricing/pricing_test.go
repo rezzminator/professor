@@ -9,8 +9,8 @@ import (
 
 func ptr(value float64) *float64 { return &value }
 
-// resolveCases is testdata/resolve-cases.json, the resolution cases the
-// /tokens mirror of Resolve reads too.
+// resolveCases is testdata/resolve-cases.json, the resolution cases Resolve
+// is held to.
 type resolveCases struct {
 	Keys  []string `json:"keys"`
 	Cases []struct {
@@ -252,6 +252,136 @@ func TestClaudeCost(t *testing.T) {
 			got, ok := tc.row.ClaudeCost(tc.usage)
 			if ok != tc.ok || (ok && (got < tc.want-1e-6 || got > tc.want+1e-6)) {
 				t.Fatalf("ClaudeCost = %v, %v; want %v, %v", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestUsageBlockBilled(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block string
+		want  ClaudeUsage
+		split bool
+	}{
+		{
+			"a write with no breakdown is the 5-minute default",
+			`{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":40}`,
+			ClaudeUsage{Input: 1, Output: 2, CacheRead: 3, Write5m: 40},
+			false,
+		},
+		{
+			"the breakdown splits; what it does not cover is 5-minute",
+			`{"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":60}}`,
+			ClaudeUsage{Write5m: 40, Write1h: 60},
+			true,
+		},
+		{
+			"an all-zero breakdown carries no split",
+			`{"cache_creation_input_tokens":7,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}}`,
+			ClaudeUsage{Write5m: 7},
+			false,
+		},
+		{
+			"an empty top level carries its counts in iterations",
+			`{"input_tokens":0,"iterations":[{"input_tokens":5,"output_tokens":7,"cache_creation_input_tokens":9},{"input_tokens":1,"cache_read_input_tokens":300}]}`,
+			ClaudeUsage{Input: 6, Output: 7, CacheRead: 300, Write5m: 9},
+			false,
+		},
+		{
+			"iterations sum before the TTL split",
+			`{"iterations":[{"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_1h_input_tokens":30}},{"cache_creation_input_tokens":50}]}`,
+			ClaudeUsage{Write5m: 30, Write1h: 30},
+			true,
+		},
+		{
+			"a nonzero top level ignores its iterations",
+			`{"output_tokens":4,"iterations":[{"input_tokens":99}]}`,
+			ClaudeUsage{Output: 4},
+			false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var block UsageBlock
+			if err := json.Unmarshal([]byte(tc.block), &block); err != nil {
+				t.Fatalf("decode %s: %v", tc.block, err)
+			}
+			got, split := block.Billed()
+			if got != tc.want || split != tc.split {
+				t.Fatalf("Billed() = %+v, %v; want %+v, %v", got, split, tc.want, tc.split)
+			}
+		})
+	}
+	var block UsageBlock
+	if err := json.Unmarshal(
+		[]byte(`{"output_tokens":9,"output_tokens_details":{"thinking_tokens":4}}`),
+		&block,
+	); err != nil {
+		t.Fatalf("decode thinking: %v", err)
+	}
+	if block.Thinking() != 4 || (UsageBlock{}).Thinking() != 0 {
+		t.Fatalf("Thinking() = %d, want 4 (and 0 without details)", block.Thinking())
+	}
+}
+
+func TestClaudeCostPartsPricesEachColumnAndSumsInOrder(t *testing.T) {
+	opus := Row{
+		Key: "claude-opus-5-5", Engine: EngineClaude,
+		Rates: Rates{In: ptr(4), Out: ptr(20), Hit: ptr(0.2), W5m: ptr(5), W1h: ptr(8)},
+	}
+	usage := ClaudeUsage{Input: 3, Output: 1700, CacheRead: 123457, Write5m: 911, Write1h: 77}
+	parts, ok := opus.ClaudeCostParts(usage)
+	// Each part is count × rate / 1e6 in float64 at run time, as the Node
+	// engine computed it; Go constants would fold exactly and differ in the last bit.
+	part := func(count int64, rate float64) float64 { return float64(count) * rate / 1e6 }
+	want := ClaudeParts{
+		Input:     part(3, 4),
+		Output:    part(1700, 20),
+		Write5m:   part(911, 5),
+		Write1h:   part(77, 8),
+		CacheRead: part(123457, 0.2),
+	}
+	if !ok || parts != want {
+		t.Fatalf("ClaudeCostParts = %+v, %v; want %+v", parts, ok, want)
+	}
+	total, ok := opus.ClaudeCost(usage)
+	if sum := want.Input + want.Output + want.Write5m + want.Write1h + want.CacheRead; !ok || total != sum {
+		t.Fatalf("ClaudeCost = %v, want the parts summed in order, %v", total, sum)
+	}
+}
+
+func TestCodexCost(t *testing.T) {
+	sol := Row{
+		Key: "gpt-5.6-sol", Engine: EngineCodex, Rates: Rates{In: ptr(4), Out: ptr(20), Cached: ptr(0.4)},
+		Long: &Long{Above: 272000, Rates: Rates{In: ptr(8), Out: ptr(30), Cached: ptr(0.8)}},
+	}
+	noCached := Row{Key: "gpt-x", Engine: EngineCodex, Rates: Rates{In: ptr(1), Out: ptr(2)}}
+	claude := Row{Key: "claude-x", Engine: EngineClaude, Rates: Rates{In: ptr(1), Out: ptr(2)}}
+	// count × (rate / 1e6) at run time, the Node engine's order.
+	perToken := func(count int64, rate float64) float64 { return float64(count) * (rate / 1e6) }
+	for _, tc := range []struct {
+		name    string
+		row     Row
+		usage   CodexUsage
+		context int64
+		want    float64
+		ok      bool
+	}{
+		{
+			"uncached, cached and output each at its rate", sol,
+			CodexUsage{Input: 77000, Cached: 33000, Output: 14000},
+			1000,
+			perToken(44000, 4) + perToken(33000, 0.4) + perToken(14000, 20), true,
+		},
+		{"the long tier above its threshold", sol, CodexUsage{Input: 1e6, Output: 1e6}, 272001, 8 + 30, true},
+		{"an unpublished rate on a zero count", noCached, CodexUsage{Input: 1e6, Output: 1e6}, 0, 3, true},
+		{"an unpublished rate used", noCached, CodexUsage{Input: 10, Cached: 5}, 0, 0, false},
+		{"a Claude row", claude, CodexUsage{Input: 1}, 0, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tc.row.CodexCost(tc.usage, tc.context)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("CodexCost = %v, %v; want %v, %v", got, ok, tc.want, tc.ok)
 			}
 		})
 	}

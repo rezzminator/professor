@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // claudeScanWidths are the tail sizes tried in turn. The picker's first refresh
@@ -127,7 +127,7 @@ func (reader *Reader) claudeFacts(row *compose.Row, nowNS int64) (Facts, error) 
 // ran, and an agent is working when its own transcript says its turn is open
 // and it wrote within agentFreshNS.
 func (reader *Reader) workingAgents(transcript string, nowNS int64) (int, error) {
-	dir := strings.TrimSuffix(transcript, filepath.Ext(transcript)) + string(filepath.Separator) + "subagents"
+	dir := claudetranscript.SubagentsDir(transcript)
 	names, err := reader.agentNames(dir)
 	if err != nil {
 		return 0, err

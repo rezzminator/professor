@@ -1,0 +1,24 @@
+{
+ "test": "pricing: a response with zero top-level counts is priced from usage.iterations, never dropped as synthetic",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-iters-M9GG3Z",
+  "--out",
+  "{TMP}/price-rh9sj5xu6z.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-iters-M9GG3Z",
+  "price-rh9sj5xu6z.json"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-rh9sj5xu6z.json"
+ }
+}

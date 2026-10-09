@@ -1,0 +1,18 @@
+{
+ "test": "--timeline: an unpriced model renders n/a in the header and every row, never $0",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t2.jsonl"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-YM0GuF"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "tl-home-YM0GuF"
+ ],
+ "outputs": {}
+}

@@ -1,0 +1,17 @@
+{
+ "test": "prices: a bad flag is refused before pfm is looked for",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "3x"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": ""
+ },
+ "exit": 2,
+ "signal": null,
+ "inputs": [
+  "no-such-pfm"
+ ],
+ "outputs": {}
+}

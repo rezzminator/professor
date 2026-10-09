@@ -1,0 +1,18 @@
+{
+ "test": "--timeline: the header's USD equals the default report's USD for the same file, and the rows sum to it",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-Ireo7m"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "tl-home-Ireo7m"
+ ],
+ "outputs": {}
+}

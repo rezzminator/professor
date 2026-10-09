@@ -464,4 +464,32 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "model-cost help names --all/--force/--check; model plus --all and --check plus --json exit 2; offline --check prints its summary; an unknown id exits 1 naming --all"
 fi
 
+# ─── O1.16 — tokens offline surface ────────────────────────────────────────
+
+beat O1.16-tokens
+spends none
+bad=""
+help_out="$(pfm tokens --help 2>&1)"; help_rc=$?
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--flight' <<<"$help_out" || ! grep -q -- '--timeline' <<<"$help_out"; then
+  bad="$bad pfm tokens --help lacks --codex, --flight or --timeline (exit $help_rc): $(one_line "$help_out");"
+fi
+since_out="$(pfm tokens --since 3x 2>&1)"; since_rc=$?
+if [ "$since_rc" -ne 2 ] || ! grep -qF -- '--since wants' <<<"$since_out"; then
+  bad="$bad pfm tokens --since 3x exited $since_rc, want 2 naming --since: $(one_line "$since_out");"
+fi
+tokens_root="$(mktemp -d)"
+root_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --root "$tokens_root/missing" 2>&1)"; root_rc=$?
+if [ "$root_rc" -ne 1 ] || ! grep -qF -- '--root' <<<"$root_out"; then
+  bad="$bad pfm tokens over an unreadable --root exited $root_rc, want 1 naming --root: $(one_line "$root_out");"
+fi
+empty_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --root "$tokens_root" 2>&1)"; empty_rc=$?
+if [ "$empty_rc" -ne 0 ] || ! grep -q '^TOKEN AUDIT · ' <<<"$empty_out"; then
+  bad="$bad pfm tokens over an empty root did not print its report (exit $empty_rc): $(one_line "$empty_out");"
+fi
+rm -rf "$tokens_root"
+# The report's numbers are proven by the golden replay of internal/tokens.
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "tokens help names --codex/--flight/--timeline; a bad --since exits 2; an unreadable --root exits 1; an empty root prints its report"
+fi
+
 lane_end

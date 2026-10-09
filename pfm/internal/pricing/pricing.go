@@ -82,6 +82,84 @@ type ClaudeUsage struct {
 	Input, Output, CacheRead, Write5m, Write1h int64
 }
 
+// UsageBlock is a Claude response's usage block as a transcript records it,
+// the one decoding every transcript reader shares.
+type UsageBlock struct {
+	Input         int64           `json:"input_tokens"`
+	Output        int64           `json:"output_tokens"`
+	CacheRead     int64           `json:"cache_read_input_tokens"`
+	CacheCreation int64           `json:"cache_creation_input_tokens"`
+	Breakdown     *CacheBreakdown `json:"cache_creation"`
+	Iterations    []UsageBlock    `json:"iterations"`
+	OutputDetails *struct {
+		Thinking int64 `json:"thinking_tokens"`
+	} `json:"output_tokens_details"`
+}
+
+// CacheBreakdown is a cache write split by TTL.
+type CacheBreakdown struct {
+	Write5m int64 `json:"ephemeral_5m_input_tokens"`
+	Write1h int64 `json:"ephemeral_1h_input_tokens"`
+}
+
+// Billed is what the response billed. A response can carry zeros in every
+// top-level count and its real counts only in Iterations (seen on
+// claude-opus-5-5, 2026-09): then the iterations' counts are summed; otherwise
+// the top level already equals their sum. A cache write splits by TTL, and the
+// part of it the breakdown does not cover (none, or a short one) is the
+// default 5-minute TTL. split reports a write that carried a TTL breakdown.
+func (u UsageBlock) Billed() (usage ClaudeUsage, split bool) {
+	folded := u
+	if u.Input+u.Output+u.CacheRead+u.CacheCreation == 0 && len(u.Iterations) > 0 {
+		folded = UsageBlock{Breakdown: &CacheBreakdown{}}
+		for _, iteration := range u.Iterations {
+			folded.Input += iteration.Input
+			folded.Output += iteration.Output
+			folded.CacheRead += iteration.CacheRead
+			folded.CacheCreation += iteration.CacheCreation
+			if iteration.Breakdown != nil {
+				folded.Breakdown.Write5m += iteration.Breakdown.Write5m
+				folded.Breakdown.Write1h += iteration.Breakdown.Write1h
+			}
+		}
+	}
+	var write5m, write1h int64
+	if folded.Breakdown != nil {
+		write5m, write1h = folded.Breakdown.Write5m, folded.Breakdown.Write1h
+	}
+	return ClaudeUsage{
+		Input:     folded.Input,
+		Output:    folded.Output,
+		CacheRead: folded.CacheRead,
+		Write5m:   write5m + max(folded.CacheCreation-write5m-write1h, 0),
+		Write1h:   write1h,
+	}, write5m+write1h > 0
+}
+
+// Thinking is the response's thinking tokens, a part of Output.
+func (u UsageBlock) Thinking() int64 {
+	if u.OutputDetails == nil {
+		return 0
+	}
+	return u.OutputDetails.Thinking
+}
+
+// ClaudeParts is one Claude response's USD by billing column.
+type ClaudeParts struct {
+	Input, Output, Write5m, Write1h, CacheRead float64
+}
+
+// Total is the response's USD: the columns summed in one fixed order.
+func (p ClaudeParts) Total() float64 {
+	return p.Input + p.Output + p.Write5m + p.Write1h + p.CacheRead
+}
+
+// CodexUsage is a Codex thread's billed counts: Input includes Cached, Output
+// includes reasoning, and Codex bills no cache write.
+type CodexUsage struct {
+	Input, Cached, Output int64
+}
+
 var (
 	bedrockPrefix  = regexp.MustCompile(`^(?:[a-z0-9-]+\.)?anthropic\.`)
 	bedrockVersion = regexp.MustCompile(`-v\d+(?::\d+)?$`)
@@ -399,28 +477,63 @@ func (r Row) RatesAt(context int64) Rates {
 // (input + cache read + cache write tokens). ok is false when the row is not
 // a Claude row or a nonzero count has no published rate.
 func (r Row) ClaudeCost(usage ClaudeUsage) (float64, bool) {
+	parts, ok := r.ClaudeCostParts(usage)
+	return parts.Total(), ok
+}
+
+// ClaudeCostParts is ClaudeCost by billing column, each count times its rate
+// per million; an unpublished rate on a zero count costs nothing.
+func (r Row) ClaudeCostParts(usage ClaudeUsage) (ClaudeParts, bool) {
 	if r.Engine != EngineClaude {
-		return 0, false
+		return ClaudeParts{}, false
 	}
 	rates := r.RatesAt(usage.Input + usage.CacheRead + usage.Write5m + usage.Write1h)
-	total := 0.0
+	var parts ClaudeParts
 	for _, part := range []struct {
 		count int64
 		rate  *float64
+		usd   *float64
 	}{
-		{usage.Input, rates.In},
-		{usage.Output, rates.Out},
-		{usage.CacheRead, rates.Hit},
-		{usage.Write5m, rates.W5m},
-		{usage.Write1h, rates.W1h},
+		{usage.Input, rates.In, &parts.Input},
+		{usage.Output, rates.Out, &parts.Output},
+		{usage.Write5m, rates.W5m, &parts.Write5m},
+		{usage.Write1h, rates.W1h, &parts.Write1h},
+		{usage.CacheRead, rates.Hit, &parts.CacheRead},
 	} {
 		if part.count == 0 {
 			continue
 		}
 		if part.rate == nil {
+			return ClaudeParts{}, false
+		}
+		*part.usd = float64(part.count) * *part.rate / 1e6
+	}
+	return parts, true
+}
+
+// CodexCost prices a Codex thread's usage in USD at the tier context selects:
+// uncached input, cached input and output, each at its rate per million. ok
+// is false when the row is not a Codex row or a nonzero count has no
+// published rate.
+func (r Row) CodexCost(usage CodexUsage, context int64) (float64, bool) {
+	if r.Engine != EngineCodex {
+		return 0, false
+	}
+	rates := r.RatesAt(context)
+	uncached := max(usage.Input-usage.Cached, 0)
+	perMillion := [3]float64{}
+	for i, part := range []struct {
+		count int64
+		rate  *float64
+	}{{uncached, rates.In}, {usage.Cached, rates.Cached}, {usage.Output, rates.Out}} {
+		if part.rate != nil {
+			perMillion[i] = *part.rate / 1e6
+		} else if part.count > 0 {
 			return 0, false
 		}
-		total += float64(part.count) * *part.rate
 	}
-	return total / 1e6, true
+	// Each product rounds before the sum (float64): a fused multiply-add
+	// would move the last bits by architecture.
+	return float64(float64(uncached)*perMillion[0]) + float64(float64(usage.Cached)*perMillion[1]) +
+		float64(float64(usage.Output)*perMillion[2]), true
 }

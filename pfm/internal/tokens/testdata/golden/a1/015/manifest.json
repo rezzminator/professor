@@ -1,0 +1,23 @@
+{
+ "test": "A1 timeline multi",
+ "now": "2026-09-21T06:00:00.000Z",
+ "args": [
+  "--timeline",
+  "{FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl",
+  "--timeline",
+  "{FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t3.jsonl",
+  "--timeline",
+  "{FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t4.jsonl",
+  "--timeline",
+  "{TMP}/missing.jsonl"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 1,
+ "signal": null,
+ "inputs": [
+  "missing.jsonl"
+ ],
+ "outputs": {}
+}

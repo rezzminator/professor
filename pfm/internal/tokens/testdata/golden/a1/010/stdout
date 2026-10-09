@@ -1,0 +1,7 @@
+TIMELINE executor · sonnet-5 · effort high · 4 calls · wall 30s · peak ctx 17.2K · out 910 tok · tool errors 1 · results >20KB 1 · $0.0577 · {FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl
+  #1 10:00:03 after - · ctx 8.0K · out 120 · $0.0212 · Read: /tmp/tl-proj/src/alpha.go 2000ch 1.0s
+  #2 10:00:10 after 6.0s · ctx 9.5K · out 300 · $0.0084 · Bash: go test ./internal/alpha/ -run TestAlpha 19ch ERR 8.0s | Grep: func Alpha 27ch 8.0s
+  #3 10:00:21 after 3.0s · ctx 10.2K · out 90 · $0.0046 · Read: /tmp/tl-proj/src/generated_table.go 25000ch 1.0s
+  #4 10:00:30 after 8.0s · ctx 17.2K · out 400 · $0.0235 · (no tools)
+pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: none

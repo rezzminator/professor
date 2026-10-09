@@ -1,0 +1,23 @@
+{
+ "test": "prices: an active override leads every data-gaps line, naming its file and row count",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--codex",
+  "--since",
+  "99999d",
+  "--codex-root",
+  "{FIX}/codex"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{TMP}/override-table.json",
+  "HOME": "{TMP}/override-qe7MSM"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "override-qe7MSM",
+  "override-table.json",
+  "pfm-KaeWoJ"
+ ],
+ "outputs": {}
+}

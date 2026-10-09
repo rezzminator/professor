@@ -152,7 +152,7 @@ Toggled by `harvester.enabled`; the only family the external `/mcp` serves. Sett
 
 ## pfm model-cost
 
-**CLI:** `pfm model-cost gpt-6.1-sol`, `pfm model-cost --json --all` or `pfm model-cost --check` · **Consumers:** `token-audit.mjs`, the status line, `pfm doctor`, `pfm install`
+**CLI:** `pfm model-cost gpt-6.1-sol`, `pfm model-cost --json --all` or `pfm model-cost --check` · **Consumers:** `pfm tokens`, the status line, `pfm doctor`, `pfm install`
 
 One price source: `pfm/internal/pricing/prices.json` in the Professor clone — tracked, embedded into pfm, and the refresh target. Each row carries a model key, its engine and USD per million tokens: `in` and `out`, plus Claude `hit`/`w5m`/`w1h` or OpenAI `cached` where the publisher lists them (an absent rate is unpublished, never 0), and an optional `long` tier that applies when one call's context is above its `above`. `pfm.prices.json` beside `pfm.config.json` overrides rows by key.
 
@@ -161,6 +161,12 @@ Every call refreshes first, at most once a day: the table is current while its `
 The text output is one `prices:` summary line (rows, fetch time, where the table came from, the refresh status, the override) and a table; `--json` prints the document `token-audit.mjs` reads, `--check` the summary line only, exit 1 when the table cannot load. An id resolves after normalization (case, provider prefix, Bedrock and Vertex suffixes, Claude dots) to its exact key, else to its key without a trailing snapshot date; any other id exits 1 naming `pfm model-cost --all`.
 
 Coverage is the direct API Standard list prices on these pages. Negotiated rates, account-specific discounts and other service modes are outside the table; `pfm.prices.json` carries a negotiated rate. `$tokens` estimates recorded usage at these current rates and reports missing prices as unavailable; it does not claim historical billing amounts.
+
+## pfm tokens
+
+**CLI:** `pfm tokens [--since 24h|3d] [--root DIR]… [--project SUBSTR] [--family SUBSTR] [--session SID] [--out FILE] [--view FILE] [--briefs FILE] [--prices FILE]`, `pfm tokens --codex`, `pfm tokens --flight DIR [--metrics-out FILE]`, `pfm tokens --timeline FILE…` · **Consumers:** `/tokens`, `/flights:audit`, `agent-optimizer`
+
+The read-only audit of agent transcripts: where did the tokens go. It replays Claude Code transcripts (pfm's resolved Claude roots, or `--root`) and Codex rollouts (`sessions/` and `archived_sessions/` of the first Codex root, or `--codex-root`), prices every call from the table `pfm model-cost` serves (or a saved `pfm model-cost --json --all` document or `prices.json` via `--prices`), and traces each dollar to the context that caused it. A text report on stdout; `--out`, `--view` and `--briefs` write JSON; `--flight` writes `metrics.md` from the flight's `agents.tsv` (else `run.md`). An unpriced model renders `n/a`, never $0. Exit 2 on a usage error, 1 when the table cannot load or anything could not be read.
 
 ## Shared engine `internal/ask`
 

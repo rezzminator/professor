@@ -1,0 +1,2 @@
+{"type":"custom-title","customTitle":"clamp lo chat","cwd":"/tmp/clamp-proj"}
+{"type":"assistant","timestamp":"2026-09-20T09:00:00.000Z","cwd":"/tmp/clamp-proj","requestId":"req-999-1","effort":"medium","message":{"id":"msg-999-1","model":"claude-sonnet-5","content":[{"type":"text","text":"step"}],"usage":{"input_tokens":10,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":1000,"cache_creation":{"ephemeral_5m_input_tokens":999,"ephemeral_1h_input_tokens":1}}}}

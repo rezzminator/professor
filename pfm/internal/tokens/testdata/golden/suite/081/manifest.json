@@ -1,0 +1,21 @@
+{
+ "test": "--timeline: ownership across project directories matches aggregate within --root",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{TMP}/price-ownership-domain-dQ3BPO/-tmp-z-other-proj/sess-b.jsonl",
+  "--root",
+  "{TMP}/price-ownership-domain-dQ3BPO"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-GSUmdW"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-ownership-domain-dQ3BPO",
+  "tl-home-GSUmdW"
+ ],
+ "outputs": {}
+}

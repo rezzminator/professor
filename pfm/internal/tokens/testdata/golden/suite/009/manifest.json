@@ -1,0 +1,29 @@
+{
+ "test": "--flight: an executor past 150 calls reads OVER 150, a lander at 172 reads ok/200, and the totals count one over",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--flight",
+  "{TMP}/overcap-flight-Dl2UhQ",
+  "--root",
+  "{TMP}/overcap-nPGBic/projects",
+  "--codex-root",
+  "{FIX}/codex",
+  "--metrics-out",
+  "{TMP}/overcap-flight-Dl2UhQ/metrics.md",
+  "--out",
+  "{TMP}/overcap-flight-Dl2UhQ/report.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "overcap-flight-Dl2UhQ",
+  "overcap-nPGBic"
+ ],
+ "outputs": {
+  "--out": "{TMP}/overcap-flight-Dl2UhQ/report.json",
+  "--metrics-out": "{TMP}/overcap-flight-Dl2UhQ/metrics.md"
+ }
+}

@@ -1,0 +1,19 @@
+{
+ "test": "--timeline: combined with --flight, --codex, --project or --since is refused",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl",
+  "--codex"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-32H7rt"
+ },
+ "exit": 2,
+ "signal": null,
+ "inputs": [
+  "tl-home-32H7rt"
+ ],
+ "outputs": {}
+}

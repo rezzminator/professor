@@ -1,0 +1,15 @@
+{
+ "test": "A1 since refused",
+ "now": "2026-09-21T06:00:00.000Z",
+ "args": [
+  "--since",
+  "3x"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 2,
+ "signal": null,
+ "inputs": [],
+ "outputs": {}
+}

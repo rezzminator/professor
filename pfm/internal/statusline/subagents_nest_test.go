@@ -185,7 +185,7 @@ func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
 	}
 	got, warned := renderOneSubagent(t, session, parentTask)
 	if !strings.HasPrefix(got, "?/?│▱") ||
-		!strings.Contains(warned, "row p: nested agents: read sub-agent meta") {
+		!strings.Contains(warned, "row p: nested agents: parse sub-agent meta") {
 		t.Fatalf("content = %q warn = %q, want ?/? and the cause", got, warned)
 	}
 }

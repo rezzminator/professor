@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
@@ -29,6 +30,19 @@ type Options struct {
 	Force, Offline   bool
 	Clock            clock.Clock
 	Fetch            func(context.Context) ([]Catalog, error)
+}
+
+// MachineOptions are the options a command refreshes the machine's table
+// with: the runtime's home and config, the offline switch, the real clock and
+// the HTTP fetcher. pfm model-cost and pfm tokens both load through them.
+func MachineOptions(runtime config.Runtime) Options {
+	return Options{
+		Home:       runtime.Paths.Home,
+		ConfigPath: runtime.Config.Path,
+		Offline:    paths.PricesOffline(),
+		Clock:      clock.Real,
+		Fetch:      NewFetcher(nil, nil).Fetch,
+	}
 }
 
 // Result is what one refresh did. Err is a failed fetch or derivation;
@@ -81,6 +95,34 @@ func Refresh(ctx context.Context, options Options) (pricing.Prices, Result, erro
 		return pricing.Prices{}, result, err
 	}
 	return prices, result, nil
+}
+
+// PriceDocument is the --json document of a served table and the refresh that
+// served it; model names a single-model lookup ("" for every row).
+func PriceDocument(prices pricing.Prices, result Result, model string, rows []pricing.Row) pricing.Document {
+	doc := pricing.Document{
+		Version: prices.Version, FetchedAt: prices.FetchedAt, Sources: prices.Sources, ServedFrom: prices.From,
+		File: prices.File, FileError: errorText(prices.FileError), Override: prices.Override, Model: model, Rows: rows,
+		Refresh: pricing.RefreshReport{
+			Status: result.Status, Error: errorText(result.Err), StampError: errorText(result.StampErr),
+		},
+	}
+	if !result.CheckedAt.IsZero() {
+		doc.CheckedAt = result.CheckedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if result.Status == StatusRefreshed {
+		changed, persisted := result.Changed, result.Persisted
+		doc.Refresh.Changed, doc.Refresh.Persisted = &changed, &persisted
+		doc.Refresh.PersistError = errorText(result.PersistErr)
+	}
+	return doc
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func fetchedWithin(fetchedAt string, now time.Time) bool {

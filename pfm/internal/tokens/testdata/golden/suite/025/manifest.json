@@ -1,0 +1,17 @@
+{
+ "test": "an unreadable root is a failure to look, not an empty result",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--root",
+  "{FIX}/no-such-root",
+  "--since",
+  "24h"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 2,
+ "signal": null,
+ "inputs": [],
+ "outputs": {}
+}

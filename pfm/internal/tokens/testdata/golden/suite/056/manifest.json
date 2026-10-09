@@ -1,0 +1,19 @@
+{
+ "test": "--timeline: a fork or resumed file prices only its own call, like the default report",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{TMP}/price-fork-9HmLpQ/-tmp-price-proj/sess-a.jsonl"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-CRsUov"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-fork-9HmLpQ",
+  "tl-home-CRsUov"
+ ],
+ "outputs": {}
+}

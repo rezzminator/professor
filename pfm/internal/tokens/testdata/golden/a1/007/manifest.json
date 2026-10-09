@@ -1,0 +1,18 @@
+{
+ "test": "A1 codex",
+ "now": "2026-09-21T06:00:00.000Z",
+ "args": [
+  "--codex",
+  "--since",
+  "99999d",
+  "--codex-root",
+  "{FIX}/codex"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [],
+ "outputs": {}
+}

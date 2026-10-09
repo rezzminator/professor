@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-09-20T09:00:00.000Z","cwd":"/tmp/price-proj","requestId":"req-msg-h45","effort":"medium","uuid":"s-0-0","sessionId":"s","message":{"id":"msg-h45","model":"claude-haiku-4-5-20251001","content":[{"type":"text","text":"step"}],"usage":{"input_tokens":200,"output_tokens":300,"cache_read_input_tokens":0,"cache_creation_input_tokens":40000}}}
+{"type":"custom-title","customTitle":"price s","cwd":"/tmp/price-proj"}

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // agentNesting is what a row says about the agents below its task, at every
@@ -61,7 +63,7 @@ func scanAgentTree(sessionTranscript string) *agentTree {
 		tree.err = errors.New("payload names no session transcript")
 		return tree
 	}
-	tree.dir = filepath.Join(strings.TrimSuffix(sessionTranscript, ".jsonl"), "subagents")
+	tree.dir = transcript.SubagentsDir(sessionTranscript)
 	entries, err := os.ReadDir(tree.dir)
 	if err != nil {
 		tree.err = fmt.Errorf("list %s: %w", tree.dir, err)
@@ -70,26 +72,20 @@ func scanAgentTree(sessionTranscript string) *agentTree {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".meta.json") {
+		id, isMeta := transcript.SubagentMetaID(name)
+		if entry.IsDir() || !isMeta {
 			continue
 		}
-		id := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".meta.json")
 		tree.ids = append(tree.ids, id)
-		path := filepath.Join(tree.dir, name)
-		raw, err := os.ReadFile(path)
-		if err == nil {
-			var meta struct {
-				ParentAgentID string `json:"parentAgentId"`
-			}
-			if err = json.Unmarshal(raw, &meta); err == nil {
-				if parent := strings.TrimSpace(meta.ParentAgentID); parent != "" && parent != id {
-					tree.children[parent] = append(tree.children[parent], id)
-				}
-				continue
-			}
+		meta, err := transcript.ReadSubagentMeta(filepath.Join(tree.dir, name))
+		if err != nil {
+			tree.err = err
+			tree.warnings = append(tree.warnings, tree.err.Error())
+			continue
 		}
-		tree.err = fmt.Errorf("read sub-agent meta %s: %w", path, err)
-		tree.warnings = append(tree.warnings, tree.err.Error())
+		if parent := strings.TrimSpace(meta.ParentAgentID); parent != "" && parent != id {
+			tree.children[parent] = append(tree.children[parent], id)
+		}
 	}
 	return tree
 }
@@ -136,7 +132,7 @@ func (tree *agentTree) turn(id string) turnState {
 		return state
 	}
 	state := turnClosed
-	open, err := turnOpen(filepath.Join(tree.dir, "agent-"+id+".jsonl"))
+	open, err := turnOpen(transcript.SubagentTranscript(tree.dir, id))
 	switch {
 	case err != nil:
 		tree.warnings = append(tree.warnings, err.Error())

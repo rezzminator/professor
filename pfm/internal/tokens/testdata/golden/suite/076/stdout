@@ -1,0 +1,9 @@
+TOKEN AUDIT · codex · last 2399976h · {FIX}/codex · 1 threads of 1 rollouts
+pricing: saved table {TMP}/override-table.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: price override active: 8 rows from {TMP}/override-table.json
+
+STARTED          THREAD        MODEL        LABEL                           IN      CACHED        OUT   EST USD
+2026-09-20 09:05 cx-thread-1   5.6-sol      subagent (executor)         77,000      33,000     14,000     $0.47
+
+TOTAL 91,000 tok · uncached in 44,000 · cached in 33,000 · out 14,000 (incl. 7,000 reasoning) · $0.47
+1 thread(s) resumed or compacted mid-run; each segment's peak is summed — the final counter alone would undercount them.

@@ -1,0 +1,19 @@
+{
+ "test": "A1 project",
+ "now": "2026-09-21T06:00:00.000Z",
+ "args": [
+  "--since",
+  "48h",
+  "--root",
+  "{FIX}/claude/projects",
+  "--project",
+  "demo"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [],
+ "outputs": {}
+}

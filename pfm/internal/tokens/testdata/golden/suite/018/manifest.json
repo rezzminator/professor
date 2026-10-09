@@ -1,0 +1,23 @@
+{
+ "test": "default report: an unpriced run prints n/a in the run table, never $0.0000",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{FIX}/claude/projects",
+  "--out",
+  "{TMP}/default.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "default.json"
+ ],
+ "outputs": {
+  "--out": "{TMP}/default.json"
+ }
+}

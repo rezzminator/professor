@@ -1,0 +1,19 @@
+{
+ "test": "--family selects a family by agent type when no main chat title carries the name",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{FIX}/claude/projects",
+  "--family",
+  "lander"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [],
+ "outputs": {}
+}

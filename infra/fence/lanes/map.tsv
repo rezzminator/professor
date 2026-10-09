@@ -125,6 +125,7 @@ pfm name-sync	F	F.13-name-sync
 pfm opencode	A	A.13-opencode-layer
 pfm model-cost	O1	O1.15-model-cost
 pfm tokens	O1	O1.16-tokens
+pfm transcript	O1	O1.17-transcript
 pfm reap	O2	O2.01-reap
 pfm statusline	E1	E1.02-statusline-theme
 pfm statusline	E2	E2.02-statusline

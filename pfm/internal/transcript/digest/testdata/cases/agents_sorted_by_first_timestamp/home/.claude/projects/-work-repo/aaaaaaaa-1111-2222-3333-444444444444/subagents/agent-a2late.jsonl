@@ -1,0 +1,4 @@
+{"type": "user", "sessionId": "aaaaaaaa-1111-2222-3333-444444444444", "agentId": "a2late", "timestamp": "2026-09-29T20:00:30.000Z", "message": {"content": "go"}}
+{"type": "assistant", "sessionId": "aaaaaaaa-1111-2222-3333-444444444444", "agentId": "a2late", "timestamp": "2026-09-29T20:00:31.000Z", "message": {"content": [{"type": "tool_use", "id": "a2late0", "name": "Bash", "input": {"command": "ls"}}]}}
+{"type": "assistant", "sessionId": "aaaaaaaa-1111-2222-3333-444444444444", "agentId": "a2late", "timestamp": "2026-09-29T20:00:32.000Z", "message": {"content": [{"type": "tool_use", "id": "a2late1", "name": "Bash", "input": {"command": "ls"}}]}}
+{"type": "assistant", "sessionId": "aaaaaaaa-1111-2222-3333-444444444444", "agentId": "a2late", "timestamp": "2026-09-29T20:00:33.000Z", "message": {"content": [{"type": "tool_use", "id": "a2late2", "name": "Bash", "input": {"command": "ls"}}]}}

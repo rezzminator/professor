@@ -27,6 +27,8 @@ type goldenManifest struct {
 	Env     map[string]string `json:"env"`
 	Exit    int               `json:"exit"`
 	Outputs map[string]string `json:"outputs"`
+	// Dirs names the empty input directories, which git cannot carry under in/.
+	Dirs []string `json:"dirs"`
 }
 
 // nodeError is a Node fs error message; Go states the same error as
@@ -167,6 +169,11 @@ func openScenario(t *testing.T, dir string) scenario {
 	expand := strings.NewReplacer("{TMP}", scratch, "{FIX}", fixtures).Replace
 	mask := strings.NewReplacer(scratch, "{TMP}", fixtures, "{FIX}").Replace
 	materialize(t, filepath.Join(dir, "in"), scratch, expand)
+	for _, empty := range manifest.Dirs {
+		if err := os.MkdirAll(filepath.Join(scratch, empty), 0o755); err != nil {
+			t.Fatalf("create the empty input %s: %v", empty, err)
+		}
+	}
 	prices, ok := manifest.Env["TOKEN_AUDIT_PRICES"]
 	if !ok {
 		t.Fatalf("%s names no saved price table: the replay never fetches", manifest.Test)
@@ -190,7 +197,7 @@ func openScenario(t *testing.T, dir string) scenario {
 		for _, account := range accounts {
 			opts.ClaudeRoots = append(opts.ClaudeRoots, filepath.Join(home, ".cc", account.Name(), "projects"))
 		}
-		opts.CodexHome = filepath.Join(home, ".codex")
+		opts.CodexHomes = []string{filepath.Join(home, ".codex")}
 	}
 	return scenario{dir: dir, manifest: manifest, scratch: scratch, expand: expand, mask: mask, opts: opts}
 }

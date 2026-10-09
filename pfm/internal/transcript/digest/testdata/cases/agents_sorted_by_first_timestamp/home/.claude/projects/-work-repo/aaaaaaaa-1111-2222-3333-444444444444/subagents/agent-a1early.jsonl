@@ -1,0 +1,2 @@
+{"type": "user", "sessionId": "aaaaaaaa-1111-2222-3333-444444444444", "agentId": "a1early", "timestamp": "2026-09-29T20:00:10.000Z", "message": {"content": "go"}}
+{"type": "assistant", "sessionId": "aaaaaaaa-1111-2222-3333-444444444444", "agentId": "a1early", "timestamp": "2026-09-29T20:00:11.000Z", "message": {"content": [{"type": "tool_use", "id": "a1early0", "name": "Bash", "input": {"command": "ls"}}]}}

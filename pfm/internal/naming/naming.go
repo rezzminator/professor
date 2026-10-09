@@ -1,7 +1,6 @@
 package naming
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -157,42 +156,6 @@ func IsJunkPrompt(prompt string) bool {
 		prompt[1] <= 'z'
 }
 
-// FlattenPromptText extracts a user message's content. JSON strings become
-// text directly; arrays contribute only top-level blocks whose type is text.
-// Tabs and newlines are collapsed to one space, matching the transcript
-// metadata records consumed by the rest of pfm.
-func FlattenPromptText(content json.RawMessage) string {
-	var text string
-	if err := json.Unmarshal(content, &text); err == nil {
-		return squashTabsAndNewlines(text)
-	}
-
-	var rawBlocks []json.RawMessage
-	if err := json.Unmarshal(content, &rawBlocks); err != nil {
-		return ""
-	}
-
-	type textBlock struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	texts := make([]string, 0, len(rawBlocks))
-	for _, rawBlock := range rawBlocks {
-		var block textBlock
-		if err := json.Unmarshal(rawBlock, &block); err != nil {
-			continue
-		}
-		// "text" is the Claude transcript block; "input_text" is the Codex
-		// response_item user block — the only record current Codex writes a
-		// submitted prompt into.
-		if block.Type != "text" && block.Type != "input_text" {
-			continue
-		}
-		texts = append(texts, block.Text)
-	}
-	return squashTabsAndNewlines(strings.Join(texts, " "))
-}
-
 // CxName follows Codex thread lineage before falling back to the first user
 // message. It is the only naming function that clips its result.
 func CxName(
@@ -207,10 +170,10 @@ func CxName(
 			continue
 		}
 		if name := names[id]; name != "" {
-			return ClipRunes(squashTabsAndNewlines(name), 60)
+			return ClipRunes(SquashTabsAndNewlines(name), 60)
 		}
 	}
-	return ClipRunes(squashTabsAndNewlines(firstUserMessage), 60)
+	return ClipRunes(SquashTabsAndNewlines(firstUserMessage), 60)
 }
 
 // CodexRowName is the name one Codex conversation is listed under, given its
@@ -288,7 +251,9 @@ func ClipRunes(value string, limit int) string {
 	return value
 }
 
-func squashTabsAndNewlines(value string) string {
+// SquashTabsAndNewlines turns each run of tabs and newlines into one space,
+// the form a prompt or a name takes on one listed row.
+func SquashTabsAndNewlines(value string) string {
 	first := strings.IndexAny(value, "\t\n")
 	if first < 0 {
 		return value

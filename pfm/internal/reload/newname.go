@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/inject"
+	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // LeftBehindSuffix is appended to the abandoned session's custom title by a
@@ -24,52 +24,21 @@ import (
 // no by-name verb mistakes it for the live chat.
 const LeftBehindSuffix = " (before --new)"
 
-// titleRecord is the shape index/claude.go reads a Claude custom title from
-// (claudeRecord: type + customTitle, agentName as the fallback) and the
-// shape every real custom-title record carries — type, customTitle,
-// sessionId; nothing else — surveyed over a live store before this was
-// written. The writer and the reader agree field for field.
+// titleRecord is the custom-title record a reboot appends, the shape every
+// real one carries — type, customTitle, sessionId; nothing else — surveyed
+// over a live store before this was written; transcript.LineTitle reads it.
 type titleRecord struct {
 	Type        string `json:"type"`
 	CustomTitle string `json:"customTitle"`
-	AgentName   string `json:"agentName,omitempty"`
 	SessionID   string `json:"sessionId,omitempty"`
 }
 
-// TranscriptTitle is the custom title a Claude transcript wears — the LAST
-// custom-title (or agent-name) record wins, exactly as index/claude.go
-// resolves CustomTitle — so a `--new` reboot knows the name the session it
-// abandons would keep. "" means the transcript has no custom title: its row
-// is named from its prompts, and there is nothing to carry.
+// TranscriptTitle is the custom title a Claude transcript wears —
+// transcript.FileTitle, the index's rule — so a `--new` reboot knows the name
+// the session it abandons would keep. "" means the transcript has no custom
+// title: its row is named from its prompts, and there is nothing to carry.
 func TranscriptTitle(path string) (string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read transcript %q for its title: %w", path, err)
-	}
-	title := ""
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	scanner.Buffer(make([]byte, 64<<10), 32<<20)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if !bytes.Contains(line, []byte(`"custom-title"`)) && !bytes.Contains(line, []byte(`"agent-name"`)) {
-			continue
-		}
-		var record titleRecord
-		if err := json.Unmarshal(line, &record); err != nil {
-			continue
-		}
-		switch record.Type {
-		case "custom-title", "agent-name":
-			title = record.CustomTitle
-			if title == "" {
-				title = record.AgentName
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan transcript %q for its title: %w", path, err)
-	}
-	return title, nil
+	return claudetranscript.FileTitle(path)
 }
 
 // TranscriptBackupDir is where every guarded transcript append parks the

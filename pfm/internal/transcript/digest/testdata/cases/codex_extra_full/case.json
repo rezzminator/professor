@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "02b0fff8",
+  "--results",
+  "full"
+ ],
+ "dirs": []
+}

@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--out",
+  "{HOME}/d/digest.txt"
+ ],
+ "dirs": []
+}

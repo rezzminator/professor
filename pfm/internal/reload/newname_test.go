@@ -325,6 +325,13 @@ func TestTranscriptTitleReadsTheLastCustomTitleLikeTheIndexReader(t *testing.T) 
 			want: "qa seat",
 		},
 		{
+			name: "an empty or foreign-member title record names nothing",
+			path: write("foreign.jsonl", `{"type":"agent-name","agentName":"Agent"}`+"\n"+
+				`{"type":"custom-title","customTitle":""}`+"\n"+
+				`{"type":"custom-title","agentName":"wrong member"}`+"\n"),
+			want: "Agent",
+		},
+		{
 			name: "no title record",
 			path: write("none.jsonl", `{"type":"user","message":{"content":"x"}}`+"\n"),
 			want: "",

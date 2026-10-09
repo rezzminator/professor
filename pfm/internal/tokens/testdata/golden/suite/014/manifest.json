@@ -15,5 +15,8 @@
  "inputs": [
   "empty-aRutlO"
  ],
- "outputs": {}
+ "outputs": {},
+ "dirs": [
+  "empty-aRutlO"
+ ]
 }

@@ -49,6 +49,10 @@ func (row *briefRow) json() *object {
 		set("testCmds", orEmpty(row.testCmds)).set("brief", row.brief)
 }
 
+// lineStarts turns every line start JavaScript's multiline ^ honours beyond
+// \n (after \r, U+2028 and U+2029) into a \n.
+var lineStarts = strings.NewReplacer("\r", "\n", "\u2028", "\n", "\u2029", "\n")
+
 // briefItems counts a brief's list items and headings; JavaScript's
 // multiline ^ also starts a line after \r, U+2028 and U+2029.
 func briefItems(text string) float64 {

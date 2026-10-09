@@ -5,9 +5,9 @@ description: 'Digests one agent session — "read that chat''s transcript", "wha
 
 # transcript
 
-Run `python3 ~/.claude/skills/transcript/transcript.py {verb} {target} [filters]`, the path written in full every time. Python 3 standard library, read-only on every transcript; `--out FILE` is its only write. Every failure, expected or internal, prints `TRANSCRIPT FAILED — {reason}` on stderr and exits 2, including `NOT FOUND {id} — searched {roots}`, `AMBIGUOUS {id} — {n} transcripts: {paths}` (a name lists each with its size and last record), an empty or unparseable file, a bad filter value or an unwritable `--out`. None of these is an empty transcript.
+Run `pfm transcript {verb} {target} [filters]`, read-only on every transcript; `--out FILE` is its only write. Every failure prints `TRANSCRIPT FAILED — {reason}` on stderr: a bad flag or filter value exits 2; a transcript that cannot be found or read exits 1, including `NOT FOUND {id} — searched {roots}`, `AMBIGUOUS {id} — {n} transcripts: {paths}` (a name lists each with its size and last record), an empty or unparseable file and an unwritable `--out`. None of these is an empty transcript.
 
-A target is a transcript path, a session id or any unique prefix of one (a Codex rollout `…/sessions/YYYY/MM/DD/rollout-*-{id}.jsonl`, a Claude chat `…/projects/{slug}/{id}.jsonl`), a Claude sub-agent id, with or without `agent-` (`…/{session}/subagents/agent-{id}.jsonl`), a Claude chat name (case ignored; a chat's name is its last title record, so a renamed chat answers to its new name only, and several chats sharing one name are `AMBIGUOUS`), or a Codex agent path (`/root/{name}`), matched against each rollout's `session_meta` and unique within one thread tree only, so a reused path is `AMBIGUOUS`. The script searches `$CLAUDE_CONFIG_DIR`, `~/.claude`, `~/.cc/*`, `$CODEX_HOME` and `~/.codex`, plus each `--root DIR`; `~/.cc/*` link to one tree, so each file counts once. A Codex seat's name is not a target: `pfm chat resolve {name}` prints its session id in the third column while the seat is alive.
+A target is a transcript path, a session id or any unique prefix of one (a Codex rollout `…/sessions/YYYY/MM/DD/rollout-*-{id}.jsonl`, a Claude chat `…/projects/{slug}/{id}.jsonl`), a Claude sub-agent id, with or without `agent-` (`…/{session}/subagents/agent-{id}.jsonl`), a Claude chat name (case ignored; a chat's name is its last title record, so a renamed chat answers to its new name only, and several chats sharing one name are `AMBIGUOUS`), or a Codex agent path (`/root/{name}`), matched against each rollout's `session_meta` and unique within one thread tree only, so a reused path is `AMBIGUOUS`. It searches pfm's Claude roots and Codex homes, plus each `--root DIR`; a file reached twice counts once. A Codex seat's name is not a target: `pfm chat resolve {name}` prints its session id in the third column while the seat is alive.
 
 Name lookup reads the last 256 KiB of each session; a title outside that tail is missed, so resolve older titles by id or path. A failed directory scan or unreadable session yields `INCOMPLETE name lookup` instead of a unique match or `NOT FOUND`.
 
@@ -19,7 +19,7 @@ Name lookup reads the last 256 KiB of each session; a title outside that tail is
 | `counts` | The header, then per tool for the calls kept by the filters: calls, errors, total and largest result, calls without a result |
 | `types` | Record types and dispositions (rendered, header, skipped) inside `--lines`, counted; the three counts sum to `RECORDS`. Other filters are refused |
 | `locate` | The resolved path |
-| `agents` | A session's sub-agents, including nested `subagents/workflows/wf_*/` files, oldest first: id · agent type · description · first → last UTC timestamp · records · size · calls; `META ERROR {reason}` where its `.meta.json` is missing or unreadable; `AGENTS 0 — no subagents directory at {path}` for a missing directory; a failed stat or enumeration exits 2 |
+| `agents` | A session's sub-agents, including nested `subagents/workflows/wf_*/` files, oldest first: id · agent type · description · first → last UTC timestamp · records · size · calls; `META ERROR {reason}` where its `.meta.json` is missing or unreadable; `AGENTS 0 — no subagents directory at {path}` for a missing directory; a failed stat or enumeration exits 1 |
 
 ## Reading the digest
 
@@ -28,7 +28,7 @@ Name lookup reads the last 256 KiB of each session; a title outside that tail is
 - `UNFINISHED` before `SKIPPED`: the last turn has no final reply; the run was cut off or is still running. This warning applies even when filters hide that turn.
 - A failed call prints the tail of its output under it, `    | `-prefixed. A command that succeeded prints its last output line in `‹…›`; a read prints only its size.
 - Codex `exec` scripts appear as the commands, edits and MCP calls they ran. A script that ran none shows up as itself.
-- Every record not rendered is counted by type on the `SKIPPED` line: token counts, encrypted reasoning, harness attachments, duplicate event records, and any type the script does not know. Header records are listed after `| HEADER`.
+- Every record not rendered is counted by type on the `SKIPPED` line: token counts, encrypted reasoning, harness attachments, duplicate event records, and any type the reader does not know. Header records are listed after `| HEADER`.
 
 ## Filters
 

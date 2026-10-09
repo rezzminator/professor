@@ -1,0 +1,9 @@
+{
+ "args": [
+  "counts",
+  "{CLAUDE}",
+  "--grep",
+  "TestFork"
+ ],
+ "dirs": []
+}

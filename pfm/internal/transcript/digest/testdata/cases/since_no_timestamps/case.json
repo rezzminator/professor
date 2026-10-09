@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--since",
+  "-5m"
+ ],
+ "dirs": []
+}

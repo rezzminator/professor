@@ -27,6 +27,19 @@ type Member struct {
 // property order; a key given twice keeps its first place and its last value.
 // ok is false when raw is no object.
 func Members(raw json.RawMessage) (members []Member, ok bool) {
+	members, ok = InsertionMembers(raw)
+	SortKeys(members, func(member Member) string { return member.Key })
+	return members, ok
+}
+
+// InsertionMembers decodes raw as an object and returns its members in the
+// order they were written (a Python dict's order); a key given twice keeps its
+// first place and its last value. ok is false when raw is no object, is cut
+// short or carries anything after it (JSON.parse and json.loads refuse both).
+func InsertionMembers(raw json.RawMessage) (members []Member, ok bool) {
+	if !json.Valid(raw) {
+		return nil, false
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
 		return nil, false
@@ -49,7 +62,6 @@ func Members(raw json.RawMessage) (members []Member, ok bool) {
 		place[key] = len(members)
 		members = append(members, Member{Key: key, Value: value})
 	}
-	SortKeys(members, func(member Member) string { return member.Key })
 	return members, true
 }
 

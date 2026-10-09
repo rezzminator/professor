@@ -1,0 +1,9 @@
+{
+ "args": [
+  "counts",
+  "{CLAUDE}",
+  "--tool",
+  "Bash,Grep"
+ ],
+ "dirs": []
+}

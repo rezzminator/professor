@@ -109,12 +109,6 @@
     "global/skills/transcript/SKILL.md": {
       "curated": true
     },
-    "global/skills/transcript/transcript.py": {
-      "curated": true
-    },
-    "global/skills/transcript/transcript_test.py": {
-      "curated": true
-    },
     "project/CLAUDE.md": {
       "sources": {
         "CLAUDE.md": "64fe5af625d151b0218fa1cd6b893f733ddaf27f7478a8ba7da7295f9aa70d6f"

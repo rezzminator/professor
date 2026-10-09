@@ -1,0 +1,4 @@
+SESSION aaaaaaaa-1111-2222-3333-444444444444 · {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444.jsonl
+AGENTS 2
+a1flat · META ERROR missing {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444/subagents/agent-a1flat.meta.json · 2026-09-29 20:00:10Z → 2026-09-29 20:00:10Z · 1 records · 162B · 0 calls
+a2nested · META ERROR missing {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444/subagents/workflows/wf_one/agent-a2nested.meta.json · 2026-09-29 20:00:20Z → 2026-09-29 20:00:20Z · 1 records · 164B · 0 calls

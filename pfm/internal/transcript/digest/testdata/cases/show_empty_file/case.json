@@ -1,0 +1,7 @@
+{
+ "args": [
+  "show",
+  "{HOME}/empty.jsonl"
+ ],
+ "dirs": []
+}

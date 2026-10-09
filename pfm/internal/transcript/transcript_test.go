@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -507,5 +508,20 @@ func TestReadMetaFollowsTheNewestCodexTurnRecord(t *testing.T) {
 				t.Fatalf("CodexTurn = %d, want %d", meta.CodexTurn, testCase.want)
 			}
 		})
+	}
+}
+
+// TestContentListsReadEachBlockOnItsOwn: Visible and the tool-call reader
+// decode content through DecodeContent, so one odd element never hides its
+// siblings (INTENDED: a list holding one used to read as empty).
+func TestContentListsReadEachBlockOnItsOwn(t *testing.T) {
+	if got := Visible(json.RawMessage(`[{"type":"text","text":"kept"},7,{"type":"text","text":5}]`)); got != "kept" {
+		t.Errorf("Visible = %q, want kept", got)
+	}
+	entry, ok := toolCall(
+		json.RawMessage(`[5,{"type":"tool_use","name":7},{"type":"tool_use","name":"Read","input":{"a":1}}]`),
+	)
+	if !ok || entry.Tool != "Read" || entry.Input != `{"a":1}` {
+		t.Errorf("toolCall = %+v, %t; want the Read call", entry, ok)
 	}
 }

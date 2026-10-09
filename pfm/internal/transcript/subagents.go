@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -112,6 +113,9 @@ func ReadSubagentMeta(path string) (SubagentMeta, error) {
 	var meta SubagentMeta
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return SubagentMeta{}, fmt.Errorf("parse sub-agent meta %s: %w", path, err)
+	}
+	if trimmed := bytes.TrimSpace(raw); trimmed[0] != '{' {
+		return SubagentMeta{}, fmt.Errorf("parse sub-agent meta %s: not a JSON object", path)
 	}
 	return meta, nil
 }

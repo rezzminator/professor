@@ -65,7 +65,7 @@ func runHeadless(
 		switch args[0] {
 		case "run":
 			args[0] = newAction
-		case "transcript":
+		case transcriptCommand:
 			args[0] = "read"
 		}
 	}

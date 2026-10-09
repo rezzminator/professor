@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--only",
+  "error"
+ ],
+ "dirs": []
+}

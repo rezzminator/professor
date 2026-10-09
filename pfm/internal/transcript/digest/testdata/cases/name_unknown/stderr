@@ -1,0 +1,1 @@
+TRANSCRIPT FAILED — NOT FOUND Nobody Here — searched {HOME}/.claude/projects, {HOME}/.codex for an id or prefix; the name lookup over 2 session files (the last 256 KB of each) found no chat whose last title is 'Nobody Here' (a seat name resolves to its id with `pfm chat resolve Nobody Here`, third column)

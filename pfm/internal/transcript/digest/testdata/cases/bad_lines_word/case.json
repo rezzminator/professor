@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--lines",
+  "a-b"
+ ],
+ "dirs": []
+}

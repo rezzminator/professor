@@ -176,7 +176,7 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 		return
 	}
 	if parsed.Type == RoleUser && !parsed.IsMeta && !parsed.IsCompactSummary {
-		prompt := naming.FlattenPromptText(parsed.Message.Content)
+		prompt := FlattenPromptText(parsed.Message.Content)
 		if prompt != "" && !naming.IsJunkPrompt(prompt) {
 			meta.HumanPrompts++
 		}

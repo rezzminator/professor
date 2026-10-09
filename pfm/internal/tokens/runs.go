@@ -96,15 +96,15 @@ func (a *auditor) callOrigins(files []string) map[string]string {
 		number := 0
 		err := eachLine(file, func(raw []byte) {
 			number++
-			var line claudeLine
-			if json.Unmarshal(raw, &line) != nil || line.Type != "assistant" {
+			line, decoded := transcript.DecodeClaudeRecord(raw)
+			if kind, _ := line.Kind(); !decoded || kind != "assistant" {
 				return // malformed lines are counted by the replay
 			}
-			message := line.message()
-			if message == nil || message.Usage == nil {
+			message, usage := claudeMessage(&line)
+			if usage == nil {
 				return
 			}
-			key := line.callKey(message, file, number)
+			key := callKey(&line, message, file, number)
 			session := firstOf(line.SessionID)
 			if session == "" {
 				session = transcript.TranscriptStem(file)

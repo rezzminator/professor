@@ -95,3 +95,16 @@ func TestSubagentsAboveTheRootAreNotAgents(t *testing.T) {
 		t.Fatal("SessionDir found a subagents directory where none is")
 	}
 }
+
+func TestReadSubagentMetaRefusesANonObjectMeta(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent-x.meta.json")
+	if err := os.WriteFile(path, []byte("null\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSubagentMeta(
+		path,
+	); err == nil ||
+		err.Error() != "parse sub-agent meta "+path+": not a JSON object" {
+		t.Errorf("ReadSubagentMeta of a null meta = %v, want the not-a-JSON-object refusal", err)
+	}
+}

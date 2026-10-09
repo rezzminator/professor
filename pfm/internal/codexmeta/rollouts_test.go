@@ -119,3 +119,35 @@ func TestRolloutID(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentPathRolloutsMatchesEitherAgentPathForm(t *testing.T) {
+	home, extra := t.TempDir(), t.TempDir()
+	write := func(path, content string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	direct := write(filepath.Join(home, SessionsDir, "2026", "09", "29", "rollout-a.jsonl"),
+		`{"type":"session_meta","payload":{"id":"a","agent_path":"/root/fix_1a"}}`+"\n")
+	spawned := write(
+		filepath.Join(home, ArchivedSessionsDir, "rollout-b.jsonl"),
+		`{"type":"session_meta","payload":{"id":"b","source":{"subagent":{"thread_spawn":{"agent_path":"/root/fix_1a"}}}}}`+"\n",
+	)
+	broken := write(filepath.Join(extra, "deep", "rollout-c.jsonl"), "{not json\n")
+	write(
+		filepath.Join(extra, "rollout-d.jsonl"),
+		`{"type":"session_meta","payload":{"id":"d","agent_path":"/root/other"}}`+"\n",
+	)
+	hits, unreadable, errs := AgentPathRollouts(context.Background(), []string{home}, []string{extra}, "/root/fix_1a")
+	if len(hits) != 2 || hits[0] != direct || hits[1] != spawned || len(errs) != 0 {
+		t.Errorf("AgentPathRollouts hits = %q, errs = %v; want %q, %q", hits, errs, direct, spawned)
+	}
+	if len(unreadable) != 1 || unreadable[0].Path != broken || unreadable[0].Err == nil {
+		t.Errorf("unreadable = %+v, want %s with its error", unreadable, broken)
+	}
+}

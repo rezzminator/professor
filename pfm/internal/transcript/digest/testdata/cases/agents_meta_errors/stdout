@@ -1,0 +1,6 @@
+SESSION aaaaaaaa-1111-2222-3333-444444444444 · {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444.jsonl
+AGENTS 4
+a1nometa · META ERROR missing {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444/subagents/agent-a1nometa.meta.json · 2026-09-29 20:00:10Z → 2026-09-29 20:00:10Z · 1 records · 164B · 0 calls
+a2badmeta · META ERROR {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444/subagents/agent-a2badmeta.meta.json: Expecting property name enclosed in double quotes: line 1 column 2 (char 1) · 2026-09-29 20:00:20Z → 2026-09-29 20:00:20Z · 1 records · 165B · 0 calls
+a3array · META ERROR {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444/subagents/agent-a3array.meta.json: not a JSON object · 2026-09-29 20:00:30Z → 2026-09-29 20:00:30Z · 1 records · 163B · 0 calls
+a4empty · type ? · no description · 2026-09-29 20:00:40Z → 2026-09-29 20:00:40Z · 1 records · 163B · 0 calls

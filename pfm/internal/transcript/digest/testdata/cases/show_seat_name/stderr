@@ -1,0 +1,1 @@
+TRANSCRIPT FAILED — NOT FOUND seat.2-a — searched {HOME}/.claude/projects, {HOME}/.codex for an id or prefix; the name lookup over 0 session files (the last 256 KB of each) found no chat whose last title is 'seat.2-a' (a seat name resolves to its id with `pfm chat resolve seat.2-a`, third column)

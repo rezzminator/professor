@@ -1,0 +1,17 @@
+TRANSCRIPT claude · cccccccc-1111-2222-3333-444444444444 · claude-fable-5-1
+FILE {HOME}/.claude/projects/-work-repo/cccccccc-1111-2222-3333-444444444444.jsonl · 5982 bytes · 22 records · cwd /work/repo (shown as ./)
+NAME Extra Desk
+SPAN 2026-09-29 18:00:27Z → 20:00:30Z · 7203s wall
+CALLS 10, 1 err, 1 without result: Read 2 · Edit 1 · Agent 1 · Skill 1 · WebFetch 1 (1 err) · mcp__x__y 1 · Write 1 · Glob 1 · Bash 1
+TOOL | CALLS | ERR | RESULT TOTAL | RESULT MAX | NO RESULT
+Read | 2 | 0 | 69B | 69B | 1
+Edit | 1 | 0 | 6B | 6B | 0
+Agent | 1 | 0 | 6B | 6B | 0
+Skill | 1 | 0 | 9B | 9B | 0
+WebFetch | 1 | 1 | 13B | 13B | 0
+mcp__x__y | 1 | 0 | 12B | 12B | 0
+Write | 1 | 0 | 0B | 0B | 0
+Glob | 1 | 0 | 9B | 9B | 0
+Bash | 1 | 0 | 18B | 18B | 0
+EVENTS call 10 · note 4 · prompt 3 · reply 3 · final 1
+SKIPPED 8 records: system.api_error 1 · system.? 1 · user.document 1 · user.text 1 · unparseable line 1 · attachment.? 1 · summary 1 · 7 1 | HEADER 1: custom-title 1

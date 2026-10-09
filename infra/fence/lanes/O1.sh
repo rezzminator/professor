@@ -492,4 +492,34 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "tokens help names --codex/--flight/--timeline; a bad --since exits 2; an unreadable --root exits 1; an empty root prints its report"
 fi
 
+# ─── O1.17 — transcript offline surface ────────────────────────────────────
+# One fixture transcript, no chat: the digest, a refused verb, an id nothing holds.
+beat O1.17-transcript
+spends none
+bad=""
+help_out="$(pfm transcript --help 2>&1)"; help_rc=$?
+if [ "$help_rc" -ne 0 ] || ! grep -q -- 'show,counts,types,locate,agents' <<<"$help_out"; then
+  bad="$bad pfm transcript --help lacks its verbs (exit $help_rc): $(one_line "$help_out");"
+fi
+verb_out="$(pfm transcript list x 2>&1)"; verb_rc=$?
+if [ "$verb_rc" -ne 2 ] || ! grep -qF -- "invalid choice: 'list'" <<<"$verb_out"; then
+  bad="$bad pfm transcript list exited $verb_rc, want 2 naming the invalid choice: $(one_line "$verb_out");"
+fi
+transcript_dir="$(mktemp -d)"
+printf '%s\n' '{"type":"user","sessionId":"lane-o1-17","timestamp":"2026-09-29T20:00:00Z","message":{"content":"lane prompt"}}' \
+  > "$transcript_dir/session.jsonl"
+show_out="$(pfm transcript show "$transcript_dir/session.jsonl" 2>&1)"; show_rc=$?
+if [ "$show_rc" -ne 0 ] || ! grep -q '^TRANSCRIPT claude · lane-o1-17' <<<"$show_out" || ! grep -qF 'PROMPT lane prompt' <<<"$show_out"; then
+  bad="$bad pfm transcript show did not digest the fixture (exit $show_rc): $(one_line "$show_out");"
+fi
+locate_out="$(pfm transcript locate no-such-session-anywhere 2>&1)"; locate_rc=$?
+if [ "$locate_rc" -ne 1 ] || ! grep -qF 'TRANSCRIPT FAILED — NOT FOUND no-such-session-anywhere' <<<"$locate_out"; then
+  bad="$bad pfm transcript locate of nothing exited $locate_rc, want 1 naming NOT FOUND: $(one_line "$locate_out");"
+fi
+rm -rf "$transcript_dir"
+# The digest's bytes are proven by the golden replay of internal/transcript/digest.
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "transcript help names its verbs; an unknown verb exits 2; a fixture digests; an id nothing holds exits 1 NOT FOUND"
+fi
+
 lane_end

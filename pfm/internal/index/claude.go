@@ -70,9 +70,8 @@ func parseClaudeTranscriptFile(
 
 		switch record.Type {
 		case "custom-title", "agent-name":
-			transcript.CustomTitle = record.CustomTitle
-			if transcript.CustomTitle == "" {
-				transcript.CustomTitle = record.AgentName
+			if title, ok := claudetranscript.TitleOf(record.Type, record.CustomTitle, record.AgentName); ok {
+				transcript.CustomTitle = title
 			}
 		case "ai-title":
 			transcript.AITitle = record.AITitle
@@ -86,7 +85,7 @@ func parseClaudeTranscriptFile(
 			if record.IsCompactSummary {
 				return
 			}
-			prompt := naming.FlattenPromptText(json.RawMessage(record.Message.Content))
+			prompt := claudetranscript.FlattenPromptText(json.RawMessage(record.Message.Content))
 			if prompt == "" || naming.IsJunkPrompt(prompt) {
 				return
 			}

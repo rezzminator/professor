@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--results",
+  "some"
+ ],
+ "dirs": []
+}

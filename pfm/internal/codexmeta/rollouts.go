@@ -108,3 +108,46 @@ func RolloutID(name string) string {
 	}
 	return strings.TrimPrefix(strings.TrimSuffix(name, ".jsonl"), "rollout-")
 }
+
+// Unreadable is a rollout whose header could not be read.
+type Unreadable struct {
+	Path string
+	Err  error
+}
+
+// AgentPathRollouts lists the rollouts whose session_meta names agentPath (an
+// orchestrator's /root/{name} for its sub-agent), over each Codex home's
+// sessions and archived_sessions and each extra directory walked whole, in
+// walk order. A rollout whose header cannot be read is unreadable, never a
+// miss; a place the walk failed to look is one entry of errs.
+func AgentPathRollouts(
+	ctx context.Context,
+	homes, extra []string,
+	agentPath string,
+) (hits []string, unreadable []Unreadable, errs []error) {
+	var rollouts []Rollout
+	for _, home := range homes {
+		found, walkErrs := WalkRollouts(ctx, home, SessionsDir, ArchivedSessionsDir)
+		rollouts, errs = append(rollouts, found...), append(errs, walkErrs...)
+	}
+	for _, dir := range extra {
+		found, walkErrs := WalkRollouts(ctx, dir, ".")
+		rollouts, errs = append(rollouts, found...), append(errs, walkErrs...)
+	}
+	seen := map[string]bool{}
+	for _, rollout := range rollouts {
+		if seen[rollout.Path] {
+			continue
+		}
+		seen[rollout.Path] = true
+		header, err := ReadHeader(rollout.Path)
+		switch {
+		case errors.Is(err, ErrNoSessionMeta):
+		case err != nil:
+			unreadable = append(unreadable, Unreadable{Path: rollout.Path, Err: err})
+		case header.AgentPath == agentPath:
+			hits = append(hits, rollout.Path)
+		}
+	}
+	return hits, unreadable, errs
+}

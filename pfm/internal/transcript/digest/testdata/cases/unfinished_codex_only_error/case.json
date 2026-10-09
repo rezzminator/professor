@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CODEX}",
+  "--only",
+  "error"
+ ],
+ "dirs": []
+}

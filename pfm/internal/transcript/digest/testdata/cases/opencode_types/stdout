@@ -1,0 +1,4 @@
+RECORDS 23 in {HOME}/.local/share/opencode/opencode.db#ses_1a2b3c4d5e6fGarden0001 (opencode)
+rendered 13: part.tool 5 · part.text 4 · part.file 1 · part.text (synthetic) 1 · part.compaction 1 · message.assistant (error) 1
+header 4: message.user 2 · message.assistant 2
+skipped 6: part.step-start 2 · part.step-finish 2 · part.reasoning 1 · part.mystery 1

@@ -6,13 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -215,25 +211,12 @@ func ReadOpenCodeSessions(ctx context.Context, root string) (
 	sessions []store.OpenCodeSession,
 	returnErr error,
 ) {
-	dbPath := filepath.Join(root, "opencode.db")
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("stat opencode store %s: %w", dbPath, err)
+	db, err := openOpenCodeStore(root)
+	if errors.Is(err, ErrNoOpenCodeStore) {
+		return nil, nil
 	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("opencode store %s is a directory", dbPath)
-	}
-
-	// Direct read-only access to the LIVE store: WAL-mode readers never block
-	// writers or tear state, and the one statement pins one consistent snapshot
-	// across every materialized shape and validation CTE. A bounded busy timeout
-	// converts a hot-writer moment into an error we report, never an unbounded wait.
-	db, err := sqlitedb.OpenReadOnly(dbPath, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("open opencode store read-only: %w", err)
+		return nil, err
 	}
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {

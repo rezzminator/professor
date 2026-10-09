@@ -1,6 +1,6 @@
 # chat-investigator
 
-`chat-investigator` answers one mission about what happened in other chats — main chats, their sub-agents, Codex threads — from their transcripts, each claim tied to a transcript line with its excerpt quoted. It is the open-hand investigation a main chat used to run in its own context, made specific: the prompt keeps what those runs did well and fixes what they did wrong or wasted, measured by six `agent-optimizer` audits of real investigation runs. It reads through the `transcript` skill's script, uses the chat MCP only to locate a chat and read its live state, writes no file but its digests, and spawns nothing.
+`chat-investigator` answers one mission about what happened in other chats — main chats, their sub-agents, Codex threads, OpenCode sessions — from their transcripts, each claim tied to a transcript line with its excerpt quoted. It is the open-hand investigation a main chat used to run in its own context, made specific: the prompt keeps what those runs did well and fixes what they did wrong or wasted, measured by six `agent-optimizer` audits of real investigation runs. It reads through `pfm transcript`, uses the chat MCP only to locate a chat and read its live state, writes no file but its digests, and spawns nothing.
 
 ## Contents
 
@@ -82,7 +82,7 @@ An investigation brief without a cap fanned out to 17 agents three levels deep i
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/chat-investigator.md` |
-| The digest it reads through | `pfm transcript` (`pfm/internal/transcript/digest/`) and `templates/global/skills/transcript/SKILL.md` |
+| The digest it reads through | `pfm transcript` (`pfm/internal/transcript/digest/`) and `templates/global/skills/chatlog/SKILL.md` |
 | The timeline and dollar source | `pfm tokens --timeline` |
 | Name, sub-agent and liveness lookups | `pfm transcript locate`, `pfm transcript agents`, `pfm ls --all --tsv` |
-| The roster line and the transcript skill's readers | `docs/BLUEPRINT.md` |
+| The roster line and the chatlog skill's readers | `docs/BLUEPRINT.md` |

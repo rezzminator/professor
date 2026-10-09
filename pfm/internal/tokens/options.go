@@ -16,11 +16,14 @@ const usage = `usage: pfm tokens [--since 24h|3d] [--root DIR]... [--project SUB
                   [--family-rx RE] [--session SID] [--top N] [--out FILE] [--view FILE] [--briefs FILE]
                   [--host-label NAME] [--prices FILE]
        pfm tokens --codex [--since 24h|3d] [--project SUBSTR] [--codex-root DIR] [--top N] [--prices FILE]
+       pfm tokens --opencode [--since 24h|3d] [--project SUBSTR] [--opencode-root DIR] [--top N] [--prices FILE]
        pfm tokens --flight DIR [--metrics-out FILE] [--out FILE] [--prices FILE]
        pfm tokens --timeline FILE [--timeline FILE]... [--root DIR]... [--prices FILE]
 
-Audits agent transcripts: where did the tokens go? Claude Code transcripts and
-Codex rollouts, priced from the one table pfm model-cost serves (or a saved
+Audits agent transcripts: where did the tokens go? Claude Code transcripts,
+Codex rollouts (--codex) and OpenCode sessions (--opencode, from each message's
+own token record; OpenCode's recorded cost is shown beside the estimate, never
+in its place), priced from the one table pfm model-cost serves (or a saved
 ` + "`pfm model-cost --json --all`" + ` document / prices.json via --prices). A text report on
 stdout; --out, --view and --briefs write JSON. Exit 2 on a usage error, 1 when
 the table cannot load or anything could not be read.`
@@ -41,6 +44,8 @@ type flags struct {
 	metricsOut     string
 	codex          bool
 	codexHome      string
+	opencode       bool
+	opencodeRoot   string
 	hostLabel      string
 	roots          []string
 	timeline       []string
@@ -87,6 +92,8 @@ func readFlags(args []string, host string) (flags, error) {
 	set.StringVar(&parsed.metricsOut, "metrics-out", "", "--flight: where metrics.md goes")
 	set.BoolVar(&parsed.codex, pricing.EngineCodex, false, "one row per Codex thread")
 	set.StringVar(&parsed.codexHome, "codex-root", "", "the Codex home to read")
+	set.BoolVar(&parsed.opencode, engineOpenCode, false, "one row per OpenCode session")
+	set.StringVar(&parsed.opencodeRoot, "opencode-root", "", "the OpenCode root (holding opencode.db) to read")
 	set.StringVar(&parsed.hostLabel, "host-label", host, "--view: the host name the page shows")
 	set.StringVar(&parsed.prices, "prices", "", "a saved price document or prices.json instead of the served table")
 	set.Var((*listFlag)(&parsed.roots), "root", "a transcript root (repeatable)")
@@ -118,6 +125,18 @@ func readFlags(args []string, host string) (flags, error) {
 		return flags{}, usageError("--family-rx %s: %v", *familyRx, err)
 	}
 	parsed.familyRx, parsed.familyRxSource = rx, *familyRx
+	given := map[string]bool{}
+	set.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if parsed.opencode {
+		for _, name := range openCodeRefuses {
+			if given[name] {
+				return flags{}, usageError("--opencode is its own mode: it takes no --codex, --flight, --timeline, " +
+					"--root, --family, --family-rx, --session, --out, --view, --briefs or --metrics-out")
+			}
+		}
+	} else if given["opencode-root"] {
+		return flags{}, usageError("--opencode-root reads OpenCode only: pass --opencode with it")
+	}
 	if len(parsed.timeline) != 0 {
 		sinceGiven := false
 		set.Visit(func(f *flag.Flag) { sinceGiven = sinceGiven || f.Name == "since" })
@@ -128,6 +147,13 @@ func readFlags(args []string, host string) (flags, error) {
 		}
 	}
 	return parsed, nil
+}
+
+// openCodeRefuses are the flags --opencode cannot honour: another mode, or a
+// Claude root, filter or output its table never reads or writes.
+var openCodeRefuses = []string{
+	pricing.EngineCodex, "flight", "timeline", "root", "family", "family-rx", "session", "out", "view", "briefs",
+	"metrics-out",
 }
 
 func usageLine(text string) string {

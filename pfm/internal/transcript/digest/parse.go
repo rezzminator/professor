@@ -25,8 +25,9 @@ const detectWindow = 80
 
 // The engine names a digest prints, the engines' CLI spellings.
 var (
-	engineClaude = pfmengine.MustLookup(pfmengine.Claude).LongName
-	engineCodex  = pfmengine.MustLookup(pfmengine.Codex).LongName
+	engineClaude   = pfmengine.MustLookup(pfmengine.Claude).LongName
+	engineCodex    = pfmengine.MustLookup(pfmengine.Codex).LongName
+	engineOpenCode = pfmengine.MustLookup(pfmengine.OpenCode).LongName
 )
 
 // Event kinds and dispositions.
@@ -105,21 +106,23 @@ func (ev *event) setResult(text string, failed bool, ts string) {
 type disposition struct{ state, label string }
 
 // parsed is one transcript read into events, every record's disposition kept
-// in the order its line was first marked.
+// in the order its line was first marked; an OpenCode session's records are
+// its message and part rows.
 type parsed struct {
-	path, engine string
-	bytes        int64
-	records      int
-	events       []*event
-	order        []int
-	disp         map[int]disposition
-	meta         map[string]string
-	nulls        map[string]bool
-	title        string
-	t0, t1       *time.Time
-	pending      map[string]*event
-	calls        map[string]*event
-	wrappers     []*event
+	path, engine    string
+	bytes           int64
+	records         int
+	messages, parts int
+	events          []*event
+	order           []int
+	disp            map[int]disposition
+	meta            map[string]string
+	nulls           map[string]bool
+	title           string
+	t0, t1          *time.Time
+	pending         map[string]*event
+	calls           map[string]*event
+	wrappers        []*event
 }
 
 func (p *parsed) mark(line int, state, label string) {

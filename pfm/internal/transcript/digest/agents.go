@@ -49,6 +49,17 @@ func sessionAgents(path string) (string, error) {
 	for _, file := range uniqueResolved(files) {
 		rows = append(rows, readAgentRow(file))
 	}
+	sortAgentRows(rows)
+	lines = append(lines, fmt.Sprintf("AGENTS %d", len(rows)))
+	for _, row := range rows {
+		lines = append(lines, row.text)
+	}
+	return strings.Join(lines, "\n") + "\n", nil
+}
+
+// sortAgentRows orders rows by their first stamp, a row without one last, a
+// tie by its text.
+func sortAgentRows(rows []agentRow) {
 	sort.SliceStable(rows, func(left, right int) bool {
 		a, b := rows[left], rows[right]
 		switch {
@@ -59,11 +70,6 @@ func sessionAgents(path string) (string, error) {
 		}
 		return a.text < b.text
 	})
-	lines = append(lines, fmt.Sprintf("AGENTS %d", len(rows)))
-	for _, row := range rows {
-		lines = append(lines, row.text)
-	}
-	return strings.Join(lines, "\n") + "\n", nil
 }
 
 // readAgentRow reads one sub-agent transcript in one streamed pass: its
@@ -106,7 +112,7 @@ func readAgentRow(path string) agentRow {
 		return agentRow{text: filepath.Base(path) + " · READ ERROR " + err.Error()}
 	}
 	id := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "agent-"), ".jsonl")
-	span := "no timestamps"
+	span := noTimestamps
 	if first != nil {
 		span = first.Format("2006-01-02 15:04:05") + "Z → " + last.Format("2006-01-02 15:04:05") + "Z"
 	}

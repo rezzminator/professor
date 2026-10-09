@@ -91,22 +91,19 @@
     "global/commands/reminder.md": {
       "curated": true
     },
-    "global/commands/tokens/README.md": {
-      "curated": true
-    },
-    "global/commands/tokens/SKILL.md": {
-      "curated": true
-    },
     "global/commands/ultimate.md": {
+      "curated": true
+    },
+    "global/skills/chatlog/README.md": {
+      "curated": true
+    },
+    "global/skills/chatlog/SKILL.md": {
       "curated": true
     },
     "global/skills/close-out/SKILL.md": {
       "curated": true
     },
     "global/skills/sources.json": {
-      "curated": true
-    },
-    "global/skills/transcript/SKILL.md": {
       "curated": true
     },
     "project/CLAUDE.md": {

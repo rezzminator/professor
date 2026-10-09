@@ -1,6 +1,7 @@
 // Package tokens is `pfm tokens`, the read-only audit of agent transcripts:
 // where did the tokens go? It replays Claude Code JSONL transcripts and Codex
-// CLI rollouts, prices every call from the one table `pfm model-cost` serves,
+// CLI rollouts, counts OpenCode sessions from their store's per-message token
+// records, prices every call from the one table `pfm model-cost` serves,
 // and traces each dollar to the context that caused it. A RUN is one
 // transcript (a main chat loop, a sub-agent, a Codex thread); a FAMILY is a
 // main chat plus every sub-agent it spawned. Dollars are list-price estimates:
@@ -42,8 +43,9 @@ const (
 
 // Options are the run's seams: its arguments and streams, the clock that
 // fixes "now", the environment that names the host, the zone a stamp without
-// an offset reads in, pfm's resolved transcript roots, and how the served
-// price table loads when no --prices file is given.
+// an offset reads in, pfm's resolved transcript roots (Claude, Codex and
+// OpenCode), and how the served price table loads when no --prices file is
+// given.
 type Options struct {
 	Args           []string
 	Stdout, Stderr io.Writer
@@ -52,6 +54,7 @@ type Options struct {
 	Location       *time.Location
 	ClaudeRoots    []string
 	CodexHomes     []string
+	OpenCodeRoots  []string
 	Served         modelcost.Options
 }
 
@@ -108,6 +111,7 @@ type auditor struct {
 	timelineMode bool
 	claudeRoots  []string
 	codexHomes   []string
+	openCodeRoot []string
 	prices       *priceBook
 	scan         *scanState
 	global       *globals
@@ -140,13 +144,17 @@ func newAuditor(opts Options, parsed flags, host string) *auditor {
 	a := &auditor{
 		opts: parsed, stdout: opts.Stdout, stderr: opts.Stderr, loc: opts.Location, host: host, now: now,
 		since: now - float64(parsed.hours*3600e3), hours: parsed.hours, timelineMode: len(parsed.timeline) != 0,
-		claudeRoots: opts.ClaudeRoots, codexHomes: opts.CodexHomes, scan: newScanState(), global: newGlobals(),
+		claudeRoots: opts.ClaudeRoots, codexHomes: opts.CodexHomes, openCodeRoot: opts.OpenCodeRoots,
+		scan: newScanState(), global: newGlobals(),
 	}
 	if a.loc == nil {
 		a.loc = time.Local
 	}
 	if parsed.codexHome != "" {
 		a.codexHomes = []string{parsed.codexHome}
+	}
+	if parsed.opencodeRoot != "" {
+		a.openCodeRoot = []string{parsed.opencodeRoot}
 	}
 	if a.timelineMode {
 		a.since = 0
@@ -181,6 +189,9 @@ func run0(ctx context.Context, opts Options) (int, error) {
 	if parsed.codex {
 		return a.runCodex(ctx)
 	}
+	if parsed.opencode {
+		return a.runOpenCode(ctx)
+	}
 	if a.timelineMode {
 		return a.runTimeline()
 	}
@@ -203,6 +214,6 @@ func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	return Audit(context.Background(), Options{
 		Args: args, Stdout: stdout, Stderr: stderr, Clock: clock.Real, Env: paths.OSEnv{}, Location: time.Local,
 		ClaudeRoots: runtime.Paths.Roots[pfmengine.Claude], CodexHomes: runtime.Paths.Roots[pfmengine.Codex],
-		Served: modelcost.MachineOptions(runtime),
+		OpenCodeRoots: runtime.Paths.Roots[pfmengine.OpenCode], Served: modelcost.MachineOptions(runtime),
 	})
 }

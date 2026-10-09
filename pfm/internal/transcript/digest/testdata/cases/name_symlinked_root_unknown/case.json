@@ -3,5 +3,8 @@
   "show",
   "Nobody Here"
  ],
- "dirs": []
+ "dirs": [],
+ "links": {
+  ".cc/1/projects": "../../.claude/projects"
+ }
 }

@@ -23,8 +23,8 @@ const (
 
 var digestResultsForm = regexp.MustCompile(`^(brief|none|full|tail:[1-9]\d*)$`)
 
-// chatDigest is chat_digest: `pfm transcript show` over any Claude or Codex
-// transcript, run in-process, its digest bounded to max_bytes at a line end.
+// chatDigest is chat_digest: `pfm transcript show` over any Claude, Codex or
+// OpenCode transcript, run in-process, its digest bounded to max_bytes at a line end.
 func (service *Service) chatDigest(
 	ctx context.Context,
 	_ *mcp.CallToolRequest,

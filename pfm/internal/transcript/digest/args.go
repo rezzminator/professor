@@ -16,10 +16,13 @@ var verbChoices = []string{"show", "counts", "types", "locate", "agents"}
 
 const usageText = `usage: pfm transcript {show,counts,types,locate,agents} TARGET [options]
 
-Mechanical reader of Claude Code and Codex transcripts.
+Mechanical reader of Claude Code, Codex and OpenCode transcripts.
 
 TARGET is a transcript path, a session id or its prefix, a Claude agent id, a
-Codex agent path (/root/{name}), or a Claude chat name (its last title).
+Codex agent path (/root/{name}), a Claude chat name (its last title), an
+OpenCode session's title, or an OpenCode locator {store}#{session id}.
+An OpenCode session is read from its store: its line numbers are record numbers
+(each message, then its parts) and its records carry no byte size.
 
 options:
   --root DIR        an extra directory searched for the id or chat name (repeatable)
@@ -38,6 +41,7 @@ options:
   --text N          characters of a prompt or reply, 0 = whole (default 500)
   --final N         characters of the final reply, 0 = whole (the default)
   --lines RANGE     transcript line range FROM-TO, FROM- or one line: the events those records produced
+                    (an OpenCode session: record numbers)
   --width N         characters of a call's target (default 180)
   --out FILE        write the digest here and print its path and size
 `

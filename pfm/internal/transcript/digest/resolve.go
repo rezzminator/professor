@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -29,17 +30,27 @@ var (
 // resolver turns a target into one transcript path over pfm's roots and the
 // run's extra --root directories; out collects its warnings.
 type resolver struct {
-	ctx   context.Context
-	env   Env
-	extra []string
-	out   *Output
+	ctx      context.Context
+	env      Env
+	extra    []string
+	out      *Output
+	openCode struct {
+		read   bool
+		stores int
+		hits   []openCodeHit
+		failed []error
+	}
 }
 
-// resolve is the transcript a target names: a file as given, a Codex agent
-// path by its rollout's session_meta, an id or prefix by file name, else a
-// Claude chat name by its last title.
+// resolve is the transcript a target names: a file as given, an OpenCode
+// locator as given, a Codex agent path by its rollout's session_meta, an id or
+// prefix by file name or OpenCode session id, else a Claude chat name by its
+// last title or an OpenCode session by its title.
 func (finder *resolver) resolve(target string) (string, error) {
 	if info, err := os.Stat(target); err == nil && info.Mode().IsRegular() {
+		return target, nil
+	}
+	if _, _, ok := splitOpenCodeLocator(target); ok {
 		return target, nil
 	}
 	if agentPathTarget.MatchString(target) {
@@ -80,10 +91,21 @@ func (finder *resolver) warnUnreadable(target string, failed []error) {
 }
 
 // idHits lists every transcript whose file name carries id: a Claude session
-// or sub-agent, a Codex rollout, any of them below an extra root.
+// or sub-agent, a Codex rollout, any of them below an extra root, and every
+// OpenCode session whose id starts with id (read only for an id shaped like
+// one, so a Claude or Codex id never waits on or warns of the store).
 func (finder *resolver) idHits(id string) (hits []string, failed []error) {
-	sessions, errs := transcript.FindSessions(finder.env.ClaudeRoots, id)
-	hits, failed = append(hits, sessions...), append(failed, errs...)
+	if strings.HasPrefix(id, openCodeSessionPrefix) {
+		sessions, errs := finder.openCodeSessions()
+		failed = append(failed, errs...)
+		for at := range sessions {
+			if strings.HasPrefix(sessions[at].session.ID, id) {
+				hits = append(hits, sessions[at].locator())
+			}
+		}
+	}
+	claude, errs := transcript.FindSessions(finder.env.ClaudeRoots, id)
+	hits, failed = append(hits, claude...), append(failed, errs...)
 	agents, errs := transcript.FindSubagents(finder.env.ClaudeRoots, id)
 	hits, failed = append(hits, agents...), append(failed, errs...)
 	for _, home := range finder.env.CodexHomes {
@@ -164,14 +186,25 @@ func (finder *resolver) pick(target string, hits, unreadable []string) (string, 
 	return hits[0], nil
 }
 
-// searched names every root that exists, Claude roots first.
+// searched names every root that exists, Claude roots first, an OpenCode
+// root by its store.
 func (finder *resolver) searched() string {
 	var roots []string
-	for _, group := range [][]string{finder.env.ClaudeRoots, finder.env.CodexHomes, finder.extra} {
+	for _, group := range [][]string{finder.env.ClaudeRoots, finder.env.CodexHomes} {
 		for _, root := range group {
 			if info, err := os.Stat(root); err == nil && info.IsDir() {
 				roots = append(roots, root)
 			}
+		}
+	}
+	for _, root := range finder.env.OpenCodeRoots {
+		if _, err := os.Stat(index.OpenCodeStorePath(root)); err == nil {
+			roots = append(roots, index.OpenCodeStorePath(root))
+		}
+	}
+	for _, root := range finder.extra {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			roots = append(roots, root)
 		}
 	}
 	if len(roots) == 0 {
@@ -181,7 +214,8 @@ func (finder *resolver) searched() string {
 }
 
 // byName is the Claude session transcript whose last title is target, over
-// every directory below the Claude roots and the extra roots. A place that
+// every directory below the Claude roots and the extra roots, or the OpenCode
+// session titled target. A place that
 // could not be read makes the lookup INCOMPLETE, never NOT FOUND; idFailed,
 // the places the id search before it could not read (a Codex home among
 // them), is a warning beside a found chat and named in a NOT FOUND. A done
@@ -255,27 +289,44 @@ func (finder *resolver) byName(target string, idFailed []error) (string, error) 
 			hits = append(hits, hit{path: path, tail: tail})
 		}
 	}
+	sessions, errs := finder.openCodeSessions()
+	for _, err := range errs {
+		unreadable = append(unreadable, err.Error())
+	}
+	var named []openCodeHit
+	for at := range sessions {
+		if strings.EqualFold(sessions[at].session.Title, target) {
+			named = append(named, sessions[at])
+		}
+	}
 	if len(unreadable) != 0 {
 		return "", runtimeFailure("INCOMPLETE name lookup for %s — %d discovery/read errors: %s",
 			pyvalue.ReprString(target), len(unreadable), strings.Join(unreadable, " "))
 	}
-	switch len(hits) {
+	switch len(hits) + len(named) {
 	case 1:
 		finder.warnUnreadable(target, idFailed)
+		if len(named) == 1 {
+			return named[0].locator(), nil
+		}
 		return hits[0].path, nil
 	case 0:
 		missed := ""
 		if len(idFailed) != 0 {
 			missed = fmt.Sprintf("; %d places unreadable while resolving: %s", len(idFailed), joinErrors(idFailed))
 		}
+		titles := ""
+		if finder.openCode.stores != 0 {
+			titles = fmt.Sprintf(" and %d OpenCode session titles", len(sessions))
+		}
 		return "", runtimeFailure("NOT FOUND %s — searched %s for an id or prefix; the name lookup over %d session "+
-			"files (the last %d KB of each) found no chat whose last title is %s (a seat name resolves to its id "+
-			"with `pfm chat resolve %s`, third column)%s", target, finder.searched(), len(files), nameTail/1024,
+			"files (the last %d KB of each)%s found no chat whose last title is %s (a seat name resolves to its id "+
+			"with `pfm chat resolve %s`, third column)%s", target, finder.searched(), len(files), nameTail/1024, titles,
 			pyvalue.ReprString(target), target, missed)
 	}
 	sort.Slice(hits, func(left, right int) bool { return hits[left].path < hits[right].path })
 	rows := make([]string, len(hits))
-	for index, found := range hits {
+	for row, found := range hits {
 		last := "without a timestamp"
 		if stamps := tailStamp.FindAllSubmatch(found.tail, -1); len(stamps) != 0 {
 			last = string(stamps[len(stamps)-1][1])
@@ -286,9 +337,13 @@ func (finder *resolver) byName(target string, idFailed []error) (string, error) 
 		} else {
 			size = strconv.FormatInt(info.Size(), 10) + " bytes"
 		}
-		rows[index] = found.path + " (" + size + ", last record " + last + ")"
+		rows[row] = found.path + " (" + size + ", last record " + last + ")"
 	}
-	return "", runtimeFailure("AMBIGUOUS %s — %d transcripts named %s: %s", target, len(hits),
+	if len(named) != 0 {
+		rows = append(rows, openCodeNameRows(named)...)
+		sort.Strings(rows)
+	}
+	return "", runtimeFailure("AMBIGUOUS %s — %d transcripts named %s: %s", target, len(rows),
 		pyvalue.ReprString(target), strings.Join(rows, " "))
 }
 
@@ -321,8 +376,8 @@ func uniqueResolved(paths []string) []string {
 // joinErrors is errs' messages joined by spaces.
 func joinErrors(errs []error) string {
 	texts := make([]string, len(errs))
-	for index, err := range errs {
-		texts[index] = err.Error()
+	for at, err := range errs {
+		texts[at] = err.Error()
 	}
 	return strings.Join(texts, " ")
 }

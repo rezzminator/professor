@@ -196,7 +196,7 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 ## Measuring a run
 
-`/tokens --filter rr` lists each lead and digger with its tokens and tool uses. Three numbers say whether a run held the budget: the lead's calls against `r(d + 1) + 5`, the rounds used against the lead's round ceiling, and the `NOT ON PAGE` count in the document's `Verification` section. A `NOT ON PAGE` rate that stays above zero across runs means findings are still being paraphrased, and the fix is in the digger's fetch prompt, not in a larger verification sample.
+`pfm tokens --family {the chat's session-id prefix}` (`--since` widening its 24 h window to the run's start) prices the chat's agents per agent type, the lead's and the diggers', then its 14 costliest agents one by one with their calls, context and price; `pfm tokens --timeline {the lead's transcript}` lists the lead's calls one by one with their tokens and tool uses. Three numbers say whether a run held the budget: the lead's calls against `r(d + 1) + 5`, the rounds used against the lead's round ceiling, and the `NOT ON PAGE` count in the document's `Verification` section. A `NOT ON PAGE` rate that stays above zero across runs means findings are still being paraphrased, and the fix is in the digger's fetch prompt, not in a larger verification sample.
 
 ## Surfaces that stay in sync
 

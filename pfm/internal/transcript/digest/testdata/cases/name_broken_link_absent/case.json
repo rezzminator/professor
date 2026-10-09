@@ -3,5 +3,8 @@
   "locate",
   "Nobody Here"
  ],
- "dirs": []
+ "dirs": [],
+ "links": {
+  ".claude/projects/unreadable-project": "../../missing-project"
+ }
 }

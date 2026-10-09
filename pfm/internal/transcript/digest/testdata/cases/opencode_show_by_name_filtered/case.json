@@ -1,0 +1,1 @@
+{"args": ["show", "tidy the garden beds", "--only", "call", "--tool", "bash,read", "--lines", "8-10", "--results", "full"], "opencode": "garden"}

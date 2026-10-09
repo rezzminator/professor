@@ -192,7 +192,7 @@ type ReadInput struct {
 // DigestInput requests the one-line-per-event digest of one transcript. Every
 // optional field maps onto one `pfm transcript show` flag.
 type DigestInput struct {
-	Source     string `json:"source" jsonschema:"chat_find id, Claude or Codex session or agent id (or prefix), transcript path, or a Claude chat's title"`
+	Source     string `json:"source" jsonschema:"chat_find id, Claude, Codex or OpenCode session or agent id (or prefix), transcript path, OpenCode locator {store}#{session id}, or a Claude chat's or OpenCode session's title"`
 	Lines      string `json:"lines,omitempty" jsonschema:"transcript line range FROM-TO, FROM- or one line number; the events those records produced"`
 	Since      string `json:"since,omitempty" jsonschema:"window start: HH:MM[:SS] UTC, an ISO time, +5m from the transcript start, -15m from its end"`
 	Until      string `json:"until,omitempty" jsonschema:"window end, same forms as since"`

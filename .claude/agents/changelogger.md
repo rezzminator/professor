@@ -1,6 +1,7 @@
 ---
 name: changelogger
 description: 'RELEASE-ONLY — spawned by releaser at NOTES: writes releases/v{NEW}.md, the CHANGELOG.md line and the coverage ledger for the adopter updating onto it; revise mode fixes what the check or the rehearsal flagged. releaser → here. Returns DONE or BLOCKED, section and action counts, the ledger tally.'
+available-to: [releaser]
 model: opus
 effort: xhigh
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent

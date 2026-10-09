@@ -3,9 +3,9 @@
 	url = https://github.com/rezzminator/agent-effort.git
 	branch = develop
 	ignore = dirty
-[submodule "agent-scope"]
-	path = plugins/agent-scope
-	url = https://github.com/rezzminator/agent-scope.git
+[submodule "tool-visibility-controller"]
+	path = plugins/tool-visibility-controller
+	url = https://github.com/rezzminator/tool-visibility-controller.git
 	branch = develop
 	ignore = dirty
 [submodule "buddy"]

@@ -46,17 +46,17 @@
       "keywords": ["claude-code", "sub-agent", "effort", "reasoning-effort", "function-hooks", "professor"]
     },
     {
-      "name": "agent-scope",
+      "name": "tool-visibility-controller",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/rezzminator/agent-scope.git",
-        "path": "plugins/agent-scope",
+        "url": "https://github.com/rezzminator/tool-visibility-controller.git",
+        "path": "plugins/tool-visibility-controller",
         "ref": "main"
       },
-      "description": "Scope Claude Code sub-agents to their parents: available-to: [parent] in an agent's frontmatter hides it from every other loop's agent listing and refuses every other dispatch.",
-      "homepage": "https://github.com/rezzminator/agent-scope",
+      "description": "Claude Code plugin for per-agent tool visibility — hide and refuse subagents, skills, MCP and built-in tools per loop",
+      "homepage": "https://github.com/rezzminator/tool-visibility-controller",
       "license": "MIT",
-      "keywords": ["claude-code", "sub-agent", "agent-listing", "agent-permissions", "function-hooks", "professor"]
+      "keywords": ["claude-code", "subagents", "mcp", "claude-skills", "tool-permissions", "function-hooks", "professor"]
     },
     {
       "name": "buddy",

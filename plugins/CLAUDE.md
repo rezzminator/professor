@@ -5,7 +5,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 # Vocabulary
 
 - agent-effort: a tag at the start of an Agent prompt sets that sub-agent's reasoning effort · `agent-effort/`
-- agent-scope: `available-to: [parent, …]` in an agent's frontmatter hides it from every other loop's agent listing and refuses every other dispatch · `agent-scope/`
+- tool-visibility-controller: a `visibility` field in agent, skill and command frontmatter, plus a scope file, decides per loop which agents, skills, MCP tools and built-in tools it sees and may invoke · `tool-visibility-controller/`
 - buddy: an ASCII companion above the prompt that reacts to the work and answers `/buddy` · `buddy/`
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`
 - callmeter: records every tool call, request, agent and turn into SQLite through a Go binary behind every hook · `callmeter/`
@@ -26,7 +26,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 ## Host
 
 - Users install each plugin from its repository's `main`.
-- An alpha `pfm install` copies agent-effort, agent-scope, cache-live-control and sub-agent-compact from their installable plugin when `claude.pluginCheckoutRoot` in `pfm.config.json` names this directory, and disables their GitHub copies.
+- An alpha `pfm install` copies agent-effort, cache-live-control, sub-agent-compact and tool-visibility-controller from their installable plugin when `claude.pluginCheckoutRoot` in `pfm.config.json` names this directory, and disables their GitHub copies.
 - `pfm install` copies neither callmeter nor buddy: callmeter's `-dev` marketplace copy is refreshed by its own `CLAUDE.md`; buddy installs from its own dev marketplace as `buddy@buddy-dev`.
 - An open chat loads a refreshed copy on `/reload-plugins`.
 

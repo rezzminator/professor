@@ -284,7 +284,7 @@ A — overlay rescue and recorded delivery use the live jailed chat boundary.
 
 **Source:** [pfm/cmd/pfm/picker_cancel_jail_test.go](../../../pfm/cmd/pfm/picker_cancel_jail_test.go) line 20 · **Observed:** 1.59s · **Class:** process/tmux
 
-newPickerCancelJail; direct tmux session script; send C-x/C-s/Escape; marker, primary, and kill-store reads.
+newPickerCancelJail; direct tmux session script; send C-x/Escape; marker, primary, and kill-store reads.
 
 A — picker input and side-effect suppression are interactive tmux behavior.
 

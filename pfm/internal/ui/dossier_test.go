@@ -292,10 +292,15 @@ func TestDossierOfAnActionRowSaysWhatEnterDoes(t *testing.T) {
 		}
 	}
 	fresh := ansi.Strip(selectChat(t, model, "New Claude chat").renderDossier(30))
-	for _, want := range []string{"starts a new Claude chat", "◖ ⏎ start ◗"} {
+	for _, want := range []string{"Enter chooses the engine,", "◖ ⏎ choose ◗"} {
 		if !strings.Contains(fresh, want) {
 			t.Errorf("the new-chat row's pane lacks %q:\n%s", want, fresh)
 		}
+	}
+	single := NewModel(wizardSnapshot(nil, []int{3}, nil))
+	if only := ansi.Strip(single.renderDossier(30)); !strings.Contains(only, "Enter starts a new Codex chat") ||
+		!strings.Contains(only, "◖ ⏎ start ◗") {
+		t.Errorf("a row with nothing to choose says Enter starts the chat:\n%s", only)
 	}
 	failed := compose.Row{Kind: compose.ProfessorUpdateFailed, Name: "update check failed"}
 	notice := strings.Join(dossierPurposeLinesText(dossierPurpose(failed), 36), " ")

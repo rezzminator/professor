@@ -66,8 +66,12 @@ func TestChatsFooterKeysFollowTheSelectedRow(t *testing.T) {
 		t.Errorf("the update banner arms the upgrade: %q", got)
 	}
 	model = selectChat(t, model, "New Claude chat")
-	if got := footerText(model.chatsFooterKeys(false)); !strings.Contains(got, "start") {
-		t.Errorf("a new-chat row arms start: %q", got)
+	if got := footerText(model.chatsFooterKeys(false)); !strings.Contains(got, "choose") {
+		t.Errorf("a new-chat row that asks something arms choose: %q", got)
+	}
+	single := NewModel(wizardSnapshot(nil, []int{3}, nil))
+	if got := footerText(single.chatsFooterKeys(false)); !strings.Contains(got, "start") {
+		t.Errorf("a new-chat row with nothing to ask arms start: %q", got)
 	}
 	model = selectChat(t, model, "P:BUILDER")
 	first, second := model.chatsFooterKeys(false)
@@ -112,10 +116,10 @@ func TestFooterKeepsTheShippedHelpOnOtherTabsAndFitsEveryWidth(t *testing.T) {
 		}
 	}
 	model.tab = TabChats
-	if wide := ansi.Strip(model.renderFooter(120)); !strings.Contains(wide, "type to fuzzy-find") {
+	if wide := ansi.Strip(model.renderFooter(120)); !strings.Contains(wide, "type to find") {
 		t.Errorf("the wide footer teaches search: %q", wide)
 	}
-	if narrow := ansi.Strip(model.renderFooter(80)); strings.Contains(narrow, "type to fuzzy-find") {
+	if narrow := ansi.Strip(model.renderFooter(80)); strings.Contains(narrow, "type to find") {
 		t.Errorf("the compact footer drops the search hint: %q", narrow)
 	}
 	model.tab = TabLimits

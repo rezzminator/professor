@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -327,6 +329,8 @@ func buildSnapshot(
 		OpenCodeAccountIDs:     machine.OpenCodeAccountIDs(),
 		Theme:                  machine.Theme,
 		Home:                   environment.Paths.Home,
+		ProjectDirs:            output.ProjectDirs,
+		DirExists:              isDirectory,
 		Cache1H:                machine.EffectiveClaude(environment.Primary).Cache1H,
 		Cache1HByAccount:       cacheByAccount,
 		NowNS:                  environment.NowNS,
@@ -704,7 +708,7 @@ func sendRefresh(
 // Treating it as a real value sent it straight into fleet.SetPrimaryAccount's
 // roster check, which rejected it and aborted the whole `pfm ls` run before
 // the picker's actual selection ever executed. A cancelled
-// picker (Esc/⌃C) never writes either: a ⌃S account switch is only a
+// picker (Esc/⌃C) never writes either: a wizard's account choice is only a
 // pending intent until the picker exits deliberately. An outcome that
 // already matches the persisted primary has nothing new to write.
 func primaryWriteback(kind ui.OutcomeKind, account, current int) (int, bool) {
@@ -756,4 +760,18 @@ func refreshWorkbenches(request scanRequest, discover func([]string) ([]workbenc
 	}
 	benches, walkErrors := discover(roots)
 	return workbench.WriteCache(paths.WorkbenchCache(values), benches, append(faults, walkErrors...))
+}
+
+// isDirectory is the picker's answer to an `@` path: a directory that exists
+// now. A path that is missing, or runs through a file, is no place; any other
+// stat failure is an error the picker names, never "no match".
+func isDirectory(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat %s: %w", path, err)
+	}
+	return info.IsDir(), nil
 }

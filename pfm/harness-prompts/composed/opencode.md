@@ -85,6 +85,8 @@ Work takes the lowest rung that fits; a higher rung needs its named reason:
 
 ✗ A five-file fix sent through `/flights:spec`: a grill for work whose requirements are already plain. ✓ `flights-foreman` with the problem.
 
+A brief relays the user's intent, never their words: read what they mean from their message and the whole conversation, and state it as the precise outcome they want, with its acceptance. A value they fixed — a name, a quoted string, a number, a path — travels verbatim; a fork only the user can settle is asked before the dispatch, never guessed into the brief.
+
 A manual — an agent role, a flights command — runs step by step as written: no step added, none skipped, none reordered. A caller's rule that contradicts the manual (a review inside a builder, a full suite per unit, an extra report) is not merged and not passed down: follow the manual and name the refused rule in your return. Only the user, in their own message in this chat, changes a manual's step.
 
 ## You hold a flight

@@ -230,6 +230,73 @@ checks_templates_mirrors_generate() {
 
 }
 
+checks_templates_global_variants() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" decl="$REPO_ROOT/templates/global/agents/variants.json"
+  local jail home names declared name rendered=0 missing="" out rc=0 named=""
+  head_ "templates — global agent variants render"
+  # templates/global/agents/variants.json declares agents re-emitted from a
+  # source agent with swapped body text. A swap whose text drifted from its
+  # source fails only when engine-sync renders it, which an adopter's install
+  # does: this step renders every declared variant with the real binary, built
+  # from the mounted source, into a jail home and Codex home (the real $HOME is
+  # never read or written). Its own broken state is a red line: a declaration
+  # that cannot be read, one that declares nothing, a render error, or a
+  # rendered count that differs from the declared count (a lookup that found
+  # nothing would otherwise read as clean).
+  if ! need_tool go templates || ! need_tool node templates; then
+    fail_step "global agent variants NOT RENDERED — the toolchain is missing"
+    return
+  elif ! engine_sync_build "$es_bin"; then
+    fail_step "global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)"
+    return
+  elif [[ ! -f "$decl" ]]; then
+    fail_step "global agent variants NOT RENDERED — $decl is missing, so nothing was looked up"
+    return
+  elif ! names="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(d===null||typeof d!=="object"||Array.isArray(d))throw new Error("not an object of variants");console.log(Object.keys(d).sort().join("\n"))' "$decl" 2>&1)"; then
+    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: $names"
+    return
+  fi
+  declared=$(grep -c . <<<"$names" || true)
+  if (( declared == 0 )); then
+    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json declares no variant, so nothing could render"
+    return
+  fi
+  mkdir -p "$TMP_BASE/engine-sync"
+  if ! jail="$(mktemp -d "$TMP_BASE/engine-sync/global-variants.XXXXXX")"; then
+    fail_step "global agent variants NOT RENDERED — the jail home could not be created under $TMP_BASE/engine-sync"
+    return
+  fi
+  home="$jail/home"
+  mkdir -p "$home/.claude" "$home/.codex"
+  out="$jail/engine-sync-global.out"
+  env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u ENGINE_SYNC_HOME -u ENGINE_SYNC_STATE -u CODEX_HOME \
+    HOME="$home" "$es_bin" global --home "$home" --source-repo "$REPO_ROOT" \
+    --claude-config-dir "$home/.claude" --codex-home "$home/.codex" >"$out" 2>&1 || rc=$?
+  if (( rc != 0 )); then
+    cat "$out"
+    while IFS= read -r name; do
+      if grep -qF "variant \"$name\"" "$out"; then named="${named:+$named, }$name"; fi
+    done <<<"$names"
+    fail_step "global agent variants FAILED to render (engine-sync global exit $rc; variant named in the error: ${named:-none — read the output above})"
+  else
+    while IFS= read -r name; do
+      if [[ -f "$home/.codex/agents/$name.toml" && -L "$home/.claude/agents/$name.md" && -s "$home/.claude/agents/$name.md" ]]; then
+        rendered=$((rendered + 1))
+      else
+        missing="${missing:+$missing, }$name"
+      fi
+    done <<<"$names"
+    if (( rendered != declared )); then
+      cat "$out"
+      fail_step "global agent variants: $rendered of $declared declared variant(s) rendered — missing: $missing"
+    else
+      ok "all $declared global agent variant(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
+    fi
+  fi
+  rm -rf "$jail"
+
+}
+
 checks_templates_mirrors_marker() {
   head_ "templates — codex generated-marker claim"
   # engine-sync never touches a file it does not recognize as generated, so a
@@ -389,6 +456,7 @@ checks_templates() {
   checks_templates_scratch_paths
   checks_templates_descriptions
   checks_templates_mirrors_generate
+  checks_templates_global_variants
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
   checks_templates_release_check
@@ -832,6 +900,7 @@ gate_run() { # pfm, templates, or all
     steps_add templates.scratch-paths checks_templates_scratch_paths
     steps_add templates.descriptions checks_templates_descriptions
     steps_add templates.mirrors checks_templates_mirrors
+    steps_add templates.global-variants checks_templates_global_variants
     steps_add templates.release-check checks_templates_release_check
     steps_add templates.refresh-scope checks_templates_refresh_scope
     steps_add templates.pfm-guard checks_templates_pfm_guard

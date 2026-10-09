@@ -114,10 +114,10 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			warn:        "row p: nested agents: open sub-agent transcript",
 		},
 		{
-			name:        "an agent that spawned none reads solo",
+			name:        "an agent that spawned none carries no nesting part",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "other": {turnToolCall}},
 			parents:     map[string]string{"p": "", "other": ""},
-			nested:      "solo",
+			nested:      "",
 			status:      finished,
 		},
 	}
@@ -125,7 +125,7 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, tc.transcripts, tc.parents)
 			got, warned := renderOneSubagent(t, session, parentTask)
-			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M $0.01/2.0K/35"
+			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35"
 			if tc.nested != "" {
 				wantStart = tc.nested + "│" + wantStart
 			}
@@ -151,7 +151,7 @@ func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "solo│▱") {
+	if !strings.HasPrefix(got, "▱") {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := renderOneSubagent(t, session,
@@ -221,7 +221,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			`"contextWindowSize":1000,"tokenCount":10,"label":"map it"}`
 	}
 	const (
-		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K $0.01/2.0K/35/2│scout·general-purpose│opus│"
+		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K Σ$0.01/2.0K/35/2│scout·general-purpose│opus│"
 		fullTail   = " 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│map it"
 		parentTail = " 3m:30s│1 error│💾5m✓1m:38s 94%│⟲1│map it"
 	)
@@ -242,28 +242,28 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "completed, first minute: the whole line muted, Claude Code's faint left on",
 			task:      row("a1", "completed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: "solo│" + fullRow + "completed" + fullTail,
+			wantPlain: fullRow + "completed" + fullTail,
 			check:     mutedWhole,
 		},
 		{
 			name:      "completed, after a minute: collapsed",
 			task:      row("a1", "completed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "completed 2m0s ago│$0.01/2.0K/35/2│scout·general-purpose│map it",
+			wantPlain: "completed 2m0s ago│Σ$0.01/2.0K/35/2│scout·general-purpose│map it",
 			check:     mutedCollapsed,
 		},
 		{
 			name:      "failed, first minute: full colour, it is an alert",
 			task:      row("a1", "failed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: "solo│" + fullRow + "failed" + fullTail,
+			wantPlain: fullRow + "failed" + fullTail,
 			check:     bright,
 		},
 		{
 			name:      "failed, after a minute: collapsed, the status still red",
 			task:      row("a1", "failed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "failed 2m0s ago│$0.01/2.0K/35/2│scout·general-purpose│map it",
+			wantPlain: "failed 2m0s ago│Σ$0.01/2.0K/35/2│scout·general-purpose│map it",
 			check:     redStatus,
 		},
 		{

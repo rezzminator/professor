@@ -323,7 +323,7 @@ func activeContent(
 ) []rowPart {
 	gauge := cTokens + formatContextTokens(task.TokenCount) + reset
 	if task.ContextWindowSize > 0 {
-		percent := int(task.TokenCount * 100 / task.ContextWindowSize)
+		percent := gaugePercent(float64(task.TokenCount) * 100 / float64(task.ContextWindowSize))
 		gauge = makeBar(percent, subagentBarWidth) + " " +
 			percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " +
 			gauge + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset

@@ -225,15 +225,16 @@ func messageTurnOpen(line []byte) (open, ok bool) {
 }
 
 // nestingSegment renders "2/5": the agents below the task working right now
-// (green) over all of them at every depth (the tools colour). "solo" when it
-// spawned none; "?/?" when the scan failed, and an "(N unread)" suffix for
-// agents whose turn state could not be read.
+// (green) over all of them at every depth (the tools colour). Nothing when it
+// spawned none, so a lone agent's row opens on its gauge; "?/?" when the scan
+// failed, and an "(N unread)" suffix for agents whose turn state could not be
+// read.
 func nestingSegment(nest agentNesting) string {
 	if nest.err != nil {
 		return cWarn + "?/?" + reset
 	}
 	if nest.total == 0 {
-		return cMuted + "solo" + reset
+		return ""
 	}
 	working := cRunning + strconv.Itoa(nest.active) + reset
 	line := working + cMuted + "/" + reset + cTools + strconv.Itoa(nest.total) + reset

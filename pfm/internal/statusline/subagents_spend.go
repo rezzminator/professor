@@ -256,20 +256,22 @@ func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend
 	return total
 }
 
-// spendSegment renders "$1.24/3.1M/42K/12": USD, prompt and output tokens,
-// then tool calls, for the agent and every agent below it. A floor (partial) gets a "+?" in the
-// warning colour; with nothing priced at all the dollar part is "$?". An own
-// transcript that could not be read is "$?/?/?/?": nothing it says is a total.
+// spendSegment renders "Σ$1.24/3.1M/42K/12": USD, prompt and output tokens,
+// then tool calls, for the agent and every agent below it. The Σ marks a
+// lifetime sum, so it never reads as part of the context gauge beside it. A
+// floor (partial) gets a "+?" in the warning colour; with nothing priced at
+// all the dollar part is "$?". An own transcript that could not be read is
+// "Σ$?/?/?/?": nothing it says is a total.
 func spendSegment(activity agentActivity) string {
 	if activity.err != nil {
-		return cWarn + "$?/?/?/?" + reset
+		return cMuted + "Σ" + reset + cWarn + "$?/?/?/?" + reset
 	}
 	spend := activity.spend
 	dollars := "$?"
 	if spend.priced > 0 || !spend.partial {
 		dollars = "$" + strconv.FormatFloat(spend.usd, 'f', 2, 64)
 	}
-	line := cCost + dollars + reset + cMuted + "/" + reset +
+	line := cMuted + "Σ" + reset + cCost + dollars + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
 		cTools + strconv.Itoa(spend.tools) + reset

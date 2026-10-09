@@ -858,7 +858,7 @@ func codexSegment(
 		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)
 	}
 	if !transcriptGauge && window > 0 && contextTokens > 0 {
-		percent := int(contextTokens * 100 / window)
+		percent := gaugePercent(float64(contextTokens) * 100 / float64(window))
 		if percent > 100 {
 			percent = 100
 		}

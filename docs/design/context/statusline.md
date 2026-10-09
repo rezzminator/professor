@@ -46,9 +46,9 @@ The command is rendered with `~` expanded to the home directory. `~/.local/bin/p
 
 | Field | Shows | Rule |
 | --- | --- | --- |
-| nested | `2/5` | agents below this one working right now (their own turn is open), in green, over every agent below it at any depth, in the tools colour; `solo`, muted, when it spawned none. It leads the row because a parent row is read for it |
-| gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize` |
-| spend | `$1.24/3.1M/42K/12` | follows the gauge after a space, not a `│`: USD, prompt tokens (uncached, cache read, cache write), output tokens, distinct `tool_use` calls, billed by this agent and every agent below it at any depth, over each whole transcript, so spend from before a compaction counts. A response counts once per `message.id`; a usage block whose counts sit only in `usage.iterations` is folded, and a cache write is priced by its TTL split, the uncovered part at the 5-minute rate. Rates come from pfm's price table (`pfm/internal/pricing/prices.json`, the newer of the clone file and the embedded copy, plus any `pfm.prices.json` override), read without a fetch; a row's long tier applies to a response whose context is above its threshold, as `/tokens` prices it. A floor carries a yellow `+?`: a model the table cannot price, or a transcript below it that cannot be read. `$?` when nothing could be priced, `$?/?/?/?` when the agent's own transcript cannot be read |
+| nested | `2/5` | agents below this one working right now (their own turn is open), in green, over every agent below it at any depth, in the tools colour; nothing when it spawned none, so a lone agent's row opens on its gauge. It leads the row because a parent row is read for it |
+| gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize`, rounded to the nearest percent; a window not yet full stops at 99%, so `100%` always means full |
+| spend | `Σ$1.24/3.1M/42K/12` | follows the gauge after a space, not a `│`, opened by a muted `Σ`: a lifetime sum, never a share of the context gauge beside it. USD, prompt tokens (uncached, cache read, cache write), output tokens, distinct `tool_use` calls, billed by this agent and every agent below it at any depth, over each whole transcript, so spend from before a compaction counts. A response counts once per `message.id`; a usage block whose counts sit only in `usage.iterations` is folded, and a cache write is priced by its TTL split, the uncovered part at the 5-minute rate. Rates come from pfm's price table (`pfm/internal/pricing/prices.json`, the newer of the clone file and the embedded copy, plus any `pfm.prices.json` override), read without a fetch; a row's long tier applies to a response whose context is above its threshold, as `/tokens` prices it. A floor carries a yellow `+?`: a model the table cannot price, or a transcript below it that cannot be read. `$?` when nothing could be priced, `Σ$?/?/?/?` when the agent's own transcript cannot be read |
 | identity | `scout·tracer` | the task name, then its role (`agentType`) |
 | model | `opus·🏎️ high` | the model family, then the effort (see [Effort](#effort)) |
 | status | `running 2m:0s` | status plus time since `startTime`, in the cache window's h:m:s shape; a finished task's clock stops at its transcript's last entry. `delegating` replaces a stopped status while any agent below still works, and its clock runs on |
@@ -69,7 +69,7 @@ A row is finished once its status is `completed`, `failed`, `killed` or `error` 
 
 - A completed row, for its first minute: the whole row in one muted colour, without `ESC[22m`, so Claude Code's faint stays on and the row reads as disabled.
 - A failed, killed or errored row, for its first minute: a full row, because it is an alert.
-- Any finished row after one minute since its transcript's last entry: collapsed to `completed 3m0s ago│$1.24/3.1M/42K/12│scout·tracer│label`, muted, the status word red when it is a failure.
+- Any finished row after one minute since its transcript's last entry: collapsed to `completed 3m0s ago│Σ$1.24/3.1M/42K/12│scout·tracer│label`, muted, the status word red when it is a failure.
 
 ## Where each field comes from
 
@@ -99,6 +99,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 ## The main statusline
 
+- The context gauge rounds as a row's gauge does: to the nearest percent, stopping at 99% until the window is full (`gaugePercent`, `pfm/internal/statusline/context.go`).
 - After the context gauge, the spend block reads `💰$3.20/1.2M/40K/88`: Claude Code's own `cost.total_cost_usd` (dim, yellow from $2, red from $10), then the prompt tokens, output tokens and distinct tool calls of the chat's transcript and every sub-agent transcript beside it, the same scope that cost covers. It is read the way the sub-agent spend is, a response once per `message.id`, its last line. `+?` marks a sub-agent transcript that could not be read, and `?/?/?` a chat transcript that could not be. A Codex chat keeps `🧮` context tokens and `✎` prompts in its place (`pfm/internal/statusline/context.go`).
 - The model block reads `◆ Opus 5.5·🚀 xhigh`: model symbol and name, a muted `·`, then the effort (`pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.

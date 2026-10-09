@@ -380,7 +380,7 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	for _, want := range []string{
 		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·🏎️ high", "sample",
-		"42%", "💰$3.42/", "⏳ 5m32s", "·2 ·1",
+		"43%", "💰$3.42/", "⏳ 5m32s", "·2 ·1",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("render lacks %q:\n%q", want, got)

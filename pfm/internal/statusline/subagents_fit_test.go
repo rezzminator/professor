@@ -10,7 +10,7 @@ import (
 func TestFitRowDropsByRank(t *testing.T) {
 	parts := func() []rowPart {
 		return []rowPart{
-			{text: "solo"},
+			{text: "1/3"},
 			{text: "gauge $1/2/3"},
 			{text: "scout"},
 			{text: "opus·high", short: "opus", drop: dropEffort},
@@ -21,7 +21,7 @@ func TestFitRowDropsByRank(t *testing.T) {
 			{text: "label"},
 		}
 	}
-	full := "solo│gauge $1/2/3│scout│opus·high│running│cache│⟲1│pfm│label"
+	full := "1/3│gauge $1/2/3│scout│opus·high│running│cache│⟲1│pfm│label"
 	cases := []struct {
 		name    string
 		columns int
@@ -31,11 +31,11 @@ func TestFitRowDropsByRank(t *testing.T) {
 		{"a row that fits keeps every part", len([]rune(full)) + rowPrefixWidth, full},
 		{
 			"one column short: the cwd goes first", len([]rune(full)) + rowPrefixWidth - 1,
-			"solo│gauge $1/2/3│scout│opus·high│running│cache│⟲1│label",
+			"1/3│gauge $1/2/3│scout│opus·high│running│cache│⟲1│label",
 		},
 		{
 			"narrow: everything ranked goes, the effort shortens to the family", 40,
-			"solo│gauge $1/2/3│scout│opus│running│label",
+			"1/3│gauge $1/2/3│scout│opus│running│label",
 		},
 	}
 	for _, tc := range cases {

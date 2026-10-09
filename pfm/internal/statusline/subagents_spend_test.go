@@ -66,10 +66,10 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 		warn        string
 	}{
 		{
-			name:        "solo: its own two responses, the repeated one once",
+			name:        "a lone agent: its own two responses, the repeated one once",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": ""},
-			want:        "$0.01/2.0K/35/2",
+			want:        "Σ$0.01/2.0K/35/2",
 		},
 		{
 			name: "a streamed response counts its last line, the final output",
@@ -79,7 +79,7 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 				turnEnded,
 			}},
 			parents: map[string]string{"p": "", "c1": "p"},
-			want:    "$0.01/3.0K/135/2",
+			want:    "Σ$0.01/3.0K/135/2",
 		},
 		{
 			name: "a child and a grandchild add in",
@@ -87,19 +87,19 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 				"p": agentTranscriptLines, "c1": {childResponse, turnEnded}, "g1": {grandchildResponse, turnEnded},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
-			want:    "$8.01/1.0M/135/2",
+			want:    "Σ$8.01/1.0M/135/2",
 		},
 		{
 			name:        "a model the table cannot price leaves a floor",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {unpricedResponse, turnEnded}},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "$0.01/2.5K/85/2+?",
+			want:        "Σ$0.01/2.5K/85/2+?",
 		},
 		{
 			name:        "a child transcript that cannot be read leaves a floor and its cause",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "$0.01/2.0K/35/2+?",
+			want:        "Σ$0.01/2.0K/35/2+?",
 			warn:        "open sub-agent transcript",
 		},
 	}
@@ -129,7 +129,7 @@ func TestRenderSubagentsSpendWithoutPrices(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
 		t.Fatalf("row is not JSON: %v: %q", err, got)
 	}
-	if content := stripANSICodes(row.Content); !strings.Contains(content, "1.0K/1.0M $?/2.0K/35/2│") {
-		t.Fatalf("content = %q, want $?/2.0K/35/2 after the gauge", content)
+	if content := stripANSICodes(row.Content); !strings.Contains(content, "1.0K/1.0M Σ$?/2.0K/35/2│") {
+		t.Fatalf("content = %q, want Σ$?/2.0K/35/2 after the gauge", content)
 	}
 }

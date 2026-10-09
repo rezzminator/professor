@@ -3,7 +3,7 @@ name: tracetree
 description: Internal kit of tracer and sub-tracer — tracetree.py opens a trace run, stores each node's hops once, waits for the whole tree, checks every quote against the file and maps the components. Not invoked directly — ask tracer; a finished run → /read-tracer-run.
 visibility:
   visible-to:
-    include: [tracer, tracer-pro, tracer-pro-max, sub-tracer]
+    include: [tracer, sub-tracer]
 ---
 
 # tracetree

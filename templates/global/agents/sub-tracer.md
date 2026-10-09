@@ -1,9 +1,9 @@
 ---
 name: sub-tracer
-description: TRACER-ONLY follows one thread of code — spawned by tracer, tracer-pro, tracer-pro-max and sub-tracer, never delegated to directly. Returns one line naming its .hops file.
+description: TRACER-ONLY follows one thread of code — spawned by tracer and sub-tracer, never delegated to directly. Returns one line naming its .hops file.
 visibility:
   visible-to:
-    include: [tracer, tracer-pro, tracer-pro-max, sub-tracer]
+    include: [tracer, sub-tracer]
 tools: Read, Grep, Glob, Bash, Agent
 model: haiku
 effort: low

@@ -1,7 +1,7 @@
 ---
 name: flights-foreman
 description: 'Builds one request start to finish — route any repo fix, build or feature here, not to general-purpose: "fix X", "build X", "X fails, find why and fix it", "these five bugs", a spec from /flights:spec. Pass the request or its requirements.md path, all you hold, acceptance, testing manuals, worktree, flight directory. /flights:spec → here → child flights-foreman, flights-mechanical-executor, flights-lander. Returns DONE, PARTIAL, FAILED or BLOCKED, a row per unit, the gate verdict.'
-model: opus
+model: sonnet
 effort: high
 codex-model: gpt-6.1-sol
 codex-effort: high

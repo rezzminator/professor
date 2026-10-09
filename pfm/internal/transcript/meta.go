@@ -63,14 +63,16 @@ func (meta Meta) ContextPercent() float64 {
 }
 
 // contextOf is the context a Claude usage block reports: its prompt tokens.
-// A context is one request's, never a sum, so a response that carries its
-// counts only in iterations reports its last iteration, the request that ran
-// last.
+// A context is one request's, never a sum, so a response that billed several
+// requests (counts only in iterations, or an advisor consulted between two)
+// reports its last request, the one that ran last; an advisor's request is
+// another model's and never this one's.
 func contextOf(usage pricing.UsageBlock) int64 {
-	if n := len(usage.Iterations); usage.Input+usage.CacheRead+usage.CacheCreation == 0 && n > 0 {
-		usage = usage.Iterations[n-1]
+	requests := usage.Requests()
+	if len(requests) == 0 {
+		return 0
 	}
-	return usage.Input + usage.CacheRead + usage.CacheCreation
+	return requests[len(requests)-1].Context()
 }
 
 type metaRecord struct {

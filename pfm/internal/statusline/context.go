@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -43,7 +44,7 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 		}
 	}
 	if runtime.Engine != pfmengine.Codex {
-		l2 += sep + sessionSpendSegment(data)
+		l2 += sep + sessionSpendSegment(data, runtime.Prices)
 	}
 	// Never width-gated: a recorded launch reports its cache window and
 	// transcript readability. Codex reports no cache split.
@@ -62,33 +63,60 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	), contextTokens
 }
 
-// sessionSpendSegment is the main line's "💰$3.20/1.2M/40K/88": Claude Code's
-// own session cost, then the prompt and output tokens and the tool calls of
-// this chat's transcript and every sub-agent's beside it — the scope that cost
-// covers. A floor carries "+?"; a transcript that cannot be read is "?/?/?".
-func sessionSpendSegment(data input) string {
-	cost := data.Cost.TotalCostUSD
-	color := dim
-	if cost >= 10 {
-		color = red
-	} else if cost >= 2 {
-		color = yellow
-	}
-	line := color + "💰" + fmt.Sprintf("$%.2f", cost) + reset + cMuted + "/" + reset
+// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 +$1.87 unlogged".
+// The dollars are Claude Code's cost.total_cost_usd: the whole session at list
+// price, including the requests it makes that no transcript records (prompt
+// suggestions, summaries, titles). The tokens and tool calls are this chat's
+// transcript and every sub-agent's, priced at the served table the same way
+// as each sub-agent row; whatever the total holds beyond that is named
+// "+$X unlogged", so the rows and the line add up. A logged price above the
+// total is pfm's own error and renders "logged $X > total" in warning.
+// Without a Claude Code figure the logged price leads; a floor carries "+?";
+// a transcript that cannot be read is "?/?/?" after the total.
+func sessionSpendSegment(data input, prices *pricing.Prices) string {
+	total := data.Cost.TotalCostUSD
 	if strings.TrimSpace(data.TranscriptPath) == "" {
-		return line + cWarn + "?/?/?" + reset
+		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset
 	}
-	spend, err := sessionSpend(data.TranscriptPath)
+	spend, err := sessionSpend(data.TranscriptPath, prices)
 	if err != nil {
-		return line + cWarn + "?/?/?" + reset
+		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset
+	}
+	logged := spend.priced > 0 || !spend.partial
+	line := spendDollars(spend.usd, logged)
+	if total > 0 {
+		line = spendDollars(total, true)
 	}
 	line += cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
 		cTools + strconv.Itoa(spend.tools) + reset
-	if spend.partial {
+	if spend.partial && logged {
 		line += cWarn + "+?" + reset
 	}
+	if total <= 0 || !logged {
+		return line
+	}
+	switch gap := total - spend.usd; {
+	case gap >= 0.005:
+		line += cMuted + fmt.Sprintf(" +$%.2f unlogged", gap) + reset
+	case gap <= -0.005:
+		line += cWarn + fmt.Sprintf(" logged $%.2f > total", spend.usd) + reset
+	}
 	return line
+}
+
+// spendDollars is "💰$4.68/" coloured by size, or "💰$?/" when unknown.
+func spendDollars(usd float64, known bool) string {
+	if !known {
+		return cWarn + "💰$?" + reset + cMuted + "/" + reset
+	}
+	color := dim
+	if usd >= 10 {
+		color = red
+	} else if usd >= 2 {
+		color = yellow
+	}
+	return color + "💰" + fmt.Sprintf("$%.2f", usd) + reset + cMuted + "/" + reset
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.
@@ -138,6 +166,9 @@ func contextWindow(runtime Runtime, data input, meta transcript.Meta) int64 {
 	}
 	if runtime.Engine == pfmengine.Codex {
 		return meta.ContextWindow
+	}
+	if data.ContextWindow.ContextWindowSize > 0 {
+		return data.ContextWindow.ContextWindowSize
 	}
 	model := data.Model.ID
 	if model == "" {

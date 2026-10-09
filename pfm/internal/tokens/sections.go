@@ -23,6 +23,18 @@ func runUSD(r *run) string {
 	return dollars(r.usd)
 }
 
+// advisorShare is " · advisor 12.0%" for a run set whose spend included an
+// advisor's ("n/a" when the table could not price a consultation), "" for none.
+func advisorShare(advisor advisorSpend, total float64) string {
+	switch {
+	case advisor.calls == 0:
+		return ""
+	case advisor.unpriced != 0:
+		return " · advisor " + notPriced
+	}
+	return " · advisor " + pctText(advisor.usd, total)
+}
+
 func (a *auditor) runLine(r *run) string {
 	name := r.agentType
 	if name == "" {
@@ -45,7 +57,7 @@ func (a *auditor) runLine(r *run) string {
 		padStart(num(round(r.ctxPeak/1000)), 3) + "K · " + padStart(num(round(wallMinutes(r))), 4) + "m wall/" +
 		padStart(num(round(r.toolWaitMs/60e3)), 4) + "m in tools · rw " + padStart(dollars(r.rewrites.usd), 6) +
 		" · errs " + padStart(num(r.errs), 3) + " · reread " + padStart(num(r.rereadN), 3) + " · poll " +
-		padStart(dollars(r.pollUSD), 6) + " · ttl " + ttlMix(r.tok.cw5, r.tok.cw1) + repeat
+		padStart(dollars(r.pollUSD), 6) + " · ttl " + ttlMix(r.tok.cw5, r.tok.cw1) + advisorNote(r.advisor) + repeat
 }
 
 func (a *auditor) reportTools() {
@@ -154,10 +166,10 @@ func (a *auditor) familyDrill(t *totals) {
 			by.set(item.key, fixedNum(item.value.(float64), 2))
 		}
 		a.print("  main loop: " + num(main.calls) + " calls · ctx " + num(round(main.ctxFirst/1000)) + "→" +
-			num(round(main.ctxPeak/1000)) + "K · mean " + num(round(main.ctxSum/main.calls/1000)) + "K · resets " +
+			num(round(main.ctxPeak/1000)) + "K · mean " + num(round(meanContext(main)/1000)) + "K · resets " +
 			num(main.resets) + " · rewrites " + num(main.rewrites.n) + "× " + dollars(main.rewrites.usd) + " " +
 			stringify(by, 0))
-		a.print("  main loop paid for: " + categoryMix(main.cats, main.usd, 6))
+		a.print("  main loop paid for: " + categoryMix(main.cats, main.usd, 6) + advisorShare(main.advisor, main.usd))
 		break
 	}
 	byModel := newObject()
@@ -183,6 +195,10 @@ func (a *auditor) familyDrill(t *totals) {
 			}
 		}
 		total := usdOf(key)
+		var advisor advisorSpend
+		for _, r := range rs {
+			advisor.merge(r.advisor)
+		}
 		a.print("  " + key + ": " + num(float64(len(rs))) + " runs · " + dollars(total) + " · median " +
 			dollars(medianOf(rs, func(r *run) float64 { return r.usd })) + " · median calls " +
 			num(medianOf(rs, func(r *run) float64 { return r.calls })) + " · median peak " +
@@ -190,7 +206,7 @@ func (a *auditor) familyDrill(t *totals) {
 				round(medianOf(rs, func(r *run) float64 { return r.ctxPeak / 1000 })),
 			) + "K · median wall " +
 			num(round(medianOf(rs, wallMinutes))) + "m")
-		a.print("     paid for: " + categoryMix(cats, total, 6))
+		a.print("     paid for: " + categoryMix(cats, total, 6) + advisorShare(advisor, total))
 	}
 	a.print("  costliest agents:")
 	sorted := append([]*run(nil), f.agentRuns...)

@@ -330,7 +330,7 @@ func configRuntime(t *testing.T, home, flagPath, envPath, stateEnv string) Runti
 		t.Fatal(err)
 	}
 	runtime := Runtime{Home: home, Env: map[string]string{}}
-	runtime.UseConfig(machine)
+	runtime.UseConfig(machine, io.Discard)
 	return runtime
 }
 

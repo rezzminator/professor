@@ -411,8 +411,7 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 		if negativeUsage(usage) {
 			return fmt.Errorf("assistant usage contains a negative token count")
 		}
-		billed, _ := usage.Billed()
-		total := billed.Input + billed.Output + billed.CacheRead + billed.Write5m + billed.Write1h
+		total := claudeTokens(usage)
 		if total > 0 && !entry.messageCounted(record.Message.ID, record.RequestID) {
 			entry.claudeTokens += total
 			entry.known = true
@@ -429,6 +428,17 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 		}
 	}
 	return nil
+}
+
+// claudeTokens is every token the response billed: the executor's and each
+// advisor consultation's, which the executor's top level never carries.
+func claudeTokens(usage pricing.UsageBlock) int64 {
+	billed, _ := usage.Billed()
+	total := billed.Context() + billed.Output
+	for _, advisor := range usage.Advisors() {
+		total += advisor.Usage.Context() + advisor.Usage.Output
+	}
+	return total
 }
 
 // negativeUsage reports a negative count at the top level or in any

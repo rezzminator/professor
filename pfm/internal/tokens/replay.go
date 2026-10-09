@@ -13,6 +13,9 @@ import (
 // tokenCounts are a run's tokens or dollars by billing column.
 type tokenCounts struct{ in, out, cw5, cw1, cr float64 }
 
+// sum is every column added, in the columns' order.
+func (t tokenCounts) sum() float64 { return t.in + t.out + t.cw5 + t.cw1 + t.cr }
+
 func (t tokenCounts) json() *object {
 	return newObject().set("in", t.in).set("out", t.out).set("cw5", t.cw5).set("cw1", t.cw1).set("cr", t.cr)
 }
@@ -23,9 +26,12 @@ type repeatedCommand struct {
 	n   float64
 }
 
-// timelineRow is one model call of a --timeline run.
+// timelineRow is one model call of a --timeline run, or a response that billed
+// only its advisor (consultOnly: no call, no context).
 type timelineRow struct {
 	n, ts, ctx, out float64
+	advisor         advisorSpend // the consultations the call billed; their dollars are part of usd
+	consultOnly     bool
 	gap, usd        *float64
 	tools           []*timelineSlot
 }
@@ -40,9 +46,11 @@ type run struct {
 	title, agentType                          string
 	depth, calls, usd                         float64
 	usdBy                                     tokenCounts
+	advisor                                   advisorSpend
 	models, efforts                           *object
 	t0, t1, activeMs, toolWaitMs              float64
 	ctxFirst, ctxPeak, ctxSum                 float64
+	marked                                    bool // a call set ctxFirst
 	bands                                     *object
 	rewrites                                  struct {
 		n, usd  float64
@@ -183,10 +191,39 @@ func (a *auditor) replay(file string, c *collected) *run {
 		if math.IsNaN(r.firstTS) {
 			r.firstTS = call.ts
 		}
+		if len(call.requests) == 0 {
+			// Only the advisor billed: the executor made no request, so the response is no
+			// call and moves no context; its consultations are booked at their own model.
+			switch {
+			case call.ts < a.since:
+			case call.copied:
+				a.scan.copiedCalls++
+				copiedCalls++
+			default:
+				a.countUnknown(call)
+				// the response's own model is the run's even when only its advisor billed
+				r.models.bump(modelKeyOf(call), 0)
+				r.efforts.bump(call.effort, 0)
+				r.span(call.ts)
+				advisor := a.bookAdvisors(r, call, call.ts, project)
+				if c.timelineRun {
+					var usd *float64
+					if advisor.unpriced == 0 {
+						usd = &advisor.usd
+					}
+					r.timeline = append(
+						r.timeline,
+						timelineRow{n: r.calls, ts: call.ts, consultOnly: true, usd: usd, tools: c.issued[e.call]},
+					)
+				}
+			}
+			continue
+		}
 		cw5, cw1 := float64(u.Write5m), float64(u.Write1h)
 		cwAll := cw5 + cw1
 		cr, inp, out := float64(u.CacheRead), float64(u.Input), float64(u.Output)
-		ctx := inp + cr + cwAll
+		// a context is one request's: the last one the response made
+		ctx := float64(call.requests[len(call.requests)-1].Context())
 		reset := false
 		if first {
 			total := 0.0
@@ -281,8 +318,9 @@ func (a *auditor) replay(file string, c *collected) *run {
 			prev = &previousCall{ctx, ts, call.model}
 			continue
 		}
-		row, rates, found := a.prices.rates(call.model, ctx)
-		parts, priced := row.ClaudeCostParts(u)
+		a.countUnknown(call)
+		row, _, found := a.prices.rates(call.model, ctx)
+		parts, priced := row.ClaudeRequestsCostParts(call.requests)
 		modelKey := modelKeyOf(call)
 		gap := (*float64)(nil)
 		if !math.IsNaN(lastToolTS) {
@@ -303,14 +341,23 @@ func (a *auditor) replay(file string, c *collected) *run {
 			g.calls++
 			r.models.bump(modelKey, 0)
 			r.efforts.bump(call.effort, 0)
+			r.tok.add(inp, out, cw5, cw1, cr)
+			g.tok.add(inp, out, cw5, cw1, cr)
+			advisor := a.bookAdvisors(r, call, ts, project)
 			if c.timelineRun {
 				r.timeline = append(
 					r.timeline,
-					timelineRow{n: r.calls, ts: ts, gap: gap, ctx: ctx, out: out, tools: c.issued[e.call]},
+					timelineRow{
+						n:       r.calls,
+						ts:      ts,
+						gap:     gap,
+						ctx:     ctx,
+						out:     out,
+						advisor: advisor,
+						tools:   c.issued[e.call],
+					},
 				)
 			}
-			r.tok.add(inp, out, cw5, cw1, cr)
-			g.tok.add(inp, out, cw5, cw1, cr)
 			r.mark(ts, ctx)
 			prev = &previousCall{ctx, ts, call.model}
 			continue
@@ -318,58 +365,38 @@ func (a *auditor) replay(file string, c *collected) *run {
 		if cwAll != 0 && !call.split {
 			a.scan.tierUnknownCalls++
 		}
-		// Rates are taken as multiples of base, the input rate; a free model (in: 0) uses
-		// base 1 so no ratio divides by zero; the uncached tail weighs un1 = in/base.
-		base := orZero(rates.In)
-		if base == 0 {
-			base = 1
-		}
-		perToken, readRatio, uncached := base/1e6, orZero(readRate(row, rates))/base, orZero(rates.In)/base
-		write := orZero(rates.W5m) / base
-		if cwAll != 0 {
-			write = (float64(cw5*orZero(rates.W5m)) + float64(cw1*orZero(rates.W1h))) / (cwAll * base)
-		}
 		usd := parts.Total()
-		// attribute: charge everything as a cache read, then correct the tail beyond cr
+		effortKey := r.kind + " · " + modelStem(call.model) + " · effort " + call.effort
+		a.bookSpend(r, parts, ctx, out, ts, effortKey, project)
 		read0 := r.cats[catReadFirst] + r.cats[catReadAgain] + r.cats[catBashRead]
 		inj0 := r.cats[catHarness]
-		for k := range categoryCount {
-			if catTok[k] != 0 {
-				value := float64(float64(catTok[k]*readRatio) * perToken)
-				r.cats[k] += value
-				g.cats[k] += value
-			}
-		}
-		for i, pos := len(segs)-1, have; i >= 0 && pos > cr; i-- {
-			s := segs[i]
-			lo, hi := pos-s.tok, pos
-			pos = lo
-			read := math.Max(0, math.Min(hi, cr)-lo)
-			written := math.Max(0, math.Min(hi, cr+cwAll)-math.Max(lo, cr))
-			tail := math.Max(0, hi-math.Max(lo, cr+cwAll))
-			diff := float64(read*readRatio) + float64(written*write) + float64(tail*uncached) - float64(s.tok*readRatio)
-			value := float64(diff * perToken)
-			r.cats[s.cat] += value
-			g.cats[s.cat] += value
+		for _, request := range call.requests {
+			a.attribute(r, segs, &catTok, have, row, request)
 		}
 		r.cats[catOutput] += parts.Output
 		g.cats[catOutput] += parts.Output
-		r.usdBy.add(parts.Input, parts.Output, parts.Write5m, parts.Write1h, parts.CacheRead)
-		g.usd.add(parts.Input, parts.Output, parts.Write5m, parts.Write1h, parts.CacheRead)
 		g.tok.add(inp, out, cw5, cw1, cr)
 		g.think += float64(call.thinking)
 		g.calls++
 		r.tok.add(inp, out, cw5, cw1, cr)
 		r.calls++
-		r.usd += usd
+		advisor := a.bookAdvisors(r, call, ts, project)
 		if c.timelineRun {
-			value := usd
+			value := usd + advisor.usd
 			r.timeline = append(
 				r.timeline,
-				timelineRow{n: r.calls, ts: ts, gap: gap, ctx: ctx, out: out, usd: &value, tools: c.issued[e.call]},
+				timelineRow{
+					n:       r.calls,
+					ts:      ts,
+					gap:     gap,
+					ctx:     ctx,
+					out:     out,
+					usd:     &value,
+					advisor: advisor,
+					tools:   c.issued[e.call],
+				},
 			)
 		}
-		r.usdLC += usd
 		depth := "4 · calls 301+"
 		switch {
 		case r.calls <= 50:
@@ -380,11 +407,9 @@ func (a *auditor) replay(file string, c *collected) *run {
 			depth = "3 · calls 151–300"
 		}
 		depthKey := r.kind + " " + depth
-		g.callIdx.bump2(depthKey, "usd", usd)
+		g.callIdx.bump2(depthKey, "usd", usd+advisor.usd)
 		g.callIdx.bump2(depthKey, "calls", 1)
 		g.callIdx.bump2(depthKey, "ctx", ctx)
-		g.tier.bump2(r.kind, "cw5", parts.Write5m)
-		g.tier.bump2(r.kind, "cw1", parts.Write1h)
 		small := onlyTools && pendChars < 1600 && out < 250
 		poll := trigger != nil && trigger.tool == toolBash &&
 			(c.allCmd[trigger.target] >= 8 || bashPoll.MatchString(trigger.target))
@@ -410,24 +435,13 @@ func (a *auditor) replay(file string, c *collected) *run {
 				r.activeMs += since
 			}
 		}
-		band := bands[len(bands)-1].name
-		for _, b := range bands {
-			if ctx/1000 < b.below {
-				band = b.name
-				break
-			}
-		}
-		r.bands.bump(band, usd)
-		g.bands.bump2(band, "usd", usd)
-		g.bands.bump2(band, "calls", 1)
-		effortKey := r.kind + " · " + modelStem(call.model) + " · effort " + call.effort
-		g.modelEffort.bump2(effortKey, "usd", usd)
-		g.modelEffort.bump2(effortKey, "calls", 1)
-		g.modelEffort.bump2(effortKey, "out", out)
-		g.hourly.bump2(utf16Slice(isoTime(ts), 0, 13), project, usd)
+		// a rewrite is the request that followed the previous call: the response's first
+		first := call.requests[0]
+		firstParts, _ := row.ClaudeCostParts(first)
 		bust := a.rewrite(r, rewriteCheck{
-			prev: prev, reset: reset, model: call.model, cr: cr, cwAll: cwAll, gap: since,
-			usd: parts.Write5m + parts.Write1h, trigger: trigger, longest: longest,
+			prev: prev, reset: reset, model: call.model, cr: float64(first.CacheRead),
+			cwAll: float64(first.Write5m + first.Write1h), gap: since,
+			usd: firstParts.Write5m + firstParts.Write1h, trigger: trigger, longest: longest,
 		})
 		reads := r.cats[catReadFirst] + r.cats[catReadAgain] + r.cats[catBashRead] - read0
 		findings := [5]float64{0, 0, bust, reads, r.cats[catHarness] - inj0}
@@ -437,18 +451,18 @@ func (a *auditor) replay(file string, c *collected) *run {
 		if small || poll {
 			findings[1] = usd
 		}
-		bin := math.Max(0, math.Min(47, math.Floor((ts-a.since)/(a.hours*3600e3/48))))
-		r.tl[int(bin)] += usd
-		series := []float64{round(ctx / 1000), fixedNum(usd*1000, 1)}
+		bin := a.timeBin(ts)
+		series := []float64{round(ctx / 1000), fixedNum((usd+advisor.usd)*1000, 1)}
 		for k, value := range findings {
 			r.f[k] += value
-			r.tlf[k][int(bin)] += value
+			r.tlf[k][bin] += value
 			series = append(series, fixedNum(value*1000, 1))
 		}
 		r.series = append(r.series, series)
 		prev = &previousCall{ctx, ts, call.model}
 	}
-	if r.calls == 0 {
+	// a run that billed only advisor consultations is kept: its dollars are in the total
+	if r.calls == 0 && r.advisor.calls == 0 {
 		if copiedCalls != 0 {
 			a.scan.copiesOnly = append(a.scan.copiesOnly, copyOnly{file: file, sid: c.sid})
 		}
@@ -458,6 +472,105 @@ func (a *auditor) replay(file string, c *collected) *run {
 	r.distinctRead = float64(len(c.seenReads))
 	a.finishRun(r, landed, cmdCount, project)
 	return r
+}
+
+// attribute traces one request's dollars to the context that caused it: it
+// charges every carried token as a cache read, then corrects the tail beyond the
+// request's cache read to its write and uncached input rates. A request that ran
+// before the response's last carried only the context below its own size:
+// what entered above it is uncharged. Rates are taken as
+// multiples of base, the input rate; a free model (in: 0) uses base 1 so no ratio
+// divides by zero; the uncached tail weighs un1 = in/base.
+func (a *auditor) attribute(
+	r *run, segs []segment, catTok *[categoryCount]float64, have float64, row pricing.Row, request pricing.ClaudeUsage,
+) {
+	g := a.global
+	rates := row.RatesAt(request.Context())
+	cw5, cw1 := float64(request.Write5m), float64(request.Write1h)
+	cwAll, cr := cw5+cw1, float64(request.CacheRead)
+	base := orZero(rates.In)
+	if base == 0 {
+		base = 1
+	}
+	perToken, readRatio, uncached := base/1e6, orZero(readRate(row, rates))/base, orZero(rates.In)/base
+	write := orZero(rates.W5m) / base
+	if cwAll != 0 {
+		write = (float64(cw5*orZero(rates.W5m)) + float64(cw1*orZero(rates.W1h))) / (cwAll * base)
+	}
+	for k := range categoryCount {
+		if catTok[k] != 0 {
+			value := float64(float64(catTok[k]*readRatio) * perToken)
+			r.cats[k] += value
+			g.cats[k] += value
+		}
+	}
+	top := math.Min(have, float64(request.Context()))
+	for i, pos := len(segs)-1, have; i >= 0 && pos > cr; i-- {
+		s := segs[i]
+		lo, hi := pos-s.tok, pos
+		pos = lo
+		carried := math.Min(hi, top)
+		read := math.Max(0, math.Min(carried, cr)-lo)
+		written := math.Max(0, math.Min(carried, cr+cwAll)-math.Max(lo, cr))
+		tail := math.Max(0, carried-math.Max(lo, cr+cwAll))
+		diff := float64(read*readRatio) + float64(written*write) + float64(tail*uncached) - float64(s.tok*readRatio)
+		value := float64(diff * perToken)
+		r.cats[s.cat] += value
+		g.cats[s.cat] += value
+	}
+}
+
+// span widens the run's window to a booking at ts.
+func (r *run) span(ts float64) {
+	if r.t0 == 0 {
+		r.t0 = ts
+	}
+	r.t1 = ts
+}
+
+// bookSpend books a priced booking's dollars: the billing columns, the run's
+// totals, its context band, its kind · model · effort row, its cache-write tier,
+// its hour and window bin.
+func (a *auditor) bookSpend(r *run, parts pricing.ClaudeParts, ctx, out, ts float64, effortKey, project string) {
+	g := a.global
+	usd := parts.Total()
+	r.usdBy.add(parts.Input, parts.Output, parts.Write5m, parts.Write1h, parts.CacheRead)
+	g.usd.add(parts.Input, parts.Output, parts.Write5m, parts.Write1h, parts.CacheRead)
+	r.usd += usd
+	r.usdLC += usd
+	band := bandOf(ctx)
+	r.bands.bump(band, usd)
+	g.bands.bump2(band, "usd", usd)
+	g.bands.bump2(band, "calls", 1)
+	g.modelEffort.bump2(effortKey, "usd", usd)
+	g.modelEffort.bump2(effortKey, "calls", 1)
+	g.modelEffort.bump2(effortKey, "out", out)
+	g.tier.bump2(r.kind, "cw5", parts.Write5m)
+	g.tier.bump2(r.kind, "cw1", parts.Write1h)
+	g.hourly.bump2(utf16Slice(isoTime(ts), 0, 13), project, usd)
+	r.tl[a.timeBin(ts)] += usd
+}
+
+// countUnknown counts the call's usage iterations of a type pfm does not know.
+func (a *auditor) countUnknown(call *callUsage) {
+	for _, kind := range call.unknown {
+		a.scan.unknownIterations.bump(kind, 1)
+	}
+}
+
+// bandOf is the name of the context band a request of ctx tokens falls in.
+func bandOf(ctx float64) string {
+	for _, b := range bands {
+		if ctx/1000 < b.below {
+			return b.name
+		}
+	}
+	return bands[len(bands)-1].name
+}
+
+// timeBin is the 48th of the window a call at ts falls in.
+func (a *auditor) timeBin(ts float64) int {
+	return int(math.Max(0, math.Min(47, math.Floor((ts-a.since)/(a.hours*3600e3/48)))))
 }
 
 // previousCall is the call before the current one: its context, time and model.
@@ -476,10 +589,10 @@ func (t *tokenCounts) add(in, out, cw5, cw1, cr float64) {
 
 // mark records a counted call's time and context.
 func (r *run) mark(ts, ctx float64) {
-	if r.t0 == 0 {
-		r.t0, r.ctxFirst = ts, ctx
+	if !r.marked {
+		r.ctxFirst, r.marked = ctx, true
 	}
-	r.t1 = ts
+	r.span(ts)
 	r.ctxPeak = math.Max(r.ctxPeak, ctx)
 	r.ctxSum += ctx
 }

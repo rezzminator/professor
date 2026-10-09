@@ -265,3 +265,55 @@ func TestHeadlessCodexStatesSelectedHome(t *testing.T) {
 		t.Fatalf("plan CodexHome=%q error=%v; want %q", plan.CodexHome, err, want)
 	}
 }
+
+// A chat the policy says must carry the fleet prompt, started without it, is
+// reported by the plan the starter's surface prints: one warning naming the
+// cause, none once the prompt is staged. Which policies want the prompt is
+// claudelaunch.TestPromptWarning's.
+func TestHeadlessClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
+	for _, entry := range []struct {
+		name  string
+		mode  string
+		stage bool
+		want  string
+	}{
+		{"professor, no clone recorded", pfmconfig.SystemPromptProfessor, false, "no source repository recorded"},
+		{"professor, prompt staged", pfmconfig.SystemPromptProfessor, true, ""},
+	} {
+		for _, door := range []string{"new", "fork"} {
+			t.Run(entry.name+"/"+door, func(t *testing.T) {
+				home := t.TempDir()
+				if entry.stage {
+					stageProfessorPrompt(t, home)
+				}
+				machine := testMachineConfig(home)
+				machine.Claude.SystemPrompt = entry.mode
+				var plan HeadlessPlan
+				var err error
+				if door == "new" {
+					plan, err = HeadlessRun(HeadlessRequest{
+						Engine: pfmengine.Claude, Name: "worker", CWD: "/work/alpha",
+						Home: home, PrimaryAccount: 1, Config: machine,
+					})
+				} else {
+					plan, err = HeadlessFork(HeadlessForkRequest{
+						Engine: pfmengine.Claude, SessionID: "thread-123", Name: "branch",
+						CWD: "/work/alpha", Home: home, PrimaryAccount: 1, Config: machine,
+					})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if entry.want == "" {
+					if len(plan.Warnings) != 0 {
+						t.Fatalf("warnings = %q, want none", plan.Warnings)
+					}
+					return
+				}
+				if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], entry.want) {
+					t.Fatalf("warnings = %q, want one naming %q", plan.Warnings, entry.want)
+				}
+			})
+		}
+	}
+}

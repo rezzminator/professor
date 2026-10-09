@@ -807,3 +807,60 @@ func TestChatBranchCodexRequiresLogin(t *testing.T) {
 		t.Fatalf("chat branch code=%d stderr=%q", code, stderr.String())
 	}
 }
+
+// A fork that cannot carry the fleet prompt its policy asks for says so on the
+// starter's stderr, with the cause, and still forks.
+func TestChatBranchWarnsWhenTheFleetPromptCannotReachTheFork(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "a3000000-3333-4333-8333-333333333333"
+	const branchSocket = "probe-branch-prompt-warn"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+	config := fmt.Sprintf(
+		`{"version":1,"claude":{"systemPrompt":"professor"},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q}]}`,
+		jail.primaryDir,
+		jail.parentDir,
+	)
+	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "prompt-warn-branch",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "pfm chat branch: Claude started WITHOUT its system prompt file") ||
+		!strings.Contains(stderr, "no source repository recorded") {
+		t.Fatalf("chat branch stderr=%q, want the prompt warning naming the missing clone", stderr)
+	}
+
+	// A fork whose seat cannot be created never started: it is not told it
+	// started without its prompt. A server already holding the seat's session
+	// name refuses the seat after the fork is planned.
+	const refusedSocket = "probe-branch-prompt-refused"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", refusedSocket)
+	cleanupBranchSocket(t, jail, refusedSocket)
+	if output, err := exec.Command(
+		"tmux", "-f", "/dev/null", "-S", filepath.Join(jail.tmuxDir, refusedSocket),
+		"new-session", "-d", "-s", refusedSocket,
+	).CombinedOutput(); err != nil {
+		t.Fatalf("hold the seat's session name: %v: %s", err, output)
+	}
+	stdout, stderr, code = runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "prompt-refused-branch",
+	)
+	if code != 1 || !strings.Contains(stderr, "pfm chat branch: create detached seat:") ||
+		strings.Contains(stderr, "WITHOUT") {
+		t.Fatalf("refused chat branch rc=%d stdout=%q stderr=%q, want the refusal and no prompt warning",
+			code, stdout, stderr)
+	}
+}

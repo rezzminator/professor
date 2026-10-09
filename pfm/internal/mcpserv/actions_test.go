@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -890,5 +891,24 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 				t.Fatalf("chat_exit dispatched %q, want no CLI kill: the exit verb is its only door", dispatched)
 			}
 		})
+	}
+}
+
+// chat_open's caller has no terminal: the message is the only place it can be
+// told how the chat opened and that the fleet prompt did not reach it.
+func TestOpenMessageCarriesEveryWarning(t *testing.T) {
+	got := openMessage(action.OpenResult{
+		Name: "scribe", Socket: "cc-1-2-3", State: "opened", Detail: "opened in /home: its own directory is gone",
+		Warnings: []string{"Claude started WITHOUT its system prompt file: no source repository recorded"},
+	})
+	want := "opened scribe on socket cc-1-2-3 — opened in /home: its own directory is gone" +
+		" — WARNING: Claude started WITHOUT its system prompt file: no source repository recorded"
+	if got != want {
+		t.Fatalf("openMessage = %q, want %q", got, want)
+	}
+	if got := openMessage(
+		action.OpenResult{Name: "scribe", Socket: "cc-1-2-3", State: "live"},
+	); got != "live scribe on socket cc-1-2-3" {
+		t.Fatalf("openMessage without warnings = %q", got)
 	}
 }

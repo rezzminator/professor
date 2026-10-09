@@ -169,16 +169,7 @@ func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, machine paths.Val
 		fmt.Fprintf(stderr, "pfm statusline --subagents: read input (fail-open): %v\n", err)
 		return 0
 	}
-	var prices *pricing.Prices
-	if table, err := pricing.LoadPrices(machine.Home, pfmConfigPath); err != nil {
-		fmt.Fprintf(stderr, "pfm statusline --subagents: price table (rows show $?): %v\n", err)
-	} else {
-		prices = &table
-		if table.FileError != nil {
-			fmt.Fprintf(stderr, "pfm statusline --subagents: clone prices unusable, pricing from the %s table: %v\n",
-				table.From, table.FileError)
-		}
-	}
+	prices := LoadServedPrices(machine.Home, pfmConfigPath, stderr, "pfm statusline --subagents")
 	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: render (fail-open): %v\n", err)
@@ -188,6 +179,29 @@ func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, machine paths.Val
 		fmt.Fprintf(stderr, "pfm statusline --subagents: write output (fail-open): %v\n", err)
 	}
 	return 0
+}
+
+// LoadServedPrices is the machine's served price table (pricing.LoadPrices:
+// the clone file or the embedded copy, the override beside pfmConfigPath
+// merged), never fetched. A table that cannot load is nil — every dollar then
+// renders "$?" — and its cause goes to stderr under who, as does a clone file
+// the embedded copy stood in for.
+func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) *pricing.Prices {
+	table, err := pricing.LoadPrices(home, pfmConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: price table (dollars show $?): %v\n", who, err)
+		return nil
+	}
+	if table.FileError != nil {
+		fmt.Fprintf(
+			stderr,
+			"%s: clone prices unusable, pricing from the %s table: %v\n",
+			who,
+			table.From,
+			table.FileError,
+		)
+	}
+	return &table
 }
 
 // RenderSubagents turns one subagentStatusLine payload into the JSON lines

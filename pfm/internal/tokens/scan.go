@@ -25,6 +25,7 @@ type scanState struct {
 	noTimestamp            int
 	unpricedCalls          int
 	unpricedModels         *object
+	unknownIterations      *object // usage iterations of a type pfm does not know, by type
 	tierUnknownCalls       int
 	syntheticCalls         int
 	identityUnknownRecords int
@@ -34,20 +35,26 @@ type scanState struct {
 	notes                  []string
 }
 
-func newScanState() *scanState { return &scanState{roots: []string{}, unpricedModels: newObject()} }
+func newScanState() *scanState {
+	return &scanState{roots: []string{}, unpricedModels: newObject(), unknownIterations: newObject()}
+}
 
 func (scan *scanState) json() *object {
 	copies := make([]*object, len(scan.copiesOnly))
 	for i, item := range scan.copiesOnly {
 		copies[i] = newObject().set("file", item.file).set("sid", item.sid)
 	}
-	return newObject().set("roots", append([]string{}, scan.roots...)).set("files", scan.files).
+	out := newObject().set("roots", append([]string{}, scan.roots...)).set("files", scan.files).
 		set("skippedOld", scan.skippedOld).set("dupFiles", scan.dupFiles).set("badLines", scan.badLines).
 		set("noTimestamp", scan.noTimestamp).set("unpricedCalls", scan.unpricedCalls).
 		set("unpricedModels", scan.unpricedModels).set("tierUnknownCalls", scan.tierUnknownCalls).
 		set("syntheticCalls", scan.syntheticCalls).set("identityUnknownRecords", scan.identityUnknownRecords).
 		set("copiedCalls", scan.copiedCalls).set("copiesOnly", copies).
 		set("readErrors", append([]string{}, scan.readErrors...)).set("notes", append([]string{}, scan.notes...))
+	if len(scan.unknownIterations.ordered()) != 0 {
+		out.set("unknownIterations", scan.unknownIterations)
+	}
+	return out
 }
 
 // noteOnce adds a note the scan does not already carry.
@@ -87,6 +94,14 @@ func (a *auditor) gapsLine() string {
 	if scan.unpricedCalls != 0 {
 		loud = append(loud, num(float64(scan.unpricedCalls))+" UNPRICED calls "+stringify(scan.unpricedModels, 0)+
 			` — tokens counted, dollars "n/a"; check exact IDs and available rates with pfm model-cost --json --all`)
+	}
+	if unknown := scan.unknownIterations.ordered(); len(unknown) != 0 {
+		count := 0.0
+		for _, kind := range unknown {
+			count += scan.unknownIterations.number(kind)
+		}
+		loud = append(loud, num(count)+" usage iterations of a type pfm does not price apart "+
+			stringify(scan.unknownIterations, 0)+" — the response's own counts stand")
 	}
 	add(scan.tierUnknownCalls, " cache writes with no 5m/1h split (priced as 5m)")
 	add(scan.identityUnknownRecords,

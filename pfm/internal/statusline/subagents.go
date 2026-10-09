@@ -87,6 +87,7 @@ const (
 	finishedCollapse = time.Minute
 	entryAssistant   = "assistant"
 	entryUser        = "user"
+	entryCostState   = "cost-state"
 	blockToolUse     = "tool_use"
 	// stallAfter is the quiet time before a running agent's row says idle:
 	// shorter gaps are ordinary model latency.

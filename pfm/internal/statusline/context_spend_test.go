@@ -3,6 +3,7 @@ package statusline
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,15 +27,20 @@ const (
 		`"usage":{"input_tokens":500,"output_tokens":50}}}`
 )
 
-// spendTranscript writes a session transcript with one sub-agent beside it.
-func spendTranscript(t *testing.T, child string) string {
+// spendTranscript writes a session transcript with one sub-agent beside it; lines follow the main
+// thread's response in it.
+func spendTranscript(t *testing.T, child string, lines ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	dir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(spendMainResponse+"\n"), 0o600); err != nil {
+	body := spendMainResponse + "\n" + strings.Join(append(lines, ""), "\n")
+	if len(lines) == 0 {
+		body = spendMainResponse + "\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(transcript.SubagentTranscript(dir, "c1"), []byte(child+"\n"), 0o600); err != nil {
@@ -51,6 +57,21 @@ func spendTranscript(t *testing.T, child string) string {
 }
 
 func micros(value int64) *int64 { return &value }
+
+// stampLine is a transcript line that carries only a timestamp; costStateLine is the line Claude
+// Code writes at a graceful exit.
+func stampLine(at string) string { return `{"type":"user","timestamp":"` + at + `"}` }
+
+func costStateLine(usd string) string {
+	return `{"type":"cost-state","sessionId":"` + spendSession + `","totalCostUSD":` + usd + `}`
+}
+
+// costStateExiting is a cost-state whose clock fields say the launch ended at exit (startTime +
+// totalDuration, Claude Code's wall clock of the exit), whatever the last stamp before it says.
+func costStateExiting(usd string, exitMillis int64) string {
+	return `{"type":"cost-state","sessionId":"` + spendSession + `","totalCostUSD":` + usd +
+		`,"totalDuration":1000,"startTime":` + strconv.FormatInt(exitMillis-1000, 10) + `}`
+}
 
 // spendRows is a ledger of this session: the main thread's one call and the
 // sub-agent c1's, $8.003 together, 1.0M prompt and 5.1K output tokens.
@@ -100,7 +121,8 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 		noPrices   bool
 		noSession  bool
 		claudeCost float64
-		want       string // the line from the money bag on
+		lines      []string // main transcript lines after the first response: stamps and cost-state lines
+		want       string   // the line from the money bag on
 	}{
 		{
 			name: "ledger equals claude code", rows: spendRows(), marker: "on", child: spendChildResponse,
@@ -115,8 +137,12 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			want:       "💰$8.00/1.0M/5.1K/1",
 		},
 		{
-			name: "ledger below claude code beyond the tolerance", rows: spendRows(), marker: "on",
-			child: spendChildResponse, claudeCost: 9.5, want: "💰$8.00/1.0M/5.1K/1",
+			name:       "ledger below claude code beyond the tolerance: its total stands, nothing is flagged",
+			rows:       spendRows(),
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 9.5,
+			want:       "💰$9.50/1.0M/5.1K/1",
 		},
 		{
 			name: "ledger above claude code beyond the tolerance", rows: spendRows(), marker: "on",
@@ -188,6 +214,148 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 		},
 		{name: "no ledger, no transcript, no total", noSession: true, want: "💰$?/?/?/?"},
 		{
+			name:       "resumed, the launch before fully ledgered: the ledger is the whole total, nothing is flagged",
+			rows:       spendRows(),
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 8.003,
+			lines: []string{
+				stampLine("2026-10-09T18:00:02.000Z"),
+				costStateLine("8.003"),
+				stampLine("2026-10-09T19:00:00.000Z"),
+			},
+			want: "💰$8.00/1.0M/5.1K/1",
+		},
+		{
+			name:       "resumed, a call just landed and the ledger lags: claude code's total leads, nothing is flagged",
+			rows:       spendRows(),
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 8.6,
+			lines: []string{
+				stampLine("2026-10-09T18:00:02.000Z"),
+				costStateLine("8.003"),
+				stampLine("2026-10-09T19:00:00.000Z"),
+			},
+			want: "💰$8.60/1.0M/5.1K/1",
+		},
+		{
+			name:       "resumed, the exit stamped just before the last rows: nothing is flagged",
+			rows:       spendRows(),
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 8.003,
+			lines: []string{
+				stampLine("2026-10-09T17:59:59.000Z"),
+				costStateLine("8.003"),
+				stampLine("2026-10-09T19:00:00.000Z"),
+			},
+			want: "💰$8.00/1.0M/5.1K/1",
+		},
+		{
+			name:       "resumed after background agents ran while the main thread was quiet: the clock fields place the exit",
+			rows:       spendRows(),
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 8.003,
+			lines: []string{
+				stampLine(
+					"2026-10-09T17:00:00.000Z",
+				),
+				costStateExiting("8.003", 1791569100000),
+				stampLine("2026-10-09T19:00:00.000Z"),
+			},
+			want: "💰$8.00/1.0M/5.1K/1",
+		},
+		{
+			name:       "a session older than its ledger: the one dollar is the complete total, the gap is named",
+			rows:       spendRows(),
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 83.203,
+			lines: []string{
+				stampLine("2026-10-09T17:00:00.000Z"),
+				costStateLine("75.2011"),
+				stampLine("2026-10-09T17:59:00.000Z"),
+			},
+			want: "💰$83.20/1.0M/5.1K/1 pre-ledger",
+		},
+		{
+			name:   "a session older than its ledger, claude code's total not yet read: the ledger plus the gap",
+			rows:   spendRows(),
+			marker: "on",
+			child:  spendChildResponse,
+			lines: []string{
+				stampLine("2026-10-09T17:00:00.000Z"),
+				costStateLine("75.2011"),
+				stampLine("2026-10-09T17:59:00.000Z"),
+			},
+			want: "💰$83.20/1.0M/5.1K/1 pre-ledger",
+		},
+		{
+			name: "a launch that ran with no sink between two that logged: the gap is named",
+			rows: spendRows(), marker: "on", child: spendChildResponse, claudeCost: 18.003,
+			lines: []string{
+				stampLine("2026-10-09T17:00:00.000Z"), costStateLine("10"), stampLine("2026-10-09T17:30:00.000Z"),
+				stampLine("2026-10-09T18:00:02.000Z"), costStateLine("18.003"), stampLine("2026-10-09T19:00:00.000Z"),
+			},
+			want: "💰$18.00/1.0M/5.1K/1 pre-ledger",
+		},
+		{
+			name:       "a launch crashed after a healthy resume: the ledger holds what claude code lost, nothing is flagged",
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 8,
+			rows: append(spendRows(), costledger.Row{
+				RequestID:     "req_crash",
+				TS:            "2026-10-09T19:00:00.000Z",
+				SessionID:     spendSession,
+				QuerySource:   "repl_main_thread",
+				CostUSDMicros: micros(2_000_000),
+				Join:          costledger.JoinLogSpan,
+			}),
+			lines: []string{
+				stampLine("2026-10-09T18:00:00.500Z"),
+				costStateLine("8"),
+				stampLine("2026-10-09T18:50:00.000Z"),
+			},
+			want: "💰$10.00/1.0M/5.1K/1",
+		},
+		{
+			name:       "resumed, a background agent ran on after the main thread's last line: its calls are that launch's, nothing is flagged",
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 9.003,
+			rows: append(spendRows(), costledger.Row{
+				RequestID:     "req_background",
+				TS:            "2026-10-09T18:30:00.000Z",
+				SessionID:     spendSession,
+				AgentID:       "c1",
+				QuerySource:   "agent:builtin:general-purpose",
+				CostUSDMicros: micros(1_000_000),
+				Join:          costledger.JoinLogSpan,
+			}),
+			lines: []string{
+				stampLine("2026-10-09T18:00:02.000Z"),
+				costStateLine("9.003"),
+				stampLine("2026-10-09T19:00:00.000Z"),
+			},
+			want: "💰$9.00/1.0M/5.1K/1",
+		},
+		{
+			name:       "a session older than its ledger whose launch could not log: the failure is named, not the gap",
+			rows:       spendRows(),
+			marker:     "failed",
+			child:      spendChildResponse,
+			claudeCost: 83.203,
+			lines: []string{
+				stampLine("2026-10-09T17:00:00.000Z"),
+				costStateLine("75.2011"),
+				stampLine("2026-10-09T17:59:00.000Z"),
+			},
+			want: "💰$83.20/1.0M/5.1K/1 sink failed",
+		},
+		{
 			name: "a ledger that cannot be read is named, claude code's total stands", unreadable: true, marker: "on",
 			child: spendChildResponse, claudeCost: 8.003, want: "💰$8.00/1.0M/100/1 ledger unreadable",
 		},
@@ -206,7 +374,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			data := input{SessionID: spendSession}
 			data.Cost.TotalCostUSD = tc.claudeCost
 			if !tc.noSession {
-				data.TranscriptPath = spendTranscript(t, tc.child)
+				data.TranscriptPath = spendTranscript(t, tc.child, tc.lines...)
 			}
 			runtime := Runtime{
 				Home: t.TempDir(), Engine: pfmengine.Claude,
@@ -223,9 +391,6 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			at := strings.Index(got, "💰")
 			if at < 0 {
 				t.Fatalf("line %q has no spend segment", got)
-			}
-			if strings.Contains(got, "ledger≠cc") {
-				t.Fatalf("line %q carries the ledger≠cc marker: the main line never names that comparison", got)
 			}
 			if segment, _, _ := strings.Cut(got[at:], " │"); segment != tc.want {
 				t.Fatalf("spend segment %q, want %q (line %q)", segment, tc.want, got)

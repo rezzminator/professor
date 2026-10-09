@@ -27,6 +27,9 @@ const (
 	// below it the two totals agree to the cent they both print.
 	differenceFloor = 5000
 	mainThreadLabel = "main thread"
+	// beforeLedgerLabel names the share of the session the ledger began after: spend that no
+	// agent's row holds, only Claude Code's own totals (the cost-state lines of the transcript).
+	beforeLedgerLabel = "before ledger (not attributed)"
 )
 
 var requestIDKey = []byte(`"requestId"`)
@@ -59,6 +62,8 @@ type sessionLedger struct {
 	total      costledger.Totals
 	side       costledger.Totals
 	cc         *float64
+	ccClosed   bool  // no line follows the last cost-state: cc is the chat's final total, not a floor
+	before     int64 // micro-dollars spent before the ledger began (costledger.BeforeLedger)
 	agents     []agentLine
 	sources    []sourceLine
 	unreliable []string // why the side-call split may be wrong, never silently dropped
@@ -104,17 +109,54 @@ func (a *auditor) measureSession(chat ledgerChat, ledger costledger.Ledger) *ses
 		chat: chat, faults: ledger.Faults, total: costledger.Sum(ledger.Rows), side: costledger.Sum(side),
 		unreliable: problems,
 	}
-	for _, r := range a.runs {
-		if r.kind == kindMain && r.sid == chat.sid {
-			session.cc = r.harnessUSD
-			break
+	states, found := a.mainCostStates(chat.sid)
+	if found {
+		if n := len(states.States()); n != 0 {
+			cc := states.States()[n-1].USD
+			session.cc = &cc
 		}
+		session.ccClosed = states.Closed()
+		session.before = costledger.BeforeLedger(ledger.Rows, states.States())
 	}
 	types, parents, problems := a.agentMeta(chat.sid)
 	session.unreliable = append(session.unreliable, problems...)
 	session.agents = agentLines(ledger.Rows, types, parents)
 	session.sources = sourceLines(ledger.Rows)
 	return session
+}
+
+// mainCostStates is the cost-state lines of a chat's main transcript: from its run when the window
+// holds one, else read from the file itself (a chat whose main-thread calls all fall before --since
+// or outside --project still has its total, and the session total stays the main line's figure).
+// found is false when no main transcript of the chat was walked.
+func (a *auditor) mainCostStates(sid string) (anchors costledger.Anchors, found bool) {
+	for _, r := range a.runs {
+		if r.kind == kindMain && r.sid == sid {
+			return r.anchors, true
+		}
+	}
+	for _, file := range a.transcripts {
+		if transcript.IsSubagentTranscript(file) || transcript.TranscriptSession(file) != sid {
+			continue
+		}
+		err := eachLine(file, func(raw []byte) {
+			line, decoded := transcript.DecodeClaudeRecord(raw)
+			if !decoded {
+				return
+			}
+			if truthy(line.Timestamp) {
+				anchors.Stamp(keyString(line.Timestamp))
+			}
+			if kind, _ := line.Kind(); kind == "cost-state" {
+				costState(&anchors, &line)
+			}
+		})
+		if err != nil {
+			a.scan.readErrors = append(a.scan.readErrors, file+": "+describe(err))
+		}
+		return anchors, true
+	}
+	return anchors, false
 }
 
 // heldRequests is every requestId a transcript of the session records, the
@@ -343,13 +385,19 @@ func microsDollars(micros int64) string {
 // ccMicros is Claude Code's own total in micro-dollars.
 func ccMicros(cc float64) int64 { return int64(math.Round(cc * 1e6)) }
 
-// difference is the ledger total minus Claude Code's, when there is a
-// Claude Code total and the two differ by half a cent or more.
+// sessionMicros is the session's total, the number the main status line shows: the ledger's rows
+// plus what came before the ledger.
+func (s *sessionLedger) sessionMicros() int64 { return s.total.Micros + s.before }
+
+// difference is the session total minus Claude Code's, when the transcript's last cost-state is the
+// chat's final total (nothing ran after it) and the two differ by half a cent or more. What the
+// ledger lacks of a cost-state is not a difference, it is the before-ledger line; what this
+// names is a ledger above Claude Code's total, or rows logged after its last exit.
 func (s *sessionLedger) difference() (int64, bool) {
-	if s.cc == nil {
+	if s.cc == nil || !s.ccClosed {
 		return 0, false
 	}
-	diff := s.total.Micros - ccMicros(*s.cc)
+	diff := s.sessionMicros() - ccMicros(*s.cc)
 	return diff, diff >= differenceFloor || diff <= -differenceFloor
 }
 
@@ -360,11 +408,17 @@ func (s *sessionLedger) lines(top int) []string {
 	title := firstText(s.chat.title, "(untitled)")
 	out := []string{
 		"  chat " + s.chat.sid + " · " + strings.TrimRight(cut(title, 50), " "),
-		"    session total " + microsDollars(s.total.Micros) + " (" + num(float64(s.total.Rows)) + " " +
+		"    session total " + microsDollars(s.sessionMicros()) + " (" + num(float64(s.total.Rows)) + " " +
 			countWord(s.total.Rows, "call", "calls") + ") — the main status line's number",
-		"    side calls " + microsDollars(s.side.Micros) + " (" + num(float64(s.side.Rows)) + " " +
-			countWord(s.side.Rows, "call", "calls") + " no transcript holds)",
 	}
+	if s.before >= differenceFloor {
+		out = append(out, "    before ledger "+microsDollars(s.before)+" (not attributed)")
+	}
+	out = append(
+		out,
+		"    side calls "+microsDollars(s.side.Micros)+" ("+num(float64(s.side.Rows))+" "+
+			countWord(s.side.Rows, "call", "calls")+" no transcript holds)",
+	)
 	if n := s.total.UnknownCost; n != 0 {
 		out = append(
 			out,
@@ -377,9 +431,16 @@ func (s *sessionLedger) lines(top int) []string {
 	for _, problem := range s.unreliable {
 		out = append(out, "    side calls may be overstated: "+problem)
 	}
-	if s.cc == nil {
+	switch {
+	case s.cc == nil:
 		out = append(out, "    Claude Code's own total: no cost-state line in this chat's transcript")
-	} else {
+	case !s.ccClosed:
+		out = append(
+			out,
+			"    Claude Code's last cost-state says "+dollars(*s.cc)+
+				" (written at an earlier exit; the chat has run since)",
+		)
+	default:
 		out = append(out, "    Claude Code says "+dollars(*s.cc)+" (the transcript's last cost-state line)")
 		if diff, differs := s.difference(); differs {
 			sign := "+"
@@ -390,12 +451,12 @@ func (s *sessionLedger) lines(top int) []string {
 			if magnitude < 0 {
 				magnitude = -magnitude
 			}
-			out = append(out, "    ledger minus Claude Code: "+sign+microsDollars(magnitude))
+			out = append(out, "    session total minus Claude Code: "+sign+microsDollars(magnitude))
 		}
 	}
 	row := func(indent int, label string, micros int64, unknown int) string {
 		line := "      " + strings.Repeat("  ", indent) + cut(label, 56-2*indent) +
-			padStart(microsDollars(micros), 8) + padStart(pctText(float64(micros), float64(s.total.Micros)), 7)
+			padStart(microsDollars(micros), 8) + padStart(pctText(float64(micros), float64(s.sessionMicros())), 7)
 		if unknown != 0 {
 			line += " · " + num(float64(unknown)) + " with no cost"
 		}
@@ -424,9 +485,15 @@ func (s *sessionLedger) lines(top int) []string {
 			row(0, "… "+num(float64(hidden))+" more "+countWord(hidden, "agent", "agents"), hiddenMicros, 0),
 		)
 	}
+	if s.before >= differenceFloor {
+		out = append(out, row(0, beforeLedgerLabel, s.before, 0))
+	}
 	out = append(out, "    by query_source")
 	for _, source := range s.sources {
 		out = append(out, row(0, source.source, source.micros, source.unknown))
+	}
+	if s.before >= differenceFloor {
+		out = append(out, row(0, beforeLedgerLabel, s.before, 0))
 	}
 	return out
 }
@@ -451,6 +518,7 @@ func (s *sessionLedger) json() *object {
 		}
 	}
 	return newObject().set("sid", s.chat.sid).set("micros", float64(s.total.Micros)).set("rows", s.total.Rows).
+		set("beforeLedgerMicros", float64(s.before)).set("sessionMicros", float64(s.sessionMicros())).
 		set("unknownCost", s.total.UnknownCost).set("faults", s.faults).
 		set("side", newObject().set("micros", float64(s.side.Micros)).set("calls", s.side.Rows).
 			set("unknownCost", s.side.UnknownCost)).
@@ -480,7 +548,7 @@ func (r *ledgerReport) body(top int, heading string) []string {
 		return []string{noLedgerLine}
 	}
 	stableSort(r.measured, func(left, right *sessionLedger) float64 {
-		return float64(right.total.Micros - left.total.Micros)
+		return float64(right.sessionMicros() - left.sessionMicros())
 	})
 	out := []string{heading}
 	for _, s := range firstN(r.measured, top) {

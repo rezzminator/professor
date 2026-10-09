@@ -1,0 +1,24 @@
+{
+ "test": "pricing: missing response identity exposes per-record billing uncertainty",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-identity-unknown-Spkbum",
+  "--out",
+  "{TMP}/price-6ws6repi1a8.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-6ws6repi1a8.json",
+  "price-identity-unknown-Spkbum"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-6ws6repi1a8.json"
+ }
+}

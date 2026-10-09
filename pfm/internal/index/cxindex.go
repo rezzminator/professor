@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 func reloadCxNamesFromRoots(
@@ -52,7 +53,10 @@ func reloadCxNamesFromRoots(
 		if source.size < 0 {
 			continue
 		}
-		_, bytesRead, err := readCompleteLines(source.path, 0, func(line []byte) {
+		_, bytesRead, err := claudetranscript.ReadLines(source.path, 0, func(line []byte, complete bool) {
+			if !complete {
+				return
+			}
 			if entry, err := codexmeta.DecodeSessionIndexLine(line); err == nil {
 				names[entry.ID] = store.CxName{
 					ID: entry.ID, ThreadName: entry.ThreadName,
@@ -134,7 +138,10 @@ func reloadCxNames(
 
 	names := make(map[string]store.CxName)
 	if size >= 0 {
-		_, bytesRead, err := readCompleteLines(path, 0, func(line []byte) {
+		_, bytesRead, err := claudetranscript.ReadLines(path, 0, func(line []byte, complete bool) {
+			if !complete {
+				return
+			}
 			if entry, err := codexmeta.DecodeSessionIndexLine(line); err == nil {
 				// The file is append-only, so the LAST entry for an id — the
 				// one this overwrite leaves standing — is the freshest rename

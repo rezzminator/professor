@@ -1,0 +1,24 @@
+{
+ "test": "pricing: a resumed copy is identified by the same call in its named origin, without a fork marker",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-fork-ZkTrau",
+  "--out",
+  "{TMP}/price-w6albl1cf.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-fork-ZkTrau",
+  "price-w6albl1cf.json"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-w6albl1cf.json"
+ }
+}

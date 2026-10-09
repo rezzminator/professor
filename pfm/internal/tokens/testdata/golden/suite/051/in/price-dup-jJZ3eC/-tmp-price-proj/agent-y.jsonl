@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-09-20T09:00:00.000Z","cwd":"/tmp/price-proj","requestId":"req-msg-dup","effort":"medium","uuid":"agent-y-0-0","sessionId":"sess-p","message":{"id":"msg-dup","model":"claude-sonnet-5","content":[{"type":"text","text":"step"}],"usage":{"input_tokens":1000,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"custom-title","customTitle":"price agent-y","cwd":"/tmp/price-proj"}

@@ -1,0 +1,23 @@
+{
+ "test": "Bash classification: `dev.sh status` reports state and is not a test/build run",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{FIX}/claude/projects",
+  "--out",
+  "{TMP}/cats.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "cats.json"
+ ],
+ "outputs": {
+  "--out": "{TMP}/cats.json"
+ }
+}

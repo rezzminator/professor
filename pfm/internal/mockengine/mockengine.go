@@ -160,7 +160,7 @@ func (rec recorder) write(name, content string) error {
 
 // appendLine adds one line to a file the engine owns, creating it and its
 // directory on first use — the append-only shape every transcript reader
-// (internal/index readCompleteLines, internal/transcript.From) expects.
+// (internal/transcript.ReadLines, internal/transcript.From) expects.
 func appendLine(path string, line []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)

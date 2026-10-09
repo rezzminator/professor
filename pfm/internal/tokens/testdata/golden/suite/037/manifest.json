@@ -1,0 +1,18 @@
+{
+ "test": "--timeline: a transcript where every line is malformed JSON prints UNREADABLE and exits 1",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{FIX}/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t3.jsonl"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-clrV8T"
+ },
+ "exit": 1,
+ "signal": null,
+ "inputs": [
+  "tl-home-clrV8T"
+ ],
+ "outputs": {}
+}

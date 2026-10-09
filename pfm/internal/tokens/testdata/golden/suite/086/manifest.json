@@ -1,0 +1,27 @@
+{
+ "test": "pricing: exported page and brief rows preserve unavailable model dollars as null",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--root",
+  "{FIX}/claude/projects",
+  "--since",
+  "99999d",
+  "--view",
+  "{TMP}/unpriced-view.json",
+  "--briefs",
+  "{TMP}/unpriced-briefs.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "unpriced-briefs.json",
+  "unpriced-view.json"
+ ],
+ "outputs": {
+  "--view": "{TMP}/unpriced-view.json",
+  "--briefs": "{TMP}/unpriced-briefs.json"
+ }
+}

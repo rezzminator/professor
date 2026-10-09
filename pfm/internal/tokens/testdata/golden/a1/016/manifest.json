@@ -1,0 +1,31 @@
+{
+ "test": "A1 out view briefs",
+ "now": "2026-09-21T06:00:00.000Z",
+ "args": [
+  "--since",
+  "48h",
+  "--root",
+  "{FIX}/claude/projects",
+  "--out",
+  "{TMP}/a/out.json",
+  "--view",
+  "{TMP}/a/view.json",
+  "--briefs",
+  "{TMP}/a/briefs.json",
+  "--family-rx",
+  "."
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "a"
+ ],
+ "outputs": {
+  "--out": "{TMP}/a/out.json",
+  "--view": "{TMP}/a/view.json",
+  "--briefs": "{TMP}/a/briefs.json"
+ }
+}

@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-09-20T09:00:00.000Z","cwd":"/tmp/price-proj","requestId":"req-msg-shared","effort":"medium","uuid":"uuid-shared","sessionId":"sess-c","session_id":"sess-b","message":{"id":"msg-shared","model":"claude-sonnet-5","content":[{"type":"text","text":"step"}],"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"custom-title","customTitle":"price sess-c","cwd":"/tmp/price-proj"}

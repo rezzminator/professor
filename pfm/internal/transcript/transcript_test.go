@@ -305,6 +305,26 @@ func TestReadMetaClaudeContextExcludesOutputTokens(t *testing.T) {
 	}
 }
 
+// A response whose counts sit only in usage.iterations (claude-opus-5-5)
+// reports its context through its last iteration: the request that ran last.
+func TestReadMetaClaudeContextReadsTheLastIteration(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200}}}`+"\n"+
+			`{"type":"assistant","message":{"usage":{"input_tokens":0,"output_tokens":0,"iterations":[`+
+			`{"input_tokens":5,"cache_read_input_tokens":900,"output_tokens":40},`+
+			`{"input_tokens":7,"cache_read_input_tokens":1200,"cache_creation_input_tokens":30,"output_tokens":9}]}}}`+"\n",
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 1237 {
+		t.Fatalf("context tokens = %d, want the last iteration's 1237, never the stale 300", meta.ContextTokens)
+	}
+}
+
 func TestReadMetaClaudeIgnoresNewerSidechainUsage(t *testing.T) {
 	path := writeTranscript(
 		t,

@@ -1,0 +1,22 @@
+{
+ "test": "--timeline: copied-call and duplicate discovery gaps belong to each named file",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{TMP}/price-duplicate-discovery-xodf4I/-tmp-price-proj/s.jsonl",
+  "--timeline",
+  "{TMP}/price-clean-discovery-FKjooy/-tmp-price-proj/s.jsonl"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-WqPa99"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-clean-discovery-FKjooy",
+  "price-duplicate-discovery-xodf4I",
+  "tl-home-WqPa99"
+ ],
+ "outputs": {}
+}

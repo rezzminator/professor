@@ -4,7 +4,6 @@ package command
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
@@ -36,13 +34,7 @@ pricing pages at most once a day, with pfm.prices.json merged in.
 
 // ModelCost runs `pfm model-cost` for the machine.
 func ModelCost(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
-	return runModelCost(args, stdout, stderr, modelcost.Options{
-		Home:       runtime.Paths.Home,
-		ConfigPath: runtime.Config.Path,
-		Offline:    paths.PricesOffline(),
-		Clock:      clock.Real,
-		Fetch:      modelcost.NewFetcher(nil, nil).Fetch,
-	})
+	return runModelCost(args, stdout, stderr, modelcost.MachineOptions(runtime))
 }
 
 func runModelCost(args []string, stdout, stderr io.Writer, options modelcost.Options) int {
@@ -100,7 +92,7 @@ func runModelCost(args []string, stdout, stderr io.Writer, options modelcost.Opt
 		rows = []pricing.Row{row}
 	}
 	if *jsonOutput {
-		return writeDocument(stdout, stderr, prices, result, model, rows)
+		return writeDocument(stdout, stderr, modelcost.PriceDocument(prices, result, model, rows))
 	}
 	fmt.Fprintln(stdout, summary(prices, result))
 	if *check {
@@ -180,63 +172,8 @@ func writeTable(stdout io.Writer, rows []pricing.Row) error {
 	return table.Flush()
 }
 
-type refreshDocument struct {
-	Status       string `json:"status"`
-	Error        string `json:"error,omitempty"`
-	Changed      *bool  `json:"changed,omitempty"`
-	Persisted    *bool  `json:"persisted,omitempty"`
-	PersistError string `json:"persist_error,omitempty"`
-	StampError   string `json:"stamp_error,omitempty"`
-}
-
-// document is the `pfm model-cost --json` document.
-type document struct {
-	Version    int               `json:"version"`
-	FetchedAt  string            `json:"fetched_at"`
-	CheckedAt  string            `json:"checked_at,omitempty"`
-	Sources    []pricing.Source  `json:"sources"`
-	ServedFrom string            `json:"served_from"`
-	File       string            `json:"file,omitempty"`
-	FileError  string            `json:"file_error,omitempty"`
-	Refresh    refreshDocument   `json:"refresh"`
-	Override   *pricing.Override `json:"override"`
-	Model      string            `json:"model,omitempty"`
-	Rows       []pricing.Row     `json:"rows"`
-}
-
-func errorText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-func writeDocument(
-	stdout, stderr io.Writer,
-	prices pricing.Prices,
-	result modelcost.Result,
-	model string,
-	rows []pricing.Row,
-) int {
-	doc := document{
-		Version: prices.Version, FetchedAt: prices.FetchedAt, Sources: prices.Sources, ServedFrom: prices.From,
-		File: prices.File, FileError: errorText(prices.FileError), Override: prices.Override, Model: model, Rows: rows,
-		Refresh: refreshDocument{
-			Status: result.Status, Error: errorText(result.Err), StampError: errorText(result.StampErr),
-		},
-	}
-	if !result.CheckedAt.IsZero() {
-		doc.CheckedAt = result.CheckedAt.UTC().Format(time.RFC3339Nano)
-	}
-	if result.Status == modelcost.StatusRefreshed {
-		changed, persisted := result.Changed, result.Persisted
-		doc.Refresh.Changed, doc.Refresh.Persisted = &changed, &persisted
-		doc.Refresh.PersistError = errorText(result.PersistErr)
-	}
-	encoder := json.NewEncoder(stdout)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(doc); err != nil {
+func writeDocument(stdout, stderr io.Writer, doc pricing.Document) int {
+	if err := pricing.EncodeDocument(stdout, doc); err != nil {
 		fmt.Fprintf(stderr, "pfm model-cost: write output: %v\n", err)
 		return 1
 	}

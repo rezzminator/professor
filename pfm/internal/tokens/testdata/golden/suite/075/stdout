@@ -1,0 +1,87 @@
+TOKEN AUDIT · last 2399976h · host golden-host · 2026-10-09T10:28:46.000Z
+scanned {FIX}/claude/projects · 5 transcripts (1 main, 4 agent runs with priced calls) · 97 API calls
+pricing: saved table {TMP}/override-table.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: price override active: 8 rows from {TMP}/override-table.json · 1 synthetic/zero-usage calls (dropped: the harness billed nothing for them) · 2 UNPRICED calls {"claude-unobtanium-9":2} — tokens counted, dollars "n/a"; check exact IDs and available rates with pfm model-cost --json --all
+
+== 1 · TOTAL $0.40 by billing class
+      $0.21  51.6%  re-reading cached context (per-model read rate) · 1.0M tok
+      $0.12  30.0%  writing context to the 5-minute cache (1.25x) · 0.1M tok
+      $0.00   0.0%  writing context to the 1-hour cache (2x) · 0.0M tok
+      $0.04   9.5%  output tokens · 0.0M tok
+      $0.04   8.9%  uncached input (1x) · 0.0M tok
+  main chat loops $0.05 (13.4%) · sub-agents $0.35 (86.6%) · thinking 0.0M of 0.0M output tok
+  cache writes by agent runs: 5-minute $0.08 · 1-hour $0.00
+  cache writes by main runs: 5-minute $0.04 · 1-hour $0.00
+
+== 2 · BY PROJECT
+      $0.40 100.0%  /tmp/demo-proj                               main $0.05 · agents $0.35 · 5 runs · rewrites $0.00
+
+== 3 · BY KIND · MODEL · EFFORT
+      $0.35  86.6%      92 calls ·  $0.38/100 calls · agent · sonnet-5 · effort medium
+      $0.05  13.4%       3 calls ·  $1.78/100 calls · main · sonnet-5 · effort medium
+
+== 4 · WHAT THE MONEY PAID FOR (every dollar traced to the context that caused it)
+      $0.24  61.0%  fixed prefix (system prompt, tool schemas, CLAUDE.md)
+      $0.05  11.5%  Bash · test/build/docker runs
+      $0.04  11.1%  own earlier output (text, tool inputs)
+      $0.04   9.5%  OUTPUT generated (text + thinking + tool inputs)
+      $0.01   3.1%  Bash · other
+      $0.01   1.3%  Read · first time
+      $0.00   1.1%  Read · same file again
+      $0.00   0.8%  sub-agent reports (sync)
+      $0.00   0.6%  unexplained delta
+  · /tmp/demo-proj: fixed prefix 61.0% · Bash · test/build/docker runs 11.5% · own earlier output 11.1% · OUTPUT generated 9.5% · Bash · other 3.1%
+
+== 5 · HOW BIG WAS THE CONTEXT WHEN THE MONEY WAS SPENT
+      $0.36  89.1%      94 calls ·   $0.38/100 calls · context under 50K
+      $0.04  10.9%       1 calls ·   $4.34/100 calls · context 200–400K
+  and how deep into a run it was spent (a run's context only grows, so late calls are the dear ones):
+      $0.26  65.7%      57 calls · mean context   14K · agent · calls 1–50
+      $0.08  20.9%      35 calls · mean context    7K · agent · calls 51–150
+      $0.05  13.4%       3 calls · mean context   18K · main · calls 1–50
+  calls that moved almost nothing yet re-read the whole context:
+      $0.29  71.4%      89 calls · agent · small steps (under ~400 tokens came in, under 250 went out)
+      $0.01   1.8%       1 calls · main · small steps (under ~400 tokens came in, under 250 went out)
+      $0.00   0.5%       1 calls · agent · answering a shell command the run repeated 8+ times (polling, log-peeking)
+
+== 6 · FULL CACHE REWRITES (the whole context re-billed at write price)
+  $0.00 total (0.0%)
+
+== 7 · TOP 12 CHAT FAMILIES (a chat + the agents it spawned)
+      $0.40 100.0%  demo flight chat                   demo-proj    own    $0.05 ·   4 agents    $0.35 · rewrites   $0.00 · peak 19K
+
+== 8 · AGENT GROUPS (project · agent type · model) — same job, different cost?
+      total    n   median      p90      max  calls  peakK  wall m  errs  tests  reread  poll$ small$     ttl  group (calls/peak/wall = median, errs/tests/reread = per run, poll/small = share of group $, ttl = where its cache writes went)
+      $0.35    3    $0.07    $0.25    $0.25      4     12       5   0.3    1.0     0.3   0.6%  82.4%      5m  demo-proj · executor · sonnet-5
+      $0.00    1    $0.00    $0.00    $0.00      2     11       3   0.0    0.0     0.0   0.0%   0.0%      5m  demo-proj · lander · unobtanium-9
+
+== 9 · TOP 15 SINGLE RUNS
+      $0.25  executor: task 1-b                           sonnet-5        85 calls · ctx   9→ 12K ·   87m wall/   0m in tools · rw  $0.00 · errs   1 · reread   1 · poll  $0.00 · ttl 5m
+      $0.07  executor: task 1-a                           sonnet-5         3 calls · ctx  10→210K ·    5m wall/   0m in tools · rw  $0.00 · errs   0 · reread   0 · poll  $0.00 · ttl 5m
+      $0.05  MAIN demo flight chat                        sonnet-5         3 calls · ctx  17→ 19K ·   30m wall/   0m in tools · rw  $0.00 · errs   0 · reread   0 · poll  $0.00 · ttl 5m
+      $0.02  executor: task 1-d status probe              sonnet-5         4 calls · ctx   7→  8K ·    4m wall/   0m in tools · rw  $0.00 · errs   0 · reread   0 · poll  $0.00 · ttl 5m
+        n/a  lander: task 1-c gate                        unobtanium-9     2 calls · ctx  10→ 11K ·    3m wall/   0m in tools · rw  $0.00 · errs   0 · reread   0 · poll  $0.00 · ttl 5m
+  concentration: the costliest 10% of agent runs (1 of 4) spent 72.6% of all agent dollars · runs over 150 calls: 0 spending 0.0%
+
+== 10 · TOOLS (results entering context; ~4 chars per token)
+     0.0M tok      3× ·     68 tok each ·   0.0% failed · Read
+     0.0M tok     87× ·      1 tok each ·   1.1% failed · Bash
+     0.0M tok      1× ·      1 tok each ·   0.0% failed · Agent
+       0.0M tok     84× ·   0.0% failed ·      0h waiting · Bash · other
+       0.0M tok      3× ·  33.3% failed ·      0h waiting · Bash · test/build/docker runs
+  harness injections by type:
+
+== 11 · LOOPS
+  the same shell command, repeated inside one run:
+  the same file, read again while already in context:
+      1 re-reads ·     0K tok · demo-proj · src/core.ts                                                                             
+  single tool results that were then carried the longest (estimate: tokens × later calls × read price):
+     $0.04 ·  200K tok carried    1 calls · Bash · go test ./...                                                                   
+
+== 12 · BUSIEST HOURS (UTC)
+  2026-09-20T09h    $0.33
+  2026-09-20T10h    $0.07
+
+== CROSS-CHECK (this estimate vs the harness's own cost-state line, chats wholly inside the window)
+  at the published context tiers (per-model rate in the pfm model-cost table — an estimate): $0.40 (0.95x)
+  1 chats · harness says $0.42 · this audit says $0.40 with agents (0.95x) / $0.05 main loops only (0.13x)

@@ -8,6 +8,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 type codexRecord struct {
@@ -44,7 +45,10 @@ func parseCodexRolloutFile(
 	// session_meta line normally establishes the source before messages, but
 	// the fallback remains user for older files without thread_source.
 	sourceKnown := start > 0
-	parsedOffset, bytesRead, err := readCompleteLines(file.Path, start, func(line []byte) {
+	parsedOffset, bytesRead, err := claudetranscript.ReadLines(file.Path, start, func(line []byte, complete bool) {
+		if !complete {
+			return
+		}
 		if !relevantCodexLine(line) {
 			return
 		}

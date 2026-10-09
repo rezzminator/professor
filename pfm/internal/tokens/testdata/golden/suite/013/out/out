@@ -1,0 +1,90 @@
+{
+ "v": 1,
+ "flight": "runmd-OmC5hn",
+ "source": "run.md (no agents.tsv — every row matched by window)",
+ "baseline": "0000000000000000000000000000000000000000",
+ "window": [
+  "2026-09-20T09:00:00.000Z",
+  "2026-09-20T09:06:00.000Z"
+ ],
+ "scan": {
+  "roots": [
+   "{FIX}/claude/projects"
+  ],
+  "files": 5,
+  "skippedOld": 0,
+  "dupFiles": 0,
+  "badLines": 0,
+  "noTimestamp": 0,
+  "unpricedCalls": 2,
+  "unpricedModels": {
+   "claude-unobtanium-9": 2
+  },
+  "tierUnknownCalls": 0,
+  "syntheticCalls": 1,
+  "identityUnknownRecords": 0,
+  "copiedCalls": 0,
+  "copiesOnly": [],
+  "readErrors": [],
+  "notes": [
+   "3 UNMATCHED (see the unmatched section)"
+  ]
+ },
+ "total": {
+  "n": 1,
+  "calls": 3,
+  "usd": 0.07128,
+  "unpriced": 0,
+  "in": 11240,
+  "cr": 220000,
+  "out": 120,
+  "fail": 0,
+  "poll": 0,
+  "reread": 0,
+  "contract": 1,
+  "compact": 0,
+  "over": 0,
+  "peak": 210420,
+  "lc": 0.07128
+ },
+ "rows": [
+  {
+   "taskId": "1-a",
+   "agentType": "executor",
+   "agentId": "",
+   "round": "",
+   "at": 1789894860000,
+   "engine": "claude",
+   "how": "window",
+   "model": "claude-sonnet-5",
+   "calls": 3,
+   "wallMs": 290000,
+   "ctxFirst": 10000,
+   "ctxPeak": 210420,
+   "tok": {
+    "in": 4040,
+    "out": 120,
+    "cw5": 7200,
+    "cw1": 0,
+    "cr": 220000
+   },
+   "usd": 0.0713,
+   "failedCmds": 0,
+   "pollN": 0,
+   "rereadN": 0,
+   "contractReads": 1,
+   "compactions": 0,
+   "overCap": false
+  }
+ ],
+ "unmatched": [
+  "TRANSCRIPT executor · claude · b2 · 2026-09-20T09:01 · $0.25 · ran under this flight's session with no ledger row",
+  "TRANSCRIPT lander · claude · c3 · 2026-09-20T09:02 · n/a · ran under this flight's session with no ledger row",
+  "TRANSCRIPT executor · claude · d4 · 2026-09-20T09:01 · $0.02 · ran under this flight's session with no ledger row"
+ ],
+ "unledgered": {
+  "n": 3,
+  "usd": 0.2745,
+  "unpriced": 1
+ }
+}

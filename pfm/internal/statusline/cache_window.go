@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // cacheWindowSegment renders the prompt cache's time left and the share of
@@ -367,13 +368,8 @@ func cacheAnchorIn(path string, sidechain bool) cacheWindow {
 				Sidechain bool   `json:"isSidechain"`
 				Timestamp string `json:"timestamp"`
 				Message   struct {
-					Content json.RawMessage `json:"content"`
-					Usage   struct {
-						CacheCreation struct {
-							FiveMinutes int64 `json:"ephemeral_5m_input_tokens"`
-							OneHour     int64 `json:"ephemeral_1h_input_tokens"`
-						} `json:"cache_creation"`
-					} `json:"usage"`
+					Content json.RawMessage    `json:"content"`
+					Usage   pricing.UsageBlock `json:"usage"`
 				} `json:"message"`
 			}
 			if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Sidechain && !sidechain {
@@ -381,10 +377,11 @@ func cacheAnchorIn(path string, sidechain bool) cacheWindow {
 			}
 			switch record.Type {
 			case "assistant":
-				switch created := record.Message.Usage.CacheCreation; {
-				case created.OneHour > 0:
+				switch created := record.Message.Usage.Breakdown; {
+				case created == nil:
+				case created.Write1h > 0:
 					window.ttl = time.Hour
-				case created.FiveMinutes > 0:
+				case created.Write5m > 0:
 					window.ttl = 5 * time.Minute
 				}
 				if parsed, parseErr := time.Parse(time.RFC3339Nano, record.Timestamp); parseErr == nil &&

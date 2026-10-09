@@ -1,13 +1,11 @@
 package statusline
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -19,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // subagentInput is the row context Claude Code's subagentStatusLine setting
@@ -520,30 +519,17 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) age
 		activity.roleErr = activity.err
 		return activity
 	}
-	base := filepath.Join(strings.TrimSuffix(sessionTranscript, ".jsonl"), "subagents", "agent-"+id)
-	activity.role, activity.roleErr = readAgentRole(base + ".meta.json")
-	path := base + ".jsonl"
+	path := transcript.SubagentTranscript(transcript.SubagentsDir(sessionTranscript), id)
+	activity.role, activity.roleErr = readAgentRole(transcript.SubagentMetaPath(path))
 	activity.transcript = path
-	file, err := os.Open(path)
-	if err != nil {
-		activity.err = fmt.Errorf("open sub-agent transcript %s: %w", path, err)
-		return activity
-	}
-	defer func() { _ = file.Close() }() // read-only handle; a close error loses nothing
-
 	seen := map[string]struct{}{}
 	spend := newSpendScan(prices)
-	reader := bufio.NewReaderSize(file, 1<<16)
-	for {
-		line, readErr := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			recordTranscriptLine(line, seen, &activity, spend)
-		}
-		if readErr != nil {
-			if !errors.Is(readErr, io.EOF) {
-				activity.err = fmt.Errorf("read sub-agent transcript %s: %w", path, readErr)
-			}
-			break
+	if _, _, err := transcript.ReadLines(path, 0, func(line []byte, _ bool) {
+		recordTranscriptLine(line, seen, &activity, spend)
+	}); err != nil {
+		var opened bool
+		if opened, activity.err = transcriptError(path, err); !opened {
+			return activity
 		}
 	}
 	activity.tools = len(seen)
@@ -554,15 +540,9 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) age
 
 // readAgentRole reads agentType from the sub-agent's meta file.
 func readAgentRole(path string) (string, error) {
-	raw, err := os.ReadFile(path)
+	meta, err := transcript.ReadSubagentMeta(path)
 	if err != nil {
-		return "", fmt.Errorf("read sub-agent meta %s: %w", path, err)
-	}
-	var meta struct {
-		AgentType string `json:"agentType"`
-	}
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		return "", fmt.Errorf("parse sub-agent meta %s: %w", path, err)
+		return "", err
 	}
 	if strings.TrimSpace(meta.AgentType) == "" {
 		return "", fmt.Errorf("sub-agent meta %s names no agentType", path)
@@ -574,13 +554,14 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	var entry struct {
 		Type      string    `json:"type"`
 		Subtype   string    `json:"subtype"`
+		RequestID string    `json:"requestId"`
 		Timestamp time.Time `json:"timestamp"`
 		Effort    any       `json:"effort"`
 		Message   struct {
-			ID      string          `json:"id"`
-			Model   string          `json:"model"`
-			Content json.RawMessage `json:"content"`
-			Usage   *billedUsage    `json:"usage"`
+			ID      string              `json:"id"`
+			Model   string              `json:"model"`
+			Content json.RawMessage     `json:"content"`
+			Usage   *pricing.UsageBlock `json:"usage"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &entry) != nil {
@@ -618,7 +599,7 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if level, ok := entry.Effort.(string); ok && strings.TrimSpace(level) != "" {
 		activity.effort = strings.TrimSpace(level)
 	}
-	spend.record(entry.Message.ID, entry.Message.Model, entry.Message.Usage)
+	spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, entry.Message.Usage)
 	if usage := entry.Message.Usage; usage != nil {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
 			activity.cacheHit = hit

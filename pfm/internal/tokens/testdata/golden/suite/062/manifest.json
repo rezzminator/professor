@@ -1,0 +1,24 @@
+{
+ "test": "pricing: streamed lines without message.id share the namespaced requestId call key",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-request-VFEWDH",
+  "--out",
+  "{TMP}/price-jepg3o1qh8.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-jepg3o1qh8.json",
+  "price-request-VFEWDH"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-jepg3o1qh8.json"
+ }
+}

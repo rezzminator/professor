@@ -1,0 +1,19 @@
+{
+ "test": "default report: a mixed run's 1-hour share clamps to 1..99, never 0% or 100%",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/clamp-RwpDmH"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "clamp-RwpDmH"
+ ],
+ "outputs": {}
+}

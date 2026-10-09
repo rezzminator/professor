@@ -1,0 +1,24 @@
+{
+ "test": "pricing: a Fable 5.1 cache read bills $0.25/MTok, a Fable 5 read $1.00/MTok",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-fable51-w5DF4E",
+  "--out",
+  "{TMP}/price-bshak85m99.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-bshak85m99.json",
+  "price-fable51-w5DF4E"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-bshak85m99.json"
+ }
+}

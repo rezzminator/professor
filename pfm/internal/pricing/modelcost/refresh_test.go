@@ -331,3 +331,50 @@ func TestRefreshOfAFutureDatedTableOrStampFetches(t *testing.T) {
 		}
 	})
 }
+
+func TestDocumentStatesTheServedTableAndItsRefresh(t *testing.T) {
+	checked := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	prices := pricing.Prices{
+		Table: pricing.Table{
+			Version:   pricing.Version,
+			FetchedAt: "2026-01-01T00:00:00Z",
+			Sources:   []pricing.Source{{Provider: "openai", URL: "https://example.invalid"}},
+		},
+		Origin:   pricing.Origin{From: pricing.FromFile, File: "/clone/prices.json", FileError: errors.New("stale")},
+		Override: &pricing.Override{Path: "/cfg/pfm.prices.json", Rows: 2},
+	}
+	refreshed := PriceDocument(
+		prices,
+		Result{Status: StatusRefreshed, Changed: true, PersistErr: errors.New("read-only"), CheckedAt: checked},
+		"",
+		nil,
+	)
+	if refreshed.ServedFrom != pricing.FromFile || refreshed.File != "/clone/prices.json" ||
+		refreshed.FileError != "stale" ||
+		refreshed.CheckedAt != "2026-01-02T03:04:05Z" ||
+		refreshed.Override == nil ||
+		refreshed.Override.Rows != 2 {
+		t.Fatalf("Document header = %+v", refreshed)
+	}
+	if r := refreshed.Refresh; r.Status != StatusRefreshed || r.Changed == nil || !*r.Changed || r.Persisted == nil ||
+		*r.Persisted ||
+		r.PersistError != "read-only" {
+		t.Fatalf("refreshed report = %+v", r)
+	}
+	failed := PriceDocument(prices, Result{Status: StatusFailed, Err: errors.New("HTTP 503")}, "claude-opus-5-5", nil)
+	if r := failed.Refresh; r.Status != StatusFailed || r.Error != "HTTP 503" || r.Changed != nil ||
+		r.Persisted != nil ||
+		failed.Model != "claude-opus-5-5" {
+		t.Fatalf("failed report = %+v, model %q", r, failed.Model)
+	}
+}
+
+func TestMachineOptionsReadTheRuntime(t *testing.T) {
+	var runtime config.Runtime
+	runtime.Paths.Home, runtime.Config.Path = "/h", "/h/pfm.config.json"
+	options := MachineOptions(runtime)
+	if options.Home != "/h" || options.ConfigPath != "/h/pfm.config.json" || options.Force ||
+		options.Offline != paths.PricesOffline() || options.Clock == nil || options.Fetch == nil {
+		t.Fatalf("MachineOptions = %+v", options)
+	}
+}

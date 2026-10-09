@@ -1,0 +1,24 @@
+{
+ "test": "--timeline: a fork or resumed file prices only its own call, like the default report",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-fork-9HmLpQ",
+  "--out",
+  "{TMP}/price-3v3qcmy5qqa.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-3v3qcmy5qqa.json",
+  "price-fork-9HmLpQ"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-3v3qcmy5qqa.json"
+ }
+}

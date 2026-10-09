@@ -1,0 +1,26 @@
+{
+ "test": "--session: a transcript holding only copies exits zero and names their origin",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-fork-LAUj9e",
+  "--out",
+  "{TMP}/price-ch31561yyyf.json",
+  "--session",
+  "sess-c"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-ch31561yyyf.json",
+  "price-fork-LAUj9e"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-ch31561yyyf.json"
+ }
+}

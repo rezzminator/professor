@@ -1,0 +1,7 @@
+TOKEN AUDIT · codex · last 2399976h · {FIX}/codex · 0 threads of 1 rollouts
+pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: 1 rollouts outside --project no-such-project
+
+STARTED          THREAD        MODEL        LABEL                           IN      CACHED        OUT   EST USD
+
+TOTAL 0 tok · uncached in 0 · cached in 0 · out 0 (incl. 0 reasoning) · $0.00

@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-09-20T09:00:00.000Z","cwd":"/tmp/price-proj","requestId":"req-msg-f51","effort":"medium","uuid":"s-0-0","sessionId":"s","message":{"id":"msg-f51","model":"claude-fable-5-1","content":[{"type":"text","text":"step"}],"usage":{"input_tokens":100,"output_tokens":500,"cache_read_input_tokens":1000000,"cache_creation_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}}}}
+{"type":"custom-title","customTitle":"price s","cwd":"/tmp/price-proj"}

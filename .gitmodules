@@ -23,6 +23,11 @@
 	url = https://github.com/rezzminator/callmeter.git
 	branch = develop
 	ignore = dirty
+[submodule "engine-sync"]
+	path = plugins/engine-sync
+	url = https://github.com/rezzminator/engine-sync.git
+	branch = develop
+	ignore = dirty
 [submodule "sub-agent-compact"]
 	path = plugins/sub-agent-compact
 	url = https://github.com/rezzminator/sub-agent-compact.git

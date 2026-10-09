@@ -21,6 +21,18 @@ func TestApplyTokenRecordCountsEachResponseOnce(t *testing.T) {
 			`{"type":"assistant","message":{"id":"m2","usage":{"input_tokens":0,"output_tokens":0,` +
 				`"iterations":[{"input_tokens":100,"output_tokens":20},{"cache_creation_input_tokens":30}]}}}`,
 		}, 150, 0, true},
+		{"an advisor's iterations count beside the executor's top level", []string{
+			`{"type":"assistant","message":{"id":"m3","usage":{"input_tokens":4,"output_tokens":40,` +
+				`"cache_read_input_tokens":300,"cache_creation_input_tokens":20,"iterations":[` +
+				`{"input_tokens":2,"output_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":20,"type":"message"},` +
+				`{"input_tokens":177,"output_tokens":1422,"cache_creation_input_tokens":8000,"type":"advisor_message","model":"claude-opus-5-5"},` +
+				`{"input_tokens":2,"output_tokens":30,"cache_read_input_tokens":200,"type":"message"}]}}}`,
+		}, 4 + 40 + 300 + 20 + 177 + 1422 + 8000, 0, true},
+		{"an advisor's iterations count beside an empty top level's executor iterations", []string{
+			`{"type":"assistant","message":{"id":"m4","usage":{"input_tokens":0,"output_tokens":0,"iterations":[` +
+				`{"input_tokens":100,"output_tokens":20,"type":"message"},` +
+				`{"input_tokens":50,"output_tokens":5,"type":"advisor_message","model":"claude-opus-5-5"}]}}}`,
+		}, 100 + 20 + 50 + 5, 0, true},
 		{"a Codex token_count sets the lifetime total; an info-less one is ignored", []string{
 			`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":900}}}}`,
 			`{"type":"event_msg","payload":{"type":"token_count","info":null}}`,

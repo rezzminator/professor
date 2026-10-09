@@ -320,6 +320,9 @@ type event struct {
 type callUsage struct {
 	usage    pricing.ClaudeUsage
 	split    bool
+	requests []pricing.ClaudeUsage  // the executor's requests, which sum to usage; none when only the advisor billed
+	advisors []pricing.AdvisorUsage // the advisor consultations the response billed beside its own usage
+	unknown  []string               // the usage iteration types pfm does not know
 	thinking int64
 	model    string
 	noModel  bool // the record named no model at all
@@ -479,8 +482,9 @@ func (a *auditor) collectCall(
 	file string, ts float64, toolUses map[string]toolUse, slots map[string]*timelineSlot, owners map[string]string,
 ) {
 	usage, split := block.Billed()
+	advisors := block.Advisors()
 	model := jsString(message.Model)
-	if model == "<synthetic>" || usage.Input+usage.Output+usage.CacheRead+usage.Write5m+usage.Write1h == 0 {
+	if model == "<synthetic>" || usage == (pricing.ClaudeUsage{}) && len(advisors) == 0 {
 		a.scan.syntheticCalls++
 		return
 	}
@@ -514,7 +518,8 @@ func (a *auditor) collectCall(
 		effort = keyString(value)
 	}
 	c.usage[id] = &callUsage{
-		usage: usage, split: split, thinking: block.Thinking(), model: model,
+		usage: usage, split: split, requests: block.Requests(), advisors: advisors, unknown: block.UnknownIterations(),
+		thinking: block.Thinking(), model: model,
 		noModel: len(message.Model) == 0 || string(message.Model) == jsNull, ts: ts, effort: effort, copied: copied,
 	}
 	list, _ := transcript.DecodeContent(message.Content)

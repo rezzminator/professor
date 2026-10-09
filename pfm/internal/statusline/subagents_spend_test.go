@@ -156,6 +156,10 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m3", "claude-opus-5-5", 12, 900, 4000, 0, 1500),
+		// a response that consulted the advisor: priced at the advisor's model on both surfaces
+		strings.Replace(strings.Replace(advisorResponse("claude-opus-5-5"), `{"type":"assistant",`,
+			`{"type":"assistant","timestamp":"2026-09-21T05:00:00Z","cwd":"/w/demo","sessionId":"s1",`, 1),
+			"claude-sonnet-5-5", "claude-sonnet-5", 1),
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -164,8 +168,8 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	spend, err := readTranscriptSpend(path, prices)
-	if err != nil || spend.partial || spend.priced != 3 {
-		t.Fatalf("statusline spend = %+v, %v; want three priced responses", spend, err)
+	if err != nil || spend.partial || spend.priced != 5 || spend.advisorUSD == 0 {
+		t.Fatalf("statusline spend = %+v, %v; want four priced responses and one priced advisor", spend, err)
 	}
 
 	out := filepath.Join(t.TempDir(), "audit.json")
@@ -183,8 +187,11 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	var audit struct {
-		USD   map[string]float64 `json:"usd"`
-		Calls int                `json:"calls"`
+		USD     map[string]float64 `json:"usd"`
+		Calls   int                `json:"calls"`
+		Advisor struct {
+			USD float64 `json:"usd"`
+		} `json:"advisor"`
 	}
 	if err := json.Unmarshal(data, &audit); err != nil {
 		t.Fatal(err)
@@ -193,7 +200,114 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 	for _, usd := range audit.USD {
 		total += usd
 	}
-	if audit.Calls != 3 || math.Abs(total-spend.usd) > 1e-12 || total == 0 {
-		t.Errorf("pfm tokens $%v over %d calls, statusline $%v; want one price", total, audit.Calls, spend.usd)
+	if audit.Calls != 4 || math.Abs(total-spend.usd) > 1e-12 || total == 0 ||
+		math.Abs(audit.Advisor.USD-spend.advisorUSD) > 1e-12 {
+		t.Errorf("pfm tokens $%v (advisor $%v) over %d calls, statusline $%v (advisor $%v); want one price",
+			total, audit.Advisor.USD, audit.Calls, spend.usd, spend.advisorUSD)
+	}
+}
+
+// advisorResponse is a Sonnet response that consulted the Opus advisor once,
+// as the harness records it: the top level is the executor's two message
+// iterations, the advisor iteration is billed to the advisor model beside them.
+func advisorResponse(advisorModel string) string {
+	model := ""
+	if advisorModel != "" {
+		model = `,"model":"` + advisorModel + `"`
+	}
+	return `{"type":"assistant","requestId":"req_a1","message":{"id":"a1","model":"claude-sonnet-5-5","usage":` +
+		`{"input_tokens":4,"cache_creation_input_tokens":1442,"cache_read_input_tokens":175106,"output_tokens":1240,` +
+		`"cache_creation":{"ephemeral_5m_input_tokens":552,"ephemeral_1h_input_tokens":0},"iterations":[` +
+		`{"input_tokens":2,"output_tokens":26,"cache_read_input_tokens":87277,"cache_creation_input_tokens":552,"type":"message"},` +
+		`{"input_tokens":177,"output_tokens":1422,"cache_read_input_tokens":0,"cache_creation_input_tokens":89334,` +
+		`"cache_creation":{"ephemeral_5m_input_tokens":89334,"ephemeral_1h_input_tokens":0},"type":"advisor_message"` + model + `},` +
+		`{"input_tokens":2,"output_tokens":1214,"cache_read_input_tokens":87829,"cache_creation_input_tokens":890,"type":"message"}]}}}`
+}
+
+// An advisor consultation is priced at the advisor's own model and counted in
+// the agent's spend, apart from the executor's own dollars.
+func TestReadTranscriptSpendPricesTheAdvisorAtItsOwnModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent-x.jsonl")
+	if err := os.WriteFile(path, []byte(advisorResponse("claude-opus-5-5")+"\n"), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	spend, err := readTranscriptSpend(path, testPrices(t))
+	if err != nil {
+		t.Fatalf("readTranscriptSpend: %v", err)
+	}
+	executor := (4*2.0 + 1240*10.0 + 175106*0.2 + 1442*2.5) / 1e6
+	advisor := (177*4.0 + 1422*20.0 + 89334*5.0) / 1e6
+	if math.Abs(spend.advisorUSD-advisor) > 1e-12 || math.Abs(spend.usd-(executor+advisor)) > 1e-12 {
+		t.Errorf(
+			"usd %v advisor %v; want %v = executor %v + advisor %v",
+			spend.usd,
+			spend.advisorUSD,
+			executor+advisor,
+			executor,
+			advisor,
+		)
+	}
+	if spend.in != 4+1442+175106+177+89334 || spend.out != 1240+1422 || spend.partial {
+		t.Errorf(
+			"in/out %d/%d partial %v; want the advisor's tokens counted with the executor's",
+			spend.in,
+			spend.out,
+			spend.partial,
+		)
+	}
+	plain := spendSegment(agentActivity{spend: agentSpend{usd: 1.5, advisorUSD: 0.25, priced: 1}})
+	if got := stripANSICodes(plain); !strings.Contains(got, "$1.50/0/0/0 adv $0.25") {
+		t.Errorf("segment %q; want the advisor's dollars shown as advisor spend", got)
+	}
+	if got := stripANSICodes(
+		spendSegment(agentActivity{spend: agentSpend{usd: 1.5, priced: 1}}),
+	); strings.Contains(
+		got,
+		"adv",
+	) {
+		t.Errorf("segment %q; want no advisor mark without advisor spend", got)
+	}
+}
+
+// An advisor model the table cannot price leaves the sum a floor, never a
+// quiet low number, and the executor's own dollars are still counted.
+func TestReadTranscriptSpendMarksAnUnpricedAdvisorAsAFloor(t *testing.T) {
+	for _, model := range []string{"claude-nonesuch-9", ""} {
+		path := filepath.Join(t.TempDir(), "agent-x.jsonl")
+		if err := os.WriteFile(path, []byte(advisorResponse(model)+"\n"), 0o600); err != nil {
+			t.Fatalf("write transcript: %v", err)
+		}
+		spend, err := readTranscriptSpend(path, testPrices(t))
+		if err != nil {
+			t.Fatalf("readTranscriptSpend: %v", err)
+		}
+		executor := (4*2.0 + 1240*10.0 + 175106*0.2 + 1442*2.5) / 1e6
+		if !spend.partial || spend.advisorUSD != 0 || math.Abs(spend.usd-executor) > 1e-12 {
+			t.Errorf("advisor model %q: %+v; want a partial sum of the executor's %v", model, spend, executor)
+		}
+		if got := stripANSICodes(spendSegment(agentActivity{spend: spend})); !strings.Contains(got, " adv n/a") ||
+			strings.Contains(got, "adv $") {
+			t.Errorf("advisor model %q: segment %q; want the advisor's dollars as n/a, never $0", model, got)
+		}
+	}
+}
+
+// An iteration type pfm does not know may have billed what the top level does
+// not carry: the sum is a floor, never a quiet total.
+func TestReadTranscriptSpendMarksAnUnknownIterationAsAFloor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent-x.jsonl")
+	line := `{"type":"assistant","requestId":"req_f1","message":{"id":"f1","model":"claude-sonnet-5-5","usage":` +
+		`{"input_tokens":1000,"output_tokens":100,"iterations":[` +
+		`{"input_tokens":900,"output_tokens":40,"type":"message","model":"claude-fable-5-1"},` +
+		`{"input_tokens":1000,"output_tokens":100,"type":"fallback_message","model":"claude-sonnet-5-5"}]}}}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	spend, err := readTranscriptSpend(path, testPrices(t))
+	if err != nil {
+		t.Fatalf("readTranscriptSpend: %v", err)
+	}
+	if !spend.partial || spend.priced != 1 || math.Abs(spend.usd-(1000*2.0+100*10.0)/1e6) > 1e-12 {
+		t.Errorf("%+v; want the top level priced and the sum a floor", spend)
 	}
 }

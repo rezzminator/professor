@@ -14,19 +14,28 @@ import (
 // agentSpend is what an agent billed over its whole transcript — every
 // response before and after a compaction — in USD, tokens and tool calls: in
 // is every prompt token (uncached, cache read, cache write), out every output
-// token, tools every distinct tool_use.
+// token, tools every distinct tool_use. An advisor the agent consulted bills at
+// its own model: its dollars and tokens are counted in usd, in and out, and
+// its dollars alone in advisorUSD.
 // partial means the sum is a floor: a response named a model the price table
-// cannot price, or a transcript below the agent could not be read.
+// cannot price, carried a usage iteration of a type pfm does not know, or a
+// transcript below the agent could not be read.
 type agentSpend struct {
 	usd     float64
 	in, out int64
-	tools   int
-	priced  int
-	partial bool
+	// advisorUSD is the part of usd the advisor model billed.
+	advisorUSD float64
+	// advisorUnpriced counts the consultations the table could not price.
+	advisorUnpriced int
+	tools           int
+	priced          int
+	partial         bool
 }
 
 func (spend *agentSpend) add(other agentSpend) {
 	spend.usd += other.usd
+	spend.advisorUSD += other.advisorUSD
+	spend.advisorUnpriced += other.advisorUnpriced
 	spend.in += other.in
 	spend.out += other.out
 	spend.tools += other.tools
@@ -46,8 +55,11 @@ type spendScan struct {
 }
 
 type response struct {
-	model  string
-	billed pricing.ClaudeUsage
+	model    string
+	billed   pricing.ClaudeUsage
+	requests []pricing.ClaudeUsage
+	advisors []pricing.AdvisorUsage
+	unknown  bool
 }
 
 func newSpendScan(prices *pricing.Prices) *spendScan {
@@ -59,11 +71,15 @@ func (scan *spendScan) record(messageID, requestID, model string, usage *pricing
 		return
 	}
 	billed, _ := usage.Billed()
+	seen := response{
+		model: model, billed: billed, requests: usage.Requests(), advisors: usage.Advisors(),
+		unknown: len(usage.UnknownIterations()) != 0,
+	}
 	if key := transcript.ResponseKey(messageID, requestID, "", ""); key != "" {
-		scan.responses[key] = response{model: model, billed: billed}
+		scan.responses[key] = seen
 		return
 	}
-	scan.unkeyed.add(scan.price(model, billed))
+	scan.unkeyed.add(scan.priceResponse(seen))
 }
 
 // total is every response the scan saw, each priced once, and its distinct
@@ -72,16 +88,31 @@ func (scan *spendScan) total() agentSpend {
 	spend := scan.unkeyed
 	spend.tools = len(scan.tools)
 	for _, seen := range scan.responses {
-		spend.add(scan.price(seen.model, seen.billed))
+		spend.add(scan.priceResponse(seen))
 	}
 	return spend
 }
 
-func (scan *spendScan) price(model string, billed pricing.ClaudeUsage) agentSpend {
-	spend := agentSpend{
-		in:  billed.Input + billed.CacheRead + billed.Write5m + billed.Write1h,
-		out: billed.Output,
+// priceResponse is the response's own spend, each request at its own tier,
+// plus each advisor consultation's, the advisor priced at the model it names.
+// An iteration of a type pfm does not know leaves the sum a floor.
+func (scan *spendScan) priceResponse(seen response) agentSpend {
+	spend := scan.price(seen.model, seen.billed, seen.requests)
+	spend.partial = spend.partial || seen.unknown
+	for _, advisor := range seen.advisors {
+		consulted := scan.price(advisor.Model, advisor.Usage, []pricing.ClaudeUsage{advisor.Usage})
+		consulted.advisorUSD = consulted.usd
+		if consulted.partial {
+			consulted.advisorUnpriced = 1
+		}
+		spend.add(consulted)
 	}
+	return spend
+}
+
+// price is billed's tokens and the USD of its requests, which sum to it.
+func (scan *spendScan) price(model string, billed pricing.ClaudeUsage, requests []pricing.ClaudeUsage) agentSpend {
+	spend := agentSpend{in: billed.Context(), out: billed.Output}
 	if billed == (pricing.ClaudeUsage{}) {
 		return spend
 	}
@@ -90,7 +121,9 @@ func (scan *spendScan) price(model string, billed pricing.ClaudeUsage) agentSpen
 		row, ok = scan.prices.Resolve(model)
 	}
 	if ok {
-		spend.usd, ok = row.ClaudeCost(billed)
+		var parts pricing.ClaudeParts
+		parts, ok = row.ClaudeRequestsCostParts(requests)
+		spend.usd = parts.Total()
 	}
 	if !ok {
 		spend.partial = true
@@ -213,7 +246,9 @@ func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend
 }
 
 // spendSegment renders "$1.24/3.1M/42K/12": USD, prompt and output tokens,
-// then tool calls, for the agent and every agent below it. A floor (partial) gets a "+?" in the
+// then tool calls, for the agent and every agent below it; advisor spend, part
+// of that USD, follows as " adv $0.30", or " adv n/a" when the table could not
+// price a consultation. A floor (partial) gets a "+?" in the
 // warning colour; with nothing priced at all the dollar part is "$?". An own
 // transcript that could not be read is "$?/?/?/?": nothing it says is a total.
 func spendSegment(activity agentActivity) string {
@@ -229,6 +264,12 @@ func spendSegment(activity agentActivity) string {
 		cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
 		cTools + strconv.Itoa(spend.tools) + reset
+	switch {
+	case spend.advisorUnpriced > 0:
+		line += cMuted + " adv " + reset + cWarn + "n/a" + reset
+	case spend.advisorUSD > 0:
+		line += cMuted + " adv " + reset + cCost + "$" + strconv.FormatFloat(spend.advisorUSD, 'f', 2, 64) + reset
+	}
 	if spend.partial && spend.priced > 0 {
 		line += cWarn + "+?" + reset
 	}

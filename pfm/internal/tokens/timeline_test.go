@@ -53,3 +53,46 @@ func TestTimelinePrintsEachFileAndFailsOnAnUnreadableOne(t *testing.T) {
 		t.Errorf("exit %d, want 1 with the unreadable file named and the next file still printed:\n%s", code, stdout)
 	}
 }
+
+func TestTimelineMarksTheAdvisorPartOfACallsDollars(t *testing.T) {
+	file := writeTranscript(t, filepath.Join(t.TempDir(), "-w-demo", "s1.jsonl"),
+		advisorAssistant("m1", "claude-sonnet-5", "2026-09-21T05:00:00Z", "claude-opus-5-5"))
+	code, stdout, stderr := auditWith(t, Options{}, "--prices", fixture(t, "model-cost.json"), "--timeline", file)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q, want 0", code, stderr)
+	}
+	total, advisor := "$"+fixed(advisorExecutorUSD+advisorAdvisorUSD, 4), "(advisor $"+fixed(advisorAdvisorUSD, 4)+")"
+	for _, part := range []string{total + " " + advisor + " · " + file, " · " + total + " " + advisor + " · (no tools)"} {
+		if !strings.Contains(stdout, part) {
+			t.Errorf("timeline lacks %q:\n%s", part, stdout)
+		}
+	}
+	// an executor model the table cannot price still shows the advisor dollars its call booked
+	file = writeTranscript(t, filepath.Join(t.TempDir(), "-w-demo", "s2.jsonl"),
+		advisorAssistant("m1", "claude-nonesuch-9", "2026-09-21T05:00:00Z", "claude-opus-5-5"))
+	code, stdout, stderr = auditWith(t, Options{}, "--prices", fixture(t, "model-cost.json"), "--timeline", file)
+	if code != 0 || !strings.Contains(stdout, " · "+notPriced+" "+advisor+" · (no tools)") {
+		t.Errorf("exit %d stderr %q; want the unpriced call's row to carry %q:\n%s", code, stderr, advisor, stdout)
+	}
+	// an advisor the table cannot price marks its call "n/a", never "$0"
+	file = writeTranscript(t, filepath.Join(t.TempDir(), "-w-demo", "s3.jsonl"),
+		advisorAssistant("m1", "claude-sonnet-5", "2026-09-21T05:00:00Z", "claude-nonesuch-9"))
+	code, stdout, stderr = auditWith(t, Options{}, "--prices", fixture(t, "model-cost.json"), "--timeline", file)
+	unpriced := " · $" + fixed(advisorExecutorUSD, 4) + " (advisor " + notPriced + ") · (no tools)"
+	if code != 0 || !strings.Contains(stdout, unpriced) || strings.Contains(stdout, "(advisor $") {
+		t.Errorf("exit %d stderr %q; want the row to carry %q:\n%s", code, stderr, unpriced, stdout)
+	}
+}
+
+// A response that billed only its advisor is no call, but its dollars are the
+// run's: the timeline shows the consultation on a row of its own.
+func TestTimelineShowsAConsultationWithoutACall(t *testing.T) {
+	file := writeTranscript(t, filepath.Join(t.TempDir(), "-w-demo", "s1.jsonl"),
+		assistant("m1", "claude-sonnet-5", "2026-09-21T05:00:00Z", 1000, 100, 2000, 400),
+		advisorOnlyAssistant("m2", "2026-09-21T05:01:00Z"))
+	code, stdout, stderr := auditWith(t, Options{}, "--prices", fixture(t, "model-cost.json"), "--timeline", file)
+	row := "  advisor 05:01:00 · $" + fixed(advisorAdvisorUSD, 4) + " · (no tools)"
+	if code != 0 || stderr != "" || !strings.Contains(stdout, row) || !strings.Contains(stdout, " · 1 calls · ") {
+		t.Errorf("exit %d stderr %q; want one call and the consultation's row %q:\n%s", code, stderr, row, stdout)
+	}
+}

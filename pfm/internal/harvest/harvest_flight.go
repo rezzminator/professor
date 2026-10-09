@@ -12,12 +12,21 @@ import (
 // again — nor written to the negative cache or the source's scoreboard. A walk
 // that succeeded is shared whatever became of its leader. A failure whose walk
 // was refused for load (NoteRefusedForLoad) is the server's, not the source's:
-// answered, but neither cached nor scored.
+// answered, but neither cached nor scored. A failure the source owns is
+// written to the negative cache before its flight leaves the table, and a
+// caller finding no flight reads that cache under the same lock, so no caller
+// can fall between the two and walk a source that has just failed.
 func (h *Harvester) fetchShared(ctx context.Context, key, source string, options FetchOptions) Result {
+	if h.hooks.entering != nil {
+		h.hooks.entering(key)
+	}
 	for {
 		h.flightMu.Lock()
 		if flight, ok := h.flights[key]; ok {
 			h.flightMu.Unlock()
+			if h.hooks.joined != nil {
+				h.hooks.joined(key)
+			}
 			select {
 			case <-flight.done:
 				if flight.abandoned {
@@ -35,19 +44,32 @@ func (h *Harvester) fetchShared(ctx context.Context, key, source string, options
 				return Result{Source: source, Error: ctx.Err().Error()}
 			}
 		}
+		if cached, ok := h.neg.get(key); ok { // a walk that failed after this caller's own cache read
+			h.flightMu.Unlock()
+			if options.SizeOnly {
+				cached.Content = ""
+			}
+			return cached
+		}
 		flight := &fetchFlight{done: make(chan struct{})}
 		h.flights[key] = flight
 		h.flightMu.Unlock()
-		result, abandoned, refused := h.walk(ctx, source, options)
+		whole := options // the flight shares the whole page: a size-only leader blanks only its own answer
+		whole.SizeOnly = false
+		result, abandoned, refused := h.walk(ctx, source, whole)
+		owned := !abandoned && !refused // the source's own outcome: cached when it failed, and scored
 		h.flightMu.Lock()
+		if owned && result.Error != "" && !flight.overtaken {
+			h.neg.put(key, result)
+		}
 		flight.result, flight.abandoned = result, abandoned
 		close(flight.done)
 		delete(h.flights, key)
 		h.flightMu.Unlock()
-		if !abandoned && !refused {
-			if result.Error != "" {
-				h.neg.put(key, result)
-			}
+		if h.hooks.left != nil {
+			h.hooks.left(key)
+		}
+		if owned {
 			h.recordStat(source, result) // scoreboard: every terminal outcome lands in stats.jsonl
 		}
 		if options.SizeOnly && result.Error == "" {
@@ -55,6 +77,27 @@ func (h *Harvester) fetchShared(ctx context.Context, key, source string, options
 		}
 		return result
 	}
+}
+
+// clearFailure forgets key's cached failure once a refresh has read its
+// source, and keeps a walk of key still in flight — begun before that read —
+// from caching its failure over it.
+func (h *Harvester) clearFailure(key string) {
+	h.flightMu.Lock()
+	defer h.flightMu.Unlock()
+	h.neg.drop(key)
+	if flight, ok := h.flights[key]; ok {
+		flight.overtaken = true
+	}
+}
+
+// flightHooks are fetchShared's test seams, nil outside tests: entering runs
+// as a caller reaches the flight table, joined once it has found a flight to
+// wait on, left once a leader has removed its flight from the table.
+type flightHooks struct {
+	entering func(key string)
+	joined   func(key string)
+	left     func(key string)
 }
 
 // walk runs one fetchUnshared under a fresh load-refusal probe. abandoned: it

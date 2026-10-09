@@ -11,7 +11,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -247,6 +249,63 @@ func TestCallerHeadersPartitionTheCache(t *testing.T) {
 			second.CacheStatus,
 			again.CacheStatus,
 		)
+	}
+}
+
+// TestCallerHeadersShareTheirFailureAcrossCalls: every call with headers got
+// a fresh negative cache and flight table, so a source that had just failed
+// for a header set was walked again by its next call with the same set, and
+// two such calls at once walked it twice. One header set keeps one set of
+// in-memory caches across calls; another set never reads them.
+func TestCallerHeadersShareTheirFailureAcrossCalls(t *testing.T) {
+	t.Parallel()
+	var sourceRequests atomic.Int32
+	failing := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "failing.example.test" {
+			sourceRequests.Add(1)
+		}
+		return nil, errors.New("fixture connection failure")
+	})
+	h := mustNew(t, Options{
+		CacheDir: t.TempDir(), Client: &http.Client{Transport: failing}, Chrome: &http.Client{Transport: failing},
+		Jina: &http.Client{Transport: failing}, OA: &http.Client{Transport: failing},
+		Converter: &fakeConverter{}, BrowserRung: browserOff(),
+		NegativeTransientTTL: time.Hour, // a slow runner never outlives the cached failure
+	})
+	read := func(header string) Result {
+		headers, err := ParseCallerHeaders(map[string]string{"X-Probe": header})
+		if err != nil {
+			t.Fatal(err)
+		}
+		const source = "https://failing.example.test/page"
+		scoped, ctx, err := h.ForCaller(context.Background(), headers, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scoped.Fetch(ctx, source)
+	}
+	walks := sourceRequests.Load
+	first := read("one")
+	walked := walks()
+	second := read("one")
+	if first.Error == "" || !strings.Contains(second.Error, "recently failed; cached") || walks() != walked {
+		t.Fatalf("second call with the same headers answered %q after %d source requests (the first call made %d); "+
+			"want the cached failure and no walk", second.Error, walks(), walked)
+	}
+	if other := read("two"); strings.Contains(other.Error, "recently failed; cached") || walks() == walked {
+		t.Fatalf("a call with other headers answered %q with no walk of its own; want its own walk", other.Error)
+	}
+	for index := range 2 * maxCallerScopes { // a caller sending a new header set per call
+		headers, err := ParseCallerHeaders(map[string]string{"X-Probe": fmt.Sprintf("rotating-%d", index)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.scopedTo(headers)
+	}
+	h.scopeMu.Lock()
+	defer h.scopeMu.Unlock()
+	if kept := len(h.scopes); kept > maxCallerScopes {
+		t.Fatalf("a harvester keeps %d header sets' caches; want at most %d", kept, maxCallerScopes)
 	}
 }
 

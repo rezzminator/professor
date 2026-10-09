@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 type legacyConverterFunc func(context.Context, string, string, []byte) (string, error)
@@ -55,6 +57,19 @@ func TestLegacyNegativeCacheAnnotatesRetryAndExpiresByFailureKind(t *testing.T) 
 				t.Fatalf("cache presence=%v, want %v", ok, test.want)
 			}
 		})
+	}
+
+	// An expired failure leaves even when its key is never read again: a
+	// header set's cache (scopedTo) lives as long as the server.
+	fake := clock.NewFake(time.Now())
+	swept := newNegativeCache(120*time.Second, 15*time.Second, fake)
+	for index := range 4 * negativeSweepFloor {
+		swept.put(fmt.Sprintf("https://fixture.example.test/%d", index), permanent)
+		fake.Advance(121 * time.Second)
+	}
+	if held := len(swept.entries); held > negativeSweepFloor {
+		t.Fatalf("a cache whose every failure expired before the next holds %d entries; want at most %d",
+			held, negativeSweepFloor)
 	}
 }
 

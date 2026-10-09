@@ -368,7 +368,11 @@ type Harvester struct {
 	neg          *negativeCache
 	flightMu     sync.Mutex
 	flights      map[string]*fetchFlight
+	hooks        flightHooks
 	settings     settings
+	// scopes holds one clone per caller header set (scopedTo), by its hash.
+	scopeMu sync.Mutex
+	scopes  map[string]*Harvester
 }
 
 func (h *Harvester) nowClock() clock.Clock {
@@ -385,6 +389,9 @@ type fetchFlight struct {
 	// joined callers walk again rather than read its result
 	// (Harvester.fetchShared).
 	abandoned bool
+	// overtaken marks a walk a successful refresh of its key read past while
+	// it ran (Harvester.clearFailure): its failure is not cached over that read.
+	overtaken bool
 }
 
 // New constructs a Harvester. A nil Converter is valid for callers that only

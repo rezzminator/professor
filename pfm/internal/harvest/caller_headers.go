@@ -30,6 +30,10 @@ const (
 	// hash of its sorted header set: a page read with a credential is never
 	// served to a call without it, nor the other way round.
 	callerCacheDir = "caller-headers"
+	// maxCallerScopes bounds the header sets whose in-memory caches a
+	// harvester keeps (scopedTo): a caller sending a new set per call grows
+	// nothing past it.
+	maxCallerScopes = 64
 )
 
 // ErrCallerHeader marks a caller header set refused at entry; no request
@@ -208,9 +212,27 @@ func (h *Harvester) ForWork(
 	return h.scopedTo(headers), context.WithValue(ctx, callerScopeKey{}, callerScope{headers: headers}), nil
 }
 
-// scopedTo is h with its caches partitioned by the header set's hash.
+// scopedTo is h with its caches partitioned by the header set's hash: one
+// clone per header set, kept across calls, so the set's in-memory negative
+// cache and flight table hold like h's own. Past maxCallerScopes sets one
+// clone is forgotten (its artifacts stay on disk); a header value is never
+// kept, only its set's hash.
 func (h *Harvester) scopedTo(headers CallerHeaders) *Harvester {
 	hash := headers.hash()
+	h.scopeMu.Lock()
+	defer h.scopeMu.Unlock()
+	if clone, ok := h.scopes[hash]; ok {
+		return clone
+	}
+	if h.scopes == nil {
+		h.scopes = map[string]*Harvester{}
+	}
+	if len(h.scopes) >= maxCallerScopes {
+		for forgotten := range h.scopes {
+			delete(h.scopes, forgotten)
+			break
+		}
+	}
 	clone := &Harvester{
 		options:      h.options,
 		clock:        h.clock,
@@ -226,6 +248,7 @@ func (h *Harvester) scopedTo(headers CallerHeaders) *Harvester {
 		flights:      make(map[string]*fetchFlight),
 		settings:     h.settings,
 	}
+	h.scopes[hash] = clone
 	return clone
 }
 

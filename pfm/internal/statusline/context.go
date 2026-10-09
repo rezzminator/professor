@@ -63,12 +63,13 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	), contextTokens
 }
 
-// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 ledger≠cc": exactly ONE dollar
+// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 sink failed": exactly ONE dollar
 // amount in every state, then prompt tokens, output tokens and tool calls. With a cost ledger the
-// amount is the ledger's total — Claude Code's own price of every API call of the session, the
-// ones no transcript records included — and the tokens are the ledger's sums; the same total is the
-// main thread's rows plus every top-level sub-agent row, `pfm tokens`' session total and callmeter's
-// chat sum. Without one the amount is Claude Code's cost.total_cost_usd and the tokens are the
+// amount is the complete session total (completeSpend): the ledger's total — Claude Code's own
+// price of every API call of the session, the ones no transcript records included — plus the spend
+// the ledger never saw (preLedgerUSD), unless Claude Code's payload is ahead of that by more than the
+// tolerance; the tokens are the ledger's sums. That total is the main thread's rows plus every
+// top-level sub-agent row plus the before-ledger spend, and `pfm tokens`' session total. Without one the amount is Claude Code's cost.total_cost_usd and the tokens are the
 // transcripts', this chat's and every sub-agent's, priced at the served table; with no Claude Code
 // figure the logged price leads. Tool calls are always the transcripts'. A floor carries "+?" (a
 // call whose cost never arrived, a model the table cannot price); a transcript that cannot be
@@ -90,15 +91,17 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks) 
 	}
 	if books.ledger.Present {
 		booked := ledgerSpend(books.ledger.Rows)
-		line := spendDollars(booked.usd, true) + spendTail(booked.in, booked.out, tools)
+		before := preLedgerUSD(books.ledger.Rows, spend)
+		one := completeSpend(booked.usd, before, total)
+		line := spendDollars(one, true) + spendTail(booked.in, booked.out, tools)
 		if booked.partial {
 			line += cWarn + "+?" + reset
 		}
-		return line + markerText(spendMarker(books, total, booked.usd, 0, false))
+		return line + markerText(spendMarker(books, one, 0, false, before))
 	}
 	if !readable {
 		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset +
-			markerText(spendMarker(books, total, 0, 0, false))
+			markerText(spendMarker(books, total, 0, false, 0))
 	}
 	logged := spend.priced > 0 || !spend.partial
 	line := spendDollars(spend.usd, logged)
@@ -109,7 +112,7 @@ func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks) 
 	if spend.partial && logged {
 		line += cWarn + "+?" + reset
 	}
-	return line + markerText(spendMarker(books, total, 0, spend.usd, logged))
+	return line + markerText(spendMarker(books, total, spend.usd, logged, 0))
 }
 
 // spendTail is "1.0M/5.1K/46": prompt tokens, output tokens, tool calls.

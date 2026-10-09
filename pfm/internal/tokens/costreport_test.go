@@ -65,9 +65,18 @@ func heldBy(row costledger.Row) (string, bool) {
 
 type sessionOptions struct {
 	costState *float64 // the main transcript's cost-state line, none when nil
-	ledger    bool
+	// exitAt is the stamp of the last line before the cost-state, the exit it records: after every
+	// call of the sample unless set.
+	exitAt string
+	// reopened: the chat ran on after the cost-state, a stamped line follows it: the next launch's
+	// first line, at reopenAt (after every call of the sample unless set)
+	reopened bool
+	reopenAt string
+	ledger   bool
 	// stale is the agent whose transcript carries calls days before the window
 	stale string
+	// staleMain: the main thread's calls are days before the window, so no main run is in it
+	staleMain bool
 }
 
 // writeSample writes the sample session: its ledger under ledgerDir when
@@ -105,7 +114,7 @@ func writeSample(t *testing.T, root, ledgerDir string, opts sessionOptions) {
 			continue
 		}
 		at := row.TS
-		if owner != "" && owner == opts.stale {
+		if (owner != "" && owner == opts.stale) || (owner == "" && opts.staleMain) {
 			at = "2026-10-05T10:00:00.000Z"
 		}
 		lines[owner] = append(lines[owner], callLine(row.RequestID, at))
@@ -113,7 +122,19 @@ func writeSample(t *testing.T, root, ledgerDir string, opts sessionOptions) {
 	project := filepath.Join(root, "-w-demo")
 	mainLines := lines[""]
 	if opts.costState != nil {
-		mainLines = append(mainLines, fmt.Sprintf(`{"type":"cost-state","totalCostUSD":%v}`, *opts.costState))
+		exitAt := opts.exitAt
+		if exitAt == "" {
+			exitAt = "2026-10-09T18:40:00.000Z"
+		}
+		mainLines = append(mainLines, fmt.Sprintf(`{"type":"system","timestamp":%q}`, exitAt),
+			fmt.Sprintf(`{"type":"cost-state","totalCostUSD":%v}`, *opts.costState))
+		if opts.reopened {
+			reopenAt := opts.reopenAt
+			if reopenAt == "" {
+				reopenAt = "2026-10-09T18:50:00.000Z"
+			}
+			mainLines = append(mainLines, fmt.Sprintf(`{"type":"system","timestamp":%q}`, reopenAt))
+		}
 	}
 	writeTranscript(t, filepath.Join(project, ledgerSession+".jsonl"), mainLines...)
 	for owner, owned := range lines {
@@ -290,18 +311,35 @@ func TestCostLedgerSetsTheTotalAgainstClaudeCodes(t *testing.T) {
 		want      []string
 		not       []string
 	}{
-		{"no cost-state line", nil, []string{"no cost-state line"}, []string{"ledger minus Claude Code"}},
-		{"equal", cost(1.2941), []string{"Claude Code says $1.29"}, []string{"ledger minus Claude Code"}},
-		{"under half a cent", cost(1.2985), []string{"Claude Code says $1.30"}, []string{"ledger minus Claude Code"}},
 		{
-			"ledger below Claude Code", cost(1.40),
-			[]string{"Claude Code says $1.40", "ledger minus Claude Code: -$0.11"},
-			nil,
+			"no cost-state line", nil,
+			[]string{"no cost-state line"},
+			[]string{"session total minus Claude Code", "before ledger"},
+		},
+		{
+			"equal", cost(1.2941),
+			[]string{"Claude Code says $1.29"},
+			[]string{"session total minus Claude Code", "before ledger"},
+		},
+		{
+			"under half a cent", cost(1.2985),
+			[]string{"Claude Code says $1.30"},
+			[]string{"session total minus Claude Code", "before ledger"},
+		},
+		{
+			"ledger below Claude Code: the rest came before the ledger",
+			cost(1.40),
+			[]string{
+				"Claude Code says $1.40",
+				"session total $1.40 (15 calls)",
+				"before ledger $0.11 (not attributed)",
+			},
+			[]string{"session total minus Claude Code"},
 		},
 		{
 			"ledger above Claude Code", cost(1.1),
-			[]string{"ledger minus Claude Code: +$0.19"},
-			nil,
+			[]string{"session total minus Claude Code: +$0.19", "session total $1.29 (15 calls)"},
+			[]string{"before ledger"},
 		},
 	}
 	for _, c := range cases {
@@ -323,6 +361,107 @@ func TestCostLedgerSetsTheTotalAgainstClaudeCodes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A chat that began before its ledger: Claude Code restored its total on resume, so the
+// cost-state of the exit before the ledger holds money no row does. The report names it as its
+// own line, attributed to no agent, and the session total (the main status line's one dollar
+// amount) is the rows plus that line.
+func TestCostLedgerNamesWhatCameBeforeTheLedgerAndAddsItToTheSessionTotal(t *testing.T) {
+	cost := 76.5
+	root, ledgerDir := t.TempDir(), t.TempDir()
+	writeSample(t, root, ledgerDir, sessionOptions{
+		ledger: true, costState: &cost, exitAt: "2026-10-09T18:00:00.000Z", reopened: true,
+		reopenAt: "2026-10-09T18:20:00.000Z",
+	})
+	code, stdout, stderr := ledgerAudit(t, root, ledgerDir)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	for _, want := range []string{
+		"session total $77.79 (15 calls)",
+		"before ledger $76.50 (not attributed)",
+		"Claude Code's last cost-state says $76.50 (written at an earlier exit; the chat has run since)",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "session total minus Claude Code") {
+		t.Errorf("a cost-state the chat ran past is no total to set the ledger against:\n%s", stdout)
+	}
+	for _, row := range []struct{ label, want string }{
+		{"main thread", "$0.34 0.4%"},
+		{"agent " + mainAgent, "$0.95 1.2%"},
+		{"before ledger (not attributed)", "$76.50 98.3%"},
+		{"repl_main_thread", "$0.34 0.4%"},
+	} {
+		if got := tail2(rowFields(t, stdout, row.label)); got != row.want {
+			t.Errorf("row %q ends %q, want %q", row.label, got, row.want)
+		}
+	}
+	out := filepath.Join(t.TempDir(), "audit.json")
+	if code, _, stderr := ledgerAudit(t, root, ledgerDir, "--out", out); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		CostLedger []struct {
+			Micros       int64 `json:"micros"`
+			BeforeLedger int64 `json:"beforeLedgerMicros"`
+			Session      int64 `json:"sessionMicros"`
+		} `json:"costLedger"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil || len(document.CostLedger) != 1 {
+		t.Fatalf("costLedger = %+v, %v", document.CostLedger, err)
+	}
+	got := document.CostLedger[0]
+	if got.Micros != 1294100 || got.BeforeLedger != 76_500_000 || got.Session != 77_794_100 {
+		t.Errorf("micros %d beforeLedgerMicros %d sessionMicros %d, want 1294100 76500000 77794100",
+			got.Micros, got.BeforeLedger, got.Session)
+	}
+}
+
+// A chat whose main-thread calls all fall before the window still reports its whole session total:
+// the cost-states are read from its main transcript, not only from a run of the window.
+func TestCostLedgerReadsTheCostStatesOfAMainTranscriptOutsideTheWindow(t *testing.T) {
+	cost := 76.5
+	root, ledgerDir := t.TempDir(), t.TempDir()
+	writeSample(t, root, ledgerDir, sessionOptions{
+		ledger: true, costState: &cost, exitAt: "2026-10-09T18:00:00.000Z", reopened: true,
+		reopenAt: "2026-10-09T18:20:00.000Z", staleMain: true,
+	})
+	code, stdout, stderr := ledgerAudit(t, root, ledgerDir)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	for _, want := range []string{
+		"session total $77.79 (15 calls)",
+		"before ledger $76.50 (not attributed)",
+		"Claude Code's last cost-state says $76.50",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// A chat the ledger covers from its first call has nothing before it: a resume whose earlier
+// launch was fully ledgered, the cost-state matching the rows up to its exit.
+func TestCostLedgerHealthyResumeHasNothingBeforeTheLedger(t *testing.T) {
+	cost := 1.2941
+	root, ledgerDir := t.TempDir(), t.TempDir()
+	writeSample(t, root, ledgerDir, sessionOptions{ledger: true, costState: &cost, reopened: true})
+	code, stdout, stderr := ledgerAudit(t, root, ledgerDir)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "session total $1.29 (15 calls)") || strings.Contains(stdout, "before ledger") {
+		t.Errorf("a healthy resume reports a session total of $1.29 and no before-ledger line:\n%s", stdout)
 	}
 }
 

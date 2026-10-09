@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strconv"
 
+	"github.com/rezzminator/professor/pfm/internal/costledger"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -33,6 +34,9 @@ type agentSpend struct {
 	// fromLedger means usd, in and out are the cost ledger's rows of the agent and every agent
 	// below it (ledgerSpend), not a price of its transcripts.
 	fromLedger bool
+	// costStates are the cost-state lines of the transcript this spend was read from, with the exit
+	// each was written at; add leaves them out of a sum, which has no one exit.
+	costStates []costledger.CostState
 }
 
 func (spend *agentSpend) add(other agentSpend) {
@@ -55,6 +59,7 @@ type spendScan struct {
 	responses map[string]response
 	unkeyed   agentSpend
 	tools     map[string]struct{}
+	anchors   costledger.Anchors
 }
 
 type response struct {
@@ -90,6 +95,7 @@ func (scan *spendScan) record(messageID, requestID, model string, usage *pricing
 func (scan *spendScan) total() agentSpend {
 	spend := scan.unkeyed
 	spend.tools = len(scan.tools)
+	spend.costStates = scan.anchors.States()
 	for _, seen := range scan.responses {
 		spend.add(scan.priceResponse(seen))
 	}
@@ -140,9 +146,13 @@ func (scan *spendScan) price(model string, billed pricing.ClaudeUsage, requests 
 // them.
 func (scan *spendScan) line(line []byte) {
 	var entry struct {
-		Type      string `json:"type"`
-		RequestID string `json:"requestId"`
-		Message   struct {
+		Type          string   `json:"type"`
+		Timestamp     string   `json:"timestamp"`
+		TotalCostUSD  *float64 `json:"totalCostUSD"`
+		StartTime     float64  `json:"startTime"`
+		TotalDuration float64  `json:"totalDuration"`
+		RequestID     string   `json:"requestId"`
+		Message       struct {
 			ID      string              `json:"id"`
 			Model   string              `json:"model"`
 			Usage   *pricing.UsageBlock `json:"usage"`
@@ -152,7 +162,16 @@ func (scan *spendScan) line(line []byte) {
 			} `json:"content"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(line, &entry) != nil || entry.Type != entryAssistant {
+	if json.Unmarshal(line, &entry) != nil {
+		return
+	}
+	if entry.Timestamp != "" {
+		scan.anchors.Stamp(entry.Timestamp)
+	}
+	if entry.Type == entryCostState && entry.TotalCostUSD != nil {
+		scan.anchors.State(*entry.TotalCostUSD, entry.StartTime, entry.TotalDuration)
+	}
+	if entry.Type != entryAssistant {
 		return
 	}
 	for _, block := range entry.Message.Content {

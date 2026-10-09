@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/costledger"
 	"github.com/rezzminator/professor/pfm/internal/jsvalue"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
@@ -366,6 +367,7 @@ type collected struct {
 	aiTitle     string
 	cwd         string
 	harnessUSD  *float64
+	anchors     costledger.Anchors // every cost-state line, each placed at its exit
 	brief       *string
 	stats       briefStats
 	issued      map[string][]*timelineSlot
@@ -377,6 +379,27 @@ type collected struct {
 	sid         string
 	meta        transcript.SubagentMeta
 	timelineRun bool
+}
+
+// costState hands anchors a cost-state line's total and clock fields. read is false when the line
+// carries no total; clockRead is false when startTime or totalDuration is present and not a number,
+// a line the caller counts as bad: the stamps alone then place the exit.
+func costState(anchors *costledger.Anchors, line *transcript.ClaudeRecord) (cost float64, read, clockRead bool) {
+	if len(line.TotalCostUSD) == 0 || json.Unmarshal(line.TotalCostUSD, &cost) != nil {
+		return 0, false, true
+	}
+	var start, duration float64
+	clockRead = true
+	for _, field := range []struct {
+		raw  json.RawMessage
+		into *float64
+	}{{line.StartTime, &start}, {line.TotalDuration, &duration}} {
+		if len(field.raw) != 0 && json.Unmarshal(field.raw, field.into) != nil {
+			*field.into, clockRead = 0, false
+		}
+	}
+	anchors.State(cost, start, duration)
+	return cost, true, clockRead
 }
 
 // collect reads file into replay events. origins names each call's owning
@@ -410,6 +433,7 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 		ts := math.NaN()
 		if truthy(line.Timestamp) {
 			ts, _ = dateParse(keyString(line.Timestamp), a.loc)
+			c.anchors.Stamp(keyString(line.Timestamp))
 		}
 		if c.timelineRun && !math.IsNaN(ts) {
 			c.recT0, c.recT1 = math.Min(c.recT0, ts), math.Max(c.recT1, ts)
@@ -429,9 +453,13 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 			}
 			return
 		case "cost-state":
-			var cost float64
-			if len(line.TotalCostUSD) != 0 && json.Unmarshal(line.TotalCostUSD, &cost) == nil {
+			cost, read, clockRead := costState(&c.anchors, &line)
+			if read {
 				c.harnessUSD = &cost
+			}
+			if !clockRead {
+				a.scan.badLines++
+				c.bad++
 			}
 			return
 		case "system":

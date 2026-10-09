@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/costledger"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -63,6 +64,7 @@ type run struct {
 	cats                 [categoryCount]float64
 	series               [][]float64
 	harnessUSD           *float64
+	anchors              costledger.Anchors // every cost-state line, each placed at its exit
 	topRepeat            *repeatedCommand
 	brief                *string
 	stats                briefStats
@@ -118,7 +120,8 @@ func (a *auditor) replay(file string, c *collected) *run {
 	r := &run{
 		file: file, kind: kindMain, sid: c.sid, project: project, engine: pricing.EngineClaude, agentID: c.sid,
 		title: c.title, models: newObject(), efforts: newObject(), bands: newObject(), tools: newObject(),
-		bash: newObject(), harnessUSD: c.harnessUSD, brief: c.brief, stats: c.stats, attach: newObject(),
+		bash: newObject(), harnessUSD: c.harnessUSD, anchors: c.anchors,
+		brief: c.brief, stats: c.stats, attach: newObject(),
 		series: [][]float64{}, repeats: []repeatedCommand{}, firstTS: math.NaN(),
 	}
 	r.rewrites.by, r.rewrites.nBy = newObject(), newObject()

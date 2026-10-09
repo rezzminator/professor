@@ -112,19 +112,24 @@ func TestCollectCountsMalformedUndatedAndSyntheticLines(t *testing.T) {
 		assistant("m4", "claude-sonnet-5", "2026-09-21T05:00:00Z", 10, 10, 0, 0),
 		assistant("m4", "claude-sonnet-5", "2026-09-21T05:00:01Z", 10, 12, 0, 0),
 		`{"type":"custom-title","customTitle":"demo title"}`,
+		// a clock field that is no number: the total stands, the line counts as bad
+		`{"type":"cost-state","totalCostUSD":1.5,"startTime":"2026-09-21T05:00:00Z","totalDuration":1000}`,
 	)
 	a, _, _ := testAuditor(t)
 	c, err := a.collect(file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.scan.badLines != 1 || a.scan.noTimestamp != 1 || a.scan.syntheticCalls != 2 {
+	if a.scan.badLines != 2 || a.scan.noTimestamp != 1 || a.scan.syntheticCalls != 2 {
 		t.Errorf(
-			"bad %d, undated %d, synthetic %d; want 1, 1, 2",
+			"bad %d, undated %d, synthetic %d; want 2, 1, 2",
 			a.scan.badLines,
 			a.scan.noTimestamp,
 			a.scan.syntheticCalls,
 		)
+	}
+	if c.harnessUSD == nil || *c.harnessUSD != 1.5 || len(c.anchors.States()) != 1 {
+		t.Errorf("harnessUSD %v, cost-states %v; want 1.5 and one state", c.harnessUSD, c.anchors.States())
 	}
 	if c.order != 1 || c.usage["message:m4"].usage.Output != 12 || c.title != "demo title" || c.cwd != "/w/demo" {
 		t.Errorf("calls %d, m4 output %d, title %q, cwd %q; want one call whose last line counts",

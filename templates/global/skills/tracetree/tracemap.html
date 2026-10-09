@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trace map</title>
+<style>
+:root {
+  --bg: #0b0e14; --bg2: #11151d; --panel: rgba(17, 21, 29, .92); --ink: #e6e9ef; --mute: #8a93a6; --faint: #2a3140;
+  --call: #7aa2f7; --names: #bb9af7; --split: #f0b429; --then: #4b5468; --halo: #0b0e14; --sel: #ffffff;
+  --end-returned: #5fd38d; --end-written: #4fb3ff; --end-sent: #ff9f43; --end-executed: #ff5d73;
+  --end-printed: #c0c7d4; --end-dropped: #6b7385; --end-unread: #6b7385;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f6f7fb; --bg2: #ffffff; --panel: rgba(255, 255, 255, .94); --ink: #1b2130; --mute: #5d6678; --faint: #dde1ea;
+    --call: #2f6fe0; --names: #8b5cf6; --split: #c98a00; --then: #b3bac8; --halo: #f6f7fb; --sel: #000000;
+    --end-returned: #1f9d5c; --end-written: #1d7fd6; --end-sent: #d9771b; --end-executed: #d9344e;
+    --end-printed: #6d7587; --end-dropped: #9aa1b0; --end-unread: #9aa1b0;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f6f7fb; --bg2: #ffffff; --panel: rgba(255, 255, 255, .94); --ink: #1b2130; --mute: #5d6678; --faint: #dde1ea;
+  --call: #2f6fe0; --names: #8b5cf6; --split: #c98a00; --then: #b3bac8; --halo: #f6f7fb; --sel: #000000;
+  --end-returned: #1f9d5c; --end-written: #1d7fd6; --end-sent: #d9771b; --end-executed: #d9344e;
+  --end-printed: #6d7587; --end-dropped: #9aa1b0; --end-unread: #9aa1b0;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); overflow: hidden; }
+button, input { font: inherit; color: inherit; }
+#stage { position: fixed; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#stage.panning { cursor: grabbing; }
+
+header {
+  position: fixed; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  pointer-events: none; z-index: 3;
+}
+header > * { pointer-events: auto; }
+.brand, .tools { max-width: 100%; }
+.brand { display: flex; align-items: baseline; gap: 10px; padding: 8px 14px; background: var(--panel); border: 1px solid var(--faint);
+  border-radius: 12px; backdrop-filter: blur(8px); max-width: 100%; }
+.brand b { font-size: 15px; letter-spacing: .02em; }
+.brand span { color: var(--mute); font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; background: var(--panel); border: 1px solid var(--faint);
+  border-radius: 12px; backdrop-filter: blur(8px); align-items: center; }
+.tools input { width: 190px; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--faint); background: var(--bg2); outline: none; }
+.tools input:focus { border-color: var(--call); }
+.btn { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--faint); background: var(--bg2); cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--mute); }
+.btn[aria-pressed="true"] { border-color: var(--split); color: var(--split); }
+.btn.play { border-color: var(--split); color: var(--split); font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; padding: 7px 12px; background: var(--panel); border: 1px solid var(--faint);
+  border-radius: 12px; color: var(--mute); font-size: 11.5px; }
+.legend i { display: inline-block; width: 18px; height: 0; vertical-align: middle; margin-right: 5px; border-top: 2px solid; }
+
+#threads { position: fixed; left: 12px; top: 112px; bottom: 76px; width: 300px; overflow: auto; z-index: 2; padding: 8px;
+  background: var(--panel); border: 1px solid var(--faint); border-radius: 12px; backdrop-filter: blur(8px); }
+#threads h2, #panel h2 { margin: 2px 4px 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--mute); }
+.thread { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; padding: 7px 6px; border-radius: 8px; cursor: pointer; }
+.thread:hover, .thread.on { background: var(--bg2); }
+.thread .dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 10.5px var(--mono); color: #0b0e14; }
+.thread p { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink); }
+.thread small { color: var(--mute); font-family: var(--mono); font-size: 10.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread > div { min-width: 0; }
+.thread .go { border: 0; background: none; cursor: pointer; color: var(--mute); font-size: 14px; padding: 0 4px; }
+.thread .go:hover { color: var(--split); }
+.thread.child { margin-left: 16px; }
+
+#panel { position: fixed; right: 12px; top: 112px; bottom: 76px; width: 360px; overflow: auto; z-index: 2; padding: 14px 16px;
+  background: var(--panel); border: 1px solid var(--faint); border-radius: 12px; backdrop-filter: blur(8px); display: none; }
+#panel.open { display: block; }
+#panel .name { font-size: 18px; font-weight: 650; word-break: break-word; margin: 0 0 4px; }
+#panel .addr { font-family: var(--mono); font-size: 12px; color: var(--mute); cursor: copy; word-break: break-all; }
+#panel .addr:hover { color: var(--ink); }
+#panel section { margin-top: 14px; }
+#panel ul { list-style: none; margin: 0; padding: 0; }
+#panel li { padding: 4px 0; border-top: 1px solid var(--faint); }
+#panel li a { color: var(--ink); cursor: pointer; text-decoration: none; font-family: var(--mono); font-size: 12px; word-break: break-all; }
+#panel li a:hover { color: var(--call); }
+#panel li em { display: block; color: var(--mute); font-style: normal; font-size: 12px; }
+#panel .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { padding: 1px 8px; border-radius: 99px; font: 600 11px var(--mono); color: #0b0e14; cursor: pointer; }
+.kind { display: inline-block; padding: 0 7px; border: 1px solid var(--faint); border-radius: 99px; color: var(--mute); font-size: 11px; margin-left: 6px; }
+#panel .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.close { position: absolute; right: 10px; top: 8px; border: 0; background: none; color: var(--mute); font-size: 18px; cursor: pointer; }
+
+#ticker { position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; width: min(820px, calc(100% - 24px)); z-index: 3;
+  padding: 8px 14px; background: var(--panel); border: 1px solid var(--faint); border-radius: 12px; backdrop-filter: blur(8px);
+  font: 12px/1.5 var(--mono); min-height: 40px; }
+#ticker .idle { color: var(--mute); font-family: var(--sans); }
+#ticker div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ticker div:not(:last-child) { opacity: .5; }
+#ticker b { padding: 0 6px; border-radius: 6px; color: #0b0e14; margin-right: 8px; }
+#empty { position: fixed; inset: 0; display: none; place-items: center; color: var(--mute); font-size: 15px; text-align: center; padding: 24px; }
+
+.hull path { stroke-linejoin: round; stroke-linecap: round; }
+.hull text { font: 600 10.5px var(--mono); fill: var(--mute); letter-spacing: .04em; text-anchor: middle; }
+.link { fill: none; stroke-width: 1.4; }
+.link.call { stroke: var(--call); }
+.link.names { stroke: var(--names); stroke-dasharray: 5 4; }
+.link.split { stroke: var(--split); stroke-width: 2.6; }
+.link.then { stroke: var(--then); stroke-dasharray: 1 5; stroke-linecap: round; }
+.node { cursor: pointer; }
+.node .shape { stroke: var(--halo); stroke-width: 2; }
+.node .ring { fill: none; stroke-width: 3; opacity: 0; }
+.node text { font: 11px var(--sans); fill: var(--ink); paint-order: stroke; stroke: var(--halo); stroke-width: 3.5px; stroke-linejoin: round;
+  text-anchor: middle; pointer-events: none; }
+.node .end { stroke: var(--halo); stroke-width: 1.2; }
+#stage.labels-auto .node.small:not(.on):not(.sel) text { display: none; }
+#stage.labels-auto.zoomed .node.small text { display: inline; }
+#stage.focus .node:not(.on) { opacity: .12; }
+#stage.focus .link:not(.on) { opacity: .06; }
+#stage.focus .hull { opacity: .4; }
+#stage .link.on { stroke-width: 2.4; }
+.node.sel .shape { stroke: var(--sel); stroke-width: 3; }
+.node.match .shape { stroke: var(--split); stroke-width: 3; }
+.trail { fill: none; stroke-width: 3; stroke-linecap: round; opacity: .55; }
+.walker { filter: url(#glow); }
+@keyframes pulse { 0% { opacity: .95; stroke-width: 7; } 100% { opacity: 0; stroke-width: 1; } }
+.node .ring.go { animation: pulse 1.1s ease-out; }
+.node.visited .shape { stroke: var(--c); stroke-width: 2.5; }
+
+@media (max-width: 760px) {
+  #threads { top: auto; bottom: 64px; height: 34vh; width: auto; right: 12px; display: none; }
+  #threads.open { display: block; }
+  #panel { left: 12px; right: 12px; width: auto; top: auto; bottom: 64px; height: 46vh; }
+  .legend { display: none; }
+  .tools input { width: 120px; }
+  .brand span { display: none; }
+}
+@media (min-width: 761px) { #threadsBtn { display: none; } }
+@media (prefers-reduced-motion: reduce) { .node .ring.go { animation-duration: .01s; } }
+</style>
+</head>
+<body>
+<svg id="stage" class="labels-auto" role="img" aria-label="Component map of a trace run">
+  <defs>
+    <filter id="glow" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <marker id="m-call" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1 L10 5 L0 9 z" fill="var(--call)"/></marker>
+    <marker id="m-names" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1 L10 5 L0 9 z" fill="var(--names)"/></marker>
+    <marker id="m-split" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 L3 5 z" fill="var(--split)"/></marker>
+    <marker id="m-then" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 2 L9 5 L0 8" fill="none" stroke="var(--then)" stroke-width="1.5"/></marker>
+  </defs>
+  <g id="world"><g id="hulls"></g><g id="links"></g><g id="trails"></g><g id="nodes"></g><g id="walkers"></g></g>
+</svg>
+
+<header>
+  <div class="brand"><b>trace map</b><span id="meta"></span></div>
+  <div class="tools">
+    <input id="search" type="search" placeholder="find a component  ( / )" aria-label="Find a component">
+    <button class="btn play" id="playBtn" title="Replay the run: every thread walks its hops, children start where their parent split (space)">▶ replay the run</button>
+    <button class="btn" id="speedBtn" title="Replay speed">1×</button>
+    <button class="btn" id="thenBtn" aria-pressed="false" title="Show walk-order links: consecutive hops with no name link">walk order</button>
+    <button class="btn" id="labelBtn" aria-pressed="false" title="Show every label">labels</button>
+    <button class="btn" id="fitBtn" title="Fit the map to the window (f)">fit</button>
+    <button class="btn" id="themeBtn" title="Theme: system, light, dark">◐</button>
+    <button class="btn" id="threadsBtn">threads</button>
+  </div>
+  <div class="legend">
+    <span><i style="border-color:var(--call)"></i>calls</span>
+    <span><i style="border-color:var(--names);border-top-style:dashed"></i>names the file</span>
+    <span><i style="border-color:var(--split);border-top-width:3px"></i>split to a child</span>
+    <span><i style="border-color:var(--then);border-top-style:dotted"></i>walk order</span>
+    <span>■ thread leaves the code</span>
+  </div>
+</header>
+
+<aside id="threads" aria-label="Threads"><h2>Threads — hover to trace, ▶ to replay</h2><div id="threadList"></div></aside>
+<aside id="panel" aria-live="polite"><button class="close" id="closePanel" aria-label="Close">×</button><div id="panelBody"></div></aside>
+<div id="ticker"><span class="idle">Hover a component to see what it touches · click it for its links · ▶ replays how the tracer walked your code.</span></div>
+<div id="empty"></div>
+
+<script>
+(() => {
+"use strict";
+const MAP = /*TRACEMAP_DATA*/null;
+const NS = "http://www.w3.org/2000/svg";
+const $ = (s) => document.querySelector(s);
+const stage = $("#stage"), world = $("#world");
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function svg(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in attrs || {}) {
+    if (k === "on") for (const ev in attrs.on) e.addEventListener(ev, attrs.on[ev]);
+    else if (k === "style") e.style.cssText = attrs[k];
+    else e.setAttribute(k, attrs[k]);
+  }
+  for (const kid of kids) if (kid != null) e.append(kid instanceof Node ? kid : String(kid));
+  return e;
+}
+function empty(msg) { const e = $("#empty"); e.textContent = msg; e.style.display = "grid"; }
+
+if (!MAP) { empty("No map data in this page — build it with: tracetree.py map RUN --html OUT"); return; }
+if (!MAP.components.length) { empty("This run holds no verified hop, so there is nothing to map."); return; }
+
+// ---------- data ----------
+const nodeKey = (t) => t.split(".").map(Number);
+const byKey = (a, b) => { const x = nodeKey(a), y = nodeKey(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { if (x[i] === undefined) return -1; if (y[i] === undefined) return 1; if (x[i] !== y[i]) return x[i] - y[i]; } return 0; };
+const threadIds = Object.keys(MAP.threads).sort(byKey);
+const tColor = {};
+threadIds.forEach((t, i) => { tColor[t] = `hsl(${(i * 137.508 + 28) % 360} 82% 64%)`; });
+const childOf = {};
+threadIds.forEach((t) => (MAP.threads[t].children || []).forEach((c) => { childOf[c] = t; }));
+const roots = threadIds.filter((t) => !childOf[t]);
+
+const dirOf = (f) => (f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : "(repo root)");
+const comps = MAP.components.map((c) => ({ ...c, dir: dirOf(c.file), label: c.name || c.file.split("/").pop(),
+  x: 0, y: 0, vx: 0, vy: 0, fx: null, fy: null }));
+const byId = new Map(comps.map((c) => [c.id, c]));
+const links = MAP.edges.map((e) => ({ ...e, a: byId.get(e.from), b: byId.get(e.to) })).filter((e) => e.a && e.b);
+comps.forEach((c) => { c.out = []; c.in = []; c.r = 6 + 2.4 * Math.sqrt(c.hops.length) + (c.threads.length > 1 ? 1.5 * Math.min(c.threads.length, 6) : 0); });
+links.forEach((l) => { l.a.out.push(l); l.b.in.push(l); });
+
+const dirs = [...new Set(comps.map((c) => c.dir))].sort();
+const dColor = {};
+dirs.forEach((d) => { let h = 0; for (const ch of d) h = (h * 31 + ch.charCodeAt(0)) >>> 0; dColor[d] = `hsl(${h % 360} 38% 52%)`; });
+
+const runName = MAP.run.split("/").pop(), repoName = MAP.root.split("/").filter(Boolean).pop();
+document.title = `Trace map — ${repoName} · ${runName}`;
+$("#meta").textContent = `${repoName} · run ${runName} · ${comps.length} components · ${links.filter((l) => l.kind !== "then").length} links · ${threadIds.length} threads`;
+
+// ---------- layout: directories on a sunflower spiral, a force simulation inside ----------
+const anchor = {};
+const spread = 150 + 18 * Math.sqrt(comps.length);
+dirs.forEach((d, i) => { const r = spread * Math.sqrt((i + 0.5) / dirs.length) * 1.6, a = i * 2.39996; anchor[d] = { x: r * Math.cos(a), y: r * Math.sin(a) }; });
+comps.forEach((c, i) => { const a = anchor[c.dir], t = i * 2.39996; c.x = a.x + 30 * Math.cos(t) * Math.random(); c.y = a.y + 30 * Math.sin(t) * Math.random(); });
+
+let alpha = 1;
+function tick() {
+  const n = comps.length;
+  for (let i = 0; i < n; i++) {
+    const p = comps[i];
+    for (let j = i + 1; j < n; j++) {
+      const q = comps[j];
+      let dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy;
+      if (d2 > 360000) continue;
+      if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+      const d = Math.sqrt(d2), min = p.r + q.r + 14;
+      let f = (-900 * alpha) / d2;
+      if (d < min) f -= ((min - d) / d) * 0.5;
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      p.vx += fx; p.vy += fy; q.vx -= fx; q.vy -= fy;
+    }
+  }
+  for (const l of links) {
+    if (l.kind === "then" && !showThen) continue;
+    const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const want = 70 + l.a.r + l.b.r, k = (l.kind === "then" ? 0.02 : 0.06) * alpha * ((d - want) / d);
+    l.a.vx += dx * k; l.a.vy += dy * k; l.b.vx -= dx * k; l.b.vy -= dy * k;
+  }
+  for (const c of comps) {
+    const a = anchor[c.dir];
+    c.vx += (a.x - c.x) * 0.05 * alpha - c.x * 0.002 * alpha;
+    c.vy += (a.y - c.y) * 0.05 * alpha - c.y * 0.002 * alpha;
+    if (c.fx != null) { c.x = c.fx; c.y = c.fy; c.vx = c.vy = 0; continue; }
+    c.vx *= 0.62; c.vy *= 0.62; c.x += c.vx; c.y += c.vy;
+  }
+  alpha *= 0.982;
+}
+
+// ---------- drawing ----------
+const gH = $("#hulls"), gL = $("#links"), gN = $("#nodes"), gT = $("#trails"), gW = $("#walkers");
+const hullOf = {};
+dirs.forEach((d) => {
+  const g = svg("g", { class: "hull" }, gH);
+  hullOf[d] = { path: svg("path", { fill: dColor[d], stroke: dColor[d], "fill-opacity": 0.07, "stroke-opacity": 0.07, "stroke-width": 56 }, g),
+    text: svg("text", {}, g) };
+  hullOf[d].text.textContent = d;
+});
+links.forEach((l) => {
+  l.el = svg("path", { class: `link ${l.kind}`, "marker-end": `url(#m-${l.kind})` }, gL);
+  if (l.kind === "then") l.el.style.display = "none";
+});
+comps.forEach((c) => {
+  const g = svg("g", { class: "node" + (c.hops.length < 3 && c.threads.length < 2 ? " small" : "") }, gN);
+  c.el = g;
+  c.ring = svg("circle", { class: "ring", r: c.r + 5 }, g);
+  const boxy = ["section", "target", "file"].includes(c.kind);
+  c.shape = boxy ? svg("rect", { class: "shape", x: -c.r, y: -c.r, width: 2 * c.r, height: 2 * c.r, rx: 4, fill: dColor[c.dir] }, g)
+    : svg("circle", { class: "shape", r: c.r, fill: dColor[c.dir] }, g);
+  c.ends.forEach((e, i) => svg("rect", { class: "end", x: c.r * 0.55 + i * 7, y: c.r * 0.35, width: 7, height: 7, fill: `var(--end-${e.kind}, var(--end-printed))` }, g));
+  const t = svg("text", { y: c.r + 13 }, g);
+  t.textContent = c.label;
+  const tip = svg("title", {}, g);
+  tip.textContent = `${c.id}\n${c.file}:${c.line || c.hops[0] || ""} · ${c.hops.length} hops · threads ${c.threads.join(", ")}`;
+});
+
+function hull(pts) {
+  if (pts.length < 3) return pts;
+  pts = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of pts.slice().reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+function linkPath(l) {
+  const { a, b } = l, dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+  const bend = Math.min(40, d * 0.12), mx = (a.x + b.x) / 2 - (dy / d) * bend, my = (a.y + b.y) / 2 + (dx / d) * bend;
+  const ex = mx - b.x, ey = my - b.y, el2 = Math.sqrt(ex * ex + ey * ey) || 1;
+  const tx = b.x + (ex / el2) * (b.r + 4), ty = b.y + (ey / el2) * (b.r + 4);
+  return `M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)}`;
+}
+function draw() {
+  for (const c of comps) c.el.setAttribute("transform", `translate(${c.x.toFixed(1)},${c.y.toFixed(1)})`);
+  for (const l of links) if (l.el.style.display !== "none") l.el.setAttribute("d", linkPath(l));
+  for (const d of dirs) {
+    const members = comps.filter((c) => c.dir === d), pts = hull(members.map((c) => [c.x, c.y]));
+    hullOf[d].path.setAttribute("d", "M" + pts.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" L") + (pts.length > 2 ? " Z" : ""));
+    const top = Math.min(...members.map((c) => c.y - c.r)), cx = members.reduce((s, c) => s + c.x, 0) / members.length;
+    hullOf[d].text.setAttribute("x", cx.toFixed(1)); hullOf[d].text.setAttribute("y", (top - 30).toFixed(1));
+  }
+  for (const w of play.walkers) if (w.trail) w.trail.setAttribute("d", w.trailPts());
+}
+
+// ---------- view: pan, zoom, fit ----------
+const view = { k: 1, x: 0, y: 0 };
+let viewerMoved = false, settledFit = false;
+function applyView() {
+  world.setAttribute("transform", `translate(${view.x},${view.y}) scale(${view.k})`);
+  stage.classList.toggle("zoomed", view.k > 1.35);
+}
+function fit() {
+  const xs = comps.map((c) => c.x), ys = comps.map((c) => c.y);
+  const x0 = Math.min(...xs) - 80, x1 = Math.max(...xs) + 80, y0 = Math.min(...ys) - 80, y1 = Math.max(...ys) + 80;
+  const wide = innerWidth > 760, left = wide ? 330 : 12, right = wide && $("#panel").classList.contains("open") ? 380 : 12;
+  const top = wide ? 112 : 150, bottom = 70, W = innerWidth - left - right, H = innerHeight - top - bottom;
+  view.k = Math.min(W / (x1 - x0), H / (y1 - y0), 2.2);
+  view.x = left + W / 2 - ((x0 + x1) / 2) * view.k; view.y = top + H / 2 - ((y0 + y1) / 2) * view.k;
+  applyView();
+}
+function centerOn(c) {
+  view.k = Math.max(view.k, 1.2);
+  view.x = innerWidth / 2 - c.x * view.k; view.y = innerHeight / 2 - c.y * view.k; applyView();
+}
+const toWorld = (px, py) => ({ x: (px - view.x) / view.k, y: (py - view.y) / view.k });
+stage.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  const f = Math.exp(-ev.deltaY * 0.0015), k = Math.min(6, Math.max(0.12, view.k * f));
+  view.x = ev.clientX - ((ev.clientX - view.x) * k) / view.k; view.y = ev.clientY - ((ev.clientY - view.y) * k) / view.k; view.k = k;
+  viewerMoved = true; applyView();
+}, { passive: false });
+
+let drag = null;
+stage.addEventListener("pointerdown", (ev) => {
+  const g = ev.target.closest(".node");
+  const c = g ? comps.find((x) => x.el === g) : null;
+  drag = { c, sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, moved: false };
+  stage.setPointerCapture(ev.pointerId);
+  if (!c) stage.classList.add("panning");
+});
+stage.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy;
+  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+  if (drag.c && drag.moved) {
+    const p = toWorld(ev.clientX, ev.clientY);
+    drag.c.fx = p.x; drag.c.fy = p.y; alpha = Math.max(alpha, 0.25); wake();
+  } else if (!drag.c) { view.x = drag.vx + dx; view.y = drag.vy + dy; viewerMoved = true; applyView(); }
+});
+stage.addEventListener("pointerup", () => {
+  stage.classList.remove("panning");
+  if (drag && !drag.moved) { if (drag.c) select(drag.c); else clearAll(); }
+  drag = null;
+});
+stage.addEventListener("dblclick", (ev) => {
+  const g = ev.target.closest(".node"), c = g && comps.find((x) => x.el === g);
+  if (c) { c.fx = c.fy = null; alpha = Math.max(alpha, 0.2); wake(); }
+});
+
+// ---------- focus: hover, select, search, threads ----------
+let selected = null, pinnedSet = null;
+function setFocus(nodeSet, linkSet) {
+  stage.classList.toggle("focus", !!nodeSet);
+  for (const c of comps) c.el.classList.toggle("on", !!nodeSet && nodeSet.has(c));
+  for (const l of links) l.el.classList.toggle("on", !!linkSet && linkSet.has(l));
+}
+function neighbourhood(c) {
+  const ns = new Set([c]), ls = new Set();
+  for (const l of [...c.out, ...c.in]) { if (l.kind === "then" && !showThen) continue; ns.add(l.a); ns.add(l.b); ls.add(l); }
+  return [ns, ls];
+}
+function reach(c, dir) {
+  const ns = new Set([c]), ls = new Set(), todo = [c];
+  while (todo.length) {
+    const x = todo.pop();
+    for (const l of dir === "down" ? x.out : x.in) {
+      if (l.kind === "then" && !showThen) continue;
+      ls.add(l);
+      const y = dir === "down" ? l.b : l.a;
+      if (!ns.has(y)) { ns.add(y); todo.push(y); }
+    }
+  }
+  return [ns, ls];
+}
+function threadSet(t) {
+  const steps = (MAP.threads[t].walk || []).map((s) => byId.get(s.c)).filter(Boolean);
+  const ns = new Set(steps), ls = new Set();
+  for (const l of links) if (l.threads.includes(t) && ns.has(l.a) && ns.has(l.b)) ls.add(l);
+  return [ns, ls];
+}
+gN.addEventListener("pointerover", (ev) => {
+  const g = ev.target.closest(".node"); if (!g || pinnedSet) return;
+  const c = comps.find((x) => x.el === g); setFocus(...neighbourhood(c));
+});
+gN.addEventListener("pointerout", () => { if (!pinnedSet) setFocus(null, null); });
+
+function addr(c) { return `${c.file}:${c.line || c.hops[0] || 1}`; }
+function copy(text, node) { navigator.clipboard?.writeText(text).then(() => { const was = node.textContent; node.textContent = "copied"; setTimeout(() => { node.textContent = was; }, 900); }, () => {}); }
+function chip(t) { return el("span", { class: "chip", style: `background:${tColor[t]}`, title: MAP.threads[t].thread, on: { click: () => showThread(t) } }, t); }
+function linkItem(l, other, arrow) {
+  return el("li", {}, el("a", { on: { click: () => { select(other); centerOn(other); } } }, `${arrow} ${other.id}`), l.note ? el("em", {}, l.note) : null);
+}
+const ARROW = { call: "→", names: "⇢", split: "⇉", then: "·" }, BACK = { call: "←", names: "⇠", split: "⇇", then: "·" };
+function select(c) {
+  if (selected) selected.el.classList.remove("sel");
+  selected = c; c.el.classList.add("sel");
+  pinnedSet = neighbourhood(c); setFocus(...pinnedSet);
+  const outs = c.out.filter((l) => l.kind !== "then" || showThen), ins = c.in.filter((l) => l.kind !== "then" || showThen);
+  const a = el("div", { class: "addr", title: "copy file:line" }, addr(c));
+  a.addEventListener("click", () => copy(addr(c), a));
+  const body = $("#panelBody"); body.replaceChildren(...[
+    el("p", { class: "name" }, c.label, el("span", { class: "kind" }, c.kind)),
+    a,
+    el("section", {}, el("h2", {}, `Verified hops · ${c.hops.length}`), el("div", { class: "addr" }, c.hops.map((h) => `:${h}`).join("  "))),
+    el("section", {}, el("h2", {}, "Threads"), el("div", { class: "chips" }, ...c.threads.map(chip))),
+    outs.length ? el("section", {}, el("h2", {}, `Reaches · ${outs.length}`), el("ul", {}, ...outs.map((l) => linkItem(l, l.b, ARROW[l.kind])))) : null,
+    ins.length ? el("section", {}, el("h2", {}, `Reached from · ${ins.length}`), el("ul", {}, ...ins.map((l) => linkItem(l, l.a, BACK[l.kind])))) : null,
+    c.ends.length ? el("section", {}, el("h2", {}, "Thread leaves the code"), el("ul", {}, ...c.ends.map((e) => el("li", {}, el("a", { style: `color:var(--end-${e.kind})` }, `■ ${e.kind}`), e.note ? el("em", {}, e.note) : null)))) : null,
+    el("div", { class: "row" },
+      el("button", { class: "btn", on: { click: () => { pinnedSet = reach(c, "down"); setFocus(...pinnedSet); } } }, "everything it reaches"),
+      el("button", { class: "btn", on: { click: () => { pinnedSet = reach(c, "up"); setFocus(...pinnedSet); } } }, "everything that reaches it"),
+      el("button", { class: "btn", on: { click: (ev) => copy(c.id, ev.target) } }, "copy id")),
+  ].filter(Boolean));
+  $("#panel").classList.add("open");
+}
+function showThread(t) {
+  const th = MAP.threads[t];
+  pinnedSet = threadSet(t); setFocus(...pinnedSet);
+  document.querySelectorAll(".thread").forEach((x) => x.classList.toggle("on", x.dataset.t === t));
+  const steps = (th.walk || []).filter((s) => byId.has(s.c));
+  $("#panelBody").replaceChildren(...[
+    el("p", { class: "name" }, el("span", { class: "chip", style: `background:${tColor[t]}` }, t), " ", "thread"),
+    el("div", {}, th.thread),
+    el("div", { class: "row" }, el("button", { class: "btn play", on: { click: () => replay([t]) } }, "▶ replay this thread")),
+    el("section", {}, el("h2", {}, `Walk · ${steps.length} hops`), el("ul", {}, ...steps.map((s, i) => {
+      const c = byId.get(s.c);
+      return el("li", {}, el("a", { on: { click: () => { select(c); centerOn(c); } } }, `${i + 1}. ${c.file}:${s.line}`), s.note ? el("em", {}, s.note) : null);
+    }))),
+    th.children && th.children.length ? el("section", {}, el("h2", {}, "Split into"), el("div", { class: "chips" }, ...th.children.map(chip))) : null,
+  ].filter(Boolean));
+  $("#panel").classList.add("open");
+}
+function clearAll() {
+  if (selected) selected.el.classList.remove("sel");
+  selected = null; pinnedSet = null; setFocus(null, null);
+  document.querySelectorAll(".thread.on").forEach((x) => x.classList.remove("on"));
+  comps.forEach((c) => c.el.classList.remove("match"));
+  $("#panel").classList.remove("open");
+}
+$("#closePanel").addEventListener("click", clearAll);
+
+const list = $("#threadList");
+const depth = (t) => (childOf[t] ? 1 + depth(childOf[t]) : 0);
+threadIds.forEach((t) => {
+  const th = MAP.threads[t];
+  const row = el("div", { class: "thread" + (childOf[t] ? " child" : ""), "data-t": t, style: `margin-left:${Math.min(depth(t), 4) * 14}px` },
+    el("span", { class: "dot", style: `background:${tColor[t]}` }, t),
+    el("div", {}, el("p", {}, th.thread), el("small", {}, th.entry || "no verified hop")),
+    el("button", { class: "go", title: "replay this thread", on: { click: (ev) => { ev.stopPropagation(); replay([t]); } } }, "▶"));
+  row.addEventListener("mouseenter", () => { if (!pinnedSet) setFocus(...threadSet(t)); });
+  row.addEventListener("mouseleave", () => { if (!pinnedSet) setFocus(null, null); });
+  row.addEventListener("click", () => showThread(t));
+  list.append(row);
+});
+
+const search = $("#search");
+search.addEventListener("input", () => {
+  const q = search.value.trim().toLowerCase();
+  comps.forEach((c) => c.el.classList.remove("match"));
+  if (!q) { if (!selected) { pinnedSet = null; setFocus(null, null); } return; }
+  const hits = new Set(comps.filter((c) => c.id.toLowerCase().includes(q)));
+  hits.forEach((c) => c.el.classList.add("match"));
+  pinnedSet = [hits, new Set()]; setFocus(hits, new Set());
+});
+search.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter") return;
+  const q = search.value.trim().toLowerCase(), c = comps.find((x) => x.id.toLowerCase().includes(q));
+  if (c) { select(c); centerOn(c); }
+});
+
+// ---------- toggles ----------
+let showThen = false;
+$("#thenBtn").addEventListener("click", (ev) => {
+  showThen = !showThen; ev.currentTarget.setAttribute("aria-pressed", showThen);
+  links.forEach((l) => { if (l.kind === "then") l.el.style.display = showThen ? "" : "none"; });
+  alpha = Math.max(alpha, 0.35); wake();
+});
+$("#labelBtn").addEventListener("click", (ev) => {
+  const all = stage.classList.toggle("labels-auto") === false; ev.currentTarget.setAttribute("aria-pressed", all);
+});
+$("#fitBtn").addEventListener("click", fit);
+$("#threadsBtn").addEventListener("click", () => $("#threads").classList.toggle("open"));
+const themes = ["", "light", "dark"];
+let theme = 0;
+try { theme = Math.max(0, themes.indexOf(localStorage.getItem("tracemap-theme") || "")); } catch (e) { theme = 0; }
+const applyTheme = () => { if (themes[theme]) document.documentElement.dataset.theme = themes[theme]; else delete document.documentElement.dataset.theme; };
+applyTheme();
+$("#themeBtn").addEventListener("click", () => {
+  theme = (theme + 1) % 3; applyTheme();
+  try { localStorage.setItem("tracemap-theme", themes[theme]); } catch (e) { /* a private window keeps the theme for this visit only */ }
+});
+
+// ---------- replay: every thread walks its hops; a child starts where its parent split ----------
+const HOP_MS = 1100;
+const play = { walkers: [], speed: 1, on: false, last: 0, lines: [] };
+const speeds = [1, 2, 4, 0.5];
+$("#speedBtn").addEventListener("click", (ev) => {
+  play.speed = speeds[(speeds.indexOf(play.speed) + 1) % speeds.length]; ev.currentTarget.textContent = `${play.speed}×`;
+});
+function ticker(t, c, s) {
+  play.lines.push([t, `${c.file}:${s.line}`, s.note]);
+  play.lines = play.lines.slice(-4);
+  $("#ticker").replaceChildren(...play.lines.map(([tt, where, note]) => el("div", {}, el("b", { style: `background:${tColor[tt]}` }, tt), where, note ? `  —  ${note}` : "")));
+}
+function spawnWalker(t) {
+  const steps = (MAP.threads[t].walk || []).map((s) => ({ ...s, comp: byId.get(s.c) })).filter((s) => s.comp);
+  if (!steps.length) { (MAP.threads[t].children || []).forEach(spawnWalker); return; }
+  const dot = svg("circle", { class: "walker", r: 6, fill: tColor[t] }, gW);
+  const trail = svg("path", { class: "trail", stroke: tColor[t] }, gT);
+  const w = { t, steps, i: 0, clock: 0, dot, trail, done: false, arrived: -1 };
+  w.trailPts = () => "M" + steps.slice(0, w.i + 1).map((s) => `${s.comp.x.toFixed(1)},${s.comp.y.toFixed(1)}`).join(" L");
+  play.walkers.push(w);
+}
+function arrive(w) {
+  const s = w.steps[w.i], c = s.comp;
+  c.el.classList.add("visited"); c.el.style.setProperty("--c", tColor[w.t]);
+  c.ring.setAttribute("stroke", tColor[w.t]); c.ring.classList.remove("go"); void c.ring.getBBox(); c.ring.classList.add("go");
+  ticker(w.t, c, s);
+}
+function stepPlay(dt) {
+  for (const w of play.walkers) {
+    if (w.done) continue;
+    if (w.arrived < w.i) { arrive(w); w.arrived = w.i; }
+    w.clock += dt * play.speed;
+    const s = w.steps[w.i], next = w.steps[w.i + 1];
+    let x = s.comp.x, y = s.comp.y;
+    if (next) {
+      const travel = next.comp === s.comp ? 0 : HOP_MS * 0.45, dwell = HOP_MS - travel;
+      if (w.clock > dwell && travel) {
+        const u = reduced ? 1 : Math.min(1, (w.clock - dwell) / travel), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+        x += (next.comp.x - x) * e; y += (next.comp.y - y) * e;
+      }
+      if (w.clock >= HOP_MS) { w.clock = 0; w.i++; }
+    } else if (w.clock >= HOP_MS) {
+      w.done = true; w.dot.remove();
+      (MAP.threads[w.t].children || []).forEach(spawnWalker);
+    }
+    w.dot.setAttribute("cx", x.toFixed(1)); w.dot.setAttribute("cy", y.toFixed(1));
+  }
+  if (play.walkers.every((w) => w.done)) {
+    play.on = false; $("#playBtn").textContent = "▶ replay the run";
+    $("#ticker").append(el("div", {}, el("span", { class: "idle" }, `replay done — ${play.walkers.length} threads walked`)));
+  }
+}
+function stopPlay() {
+  play.walkers.forEach((w) => { w.dot.remove(); w.trail.remove(); });
+  play.walkers = []; play.on = false; play.lines = [];
+  comps.forEach((c) => { c.el.classList.remove("visited"); });
+  $("#playBtn").textContent = "▶ replay the run";
+}
+function replay(ts) {
+  stopPlay(); clearAll();
+  ts.forEach(spawnWalker);
+  play.on = true; play.last = performance.now(); $("#playBtn").textContent = "■ stop"; wake();
+}
+$("#playBtn").addEventListener("click", () => (play.on ? stopPlay() : replay(roots)));
+
+// ---------- keys and the frame loop ----------
+addEventListener("keydown", (ev) => {
+  if (ev.target === search) { if (ev.key === "Escape") { search.value = ""; search.dispatchEvent(new Event("input")); search.blur(); } return; }
+  if (ev.key === "/") { ev.preventDefault(); search.focus(); }
+  else if (ev.key === "Escape") { clearAll(); }
+  else if (ev.key === "f") fit();
+  else if (ev.key === " ") { ev.preventDefault(); play.on ? stopPlay() : replay(roots); }
+});
+addEventListener("resize", () => applyView());
+
+let raf = 0;
+function frame(now) {
+  raf = 0;
+  if (alpha > 0.003) tick();
+  if (!settledFit && alpha < 0.08) { settledFit = true; if (!viewerMoved) fit(); }
+  if (play.on) { stepPlay(Math.min(100, now - play.last)); play.last = now; }
+  draw();
+  if (alpha > 0.003 || play.on) wake();
+}
+function wake() { if (!raf) raf = requestAnimationFrame(frame); }
+
+if (reduced) { while (alpha > 0.003) tick(); draw(); fit(); }
+else { for (let i = 0; i < 60; i++) tick(); draw(); fit(); wake(); }
+})();
+</script>
+</body>
+</html>

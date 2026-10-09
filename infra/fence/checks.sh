@@ -403,7 +403,7 @@ checks_templates_opencode_writer_tests() {
 
 checks_templates_skill_tests() {
   local skill cp_out
-  for skill in codeprobe; do
+  for skill in codeprobe tracetree; do
     head_ "templates — $skill skill tests"
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then

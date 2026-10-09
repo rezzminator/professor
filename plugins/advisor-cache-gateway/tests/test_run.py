@@ -162,7 +162,7 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.read_settings()["env"]["ANTHROPIC_BASE_URL"], other)
 
 
-    def health_pid(self):
+    def serving_pid(self):
         try:
             with urllib.request.urlopen(self.url + "/__gateway/health", timeout=1) as r:
                 return int(r.read().split(b"pid=")[1].split()[0])
@@ -190,13 +190,13 @@ class RunTest(unittest.TestCase):
         self.write_settings({})
         self.start(upstream=self.slow_upstream())
         self.assertTrue(wait_for(self.linked), "never linked")
-        first = self.health_pid()
+        first = self.serving_pid()
         got = []
         t = threading.Thread(target=self.stream, args=(got,))
         t.start()
         time.sleep(0.3)
         self.proc.send_signal(signal.SIGHUP)
-        self.assertTrue(wait_for(lambda: self.health_pid() not in (None, first)), "no new gateway took over")
+        self.assertTrue(wait_for(lambda: self.serving_pid() not in (None, first)), "no new gateway took over")
         t.join(20)
         self.assertIn(b"message_stop", got[0])
         self.assertTrue(self.linked())
@@ -255,9 +255,9 @@ class RunTest(unittest.TestCase):
             t.start()
         try:
             for _ in range(10):
-                before = self.health_pid()
+                before = self.serving_pid()
                 self.proc.send_signal(signal.SIGHUP)
-                self.assertTrue(wait_for(lambda: self.health_pid() not in (None, before)), "no new gateway took over")
+                self.assertTrue(wait_for(lambda: self.serving_pid() not in (None, before)), "no new gateway took over")
                 time.sleep(0.2)
         finally:
             stop.set()

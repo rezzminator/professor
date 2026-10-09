@@ -68,7 +68,7 @@ release() {
   edit '.env.ANTHROPIC_BASE_URL = $direct' && log "released: Claude Code, running sessions included, talks to $(direct) directly"
 }
 
-health_pid() {
+serving_pid() {
   curl -sf --max-time 1 "$URL/__gateway/health" 2>/dev/null | sed -n 's/^ok pid=\([0-9]*\).*/\1/p'
 }
 
@@ -79,7 +79,7 @@ start_gateway() {
   "$PY" -I "$DIR/gateway.py" &
   new=$!
   i=0
-  until [ "$(health_pid)" = "$new" ]; do
+  until [ "$(serving_pid)" = "$new" ]; do
     if ! kill -0 "$new" 2>/dev/null; then
       wait "$new"
       log "gateway exited with status $? before answering $URL"

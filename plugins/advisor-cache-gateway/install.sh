@@ -75,7 +75,7 @@ SETTINGS=$("$PY" -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$
 "$PY" -I -m unittest discover -s "$SRC/tests" >/dev/null 2>&1 || { echo "install.sh: tests fail; run: $PY -I -m unittest discover -s $SRC/tests" >&2; exit 1; }
 
 health() { curl -sf --max-time 1 "$URL/__gateway/health" 2>/dev/null; }
-health_pid() { health | sed -n 's/^ok pid=\([0-9]*\).*/\1/p'; }
+serving_pid() { health | sed -n 's/^ok pid=\([0-9]*\).*/\1/p'; }
 mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 CUR=$("$JQ" -r '.env.ANTHROPIC_BASE_URL // ""' "$SETTINGS")
@@ -219,14 +219,14 @@ if [ "$DISABLED" = yes ]; then
 fi
 
 if [ "$LOADED" = yes ] && [ "$SERVICE_CHANGED" = no ] && [ "$RUN_CHANGED" = no ]; then
-  BEFORE=$(health_pid)
+  BEFORE=$(serving_pid)
   if [ "$OS" = Darwin ]; then
     launchctl kill HUP "$DOMAIN/$LABEL"
   else
     systemctl --user kill -s HUP --kill-whom=main "$UNIT"
   fi
   i=0
-  until AFTER=$(health_pid) && [ -n "$AFTER" ] && [ "$AFTER" != "$BEFORE" ]; do
+  until AFTER=$(serving_pid) && [ -n "$AFTER" ] && [ "$AFTER" != "$BEFORE" ]; do
     i=$((i + 1))
     if [ $i -ge 80 ]; then
       echo "install.sh: the graceful restart did not take over within 20 seconds; the old gateway keeps serving" >&2

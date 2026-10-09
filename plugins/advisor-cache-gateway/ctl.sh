@@ -22,7 +22,7 @@ CONF="$DIR/config.env"
 DIRECT=$( [ -f "$CONF" ] && . "$CONF"; printf '%s' "${ADVISOR_CACHE_UPSTREAM:-https://api.anthropic.com}")
 
 health() { curl -sf --max-time 1 "$URL/__gateway/health" 2>/dev/null; }
-health_pid() { health | sed -n 's/^ok pid=\([0-9]*\).*/\1/p'; }
+serving_pid() { health | sed -n 's/^ok pid=\([0-9]*\).*/\1/p'; }
 linked() { [ "$("$JQ" -r '.env.ANTHROPIC_BASE_URL // ""' "$SETTINGS")" = "$URL" ]; }
 
 if [ "$(uname -s)" = Darwin ]; then
@@ -69,10 +69,10 @@ case "${1:-}" in
     ;;
   restart)
     loaded || { echo "ctl.sh: the gateway is off; use: ctl.sh on" >&2; exit 1; }
-    before=$(health_pid)
+    before=$(serving_pid)
     svc_hup
     i=0
-    until after=$(health_pid) && [ -n "$after" ] && [ "$after" != "$before" ]; do
+    until after=$(serving_pid) && [ -n "$after" ] && [ "$after" != "$before" ]; do
       i=$((i + 1))
       [ $i -ge 80 ] && { echo "ctl.sh: no new gateway took over within 20 seconds; the old one keeps serving" >&2; exit 1; }
       sleep 0.25

@@ -464,7 +464,7 @@ class DrainTest(unittest.TestCase):
         self.procs.append(p)
         return p
 
-    def health_pid(self):
+    def serving_pid(self):
         try:
             conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
             conn.request("GET", "/__gateway/health")
@@ -477,7 +477,7 @@ class DrainTest(unittest.TestCase):
     def wait_for_pid(self, pid):
         end = time.time() + 10
         while time.time() < end:
-            if self.health_pid() == pid:
+            if self.serving_pid() == pid:
                 return True
             time.sleep(0.05)
         return False

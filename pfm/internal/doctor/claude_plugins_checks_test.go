@@ -13,12 +13,14 @@ import (
 
 var doctorPluginIDs = []string{
 	"cache-live-control@cache-live-control", "sub-agent-compact@sub-agent-compact", "agent-effort@agent-effort",
+	"agent-scope@agent-scope",
 }
 
 var doctorDevIDs = []string{
 	"cache-live-control@cache-live-control-dev",
 	"sub-agent-compact@sub-agent-compact-dev",
 	"agent-effort@agent-effort-dev",
+	"agent-scope@agent-scope-dev",
 }
 
 var releaseTargets = installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
@@ -65,7 +67,7 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			writeDoctorInstalledPlugins(t, store, doctorPluginIDs...)
 			switch state {
 			case "uninstalled":
-				writeDoctorInstalledPlugins(t, store, doctorPluginIDs[0], doctorPluginIDs[2])
+				writeDoctorInstalledPlugins(t, store, doctorPluginIDs[0], doctorPluginIDs[2], doctorPluginIDs[3])
 			case "settings unreadable":
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
@@ -145,7 +147,7 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 // checkouts checks the -dev ids and their copies, a fallback names its reason
 // and checks the GitHub ids, and both copies enabled at once is a duplicate.
 func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
-	names := []string{"cache-live-control", "sub-agent-compact", "agent-effort"}
+	names := []string{"cache-live-control", "sub-agent-compact", "agent-effort", "agent-scope"}
 	for _, state := range []string{
 		"alpha clean", "alpha duplicate", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release duplicate",
 	} {

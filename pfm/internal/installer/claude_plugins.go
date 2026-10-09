@@ -52,6 +52,7 @@ var claudePlugins = []claudePlugin{
 	{Name: "cache-live-control", Source: "rezzminator/cache-live-control", ID: "cache-live-control@cache-live-control"},
 	{Name: "sub-agent-compact", Source: "rezzminator/sub-agent-compact", ID: "sub-agent-compact@sub-agent-compact"},
 	{Name: "agent-effort", Source: "rezzminator/agent-effort", ID: "agent-effort@agent-effort"},
+	{Name: "agent-scope", Source: "rezzminator/agent-scope", ID: "agent-scope@agent-scope"},
 }
 
 // ClaudePluginRepair is the repair every plugin gap pfm install closes names.

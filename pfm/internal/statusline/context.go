@@ -236,9 +236,9 @@ func writeContextFloor(path string, floor int64) {
 	}
 }
 
-// gaugePercent is a context share as the gauge shows it: rounded to the
-// nearest whole percent, so 69.1K of 1.0M reads 7%, never a truncated 6%; a
-// window not yet full stops at 99, so 100% always means full.
+// gaugePercent is a context or rate-limit share as the statusline shows it:
+// rounded to the nearest whole percent, so 69.1K of 1.0M reads 7%, never a
+// truncated 6%; a window not yet full stops at 99, so 100% always means full.
 func gaugePercent(share float64) int {
 	rounded := int(math.Round(share))
 	if rounded >= 100 && share < 100 {

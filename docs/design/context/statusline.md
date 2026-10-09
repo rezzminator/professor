@@ -99,7 +99,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 ## The main statusline
 
-- The context gauge rounds as a row's gauge does: to the nearest percent, stopping at 99% until the window is full (`gaugePercent`, `pfm/internal/statusline/context.go`).
+- The context gauge and every rate-limit `-used:` percent (Claude, Fable, Codex) round as a row's gauge does: to the nearest percent, stopping at 99% until the window is full (`gaugePercent`, `pfm/internal/statusline/context.go`).
 - After the context gauge, the spend block reads `💰$3.20/1.2M/40K/88`: Claude Code's own `cost.total_cost_usd` (dim, yellow from $2, red from $10), then the prompt tokens, output tokens and distinct tool calls of the chat's transcript and every sub-agent transcript beside it, the same scope that cost covers. It is read the way the sub-agent spend is, a response once per `message.id`, its last line. `+?` marks a sub-agent transcript that could not be read, and `?/?/?` a chat transcript that could not be. A Codex chat keeps `🧮` context tokens and `✎` prompts in its place (`pfm/internal/statusline/context.go`).
 - The model block reads `◆ Opus 5.5·🚀 xhigh`: model symbol and name, a muted `·`, then the effort (`pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.

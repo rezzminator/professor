@@ -121,7 +121,7 @@ func TestClaudeAccountFourDoesNotRenderCodexUsage(t *testing.T) {
 func TestStatuslineRendersFableRateAndSymbol(t *testing.T) {
 	got, err := Render(context.Background(), []byte(`{
   "model":{"display_name":"Fable"},
-  "rate_limits":{"limits":[{"kind":"weekly_scoped","percent":23,"resets_at":"2030-01-07T08:00:00Z","scope":{"model":{"display_name":" fAbLe "}},"is_active":true}]}
+  "rate_limits":{"limits":[{"kind":"weekly_scoped","percent":22.6,"resets_at":"2030-01-07T08:00:00Z","scope":{"model":{"display_name":" fAbLe "}},"is_active":true}]}
 }`), Runtime{
 		Home: t.TempDir(), Columns: 120, UID: 1000, Command: quietRunner{},
 	})
@@ -241,7 +241,7 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 				writeGoldenCache(
 					t,
 					filepath.Join(cacheDir, "cc-gpt-usage-1000.json"),
-					`{"primary":{"usedPercent":32,"windowDurationMins":300,"resetsAt":1786845600},"secondary":{"usedPercent":71,"windowDurationMins":10080,"resetsAt":1787443200},"planType":"plus"}`,
+					`{"primary":{"usedPercent":31.6,"windowDurationMins":300,"resetsAt":1786845600},"secondary":{"usedPercent":70.5,"windowDurationMins":10080,"resetsAt":1787443200},"planType":"plus"}`,
 					now,
 				)
 				writeGoldenCache(t, filepath.Join(cacheDir, "cc-sl-gptreq"), "7 0\n", now)

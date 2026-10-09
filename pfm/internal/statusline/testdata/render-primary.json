@@ -18,7 +18,7 @@
   "session_id": "11111111-1111-4111-8111-111111111111",
   "transcript_path": "__TRANSCRIPT__",
   "rate_limits": {
-    "five_hour": {"used_percentage": 32, "resets_at": 1786845600},
-    "seven_day": {"used_percentage": 71, "resets_at": 1787443200}
+    "five_hour": {"used_percentage": 31.6, "resets_at": 1786845600},
+    "seven_day": {"used_percentage": 70.5, "resets_at": 1787443200}
   }
 }

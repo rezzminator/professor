@@ -357,7 +357,7 @@ func appendRateSegments(line string, now time.Time, data input) string {
 			line = appendSegment(line, makeBar(0, 5)+" "+dim+descriptor.Label+"-used:—"+reset)
 			continue
 		}
-		used := int(window.UsedPercentage)
+		used := gaugePercent(window.UsedPercentage)
 		segment := makeBar(used, 5) + " " + percentColor(used) +
 			descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
 		remaining := window.ResetsAt - now.Unix()
@@ -837,7 +837,7 @@ func codexSegment(
 			if window == nil || window.UsedPercent < 0 {
 				continue
 			}
-			percent := int(window.UsedPercent)
+			percent := gaugePercent(window.UsedPercent)
 			segment += sep + makeBar(percent, 5) + " " + percentColor(percent) +
 				windowLabel(window.WindowDurationMins) + "-used:" + strconv.Itoa(percent) + "%" + reset +
 				resetCountdown(now, window.ResetsAt)

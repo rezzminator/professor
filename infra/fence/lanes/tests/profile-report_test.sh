@@ -336,6 +336,21 @@ eq "profile.tsv: the GATE row — STEPS wall, CPU, I/O and VM PSI deltas over th
   "FAIL 125.3 58.000 435.000 0.290 0.580 0.870 CONTENTION" \
   "$(for c in verdict wall_s cpu_s io_mb psi_cpu_s psi_io_s psi_mem_s attribution; do cell "$TSV" GATE "$c"; done | paste -sd' ' -)"
 
+# The race step profiles into its own root, profile/race/ (its packages are pfm.unit's too): INDEX lists
+# that root's processes as it lists a fixture root's, and a red pfm.race points at the profiles. Its run
+# sits outside $T/timing, whose run.* siblings the judge reads for its spin reference.
+RRACE=$T/racerun/run.RACE
+mkres "$RRACE/resources.tsv" 30 15
+mkgate "$RRACE" FAIL PASS pfm.race FAIL 3.0
+mkprof "$RRACE" pfm.race exit 1 "$(ep 2)" "$(ep 5)" 3.000000 2.000 0 0.000000 0.000000 0.000000
+proc "$RRACE/profile/race" internal_harvest.79 exit 1 "" exit
+run_sut summary "$RRACE"
+eq "race root: summary exit 0" 0 "$RC"
+has "step line: a red pfm.race points at the profiles" " · profiles $RRACE/profile/INDEX.txt" "$(line_with "$OUT" "PROFILE step pfm.race ")"
+eq "INDEX: a process inside the race step's root is listed with its full path and bundle" \
+  "$RRACE/profile/race/internal_harvest.79 · event exit · exit 1 · wall 2.5s · run delay 0.123s → $RRACE/profile/race/internal_harvest.79/exit/DIAGNOSIS.txt" \
+  "$(line_with "$(< "$RRACE/profile/INDEX.txt")" "/internal_harvest.79 ")"
+
 # The one case that reads the real thresholds file: the script at its own location, the judge its PFM names,
 # whatever values pfm/.testcontention.yml holds. It runs on a copy of the run, so $R's own profile.tsv stays;
 # the copy sits outside $T/timing, whose run.* siblings the judge reads for its spin reference.

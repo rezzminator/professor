@@ -323,6 +323,9 @@ func TestShadowRootWordsJoinShown(t *testing.T) {
 // always calls) must stay roughly constant as the page grows, not scale with
 // its word count.
 func TestNoInertContainerSkipsTheWindowScan(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation ceiling: the race detector's own allocations swamp the counted ones under -race")
+	}
 	testjail.PauseFlightRecorder(t)
 	buildDoc := func(t *testing.T, words int) *html.Node {
 		t.Helper()

@@ -149,22 +149,23 @@ graph_order() {
     !after {
       if ($0=="pfm.unit") group=1
       else if ($0=="pfm.e2e") group=2
-      else if ($0 ~ /^pfm\.self\./) group=3
-      else if ($0 ~ /^templates\.lanes\./) group=4
-      else if ($0 ~ /^templates\.demo\./) group=5
+      else if ($0=="pfm.race") group=3
+      else if ($0 ~ /^pfm\.self\./) group=4
+      else if ($0 ~ /^templates\.lanes\./) group=5
+      else if ($0 ~ /^templates\.demo\./) group=6
       else exit 1
-      if (group<previous || (target=="pfm" && group>3) || (target=="templates" && group<4)) exit 1
+      if (group<previous || (target=="pfm" && group>4) || (target=="templates" && group<5)) exit 1
       previous=group
       next
     }
-    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.(lanes|demo)\./ || $0=="pfm.unit" || $0=="pfm.e2e") {exit 1}
+    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.(lanes|demo)\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race") {exit 1}
     END {if (barriers!=1) exit 1}
   ' "$T/registered"
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
 templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.token-audit,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
-heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
+heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.mirrors$' "$T/registered")" -eq 1 ] &&
@@ -172,7 +173,7 @@ if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^pfm\.e2e$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.lanes\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/fence/lanes/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
   [ "$(grep -c '^templates\.demo\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/demo/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
-  [ "$(sed -n '1,2p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e' ] &&
+  [ "$(sed -n '1,3p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   [ -z "$(sort "$T/registered" | uniq -d)" ] && graph_order all; then
@@ -180,9 +181,9 @@ if gate_run all >"$T/all.out" &&
 else bad 'all registration' "$(cat "$T/all.out")" "$(cat "$T/registered")"; fi
 
 if PFM_TEST_TIMING_DIR="$T/real-pfm" gate_run pfm >"$T/pfm.out" &&
-  [ "$(sed -n '1,2p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e' ] &&
+  [ "$(sed -n '1,3p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
-  [ "$(sort "$T/heavy" | paste -sd, -)" = 'pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin' ] &&
+  [ "$(sort "$T/heavy" | paste -sd, -)" = 'pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin' ] &&
   graph_order pfm; then
   ok 'pfm graph runs its tests before static checks'
 else bad 'pfm graph' "$(cat "$T/registered")"; fi
@@ -190,6 +191,9 @@ real_run="$(ls -d "$T/real-pfm"/run.* | head -1)"
 if grep -Fxq "pfm.e2e checks_pfm_e2e $REPO_ROOT/pfm $real_run" "$T/registered.args"; then
   ok 'pfm.e2e is the profiled e2e wrapper, given the pfm dir and the run dir'
 else bad 'pfm.e2e registration' "$(grep '^pfm.e2e' "$T/registered.args")"; fi
+if grep -Fxq "pfm.race checks_pfm_race $REPO_ROOT/pfm $real_run" "$T/registered.args"; then
+  ok 'pfm.race is the race step, given the pfm dir and the run dir'
+else bad 'pfm.race registration' "$(grep '^pfm.race' "$T/registered.args")"; fi
 if [ -s "$real_run/profile.tsv" ] && [ -f "$real_run/profile/INDEX.txt" ] && grep -Fq "PROFILE index $real_run/profile/INDEX.txt" "$T/pfm.out"; then
   ok 'the real profile-report.sh summary prints its PROFILE block and writes profile.tsv and profile/INDEX.txt'
 else bad 'real summary' "$(cat "$T/pfm.out")"; fi
@@ -572,6 +576,55 @@ unset STUB_LOAD_FAIL
 if grep -q '^rows ' "$STUB_EVENTS" && grep -Eq '^  PROFILE e2e.load NOT RECORDED — test-shard.sh sample exit 2 \(its stderr above\)$' "$T/e2e-noload.out"; then
   ok 'a load sampler that cannot start is one line, and the e2e rows still run'
 else bad 'e2e load failure' "$(cat "$STUB_EVENTS")" "$(cat "$T/e2e-noload.out")"; fi
+
+# checks_pfm_race: the named harvester race tests under cgo's -race, their stream kept in the run dir and
+# profiled into its own root <run>/profile/race (never pfm.unit's processes of the same packages), then a pass event demanded of every named test: a renamed, skipped or
+# unbuilt test is a red step naming it, never a green "no tests to run".
+race_pass() { printf '{"Action":"pass","Package":"github.com/rezzminator/professor/pfm/%s","Test":"%s"}\n' "$1" "$2"; }
+# The cases read the list checks.sh holds, so a test joining it changes no case here; the chaos suites
+# must be on it (the wrong-package and missing cases below name them).
+race_all="$CHECKS_PFM_RACE_TESTS"
+race_n="$(wc -l <<< "$race_all" | tr -d ' ')"
+race_regex="^($(cut -d' ' -f2 <<< "$race_all" | paste -sd'|' -))\$"
+race_pkgs="$(cut -d' ' -f1 <<< "$race_all" | sort -u | sed 's|.*|./&/|' | paste -sd' ' -)"
+race_case() { # race_case <label> <expected FAILSTEP line or empty> <stream: "pkg test" pass lines, or ABSENT>
+  local label="$1" want="$2" stream="$3" rd="$T/race-run" pkg test want_failures=0
+  [ -z "$want" ] || want_failures=1
+  rm -rf "$rd"; mkdir -p "$rd"; : > "$STUB_EVENTS"; : > "$T/unit.calls"; FAILURES=0
+  if [ "$stream" != ABSENT ]; then
+    while read -r pkg test; do race_pass "$pkg" "$test"; done <<< "$stream" > "$rd/race.json"
+  fi
+  checks_pfm_race "$T/fx/pfm" "$rd" >"$T/race.out" 2>&1
+  if grep -Fq "$rd/profile/race pfm: go test -race (harvester chaos and race regressions) -- bash -c" "$T/unit.calls" &&
+    grep -Fq 'CGO_ENABLED=1 go -C "$1" test -race -count=1 -json -timeout 10m -run "$2" "${@:4}" > "$3"' "$T/unit.calls" &&
+    grep -Fq "_ $T/fx/pfm $race_regex $rd/race.json $race_pkgs" "$T/unit.calls" &&
+    [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$rd/race.json" "$rd/race.json" "$rd/profile/race")" ] &&
+    [ "$(grep -v '^  PROFILE ' "$T/race.out")" = "$want" ] && [ -z "${PFM_TEST_ARTIFACT_DIR+x}" ] &&
+    [ "$FAILURES" -eq "$want_failures" ]; then
+    ok "pfm.race: $label"
+  else bad "pfm.race: $label" "$(cat "$T/unit.calls")" "$(cat "$STUB_EVENTS")" "$(cat "$T/race.out")" "FAILURES=$FAILURES"; fi
+}
+race_case 'every named test passed under -race with cgo on: green' '' "$race_all"
+race_case 'a named test with no pass event (skipped, renamed, never built) is red by name' \
+  "FAILSTEP pfm: race — 1 of $race_n named test(s) never passed: internal/harvestmcp TestServiceChaos" \
+  "$(grep -v TestServiceChaos <<< "$race_all")"
+race_case 'a pass in the wrong package does not stand in for the named one' \
+  "FAILSTEP pfm: race — 1 of $race_n named test(s) never passed: internal/harvest TestHarvesterChaos" \
+  "$(sed 's|^internal/harvest TestHarvesterChaos$|internal/harvestmcp TestHarvesterChaos|' <<< "$race_all")"
+race_case 'no stream at all: every named test is named as never passed' \
+  "FAILSTEP pfm: race — $race_n of $race_n named test(s) never passed: $(paste -sd, - <<< "$race_all" | sed 's/,/, /g')" ABSENT
+# No C compiler (an image built without gcc): the step is red as a missing toolchain and runs no go test,
+# never a "never passed" list that reads like a renamed suite.
+: > "$STUB_EVENTS"; : > "$T/unit.calls"; : > "$T/need.calls"; FAILURES=0
+(
+  need_tool() { printf '%s\n' "$*" >> "$T/need.calls"; [ "$1" != gcc ] || { fail_step "$2: TOOLCHAIN-MISSING — '$1' not on PATH"; return 1; }; }
+  checks_pfm_race "$T/fx/pfm" "$T/race-run" >"$T/race-nogcc.out" 2>&1
+  printf 'FAILURES=%s\n' "$FAILURES" >> "$T/race-nogcc.out"
+)
+if grep -Fxq 'gcc pfm' "$T/need.calls" && [ ! -s "$T/unit.calls" ] && [ ! -s "$STUB_EVENTS" ] &&
+  [ "$(cat "$T/race-nogcc.out")" = "$(printf "FAILSTEP pfm: TOOLCHAIN-MISSING — 'gcc' not on PATH\nFAILURES=1")" ]; then
+  ok 'pfm.race: no C compiler is a missing toolchain by name, and no go test runs'
+else bad 'pfm.race: no gcc' "$(cat "$T/need.calls")" "$(cat "$T/unit.calls")" "$(cat "$STUB_EVENTS")" "$(cat "$T/race-nogcc.out")"; fi
 
 # checks_pfm_test (iso test pfm): unit and e2e profiled into the one run dir it makes.
 : > "$STUB_EVENTS"; : > "$T/unit.calls"

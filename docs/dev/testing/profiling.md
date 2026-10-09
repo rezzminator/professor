@@ -17,7 +17,7 @@ Every `iso gate` run records what each Go test process, each gate step and the c
 
 ### Per Go package process
 
-`testjail.Run` starts a profiler in every test binary that runs with `PFM_TEST_ARTIFACT_DIR` set (`checks_pfm_unit` and `checks_pfm_e2e` set it to `$run/profile`, each Go fixture step to `$run/profile/fixture-<kind>`, so a fixture's failure pointers name only its own bundles). Each process writes `profile/<label>.<pid>/summary.json`: written at start with `event` `started-no-exit-recorded` and `exit_code` -1, rewritten at exit. A process that execs itself away or is killed keeps the start record.
+`testjail.Run` starts a profiler in every test binary that runs with `PFM_TEST_ARTIFACT_DIR` set (`checks_pfm_unit` and `checks_pfm_e2e` set it to `$run/profile`, each Go fixture step to `$run/profile/fixture-<kind>` and `checks_pfm_race` to `$run/profile/race`, so a fixture's or the race step's failure pointers name only its own bundles). Each process writes `profile/<label>.<pid>/summary.json`: written at start with `event` `started-no-exit-recorded` and `exit_code` -1, rewritten at exit. A process that execs itself away or is killed keeps the start record.
 
 | Key | Meaning |
 | --- | --- |
@@ -103,7 +103,7 @@ The step's `steps/<name>.xtrace` (see [Per step](#per-step)). For a red shell st
 | `bin/` | `pfm/scripts/test-shard.sh run --bin-dir` | the `pfm` and `mock-engine` the unit run built |
 | `profile/<label>.<pid>/summary.json` | `internal/testjail` | [Per Go package process](#per-go-package-process) |
 | `profile/<label>.<pid>/<reason>/` | `internal/testjail` | [Go bundles](#go-bundles) |
-| `profile/fixture-<kind>/<label>.<pid>/` | `internal/testjail` | the same summary and bundles, one root per Go fixture step, listed in `INDEX.txt` |
+| `profile/fixture-<kind>/<label>.<pid>/`, `profile/race/<label>.<pid>/` | `internal/testjail` | the same summary and bundles, one root per Go fixture step and one for the race step, listed in `INDEX.txt` |
 | `profile/INDEX.txt`, `profile.tsv` | `infra/fence/profile-report.sh summary` | [Reading a red gate](#reading-a-red-gate) |
 | `fixture-go-<kind>.json` | fixture steps | `go test -json` stream of the profile fixture |
 

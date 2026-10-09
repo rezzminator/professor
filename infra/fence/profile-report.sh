@@ -21,9 +21,10 @@
 # cannot be read, are said in the line, never skipped.
 #
 # summary: reads <run-dir>/gate.tsv, steps/*.prof.tsv, resources.tsv,
-# resources.err, profile/*/summary.json and profile/fixture-*/*/summary.json (each
-# Go fixture step profiles into its own profile/fixture-<kind>/ root; INDEX.txt lists
-# that root's process directories in its place); asks pfm/scripts/test-contention.sh
+# resources.err, profile/*/summary.json, profile/fixture-*/*/summary.json and
+# profile/race/*/summary.json (each Go fixture step profiles into its own
+# profile/fixture-<kind>/ root and the race step into profile/race/; INDEX.txt lists
+# such a root's process directories in its place); asks pfm/scripts/test-contention.sh
 # (windows) once for every step window plus the whole file; writes
 # <run-dir>/profile.tsv (one row per gate.tsv step, then GATE) and
 # <run-dir>/profile/INDEX.txt; prints
@@ -32,7 +33,7 @@
 #                                         slowest PASS steps
 #     PROFILE index <run-dir>/profile/INDEX.txt
 # A step line carries its pointers: ` · xtrace` (ERR records), ` · hang` (the
-# bound ended it), ` · profiles` (a Go step — pfm.unit, pfm.e2e, fixture.go-* —
+# bound ended it), ` · profiles` (a Go step — pfm.unit, pfm.e2e, pfm.race, fixture.go-* —
 # that is not PASS). A pointer to an artifact that is not there says
 # MISSING. Exit 0; 64 bad usage; 2 no run directory or an unreadable gate.tsv;
 # 71 an output cannot be written.
@@ -60,8 +61,8 @@ import tempfile
 PREFIX = 'github.com/rezzminator/professor/pfm/'
 NUMBER = re.compile(r'[+-]?[0-9]+(\.[0-9]+)?')
 REASON = re.compile(r'[A-Za-z0-9_-]+')
-FIXTURE_ROOT = re.compile(r'fixture-[a-z0-9-]+')  # a Go fixture step's profile root, never a process
-GO_STEPS = ('pfm.unit', 'pfm.e2e')
+STEP_ROOT = re.compile(r'fixture-[a-z0-9-]+|race')  # a Go step's own profile root (a fixture, the race step), never a process
+GO_STEPS = ('pfm.unit', 'pfm.e2e', 'pfm.race')
 GO_STEP_PREFIX = 'fixture.go-'
 SLOWEST_PASS = 5
 JUDGE_SECONDS = 120
@@ -549,11 +550,11 @@ def go_process_section(run):
     count, lines = 0, []
     for name in names:
         path = f'{profile_dir}/{name}'
-        if not FIXTURE_ROOT.fullmatch(name):
+        if not STEP_ROOT.fullmatch(name):
             lines.append(process_line(path))
             count += 1
             continue
-        # A Go fixture step's own profile root: its process directories take its place here.
+        # A Go step's own profile root (a fixture, the race step): its process directories take its place here.
         try:
             inner = process_names(path)
         except OSError as exc:

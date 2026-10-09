@@ -563,6 +563,43 @@ checks_pfm_e2e() {
   checks_pfm_profile_pointers "$run_dir/e2e.json" "$run_dir/profile" "$before"
 }
 
+# The tests the gate's race step runs under -race: the harvester chaos suites and the race regressions
+# they found, as <package dir under pfm/> <Test> lines. A test that guards a race joins here; the step
+# demands a pass event of each, so a rename here or there is a red step, never "no tests to run".
+CHECKS_PFM_RACE_TESTS='internal/harvest TestHarvesterChaos
+internal/harvest TestFetchFailureIsCachedBeforeItsFlightEnds
+internal/harvest TestFetchSizeOnlyLeaderSharesTheWholePage
+internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
+internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
+internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
+internal/harvestmcp TestServiceChaos'
+
+# checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo
+# (the pfm-dev image carries gcc; CGO_ENABLED=1 for this command alone, every other build stays static),
+# its stream kept as <run dir>/race.json and profiled into its own root <run dir>/profile/race — its
+# packages are pfm.unit's too, and failure pointers match a process by package. BROKEN STATE: a named test
+# with no pass event in the stream — skipped, renamed, unbuilt, or a stream that was never written — is
+# a red line naming each such test; no C compiler is TOOLCHAIN-MISSING and no test runs.
+checks_pfm_race() {
+  local d="$1" run_dir="$2" json="$2/race.json" before="$FAILURES" regex pkgs=() pkg test passed missing="" n=0 total=0
+  local -x PFM_TEST_ARTIFACT_DIR="$run_dir/profile/race"
+  need_tool gcc pfm || return 1
+  regex="^($(awk '{print $2}' <<< "$CHECKS_PFM_RACE_TESTS" | paste -sd'|' -))\$"
+  while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$CHECKS_PFM_RACE_TESTS" | awk '!seen[$0]++')
+  run "pfm: go test -race (harvester chaos and race regressions)" -- bash -c '
+    CGO_ENABLED=1 go -C "$1" test -race -count=1 -json -timeout 10m -run "$2" "${@:4}" > "$3"
+  ' _ "$d" "$regex" "$json" "${pkgs[@]}"
+  go_test_report "$json"
+  checks_pfm_profile_pointers "$json" "$run_dir/profile/race" "$before"
+  passed="$(jq -r 'select(.Action=="pass" and .Test != null) | .Package + " " + .Test' "$json" 2>/dev/null)" || passed=""
+  while read -r pkg test; do
+    total=$((total + 1))
+    grep -Fxq "github.com/rezzminator/professor/pfm/$pkg $test" <<< "$passed" && continue
+    n=$((n + 1)); missing+="${missing:+, }$pkg $test"
+  done <<< "$CHECKS_PFM_RACE_TESTS"
+  (( n == 0 )) || fail_step "pfm: race — $n of $total named test(s) never passed: $missing"
+}
+
 # The RUN DIR line: a test run's caller reads the run dir it made from the output's last line,
 # `RUN DIR: <absolute host path>`, never by guessing the newest run.* (a gate from another tree
 # writes under another base). Each timing_run_dir caller records its run dir with timing_run_note;
@@ -833,6 +870,7 @@ gate_run() { # pfm, templates, or all
   if [[ "$target" == pfm || "$target" == all ]]; then
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir"
     steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir"
+    steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir"
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"

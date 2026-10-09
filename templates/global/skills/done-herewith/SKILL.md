@@ -1,10 +1,10 @@
 ---
-name: close-out
-description: 'USER-ONLY Finishes a chat completely — /close-out: sweeps open threads, unfinished or unverified work, uncommitted changes, running agents; does what needs no ruling, asks the rest. Returns the closing report.'
+name: done-herewith
+description: 'USER-ONLY Finishes a chat completely — /done-herewith: sweeps open threads, unfinished or unverified work, uncommitted changes, running agents; does what needs no ruling, asks the rest. Returns the closing report.'
 disable-model-invocation: true
 ---
 
-# close-out
+# done-herewith
 
 The user is leaving this chat for good. Every item the sweep finds ends one of three ways: done and verified, ruled by the user, or named in the report with what it needs.
 

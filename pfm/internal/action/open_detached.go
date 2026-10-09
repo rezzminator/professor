@@ -24,6 +24,11 @@ type OpenResult struct {
 	// with no terminal never looks at the chat it started, so a difference
 	// like that has to ride back in the result rather than in a log line.
 	Detail string
+	// Warnings are what the caller must be told about the chat it opened: it
+	// opened anyway. Today, that the fleet prompt its policy asks for cannot
+	// reach it. They ride the result because the caller has no terminal to
+	// print them on.
+	Warnings []string
 }
 
 // OpenDetached opens the target row for a caller that has no terminal — the
@@ -107,5 +112,7 @@ func (executor *Executor) OpenDetached(
 		return OpenResult{}, fmt.Errorf("open detached: %w", err)
 	}
 	trail.Reach("opened", "detached server created")
-	return OpenResult{Name: request.Row.Name, Socket: plan.ChatServer.Socket, State: "opened"}, nil
+	return OpenResult{
+		Name: request.Row.Name, Socket: plan.ChatServer.Socket, State: "opened", Warnings: plan.Warnings,
+	}, nil
 }

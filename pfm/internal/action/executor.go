@@ -15,6 +15,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -157,6 +158,7 @@ func (executor *Executor) Open(
 		); err != nil {
 			return "", err
 		}
+		launchnotice.Hold(executor.stderr, "pfm", plan.Warnings)
 	}
 	trail.Reach("opened", "pane attached")
 	return plan.Line, nil

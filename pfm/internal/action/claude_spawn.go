@@ -56,6 +56,21 @@ func (spawn ClaudeSpawn) request() claudelaunch.Request {
 	}
 }
 
+// PromptWarning is the verdict on whether this launch carries the system
+// prompt file it should: empty when it does, else why not. A surface that
+// starts the chat prints it, since the launch goes ahead without the prompt.
+func (spawn ClaudeSpawn) PromptWarning() string {
+	return claudelaunch.PromptWarning(spawn.request(), spawn.Machine)
+}
+
+// warnings is PromptWarning as the list the plans carry.
+func (spawn ClaudeSpawn) warnings() []string {
+	if warning := spawn.PromptWarning(); warning != "" {
+		return []string{warning}
+	}
+	return nil
+}
+
 func (spawn ClaudeSpawn) render() (claudelaunch.Launch, error) {
 	if spawn.Purpose < PurposeInteractive || spawn.Purpose > PurposeQuery {
 		return claudelaunch.Launch{}, fmt.Errorf("claude spawn: unknown purpose %d", spawn.Purpose)

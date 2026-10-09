@@ -29,6 +29,7 @@ type fakeActionTmux struct {
 	selected     []string
 	created      []ChatServer
 	onCreate     func()
+	createErr    error
 }
 
 func (tmux *fakeActionTmux) ListPanes(
@@ -115,6 +116,9 @@ func (tmux *fakeActionTmux) CreateChatServer(
 ) error {
 	if tmux.onCreate != nil {
 		tmux.onCreate()
+	}
+	if tmux.createErr != nil {
+		return tmux.createErr
 	}
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()

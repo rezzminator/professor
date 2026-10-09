@@ -25,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -234,7 +235,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			name = label
 		}
 	}
-	realRun, err := action.LauncherRunAs(
+	realRun, promptWarning, err := action.LauncherLaunchAs(
 		persona,
 		*realBinary,
 		arguments,
@@ -311,6 +312,10 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			_ = launchTmuxCommand(ctx, tmuxBinary, socketPath, "kill-server").Run()
 		}
 	}()
+	if promptWarning != "" && launchnotice.HoldCancellable(stderr, "pfm internal launch", []string{promptWarning}) {
+		fmt.Fprintln(stderr, "pfm internal launch: cancelled at the warning — the chat was not started")
+		return 130
+	}
 	if interactive {
 		failed = false
 		arguments := attachArguments(socketPath, startChannel, session, env.Get("TMUX") != "")

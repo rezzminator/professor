@@ -3,12 +3,14 @@ package action
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -122,6 +124,14 @@ type HeadlessPlan struct {
 	// running TUI instead — Codex is named through its own rename UI, and a
 	// prompt on the command line would start a turn before that can happen.
 	PromptOnCommandLine bool
+	// Warnings are what the person starting the chat must be told: the chat
+	// starts anyway. The command that planned it prints them on its stderr.
+	Warnings []string
+}
+
+// Report prints each warning to the starter's stderr under who's prefix.
+func (plan HeadlessPlan) Report(stderr io.Writer, who string) {
+	launchnotice.Print(stderr, who, plan.Warnings)
 }
 
 // HeadlessForkRequest is one detached fork of an existing engine session.
@@ -159,12 +169,13 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 				request.PrimaryAccount,
 			)
 		}
-		run, err := (ClaudeSpawn{
+		spawn := ClaudeSpawn{
 			Purpose: PurposeResume, Home: request.Home, Account: request.PrimaryAccount,
 			Cache1H: &request.Cache1H, Resume: request.SessionID, Fork: true,
 			Name: request.Name, Model: request.Persona.ModelOr(request.Model), Machine: machine,
 			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
-		}).ShellCommand()
+		}
+		run, err := spawn.ShellCommand()
 		if err != nil {
 			return HeadlessPlan{}, err
 		}
@@ -172,6 +183,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 			Run:                 run,
 			Binary:              claudeBinaryWord(machine),
 			PromptOnCommandLine: true,
+			Warnings:            spawn.warnings(),
 		}, nil
 	case pfmengine.Codex:
 		account, found := machine.CodexAccountByID(request.PrimaryAccount)
@@ -254,12 +266,13 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 	if request.Prompt != "" {
 		arguments = append(arguments, request.Prompt)
 	}
-	run, err := (ClaudeSpawn{
+	spawn := ClaudeSpawn{
 		Purpose: PurposeInteractive, Account: request.PrimaryAccount,
 		Cache1H: request.Cache1H, SessionID: id, Name: request.Name,
 		Model: request.Model, Effort: effort, Args: arguments, Home: request.Home,
 		Machine: machine, PromptFile: request.PromptChannel,
-	}).ShellCommand()
+	}
+	run, err := spawn.ShellCommand()
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
@@ -271,6 +284,7 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 		},
 		Binary:              claudeBinaryWord(machine),
 		PromptOnCommandLine: true,
+		Warnings:            spawn.warnings(),
 	}, nil
 }
 

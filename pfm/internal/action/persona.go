@@ -87,15 +87,15 @@ func WorkbenchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (wor
 	return persona, nil
 }
 
-func claudeCommandForPersona(
+func claudePersonaSpawn(
 	purpose Purpose, home string, account int, cache1H bool,
 	machine pfmconfig.Config, persona workbench.Persona, name string, args ...string,
-) (string, error) {
+) ClaudeSpawn {
 	return ClaudeSpawn{
 		Purpose: purpose, Home: home, Account: account, Cache1H: &cache1H,
 		Machine: machine, Name: name, Args: args,
 		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
-	}.ShellCommand()
+	}
 }
 
 func openCodePersonaEnv(request Request) (string, error) {

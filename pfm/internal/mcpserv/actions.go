@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -307,11 +308,21 @@ func (service *Service) chatOpenDetached(
 		output := ActionOutput{Status: statusError, Code: 1, Message: err.Error()}
 		return nil, output, fmt.Errorf("chat_open: %w", err)
 	}
+	return nil, ActionOutput{Status: "ok", Code: 0, Message: openMessage(result)}, nil
+}
+
+// openMessage is what chat_open tells its caller: where the chat lives, how it
+// was opened, and every warning about it — a caller with no terminal reads
+// nothing else.
+func openMessage(result action.OpenResult) string {
 	message := fmt.Sprintf("%s %s on socket %s", result.State, result.Name, result.Socket)
 	if result.Detail != "" {
 		message += " — " + result.Detail
 	}
-	return nil, ActionOutput{Status: "ok", Code: 0, Message: message}, nil
+	for _, warning := range result.Warnings {
+		message += " — WARNING: " + warning
+	}
+	return message
 }
 
 func (service *Service) chatName(

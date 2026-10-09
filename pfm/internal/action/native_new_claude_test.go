@@ -3,6 +3,7 @@ package action
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -157,5 +158,39 @@ func TestNewClaudeRequiresFreshSocket(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "fresh socket") {
 		t.Fatalf("missing fresh socket error = %v", err)
+	}
+}
+
+// The picker's plan carries what the starter must be told: a professor-mode
+// chat opened without the fleet prompt, whichever way it opens.
+func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
+	id := "11111111-1111-4111-8111-111111111111"
+	for _, kind := range []compose.Kind{compose.NewClaude, compose.ResumeClaude, compose.Agent} {
+		for _, staged := range []bool{false, true} {
+			t.Run(kind.String()+"/staged="+strconv.FormatBool(staged), func(t *testing.T) {
+				home := t.TempDir()
+				if staged {
+					stageProfessorPrompt(t, home)
+				}
+				machine := configuredMachinePolicy(home)
+				machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+				plan, err := Synthesize(Request{
+					Row:            compose.Row{Kind: kind, ID: id, CWD: "/work/project"},
+					PrimaryAccount: 42, Home: home, FreshSocket: "cc-warn", Config: machine,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if staged {
+					if len(plan.Warnings) != 0 {
+						t.Fatalf("warnings = %q, want none", plan.Warnings)
+					}
+					return
+				}
+				if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "no source repository recorded") {
+					t.Fatalf("warnings = %q, want one naming the missing clone", plan.Warnings)
+				}
+			})
+		}
 	}
 }

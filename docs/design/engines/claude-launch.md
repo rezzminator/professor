@@ -166,7 +166,7 @@ env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={
 - **Launch points at the repo.** `--system-prompt-file` is `{clone}/pfm/harness-prompts/composed/claude.md`, `{clone}` from the source-repo record. Nothing is copied at install.
 - **Workbench launches** replace the composed file with the manifest prompt; explicit `--system-prompt-file` / `--harness-prompt` win, and a role seat composes on that base (`internal/workbench/persona.go`, `internal/agentrole/base_prompt.go`).
 - **Role seats** compose the claude prompt with the role into a seat file under the SID dir and pass that instead (`agentrole.ComposeSeatPrompt`); `pfm chat reload` refreshes it before respawning.
-- **Missing file fails open:** the launch omits the flag and starts on Claude's own prompt; spawn-audit reports it.
+- **Missing file fails open, loudly:** the launch omits the flag and starts on Claude's own prompt, and the starter is told why (`claudelaunch.PromptWarning`, the one verdict) on the surface they launched from: stderr for `chat new` / `chat branch` / the picker / the launcher, the tool message for `chat_open`, the pane for agent resume, the reload worker's log plus a pane display for reload; spawn-audit reports it too. A surface that attaches next (the picker, the launcher, `chat new --attach`) holds for Enter when stdin and stderr are both a terminal, so the attach cannot cover the warning (`internal/launchnotice`); off a terminal it only prints, and Ctrl-C at the launcher's prompt kills the server it made. Agent resume prints in the pane without waiting, since a detached pane has nobody to press Enter. A caller-stated `--system-prompt` or `--system-prompt-file` is deliberate and never warned.
 
 ## Doors
 

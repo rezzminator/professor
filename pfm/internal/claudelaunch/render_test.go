@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -666,6 +667,128 @@ func TestRenderNameFlag(t *testing.T) {
 			if request.Args != nil && slices.Contains(request.Args, "--name=keep") &&
 				slices.Contains(launch.Argv, flagName) {
 				t.Fatal("a second --name rode beside --name=keep")
+			}
+		})
+	}
+}
+
+// stageComposedPrompt records a clone for home and, when write is set, puts a
+// composed Claude prompt where the door looks for it.
+func stageComposedPrompt(t *testing.T, home string, write bool) string {
+	t.Helper()
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	path := paths.ComposedHarnessPromptIn(clone, pfmengine.Claude)
+	if !write {
+		return path
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("fleet prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A launch that should carry a system prompt file and does not says so, with
+// the cause: one verdict, shared by every surface that tells the person who
+// started the chat, and true to the argv Render builds — the flag is dropped
+// exactly when the verdict says so.
+func TestPromptWarning(t *testing.T) {
+	seat := filepath.Join(t.TempDir(), "seat.md")
+	if err := os.WriteFile(seat, []byte("seat"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []struct {
+		name    string
+		mode    string
+		stage   string // "", "marker", "file"
+		request Request
+		want    string // substring of the warning; "" is no warning
+		carries bool   // Render adds --system-prompt-file itself
+	}{
+		{"professor, no clone recorded", "professor", "", Request{}, "no source repository recorded", false},
+		{"professor, composed file missing", "professor", "marker", Request{}, "claude.md", false},
+		{"professor, composed file present", "professor", "file", Request{}, "", true},
+		{"production wants no fleet prompt", "production", "", Request{}, "", false},
+		{"lean wants no fleet prompt", "lean", "", Request{}, "", false},
+		{"seat file present", "professor", "", Request{PromptFile: seat}, "", true},
+		{
+			"seat file missing", "production", "",
+			Request{PromptFile: "/nonexistent/seat.md"},
+			"/nonexistent/seat.md", false,
+		},
+		{"seat file is a directory", "production", "", Request{PromptFile: filepath.Dir(seat)}, "is a directory", false},
+		{
+			"caller states its own prompt file", "professor", "",
+			Request{Args: []string{"--system-prompt-file", "/elsewhere.md"}},
+			"", false,
+		},
+		{
+			"caller states its own prompt file with =", "professor", "",
+			Request{Args: []string{"--system-prompt-file=/elsewhere.md"}},
+			"", false,
+		},
+		{
+			"caller states its own inline prompt", "professor", "marker",
+			Request{Args: []string{"--system-prompt", "be brief"}},
+			"", false,
+		},
+		{
+			"caller states its own inline prompt with =", "professor", "marker",
+			Request{Args: []string{"--system-prompt=be brief"}},
+			"", false,
+		},
+		{
+			"inline prompt leaves the fleet file in the argv", "professor", "file",
+			Request{Args: []string{"--system-prompt", "be brief"}},
+			"", true,
+		},
+		{"query carries no prompt", "professor", "", Request{Purpose: PurposeQuery}, "", false},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			home, machine := renderMachine(t)
+			machine.Claude.SystemPrompt = entry.mode
+			switch entry.stage {
+			case "marker":
+				stageComposedPrompt(t, home, false)
+			case "file":
+				stageComposedPrompt(t, home, true)
+			}
+			entry.request.Home = home
+			got := PromptWarning(entry.request, machine)
+			if entry.want == "" {
+				if got != "" {
+					t.Fatalf("PromptWarning = %q, want none", got)
+				}
+			} else if !strings.Contains(got, entry.want) {
+				t.Fatalf("PromptWarning = %q, want it to name %q", got, entry.want)
+			}
+			launch, err := Render(entry.request, machine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			added := 0
+			for _, arg := range launch.Argv {
+				if arg == "--system-prompt-file" {
+					added++
+				}
+			}
+			for _, arg := range entry.request.Args {
+				if arg == "--system-prompt-file" {
+					added--
+				}
+			}
+			if carried := added == 1; carried != entry.carries || added > 1 {
+				t.Fatalf(
+					"Render added --system-prompt-file %d times, want carried=%t: %q",
+					added,
+					entry.carries,
+					launch.Argv,
+				)
 			}
 		})
 	}

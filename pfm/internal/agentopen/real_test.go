@@ -1,6 +1,7 @@
 package agentopen
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,11 +12,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -119,6 +122,59 @@ func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
 			}
 			if record.SessionID != id || record.Engine != pfmengine.Claude || record.Account != 2 || !record.Cache1H {
 				t.Fatalf("resume record=%+v", record)
+			}
+		})
+	}
+}
+
+func TestExecCommandsResumeWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
+	const id = "66666666-6666-4666-8666-666666666666"
+	const want = "Claude started WITHOUT its system prompt file"
+	for _, test := range []struct {
+		name    string
+		policy  string
+		stage   bool
+		warning bool
+		// terminal: stdin and stderr are a terminal; wait: held for Enter before Claude starts.
+		// The pane is always a terminal, attached or not: the door that attaches
+		// holds, so the pane only prints, or a detached open would never start
+		// and an injected message would be eaten as the Enter.
+		terminal, wait bool
+	}{
+		{"professor policy with no source clone", config.SystemPromptProfessor, false, true, true, false},
+		{"professor policy with no source clone off a terminal", config.SystemPromptProfessor, false, true, false, false},
+		{"professor policy with the composed prompt staged", config.SystemPromptProfessor, true, false, true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := strings.NewReader("\n")
+			t.Cleanup(launchnotice.Replace(input, test.terminal))
+			commands, _, _, accountDir := testExecCommands(t)
+			commands.Machine.Claude.SystemPrompt = test.policy
+			if test.stage {
+				if err := paths.WriteSourceRepoMarker(commands.Home, t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+				promptPath, err := action.ProfessorPromptPath(commands.Home)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(promptPath, []byte("professor prompt\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var stderr bytes.Buffer
+			commands.Stderr = &stderr
+			if err := commands.Resume(context.Background(), accountDir, t.TempDir(), id, false); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(stderr.String(), want); got != test.warning {
+				t.Fatalf("stderr warns=%t, want %t: %q", got, test.warning, stderr.String())
+			}
+			if waited := input.Len() == 0; waited != test.wait {
+				t.Fatalf("read Enter = %t, want %t: %q", waited, test.wait, stderr.String())
 			}
 		})
 	}

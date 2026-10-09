@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -304,6 +305,7 @@ func runRun(
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(stderr, "pfm chat new: %s\n", warning)
 	}
+	plan.Report(stderr, "pfm chat new")
 	// With --await the reply owns stdout, so the launch summary steps aside:
 	// `answer=$(pfm chat new --await …)` must be the answer and
 	// nothing else.
@@ -354,7 +356,7 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm: comms ledger: close shared state: %v\n", err)
 	}
 	if prompt == "" {
-		return attachRunResult(*attach, result, stdout, stderr)
+		return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
 	}
 	var progressOut io.Writer
 	if *progress && *await {
@@ -379,7 +381,7 @@ func runRun(
 	if code != 0 {
 		return code
 	}
-	return attachRunResult(*attach, result, stdout, stderr)
+	return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
 }
 
 func resolveRunEngineAccount(
@@ -467,10 +469,11 @@ func registerDetachedChild(state *fleetdb.Store, parent, socket string, createdA
 	)
 }
 
-func attachRunResult(attach bool, result spawn.Result, stdout, stderr io.Writer) int {
+func attachRunResult(attach bool, warnings []string, result spawn.Result, stdout, stderr io.Writer) int {
 	if !attach {
 		return 0
 	}
+	launchnotice.Pause(stderr, "pfm chat new", warnings)
 	line := "TMUX= tmux -L " + action.Quote(result.Socket) +
 		" attach -t " + action.Quote(result.Session)
 	if err := action.Dispatch(stdout, line); err != nil {

@@ -1,5 +1,5 @@
-// Package digest is `pfm transcript`, the mechanical reader of one Claude Code
-// or Codex session transcript. One pass parses a transcript into events
+// Package digest is `pfm transcript`, the mechanical reader of one Claude Code,
+// Codex or OpenCode session transcript. One pass parses a transcript into events
 // (prompts, replies, tool calls with their results, notes); filters select; a
 // renderer prints one compact line per event, its transcript line number
 // first. Every record not rendered is counted by type and named in the
@@ -10,7 +10,8 @@
 // Its bytes are the Python reader's it replaced (testdata/cases holds that
 // reader's captured runs); each deliberate difference is a {label}.intended golden
 // beside the case it changes. It reads through the shared transcript record,
-// block, title, timestamp and lookup types, never a decoder of its own.
+// block, title, timestamp and lookup types, never a decoder of its own, and an
+// OpenCode session's store rows through internal/index (opencode.go maps them).
 package digest
 
 import (
@@ -32,21 +33,23 @@ const (
 	warningPrefix = "TRANSCRIPT WARNING — "
 )
 
-// Env is where a run looks: pfm's resolved Claude roots and Codex homes, and
-// the home directory a digest shortens to "~/".
+// Env is where a run looks: pfm's resolved Claude roots, Codex homes and
+// OpenCode roots, and the home directory a digest shortens to "~/".
 type Env struct {
-	ClaudeRoots []string
-	CodexHomes  []string
-	Home        string
+	ClaudeRoots   []string
+	CodexHomes    []string
+	OpenCodeRoots []string
+	Home          string
 }
 
 // EnvOf is the Env pfm's resolved paths name: every Claude projects root,
-// every Codex home and the home directory.
+// every Codex home, every OpenCode root and the home directory.
 func EnvOf(values paths.Values) Env {
 	return Env{
-		ClaudeRoots: values.Roots[pfmengine.Claude],
-		CodexHomes:  values.Roots[pfmengine.Codex],
-		Home:        values.Home,
+		ClaudeRoots:   values.Roots[pfmengine.Claude],
+		CodexHomes:    values.Roots[pfmengine.Codex],
+		OpenCodeRoots: values.Roots[pfmengine.OpenCode],
+		Home:          values.Home,
 	}
 }
 
@@ -93,13 +96,27 @@ func DigestTranscript(ctx context.Context, args []string, env Env) (Output, erro
 	}
 	switch req.verb {
 	case "locate":
+		if storePath, id, ok := splitOpenCodeLocator(path); ok {
+			if err := openCodeLocate(ctx, storePath, id); err != nil {
+				return out, err
+			}
+		}
 		out.Text = path + "\n"
 		return out, nil
 	case "agents":
-		out.Text, err = sessionAgents(path)
+		if storePath, id, ok := splitOpenCodeLocator(path); ok {
+			out.Text, err = openCodeAgents(ctx, storePath, id)
+		} else {
+			out.Text, err = sessionAgents(path)
+		}
 		return out, err
 	}
-	parsed, err := parseTranscript(ctx, path)
+	var parsed *parsed
+	if storePath, id, ok := splitOpenCodeLocator(path); ok {
+		parsed, err = parseOpenCode(ctx, storePath, id)
+	} else {
+		parsed, err = parseTranscript(ctx, path)
+	}
 	if err != nil {
 		return out, err
 	}

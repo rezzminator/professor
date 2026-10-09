@@ -1,0 +1,13 @@
+TRANSCRIPT opencode · ses_1a2b3c4d5e6fGarden0001 · openai/gpt-5.6-sol high
+STORE {HOME}/.local/share/opencode/opencode.db#ses_1a2b3c4d5e6fGarden0001 · 23 records: 5 messages, 18 parts (L = record number in store order; no file lines or bytes) · cwd /work/garden (shown as ./)
+NAME Tidy the garden beds
+SPAN 2026-09-30 10:00:00Z → 10:01:07Z · 67s wall
+CALLS 5, 1 err, 1 without result: bash 1 · read 1 (1 err) · task 1 · edit 1 · webfetch 1
+TOOL | CALLS | ERR | RESULT TOTAL | RESULT MAX | NO RESULT
+bash | 1 | 0 | 11B | 11B | 0
+read | 1 | 1 | 40B | 40B | 0
+task | 1 | 0 | 18B | 18B | 0
+edit | 1 | 0 | 13B | 13B | 0
+webfetch | 1 | 0 | 0B | 0B | 1
+EVENTS call 5 · prompt 3 · note 3 · reply 1 · final 1
+SKIPPED 6 records: part.step-start 2 · part.step-finish 2 · part.reasoning 1 · part.mystery 1 | HEADER 4: message.user 2 · message.assistant 2

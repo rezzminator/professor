@@ -10,6 +10,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 )
 
+// noTimestamps is the span of a transcript or agent whose records carry no time.
+const noTimestamps = "no timestamps"
+
 const unfinishedLine = "UNFINISHED — the last turn has no final reply: the run was cut off or is still running"
 
 // capText is text cut to limit characters with the cut counted; limit <= 0
@@ -156,12 +159,17 @@ func header(p *parsed, req *request, shown int) []string {
 	if role != "" {
 		first += " · " + role
 	}
-	lines := []string{first, fmt.Sprintf("FILE %s · %d bytes · %d records · cwd %s (shown as ./)", p.path, p.bytes,
-		p.records, meta("cwd", "?"))}
+	source := fmt.Sprintf("FILE %s · %d bytes · %d records · cwd %s (shown as ./)", p.path, p.bytes, p.records,
+		meta("cwd", "?"))
+	if p.engine == engineOpenCode {
+		source = fmt.Sprintf("STORE %s · %d records: %d messages, %d parts (L = record number in store order; no "+
+			"file lines or bytes) · cwd %s (shown as ./)", p.path, p.records, p.messages, p.parts, meta("cwd", "?"))
+	}
+	lines := []string{first, source}
 	if p.title != "" {
 		lines = append(lines, "NAME "+p.title)
 	}
-	span := "no timestamps"
+	span := noTimestamps
 	if p.t0 != nil {
 		span = fmt.Sprintf("%sZ → %sZ · %ds wall", p.t0.Format("2006-01-02 15:04:05"), p.t1.Format("15:04:05"),
 			int(p.t1.Sub(*p.t0).Seconds()))

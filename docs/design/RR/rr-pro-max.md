@@ -55,7 +55,7 @@ Nothing else ends a run. A lead that keeps adding sub-areas, or judges each roun
 
 ## Cost
 
-A run costs `r(d + 1) + 5` lead calls; each round of 8 diggers costs 9, and `r` has no bound. Each lead call re-sends the lead's whole context, which grows by every digger's findings, so a round late in a run costs more than an early one. `/tokens --filter rr` lists each lead and digger with its tokens; the number to watch is rounds used, since no ceiling reports a runaway for you.
+A run costs `r(d + 1) + 5` lead calls; each round of 8 diggers costs 9, and `r` has no bound. Each lead call re-sends the lead's whole context, which grows by every digger's findings, so a round late in a run costs more than an early one. `pfm tokens --family {the chat's session-id prefix}` prices the lead and the diggers per agent type, then the 14 costliest agents one by one, so a long run's cheaper diggers drop out of that list; the number to watch is rounds used, since no ceiling reports a runaway for you.
 
 ## Running it
 

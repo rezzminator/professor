@@ -3,5 +3,10 @@
   "locate",
   "Linked Desk"
  ],
- "dirs": []
+ "dirs": [],
+ "links": {
+  ".claude/projects/alias": "../../linked-project",
+  ".claude/projects/linked": "../../linked-project",
+  "linked-project/cycle": "../.claude/projects"
+ }
 }

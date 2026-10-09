@@ -74,7 +74,7 @@ func runStatuslineWithRuntime(
 		fmt.Fprintf(stderr, "pfm statusline: resolve runtime (fail-open): %v\n", err)
 		return 0
 	}
-	runtime.UseConfig(machine)
+	runtime.UseConfig(machine, stderr)
 	if runtime.Engine == pfmengine.Codex {
 		runtime.AccountDirs = make(map[string]int, len(machine.Config.CodexAccounts))
 		runtime.AccountEmojis = make(map[int]string, len(machine.Config.CodexAccounts))

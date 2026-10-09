@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -43,7 +45,7 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 		}
 	}
 	if runtime.Engine != pfmengine.Codex {
-		l2 += sep + sessionSpendSegment(data)
+		l2 += sep + sessionSpendSegment(data, runtime.Prices)
 	}
 	// Never width-gated: a recorded launch reports its cache window and
 	// transcript readability. Codex reports no cache split.
@@ -62,33 +64,57 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	), contextTokens
 }
 
-// sessionSpendSegment is the main line's "💰$3.20/1.2M/40K/88": Claude Code's
-// own session cost, then the prompt and output tokens and the tool calls of
-// this chat's transcript and every sub-agent's beside it — the scope that cost
-// covers. A floor carries "+?"; a transcript that cannot be read is "?/?/?".
-func sessionSpendSegment(data input) string {
-	cost := data.Cost.TotalCostUSD
+// sessionSpendSegment is the main line's "💰$3.20/1.2M/40K/88": what this
+// chat and every sub-agent beside it billed — USD at the served price table,
+// prompt and output tokens, tool calls — the same scan and table as each
+// sub-agent row, so the line and the rows add up. Claude Code's own session
+// cost follows as " cc $37.31" only when pfm cannot price the session or the
+// two disagree by more than a tenth: its client prices from its own table,
+// which can lag a new model. A floor carries "+?"; a transcript that cannot
+// be read is "$?/?/?/?".
+func sessionSpendSegment(data input, prices *pricing.Prices) string {
+	claudeCost := data.Cost.TotalCostUSD
+	if strings.TrimSpace(data.TranscriptPath) == "" {
+		return cWarn + "💰$?/?/?/?" + reset + claudeCostSuffix(claudeCost, 0, false)
+	}
+	spend, err := sessionSpend(data.TranscriptPath, prices)
+	if err != nil {
+		return cWarn + "💰$?/?/?/?" + reset + claudeCostSuffix(claudeCost, 0, false)
+	}
+	priced := spend.priced > 0 || !spend.partial
 	color := dim
-	if cost >= 10 {
+	if spend.usd >= 10 {
 		color = red
-	} else if cost >= 2 {
+	} else if spend.usd >= 2 {
 		color = yellow
 	}
-	line := color + "💰" + fmt.Sprintf("$%.2f", cost) + reset + cMuted + "/" + reset
-	if strings.TrimSpace(data.TranscriptPath) == "" {
-		return line + cWarn + "?/?/?" + reset
+	dollars := "$?"
+	if priced {
+		dollars = fmt.Sprintf("$%.2f", spend.usd)
+	} else {
+		color = cWarn
 	}
-	spend, err := sessionSpend(data.TranscriptPath)
-	if err != nil {
-		return line + cWarn + "?/?/?" + reset
-	}
-	line += cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
+	line := color + "💰" + dollars + reset + cMuted + "/" + reset +
+		cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
 		cTools + strconv.Itoa(spend.tools) + reset
-	if spend.partial {
+	if spend.partial && priced {
 		line += cWarn + "+?" + reset
 	}
-	return line
+	return line + claudeCostSuffix(claudeCost, spend.usd, priced)
+}
+
+// claudeCostSuffix is " cc $37.31", Claude Code's own session cost, when it
+// reported one and pfm has no price of its own or differs from it by more
+// than a tenth of the larger; otherwise nothing.
+func claudeCostSuffix(claudeCost, pfmCost float64, priced bool) string {
+	if claudeCost <= 0 {
+		return ""
+	}
+	if priced && math.Abs(claudeCost-pfmCost) <= 0.1*math.Max(claudeCost, pfmCost) {
+		return ""
+	}
+	return cMuted + " cc " + reset + cWarn + fmt.Sprintf("$%.2f", claudeCost) + reset
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.

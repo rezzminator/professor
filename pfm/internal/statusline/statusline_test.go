@@ -288,6 +288,7 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 				Engine:       engineID,
 				Env:          sample.env,
 				Command:      quietRunner{},
+				Prices:       testPrices(t),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -380,7 +381,7 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	for _, want := range []string{
 		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·🏎️ high", "sample",
-		"42%", "💰$3.42/", "⏳ 5m32s", "·2 ·1",
+		"42%", "💰$?/?/?/? cc $3.42", "⏳ 5m32s", "·2 ·1",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("render lacks %q:\n%q", want, got)
@@ -498,14 +499,14 @@ func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T)
 }`), Runtime{
 		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
 		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000, Env: map[string]string{},
-		Command: quietRunner{},
+		Command: quietRunner{}, Prices: testPrices(t),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if !strings.Contains(plain, "25%") || strings.Contains(plain, "77%") ||
-		!strings.Contains(plain, "💰$0.00/250.0K/0/0") {
+		!strings.Contains(plain, "💰$0.39/250.0K/0/0") {
 		t.Fatalf("measured transcript gauge or prompt count missing:\n%q", plain)
 	}
 	floor, err := os.ReadFile(filepath.Join(root, ".cache", "pfm-statusline", "claude-work-sample.txt"))

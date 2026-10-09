@@ -161,17 +161,15 @@ func (scan *spendScan) line(line []byte) {
 }
 
 // sessionSpend is what a whole chat billed: its own transcript and every
-// sub-agent's beside it. A sub-agent transcript that cannot be read, or a
-// subagents directory that cannot be listed, leaves the sum partial; a session
-// that never spawned one has no directory, which is not a failure.
-func sessionSpend(sessionTranscript string) (agentSpend, error) {
-	// Read without prices: the dollars are Claude Code's, so an unpriced
-	// response is no floor here, only an unreadable transcript is.
-	total, err := readTranscriptSpend(sessionTranscript, nil)
+// sub-agent's beside it, priced at prices (nil prices nothing). An unpriced
+// response, a sub-agent transcript that cannot be read, or a subagents
+// directory that cannot be listed leaves the sum partial; a session that never
+// spawned one has no directory, which is not a failure.
+func sessionSpend(sessionTranscript string, prices *pricing.Prices) (agentSpend, error) {
+	total, err := readTranscriptSpend(sessionTranscript, prices)
 	if err != nil {
 		return agentSpend{}, err
 	}
-	total.partial = false
 	tree := scanAgentTree(sessionTranscript)
 	if tree.err != nil {
 		if !errors.Is(tree.err, fs.ErrNotExist) {
@@ -180,8 +178,8 @@ func sessionSpend(sessionTranscript string) (agentSpend, error) {
 		return total, nil
 	}
 	for _, id := range tree.ids {
-		spend, err := readTranscriptSpend(transcript.SubagentTranscript(tree.dir, id), nil)
-		spend.partial = err != nil
+		spend, err := readTranscriptSpend(transcript.SubagentTranscript(tree.dir, id), prices)
+		spend.partial = spend.partial || err != nil
 		total.add(spend)
 	}
 	return total, nil

@@ -46,6 +46,19 @@
       "keywords": ["claude-code", "sub-agent", "effort", "reasoning-effort", "function-hooks", "professor"]
     },
     {
+      "name": "agent-scope",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/agent-scope.git",
+        "path": "plugins/agent-scope",
+        "ref": "main"
+      },
+      "description": "Scope Claude Code sub-agents to their parents: available-to: [parent] in an agent's frontmatter hides it from every other loop's agent listing and refuses every other dispatch.",
+      "homepage": "https://github.com/rezzminator/agent-scope",
+      "license": "MIT",
+      "keywords": ["claude-code", "sub-agent", "agent-listing", "agent-permissions", "function-hooks", "professor"]
+    },
+    {
       "name": "buddy",
       "source": {
         "source": "git-subdir",

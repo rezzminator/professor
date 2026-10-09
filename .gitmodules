@@ -3,6 +3,11 @@
 	url = https://github.com/rezzminator/agent-effort.git
 	branch = develop
 	ignore = dirty
+[submodule "agent-scope"]
+	path = plugins/agent-scope
+	url = https://github.com/rezzminator/agent-scope.git
+	branch = develop
+	ignore = dirty
 [submodule "buddy"]
 	path = plugins/buddy
 	url = https://github.com/rezzminator/buddy.git

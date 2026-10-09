@@ -210,7 +210,7 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"agent-effort@agent-effort":true,"agent-scope@agent-scope":true}}`
+		`"sub-agent-compact@sub-agent-compact":true,"agent-effort@agent-effort":true,"tool-visibility-controller@tool-visibility-controller":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID, claudePlugins[2].ID, claudePlugins[3].ID)
 	runner := &pluginRunner{}
@@ -263,7 +263,7 @@ func writeInstalledPlugins(t *testing.T, dir string, ids ...string) {
 func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"agent-effort@agent-effort":true,"agent-scope@agent-scope":true}}`
+		`"sub-agent-compact@sub-agent-compact":true,"agent-effort@agent-effort":true,"tool-visibility-controller@tool-visibility-controller":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
 	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID, claudePlugins[2].ID, claudePlugins[3].ID)

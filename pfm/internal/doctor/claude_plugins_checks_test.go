@@ -13,14 +13,14 @@ import (
 
 var doctorPluginIDs = []string{
 	"cache-live-control@cache-live-control", "sub-agent-compact@sub-agent-compact", "agent-effort@agent-effort",
-	"agent-scope@agent-scope",
+	"tool-visibility-controller@tool-visibility-controller",
 }
 
 var doctorDevIDs = []string{
 	"cache-live-control@cache-live-control-dev",
 	"sub-agent-compact@sub-agent-compact-dev",
 	"agent-effort@agent-effort-dev",
-	"agent-scope@agent-scope-dev",
+	"tool-visibility-controller@tool-visibility-controller-dev",
 }
 
 var releaseTargets = installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
@@ -147,7 +147,7 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 // checkouts checks the -dev ids and their copies, a fallback names its reason
 // and checks the GitHub ids, and both copies enabled at once is a duplicate.
 func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
-	names := []string{"cache-live-control", "sub-agent-compact", "agent-effort", "agent-scope"}
+	names := []string{"cache-live-control", "sub-agent-compact", "agent-effort", "tool-visibility-controller"}
 	for _, state := range []string{
 		"alpha clean", "alpha duplicate", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release duplicate",
 	} {

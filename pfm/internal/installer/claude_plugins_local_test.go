@@ -97,9 +97,9 @@ func TestClaudePluginTargets(t *testing.T) {
 			ID:     "agent-effort@agent-effort",
 		},
 		{
-			Name:   "agent-scope",
-			Source: "rezzminator/agent-scope",
-			ID:     "agent-scope@agent-scope",
+			Name:   "tool-visibility-controller",
+			Source: "rezzminator/tool-visibility-controller",
+			ID:     "tool-visibility-controller@tool-visibility-controller",
 		},
 	}
 	home := t.TempDir()

@@ -193,7 +193,7 @@ Drift exists because 90 of the survey's 239 rejections were code that changed af
 
 **Function:** `incidents`, `warnings_block`, `map_flags`
 
-Every `check` view prints the WARNINGS block first; `wait` prints it right after its WAIT line. A node broke the hop contract when it has placed hops, a refused write stored with hops that still do not hold, or REJECTED hops:
+Every `check` view prints the WARNINGS block first; `wait` prints it right after its WAIT line. A node broke the hop contract when it has placed hops, a refused write stored with hops that still do not hold, or REJECTED hops (a count of one reads `1 hop`, `1 node`):
 
 ```text
 ⚠ WARNINGS — {b} of {n} nodes broke the hop contract; their answers rest on placed, refused or rejected hops: drill before trusting them
@@ -205,7 +205,8 @@ Every `check` view prints the WARNINGS block first; `wait` prints it right after
 ```
 
 - A hop counts as placed when the resolver placed it by `basename and quote`, `sibling file` or `unique line`, or when its given path is no tail of the file it landed in (a later hop on an invented directory reaches the file through the first), and its given path never held the quote. A plain tail (`server.go`, `..` collapsed) is no incident; a hop whose given path held the quote when walked is followed, not placed.
-- The placed line shows three `given → path` pairs, then `+{j} more`.
+- A placed hop whose quote sits at the very line it cited only miscopied its path: the walker read the right lines and typed the directory wrong. It breaks no contract and prints a note after the block, or after `WARNINGS: none`: `· node {ID}: the kit corrected a miscopied path on {k} hops — each quote sits at its cited line ({given} → {path}, …)`. With a sidecar the entry was stored `verified` at its given line; without one the check-time resolver found the quote at the cited line. A placement at any other line keeps the `⚠` line. The user ruled this calibration after a run's two path slips read as untrustworthy evidence.
+- The placed and miscopied lines show three `given → path` pairs, then `+{j} more`.
 - A refusal the second write fixed is no incident.
 - Drift prints its run line without counting a node as broken; when only drift occurs, the header reads `⚠ WARNINGS — no node broke the hop contract`. The followed line prints only beside other lines: followed hops alone leave `WARNINGS: none`.
 - Flagged answer lines stay in the answers view and in COUNTS' `flagged=`, never in WARNINGS, so a clean walk never warns.
@@ -213,12 +214,12 @@ Every `check` view prints the WARNINGS block first; `wait` prints it right after
 
 The same findings ride every surface:
 
-- COUNTS carries `placed=` (hops) and `refused=` (nodes).
+- COUNTS carries `placed=` (hops, miscopied ones included) and `refused=` (nodes).
 - The `MAP` line and the first line of `map.txt` and `map` end `· ⚠ {b} nodes broke the hop contract` and `· ⚠ {k} drifted` when they apply.
-- `map --json` carries `"warnings"`, the block's lines, `[]` when none.
-- `map --html` opens its ledger with a red block of the lines, ahead of the map.
+- `map --json` carries `"warnings"`, the block's lines, `[]` when none, and `"notes"`, the `·` lines.
+- `map --html` opens its ledger with a red block of the lines, ahead of the map, and a quiet block of the notes.
 - `write` prints to stderr for its own node and exits 0:
-  - `⚠ WARNING — {k} of your hops named a path that is not the file; the kit placed them: {pairs}. Copy paths as your read printed them.`
+  - `⚠ WARNING — {k} of your hops named a path that is not the file; the kit placed them: {pairs}. Copy paths as your read printed them.` A miscopy warns here too: the node that typed the path is the one to learn.
   - `⚠ WARNING — stored with {b} hops that do not hold; your tracer sees them REJECTED and is warned`
 
 The lead's final opens with the lines, and the caller relays them to the user. The user ruled for this after the [engine trace](tracer-bench.md#engine-trace): placing an invented path silently hid a node that broke the contract.

@@ -60,8 +60,10 @@ A node that broke the hop contract is named without drilling. `wait` (right afte
 (first) print a WARNINGS block, from the sidecar's `how` and `status` per hop, the `ID.refused` marker, and the check-time
 resolution and drift: per node, hops the resolver placed by `basename and quote`, `sibling file` or `unique line` (plain
 tail resolution is none), a write refused once and stored with hops that still do not hold, hops REJECTED; then one
-run line for hops DRIFTED. Flagged answer lines stay in COUNTS alone, so a clean walk never warns. A run with none prints `WARNINGS: none`; a sidecar that cannot be
-read prints a could-not-look line instead. COUNTS gains `placed=N` (hops), `followed=N` (hops) and `refused=N` (nodes)
+run line for hops DRIFTED. A placed hop whose quote sits at the very line it cited only miscopied its path: it breaks
+no contract and prints a `· node {ID}: the kit corrected a miscopied path …` note after the block, or after
+`WARNINGS: none`. Flagged answer lines stay in COUNTS alone, so a clean walk never warns. A run with none prints
+`WARNINGS: none`; a sidecar that cannot be read prints a could-not-look line instead. COUNTS gains `placed=N` (hops), `followed=N` (hops) and `refused=N` (nodes)
 after `drifted=`.
 A hop is placed only when its given path never held the quote. One the resolver re-addresses at check time whose given
 path held the quote when walked is FOLLOWED, a file moved since: with a sidecar, an entry stored as verified or moved
@@ -72,7 +74,8 @@ verified or moved status at the new path, flagged `followed a file moved since t
 it prints no node line and, beside other warnings only, one run line `⚠ run: {k} hops followed files moved since the walk
 ({given} → {path}, …)`; alone it leaves `WARNINGS: none`.
 The MAP line and the first line of the map text end ` · ⚠ {n} nodes broke the hop contract` and ` · ⚠ {k} drifted` when
-they apply; `map --json` carries `"warnings": [lines]` and `map --html` a red block of the same lines. `write` prints the
+they apply; `map --json` carries `"warnings": [lines]` and `"notes": [lines]`, `map --html` a red block of the warnings
+and a quiet one of the notes. `write` prints the
 same two findings to stderr for its own node, exit 0.
 A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2. Python 3 standard library only.
 """
@@ -736,7 +739,7 @@ def verify(run, files, names, counts, drift=True):
     for name in names:
         n = {"head": f"THREAD {name}: (no THREAD line written)", "hops": [], "full": [], "answers": [],
              "struct": [], "ok": 0, "bad": 0, "drift": 0, "seen": 0, "ended": False, "split": False, "walk": [], "unsettled": [],
-             "placed": [], "followed": [], "refused": False, "badnow": 0, "rej": 0}
+             "placed": [], "miscopied": [], "followed": [], "refused": False, "badnow": 0, "rej": 0}
         nodes[name] = n
         try:
             recs = parse(open(os.path.join(run, name + ".hops"), encoding="utf-8", errors="replace").read())
@@ -746,9 +749,11 @@ def verify(run, files, names, counts, drift=True):
         nhops = sum(1 for r in recs if r[0] == "hop")
         side = sidecar_entries(files, run, name, nhops) if nhops else None
         if side is not None:
-            n["placed"] = [(strip_line(e.get("given", "")), e.get("path", "")) for e in side
-                           if placed_path(files.root, strip_line(e.get("given", "")), e.get("path", ""), e.get("how"))]
-            counts["placed"] += len(n["placed"])
+            for e in side:
+                given = strip_line(e.get("given", ""))
+                if placed_path(files.root, given, e.get("path", ""), e.get("how")):
+                    n["miscopied" if miscopy(e) else "placed"].append((given, e.get("path", "")))
+            counts["placed"] += len(n["placed"]) + len(n["miscopied"])
         if os.path.exists(os.path.join(run, name + ".refused")):
             n["refused"] = True
             counts["refused"] += 1
@@ -791,7 +796,7 @@ def verify(run, files, names, counts, drift=True):
                 real = os.path.relpath(fkey, files.root)
                 kind = hop_incident(files, run, side, hi, path, ln, quotes, real, how, drift)
                 if kind == "placed" and side is None:
-                    n["placed"].append((path, real))
+                    n["miscopied" if quotes and got[0] + 1 == ln else "placed"].append((path, real))
                     counts["placed"] += 1
                 followed = kind == "followed"
                 if followed:
@@ -997,6 +1002,17 @@ def strip_line(given):
     return re.sub(r":\d+(?:-\d+)?$", "", given)
 
 
+def miscopy(entry):
+    """Whether a placed sidecar entry only miscopied its path: stored verified, its quote at the very line it cited."""
+    m = re.search(r":(\d+)(?:-\d+)?$", entry.get("given", ""))
+    return entry.get("status") == "verified" and m is not None and int(m.group(1)) == entry.get("line")
+
+
+def count(k, word):
+    """`1 hop`, `2 hops`."""
+    return f"{k} {word}" if k == 1 else f"{k} {word}s"
+
+
 def pair_list(pairs):
     """`given → path` for each distinct pair in order, the first PAIRS_SHOWN, then `+j more` for the rest."""
     seen = list(dict.fromkeys(pairs))
@@ -1005,47 +1021,54 @@ def pair_list(pairs):
 
 
 def incidents(loaded):
-    """What broke the hop contract, from what the kit already has: {lines, broke, drifted}. `lines` is the WARNINGS
-    block (header first) and empty when nothing happened; `broke` counts the nodes with placed, refused or rejected hops.
+    """What broke the hop contract, from what the kit already has: {lines, notes, broke, drifted}. `lines` is the
+    WARNINGS block (header first) and empty when nothing happened; `broke` counts the nodes with placed, refused or
+    rejected hops. A placed hop whose quote sits at the very line it cited only miscopied its path: it breaks no
+    contract and prints a `·` line in `notes`, after the block or after `WARNINGS: none`.
     The run's drifted hops print their own line and count no node as broken; followed hops (a file moved since the walk)
     print a run line only beside other lines and count no node as broken; flagged answers stay in COUNTS only, so a
     clean walk never warns. A
     sidecar that could not be read, with nothing else found, is a could-not-look line, never an empty block."""
     run, root, names, files, nodes, ranges, counts = loaded
-    broke, details = 0, []
+    broke, details, notes = 0, [], []
     for name in names:
         n = nodes[name]
         refused = n["refused"] and n["badnow"] > 0
         broke += bool(n["placed"] or refused or n["rej"])
         if n["placed"]:
-            details.append(f"⚠ node {name}: {len(n['placed'])} hops named a path that is not the file — the kit placed "
-                           f"them ({pair_list(n['placed'])})")
+            details.append(f"⚠ node {name}: {count(len(n['placed']), 'hop')} named a path that is not the file — the kit "
+                           f"placed them ({pair_list(n['placed'])})")
         if refused:
-            details.append(f"⚠ node {name}: write refused once, then stored with {n['badnow']} hops that still do not hold")
+            details.append(f"⚠ node {name}: write refused once, then stored with {count(n['badnow'], 'hop')} that still "
+                           f"do not hold")
         if n["rej"]:
-            details.append(f"⚠ node {name}: {n['rej']} hops REJECTED")
+            details.append(f"⚠ node {name}: {count(n['rej'], 'hop')} REJECTED")
+        if n["miscopied"]:
+            notes.append(f"· node {name}: the kit corrected a miscopied path on {count(len(n['miscopied']), 'hop')} — "
+                         f"each quote sits at its cited line ({pair_list(n['miscopied'])})")
     if counts["drifted"]:
-        details.append(f"⚠ run: {counts['drifted']} hops DRIFTED — the code changed since the walk: re-read before pasting")
+        details.append(f"⚠ run: {count(counts['drifted'], 'hop')} DRIFTED — the code changed since the walk: re-read "
+                       f"before pasting")
     if details and counts["followed"]:
         moved = [pair for name in names for pair in nodes[name]["followed"]]
-        details.append(f"⚠ run: {counts['followed']} hops followed files moved since the walk ({pair_list(moved)})")
+        details.append(f"⚠ run: {count(counts['followed'], 'hop')} followed files moved since the walk ({pair_list(moved)})")
     if details:
         head = (f"⚠ WARNINGS — {broke} of {len(names)} nodes broke the hop contract; their answers rest on placed, "
                 f"refused or rejected hops: drill before trusting them") if broke else "⚠ WARNINGS — no node broke the hop contract"
-        return dict(lines=[head, *details], broke=broke, drifted=counts["drifted"])
+        return dict(lines=[head, *details], notes=notes, broke=broke, drifted=counts["drifted"])
     if files.unknown:
         return dict(lines=[f"⚠ WARNINGS — none found, but the kit could not look: {'; '.join(files.unknown)}"],
-                    broke=0, drifted=0)
-    return dict(lines=[], broke=0, drifted=0)
+                    notes=notes, broke=0, drifted=0)
+    return dict(lines=[], notes=notes, broke=0, drifted=0)
 
 
 def warnings_block(inc):
-    return inc["lines"] or ["WARNINGS: none"]
+    return (inc["lines"] or ["WARNINGS: none"]) + inc["notes"]
 
 
 def map_flags(inc):
     """The MAP-line suffix: the nodes that broke the hop contract and the drifted hops."""
-    return ((f" · ⚠ {inc['broke']} nodes broke the hop contract" if inc["broke"] else "")
+    return ((f" · ⚠ {count(inc['broke'], 'node')} broke the hop contract" if inc["broke"] else "")
             + (f" · ⚠ {inc['drifted']} drifted" if inc["drifted"] else ""))
 
 
@@ -1275,8 +1298,8 @@ def cmd_write(run, name):
         sys.stderr.write(f"⚠ WARNING — {len(moved)} of your hops named a path that is not the file; the kit placed them: "
                          f"{pair_list(moved)}. Copy paths as your read printed them.\n")
     if bad:
-        sys.stderr.write(f"⚠ WARNING — stored with {len(bad)} hops that do not hold; your tracer sees them REJECTED and is "
-                         f"warned\n")
+        sys.stderr.write(f"⚠ WARNING — stored with {count(len(bad), 'hop')} that do not hold; your tracer sees them REJECTED "
+                         f"and is warned\n")
 
 
 def question_line(run, question):
@@ -1504,7 +1527,8 @@ def page_data(loaded, data):
                      "question": int(q.group(1)) if q else None, "from": rec[0] or None,
                      "started": run_file(run, name + ".started"), "written": run_file(run, name + ".hops"),
                      "answers": answers, "struct": n["struct"], "verified": n["ok"], "broken": broken,
-                     "placed": [list(p) for p in n["placed"]], "followed": [list(p) for p in n["followed"]],
+                     "placed": [list(p) for p in n["placed"]],
+                     "miscopied": [list(p) for p in n["miscopied"]], "followed": [list(p) for p in n["followed"]],
                      "refused": n["refused"]}
     try:
         entries = os.listdir(run)
@@ -1549,13 +1573,13 @@ def cmd_map(run, opts):
         if opts["--html"]:
             import tracemap_html
             out = os.path.abspath(opts["--html"])
-            data = dict(tracemap.data(g, True, tracemap.focus(g, opts["--from"], opts["--to"], True)), warnings=inc["lines"])
+            data = dict(tracemap.data(g, True, tracemap.focus(g, opts["--from"], opts["--to"], True)), warnings=inc["lines"], notes=inc["notes"])
             tracemap_html.write(dict(data, **page_data(loaded, data)), out)
             print(f"HTML {out} — open it in a browser")
         elif opts["--json"]:
             import json
             print(json.dumps(dict(tracemap.data(g, show_all, tracemap.focus(g, opts["--from"], opts["--to"], show_all)),
-                                  warnings=inc["lines"]), indent=1, ensure_ascii=False))
+                                  warnings=inc["lines"], notes=inc["notes"]), indent=1, ensure_ascii=False))
         elif opts["--from"] or opts["--to"]:
             parts = [tracemap.tree(g, opts[k], k[2:], show_all) for k in ("--from", "--to") if opts[k]]
             sys.stdout.write("\n".join(parts))

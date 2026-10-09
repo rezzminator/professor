@@ -1,7 +1,8 @@
 """tracemap_html — the trace map as one self-contained page, written only on request:
 `tracetree.py map RUN --html OUT`. The page is tracemap.html beside this file with the run's data inlined as JSON (every
 `<` escaped, so no file text can close the script) and its <title> naming the repo; it loads nothing from the network.
-When the data carries warnings, a red block of those lines opens the page's ledger, ahead of the map. Python 3 standard
+When the data carries warnings, a red block of those lines opens the page's ledger, ahead of the map; its notes (a
+miscopied path the kit corrected) follow in a quiet block. Python 3 standard
 library only.
 """
 import html
@@ -22,9 +23,11 @@ def write(data, out):
         if mark not in page:
             raise ValueError(f"{TEMPLATE} lacks its slot {mark}")
     title = data.get("title") or os.path.basename(str(data.get("root", "")).rstrip("/")) or "Trace"
-    lines = data.get("warnings") or []
+    lines, notes = data.get("warnings") or [], data.get("notes") or []
     block = ('<section id="warnings" role="alert" aria-label="Warnings">'
              + "".join(f"<p>{html.escape(l)}</p>" for l in lines) + "</section>") if lines else ""
+    block += ('<section id="kitnotes" aria-label="Kit notes">'
+              + "".join(f"<p>{html.escape(l)}</p>" for l in notes) + "</section>") if notes else ""
     page = page.replace(TITLE, f"<title>{html.escape(title)} trace map</title>", 1).replace(WARNINGS, block, 1)
     blob = (json.dumps(data, ensure_ascii=False)
             .replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))

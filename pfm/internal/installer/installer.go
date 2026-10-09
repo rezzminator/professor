@@ -205,7 +205,6 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retireStoreEntries())
 	installer.deferFailure(installer.retirePredecessors())
 	installer.deferFailure(installer.retireRenamedGlobalAgents())
-	installer.deferFailure(installer.retireBBInstall())
 	installer.deferFailure(installer.retireStagedManagedSurfaces(false))
 	if err == nil {
 		installer.deferFailure(installer.wireCommands(assets))
@@ -608,17 +607,15 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 			return fail(fmt.Errorf("stage planned command %s: %w", relative, err))
 		}
 	}
-	for _, retired := range []string{"bb.md", "swap.md"} {
-		if err := os.RemoveAll(filepath.Join(target, retired)); err != nil {
-			return fail(fmt.Errorf("retire %s from command preview: %w", retired, err))
-		}
+	if err := os.RemoveAll(filepath.Join(target, "swap.md")); err != nil {
+		return fail(fmt.Errorf("retire swap.md from command preview: %w", err))
 	}
 	return temporary, cleanup, nil
 }
 
 // copyCommandPlanTree snapshots the current command source while omitting the
-// two retired top-level commands. In particular, an old dangling /bb symlink
-// must not make preview fail before the installer can report and retire it.
+// retired top-level swap command (swap.md); copyPlanTree skips any dangling
+// link, so a link the install is about to prune never fails the preview.
 func copyCommandPlanTree(source, target string) error {
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		return err
@@ -628,7 +625,7 @@ func copyCommandPlanTree(source, target string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if entry.Name() == "bb.md" || entry.Name() == "swap.md" {
+		if entry.Name() == "swap.md" {
 			continue
 		}
 		if err := copyPlanTree(filepath.Join(source, entry.Name()), filepath.Join(target, entry.Name())); err != nil {
@@ -725,9 +722,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.unwireGeneratedCodexAgents(); err != nil {
-		return err
-	}
-	if err := installer.retireBBInstall(); err != nil {
 		return err
 	}
 	if schedulerIsLaunchd {

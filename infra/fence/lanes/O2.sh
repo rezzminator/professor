@@ -1066,7 +1066,6 @@ while IFS= read -r dir; do
   [ -n "$dir" ] || continue
   [ ! -e "$dir/commands/reload.md" ] || bad="$bad $dir/commands/reload.md still present;"
   [ ! -e "$dir/skills/handoff" ] && [ ! -L "$dir/skills/handoff" ] || bad="$bad $dir/skills/handoff still present;"
-  [ ! -e "$dir/commands/bb.md" ] || bad="$bad $dir/commands/bb.md remnant still present;"
   [ -z "$(find "$dir/commands/chat" -maxdepth 1 -name '*.md' 2>/dev/null | head -1)" ] || bad="$bad /chat:* command remnants still under $dir/commands/chat;"
   [ -z "$(find "$dir" -maxdepth 2 -name 'professor-*.json' 2>/dev/null | head -1)" ] || bad="$bad a staged professor-*.json theme still under $dir;"
   if [ -f "$dir/settings.json" ]; then

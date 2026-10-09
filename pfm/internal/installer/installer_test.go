@@ -263,8 +263,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bbTarget := filepath.Join(config, "commands", "bb.md")
-	writeFixture(t, bbTarget, "operator copy\n")
 	seed := fleetdb.OpenSharedState(context.Background(), paths.Values{
 		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 	})
@@ -289,9 +287,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if _, err := os.Lstat(stagedClaude); !os.IsNotExist(err) {
 		t.Fatalf("dry run staged assets: %v", err)
 	}
-	if content := readFixture(t, bbTarget); content != "operator copy\n" {
-		t.Fatalf("dry run changed bb.md: %q", content)
-	}
 
 	var applied bytes.Buffer
 	report, err := Run(context.Background(), Options{
@@ -302,9 +297,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		t.Fatalf("apply report=%#v err=%v\n%s", report, err, applied.String())
 	}
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
-	if content := readFixture(t, bbTarget); content != "operator copy\n" {
-		t.Fatalf("install changed operator bb.md: %q", content)
-	}
 	assertLink(t, filepath.Join(config, "commands", "reload.md"), filepath.Join(managed, "reload.command.md"))
 	// T3: the staged /reload command's frontmatter description opens with
 	// the USER-ONLY law and then carries reload.Usage itself, folded to one
@@ -396,9 +388,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 				t.Fatalf("retired enablement link remains at %s: %v", retired, err)
 			}
 		}
-	}
-	if _, err := os.Lstat(bbTarget + ".pre-professor-20300102-030405"); !os.IsNotExist(err) {
-		t.Fatalf("install backed up an unowned bb.md: %v", err)
 	}
 	for _, retired := range []string{
 		filepath.Join(config, ".cc-ls-hidden"),
@@ -494,9 +483,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		Mode:          ModeUninstall, Home: home, Now: now, Stdout: &removed, Runner: runner,
 	}); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, removed.String())
-	}
-	if content := readFixture(t, bbTarget); content != "operator copy\n" {
-		t.Fatalf("uninstall changed operator bb.md = %q", content)
 	}
 	if settings := readFixture(
 		t,
@@ -1229,28 +1215,44 @@ func TestShimSourceUsesRecordedCloneAndKeepsLegacyPosition(t *testing.T) {
 	}
 }
 
-func TestShimSourceSkipsWithoutRecordedClone(t *testing.T) {
-	home := t.TempDir()
-	zshrc := filepath.Join(home, ".zshrc")
-	if err := os.WriteFile(zshrc, []byte("untouched\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	installer := &engine{
-		options: Options{Home: home, Mode: ModeApply, Stdout: io.Discard},
-		apply:   true, stamp: "test", managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
-	}
-	if err := installer.wireShell(false); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(zshrc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(raw) != "untouched\n" {
-		t.Fatalf("zshrc=%q", raw)
-	}
-	if installer.report.Skipped == 0 {
-		t.Fatal("missing skip report")
+func TestShimSourceWithoutRecordedClone(t *testing.T) {
+	for _, scenario := range []string{"fallback exists", "fallback absent", "marker unusable"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			zshrc := filepath.Join(home, ".zshrc")
+			writeFixture(t, zshrc, "untouched\n")
+			shim := filepath.Join(home, ".professor", "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
+			var want string
+			switch scenario {
+			case "fallback exists":
+				writeFixture(t, shim, "fixture shim\n")
+			case "fallback absent":
+				want = "  skip    zshrc: no source repo recorded and " + shim + " does not exist\n"
+			case "marker unusable":
+				writeFixture(t, paths.SourceRepoPath(home), filepath.Join(home, "moved-away")+"\n")
+				_, markerErr := paths.ReadSourceRepoMarker(home)
+				want = "  skip    zshrc: " + markerErr.Error() +
+					" — rerun pfm install --yes from inside your Professor clone\n"
+			}
+			var output bytes.Buffer
+			installer := &engine{
+				options: Options{Home: home, Mode: ModeApply, Stdout: &output},
+				apply:   true, stamp: "test", managedRoot: managedRootForHome(home),
+			}
+			if err := installer.wireShell(false); err != nil {
+				t.Fatalf("wireShell: %v", err)
+			}
+			got := readFixture(t, zshrc)
+			if scenario == "fallback exists" {
+				if !strings.Contains(got, sourceLine(shim)) {
+					t.Fatalf("zshrc=%q, want source line %q", got, sourceLine(shim))
+				}
+				return
+			}
+			if got != "untouched\n" || output.String() != want {
+				t.Fatalf("zshrc=%q output=%q, want untouched zshrc and %q", got, output.String(), want)
+			}
+		})
 	}
 }
 

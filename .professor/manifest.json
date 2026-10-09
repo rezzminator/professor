@@ -97,7 +97,7 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "70826e55706e75c0aaaccbf346a29fa83956612c41409f526faaeace93be5922",
-    ".claude/agents/gitter.md": "76afa4010c7917590b9b3a7426db49d546a6e33c3b5012b361c3237f994afba3",
+    ".claude/agents/gitter.md": "5f4b58b9baea54b807006a7389ad721a30d5391e2b1193c9371f68d7c261a5b8",
     ".claude/agents/releaser.md": "5d892c434d1380c97e688be24feb67b0ebe246ba89e0dd4cbce2b8efc24f7b95",
     ".claude/codex-build.json": "363b2f38e38d577d2c0ead1d0ef49c6114631c6f60d7b632d18420ea92ca9ee1",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",

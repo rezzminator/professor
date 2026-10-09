@@ -627,28 +627,21 @@ func (r Row) ClaudeCostParts(usage ClaudeUsage) (ClaudeParts, bool) {
 	return parts, true
 }
 
-// ClaudeRequestsCostParts prices a response request by request, each at the
-// tier its own context selects, the columns summed; ok is false when any
-// request cannot be priced.
-func (r Row) ClaudeRequestsCostParts(requests []ClaudeUsage) (ClaudeParts, bool) {
-	var parts ClaudeParts
-	for _, request := range requests {
-		priced, ok := r.ClaudeCostParts(request)
-		if !ok {
-			return ClaudeParts{}, false
-		}
-		parts = parts.plus(priced)
-	}
-	return parts, true
-}
-
 // CodexCost prices a Codex thread's usage in USD at the tier context selects:
 // uncached input, cached input and output, each at its rate per million. ok
 // is false when the row is not a Codex row or a nonzero count has no
 // published rate.
 func (r Row) CodexCost(usage CodexUsage, context int64) (float64, bool) {
+	parts, ok := r.codexCostParts(usage, context)
+	// Summed in the order the Codex reports always have: uncached, cached, output.
+	return parts.Input + parts.CacheRead + parts.Output, ok
+}
+
+// codexCostParts is CodexCost by billing column: the uncached input in Input,
+// the cached input in CacheRead, the output in Output, no cache write.
+func (r Row) codexCostParts(usage CodexUsage, context int64) (ClaudeParts, bool) {
 	if r.Engine != EngineCodex {
-		return 0, false
+		return ClaudeParts{}, false
 	}
 	rates := r.RatesAt(context)
 	uncached := max(usage.Input-usage.Cached, 0)
@@ -660,11 +653,57 @@ func (r Row) CodexCost(usage CodexUsage, context int64) (float64, bool) {
 		if part.rate != nil {
 			perMillion[i] = *part.rate / 1e6
 		} else if part.count > 0 {
-			return 0, false
+			return ClaudeParts{}, false
 		}
 	}
 	// Each product rounds before the sum (float64): a fused multiply-add
 	// would move the last bits by architecture.
-	return float64(float64(uncached)*perMillion[0]) + float64(float64(usage.Cached)*perMillion[1]) +
-		float64(float64(usage.Output)*perMillion[2]), true
+	return ClaudeParts{
+		Input:     float64(float64(uncached) * perMillion[0]),
+		CacheRead: float64(float64(usage.Cached) * perMillion[1]),
+		Output:    float64(float64(usage.Output) * perMillion[2]),
+	}, true
+}
+
+// ResponseCostParts prices one response of a Claude Code transcript, whichever
+// model wrote it, by billing column. A Claude row prices it as ClaudeCostParts.
+// A Codex row is a model the model-gateway's chatgpt route served: the gateway
+// writes its usage Anthropic-shaped (input_tokens = total - cached - written,
+// cache read = cached, cache creation = written), so the request's whole input
+// is Context() and selects the tier, the input and cache read price as
+// CodexCost's columns, and a written token, Codex having no cache-write
+// premium, bills at in in its own write column, beside the tokens it prices.
+func (r Row) ResponseCostParts(usage ClaudeUsage) (ClaudeParts, bool) {
+	if r.Engine != EngineCodex {
+		return r.ClaudeCostParts(usage)
+	}
+	context := usage.Context()
+	parts, ok := r.codexCostParts(
+		CodexUsage{Input: usage.Input + usage.CacheRead, Cached: usage.CacheRead, Output: usage.Output}, context)
+	if !ok || usage.Write5m+usage.Write1h == 0 {
+		return parts, ok
+	}
+	in := r.RatesAt(context).In
+	if in == nil {
+		return ClaudeParts{}, false
+	}
+	perMillion := *in / 1e6
+	parts.Write5m = float64(float64(usage.Write5m) * perMillion)
+	parts.Write1h = float64(float64(usage.Write1h) * perMillion)
+	return parts, true
+}
+
+// ResponseRequestsCostParts is ResponseCostParts request by request, each at
+// the tier its own context selects, the columns summed; ok is false when any
+// request cannot be priced.
+func (r Row) ResponseRequestsCostParts(requests []ClaudeUsage) (ClaudeParts, bool) {
+	var parts ClaudeParts
+	for _, request := range requests {
+		priced, ok := r.ResponseCostParts(request)
+		if !ok {
+			return ClaudeParts{}, false
+		}
+		parts = parts.plus(priced)
+	}
+	return parts, true
 }

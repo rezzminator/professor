@@ -131,7 +131,7 @@ func (scan *spendScan) price(model string, billed pricing.ClaudeUsage, requests 
 	}
 	if ok {
 		var parts pricing.ClaudeParts
-		parts, ok = row.ClaudeRequestsCostParts(requests)
+		parts, ok = row.ResponseRequestsCostParts(requests)
 		spend.usd = parts.Total()
 	}
 	if !ok {

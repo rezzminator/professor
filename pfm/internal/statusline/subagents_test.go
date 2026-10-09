@@ -78,7 +78,9 @@ func testPrices(t *testing.T) *pricing.Prices {
 		{"key":"claude-opus-4-1","engine":"claude","in":15,"out":75,"hit":1.5,"w5m":18.75,"w1h":30},
 		{"key":"claude-opus-5-5","engine":"claude","in":4,"out":20,"hit":0.2,"w5m":5,"w1h":8},
 		{"key":"claude-sonnet-5","engine":"claude","in":2,"out":10,"hit":0.2,"w5m":2.5,"w1h":4},
-		{"key":"claude-sonnet-5-5","engine":"claude","in":2,"out":10,"hit":0.2,"w5m":2.5,"w1h":4}]}`), "status line test prices")
+		{"key":"claude-sonnet-5-5","engine":"claude","in":2,"out":10,"hit":0.2,"w5m":2.5,"w1h":4},
+		{"key":"gpt-6-sol","engine":"codex","in":2,"out":10,"cached":0.2,
+		"long":{"above":272000,"in":4,"out":15,"cached":0.4}}]}`), "status line test prices")
 	if err != nil {
 		t.Fatalf("test price table: %v", err)
 	}

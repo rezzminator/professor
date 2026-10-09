@@ -160,6 +160,8 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m3", "claude-opus-5-5", 12, 900, 4000, 0, 1500),
+		// a gpt model through the model-gateway: Anthropic-shaped usage, priced at its Codex row on both surfaces
+		line("m4", "gpt-5.6-sol", 1000, 100, 2000, 400, 0),
 		// a response that consulted the advisor: priced at the advisor's model on both surfaces
 		strings.Replace(strings.Replace(advisorResponse("claude-opus-5-5"), `{"type":"assistant",`,
 			`{"type":"assistant","timestamp":"2026-09-21T05:00:00Z","cwd":"/w/demo","sessionId":"s1",`, 1),
@@ -172,8 +174,8 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	spend, err := readTranscriptSpend(path, prices)
-	if err != nil || spend.partial || spend.priced != 5 || spend.advisorUSD == 0 {
-		t.Fatalf("statusline spend = %+v, %v; want four priced responses and one priced advisor", spend, err)
+	if err != nil || spend.partial || spend.priced != 6 || spend.advisorUSD == 0 {
+		t.Fatalf("statusline spend = %+v, %v; want five priced responses and one priced advisor", spend, err)
 	}
 
 	out := filepath.Join(t.TempDir(), "audit.json")
@@ -204,7 +206,7 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 	for _, usd := range audit.USD {
 		total += usd
 	}
-	if audit.Calls != 4 || math.Abs(total-spend.usd) > 1e-12 || total == 0 ||
+	if audit.Calls != 5 || math.Abs(total-spend.usd) > 1e-12 || total == 0 ||
 		math.Abs(audit.Advisor.USD-spend.advisorUSD) > 1e-12 {
 		t.Errorf("pfm tokens $%v (advisor $%v) over %d calls, statusline $%v (advisor $%v); want one price",
 			total, audit.Advisor.USD, audit.Calls, spend.usd, spend.advisorUSD)
@@ -446,5 +448,50 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	}
 	if want := "1.0K/1.0M $1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
+	}
+}
+
+// A sub-agent that ran through the model-gateway's chatgpt route leaves a
+// Claude Code transcript whose usage the gateway wrote Anthropic-shaped
+// (input_tokens = total - cached - written): the row prices it at its Codex
+// row's rates, input and a cache write at in, cache read at cached, output at
+// out (the tiers are pricing's TestResponseRequestsCostParts).
+func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
+	gpt := func(usage string) []string {
+		return []string{
+			`{"type":"assistant","message":{"id":"g-1","model":"gpt-6-sol","usage":` + usage + `}}`, turnEnded,
+		}
+	}
+	const task = `{"id":"p","type":"local_agent","status":"completed","startTime":1790244000000,` +
+		`"model":"gpt-6-sol","contextWindowSize":1000000,"tokenCount":1000,"label":"orchestrate"}`
+	for _, tc := range []struct {
+		name  string
+		lines []string
+		want  string // what follows the gauge, ANSI stripped
+	}{
+		{
+			// 100K+10K at $2, 150K read at $0.2, 1M out at $10: 0.22 + 0.03 + 10.
+			name: "the base tier, a cache write billed as input",
+			lines: gpt(`{"input_tokens":100000,"output_tokens":1000000,"cache_read_input_tokens":150000,` +
+				`"cache_creation_input_tokens":10000}`),
+			want: "$10.25/260.0K/1.0M/0",
+		},
+		{
+			name: "a model no row prices stays unpriced",
+			lines: []string{
+				`{"type":"assistant","message":{"id":"g-1","model":"gpt-nonesuch-9","usage":` +
+					`{"input_tokens":1000,"output_tokens":100}}}`, turnEnded,
+			},
+			want: "$?/1.0K/100/0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
+			// the row is read inside the minute after the turn ended, before a finished row collapses
+			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
+			if !strings.Contains(got, "1.0K/1.0M "+tc.want+"│") {
+				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
+			}
+		})
 	}
 }

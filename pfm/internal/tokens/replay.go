@@ -323,7 +323,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 		}
 		a.countUnknown(call)
 		row, _, found := a.prices.rates(call.model, ctx)
-		parts, priced := row.ClaudeRequestsCostParts(call.requests)
+		parts, priced := row.ResponseRequestsCostParts(call.requests)
 		modelKey := modelKeyOf(call)
 		gap := (*float64)(nil)
 		if !math.IsNaN(lastToolTS) {
@@ -365,7 +365,8 @@ func (a *auditor) replay(file string, c *collected) *run {
 			prev = &previousCall{ctx, ts, call.model}
 			continue
 		}
-		if cwAll != 0 && !call.split {
+		// a Codex row bills a write at in whatever its TTL: only a Claude row's tier is unknown
+		if cwAll != 0 && !call.split && row.Engine != pricing.EngineCodex {
 			a.scan.tierUnknownCalls++
 		}
 		usd := parts.Total()
@@ -440,7 +441,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 		}
 		// a rewrite is the request that followed the previous call: the response's first
 		first := call.requests[0]
-		firstParts, _ := row.ClaudeCostParts(first)
+		firstParts, _ := row.ResponseCostParts(first)
 		bust := a.rewrite(r, rewriteCheck{
 			prev: prev, reset: reset, model: call.model, cr: float64(first.CacheRead),
 			cwAll: float64(first.Write5m + first.Write1h), gap: since,
@@ -496,9 +497,14 @@ func (a *auditor) attribute(
 		base = 1
 	}
 	perToken, readRatio, uncached := base/1e6, orZero(readRate(row, rates))/base, orZero(rates.In)/base
-	write := orZero(rates.W5m) / base
+	w5m, w1h := rates.W5m, rates.W1h
+	if row.Engine == pricing.EngineCodex {
+		// a Codex row bills a written token at in (pricing.Row.ResponseCostParts)
+		w5m, w1h = rates.In, rates.In
+	}
+	write := orZero(w5m) / base
 	if cwAll != 0 {
-		write = (float64(cw5*orZero(rates.W5m)) + float64(cw1*orZero(rates.W1h))) / (cwAll * base)
+		write = (float64(cw5*orZero(w5m)) + float64(cw1*orZero(w1h))) / (cwAll * base)
 	}
 	for k := range categoryCount {
 		if catTok[k] != 0 {

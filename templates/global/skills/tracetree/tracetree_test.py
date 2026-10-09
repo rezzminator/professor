@@ -174,6 +174,13 @@ class StartQuestionTest(Repo):
         self.assertEqual(worded.returncode, 0, worded.stderr)
         self.assertEqual(worded.stdout.replace("started 3", "started 2"), plain.stdout)
 
+    def test_start_records_its_from_and_question_for_the_map_page(self):
+        tt(["start", self.run_dir, "2", "srv/server.go:5", "Q2"])
+        tt(["start", self.run_dir, "3", "nowhere.go:4"])
+        for node, want in (("2", "srv/server.go:5\tQ2\n"), ("3", "nowhere.go:4\t\n")):
+            with open(os.path.join(self.run_dir, node + ".started"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), want)
+
     def test_a_question_number_the_file_lacks_is_named_not_dropped(self):
         self.ask("1. What calls Handle?\n")
         got = tt(["start", self.run_dir, "2", "srv/server.go:5", "Q7"])
@@ -639,6 +646,79 @@ class MapTest(Repo):
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertLess(got.stdout.index("\napp/srv/server.go\n"), got.stdout.index("\napp/kill/kill.go\n"))
 
+    def page(self):
+        out = os.path.join(self.run_dir, "page.html")
+        got = tt(["map", self.run_dir, "--html", out])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        with open(out, encoding="utf-8") as f:
+            page = f.read()
+        m = re.search(r'<script type="application/json" id="tracemap-data">(.*?)</script>', page, re.S)
+        self.assertIsNotNone(m, "the page carries no data script")
+        return page, json.loads(m.group(1))
+
+    def test_json_steps_say_how_each_hop_holds_and_components_where_they_end(self):
+        self.walk(extra=["@ app/srv/server.go:3", "> \treturn kill.Run(req.Target)", "= the call again, cited at the func"],
+                  raw=True)
+        data = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
+        self.assertEqual([(s["c"], s["line"], s["b"], s["status"]) for s in data["threads"]["1"]["walk"]],
+                         [("app/srv/server.go::Handle", 7, 7, "verified"), ("app/kill/kill.go::Run", 5, 5, "verified"),
+                          ("app/srv/server.go::Handle", 7, 7, "moved")])
+        self.assertEqual({c["id"]: (c["line"], c["end"]) for c in data["components"]},
+                         {"app/srv/server.go::Handle": (3, 8), "app/kill/kill.go::Run": (4, 9)})
+
+    def test_the_page_carries_the_questions_each_nodes_checked_answers_its_clock_and_the_file_text(self):
+        with open(os.path.join(self.run_dir, "questions"), "w") as f:
+            f.write("1. What does Handle hand on?\n2. Who kills the pane?\n")
+        tt(["start", self.run_dir, "1", "app/srv/server.go:3", "Q2"])
+        tt(["start", self.run_dir, "2", "app/kill/kill.go:4"])
+        self.write("1", hops("1", ["- Handle hands the target to kill.Run [app/srv/server.go:7]",
+                                   "- Run returns `nothing at all` [app/kill/kill.go:5]"],
+                             ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the target goes to kill.Run",
+                              "@ app/kill/kill.go:5", f"> {EXEC}", "= tmux kills the pane"],
+                             ["END executed: tmux kill-pane @ app/kill/kill.go:5"]))
+        _, data = self.page()
+        self.assertEqual(data["title"], os.path.basename(self.root))
+        self.assertEqual(data["questions"], {"1": "What does Handle hand on?", "2": "Who kills the pane?"})
+        node = data["nodes"]["1"]
+        self.assertEqual((node["question"], node["from"]), (2, "app/srv/server.go:3"))
+        self.assertEqual([a["flags"] for a in node["answers"]], [[], ["? `nothing at all` not in the cited file"]])
+        self.assertEqual((data["counts"]["answers"], data["counts"]["flagged"]), (2, 1))
+        self.assertLessEqual(data["times"]["new"], node["started"])
+        self.assertLessEqual(node["started"], node["written"])
+        self.assertIsNone(data["times"]["done"])
+        self.assertEqual((list(data["missing"]), list(data["nodes"])), (["2"], ["1"]))
+        self.assertEqual({f["path"]: f["lines"] for f in data["files"]},
+                         {"app/srv/server.go": SERVER, "app/kill/kill.go": KILL})
+
+    def test_file_text_that_closes_a_script_stays_inside_the_pages_data(self):
+        web = ["package web", "", "func Page() string {", '\treturn "<script>boot()</script>"', "}"]
+        path = os.path.join(self.root, "app", "web", "web.go")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write("\n".join(web) + "\n")
+        self.write("1", hops("1", ["- Page closes its own </script> [app/web/web.go:4]"],
+                             ["@ app/web/web.go:4", f"> {web[3]}", "= the page ends its </script>"],
+                             ["END returned: the markup @ app/web/web.go:4"]))
+        page, data = self.page()
+        with open(os.path.join(os.path.dirname(SCRIPT), "tracemap.html"), encoding="utf-8") as f:
+            self.assertEqual(page.count("</script>"), f.read().count("</script>"))
+        self.assertEqual(next(f["lines"] for f in data["files"] if f["path"] == "app/web/web.go"), web)
+        self.assertEqual(data["threads"]["1"]["walk"][0]["note"], "the page ends its </script>")
+
+    def test_past_the_text_budget_a_file_carries_only_the_lines_near_its_hops(self):
+        big = ["package big", "", "func Big() error {", "\treturn nil", "}"] + [f"// {i:06d} " + "x" * 80 for i in range(50000)]
+        path = os.path.join(self.root, "app", "big", "big.go")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write("\n".join(big) + "\n")
+        self.write("1", hops("1", ["- Big returns nil [app/big/big.go:4]"], ["@ app/big/big.go:4", "> \treturn nil"],
+                             ["END returned: nil @ app/big/big.go:4"]))
+        _, data = self.page()
+        entry = next(f for f in data["files"] if f["path"] == "app/big/big.go")
+        self.assertEqual((entry["count"], entry["lines"]), (len(big), None))
+        self.assertEqual(entry["sparse"], {str(i): big[i - 1] for i in range(1, 13)})
+        self.assertLess(os.path.getsize(os.path.join(self.run_dir, "page.html")), 1024 * 1024)
+
 EXEC = '\tif err := exec.Command("tmux", "kill-pane", "-t", target).Run(); err != nil {'
 ERRF = '\t\treturn fmt.Errorf("kill pane %s: %w", target, err)'
 REQUIRED = '\t\treturn errors.New("target is required")'
@@ -1031,7 +1111,7 @@ class WarningsTest(Stored):
         dirty = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
         self.assertEqual(dirty["warnings"], self.check().splitlines()[:2])
 
-    def test_the_html_page_opens_with_a_red_banner_of_the_lines_only_when_there_are_some(self):
+    def test_the_html_page_opens_its_ledger_with_a_red_block_of_the_lines_only_when_there_are_some(self):
         self.write("1", self.good())
         out = os.path.join(self.run_dir, "page.html")
         self.assertEqual(tt(["map", self.run_dir, "--html", out]).returncode, 0)
@@ -1047,9 +1127,12 @@ class WarningsTest(Stored):
         self.assertLess(page.index('id="warnings"'), page.index('id="stage"'))
         self.assertIn("1 of 1 nodes broke the hop contract", page)
         self.assertIn("pkg/kill/kill.go → app/kill/kill.go", page)
-        banner = page[page.index('id="warnings"') - 1500:page.index('id="stage"')]
-        self.assertIn("prefers-color-scheme: light", banner)
-        self.assertIn('[data-theme="light"] #warnings', banner)
+        self.assertLess(page.index('id="warnings"'), page.index('id="evidence"'))
+        head = page[:page.index("</head>")]
+        for sel in (":root {", ':root:not([data-theme="light"]) {', ':root[data-theme="dark"] {'):
+            at = head.index(sel)
+            self.assertRegex(head[at:head.index("}", at)], r"--alarm: #[0-9a-f]{6}; --alarm-ink: #[0-9a-f]{6};", sel)
+        self.assertRegex(head, r"#warnings \{[^}]*background: var\(--alarm\); color: var\(--alarm-ink\);")
         self.assertNotRegex(page, r"(src|href)\s*=\s*[\"']?(https?:)?//")
 
 

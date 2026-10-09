@@ -25,7 +25,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `tracetree.py` | The commands, the check, the resolver, drift, WARNINGS |
 | `tracemap.py` | The component map, imported by `tracetree.py` |
 | `tracemap_html.py` | The page writer, imported only for `map --html` |
-| `tracemap.html` | The page template, with its `/*TRACEMAP_DATA*/null` data slot |
+| `tracemap.html` | The page template, with its title, warnings and `/*TRACEMAP_DATA*/null` data slots |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
 | `SKILL.md` | The agents' command table and the check, visible to the tracer tiers and `sub-tracer` only |
 
@@ -38,7 +38,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `ROOT` | `new` | The repository root, absolute |
 | `BASE` | `new`, in a git work tree with a commit | The commit `HEAD` was at |
 | `questions` | `new --questions` | The brief's numbered questions, as read from stdin |
-| `{ID}.started` | `start` | Nothing: the node is running |
+| `{ID}.started` | `start` | `{PATH:LINE}<tab>{QUESTION}`, a line per `start`: the node is running; the map page reads its question and its time |
 | `{ID}.refused` | `write`, at its refusal | Nothing: the node's first write was refused |
 | `{ID}.hops` | `write`, once | The node's file, each placed hop's `@` rewritten to its real `path:line` |
 | `{ID}.write.json` | `write`, with the store | One entry per hop: `given`, `path`, `line`, `end`, `how`, `status`, `sha256` |
@@ -79,7 +79,7 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 
 **Function:** `cmd_start` — **Run by:** each sub-tracer, as its first call
 
-`start RUN ID PATH:LINE [QUESTION]` touches `{ID}.started`. For a QUESTION of the form `Q{n}` it prints `QUESTION Q{n}: {text}` from `questions`, or names why it cannot. Then `started {ID} — {path}` and PATH from LINE−3 to LINE+40, numbered. A FROM path resolves by its tail like a hop's.
+`start RUN ID PATH:LINE [QUESTION]` appends `{PATH:LINE}<tab>{QUESTION}` to `{ID}.started`. For a QUESTION of the form `Q{n}` it prints `QUESTION Q{n}: {text}` from `questions`, or names why it cannot. Then `started {ID} — {path}` and PATH from LINE−3 to LINE+40, numbered. A FROM path resolves by its tail like a hop's.
 
 ### write
 
@@ -216,7 +216,7 @@ The same findings ride every surface:
 - COUNTS carries `placed=` (hops) and `refused=` (nodes).
 - The `MAP` line and the first line of `map.txt` and `map` end `· ⚠ {b} nodes broke the hop contract` and `· ⚠ {k} drifted` when they apply.
 - `map --json` carries `"warnings"`, the block's lines, `[]` when none.
-- `map --html` opens with a red banner of the lines.
+- `map --html` opens its ledger with a red block of the lines, ahead of the map.
 - `write` prints to stderr for its own node and exits 0:
   - `⚠ WARNING — {k} of your hops named a path that is not the file; the kit placed them: {pairs}. Copy paths as your read printed them.`
   - `⚠ WARNING — stored with {b} hops that do not hold; your tracer sees them REJECTED and is warned`
@@ -293,5 +293,23 @@ The `MAP` line reads `MAP {RUN}/map.txt — {n} components in {f} files, {c} cal
 
 - NAME, for `--from` and `--to`, is an exact id, else a component name, else a file or its tail, else any id containing it, ignoring case. One matching nothing or more than 6 components exits 2 and says which.
 - `--from NAME` prints the tree of everything NAME reaches, `--to NAME` everything that reaches it.
-- `--json` prints `run`, `root`, `components`, `edges`, `threads` with each thread's `walk`, and `warnings`; with `--from` or `--to`, only that part.
-- `--html OUT` writes `tracemap.html` with the data inlined: one self-contained page that loads nothing from the network, draws the map and replays the run thread by thread. It is written only when a person asks to see it.
+- `--json` prints `run`, `root`, `components` (each with its first and last line, `line` and `end`), `edges`, `threads` with each thread's `walk` (each step's `line` to `b`, its `status` — `verified`, `moved`, `placed` or `followed` — and the hop's flag), and `warnings`; with `--from` or `--to`, only that part.
+- `--html OUT` writes `tracemap.html` with the data inlined, every `<` escaped so no file text closes its script: one self-contained page that loads nothing from the network, written only when a person asks to see it.
+
+### The page
+
+Beside the map data the page carries what `page_data` reads from the run:
+
+- the questions and `BASE`;
+- per node: its question and FROM from `{ID}.started`, its answers checked as the answers view checks them, its broken hops, its placed and followed paths;
+- the nodes that started and never wrote;
+- the clock, from the run files' mtimes: `ROOT` for `new`, `{ID}.started`, `{ID}.hops`, `answers.txt` for `wait`;
+- the text of every file a shown component sits in: whole, most hops first, up to 4 MB; past that, the lines within 8 of a hop.
+
+It draws three parts:
+
+- the ledger: the run, the warnings block, the evidence bar of how every hop holds, each question with its threads and their answers, every `[path:N]` a link to its line;
+- the code wall: one column per traced file, drawn to scale from its own text and grouped by directory, each thread's hops marked and its route drawn between them; zooming in reads the code itself, Fold collapses the lines no hop touches;
+- the clock: each node's bar from start to write; replay walks the threads in the order they ran.
+
+Search runs over the file text. Keys: `/` search, space replay, `←` `→` hops, `[` `]` threads, `z` Fold, `f` fit, `+` `-` zoom, `esc` clear.

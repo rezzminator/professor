@@ -9,8 +9,9 @@
                                         ones included) whose path or current line matches REGEX, then one PRIOR: line;
                                         in a git work tree RUN/BASE holds the commit ROOT is at (no file otherwise)
   tracetree.py start RUN ID PATH:LINE [QUESTION]
-                                        register node ID as running, print PATH from LINE-3 to LINE+40, numbered; a
-                                        QUESTION of the form Q{n} prints question n of RUN/questions above them
+                                        register node ID as running (RUN/ID.started holds `PATH:LINE<tab>QUESTION`),
+                                        print PATH from LINE-3 to LINE+40, numbered; a QUESTION of the form Q{n}
+                                        prints question n of RUN/questions above them
   tracetree.py write RUN ID < FILE      store node ID's hops file once; an incomplete file is refused unstored. Every
                                         hop is then placed against the files now: the first write with a hop that does
                                         not hold (no such file, quote nowhere, a directory, a quote elided with `...`)
@@ -37,8 +38,10 @@
   tracetree.py map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT]
                                         the component map built from the verified hops (tracemap.py): a text
                                         declaration, a tree below (--from) or above (--to) a component, the
-                                        map as JSON, or on request a self-contained page (tracemap_html.py);
-                                        `wait` also writes the text map to RUN/map.txt
+                                        map as JSON, or on request a self-contained page (tracemap_html.py) that also
+                                        carries the questions, the run's clock, each node's checked answers and the
+                                        text of the files its hops sit in; `wait` also writes the text map to
+                                        RUN/map.txt
 
 A hop's quote is re-read from the file: found at its address it is verified, found within 30 lines or elsewhere
 in the file it is re-addressed, found nowhere it is REJECTED. A hop whose path places no file is resolved, in
@@ -69,7 +72,7 @@ verified or moved status at the new path, flagged `followed a file moved since t
 it prints no node line and, beside other warnings only, one run line `⚠ run: {k} hops followed files moved since the walk
 ({given} → {path}, …)`; alone it leaves `WARNINGS: none`.
 The MAP line and the first line of the map text end ` · ⚠ {n} nodes broke the hop contract` and ` · ⚠ {k} drifted` when
-they apply; `map --json` carries `"warnings": [lines]` and `map --html` a red banner of the same lines. `write` prints the
+they apply; `map --json` carries `"warnings": [lines]` and `map --html` a red block of the same lines. `write` prints the
 same two findings to stderr for its own node, exit 0.
 A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2. Python 3 standard library only.
 """
@@ -799,8 +802,6 @@ def verify(run, files, names, counts, drift=True):
                 shown = files.shown(fkey, path)
                 if shown != path:
                     files.alias.setdefault(path, set()).add(fkey)
-                n["walk"].append({"t": "hop", "key": fkey, "line": a, "note": notes[0] if notes else "",
-                                  "b": b, "shown": shown})
                 flag = []
                 if shown != path or followed:
                     flag.append(f"path resolved from {path}" + (f": {FOLLOWED_HOW}" if followed else f": {how}" if how else ""))
@@ -809,6 +810,12 @@ def verify(run, files, names, counts, drift=True):
                     flag.append(f"re-addressed from :{ln}")
                 if tag != "exact":
                     flag.append(tag)
+                wrote_placed = side is not None and placed_path(files.root, strip_line(side[hi].get("given", "")),
+                                                                side[hi].get("path", ""), side[hi].get("how"))
+                status = ("followed" if followed else "placed" if kind == "placed" or wrote_placed
+                          else "moved" if a != ln and quotes else "verified")
+                n["walk"].append({"t": "hop", "key": fkey, "line": a, "note": notes[0] if notes else "",
+                                  "b": b, "shown": shown, "status": status, "flag": "; ".join(flag)})
                 flag = f"   ({'; '.join(flag)})" if flag else ""
                 addr = f"{shown}:{a}" if a == b else f"{shown}:{a}-{b}"
                 text = lines[a - 1].strip()
@@ -1290,8 +1297,8 @@ def question_line(run, question):
 
 
 def cmd_start(run, name, at, question=""):
-    """Register node ID as running ({ID}.started) and print its FROM line with the 40 lines after it, numbered;
-    above them the card's question when its QUESTION is Q{n}."""
+    """Register node ID as running ({ID}.started, holding `FROM<tab>QUESTION` for the map page) and print its FROM line
+    with the 40 lines after it, numbered; above them the card's question when its QUESTION is Q{n}."""
     if not NODE_ID.fullmatch(name):
         fail(f"ID {name!r} is not dotted numbers like 3 or 3.1")
     run = os.path.abspath(run)
@@ -1300,7 +1307,8 @@ def cmd_start(run, name, at, question=""):
     except OSError as e:
         fail(f"{run} is not a tracetree run (no ROOT file: {e})")
     try:
-        open(os.path.join(run, name + ".started"), "a").close()
+        with open(os.path.join(run, name + ".started"), "a", encoding="utf-8") as f:
+            f.write(f"{at}\t{question}\n")
     except OSError as e:
         fail(f"cannot register {name} in {run}: {e}")
     m = re.fullmatch(r"(.+?):(\d+)(?:-\d+)?", at.strip("`"))
@@ -1452,6 +1460,85 @@ def write_map(loaded, inc):
     return f"MAP {path} — {tracemap.summary(g)}{map_flags(inc)}"
 
 
+PAGE_TEXT_MAX = 4 * 1024 * 1024
+PAGE_CONTEXT = 8
+BROKEN = re.compile(r"(≈ DRIFTED|✗ REJECTED|✗ BAD ADDRESS) (\S+?):(\d+) — ")
+BROKEN_STATUS = {"≈ DRIFTED": "drifted", "✗ REJECTED": "rejected", "✗ BAD ADDRESS": "badaddr"}
+
+
+def run_file(run, name, read=False):
+    """A run file's mtime, or its text with read set; None when it cannot be read — a missing time stays missing."""
+    path = os.path.join(run, name)
+    try:
+        if not read:
+            return os.path.getmtime(path)
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def page_data(loaded, data):
+    """What the map page draws beside the map: the questions, BASE, the run's clock, COUNTS with the answers checked,
+    each node's checked answers, structure lines and broken hops, the nodes that started and never wrote, and the text
+    of every file a shown component sits in — whole, the files with the most hops first, until PAGE_TEXT_MAX bytes;
+    past it only the lines within PAGE_CONTEXT of a hop. Times are mtimes: `new` wrote ROOT, `start` {ID}.started,
+    `write` {ID}.hops, `wait` answers.txt; one that cannot be read is null."""
+    run, root, names, files, nodes, ranges, counts = loaded
+    counts = dict(counts)
+    out = {}
+    for name in names:
+        n = nodes[name]
+        rec = (run_file(run, name + ".started", read=True) or "").split("\n")[0].split("\t")
+        q = re.fullmatch(r"[Qq](\d+)", rec[1].strip()) if len(rec) > 1 else None
+        answers = []
+        for ans in n["answers"]:
+            text, flags, moves = check_answer(ans, files, ranges)
+            counts["answers"] += 1
+            counts["flagged"] += bool(flags)
+            counts["recited"] += bool(moves)
+            answers.append({"text": text, "flags": flags, "moves": moves})
+        broken = [{"status": BROKEN_STATUS[m.group(1)], "path": m.group(2), "line": int(m.group(3)), "text": line}
+                  for line in n["hops"] for m in [BROKEN.match(line)] if m]
+        out[name] = {"thread": data["threads"].get(name, {}).get("thread", n["head"]),
+                     "question": int(q.group(1)) if q else None, "from": rec[0] or None,
+                     "started": run_file(run, name + ".started"), "written": run_file(run, name + ".hops"),
+                     "answers": answers, "struct": n["struct"], "verified": n["ok"], "broken": broken,
+                     "placed": [list(p) for p in n["placed"]], "followed": [list(p) for p in n["followed"]],
+                     "refused": n["refused"]}
+    try:
+        entries = os.listdir(run)
+    except OSError as e:
+        fail(f"cannot list {run}: {e}")
+    missing = {f[:-8]: run_file(run, f) for f in entries
+               if f.endswith(".started") and NODE_ID.fullmatch(f[:-8]) and f[:-8] not in out}
+    hops = {}
+    for c in data["components"]:
+        hops.setdefault(c["file"], set()).update(c["hops"])
+    for th in data["threads"].values():
+        for s in th["walk"]:
+            hops.setdefault(s["c"].split("::")[0], set()).update(range(s["line"], s["b"] + 1))
+    shown, spent = [], 0
+    for rel in sorted(hops, key=lambda r: (-len(hops[r]), r)):
+        lines = files.lines(rel)
+        if lines is None:
+            continue
+        lines = lines[:-1] if lines and lines[-1] == "" else lines
+        size = sum(len(l) + 1 for l in lines)
+        entry = {"path": rel, "count": len(lines), "lines": None, "sparse": None}
+        if spent + size <= PAGE_TEXT_MAX:
+            entry["lines"], spent = lines, spent + size
+        else:
+            near = {i for h in hops[rel] for i in range(h - PAGE_CONTEXT, h + PAGE_CONTEXT + 1) if 1 <= i <= len(lines)}
+            entry["sparse"] = {str(i): lines[i - 1] for i in sorted(near)}
+        shown.append(entry)
+    base = (run_file(run, "BASE", read=True) or "").strip() or None
+    return {"title": os.path.basename(root.rstrip("/")) or root, "base": base,
+            "times": {"new": run_file(run, "ROOT"), "done": run_file(run, "answers.txt")},
+            "questions": {str(k): v for k, v in parse_questions(run_file(run, "questions", read=True) or "").items()},
+            "counts": counts, "nodes": out, "missing": missing, "files": shown}
+
+
 def cmd_map(run, opts):
     loaded = load(run)
     run, root, names, files, nodes = loaded[:5]
@@ -1462,8 +1549,8 @@ def cmd_map(run, opts):
         if opts["--html"]:
             import tracemap_html
             out = os.path.abspath(opts["--html"])
-            tracemap_html.write(dict(tracemap.data(g, True, tracemap.focus(g, opts["--from"], opts["--to"], True)),
-                                     warnings=inc["lines"]), out)
+            data = dict(tracemap.data(g, True, tracemap.focus(g, opts["--from"], opts["--to"], True)), warnings=inc["lines"])
+            tracemap_html.write(dict(data, **page_data(loaded, data)), out)
             print(f"HTML {out} — open it in a browser")
         elif opts["--json"]:
             import json

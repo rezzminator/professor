@@ -215,6 +215,7 @@ class Builder:
         if cid not in comps and make:
             comps[cid] = {"id": cid, "file": rel, "name": name, "kind": kind,
                           "line": start + 1 if start is not None else None,
+                          "end": start + len(extent(lines, start, lg, fenced)) if start is not None else None,
                           "hops": set(), "threads": set(), "ends": [], "_key": key, "_lang": lg, "_start": start}
         return comps.get(cid)
 
@@ -263,7 +264,8 @@ class Builder:
                     continue
                 c["hops"].add(w["line"])
                 c["threads"].add(name)
-                steps.append({"c": c["id"], "line": w["line"], "note": w["note"]})
+                steps.append({"c": c["id"], "line": w["line"], "b": w.get("b", w["line"]), "note": w["note"],
+                              "status": w.get("status", "verified"), "flag": w.get("flag", "")})
                 if prev and prev[0] is not c:
                     self.link(prev[0], prev[1], prev[2], c, w["line"], w["note"], name)
                 prev = (c, w["line"], w["note"])
@@ -431,9 +433,11 @@ def tree(g, name, direction, show_all=False):
 
 
 def data(g, show_all=False, keep=None):
-    """The map as plain data — components, links, threads with their walks — restricted to keep when given."""
+    """The map as plain data — components (each with its last line, `end`), links, threads with their walks, each
+    step's verified range `line`–`b`, its `status` (verified, moved, placed, followed) and the check's `flag` — restricted
+    to keep when given."""
     def public(c):
-        return {"id": c["id"], "file": c["file"], "name": c["name"], "kind": c["kind"], "line": c["line"],
+        return {"id": c["id"], "file": c["file"], "name": c["name"], "kind": c["kind"], "line": c["line"], "end": c["end"],
                 "hops": sorted(c["hops"]), "threads": by_rank(g, c["threads"]),
                 "ends": [{"kind": e["kind"], "note": e["note"], "threads": by_rank(g, e["threads"])} for e in c["ends"]]}
     comps = [public(c) for cid, c in sorted(g["components"].items()) if keep is None or cid in keep]

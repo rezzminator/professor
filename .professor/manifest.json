@@ -114,7 +114,7 @@
     ".claude/scripts/pfm-guard.sh": "c6b58ba494ff2b7640d4a0a78f6c8e3f5e5f7f5aac93ed1adb8e30d8adab1314",
     ".claude/scripts/test-pfm.sh": "a3a1f9e91a22f7fa54a965c6b2cf3fa80ce56276354a7f5836afe27032a0c34d",
     ".claude/scripts/test-templates.sh": "f2465d15447631d75ad14c0b531c4e4c4c044aed44291a181f38b12b8f3f4053",
-    ".claude/scripts/unit-path.sh": "484d1069e0a9ccdc8c7492f2fd2f3e72fece27cfb1888ee5aa8669ac9fab0918",
+    ".claude/scripts/unit-path.sh": "8215db4480427de80aa125c77d9d3f5a1cf76ef14363e81dd86b07eaf0b8ead8",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "63762ca24273ad79725a09efaf6188e376767987ce5603d549521fa681d1df12",

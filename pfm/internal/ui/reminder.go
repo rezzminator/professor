@@ -6,7 +6,7 @@ package ui
 func (model *Model) pinRemindedRows(pinned map[int]bool) {
 	for _, group := range model.groups {
 		for _, index := range group.indices {
-			if model.rows[index].Reminded && model.visibleInView(model.rows[index]) {
+			if model.rows[index].Reminded && model.visibleInView(model.rows[index]) && model.inPlace(index) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 			}

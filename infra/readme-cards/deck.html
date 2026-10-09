@@ -775,8 +775,8 @@
         <span class="boxlbl">─ fleet <span id="pkN">12</span> </span>
         <div id="pkBody"></div>
       </div>
-      <div class="tuirow hint" id="pkHint"> ↑↓ move  enter open  esc cancel  type to fuzzy-find</div>
-      <div class="tuirow hint"> ⌃X kill  ⌃E 1h  ⌃S account  ⌃O reboot</div>
+      <div class="tuirow hint" id="pkHint"> ↑↓ move  enter open  esc close  type to find · @ go</div>
+      <div class="tuirow hint"> ⌃X kill  ⌃O reboot</div>
     </div>
     <div class="term cc pkv" id="pkCC" hidden>
       <div class="thead"><div class="ccban"><pre class="cclogo"> ▐▛███▛█
@@ -1027,7 +1027,7 @@
       <div class="why"><span class="k">Why</span><p>Several accounts become one continuous session instead of several broken ones.</p></div>
       <div class="how"><span class="k">How</span><p><code>/reload --account 2 --then "…"</code> — or the usage hook warns the model and it moves itself.</p></div>
     </div>
-    <div class="cue">type <code>/reload --account 2 --then "continue from step 4"</code> in the chat yourself — or let the usage hook warn the model and it moves itself; <code>⌃S</code> in the picker changes the seat for new chats</div>
+    <div class="cue">type <code>/reload --account 2 --then "continue from step 4"</code> in the chat yourself — or let the usage hook warn the model and it moves itself; <code>⏎</code> on the picker's ✦ row chooses the seat of a new chat</div>
     <div class="seats" id="seats">
       <div class="seat on" data-a="1"><span>🥇</span><b>account 1</b><i><u class="sfill" style="width:96%;background:#e07a62"></u></i><em>5h 96% · resets 16:00</em></div>
       <div class="seat" data-a="2"><span>🥈</span><b>account 2</b><i><u class="sfill" style="width:4%;background:#6fc3a5"></u></i><em>5h 4%</em></div>
@@ -2058,7 +2058,7 @@
     var cache = document.getElementById('slCache'), tm = document.getElementById('slTime'), clock = document.getElementById('cbClock');
     var cw5 = document.getElementById('cw5'), cw1 = document.getElementById('cw1'), f5 = document.getElementById('cwf5'), f1 = document.getElementById('cwf1'), log = document.getElementById('cwLog');
     var TOUR = [
-      ['acct', 'account seat', '🥇 🥈 🥉 — which configured account this chat runs on. Change it with /reload --account N; the picker\'s ⌃S does it for new chats.'],
+      ['acct', 'account seat', '🥇 🥈 🥉 — which configured account this chat runs on. Change it with /reload --account N; ⏎ on the picker\'s ✦ row chooses it for a new chat.'],
       ['model', 'model', '✦ Fable · ◆ Opus · ◇ Sonnet · ○ Haiku — the glyph reads at a glance across a wall of tmux panes.'],
       ['name', 'chat name', 'The same name as in the picker and the tmux window — pfm keeps all three converged.'],
       ['effort', 'effort', '🔹 low · 🔶 medium · 💠 high · 💎 xhigh · 👑 max; 💤 when thinking is off.'],
@@ -2317,7 +2317,7 @@
     ];
     async function play() {
       var my = sc.next();
-      show('pk'); q.textContent = ''; filter(''); cursor(5); hint.textContent = ' ↑↓ move  enter open  esc cancel  type to fuzzy-find';
+      show('pk'); q.textContent = ''; filter(''); cursor(5); hint.textContent = ' ↑↓ move  enter open  esc close  type to find · @ go';
       ccb.innerHTML = ''; ccin.textContent = ''; cccaret.style.display = ''; key.hidden = true; cxb.innerHTML = ''; shp.textContent = '';
       if (!(await sc.wait(900, my))) return;
       // 1. down three rows to GOD, open it
@@ -2346,7 +2346,7 @@
       var sp = document.createElement('span'); shp.appendChild(sp);
       if (!(await typeInto(null, sp, 'pfm', sc, my, 12))) return;
       if (!(await sc.wait(500, my))) return;
-      show('pk'); cursor(7); hint.textContent = ' ↑↓ move  enter open  esc cancel  type to fuzzy-find';
+      show('pk'); cursor(7); hint.textContent = ' ↑↓ move  enter open  esc close  type to find · @ go';
       if (!(await sc.wait(800, my))) return;
       // 4. up two rows to DOER, a Codex chat, open it
       for (var u = 6; u >= 3; u--) { cursor(u); if (!(await sc.wait(220, my))) return; }

@@ -137,6 +137,16 @@ func Run(
 		if updateNotice != "" {
 			fmt.Fprintln(stderr, updateNotice)
 		}
+		// The new-chat steps open on the last launch's choices. A memory that
+		// cannot be read says so and the steps open on the configured values.
+		lastLaunch, memoryErr := sharedState.LaunchMemory(ctx)
+		if memoryErr != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm ls: last launch unreadable, new-chat steps open on the configured values: %v\n",
+				memoryErr,
+			)
+		}
 		// Row facts feed the picker's live gauge, so only the interactive picker
 		// reads them; the scripted listings stay as composed.
 		// The Reader caches each file by size and modification time: a refresh
@@ -160,6 +170,10 @@ func Run(
 		scan.Snapshot.ApplyKill = applier
 		scan.Snapshot.ApplyDeactivate = deactivateApplier(ctx, scan.Paths)
 		scan.Snapshot.MergeNewChat = true
+		scan.Snapshot.LastLaunch = lastLaunch
+		if memoryErr != nil {
+			scan.Snapshot.LaunchMemoryError = memoryErr.Error()
+		}
 		statsSampler := pfmstats.NewSampler(
 			scan.Paths.ProcRoot,
 			scan.Paths.CgroupRoot,
@@ -212,9 +226,9 @@ func Run(
 	// here to apply and no exit key that can lose one. What remains is the
 	// receipt, printed once the picker has released the terminal.
 	reportKills(outcome.KillChanges, stderr)
-	// A ⌃S account switch IS still a pending intent, and backing out with
-	// Esc/⌃C must not write it. Nor does a non-positive PrimaryAccount ever
-	// mean a deliberate choice — see primaryWriteback.
+	// A new-chat wizard's Claude account IS still a pending intent, and
+	// backing out with Esc/⌃C must not write it. Nor does a non-positive
+	// PrimaryAccount ever mean a deliberate choice — see primaryWriteback.
 	claudePrimary := outcome.ClaudePrimaryAccount
 	if claudePrimary == 0 && compose.EngineForKind(outcome.Row.Kind) != pfmengine.Codex {
 		claudePrimary = outcome.PrimaryAccount
@@ -262,22 +276,81 @@ func Run(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
-		return pfmchat.OpenRow(
-			ctx,
-			selectedRow,
-			outcome.PrimaryAccount,
-			cache1H,
-			"",
-			stdout,
-			stderr,
-			&runtime,
-		)
+		return openAndRemember(ctx, sharedState, outcome, stderr, func() int {
+			return pfmchat.OpenRow(
+				ctx,
+				selectedRow,
+				outcome.PrimaryAccount,
+				cache1H,
+				"",
+				stdout,
+				stderr,
+				&runtime,
+			)
+		})
 	case ui.OutcomeCancelled, ui.OutcomeNone:
 		return 0
 	default:
 		fmt.Fprintf(stderr, "pfm ls: unsupported picker outcome %d\n", outcome.Kind)
 		return 1
 	}
+}
+
+// openAndRemember records the launch for the next picker, then runs open.
+// The record comes first because open execs tmux or zsh on a terminal and
+// never returns; an open that returns a failure puts the memory back.
+func openAndRemember(
+	ctx context.Context,
+	state *fleetdb.Store,
+	outcome ui.Outcome,
+	stderr io.Writer,
+	open func() int,
+) int {
+	if !isNewChatLaunch(outcome) {
+		return open()
+	}
+	before, hadBefore, readErr := state.Meta(ctx, fleetdb.LaunchMemoryKey)
+	remembered := false
+	if readErr != nil {
+		fmt.Fprintf(stderr, "pfm ls: remember this launch for the next picker: %v\n", readErr)
+	} else if err := rememberLaunch(ctx, state, outcome); err != nil {
+		fmt.Fprintf(stderr, "pfm ls: remember this launch for the next picker: %v\n", err)
+	} else {
+		remembered = true
+	}
+	code := open()
+	if code != 0 && remembered {
+		if !hadBefore {
+			before = "{}" // reads as the empty memory a store with no row has
+		}
+		if err := state.SetMeta(ctx, fleetdb.LaunchMemoryKey, before, clock.Real.Now().Unix()); err != nil {
+			fmt.Fprintf(stderr, "pfm ls: the launch failed, but its choices stay remembered: %v\n", err)
+		}
+	}
+	return code
+}
+
+// rememberLaunch records what a new-chat launch chose — its engine, account
+// and, for Claude, its cache — so the next picker's steps open on it. Any other
+// outcome (a resume, a cancel) records nothing.
+func rememberLaunch(ctx context.Context, state *fleetdb.Store, outcome ui.Outcome) error {
+	if !isNewChatLaunch(outcome) {
+		return nil
+	}
+	engine := compose.EngineForKind(outcome.Row.Kind)
+	var cache *bool
+	if engine == pfmengine.Claude {
+		choice := outcome.Cache1H
+		cache = &choice
+	}
+	return state.RememberLaunch(ctx, string(engine), outcome.PrimaryAccount, cache, clock.Real.Now().Unix())
+}
+
+// isNewChatLaunch reports whether the picker chose to start a new chat.
+func isNewChatLaunch(outcome ui.Outcome) bool {
+	kind := outcome.Row.Kind
+	return outcome.Kind == ui.OutcomeSelected &&
+		(kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode)
 }
 
 // resolveSelectedRow re-resolves an OutcomeSelected row against the current

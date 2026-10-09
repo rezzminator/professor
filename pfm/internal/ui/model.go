@@ -17,7 +17,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/sky"
-	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/theme"
 )
@@ -26,6 +25,10 @@ const (
 	defaultWidth  = 120
 	defaultHeight = 28
 	keyDown       = "down"
+	keyEnter      = "enter"
+	keyEsc        = "esc"
+	keyLeft       = "left"
+	keyRight      = "right"
 	keyCtrlP      = "ctrl+p"
 	keyCtrlN      = "ctrl+n"
 	// statsRefreshInterval is the Limits/Stats cadence while watched. Stats
@@ -164,6 +167,8 @@ type Model struct {
 	mergeNewChat   bool
 	actionIndex    int
 	newChatEngine  pfmengine.ID
+	placeState     // the place rail and the omnibox (omnibox.go)
+	wizardState    // the new-chat steps and what they open on (launchwizard.go)
 	// activity is stamped on every real keystroke. The background refresh
 	// stream reads it to decide whether anyone is still watching.
 	activity *ActivityClock
@@ -203,8 +208,7 @@ func NewModel(snapshot Snapshot) Model {
 	configuredAccountEmojis = copyEmojis(snapshot.AccountEmojis)
 	configuredCodexAccountEmojis = copyEmojis(snapshot.CodexAccountEmojis)
 	input := textinput.New()
-	input.Prompt = "find › "
-	input.Placeholder = "type project or name"
+	input.Prompt = findPrompt
 	input.CharLimit = 200
 	input.SetVirtualCursor(true)
 	input.SetValue(snapshot.InitialQuery)
@@ -256,6 +260,7 @@ func NewModel(snapshot Snapshot) Model {
 			statsRefreshMaxInterval,
 		),
 		mergeNewChat: snapshot.MergeNewChat,
+		placeState:   placeState{projectDirs: snapshot.ProjectDirs, dirExists: snapshot.DirExists},
 		deck: deckState{
 			home: snapshot.Home, rev: 1, agg: &deckAgg{}, freshNS: snapshot.NowNS,
 			factsError: snapshot.FactsError,
@@ -266,6 +271,9 @@ func NewModel(snapshot Snapshot) Model {
 			snapshot.OpenCodeAccountIDs,
 		),
 	}
+	model.defaultEngine = model.newChatEngine
+	model.applyLaunchMemory(snapshot.LastLaunch)
+	model.memoryError = snapshot.LaunchMemoryError
 	if model.samplingContext == nil {
 		model.samplingContext = context.Background()
 	}
@@ -277,6 +285,7 @@ func NewModel(snapshot Snapshot) Model {
 	}
 	model.applyCosmosGraph(snapshot.Cosmos)
 	model.rebuild(snapshot.InitialCursorID, 0)
+	model.query.Placeholder = "type to find · @ to go"
 	model.mergeCosmosSeats()
 	return model
 }
@@ -426,17 +435,29 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := message.String()
-	if key == "esc" || key == "ctrl+c" {
+	if model.wizard.on {
+		if next, command, handled := model.wizardKey(key); handled {
+			return next, command
+		}
+		// Any other key leaves the wizard and acts as it always does.
+		model.wizard = launchWizard{}
+	}
+	next, handled := model.omniKey(key)
+	if handled {
+		return next, nil
+	}
+	model = next
+	if key == keyEsc || key == "ctrl+c" {
 		model.outcome = OutcomeCancelled
 		return model, tea.Quit
 	}
 	switch key {
-	case "left":
+	case keyLeft:
 		if model.tab == TabChats {
 			return model.navigateChatHorizontal(-1)
 		}
 		return model.navigateHorizontal(-1)
-	case "right":
+	case keyRight:
 		if model.tab == TabChats {
 			return model.navigateChatHorizontal(1)
 		}
@@ -458,12 +479,6 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+x":
 		model.toggleKilled()
-		return model, nil
-	case "ctrl+e":
-		model.cache1H = !model.cache1H
-		return model, nil
-	case "ctrl+s":
-		model.cycleSelectedAccount()
 		return model, nil
 	// ⌃O, not ⌃B: the picker always runs inside tmux and C-b is tmux's PREFIX,
 	// so tmux swallowed the keystroke before the picker ever saw it. Any
@@ -487,7 +502,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return model, nil // notice only, no chat to open — see professor_update_failed_row.go
 			}
 			if model.mergeNewChat && isNewChatActionKind(row.Kind) {
-				return model.selectNewChat(row)
+				return model.beginWizard(row)
 			}
 			switch model.actionIndex {
 			case 1:
@@ -671,108 +686,16 @@ func batchCommands(commands ...tea.Cmd) tea.Cmd {
 }
 
 func (model Model) navigateChatHorizontal(direction int) (tea.Model, tea.Cmd) {
-	if row, ok := model.selectedRow(); ok && model.mergeNewChat &&
-		(isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
-		model.newChatEngine = adjacentID(model.effectiveNewChatEngine(row), direction, model.newChatEnginesFor(row))
+	row, ok := model.selectedRow()
+	if ok && model.mergeNewChat && isNewChatActionKind(row.Kind) {
+		return model, nil // a ✦ row's arrows belong to its wizard once it is open
+	}
+	if ok && model.mergeNewChat && row.Kind == compose.ProfessorUpdate {
+		model.newChatEngine = adjacentID(model.newChatEngine, direction, model.newChatEnginesFor(row))
 		return model, nil
 	}
 	model.actionIndex = (model.actionIndex + len(carouselActions) + direction) % len(carouselActions)
 	return model, nil
-}
-
-func adjacentEngine(current pfmengine.ID, direction int) pfmengine.ID {
-	ids := spawn.RegisteredLaunchers()
-	if len(ids) == 0 {
-		// Unit packages do not execute cmd/pfm's composition root. Keep the two
-		// shipped launchers available there without registering production
-		// behaviour outside that root.
-		ids = []pfmengine.ID{pfmengine.Claude, pfmengine.Codex}
-	}
-	return adjacentID(current, direction, ids)
-}
-
-func adjacentID(current pfmengine.ID, direction int, ids []pfmengine.ID) pfmengine.ID {
-	if len(ids) == 0 {
-		return ""
-	}
-	for index, id := range ids {
-		if id == current {
-			if direction < 0 {
-				return ids[(index+len(ids)-1)%len(ids)]
-			}
-			return ids[(index+1)%len(ids)]
-		}
-	}
-	return ids[0]
-}
-
-func (model Model) newChatEngines() []pfmengine.ID {
-	ids := make([]pfmengine.ID, 0, len(pfmengine.All()))
-	appendUnique := func(id pfmengine.ID) {
-		for _, present := range ids {
-			if present == id {
-				return
-			}
-		}
-		ids = append(ids, id)
-	}
-	for index := range model.rows {
-		row := &model.rows[index]
-		if row.Workbench != "" {
-			continue
-		}
-		switch row.Kind {
-		case compose.NewClaude:
-			appendUnique(pfmengine.Claude)
-		case compose.NewCodex:
-			appendUnique(pfmengine.Codex)
-		case compose.NewOpenCode:
-			appendUnique(pfmengine.OpenCode)
-		}
-	}
-	for _, id := range spawn.RegisteredLaunchers() {
-		if id != pfmengine.Claude && id != pfmengine.Codex {
-			appendUnique(id)
-		}
-	}
-	return ids
-}
-
-// AdjacentEngine returns the previous or next registered engine in stable
-// picker order. Unknown inputs start at the first registered engine.
-func AdjacentEngine(current pfmengine.ID, direction int) pfmengine.ID {
-	return adjacentEngine(current, direction)
-}
-
-func (model *Model) cycleSelectedAccount() {
-	row, ok := model.selectedRow()
-	if !ok {
-		return
-	}
-	// The update banner is a global action, not a chat belonging to the
-	// carousel engine shown inside it. Keep its account key aligned with the
-	// always-visible Claude account in the header; the chosen engine still
-	// resolves its own launch account when Enter is pressed.
-	if row.Kind == compose.ProfessorUpdate {
-		model.primary = nextAccount(model.primary, model.accountIDs)
-		return
-	}
-	engine := compose.EngineForKind(row.Kind)
-	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
-		engine = model.effectiveNewChatEngine(row)
-	}
-	if engine == pfmengine.Codex {
-		model.codexPrimary = nextAccount(model.codexPrimary, model.codexAccountIDs)
-		return
-	}
-	if engine == pfmengine.OpenCode {
-		model.openCodePrimary = nextAccount(model.openCodePrimary, model.openCodeAccountIDs)
-		return
-	}
-	model.primary = nextAccount(model.primary, model.accountIDs)
-	if choice, ok := model.cache1HByAccount[model.primary]; ok {
-		model.cache1H = choice
-	}
 }
 
 func (model Model) accountForKind(kind compose.Kind) int {
@@ -1017,7 +940,9 @@ func (model *Model) updateQuery(value string) {
 		model.query.CharLimit > 0 {
 		value = string(runes[:model.query.CharLimit])
 	}
+	before := model.effectivePlace().root
 	model.query.SetValue(value)
+	model.syncOmni(before)
 	model.refilter(follow, 0)
 }
 
@@ -1033,6 +958,9 @@ func trimLastWord(value string) string {
 func (model *Model) applyRefresh(snapshot Snapshot) {
 	follow := model.selectedKey()
 	fallback := model.cursor
+	if snapshot.ProjectDirs != nil {
+		model.projectDirs = snapshot.ProjectDirs
+	}
 	rows := snapshot.Rows
 	// The update and update-check failure rows are read once from the cache
 	// before the picker opens; a refresh snapshot never carries them, so
@@ -1230,7 +1158,18 @@ func (model *Model) adjustKilledCount(killed bool) {
 	}
 }
 
+// searchText is what a typed find matches a row against: its project, then
+// its name.
+func searchText(row compose.Row) string {
+	project := cleanField(row.Project)
+	if project == "" {
+		project = "?"
+	}
+	return strings.ToLower(project + " " + cleanField(row.Name))
+}
+
 func (model *Model) rebuild(follow string, fallback int) {
+	model.indexPlaces()
 	model.search = make([]string, len(model.rows))
 	byProject := make(map[string]int)
 	model.groups = model.groups[:0]
@@ -1240,9 +1179,7 @@ func (model *Model) rebuild(follow string, fallback int) {
 		if project == "" {
 			project = "?"
 		}
-		model.search[index] = strings.ToLower(
-			project + " " + cleanField(row.Name),
-		)
+		model.search[index] = searchText(*row)
 		groupIndex, found := byProject[project]
 		if !found {
 			groupIndex = len(model.groups)
@@ -1259,6 +1196,7 @@ func (model *Model) rebuild(follow string, fallback int) {
 }
 
 func (model *Model) rebuildOrder() {
+	model.retargetLaunchRows()
 	model.order = model.order[:0]
 	model.nameGroups = make(map[int]nameGroup)
 	// members and emitted are scanned/shared across every project group, not
@@ -1270,7 +1208,7 @@ func (model *Model) rebuildOrder() {
 	for _, group := range model.groups {
 		for _, index := range group.indices {
 			row := model.rows[index]
-			if row.Reminded || !model.visibleInView(row) || !isNameGroupRow(row.Kind) {
+			if row.Reminded || !model.visibleInView(row) || !isNameGroupRow(row.Kind) || !model.inPlace(index) {
 				continue
 			}
 			if key, _, ok := workbenchNameGroup(row); ok {
@@ -1307,7 +1245,7 @@ func (model *Model) rebuildOrder() {
 			if pinned[index] {
 				continue
 			}
-			if !model.visibleInView(model.rows[index]) {
+			if !model.visibleInView(model.rows[index]) || !model.inPlace(index) {
 				continue
 			}
 			if model.mergeNewChat && isFleetNewChatRow(model.rows[index]) {
@@ -1344,6 +1282,7 @@ func (model *Model) rebuildOrder() {
 			}
 		}
 	}
+	model.elsewhere = model.outOfPlaceRows()
 }
 
 func isNewChatActionKind(kind compose.Kind) bool {
@@ -1353,13 +1292,16 @@ func isNewChatActionKind(kind compose.Kind) bool {
 func (model *Model) refilter(follow string, fallback int) {
 	query := strings.TrimSpace(model.query.Value())
 	model.filtered = model.filtered[:0]
-	if query == "" {
+	if rows, moded := model.omniRows(); moded {
+		model.filtered = append(model.filtered, rows...)
+	} else if query == "" {
 		model.filtered = append(model.filtered, model.order...)
 	} else {
+		candidates := model.searchSpace() // this place first, then every other place
 		query = strings.ToLower(query)
 		matched := make([]bool, len(model.rows))
-		fuzzyOrder := make([]int, 0, len(model.order))
-		for _, rowIndex := range model.order {
+		fuzzyOrder := make([]int, 0, len(candidates))
+		for _, rowIndex := range candidates {
 			candidate := model.search[rowIndex]
 			if strings.Contains(candidate, query) {
 				matched[rowIndex] = true
@@ -1376,7 +1318,7 @@ func (model *Model) refilter(follow string, fallback int) {
 				matched[fuzzyOrder[match.Index]] = true
 			}
 		}
-		for _, rowIndex := range model.order {
+		for _, rowIndex := range candidates {
 			if matched[rowIndex] {
 				model.filtered = append(model.filtered, rowIndex)
 			}
@@ -1449,7 +1391,7 @@ func rowEngine(kind compose.Kind) pfmengine.ID {
 }
 
 // Result returns the effects accumulated by the pure model. Cancelled reverts
-// PrimaryAccount to what the picker opened with, since a ⌃S account switch is
+// PrimaryAccount to what the picker opened with, since a wizard account choice is
 // only a pending intent until the picker exits deliberately.
 //
 // KillChanges survives a cancel: it is no longer a request to apply anything,

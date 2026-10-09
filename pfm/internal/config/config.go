@@ -98,6 +98,8 @@ type ClaudePrefs struct {
 	// PluginCheckoutRoot is claude.pluginCheckoutRoot, an absolute path; empty
 	// when unset. Machine-wide: an account may not set it.
 	PluginCheckoutRoot string
+	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
+	CostLedger bool
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -293,6 +295,7 @@ type rawClaude struct {
 	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
 	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
 	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
+	CostLedger             *bool   `json:"costLedger,omitempty"`
 }
 
 type rawOpenCode struct {
@@ -446,18 +449,19 @@ func defaultsWithMCPServers(
 		"claude.cleanupPeriodDays":                           SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
 		KeyClaudePluginCheckoutRoot:                          SourceDefault,
+		KeyClaudeCostLedger:                                  SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
 		engineConfigKey(pfmengine.OpenCode, engineKeyBinary): SourceDefault,
-		"mcp.http.port":         SourceDefault,
-		"ask.engine":            SourceDefault,
-		"tmux.titles.enabled":   SourceDefault,
-		"nameSync.interval":     SourceDefault,
-		keyDoctorIgnoreWarnings: SourceDefault,
-		keyDoctorAcceptedMCP:    SourceDefault,
+		"mcp.http.port":                                      SourceDefault,
+		"ask.engine":                                         SourceDefault,
+		"tmux.titles.enabled":                                SourceDefault,
+		"nameSync.interval":                                  SourceDefault,
+		keyDoctorIgnoreWarnings:                              SourceDefault,
+		keyDoctorAcceptedMCP:                                 SourceDefault,
 	}
 	for _, id := range pfmengine.All() {
 		name := pfmengine.MustLookup(id).LongName
@@ -496,6 +500,7 @@ func defaultsWithMCPServers(
 			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
 			Cache1H:               true,
+			CostLedger:            true,
 
 			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 		},
@@ -740,6 +745,10 @@ func loadWithMCPServers(
 			}
 			result.Claude.PluginCheckoutRoot = root
 			result.Sources[KeyClaudePluginCheckoutRoot] = SourceFile
+		}
+		if raw.Claude.CostLedger != nil {
+			result.Claude.CostLedger = *raw.Claude.CostLedger
+			result.Sources[KeyClaudeCostLedger] = SourceFile
 		}
 		if err := applySubagentCaps(
 			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
@@ -1441,6 +1450,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			"cache1h":               config.Claude.Cache1H,
 			"nativeCursor":          config.Claude.NativeCursor,
 			"pluginCheckoutRoot":    pluginRoot,
+			"costLedger":            config.Claude.CostLedger,
 		},
 		codexName: codexValue,
 		"tmux": map[string]any{

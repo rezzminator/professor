@@ -20,7 +20,7 @@
 | Kind | variant of `rr`, declared in `templates/global/agents/variants.json` |
 | Model, effort | `opus`, `medium` |
 | Tools | `WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` — `rr.md`'s list plus `Read`, set by the `tools` override in `variants.json` |
-| Spawns | `sub-rr`, and `tracer-rr` for a repository sub-area |
+| Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line; an existing file of the same name is overwritten (§ Read, and the name guard it gives up) |
 | Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |
 
@@ -36,7 +36,7 @@ Description, verbatim: `Maps a query exhaustively — tier 3, the ultimate: rr-p
 | `so 4 diggers carry the entire frontier` | `so 8 diggers carry the entire frontier` |
 | `Digging ends when every sub-area is settled, when a round settled nothing and added no sub-area, or at the end of round 3 — a safety ceiling, never a target.` | `Digging ends when every sub-area is settled, or when a round settled nothing and added no sub-area; no round ceiling applies.` |
 | `on at most 8 source pages` | `on at most 16 source pages` |
-| `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `tracer-rr` for a sub-area whose answer lives in a repository's code — the full text is in `tracer-rr.md`, § Who spawns it |
+| `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
 
 The third swap replaces the whole stop sentence, so any edit to that sentence in `rr.md` must be mirrored in this entry; `TestShippedGlobalAgentVariantsRender` fails until it is.
 
@@ -78,7 +78,7 @@ Two completed runs and one orphaned run on one query (what benchmarks evaluate d
 | --- | --- |
 | The declaration | `templates/global/agents/variants.json`, entry `rr-pro-max` |
 | The body it swaps into | `templates/global/agents/rr.md` — the stop sentence is swapped whole |
-| The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `rr-pro` entry |
+| The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is identical in the `rr-pro` entry |
 | The renderer and its tests | `plugins/engine-sync/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The hook's docs | `docs/design/hooks/hooks.md`, `docs/dev/pfm-surface.md` |

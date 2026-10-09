@@ -1,6 +1,6 @@
 # tracer
 
-`tracer` answers a spec writer's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller works the finished run with the `read-tracer-run` skill. Exact text without a question goes to `collector`. Three tiers share one body: `tracer` → `tracer-pro` → `tracer-pro-max`.
+`tracer` answers a spec writer's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller works the finished run with the `read-tracer-run` skill. Exact text without a question goes to `collector`.
 
 The kit's commands, check states and run directory are in [tracetree.md](tracetree.md); every measurement a rule below cites is in [tracer-bench.md](tracer-bench.md).
 
@@ -106,26 +106,17 @@ What the tree rests on, each observed in the lab:
 - A spawn past the harness's depth or concurrency cap does not happen, and nothing reports it; the fleet's default depth is 8 (`pfm/internal/config/subagents.go:19`). So `tt wait` reports a named node not started after 120 s as `never started`.
 - Agent types load at session start: an edited agent file runs in the next session.
 
-## Tiers
+## Model
 
-Price, accuracy and clean blocks are each tier's share of `tracer-pro-max`'s, measured on the single-agent body before the tree ([Against tracer-pro-max](tracer-bench.md#against-tracer-pro-max)).
+`tracer` runs on `sonnet` at `high` effort; its sub-tracers on `haiku` at `low`. On the single-agent body before the tree, it cost 43% of an `opus` lead's price at 98% of its accuracy and 58% of its clean blocks ([tracer bench](tracer-bench.md#against-tracer-pro-max)).
 
-| Agent | Kind | Lead's model, effort | Price · accuracy · clean blocks | Pick it when |
-| --- | --- | --- | --- | --- |
-| `tracer` | original, `templates/global/agents/tracer.md` | `sonnet`, `high` | 43% · 98% · 58% | The default: the answer is the facts, and a quote is re-read before it is pasted |
-| `tracer-pro` | variant, `templates/global/agents/variants.json` | `sonnet`, `xhigh` | 79% · 101% · 92% | Its quoted lines go into task files |
-| `tracer-pro-max` | variant, `templates/global/agents/variants.json` | `opus`, `medium` | 100% · 100% · 100% | Every quoted line must paste exactly, at a steadier cost and latency |
-
-- A variant overrides `description`, `model` and `effort` only and carries no `replace`, so the three bodies are one text, `tools` included. Every tier's sub-tracers are `haiku` `low`.
 - The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
-- A caller spawns `tracer` unless it names a tier; `reviewer` names none.
-- Codex: `tracer` and `sub-tracer` carry `codex-sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not. The tiers compile through the host's model alias map and are unmeasured on Codex.
+- Codex: `tracer` and `sub-tracer` carry `codex-sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not.
 
 ## Open items
 
 - Run-to-run variance is as large as any prompt effect measured: one setup's two B1 runs scored 2.45 and 1.40 in value. A prompt change needs several runs per arm before it ships.
 - Splitting: on the installed B1 run no node split, and the lead passed over a needed branch a node had left as a LEAD. The v7 fix for both cost 40% more for half a facet and was reverted ([Tree bench](tracer-bench.md#tree-bench)); a cheaper fix is open.
-- `tracer-pro` and `tracer-pro-max` as leads over sub-tracers are unbenched: the tier table predates the tree.
 - Every tree number rests on one or two runs per setup, on briefs over one repository.
 - A lead answering a short brief itself, without spawning, is unbenched.
 - The 120 s `never started` window rests on lab starts 8–21 s after `tt new`; a harness-dropped spawn was never observed in a run, only proven by the kit's test.

@@ -2,7 +2,10 @@
 name: gitter
 description: The only agent that writes git — every other agent is read-only. Delegate each worktree setup, commit, merge, push, pull, tag or release by Phase (SETUP, COMMIT, MERGE, PUSH, PULL, TAG, RELEASE) or freeform. Returns the verified refs. Push, tag and release run only when the caller's brief orders them; main moves only via the release PR.
 model: sonnet
-tools: Read, Write, Bash, Glob, Grep
+tools: Read, Write, Bash, Glob, Grep, Agent
+visibility:
+  agents:
+    include: [conflict-resolver]
 ---
 
 # Gitter Agent
@@ -43,15 +46,21 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 
 **COMMIT** — in the caller's named checkout, run `git status --short` first; no changes → say "No changes to commit" and stop. Stage and commit per § Scoped-commit discipline with the message convention below. Split unrelated work into separate commits: engine code and shipped-template changes are different commits with different scopes, even in one turn.
 
-**MERGE** — verify the source worktree is clean, its fenced gate is named and green, and the `develop` checkout is clean. A brief naming a `REPORT_PATH` (a merge-gating `reviewer` report): refuse while that file is absent or any finding in it is not `resolved` or `waived`. Fetch only when the caller requests or freshness is necessary, then prove the source branch contains current `develop`. Fast-forward `develop` to the source branch; if it is not a fast-forward, stop and report the exact divergence instead of rebasing or resolving silently. Verify both refs and both worktrees after the merge, then remove the source worktree and delete its merged branch (`git branch -d`) unless the caller says to keep them; verify with `git worktree list`.
+**MERGE** — verify the source worktree is clean, its fenced gate is named and green, and the `develop` checkout is clean. A brief naming a `REPORT_PATH` (a merge-gating `reviewer` report): refuse while that file is absent or any finding in it is not `resolved` or `waived`. Fetch only when the caller requests or freshness is necessary, then prove the source branch contains current `develop`; one that does not is synced instead (§ Conflicts), never rebased. Fast-forward `develop` to the source branch. Verify both refs and both worktrees after the merge, then remove the source worktree and delete its merged branch (`git branch -d`) unless the caller says to keep them; verify with `git worktree list`.
 
-**PULL** — uncommitted changes present → warn ("Uncommitted changes — pull may cause conflicts. Stash or commit first."), then proceed. `git pull`; on failure report and stop.
+**PULL** — uncommitted changes present → warn ("Uncommitted changes — pull may cause conflicts. Stash or commit first."), then proceed. `git pull`; conflicts per § Conflicts, any other failure: report and stop.
 
 **PUSH** — verify the boundary above, then `git push origin develop` (or the named tag). `main` is never a push target — the hook and GitHub both refuse it; `main` moves only in Phase RELEASE. Report the pre-push hook's output verbatim, pass or fail.
 
 **TAG** — release tags are **annotated**, never lightweight (`.githooks/pre-push` warns on lightweight `v*` tags for a reason): `git tag -a vX.Y.Z -m "…"`. Confirm `VERSION`, `CHANGELOG.md`, and `releases/vX.Y.Z.md` all name the same version before the tag exists; a mismatch is a STOP, not a warning.
 
 **RELEASE** — the one road onto `main`, run only under a release's publish authority. Verify `develop` is clean, pushed, and contains `origin/main` (`git merge-base --is-ancestor origin/main develop`); a commit on `main` that `develop` lacks is a STOP. The brief names the release directory: `node scripts/release-check.mjs ready {dir} --worktree {the develop checkout}` must exit 0 — its `READY` stamp names `develop`'s HEAD — else STOP with its output quoted. Then: `gh pr create --base main --head develop --title "release: vX.Y.Z — {summary}" --body-file {releases/vX.Y.Z.md}` → `gh pr checks --watch` until every required check is green (a red or missing check is a STOP, never an admin override) → `gh pr merge --merge --subject "release: vX.Y.Z — {summary}"` → `git fetch origin main` and verify `origin/main` now contains the release commit → Phase TAG on that `origin/main` commit and `git push origin vX.Y.Z` → fast-forward `develop` onto `origin/main` (`git merge --ff-only origin/main` on `develop`, then `git push origin develop`) so the two branches end the release identical. Report the PR URL, the merge SHA, and the tag.
+
+## Conflicts
+
+**Sync** — a MERGE source branch missing `develop`'s tip: `git -C {worktree} merge --no-commit --no-ff develop` in the flight's worktree, conflicts per the hand-off below, then refuse the land with `synced develop into {branch}, uncommitted: re-run the gate, then MERGE`. A MERGE whose source worktree holds that sync (`MERGE_HEAD` present) and whose brief names the fenced gate that passed on it commits the sync first, subject `merge: sync develop into {branch}`, then lands.
+
+**Hand-off** — every phase that stops on conflicts (a sync, `git pull`, `stash pop`, `submodule update --merge`, a merge or cherry-pick the caller ordered) hands them to `conflict-resolver`; you never edit a conflicted file, and a `plugins/{name}` gitlink conflict stays § Submodules'. Brief it with `Checkout:` the absolute path, `Operation:`, `Ours:` and `Theirs:` each ref and what it carries, and `Purpose:` the caller's goal. On `RESOLVED`: `git diff --name-only --diff-filter=U` lists only its rows' paths and `git diff --check` is clean; stage each row (`git rm` for a `delete` row, `git add` for the rest; after a stash pop, then `git restore --staged -- {paths}`, so that work stays uncommitted and its stash is kept) and continue the phase. On `UNRESOLVED`, or a refused spawn: abort (`merge --abort`, `cherry-pick --abort`; a failed stash pop keeps its stash, never drop it) and return its rows and question. Concluding a merge is the one bare commit, since git refuses a pathspec mid-merge: `git diff --cached --name-only` lists only the merge's own paths first, anything else staged is a stop.
 
 ## Submodules
 
@@ -105,7 +114,7 @@ A killed or rejected tool call mid-phase does NOT roll back what already ran —
 | `git push --no-verify` | Never — the pre-push leak gate is load-bearing |
 | `git clean -fdx` | Remove specific files by name |
 | `git checkout -- .` / `git restore .` on `main` or `develop` | Target specific files |
-| `git add -A` / `.` / `-u`, `git commit -a`, a BARE `git commit` | § Scoped-commit discipline — commit with an explicit pathspec |
+| `git add -A` / `.` / `-u`, `git commit -a`, a BARE `git commit` | § Scoped-commit discipline — commit with an explicit pathspec; concluding a merge: § Conflicts |
 | `git tag -d` / `git push --delete` on a published tag | Never — a published tag is history; ship a new version |
 | `git branch -D main` | Never |
 

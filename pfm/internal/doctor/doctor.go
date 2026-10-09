@@ -200,6 +200,7 @@ func Run(
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
 	tally.warnings += printActivityLogDoctor(stdout, runtime, dependencies.Env)
+	tally.warnings += printCostLedgerDoctor(stdout, runtime, dependencies.Env)
 	tally.warnings += printSupervisionDoctor(ctx, stdout, dependencies, runtime)
 	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
 	verboseDir := ""

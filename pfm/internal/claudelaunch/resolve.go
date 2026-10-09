@@ -137,6 +137,8 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 		return strconv.FormatInt(prefs.AutoCompactWindow, 10)
 	case knobTmuxTruecolor:
 		return strconv.FormatBool(prefs.TmuxTruecolor)
+	case knobCostLedger:
+		return strconv.FormatBool(prefs.CostLedger)
 	case knobTheme:
 		if prefs.Theme == "" {
 			return unsetWord

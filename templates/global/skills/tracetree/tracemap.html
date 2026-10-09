@@ -757,26 +757,31 @@ function drawRoutes() {
   for (const t of order) {
     const steps = TH.get(t).steps;
     if (steps.length < 2) continue;
-    const on = inFocus(t), c = tcolor(t);
-    ctx.save();
-    ctx.lineJoin = "round"; ctx.lineCap = "round";
-    ctx.lineWidth = f && on ? 2.1 : 1.1;
-    ctx.strokeStyle = withA(c, f ? (on ? 0.95 : 0.05) : 0.42);
-    if (f && on && TOK.dark) { ctx.shadowColor = withA(c, 0.7); ctx.shadowBlur = 8; }
-    ctx.beginPath();
+    const on = inFocus(t), c = tcolor(t), alpha = f ? (on ? 0.95 : 0.05) : 0.42;
+    // a "then" route is walk order only, no call or name in the code links its ends: dashed and fainter
+    const segs = [];
     for (let j = 1; j < steps.length; j++) {
       const a = steps[j - 1], b = steps[j];
       if (!seen(b)) {
-        if (S.tau != null && seen(a)) {
-          const u = clamp((S.tau - a.time) / (b.time - a.time), 0, 1);
-          partial(segment(a, b), u);
-        }
+        if (S.tau != null && seen(a)) segs.push({ s: b, sg: segment(a, b), u: clamp((S.tau - a.time) / (b.time - a.time), 0, 1) });
         break;
       }
-      tracePath(ctx, segment(a, b));
+      segs.push({ s: b, sg: segment(a, b), u: 1 });
     }
-    ctx.stroke();
-    ctx.restore();
+    for (const walkOnly of [false, true]) {
+      const part = segs.filter((x) => (x.s.link === "then") === walkOnly);
+      if (!part.length) continue;
+      ctx.save();
+      ctx.lineJoin = "round"; ctx.lineCap = walkOnly ? "butt" : "round";
+      ctx.lineWidth = f && on ? 2.1 : 1.1;
+      ctx.strokeStyle = withA(c, walkOnly ? alpha * 0.55 : alpha);
+      if (walkOnly) ctx.setLineDash([5, 4]);
+      if (f && on && TOK.dark && !walkOnly) { ctx.shadowColor = withA(c, 0.7); ctx.shadowBlur = 8; }
+      ctx.beginPath();
+      for (const x of part) x.u < 1 ? partial(x.sg, x.u) : tracePath(ctx, x.sg);
+      ctx.stroke();
+      ctx.restore();
+    }
     if (on || !f) {
       ctx.fillStyle = withA(c, f ? 1 : 0.85);
       for (const s of steps) {
@@ -1349,6 +1354,7 @@ function threadBlock(t) {
   const items = [
     [glyph((s) => { sv("rect", { x: 3, y: 0, width: 9, height: 14, fill: "currentColor", opacity: ".14" }, s); sv("rect", { x: 3, y: 5, width: 9, height: 4, fill: "var(--t1)", opacity: ".55" }, s); sv("rect", { x: 3, y: 5, width: 2, height: 4, fill: "var(--t1)" }, s); }), "A hop: the lines a walker quoted, re-read from the file and found there."],
     [glyph((s) => { sv("path", { d: "M2 11 C 12 11, 14 3, 24 3", fill: "none", stroke: "var(--t0)", "stroke-width": "1.6" }, s); }), "Its thread moving on to the next hop, in walk order."],
+    [glyph((s) => { sv("path", { d: "M2 11 C 12 11, 14 3, 24 3", fill: "none", stroke: "var(--t0)", "stroke-width": "1.6", "stroke-dasharray": "5 4", opacity: ".55" }, s); }), "Routes are the walkers' reading of the code; nothing was run — dashed: walk order only, no call or name in the code links them."],
     [glyph((s) => { sv("path", { d: "M2 11 C 12 11, 14 3, 24 3", fill: "none", stroke: "var(--t4)", "stroke-width": "1.3", "stroke-dasharray": "3 3" }, s); }), "A split: the walker handed a branch to a child sub-tracer."],
     [glyph((s) => { sv("rect", { x: 9, y: 3.5, width: 7, height: 7, fill: "var(--t2)" }, s); }), "Where the thread leaves the code: returned, written, sent, executed, printed or dropped."],
   ];

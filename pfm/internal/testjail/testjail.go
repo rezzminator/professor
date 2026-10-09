@@ -418,7 +418,7 @@ func InstalledHome(t *testing.T) string {
 		t.Fatal(err)
 	}
 	canonical := filepath.Join(jailedHome, ".local", "bin", "pfm")
-	if err := WriteExecutable(canonical, []byte("jailed-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(canonical, []byte(jailedPfmStub), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", claudeBinary)

@@ -19,7 +19,8 @@
     "requireManagedCleanup": true,
     "maxSubagentSpawnDepth": 8,
     "maxConcurrentSubagents": null,
-    "pluginCheckoutRoot": null
+    "pluginCheckoutRoot": null,
+    "costLedger": true
   },
   "codex": {
     "yolo": true,

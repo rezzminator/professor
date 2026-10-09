@@ -1,6 +1,6 @@
 # rr-pro
 
-`rr-pro` is the `rr` lead with wider caps, more reasoning and the repository lane: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`, and a `tracer-rr` for each repository whose code holds an answer. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
+`rr-pro` is the `rr` lead with wider caps, more reasoning and the repository lane: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`, and a `clone-distiller` for each repository whose code holds an answer. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
 
 ## Contents
 
@@ -18,7 +18,7 @@
 | Kind | variant of `rr`, declared in `templates/global/agents/variants.json` |
 | Model, effort | `opus`, `medium` |
 | Tools | `WebSearch, WebFetch, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` (inherited from `rr.md`) |
-| Spawns | `sub-rr`, and `tracer-rr` for a repository sub-area |
+| Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
 | Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |
 
@@ -34,7 +34,7 @@ Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → he
 | `so 4 diggers carry the entire frontier` | `so 6 diggers carry the entire frontier` |
 | `or at the end of round 3 — a safety ceiling` | `or at the end of round 5 — a safety ceiling` |
 | `on at most 8 source pages` | `on at most 12 source pages` |
-| `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `tracer-rr` for a sub-area whose answer lives in a repository's code — the full text is in `tracer-rr.md`, § Who spawns it |
+| `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
 
 - Each swapped text must occur exactly once in `rr.md`'s body. `renderGlobalAgentVariant` (`plugins/engine-sync/internal/codexgen/globalvariants.go`) refuses anything else with `"replace" text {text} occurs {n} times in the body, want exactly 1`, so an edit to `rr.md` that rewords a swapped sentence fails the render instead of shipping a variant with `rr`'s caps.
 - `TestShippedGlobalAgentVariantsRender` renders the shipped `variants.json` against the shipped `rr.md` and compiles each variant to its Codex TOML; it is the gate that catches the rewording before an install does.
@@ -68,7 +68,7 @@ Three runs on one query (how faithfully fetch-and-answer tools quote a page) set
 | --- | --- |
 | The declaration | `templates/global/agents/variants.json`, entry `rr-pro` |
 | The body it swaps into | `templates/global/agents/rr.md` |
-| The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `rr-pro-max` entry |
+| The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is identical in the `rr-pro-max` entry |
 | The renderer and its tests | `plugins/engine-sync/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The family doc | `docs/design/RR/rr.md` |

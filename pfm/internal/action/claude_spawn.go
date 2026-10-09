@@ -96,6 +96,10 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	var command strings.Builder
 	command.WriteString(envStripWords(launch.Unset))
 	writeAssignments(&command, launch.Env)
+	for _, word := range launch.Wrapper {
+		command.WriteByte(' ')
+		command.WriteString(Quote(word))
+	}
 	command.WriteByte(' ')
 	command.WriteString(Quote(launch.Binary))
 	for _, argument := range launch.Argv {
@@ -124,9 +128,14 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 		return nil, err
 	}
 	path := deps.Executable(launch.Binary)
+	args := append(append([]string{}, launch.Wrapper...), path)
+	args = append(args, launch.Argv...)
+	if len(launch.Wrapper) != 0 {
+		path = launch.Wrapper[0]
+	}
 	return &ProcessCommand{
 		ctx: ctx, runner: spawn.runner(), Path: path,
-		Args: append([]string{path}, launch.Argv...),
+		Args: args,
 		Env:  launchEnvironment(os.Environ(), launch),
 	}, nil
 }

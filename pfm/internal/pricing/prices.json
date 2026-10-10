@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "fetched_at": "2026-10-08T13:01:33Z",
+  "fetched_at": "2026-10-10T22:50:50Z",
   "sources": [
     {"provider":"anthropic","url":"https://platform.claude.com/docs/en/about-claude/pricing.md"},
     {"provider":"openai","url":"https://developers.openai.com/api/docs/pricing.md"}
@@ -65,6 +65,7 @@
     {"key":"gpt-6-luna","engine":"codex","in":0.1,"out":0.5,"cached":0.01,"long":{"above":272000,"in":0.2,"out":0.75,"cached":0.02}},
     {"key":"gpt-6-sol","engine":"codex","in":2,"out":10,"cached":0.2,"long":{"above":272000,"in":4,"out":15,"cached":0.4}},
     {"key":"gpt-6.1-sol","engine":"codex","in":2,"out":10,"cached":0.1,"long":{"above":272000,"in":4,"out":15,"cached":0.2}},
+    {"key":"gpt-rosalind-discovery","engine":"codex","in":5,"out":25,"cached":0.5},
     {"key":"gpt-rosalind-research","engine":"codex","in":5,"out":25,"cached":0.5},
     {"key":"o1","engine":"codex","in":15,"out":60,"cached":7.5},
     {"key":"o1-pro","engine":"codex","in":150,"out":600},

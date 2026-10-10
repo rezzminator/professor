@@ -8,7 +8,7 @@ model: claude-sonnet-5-5
 effort: high
 codex-model: gpt-6-luna
 codex-effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
@@ -48,7 +48,7 @@ You execute one mechanical task file and report once: its Steps, Decisions and S
 - The shell may be zsh: write file lists out, never through a `$var`; never name a variable `status` or `path`.
 - Git is read-only: never `stash`, `checkout`, `restore`, `reset`, `apply` or `add`.
 - Search for the lines, then read that range yourself; you spawn no sub-agent. An Edit's result is its proof: reread only lines not yet in your context.
-- At a compaction nudge, finish the step in hand, then write the bare marker `<compact-now>{focus}</compact-now>` beside a tool call (nudged at a wait: the first tool call after the wake, never the wait line); the focus: the task file, the rows done and left, the red and green log paths, the next step.
+- At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__compact`, its `focus`: the task file, the rows done and left, the red and green log paths, the next step.
 
 ## The cap
 

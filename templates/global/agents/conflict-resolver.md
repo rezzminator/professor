@@ -6,7 +6,7 @@ visibility:
     include: [gitter]
 model: opus
 effort: high
-tools: Read, Edit, Write, Bash, Glob, Grep
+tools: Read, Edit, Write, Bash, Glob, Grep, mcp__sub-agent-compact__compact
 codex-sandbox: workspace-write
 ---
 

@@ -76,9 +76,9 @@ The return is also a file. The lander's last act before returning writes it, ver
 
 ## Context budget
 
-- `tools: Read, Write, Edit, Bash, Glob, Grep, Skill` — `Skill` is carried because `/code-review` needs it; nothing else beyond the executor's list.
+- `tools: Read, Write, Edit, Bash, Glob, Grep, Skill, mcp__sub-agent-compact__compact` — `Skill` is carried because `/code-review` needs it; nothing else beyond the executor's list.
 - It reads the diff and the hunks' surroundings by range.
-- `autoCompact`, iteration 0: forced at 350k, nudged from 150k and every 60k after; at a nudge the lander finishes the step in hand and writes `<compact-now>{focus}</compact-now>` beside a tool call (nudged at a wait: the first tool call after the wake, never the wait line), the focus naming `gate.md` as its ledger, each project's gate runs done and left with their log paths, and the next step.
+- `autoCompact`, iteration 0: forced at 350k, nudged from 150k and every 60k after; at a nudge the lander finishes the step in hand and calls `mcp__sub-agent-compact__compact`, its `focus` naming `gate.md` as its ledger, each project's gate runs done and left with their log paths, and the next step.
 - One lander per flight holds every project's manual and suite in one context: the price of one review that sees both sides of every contract change together. It is on the watch list ([Open items](flights.md#open-items)).
 
 ## The accepted risk

@@ -5,7 +5,7 @@ model: sonnet
 effort: high
 codex-model: gpt-6.1-sol
 codex-effort: high
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
@@ -88,7 +88,7 @@ The root writes it, one line per event, after a header with the baseline sha (`g
 - A command you must wait for runs in the foreground with an explicit timeout; one longer than a call allows runs in the background writing its output to a file, with a watch like § The run step 8's on that file. Never a `sleep` chain, never a backgrounded command left behind.
 - The project contract is already in your context: never open a `CLAUDE.md` or `AGENTS.md`. A log is read through `tail` or a search.
 - A call carries all the work it can: independent reads, searches and commands go out together in one message; dependent steps whose next move needs no judgment chain into one shell call (`&&`, `||`, `for`, `if`); every glob is quoted. A new call is earned only by a result you must read before the next step.
-- At a compaction nudge, finish the step in hand (✗ compacting between reading code and editing it), then write the bare marker `<compact-now>{focus}</compact-now>` beside a tool call (nudged at a wait: the first tool call after the wake); the focus: the request, the tracer `RUN`, the `GOAL`, `DECIDE` and door lines, the units done and in flight, the red and green log paths, the next step.
+- At a compaction nudge, finish the step in hand (✗ compacting between reading code and editing it), then call `mcp__sub-agent-compact__compact`, its `focus`: the request, the tracer `RUN`, the `GOAL`, `DECIDE` and door lines, the units done and in flight, the red and green log paths, the next step.
 
 ## The cap
 

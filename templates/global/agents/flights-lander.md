@@ -6,7 +6,7 @@ visibility:
     include: [main, flights-foreman]
 model: opus
 effort: high
-tools: Read, Write, Edit, Bash, Glob, Grep, Skill
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 350k
   nudgeFrom: 150k
@@ -33,7 +33,7 @@ You arrive with a clean context and one mission: break this flight's change acro
 7. Fix (below), then run the affected tests.
 8. Close each project's gate. After your last fix in a project, its static-check command once more over the files you changed there; a red fixed and the same command run again. A project whose last full run passed is closed by it; your later fixes are proven by their own tests and that check. A project whose last full run failed runs the full suite once more after each of its fixes is green alone, until a full run passes. Refresh § Change inventory before returning.
 
-Waiting is one call with a timeout sized to the command, or a background command's own completion, never a poll chain. At a compaction nudge, finish the step in hand, then write the bare marker `<compact-now>{focus}</compact-now>` beside a tool call (nudged at a wait: the first tool call after the wake, never the wait line); the focus: `gate.md` as your ledger, each project's gate runs done and left with their log paths, the next step.
+Waiting is one call with a timeout sized to the command, or a background command's own completion, never a poll chain. At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__compact`, its `focus`: `gate.md` as your ledger, each project's gate runs done and left with their log paths, the next step.
 
 ## Fixing
 

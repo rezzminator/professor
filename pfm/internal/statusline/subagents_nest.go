@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -30,6 +31,8 @@ type agentNesting struct {
 // parent from its meta file's parentAgentId, which Claude Code writes for an
 // agent spawned by another agent (a main-loop spawn carries none). open caches
 // each agent's own turn state for the render, spent each agent's billing.
+// over and now (judgeLiveness) decide which agents with an open turn really
+// work: a transcript cannot say an agent was killed.
 type agentTree struct {
 	dir      string
 	children map[string][]string
@@ -38,6 +41,8 @@ type agentTree struct {
 	open     map[string]turnState
 	spent    map[string]agentSpend
 	ids      []string
+	over     map[string]bool
+	now      time.Time
 }
 
 type turnState int
@@ -47,6 +52,13 @@ const (
 	turnClosed
 	turnWorking
 )
+
+// agentDeadAfter is how long an agent's open turn may stay silent and still
+// count as working. The longest quiet a live agent has is one foreground tool
+// call (Bash stops at ten minutes) or one long model reply; an agent killed
+// mid-stream, or stopped by its parent, leaves a last line nothing ever
+// answers, so past this its open turn is a dead one.
+const agentDeadAfter = 15 * time.Minute
 
 // tailWindow is the first read from a transcript's end; it doubles until a
 // message entry is found, so one huge tool result costs a longer read, never
@@ -88,6 +100,36 @@ func scanAgentTree(sessionTranscript string) *agentTree {
 		}
 	}
 	return tree
+}
+
+// judgeLiveness gives the tree what a transcript cannot say about an agent
+// whose turn is open: the render's clock, and the tasks Claude Code itself
+// lists as over (completed, failed, killed, error), whose open turn is a
+// leftover, not work. Without it every open turn counts as work.
+func (tree *agentTree) judgeLiveness(now time.Time, over map[string]bool) {
+	tree.now, tree.over = now, over
+}
+
+// terminalStatus is a task status Claude Code gives a task that is over.
+func terminalStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case taskCompleted, "failed", "killed", "error":
+		return true
+	}
+	return false
+}
+
+// finishedTasks are the ids of every task in the payload Claude Code lists as
+// over, rows it shows nothing for included: an agent it calls over is not
+// working, whatever its transcript's last line says.
+func finishedTasks(tasks []subagentTask) map[string]bool {
+	over := map[string]bool{}
+	for index := range tasks {
+		if tasks[index].ID != "" && terminalStatus(tasks[index].Status) {
+			over[tasks[index].ID] = true
+		}
+	}
+	return over
 }
 
 // nesting counts every agent below one task, at any depth, and how many of
@@ -132,12 +174,12 @@ func (tree *agentTree) turn(id string) turnState {
 		return state
 	}
 	state := turnClosed
-	open, err := turnOpen(transcript.SubagentTranscript(tree.dir, id))
+	open, last, err := turnOpen(transcript.SubagentTranscript(tree.dir, id))
 	switch {
 	case err != nil:
 		tree.warnings = append(tree.warnings, err.Error())
 		state = turnUnread
-	case open:
+	case open && !tree.over[id] && (tree.now.IsZero() || tree.now.Sub(last) < agentDeadAfter):
 		state = turnWorking
 	}
 	tree.open[id] = state
@@ -149,23 +191,24 @@ func (tree *agentTree) turn(id string) turnState {
 // without a tool_use. A tool call, a tool result, a prompt or a message still
 // streaming (no stop_reason yet) means it is working. A torn final line is the
 // agent mid-write and fails to parse, so it is skipped; a transcript with no message entry yet is a
-// turn that has not produced its first reply.
-func turnOpen(path string) (bool, error) {
+// turn that has not produced its first reply. last is when that entry was
+// written, the file's mtime for a transcript with no message entry yet.
+func turnOpen(path string) (open bool, last time.Time, err error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return false, fmt.Errorf("open sub-agent transcript %s: %w", path, err)
+		return false, time.Time{}, fmt.Errorf("open sub-agent transcript %s: %w", path, err)
 	}
 	defer func() { _ = file.Close() }() // read-only handle; a close error loses nothing
 	info, err := file.Stat()
 	if err != nil {
-		return false, fmt.Errorf("stat sub-agent transcript %s: %w", path, err)
+		return false, time.Time{}, fmt.Errorf("stat sub-agent transcript %s: %w", path, err)
 	}
 	size := info.Size()
 	for window := int64(tailWindow); ; window *= 2 {
 		start := max(size-window, 0)
 		chunk := make([]byte, size-start)
 		if _, err := file.ReadAt(chunk, start); err != nil && !errors.Is(err, io.EOF) {
-			return false, fmt.Errorf("read sub-agent transcript %s: %w", path, err)
+			return false, time.Time{}, fmt.Errorf("read sub-agent transcript %s: %w", path, err)
 		}
 		// The piece after the last newline stays: a torn one fails to parse
 		// and is skipped, as readAgentActivity skips it.
@@ -174,38 +217,43 @@ func turnOpen(path string) (bool, error) {
 			lines = lines[1:] // the window's first piece may start mid-line
 		}
 		for index := len(lines) - 1; index >= 0; index-- {
-			if open, ok := messageTurnOpen(lines[index]); ok {
-				return open, nil
+			if open, stamped, ok := messageTurnOpen(lines[index]); ok {
+				if stamped.IsZero() {
+					stamped = info.ModTime()
+				}
+				return open, stamped, nil
 			}
 		}
 		if start == 0 {
-			return true, nil
+			return true, info.ModTime(), nil
 		}
 	}
 }
 
 // messageTurnOpen answers for one transcript line; ok is false for a line
-// that is not a user or assistant message.
-func messageTurnOpen(line []byte) (open, ok bool) {
+// that is not a user or assistant message. stamped is the line's timestamp,
+// zero when it carries none.
+func messageTurnOpen(line []byte) (open bool, stamped time.Time, ok bool) {
 	var entry struct {
-		Type    string `json:"type"`
-		Message struct {
+		Type      string    `json:"type"`
+		Timestamp time.Time `json:"timestamp"`
+		Message   struct {
 			StopReason *string         `json:"stop_reason"`
 			Content    json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &entry) != nil {
-		return false, false
+		return false, time.Time{}, false
 	}
 	switch entry.Type {
 	case entryUser:
-		return true, true
+		return true, entry.Timestamp, true
 	case entryAssistant:
 	default:
-		return false, false
+		return false, time.Time{}, false
 	}
 	if entry.Message.StopReason == nil || *entry.Message.StopReason == "" {
-		return true, true
+		return true, entry.Timestamp, true
 	}
 	var blocks []struct {
 		Type string `json:"type"`
@@ -213,11 +261,11 @@ func messageTurnOpen(line []byte) (open, ok bool) {
 	if json.Unmarshal(entry.Message.Content, &blocks) == nil {
 		for _, block := range blocks {
 			if block.Type == blockToolUse {
-				return true, true
+				return true, entry.Timestamp, true
 			}
 		}
 	}
-	return false, true
+	return false, entry.Timestamp, true
 }
 
 // nestingSegment renders "2/5": the agents below the task working right now

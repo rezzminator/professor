@@ -265,6 +265,48 @@ func agentCacheText(transcript string, hit int, now time.Time) string {
 	return text + " " + cacheHitText(hit, lapsed)
 }
 
+// unmeasuredCacheText is a sub-agent row's cache segment when its provider
+// names no cache lifetime (a gpt- model through the gateway's chatgpt route):
+// the hit share of the newest completed call, and in the window's place a muted
+// 💾∅. It is neither the warning "?" (a transcript read with no request to
+// count from) nor the failure "!" (a transcript we could not read): the window
+// is unknown by nature, so no countdown is drawn. hit < 0 renders 💾– as above.
+func unmeasuredCacheText(hit int) string {
+	if hit < 0 {
+		return cMuted + "💾–" + reset
+	}
+	return cMuted + "💾∅" + reset + " " + cacheHitText(hit, false)
+}
+
+// openAIModel is true for a model OpenAI serves, whose id opens with gpt-: its
+// cache has no lifetime a transcript records, unlike Anthropic's cache_creation
+// split.
+func openAIModel(model string) bool {
+	return strings.HasPrefix(modelVersion(model), "gpt-")
+}
+
+// transcriptUsage is a message's usage block and whether it reports cache
+// counters at all: an absent counter and a zero one are different facts.
+type transcriptUsage struct {
+	pricing.UsageBlock
+	reportsCache bool
+}
+
+func (usage *transcriptUsage) UnmarshalJSON(raw []byte) error {
+	if err := json.Unmarshal(raw, &usage.UsageBlock); err != nil {
+		return err
+	}
+	var counters struct {
+		Read    *int64 `json:"cache_read_input_tokens"`
+		Created *int64 `json:"cache_creation_input_tokens"`
+	}
+	if err := json.Unmarshal(raw, &counters); err != nil {
+		return err
+	}
+	usage.reportsCache = counters.Read != nil || counters.Created != nil
+	return nil
+}
+
 // cacheHitText renders the share of one call's prompt read from the cache:
 // 94%. Green from 80, yellow from 50, red below — the context re-written.
 // The figure only changes when a call completes, so once the window has

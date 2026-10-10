@@ -576,3 +576,115 @@ func TestRecordTranscriptLineReadsEachBlockOnItsOwn(t *testing.T) {
 		t.Fatalf("errors = %d, seen = %v; want the one errored result and the t9 call", activity.errors, seen)
 	}
 }
+
+// gptAgentLines is a sub-agent transcript the way the model gateway's chatgpt
+// route leaves it, taken from a live gpt-6-luna tracer: the translated usage
+// counts the uncached remainder in input_tokens (the gateway log for the
+// second call reads input=7619 cached=5888, the fourth input=13719
+// cached=12032), the cache_creation split is all zeros because OpenAI names
+// no cache lifetime, and each call first writes a message_start line whose
+// usage is the gateway's estimate of the whole prompt with no cache fields.
+// The three completed calls hit 77%, 87% and 87%.
+var gptAgentLines = []string{
+	`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
+	`{"type":"assistant","timestamp":"2026-09-24T10:00:30Z","message":{"id":"msg_a","model":"gpt-6-luna",` +
+		`"stop_reason":"tool_use","content":[{"type":"tool_use","id":"call_a","name":"Bash"}],` +
+		`"usage":{"input_tokens":1731,"cache_creation_input_tokens":0,"cache_read_input_tokens":5888,"output_tokens":30,` +
+		`"output_tokens_details":{"thinking_tokens":0},"service_tier":"standard",` +
+		`"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"inference_geo":"",` +
+		`"iterations":[],"speed":"standard"}}}`,
+	`{"type":"user","timestamp":"2026-09-24T10:00:32Z","message":{"content":[{"type":"tool_result",` +
+		`"tool_use_id":"call_a","content":"ok"}]}}`,
+	`{"type":"assistant","timestamp":"2026-09-24T10:00:35Z","message":{"id":"msg_b","model":"gpt-6-luna",` +
+		`"stop_reason":null,"content":[{"type":"text","text":"checking"}],` +
+		`"usage":{"input_tokens":13650,"output_tokens":0}}}`,
+	`{"type":"assistant","timestamp":"2026-09-24T10:00:40Z","message":{"id":"msg_b","model":"gpt-6-luna",` +
+		`"stop_reason":"end_turn","content":[{"type":"text","text":"checking"}],` +
+		`"usage":{"input_tokens":1687,"cache_creation_input_tokens":0,"cache_read_input_tokens":12032,"output_tokens":249,` +
+		`"output_tokens_details":{"thinking_tokens":0},"service_tier":"standard",` +
+		`"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"inference_geo":"",` +
+		`"iterations":[],"speed":"standard"}}}`,
+	`{"type":"user","timestamp":"2026-09-24T10:00:50Z","message":{"role":"user","content":"again"}}`,
+	`{"type":"assistant","timestamp":"2026-09-24T10:01:00Z","message":{"id":"msg_c","model":"gpt-6-luna",` +
+		`"stop_reason":null,"content":[{"type":"text","text":"working"}],` +
+		`"usage":{"input_tokens":14200,"output_tokens":0}}}`,
+}
+
+// An OpenAI-served row's cache segment carries the hit share of its newest completed
+// call, counted from the translated usage like the gateway counts it, and no
+// countdown: OpenAI names no cache lifetime, so the window is a deliberate
+// "∅" — not the "?" of a transcript with no request to count from, and not the
+// "!" of a transcript that could not be read. The message_start line of the
+// call still streaming reports no cache fields and must not read as 0%.
+func TestRenderSubagentsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
+	task := func(id string) string {
+		return `{"id":"` + id + `","type":"local_agent","status":"running","model":"gpt-6-luna[1m]",` +
+			`"contextWindowSize":1000000,"tokenCount":10}`
+	}
+	cases := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"completed call after a streamed one", gptAgentLines[:6], "│💾∅ 87%"},
+		{"a call still streaming keeps the last completed hit", gptAgentLines, "│💾∅ 87%"},
+		{"first call still streaming: no hit yet", append(gptAgentLines[:1:1], gptAgentLines[3]), "│💾–"},
+		{"first completed call", gptAgentLines[:3], "│💾∅ 77%"},
+		// A fresh agent's first call reads nothing from the cache: the gateway
+		// still reports both counters, at zero, and that is a 0% call, not a
+		// line without counters.
+		{"a cold call reporting zero counters is 0%", []string{
+			gptAgentLines[0],
+			`{"type":"assistant","timestamp":"2026-09-24T10:00:30Z","message":{"id":"msg_z","model":"gpt-6-luna",` +
+				`"stop_reason":"end_turn","content":[{"type":"text","text":"done"}],` +
+				`"usage":{"input_tokens":7619,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":30}}}`,
+		}, "│💾∅ 0%"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			session := subagentSession(t, map[string][]string{"g1": tc.lines}, map[string]string{"g1": "gpt-tracer"})
+			got, _ := renderOneSubagent(t, session, task("g1"))
+			if !strings.HasSuffix(got, tc.want) && !strings.Contains(got, tc.want+"│") {
+				t.Fatalf("content = %q, want the cache segment %q", got, tc.want)
+			}
+			if strings.Contains(got, "💾?") || strings.Contains(got, "✓") || strings.Contains(got, "✗") {
+				t.Fatalf("content = %q: an OpenAI-served row draws no countdown and no unknown-tier ?", got)
+			}
+		})
+	}
+	t.Run("an unreadable transcript is still the failure marker", func(t *testing.T) {
+		session := subagentSession(t, map[string][]string{}, map[string]string{"g2": "gpt-tracer"})
+		got, _ := renderOneSubagent(t, session, task("g2"))
+		if !strings.Contains(got, "💾!") || strings.Contains(got, "∅") {
+			t.Fatalf("content = %q, want 💾! and no unknown-window marker", got)
+		}
+	})
+	t.Run("the model the transcript records names the provider when the payload names none", func(t *testing.T) {
+		session := subagentSession(t,
+			map[string][]string{"g3": gptAgentLines[:6]}, map[string]string{"g3": "gpt-tracer"})
+		got, _ := renderOneSubagent(t, session,
+			`{"id":"g3","type":"local_agent","status":"running","contextWindowSize":1000000,"tokenCount":10}`)
+		if !strings.Contains(got, "│💾∅ 87%") {
+			t.Fatalf("content = %q, want the unknown window and 87%%", got)
+		}
+	})
+}
+
+// A Claude row keeps its window and its hit exactly: the length from the cache
+// write's split, the countdown from its newest request, and a message_start
+// line that carries cache fields counts as a real call.
+func TestRenderSubagentsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
+	session := subagentSession(t, map[string][]string{"c1": {
+		`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","timestamp":"2026-09-24T10:01:00Z","message":{"id":"m1","model":"claude-opus-5-5",` +
+			`"stop_reason":null,"content":[{"type":"text","text":"a"}],` +
+			`"usage":{"input_tokens":6,"cache_read_input_tokens":900,"cache_creation_input_tokens":94,` +
+			`"cache_creation":{"ephemeral_5m_input_tokens":94,"ephemeral_1h_input_tokens":0},"output_tokens":1}}}`,
+	}}, map[string]string{"c1": "tracer"})
+	got, _ := renderOneSubagent(t, session,
+		`{"id":"c1","type":"local_agent","status":"running","model":"claude-opus-5-5[1m]",`+
+			`"contextWindowSize":1000000,"tokenCount":10}`)
+	if !strings.Contains(got, "│💾5m✓3m:0s 90%") {
+		t.Fatalf("content = %q, want the Claude row's 5m window and 90%%", got)
+	}
+}

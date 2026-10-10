@@ -61,7 +61,9 @@ type subagentRow struct {
 // until the first model turn lands; effort is the level its latest request
 // went out at, "" until one records it; err means the transcript could not be
 // read and roleErr the meta file, each rendering "?" — never as zero or empty.
-// spend is its own billing plus every agent's below it.
+// spend is its own billing plus every agent's below it. noCacheWindow is set
+// for an agent whose provider names no cache lifetime (a gpt- model through the
+// gateway's chatgpt route): its row shows the hit share and no countdown.
 type agentActivity struct {
 	role        string
 	roleErr     error
@@ -70,11 +72,14 @@ type agentActivity struct {
 	errors      int
 	compactions int
 	cacheHit    int
+	model       string
 	transcript  string
 	last        time.Time
 	err         error
 	nest        agentNesting
 	spend       agentSpend
+
+	noCacheWindow bool
 }
 
 const (
@@ -257,8 +262,10 @@ func RenderSubagents(
 		if task.Type == localAgentTask {
 			if tree == nil {
 				tree = scanAgentTree(data.TranscriptPath)
+				tree.judgeLiveness(now, finishedTasks(data.Tasks))
 			}
 			read := readAgentActivity(data.TranscriptPath, task.ID, prices)
+			read.noCacheWindow = openAIModel(task.Model) || openAIModel(read.model)
 			if read.roleErr == nil {
 				read.role = roles.name(read.role, warn)
 			}
@@ -345,9 +352,7 @@ func subagentContent(
 // Claude Code marks an orchestrator completed while its background workers
 // work on, and that row is not finished.
 func rowFinished(task *subagentTask, activity *agentActivity) bool {
-	switch strings.TrimSpace(task.Status) {
-	case taskCompleted, "failed", "killed", "error":
-	default:
+	if !terminalStatus(task.Status) {
 		return false
 	}
 	return activity == nil || activity.nest.active == 0 && activity.nest.unknown == 0 && activity.nest.err == nil
@@ -552,7 +557,11 @@ func activitySegments(activity agentActivity, running bool, now time.Time) []row
 	if activity.errors > 0 {
 		parts = append(parts, rowPart{text: cBad + plural(activity.errors, "error") + reset})
 	}
-	parts = append(parts, rowPart{text: agentCacheText(activity.transcript, activity.cacheHit, now), drop: dropCache})
+	cache := agentCacheText(activity.transcript, activity.cacheHit, now)
+	if activity.noCacheWindow {
+		cache = unmeasuredCacheText(activity.cacheHit)
+	}
+	parts = append(parts, rowPart{text: cache, drop: dropCache})
 	if activity.compactions > 0 {
 		compactions := cCompaction + fmt.Sprintf("⟲%d", activity.compactions) + reset
 		parts = append(parts, rowPart{text: compactions, drop: dropCompactions})
@@ -703,10 +712,10 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		Timestamp time.Time `json:"timestamp"`
 		Effort    any       `json:"effort"`
 		Message   struct {
-			ID      string              `json:"id"`
-			Model   string              `json:"model"`
-			Content json.RawMessage     `json:"content"`
-			Usage   *pricing.UsageBlock `json:"usage"`
+			ID      string           `json:"id"`
+			Model   string           `json:"model"`
+			Content json.RawMessage  `json:"content"`
+			Usage   *transcriptUsage `json:"usage"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &entry) != nil {
@@ -740,8 +749,20 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if level, ok := entry.Effort.(string); ok && strings.TrimSpace(level) != "" {
 		activity.effort = strings.TrimSpace(level)
 	}
-	spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, entry.Message.Usage)
-	if usage := entry.Message.Usage; usage != nil {
+	if model := entry.Message.Model; model != "" && model != "<synthetic>" {
+		activity.model = model
+	}
+	usage := entry.Message.Usage
+	if usage == nil {
+		spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, nil)
+		return
+	}
+	spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, &usage.UsageBlock)
+	// A line that reports no cache counters is a call still streaming (the
+	// gateway's message_start carries its whole-prompt estimate in
+	// input_tokens and nothing else): reading it as a call would drop the
+	// newest completed call's share to 0%.
+	if usage.reportsCache {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
 			activity.cacheHit = hit
 		}

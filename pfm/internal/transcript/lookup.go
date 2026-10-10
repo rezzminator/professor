@@ -36,7 +36,7 @@ func FindSessions(roots []string, prefix string) (found []string, errs []error) 
 				switch {
 				case errors.Is(err, fs.ErrNotExist):
 				case err != nil:
-					errs = append(errs, fmt.Errorf("stat %s: %w", path, err))
+					errs = append(errs, fmt.Errorf("stat Claude transcript %s: %w", path, err))
 				case !info.IsDir():
 					found = append(found, path)
 				}
@@ -59,10 +59,11 @@ func FindSubagents(roots []string, prefix string) (found []string, errs []error)
 			for _, session := range sessions {
 				dir := filepath.Join(session, subagentsDirName)
 				info, err := os.Stat(dir)
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
 				if err != nil {
-					if !errors.Is(err, fs.ErrNotExist) {
-						errs = append(errs, fmt.Errorf("stat %s: %w", dir, err))
-					}
+					errs = append(errs, fmt.Errorf("stat Claude subagents directory %s: %w", dir, err))
 					continue
 				}
 				if !info.IsDir() {

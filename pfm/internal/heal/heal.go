@@ -127,6 +127,10 @@ type Stores struct {
 	Root    string
 }
 
+// ErrNoStores is a Codex home that was read and holds no thread store: a
+// build that keeps none, so there is nothing to heal — never a failed lookup.
+var ErrNoStores = errors.New("no Codex thread store")
+
 // FindStores locates the newest generation of each store under codexHome.
 // Codex leaves older generations behind when it migrates, and the highest N is
 // the live one.
@@ -159,10 +163,10 @@ func FindStores(codexHome string) (Stores, error) {
 		}
 	}
 	if stores.State == "" {
-		return Stores{}, fmt.Errorf("no state_N.sqlite under %s", codexHome)
+		return Stores{}, fmt.Errorf("%w: no state_N.sqlite under %s", ErrNoStores, codexHome)
 	}
 	if stores.History == "" {
-		return Stores{}, fmt.Errorf("no thread_history_N.sqlite under %s", codexHome)
+		return Stores{}, fmt.Errorf("%w: no thread_history_N.sqlite under %s", ErrNoStores, codexHome)
 	}
 	return stores, nil
 }
@@ -189,7 +193,7 @@ func storeGeneration(name, prefix string) (int, bool) {
 //
 // only, when set, limits the sweep to one thread id.
 func Sweep(ctx context.Context, stores Stores, only string) (report Report, returnErr error) {
-	rolloutByID, err := rolloutPaths(ctx, stores.State)
+	rolloutByID, err := rolloutPaths(ctx, stores.State, only)
 	if err != nil {
 		return Report{}, err
 	}
@@ -205,8 +209,13 @@ func Sweep(ctx context.Context, stores Stores, only string) (report Report, retu
 
 	query := "SELECT thread_id, next_rollout_byte_offset, next_rollout_ordinal " +
 		"FROM thread_history_projection_state"
+	var args []any
+	if only != "" {
+		query += " WHERE thread_id = ?"
+		args = append(args, only)
+	}
 	op := obs.SQL(ctx, healKind, query)
-	rows, err := history.QueryContext(ctx, query)
+	rows, err := history.QueryContext(ctx, query, args...)
 	op.End(-1, err)
 	if err != nil {
 		return Report{}, fmt.Errorf(
@@ -221,14 +230,11 @@ func Sweep(ctx context.Context, stores Stores, only string) (report Report, retu
 		}
 	}()
 
-	report = Report{Totals: make(map[Verdict]int)}
+	report = Report{}
 	for rows.Next() {
 		var state ThreadState
 		if err := rows.Scan(&state.ID, &state.Offset, &state.Ordinal); err != nil {
 			return Report{}, fmt.Errorf("scan a projection cursor: %w", err)
-		}
-		if only != "" && state.ID != only {
-			continue
 		}
 		state.RolloutPath = rolloutByID[state.ID]
 		state.Verdict, state.Detail, state.Size = classify(
@@ -236,20 +242,29 @@ func Sweep(ctx context.Context, stores Stores, only string) (report Report, retu
 			state.Offset,
 			state.Ordinal,
 		)
-		report.Totals[state.Verdict]++
 		report.Threads = append(report.Threads, state)
-		if state.Verdict.LeftAlone() {
-			report.LeftAlone = append(report.LeftAlone, state.ID)
-		}
 	}
 	if err := rows.Err(); err != nil {
 		return Report{}, fmt.Errorf("iterate the projection cursors: %w", err)
+	}
+	report.recount()
+	return report, nil
+}
+
+// recount keeps summaries tied to the current protected thread readings.
+func (report *Report) recount() {
+	report.Totals = make(map[Verdict]int)
+	report.LeftAlone = nil
+	for _, state := range report.Threads {
+		report.Totals[state.Verdict]++
+		if state.Verdict.LeftAlone() {
+			report.LeftAlone = append(report.LeftAlone, state.ID)
+		}
 	}
 	sort.Slice(report.Threads, func(left, right int) bool {
 		return report.Threads[left].ID < report.Threads[right].ID
 	})
 	sort.Strings(report.LeftAlone)
-	return report, nil
 }
 
 // classify judges one cursor against the rollout it points into. It is the
@@ -521,7 +536,7 @@ func indexByte(data []byte, target byte) int {
 }
 
 // rolloutPaths reads the thread → rollout mapping out of the state store.
-func rolloutPaths(ctx context.Context, statePath string) (paths map[string]string, returnErr error) {
+func rolloutPaths(ctx context.Context, statePath, only string) (paths map[string]string, returnErr error) {
 	state, err := openReadOnly(statePath)
 	if err != nil {
 		return nil, err
@@ -531,9 +546,14 @@ func rolloutPaths(ctx context.Context, statePath string) (paths map[string]strin
 			returnErr = errors.Join(returnErr, fmt.Errorf("close state store %q: %w", statePath, err))
 		}
 	}()
-	const query = "SELECT id, rollout_path FROM threads"
+	query := "SELECT id, rollout_path FROM threads"
+	var args []any
+	if only != "" {
+		query += " WHERE id = ?"
+		args = append(args, only)
+	}
 	op := obs.SQL(ctx, healKind, query)
-	rows, err := state.QueryContext(ctx, query)
+	rows, err := state.QueryContext(ctx, query, args...)
 	op.End(-1, err)
 	if err != nil {
 		return nil, fmt.Errorf("read threads from %q: %w", statePath, err)
@@ -566,29 +586,51 @@ func openReadOnly(path string) (*sql.DB, error) {
 	return database, nil
 }
 
-// Live reports whether Codex holds this thread's writer lock right now.
-//
-// A held lock means a running seat owns the thread and its in-memory cursor
-// would race a heal, so the thread is left alone. A lock file that exists but
-// is NOT held is the ordinary leftover of a closed seat.
-func Live(codexHome, threadID string) bool {
+// Live reports a held writer lock separately from an unreadable lock.
+// Only a missing lock file means not live; other probe failures are unknown.
+func Live(codexHome, threadID string) (live bool, returnErr error) {
 	path := filepath.Join(codexHome, "thread-writer-locks", threadID+".lock")
-	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	file, live, err := writerLock(path, false)
 	if err != nil {
-		return false
+		return false, err
 	}
-	defer func() {
+	if file != nil {
 		if err := file.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "heal: close writer lock %s: %v\n", path, err)
+			return false, fmt.Errorf("close writer lock %s: %w", path, err)
 		}
-	}()
-	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return true
 	}
-	// The probe took the lock; give it straight back, because holding it is
-	// itself the thing that would block a seat from opening.
-	_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
-	return false
+	return live, nil
+}
+
+// writerLock leaves a successful lock held until its returned file is closed.
+// The create door is used only while the caller holds Codex's coordination lock,
+// which serializes writer-file creation and removal (including stale cleanup).
+func writerLock(path string, create bool) (*os.File, bool, error) {
+	flags := os.O_RDWR
+	if create {
+		flags |= os.O_CREATE
+	}
+	file, err := os.OpenFile(path, flags, 0o600)
+	if !create && errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("open writer lock %s: %w", path, err)
+	}
+	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		closeErr := file.Close()
+		if closeErr != nil {
+			return nil, false, errors.Join(
+				fmt.Errorf("lock %s: %w", path, err),
+				fmt.Errorf("close %s: %w", path, closeErr),
+			)
+		}
+		if errors.Is(err, unix.EWOULDBLOCK) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("lock writer file %s: %w", path, err)
+	}
+	return file, false, nil
 }
 
 // Backup copies the history store, and its -wal and -shm siblings, into a

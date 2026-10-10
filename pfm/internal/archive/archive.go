@@ -11,8 +11,6 @@
 package archive
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -83,6 +81,17 @@ type Move struct {
 	Bytes   int64
 	Failed  string
 	Applied bool
+	// Replayed means relocation completed earlier, but sidecar cleanup is still pending.
+	Replayed bool
+
+	// The transaction's own state (transaction.go): the source as the plan
+	// saw it, the identity its publication carries, the archived file as
+	// published, and how far the relocation got.
+	planned   fs.FileInfo
+	fileID    string
+	archived  fs.FileInfo
+	published bool
+	removed   bool
 }
 
 // Report is one run's outcome.
@@ -106,7 +115,10 @@ type Report struct {
 	// directory that could not be read or scanned, never "nothing found
 	// there." They are reported and their kill row is left standing: a
 	// lookup that failed to look is not proof the chat is gone.
-	Unresolved []string
+	Unresolved       []string
+	UnresolvedErrors map[string]string
+	// Unclassified records sidecar lines retained because ownership could not be decoded.
+	Unclassified []string
 	// Bytes is the total planned or moved.
 	Bytes int64
 	// Unkilled counts kill rows retired by this run.
@@ -178,12 +190,7 @@ func (runner *Runner) Run(
 ) (report Report, err error) {
 	trail := obs.NewTrail(ctx, "archive", "requested")
 	defer func() { trail.End(err) }()
-	live, err := LiveSessions(
-		runner.proc,
-		firstEngineRoot(runner.paths.Roots[pfmengine.Codex]),
-		runner.paths.SIDDir,
-		runner.codexBinary,
-	)
+	live, err := runner.liveSessions()
 	if err != nil {
 		// A reading that could not run is not "no chats are live" — refuse
 		// the whole decision rather than move a transcript out from under a
@@ -196,7 +203,7 @@ func (runner *Runner) Run(
 		report, err = runner.runKilled(ctx, options, live)
 	}
 	if err != nil {
-		return Report{}, err
+		return report, err
 	}
 	trail.Reach("planned", "moves classified")
 	if options.Apply {
@@ -227,8 +234,8 @@ func (runner *Runner) runKilled(
 	if err != nil {
 		return Report{}, fmt.Errorf("read the killed set: %w", err)
 	}
-	// decided is every id this run resolved one way or another — moved,
-	// orphaned, or skipped as live. Those three leave the killed list;
+	// Only live chats, genuine orphans and successfully recorded moves leave
+	// the killed list;
 	// unsupported engines and unresolved lookups remain killed and are
 	// reported separately.
 	decided := make([]string, 0, len(killed))
@@ -239,7 +246,20 @@ func (runner *Runner) runKilled(
 		}
 		if _, running := live[strings.ToLower(chat.ID)]; running {
 			report.Live = append(report.Live, chat.ID)
-			decided = append(decided, chat.ID)
+			// A live chat with pending cleanup keeps its kill and is reported; the
+			// rest of the killed set is still decided by this run.
+			_, pending, pendingErr := runner.pendingMove(chat.ID)
+			switch {
+			case pendingErr != nil && !errors.Is(pendingErr, fs.ErrNotExist):
+				report.unresolve(chat.ID, fmt.Sprintf("check pending cleanup for live chat: %v", pendingErr))
+			case pending:
+				report.unresolve(
+					chat.ID,
+					"sidecar cleanup for this archived chat is pending while it runs; kill retained",
+				)
+			default:
+				decided = append(decided, chat.ID)
+			}
 			continue
 		}
 		source, engine, err := runner.findTranscript(chat)
@@ -248,30 +268,41 @@ func (runner *Runner) runKilled(
 			// scan failed for a reason other than "nothing there." Report it
 			// and leave the kill standing: retiring it here is how a killed
 			// chat whose transcript exists gets reported an orphan.
-			report.Unresolved = append(report.Unresolved, chat.ID)
+			report.unresolve(chat.ID, err.Error())
 			continue
 		}
-		if source == "" {
-			report.Orphans = append(report.Orphans, chat.ID)
-			decided = append(decided, chat.ID)
+		var info fs.FileInfo
+		if source != "" {
+			info, err = os.Stat(source)
+		}
+		if source == "" || errors.Is(err, fs.ErrNotExist) {
+			move, found, replayErr := runner.pendingMove(chat.ID)
+			switch {
+			case replayErr != nil:
+				report.unresolve(chat.ID, replayErr.Error())
+			case found:
+				report.Moves = append(report.Moves, move)
+				report.Bytes += move.Bytes
+			default:
+				report.Orphans = append(report.Orphans, chat.ID)
+				decided = append(decided, chat.ID)
+			}
 			continue
 		}
-		info, err := os.Stat(source)
 		if err != nil {
-			report.Orphans = append(report.Orphans, chat.ID)
-			decided = append(decided, chat.ID)
+			report.unresolve(chat.ID, fmt.Sprintf("stat transcript %s: %v", source, err))
 			continue
 		}
 		move := Move{
-			ID:     chat.ID,
-			Engine: string(engine),
-			Source: source,
-			Target: runner.targetFor(engine, source),
-			Bytes:  info.Size(),
+			ID:      chat.ID,
+			Engine:  string(engine),
+			Source:  source,
+			Target:  runner.targetFor(engine, source),
+			Bytes:   info.Size(),
+			planned: info,
 		}
 		report.Moves = append(report.Moves, move)
 		report.Bytes += move.Bytes
-		decided = append(decided, chat.ID)
 	}
 	if !options.Apply {
 		return report, nil
@@ -279,7 +310,7 @@ func (runner *Runner) runKilled(
 
 	backups, err := runner.backupSidecars()
 	if err != nil {
-		return Report{}, err
+		return report, err
 	}
 	report.SidecarBackups = backups
 
@@ -288,30 +319,33 @@ func (runner *Runner) runKilled(
 
 	archived := make([]string, 0, len(moved))
 	for _, move := range moved {
-		if move.Applied {
+		if move.Applied && move.Failed == "" {
 			archived = append(archived, move.ID)
+			decided = append(decided, move.ID)
 		}
 	}
-	pruned, err := runner.pruneLines(
+	pruned, unclassified, err := runner.pruneLines(
 		filepath.Join(runner.paths.Home, ".claude", "history.jsonl"),
 		archived,
 	)
 	if err != nil {
-		return Report{}, err
+		return report, err
 	}
 	report.HistoryPruned = pruned
-	pruned, err = runner.pruneLines(
+	report.Unclassified = append(report.Unclassified, unclassified...)
+	pruned, unclassified, err = runner.pruneLines(
 		filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "session_index.jsonl"),
 		archived,
 	)
 	if err != nil {
-		return Report{}, err
+		return report, err
 	}
 	report.IndexPruned = pruned
+	report.Unclassified = append(report.Unclassified, unclassified...)
 
 	for _, id := range decided {
 		if err := runner.kills.Unkill(ctx, id); err != nil {
-			return Report{}, fmt.Errorf("retire the kill for %s: %w", id, err)
+			return report, fmt.Errorf("retire the kill for %s: %w", id, err)
 		}
 		report.Unkilled++
 	}
@@ -351,7 +385,8 @@ func (runner *Runner) runSubagents(
 				return nil
 			}
 			id := strings.TrimSuffix(entry.Name(), ".jsonl")
-			if _, running := live[strings.ToLower(id)]; running {
+			// The session that owns a sidechain can resume it: its id is in the path.
+			if transcriptLive(live, id, path) {
 				report.Live = append(report.Live, id)
 				return nil
 			}
@@ -365,7 +400,8 @@ func (runner *Runner) runSubagents(
 					filepath.Base(filepath.Dir(path)),
 					entry.Name(),
 				),
-				Bytes: info.Size(),
+				Bytes:   info.Size(),
+				planned: info,
 			}
 			report.Moves = append(report.Moves, move)
 			report.Bytes += move.Bytes
@@ -497,37 +533,39 @@ func (runner *Runner) targetFor(engine pfmengine.ID, source string) string {
 	)
 }
 
-// performMoves relocates each planned file and records it in the manifest as
-// it goes, so an interrupted run leaves a manifest describing exactly the
-// moves it finished.
-func (runner *Runner) performMoves(moves []Move) []Move {
-	stamp := runner.now().UTC().Format("20060102-150405")
-	applied := make([]Move, 0, len(moves))
-	for _, move := range moves {
-		if err := os.MkdirAll(filepath.Dir(move.Target), 0o700); err != nil {
-			move.Failed = err.Error()
-			applied = append(applied, move)
-			continue
-		}
-		if _, err := os.Stat(move.Target); err == nil {
-			move.Failed = "a file is already archived under that name"
-			applied = append(applied, move)
-			continue
-		}
-		if err := moveFile(move.Source, move.Target); err != nil {
-			move.Failed = err.Error()
-			applied = append(applied, move)
-			continue
-		}
-		move.Applied = true
-		if err := AppendManifest(runner.paths.ArchiveDir, move, stamp); err != nil {
-			// The file moved; the record of it did not. Say so — a move with
-			// no manifest row is the one move that cannot be undone.
-			move.Failed = "moved, but the manifest row failed: " + err.Error()
-		}
-		applied = append(applied, move)
+// unresolve keeps id killed and records why this run could not decide it.
+func (report *Report) unresolve(id, cause string) {
+	report.Unresolved = append(report.Unresolved, id)
+	if report.UnresolvedErrors == nil {
+		report.UnresolvedErrors = make(map[string]string)
 	}
-	return applied
+	report.UnresolvedErrors[id] = cause
+}
+
+// pendingMove keeps a relocated chat in cleanup replay, not the disposable orphan set.
+func (runner *Runner) pendingMove(id string) (Move, bool, error) {
+	row, owned, _, err := recordedArchive(runner.paths.ArchiveDir, id)
+	if err != nil || !owned {
+		return Move{}, false, err
+	}
+	// An original still in place means the relocation never finished: the
+	// source holds the transcript and a later archive resumes the publication.
+	if _, err := os.Lstat(row.Original); err == nil {
+		return Move{}, false, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return Move{}, false, fmt.Errorf("inspect the original of pending archive %s at %s: %w", id, row.Original, err)
+	}
+	info, err := os.Stat(row.Archived)
+	if err != nil {
+		return Move{}, false, fmt.Errorf("inspect pending archive for %s at %s: %w", id, row.Archived, err)
+	}
+	if !info.Mode().IsRegular() {
+		return Move{}, false, fmt.Errorf("pending archive for %s at %s is not a regular transcript", id, row.Archived)
+	}
+	return Move{
+		ID: id, Engine: row.Engine, Source: row.Original, Target: row.Archived,
+		Bytes: info.Size(), Applied: true, Replayed: true,
+	}, true, nil
 }
 
 // backupSidecars copies every file this run may rewrite, before it rewrites
@@ -563,62 +601,6 @@ func (runner *Runner) backupSidecars() ([]string, error) {
 	return backups, nil
 }
 
-// pruneLines drops every line naming an archived id. The file is rewritten
-// through a temporary beside it, so an interrupted prune leaves the original.
-func (runner *Runner) pruneLines(path string, ids []string) (dropped int, returnErr error) {
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	file, err := os.Open(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close %s: %w", path, err))
-		}
-	}()
-
-	wanted := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		wanted[strings.ToLower(id)] = struct{}{}
-	}
-	dropped = 0
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	var content bytes.Buffer
-	for scanner.Scan() {
-		line := scanner.Text()
-		archived := false
-		for _, id := range uuidPattern.FindAllString(line, -1) {
-			if _, found := wanted[strings.ToLower(id)]; found {
-				archived = true
-				break
-			}
-		}
-		if archived {
-			dropped++
-			continue
-		}
-		if _, err := content.WriteString(line + "\n"); err != nil {
-			return 0, fmt.Errorf("buffer %s: %w", path, err)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("read %s: %w", path, err)
-	}
-	if dropped == 0 {
-		return 0, nil
-	}
-	if err := atomicfile.Write(path, content.Bytes(), 0o600); err != nil {
-		return 0, fmt.Errorf("replace %s: %w", path, err)
-	}
-	return dropped, nil
-}
-
 // isSidechain classifies a transcript from its head alone.
 func isSidechain(path string) bool {
 	file, err := os.Open(path)
@@ -636,25 +618,6 @@ func isSidechain(path string) bool {
 		return false
 	}
 	return strings.Contains(string(head[:read]), sidechainMarker)
-}
-
-// moveFile relocates a file, falling back to copy-and-remove when the archive
-// sits on another filesystem.
-func moveFile(source, target string) error {
-	if err := os.Rename(source, target); err == nil {
-		return nil
-	}
-	content, err := os.ReadFile(source)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", source, err)
-	}
-	if err := atomicfile.Write(target, content, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", target, err)
-	}
-	if err := os.Remove(source); err != nil {
-		return fmt.Errorf("remove %s after copying it: %w", source, err)
-	}
-	return nil
 }
 
 // FormatBytes renders a size for the report.

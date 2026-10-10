@@ -57,11 +57,11 @@ func runHeal(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	report, err := runner.Run(context.Background(), heal.Options{Apply: *apply})
+	printHealReport(report, *apply, stdout)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm heal: %v\n", err)
 		return 1
 	}
-	printHealReport(report, *apply, stdout)
 	return 0
 }
 
@@ -124,6 +124,9 @@ func printHealReport(report heal.Report, apply bool, stdout io.Writer) {
 		len(report.SkippedLive),
 		len(report.LeftAlone),
 	)
+	for _, id := range report.Healed {
+		fmt.Fprintf(stdout, "HEALED %s\n", id)
+	}
 	for _, id := range report.SkippedLive {
 		fmt.Fprintf(stdout, "SKIP live thread %s\n", id)
 	}

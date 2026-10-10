@@ -1,9 +1,16 @@
 package heal
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -113,5 +120,183 @@ func TestRunRecordsTheHealsStateTransitions(t *testing.T) {
 	}
 	if !deleted {
 		t.Fatalf("no present->deleted record for the healed thread: %s", recorder.Raw())
+	}
+}
+
+func TestHealLeavesUnknownWriterLocksUntouched(t *testing.T) {
+	for _, failure := range []string{"lock directory is a file", "lock is a symlink loop"} {
+		t.Run(failure, func(t *testing.T) {
+			jail := newCodexJail(t)
+			const id = "33333333-3333-4333-8333-333333333333"
+			offsets := jail.addThread(t, id, 3)
+			jail.setCursor(t, id, offsets[2], 1)
+			locks := filepath.Join(jail.root, "thread-writer-locks")
+			if failure == "lock directory is a file" {
+				if err := os.WriteFile(locks, []byte("not a directory"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.MkdirAll(locks, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(id+".lock", filepath.Join(locks, id+".lock")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runner, err := New(jail.root, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Run(context.Background(), Options{Apply: true})
+			if err == nil || !strings.Contains(err.Error(), "lock") {
+				t.Errorf("unknown lock looked safe: Run error=%v", err)
+			}
+			if rows := jail.projectionRows(t, id); rows != 3 {
+				t.Errorf("unknown writer lock allowed deletion: rows=%d", rows)
+			}
+		})
+	}
+}
+
+func TestHealHoldsWriterLockThroughBackupAndDelete(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
+			jail := newCodexJail(t)
+			const id = "33333333-3333-4333-8333-333333333333"
+			offsets := jail.addThread(t, id, 3)
+			jail.setCursor(t, id, offsets[2], 1)
+			locks := filepath.Join(jail.root, "thread-writer-locks")
+			if err := os.MkdirAll(locks, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(locks, id+".lock")
+			if existing {
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			probed := false
+			runner, err := New(jail.root, func() time.Time {
+				probed = true
+				coordination, err := os.OpenFile(
+					filepath.Join(locks, ".coordination.lock"),
+					os.O_CREATE|os.O_RDWR,
+					0o600,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := coordination.Close(); err != nil {
+						t.Errorf("close coordination: %v", err)
+					}
+				}()
+				if err := unix.Flock(
+					int(coordination.Fd()),
+					unix.LOCK_EX|unix.LOCK_NB,
+				); !errors.Is(
+					err,
+					unix.EWOULDBLOCK,
+				) {
+					t.Errorf("provider could recreate the writer inode during heal: coordination lock = %v", err)
+				}
+				writer, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := writer.Close(); err != nil {
+						t.Errorf("close writer: %v", err)
+					}
+				}()
+				err = unix.Flock(int(writer.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+				if !errors.Is(err, unix.EWOULDBLOCK) {
+					t.Errorf("seat acquired writer lock between validation and deletion: %v", err)
+				}
+				return time.Unix(1800000000, 0)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := runner.Run(context.Background(), Options{Apply: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !probed || len(report.Healed) != 1 || jail.projectionRows(t, id) != 0 {
+				t.Fatalf("repair did not commit: %+v", report)
+			}
+			writer, err := os.OpenFile(path, os.O_RDWR, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := writer.Close(); err != nil {
+					t.Errorf("close writer: %v", err)
+				}
+			}()
+			if err := unix.Flock(int(writer.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+				t.Fatalf("heal leaked writer lock after commit: %v", err)
+			}
+		})
+	}
+}
+
+func TestThreadWarnsOnRepairFailureWithoutBlockingResume(t *testing.T) {
+	for _, failure := range []string{"missing home", "find stores", "read projection"} {
+		t.Run(failure, func(t *testing.T) {
+			jail := newCodexJail(t)
+			const id = "33333333-3333-4333-8333-333333333333"
+			home := jail.root
+			switch failure {
+			case "missing home":
+				home = filepath.Join(jail.root, "nowhere")
+			case "find stores":
+				home = filepath.Join(jail.root, "invalid-home")
+				if err := os.WriteFile(home, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.WriteFile(jail.stores.State, []byte("not sqlite"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			message := Thread(context.Background(), home, id)
+			if !strings.Contains(message, id) || !strings.Contains(message, "warning") ||
+				!strings.Contains(message, "resume") {
+				t.Fatalf("repair failure rendered as nothing to heal: %q", message)
+			}
+		})
+	}
+}
+
+func TestHealReportsTheProtectedRevalidation(t *testing.T) {
+	jail := newCodexJail(t)
+	const id = "33333333-3333-4333-8333-333333333333"
+	offsets := jail.addThread(t, id, 3)
+	jail.setCursor(t, id, offsets[2], 1)
+	path := filepath.Join(jail.root, "sessions", "rollout-"+id+".jsonl")
+	runner, err := New(jail.root, func() time.Time {
+		// Clock capture at the protected backup boundary plays a producer change.
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content = []byte(strings.Replace(string(content), `"ordinal":2`, `"ordinal":4`, 1))
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return time.Unix(1800000000, 0)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Run(context.Background(), Options{Thread: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Threads) != 1 || report.Threads[0].Verdict != VerdictNoncanonical ||
+		report.Totals[VerdictNoncanonical] != 1 || len(report.LeftAlone) != 1 ||
+		len(report.Healed) != 0 || jail.projectionRows(t, id) != 3 {
+		t.Fatalf("protected revalidation lost its refusal/report: %+v", report)
 	}
 }

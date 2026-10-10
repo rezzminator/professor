@@ -161,9 +161,82 @@ func TestHealCommandReportsThenRepairs(t *testing.T) {
 	}
 }
 
-// A Codex home with no stores is not a failure for --thread: the resume it
-// guards matters more than the repair.
-func TestHealThreadIsSilentWithoutACodexHome(t *testing.T) {
+func TestHealCommandShowsCommittedRepairsWhenALaterDeleteFails(t *testing.T) {
+	first := healJail(t)
+	const second = "44444444-4444-4444-8444-444444444444"
+	codexHome := os.Getenv("PFM_CODEX_ROOT")
+	content, err := os.ReadFile(filepath.Join(codexHome, "sessions", "rollout-"+first+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(codexHome, "sessions", "rollout-"+second+".jsonl")
+	if err := os.WriteFile(rollout, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"state_1.sqlite", "thread_history_1.sqlite"} {
+		database, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := database.Close(); err != nil {
+				t.Errorf("close fixture %s: %v", name, err)
+			}
+		})
+		if name == "state_1.sqlite" {
+			if _, err := database.Exec("INSERT INTO threads VALUES (?, ?)", second, rollout); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, err := database.Exec(`INSERT INTO thread_history_projection_state
+			SELECT ?, next_rollout_byte_offset, next_rollout_ordinal
+			FROM thread_history_projection_state WHERE thread_id = ?`, second, first); err != nil {
+			t.Fatal(err)
+		}
+		for _, table := range []string{"thread_items", "thread_turns"} {
+			if _, err := database.Exec("INSERT INTO "+table+" VALUES (?)", second); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := database.Exec(`CREATE TRIGGER refuse_second
+			BEFORE DELETE ON thread_history_projection_state
+			WHEN OLD.thread_id = '44444444-4444-4444-8444-444444444444'
+			BEGIN SELECT RAISE(ABORT, 'second delete refused'); END`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"heal", "--apply"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("partial repair exit=%d, want 1: stdout=%s stderr=%s", code, &stdout, &stderr)
+	}
+	if healProjectionRows(t, codexHome, first) != 0 || healProjectionRows(t, codexHome, second) != 1 {
+		t.Fatal("fixture did not commit the first repair and refuse the second")
+	}
+	if !strings.Contains(stderr.String(), second) || !strings.Contains(stderr.String(), "second delete refused") {
+		t.Errorf("second-delete failure lost its context: %s", &stderr)
+	}
+	if !strings.Contains(stdout.String(), "healed=1") ||
+		!strings.Contains(stdout.String(), "HEALED "+first) ||
+		strings.Contains(stdout.String(), "HEALED "+second) {
+		t.Errorf("committed repair hidden or misreported: stdout=%s stderr=%s", &stdout, &stderr)
+	}
+	const prefix = "backed up the history store -> "
+	backup := ""
+	for line := range strings.SplitSeq(stdout.String(), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			backup = strings.TrimPrefix(line, prefix)
+		}
+	}
+	if backup == "" {
+		t.Errorf("partial repair backup hidden: stdout=%s stderr=%s", &stdout, &stderr)
+	} else if info, err := os.Stat(backup); err != nil || !info.IsDir() {
+		t.Errorf("printed backup is not recoverable: %s: %v", backup, err)
+	}
+}
+
+// A missing Codex home warns for --thread without failing the resume it guards.
+func TestHealThreadWarnsWithoutBlockingResumeForAMissingCodexHome(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PFM_HOME", root)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "nowhere"))
@@ -175,8 +248,16 @@ func TestHealThreadIsSilentWithoutACodexHome(t *testing.T) {
 	); code != 0 {
 		t.Fatalf("rc = %d, want 0: %s", code, stderr.String())
 	}
-	if stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("output = %q / %q, want silence", stdout.String(), stderr.String())
+	if stdout.Len() != 0 ||
+		!strings.Contains(stderr.String(), "33333333-3333-4333-8333-333333333333") ||
+		!strings.Contains(stderr.String(), "warning") ||
+		!strings.Contains(stderr.String(), "no Codex home") ||
+		!strings.Contains(stderr.String(), "continuing resume") {
+		t.Fatalf(
+			"output = %q / %q, want contextual stderr warning and continued resume",
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	// The reporting form DOES fail loudly — an operator asking for a report
 	// deserves to hear that there is nothing to report on.

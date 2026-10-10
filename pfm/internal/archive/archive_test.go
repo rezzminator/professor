@@ -3,12 +3,16 @@ package archive
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -324,6 +328,13 @@ func TestRestorePutsAChatBackWhereItWas(t *testing.T) {
 	if _, err := runner.Run(context.Background(), Options{Apply: true}); err != nil {
 		t.Fatal(err)
 	}
+	// A failed later intent must not hide the older recoverable archive.
+	if err := AppendManifest(values.ArchiveDir, Move{
+		ID: id, Engine: "cc", Source: filepath.Join(transcripts, "missing.jsonl"),
+		Target: filepath.Join(values.ArchiveDir, "missing-target.jsonl"),
+	}, "later"); err != nil {
+		t.Fatal(err)
+	}
 	row, err := Restore(values.ArchiveDir, id)
 	if err != nil {
 		t.Fatalf("Restore() error = %v", err)
@@ -340,6 +351,88 @@ func TestRestorePutsAChatBackWhereItWas(t *testing.T) {
 	}
 	if _, err := Restore(values.ArchiveDir, "not-in-the-manifest"); err == nil {
 		t.Fatal("Restore() accepted an id the manifest never recorded")
+	}
+}
+
+func TestArchiveReplaysSidecarCleanupBeforeRetiringKill(t *testing.T) {
+	for _, name := range []string{"history.jsonl", "session_index.jsonl"} {
+		t.Run(name, func(t *testing.T) {
+			values := archiveJail(t)
+			const id = "88888888-8888-4888-8888-888888888888"
+			source := filepath.Join(values.Roots[pfmengine.Claude][0], "-p", id+".jsonl")
+			writeFile(t, source, "{}\n")
+			sidecar := filepath.Join(values.Home, ".claude", name)
+			field := "sessionId"
+			if name == "session_index.jsonl" {
+				sidecar = filepath.Join(values.Roots[pfmengine.Codex][0], name)
+				field = "id"
+			}
+			owned := `{"` + field + `":"` + id + `","display":"archived"}` + "\n"
+			oversized := `{"` + field + `":"99999999-9999-4999-8999-999999999999","display":"` +
+				strings.Repeat("x", 8*1024*1024) + `"}` + "\n"
+			writeFile(t, sidecar, owned+oversized)
+			kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: pfmengine.Claude}}}
+			runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := runner.Run(context.Background(), Options{Apply: true})
+			if err == nil || !strings.Contains(err.Error(), "token too long") ||
+				len(first.Moves) != 1 || !first.Moves[0].Applied || len(kills.unkilled) != 0 {
+				t.Fatalf("fixture did not fail cleanup after relocation: report=%+v error=%v", first, err)
+			}
+			if _, err := os.Stat(source); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("fixture source was not relocated: %v", err)
+			}
+			retry, err := runner.Run(context.Background(), Options{Apply: true})
+			if err == nil || len(kills.unkilled) != 0 || len(retry.Orphans) != 0 {
+				t.Fatalf("retry retired kill with pending sidecar cleanup: report=%+v error=%v retired=%v",
+					retry, err, kills.unkilled)
+			}
+			// The chat resumes while its cleanup is pending: it keeps its kill and is
+			// reported, and the run still decides the rest of the killed set.
+			const otherID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+			other := filepath.Join(values.Roots[pfmengine.Claude][0], "-p", otherID+".jsonl")
+			writeFile(t, other, "{}\n")
+			kills.rows = append(kills.rows, KilledChat{ID: otherID, Engine: pfmengine.Claude})
+			kept := `{"` + field + `":"99999999-9999-4999-8999-999999999999","display":"kept"}` + "\n"
+			otherLine := `{"` + field + `":"` + otherID + `","display":"other"}` + "\n"
+			writeFile(t, sidecar, owned+kept+otherLine)
+			crumb := filepath.Join(values.SIDDir, "cc-1800000001-42-1")
+			writeFile(t, crumb, source+"\n")
+			paused, pausedErr := runner.Run(context.Background(), Options{Apply: true})
+			if pausedErr != nil || len(paused.Live) != 1 ||
+				!strings.Contains(paused.UnresolvedErrors[id], "pending") ||
+				strings.Join(kills.unkilled, ",") != otherID {
+				t.Errorf(
+					"a live chat with pending cleanup blocked the run or lost its kill: report=%+v error=%v retired=%v",
+					paused,
+					pausedErr,
+					kills.unkilled,
+				)
+			}
+			kills.rows = kills.rows[:1]
+			if err := os.Remove(crumb); err != nil {
+				t.Fatal(err)
+			}
+			// The chat has stopped; replay must clean its metadata without moving again.
+			finished, err := runner.Run(context.Background(), Options{Apply: true})
+			if err != nil || finished.Unkilled != 1 || strings.Join(kills.unkilled, ",") != otherID+","+id {
+				t.Fatalf("cleanup replay did not finish retirement: report=%+v error=%v retired=%v",
+					finished, err, kills.unkilled)
+			}
+			content, err := os.ReadFile(sidecar)
+			if err != nil || strings.TrimSpace(string(content)) != strings.TrimSpace(kept) {
+				t.Fatalf("cleanup replay lost or retained metadata: content=%q error=%v", content, err)
+			}
+			rows, err := ReadManifest(values.ArchiveDir)
+			if err != nil || len(rows) != 2 || rows[0].ID != id {
+				t.Fatalf("replay rewrote relocation history: rows=%+v error=%v", rows, err)
+			}
+			if _, err := Restore(values.ArchiveDir, id); err != nil {
+				t.Fatalf("cleanup retry lost transcript recovery: %v", err)
+			}
+		})
 	}
 }
 
@@ -515,5 +608,362 @@ func TestArchiveFindsAClaudeTranscriptBehindASymlinkedProject(t *testing.T) {
 	}
 	if path, err := runner.findClaudeTranscript(id); err != nil || path != filepath.Join(project, id+".jsonl") {
 		t.Fatalf("findClaudeTranscript = %q, %v; want the transcript behind the linked project", path, err)
+	}
+}
+
+func TestArchiveFailedMovesRemainKilledAndRecoverable(t *testing.T) {
+	for _, failure := range []string{"occupied target", "manifest unavailable", "directory sync unavailable"} {
+		t.Run(failure, func(t *testing.T) {
+			values := archiveJail(t)
+			const id = "11111111-1111-4111-8111-111111111111"
+			source := filepath.Join(values.Roots[pfmengine.Claude][0], "-p", id+".jsonl")
+			writeFile(t, source, "transcript\n")
+			kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: pfmengine.Claude}}}
+			runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failure == "occupied target" {
+				writeFile(t, runner.targetFor(pfmengine.Claude, source), "existing archive\n")
+			} else if failure == "directory sync unavailable" {
+				originalSync := syncManifestParents
+				t.Cleanup(func() { syncManifestParents = originalSync })
+				syncManifestParents = func(string) error { return errors.New("directory sync unavailable") }
+			} else if err := os.MkdirAll(ManifestPath(values.ArchiveDir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			report, err := runner.Run(context.Background(), Options{Apply: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Moves) != 1 || report.Moves[0].Failed == "" {
+				t.Fatalf("failure not reported: %+v", report)
+			}
+			content, err := os.ReadFile(source)
+			if err != nil || string(content) != "transcript\n" {
+				t.Errorf("failed archive lost original transcript: %q, %v", content, err)
+			}
+			if report.Unkilled != 0 || len(kills.unkilled) != 0 {
+				t.Errorf("failed move retired its kill: %+v, %v", report, kills.unkilled)
+			}
+			if report.Moves[0].Applied {
+				t.Errorf("unrecorded failed move reported Applied: %+v", report.Moves[0])
+			}
+		})
+	}
+}
+
+func TestArchiveUnresolvedRetainsItsCause(t *testing.T) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		t.Run(string(engine), func(t *testing.T) {
+			values := archiveJail(t)
+			const id = "11111111-1111-4111-8111-111111111111"
+			if engine == pfmengine.Claude {
+				root := values.Roots[engine][0]
+				if err := os.RemoveAll(root); err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, root, "not a directory")
+			} else {
+				path := filepath.Join(values.Roots[engine][0], "sessions", "loop-"+id+".jsonl")
+				if err := os.Symlink(filepath.Base(path), path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: engine}}}
+			runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := runner.Run(context.Background(), Options{Apply: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Unresolved) != 1 || len(report.Orphans) != 0 || len(kills.unkilled) != 0 {
+				t.Fatalf("unreadable transcript was not kept unresolved: %+v kills=%v", report, kills.unkilled)
+			}
+			if !strings.Contains(fmt.Sprintf("%+v", report), "directory") &&
+				!strings.Contains(fmt.Sprintf("%+v", report), "symbolic links") {
+				t.Fatalf("unresolved cause discarded: %+v", report)
+			}
+		})
+	}
+}
+
+func TestArchivePreservesAnExternalSidecarAppendAtCommit(t *testing.T) {
+	for _, name := range []string{
+		"history.jsonl", "history alias", "history writer active", "history writer stale",
+		"history lease replaced", "history slow prune", "session_index.jsonl", "index replaced", "index held append",
+	} {
+		t.Run(name, func(t *testing.T) {
+			values := archiveJail(t)
+			const archived = "11111111-1111-4111-8111-111111111111"
+			const unrelated = "22222222-2222-4222-8222-222222222222"
+			isIndex := name == "session_index.jsonl" || name == "index replaced" || name == "index held append"
+			path := filepath.Join(values.Home, ".claude", "history.jsonl")
+			if isIndex {
+				path = filepath.Join(values.Roots[pfmengine.Codex][0], "session_index.jsonl")
+			}
+			record := func(id, label string) string {
+				if isIndex {
+					return fmt.Sprintf(`{"id":%q,"thread_name":%q,"updated_at":"2026-08-15T10:00:00Z"}`+"\n", id, label)
+				}
+				return fmt.Sprintf(`{"sessionId":%q,"display":%q,"pastedContents":{},`+
+					`"timestamp":1800000000000,"project":"fixture-project"}`+"\n", id, label)
+			}
+			owned := record(archived, "archived")
+			kept := record("33333333-3333-4333-8333-333333333333", "kept")
+			appended := record(unrelated, "external append")
+			writeFile(t, path, owned+kept)
+			if name == "history alias" {
+				target := filepath.Join(values.Home, "actual-history")
+				if err := os.Rename(path, target); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			realPath, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "history writer active" || name == "history writer stale" {
+				if err := os.Mkdir(realPath+".lock", 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if name == "history writer stale" {
+					past := time.Now().Add(-time.Minute)
+					if err := os.Chtimes(realPath+".lock", past, past); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Cleanup(func() {
+					if err := os.Remove(realPath + ".lock"); err != nil {
+						t.Errorf("release native writer: %v", err)
+					}
+				})
+			}
+			// Native Claude uses a realpath-keyed mkdir lease; native Codex uses O_APPEND,
+			// not a shared filesystem lock. These are actual jailed filesystem operations.
+			appendExternal := func() error {
+				file, err := os.OpenFile(realPath, os.O_WRONLY|os.O_APPEND, 0o600)
+				if err != nil {
+					return err
+				}
+				_, writeErr := file.WriteString(appended)
+				return errors.Join(writeErr, file.Close())
+			}
+			var heldAppend *os.File
+			if name == "index held append" {
+				heldAppend, err = os.OpenFile(realPath, os.O_WRONLY|os.O_APPEND, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := heldAppend.Close(); err != nil {
+						t.Errorf("close external append descriptor: %v", err)
+					}
+				})
+			}
+			var slow *clock.Fake
+			if name == "history slow prune" {
+				slow = clock.NewFake(time.Now())
+				originalClock := leaseClock
+				leaseClock = slow
+				t.Cleanup(func() { leaseClock = originalClock })
+			}
+			original := beforePruneCommit
+			t.Cleanup(func() { beforePruneCommit = original })
+			blocked := false
+			entered := false
+			beforePruneCommit = func(string) error {
+				entered = true
+				if name == "index held append" {
+					return nil // The native descriptor stays open across our commit.
+				}
+				if name == "history slow prune" {
+					// Carry the producer's ten-second stale-takeover boundary on the
+					// lease clock: eleven seconds pass, and every heartbeat tick is
+					// given its chance to refresh the lease before time moves on.
+					for step := 1; step <= 11; step++ {
+						slow.Advance(time.Second)
+						if step%2 == 0 && !awaitLeaseRefresh(realPath+".lock", slow.Now()) {
+							return fmt.Errorf("the lease was not refreshed by the heartbeat due at %s", slow.Now())
+						}
+					}
+					info, err := os.Stat(realPath + ".lock")
+					if err != nil && !errors.Is(err, os.ErrNotExist) {
+						return err
+					}
+					if err == nil && slow.Now().Sub(info.ModTime()) >= 10*time.Second {
+						if err := os.Remove(realPath + ".lock"); err != nil {
+							return err
+						}
+					}
+				}
+				if name == "index replaced" {
+					return atomicfile.Write(realPath, []byte(owned+kept+appended), 0o600)
+				}
+				if name == "history lease replaced" {
+					if err := os.Rename(realPath+".lock", realPath+".displaced-lock"); errors.Is(err, os.ErrNotExist) {
+						return nil // Unfixed prune holds no lease: the later assertion still fails.
+					} else if err != nil {
+						return err
+					}
+					return os.Mkdir(realPath+".lock", 0o700)
+				}
+				if !isIndex {
+					if err := os.Mkdir(realPath+".lock", 0o700); errors.Is(err, os.ErrExist) {
+						blocked = true
+						return nil
+					} else if err != nil {
+						return err
+					}
+					return errors.Join(appendExternal(), os.Remove(realPath+".lock"))
+				}
+				return appendExternal()
+			}
+			runner, err := New(Dependencies{Paths: values, Kills: &fakeKills{}, Proc: emptyProc{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			dropped, _, err := runner.pruneLines(path, []string{archived})
+			if name == "history writer active" || name == "history writer stale" ||
+				name == "history lease replaced" || name == "index replaced" {
+				if err == nil || dropped != 0 {
+					t.Errorf("lost sidecar protection was reported as success: dropped=%d error=%v", dropped, err)
+				}
+				expected := owned + kept
+				if name == "index replaced" {
+					expected += appended
+				}
+				content, readErr := os.ReadFile(path)
+				if readErr != nil || string(content) != expected {
+					t.Errorf("unsafe prune modified the protected sidecar: content=%q error=%v", content, readErr)
+				}
+				if !isIndex {
+					if _, statErr := os.Stat(realPath + ".lock"); statErr != nil {
+						t.Errorf("prune removed another history writer's lease: %v", statErr)
+					}
+				}
+				return
+			}
+			if err != nil || dropped != 1 || !entered {
+				t.Fatalf(
+					"prune did not reach its commit boundary: dropped=%d entered=%v error=%v",
+					dropped,
+					entered,
+					err,
+				)
+			}
+			if !isIndex {
+				if !blocked {
+					t.Error("native history writer entered the scan-to-replacement interval")
+				} else {
+					if err := os.Mkdir(realPath+".lock", 0o700); err != nil {
+						t.Fatalf("history lease was not released: %v", err)
+					}
+					if err := errors.Join(appendExternal(), os.Remove(realPath+".lock")); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if heldAppend != nil {
+				if _, err := heldAppend.WriteString(appended); err != nil {
+					t.Fatal(err)
+				}
+			}
+			content, err := os.ReadFile(path)
+			if err != nil || strings.Contains(string(content), archived) ||
+				!strings.Contains(string(content), kept) || !strings.Contains(string(content), appended) {
+				t.Fatalf("sidecar commit lost an unrelated external append: content=%q error=%v", content, err)
+			}
+		})
+	}
+}
+
+// awaitLeaseRefresh waits, a bounded real while, for the heartbeat to stamp the
+// lease at tick; a heartbeat that never does leaves the stale lease to the
+// producer's takeover, which the caller's assertion then reports.
+// awaitLeaseRefresh reports whether the heartbeat refreshed the lease for the
+// tick due at tick; a heartbeat that never answers is false, never a pass.
+func awaitLeaseRefresh(lock string, tick time.Time) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if info, err := os.Stat(lock); err == nil && !info.ModTime().Before(tick.Truncate(time.Microsecond)) {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return false
+}
+
+func TestMoveFileRefusesAnOccupiedPublicationTarget(t *testing.T) {
+	root := t.TempDir()
+	source, target := filepath.Join(root, "source"), filepath.Join(root, "target")
+	writeFile(t, source, "second transcript")
+	writeFile(t, target, "first transcript")
+	if err := moveFile(source, target); err == nil {
+		t.Fatal("archive publication overwrote a concurrent winner")
+	}
+	for path, want := range map[string]string{source: "second transcript", target: "first transcript"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("publication lost transcript %s: got=%q err=%v", path, got, err)
+		}
+	}
+}
+
+// The observation seam pauses the writer at its pre-write publication boundary.
+func TestMoveFileCrossFilesystemPublishesOnlyCompleteTarget(t *testing.T) {
+	originalLink, originalBefore := linkArchiveFile, beforeArchiveCopyWrite
+	t.Cleanup(func() { linkArchiveFile, beforeArchiveCopyWrite = originalLink, originalBefore })
+	linkArchiveFile = func(string, string) error { return syscall.EXDEV }
+	root := t.TempDir()
+	source, target := filepath.Join(root, "source"), filepath.Join(root, "target")
+	writeFile(t, source, "complete transcript\n")
+	observed := false
+	beforeArchiveCopyWrite = func() {
+		observed = true
+		if content, err := os.ReadFile(target); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("incomplete final archive target visible before copy write: content=%q err=%v", content, err)
+		}
+	}
+	if err := moveFile(source, target); err != nil {
+		t.Fatal(err)
+	}
+	if !observed {
+		t.Fatal("fixture never reached the cross-filesystem write boundary")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "complete transcript\n" {
+		t.Fatalf("incomplete publication: content=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(source); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("successful move retained source: %v", err)
+	}
+}
+
+func TestMoveFileKeepsSourceWhenPublicationDurabilityFails(t *testing.T) {
+	originalLink, originalSync := linkArchiveFile, syncArchivePublication
+	t.Cleanup(func() { linkArchiveFile, syncArchivePublication = originalLink, originalSync })
+	for _, copyFile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cross-filesystem=%v", copyFile), func(t *testing.T) {
+			linkArchiveFile = originalLink
+			if copyFile {
+				linkArchiveFile = func(string, string) error { return syscall.EXDEV }
+			}
+			syncArchivePublication = func(string) error { return errors.New("publication directory sync unavailable") }
+			root := t.TempDir()
+			source, target := filepath.Join(root, "source"), filepath.Join(root, "target")
+			writeFile(t, source, "durable original")
+			err := moveFile(source, target)
+			if err == nil || !strings.Contains(err.Error(), "publication directory sync unavailable") {
+				t.Errorf("publication durability failure not reported: %v", err)
+			}
+			if got, err := os.ReadFile(source); err != nil || string(got) != "durable original" {
+				t.Errorf("source unlinked before publication durability: content=%q err=%v", got, err)
+			}
+		})
 	}
 }

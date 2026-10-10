@@ -53,7 +53,15 @@ jobs:
           set -euo pipefail
           "$ENGINE_SYNC_BIN" build "$RUNNER_TEMP/professor-fence"
 
-      - name: Stage private leak-check policy
+      # Structural checks need no repository secret and always run, including forks.
+      - name: Stage structural leak-check policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '!structural-only\n' > "$RUNNER_TEMP/professor-fence/scripts/leak-terms.txt"
+
+      - name: Stage private leak-check policy (trusted events only)
+        if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           PFM_PRIVATE_LEAK_TERMS: ${{ secrets.PFM_PRIVATE_LEAK_TERMS }}
         shell: bash
@@ -61,12 +69,38 @@ jobs:
           set -euo pipefail
           test -n "$PFM_PRIVATE_LEAK_TERMS" || { echo "Missing repository secret PFM_PRIVATE_LEAK_TERMS" >&2; exit 1; }
           umask 077
-          printf '%s\n' "$PFM_PRIVATE_LEAK_TERMS" > "$RUNNER_TEMP/professor-fence/scripts/leak-terms.txt"
+          printf '%s\n' "$PFM_PRIVATE_LEAK_TERMS" > "$RUNNER_TEMP/professor-leak-terms-private.txt"
 
-      - name: Run the repository gate through the isolated fence
+      - name: Report skipped private leak coverage
+        if: ${{ !(github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
         shell: bash
         run: |
-          "$RUNNER_TEMP/professor-fence/.claude/scripts/dev.sh" iso test templates
+          echo '::warning::PRIVATE COVERAGE SKIPPED — fork or Dependabot PR has no ordinary Actions private leak-term secret; structural checks still run.'
+          echo 'PRIVATE COVERAGE SKIPPED — fork or Dependabot PR; structural checks still run.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run structural checks through the isolated fence
+        shell: bash
+        run: |
+          LEAK_TERMS="$RUNNER_TEMP/professor-fence/scripts/leak-terms.txt" \
+            "$RUNNER_TEMP/professor-fence/.claude/scripts/dev.sh" iso test templates
+
+      - name: Scan private leak terms (trusted events only)
+        if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        shell: bash
+        run: |
+          LEAK_TERMS="$RUNNER_TEMP/professor-leak-terms-private.txt" \
+            "$RUNNER_TEMP/professor-fence/.claude/scripts/dev.sh" iso run '
+              set -euo pipefail
+              paths="$(mktemp)"
+              trap '\''rm -f "$paths"'\'' EXIT
+              git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" ls-files -z > "$paths" || {
+                echo "Private leak scan FAILED — tracked-file enumeration failed" >&2; exit 1;
+              }
+              files=()
+              while IFS= read -r -d "" path; do files+=("$path"); done < "$paths"
+              (( ${#files[@]} > 0 )) || { echo "Private leak scan FAILED — empty tracked-file enumeration" >&2; exit 1; }
+              bash scripts/leak-check.sh --files "${files[@]}"
+            '
 
   cross-compile:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}

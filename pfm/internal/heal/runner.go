@@ -2,7 +2,10 @@ package heal
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -74,34 +77,97 @@ func (runner *Runner) Run(
 			broken = append(broken, thread)
 		}
 	}
-	for _, thread := range broken {
-		if Live(runner.stores.Root, thread.ID) {
-			report.SkippedLive = append(report.SkippedLive, thread.ID)
-		}
-	}
-	trail.Reach("planned", "broken threads classified")
-	if len(broken) == 0 || len(report.SkippedLive) == len(broken) {
-		// Nothing to write, so nothing to back up.
+	if len(broken) == 0 {
 		return report, nil
 	}
-	backup, backupErr := Backup(runner.stores, runner.now())
-	if backupErr != nil {
-		err = backupErr
-		return Report{}, err
+	locks := filepath.Join(runner.stores.Root, "thread-writer-locks")
+	if err := os.MkdirAll(locks, 0o700); err != nil {
+		return report, fmt.Errorf("create writer lock directory %s: %w", locks, err)
 	}
-	report.BackupDir = backup
-
-	skipped := make(map[string]struct{}, len(report.SkippedLive))
-	for _, id := range report.SkippedLive {
-		skipped[id] = struct{}{}
+	coordination, _, lockErr := writerLock(filepath.Join(locks, ".coordination.lock"), true)
+	if lockErr != nil {
+		return report, lockErr
 	}
+	if coordination == nil {
+		return report, fmt.Errorf("writer coordination lock is busy; projections left untouched")
+	}
+	// Keep coordination as well as the per-thread locks through the commit:
+	// Codex removes writer files under coordination on guard drop and startup.
+	// Without it a new inode could evade a held thread lock.
+	defer func() {
+		if closeErr := coordination.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close writer coordination lock: %w", closeErr))
+		}
+	}()
+	writerLocks := make(map[string]*os.File, len(broken))
+	defer func() {
+		for threadID, file := range writerLocks {
+			if closeErr := file.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close writer lock for %s: %w", threadID, closeErr))
+			}
+		}
+	}()
 	for _, thread := range broken {
-		if _, live := skipped[thread.ID]; live {
+		file, live, lockErr := writerLock(filepath.Join(locks, thread.ID+".lock"), true)
+		if lockErr != nil {
+			return report, fmt.Errorf("validate writer for %s: %w", thread.ID, lockErr)
+		}
+		if live {
+			report.SkippedLive = append(report.SkippedLive, thread.ID)
 			continue
 		}
+		writerLocks[thread.ID] = file
+	}
+	// Capture the backup time only after every candidate is protected, then
+	// re-read projections before deciding whether that backup is needed.
+	stamp := runner.now()
+	// Merge protected readings once, including the completed prefix on an error.
+	revalidated := make(map[string][]ThreadState, len(broken))
+	defer func() {
+		if len(revalidated) == 0 {
+			return
+		}
+		retained := report.Threads[:0]
+		for _, prior := range report.Threads {
+			if _, replaced := revalidated[prior.ID]; !replaced {
+				retained = append(retained, prior)
+			}
+		}
+		for _, current := range revalidated {
+			retained = append(retained, current...)
+		}
+		report.Threads = retained
+		report.recount()
+	}()
+	ready := make([]ThreadState, 0, len(broken))
+	for _, thread := range broken {
+		if _, protected := writerLocks[thread.ID]; !protected {
+			continue
+		}
+		// Revalidate after obtaining protection, not from the pre-lock snapshot.
+		validated, sweepErr := Sweep(ctx, runner.stores, thread.ID)
+		if sweepErr != nil {
+			return report, fmt.Errorf("validate projection %s under writer lock: %w", thread.ID, sweepErr)
+		}
+		revalidated[thread.ID] = validated.Threads
+		for _, current := range validated.Threads {
+			if current.Verdict.Broken() {
+				ready = append(ready, current)
+			}
+		}
+	}
+	trail.Reach("planned", "broken threads classified under writer locks")
+	if len(ready) == 0 {
+		return report, nil
+	}
+	backup, backupErr := Backup(runner.stores, stamp)
+	if backupErr != nil {
+		return report, backupErr
+	}
+	report.BackupDir = backup
+	for _, thread := range ready {
 		if deleteErr := Delete(ctx, runner.stores, thread.ID); deleteErr != nil {
-			err = fmt.Errorf("heal %s: %w", thread.ID, deleteErr)
-			return Report{}, err
+			return report, fmt.Errorf("heal %s: %w", thread.ID, deleteErr)
 		}
 		report.Healed = append(report.Healed, thread.ID)
 	}
@@ -112,22 +178,23 @@ func (runner *Runner) Run(
 // Thread heals one conversation ahead of a resume and reports what it did in
 // one line, or nothing at all when there was nothing to do.
 //
-// It never fails a resume: a Codex home with no stores, an unreadable
-// projection, a thread somebody else is holding — each returns an empty
-// message and a nil error, because opening the chat matters more than
-// repairing it, and the resume's own continuity banner already warns when a
-// thread looks short.
+// It never blocks a resume. A failed lookup or repair returns a contextual
+// warning; a successful check with nothing to repair, or a Codex home that
+// keeps no thread store, is silent.
 func Thread(ctx context.Context, codexHome, threadID string) string {
 	if threadID == "" {
 		return ""
 	}
 	runner, err := New(codexHome, nil)
-	if err != nil {
+	if errors.Is(err, ErrNoStores) {
 		return ""
+	}
+	if err != nil {
+		return fmt.Sprintf("pfm: warning: cannot check %s before resume: %v — continuing resume", threadID, err)
 	}
 	report, err := runner.Run(ctx, Options{Thread: threadID})
 	if err != nil {
-		return ""
+		return fmt.Sprintf("pfm: warning: cannot heal %s before resume: %v — continuing resume", threadID, err)
 	}
 	for _, healed := range report.Healed {
 		if healed != threadID {

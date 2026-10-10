@@ -64,7 +64,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 ## Tricks and traps
 
 - A long `TMUX_TMPDIR` fails with "File name too long" and reads as a tmux bug: keep scratch socket paths short (`testjail.ShortRoot`).
-- A fresh worktree lacks the engine mirrors and `tmp/tools`, so `iso gate`'s `templates.mirrors` and `check-templates.sh`'s `FAIL install` go red with no defect: run `pfm codex build . && pfm opencode build .` and `bash infra/fence/tools.sh` at its root first.
+- A fresh worktree lacks the engine mirrors and `tmp/tools`, so `iso gate`'s `templates.mirrors` goes red with no defect, and `check-templates.sh` prints `GAP install (templates is missing: …)`, exit 3, naming each absent tool — a tool gap, never a failed check (rumdl and PyYAML are the host's, from `pfm install` and python3, never the fence image's): run `pfm codex build . && pfm opencode build .` and `bash infra/fence/tools.sh` at its root first.
 - The fence mounts the worktree read-only: `PFM_UPDATE_GOLDENS=1` regenerates in a writable scratch copy through `dev.sh iso run`; diff the result against the tracked golden, then apply it on the host.
 - `codex` is a shell function on a developer host: a test or script calls `command codex`.
 - A probe that launches an engine closes stdin (`</dev/null`) or it hangs.

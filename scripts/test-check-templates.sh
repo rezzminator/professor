@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Exercise .claude/scripts/check-templates.sh, the templates unit's static-check command, against a
-# fake repository: usage, the install FAIL line (alone, no check run), path handling, the file-scoped
+# fake repository: usage, the install GAP line (alone, naming each missing tool, exit 3, no check run), path handling, the file-scoped
 # checks (rumdl on .md files only, leak on every file, SKIP wording), the unit-wide checks (every one
 # runs after a failure; agent-roster is not one of them), the infra/fence/checks.sh shims and the branch
 # where that file is missing, a directory argument, the per-run private scratch directory (the log's name
@@ -26,7 +26,7 @@ shtest_clean_also "/tmp/$PROJECT"
 # The EXIT trap keeps shtest.sh's PID guard: run by a forked shell it must leave the suite's scratch alone.
 shtest_probe_trap_guard "/tmp/$PROJECT"
 USAGE='Name the files you changed.'
-INSTALL='FAIL install (templates has no installed dependencies — run: pfm install --yes && bash infra/fence/tools.sh)'
+gap() { printf 'GAP install (templates is missing: %s — no check ran, this is a missing tool and not a failed check; run: pfm install --yes && bash infra/fence/tools.sh, and PyYAML for python3)' "$1"; }
 
 # PATH = stubs, then symlinks to the real basics. The stub records name, arguments, cwd and
 # LEAK_TERMS, prints STUB_LINES numbered lines, and exits with the next code of $REC/rc.<name>.<first
@@ -186,26 +186,29 @@ chk "log: the path is printed as 'log: /tmp/{project}/check-templates/{UTC}-{pid
 chk "log: the checks' full output is in the file and not on the screen" bash -c 'grep -qx "OUT-OF-clone-check.sh" "$0" && grep -qx "line 3" "$0" && ! grep -q "OUT-OF" <<<"$1"' "$LOGF" "$OUT"
 
 reset; rm "$T/bin/jq"; go docs/a.md
-chk "install: a missing jq prints only the FAIL install line, exit 1, no check run" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: a missing jq prints only the GAP install line naming jq, exit 3, no check run" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap jq)"
 cp "$T/stub.sh" "$T/bin/jq"
 reset; rm "$T/bin/node"; go docs/a.md
-chk "install: a missing node" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: a missing node is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap node)"
 cp "$T/stub.sh" "$T/bin/node"
 reset; rm "$T/bin/python3"; go docs/a.md
-chk "install: a missing python3" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: a missing python3 is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap python3)"
 cp "$T/stub.sh" "$T/bin/python3"
 reset; rcseq python3.-c 1; go docs/a.md
-chk "install: PyYAML not importable" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: PyYAML not importable is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap PyYAML)"
 reset; rm "$T/bin/rumdl"; go docs/a.md
-chk "install: rumdl on neither PATH nor the uv tool dir" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: rumdl on neither PATH nor the uv tool dir is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap rumdl)"
 mkdir -p "$T/home/.local/share/uv/tools/rumdl/bin"; cp "$T/stub.sh" "$T/home/.local/share/uv/tools/rumdl/bin/rumdl"
 reset; go docs/a.md
 chk "install: rumdl found in the uv tool dir passes and is the one run" bash -c '[ "$1" = 0 ] && grep -qxF "rumdl check --output-format concise docs/a.md" "$2/calls"' "$OUT" "$RC" "$REC"
+rm "$T/bin/jq" "$T/home/.local/share/uv/tools/rumdl/bin/rumdl"; reset; STUB_RESOLVE_RC=2 go docs/a.md
+chk "install: every missing tool is named in the one GAP line, exit 3 and never a failed check's 1" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap 'jq, rumdl, jscpd')"
+cp "$T/stub.sh" "$T/bin/jq"; cp "$T/stub.sh" "$T/home/.local/share/uv/tools/rumdl/bin/rumdl"
 reset; STUB_RESOLVE_RC=2 go docs/a.md
-chk "install: clone-check cannot resolve the pinned jscpd" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: clone-check cannot resolve the pinned jscpd, which is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap jscpd)"
 reset; go docs/a.md
 chk "install: clone-check resolves the pinned jscpd, install passes" bash -c '[ "$1" = 0 ]' "$OUT" "$RC"
 reset; STUB_RESOLVE_RC=2 go nope.md
-chk "install: no FAIL path line beside the install line" bash -c '[ "$0" = "$1" ]' "$OUT" "$INSTALL"
+chk "install: no FAIL path line beside the install line" bash -c '[ "$0" = "$1" ]' "$OUT" "$(gap jscpd)"
 
 shtest_end

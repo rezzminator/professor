@@ -47,6 +47,7 @@ func TestOpenSharedStateReadOnlyNeverCreatesOrMigrates(t *testing.T) {
 		name    string
 		version int // 0: no file
 		empty   bool
+		seed    string // a file an older pfm left, in place of the staged one
 		want    func(error) bool
 	}{
 		{name: "absent", want: func(err error) bool { return errors.Is(err, ErrAbsent) }},
@@ -55,11 +56,18 @@ func TestOpenSharedStateReadOnlyNeverCreatesOrMigrates(t *testing.T) {
 			var mismatch *SchemaMismatchError
 			return errors.As(err, &mismatch) && mismatch.Found == SchemaVersion-1 && !mismatch.Newer()
 		}},
-		{name: "newer", version: SchemaVersion + 1, want: func(err error) bool {
+		{name: "newer", version: RetiredSchemaVersion + 1, want: func(err error) bool {
 			var mismatch *SchemaMismatchError
-			return errors.As(err, &mismatch) && mismatch.Found == SchemaVersion+1 && mismatch.Newer()
+			return errors.As(err, &mismatch) && mismatch.Found == RetiredSchemaVersion+1 && mismatch.Newer()
 		}},
 		{name: "current", version: SchemaVersion, want: func(err error) bool { return err == nil }},
+		{name: "retired", version: RetiredSchemaVersion, want: func(err error) bool { return err == nil }},
+		{
+			name:    "current, an installed pfm's file without hidden.revision",
+			version: SchemaVersion,
+			seed:    v3Schema + "INSERT INTO hidden(uuid,hidden_at) VALUES('kept-kill',7);",
+			want:    func(err error) bool { return err == nil },
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -72,6 +80,11 @@ func TestOpenSharedStateReadOnlyNeverCreatesOrMigrates(t *testing.T) {
 				if err := os.WriteFile(path, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
+			case test.seed != "":
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				seedSharedState(t, path, test.seed)
 			case test.version != 0:
 				stageSharedStateVersion(t, path, test.version)
 			}
@@ -83,9 +96,9 @@ func TestOpenSharedStateReadOnlyNeverCreatesOrMigrates(t *testing.T) {
 			}
 			records, err := state.KilledRecords(context.Background())
 			switch {
-			case test.version == SchemaVersion:
+			case test.version == SchemaVersion || test.version == RetiredSchemaVersion:
 				if err != nil || records["kept-kill"].KilledAt != 7 {
-					t.Fatalf("current read-only kills=%v err=%v", records, err)
+					t.Fatalf("read-only kills at v%d=%v err=%v", test.version, records, err)
 				}
 			case degraded != nil && errors.Is(degraded, ErrAbsent):
 				if err != nil || len(records) != 0 {

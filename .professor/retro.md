@@ -243,3 +243,8 @@ Resolved:
 Observed: tool-visibility-controller is missing from `enabledPlugins` in both `~/.claude/settings.json` and `~/.cc/2/settings.json`. The main chat's agent list shows conflict-resolver (`visible-to: [gitter]`) and every TRACER-ONLY, RR-ONLY and INVESTIGATOR-ONLY helper. A haiku test relay spawned conflict-resolver directly 9 times once its prompt carried the user's authorization. The only refusal came from the model reading "GITTER-ONLY" in the description.
 Amend: judgment — either enable tool-visibility-controller on the host (a fleet-wide change and its own task), or have `pfm doctor` warn when an installed agent declares `visibility` while the plugin is off.
 Resolved:
+
+## 2026-10-10 — `pfm doctor`'s repair for a missing plugin cannot work from a live chat
+Observed: `pfm doctor` reported `tool-visibility-controller@tool-visibility-controller-dev not enabled … — run pfm install --yes`. Two `pfm install --yes` runs from a chat both exited 0, and both skipped the plugin step ("skip claude plugins: live chats … — close them and rerun"). The chat running the install is itself one of those live chats, so following the repair from inside any chat never closes the gap. The plugin had silently stayed off on every account since it joined the table. Separately, BSD `pgrep` leaves out its own ancestors, so a live-chat count taken from inside a chat is one short.
+Amend: pfm/internal/doctor/claude_plugins_checks.go — the plugin-gap repair names the live-chat gate ("close every Claude chat, then run pfm install --yes from a plain terminal"), and `pfm install` reports a skipped plugin step as a warning in its summary line, never an exit-0 skip buried among the rows.
+Resolved:

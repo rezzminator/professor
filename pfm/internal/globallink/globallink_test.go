@@ -287,3 +287,50 @@ func TestDescribeStateNamesDanglingByLinkName(t *testing.T) {
 		t.Fatalf("DescribeState(dangling) = %q, want it to name DANGLING and the link path", got)
 	}
 }
+
+func TestApplyKeepsPolicyLinkVisibleDuringRepoint(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.json")
+	oldSource, newSource := filepath.Join(dir, "old.json"), filepath.Join(dir, "new.json")
+	if err := os.Symlink(oldSource, target); err != nil {
+		t.Fatal(err)
+	}
+	ready, stop, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	observations := make(chan error, 1)
+	go func() {
+		defer close(done)
+		close(ready)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := os.Readlink(target); err != nil {
+				select {
+				case observations <- err:
+				default:
+				}
+			}
+		}
+	}()
+	<-ready
+	for count := 0; count < 500; count++ {
+		source := oldSource
+		if count%2 == 0 {
+			source = newSource
+		}
+		if err := Apply(target, source, WrongTarget); err != nil {
+			close(stop)
+			<-done
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	<-done
+	select {
+	case err := <-observations:
+		t.Fatalf("policy reader observed a missing link during repoint: %v", err)
+	default:
+	}
+}

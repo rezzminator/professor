@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -102,15 +103,9 @@ func ClassifyLink(target, source, sourceRepoRoot string, kind Kind) (State, stri
 	return Conflict, "", nil
 }
 
-// Apply performs the filesystem change ClassifyLink's state
-// recommends. Correct and Conflict are both no-ops — the first because
-// nothing is wrong, the second because a conflict is never touched. Missing,
-// Copy, and WrongTarget all end the same way: whatever is there (nothing, a
-// plain copy, or a stale symlink) is cleared and the desired symlink takes
-// its place. RemoveAll is safe here specifically because Copy only ever
-// classifies an entry whose TYPE matches the desired link's kind (a
-// same-shape copy), and WrongTarget only ever classifies a symlink — never a
-// foreign directory, which conflict leaves alone before this is reached.
+// Apply keeps Correct and Conflict untouched, replaces same-shape copies,
+// and atomically repoints managed stale or dangling links so policy readers
+// always see either the previous target or the desired target.
 func Apply(target, source string, state State) error {
 	switch state {
 	case Correct, Conflict:
@@ -118,6 +113,9 @@ func Apply(target, source string, state State) error {
 	case Missing, Copy, WrongTarget, Dangling:
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+		}
+		if state == WrongTarget || state == Dangling {
+			return atomicfile.Symlink(target, source)
 		}
 		if state != Missing {
 			if err := os.RemoveAll(target); err != nil {

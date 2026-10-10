@@ -306,7 +306,18 @@ func (installer *engine) globalSourceRepoRoot() (string, error) {
 		}
 		return filepath.Clean(abs), nil
 	}
-	return GlobalSourceRepo(installer.options.Home)
+	repo, err := GlobalSourceRepo(installer.options.Home)
+	if installer.options.Mode == ModeUninstall && errors.Is(err, paths.ErrSourceRepoUnusable) {
+		repos, historyErr := installer.engineSyncPolicySourceRepos()
+		if historyErr != nil {
+			return "", fmt.Errorf("resolve recorded uninstall ownership: %w", historyErr)
+		}
+		if len(repos) != 0 {
+			installer.say("  source clone unavailable at %s; using recorded ownership for uninstall", repos[0])
+			return repos[0], nil
+		}
+	}
+	return repo, err
 }
 
 // wireGlobalCommands links each top-level clone command into the store commands registry.

@@ -56,7 +56,7 @@ func ReportGlobalAgents(
 		ClaudeAbsent:    claudeAbsent,
 	}
 	if !claudeAbsent {
-		repo, cloned, err := recordedGlobalClone(home)
+		repo, cloned, err := RecordedGlobalClone(home)
 		if err != nil {
 			fmt.Fprintf(
 				w,
@@ -70,10 +70,18 @@ func ReportGlobalAgents(
 			options.SourceRepo = repo
 		}
 	}
-	rows, err := enginesync.Runner{Env: env, Home: home}.MachineDoctor(context.Background(), options)
-	if err != nil {
+	runner := enginesync.Runner{Env: env, Home: home}
+	if err := runner.RequireMinimumVersion(context.Background()); err != nil {
 		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
 		return 0, 1
+	}
+	versionWarnings, versionFailures := ReportEngineSyncVersions(w, home, env)
+	warnings += versionWarnings
+	failures += versionFailures
+	rows, err := runner.MachineDoctor(context.Background(), options)
+	if err != nil {
+		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
+		return warnings, failures + 1
 	}
 	for _, row := range rows {
 		fmt.Fprintf(w, "doctor: %s\n", row.Message)
@@ -87,11 +95,11 @@ func ReportGlobalAgents(
 	return warnings, failures
 }
 
-// recordedGlobalClone resolves the clone a prior install anchored on, and
+// RecordedGlobalClone resolves the clone a prior install anchored on, and
 // whether there is one at all: no marker and nothing at the default path is
 // no clone. A marker or path that cannot be inspected is an error, never "no
 // clone".
-func recordedGlobalClone(home string) (string, bool, error) {
+func RecordedGlobalClone(home string) (string, bool, error) {
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
 		return "", false, err

@@ -40,12 +40,14 @@ func forwardEngineSync(engine string, args []string, stdout, stderr io.Writer, r
 
 // forwardAgentsSource preserves pfm's clone source when the caller omits it.
 func forwardAgentsSource(args []string, home string) ([]string, error) {
-	// engine-sync parses with Go's flag package: one or two dashes name a
-	// flag, and "--" ends the flags.
+	// engine-sync accepts flags before or after positionals; a sentinel ends parsing.
 	for index := 1; index < len(args); index++ {
 		arg := args[index]
-		if arg == "--" || !strings.HasPrefix(arg, "-") {
+		if arg == "--" {
 			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			continue
 		}
 		name, value, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-"), "=")
 		switch name {
@@ -69,9 +71,21 @@ func forwardAgentsSource(args []string, home string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	source, err := installer.GlobalSourceRepo(home)
+	source, cloned, err := installer.RecordedGlobalClone(home)
 	if err != nil {
 		return nil, err
 	}
-	return append(append([]string(nil), args...), "--source-repo", source), nil
+	if !cloned {
+		return args, nil
+	}
+	split := len(args)
+	for index, value := range args {
+		if value == "--" {
+			split = index
+			break
+		}
+	}
+	forwarded := append([]string(nil), args[:split]...)
+	forwarded = append(forwarded, "--source-repo", source)
+	return append(forwarded, args[split:]...), nil
 }

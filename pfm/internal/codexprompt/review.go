@@ -19,8 +19,7 @@ import (
 // '[PROMPT]'") — a scoped review is prompt-only.
 const (
 	codeReviewCommand = "/code-review"
-	// codeReviewDefaultModel is Professor's review model, supplied to
-	// engine-sync by templates/global/engine-sync/config.json's model map.
+	// codeReviewDefaultModel is pfm's own review model for its composed prompt.
 	codeReviewDefaultModel = "gpt-6.1-sol"
 	codeReviewPrompt       = "Review the uncommitted changes only in your task's own files (name them, space " +
 		"separated). Ignore every other path. Report correctness bugs only, most severe first."

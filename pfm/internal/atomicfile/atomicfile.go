@@ -142,3 +142,30 @@ func WriteScratch(directory, pattern string, content []byte) (path string, clean
 	}
 	return path, cleanup, nil
 }
+
+// Symlink replaces a managed link atomically, so readers see the old or new target.
+func Symlink(target, source string) (err error) {
+	temporary, err := os.CreateTemp(filepath.Dir(target), ".pfm-link-*")
+	if err != nil {
+		return fmt.Errorf("stage global link %s: %w", target, err)
+	}
+	name := temporary.Name()
+	defer func() {
+		if removeErr := os.Remove(name); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove staged global link %s: %w", name, removeErr))
+		}
+	}()
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close staged global link %s: %w", name, err)
+	}
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("prepare global link %s: %w", name, err)
+	}
+	if err := os.Symlink(source, name); err != nil {
+		return fmt.Errorf("stage global link %s -> %s: %w", name, source, err)
+	}
+	if err := os.Rename(name, target); err != nil {
+		return fmt.Errorf("replace global link %s -> %s: %w", target, source, err)
+	}
+	return nil
+}

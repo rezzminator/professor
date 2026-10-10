@@ -8,6 +8,8 @@
 #
 # BROKEN STATE: a missing hook or a missing jq exits 2 before any case.
 set -uo pipefail
+readiness_only=0
+if [[ ${1:-} == --readiness-only ]]; then readiness_only=1; shift; fi
 HOOK=${1:-"$(cd "$(dirname "$0")/.." && pwd)/.claude/scripts/format-md.sh"}
 [[ -f "$HOOK" ]] || { printf 'test-format-md: hook not found: %s\n' "$HOOK" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "test-format-md: jq missing — the hook cannot read its input" >&2; exit 2; }
@@ -51,6 +53,7 @@ hook() { # hook <file>: RC and ERR of one hook run
   RC=$?
 }
 
+if [[ $readiness_only == 0 ]]; then
 STUB_CHECK_RC=0 hook "$R/docs/dev/a.md"
 if [[ $RC == 0 && -z $ERR ]]; then ok "a clean file exits 0 with nothing on stderr"
 else bad "a clean file" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
@@ -90,6 +93,8 @@ STUB_CHECK_RC=1 STUB_CHECK_OUT='docs/notes.md:1:1: [MD041] x' hook "$R/docs/note
 if [[ $RC == 0 && -z $ERR ]]; then ok "a docs/ root file outside the hub is left alone"
 else bad "a docs/ root file outside the hub" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
+fi
+
 # A committed baseline belongs to a second repo; the cases above have no HEAD.
 C="$(cd "$T" && pwd -P)/committed"
 mkdir -p "$C/docs/dev" && git -C "$C" init -q &&
@@ -100,6 +105,7 @@ standing=$'docs/dev/a.md:8:1: [MD051] Link anchor \'#missing\' does not exist in
 shifted=$'docs/dev/a.md:9:1: [MD051] Link anchor \'#missing\' does not exist in document headings\n'
 introduced=$'docs/dev/a.md:12:3: [MD018] No space after hash on atx style heading\n'
 
+if [[ $readiness_only == 0 ]]; then
 STUB_COMMITTED_CHECK_RC=1 STUB_COMMITTED_CHECK_OUT="$standing" \
   STUB_CHECK_RC=1 STUB_CHECK_OUT="$shifted" hook "$C/docs/dev/a.md"
 if [[ $RC == 0 && -z $ERR ]]; then ok "standing issues at shifted positions exit 0 with nothing on stderr"
@@ -134,6 +140,8 @@ PATH="$T/nobin" hook "$R/docs/dev/a.md"
 if [[ $RC == 0 && -n $ERR && $ERR == *docs/dev/a.md* ]]; then ok "a missing rumdl exits 0 with stderr naming the file"
 else bad "a missing rumdl" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
+fi
+
 # Both hooks report standing uncommitted diagnostics once per session.
 gate="$T/overlap"
 mkdir -p "$gate" || exit 2
@@ -159,6 +167,14 @@ if [[ ! -f "$gate/ready" ]]; then
   bad "formatter readiness FAILED — $reason" "$(cat "$gate/first.err")"
   shtest_end
   exit 1
+fi
+if [[ $readiness_only == 1 ]]; then
+  printf 'release\n' > "$gate/release"
+  wait "$first_hook"; first_rc=$?
+  if [[ $first_rc == 0 || $first_rc == 2 ]]; then ok 'formatter readiness detected';
+  else bad 'formatter failed after readiness' "exit $first_rc"; fi
+  shtest_end
+  exit
 fi
 ln -s a.md "$C/docs/dev/alias.md" || exit 2
 STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=0 TMPDIR="$T/cache" HOOK_SESSION=overlap hook "$T/link/docs/dev/alias.md"

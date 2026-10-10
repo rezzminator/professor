@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // engineSync is the engine-sync runner this install drives: its environment
@@ -40,6 +41,20 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, cleanup()) }()
+	if err := runner.RequireMinimumVersion(context.Background()); err != nil {
+		var unavailable *enginesync.UnavailableError
+		if installer.options.Mode == ModeUninstall {
+			if errors.As(err, &unavailable) {
+				if retireErr := installer.retireEngineSyncConfig(sourceRepo); retireErr != nil {
+					return retireErr
+				}
+				return installer.leaveEngineSyncOwned(err)
+			}
+			installer.deferFailure(err)
+			return installer.retireEngineSyncConfig(sourceRepo)
+		}
+		return err
+	}
 	options := enginesync.GlobalOptions{
 		SourceRepo:       sourceRepo,
 		ClaudeConfigDirs: []string{installer.options.ConfigDir},
@@ -91,7 +106,14 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 	if runErr != nil {
 		var unavailable *enginesync.UnavailableError
 		if options.Uninstall && errors.As(runErr, &unavailable) {
+			if err := installer.retireEngineSyncConfig(sourceRepo); err != nil {
+				return err
+			}
 			return installer.leaveEngineSyncOwned(runErr)
+		}
+		if options.Uninstall {
+			installer.deferFailure(runErr)
+			return installer.retireEngineSyncConfig(sourceRepo)
 		}
 		return runErr
 	}
@@ -102,6 +124,10 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 		return nil
 	}
 	conflictErr := fmt.Errorf("engine-sync global: %s", strings.Join(conflicts, "; "))
+	if options.Uninstall {
+		installer.deferFailure(conflictErr)
+		return installer.retireEngineSyncConfig(sourceRepo)
+	}
 	if !installer.apply {
 		installer.planErrors = append(installer.planErrors, conflictErr)
 		return nil
@@ -113,7 +139,7 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 // not installed: pfm tears down everything it owns itself, and only what
 // engine-sync writes (the Codex roles, the global commands) and the targets
 // file that serves it stay for a second uninstall.
-const engineSyncAbsentText = "engine-sync unavailable: Codex roles, global commands and targets.json left in place; " +
+const engineSyncAbsentText = "engine-sync unavailable: Codex roles, global commands and targets.json left in place; config.json policy link is handled by pfm ownership checks; " +
 	"run pfm uninstall again with engine-sync present"
 
 // leaveEngineSyncOwned handles an uninstall whose engine-sync binary is
@@ -184,14 +210,46 @@ func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner,
 		"config.json",
 	)
 	runner.ChildEnv = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Dir(filepath.Dir(target)))
-	if installer.options.Mode == ModeUninstall {
+	source := filepath.Join(sourceRepo, "templates", "global", "engine-sync", "config.json")
+	sourceMissing := false
+	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) {
+		sourceMissing = true
+		installer.say("  engine-sync machine policy source missing: %s", source)
+	} else if err != nil {
+		return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy %s: %w", source, err)
+	}
+	if sourceMissing {
+		owned, err := installer.ownsEngineSyncPolicy(target, sourceRepo)
+		if err != nil {
+			return runner, cleanup, err
+		}
+		if err := installer.retireEngineSyncConfig(sourceRepo); err != nil {
+			return runner, cleanup, err
+		}
+		if !installer.apply && owned {
+			temporary, err := os.MkdirTemp("", "pfm-engine-sync-plan-")
+			if err != nil {
+				return runner, cleanup, fmt.Errorf("create engine-sync missing-policy preview: %w", err)
+			}
+			cleanup = func() error {
+				if err := os.RemoveAll(temporary); err != nil {
+					return fmt.Errorf("remove engine-sync policy plan root %s: %w", temporary, err)
+				}
+				return nil
+			}
+			runner.ChildEnv = append(runner.ChildEnv, "XDG_CONFIG_HOME="+temporary)
+		}
 		return runner, cleanup, nil
 	}
-	source := filepath.Join(sourceRepo, "templates", "global", "engine-sync", "config.json")
-	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) {
+	if installer.options.Mode == ModeUninstall {
+		if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) {
+			if err := installer.retireEngineSyncConfig(sourceRepo); err != nil {
+				return runner, cleanup, err
+			}
+		} else if err != nil {
+			return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy %s: %w", target, err)
+		}
 		return runner, cleanup, nil
-	} else if err != nil {
-		return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy: %w", err)
 	}
 	info, inspectErr := os.Lstat(target)
 	if inspectErr != nil && !errors.Is(inspectErr, fs.ErrNotExist) {
@@ -211,10 +269,25 @@ func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner,
 			return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy %s: %w", target, err)
 		}
 		if state == globallink.Conflict {
-			policyPath = target
+			owned, err := installer.ownsEngineSyncPolicy(target, sourceRepo)
+			if err != nil {
+				return runner, cleanup, err
+			}
+			if owned {
+				if err := installer.change("repoint engine-sync machine policy "+target+" -> "+source, func() error {
+					return globallink.Apply(target, source, globallink.WrongTarget)
+				}); err != nil {
+					return runner, cleanup, err
+				}
+			} else {
+				policyPath = target
+				installer.skip("CONFLICT engine-sync machine policy " + target + " is not clone-owned; preserved")
+			}
 		}
-		if err := installer.wireGlobalLink(source, target, sourceRepo, false); err != nil {
-			return runner, cleanup, err
+		if state != globallink.Conflict {
+			if err := installer.wireGlobalLink(source, target, sourceRepo, false); err != nil {
+				return runner, cleanup, err
+			}
 		}
 	}
 	if installer.apply {
@@ -228,7 +301,12 @@ func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner,
 	if err != nil {
 		return runner, cleanup, fmt.Errorf("create engine-sync policy plan root: %w", err)
 	}
-	cleanup = func() error { return os.RemoveAll(temporary) }
+	cleanup = func() error {
+		if err := os.RemoveAll(temporary); err != nil {
+			return fmt.Errorf("remove engine-sync policy plan root %s: %w", temporary, err)
+		}
+		return nil
+	}
 	if err := atomicfile.Write(filepath.Join(temporary, "engine-sync", "config.json"), policy, 0o600); err != nil {
 		return runner, func() error { return nil }, errors.Join(err, cleanup())
 	}
@@ -260,25 +338,57 @@ func (installer *engine) retireEngineSyncConfig(sourceRepo string) error {
 		filepath.Dir(enginesync.TargetsPath(installer.env(), installer.options.Home)),
 		"config.json",
 	)
-	info, err := os.Lstat(target)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
+	owned, err := installer.ownsEngineSyncPolicy(target, sourceRepo)
 	if err != nil {
 		return err
 	}
+	if owned {
+		return installer.retire(target, "engine-sync machine configuration")
+	}
+	return nil
+}
+
+func (installer *engine) ownsEngineSyncPolicy(target, sourceRepo string) (bool, error) {
+	info, err := os.Lstat(target)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect engine-sync policy %s: %w", target, err)
+	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return nil
+		return false, nil
 	}
 	found, err := os.Readlink(target)
 	if err != nil {
-		return err
+		return false, fmt.Errorf("read engine-sync policy link %s: %w", target, err)
 	}
 	if !filepath.IsAbs(found) {
 		found = filepath.Join(filepath.Dir(target), found)
 	}
-	if ownedGlobalLink([]string{sourceRepo}, "engine-sync", "config.json", filepath.Clean(found)) {
-		return installer.retire(target, "engine-sync machine configuration")
+	repos, err := installer.engineSyncPolicySourceRepos()
+	if err != nil {
+		return false, err
 	}
-	return nil
+	repos = append(repos, sourceRepo, filepath.Join(installer.options.Home, ".professor"))
+	return ownedGlobalLink(repos, "engine-sync", "config.json", filepath.Clean(found)), nil
+}
+
+// A retired clone still identifies its policy link; other registries retain
+// their live-source validation before deciding what can be removed.
+func (installer *engine) engineSyncPolicySourceRepos() ([]string, error) {
+	repos, err := installer.recordedProfessorSourceRepos()
+	if !errors.Is(err, paths.ErrSourceRepoUnusable) {
+		return repos, err
+	}
+	marker := paths.SourceRepoPath(installer.options.Home)
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		return nil, fmt.Errorf("read historical policy source repository marker %s: %w", marker, err)
+	}
+	repo := strings.TrimSpace(string(raw))
+	if !filepath.IsAbs(repo) || strings.ContainsAny(repo, "\r\n") {
+		return nil, fmt.Errorf("historical policy source repository marker %s is not one absolute path", marker)
+	}
+	return []string{paths.PhysicalPath(filepath.Clean(repo))}, nil
 }

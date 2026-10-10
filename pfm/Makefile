@@ -31,8 +31,8 @@ DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
 # The local build artifact lives in the repo's gitignored tmp/, never in the tree.
 LOCAL   := $(REPO)/tmp/bin/pfm.dev
-# The engine-sync checkout host-install builds into {engine-sync home}
-# (scripts/install-engine-sync.sh), the plugin submodule.
+# The plugin submodule host-install builds unstamped, installing under its
+# own reported version in {engine-sync home} (scripts/install-engine-sync.sh).
 ENGINE_SYNC_SRC := $(REPO)/plugins/engine-sync
 UNIT    := pfm-mcp.service
 # The macOS twin of UNIT: the launch agent pfm install wires for the daemon.
@@ -191,19 +191,27 @@ install: ## Swap in a new build, restart the daemon, sweep obsolete processes, a
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build engine-sync from plugins/engine-sync into {engine-sync home}/versions/{version} and link bin/engine-sync; build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
+host-install: ## Build engine-sync from plugins/engine-sync unstamped, install into {engine-sync home}/versions/{reported version} and link bin/engine-sync; build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
 	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
 	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
 	@# build even starts — $(BIN) is never touched. FORCE=1 in the
 	@# environment (`FORCE=1 make host-install`) passes straight through to
 	@# the guard and prints a FORCED line instead of refusing.
-	@bash "$(REPO)/pfm/scripts/install-engine-sync.sh" "$(ENGINE_SYNC_SRC)"
-	@# engine-sync first: the new binary's install check below plans through
-	@# it (pfm execs engine-sync for every Codex and OpenCode artifact), so a
-	@# failed engine-sync build stops here with $(BIN) untouched.
 	@mkdir -p "$$(dirname "$(BIN)")"; \
 	tmp="$$(mktemp "$(BIN).new.XXXXXX")"; \
-	trap 'rm -f "$$tmp"' EXIT; \
+	journal="$$(mktemp -d "$(BIN).engine-sync.XXXXXX")"; \
+	completed=0; \
+	trap 'if [ "$$completed" = 0 ] && [ -f "$$journal/path" ]; then \
+	  es_link="$$(cat "$$journal/path")"; \
+	  if [ "$$(readlink "$$es_link" 2>/dev/null || true)" = "$$(readlink "$$journal/installed")" ]; then \
+	    if [ -L "$$journal/previous" ]; then \
+	      restored=0; cp -P "$$journal/previous" "$$journal/restore" && mv -f "$$journal/restore" "$$es_link" && restored=1; \
+	    else restored=0; rm -f "$$es_link" && restored=1; fi; \
+	    if [ "$$restored" = 1 ]; then echo "host-install: restored engine-sync stable link $$es_link after refused pfm swap" >&2; \
+	    else echo "host-install: FAILED to restore engine-sync stable link $$es_link" >&2; fi; \
+	  else echo "host-install: engine-sync stable link changed concurrently; kept $$es_link" >&2; fi; \
+	fi; rm -f "$$tmp"; rm -rf "$$journal"' EXIT; \
+	ENGINE_SYNC_LINK_JOURNAL="$$journal" bash "$(REPO)/pfm/scripts/install-engine-sync.sh" "$(ENGINE_SYNC_SRC)"; \
 	go build $(LDFLAGS) -o "$$tmp" ./cmd/pfm || { echo "host-install: build FAILED — $(BIN) untouched" >&2; exit 1; }; \
 	reported="$$("$$tmp" --version 2>&1)" || { echo "host-install: smoke test FAILED ($$reported) — $(BIN) untouched" >&2; exit 1; }; \
 	case "$$reported" in *"$(VERSION)"*) ;; \
@@ -219,7 +227,7 @@ host-install: ## Build engine-sync from plugins/engine-sync into {engine-sync ho
 	  fi; \
 	fi; \
 	kept=""; if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev" && kept="; previous kept at $(BIN).prev"; fi; \
-	mv -f "$$tmp" "$(BIN)"; \
+	mv -f "$$tmp" "$(BIN)"; completed=1; \
 	echo "installed: $(BIN) ($$reported$$kept)"
 	@# The new binary answers `pfm install --check` before the swap. Any
 	@# refusal keeps $(BIN) untouched and prints the check's own answer.

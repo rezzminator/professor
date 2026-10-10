@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -37,6 +36,7 @@ var forwardCases = []struct {
 }
 
 func testForwarders(t *testing.T, engine string) {
+	t.Setenv("ENGINE_SYNC_WORKBENCH_MARKER", "operator-marker")
 	for _, testCase := range forwardCases {
 		if testCase.args[0] != engine {
 			continue
@@ -49,14 +49,6 @@ func testForwarders(t *testing.T, engine string) {
 				t.Fatalf("pfm %q exit = %d, want %d; stderr=%q", testCase.args, code, testCase.code, stderr.String())
 			}
 			forwarded := append([]string(nil), testCase.args...)
-			if testCase.name == "codex agents" || testCase.name == "codex agents home equals" ||
-				testCase.name == "codex agents single-dash home" {
-				source, err := installer.GlobalSourceRepo("/h")
-				if err != nil {
-					t.Fatal(err)
-				}
-				forwarded = append(forwarded, "--source-repo", source)
-			}
 			calls, want := testjail.EngineSyncCalls(t, record), []string{strings.Join(forwarded, " ")}
 			if !slices.Equal(calls, want) {
 				t.Fatalf("engine-sync calls = %q, want %q", calls, want)
@@ -71,7 +63,7 @@ func testForwarders(t *testing.T, engine string) {
 				)
 			}
 			marker, err := os.ReadFile(record + ".marker")
-			if err != nil || strings.TrimSpace(string(marker)) != ".professor/workbench.json" {
+			if err != nil || strings.TrimSpace(string(marker)) != "operator-marker" {
 				t.Fatalf("marker = %q (%v)", marker, err)
 			}
 			if want := testCase.stdout + "\n"; stdout.String() != want {
@@ -100,5 +92,40 @@ func TestCodexCommandWithoutEngineSyncIsExitOne(t *testing.T) {
 	stable := filepath.Join(root, "home", ".local", "share", "engine-sync", "bin", "engine-sync")
 	if !strings.Contains(stderr.String(), "pfm codex: engine-sync binary unavailable: "+stable+": ") {
 		t.Fatalf("stderr = %q does not name the unavailable binary at %s", stderr.String(), stable)
+	}
+}
+
+func TestForwardAgentsSourceUsesOnlyAnExistingClone(t *testing.T) {
+	for _, name := range []string{"absent", "existing", "sentinel", "flag after positional"} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			source := filepath.Join(home, ".professor")
+			if name != "absent" {
+				if err := os.MkdirAll(source, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"agents"}
+			if name == "sentinel" {
+				args = append(args, "--")
+			}
+			if name == "flag after positional" {
+				args = append(args, "position", "--source-repo", "/explicit")
+			}
+			got, err := forwardAgentsSource(args, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := args
+			switch name {
+			case "existing":
+				want = []string{"agents", "--source-repo", source}
+			case "sentinel":
+				want = []string{"agents", "--source-repo", source, "--"}
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		})
 	}
 }

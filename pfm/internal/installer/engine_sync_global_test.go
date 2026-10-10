@@ -52,7 +52,14 @@ func TestWireEngineSyncGlobalRendersEveryEvent(t *testing.T) {
 	if err := installer.wireEngineSyncGlobal(nil); err != nil {
 		t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
 	}
-	want := "  change  link /h/.claude/agents/a.md -> /r/templates/global/agents/a.md\n" +
+	want := "  engine-sync machine policy source missing: " + filepath.Join(
+		installer.options.SourceRepo,
+		"templates",
+		"global",
+		"engine-sync",
+		"config.json",
+	) + "\n" +
+		"  change  link /h/.claude/agents/a.md -> /r/templates/global/agents/a.md\n" +
 		"  change  retire /h/.codex/agents/x.toml (retired generated Codex agent)\n" +
 		"  skip    no Codex accounts configured — agent mirror has nothing to write\n" +
 		"  ok      Codex global agents compiled=1 linked=1\n"
@@ -256,6 +263,11 @@ func withoutEngineSync(t *testing.T) {
 func TestWireEngineSyncGlobalUninstallPreviewWithoutTheBinarySkips(t *testing.T) {
 	installer, output, _ := engineSyncGlobalEngine(t, ModeUninstall, nil)
 	installer.apply = false
+	writeFixture(
+		t,
+		filepath.Join(installer.options.SourceRepo, "templates", "global", "engine-sync", "config.json"),
+		`{"version":1}`,
+	)
 	withoutEngineSync(t)
 	if err := installer.wireEngineSyncGlobal(nil); err != nil {
 		t.Fatalf("wireEngineSyncGlobal: %v", err)
@@ -403,5 +415,172 @@ func TestWireEngineSyncGlobalMachinePolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
+	for _, version := range []string{"0.1.0", "0.2.0-alpha"} {
+		t.Run(version, func(t *testing.T) {
+			installer, _, _ := engineSyncGlobalEngine(t, ModeApply, nil)
+			binary := filepath.Join(t.TempDir(), "engine-sync")
+			script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'engine-sync " + version + "'; else echo '{\"ok\":true,\"events\":[]}'; fi\n"
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(enginesync.EnvBin, binary)
+			err := installer.wireEngineSyncGlobal(nil)
+			if version == "0.1.0" {
+				if err == nil ||
+					!strings.Contains(
+						err.Error(),
+						"engine-sync 0.1.0 is older than required 0.2.0-alpha — run make host-install",
+					) {
+					t.Fatalf("old binary = %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("compatible binary: %v", err)
+			}
+		})
+	}
+}
+
+func TestEngineSyncPolicyMigratesMissingAndMovedClones(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	for _, name := range []string{"missing apply", "missing plan", "missing uninstall", "moved apply", "moved uninstall", "moved deleted uninstall", "deleted marker uninstall", "missing binary uninstall"} {
+		t.Run(name, func(t *testing.T) {
+			mode := ModeApply
+			if strings.Contains(name, "plan") {
+				mode = ModeDryRun
+			}
+			if strings.Contains(name, "uninstall") {
+				mode = ModeUninstall
+			}
+			installer, output, home := engineSyncGlobalEngine(t, mode, nil)
+			source := filepath.Join(installer.options.SourceRepo, "templates", "global", "engine-sync", "config.json")
+			oldRepo := filepath.Join(home, "previous-clone")
+			oldSource := filepath.Join(oldRepo, "templates", "global", "engine-sync", "config.json")
+			target := filepath.Join(home, ".config", "engine-sync", "config.json")
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			link := source
+			if strings.HasPrefix(name, "moved") || name == "deleted marker uninstall" {
+				writeFixture(t, source, `{"version":1}`)
+				link = oldSource
+				if err := os.MkdirAll(oldRepo, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, paths.SourceRepoPath(home), oldRepo+"\n")
+				if name == "moved deleted uninstall" || name == "deleted marker uninstall" {
+					if err := os.RemoveAll(oldRepo); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if name == "deleted marker uninstall" {
+				installer.options.SourceRepo = ""
+			}
+			if err := os.Symlink(link, target); err != nil {
+				t.Fatal(err)
+			}
+			testjail.FakeEngineSync(t, `{"ok":true,"events":[]}`, 0)
+			if strings.Contains(name, "missing binary") {
+				withoutEngineSync(t)
+			}
+			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+				t.Fatal(err)
+			}
+			if name == "missing plan" {
+				if got, err := os.Readlink(target); err != nil || got != link {
+					t.Fatalf("preview link %q: %v", got, err)
+				}
+			} else if name == "moved apply" {
+				if got, err := os.Readlink(target); err != nil || got != source {
+					t.Fatalf("moved link %q: %v", got, err)
+				}
+			} else if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("retired policy: %v", err)
+			}
+			if strings.Contains(name, "missing") &&
+				!strings.Contains(output.String(), "machine policy source missing") {
+				t.Fatalf("missing policy was silent: %s", output.String())
+			}
+		})
+	}
+}
+
+func TestMissingEngineSyncPolicyPreviewPreservesOperatorPolicy(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	for _, kind := range []string{"regular", "foreign link"} {
+		t.Run(kind, func(t *testing.T) {
+			installer, _, home := engineSyncGlobalEngine(t, ModeDryRun, nil)
+			configHome := filepath.Join(home, ".config")
+			target := filepath.Join(configHome, "engine-sync", "config.json")
+			if kind == "regular" {
+				writeFixture(t, target, `{"version":1,"operator":true}`)
+			} else {
+				foreign := filepath.Join(home, "operator-policy.json")
+				writeFixture(t, foreign, `{"version":1,"operator":true}`)
+				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(foreign, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runner, cleanup, err := installer.engineSyncConfig(installer.options.SourceRepo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := cleanup(); err != nil {
+					t.Error(err)
+				}
+			}()
+			found := ""
+			for _, entry := range runner.ChildEnv {
+				if strings.HasPrefix(entry, "XDG_CONFIG_HOME=") {
+					found = strings.TrimPrefix(entry, "XDG_CONFIG_HOME=")
+				}
+			}
+			if found != configHome {
+				t.Fatalf("preview hides operator policy: XDG_CONFIG_HOME=%s, want %s", found, configHome)
+			}
+		})
+	}
+}
+
+func TestEngineSyncPolicyPlanCleanupNamesItsRoot(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	parent := filepath.Join(t.TempDir(), "scratch")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", parent)
+	installer, _, _ := engineSyncGlobalEngine(t, ModeDryRun, nil)
+	writeFixture(
+		t,
+		filepath.Join(installer.options.SourceRepo, "templates", "global", "engine-sync", "config.json"),
+		`{"version":1}`,
+	)
+	runner, cleanup, err := installer.engineSyncConfig(installer.options.SourceRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporary := ""
+	for _, entry := range runner.ChildEnv {
+		if strings.HasPrefix(entry, "XDG_CONFIG_HOME=") {
+			temporary = strings.TrimPrefix(entry, "XDG_CONFIG_HOME=")
+		}
+	}
+	if err := os.RemoveAll(parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(parent, []byte("operator file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanup(); err == nil ||
+		!strings.Contains(err.Error(), "remove engine-sync policy plan root "+temporary) {
+		t.Fatalf("cleanup error lacks the preview root: %v", err)
 	}
 }

@@ -193,3 +193,22 @@ func TestAtRelativePathFromTheEverywhereStopIsADirectory(t *testing.T) {
 		t.Fatalf("@./x from ~ = place %q status %q, want the directory /jail/me/x", model.place, model.killStatus)
 	}
 }
+
+func TestARemindedChatPinsAtTheTopFromAnyPlace(t *testing.T) {
+	rows, dirs := placeFixtureRows()
+	for index := range rows {
+		rows[index].Reminded = rows[index].ID == "away"
+	}
+	model := NewModel(Snapshot{
+		Rows: rows, ProjectDirs: dirs, Home: "/jail/me", MergeNewChat: true,
+		PrimaryAccount: 1, AccountIDs: []int{1}, NowNS: fixtureNowNS, Width: 120, Height: 30,
+	})
+	if got := visibleNames(model); got != "away,here,nested" {
+		t.Fatalf("opening place lists %q, want the reminded chat from ops pinned first", got)
+	}
+	// A search reaches it once, not again as an out-of-place match.
+	model = typeText(t, model, "away")
+	if got := visibleNames(model); got != "away" {
+		t.Fatalf("search lists %q, want the reminded chat exactly once", got)
+	}
+}

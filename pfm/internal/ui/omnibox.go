@@ -444,7 +444,7 @@ func (model *Model) outOfPlaceRows() []int {
 		for _, index := range group.indices {
 			row := &model.rows[index]
 			if index >= len(model.rowDir) || model.rowDir[index] == "" || isNewChatActionKind(row.Kind) ||
-				!model.visibleInView(*row) || model.inPlace(index) {
+				!model.visibleInView(*row) || model.inPlace(index) || row.Reminded { // a reminded row is already pinned
 				continue
 			}
 			rows = append(rows, index)

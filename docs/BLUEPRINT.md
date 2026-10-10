@@ -244,6 +244,8 @@ flight directories.
 
 For a single-project repo, drop the `{project-a}/`, `{project-b}/` layer — agents live in `.claude/agents/` only, no child CLAUDE.md files.
 
+Professor’s adopter-wide engine-sync policy lives in `templates/global/engine-sync/config.json`; an adopter can write `.claude/engine-sync.json` for project-specific overrides.
+
 ---
 
 ## What you get out of the box

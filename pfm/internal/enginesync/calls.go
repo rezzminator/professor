@@ -225,8 +225,9 @@ type Row struct {
 }
 
 type machineDoctorReply struct {
-	OK   bool  `json:"ok"`
-	Rows []Row `json:"rows"`
+	OK    bool   `json:"ok"`
+	Rows  []Row  `json:"rows"`
+	Error string `json:"error"`
 }
 
 // MachineDoctor runs `engine-sync doctor --machine --json` and returns its
@@ -254,6 +255,9 @@ func (runner Runner) MachineDoctor(ctx context.Context, options MachineDoctorOpt
 	var reply machineDoctorReply
 	if err := runner.runJSON(ctx, args, &reply, func() bool { return reply.OK }); err != nil {
 		return nil, err
+	}
+	if reply.Error != "" {
+		return nil, fmt.Errorf("engine-sync doctor --machine: %s", reply.Error)
 	}
 	failing := false
 	for index, row := range reply.Rows {

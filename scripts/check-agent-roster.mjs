@@ -4,21 +4,61 @@
 // A healthy run proves source discovery completed for both Codex and OpenCode;
 // missing generated directories/files are failures named by runtime and path.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CODEX_CONFIG = JSON.parse(
-  readFileSync(join(ROOT, ".claude/codex-build.json"), "utf8"),
-);
+const binary = process.env.ENGINE_SYNC_BIN || "engine-sync";
+// A check that crashed never looked: an unexpected throw is an ERROR (exit 2),
+// never the roster mismatch exit 1 reports.
+process.on("uncaughtException", (error) => {
+  console.error(`agent-roster: ERROR — the check could not run: ${error.stack || error}`);
+  process.exit(2);
+});
+const configArgs = ["config", "show", "--json", "."];
+function configError(error) {
+  console.error(`agent-roster: ERROR — ${binary} ${configArgs.join(" ")}: ${error}`);
+  process.exit(2);
+}
+const result = spawnSync(binary, configArgs, {
+  cwd: ROOT, encoding: "utf8", timeout: 30000,
+});
+if (result.error) configError(result.error.message);
+let effective;
+try {
+  effective = JSON.parse(result.stdout);
+} catch (error) {
+  configError(`invalid JSON: ${error.message}; ${result.stderr.trim()}`);
+}
+if (effective?.ok !== true)
+  configError(effective?.error || result.stderr.trim() || "config show did not report ok: true");
+if (result.status !== 0)
+  configError(`exit ${result.status}, signal ${result.signal || "none"}; ${result.stderr.trim()}`);
+const CODEX_CONFIG = effective.config?.codex;
+const WORKBENCH_MARKER = effective.config?.workbenchMarker;
+const stringList = (value) => Array.isArray(value) && value.every((name) => typeof name === "string");
+if (!stringList(CODEX_CONFIG?.excludeProjects) || !stringList(CODEX_CONFIG.neverRegister) ||
+    (CODEX_CONFIG.projects !== null && !stringList(CODEX_CONFIG.projects)) ||
+    typeof CODEX_CONFIG.suffixMode !== "string" || typeof CODEX_CONFIG.suffixPrefix !== "string" ||
+    typeof WORKBENCH_MARKER !== "string")
+  configError("effective config has invalid codex projects, excludeProjects, neverRegister, suffixMode, suffixPrefix or workbenchMarker fields");
 const failures = [];
 
-const markdownNames = (dir) =>
+// Agent sources as the compilers read them: README.md is never an agent;
+// Codex walks nested directories and names a role by its file's basename,
+// OpenCode reads the top level only.
+const markdownNames = (dir, nested = false) =>
   existsSync(dir)
-    ? readdirSync(dir)
-        .filter((name) => name.endsWith(".md"))
-        .map((name) => name.slice(0, -3))
+    ? readdirSync(dir, { withFileTypes: true })
+        .flatMap((entry) =>
+          nested && entry.isDirectory()
+            ? markdownNames(join(dir, entry.name), true)
+            : entry.name.endsWith(".md") && !["README.md", "SKILL.md"].includes(entry.name)
+              ? [entry.name.slice(0, -3)]
+              : [],
+        )
         .sort()
     : [];
 
@@ -30,28 +70,52 @@ const generatedNames = (dir, extension) =>
         .sort()
     : [];
 
-const projects = readdirSync(ROOT, { withFileTypes: true })
-  .filter(
-    (entry) =>
-      entry.isDirectory() && existsSync(join(ROOT, entry.name, "CLAUDE.md")),
-  )
-  .map((entry) => entry.name)
+// Child projects as engine-sync discovers them (internal/source/discover.go
+// Projects): an explicit codex.projects list wins over the root scan and its
+// excludeProjects; a child holding the workbench marker builds as its own root.
+const hasOrientation = (dir) => {
+  try {
+    return statSync(join(dir, "CLAUDE.md")).isFile();
+  } catch {
+    return false;
+  }
+};
+const isWorkbench = (dir) => {
+  if (!WORKBENCH_MARKER) return false;
+  let current = dir;
+  for (const part of WORKBENCH_MARKER.split("/")) {
+    current = join(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+};
+const candidates = CODEX_CONFIG.projects !== null
+  ? CODEX_CONFIG.projects.filter((name) => name !== ".")
+  : readdirSync(ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && ![".claude", ".codex"].includes(entry.name) &&
+        !CODEX_CONFIG.excludeProjects.includes(entry.name))
+      .map((entry) => entry.name);
+const projects = [...new Set(candidates)]
+  .filter((name) => !isWorkbench(join(ROOT, name)) && hasOrientation(join(ROOT, name)))
   .sort();
 
-const rootAgents = markdownNames(join(ROOT, ".claude/agents"));
-
-function expectedAgents(excludedProjects, suffixMode, suffixPrefix = "") {
-  const expected = [...rootAgents];
+function expectedAgents(nested, suffixMode, suffixPrefix = "", neverRegister = []) {
+  const expected = markdownNames(join(ROOT, ".claude/agents"), nested)
+    .filter((agent) => !neverRegister.includes(agent));
   for (const project of projects) {
-    if (excludedProjects.includes(project)) continue;
-    for (const agent of markdownNames(join(ROOT, project, ".claude/agents"))) {
+    for (const agent of markdownNames(join(ROOT, project, ".claude/agents"), nested)) {
       let suffix = project;
       if (suffixMode === "none") suffix = "";
       if (suffixMode === "strip-prefix")
         suffix = project.startsWith(suffixPrefix)
           ? project.slice(suffixPrefix.length)
           : project;
-      expected.push(suffix ? `${agent}-${suffix}` : agent);
+      const name = suffix ? `${agent}-${suffix}` : agent;
+      if (!neverRegister.includes(agent) && !neverRegister.includes(name)) expected.push(name);
     }
   }
   return [...new Set(expected)].sort();
@@ -89,14 +153,15 @@ if (missingDirs.length) {
 }
 
 const codexExpected = expectedAgents(
-  CODEX_CONFIG.excludeProjects ?? [],
-  CODEX_CONFIG.suffixMode ?? "project",
-  CODEX_CONFIG.suffixPrefix ?? "",
+  true,
+  CODEX_CONFIG.suffixMode,
+  CODEX_CONFIG.suffixPrefix,
+  CODEX_CONFIG.neverRegister,
 );
 const codexActual = generatedNames(codexDir, ".toml");
 compare("codex", codexExpected, codexActual, ".toml");
 
-const openCodeExpected = expectedAgents(["templates"], "project");
+const openCodeExpected = expectedAgents(false, "project");
 const openCodeActual = generatedNames(openCodeDir, ".md");
 compare("opencode", openCodeExpected, openCodeActual, ".md");
 

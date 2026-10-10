@@ -79,7 +79,7 @@ func FakeEngineSync(t *testing.T, reply string, code int) string {
 	binary := filepath.Join(dir, "engine-sync")
 	record := filepath.Join(dir, "argv")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + record + "'\nprintf '%s\\n' \"$HOME\" > '" + record +
-		".home'\ncat <<'REPLY'\n" + reply + "\nREPLY\nprintf 'usage: engine-sync\\n' >&2\nexit " +
+		".home'\nprintf '%s\n' \"$ENGINE_SYNC_WORKBENCH_MARKER\" > '" + record + ".marker'\nhome=\"$HOME\"; prev=\"\"\nfor arg; do [ \"$prev\" != --home ] || home=\"$arg\"; prev=\"$arg\"; done\nconfig=\"${XDG_CONFIG_HOME:-$home/.config}/engine-sync/config.json\"\nif [ -f \"$config\" ]; then cat \"$config\" > '" + record + ".config'; fi\nif [ -f \"${config%/*}/targets.json\" ]; then cat \"${config%/*}/targets.json\" > '" + record + ".targets'; fi\ncat <<'REPLY'\n" + reply + "\nREPLY\nprintf 'usage: engine-sync\\n' >&2\nexit " +
 		strconv.Itoa(code) + "\n"
 	if err := WriteExecutable(binary, []byte(script), 0o755); err != nil {
 		t.Fatalf("write the engine-sync fake %s: %v", binary, err)

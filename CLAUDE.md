@@ -51,7 +51,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Codex
 
-- Reads `AGENTS.md`, whose § Codex adapter comes from `.claude/codex-build.json`, and `.codex/`.
+- Reads `AGENTS.md`, whose § Codex adapter comes from `.claude/engine-sync.json` (`codex.rootAdapter`), and `.codex/`.
 - engine-sync writes its mirror, run as `pfm codex build .`; `pfm codex check .` its check.
 - A role is a `.toml` twin `pfm install` (through `engine-sync global`, or `pfm codex agents`) writes as a marker-owned regular file into every Codex home's `{codex-home}/agents/` — Codex refuses a symlinked role — so a role changes at the next `pfm install`.
 

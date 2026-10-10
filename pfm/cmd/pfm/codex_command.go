@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 // runCodex forwards `pfm codex ARGS…` to `engine-sync codex ARGS…` for the one
@@ -19,9 +23,55 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 // forwardEngineSync runs engine-sync under this process's resolved home, so a
 // forwarded --home default means what pfm's own default meant.
 func forwardEngineSync(engine string, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+	if engine == enginesync.EngineCodex && len(args) > 0 && args[0] == "agents" {
+		var err error
+		args, err = forwardAgentsSource(args, runtime.Paths.Home)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm codex agents: %v\n", err)
+			return 1
+		}
+	}
 	runner := enginesync.Runner{
 		Home:     runtime.Paths.Home,
 		ChildEnv: append(os.Environ(), "HOME="+runtime.Paths.Home),
 	}
 	return runner.Forward(context.Background(), "pfm "+engine, append([]string{engine}, args...), stdout, stderr)
+}
+
+// forwardAgentsSource preserves pfm's clone source when the caller omits it.
+func forwardAgentsSource(args []string, home string) ([]string, error) {
+	// engine-sync parses with Go's flag package: one or two dashes name a
+	// flag, and "--" ends the flags.
+	for index := 1; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			break
+		}
+		name, value, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-"), "=")
+		switch name {
+		case "source-repo", "help", "h":
+			return args, nil
+		case "home":
+			if !hasValue {
+				index++
+				if index == len(args) {
+					return args, nil
+				}
+				value = args[index]
+			}
+			home = value
+		}
+	}
+	if home == "" {
+		return args, nil
+	}
+	home, err := filepath.Abs(home)
+	if err != nil {
+		return nil, err
+	}
+	source, err := installer.GlobalSourceRepo(home)
+	if err != nil {
+		return nil, err
+	}
+	return append(append([]string(nil), args...), "--source-repo", source), nil
 }

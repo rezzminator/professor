@@ -49,6 +49,9 @@
     "global/codex/config.toml": {
       "curated": true
     },
+    "global/engine-sync/config.json": {
+      "curated": true
+    },
     "global/commands/context-meter.md": {
       "curated": true
     },

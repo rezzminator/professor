@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -22,6 +23,10 @@ var forwardCases = []struct {
 	{name: "codex build", args: []string{"codex", "build", ".", "--model", "opus=x"}, stdout: "CODEX BUILD PASS"},
 	{name: "codex check finding", args: []string{"codex", "check", "--home", "/h"}, code: 1},
 	{name: "codex agents", args: []string{"codex", "agents", "--home", "/h"}, stdout: "CODEX AGENTS PASS"},
+	{name: "codex agents explicit source", args: []string{"codex", "agents", "--source-repo=/custom"}},
+	{name: "codex agents home equals", args: []string{"codex", "agents", "--home=/h"}},
+	{name: "codex agents single-dash source", args: []string{"codex", "agents", "-source-repo", "/custom"}},
+	{name: "codex agents single-dash home", args: []string{"codex", "agents", "-home", "/h"}},
 	{name: "codex usage", args: []string{"codex", "generate"}, code: 2},
 	{
 		name: "opencode build", args: []string{"opencode", "build", "."},
@@ -43,7 +48,16 @@ func testForwarders(t *testing.T, engine string) {
 			if code := run(testCase.args, &stdout, &stderr); code != testCase.code {
 				t.Fatalf("pfm %q exit = %d, want %d; stderr=%q", testCase.args, code, testCase.code, stderr.String())
 			}
-			calls, want := testjail.EngineSyncCalls(t, record), []string{strings.Join(testCase.args, " ")}
+			forwarded := append([]string(nil), testCase.args...)
+			if testCase.name == "codex agents" || testCase.name == "codex agents home equals" ||
+				testCase.name == "codex agents single-dash home" {
+				source, err := installer.GlobalSourceRepo("/h")
+				if err != nil {
+					t.Fatal(err)
+				}
+				forwarded = append(forwarded, "--source-repo", source)
+			}
+			calls, want := testjail.EngineSyncCalls(t, record), []string{strings.Join(forwarded, " ")}
 			if !slices.Equal(calls, want) {
 				t.Fatalf("engine-sync calls = %q, want %q", calls, want)
 			}
@@ -56,10 +70,14 @@ func testForwarders(t *testing.T, engine string) {
 					filepath.Join(root, "home"),
 				)
 			}
+			marker, err := os.ReadFile(record + ".marker")
+			if err != nil || strings.TrimSpace(string(marker)) != ".professor/workbench.json" {
+				t.Fatalf("marker = %q (%v)", marker, err)
+			}
 			if want := testCase.stdout + "\n"; stdout.String() != want {
 				t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 			}
-			wantStderr := "pfm " + engine + ": deprecated, runs engine-sync " + strings.Join(testCase.args, " ") +
+			wantStderr := "pfm " + engine + ": deprecated, runs engine-sync " + strings.Join(forwarded, " ") +
 				"\nusage: engine-sync\n"
 			if stderr.String() != wantStderr {
 				t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)

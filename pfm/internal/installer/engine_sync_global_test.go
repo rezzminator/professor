@@ -323,3 +323,85 @@ func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T)
 		t.Fatalf("the uninstall did not finish:\n%s", output.String())
 	}
 }
+
+func TestWireEngineSyncGlobalMachinePolicy(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	for _, name := range []string{"apply", "plan", "plan wrong target", "plan targets", "operator", "uninstall owned", "uninstall operator"} {
+		t.Run(name, func(t *testing.T) {
+			mode := ModeApply
+			if strings.HasPrefix(name, "plan") {
+				mode = ModeDryRun
+			}
+			if strings.HasPrefix(name, "uninstall") {
+				mode = ModeUninstall
+			}
+			installer, output, home := engineSyncGlobalEngine(t, mode, nil)
+			source := filepath.Join(installer.options.SourceRepo, "templates", "global", "engine-sync", "config.json")
+			policy := `{"version":1,"machine":{"retiredAgents":["old-role"]}}`
+			writeFixture(t, source, policy)
+			target := filepath.Join(home, ".config", "engine-sync", "config.json")
+			switch {
+			case strings.Contains(name, "operator"):
+				policy = `{"version":1,"machine":{"retiredAgents":["personal-role"]}}`
+				writeFixture(t, target, policy)
+			case name == "plan wrong target":
+				stale := filepath.Join(installer.options.SourceRepo, "old", "config.json")
+				writeFixture(t, stale, `{"version":1,"machine":{"retiredAgents":["stale-role"]}}`)
+				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(stale, target); err != nil {
+					t.Fatal(err)
+				}
+			case name == "plan targets":
+				writeFixture(t, filepath.Join(filepath.Dir(target), "targets.json"), `{"codexHomes":["/recorded"]}`)
+			case name == "uninstall owned":
+				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(source, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(record + ".config")
+			if err != nil || string(got) != policy {
+				t.Fatalf("machine policy = %q (%v), want %q", got, err, policy)
+			}
+			if name == "plan targets" {
+				got, err := os.ReadFile(record + ".targets")
+				if err != nil || string(got) != `{"codexHomes":["/recorded"]}` {
+					t.Fatalf("preview targets = %q (%v), want the recorded targets", got, err)
+				}
+			}
+			switch {
+			case name == "plan wrong target":
+				stale := filepath.Join(installer.options.SourceRepo, "old", "config.json")
+				if got, err := os.Readlink(target); err != nil || got != stale {
+					t.Fatalf("preview rewired %s: %q (%v)", target, got, err)
+				}
+			case name == "apply":
+				got, err := os.Readlink(target)
+				if err != nil || got != source {
+					t.Fatalf("config link = %q (%v), want %q", got, err, source)
+				}
+			case strings.Contains(name, "operator"):
+				got, err := os.ReadFile(target)
+				if err != nil || string(got) != policy {
+					t.Fatalf("operator policy = %q (%v)", got, err)
+				}
+				if name == "operator" &&
+					!strings.Contains(output.String(), "machine policy "+source+" is not applied") {
+					t.Fatalf("operator policy kept silently:\n%s", output.String())
+				}
+			default:
+				if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("config target after %s: %v", name, err)
+				}
+			}
+		})
+	}
+}

@@ -207,8 +207,16 @@ checks_templates_descriptions() {
 
 }
 
+checks_engine_sync_policy() { # <config-home>: stage the shipped machine policy for a compiler's jail
+  local policy="$REPO_ROOT/templates/global/engine-sync/config.json" destination="$1/engine-sync"
+  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/config.json"; then
+    echo "engine-sync: machine policy could not be staged from $policy into $destination/config.json" >&2
+    return 1
+  fi
+}
+
 checks_templates_mirrors_generate() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync"
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config"
   head_ "templates — generate the engine mirrors"
   # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
   # clone holds none, so verify generates them from the Claude sources
@@ -220,9 +228,11 @@ checks_templates_mirrors_generate() {
     fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
   elif ! engine_sync_build "$es_bin"; then
     fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
-  elif "$es_bin" check "$REPO_ROOT" >/dev/null 2>&1; then
+  elif ! checks_engine_sync_policy "$config_home"; then
+    fail_step "mirror generation could not run — the machine policy could not be staged (see above); no mirror gate below is a verdict on the tree"
+  elif XDG_CONFIG_HOME="$config_home" "$es_bin" check "$REPO_ROOT" >/dev/null 2>&1; then
     ok "engine mirrors current — nothing generated"
-  elif "$es_bin" build "$REPO_ROOT"; then
+  elif XDG_CONFIG_HOME="$config_home" "$es_bin" build "$REPO_ROOT"; then
     ok "engine mirrors generated from the Claude sources"
   else
     fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
@@ -269,6 +279,11 @@ checks_templates_global_variants() {
   home="$jail/home"
   mkdir -p "$home/.claude" "$home/.codex"
   out="$jail/engine-sync-global.out"
+  if ! checks_engine_sync_policy "$home/.config"; then
+    fail_step "global agent variants NOT RENDERED — the machine policy could not be staged in the jail"
+    rm -rf "$jail"
+    return
+  fi
   env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u ENGINE_SYNC_HOME -u ENGINE_SYNC_STATE -u CODEX_HOME \
     HOME="$home" "$es_bin" global --home "$home" --source-repo "$REPO_ROOT" \
     --claude-config-dir "$home/.claude" --codex-home "$home/.codex" >"$out" 2>&1 || rc=$?
@@ -308,17 +323,28 @@ checks_templates_mirrors_marker() {
   else
     fail_step "codex marker claim FAILED — a stranded marker or an orphaned generated file (see output)"
   fi
+  node_test_suite "generated marker claims" "$TMP_BASE/templates/codex-markers.tap" scripts/check-codex-markers.test.mjs
 
 }
 
 checks_templates_mirrors_roster() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config" rc
   head_ "templates — generated agent rosters"
-  if node scripts/check-agent-roster.mjs; then
+  if ! checks_engine_sync_policy "$config_home"; then
+    fail_step "agent roster ERROR — the machine policy could not be staged (see above)"
+  elif ENGINE_SYNC_BIN="$es_bin" XDG_CONFIG_HOME="$config_home" node scripts/check-agent-roster.mjs; then
     ok "Codex and OpenCode agent rosters match their Claude sources"
   else
-    fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      fail_step "agent roster ERROR — effective configuration could not be read or the check crashed (see the error above)"
+    elif [ "$rc" -eq 3 ]; then
+      fail_step "agent roster NOT GENERATED — the engine mirrors are absent, so no roster was compared (see above)"
+    else
+      fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
+    fi
   fi
-
+  ENGINE_SYNC_BIN="$es_bin" node_test_suite "generated agent rosters" "$TMP_BASE/templates/agent-roster.tap" scripts/check-agent-roster.test.mjs
 }
 
 checks_templates_release_check() {
@@ -386,8 +412,10 @@ checks_templates_mirrors_opencode() {
   # under a scratch home; verification never depends on or installs a host binary.
   if ! need_tool go templates || ! engine_sync_build "$es_bin"; then
     fail_step "opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)"
-  elif "$es_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
-    && "$es_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
+  elif ! checks_engine_sync_policy "$opencode_home/.config"; then
+    fail_step "opencode mirror NOT CHECKED — the machine policy could not be staged (see above)"
+  elif XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
+    && XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
     ok "opencode mirror current and parseable"
   else
     fail_step "opencode mirror FAILED — run: engine-sync opencode build $REPO_ROOT"
@@ -398,6 +426,12 @@ checks_templates_mirrors_opencode() {
 checks_templates_opencode_writer_tests() {
   head_ "templates — OpenCode writer check tests"
   node_test_suite "opencode-writer check" "$TMP_BASE/templates/opencode-writer.tap" scripts/check-opencode-writer.test.mjs
+
+}
+
+checks_templates_engine_sync_action_tests() {
+  head_ "templates — CI engine-sync action tests"
+  node_test_suite "engine-sync action" "$TMP_BASE/templates/engine-sync-action.tap" scripts/engine-sync-action.test.mjs
 
 }
 
@@ -913,6 +947,7 @@ gate_run() { # pfm, templates, or all
     steps_add templates.test-templates-tests checks_templates_unit_script test-templates
     steps_add templates.unit-path-tests checks_templates_unit_script unit-path
     steps_add templates.opencode-writer-tests checks_templates_opencode_writer_tests
+    steps_add templates.engine-sync-action-tests checks_templates_engine_sync_action_tests
     steps_add templates.skill-tests checks_templates_skill_tests
     steps_add templates.opencode-writer-refs checks_templates_opencode_writer_refs
   fi

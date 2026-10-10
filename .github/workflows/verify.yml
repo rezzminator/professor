@@ -34,6 +34,10 @@ jobs:
 
       # engine-sync writes the mirrors below, and the fence builds its own
       # copy from the same checked-out source (infra/fence/fence-env.sh).
+      # The action stages the shipped machine policy and exports its config
+      # home; the fence stages the same file from the same commit for its
+      # checks (infra/fence/checks.sh checks_engine_sync_policy), so runner
+      # generation and fence checks resolve the same policy.
       - name: Build engine-sync
         uses: ./.github/actions/engine-sync
 

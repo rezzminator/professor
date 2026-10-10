@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
+	"github.com/rezzminator/professor/pfm/internal/globallink"
 )
 
 // engineSync is the engine-sync runner this install drives: its environment
@@ -32,6 +35,11 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 	if err != nil {
 		return fmt.Errorf("resolve the engine-sync global source repository: %w", err)
 	}
+	runner, cleanup, err := installer.engineSyncConfig(sourceRepo)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, cleanup()) }()
 	options := enginesync.GlobalOptions{
 		SourceRepo:       sourceRepo,
 		ClaudeConfigDirs: []string{installer.options.ConfigDir},
@@ -57,7 +65,7 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 		}()
 		options.SourceHome = sourceHome
 	}
-	result, runErr := installer.engineSync().Global(context.Background(), options)
+	result, runErr := runner.Global(context.Background(), options)
 	var conflicts []string
 	for _, event := range result.Events {
 		switch event.Verb {
@@ -88,6 +96,9 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 		return runErr
 	}
 	if result.OK {
+		if options.Uninstall {
+			return installer.retireEngineSyncConfig(sourceRepo)
+		}
 		return nil
 	}
 	conflictErr := fmt.Errorf("engine-sync global: %s", strings.Join(conflicts, "; "))
@@ -161,4 +172,113 @@ func (installer *engine) wireEngineSyncTargets() error {
 	return installer.change("write "+path, func() error {
 		return atomicfile.Write(path, encoded, 0o600)
 	})
+}
+
+// engineSyncConfig wires Professor's machine policy through the public file
+// surface. A preview reads the future policy from a scratch config directory.
+func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner, func() error, error) {
+	runner := installer.engineSync()
+	cleanup := func() error { return nil }
+	target := filepath.Join(
+		filepath.Dir(enginesync.TargetsPath(installer.env(), installer.options.Home)),
+		"config.json",
+	)
+	runner.ChildEnv = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Dir(filepath.Dir(target)))
+	if installer.options.Mode == ModeUninstall {
+		return runner, cleanup, nil
+	}
+	source := filepath.Join(sourceRepo, "templates", "global", "engine-sync", "config.json")
+	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) {
+		return runner, cleanup, nil
+	} else if err != nil {
+		return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy: %w", err)
+	}
+	info, inspectErr := os.Lstat(target)
+	if inspectErr != nil && !errors.Is(inspectErr, fs.ErrNotExist) {
+		return runner, cleanup, inspectErr
+	}
+	// The policy the apply leaves engine-sync reading: an operator's regular
+	// file and a conflicting entry stay as they are; every other state ends as
+	// the link to the clone's source.
+	policyPath := source
+	if inspectErr == nil && info.Mode().IsRegular() {
+		policyPath = target
+		installer.skip(target + " is the operator's own engine-sync policy, kept: Professor's machine policy " +
+			source + " is not applied (merge it into the operator file to keep its guards)")
+	} else {
+		state, _, err := globallink.ClassifyLink(target, source, sourceRepo, globallink.File)
+		if err != nil {
+			return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy %s: %w", target, err)
+		}
+		if state == globallink.Conflict {
+			policyPath = target
+		}
+		if err := installer.wireGlobalLink(source, target, sourceRepo, false); err != nil {
+			return runner, cleanup, err
+		}
+	}
+	if installer.apply {
+		return runner, cleanup, nil
+	}
+	policy, err := os.ReadFile(policyPath)
+	if err != nil {
+		return runner, cleanup, fmt.Errorf("read engine-sync machine policy: %w", err)
+	}
+	temporary, err := os.MkdirTemp("", "pfm-engine-sync-plan-")
+	if err != nil {
+		return runner, cleanup, fmt.Errorf("create engine-sync policy plan root: %w", err)
+	}
+	cleanup = func() error { return os.RemoveAll(temporary) }
+	if err := atomicfile.Write(filepath.Join(temporary, "engine-sync", "config.json"), policy, 0o600); err != nil {
+		return runner, func() error { return nil }, errors.Join(err, cleanup())
+	}
+	// The scratch config home replaces the real one for the preview, so the
+	// recorded machine targets travel with the policy.
+	targetsPath := enginesync.TargetsPath(installer.env(), installer.options.Home)
+	if targets, err := os.ReadFile(targetsPath); err == nil {
+		if err := atomicfile.Write(
+			filepath.Join(temporary, "engine-sync", filepath.Base(targetsPath)),
+			targets,
+			0o600,
+		); err != nil {
+			return runner, func() error { return nil }, errors.Join(err, cleanup())
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return runner, func() error { return nil }, errors.Join(
+			fmt.Errorf("read engine-sync machine targets: %w", err),
+			cleanup(),
+		)
+	}
+	runner.ChildEnv = append(runner.ChildEnv, "XDG_CONFIG_HOME="+temporary)
+	return runner, cleanup, nil
+}
+
+// retireEngineSyncConfig removes only a clone-owned policy link, after the
+// engine has used it to retire its configured machine artifacts.
+func (installer *engine) retireEngineSyncConfig(sourceRepo string) error {
+	target := filepath.Join(
+		filepath.Dir(enginesync.TargetsPath(installer.env(), installer.options.Home)),
+		"config.json",
+	)
+	info, err := os.Lstat(target)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	found, err := os.Readlink(target)
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(found) {
+		found = filepath.Join(filepath.Dir(target), found)
+	}
+	if ownedGlobalLink([]string{sourceRepo}, "engine-sync", "config.json", filepath.Clean(found)) {
+		return installer.retire(target, "engine-sync machine configuration")
+	}
+	return nil
 }

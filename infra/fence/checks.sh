@@ -230,12 +230,16 @@ checks_templates_mirrors_generate() {
     fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
   elif ! checks_engine_sync_policy "$config_home"; then
     fail_step "mirror generation could not run — the machine policy could not be staged (see above); no mirror gate below is a verdict on the tree"
-  elif XDG_CONFIG_HOME="$config_home" "$es_bin" check "$REPO_ROOT" >/dev/null 2>&1; then
-    ok "engine mirrors current — nothing generated"
-  elif XDG_CONFIG_HOME="$config_home" "$es_bin" build "$REPO_ROOT"; then
-    ok "engine mirrors generated from the Claude sources"
   else
-    fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
+    local report="$TMP_BASE/engine-sync/project-check.log" rc=0
+    XDG_CONFIG_HOME="$config_home" "$es_bin" check "$REPO_ROOT" >"$report" 2>&1 || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      ok "engine mirrors current — nothing generated"
+    else
+      cat "$report"
+      fail_step "host mirrors STALE or unreadable (engine-sync check exit $rc) — the fence mount is read-only; no mirror gate below is a verdict on the tree"
+      echo 'On the host, from this worktree: make -C pfm host-install; pfm install --yes; pfm codex build . && pfm opencode build .'
+    fi
   fi
 
 }

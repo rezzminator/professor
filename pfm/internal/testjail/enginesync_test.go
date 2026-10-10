@@ -20,7 +20,7 @@ func TestDefaultEngineSyncAnswersEveryShape(t *testing.T) {
 		{args: []string{"doctor", "--machine", "--json"}, want: `{"ok":true,"rows":[]}`},
 		{args: []string{"codex", "check", "/r", "--json"}, want: `"problems":[]`},
 		{args: []string{"opencode", "build", "/r"}, want: "OPENCODE BUILD PASS"},
-		{args: []string{"version"}, want: "engine-sync 0.0.0-testjail"},
+		{args: []string{"version"}, want: "engine-sync 9.0.0-testjail"},
 	}
 	for _, testCase := range cases {
 		out, err := exec.Command(binary, testCase.args...).Output()

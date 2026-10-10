@@ -146,3 +146,31 @@ func TestCreatePublishesOnceAndPreservesExistingTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestSymlinkPublishesWholeAndPreservesForeignDirectoryOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "policy.json")
+	if err := os.Symlink("old.json", target); err != nil {
+		t.Fatal(err)
+	}
+	if err := Symlink(target, "new.json"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(target); err != nil || got != "new.json" {
+		t.Fatalf("published %q: %v", got, err)
+	}
+	foreign := filepath.Join(dir, "foreign")
+	if err := os.Mkdir(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(foreign, "keep")
+	if err := os.WriteFile(keep, []byte("operator"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Symlink(foreign, "new.json"); err == nil {
+		t.Fatal("directory replacement unexpectedly succeeded")
+	}
+	if got, err := os.ReadFile(keep); err != nil || string(got) != "operator" {
+		t.Fatalf("operator data %q: %v", got, err)
+	}
+}

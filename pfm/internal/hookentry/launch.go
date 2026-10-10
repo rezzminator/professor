@@ -381,11 +381,14 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: launcher wait-for timeout after %s\n", launcherWaitTimeout)
 		return 1
 	}
+	// Starting the waiter does not prove its client connected: a fast child
+	// can record its status and close the last pane before that connection.
+	// The durable status is authoritative only after the bounded wait ended;
+	// a timeout above still fails, and absent or invalid status never succeeds.
+	status, err := readLaunchStatus(statusPath)
 	if waitErr != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
-		return 1
 	}
-	status, err := readLaunchStatus(statusPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1

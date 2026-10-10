@@ -193,16 +193,17 @@ func TestTargetsPath(t *testing.T) {
 	}
 }
 
-func TestRunnerSuppliesWorkbenchMarker(t *testing.T) {
-	for _, childEnv := range [][]string{nil, {"ENGINE_SYNC_WORKBENCH_MARKER=stale", "HOME=/fixture"}} {
+func TestRunnerPreservesWorkbenchMarker(t *testing.T) {
+	t.Setenv("ENGINE_SYNC_WORKBENCH_MARKER", "operator-marker")
+	for _, childEnv := range [][]string{nil, {"ENGINE_SYNC_WORKBENCH_MARKER=operator-marker", "HOME=/fixture"}} {
 		runner, binary := fakeRunner(t, "ok", "", 0)
 		runner.ChildEnv = childEnv
 		if _, err := runner.run(context.Background(), []string{"version"}); err != nil {
 			t.Fatal(err)
 		}
 		marker, err := os.ReadFile(binary + ".marker")
-		if err != nil || strings.TrimSpace(string(marker)) != paths.WorkbenchManifest("") {
-			t.Fatalf("workbench marker = %q (%v), want %q", marker, err, paths.WorkbenchManifest(""))
+		if err != nil || strings.TrimSpace(string(marker)) != "operator-marker" {
+			t.Fatalf("workbench marker = %q (%v), want %q", marker, err, "operator-marker")
 		}
 	}
 }

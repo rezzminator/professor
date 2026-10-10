@@ -28,7 +28,9 @@
         "literal": "children are Explore+haiku (never\nyour own type)",
         "replace": "children are spawned via spawn_agent as the `explorer` role (never your own type)"
       }
-    ]
+    ],
+    "sourceAgentsDir": "templates/global/agents",
+    "agentMarkerDir": "templates/global/agents"
   },
   "codex": {
     "globalCommands": true,
@@ -44,7 +46,13 @@
     "excludeProjects": [],
     "neverRegister": [],
     "suffixMode": "project",
-    "suffixPrefix": ""
+    "suffixPrefix": "",
+    "review": {
+      "modelAlias": "opus",
+      "defaultEffort": "low",
+      "prompt": "Review the uncommitted changes only in your task's own files (name them, space separated). Ignore every other path. Report correctness bugs only, most severe first.",
+      "slotPrompt": "Review the uncommitted changes only in the flight's files (name them, space separated). Ignore every other path. Report correctness bugs only, most severe first."
+    }
   },
   "opencode": {
     "modelMap": {
@@ -131,5 +139,8 @@
       "chat": "professor"
     }
   },
-  "workbenchMarker": ".professor/workbench.json"
+  "workbenchMarker": ".professor/workbench.json",
+  "commandDirs": [
+    "templates/global/commands"
+  ]
 }

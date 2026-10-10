@@ -429,6 +429,63 @@ func countEnvironmentEntry(environment []string, want string) int {
 	return count
 }
 
+func TestLaunchReadsCompletedStatusAfterServerExit(t *testing.T) {
+	realTmux, err := exec.LookPath("tmux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, exitStatus := range []int{0, 7} {
+		t.Run(strconv.Itoa(exitStatus), func(t *testing.T) {
+			root := testjail.ShortRoot(t)
+			binDir := filepath.Join(root, "bin")
+			if err := os.MkdirAll(binDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// Force the done waiter to connect only after the last pane exited.
+			// The signal cannot survive that server, but the recorded status must.
+			wrapper := "#!/bin/sh\n" +
+				"if [ \"$3\" = wait-for ] && [ \"$4\" != -S ]; then\n" +
+				"  case \"$4\" in pfm-launch-done-*)\n" +
+				"    n=0; while " + action.Quote(realTmux) + " -S \"$2\" has-session 2>/dev/null; do\n" +
+				"      n=$((n + 1)); [ \"$n\" -lt 500 ] || exit 99; sleep 0.01\n" +
+				"    done;; esac\nfi\nexec " + action.Quote(realTmux) + " \"$@\"\n"
+			if err := testjail.WriteExecutable(filepath.Join(binDir, "tmux"), []byte(wrapper), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(binDir, "claude")
+			if err := testjail.WriteExecutable(
+				binary,
+				[]byte("#!/bin/sh\nexit "+strconv.Itoa(exitStatus)+"\n"),
+				0o700,
+			); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			t.Setenv("TMUX", "")
+			t.Setenv(paths.EnvHome, root)
+			t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
+			machine := config.Runtime{
+				Config: config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
+				Paths: paths.Values{
+					Home: root, StateDB: filepath.Join(root, "state", "pfm.db"),
+					SIDDir: filepath.Join(root, "sid"), TmuxDir: filepath.Join(root, "tmux"),
+				},
+			}
+			var stdout, stderr bytes.Buffer
+			if got := Launch(
+				[]string{"--real", binary, "--cwd", root, "--"},
+				&stdout,
+				&stderr,
+				machine,
+				&paths.MapEnv{},
+			); got != exitStatus {
+				t.Fatalf("completed launch = %d, want %d: %s", got, exitStatus, stderr.String())
+			}
+		})
+	}
+}
+
 func TestReadLaunchStatusRejectsMissingAndInvalidFiles(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "status")

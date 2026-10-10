@@ -178,19 +178,12 @@ func (runner Runner) run(ctx context.Context, args []string) (deps.RunResult, er
 	return result, nil
 }
 
-// childEnv supplies Professor's marker through engine-sync's public override.
+// childEnv preserves the caller's overrides; layered engine-sync policy owns the default marker.
 func (runner Runner) childEnv() []string {
-	env := runner.ChildEnv
-	if env == nil {
-		env = os.Environ()
+	if runner.ChildEnv != nil {
+		return runner.ChildEnv
 	}
-	result := make([]string, 0, len(env)+1)
-	for _, value := range env {
-		if !strings.HasPrefix(value, "ENGINE_SYNC_WORKBENCH_MARKER=") {
-			result = append(result, value)
-		}
-	}
-	return append(result, "ENGINE_SYNC_WORKBENCH_MARKER="+paths.WorkbenchManifest(""))
+	return os.Environ()
 }
 
 // Forward is a retiring pfm command that now belongs to engine-sync: it

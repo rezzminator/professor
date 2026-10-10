@@ -29,7 +29,7 @@ for arg; do
   esac
 done
 case "$1" in
-version) echo 'engine-sync 0.0.0-testjail'; exit 0 ;;
+version) echo 'engine-sync 9.0.0-testjail'; exit 0 ;;
 global) [ "$json" = 1 ] && echo '{"ok":true,"events":[],"error":""}'; exit 0 ;;
 doctor)
   if [ "$machine" = 1 ]; then
@@ -78,9 +78,11 @@ func FakeEngineSync(t *testing.T, reply string, code int) string {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "engine-sync")
 	record := filepath.Join(dir, "argv")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + record + "'\nprintf '%s\\n' \"$HOME\" > '" + record +
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'engine-sync 9.0.0-testjail'; exit 0; fi\nprintf '%s\\n' \"$*\" >> '" + record + "'\nprintf '%s\\n' \"$HOME\" > '" + record +
 		".home'\nprintf '%s\n' \"$ENGINE_SYNC_WORKBENCH_MARKER\" > '" + record + ".marker'\nhome=\"$HOME\"; prev=\"\"\nfor arg; do [ \"$prev\" != --home ] || home=\"$arg\"; prev=\"$arg\"; done\nconfig=\"${XDG_CONFIG_HOME:-$home/.config}/engine-sync/config.json\"\nif [ -f \"$config\" ]; then cat \"$config\" > '" + record + ".config'; fi\nif [ -f \"${config%/*}/targets.json\" ]; then cat \"${config%/*}/targets.json\" > '" + record + ".targets'; fi\ncat <<'REPLY'\n" + reply + "\nREPLY\nprintf 'usage: engine-sync\\n' >&2\nexit " +
-		strconv.Itoa(code) + "\n"
+		strconv.Itoa(
+			code,
+		) + "\n"
 	if err := WriteExecutable(binary, []byte(script), 0o755); err != nil {
 		t.Fatalf("write the engine-sync fake %s: %v", binary, err)
 	}

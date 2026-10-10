@@ -23,7 +23,7 @@
 | --- | --- |
 | Kind | original agent, `templates/global/agents/clone-distiller.md`, linked by `pfm install` |
 | Class | any caller |
-| Model, effort | `opus`, `medium` — following a call chain through unfamiliar code is judgment, not extraction |
+| Model, effort | `opus`, `medium` — with the code read by `tracer`, what is left is the history and the ruling across both; on the `openai/codex` bench, `sonnet` at `high` matched `opus` per dollar (Q .79 at $1.12 and .50 at $0.80, against .79 at $1.22, graded blind against the clone) but its cheaper run missed the commit that admits the busy-wait and wrote that none did |
 | Tools | `Bash, Read, Grep, Glob, Agent` — no `Write`: the result file is written by `Bash` (§ The result file) |
 | Budget | 30 tool calls |
 | Spawns | one `tracer`, for the code part of every question (§ Reading) |

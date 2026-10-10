@@ -238,7 +238,7 @@ func (installer *engine) install(ctx context.Context) error {
 		}
 		installer.deferFailure(installer.ensureLaunchdLogDir())
 		installer.deferFailure(installer.wireLaunchAgent(ctx))
-		installer.deferFailure(installer.wireReminderLaunchAgent(ctx))
+		installer.deferFailure(installer.wireScheduleLaunchAgent(ctx))
 		installer.deferFailure(installer.wireMCPLaunchAgent(ctx))
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
@@ -248,7 +248,7 @@ func (installer *engine) install(ctx context.Context) error {
 		installer.deferFailure(err)
 		reload := systemdAssetChanged || unitChanged
 		if !reload && installer.apply {
-			for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit} {
+			for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit} {
 				state, err := fleetUnitState(ctx, installer.options.Runner, unit)
 				if err != nil || state != unitStateActive {
 					reload = true
@@ -591,14 +591,14 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		if err := installer.unwireLaunchAgent(ctx); err != nil {
 			return err
 		}
-		if err := installer.unwireReminderLaunchAgent(ctx); err != nil {
+		if err := installer.unwireScheduleLaunchAgent(ctx); err != nil {
 			return err
 		}
 	}
 	managerAvailable := installer.userManagerAvailable(ctx)
 	if managerAvailable && installer.apply {
 		installer.runSystemctl(
-			ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit, mcpUnitName,
+			ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit, mcpUnitName,
 		)
 	}
 	if _, err := installer.retireUnitEnablements(
@@ -1312,8 +1312,8 @@ var unitNames = []string{
 	nameSyncPathUnit,
 	"pfm-name-sync.service",
 	nameSyncTimerUnit,
-	reminderServiceUnit,
-	reminderTimerUnit,
+	scheduleServiceUnit,
+	scheduleTimerUnit,
 }
 
 const (
@@ -1326,6 +1326,7 @@ const (
 var retiredUnitNames = []string{
 	"cc-fleet-name-sync.path", "cc-fleet-name-sync.service", "cc-fleet-name-sync.timer",
 	"cc-name-sync.path", "cc-name-sync.service", "cc-name-sync.timer",
+	"pfm-reminder.service", "pfm-reminder.timer",
 }
 
 var unitEnablements = []struct {
@@ -1334,7 +1335,7 @@ var unitEnablements = []struct {
 }{
 	{unit: nameSyncPathUnit, wants: systemdDefaultWants},
 	{unit: nameSyncTimerUnit, wants: "timers.target.wants"},
-	{unit: reminderTimerUnit, wants: "timers.target.wants"},
+	{unit: scheduleTimerUnit, wants: "timers.target.wants"},
 	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
 
@@ -1366,7 +1367,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 			installer.runSystemctl(ctx, "reset-failed", name)
 		}
 		if statErr == nil {
-			if err := installer.retire(target, "superseded by pfm-name-sync"); err != nil {
+			if err := installer.retire(target, "superseded by a renamed pfm unit"); err != nil {
 				return false, err
 			}
 			changed = true
@@ -1464,7 +1465,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		return
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
-	enablements := [][]string{{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit}}
+	enablements := [][]string{{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit}}
 	if installer.mcpAnyEnabled() {
 		enablements = append(enablements, []string{mcpUnitName})
 	}

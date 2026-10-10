@@ -1,4 +1,4 @@
-package reminder
+package schedule
 
 import (
 	"strings"
@@ -72,8 +72,8 @@ func TestFormatInterval(t *testing.T) {
 
 func TestMessageNamesIdIntervalAndPrompt(t *testing.T) {
 	t.Parallel()
-	got := Message(fleetdb.Reminder{ID: 12, Interval: 15 * 24 * time.Hour, Prompt: "check the nightly build"})
-	const want = "⏰ pfm reminder 12 (every 15d): check the nightly build"
+	got := Message(fleetdb.Schedule{ID: 12, Interval: 15 * 24 * time.Hour, Prompt: "check the nightly build"})
+	const want = "⏰ pfm schedule 12 (every 15d): check the nightly build"
 	if got != want {
 		t.Fatalf("Message = %q, want %q", got, want)
 	}

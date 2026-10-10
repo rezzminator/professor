@@ -305,12 +305,12 @@ func (model Model) renderTabs(width int) string {
 }
 
 // chatsHeaderLine is the Chats tab's third header line: the context the list is
-// read in — account, cache, counts — or, when the reminder flags could not be
-// read, that failure: an unreadable flag store never renders as "no reminders".
+// read in — account, cache, counts — or, when the schedule flags could not be
+// read, that failure: an unreadable flag store never renders as "no schedules".
 func (model Model) chatsHeaderLine(width int) string {
 	palette := configuredPalette
-	if model.reminderError != "" {
-		return warnStyle.Render(fillLine(" Chats · reminder flags unreadable: "+model.reminderError, width))
+	if model.scheduleError != "" {
+		return warnStyle.Render(fillLine(" Chats · schedule flags unreadable: "+model.scheduleError, width))
 	}
 	headerAccount := model.primary
 	headerMedal := accountMedal(headerAccount)

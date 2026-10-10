@@ -45,7 +45,7 @@ Every command, agent, and rule sorts into one of three tiers:
 - **/flights:orchestrate-cross-harness** — the main chat acts as the root `flights-foreman`, its child foremen chat seats on another engine.
 - **/flights:audit** — the skeptic over a flight, running or landed: every claim checked against its artifact — `run.md`, git, the executor transcripts, the checks' own output — and an artifact it cannot read is a finding, never an absence.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.
-- **/reminder** — a recurring wake-up for one chat: on each fire pfm resumes the chat if it has exited, types the stored self-contained prompt into it, and pins its picker row red at the top until opened; `ls` and `rm` manage the set.
+- **/pfm:schedule** — a recurring wake-up for one chat: on each fire pfm resumes the chat if it has exited, types the stored self-contained prompt into it, and pins its picker row red at the top until opened; `ls` and `rm` manage the set.
 - **/housekeeping** — clears a repository's stale worktrees, branches and stashes: each classified merged, landed under another hash, or waiting, with byte-level evidence; landed work removed through `gitter`, remote deletes and stash drops only on the user's answer, waiting work reported or handed to `flights-foreman`.
 - **/context-audit** — user-only: from a pasted `/context`, finds what loads into the chat but never earns its place there (off-topic skills, forbidden or nested-only tools, sub-only agents, duplicate routes, silently failing deny rules), proves each at its source, and applies the user's per-row ruling with the right lever; prompt-file size stays `/context-meter`'s.
 - **/ultimate** — one piece of work made with the running model's own imagination at full stretch: past its first idea to one that surprises it, the most capable medium, built by its own hand around its boldest element, and raised on the delivered output until a whole look finds only polish.
@@ -210,7 +210,7 @@ your-project/
 │   └── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 ├── .claude/
 │   ├── agents/                        ← root agents (gitter; tracer and the whole flights cast are machine-global)
-│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /pfm:workbench, /context-meter, /context-audit, /quality:*, /h:gh, /reminder, /housekeeping, /ultimate — `pfm install` installs them host-level)
+│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /pfm:workbench, /context-meter, /context-audit, /quality:*, /h:gh, /pfm:schedule, /housekeeping, /ultimate — `pfm install` installs them host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, format-md.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
 │   └── settings.json                  ← permissions, project hooks (pfm-guard, guard-stamp, format-md, codex-sync)

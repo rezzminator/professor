@@ -15,11 +15,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
-const reminderTestChatID = "33333333-3333-4333-8333-333333333333"
+const scheduleTestChatID = "33333333-3333-4333-8333-333333333333"
 
-// indexReminderChat plants an indexed Claude transcript the resolver finds by
+// indexScheduleChat plants an indexed Claude transcript the resolver finds by
 // its session id, and returns that id.
-func indexReminderChat(t *testing.T) string {
+func indexScheduleChat(t *testing.T) string {
 	t.Helper()
 	root := jailTest(t)
 	project := filepath.Join(root, "work", "project")
@@ -30,8 +30,8 @@ func indexReminderChat(t *testing.T) string {
 		}
 	}
 	content := `{"type":"user","cwd":` + strconv.Quote(project) +
-		`,"message":{"content":"Reminder target prompt"}}` + "\n"
-	transcriptPath := filepath.Join(transcriptDir, reminderTestChatID+".jsonl")
+		`,"message":{"content":"Schedule target prompt"}}` + "\n"
+	transcriptPath := filepath.Join(transcriptDir, scheduleTestChatID+".jsonl")
 	if err := os.WriteFile(transcriptPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -39,25 +39,25 @@ func indexReminderChat(t *testing.T) string {
 	if code := run([]string{"index", "--full"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("index code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	return reminderTestChatID
+	return scheduleTestChatID
 }
 
-func runReminder(t *testing.T, args ...string) (int, string, string) {
+func runSchedule(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := run(append([]string{"chat", "reminder"}, args...), &stdout, &stderr)
+	code := run(append([]string{"chat", "schedule"}, args...), &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
 }
 
-func TestChatReminderSetLsRmRoundTrip(t *testing.T) {
-	id := indexReminderChat(t)
+func TestChatScheduleSetLsRmRoundTrip(t *testing.T) {
+	id := indexScheduleChat(t)
 
-	code, stdout, stderr := runReminder(t, "set", "--every", "2h", "--prompt", "check the build", id)
+	code, stdout, stderr := runSchedule(t, "set", "--every", "2h", "--prompt", "check the build", id)
 	if code != 0 || stdout != "1\n" {
 		t.Fatalf("set code=%d stdout=%q stderr=%q, want 0 and the id alone", code, stdout, stderr)
 	}
 
-	code, stdout, stderr = runReminder(t, "ls")
+	code, stdout, stderr = runSchedule(t, "ls")
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 	if code != 0 || len(lines) != 2 {
 		t.Fatalf("ls code=%d stdout=%q stderr=%q, want header and one row", code, stdout, stderr)
@@ -69,8 +69,8 @@ func TestChatReminderSetLsRmRoundTrip(t *testing.T) {
 		t.Fatalf("ls row = %q, want the prompt and the interval", lines[1])
 	}
 
-	code, stdout, stderr = runReminder(t, "ls", "--json")
-	var listed []fleetdb.Reminder
+	code, stdout, stderr = runSchedule(t, "ls", "--json")
+	var listed []fleetdb.Schedule
 	if err := json.Unmarshal([]byte(stdout), &listed); err != nil || code != 0 {
 		t.Fatalf("ls --json code=%d stdout=%q stderr=%q err=%v", code, stdout, stderr, err)
 	}
@@ -79,20 +79,20 @@ func TestChatReminderSetLsRmRoundTrip(t *testing.T) {
 		t.Fatalf("listed = %+v", listed)
 	}
 
-	code, stdout, stderr = runReminder(t, "rm", "1")
-	if code != 0 || stdout != "removed reminder 1\n" {
+	code, stdout, stderr = runSchedule(t, "rm", "1")
+	if code != 0 || stdout != "removed schedule 1\n" {
 		t.Fatalf("rm code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if code, stdout, _ = runReminder(t, "ls"); code != 0 || stdout != "no reminders\n" {
-		t.Fatalf("ls after rm code=%d stdout=%q, want 'no reminders'", code, stdout)
+	if code, stdout, _ = runSchedule(t, "ls"); code != 0 || stdout != "no schedules\n" {
+		t.Fatalf("ls after rm code=%d stdout=%q, want 'no schedules'", code, stdout)
 	}
-	if code, _, stderr = runReminder(t, "rm", "1"); code != 1 || !strings.Contains(stderr, "no reminder 1") {
-		t.Fatalf("second rm code=%d stderr=%q, want 1 and 'no reminder 1'", code, stderr)
+	if code, _, stderr = runSchedule(t, "rm", "1"); code != 1 || !strings.Contains(stderr, "no schedule 1") {
+		t.Fatalf("second rm code=%d stderr=%q, want 1 and 'no schedule 1'", code, stderr)
 	}
 }
 
-func TestChatReminderSetRefusals(t *testing.T) {
-	id := indexReminderChat(t)
+func TestChatScheduleSetRefusals(t *testing.T) {
+	id := indexScheduleChat(t)
 	cases := []struct {
 		name     string
 		args     []string
@@ -110,55 +110,55 @@ func TestChatReminderSetRefusals(t *testing.T) {
 		{"rm non integer", []string{"rm", "abc"}, 2, "usage"},
 	}
 	for _, tc := range cases {
-		code, stdout, stderr := runReminder(t, tc.args...)
+		code, stdout, stderr := runSchedule(t, tc.args...)
 		if code != tc.wantCode || !strings.Contains(stderr, tc.wantErr) {
 			t.Errorf("%s: code=%d stdout=%q stderr=%q, want %d and %q",
 				tc.name, code, stdout, stderr, tc.wantCode, tc.wantErr)
 		}
 	}
-	if code, stdout, _ := runReminder(t, "ls"); code != 0 || stdout != "no reminders\n" {
-		t.Fatalf("a refused set stored a reminder: code=%d stdout=%q", code, stdout)
+	if code, stdout, _ := runSchedule(t, "ls"); code != 0 || stdout != "no schedules\n" {
+		t.Fatalf("a refused set stored a schedule: code=%d stdout=%q", code, stdout)
 	}
 }
 
-func TestChatReminderLsJSONEmptyIsAnArray(t *testing.T) {
+func TestChatScheduleLsJSONEmptyIsAnArray(t *testing.T) {
 	jailTest(t)
-	code, stdout, stderr := runReminder(t, "ls", "--json")
+	code, stdout, stderr := runSchedule(t, "ls", "--json")
 	if code != 0 || strings.TrimSpace(stdout) != "[]" {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want []", code, stdout, stderr)
 	}
 }
 
-func TestChatReminderSetWithoutChatNeedsACallerIdentity(t *testing.T) {
+func TestChatScheduleSetWithoutChatNeedsACallerIdentity(t *testing.T) {
 	jailTest(t)
 	t.Setenv("TMUX", "")
-	code, stdout, stderr := runReminder(t, "set", "--every", "1h", "--prompt", "x")
+	code, stdout, stderr := runSchedule(t, "set", "--every", "1h", "--prompt", "x")
 	if code != 1 || !strings.Contains(stderr, "cannot tell which chat this is; name the chat") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 
-func TestChatReminderLsShowsAFailedFire(t *testing.T) {
+func TestChatScheduleLsShowsAFailedFire(t *testing.T) {
 	jailTest(t)
 	ctx := context.Background()
 	state := fleetdb.OpenSharedState(ctx, jailPaths(t))
 	if err := state.Degraded(); err != nil {
 		t.Fatal(err)
 	}
-	id, err := state.CreateReminder(ctx, fleetdb.Reminder{
+	id, err := state.CreateSchedule(ctx, fleetdb.Schedule{
 		SessionID: "sess-1", Engine: "claude", Label: "docs", Prompt: strings.Repeat("long ", 30),
 		Interval: time.Hour, Created: time.Now().Add(-3 * time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := state.RecordReminderFailure(ctx, id, time.Now(), "socket gone"); err != nil {
+	if _, err := state.RecordScheduleFailure(ctx, id, time.Now(), "socket gone"); err != nil {
 		t.Fatal(err)
 	}
 	if err := state.Close(); err != nil {
 		t.Fatal(err)
 	}
-	code, stdout, stderr := runReminder(t, "ls")
+	code, stdout, stderr := runSchedule(t, "ls")
 	if code != 0 || !strings.Contains(stdout, "  last fire failed ") || !strings.Contains(stdout, ": socket gone") ||
 		!strings.Contains(stdout, "docs") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -170,7 +170,7 @@ func TestChatReminderLsShowsAFailedFire(t *testing.T) {
 	}
 }
 
-func TestReminderFireWithAnUnresolvableChatStaysDue(t *testing.T) {
+func TestScheduleFireWithAnUnresolvableChatStaysDue(t *testing.T) {
 	jailTest(t)
 	ctx := context.Background()
 	state := fleetdb.OpenSharedState(ctx, jailPaths(t))
@@ -178,24 +178,24 @@ func TestReminderFireWithAnUnresolvableChatStaysDue(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := time.Now().Add(-3 * time.Hour)
-	id, err := state.CreateReminder(ctx, fleetdb.Reminder{
+	id, err := state.CreateSchedule(ctx, fleetdb.Schedule{
 		SessionID: "99999999-9999-4999-8999-999999999999", Engine: "claude", Label: "ghost", Prompt: "wake up",
 		Interval: time.Hour, Created: created,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, found, err := state.Reminder(ctx, id)
+	before, found, err := state.Schedule(ctx, id)
 	if err != nil || !found {
-		t.Fatalf("seeded reminder: found=%v err=%v", found, err)
+		t.Fatalf("seeded schedule: found=%v err=%v", found, err)
 	}
 	if err := state.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"internal", "reminder-fire"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "pfm internal reminder-fire: reminder 1 (ghost, 9999") ||
+	code := run([]string{"internal", "schedule-fire"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "pfm internal schedule-fire: schedule 1 (ghost, 9999") ||
 		!strings.Contains(stderr.String(), "stays due") || stdout.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -206,7 +206,7 @@ func TestReminderFireWithAnUnresolvableChatStaysDue(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	after, _, err := state.Reminder(ctx, id)
+	after, _, err := state.Schedule(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,14 +215,14 @@ func TestReminderFireWithAnUnresolvableChatStaysDue(t *testing.T) {
 	}
 }
 
-func TestReminderFireNothingDueIsSilent(t *testing.T) {
+func TestScheduleFireNothingDueIsSilent(t *testing.T) {
 	jailTest(t)
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"internal", "reminder-fire"}, &stdout, &stderr)
+	code := run([]string{"internal", "schedule-fire"}, &stdout, &stderr)
 	if code != 0 || stdout.Len()+stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want silent 0", code, stdout.String(), stderr.String())
 	}
-	if code := run([]string{"internal", "reminder-fire", "extra"}, &stdout, &stderr); code != 2 {
+	if code := run([]string{"internal", "schedule-fire", "extra"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("extra arg code=%d, want 2", code)
 	}
 }

@@ -15,25 +15,25 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// fakeReminderSource is a reminderSource answering from fixed lists, so the
+// fakeScheduleSource is a scheduleSource answering from fixed lists, so the
 // rendering table covers each state without a database.
-type fakeReminderSource struct {
+type fakeScheduleSource struct {
 	degraded    error
-	due         []fleetdb.Reminder
-	problems    []fleetdb.Reminder
+	due         []fleetdb.Schedule
+	problems    []fleetdb.Schedule
 	dueErr      error
 	problemsErr error
 }
 
-func (f fakeReminderSource) Degraded() error { return f.degraded }
+func (f fakeScheduleSource) Degraded() error { return f.degraded }
 
-func (f fakeReminderSource) DueReminders(context.Context, time.Time) ([]fleetdb.Reminder, error) {
+func (f fakeScheduleSource) DueSchedules(context.Context, time.Time) ([]fleetdb.Schedule, error) {
 	return f.due, f.dueErr
 }
 
-func (f fakeReminderSource) ReminderProblems(
+func (f fakeScheduleSource) ScheduleProblems(
 	context.Context, time.Time, time.Duration,
-) ([]fleetdb.Reminder, error) {
+) ([]fleetdb.Schedule, error) {
 	return f.problems, f.problemsErr
 }
 
@@ -42,59 +42,59 @@ func armedTimerReport() serviceManagerReport {
 		Manager: "systemd",
 		Present: true,
 		Unit: serviceManagerUnitState{
-			Unit: "pfm-reminder.timer", Present: true, Enabled: true, Active: true, State: "active",
+			Unit: "pfm-schedule.timer", Present: true, Enabled: true, Active: true, State: "active",
 		},
 	}
 }
 
 func unitReport(unit serviceManagerUnitState) serviceManagerReport {
-	unit.Unit = "pfm-reminder.timer"
+	unit.Unit = "pfm-schedule.timer"
 	return serviceManagerReport{Manager: "systemd", Present: true, Unit: unit}
 }
 
-// TestRenderReminderDoctorStates pins the one `doctor: reminders` line for each
+// TestRenderScheduleDoctorStates pins the one `doctor: schedules` line for each
 // scheduler state and each database state, and the warning count each returns.
-func TestRenderReminderDoctorStates(t *testing.T) {
+func TestRenderScheduleDoctorStates(t *testing.T) {
 	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 	dbErr := errors.New("disk image is malformed")
-	overdue := fleetdb.Reminder{ID: 3, Label: "standup", NextFire: now.Add(-20 * time.Minute)}
-	withinGrace := fleetdb.Reminder{ID: 4, Label: "tea", NextFire: now.Add(-2 * time.Minute)}
-	failedOld := fleetdb.Reminder{
+	overdue := fleetdb.Schedule{ID: 3, Label: "standup", NextFire: now.Add(-20 * time.Minute)}
+	withinGrace := fleetdb.Schedule{ID: 4, Label: "tea", NextFire: now.Add(-2 * time.Minute)}
+	failedOld := fleetdb.Schedule{
 		ID: 7, Label: "old", NextFire: now.Add(-20 * time.Minute),
 		LastError: "chat gone", LastErrorAt: now.Add(-2 * time.Hour),
 	}
-	failedNew := fleetdb.Reminder{
+	failedNew := fleetdb.Schedule{
 		ID: 9, Label: "new", NextFire: now.Add(-20 * time.Minute),
 		LastError: "inject refused", LastErrorAt: now.Add(-time.Hour),
 	}
-	const head = "doctor: reminders scheduler=systemd unit=pfm-reminder.timer "
+	const head = "doctor: schedules scheduler=systemd unit=pfm-schedule.timer "
 	const armed = head + "armed=true state=active "
 	cases := []struct {
 		name     string
 		skipOn   string
 		schedule serviceManagerReport
-		drift    reminderScheduleDrift
-		source   fakeReminderSource
+		drift    scheduleTimerDrift
+		source   fakeScheduleSource
 		want     string
 		warnings int
 	}{
 		{
 			name:     "drifted scheduler",
 			schedule: armedTimerReport(),
-			drift:    reminderScheduleDrift{Path: "/h/.config/systemd/user/pfm-reminder.timer", Drifted: true},
-			want:     armed + "drift=/h/.config/systemd/user/pfm-reminder.timer due=0 overdue=0 failed=0 — run pfm install --yes\n",
+			drift:    scheduleTimerDrift{Path: "/h/.config/systemd/user/pfm-schedule.timer", Drifted: true},
+			want:     armed + "drift=/h/.config/systemd/user/pfm-schedule.timer due=0 overdue=0 failed=0 — run pfm install --yes\n",
 			warnings: 1,
 		},
 		{
 			name: "drifted scheduler with timer missing", schedule: unitReport(serviceManagerUnitState{}),
-			drift: reminderScheduleDrift{Path: "/h/.config/systemd/user/pfm-reminder.timer", Drifted: true},
+			drift: scheduleTimerDrift{Path: "/h/.config/systemd/user/pfm-schedule.timer", Drifted: true},
 			want: head + "armed=false present=false enabled=false state=none " +
-				"drift=/h/.config/systemd/user/pfm-reminder.timer due=0 overdue=0 failed=0 — run pfm install --yes\n",
+				"drift=/h/.config/systemd/user/pfm-schedule.timer due=0 overdue=0 failed=0 — run pfm install --yes\n",
 			warnings: 1,
 		},
 		{
 			name: "could not compare scheduler", schedule: armedTimerReport(),
-			drift:    reminderScheduleDrift{Err: errors.New("read /h/x: is a directory")},
+			drift:    scheduleTimerDrift{Err: errors.New("read /h/x: is a directory")},
 			want:     armed + "drift=could_not_compare error=read /h/x: is a directory due=0 overdue=0 failed=0\n",
 			warnings: 1,
 		},
@@ -114,7 +114,7 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 			skipOn:   "darwin",
 			schedule: unitReport(serviceManagerUnitState{Present: true, Enabled: true, State: "inactive"}),
 			want: head + "armed=false present=true enabled=true state=inactive due=0 overdue=0 failed=0 — " +
-				"start with: systemctl --user enable --now pfm-reminder.timer\n",
+				"start with: systemctl --user enable --now pfm-schedule.timer\n",
 			warnings: 1,
 		},
 		{
@@ -126,68 +126,68 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 		{
 			name: "no manager",
 			schedule: serviceManagerReport{
-				Manager: "systemd", Unit: serviceManagerUnitState{Unit: "pfm-reminder.timer"},
+				Manager: "systemd", Unit: serviceManagerUnitState{Unit: "pfm-schedule.timer"},
 			},
-			want: "doctor: reminders scheduler=none unit=pfm-reminder.timer due=0 overdue=0 failed=0 — " +
-				"no systemd user manager on this host: reminders fire only when pfm internal reminder-fire is run\n",
+			want: "doctor: schedules scheduler=none unit=pfm-schedule.timer due=0 overdue=0 failed=0 — " +
+				"no systemd user manager on this host: schedules fire only when pfm internal schedule-fire is run\n",
 		},
 		{
-			name:     "overdue reminder",
+			name:     "overdue schedule",
 			schedule: armedTimerReport(),
-			source:   fakeReminderSource{due: []fleetdb.Reminder{overdue}, problems: []fleetdb.Reminder{overdue}},
-			want:     armed + "due=1 overdue=1 failed=0 — 1 reminder(s) due longer than 15m0s: nothing is firing them\n",
+			source:   fakeScheduleSource{due: []fleetdb.Schedule{overdue}, problems: []fleetdb.Schedule{overdue}},
+			want:     armed + "due=1 overdue=1 failed=0 — 1 schedule(s) due longer than 15m0s: nothing is firing them\n",
 			warnings: 1,
 		},
 		{
 			name:     "due within grace",
 			schedule: armedTimerReport(),
-			source:   fakeReminderSource{due: []fleetdb.Reminder{withinGrace}},
+			source:   fakeScheduleSource{due: []fleetdb.Schedule{withinGrace}},
 			want:     armed + "due=1 overdue=0 failed=0\n",
 		},
 		{
-			name:     "failed reminder",
+			name:     "failed schedule",
 			schedule: armedTimerReport(),
-			source:   fakeReminderSource{problems: []fleetdb.Reminder{failedOld}},
-			want:     armed + "due=0 overdue=0 failed=1 — last failure: reminder 7 (old): chat gone\n",
+			source:   fakeScheduleSource{problems: []fleetdb.Schedule{failedOld}},
+			want:     armed + "due=0 overdue=0 failed=1 — last failure: schedule 7 (old): chat gone\n",
 			warnings: 1,
 		},
 		{
 			name:     "two failures name the latest",
 			schedule: armedTimerReport(),
-			source:   fakeReminderSource{problems: []fleetdb.Reminder{failedOld, failedNew}},
-			want:     armed + "due=0 overdue=0 failed=2 — last failure: reminder 9 (new): inject refused\n",
+			source:   fakeScheduleSource{problems: []fleetdb.Schedule{failedOld, failedNew}},
+			want:     armed + "due=0 overdue=0 failed=2 — last failure: schedule 9 (new): inject refused\n",
 			warnings: 1,
 		},
 		{
 			name:     "overdue and failed",
 			schedule: unitReport(serviceManagerUnitState{}),
-			source: fakeReminderSource{
-				due: []fleetdb.Reminder{overdue}, problems: []fleetdb.Reminder{overdue, failedOld},
+			source: fakeScheduleSource{
+				due: []fleetdb.Schedule{overdue}, problems: []fleetdb.Schedule{overdue, failedOld},
 			},
 			want: head + "armed=false present=false enabled=false state=none due=1 overdue=1 failed=1 — " +
-				"run pfm install --yes; 1 reminder(s) due longer than 15m0s: nothing is firing them; " +
-				"last failure: reminder 7 (old): chat gone\n",
+				"run pfm install --yes; 1 schedule(s) due longer than 15m0s: nothing is firing them; " +
+				"last failure: schedule 7 (old): chat gone\n",
 			warnings: 1,
 		},
 		{
 			name:     "degraded source",
 			schedule: armedTimerReport(),
-			source:   fakeReminderSource{degraded: dbErr, due: []fleetdb.Reminder{overdue}},
+			source:   fakeScheduleSource{degraded: dbErr, due: []fleetdb.Schedule{overdue}},
 			want: armed + "db=unreadable error=disk image is malformed — " +
-				"reminder state unknown; the doctor: shared store row counts it\n",
+				"schedule state unknown; the doctor: shared store row counts it\n",
 		},
 		{
 			name:     "due query error",
 			schedule: armedTimerReport(),
-			source:   fakeReminderSource{dueErr: dbErr, problems: []fleetdb.Reminder{overdue}},
-			want:     armed + "db=unreadable error=disk image is malformed — reminder state unknown\n",
+			source:   fakeScheduleSource{dueErr: dbErr, problems: []fleetdb.Schedule{overdue}},
+			want:     armed + "db=unreadable error=disk image is malformed — schedule state unknown\n",
 			warnings: 1,
 		},
 		{
 			name:     "problems query error",
 			schedule: armedTimerReport(),
-			source:   fakeReminderSource{problemsErr: dbErr, due: []fleetdb.Reminder{overdue}},
-			want:     armed + "db=unreadable error=disk image is malformed — reminder state unknown\n",
+			source:   fakeScheduleSource{problemsErr: dbErr, due: []fleetdb.Schedule{overdue}},
+			want:     armed + "db=unreadable error=disk image is malformed — schedule state unknown\n",
 			warnings: 1,
 		},
 	}
@@ -197,7 +197,7 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 				t.Skipf("%s treats a loaded StartInterval job as armed", tc.skipOn)
 			}
 			var out strings.Builder
-			got := renderReminderDoctor(context.Background(), &out, tc.schedule, tc.drift, tc.source, now)
+			got := renderScheduleDoctor(context.Background(), &out, tc.schedule, tc.drift, tc.source, now)
 			if out.String() != tc.want {
 				t.Fatalf("line =\n%q\nwant\n%q", out.String(), tc.want)
 			}
@@ -211,17 +211,17 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 	}
 }
 
-func stubReminderScheduleProbe(t *testing.T, report serviceManagerReport) {
+func stubScheduleTimerProbe(t *testing.T, report serviceManagerReport) {
 	t.Helper()
-	previous := reminderScheduleProbeOverride
-	reminderScheduleProbeOverride = func(context.Context, deps.Runner) serviceManagerReport { return report }
-	t.Cleanup(func() { reminderScheduleProbeOverride = previous })
+	previous := scheduleTimerProbeOverride
+	scheduleTimerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport { return report }
+	t.Cleanup(func() { scheduleTimerProbeOverride = previous })
 }
 
-// TestPrintReminderDoctorRealStateOverdue reads a real shared state database
-// holding one reminder due for 20 minutes: past the 15-minute grace.
-func TestPrintReminderDoctorRealStateOverdue(t *testing.T) {
-	stubReminderScheduleProbe(t, armedTimerReport())
+// TestPrintScheduleDoctorRealStateOverdue reads a real shared state database
+// holding one schedule due for 20 minutes: past the 15-minute grace.
+func TestPrintScheduleDoctorRealStateOverdue(t *testing.T) {
+	stubScheduleTimerProbe(t, armedTimerReport())
 	dir := t.TempDir()
 	values := paths.Values{Home: dir, StateDB: filepath.Join(dir, "state.db")}
 	now := time.Now()
@@ -230,21 +230,21 @@ func TestPrintReminderDoctorRealStateOverdue(t *testing.T) {
 	if err := store.Degraded(); err != nil {
 		t.Fatalf("open state db: %v", err)
 	}
-	if _, err := store.CreateReminder(ctx, fleetdb.Reminder{
+	if _, err := store.CreateSchedule(ctx, fleetdb.Schedule{
 		SessionID: "cc-alpha", Engine: "claude", Label: "standup", Prompt: "stand up",
 		Interval: time.Hour, Created: now.Add(-2 * time.Hour), NextFire: now.Add(-20 * time.Minute),
 	}); err != nil {
-		t.Fatalf("create reminder: %v", err)
+		t.Fatalf("create schedule: %v", err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("close state db: %v", err)
 	}
 
 	var out strings.Builder
-	got := printReminderDoctor(ctx, &out, &deps.FakeRunner{}, values, now)
-	want := "doctor: reminders scheduler=systemd unit=pfm-reminder.timer armed=true state=active " +
-		"drift=" + missingReminderAsset(dir) + " due=1 overdue=1 failed=0 — run pfm install --yes; " +
-		"1 reminder(s) due longer than 15m0s: nothing is firing them\n"
+	got := printScheduleDoctor(ctx, &out, &deps.FakeRunner{}, values, now)
+	want := "doctor: schedules scheduler=systemd unit=pfm-schedule.timer armed=true state=active " +
+		"drift=" + missingScheduleAsset(dir) + " due=1 overdue=1 failed=0 — run pfm install --yes; " +
+		"1 schedule(s) due longer than 15m0s: nothing is firing them\n"
 	if out.String() != want {
 		t.Fatalf("output =\n%q\nwant\n%q", out.String(), want)
 	}
@@ -253,10 +253,10 @@ func TestPrintReminderDoctorRealStateOverdue(t *testing.T) {
 	}
 }
 
-// TestPrintReminderDoctorUnreadableState puts the state database under a path
+// TestPrintScheduleDoctorUnreadableState puts the state database under a path
 // whose parent is a regular file: the line says so and carries no counts.
-func TestPrintReminderDoctorUnreadableState(t *testing.T) {
-	stubReminderScheduleProbe(t, armedTimerReport())
+func TestPrintScheduleDoctorUnreadableState(t *testing.T) {
+	stubScheduleTimerProbe(t, armedTimerReport())
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "blocker")
 	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
@@ -265,11 +265,11 @@ func TestPrintReminderDoctorUnreadableState(t *testing.T) {
 	values := paths.Values{Home: dir, StateDB: filepath.Join(blocker, "state.db")}
 
 	var out strings.Builder
-	got := printReminderDoctor(context.Background(), &out, &deps.FakeRunner{}, values, time.Now())
+	got := printScheduleDoctor(context.Background(), &out, &deps.FakeRunner{}, values, time.Now())
 	line := out.String()
-	if !strings.HasPrefix(line, "doctor: reminders scheduler=systemd unit=pfm-reminder.timer armed=true state=active "+
-		"drift="+missingReminderAsset(dir)+" db=unreadable error=") || !strings.HasSuffix(line,
-		" — run pfm install --yes; reminder state unknown; the doctor: shared store row counts it\n") {
+	if !strings.HasPrefix(line, "doctor: schedules scheduler=systemd unit=pfm-schedule.timer armed=true state=active "+
+		"drift="+missingScheduleAsset(dir)+" db=unreadable error=") || !strings.HasSuffix(line,
+		" — run pfm install --yes; schedule state unknown; the doctor: shared store row counts it\n") {
 		t.Fatalf("output = %q", line)
 	}
 	if strings.Contains(line, "due=") || strings.Count(line, "\n") != 1 {
@@ -280,18 +280,18 @@ func TestPrintReminderDoctorUnreadableState(t *testing.T) {
 	}
 }
 
-func missingReminderAsset(home string) string {
+func missingScheduleAsset(home string) string {
 	if goRuntime.GOOS == "darwin" {
-		return filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")
+		return filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.schedule.plist")
 	}
-	return filepath.Join(home, ".config", "systemd", "user", "pfm-reminder.timer")
+	return filepath.Join(home, ".config", "systemd", "user", "pfm-schedule.timer")
 }
 
-func TestPrintReminderDoctorScheduleDrift(t *testing.T) {
-	stubReminderScheduleProbe(t, armedTimerReport())
+func TestPrintScheduleDoctorScheduleDrift(t *testing.T) {
+	stubScheduleTimerProbe(t, armedTimerReport())
 	home := t.TempDir()
-	timer := filepath.Join(home, ".config", "systemd", "user", "pfm-reminder.timer")
-	plist := filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")
+	timer := filepath.Join(home, ".config", "systemd", "user", "pfm-schedule.timer")
+	plist := filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.schedule.plist")
 	for _, path := range []string{timer, plist} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -314,8 +314,8 @@ func TestPrintReminderDoctorScheduleDrift(t *testing.T) {
 		path = plist
 	}
 	var out strings.Builder
-	got := printReminderDoctor(ctx, &out, &deps.FakeRunner{}, values, time.Now())
-	want := "doctor: reminders scheduler=systemd unit=pfm-reminder.timer armed=true state=active drift=" +
+	got := printScheduleDoctor(ctx, &out, &deps.FakeRunner{}, values, time.Now())
+	want := "doctor: schedules scheduler=systemd unit=pfm-schedule.timer armed=true state=active drift=" +
 		path + " due=0 overdue=0 failed=0 — run pfm install --yes\n"
 	if out.String() != want || got != 1 {
 		t.Fatalf("output=%q warnings=%d want=%q warnings=1", out.String(), got, want)

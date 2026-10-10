@@ -17,7 +17,8 @@ import (
 // SchemaVersion is the user_version this build stamps on the shared database.
 // Every pfm refuses a file stamped newer than its own, so a column an older
 // pfm's statements survive (they name their columns, and its default fills
-// their inserts) is added at open with no bump: addHiddenRevision.
+// their inserts) is added at open with no bump: addHiddenRevision; a table
+// rename likewise: renameRemindersTable.
 const SchemaVersion = 3
 
 // RetiredSchemaVersion is the user_version a develop build stamped when it
@@ -120,6 +121,62 @@ func addHiddenRevision(ctx context.Context, db *sql.DB, path string) (returnErr 
 		return fmt.Errorf("add hidden.revision to shared database %s: %w", path, err)
 	}
 	return nil
+}
+
+// schedulesRenameDDL renames the table migration 3 creates as reminders, with
+// its indexes, to the schedules name every statement here uses. It runs at
+// open with no version bump, like hidden.revision, so a version-3 pfm still
+// opens the file; only its own reminder statements stop finding their table.
+const schedulesRenameDDL = `
+ALTER TABLE reminders RENAME TO schedules;
+DROP INDEX IF EXISTS reminders_next_fire;
+DROP INDEX IF EXISTS reminders_session;
+CREATE INDEX IF NOT EXISTS schedules_next_fire ON schedules(next_fire_ns);
+CREATE INDEX IF NOT EXISTS schedules_session ON schedules(session_id);`
+
+// renameRemindersTable moves a file's reminders table to schedules. It re-reads
+// the tables under the migration lock, or two first openers would both rename;
+// a file already holding schedules opens without taking the lock.
+func renameRemindersTable(ctx context.Context, db *sql.DB, path string) (returnErr error) {
+	pending, err := hasRemindersTable(ctx, db)
+	if err != nil || !pending {
+		return err
+	}
+	unlock, err := LockMigration(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	if pending, err := hasRemindersTable(ctx, db); err != nil || !pending {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin reminders-to-schedules rename on shared database %s: %w", path, err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("roll back reminders-to-schedules rename: %w", err))
+		}
+	}()
+	if _, err := tx.ExecContext(ctx, schedulesRenameDDL); err != nil {
+		return fmt.Errorf("rename reminders to schedules on shared database %s: %w", path, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reminders-to-schedules rename on shared database %s: %w", path, err)
+	}
+	return nil
+}
+
+// hasRemindersTable reports a reminders table still waiting for its rename.
+func hasRemindersTable(ctx context.Context, db *sql.DB) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='reminders'",
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("read shared database tables: %w", err)
+	}
+	return count == 1, nil
 }
 
 func hasHiddenRevision(ctx context.Context, db *sql.DB) (bool, error) {

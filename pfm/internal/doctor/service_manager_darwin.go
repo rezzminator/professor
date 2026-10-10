@@ -20,9 +20,9 @@ const (
 	// (internal/installer/assets/launchd/com.professor.pfm.mcp.plist,
 	// installer/launchd.go's mcpLaunchdLabel) — the daemon M48 names.
 	pfmMCPLaunchdLabel = "com.professor.pfm.mcp"
-	// pfmReminderLaunchdLabel is the StartInterval job staged by the installer
-	// that runs pfm internal reminder-fire every five minutes.
-	pfmReminderLaunchdLabel = "com.professor.pfm.reminder"
+	// pfmScheduleLaunchdLabel is the StartInterval job staged by the installer
+	// that runs pfm internal schedule-fire every five minutes.
+	pfmScheduleLaunchdLabel = "com.professor.pfm.schedule"
 	// launchctlNotFoundExit is `launchctl print`'s exit for a label launchd
 	// does not know ("Could not find service … in domain").
 	launchctlNotFoundExit = 113
@@ -51,32 +51,32 @@ func probeServiceManager(ctx context.Context, runner deps.Runner) serviceManager
 	return report
 }
 
-// reminderScheduleIdentity names the manager and label the reminders row
+// scheduleTimerIdentity names the manager and label the schedules row
 // reports without asking the manager anything.
-func reminderScheduleIdentity() (manager, unit string) {
-	return serviceManagerDarwinName, pfmReminderLaunchdLabel
+func scheduleTimerIdentity() (manager, unit string) {
+	return serviceManagerDarwinName, pfmScheduleLaunchdLabel
 }
 
-// probeReminderSchedule asks launchd about the pfm reminder label; a launchctl
+// probeScheduleTimer asks launchd about the pfm schedule label; a launchctl
 // binary absent from PATH is Present=false, the same clean answer
 // probeServiceManager gives.
-func probeReminderSchedule(ctx context.Context, runner deps.Runner) serviceManagerReport {
+func probeScheduleTimer(ctx context.Context, runner deps.Runner) serviceManagerReport {
 	report := serviceManagerReport{
 		Manager: serviceManagerDarwinName,
-		Unit:    serviceManagerUnitState{Unit: pfmReminderLaunchdLabel},
+		Unit:    serviceManagerUnitState{Unit: pfmScheduleLaunchdLabel},
 	}
 	if _, err := runner.LookPath("launchctl"); err != nil {
 		return report
 	}
 	report.Present = true
-	report.Unit = probeLaunchdLabel(ctx, runner, pfmReminderLaunchdLabel)
+	report.Unit = probeLaunchdLabel(ctx, runner, pfmScheduleLaunchdLabel)
 	return report
 }
 
-// reminderScheduleArmed is true when the job is loaded. A StartInterval job
+// scheduleTimerArmed is true when the job is loaded. A StartInterval job
 // sits loaded and waiting between fires and reads `running` only mid-fire, so
 // Active would report a healthy schedule as dead.
-func reminderScheduleArmed(unit serviceManagerUnitState) bool {
+func scheduleTimerArmed(unit serviceManagerUnitState) bool {
 	return unit.Present
 }
 

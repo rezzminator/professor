@@ -1,5 +1,5 @@
 [Unit]
-Description=Fire due pfm reminders every 5 minutes
+Description=Fire due pfm schedules every 5 minutes
 
 [Timer]
 # Wall-clock ticks at :00, :05, ... — the fixed cadence, so no install-time
@@ -8,7 +8,7 @@ OnCalendar=*:0/5
 # A tick missed while the host slept or the user manager was down fires once at
 # the next start.
 Persistent=true
-Unit=pfm-reminder.service
+Unit=pfm-schedule.service
 
 [Install]
 WantedBy=timers.target

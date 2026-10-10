@@ -73,6 +73,9 @@
     "global/commands/pfm.md": {
       "curated": true
     },
+    "global/commands/pfm/schedule.md": {
+      "curated": true
+    },
     "global/commands/pfm/workbench.md": {
       "curated": true
     },
@@ -95,9 +98,6 @@
       "curated": true
     },
     "global/commands/quality/prompt.md": {
-      "curated": true
-    },
-    "global/commands/reminder.md": {
       "curated": true
     },
     "global/commands/ultimate.md": {

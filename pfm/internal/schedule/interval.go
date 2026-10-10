@@ -1,9 +1,9 @@
-// Package reminder owns the recurring alarms behind `pfm chat reminder` and
-// the scheduler's `pfm internal reminder-fire`: the interval grammar, the
+// Package schedule owns the recurring alarms behind `pfm chat schedule` and
+// the scheduler's `pfm internal schedule-fire`: the interval grammar, the
 // message a fire types into a chat, the locked fire loop over the shared
-// reminder store (fleetdb), the set/ls/rm command and the deliverer that wakes
+// schedule store (fleetdb), the set/ls/rm command and the deliverer that wakes
 // a chat (resuming a dead one) and injects the message.
-package reminder
+package schedule
 
 import (
 	"fmt"
@@ -22,7 +22,7 @@ const (
 
 // ParseInterval reads a recurrence: "weekly", "<N>d" for a positive whole
 // number of days, or a Go duration. It refuses anything shorter than
-// fleetdb.MinReminderInterval, naming the minimum, and anything it cannot
+// fleetdb.MinScheduleInterval, naming the minimum, and anything it cannot
 // read, naming the accepted forms.
 func ParseInterval(text string) (time.Duration, error) {
 	cleaned := strings.ToLower(strings.TrimSpace(text))
@@ -49,8 +49,8 @@ func ParseInterval(text string) (time.Duration, error) {
 		}
 		interval = parsed
 	}
-	if interval < fleetdb.MinReminderInterval {
-		minutes := int(fleetdb.MinReminderInterval / time.Minute)
+	if interval < fleetdb.MinScheduleInterval {
+		minutes := int(fleetdb.MinScheduleInterval / time.Minute)
 		return 0, fmt.Errorf("interval %q is too short: minimum %dm", text, minutes)
 	}
 	return interval, nil
@@ -77,7 +77,7 @@ func FormatInterval(interval time.Duration) string {
 	return interval.String()
 }
 
-// Message is the line a fire types into the reminded chat.
-func Message(r fleetdb.Reminder) string {
-	return "⏰ pfm reminder " + strconv.FormatInt(r.ID, 10) + " (every " + FormatInterval(r.Interval) + "): " + r.Prompt
+// Message is the line a fire types into the scheduled chat.
+func Message(r fleetdb.Schedule) string {
+	return "⏰ pfm schedule " + strconv.FormatInt(r.ID, 10) + " (every " + FormatInterval(r.Interval) + "): " + r.Prompt
 }

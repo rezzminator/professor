@@ -333,7 +333,7 @@ func probeAnswered(err error) bool {
 }
 
 // launchAgentRunning reports whether the launch agent labelled label (name-sync
-// or the reminder fire) is executing right now, and whether the question could
+// or the schedule fire) is executing right now, and whether the question could
 // be asked at all.
 //
 // "state = not running" contains "running", so the state line is compared whole

@@ -1,4 +1,4 @@
-package reminder
+package schedule
 
 import (
 	"context"
@@ -23,7 +23,7 @@ type fakeDeliverer struct {
 	delivered []delivery
 }
 
-func (fake *fakeDeliverer) Deliver(_ context.Context, r fleetdb.Reminder, message string) error {
+func (fake *fakeDeliverer) Deliver(_ context.Context, r fleetdb.Schedule, message string) error {
 	if err := fake.failing[r.ID]; err != nil {
 		return err
 	}
@@ -48,26 +48,26 @@ func openStore(t *testing.T) *fleetdb.Store {
 
 func seed(t *testing.T, store *fleetdb.Store, label string, interval time.Duration, created time.Time) int64 {
 	t.Helper()
-	id, err := store.CreateReminder(context.Background(), fleetdb.Reminder{
+	id, err := store.CreateSchedule(context.Background(), fleetdb.Schedule{
 		SessionID: "sess-" + label, Engine: "claude", Label: label, Prompt: "ping " + label,
 		Interval: interval, Created: created,
 	})
 	if err != nil {
-		t.Fatalf("seed reminder %s: %v", label, err)
+		t.Fatalf("seed schedule %s: %v", label, err)
 	}
 	return id
 }
 
-func mustReminder(t *testing.T, store *fleetdb.Store, id int64) fleetdb.Reminder {
+func mustSchedule(t *testing.T, store *fleetdb.Store, id int64) fleetdb.Schedule {
 	t.Helper()
-	got, found, err := store.Reminder(context.Background(), id)
+	got, found, err := store.Schedule(context.Background(), id)
 	if err != nil || !found {
-		t.Fatalf("read reminder %d: found=%v err=%v", id, found, err)
+		t.Fatalf("read schedule %d: found=%v err=%v", id, found, err)
 	}
 	return got
 }
 
-func TestFireDeliversDueReminderOnceAndReschedules(t *testing.T) {
+func TestFireDeliversDueScheduleOnceAndReschedules(t *testing.T) {
 	store := openStore(t)
 	now := time.Unix(1_800_000_000, 0)
 	due := seed(t, store, "due", time.Hour, now.Add(-90*time.Minute))
@@ -79,20 +79,20 @@ func TestFireDeliversDueReminderOnceAndReschedules(t *testing.T) {
 		t.Fatalf("Fire: %v", err)
 	}
 	if report.Skipped || len(report.Failed) != 0 || len(report.Fired) != 1 || report.Fired[0].ID != due {
-		t.Fatalf("report = %+v, want exactly reminder %d fired", report, due)
+		t.Fatalf("report = %+v, want exactly schedule %d fired", report, due)
 	}
 	if len(deliverer.delivered) != 1 || deliverer.delivered[0].id != due ||
 		deliverer.delivered[0].message != Message(report.Fired[0]) {
 		t.Fatalf("deliveries = %+v, want one carrying Message(due)", deliverer.delivered)
 	}
-	got := mustReminder(t, store, due)
+	got := mustSchedule(t, store, due)
 	if !got.NextFire.Equal(now.Add(time.Hour)) || !got.Unseen || !got.LastFired.Equal(now) {
-		t.Fatalf("fired reminder = %+v, want next now+1h, unseen, last_fired now", got)
+		t.Fatalf("fired schedule = %+v, want next now+1h, unseen, last_fired now", got)
 	}
-	untouched := mustReminder(t, store, later)
+	untouched := mustSchedule(t, store, later)
 	wantNext := now.Add(-10 * time.Minute).Add(time.Hour)
 	if untouched.Unseen || !untouched.LastFired.IsZero() || !untouched.NextFire.Equal(wantNext) {
-		t.Fatalf("not-yet-due reminder changed: %+v", untouched)
+		t.Fatalf("not-yet-due schedule changed: %+v", untouched)
 	}
 }
 
@@ -109,12 +109,12 @@ func TestFireMissedIntervalsFireOnceWithoutBurst(t *testing.T) {
 	if len(deliverer.delivered) != 1 {
 		t.Fatalf("three missed intervals delivered %d times, want exactly 1", len(deliverer.delivered))
 	}
-	if got := mustReminder(t, store, id); !got.NextFire.Equal(now.Add(time.Hour)) {
+	if got := mustSchedule(t, store, id); !got.NextFire.Equal(now.Add(time.Hour)) {
 		t.Fatalf("next fire = %v, want now+interval %v", got.NextFire, now.Add(time.Hour))
 	}
 }
 
-func TestFireDeliverErrorKeepsReminderDueAndOthersStillFire(t *testing.T) {
+func TestFireDeliverErrorKeepsScheduleDueAndOthersStillFire(t *testing.T) {
 	store := openStore(t)
 	now := time.Unix(1_800_000_000, 0)
 	created := now.Add(-2 * time.Hour)
@@ -126,20 +126,20 @@ func TestFireDeliverErrorKeepsReminderDueAndOthersStillFire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fire: %v", err)
 	}
-	if len(report.Failed) != 1 || report.Failed[0].Reminder.ID != broken ||
+	if len(report.Failed) != 1 || report.Failed[0].Schedule.ID != broken ||
 		!strings.Contains(report.Failed[0].Err.Error(), "tmux server vanished") {
-		t.Fatalf("Failed = %+v, want reminder %d with the deliver error", report.Failed, broken)
+		t.Fatalf("Failed = %+v, want schedule %d with the deliver error", report.Failed, broken)
 	}
 	if len(report.Fired) != 1 || report.Fired[0].ID != healthy {
-		t.Fatalf("Fired = %+v, want the healthy reminder %d", report.Fired, healthy)
+		t.Fatalf("Fired = %+v, want the healthy schedule %d", report.Fired, healthy)
 	}
-	stuck := mustReminder(t, store, broken)
+	stuck := mustSchedule(t, store, broken)
 	if !strings.Contains(stuck.LastError, "tmux server vanished") || !stuck.NextFire.Before(now.Add(time.Second)) {
-		t.Fatalf("failed reminder = %+v, want LastError set and still due", stuck)
+		t.Fatalf("failed schedule = %+v, want LastError set and still due", stuck)
 	}
-	due, err := store.DueReminders(context.Background(), now)
+	due, err := store.DueSchedules(context.Background(), now)
 	if err != nil || len(due) != 1 || due[0].ID != broken {
-		t.Fatalf("due after fire = %+v, %v; want only the failed reminder", due, err)
+		t.Fatalf("due after fire = %+v, %v; want only the failed schedule", due, err)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestFireSkipsWhenAnotherFireHoldsTheLock(t *testing.T) {
 func TestFireLockPathSitsBesideTheStateDatabase(t *testing.T) {
 	t.Parallel()
 	got := FireLockPath(paths.Values{StateDB: "/state/pfm/pfm.db"})
-	if got != "/state/pfm/reminder-fire.lock" {
+	if got != "/state/pfm/schedule-fire.lock" {
 		t.Fatalf("LockPath = %q", got)
 	}
 }

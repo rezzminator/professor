@@ -1,4 +1,4 @@
-package reminder
+package schedule
 
 import (
 	"context"
@@ -18,14 +18,14 @@ import (
 )
 
 const (
-	reminderFireCommand = "pfm internal reminder-fire"
-	// reminderComposerReads is how many consecutive captures must show the
+	scheduleFireCommand = "pfm internal schedule-fire"
+	// scheduleComposerReads is how many consecutive captures must show the
 	// composer before a revived chat is typed into: one read can catch a
 	// splash frame that paints the glyph before the input is live.
-	reminderComposerReads = 3
-	// reminderCaptureLines is the scrollback a composer read looks at.
-	reminderCaptureLines = 40
-	reminderOpened       = "opened"
+	scheduleComposerReads = 3
+	// scheduleCaptureLines is the scrollback a composer read looks at.
+	scheduleCaptureLines = 40
+	scheduleOpened       = "opened"
 )
 
 // ComposerWait bounds the revived composer wait; the installer gate bounds its wait by it.
@@ -33,11 +33,11 @@ const ComposerWait = 90 * time.Second
 
 // Package variables so a test shortens the wait.
 var (
-	reminderComposerPoll = 500 * time.Millisecond
-	reminderComposerWait = ComposerWait
+	scheduleComposerPoll = 500 * time.Millisecond
+	scheduleComposerWait = ComposerWait
 )
 
-// chatDeliverer wakes a chat and types a reminder into it: a live chat
+// chatDeliverer wakes a chat and types a schedule into it: a live chat
 // is injected as it stands, a dead one is resumed detached on a fresh tmux
 // socket and typed into once its composer is up. The seams default to the real
 // doors; a test replaces them.
@@ -47,7 +47,7 @@ type chatDeliverer struct {
 	tmuxDir string
 	open    func(ctx context.Context, sessionID string) (action.OpenResult, error)
 	capture func(ctx context.Context, socketPath, target string) (string, error)
-	inject  func(ctx context.Context, r fleetdb.Reminder, target, message string) error
+	inject  func(ctx context.Context, r fleetdb.Schedule, target, message string) error
 }
 
 func newChatDeliverer(runtime *pfmconfig.Runtime, stderr io.Writer) *chatDeliverer {
@@ -56,20 +56,20 @@ func newChatDeliverer(runtime *pfmconfig.Runtime, stderr io.Writer) *chatDeliver
 		return pfmchat.OpenDetachedID(ctx, sessionID, stderr, runtime)
 	}
 	deliverer.capture = func(ctx context.Context, socketPath, target string) (string, error) {
-		return (inject.TmuxInjector{}).Capture(ctx, socketPath, target, false, reminderCaptureLines)
+		return (inject.TmuxInjector{}).Capture(ctx, socketPath, target, false, scheduleCaptureLines)
 	}
-	deliverer.inject = deliverer.injectReminder
+	deliverer.inject = deliverer.injectSchedule
 	return deliverer
 }
 
 // Deliver implements Deliverer.
-func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Reminder, message string) error {
+func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Schedule, message string) error {
 	result, err := deliverer.open(ctx, r.SessionID)
 	if err != nil {
 		return fmt.Errorf("resolve chat %s (%s): %w", r.SessionID, r.Label, err)
 	}
 	target := r.SessionID
-	if result.State == reminderOpened {
+	if result.State == scheduleOpened {
 		if err := deliverer.awaitComposer(ctx, result.Socket); err != nil {
 			return err
 		}
@@ -80,10 +80,10 @@ func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Reminder,
 
 // awaitComposer polls a revived chat's pane until its composer shows on
 // consecutive reads. A folder-trust dialog fails at once: its one key is the
-// human's decision, never a reminder's.
+// human's decision, never a schedule's.
 func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string) error {
 	socketPath := filepath.Join(deliverer.tmuxDir, socket)
-	deadline := clock.Real.Now().Add(reminderComposerWait)
+	deadline := clock.Real.Now().Add(scheduleComposerWait)
 	streak := 0
 	var lastErr error
 	for {
@@ -95,7 +95,7 @@ func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string
 			return fmt.Errorf("revived chat on %s is held at the folder-trust dialog; nothing typed", socket)
 		case inject.LastComposerLine(capture) != "":
 			streak++
-			if streak >= reminderComposerReads {
+			if streak >= scheduleComposerReads {
 				return nil
 			}
 		default:
@@ -105,24 +105,24 @@ func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string
 			failure := fmt.Errorf(
 				"revived chat on socket %s showed no composer within %s; "+
 					"it stays running and the next tick will inject it",
-				socket, reminderComposerWait,
+				socket, scheduleComposerWait,
 			)
 			if lastErr != nil {
 				failure = fmt.Errorf("%w (last capture error: %v)", failure, lastErr)
 			}
 			return failure
 		}
-		if err := clock.Real.Sleep(ctx, reminderComposerPoll); err != nil {
+		if err := clock.Real.Sleep(ctx, scheduleComposerPoll); err != nil {
 			return fmt.Errorf("wait for composer on socket %s: %w", socket, err)
 		}
 	}
 }
 
-// injectReminder types the message the way its setter would have: the
-// reminder is a deferred message from that chat, signed as the setter's.
-func (deliverer *chatDeliverer) injectReminder(
+// injectSchedule types the message the way its setter would have: the
+// schedule is a deferred message from that chat, signed as the setter's.
+func (deliverer *chatDeliverer) injectSchedule(
 	ctx context.Context,
-	r fleetdb.Reminder,
+	r fleetdb.Schedule,
 	target, message string,
 ) error {
 	engine, err := pfmchat.NewInjectEngine(true, deliverer.runtime)
@@ -142,23 +142,23 @@ func (deliverer *chatDeliverer) injectReminder(
 	return nil
 }
 
-// RunFire is `pfm internal reminder-fire`: the scheduler's tick.
+// RunFire is `pfm internal schedule-fire`: the scheduler's tick.
 func RunFire(args []string, stdout, stderr io.Writer, runtime *pfmconfig.Runtime) int {
 	if len(args) != 0 {
-		fmt.Fprintf(stderr, "usage: %s\n", reminderFireCommand)
+		fmt.Fprintf(stderr, "usage: %s\n", scheduleFireCommand)
 		return 2
 	}
 	effective, err := pfmconfig.RuntimeOrDefault(runtime)
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: read runtime: %v\n", reminderFireCommand, err)
+		fmt.Fprintf(stderr, "%s: read runtime: %v\n", scheduleFireCommand, err)
 		return 1
 	}
 	ctx := context.Background()
 	state := fleetdb.OpenSharedState(ctx, effective.Paths)
 	if err := state.Degraded(); err != nil {
-		fmt.Fprintf(stderr, "%s: open shared state: %v\n", reminderFireCommand, err)
+		fmt.Fprintf(stderr, "%s: open shared state: %v\n", scheduleFireCommand, err)
 		if closeErr := state.Close(); closeErr != nil {
-			fmt.Fprintf(stderr, "%s: close shared state: %v\n", reminderFireCommand, closeErr)
+			fmt.Fprintf(stderr, "%s: close shared state: %v\n", scheduleFireCommand, closeErr)
 		}
 		return 1
 	}
@@ -167,33 +167,33 @@ func RunFire(args []string, stdout, stderr io.Writer, runtime *pfmconfig.Runtime
 	)
 	code := 0
 	if closeErr := state.Close(); closeErr != nil {
-		fmt.Fprintf(stderr, "%s: close shared state: %v\n", reminderFireCommand, closeErr)
+		fmt.Fprintf(stderr, "%s: close shared state: %v\n", scheduleFireCommand, closeErr)
 		code = 1
 	}
 	if fireErr != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", reminderFireCommand, fireErr)
+		fmt.Fprintf(stderr, "%s: %v\n", scheduleFireCommand, fireErr)
 		return 1
 	}
 	if report.Skipped {
-		fmt.Fprintf(stderr, "%s: another fire holds the lock; skipped\n", reminderFireCommand)
+		fmt.Fprintf(stderr, "%s: another fire holds the lock; skipped\n", scheduleFireCommand)
 		return code
 	}
 	for index := range report.Fired {
 		fired := &report.Fired[index]
-		fmt.Fprintf(stdout, "fired reminder %d → %s\n", fired.ID, reminderChatColumnFull(fired))
+		fmt.Fprintf(stdout, "fired schedule %d → %s\n", fired.ID, scheduleChatColumnFull(fired))
 	}
 	for index := range report.Failed {
 		failure := &report.Failed[index]
-		fmt.Fprintf(stderr, "%s: reminder %d (%s, %s): %v — stays due\n",
-			reminderFireCommand, failure.Reminder.ID, failure.Reminder.Label, failure.Reminder.SessionID, failure.Err)
+		fmt.Fprintf(stderr, "%s: schedule %d (%s, %s): %v — stays due\n",
+			scheduleFireCommand, failure.Schedule.ID, failure.Schedule.Label, failure.Schedule.SessionID, failure.Err)
 		code = 1
 	}
 	return code
 }
 
-// reminderChatColumnFull names a reminder's chat for the fire log: its label,
+// scheduleChatColumnFull names a schedule's chat for the fire log: its label,
 // else its whole session id.
-func reminderChatColumnFull(r *fleetdb.Reminder) string {
+func scheduleChatColumnFull(r *fleetdb.Schedule) string {
 	if r.Label != "" {
 		return r.Label
 	}

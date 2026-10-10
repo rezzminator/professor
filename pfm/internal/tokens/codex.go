@@ -116,30 +116,34 @@ func (p *codexPeaks) done() (codexUsage, int) {
 }
 
 // modelSet is a set of model names in first-seen order.
-type modelSet []string
+type modelSet struct {
+	names  []string
+	recent string
+}
 
 func (set *modelSet) add(model string) {
-	for _, seen := range *set {
+	set.recent = model
+	for _, seen := range set.names {
 		if seen == model {
 			return
 		}
 	}
-	*set = append(*set, model)
+	set.names = append(set.names, model)
 }
 
 // last is the model a thread ran last, the one it is priced at.
 func (set modelSet) last() string {
-	if len(set) == 0 {
+	if len(set.names) == 0 {
 		return "unknown"
 	}
-	return set[len(set)-1]
+	return set.recent
 }
 
 // noteModels notes a thread that ran more than one model.
 func (a *auditor) noteModels(file string, models modelSet) {
-	if len(models) > 1 {
-		a.scan.notes = append(a.scan.notes, filepath.Base(file)+" ran "+num(float64(len(models)))+" models ("+
-			strings.Join(models, ", ")+`) — priced entirely at "`+models.last()+`"`)
+	if len(models.names) > 1 {
+		a.scan.notes = append(a.scan.notes, filepath.Base(file)+" ran "+num(float64(len(models.names)))+" models ("+
+			strings.Join(models.names, ", ")+`) — priced entirely at "`+models.last()+`"`)
 	}
 }
 
@@ -158,8 +162,10 @@ type fastUsage struct {
 // result.
 func (a *auditor) codexUsageFast(file string) fastUsage {
 	var (
-		result fastUsage
-		peaks  codexPeaks
+		result    fastUsage
+		peaks     codexPeaks
+		baselines []transcript.CodexTokenUsage
+		baseline  transcript.CodexTokenUsage
 	)
 	_, _, err := transcript.ReadLines(file, 0, func(line []byte, complete bool) {
 		if !complete || (!bytes.Contains(line, tokenCountMark) && !bytes.Contains(line, turnContextMark)) {
@@ -179,18 +185,57 @@ func (a *auditor) codexUsageFast(file string) fastUsage {
 		if record.payloadKind != "token_count" || record.info == nil {
 			return
 		}
+		total := record.info.TotalTokenUsage
+		if total == nil {
+			return
+		}
+		previousPeak := peaks.seg
+		if peaks.started && total.TotalTokens < peaks.prev {
+			if previousPeak != nil {
+				baselines = append(baselines, baseline)
+			}
+			baseline, previousPeak = transcript.CodexTokenUsage{}, nil
+		}
+		changed := peaks.add(*total)
+		at, stamped := dateParse(keyString(record.timestamp), a.loc)
+		if !stamped {
+			a.scan.noTimestamp++
+			peaks.seg = previousPeak // Keep reset boundaries, not undated usage.
+			return
+		}
+		if peaks.seg == nil || total.TotalTokens > peaks.seg.TotalTokens {
+			peaks.seg, changed = total, true // A stamped repeat can resolve undated usage.
+		}
+		if at < a.since {
+			baseline = *total
+			return
+		}
 		if lastUsage := record.info.LastTokenUsage; lastUsage != nil {
 			result.contextPeak = max(result.contextPeak, lastUsage.InputTokens)
 		}
-		if total := record.info.TotalTokenUsage; total == nil || !peaks.add(*total) {
-			return
+		if changed && total.TotalTokens > baseline.TotalTokens {
+			result.events++
 		}
-		result.events++
 	})
 	if err != nil {
 		a.scan.readErrors = append(a.scan.readErrors, file+": "+describe(err))
 	}
-	result.usage, result.segments = peaks.done()
+	if peaks.seg != nil {
+		peaks.peaks = append(peaks.peaks, *peaks.seg)
+		baselines = append(baselines, baseline)
+	}
+	for i, peak := range peaks.peaks {
+		base := baselines[i]
+		if peak.TotalTokens <= base.TotalTokens {
+			continue
+		}
+		result.segments++
+		result.usage.in += peak.InputTokens - base.InputTokens
+		result.usage.cached += peak.CachedInputTokens - base.CachedInputTokens
+		result.usage.out += peak.OutputTokens - base.OutputTokens
+		result.usage.reasoning += peak.ReasoningOutputTokens - base.ReasoningOutputTokens
+		result.usage.total += peak.TotalTokens - base.TotalTokens
+	}
 	return result
 }
 

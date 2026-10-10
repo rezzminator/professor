@@ -10,9 +10,10 @@ import (
 )
 
 type updateReplacement struct {
-	target   string
-	backup   string
-	replaced bool
+	target        string
+	backup        string
+	replaced      bool
+	restoreFailed bool
 }
 
 func updateFailure(primary, rollbackErr error) error {
@@ -34,7 +35,11 @@ func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writ
 			continue
 		}
 		if err := copyUpdateFile(replacement.backup, replacement.target); err != nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%s: %w", replacement.target, err))
+			replacements[index].restoreFailed = true
+			rollbackErr = errors.Join(
+				rollbackErr,
+				fmt.Errorf("%s (backup retained at %s): %w", replacement.target, replacement.backup, err),
+			)
 			continue
 		}
 		fmt.Fprintf(stderr, "pfm update: rolled back %s\n", replacement.target)

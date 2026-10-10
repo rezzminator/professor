@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -158,15 +159,54 @@ func TestWireEngineSyncGlobalConflictBlocksTheApplyAndIsAPlanError(t *testing.T)
 }
 
 func TestWireEngineSyncGlobalWithoutTheBinaryFailsTheStep(t *testing.T) {
-	installer, _, home := engineSyncGlobalEngine(t, ModeApply, nil)
 	t.Setenv("ENGINE_SYNC_BIN", "")
 	t.Setenv("ENGINE_SYNC_HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
-	err := installer.wireEngineSyncGlobal(nil)
-	stable := filepath.Join(home, ".local", "share", "engine-sync", "bin", "engine-sync")
-	if err == nil || !strings.HasPrefix(err.Error(), "engine-sync binary unavailable: "+stable+": ") {
-		t.Fatalf("wireEngineSyncGlobal = %v, want the unavailable binary at %s", err, stable)
+	for _, name := range []string{"Codex home configured", "clone present with empty Codex roster"} {
+		t.Run(name, func(t *testing.T) {
+			installer, _, home := engineSyncGlobalEngine(t, ModeApply, nil)
+			if name == "clone present with empty Codex roster" {
+				installer.options.CodexHomes = []string{}
+				if err := os.MkdirAll(installer.options.SourceRepo, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := installer.wireEngineSyncGlobal(nil)
+			stable := enginesync.StablePath(installer.env(), home)
+			if err == nil || !strings.HasPrefix(err.Error(), "engine-sync binary unavailable: "+stable+": ") {
+				t.Fatalf("wireEngineSyncGlobal = %v, want the unavailable binary at %s", err, stable)
+			}
+		})
 	}
+}
+
+func TestBinaryOnlyInstallWithoutEngineSync(t *testing.T) {
+	t.Setenv("ENGINE_SYNC_BIN", "")
+	t.Setenv("ENGINE_SYNC_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	for _, mode := range []Mode{ModeDryRun, ModeApply} {
+		t.Run(fmt.Sprintf("mode-%d", mode), func(t *testing.T) {
+			installer, output, home := engineSyncGlobalEngine(t, mode, []string{})
+			installer.options.SourceRepo = ""
+			stable := enginesync.StablePath(installer.env(), home)
+			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+				t.Fatalf("binary-only wireEngineSyncGlobal: %v\n%s", err, output.String())
+			}
+			if strings.Count(output.String(), "  skip    ") != 1 ||
+				!strings.Contains(output.String(), "  skip    engine-sync binary unavailable: "+stable+": ") {
+				t.Fatalf("want one visible missing-binary skip at %s:\n%s", stable, output.String())
+			}
+		})
+	}
+	t.Run("preview", func(t *testing.T) {
+		installer, output, _ := engineSyncGlobalEngine(t, ModeDryRun, []string{})
+		installer.options.SourceRepo = ""
+		installer.options.MCPConfigPath = testConfigPath(t)
+		installer.options.Runner = &fakeRunner{}
+		if _, err := Run(context.Background(), installer.options); err != nil {
+			t.Fatalf("binary-only preview: %v\n%s", err, output.String())
+		}
+	})
 }
 
 // targets.json names this install's roster, an empty one as an empty list,

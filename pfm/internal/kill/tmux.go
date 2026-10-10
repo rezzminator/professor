@@ -51,26 +51,58 @@ func (tmux TmuxKiller) PaneExists(
 	ctx context.Context,
 	socketPath, paneID string,
 ) (bool, error) {
-	output, err := tmux.command(
-		ctx,
-		socketPath,
-		"list-panes",
-		"-a",
-		"-F",
-		"#{pane_id}",
-	).Output()
+	panes, err := tmux.PaneIDs(ctx, socketPath)
 	if err != nil {
-		if pfmtmux.CouldNotRun(err) {
-			return false, err
-		}
-		return false, nil
+		return false, err
 	}
-	for _, candidate := range strings.Split(string(output), "\n") {
+	for _, candidate := range panes {
 		if candidate == paneID {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// PaneIDs queries the complete server, never folding a failed query into absence.
+func (tmux TmuxKiller) PaneIDs(ctx context.Context, socketPath string) ([]string, error) {
+	output, err := tmux.command(ctx, socketPath, "list-panes", "-a", "-F", "#{pane_id}").Output()
+	if err != nil {
+		stderr := exitStderr(err)
+		if !pfmtmux.CouldNotRun(err) && tmuxServerGone(stderr) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list panes on %s: %w: %s", socketPath, err, stderr)
+	}
+	var panes []string
+	for _, line := range strings.Split(string(output), "\n") {
+		if pane := strings.TrimSpace(line); pane != "" {
+			panes = append(panes, pane)
+		}
+	}
+	return panes, nil
+}
+
+// KillServerIfSolePane evaluates every session/window's pane IDs inside tmux's
+// synchronous command queue. No client-side snapshot can become stale before
+// kill-server. Linked windows may repeat a pane ID; that conservatively refuses.
+func (tmux TmuxKiller) KillServerIfSolePane(ctx context.Context, socketPath, paneID string) error {
+	id, err := strconv.Atoi(strings.TrimPrefix(paneID, "%"))
+	if err != nil || id < 0 || !strings.HasPrefix(paneID, "%") {
+		return fmt.Errorf("invalid pane ID for exclusive server kill: %q", paneID)
+	}
+	condition := "#{==:#{S:#{W:#{P:#{pane_id}}}}," + paneID + "}"
+	_, err = tmux.command(ctx, socketPath, "if-shell", "-F", "-t", paneID, condition, "kill-server").Output()
+	if err != nil {
+		return fmt.Errorf("kill exclusive server for pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+	}
+	return nil
+}
+
+func tmuxServerGone(message string) bool {
+	message = strings.TrimSpace(message)
+	return strings.HasPrefix(message, "no server running") ||
+		strings.HasPrefix(message, "error connecting to") &&
+			(strings.HasSuffix(message, "(No such file or directory)") || strings.HasSuffix(message, "(Connection refused)"))
 }
 
 func (tmux TmuxKiller) SendLine(
@@ -152,7 +184,11 @@ func (tmux TmuxKiller) KillPane(
 	ctx context.Context,
 	socketPath, paneID string,
 ) error {
-	return tmux.socket().KillPane(ctx, socketPath, paneID)
+	_, err := tmux.command(ctx, socketPath, "kill-pane", "-t", paneID).Output()
+	if err != nil {
+		return fmt.Errorf("kill pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+	}
+	return nil
 }
 
 // ClientTTYs lists the terminals attached to this server. A chat's clients ARE
@@ -208,7 +244,11 @@ func (tmux TmuxKiller) KillServer(
 	ctx context.Context,
 	socketPath string,
 ) error {
-	return tmux.socket().KillServer(ctx, socketPath)
+	_, err := tmux.command(ctx, socketPath, "kill-server").Output()
+	if err != nil {
+		return fmt.Errorf("kill server on %s: %w: %s", socketPath, err, exitStderr(err))
+	}
+	return nil
 }
 
 // socket is the one tmux-addressing wrapper (internal/tmux.Socket): Dir

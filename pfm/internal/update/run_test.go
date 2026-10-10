@@ -334,19 +334,6 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 	}
 }
 
-// TestUpdateBareRunReportsNotManagedOutsideAnyProject is a REGRESSION test
-// for the bare `pfm update` post-report tail: watched failing against a
-// build where the NOT-MANAGED branch was reverted to writeProjectFailure
-// (running update from outside any managed project reported FAILED — a
-// baseline that was never expected to exist there). Only the human-readable
-// path is driven end to end through runUpdate here: the --json path cannot
-// be observed as a single parseable JSON object through this entry point
-// because runUpdate unconditionally writes a pre-existing "updated vX.Y.Z
-// from PATH" line ahead of the project report regardless of --json (see
-// update_command.go's `fmt.Fprintf(stdout, "updated %s from %s\n", ...)`,
-// unrelated to this fix). That full --json integration is a NAMED GAP; the
-// --json terminal contract itself is pinned directly against
-// writeProjectUnmanaged in TestWriteProjectUnmanagedHumanAndJSON below.
 func TestUpdateBareRunReportsNotManagedOutsideAnyProject(t *testing.T) {
 	repo := newUpdateGitFixture(t)
 	runtime := updateTestRuntime(t)

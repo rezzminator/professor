@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 // Capture, CaptureStyled and SendKey complete fakeTmux as a TmuxClient for the
@@ -81,6 +83,90 @@ func (tmux *screenTmux) PaneExists(ctx context.Context, socketPath, paneID strin
 		return false, nil
 	}
 	return tmux.fakeTmux.PaneExists(ctx, socketPath, paneID)
+}
+
+type reapTmux struct {
+	*fakeTmux
+	serverErr error
+}
+
+func (tmux *reapTmux) KillServer(_ context.Context, socketPath string) error {
+	if filepath.Base(socketPath) == "cc-gone" {
+		return errors.New("no server running on " + socketPath)
+	}
+	return tmux.serverErr
+}
+
+func (tmux *reapTmux) KillPane(ctx context.Context, socketPath, pane string) error {
+	if pane == "%8" {
+		return nil
+	}
+	return tmux.fakeTmux.KillPane(ctx, socketPath, pane)
+}
+
+func TestReapTeammatesRetainsFailedChildren(t *testing.T) {
+	for _, gone := range []bool{false, true} {
+		t.Run(map[bool]string{false: "live failures", true: "already gone"}[gone], func(t *testing.T) {
+			jail := newKillJail(t)
+			database := jail.open(t)
+			ctx := context.Background()
+			serverErr, paneErr := errors.New("kill-server permission denied"), errors.New("kill-pane permission denied")
+			if gone {
+				serverErr, paneErr = errors.New("no server running on /x"), errors.New("can't find pane: %7")
+			}
+			tmux := &reapTmux{fakeTmux: &fakeTmux{killPaneErr: paneErr}, serverErr: serverErr}
+			finisher, err := NewFinisher(database, Dependencies{Tmux: tmux})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const id, socket, pane = "parent", "cc-child", "shared\t%7"
+			for kind, value := range map[string]string{fleetdb.KindNew: socket, fleetdb.KindPane: pane} {
+				successful := "cc-gone"
+				if kind == fleetdb.KindPane {
+					successful = "shared\t%8"
+				}
+				for _, child := range []string{value, successful} {
+					if err := database.Shared().AddChild(ctx, kind, id, child, 1); err != nil {
+						t.Fatal(err)
+					}
+				}
+				flat := filepath.Join(jail.home, ".claude", ".cc-"+kind+"-children", id)
+				if err := os.MkdirAll(filepath.Dir(flat), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(flat, []byte(value+"\n"+successful+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			socketPath := filepath.Join(jail.tmuxDir, socket)
+			if err := os.WriteFile(socketPath, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err = finisher.reapTeammates(ctx, id)
+			if gone && err != nil {
+				t.Fatalf("already-gone reap = %v", err)
+			}
+			if !gone && (!errors.Is(err, serverErr) || !errors.Is(err, paneErr)) {
+				t.Errorf("reap error = %v, want both kill failures", err)
+			}
+			for kind, value := range map[string]string{fleetdb.KindNew: socket, fleetdb.KindPane: pane} {
+				values, _, err := database.Shared().Children(ctx, kind, id)
+				if err != nil || gone && len(values) != 0 || !gone && (len(values) != 1 || values[0] != value) {
+					t.Errorf("%s registrations = %v, %v; gone=%v", kind, values, err, gone)
+				}
+				flat := filepath.Join(jail.home, ".claude", ".cc-"+kind+"-children", id)
+				contents, readErr := os.ReadFile(flat)
+				if gone && !errors.Is(readErr, os.ErrNotExist) ||
+					!gone && (readErr != nil || string(contents) != value+"\n") {
+					t.Errorf("%s legacy registrations = %q, %v; gone=%v", kind, contents, readErr, gone)
+				}
+			}
+			_, statErr := os.Stat(socketPath)
+			if gone && !errors.Is(statErr, os.ErrNotExist) || !gone && statErr != nil {
+				t.Errorf("detached socket stat = %v; gone=%v", statErr, gone)
+			}
+		})
+	}
 }
 
 // Claude Code frames the finisher reads: a running turn's footer, the idle
@@ -167,6 +253,37 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 			wantEvents: []string{"capture", "capture", "styled"},
 			wantKilled: true,
 			wantReason: `holds the draft "fix the"`,
+		},
+		{
+			name: "a draft ending in a marker",
+			tmux: &screenTmux{
+				fakeTmux: &fakeTmux{existsFor: 1 << 20},
+				screen:   []string{"⏺ done\n────────\n❯ explain this symbol ›\n────────\n"},
+				styled:   "⏺ done\n────────\n❯ explain this symbol ›\n────────\n",
+			},
+			wantEvents: []string{"capture", "capture", "styled"},
+			wantKilled: true,
+			wantReason: `holds the draft "explain this symbol ›"`,
+		},
+		{
+			name: "a marker on a continuation draft row",
+			tmux: &screenTmux{
+				fakeTmux: &fakeTmux{existsFor: 1 << 20},
+				screen:   []string{"⏺ done\n────────\n❯ unfinished draft\n  ›\n────────\n"},
+			},
+			wantEvents: []string{"capture", "capture", "styled"},
+			wantKilled: true,
+			wantReason: `holds the draft "unfinished draft"`,
+		},
+		{
+			name: "a box glyph on a draft row",
+			tmux: &screenTmux{
+				fakeTmux: &fakeTmux{existsFor: 1 << 20},
+				screen:   []string{"⏺ done\n────────\n❯ \n  ─\n  unfinished draft\n────────\n"},
+			},
+			wantEvents: []string{"capture", "capture"},
+			wantKilled: true,
+			wantReason: "holds text below its marker row",
 		},
 		{
 			name:       "a composer not drawn",

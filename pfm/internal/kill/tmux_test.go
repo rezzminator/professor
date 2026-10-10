@@ -49,6 +49,34 @@ func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, 
 	}
 }
 
+func TestPaneExistsPropagatesConnectionFailure(t *testing.T) {
+	for _, test := range []struct {
+		message string
+		wantErr bool
+	}{
+		{"error connecting to /x (Permission denied)", true},
+		{"protocol version mismatch", true},
+		{"no server running on /x", false},
+		{"error connecting to /x (No such file or directory)", false},
+		{"error connecting to /x (Connection refused)", false},
+	} {
+		t.Run(test.message, func(t *testing.T) {
+			binary := filepath.Join(t.TempDir(), "tmux")
+			script := "#!/bin/sh\nprintf '%s\\n' '" + test.message + "' >&2\nexit 1\n"
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			exists, err := (TmuxKiller{Binary: binary}).PaneExists(context.Background(), "/x", "%4")
+			if exists || (err != nil) != test.wantErr {
+				t.Fatalf("PaneExists = %v, %v, want false, error=%v", exists, err, test.wantErr)
+			}
+			if test.wantErr && !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("error %v does not carry stderr %q", err, test.message)
+			}
+		})
+	}
+}
+
 // TestTmuxKillerRecordsEveryInvocation: the kill façade terminates through
 // the observed tmux command — one record per call.
 func TestTmuxKillerRecordsEveryInvocation(t *testing.T) {

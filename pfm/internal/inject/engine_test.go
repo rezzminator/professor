@@ -726,40 +726,26 @@ func TestInjectPasteBoundaryAndKillerBody(t *testing.T) {
 	}
 }
 
-// TestMultiLineLongMessageSurvivesPasteByteExactWithoutMidBodyEnter pins
-// Task C item 6: a multi-line body over the inline threshold crosses as ONE
-// SendPaste call carrying every embedded newline byte-exact, and the
-// engine's own transport layer never decomposes it into a sequence of
-// per-line send-keys — the only SendKey calls it issues are the "Enter"s
-// from the explicit submit loop AFTER the single paste, never interleaved
-// mid-body. Whether a REAL pane treats an embedded newline as literal text
-// rather than an early Enter is a bracketed-paste property of the target
-// composer (Claude/Codex requesting the terminal mode via \e[?2004h); this
-// fake models tmux's argument boundary, not real terminal negotiation, which
-// stays an UNPLAYED gap (TESTPLAN.md § Composer transport boundaries).
+// Byte-exact calls are proven; real terminal negotiation remains UNPLAYED (TESTPLAN.md).
 func TestMultiLineLongMessageSurvivesPasteByteExactWithoutMidBodyEnter(t *testing.T) {
+	assertMultilinePaste(t, "line one\nline two\nline three\n"+strings.Repeat("padding line\n", 60))
+}
+
+func assertMultilinePaste(t *testing.T, body string) {
+	t.Helper()
 	fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
 	engine := newTestEngine(t, "cc-multiline-paste", fake)
+	transport := &transportTmux{fakeTmux: fake}
+	engine.tmux = transport
 	engine.options.DisableSignature = true
-	body := "line one\nline two\nline three\n" + strings.Repeat("padding line\n", 60)
-	result, err := engine.Inject(context.Background(), Request{
-		Target: "chat", Message: body,
-	})
+	result, err := engine.Inject(context.Background(), Request{Target: "chat", Message: body})
 	if err != nil || result.Code != 0 {
 		t.Fatalf("multi-line paste result=%+v err=%v", result, err)
 	}
-	if !fake.pasted || len(fake.literals) != 1 || fake.literals[0] != body {
-		t.Fatalf(
-			"multi-line body did not cross as one byte-exact paste call: pasted=%v chunks=%d",
-			fake.pasted, len(fake.literals),
-		)
+	if len(transport.pasteBodies) != 1 || transport.pasteBodies[0] != body || len(transport.literalBodies) != 0 {
+		t.Fatalf("body transport: paste=%q literal=%q", transport.pasteBodies, transport.literalBodies)
 	}
-	// "C-s" is the routine idle mash-guard sent before ANY delivery, typed
-	// and paste alike; it is not paste-specific. What matters here is that
-	// no OTHER key appears — in particular no extra "Enter" beyond the
-	// submit loop's own single Enter per attempt, which would signal the
-	// engine split the paste into a per-line typed sequence instead of the
-	// one SendPaste call already asserted above.
+	// C-s is the idle guard; Enter belongs to the explicit submit loop.
 	for _, key := range fake.keys {
 		if key != "Enter" && key != "C-s" {
 			t.Fatalf("unexpected key sent around a multi-line paste: %q (keys=%q)", key, fake.keys)
@@ -767,12 +753,27 @@ func TestMultiLineLongMessageSurvivesPasteByteExactWithoutMidBodyEnter(t *testin
 	}
 }
 
-// TestSlashCommandOfAnyLengthUsesPacedLiteralNotPaste pins Task C item 9:
-// isHarnessCommand is checked BEFORE the size comparison in the transport
-// ladder (commandTransport short-circuits pasteTransport), so a "/"-prefixed
-// command far over the inline threshold still takes the paced-literal chunk
-// transport TESTPLAN.md:446 already pins — never paste, and never the
-// auto-file rescue.
+type transportTmux struct {
+	*fakeTmux
+	pasteBodies, literalBodies []string
+}
+
+func (fake *transportTmux) SendLiteral(ctx context.Context, socket, pane, body string) error {
+	fake.literalBodies = append(fake.literalBodies, body)
+	return fake.fakeTmux.SendLiteral(ctx, socket, pane, body)
+}
+
+func (fake *transportTmux) SendPaste(ctx context.Context, socket, pane, body string) error {
+	fake.pasteBodies = append(fake.pasteBodies, body)
+	return fake.fakeTmux.SendPaste(ctx, socket, pane, body)
+}
+
+func TestShortMultilineMessageUsesPasteByteExact(t *testing.T) {
+	for _, body := range []string{"Review this:\nDo not modify files.", "Review this:\rDo not modify files."} {
+		t.Run(body, func(t *testing.T) { assertMultilinePaste(t, body) })
+	}
+}
+
 func TestSlashCommandOfAnyLengthUsesPacedLiteralNotPaste(t *testing.T) {
 	fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
 	engine := newTestEngine(t, "cc-command-any-length", fake)

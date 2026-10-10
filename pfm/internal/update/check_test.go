@@ -2,7 +2,9 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -99,5 +101,67 @@ func TestUpdateCheckAliasReportsRetiredNames(t *testing.T) {
 	code := Run([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime)
 	if code != 1 || !strings.Contains(stdout.String(), "legacy.md:1   /wave") {
 		t.Fatalf("alias code=%d stdout=%q stderr=%q; want retired-name review", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestUpdateJSONIsExactlyOneObject(t *testing.T) {
+	for _, jsonOutput := range []bool{false, true} {
+		name := "human"
+		if jsonOutput {
+			name = "json"
+		}
+		t.Run(name, func(t *testing.T) {
+			repo := newUpdateGitFixture(t)
+			runtime := updateTestRuntime(t)
+			stubUpdatePipeline(t, runtime)
+			updateBaselineDoctor = func(_ context.Context, _ pfmconfig.Runtime, _ bool, stdout, _ io.Writer) (doctorOutcome, error) {
+				fmt.Fprintln(stdout, "baseline doctor progress")
+				return doctorOutcome{}, nil
+			}
+			updateApplyInstall = func(_ context.Context, _, _, _ string, _ pfmconfig.Runtime, _ bool, stdout, stderr io.Writer) error {
+				fmt.Fprintln(stdout, "install progress")
+				fmt.Fprintln(stderr, "install diagnostic")
+				return nil
+			}
+			updateRunDoctor = func(_ context.Context, _ string, _ pfmconfig.Runtime, _ string, _ bool, stdout, _ io.Writer) (doctorOutcome, error) {
+				output := "doctor: row=new warning\ndoctor: warnings=1\n"
+				fmt.Fprint(stdout, output)
+				return doctorOutcome{Exit: 1, Warnings: 1, Output: output}, nil
+			}
+			args := []string{"--skip-harvest", "--repo", repo, "--root", t.TempDir()}
+			if jsonOutput {
+				args = append(args, "--json")
+			}
+			var stdout, stderr bytes.Buffer
+			if code := Run(args, &stdout, &stderr, runtime); code != 0 {
+				t.Fatalf("Run() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			progress := "baseline doctor progress\ninstall progress\ndoctor: row=new warning\ndoctor: warnings=1\n" +
+				"doctor after update: warnings=1 (before update: 0)\n" +
+				"new warning rows — read them before the next update:\ndoctor: row=new warning\n" +
+				fmt.Sprintf("updated v0.10.0 from %s\nrelease notes: none between v0.9.0 and v0.10.0\n", repo)
+			if !jsonOutput {
+				if stderr.String() != "install diagnostic\n" ||
+					!strings.HasPrefix(stdout.String(), progress+"NOT-MANAGED — ") {
+					t.Fatalf("human output changed: stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+				return
+			}
+			decoder := json.NewDecoder(&stdout)
+			var report map[string]any
+			if err := decoder.Decode(&report); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v", err)
+			}
+			if terminal, ok := report["terminal"].(string); !ok || !strings.HasPrefix(terminal, "NOT-MANAGED — ") {
+				t.Fatalf("JSON terminal=%v, want NOT-MANAGED", report["terminal"])
+			}
+			if err := decoder.Decode(&report); err != io.EOF {
+				t.Fatalf("second JSON decode=%v, want io.EOF", err)
+			}
+			wantStderr := strings.Replace(progress, "install progress\n", "install progress\ninstall diagnostic\n", 1)
+			if stderr.String() != wantStderr {
+				t.Fatalf("JSON progress stderr=%q, want %q", stderr.String(), wantStderr)
+			}
+		})
 	}
 }

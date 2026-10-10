@@ -133,6 +133,60 @@ func TestKillWhoseFinisherCannotStartLeavesTheChatAsItWas(t *testing.T) {
 	}
 }
 
+func TestFailedLaunchRollbackPreservesConcurrentSuccessfulKill(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	const id = "72727272-7272-4272-8272-727272727272"
+	ctx := context.Background()
+	entered, release := make(chan struct{}), make(chan struct{})
+	launchFailed := errors.New("launch A failed")
+	first, err := New(database, Dependencies{
+		Spawner: failingSpawner{spawn: func() error {
+			close(entered)
+			<-release
+			return launchFailed
+		}},
+		Now: func() time.Time { return time.Unix(900, 0) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := New(
+		database,
+		Dependencies{Spawner: &captureSpawner{}, Now: func() time.Time { return time.Unix(900, 0) }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{ID: id, Engine: pfmengine.Claude, Exit: true, SocketName: "cc-720-1-1", PaneID: "%4"}
+	done := make(chan error, 1)
+	go func() { _, err := first.Kill(ctx, request); done <- err }()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("A did not reach Spawn: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("A did not reach Spawn")
+	}
+	_, secondErr := second.Kill(ctx, request)
+	close(release)
+	if err := <-done; !errors.Is(err, launchFailed) {
+		t.Fatalf("A Kill = %v, want launch failure", err)
+	}
+	if secondErr != nil {
+		t.Fatalf("B Kill = %v", secondErr)
+	}
+	if _, hidden, err := database.Killed(ctx, id); err != nil || !hidden {
+		t.Fatalf("B's successful kill disappeared after A rollback: hidden=%v err=%v", hidden, err)
+	}
+	if reasserted, err := database.ReassertKill(ctx, id); err != nil || !reasserted {
+		t.Fatalf("B post-exit reassert = %v, %v; want true, nil", reasserted, err)
+	}
+	if _, hidden, err := database.Killed(ctx, id); err != nil || !hidden {
+		t.Fatalf("B's kill disappeared after reassert: hidden=%v err=%v", hidden, err)
+	}
+}
+
 // stubLauncher is a setsid stand-in exiting with code.
 func stubLauncher(t *testing.T, root string, code int) string {
 	t.Helper()

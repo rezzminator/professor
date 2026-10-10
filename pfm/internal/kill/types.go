@@ -83,6 +83,8 @@ type TmuxClient interface {
 	// failure returns a non-nil error and an unspecified bool, never a bare
 	// false a caller could mistake for a confirmed exit.
 	PaneExists(ctx context.Context, socketPath, paneID string) (bool, error)
+	// PaneIDs lists every pane on the server, including panes without a tty.
+	PaneIDs(ctx context.Context, socketPath string) ([]string, error)
 	SendLine(ctx context.Context, socketPath, paneID, line string) error
 	// Capture reads the pane's visible screen, CaptureStyled the same with
 	// its styling; SendKey presses one named tmux key there. The finisher
@@ -93,6 +95,8 @@ type TmuxClient interface {
 	SendKey(ctx context.Context, socketPath, paneID, key string) error
 	KillPane(ctx context.Context, socketPath, paneID string) error
 	KillServer(ctx context.Context, socketPath string) error
+	// KillServerIfSolePane checks exclusivity and kills in one server-side operation.
+	KillServerIfSolePane(ctx context.Context, socketPath, paneID string) error
 	ClientTTYs(ctx context.Context, socketPath string) ([]string, error)
 	PanesByTTY(ctx context.Context, socketPath string) (map[string]string, error)
 }

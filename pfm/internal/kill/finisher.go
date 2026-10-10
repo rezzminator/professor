@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -424,65 +425,71 @@ func (finisher *Finisher) reapTeammates(
 	id string,
 ) error {
 	var reapErrors []error
-	state := finisher.database.Shared()
-
-	detachedPath := filepath.Join(
-		finisher.paths.home,
-		".claude",
-		".cc-new-children",
-		id,
-	)
-	detached, err := finisher.children(ctx, fleetdb.KindNew, id, detachedPath)
-	if err != nil {
-		reapErrors = append(reapErrors, err)
-	}
-	for _, socket := range detached {
-		socket = strings.TrimSpace(socket)
-		if socket == "" {
-			continue
-		}
-		socketPath := filepath.Join(finisher.paths.tmuxDir, socket)
-		_ = finisher.tmux.KillServer(ctx, socketPath)
-		if err := os.Remove(socketPath); err != nil &&
-			!errors.Is(err, fs.ErrNotExist) {
+	for _, kind := range []string{fleetdb.KindNew, fleetdb.KindPane} {
+		flatPath := filepath.Join(finisher.paths.home, ".claude", ".cc-"+kind+"-children", id)
+		values, err := finisher.children(ctx, kind, id, flatPath)
+		if err != nil {
 			reapErrors = append(reapErrors, err)
-		}
-	}
-	if err := state.ClearChildren(ctx, fleetdb.KindNew, id); err != nil {
-		reapErrors = append(reapErrors, err)
-	}
-	if err := os.Remove(detachedPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		reapErrors = append(reapErrors, err)
-	}
-
-	panePath := filepath.Join(
-		finisher.paths.home,
-		".claude",
-		".cc-pane-children",
-		id,
-	)
-	panes, err := finisher.children(ctx, fleetdb.KindPane, id, panePath)
-	if err != nil {
-		reapErrors = append(reapErrors, err)
-	}
-	for _, value := range panes {
-		socket, pane, found := strings.Cut(value, "\t")
-		if !found || pane == "" {
 			continue
 		}
-		_ = finisher.tmux.KillPane(
-			ctx,
-			filepath.Join(finisher.paths.tmuxDir, socket),
-			pane,
-		)
-	}
-	if err := state.ClearChildren(ctx, fleetdb.KindPane, id); err != nil {
-		reapErrors = append(reapErrors, err)
-	}
-	if err := os.Remove(panePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		reapErrors = append(reapErrors, err)
+		var retained []string
+		for _, value := range values {
+			err := finisher.reapChild(ctx, kind, value)
+			if err == nil {
+				err = finisher.database.Shared().ClearChild(ctx, kind, id, value)
+			}
+			if err != nil {
+				reapErrors = append(reapErrors, fmt.Errorf("reap %s child %q of %s: %w", kind, value, id, err))
+				retained = append(retained, value)
+			}
+		}
+		if len(retained) == 0 {
+			err = os.Remove(flatPath)
+		} else if _, statErr := os.Stat(flatPath); statErr == nil {
+			err = atomicfile.Write(flatPath, []byte(strings.Join(retained, "\n")+"\n"), 0o600)
+		} else {
+			err = statErr
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			reapErrors = append(reapErrors, fmt.Errorf("update children file %s: %w", flatPath, err))
+		}
 	}
 	return errors.Join(reapErrors...)
+}
+
+func (finisher *Finisher) reapChild(ctx context.Context, kind, value string) error {
+	socket, pane, found := strings.Cut(value, "\t")
+	if kind == fleetdb.KindNew {
+		socket = strings.TrimSpace(value)
+	} else if !found || pane == "" {
+		return fmt.Errorf("invalid pane registration %q", value)
+	}
+	if socket == "" {
+		return fmt.Errorf("empty socket registration %q", value)
+	}
+	socketPath := filepath.Join(finisher.paths.tmuxDir, socket)
+	var err error
+	if kind == fleetdb.KindNew {
+		err = finisher.tmux.KillServer(ctx, socketPath)
+	} else {
+		err = finisher.tmux.KillPane(ctx, socketPath, pane)
+	}
+	if err != nil {
+		message := exitStderr(err)
+		if message == "" {
+			message = err.Error()
+		}
+		gone := tmuxServerGone(message) || kind == fleetdb.KindPane && strings.HasPrefix(message, "can't find pane:")
+		if !gone {
+			return err
+		}
+	}
+	if kind == fleetdb.KindNew {
+		if err := os.Remove(socketPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove reaped socket %s: %w", socketPath, err)
+		}
+	}
+	return nil
 }
 
 // children resolves one kind of teammate for a chat: the shared table's rows,

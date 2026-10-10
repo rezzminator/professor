@@ -53,6 +53,14 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 			installer.deferFailure(err)
 			return installer.retireEngineSyncConfig(sourceRepo)
 		}
+		if errors.As(err, &unavailable) && len(installer.codexHomes()) == 0 {
+			if _, inspectErr := os.Stat(sourceRepo); errors.Is(inspectErr, fs.ErrNotExist) {
+				installer.skip(err.Error() + " (no source clone or Codex homes configured)")
+				return nil
+			} else if inspectErr != nil {
+				return fmt.Errorf("inspect engine-sync global source repository %s: %w", sourceRepo, inspectErr)
+			}
+		}
 		return err
 	}
 	options := enginesync.GlobalOptions{
@@ -146,7 +154,7 @@ const engineSyncAbsentText = "engine-sync unavailable: Codex roles, global comma
 // absent. The preview skips with the text and raises no plan error, so the
 // preflight does not refuse the rest of the teardown; the apply defers the
 // failure, so the run finishes and still exits non-zero. An install never
-// reaches here: an absent binary fails an install step.
+// reaches here: it either skips an empty global step or fails the install.
 func (installer *engine) leaveEngineSyncOwned(cause error) error {
 	installer.engineSyncAbsent = true
 	if !installer.apply {

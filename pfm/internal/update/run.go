@@ -91,7 +91,19 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 		fmt.Fprintf(stderr, "pfm update: resolve repository: %v\n", err)
 		return 5
 	}
-	if err := updateRepository(context.Background(), repo, *target, *skipHarvest, stdout, stderr, runtime); err != nil {
+	progress := stdout
+	if *jsonOutput {
+		progress = stderr
+	}
+	if err := updateRepository(
+		context.Background(),
+		repo,
+		*target,
+		*skipHarvest,
+		progress,
+		stderr,
+		runtime,
+	); err != nil {
 		fmt.Fprintf(stderr, "pfm update: %v\n", err)
 		return 5
 	}
@@ -214,6 +226,7 @@ func updateRepository(
 		return fmt.Errorf("stage update beside managed root: %w", err)
 	}
 	worktreeAdded := false
+	var replacements []updateReplacement
 	defer func() {
 		var cleanupErr error
 		if worktreeAdded {
@@ -228,8 +241,14 @@ func updateRepository(
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup staged source worktree: %w", removeErr))
 			}
 		}
-		if removeErr := os.RemoveAll(stage); removeErr != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup update stage %s: %w", stage, removeErr))
+		// A failed binary restore leaves its backup as the manual repair source.
+		if !slices.ContainsFunc(
+			replacements,
+			func(replacement updateReplacement) bool { return replacement.restoreFailed },
+		) {
+			if removeErr := os.RemoveAll(stage); removeErr != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup update stage %s: %w", stage, removeErr))
+			}
 		}
 		if cleanupErr == nil {
 			return
@@ -277,7 +296,7 @@ func updateRepository(
 		return errors.New("binary ownership ledger is empty; refusing to overwrite PATH copies")
 	}
 	installSourceRepo := preferredUpdateSourceRepo(runtime.Paths.Home, repo)
-	replacements := make([]updateReplacement, 0, len(ledger.Paths))
+	replacements = make([]updateReplacement, 0, len(ledger.Paths))
 	for _, targetPath := range ledger.Paths {
 		if strings.TrimSpace(targetPath) == "" || !filepath.IsAbs(targetPath) {
 			return fmt.Errorf("binary ownership ledger contains invalid path %q", targetPath)

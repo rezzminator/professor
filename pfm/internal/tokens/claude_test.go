@@ -137,6 +137,29 @@ func TestCollectCountsMalformedUndatedAndSyntheticLines(t *testing.T) {
 	}
 }
 
+func TestMalformedClaudeUsageIsReportedAsGap(t *testing.T) {
+	file := writeTranscript(
+		t,
+		filepath.Join(t.TempDir(), "s1.jsonl"),
+		assistant("good", "claude-sonnet-5", "2026-09-21T05:00:00Z", 10, 20, 0, 0),
+		`{"type":"assistant","timestamp":"2026-09-21T05:01:00Z","message":{"id":"bad","model":"claude-sonnet-5","usage":{"input_tokens":"broken","output_tokens":20}}}`,
+		`{"type":"assistant"}`,
+		`{"type":"assistant","message":{"usage":null}}`,
+		`{"type":"assistant","message":{}}`,
+	)
+	a, _, _ := testAuditor(t)
+	c, err := a.collect(file, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.scan.badLines != 1 || !strings.Contains(a.gapsLine(), "1 malformed lines") {
+		t.Errorf("badLines %d, gaps %q; want one malformed usage gap", a.scan.badLines, a.gapsLine())
+	}
+	if len(c.usage) != 1 || c.usage["message:good"] == nil {
+		t.Errorf("usage = %v; want only the valid call", c.usage)
+	}
+}
+
 // TestClaudeContentDecodesEachBlockOnItsOwn: one odd element of a content list
 // never hides its siblings (INTENDED: the list used to fail whole and count
 // as its JSON, where the Node engine read each block by its type).

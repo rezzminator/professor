@@ -97,7 +97,7 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "70826e55706e75c0aaaccbf346a29fa83956612c41409f526faaeace93be5922",
-    ".claude/agents/gitter.md": "5f4b58b9baea54b807006a7389ad721a30d5391e2b1193c9371f68d7c261a5b8",
+    ".claude/agents/gitter.md": "54047f8c6b7f00eca70e3fe2ca6f9cf16c7fae7d812a0b0268f69fa3c85a4b3d",
     ".claude/agents/releaser.md": "5d892c434d1380c97e688be24feb67b0ebe246ba89e0dd4cbce2b8efc24f7b95",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",

@@ -163,6 +163,10 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate shared state database: %w", err)
 	}
+	if err := addHiddenRevision(ctx, db, path); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate shared state database: %w", err)
+	}
 	return db, nil
 }
 

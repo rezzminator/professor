@@ -6,11 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 type modelCostTransport func(*http.Request) (*http.Response, error)
@@ -175,12 +172,11 @@ const (
 
 // TestGenerationGroupRows: a generation-range row ("Claude 4.6 and earlier
 // models") outside the Model pricing table names no model: the catalog keeps
-// it in its table and attributes it to no model, and every price row derives
-// as the page publishes it. Any other label naming no model, and a generation
+// it in its table and attributes it to no model; TestDeriveThePublishedPages
+// derives its price rows. Any other label naming no model, and a generation
 // range inside the Model pricing table, still fail the catalog.
 func TestGenerationGroupRows(t *testing.T) {
 	claude, openai := publishedPages(t)
-	f64 := func(v float64) *float64 { return &v }
 	t.Run("the published pages refresh", func(t *testing.T) {
 		catalogs, err := pagesFetcher(claude, openai, http.StatusOK, nil).Fetch(context.Background())
 		if err != nil {
@@ -202,42 +198,6 @@ func TestGenerationGroupRows(t *testing.T) {
 					t.Fatalf("model %s holds the generation-range row", model.ID)
 				}
 			}
-		}
-		prices, err := Derive(catalogs, "2026-10-11T00:00:00Z")
-		if err != nil {
-			t.Fatalf("Derive: %v", err)
-		}
-		claudeRows := map[string]pricing.Row{}
-		for _, row := range prices.Rows {
-			if row.Engine == pricing.EngineClaude {
-				claudeRows[row.Key] = row
-			}
-		}
-		keys := []string{
-			"claude-fable-5", "claude-fable-5-1", "claude-haiku-3-5", "claude-haiku-4-5", "claude-haiku-5-5",
-			"claude-mythos-5", "claude-mythos-5-1", "claude-opus-4", "claude-opus-4-1", "claude-opus-4-5",
-			"claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5",
-			"claude-sonnet-4", "claude-sonnet-4-5", "claude-sonnet-4-6", "claude-sonnet-5", "claude-sonnet-5-5",
-		}
-		if len(claudeRows) != len(keys) {
-			t.Fatalf("claude rows = %d, want %d: %v", len(claudeRows), len(keys), claudeRows)
-		}
-		for _, key := range keys {
-			if _, ok := claudeRows[key]; !ok {
-				t.Fatalf("no derived row %s", key)
-			}
-		}
-		for key, want := range map[string]pricing.Rates{
-			"claude-opus-4-6":   {In: f64(5), Out: f64(25), Hit: f64(0.5), W5m: f64(6.25), W1h: f64(10)},
-			"claude-sonnet-4-6": {In: f64(3), Out: f64(15), Hit: f64(0.3), W5m: f64(3.75), W1h: f64(6)},
-			"claude-sonnet-5":   {In: f64(2), Out: f64(10), Hit: f64(0.2), W5m: f64(2.5), W1h: f64(4)},
-		} {
-			if !reflect.DeepEqual(claudeRows[key].Rates, want) {
-				t.Fatalf("%s rates = %+v, want %+v", key, claudeRows[key].Rates, want)
-			}
-		}
-		if long := claudeRows["claude-haiku-5-5"].Long; long == nil || long.Above != 100000 || *long.In != 0.5 {
-			t.Fatalf("claude-haiku-5-5 long tier = %+v, want above 100000 at $0.50 in", long)
 		}
 	})
 	for _, tc := range []struct{ name, label string }{

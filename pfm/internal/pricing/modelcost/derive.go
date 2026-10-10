@@ -16,10 +16,16 @@ var (
 	amountPattern    = regexp.MustCompile(`(?i)^\$\s*(\d+(?:,\d{3})*(?:\.\d+)?)(?:\s*/\s*(?:MTok|1M tokens))?$`)
 	promptTier       = regexp.MustCompile(`(?i)for prompts (up to|over) ([\d,]+) tokens`)
 	anyPromptTier    = regexp.MustCompile(`(?i)for prompts`)
-	serviceMode      = regexp.MustCompile(`(?m)^\s*(Standard|Batch|Fast|Ultrafast)\s*$`)
+	serviceMode      = regexp.MustCompile(`(?m)^\s*(Standard|Batch|Flex|Priority|Fast|Ultrafast)\s*$`)
 	perMillion       = regexp.MustCompile(`(?i)prices per 1m tokens`)
 	longBoundary     = regexp.MustCompile(`(?i)long context:\s*>\s*([\d,.]+[kKmM]?)\s*input tokens`)
 	thresholdPattern = regexp.MustCompile(`(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kKmM]?)`)
+	// loneWord is a context line of one word alone, as the page sets a
+	// service-mode tab: on a modeless table it is a mode no rule knows.
+	loneWord = regexp.MustCompile(`(?m)^\s*[A-Za-z]+\s*$`)
+	// namedMode is a non-Standard service mode named anywhere in a context,
+	// in prose or markup ("Flex processing", "**Batch**").
+	namedMode = regexp.MustCompile(`\b(Batch|Flex|Priority|Fast|Ultrafast)\b`)
 )
 
 // Derive turns both providers' catalogs into the price table: only the
@@ -289,8 +295,14 @@ func deriveOpenAI(catalog *Catalog) []pricing.Row {
 }
 
 // standardTable is OpenAI's Standard text-token table: the "Standard pricing
-// data" table, a grouped table of short-context columns, or a specialized
-// category table whose service mode is Standard.
+// data" table, a grouped table of short-context columns, a specialized
+// category table whose service mode is Standard, or a grouped table whose
+// context names no service mode and whose columns are only Model, Input,
+// Output and Cached input (the life sciences models). A grouped table under
+// any other mode, one whose context names a non-Standard mode in any shape or
+// a lone word no mode rule knows (a mode is a "similar" of Batch: a wrong
+// price is worse than a missing one), or a modeless one with another column (a
+// modality, a use case), never prices.
 func standardTable(table Table, headers columns) bool {
 	heading := strings.ToLower(plain(table.Heading))
 	if heading == "standard pricing data" {
@@ -303,8 +315,12 @@ func standardTable(table Table, headers columns) bool {
 		return true
 	}
 	modes := serviceMode.FindAllStringSubmatch(table.Context, -1)
+	if len(modes) == 0 {
+		return !loneWord.MatchString(table.Context) && !namedMode.MatchString(table.Context) &&
+			tokenColumnsOnly(headers)
+	}
 	return headers.index("category") >= 0 && headers.index("input") >= 0 && headers.index("output") >= 0 &&
-		len(modes) > 0 && modes[len(modes)-1][1] == "Standard"
+		modes[len(modes)-1][1] == "Standard"
 }
 
 // openAIRow folds a model's variants: their short-context rates must agree,
@@ -330,4 +346,18 @@ func openAIRow(key string, variants []openAIVariant) (pricing.Row, bool) {
 		return pricing.Row{}, false
 	}
 	return row, true
+}
+
+// tokenColumns are the only headers a modeless grouped table may carry.
+var tokenColumns = []string{"model", "input", "cached input", "output"}
+
+// tokenColumnsOnly is a table of Model, Input and Output with at most a Cached
+// input column beside them, and no other.
+func tokenColumnsOnly(headers columns) bool {
+	for _, header := range headers {
+		if !slices.Contains(tokenColumns, header) {
+			return false
+		}
+	}
+	return headers.index("model") >= 0 && headers.index("input") >= 0 && headers.index("output") >= 0
 }

@@ -1,6 +1,7 @@
 package modelcost
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -83,6 +84,17 @@ func TestDeriveTheStandardTextTokenRows(t *testing.T) {
 	}
 }
 
+// plainHeader is a grouped table of Model, Input, Cached input and Output, as
+// the page publishes its life sciences models, opening its first row.
+const plainHeader = "| Model | Input | Cached input | Output |\n| --- | --- | --- | --- |\n| gpt-lab-1 "
+
+// grouped appends a grouped table to the OpenAI page under its own context:
+// mode is a service-mode line or empty, header opens the table's first row.
+func grouped(mode, header string) string {
+	return openAIPage + "Lab models\nPrices per 1M tokens.\n" + mode + "### Grouped Pricing Table data\n" + header +
+		"| $5.00 | $0.50 | $25.00 |\n"
+}
+
 func TestDeriveVariants(t *testing.T) {
 	duplicate := func(input string) string {
 		return openAIPage + "### Grouped Pricing Table data\n" + openAIHeader +
@@ -118,6 +130,16 @@ func TestDeriveVariants(t *testing.T) {
 			strings.Replace(openAIPage, "Prices per 1M tokens.\nStandard\n### Grouped", "Prices per 1M tokens.\nStandard\nPrior mode\nFast\n### Grouped", 1),
 			"gpt-5.3-codex", nil,
 		},
+		{
+			"a category table whose last mode line is Flex", claudePage,
+			strings.Replace(openAIPage, "Prices per 1M tokens.\nStandard\n### Grouped", "Prices per 1M tokens.\nStandard\nFlex\n### Grouped", 1),
+			"gpt-5.3-codex", nil,
+		},
+		{
+			"a category table whose last mode line is Priority", claudePage,
+			strings.Replace(openAIPage, "Prices per 1M tokens.\nStandard\n### Grouped", "Prices per 1M tokens.\nStandard\nPriority\n### Grouped", 1),
+			"gpt-5.3-codex", nil,
+		},
 		{"missing input", claudePage, astraInput("-"), "gpt-6-astra", nil},
 		{"not available", claudePage, astraInput("N/A"), "gpt-6-astra", nil},
 		{"a range", claudePage, astraInput("$0.10–$0.20"), "gpt-6-astra", nil},
@@ -125,6 +147,15 @@ func TestDeriveVariants(t *testing.T) {
 		{"per image", claudePage, astraInput("$1 per image"), "gpt-6-astra", nil},
 		{"not a number", claudePage, astraInput("$oops"), "gpt-6-astra", nil},
 		{"thousands separator", claudePage, astraInput("$1,000.00"), "gpt-6-astra", rate(1000)},
+		{"a modeless grouped table of Model, Input, Output prices", claudePage, grouped("", plainHeader), "gpt-lab-1", rate(5)},
+		{"a grouped table under Batch never prices", claudePage, grouped("Batch\n", plainHeader), "gpt-lab-1", nil},
+		{"a grouped table whose context names a mode in prose never prices", claudePage, grouped("Flex processing\n", plainHeader), "gpt-lab-1", nil},
+		{"a grouped table under an unknown mode word never prices", claudePage, grouped("Scale\n", plainHeader), "gpt-lab-1", nil},
+		{
+			"a modeless grouped table with another column never prices", claudePage,
+			grouped("", "| Model | Use case | Input | Cached input | Output |\n| --- | --- | --- | --- | --- |\n| gpt-lab-1 | Lab "),
+			"gpt-lab-1", nil,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			row, ok := derived(t, tc.claude, tc.openai).Resolve(tc.key)
@@ -152,5 +183,25 @@ func TestDeriveRefusesAProviderWithoutRows(t *testing.T) {
 	}
 	if _, err := Derive(catalogsOf(t, claudePage, openAIPage)[:1], "2026-10-08T09:00:00Z"); err == nil {
 		t.Fatal("Derive of one provider succeeded, want an error")
+	}
+}
+
+// TestDeriveThePublishedPages: both pages as served on 2026-10-11 derive to
+// testdata/prices-2026-10-11.json, the life sciences models' modeless grouped
+// table among the standard rows.
+func TestDeriveThePublishedPages(t *testing.T) {
+	claude, openai := publishedPages(t)
+	got := derived(t, claude, openai)
+	content, err := os.ReadFile("testdata/prices-2026-10-11.json")
+	if err != nil {
+		t.Fatalf("read the expected table: %v", err)
+	}
+	want, err := pricing.DecodeTable(content, "testdata/prices-2026-10-11.json")
+	if err != nil {
+		t.Fatalf("decode the expected table: %v", err)
+	}
+	if !pricing.SameRates(got, want) {
+		gotJSON, _ := pricing.Encode(got)
+		t.Fatalf("Derive of the published pages =\n%s\nwant testdata/prices-2026-10-11.json", gotJSON)
 	}
 }

@@ -2,10 +2,14 @@
 # Exercise .claude/scripts/check-pfm.sh — pfm's static-check command — against a fake repository:
 # its usage text, the resolver's FAIL path lines, the offline install check (module cache only, go's
 # output in the log), the SKIP wording, the files fmt receives and the formatter it picks (the pinned
-# one tools.sh names, else PATH), the unit-wide typecheck (go vet over the whole module, on every
-# selection, a deletion-only one included), lint-new scoped to the named files (a lint finding on
-# another file is burn-down, a typecheck finding on any file or a tool error with no finding is a
-# FAIL), the check order, every check running after one fails, the exit code, the log, and the host's fence verdicts (the docker probe after a fence
+# one tools.sh names, else PATH), typecheck's scope (go vet over the named packages and their direct
+# importers from go list; the whole module when no .go file is named, a deletion-only selection
+# included; a failed go list is FAIL typecheck), lint-new over the named packages and scoped to the
+# named files (a lint finding on another file is burn-down, a typecheck finding on any file or a tool
+# error with no finding is a FAIL), the check order, every check running after one fails, the exit
+# code, the log, the host lock (a second run waits, says so, and reaches the fence only once the lock
+# is free, under each of flock and perl on PATH; no lock tool is a FAIL fence line), and the host's
+# fence verdicts (the docker probe after a fence
 # failure, a fence run with no check line, a PASS followed by a non-zero exit). dev.sh, go, make,
 # golangci-lint and docker are stubs in the fake root that record their argv and exit as the test
 # tells them; `iso run` executes its command string with PFM_DEV_FENCE=1 like the real fence.
@@ -25,7 +29,7 @@ source "$HERE/scripts/stub-root.sh"
 for s in go make golangci-lint; do ln -s .stub "$BIN/$s"; done
 # The SUT runs with PATH=$BIN alone: the host's go, make, docker and golangci-lint are never reachable;
 # docker exists only while a test links it.
-for t in bash env sh git realpath dirname basename date mkdir cat grep sed awk tail head rm wc tr sort mktemp cp chmod ls cut uniq tee; do
+for t in flock perl bash env sh git realpath dirname basename date mkdir cat grep sed awk tail head rm wc tr sort mktemp cp chmod ls cut uniq tee; do
   p="$(command -v "$t")" || continue
   ln -s "$p" "$BIN/$t"
 done
@@ -35,7 +39,9 @@ cp "$HERE/.claude/scripts/unit-path.sh" "$R/.claude/scripts/unit-path.sh"
 chmod +x "$R/.claude/scripts/check-pfm.sh" 2>/dev/null || true
 
 # --- fixture repository ---------------------------------------------------------------------------
-mkdir -p "$R/pfm/internal/a" "$R/pfm/docs" "$R/docs"
+mkdir -p "$R/pfm/internal/a" "$R/pfm/internal/b" "$R/pfm/docs" "$R/docs"
+printf 'module example.test/pfm\n' >"$R/pfm/go.mod"
+printf 'package b\n' >"$R/pfm/internal/b/b.go"
 printf 'package a\n' >"$R/pfm/internal/a/a.go"
 printf 'package a\n' >"$R/pfm/internal/a/a_test.go"
 printf 'package a\n' >"$R/pfm/internal/a/gone.go"
@@ -81,9 +87,12 @@ rec_lacks() { # rec_lacks <name> <tool-prefix>
 
 A=pfm/internal/a/a.go
 U='Name the files you changed.'
-LINT_NEW=(make -C pfm --no-print-directory lint-new)
+LINT_NEW=(make -C pfm --no-print-directory lint-new LINT_PKGS=./internal/a)
 ARCH=(make -C pfm --no-print-directory arch)
 TYPECHECK=(go -C pfm vet ./...)
+VET_A=(go -C pfm vet ./internal/a)
+LOCK="/tmp/${NAME#.}/check-pfm/fence.lock"
+WAITING="check-pfm.sh: waiting for another check-pfm.sh run to leave the fence ($LOCK)"
 LAUNCH=(go -C pfm test ./internal/claudelaunch/ -run TestNoLaunchLiteralOutsideRegistry -count=1)
 INSTALL=(go -C pfm mod download)
 INSTALL_FAIL='FAIL install (pfm has no installed dependencies — run: .claude/scripts/dev.sh iso install pfm)'
@@ -106,13 +115,16 @@ rc_is "all checks green exit 0" 0
 for c in fmt typecheck lint-new arch launch-literals; do out_has "green run prints PASS $c" "PASS $c"; done
 out_lacks "the whole-module vet is named typecheck, never vet" "PASS vet"
 if [ "$(verdicts | cut -d' ' -f2 | tr '\n' ' ')" = 'fmt typecheck lint-new arch launch-literals ' ]; then ok "the checks run in the order fmt, typecheck, lint-new, arch, launch-literals"; else bad "the checks run in the order fmt, typecheck, lint-new, arch, launch-literals" "$(verdicts)"; fi
-rec_has "typecheck is go vet over the whole module" "${TYPECHECK[@]}"
+rec_has "typecheck is go vet over the named package" "${VET_A[@]}"
+if grep -qxF -- "$(printf '%s ' "${TYPECHECK[@]}" | sed 's/ $//')" "$REC"; then bad "a named go file never vets the whole module" "$(cat "$REC")"; else ok "a named go file never vets the whole module"; fi
+out_lacks "an uncontended run never waits on the host lock" "$WAITING"
 if [ "$(grep -c '^dev.sh iso run ' "$REC")" = 1 ]; then ok "the host re-runs itself in one fence call"; else bad "the host re-runs itself in one fence call" "$(cat "$REC")"; fi
 rec_has "install is the module-cache download" "${INSTALL[@]}"
-rec_lacks "install never loads the tree's packages" "go -C pfm list"
+first_list="$(grep -n '^go -C pfm list' "$REC" | head -1 | cut -d: -f1)"; fmt_at="$(grep -n '^golangci-lint fmt' "$REC" | head -1 | cut -d: -f1)"
+if [ -n "$fmt_at" ] && { [ -z "$first_list" ] || [ "$first_list" -gt "$fmt_at" ]; }; then ok "install never loads the tree's packages (no go list before fmt)"; else bad "install never loads the tree's packages (no go list before fmt)" "$(cat "$REC")"; fi
 if grep -qE 'GOPROXY=off -C pfm mod download$' "$REC.env"; then ok "the install check runs offline"; else bad "the install check runs offline" "$(cat "$REC.env")"; fi
 if grep -q -- '-mod=mod' "$REC.env"; then bad "the install check sets no -mod flag (it has no effect on mod download)" "$(cat "$REC.env")"; else ok "the install check sets no -mod flag (it has no effect on mod download)"; fi
-rec_has "lint-new runs the make target, whole" "${LINT_NEW[@]}"
+rec_has "lint-new runs the make target over the named package" "${LINT_NEW[@]}"
 rec_has "arch runs the make target, whole" "${ARCH[@]}"
 rec_has "launch-literals runs its one test, whole" "${LAUNCH[@]}"
 rec_has "fmt gets the named go file relative to pfm" golangci-lint fmt --diff internal/a/a.go
@@ -190,7 +202,22 @@ reset; rule golangci-lint fmt 3
 run "$R" "$A"
 out_has "a formatter that exits non-zero is FAIL fmt" "FAIL fmt"
 
-# --- typecheck: the whole module, on every selection --------------------------------------------------------
+# --- typecheck: the named packages and their direct importers ----------------------------------------------
+reset; rule go ' list ' 0 'example.test/pfm\t\nexample.test/pfm/internal/a\tfmt \nexample.test/pfm/internal/c\tfmt example.test/pfm/internal/a \nexample.test/pfm/internal/d\t example.test/pfm/internal/a\nexample.test/pfm/cmd/x\tos  example.test/pfm/internal/b\nexample.test/pfm/internal/e\tos example.test/pfm/internal/c '
+run "$R" "$A" pfm/internal/b/b.go
+rec_has "typecheck vets the named packages, then every direct importer (imports, test imports)" go -C pfm vet ./internal/a ./internal/b ./internal/c ./internal/d ./cmd/x
+rec_has "lint-new gets every named package" make -C pfm --no-print-directory lint-new 'LINT_PKGS=./internal/a ./internal/b'
+rule go ' vet ' 1 'internal/c/c.go:5:25: undefined: a.F'
+run "$R" "$A"
+expect "a break in an importer nobody named is FAIL typecheck" 1 "FAIL typecheck"
+reset; rule go ' list ' 1 'go: pattern ./...: boom'
+run "$R" "$A"
+expect "a failed go list is FAIL typecheck" 1 "FAIL typecheck"
+rec_lacks "a failed go list vets nothing" "go -C pfm vet"
+LOG="$(sed -n 's/^log: //p' <<<"$OUT")"
+if [ -f "$LOG" ] && grep -q 'boom' "$LOG"; then ok "a failed go list's cause is in the log"; else bad "a failed go list's cause is in the log" "$LOG"; fi
+
+# --- typecheck: the whole module when no .go file is named ---------------------------------------------------
 reset; rule go ' vet ' 1 'internal/b/b.go:5:25: undefined: a.F'
 run "$R" "$A"
 out_has "a go vet failure anywhere is FAIL typecheck" "FAIL typecheck"
@@ -312,6 +339,43 @@ reset; rule dev.sh 'iso run' 4 'PASS fmt'
 run "$R" "$A"
 expect "a PASS line then a non-zero fence exit is a FAIL fence" 1 "FAIL fence (dev.sh iso run exited 4 after 1 check line(s) — see the log)"
 reset
+
+# --- the host lock: one fence run at a time --------------------------------------------------------------------
+hold_lock() { # hold_lock <tool>: holds $LOCK in the background until $T/gate is gone; touches $T/held once held
+  rm -f "$T/held"; touch "$T/gate"; mkdir -p "${LOCK%/*}"
+  if [ "$1" = flock ]; then
+    flock "$LOCK" bash -c 'touch "$1"; while [ -e "$2" ]; do sleep 0.1; done' _ "$T/held" "$T/gate" &
+  else
+    perl -MFcntl=:flock -e 'open(my $fh, ">", $ARGV[0]) or die "$!"; flock($fh, LOCK_EX) or die "$!";
+      open(my $h, ">", $ARGV[1]) or die "$!"; close $h; select(undef, undef, undef, 0.1) while -e $ARGV[2]' "$LOCK" "$T/held" "$T/gate" &
+  fi
+  HOLDER=$!
+  for _ in $(seq 100); do [ -e "$T/held" ] && return 0; sleep 0.1; done
+  echo "hold_lock $1: the holder never took $LOCK" >&2
+}
+reset
+for tool in flock perl; do
+  if ! command -v "$tool" >/dev/null 2>&1; then echo "skip: no $tool on this host — the $tool lock path is unproven here"; continue; fi
+  [ "$tool" = flock ] || rm -f "$BIN/flock" # the SUT takes flock first: unlink it to exercise perl
+  hold_lock "$tool"
+  : >"$REC"; rm -f "$T/lockout" "$T/lockrc"
+  ( cd "$R" && env -u PFM_DEV_FENCE PATH="$BIN" REC="$REC" RULES="$RULES" STUBLIB="$STUBLIB" \
+      "$R/.claude/scripts/check-pfm.sh" "$A" >"$T/lockout" 2>&1; echo $? >"$T/lockrc" ) &
+  waiter=$!
+  for _ in $(seq 100); do grep -qxF -- "$WAITING" "$T/lockout" 2>/dev/null && break; sleep 0.1; done
+  sleep 0.5
+  if grep -qxF -- "$WAITING" "$T/lockout"; then ok "$tool: a run behind a held lock says it waits"; else bad "$tool: a run behind a held lock says it waits" "$(cat "$T/lockout")"; fi
+  if grep -q '^dev.sh ' "$REC"; then bad "$tool: a run behind a held lock never reaches the fence" "$(cat "$REC")"; else ok "$tool: a run behind a held lock never reaches the fence"; fi
+  rm -f "$T/gate"; wait "$HOLDER" || true; wait "$waiter" || true
+  if [ "$(cat "$T/lockrc" 2>/dev/null)" = 0 ] && grep -q '^dev.sh iso run ' "$REC"; then ok "$tool: the waiting run reaches the fence once the lock is free"; else bad "$tool: the waiting run reaches the fence once the lock is free" "rc=$(cat "$T/lockrc" 2>/dev/null) $(cat "$T/lockout")"; fi
+  [ "$tool" = flock ] || { p="$(command -v flock 2>/dev/null)" && ln -sf "$p" "$BIN/flock"; } || true
+done
+moved=()
+for t in flock perl; do if [ -e "$BIN/$t" ]; then mv "$BIN/$t" "$BIN/.off-$t"; moved+=("$t"); fi; done
+run "$R" "$A"
+expect "no flock or perl on PATH is a FAIL fence line" 1 "FAIL fence (the host lock $LOCK could not be taken, exit 3)"
+rec_lacks "no lock tool never reaches the fence" dev.sh
+for t in "${moved[@]}"; do mv "$BIN/.off-$t" "$BIN/$t"; done
 
 # --- fence mode -------------------------------------------------------------------------------------------------
 run_fence "$A"

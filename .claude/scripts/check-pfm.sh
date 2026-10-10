@@ -2,15 +2,18 @@
 # check-pfm.sh — pfm's static-check command: name the files you changed, run it once at the end.
 #   check-pfm.sh <file>...
 # The pinned Go tools live in the fence image, not on the host: on the host this resolves the files
-# (unit-path.sh; a bad one is a `FAIL path` line), re-runs itself in one fence container
-# (`dev.sh iso run`, PFM_DEV_FENCE set there), prints that run's PASS/FAIL/SKIP lines and the log
+# (unit-path.sh; a bad one is a `FAIL path` line), takes the host lock
+# /tmp/{project}/check-pfm/fence.lock (one run in the fence at a time across every worktree; a run
+# that waits says so on stderr), re-runs itself in one fence container (`dev.sh iso run`,
+# PFM_DEV_FENCE set there), prints that run's PASS/FAIL/SKIP lines and the log
 # path /tmp/{project}/check-pfm/{UTC timestamp}-{pid}.log. In the fence it checks, offline:
 # install (`go mod download` from the module cache alone — a code error in the tree cannot trip it;
 # its output goes to the log), then every one of: fmt (golangci-lint fmt --diff on the named .go
 # files; the formatter is the pinned one `infra/fence/tools.sh --print-bin` names, else the one on
-# PATH), typecheck (`go vet ./...` over the whole pfm module — it type-checks every package and its
-# tests, so a change that breaks a file nobody named, or a deleted .go file, reads FAIL; it runs on
-# every selection, a deletion-only one included), lint-new (make lint-new over the named .go files:
+# PATH), typecheck (`go vet` over the named .go files' packages plus every module package importing
+# one of them directly, test imports included — so an API change that breaks an importer nobody named
+# reads FAIL; with no named .go file, a deletion-only selection included, `go vet ./...` over the
+# whole module), lint-new (make lint-new LINT_PKGS={the named .go files' packages}:
 # FAIL when a lint finding line names one of them, or when any finding line on ANY file ends
 # `(typecheck)`; lint findings on other files are burn-down, listed in the log, a PASS; a non-zero
 # exit with no finding line at all is a tool error, FAIL; SKIP when no .go file is named), arch
@@ -21,7 +24,9 @@
 # When the fence call dies before any check ran, only then is docker probed to name why.
 # BROKEN STATE: a missing unit-path.sh or dev.sh errors on source/exec; a fence that never starts
 # prints a `FAIL fence (...)` line naming the cause (never a PASS) and exits 1; a fence call that
-# dies mid-run or prints no check line is a FAIL fence line too.
+# dies mid-run or prints no check line is a FAIL fence line too; a host lock that cannot be taken
+# (no flock or perl, an unopenable lock file) is a FAIL fence line before any fence call; a go list
+# that fails is FAIL typecheck with its output, never a vet of the named packages alone.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 usage() { echo 'Name the files you changed.' >&2; exit 2; }
@@ -43,6 +48,27 @@ if [ -z "${PFM_DEV_FENCE:-}" ]; then
   if [ "${#files[@]}" = 0 ] && [ "$path_rc" != 0 ]; then exit 1; fi
   cmd="$(printf '%q ' ./.claude/scripts/check-pfm.sh "${files[@]}")"
   unit_log check-pfm || { echo "check-pfm.sh: the log directory could not be created" >&2; exit 1; }
+  # One fence run at a time across every worktree of this repository: the lock sits beside the logs,
+  # under the main checkout's /tmp/{project}; the fence call inherits fd 9, so the lock lasts as long
+  # as the run and the kernel drops it when the last holder exits — a killed run never leaves it held.
+  lock="${UNIT_LOG%/*}/fence.lock"
+  exec 9>"$lock" || { echo "check-pfm.sh: the lock file $lock could not be opened" >&2; exit 1; }
+  fence_lock() { # fence_lock <try|wait>: flock fd 9; 1 = held by another run, other non-zero = no lock
+    if command -v flock >/dev/null 2>&1; then
+      if [ "$1" = try ]; then flock -n 9; else flock 9; fi
+    elif command -v perl >/dev/null 2>&1; then
+      perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or die "fd 9: $!\n";
+        flock($fh, LOCK_EX | ($ARGV[0] eq "try" ? LOCK_NB : 0)) and exit 0; $!{EWOULDBLOCK} ? exit 1 : die "flock: $!\n"' "$1"
+    else
+      echo "check-pfm.sh: neither flock nor perl is on PATH to take $lock" >&2; return 3
+    fi
+  }
+  lrc=0; fence_lock try || lrc=$?
+  if [ "$lrc" = 1 ]; then
+    echo "check-pfm.sh: waiting for another check-pfm.sh run to leave the fence ($lock)" >&2
+    lrc=0; fence_lock wait || lrc=$?
+  fi
+  if [ "$lrc" != 0 ]; then echo "FAIL fence (the host lock $lock could not be taken, exit $lrc)"; echo "log: $UNIT_LOG"; exit 1; fi
   rc=0
   "$DEV" iso run "$cmd" >"$UNIT_LOG" 2>&1 || rc=$?
   lines="$(grep -E '^(PASS|FAIL|SKIP) ' "$UNIT_LOG" || true)"
@@ -113,15 +139,50 @@ tools.sh --print-bin exited $tools_rc: $tools_out"; fi
     verdict fmt "$rc" "$out"
   fi
 fi
-# The whole module, on every selection: it compiles what nobody named, and what a deletion left behind.
-check typecheck go -C pfm vet ./...
+# The named .go files' packages, pfm-relative (./internal/a, . for the module root).
+pkgs=()
+for g in "${gofiles[@]}"; do
+  d="$(dirname "$g")"; if [ "$d" = . ]; then d=.; else d="./$d"; fi
+  case " ${pkgs[*]} " in *" $d "*) ;; *) pkgs+=("$d") ;; esac
+done
+# typecheck: with no named .go file (a deletion or a non-Go file), the whole module — it compiles what
+# a deletion left behind. Otherwise the named packages plus every module package importing one of them
+# directly (test imports too), so an API change that breaks an unnamed importer still reads FAIL.
+if [ "${#pkgs[@]}" = 0 ]; then
+  check typecheck go -C pfm vet ./...
+else
+  mod="$(sed -n 's/^module[[:space:]]*//p' pfm/go.mod)"
+  lrc=0; listed=
+  if [ -z "$mod" ]; then
+    lrc=1; listed='pfm/go.mod names no module path'
+  else
+    listed="$(go -C pfm list -e -f '{{.ImportPath}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>&1)" || lrc=$?
+  fi
+  if [ "$lrc" != 0 ]; then
+    verdict typecheck "$lrc" "go list (the importers of the named packages) failed — no package was vetted:
+$listed"
+  else
+    namedips=" "; for p in "${pkgs[@]}"; do if [ "$p" = . ]; then namedips+="$mod "; else namedips+="$mod/${p#./} "; fi; done
+    vetpkgs=("${pkgs[@]}")
+    while IFS=$'\t' read -r ip imps; do
+      for i in $imps; do
+        case "$namedips" in *" $i "*)
+          if [ "$ip" = "$mod" ]; then p=.; else p="./${ip#"$mod"/}"; fi
+          case " ${vetpkgs[*]} " in *" $p "*) ;; *) vetpkgs+=("$p") ;; esac
+          break ;;
+        esac
+      done
+    done <<<"$listed"
+    check typecheck go -C pfm vet "${vetpkgs[@]}"
+  fi
+fi
 if [ "${#gofiles[@]}" = 0 ]; then
   echo 'SKIP lint-new (no named file it applies to)'
 else
   # golangci-lint prints `path/to/file.go:LINE:COL: message (linter)`, relative to pfm (its cwd under
   # make -C pfm); the repository-relative and absolute spellings are accepted too.
   rc=0
-  out="$(make -C pfm --no-print-directory lint-new 2>&1)" || rc=$?
+  out="$(make -C pfm --no-print-directory lint-new "LINT_PKGS=${pkgs[*]}" 2>&1)" || rc=$?
   hit=0; seen=0; burn=()
   while IFS= read -r l; do
     [[ "$l" =~ ^([^[:space:]:]+):[0-9]+(:[0-9]+)?:\  ]] || continue

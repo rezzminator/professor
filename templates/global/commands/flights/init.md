@@ -56,12 +56,12 @@ Per unit, a testing manual where flights looks for it: `.claude/commands/{unit}-
 `{scripts}/check-{unit}.sh <file>...`:
 
 - No argument, a flag or an empty argument: exit 2 with the usage line `Name the files you changed.`
-- The unit's installed tools only, never a runner that fetches a tool. Not installed per the map's offline check: only the line `FAIL install ({unit} has no installed dependencies — run: {install command})`, no check run, exit 1; a unit with `no dependencies` never prints it.
+- The unit's installed tools only, never a runner that fetches a tool. Not installed per the map's offline check: only the line `GAP install ({unit} is missing: {each missing tool} — no check ran, this is a missing tool and not a failed check; run: {install command})`, no check run, exit 3; a unit with `no dependencies` never prints it.
 - File-scoped checks (format check, lint) on the named files their tool applies to; one that no named file applies to prints exactly `SKIP {check} (no named file it applies to)` in every unit, never PASS. Unit-wide checks (type check, an architecture ratchet, any other static check the testing manual requires for a builder's change) whole. A check that builds, serves or reaches beyond the machine stays out, named under GAPS as a landing check the owner places; a check another listed check already runs is listed once.
 - A check that needs a running service: only after it fails, a probe names on its FAIL line the missing service and the command that starts it in the current checkout, or that the probe itself failed and why, never the service as up; config values never interpolate into a shell string.
 - A check that rewrites the tree to compare (regenerate-and-compare) holds a lock keyed to the checkout path, waits a bounded time then prints `FAIL {check}` naming the holder, is freed when its holder dies, and leaves the tree as it found it.
 - Every check runs even after one fails, one `PASS {check}`, `FAIL {check}` or `SKIP {check}` line each; output to `{tmp}/check-{unit}/{UTC timestamp}-{pid}.log`, its path printed.
-- Exit 1 when any line is FAIL, else 0. No change to the unit's package manifest.
+- Exit 1 when any line is FAIL, else 3 on the GAP line, else 0. No change to the unit's package manifest.
 
 ## 6 — Tests for both
 
@@ -89,7 +89,7 @@ The smoke cell holds each command's verdict lines and exit code on one line, a `
 
 ```text
 | unit | test command | check command | manual | smoke |
-| {unit} | {path} created|aligned|ok | {path} created|aligned|ok | {path} created|aligned|ok | test exit {code} · check {its PASS, FAIL and SKIP lines} exit {code} |
+| {unit} | {path} created|aligned|ok | {path} created|aligned|ok | {path} created|aligned|ok | test exit {code} · check {its GAP, PASS, FAIL and SKIP lines} exit {code} |
 RESOLVER {path} created|aligned|ok
 PROJECT MAP {path} created|aligned|ok
 ENGINE COPIES regenerated|none

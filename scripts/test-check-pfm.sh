@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Exercise .claude/scripts/check-pfm.sh — pfm's static-check command — against a fake repository:
-# its usage text, the resolver's FAIL path lines, the offline install check (module cache only, go's
-# output in the log), the SKIP wording, the files fmt receives and the formatter it picks (the pinned
+# its usage text, the resolver's FAIL path lines, the install gap (one `GAP install (pfm is missing: …)`
+# line naming every missing tool — go, make, golangci-lint when a .go file is named, the Go modules go's
+# offline download cannot find — no check run, exit 3, go's output in the log; any other module-download
+# failure a FAIL install, exit 1; the host passes the GAP line through with exit 3), the SKIP wording, the files fmt receives and the formatter it picks (the pinned
 # one tools.sh names, else PATH), typecheck's scope (go vet over the named packages and their direct
 # importers from go list; the whole module when no .go file is named, a deletion-only selection
 # included; a failed go list is FAIL typecheck), lint-new over the named packages and scoped to the
@@ -84,7 +86,8 @@ expect() { # expect <name> <rc> <line that must be in OUT>
 rc_is() { if [ "$RC" = "$2" ]; then ok "$1"; else bad "$1" "rc=$RC want $2" "$OUT"; fi; }
 out_has() { if grep -qxF -- "$2" <<<"$OUT"; then ok "$1"; else bad "$1" "no output line: $2" "$OUT"; fi; }
 out_lacks() { if grep -qxF -- "$2" <<<"$OUT"; then bad "$1" "unexpected output line: $2" "$OUT"; else ok "$1"; fi; }
-verdicts() { grep -E '^(PASS|FAIL|SKIP) ' <<<"$OUT" || true; }
+verdicts() { grep -E '^(PASS|FAIL|SKIP|GAP) ' <<<"$OUT" || true; }
+no_gap() { if grep -q '^GAP install ' <<<"$OUT"; then bad "$1" "a GAP install line" "$OUT"; else ok "$1"; fi; }
 rec_has() { # rec_has <name> <tool> <arg>...
   local name="$1" want
   shift; want="$1$(printf ' %q' "${@:2}")"
@@ -104,7 +107,8 @@ LOCK="/tmp/${NAME#.}/check-pfm/fence.lock"
 WAITING="check-pfm.sh: waiting for another check-pfm.sh run to leave the fence ($LOCK)"
 LAUNCH=(go -C pfm test ./internal/claudelaunch/ -run TestNoLaunchLiteralOutsideRegistry -count=1)
 INSTALL=(go -C pfm mod download)
-INSTALL_FAIL='FAIL install (pfm has no installed dependencies — run: .claude/scripts/dev.sh iso install pfm)'
+gap() { printf 'GAP install (pfm is missing: %s — no check ran, this is a missing tool and not a failed check; run: .claude/scripts/dev.sh iso install pfm, and make -C pfm tools for golangci-lint)' "$1"; }
+INSTALL_FAIL='FAIL install (go mod download failed offline and named no missing module — see the log)'
 
 # --- the usage rule -------------------------------------------------------------------------------
 run "$R"
@@ -156,8 +160,12 @@ rec_has "no pinned formatter in the printed dir: fmt falls back to PATH" golangc
 rm -f "$BIN/golangci-lint"
 : >"$REC"
 OUT="$(cd "$R" && env PFM_DEV_FENCE=1 PINBIN="$R/nowhere" PATH="$BIN" REC="$REC" RULES="$RULES" STUBLIB="$STUBLIB" "$R/.claude/scripts/check-pfm.sh" "$A" 2>&1)" && RC=0 || RC=$?
-out_has "no formatter anywhere is FAIL fmt, never a PASS" "FAIL fmt"
-out_has "no formatter anywhere names the missing toolchain" "  | LINT: TOOLCHAIN-MISSING — run 'make tools' (infra/fence/tools.env)"
+expect "no formatter anywhere with a .go file named is the GAP line naming golangci-lint, exit 3" 3 "$(gap golangci-lint)"
+if [ "$(verdicts)" = "$(gap golangci-lint)" ]; then ok "a missing formatter: the GAP line is the only verdict line"; else bad "a missing formatter: the GAP line is the only verdict line" "$(verdicts)"; fi
+rec_lacks "a missing formatter runs no make check" make
+OUT="$(cd "$R" && env PFM_DEV_FENCE=1 PINBIN="$R/nowhere" PATH="$BIN" REC="$REC" RULES="$RULES" STUBLIB="$STUBLIB" "$R/.claude/scripts/check-pfm.sh" pfm/docs/x.md 2>&1)" && RC=0 || RC=$?
+rc_is "no formatter and no .go file named: no gap, the checks run" 0
+no_gap "no formatter and no .go file named prints no GAP line"
 ln -s .stub "$BIN/golangci-lint"
 rm -rf "$R/infra" "$R/pinbin"
 
@@ -233,6 +241,7 @@ out_has "a go vet failure anywhere is FAIL typecheck" "FAIL typecheck"
 rc_is "a FAIL typecheck exits 1" 1
 for c in fmt lint-new arch launch-literals; do out_has "after typecheck fails, $c still runs" "PASS $c"; done
 out_lacks "a tree code error is no install FAIL" "$INSTALL_FAIL"
+no_gap "a tree code error is no install GAP"
 run "$R" pfm/docs/x.md
 out_has "a failing typecheck is FAIL even when no go file is named" "FAIL typecheck"
 run "$R" pfm/internal/a/gone.go
@@ -311,20 +320,46 @@ out_has "a failing launch test prints FAIL launch-literals" "FAIL launch-literal
 out_has "after launch-literals fails, arch still runs" "PASS arch"
 reset
 
-# --- the offline install check ----------------------------------------------------------------------------
+# --- the install gap: a missing tool is one GAP line, exit 3, never a failed check ---------------------------
 rule go 'mod download' 1 'go: example.test/dep@v1.0.0: module lookup disabled by GOPROXY=off'
 run "$R" "$A"
-expect "an uninstalled unit prints the install FAIL line, exit 1" 1 "$INSTALL_FAIL"
-if [ "$(verdicts)" = "$INSTALL_FAIL" ]; then ok "the install FAIL line is the only verdict line"; else bad "the install FAIL line is the only verdict line" "$(verdicts)"; fi
+expect "modules go cannot find offline: the host prints the GAP line naming them, exit 3" 3 "$(gap 'Go modules')"
+if [ "$(verdicts)" = "$(gap 'Go modules')" ]; then ok "the GAP line is the only verdict line"; else bad "the GAP line is the only verdict line" "$(verdicts)"; fi
+out_lacks "a gap is never a FAIL fence line" "FAIL fence (dev.sh iso run exited 3 before any check ran — see the log)"
 LOG="$(sed -n 's/^log: //p' <<<"$OUT")"
-if [ -f "$LOG" ] && grep -q 'module lookup disabled' "$LOG"; then ok "go's own output is in the log after an install FAIL"; else bad "go's own output is in the log after an install FAIL" "$LOG"; fi
+if [ -f "$LOG" ] && grep -q 'module lookup disabled' "$LOG"; then ok "go's own output is in the log after an install GAP"; else bad "go's own output is in the log after an install GAP" "$LOG"; fi
+rec_lacks "no make check runs after an install GAP" make
+rec_lacks "no formatter runs after an install GAP" golangci-lint
+if [ "$(grep -c '^go ' "$REC")" = 1 ]; then ok "no go check runs after an install GAP"; else bad "no go check runs after an install GAP" "$(cat "$REC")"; fi
+run "$R" pfm/internal/a/nope.go "$A"
+expect "a FAIL path line beside a GAP exits 1" 1 "FAIL path pfm/internal/a/nope.go (no such file in pfm)"
+out_has "a FAIL path line beside a GAP still prints the GAP line" "$(gap 'Go modules')"
+reset
+rule go 'mod download' 1 'go: errors parsing go.mod: pfm/go.mod:3: unknown directive: bogus'
+run "$R" "$A"
+expect "any other offline download failure is FAIL install, exit 1" 1 "$INSTALL_FAIL"
+no_gap "a broken go.mod is never a gap"
 rec_lacks "no make check runs after an install FAIL" make
-rec_lacks "no formatter runs after an install FAIL" golangci-lint
-if [ "$(grep -c '^go ' "$REC")" = 1 ]; then ok "no go check runs after an install FAIL"; else bad "no go check runs after an install FAIL" "$(cat "$REC")"; fi
+reset
+mv "$BIN/go" "$BIN/.off-go"; mv "$BIN/make" "$BIN/.off-make"
+run "$R" "$A"
+expect "no go and no make: one GAP line naming both, exit 3" 3 "$(gap 'go, make')"
+rec_lacks "a missing go runs no check" golangci-lint
+rm -f "$BIN/golangci-lint"
+run "$R" "$A"
+expect "every tool missing: one GAP line naming each, exit 3" 3 "$(gap 'go, make, golangci-lint')"
+ln -s .stub "$BIN/golangci-lint"; mv "$BIN/.off-go" "$BIN/go"
+rule go 'mod download' 1 'go: example.test/dep@v1.0.0: module lookup disabled by GOPROXY=off'
+run "$R" "$A"
+expect "no make and modules go cannot find: one GAP line naming both, exit 3" 3 "$(gap 'make, Go modules')"
+mv "$BIN/.off-make" "$BIN/make"
+run_fence "$A"
+expect "fence mode prints the GAP line itself, exit 3" 3 "$(gap 'Go modules')"
 reset
 rule go ' vet ' 1 'pfm/x.go:1:1: undefined: y'
 run "$R" "$A"
 out_lacks "a code error in the tree is no install FAIL" "$INSTALL_FAIL"
+no_gap "a code error in the tree is no install GAP"
 out_has "a code error in the tree is FAIL typecheck" "FAIL typecheck"
 out_has "a code error in the tree still runs every other check" "PASS arch"
 reset
@@ -347,6 +382,9 @@ out_lacks "a fence run with no check line is never a PASS" "PASS fmt"
 reset; rule dev.sh 'iso run' 4 'PASS fmt'
 run "$R" "$A"
 expect "a PASS line then a non-zero fence exit is a FAIL fence" 1 "FAIL fence (dev.sh iso run exited 4 after 1 check line(s) — see the log)"
+reset; rule dev.sh 'iso run' 3 'PASS fmt'
+run "$R" "$A"
+expect "a fence exit 3 with no GAP line is a FAIL fence, never a gap" 1 "FAIL fence (dev.sh iso run exited 3 after 1 check line(s) — see the log)"
 reset
 
 # --- the host lock: one fence run at a time --------------------------------------------------------------------

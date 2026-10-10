@@ -138,7 +138,7 @@ func deriveClaude(catalog *Catalog) []pricing.Row {
 	for _, model := range catalog.Models {
 		var variants []claudeVariant
 		for _, table := range model.Tables {
-			if strings.ToLower(plain(table.Heading)) != "model pricing" {
+			if strings.ToLower(plain(table.Heading)) != claudePriceTable {
 				continue
 			}
 			headers := headersOf(table)

@@ -156,10 +156,17 @@ func (s *Fetcher) fetchSource(ctx context.Context, sourceURL string) (Source, er
 	}, nil
 }
 
+// claudePriceTable is the Claude page's heading whose table alone prices a
+// model; every other table carries modifiers, overheads or other tariffs.
+const claudePriceTable = "model pricing"
+
 var (
 	linkPattern       = regexp.MustCompile(`\[([^]]+)\]\([^)]*\)`)
 	tagPattern        = regexp.MustCompile(`<[^>]*>`)
 	claudeNamePattern = regexp.MustCompile(`(?i)claude\s+[a-z]+(?:\s+\d+(?:\.\d+)?)?`)
+	// generationPattern is a whole label naming a Claude generation range,
+	// "Claude 4.6 and earlier models": it names no model.
+	generationPattern = regexp.MustCompile(`(?i)^claude\s+\d+(?:\.\d+)?\s+and\s+(?:earlier|later)\s+models$`)
 )
 
 func parseCatalog(provider string, source Source) (Catalog, error) {
@@ -224,9 +231,16 @@ func parseCatalog(provider string, source Source) (Catalog, error) {
 			table.Rows = append(table.Rows, row)
 			if column >= 0 {
 				ids := publishedIDs(provider, cells[column])
-				if len(ids) == 0 {
+				if len(ids) == 0 && !generationGroup(provider, cells[column]) {
 					return Catalog{}, fmt.Errorf(
 						"line %d: unsupported model label %q; catalog incomplete",
+						i+1,
+						cells[column],
+					)
+				}
+				if len(ids) == 0 && strings.EqualFold(plain(heading), claudePriceTable) {
+					return Catalog{}, fmt.Errorf(
+						"line %d: group label %q in the Model pricing table names no model; catalog incomplete",
 						i+1,
 						cells[column],
 					)
@@ -258,6 +272,16 @@ func parseCatalog(provider string, source Source) (Catalog, error) {
 	}
 	catalog.PageContext = strings.Join(contextLines, "\n")
 	return catalog, nil
+}
+
+// generationGroup reports a Claude row whose whole label is a generation range
+// ("Claude 4.6 and earlier models", as the Bash tool table publishes its token
+// overhead): the row stays in its table and is attributed to no model.
+// parseCatalog refuses one in the Model pricing table, where it would price
+// models the page never names.
+func generationGroup(provider, label string) bool {
+	return provider == providerAnthropic &&
+		generationPattern.MatchString(plain(linkPattern.ReplaceAllString(label, "$1")))
 }
 
 func publishedIDs(provider, label string) []string {

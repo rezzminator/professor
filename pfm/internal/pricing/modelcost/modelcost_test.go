@@ -5,8 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 type modelCostTransport func(*http.Request) (*http.Response, error)
@@ -142,5 +146,134 @@ func TestFetchErrors(t *testing.T) {
 	if _, err := pagesFetcher(label, openAIPage, 200, nil).Fetch(context.Background()); err == nil ||
 		!strings.Contains(err.Error(), "model label") {
 		t.Fatalf("Fetch error = %v, want the unsupported model label", err)
+	}
+}
+
+// publishedPages are both official pricing pages exactly as they were served
+// on 2026-10-11. The Claude page's Bash tool table prices its token overhead
+// per generation range: "Claude 4.7 and later models and Claude Mythos
+// Preview" and "Claude 4.6 and earlier models".
+func publishedPages(t *testing.T) (claude, openai string) {
+	t.Helper()
+	pages := make([]string, 2)
+	for i, name := range []string{"testdata/claude-pricing.md", "testdata/openai-pricing.md"} {
+		content, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		pages[i] = string(content)
+	}
+	return pages[0], pages[1]
+}
+
+// The first cell of the Bash tool table's generation-range row and of the
+// Model pricing table's Opus 4.6 row, each the first such cell on the page.
+const (
+	bashToolGroupRow = "| Claude 4.6 and earlier models "
+	opusRow          = "| Claude Opus 4.6 "
+)
+
+// TestGenerationGroupRows: a generation-range row ("Claude 4.6 and earlier
+// models") outside the Model pricing table names no model: the catalog keeps
+// it in its table and attributes it to no model, and every price row derives
+// as the page publishes it. Any other label naming no model, and a generation
+// range inside the Model pricing table, still fail the catalog.
+func TestGenerationGroupRows(t *testing.T) {
+	claude, openai := publishedPages(t)
+	f64 := func(v float64) *float64 { return &v }
+	t.Run("the published pages refresh", func(t *testing.T) {
+		catalogs, err := pagesFetcher(claude, openai, http.StatusOK, nil).Fetch(context.Background())
+		if err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		var bash *Table
+		for i, table := range catalogs[0].Tables {
+			if table.Heading == "Bash tool" {
+				bash = &catalogs[0].Tables[i]
+			}
+		}
+		if bash == nil || len(bash.Rows) != 2 || bash.Rows[1][0].Text != "Claude 4.6 and earlier models" ||
+			bash.Rows[1][1].Text != "244 tokens" {
+			t.Fatalf("Bash tool table = %+v, want both generation rows kept", bash)
+		}
+		for _, model := range catalogs[0].Models {
+			for _, table := range model.Tables {
+				if table.Heading == "Bash tool" && table.Rows[0][0].Text == "Claude 4.6 and earlier models" {
+					t.Fatalf("model %s holds the generation-range row", model.ID)
+				}
+			}
+		}
+		prices, err := Derive(catalogs, "2026-10-11T00:00:00Z")
+		if err != nil {
+			t.Fatalf("Derive: %v", err)
+		}
+		claudeRows := map[string]pricing.Row{}
+		for _, row := range prices.Rows {
+			if row.Engine == pricing.EngineClaude {
+				claudeRows[row.Key] = row
+			}
+		}
+		keys := []string{
+			"claude-fable-5", "claude-fable-5-1", "claude-haiku-3-5", "claude-haiku-4-5", "claude-haiku-5-5",
+			"claude-mythos-5", "claude-mythos-5-1", "claude-opus-4", "claude-opus-4-1", "claude-opus-4-5",
+			"claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5",
+			"claude-sonnet-4", "claude-sonnet-4-5", "claude-sonnet-4-6", "claude-sonnet-5", "claude-sonnet-5-5",
+		}
+		if len(claudeRows) != len(keys) {
+			t.Fatalf("claude rows = %d, want %d: %v", len(claudeRows), len(keys), claudeRows)
+		}
+		for _, key := range keys {
+			if _, ok := claudeRows[key]; !ok {
+				t.Fatalf("no derived row %s", key)
+			}
+		}
+		for key, want := range map[string]pricing.Rates{
+			"claude-opus-4-6":   {In: f64(5), Out: f64(25), Hit: f64(0.5), W5m: f64(6.25), W1h: f64(10)},
+			"claude-sonnet-4-6": {In: f64(3), Out: f64(15), Hit: f64(0.3), W5m: f64(3.75), W1h: f64(6)},
+			"claude-sonnet-5":   {In: f64(2), Out: f64(10), Hit: f64(0.2), W5m: f64(2.5), W1h: f64(4)},
+		} {
+			if !reflect.DeepEqual(claudeRows[key].Rates, want) {
+				t.Fatalf("%s rates = %+v, want %+v", key, claudeRows[key].Rates, want)
+			}
+		}
+		if long := claudeRows["claude-haiku-5-5"].Long; long == nil || long.Above != 100000 || *long.In != 0.5 {
+			t.Fatalf("claude-haiku-5-5 long tier = %+v, want above 100000 at $0.50 in", long)
+		}
+	})
+	for _, tc := range []struct{ name, label string }{
+		{"a bold generation range", "**Claude 4.6 and earlier models**"},
+		{"a later range of a whole generation", "Claude 5 and later models"},
+	} {
+		t.Run(tc.name+" refreshes", func(t *testing.T) {
+			page := strings.Replace(claude, bashToolGroupRow, "| "+tc.label+" ", 1)
+			if page == claude {
+				t.Fatal("the fixture edit matched nothing")
+			}
+			if _, err := pagesFetcher(page, openai, http.StatusOK, nil).Fetch(context.Background()); err != nil {
+				t.Fatalf("Fetch: %v", err)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, page, want string }{
+		{
+			"an unknown label still fails",
+			strings.Replace(claude, bashToolGroupRow, "| Unrecognized publisher label ", 1),
+			`unsupported model label "Unrecognized publisher label"; catalog incomplete`,
+		},
+		{
+			"a generation range in the Model pricing table fails",
+			strings.Replace(claude, opusRow, "| Claude 4.6 and earlier models ", 1),
+			`group label "Claude 4.6 and earlier models" in the Model pricing table names no model; catalog incomplete`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.page == claude {
+				t.Fatal("the fixture edit matched nothing")
+			}
+			if _, err := pagesFetcher(tc.page, openai, http.StatusOK, nil).Fetch(context.Background()); err == nil ||
+				!strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Fetch error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

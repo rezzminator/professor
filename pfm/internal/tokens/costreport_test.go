@@ -478,6 +478,63 @@ func TestCostLedgerHeldSetCountsTranscriptsOutsideTheWindow(t *testing.T) {
 	}
 }
 
+func TestCostLedgerHeldSetIncludesOldMtimeTranscripts(t *testing.T) {
+	root, ledgerDir := t.TempDir(), t.TempDir()
+	writeSample(t, root, ledgerDir, sessionOptions{ledger: true, stale: "a0000000000000001"})
+	file := filepath.Join(root, "-w-demo", ledgerSession, "subagents", "agent-a0000000000000001.jsonl")
+	old := ledgerNow.Add(-48 * time.Hour)
+	if err := os.Chtimes(file, old, old); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "audit.json")
+	code, stdout, stderr := ledgerAudit(t, root, ledgerDir, "--out", out)
+	if code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	if want := "side calls $0.15 (4 calls no transcript holds)"; !strings.Contains(stdout, want) {
+		t.Errorf("stdout lacks %q:\n%s", want, stdout)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Scan struct {
+			SkippedOld int `json:"skippedOld"`
+		} `json:"scan"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Scan.SkippedOld != 1 {
+		t.Errorf("skippedOld = %d, want 1", document.Scan.SkippedOld)
+	}
+}
+
+func TestLedgerTranscriptsRetainOwnershipRoot(t *testing.T) {
+	first, second, ledgerDir := t.TempDir(), t.TempDir(), t.TempDir()
+	writeSample(t, first, ledgerDir, sessionOptions{})
+	writeSample(t, second, ledgerDir, sessionOptions{})
+	meta := filepath.Join(second, "-w-demo", ledgerSession, "subagents", "agent-"+mainAgent+".meta.json")
+	writeTranscript(t, meta, `{"agentType":"stale-copy","parentAgentId":"wrong-parent"}`)
+	a, _, _ := testAuditor(t, "--root", first, "--root", second)
+	if err := a.collectRuns(); err != nil {
+		t.Fatal(err)
+	}
+	types, parents, problems := a.agentMeta(ledgerSession)
+	if len(problems) != 0 || types[mainAgent] != "general-purpose" || parents[mainAgent] != "" {
+		t.Fatalf(
+			"ledger metadata types=%v parents=%v problems=%v; want ownership-selected root",
+			types,
+			parents,
+			problems,
+		)
+	}
+	if a.scan.dupFiles == 0 {
+		t.Fatal("fixture did not exercise duplicate transcript ownership")
+	}
+}
+
 func TestCostLedgerAbsentIsOneLineAndNoSection(t *testing.T) {
 	root, ledgerDir := t.TempDir(), t.TempDir()
 	writeSample(t, root, ledgerDir, sessionOptions{})

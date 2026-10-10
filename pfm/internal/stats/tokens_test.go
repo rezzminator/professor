@@ -1,6 +1,12 @@
 package stats
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestApplyTokenRecordCountsEachResponseOnce(t *testing.T) {
 	for _, tc := range []struct {
@@ -56,6 +62,113 @@ func TestApplyTokenRecordCountsEachResponseOnce(t *testing.T) {
 					tc.wantKnownNow,
 				)
 			}
+		})
+	}
+}
+
+func TestApplyTokenRecordPreservesCodexSegments(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		totals []int64
+	}{
+		{"reset", []int64{1000, 1500, 100, 200, 200}},
+		{"reset to zero", []int64{1000, 1500, 0, 100, 200, 200}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var lines []string
+			for _, total := range tc.totals {
+				lines = append(lines, fmt.Sprintf(
+					`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":%d}}}}`,
+					total,
+				))
+			}
+			t.Run("direct", func(t *testing.T) {
+				entry := &tokenCacheEntry{}
+				for _, line := range lines {
+					if err := applyTokenRecord(entry, []byte(line)); err != nil {
+						t.Fatalf("applyTokenRecord: %v", err)
+					}
+				}
+				if entry.codexTokens != 1700 {
+					t.Fatalf("codexTokens = %d; want 1700", entry.codexTokens)
+				}
+			})
+			t.Run("appended sampling passes", func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "rollout.jsonl")
+				if err := os.WriteFile(path, []byte(strings.Join(lines[:2], "\n")+"\n"), 0o600); err != nil {
+					t.Fatalf("write rollout: %v", err)
+				}
+				sampler := &Sampler{tokenCache: make(map[string]*tokenCacheEntry)}
+				first, warnings := sampler.readTokenUsageLocked(path)
+				if len(warnings) != 0 || first.total != 1500 {
+					t.Fatalf("first sample = %+v, warnings %v; want 1500", first, warnings)
+				}
+				appendFile(t, path, strings.Join(lines[2:], "\n")+"\n")
+				second, warnings := sampler.readTokenUsageLocked(path)
+				if len(warnings) != 0 || second.total != 1700 {
+					t.Fatalf("second sample = %+v, warnings %v; want 1700", second, warnings)
+				}
+			})
+		})
+	}
+}
+
+func TestApplyTokenRecordUpdatesRepeatedResponseUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		identity string
+	}{
+		{"message id", `"message":{"id":"m1","usage":`},
+		{"request id", `"requestId":"r1","message":{"usage":`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := `{"type":"assistant",` + tc.identity + `{"input_tokens":100,"output_tokens":0}}}`
+			last := `{"type":"assistant",` + tc.identity + `{"input_tokens":100,"output_tokens":20}}}`
+			t.Run("direct", func(t *testing.T) {
+				entry := &tokenCacheEntry{}
+				lines := []string{first}
+				for i := 0; i < countedMessageRing; i++ {
+					lines = append(
+						lines,
+						fmt.Sprintf(`{"type":"assistant","message":{"id":"zero-%d","usage":{"input_tokens":0}}}`, i),
+					)
+				}
+				for _, line := range append(lines, last, last) {
+					if err := applyTokenRecord(entry, []byte(line)); err != nil {
+						t.Fatalf("applyTokenRecord: %v", err)
+					}
+				}
+				if entry.claudeTokens != 120 {
+					t.Fatalf("claudeTokens = %d; want 120", entry.claudeTokens)
+				}
+				for _, usage := range []string{`{"input_tokens":80}`, `{"input_tokens":0}`, `null`} {
+					if err := applyTokenRecord(
+						entry,
+						[]byte(`{"type":"assistant",`+tc.identity+usage+`}}`),
+					); err != nil {
+						t.Fatalf("apply revised usage %s: %v", usage, err)
+					}
+				}
+				if entry.claudeTokens != 0 || !entry.known {
+					t.Fatalf("revised claudeTokens = %d known %v; want 0 known", entry.claudeTokens, entry.known)
+				}
+			})
+			t.Run("appended sampling passes", func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "session.jsonl")
+				if err := os.WriteFile(path, []byte(first+"\n"), 0o600); err != nil {
+					t.Fatalf("write transcript: %v", err)
+				}
+				sampler := &Sampler{tokenCache: make(map[string]*tokenCacheEntry)}
+				initial, warnings := sampler.readTokenUsageLocked(path)
+				if len(warnings) != 0 || initial.total != 100 {
+					t.Fatalf("first sample = %+v, warnings %v; want 100", initial, warnings)
+				}
+				appendFile(t, path, last+"\n"+last+"\n")
+				updated, warnings := sampler.readTokenUsageLocked(path)
+				if len(warnings) != 0 || updated.total != 120 {
+					t.Fatalf("second sample = %+v, warnings %v; want 120", updated, warnings)
+				}
+			})
 		})
 	}
 }

@@ -101,6 +101,91 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 	}
 }
 
+func TestUpdateRetainsBackupAfterFailedBinaryRollback(t *testing.T) {
+	for _, phase := range []string{"success", "clean rollback", "binary rollback residue", "installer residue"} {
+		t.Run(phase, func(t *testing.T) {
+			repo := newUpdateGitFixture(t)
+			runtime := updateTestRuntime(t)
+			stubUpdatePipeline(t, runtime)
+			canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+			var stage string
+			updateApplyInstall = func(_ context.Context, candidate, _, _ string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+				stage = filepath.Dir(candidate)
+				if phase == "success" {
+					return nil
+				}
+				if phase == "binary rollback residue" {
+					if err := os.Remove(canonical); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(canonical, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(
+						filepath.Join(canonical, "obstruction"),
+						[]byte("keep\n"),
+						0o600,
+					); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return errors.New("injected install failure")
+			}
+			oldInstall, oldDoctor := updateRollbackInstall, updateRollbackDoctor
+			t.Cleanup(func() { updateRollbackInstall, updateRollbackDoctor = oldInstall, oldDoctor })
+			updateRollbackInstall = func(_ context.Context, previous, _, _ string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+				if got, err := os.ReadFile(previous); err != nil || string(got) != "old\n" {
+					t.Fatalf("previous installer binary=%q err=%v, want old", got, err)
+				}
+				if phase == "installer residue" {
+					return errors.New("injected previous install failure")
+				}
+				return nil
+			}
+			updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+				return doctorOutcome{}, nil
+			}
+			var stdout, stderr bytes.Buffer
+			wantCode := 5
+			if phase == "success" {
+				wantCode = 0
+			}
+			if code := Run(
+				[]string{"--repo", repo, "--root", t.TempDir()},
+				&stdout,
+				&stderr,
+				runtime,
+			); code != wantCode {
+				t.Fatalf("Run() code=%d, want %d; stderr=%q", code, wantCode, stderr.String())
+			}
+			if stage == "" {
+				t.Fatal("candidate installer did not receive the update stage")
+			}
+			if phase == "binary rollback residue" {
+				backup := filepath.Join(stage, "previous-0")
+				if got, err := os.ReadFile(backup); err != nil || string(got) != "old\n" {
+					t.Fatalf("retained backup=%q err=%v, want old binary bytes at %s", got, err, backup)
+				}
+				if !strings.Contains(stderr.String(), "rollback residue") ||
+					!strings.Contains(stderr.String(), backup) {
+					t.Fatalf("rollback failure=%q, want retained backup path %s", stderr.String(), backup)
+				}
+				return
+			}
+			if _, err := os.Stat(stage); !os.IsNotExist(err) {
+				t.Fatalf("stage cleanup=%v, want stage removed after %s", err, phase)
+			}
+			wantBinary := "old\n"
+			if phase == "success" {
+				wantBinary = "new\n"
+			}
+			if got, err := os.ReadFile(canonical); err != nil || string(got) != wantBinary {
+				t.Fatalf("installed binary=%q err=%v, want %q", got, err, wantBinary)
+			}
+		})
+	}
+}
+
 func TestUpdateRollbackJoinsStepFailures(t *testing.T) {
 	for _, step := range []string{"source", "install", "doctor spawn", "doctor verdict"} {
 		t.Run(step, func(t *testing.T) {

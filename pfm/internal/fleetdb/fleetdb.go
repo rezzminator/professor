@@ -7,6 +7,7 @@ package fleetdb
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -209,17 +210,51 @@ func (s *Store) Kill(ctx context.Context, id string, killedAt int64) error {
 	if s.db == nil {
 		return fmt.Errorf("record shared kill %q: %w", id, s.degraded)
 	}
-	if _, err := s.exec(ctx, `
-INSERT INTO hidden(uuid,hidden_at,at_payload) VALUES(?,?,NULL)
-ON CONFLICT(uuid) DO UPDATE SET
-  hidden_at=excluded.hidden_at,
-  at_payload=NULL`,
-		id,
-		killedAt,
-	); err != nil {
+	if _, err := s.exec(ctx, permanentKillSQL, id, killedAt, rand.Text()); err != nil {
 		return fmt.Errorf("record shared kill %q: %w", id, err)
 	}
 	return nil
+}
+
+const permanentKillSQL = `
+INSERT INTO hidden(uuid,hidden_at,at_payload,revision) VALUES(?,?,NULL,?)
+ON CONFLICT(uuid) DO UPDATE SET
+  hidden_at=excluded.hidden_at,
+  at_payload=NULL,
+  revision=excluded.revision || '-updated'
+RETURNING revision`
+
+// KillWithRevision returns a rollback identity only when this statement inserts
+// the row. An upsert of an existing kill gets a fresh revision but no rollback.
+func (s *Store) KillWithRevision(ctx context.Context, id string, killedAt int64) (string, error) {
+	if s.db == nil {
+		return "", fmt.Errorf("record shared kill %q: %w", id, s.degraded)
+	}
+	revision := rand.Text()
+	var written string
+	if err := s.queryRow(ctx, permanentKillSQL, id, killedAt, revision).Scan(&written); err != nil {
+		return "", fmt.Errorf("record shared kill %q: %w", id, err)
+	}
+	if written != revision {
+		return "", nil
+	}
+	return revision, nil
+}
+
+// UnkillIfRevision rolls back only the exact permanent kill write observed.
+func (s *Store) UnkillIfRevision(ctx context.Context, id, revision string) (bool, error) {
+	if s.db == nil {
+		return false, fmt.Errorf("roll back shared kill %q: %w", id, s.degraded)
+	}
+	result, err := s.exec(ctx, "DELETE FROM hidden WHERE uuid=? AND revision=? AND at_payload IS NULL", id, revision)
+	if err != nil {
+		return false, fmt.Errorf("roll back shared kill %q: %w", id, err)
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count rolled back shared kill %q: %w", id, err)
+	}
+	return removed == 1, nil
 }
 
 // KillUntilPrompt records the current prompt count for a /clear kill. A
@@ -234,8 +269,9 @@ func (s *Store) KillUntilPrompt(
 		return fmt.Errorf("record shared clear kill %q: %w", id, s.degraded)
 	}
 	if _, err := s.exec(ctx, `
-INSERT INTO hidden(uuid,hidden_at,at_payload) VALUES(?,?,?)
+INSERT INTO hidden(uuid,hidden_at,at_payload,revision) VALUES(?,?,?,lower(hex(randomblob(16))))
 ON CONFLICT(uuid) DO UPDATE SET
+  revision=CASE WHEN hidden.at_payload IS NULL THEN hidden.revision ELSE excluded.revision END,
   hidden_at=CASE WHEN hidden.at_payload IS NULL THEN hidden.hidden_at ELSE excluded.hidden_at END,
   at_payload=CASE
     WHEN hidden.at_payload IS NULL THEN NULL
@@ -276,7 +312,11 @@ func (s *Store) ReassertKill(ctx context.Context, id string) (bool, error) {
 	if s.db == nil {
 		return false, fmt.Errorf("reassert shared kill %q: %w", id, s.degraded)
 	}
-	result, err := s.exec(ctx, "UPDATE hidden SET at_payload=NULL WHERE uuid=?", id)
+	result, err := s.exec(
+		ctx,
+		"UPDATE hidden SET at_payload=NULL, revision=lower(hex(randomblob(16))) WHERE uuid=?",
+		id,
+	)
 	if err != nil {
 		return false, fmt.Errorf("reassert shared kill %q: %w", id, err)
 	}
@@ -424,6 +464,17 @@ INSERT OR IGNORE INTO children(kind,key,val,created_at) VALUES(?,?,?,?)`,
 		createdAt,
 	); err != nil {
 		return fmt.Errorf("record shared child: %w", err)
+	}
+	return nil
+}
+
+// ClearChild removes only the teammate that was actually reaped.
+func (s *Store) ClearChild(ctx context.Context, kind, key, value string) error {
+	if s.db == nil {
+		return fmt.Errorf("clear shared child %q: %w", value, s.degraded)
+	}
+	if _, err := s.exec(ctx, "DELETE FROM children WHERE kind=? AND key=? AND val=?", kind, key, value); err != nil {
+		return fmt.Errorf("clear shared %s child %q of %s: %w", kind, value, key, err)
 	}
 	return nil
 }

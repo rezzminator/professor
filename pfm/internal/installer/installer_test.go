@@ -674,6 +674,60 @@ func TestWireGlobalCommandsLinksFilesAndDirectories(t *testing.T) {
 	assertLink(t, filepath.Join(home, ".claude", "commands", "tools"), filepath.Join(source, "tools"))
 }
 
+func TestFutureCommandSourceIncludesTemplateGlobalCommands(t *testing.T) {
+	for _, test := range []struct {
+		entry    string
+		conflict bool
+	}{
+		{"newcmd.md", false},
+		{filepath.Join("newtools", "newcmd.md"), false},
+		{"newcmd.md", true},
+	} {
+		name := test.entry
+		if test.conflict {
+			name += " conflict"
+		}
+		t.Run(name, func(t *testing.T) {
+			entry := test.entry
+			home := t.TempDir()
+			source := filepath.Join(home, ".professor", "templates", "global", "commands")
+			content := "# new clone command\n"
+			writeFixture(t, filepath.Join(source, entry), content)
+			registry := filepath.Join(home, ".claude", "commands")
+			writeFixture(t, filepath.Join(registry, "local.md"), "# retained local command\n")
+			if test.conflict {
+				content = "# local conflict must win\n"
+				external := filepath.Join(home, "custom-command.md")
+				writeFixture(t, external, content)
+				if err := os.Symlink(external, filepath.Join(registry, entry)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			installer := &engine{options: Options{Home: home, ConfigDir: filepath.Join(home, ".claude")}}
+			staged, cleanup, err := installer.futureCommandSource(nil)
+			if err != nil {
+				t.Fatalf("futureCommandSource: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := cleanup(); err != nil {
+					t.Errorf("cleanup command plan: %v", err)
+				}
+			})
+			path := filepath.Join(staged, ".claude", "commands", entry)
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != content {
+				t.Fatalf("staged clone command %s = %q, %v; want %q", entry, got, err, content)
+			}
+			if got := readFixture(
+				t,
+				filepath.Join(staged, ".claude", "commands", "local.md"),
+			); got != "# retained local command\n" {
+				t.Fatalf("staged local command = %q", got)
+			}
+		})
+	}
+}
+
 // TestWireGlobalCommandsSkipsAnAbsentOrEmptySource pins the spec's explicit
 // carve-out: a parallel lane may not have populated templates/global/commands
 // yet, and that is a reported skip (0 entries), never an error.

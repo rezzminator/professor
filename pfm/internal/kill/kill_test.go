@@ -101,6 +101,16 @@ func (tmux *fakeTmux) PanesByTTY(
 	return panes, nil
 }
 
+func (tmux *fakeTmux) PaneIDs(context.Context, string) ([]string, error) {
+	tmux.mutex.Lock()
+	defer tmux.mutex.Unlock()
+	panes := make([]string, 0, len(tmux.panesByTTY))
+	for _, pane := range tmux.panesByTTY {
+		panes = append(panes, pane)
+	}
+	return panes, nil
+}
+
 func (tmux *fakeTmux) PanePID(
 	_ context.Context,
 	_, _ string,
@@ -152,6 +162,19 @@ func (tmux *fakeTmux) KillServer(
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	tmux.killedServers = append(tmux.killedServers, filepath.Base(socketPath))
+	return nil
+}
+
+func (tmux *fakeTmux) KillServerIfSolePane(_ context.Context, socketPath, paneID string) error {
+	tmux.mutex.Lock()
+	defer tmux.mutex.Unlock()
+	if len(tmux.panesByTTY) == 1 {
+		for _, pane := range tmux.panesByTTY {
+			if pane == paneID {
+				tmux.killedServers = append(tmux.killedServers, filepath.Base(socketPath))
+			}
+		}
+	}
 	return nil
 }
 

@@ -29,7 +29,7 @@ ORDER BY name`)
 
 	// Kills are uuid-keyed, with no engine column.
 	columns := queryColumn(t, state, "SELECT name FROM pragma_table_info('hidden')")
-	if !reflect.DeepEqual(columns, []string{"uuid", "hidden_at", "at_payload"}) {
+	if !reflect.DeepEqual(columns, []string{"uuid", "hidden_at", "at_payload", "revision"}) {
 		t.Fatalf("killed columns = %v", columns)
 	}
 	columns = queryColumn(t, state, "SELECT name FROM pragma_table_info('children')")
@@ -89,6 +89,36 @@ ORDER BY name`)
 	}
 	if busyTimeout == 0 {
 		t.Fatal("busy_timeout = 0: a concurrent sqlite3 CLI writer would fail instead of queue")
+	}
+}
+
+func TestKillWithRevisionRollsBackOnlyAnInsertedRow(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "insert", true: "concurrent prior kill"}[existing], func(t *testing.T) {
+			state, _ := openTestStore(t)
+			ctx := context.Background()
+			const id = "revision-owner"
+			if existing {
+				if err := state.Kill(ctx, id, 42); err != nil {
+					t.Fatal(err)
+				}
+			}
+			revision, err := state.KillWithRevision(ctx, id, 42)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (revision != "") == existing {
+				t.Fatalf("rollback revision %q, existing=%v; only inserts own rollback", revision, existing)
+			}
+			removed, err := state.UnkillIfRevision(ctx, id, revision)
+			if err != nil || removed == existing {
+				t.Fatalf("conditional rollback = %v, %v, existing=%v", removed, err, existing)
+			}
+			records, err := state.KilledRecords(ctx)
+			if _, present := records[id]; err != nil || present != existing {
+				t.Fatalf("kill after rollback = %v, %v, existing=%v", records, err, existing)
+			}
+		})
 	}
 }
 

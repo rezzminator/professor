@@ -167,6 +167,8 @@ func (a *auditor) walk(dir string, out *[]string) {
 			a.scan.readErrors = append(a.scan.readErrors, path+": "+describe(err))
 			continue
 		}
+		// Ledger joins need the whole session, even when replay skips this file.
+		a.transcripts = append(a.transcripts, path)
 		if float64(info.ModTime().UnixMilli()) >= a.since {
 			*out = append(*out, path)
 		} else {

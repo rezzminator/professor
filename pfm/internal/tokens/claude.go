@@ -103,19 +103,18 @@ var bands = [...]struct {
 // timelineBig is the tool-result size, in characters, --timeline counts as big.
 const timelineBig = 20 * 1024
 
-// claudeMessage is the record's message with its usage decoded: nil, nil
-// when the record carries no message object or its usage is malformed — the
-// ported reader skips such a message whole, content included.
-func claudeMessage(line *transcript.ClaudeRecord) (*transcript.ClaudeMessage, *pricing.UsageBlock) {
+// claudeMessage decodes a message's usage. A malformed usage skips the whole
+// message, content included, and returns its error for the collect gap counter.
+func claudeMessage(line *transcript.ClaudeRecord) (*transcript.ClaudeMessage, *pricing.UsageBlock, error) {
 	message := line.DecodeMessage()
 	if message == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	usage, err := message.UsageBlock()
 	if err != nil {
-		return nil, nil
+		return nil, nil, err
 	}
-	return message, usage
+	return message, usage, nil
 }
 
 // callKey is the record's response key: one API response is one call however
@@ -468,7 +467,12 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 				return
 			}
 		}
-		message, usage := claudeMessage(&line)
+		message, usage, usageErr := claudeMessage(&line)
+		if usageErr != nil {
+			a.scan.badLines++
+			c.bad++
+			return
+		}
 		switch {
 		case kind == "assistant" && usage != nil:
 			a.collectCall(c, &line, message, usage, file, ts, toolUses, slots, owners)
@@ -667,10 +671,7 @@ func (a *auditor) toolResult(
 		if stats.firstEditCall == 0 {
 			stats.readsBeforeEdit++
 		}
-		result.cat = catReadFirst
-		if c.seenReads[result.target] {
-			result.cat = catReadAgain
-		}
+		result.cat = catReadFirst // replay classifies repeats where context resets are known
 		c.seenReads[result.target] = true
 	case name == toolBash:
 		full := collapseSpaces(inputString(use.input, "command"))

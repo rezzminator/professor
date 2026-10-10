@@ -91,7 +91,7 @@ page data → {TMP}/a/view.json (5 KB · demo-proj 5 runs)
 
 == 14 · BRIEFS AND BEHAVIOUR · families matching /./ · 1 families · 4 agent runs
      total   n    med$ calls peakK | brief:  chars items paths code | filesRd rdB4edit 1stEdit edits files maxOne tests fail%  group (medians per run)
-     $0.34   3   $0.07     4    12 |            18     0     0    0 |       0        1       0     0     0      0     1 33.3%  demo flight chat[sess-mai] · executor · sonnet-5
+     $0.34   3   $0.07     4    12 |            18     0     0    0 |       1        1       0     0     0      0     1 33.3%  demo flight chat[sess-mai] · executor · sonnet-5
      $0.00   1   $0.00     2    11 |            10     0     0    0 |       0        0       0     0     0      0     0  0.0%  demo flight chat[sess-mai] · lander · unobtanium-9
   where the context growth came from (tokens landed after the fixed prefix, all matching runs, by model):
     sonnet-5      3 runs · Bash · test/build/docker runs 97.6% · own earlier output 1.5% · Read · first time 0.5% · Bash · other 0.5%

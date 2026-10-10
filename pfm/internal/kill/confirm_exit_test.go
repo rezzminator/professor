@@ -2,6 +2,7 @@ package kill
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ import (
 func TestManagerConfirmExitFailsWhenPaneOutlivesEscalation(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	tmux := &fakeTmux{existsFor: 1_000_000} // never reports gone, however many times asked
+	tmux := &fakeTmux{existsFor: 1_000_000, panesByTTY: map[string]string{"/dev/pts/9": "%9"}} // never reports gone
 	manager, err := New(database, Dependencies{
 		Tmux:         tmux,
 		Spawner:      &captureSpawner{},
@@ -80,6 +81,51 @@ func TestManagerConfirmExitSucceedsOncePaneGone(t *testing.T) {
 		t.Fatalf("ConfirmExit escalated over an already-gone pane: panes=%v servers=%v",
 			tmux.killedPanes, tmux.killedServers)
 	}
+}
+
+func TestConfirmExitDoesNotKillSiblingPanes(t *testing.T) {
+	for _, stale := range []bool{false, true} {
+		t.Run(map[bool]string{false: "shared", true: "stale exclusive snapshot"}[stale], func(t *testing.T) {
+			jail := newKillJail(t)
+			tmux := &fakeTmux{
+				existsFor:   1_000_000,
+				killPaneErr: errors.New("kill-pane failed"),
+				panesByTTY:  map[string]string{"/dev/pts/4": "%4", "/dev/pts/5": "%5"},
+			}
+			var client TmuxClient = tmux
+			if stale {
+				client = &stalePaneTmux{fakeTmux: tmux}
+			}
+			manager, err := New(jail.open(t), Dependencies{Tmux: client, ConfirmEvery: time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = manager.ConfirmExit(
+				context.Background(),
+				Target{SocketPath: filepath.Join(jail.tmuxDir, "shared"), PaneID: "%4"},
+			)
+			if err == nil || !strings.Contains(err.Error(), "pane %4 still alive") {
+				t.Fatalf("ConfirmExit = %v, want named still alive error", err)
+			}
+			if len(tmux.killedServers) != 0 {
+				t.Fatalf("shared server killed: %v; sibling must remain", tmux.killedServers)
+			}
+			if tmux.panesByTTY["/dev/pts/5"] != "%5" || len(tmux.killedPanes) != 1 ||
+				tmux.killedPanes[0] != "shared\t%4" {
+				t.Fatalf(
+					"sibling changed or target not attempted: panes=%v kills=%v",
+					tmux.panesByTTY,
+					tmux.killedPanes,
+				)
+			}
+		})
+	}
+}
+
+type stalePaneTmux struct{ *fakeTmux }
+
+func (*stalePaneTmux) PaneIDs(context.Context, string) ([]string, error) {
+	return []string{"%4"}, nil // sibling arrives after this snapshot
 }
 
 func TestNewConfirmEveryTestKnob(t *testing.T) {

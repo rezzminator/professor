@@ -62,18 +62,27 @@ func (a *auditor) ownership(file string) (domain, files []string, err error) {
 	for _, root := range domain {
 		a.walk(root, &all)
 	}
+	var duplicates int
+	files, duplicates = uniqueTranscripts(all)
+	a.scan.dupFiles += duplicates
+	a.transcripts, _ = uniqueTranscripts(a.transcripts)
+	return domain, files, nil
+}
+
+// uniqueTranscripts keeps the same ownership root for replay and whole-session joins.
+func uniqueTranscripts(paths []string) (files []string, duplicates int) {
 	seen := map[string]bool{}
-	for _, path := range all {
+	for _, path := range paths {
 		parts := strings.Split(path, string(filepath.Separator))
 		key := strings.Join(parts[max(0, len(parts)-3):], "/")
 		if seen[key] {
-			a.scan.dupFiles++
+			duplicates++
 			continue
 		}
 		seen[key] = true
 		files = append(files, path)
 	}
-	return domain, files, nil
+	return files, duplicates
 }
 
 // holder is one transcript holding a call.
@@ -100,9 +109,9 @@ func (a *auditor) callOrigins(files []string) map[string]string {
 			if kind, _ := line.Kind(); !decoded || kind != "assistant" {
 				return // malformed lines are counted by the replay
 			}
-			message, usage := claudeMessage(&line)
-			if usage == nil {
-				return
+			message, usage, usageErr := claudeMessage(&line)
+			if usageErr != nil || usage == nil {
+				return // usage gaps are counted once by collect, not the ownership index
 			}
 			key := callKey(&line, message, file, number)
 			session := firstOf(line.SessionID)
@@ -190,7 +199,6 @@ func (a *auditor) collectRuns() error {
 		return err
 	}
 	a.scan.roots = domain
-	a.transcripts = files
 	owners := a.callOrigins(files)
 	session := a.opts.session
 	skipped := 0

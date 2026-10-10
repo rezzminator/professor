@@ -1,9 +1,12 @@
 package transcript
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -47,6 +50,93 @@ func TestFindSessionsReadsOneLevelBelowEachRoot(t *testing.T) {
 	}
 	if _, errs := FindSessions([]string{filepath.Join(projects, "proj", "bbbb.jsonl")}, "a"); len(errs) != 1 {
 		t.Errorf("a root that is a file: errs = %v, want one", errs)
+	}
+}
+
+func TestFindSessionsReportsStatFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		target  string
+		wantErr bool
+	}{
+		{name: "loop", target: "lookup-bad.jsonl", wantErr: true},
+		{name: "dangling", target: "gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			project := filepath.Join(root, "project")
+			if err := os.MkdirAll(project, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			good := filepath.Join(project, "lookup-ok.jsonl")
+			if err := os.WriteFile(good, []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(project, "lookup-bad.jsonl")
+			if err := os.Symlink(tc.target, path); err != nil {
+				t.Fatal(err)
+			}
+			found, errs := FindSessions([]string{root}, "lookup")
+			if !reflect.DeepEqual(found, []string{good}) {
+				t.Errorf("FindSessions = %q, want %q", found, []string{good})
+			}
+			if tc.wantErr {
+				if len(errs) != 1 {
+					t.Fatalf("errs = %v, want one Stat failure for %s", errs, path)
+				}
+				if !strings.Contains(errs[0].Error(), path) || !errors.Is(errs[0], syscall.ELOOP) {
+					t.Errorf("error = %v, want path %s and wrapped ELOOP", errs[0], path)
+				}
+			} else if len(errs) != 0 {
+				t.Errorf("dangling entry: errs = %v, want none", errs)
+			}
+		})
+	}
+}
+
+func TestFindSubagentsReportsStatFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		target  string
+		wantErr bool
+	}{
+		{name: "loop", target: "subagents", wantErr: true},
+		{name: "dangling", target: "gone"},
+		{name: "missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := lookupFixture(t)
+			projects := filepath.Join(root, "projects")
+			session := filepath.Join(projects, "proj", "broken-session")
+			if err := os.MkdirAll(session, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(session, "subagents")
+			if tc.target != "" {
+				if err := os.Symlink(tc.target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			found, errs := FindSubagents([]string{projects}, "f00")
+			base := filepath.Join(projects, "proj", "aaaa1111", "subagents")
+			want := []string{
+				filepath.Join(base, "agent-f00d.jsonl"),
+				filepath.Join(base, "workflows", "wf_1", "agent-f00e.jsonl"),
+			}
+			if !reflect.DeepEqual(found, want) {
+				t.Errorf("FindSubagents = %q, want %q", found, want)
+			}
+			if tc.wantErr {
+				if len(errs) != 1 {
+					t.Fatalf("errs = %v, want one Stat failure for %s", errs, path)
+				}
+				if !strings.Contains(errs[0].Error(), path) || !errors.Is(errs[0], syscall.ELOOP) {
+					t.Errorf("error = %v, want path %s and wrapped ELOOP", errs[0], path)
+				}
+			} else if len(errs) != 0 {
+				t.Errorf("%s subagents: errs = %v, want none", tc.name, errs)
+			}
+		})
 	}
 }
 

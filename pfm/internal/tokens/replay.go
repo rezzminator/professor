@@ -138,7 +138,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 	var catTok [categoryCount]float64
 	have, prevOut, prefixTok := 0.0, 0.0, 0.0
 	first, compactPending := true, false
-	var pending []event
+	var pending []*event
 	var prev *previousCall
 	push := func(cat int, tok float64) {
 		if tok <= 0 {
@@ -178,15 +178,30 @@ func (a *auditor) replay(file string, c *collected) *run {
 	cmdCount := newObject()
 	lastToolTS := math.NaN()
 	copiedCalls := 0
+	seenReads, counted := map[string]bool{}, 0
+	countPending := func() {
+		for _, e := range pending[counted:] {
+			if e.tool == toolRead {
+				e.cat = catReadFirst
+				if seenReads[e.target] {
+					e.cat = catReadAgain
+				}
+				seenReads[e.target] = true
+			}
+			a.countContext(r, *e, project, cmdCount, &lastToolTS)
+		}
+		counted = len(pending)
+	}
 	for k := range c.seq {
 		e := &c.seq[k]
 		if e.compact {
+			countPending()
+			clear(seenReads)
 			compactPending = true
 			continue
 		}
 		if e.call == "" {
-			pending = append(pending, *e)
-			a.countContext(r, *e, project, cmdCount, &lastToolTS)
+			pending = append(pending, e)
 			continue
 		}
 		call := c.usage[e.call]
@@ -195,6 +210,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 			r.firstTS = call.ts
 		}
 		if len(call.requests) == 0 {
+			countPending()
 			// Only the advisor billed: the executor made no request, so the response is no
 			// call and moves no context; its consultations are booked at their own model.
 			switch {
@@ -227,12 +243,16 @@ func (a *auditor) replay(file string, c *collected) *run {
 		cr, inp, out := float64(u.CacheRead), float64(u.Input), float64(u.Output)
 		// a context is one request's: the last one the response made
 		ctx := float64(call.requests[len(call.requests)-1].Context())
-		reset := false
+		reset := !first && (compactPending || ctx < have*0.6)
+		if reset && !compactPending {
+			clear(seenReads)
+		}
+		countPending()
 		if first {
 			total := 0.0
 			estimates := make([]float64, len(pending))
 			for i := range pending {
-				p := &pending[i]
+				p := pending[i]
 				estimates[i] = p.chars / 4
 				total += estimates[i]
 			}
@@ -243,18 +263,16 @@ func (a *auditor) replay(file string, c *collected) *run {
 			prefixTok = ctx - float64(total*factor)
 			push(catPrefix, prefixTok)
 			for i := range pending {
-				p := &pending[i]
+				p := pending[i]
 				push(p.cat, estimates[i]*factor)
 			}
 			first = false
 		} else {
 			fresh := ctx - have
 			switch {
-			case compactPending || ctx < have*0.6:
-				reset = true
+			case reset:
 				r.resets++
 				segs, catTok, have = nil, [categoryCount]float64{}, 0
-				clear(c.seenReads)
 				push(catPrefix, math.Min(prefixTok, ctx))
 				push(catSummary, ctx-have)
 			case fresh < 0:
@@ -264,12 +282,12 @@ func (a *auditor) replay(file string, c *collected) *run {
 				push(catOwn, own)
 				rest, chars := fresh-own, 0.0
 				for k := range pending {
-					p := &pending[k]
+					p := pending[k]
 					chars += p.chars
 				}
 				if rest > 0 && chars > 0 {
 					for k := range pending {
-						p := &pending[k]
+						p := pending[k]
 						tok := rest * p.chars / chars
 						push(p.cat, tok)
 						if p.tool != "" && tok > 8000 {
@@ -297,7 +315,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 		var trigger, longest *event
 		pendChars, onlyTools := 0.0, len(pending) > 0
 		for i := range pending {
-			p := &pending[i]
+			p := pending[i]
 			if p.att == "" {
 				trigger = p
 			}
@@ -307,7 +325,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 			pendChars += p.chars
 			onlyTools = onlyTools && (p.tool != "" || p.att != "")
 		}
-		pending, prevOut = nil, out
+		pending, prevOut, counted = nil, out, 0
 		ts := call.ts
 		if ts < a.since {
 			prev = &previousCall{ctx, ts, call.model}
@@ -465,6 +483,7 @@ func (a *auditor) replay(file string, c *collected) *run {
 		r.series = append(r.series, series)
 		prev = &previousCall{ctx, ts, call.model}
 	}
+	countPending()
 	// a run that billed only advisor consultations is kept: its dollars are in the total
 	if r.calls == 0 && r.advisor.calls == 0 {
 		if copiedCalls != 0 {
@@ -604,54 +623,6 @@ func (r *run) mark(ts, ctx float64) {
 	r.span(ts)
 	r.ctxPeak = math.Max(r.ctxPeak, ctx)
 	r.ctxSum += ctx
-}
-
-// countContext counts one non-call event inside the window: the tool, Bash and
-// injection tallies the report reads.
-func (a *auditor) countContext(r *run, e event, project string, cmdCount *object, lastToolTS *float64) {
-	if e.tool != "" && !math.IsNaN(e.ts) {
-		*lastToolTS = e.ts
-	}
-	if e.ts >= a.since && e.tool != "" {
-		tool := r.tools.childWith(e.tool, "n", "chars", "err")
-		tool.bump("n", 1)
-		tool.bump("chars", e.chars)
-		if e.err {
-			tool.bump("err", 1)
-			r.errs++
-		}
-		if e.bash != noBash {
-			bash := r.bash.childWith(categories[e.bash], "n", "chars", "err", "waitMs")
-			bash.bump("n", 1)
-			bash.bump("chars", e.chars)
-			bash.bump("waitMs", e.dur)
-			if e.err {
-				bash.bump("err", 1)
-			}
-			cmdCount.bump(e.target, 1)
-		}
-		if e.cat == catReadAgain {
-			r.rereadN++
-			r.rereadChars += e.chars
-			key := project + " · " + strings.Replace(e.target, project+"/", "", 1)
-			a.global.rereads.bump2(key, "n", 1)
-			a.global.rereads.bump2(key, "chars", e.chars)
-		}
-		// the project contract the agent re-opens: by Read, or by a shell read of it
-		if contract.MatchString(e.target) && (e.tool == toolRead || e.bash == catBashRead) {
-			r.contractReads++
-		}
-		if e.tool == toolBash && e.err {
-			r.failedCmds++
-		}
-		r.toolWaitMs += e.dur
-	}
-	if e.ts >= a.since && e.att != "" {
-		a.global.attach.bump2(e.att, "n", 1)
-		a.global.attach.bump2(e.att, "chars", e.chars)
-		r.attach.bump2(e.att, "n", 1)
-		r.attach.bump2(e.att, "chars", e.chars)
-	}
 }
 
 // rewriteCheck is what decides whether a call re-billed the whole context.

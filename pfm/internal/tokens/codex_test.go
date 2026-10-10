@@ -2,7 +2,10 @@ package tokens
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -38,8 +41,124 @@ func TestModelSetKeepsFirstSeenOrderAndPricesTheLast(t *testing.T) {
 	for _, model := range []string{"gpt-a", "gpt-b", "gpt-a"} {
 		set.add(model)
 	}
-	if len(set) != 2 || set[0] != "gpt-a" || set.last() != "gpt-b" {
+	if len(set.names) != 2 || set.names[0] != "gpt-a" || set.last() != "gpt-a" {
 		t.Errorf("set = %v", set)
+	}
+}
+
+func TestCodexSinceExcludesPreWindowUsage(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		totals   []int64
+		stamps   []string
+		want     int64
+		segments int
+	}{
+		{"crossing cutoff", []int64{1000000, 1000100}, []string{"2026-09-20T05:00:00Z", "2026-09-21T05:00:00Z"}, 100, 1},
+		{"reset inside window", []int64{1000000, 1000100, 20, 50}, []string{"2026-09-20T05:00:00Z", "2026-09-21T05:00:00Z", "2026-09-21T05:01:00Z", "2026-09-21T05:02:00Z"}, 150, 2},
+		{"all inside", []int64{100, 150}, []string{"2026-09-21T05:00:00Z", "2026-09-21T05:01:00Z"}, 150, 1},
+		{"all before", []int64{100, 150}, []string{"2026-09-20T04:00:00Z", "2026-09-20T05:00:00Z"}, 0, 0},
+		{"repeated counter inside", []int64{100, 100}, []string{"2026-09-20T05:00:00Z", "2026-09-21T05:00:00Z"}, 0, 0},
+		{"stamped repeat of undated first counter", []int64{150, 150}, []string{"", "2026-09-21T05:00:00Z"}, 150, 1},
+		{"stamped repeat of undated increase", []int64{500, 1000, 1000}, []string{"2026-09-21T05:00:00Z", "", "2026-09-21T05:02:00Z"}, 1000, 1},
+		{"undated reset", []int64{1000, 0, 1200}, []string{"2026-09-21T05:00:00Z", "", "2026-09-21T05:02:00Z"}, 2200, 2},
+		{"undated tail", []int64{500, 1000}, []string{"2026-09-21T05:00:00Z", ""}, 500, 1},
+		{"consecutive undated resets", []int64{1000, 100, 0, 1200}, []string{"2026-09-21T05:00:00Z", "", "", "2026-09-21T05:02:00Z"}, 2200, 2},
+		{"at cutoff", []int64{100, 200}, []string{"2026-09-20T05:59:59Z", "2026-09-20T06:00:00Z"}, 100, 1},
+		{"reset before cutoff", []int64{1000, 100, 200}, []string{"2026-09-19T05:00:00Z", "2026-09-20T05:00:00Z", "2026-09-21T05:00:00Z"}, 100, 1},
+		{"reset to zero inside", []int64{1000, 1100, 0, 50}, []string{"2026-09-20T05:00:00Z", "2026-09-21T05:00:00Z", "2026-09-21T05:01:00Z", "2026-09-21T05:02:00Z"}, 150, 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			lines := []string{`{"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`}
+			for i, total := range test.totals {
+				lines = append(
+					lines,
+					fmt.Sprintf(
+						`{"type":"event_msg","timestamp":%q,"payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d,"reasoning_output_tokens":%d,"total_tokens":%d},"last_token_usage":{"input_tokens":100}}}}`,
+						test.stamps[i],
+						total*3/5,
+						total/5,
+						total*2/5,
+						total/5,
+						total,
+					),
+				)
+			}
+			file := writeTranscript(t, filepath.Join(home, "sessions", "rollout-window.jsonl"), lines...)
+			a, stdout, _ := testAuditor(t, "--since", "24h")
+			a.codexHomes = []string{home}
+			usage := a.codexUsageFast(file)
+			want := codexUsage{
+				in:        test.want * 3 / 5,
+				cached:    test.want / 5,
+				out:       test.want * 2 / 5,
+				reasoning: test.want / 5,
+				total:     test.want,
+			}
+			if usage.usage != want || usage.segments != test.segments {
+				t.Errorf(
+					"usage %+v over %d segments, want %+v over %d",
+					usage.usage,
+					usage.segments,
+					want,
+					test.segments,
+				)
+			}
+			cost := a.codexCost(usage.models.last(), usage.usage, usage.contextPeak)
+			wantCost := (float64(want.in-want.cached)*4 + float64(want.cached)*0.4 + float64(want.out)*20) / 1e6
+			if cost == nil || math.Abs(*cost-wantCost) > 1e-12 {
+				t.Errorf("cost %v, want %v for only the window", cost, wantCost)
+			}
+			if code, err := a.runCodex(context.Background()); code != 0 || err != nil {
+				t.Fatalf("runCodex: exit %d, %v", code, err)
+			}
+			if !strings.Contains(stdout.String(), "TOTAL "+grouped(float64(test.want))+" tok") {
+				t.Errorf("window total absent:\n%s", stdout.String())
+			}
+			if test.want == 0 && !strings.Contains(stdout.String(), "0 threads of 1 rollouts") {
+				t.Errorf("thread with no window usage was reported:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
+func TestCodexPricesLastObservedModelAfterSwitchBack(t *testing.T) {
+	home := t.TempDir()
+	file := writeTranscript(
+		t,
+		filepath.Join(home, "sessions", "rollout-models.jsonl"),
+		`{"type":"turn_context","payload":{"model":"gpt-a"}}`,
+		`{"type":"turn_context","payload":{"model":"gpt-b"}}`,
+		`{"type":"turn_context","payload":{"model":"gpt-a"}}`,
+		`{"type":"event_msg","timestamp":"2026-09-21T05:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000000,"total_tokens":1000000}}}}`,
+	)
+	a, stdout, _ := testAuditor(t)
+	row, ok := a.prices.table.Resolve("gpt-5.6-sol")
+	if !ok {
+		t.Fatal("fixture has no Codex price")
+	}
+	for i, model := range []string{"gpt-a", "gpt-b"} {
+		row.Key, row.In, row.Long = model, ptr(float64(4+i*4)), nil
+		a.prices.table.Rows = append(a.prices.table.Rows, row)
+	}
+	a.codexHomes = []string{home}
+	usage := a.codexUsageFast(file)
+	encoded, err := json.Marshal(usage.models.names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `["gpt-a","gpt-b"]` || usage.models.last() != "gpt-a" {
+		t.Errorf("model list %s, last %s; want [gpt-a,gpt-b] and gpt-a", encoded, usage.models.last())
+	}
+	if code, err := a.runCodex(context.Background()); code != 0 || err != nil {
+		t.Fatalf("runCodex: exit %d, %v", code, err)
+	}
+	if !strings.Contains(stdout.String(), "$4.00") || !strings.Contains(stdout.String(), `priced entirely at "gpt-a"`) {
+		t.Errorf("row is not priced at the last observed model:\n%s", stdout.String())
+	}
+	if r := a.codexAuditRun(file, nil); r.model != "gpt-a" || math.Abs(r.usd-4) > 1e-12 {
+		t.Errorf("flight model %s, cost %v; want gpt-a, 4", r.model, r.usd)
 	}
 }
 

@@ -409,6 +409,9 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fail(fmt.Errorf("inspect Claude commands for preview: %w", err))
 	}
+	if err := installer.stageGlobalCommandPlan(target); err != nil {
+		return fail(err)
+	}
 	for _, asset := range assets {
 		commandTarget, found := installer.commandTarget(asset.path)
 		if !found {
@@ -430,6 +433,48 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 		return fail(fmt.Errorf("retire swap.md from command preview: %w", err))
 	}
 	return temporary, cleanup, nil
+}
+
+// stageGlobalCommandPlan snapshots the clone entries wireGlobalCommands would
+// link, preserving the registry entries that its shared classifier refuses.
+// Embedded commands are overlaid afterwards: their managed links precede the
+// global step during apply, so they remain conflicts rather than clone links.
+func (installer *engine) stageGlobalCommandPlan(target string) error {
+	sourceRepo, err := installer.globalSourceRepoRoot()
+	if err != nil {
+		return fmt.Errorf("resolve global commands source repository for preview: %w", err)
+	}
+	source := filepath.Join(sourceRepo, "templates", "global", "commands")
+	entries, err := os.ReadDir(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect global commands source for preview %s: %w", source, err)
+	}
+	for _, entry := range entries {
+		kind := globallink.File
+		if entry.IsDir() {
+			kind = globallink.Dir
+		}
+		commandSource := filepath.Join(source, entry.Name())
+		commandTarget := filepath.Join(installer.options.ConfigDir, "commands", entry.Name())
+		state, _, err := globallink.ClassifyLink(commandTarget, commandSource, sourceRepo, kind)
+		if err != nil {
+			return fmt.Errorf("inspect global command for preview %s: %w", commandTarget, err)
+		}
+		if state == globallink.Conflict {
+			continue
+		}
+		staged := filepath.Join(target, entry.Name())
+		if err := os.RemoveAll(staged); err != nil {
+			return fmt.Errorf("replace global command in preview %s: %w", staged, err)
+		}
+		if err := copyPlanTree(commandSource, staged); err != nil {
+			return fmt.Errorf("stage global command for preview %s: %w", commandSource, err)
+		}
+	}
+	return nil
 }
 
 // copyCommandPlanTree snapshots the current command source while omitting the

@@ -48,6 +48,28 @@ func (s *Store) Kill(ctx context.Context, killed Killed) error {
 	})
 }
 
+// KillWithRevision records a permanent kill; only an inserted row gets a rollback identity.
+func (s *Store) KillWithRevision(ctx context.Context, killed Killed) (string, error) {
+	var revision string
+	err := s.killedWrite(ctx, "kill", killed.ID, func() error {
+		var writeErr error
+		revision, writeErr = s.state.KillWithRevision(ctx, killed.ID, killed.KilledAt)
+		return writeErr
+	})
+	return revision, err
+}
+
+// UnkillIfRevision never removes a concurrent kill or post-exit reassertion.
+func (s *Store) UnkillIfRevision(ctx context.Context, id, revision string) (bool, error) {
+	var removed bool
+	err := s.killedWrite(ctx, "rollback", id, func() error {
+		var writeErr error
+		removed, writeErr = s.state.UnkillIfRevision(ctx, id, revision)
+		return writeErr
+	})
+	return removed, err
+}
+
 // Unkill removes a kill from the shared store under the same busy policy.
 func (s *Store) Unkill(ctx context.Context, id string) (bool, error) {
 	var removed bool

@@ -14,7 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 //go:embed migration_v2.sql
 var migrationV2 string
@@ -22,9 +22,12 @@ var migrationV2 string
 //go:embed migration_v3.sql
 var migrationV3 string
 
+//go:embed migration_v4.sql
+var migrationV4 string
+
 // sharedMigrations is indexed by the version each step produces; version 1 is
 // schemaDDL itself, so the first two slots stay empty.
-var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3}
+var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3, 4: migrationV4}
 
 func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (returnErr error) {
 	var version int

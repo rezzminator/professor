@@ -887,16 +887,11 @@ func (engine *Engine) injectResolved(
 	base.Unsigned = prepared.Unsigned
 	base.AutoFilePath = prepared.AutoFilePath
 	commandTransport := isHarnessCommand(request.Message)
-	// pasteTransport now covers both shapes that need byte-safe bracketed
-	// paste: an explicit --file body (any size, unconditionally — a literal
-	// newline in send-keys -l submits the composer early) and an ordinary
-	// message over the engine's inline threshold, which prepareMessage used
-	// to spill to a file pointer before this ladder ever saw it — see its
-	// own comment. prepared.AutoFilePath is therefore always empty here for
-	// a live delivery; it is populated below ONLY as a rescue, if this
-	// attempt cannot be proven.
-	pasteTransport := !commandTransport &&
-		(request.FileBacked || utf8.RuneCountInString(message) > engine.inlineThreshold(target.Engine))
+	// File-backed, multiline and long ordinary messages need byte-safe paste:
+	// a literal newline in send-keys -l submits the composer early.
+	// AutoFilePath is populated only as rescue for unproven live delivery.
+	pasteTransport := !commandTransport && (request.FileBacked || strings.ContainsAny(message, "\n\r") ||
+		utf8.RuneCountInString(message) > engine.inlineThreshold(target.Engine))
 	var sendErr error
 	switch {
 	case pasteTransport:

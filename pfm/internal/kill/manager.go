@@ -131,8 +131,8 @@ const (
 // When the pane is still there after the bounded wait, ConfirmExit escalates
 // exactly the way Finisher.Run's own fallback does — kill-pane, then (one
 // rung further, since the finisher's own kill-pane may itself be the thing
-// that never landed) kill-server of THIS target's own socket, never any
-// other. Only once every escalation has also failed to clear the pane does
+// that never landed) kill-server only if THIS target is the socket's sole
+// pane. A shared server is never killed. Only once every escalation has also failed to clear the pane does
 // it return a named error; a caller must never print success past that
 // point.
 func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
@@ -147,7 +147,7 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 	}
 	for _, escalate := range []func() error{
 		func() error { return manager.tmux.KillPane(ctx, target.SocketPath, target.PaneID) },
-		func() error { return manager.tmux.KillServer(ctx, target.SocketPath) },
+		func() error { return manager.tmux.KillServerIfSolePane(ctx, target.SocketPath, target.PaneID) },
 	} {
 		if landed {
 			break
@@ -249,28 +249,24 @@ func (manager *Manager) Kill(
 	// composer already refuses to apply such a kill (compose.applyKill), so
 	// writing one only leaves a row nobody can unkill. The pane still closes
 	// below.
-	created := false
+	rollbackRevision := ""
 	if !AddressOnly(target) {
-		// What this call observed before writing decides whether a failed
-		// launch may roll the row back: only a row it created, never a kill
-		// that was already there.
-		_, existed, err := manager.database.Killed(ctx, target.ID)
-		if err != nil {
-			return Target{}, fmt.Errorf("read kill row for %s before writing it: %w", target.ID, err)
-		}
-		created = !existed
-		if err := manager.database.Kill(ctx, store.Killed{
+		// The write itself decides rollback ownership atomically: only an insert,
+		// never an existing kill, including one that raced this request.
+		revision, err := manager.database.KillWithRevision(ctx, store.Killed{
 			ID:       target.ID,
 			Engine:   target.Engine,
 			KilledAt: manager.now().Unix(),
-		}); err != nil {
+		})
+		if err != nil {
 			return Target{}, err
 		}
+		rollbackRevision = revision
 	}
 
 	if spawn {
 		if err := manager.spawner.Spawn(ctx, ExitArgs(target)); err != nil {
-			return Target{}, manager.rollBackKill(ctx, target.ID, created, err)
+			return Target{}, manager.rollBackKill(ctx, target.ID, rollbackRevision, err)
 		}
 	}
 	return target, nil
@@ -282,11 +278,11 @@ func (manager *Manager) Kill(
 // the chat is hidden with its pane still open. The rollback outlives a
 // cancelled request: a launch cancelled with its caller must not leave the
 // row behind.
-func (manager *Manager) rollBackKill(ctx context.Context, id string, created bool, launchErr error) error {
-	if !created {
+func (manager *Manager) rollBackKill(ctx context.Context, id, revision string, launchErr error) error {
+	if revision == "" {
 		return launchErr
 	}
-	if _, err := manager.database.Unkill(context.WithoutCancel(ctx), id); err != nil {
+	if _, err := manager.database.UnkillIfRevision(context.WithoutCancel(ctx), id, revision); err != nil {
 		return fmt.Errorf(
 			"%w; roll back the kill row of %s: %w — the chat is hidden with its pane still open; run pfm chat unkill %s",
 			launchErr,

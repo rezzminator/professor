@@ -217,18 +217,13 @@ func ComposerDraftText(capture string) string {
 	return strings.Join(strings.Fields(composerDraft(lastComposerLine(capture))), " ")
 }
 
-// composerDraft is the text after a composer line's last ❯/› marker.
+// composerDraft is the text after the composer row's leading ❯/› marker.
 func composerDraft(line string) string {
-	cut := -1
-	for index, character := range line {
-		if character == '❯' || character == '›' {
-			cut = index + utf8.RuneLen(character)
-		}
+	line = strings.TrimLeftFunc(stripTerminalControl(line), unicode.IsSpace)
+	if strings.HasPrefix(line, "❯") || strings.HasPrefix(line, "›") {
+		return line[len("❯"):]
 	}
-	if cut < 0 {
-		return ""
-	}
-	return line[cut:]
+	return ""
 }
 
 // ComposerEmpty reports whether the composer holds no draft — no text after
@@ -313,9 +308,15 @@ func lastComposerLine(capture string) string {
 // lastComposerRow is the index of lastComposerLine's row in lines, -1 when
 // no row starts with a composer marker.
 func lastComposerRow(lines []string) int {
-	last := -1
+	last, boxWidth := -1, 0
 	for index, line := range lines {
 		clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
+		if boxWidth > 0 {
+			if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= boxWidth {
+				boxWidth = 0
+			}
+			continue // A marker inside the bounded draft is continuation text.
+		}
 		visible := strings.TrimLeftFunc(clean, unicode.IsSpace)
 		if strings.HasPrefix(visible, "❯") {
 			// Claude renders live agent activity as a bullet row beneath the
@@ -325,11 +326,15 @@ func lastComposerRow(lines []string) int {
 			if claudeAgentRow.MatchString(visible) {
 				continue
 			}
-			last = index
-			continue
 		}
-		if strings.HasPrefix(visible, "›") {
+		if strings.HasPrefix(visible, "❯") || strings.HasPrefix(visible, "›") {
 			last = index
+			if index > 0 {
+				top := strings.TrimSpace(stripTerminalControl(lines[index-1]))
+				if ComposerBoxRule(top) {
+					boxWidth = utf8.RuneCountInString(top)
+				}
+			}
 		}
 	}
 	return last
@@ -349,9 +354,16 @@ func ComposerBoxEmpty(capture string) bool {
 	if row < 0 {
 		return false
 	}
+	topWidth := 0
+	if row > 0 {
+		top := strings.TrimSpace(stripTerminalControl(lines[row-1]))
+		if ComposerBoxRule(top) {
+			topWidth = utf8.RuneCountInString(top)
+		}
+	}
 	for _, line := range lines[row+1:] {
 		clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
-		if ComposerBoxRule(clean) {
+		if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= topWidth {
 			return true
 		}
 		if strings.IndexFunc(clean, func(character rune) bool {

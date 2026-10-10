@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -214,6 +215,9 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 		if *skipThemes {
 			confirmation += " --skip-themes"
+		}
+		if *configDir != "" {
+			confirmation += " --config-dir " + action.Quote(*configDir)
 		}
 		fmt.Fprintln(stdout, confirmation)
 	}

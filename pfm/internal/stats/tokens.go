@@ -29,16 +29,21 @@ type tokenCacheEntry struct {
 	modifiedNS   int64
 	claudeTokens int64
 	codexTokens  int64
+	codexPeak    int64
+	codexClosed  int64
 	known        bool
 	generation   uint64
 	fileInfo     os.FileInfo
 	rewriteGuard []byte
-	// countedMessages remembers the ids of the assistant messages already
-	// added to claudeTokens. Claude writes one record per content block of a
-	// message and every record repeats the same usage block, so the id — not
-	// the record — is the unit of counting. A short ring is enough: a
-	// message's records are written together.
-	countedMessages []string
+	// countedMessages retains each response's latest contribution so later
+	// content-block records can revise its partial usage without double counting.
+	// A short ring is enough: a message's records are written together.
+	countedMessages []tokenMessageContribution
+}
+
+type tokenMessageContribution struct {
+	key    string
+	tokens int64
 }
 
 // countedMessageRing bounds countedMessages; a message never spans more
@@ -76,8 +81,8 @@ type tokenRecord struct {
 	Type      string `json:"type"`
 	RequestID string `json:"requestId"`
 	Message   struct {
-		ID    string             `json:"id"`
-		Usage pricing.UsageBlock `json:"usage"`
+		ID    string              `json:"id"`
+		Usage *pricing.UsageBlock `json:"usage"`
 	} `json:"message"`
 	Payload struct {
 		Type string                     `json:"type"`
@@ -406,14 +411,14 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 			return fmt.Errorf("parse timestamp %q: %w", record.Timestamp, err)
 		}
 	}
-	if record.Type == "assistant" {
-		usage := record.Message.Usage
+	if record.Type == "assistant" && record.Message.Usage != nil {
+		usage := *record.Message.Usage
 		if negativeUsage(usage) {
 			return fmt.Errorf("assistant usage contains a negative token count")
 		}
 		total := claudeTokens(usage)
-		if total > 0 && !entry.messageCounted(record.Message.ID, record.RequestID) {
-			entry.claudeTokens += total
+		entry.claudeTokens += entry.messageTokenDelta(record.Message.ID, record.RequestID, total)
+		if total > 0 {
 			entry.known = true
 		}
 	}
@@ -422,9 +427,15 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 		if total < 0 {
 			return fmt.Errorf("lifetime usage for Codex contains a negative token count")
 		}
-		if total > 0 {
-			entry.codexTokens = total
-			entry.known = true
+		if info.TotalTokenUsage != nil {
+			if total < entry.codexPeak {
+				entry.codexClosed += entry.codexPeak
+			}
+			entry.codexPeak = total
+			entry.codexTokens = entry.codexClosed + entry.codexPeak
+			if total > 0 {
+				entry.known = true
+			}
 		}
 	}
 	return nil
@@ -455,24 +466,29 @@ func negativeUsage(usage pricing.UsageBlock) bool {
 	return false
 }
 
-// messageCounted reports whether this assistant record's response was
-// already added, and records it when not. The first line of a response counts:
-// Claude Code repeats one response's usage unchanged on each of its lines. A
-// record naming neither a message id nor a request id is counted on its own —
+// messageTokenDelta records this response's latest usage and returns only its
+// change from the previously counted contribution. Identical repeats add zero.
+// A record naming neither a message id nor a request id is counted on its own —
 // the shape every pre-id fixture has.
-func (entry *tokenCacheEntry) messageCounted(messageID, requestID string) bool {
+func (entry *tokenCacheEntry) messageTokenDelta(messageID, requestID string, total int64) int64 {
 	key := transcript.ResponseKey(messageID, requestID, "", "")
 	if key == "" {
-		return false
+		return total
 	}
-	for _, seen := range entry.countedMessages {
-		if seen == key {
-			return true
+	for index := range entry.countedMessages {
+		seen := &entry.countedMessages[index]
+		if seen.key == key {
+			delta := total - seen.tokens
+			seen.tokens = total
+			return delta
 		}
 	}
-	entry.countedMessages = append(entry.countedMessages, key)
+	if total == 0 {
+		return 0 // An unseen zero contribution must not evict a billable response.
+	}
+	entry.countedMessages = append(entry.countedMessages, tokenMessageContribution{key: key, tokens: total})
 	if len(entry.countedMessages) > countedMessageRing {
 		entry.countedMessages = entry.countedMessages[len(entry.countedMessages)-countedMessageRing:]
 	}
-	return false
+	return total
 }

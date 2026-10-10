@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePrefs, error) {
@@ -15,6 +16,13 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 	if raw.AutoCompactWindow != nil && *raw.AutoCompactWindow < 1 {
 		return ClaudePrefs{}, fmt.Errorf(
 			"config %s: %s.autoCompactWindow must be at least 1", path, configScope(scope, index),
+		)
+	}
+	if raw.HelperModel != nil && !ValidHelperModel(*raw.HelperModel) {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.helperModel must be a non-empty model name without whitespace",
+			path,
+			configScope(scope, index),
 		)
 	}
 	if raw.CleanupPeriodDays != nil && *raw.CleanupPeriodDays < 1 {
@@ -88,6 +96,27 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 	return prefs, nil
 }
 
+// ValidHelperModel reports whether value can be a helper model: a model id or
+// alias, non-empty, without a space or control character, so it reaches Claude
+// Code's environment as one word.
+func ValidHelperModel(value string) bool {
+	return value != "" && !strings.ContainsFunc(value, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	})
+}
+
+// copyClaudeLaunchPrefs sets the launch values an account block carries or
+// inherits whole: Load seeds an account's from the resolved top level, and
+// EffectiveClaude reads them back from the account.
+func copyClaudeLaunchPrefs(target *ClaudePrefs, source ClaudePrefs) {
+	target.WebSearchesPerSession = source.WebSearchesPerSession
+	target.AutoCompactWindow = source.AutoCompactWindow
+	target.HelperModel = source.HelperModel
+	target.TmuxTruecolor = source.TmuxTruecolor
+	target.CleanupPeriodDays = source.CleanupPeriodDays
+	target.RequireManagedCleanup = source.RequireManagedCleanup
+}
+
 func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[string]Source, scope string, index int) {
 	base := scope + "."
 	if index >= 0 {
@@ -100,6 +129,10 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 	if raw.AutoCompactWindow != nil {
 		target.AutoCompactWindow = *raw.AutoCompactWindow
 		sources[base+"autoCompactWindow"] = SourceFile
+	}
+	if raw.HelperModel != nil {
+		target.HelperModel = *raw.HelperModel
+		sources[base+"helperModel"] = SourceFile
 	}
 	if raw.TmuxTruecolor != nil {
 		target.TmuxTruecolor = *raw.TmuxTruecolor

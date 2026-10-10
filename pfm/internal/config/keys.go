@@ -11,6 +11,11 @@ const (
 	defaultAskLunaModel = "gpt-5.6-luna"
 )
 
+// DefaultHelperModel is the model Claude Code's helper calls run on when
+// claude.helperModel is unset: a full model id, so it names Haiku 5.5 whatever
+// the gateway's alias table says.
+const DefaultHelperModel = "claude-haiku-5-5"
+
 // KeyClaudePluginCheckoutRoot names the directory holding one checkout per
 // Claude plugin pfm install ensures ({root}/{plugin}/plugins/{plugin}): an
 // -alpha build installs each plugin from a copy of its checkout there.
@@ -43,6 +48,7 @@ func Keys() []KeyDefault {
 		{"claude.systemPrompt", nil},
 		{"claude.webSearchesPerSession", int64(9007199254740991)},
 		{"claude.autoCompactWindow", int64(100000)},
+		{"claude.helperModel", DefaultHelperModel},
 		{"claude.tmuxTruecolor", true},
 		{"claude.cleanupPeriodDays", 36500},
 		{"claude.requireManagedCleanup", true},

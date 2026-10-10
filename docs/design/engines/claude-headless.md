@@ -15,7 +15,7 @@ Every non-interactive Claude Code run pfm makes — `claude -p` for `pfm headles
 ## Decisions
 
 - **One runner.** Every `-p` run is built by `arguments()` and `setEnvironment` in `run.go`; a caller varies only the request fields and its own `Args`.
-- **Headless reads no launch value from `pfm.config.json`.** For `pfm headless exec`, model and effort come from its flags. Theme, sub-agent caps, cache, truecolor, lean prompt, the web-search cap and `autoCompactWindow` come from `Request.Settings` or `--pfm-settings PATH`, a JSON file shaped like the config's `claude` block (conventionally `pfm.settings.json`). `--pfm-settings` keys are the supported knob names in `claudelaunch.Knobs`, and `pfm headless exec` renders them through the registry. A value not passed is not sent, except the function-hooks constant and the auto-compact window (default `100000`), which are always sent. The config is read only for where the harness is: the account roster (to turn `--account N` into its config dir), each account's `claude` binary, and the default engine when `--engine` is absent. Constants of the launch registry — the hygiene unsets and `outputStyle` — still apply ([claude-launch.md](claude-launch.md#knobs)).
+- **Headless reads no launch value from `pfm.config.json`.** For `pfm headless exec`, model and effort come from its flags. Theme, sub-agent caps, cache, truecolor, lean prompt, the web-search cap, `autoCompactWindow` and `helperModel` come from `Request.Settings` or `--pfm-settings PATH`, a JSON file shaped like the config's `claude` block (conventionally `pfm.settings.json`). `--pfm-settings` keys are the supported knob names in `claudelaunch.Knobs`, and `pfm headless exec` renders them through the registry. A value not passed is not sent, except the function-hooks constant, the auto-compact window (default `100000`) and the helper model (default `claude-haiku-5-5`, the config's own default), which are always sent. The config is read only for where the harness is: the account roster (to turn `--account N` into its config dir), each account's `claude` binary, and the default engine when `--engine` is absent. Constants of the launch registry — the hygiene unsets and `outputStyle` — still apply ([claude-launch.md](claude-launch.md#knobs)).
 - **Internal callers state their values.** The ask engine (status and summary helpers), the credential-refresh ACK and the doctor probe build their requests with explicit values — the ask engine from the config's `ask` block, the others from constants; `Run` itself never reaches into the config for a launch value.
 - **The prompt travels on stdin, the system prompt in a file.** `Run` writes any system prompt to a `pfm-headless-system-*.txt` file and passes `--system-prompt-file` (`run.go:458-469`, `:606-611`), and feeds the user prompt on stdin (`:519-521`) — neither lands in argv, where `ps` would show it.
 - **An explicit environment is the caller's word.** A run with no `Env` strips the provider and endpoint variables; a caller that passes `Env` keeps them (`run.go:697-724`). That is the only way to aim a headless run at a proxy.
@@ -39,7 +39,7 @@ Every non-interactive Claude Code run pfm makes — `claude -p` for `pfm headles
 | 10 | `--strict-mcp-config` | `StrictMCP` |
 | 11 | `--no-session-persistence` | `NoSessionPersistence` |
 | 12 | caller `Args` | verbatim (`:676`) |
-| 13 | `--settings <payload>` | always, unless `Args` carries `--settings` — `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}` plus passed values from `Request.Settings` or `--pfm-settings` |
+| 13 | `--settings <payload>` | always, unless `Args` carries `--settings` — `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}` plus passed values from `Request.Settings` or `--pfm-settings` |
 
 The process runs in its own process group (`:528`). `--permission-mode`, `--add-dir`, `--agent`, `--input-format` and `--append-system-prompt` are never emitted.
 
@@ -61,7 +61,7 @@ For Codex, which cannot honour these controls, the run is refused before launch 
 
 ### Credential-refresh ACK
 
-`pfm/internal/stats/limits.go:871-881`: `claude -p --model claude-haiku-4-5 --max-turns 1 --settings {"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}` with prompt `ACK` and no explicit environment — the cheapest request that makes Claude Code refresh an account's credentials.
+`pfm/internal/stats/limits.go:871-881`: `claude -p --model claude-haiku-4-5 --max-turns 1 --settings {"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}` with prompt `ACK` and no explicit environment — the cheapest request that makes Claude Code refresh an account's credentials.
 
 ### Doctor harness probe
 
@@ -73,7 +73,7 @@ See [Harness-prompt drift probe](#harness-prompt-drift-probe). `pfm doctor` also
 
 - **Always dropped** (`:696-707`, plus the engine `HomeEnv`): `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CONFIG_DIR`, `CODEX_THREAD_ID`, `TMUX`, `TMUX_PANE`.
 - **Dropped unless the environment is explicit** (`:697-724`): `CLAUDE_PROJECT_DIR`, `ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `CACHE_LIVE_CONTROL_MAIN_TTL`, `CACHE_LIVE_CONTROL_AGENTS_TTL`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, and the registry's `WireSettings` environment targets (caps, web-search cap, truecolor and native cursor).
-- **Set:** `CLAUDE_CONFIG_DIR={config dir}` when an account resolved. Sub-agent caps, web-search cap, truecolor and simple prompt reach Claude through the `--settings` `env` block when passed through `Request.Settings` or `--pfm-settings`; function hooks and the auto-compact window always reach it through that block.
+- **Set:** `CLAUDE_CONFIG_DIR={config dir}` when an account resolved. Sub-agent caps, web-search cap, truecolor and simple prompt reach Claude through the `--settings` `env` block when passed through `Request.Settings` or `--pfm-settings`; function hooks, the auto-compact window and the helper model always reach it through that block. A caller `--settings` in `Args` replaces the whole payload, helper model included.
 
 ## Harness-prompt drift probe
 
@@ -83,7 +83,7 @@ See [Harness-prompt drift probe](#harness-prompt-drift-probe). `pfm doctor` also
 - **Capture.** A local sink on `127.0.0.1:0` answers every request with HTTP 400 and keeps the first `/messages` body (`harness_prompt.go:396`, `:602-617`). The probe runs `WithoutAccount`, Native, a 20-second timeout, stdin `/dev/null`, in a throwaway config dir that is also its cwd (`:369`, `:413-428`, `:472`): the CLI loads `.claude/settings.json` in its cwd as project settings, and their `env` beats the probe environment's sink URL — run from `~`, that file is the user's own settings.
 
   ```text
-  claude -p --model <alias> x --output-format json --strict-mcp-config --mcp-config {"mcpServers":{}} --max-turns 1 --exclude-dynamic-system-prompt-sections --settings {"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}
+  claude -p --model <alias> x --output-format json --strict-mcp-config --mcp-config {"mcpServers":{}} --max-turns 1 --exclude-dynamic-system-prompt-sections --settings {"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}
   ```
 
 - **Probe environment** (`claudelaunch.ProbeEnv`, `harness_prompt.go:436,482`): strips the registry's hygiene names; pins `ANTHROPIC_BASE_URL=<sink>`, `ANTHROPIC_API_KEY=pfm-doctor-sink`, `ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0`, `FORCE_PROMPT_CACHING_5M=1`, `CLAUDE_CONFIG_DIR=<tmp>`.

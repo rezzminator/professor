@@ -80,6 +80,7 @@ type ClaudePrefs struct {
 	TmuxTruecolor         bool
 	CleanupPeriodDays     int
 	RequireManagedCleanup bool
+	HelperModel           string // Claude Code's helper-call model; never empty after Load
 	// SystemPrompt is one of the SystemPrompt* values; empty means
 	// SystemPromptProduction.
 	SystemPrompt string
@@ -281,6 +282,7 @@ type rawClaude struct {
 	PermissionMode        *string `json:"permissionMode,omitempty"`
 	WebSearchesPerSession *int64  `json:"webSearchesPerSession,omitempty"`
 	AutoCompactWindow     *int64  `json:"autoCompactWindow,omitempty"`
+	HelperModel           *string `json:"helperModel,omitempty"`
 	TmuxTruecolor         *bool   `json:"tmuxTruecolor,omitempty"`
 	CleanupPeriodDays     *int    `json:"cleanupPeriodDays,omitempty"`
 	RequireManagedCleanup *bool   `json:"requireManagedCleanup,omitempty"`
@@ -445,6 +447,7 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
 		"claude.webSearchesPerSession":                       SourceDefault,
 		"claude.autoCompactWindow":                           SourceDefault,
+		"claude.helperModel":                                 SourceDefault,
 		"claude.tmuxTruecolor":                               SourceDefault,
 		"claude.cleanupPeriodDays":                           SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
@@ -496,6 +499,7 @@ func defaultsWithMCPServers(
 			Binary:                pfmengine.MustLookup(pfmengine.Claude).Binary,
 			WebSearchesPerSession: 9007199254740991,
 			AutoCompactWindow:     100000,
+			HelperModel:           DefaultHelperModel,
 			TmuxTruecolor:         true,
 			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
@@ -777,11 +781,7 @@ func loadWithMCPServers(
 				if err != nil {
 					return Config{}, err
 				}
-				prefs.WebSearchesPerSession = result.Claude.WebSearchesPerSession
-				prefs.AutoCompactWindow = result.Claude.AutoCompactWindow
-				prefs.TmuxTruecolor = result.Claude.TmuxTruecolor
-				prefs.CleanupPeriodDays = result.Claude.CleanupPeriodDays
-				prefs.RequireManagedCleanup = result.Claude.RequireManagedCleanup
+				copyClaudeLaunchPrefs(&prefs, result.Claude)
 				applyClaudeLaunchPrefs(&prefs, *value.Claude, result.Sources, "accounts", index)
 				if value.Claude.Cache1H == nil {
 					// No account-level override: inherit the already-resolved
@@ -1191,11 +1191,7 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
 		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
-		result.WebSearchesPerSession = account.Claude.WebSearchesPerSession
-		result.AutoCompactWindow = account.Claude.AutoCompactWindow
-		result.TmuxTruecolor = account.Claude.TmuxTruecolor
-		result.CleanupPeriodDays = account.Claude.CleanupPeriodDays
-		result.RequireManagedCleanup = account.Claude.RequireManagedCleanup
+		copyClaudeLaunchPrefs(&result, *account.Claude)
 		// Zero is unset on both caps, so Load's inheritance already put the
 		// resolved top-level value here — same unconditional copy as Cache1H.
 		result.MaxSubagentSpawnDepth = account.Claude.MaxSubagentSpawnDepth
@@ -1373,6 +1369,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			value[claudeName] = map[string]any{
 				"webSearchesPerSession": account.Claude.WebSearchesPerSession,
 				"autoCompactWindow":     account.Claude.AutoCompactWindow,
+				"helperModel":           account.Claude.HelperModel,
 				"tmuxTruecolor":         account.Claude.TmuxTruecolor,
 				"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
 				"requireManagedCleanup": account.Claude.RequireManagedCleanup,
@@ -1441,6 +1438,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		claudeName: map[string]any{
 			"webSearchesPerSession": config.Claude.WebSearchesPerSession,
 			"autoCompactWindow":     config.Claude.AutoCompactWindow,
+			"helperModel":           config.Claude.HelperModel,
 			"tmuxTruecolor":         config.Claude.TmuxTruecolor,
 			"cleanupPeriodDays":     config.Claude.CleanupPeriodDays,
 			"requireManagedCleanup": config.Claude.RequireManagedCleanup,

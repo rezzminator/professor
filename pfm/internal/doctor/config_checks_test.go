@@ -216,9 +216,19 @@ func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
 	) {
 		t.Fatalf("missing-key row absent: %s", output.String())
 	}
-	want := "doctor: config: missing key claude.autoCompactWindow (default 100000) — informational: unset, its default applies\n"
-	if !strings.Contains(output.String(), want) || warnings != 0 || failures != 0 {
-		t.Fatalf("missing-key row=%q warnings=%d failures=%d, want %q 0/0", output.String(), warnings, failures, want)
+	for _, want := range []string{
+		"doctor: config: missing key claude.autoCompactWindow (default 100000) — informational: unset, its default applies\n",
+		"doctor: config: missing key claude.helperModel (default claude-haiku-5-5) — informational: unset, its default applies\n",
+	} {
+		if !strings.Contains(output.String(), want) || warnings != 0 || failures != 0 {
+			t.Fatalf(
+				"missing-key row=%q warnings=%d failures=%d, want %q 0/0",
+				output.String(),
+				warnings,
+				failures,
+				want,
+			)
+		}
 	}
 	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)

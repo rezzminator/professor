@@ -11,7 +11,7 @@ import (
 func TestResolveSources(t *testing.T) {
 	home := t.TempDir()
 	machine := pfmconfig.Defaults(home, []string{home + "/.claude/projects/a", home + "/.cc/2/projects/b"})
-	defaultWindowFound := false
+	defaultWindowFound, defaultHelperFound := false, false
 	for _, row := range Resolve(machine, 0) {
 		if row.Knob.Name == "autoCompactWindow" {
 			defaultWindowFound = true
@@ -19,22 +19,32 @@ func TestResolveSources(t *testing.T) {
 				t.Errorf("default auto compact window=%#v", row)
 			}
 		}
+		if row.Knob.Name == "helperModel" {
+			defaultHelperFound = true
+			if row.Value != "claude-haiku-5-5" || row.Won != "default" {
+				t.Errorf("default helper model=%#v", row)
+			}
+		}
 	}
-	if !defaultWindowFound {
-		t.Fatal("default auto compact window row missing")
+	if !defaultWindowFound || !defaultHelperFound {
+		t.Fatalf("default rows missing: auto compact window=%t helper model=%t", defaultWindowFound, defaultHelperFound)
 	}
 	machine.Claude.Theme = "dark"
 	machine.Claude.AutoCompactWindow = 250000
+	machine.Claude.HelperModel = "claude-haiku-4-5"
 	machine.Sources["claude.theme"] = pfmconfig.SourceFile
 	machine.Sources["claude.autoCompactWindow"] = pfmconfig.SourceFile
+	machine.Sources["claude.helperModel"] = pfmconfig.SourceFile
 	machine.MCPServers["harvester"] = pfmconfig.MCPServer{Enabled: true}
 	machine.Sources["harvester.enabled"] = pfmconfig.SourceFile
 	prefs := machine.Claude
 	prefs.Theme = "light"
 	prefs.AutoCompactWindow = 50000
+	prefs.HelperModel = "claude-sonnet-5-5"
 	machine.Accounts[1].Claude = &prefs
 	machine.Sources["accounts[1].claude.theme"] = pfmconfig.SourceFile
 	machine.Sources["accounts[1].claude.autoCompactWindow"] = pfmconfig.SourceFile
+	machine.Sources["accounts[1].claude.helperModel"] = pfmconfig.SourceFile
 	get := func(account int, name string) Resolved {
 		for _, row := range Resolve(machine, account) {
 			if row.Knob.Name == name {
@@ -67,6 +77,12 @@ func TestResolveSources(t *testing.T) {
 	}
 	if row := get(2, "autoCompactWindow"); row.Won != "account" || row.Value != "50000" {
 		t.Errorf("account auto compact window=%#v", row)
+	}
+	if row := get(0, "helperModel"); row.Won != "config" || row.Value != "claude-haiku-4-5" {
+		t.Errorf("machine helper model=%#v", row)
+	}
+	if row := get(2, "helperModel"); row.Won != "account" || row.Value != "claude-sonnet-5-5" {
+		t.Errorf("account helper model=%#v", row)
 	}
 	if row := get(0, "functionHooks"); row.Won != "constant" || row.Value != "1" {
 		t.Errorf("function hooks=%#v", row)

@@ -222,6 +222,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("theme", config.Claude.Theme)
 	printClaude("webSearchesPerSession", config.Claude.WebSearchesPerSession)
 	printClaude("autoCompactWindow", config.Claude.AutoCompactWindow)
+	printClaude("helperModel", config.Claude.HelperModel)
 	printClaude("tmuxTruecolor", config.Claude.TmuxTruecolor)
 	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
 	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)

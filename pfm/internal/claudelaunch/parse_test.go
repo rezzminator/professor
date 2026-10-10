@@ -113,6 +113,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "100000" {
 					t.Error("auto compact window missing")
 				}
+			case "helperModel":
+				if parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"] != "claude-haiku-5-5" {
+					t.Error("helper model missing")
+				}
 			case "tmuxTruecolor":
 				if parsed.SettingsEnv["CLAUDE_CODE_TMUX_TRUECOLOR"] != "1" {
 					t.Error("truecolor missing")

@@ -206,13 +206,24 @@ func promptCacheTTL(cache1h bool) string {
 	return cacheTTL5M
 }
 
+// helperModel is the model of Claude Code's helper calls: the configured one,
+// else Haiku 5.5. Never empty, so an unset value cannot reach Claude Code as an
+// empty model name.
+func helperModel(prefs pfmconfig.ClaudePrefs) string {
+	if prefs.HelperModel == "" {
+		return pfmconfig.DefaultHelperModel
+	}
+	return prefs.HelperModel
+}
+
 func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) map[string]any {
 	settings := map[string]any{knobOutputStyle: defaultWord, knobCleanupPeriodDays: prefs.CleanupPeriodDays}
 	env := map[string]string{
-		envWebSearches:       strconv.FormatInt(prefs.WebSearchesPerSession, 10),
-		envAutoCompactWindow: strconv.FormatInt(prefs.AutoCompactWindow, 10),
-		envAgentTeams:        "0",
-		envFunctionHooks:     "1",
+		envWebSearches:             strconv.FormatInt(prefs.WebSearchesPerSession, 10),
+		envAutoCompactWindow:       strconv.FormatInt(prefs.AutoCompactWindow, 10),
+		envAnthropicSmallFastModel: helperModel(prefs),
+		envAgentTeams:              "0",
+		envFunctionHooks:           "1",
 	}
 	depth := prefs.MaxSubagentSpawnDepth
 	if depth < 1 {

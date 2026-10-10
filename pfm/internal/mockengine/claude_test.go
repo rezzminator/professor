@@ -72,7 +72,7 @@ func claudeArgs(extra ...string) []string {
 	return append(
 		extra,
 		"--settings",
-		`{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`,
+		`{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`,
 		"--model",
 		"claude-sonnet-4-5-fixture",
 	)

@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -20,7 +21,7 @@ const (
 var headlessKeys = map[string]string{
 	knobCache1H: kindBool, knobSystemPrompt: kindString, knobNativeCursor: kindBool,
 	knobMaxSubagentSpawnDepth: kindInt, knobMaxConcurrentSubagents: kindInt,
-	knobWebSearchesPerSession: kindInt, knobAutoCompactWindow: kindInt,
+	knobWebSearchesPerSession: kindInt, knobAutoCompactWindow: kindInt, knobHelperModel: kindString,
 	knobTmuxTruecolor: kindBool, knobTheme: kindString,
 	knobCleanupPeriodDays: kindInt,
 }
@@ -72,6 +73,12 @@ func checkValue(key, kind string, value any) error {
 		}
 		return fmt.Errorf("%s: expected positive int", key)
 	}
+	if key == knobHelperModel {
+		if text, ok := value.(string); ok && pfmconfig.ValidHelperModel(text) {
+			return nil
+		}
+		return fmt.Errorf("%s: expected a non-empty model name without whitespace", key)
+	}
 	switch kind {
 	case kindBool:
 		if _, ok := value.(bool); ok {
@@ -111,9 +118,11 @@ func RenderHeadless(settings map[string]any) (string, error) {
 	result := map[string]any{knobOutputStyle: defaultWord}
 	env := map[string]string{envFunctionHooks: "1"}
 	for _, knob := range Knobs {
-		if knob.Name == knobAutoCompactWindow {
+		switch knob.Name {
+		case knobAutoCompactWindow:
 			env[envAutoCompactWindow] = strconv.FormatInt(knob.Default.(int64), 10)
-			break
+		case knobHelperModel:
+			env[envAnthropicSmallFastModel] = knob.Default.(string)
 		}
 	}
 	for key, value := range settings {
@@ -149,6 +158,8 @@ func RenderHeadless(settings map[string]any) (string, error) {
 			env[envWebSearches] = strconv.FormatInt(mustInteger(value), 10)
 		case knobAutoCompactWindow:
 			env[envAutoCompactWindow] = strconv.FormatInt(mustInteger(value), 10)
+		case knobHelperModel:
+			env[envAnthropicSmallFastModel] = value.(string)
 		case knobTmuxTruecolor:
 			if value.(bool) {
 				env[envTmuxTruecolor] = "1"

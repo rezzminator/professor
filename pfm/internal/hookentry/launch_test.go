@@ -353,27 +353,32 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 	machine := config.Runtime{Config: config.Config{
 		Claude: config.ClaudePrefs{AutoCompactWindow: 100000},
 		Accounts: []config.Account{
-			{ID: 2, ConfigDir: accountDir, Claude: &config.ClaudePrefs{AutoCompactWindow: 50000}},
+			{
+				ID:        2,
+				ConfigDir: accountDir,
+				Claude:    &config.ClaudePrefs{AutoCompactWindow: 50000, HelperModel: "claude-sonnet-5-5"},
+			},
 		},
 	}}
 	for _, test := range []struct {
 		name, ambient, tmux, forced string
 		args                        []string
 		wantWindow                  int64
+		wantHelper                  string
 		session                     bool
 	}{
-		{"print account override", accountDir + "/.", "", "", []string{"-p", "hi"}, 50000, true},
-		{"forced resume", accountDir, "", "1", []string{"--resume", "X"}, 50000, true},
-		{"pfm socket", accountDir, "/tmp/tmux-1000/cc-1-2-3,123,0", "", []string{"--resume", "X"}, 50000, true},
-		{"unmatched ambient", "", "", "", []string{"-p", "hi"}, 100000, true},
-		{"plugin", accountDir, "", "", []string{"plugin", "install", "x"}, 0, false},
-		{"mcp", accountDir, "", "", []string{"mcp", "list"}, 0, false},
-		{"config", accountDir, "", "", []string{"config"}, 0, false},
-		{"agents query", accountDir, "", "", []string{"agents", "--json"}, 0, false},
-		{"version", accountDir, "", "", []string{"--version"}, 0, false},
-		{"short version", accountDir, "", "", []string{"-v"}, 0, false},
-		{"help", accountDir, "", "", []string{"-h"}, 0, false},
-		{"long help", accountDir, "", "", []string{"--help"}, 0, false},
+		{"print account override", accountDir + "/.", "", "", []string{"-p", "hi"}, 50000, "claude-sonnet-5-5", true},
+		{"forced resume", accountDir, "", "1", []string{"--resume", "X"}, 50000, "claude-sonnet-5-5", true},
+		{"pfm socket", accountDir, "/tmp/tmux-1000/cc-1-2-3,123,0", "", []string{"--resume", "X"}, 50000, "claude-sonnet-5-5", true},
+		{"unmatched ambient", "", "", "", []string{"-p", "hi"}, 100000, "", true},
+		{"plugin", accountDir, "", "", []string{"plugin", "install", "x"}, 0, "", false},
+		{"mcp", accountDir, "", "", []string{"mcp", "list"}, 0, "", false},
+		{"config", accountDir, "", "", []string{"config"}, 0, "", false},
+		{"agents query", accountDir, "", "", []string{"agents", "--json"}, 0, "", false},
+		{"version", accountDir, "", "", []string{"--version"}, 0, "", false},
+		{"short version", accountDir, "", "", []string{"-v"}, 0, "", false},
+		{"help", accountDir, "", "", []string{"-h"}, 0, "", false},
+		{"long help", accountDir, "", "", []string{"--help"}, 0, "", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", test.ambient)
@@ -403,7 +408,7 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 				}
 				return
 			}
-			for _, want := range claudelaunch.SessionEnv(config.ClaudePrefs{AutoCompactWindow: test.wantWindow}) {
+			for _, want := range claudelaunch.SessionEnv(config.ClaudePrefs{AutoCompactWindow: test.wantWindow, HelperModel: test.wantHelper}) {
 				if count := countEnvironmentEntry(got, want); count != 1 {
 					t.Errorf("%q occurs %d times in exec env", want, count)
 				}
@@ -411,6 +416,14 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 				if count := countEnvironmentEntry(got, name+"=inherited"); count != 0 {
 					t.Errorf("inherited %q survived %d times in exec env", name, count)
 				}
+			}
+			// The helper model is the account's, else Haiku 5.5, whatever the shell exported.
+			wantHelper := test.wantHelper
+			if wantHelper == "" {
+				wantHelper = "claude-haiku-5-5"
+			}
+			if want := "ANTHROPIC_SMALL_FAST_MODEL=" + wantHelper; countEnvironmentEntry(got, want) != 1 {
+				t.Errorf("%q occurs %d times in exec env, want once", want, countEnvironmentEntry(got, want))
 			}
 			if countEnvironmentEntry(got, "PFM_KEEP=kept") != 1 {
 				t.Errorf("unrelated env lost from exec: %q", got)

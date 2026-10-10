@@ -144,6 +144,7 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		TmuxTruecolor:         true,
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
+		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
 		CostLedger:            true,
 
@@ -303,6 +304,7 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		TmuxTruecolor:         true,
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
+		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
 		CostLedger:            true,
 

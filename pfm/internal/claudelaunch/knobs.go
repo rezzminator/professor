@@ -3,6 +3,7 @@ package claudelaunch
 import (
 	"strings"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -15,6 +16,7 @@ const (
 	knobMaxConcurrentSubagents     = "maxConcurrentSubagents"
 	knobWebSearchesPerSession      = "webSearchesPerSession"
 	knobAutoCompactWindow          = "autoCompactWindow"
+	knobHelperModel                = "helperModel"
 	knobTmuxTruecolor              = "tmuxTruecolor"
 	knobTheme                      = "theme"
 	knobCleanupPeriodDays          = "cleanupPeriodDays"
@@ -258,6 +260,14 @@ var Knobs = func() []Knob {
 			SourceConfig,
 			int64(100000),
 			"Set the auto-compact window the compaction plugin reads.",
+		},
+		Knob{
+			knobHelperModel,
+			WireSettings,
+			"env." + envAnthropicSmallFastModel,
+			SourceConfig,
+			pfmconfig.DefaultHelperModel,
+			"Run Claude Code's helper calls (page summaries, web search, titles) on a small model, Haiku 5.5 unless configured.",
 		},
 		Knob{
 			knobTmuxTruecolor,

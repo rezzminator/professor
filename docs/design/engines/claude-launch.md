@@ -29,6 +29,7 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 - **One `--settings` payload carries almost everything.** Environment variables ride its `env` block and every other setting rides its own key. `--settings` outranks the project and account settings files, and its `env` overwrites the shell's value, so a launch value cannot be shadowed by a project file or an exported variable.
 - **Three things stay outside it.** `CLAUDE_CONFIG_DIR` is process environment because it chooses where Claude reads settings from; the unset list is `env -u` because a settings `env` block can set a variable but not remove one; `--system-prompt-file`, `--mcp-config` and the session verbs (`--session-id`, `--resume`, `--fork-session`, `--name`) are flags because no settings key replaces them; the autonomy pair, `--model` and `--effort` stay flags because a flag outranks its settings key.
 - **Defaults come only from `pfm.config.json`.** A per-launch choice changes one launch; no door carries a default of its own ([pfm-home.md](pfm-home.md#decisions)).
+- **Helper calls run on Haiku, always.** Claude Code's helper calls (the page summary behind WebFetch, session and tool-use-summary titles, a hook's prompt, and the WebSearch call while its server flag `tengu_plum_vx3` is true) take their model from one resolver that reads `ANTHROPIC_SMALL_FAST_MODEL` first; unset, a gateway host runs them on the main chat's model. `helperModel` carries the variable through every door, defaulting to the full id `claude-haiku-5-5`, and the hygiene unset stays so an exported value never reaches a launch the settings do not carry. `ANTHROPIC_DEFAULT_HAIKU_MODEL` is not used: it redefines the `haiku` alias, so it would move Haiku sub-agents too. A caller's own `--settings` on a headless run replaces pfm's whole payload, this key included.
 - **Agent teams are off, always.** `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` is a constant row, not a config key, and no project file needs to carry it.
 - **The plugin env rides the launch.** `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and the auto-compact window are launch values, never account `settings.json` keys; keys an older install wrote there stay, outranked by `--settings`. The variable does not override a cached `cachedGrowthBookFeatures.tengu_plugin_hooks_modules: false` in `{configDir}/.claude.json`, which a gateway host never refreshes; `pfm doctor`'s `function-hook-modules` row reports it.
 
@@ -79,6 +80,7 @@ type Knob struct {
 | `maxConcurrentSubagents` | settings `env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | config | unset (Claude's own default) |
 | `webSearchesPerSession` | settings `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | config | `9007199254740991` |
 | `autoCompactWindow` | settings `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` | config | `100000` |
+| `helperModel` | settings `env.ANTHROPIC_SMALL_FAST_MODEL`: the model of Claude Code's helper calls (WebFetch's page summary, the WebSearch call, session and tool-use-summary titles); the main chat and the sub-agents keep their own models. Every door carries it: `Render`, the passthrough launcher (`SessionEnv`, as a process-environment value replacing an inherited one), a headless run's `--settings`, where it is the default or `helperModel` from `--pfm-settings`, since headless reads no config ([claude-headless.md](claude-headless.md#decisions)) | config | `claude-haiku-5-5` |
 | `tmuxTruecolor` | settings `env.CLAUDE_CODE_TMUX_TRUECOLOR=1` | config | `true` |
 | `noFlicker` | settings `env.CLAUDE_CODE_NO_FLICKER=1`, keeping the fullscreen renderer past Claude's boot canary; not on a query | account settings `tui: fullscreen` | off |
 | agent teams | settings `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` | constant | — |
@@ -152,6 +154,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `maxConcurrentSubagents` | unset | sub-agent concurrency |
 | `webSearchesPerSession` | `9007199254740991` | web-search cap |
 | `autoCompactWindow` | `100000` | auto-compact window |
+| `helperModel` | `claude-haiku-5-5` | the helper-call model (`ANTHROPIC_SMALL_FAST_MODEL`); a full model id or alias with no whitespace, an empty value is refused; an account may override it |
 | `tmuxTruecolor` | `true` | truecolor under tmux |
 | `noFlicker` | off | not a config key: on when the account's `settings.json` has top-level `"tui": "fullscreen"` |
 | `costLedger` | `true` | the per-call cost ledger ([cost-ledger.md](cost-ledger.md)); machine-wide, an account-level value is refused |

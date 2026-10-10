@@ -27,6 +27,7 @@ func fakeBinary(t *testing.T, path, stdout, stderr string, code int) {
 		"for arg; do printf '%s\\n' \"$arg\"; done > " + quote(path+".argv") + "\n" +
 		"printf '%s' " + quote(stdout) + "\n" +
 		"printf '%s' " + quote(stderr) + " >&2\n" +
+		"printf '%s\n' \"$ENGINE_SYNC_WORKBENCH_MARKER\" > " + quote(path+".marker") + "\n" +
 		"exit " + strconv.Itoa(code) + "\n"
 	if err := testjail.WriteExecutable(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -189,5 +190,19 @@ func TestTargetsPath(t *testing.T) {
 				t.Fatalf("TargetsPath = %q, want %q", got, testCase.want)
 			}
 		})
+	}
+}
+
+func TestRunnerSuppliesWorkbenchMarker(t *testing.T) {
+	for _, childEnv := range [][]string{nil, {"ENGINE_SYNC_WORKBENCH_MARKER=stale", "HOME=/fixture"}} {
+		runner, binary := fakeRunner(t, "ok", "", 0)
+		runner.ChildEnv = childEnv
+		if _, err := runner.run(context.Background(), []string{"version"}); err != nil {
+			t.Fatal(err)
+		}
+		marker, err := os.ReadFile(binary + ".marker")
+		if err != nil || strings.TrimSpace(string(marker)) != paths.WorkbenchManifest("") {
+			t.Fatalf("workbench marker = %q (%v), want %q", marker, err, paths.WorkbenchManifest(""))
+		}
 	}
 }

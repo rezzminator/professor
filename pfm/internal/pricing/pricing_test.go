@@ -2,6 +2,7 @@ package pricing
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"reflect"
 	"strings"
@@ -474,35 +475,6 @@ func TestUsageBlockUnknownIterations(t *testing.T) {
 	}
 }
 
-// An advised response's requests each sit under the long tier's threshold
-// while their sum does not: each is priced at the tier its own context selects.
-func TestClaudeRequestsCostPartsPricesEachRequestAtItsOwnTier(t *testing.T) {
-	haiku := Row{
-		Key: "claude-haiku-5-5", Engine: EngineClaude,
-		Rates: Rates{In: ptr(1), Out: ptr(5), Hit: ptr(0.1), W5m: ptr(1.25), W1h: ptr(2)},
-		Long:  &Long{Above: 100000, Rates: Rates{In: ptr(2), Out: ptr(10), Hit: ptr(0.2), W5m: ptr(2.5), W1h: ptr(4)}},
-	}
-	requests := []ClaudeUsage{
-		{Input: 2, Output: 26, CacheRead: 87277, Write5m: 552},
-		{Input: 2, Output: 1214, CacheRead: 87829, Write5m: 890},
-	}
-	part := func(count int64, rate float64) float64 { return float64(count) * rate / 1e6 }
-	want := ClaudeParts{
-		Input:     part(2, 1) + part(2, 1),
-		Output:    part(26, 5) + part(1214, 5),
-		Write5m:   part(552, 1.25) + part(890, 1.25),
-		CacheRead: part(87277, 0.1) + part(87829, 0.1),
-	}
-	if parts, ok := haiku.ClaudeRequestsCostParts(requests); !ok || parts != want {
-		t.Fatalf("ClaudeRequestsCostParts = %+v, %v; want %+v, each request at the base tier", parts, ok, want)
-	}
-	unpublished := haiku
-	unpublished.W5m = nil
-	if _, ok := unpublished.ClaudeRequestsCostParts(requests); ok {
-		t.Fatal("ClaudeRequestsCostParts priced a request whose write rate is unpublished")
-	}
-}
-
 func TestClaudeCostPartsPricesEachColumnAndSumsInOrder(t *testing.T) {
 	opus := Row{
 		Key: "claude-opus-5-5", Engine: EngineClaude,
@@ -564,4 +536,103 @@ func TestCodexCost(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A transcript is Claude Code's whatever model wrote it: the model-gateway's
+// chatgpt route writes a Codex model's usage as input_tokens = total - cached -
+// written, cache read = cached, cache creation = written. A Codex row prices
+// those fields at its in, cached and out rates; Codex bills no cache write, so
+// a written token bills at in, in its write column. A Claude row prices each
+// request as ClaudeCostParts.
+func TestResponseRequestsCostParts(t *testing.T) {
+	sol := Row{
+		Key: "gpt-6-sol", Engine: EngineCodex, Rates: Rates{In: ptr(2), Out: ptr(10), Cached: ptr(0.2)},
+		Long: &Long{Above: 272000, Rates: Rates{In: ptr(4), Out: ptr(15), Cached: ptr(0.4)}},
+	}
+	noCached := Row{Key: "gpt-x", Engine: EngineCodex, Rates: Rates{In: ptr(1), Out: ptr(2)}}
+	haiku := Row{
+		Key: "claude-haiku-5-5", Engine: EngineClaude,
+		Rates: Rates{In: ptr(1), Out: ptr(5), Hit: ptr(0.1), W5m: ptr(1.25), W1h: ptr(2)},
+		Long:  &Long{Above: 100000, Rates: Rates{In: ptr(2), Out: ptr(10), Hit: ptr(0.2), W5m: ptr(2.5), W1h: ptr(4)}},
+	}
+	unpublished := haiku
+	unpublished.W5m = nil
+	// an advised response's requests each sit under the long tier's threshold while their sum does not
+	advised := []ClaudeUsage{
+		{Input: 2, Output: 26, CacheRead: 87277, Write5m: 552},
+		{Input: 2, Output: 1214, CacheRead: 87829, Write5m: 890},
+	}
+	part := func(count int64, rate float64) float64 { return float64(count) * rate / 1e6 }
+	// count × (rate / 1e6) at run time, the Codex arithmetic.
+	perToken := func(count int64, rate float64) float64 { return float64(count) * (rate / 1e6) }
+	for _, tc := range []struct {
+		name     string
+		row      Row
+		requests []ClaudeUsage
+		want     ClaudeParts
+		ok       bool
+	}{
+		{
+			"codex row: input, cache read and output each at its rate, a write at in in its column", sol,
+			[]ClaudeUsage{{Input: 100000, Output: 1e6, CacheRead: 150000, Write5m: 6000, Write1h: 4000}},
+			ClaudeParts{
+				Input: perToken(100000, 2), Output: perToken(1e6, 10), CacheRead: perToken(150000, 0.2),
+				Write5m: perToken(6000, 2), Write1h: perToken(4000, 2),
+			},
+			true,
+		},
+		{
+			"codex row: the long tier when input + cache read + write is above its threshold", sol,
+			[]ClaudeUsage{{Input: 100000, Output: 1e6, CacheRead: 170001, Write5m: 2000}},
+			ClaudeParts{
+				Input: perToken(100000, 4), Output: perToken(1e6, 15), CacheRead: perToken(170001, 0.4),
+				Write5m: perToken(2000, 4),
+			},
+			true,
+		},
+		{
+			"codex row: each request at the tier its own context selects", sol,
+			[]ClaudeUsage{{Input: 200000, Output: 10}, {Input: 300000, Output: 10}},
+			ClaudeParts{Input: perToken(200000, 2) + perToken(300000, 4), Output: perToken(10, 10) + perToken(10, 15)},
+			true,
+		},
+		{
+			"codex row: an unpublished cached rate on a cache read", noCached,
+			[]ClaudeUsage{{Input: 10, CacheRead: 5}},
+			ClaudeParts{},
+			false,
+		},
+		{
+			"codex row: an unpublished cached rate on no cache read", noCached,
+			[]ClaudeUsage{{Input: 1e6, Output: 1e6}},
+			ClaudeParts{Input: perToken(1e6, 1), Output: perToken(1e6, 2)},
+			true,
+		},
+		{
+			"claude row: each request at the tier its own context selects", haiku, advised,
+			ClaudeParts{
+				Input:     part(2, 1) + part(2, 1),
+				Output:    part(26, 5) + part(1214, 5),
+				Write5m:   part(552, 1.25) + part(890, 1.25),
+				CacheRead: part(87277, 0.1) + part(87829, 0.1),
+			},
+			true,
+		},
+		{"claude row: an unpublished write rate", unpublished, advised, ClaudeParts{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tc.row.ResponseRequestsCostParts(tc.requests)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("ResponseRequestsCostParts = %+v, %v; want %+v, %v", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+	t.Run("a Codex thread's cost is the same function", func(t *testing.T) {
+		usage := ClaudeUsage{Input: 77000, Output: 14000, CacheRead: 33000, Write5m: 5000}
+		parts, ok := sol.ResponseCostParts(usage)
+		want, wantOK := sol.CodexCost(CodexUsage{Input: 115000, Cached: 33000, Output: 14000}, 115000)
+		if !ok || !wantOK || math.Abs(parts.Total()-want) > 1e-12 {
+			t.Fatalf("ResponseCostParts total = %v, %v; want CodexCost %v, %v", parts.Total(), ok, want, wantOK)
+		}
+	})
 }

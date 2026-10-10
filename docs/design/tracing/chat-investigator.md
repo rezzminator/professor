@@ -1,6 +1,6 @@
 # chat-investigator
 
-`chat-investigator` answers one mission about what happened in other chats — main chats, their sub-agents, Codex threads, OpenCode sessions — from their transcripts, each claim tied to a transcript line with its excerpt quoted. It is the open-hand investigation a main chat used to run in its own context, made specific: the prompt keeps what those runs did well and fixes what they did wrong or wasted, measured by six `agent-optimizer` audits of real investigation runs. It reads through `pfm transcript`, uses the chat MCP only to locate a chat and read its live state, writes no file but its digests, and spawns nothing.
+`chat-investigator` answers one mission about what happened in other chats — main chats, their sub-agents, Codex threads, OpenCode sessions — from their transcripts, each claim tied to a transcript line with its excerpt quoted. It is the open-hand investigation a main chat used to run in its own context, made specific: the prompt keeps what those runs did well and fixes what they did wrong or wasted, measured by six `agent-optimizer` audits of real investigation runs. It reads through `pfm transcript`, uses the chat MCP only to locate a chat and read its live state, writes no file but its digests and its readers' evidence rows, and spawns only `sub-investigator` readers on `haiku` for digests over 30 KB.
 
 ## Contents
 
@@ -8,7 +8,9 @@
 - [Identity](#identity)
 - [The brief](#the-brief)
 - [The prompt](#the-prompt)
-- [Why it spawns nothing](#why-it-spawns-nothing)
+- [The readers](#the-readers)
+- [Why its spawning is capped](#why-its-spawning-is-capped)
+- [Bench](#bench)
 - [Not part of the design](#not-part-of-the-design)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 
@@ -31,10 +33,10 @@
 | Kind | original agent, `templates/global/agents/chat-investigator.md`, linked by `pfm install` |
 | Class | none: any caller, the user included, may ask for it |
 | Model, effort | `sonnet`, `high` — the work is locating, digesting and quoting, as `tracer`'s is; a caller whose mission is judgment over many runs passes `opus` at spawn |
-| Tools | `Read, Grep, Glob, Bash`, and `chat_ls`, `chat_find`, `chat_status`, `chat_last` from the professor MCP |
+| Tools | `Read, Grep, Glob, Bash, Agent`, and `chat_ls`, `chat_find`, `chat_status`, `chat_last` from the professor MCP |
 | Budget | 40 tool calls |
-| Spawns | nothing |
-| Writes | digests under `/tmp/chat-investigator/`, through `pfm transcript show --out`; the answer is its final message |
+| Spawns | `sub-investigator` only, one per digest over 30 KB: at most 6 in a first round and 3 in a second |
+| Writes | digests under `/tmp/chat-investigator/`, through `pfm transcript show --out`, and its readers' `.ev` rows beside them; the answer is its final message |
 
 ## The brief
 
@@ -64,9 +66,24 @@ Each rule and the failure in the audited runs it fixes:
 | The answer is the final message, no report file | Two runs had a report `Write` refused and generated the report twice |
 | Every Bash command opens with `emulate sh 2>/dev/null;` | zsh aborted `echo ====` chains in three runs |
 
-## Why it spawns nothing
+## The readers
 
-An investigation brief without a cap fanned out to 17 agents three levels deep in 13 minutes for $29.47, with 25 more forks planned; stopping the two parents left 14 children running. The same mission's sibling, one agent reading 17 digests alone, cost $3.91. The investigator holds no `Agent` tool: a mission too large for its 40 calls returns what it read and the targets left, and the caller decides the split, dispatching several investigators in one message, one target set each.
+Every call re-sends the investigator's whole context, so a digest it reads is paid for again on every later call at `sonnet` price. A digest under 30 KB it reads itself; a larger one goes to a `sub-investigator` on `haiku` at `medium` (`templates/global/agents/sub-investigator.md`, visible to `chat-investigator` only), whose card names the digest, the target, its `.ev` output and numbered orders. Orders name lines — "every user prompt that rejects a result", "each Write and its path" — never a conclusion. The reader writes one tab-separated row per line found: `D{n}` (the digest line), the excerpt copied character for character, the order, what the line is. The investigator checks every `D{n}` row against its digest in one `awk` call, drops a `BAD` row, then judges from the rows, opening the digest only at a cited line.
+
+## Why its spawning is capped
+
+An investigation brief without a cap fanned out to 17 agents three levels deep in 13 minutes for $29.47, with 25 more forks planned; stopping the two parents left 14 children running. The same mission's sibling, one agent reading 17 digests alone, cost $3.91. So the tree is two levels by construction: `sub-investigator` holds no `Agent` tool, and the investigator spawns at most 6 readers and then 3. A mission larger than that returns what was read and the targets left, and the caller decides the split, dispatching several investigators in one message, one target set each.
+
+## Bench
+
+Three rounds of iterative improvement, each version run twice per rung through a throwaway relay chat, every answer graded blind against an answer key; Q is the mean sub-ask score times the share of sampled evidence claims correct.
+
+| Rung | v0, one `sonnet` reader | v1, `haiku` readers (shipped) |
+| --- | --- | --- |
+| 7 sub-agent digests under 30 KB | Q .90 / .91, $0.24 / $0.32 | Q 1.00 / 1.00, $0.19 / $0.21, no reader spawned |
+| One main chat, 523 KB digest, 170 prompts | Q 1.00 / 1.00, $0.61 / $0.54, peak context 124–128K | Q 1.00 at $0.45 with 4 readers, peak context 76K; Q .89 at $0.50 in the run that read the digest itself |
+
+Two candidates lost on the large rung and were reverted. Barring the investigator from a large digest entirely (v2) cut the cost to $0.24 / $0.37 but dropped precision to .77 / .89: with no exchange around a reader's row, it counted plain questions and status pings as corrections. Letting it open 20-line windows around cited rows (v3) restored Q 1.00 / 1.00 at $0.50 / $0.60, no better per dollar than v1. The split pays only on digests well over 30 KB; most of a large run's cost is still the judge reading enough context to rule.
 
 ## Not part of the design
 
@@ -81,7 +98,7 @@ An investigation brief without a cap fanned out to 17 agents three levels deep i
 
 | Surface | File |
 | --- | --- |
-| The agent | `templates/global/agents/chat-investigator.md` |
+| The agent and its reader | `templates/global/agents/chat-investigator.md`, `templates/global/agents/sub-investigator.md` |
 | The digest it reads through | `pfm transcript` (`pfm/internal/transcript/digest/`) and `templates/global/skills/chatlog/SKILL.md` |
 | The timeline and dollar source | `pfm tokens --timeline` |
 | Name, sub-agent and liveness lookups | `pfm transcript locate`, `pfm transcript agents`, `pfm ls --all --tsv` |

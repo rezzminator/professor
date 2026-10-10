@@ -137,22 +137,22 @@ func TestLedgerSpendsAddUpToTheSessionTotal(t *testing.T) {
 	}
 }
 
-// What the launch recorded outranks the comparison, an unreadable ledger outranks Claude Code's
-// total, and no marker is ever raised without a Claude Code total to compare.
+// What the launch recorded outranks everything, an unreadable ledger outranks Claude Code's total,
+// and no marker is ever raised without a Claude Code total to compare.
 func TestSpendMarkerPrecedence(t *testing.T) {
 	present := costledger.Ledger{Present: true}
 	cases := []struct {
 		name       string
 		books      ledgerBooks
 		claude     float64
-		ledgerUSD  float64
 		loggedUSD  float64
 		logged     bool
+		beforeUSD  float64
 		wantMarker string
 	}{
 		{
 			name: "sink failed beats a gap", books: ledgerBooks{ledger: present, marker: claudelaunch.CostLedgerFailed},
-			claude: 10, ledgerUSD: 1, wantMarker: markerSinkFailed,
+			claude: 10, wantMarker: markerSinkFailed,
 		},
 		{
 			name:       "preempted beats an unreadable ledger",
@@ -169,25 +169,62 @@ func TestSpendMarkerPrecedence(t *testing.T) {
 			name: "unreadable beats a gap", books: ledgerBooks{err: errors.New("x"), marker: claudelaunch.CostLedgerOn},
 			claude: 10, wantMarker: markerLedgerUnreadable,
 		},
-		{
-			name: "a gap on a ledger", books: ledgerBooks{ledger: present, marker: claudelaunch.CostLedgerOn},
-			claude: 10, ledgerUSD: 9, wantMarker: markerLedgerGap,
-		},
-		{
-			name: "a ledger above claude code is a gap too", books: ledgerBooks{ledger: present},
-			claude: 9, ledgerUSD: 10, wantMarker: markerLedgerGap,
-		},
-		{name: "no claude code total, nothing to compare", books: ledgerBooks{ledger: present}, ledgerUSD: 9},
+		{name: "a ledger below claude code raises no marker", books: ledgerBooks{ledger: present}, claude: 10},
 		{
 			name: "no ledger, transcripts below", books: ledgerBooks{}, claude: 10, loggedUSD: 9, logged: true,
 			wantMarker: markerUnlogged,
 		},
 		{name: "no ledger, transcripts unpriced: nothing to say", books: ledgerBooks{}, claude: 10, loggedUSD: 0},
 		{name: "no ledger, transcripts above claude code", books: ledgerBooks{}, claude: 5, loggedUSD: 9, logged: true},
+		{
+			name:       "spend before the ledger is named",
+			books:      ledgerBooks{ledger: present, marker: claudelaunch.CostLedgerOn},
+			claude:     83.2,
+			beforeUSD:  75.2,
+			wantMarker: markerPreLedger,
+		},
+		{
+			name: "spend before the ledger within the tolerance is not", books: ledgerBooks{ledger: present},
+			claude: 83.2, beforeUSD: 0.4,
+		},
+		{
+			name:       "a failed sink beats spend before the ledger",
+			books:      ledgerBooks{ledger: present, marker: claudelaunch.CostLedgerFailed},
+			claude:     83.2,
+			beforeUSD:  75.2,
+			wantMarker: markerSinkFailed,
+		},
+		{
+			name: "an unreadable ledger beats spend before it", books: ledgerBooks{err: errors.New("x")},
+			claude: 83.2, beforeUSD: 75.2, wantMarker: markerLedgerUnreadable,
+		},
 	}
 	for _, tc := range cases {
-		if got := spendMarker(tc.books, tc.claude, tc.ledgerUSD, tc.loggedUSD, tc.logged); got != tc.wantMarker {
+		if got := spendMarker(tc.books, tc.claude, tc.loggedUSD, tc.logged, tc.beforeUSD); got != tc.wantMarker {
 			t.Errorf("%s: marker %q, want %q", tc.name, got, tc.wantMarker)
+		}
+	}
+}
+
+// The one dollar amount is the ledger plus what preceded it; Claude Code's own total leads only
+// when it is ahead by more than the tolerance (max of a cent and half a percent of its total).
+func TestCompleteSpendIsTheLedgerPlusBeforeUnlessClaudeCodeIsAheadBeyondTheTolerance(t *testing.T) {
+	cases := []struct {
+		name                        string
+		ledger, before, claude, one float64
+	}{
+		{name: "equal", ledger: 8.003, claude: 8.003, one: 8.003},
+		{name: "claude code ahead within the tolerance", ledger: 8.003, claude: 8.01, one: 8.003},
+		{name: "claude code ahead beyond it: a call the ledger has not seen", ledger: 8.003, claude: 8.6, one: 8.6},
+		{name: "claude code behind: the ledger holds what it lost", ledger: 10.003, claude: 8, one: 10.003},
+		{name: "no claude code figure", ledger: 8.003, one: 8.003},
+		{name: "a session older than its ledger", ledger: 8.003, before: 75.2011, claude: 83.203, one: 83.2041},
+		{name: "older, claude code's total not yet read", ledger: 8.003, before: 75.2011, one: 83.2041},
+		{name: "older, claude code ahead of both", ledger: 8.003, before: 75.2011, claude: 90, one: 90},
+	}
+	for _, tc := range cases {
+		if got := completeSpend(tc.ledger, tc.before, tc.claude); math.Abs(got-tc.one) > 1e-9 {
+			t.Errorf("%s: completeSpend = %v, want %v", tc.name, got, tc.one)
 		}
 	}
 }

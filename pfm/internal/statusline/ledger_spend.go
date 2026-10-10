@@ -19,9 +19,6 @@ import (
 // its agent and every agent below it. A state the main line must flag carries one of these
 // markers, none with an amount in it: the amounts behind them are `pfm tokens`'.
 const (
-	// markerLedgerGap: the ledger total differs from Claude Code's by more than ledgerTolerance,
-	// so the ledger is incomplete (or Claude Code's total is).
-	markerLedgerGap = "ledger≠cc"
 	// markerSinkFailed: the cost sink could not be armed for this launch.
 	markerSinkFailed = "sink failed"
 	// markerPreempted: the user's own telemetry settings kept the ledger from starting.
@@ -33,6 +30,9 @@ const (
 	markerUnlogged = "unlogged"
 	// markerLedgerUnreadable: the ledger file exists but could not be read.
 	markerLedgerUnreadable = "ledger unreadable"
+	// markerPreLedger: the session spent money before its ledger began (it started, or ran a launch,
+	// without a sink); the one dollar amount holds it, no ledger row does.
+	markerPreLedger = "pre-ledger"
 
 	// ledgerToleranceFloor and ledgerToleranceShare: the ledger and Claude Code agree when they
 	// differ by at most the larger of one cent and half a percent of Claude Code's total.
@@ -89,12 +89,34 @@ func ledgerTolerance(claudeTotal float64) float64 {
 	return math.Max(ledgerToleranceFloor, ledgerToleranceShare*claudeTotal)
 }
 
+// preLedgerUSD is what the session spent before its ledger began, in dollars: what the cost-state
+// lines of its transcript (Claude Code's own totals at each exit) hold beyond the ledger's rows up
+// to that exit (costledger.BeforeLedger).
+func preLedgerUSD(rows []costledger.Row, spend agentSpend) float64 {
+	return float64(costledger.BeforeLedger(rows, spend.costStates)) / 1e6
+}
+
+// completeSpend is the session's one dollar amount when a ledger exists: the ledger's total plus
+// what came before it. Claude Code's own total leads only when it is ahead of that by more than
+// the tolerance (a call whose row has not reached the ledger yet, a launch that logged nothing);
+// within it the ledger's figure stands, so the main line adds up with the sub-agent rows and
+// `pfm tokens` to the cent.
+func completeSpend(ledgerUSD, beforeUSD, claudeTotal float64) float64 {
+	complete := ledgerUSD + beforeUSD
+	if claudeTotal-complete > ledgerTolerance(claudeTotal) {
+		return claudeTotal
+	}
+	return complete
+}
+
 // spendMarker is the one amount-free flag the main line carries, "" when nothing needs one. What
 // the launch recorded comes first: a launch whose ledger failed, was pre-empted or is off is not
 // logging, whatever file a previous launch of the session left. Then a ledger that could not be
-// read; then the ledger against Claude Code's total, or, with no ledger, the transcripts' logged
-// price against it (loggedUSD, valid when logged).
-func spendMarker(books ledgerBooks, claudeTotal, ledgerUSD, loggedUSD float64, logged bool) string {
+// read; then spend that precedes the ledger (beforeUSD, a fact of the files: it does not move with
+// a call in flight); then, with no ledger, the transcripts' logged price against Claude Code's
+// total (loggedUSD, valid when logged). The ledger is never compared with Claude Code's total on
+// the line: `pfm tokens` names that difference.
+func spendMarker(books ledgerBooks, claudeTotal, loggedUSD float64, logged bool, beforeUSD float64) string {
 	switch books.marker {
 	case claudelaunch.CostLedgerFailed:
 		return markerSinkFailed
@@ -107,10 +129,10 @@ func spendMarker(books ledgerBooks, claudeTotal, ledgerUSD, loggedUSD float64, l
 	switch {
 	case books.err != nil:
 		return markerLedgerUnreadable
+	case beforeUSD > tolerance:
+		return markerPreLedger
 	case claudeTotal <= 0:
 		return ""
-	case books.ledger.Present && math.Abs(claudeTotal-ledgerUSD) > tolerance:
-		return markerLedgerGap
 	case !books.ledger.Present && logged && claudeTotal-loggedUSD > tolerance:
 		return markerUnlogged
 	}

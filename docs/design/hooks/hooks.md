@@ -96,7 +96,7 @@ pfm owns one Codex hook, `resume-unkill`: a `SessionStart` handler with matcher 
 
 ## OpenCode
 
-pfm ships no OpenCode hook and no plugin. OpenCode has no appendix hook; the staged prompt reaches it through the `instructions` config array (`pfm/internal/installer/opencode_instructions.go:12-17`). The guard that a Claude hook gives is a permission deny in `.opencode/opencode.jsonc` instead (`.claude/codex-build.json:8`).
+pfm ships no OpenCode hook and no plugin. OpenCode has no appendix hook; the staged prompt reaches it through the `instructions` config array (`pfm/internal/installer/opencode_instructions.go:12-17`). The guard that a Claude hook gives is a permission deny in `.opencode/opencode.jsonc` instead (the machine policy `templates/global/engine-sync/config.json` `opencode.permission`).
 
 ## Agent-attached hooks (not machine-global)
 
@@ -180,7 +180,7 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 
 ## Discrepancies
 
-1. **The Codex adapter says "Codex has NO hook layer"** (`.claude/codex-build.json:8`). Codex has one, and pfm reads and writes `{codex home}/hooks.json`. The conclusion (the guard is absolute in Codex) still holds, because pfm installs no Codex guard hook.
+1. **The Codex adapter says "Codex has NO hook layer"** (`.claude/engine-sync.json` `codex.rootAdapter`). Codex has one, and pfm reads and writes `{codex home}/hooks.json`. The conclusion (the guard is absolute in Codex) still holds, because pfm installs no Codex guard hook.
 2. **`docs/BLUEPRINT.md` lists "statusline" among the hooks** in its tree diagram; it is a `statusLine` key in the launch payload, and the list omits the guard and the mirror sync.
 3. **Twins differ.** `pfm-guard.sh` and `guard-stamp.sh` differ between `.claude/scripts/` and `templates/project/scripts/`; `format-md.sh` and `codex-sync.sh` are identical. The difference is not reviewed here.
 
@@ -204,6 +204,6 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 | The project template | `templates/project/settings.json`, `templates/project/scripts/`, `templates/refresh-map.json` | The project-tier hooks and their sources |
 | The scaffold | `pfm/internal/professor/scaffold.go:29-33` | Where `pfm init` puts them |
 | This repo's install | `.claude/settings.json`, `.claude/scripts/` | The project tier this repo runs |
-| The engine adapters | `.claude/codex-build.json` | What Codex and OpenCode are told about hooks |
+| The engine adapters | `.claude/engine-sync.json` | What Codex and OpenCode are told about hooks |
 | The CLI surface | `docs/dev/pfm-surface.md` | The `doctor`, `install` and `internal` rows |
 | The setup docs | `docs/SETUP.md`, `docs/BLUEPRINT.md`, `docs/references/memory-backup.md` | What an adopter is told to install |

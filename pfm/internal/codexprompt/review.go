@@ -19,9 +19,8 @@ import (
 // '[PROMPT]'") — a scoped review is prompt-only.
 const (
 	codeReviewCommand = "/code-review"
-	// codeReviewDefaultModel is the default tier map's entry for the review
-	// alias, the model engine-sync's compiler emits with no config of its own
-	// (engine-sync internal/codexgen/config.go defaultConfig, opus).
+	// codeReviewDefaultModel is Professor's review model, supplied to
+	// engine-sync by templates/global/engine-sync/config.json's model map.
 	codeReviewDefaultModel = "gpt-6.1-sol"
 	codeReviewPrompt       = "Review the uncommitted changes only in your task's own files (name them, space " +
 		"separated). Ignore every other path. Report correctness bugs only, most severe first."
@@ -71,8 +70,8 @@ var codeReviewFlags = []string{"--fix", "--comment", "--post", "--no-post"}
 
 // rewriteCodeReview replaces every /code-review invocation in text with the
 // Codex shell review command, leaving the prose around it exactly as it was.
-// The model is the default tier map's review model, the one a project build
-// with no model map of its own emits.
+// The model is Professor's review model, independent of engine-sync's
+// neutral model defaults.
 func rewriteCodeReview(text string) string {
 	if !strings.Contains(text, codeReviewCommand) {
 		return text

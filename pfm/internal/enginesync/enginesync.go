@@ -169,13 +169,28 @@ func (runner Runner) run(ctx context.Context, args []string) (deps.RunResult, er
 		obs.Logger(ctx).Error("engine-sync resolve", obs.FieldCmd, strings.Join(args, " "), obs.FieldErr, err)
 		return deps.RunResult{ExitCode: -1}, err
 	}
-	result, err := runner.exec().Run(ctx, append([]string{binary}, args...), deps.RunOptions{Env: runner.ChildEnv})
+	result, err := runner.exec().Run(ctx, append([]string{binary}, args...), deps.RunOptions{Env: runner.childEnv()})
 	if err != nil {
 		wrapped := fmt.Errorf("run %s %s: %w", binary, strings.Join(args, " "), err)
 		obs.Logger(ctx).Error("engine-sync run", obs.FieldCmd, strings.Join(args, " "), obs.FieldErr, wrapped)
 		return result, wrapped
 	}
 	return result, nil
+}
+
+// childEnv supplies Professor's marker through engine-sync's public override.
+func (runner Runner) childEnv() []string {
+	env := runner.ChildEnv
+	if env == nil {
+		env = os.Environ()
+	}
+	result := make([]string, 0, len(env)+1)
+	for _, value := range env {
+		if !strings.HasPrefix(value, "ENGINE_SYNC_WORKBENCH_MARKER=") {
+			result = append(result, value)
+		}
+	}
+	return append(result, "ENGINE_SYNC_WORKBENCH_MARKER="+paths.WorkbenchManifest(""))
 }
 
 // Forward is a retiring pfm command that now belongs to engine-sync: it

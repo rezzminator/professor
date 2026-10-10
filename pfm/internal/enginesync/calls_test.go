@@ -272,11 +272,17 @@ func TestMachineDoctor(t *testing.T) {
 			},
 		},
 		{
-			name:    "the no-clone state with Claude absent",
+			name:    "the default source with Claude absent",
 			options: MachineDoctorOptions{ClaudeAbsent: true},
-			stdout:  `{"ok":true,"rows":[{"level":"warn","message":"global-agents source=/h/.professor state=NO-CLONE"}]}`,
-			want:    []Row{{Level: LevelWarn, Message: "global-agents source=/h/.professor state=NO-CLONE"}},
+			stdout:  `{"ok":true,"rows":[{"level":"warn","message":"global-agents source=/h/.claude/agents state=NO-SOURCES"}]}`,
+			want:    []Row{{Level: LevelWarn, Message: "global-agents source=/h/.claude/agents state=NO-SOURCES"}},
 			argv:    []string{"doctor", "--machine", "--home", "/h", "--claude-absent", "--json"},
+		},
+		{
+			name:    "a configuration error retains its file and key",
+			code:    1,
+			stdout:  `{"ok":false,"rows":[],"configSources":[],"error":"/h/.config/engine-sync/config.json: machine.modelMap: expected object"}`,
+			wantErr: "/h/.config/engine-sync/config.json: machine.modelMap: expected object",
 		},
 		{
 			name: "an unknown level is an error", stdout: `{"ok":true,"rows":[{"level":"info","message":"m"}]}`,

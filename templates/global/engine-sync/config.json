@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "machine": {
+    "modelMap": {
+      "opus": "gpt-6.1-sol",
+      "sonnet": "gpt-6-luna",
+      "haiku": "gpt-6-luna",
+      "fable": "gpt-6.1-sol"
+    },
+    "legacyCodexAgentsDir": ".local/state/pfm/generated/codex-agents",
+    "retiredAgents": [
+      "frr",
+      "rr-super"
+    ],
+    "retiredFiles": [
+      ".codex/agents/explorer.toml"
+    ],
+    "generatedAgentsDir": ".local/state/pfm/generated/claude-agents",
+    "claudeAgentsDir": "",
+    "rewrites": [
+      {
+        "engines": [
+          "codex"
+        ],
+        "kinds": [
+          "agent"
+        ],
+        "literal": "children are Explore+haiku (never\nyour own type)",
+        "replace": "children are spawned via spawn_agent as the `explorer` role (never your own type)"
+      }
+    ]
+  },
+  "codex": {
+    "globalCommands": true,
+    "modelMap": {
+      "opus": "gpt-6.1-sol",
+      "sonnet": "gpt-6-luna",
+      "haiku": "gpt-6-luna",
+      "fable": "gpt-6.1-sol"
+    },
+    "rootAdapter": "\n## Codex adapter — reading this file in the Codex harness\n\nThis file is compiled from CLAUDE.md by pfm codex build; model aliases are already mapped to Codex models. Translate harness mechanics to the matching Codex command or role, and treat generated files as read-only: edit CLAUDE.md and rebuild.\n",
+    "agentPreamble": "You are the {{.Name}} role in this repository, running as a native Codex subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\n",
+    "excludeDirs": [],
+    "excludeProjects": [],
+    "neverRegister": [],
+    "suffixMode": "project",
+    "suffixPrefix": ""
+  },
+  "opencode": {
+    "modelMap": {
+      "opus": "openai/gpt-6.1-sol",
+      "sonnet": "openai/gpt-6.1-sol-fast",
+      "haiku": "openai/gpt-5.5-fast",
+      "fable": "openai/gpt-6.1-sol"
+    },
+    "agentPreamble": "You are the {{.Name}} role in the Professor repo, running as a native OpenCode subagent.\nFirst action: read the repo root AGENTS.md in full — its laws bind you (only gitter may write Git; guarded files are read-only for every subagent) and its § OpenCode adapter maps any Claude-harness mechanic named below. Then execute the protocol below exactly; your mode/task comes from the dispatch prompt.\nStamp every deliverable, report, or verdict you produce with: Executor: opencode-subagent/{{.Name}}\n\n",
+    "mirrorFiles": [
+      "LICENSE",
+      "SECURITY.md"
+    ],
+    "permission": {
+      "*": "allow",
+      "bash": {
+        "*": "allow",
+        "git commit": "deny",
+        "git commit *": "deny",
+        "git push": "deny",
+        "git push *": "deny",
+        "git tag": "deny",
+        "git tag *": "deny",
+        "git merge": "deny",
+        "git merge *": "deny",
+        "git rebase": "deny",
+        "git rebase *": "deny",
+        "git reset": "deny",
+        "git reset *": "deny",
+        "git cherry-pick": "deny",
+        "git cherry-pick *": "deny",
+        "git revert": "deny",
+        "git revert *": "deny",
+        "git am": "deny",
+        "git am *": "deny",
+        "git -C * commit": "deny",
+        "git -C * commit *": "deny",
+        "git -C * push": "deny",
+        "git -C * push *": "deny",
+        "git -C * tag": "deny",
+        "git -C * tag *": "deny",
+        "git -C * merge": "deny",
+        "git -C * merge *": "deny",
+        "git -C * rebase": "deny",
+        "git -C * rebase *": "deny",
+        "git -C * reset": "deny",
+        "git -C * reset *": "deny",
+        "git -C * cherry-pick": "deny",
+        "git -C * cherry-pick *": "deny",
+        "git -C * revert": "deny",
+        "git -C * revert *": "deny",
+        "git -C * am": "deny",
+        "git -C * am *": "deny",
+        "gh release*": "deny"
+      },
+      "doom_loop": "allow",
+      "edit": {
+        "**": "allow",
+        "**/.claude/**": "deny",
+        "**/AGENTS.md": "deny",
+        "**/CLAUDE.md": "deny",
+        ".opencode/**": "deny",
+        "AGENTS.md": "deny",
+        "CLAUDE.md": "deny"
+      },
+      "external_directory": "allow"
+    },
+    "agent": {
+      "gitter": {
+        "permission": {
+          "bash": {
+            "git *": "allow"
+          }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "globalServers": [
+      "professor"
+    ],
+    "renamed": {
+      "harvester": "professor",
+      "chat": "professor"
+    }
+  },
+  "workbenchMarker": ".professor/workbench.json"
+}

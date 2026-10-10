@@ -13,6 +13,7 @@ The pieces: the launch registry points Claude Code's OpenTelemetry exporters at 
 - [The join](#the-join)
 - [The ledger](#the-ledger)
 - [The status lines](#the-status-lines)
+- [Before the ledger](#before-the-ledger)
 - [pfm tokens](#pfm-tokens)
 - [Config and environment](#config-and-environment)
 - [Doctor](#doctor)
@@ -157,8 +158,8 @@ Every number on the main line and where it comes from:
 | Number | Shows | Source |
 | --- | --- | --- |
 | context gauge `42%` | share of the context window in use | the chat's transcript (`transcript.ReadMeta`); the payload's `context_window.used_percentage` when the transcript cannot be read; `~` marks an estimate after a compaction |
-| dollars `💰$3.42` | the one dollar amount of the line, the session total | the ledger total (`Σ cost_usd_micros` over the deduped rows) when a ledger exists; else the payload's `cost.total_cost_usd` (Claude Code's own total); with no such figure, the transcripts' price at pfm's price table; `$?` when nothing could be priced |
-| prompt tokens `420.0K` | everything sent as input | with a ledger, `input_tokens + cache_read_tokens + cache_creation_tokens` summed over every row; else the chat's transcript and every sub-agent's, a response counted once per `message.id` |
+| dollars `💰$3.42` | the one dollar amount of the line, the complete session total | with a ledger, the ledger total (`Σ cost_usd_micros` over the deduped rows) plus [what came before the ledger](#before-the-ledger), unless the payload's `cost.total_cost_usd` is ahead of that by more than `max($0.01, 0.5% of it)` (then the payload: a call whose row has not reached the ledger yet, a launch that logged nothing); else the payload's `cost.total_cost_usd` (Claude Code's own total); with no such figure, the transcripts' price at pfm's price table; `$?` when nothing could be priced |
+| prompt tokens `420.0K` | everything sent as input | with a ledger, `input_tokens + cache_read_tokens + cache_creation_tokens` summed over every row (the calls before the ledger have no tokens anywhere, so a pre-ledger chat's columns are the ledger's alone); else the chat's transcript and every sub-agent's, a response counted once per `message.id` |
 | output tokens `31K` | everything the model wrote | with a ledger, `output_tokens` summed over every row; else the transcripts' |
 | tool calls `46` | distinct `tool_use` calls | the chat's transcript and every sub-agent transcript beside it, always; the ledger records no tools. `?` when a transcript cannot be read |
 | `+?` | the dollar figure is a floor | with a ledger, a row whose cost never arrived (`cost_usd_micros` null); without one, a transcript model the price table cannot price |
@@ -166,7 +167,7 @@ Every number on the main line and where it comes from:
 | `⏳ 5m32s` | session wall time | the payload's `cost.total_duration_ms` |
 | `5h-used:32%`, `7d-used:71%` | rate-limit windows | the payload's `rate_limits`, or pfm's refreshed copy |
 
-The main line renders exactly one `$` in every state; a test (`TestMainLineRendersOneDollarAmountInEveryState`) renders 21 states and counts. The ledger total equals the main thread's own ledger rows plus every top-level sub-agent row, `pfm tokens`' session total, and callmeter's chat request sum; that equality is the invariant that keeps every surface on one figure.
+The main line renders exactly one `$` in every state; a test (`TestMainLineRendersOneDollarAmountInEveryState`) renders every state, resumed, pre-ledger and crashed launches among them, and counts. The invariant that keeps every surface on one figure: the complete total equals the main thread's own ledger rows plus every top-level sub-agent row plus the spend before the ledger (which no agent owns), and `pfm tokens`' session total; callmeter's `PRE-LEDGER USD` is the same before-ledger figure by the same rule. A chat that was resumed, or that began before the ledger, still shows its whole spend: Claude Code restores its total from the transcript on resume, so nothing about the figure depends on which launch armed a sink.
 
 ### Markers
 
@@ -178,10 +179,10 @@ A state the line must flag ends in one marker (`spendMarker`, `pfm/internal/stat
 | `ledger preempted` | `PFM_COST_LEDGER=preempted`: the user's own telemetry kept the ledger from starting |
 | `ledger off` | `PFM_COST_LEDGER=off`: `claude.costLedger` is `false` |
 | `ledger unreadable` | the ledger file exists and could not be read, or its session id is invalid; the line then shows Claude Code's total and the cause goes to the activity log |
-| `ledger≠cc` | a ledger exists, the payload's total is above zero, and the two differ by more than `max($0.01, 0.5% of Claude Code's total)`: the ledger is incomplete, or Claude Code's total moved after the last flush |
-| `unlogged` | no ledger, and the transcripts price below Claude Code's total by more than the same tolerance: calls no transcript records exist, and nothing measures them |
+| `pre-ledger` | [spend before the ledger](#before-the-ledger) exceeds `max($0.01, 0.5% of the line's amount)`: the chat began before the ledger, or ran a launch without a sink. A fact of the files, so it does not flicker with a call in flight and a healthy resume (every earlier launch fully logged) never shows it |
+| `unlogged` | no ledger, and the transcripts price below Claude Code's total by more than `max($0.01, 0.5% of Claude Code's total)`: calls no transcript records exist, and nothing measures them |
 
-A launch's own marker (`failed`, `preempted`, `off`) wins even when a ledger file of an earlier launch of the session exists: this launch is not logging, so the ledger is a floor. The amount stays the ledger's total, so the line keeps matching `pfm tokens` and callmeter. Not flagged: no ledger and transcripts priced above Claude Code's total, a payload with no total, and a sink armed whose ledger has no row yet. The amounts behind a marker (side-call spend, the ledger-minus-Claude-Code difference, the unlogged gap) are what [pfm tokens](#pfm-tokens) reports.
+A launch's own marker (`failed`, `preempted`, `off`) wins even when a ledger file of an earlier launch of the session exists: this launch is not logging, so the ledger is a floor. The amount is still the complete total: the ledger plus what came before it while those agree with Claude Code's payload, then the payload once this launch's unlogged calls put it ahead by more than the tolerance; `pfm tokens` and callmeter, reading the files, catch up with it at the next exit's cost-state. Not flagged: no ledger and transcripts priced above Claude Code's total, a payload with no total, and a sink armed whose ledger has no row yet. The line never compares the ledger with Claude Code's total (the user ruled the `ledger≠cc` marker out of the status line); that difference, like the side-call spend and the unlogged gap, is what [pfm tokens](#pfm-tokens) reports.
 
 ### Sub-agent row numbers
 
@@ -199,6 +200,26 @@ A row's spend field `$1.24/3.1M/42K/12` (`spendSegment`):
 
 The invariant: the main thread's own rows plus every top-level row equal the ledger total. A row's gauge, status, cache and the other fields are in [statusline.md](../context/statusline.md#the-sub-agent-row).
 
+## Before the ledger
+
+A chat can hold spend its ledger never saw: it began before the ledger existed, or one of its launches ran without a sink (`failed`, `preempted`, `off`, or an older `pfm`); less often a launch with a sink lost exports, or Claude Code priced a call that sent no OTel `api_request` event (a sub-agent routed to a non-Anthropic model through a gateway, seen on a live host), or a call's cost never arrived (a null-cost row, which the line marks `+?`). The first two are the common cause and name the marker; the figure is the same for all of them. Claude Code keeps that spend in its total: when a session resumes it restores `cost.total_cost_usd` from the transcript's last `cost-state` line (measured on 2.1.296), so the payload's figure is the complete total from the first render, while the ledger holds the launches that logged. The difference is *before the ledger*, attributed to no agent.
+
+`costledger.BeforeLedger(rows, states)` (`pfm/internal/costledger/before.go`) reads it from the transcript, never guesses it from a live payload. Each `cost-state` line is Claude Code's exact running total at one exit; the ledger's rows of the launches up to that exit, taken from it, leave what the ledger never saw. The answer is the largest such remainder over the transcript's cost-states, floored at 0:
+
+```text
+before = max over cost-states c of ( c.totalCostUSD − Σ cost_usd_micros of the rows with ts ≤ cutoff(c) )
+cutoff(c) = max( exit(c) + 2 s, until(c) ), or no bound when no timestamped line follows c
+```
+
+- `exit(c)` is the later of the last timestamped transcript line before `c` and `startTime + totalDuration` of `c`. The clock is the exit's wall clock on a session's first launch only: Claude Code keeps `startTime` across a resume while `totalDuration` counts no time between launches, so a resumed launch's clock lags its exit by those gaps (measured on the host's transcripts: a fifth of the later cost-states lag their last stamp by more than a minute) and the stamp leads.
+- `until(c)` is the first timestamped line after `c`: the next launch wrote it before its first call, so every row up to it belongs to the launches `c` totals, including a background agent's calls after the main thread's last line, which no stamp of the main transcript places. With no line after `c` (a closed chat) every row does. A cost-state with no placeable exit is bounded by `until(c)` alone.
+- The 2 s grace covers a reload, whose next launch writes its first line within seconds of the exit: a call's row lands up to 0.25 s after its transcript line (measured over three live sessions), and the next launch's first call comes seconds later. A row with no readable `ts` counts as logged by every exit; a row with a null cost counts nothing.
+- The statusline walks the main transcript once for its tokens and tool calls and collects the cost-states on the way (`statusline.spendScan`); `pfm tokens` does the same in its Claude reader. Both pass `costledger.Anchors` the lines in file order.
+
+The one dollar amount is the ledger total plus `before`, shown unless Claude Code's payload is ahead of it by more than the tolerance. The payload therefore leads in the one or two seconds before a call's OTLP export reaches the ledger, and the ledger plus `before` leads after a crash that wrote no cost-state; in the ordinary case the line is exactly the sum of the rows `pfm tokens` prints. A gap trigger (payload against ledger) would flicker after every call and is not used.
+
+callmeter names the same difference as `PRE-LEDGER USD` in `report cost`, from the same rule over the latest cost-state it holds, because callmeter is standalone and keeps no earlier ones; it holds no transcript stamps, so its exit is the later of `session_costs.started + wall_ms` and the session's latest `SessionEnd` event, the hook that fires at the exit that wrote that cost-state ([callmeter's design](../../../plugins/callmeter/docs/design.md)).
+
 ## pfm tokens
 
 `pfm tokens`, `pfm tokens --session SID` and `pfm tokens --flight DIR` (`pfm/internal/tokens/costreport.go`) read each Claude chat's ledger beside its transcripts and print what the status line's markers point at. The ledger directory is `paths.CostLedgerDir`, so `PFM_COST_LEDGER_DIR` redirects it. Codex, OpenCode and `--timeline` runs have no Claude ledger and are unchanged.
@@ -207,18 +228,19 @@ A chat with a ledger gets a block under `== COST LEDGER` (the flight report: `##
 
 | Line | Source |
 | --- | --- |
-| `session total $X (N calls)` | `Σ cost_usd_micros` over the deduped rows, the main status line's number |
+| `session total $X (N calls)` | `Σ cost_usd_micros` over the deduped rows plus the spend [before the ledger](#before-the-ledger), the main status line's number |
+| `before ledger $X (not attributed)` | the spend before the ledger, shown when it is half a cent or more; the same figure is a `before ledger (not attributed)` row in `by agent` and in `by query_source`, so the rows add up to the session total |
 | `side calls $X (N calls no transcript holds)` | rows no transcript holds: a row is held when any transcript line of the session, the main file or any `subagents/agent-*.jsonl`, in any file the ownership walk found however old, carries its `request_id` as `requestId` (`Ledger.Side`). A transcript that could not be read, or a line that could not be decoded, may hide a held request, so the block says `side calls may be overstated` and names the file |
 | `N calls with no cost in the ledger` | rows with `cost_usd_micros` null: counted, named, not in the total |
 | `N torn ledger lines skipped` | `Ledger.Faults` |
-| `Claude Code says $X` | the main transcript's last `cost-state` line (`totalCostUSD`); `no cost-state line in this chat's transcript` when there is none (`pfm tokens` has no stdin payload, so the transcript is its only source of Claude Code's total) |
-| `ledger minus Claude Code: +$X` | shown when the two differ by half a cent or more; the amount behind the `ledger≠cc` marker. The report's threshold is half a cent, not the status line's `max($0.01, 0.5%)`, because both numbers print as dollars and cents here |
+| `Claude Code says $X` | the main transcript's last `cost-state` line (`totalCostUSD`); `no cost-state line in this chat's transcript` when there is none (`pfm tokens` has no stdin payload, so the transcript is its only source of Claude Code's total). When a timestamped line follows that cost-state the chat has run past it, and the line reads `Claude Code's last cost-state says $X (written at an earlier exit; the chat has run since)` |
+| `session total minus Claude Code: +$X` | shown only when the last cost-state is the chat's final word (no timestamped transcript line follows it) and the two differ by half a cent or more; both numbers print as dollars and cents here, so the threshold is half a cent. The session total includes the spend before the ledger, so a healthy chat reads 0 here |
 | `by agent` | cost and share of the session total: the main thread's own calls, each top-level sub-agent as a tree (itself and everything it spawned, children indented), the calls of an agent the log never named (`?`) last. The parent is the ledger's `parent_agent_id`, else the meta file's `parentAgentId`; a parent that is no agent with calls, or a loop, makes the agent top-level. The main thread and the top-level rows sum to the session total |
 | `by query_source` | cost and share per `query_source`, dearest first: `repl_main_thread`, each `agent:builtin:{name}`, `web_search_tool`, `web_fetch_apply`, `agent_summary`, `prompt_suggestion`, `compact`, … |
 
 A chat with no ledger keeps today's output and one line, `side calls not measured (no cost ledger)` (per chat count when some chats have one). A ledger that exists and cannot be read is a read error on stderr and in the block, and exits 1, never "no ledger". The estimate columns elsewhere in the report (per-run dollars from the transcripts at the price table) are unchanged: the ledger adds a section, it replaces nothing.
 
-`--out` (the report and the flight form) gains a `costLedger` array, one object per chat with a ledger (every amount in micro-dollars, with `side`, `claudeCodeMicros`, `differenceMicros`, `byAgent`, `bySource`), only when a ledger exists, so a document from a machine without ledgers is byte-identical to before.
+`--out` (the report and the flight form) gains a `costLedger` array, one object per chat with a ledger (every amount in micro-dollars, with `side`, `claudeCodeMicros`, `differenceMicros`, `beforeLedgerMicros`, `sessionMicros`, `byAgent`, `bySource`), only when a ledger exists, so a document from a machine without ledgers is byte-identical to before.
 
 ## Config and environment
 

@@ -1,6 +1,6 @@
 # clone-distiller
 
-`clone-distiller` investigates an external repository: given its URL, a numbered batch of questions and a `Goal:` line, it clones the repository into `/tmp`, answers each question from the code (how the project does something, its patterns, where something lives, when it changed), writes a result file whose every piece of evidence is an absolute `path:line` into the clone, and returns a commit-linked finding per question. It is `tracer`'s reading discipline pointed at someone else's code; `tracer` reads this repository. Any caller may spawn it; `rr-pro` and `rr-pro-max` send their repository lane to it.
+`clone-distiller` investigates an external repository: given its URL, a numbered batch of questions and a `Goal:` line, it clones the repository into `/tmp`, answers each question from the code (how the project does something, its patterns, where something lives, when it changed), writes a result file whose every piece of evidence is an absolute `path:line` into the clone, and returns a commit-linked finding per question. It clones and digs the history itself and hands the code questions to `tracer`, pointed at the clone. Any caller may spawn it; `rr-pro` and `rr-pro-max` send their repository lane to it.
 
 ## Contents
 
@@ -24,9 +24,9 @@
 | Kind | original agent, `templates/global/agents/clone-distiller.md`, linked by `pfm install` |
 | Class | any caller |
 | Model, effort | `opus`, `medium` — following a call chain through unfamiliar code is judgment, not extraction |
-| Tools | `Bash, Read, Grep, Glob` — no `Write`: the result file is written by `Bash` (§ The result file) |
+| Tools | `Bash, Read, Grep, Glob, Agent` — no `Write`: the result file is written by `Bash` (§ The result file) |
 | Budget | 30 tool calls |
-| Spawns | nothing — it holds no `Agent` |
+| Spawns | one `tracer`, for the code part of every question (§ Reading) |
 | Writes | its clone under `/tmp/clone-distiller/repos/`, and one result file under `{OUT-DIR}/clone-distiller/`, or `/tmp/clone-distiller/results/` with no `OUT-DIR:` |
 | Codex sandbox | workspace-write (codex-sandbox): the clone and the result file are writes; network inside Codex's sandbox is the engine's |
 | Start hook | none — `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) lists exact names and omits it; an RR lead passes its directory as `OUT-DIR:` in the brief |
@@ -71,7 +71,7 @@ The directory is keyed by commit so it never changes under a reader: two diggers
 
 ## Reading
 
-`tracer`'s rules, applied to the clone:
+The code goes to `tracer` and the history stays with the digger, both in its second message. One `tracer` call carries `Repo root: {clone dir}`, the `Goal:` line and the code part of each question, numbered as the brief numbers it; its `haiku` sub-tracers walk the code and its kit checks every quote against the clone, and the digger drops the spec-writer lines (`CHECK`, `TESTS`, `MAP`, `RUN`) and turns each cited range into an `@@` pointer the SAVE script resolves or refuses. On the bench dig of `openai/codex`, three code questions cost $1.39 read by the `opus` digger alone and $0.45 through `tracer` ($0.36 lead, $0.09 for nine sub-tracers), every one of 156 quotes verified. The digger reads the clone itself only for a `tracer` `NOT READ` item its `Goal:` turns on, under these rules:
 
 - Every read of a round in one message; a file read once is not read again; a file over 300 lines is read by `grep -n` hits and line ranges, never whole.
 - Read to the answer: follow a call to the line that decides, returns, raises or writes; a fact not read goes under `Not read`.
@@ -129,7 +129,6 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | Links typed by the agent | A typed link drifted from the lines it cited (a `git show 3aebe1b^` read linked to another commit) and cost a second save; the script resolves the commit and builds the link |
 | A `blob:none` history clone | Each old file version is fetched over the network, one request at a time, the first time `git log -S` or `-p` touches it: a pickaxe over one repository's history ran past 120 s in every dig of a trial, where the `blob:limit=1m` clone answers in under a second |
 | A clone verb in the harvester | It would take `Bash` away from a reader of untrusted code and give Codex a sandbox-independent clone, at the price of engine work; the digger clones with `git` itself |
-| Reusing `tracer` | `tracer` forbids the network and returns spec-writer furniture (test homes, check commands) a caller learning from external code cannot use |
 | A lane in plain `rr` | The cheap map stays cheap; `rr-pro` and `rr-pro-max` pay for an `opus` digger and a clone by design |
 | A commit `Ref:` | Every git command that materializes an arbitrary commit — `fetch`, `remote add`, `checkout` of a commit — is blocked by the fleet's git-guard hook (`pfm/internal/hookentry/git_guard.go`, `gitGuardBlocks`); running one inside a heredoc the guard does not parse would route around it. `git clone --branch` takes a branch or tag and is not guarded |
 | Absolute paths in the return | A caller's document cites web URLs; the paths live in the result file |
@@ -139,6 +138,7 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/clone-distiller.md` |
+| The code reader it spawns | `templates/global/agents/tracer.md`, whose brief contract the code call follows |
 | The lane its briefs come from | `templates/global/agents/variants.json`, the `replace` entry of `rr-pro` and of `rr-pro-max`, identical text |
 | The sentence the lane swaps | `templates/global/agents/rr.md`, step 4's last sentence |
 | The renderer's gate | `TestShippedGlobalAgentVariantsRender`, `plugins/engine-sync/internal/codexgen/globalvariants_test.go` |

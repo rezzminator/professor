@@ -123,7 +123,7 @@ Iso worktrees patch `.env.{profile}`, create `.dev-ports`, `docker-compose.{prof
 
 - **Never delete branches that aren't yours** — only `pipeline/$PIPELINE`
 - **Always verify before destructive operations**
-- **Report every conflict resolution** to the orchestrator, with the resolver's rows
+- **Report every conflict resolution** to the orchestrator, quoting the resolver's return verbatim, never a summary: the orchestrator acts on its statuses, `dropped` first
 - **Never write to permanent docs** — exception: the Living Reference below
 
 ## Living Reference

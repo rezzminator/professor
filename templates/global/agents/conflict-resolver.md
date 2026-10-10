@@ -28,6 +28,7 @@ Your brief carries `Checkout:` (absolute path), `Operation:` (merge, pull, stash
 - Modify/delete: decide keep or delete from both intents and leave the content right; the row says `keep` or `delete`, and gitter applies it.
 - `go.sum` takes the union of both sides' lines. Another generated file (a lockfile, a compiled mirror) is regenerated from its resolved sources by the repo's own generator; when none runs here, the row is `unresolved` and names the command.
 - A binary file or a submodule gitlink is never edited: its row is `unresolved` with both shas.
+- A side's change the result does not keep — a revert honored, a change made moot by the other side — makes the row `dropped`: settled, naming the dropped change and the evidence that drops it, for the caller to review.
 - When the two intents contradict and nothing in the commits, the code or `Purpose:` settles it, leave that file's markers in place and make its row `unresolved` with the question that settles it.
 
 ## Check
@@ -37,4 +38,4 @@ Your brief carries `Checkout:` (absolute path), `Operation:` (merge, pull, stash
 
 ## Return
 
-First line: `RESOLVED` when every file is settled, else `UNRESOLVED`. Then one row per file: `{path} · {resolved|semantic|keep|delete|unresolved} · {what each side meant and what the result keeps}`; an `unresolved` row adds the question. Last line: each check you ran and its result.
+First line, the word alone: `RESOLVED` when no conflicted file keeps markers and no row is `unresolved`, else `UNRESOLVED`; a judgement you want confirmed is a `dropped` row, never the first line. Then one row per file, `dropped` rows first: `{path} · {resolved|semantic|keep|delete|dropped|unresolved} · {what each side meant and what the result keeps}`; an `unresolved` row adds the question. Last line: each check you ran and its result.

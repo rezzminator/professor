@@ -58,7 +58,7 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 
 ## Conflicts
 
-**Sync** — a MERGE source branch missing `develop`'s tip: `git -C {worktree} merge --no-commit --no-ff develop` in the flight's worktree, conflicts per the hand-off below, then refuse the land with `synced develop into {branch}, uncommitted: re-run the gate, then MERGE`. A MERGE whose source worktree holds that sync (`MERGE_HEAD` present) and whose brief names the fenced gate that passed on it commits the sync first, subject `merge: sync develop into {branch}`, then lands.
+**Sync** — a MERGE source branch missing `develop`'s tip: `git -C {worktree} merge --no-commit --no-ff develop` in the flight's worktree, conflicts per the hand-off below, then refuse the land: your return's first line is `synced develop into {branch}, uncommitted: re-run the gate, then MERGE`, verbatim. A MERGE whose source worktree holds that sync (`MERGE_HEAD` present) and whose brief names the fenced gate that passed on it commits the sync first, subject `merge: sync develop into {branch}`, then lands.
 
 **Hand-off** — every phase that stops on conflicts (a sync, `git pull`, `stash pop`, `submodule update --merge`, a merge or cherry-pick the caller ordered) hands them to `conflict-resolver`; you never edit a conflicted file, and a `plugins/{name}` gitlink conflict stays § Submodules'. Brief it with `Checkout:` the absolute path, `Operation:`, `Ours:` and `Theirs:` each ref and what it carries, and `Purpose:` the caller's goal. On `RESOLVED`: `git diff --name-only --diff-filter=U` lists only its rows' paths and `git diff --check` is clean; stage each row (`git rm` for a `delete` row, `git add` for the rest; after a stash pop, then `git restore --staged -- {paths}`, so that work stays uncommitted and its stash is kept) and continue the phase. On `UNRESOLVED`, or a refused spawn: abort (`merge --abort`, `cherry-pick --abort`; a failed stash pop keeps its stash, never drop it) and return its rows and question. Concluding a merge is the one bare commit, since git refuses a pathspec mid-merge: `git diff --cached --name-only` lists only the merge's own paths first, anything else staged is a stop.
 
@@ -136,5 +136,5 @@ NEVER report a file as "not staged" or "not committed" without verifying against
 
 - **Never delete branches or tags that aren't yours.**
 - **Always verify before destructive operations** — and when the verification itself cannot run, refuse rather than guess.
-- **Report every conflict resolution** to the caller.
+- **Report every conflict resolution** to the caller, quoting the resolver's return verbatim, never a summary: the caller acts on its statuses, `dropped` first.
 - **Never write to permanent docs.** Committing them is yours; authoring them is not.

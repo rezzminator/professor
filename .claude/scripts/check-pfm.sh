@@ -4,7 +4,8 @@
 # The pinned Go tools live in the fence image, not on the host: on the host this resolves the files
 # (unit-path.sh; a bad one is a `FAIL path` line), takes the host lock
 # /tmp/{project}/check-pfm/fence.lock (one run in the fence at a time across every worktree; a run
-# that waits says so on stderr), re-runs itself in one fence container (`dev.sh iso run`,
+# that waits says so on stderr), re-runs itself in one fence container (`dev.sh iso run`; a TERM or
+# INT to this script terminates that run's process tree, which removes its container, exit 143/130,
 # PFM_DEV_FENCE set there), prints that run's PASS/FAIL/SKIP lines and the log
 # path /tmp/{project}/check-pfm/{UTC timestamp}-{pid}.log. In the fence it checks, offline:
 # install (`go mod download` from the module cache alone — a code error in the tree cannot trip it;
@@ -69,8 +70,16 @@ if [ -z "${PFM_DEV_FENCE:-}" ]; then
     lrc=0; fence_lock wait || lrc=$?
   fi
   if [ "$lrc" != 0 ]; then echo "FAIL fence (the host lock $lock could not be taken, exit $lrc)"; echo "log: $UNIT_LOG"; exit 1; fi
+  # A TERM or INT to this run (a caller's timeout, Ctrl-C) takes its fence run down with it: TERM to
+  # the dev.sh → docker compose tree stops and removes the container. A SIGKILL cannot be caught.
+  kill_tree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done; kill -TERM "$1" 2>/dev/null || true; }
   rc=0
-  "$DEV" iso run "$cmd" >"$UNIT_LOG" 2>&1 9>&- || rc=$?
+  "$DEV" iso run "$cmd" >"$UNIT_LOG" 2>&1 9>&- &
+  fence_pid=$!
+  trap 'kill_tree "$fence_pid"; wait "$fence_pid" 2>/dev/null; exit 143' TERM
+  trap 'kill_tree "$fence_pid"; wait "$fence_pid" 2>/dev/null; exit 130' INT
+  wait "$fence_pid" || rc=$?
+  trap - TERM INT
   lines="$(grep -E '^(PASS|FAIL|SKIP) ' "$UNIT_LOG" || true)"
   [ -z "$lines" ] || echo "$lines"
   extra=

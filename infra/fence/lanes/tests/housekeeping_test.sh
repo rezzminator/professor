@@ -293,6 +293,15 @@ fresh; touch "$STAMP"; STUB_MB=250 hk
 if ! grep -q '^system df\|^volume inspect pfm-dev-gocache\|^volume rm pfm-dev-gocache' "$STUB_DOCKER_LOG"; then ok "budget: a fresh stamp skips the check"
 else bad "budget stamp" "$(cat "$STUB_DOCKER_LOG")"; fi
 
+# 9b — budget: the stamp is fresh for PFM_FENCE_BUDGET_MINUTES (default 120), not a day
+fresh; touch -d @$(( $(date +%s) - 3 * 3600 )) "$STAMP"; STUB_MB=250 hk; r1=0; logged 'volume rm pfm-dev-gocache' && r1=1
+fresh; touch -d @$(( $(date +%s) - 3600 )) "$STAMP"; STUB_MB=250 hk; r2=0; logged 'volume rm pfm-dev-gocache' || r2=1
+fresh; touch -d @$(( $(date +%s) - 3600 )) "$STAMP"; PFM_FENCE_BUDGET_MINUTES=30 STUB_MB=250 hk; r3=0; logged 'volume rm pfm-dev-gocache' && r3=1
+fresh; touch -d @$(( $(date +%s) - 3 * 3600 )) "$STAMP"; PFM_FENCE_BUDGET_MINUTES=2h STUB_MB=250 hk
+r4=0; warned cache-budget && grep -q 'PFM_FENCE_BUDGET_MINUTES' "$T/err" && logged 'volume rm pfm-dev-gocache' && r4=1
+if [ "$r1$r2$r3$r4" = 1111 ]; then ok "budget: a 3 h old stamp re-sizes, a 1 h old one skips, PFM_FENCE_BUDGET_MINUTES overrides, an invalid one warns and 120 applies"
+else bad "budget cadence" "3h=$r1 1h-skip=$r2 override=$r3 invalid=$r4" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+
 # 10 — budget: an unmeasurable size (df fails, or reports nothing) warns, never passes, no stamp
 fresh; STUB_DF=fail STUB_MB=250 hk; r1=0; warned cache-budget && [ ! -f "$STAMP" ] && r1=1
 fresh; STUB_MB='' hk; r2=0; warned cache-budget && [ ! -f "$STAMP" ] && r2=1

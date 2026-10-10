@@ -68,7 +68,8 @@
 #                   last-use age and it never prunes a record a running build
 #                   holds, so an active build loop keeps its cache.
 #   cache-budget    a tool trims its cache by age only, never by size. At most
-#                   once a day every shared cache volume is sized from one
+#                   every PFM_FENCE_BUDGET_MINUTES (default 120: the Go cache can
+#                   grow 20 GB a day) every shared cache volume is sized from one
 #                   `docker system df -v` (bounded to 120 s where the host has
 #                   `timeout`) against its budget in MB — pfm-dev-gocache
 #                   PFM_FENCE_GOCACHE_MB (15000), pfm-dev-gomod PFM_FENCE_GOMOD_MB
@@ -275,7 +276,7 @@ _fence_hk_stamp_dir() { # the stamps and the checkout ledger: /tmp/{project}/fen
   printf '%s/fence\n' "$(_fence_hk_project_dir)"
 }
 
-_fence_hk_stamp_fresh() { [ -n "$(find "$1" -mmin -1440 2>/dev/null)" ]; } # written in the last 24 h
+_fence_hk_stamp_fresh() { [ -n "$(find "$1" -mmin -"${2:-1440}" 2>/dev/null)" ]; } # written in the last $2 minutes (default 24 h)
 
 _fence_hk_stamp() { # _fence_hk_stamp <step> <stamp> — a failed write repeats the step next build
   local out
@@ -284,9 +285,13 @@ _fence_hk_stamp() { # _fence_hk_stamp <step> <stamp> — a failed write repeats 
 }
 
 _fence_hk_cache_budget() {
-  local dir stamp out rc v var def budget size used all_ok=1 present=""
+  local dir stamp out rc v var def budget size used all_ok=1 present="" every="${PFM_FENCE_BUDGET_MINUTES:-120}"
+  if ! _fence_hk_posint "$every"; then
+    _fence_hk_warn cache-budget "PFM_FENCE_BUDGET_MINUTES='$every' is not a positive integer — using 120"
+    every=120
+  fi
   dir="$(_fence_hk_stamp_dir)"; stamp="$dir/cache-budget.stamp"
-  _fence_hk_stamp_fresh "$stamp" && return 0
+  _fence_hk_stamp_fresh "$stamp" "$((10#$every))" && return 0
   while read -r v var def; do
     if out="$(docker volume inspect "$v" 2>&1)"; then present="$present $v"
     else

@@ -8,7 +8,8 @@
 # named files (a lint finding on another file is burn-down, a typecheck finding on any file or a tool
 # error with no finding is a FAIL), the check order, every check running after one fails, the exit
 # code, the log, the host lock (a second run waits, says so, and reaches the fence only once the lock
-# is free, under each of flock and perl on PATH; the fence call never inherits the lock; no lock
+# is free, under each of flock and perl on PATH; the fence call never inherits the lock; a TERM to the
+# caller ends the fence run's process tree; no lock
 # tool is a FAIL fence line), and the host's
 # fence verdicts (the docker probe after a fence
 # failure, a fence run with no check line, a PASS followed by a non-zero exit). dev.sh, go, make,
@@ -30,7 +31,7 @@ source "$HERE/scripts/stub-root.sh"
 for s in go make golangci-lint; do ln -s .stub "$BIN/$s"; done
 # The SUT runs with PATH=$BIN alone: the host's go, make, docker and golangci-lint are never reachable;
 # docker exists only while a test links it.
-for t in flock perl bash env sh git realpath dirname basename date mkdir cat grep sed awk tail head rm wc tr sort mktemp cp chmod ls cut uniq tee; do
+for t in flock perl pgrep sleep bash env sh git realpath dirname basename date mkdir cat grep sed awk tail head rm wc tr sort mktemp cp chmod ls cut uniq tee; do
   p="$(command -v "$t")" || continue
   ln -s "$p" "$BIN/$t"
 done
@@ -42,7 +43,8 @@ chmod +x "$R/.claude/scripts/check-pfm.sh" 2>/dev/null || true
 # dev.sh records whether it inherited the host lock's fd 9 to $REC.fd9, then runs the stub.
 mv "$R/.claude/scripts/dev.sh" "$R/.claude/scripts/dev-stub.sh"
 # shellcheck disable=SC2016 # the wrapper's body is literal: $REC, $0 and $@ expand when it runs
-printf '#!%s\nif { : >&9; } 2>/dev/null; then echo open >>"$REC.fd9"; else echo closed >>"$REC.fd9"; fi\nexec "$(dirname "$0")/dev-stub.sh" "$@"\n' "$BASH" >"$R/.claude/scripts/dev.sh"
+# With FENCE_HANG set it stands in for a long fence run: its pid and its child sleep's pid go to that file.
+printf '#!%s\nif { : >&9; } 2>/dev/null; then echo open >>"$REC.fd9"; else echo closed >>"$REC.fd9"; fi\nif [ -n "${FENCE_HANG:-}" ]; then sleep 60 & echo "$$ $!" >"$FENCE_HANG"; wait; fi\nexec "$(dirname "$0")/dev-stub.sh" "$@"\n' "$BASH" >"$R/.claude/scripts/dev.sh"
 chmod +x "$R/.claude/scripts/dev.sh"
 
 # --- fixture repository ---------------------------------------------------------------------------
@@ -380,6 +382,18 @@ done
 : >"$REC.fd9"; reset
 run "$R" "$A"
 if [ "$(cat "$REC.fd9")" = closed ]; then ok "the fence call never inherits the lock fd: a killed caller frees the lock"; else bad "the fence call never inherits the lock fd: a killed caller frees the lock" "fd 9 in dev.sh: $(cat "$REC.fd9")"; fi
+# A TERM to the caller (a timeout) takes the fence run's whole tree down with it.
+rm -f "$T/hang"
+( cd "$R" && exec env -u PFM_DEV_FENCE PATH="$BIN" REC="$REC" RULES="$RULES" STUBLIB="$STUBLIB" FENCE_HANG="$T/hang" \
+    "$R/.claude/scripts/check-pfm.sh" "$A" >"$T/termout" 2>&1 ) &
+caller=$!
+for _ in $(seq 100); do [ -s "$T/hang" ] && break; sleep 0.1; done
+fpid= spid=; if [ -s "$T/hang" ]; then read -r fpid spid <"$T/hang"; fi
+kill -TERM "$caller" 2>/dev/null || true; crc=0; wait "$caller" || crc=$?
+alive=
+for _ in $(seq 30); do alive=; for p in $fpid $spid; do kill -0 "$p" 2>/dev/null && alive+=" $p"; done; [ -z "$alive" ] && break; sleep 0.1; done
+if [ -n "${fpid:-}" ] && [ -n "${spid:-}" ] && [ -z "$alive" ] && [ "$crc" = 143 ]; then ok "a TERM to the caller ends its fence run's whole tree, exit 143"
+else bad "a TERM to the caller ends its fence run's whole tree, exit 143" "rc=$crc fence=${fpid:-?} child=${spid:-?} still alive:${alive:- none}"; for p in $alive; do kill "$p" 2>/dev/null; done; fi
 moved=()
 for t in flock perl; do if [ -e "$BIN/$t" ]; then mv "$BIN/$t" "$BIN/.off-$t"; moved+=("$t"); fi; done
 run "$R" "$A"

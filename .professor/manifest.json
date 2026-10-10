@@ -105,7 +105,7 @@
     ".claude/commands/pfm-testing-manual.md": "f954e8b3a8f31e0458f073b71922014998816f33eff9ebfa8de985c79a3511f3",
     ".claude/commands/pfm/release.md": "dbb98e48f8f03c460cd8662061c60f76609285179b0b45b711bc8bfbb7aaae41",
     ".claude/engine-sync.json": "42625037ed3e3dd7e91782bfaf4306352891c5bfa4ed2dd3df9768c91b024461",
-    ".claude/scripts/check-pfm.sh": "f25802a1ca32ce9f0325d710f28d55841810078d6d809ed07d0503506548dff2",
+    ".claude/scripts/check-pfm.sh": "650d08f7ccef8dacad998f377b43e888f2f3534c77ab24b26fe3702c3f200a12",
     ".claude/scripts/check-templates.sh": "13f6d2180c45713f03edeabd832187c5baa5e6ff27a30f3fa1920b5c0e354218",
     ".claude/scripts/codex-sync.sh": "fb4348e30b3f015fef8ed97b70a5fa9b43a19782cdbe7cf42f8a6872d94d47b9",
     ".claude/scripts/dev.sh": "4a32e7251b21304641ce9c46a77a7995d14f71f52752a2feb1355013b568e6af",

@@ -296,7 +296,9 @@ func deriveOpenAI(catalog *Catalog) []pricing.Row {
 
 // standardTable is OpenAI's Standard text-token table: the "Standard pricing
 // data" table, a grouped table of short-context columns, a specialized
-// category table whose service mode is Standard, or a grouped table whose
+// category table whose service mode is Standard, a grouped table under
+// Standard alone whose columns are only Model, Input, Output and Cached input,
+// or a grouped table whose
 // context names no service mode and whose columns are only Model, Input,
 // Output and Cached input (the life sciences models). A grouped table under
 // any other mode, one whose context names a non-Standard mode in any shape or
@@ -319,8 +321,24 @@ func standardTable(table Table, headers columns) bool {
 		return !loneWord.MatchString(table.Context) && !namedMode.MatchString(table.Context) &&
 			tokenColumnsOnly(headers)
 	}
-	return headers.index("category") >= 0 && headers.index("input") >= 0 && headers.index("output") >= 0 &&
-		modes[len(modes)-1][1] == "Standard"
+	if modes[len(modes)-1][1] != "Standard" {
+		return false
+	}
+	if headers.index("category") >= 0 {
+		return headers.index("input") >= 0 && headers.index("output") >= 0
+	}
+	return onlyStandardNamed(table.Context) && tokenColumnsOnly(headers)
+}
+
+// onlyStandardNamed reports a context whose every lone word is "Standard" and
+// whose prose names no other service mode.
+func onlyStandardNamed(context string) bool {
+	for _, word := range loneWord.FindAllString(context, -1) {
+		if strings.TrimSpace(word) != "Standard" {
+			return false
+		}
+	}
+	return !namedMode.MatchString(context)
 }
 
 // openAIRow folds a model's variants: their short-context rates must agree,

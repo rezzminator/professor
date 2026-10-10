@@ -37,8 +37,9 @@ const (
 // t0 is the clone file's fetch time, later than any embedded table.
 var t0 = time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// fixture is one model-cost run's world: a clone file fetched at t0, a
-// fetcher over the two pages (or failing), and its call count.
+// fixture is one model-cost run's world: a clone file fetched at t0 and
+// confirmed then by this binary, a fetcher over the two pages (or failing),
+// and its call count.
 type fixture struct {
 	home, file, configPath string
 	calls                  int
@@ -63,7 +64,15 @@ func newFixture(t *testing.T) *fixture {
 			{Key: "claude-opus-4-1", Engine: pricing.EngineClaude, Rates: pricing.Rates{In: &in, Out: &out}},
 		},
 	}
-	if _, err := pricing.WriteFile(file, table); err != nil {
+	content, err := pricing.WriteFile(file, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := modelcost.ThisBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pricing.WriteStamp(home, t0, content, binary); err != nil {
 		t.Fatal(err)
 	}
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
@@ -194,9 +203,8 @@ func TestModelCostModelTextInsideTheWindowFetchesNothing(t *testing.T) {
 	if code != 0 || stderr != "" || f.calls != 0 || len(lines) != 3 {
 		t.Fatalf("code %d, %d fetches, stderr %q, stdout:\n%s", code, f.calls, stderr, stdout)
 	}
-	summary := "prices: 1 rows · fetched " + t0.Format(
-		time.RFC3339,
-	) + " · from file " + f.file + " · refresh current · override: none"
+	summary := "prices: 1 rows · fetched " + t0.Format(time.RFC3339) + " · checked " + t0.Format(time.RFC3339) +
+		" · from file " + f.file + " · refresh current · override: none"
 	if lines[0] != summary {
 		t.Fatalf("summary = %q\nwant      %q", lines[0], summary)
 	}

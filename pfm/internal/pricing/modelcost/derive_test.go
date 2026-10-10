@@ -151,6 +151,20 @@ func TestDeriveVariants(t *testing.T) {
 		{"a grouped table under Batch never prices", claudePage, grouped("Batch\n", plainHeader), "gpt-lab-1", nil},
 		{"a grouped table whose context names a mode in prose never prices", claudePage, grouped("Flex processing\n", plainHeader), "gpt-lab-1", nil},
 		{"a grouped table under an unknown mode word never prices", claudePage, grouped("Scale\n", plainHeader), "gpt-lab-1", nil},
+		{"a Standard grouped table of Model, Input, Output prices", claudePage, grouped("Standard\n", plainHeader), "gpt-lab-1", rate(5)},
+		{
+			"a Standard grouped table beside an unknown mode word never prices", claudePage,
+			grouped("Scale\nStandard\n", plainHeader), "gpt-lab-1", nil,
+		},
+		{
+			"a Standard grouped table whose context names another mode in prose never prices", claudePage,
+			grouped("Standard\nFlex processing\n", plainHeader), "gpt-lab-1", nil,
+		},
+		{
+			"a Standard grouped table with another column never prices", claudePage,
+			grouped("Standard\n", "| Model | Use case | Input | Cached input | Output |\n| --- | --- | --- | --- | --- |\n| gpt-lab-1 | Lab "),
+			"gpt-lab-1", nil,
+		},
 		{
 			"a modeless grouped table with another column never prices", claudePage,
 			grouped("", "| Model | Use case | Input | Cached input | Output |\n| --- | --- | --- | --- | --- |\n| gpt-lab-1 | Lab "),

@@ -164,10 +164,17 @@ var (
 	linkPattern       = regexp.MustCompile(`\[([^]]+)\]\([^)]*\)`)
 	tagPattern        = regexp.MustCompile(`<[^>]*>`)
 	claudeNamePattern = regexp.MustCompile(`(?i)claude\s+[a-z]+(?:\s+\d+(?:\.\d+)?)?`)
-	// generationPattern is a whole label naming a Claude generation range,
-	// "Claude 4.6 and earlier models": it names no model.
-	generationPattern = regexp.MustCompile(`(?i)^claude\s+\d+(?:\.\d+)?\s+and\s+(?:earlier|later)\s+models$`)
+	// previewPattern is a Claude preview name, "Claude Mythos Preview": the page
+	// publishes no version for it, so it names no model the catalog serves.
+	previewPattern = regexp.MustCompile(`(?i)\bclaude\s+[a-z]+\s+preview\b`)
+	// groupPattern is a whole label of generation ranges ("Claude 4.6 and
+	// earlier models") and preview names, joined by "and" or commas: it names no
+	// model.
+	groupPattern = regexp.MustCompile(`(?i)^(?:` + groupPart + `)(?:\s*,?\s+(?:and\s+)?(?:` + groupPart + `))*$`)
 )
+
+// groupPart is one part of a group label: a generation range or a preview name.
+const groupPart = `claude\s+\d+(?:\.\d+)?\s+and\s+(?:earlier|later)\s+models|claude\s+[a-z]+\s+preview`
 
 func parseCatalog(provider string, source Source) (Catalog, error) {
 	catalog := Catalog{
@@ -231,7 +238,7 @@ func parseCatalog(provider string, source Source) (Catalog, error) {
 			table.Rows = append(table.Rows, row)
 			if column >= 0 {
 				ids := publishedIDs(provider, cells[column])
-				if len(ids) == 0 && !generationGroup(provider, cells[column]) {
+				if len(ids) == 0 && !groupLabel(provider, cells[column]) {
 					return Catalog{}, fmt.Errorf(
 						"line %d: unsupported model label %q; catalog incomplete",
 						i+1,
@@ -274,21 +281,21 @@ func parseCatalog(provider string, source Source) (Catalog, error) {
 	return catalog, nil
 }
 
-// generationGroup reports a Claude row whose whole label is a generation range
-// ("Claude 4.6 and earlier models", as the Bash tool table publishes its token
-// overhead): the row stays in its table and is attributed to no model.
-// parseCatalog refuses one in the Model pricing table, where it would price
-// models the page never names.
-func generationGroup(provider, label string) bool {
+// groupLabel reports a Claude row whose whole label is a group label: generation
+// ranges and preview names ("Claude 4.7 and later models and Claude Mythos
+// Preview", as the Bash tool table publishes its token overhead). The row stays
+// in its table and is attributed to no model; parseCatalog refuses one in the
+// Model pricing table, where it would price models the page never names.
+func groupLabel(provider, label string) bool {
 	return provider == providerAnthropic &&
-		generationPattern.MatchString(plain(linkPattern.ReplaceAllString(label, "$1")))
+		groupPattern.MatchString(plain(linkPattern.ReplaceAllString(label, "$1")))
 }
 
 func publishedIDs(provider, label string) []string {
 	label = tagPattern.ReplaceAllString(linkPattern.ReplaceAllString(label, "$1"), "")
 	if provider == providerAnthropic {
 		var ids []string
-		for _, name := range claudeNamePattern.FindAllString(label, -1) {
+		for _, name := range claudeNamePattern.FindAllString(previewPattern.ReplaceAllString(label, ""), -1) {
 			ids = append(ids, strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(name), " ", "-"), ".", "-"))
 		}
 		return ids

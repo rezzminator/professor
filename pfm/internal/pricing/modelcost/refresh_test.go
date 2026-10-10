@@ -2,7 +2,9 @@ package modelcost
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,8 +107,21 @@ func readFile(t *testing.T, path string) string {
 	return string(content)
 }
 
+// stampByThisBinary records a check at t0 of the clone file, by this binary.
+func stampByThisBinary(t *testing.T, home, file string) {
+	t.Helper()
+	binary, err := ThisBinary()
+	if err != nil {
+		t.Fatalf("ThisBinary: %v", err)
+	}
+	if err := pricing.WriteStamp(home, t0, []byte(readFile(t, file)), binary); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRefreshWithinTheWindowFetchesNothing(t *testing.T) {
 	home, file := refreshHome(t, fixtureTable(t, t0, 99))
+	stampByThisBinary(t, home, file)
 	before := readFile(t, file)
 	fetch := &fakeFetch{}
 	prices, result := refreshAt(t, home, t0.Add(23*time.Hour), fetch, false, false)
@@ -212,10 +227,17 @@ func TestRefreshReportsAMalformedStamp(t *testing.T) {
 	if err := os.WriteFile(paths.PricesStampPath(home), []byte("garbage\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, result := refreshAt(t, home, t0.Add(time.Hour), &fakeFetch{}, false, false)
-	if result.Status != StatusCurrent || result.StampErr == nil ||
+	_, result := refreshAt(t, home, t0.Add(time.Hour), &fakeFetch{}, false, true)
+	if result.Status != StatusOffline || result.StampErr == nil ||
 		!strings.Contains(result.StampErr.Error(), paths.PricesStampPath(home)) {
-		t.Fatalf("result = %+v, want current with the stamp error named", result)
+		t.Fatalf("result = %+v, want offline with the stamp error named", result)
+	}
+	_, result = refreshAt(t, home, t0.Add(time.Hour), &fakeFetch{}, false, false)
+	if result.Status != StatusRefreshed || result.StampErr != nil {
+		t.Fatalf("result = %+v, want a malformed stamp refetched and rewritten", result)
+	}
+	if stamp, err := pricing.ReadStamp(home); err != nil || stamp.Binary == "" {
+		t.Fatalf("rewritten stamp = %+v, %v; want this binary's", stamp, err)
 	}
 }
 
@@ -293,7 +315,8 @@ func TestRefreshThatCannotWriteTheCloneFileServesTheFetch(t *testing.T) {
 }
 
 func TestRefreshInvalidOverrideIsTheError(t *testing.T) {
-	home, _ := refreshHome(t, fixtureTable(t, t0, 4))
+	home, file := refreshHome(t, fixtureTable(t, t0, 4))
+	stampByThisBinary(t, home, file)
 	configPath := filepath.Join(t.TempDir(), config.FileName)
 	if err := os.WriteFile(config.PricesPath(configPath), []byte(`{"version":1,"rows":[]}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -321,7 +344,11 @@ func TestRefreshOfAFutureDatedTableOrStampFetches(t *testing.T) {
 	})
 	t.Run("stamp from the future", func(t *testing.T) {
 		home, file := refreshHome(t, fixtureTable(t, now.Add(-72*time.Hour), 99))
-		if err := pricing.WriteStamp(home, t0, []byte(readFile(t, file))); err != nil {
+		binary, err := ThisBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pricing.WriteStamp(home, t0, []byte(readFile(t, file)), binary); err != nil {
 			t.Fatal(err)
 		}
 		fetch := &fakeFetch{}
@@ -377,4 +404,151 @@ func TestMachineOptionsReadTheRuntime(t *testing.T) {
 		options.Offline != paths.PricesOffline() || options.Clock == nil || options.Fetch == nil {
 		t.Fatalf("MachineOptions = %+v", options)
 	}
+}
+
+// rawStamp writes the check stamp as the line "{t0} {sha256 of the clone
+// file} {binary}", the binary field left out when binary is empty (the stamp
+// format before a check named its binary).
+func rawStamp(t *testing.T, home, file, binary string) {
+	t.Helper()
+	line := fmt.Sprintf("%s %x", t0.Format(time.RFC3339Nano), sha256.Sum256([]byte(readFile(t, file))))
+	if binary != "" {
+		line += " " + binary
+	}
+	if err := os.MkdirAll(filepath.Dir(paths.PricesStampPath(home)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.PricesStampPath(home), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRefreshTiesTheWindowToTheBinary: a table is current only by a stamp
+// this binary wrote within the Window. A table fetched an hour ago with no
+// stamp, a stamp in the binary-less format, and a stamp another binary wrote
+// (a refresh just before a host install) are all refetched; the refresh then
+// stamps this binary, so its next check within the Window is current.
+func TestRefreshTiesTheWindowToTheBinary(t *testing.T) {
+	for _, tc := range []struct{ name, binary string }{
+		{"no stamp", ""},
+		{"a stamp without a binary", "-"},
+		{"a stamp from another binary", "another-pfm-build"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, file := refreshHome(t, fixtureTable(t, t0, 4))
+			switch tc.binary {
+			case "":
+			case "-":
+				rawStamp(t, home, file, "")
+			default:
+				rawStamp(t, home, file, tc.binary)
+			}
+			fetch := &fakeFetch{}
+			_, result := refreshAt(t, home, t0.Add(time.Hour), fetch, false, false)
+			if result.Status != StatusRefreshed || fetch.calls != 1 {
+				t.Fatalf("status %q after %d fetches, want refreshed after 1", result.Status, fetch.calls)
+			}
+			_, result = refreshAt(t, home, t0.Add(2*time.Hour), fetch, false, false)
+			if result.Status != StatusCurrent || fetch.calls != 1 {
+				t.Fatalf("this binary's next check: status %q after %d fetches, want current after 1",
+					result.Status, fetch.calls)
+			}
+		})
+	}
+}
+
+// TestIdentifyIsTheExecutableThisProcessStartedFrom: the identity is the
+// sha256 of the file the process started from; a binary renamed over its path
+// afterwards (a host install while an old pfm runs) is no identity, so the old
+// process never stamps its parse as the new binary's.
+func TestIdentifyIsTheExecutableThisProcessStartedFrom(t *testing.T) {
+	started := func(t *testing.T) executable {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "pfm")
+		if err := os.WriteFile(path, []byte("old build"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return executable{path: path, info: info}
+	}
+	t.Run("the file it started from", func(t *testing.T) {
+		got, err := identify(started(t))
+		if want := fmt.Sprintf("exe-sha256:%x", sha256.Sum256([]byte("old build"))); err != nil || got != want {
+			t.Fatalf("identify = %q, %v; want %q", got, err, want)
+		}
+	})
+	t.Run("a binary renamed over its path", func(t *testing.T) {
+		exe := started(t)
+		replacement := exe.path + ".new"
+		if err := os.WriteFile(replacement, []byte("new build"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(replacement, exe.path); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := identify(exe); err == nil || !strings.Contains(err.Error(), "was replaced") {
+			t.Fatalf("identify = %q, %v; want the replacement refused", got, err)
+		}
+	})
+	t.Run("an executable unreadable at startup", func(t *testing.T) {
+		cause := errors.New("this binary's identity: fixture")
+		if got, err := identify(executable{err: cause}); !errors.Is(err, cause) || got != "" {
+			t.Fatalf("identify = %q, %v; want the startup error", got, err)
+		}
+	})
+}
+
+// TestRefreshReportsAnUnreadableIdentityOnlyWhereAStampIsJudged: a machine
+// with no clone file serves its embedded table without a stamp, so an
+// identity that cannot be read is no warning there; where the stamp write
+// fails too, the identity's cause is named beside the write error, never
+// dropped.
+func TestRefreshReportsAnUnreadableIdentityOnlyWhereAStampIsJudged(t *testing.T) {
+	unreadable := func() (string, error) { return "", errors.New("this binary's identity: fixture") }
+	t.Run("no clone file, embedded table current", func(t *testing.T) {
+		home := t.TempDir()
+		published, err := pricing.LoadPublished(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fetchedAt, err := time.Parse(time.RFC3339, published.FetchedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fetch := &fakeFetch{}
+		_, result, err := Refresh(context.Background(), Options{
+			Home: home, Clock: clock.NewFake(fetchedAt.Add(time.Hour)), Fetch: fetch.fetch(t), Binary: unreadable,
+		})
+		if err != nil || result.Status != StatusCurrent || result.StampErr != nil || fetch.calls != 0 {
+			t.Fatalf("result = %+v, %v after %d fetches; want current with no stamp warning", result, err, fetch.calls)
+		}
+	})
+	t.Run("a stamp that cannot be written", func(t *testing.T) {
+		home, _ := refreshHome(t, fixtureTable(t, t0, 4))
+		stateDir := filepath.Dir(paths.PricesStampPath(home))
+		if err := os.MkdirAll(filepath.Dir(stateDir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(stateDir, []byte("a file where the state directory goes\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, result, err := Refresh(context.Background(), Options{
+			Home:   home,
+			Clock:  clock.NewFake(t0.Add(25 * time.Hour)),
+			Fetch:  (&fakeFetch{}).fetch(t),
+			Binary: unreadable,
+		})
+		if err != nil || result.Status != StatusRefreshed || result.StampErr == nil ||
+			!strings.Contains(result.StampErr.Error(), "write price check stamp") ||
+			!strings.Contains(result.StampErr.Error(), "identity: fixture") {
+			t.Fatalf(
+				"result = %+v, %v; want refreshed, the write error and the identity's cause both named",
+				result,
+				err,
+			)
+		}
+	})
 }

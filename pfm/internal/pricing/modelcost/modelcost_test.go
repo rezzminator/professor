@@ -192,10 +192,16 @@ func TestGenerationGroupRows(t *testing.T) {
 			bash.Rows[1][1].Text != "244 tokens" {
 			t.Fatalf("Bash tool table = %+v, want both generation rows kept", bash)
 		}
+		if bash.Rows[0][0].Text != "Claude 4.7 and later models and Claude Mythos Preview" {
+			t.Fatalf("Bash tool row 1 = %q, want the generation range and the preview name kept", bash.Rows[0][0].Text)
+		}
 		for _, model := range catalogs[0].Models {
 			for _, table := range model.Tables {
-				if table.Heading == "Bash tool" && table.Rows[0][0].Text == "Claude 4.6 and earlier models" {
-					t.Fatalf("model %s holds the generation-range row", model.ID)
+				for _, row := range table.Rows {
+					if table.Heading == "Bash tool" &&
+						(row[0].Text == bash.Rows[0][0].Text || row[0].Text == bash.Rows[1][0].Text) {
+						t.Fatalf("model %s holds the group row %q", model.ID, row[0].Text)
+					}
 				}
 			}
 		}
@@ -224,6 +230,16 @@ func TestGenerationGroupRows(t *testing.T) {
 			"a generation range in the Model pricing table fails",
 			strings.Replace(claude, opusRow, "| Claude 4.6 and earlier models ", 1),
 			`group label "Claude 4.6 and earlier models" in the Model pricing table names no model; catalog incomplete`,
+		},
+		{
+			"a preview name in the Model pricing table fails",
+			strings.Replace(claude, opusRow, "| Claude Mythos Preview ", 1),
+			`group label "Claude Mythos Preview" in the Model pricing table names no model; catalog incomplete`,
+		},
+		{
+			"a preview name beside an unknown label still fails",
+			strings.Replace(claude, bashToolGroupRow, "| Claude Mythos Preview and Unrecognized label ", 1),
+			`unsupported model label "Claude Mythos Preview and Unrecognized label"; catalog incomplete`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -64,11 +64,13 @@ type Prices struct {
 	Override *Override
 }
 
-// Stamp is the last check that confirmed the clone file: when, and the
-// sha256 of the bytes it confirmed.
+// Stamp is the last check that confirmed the clone file: when, the sha256 of
+// the bytes it confirmed, and the binary that parsed them ("" in a stamp
+// written before a check named its binary).
 type Stamp struct {
 	At     time.Time
 	SHA256 string
+	Binary string
 }
 
 // Embedded is the table compiled into this binary.
@@ -208,27 +210,43 @@ func ReadStamp(home string) (Stamp, error) {
 		return Stamp{}, fmt.Errorf("read price check stamp %s: %w", path, err)
 	}
 	fields := strings.Fields(string(raw))
-	if len(fields) != 2 || len(fields[1]) != sha256.Size*2 {
-		return Stamp{}, fmt.Errorf("price check stamp %s is not \"{time} {sha256}\"", path)
+	if (len(fields) != 2 && len(fields) != 3) || len(fields[1]) != sha256.Size*2 {
+		return Stamp{}, fmt.Errorf("price check stamp %s is not \"{time} {sha256} {binary}\"", path)
 	}
 	at, err := time.Parse(time.RFC3339Nano, fields[0])
 	if err != nil {
 		return Stamp{}, fmt.Errorf("price check stamp %s: %w", path, err)
 	}
-	return Stamp{At: at, SHA256: fields[1]}, nil
+	stamp := Stamp{At: at, SHA256: fields[1]}
+	if len(fields) == 3 {
+		stamp.Binary = fields[2]
+	}
+	return stamp, nil
 }
 
-// WriteStamp records a check at at that confirmed the clone file content.
-func WriteStamp(home string, at time.Time, content []byte) error {
+// WriteStamp records a check at at that confirmed the clone file content,
+// parsed by binary; an empty binary (one whose identity could not be read)
+// writes the binary-less line, which no binary takes as its own.
+func WriteStamp(home string, at time.Time, content []byte, binary string) error {
 	path := paths.PricesStampPath(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("write price check stamp %s: %w", path, err)
 	}
-	line := at.UTC().Format(time.RFC3339Nano) + " " + pricesSHA256(content) + "\n"
+	line := at.UTC().Format(time.RFC3339Nano) + " " + pricesSHA256(content)
+	if binary != "" {
+		line += " " + binary
+	}
+	line += "\n"
 	if err := atomicfile.Write(path, []byte(line), 0o644); err != nil {
 		return fmt.Errorf("write price check stamp %s: %w", path, err)
 	}
 	return nil
+}
+
+// By reports whether binary wrote the stamp; a stamp without a binary is no
+// binary's.
+func (s Stamp) By(binary string) bool {
+	return s.Binary != "" && s.Binary == binary
 }
 
 // Matches reports whether the stamp confirmed exactly this content.

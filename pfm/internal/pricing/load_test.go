@@ -261,12 +261,20 @@ func TestStampRecordsTheCheckAndTheContentItConfirmed(t *testing.T) {
 		t.Fatalf("missing stamp = %+v, %v; want zero, nil", stamp, err)
 	}
 	at := time.Date(2026, 10, 8, 9, 30, 0, 0, time.UTC)
-	if err := WriteStamp(home, at, []byte("content")); err != nil {
+	if err := WriteStamp(home, at, []byte("content"), "exe-sha256:abc"); err != nil {
 		t.Fatalf("WriteStamp: %v", err)
 	}
 	stamp, err := ReadStamp(home)
-	if err != nil || !stamp.At.Equal(at) || stamp.SHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte("content"))) {
-		t.Fatalf("ReadStamp = %+v, %v", stamp, err)
+	if err != nil || !stamp.At.Equal(at) || stamp.SHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte("content"))) ||
+		!stamp.By("exe-sha256:abc") || stamp.By("exe-sha256:other") || stamp.By("") {
+		t.Fatalf("ReadStamp = %+v, %v; want the check, its content and its binary", stamp, err)
+	}
+	if err := WriteStamp(home, at, []byte("content"), ""); err != nil {
+		t.Fatalf("WriteStamp: %v", err)
+	}
+	stamp, err = ReadStamp(home)
+	if err != nil || stamp.Binary != "" || stamp.By("") || !stamp.Matches([]byte("content")) {
+		t.Fatalf("a binary-less stamp = %+v, %v; want readable and no binary's", stamp, err)
 	}
 	if !stamp.Matches([]byte("content")) || stamp.Matches([]byte("changed")) || stamp.Matches(nil) {
 		t.Fatal("Matches must hold only for the confirmed content")

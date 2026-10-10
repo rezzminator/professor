@@ -84,8 +84,9 @@ func TestFindSessionsReportsStatFailure(t *testing.T) {
 				if len(errs) != 1 {
 					t.Fatalf("errs = %v, want one Stat failure for %s", errs, path)
 				}
-				if !strings.Contains(errs[0].Error(), path) || !errors.Is(errs[0], syscall.ELOOP) {
-					t.Errorf("error = %v, want path %s and wrapped ELOOP", errs[0], path)
+				if !strings.Contains(errs[0].Error(), "stat Claude transcript "+path) ||
+					!errors.Is(errs[0], syscall.ELOOP) {
+					t.Errorf("error = %v, want \"stat Claude transcript %s\" and wrapped ELOOP", errs[0], path)
 				}
 			} else if len(errs) != 0 {
 				t.Errorf("dangling entry: errs = %v, want none", errs)
@@ -130,8 +131,9 @@ func TestFindSubagentsReportsStatFailure(t *testing.T) {
 				if len(errs) != 1 {
 					t.Fatalf("errs = %v, want one Stat failure for %s", errs, path)
 				}
-				if !strings.Contains(errs[0].Error(), path) || !errors.Is(errs[0], syscall.ELOOP) {
-					t.Errorf("error = %v, want path %s and wrapped ELOOP", errs[0], path)
+				if !strings.Contains(errs[0].Error(), "stat Claude subagents directory "+path) ||
+					!errors.Is(errs[0], syscall.ELOOP) {
+					t.Errorf("error = %v, want \"stat Claude subagents directory %s\" and wrapped ELOOP", errs[0], path)
 				}
 			} else if len(errs) != 0 {
 				t.Errorf("%s subagents: errs = %v, want none", tc.name, errs)

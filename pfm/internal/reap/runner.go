@@ -100,6 +100,8 @@ type Options struct {
 	ClientActive time.Duration
 	// Self is the caller's own socket, which is never a candidate.
 	Self string
+	// onlySocket bounds a kill-time refresh to its candidate, not the whole fleet.
+	onlySocket string
 }
 
 // Report is one sweep's result.
@@ -217,7 +219,7 @@ func (runner *Runner) Run(
 		return Report{}, err
 	}
 
-	sockets, err := runner.probeSockets(ctx, tree)
+	sockets, err := runner.probeSockets(ctx, tree, options.onlySocket)
 	if err != nil {
 		return Report{}, err
 	}
@@ -234,13 +236,15 @@ func (runner *Runner) Run(
 	input.Sockets = sockets
 	input.RecentIDs = runner.recentSessions(sockets, input.BusyRecent)
 
-	sessionCtx, cancelSessions := context.WithTimeout(ctx, probeTimeout)
-	sessions, err := runner.tmux.Sessions(sessionCtx, "vsct")
-	cancelSessions()
-	if err != nil {
-		return Report{}, fmt.Errorf("list bunker sessions: %w", err)
+	if options.onlySocket == "" {
+		sessionCtx, cancelSessions := context.WithTimeout(ctx, probeTimeout)
+		sessions, err := runner.tmux.Sessions(sessionCtx, "vsct")
+		cancelSessions()
+		if err != nil {
+			return Report{}, fmt.Errorf("list bunker sessions: %w", err)
+		}
+		input.VSCT = sessions
 	}
-	input.VSCT = sessions
 	trail.Reach("probed", "every socket classified")
 
 	decisions := Plan(input)
@@ -253,7 +257,7 @@ func (runner *Runner) Run(
 			report.AvailBefore = avail
 		}
 		var applyWarnings []string
-		decisions, applyWarnings = runner.apply(ctx, decisions)
+		decisions, applyWarnings = runner.apply(ctx, decisions, options)
 		warnings = append(warnings, applyWarnings...)
 		if avail, err := runner.availableKB(); err != nil {
 			warnings = append(warnings, fmt.Sprintf("read available memory after reap: %v", err))
@@ -299,6 +303,7 @@ func (runner *Runner) Run(
 func (runner *Runner) probeSockets(
 	ctx context.Context,
 	tree *ProcessTree,
+	only string,
 ) ([]Socket, error) {
 	entries, err := os.ReadDir(runner.paths.TmuxDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -314,7 +319,7 @@ func (runner *Runner) probeSockets(
 	}
 	files := make([]socketFile, 0, len(entries))
 	for _, entry := range entries {
-		if !isReapSocketName(entry.Name()) {
+		if !isReapSocketName(entry.Name()) || (only != "" && entry.Name() != only) {
 			continue
 		}
 		info, err := entry.Info()
@@ -518,6 +523,7 @@ func (runner *Runner) probeIdleSignals(ctx context.Context, sockets []Socket) {
 func (runner *Runner) apply(
 	ctx context.Context,
 	decisions []Decision,
+	options Options,
 ) ([]Decision, []string) {
 	applied := make([]Decision, 0, len(decisions))
 	warnings := make([]string, 0)
@@ -573,6 +579,13 @@ func (runner *Runner) apply(
 				decision.Reason = "attached since the sweep started"
 				break
 			}
+			// Reuse the complete dry-run classifier with new busy, process,
+			// crumb, client and transcript readings, not plan-time evidence.
+			// Apply=false prevents recursive application of that fresh plan.
+			decision = runner.reclassifyKill(ctx, decision, options)
+			if decision.Action != ActionKillServer {
+				break
+			}
 			if err := runner.killServer(ctx, decision.Socket); err != nil {
 				decision.State = StateSkip
 				decision.Reason = fmt.Sprintf("kill-server: %v", err)
@@ -587,6 +600,27 @@ func (runner *Runner) apply(
 			}
 		case ActionKillSession:
 			name := strings.TrimPrefix(decision.Socket, "vsct:")
+			probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+			sessions, err := runner.tmux.Sessions(probeCtx, "vsct")
+			cancel()
+			if err != nil {
+				decision.State = StateSkip
+				decision.Reason = fmt.Sprintf("re-probe before kill-session: %v", err)
+				decision.Failed = true
+				break
+			}
+			decision.State = StateSkip
+			decision.Action = ActionNone
+			decision.Reason = "session no longer exists at apply"
+			for _, session := range sessions {
+				if session.Name == name {
+					decision = planVSCT(Input{Apply: true, VSCTMaxIdle: vsctMaxIdle}, session)
+					break
+				}
+			}
+			if decision.Action != ActionKillSession {
+				break
+			}
 			if err := runner.tmux.KillSession(ctx, "vsct", name); err != nil {
 				decision.State = StateSkip
 				decision.Reason = fmt.Sprintf("kill-session: %v", err)
@@ -599,6 +633,34 @@ func (runner *Runner) apply(
 		applied = append(applied, decision)
 	}
 	return applied, warnings
+}
+
+// reclassifyKill shares Run's probing and Plan's safety rules, limited to
+// this candidate. No unrelated socket or bunker probe follows its safety reading.
+func (runner *Runner) reclassifyKill(ctx context.Context, original Decision, options Options) Decision {
+	options.Apply = false
+	options.onlySocket = original.Socket
+	fresh, err := runner.Run(ctx, options)
+	if err != nil {
+		original.State = StateSkip
+		original.Action = ActionNone
+		original.Failed = true
+		original.Reason = fmt.Sprintf("refresh safety probes before kill: %v", err)
+		return original
+	}
+	for _, decision := range fresh.Decisions {
+		if decision.Socket != original.Socket {
+			continue
+		}
+		if decision.State == StateIdle || decision.State == StateOrphan || decision.State == StateFork {
+			decision.Action = ActionKillServer
+		}
+		return decision
+	}
+	original.State = StateSkip
+	original.Action = ActionNone
+	original.Reason = "socket no longer present at apply"
+	return original
 }
 
 func removeRoleSeatPrompt(sidDir, socket string) error {

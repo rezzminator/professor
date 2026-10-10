@@ -163,7 +163,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.refresh-scope,templates.pfm-guard,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -813,6 +813,7 @@ else bad 'checks_templates_unit_script red suite' "$out"; fi
 # checks_templates (CI's iso test templates) calls each of the five unit-script suites once.
 out="$( (
   for f in $(declare -F | awk '{print $3}' | grep '^checks_templates_'); do
+    case "$f" in checks_templates_steps|checks_templates_step_serial) continue ;; esac
     eval "$f() { printf '%s%s\\n' '$f' \"\${*:+ \$*}\"; }"
   done
   checks_templates
@@ -900,5 +901,34 @@ out="$(leak_gate)"
 if [ "$status" = ' M plugins/demo' ] && [ "$out" = "$leak_clean" ] && [ "$(cat "$T/leak-files" 2>&1)" = "$leak_scanned" ]; then
   ok 'a submodule with new commits is a changed gitlink, never a changed file or a deleted path'
 else bad 'leak gate submodule with new commits' "$status" "$out" "$(cat "$T/leak-files" 2>&1)"; fi
+
+# A sampler still bootstrapping may not yet honor TERM. Its emitted header
+# is the existing readiness door: real sampler.sh emits it after arming traps.
+mkdir -p "$T/boot"
+cat > "$T/boot/sampler.sh" <<'SH'
+trap '' TERM
+printf started > "$1/started"
+exec {boot_fd}<> <(:)
+read -r -t "${BOOT_GRACE_S:-0.2}" -u "$boot_fd" || true
+trap 'printf stopped > "$1/stopped"; exit 0' TERM
+printf 'epoch_s\n' > "$1/resources.tsv"
+while :; do read -r -t 0.1 -u "$boot_fd" || true; done
+SH
+cat > "$T/boot/driver.sh" <<'SH'
+source "$1"
+bash "$2/sampler.sh" "$2" &
+pid=$!
+trap 'kill -KILL "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+for ((i=0;i<100;i++)); do [[ -f "$2/started" ]] && break; sleep 0.01; done
+[[ -f "$2/started" ]] || exit 2
+gate_resources_stop "$pid" "$2"
+[[ -f "$2/stopped" && -s "$2/resources.tsv" ]]
+SH
+if timeout --kill-after=1s 2s bash "$T/boot/driver.sh" "$SUT" "$T/boot" > "$T/boot/out" 2>&1; then
+  ok 'sampler stop waits for armed-trap header and finishes after bootstrap'
+else
+  boot_rc=$?
+  bad 'sampler stop waits for armed-trap header and finishes after bootstrap' "rc=$boot_rc" "$(cat "$T/boot/out")"
+fi
 
 shtest_end

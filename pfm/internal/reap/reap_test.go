@@ -64,7 +64,7 @@ func TestApplyRechecksAPlannedCorpseBeforeRemovingItsSocket(t *testing.T) {
 		Socket: socket,
 		State:  StateDead,
 		Action: ActionRemoveSocketFile,
-	}})
+	}}, Options{})
 	if len(decisions) != 1 || decisions[0].State != StateSkip || decisions[0].Action != ActionNone {
 		t.Fatalf("corpse apply decisions = %#v, want one skipped decision", decisions)
 	}
@@ -88,7 +88,7 @@ func TestApplyPreservesAPlannedCorpseWhenReprobeIsUnreadable(t *testing.T) {
 		Socket: socket,
 		State:  StateDead,
 		Action: ActionRemoveSocketFile,
-	}})
+	}}, Options{})
 	if len(decisions) != 1 || decisions[0].State != StateSkip || decisions[0].Action != ActionNone {
 		t.Fatalf("unreadable corpse apply decisions = %#v, want one skipped decision", decisions)
 	}
@@ -150,7 +150,7 @@ func TestApplyRemovesTheRolePromptOnADeadSocketRemoval(t *testing.T) {
 		Label:  seat,
 		State:  StateDead,
 		Action: ActionRemoveSocketFile,
-	}})
+	}}, Options{})
 	if len(warnings) != 0 {
 		t.Fatalf("clean role-prompt removal produced warnings: %v", warnings)
 	}
@@ -194,7 +194,7 @@ func TestApplyMarksADecisionFailedWhenTheCorpseSocketCannotBeRemoved(t *testing.
 		Socket: socket,
 		State:  StateDead,
 		Action: ActionRemoveSocketFile,
-	}})
+	}}, Options{})
 	if len(decisions) != 1 {
 		t.Fatalf("apply returned %d decisions, want one", len(decisions))
 	}
@@ -217,18 +217,15 @@ func TestApplyMarksADecisionFailedWhenTheCorpseSocketCannotBeRemoved(t *testing.
 // so the caller's exit code can never read clean.
 func TestApplyMarksADecisionFailedWhenKillServerErrors(t *testing.T) {
 	const socket = "cc-902-1-1"
-	runner := &Runner{
-		paths: paths.Values{TmuxDir: t.TempDir()},
-		tmux:  liveDuringCorpseReprobe{},
-		killServer: func(context.Context, string) error {
-			return errors.New("tmux kill-server: connection refused")
-		},
+	runner, _, _, _ := freshSafetyRunner(t, socket)
+	runner.killServer = func(context.Context, string) error {
+		return errors.New("tmux kill-server: connection refused")
 	}
 	decisions, _ := runner.apply(context.Background(), []Decision{{
 		Socket: socket,
-		State:  StateOrphan,
+		State:  StateIdle,
 		Action: ActionKillServer,
-	}})
+	}}, Options{})
 	if len(decisions) != 1 {
 		t.Fatalf("apply returned %d decisions, want one", len(decisions))
 	}
@@ -264,24 +261,19 @@ func TestRemoveRoleSeatPromptRemovesAnExistingPrompt(t *testing.T) {
 func TestApplyRemovesTheRolePromptOnAResolvedKill(t *testing.T) {
 	const socket = "cc-903-1-1"
 	const seat = "builder"
-	sidDir := t.TempDir()
+	runner, _, _, _ := freshSafetyRunner(t, socket)
+	sidDir := runner.paths.SIDDir
 	prompt := mustReapSeatPromptPath(t, sidDir, socket)
 	if err := agentrole.WriteSeatPrompt(sidDir, socket, "", "<!-- pfm agent-role: worker -->\nROLE"); err != nil {
 		t.Fatal(err)
 	}
-	runner := &Runner{
-		paths: paths.Values{TmuxDir: t.TempDir(), SIDDir: sidDir},
-		tmux:  liveDuringCorpseReprobe{},
-		killServer: func(context.Context, string) error {
-			return nil
-		},
-	}
+
 	decisions, warnings := runner.apply(context.Background(), []Decision{{
 		Socket: socket,
 		Label:  seat,
 		State:  StateIdle,
 		Action: ActionKillServer,
-	}})
+	}}, Options{})
 	if len(warnings) != 0 {
 		t.Fatalf("clean role-prompt removal produced warnings: %v", warnings)
 	}
@@ -299,7 +291,8 @@ func TestApplyRemovesTheRolePromptOnAResolvedKill(t *testing.T) {
 func TestApplyWarnsWithoutFailingWhenTheRolePromptCannotBeRemoved(t *testing.T) {
 	const socket = "cc-904-1-1"
 	const seat = "builder"
-	sidDir := t.TempDir()
+	runner, _, _, _ := freshSafetyRunner(t, socket)
+	sidDir := runner.paths.SIDDir
 	prompt := mustReapSeatPromptPath(t, sidDir, socket)
 	// A non-empty directory in the prompt's place makes os.Remove fail with
 	// ENOTEMPTY for every uid, root included. A read-only parent directory
@@ -314,19 +307,12 @@ func TestApplyWarnsWithoutFailingWhenTheRolePromptCannotBeRemoved(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	runner := &Runner{
-		paths: paths.Values{TmuxDir: t.TempDir(), SIDDir: sidDir},
-		tmux:  liveDuringCorpseReprobe{},
-		killServer: func(context.Context, string) error {
-			return nil
-		},
-	}
 	decisions, warnings := runner.apply(context.Background(), []Decision{{
 		Socket: socket,
 		Label:  seat,
 		State:  StateIdle,
 		Action: ActionKillServer,
-	}})
+	}}, Options{})
 	if len(decisions) != 1 || decisions[0].State != StateKilled || decisions[0].Failed {
 		t.Fatalf(
 			"an unremovable role prompt must not fail the reap itself: %#v",

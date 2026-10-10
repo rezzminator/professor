@@ -94,9 +94,18 @@ func FileIDOf(path string) (FileID, error) {
 	if err != nil {
 		return FileID{}, err
 	}
+	id, err := FileIDOfInfo(info)
+	if err != nil {
+		return FileID{}, fmt.Errorf("stat %s: %w", path, err)
+	}
+	return id, nil
+}
+
+// FileIDOfInfo is the identity a stat result already carries.
+func FileIDOfInfo(info os.FileInfo) (FileID, error) {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return FileID{}, fmt.Errorf("stat %s: no device and inode on this platform", path)
+		return FileID{}, fmt.Errorf("%s: no device and inode on this platform", info.Name())
 	}
 	return FileID{Device: fileIDDevice(stat.Dev), Inode: stat.Ino}, nil
 }

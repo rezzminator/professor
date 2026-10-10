@@ -364,17 +364,27 @@ checks_templates_release_check() {
 }
 
 checks_templates_refresh_scope() {
-  head_ "templates — refresh-scope fixtures"
+  head_ "templates — refresh-scope and verify leak policy fixtures"
   run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
+  run "templates: verify leak policy fixtures" -- python3 "$REPO_ROOT/scripts/test-verify-leak-policy.py"
 
+}
+
+checks_templates_worktree_script() {
+  head_ "templates — shipped worktree.sh lifecycle safety"
+  if bash "$REPO_ROOT/scripts/test-worktree.sh"; then
+    ok "worktree.sh refuses dirty removal, keeps registered paths with spaces, and names failed provisioning"
+  else
+    fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, or provisioning failure handling broke (see output)"
+  fi
 }
 
 checks_templates_pfm_guard() {
   head_ "templates — pfm-guard across repositories"
-  if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh"; then
-    ok "pfm-guard finds the session's law stamp for another repo's edit and denies an unread law"
+  if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-guard-stamp.sh"; then
+    ok "pfm-guard and both guard-stamp twins preserve session-keyed law stamps, cross-repo edits, and marker cleanup"
   else
-    fail_step "pfm-guard regression FAILED — a cross-repo edit must open on the session's law stamp and stay shut without one"
+    fail_step "pfm-guard/guard-stamp regression FAILED — session law stamps, cross-repo enforcement, or marker cleanup broke (see output)"
   fi
 
 }
@@ -484,35 +494,42 @@ checks_templates_mirrors_manifest() {
   fi
 }
 
+# One catalogue for the serial runner and the parallel gate. Scheduling-only
+# lane/demo aggregates and the gate's heavy check-map stay at their boundaries.
+checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
+  local add="$1"
+  "$add" templates.clone checks_templates_clone
+  "$add" templates.leak checks_templates_leak
+  "$add" templates.placeholders checks_templates_placeholders
+  "$add" templates.scratch-paths checks_templates_scratch_paths
+  "$add" templates.descriptions checks_templates_descriptions
+  "$add" templates.mirrors checks_templates_mirrors
+  "$add" templates.global-variants checks_templates_global_variants
+  "$add" templates.release-check checks_templates_release_check
+  "$add" templates.refresh-scope checks_templates_refresh_scope
+  "$add" templates.pfm-guard checks_templates_pfm_guard
+  "$add" templates.worktree-script checks_templates_worktree_script
+  "$add" templates.dev-report checks_templates_dev_report
+  "$add" templates.format-md checks_templates_format_md
+  "$add" templates.flight-templates checks_templates_flight_templates
+  "$add" templates.check-pfm-tests checks_templates_unit_script check-pfm
+  "$add" templates.check-templates-tests checks_templates_unit_script check-templates
+  "$add" templates.test-pfm-tests checks_templates_unit_script test-pfm
+  "$add" templates.test-templates-tests checks_templates_unit_script test-templates
+  "$add" templates.unit-path-tests checks_templates_unit_script unit-path
+  "$add" templates.opencode-writer-tests checks_templates_opencode_writer_tests
+  "$add" templates.engine-sync-action-tests checks_templates_engine_sync_action_tests
+  "$add" templates.skill-tests checks_templates_skill_tests
+  "$add" templates.opencode-writer-refs checks_templates_opencode_writer_refs
+}
+
+checks_templates_step_serial() { shift; "$@"; }
+
 checks_templates() {
-  checks_templates_clone
   checks_templates_check_map_serial
   checks_templates_lanes_serial
   checks_templates_demo_serial
-  checks_templates_leak
-  checks_templates_placeholders
-  checks_templates_scratch_paths
-  checks_templates_descriptions
-  checks_templates_mirrors_generate
-  checks_templates_global_variants
-  checks_templates_mirrors_marker
-  checks_templates_mirrors_roster
-  checks_templates_release_check
-  checks_templates_refresh_scope
-  checks_templates_pfm_guard
-  checks_templates_dev_report
-  checks_templates_format_md
-  checks_templates_flight_templates
-  checks_templates_unit_script check-pfm
-  checks_templates_unit_script check-templates
-  checks_templates_unit_script test-pfm
-  checks_templates_unit_script test-templates
-  checks_templates_unit_script unit-path
-  checks_templates_mirrors_opencode
-  checks_templates_opencode_writer_tests
-  checks_templates_skill_tests
-  checks_templates_opencode_writer_refs
-  checks_templates_mirrors_manifest
+  checks_templates_steps checks_templates_step_serial
 }
 
 checks_pfm_verify() {
@@ -850,8 +867,20 @@ checks_gate_check_map() { # run dir
 # gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
 # record is missing — the judge then reads "not measured", never a quiet pass.
 gate_resources_stop() {
-  local pid="$1" run_dir="$2" rc
-  kill -TERM "$pid" 2>/dev/null || true # already gone: its exit status below says why
+  local pid="$1" run_dir="$2" rc attempt
+  # sampler.sh emits its header only after arming TERM; a stop during bootstrap
+  # can otherwise be lost and leave wait hanging after a very short steps_run.
+  for ((attempt=0; attempt<50; attempt++)); do
+    [[ -s "$run_dir/resources.tsv" ]] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if [[ ! -s "$run_dir/resources.tsv" ]] && kill -0 "$pid" 2>/dev/null; then
+    printf 'PROFILE resources NOT RECORDED — sampler readiness timed out\n'
+    kill -KILL "$pid" 2>/dev/null || true
+  else
+    kill -TERM "$pid" 2>/dev/null || true # already gone: its exit status below says why
+  fi
   if wait "$pid"; then rc=0; else rc=$?; fi
   if (( rc != 0 )); then
     printf 'PROFILE resources NOT RECORDED — sampler.sh exit %s (its stderr above)\n' "$rc"
@@ -932,28 +961,7 @@ gate_run() { # pfm, templates, or all
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
     steps_add_heavy templates.check-map checks_gate_check_map "$run_dir"
-    steps_add templates.clone checks_templates_clone
-    steps_add templates.leak checks_templates_leak
-    steps_add templates.placeholders checks_templates_placeholders
-    steps_add templates.scratch-paths checks_templates_scratch_paths
-    steps_add templates.descriptions checks_templates_descriptions
-    steps_add templates.mirrors checks_templates_mirrors
-    steps_add templates.global-variants checks_templates_global_variants
-    steps_add templates.release-check checks_templates_release_check
-    steps_add templates.refresh-scope checks_templates_refresh_scope
-    steps_add templates.pfm-guard checks_templates_pfm_guard
-    steps_add templates.dev-report checks_templates_dev_report
-    steps_add templates.format-md checks_templates_format_md
-    steps_add templates.flight-templates checks_templates_flight_templates
-    steps_add templates.check-pfm-tests checks_templates_unit_script check-pfm
-    steps_add templates.check-templates-tests checks_templates_unit_script check-templates
-    steps_add templates.test-pfm-tests checks_templates_unit_script test-pfm
-    steps_add templates.test-templates-tests checks_templates_unit_script test-templates
-    steps_add templates.unit-path-tests checks_templates_unit_script unit-path
-    steps_add templates.opencode-writer-tests checks_templates_opencode_writer_tests
-    steps_add templates.engine-sync-action-tests checks_templates_engine_sync_action_tests
-    steps_add templates.skill-tests checks_templates_skill_tests
-    steps_add templates.opencode-writer-refs checks_templates_opencode_writer_refs
+    checks_templates_steps steps_add
   fi
   if gate_derive_bound "$target"; then derived=1; fi
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

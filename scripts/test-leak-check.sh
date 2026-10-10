@@ -15,7 +15,12 @@ cat > "$T/bin/git" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$*" == 'rev-parse --show-toplevel' ]]; then
   printf '%s\n' "$TEST_REPO"
-elif [[ "${1:-}" == 'diff' ]]; then
+elif [[ "${1:-}" == 'cat-file' ]]; then
+  printf 'commit\n'
+elif [[ "${1:-}" == 'rev-list' ]]; then
+  if [[ "${GIT_ENUM_FAIL:-}" == 1 ]]; then echo 'synthetic enumeration failure' >&2; exit 3; fi
+  printf 'fixture-commit\n'
+elif [[ "${1:-}" == 'diff' || "${1:-}" == 'diff-tree' ]]; then
   cat "$GIT_DIFF_FILE"
 else
   exit 3
@@ -71,7 +76,7 @@ leak_run() {
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE \
     TEST_REPO="$T/repo" GREP_FAIL_FILE="${GREP_FAIL_FILE:-}" GREP_FAIL_SUFFIX="${GREP_FAIL_SUFFIX:-}" \
     GREP_FAIL_STDIN="${GREP_FAIL_STDIN:-}" GREP_FORCE_C="${GREP_FORCE_C:-}" GREP_NOFOLD_LOCALE="${GREP_NOFOLD_LOCALE:-}" GREP_NOFOLD_SCOPE="${GREP_NOFOLD_SCOPE:-}" \
-    GIT_DIFF_FILE="$T/diff" LEAK_TERMS="$terms" LC_ALL="${LEAK_LC_ALL:-C.UTF-8}" \
+    GIT_ENUM_FAIL="${GIT_ENUM_FAIL:-}" GIT_DIFF_FILE="$T/diff" LEAK_TERMS="$terms" LC_ALL="${LEAK_LC_ALL:-C.UTF-8}" \
     PATH="$T/bin:$PATH" \
     bash "$ROOT/scripts/leak-check.sh" "$@" > "$T/out" 2> "$T/err" < /dev/null
   rc=$?
@@ -108,14 +113,16 @@ else
   bad 'ignore token suppresses its own substring but keeps a separate hit' "rc=$rc; out=$out; err=$err"
 fi
 
+mkdir -p "$T/repo/.opencode"
 printf 'syntheticsecret\n' > "$T/repo/LICENSE"
+printf 'syntheticsecret\n' > "$T/repo/.opencode/LICENSE"
 printf 'syntheticsecret\n' > "$T/repo/.githooks/guard"
 printf 'syntheticsecret\n' > "$T/repo/fixtures/ignore/skip.txt"
-run_check LICENSE .githooks/guard fixtures/ignore/skip.txt clean-1.txt
-if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'scanned 1 file(s) (3 excluded by design, 0 not a regular file)'* ]]; then
-  ok 'license, hook, and configured path are excluded and counted'
+run_check LICENSE .opencode/LICENSE .githooks/guard fixtures/ignore/skip.txt clean-1.txt
+if [[ "$rc" -eq 1 && "$out" == 'LEAK .githooks/guard: syntheticsecret' && "$err" == *'scanned 2 file(s) (3 excluded by design, 0 not a regular file)'* ]]; then
+  ok 'F14: required public licenses stay excluded while hooks are scanned in files mode'
 else
-  bad 'license, hook, and configured path are excluded and counted' "rc=$rc; out=$out; err=$err"
+  bad 'F14: required public licenses stay excluded while hooks are scanned in files mode' "rc=$rc; out=$out; err=$err"
 fi
 
 run_check missing.txt hit.txt
@@ -366,5 +373,95 @@ for mode in staged range; do
     fi
   done
 done
+
+# Every reachable commit matters, even if the tip no longer contains the leak.
+range_from="$(pgit rev-parse HEAD)"
+printf 'syntheticsecret\n' > "$pushed/transient.txt"
+pgit add transient.txt && pgit commit -q -m transient
+rm "$pushed/transient.txt"
+pgit add -u && pgit commit -q -m removed
+real_range() {
+  out="$(PFM_DEV_REPO_GIT_DIR="$pushed/.git" PFM_DEV_REPO_WORK_TREE="$pushed" LEAK_TERMS="${TERMS:-$T/terms}" LC_ALL=C.UTF-8 \
+    bash "$ROOT/scripts/leak-check.sh" --range "$1" "$2" 2> "$T/err" < /dev/null)"
+  rc=$?; err="$(cat "$T/err")"
+}
+real_range "$range_from" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK transient.txt: syntheticsecret'* ]]; then
+  ok 'F7: a leak added then removed in the same push is blocked'
+else
+  bad 'F7: a leak added then removed in the same push is blocked' "rc=$rc; out=$out; err=$err"
+fi
+
+# A merge may add a line present in neither parent; ordinary log patches omit it.
+pgit checkout -q -b side
+printf 'side\n' > "$pushed/side.txt"
+pgit add side.txt && pgit commit -q -m side
+pgit checkout -q -
+merge_from="$(pgit rev-parse HEAD)"
+pgit merge -q --no-ff --no-commit side
+mkdir -p "$pushed/.githooks" "$pushed/.opencode"
+printf 'syntheticsecret\n' > "$pushed/.githooks/merged"
+printf 'syntheticsecret\n' > "$pushed/LICENSE"
+printf 'syntheticsecret\n' > "$pushed/.opencode/LICENSE"
+pgit add .githooks/merged LICENSE .opencode/LICENSE && pgit commit -q -m merged
+real_range "$merge_from" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK .githooks/merged: syntheticsecret'* && "$out" != *'LEAK LICENSE:'* && "$out" != *'LEAK .opencode/LICENSE:'* ]]; then
+  ok 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded'
+else
+  bad 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded' "rc=$rc; out=$out; err=$err"
+fi
+
+GIT_ENUM_FAIL=1 run_range
+if [[ "$rc" -ne 0 && "$out$err" == *'FAILED'* && "$out$err" == *'enumerat'* && "$out$err" != *'leak-check: clean'* ]]; then
+  ok 'F7: commit enumeration failure is visible and refuses clean'
+else
+  bad 'F7: commit enumeration failure is visible and refuses clean' "rc=$rc; out=$out; err=$err"
+fi
+
+empty_tree="$(pgit hash-object -t tree /dev/null)"
+real_range "$empty_tree" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK transient.txt: syntheticsecret'* ]]; then
+  ok 'F7: new-ref empty-tree base enumerates every reachable commit'
+else
+  bad 'F7: new-ref empty-tree base enumerates every reachable commit' "rc=$rc; out=$out; err=$err"
+fi
+# A new ref's commits the remote already holds were judged by the push that published them:
+# a leak scrubbed long ago must not block every later new-branch push.
+pgit update-ref refs/remotes/origin/main HEAD
+pgit checkout -q -b fresh-branch
+printf 'clean\n' > "$pushed/fresh.txt"
+pgit add fresh.txt && pgit commit -q -m fresh
+real_range "$empty_tree" HEAD
+if [[ "$rc" -eq 0 && "$err" == *'1 newly reachable commit'* ]]; then
+  ok 'F7: new-ref empty-tree base scans only commits no remote holds'
+else
+  bad 'F7: new-ref empty-tree base scans only commits no remote holds' "rc=$rc; out=$out; err=$err"
+fi
+
+printf '!structural-only\n' > "$T/structural-terms"
+TERMS="$T/structural-terms" run_check clean-1.txt
+if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'PRIVATE COVERAGE SKIPPED'* && "$err" == *'4 structural pattern(s)'* ]]; then
+  ok 'F13: explicit structural policy runs without private terms and names the coverage gap'
+else
+  bad 'F13: explicit structural policy runs without private terms and names the coverage gap' "rc=$rc; out=$out; err=$err"
+fi
+TERMS="$T/structural-terms" run_check gm.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK gm.txt: $gm_addr" && "$err" == *'PRIVATE COVERAGE SKIPPED'* ]]; then
+  ok 'F13: structural policy still rejects identifying structure on forks'
+else
+  bad 'F13: structural policy still rejects identifying structure on forks' "rc=$rc; out=$out; err=$err"
+fi
+printf '!structural-only\nsyntheticsecret\n' > "$T/mixed-terms"
+TERMS="$T/mixed-terms" run_check clean-1.txt
+if [[ "$rc" -ne 0 && "$err" == *'FAILED'* ]]; then ok 'F13: mixed structural-only and private policy is refused'
+else bad 'F13: mixed structural-only and private policy is refused' "rc=$rc; out=$out; err=$err"; fi
+
+mkdir -p "$T/scan-temp"
+TMPDIR="$T/scan-temp" run_check hit.txt
+if [[ "$rc" == 1 && -z "$(find "$T/scan-temp" -type f -print)" ]]; then
+  ok 'files scan removes every allocated temporary artifact'
+else
+  bad 'files scan removes every allocated temporary artifact' "rc=$rc; leftovers=$(find "$T/scan-temp" -type f -print)"
+fi
 
 shtest_end

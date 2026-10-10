@@ -52,3 +52,21 @@ func TestLockBeatSucceedsWhileStillOwner(t *testing.T) {
 		t.Fatalf("beat() = %v, want nil while still the owner", err)
 	}
 }
+
+func TestCancelledSettleReleasesTargetLock(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := acquireTargetLock(ctx, clock.Real, root, "sock:%1", time.Second, time.Millisecond, time.Minute)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("settle error = %v, want context.Canceled", err)
+	}
+	lock, err := acquireTargetLock(context.Background(), clock.Real, root, "sock:%1", 0, 0, time.Minute)
+	if err != nil {
+		t.Fatalf("cancelled settle leaked the owned lock: reacquire = %v", err)
+	}
+	defer lock.release()
+	if err := lock.beat(); err != nil {
+		t.Fatalf("reacquired lock cannot heartbeat: %v", err)
+	}
+}

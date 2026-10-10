@@ -2,7 +2,9 @@
 # check-templates.sh — the static checks of the templates unit (every path outside pfm/), on the host.
 #   .claude/scripts/check-templates.sh <file>...
 # Installed tools only, never one that fetches a tool. Not installed (node, python3 + PyYAML, jq, git,
-# rumdl, jscpd at the pinned version (scripts/clone-check.sh --resolve)): only `FAIL install (...)`, no check run, exit 1. Else one PASS/FAIL/SKIP line per check,
+# rumdl, jscpd at the pinned version (scripts/clone-check.sh --resolve)): only `GAP install (templates is missing: <each missing tool>
+# ...)`, no check run, exit 3 — a missing tool is a gap in this machine, never a failed check (exit 1). rumdl is a host tool
+# (`pfm install`, never the fence image: infra/fence/tools.sh installs only the pinned Go and npm tools). Else one PASS/FAIL/SKIP line per check,
 # every check run even after one fails: file-scoped rumdl (named .md files) and leak (every named file);
 # unit-wide clone, placeholders, scratch-paths, descriptions, manifest, codex-markers,
 # opencode-writer-refs. Output goes to /tmp/{project}/check-templates/{UTC}-{pid}.log (path printed).
@@ -15,7 +17,7 @@
 # mirrors .codex/agents and .opencode/agent, which `pfm codex|opencode build` writes, and exits 3
 # NOT GENERATED without them), the node/python/shell test suites (test-templates.sh),
 # `dev.sh iso gate templates`.
-# BROKEN STATE: a missing unit-path.sh errors on source; a missing infra/fence/checks.sh is FAIL on both
+# BROKEN STATE: a missing tool is `GAP install` naming it, exit 3, never a PASS or a bare FAIL; a missing unit-path.sh errors on source; a missing infra/fence/checks.sh is FAIL on both
 # checks that need it; a check whose tool dies is FAIL, never PASS; a log or scratch directory that
 # cannot be created is exit 1 naming it.
 set -euo pipefail
@@ -30,21 +32,25 @@ RUMDL="$(command -v rumdl || true)"
 jscpd_resolvable() { # clone-check.sh's own resolver: installed and at the pinned version
   bash "$ROOT/scripts/clone-check.sh" --resolve > /dev/null 2>&1
 }
-installed() {
+missing_tools() { # one name per line: every tool this machine lacks, so the gap line names all of them
   local t
-  for t in node python3 jq git; do command -v "$t" > /dev/null 2>&1 || return 1; done
-  python3 -c 'import yaml' > /dev/null 2>&1 || return 1
-  [ -n "$RUMDL" ] && jscpd_resolvable
+  for t in node python3 jq git; do command -v "$t" > /dev/null 2>&1 || echo "$t"; done
+  if command -v python3 > /dev/null 2>&1 && ! python3 -c 'import yaml' > /dev/null 2>&1; then echo PyYAML; fi
+  [ -n "$RUMDL" ] || echo rumdl
+  jscpd_resolvable || echo jscpd
 }
-install_fail() {
-  echo 'FAIL install (templates has no installed dependencies — run: pfm install --yes && bash infra/fence/tools.sh)'
-  exit 1
+install_gap() { # install_gap: prints the one GAP line and exits 3 when any tool is missing
+  local missing="" tool
+  while IFS= read -r tool; do missing+="${missing:+, }$tool"; done < <(missing_tools)
+  [ -n "$missing" ] || return 0
+  echo "GAP install (templates is missing: ${missing} — no check ran, this is a missing tool and not a failed check; run: pfm install --yes && bash infra/fence/tools.sh, and PyYAML for python3)"
+  exit 3
 }
 
 # The log name first: the scratch directory is named after it. With no log name the install state decides
 # the line (git is one of the tools).
 if ! unit_log check-templates; then
-  installed || install_fail
+  install_gap
   echo "check-templates.sh: the log directory could not be created" >&2; exit 1
 fi
 SCRATCH="${UNIT_LOG%.log}.d"
@@ -53,7 +59,7 @@ FAILED=0
 trap 'if [ "$FAILED" = 0 ]; then rm -rf -- "$SCRATCH"; fi' EXIT
 PATH_LINES="$SCRATCH/path-lines"; FAILMARK="$SCRATCH/failmark"
 unit_paths check templates "$@" > "$PATH_LINES"
-installed || install_fail
+install_gap
 
 cd "$ROOT"
 cat "$PATH_LINES"

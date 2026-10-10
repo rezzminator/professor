@@ -52,6 +52,9 @@
     "global/engine-sync/config.json": {
       "curated": true
     },
+    "global/commands/context-audit.md": {
+      "curated": true
+    },
     "global/commands/context-meter.md": {
       "curated": true
     },

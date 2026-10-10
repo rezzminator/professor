@@ -4,6 +4,8 @@ http:internal/harvest/search.go 2
 http:internal/harvestpy/provision.go 1
 http:internal/usagehook/hook.go 1
 proc:internal/codexappendix/trust.go 1
+proc:internal/costsink/arm.go 1
+proc:internal/costsink/launch.go 1
 proc:internal/deps/registry.go 1
 proc:internal/gather/tmuxprobe.go 1
 proc:internal/statusline/process.go 1

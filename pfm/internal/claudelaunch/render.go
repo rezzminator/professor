@@ -40,10 +40,14 @@ type Request struct {
 
 type Launch struct {
 	Unset, Env []string
-	Binary     string
-	Argv       []string
-	Cache1H    bool
-	SessionID  string
+	// Wrapper is the argv words that run in front of Binary: the cost launcher that arms the
+	// per-launch cost sink and then execs Binary, keeping the pid. Empty when the launch carries
+	// no cost ledger.
+	Wrapper   []string
+	Binary    string
+	Argv      []string
+	Cache1H   bool
+	SessionID string
 }
 
 // CheckConfigDir refuses an account dir Claude would create itself or one
@@ -109,6 +113,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
 	result.Env = append(result.Env, ShellEnv(paths.OSEnv{}.Lookup)...)
+	costLedgerPlan(request, prefs.CostLedger, &result)
 	if request.SessionID != "" {
 		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
 	}

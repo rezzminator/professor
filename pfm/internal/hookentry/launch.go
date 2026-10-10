@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/costsink"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -94,6 +95,24 @@ func launchStartsSession(arguments []string) bool {
 	return true
 }
 
+// armCostLedger decides the cost ledger of a session the pass-through is about to exec; a seam so
+// the launcher tests never start a sink.
+var armCostLedger = costsink.PrepareCurrent
+
+// launchIsHeadless reports a print-mode run: one prompt in, one answer out, no chat to meter.
+func launchIsHeadless(arguments []string) bool {
+	for _, argument := range arguments {
+		if argument == "--" {
+			return false
+		}
+		if argument == "-p" || argument == "--print" || argument == "--output-format" ||
+			strings.HasPrefix(argument, "--output-format=") {
+			return true
+		}
+	}
+	return false
+}
+
 // Launch is the managed Claude launcher entry.
 func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
 	if env == nil {
@@ -145,6 +164,9 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			}
 			filtered = append(filtered, sessionEnv...)
 			environment = filtered
+			if !launchIsHeadless(arguments) {
+				environment, _ = armCostLedger(environment, env, prefs.CostLedger, stderr)
+			}
 		}
 		stamped := make([]string, 0, len(environment)+1)
 		for _, entry := range environment {

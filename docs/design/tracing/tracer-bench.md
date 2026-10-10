@@ -224,7 +224,7 @@ A trace of the Claude engine's launch path on this repository: $0.82, 18 threads
 
 - 40 hops were rejected at first; one Haiku node wrote 27 of them as invented `pkg/...` paths. After the resolver and drift none stayed rejected: the invented paths were placed, and 12 hops drifted when a flight rewrote the launcher two hours later.
 - The map: `--to Render` printed the launch chain from `main.go::run` down to it, eight frames, and `--from run` the whole chain down to the tmux session. Qualifying Go calls by package removed 4 false links a same-named method had made; the first build had 77 call links in 84 files.
-- Placing invented paths silently hid a node that broke the hop contract. The user ruled that it must scream if it happens again: the WARNINGS block, the COUNTS fields, the MAP suffix, the page's banner, the JSON field and `write`'s stderr warning.
+- Placing invented paths silently hid a node that broke the hop contract. The user ruled that it must scream if it happens again: the WARNINGS block, the COUNTS fields, the MAP suffix, the page's red block, the JSON field and `write`'s stderr warning.
 
 ## Live probe
 

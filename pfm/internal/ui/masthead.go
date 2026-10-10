@@ -53,8 +53,12 @@ func (model Model) renderHeader(width int) string {
 	default:
 		lines = append(lines, model.chatsHeaderLine(contentWidth))
 	}
+	rail := ""
+	if model.tab == TabChats && model.mergeNewChat {
+		rail = "\n" + model.renderPlaceRail(width)
+	}
 	if !model.skyEnabled {
-		return strings.Join(lines, "\n")
+		return strings.Join(lines, "\n") + rail
 	}
 	widget := sky.Frame(sky.Options{
 		Counts:   liveEngineCounts(model.rows),
@@ -67,7 +71,7 @@ func (model Model) renderHeader(width int) string {
 	for index := range lines {
 		lines[index] = fillLine(lines[index], contentWidth) + widget[index]
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n") + rail
 }
 
 // fleetVitals counts what the masthead reports: live chats per engine, and the

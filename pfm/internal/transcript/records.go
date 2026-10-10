@@ -69,6 +69,8 @@ type ClaudeRecord struct {
 	AgentName        json.RawMessage `json:"agentName"`
 	AITitle          json.RawMessage `json:"aiTitle"`
 	TotalCostUSD     json.RawMessage `json:"totalCostUSD"`
+	StartTime        json.RawMessage `json:"startTime"`
+	TotalDuration    json.RawMessage `json:"totalDuration"`
 	Message          json.RawMessage `json:"message"`
 	RequestID        json.RawMessage `json:"requestId"`
 	UUID             json.RawMessage `json:"uuid"`

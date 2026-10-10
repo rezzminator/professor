@@ -25,7 +25,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `tracetree.py` | The commands, the check, the resolver, drift, WARNINGS |
 | `tracemap.py` | The component map, imported by `tracetree.py` |
 | `tracemap_html.py` | The page writer, imported only for `map --html` |
-| `tracemap.html` | The page template, with its `/*TRACEMAP_DATA*/null` data slot |
+| `tracemap.html` | The page template, with its title, warnings and `/*TRACEMAP_DATA*/null` data slots |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
 | `SKILL.md` | The agents' command table and the check, visible to the tracer tiers and `sub-tracer` only |
 
@@ -38,7 +38,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `ROOT` | `new` | The repository root, absolute |
 | `BASE` | `new`, in a git work tree with a commit | The commit `HEAD` was at |
 | `questions` | `new --questions` | The brief's numbered questions, as read from stdin |
-| `{ID}.started` | `start` | Nothing: the node is running |
+| `{ID}.started` | `start` | `{PATH:LINE}<tab>{QUESTION}`, a line per `start`: the node is running; the map page reads its question and its time |
 | `{ID}.refused` | `write`, at its refusal | Nothing: the node's first write was refused |
 | `{ID}.hops` | `write`, once | The node's file, each placed hop's `@` rewritten to its real `path:line` |
 | `{ID}.write.json` | `write`, with the store | One entry per hop: `given`, `path`, `line`, `end`, `how`, `status`, `sha256` |
@@ -73,13 +73,13 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 
 `new ROOT [--seek REGEX] [--questions]` creates the run directory, writes `ROOT` and prints the run's path. `--questions` reads stdin to EOF and fails unless it finds a question numbered `1.`, `1)` or `Q1`; it stores the text as `questions`. In a git work tree with a commit it writes `BASE`; a git that cannot answer is named on stderr, never fatal.
 
-`--seek` then lists every verified hop of an earlier run on the same ROOT, modified within the last 6 hours, running runs included, whose path or current line matches REGEX: `PRIOR {run} node {ID}: {path}:{line}  {text}`, newest run first, at most 30. The last line is `PRIOR: {n} hops in {k} runs — tt check {run} --hops {ID}`, naming any not shown and any run it could not read, or `PRIOR: none in {k} earlier runs on this root`, or `PRIOR: could not look — {reason}`.
+`--seek` then lists every verified hop of an earlier run on the same ROOT, modified within the last 6 hours, running runs included, whose path or current line matches REGEX: `PRIOR {run} node {ID}: {path}:{line}  {text}`, newest run first, at most 30; a text past 160 characters is cut to 157 and ends `...`. The last line is `PRIOR: {n} hops in {k} runs — tt check {run} --hops {ID}`, naming any not shown and any run it could not read, or `PRIOR: none in {k} earlier runs on this root`, or `PRIOR: could not look — {reason}`.
 
 ### start
 
 **Function:** `cmd_start` — **Run by:** each sub-tracer, as its first call
 
-`start RUN ID PATH:LINE [QUESTION]` touches `{ID}.started`. For a QUESTION of the form `Q{n}` it prints `QUESTION Q{n}: {text}` from `questions`, or names why it cannot. Then `started {ID} — {path}` and PATH from LINE−3 to LINE+40, numbered. A FROM path resolves by its tail like a hop's.
+`start RUN ID PATH:LINE [QUESTION]` appends `{PATH:LINE}<tab>{QUESTION}` to `{ID}.started`. For a QUESTION of the form `Q{n}` it prints `QUESTION Q{n}: {text}` from `questions`, or names why it cannot. Then `started {ID} — {path}` and PATH from LINE−3 to LINE+40, numbered. A FROM path resolves by its tail like a hop's.
 
 ### write
 
@@ -115,7 +115,7 @@ The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s �
 
 ## The check
 
-Each hop's quote is re-read from the file at check time, in every view, so the printout shows the file's own text, never the node's. A quote line matches `exact`, else `loose` (whitespace collapsed), else as a `fragment` of at least 12 characters; a match short of exact is tagged.
+Each hop's quote is re-read from the file at check time, in every view, so the printout shows the file's own text, never the node's. A quote line matches `exact`, else `loose` (whitespace collapsed), else as a `fragment` of at least 12 characters; a match short of exact is tagged. A pasted line-number prefix, wrapping backticks and one backslash escaping the indentation (`> \    def f():`) are dropped before matching.
 
 | State | Printed | When |
 | --- | --- | --- |
@@ -141,7 +141,7 @@ The answers view checks each ANSWER line's cites against the verified hops. A ci
 | `✗ no such file` | The cite names no file |
 | `no [path:N] cite` | The line cites nothing |
 
-A flagged line is not evidence. Each node's block ends `hops: {v} verified, {r} rejected`, adding `{d} drifted` when any did. The last line of every view is `COUNTS:`, the whole run's tally: `nodes`, `hops`, `verified`, `moved`, `rejected`, `drifted`, `placed`, `followed`, `refused`, `partial`, `unseen`, `answers`, `flagged`, `recited`, `missing`, `badaddr`, `open`, joined by ` · `.
+A flagged line is not evidence. Each node's block ends `hops: {v} verified, {r} rejected`, adding `{d} drifted` when any did. The last line of every view is `COUNTS:`, the whole run's tally: `nodes`, `hops`, `verified`, `moved`, `rejected`, `drifted`, `placed`, `followed`, `refused`, `partial`, `unseen`, `answers`, `flagged`, `recited`, `missing`, `badaddr`, `noend` (nodes with neither END nor SPLIT), joined by ` · `.
 
 ## The resolver
 
@@ -193,7 +193,7 @@ Drift exists because 90 of the survey's 239 rejections were code that changed af
 
 **Function:** `incidents`, `warnings_block`, `map_flags`
 
-Every `check` view prints the WARNINGS block first; `wait` prints it right after its WAIT line. A node broke the hop contract when it has placed hops, a refused write stored with hops that still do not hold, or REJECTED hops:
+Every `check` view prints the WARNINGS block first; `wait` prints it right after its WAIT line. A node broke the hop contract when it has placed hops, a refused write stored with hops that still do not hold, or REJECTED hops (a count of one reads `1 hop`, `1 node`):
 
 ```text
 ⚠ WARNINGS — {b} of {n} nodes broke the hop contract; their answers rest on placed, refused or rejected hops: drill before trusting them
@@ -205,7 +205,8 @@ Every `check` view prints the WARNINGS block first; `wait` prints it right after
 ```
 
 - A hop counts as placed when the resolver placed it by `basename and quote`, `sibling file` or `unique line`, or when its given path is no tail of the file it landed in (a later hop on an invented directory reaches the file through the first), and its given path never held the quote. A plain tail (`server.go`, `..` collapsed) is no incident; a hop whose given path held the quote when walked is followed, not placed.
-- The placed line shows three `given → path` pairs, then `+{j} more`.
+- A placed hop whose quote sits at the very line it cited only miscopied its path: the walker read the right lines and typed the directory wrong. It breaks no contract and prints a note after the block, or after `WARNINGS: none`: `· node {ID}: the kit corrected a miscopied path on {k} hops — each quote sits at its cited line ({given} → {path}, …)`. With a sidecar the entry was stored `verified` at its given line; without one the check-time resolver found the quote at the cited line. A placement at any other line keeps the `⚠` line. The user ruled this calibration after a run's two path slips read as untrustworthy evidence.
+- The placed and miscopied lines show three `given → path` pairs, then `+{j} more`.
 - A refusal the second write fixed is no incident.
 - Drift prints its run line without counting a node as broken; when only drift occurs, the header reads `⚠ WARNINGS — no node broke the hop contract`. The followed line prints only beside other lines: followed hops alone leave `WARNINGS: none`.
 - Flagged answer lines stay in the answers view and in COUNTS' `flagged=`, never in WARNINGS, so a clean walk never warns.
@@ -213,12 +214,12 @@ Every `check` view prints the WARNINGS block first; `wait` prints it right after
 
 The same findings ride every surface:
 
-- COUNTS carries `placed=` (hops) and `refused=` (nodes).
+- COUNTS carries `placed=` (hops, miscopied ones included) and `refused=` (nodes).
 - The `MAP` line and the first line of `map.txt` and `map` end `· ⚠ {b} nodes broke the hop contract` and `· ⚠ {k} drifted` when they apply.
-- `map --json` carries `"warnings"`, the block's lines, `[]` when none.
-- `map --html` opens with a red banner of the lines.
+- `map --json` carries `"warnings"`, the block's lines, `[]` when none, and `"notes"`, the `·` lines.
+- `map --html` opens its ledger with a red block of the lines, ahead of the map, and a quiet block of the notes.
 - `write` prints to stderr for its own node and exits 0:
-  - `⚠ WARNING — {k} of your hops named a path that is not the file; the kit placed them: {pairs}. Copy paths as your read printed them.`
+  - `⚠ WARNING — {k} of your hops named a path that is not the file; the kit placed them: {pairs}. Copy paths as your read printed them.` A miscopy warns here too: the node that typed the path is the one to learn.
   - `⚠ WARNING — stored with {b} hops that do not hold; your tracer sees them REJECTED and is warned`
 
 The lead's final opens with the lines, and the caller relays them to the user. The user ruled for this after the [engine trace](tracer-bench.md#engine-trace): placing an invented path silently hid a node that broke the contract.
@@ -236,7 +237,7 @@ In order:
 5. The `MAP` line.
 6. The OPEN block.
 
-The OPEN block lists every NOT READ and LEAD line of the shown nodes, each suffixed `— run: node {ID}`, plus `(grep only — read it)` when a `path:line` in it is held by no verified hop of the run; `OPEN: none` when empty.
+The OPEN block lists every NOT READ and LEAD line of the shown nodes, each suffixed `— run: node {ID}`, plus `(grep only — read it)` when a `path:line` or `path:A-B` in it is held by no verified hop of the run; a line range it names (`path:A-B`, `path lines A-B and C-D`) that verified hops of any node hold adds `(held: node {ID} verified {path}:{lines})`, one per node — a marker, never a drop; `OPEN: none` when empty.
 
 The full view always goes to `answers.txt`; when it cannot be written, `ANSWERS FAILED — {reason}` precedes the full view. At 28000 characters or more the printout keeps, in order:
 
@@ -293,5 +294,23 @@ The `MAP` line reads `MAP {RUN}/map.txt — {n} components in {f} files, {c} cal
 
 - NAME, for `--from` and `--to`, is an exact id, else a component name, else a file or its tail, else any id containing it, ignoring case. One matching nothing or more than 6 components exits 2 and says which.
 - `--from NAME` prints the tree of everything NAME reaches, `--to NAME` everything that reaches it.
-- `--json` prints `run`, `root`, `components`, `edges`, `threads` with each thread's `walk`, and `warnings`; with `--from` or `--to`, only that part.
-- `--html OUT` writes `tracemap.html` with the data inlined: one self-contained page that loads nothing from the network, draws the map and replays the run thread by thread. It is written only when a person asks to see it.
+- `--json` prints `run`, `root`, `components` (each with its first and last line, `line` and `end`), `edges`, `threads` with each thread's `walk` (each step's `line` to `b`, its `status` — `verified`, `moved`, `placed` or `followed` — the hop's flag, and its `link` from the step before — `call`, `names`, `then`, `same` within one component, null on the first), and `warnings`; with `--from` or `--to`, only that part.
+- `--html OUT` writes `tracemap.html` with the data inlined, every `<` escaped so no file text closes its script: one self-contained page that loads nothing from the network, written only when a person asks to see it.
+
+### The page
+
+Beside the map data the page carries what `page_data` reads from the run:
+
+- the questions and `BASE`;
+- per node: its question and FROM from `{ID}.started`, its answers checked as the answers view checks them, its broken hops, its placed and followed paths;
+- the nodes that started and never wrote;
+- the clock, from the run files' mtimes: `ROOT` for `new`, `{ID}.started`, `{ID}.hops`, `answers.txt` for `wait`;
+- the text of every file a shown component sits in: whole, most hops first, up to 4 MB; past that, the lines within 8 of a hop.
+
+It draws three parts:
+
+- the ledger: the run, the warnings block, the evidence bar of how every hop holds, each question with its threads and their answers, every `[path:N]` a link to its line;
+- the code wall: one column per traced file, drawn to scale from its own text and grouped by directory, each thread's hops marked and its route drawn between them, solid where a call or a name in the code links two hops or they share a component, dashed and fainter for walk order only (`then`); the key says routes are the walkers' reading of the code, nothing run; zooming in reads the code itself, Fold collapses the lines no hop touches;
+- the clock: each node's bar from start to write; replay walks the threads in the order they ran.
+
+Search runs over the file text. Keys: `/` search, space replay, `←` `→` hops, `[` `]` threads, `z` Fold, `f` fit, `+` `-` zoom, `esc` clear.

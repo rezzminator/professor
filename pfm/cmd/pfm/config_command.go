@@ -226,6 +226,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
 	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
 	printClaude("pluginCheckoutRoot", config.Claude.PluginCheckoutRoot)
+	printClaude("costLedger", config.Claude.CostLedger)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

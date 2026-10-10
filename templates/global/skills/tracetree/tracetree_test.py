@@ -174,6 +174,13 @@ class StartQuestionTest(Repo):
         self.assertEqual(worded.returncode, 0, worded.stderr)
         self.assertEqual(worded.stdout.replace("started 3", "started 2"), plain.stdout)
 
+    def test_start_records_its_from_and_question_for_the_map_page(self):
+        tt(["start", self.run_dir, "2", "srv/server.go:5", "Q2"])
+        tt(["start", self.run_dir, "3", "nowhere.go:4"])
+        for node, want in (("2", "srv/server.go:5\tQ2\n"), ("3", "nowhere.go:4\t\n")):
+            with open(os.path.join(self.run_dir, node + ".started"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), want)
+
     def test_a_question_number_the_file_lacks_is_named_not_dropped(self):
         self.ask("1. What calls Handle?\n")
         got = tt(["start", self.run_dir, "2", "srv/server.go:5", "Q7"])
@@ -357,6 +364,30 @@ class OpenTest(Repo):
         flagged = self.wait("1").splitlines()
         self.assertEqual(flagged[-2], "LEAD the handler refuses first @ app/srv/server.go:5 — run: node 1")
         self.assertEqual(flagged[-1], "NOT READ the wrapped error at app/kill/kill.go:6 — run: node 1 (grep only — read it)")
+
+    def test_a_line_range_a_verified_hop_of_any_node_holds_is_marked_held_never_dropped(self):
+        self.node("1", [])
+        self.node("2", ["NOT READ server.go lines 1-4 and 5-8 beyond what was needed",
+                        "NOT READ app/srv/server.go:1-4, the package header",
+                        "LEAD app/kill/kill.go lines 1-9 untouched"],
+                  hop=("app/kill/kill.go:6", "\t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)"))
+        out = self.wait("2").splitlines()
+        self.assertEqual(out[-4:], [
+            "OPEN",
+            "NOT READ server.go lines 1-4 and 5-8 beyond what was needed — run: node 2 "
+            "(held: node 1 verified app/srv/server.go:5)",
+            "NOT READ app/srv/server.go:1-4, the package header — run: node 2 (grep only — read it)",
+            "LEAD app/kill/kill.go lines 1-9 untouched — run: node 2 (held: node 2 verified app/kill/kill.go:6)"])
+
+    def test_counts_names_nodes_with_no_end_noend_so_it_never_reads_as_the_open_block(self):
+        self.store("1", hops("1", ["- x [app/srv/server.go:5]"],
+                             ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")"],
+                             ["NOT READ whether Run retries"]))
+        out = self.wait("1")
+        counts = next(l for l in out.splitlines() if l.startswith("COUNTS: "))
+        self.assertTrue(counts.endswith(" · noend=1"), counts)
+        self.assertNotIn("open=", counts)
+        self.assertEqual(out.splitlines()[-2:], ["OPEN", "NOT READ whether Run retries — run: node 1"])
 
     def test_nothing_to_list_prints_open_none_and_only_shown_nodes_are_listed(self):
         self.node("1", [])
@@ -595,6 +626,25 @@ class MapTest(Repo):
         self.assertEqual([s["c"] for s in data["threads"]["1"]["walk"]],
                          ["app/srv/server.go::Handle", "app/kill/kill.go::Run"])
 
+    def test_each_walk_step_carries_the_kind_of_link_from_the_step_before_it(self):
+        self.walk(extra=["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                         "= the error is wrapped",
+                         "@ app/log/log.go:4", "> \tprintln(msg)", "= the message is printed"])
+        self.write("2", hops("2", ["- make test runs check.sh [Makefile:2]"],
+                             ["@ Makefile:2", "> \t./scripts/check.sh all", "= make runs the check script",
+                              "@ scripts/check.sh:5", ">   go test ./...", "= the script runs go test"],
+                             ["END executed: go test @ scripts/check.sh:5"]))
+        data = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
+        self.assertEqual([(s["c"], s["link"]) for s in data["threads"]["1"]["walk"]],
+                         [("app/srv/server.go::Handle", None), ("app/kill/kill.go::Run", "call"),
+                          ("app/kill/kill.go::Run", "same"), ("app/log/log.go::Note", "then")])
+        self.assertEqual([s["link"] for s in data["threads"]["2"]["walk"]], [None, "names"])
+        page, inlined = self.page()
+        self.assertEqual([s["link"] for s in inlined["threads"]["1"]["walk"]], [None, "call", "same", "then"])
+        self.assertIn('s.link === "then"', page)
+        self.assertIn("Routes are the walkers' reading of the code; nothing was run — dashed: walk order only, "
+                      "no call or name in the code links them.", page)
+
     def test_html_is_written_only_on_request_and_loads_nothing_from_the_network(self):
         self.walk()
         out = os.path.join(self.run_dir, "page.html")
@@ -638,6 +688,79 @@ class MapTest(Repo):
         got = tt(["map", self.run_dir])
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertLess(got.stdout.index("\napp/srv/server.go\n"), got.stdout.index("\napp/kill/kill.go\n"))
+
+    def page(self):
+        out = os.path.join(self.run_dir, "page.html")
+        got = tt(["map", self.run_dir, "--html", out])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        with open(out, encoding="utf-8") as f:
+            page = f.read()
+        m = re.search(r'<script type="application/json" id="tracemap-data">(.*?)</script>', page, re.S)
+        self.assertIsNotNone(m, "the page carries no data script")
+        return page, json.loads(m.group(1))
+
+    def test_json_steps_say_how_each_hop_holds_and_components_where_they_end(self):
+        self.walk(extra=["@ app/srv/server.go:3", "> \treturn kill.Run(req.Target)", "= the call again, cited at the func"],
+                  raw=True)
+        data = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
+        self.assertEqual([(s["c"], s["line"], s["b"], s["status"]) for s in data["threads"]["1"]["walk"]],
+                         [("app/srv/server.go::Handle", 7, 7, "verified"), ("app/kill/kill.go::Run", 5, 5, "verified"),
+                          ("app/srv/server.go::Handle", 7, 7, "moved")])
+        self.assertEqual({c["id"]: (c["line"], c["end"]) for c in data["components"]},
+                         {"app/srv/server.go::Handle": (3, 8), "app/kill/kill.go::Run": (4, 9)})
+
+    def test_the_page_carries_the_questions_each_nodes_checked_answers_its_clock_and_the_file_text(self):
+        with open(os.path.join(self.run_dir, "questions"), "w") as f:
+            f.write("1. What does Handle hand on?\n2. Who kills the pane?\n")
+        tt(["start", self.run_dir, "1", "app/srv/server.go:3", "Q2"])
+        tt(["start", self.run_dir, "2", "app/kill/kill.go:4"])
+        self.write("1", hops("1", ["- Handle hands the target to kill.Run [app/srv/server.go:7]",
+                                   "- Run returns `nothing at all` [app/kill/kill.go:5]"],
+                             ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the target goes to kill.Run",
+                              "@ app/kill/kill.go:5", f"> {EXEC}", "= tmux kills the pane"],
+                             ["END executed: tmux kill-pane @ app/kill/kill.go:5"]))
+        _, data = self.page()
+        self.assertEqual(data["title"], os.path.basename(self.root))
+        self.assertEqual(data["questions"], {"1": "What does Handle hand on?", "2": "Who kills the pane?"})
+        node = data["nodes"]["1"]
+        self.assertEqual((node["question"], node["from"]), (2, "app/srv/server.go:3"))
+        self.assertEqual([a["flags"] for a in node["answers"]], [[], ["? `nothing at all` not in the cited file"]])
+        self.assertEqual((data["counts"]["answers"], data["counts"]["flagged"]), (2, 1))
+        self.assertLessEqual(data["times"]["new"], node["started"])
+        self.assertLessEqual(node["started"], node["written"])
+        self.assertIsNone(data["times"]["done"])
+        self.assertEqual((list(data["missing"]), list(data["nodes"])), (["2"], ["1"]))
+        self.assertEqual({f["path"]: f["lines"] for f in data["files"]},
+                         {"app/srv/server.go": SERVER, "app/kill/kill.go": KILL})
+
+    def test_file_text_that_closes_a_script_stays_inside_the_pages_data(self):
+        web = ["package web", "", "func Page() string {", '\treturn "<script>boot()</script>"', "}"]
+        path = os.path.join(self.root, "app", "web", "web.go")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write("\n".join(web) + "\n")
+        self.write("1", hops("1", ["- Page closes its own </script> [app/web/web.go:4]"],
+                             ["@ app/web/web.go:4", f"> {web[3]}", "= the page ends its </script>"],
+                             ["END returned: the markup @ app/web/web.go:4"]))
+        page, data = self.page()
+        with open(os.path.join(os.path.dirname(SCRIPT), "tracemap.html"), encoding="utf-8") as f:
+            self.assertEqual(page.count("</script>"), f.read().count("</script>"))
+        self.assertEqual(next(f["lines"] for f in data["files"] if f["path"] == "app/web/web.go"), web)
+        self.assertEqual(data["threads"]["1"]["walk"][0]["note"], "the page ends its </script>")
+
+    def test_past_the_text_budget_a_file_carries_only_the_lines_near_its_hops(self):
+        big = ["package big", "", "func Big() error {", "\treturn nil", "}"] + [f"// {i:06d} " + "x" * 80 for i in range(50000)]
+        path = os.path.join(self.root, "app", "big", "big.go")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write("\n".join(big) + "\n")
+        self.write("1", hops("1", ["- Big returns nil [app/big/big.go:4]"], ["@ app/big/big.go:4", "> \treturn nil"],
+                             ["END returned: nil @ app/big/big.go:4"]))
+        _, data = self.page()
+        entry = next(f for f in data["files"] if f["path"] == "app/big/big.go")
+        self.assertEqual((entry["count"], entry["lines"]), (len(big), None))
+        self.assertEqual(entry["sparse"], {str(i): big[i - 1] for i in range(1, 13)})
+        self.assertLess(os.path.getsize(os.path.join(self.run_dir, "page.html")), 1024 * 1024)
 
 EXEC = '\tif err := exec.Command("tmux", "kill-pane", "-t", target).Run(); err != nil {'
 ERRF = '\t\treturn fmt.Errorf("kill pane %s: %w", target, err)'
@@ -792,6 +915,14 @@ class WriteVerifyTest(Stored):
         self.assertFalse(os.path.exists(os.path.join(self.run_dir, "1.write.json")))
         self.assertTrue(os.path.exists(os.path.join(self.run_dir, "1.refused")))
 
+    def test_a_quote_whose_indent_was_escaped_with_one_backslash_is_stored_on_the_first_write(self):
+        got = self.put("1", ["@ app/kill/kill.go:5", "> \\    " + EXEC.strip(), "@ app/kill/kill.go:6", "> \\" + ERRF])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.run_dir, "1.refused")))
+        self.assertEqual([(e["line"], e["status"]) for e in self.sidecar()], [(5, "verified"), (6, "verified")])
+        kept = self.put("2", ["@ app/kill/kill.go:5", "> \\" + EXEC.strip()])
+        self.assertEqual(kept.returncode, 2, "a backslash before no whitespace is part of the quote")
+
     def test_the_second_write_stores_the_file_with_that_hop_rejected_and_a_third_is_refused(self):
         hop_lines = ["@ app/srv/server.go:5", f"> {REQUIRED}", "@ app/kill/kill.go:6", f"> {self.GHOST}"]
         self.assertEqual(self.put("1", hop_lines).returncode, 2)
@@ -848,6 +979,8 @@ HEADER_BROKE = ("⚠ WARNINGS — {n} of {m} nodes broke the hop contract; their
                 "rejected hops: drill before trusting them")
 HEADER_NONE_BROKE = "⚠ WARNINGS — no node broke the hop contract"
 GHOST_HOP = '\t\treturn fmt.Errorf("this text is written nowhere in the tree")'
+MISCOPY = ("· node 1: the kit corrected a miscopied path on 1 hop — each quote sits at its cited line "
+           "(pkg/kill/kill.go → app/kill/kill.go)")
 
 
 class WarningsTest(Stored):
@@ -860,7 +993,7 @@ class WarningsTest(Stored):
     def placed_node(self, node="1", paths=("pkg/kill/kill.go",)):
         lines = []
         for path in paths:
-            lines += [f"@ {path}:5", f"> {EXEC}"]
+            lines += [f"@ {path}:4", f"> {EXEC}"]
         got = self.put(node, lines)
         self.assertEqual(got.returncode, 0, got.stderr)
         return got
@@ -874,21 +1007,21 @@ class WarningsTest(Stored):
         self.placed_node()
         lines = self.check().splitlines()
         self.assertEqual(lines[0], HEADER_BROKE.format(n=1, m=1))
-        self.assertEqual(lines[1], "⚠ node 1: 1 hops named a path that is not the file — the kit placed them "
+        self.assertEqual(lines[1], "⚠ node 1: 1 hop named a path that is not the file — the kit placed them "
                                    "(pkg/kill/kill.go → app/kill/kill.go)")
         self.assertIn("drifted=0 · placed=1 · followed=0 · refused=0", lines[-1])
 
     def test_a_run_without_a_sidecar_is_judged_by_the_check_time_resolver(self):
-        out = self.hop("pkg/kill/kill.go", 5, EXEC, view=None).splitlines()
+        out = self.hop("pkg/kill/kill.go", 4, EXEC, view=None).splitlines()
         self.assertEqual(out[0], HEADER_BROKE.format(n=1, m=1))
-        self.assertEqual(out[1], "⚠ node 1: 1 hops named a path that is not the file — the kit placed them "
+        self.assertEqual(out[1], "⚠ node 1: 1 hop named a path that is not the file — the kit placed them "
                                  "(pkg/kill/kill.go → app/kill/kill.go)")
         self.assertIn("placed=1 · followed=0 · refused=0", out[-1])
-        sibling = self.hop("app/kill/pane.go", 5, EXEC, view=None)
+        sibling = self.hop("app/kill/pane.go", 4, EXEC, view=None)
         self.assertIn("(app/kill/pane.go → app/kill/kill.go)", sibling)
 
     def test_a_later_hop_on_the_same_invented_path_is_placed_through_the_first_and_still_counted(self):
-        self.store("1", hops("1", ["- x"], ["@ pkg/kill/kill.go:5", f"> {EXEC}", "@ pkg/kill/kill.go:6", f"> {ERRF}"],
+        self.store("1", hops("1", ["- x"], ["@ pkg/kill/kill.go:4", f"> {EXEC}", "@ pkg/kill/kill.go:7", f"> {ERRF}"],
                              ["END returned: x @ app/srv/server.go:5"]))
         lines = self.check().splitlines()
         self.assertEqual(lines[1], "⚠ node 1: 2 hops named a path that is not the file — the kit placed them "
@@ -907,6 +1040,36 @@ class WarningsTest(Stored):
         self.assertNotIn("WARNING", got.stderr)
         self.assertEqual(self.check().splitlines()[0], "WARNINGS: none")
 
+    def test_a_placed_hop_quoting_its_very_cited_line_only_miscopied_its_path_and_breaks_no_contract(self):
+        got = self.put("1", ["@ pkg/kill/kill.go:5", f"> {EXEC}"])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        lines = self.check().splitlines()
+        self.assertEqual(lines[:2], ["WARNINGS: none", MISCOPY])
+        self.assertIn("placed=1 · followed=0 · refused=0", lines[-1])
+        line = next(l for l in self.wait("1").splitlines() if l.startswith("MAP "))
+        self.assertNotIn("broke the hop contract", line)
+        data = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
+        self.assertEqual((data["warnings"], data["notes"]), ([], [MISCOPY]))
+
+    def test_a_run_without_a_sidecar_tells_a_miscopy_from_a_placement_by_the_cited_line(self):
+        self.assertEqual(self.hop("pkg/kill/kill.go", 5, EXEC, view=None).splitlines()[:2], ["WARNINGS: none", MISCOPY])
+        self.assertEqual(self.hop("pkg/kill/kill.go", 4, EXEC, view=None).splitlines()[0], HEADER_BROKE.format(n=1, m=1))
+
+    def test_a_miscopy_beside_a_broken_node_follows_the_block_and_counts_no_node(self):
+        self.assertEqual(self.put("1", ["@ pkg/kill/kill.go:5", f"> {EXEC}"]).returncode, 0)
+        self.store("2", hops("2", ["- x"], ["@ app/srv/server.go:5", f"> {GHOST_HOP}"],
+                             ["END returned: x @ app/srv/server.go:5"]))
+        self.assertEqual(self.check().splitlines()[:3], [HEADER_BROKE.format(n=1, m=2), "⚠ node 2: 1 hop REJECTED", MISCOPY])
+
+    def test_the_page_shows_a_miscopy_as_a_quiet_note_and_no_red_block(self):
+        self.assertEqual(self.put("1", ["@ pkg/kill/kill.go:5", f"> {EXEC}"]).returncode, 0)
+        out = os.path.join(self.run_dir, "page.html")
+        self.assertEqual(tt(["map", self.run_dir, "--html", out]).returncode, 0)
+        with open(out, encoding="utf-8") as f:
+            page = f.read()
+        self.assertNotIn('id="warnings"', page)
+        self.assertIn(f'<section id="kitnotes" aria-label="Kit notes"><p>{MISCOPY}</p></section>', page)
+
     def test_more_than_three_placed_paths_are_cut_with_the_count_left(self):
         self.placed_node(paths=("pkg/a/kill.go", "pkg/b/kill.go", "pkg/c/kill.go", "pkg/d/kill.go", "pkg/a/kill.go"))
         line = self.check().splitlines()[1]
@@ -920,8 +1083,8 @@ class WarningsTest(Stored):
         self.assertEqual(self.put("1", hop_lines).returncode, 0)
         lines = self.check().splitlines()
         self.assertEqual(lines[0], HEADER_BROKE.format(n=1, m=1))
-        self.assertEqual(lines[1], "⚠ node 1: write refused once, then stored with 1 hops that still do not hold")
-        self.assertEqual(lines[2], "⚠ node 1: 1 hops REJECTED")
+        self.assertEqual(lines[1], "⚠ node 1: write refused once, then stored with 1 hop that still do not hold")
+        self.assertEqual(lines[2], "⚠ node 1: 1 hop REJECTED")
         self.assertIn("rejected=1 · drifted=0 · placed=0 · followed=0 · refused=1", lines[-1])
 
     def test_a_refused_write_the_second_attempt_fixed_is_no_incident(self):
@@ -936,7 +1099,7 @@ class WarningsTest(Stored):
     def test_a_rejected_hop_gets_its_own_line_and_counts_its_node(self):
         out = self.hop("app/srv/server.go", 5, "\tghost()", view=None).splitlines()
         self.assertEqual(out[0], HEADER_BROKE.format(n=1, m=1))
-        self.assertEqual(out[1], "⚠ node 1: 1 hops REJECTED")
+        self.assertEqual(out[1], "⚠ node 1: 1 hop REJECTED")
 
     def test_the_header_counts_only_nodes_that_broke_the_contract_out_of_the_whole_run(self):
         self.store("1", self.good())
@@ -944,8 +1107,8 @@ class WarningsTest(Stored):
         self.placed_node("3")
         lines = self.check().splitlines()
         self.assertEqual(lines[0], HEADER_BROKE.format(n=2, m=3))
-        self.assertTrue(lines[1].startswith("⚠ node 2: 1 hops named"), lines[1])
-        self.assertTrue(lines[2].startswith("⚠ node 3: 1 hops named"), lines[2])
+        self.assertTrue(lines[1].startswith("⚠ node 2: 1 hop named"), lines[1])
+        self.assertTrue(lines[2].startswith("⚠ node 3: 1 hop named"), lines[2])
 
     def test_flagged_answers_alone_raise_no_warning_so_a_clean_walk_never_screams(self):
         out = self.hop("app/srv/server.go", 5, REQUIRED, answer="- Run ends [app/kill/kill.go:9]", view=None)
@@ -980,7 +1143,7 @@ class WarningsTest(Stored):
         lines = self.wait("1").splitlines()
         self.assertTrue(lines[0].startswith("WAIT done"), lines[0])
         self.assertEqual(lines[1], HEADER_BROKE.format(n=1, m=1))
-        self.assertTrue(lines[2].startswith("⚠ node 1: 1 hops named"), lines[2])
+        self.assertTrue(lines[2].startswith("⚠ node 1: 1 hop named"), lines[2])
         self.assertTrue(lines[3].startswith("[1] THREAD 1"), lines[3])
         with open(os.path.join(self.run_dir, "answers.txt")) as f:
             self.assertEqual(f.read().splitlines()[:3], lines[:3])
@@ -999,7 +1162,7 @@ class WarningsTest(Stored):
             filler = [f"- filler {i} of node {node}: " + "the handler checks the target before it kills the pane " * 4
                       + "[app/srv/server.go:5]" for i in range(60)]
             self.write(node, hops(node, [*filler, "- Run ends [app/kill/kill.go:9]"],
-                                  ["@ pkg/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")"],
+                                  ["@ pkg/srv/server.go:4", "> \t\treturn errors.New(\"target is required\")"],
                                   [f"NOT READ whether node {node} retries", "END returned: x @ app/srv/server.go:5"]))
         out = self.wait("1", "2", "3")
         self.assertLessEqual(len(out), 28000)
@@ -1007,17 +1170,17 @@ class WarningsTest(Stored):
         self.assertEqual(lines[0].split()[0], "WAIT")
         self.assertEqual(lines[1], HEADER_BROKE.format(n=3, m=3))
         for i, node in enumerate("123"):
-            self.assertTrue(lines[2 + i].startswith(f"⚠ node {node}: 1 hops named a path"), lines[2 + i])
+            self.assertTrue(lines[2 + i].startswith(f"⚠ node {node}: 1 hop named a path"), lines[2 + i])
         self.assertTrue(lines[5].startswith("COUNTS: "), lines[5])
         self.assertEqual(lines[-1], f"FULL {self.run_dir}/answers.txt")
 
     def test_the_map_line_and_the_map_text_name_the_nodes_that_broke_the_contract(self):
         self.placed_node()
         line = next(l for l in self.wait("1").splitlines() if l.startswith("MAP "))
-        self.assertTrue(line.endswith(" · ⚠ 1 nodes broke the hop contract"), line)
+        self.assertTrue(line.endswith(" · ⚠ 1 node broke the hop contract"), line)
         with open(os.path.join(self.run_dir, "map.txt")) as f:
             first = f.readline().rstrip("\n")
-        self.assertTrue(first.startswith("MAP ") and first.endswith(" · ⚠ 1 nodes broke the hop contract"), first)
+        self.assertTrue(first.startswith("MAP ") and first.endswith(" · ⚠ 1 node broke the hop contract"), first)
         mapped = tt(["map", self.run_dir])
         self.assertEqual(mapped.returncode, 0, mapped.stderr)
         self.assertEqual(mapped.stdout.splitlines()[0], first)
@@ -1031,7 +1194,7 @@ class WarningsTest(Stored):
         dirty = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
         self.assertEqual(dirty["warnings"], self.check().splitlines()[:2])
 
-    def test_the_html_page_opens_with_a_red_banner_of_the_lines_only_when_there_are_some(self):
+    def test_the_html_page_opens_its_ledger_with_a_red_block_of_the_lines_only_when_there_are_some(self):
         self.write("1", self.good())
         out = os.path.join(self.run_dir, "page.html")
         self.assertEqual(tt(["map", self.run_dir, "--html", out]).returncode, 0)
@@ -1047,9 +1210,12 @@ class WarningsTest(Stored):
         self.assertLess(page.index('id="warnings"'), page.index('id="stage"'))
         self.assertIn("1 of 1 nodes broke the hop contract", page)
         self.assertIn("pkg/kill/kill.go → app/kill/kill.go", page)
-        banner = page[page.index('id="warnings"') - 1500:page.index('id="stage"')]
-        self.assertIn("prefers-color-scheme: light", banner)
-        self.assertIn('[data-theme="light"] #warnings', banner)
+        self.assertLess(page.index('id="warnings"'), page.index('id="evidence"'))
+        head = page[:page.index("</head>")]
+        for sel in (":root {", ':root:not([data-theme="light"]) {', ':root[data-theme="dark"] {'):
+            at = head.index(sel)
+            self.assertRegex(head[at:head.index("}", at)], r"--alarm: #[0-9a-f]{6}; --alarm-ink: #[0-9a-f]{6};", sel)
+        self.assertRegex(head, r"#warnings \{[^}]*background: var\(--alarm\); color: var\(--alarm-ink\);")
         self.assertNotRegex(page, r"(src|href)\s*=\s*[\"']?(https?:)?//")
 
 
@@ -1096,7 +1262,7 @@ class WriteWarnsItsOwnNodeTest(Stored):
         lines = got.stderr.splitlines()
         self.assertEqual(len(lines), 2, lines)
         self.assertTrue(lines[0].startswith("⚠ WARNING — 1 of your hops named a path"), lines[0])
-        self.assertTrue(lines[1].startswith("⚠ WARNING — stored with 1 hops that do not hold"), lines[1])
+        self.assertTrue(lines[1].startswith("⚠ WARNING — stored with 1 hop that do not hold"), lines[1])
 
 
 HOUR = 3600
@@ -1262,7 +1428,7 @@ class DriftTest(Stored):
         self.edit()
         lines = self.check().splitlines()
         self.assertEqual(lines[0], HEADER_NONE_BROKE)
-        self.assertEqual(lines[1], "⚠ run: 1 hops DRIFTED — the code changed since the walk: re-read before pasting")
+        self.assertEqual(lines[1], "⚠ run: 1 hop DRIFTED — the code changed since the walk: re-read before pasting")
         self.assertEqual(sum(1 for l in lines if l.startswith("⚠ ")), 2, lines)
         self.assertEqual(self.check("--hops").splitlines()[:2], lines[:2])
 
@@ -1274,7 +1440,7 @@ class DriftTest(Stored):
         self.assertTrue(mapped.stdout.splitlines()[0].endswith(" · ⚠ 1 drifted"), mapped.stdout.splitlines()[0])
         data = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
         self.assertEqual(data["warnings"][-1],
-                         "⚠ run: 1 hops DRIFTED — the code changed since the walk: re-read before pasting")
+                         "⚠ run: 1 hop DRIFTED — the code changed since the walk: re-read before pasting")
         waited = tt(["wait", self.run_dir, "1", "--grace", "0", "--timeout", "30"]).stdout
         self.assertTrue(next(l for l in waited.splitlines() if l.startswith("MAP ")).endswith(" · ⚠ 1 drifted"))
 
@@ -1284,7 +1450,7 @@ class DriftTest(Stored):
             f.write(self.base + "\n")
         self.edit(commit=True)
         self.assertEqual(self.check().splitlines()[1],
-                         "⚠ run: 1 hops DRIFTED — the code changed since the walk: re-read before pasting")
+                         "⚠ run: 1 hop DRIFTED — the code changed since the walk: re-read before pasting")
 
 
 class PlainDriftTest(Stored):
@@ -1381,13 +1547,13 @@ class FollowedTest(Stored):
         self.assertIn(FOLLOWED_COUNTS, out)
 
     def test_a_given_directory_that_never_existed_at_the_base_stays_placed(self):
-        self.store("1", hops("1", ["- x"], self.hop_lines(("pkg/kill/kill.go", 5, EXEC)),
+        self.store("1", hops("1", ["- x"], self.hop_lines(("pkg/kill/kill.go", 4, EXEC)),
                              ["END returned: x @ app/srv/server.go:5"]))
         self.set_base()
         self.move_kill()
         lines = self.check().splitlines()
         self.assertEqual(lines[0], HEADER_BROKE.format(n=1, m=1))
-        self.assertEqual(lines[1], "⚠ node 1: 1 hops named a path that is not the file — the kit placed them "
+        self.assertEqual(lines[1], "⚠ node 1: 1 hop named a path that is not the file — the kit placed them "
                                    "(pkg/kill/kill.go → app/proc/kill.go)")
         self.assertIn("placed=1 · followed=0 · refused=0", lines[-1])
 
@@ -1396,11 +1562,11 @@ class FollowedTest(Stored):
         git(self.root, "add", "-A")
         git(self.root, "commit", "-q", "-m", "pane")
         self.base = git(self.root, "rev-parse", "HEAD")
-        self.store("1", hops("1", ["- x"], self.hop_lines(("app/kill/pane.go", 5, EXEC)),
+        self.store("1", hops("1", ["- x"], self.hop_lines(("app/kill/pane.go", 4, EXEC)),
                              ["END returned: x @ app/srv/server.go:5"]))
         self.set_base()
         out = self.check()
-        self.assertIn("⚠ node 1: 1 hops named a path that is not the file — the kit placed them "
+        self.assertIn("⚠ node 1: 1 hop named a path that is not the file — the kit placed them "
                       "(app/kill/pane.go → app/kill/kill.go)", out)
         self.assertIn("placed=1 · followed=0", out)
 
@@ -1415,16 +1581,16 @@ class FollowedTest(Stored):
         self.move_kill()
         out = self.check()
         self.assertIn("placed=1 · followed=0", out)
-        self.assertIn("⚠ node 1: 1 hops named a path that is not the file", out)
+        self.assertIn("⚠ node 1: 1 hop named a path that is not the file", out)
 
     def test_a_git_that_cannot_answer_leaves_the_hop_placed_and_says_it_could_not_look(self):
-        self.store("1", hops("1", ["- x"], self.hop_lines(("app/kill/kill.go", 5, EXEC)),
+        self.store("1", hops("1", ["- x"], self.hop_lines(("app/kill/kill.go", 4, EXEC)),
                              ["END returned: x @ app/srv/server.go:5"]))
         self.move_kill()
         self.set_base("0" * 40)
         out = self.check()
         self.assertEqual(out.count("DRIFT UNKNOWN — "), 1, out)
-        self.assertIn("⚠ node 1: 1 hops named a path that is not the file — the kit placed them "
+        self.assertIn("⚠ node 1: 1 hop named a path that is not the file — the kit placed them "
                       "(app/kill/kill.go → app/proc/kill.go)", out)
         self.assertIn("placed=1 · followed=0", out)
 
@@ -1435,8 +1601,8 @@ class FollowedTest(Stored):
         self.move_kill()
         lines = self.check().splitlines()
         self.assertEqual(lines[0], HEADER_BROKE.format(n=1, m=1))
-        self.assertEqual(lines[1], "⚠ node 1: 1 hops REJECTED")
-        self.assertEqual(lines[2], "⚠ run: 1 hops followed files moved since the walk "
+        self.assertEqual(lines[1], "⚠ node 1: 1 hop REJECTED")
+        self.assertEqual(lines[2], "⚠ run: 1 hop followed files moved since the walk "
                                    "(app/kill/kill.go → app/proc/kill.go)")
         self.assertEqual(sum(1 for l in lines if l.startswith("⚠ ")), 3, lines)
         self.assertIn("rejected=1 · drifted=0 · placed=0 · followed=1 · refused=0", lines[-1])
@@ -1475,8 +1641,8 @@ class FollowedTest(Stored):
         git(self.root, "commit", "-q", "-am", "three")
         lines = self.check().splitlines()
         self.assertEqual(lines[0], HEADER_NONE_BROKE)
-        self.assertEqual(lines[1], "⚠ run: 1 hops DRIFTED — the code changed since the walk: re-read before pasting")
-        self.assertEqual(lines[2], "⚠ run: 1 hops followed files moved since the walk "
+        self.assertEqual(lines[1], "⚠ run: 1 hop DRIFTED — the code changed since the walk: re-read before pasting")
+        self.assertEqual(lines[2], "⚠ run: 1 hop followed files moved since the walk "
                                    "(app/kill/kill.go → app/proc/kill.go)")
 
 
@@ -1559,6 +1725,17 @@ class SeekTest(Repo):
         self.assertEqual(len(rest), 31, rest)
         self.assertTrue(all(l.startswith(f"PRIOR {prior} node 1: ") for l in rest[:30]))
         self.assertEqual(rest[30], f"PRIOR: 35 hops in 1 runs, 5 not shown — tt check {prior} --hops 1")
+
+    def test_seek_cuts_a_line_longer_than_160_characters_and_ends_it_with_dots(self):
+        long = "\tconfig := " + "\"" + "x" * 300 + "\""
+        with open(os.path.join(self.root, "app/srv/conf.go"), "w") as f:
+            f.write("package srv\n\nfunc Conf() {\n" + long + "\n}\n")
+        prior = self.sibling("20260101-000000-aaaa", hops("1", ["- x"], ["@ app/srv/conf.go:4", "> " + long], []))
+        _, rest = self.new("--seek", "conf\\.go")
+        head = f"PRIOR {prior} node 1: app/srv/conf.go:4  "
+        self.assertTrue(rest[0].startswith(head), rest[0])
+        self.assertEqual(rest[0][len(head):], long.strip()[:157] + "...")
+        self.assertEqual(len(rest[0]) - len(head), 160)
 
     def test_seek_names_a_run_it_could_not_read_in_the_summary(self):
         self.sibling("20260101-000000-aaaa", self.good("1"))

@@ -215,6 +215,7 @@ class Builder:
         if cid not in comps and make:
             comps[cid] = {"id": cid, "file": rel, "name": name, "kind": kind,
                           "line": start + 1 if start is not None else None,
+                          "end": start + len(extent(lines, start, lg, fenced)) if start is not None else None,
                           "hops": set(), "threads": set(), "ends": [], "_key": key, "_lang": lg, "_start": start}
         return comps.get(cid)
 
@@ -232,16 +233,21 @@ class Builder:
         return re.search(rf"(?<![\w.-]){base}(?![\w-])", self.body(a, aline)) is not None
 
     def link(self, p, pline, pnote, c, cline, cnote, tid):
+        """Record the link between consecutive components p and c; returns its kind: call, names or then."""
         if c["name"] and call_shape(c, p).search(self.body(p, pline)):
             self.edge(p["id"], c["id"], "call", cnote, tid)
-        elif p["name"] and call_shape(p, c).search(self.body(c, cline)):
+            return "call"
+        if p["name"] and call_shape(p, c).search(self.body(c, cline)):
             self.edge(c["id"], p["id"], "call", pnote, tid)
-        elif p["file"] != c["file"] and self.names_file(p, pline, c):
+            return "call"
+        if p["file"] != c["file"] and self.names_file(p, pline, c):
             self.edge(p["id"], c["id"], "names", cnote, tid)
-        elif p["file"] != c["file"] and self.names_file(c, cline, p):
+            return "names"
+        if p["file"] != c["file"] and self.names_file(c, cline, p):
             self.edge(c["id"], p["id"], "names", pnote, tid)
-        else:
-            self.edge(p["id"], c["id"], "then", cnote, tid)
+            return "names"
+        self.edge(p["id"], c["id"], "then", cnote, tid)
+        return "then"
 
     def edge(self, a, b, kind, note, tid):
         if a == b:
@@ -263,9 +269,10 @@ class Builder:
                     continue
                 c["hops"].add(w["line"])
                 c["threads"].add(name)
-                steps.append({"c": c["id"], "line": w["line"], "note": w["note"]})
-                if prev and prev[0] is not c:
+                kind = None if prev is None else "same" if prev[0] is c else \
                     self.link(prev[0], prev[1], prev[2], c, w["line"], w["note"], name)
+                steps.append({"c": c["id"], "line": w["line"], "b": w.get("b", w["line"]), "note": w["note"],
+                              "status": w.get("status", "verified"), "flag": w.get("flag", ""), "link": kind})
                 prev = (c, w["line"], w["note"])
                 continue
             # SPLIT and END addresses are not quote-checked: they land on a component a verified hop built,
@@ -431,9 +438,12 @@ def tree(g, name, direction, show_all=False):
 
 
 def data(g, show_all=False, keep=None):
-    """The map as plain data — components, links, threads with their walks — restricted to keep when given."""
+    """The map as plain data — components (each with its last line, `end`), links, threads with their walks, each
+    step's verified range `line`–`b`, its `status` (verified, moved, placed, followed), the check's `flag` and its `link`
+    from the step before it (call, names, then, same within one component; null on the first) — restricted to keep
+    when given."""
     def public(c):
-        return {"id": c["id"], "file": c["file"], "name": c["name"], "kind": c["kind"], "line": c["line"],
+        return {"id": c["id"], "file": c["file"], "name": c["name"], "kind": c["kind"], "line": c["line"], "end": c["end"],
                 "hops": sorted(c["hops"]), "threads": by_rank(g, c["threads"]),
                 "ends": [{"kind": e["kind"], "note": e["note"], "threads": by_rank(g, e["threads"])} for e in c["ends"]]}
     comps = [public(c) for cid, c in sorted(g["components"].items()) if keep is None or cid in keep]

@@ -198,38 +198,12 @@ func engineHexOf(row compose.Row) string {
 	return palette.Accent
 }
 
-// nameSpans paints a row's name: the merged new-chat row shows the engine
-// choice, every other row its name with the search matches lit.
+// nameSpans paints a row's name: the merged launch row shows who runs it and
+// where (omnibox.go), every other row its name with the search matches lit.
 func (model Model) nameSpans(row compose.Row, width int, name, bg string, base tone) []span {
 	palette := configuredPalette
 	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
-		spans := make([]span, 0, 8)
-		labels := make([]string, 0, 4)
-		used := 0
-		for index, id := range model.newChatEnginesFor(row) {
-			label := pfmengine.MustLookup(id).Short
-			paint := tone{fg: palette.Muted, bg: bg}
-			if id == model.effectiveNewChatEngine(row) {
-				label = "[ " + label + " ]"
-				paint = tone{fg: palette.Accent, bg: bg, bold: true}
-			}
-			labels = append(labels, label)
-			if index > 0 {
-				spans = append(spans, span{text: " ", paint: tone{bg: bg}})
-				used++
-			}
-			spans = append(spans, span{text: label, paint: paint})
-			used += ansi.StringWidth(label)
-		}
-		if used > width {
-			// Too narrow for the whole choice: keep one honest run, cut with an
-			// ellipsis, rather than let the row outgrow its column.
-			return []span{{text: padRightCells(strings.Join(labels, " "), width), paint: base}}
-		}
-		if used < width {
-			spans = append(spans, span{text: strings.Repeat(" ", width-used), paint: tone{bg: bg}})
-		}
-		return spans
+		return model.launchSpans(row, width, bg)
 	}
 	shown := padRightCells(name, width)
 	lit := tone{fg: palette.Warn, bg: bg, bold: true}
@@ -246,6 +220,9 @@ func (model Model) renderGroupedRow(
 ) string {
 	if notice, ok := model.renderNoticeRow(row, selected, width, grouped); ok {
 		return notice
+	}
+	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
+		row, _ = model.newChatActionRow(row)
 	}
 	palette := configuredPalette
 	isAction := isNewChatActionKind(row.Kind)

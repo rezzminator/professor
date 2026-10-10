@@ -7,12 +7,16 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/costledger"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/tokens"
@@ -112,7 +116,7 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 func TestRenderSubagentsSpendWithoutPrices(t *testing.T) {
 	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""})
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + parentTask + `]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), nil, &strings.Builder{})
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), nil, "", "", &strings.Builder{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +160,8 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m3", "claude-opus-5-5", 12, 900, 4000, 0, 1500),
+		// a gpt model through the model-gateway: Anthropic-shaped usage, priced at its Codex row on both surfaces
+		line("m4", "gpt-5.6-sol", 1000, 100, 2000, 400, 0),
 		// a response that consulted the advisor: priced at the advisor's model on both surfaces
 		strings.Replace(strings.Replace(advisorResponse("claude-opus-5-5"), `{"type":"assistant",`,
 			`{"type":"assistant","timestamp":"2026-09-21T05:00:00Z","cwd":"/w/demo","sessionId":"s1",`, 1),
@@ -168,8 +174,8 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	spend, err := readTranscriptSpend(path, prices)
-	if err != nil || spend.partial || spend.priced != 5 || spend.advisorUSD == 0 {
-		t.Fatalf("statusline spend = %+v, %v; want four priced responses and one priced advisor", spend, err)
+	if err != nil || spend.partial || spend.priced != 6 || spend.advisorUSD == 0 {
+		t.Fatalf("statusline spend = %+v, %v; want five priced responses and one priced advisor", spend, err)
 	}
 
 	out := filepath.Join(t.TempDir(), "audit.json")
@@ -200,7 +206,7 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 	for _, usd := range audit.USD {
 		total += usd
 	}
-	if audit.Calls != 4 || math.Abs(total-spend.usd) > 1e-12 || total == 0 ||
+	if audit.Calls != 5 || math.Abs(total-spend.usd) > 1e-12 || total == 0 ||
 		math.Abs(audit.Advisor.USD-spend.advisorUSD) > 1e-12 {
 		t.Errorf("pfm tokens $%v (advisor $%v) over %d calls, statusline $%v (advisor $%v); want one price",
 			total, audit.Advisor.USD, audit.Calls, spend.usd, spend.advisorUSD)
@@ -309,5 +315,183 @@ func TestReadTranscriptSpendMarksAnUnknownIterationAsAFloor(t *testing.T) {
 	}
 	if !spend.partial || spend.priced != 1 || math.Abs(spend.usd-(1000*2.0+100*10.0)/1e6) > 1e-12 {
 		t.Errorf("%+v; want the top level priced and the sum a floor", spend)
+	}
+}
+
+const (
+	// ledgerSampleSession is the session of costledger's sample-15.jsonl: 15 rows, $1.2941 — the
+	// main thread $0.340251 and the top-level agent a..02 with its children a..01 and a..03
+	// $0.953849 (a..02 alone $0.787435, a..01 $0.078574, a..03 $0.08784).
+	ledgerSampleSession = "00000000-0000-4000-8000-0000000000a1"
+	ledgerAgentRoot     = "a0000000000000002"
+	ledgerAgentFirst    = "a0000000000000001"
+	ledgerAgentSecond   = "a0000000000000003"
+)
+
+// useLedgerSample copies the sample ledger into a fresh ledger directory, points the process at it,
+// and returns that directory.
+func useLedgerSample(t *testing.T) string {
+	t.Helper()
+	sample, err := os.ReadFile(filepath.Join("..", "costledger", "testdata", "sample-15.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ledgerSampleSession+".jsonl"), sample, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCostLedgerDir, dir)
+	return dir
+}
+
+func ledgerTask(id string) string {
+	return `{"id":"` + id + `","type":"local_agent","status":"running","startTime":1790244000000,` +
+		`"model":"claude-opus-5-5","contextWindowSize":1000000,"tokenCount":1000}`
+}
+
+// renderLedgerRows renders the tasks of one session and returns each row's content, ANSI stripped.
+func renderLedgerRows(t *testing.T, sessionID, session string, ids ...string) map[string]string {
+	t.Helper()
+	tasks := make([]string, 0, len(ids))
+	for _, id := range ids {
+		tasks = append(tasks, ledgerTask(id))
+	}
+	payload := `{"session_id":` + jsonText(sessionID) + `,"transcript_path":` + jsonText(session) +
+		`,"cwd":"/work/repo","tasks":[` + strings.Join(tasks, ",") + `]}`
+	var warn bytes.Buffer
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", "", &warn)
+	if err != nil {
+		t.Fatalf("RenderSubagents: %v", err)
+	}
+	rows := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		var row subagentRow
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("row is not JSON: %v: %q (warn %q)", err, line, warn.String())
+		}
+		rows[row.ID] = stripANSICodes(row.Content)
+	}
+	return rows
+}
+
+// With a ledger a row's dollars and tokens are the ledger rows of that agent and every agent below
+// it, side calls included, the tree taken from the rows' parent_agent_id (agent a..03 has no meta
+// file at all) and the meta files. The main line's one dollar amount is the ledger total, and it is
+// the main thread's own rows plus every top-level row.
+func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
+	useLedgerSample(t)
+	session := nestedSession(t,
+		map[string][]string{ledgerAgentRoot: agentTranscriptLines, ledgerAgentFirst: agentTranscriptLines},
+		map[string]string{ledgerAgentRoot: "", ledgerAgentFirst: ledgerAgentRoot})
+	rows := renderLedgerRows(t, ledgerSampleSession, session, ledgerAgentRoot, ledgerAgentFirst, ledgerAgentSecond)
+	for id, want := range map[string]string{
+		ledgerAgentRoot:   "$0.95/740.0K/3.2K/",
+		ledgerAgentFirst:  "$0.08/224.3K/1.2K/2",
+		ledgerAgentSecond: "$0.09/224.5K/1.4K/?",
+	} {
+		if !strings.Contains(rows[id], "1.0K/1.0M "+want) {
+			t.Errorf("row %s = %q, want the gauge followed by %q", id, rows[id], want)
+		}
+	}
+
+	var mainRows float64
+	ledger, err := costledger.ForSession(os.Getenv(paths.EnvCostLedgerDir), ledgerSampleSession)
+	if err != nil || len(ledger.Rows) != 15 {
+		t.Fatalf("sample ledger = %d rows, %v; want 15", len(ledger.Rows), err)
+	}
+	for _, row := range ledger.Rows {
+		if row.AgentID == "" {
+			mainRows += float64(*row.CostUSDMicros) / 1e6
+		}
+	}
+	data := input{SessionID: ledgerSampleSession}
+	runtime := Runtime{
+		Home:   t.TempDir(),
+		Engine: pfmengine.Claude,
+		Prices: testPrices(t),
+		Env: map[string]string{
+			paths.EnvCostLedgerDir:     os.Getenv(paths.EnvCostLedgerDir),
+			claudelaunch.EnvCostLedger: "on",
+		},
+	}
+	_, line, _ := renderContextLine(runtime, data, "", subagentNow)
+	amount := regexp.MustCompile(`\$(\d+\.\d{2})`)
+	totalText := amount.FindStringSubmatch(stripANSICodes(line))
+	topText := amount.FindStringSubmatch(rows[ledgerAgentRoot])
+	if totalText == nil || topText == nil {
+		t.Fatalf("no dollar amount: main line %q, root row %q", stripANSICodes(line), rows[ledgerAgentRoot])
+	}
+	total, _ := strconv.ParseFloat(totalText[1], 64)
+	top, _ := strconv.ParseFloat(topText[1], 64)
+	if math.Abs(mainRows+top-total) > 0.0051 {
+		t.Errorf("main rows $%.4f + top-level row $%.2f != ledger total $%.2f on the main line", mainRows, top, total)
+	}
+}
+
+// An agent the ledger has no row for yet (its calls reach the ledger up to 20 s late) keeps today's
+// transcript pricing; an advisor consulted by a ledger-priced agent stays its own "adv $X".
+func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
+	dir := useLedgerSample(t)
+	if err := costledger.Append(dir, costledger.Row{
+		RequestID: "req_adv", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "adv1",
+		QuerySource: "agent:builtin:general-purpose", Model: "claude-sonnet-5-5", InputTokens: 10, OutputTokens: 20,
+		CostUSDMicros: micros(1_000_000), Join: costledger.JoinLogSpan,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := nestedSession(t,
+		map[string][]string{"fresh": agentTranscriptLines, "adv1": {advisorResponse("claude-opus-5-5")}},
+		map[string]string{"fresh": "", "adv1": ""})
+	rows := renderLedgerRows(t, ledgerSampleSession, session, "fresh", "adv1")
+	if want := "1.0K/1.0M $0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
+		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
+	}
+	if want := "1.0K/1.0M $1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
+		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
+	}
+}
+
+// A sub-agent that ran through the model-gateway's chatgpt route leaves a
+// Claude Code transcript whose usage the gateway wrote Anthropic-shaped
+// (input_tokens = total - cached - written): the row prices it at its Codex
+// row's rates, input and a cache write at in, cache read at cached, output at
+// out (the tiers are pricing's TestResponseRequestsCostParts).
+func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
+	gpt := func(usage string) []string {
+		return []string{
+			`{"type":"assistant","message":{"id":"g-1","model":"gpt-6-sol","usage":` + usage + `}}`, turnEnded,
+		}
+	}
+	const task = `{"id":"p","type":"local_agent","status":"completed","startTime":1790244000000,` +
+		`"model":"gpt-6-sol","contextWindowSize":1000000,"tokenCount":1000,"label":"orchestrate"}`
+	for _, tc := range []struct {
+		name  string
+		lines []string
+		want  string // what follows the gauge, ANSI stripped
+	}{
+		{
+			// 100K+10K at $2, 150K read at $0.2, 1M out at $10: 0.22 + 0.03 + 10.
+			name: "the base tier, a cache write billed as input",
+			lines: gpt(`{"input_tokens":100000,"output_tokens":1000000,"cache_read_input_tokens":150000,` +
+				`"cache_creation_input_tokens":10000}`),
+			want: "$10.25/260.0K/1.0M/0",
+		},
+		{
+			name: "a model no row prices stays unpriced",
+			lines: []string{
+				`{"type":"assistant","message":{"id":"g-1","model":"gpt-nonesuch-9","usage":` +
+					`{"input_tokens":1000,"output_tokens":100}}}`, turnEnded,
+			},
+			want: "$?/1.0K/100/0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
+			// the row is read inside the minute after the turn ended, before a finished row collapses
+			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
+			if !strings.Contains(got, "1.0K/1.0M "+tc.want+"│") {
+				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
+			}
+		})
 	}
 }

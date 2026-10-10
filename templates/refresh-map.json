@@ -40,7 +40,7 @@
     "global/agents/rr.md": {
       "curated": true
     },
-    "global/agents/tracer-rr.md": {
+    "global/agents/clone-distiller.md": {
       "curated": true
     },
     "global/agents/tracer.md": {
@@ -62,6 +62,9 @@
       "curated": true
     },
     "global/commands/housekeeping.md": {
+      "curated": true
+    },
+    "global/commands/iterative-improvement.md": {
       "curated": true
     },
     "global/commands/pfm.md": {
@@ -103,7 +106,7 @@
     "global/skills/chatlog/SKILL.md": {
       "curated": true
     },
-    "global/skills/close-out/SKILL.md": {
+    "global/skills/done-herewith/SKILL.md": {
       "curated": true
     },
     "global/skills/sources.json": {

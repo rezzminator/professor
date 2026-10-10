@@ -281,11 +281,16 @@ func TestSelectedRowOffersTheCurrentActionAsAChipAtEveryWidth(t *testing.T) {
 	}
 }
 
-func TestMergedNewChatRowShowsTheEngineChoiceAndSurvivesNarrowWidths(t *testing.T) {
+func TestMergedLaunchRowNamesItsEngineAndPlaceAndSurvivesNarrowWidths(t *testing.T) {
 	model := deckModel(120, 30)
 	row := compose.Row{Kind: compose.NewClaude, Name: "New Claude chat", Project: "~"}
-	if plain := ansi.Strip(model.renderGroupedRow(row, false, 100, false)); !strings.Contains(plain, "[ Claude ]") {
-		t.Errorf("the chosen engine is bracketed, got %q", plain)
+	if plain := ansi.Strip(
+		model.renderGroupedRow(row, false, 100, false),
+	); !strings.Contains(
+		plain,
+		"New chat → ~  Claude",
+	) {
+		t.Errorf("the launch row names where it starts and the remembered engine, got %q", plain)
 	}
 	if plain := ansi.Strip(model.renderGroupedRow(row, false, 30, false)); lipgloss.Width(plain) != 30 {
 		t.Errorf("a cramped new-chat row still fits its width: %q", plain)

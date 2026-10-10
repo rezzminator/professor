@@ -452,3 +452,30 @@ func TestOpenCodeWorkbenchPlugin(t *testing.T) {
 		t.Fatalf("plugin = %q, want %q", got, want)
 	}
 }
+
+// The cost ledger directory is the same one the sink writes and callmeter reads:
+// PFM_COST_LEDGER_DIR wins, else the pfm state directory of the home.
+func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testing.T) {
+	home := "/jail/home"
+	cases := []struct {
+		name string
+		env  Env
+		want string
+	}{
+		{"default", &MapEnv{}, "/jail/home/.local/state/pfm/cost-ledger"},
+		{
+			"empty override is unset",
+			&MapEnv{Values: map[string]string{EnvCostLedgerDir: ""}},
+			"/jail/home/.local/state/pfm/cost-ledger",
+		},
+		{"override", &MapEnv{Values: map[string]string{EnvCostLedgerDir: "/elsewhere/ledger"}}, "/elsewhere/ledger"},
+	}
+	for _, tc := range cases {
+		if got := CostLedgerDir(tc.env, home); got != tc.want {
+			t.Errorf("%s: CostLedgerDir = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if got, want := CostSinkLog(home), "/jail/home/.local/state/pfm/log/cost-sink.log"; got != want {
+		t.Errorf("CostSinkLog = %q, want %q", got, want)
+	}
+}

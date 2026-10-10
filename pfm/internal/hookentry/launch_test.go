@@ -519,3 +519,56 @@ func TestLaunchPassthroughWaitsForParentAccountRegistration(t *testing.T) {
 		t.Fatalf("parent registration rejected healthy managed child: code=%d stderr=%q", code, stderr.String())
 	}
 }
+
+func TestLaunchPassthroughDecidesTheCostLedgerOfASessionOnly(t *testing.T) {
+	previousExec, previousArm := LaunchExec, armCostLedger
+	t.Cleanup(func() { LaunchExec, armCostLedger = previousExec, previousArm })
+	t.Setenv("PFM_LAUNCH_PASSTHROUGH", "1")
+	t.Setenv("TMUX", "")
+	for _, test := range []struct {
+		name      string
+		args      []string
+		ledger    bool
+		wantCalls int
+	}{
+		{"interactive resume with the ledger on", []string{"--resume", "X"}, true, 1},
+		{"interactive start with the ledger switched off", []string{"--model", "opus"}, false, 1},
+		{"print mode is no chat", []string{"-p", "hi"}, true, 0},
+		{"output-format is print mode", []string{"--output-format=json", "hi"}, true, 0},
+		{"a subcommand starts no session", []string{"mcp", "list"}, true, 0},
+		{"help starts no session", []string{"--help"}, true, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var enabled []bool
+			armCostLedger = func(environ []string, _ paths.Env, ledger bool, _ io.Writer) ([]string, string) {
+				enabled = append(enabled, ledger)
+				return append(append([]string(nil), environ...), "PFM_COST_LEDGER=armed-by-test"), "on"
+			}
+			var execEnv []string
+			LaunchExec = func(_ string, _, environment []string) error {
+				execEnv = append([]string(nil), environment...)
+				return nil
+			}
+			machine := config.Runtime{Config: config.Config{Claude: config.ClaudePrefs{CostLedger: test.ledger}}}
+			if code := Launch(
+				append([]string{"--real", "/bin/echo", "--"}, test.args...),
+				&bytes.Buffer{}, &bytes.Buffer{}, machine, paths.OSEnv{},
+			); code != 0 {
+				t.Fatalf("Launch code = %d", code)
+			}
+			if len(enabled) != test.wantCalls {
+				t.Fatalf("the ledger was decided %d times, want %d", len(enabled), test.wantCalls)
+			}
+			if test.wantCalls == 1 {
+				if enabled[0] != test.ledger {
+					t.Errorf("decided with claude.costLedger=%t, want %t", enabled[0], test.ledger)
+				}
+				if countEnvironmentEntry(execEnv, "PFM_COST_LEDGER=armed-by-test") != 1 {
+					t.Errorf("the exec environment lacks the ledger decision: %q", execEnv)
+				}
+			} else if countEnvironmentEntry(execEnv, "PFM_COST_LEDGER=armed-by-test") != 0 {
+				t.Errorf("a run that starts no chat carries a ledger decision: %q", execEnv)
+			}
+		})
+	}
+}

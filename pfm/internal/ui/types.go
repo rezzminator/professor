@@ -85,14 +85,27 @@ type Snapshot struct {
 	Theme                  string
 	// Home is the reader's home directory, so the dossier can write a path as
 	// ~/…; rendering never reads the environment itself.
-	Home             string
+	Home string
+	// ProjectDirs maps each project label to its root directory, so the
+	// picker can file every row under the place it belongs to (places.go).
+	ProjectDirs map[string]string
+	// DirExists answers whether an `@` path names a real directory, and
+	// errs when it could not look; nil refuses every typed path. It is the
+	// picker's one filesystem door.
+	DirExists        func(string) (bool, error)
 	Cache1H          bool
 	Cache1HByAccount map[int]bool
-	NowNS            int64
-	Width            int
-	Height           int
-	InitialQuery     string
-	InitialCursorID  string
+	// LastLaunch is what the last new-chat launch chose; the picker's new-chat
+	// steps open on it (launchwizard.go). Zero when nothing was launched yet.
+	LastLaunch fleetdb.LaunchMemory
+	// LaunchMemoryError is a failed read of LastLaunch, shown on the ✦ row so
+	// an unreadable memory never reads as "nothing launched yet".
+	LaunchMemoryError string
+	NowNS             int64
+	Width             int
+	Height            int
+	InitialQuery      string
+	InitialCursorID   string
 	// ReminderError is a failed read of the unseen-reminder flags, shown in
 	// the Chats header so a broken read never renders as "no reminders".
 	ReminderError string

@@ -502,6 +502,7 @@ func (a *auditor) runReport(t *totals) (int, error) {
 		a.familyDrill(t)
 	}
 	a.crossCheck(t)
+	a.reportCostLedger(t)
 	if a.opts.out != "" {
 		if err := a.writeOut(t, topRuns); err != nil {
 			return 1, err
@@ -667,6 +668,9 @@ func (a *auditor) writeOut(t *totals, ranked []*run) error {
 		set("byProject", byProject).set("families", families).set("groups", groups).set("runs", runs)
 	if g.advisor.calls != 0 {
 		document.set("advisor", g.advisor.json())
+	}
+	if sessions, ok := a.ledgerJSON(); ok {
+		document.set("costLedger", sessions)
 	}
 	size, err := writeOutput(a.opts.out, stringify(document, 0))
 	if err != nil {

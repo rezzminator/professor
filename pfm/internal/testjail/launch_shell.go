@@ -9,6 +9,13 @@ import (
 // Literal name: testjail cannot import internal/claudelaunch (import cycle).
 const launchShellEnv = "CLAUDE_CODE_SHELL"
 
+// jailedPfmStub is the installed pfm of a jailed home. It is also the cost launcher every rendered
+// Claude launch runs in front of Claude: here it arms no sink and execs Claude, so a launched pane
+// runs its fake engine.
+const jailedPfmStub = "#!/bin/sh\n# jailed-pfm\n" +
+	"if [ \"$1\" = internal ] && [ \"$2\" = cost-launch ] && [ \"$3\" = -- ]; then shift 3; exec \"$@\"; fi\n" +
+	"echo \"jailed-pfm: $*: not a pfm\" >&2\nexit 127\n"
+
 // pinLaunchShell pins CLAUDE_CODE_SHELL to the bash resolve finds, or clears
 // it when there is none. A Claude launch adds CLAUDE_CODE_SHELL, bash resolved
 // on the host's PATH, unless the launch environment already carries a usable

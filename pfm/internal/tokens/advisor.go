@@ -65,7 +65,7 @@ func (a *auditor) bookAdvisors(r *run, call *callUsage, ts float64, project stri
 		tok := tokenCounts{in: inp, out: out, cw5: cw5, cw1: cw1, cr: cr}
 		ctx := inp + cr + cw5 + cw1
 		row, _, found := a.prices.rates(advisor.Model, ctx)
-		parts, priced := row.ClaudeCostParts(u)
+		parts, priced := row.ResponseCostParts(u)
 		r.tok.add(inp, out, cw5, cw1, cr)
 		g.tok.add(inp, out, cw5, cw1, cr)
 		if !found || !priced {

@@ -93,6 +93,11 @@ const (
 	WireEnv
 	WireUnset
 	WireFlag
+	// WireWrapper is a launch decision the wrapper `pfm internal cost-launch` makes at exec time.
+	WireWrapper
+	// WireWrapperEnv is a process-environment value only the wrapper can set: it depends on a
+	// socket the wrapper binds just before exec.
+	WireWrapperEnv
 )
 
 func (wire Wire) String() string {
@@ -105,6 +110,10 @@ func (wire Wire) String() string {
 		return unsetWord
 	case WireFlag:
 		return "flag"
+	case WireWrapper:
+		return "wrapper"
+	case WireWrapperEnv:
+		return "wrapper-env"
 	default:
 		return "unknown"
 	}
@@ -158,6 +167,19 @@ var Knobs = func() []Knob {
 	for _, name := range hygiene {
 		rows = append(rows, Knob{name, WireUnset, name, SourceConstant, nil, "Discard inherited launch state."})
 	}
+	for _, v := range costVars {
+		rows = append(rows, Knob{
+			v.name, WireWrapperEnv, v.name, SourceConstant, v.value,
+			"Point Claude Code's OpenTelemetry exporters at the launch's loopback cost sink.",
+		})
+	}
+	rows = append(rows, Knob{
+		EnvCostLedger, WireWrapperEnv, EnvCostLedger, SourceConstant, "on|off|preempted|failed",
+		"Record what the cost ledger decided for this launch, for the status line.",
+	}, Knob{
+		EnvCostLedgerPID, WireWrapperEnv, EnvCostLedgerPID, SourceConstant, "{pid}",
+		"Name the process the armed sink serves, so a second pass of the same process reuses it.",
+	})
 	return append(
 		rows,
 		Knob{
@@ -172,6 +194,14 @@ var Knobs = func() []Knob {
 			SourceLaunchThenConfig,
 			true,
 			"Hand the main chat's starting prompt-cache TTL to the cache-live-control plugin in the process environment; the plugin owns every TTL from then on.",
+		},
+		Knob{
+			knobCostLedger,
+			WireWrapper,
+			"pfm internal cost-launch",
+			SourceConfig,
+			true,
+			"Arm a per-launch cost sink on 127.0.0.1 and exec Claude with the exporter variables pointed at it; false, or the user's own telemetry settings, launch without.",
 		},
 		Knob{
 			knobShell,
@@ -338,7 +368,7 @@ func LaunchEnvNames() []string {
 	var names []string
 	for _, knob := range Knobs {
 		switch {
-		case knob.Wire == WireEnv:
+		case knob.Wire == WireEnv, knob.Wire == WireWrapperEnv:
 			names = append(names, knob.Target)
 		case knob.Wire == WireSettings && strings.HasPrefix(knob.Target, "env."):
 			names = append(names, strings.TrimPrefix(knob.Target, "env."))

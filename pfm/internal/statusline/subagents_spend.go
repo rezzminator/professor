@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strconv"
 
+	"github.com/rezzminator/professor/pfm/internal/costledger"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -30,6 +31,12 @@ type agentSpend struct {
 	tools           int
 	priced          int
 	partial         bool
+	// fromLedger means usd, in and out are the cost ledger's rows of the agent and every agent
+	// below it (ledgerSpend), not a price of its transcripts.
+	fromLedger bool
+	// costStates are the cost-state lines of the transcript this spend was read from, with the exit
+	// each was written at; add leaves them out of a sum, which has no one exit.
+	costStates []costledger.CostState
 }
 
 func (spend *agentSpend) add(other agentSpend) {
@@ -52,6 +59,7 @@ type spendScan struct {
 	responses map[string]response
 	unkeyed   agentSpend
 	tools     map[string]struct{}
+	anchors   costledger.Anchors
 }
 
 type response struct {
@@ -87,6 +95,7 @@ func (scan *spendScan) record(messageID, requestID, model string, usage *pricing
 func (scan *spendScan) total() agentSpend {
 	spend := scan.unkeyed
 	spend.tools = len(scan.tools)
+	spend.costStates = scan.anchors.States()
 	for _, seen := range scan.responses {
 		spend.add(scan.priceResponse(seen))
 	}
@@ -122,7 +131,7 @@ func (scan *spendScan) price(model string, billed pricing.ClaudeUsage, requests 
 	}
 	if ok {
 		var parts pricing.ClaudeParts
-		parts, ok = row.ClaudeRequestsCostParts(requests)
+		parts, ok = row.ResponseRequestsCostParts(requests)
 		spend.usd = parts.Total()
 	}
 	if !ok {
@@ -137,9 +146,13 @@ func (scan *spendScan) price(model string, billed pricing.ClaudeUsage, requests 
 // them.
 func (scan *spendScan) line(line []byte) {
 	var entry struct {
-		Type      string `json:"type"`
-		RequestID string `json:"requestId"`
-		Message   struct {
+		Type          string   `json:"type"`
+		Timestamp     string   `json:"timestamp"`
+		TotalCostUSD  *float64 `json:"totalCostUSD"`
+		StartTime     float64  `json:"startTime"`
+		TotalDuration float64  `json:"totalDuration"`
+		RequestID     string   `json:"requestId"`
+		Message       struct {
 			ID      string              `json:"id"`
 			Model   string              `json:"model"`
 			Usage   *pricing.UsageBlock `json:"usage"`
@@ -149,7 +162,16 @@ func (scan *spendScan) line(line []byte) {
 			} `json:"content"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(line, &entry) != nil || entry.Type != entryAssistant {
+	if json.Unmarshal(line, &entry) != nil {
+		return
+	}
+	if entry.Timestamp != "" {
+		scan.anchors.Stamp(entry.Timestamp)
+	}
+	if entry.Type == entryCostState && entry.TotalCostUSD != nil {
+		scan.anchors.State(*entry.TotalCostUSD, entry.StartTime, entry.TotalDuration)
+	}
+	if entry.Type != entryAssistant {
 		return
 	}
 	for _, block := range entry.Message.Content {
@@ -244,24 +266,30 @@ func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend
 }
 
 // spendSegment renders "$1.24/3.1M/42K/12": USD, prompt and output tokens,
-// then tool calls, for the agent and every agent below it; advisor spend, part
+// then tool calls, for the agent and every agent below it (with a cost ledger,
+// its rows' dollars and tokens: see agentSpend.fromLedger); advisor spend, part
 // of that USD, follows as " adv $0.30", or " adv n/a" when the table could not
 // price a consultation. A floor (partial) gets a "+?" in the
 // warning colour; with nothing priced at all the dollar part is "$?". An own
 // transcript that could not be read is "$?/?/?/?": nothing it says is a total.
 func spendSegment(activity agentActivity) string {
-	if activity.err != nil {
+	spend := activity.spend
+	if activity.err != nil && !spend.fromLedger {
 		return cWarn + "$?/?/?/?" + reset
 	}
-	spend := activity.spend
 	dollars := "$?"
 	if spend.priced > 0 || !spend.partial {
 		dollars = "$" + strconv.FormatFloat(spend.usd, 'f', 2, 64)
 	}
+	tools := cTools + strconv.Itoa(spend.tools) + reset
+	if activity.err != nil {
+		// The ledger priced the row; the transcript that holds its tool calls did not read.
+		tools = cWarn + "?" + reset
+	}
 	line := cCost + dollars + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
-		cTools + strconv.Itoa(spend.tools) + reset
+		tools
 	switch {
 	case spend.advisorUnpriced > 0:
 		line += cMuted + " adv " + reset + cWarn + "n/a" + reset

@@ -27,7 +27,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `tracemap_html.py` | The page writer, imported only for `map --html` |
 | `tracemap.html` | The page template, with its title, warnings and `/*TRACEMAP_DATA*/null` data slots |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
-| `SKILL.md` | The agents' command table and the check, visible to the tracer tiers and `sub-tracer` only |
+| `SKILL.md` | The agents' command table and the check, visible to `tracer` and `sub-tracer` only |
 
 ## The run directory
 

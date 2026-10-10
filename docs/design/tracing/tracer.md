@@ -11,7 +11,7 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 - [A run](#a-run)
 - [Rules](#rules)
 - [Harness behaviour](#harness-behaviour)
-- [Tiers](#tiers)
+- [Model](#model)
 - [Open items](#open-items)
 
 ## Parts
@@ -19,12 +19,11 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 | Part | File | Model, effort |
 | --- | --- | --- |
 | Lead | `templates/global/agents/tracer.md` | `sonnet`, `high` |
-| Lead, tiers 2 and 3 | `templates/global/agents/variants.json` | `sonnet` `xhigh`; `opus` `medium` |
 | Reader | `templates/global/agents/sub-tracer.md` | `haiku`, `low` |
 | Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `tracemap.html`, `tracetree_test.py`, `SKILL.md` | — |
 | Caller's skill | `templates/global/skills/read-tracer-run/SKILL.md` | — |
 
-`sub-tracer` and the `tracetree` skill are visible only to the three tiers and `sub-tracer` itself. In the prompts, `tt` stands for `python3 ~/.claude/skills/tracetree/tracetree.py`.
+`sub-tracer` and the `tracetree` skill are visible only to `tracer` and `sub-tracer`. In the prompts, `tt` stands for `python3 ~/.claude/skills/tracetree/tracetree.py`.
 
 ## Why a tree
 
@@ -94,7 +93,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-`flights-foreman` sends code it has not read to tracer at intake or any later step, carries `Skill` to load `read-tracer-run`, keeps the `RUN` through every compaction and puts `RUN` and node IDs in each child's brief (`templates/global/agents/flights-foreman.md:32`, `:57`, `:91`). `reviewer` spawns `subagent_type: tracer` for its tracer questions (`templates/global/agents/reviewer.md:39`).
+`flights-foreman` sends code it has not read to tracer at intake or any later step, carries `Skill` to load `read-tracer-run`, keeps the `RUN` through every compaction and puts `RUN` and node IDs in each child's brief (`templates/global/agents/flights-foreman.md:32`, `:57`, `:91`). `reviewer` spawns `subagent_type: tracer` for each review seat, asked for facts and told to skip CHECK, TESTS and lines to paste (`templates/global/agents/reviewer.md:43`). `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself, reads the clone only for a NOT READ item its goal turns on, and drops CHECK, TESTS, MAP and RUN (`templates/global/agents/clone-distiller.md:45-48`).
 
 ## Harness behaviour
 
@@ -103,14 +102,15 @@ What the tree rests on, each observed in the lab:
 - A child runs asynchronously; its completion arrives as a notification that wakes its parent.
 - Notifications that arrive during a blocking tool call are absorbed into the parent's next request and wake nothing; several completions can arrive as one wake. So the lead waits inside `tt wait`, never on wakes.
 - A child finishing after the lead's final wakes the lead, and the lead's reply replaces the final.
-- A spawn past the harness's depth or concurrency cap does not happen, and nothing reports it; the fleet's default depth is 8 (`pfm/internal/config/subagents.go:19`). So `tt wait` reports a named node not started after 120 s as `never started`.
+- A spawn past the harness's concurrency cap fails at once with the tool result `Concurrent subagent limit reached. You can run 50 subagents at once. Do not retry.`; a spawn past the depth cap was never observed. The fleet's default depth is 8 (`pfm/internal/config/subagents.go:19`). Either way the thread never starts, so `tt wait` reports a named node not started after 120 s as `never started`, and the gap round respawns it: in the field, seven threads refused this way all started on the respawn ([Field runs](tracer-bench.md#lead-audit)).
 - Agent types load at session start: an edited agent file runs in the next session.
 
 ## Model
 
-`tracer` runs on `sonnet` at `high` effort; its sub-tracers on `haiku` at `low`. On the single-agent body before the tree, it cost 43% of an `opus` lead's price at 98% of its accuracy and 58% of its clean blocks ([tracer bench](tracer-bench.md#against-tracer-pro-max)).
+`tracer` runs on `sonnet` at `high` effort; its sub-tracers on `haiku` at `low`. On the single-agent body before the tree, it cost 43% of an `opus` lead's price at 98% of its accuracy and 58% of its clean blocks ([tracer bench](tracer-bench.md#against-an-opus-lead)).
 
 - The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
+- Both agents run on Claude only, by the user's ruling: a generator of GPT role twins must never map `tracer` or `sub-tracer`. Over 85 field runs the twins, `gpt-tracer` on `gpt-6-sol` and `gpt-sub-tracer` on `gpt-6-luna`, cited a line past the file's end on 8.3% of hops against `tracer`'s 0.11%, and had 0.84% of hops rejected against 0.17% ([Field runs](tracer-bench.md#field-runs)).
 - Codex: `tracer` and `sub-tracer` carry `codex-sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not.
 
 ## Open items
@@ -122,5 +122,9 @@ What the tree rests on, each observed in the lab:
 - The 120 s `never started` window rests on lab starts 8–21 s after `tt new`; a harness-dropped spawn was never observed in a run, only proven by the kit's test.
 - One thread per item of a list the brief asks to classify does not hold yet: on replay P0 the lead grouped 24 docs into three threads of 8, left two unread and ran no gap round.
 - The read-numbering fix behind P20's 12 wrong line numbers is unbenched on a replay.
-- No caller probe has run since the round-3 mechanisms (`--seek` PRIOR, `Q{n}`, OPEN, the ceiling, `tt read`): whether callers now drill instead of re-asking is unmeasured.
+- Callers do not work the run. Across 84 callers in the field none re-asked a fact a final held, yet 3 ran `check` or `map` on a returned run, 1 loaded `read-tracer-run`, none of six audited callers relayed a final's `⚠` lines, and reviewer callers re-read quoted ranges with `sed` to verify them ([Caller audit](tracer-bench.md#caller-audit)).
+- The kit stalls on a very large file: on a run whose root held a 59 MB minified bundle (415,089 lines), waits ran past the Bash tool's 600 s and one drill did not finish in 120 s. The lead has no step for a wait the Bash tool moves to the background, and spent ten calls on `pkill`, short re-waits and a `sleep` loop.
+- The two-drill cap reads as per run or per wait: 23 of 183 field leads drilled more than twice, and the audited extra drills supplied cites their finals used.
+- A thread refused at spawn has no rule of its own: one lead whose seven spawns were all refused read the code itself with whole-file `Read`s instead of running the gap round.
+- A brief comparing several revisions has no kit support, since a run has one root: the heaviest field lead, at 40 calls, built trees by hand and bypassed a refused `tt read` with an unnumbered `sed`; another bypass left 9 of 20 cites off by one or two lines.
 - 55 of the 88 rejected hops left after the resolver are one run on a submodule plugin since renamed: the resolver follows a moved file only where its basename, a sibling or a unique line places the quote ([Resolver and drift](tracer-bench.md#resolver-and-drift)).

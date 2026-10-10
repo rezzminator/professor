@@ -1,6 +1,6 @@
 # tracer bench
 
-Every measured `tracer` run: the single-agent bench behind the three tiers, the tree bench behind the lead and its sub-tracers, the replay of past heavy briefs, the caller probes and their audits, the rejected-hop survey behind the resolver and drift, and the runs that checked the kit. The design is [tracer.md](tracer.md), the kit [tracetree.md](tracetree.md).
+Every measured `tracer` run: the single-agent bench behind the model, the tree bench behind the lead and its sub-tracers, the replay of past heavy briefs, the caller probes and their audits, the rejected-hop survey behind the resolver and drift, the runs that checked the kit, and the field runs swept from disk. The design is [tracer.md](tracer.md), the kit [tracetree.md](tracetree.md).
 
 ## Contents
 
@@ -12,6 +12,7 @@ Every measured `tracer` run: the single-agent bench behind the three tiers, the 
 - [Resolver and drift](#resolver-and-drift)
 - [Engine trace](#engine-trace)
 - [Live probe](#live-probe)
+- [Field runs](#field-runs)
 
 ## Single-agent bench
 
@@ -38,31 +39,31 @@ The final single-agent body on each model and effort. A Sonnet run spawns `trace
 
 Lines exact: a non-blank fenced line counts when it appears verbatim in the repository's tracked source, config or Makefile lines once the fence's own indent is stripped. A clean block has every line exact, so it pastes into a task file as it stands.
 
-| Setup | Tier | Accuracy /30 | Wrong | Cost (USD) | Requests | Seconds | Return (KB) | Lines exact | Clean blocks |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline `general-purpose`, `opus` `high` | — | 29.5 | 3 | 1.37 | 25 | 164 | 17.9 | 26/81 | 5/10 |
-| `opus` `medium` (prompt run 2) | `tracer-pro-max` | 28.0 | 2 | 0.80 | 15 | 158 | 19.5 | 84/84 | 9/9 |
-| Sonnet 5.5 `xhigh`, run 1 | `tracer-pro` | 28.5 | 2 | 0.50 | 10 | 146 | 22.5 | 77/78 | 12/13 |
-| Sonnet 5.5 `xhigh`, run 2 | `tracer-pro` | 28.0 | 2 | 0.77 | 16 | 242 | 22.7 | 87/88 | 11/12 |
-| Sonnet 5.5 `high` | `tracer` | 27.5 | 3 | 0.34 | 7 | 94 | 23.7 | 32/96 | 7/12 |
-| Sonnet 5.5 `medium`, run 1 | — | 27.0 | 2 | 0.25 | 6 | 67 | 17.3 | 54/76 | 5/12 |
-| Sonnet 5.5 `medium`, run 2 | — | 27.5 | 3 | 0.24 | 7 | 75 | 19.3 | 77/86 | 6/11 |
+| Setup | Accuracy /30 | Wrong | Cost (USD) | Requests | Seconds | Return (KB) | Lines exact | Clean blocks |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline `general-purpose`, `opus` `high` | 29.5 | 3 | 1.37 | 25 | 164 | 17.9 | 26/81 | 5/10 |
+| `opus` `medium` (prompt run 2) | 28.0 | 2 | 0.80 | 15 | 158 | 19.5 | 84/84 | 9/9 |
+| Sonnet 5.5 `xhigh`, run 1 | 28.5 | 2 | 0.50 | 10 | 146 | 22.5 | 77/78 | 12/13 |
+| Sonnet 5.5 `xhigh`, run 2 | 28.0 | 2 | 0.77 | 16 | 242 | 22.7 | 87/88 | 11/12 |
+| Sonnet 5.5 `high`, the shipped `tracer` | 27.5 | 3 | 0.34 | 7 | 94 | 23.7 | 32/96 | 7/12 |
+| Sonnet 5.5 `medium`, run 1 | 27.0 | 2 | 0.25 | 6 | 67 | 17.3 | 54/76 | 5/12 |
+| Sonnet 5.5 `medium`, run 2 | 27.5 | 3 | 0.24 | 7 | 75 | 19.3 | 77/86 | 6/11 |
 
-- Accuracy moves within 3% across every setup; price and quoting are what the tiers trade.
+- Accuracy moves within 3% across every setup; price and quoting are what the setups trade.
 - Quoting does not rise with effort: `high` quoted worst, one 38-line shell script carrying its line numbers.
 - Both `xhigh` runs elided one line of the same block with `...`, their one quoting fault; run 1 made 26 tool calls against a 25-call budget.
 - `xhigh`'s cost swings from $0.50 to $0.77 between two runs of one brief, its latency from 146 s to 242 s.
 
-### Against tracer-pro-max
+### Against an opus lead
 
-Each tier's share of `tracer-pro-max`; `tracer-pro` is the mean of its two runs.
+Each setup's share of the `opus` `medium` lead; Sonnet 5.5 `xhigh` is the mean of its two runs.
 
-| Tier | Price | Accuracy | Clean blocks | Seconds |
+| Setup | Price | Accuracy | Clean blocks | Seconds |
 | --- | --- | --- | --- | --- |
-| `tracer-pro-max` | 100% | 100% | 100% | 158 |
-| `tracer-pro` | 79% (62–96%) | 101% | 92% | 194 |
-| `tracer` | 43% | 98% | 58% | 94 |
-| Sonnet 5.5 `medium`, untiered | 31% | 97% | 48% | 71 |
+| `opus` `medium` | 100% | 100% | 100% | 158 |
+| Sonnet 5.5 `xhigh` | 79% (62–96%) | 101% | 92% | 194 |
+| Sonnet 5.5 `high`, the shipped `tracer` | 43% | 98% | 58% | 94 |
+| Sonnet 5.5 `medium` | 31% | 97% | 48% | 71 |
 
 ## Tree bench
 
@@ -229,3 +230,55 @@ A trace of the Claude engine's launch path on this repository: $0.82, 18 threads
 ## Live probe
 
 A live tracer run after write-time refusal and drift landed: 2 nodes, 62 of 62 hops verified, no refusal, both sidecars and `BASE` written; $0.23 in 109 s.
+
+## Field runs
+
+Every run directory written under `/tmp/{project}/tracer/` from 2026-10-09 21:00, when the tree landed, to 2026-10-11 01:04: 259 runs, each re-checked with `tt check` on 2026-10-11 and joined to the lead transcript that ran its `tt new`, the lead's agent type read from the transcript's `.meta.json`. Claude-led runs by caller: `reviewer` and its bench variants 159, main chats 11, `clone-distiller` 10, `general-purpose` 3, `gpt-foreman` 3, `flights-foreman` 2.
+
+### Kit counts by lead
+
+Drift is measured at the re-check, not the walk, so a worktree edited after its trace drifts; a bad address is a hop citing a line past its file's end that did not hold when walked.
+
+| Lead | Runs | No hops | Hops | Rejected | Bad address | Refused once, of nodes | Flagged, of answer lines | Drifted |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `tracer`, `sonnet` `high` | 171 | 2 | 30,617 | 0.17% | 0.11% | 6.1% | 11.1% | 2.8% |
+| `gpt-tracer`, `gpt-6-sol` | 85 | 1 | 6,746 | 0.84% | 8.3% | 8.6% | 89.0% | 84.6% |
+
+- `gpt-foreman` edited the worktrees its twins had traced, so most of their hops drifted and their flags follow; rejections and bad addresses do not depend on drift.
+- No sub-tracer ran `tt new`: the 11 sub-tracer transcripts naming it quote it, never call it.
+
+### Lead flow
+
+Over the 183 Claude lead transcripts:
+
+| Measure | Value |
+| --- | --- |
+| Tool calls | median 15, p90 24, max 40 |
+| First spawn at call 2 | 157; after call 3: 10; never: 1 |
+| Polls (`sleep`, `true`, listing the run) | 3 in all |
+| `tt wait` without the 600000 timeout | 6 of 241 |
+| More than two drills | 23 |
+| Final carrying RUN, MAP and NOT READ | 180 |
+| Final length | median 18,369 characters, p90 25,320 |
+
+Spend over the 72 hours to 2026-10-11 01:37, from `pfm tokens`: `tracer` 219 runs, $84.89, median $0.35, p90 $0.59, max $0.97; `sub-tracer` 1,801 runs, $21.85, median $0.01; `gpt-tracer` 61 runs, $33.30, max $11.23; `gpt-sub-tracer` 562 runs, $4.83.
+
+### Lead audit
+
+`agent-optimizer` audited ten Claude leads picked as outliers: the three finals the flow count read as empty, the two runs with no hops, two leads over the drill cap, the two heaviest and one `clone-distiller` caller. Ten runs, 200 tool calls, 17 tool errors, $4.79.
+
+- Empty finals: one was a false reading and its caller got the whole final; one lead was cut off mid-spawn after its caller had returned; one wait ended with exit 137 at 240 s as its session shut down.
+- No hops: one lead never spawned and read the code itself; the other spawned 7 threads, all refused at the harness's 50-agent concurrency cap, and the lead read whole files instead of running the gap round. Another lead had 7 of 11 spawns refused, respawned all 7 in the gap round, and every one started.
+- Large file: a root holding a 59 MB minified bundle (415,089 lines) cost 12 calls, about 1,650 s and $0.55 of a $0.97 run: one wait returned after 597 s against its 540 s timeout, the next was moved to the background at 600 s, and the lead spent ten calls on short re-waits, `pkill`, a killed `check` and a `sleep` loop. Re-checked on 2026-10-11, one `check --hops` on that run did not finish in 120 s.
+- Drills: the third and fourth drills of the two over-cap leads supplied 8 to 28 cites each that their finals used; one node was drilled twice.
+- Bypassed reads: a refused second `tt read` was bypassed with an unnumbered `sed` in two runs; in one, 9 of 20 cites landed one or two lines off.
+- Correctness: a reviewed final's 32 first-question cites all match the run's `BASE`, and its flagged lines were re-quoted correctly.
+
+### Caller audit
+
+`chat-investigator` read six callers that spawned tracer in more than one message: a main chat and five reviewer seats.
+
+- 0 of 10 later spawns re-asked what an earlier final held; four went out before any tracer had returned. Seven finals held a fact a later spawn partly re-found, never a whole later question.
+- No caller ran `check`, `map` or `read` on a returned run or loaded `read-tracer-run`; across all 84 callers 3 ran `check` or `map` and 1 loaded the skill.
+- Neither caller whose finals carried `⚠` lines relayed them; one review file reports its seats with no mention of the rejected or placed hops.
+- All five reviewer seats re-read ranges the finals had quoted, with `sed`, under "Verify candidate lines".

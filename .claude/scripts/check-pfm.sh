@@ -49,8 +49,8 @@ if [ -z "${PFM_DEV_FENCE:-}" ]; then
   cmd="$(printf '%q ' ./.claude/scripts/check-pfm.sh "${files[@]}")"
   unit_log check-pfm || { echo "check-pfm.sh: the log directory could not be created" >&2; exit 1; }
   # One fence run at a time across every worktree of this repository: the lock sits beside the logs,
-  # under the main checkout's /tmp/{project}; the fence call inherits fd 9, so the lock lasts as long
-  # as the run and the kernel drops it when the last holder exits — a killed run never leaves it held.
+  # under the main checkout's /tmp/{project}; only this process holds fd 9 (the fence call gets it
+  # closed), so the kernel drops the lock the moment this process exits or is killed.
   lock="${UNIT_LOG%/*}/fence.lock"
   exec 9>"$lock" || { echo "check-pfm.sh: the lock file $lock could not be opened" >&2; exit 1; }
   fence_lock() { # fence_lock <try|wait>: flock fd 9; 1 = held by another run, other non-zero = no lock
@@ -70,7 +70,7 @@ if [ -z "${PFM_DEV_FENCE:-}" ]; then
   fi
   if [ "$lrc" != 0 ]; then echo "FAIL fence (the host lock $lock could not be taken, exit $lrc)"; echo "log: $UNIT_LOG"; exit 1; fi
   rc=0
-  "$DEV" iso run "$cmd" >"$UNIT_LOG" 2>&1 || rc=$?
+  "$DEV" iso run "$cmd" >"$UNIT_LOG" 2>&1 9>&- || rc=$?
   lines="$(grep -E '^(PASS|FAIL|SKIP) ' "$UNIT_LOG" || true)"
   [ -z "$lines" ] || echo "$lines"
   extra=

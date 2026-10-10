@@ -8,7 +8,8 @@
 # named files (a lint finding on another file is burn-down, a typecheck finding on any file or a tool
 # error with no finding is a FAIL), the check order, every check running after one fails, the exit
 # code, the log, the host lock (a second run waits, says so, and reaches the fence only once the lock
-# is free, under each of flock and perl on PATH; no lock tool is a FAIL fence line), and the host's
+# is free, under each of flock and perl on PATH; the fence call never inherits the lock; no lock
+# tool is a FAIL fence line), and the host's
 # fence verdicts (the docker probe after a fence
 # failure, a fence run with no check line, a PASS followed by a non-zero exit). dev.sh, go, make,
 # golangci-lint and docker are stubs in the fake root that record their argv and exit as the test
@@ -37,6 +38,12 @@ done
 cp "$SUT" "$R/.claude/scripts/check-pfm.sh" || true
 cp "$HERE/.claude/scripts/unit-path.sh" "$R/.claude/scripts/unit-path.sh"
 chmod +x "$R/.claude/scripts/check-pfm.sh" 2>/dev/null || true
+
+# dev.sh records whether it inherited the host lock's fd 9 to $REC.fd9, then runs the stub.
+mv "$R/.claude/scripts/dev.sh" "$R/.claude/scripts/dev-stub.sh"
+# shellcheck disable=SC2016 # the wrapper's body is literal: $REC, $0 and $@ expand when it runs
+printf '#!%s\nif { : >&9; } 2>/dev/null; then echo open >>"$REC.fd9"; else echo closed >>"$REC.fd9"; fi\nexec "$(dirname "$0")/dev-stub.sh" "$@"\n' "$BASH" >"$R/.claude/scripts/dev.sh"
+chmod +x "$R/.claude/scripts/dev.sh"
 
 # --- fixture repository ---------------------------------------------------------------------------
 mkdir -p "$R/pfm/internal/a" "$R/pfm/internal/b" "$R/pfm/docs" "$R/docs"
@@ -370,6 +377,9 @@ for tool in flock perl; do
   if [ "$(cat "$T/lockrc" 2>/dev/null)" = 0 ] && grep -q '^dev.sh iso run ' "$REC"; then ok "$tool: the waiting run reaches the fence once the lock is free"; else bad "$tool: the waiting run reaches the fence once the lock is free" "rc=$(cat "$T/lockrc" 2>/dev/null) $(cat "$T/lockout")"; fi
   [ "$tool" = flock ] || { p="$(command -v flock 2>/dev/null)" && ln -sf "$p" "$BIN/flock"; } || true
 done
+: >"$REC.fd9"; reset
+run "$R" "$A"
+if [ "$(cat "$REC.fd9")" = closed ]; then ok "the fence call never inherits the lock fd: a killed caller frees the lock"; else bad "the fence call never inherits the lock fd: a killed caller frees the lock" "fd 9 in dev.sh: $(cat "$REC.fd9")"; fi
 moved=()
 for t in flock perl; do if [ -e "$BIN/$t" ]; then mv "$BIN/$t" "$BIN/.off-$t"; moved+=("$t"); fi; done
 run "$R" "$A"

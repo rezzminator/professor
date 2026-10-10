@@ -97,11 +97,11 @@
   },
   "file_hashes": {
     ".claude/agents/changelogger.md": "2f0e0aeff57ae98ce3c04f9a0f57cdb853094c28c0560f4bedd2f13826fd36a6",
-    ".claude/agents/gitter.md": "603ca0c5ee613b56d9d7b0c8312946853c4035dd4c1adfd7cc28daf748257d98",
+    ".claude/agents/gitter.md": "5906784f3be6205747e00395dfdd05a549d558738dcc5fd6d687a070ca96c4fb",
     ".claude/agents/releaser.md": "0bb2a0fc21e94c50c506a59701a0a10536be94ae31e2ff8f5a676eab2f3ba82a",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
-    ".claude/commands/pcm.md": "acb20025a0cef1c3e4957a6b14c26bd51ef913f39d54a8078a4f79105bd48f8d",
+    ".claude/commands/pcm.md": "f7fab93376268a57fc45ad0a58ce1a9863f2a211154d412d732f200a2b5c64b9",
     ".claude/commands/pfm-testing-manual.md": "f9b1fed33ae264248f40b222fdd0c7251318fa44ee14abad9322fc5a5abaa6f7",
     ".claude/commands/pfm/release.md": "dbb98e48f8f03c460cd8662061c60f76609285179b0b45b711bc8bfbb7aaae41",
     ".claude/engine-sync.json": "42625037ed3e3dd7e91782bfaf4306352891c5bfa4ed2dd3df9768c91b024461",

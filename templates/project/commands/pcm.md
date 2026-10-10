@@ -297,7 +297,7 @@ Catches what no single-domain audit can see. Reads across ALL domains simultaneo
 
 **Full rename:** Grep ALL occurrences → update agents → update CLAUDE.md → update the flights commands → final grep for zero stale refs.
 
-**New agent:** Create `.claude/agents/{name}.md` → update pipeline if needed (the Inventory derives; nothing to count).
+**New agent:** Create `.claude/agents/{name}.md` (a `tools:` allowlist names `mcp__sub-agent-compact__compact`) → update pipeline if needed (the Inventory derives; nothing to count).
 
 **New skill:** Create `.claude/skills/{name}/SKILL.md` → no CLAUDE.md edit needed (skills self-index from `description:` frontmatter).
 

@@ -69,7 +69,7 @@ A bulk edit whose every line you already fixed (a rename across many files) may 
 - Each decision is tested once, in the test of the unit whose code makes it: its rows are cases of one table-driven test, or assertions of one test, in that unit's existing test file; a new test file only where the source file has no test home.
 - Tests before code: every case written from its row's example, inputs and expected values exactly; one red run of every new or extended test against the unfixed tree, failing on an assertion (a build error proves nothing), its log kept; then the code; then the same command green. When the fix already landed, the red runs against a mktemp copy holding the unfixed code, never by breaking working code or a git write.
 - No catch-nothing assertion. A test proves behaviour that exists, never that something is gone.
-- Run the affected tests as you go; the testing manual's static-check command once, last, over the files you changed, a red fixed and the same command run again. The full suite and the review are the lander's.
+- Run the affected tests as you go; the testing manual's static-check command once, last, over the files you changed, a red fixed and the same command run again. A `GAP install` line (exit 3) is no red and no pass: install nothing; your return names it with the missing tools. The full suite and the review are the lander's.
 
 ## Landing
 

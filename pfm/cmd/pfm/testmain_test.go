@@ -85,6 +85,10 @@ func noNetworkHarvestDigest() harvestpy.EnvironmentDigest {
 	}
 }
 
+// testBinaryDir is where TestMain built the shared pfm binary, and where the
+// watch ladder builds its mock engine once; empty when no build ran.
+var testBinaryDir string
+
 // TestMain gives this package a short, canonical TMPDIR before any test builds
 // a path from it. See internal/testjail for why both properties matter.
 func TestMain(m *testing.M) {
@@ -101,6 +105,7 @@ func TestMain(m *testing.M) {
 			_, _ = os.Stderr.WriteString("create shared pfm test binary directory: " + err.Error() + "\n")
 			os.Exit(1)
 		}
+		testBinaryDir = binaryDir
 		testPFMBinary, err = testjail.PFMBinary(filepath.Join("..", ".."), binaryDir)
 		if err != nil {
 			_, _ = os.Stderr.WriteString(

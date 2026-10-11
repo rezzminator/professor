@@ -65,6 +65,20 @@ func serverGone(err error) bool {
 // server, and the one fix is ReapCommand.
 var ErrServerEmpty = errors.New("tmux server holds no session")
 
+// ErrServerUnresponsive marks a server that did not answer a read-only probe
+// within ProbeTimeout: a stopped or wedged server. It may well hold a live
+// chat, so it is never read as gone — and never waited on past the timeout,
+// since one frozen server would otherwise stall every scan of the fleet.
+var ErrServerUnresponsive = errors.New("tmux server did not answer")
+
+// ProbeTimeout bounds one list-panes call. A healthy server answers in
+// milliseconds; a server past this is reported unreadable for this scan.
+const ProbeTimeout = 2 * time.Second
+
+// probeWaitDelay is how long a probe whose client was killed may keep its
+// output pipes open before they are closed under it.
+const probeWaitDelay = 500 * time.Millisecond
+
 // ReapCommand is the command that ends abandoned empty pfm tmux servers; every
 // message naming such a server names it as the fix.
 const ReapCommand = "pfm chat ls --reap"
@@ -115,6 +129,11 @@ func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments
 	}
 	command := exec.CommandContext(ctx, binary, append([]string{"-L", socket}, arguments...)...)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmux.TmuxTmpDir)
+	// A tmux client hands its stdout to the server it talks to, so a client
+	// killed for a stopped server leaves that server holding the pipe: Wait
+	// would block on it forever. Past the delay the pipes are closed and the
+	// probe returns its error.
+	command.WaitDelay = probeWaitDelay
 	return pfmtmux.Observe(ctx, command, arguments...)
 }
 
@@ -140,8 +159,13 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 		"#{pane_current_path}",
 		"#{pane_current_command}",
 	}, "\x1f")
-	command := tmux.probeCommand(ctx, socket, "list-panes", "-a", "-F", format)
+	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	defer cancel()
+	command := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", format)
 	output, err := command.Output()
+	if err != nil && ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+		return nil, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+	}
 	if err != nil {
 		// Match the legacy probe's older field set as a compatibility fallback.
 		// Some long-lived servers reject newer format fields while remaining
@@ -158,8 +182,11 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 			"#{window_name}",
 			"#{pane_pid}",
 		}, "\t")
-		legacyCommand := tmux.probeCommand(ctx, socket, "list-panes", "-a", "-F", legacyFormat)
+		legacyCommand := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", legacyFormat)
 		legacyOutput, legacyErr := legacyCommand.Output()
+		if legacyErr != nil && ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+		}
 		if legacyErr != nil {
 			// Both probes agree there is nothing behind the socket: say so in a
 			// form the caller can classify, since the bare ExitError reads only
@@ -546,7 +573,7 @@ func probeTmux(
 		socket := socket
 		group.Go(func() error {
 			panes, err := client.ListPanes(groupCtx, socket.name)
-			if err != nil && groupCtx.Err() == nil {
+			if err != nil && groupCtx.Err() == nil && !errors.Is(err, ErrServerUnresponsive) {
 				// A server can rotate its active window between tmux accepting
 				// the client and list-panes. One immediate read-only retry
 				// avoids turning that transient into missing live rows.
@@ -597,6 +624,10 @@ func probeTmux(
 			}
 			if !errors.Is(err, ErrServerGone) {
 				mutex.Lock()
+				if result.Unreadable == nil {
+					result.Unreadable = map[string]string{}
+				}
+				result.Unreadable[socket.name] = err.Error()
 				result.ProbeWarnings = append(
 					result.ProbeWarnings,
 					fmt.Sprintf(

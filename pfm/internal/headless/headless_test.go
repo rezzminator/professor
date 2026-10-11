@@ -246,6 +246,7 @@ func TestWatchAnnouncesIdleThenExit(t *testing.T) {
 				Live:   live.Load(),
 			}, true, nil
 		},
+		Clock: newAutoClock(),
 	}
 	var out bytes.Buffer
 	go func() {
@@ -284,6 +285,7 @@ func TestWatchReportsAChatThatVanishesAsDead(t *testing.T) {
 		Resolve: func(context.Context) (Chat, bool, error) {
 			return Chat{}, false, nil
 		},
+		Clock: newAutoClock(),
 	}
 	var out bytes.Buffer
 	status, err := watcher.Watch(context.Background(), WatchOptions{
@@ -308,6 +310,7 @@ func TestWatchOnceStopsAtTheFirstIdle(t *testing.T) {
 		Resolve: func(context.Context) (Chat, bool, error) {
 			return Chat{Name: "seat", Engine: "cc", Path: path, Live: true}, true, nil
 		},
+		Clock: newAutoClock(),
 	}
 	var out bytes.Buffer
 	status, err := watcher.Watch(context.Background(), WatchOptions{
@@ -525,6 +528,7 @@ func TestWatchAnnouncesATurnEndedOnAnErrorAsIdleWithItsKind(t *testing.T) {
 		Resolve: func(context.Context) (Chat, bool, error) {
 			return Chat{Name: "seat", Engine: "cc", Path: path, Live: true}, true, nil
 		},
+		Clock: newAutoClock(),
 	}
 	var out bytes.Buffer
 	idleHooks := 0

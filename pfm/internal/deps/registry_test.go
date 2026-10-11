@@ -238,3 +238,46 @@ func TestAtLeastComparesNumericFieldsIncludingPreReleaseSuffixes(t *testing.T) {
 		}
 	}
 }
+
+// TestPython3RegistryEntryIsRequiredAndPlatformGated pins the python3 row: the
+// tracer's tracetree kit and its launch hook run on it, so a missing python3
+// fails the install's pre-change check and the doctor dependency preflight like
+// git or tmux, and the row's version parse reads the interpreter's own banner.
+func TestPython3RegistryEntryIsRequiredAndPlatformGated(t *testing.T) {
+	entries := Registry(Options{Home: t.TempDir(), GOOS: "linux", GOARCH: "amd64"})
+	var entry *Entry
+	for index, candidate := range entries {
+		if candidate.Name == "python3" {
+			entry = &entries[index]
+		}
+	}
+	if entry == nil {
+		t.Fatal("registry has no python3 entry")
+	}
+	if !entry.Required || entry.Harvest {
+		t.Errorf("python3 Required=%v Harvest=%v, want a required engine dependency", entry.Required, entry.Harvest)
+	}
+	for _, platform := range []string{"linux", "darwin"} {
+		if !entry.AppliesTo(platform) {
+			t.Errorf("python3 must apply to %s", platform)
+		}
+	}
+	if entry.AppliesTo("windows") {
+		t.Error("python3 must not apply to an ungated platform")
+	}
+	if entry.Command != "python3" {
+		t.Errorf("python3 Command = %q, want the bare name resolved on PATH", entry.Command)
+	}
+	for _, word := range []string{"python3", "tracetree", "launch hook"} {
+		if !strings.Contains(entry.InstallHint, word) {
+			t.Errorf("python3 InstallHint = %q, want it to say %q", entry.InstallHint, word)
+		}
+	}
+	if !Registered("python3") {
+		t.Error(`Registered("python3") = false, want true`)
+	}
+	got, err := entry.Parse("Python 3.12.1\n")
+	if err != nil || got != "3.12.1" {
+		t.Errorf("python3 Parse(%q) = %q, %v; want 3.12.1", "Python 3.12.1\n", got, err)
+	}
+}

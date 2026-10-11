@@ -14,12 +14,16 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
-	tracerPythonChecked = "python3 on doctor's PATH (the launch passes Claude its caller's PATH, which pfm does not set)"
-	tracerFixPythonText = "install python3 (the kit uses only the Python 3 standard library and states no minimum " +
-		"version) and put it on the PATH Claude is launched with"
+	tracerPythonChecked = "registry entry python3 on doctor's PATH (the launch passes Claude its caller's PATH, " +
+		"which pfm does not set)"
+	tracerPythonMissing = "python3 not found on doctor's PATH"
+	tracerFixPythonText = "the tracer cannot run without python3, a required dependency (the kit uses only the " +
+		"Python 3 standard library and states no minimum version): install it as the doctor: dep python3 row says, " +
+		"and put it on the PATH Claude is launched with"
 	tracerFixKitText     = "run pfm install --yes to relink the tracetree skill"
 	tracerFixRelinkText  = "run pfm install --yes to relink the kit; " + tracerFixPythonText
 	tracerFixSmokeNotRun = "fix the rows above, then rerun pfm doctor"
@@ -112,7 +116,59 @@ func TestTracerIntakeDoctor(t *testing.T) {
 			rows: func(command, _, _ string) []string {
 				return []string{
 					tracerIntakeRow + ` FAIL need=python3 checked=` + tracerPythonChecked +
-						` error="exec: \"python3\": executable file not found in $PATH" — fix: ` + tracerFixPythonText,
+						` error="` + tracerPythonMissing + `" — fix: ` + tracerFixPythonText,
+					tracerIntakeRow + ` FAIL need=smoke checked=` + command +
+						` error="not run: python3 or the kit failed above" — fix: ` + tracerFixSmokeNotRun,
+				}
+			},
+			code: 3, failureCount: "2",
+		},
+		{
+			name: "python3 found but its version probe failing",
+			stage: func(t *testing.T, home string) {
+				bin := filepath.Join(home, "broken-python")
+				if err := os.Mkdir(bin, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := testjail.WriteExecutable(
+					filepath.Join(bin, "python3"), []byte("#!/bin/sh\necho boom >&2\nexit 1\n"), 0o700,
+				); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+filepath.Join(home, ".local", "bin"))
+			},
+			rows: func(command, _, python string) []string {
+				return []string{
+					tracerIntakeRow + ` FAIL need=python3 checked=` + python + ` --version` +
+						` error="broken: exit status 1 raw=\"boom\"" — fix: ` + tracerFixPythonText,
+					tracerIntakeRow + ` FAIL need=smoke checked=` + command +
+						` error="not run: python3 or the kit failed above" — fix: ` + tracerFixSmokeNotRun,
+				}
+			},
+			code: 3, failureCount: "2",
+		},
+		{
+			// A relative PATH entry (a project's venv/bin, say) resolves python3
+			// only with exec.ErrDot: the probe never gets a path, and the row
+			// still names what it checked.
+			name: "python3 resolving only through a relative PATH entry",
+			stage: func(t *testing.T, home string) {
+				if err := os.Mkdir(filepath.Join(home, "venv-bin"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := testjail.WriteExecutable(
+					filepath.Join(home, "venv-bin", "python3"), []byte("#!/bin/sh\necho 'Python 3.12.1'\n"), 0o700,
+				); err != nil {
+					t.Fatal(err)
+				}
+				t.Chdir(home)
+				t.Setenv("PATH", "venv-bin"+string(os.PathListSeparator)+filepath.Join(home, ".local", "bin"))
+			},
+			rows: func(command, _, _ string) []string {
+				return []string{
+					tracerIntakeRow + ` FAIL need=python3 checked=` + tracerPythonChecked +
+						` error="broken: exec: \"python3\": cannot run executable found relative to current directory"` +
+						` — fix: ` + tracerFixPythonText,
 					tracerIntakeRow + ` FAIL need=smoke checked=` + command +
 						` error="not run: python3 or the kit failed above" — fix: ` + tracerFixSmokeNotRun,
 				}
@@ -212,7 +268,7 @@ func TestTracerIntakeDoctor(t *testing.T) {
 			rows: func(_, _, _ string) []string {
 				return []string{
 					tracerIntakeRow + ` FAIL need=python3 checked=` + tracerPythonChecked +
-						` error="exec: \"python3\": executable file not found in $PATH" — fix: ` + tracerFixPythonText,
+						` error="` + tracerPythonMissing + `" — fix: ` + tracerFixPythonText,
 					tracerPendingRow,
 				}
 			},

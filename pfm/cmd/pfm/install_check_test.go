@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -108,7 +107,10 @@ func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
 }
 
 func TestInstallCheckPreChangeChecks(t *testing.T) {
-	for _, scenario := range []string{"quiet", "running", "short schedule", "unprobed", "dependency", "explicit missing"} {
+	for _, scenario := range []string{
+		"kit missing python3 present", "python3 missing", "running", "short schedule", "unprobed", "dependency",
+		"explicit missing",
+	} {
 		t.Run(scenario, func(t *testing.T) {
 			home, _, _ := installCheckHome(t, false)
 			bin, _ := writeManagerFakes(
@@ -117,7 +119,7 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				"echo 'state = not running'",
 			)
 			wantCode, wantErr := 0, ""
-			if scenario == "dependency" {
+			if scenario == "dependency" || scenario == "python3 missing" {
 				wantCode = 1
 			}
 			if scenario == "running" {
@@ -151,12 +153,10 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				}
 			}
 			t.Setenv("PATH", bin)
-			if scenario == "quiet" {
-				// A fresh machine has neither python3 nor the tracetree kit the
-				// install links: the pre-change check never judges them.
-				if found, err := exec.LookPath("python3"); err == nil {
-					t.Fatalf("python3 resolves to %s on the fresh home's PATH", found)
-				}
+			if scenario == "kit missing python3 present" || scenario == "python3 missing" {
+				// A fresh machine has not got the tracetree kit the install links:
+				// the pre-change check never judges the kit. python3 is a registry
+				// dependency like git, judged by the probe the cases below script.
 				kit := filepath.Join(home, ".claude", "skills", "tracetree")
 				if _, err := os.Lstat(kit); !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("the fresh home already carries %s (err=%v)", kit, err)
@@ -165,15 +165,24 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 			savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
 			t.Cleanup(func() { doctor.DependencyProbeOverride, runInstaller = savedProbe, savedInstaller })
 			doctor.DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
-				if scenario != "dependency" {
+				name, state := "", deps.StateOK
+				switch scenario {
+				case "dependency":
+					name, state = "tmux", deps.StateMissing
+				case "python3 missing":
+					name, state = "python3", deps.StateMissing
+				case "kit missing python3 present":
+					name = "python3"
+				}
+				if name == "" {
 					return nil
 				}
 				for _, entry := range entries {
-					if entry.Name == "tmux" {
-						return []deps.Result{{Entry: entry, State: deps.StateMissing}}
+					if entry.Name == name {
+						return []deps.Result{{Entry: entry, State: state, Path: "/test/bin/" + name}}
 					}
 				}
-				t.Fatal("tmux registry entry missing")
+				t.Fatalf("%s registry entry missing", name)
 				return nil
 			}
 			runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
@@ -199,10 +208,13 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				t.Fatal("check changed home")
 			}
 			switch scenario {
-			case "quiet", "short schedule":
-				if out.String() != "install check: ok — pfm install --yes would pass its pre-change checks\n" ||
-					errOut.Len() != 0 {
-					t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+			case "kit missing python3 present", "short schedule":
+				want := "install check: ok — pfm install --yes would pass its pre-change checks\n"
+				if scenario == "kit missing python3 present" {
+					want = "doctor: dep python3 path=/test/bin/python3 ok\n" + want
+				}
+				if out.String() != want || errOut.Len() != 0 {
+					t.Fatalf("stdout=%q stderr=%q, want stdout %q", out.String(), errOut.String(), want)
 				}
 			case "running":
 				if errOut.String() != wantErr {
@@ -221,6 +233,13 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				if !strings.Contains(out.String(), "doctor: dep tmux path=(none) MISSING required") ||
 					errOut.String() != "pfm install: required dependency preflight failed\n" {
 					t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+				}
+			case "python3 missing":
+				want := "doctor: dep python3 path=(none) MISSING required — install: install python3; " +
+					"the tracer's tracetree kit and its launch hook run on it\n"
+				if !strings.Contains(out.String(), want) ||
+					errOut.String() != "pfm install: required dependency preflight failed\n" {
+					t.Fatalf("stdout=%q stderr=%q, want stdout holding %q", out.String(), errOut.String(), want)
 				}
 			case "explicit missing":
 				if !strings.Contains(errOut.String(), "--config "+flag+" does not exist") {

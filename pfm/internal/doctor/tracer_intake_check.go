@@ -29,12 +29,18 @@ const (
 	// creates; the kit derives its run's /tmp/{project} from that name, so the
 	// prefix is what makes the cleanup's removal safe.
 	tracerScratchPrefix = "pfm-doctor-tracer-"
+	// tracerPythonName is the dependency registry row the check resolves python3
+	// through.
+	tracerPythonName = "python3"
 	// kitScratchRoot is where the tracetree kit writes its runs, a literal of
 	// the kit itself (tracetree.py open_run).
 	kitScratchRoot = "/tmp"
 
-	tracerFixPython = "install python3 (the kit uses only the Python 3 standard library and states no " +
-		"minimum version) and put it on the PATH Claude is launched with"
+	// tracerFixPython is the consequence of a python3 failure; the install step
+	// is the registry row's InstallHint, which the doctor: dep python3 row prints.
+	tracerFixPython = "the tracer cannot run without python3, a required dependency (the kit uses only the Python 3 " +
+		"standard library and states no minimum version): install it as the doctor: dep python3 row says, and put it " +
+		"on the PATH Claude is launched with"
 	tracerFixKit = "run pfm install --yes to relink the tracetree skill"
 	// tracerFixRelink serves every smoke failure: a kit that did not run is a
 	// broken link or file, a missing interpreter, or a hook that hung.
@@ -95,7 +101,7 @@ func printTracerIntakeDoctor(
 	runner := dependencies.Runner
 	environment := deps.EnvironmentWith("PATH", dependencies.Env.Get("PATH"))
 
-	python, version, pythonOK := checkTracerPython(ctx, runner, environment, fail)
+	python, version, pythonOK := checkTracerPython(ctx, runner, home, fail)
 	pending, kitOK := checkTracerKit(home, kit, fail)
 	if pending {
 		fmt.Fprintf(stdout, "%s kit not installed yet — run pfm install --yes\n", tracerIntakeRow)
@@ -129,41 +135,49 @@ func printTracerIntakeDoctor(
 
 type tracerFailer func(need, checked, key, detail, fix string)
 
-// checkTracerPython resolves python3 and asks its version.
-func checkTracerPython(ctx context.Context, runner deps.Runner, environment []string, fail tracerFailer) (
-	path, version string, ok bool,
-) {
-	checked := "python3 on doctor's PATH (the launch passes Claude its caller's PATH, which pfm does not set)"
-	path, err := runner.LookPath("python3")
-	if err != nil {
-		fail("python3", checked, "error", err.Error(), tracerFixPython)
+// checkTracerPython judges python3 through its deps.Registry row, the one
+// place that names the command, how it is resolved and how its version is
+// read: the same deps.Probe the doctor: dep python3 row runs, under this
+// check's own tracerIntakeBound where the dep row takes the probe's default
+// bound. A FAIL here is the consequence of that row (the tracer cannot run),
+// not a second lookup.
+func checkTracerPython(
+	ctx context.Context, runner deps.Runner, home string, fail tracerFailer,
+) (path, version string, ok bool) {
+	checked := "registry entry " + tracerPythonName + " on doctor's PATH (the launch passes Claude its caller's PATH, " +
+		"which pfm does not set)"
+	var entry deps.Entry
+	registry := deps.Registry(deps.Options{Home: home})
+	for index := range registry {
+		if registry[index].Name == tracerPythonName {
+			entry = registry[index]
+		}
+	}
+	if entry.Name == "" {
+		fail("python3", "deps.Registry", "error", "no python3 row in the dependency registry",
+			"this pfm build carries no python3 dependency to check; rebuild pfm from its source")
 		return "", "", false
 	}
-	bounded, cancel := context.WithTimeout(ctx, tracerIntakeBound)
-	defer cancel()
-	result, err := runner.Run(bounded, []string{path, "--version"}, deps.RunOptions{Env: environment})
-	switch {
-	case bounded.Err() != nil:
-		fail("python3", path+" --version", "error", "timed out: "+bounded.Err().Error(), tracerFixPython)
-	case err != nil:
-		fail("python3", path+" --version", "error", err.Error(), tracerFixPython)
-	case result.ExitCode != 0:
-		fail(
-			"python3",
-			path+" --version",
-			"stderr",
-			capturedLine(result.Stderr, fmt.Sprintf("exit %d", result.ExitCode)),
-			tracerFixPython,
-		)
+	result := deps.Probe(ctx, []deps.Entry{entry}, deps.ProbeOptions{
+		LookPath: runner.LookPath, Runner: runner, Timeout: tracerIntakeBound,
+	})[0]
+	switch result.State {
+	case deps.StateOK:
+		return result.Path, result.Version, true
+	case deps.StateMissing:
+		fail("python3", checked, "error", tracerPythonName+" not found on doctor's PATH", tracerFixPython)
+	case deps.StateSkipped:
+		fail("python3", checked, "error", tracerPythonName+" is not checked on this platform: "+result.Error,
+			tracerFixPython)
 	default:
-		text := capturedLine(append(result.Stdout, result.Stderr...), "")
-		if version = strings.TrimSpace(strings.TrimPrefix(text, "Python")); version == "" {
-			fail("python3", path+" --version", "error", "printed no version", tracerFixPython)
-			return path, "", false
+		// A lookup that failed past "not found" (a relative PATH entry's
+		// exec.ErrDot) reaches here with no path and no version probe run.
+		if result.Path != "" {
+			checked = result.Path + " " + strings.Join(entry.VersionArgs, " ")
 		}
-		return path, version, true
+		fail("python3", checked, "error", string(result.State)+": "+result.Error, tracerFixPython)
 	}
-	return path, "", false
+	return result.Path, "", false
 }
 
 // checkTracerKit judges the kit file the hook names. pending is true when the

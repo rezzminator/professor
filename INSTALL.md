@@ -24,7 +24,7 @@ Shortest path first.
 
 ## Runtime prerequisites for the `pfm` install paths
 
-Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `jq`, a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires `setsid`; macOS requires `ps`, `lsof`, and `launchctl`. `systemd` on Linux is optional when user units are unavailable, but the scheduler surface cannot be enabled without it.
+Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `jq`, `python3` (the tracer's tracetree kit and its launch hook run on it; `pfm install` checks it and never installs it), a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires `setsid`; macOS requires `ps`, `lsof`, and `launchctl`. `systemd` on Linux is optional when user units are unavailable, but the scheduler surface cannot be enabled without it.
 
 The `claude` and `codex` executables are not installed by `pfm`. Their self-doctors are optional engine diagnostics even when accounts are configured: a broken engine capability stays visible, but it cannot block unrelated host installation. Use `--skip-engine codex` to skip the Codex probe and leave Codex mirror and hook surfaces unmanaged for this run.
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -258,5 +260,99 @@ func TestReloadLaunchAgentNeverLoadedBootstrapFailureStaysPlain(t *testing.T) {
 	}
 	if callKind(runner.calls, "bootout") {
 		t.Fatalf("calls=%q, want no bootout — nothing was loaded", runner.calls)
+	}
+}
+
+// printRunner is a loadedRunner whose `launchctl print` answers with output, or
+// fails with err.
+type printRunner struct {
+	loadedRunner
+	output string
+	err    error
+}
+
+func (r *printRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
+	return []byte(r.output), r.err
+}
+
+// TestReloadLaunchAgentLoadedUnchangedReloadsAStaleJob: a loaded agent whose
+// plist did not change is still reloaded when a pfm binary swap left it wedged
+// (launchd could not spawn it) or running the replaced build; a healthy or idle
+// one is left alone, and an unreadable state is reported, never read as healthy.
+func TestReloadLaunchAgentLoadedUnchangedReloadsAStaleJob(t *testing.T) {
+	t.Parallel()
+	built := time.Unix(1_800_000_000, 0)
+	for _, test := range []struct {
+		name    string
+		output  string
+		err     error
+		started int64
+		reload  bool
+		says    string
+	}{
+		{
+			name:   "spawn failed after a swap",
+			output: "\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n\tjob state = spawn failed\n",
+			reload: true,
+			says:   "launchd could not spawn it",
+		},
+		{
+			name:    "running the replaced binary",
+			output:  "\tstate = running\n\tpid = 4242\n",
+			started: built.Unix() - 60,
+			reload:  true,
+			says:    "pid 4242 runs the pfm binary",
+		},
+		{
+			name:    "running the current binary",
+			output:  "\tstate = running\n\tpid = 4242\n",
+			started: built.Unix() + 60,
+			says:    "left running",
+		},
+		{
+			name:   "idle between runs",
+			output: "\tstate = not running\n\tlast exit code = 0\n",
+			says:   "left running",
+		},
+		{
+			name: "state unreadable",
+			err:  errors.New("launchctl: input/output error"),
+			says: "health NOT probed",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			binary := filepath.Join(home, ".local", "bin", "pfm")
+			writeFixture(t, binary, "pfm\n")
+			if err := os.Chtimes(binary, built, built); err != nil {
+				t.Fatal(err)
+			}
+			runner := &printRunner{output: test.output, err: test.err}
+			var out strings.Builder
+			installer := engine{
+				options: Options{Home: home, Runner: runner, Stdout: &out, Sleep: func(time.Duration) {}},
+				apply:   true,
+				processBirth: func(pid int) (int64, error) {
+					if pid != 4242 {
+						return 0, errors.New("unexpected pid")
+					}
+					return test.started, nil
+				},
+			}
+			if err := installer.reloadLaunchAgentWithLabel(
+				context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, false,
+			); err != nil {
+				t.Fatalf("reload returned %v, want nil", err)
+			}
+			reloaded := callKind(runner.calls, "bootout") && callKind(runner.calls, "bootstrap")
+			if reloaded != test.reload {
+				t.Fatalf("reloaded=%v, want %v; calls=%q", reloaded, test.reload, runner.calls)
+			}
+			if !strings.Contains(out.String(), test.says) {
+				t.Fatalf("install said %q, want it to say %q", out.String(), test.says)
+			}
+		})
 	}
 }

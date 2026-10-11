@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -173,5 +174,29 @@ func TestFireLockPathSitsBesideTheStateDatabase(t *testing.T) {
 	got := FireLockPath(paths.Values{StateDB: "/state/pfm/pfm.db"})
 	if got != "/state/pfm/schedule-fire.lock" {
 		t.Fatalf("LockPath = %q", got)
+	}
+}
+
+func TestFireDeliversAOneTimeScheduleOnce(t *testing.T) {
+	t.Parallel()
+	store := openStore(t)
+	ctx := context.Background()
+	base := time.Unix(1_800_000_000, 0)
+	id, err := store.CreateSchedule(ctx, fleetdb.Schedule{
+		SessionID: "sess-once", Engine: "claude", Prompt: "ping once", Interval: time.Hour, Once: true, Created: base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliverer := &fakeDeliverer{}
+	lock := filepath.Join(t.TempDir(), "fire.lock")
+	for _, tick := range []time.Time{base.Add(time.Hour), base.Add(2 * time.Hour), base.Add(30 * 24 * time.Hour)} {
+		if _, err := Fire(ctx, store, deliverer, lock, tick); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(deliverer.delivered) != 1 || deliverer.delivered[0].id != id ||
+		deliverer.delivered[0].message != "⏰ pfm schedule "+strconv.FormatInt(id, 10)+" (once): ping once" {
+		t.Fatalf("delivered %+v, want one-time schedule %d delivered once", deliverer.delivered, id)
 	}
 }

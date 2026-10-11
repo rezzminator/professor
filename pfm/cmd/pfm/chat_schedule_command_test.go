@@ -103,6 +103,10 @@ func TestChatScheduleSetRefusals(t *testing.T) {
 		{"interval garbage", []string{"set", "--every", "soon", "--prompt", "x", id}, 2, "weekly"},
 		{"blank prompt", []string{"set", "--every", "1h", "--prompt", "  ", id}, 2, "prompt"},
 		{"two chats", []string{"set", "--every", "1h", "--prompt", "x", id, id}, 2, "usage"},
+		{"no timing", []string{"set", "--prompt", "x", id}, 2, "exactly one"},
+		{"every and in", []string{"set", "--every", "1h", "--in", "1h", "--prompt", "x", id}, 2, "exactly one"},
+		{"in and at", []string{"set", "--in", "1h", "--at", "18:00", "--prompt", "x", id}, 2, "exactly one"},
+		{"at unreadable", []string{"set", "--at", "noon", "--prompt", "x", id}, 2, "HH:MM"},
 		{"unknown chat", []string{"set", "--every", "1h", "--prompt", "x", "nobody"}, codeUnknownChat, "no chat named"},
 		{"no subcommand", nil, 2, "usage"},
 		{"unknown subcommand", []string{"bogus"}, 2, "usage"},
@@ -224,5 +228,22 @@ func TestScheduleFireNothingDueIsSilent(t *testing.T) {
 	}
 	if code := run([]string{"internal", "schedule-fire", "extra"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("extra arg code=%d, want 2", code)
+	}
+}
+
+func TestChatScheduleSetInIsAOneTimeSchedule(t *testing.T) {
+	id := indexScheduleChat(t)
+	code, stdout, stderr := runSchedule(t, "set", "--in", "2h", "--prompt", "check once", id)
+	if code != 0 || strings.TrimSpace(stdout) != "1" {
+		t.Fatalf("set --in code=%d stdout=%q stderr=%q, want 0 and id 1", code, stdout, stderr)
+	}
+	code, stdout, stderr = runSchedule(t, "ls", "--json")
+	var listed []fleetdb.Schedule
+	if code != 0 || json.Unmarshal([]byte(stdout), &listed) != nil || len(listed) != 1 ||
+		!listed[0].Once || listed[0].Interval != 2*time.Hour {
+		t.Fatalf("ls --json code=%d stdout=%q stderr=%q, want one one-time schedule 2h out", code, stdout, stderr)
+	}
+	if code, stdout, _ = runSchedule(t, "ls"); code != 0 || !strings.Contains(stdout, "  once  ") {
+		t.Fatalf("ls code=%d stdout=%q, want its EVERY column to read once", code, stdout)
 	}
 }

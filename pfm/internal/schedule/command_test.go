@@ -25,7 +25,7 @@ func TestRunScheduleCommandRefusesBadUsageBeforeTouchingAnyStore(t *testing.T) {
 		args    []string
 		wantErr string
 	}{
-		{"no verb", nil, "pfm chat schedule set --every"},
+		{"no verb", nil, "pfm chat schedule set {--every <interval> | --in <delay> | --at <time>}"},
 		{"unknown verb", []string{"bogus"}, `unknown command "bogus"`},
 		{"interval below minimum", []string{"set", "--every", "30s", "--prompt", "x"}, "minimum 1m"},
 		{"interval garbage", []string{"set", "--every", "soon", "--prompt", "x"}, "weekly, <N>d"},

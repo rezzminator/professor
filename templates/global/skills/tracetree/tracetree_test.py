@@ -1790,5 +1790,294 @@ class SeekTest(Repo):
         self.assertEqual(os.listdir(self.parent), [])
 
 
+def row(i):
+    return f"row {i:06d} " + "x" * 30
+
+
+class BigFileTest(Stored):
+    """A file past the search limit is checked only within NEAR lines of a hop's address, and one past the read limit
+    is not read: no file makes a command search or read without bound. The files are named once, where the lead reads."""
+
+    def setUp(self):
+        super().setUp()
+        self.add("app/big/big.go", [row(i) for i in range(1, 30001)])
+        self.assertGreater(os.path.getsize(os.path.join(self.root, "app/big/big.go")), 1 << 20)
+
+    def two_nodes(self):
+        for node in ("1", "2"):
+            self.store(node, hops(node, [f"- row [app/big/big.go:{20000 + int(node)}]"],
+                                  [f"@ app/big/big.go:{20000 + int(node)}", f"> {row(20000 + int(node))}"],
+                                  ["END returned: x @ app/big/big.go:20001"]))
+
+    def test_a_quote_within_thirty_lines_of_its_address_verifies_and_one_further_off_is_rejected_unsearched(self):
+        near = self.hop("app/big/big.go", 20000, row(20010))
+        self.assertIn("app/big/big.go:20010  row 020010", near)
+        self.assertIn("(re-addressed from :20000)", near)
+        far = self.hop("app/big/big.go", 20000, row(25000))
+        self.assertIn("✗ REJECTED app/big/big.go:20000 — quote not within 30 lines of the address", far)
+        self.assertIn("rejected=1", far)
+
+    def test_a_cite_in_a_big_file_is_not_moved_to_a_quote_far_from_it(self):
+        out = self.hop("app/big/big.go", 100, row(100), answer=f"- the row `{row(25000)}` [app/big/big.go:100]",
+                       view=None)
+        self.assertIn("not in the cited file", out)
+        self.assertNotIn("↻", out)
+
+    def test_the_big_file_is_named_once_in_the_notes_of_check_wait_and_the_json_map(self):
+        self.two_nodes()
+        note = "· app/big/big.go is "
+        checked = tt(["check", self.run_dir])
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        waited = self.wait("1", "2")
+        data = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
+        for out in (checked.stdout, waited):
+            self.assertEqual(len([l for l in out.splitlines() if l.startswith(note)]), 1, out)
+            self.assertIn("checks a hop or cite only within 30 lines of its address", out)
+        self.assertEqual(sum(n.startswith(note) for n in data["notes"]), 1, data["notes"])
+        self.assertEqual(checked.stdout.splitlines()[0], "WARNINGS: none")
+
+    def test_start_names_a_big_file_to_the_node_that_will_cite_it(self):
+        got = tt(["start", self.run_dir, "1", "app/big/big.go:100"])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn("app/big/big.go is ", got.stdout)
+        self.assertIn("within 30 lines of its address", got.stdout)
+        self.assertIn(row(100), got.stdout)
+
+    def test_a_file_over_the_read_limit_is_not_read_and_the_hop_says_why(self):
+        huge = os.path.join(self.root, "app/huge/huge.go")
+        os.makedirs(os.path.dirname(huge))
+        with open(huge, "wb") as f:
+            f.truncate((128 << 20) + 1)
+        out = self.hop("app/huge/huge.go", 5, "anything")
+        self.assertIn("✗ REJECTED app/huge/huge.go:5 — file is 128.0 MB, over the 128 MB read limit", out)
+        self.assertIn("· app/huge/huge.go is 128.0 MB — over the 128 MB read limit: the kit reads none of it", out)
+        tail = self.hop("huge.go", 5, "anything")
+        self.assertIn("✗ REJECTED huge.go:5 — file is 128.0 MB, over the 128 MB read limit", tail)
+
+    def test_a_hop_on_a_fifo_is_rejected_without_opening_it(self):
+        fifo = os.path.join(self.root, "app/fifo/pipe.go")
+        os.makedirs(os.path.dirname(fifo))
+        os.mkfifo(fifo)
+        out = self.hop("app/fifo/pipe.go", 1, "anything")
+        self.assertIn("✗ REJECTED app/fifo/pipe.go:1 — not a regular file", out)
+
+    def test_a_big_file_only_a_sibling_search_read_is_not_named(self):
+        self.add("app/big/small.go", ["package big", "func Small() {}"])
+        out = self.hop("app/big/small.go", 2, "a quote written nowhere in this tree at all", view=None)
+        self.assertIn("rejected=1", out)
+        self.assertNotIn("app/big/big.go is", out)
+
+    def test_the_map_looks_for_a_big_file_s_component_no_further_up_than_one_body(self):
+        self.add("app/big/far.go", ["package big", "func Far() {"] + [row(i) for i in range(1, 30001)] + ["}"])
+        self.hop("app/big/far.go", 20002, row(20000))
+        mapped = tt(["map", self.run_dir])
+        self.assertEqual(mapped.returncode, 0, mapped.stderr)
+        self.assertIn("app/big/far.go", mapped.stdout)
+        self.assertNotIn("far.go::Far", mapped.stdout)
+
+
+class BrokenNodeMarkTest(Stored):
+    """An answer line of a node that broke the hop contract carries a mark at the line itself."""
+
+    MARK = " ⚠ node {} broke the hop contract"
+    END = ["END returned: x @ app/srv/server.go:5"]
+
+    def nodes(self):
+        self.store("1", hops("1", ["- the pane is killed [app/kill/kill.go:5]", "- the error is wrapped [app/kill/kill.go:6]"],
+                             ["@ pkg/kill/kill.go:4", f"> {EXEC}"], self.END))
+        self.store("2", hops("2", ["- Handle refuses an empty target [app/srv/server.go:5]"],
+                             ["@ app/srv/server.go:5", f"> {REQUIRED}"], self.END))
+        self.store("3", hops("3", ["- a ghost [app/srv/server.go:7]"],
+                             ["@ app/srv/server.go:7", f"> {GHOST_HOP}"], self.END))
+        self.store("4", hops("4", ["- the pane is killed again [app/kill/kill.go:5]"],
+                             ["@ pkg/kill/kill.go:5", f"> {EXEC}"], self.END))
+
+    def answers(self, out):
+        return [l for l in out.splitlines() if l.lstrip().startswith("- ")]
+
+    def test_every_answer_line_of_a_placed_or_rejected_node_ends_in_the_mark_and_no_other_line_has_one(self):
+        self.nodes()
+        for out in (tt(["check", self.run_dir]).stdout, self.wait("1", "2", "3", "4")):
+            lines = self.answers(out)
+            self.assertEqual(len(lines), 5, out)
+            self.assertEqual(len([l for l in lines if "⚠ node" in l]), 3, out)
+            for l in lines:
+                if "pane is killed [" in l or "error is wrapped" in l:
+                    self.assertTrue(l.endswith(self.MARK.format(1)), l)
+                if "a ghost" in l:
+                    self.assertTrue(l.endswith(self.MARK.format(3)), l)
+                if "Handle refuses" in l or "killed again" in l:
+                    self.assertNotIn("⚠", l)
+
+    def test_a_line_citing_only_a_broken_node_s_hops_carries_that_node_s_mark(self):
+        self.store("1", hops("1", ["- the pane is killed [app/kill/kill.go:5]"], ["@ pkg/kill/kill.go:4", f"> {EXEC}"], self.END))
+        self.store("2", hops("2", ["- Handle refuses an empty target [app/srv/server.go:5]",
+                                   "- and the pane is killed [app/kill/kill.go:5]"],
+                             ["@ app/srv/server.go:5", f"> {REQUIRED}"], self.END))
+        lines = self.answers(tt(["check", self.run_dir]).stdout)
+        self.assertTrue(next(l for l in lines if "and the pane" in l).endswith(self.MARK.format(1)), lines)
+        self.assertNotIn("⚠", next(l for l in lines if "Handle refuses" in l))
+
+    def test_the_mark_follows_the_line_s_own_flags(self):
+        self.store("1", hops("1", ["- the row `ghost` [app/kill/kill.go:5]"], ["@ pkg/kill/kill.go:4", f"> {EXEC}"], self.END))
+        line = self.answers(tt(["check", self.run_dir]).stdout)[0]
+        self.assertRegex(line, r"\(.*not in the cited file.*\)" + re.escape(self.MARK.format(1)) + "$")
+
+
+class PinnedRevisionTest(Stored):
+    """A hop pinned to a git revision of the root, `{rev}:{path}:{line}`, is verified against `git show` of that
+    revision: it never drifts, is never placed in the working tree, and nothing is checked out."""
+
+    NEEDED = REQUIRED.replace("is required", "is needed")
+
+    def setUp(self):
+        super().setUp()
+        git(self.root, "init", "-q")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "one", when=time.time() - 2 * HOUR)
+        self.old = git(self.root, "rev-parse", "HEAD")
+        self.old12 = self.old[:12]
+        path = os.path.join(self.root, "app/srv/server.go")
+        with open(path) as f:
+            text = f.read()
+        with open(path, "w") as f:
+            f.write(text.replace("target is required", "target is needed"))
+        git(self.root, "commit", "-q", "-am", "two")
+        with open(os.path.join(self.run_dir, "BASE"), "w") as f:
+            f.write(git(self.root, "rev-parse", "HEAD") + "\n")
+
+    def test_a_pinned_hop_holds_at_its_revision_whatever_the_working_tree_says_and_however_the_revision_is_spelled(self):
+        plain = self.hop("app/srv/server.go", 5, REQUIRED)
+        self.assertIn("REJECTED app/srv/server.go:5", plain)
+        for rev in (self.old, self.old12, "HEAD~1"):
+            out = self.hop(f"{rev}:app/srv/server.go", 5, REQUIRED)
+            self.assertEqual(out.splitlines()[0], "WARNINGS: none", out)
+            self.assertIn(f"{self.old12}:app/srv/server.go:5  return errors.New", out)
+            self.assertIn("verified=1 · moved=0 · rejected=0 · drifted=0 · placed=0", out)
+
+    def test_a_pinned_quote_on_another_line_of_the_revision_is_re_addressed(self):
+        out = self.hop(f"{self.old12}:app/srv/server.go", 3, REQUIRED)
+        self.assertIn(f"{self.old12}:app/srv/server.go:5  return errors.New", out)
+        self.assertIn("re-addressed from :3", out)
+        self.assertIn("moved=1", out)
+
+    def test_a_pinned_quote_only_the_working_tree_holds_is_rejected_never_drifted_or_placed_there(self):
+        out = self.hop(f"{self.old12}:app/srv/server.go", 5, self.NEEDED)
+        self.assertIn(f"REJECTED {self.old12}:app/srv/server.go:5 — quote not in the file", out)
+        self.assertNotIn("DRIFTED", out)
+        self.assertNotIn("basename and quote", out)
+        self.assertIn("rejected=1 · drifted=0", out)
+
+    def test_a_pinned_path_the_revision_lacks_and_a_revision_that_names_no_commit_are_rejected_with_the_reason(self):
+        gone = self.hop(f"{self.old12}:app/nope/server.go", 5, REQUIRED)
+        self.assertIn(f"REJECTED {self.old12}:app/nope/server.go:5 — no such file at {self.old12}", gone)
+        none = self.hop("nosuchrev:app/srv/server.go", 5, self.NEEDED)
+        self.assertIn("REJECTED nosuchrev:app/srv/server.go:5 — no commit named nosuchrev", none)
+        self.assertNotIn("basename and quote", none)
+
+    def test_write_stores_the_revision_as_its_commit_so_a_moving_ref_cannot_move_the_hop(self):
+        got = tt(["write", self.run_dir, "1"], input=hops("1", ["- x [HEAD~1:app/srv/server.go:5]"],
+                 ["@ HEAD~1:app/srv/server.go:5", f"> {REQUIRED}"], ["END returned: x @ app/srv/server.go:5"]))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertNotIn("WARNING", got.stderr)
+        with open(os.path.join(self.run_dir, "1.hops")) as f:
+            stored = f.read()
+        self.assertIn(f"@ {self.old12}:app/srv/server.go:5", stored)
+        self.assertIn(f"- x [{self.old12}:app/srv/server.go:5]", stored)
+        with open(os.path.join(self.root, "app/srv/server.go"), "a") as f:
+            f.write("// more\n")
+        git(self.root, "commit", "-q", "-am", "three")
+        out = tt(["check", self.run_dir]).stdout
+        self.assertEqual(out.splitlines()[0], "WARNINGS: none", out)
+        self.assertIn("verified=1 · moved=0 · rejected=0 · drifted=0 · placed=0", out)
+        self.assertIn("flagged=0", out)
+
+    def test_start_read_and_the_map_take_a_pinned_address(self):
+        started = tt(["start", self.run_dir, "1", f"{self.old12}:app/srv/server.go:5"])
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertIn(REQUIRED, started.stdout)
+        self.assertNotIn("target is needed", started.stdout)
+        read = tt(["read", self.run_dir, "HEAD~1:app/srv/server.go:3-6"])
+        self.assertEqual(read.returncode, 0, read.stderr)
+        self.assertIn("== HEAD~1:app/srv/server.go:3-6", read.stdout)
+        self.assertIn(REQUIRED, read.stdout)
+        self.hop(f"{self.old12}:app/srv/server.go", 5, REQUIRED)
+        mapped = tt(["map", self.run_dir])
+        self.assertEqual(mapped.returncode, 0, mapped.stderr)
+        self.assertIn("app/srv/server.go", mapped.stdout)
+
+    def written(self, node="1"):
+        with open(os.path.join(self.run_dir, node + ".hops")) as f:
+            return f.read()
+
+    def test_a_pinned_range_in_a_not_read_line_is_stored_as_its_commit_and_never_held_by_the_working_tree(self):
+        self.store("2", hops("2", ["- y [app/srv/server.go:5]"], ["@ app/srv/server.go:5", f"> {self.NEEDED}"],
+                             ["END returned: y @ app/srv/server.go:5"]))
+        got = tt(["write", self.run_dir, "1"], input=hops("1", ["- x [HEAD~1:app/srv/server.go:5]"],
+                 ["@ HEAD~1:app/srv/server.go:5", f"> {REQUIRED}"],
+                 ["END returned: x @ HEAD~1:app/srv/server.go:5", "NOT READ HEAD~1:app/srv/server.go:3-6 — the caller"]))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn(f"NOT READ {self.old12}:app/srv/server.go:3-6", self.written())
+        self.assertIn(f"END returned: x @ {self.old12}:app/srv/server.go:5", self.written())
+        self.store("3", hops("3", ["- z [app/srv/server.go:5]"], ["@ app/srv/server.go:5", f"> {self.NEEDED}"],
+                             ["END returned: z @ app/srv/server.go:5", "NOT READ HEAD~1:app/srv/server.go:4-6 — as written"]))
+        opened = [l for l in self.wait("1", "2", "3").splitlines() if l.startswith("NOT READ")]
+        stored = next(l for l in opened if f"{self.old12}:app/srv/server.go:3-6" in l)
+        self.assertIn(f"(held: node 1 verified {self.old12}:app/srv/server.go:5)", stored)
+        self.assertNotIn("node 2", stored)
+        kept = next(l for l in opened if "HEAD~1:app/srv/server.go:4-6" in l)
+        self.assertNotIn("held: node 2", kept)
+        self.assertNotIn("held: node 3", kept)
+
+    def test_a_quoted_line_that_names_a_revision_is_stored_as_written(self):
+        quote = "\t// see [HEAD~1:app/srv/server.go:5]"
+        self.add("app/doc/notes.go", ["package doc", quote])
+        got = tt(["write", self.run_dir, "1"], input=hops("1", ["- x [app/doc/notes.go:2]"],
+                 ["@ app/doc/notes.go:2", f"> {quote}", f"= see [HEAD~1:app/srv/server.go:5]"],
+                 ["END returned: x @ app/doc/notes.go:2"]))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn(f"> {quote}\n= see [HEAD~1:app/srv/server.go:5]\n", self.written())
+        self.assertIn("verified=1 · moved=0 · rejected=0", tt(["check", self.run_dir]).stdout)
+
+    def test_a_pinned_hop_git_cannot_answer_says_so_never_no_commit(self):
+        self.store("1", hops("1", ["- x"], ["@ HEAD~1:app/srv/server.go:5", f"> {REQUIRED}"],
+                             ["END returned: x @ app/srv/server.go:5"]))
+        empty = tempfile.mkdtemp(prefix="tracetree-nogit-")
+        self.addCleanup(shutil.rmtree, empty, True)
+        got = subprocess.run([sys.executable, SCRIPT, "check", self.run_dir, "--hops"], capture_output=True, text=True,
+                             timeout=60, env=dict(os.environ, PATH=empty))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn("✗ REJECTED HEAD~1:app/srv/server.go:5 — git could not say: git rev-parse could not run", got.stdout)
+        self.assertNotIn("no commit named", got.stdout)
+
+    def test_a_pinned_directory_is_rejected_as_one(self):
+        out = self.hop(f"{self.old12}:app/srv", 1, "server.go")
+        self.assertIn(f"✗ REJECTED {self.old12}:app/srv:1 — a directory, not a file", out)
+
+    def test_a_pinned_file_over_the_read_limit_is_not_read(self):
+        huge = os.path.join(self.root, "app/huge/huge.go")
+        os.makedirs(os.path.dirname(huge))
+        with open(huge, "wb") as f:
+            f.truncate((128 << 20) + 1)
+        git(self.root, "add", "app/huge/huge.go")
+        git(self.root, "commit", "-q", "-m", "huge")
+        sha12 = git(self.root, "rev-parse", "HEAD")[:12]
+        os.remove(huge)
+        out = self.hop(f"{sha12}:app/huge/huge.go", 5, "anything")
+        self.assertIn(f"✗ REJECTED {sha12}:app/huge/huge.go:5 — file is 128.0 MB, over the 128 MB read limit", out)
+
+    def test_nothing_is_checked_out_or_created(self):
+        def state():
+            return (git(self.root, "status", "--porcelain"), git(self.root, "worktree", "list"),
+                    git(self.root, "rev-parse", "HEAD"), git(self.root, "stash", "list"),
+                    sorted(os.listdir(self.root)), git(self.root, "branch", "--list"))
+        before = state()
+        self.hop(f"{self.old12}:app/srv/server.go", 5, REQUIRED)
+        tt(["check", self.run_dir, "--full"])
+        tt(["map", self.run_dir, "--json"])
+        self.assertIn("verified=1 · moved=0 · rejected=0", tt(["check", self.run_dir]).stdout)
+        self.assertEqual(state(), before)
+
+
 if __name__ == "__main__":
     unittest.main()

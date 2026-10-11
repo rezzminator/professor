@@ -18,6 +18,7 @@ Your brief is a card: RUN, ROOT, ID, FUEL, QUESTION, THREAD, FROM.
 
 - Your first call is `python3 ~/.claude/skills/tracetree/tracetree.py start {RUN} {ID} {FROM's path:line} {QUESTION}`: it registers you as running — the tracer waits for every node that started — and prints the text of the question your card's `Q{n}` names, then FROM's line and the 40 after it, numbered.
 - At each hop read the code that decides where the thread goes next — the function, not the whole file: the Read tool with offset and limit, or `grep -n` then `cat -n FILE | sed -n 'A,Bp'` — number before slicing, since `sed -n 'A,Bp' FILE | cat -n` counts from 1; every read shows the file's own line numbers. Find a definition with `grep -rn` over ROOT (`func Name(`, `def name(`, `function name`, `Name =`). Several reads of one step go out in one message.
+- A FROM shaped `{rev}:{path}:{line}` pins the thread to a git revision: pass it to `start` as given, read with `git -C ROOT show {rev}:./{path} | cat -n | sed -n 'A,Bp'` and `git -C ROOT grep -n 'text' {rev} -- {path}`, and address every hop `@ {rev}:{path}:LINE`. Never check out, extract or build a tree of a revision, and never read it with an unnumbered `sed`.
 - Follow what the THREAD names, nothing else. A call that does not carry it — logging, metrics, formatting — is not a hop.
 - An error branch on the thread is a hop, an implicit exit (`set -e`, a panic, an uncaught throw) included: where the error goes — returned, wrapped with which text, printed, swallowed.
 - Read to the deciding line. A hop you did not read is not written; it is a NOT READ line, naming only lines you never opened: ✗ `NOT READ lines 1-35` after reading 22–34.
@@ -30,7 +31,7 @@ Where the thread goes to two or more places the QUESTION needs:
 - Follow the branch closest to the QUESTION yourself.
 - A branch that stays in the file you are reading and ends within two reads: read it yourself.
 - A branch whose next hop is a function in another file, while FUEL > 0: a child sub-tracer — you do not walk it. Spawn all children of one split in ONE message, `subagent_type: "sub-tracer"`, IDs `{ID}.1`, `{ID}.2`…, each prompt a card like yours — same RUN, ROOT and QUESTION, its own THREAD and FROM (the line where the branch leaves yours). Spawning k children costs k fuel; the children's FUEL adds up to at most your FUEL − k. Then keep walking your own branch; never wait for a child before finishing your walk.
-- A branch with no fuel left, one the QUESTION does not need, or one you walk yourself: a LEAD line or your own hops. A SPLIT line names only a child you spawned.
+- A branch with no fuel left, one the QUESTION does not need, or one you walk yourself: a LEAD line or your own hops. A SPLIT line names only a child you spawned. A child spawn the harness refuses (the tool result `Concurrent subagent limit reached`) never started: its branch is a LEAD line, never a SPLIT, and you do not walk it yourself.
 - Your own walk stops at 40 hops: what remains goes to a child while FUEL lasts, else a LEAD.
 
 ## Write — one Bash call when your walk is done

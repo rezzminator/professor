@@ -164,9 +164,10 @@ var (
 	linkPattern       = regexp.MustCompile(`\[([^]]+)\]\([^)]*\)`)
 	tagPattern        = regexp.MustCompile(`<[^>]*>`)
 	claudeNamePattern = regexp.MustCompile(`(?i)claude\s+[a-z]+(?:\s+\d+(?:\.\d+)?)?`)
-	// previewPattern is a Claude preview name, "Claude Mythos Preview": the page
-	// publishes no version for it, so it names no model the catalog serves.
-	previewPattern = regexp.MustCompile(`(?i)\bclaude\s+[a-z]+\s+preview\b`)
+	// previewPattern is the word that makes a label a preview ("Claude Mythos
+	// Preview", "Claude Sonnet 4.5 Preview"): wherever a version sits in it, it
+	// names no model the catalog serves.
+	previewPattern = regexp.MustCompile(`(?i)\bpreview\b`)
 	// groupPattern is a whole label of generation ranges ("Claude 4.6 and
 	// earlier models") and preview names, joined by "and" or commas: it names no
 	// model.
@@ -174,7 +175,7 @@ var (
 )
 
 // groupPart is one part of a group label: a generation range or a preview name.
-const groupPart = `claude\s+\d+(?:\.\d+)?\s+and\s+(?:earlier|later)\s+models|claude\s+[a-z]+\s+preview`
+const groupPart = `claude\s+\d+(?:\.\d+)?\s+and\s+(?:earlier|later)\s+models|claude\s+[a-z]+(?:\s+\d+(?:\.\d+)?)?\s+preview`
 
 func parseCatalog(provider string, source Source) (Catalog, error) {
 	catalog := Catalog{
@@ -294,8 +295,11 @@ func groupLabel(provider, label string) bool {
 func publishedIDs(provider, label string) []string {
 	label = tagPattern.ReplaceAllString(linkPattern.ReplaceAllString(label, "$1"), "")
 	if provider == providerAnthropic {
+		if previewPattern.MatchString(label) {
+			return nil
+		}
 		var ids []string
-		for _, name := range claudeNamePattern.FindAllString(previewPattern.ReplaceAllString(label, ""), -1) {
+		for _, name := range claudeNamePattern.FindAllString(label, -1) {
 			ids = append(ids, strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(name), " ", "-"), ".", "-"))
 		}
 		return ids

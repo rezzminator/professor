@@ -237,6 +237,11 @@ func TestGenerationGroupRows(t *testing.T) {
 			`group label "Claude Mythos Preview" in the Model pricing table names no model; catalog incomplete`,
 		},
 		{
+			"a versioned preview name in the Model pricing table fails",
+			strings.Replace(claude, opusRow, "| Claude Sonnet 4.5 Preview ", 1),
+			`group label "Claude Sonnet 4.5 Preview" in the Model pricing table names no model; catalog incomplete`,
+		},
+		{
 			"a preview name beside an unknown label still fails",
 			strings.Replace(claude, bashToolGroupRow, "| Claude Mythos Preview and Unrecognized label ", 1),
 			`unsupported model label "Claude Mythos Preview and Unrecognized label"; catalog incomplete`,
@@ -251,5 +256,23 @@ func TestGenerationGroupRows(t *testing.T) {
 				t.Fatalf("Fetch error = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestPublishedIDsNamesNoModelForAnyPreviewLabel(t *testing.T) {
+	for _, tc := range []struct {
+		label string
+		want  []string
+	}{
+		{"Claude Sonnet 4.5", []string{"claude-sonnet-4-5"}},
+		{"Claude Sonnet 4.5 Preview", nil},
+		{"Claude Sonnet Preview 4.5", nil},
+		{"Claude Mythos Preview", nil},
+		{"claude sonnet 4.5 PREVIEW", nil},
+	} {
+		got := publishedIDs(providerAnthropic, tc.label)
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("publishedIDs(%q) = %v, want %v", tc.label, got, tc.want)
+		}
 	}
 }

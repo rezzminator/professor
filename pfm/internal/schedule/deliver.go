@@ -2,12 +2,15 @@ package schedule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/archive"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -43,15 +46,22 @@ var (
 // doors; a test replaces them.
 type chatDeliverer struct {
 	runtime *pfmconfig.Runtime
+	stdout  io.Writer
 	stderr  io.Writer
 	tmuxDir string
 	open    func(ctx context.Context, sessionID string) (action.OpenResult, error)
 	capture func(ctx context.Context, socketPath, target string) (string, error)
 	inject  func(ctx context.Context, r fleetdb.Schedule, target, message string) error
+
+	// archiveDir is the archive the fire restores a chat from when the index no longer holds it.
+	archiveDir string
 }
 
-func newChatDeliverer(runtime *pfmconfig.Runtime, stderr io.Writer) *chatDeliverer {
-	deliverer := &chatDeliverer{runtime: runtime, stderr: stderr, tmuxDir: runtime.Paths.TmuxDir}
+func newChatDeliverer(runtime *pfmconfig.Runtime, stdout, stderr io.Writer) *chatDeliverer {
+	deliverer := &chatDeliverer{
+		runtime: runtime, stdout: stdout, stderr: stderr,
+		tmuxDir: runtime.Paths.TmuxDir, archiveDir: runtime.Paths.ArchiveDir,
+	}
 	deliverer.open = func(ctx context.Context, sessionID string) (action.OpenResult, error) {
 		return pfmchat.OpenDetachedID(ctx, sessionID, stderr, runtime)
 	}
@@ -65,6 +75,9 @@ func newChatDeliverer(runtime *pfmconfig.Runtime, stderr io.Writer) *chatDeliver
 // Deliver implements Deliverer.
 func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Schedule, message string) error {
 	result, err := deliverer.open(ctx, r.SessionID)
+	if errors.Is(err, pfmchat.ErrNotIndexed) {
+		result, err = deliverer.openArchived(ctx, r.SessionID, err)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve chat %s (%s): %w", r.SessionID, r.Label, err)
 	}
@@ -76,6 +89,44 @@ func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Schedule,
 		target = result.Socket
 	}
 	return deliverer.inject(ctx, r, target, message)
+}
+
+// openArchived answers a chat the index does not hold. A chat the archive
+// manifest holds is put back through the archive's own restore (permanent; killing
+// and archiving it again reverses it) and opened like any dead chat: fleet.Scan runs
+// the index delta before it composes rows, so the next open sees the restored
+// transcript with no wait. A chat in neither place keeps the not-indexed failure, saying so.
+func (deliverer *chatDeliverer) openArchived(
+	ctx context.Context,
+	sessionID string,
+	notIndexed error,
+) (action.OpenResult, error) {
+	rows, err := archive.ReadManifest(deliverer.archiveDir)
+	if err != nil {
+		return action.OpenResult{}, fmt.Errorf("%w; read the archive manifest: %w", notIndexed, err)
+	}
+	archived := false
+	for index := range rows {
+		archived = archived || strings.EqualFold(rows[index].ID, sessionID)
+	}
+	if !archived {
+		return action.OpenResult{}, fmt.Errorf("%w; not in the archive either (%s)", notIndexed, deliverer.archiveDir)
+	}
+	if _, err := archive.Restore(deliverer.archiveDir, sessionID); err != nil {
+		return action.OpenResult{}, fmt.Errorf("%w; restore archived chat %s: %w", notIndexed, sessionID, err)
+	}
+	if _, err := fmt.Fprintf(deliverer.stdout, "restored archived chat %s\n", sessionID); err != nil {
+		return action.OpenResult{}, fmt.Errorf("report restored archived chat %s: %w", sessionID, err)
+	}
+	result, err := deliverer.open(ctx, sessionID)
+	if err != nil {
+		return action.OpenResult{}, fmt.Errorf(
+			"restored archived chat %s but it still cannot be opened: %w",
+			sessionID,
+			err,
+		)
+	}
+	return result, nil
 }
 
 // awaitComposer polls a revived chat's pane until its composer shows on
@@ -163,7 +214,7 @@ func RunFire(args []string, stdout, stderr io.Writer, runtime *pfmconfig.Runtime
 		return 1
 	}
 	report, fireErr := Fire(
-		ctx, state, newChatDeliverer(&effective, stderr), FireLockPath(effective.Paths), clock.Real.Now(),
+		ctx, state, newChatDeliverer(&effective, stdout, stderr), FireLockPath(effective.Paths), clock.Real.Now(),
 	)
 	code := 0
 	if closeErr := state.Close(); closeErr != nil {

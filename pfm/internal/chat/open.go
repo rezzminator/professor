@@ -145,6 +145,10 @@ func OpenID(
 	return 1
 }
 
+// ErrNotIndexed is OpenDetachedID's answer for an id the fleet scan does not
+// hold: the wrapped text reads `chat "<id>" is not indexed`.
+var ErrNotIndexed = errors.New("not indexed")
+
 // OpenDetachedID opens an indexed chat for a caller that has no terminal to be
 // replaced by an attach — the MCP daemon. It is OpenID's own resolution and
 // preparation over action.Executor.OpenDetached: no K1 eval line, no attach,
@@ -172,7 +176,7 @@ func OpenDetachedID(
 		}
 		return openDetachedResolvedRow(ctx, row, stderr, effective)
 	}
-	return action.OpenResult{}, fmt.Errorf("chat %q is not indexed", id)
+	return action.OpenResult{}, fmt.Errorf("chat %q is %w", id, ErrNotIndexed)
 }
 
 // OpenDetachedTarget opens one already-resolved chat without scanning for its

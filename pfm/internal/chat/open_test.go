@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/archive"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -21,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -644,5 +646,92 @@ func TestOpenPlainGoneDirectory(t *testing.T) {
 	}
 	if len(fake.created) != 1 || fake.created[0].CWD != cwd {
 		t.Fatalf("plain fallback=%#v, want %s", fake.created, cwd)
+	}
+}
+
+// TestOpenDetachedIDOpensAKilledChat pins that a hidden (killed) chat is
+// still in the all view the open door scans: a schedule aimed at it wakes it.
+func TestOpenDetachedIDOpensAKilledChat(t *testing.T) {
+	root := testjail.Fleet(t)
+	const id = "44444444-4444-4444-8444-444444444444"
+	seedClaudeChat(t, root, id)
+	db, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Kill(context.Background(), store.Killed{ID: id, KilledAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	tmux := &fakeOpenTmux{alive: map[string]bool{}}
+	stubOpenExecutor(t, tmux)
+	result, err := OpenDetachedID(context.Background(), id, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("OpenDetachedID(killed chat) error = %v", err)
+	}
+	if result.State != "opened" || len(tmux.created) != 1 {
+		t.Fatalf("result = %#v created = %d, want the killed chat resumed once", result, len(tmux.created))
+	}
+}
+
+// TestOpenDetachedIDNamesAnUnindexedChatWithErrNotIndexed pins the sentinel a
+// caller tells "the scan does not hold this id" by, and the message it keeps.
+func TestOpenDetachedIDNamesAnUnindexedChatWithErrNotIndexed(t *testing.T) {
+	testjail.Fleet(t)
+	_, err := OpenDetachedID(context.Background(), "55555555-5555-4555-8555-555555555555", io.Discard, nil)
+	if !errors.Is(err, ErrNotIndexed) {
+		t.Fatalf("err = %v, want errors.Is ErrNotIndexed", err)
+	}
+	if want := `chat "55555555-5555-4555-8555-555555555555" is not indexed`; err.Error() != want {
+		t.Fatalf("err = %q, want %q", err.Error(), want)
+	}
+}
+
+// archiveKills is the killed set an archive run reads: the one chat it names.
+type archiveKills struct{ id string }
+
+func (kills archiveKills) Killed(context.Context) ([]archive.KilledChat, error) {
+	return []archive.KilledChat{{ID: kills.id, Engine: pfmengine.Claude}}, nil
+}
+
+func (archiveKills) Unkill(context.Context, string) error { return nil }
+
+// TestOpenDetachedIDSeesAnArchivedChatGoneThenRestored pins the open door a
+// schedule fire's restore stands on: an indexed chat, once archived, answers
+// ErrNotIndexed, and the scan after archive.Restore opens it again.
+func TestOpenDetachedIDSeesAnArchivedChatGoneThenRestored(t *testing.T) {
+	root := testjail.Fleet(t)
+	const id = "66666666-6666-4666-8666-666666666666"
+	seedClaudeChat(t, root, id)
+	tmux := &fakeOpenTmux{alive: map[string]bool{}}
+	stubOpenExecutor(t, tmux)
+	ctx := context.Background()
+	if _, found, err := Resolve(ctx, id, io.Discard, nil); err != nil || !found {
+		t.Fatalf("seeded chat resolve found=%v err=%v, want it indexed before the archive", found, err)
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := archive.New(archive.Dependencies{Paths: values, Kills: archiveKills{id: id}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Run(ctx, archive.Options{Apply: true})
+	if err != nil || len(report.Moves) != 1 || !report.Moves[0].Applied {
+		t.Fatalf("archive the chat: report=%+v err=%v", report, err)
+	}
+	if _, err := OpenDetachedID(ctx, id, io.Discard, nil); !errors.Is(err, ErrNotIndexed) {
+		t.Fatalf("OpenDetachedID(archived chat) err = %v, want ErrNotIndexed", err)
+	}
+	if _, err := archive.Restore(values.ArchiveDir, id); err != nil {
+		t.Fatal(err)
+	}
+	result, err := OpenDetachedID(ctx, id, io.Discard, nil)
+	if err != nil || result.State != "opened" || len(tmux.created) != 1 {
+		t.Fatalf("OpenDetachedID(restored chat) = %#v, %v created = %d, want it resumed once",
+			result, err, len(tmux.created))
 	}
 }

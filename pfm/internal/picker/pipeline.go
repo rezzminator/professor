@@ -62,49 +62,6 @@ var (
 	fleetRefreshStaleAfter = ui.RefreshStaleAfter
 )
 
-// refreshCadence is one refresh stream's backoff state. It starts at
-// fleetRefreshInterval and stretches by fleetRefreshGrowth after each pass
-// that nobody interrupted, capped at fleetRefreshParkThreshold, so a picker
-// being driven stays prompt. streamFleetRefreshesWith is what turns
-// "capped" into "stopped" — see the park/poll split there.
-type refreshCadence struct {
-	activity  *ui.ActivityClock
-	lastStamp int64
-	interval  time.Duration
-}
-
-func newRefreshCadence(activity *ui.ActivityClock) *refreshCadence {
-	return &refreshCadence{
-		activity:  activity,
-		lastStamp: activity.StampNS(),
-		interval:  fleetRefreshInterval,
-	}
-}
-
-// next reports how long to wait before the next pass. Any interaction since
-// the previous call snaps the cadence back to fleetRefreshInterval; otherwise
-// it grows, capped at fleetRefreshMaxInterval.
-//
-// A nil clock — every non-interactive caller — never backs off. An absent
-// presence signal is a claim about US, not about the user, and must never be
-// spent as evidence that nobody is there.
-func (cadence *refreshCadence) next() time.Duration {
-	if cadence.activity == nil {
-		return fleetRefreshInterval
-	}
-	if stamp := cadence.activity.StampNS(); stamp != cadence.lastStamp {
-		cadence.lastStamp = stamp
-		cadence.interval = fleetRefreshInterval
-		return cadence.interval
-	}
-	grown := time.Duration(float64(cadence.interval) * fleetRefreshGrowth)
-	if grown > fleetRefreshParkThreshold {
-		grown = fleetRefreshParkThreshold
-	}
-	cadence.interval = grown
-	return cadence.interval
-}
-
 // bufferedWarnings collects gather warnings raised from the background
 // refresh goroutine while an interactive picker owns the terminal (runLS),
 // releasing them to stderr only once flush is called after Pick returns.
@@ -259,88 +216,6 @@ func scanFleetCached(
 	return scanResult{Output: result.Output, Snapshot: snapshot, Paths: result.Env.Paths}, nil
 }
 
-// buildSnapshot is the picker's view of one composed pass: rows, account
-// chrome, and the cosmos over the comms ledger.
-func buildSnapshot(
-	ctx context.Context,
-	environment fleet.Env,
-	request scanRequest,
-	output compose.Output,
-) ui.Snapshot {
-	cosmos := compose.BuildCosmos(output.Rows, nil, environment.NowNS, true)
-	if request.Comms != nil {
-		events, err := request.Comms.CommsSince(
-			ctx,
-			environment.NowNS-int64(compose.CosmosWindow),
-			compose.CosmosEventCap,
-		)
-		if err != nil {
-			cosmos.Err = fmt.Errorf("read comms ledger: %w", err).Error()
-		} else {
-			cosmos = compose.BuildCosmos(output.Rows, events, environment.NowNS, true)
-			if len(events) == compose.CosmosEventCap {
-				cosmos.Warnings = append(cosmos.Warnings, compose.CosmosTruncationWarning)
-			}
-		}
-	}
-	rows := output.Rows
-	scheduleError := ""
-	if request.Schedules != nil {
-		unseen, err := request.Schedules.UnseenScheduleSessionIDs(ctx)
-		if err != nil {
-			scheduleError = fmt.Errorf("read schedule flags: %w", err).Error()
-		} else {
-			// Clone: output.Rows is shared with scanResult.Output.
-			rows = slices.Clone(output.Rows)
-			for index := range rows {
-				if rows[index].ID != "" {
-					rows[index].ScheduleFired = unseen[rows[index].ID]
-				}
-			}
-		}
-	}
-	factsError := ""
-	if request.Facts != nil {
-		var failures []error
-		rows, failures = request.Facts.Enrich(rows, environment.NowNS)
-		if len(failures) > 0 {
-			factsError = fmt.Sprintf("%d unreadable, first: %v", len(failures), failures[0])
-		}
-	}
-	machine := environment.Config
-	cacheByAccount := make(map[int]bool)
-	for _, account := range machine.AccountIDs() {
-		cacheByAccount[account] = machine.EffectiveClaude(account).Cache1H
-	}
-	return ui.Snapshot{
-		Rows:                   rows,
-		ScheduleError:          scheduleError,
-		FactsError:             factsError,
-		View:                   request.View,
-		KilledCount:            output.KilledCount,
-		SuppressedCount:        output.SuppressedCount,
-		PrimaryAccount:         environment.Primary,
-		AccountIDs:             machine.AccountIDs(),
-		AccountEmojis:          machine.AccountEmojis(),
-		CodexPrimaryAccount:    machine.PrimaryCodexAccount(),
-		CodexAccountIDs:        machine.CodexAccountIDs(),
-		CodexAccountEmojis:     machine.CodexAccountEmojis(),
-		OpenCodePrimaryAccount: machine.PrimaryOpenCodeAccount(),
-		OpenCodeAccountIDs:     machine.OpenCodeAccountIDs(),
-		Theme:                  machine.Theme,
-		Home:                   environment.Paths.Home,
-		ProjectDirs:            output.ProjectDirs,
-		DirExists:              isDirectory,
-		Cache1H:                machine.EffectiveClaude(environment.Primary).Cache1H,
-		Cache1HByAccount:       cacheByAccount,
-		NowNS:                  environment.NowNS,
-		InitialQuery:           request.Query,
-		NoSky:                  request.NoSky,
-		CosmosSafe:             resolveCosmosSafe(request.Safe, (paths.OSEnv{}).Get("TERM_PROGRAM")),
-		Cosmos:                 cosmos,
-	}
-}
-
 type indexRunner interface {
 	Run(context.Context, fleetindex.Options) (fleetindex.Counters, error)
 }
@@ -410,90 +285,139 @@ func streamFleetRefreshesWith(
 	// when a stale fleet's passes fail, keys start at most one per bound.
 	// Parked Codex probes are not full passes and leave the stamp alone.
 	lastAttempt := refreshClock.Now()
-	environment, err := fleet.ResolveEnv(request.fleetRequest())
-	if err != nil {
-		writeRefreshError(ctx, stderr, "", err)
-		return
-	}
-	var data fleet.Data
-	if request.View == compose.DefaultView {
-		data, err = fleet.LoadDefaultData(ctx, database)
-	} else {
-		data, err = fleet.LoadData(ctx, database)
-	}
-	if err != nil {
-		writeRefreshError(ctx, stderr, "", err)
-		return
-	}
-	live, err := fleet.Gather(ctx, database, environment, data,
-		request.ReadOnly,
-		warn,
-		stderr,
+	var (
+		// pendingRefresh: a failed publication must be retried even if
+		// reconciliation already committed the binding and therefore reports no
+		// further identity change. It also holds a stream whose first pass failed
+		// out of the park.
+		pendingRefresh bool
+		// failStreak counts consecutive failed passes and retryAt is when the
+		// next retry is due (failureBackoff). A pass that lands resets both.
+		failStreak int
+		retryAt    time.Time
 	)
-	if err != nil {
-		writeRefreshError(ctx, stderr, " gather", err)
-		return
+	// fail is every pass error's one door: stderr for the log, and a failure
+	// snapshot for the picker, whose alt-screen hides stderr. A stream that
+	// only wrote stderr left the TUI showing the last good rows as current. It
+	// reports false when the picker is going away and the stream should stop.
+	fail := func(stage string, err error, at time.Time) bool {
+		if pendingRefresh {
+			// A failed pass (not a published pass the presence probe then could
+			// not watch) schedules its retry: the loop below holds every timer
+			// fire until retryAt, whatever the park poll says.
+			failStreak++
+			retryAt = at.Add(failureBackoff(failStreak))
+		}
+		if !writeRefreshError(ctx, stderr, stage, err) {
+			return false
+		}
+		return sendRefreshFailure(ctx, updates, stage, err, at)
 	}
-	data, err = fleet.EnrichLive(ctx, database, data, live)
-	if err != nil {
-		writeRefreshError(ctx, stderr, " live cache", err)
-		return
-	}
-	if !sendRefresh(ctx, environment, request, data, live, true, updates) {
-		return
-	}
-	movedBinding := false
-	if !request.ReadOnly {
-		movedBinding = fleet.ReconcileCodexPanes(ctx, database, live, environment.Runtime(), warn)
-	}
-
+	var (
+		// lastSent is the last completed pass; presence its fork-free
+		// fingerprint, what a parked poll compares against.
+		lastSent    sentRefresh
+		presence    presenceBaseline
+		environment fleet.Env
+		data        fleet.Data
+		live        gather.Snapshot
+		indexer     indexRunner
+		err         error
+	)
 	newIndexer := dependencies.newIndexer
 	if newIndexer == nil {
 		newIndexer = func(database *store.Store) (indexRunner, error) {
 			return fleetindex.NewWithRoots(database, environment.Paths, environment.Paths.Roots)
 		}
 	}
-	indexer, err := newIndexer(database)
-	if err != nil {
-		writeRefreshError(ctx, stderr, " index", err)
-		return
-	}
-	if _, err := indexer.Run(ctx, fleetindex.Options{
-		PriorityCWD:  environment.CurrentDir,
-		PriorityOnly: true,
-	}); err != nil {
-		writeRefreshError(ctx, stderr, " project index", err)
-		return
-	}
-	data, err = fleet.LoadData(ctx, database)
-	if err != nil {
-		writeRefreshError(ctx, stderr, "", err)
-		return
-	}
-	if movedBinding {
-		// The `live` this pass has been carrying since the gather above was
-		// taken BEFORE fleet.ReconcileCodexPanes moved a binding — its
-		// LiveCodex.RolloutPath still names the thread the pane just left,
-		// so the final snapshot below would show the successor `↻`
-		// (resumable) rather than `●` (live) for this whole pass. Gather and
-		// re-enrich again, the same way the pass started, now that the
-		// reconciled data is what the resolver sees.
+	// firstPass is the picker's opening look. A failure no longer ends the
+	// stream — it is published as a stale marker and the loop below retries on
+	// its cadence, so a transient first-pass error never leaves a picker that
+	// shows its opening rows forever. It reports false only when the stream
+	// must stop (the picker is going away).
+	firstPass := func() (proceed bool) {
+		stop := func(stage string, err error) bool {
+			pendingRefresh = true
+			return fail(stage, err, lastAttempt)
+		}
+		environment, err = fleet.ResolveEnv(request.fleetRequest())
+		if err != nil {
+			return stop("", err)
+		}
+		presence.begin(environment, lastAttempt)
+		if request.View == compose.DefaultView {
+			data, err = fleet.LoadDefaultData(ctx, database)
+		} else {
+			data, err = fleet.LoadData(ctx, database)
+		}
+		if err != nil {
+			return stop("", err)
+		}
 		live, err = fleet.Gather(ctx, database, environment, data,
 			request.ReadOnly,
 			warn,
 			stderr,
 		)
 		if err != nil {
-			writeRefreshError(ctx, stderr, " gather", err)
-			return
+			return stop(" gather", err)
 		}
 		data, err = fleet.EnrichLive(ctx, database, data, live)
 		if err != nil {
-			writeRefreshError(ctx, stderr, " live cache", err)
-			return
+			return stop(" live cache", err)
 		}
+		if _, ok := sendRefresh(ctx, environment, request, data, live, true, updates); !ok {
+			return false
+		}
+		movedBinding := false
+		if !request.ReadOnly {
+			movedBinding = fleet.ReconcileCodexPanes(ctx, database, live, environment.Runtime(), warn)
+		}
+		if indexer, err = newIndexer(database); err != nil {
+			return stop(" index", err)
+		}
+		if _, err = indexer.Run(ctx, fleetindex.Options{
+			PriorityCWD:  environment.CurrentDir,
+			PriorityOnly: true,
+		}); err != nil {
+			return stop(" project index", err)
+		}
+		data, err = fleet.LoadData(ctx, database)
+		if err != nil {
+			return stop("", err)
+		}
+		if movedBinding {
+			// The `live` this pass has been carrying since the gather above was
+			// taken BEFORE fleet.ReconcileCodexPanes moved a binding — its
+			// LiveCodex.RolloutPath still names the thread the pane just left,
+			// so the final snapshot below would show the successor `↻`
+			// (resumable) rather than `●` (live) for this whole pass. Gather and
+			// re-enrich again, the same way the pass started, now that the
+			// reconciled data is what the resolver sees.
+			live, err = fleet.Gather(ctx, database, environment, data,
+				request.ReadOnly,
+				warn,
+				stderr,
+			)
+			if err != nil {
+				return stop(" gather", err)
+			}
+			data, err = fleet.EnrichLive(ctx, database, data, live)
+			if err != nil {
+				return stop(" live cache", err)
+			}
+		}
+		var ok bool
+		if lastSent, ok = sendRefresh(ctx, environment, request, data, live, false, updates); !ok {
+			return false
+		}
+		if err = presence.record(environment, live); err != nil {
+			// The rows just landed, but the parked poll cannot watch them:
+			// the masthead says so instead of letting them read as watched.
+			return fail(" presence", err, lastAttempt)
+		}
+		return true
 	}
-	if !sendRefresh(ctx, environment, request, data, live, false, updates) {
+	if !firstPass() {
 		return
 	}
 
@@ -507,9 +431,6 @@ func streamFleetRefreshesWith(
 	// wakes a full pass to publish the new binding and hidden predecessor.
 	parked := false
 	wake := dependencies.activity.Wake()
-	// A failed publication must be retried even if reconciliation already
-	// committed the binding and therefore reports no further identity change.
-	pendingRefresh := false
 	// parkedRollouts is the FDLinks-observed identity of every live Codex
 	// PID as of the previous parked poll. fleet.ReconcileCodexPanes' observation
 	// step runs a tmux capture-pane over every live Codex pane — the same
@@ -521,15 +442,97 @@ func streamFleetRefreshesWith(
 	// a full pass invalidates it so the next idle probe verifies the binding.
 	var parkedRollouts map[int]fleet.CodexRolloutFingerprint
 	var nextCodexProbe time.Time
+	// codexProbeNeedsPass is the parked Codex identity check: it reports whether
+	// reconciliation moved a binding and so a full pass must publish it.
+	codexProbeNeedsPass := func() bool {
+		if request.ReadOnly || len(live.Codex) == 0 || refreshClock.Now().Before(nextCodexProbe) {
+			return false
+		}
+		nextCodexProbe = refreshClock.Now().Add(fleetRefreshCodexPollInterval)
+		probe := gather.Snapshot{Panes: live.Panes}
+		probe.Codex, err = gather.RefreshCodexHeldRollouts(
+			gather.NewProcFS(environment.Paths.ProcRoot), live.Codex, environment.Paths.Roots[pfmengine.Codex],
+		)
+		if err != nil {
+			warn(fmt.Sprintf("Codex idle identity probe: %v", err))
+		}
+		fingerprints := fleet.CodexRolloutFingerprints(probe.Codex)
+		unchanged := fleet.CodexRolloutFingerprintsEqual(parkedRollouts, fingerprints)
+		if unchanged && fleet.CodexRolloutFingerprintsSkippable(probe.Codex) {
+			// No live Codex PID's FDLinks-observed rollout moved since
+			// the previous poll, AND every one of them already has an
+			// answer procfs alone can stand behind (a held rollout, or a
+			// conflict/error state fleet.ObserveCodexPanes overrides
+			// regardless of pane text) — nothing a capture-pane could
+			// tell reconciliation that procfs has not already settled.
+			// A rollout-LESS Codex process (DetectCodexThreads' normal
+			// shape since Codex 0.146.1 — no open rollout fd at all) is
+			// never skippable: procfs has no opinion for it, so the
+			// pane's own screen is the only signal there is.
+			return false
+		}
+		// A warning can mean the binding was retained for retry. Cache only
+		// a fully verified pass; an unchanged rollout is not proof that
+		// the previous database write succeeded.
+		verified := true
+		changed := fleet.ReconcileCodexPanes(ctx, database, probe, environment.Runtime(), func(message string) {
+			verified = false
+			warn(message)
+		})
+		if verified {
+			parkedRollouts = fingerprints
+		} else {
+			parkedRollouts = nil
+		}
+		return changed
+	}
+	// polls counts parked polls whose presence was unchanged. Every
+	// ceil(fleetRefreshInterval / fleetRefreshParkPollInterval)-th one (6 s at
+	// the defaults) re-reads the rows' working state over the LAST pass's
+	// composed output — a stat per transcript, no tmux and no process scan — so
+	// a chat that goes busy or idle while the picker is parked shows it within
+	// fleetRefreshInterval rounded up to the park poll.
+	polls := 0
+	refreshParkedFacts := func() bool {
+		polls++
+		every := int((fleetRefreshInterval + fleetRefreshParkPollInterval - 1) / fleetRefreshParkPollInterval)
+		// A blind presence probe (no baseline) leaves its stale marker up: a
+		// facts snapshot would clear it while nothing watches the chat set.
+		if request.Facts == nil || !presence.have || polls%max(every, 1) != 0 || !hasLiveRow(lastSent.output.Rows) {
+			return true
+		}
+		reread := environment
+		reread.NowNS = refreshClock.Now().UnixNano()
+		snapshot := buildSnapshot(ctx, reread, request, lastSent.output)
+		if !rowFactsMoved(lastSent.snapshot, snapshot) {
+			return true
+		}
+		if !publishSnapshot(ctx, snapshot, updates) {
+			return false
+		}
+		lastSent.snapshot = snapshot
+		return true
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C():
+			// A failing refresh backs off: the timer (the park poll, 2 s) fires
+			// long before the retry is due, and a full pass per fire would
+			// cost seconds of CPU each for as long as the failure lasts. The
+			// stale marker stays up and its age keeps counting meanwhile.
+			if failStreak > 0 {
+				if wait := retryAt.Sub(refreshClock.Now()); wait > 0 {
+					timer.Reset(wait)
+					continue
+				}
+			}
 		case <-wake:
 			// A keystroke lands here, not on the timer. A fleet refreshed
 			// moments ago is fresh enough; one the backoff left behind is
-			// refreshed now, without waiting out the park poll.
+			// refreshed now, without waiting out the park poll or a failure
+			// backoff: the user is looking at a marked-stale fleet.
 			if refreshClock.Now().Sub(lastAttempt) < fleetRefreshStaleAfter {
 				continue
 			}
@@ -542,46 +545,23 @@ func streamFleetRefreshesWith(
 		next := cadence.next()
 		if parked && next >= fleetRefreshParkThreshold && !pendingRefresh {
 			timer.Reset(fleetRefreshParkPollInterval)
-			if request.ReadOnly || len(live.Codex) == 0 || refreshClock.Now().Before(nextCodexProbe) {
-				continue
+			// The parked poll's question is "did the set of chats change?",
+			// answered with syscalls only (gather.PresenceProbe): a full pass
+			// costs seconds of CPU, but a parked picker that never looked again
+			// showed a fleet frozen at the moment it parked. Moved falls
+			// through to a full pass. The presence probe itself forks and
+			// execs nothing; an unmoved poll then pays only the Codex identity
+			// probe, which with a live Codex pane execs (lsof on macOS, a tmux
+			// capture-pane for a rollout-less Codex) once per
+			// fleetRefreshCodexPollInterval, as it did before the probe.
+			moved, presenceErr := presence.moved(environment, live, refreshClock.Now())
+			if presenceErr != nil {
+				warn(fmt.Sprintf("parked presence probe: %v", presenceErr))
 			}
-			nextCodexProbe = refreshClock.Now().Add(fleetRefreshCodexPollInterval)
-			probe := gather.Snapshot{Panes: live.Panes}
-			probe.Codex, err = gather.RefreshCodexHeldRollouts(
-				gather.NewProcFS(environment.Paths.ProcRoot), live.Codex, environment.Paths.Roots[pfmengine.Codex],
-			)
-			if err != nil {
-				warn(fmt.Sprintf("Codex idle identity probe: %v", err))
-			}
-			fingerprints := fleet.CodexRolloutFingerprints(probe.Codex)
-			unchanged := fleet.CodexRolloutFingerprintsEqual(parkedRollouts, fingerprints)
-			if unchanged && fleet.CodexRolloutFingerprintsSkippable(probe.Codex) {
-				// No live Codex PID's FDLinks-observed rollout moved since
-				// the previous poll, AND every one of them already has an
-				// answer procfs alone can stand behind (a held rollout, or a
-				// conflict/error state fleet.ObserveCodexPanes overrides
-				// regardless of pane text) — nothing a capture-pane could
-				// tell reconciliation that procfs has not already settled.
-				// A rollout-LESS Codex process (DetectCodexThreads' normal
-				// shape since Codex 0.146.1 — no open rollout fd at all) is
-				// never skippable: procfs has no opinion for it, so the
-				// pane's own screen is the only signal there is.
-				continue
-			}
-			// A warning can mean the binding was retained for retry. Cache only
-			// a fully verified pass; an unchanged rollout is not proof that
-			// the previous database write succeeded.
-			verified := true
-			changed := fleet.ReconcileCodexPanes(ctx, database, probe, environment.Runtime(), func(message string) {
-				verified = false
-				warn(message)
-			})
-			if verified {
-				parkedRollouts = fingerprints
-			} else {
-				parkedRollouts = nil
-			}
-			if !changed {
+			if !moved && !codexProbeNeedsPass() {
+				if !refreshParkedFacts() {
+					return
+				}
 				continue
 			}
 		}
@@ -596,16 +576,19 @@ func streamFleetRefreshesWith(
 		lastAttempt = passStart
 		environment, err = fleet.ResolveEnv(request.fleetRequest())
 		if err != nil {
-			writeRefreshError(ctx, stderr, "", err)
+			if !fail("", err, passStart) {
+				return
+			}
 			continue
 		}
+		presence.begin(environment, passStart)
 		if request.View == compose.DefaultView {
 			data, err = fleet.LoadDefaultData(ctx, database)
 		} else {
 			data, err = fleet.LoadData(ctx, database)
 		}
 		if err != nil {
-			if !writeRefreshError(ctx, stderr, "", err) {
+			if !fail("", err, passStart) {
 				return
 			}
 			continue
@@ -616,14 +599,14 @@ func streamFleetRefreshesWith(
 			stderr,
 		)
 		if err != nil {
-			if !writeRefreshError(ctx, stderr, " gather", err) {
+			if !fail(" gather", err, passStart) {
 				return
 			}
 			continue
 		}
 		data, err = fleet.EnrichLive(ctx, database, data, live)
 		if err != nil {
-			if !writeRefreshError(ctx, stderr, " live cache", err) {
+			if !fail(" live cache", err, passStart) {
 				return
 			}
 			continue
@@ -632,21 +615,30 @@ func streamFleetRefreshesWith(
 		if !request.ReadOnly {
 			movedBinding = fleet.ReconcileCodexPanes(ctx, database, live, environment.Runtime(), warn)
 		}
-		if !sendRefresh(ctx, environment, request, data, live, true, updates) {
+		if _, ok := sendRefresh(ctx, environment, request, data, live, true, updates); !ok {
 			return
+		}
+		if indexer == nil {
+			// The first pass failed before it could build the indexer.
+			if indexer, err = newIndexer(database); err != nil {
+				if !fail(" index", err, passStart) {
+					return
+				}
+				continue
+			}
 		}
 		if _, err = indexer.Run(ctx, fleetindex.Options{
 			PriorityCWD:  environment.CurrentDir,
 			PriorityOnly: true,
 		}); err != nil {
-			if !writeRefreshError(ctx, stderr, " index", err) {
+			if !fail(" index", err, passStart) {
 				return
 			}
 			continue
 		}
 		data, err = fleet.LoadData(ctx, database)
 		if err != nil {
-			if !writeRefreshError(ctx, stderr, "", err) {
+			if !fail("", err, passStart) {
 				return
 			}
 			continue
@@ -659,45 +651,34 @@ func streamFleetRefreshesWith(
 			// or the successor renders `↻` until the next tick.
 			live, err = fleet.Gather(ctx, database, environment, data, request.ReadOnly, warn, stderr)
 			if err != nil {
-				if !writeRefreshError(ctx, stderr, " gather", err) {
+				if !fail(" gather", err, passStart) {
 					return
 				}
 				continue
 			}
 			data, err = fleet.EnrichLive(ctx, database, data, live)
 			if err != nil {
-				if !writeRefreshError(ctx, stderr, " live cache", err) {
+				if !fail(" live cache", err, passStart) {
 					return
 				}
 				continue
 			}
 		}
-		if !sendRefresh(ctx, environment, request, data, live, false, updates) {
+		var ok bool
+		if lastSent, ok = sendRefresh(ctx, environment, request, data, live, false, updates); !ok {
 			return
 		}
-		pendingRefresh = false
+		pendingRefresh, failStreak = false, 0
+		if err = presence.record(environment, live); err != nil {
+			// The rows just landed, but the parked poll cannot watch them:
+			// the masthead says so instead of letting them read as watched.
+			if !fail(" presence", err, passStart) {
+				return
+			}
+		}
 		// A full pass can publish while reconciliation reports a retryable
 		// failure. Let the first parked poll verify the binding before caching.
 		parkedRollouts = nil
-	}
-}
-
-func sendRefresh(
-	ctx context.Context,
-	environment fleet.Env,
-	request scanRequest,
-	data fleet.Data,
-	live gather.Snapshot,
-	refreshing bool,
-	updates chan<- ui.Snapshot,
-) bool {
-	snapshot := buildSnapshot(ctx, environment, request, fleet.ComposeFleet(environment, request.View, data, live))
-	snapshot.Refreshing = refreshing
-	select {
-	case updates <- snapshot:
-		return true
-	case <-ctx.Done():
-		return false
 	}
 }
 

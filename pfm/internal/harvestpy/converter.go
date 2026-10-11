@@ -129,7 +129,12 @@ type Request struct {
 	Path   string `json:"path"`
 	Kind   string `json:"kind"`
 	Source string `json:"source,omitempty"`
-	OCR    bool   `json:"ocr,omitempty"`
+	// BaseURL is the address the document was finally fetched from, after
+	// every redirect (harvest.BaseURLFrom): the base its relative links and
+	// image sources resolve against, unless the page names a <base href>.
+	// "" leaves a relative target as the page wrote it.
+	BaseURL string `json:"base_url,omitempty"`
+	OCR     bool   `json:"ocr,omitempty"`
 	// OCRLang is the caller's script for a scan (harvest.OCRLangFrom); ""
 	// lets the document's text layer, /Lang or metadata decide.
 	OCRLang string `json:"ocr_language,omitempty"`

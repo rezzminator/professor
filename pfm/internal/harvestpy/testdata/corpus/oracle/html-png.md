@@ -17,8 +17,8 @@
 - Former editors:
 - Authors:
 - Feedback:
-- [GitHub w3c/png](https://github.com/w3c/png/)([pull requests](https://github.com/w3c/png/pulls/),[new issue](https://github.com/w3c/png/issues/new/choose),[open issues](https://github.com/w3c/png/issues/))
-- [public-png@w3.org](mailto:public-png@w3.org?subject=%5Bpng-3%5D%20YOUR%20TOPIC%20HERE)with subject line `[png-3] … message topic …` ([archives](https://lists.w3.org/Archives/Public/public-png))
+- [GitHub w3c/png](https://github.com/w3c/png/) ([pull requests](https://github.com/w3c/png/pulls/), [new issue](https://github.com/w3c/png/issues/new/choose), [open issues](https://github.com/w3c/png/issues/))
+- [public-png@w3.org](mailto:public-png@w3.org?subject=%5Bpng-3%5D%20YOUR%20TOPIC%20HERE) with subject line `[png-3] … message topic …` ([archives](https://lists.w3.org/Archives/Public/public-png))
 - Errata:
 - [https://www.w3.org/2025/06/REC-PNG-20250624-errata](https://www.w3.org/2025/06/REC-PNG-20250624-errata)
 
@@ -49,7 +49,7 @@ This document is governed by the [03 November 2023 W3C Process Document](https:/
 The design goals for this specification were:
 
 1. Portability: encoding, decoding, and transmission should be software and hardware platform independent.
-2. Completeness: it should be possible to represent [truecolor](#3truecolour),[indexed-color](#3indexedColour), and[greyscale](#dfn-greyscale)images, in each case with the option of transparency, color space information, and ancillary information such as textual comments.
+2. Completeness: it should be possible to represent [truecolor](#3truecolour), [indexed-color](#3indexedColour), and [greyscale](#dfn-greyscale) images, in each case with the option of transparency, color space information, and ancillary information such as textual comments.
 3. Serial encode and decode: it should be possible for datastreams to be generated serially and read serially, allowing the datastream format to be used for on-the-fly generation and display of images across a serial communication channel.
 4. Progressive presentation: it should be possible to transmit datastreams so that an approximation of the whole image can be presented initially, and progressively enhanced as the datastream is received.
 5. Robustness to transmission errors: it should be possible to detect datastream transmission errors reliably.
@@ -69,9 +69,10 @@ For the purposes of this specification the following definitions apply.
 - octet
 - 8-bit binary integer in the range [0, 255] where the most significant bit is bit 7 and the least significant bit is bit 0.
 - byte order
-- ordering of [bytes](#dfn-byte)for multi-byte data values.
+- ordering of [bytes](#dfn-byte) for multi-byte data values.
 - chromaticity
-- pair of *x*and*y*values in the*xyY*space specified at [[COLORIMETRY](#bib-colorimetry)].Note
+- pair of *x* and *y* values in the *xyY* space specified at [[COLORIMETRY](#bib-colorimetry)].
+  Note
   Chromaticity is a measure of the quality of a color regardless of its luminance.
 - composite (verb)
 - form an image by merging a foreground image and a background image, using transparency information to determine where and to what extent the background should be visible. Note
@@ -79,29 +80,29 @@ For the purposes of this specification the following definitions apply.
 - datastream
 - sequence of [bytes](#dfn-byte).
 - deflate
-- member of the [LZ77](#3LZ77)family of compression methods.
+- member of the [LZ77](#3LZ77) family of compression methods.
   SOURCE: [[RFC1951](#bib-rfc1951)]
 - frame
-- For static PNG, the [static image](#dfn-static-image)is considered to be the first (and only) frame. For animated PNG, each image that forms part of the[frame-based animation](#apng-frame-based-animation)sequence is a frame. Thus, for animated PNG, when the static image is not the first frame, the static image is not considered to be a frame.
+- For static PNG, the [static image](#dfn-static-image) is considered to be the first (and only) frame. For animated PNG, each image that forms part of the [frame-based animation](#apng-frame-based-animation) sequence is a frame. Thus, for animated PNG, when the static image is not the first frame, the static image is not considered to be a frame.
 - frame buffer
 - the final digital storage area for the image shown by most types of computer display. Note
   Software causes an image to appear on screen by loading the image into the [frame buffer](#dfn-frame-buffer).
 - fully transparent black
 - pixel where the red, green, blue and alpha components are all equal to zero.
 - gamma value
-- value of the exponent of a [gamma](#dfn-gamma)[transfer function](#dfn-transfer-function).
+- value of the exponent of a [gamma](#dfn-gamma) [transfer function](#dfn-transfer-function).
 - gamma
 - power-law [transfer function](#dfn-transfer-function).
 - high dynamic range (HDR)
-- an image format capable of storing images with a relatively high dynamic range similar to or in excess of the human visual system's instantaneous dynamic range (~12-14 [stops](#dfn-stop)). PNG allows the use of two[HDR](#dfn-hdr)formats,[HLG](#dfn-hlg)and[PQ](#dfn-pq)[[ITU-R-BT.2100](#bib-itu-r-bt.2100)].
+- an image format capable of storing images with a relatively high dynamic range similar to or in excess of the human visual system's instantaneous dynamic range (~12-14 [stops](#dfn-stop)). PNG allows the use of two [HDR](#dfn-hdr) formats, [HLG](#dfn-hlg) and [PQ](#dfn-pq) [[ITU-R-BT.2100](#bib-itu-r-bt.2100)].
 - hybrid log-gamma (HLG)
-- [transfer function](#dfn-transfer-function)defined in [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] Table 5. (A relative scene-referred system.)
+- [transfer function](#dfn-transfer-function) defined in [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] Table 5. (A relative scene-referred system.)
 - full-range image
 - image where reference black and white correspond, respectively, to sample values `0` and `2`.bit depth- 1
 - image data
-- 1-dimensional array of [scanlines](#dfn-scanline)within an image.
+- 1-dimensional array of [scanlines](#dfn-scanline) within an image.
 - interlaced PNG image
-- sequence of [reduced images](#3reducedImage)generated from the[PNG image](#3PNGimage)by[pass extraction](#3passExtraction).
+- sequence of [reduced images](#3reducedImage) generated from the [PNG image](#3PNGimage) by [pass extraction](#3passExtraction).
 - lossless
 - method of data compression that permits reconstruction of the original data exactly, bit-for-bit.
 - luminance
@@ -112,18 +113,19 @@ For the purposes of this specification the following definitions apply.
 - narrow-range image
 - Image where reference black and white do not correspond, respectively, to sample values `0` and `2^(bit depth) - 1`.
 - network byte order
-- [byte order](#dfn-byte-order)in which the most significant byte comes first, then the less significant bytes in descending order of significance (MSB LSB for two-byte integers, MSB B2 B1 LSB for four-byte integers).
+- [byte order](#dfn-byte-order) in which the most significant byte comes first, then the less significant bytes in descending order of significance (MSB LSB for two-byte integers, MSB B2 B1 LSB for four-byte integers).
 - perceptual quantizer (PQ)
-- [transfer function](#dfn-transfer-function)defined in [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] Table 4. (An absolute display-referred system.)Note
+- [transfer function](#dfn-transfer-function) defined in [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] Table 4. (An absolute display-referred system.)
+  Note
   Only RGB may be used in PNG, ICtCp is NOT supported.
 - PNG decoder
-- process or device that reconstructs the [reference image](#3referenceImage)from a[PNG datastream](#3PNGdatastream)and generates a corresponding[delivered image](#3deliveredImage).
+- process or device that reconstructs the [reference image](#3referenceImage) from a [PNG datastream](#3PNGdatastream) and generates a corresponding [delivered image](#3deliveredImage).
 - PNG editor
-- process or device that creates a modification of an existing [PNG datastream](#3PNGdatastream), preserving unmodified ancillary information wherever possible, and obeying the[chunk](#3chunk)ordering rules, even for unknown chunk types.
+- process or device that creates a modification of an existing [PNG datastream](#3PNGdatastream), preserving unmodified ancillary information wherever possible, and obeying the [chunk](#3chunk) ordering rules, even for unknown chunk types.
 - PNG encoder
-- process or device which constructs a [reference image](#3referenceImage)from a[source image](#3sourceImage), and generates a[PNG datastream](#3PNGdatastream)representing the reference image.
+- process or device which constructs a [reference image](#3referenceImage) from a [source image](#3sourceImage), and generates a [PNG datastream](#3PNGdatastream) representing the reference image.
 - PNG file
-- [PNG datastream](#3PNGdatastream)stored as a file.
+- [PNG datastream](#3PNGdatastream) stored as a file.
 - PNG four-byte unsigned integer
 - a four-byte unsigned integer limited to the range 0 to 2^31-1.
   Note
@@ -131,20 +133,21 @@ For the purposes of this specification the following definitions apply.
 - PNG two-byte unsigned integer
 - a two-byte unsigned integer in network byte order.
 - sample
-- intersection of a [channel](#3channel)and a[pixel](#3pixel)in an image.
+- intersection of a [channel](#3channel) and a [pixel](#3pixel) in an image.
 - sample depth
-- number of bits used to represent a [sample](#dfn-sample)value.
+- number of bits used to represent a [sample](#dfn-sample) value.
 - scanline
-- row of [pixels](#3pixel)within an image or[interlaced PNG image](#dfn-interlaced-png-image).
+- row of [pixels](#3pixel) within an image or [interlaced PNG image](#dfn-interlaced-png-image).
 - standard dynamic range (SDR)
-- an image format capable of storing images with a relatively low dynamic range of 5-8 [stops](#dfn-stop). Examples include [[SRGB](#bib-srgb)], [[Display-P3](#bib-display-p3)], [[ITU-R-BT.709](#bib-itu-r-bt.709)].Note
+- an image format capable of storing images with a relatively low dynamic range of 5-8 [stops](#dfn-stop). Examples include [[SRGB](#bib-srgb)], [[Display-P3](#bib-display-p3)], [[ITU-R-BT.709](#bib-itu-r-bt.709)].
+  Note
   Standard dynamic range is independent of the primaries and hence, gamut. Wide color gamut [SDR](#dfn-sdr) formats are supported by PNG.
 - stop
 - a change in scene light luminance of a factor of 2.
 - transfer function
 - function relating image luminance with image samples.
 - white point
-- [chromaticity](#dfn-chromaticity)of a computer display's nominal white value.
+- [chromaticity](#dfn-chromaticity) of a computer display's nominal white value.
 - zlib
 - [deflate](#dfn-deflate)-style compression method.
   SOURCE: [[rfc1950](#bib-rfc1950)]
@@ -160,16 +163,16 @@ For the purposes of this specification the following definitions apply.
 - vacuum tube containing one or more electron guns, which emit electron beams that are manipulated to display images on a phosphorescent screen.
 - Electro-Optical Transfer Function
 - EOTF
-- The [transfer function](#dfn-transfer-function)between the electrical or digital domain and light energy. It defines the amount of light emitted by a display for a given input signal.
+- The [transfer function](#dfn-transfer-function) between the electrical or digital domain and light energy. It defines the amount of light emitted by a display for a given input signal.
 - Least Significant Byte
 - LSB
-- Least significant byte of a multi-[byte](#dfn-byte)value.
+- Least significant byte of a multi-[byte](#dfn-byte) value.
 - Most Significant Byte
 - MSB
-- Most significant byte of a multi-[byte](#dfn-byte)value.
+- Most significant byte of a multi-[byte](#dfn-byte) value.
 - Opto-Electrical Transfer Function
 - OETF
-- The [transfer function](#dfn-transfer-function)between light energy and the electrical or digital domain. It defines the amount of light in a scene required to produce a given output signal.
+- The [transfer function](#dfn-transfer-function) between light energy and the electrical or digital domain. It defines the amount of light in a scene required to produce a given output signal.
 
 All PNG images contain a single static image.
 
@@ -182,11 +185,11 @@ This specification specifies the PNG datastream, and places some requirements on
 - Source image
 - The *source image*is the image presented to a PNG encoder.
 - Reference image
-- The [reference image](#3referenceImage), which only exists conceptually, is a rectangular array of rectangular pixels, all having the same width and height, and all containing the same number of unsigned integer samples, either three (red, green, blue) or four (red, green, blue, alpha). The array of all samples of a particular kind (red, green, blue, or alpha) is called a channel. Each channel has a sample depth in the range 1 to 16, which is the number of bits used by every sample in the channel. Different channels may have different sample depths. The red, green, and blue samples determine the intensities of the red, green, and blue components of the pixel's color; if they are all zero, the pixel is black, and if they all have their maximum values (2sampledepth-1), the pixel is white. The alpha sample determines a pixel's degree of opacity, where zero means fully transparent and the maximum value means fully opaque. In a three-channel reference image all pixels are fully opaque. (It is also possible for a four-channel reference image to have all pixels fully opaque; the difference is that the latter has a specific alpha sample depth, whereas the former does not.) Each horizontal row of pixels is called a scanline. Pixels are ordered from left to right within each scanline, and scanlines are ordered from top to bottom. Every reference image can be represented exactly by a[PNG datastream](#3PNGdatastream)and every[PNG datastream](#3PNGdatastream)can be converted into a reference image. A PNG encoder may transform the source image directly into a PNG image, but conceptually it first transforms the source image into a reference image, then transforms the reference image into a PNG image. Depending on the type of source image, the transformation from the source image to a reference image may require the loss of information. That transformation is beyond the scope of this International Standard. The reference image, however, can always be recovered exactly from a PNG datastream.
+- The [reference image](#3referenceImage), which only exists conceptually, is a rectangular array of rectangular pixels, all having the same width and height, and all containing the same number of unsigned integer samples, either three (red, green, blue) or four (red, green, blue, alpha). The array of all samples of a particular kind (red, green, blue, or alpha) is called a channel. Each channel has a sample depth in the range 1 to 16, which is the number of bits used by every sample in the channel. Different channels may have different sample depths. The red, green, and blue samples determine the intensities of the red, green, and blue components of the pixel's color; if they are all zero, the pixel is black, and if they all have their maximum values (2^sampledepth-1), the pixel is white. The alpha sample determines a pixel's degree of opacity, where zero means fully transparent and the maximum value means fully opaque. In a three-channel reference image all pixels are fully opaque. (It is also possible for a four-channel reference image to have all pixels fully opaque; the difference is that the latter has a specific alpha sample depth, whereas the former does not.) Each horizontal row of pixels is called a scanline. Pixels are ordered from left to right within each scanline, and scanlines are ordered from top to bottom. Every reference image can be represented exactly by a [PNG datastream](#3PNGdatastream) and every [PNG datastream](#3PNGdatastream) can be converted into a reference image. A PNG encoder may transform the source image directly into a PNG image, but conceptually it first transforms the source image into a reference image, then transforms the reference image into a PNG image. Depending on the type of source image, the transformation from the source image to a reference image may require the loss of information. That transformation is beyond the scope of this International Standard. The reference image, however, can always be recovered exactly from a PNG datastream.
 - PNG image
-- The *PNG image*is obtained from the reference image by a series of transformations:[alpha separation](#3alphaSeparation),[indexing](#3indexing),[RGB merging](#3RGBmerging),[alpha compaction](#3alphaCompaction), and[sample depth scaling](#3sampleDepthScaling). Five types of PNG image are defined (see[6.1 Color types and values](#6Colour-values)). (If the PNG encoder actually transforms the source image directly into the PNG image, and the source image format is already similar to the PNG image format, the encoder may be able to avoid doing some of these transformations.) Although not all sample depths in the range 1 to 16 bits are explicitly supported in the PNG image, the number of significant bits in each channel of the reference image may be recorded. All channels in the PNG image have the same sample depth. A PNG encoder generates a PNG datastream from the PNG image. A PNG decoder takes the PNG datastream and recreates the PNG image.
+- The *PNG image* is obtained from the reference image by a series of transformations: [alpha separation](#3alphaSeparation), [indexing](#3indexing), [RGB merging](#3RGBmerging), [alpha compaction](#3alphaCompaction), and [sample depth scaling](#3sampleDepthScaling). Five types of PNG image are defined (see [6.1 Color types and values](#6Colour-values)). (If the PNG encoder actually transforms the source image directly into the PNG image, and the source image format is already similar to the PNG image format, the encoder may be able to avoid doing some of these transformations.) Although not all sample depths in the range 1 to 16 bits are explicitly supported in the PNG image, the number of significant bits in each channel of the reference image may be recorded. All channels in the PNG image have the same sample depth. A PNG encoder generates a PNG datastream from the PNG image. A PNG decoder takes the PNG datastream and recreates the PNG image.
 - Delivered image
-- The [delivered image](#3deliveredImage)is constructed from the PNG image obtained by decoding a PNG datastream. No specific format is specified for the[delivered image](#3deliveredImage). A viewer presents an image to the user as close to the appearance of the original source image as it can achieve.
+- The [delivered image](#3deliveredImage) is constructed from the PNG image obtained by decoding a PNG datastream. No specific format is specified for the [delivered image](#3deliveredImage). A viewer presents an image to the user as close to the appearance of the original source image as it can achieve.
 
 The relationships between the four kinds of image are illustrated in [Figure 1](#image-relationship).
 
@@ -197,7 +200,7 @@ The RGB color space in which color samples are situated may be specified in one 
 1. by CICP image format signaling metadata;
 2. by an ICC profile;
 3. by specifying explicitly that the color space is sRGB when the samples conform to this color space;
-4. by specifying a [gamma value](#dfn-gamma-value)and the 1931 CIE*x,y*chromaticities of the red, green, and blue primaries used in the image and the reference[white point](#dfn-white-point).
+4. by specifying a [gamma value](#dfn-gamma-value) and the 1931 CIE *x,y* chromaticities of the red, green, and blue primaries used in the image and the reference [white point](#dfn-white-point).
 
 For high-end applications the first two methods provides the most flexibility and control. The third method enables one particular, but extremely common, color space to be indicated. The fourth method, which was standardized before ICC profiles were widely adopted, enables the exact chromaticities of the RGB data to be specified, along with the [gamma](#dfn-gamma) correction to be applied (see [C. Gamma and chromaticity](#C-GammaAppendix)). However, color-aware applications will prefer one of the first three methods, while color-unaware applications will typically ignore all four methods.
 
@@ -245,13 +248,13 @@ Allowing only a few sample depths reduces the number of cases that decoders have
 The transformation of the reference image results in one of five types of PNG image (see [Figure 6](#possible-pixel-types)) :
 
 - Truecolor with alpha
-- Each [pixel](#3pixel)consists of four[samples](#dfn-sample): red, green, blue and[alpha](#3alpha).
+- Each [pixel](#3pixel) consists of four [samples](#dfn-sample): red, green, blue and [alpha](#3alpha).
 - Greyscale with alpha
-- Each [pixel](#3pixel)consists of two[samples](#dfn-sample): a[grey sample](#3greyscale)and an[alpha](#3alpha)sample.
+- Each [pixel](#3pixel) consists of two [samples](#dfn-sample): a [grey sample](#3greyscale) and an [alpha](#3alpha) sample.
 - Truecolor
-- Each [pixel](#3pixel)consists of a triplet of[samples](#dfn-sample): red, green, blue. An optional alpha channel can be specified as a single triplet of red, green, blue[samples](#dfn-sample):[pixels](#3pixel)of the image whose red, green, blue[samples](#dfn-sample)are identical to the red, green, blue[samples](#dfn-sample)of the alpha channel are fully transparent; others are fully opaque. If the alpha channel is not present, all[pixels](#3pixel)are fully opaque.
+- Each [pixel](#3pixel) consists of a triplet of [samples](#dfn-sample): red, green, blue. An optional alpha channel can be specified as a single triplet of red, green, blue [samples](#dfn-sample): [pixels](#3pixel) of the image whose red, green, blue [samples](#dfn-sample) are identical to the red, green, blue [samples](#dfn-sample) of the alpha channel are fully transparent; others are fully opaque. If the alpha channel is not present, all [pixels](#3pixel) are fully opaque.
 - Greyscale
-- Each pixel consists of a single grey sample, which represents overall [luminance](#dfn-luminance)(on a scale from black to white). An optional alpha channel can be specified as a single[grey sample](#3greyscale):[pixels](#3pixel)of the image whose[grey sample](#3greyscale)is identical to the[grey sample](#3greyscale)of the alpha channel are fully transparent; others are fully opaque. If the alpha channel is not present, all[pixels](#3pixel)are fully opaque.
+- Each pixel consists of a single grey sample, which represents overall [luminance](#dfn-luminance) (on a scale from black to white). An optional alpha channel can be specified as a single [grey sample](#3greyscale): [pixels](#3pixel) of the image whose [grey sample](#3greyscale) is identical to the [grey sample](#3greyscale) of the alpha channel are fully transparent; others are fully opaque. If the alpha channel is not present, all [pixels](#3pixel) are fully opaque.
 - [Indexed-color](#3indexedColour)
 - Each pixel consists of an index into a palette (and into an associated table of alpha values, if present).
 
@@ -314,12 +317,12 @@ Chunk types are four-byte sequences chosen so that they correspond to readable l
 
 The remaining chunk types are termed ancillary chunk types, which encoders may generate and decoders may interpret.
 
-1. Transparency information: [tRNS](#11tRNS)(see[11.3.1 Transparency information](#11transinfo)).
-2. Color space information: [cHRM](#11cHRM),[gAMA](#11gAMA),[iCCP](#11iCCP),[sBIT](#11sBIT),[sRGB](#11sRGB),[cICP](#cICP-chunk),[mDCV](#mDCV-chunk)(see[11.3.2 Color space information](#11addnlcolinfo)).
-3. Textual information: [iTXt](#11iTXt),[tEXt](#11tEXt),[zTXt](#11zTXt)(see[11.3.3 Textual information](#11textinfo)).
-4. Miscellaneous information: [bKGD](#11bKGD),[hIST](#11hIST),[pHYs](#11pHYs),[sPLT](#11sPLT),[eXIf](#eXIf)(see[11.3.4 Miscellaneous information](#11addnlsiinfo)).
-5. Time information: [tIME](#11tIME)(see[11.3.5 Time stamp information](#11timestampinfo)).
-6. Animation information: [acTL](#acTL-chunk),[fcTL](#fcTL-chunk),[fdAT](#fdAT-chunk)(see[11.3.6 Animation information](#animation-information)).
+1. Transparency information: [tRNS](#11tRNS) (see [11.3.1 Transparency information](#11transinfo)).
+2. Color space information: [cHRM](#11cHRM), [gAMA](#11gAMA), [iCCP](#11iCCP), [sBIT](#11sBIT), [sRGB](#11sRGB), [cICP](#cICP-chunk), [mDCV](#mDCV-chunk) (see [11.3.2 Color space information](#11addnlcolinfo)).
+3. Textual information: [iTXt](#11iTXt), [tEXt](#11tEXt), [zTXt](#11zTXt) (see [11.3.3 Textual information](#11textinfo)).
+4. Miscellaneous information: [bKGD](#11bKGD), [hIST](#11hIST), [pHYs](#11pHYs), [sPLT](#11sPLT), [eXIf](#eXIf) (see [11.3.4 Miscellaneous information](#11addnlsiinfo)).
+5. Time information: [tIME](#11tIME) (see [11.3.5 Time stamp information](#11timestampinfo)).
+6. Animation information: [acTL](#acTL-chunk), [fcTL](#fcTL-chunk), [fdAT](#fdAT-chunk) (see [11.3.6 Animation information](#animation-information)).
 
 Animated PNG (APNG) extends the original, static-only PNG format, adding support for [frame](#dfn-frame)-based animated images. It is intended to be a replacement for simple animated images that have traditionally used the GIF format [[GIF](#bib-gif)], while adding support for 24-bit images and 8-bit transparency, which GIF lacks.
 
@@ -548,10 +551,10 @@ Sample values are not necessarily proportional to light intensity; the [gAMA](#1
 
 In a PNG datastream transparency may be represented in one of four ways, depending on the PNG image type (see [4.4.1 Alpha separation](#4Concepts.Implied-alpha) and [4.4.4 Alpha compaction](#4Concepts.Alpha-indexing)).
 
-1. [Truecolor with alpha](#dfn-truecolor-with-alpha),[greyscale with alpha](#dfn-greyscale-with-alpha): an alpha channel is part of the image array.
-2. [truecolor](#3truecolour),[greyscale](#dfn-greyscale): A[tRNS](#11tRNS)chunk contains a single pixel value distinguishing the fully transparent pixels from the fully opaque pixels.
-3. [Indexed-color](#3indexedColour): A[tRNS](#11tRNS)chunk contains the alpha table that associates an alpha sample with each palette entry.
-4. [truecolor](#3truecolour),[greyscale](#dfn-greyscale),[indexed-color](#3indexedColour): there is no[tRNS](#11tRNS)chunk present and all pixels are fully opaque.
+1. [Truecolor with alpha](#dfn-truecolor-with-alpha), [greyscale with alpha](#dfn-greyscale-with-alpha): an alpha channel is part of the image array.
+2. [truecolor](#3truecolour), [greyscale](#dfn-greyscale): A [tRNS](#11tRNS) chunk contains a single pixel value distinguishing the fully transparent pixels from the fully opaque pixels.
+3. [Indexed-color](#3indexedColour): A [tRNS](#11tRNS) chunk contains the alpha table that associates an alpha sample with each palette entry.
+4. [truecolor](#3truecolour), [greyscale](#dfn-greyscale), [indexed-color](#3indexedColour): there is no [tRNS](#11tRNS) chunk present and all pixels are fully opaque.
 
 An alpha channel included in the image array has 8-bit or 16-bit samples, the same size as the other samples. The alpha sample for each pixel is stored immediately following the greyscale or RGB samples of the pixel. An alpha value of zero represents full transparency, and a value of 2sampledepth - 1 represents full opacity. Intermediate values indicate partially transparent pixels that can be [composited](#dfn-composited) against a background image to yield the delivered image.
 
@@ -627,9 +630,9 @@ Filters may use the original values of the following bytes to generate the new b
 | b | the byte corresponding to x in the previous scanline; |
 | c | the byte corresponding to b in the pixel immediately before the pixel containing b (or the byte immediately before b, when the bit depth is less than 8). |
 
-[Figure 19](#filter-byte-positions) shows the relative positions of the bytes `x`, `a`, `b`, and `c`.
+[Figure 19](#filter-byte-positions) shows the relative positions of the bytes *x*, *a*, *b*, and *c*.
 
-[Filter method](#3filter) 0 defines five basic filter types as listed in [Table 11](#9-table91). `Orig(y)` denotes the original (unfiltered) value of byte `y`. `Filt(y)` denotes the value after a filter type has been applied. `Recon(y)` denotes the value after the corresponding reconstruction function has been applied. The Paeth filter type `PaethPredictor` [[Paeth](#bib-paeth)] is defined below.
+[Filter method](#3filter) 0 defines five basic filter types as listed in [Table 11](#9-table91). `Orig(y)` denotes the original (unfiltered) value of byte *y*. `Filt(y)` denotes the value after a filter type has been applied. `Recon(y)` denotes the value after the corresponding reconstruction function has been applied. The Paeth filter type *PaethPredictor* [[Paeth](#bib-paeth)] is defined below.
 
 [Filter method](#3filter) 0 specifies exactly this set of five filter types and this shall not be extended. This ensures that decoders need not decompress the data to determine whether it contains unsupported filter types: it is sufficient to check the [filter method](#3filter) in [11.2.1 IHDR Image header](#11IHDR).
 
@@ -651,7 +654,7 @@ The sum `Orig(a) + Orig(b)` shall be performed without overflow (using at least 
 
 The Paeth filter type computes a simple linear function of the three neighboring pixels (left, above, upper left), then chooses as predictor the neighboring pixel closest to the computed value. The algorithm used in this specification is an adaptation of the technique due to Alan W. Paeth [[Paeth](#bib-paeth)].
 
-The PaethPredictor function is defined in the code below. The logic of the function and the locations of the bytes `a`, `b`, `c`, and `x` are shown in [Figure 20](#paethpredictor-function). `Pr` is the predictor for byte `x`.
+The PaethPredictor function is defined in the code below. The logic of the function and the locations of the bytes *a*, *b*, *c*, and *x* are shown in [Figure 20](#paethpredictor-function). *Pr* is the predictor for byte *x*.
 
 ```
 p = a + b - c
@@ -817,7 +820,7 @@ The tRNS chunk specifies either alpha values that are associated with palette en
 
 For [color type](#3colourType) 3 (indexed-color), the tRNS chunk contains a series of one-byte alpha values, corresponding to entries in the [PLTE](#11PLTE) chunk. Each entry indicates that pixels of the corresponding palette index shall be treated as having the specified alpha value. Alpha values have the same interpretation as in an 8-bit full alpha channel: 0 is fully transparent, 255 is fully opaque, regardless of image bit depth. The tRNS chunk shall not contain more alpha values than there are palette entries, but a tRNS chunk may contain fewer values than there are palette entries. In this case, the alpha value for all remaining palette entries is assumed to be 255. In the common case in which only palette index 0 need be made transparent, only a one-byte tRNS chunk is needed, and when all palette indices are opaque, the tRNS chunk may be omitted.
 
-For [color types](#3colourType) 0 or 2, two bytes per sample are used regardless of the image bit depth (see [7.1 Integers and byte order](#7Integers-and-byte-order)). Pixels of the specified grey sample value or RGB sample values are treated as transparent (equivalent to alpha value 0); all other pixels are to be treated as fully opaque (alpha value 2bitdepth-1). If the image bit depth is less than 16, the least significant bits are used. Encoders should set the other bits to 0, and decoders must mask the other bits to 0 before the value is used.
+For [color types](#3colourType) 0 or 2, two bytes per sample are used regardless of the image bit depth (see [7.1 Integers and byte order](#7Integers-and-byte-order)). Pixels of the specified grey sample value or RGB sample values are treated as transparent (equivalent to alpha value 0); all other pixels are to be treated as fully opaque (alpha value 2^bitdepth-1). If the image bit depth is less than 16, the least significant bits are used. Encoders should set the other bits to 0, and decoders must mask the other bits to 0 before the value is used.
 
 A tRNS chunk shall not appear for [color types](#3colourType) 4 and 6, since a full alpha channel is already present in those cases.
 
@@ -1452,7 +1455,7 @@ Note that for the first frame, the two blend modes are functionally equivalent d
 The fcTL chunk corresponding to the default image, if it exists, has these restrictions:
 
 - The `x_offset` and `y_offset` fields must be 0.
-- The `width` and `height` fields must equal the corresponding fields from the [IHDR](#11IHDR)chunk.
+- The `width` and `height` fields must equal the corresponding fields from the [IHDR](#11IHDR) chunk.
 
 As noted earlier, the output buffer must be completely initialized to fully transparent black at the beginning of each play. This is to ensure that each play of the animation will be identical. Decoders are free to avoid an explicit clear step as long as the result is guaranteed to be identical. For example, if the default image is included in the animation, and uses a `blend_op` of `APNG_BLEND_OP_SOURCE`, clearing is not necessary because the entire output buffer will be overwritten.
 
@@ -1495,7 +1498,7 @@ PNG encoders capable of full color management will perform more sophisticated ca
 
 A PNG encoder has to determine:
 
-1. what value to write in the [gAMA](#11gAMA)chunk;
+1. what value to write in the [gAMA](#11gAMA) chunk;
 2. how to transform the provided image samples into the values to be written in the PNG datastream.
 
 The value to write in the [gAMA](#11gAMA) chunk is that value which causes a PNG decoder to behave in the desired way. See [13.13 Decoder gamma handling](#13Decoder-gamma-handling).
@@ -1648,11 +1651,11 @@ For images of [color type](#3colourType) 2 ([truecolor](#3truecolour)), it is re
 
 For providing suggested palettes, the [sPLT](#11sPLT) chunk is more flexible than the [PLTE](#11PLTE) chunk in the following ways:
 
-1. With [sPLT](#11sPLT)multiple suggested palettes may be provided. A PNG decoder may choose an appropriate palette based on name or number of entries.
-2. In a PNG datastream of [color type](#3colourType)6 ([truecolor with alpha](#dfn-truecolor-with-alpha)channel), the[PLTE](#11PLTE)chunk represents a palette already[composited](#dfn-composited)against the[bKGD](#11bKGD)color, so it is useful only for display against that background color. The[sPLT](#11sPLT)chunk provides an un-[composited](#dfn-composited)palette, which is useful for display against backgrounds chosen by the PNG decoder.
-3. Since the [sPLT](#11sPLT)chunk is an ancillary chunk, a[PNG editor](#dfn-png-editor)may add or modify suggested palettes without being forced to discard unknown unsafe-to-copy chunks.
-4. Whereas the [sPLT](#11sPLT)chunk is allowed in PNG datastreams for[color types](#3colourType)0, 3, and 4 ([greyscale](#dfn-greyscale)and[indexed-color](#3indexedColour)), the[PLTE](#11PLTE)chunk cannot be used to provide reduced palettes in these cases.
-5. More than 256 entries may appear in the [sPLT](#11sPLT)chunk.
+1. With [sPLT](#11sPLT) multiple suggested palettes may be provided. A PNG decoder may choose an appropriate palette based on name or number of entries.
+2. In a PNG datastream of [color type](#3colourType) 6 ([truecolor with alpha](#dfn-truecolor-with-alpha) channel), the [PLTE](#11PLTE) chunk represents a palette already [composited](#dfn-composited) against the [bKGD](#11bKGD) color, so it is useful only for display against that background color. The [sPLT](#11sPLT) chunk provides an un-[composited](#dfn-composited) palette, which is useful for display against backgrounds chosen by the PNG decoder.
+3. Since the [sPLT](#11sPLT) chunk is an ancillary chunk, a [PNG editor](#dfn-png-editor) may add or modify suggested palettes without being forced to discard unknown unsafe-to-copy chunks.
+4. Whereas the [sPLT](#11sPLT) chunk is allowed in PNG datastreams for [color types](#3colourType) 0, 3, and 4 ([greyscale](#dfn-greyscale) and [indexed-color](#3indexedColour)), the [PLTE](#11PLTE) chunk cannot be used to provide reduced palettes in these cases.
+5. More than 256 entries may appear in the [sPLT](#11sPLT) chunk.
 
 A PNG encoder that uses the [sPLT](#11sPLT) chunk may choose to write a suggested palette represented by [PLTE](#11PLTE) and [hIST](#11hIST) chunks as well, for compatibility with decoders that do not recognize the [sPLT](#11sPLT) chunk.
 
@@ -1692,13 +1695,13 @@ Errors in a PNG datastream will fall into two general classes, transmission erro
 
 Examples of transmission errors are transmission in "text" or "ascii" mode, in which byte codes 13 and/or 10 may be added, removed, or converted throughout the datastream; unexpected termination, in which the datastream is truncated; or a physical error on a storage device, in which one or more blocks (typically 512 bytes each) will have garbled or random values. Some examples of syntax errors are an invalid value for a row filter, an invalid compression method, an invalid chunk length, the absence of a [PLTE](#11PLTE) chunk before the first [IDAT](#11IDAT) chunk in an indexed image, or the presence of multiple [gAMA](#11gAMA) chunks. A PNG decoder should handle errors as follows:
 
-1. Detect errors as early as possible using the PNG signature bytes and CRCs on each chunk. Decoders should verify that all eight bytes of the PNG signature are correct. A decoder can have additional confidence in the datastream's integrity if the next eight bytes begin an [IHDR](#11IHDR)chunk with the correct chunk length. A CRC should be checked before processing the chunk data. Sometimes this is impractical, for example when a streaming PNG decoder is processing a large[IDAT](#11IDAT)chunk. In this case the CRC should be checked when the end of the chunk is reached.
+1. Detect errors as early as possible using the PNG signature bytes and CRCs on each chunk. Decoders should verify that all eight bytes of the PNG signature are correct. A decoder can have additional confidence in the datastream's integrity if the next eight bytes begin an [IHDR](#11IHDR) chunk with the correct chunk length. A CRC should be checked before processing the chunk data. Sometimes this is impractical, for example when a streaming PNG decoder is processing a large [IDAT](#11IDAT) chunk. In this case the CRC should be checked when the end of the chunk is reached.
 2. Recover from an error, if possible; otherwise fail gracefully. Errors that have little or no effect on the processing of the image may be ignored, while those that affect critical data shall be dealt with in a manner appropriate to the application.
 3. Provide helpful messages describing errors, including recoverable errors.
 
 Three classes of PNG chunks are relevant to this philosophy. For the purposes of this classification, an "unknown chunk" is either one whose type was genuinely unknown to the decoder's author, or one that the author chose to treat as unknown, because default handling of that chunk type would be sufficient for the program's purposes. Other chunks are called "known chunks". Given this definition, the three classes are as follows:
 
-1. known chunks, which necessarily includes all of the critical chunks defined in this specification ([IHDR](#11IHDR),[PLTE](#11PLTE),[IDAT](#11IDAT),[IEND](#11IEND))
+1. known chunks, which necessarily includes all of the critical chunks defined in this specification ([IHDR](#11IHDR), [PLTE](#11PLTE), [IDAT](#11IDAT), [IEND](#11IEND))
 2. unknown critical chunks (bit 5 of the first byte of the chunk type is 0)
 3. unknown ancillary chunks (bit 5 of the first byte of the chunk type is 1)
 
@@ -1869,14 +1872,7 @@ where
 
 `MAXINSAMPLE = (2^sampledepth)-1` `MAXOUTSAMPLE = (2^desired_sampledepth)-1`
 
-A slightly less accurate conversion is achieved by simply shifting right by
-
-```
-(sampledepth -
-      desired_sampledepth)
-```
-
-places. For example, to reduce 16-bit samples to 8-bit, the low-order byte can be discarded. In many situations the shift method is sufficiently accurate for display purposes, and it is certainly much faster. (But if [gamma](#dfn-gamma) correction is being done, sample rescaling can be merged into the [gamma](#dfn-gamma) correction lookup table, as is illustrated in [13.13 Decoder gamma handling](#13Decoder-gamma-handling).)
+A slightly less accurate conversion is achieved by simply shifting right by `(sampledepth - desired_sampledepth)` places. For example, to reduce 16-bit samples to 8-bit, the low-order byte can be discarded. In many situations the shift method is sufficiently accurate for display purposes, and it is certainly much faster. (But if [gamma](#dfn-gamma) correction is being done, sample rescaling can be merged into the [gamma](#dfn-gamma) correction lookup table, as is illustrated in [13.13 Decoder gamma handling](#13Decoder-gamma-handling).)
 
 If the decoder needs to scale samples up (for example, if the [frame buffer](#dfn-frame-buffer) has a greater sample depth than the PNG image), it should use linear scaling or left-bit-replication as described in [12.4 Sample depth scaling](#12Sample-depth-scaling).
 
@@ -2046,11 +2042,28 @@ This code is ISO C [[ISO_9899](#bib-iso_9899)], with line numbers added for refe
 
 Variations:
 
-1. If output is to another PNG datastream instead of a [frame buffer](#dfn-frame-buffer), lines 21, 22, 33, and 34 should be changed along the following lines``Also, it becomes necessary to process background pixels when alpha is zero, rather than just skipping pixels. Thus, line 15 will need to be replaced by copies of lines 17-23, but processing background instead of foreground pixel values.`/* * Gamma encode for storage in output datastream. * Convert to integer sample value. */ gamout = pow(comppix, outfile_gamma); outpix[i] = (int) (gamout * out_maxsample + 0.5);`
-2. If the sample depths of the output file, foreground file, and background file are all the same, and the three [gamma values](#dfn-gamma-value)also match, then the no-compositing code in lines 14-23 reduces to copying pixel values from the input file to the output file if alpha is one, or copying pixel values from background to output file if alpha is zero. Since alpha is typically either zero or one for the vast majority of pixels in an image, this is a significant saving. No[gamma](#dfn-gamma)computations are needed for most pixels.
-3. When the sample depths and [gamma values](#dfn-gamma-value)all match, it may appear attractive to skip the[gamma](#dfn-gamma)decoding and encoding (lines 28-31, 33-34) and just perform line 32 using[gamma](#dfn-gamma)-encoded sample values. Although this does not have too bad an effect on image quality, the time savings are small if alpha values of zero and one are treated as special cases as recommended here.
-4. If the original pixel values of the background image are no longer available, only processed [frame buffer](#dfn-frame-buffer)pixels left by display of the background image, then lines 30 and 31 need to extract intensity from the[frame buffer](#dfn-frame-buffer)pixel values using code such as``However, some roundoff error can result, so it is better to have the original background pixels available if at all possible.`/* * Convert frame buffer value into intensity sample. */ gcvideo = (float) fbpix[i] / fb_maxsample; linbg = pow(gcvideo, display_exponent);`
-5. Note that lines 18-22 are performing exactly the same [gamma](#dfn-gamma)computation that is done when no alpha channel is present. If the no-alpha case is handled with a lookup table, the same lookup table can be used here. Lines 28-31 and 33-34 can also be done with (different) lookup tables.
+1. If output is to another PNG datastream instead of a [frame buffer](#dfn-frame-buffer), lines 21, 22, 33, and 34 should be changed along the following lines
+   ```
+   /*
+    * Gamma encode for storage in output datastream.
+    * Convert to integer sample value.
+    */
+   gamout = pow(comppix, outfile_gamma);
+   outpix[i] = (int) (gamout * out_maxsample + 0.5);
+   ```
+   Also, it becomes necessary to process background pixels when alpha is zero, rather than just skipping pixels. Thus, line 15 will need to be replaced by copies of lines 17-23, but processing background instead of foreground pixel values.
+2. If the sample depths of the output file, foreground file, and background file are all the same, and the three [gamma values](#dfn-gamma-value) also match, then the no-compositing code in lines 14-23 reduces to copying pixel values from the input file to the output file if alpha is one, or copying pixel values from background to output file if alpha is zero. Since alpha is typically either zero or one for the vast majority of pixels in an image, this is a significant saving. No [gamma](#dfn-gamma) computations are needed for most pixels.
+3. When the sample depths and [gamma values](#dfn-gamma-value) all match, it may appear attractive to skip the [gamma](#dfn-gamma) decoding and encoding (lines 28-31, 33-34) and just perform line 32 using [gamma](#dfn-gamma)-encoded sample values. Although this does not have too bad an effect on image quality, the time savings are small if alpha values of zero and one are treated as special cases as recommended here.
+4. If the original pixel values of the background image are no longer available, only processed [frame buffer](#dfn-frame-buffer) pixels left by display of the background image, then lines 30 and 31 need to extract intensity from the [frame buffer](#dfn-frame-buffer) pixel values using code such as
+   ```
+   /*
+    * Convert frame buffer value into intensity sample.
+    */
+   gcvideo = (float) fbpix[i] / fb_maxsample;
+   linbg = pow(gcvideo, display_exponent);
+   ```
+   However, some roundoff error can result, so it is better to have the original background pixels available if at all possible.
+5. Note that lines 18-22 are performing exactly the same [gamma](#dfn-gamma) computation that is done when no alpha channel is present. If the no-alpha case is handled with a lookup table, the same lookup table can be used here. Lines 28-31 and 33-34 can also be done with (different) lookup tables.
 6. Integer arithmetic can be used instead of floating point, providing care is taken to maintain sufficient precision throughout.
 
 Note
@@ -2091,15 +2104,15 @@ EXAMPLE Consider a hypothetical new ancillary chunk type that is safe-to-copy an
 
 To prevent this type of problem while allowing for future extension, constraints are placed on both the behavior of [PNG editors](#dfn-png-editor) and the allowed ordering requirements for chunks. The safe-to-copy bit defines the proper handling of unrecognized chunks in a datastream that is being modified.
 
-1. If a chunk's safe-to-copy bit is 1, the chunk may be copied to a modified PNG datastream whether or not the [PNG editor](#dfn-png-editor)recognizes the chunk type, and regardless of the extent of the datastream modifications.
-2. If a chunk's safe-to-copy bit is 0, it indicates that the chunk depends on the [image data](#dfn-image-data). If the program has made**any**changes to**critical**chunks, including addition, modification, deletion, or reordering of critical chunks, then unrecognized unsafe chunks shall**not**be copied to the output PNG datastream. (Of course, if the program**does**recognize the chunk, it can choose to output an appropriately modified version.)
-3. A [PNG editor](#dfn-png-editor)is always allowed to copy all unrecognized ancillary chunks if it has only added, deleted, modified, or reordered**ancillary**chunks. This implies that it is not permissible for ancillary chunks to depend on other ancillary chunks.
-4. [PNG editors](#dfn-png-editor)shall terminate on encountering an unrecognized critical chunk type, because there is no way to be certain that a valid datastream will result from modifying a datastream containing such a chunk. (Simply discarding the chunk is not good enough, because it might have unknown implications for the interpretation of other chunks.) The safe/unsafe mechanism is intended for use with ancillary chunks. The safe-to-copy bit will always be 0 for critical chunks.
+1. If a chunk's safe-to-copy bit is 1, the chunk may be copied to a modified PNG datastream whether or not the [PNG editor](#dfn-png-editor) recognizes the chunk type, and regardless of the extent of the datastream modifications.
+2. If a chunk's safe-to-copy bit is 0, it indicates that the chunk depends on the [image data](#dfn-image-data). If the program has made **any** changes to **critical** chunks, including addition, modification, deletion, or reordering of critical chunks, then unrecognized unsafe chunks shall **not** be copied to the output PNG datastream. (Of course, if the program **does** recognize the chunk, it can choose to output an appropriately modified version.)
+3. A [PNG editor](#dfn-png-editor) is always allowed to copy all unrecognized ancillary chunks if it has only added, deleted, modified, or reordered **ancillary** chunks. This implies that it is not permissible for ancillary chunks to depend on other ancillary chunks.
+4. [PNG editors](#dfn-png-editor) shall terminate on encountering an unrecognized critical chunk type, because there is no way to be certain that a valid datastream will result from modifying a datastream containing such a chunk. (Simply discarding the chunk is not good enough, because it might have unknown implications for the interpretation of other chunks.) The safe/unsafe mechanism is intended for use with ancillary chunks. The safe-to-copy bit will always be 0 for critical chunks.
 
 The rules governing ordering of chunks are as follows.
 
-1. When copying an unknown **unsafe-to-copy**ancillary chunk, a[PNG editor](#dfn-png-editor)shall not move the chunk relative to any critical chunk. It may relocate the chunk freely relative to other ancillary chunks that occur between the same pair of critical chunks. (This is well defined since the editor shall not add, delete, modify, or reorder critical chunks if it is preserving unknown unsafe-to-copy chunks.)
-2. When copying an unknown **safe-to-copy**ancillary chunk, a[PNG editor](#dfn-png-editor)shall not move the chunk from before[IDAT](#11IDAT)to after[IDAT](#11IDAT)or vice versa. (This is well defined because[IDAT](#11IDAT)is always present.) Any other reordering is permitted.
+1. When copying an unknown **unsafe-to-copy** ancillary chunk, a [PNG editor](#dfn-png-editor) shall not move the chunk relative to any critical chunk. It may relocate the chunk freely relative to other ancillary chunks that occur between the same pair of critical chunks. (This is well defined since the editor shall not add, delete, modify, or reorder critical chunks if it is preserving unknown unsafe-to-copy chunks.)
+2. When copying an unknown **safe-to-copy** ancillary chunk, a [PNG editor](#dfn-png-editor) shall not move the chunk from before [IDAT](#11IDAT) to after [IDAT](#11IDAT) or vice versa. (This is well defined because [IDAT](#11IDAT) is always present.) Any other reordering is permitted.
 3. When copying a **known**ancillary chunk type, an editor need only honour the specific chunk ordering rules that exist for that chunk type. However, it may always choose to apply the above general rules instead.
 
 These rules are expressed in terms of copying chunks from an input datastream to an output datastream, but they apply in the obvious way if a PNG datastream is modified in place.
@@ -2144,35 +2157,34 @@ A PNG datastream conforms to this specification if the following conditions are 
 
 1. The PNG datastream contains a PNG signature as the first content (see [5.2 PNG signature](#5PNG-file-signature)).
 2. With respect to the chunk types defined in this International Standard:
-   - the PNG datastream contains as its first chunk, an [IHDR](#11IHDR)chunk, immediately following the PNG signature;
-   - the PNG datastream contains as its last chunk, an [IEND](#11IEND)chunk.
-3. the PNG datastream contains as its first chunk, an
-4. No chunks or other content follow the [IEND](#11IEND)chunk.
-5. All chunks contained therein match the specification of the corresponding chunk types of this specification. The PNG datastream shall obey the relationships among chunk types defined in this specification.
-6. The sequence of chunks in the PNG datastream obeys the ordering relationship specified in this International Standard.
-7. All field values in the PNG datastream obey the relationships specified in this specification producing the structure specified in this specification.
-8. No chunks appear in the PNG datastream other than those specified in this specification or those defined according to the rules for creating new chunk types as defined in this specification.
-9. The PNG datastream is encoded according to the rules of this International Standard.
+   - the PNG datastream contains as its first chunk, an [IHDR](#11IHDR) chunk, immediately following the PNG signature;
+   - the PNG datastream contains as its last chunk, an [IEND](#11IEND) chunk.
+3. No chunks or other content follow the [IEND](#11IEND) chunk.
+4. All chunks contained therein match the specification of the corresponding chunk types of this specification. The PNG datastream shall obey the relationships among chunk types defined in this specification.
+5. The sequence of chunks in the PNG datastream obeys the ordering relationship specified in this International Standard.
+6. All field values in the PNG datastream obey the relationships specified in this specification producing the structure specified in this specification.
+7. No chunks appear in the PNG datastream other than those specified in this specification or those defined according to the rules for creating new chunk types as defined in this specification.
+8. The PNG datastream is encoded according to the rules of this International Standard.
 
 A PNG encoder conforms to this specification if it satisfies the following conditions.
 
 1. All PNG datastreams that are generated by the PNG encoder are conforming PNG datastreams.
 2. When encoding input samples that have a sample depth that cannot be directly represented in PNG, the encoder scales the samples up to the next higher sample depth that is allowed by PNG. The data are scaled in such a way that the high-order bits match the original data.
-3. [Private field values](#dfn-private-field-values)are used when encoding experimental or private definitions of values for any of the method or type fields.
+3. [Private field values](#dfn-private-field-values) are used when encoding experimental or private definitions of values for any of the method or type fields.
 
 A PNG decoder conforms to this specification if it satisfies the following conditions.
 
 1. It is able to read any PNG datastream that conforms to this International Standard, including both public and private chunks whose types may not be recognized.
 2. It supports all the standardized critical chunks, and all the standardized compression, filter, and interlace methods and types in any PNG datastream that conforms to this International Standard.
-3. Unknown chunk types are handled as described in [5.4 Chunk naming conventions](#5Chunk-naming-conventions). An unknown chunk type is**not**treated as an error unless it is a critical chunk.
-4. Unexpected values in fields of known chunks (for example, an unexpected compression method in the [IHDR](#11IHDR)chunk) are treated as errors.
-5. All types of PNG images (indexed-color, [truecolor](#3truecolour),[greyscale](#dfn-greyscale),[truecolor with alpha](#dfn-truecolor-with-alpha), and[greyscale with alpha](#dfn-greyscale-with-alpha)) are processed. For example, decoders which are part of viewers running on indexed-color display hardware shall reduce[truecolor](#3truecolour)images to indexed format for viewing.
+3. Unknown chunk types are handled as described in [5.4 Chunk naming conventions](#5Chunk-naming-conventions). An unknown chunk type is **not** treated as an error unless it is a critical chunk.
+4. Unexpected values in fields of known chunks (for example, an unexpected compression method in the [IHDR](#11IHDR) chunk) are treated as errors.
+5. All types of PNG images (indexed-color, [truecolor](#3truecolour), [greyscale](#dfn-greyscale), [truecolor with alpha](#dfn-truecolor-with-alpha), and [greyscale with alpha](#dfn-greyscale-with-alpha)) are processed. For example, decoders which are part of viewers running on indexed-color display hardware shall reduce [truecolor](#3truecolour) images to indexed format for viewing.
 6. Encountering an unknown chunk in which the ancillary bit is 0 generates an error if the decoder is attempting to extract the image.
 7. A chunk type in which the reserved bit is set is treated as an unknown chunk type.
-8. All valid combinations of bit depth and [color type](#3colourType)as defined in[11.2.1 IHDR Image header](#11IHDR)are supported.
-9. An error is reported if an unrecognized value is encountered in the bit depth, [color type](#3colourType), compression method,[filter method](#3filter), or interlace method bytes of the[IHDR](#11IHDR)chunk.
-10. When processing 16-bit [greyscale](#dfn-greyscale)or[truecolor](#3truecolour)data in the[tRNS](#11tRNS)chunk, both bytes of the sample values are evaluated to determine whether a pixel is transparent.
-11. When processing an image compressed by compression method 0, the decoder assumes no more than that the complete [image data](#dfn-image-data)is represented by a single compressed datastream that is stored in some number of[IDAT](#11IDAT)chunks.
+8. All valid combinations of bit depth and [color type](#3colourType) as defined in [11.2.1 IHDR Image header](#11IHDR) are supported.
+9. An error is reported if an unrecognized value is encountered in the bit depth, [color type](#3colourType), compression method, [filter method](#3filter), or interlace method bytes of the [IHDR](#11IHDR) chunk.
+10. When processing 16-bit [greyscale](#dfn-greyscale) or [truecolor](#3truecolour) data in the [tRNS](#11tRNS) chunk, both bytes of the sample values are evaluated to determine whether a pixel is transparent.
+11. When processing an image compressed by compression method 0, the decoder assumes no more than that the complete [image data](#dfn-image-data) is represented by a single compressed datastream that is stored in some number of [IDAT](#11IDAT) chunks.
 12. No assumptions are made concerning the positioning of any ancillary chunk other than those that are specified by the chunk ordering rules.
 
 A [PNG editor](#dfn-png-editor) conforms to this specification if it satisfies the following conditions.
@@ -2182,7 +2194,7 @@ A [PNG editor](#dfn-png-editor) conforms to this specification if it satisfies t
 3. It is able to encode all chunks that it decodes.
 4. It preserves the ordering of the chunks presented within the rules in [5.6 Chunk ordering](#5ChunkOrdering).
 5. It properly processes the safe-to-copy bit information and preserves unknown chunks when the safe-to-copy rules permit it.
-6. Unless the user specifically permits lossy operations or the editor issues a warning, it preserves all information required to reconstruct the reference image exactly, except that the sample depth of the alpha channel need not be preserved if it contains only zero and maximum values. Operations such as changing the [color type](#3colourType)or rearranging the palette in an[indexed-color](#3indexedColour)datastream are permitted provided that the new datastream losslessly represents the same reference image.
+6. Unless the user specifically permits lossy operations or the editor issues a warning, it preserves all information required to reconstruct the reference image exactly, except that the sample depth of the alpha channel need not be preserved if it contains only zero and maximum values. Operations such as changing the [color type](#3colourType) or rearranging the palette in an [indexed-color](#3indexedColour) datastream are permitted provided that the new datastream losslessly represents the same reference image.
 
 This updates the existing image/png Internet Media type, under the image top level type. This appendix is in conformance with [BCP 13](https://www.rfc-editor.org/info/bcp13) and [W3CRegMedia](https://www.w3.org/2020/01/registering-mediatypes.html).
 
@@ -2204,7 +2216,7 @@ This updates the existing image/png Internet Media type, under the image top lev
 - Interoperability considerations:
 - Network byte order used throughout.
 - Published specification:
-- [Portable Network Graphics (PNG) Specification](https://www.w3.org/TR/PNG/),[https://www.w3.org/TR/PNG/](https://www.w3.org/TR/PNG/)
+- [Portable Network Graphics (PNG) Specification](https://www.w3.org/TR/PNG/), [https://www.w3.org/TR/PNG/](https://www.w3.org/TR/PNG/)
 - Applications which use this media:
 - PNG is widely implemented in all Web browsers, image viewers, and image creation tools
 - Fragment identifier considerations:
@@ -2260,7 +2272,7 @@ This appendix is in conformance with [BCP 13](https://www.rfc-editor.org/info/bc
 - Interoperability considerations:
 - None
 - Published specification:
-- [Portable Network Graphics (PNG) Specification](https://www.w3.org/TR/png/),[https://www.w3.org/TR/png/](https://www.w3.org/TR/png/)
+- [Portable Network Graphics (PNG) Specification](https://www.w3.org/TR/png/), [https://www.w3.org/TR/png/](https://www.w3.org/TR/png/)
 - Applications which use this media:
 - Animated PNG (APNG) is widely implemented in all Web browsers, and is increasingly available in image viewers, and animation and image creation tools
 - Fragment identifier considerations:
@@ -2297,7 +2309,7 @@ The following specifies guidelines for the definition of private chunks:
 1. Do not define new chunks that redefine the meaning of existing chunks or change the interpretation of an existing standardized chunk, e.g., do not add a new chunk to say that RGB and alpha values actually mean CMYK.
 2. Minimize the use of private chunks to aid portability.
 3. Avoid defining chunks that depend on total datastream contents. If such chunks have to be defined, make them critical chunks.
-4. For textual information that is representable in Latin-1 avoid defining a new chunk type. Use a [tEXt](#11tEXt)or[zTXt](#11zTXt)chunk with a suitable keyword to identify the type of information. For textual information that is not representable in Latin-1 but which can be represented in UTF-8, use an[iTXt](#11iTXt)chunk with a suitable keyword.
+4. For textual information that is representable in Latin-1 avoid defining a new chunk type. Use a [tEXt](#11tEXt) or [zTXt](#11zTXt) chunk with a suitable keyword to identify the type of information. For textual information that is not representable in Latin-1 but which can be represented in UTF-8, use an [iTXt](#11iTXt) chunk with a suitable keyword.
 5. Group mutually dependent ancillary information into a single chunk. This avoids the need to introduce chunk ordering relationships.
 6. Avoid defining private critical chunks.
 
@@ -2474,25 +2486,25 @@ A sample implementation in portable C, **libpng**, is available at [`http://www.
 
 - Clarified descriptions of mDCV and cLLi
 - Added note to Security Considerations about potentially malicious data after IEND.
-- Clarified that [cLLI](#cLLI-chunk)is for HDR content
+- Clarified that [cLLI](#cLLI-chunk) is for HDR content
 - Added an informative reference to Smith & Zink "On the Calculation and Usage of HDR Static Content Metadata"
 - Added an informative reference to CTA-861.3-A for static HDR metadata
 - Fixed broken reference to ITU-R BT.2100
 - Updated reference to SMPTE-ST-2067-21
 - Added guidance on calculating MaxCLL and MaxFALL values
-- Added example (live streaming) where [cLLI](#cLLI-chunk)could not be pre-calculated
+- Added example (live streaming) where [cLLI](#cLLI-chunk) could not be pre-calculated
 - Added definitions for stop, SDR, HDR, HLG and PQ
 - Clarified definition of narrow-range
 - Updated ITU-T H Suppl. 19 reference to latest version
 - Added Simon Thompson as an author
 - Mandated current browser handling of out-of-range palette indices
-- Updated "Additional Information" table to add [mDCV](#mDCV-chunk)and[cLLI](#cLLI-chunk).
+- Updated "Additional Information" table to add [mDCV](#mDCV-chunk) and [cLLI](#cLLI-chunk).
 
-- Explained preferable handling of trailing bytes in the final [IDAT](#11IDAT)chunk for encoders and decoders.
-- Linked to open issue on tone-mapping [HDR](#dfn-hdr)[[ITU-R-BT.2100](#bib-itu-r-bt.2100)] images in the presence of[mDCV](#mDCV-chunk).
+- Explained preferable handling of trailing bytes in the final [IDAT](#11IDAT) chunk for encoders and decoders.
+- Linked to open issue on tone-mapping [HDR](#dfn-hdr) [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] images in the presence of [mDCV](#mDCV-chunk).
 - Follow the Encoding Standard on UTF-8 encode and decode.
 - Added definition of a frame.
-- Required the Matrix Coefficients in [cICP](#cICP-chunk)to be zero (RGB data).
+- Required the Matrix Coefficients in [cICP](#cICP-chunk) to be zero (RGB data).
 - Added known Privacy issue with recoverable data that only appears to have been redacted.
 - Improved advice on choosing filters.
 - Added links to color image type definitions.
@@ -2503,25 +2515,25 @@ A sample implementation in portable C, **libpng**, is available at [`http://www.
 - Refactored the terms and definitions, for clarity.
 - Improved definitions of source, reference, and PNG images.
 - Moved concepts from the terms and definitions section to the main prose.
-- Corrected error in [eXIf](#eXIf)chunk, which conflicted with the[chunk ordering](#5ChunkOrdering)section.
-- Simplified [Scope](#1Scope)section to remove redundant detail described elsewhere.
+- Corrected error in [eXIf](#eXIf) chunk, which conflicted with the [chunk ordering](#5ChunkOrdering) section.
+- Simplified [Scope](#1Scope) section to remove redundant detail described elsewhere.
 - Redrew chunk-ordering lattice diagrams to be clearer and more consistent.
-- Added a new chunk, [cLLI](#cLLI-chunk), to describe the Maximum Single-Pixel and Frame-Average Luminance Levels for both static and animated[HDR](#dfn-hdr)[[ITU-R-BT.2100](#bib-itu-r-bt.2100)] PNG images.
+- Added a new chunk, [cLLI](#cLLI-chunk), to describe the Maximum Single-Pixel and Frame-Average Luminance Levels for both static and animated [HDR](#dfn-hdr) [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] PNG images.
 - Updated external links to latest versions, preferring https over http.
-- Specified interoperable handling of extra sample bits, beyond the specified bit depth, in [tRNS](#11tRNS)and[bKGD](#11bKGD)chunks.
-- Added a new chunk, [mDCV](#mDCV-chunk)to describe the color volume of the mastering display used to grade[HDR](#dfn-hdr)[[ITU-R-BT.2100](#bib-itu-r-bt.2100)] content.
+- Specified interoperable handling of extra sample bits, beyond the specified bit depth, in [tRNS](#11tRNS) and [bKGD](#11bKGD) chunks.
+- Added a new chunk, [mDCV](#mDCV-chunk) to describe the color volume of the mastering display used to grade [HDR](#dfn-hdr) [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] content.
 - Used correct Unicode character names.
 - Changed chunk type codes to use hexadecimal, rather than decimal.
 - Described textual chunk processing more clearly.
-- Recommended [iTXt](#11iTXt)for new content.
-- Clarifications on the language tag field of the [iTXt](#11iTXt)chunk, corrected examples to conform to BCP47.
+- Recommended [iTXt](#11iTXt) for new content.
+- Clarifications on the language tag field of the [iTXt](#11iTXt) chunk, corrected examples to conform to BCP47.
 - Updated image/apng registration appendix. APNG MIME type registered with IANA.
 - Converted ACII-art figures to more accessible diagrams.
 
 - The three previously defined, but unofficial, chunks for Animated PNG (APNG) have been added:
-  - [acTL](#acTL-chunk)Animation Control Chunk
-  - [fcTL](#fcTL-chunk)Frame Control Chunk
-  - [fdAT](#fdAT-chunk)Frame Data Chunk
+  - [acTL](#acTL-chunk) Animation Control Chunk
+  - [fcTL](#fcTL-chunk) Frame Control Chunk
+  - [fdAT](#fdAT-chunk) Frame Data Chunk
   This brings the PNG specification into alignment with widely deployed industry practice.
 - Added the [cICP](#cICP-chunk) chunk, Coding-independent code points for video signal type identification, to contain image format metadata defined in [[ITU-T-H.273](#bib-itu-t-h.273)] which enables PNG to contain [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] High Dynamic Range ([HDR](#dfn-hdr)) and Wide Color Gamut (WCG) images.
 - For chunks which define the image color space, the order of precedence is clearly defined, if more than one is present.
@@ -2539,103 +2551,103 @@ A sample implementation in portable C, **libpng**, is available at [`http://www.
 For the list of changes between W3C Recommendation [PNG Specification Version 1.0](https://www.w3.org/TR/REC-png-961001) and [PNG Second Edition](https://www.w3.org/TR/2003/REC-PNG-20031110/), see [PNG Second Edition changelist](https://www.w3.org/TR/2003/REC-PNG-20031110/#F-ChangeList)
 
 - [BCP47]
-- [Tags for Identifying Languages](https://www.rfc-editor.org/rfc/rfc5646). A. Phillips, Ed.; M. Davis, Ed. IETF. September 2009. Best Current Practice. URL:[https://www.rfc-editor.org/rfc/rfc5646](https://www.rfc-editor.org/rfc/rfc5646)
+- [Tags for Identifying Languages](https://www.rfc-editor.org/rfc/rfc5646). A. Phillips, Ed.; M. Davis, Ed. IETF. September 2009. Best Current Practice. URL: [https://www.rfc-editor.org/rfc/rfc5646](https://www.rfc-editor.org/rfc/rfc5646)
 - [CIPA-DC-008]
-- [Exchangeable image file format for digital still cameras: Exif Version 2.32](https://www.cipa.jp/std/documents/download_e.html?DC-008-Translation-2019-E). Camera & Imaging Products Association. 2019-05-17. URL:[https://www.cipa.jp/std/documents/download_e.html?DC-008-Translation-2019-E](https://www.cipa.jp/std/documents/download_e.html?DC-008-Translation-2019-E)
+- [Exchangeable image file format for digital still cameras: Exif Version 2.32](https://www.cipa.jp/std/documents/download_e.html?DC-008-Translation-2019-E). Camera & Imaging Products Association. 2019-05-17. URL: [https://www.cipa.jp/std/documents/download_e.html?DC-008-Translation-2019-E](https://www.cipa.jp/std/documents/download_e.html?DC-008-Translation-2019-E)
 - [COLORIMETRY]
-- [Colorimetry, Fourth Edition. CIE 015:2018](http://www.cie.co.at/publications/colorimetry-4th-edition). CIE. 2018. URL:[http://www.cie.co.at/publications/colorimetry-4th-edition](http://www.cie.co.at/publications/colorimetry-4th-edition)
+- [Colorimetry, Fourth Edition. CIE 015:2018](http://www.cie.co.at/publications/colorimetry-4th-edition). CIE. 2018. URL: [http://www.cie.co.at/publications/colorimetry-4th-edition](http://www.cie.co.at/publications/colorimetry-4th-edition)
 - [Display-P3]
-- [Display P3](https://www.color.org/chardata/rgb/DisplayP3.xalter). Apple, Inc. ICC. 2022-02. URL:[https://www.color.org/chardata/rgb/DisplayP3.xalter](https://www.color.org/chardata/rgb/DisplayP3.xalter)
+- [Display P3](https://www.color.org/chardata/rgb/DisplayP3.xalter). Apple, Inc. ICC. 2022-02. URL: [https://www.color.org/chardata/rgb/DisplayP3.xalter](https://www.color.org/chardata/rgb/DisplayP3.xalter)
 - [ENCODING]
-- [Encoding Standard](https://encoding.spec.whatwg.org/). Anne van Kesteren. WHATWG. Living Standard. URL:[https://encoding.spec.whatwg.org/](https://encoding.spec.whatwg.org/)
+- [Encoding Standard](https://encoding.spec.whatwg.org/). Anne van Kesteren. WHATWG. Living Standard. URL: [https://encoding.spec.whatwg.org/](https://encoding.spec.whatwg.org/)
 - [ICC]
-- [ICC.1:2022 (Profile version 4.4.0.0)](http://www.color.org/specification/ICC.1-2022-05.pdf). International Color Consortium. May 2022. URL:[http://www.color.org/specification/ICC.1-2022-05.pdf](http://www.color.org/specification/ICC.1-2022-05.pdf)
+- [ICC.1:2022 (Profile version 4.4.0.0)](http://www.color.org/specification/ICC.1-2022-05.pdf). International Color Consortium. May 2022. URL: [http://www.color.org/specification/ICC.1-2022-05.pdf](http://www.color.org/specification/ICC.1-2022-05.pdf)
 - [ICC-2]
-- [Specification ICC.2:2019 (Profile version 5.0.0 - iccMAX)](https://www.color.org/specification/ICC.2-2019.pdf). International Color Consortium. 2019. URL:[https://www.color.org/specification/ICC.2-2019.pdf](https://www.color.org/specification/ICC.2-2019.pdf)
+- [Specification ICC.2:2019 (Profile version 5.0.0 - iccMAX)](https://www.color.org/specification/ICC.2-2019.pdf). International Color Consortium. 2019. URL: [https://www.color.org/specification/ICC.2-2019.pdf](https://www.color.org/specification/ICC.2-2019.pdf)
 - [ISO_15076-1]
-- [ISO 15076-1:2010 Image technology colour management — Architecture, profile format and data structure — Part 1: Based on ICC.1:2010](https://www.iso.org/standard/54754.html). ISO. 2010-12. URL:[https://www.iso.org/standard/54754.html](https://www.iso.org/standard/54754.html)
+- [ISO 15076-1:2010 Image technology colour management — Architecture, profile format and data structure — Part 1: Based on ICC.1:2010](https://www.iso.org/standard/54754.html). ISO. 2010-12. URL: [https://www.iso.org/standard/54754.html](https://www.iso.org/standard/54754.html)
 - [ISO_8859-1]
 - ISO/IEC 8859-1:1998, Information technology — 8-bit single-byte coded graphic character sets — Part 1: Latin alphabet No. 1.. ISO. 1998.
 - [ISO_9899]
-- [ISO/IEC 9899:2018 Information technology — Programming languages — C](https://www.iso.org/standard/74528.html). ISO. 2018-6. URL:[https://www.iso.org/standard/74528.html](https://www.iso.org/standard/74528.html)
+- [ISO/IEC 9899:2018 Information technology — Programming languages — C](https://www.iso.org/standard/74528.html). ISO. 2018-6. URL: [https://www.iso.org/standard/74528.html](https://www.iso.org/standard/74528.html)
 - [ISO-3309]
 - ISO/IEC 3309:1993, Information Technology — Telecommunications and information exchange between systems — High-level data link control (HDLC) procedures — Frame structure.. ISO. 1993.
 - [ISO646]
-- [Information technology — ISO 7-bit coded character set for information interchange](https://www.iso.org/standard/4777.html). International Organization for Standardization (ISO). December 1991. Published. URL:[https://www.iso.org/standard/4777.html](https://www.iso.org/standard/4777.html)
+- [Information technology — ISO 7-bit coded character set for information interchange](https://www.iso.org/standard/4777.html). International Organization for Standardization (ISO). December 1991. Published. URL: [https://www.iso.org/standard/4777.html](https://www.iso.org/standard/4777.html)
 - [ITU-R-BT.2100]
-- [ITU-R BT.2100, SERIES BT: BROADCASTING SERVICE (TELEVISION). Image parameter values for high dynamic range television for use in production and international programme exchange](https://www.itu.int/rec/R-REC-BT.2100). ITU. 2018-07. URL:[https://www.itu.int/rec/R-REC-BT.2100](https://www.itu.int/rec/R-REC-BT.2100)
+- [ITU-R BT.2100, SERIES BT: BROADCASTING SERVICE (TELEVISION). Image parameter values for high dynamic range television for use in production and international programme exchange](https://www.itu.int/rec/R-REC-BT.2100). ITU. 2018-07. URL: [https://www.itu.int/rec/R-REC-BT.2100](https://www.itu.int/rec/R-REC-BT.2100)
 - [ITU-R-BT.709]
-- [ITU-R BT.709, SERIES BT: BROADCASTING SERVICE (TELEVISION). Parameter values for the HDTV standards for production and international programme exchange](https://www.itu.int/rec/R-REC-BT.709). ITU. 2015-06. URL:[https://www.itu.int/rec/R-REC-BT.709](https://www.itu.int/rec/R-REC-BT.709)
+- [ITU-R BT.709, SERIES BT: BROADCASTING SERVICE (TELEVISION). Parameter values for the HDTV standards for production and international programme exchange](https://www.itu.int/rec/R-REC-BT.709). ITU. 2015-06. URL: [https://www.itu.int/rec/R-REC-BT.709](https://www.itu.int/rec/R-REC-BT.709)
 - [ITU-T-H.273]
-- [ITU-T H.273, SERIES H: AUDIOVISUAL AND MULTIMEDIA SYSTEMS Infrastructure of audiovisual services – Coding of moving video. Coding-independent code points for video signal type identification](https://www.itu.int/rec/T-REC-H.273). ITU. 2024-07-14. URL:[https://www.itu.int/rec/T-REC-H.273](https://www.itu.int/rec/T-REC-H.273)
+- [ITU-T H.273, SERIES H: AUDIOVISUAL AND MULTIMEDIA SYSTEMS Infrastructure of audiovisual services – Coding of moving video. Coding-independent code points for video signal type identification](https://www.itu.int/rec/T-REC-H.273). ITU. 2024-07-14. URL: [https://www.itu.int/rec/T-REC-H.273](https://www.itu.int/rec/T-REC-H.273)
 - [ITU-T-Series-H-Supplement-19]
-- [Series H: Audio Visual and Multimedia Systems - Usage of video signal type code points](https://www.itu.int/ITU-T/recommendations/rec.aspx?rec=14652). ITU. 2021-04. URL:[https://www.itu.int/ITU-T/recommendations/rec.aspx?rec=14652](https://www.itu.int/ITU-T/recommendations/rec.aspx?rec=14652)
+- [Series H: Audio Visual and Multimedia Systems - Usage of video signal type code points](https://www.itu.int/ITU-T/recommendations/rec.aspx?rec=14652). ITU. 2021-04. URL: [https://www.itu.int/ITU-T/recommendations/rec.aspx?rec=14652](https://www.itu.int/ITU-T/recommendations/rec.aspx?rec=14652)
 - [ITU-T-V.42]
-- [ITU-T V.42, SERIES V: DATA COMMUNICATION OVER THE TELEPHONE NETWORK. Error-correcting procedures for DCEs using asynchronous-to-synchronous conversion](https://www.itu.int/rec/T-REC-V.42-200203-I/en). ITU. 2002-03-29. URL:[https://www.itu.int/rec/T-REC-V.42-200203-I/en](https://www.itu.int/rec/T-REC-V.42-200203-I/en)
+- [ITU-T V.42, SERIES V: DATA COMMUNICATION OVER THE TELEPHONE NETWORK. Error-correcting procedures for DCEs using asynchronous-to-synchronous conversion](https://www.itu.int/rec/T-REC-V.42-200203-I/en). ITU. 2002-03-29. URL: [https://www.itu.int/rec/T-REC-V.42-200203-I/en](https://www.itu.int/rec/T-REC-V.42-200203-I/en)
 - [JPEG]
-- [JPEG File Interchange Format](https://www.w3.org/Graphics/JPEG/jfif3.pdf). Eric Hamilton. C-Cube Microsystems. Milpitas, CA, USA. September 1992. URL:[https://www.w3.org/Graphics/JPEG/jfif3.pdf](https://www.w3.org/Graphics/JPEG/jfif3.pdf)
+- [JPEG File Interchange Format](https://www.w3.org/Graphics/JPEG/jfif3.pdf). Eric Hamilton. C-Cube Microsystems. Milpitas, CA, USA. September 1992. URL: [https://www.w3.org/Graphics/JPEG/jfif3.pdf](https://www.w3.org/Graphics/JPEG/jfif3.pdf)
 - [Paeth]
-- [Image File Compression Made Easy, in Graphics Gems II, pp. 93-100](https://www.sciencedirect.com/science/article/pii/B9780080507545500293). Paeth, A.W. Academic Press. 1991. URL:[https://www.sciencedirect.com/science/article/pii/B9780080507545500293](https://www.sciencedirect.com/science/article/pii/B9780080507545500293)
+- [Image File Compression Made Easy, in Graphics Gems II, pp. 93-100](https://www.sciencedirect.com/science/article/pii/B9780080507545500293). Paeth, A.W. Academic Press. 1991. URL: [https://www.sciencedirect.com/science/article/pii/B9780080507545500293](https://www.sciencedirect.com/science/article/pii/B9780080507545500293)
 - [PNG-EXTENSIONS]
-- [Extensions to the PNG Third Edition Specification, Version 1.6.0](https://w3c.github.io/png/extensions/Overview.html). W3C. 2021. URL:[https://w3c.github.io/png/extensions/Overview.html](https://w3c.github.io/png/extensions/Overview.html)
+- [Extensions to the PNG Third Edition Specification, Version 1.6.0](https://w3c.github.io/png/extensions/Overview.html). W3C. 2021. URL: [https://w3c.github.io/png/extensions/Overview.html](https://w3c.github.io/png/extensions/Overview.html)
 - [rfc1123]
-- [Requirements for Internet Hosts - Application and Support](https://www.rfc-editor.org/rfc/rfc1123). R. Braden, Ed. IETF. October 1989. Internet Standard. URL:[https://www.rfc-editor.org/rfc/rfc1123](https://www.rfc-editor.org/rfc/rfc1123)
+- [Requirements for Internet Hosts - Application and Support](https://www.rfc-editor.org/rfc/rfc1123). R. Braden, Ed. IETF. October 1989. Internet Standard. URL: [https://www.rfc-editor.org/rfc/rfc1123](https://www.rfc-editor.org/rfc/rfc1123)
 - [rfc1950]
-- [ZLIB Compressed Data Format Specification version 3.3](https://www.rfc-editor.org/rfc/rfc1950). P. Deutsch; J-L. Gailly. IETF. May 1996. Informational. URL:[https://www.rfc-editor.org/rfc/rfc1950](https://www.rfc-editor.org/rfc/rfc1950)
+- [ZLIB Compressed Data Format Specification version 3.3](https://www.rfc-editor.org/rfc/rfc1950). P. Deutsch; J-L. Gailly. IETF. May 1996. Informational. URL: [https://www.rfc-editor.org/rfc/rfc1950](https://www.rfc-editor.org/rfc/rfc1950)
 - [RFC1951]
-- [DEFLATE Compressed Data Format Specification version 1.3](https://www.rfc-editor.org/rfc/rfc1951). P. Deutsch. IETF. May 1996. Informational. URL:[https://www.rfc-editor.org/rfc/rfc1951](https://www.rfc-editor.org/rfc/rfc1951)
+- [DEFLATE Compressed Data Format Specification version 1.3](https://www.rfc-editor.org/rfc/rfc1951). P. Deutsch. IETF. May 1996. Informational. URL: [https://www.rfc-editor.org/rfc/rfc1951](https://www.rfc-editor.org/rfc/rfc1951)
 - [RFC1952]
-- [GZIP file format specification version 4.3](https://www.rfc-editor.org/rfc/rfc1952). P. Deutsch. IETF. May 1996. Informational. URL:[https://www.rfc-editor.org/rfc/rfc1952](https://www.rfc-editor.org/rfc/rfc1952)
+- [GZIP file format specification version 4.3](https://www.rfc-editor.org/rfc/rfc1952). P. Deutsch. IETF. May 1996. Informational. URL: [https://www.rfc-editor.org/rfc/rfc1952](https://www.rfc-editor.org/rfc/rfc1952)
 - [RFC2119]
-- [Key words for use in RFCs to Indicate Requirement Levels](https://www.rfc-editor.org/rfc/rfc2119). S. Bradner. IETF. March 1997. Best Current Practice. URL:[https://www.rfc-editor.org/rfc/rfc2119](https://www.rfc-editor.org/rfc/rfc2119)
+- [Key words for use in RFCs to Indicate Requirement Levels](https://www.rfc-editor.org/rfc/rfc2119). S. Bradner. IETF. March 1997. Best Current Practice. URL: [https://www.rfc-editor.org/rfc/rfc2119](https://www.rfc-editor.org/rfc/rfc2119)
 - [rfc3339]
-- [Date and Time on the Internet: Timestamps](https://www.rfc-editor.org/rfc/rfc3339). G. Klyne; C. Newman. IETF. July 2002. Proposed Standard. URL:[https://www.rfc-editor.org/rfc/rfc3339](https://www.rfc-editor.org/rfc/rfc3339)
+- [Date and Time on the Internet: Timestamps](https://www.rfc-editor.org/rfc/rfc3339). G. Klyne; C. Newman. IETF. July 2002. Proposed Standard. URL: [https://www.rfc-editor.org/rfc/rfc3339](https://www.rfc-editor.org/rfc/rfc3339)
 - [rfc3629]
-- [UTF-8, a transformation format of ISO 10646](https://www.rfc-editor.org/rfc/rfc3629). F. Yergeau. IETF. November 2003. Internet Standard. URL:[https://www.rfc-editor.org/rfc/rfc3629](https://www.rfc-editor.org/rfc/rfc3629)
+- [UTF-8, a transformation format of ISO 10646](https://www.rfc-editor.org/rfc/rfc3629). F. Yergeau. IETF. November 2003. Internet Standard. URL: [https://www.rfc-editor.org/rfc/rfc3629](https://www.rfc-editor.org/rfc/rfc3629)
 - [RFC8174]
-- [Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words](https://www.rfc-editor.org/rfc/rfc8174). B. Leiba. IETF. May 2017. Best Current Practice. URL:[https://www.rfc-editor.org/rfc/rfc8174](https://www.rfc-editor.org/rfc/rfc8174)
+- [Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words](https://www.rfc-editor.org/rfc/rfc8174). B. Leiba. IETF. May 2017. Best Current Practice. URL: [https://www.rfc-editor.org/rfc/rfc8174](https://www.rfc-editor.org/rfc/rfc8174)
 - [SMPTE-170M]
-- [Television — Composite Analog Video Signal — NTSC for Studio Applications](https://standards.globalspec.com/std/892300/SMPTE%20ST%20170M). Society of Motion Picture and Television Engineers. 2004-11-30. URL:[https://standards.globalspec.com/std/892300/SMPTE%20ST%20170M](https://standards.globalspec.com/std/892300/SMPTE%20ST%20170M)
+- [Television — Composite Analog Video Signal — NTSC for Studio Applications](https://standards.globalspec.com/std/892300/SMPTE%20ST%20170M). Society of Motion Picture and Television Engineers. 2004-11-30. URL: [https://standards.globalspec.com/std/892300/SMPTE%20ST%20170M](https://standards.globalspec.com/std/892300/SMPTE%20ST%20170M)
 - [SMPTE-ST-2086]
-- [Mastering Display Color Volume Metadata Supporting High Luminance and Wide Color Gamut Images](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8353899). Society of Motion Picture and Television Engineers. 27 April 2018. URL:[https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8353899](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8353899)
+- [Mastering Display Color Volume Metadata Supporting High Luminance and Wide Color Gamut Images](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8353899). Society of Motion Picture and Television Engineers. 27 April 2018. URL: [https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8353899](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8353899)
 - [SRGB]
-- [Multimedia systems and equipment - Colour measurement and management - Part 2-1: Colour management - Default RGB colour space - sRGB](https://webstore.iec.ch/publication/6169). IEC. URL:[https://webstore.iec.ch/publication/6169](https://webstore.iec.ch/publication/6169)
+- [Multimedia systems and equipment - Colour measurement and management - Part 2-1: Colour management - Default RGB colour space - sRGB](https://webstore.iec.ch/publication/6169). IEC. URL: [https://webstore.iec.ch/publication/6169](https://webstore.iec.ch/publication/6169)
 - [XMP]
-- [Extensible metadata platform (XMP) specification -- Part 1](https://www.iso.org/standard/75163.html). Adobe Systems Incorporated. ISO/IEC. April 2019. URL:[https://www.iso.org/standard/75163.html](https://www.iso.org/standard/75163.html)
+- [Extensible metadata platform (XMP) specification -- Part 1](https://www.iso.org/standard/75163.html). Adobe Systems Incorporated. ISO/IEC. April 2019. URL: [https://www.iso.org/standard/75163.html](https://www.iso.org/standard/75163.html)
 - [Ziv-Lempel]
-- [A Universal Algorithm for Sequential Data Compression, IEEE Transactions on Information Theory, vol. IT-23, no. 3, pp. 337 - 343](https://ieeexplore.ieee.org/document/1055714). J. Ziv; A. Lempel. IEEE. 1977-05. URL:[https://ieeexplore.ieee.org/document/1055714](https://ieeexplore.ieee.org/document/1055714)
+- [A Universal Algorithm for Sequential Data Compression, IEEE Transactions on Information Theory, vol. IT-23, no. 3, pp. 337 - 343](https://ieeexplore.ieee.org/document/1055714). J. Ziv; A. Lempel. IEEE. 1977-05. URL: [https://ieeexplore.ieee.org/document/1055714](https://ieeexplore.ieee.org/document/1055714)
 
 - [COLOR-FAQ]
-- [Color FAQ](https://poynton.ca/ColorFAQ.html). Poynton, C.2009-10-19. URL:[https://poynton.ca/ColorFAQ.html](https://poynton.ca/ColorFAQ.html)
+- [Color FAQ](https://poynton.ca/ColorFAQ.html). Poynton, C.2009-10-19. URL: [https://poynton.ca/ColorFAQ.html](https://poynton.ca/ColorFAQ.html)
 - [CTA-861.3-A]
-- [HDR Static Metadata Extensions (CTA-861.3-A)](https://shop.cta.tech/products/cta-861-3). Consumer Technology Association. 2015-01. URL:[https://shop.cta.tech/products/cta-861-3](https://shop.cta.tech/products/cta-861-3)
+- [HDR Static Metadata Extensions (CTA-861.3-A)](https://shop.cta.tech/products/cta-861-3). Consumer Technology Association. 2015-01. URL: [https://shop.cta.tech/products/cta-861-3](https://shop.cta.tech/products/cta-861-3)
 - [EBU-R-103]
-- [Video Signal Tolerance in Digital Television Systems](https://tech.ebu.ch/docs/r/r103.pdf). EBU. 2020-05. URL:[https://tech.ebu.ch/docs/r/r103.pdf](https://tech.ebu.ch/docs/r/r103.pdf)
+- [Video Signal Tolerance in Digital Television Systems](https://tech.ebu.ch/docs/r/r103.pdf). EBU. 2020-05. URL: [https://tech.ebu.ch/docs/r/r103.pdf](https://tech.ebu.ch/docs/r/r103.pdf)
 - [GAMMA-FAQ]
-- [Gamma FAQ](https://poynton.ca/GammaFAQ.html). Poynton, C.1998-08-04. URL:[https://poynton.ca/GammaFAQ.html](https://poynton.ca/GammaFAQ.html)
+- [Gamma FAQ](https://poynton.ca/GammaFAQ.html). Poynton, C.1998-08-04. URL: [https://poynton.ca/GammaFAQ.html](https://poynton.ca/GammaFAQ.html)
 - [GIF]
-- [Graphics Interchange Format](https://www.w3.org/Graphics/GIF/spec-gif89a.txt). CompuServe Incorporated. 31 July 1990. URL:[https://www.w3.org/Graphics/GIF/spec-gif89a.txt](https://www.w3.org/Graphics/GIF/spec-gif89a.txt)
+- [Graphics Interchange Format](https://www.w3.org/Graphics/GIF/spec-gif89a.txt). CompuServe Incorporated. 31 July 1990. URL: [https://www.w3.org/Graphics/GIF/spec-gif89a.txt](https://www.w3.org/Graphics/GIF/spec-gif89a.txt)
 - [HDR-Static-Meta]
-- [On the Calculation and Usage of HDR Static Content Metadata](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9508136). Smith, Michael D.; Zink, Michael. Society of Motion Picture and Television Engineers. 2021-08-05. URL:[https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9508136](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9508136)
+- [On the Calculation and Usage of HDR Static Content Metadata](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9508136). Smith, Michael D.; Zink, Michael. Society of Motion Picture and Television Engineers. 2021-08-05. URL: [https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9508136](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9508136)
 - [HDR10]
-- [HDR10 Media Profile](https://en.wikipedia.org/wiki/HDR10). URL:[https://en.wikipedia.org/wiki/HDR10](https://en.wikipedia.org/wiki/HDR10)
+- [HDR10 Media Profile](https://en.wikipedia.org/wiki/HDR10). URL: [https://en.wikipedia.org/wiki/HDR10](https://en.wikipedia.org/wiki/HDR10)
 - [Hill]
-- [Comparative analysis of the quantization of color spaces on the basis of the CIELAB color-difference formula](https://dl.acm.org/doi/10.1145/248210.248212). Hill, B.; Roger, Th.; Vorhagen, F.W.1997-04. URL:[https://dl.acm.org/doi/10.1145/248210.248212](https://dl.acm.org/doi/10.1145/248210.248212)
+- [Comparative analysis of the quantization of color spaces on the basis of the CIELAB color-difference formula](https://dl.acm.org/doi/10.1145/248210.248212). Hill, B.; Roger, Th.; Vorhagen, F.W.1997-04. URL: [https://dl.acm.org/doi/10.1145/248210.248212](https://dl.acm.org/doi/10.1145/248210.248212)
 - [ITU-R-BT.2020]
-- [Parameter values for ultra-high definition television systems for production and international programme exchange](https://www.itu.int/rec/R-REC-BT.2020). ITU. URL:[https://www.itu.int/rec/R-REC-BT.2020](https://www.itu.int/rec/R-REC-BT.2020)
+- [Parameter values for ultra-high definition television systems for production and international programme exchange](https://www.itu.int/rec/R-REC-BT.2020). ITU. URL: [https://www.itu.int/rec/R-REC-BT.2020](https://www.itu.int/rec/R-REC-BT.2020)
 - [ITU-R-BT.2390]
-- [High dynamic range television for production and international programme exchange](https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2390-11-2023-PDF-E.pdf). ITU. URL:[https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2390-11-2023-PDF-E.pdf](https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2390-11-2023-PDF-E.pdf)
+- [High dynamic range television for production and international programme exchange](https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2390-11-2023-PDF-E.pdf). ITU. URL: [https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2390-11-2023-PDF-E.pdf](https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2390-11-2023-PDF-E.pdf)
 - [Kasson]
-- [An Analysis of Selected Computer Interchange Color Spaces](https://dl.acm.org/doi/abs/10.1145/146443.146479). Kasson, J.; W. Plouffe. 1992. URL:[https://dl.acm.org/doi/abs/10.1145/146443.146479](https://dl.acm.org/doi/abs/10.1145/146443.146479)
+- [An Analysis of Selected Computer Interchange Color Spaces](https://dl.acm.org/doi/abs/10.1145/146443.146479). Kasson, J.; W. Plouffe. 1992. URL: [https://dl.acm.org/doi/abs/10.1145/146443.146479](https://dl.acm.org/doi/abs/10.1145/146443.146479)
 - [PostScript]
 - PostScript Language Reference Manual. Adobe Systems Incorporated. Addison-Wesley. 1990.
 - [ROELOFS]
-- [PNG: The Definitive Guide](http://www.libpng.org/pub/png/pngbook.html). Roelofs, G. O'Reilly & Associates Inc. 1999-06-11. URL:[http://www.libpng.org/pub/png/pngbook.html](http://www.libpng.org/pub/png/pngbook.html)
+- [PNG: The Definitive Guide](http://www.libpng.org/pub/png/pngbook.html). Roelofs, G. O'Reilly & Associates Inc. 1999-06-11. URL: [http://www.libpng.org/pub/png/pngbook.html](http://www.libpng.org/pub/png/pngbook.html)
 - [SMPTE-RP-177]
-- [Derivation of Basic Television Color Equations](https://standards.globalspec.com/std/1284890/smpte-rp-177). Society of Motion Picture and Television Engineers. 1 November 1993. URL:[https://standards.globalspec.com/std/1284890/smpte-rp-177](https://standards.globalspec.com/std/1284890/smpte-rp-177)
+- [Derivation of Basic Television Color Equations](https://standards.globalspec.com/std/1284890/smpte-rp-177). Society of Motion Picture and Television Engineers. 1 November 1993. URL: [https://standards.globalspec.com/std/1284890/smpte-rp-177](https://standards.globalspec.com/std/1284890/smpte-rp-177)
 - [SMPTE-RP-2077]
-- [Full-Range Image Mapping](https://doi.org/10.5594/SMPTE.RP2077.2013). Society of Motion Picture and Television Engineers. 2013-01-01. URL:[https://doi.org/10.5594/SMPTE.RP2077.2013](https://doi.org/10.5594/SMPTE.RP2077.2013)
+- [Full-Range Image Mapping](https://doi.org/10.5594/SMPTE.RP2077.2013). Society of Motion Picture and Television Engineers. 2013-01-01. URL: [https://doi.org/10.5594/SMPTE.RP2077.2013](https://doi.org/10.5594/SMPTE.RP2077.2013)
 - [SMPTE-ST-2067-21]
-- [Interoperable Master Format — Application #2E](https://doi.org/10.5594/SMPTE.ST2067-21.2023). Society of Motion Picture and Television Engineers. 2023-02-20. URL:[https://doi.org/10.5594/SMPTE.ST2067-21.2023](https://doi.org/10.5594/SMPTE.ST2067-21.2023)
+- [Interoperable Master Format — Application #2E](https://doi.org/10.5594/SMPTE.ST2067-21.2023). Society of Motion Picture and Television Engineers. 2023-02-20. URL: [https://doi.org/10.5594/SMPTE.ST2067-21.2023](https://doi.org/10.5594/SMPTE.ST2067-21.2023)
 - [TIFF-6.0]
-- [TIFF Revision 6.0](https://www.loc.gov/preservation/digital/formats/fdd/fdd000022.shtml). 3 June 1992. URL:[https://www.loc.gov/preservation/digital/formats/fdd/fdd000022.shtml](https://www.loc.gov/preservation/digital/formats/fdd/fdd000022.shtml)
+- [TIFF Revision 6.0](https://www.loc.gov/preservation/digital/formats/fdd/fdd000022.shtml). 3 June 1992. URL: [https://www.loc.gov/preservation/digital/formats/fdd/fdd000022.shtml](https://www.loc.gov/preservation/digital/formats/fdd/fdd000022.shtml)

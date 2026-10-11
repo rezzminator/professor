@@ -68,9 +68,12 @@ const movedNotePrefix = "> **Note:** "
 // landing on another page, and refused its landing on a page that is no page
 // at all — a login, the site's home — which no rung stores (landing.go).
 // moved names the last rung's landing on the requested page moved permanently
-// (movedPage): a note, never a gap.
+// (movedPage): a note, never a gap. final is the address the last answered
+// rung was finally served from, after every redirect — the base its page's
+// relative links resolve against (BaseURLFrom).
 type carriedGaps struct {
 	api, next string
+	final     string
 	pager     bool
 	stated    func(content string) string
 	wall      string

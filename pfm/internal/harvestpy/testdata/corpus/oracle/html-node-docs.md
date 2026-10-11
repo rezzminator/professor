@@ -75,9 +75,9 @@
 - [Other versions](#alt-docs)
   1. [26.x](https://nodejs.org/docs/latest-v26.x/api/index.html)
   2. [25.x](https://nodejs.org/docs/latest-v25.x/api/index.html)
-  3. [24.x](https://nodejs.org/docs/latest-v24.x/api/index.html)**LTS**
+  3. [24.x **LTS**](https://nodejs.org/docs/latest-v24.x/api/index.html)
   4. [23.x](https://nodejs.org/docs/latest-v23.x/api/index.html)
-  5. [22.x](https://nodejs.org/docs/latest-v22.x/api/index.html)**LTS**
+  5. [22.x **LTS**](https://nodejs.org/docs/latest-v22.x/api/index.html)
   6. [21.x](https://nodejs.org/docs/latest-v21.x/api/index.html)
   7. [20.x](https://nodejs.org/docs/latest-v20.x/api/index.html)
   8. [19.x](https://nodejs.org/docs/latest-v19.x/api/index.html)
@@ -102,7 +102,6 @@
   - [View on single page](all.html)
   - [View as JSON](index.json)
   - [Edit on GitHub](https://github.com/nodejs/node/edit/main/doc/api/index.md)
--
 
 ## Index
 

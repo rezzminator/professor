@@ -699,63 +699,6 @@ func TestFetchBareTitleRefusesToGuess(t *testing.T) {
 	}
 }
 
-func TestLocalizeImagesSkipsOverLimitResponse(t *testing.T) {
-	t.Parallel()
-	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return response(r, http.StatusOK, "image/png", strings.Repeat("x", maxImageBytes+1)), nil
-	})
-	h := mustNew(
-		t,
-		Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}},
-	)
-	markdown, err := h.LocalizeImages(
-		context.Background(),
-		"![figure](https://example.test/too-large.png)",
-		"https://example.test/article",
-	)
-	if err != nil || !strings.Contains(markdown, "too-large.png") {
-		t.Fatalf("localized over-limit image = %q err=%v", markdown, err)
-	}
-}
-
-// TestLocalizeImagesSendsThePageAsReferer: an image localized out of a
-// harvested page was REACHED from that page, so it must carry the page's own
-// URL as Referer — never the Google provenance one, never empty. The fake
-// host is hotlink-protected the real way: it 403s anything but the exact
-// page URL.
-func TestLocalizeImagesSendsThePageAsReferer(t *testing.T) {
-	t.Parallel()
-	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64)
-	const pageURL = "https://example.test/article"
-	var referers []string
-	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		referer := r.Header.Get("Referer")
-		referers = append(referers, referer)
-		if referer != pageURL {
-			return response(r, http.StatusForbidden, "text/html", "<html>hotlinking forbidden</html>"), nil
-		}
-		return response(r, http.StatusOK, "image/png", png), nil
-	})
-	h := mustNew(
-		t,
-		Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}},
-	)
-	markdown, err := h.LocalizeImages(
-		context.Background(),
-		"![figure](https://example.test/figure.png)",
-		pageURL,
-	)
-	if err != nil {
-		t.Fatalf("LocalizeImages error = %v", err)
-	}
-	if strings.Contains(markdown, "https://example.test/figure.png") {
-		t.Fatalf("image was not localized (hotlink wall not passed): markdown=%q referers=%q", markdown, referers)
-	}
-	if len(referers) == 0 || referers[0] != pageURL {
-		t.Fatalf("localized image Referer = %q, want %q", referers, pageURL)
-	}
-}
-
 // TestFetchDirectPDFURLSendsNoReferer covers the harvest.go ladder's own
 // binary-media rungs (line ~273, guess==kindPDF): a PDF URL fetched directly
 // through Fetch (the caller handed the PDF URL itself, no harvested page in

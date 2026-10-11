@@ -48,7 +48,6 @@ An interactive introduction to Go in four sections. The first section covers bas
 
 ```
 	$ go install golang.org/x/website/tour@latest
-
 ```
 
 This will place the `tour` binary in your [GOPATH](/cmd/go/#hdr-GOPATH_and_Modules)'s `bin` directory.
@@ -243,31 +242,31 @@ Guided tours of Go programs.
 
 ### Packages
 
-- [JSON and Go](/blog/json-and-go)- using the[json](/pkg/encoding/json/)package.
-- [Gobs of data](/blog/gobs-of-data)- the design and use of the[gob](/pkg/encoding/gob/)package.
-- [The Laws of Reflection](/blog/laws-of-reflection)- the fundamentals of the[reflect](/pkg/reflect/)package.
-- [The Go image package](/blog/go-image-package)- the fundamentals of the[image](/pkg/image/)package.
-- [The Go image/draw package](/blog/go-imagedraw-package)- the fundamentals of the[image/draw](/pkg/image/draw/)package.
+- [JSON and Go](/blog/json-and-go) - using the [json](/pkg/encoding/json/) package.
+- [Gobs of data](/blog/gobs-of-data) - the design and use of the [gob](/pkg/encoding/gob/) package.
+- [The Laws of Reflection](/blog/laws-of-reflection) - the fundamentals of the [reflect](/pkg/reflect/) package.
+- [The Go image package](/blog/go-image-package) - the fundamentals of the [image](/pkg/image/) package.
+- [The Go image/draw package](/blog/go-imagedraw-package) - the fundamentals of the [image/draw](/pkg/image/draw/) package.
 
 ### Modules
 
-- [Using Go Modules](/blog/using-go-modules)- an introduction to using modules in a simple project.
-- [Migrating to Go Modules](/blog/migrating-to-go-modules)- converting an existing project to use modules.
-- [Publishing Go Modules](/blog/publishing-go-modules)- how to make new versions of modules available to others.
-- [Go Modules: v2 and Beyond](/blog/v2-go-modules)- creating and publishing major versions 2 and higher.
-- [Keeping Your Modules Compatible](/blog/module-compatibility)- how to keep your modules compatible with prior minor/patch versions.
+- [Using Go Modules](/blog/using-go-modules) - an introduction to using modules in a simple project.
+- [Migrating to Go Modules](/blog/migrating-to-go-modules) - converting an existing project to use modules.
+- [Publishing Go Modules](/blog/publishing-go-modules) - how to make new versions of modules available to others.
+- [Go Modules: v2 and Beyond](/blog/v2-go-modules) - creating and publishing major versions 2 and higher.
+- [Keeping Your Modules Compatible](/blog/module-compatibility) - how to keep your modules compatible with prior minor/patch versions.
 
 ### Tools
 
-- [About the Go command](/doc/articles/go_command.html)- why we wrote it, what it is, what it's not, and how to use it.
-- [Go Doc Comments](/doc/comment)- writing good program documentation
+- [About the Go command](/doc/articles/go_command.html) - why we wrote it, what it is, what it's not, and how to use it.
+- [Go Doc Comments](/doc/comment) - writing good program documentation
 - [Debugging Go Code with GDB](/doc/gdb)
-- [Data Race Detector](/doc/articles/race_detector.html)- a manual for the data race detector.
-- [A Quick Guide to Go's Assembler](/doc/asm)- an introduction to the assembler used by Go.
-- [C? Go? Cgo!](/blog/c-go-cgo)- linking against C code with[cgo](/cmd/cgo/).
-- [Profiling Go Programs](/blog/profiling-go-programs)- tools for measuring your code's CPU and memory usage
-- [Introducing the Go Race Detector](/blog/race-detector)- an introduction to the race detector.
-- [Gopls: The language server for Go](/gopls)- getting the most out your editor when working in Go.
+- [Data Race Detector](/doc/articles/race_detector.html) - a manual for the data race detector.
+- [A Quick Guide to Go's Assembler](/doc/asm) - an introduction to the assembler used by Go.
+- [C? Go? Cgo!](/blog/c-go-cgo) - linking against C code with [cgo](/cmd/cgo/).
+- [Profiling Go Programs](/blog/profiling-go-programs) - tools for measuring your code's CPU and memory usage
+- [Introducing the Go Race Detector](/blog/race-detector) - an introduction to the race detector.
+- [Gopls: The language server for Go](/gopls) - getting the most out your editor when working in Go.
 
 ## Wiki
 
@@ -277,8 +276,4 @@ See the [Learn](/wiki/Learn) page at the [Wiki](/wiki) for more Go learning reso
 
 ## Non-English Documentation
 
-See the
-
-[NonEnglish](/wiki/NonEnglish)page at the
-
-[Wiki](/wiki)for localized documentation.
+See the [NonEnglish](/wiki/NonEnglish) page at the [Wiki](/wiki) for localized documentation.

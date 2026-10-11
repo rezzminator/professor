@@ -16,6 +16,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
+// maxImageBytes caps a stored image the published page relocates.
+const maxImageBytes = 10 * 1024 * 1024
+
+// markdownImageRE finds the link of every markdown image: its capture group.
+var markdownImageRE = regexp.MustCompile(`!\[[^\]]*\]\(\s*([^\s)]+)`)
+
 // markdownImageWholeRE is one whole markdown image — alt text, link and an
 // optional title — the span an image that cannot be published is replaced by.
 var markdownImageWholeRE = regexp.MustCompile(`!\[([^\]]*)\]\(\s*([^\s)]+)(?:\s+"[^"]*")?\s*\)`)
@@ -175,9 +181,8 @@ func readPublicImage(canonical string) ([]byte, string, string) {
 
 // publicImageBase is the path a stored document's relative image links
 // resolve against: a local document's own file — its author wrote them against
-// its directory, and the web localizer (pageRelativeLink), whose links are
-// relative to the cached page, never runs for a local source — else the cached
-// artifact. An archive keeps the cached artifact: its members are not files
+// its directory — else the cached artifact (an older entry's page-relative
+// image links resolve against it). An archive keeps the cached artifact: its members are not files
 // beside the archive.
 func publicImageBase(result Result) string {
 	if result.Kind == kindArchive || result.Kind == kindArchiveMember {
@@ -201,7 +206,7 @@ func publicImageBase(result Result) string {
 
 // publicImagePath is the local file raw names, and whether it names one. A
 // remote link — http(s), data:, or protocol-relative (//host/…, which a page
-// may carry past the localizer's image cap) — names none.
+// may carry) — names none.
 func publicImagePath(raw, basePath string) (string, bool) {
 	trimmed := strings.TrimSpace(raw)
 	lower := strings.ToLower(trimmed)

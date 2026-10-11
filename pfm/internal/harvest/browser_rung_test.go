@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 )
 
@@ -552,62 +551,6 @@ func TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage(t *t
 				if strings.Contains(result.Content, foreign) {
 					t.Fatalf("a render that is not the requested page was stored: %.300q", result.Content)
 				}
-			}
-		})
-	}
-}
-
-// TestImagesAreLocalizedOnlyForTheStoredPage: the HTTP rung's page is flagged
-// and kept for the browser rung to beat. Its images are fetched only when it
-// is the page stored — never for a page the browser render then supersedes.
-func TestImagesAreLocalizedOnlyForTheStoredPage(t *testing.T) {
-	t.Parallel()
-	withFigure := func(ctx context.Context, kind, source string, body []byte) (string, error) {
-		converted, err := catalogOrRender(ctx, kind, source, body)
-		if err == nil && strings.Contains(string(body), "<species-card") {
-			converted += "\n\n![Estuary map](/figure.png)"
-		}
-		return converted, err
-	}
-	rendered := "<html><body><main><p>" +
-		strings.Repeat("Species notes on nesting in the dunes and feeding on the mudflats at low tide. ", 12) +
-		"</p></main></body></html>"
-	for _, tc := range []struct {
-		name, render, method string
-		figureFetches        int32
-	}{
-		{"the browser render supersedes the flagged page", rendered, "browser-chrome", 0},
-		{"the flagged page is stored", "<html><body><h1>Prove your humanity</h1></body></html>", rungDirect, 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var figureFetches atomic.Int32
-			site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-				if request.URL.Path == "/figure.png" {
-					figureFetches.Add(1)
-					return response(request, http.StatusOK, "image/png", "\x89PNG\r\n\x1a\nfigure"), nil
-				}
-				return response(request, http.StatusOK, "text/html", catalogPage()), nil
-			})
-			missing := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-				return response(request, http.StatusNotFound, "application/json", `{}`), nil
-			})
-			spy := &browserSpyConverter{html: tc.render, status: http.StatusOK, convertFn: withFigure}
-			h := mustNew(t, Options{
-				CacheDir:    t.TempDir(),
-				Client:      &http.Client{Transport: site},
-				Chrome:      &http.Client{Transport: site},
-				Jina:        &http.Client{Transport: missing},
-				OA:          &http.Client{Transport: missing},
-				Converter:   spy,
-				BrowserRung: browserOn(),
-			})
-			result := h.Fetch(context.Background(), "https://guide.example.test/birds")
-			if result.Error != "" || result.Method != tc.method {
-				t.Fatalf("method=%q rungs=%v error=%q, want %s", result.Method, result.Rungs, result.Error, tc.method)
-			}
-			if got := figureFetches.Load(); got != tc.figureFetches {
-				t.Fatalf("the figure was fetched %d time(s), want %d: images are localized for the stored page only",
-					got, tc.figureFetches)
 			}
 		})
 	}

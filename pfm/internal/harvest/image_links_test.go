@@ -1,8 +1,6 @@
 package harvest
 
 import (
-	"context"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,35 +39,11 @@ func assertNoServerPath(t *testing.T, what, body, cacheDir, dir string) {
 	}
 }
 
-// TestLocalizedImageLinkIsRelativeToTheStoredPage pins A3 defect 3: a
-// localized image is linked relative to the page stored for the source, never
-// by the server's absolute cache path, and the link resolves from that page.
-func TestLocalizedImageLinkIsRelativeToTheStoredPage(t *testing.T) {
-	t.Parallel()
-	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64)
-	const pageURL = "https://example.test/article"
-	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return response(r, http.StatusOK, "image/png", png), nil
-	})
-	cacheDir := t.TempDir()
-	h := mustNew(
-		t,
-		Options{CacheDir: cacheDir, Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}},
-	)
-	markdown, err := h.LocalizeImages(context.Background(), "![figure](https://example.test/figure.png)", pageURL)
-	if err != nil {
-		t.Fatalf("LocalizeImages error = %v", err)
-	}
-	if strings.Contains(markdown, "https://example.test/figure.png") {
-		t.Fatalf("image was not localized: %q", markdown)
-	}
-	assertNoServerPath(t, "stored page", markdown, cacheDir, filepath.Dir(h.cache.path(pageURL, kindHTML)))
-}
-
 // TestPublicResultImageLinksCarryNoServerPath: the published page — the
 // content a remote read returns and the public file it stores — links its
-// images relative to itself, both for a page-relative link the localizer
-// writes and for an absolute one an older cache entry still carries.
+// images relative to itself, both for a page-relative link and for an absolute
+// one an older cache entry still carries (the harvester once localized a
+// page's images into the cache; it no longer does).
 func TestPublicResultImageLinksCarryNoServerPath(t *testing.T) {
 	setHarvestTestJail(t)
 	cacheDir := t.TempDir()
@@ -78,7 +52,7 @@ func TestPublicResultImageLinksCarryNoServerPath(t *testing.T) {
 	relative := writeCachedImage(t, cacheDir, "https://example.test/a.png")
 	absolute := writeCachedImage(t, cacheDir, "https://example.test/b.png")
 	pageDir := filepath.Dir(filepath.Join(cacheDir, CacheKey(source, kindHTML)))
-	link, err := filepath.Rel(pageDir, relative) // the link the localizer stores (pageRelativeLink)
+	link, err := filepath.Rel(pageDir, relative) // the page-relative link an older cache entry stores
 	if err != nil {
 		t.Fatal(err)
 	}

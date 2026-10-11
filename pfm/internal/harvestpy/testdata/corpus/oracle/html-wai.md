@@ -27,8 +27,8 @@ WCAG 2 info:
 - [WCAG 2 at a Glance](/WAI/standards-guidelines/wcag/glance/)
 - [How to Meet WCAG 2 (Quick Reference)](https://www.w3.org/WAI/WCAG22/quickref/)
 - [WCAG 2 Translations](/WAI/standards-guidelines/wcag/translations/)
-- [WCAG 2.2 Standard](https://www.w3.org/TR/WCAG22/),[What’s New in WCAG 2.2](/WAI/standards-guidelines/wcag/new-in-22/)
-- [WCAG 2.1 Standard](https://www.w3.org/TR/WCAG21/),[What’s New in WCAG 2.1](/WAI/standards-guidelines/wcag/new-in-21/)
+- [WCAG 2.2 Standard](https://www.w3.org/TR/WCAG22/), [What’s New in WCAG 2.2](/WAI/standards-guidelines/wcag/new-in-22/)
+- [WCAG 2.1 Standard](https://www.w3.org/TR/WCAG21/), [What’s New in WCAG 2.1](/WAI/standards-guidelines/wcag/new-in-21/)
 - [WCAG 2.0 Standard](https://www.w3.org/TR/WCAG20/)
 
 ### Authoring Tool Accessibility Guidelines (ATAG)
@@ -71,7 +71,7 @@ The ARIA suite includes API mapping specifications that provide user agent imple
 
 ARIA info:
 
-- [WAI-ARIA Overview](/WAI/standards-guidelines/aria/)– includes a[list and description of modules and API mappings](/WAI/standards-guidelines/aria/#versions)
+- [WAI-ARIA Overview](/WAI/standards-guidelines/aria/) – includes a [list and description of modules and API mappings](/WAI/standards-guidelines/aria/#versions)
 - [WAI-ARIA Authoring Practices](https://www.w3.org/TR/wai-aria-practices/)
 - [WAI-ARIA 1.2 Standard](https://www.w3.org/TR/wai-aria-1.2/)
 
@@ -89,7 +89,7 @@ The following resources support development of accessibility evaluation methods 
 
 Additional resources related to evaluation are listed in the [Evaluating Web Accessibility Overview](/WAI/test-evaluate/), including:
 
-- [WCAG-EM Overview: WCAG Evaluation Methodology](/WAI/test-evaluate/conformance/wcag-em/)— WCAG-EM is an approach for determining how well websites and other digital products conform to Web Content Accessibility Guidelines (WCAG).
+- [WCAG-EM Overview: WCAG Evaluation Methodology](/WAI/test-evaluate/conformance/wcag-em/) — WCAG-EM is an approach for determining how well websites and other digital products conform to Web Content Accessibility Guidelines (WCAG).
 
 ### WAI-Adapt
 

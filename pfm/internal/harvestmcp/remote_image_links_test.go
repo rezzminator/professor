@@ -13,8 +13,8 @@ import (
 // TestRemoteReadImageLinksCarryNoServerPath pins A3 defect 3 at the
 // remote gateway: read on a cached page with images answers content whose
 // image links name no server path — neither the private cache path the stored
-// page links (an older entry's absolute link, the localizer's page-relative
-// one) nor the public directory the images are published into.
+// page links (an older entry's absolute or page-relative link) nor the public
+// directory the images are published into.
 func TestRemoteReadImageLinksCarryNoServerPath(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	const source = "https://example.test/thread"

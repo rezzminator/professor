@@ -193,6 +193,7 @@ func (gaps carriedGaps) landedThrough(ctx context.Context, requested, final stri
 		return gaps
 	}
 	gaps.redirect, gaps.refused, gaps.login, gaps.moved = "", "", false, ""
+	gaps.final = final
 	where := "the site redirected " + safeURL(requested) + " to " + safeURL(final)
 	landing := classifyLanding(ctx, requested, final)
 	if landing == landedElsewhere && movedPage(requested, final, hops) {

@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+from urllib.parse import urljoin, urlsplit
 
 
 def _quiet_stdout():
@@ -63,6 +64,7 @@ def html_metadata(raw: str) -> dict[str, str]:
     author = _clean(getattr(meta, "author", ""))
     if author.casefold() in _JUNK_AUTHORS:
         author = ""
+    author = _cited_authors(raw) or author
     fields = (
         ("title", _clean(getattr(meta, "title", ""))),
         ("author", author),
@@ -73,11 +75,41 @@ def html_metadata(raw: str) -> dict[str, str]:
     return {key: value for key, value in fields if value}
 
 
-def convert_html(path: pathlib.Path) -> str:
+# A scholarly page declares each author as its own citation_author meta, "Last,
+# First". trafilatura reads them as one string and the author list splits on
+# every comma ("Vaswani; Ashish; Shazeer; Noam"). Each declared name is written
+# "First Last", the names joined by "; "; a name whose comma sets off a suffix
+# ("Example Labs, Inc.", "King, Jr.") is no "Last, First" and stays as written.
+# A page declaring none keeps trafilatura's author.
+_NAME_SUFFIXES = frozenset(
+    {"inc", "ltd", "llc", "llp", "plc", "gmbh", "ag", "sa", "co", "corp", "jr", "sr", "ii", "iii", "iv", "phd", "md"}
+)
+
+
+def _cited_authors(raw: str) -> str:
+    if "citation_author" not in raw:
+        return ""
+    from trafilatura.utils import load_html
+
+    tree = load_html(raw)
+    if tree is None:
+        return ""
+    names: list[str] = []
+    for value in tree.xpath('//meta[@name="citation_author"]/@content'):
+        parts = [" ".join(part.split()) for part in value.split(",")]
+        swapped = len(parts) == 2 and all(parts) and parts[1].casefold().rstrip(".") not in _NAME_SUFFIXES
+        name = " ".join(reversed(parts)) if swapped else " ".join(value.split())
+        if name and name not in names:
+            names.append(name)
+    return "; ".join(names)
+
+
+def convert_html(path: pathlib.Path, base_url: str = "") -> str:
     import trafilatura
     from trafilatura.utils import load_html
 
     _keep_linked_blocks()
+    _keep_marked_blocks()
     _extract_comments_as_content()
     _keep_quotes_in_list_items()
     _keep_share_word_headings()
@@ -86,14 +118,24 @@ def convert_html(path: pathlib.Path) -> str:
     # with errors ignored before trafilatura sees the document.
     raw = path.read_bytes().decode("utf-8", errors="ignore")
     tree = load_html(raw)
+    islands = _Islands(raw)
     if tree is not None:
+        base = _document_base(tree, base_url)
+        scholarly = bool(tree.xpath(_CITATION_TITLE))
         _drop_hidden(tree)
         _drop_repeated_excerpts(tree)
         _drop_screen_reader_copies(tree)
+        _drop_chrome(tree, scholarly)
+        _absolutize(tree, base)
+        _math_as_text(tree)
+        _mark_kept_blocks(tree, scholarly)
         _mark_linked_images(tree)
         _unwrap_layout_tables(tree)
+        _table_islands(tree, islands)
+        _unwrap_block_hosts(tree)
+        _pre_islands(tree, islands)
         _keep_notes(tree)
-        _flatten_code_lines(tree)
+        _wrap_linked_runs(tree)
         _phrasing_paragraphs_as_text(tree)
         _inline_code_as_text(tree)
     with _quiet_stdout():
@@ -109,7 +151,7 @@ def convert_html(path: pathlib.Path) -> str:
     if document is not None:
         part = document.get if isinstance(document, dict) else lambda name: getattr(document, name, None)
         blocks = [_render_blocks(part("body")), _render_blocks(part("commentsbody"))]
-        body = "\n\n".join(block for block in blocks if block)
+        body = _restore_islands("\n\n".join(block for block in blocks if block), islands)
     _RESULT_META.update(html_metadata(raw))
     return tidy_markdown(body)
 
@@ -154,6 +196,31 @@ def _keep_linked_blocks() -> None:
         raise RuntimeError("trafilatura's discard pattern no longer holds '|next-|'; re-check the class anchor")
     discard[0] = XPath(pattern.replace("|next-|", r"|(?:^|\s)next-|"), namespaces={"re": regexpNS})
     _LINKED_BLOCKS_KEPT = True
+
+
+# trafilatura's discard pattern reads a class or id as a boilerplate name by
+# substring: "avigation" (a Wikipedia hatnote, class="hatnote
+# navigation-not-searchable"), "author" (a scholarly page's author list), "meta"
+# (its metadata table) and more delete the page's own text. An element the page
+# marks as its own — _mark_kept_blocks — and everything inside it is exempt.
+_KEEP = "data-pfm-keep"
+_KEPT_BLOCKS_PATCHED = False
+
+
+def _keep_marked_blocks() -> None:
+    global _KEPT_BLOCKS_PATCHED
+    if _KEPT_BLOCKS_PATCHED:
+        return
+    from lxml.etree import XPath
+    from trafilatura import main_extractor
+    from trafilatura.xpaths import regexpNS
+
+    discard = main_extractor.OVERALL_DISCARD_XPATH
+    pattern = discard[0].path
+    if "re:test(@class," not in pattern:
+        raise RuntimeError("trafilatura's discard pattern no longer tests the class; re-check the keep mark")
+    discard[0] = XPath(pattern.rstrip() + f"[not(ancestor-or-self::*[@{_KEEP}])]", namespaces={"re": regexpNS})
+    _KEPT_BLOCKS_PATCHED = True
 
 
 # trafilatura's comment handler flattens the comments section it found: it
@@ -444,12 +511,16 @@ def _mark_linked_images(tree) -> None:
 # inside a cell stays a table.
 def _unwrap_layout_tables(tree) -> None:
     for table in tree.xpath('//table[@role="presentation" or @role="none"]'):
-        rows = table.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr")
-        for element in [table, *table.xpath("./thead|./tbody|./tfoot"), *rows]:
-            element.tag = "div"
-        for row in rows:
-            for cell in row.xpath("./td|./th"):
-                cell.tag = "div"
+        _unwrap_table(table)
+
+
+def _unwrap_table(table) -> None:
+    rows = table.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr")
+    for element in [table, *table.xpath("./thead|./tbody|./tfoot"), *rows]:
+        element.tag = "div"
+    for row in rows:
+        for cell in row.xpath("./td|./th"):
+            cell.tag = "div"
 
 
 # trafilatura's tree cleaning deletes every <aside> and <footer> before it
@@ -509,30 +580,497 @@ def _keep_share_word_headings() -> None:
     _SHARE_WORD_HEADINGS_KEPT = True
 
 
-# A line-per-element highlighter writes each code line as its own element
-# inside the <pre>: Prism (Docusaurus) a <div class="token-line"> ending in
-# <br>, Expressive Code a <div class="ec-line">, highlight.js line numbers a
-# table row. trafilatura keeps only the first such line, so a <pre> holding a
-# block element is reduced to its rendered text first — a <br> and the end of
-# each line element are a newline, all other whitespace kept — inside one
-# <code> carrying the original's attributes.
-_CODE_LINE_TAGS = frozenset({"div", "p", "li", "tr", "table", "tbody", "thead", "ol", "ul"})
+# The page's own address, and every link and image target resolved against it.
+# trafilatura's url option resolves against the site root only, so the pass is
+# ours: the document's <base href> (itself resolved against the address the page
+# was fetched from) outranks that address; a fragment-only target, mailto: and
+# tel: stay as written, a javascript: anchor is no link (its text stays), and
+# without any address a relative target stays relative. A target urljoin cannot
+# parse (a placeholder host, "https://[your-host]/api") stays as written, and a
+# <base href> it cannot parse is ignored, as a browser ignores it.
+_CITATION_TITLE = '//meta[@name="citation_title"]'
 
 
-def _flatten_code_lines(tree) -> None:
-    for pre in list(tree.iter("pre")):
-        if not any(element.tag in _CODE_LINE_TAGS for element in pre.iterdescendants()):
+def _document_base(tree, base_url: str) -> str:
+    base = base_url if base_url.lower().startswith(("http://", "https://")) else ""
+    for element in tree.xpath("//base[@href]"):
+        try:
+            declared = urljoin(base, element.get("href").strip())
+            urlsplit(declared)
+        except ValueError:
+            break
+        if declared.lower().startswith(("http://", "https://")):
+            return declared
+        break
+    return base
+
+
+def _resolved(base: str, target: str) -> str:
+    if not base or not target or target.startswith("#"):
+        return target
+    try:
+        return urljoin(base, target)
+    except ValueError:
+        return target
+
+
+def _absolutize(tree, base: str) -> None:
+    for link in list(tree.xpath("//a[@href]")):
+        href = link.get("href").strip()
+        if href.lower().startswith("javascript:"):
+            link.drop_tag()
+        else:
+            link.set("href", _resolved(base, href))
+    for image in tree.iter("img"):
+        for attribute in ("src", "data-src"):
+            if image.get(attribute):
+                image.set(attribute, _resolved(base, image.get(attribute).strip()))
+
+
+# Page furniture that is no text of the page: a <link> in the body (MediaWiki's
+# TemplateStyles) stops the paragraph around it, a tooltip is the description a
+# hover shows, and a scholarly page (it declares citation_title) wraps its
+# paper in a services sidebar, a labs panel and an endorser prompt.
+_SCHOLARLY_CHROME = frozenset({"extra-services", "labstabs", "endorsers"})
+
+
+def _drop_chrome(tree, scholarly: bool) -> None:
+    for element in tree.xpath('//body//link|//*[@role="tooltip"]'):
+        element.drop_tree()
+    for button in tree.xpath("//body//button"):
+        if "".join(button.itertext()).strip() and not _shows_text(button, False):
+            button.drop_tree()
+    if not scholarly:
+        return
+    for element in tree.xpath("//*[@class or @id]"):
+        if _SCHOLARLY_CHROME.intersection(_classes(element)) or element.get("id") == "labstabs":
+            element.drop_tree()
+
+
+def _shows_text(element, hidden: bool) -> bool:
+    """Whether text inside element shows on the page: not when every text node
+    sits in a screen-reader-only element (a button's spoken label)."""
+    hidden = hidden or bool(_SCREEN_READER_CLASSES.intersection(_classes(element)))
+    if (element.text or "").strip() and not hidden:
+        return True
+    return any(
+        _shows_text(child, hidden) or ((child.tail or "").strip() != "" and not hidden)
+        for child in element
+        if isinstance(child.tag, str)
+    )
+
+
+def _classes(element) -> list[str]:
+    return (element.get("class") or "").casefold().split()
+
+
+# What the page marks as its own text survives the discard pattern: a note
+# (role="note", Wikipedia's hatnote) and, on a scholarly page, the paper's
+# authors, dateline, abstract and metadata table. A kept <div> holding only
+# phrasing content (a hatnote, the author list) is written as one line, its
+# links, spaces and a label (<span class="descriptor">) kept.
+_SCHOLARLY_KEPT = frozenset({"authors", "metatable", "dateline", "abstract", "subjects"})
+
+
+def _mark_kept_blocks(tree, scholarly: bool) -> None:
+    for element in tree.xpath("//*[@class or @role]"):
+        tokens = _classes(element)
+        if element.get("role") == "note" or "hatnote" in tokens or (scholarly and _SCHOLARLY_KEPT.intersection(tokens)):
+            element.set(_KEEP, "1")
+    if scholarly:
+        for descriptor in tree.xpath("//span[@class]"):
+            if "descriptor" in _classes(descriptor):
+                descriptor.tail = " " + (descriptor.tail or "")
+    for element in tree.xpath(f"//div[@{_KEEP}]"):
+        if len(element) and _all_phrasing(element):
+            text = _phrasing_markdown(element)
+            for child in list(element):
+                element.remove(child)
+            element.tag = "p"
+            element.text = text
+
+
+def _all_phrasing(element) -> bool:
+    return all(not isinstance(node.tag, str) or node.tag in _PHRASING for node in element.iterdescendants())
+
+
+# Math is the LaTeX the page carries, in place: MathML's x-tex annotation, its
+# alttext, MathJax's math/tex script, and MediaWiki's fallback image alt
+# ("{\displaystyle n}"). Inline math is written $...$ in the sentence, display
+# math $$...$$ (its own paragraph when the page puts it in a block). A MathML
+# element with no LaTeX is its text.
+_MATH_WRAPPER = '//*[contains(concat(" ", normalize-space(@class), " "), " mwe-math-element ")]'
+_STYLE_WRAP = re.compile(r"^\{\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle)\s+(.*)\}$", re.S)
+
+
+def _math_as_text(tree) -> None:
+    for wrapper in list(tree.xpath(_MATH_WRAPPER)):
+        if wrapper.getparent() is not None:
+            _write_math(wrapper, _latex_of(wrapper, True), _display_math(wrapper))
+    for script in list(tree.xpath('//script[starts-with(@type, "math/tex")]')):
+        _write_math(script, _bare_tex(script.text or ""), "mode=display" in script.get("type"))
+    for math in list(tree.iter("math")):
+        if math.getparent() is not None:
+            latex = _latex_of(math, False)
+            if latex:
+                _write_math(math, latex, math.get("display") == "block")
+            else:
+                _replace_with_text(math, " ".join("".join(math.itertext()).split()))
+
+
+def _latex_of(element, with_image: bool) -> str:
+    sources = [a.text for a in element.iter("annotation") if (a.get("encoding") or "").lower() == "application/x-tex"]
+    sources += [math.get("alttext") for math in element.iter("math")]
+    if with_image:
+        sources += [image.get("alt") for image in element.iter("img")]
+    return next((tex for tex in (_bare_tex(source or "") for source in sources) if tex), "")
+
+
+def _display_math(wrapper) -> bool:
+    if any(math.get("display") == "block" for math in wrapper.iter("math")):
+        return True
+    tokens = [token for node in wrapper.iter() for token in _classes(node)]
+    return any(token.endswith(("-display", "-block")) for token in tokens)
+
+
+def _bare_tex(source: str) -> str:
+    tex = " ".join(source.split())
+    wrapped = _STYLE_WRAP.match(tex)
+    if wrapped and _balanced(wrapped.group(1)):
+        tex = wrapped.group(1).strip()
+    return tex
+
+
+def _balanced(text: str) -> bool:
+    depth = 0
+    for char in text:
+        depth += (char == "{") - (char == "}")
+        if depth < 0:
+            return False
+    return depth == 0
+
+
+def _write_math(element, latex: str, display: bool) -> None:
+    if not latex:
+        _replace_with_text(element, "")
+        return
+    literal = f"$${latex}$$" if display else f"${latex}$"
+    parent = element.getparent()
+    if display and element.tag == "div":
+        paragraph = element.makeelement("p", {})
+        paragraph.text = literal
+        paragraph.tail = element.tail
+        parent.replace(element, paragraph)
+    else:
+        _replace_with_text(element, literal)
+
+
+# trafilatura mangles a <pre> (a one-line block, or one with no brace, parenthesis
+# or indentation, is a blockquote of whitespace-collapsed text; a block in a list
+# item or a definition is cut) and a table nested in a cell, a list item, a
+# definition or a quote (a nested table ends the outer one; a block in a cell
+# breaks its row). Each is rendered from the original DOM by the repo's own
+# writer and replaced before extraction by an inert paragraph token; the
+# finished markdown gets the rendered block back at the token's line, under the
+# line's own list or quote prefix. A table laid out as the page's grid (its
+# menu in one cell, its article in the next) is no data and stays trafilatura's
+# (_data_table). The token's mark is one the page's own text
+# does not hold, so no text of the page is ever read as a token.
+_ISLAND = "PFMISLAND"
+_CONTAINER = re.compile(r"^(?:[ ]*>[ ]?|[ ]*(?:[-*+]|\d+[.)])[ ]+)*[ ]*")
+_LIST_MARKER = re.compile(r"[-*+]\s|\d+[.)]\s")
+_FLOW_CONTAINERS = frozenset({"li", "dt", "dd", "blockquote"})
+_CELL_BLOCKS = ".//table|.//div|.//ul|.//ol|.//dl|.//pre|.//blockquote|.//h1|.//h2|.//h3|.//h4|.//h5|.//h6"
+_MAX_COLSPAN = 50
+# What a block shows no reader and trafilatura would drop inside it: an island
+# is rendered from the DOM before trafilatura's cleaning and discard run.
+_UNSEEN = (
+    ".//script|.//style|.//noscript|.//template|.//*[@aria-hidden='true'"
+    " or contains(translate(@style, ' ', ''), 'display:none')"
+    " or contains(translate(@style, ' ', ''), 'visibility:hidden')]"
+)
+
+
+class _Islands:
+    """The blocks taken out of one document — each its rendered lines and its
+    one-line form for a table cell — and the token mark naming them."""
+
+    def __init__(self, raw: str) -> None:
+        import html
+
+        text = raw + html.unescape(raw)
+        self.mark = _ISLAND
+        while self.mark in text:
+            self.mark += "Q"
+        self.token = re.compile(re.escape(self.mark) + r"(\d+)E")
+        self.blocks: list[tuple[list[str], str]] = []
+
+
+def _replace_with_token(element, islands: _Islands, lines: list[str], inline: str) -> None:
+    islands.blocks.append((lines, inline))
+    # A table's token carries the table's own attributes, so trafilatura's
+    # discard still judges it (a sidebar's class, an inline display:none); a
+    # <pre> reaches that discard with its attributes cleared (convert_tags).
+    token = element.makeelement("p", dict(element.attrib) if element.tag == "table" else {})
+    token.text = f"{islands.mark}{len(islands.blocks) - 1}E"
+    token.tail = element.tail
+    element.getparent().replace(element, token)
+
+
+def _table_islands(tree, islands: _Islands) -> None:
+    consumed: set = set()
+    for table in list(tree.iter("table")):
+        if table in consumed or table.getparent() is None or any(True for _ in table.iterancestors("pre")):
             continue
-        code = pre.find(".//code")
-        parts: list[str] = []
-        _pre_lines(pre, parts)
-        text = "".join(parts).strip("\n")
-        for child in list(pre):
-            pre.remove(child)
-        pre.text = None
-        flat = pre.makeelement("code", dict(code.attrib) if code is not None else {})
-        flat.text = text
-        pre.append(flat)
+        ancestors = {ancestor.tag for ancestor in table.iterancestors()}
+        if not ancestors & _FLOW_CONTAINERS:
+            in_cell = bool(ancestors & {"td", "th"})
+            if not (in_cell or any(cell.xpath(_CELL_BLOCKS) for cell in table.xpath(".//td|.//th"))):
+                continue
+            if not _data_table(table):
+                if table.xpath(".//pre"):
+                    _unwrap_listing(table)
+                continue
+        consumed.update(table.iter("table"))
+        _drop_unseen(table)
+        markdown = _table_markdown(table)
+        if markdown:
+            _replace_with_token(table, islands, markdown.split("\n"), " ".join(markdown.split()))
+        else:
+            table.drop_tree()
+
+
+def _drop_unseen(element) -> None:
+    for node in element.xpath(_UNSEEN):
+        node.drop_tree()
+
+
+# A layout table holding a <pre> (a line-numbered listing: Rouge, Pygments and
+# Hugo write the numbers in one cell, the code in the next) would be written as
+# a table row, its code collapsed onto it: its cells become blocks, so each
+# <pre> is a fenced block, and a cell of line numbers beside the code is dropped.
+def _unwrap_listing(table) -> None:
+    for row in table.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"):
+        cells = row.xpath("./td|./th")
+        if sum(1 for cell in cells if cell.xpath(".//pre")) > 1:
+            for cell in cells:
+                if cell.xpath(".//pre") and re.fullmatch(r"[\d\s]*", cell.text_content()):
+                    cell.drop_tree()
+    _unwrap_table(table)
+
+
+def _data_table(table) -> bool:
+    """Whether table holds data, not the page's layout: Mozilla Readability's
+    test, read on the table's own rows — a summary, a caption or header cells
+    are data; a nested table, a single row or a single column is layout; else
+    a table of 10 rows, more than 4 columns or more than 10 cells is data."""
+    if table.get("summary") or table.xpath("./caption|./colgroup|./col|./thead|./tfoot|./tr/th|./tbody/tr/th"):
+        return True
+    if table.xpath(".//table"):
+        return False
+    rows = table.xpath("./tr|./tbody/tr")
+    columns = max((len(row.xpath("./td|./th")) for row in rows), default=0)
+    if len(rows) <= 1 or columns <= 1:
+        return False
+    return len(rows) >= 10 or columns > 4 or len(rows) * columns > 10
+
+
+def _table_markdown(table) -> str:
+    """table as markdown tables: its caption, itself, then each table nested in
+    its cells as a table of its own and each multi-line <pre> as a fenced block."""
+    rows: list[list[str]] = []
+    header = False
+    nested: list = []
+    for row in table.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"):
+        cells = row.xpath("./td|./th")
+        texts: list[str] = []
+        for cell in cells:
+            for inner in [t for t in cell.iter("table") if next(t.iterancestors("table"), None) is table]:
+                nested.append(inner)
+                inner.drop_tree()
+            # A <pre> of more lines than one follows the table as a fenced block.
+            for pre in [p for p in cell.iter("pre") if len(_pre_fence(p)) > 3]:
+                nested.append(pre)
+                pre.drop_tree()
+            try:
+                span = min(max(int(cell.get("colspan") or 1), 1), _MAX_COLSPAN)
+            except ValueError:
+                span = 1
+            texts.extend([_cell_markdown(cell)] + [""] * (span - 1))
+        if not any(texts):
+            continue
+        if not rows and (row.getparent().tag == "thead" or all(cell.tag == "th" for cell in cells)):
+            header = True
+        rows.append(texts)
+    blocks: list[str] = []
+    caption = table.find("caption")
+    if caption is not None and _cell_markdown(caption):
+        blocks.append(_cell_markdown(caption))
+    if rows:
+        width = max(len(row) for row in rows)
+        rows = [row + [""] * (width - len(row)) for row in rows]
+        if not header:
+            rows.insert(0, [""] * width)
+        lines = ["| " + " | ".join(row) + " |" for row in rows]
+        lines.insert(1, "|" + "---|" * width)
+        blocks.append("\n".join(lines))
+    blocks.extend(
+        markdown
+        for markdown in (_table_markdown(inner) if inner.tag == "table" else "\n".join(_pre_fence(inner)) for inner in nested)
+        if markdown
+    )
+    return "\n\n".join(blocks)
+
+
+def _cell_markdown(cell) -> str:
+    return " ".join(_phrasing_markdown(cell).split()).replace("|", "\\|")
+
+
+# A <pre> inside emphasis or a link is written apart from the line around it,
+# which is then left an opening "*" or "[" and no closing one: the emphasis or
+# link around the block is dropped, its text kept.
+_BLOCK_HOSTS = "//*[self::a or self::b or self::strong or self::i or self::em or self::u or self::var][.//pre]"
+
+
+def _unwrap_block_hosts(tree) -> None:
+    for host in tree.xpath(_BLOCK_HOSTS):
+        host.drop_tag()
+
+
+def _pre_islands(tree, islands: _Islands) -> None:
+    for pre in list(tree.iter("pre")):
+        if pre.getparent() is None or any(True for _ in pre.iterancestors("pre")):
+            continue
+        _drop_unseen(pre)
+        lines = _pre_fence(pre)
+        if lines:
+            _replace_with_token(pre, islands, lines, _code_literal(" ".join(" ".join(lines[1:-1]).split())))
+
+
+def _pre_fence(pre) -> list[str]:
+    """pre as a fenced block's lines, its blank edge lines dropped, the fence
+    longer than any backtick run in it; none for a block of no text."""
+    parts: list[str] = []
+    _pre_lines(pre, parts)
+    lines = "".join(parts).split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return []
+    text = "\n".join(lines)
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [fence, *text.split("\n"), fence]
+
+
+def _restore_islands(markdown: str, islands: _Islands) -> str:
+    if not islands.blocks:
+        return markdown
+    lines: list[str] = []
+    for line in markdown.split("\n"):
+        restored = _restore_line(line, islands)
+        # A table needs the blank line a paragraph before it (in an item, a quote) lacks.
+        if restored != [line] and _is_table_start(restored[0]):
+            prefix = _CONTAINER.match(restored[0]).group(0)
+            if lines and lines[-1].strip(" >") and not _LIST_MARKER.search(prefix):
+                lines.append(prefix.rstrip())
+        lines.extend(restored)
+    return "\n".join(lines)
+
+
+def _is_table_start(line: str) -> bool:
+    return _CONTAINER.sub("", line, count=1).startswith("|")
+
+
+def _restore_line(line: str, islands: _Islands) -> list[str]:
+    match = islands.token.search(line)
+    if match is None or int(match.group(1)) >= len(islands.blocks):
+        return [line]
+    block, inline = islands.blocks[int(match.group(1))]
+    prefix = _CONTAINER.match(line).group(0)
+    if line[len(prefix):].startswith("|"):
+        return _restore_line(line[: match.start()] + inline + line[match.end():], islands)
+    continuation = _LIST_MARKER.sub(lambda marker: " " * len(marker.group(0)), prefix)
+    before = line[: match.start()]
+    out = [before.rstrip()] if before.strip() and len(before) > len(prefix) else []
+    lead = continuation if out else before
+    # A code line keeps its trailing spaces; a blank one takes no container indent.
+    for index, text in enumerate(block):
+        line_out = (lead if index == 0 else continuation) + text
+        out.append(line_out if text.strip() else line_out.rstrip())
+    after = line[match.end():].strip()
+    if after:
+        out.extend(_restore_line(continuation + after, islands))
+    return out
+
+
+# An item, a quote or a block holding a link among inline content: trafilatura
+# writes its text and tails trimmed, so the spaces around a link, a code span or
+# an emphasis vanish ("announced…](…)is now"; "See[issue](…)for context"; a
+# citation's title link, moved to the end). Each run of phrasing content in such
+# a container becomes a paragraph, which trafilatura (and, in an item,
+# _phrasing_paragraphs_as_text) writes whole, every space kept. A plain block
+# (div, section, article) is wrapped only when prose surrounds its links: a
+# breadcrumb or a row of links is navigation trafilatura already drops as a block.
+_RUN_CONTAINERS = ("li", "dt", "dd", "blockquote", "div", "section", "article")
+_BLOCK_PROSE_CHARS = 20
+
+
+def _wrap_linked_runs(tree) -> None:
+    for item in list(tree.iter(*_RUN_CONTAINERS)):
+        children = list(item)
+        if any(not isinstance(child.tag, str) for child in children):
+            continue
+        if not any(child.tag in _PHRASING and (child.tag == "a" or child.find(".//a") is not None) for child in children):
+            continue
+        if item.tag in {"div", "section", "article"} and _prose_chars(item) < _BLOCK_PROSE_CHARS:
+            continue
+        lead, item.text = item.text or "", None
+        paragraph = placed = None
+        for child in children:
+            if child.tag in _PHRASING:
+                if paragraph is None:
+                    paragraph = placed = item.makeelement("p", {})
+                    paragraph.text, lead = lead, ""
+                    item.append(paragraph)
+                paragraph.append(child)
+                continue
+            paragraph = None
+            _append_text(item, placed, lead)
+            lead, child.tail = child.tail or "", None
+            item.append(child)
+            placed = child
+        if paragraph is None:
+            _append_text(item, placed, lead)
+
+
+def _prose_chars(container) -> int:
+    """The characters of container's own inline text that sit outside its links."""
+    text = container.text or ""
+    for child in container:
+        if isinstance(child.tag, str) and child.tag in _PHRASING:
+            text += "".join(child.xpath(".//text()[not(ancestor-or-self::a)]"))
+        text += child.tail or ""
+    return len("".join(text.split()))
+
+
+def _append_text(item, placed, text: str) -> None:
+    """text after placed, the last child moved into its new order, else at the
+    start of item."""
+    if not text:
+        return
+    if placed is not None:
+        placed.tail = (placed.tail or "") + text
+    else:
+        item.text = (item.text or "") + text
+
+
+# The text of a <pre> as rendered: a <br> and the end of each line element (Prism's
+# <div class="token-line">, Expressive Code's <div class="ec-line">, highlight.js line
+# numbers' table row) are a newline, all other whitespace kept.
+_CODE_LINE_TAGS = frozenset({"div", "p", "li", "tr", "table", "tbody", "thead", "ol", "ul"})
 
 
 def _pre_lines(element, parts: list[str]) -> None:
@@ -562,12 +1100,11 @@ def _inline_code_as_text(tree) -> None:
         ancestors = [ancestor.tag for ancestor in code.iterancestors()]
         if code.getparent() is None or "pre" in ancestors or _CODE_PHRASING.intersection(ancestors):
             continue
-        text = _literal_text(code)
-        if "\n" in text.strip():
+        if "\n" in _literal_text(code).strip():
             continue
-        text = " ".join(text.split())
-        if text:
-            _replace_with_text(code, _code_literal(text))
+        literal = _code_markdown(code)
+        if literal:
+            _replace_with_text(code, literal)
 
 
 def _literal_text(element) -> str:
@@ -581,6 +1118,45 @@ def _literal_text(element) -> str:
             parts.append(inner)
         parts.append(child.tail or "")
     return "".join(parts)
+
+
+def _code_markdown(code) -> str:
+    """The markdown of an inline code element: one code span, or — when the
+    element holds links (Effective Go's <code><a href=…>net/http/pprof</a></code>)
+    — a code span per run of text and a linked code span per link, so no target
+    is lost."""
+    if code.find(".//a") is None or any(True for _ in code.iterancestors("a")):
+        text = " ".join(_literal_text(code).split())
+        return _code_literal(text) if text else ""
+    pieces: list[list[str]] = []
+    for text, href in _code_pieces(code, ""):
+        if pieces and pieces[-1][1] == href:
+            pieces[-1][0] += text
+        else:
+            pieces.append([text, href])
+    out = []
+    for text, href in pieces:
+        collapsed = " ".join(text.split())
+        if not collapsed:
+            out.append(" " if text else "")
+            continue
+        span = _code_literal(collapsed)
+        if href:
+            span = f"[{span}]({href})"
+        out.append(("" if not text[:1].isspace() else " ") + span + ("" if not text[-1:].isspace() else " "))
+    return "".join(out)
+
+
+def _code_pieces(element, href: str) -> list[tuple[str, str]]:
+    pieces = [(element.text or "", href)]
+    for child in element:
+        if isinstance(child.tag, str):
+            if child.tag == "a" and child.get("href"):
+                pieces.extend(_code_pieces(child, child.get("href")))
+            else:
+                pieces.append((_literal_text(child), href))
+        pieces.append((child.tail or "", href))
+    return pieces
 
 
 def _code_literal(text: str) -> str:
@@ -612,9 +1188,11 @@ _LIST_ITEM_TAGS = frozenset({"li", "dt", "dd"})
 _PHRASING = frozenset(
     {"a", "abbr", "b", "br", "cite", "code", "del", "dfn", "em", "i", "ins", "kbd", "label", "mark", "q", "s", "samp"}
     | {"small", "span", "strong", "sub", "sup", "tt", "u", "var", "wbr"}
+    | {"bdi", "bdo", "big", "data", "font", "nobr", "strike", "time"}
 )
 _EMPHASIS = {"b": "**", "strong": "**", "i": "*", "em": "*", "var": "*"}
 _CODE_PHRASING = frozenset({"code", "kbd", "samp", "tt"})
+_CELL_BLOCK_TAGS = frozenset({"div", "p", "ul", "ol", "dl", "li", "dt", "dd", "blockquote", "tr", "table", "h1", "h2", "h3", "h4", "h5", "h6"})
 
 
 def _phrasing_paragraphs_as_text(tree) -> None:
@@ -643,12 +1221,18 @@ def _phrasing_child(element) -> str:
     if element.tag == "br":
         return " "
     if element.tag in _CODE_PHRASING:
+        return _code_markdown(element)
+    if element.tag == "pre":
         text = " ".join(_literal_text(element).split())
         return _code_literal(text) if text else ""
+    if element.tag == "img":
+        return _image_markdown(element)
     inner = _phrasing_markdown(element)
     text = " ".join(inner.split())
     if not text:
         return inner
+    if element.tag in _CELL_BLOCK_TAGS:
+        return f" {text} "
     lead = " " if inner[:1].isspace() else ""
     trail = " " if inner[-1:].isspace() else ""
     if element.tag == "a" and element.get("href"):
@@ -657,6 +1241,20 @@ def _phrasing_child(element) -> str:
     if element.tag == "sup":
         return f"{lead}^{text}{trail}"
     return f"{lead}{mark}{text}{mark}{trail}"
+
+
+# An image in a cell: its first web source (an inline data: placeholder is no
+# address, and its payload is no text), the alt's brackets escaped, a source
+# holding a space, a parenthesis or an angle bracket written in angle brackets.
+def _image_markdown(element) -> str:
+    sources = (element.get("src") or "", element.get("data-src") or "")
+    source = next((value for value in sources if value and not value.casefold().startswith("data:")), "")
+    if not source:
+        return ""
+    alt = " ".join((element.get("alt") or "").split()).replace("[", "\\[").replace("]", "\\]")
+    if re.search(r"[\s()<>]", source):
+        source = "<" + source.replace("<", "%3C").replace(">", "%3E") + ">"
+    return f"![{alt}]({source})"
 
 
 # trafilatura's own markdown writer loses block boundaries: a heading after a
@@ -830,7 +1428,7 @@ def _inline(element, in_head: bool) -> str:
     return " " + inner + " " + tail
 
 
-def convert_html_full(path: pathlib.Path) -> str:
+def convert_html_full(path: pathlib.Path, base_url: str = "") -> str:
     """The WHOLE DOM as Markdown, boilerplate included: the recall gate's
     fallback (Go's harvest.FullDOMConverter) when main-content extraction kept
     too little of the page's visible text. An element the reader never sees is
@@ -849,6 +1447,7 @@ def convert_html_full(path: pathlib.Path) -> str:
         _drop_hidden(tree)
         _drop_repeated_excerpts(tree)
         _drop_screen_reader_copies(tree)
+        _absolutize(tree, _document_base(tree, base_url))
         source = lxml.html.tostring(tree, encoding="unicode")
     with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8") as visible:
         visible.write(source)
@@ -859,14 +1458,39 @@ def convert_html_full(path: pathlib.Path) -> str:
     return tidy_markdown(body)
 
 
+# Each line loses its trailing spaces and a run of three or more blank lines
+# becomes one, except inside a fenced code block, whose lines are the page's
+# own (R3: byte-exact).
+_FENCE_OPEN = re.compile(r"(`{3,})[^`]*")
+
+
+def _code_lines(lines: list[str]) -> list[bool]:
+    """Which of lines sit inside a fenced code block, its fences not."""
+    inside: list[bool] = []
+    fence = ""
+    for line in lines:
+        body = _CONTAINER.sub("", line, count=1).strip()
+        if fence:
+            closing = body.startswith(fence) and not body.strip("`")
+            inside.append(not closing)
+            fence = "" if closing else fence
+            continue
+        opener = _FENCE_OPEN.fullmatch(body)
+        fence = opener.group(1) if opener else ""
+        inside.append(False)
+    return inside
+
+
 def tidy_markdown(markdown: str) -> str:
-    lines = [line.rstrip() for line in markdown.splitlines()]
+    raw = markdown.splitlines()
+    code = _code_lines(raw)
+    lines = [line if code[index] else line.rstrip() for index, line in enumerate(raw)]
     output: list[str] = []
     index = 0
     while index < len(lines):
-        if lines[index] == "":
+        if lines[index] == "" and not code[index]:
             end = index
-            while end < len(lines) and lines[end] == "":
+            while end < len(lines) and lines[end] == "" and not code[end]:
                 end += 1
             output.extend([""] if end - index >= 3 else [""] * (end - index))
             index = end
@@ -1504,7 +2128,8 @@ def convert_text(path: pathlib.Path) -> str:
 
 
 def _html(path: pathlib.Path, request: dict) -> tuple[str, dict]:
-    return (convert_html_full(path) if request.get("full_dom") else convert_html(path)), {}
+    base_url = str(request.get("base_url") or "")
+    return (convert_html_full(path, base_url) if request.get("full_dom") else convert_html(path, base_url)), {}
 
 
 def _plain(convert_one):

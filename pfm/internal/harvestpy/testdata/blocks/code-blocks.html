@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Built-in functions · Code blocks</title></head>
+<body>
+<nav class="navbar"><a href="/docs">Docs</a> <a href="/blog">Blog</a></nav>
+<main>
+<article>
+<h1>Built-in functions</h1>
+<p>Install the package with the command below, then read the definitions that follow it.</p>
+<p>A broken build prints the marker PFMISLAND0E in its log, which names the step that failed.</p>
+<pre>go get example.test/x</pre>
+<dl>
+<dt>all(iterable)</dt>
+<dd><p>Return True if all elements of the iterable are true. Equivalent to:</p>
+<pre>def all(iterable):
+    for element in iterable:
+        if not element:
+            return False
+    return True</pre>
+</dd>
+</dl>
+<ul>
+<li>Build it first:
+<pre>cd project
+make   build
+
+make test</pre>
+</li>
+<li>Then run <code>make install</code> and read the output.</li>
+</ul>
+<blockquote><p>Quoted advice from the maintainers:</p>
+<pre>echo   "spaced"
+  indented</pre>
+</blockquote>
+<p>A block holding a backtick run needs a longer fence:</p>
+<pre>printf '```'
+echo done</pre>
+<p>A block keeps its trailing spaces and every blank line between its parts:</p>
+<pre>first = 1  
+
+
+
+second = 2</pre>
+</article>
+</main>
+<footer><a href="/privacy">Privacy</a> <a href="/careers">Careers</a></footer>
+</body>
+</html>

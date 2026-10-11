@@ -35,20 +35,13 @@ type tokenCacheEntry struct {
 	generation   uint64
 	fileInfo     os.FileInfo
 	rewriteGuard []byte
-	// countedMessages retains each response's latest contribution so later
-	// content-block records can revise its partial usage without double counting.
-	// A short ring is enough: a message's records are written together.
-	countedMessages []tokenMessageContribution
+	// countedMessages holds each billable response's latest contribution by
+	// response key, so a later content-block record revises its partial usage
+	// and is never added a second time, however many responses came between.
+	// It grows with the transcript's responses and goes with the entry when
+	// the chat leaves the fleet.
+	countedMessages map[string]int64
 }
-
-type tokenMessageContribution struct {
-	key    string
-	tokens int64
-}
-
-// countedMessageRing bounds countedMessages; a message never spans more
-// records than this between its first and last block.
-const countedMessageRing = 16
 
 type tokenMeasure struct {
 	total      int64
@@ -475,20 +468,16 @@ func (entry *tokenCacheEntry) messageTokenDelta(messageID, requestID string, tot
 	if key == "" {
 		return total
 	}
-	for index := range entry.countedMessages {
-		seen := &entry.countedMessages[index]
-		if seen.key == key {
-			delta := total - seen.tokens
-			seen.tokens = total
-			return delta
-		}
+	if counted, seen := entry.countedMessages[key]; seen {
+		entry.countedMessages[key] = total
+		return total - counted
 	}
 	if total == 0 {
-		return 0 // An unseen zero contribution must not evict a billable response.
+		return 0 // An unseen zero contribution adds nothing and is not kept.
 	}
-	entry.countedMessages = append(entry.countedMessages, tokenMessageContribution{key: key, tokens: total})
-	if len(entry.countedMessages) > countedMessageRing {
-		entry.countedMessages = entry.countedMessages[len(entry.countedMessages)-countedMessageRing:]
+	if entry.countedMessages == nil {
+		entry.countedMessages = make(map[string]int64)
 	}
+	entry.countedMessages[key] = total
 	return total
 }

@@ -113,6 +113,28 @@ func TestApplyTokenRecordPreservesCodexSegments(t *testing.T) {
 	}
 }
 
+// A response's later record is never added a second time, however many other
+// billable responses were counted between its records.
+func TestApplyTokenRecordCountsAResponseOnceAcrossManyOthers(t *testing.T) {
+	entry := &tokenCacheEntry{}
+	lines := []string{`{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100}}}`}
+	for i := 0; i < 40; i++ {
+		lines = append(
+			lines,
+			fmt.Sprintf(`{"type":"assistant","message":{"id":"other-%d","usage":{"input_tokens":1}}}`, i),
+		)
+	}
+	lines = append(lines, `{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":20}}}`)
+	for _, line := range lines {
+		if err := applyTokenRecord(entry, []byte(line)); err != nil {
+			t.Fatalf("applyTokenRecord: %v", err)
+		}
+	}
+	if entry.claudeTokens != 160 {
+		t.Fatalf("claudeTokens = %d; want 160 (m1 at its latest 120 plus 40 others)", entry.claudeTokens)
+	}
+}
+
 func TestApplyTokenRecordUpdatesRepeatedResponseUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -127,7 +149,7 @@ func TestApplyTokenRecordUpdatesRepeatedResponseUsage(t *testing.T) {
 			t.Run("direct", func(t *testing.T) {
 				entry := &tokenCacheEntry{}
 				lines := []string{first}
-				for i := 0; i < countedMessageRing; i++ {
+				for i := 0; i < 16; i++ {
 					lines = append(
 						lines,
 						fmt.Sprintf(`{"type":"assistant","message":{"id":"zero-%d","usage":{"input_tokens":0}}}`, i),

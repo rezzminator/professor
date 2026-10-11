@@ -72,7 +72,16 @@ var internalSubcommands = []string{
 	"codex-launch", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
-	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
+	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge", tracerNudgeCommand,
+	"update-check",
+}
+
+// tracerNudgeCommand also runs config-free; runInternal compares its literal for the C15 registry test.
+const tracerNudgeCommand = "tracer-nudge"
+
+// runTracerNudgeEntry runs the config-free tracer-nudge hook on the process's stdin.
+func runTracerNudgeEntry(stdout, stderr io.Writer) int {
+	return hookentry.TracerNudge(os.Stdin, stdout, stderr, hookentry.TracerNudgeStateDir(paths.OSEnv{}))
 }
 
 func main() {
@@ -109,6 +118,10 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		}
 		if len(args) > 1 && args[0] == internalCommand && args[1] == reloadRunCommand {
 			return reloadWorkerConfigFailure(args[2:], err, stderr)
+		}
+		// The tracer nudge reads no config and promises exit 0 with its error in the agent's context.
+		if len(args) > 1 && args[0] == internalCommand && args[1] == tracerNudgeCommand {
+			return runTracerNudgeEntry(stdout, stderr)
 		}
 		if !diagnosticCommand(args) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
@@ -443,6 +456,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "tracer-nudge" {
+		return runTracerNudgeEntry(stdout, stderr)
+	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
 	}
@@ -518,7 +534,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|tracer-nudge|update-check [options]",
 		)
 		return 2
 	}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -48,5 +50,33 @@ func TestRunInternalRecordsEveryDispatchUnderTheHooksComponent(t *testing.T) {
 	}
 	if exit, _ := records[1].Field(obs.FieldExit); exit != float64(1) {
 		t.Fatalf("unknown subcommand exit = %v, want 1", exit)
+	}
+}
+
+// The tracer nudge reads no config: on a broken config it still exits 0 and names its own error to the agent.
+func TestInternalTracerNudgeAnswersOnABrokenConfig(t *testing.T) {
+	root := jailTest(t)
+	configPath := writeConfigFixture(t, root, "{")
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.WriteString("not-json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdin
+	os.Stdin = reader
+	defer func() {
+		os.Stdin = previous
+		_ = reader.Close()
+	}()
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--config", configPath, internalCommand, "tracer-nudge"}, &stdout, &stderr)
+	if code != 0 || strings.Contains(stderr.String(), "pfm: config:") ||
+		!strings.Contains(stdout.String(), "TRACER-NUDGE-ERROR: decode hook payload") {
+		t.Fatalf("broken config tracer-nudge code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

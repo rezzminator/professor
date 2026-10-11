@@ -112,6 +112,7 @@ pfm internal stale	O2	O2.05-internal-plumbing
 pfm internal statusline	E1	E1.23-launcher
 pfm internal then	E1	E1.07-reload-then
 pfm internal tmux-title-renudge	O2	O2.05-internal-plumbing
+pfm internal tracer-nudge	O2	O2.05-internal-plumbing
 pfm internal update-check	A	A.14-release-notice
 pfm issues	O1	O1.13-misc-ops
 pfm log	O2	O2.05b-activity-log

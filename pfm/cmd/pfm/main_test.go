@@ -882,7 +882,7 @@ func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
 	}
 }
 
-// Only stale answers config-free: every other internal command still refuses.
+// Every other internal command still refuses while the legacy config waits.
 func TestInternalCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
 	legacyConfigJail(t)
 	var stdout, stderr bytes.Buffer

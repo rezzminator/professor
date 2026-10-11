@@ -155,7 +155,7 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, tc.transcripts, tc.parents)
 			got, warned := renderOneSubagent(t, session, parentTask)
-			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M $0.01/2.0K/35"
+			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35"
 			if tc.nested != "" {
 				wantStart = tc.nested + "│" + wantStart
 			}
@@ -251,7 +251,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			`"contextWindowSize":1000,"tokenCount":10,"label":"map it"}`
 	}
 	const (
-		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K $0.01/2.0K/35/2│scout·general-purpose│opus│"
+		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K Σ$0.01/2.0K/35/2│scout·general-purpose│opus│"
 		fullTail   = " 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│map it"
 		parentTail = " 3m:30s│1 error│💾5m✓1m:38s 94%│⟲1│map it"
 	)
@@ -279,7 +279,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "completed, after a minute: collapsed",
 			task:      row("a1", "completed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "completed 2m0s ago│$0.01/2.0K/35/2│scout·general-purpose│map it",
+			wantPlain: "completed 2m0s ago│Σ$0.01/2.0K/35/2│scout·general-purpose│map it",
 			check:     mutedCollapsed,
 		},
 		{
@@ -293,7 +293,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "failed, after a minute: collapsed, the status still red",
 			task:      row("a1", "failed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "failed 2m0s ago│$0.01/2.0K/35/2│scout·general-purpose│map it",
+			wantPlain: "failed 2m0s ago│Σ$0.01/2.0K/35/2│scout·general-purpose│map it",
 			check:     redStatus,
 		},
 		{

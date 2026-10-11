@@ -100,6 +100,19 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 					"doctor: claude_plugins plugin agent-effort@agent-effort not installed in " + store + " — run pfm install --yes\n"
 			}, 2, 1,
 		},
+		{
+			"a marketplace record of the wrong type",
+			pfmconfig.ClaudePlugin{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"},
+			false, `[]`,
+			func(path, store string) string {
+				// The one unreadable file behind both reads is one failure.
+				wrongType := json.Unmarshal([]byte(`[]`), &map[string]json.RawMessage{})
+				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
+					filepath.Join(store, "plugins", "known_marketplaces.json") + ": " + wrongType.Error() + "\n" +
+					"doctor: claude_plugins plugin typesafe@typesafe-ai not enabled in " + path + " — run pfm install --yes\n" +
+					"doctor: claude_plugins plugin typesafe@typesafe-ai not installed in " + store + " — run pfm install --yes\n"
+			}, 2, 1,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := t.TempDir()
@@ -135,7 +148,10 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 }
 
 func TestClaudePluginsDoctorStore(t *testing.T) {
-	for _, state := range []string{"clean", "disabled", "uninstalled", "absent", "settings unreadable", "record unreadable"} {
+	for _, state := range []string{
+		"clean", "disabled", "uninstalled", "absent", "settings unreadable", "record unreadable",
+		"unmanaged duplicate", "managed plus a stranger", "foreign marketplace", "marketplaces unreadable",
+	} {
 		t.Run(state, func(t *testing.T) {
 			store := t.TempDir()
 			path := filepath.Join(store, "settings.json")
@@ -146,6 +162,16 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			if state == "disabled" {
 				enabled[doctorPluginIDs[1]] = false
 			}
+			if state == "unmanaged duplicate" {
+				enabled["buddy@buddy"] = true
+				enabled["buddy@buddy-dev"] = true
+				enabled["callmeter@callmeter-dev"] = true
+				enabled["solo@one"] = true
+				enabled["solo@two"] = false
+			}
+			if state == "managed plus a stranger" {
+				enabled["cache-live-control@elsewhere"] = true
+			}
 			if state != "absent" {
 				raw, _ := json.Marshal(map[string]any{"enabledPlugins": enabled})
 				if err := os.WriteFile(path, raw, 0o600); err != nil {
@@ -153,6 +179,7 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 				}
 			}
 			writeDoctorInstalledPlugins(t, store, doctorPluginIDs...)
+			marketplaces := filepath.Join(store, "plugins", "known_marketplaces.json")
 			switch state {
 			case "uninstalled":
 				writeDoctorInstalledPlugins(t, store, doctorPluginIDs[0], doctorPluginIDs[2], doctorPluginIDs[3])
@@ -169,6 +196,23 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 					[]byte("{"),
 					0o600,
 				); err != nil {
+					t.Fatal(err)
+				}
+			case "foreign marketplace":
+				raw, _ := json.Marshal(map[string]any{
+					"cache-live-control": map[string]any{
+						"source": map[string]any{"source": "github", "repo": "someone-else/cache-live-control"},
+					},
+					"sub-agent-compact": map[string]any{
+						"source": map[string]any{"source": "github", "repo": "rezzminator/sub-agent-compact"},
+					},
+					"buddy": map[string]any{"source": map[string]any{"source": "github", "repo": "someone-else/buddy"}},
+				})
+				if err := os.WriteFile(marketplaces, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "marketplaces unreadable":
+				if err := os.WriteFile(marketplaces, []byte("{"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -196,6 +240,23 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 					filepath.Join(store, "plugins", "installed_plugins.json"),
 					err,
 				)
+			case "unmanaged duplicate":
+				warnings = 1
+				want = "doctor: claude_plugins plugin buddy enabled twice (buddy@buddy and buddy@buddy-dev) in " + path +
+					" — keep one copy: claude plugin disable each other key\n"
+			case "managed plus a stranger":
+				warnings = 1
+				want = "doctor: claude_plugins plugin cache-live-control enabled twice (" + doctorPluginIDs[0] +
+					" and cache-live-control@elsewhere) in " + path + " — keep one copy: claude plugin disable each other key\n"
+			case "foreign marketplace":
+				warnings = 1
+				want = "doctor: claude_plugins plugin " + doctorPluginIDs[0] + " marketplace cache-live-control in " +
+					marketplaces + " points at someone-else/cache-live-control, want rezzminator/cache-live-control" +
+					" — claude plugin marketplace remove cache-live-control, then run pfm install --yes\n"
+			case "marketplaces unreadable":
+				failures = 1
+				_, err := installer.ClaudePluginMarketplaceGaps(store, releaseTargets)
+				want = fmt.Sprintf("doctor: claude_plugins could not read %s: %v\n", marketplaces, err)
 			}
 			var out bytes.Buffer
 			tally := &doctorTally{}

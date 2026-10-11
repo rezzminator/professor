@@ -265,6 +265,7 @@ type negativeCache struct {
 	transient time.Duration
 	clock     clock.Clock
 	entries   map[string]negativeEntry
+	sweepAt   int // put sweeps expired entries once the cache holds this many
 }
 type negativeEntry struct {
 	at     time.Time
@@ -305,6 +306,17 @@ func (c *negativeCache) get(key string) (Result, bool) {
 	return result, true
 }
 
+// negativeSweepFloor is the entry count below which put never sweeps expired
+// failures; past it a sweep runs each time the cache doubles.
+const negativeSweepFloor = 64
+
+// drop forgets key's failure once a read of its source has succeeded.
+func (c *negativeCache) drop(key string) {
+	c.mu.Lock()
+	delete(c.entries, key)
+	c.mu.Unlock()
+}
+
 func (c *negativeCache) put(key string, result Result) {
 	c.mu.Lock()
 	ttl := c.ttl
@@ -313,6 +325,15 @@ func (c *negativeCache) put(key string, result Result) {
 		result.ErrorKind == errorKindDNS {
 		ttl = c.transient
 	}
-	c.entries[key] = negativeEntry{at: c.clock.Now(), ttl: ttl, result: result}
+	now := c.clock.Now()
+	if len(c.entries) >= c.sweepAt { // a key never read again would otherwise stay for good
+		for stale := range c.entries {
+			if now.Sub(c.entries[stale].at) >= c.entries[stale].ttl {
+				delete(c.entries, stale)
+			}
+		}
+		c.sweepAt = max(2*len(c.entries), negativeSweepFloor)
+	}
+	c.entries[key] = negativeEntry{at: now, ttl: ttl, result: result}
 	c.mu.Unlock()
 }

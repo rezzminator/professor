@@ -8,10 +8,14 @@
 # (release-rehearsal.sh) still produces pfm-dev, never the Chrome image.
 FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS pfm-base
 # The converter sidecar's OCR stack (OpenCV) loads these system libraries on
-# import, and `pfm install` stages its models on any fence image.
+# import, and `pfm install` stages its models on any fence image. gcc and
+# libc6-dev are the C toolchain `go test -race` needs (the race runtime is
+# cgo): CGO_ENABLED stays 0 below, so every build stays static, and the gate's
+# race step (infra/fence/checks.sh checks_pfm_race) turns cgo on for itself.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 tcpdump \
     libgl1 libglib2.0-0 libxcb1 \
+    gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 # Go pinned to pfm/go.mod — bump both together or the fence tests a different compiler.
 ARG GO_VERSION=1.27.1

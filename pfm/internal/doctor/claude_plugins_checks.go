@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -15,8 +16,10 @@ import (
 // GitHub ids otherwise, each fallback named on its own informational line. A
 // listed id pfm cannot install is one line naming it, its reason and its repair,
 // in place of the "run pfm install --yes" lines that would not close it, even
-// on a store never set up. An unreadable marketplace record is a failure for
-// the ids that need it; every other listed plugin is still checked.
+// on a store never set up. A plugin enabled under two or more keys, and a
+// marketplace pfm install adds that is registered from another source, are one
+// warning each with its repair. An unreadable marketplace record is a failure
+// for the ids that need it; every other listed plugin is still checked.
 func printClaudePluginsDoctor(stdout io.Writer, store string, build installer.ClaudePluginBuild, tally *doctorTally) {
 	targets := installer.ClaudePluginTargets(build)
 	for index := range targets {
@@ -74,8 +77,16 @@ func printClaudePluginsDoctor(stdout io.Writer, store string, build installer.Cl
 			Problem: "plugin " + id + " not installed in " + store, Fix: installer.ClaudePluginRepair,
 		})
 	}
+	marketplaceGaps, marketplaceErr := installer.ClaudePluginMarketplaceGaps(store, targets)
+	// An unreadable known_marketplaces.json recordErr already named is one failure, reported once.
+	knownMarketplaces := filepath.Join(store, "plugins", "known_marketplaces.json")
+	if marketplaceErr != nil && (recordErr == nil || !strings.Contains(recordErr.Error(), knownMarketplaces)) {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: claude_plugins could not read %s: %v\n", knownMarketplaces, marketplaceErr)
+	}
+	gaps = append(gaps, marketplaceGaps...)
 	gaps = append(gaps, cannotInstall...)
-	if len(gaps) == 0 && recordErr == nil {
+	if len(gaps) == 0 && recordErr == nil && marketplaceErr == nil {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return
 	}

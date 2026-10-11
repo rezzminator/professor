@@ -265,17 +265,18 @@ func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend
 	return total
 }
 
-// spendSegment renders "$1.24/3.1M/42K/12": USD, prompt and output tokens,
+// spendSegment renders "Σ$1.24/3.1M/42K/12": USD, prompt and output tokens,
 // then tool calls, for the agent and every agent below it (with a cost ledger,
 // its rows' dollars and tokens: see agentSpend.fromLedger); advisor spend, part
 // of that USD, follows as " adv $0.30", or " adv n/a" when the table could not
-// price a consultation. A floor (partial) gets a "+?" in the
+// price a consultation. The Σ marks a lifetime sum, so it never reads as part
+// of the context gauge beside it. A floor (partial) gets a "+?" in the
 // warning colour; with nothing priced at all the dollar part is "$?". An own
-// transcript that could not be read is "$?/?/?/?": nothing it says is a total.
+// transcript that could not be read is "Σ$?/?/?/?": nothing it says is a total.
 func spendSegment(activity agentActivity) string {
 	spend := activity.spend
 	if activity.err != nil && !spend.fromLedger {
-		return cWarn + "$?/?/?/?" + reset
+		return cMuted + "Σ" + reset + cWarn + "$?/?/?/?" + reset
 	}
 	dollars := "$?"
 	if spend.priced > 0 || !spend.partial {
@@ -286,7 +287,7 @@ func spendSegment(activity agentActivity) string {
 		// The ledger priced the row; the transcript that holds its tool calls did not read.
 		tools = cWarn + "?" + reset
 	}
-	line := cCost + dollars + reset + cMuted + "/" + reset +
+	line := cMuted + "Σ" + reset + cCost + dollars + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.in) + reset + cMuted + "/" + reset +
 		cTokens + formatContextTokens(spend.out) + reset + cMuted + "/" + reset +
 		tools

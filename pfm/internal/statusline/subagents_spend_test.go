@@ -61,10 +61,10 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 		warn        string
 	}{
 		{
-			name:        "solo: its own two responses, the repeated one once",
+			name:        "a lone agent: its own two responses, the repeated one once",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": ""},
-			want:        "$0.01/2.0K/35/2",
+			want:        "Σ$0.01/2.0K/35/2",
 		},
 		{
 			name: "a streamed response counts its last line, the final output",
@@ -74,7 +74,7 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 				turnEnded,
 			}},
 			parents: map[string]string{"p": "", "c1": "p"},
-			want:    "$0.01/3.0K/135/2",
+			want:    "Σ$0.01/3.0K/135/2",
 		},
 		{
 			name: "a child and a grandchild add in",
@@ -82,19 +82,19 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 				"p": agentTranscriptLines, "c1": {childResponse, turnEnded}, "g1": {grandchildResponse, turnEnded},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
-			want:    "$8.01/1.0M/135/2",
+			want:    "Σ$8.01/1.0M/135/2",
 		},
 		{
 			name:        "a model the table cannot price leaves a floor",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {unpricedResponse, turnEnded}},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "$0.01/2.5K/85/2+?",
+			want:        "Σ$0.01/2.5K/85/2+?",
 		},
 		{
 			name:        "a child transcript that cannot be read leaves a floor and its cause",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "$0.01/2.0K/35/2+?",
+			want:        "Σ$0.01/2.0K/35/2+?",
 			warn:        "open sub-agent transcript",
 		},
 	}
@@ -124,8 +124,8 @@ func TestRenderSubagentsSpendWithoutPrices(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
 		t.Fatalf("row is not JSON: %v: %q", err, got)
 	}
-	if content := stripANSICodes(row.Content); !strings.Contains(content, "1.0K/1.0M $?/2.0K/35/2│") {
-		t.Fatalf("content = %q, want $?/2.0K/35/2 after the gauge", content)
+	if content := stripANSICodes(row.Content); !strings.Contains(content, "1.0K/1.0M Σ$?/2.0K/35/2│") {
+		t.Fatalf("content = %q, want Σ$?/2.0K/35/2 after the gauge", content)
 	}
 }
 
@@ -385,9 +385,9 @@ func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
 		map[string]string{ledgerAgentRoot: "", ledgerAgentFirst: ledgerAgentRoot})
 	rows := renderLedgerRows(t, ledgerSampleSession, session, ledgerAgentRoot, ledgerAgentFirst, ledgerAgentSecond)
 	for id, want := range map[string]string{
-		ledgerAgentRoot:   "$0.95/740.0K/3.2K/",
-		ledgerAgentFirst:  "$0.08/224.3K/1.2K/2",
-		ledgerAgentSecond: "$0.09/224.5K/1.4K/?",
+		ledgerAgentRoot:   "Σ$0.95/740.0K/3.2K/",
+		ledgerAgentFirst:  "Σ$0.08/224.3K/1.2K/2",
+		ledgerAgentSecond: "Σ$0.09/224.5K/1.4K/?",
 	} {
 		if !strings.Contains(rows[id], "1.0K/1.0M "+want) {
 			t.Errorf("row %s = %q, want the gauge followed by %q", id, rows[id], want)
@@ -443,10 +443,10 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 		map[string][]string{"fresh": agentTranscriptLines, "adv1": {advisorResponse("claude-opus-5-5")}},
 		map[string]string{"fresh": "", "adv1": ""})
 	rows := renderLedgerRows(t, ledgerSampleSession, session, "fresh", "adv1")
-	if want := "1.0K/1.0M $0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
+	if want := "1.0K/1.0M Σ$0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
-	if want := "1.0K/1.0M $1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
+	if want := "1.0K/1.0M Σ$1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
 	}
 }
@@ -474,7 +474,7 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 			name: "the base tier, a cache write billed as input",
 			lines: gpt(`{"input_tokens":100000,"output_tokens":1000000,"cache_read_input_tokens":150000,` +
 				`"cache_creation_input_tokens":10000}`),
-			want: "$10.25/260.0K/1.0M/0",
+			want: "Σ$10.25/260.0K/1.0M/0",
 		},
 		{
 			name: "a model no row prices stays unpriced",
@@ -482,7 +482,7 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 				`{"type":"assistant","message":{"id":"g-1","model":"gpt-nonesuch-9","usage":` +
 					`{"input_tokens":1000,"output_tokens":100}}}`, turnEnded,
 			},
-			want: "$?/1.0K/100/0",
+			want: "Σ$?/1.0K/100/0",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

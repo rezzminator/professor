@@ -186,7 +186,7 @@ A launch's own marker (`failed`, `preempted`, `off`) wins even when a ledger fil
 
 ### Sub-agent row numbers
 
-A row's spend field `$1.24/3.1M/42K/12` (`spendSegment`):
+A row's spend field `Σ$1.24/3.1M/42K/12` (`spendSegment`; the muted `Σ` marks a subtree sum):
 
 | Number | Source |
 | --- | --- |
@@ -196,7 +196,7 @@ A row's spend field `$1.24/3.1M/42K/12` (`spendSegment`):
 | tool calls | the agent's transcript and every agent below it, always |
 | `adv $0.30` | the advisor's own spend, read from the transcript's advisor iterations, a part of the dollars; `adv n/a` when the table cannot price a consultation |
 | `+?` | a floor: with a ledger, a row of the agent or below it whose cost never arrived; without one, a model the price table cannot price or a transcript below that cannot be read |
-| `$?/?/?/?` | no ledger and the agent's own transcript cannot be read; with a ledger the row keeps its ledger dollars and shows `?` for tool calls |
+| `Σ$?/?/?/?` | no ledger and the agent's own transcript cannot be read; with a ledger the row keeps its ledger dollars and shows `?` for tool calls |
 
 The invariant: the main thread's own rows plus every top-level row equal the ledger total. A row's gauge, status, cache and the other fields are in [statusline.md](../context/statusline.md#the-sub-agent-row).
 

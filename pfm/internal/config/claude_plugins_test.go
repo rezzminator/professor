@@ -112,6 +112,25 @@ func TestClaudePluginsKey(t *testing.T) {
 			err: `claude.plugins[2] repeats claude.plugins[0]: a@b`,
 		},
 		{
+			name: "one marketplace from two sources",
+			content: `{"version":2,"claude":{"plugins":[{"id":"a@m","source":"o/one"},"c@m",` +
+				`{"id":"b@m","source":"o/two"}]}}`,
+			err: `claude.plugins[2] marketplace m has source o/two, but claude.plugins[0] gives it o/one: ` +
+				`one marketplace has one source`,
+		},
+		{
+			name: "one marketplace with its source once",
+			content: `{"version":2,"claude":{"plugins":[{"id":"a@m","source":"o/one"},"c@m",` +
+				`{"id":"b@m","source":"o/one"}]}}`,
+			want: []ClaudePlugin{{ID: "a@m", Source: "o/one"}, {ID: "c@m"}, {ID: "b@m", Source: "o/one"}},
+			wantMarshal: []any{
+				map[string]any{"id": "a@m", "source": "o/one"},
+				"c@m",
+				map[string]any{"id": "b@m", "source": "o/one"},
+			},
+			source: SourceFile,
+		},
+		{
 			name: "a full id of a listed bare name's -dev copy", content: `{"version":2,"claude":{"plugins":["agent-effort","agent-effort@agent-effort-dev"]}}`,
 			err: `claude.plugins[1] agent-effort@agent-effort-dev is a copy of claude.plugins[0] agent-effort, which ensures one copy and disables the other: list the plugin once`,
 		},

@@ -20,6 +20,7 @@ github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderMD5Catalog
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderPMC	opt-in-live	live network provider probe; opt-in
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderScholar	opt-in-live	live network provider probe; opt-in
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderUnpaywall	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestNoInertContainerSkipsTheWindowScan	race-mode	testing.AllocsPerRun ceiling; skips only in a -race build (raceEnabled), where the detector allocates on the measured paths
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCSVAndJSONConversionPathsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonAcceptanceExactHTMLFixture	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonConversionOwnedPairsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable

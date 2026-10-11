@@ -62,10 +62,13 @@ func defaultClaudePluginIDs() []string {
 }
 
 // decodeClaudePlugins validates the list entry by entry; an error names the
-// entry's index and the reason, never an entry quietly dropped.
+// entry's index and the reason, never an entry quietly dropped. One marketplace
+// has one source: Claude Code registers a marketplace name once, so a second
+// source for it could never be installed from.
 func decodeClaudePlugins(entries []json.RawMessage) ([]ClaudePlugin, error) {
 	plugins := make([]ClaudePlugin, 0, len(entries))
 	first := map[string]int{}
+	sourced := map[string]int{}
 	for index, entry := range entries {
 		plugin, err := decodeClaudePlugin(entry)
 		if err != nil {
@@ -83,6 +86,18 @@ func decodeClaudePlugins(entries []json.RawMessage) ([]ClaudePlugin, error) {
 		}
 		if err := claudePluginCopyClash(plugin, index, first); err != nil {
 			return nil, err
+		}
+		if plugin.Source != "" {
+			if earlier, named := sourced[plugin.Marketplace()]; named && plugins[earlier].Source != plugin.Source {
+				return nil, fmt.Errorf(
+					"%s[%d] marketplace %s has source %s, but %s[%d] gives it %s: one marketplace has one source",
+					KeyClaudePlugins, index, plugin.Marketplace(), plugin.Source,
+					KeyClaudePlugins, earlier, plugins[earlier].Source,
+				)
+			}
+			if _, named := sourced[plugin.Marketplace()]; !named {
+				sourced[plugin.Marketplace()] = index
+			}
 		}
 		first[plugin.ID] = index
 		plugins = append(plugins, plugin)

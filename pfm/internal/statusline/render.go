@@ -358,7 +358,7 @@ func appendRateSegments(line string, now time.Time, data input) string {
 			line = appendSegment(line, makeBar(0, 5)+" "+dim+descriptor.Label+"-used:—"+reset)
 			continue
 		}
-		used := int(window.UsedPercentage)
+		used := gaugePercent(window.UsedPercentage)
 		segment := makeBar(used, 5) + " " + percentColor(used) +
 			descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
 		remaining := window.ResetsAt - now.Unix()
@@ -838,7 +838,7 @@ func codexSegment(
 			if window == nil || window.UsedPercent < 0 {
 				continue
 			}
-			percent := int(window.UsedPercent)
+			percent := gaugePercent(window.UsedPercent)
 			segment += sep + makeBar(percent, 5) + " " + percentColor(percent) +
 				windowLabel(window.WindowDurationMins) + "-used:" + strconv.Itoa(percent) + "%" + reset +
 				resetCountdown(now, window.ResetsAt)
@@ -859,7 +859,7 @@ func codexSegment(
 		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)
 	}
 	if !transcriptGauge && window > 0 && contextTokens > 0 {
-		percent := int(contextTokens * 100 / window)
+		percent := gaugePercent(float64(contextTokens) * 100 / float64(window))
 		if percent > 100 {
 			percent = 100
 		}

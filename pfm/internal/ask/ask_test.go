@@ -11,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -357,5 +358,43 @@ func writeAskStub(t *testing.T, directory, name, body string) {
 		0o700,
 	); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestCheckModelRefusesAModelItsEngineCannotRunByName: a Claude Code alias
+// (in any case, with or without [1m]) or a price-table row of the engine
+// passes as the model to launch; any other model is refused naming the model
+// and the engine, before an engine starts.
+func TestCheckModelRefusesAModelItsEngineCannotRunByName(t *testing.T) {
+	table, err := pricing.Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusedClaude := ` is not a claude model: name an alias (fable, opus, sonnet, haiku) or a model id the price table lists`
+	for _, testCase := range []struct {
+		engine pfmengine.ID
+		model  string
+		run    string // the model to launch; "" = refused with want
+		want   string
+	}{
+		{pfmengine.Claude, "haiku", "haiku", ""},
+		{pfmengine.Claude, " Sonnet ", "sonnet", ""},
+		{pfmengine.Claude, "sonnet[1m]", "sonnet[1m]", ""},
+		{pfmengine.Claude, "claude-haiku-4-5", "claude-haiku-4-5", ""},
+		{pfmengine.Codex, "gpt-5", "gpt-5", ""},
+		{pfmengine.Claude, "gpt-5", "", `model "gpt-5"` + refusedClaude},
+		{pfmengine.Claude, "claude-nonexistent-9", "", `model "claude-nonexistent-9"` + refusedClaude},
+		{pfmengine.Claude, "haiku[2m]", "", `model "haiku[2m]"` + refusedClaude},
+		{pfmengine.Codex, "haiku", "", `model "haiku" is not a codex model: name a model id the price table lists`},
+	} {
+		run, err := CheckModel(testCase.engine, testCase.model, table)
+		got := ""
+		if err != nil {
+			got = err.Error()
+		}
+		if run != testCase.run || got != testCase.want {
+			t.Errorf("CheckModel(%s, %q) = %q, %q, want %q, %q",
+				testCase.engine, testCase.model, run, got, testCase.run, testCase.want)
+		}
 	}
 }

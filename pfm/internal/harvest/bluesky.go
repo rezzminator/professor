@@ -240,11 +240,7 @@ func bskyText(post *bskyPost) string {
 		at = end
 	}
 	out.WriteString(text[at:])
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	for index := range lines {
-		lines[index] = strings.TrimRight(lines[index], " ")
-	}
-	body := strings.ReplaceAll(strings.Join(lines, "  \n"), "  \n  \n", "\n\n")
+	body := hardBreaks(out.String())
 	if post.Embed != nil {
 		for _, image := range post.Embed.Images {
 			body += "\n\n![" + image.Alt + "](" + image.Fullsize + ")"
@@ -254,6 +250,16 @@ func bskyText(post *bskyPost) string {
 		}
 	}
 	return body
+}
+
+// hardBreaks renders a post's plain text as Markdown keeping its line breaks:
+// a single break as a hard break, a blank line as a paragraph break.
+func hardBreaks(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for index := range lines {
+		lines[index] = strings.TrimRight(lines[index], " ")
+	}
+	return strings.ReplaceAll(strings.Join(lines, "  \n"), "  \n  \n", "\n\n")
 }
 
 // bskySocialPost maps one thread node to a socialPost; parent is the id of the

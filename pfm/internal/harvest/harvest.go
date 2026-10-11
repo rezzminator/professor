@@ -26,6 +26,9 @@ func (h *Harvester) FetchWithOptions(ctx context.Context, source string, options
 	}
 	result, abandoned, refused := h.walk(ctx, source, options)
 	if !abandoned && !refused {
+		if result.Error == "" {
+			h.clearFailure(key) // the source reads again: its cached failure is history
+		}
 		h.recordStat(source, result)
 	}
 	return result

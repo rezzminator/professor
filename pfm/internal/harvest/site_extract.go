@@ -136,6 +136,14 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "x-post",
+		hosts:        []string{xHost, twitterHost, xAPIHost},
+		paths:        isXStatus,
+		extract:      extractXPost,
+		loaders:      xLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:         "mastodon-status",
 		detect:       isMastodon,
 		extract:      extractMastodonStatus,

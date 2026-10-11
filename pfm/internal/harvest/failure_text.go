@@ -228,6 +228,12 @@ func publicFailureTable(result Result, kind string) string {
 			"so the work is likely paywalled, and the harvester never signs in." + rungs +
 			" Search for an author preprint with harvester_search_literature, or read the publisher's landing page with harvester_read (urls)."
 	case errorKindForbidden:
+		if isBookLookupFailure(result) {
+			return fmt.Sprintf(bookNoOpenCopyLead+" the book catalogues that answered list none, "+
+				"and the others refused the harvester (HTTP %d %s: a bot block or an access rule, which the harvester "+
+				"cannot tell apart; it never signs in).%s Search for the book with harvester_search_literature, "+
+				"or read a public copy with harvester_read (urls).", status, failureStatusText(status), rungs)
+		}
 		return fmt.Sprintf("The source refused the harvester (HTTP %d %s): a bot block or an access rule, "+
 			"which the harvester cannot tell apart, and it never signs in.%s %s.", status, failureStatusText(status), rungs, anotherCopyLead)
 	case errorKindRateLimited:

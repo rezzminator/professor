@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -134,7 +137,8 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 
 // ClaudePluginGaps reads the store's settings.json and names every target id
 // not enabled, every plugin of ours enabled from both its GitHub and its -dev
-// marketplace, and every local target whose copy is missing or a symlink. A
+// marketplace, every local target whose copy is missing or a symlink, and every
+// other plugin enabled under two or more keys. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -174,7 +178,7 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			}
 		}
 	}
-	return gaps, nil
+	return append(gaps, claudePluginDuplicateGaps(document, path, targets)...), nil
 }
 
 // ClaudePluginsNotInstalled reads one account's plugins/installed_plugins.json
@@ -269,6 +273,179 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 		}
 	}
 	return unresolved, nil
+}
+
+// ClaudePluginMarketplaceGaps reads the store's plugins/known_marketplaces.json
+// and names every target whose marketplace is registered from a source other
+// than target.Source: `plugin marketplace add` answers "already added" for a
+// same-named marketplace, so pfm install keeps installing from the wrong source
+// until it is removed. A target with no source adds no marketplace and is not
+// compared. A source compares by its form (claudeMarketplaceSourceMatches); a
+// form whose record pfm cannot rebuild is not compared, never named with a
+// repair that cannot close it. A missing file or entry names nothing — the
+// enabled and installed checks cover a plugin never added; a file that cannot
+// be read or parsed returns its error, never an answer. A string read from the
+// file prints with its control characters escaped.
+func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
+	path := filepath.Join(store, "plugins", "known_marketplaces.json")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var known map[string]struct {
+		Source claudeMarketplaceRecord `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &known); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var gaps []ClaudePluginGap
+	for index := range targets {
+		target := &targets[index]
+		if target.Source == "" {
+			continue
+		}
+		_, marketplace, _ := strings.Cut(target.ID, "@")
+		entry, registered := known[marketplace]
+		if !registered || claudeMarketplaceSourceMatches(target.Source, entry.Source) {
+			continue
+		}
+		var got string
+		switch entry.Source.Kind {
+		case claudeMarketplaceGitHub:
+			got = entry.Source.Repo
+		case claudeMarketplaceDirectory:
+			got = entry.Source.Path
+		default:
+			got = strings.TrimSpace(entry.Source.Kind + " " + entry.Source.URL)
+		}
+		gaps = append(gaps, ClaudePluginGap{
+			fmt.Sprintf(
+				"plugin %s marketplace %s in %s points at %s, want %s",
+				target.ID,
+				marketplace,
+				path,
+				escapeControl(got),
+				target.Source,
+			),
+			"claude plugin marketplace remove " + marketplace + ", then " + ClaudePluginRepair,
+		})
+	}
+	return gaps, nil
+}
+
+// claudeMarketplaceRecord is the source Claude Code records for one marketplace
+// in known_marketplaces.json: a github repo, a git or url record's url, or a
+// directory's path.
+type claudeMarketplaceRecord struct {
+	Kind string `json:"source"`
+	Repo string `json:"repo"`
+	Path string `json:"path"`
+	URL  string `json:"url"`
+}
+
+// The record kinds pfm compares a source with.
+const (
+	claudeMarketplaceGitHub    = "github"
+	claudeMarketplaceDirectory = "directory"
+)
+
+// claudeGitHubShorthand is an owner/repo source, with an optional #ref.
+var claudeGitHubShorthand = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(#\S+)?$`)
+
+// claudeMarketplaceSourceMatches reports whether record is what `plugin
+// marketplace add source` registers, or a record pfm cannot compare with it. An
+// owner/repo[#ref] source matches a github record of the repo, the ref
+// stripped; an absolute path a directory record of the same clean path; a URL a
+// record holding that url, and a github record (one Claude Code may make from a
+// GitHub URL) is not compared. A relative or ~ path resolves where the add
+// runs, so a directory record is not compared. Every other pairing is a
+// different source.
+func claudeMarketplaceSourceMatches(source string, record claudeMarketplaceRecord) bool {
+	switch {
+	case strings.Contains(source, "://") || strings.HasPrefix(source, "git@"):
+		return record.Kind == claudeMarketplaceGitHub || (record.URL != "" && record.URL == source)
+	case filepath.IsAbs(source):
+		return record.Kind == claudeMarketplaceDirectory && filepath.Clean(record.Path) == filepath.Clean(source)
+	case claudeGitHubShorthand.MatchString(source):
+		repo, _, _ := strings.Cut(source, "#")
+		return record.Kind == claudeMarketplaceGitHub && record.Repo == repo
+	default:
+		return record.Kind == claudeMarketplaceDirectory
+	}
+}
+
+// claudePluginDuplicateGaps names every plugin enabled under two or more
+// name@marketplace keys in document, managed by pfm or not, sorted by name. A
+// plugin whose every enabled key claude.plugins lists is left alone: pfm
+// install enables each listed key again. A plugin of ours enabled as exactly
+// its GitHub and -dev ids is left to ClaudePluginGaps' own duplicate gap, whose
+// repair pfm install owns. A key from the file prints with its control
+// characters escaped.
+func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
+	enabled, _ := document["enabledPlugins"].(map[string]any)
+	byName := map[string][]string{}
+	for id, value := range enabled {
+		if value != true {
+			continue
+		}
+		name, _, _ := strings.Cut(id, "@")
+		byName[name] = append(byName[name], id)
+	}
+	listed := map[string]bool{}
+	managed := map[string][]string{}
+	for index := range targets {
+		listed[targets[index].ID] = true
+		if targets[index].Own {
+			pair := []string{targets[index].GitHubID, targets[index].DevID}
+			slices.Sort(pair)
+			managed[targets[index].Name] = pair
+		}
+	}
+	var gaps []ClaudePluginGap
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		ids := byName[name]
+		if len(ids) < 2 {
+			continue
+		}
+		slices.Sort(ids)
+		if slices.Equal(ids, managed[name]) || !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
+			continue
+		}
+		shown := make([]string, len(ids))
+		for index, id := range ids {
+			shown[index] = escapeControl(id)
+		}
+		gaps = append(gaps, ClaudePluginGap{
+			fmt.Sprintf(
+				"plugin %s enabled %s (%s) in %s",
+				escapeControl(name), timesWord(len(ids)), strings.Join(shown, " and "), path,
+			),
+			"keep one copy: claude plugin disable each other key",
+		})
+	}
+	return gaps
+}
+
+// escapeControl is text read from a file as one printed line: each control
+// character escaped as Go spells it, so a newline in a key or a url cannot
+// forge a line of its own.
+func escapeControl(text string) string {
+	if !strings.ContainsFunc(text, unicode.IsControl) {
+		return text
+	}
+	quoted := strconv.Quote(text)
+	return quoted[1 : len(quoted)-1]
+}
+
+// timesWord spells how many keys enable one plugin.
+func timesWord(count int) string {
+	if count == 2 {
+		return "twice"
+	}
+	return strconv.Itoa(count) + " times"
 }
 
 func readClaudeSettingsDocument(path string) (map[string]any, error) {

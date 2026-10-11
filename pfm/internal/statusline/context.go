@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -146,7 +147,7 @@ func spendDollars(usd float64, known bool) string {
 // transcriptGauge makes the transcript authoritative whenever it can be read.
 // The harness percentage is retained only for absent or unreadable transcripts.
 func transcriptGauge(runtime Runtime, data input, project string) contextGauge {
-	fallback := contextGauge{percent: int(data.ContextWindow.UsedPercentage)}
+	fallback := contextGauge{percent: gaugePercent(data.ContextWindow.UsedPercentage)}
 	if data.TranscriptPath == "" {
 		return fallback
 	}
@@ -157,7 +158,7 @@ func transcriptGauge(runtime Runtime, data input, project string) contextGauge {
 	window := contextWindow(runtime, data, meta)
 	meta.ContextWindow = window
 	gauge := contextGauge{
-		percent:      int(meta.ContextPercent()),
+		percent:      gaugePercent(meta.ContextPercent()),
 		window:       window,
 		humanPrompts: meta.HumanPrompts,
 		transcript:   true,
@@ -171,7 +172,7 @@ func transcriptGauge(runtime Runtime, data input, project string) contextGauge {
 		if estimate > 0 {
 			meta.ContextTokens = estimate
 		}
-		gauge.percent = int(meta.ContextPercent())
+		gauge.percent = gaugePercent(meta.ContextPercent())
 		gauge.marker = "~"
 		return gauge
 	}
@@ -288,4 +289,15 @@ func writeContextFloor(path string, floor int64) {
 	if err := atomicfile.Write(path, []byte(strconv.FormatInt(floor, 10)+"\n"), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "statusline: write context floor %s: %v\n", path, err)
 	}
+}
+
+// gaugePercent is a context or rate-limit share as the statusline shows it:
+// rounded to the nearest whole percent, so 69.1K of 1.0M reads 7%, never a
+// truncated 6%; a window not yet full stops at 99, so 100% always means full.
+func gaugePercent(share float64) int {
+	rounded := int(math.Round(share))
+	if rounded >= 100 && share < 100 {
+		return 99
+	}
+	return rounded
 }

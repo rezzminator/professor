@@ -3,6 +3,7 @@ package obs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
@@ -341,4 +342,78 @@ func TestStartFailedIsOneErrorRecord(t *testing.T) {
 	}
 	requireField(t, records[0], "argv", "codex")
 	requireField(t, records[0], FieldErr, "permission denied")
+}
+
+// TestRunnerCancelledChildIsNotAnError is the lane-M flake: a child its caller
+// cancelled on purpose answers context.Canceled (exec.Cmd.Wait reports ctx.Err
+// when the context ended the child), and every process door records that at
+// INFO with the err, never ERROR. A deadline that cut a child off stays
+// ERROR, as every other failure to start, run or wait does (the tests above).
+func TestRunnerCancelledChildIsNotAnError(t *testing.T) {
+	cancelled := fmt.Errorf("run %q: %w", "pfm", context.Canceled)
+	for _, testCase := range []struct {
+		name    string
+		err     error
+		door    func(ctx context.Context, err error)
+		message string
+		level   slog.Level
+		exit    float64
+	}{
+		{"wait cancelled", context.Canceled, waitDoor, "runner.exit", slog.LevelInfo, -1},
+		{"wait deadline", context.DeadlineExceeded, waitDoor, "runner.exit", slog.LevelError, -1},
+		{"run cancelled", cancelled, runDoor, "runner.run", slog.LevelInfo, -1},
+		{"start cancelled", context.Canceled, startDoor, "runner.start", slog.LevelInfo, 0},
+		{"direct door cancelled", context.Canceled, directDoor, "runner.exit", slog.LevelInfo, -1},
+		{"direct door start cancelled", context.Canceled, directStartDoor, "runner.start", slog.LevelInfo, 0},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx, recorder := Test(t)
+			testCase.door(ctx, testCase.err)
+			var found *Record
+			for _, record := range recorder.Records() {
+				if record.Message == testCase.message {
+					found = &record
+				}
+			}
+			if found == nil {
+				t.Fatalf("no %s record: %s", testCase.message, recorder.Raw())
+			}
+			if found.Level != testCase.level.String() {
+				t.Fatalf("%s logged at %s, want %s: %s", testCase.message, found.Level, testCase.level, recorder.Raw())
+			}
+			requireField(t, *found, FieldErr, testCase.err.Error())
+			if testCase.message != "runner.start" {
+				requireField(t, *found, FieldExit, testCase.exit)
+			}
+		})
+	}
+}
+
+func waitDoor(ctx context.Context, err error) {
+	fake := &deps.FakeRunner{}
+	fake.ScriptStart([]string{"pfm"}, 7, err, nil)
+	process, startErr := Runner(fake).Start(ctx, []string{"pfm", "doctor"}, deps.StartOptions{})
+	if startErr == nil {
+		_ = process.Wait()
+	}
+}
+
+func runDoor(ctx context.Context, err error) {
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{"pfm"}, deps.RunResult{ExitCode: -1}, err)
+	_, _ = Runner(fake).Run(ctx, []string{"pfm", "install"}, deps.RunOptions{})
+}
+
+func startDoor(ctx context.Context, err error) {
+	fake := &deps.FakeRunner{}
+	fake.ScriptStart([]string{"pfm"}, 0, nil, err)
+	_, _ = Runner(fake).Start(ctx, []string{"pfm", "doctor"}, deps.StartOptions{})
+}
+
+func directDoor(ctx context.Context, err error) {
+	Started(ctx, []string{"/usr/local/bin/codex", "app-server"}, 4242)(err)
+}
+
+func directStartDoor(ctx context.Context, err error) {
+	StartFailed(ctx, []string{"/usr/local/bin/codex", "app-server"}, err)
 }

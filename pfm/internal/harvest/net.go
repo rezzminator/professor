@@ -60,10 +60,35 @@ func errorKind(err error) string {
 		strings.Contains(low, "invalid url") {
 		return errorKindInvalid
 	}
-	if strings.Contains(low, "private") || strings.Contains(low, "internal") || strings.Contains(low, "not allowed") {
+	if isOwnRefusal(low) {
 		return errorKindBlocked
 	}
 	return errorKindConnect
+}
+
+// ownRefusalMarkers are the words of the harvester's own policy refusals (a
+// private or internal host, URL userinfo, the browser rung's SSRF guard,
+// ErrBrowserPolicyDenied, an unsafe archive member): the only
+// errors that are errorKindBlocked, published as the access-policy refusal. A
+// server's or transport's own words ("INTERNAL_ERROR", "not allowed to access
+// this API") never are.
+var ownRefusalMarkers = []string{
+	"refusing private/internal host",
+	"userinfo is not allowed",
+	strings.ToLower(ErrBrowserPolicyDenied.Error()),
+	"member name is absolute path",
+	"member name contains '..'",
+}
+
+// isOwnRefusal reports whether the lower-cased error text low is one of the
+// harvester's own policy refusals.
+func isOwnRefusal(low string) bool {
+	for _, marker := range ownRefusalMarkers {
+		if strings.Contains(low, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // FailureMessage returns the transport core's canonical terminal diagnostic.

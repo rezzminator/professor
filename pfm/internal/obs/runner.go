@@ -61,7 +61,8 @@ type loggedRunner struct {
 
 // Run records runner.run: INFO with the exit code when the command ran
 // (a non-zero exit is the command answering, per deps.Runner's contract),
-// ERROR with exit -1 when it never started.
+// ERROR with exit -1 when it never started — INFO when its caller cancelled
+// it (processLevel).
 func (runner loggedRunner) Run(ctx context.Context, argv []string, opts deps.RunOptions) (deps.RunResult, error) {
 	started := current(ctx).timing.Now()
 	result, err := runner.next.Run(ctx, argv, opts)
@@ -70,7 +71,7 @@ func (runner loggedRunner) Run(ctx context.Context, argv []string, opts deps.Run
 		exit = -1
 	}
 	attrs := append(argvShape(argv), slog.Int(FieldExit, exit))
-	record(ctx, compRunner, "runner.run", errorLevel(err), started, err, attrs...)
+	record(ctx, compRunner, "runner.run", processLevel(err), started, err, attrs...)
 	return result, err
 }
 
@@ -92,13 +93,14 @@ func (runner loggedRunner) LookPath(name string) (string, error) {
 }
 
 // Start records runner.start with the pid, then hands back a Process whose
-// terminals record their own result; a Start that fails is one ERROR record.
+// terminals record their own result; a Start that fails is one ERROR record
+// (INFO when its caller had cancelled it, processLevel).
 func (runner loggedRunner) Start(ctx context.Context, argv []string, opts deps.StartOptions) (deps.Process, error) {
 	started := current(ctx).timing.Now()
 	process, err := runner.next.Start(ctx, argv, opts)
 	attrs := argvShape(argv)
 	if err != nil {
-		record(ctx, compRunner, "runner.start", slog.LevelError, started, err, attrs...)
+		record(ctx, compRunner, "runner.start", processLevel(err), started, err, attrs...)
 		return nil, err
 	}
 	attrs = append(attrs, slog.Int(FieldPID, process.Pid()))
@@ -117,8 +119,8 @@ type loggedProcess struct {
 func (process *loggedProcess) Pid() int { return process.next.Pid() }
 
 // Wait records runner.exit: the child's exit code at INFO when it exited
-// non-zero (an *exec.ExitError is the child answering), ERROR with exit -1
-// for any other failure to wait.
+// non-zero (an *exec.ExitError is the child answering), exit -1 for any other
+// error — ERROR, or INFO when its caller cancelled the child (processLevel).
 func (process *loggedProcess) Wait() error {
 	err := process.next.Wait()
 	exit, level := 0, slog.LevelInfo
@@ -128,7 +130,7 @@ func (process *loggedProcess) Wait() error {
 	case errors.As(err, &exitErr):
 		exit = exitErr.ExitCode()
 	default:
-		exit, level = -1, slog.LevelError
+		exit, level = -1, processLevel(err)
 	}
 	process.terminal("runner.exit", level, err, slog.Int(FieldExit, exit))
 	return err
@@ -173,6 +175,18 @@ func argvShape(argv []string) []slog.Attr {
 		name = filepath.Base(argv[0])
 	}
 	return []slog.Attr{slog.String("argv", name), slog.Int("argc", len(argv))}
+}
+
+// processLevel is the level a process door records err at: INFO for nil and
+// for a context.Canceled — the caller ended the child on purpose, and
+// exec.Cmd.Wait reports ctx.Err() even for a child that then exited cleanly —
+// ERROR for every other failure to start, run or wait, a deadline that cut
+// the child off included.
+func processLevel(err error) slog.Level {
+	if errors.Is(err, context.Canceled) {
+		return slog.LevelInfo
+	}
+	return errorLevel(err)
 }
 
 // errorLevel picks the level a record takes: INFO when err is nil, else the
@@ -252,7 +266,8 @@ func (process waitedProcess) KillGroup() error {
 }
 
 // StartFailed is Started's counterpart for a direct door whose *exec.Cmd
-// never started: the one ERROR record a wrapped Runner.Start would write.
+// never started: the one record a wrapped Runner.Start would write, ERROR
+// unless its caller had cancelled it (processLevel).
 func StartFailed(ctx context.Context, argv []string, err error) {
-	record(ctx, compRunner, "runner.start", slog.LevelError, current(ctx).timing.Now(), err, argvShape(argv)...)
+	record(ctx, compRunner, "runner.start", processLevel(err), current(ctx).timing.Now(), err, argvShape(argv)...)
 }

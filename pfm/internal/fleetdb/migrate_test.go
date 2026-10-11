@@ -236,7 +236,8 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			waiting, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			// A held lock never releases, so only the configure step races this deadline.
+			waiting, cancel := context.WithTimeout(ctx, 2*time.Second)
 			held := OpenSharedState(waiting, paths.Values{StateDB: path})
 			cancel()
 			heldErr := held.Degraded()

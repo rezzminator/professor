@@ -28,6 +28,14 @@ func skillLinkLedgerPath(home string) string {
 	return filepath.Join(managedRootForHome(home), skillLinkLedgerName)
 }
 
+// SkillLinkDirs is the directories the installer's skill-links.json records it
+// links skills into. recorded is false only when the file is absent (no
+// install has written it); a file that is present but unreadable or invalid
+// is an error, never absence.
+func SkillLinkDirs(home string) (dirs []string, recorded bool, err error) {
+	return readSkillLinkLedger(home)
+}
+
 func readSkillLinkLedger(home string) ([]string, bool, error) {
 	path := skillLinkLedgerPath(home)
 	content, err := os.ReadFile(path)

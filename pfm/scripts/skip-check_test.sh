@@ -11,6 +11,12 @@ SHTEST_TAG=pfm-skip-check-test
 # shellcheck source=/dev/null
 source "$ROOT/../scripts/shtest.sh"
 
+# The module the allow-list rows resolve against: module p, package p/a holding TestListed.
+mkdir -p "$T/mod/a" "$T/mod/b"
+printf 'module p\n' > "$T/mod/go.mod"
+printf 'package a\n\nfunc TestListed() {}\n' > "$T/mod/a/a_test.go"
+printf 'package b\n\nfunc TestListed() {}\n' > "$T/mod/b/b_test.go"
+export PFM_SKIP_MODULE_ROOT="$T/mod"
 printf 'p/a\tTestListed\thelper\tfixture\n' > "$T/list.tsv"
 ev() { printf '{"Action":"%s","Package":"%s","Test":"%s"}\n' "$1" "$2" "$3"; }
 check() { # check <name> <want-rc> <want-grep> <json>   (PFM_SKIP_CHECK_VERBOSE passes through)
@@ -44,5 +50,17 @@ check "unparseable input is ERROR" 2 'SKIPS ERROR' "$T/garbage.json"
 check "missing input is ERROR" 2 'SKIPS ERROR input' "$T/absent.json"
 out=$(PFM_KNOWN_SKIPS="$T/no-list.tsv" bash "$SUT" "$T/listed.json" 2>&1); rc=$?
 if [ "$rc" -eq 2 ] && grep -q 'allow-list' <<< "$out"; then ok "missing allow-list is ERROR"; else bad "missing allow-list is ERROR" "rc=$rc" "$out"; fi
+
+# A row naming a test that does not exist is red and named, whatever the run skipped.
+printf 'p/a\tTestListed\thelper\tfixture\np/a\tTestDeleted\thelper\tfixture\n' > "$T/stale.tsv"
+out=$(PFM_KNOWN_SKIPS="$T/stale.tsv" bash "$SUT" "$T/listed.json" 2>&1); rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'SKIP-STALE p/a TestDeleted' <<< "$out" && ! grep -q 'SKIP-STALE p/a TestListed' <<< "$out"; then ok "a row for a deleted test is red, named"
+else bad "a row for a deleted test is red, named" "rc=$rc" "$out"; fi
+printf 'p/zz\tTestListed\thelper\tfixture\n' > "$T/stale-pkg.tsv"
+out=$(PFM_KNOWN_SKIPS="$T/stale-pkg.tsv" bash "$SUT" "$T/none.json" 2>&1); rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'SKIP-STALE p/zz TestListed' <<< "$out"; then ok "a row for a package that does not exist is red, named, even when the run skipped nothing"
+else bad "a row for a package that does not exist is red, named" "rc=$rc" "$out"; fi
+out=$(PFM_SKIP_MODULE_ROOT="$T/nomod" bash "$SUT" "$T/listed.json" 2>&1); rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'go.mod' <<< "$out"; then ok "a module root without go.mod is ERROR"; else bad "a module root without go.mod is ERROR" "rc=$rc" "$out"; fi
 
 shtest_end

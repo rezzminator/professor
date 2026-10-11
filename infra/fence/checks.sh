@@ -547,6 +547,8 @@ checks_pfm_verify() {
   # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
   # is rc 2 (an enumerator or grep that could not run), never a PASS.
   run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh"
+  # The flow matrix: every test and file TESTPLAN.md cites must exist.
+  run "pfm: flow-matrix citations" -- bash "$d/scripts/testplan-check.sh"
   # The gate scripts' own fixture suites: a ratchet nobody tests is trusted
   # on faith. Each prints "N passed, M failed" and is non-zero on any FAIL.
   run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d"
@@ -996,6 +998,7 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy pfm.vet run 'pfm: go vet' -- go -C "$d" vet ./...
     steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./...
     steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh"
+    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh"
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
     steps_add_heavy templates.check-map checks_gate_check_map "$run_dir"

@@ -59,6 +59,14 @@ grep '^cmd/pfm/' "$L/src.list" > "$L/cmd.list"
 # and hang the gate, so it is reported as an enumerator that could not run.
 g() { local out=$1 list=$2; shift 2; [ -s "$list" ] || return 2; grep "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
 
+# stale_baseline <name>: the baseline's Go-file keys (an optional `kind:` prefix
+# stripped) whose file no longer exists — a ledger entry that names nothing. A
+# deleted or renamed file must leave its baseline line (--measure prunes it), so
+# a green run never passes over a ledger that points at a file that is gone.
+stale_baseline() {
+  awk '{k = $1; sub(/^[a-z0-9]+:/, "", k); if (k ~ /\.go$/) print k}' "$BASE/$1.txt" | while read -r f; do [ -e "$f" ] || echo "$f"; done
+}
+
 # ratchet <id> <name> <current>: set ratchet — FAIL on any line the baseline lacks.
 ratchet() {
   local id=$1 name=$2 cur=$3
@@ -81,6 +89,8 @@ ratchet() {
     say "$id" MEASURE "$(wc -l < "$BASE/$name.txt" | tr -d ' ') entries -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
+  local stale; stale=$(stale_baseline "$name")
+  if [ -n "$stale" ]; then say "$id" FAIL "stale: $(echo "$stale" | tr '\n' ' ')— .arch/$name.txt names a file that no longer exists; run --measure"; return; fi
   local new gone
   new=$(comm -13 "$BASE/$name.txt" "$cur"); gone=$(comm -23 "$BASE/$name.txt" "$cur" | wc -l | tr -d ' ')
   if [ -n "$new" ]; then say "$id" FAIL "new: $(echo "$new" | tr '\n' ' ')"; return; fi
@@ -112,6 +122,8 @@ ratchet_counts() {
     say "$id" MEASURE "$(awk '{s+=$2} END {print s+0}' "$BASE/$name.txt") in $(wc -l < "$BASE/$name.txt" | tr -d ' ') keys -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
+  local stale; stale=$(stale_baseline "$name")
+  if [ -n "$stale" ]; then say "$id" FAIL "stale: $(echo "$stale" | tr '\n' ' ')— .arch/$name.txt names a file that no longer exists; run --measure"; return; fi
   local over
   over=$(awk -v slack="$slack" 'FILENAME==ARGV[1] {base[$1]=$2; next} !($1 in base) {print $1" (new "$2")"; next} $2>base[$1]+slack {print $1" ("base[$1]"->"$2")"}' "$BASE/$name.txt" "$cur")
   if [ -n "$over" ]; then say "$id" FAIL "$(echo "$over" | tr '\n' ' ')"; return; fi

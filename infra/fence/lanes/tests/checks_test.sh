@@ -163,7 +163,7 @@ graph_order() {
   ' "$T/registered"
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
-pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
+pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
 templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.refresh-scope,templates.pfm-guard,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&

@@ -11,21 +11,37 @@
 # skip buries the unlisted rows it exists to surface. `PFM_SKIP_CHECK_VERBOSE=1`
 # prints them as `GAP skipped test: <pkg> <Test> [<class>]` for a human audit.
 # A subtest is covered by its own row or by its parent test's row.
+# The list is a ledger too: a row whose test is no longer a `func Test…` in its
+# package's *_test.go files is `SKIP-STALE <pkg> <Test>` and red, whatever the run
+# skipped — a row for a deleted or renamed test excuses nothing and misleads.
+# The package maps to a directory under PFM_SKIP_MODULE_ROOT (default: pfm/, the
+# module root holding go.mod).
 # BROKEN STATE: no input named, an unreadable input or allow-list, a jq that is
 # missing or fails, or an input holding no test event at all = SKIPS ERROR and
 # rc 2 — "we could not look" is never "nothing was skipped".
 set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 LIST="${PFM_KNOWN_SKIPS:-$HERE/known-skips.tsv}"
+MODROOT="${PFM_SKIP_MODULE_ROOT:-$HERE/..}"
 die() { echo "SKIPS ERROR $*"; exit 2; }
 [ $# -gt 0 ] || die "usage: skip-check.sh <go-test.json>..."
 command -v jq >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — jq not on PATH"
 [ -r "$LIST" ] || die "allow-list $LIST unreadable"
 for f in "$@"; do [ -r "$f" ] || die "input $f unreadable"; done
+[ -r "$MODROOT/go.mod" ] || die "module root $MODROOT has no readable go.mod — cannot tell a stale row from a live one"
+module=$(awk '$1 == "module" {print $2; exit}' "$MODROOT/go.mod")
+[ -n "$module" ] || die "no module line in $MODROOT/go.mod"
 events=$(jq -rs '[.[] | select(.Test != null)] | length' "$@") || die "jq could not parse $*"
 [ "$events" -gt 0 ] || die "no test event in $* — the run never started a test"
 skipped=$(jq -r 'select(.Action == "skip" and .Test != null) | .Package + "\t" + .Test' "$@" | sort -u) \
   || die "jq could not read the skips in $*"
+stale=0
+while IFS=$'\t' read -r pkg test _; do
+  case "$pkg" in ''|'#'*) continue ;; esac
+  dir="$MODROOT${pkg#"$module"}"
+  if [ "${pkg#"$module"}" != "$pkg" ] && [ -d "$dir" ] && grep -qsE "^func ${test%%/*}\(" "$dir"/*_test.go; then continue; fi
+  printf 'SKIP-STALE %s %s\n' "$pkg" "$test"; stale=$((stale + 1))
+done < "$LIST"
 listed=0 unlisted=0
 while IFS=$'\t' read -r pkg test; do
   [ -n "$pkg" ] || continue
@@ -39,6 +55,9 @@ while IFS=$'\t' read -r pkg test; do
     printf 'SKIP-UNLISTED %s %s\n' "$pkg" "$test"; unlisted=$((unlisted + 1))
   fi
 done <<< "$skipped"
+if [ "$stale" -gt 0 ]; then
+  echo "SKIPS FAIL $stale row(s) in ${LIST##*/} name a test that does not exist ($unlisted unlisted skip(s)) — remove the row, or re-point it at the renamed test"; exit 1
+fi
 if [ "$unlisted" -gt 0 ]; then
   echo "SKIPS FAIL $unlisted skipped test(s) not in ${LIST##*/} ($listed listed) — run them, or record the reason there"; exit 1
 fi

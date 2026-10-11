@@ -21,6 +21,11 @@ func CompareVersions(left, right string) (int, error) {
 	if !releaseVersion.MatchString(left) || !releaseVersion.MatchString(right) {
 		return 0, fmt.Errorf("invalid engine-sync versions %q and %q", left, right)
 	}
+	for _, value := range []string{left, right} {
+		if leadingZeroPrereleaseID(value) {
+			return 0, fmt.Errorf("invalid engine-sync version %q: numeric prerelease id with a leading zero", value)
+		}
+	}
 	core := func(value string) string {
 		return strings.FieldsFunc(value, func(r rune) bool { return r == '-' || r == '+' })[0]
 	}
@@ -77,6 +82,23 @@ func CompareVersions(left, right string) (int, error) {
 		return -1, nil
 	}
 	return 1, nil
+}
+
+// leadingZeroPrereleaseID reports a numeric prerelease id written with a
+// leading zero, which semver forbids: "01" and "1" would otherwise each order
+// above the other.
+func leadingZeroPrereleaseID(value string) bool {
+	value, _, _ = strings.Cut(value, "+")
+	_, suffix, found := strings.Cut(value, "-")
+	if !found {
+		return false
+	}
+	for _, id := range strings.Split(suffix, ".") {
+		if len(id) > 1 && id[0] == '0' && strings.Trim(id, "0123456789") == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Version reads the selected binary's version without loading its configuration.

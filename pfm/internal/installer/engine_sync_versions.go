@@ -47,6 +47,9 @@ func ReportEngineSyncVersions(w io.Writer, home string, env paths.Env) (warnings
 			continue
 		}
 		if _, err := enginesync.CompareVersions(entry.Name(), entry.Name()); err != nil {
+			fmt.Fprintf(w, "doctor: engine-sync state=WARN cache %s not probed: %v\n",
+				filepath.Join(versions, entry.Name()), err)
+			warnings++
 			continue
 		}
 		binary := filepath.Join(versions, entry.Name(), "engine-sync")

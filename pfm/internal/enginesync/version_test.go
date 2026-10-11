@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -44,5 +45,27 @@ func TestCompareEngineSyncVersionPrecedence(t *testing.T) {
 				t.Fatalf("compare=%d (%v), want %d", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCompareVersionsRefusesALeadingZeroNumericPrereleaseID(t *testing.T) {
+	for _, tc := range []struct{ left, right, offender string }{
+		{"1.0.0-01", "1.0.0-1", "1.0.0-01"},
+		{"1.0.0-1", "1.0.0-01", "1.0.0-01"},
+		{"1.0.0-alpha.007", "1.0.0-alpha.7", "1.0.0-alpha.007"},
+	} {
+		_, err := CompareVersions(tc.left, tc.right)
+		if err == nil || !strings.Contains(err.Error(), tc.offender) {
+			t.Fatalf(
+				"CompareVersions(%q, %q) err = %v, want invalid semver naming %q",
+				tc.left, tc.right, err, tc.offender,
+			)
+		}
+	}
+	if got, err := CompareVersions("1.0.0-1", "1.0.0-2"); err != nil || got != -1 {
+		t.Fatalf("1.0.0-1 vs 1.0.0-2 = %d (%v), want -1", got, err)
+	}
+	if got, err := CompareVersions("1.0.0-0", "1.0.0-0"); err != nil || got != 0 {
+		t.Fatalf("a bare 0 id is valid, got %d (%v)", got, err)
 	}
 }

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -149,6 +151,17 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				}
 			}
 			t.Setenv("PATH", bin)
+			if scenario == "quiet" {
+				// A fresh machine has neither python3 nor the tracetree kit the
+				// install links: the pre-change check never judges them.
+				if found, err := exec.LookPath("python3"); err == nil {
+					t.Fatalf("python3 resolves to %s on the fresh home's PATH", found)
+				}
+				kit := filepath.Join(home, ".claude", "skills", "tracetree")
+				if _, err := os.Lstat(kit); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("the fresh home already carries %s (err=%v)", kit, err)
+				}
+			}
 			savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
 			t.Cleanup(func() { doctor.DependencyProbeOverride, runInstaller = savedProbe, savedInstaller })
 			doctor.DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {

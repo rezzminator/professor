@@ -23,7 +23,7 @@ type Hook struct {
 
 func HookTemplates(home string) []Hook {
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	tracerIntake := tracerIntakeCommand(filepath.Join(home, ".claude", "skills", "tracetree", "tracetree.py"))
+	tracerIntake := tracerIntakeCommand(TracerIntakeKit(home))
 	return []Hook{
 		{Event: "SessionStart", Command: binary + " internal launcher-repair", Name: "launcher-repair"},
 		{
@@ -48,6 +48,25 @@ func HookTemplates(home string) []Hook {
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal exit-intercept", Name: "exit-intercept"},
 	}
+}
+
+// TracerIntakeKit is the tracetree kit file the tracer-intake hook runs, under
+// the home's default Claude config dir.
+func TracerIntakeKit(home string) string {
+	return filepath.Join(home, ".claude", "skills", "tracetree", "tracetree.py")
+}
+
+// TracerIntakeHook is the tracer-intake row of HookTemplates and the kit file
+// its command runs, so a caller that proves the hook can work (the doctor
+// check) follows the row with no literal of its own. ok is false when the
+// registry carries no such row.
+func TracerIntakeHook(home string) (hook Hook, kit string, ok bool) {
+	for _, candidate := range HookTemplates(home) {
+		if candidate.Name == hookTracerIntake {
+			return candidate, TracerIntakeKit(home), true
+		}
+	}
+	return Hook{}, "", false
 }
 
 // tracerIntakeCommand runs the tracetree kit's `intake` hook, which opens a

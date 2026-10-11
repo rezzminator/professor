@@ -111,7 +111,7 @@ type installEnableRunner struct {
 func (runner *installEnableRunner) Run(ctx context.Context, name string, args ...string) error {
 	err := runner.fakeRunner.Run(ctx, name, args...)
 	if runner.failEnable && name+" "+strings.Join(args, " ") ==
-		"systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-reminder.timer" {
+		"systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer" {
 		return errors.New("exit 1")
 	}
 	return err
@@ -119,10 +119,10 @@ func (runner *installEnableRunner) Run(ctx context.Context, name string, args ..
 
 func (runner *installEnableRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
-	for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit} {
+	for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit} {
 		if call == "systemctl --user show --property=ActiveState --value "+unit {
 			runner.calls = append(runner.calls, call)
-			if unit == reminderTimerUnit {
+			if unit == scheduleTimerUnit {
 				return []byte(runner.timerState + "\n"), nil
 			}
 			return []byte("active\n"), nil
@@ -142,7 +142,7 @@ func TestInstallDeferredEnableFailureLandsLaterSteps(t *testing.T) {
 	_, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, Runner: runner, Stdout: &output, MCPConfigPath: testConfigPath(t),
 	})
-	want := "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-reminder.timer: exit 1"
+	want := "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer: exit 1"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("install error=%v, want %q", err, want)
 	}
@@ -195,7 +195,7 @@ func TestInstallDeferredRerunRepairsInactiveTimerAndKeepsHealthyUnits(t *testing
 				t.Fatal(err)
 			}
 			calls := strings.Join(runner.calls, "\n")
-			enable := "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-reminder.timer"
+			enable := "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer"
 			if state == "inactive" {
 				if !strings.Contains(calls, "systemctl --user daemon-reload") || !strings.Contains(calls, enable) {
 					t.Fatalf("inactive timer not retried:\n%s", calls)
@@ -289,7 +289,7 @@ func TestInstallDeferredSchedulerRefusalPrecedesSeed(t *testing.T) {
 	_, err := Run(context.Background(), Options{
 		Mode:              ModeApply,
 		Home:              home,
-		Runner:            &fakeRunner{nameSyncActive: true, reminderStates: []string{"inactive"}},
+		Runner:            &fakeRunner{nameSyncActive: true, scheduleStates: []string{"inactive"}},
 		ConfigSeed:        example,
 		ConfigSeedContent: []byte(`{"version":2}`),
 		MCPConfigPath:     target,
@@ -306,26 +306,26 @@ func TestInstallDeferredSchedulerRefusalPrecedesSeed(t *testing.T) {
 	}
 }
 
-func TestInstallDeferredReminderWaitThroughRun(t *testing.T) {
+func TestInstallDeferredScheduleWaitThroughRun(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
 	var slept time.Duration
 	_, err := Run(context.Background(), Options{
 		Mode:          ModeApply,
 		Home:          home,
-		Runner:        &fakeRunner{nameSyncIdle: true, reminderActive: true, reminderStates: []string{"activating"}},
+		Runner:        &fakeRunner{nameSyncIdle: true, scheduleActive: true, scheduleStates: []string{"activating"}},
 		Stdout:        &output,
 		MCPConfigPath: testConfigPath(t),
 		Sleep:         func(d time.Duration) { slept += d },
 	})
-	want := ErrReminderRunning
+	want := ErrScheduleRunning
 	if schedulerIsLaunchd {
-		want = ErrReminderAgentRunning
+		want = ErrScheduleAgentRunning
 	}
 	if !errors.Is(err, want) || slept != 90*time.Second ||
 		!strings.Contains(
 			output.String(),
-			"  wait    the pfm reminder is delivering; waiting up to 1m30s for it to finish\n",
+			"  wait    the pfm schedule is delivering; waiting up to 1m30s for it to finish\n",
 		) {
 		t.Fatalf("wait slept=%s error=%v output=%s", slept, err, output.String())
 	}

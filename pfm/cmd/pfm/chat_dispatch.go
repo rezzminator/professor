@@ -117,8 +117,8 @@ func runChatWithRuntime(
 		return runChatUnkillContext(ctx, rest, stdout, stderr, runtime)
 	case "end":
 		return runChatEnd(rest, stdout, stderr, runtime)
-	case "reminder":
-		return runChatReminder(rest, stdout, stderr, runtime)
+	case "schedule":
+		return runChatSchedule(rest, stdout, stderr, runtime)
 	case "reload":
 		return runChatReloadWithRuntime(rest, stdout, stderr, runtime, paths.OSEnv{})
 	case whoamiCommand:
@@ -165,7 +165,7 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  kill        kill a chat, optionally closing it")
 	fmt.Fprintln(w, "  unkill      remove a chat kill")
 	fmt.Fprintln(w, "  end         end a chat's tmux server")
-	fmt.Fprintln(w, "  reminder    recurring alarms that wake a chat: set | ls | rm")
+	fmt.Fprintln(w, "  schedule    recurring alarms that wake a chat: set | ls | rm")
 	fmt.Fprintln(w, "  reload      reboot a Claude chat in place under another configured account/cache mode")
 	fmt.Fprintln(w, "  find/save/branch/history/ls/resolve")
 	fmt.Fprintln(w)

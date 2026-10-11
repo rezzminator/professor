@@ -255,7 +255,15 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	legacyPathWant := filepath.Join(unitDir, "default.target.wants", "cc-name-sync.path")
 	legacyTimerWant := filepath.Join(unitDir, "timers.target.wants", "cc-name-sync.timer")
-	for _, target := range []string{legacyPathWant, legacyTimerWant} {
+	renamedTimerWant := filepath.Join(unitDir, "timers.target.wants", "pfm-reminder.timer")
+	renamedUnits := []string{
+		filepath.Join(unitDir, "pfm-reminder.service"),
+		filepath.Join(unitDir, "pfm-reminder.timer"),
+	}
+	for _, unit := range renamedUnits {
+		writeFixture(t, unit, "[Unit]\nDescription=renamed\n")
+	}
+	for _, target := range []string{legacyPathWant, legacyTimerWant, renamedTimerWant} {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -371,21 +379,21 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
 			filepath.Join(unitDir, nameSyncTimerUnit),
 		)
-		for _, unit := range []string{reminderServiceUnit, reminderTimerUnit} {
+		for _, unit := range []string{scheduleServiceUnit, scheduleTimerUnit} {
 			assertLink(t, filepath.Join(unitDir, unit), filepath.Join(managed, "systemd", unit))
 		}
 		assertLink(
 			t,
-			filepath.Join(unitDir, "timers.target.wants", reminderTimerUnit),
-			filepath.Join(unitDir, reminderTimerUnit),
+			filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
+			filepath.Join(unitDir, scheduleTimerUnit),
 		)
 	}
 	// The predecessor's enablement links are a systemd concept; a launchd host
 	// never wires systemd at all, so it has none to retire.
 	if !schedulerIsLaunchd {
-		for _, retired := range []string{legacyPathWant, legacyTimerWant} {
+		for _, retired := range append([]string{legacyPathWant, legacyTimerWant, renamedTimerWant}, renamedUnits...) {
 			if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-				t.Fatalf("retired enablement link remains at %s: %v", retired, err)
+				t.Fatalf("retired unit or enablement link remains at %s: %v", retired, err)
 			}
 		}
 	}
@@ -527,9 +535,9 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	for _, removed := range []string{
 		filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
 		filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
-		filepath.Join(unitDir, "timers.target.wants", reminderTimerUnit),
-		filepath.Join(unitDir, reminderServiceUnit),
-		filepath.Join(unitDir, reminderTimerUnit),
+		filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
+		filepath.Join(unitDir, scheduleServiceUnit),
+		filepath.Join(unitDir, scheduleTimerUnit),
 	} {
 		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
 			t.Fatalf("uninstall left enablement link at %s: %v", removed, err)
@@ -1030,7 +1038,7 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 	wantCalls := []string{
 		nameSyncStateProbe,
 		"systemctl --user daemon-reload",
-		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit + " " + reminderTimerUnit,
+		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit + " " + scheduleTimerUnit,
 	}
 	if schedulerIsLaunchd {
 		// launchd has no manager probe to fail: the agent is bootstrapped into

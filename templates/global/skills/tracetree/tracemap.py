@@ -83,14 +83,16 @@ def fences(lines):
     return out
 
 
-def enclosing(lines, i, lg, fenced):
-    """(name, 0-based start line, kind) of the component holding line i; (None, None, "file") at file level."""
+def enclosing(lines, i, lg, fenced, back=None):
+    """(name, 0-based start line, kind) of the component holding line i; (None, None, "file") at file level. With
+    `back`, a component opening more than that many lines above i is not looked for: file level."""
     defs = DEFS.get(lg)
     if not defs:
         return None, None, "file"
+    stop = -1 if back is None else max(-1, i - back - 1)
     if lg == PY:
-        return py_enclosing(lines, i)
-    for j in range(i, -1, -1):
+        return py_enclosing(lines, i, stop)
+    for j in range(i, stop, -1):
         if j in fenced:
             continue
         line = lines[j]
@@ -104,11 +106,11 @@ def enclosing(lines, i, lg, fenced):
     return None, None, "file"
 
 
-def py_enclosing(lines, i):
-    """The nearest def or class indented less than line i (or on line i itself); file level past an unindented
-    statement."""
+def py_enclosing(lines, i, stop=-1):
+    """The nearest def or class indented less than line i (or on line i itself), above `stop`; file level past an
+    unindented statement."""
     want = indent(lines[i]) if lines[i].strip() else None
-    for j in range(i, -1, -1):
+    for j in range(i, stop, -1):
         s = lines[j]
         if not s.strip():
             continue
@@ -187,7 +189,7 @@ class Builder:
         self.files, self.root = files, root
         self.rank = {name: i for i, name in enumerate(names)}
         self.g = {"run": run, "root": root, "rank": self.rank, "components": {}, "edges": {}, "threads": {}}
-        self.meta, self.bodies, self.splits = {}, {}, []
+        self.meta, self.bodies, self.splits, self.back = {}, {}, [], {}
         for name in names:
             self.walk(name, nodes[name])
         for parent, cid, child in self.splits:
@@ -201,6 +203,8 @@ class Builder:
             lines = self.files.lines(key) or []
             lg = lang(key)
             self.meta[key] = (lines, lg, fences(lines) if lg == MD else set())
+            # a file the kit searches only near an address: no component is looked for further up than one body
+            self.back[key] = BODY_CAP if self.files.reach(key) else None
         return self.meta[key]
 
     def locate(self, key, line, make):
@@ -208,7 +212,7 @@ class Builder:
         lines, lg, fenced = self.file_meta(key)
         if not 1 <= line <= len(lines):
             return None
-        name, start, kind = enclosing(lines, line - 1, lg, fenced)
+        name, start, kind = enclosing(lines, line - 1, lg, fenced, self.back[key])
         rel = os.path.relpath(key, self.root)
         cid = f"{rel}::{name}" if name else rel
         comps = self.g["components"]

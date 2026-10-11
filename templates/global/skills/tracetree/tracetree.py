@@ -56,7 +56,20 @@ else the reflog of HEAD at RUN/ROOT's mtime) holds its first quote line near the
 `drifted=N` after `rejected=`; the map leaves drifted hops out; an answer cite backed only by drifted hops is marked
 `≈`. A git command that fails or takes over 10 s leaves the hop REJECTED and prints one `DRIFT UNKNOWN — {reason}`.
 The printout always shows the file's own text.
-A node that broke the hop contract is named without drilling. `wait` (right after the WAIT line) and every `check` view
+A file past 1 MB is searched only within 30 lines of a hop's address and of an answer cite's: a quote further off is
+REJECTED (`quote not within 30 lines of the address`) and a cite's quoted text is not moved there. A file past 128 MB is
+not read: its hops are REJECTED (`file is N MB, over the 128 MB read limit`); a path that is no regular file is not
+opened (`not a regular file`). Each such file a hop, cite or FROM was checked in is named once, by a `·` note after the
+WARNINGS block (the JSON's `notes`) and by `start`, so no file makes a command search or read without bound.
+A hop, a `start` FROM, a `read` block and an answer cite can be pinned to a git revision of ROOT: `{rev}:{path}:{line}`.
+The revision is resolved to its commit (`git rev-parse`), the file is that commit's (`git show`, read-only: nothing is
+checked out), and the address is stored and printed as `{commit, 12 hex}:{path}`. A pinned hop is checked like any hop
+(its quote at the line, else within the file, else REJECTED), never placed in the working tree, never DRIFTED, and breaks
+no contract by being pinned; a path the commit lacks or holds as a directory, a file there past 128 MB, or a revision
+naming no commit is REJECTED with that reason, and a git that cannot answer with `git could not say: {reason}`. `write`
+stores every pinned address, cite and NOT READ or LEAD range under its commit, never touching `>` and `=` lines.
+A node that broke the hop contract is named without drilling, and in the answers view every answer line of that node, and
+every line whose cite only that node's verified hops back, ends ` ⚠ node {ID} broke the hop contract`. `wait` (right after the WAIT line) and every `check` view
 (first) print a WARNINGS block, from the sidecar's `how` and `status` per hop, the `ID.refused` marker, and the check-time
 resolution and drift: per node, hops the resolver placed by `basename and quote`, `sibling file` or `unique line` (plain
 tail resolution is none), a write refused once and stored with hops that still do not hold, hops REJECTED; then one
@@ -85,6 +98,7 @@ import json
 import os
 import random
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -94,7 +108,9 @@ import tracemap
 NEAR = 30
 SIBLING_NEAR = 2
 UNIQUE_CHARS = 24
-INDEX_MAX_BYTES = 1 << 20
+SEARCH_MAX_BYTES = 1 << 20
+READ_MAX_BYTES = 128 << 20
+PIN_ABBREV = 12
 GIT_TIMEOUT = 10
 NOTE_SPAN = 40
 CITE_SLACK = 3
@@ -103,15 +119,22 @@ IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 BACKTICK = re.compile(r"`([^`]+)`")
 ADDR = re.compile(r"@\s*(\S+?):(\d+)(?:-(\d+))?\s*$")
 CITE = re.compile(r"\[([^\[\]\s]+?):(\d+)(?:-(\d+))?\]")
-XREF = re.compile(r"([\w./-]+\.\w+):(\d+)")
+XREF = re.compile(r"((?:[0-9a-f]{12}:)?[\w./-]+\.\w+):(\d+)")
 # a line range a NOT READ or LEAD line names: `path:A-B`, or `path lines A-B, C and D-E`
-SPANS = re.compile(r"([\w./-]+\.\w+)(?::(\d+)-(\d+)|\s+lines?\s+(\d+(?:-\d+)?(?:(?:\s*,\s*|\s+and\s+)\d+(?:-\d+)?)*))")
+SPANS = re.compile(r"((?:[0-9a-f]{12}:)?[\w./-]+\.\w+)(?::(\d+)-(\d+)|\s+lines?\s+(\d+(?:-\d+)?(?:(?:\s*,\s*|\s+and\s+)\d+(?:-\d+)?)*))")
+PINNED = re.compile(r"[0-9a-f]{%d}:" % PIN_ABBREV)
+# `{rev}:{path}` followed by `:LINE` or ` lines A-B`, the way a hop, cite, NOT READ or LEAD line names a pinned range
+PINREF = re.compile(r"(?<![\w:~^])([\w.~^/-]+:[\w./-]+\.\w+)(?=:\d|\s+lines?\s+\d)")
 PLACEHOLDER = re.compile(r"\{[^{}]*\}")
 NODE_ID = re.compile(r"[0-9]+(?:\.[0-9]+)*")
 GAPS = re.compile(r"…|\.\.\.|<[^<>]*>|\{[^{}]*\}")
 KINDS = ("THREAD", "SPLIT", "LEAD", "END", "NOT READ")
 KEYWORDS = {"func", "return", "error", "string", "true", "false", "nil", "none", "self", "this",
             "const", "var", "def", "class", "import", "from", "with", "for", "the", "and", "not"}
+
+
+def megabytes(size):
+    return f"{size / (1 << 20):.1f} MB"
 
 
 def fail(msg):
@@ -321,20 +344,127 @@ class Files:
         self.git_root = None
         self.starts = {}
         self.old_text = {}
+        # files past SEARCH_MAX_BYTES loaded / searched near an address only / past READ_MAX_BYTES / no regular file /
+        # git could not read; pinned addresses, revisions resolved and revisions git could not resolve
+        self.large, self.big, self.unread, self.not_file, self.git_errors = {}, {}, {}, {}, {}
+        self.pins, self.revs, self.rev_errors = {}, {}, {}
+
+    def pin(self, path):
+        """(commit or None, path from ROOT, revision) for an address pinned to a git revision, `{rev}:{path}` — a name
+        that is no file under ROOT and holds a colon; the commit is None when the revision names none. None for any
+        other path. A pinned address is the file as that commit holds it, read with git alone."""
+        if ":" not in path:
+            return None
+        if path not in self.pins:
+            spec = path
+            if os.path.isabs(path):
+                spec = path[len(self.root) + 1:] if path.startswith(self.root + os.sep) else ""
+            rev, _, rel = spec.partition(":")
+            rel = os.path.normpath(rel) if rel else ""
+            if (not rev or not rel or rel.startswith("..") or os.path.isabs(rel) or rev.startswith("-")
+                    or any(c.isspace() for c in rev) or os.path.lexists(os.path.join(self.root, spec))):
+                self.pins[path] = None
+            else:
+                if rev not in self.revs:
+                    try:
+                        code, out, _ = git_out(self, ["rev-parse", "--verify", "-q", rev + "^{commit}"])
+                        self.revs[rev] = out.strip() if code == 0 and out.strip() else None
+                    except GitUnknown as e:
+                        self.unknown[str(e)] = self.unknown.get(str(e), 0) + 1
+                        self.revs[rev], self.rev_errors[rev] = None, str(e)
+                self.pins[path] = (self.revs[rev], rel, rev)
+        return self.pins[path]
 
     def key(self, path):
+        pin = self.pin(path)
+        if pin and pin[0]:
+            return os.path.join(self.root, f"{pin[0][:PIN_ABBREV]}:{pin[1]}")
         p = path if os.path.isabs(path) else os.path.join(self.root, path)
         return os.path.normpath(p)
 
     def lines(self, path):
         p = self.key(path)
         if p not in self.cache:
-            try:
-                with open(p, encoding="utf-8", errors="replace") as f:
-                    self.cache[p] = f.read().split("\n")
-            except OSError:
-                self.cache[p] = None
+            pin = self.pin(path)
+            self.cache[p] = self.revision_lines(p, pin) if pin and pin[0] else self.file_lines(p)
         return self.cache[p]
+
+    def file_lines(self, p):
+        """The lines of the regular file at p, read up to READ_MAX_BYTES; None when it cannot be read, is no regular
+        file (named in `not_file`) or is past READ_MAX_BYTES (named in `unread`). A file past SEARCH_MAX_BYTES is named
+        in `large`."""
+        try:
+            st = os.stat(p)
+            if not stat.S_ISREG(st.st_mode):
+                if not stat.S_ISDIR(st.st_mode):
+                    self.not_file[p] = "not a regular file"
+                return None
+            if st.st_size > READ_MAX_BYTES:
+                self.unread[p] = st.st_size
+                return None
+            with open(p, encoding="utf-8", errors="replace") as f:
+                text = f.read(READ_MAX_BYTES + 1)
+        except OSError:
+            return None
+        size = max(st.st_size, len(text))
+        if size > READ_MAX_BYTES:
+            self.unread[p] = size
+            return None
+        if size > SEARCH_MAX_BYTES:
+            self.large[p] = size
+        return text.split("\n")
+
+    def revision_lines(self, p, pin):
+        """The lines of a pinned file; None when its commit lacks the path, holds a directory there, holds a file past
+        READ_MAX_BYTES (named in `unread`, never read) or git cannot say (named in `git_errors`, counted in `unknown`)."""
+        try:
+            code, out, err = git_out(self, ["ls-tree", "-l", pin[0], "--", pin[1]])
+            if code != 0:
+                raise GitUnknown(f"git ls-tree {pin[0][:PIN_ABBREV]} {pin[1]} failed: {err.strip()[:120]}")
+            entry = out.split("\n")[0].split("\t")[0].split()
+            if not entry:
+                return None
+            if entry[1] != "blob":
+                self.not_file[p] = "a directory, not a file" if entry[1] == "tree" else f"a {entry[1]}, not a file"
+                return None
+            if entry[3].isdigit() and int(entry[3]) > READ_MAX_BYTES:
+                self.unread[p] = int(entry[3])
+                return None
+            lines = text_at(self, pin[0], pin[1])
+        except GitUnknown as e:
+            self.unknown[str(e)] = self.unknown.get(str(e), 0) + 1
+            self.git_errors[p] = str(e)
+            return None
+        if lines is not None:
+            size = sum(len(l) + 1 for l in lines)
+            if size > SEARCH_MAX_BYTES:
+                self.large[p] = size
+        return lines
+
+    def reach(self, path):
+        """NEAR for a file past SEARCH_MAX_BYTES, the only distance from an address it is searched, and the file joins
+        `big`, the files named in the size notes; None for the rest."""
+        k = self.key(path)
+        if k not in self.large:
+            return None
+        self.big[k] = self.large[k]
+        return NEAR
+
+    def why_unread(self, path, found=None):
+        """Why `path` (found as the file `found`, when a search found one) places no file: git could not say, a
+        revision that names no commit, past READ_MAX_BYTES, no regular file, a commit lacking the path, else absent."""
+        pin = self.pin(path)
+        if pin and not pin[0]:
+            why = self.rev_errors.get(pin[2])
+            return f"git could not say: {why}" if why else f"no commit named {pin[2]}"
+        k = found or self.key(path)
+        if k in self.git_errors:
+            return f"git could not say: {self.git_errors[k]}"
+        if k in self.unread:
+            return f"file is {megabytes(self.unread[k])}, over the {READ_MAX_BYTES >> 20} MB read limit"
+        if k in self.not_file:
+            return self.not_file[k]
+        return f"no such file at {pin[0][:PIN_ABBREV]}" if pin else "no such file"
 
     def listing(self):
         """Every file under ROOT, from one listing per process: `git ls-files` (tracked and untracked, not ignored)
@@ -377,7 +507,7 @@ class Files:
             self.index = {}
             for p in self.listing():
                 try:
-                    if os.path.getsize(p) > INDEX_MAX_BYTES:
+                    if os.path.getsize(p) > SEARCH_MAX_BYTES:
                         continue
                     with open(p, "rb") as f:
                         raw = f.read()
@@ -409,7 +539,7 @@ class Files:
         if len(hits) > 1 and quote:
             scored = []
             for p in hits:
-                i, want = find_first(self.lines(p) or [], quote, at)
+                i, want = find_first(self.lines(p) or [], quote, at, self.reach(p))
                 if i is not None:
                     scored.append((RANK[want], abs(i - at), p))
             hits = [min(scored)[2]] if scored else []
@@ -512,17 +642,20 @@ def place_hop(files, path, ln, quotes):
         got["key"], got["lines"] = key, lines
     if not quotes:
         if lines is None:
+            got["reason"] = files.why_unread(path, key)
             return got
         if 1 <= ln <= len(lines):
             return dict(got, status="verified", got=[ln - 1], tag="unquoted")
         return dict(got, status="badaddr", reason=f"the file has {len(lines)} lines")
     first, tag, how = None, "", ""
     if lines is not None:
-        first, tag = find_first(lines, quote, ln - 1)
+        first, tag = find_first(lines, quote, ln - 1, files.reach(key))
     if first is None:
-        there = resolve_elsewhere(files, path, ln, quote, key)
+        # a pinned hop is never placed in the working tree: another revision's file is not the one it names
+        there = None if files.pin(path) else resolve_elsewhere(files, path, ln, quote, key)
         if there is None:
-            got["reason"] = "quote not in the file" if lines is not None else "no such file"
+            got["reason"] = files.why_unread(path, key) if lines is None else \
+                f"quote not within {NEAR} lines of the address" if files.reach(key) else "quote not in the file"
             got["elided"] = has_gap(quote)
             return got
         key, lines, first, tag, how = there["key"], there["lines"], there["first"], there["tag"], there["how"]
@@ -684,6 +817,8 @@ def drift_of(files, run, side, hi, path, ln, quotes, placed):
     entry says verified or moved and the file's sha256 differs or the file is gone; with no sidecar, when the commit the
     run started from holds its first quote line near the cited line in the given or the resolved path. A git question
     that cannot be answered is counted under files.unknown and the hop stays rejected."""
+    if files.pin(path):
+        return None
     if side is not None:
         entry = side[hi]
         if entry.get("status") in ("verified", "moved") and entry.get("path") and entry.get("sha256"):
@@ -813,6 +948,7 @@ def verify(run, files, names, counts, drift=True):
                     counts["followed"] += 1
                 a, b = got[0] + 1, got[-1] + 1
                 ranges.append((fkey, a, b))
+                n.setdefault("held", []).append((fkey, a, b))
                 shown = files.shown(fkey, path)
                 if shown != path:
                     files.alias.setdefault(path, set()).add(fkey)
@@ -844,7 +980,10 @@ def verify(run, files, names, counts, drift=True):
                 window = "\n".join(lines[max(0, a - 1 - NOTE_SPAN):min(len(lines), b + NOTE_SPAN)])
                 for note in notes:
                     extra = window
-                    for ref, refln in XREF.findall(note):
+                    for xm in XREF.finditer(note):
+                        if glued(note, xm):
+                            continue
+                        ref, refln = xm.groups()
                         _, rl = files.find(ref)
                         if rl:
                             k = int(refln)
@@ -900,10 +1039,12 @@ def span_parts(span):
     return [p.strip() for p in GAPS.split(s) if len(p.strip()) >= 4] or ([s] if len(s) >= 6 else [])
 
 
-def span_line(lines, parts, near):
-    """The 0-based line nearest `near` holding every part (or, failing that, the first part), else None."""
+def span_line(lines, parts, near, reach=None):
+    """The 0-based line nearest `near` holding every part (or, failing that, the first part), else None; with `reach`,
+    only within that many lines of `near`."""
+    lo, hi = (0, len(lines)) if reach is None else (max(0, near - reach), min(len(lines), near + reach + 1))
     for want in (parts, parts[:1]):
-        hits = [i for i, l in enumerate(lines) if all(p in loose(l) for p in want)]
+        hits = [i for i in range(lo, hi) if all(p in loose(lines[i]) for p in want)]
         if hits:
             return min(hits, key=lambda i: abs(i - near))
     return None
@@ -946,7 +1087,7 @@ def check_answer(text, files, ranges):
             continue
         best = None
         for c in live:
-            i = span_line(c["lines"], parts, c["a"] - 1)
+            i = span_line(c["lines"], parts, c["a"] - 1, files.reach(c["key"]))
             if i is not None and (best is None or abs(i + 1 - c["a"]) < abs(best[1] + 1 - best[0]["a"])):
                 best = (c, i)
         if best is None:
@@ -994,12 +1135,20 @@ def load(run, drift=True):
     return run, root, names, files, nodes, ranges, counts
 
 
+def pinned_commit(files, path):
+    """`{commit, 12 hex}:{path}` for a path pinned to a revision that names a commit; the path as given otherwise."""
+    pin = files.pin(path)
+    return f"{pin[0][:PIN_ABBREV]}:{pin[1]}" if pin and pin[0] else path
+
+
 def placed_path(root, path, real, how):
     """Whether the kit placed a hop: the resolver re-addressed it (`how`), or the path it named is no tail of the file
     it landed in (an invented directory a later hop reaches through the first). A short path that ends the real path
     (`server.go`, `..` collapsed) is plain tail resolution, no incident. `real` is the file's path from ROOT."""
     if how in PLACED_HOW:
         return True
+    if PINNED.match(real):
+        return False
     norm = os.path.normpath(path)
     if os.path.isabs(norm):
         return norm != os.path.normpath(os.path.join(root, real))
@@ -1029,6 +1178,47 @@ def pair_list(pairs):
     return ", ".join(shown + ([f"+{len(seen) - PAIRS_SHOWN} more"] if len(seen) > PAIRS_SHOWN else []))
 
 
+def glued(text, m):
+    """Whether a path:line match is the tail of a revision-pinned name the kit did not store as its commit
+    (`HEAD~1:a.go:3`, a 40-hex sha): never the working-tree file."""
+    return m.start() > 0 and (text[m.start() - 1] in ":~^" or text[m.start() - 1].isalnum())
+
+
+def rested_on(ans, files, nodes, own):
+    """The nodes that broke the hop contract an answer line rests on: its own node, and for a cite no hop of its own
+    node or of a sound node backs, every node whose verified hops do."""
+    broken = {name for name, n in nodes.items() if broke_node(n)}
+    got = {own} & broken
+    for m in CITE.finditer(ans):
+        a, b = int(m.group(2)), int(m.group(3) or m.group(2))
+        key, _ = files.find(m.group(1))
+        backers = {name for name, n in nodes.items() if any(k == key and lo - CITE_SLACK <= a and b <= hi + CITE_SLACK
+                                                            for k, lo, hi in n.get("held", ()))}
+        if own not in backers and backers <= broken:
+            got |= backers
+    return sorted(got, key=node_key)
+
+
+def broke_node(n):
+    """Whether a node broke the hop contract: it named a path that is not the file, stored hops that still do not hold
+    after a refusal, or has REJECTED hops. A miscopied path alone breaks none."""
+    return bool(n["placed"] or (n["refused"] and n["badnow"] > 0) or n["rej"])
+
+
+def size_notes(files):
+    """One `·` note per file the kit searched only near an address (past SEARCH_MAX_BYTES) and one per file it did not
+    read (past READ_MAX_BYTES), each named once with its size."""
+    return ([f"· {os.path.relpath(k, files.root)} is {megabytes(size)} — {big_limit()}"
+             for k, size in sorted(files.big.items())]
+            + [f"· {os.path.relpath(k, files.root)} is {megabytes(size)} — over the {READ_MAX_BYTES >> 20} MB read limit: "
+               f"the kit reads none of it" for k, size in sorted(files.unread.items())])
+
+
+def big_limit():
+    return (f"past {SEARCH_MAX_BYTES >> 20} MB the kit checks a hop or cite only within {NEAR} lines of its address; "
+            f"a quote further off is REJECTED, not searched for")
+
+
 def incidents(loaded):
     """What broke the hop contract, from what the kit already has: {lines, notes, broke, drifted}. `lines` is the
     WARNINGS block (header first) and empty when nothing happened; `broke` counts the nodes with placed, refused or
@@ -1043,7 +1233,7 @@ def incidents(loaded):
     for name in names:
         n = nodes[name]
         refused = n["refused"] and n["badnow"] > 0
-        broke += bool(n["placed"] or refused or n["rej"])
+        broke += broke_node(n)
         if n["placed"]:
             details.append(f"⚠ node {name}: {count(len(n['placed']), 'hop')} named a path that is not the file — the kit "
                            f"placed them ({pair_list(n['placed'])})")
@@ -1055,6 +1245,7 @@ def incidents(loaded):
         if n["miscopied"]:
             notes.append(f"· node {name}: the kit corrected a miscopied path on {count(len(n['miscopied']), 'hop')} — "
                          f"each quote sits at its cited line ({pair_list(n['miscopied'])})")
+    notes += size_notes(files)
     if counts["drifted"]:
         details.append(f"⚠ run: {count(counts['drifted'], 'hop')} DRIFTED — the code changed since the walk: re-read "
                        f"before pasting")
@@ -1107,7 +1298,8 @@ def check_view(view, only, loaded):
                 counts["flagged"] += bool(flags)
                 counts["recited"] += bool(moves)
                 notes = flags + moves
-                out.append(f"{pad}  - {ans}" + (f"   ({'; '.join(notes)})" if notes else ""))
+                out.append(f"{pad}  - {ans}" + (f"   ({'; '.join(notes)})" if notes else "")
+                           + "".join(f" ⚠ node {b} broke the hop contract" for b in rested_on(ans, files, nodes, name)))
                 if flags:
                     hot.append(out[-1])
             if not n["answers"]:
@@ -1172,7 +1364,8 @@ def cmd_read(run, blocks):
             continue
         lines = files.lines(path)
         if lines is None:
-            out.append(f"REFUSED {label} — no such file under {root}")
+            why = files.why_unread(path)
+            out.append(f"REFUSED {label} — " + (f"no such file under {root}" if why == "no such file" else why))
             continue
         count = len(lines) - (1 if lines and lines[-1] == "" else 0)
         if a < 1 or b < a or b > count:
@@ -1290,6 +1483,10 @@ def cmd_write(run, name):
             entry = dict(given=given, path=r[1], line=r[2], end=r[2], how=None, status="rejected",
                          sha256=file_sha(pl["key"]) if pl["key"] else None)
         entries.append(entry)
+    # a revision named by a ref (`HEAD~1`, a branch) moves: every pinned address, cite and range outside the quotes and
+    # notes is stored as its commit
+    out = [line if line.startswith(">") or line.lstrip().startswith("=")
+           else PINREF.sub(lambda m: pinned_commit(files, m.group(1)), line) for line in out]
     sidecar = os.path.join(run, name + ".write.json")
     try:
         with open(sidecar, "w", encoding="utf-8") as f:
@@ -1346,14 +1543,19 @@ def cmd_start(run, name, at, question=""):
     m = re.fullmatch(r"(.+?):(\d+)(?:-\d+)?", at.strip("`"))
     if not m:
         fail(f"FROM {at!r} is not path:LINE")
-    key, lines = Files(root).find(m.group(1))
+    files = Files(root)
+    key, lines = files.find(m.group(1))
     if lines is None:
-        fail(f"FROM file {m.group(1)} is not under {root} (or names several files)")
+        why = files.why_unread(m.group(1))
+        fail(f"FROM file {m.group(1)} is not under {root} (or names several files)" if why == "no such file"
+             else f"FROM file {m.group(1)}: {why}")
     ln = int(m.group(2))
     asked = question_line(run, question)
     if asked:
         print(asked)
     print(f"started {name} — {os.path.relpath(key, root)}")
+    if files.reach(key):
+        print(f"{os.path.relpath(key, root)} is {megabytes(files.big[key])} — {big_limit()}")
     for i in range(max(1, ln - 3), min(len(lines), ln + 40) + 1):
         print(f"{i:>6}\t{lines[i - 1]}")
 
@@ -1467,6 +1669,8 @@ def held_marks(text, files, nodes, held_keys):
     run hold, one per node and file, and the start offsets of its `path:A-B` ranges no hop holds."""
     marks, unheld = {}, set()
     for m in SPANS.finditer(text):
+        if glued(text, m):
+            continue
         ref = m.group(1)
         if m.group(2):
             want = [(int(m.group(2)), int(m.group(3)))]
@@ -1502,7 +1706,7 @@ def open_block(loaded, listed):
             ranged = {m.start() for m in SPANS.finditer(text) if m.group(2)}
             grep_only = bool(unheld)
             for m in XREF.finditer(text):
-                if m.start() in ranged:
+                if m.start() in ranged or glued(text, m):
                     continue
                 key, _ = files.find(m.group(1))
                 if not key or not any(k == key and lo <= int(m.group(2)) <= hi for k, lo, hi in ranges):

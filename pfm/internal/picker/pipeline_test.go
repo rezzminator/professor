@@ -118,56 +118,60 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 	})
 }
 
-type fakeReminderReader struct {
+type fakeScheduleReader struct {
 	unseen map[string]bool
 	err    error
 }
 
-func (reader fakeReminderReader) UnseenReminderSessionIDs(context.Context) (map[string]bool, error) {
+func (reader fakeScheduleReader) UnseenScheduleSessionIDs(context.Context) (map[string]bool, error) {
 	return reader.unseen, reader.err
 }
 
-func TestBuildSnapshotMarksRemindedRows(t *testing.T) {
+func TestBuildSnapshotMarksScheduleFiredRows(t *testing.T) {
 	output := compose.Output{Rows: []compose.Row{{ID: "idA"}, {ID: "idB"}, {}}}
 	snapshot := buildSnapshot(
 		context.Background(),
 		fleet.Env{},
-		scanRequest{Reminders: fakeReminderReader{unseen: map[string]bool{"idA": true, "": true}}},
+		scanRequest{Schedules: fakeScheduleReader{unseen: map[string]bool{"idA": true, "": true}}},
 		output,
 	)
-	if snapshot.ReminderError != "" {
-		t.Fatalf("ReminderError = %q, want none", snapshot.ReminderError)
+	if snapshot.ScheduleError != "" {
+		t.Fatalf("ScheduleError = %q, want none", snapshot.ScheduleError)
 	}
-	if len(snapshot.Rows) != 3 || !snapshot.Rows[0].Reminded || snapshot.Rows[1].Reminded || snapshot.Rows[2].Reminded {
-		t.Fatalf("snapshot rows Reminded = %v, want only idA", remindedFlags(snapshot.Rows))
+	if len(snapshot.Rows) != 3 || !snapshot.Rows[0].ScheduleFired || snapshot.Rows[1].ScheduleFired ||
+		snapshot.Rows[2].ScheduleFired {
+		t.Fatalf("snapshot rows ScheduleFired = %v, want only idA", scheduleFiredFlags(snapshot.Rows))
 	}
 	for index, row := range output.Rows {
-		if row.Reminded {
-			t.Fatalf("buildSnapshot mutated the composed output: row %d is Reminded", index)
+		if row.ScheduleFired {
+			t.Fatalf("buildSnapshot mutated the composed output: row %d is ScheduleFired", index)
 		}
 	}
 }
 
-func TestBuildSnapshotReportsReminderReadFailure(t *testing.T) {
+func TestBuildSnapshotReportsScheduleReadFailure(t *testing.T) {
 	output := compose.Output{Rows: []compose.Row{{ID: "idA"}, {ID: "idB"}}}
 	snapshot := buildSnapshot(
 		context.Background(),
 		fleet.Env{},
-		scanRequest{Reminders: fakeReminderReader{err: errors.New("database unavailable")}},
+		scanRequest{Schedules: fakeScheduleReader{err: errors.New("database unavailable")}},
 		output,
 	)
-	if !strings.Contains(snapshot.ReminderError, "read reminder flags") ||
-		!strings.Contains(snapshot.ReminderError, "database unavailable") {
-		t.Fatalf("ReminderError = %q, want the wrapped read failure", snapshot.ReminderError)
+	if !strings.Contains(snapshot.ScheduleError, "read schedule flags") ||
+		!strings.Contains(snapshot.ScheduleError, "database unavailable") {
+		t.Fatalf("ScheduleError = %q, want the wrapped read failure", snapshot.ScheduleError)
 	}
-	if len(snapshot.Rows) != 2 || snapshot.Rows[0].Reminded || snapshot.Rows[1].Reminded {
-		t.Fatalf("rows after a failed read = %v, want both present and none Reminded", remindedFlags(snapshot.Rows))
+	if len(snapshot.Rows) != 2 || snapshot.Rows[0].ScheduleFired || snapshot.Rows[1].ScheduleFired {
+		t.Fatalf(
+			"rows after a failed read = %v, want both present and none ScheduleFired",
+			scheduleFiredFlags(snapshot.Rows),
+		)
 	}
 }
 
-// TestBuildSnapshotReportsDegradedReminderStore proves a state database that
-// cannot open reads as an error at the snapshot, never as "no reminders".
-func TestBuildSnapshotReportsDegradedReminderStore(t *testing.T) {
+// TestBuildSnapshotReportsDegradedScheduleStore proves a state database that
+// cannot open reads as an error at the snapshot, never as "no schedules".
+func TestBuildSnapshotReportsDegradedScheduleStore(t *testing.T) {
 	root := t.TempDir()
 	blocker := filepath.Join(root, "blocker")
 	if err := os.WriteFile(blocker, []byte("a regular file, not a directory"), 0o600); err != nil {
@@ -181,20 +185,23 @@ func TestBuildSnapshotReportsDegradedReminderStore(t *testing.T) {
 		}
 	})
 	snapshot := buildSnapshot(
-		ctx, fleet.Env{}, scanRequest{Reminders: state}, compose.Output{Rows: []compose.Row{{ID: "idA"}}},
+		ctx, fleet.Env{}, scanRequest{Schedules: state}, compose.Output{Rows: []compose.Row{{ID: "idA"}}},
 	)
-	if snapshot.ReminderError == "" {
-		t.Fatal("a degraded reminder store produced no ReminderError: a broken database reads as no reminders")
+	if snapshot.ScheduleError == "" {
+		t.Fatal("a degraded schedule store produced no ScheduleError: a broken database reads as no schedules")
 	}
-	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Reminded {
-		t.Fatalf("rows with a degraded store = %v, want the row present, not Reminded", remindedFlags(snapshot.Rows))
+	if len(snapshot.Rows) != 1 || snapshot.Rows[0].ScheduleFired {
+		t.Fatalf(
+			"rows with a degraded store = %v, want the row present, not ScheduleFired",
+			scheduleFiredFlags(snapshot.Rows),
+		)
 	}
 }
 
-func remindedFlags(rows []compose.Row) []bool {
+func scheduleFiredFlags(rows []compose.Row) []bool {
 	flags := make([]bool, len(rows))
 	for index := range rows {
-		flags[index] = rows[index].Reminded
+		flags[index] = rows[index].ScheduleFired
 	}
 	return flags
 }

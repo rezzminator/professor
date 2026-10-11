@@ -1,6 +1,6 @@
 # tracetree
 
-The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`: it opens a trace run, stores each node's hops once, waits for the whole tree, re-reads every quoted line from disk, places a hop whose path names no file, tells drifted code and moved files from a wrong quote, warns when a node broke the hop contract, and maps the components. The agents' rules are in [tracer.md](tracer.md); the measurements behind each mechanism are in [tracer-bench.md](tracer-bench.md).
+The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`: it opens a trace run, stores each node's hops once, waits for the whole tree, re-reads every quoted line from disk, places a hop whose path names no file, bounds its work on a very large file, checks hops pinned to a git revision, tells drifted code and moved files from a wrong quote, warns when a node broke the hop contract, and maps the components. The agents' rules are in [tracer.md](tracer.md); the measurements behind each mechanism are in [tracer-bench.md](tracer-bench.md).
 
 `tt` below stands for `python3 ~/.claude/skills/tracetree/tracetree.py`. Python 3 standard library only; it reads the repository and writes only the run directory. A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2.
 
@@ -14,6 +14,8 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 - [The resolver](#the-resolver)
 - [Write-time refusal](#write-time-refusal)
 - [Drift](#drift)
+- [Very large files](#very-large-files)
+- [Pinned revisions](#pinned-revisions)
 - [WARNINGS](#warnings)
 - [The wait printout](#the-wait-printout)
 - [The component map](#the-component-map)
@@ -27,7 +29,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `tracemap_html.py` | The page writer, imported only for `map --html` |
 | `tracemap.html` | The page template, with its title, warnings and `/*TRACEMAP_DATA*/null` data slots |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
-| `SKILL.md` | The agents' command table and the check, visible to the tracer tiers and `sub-tracer` only |
+| `SKILL.md` | The agents' command table and the check, visible to `tracer` and `sub-tracer` only |
 
 ## The run directory
 
@@ -79,7 +81,7 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 
 **Function:** `cmd_start` — **Run by:** each sub-tracer, as its first call
 
-`start RUN ID PATH:LINE [QUESTION]` appends `{PATH:LINE}<tab>{QUESTION}` to `{ID}.started`. For a QUESTION of the form `Q{n}` it prints `QUESTION Q{n}: {text}` from `questions`, or names why it cannot. Then `started {ID} — {path}` and PATH from LINE−3 to LINE+40, numbered. A FROM path resolves by its tail like a hop's.
+`start RUN ID PATH:LINE [QUESTION]` appends `{PATH:LINE}<tab>{QUESTION}` to `{ID}.started`. For a QUESTION of the form `Q{n}` it prints `QUESTION Q{n}: {text}` from `questions`, or names why it cannot. Then `started {ID} — {path}` and PATH from LINE−3 to LINE+40, numbered. A FROM path resolves by its tail like a hop's; `{rev}:{path}:{line}` reads the file at that git revision ([Pinned revisions](#pinned-revisions)). A FROM file past 1 MiB is named after the `started` line ([Very large files](#very-large-files)).
 
 ### write
 
@@ -99,7 +101,7 @@ The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s �
 
 **Function:** `cmd_read` — **Run by:** the lead
 
-`read RUN FILE:A-B…` prints each block as `== FILE:A-B` then its lines, numbered by the file. One call a round: a second call before the next `wait` fails whole (`one read per round`). A block is refused on its own line, `REFUSED {block} — {why}`, when it is over 30 lines, not `FILE:A-B`, in no file under ROOT, outside the file, or held whole by one verified hop's quoted range, naming `tt check {RUN} --full {ID}`.
+`read RUN FILE:A-B…` (FILE may be `{rev}:{path}`) prints each block as `== FILE:A-B` then its lines, numbered by the file. One call a round: a second call before the next `wait` fails whole (`one read per round`). A block is refused on its own line, `REFUSED {block} — {why}`, when it is over 30 lines, not `FILE:A-B`, in no file under ROOT, outside the file, or held whole by one verified hop's quoted range, naming `tt check {RUN} --full {ID}`. A file the kit does not read (past 128 MB, or a revision that names no commit or lacks the path) is refused with that reason. A refused range is read as blocks of at most 30 lines in the same call.
 
 ### check
 
@@ -159,7 +161,35 @@ One resolver places a hop at write and at check alike, in this order:
 
 A hop no step places is REJECTED, unless it [drifted](#drift). The file list is `git ls-files --cached --others --exclude-standard`, else one walk of the tree, skipping `.git`, `node_modules`, `.worktrees`, `.venv` and `__pycache__`; the unique-line index skips binary files and files over 1 MiB.
 
+A hop pinned to a git revision skips steps 2, 3 and 5–7: the file is the one at that commit ([Pinned revisions](#pinned-revisions)).
+
 Steps 5–7 exist because of the [Rejected-hop survey](tracer-bench.md#rejected-hop-survey): 49 hops named an invented directory, 6 a sibling file and 4 a line unique elsewhere, each with the quote exact.
+
+## Very large files
+
+**Function:** `Files.file_lines`, `Files.reach`, `find_first`, `size_notes`, `tracemap.enclosing` — **Constants:** `SEARCH_MAX_BYTES` (1 MiB), `READ_MAX_BYTES` (128 MiB)
+
+The resolver's moved-line search read the whole file up to three times per hop whose quote was not at its address. On a 59 MB, 415,089-line bundle that stalled `check --hops 1` for over 120 s and held a `wait` 57 s past its timeout, which the bounds below remove:
+
+- A file over 1 MiB is searched only within 30 lines of the address, for hops and for answer cites alike. A quote further off is `REJECTED` with `quote not within 30 lines of the address`. The unique-line index already skipped such files.
+- A file over 128 MiB is not read: its hops are `REJECTED` with `file is {N} MB, over the 128 MB read limit`, a hop naming it by its tail included. A file is read up to that limit, so one that grows while read stops there.
+- A path that is no regular file (a FIFO, a device) is not opened: its hops are `REJECTED` with `not a regular file`.
+- The map looks for a big file's enclosing component at most 800 lines (`BODY_CAP`, the longest body it reads) above the hop; further up, the hop sits at file level.
+- Each such file a hop, cite or FROM was checked in is named once where the lead reads it (a file only a sibling search read is not): a `·` note after the WARNINGS block (and in `map --json`'s `notes`) — `· {path} is {N} MB — past 1 MB the kit checks a hop or cite only within 30 lines of its address; a quote further off is REJECTED, not searched for` — and by `start`, after its `started` line. A rejection never reads as absence of the quote: the note says the kit did not look.
+
+The regression tests (`BigFileTest`) assert the bound by what the kit reports, not by elapsed time. On the field reproduction the bounded kit finished `check --hops 1` in 0.9 s and `check --full 9` in 0.5 s, with the same 273 verified and 5 rejected hops as the live run ([Field runs](tracer-bench.md#lead-audit)).
+
+## Pinned revisions
+
+**Function:** `Files.pin`, `Files.key`, `Files.revision_lines`, `drift_of` — **Run by:** `start`, `write`, `read`, every `check` view, `map`
+
+A hop, FROM or cite whose path is `{rev}:{path}` is pinned to a git revision of ROOT, so one run answers a brief that compares revisions. A path is read as pinned only when it holds `:`, names no existing file, its rev does not start with `-` and its path holds no `..`.
+
+- `rev` resolves to a commit with `git rev-parse --verify -q {rev}^{commit}`; the virtual file is `ROOT/{sha12}:{path}`, read with `git show`. Nothing is checked out and no worktree is created.
+- `write` rewrites the rev to its 12-hex commit prefix in every hop address, `@` address and `[{rev}:{path}:N]` cite of the stored file, so a branch name that moves later cannot change what a stored hop or answer means; the answers and `check` views accept the prefix.
+- `write` stores the same commit prefix in the free-text ranges of NOT READ and LEAD lines (`{rev}:{path}:A-B`, `{rev}:{path} lines A-B`), never in `>` quote or `=` note lines; a range still naming a ref or a full sha is never matched against the working-tree file.
+- A pinned hop is verified against its commit, never placed in the working tree, never drifts: a commit is immutable. A rev naming no commit, a path absent at the commit, a directory there, or a file over 128 MB (sized by `git ls-tree -l` before `git show`) is `REJECTED` with `no commit named {rev}`, `no such file at {sha12}`, `a directory, not a file` or the size reason. A git that fails or does not answer is `git could not say: {reason}`, never a "no".
+- The map treats `{sha12}:{path}` as its own file, so two revisions of one file are two files with their own components.
 
 ## Write-time refusal
 
@@ -214,6 +244,7 @@ Every `check` view prints the WARNINGS block first; `wait` prints it right after
 
 The same findings ride every surface:
 
+- Every answer line of a node that broke the hop contract ends `⚠ node {ID} broke the hop contract` in the answers view, after its flags; so does a line whose cite only a broken node's verified hops back, with that node's ID, so a caller reading one claim sees the mark at the claim; the lead copies it into its final. Callers handed WARNINGS lines did not relay them in the field audit; a mark on the line itself does not depend on the caller reading the block.
 - COUNTS carries `placed=` (hops, miscopied ones included) and `refused=` (nodes).
 - The `MAP` line and the first line of `map.txt` and `map` end `· ⚠ {b} nodes broke the hop contract` and `· ⚠ {k} drifted` when they apply.
 - `map --json` carries `"warnings"`, the block's lines, `[]` when none, and `"notes"`, the `·` lines.

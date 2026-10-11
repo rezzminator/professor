@@ -101,7 +101,7 @@ type Model struct {
 	killedCount          int
 	suppressedCount      int
 	refreshing           bool
-	reminderError        string
+	scheduleError        string
 	primary              int
 	initialPrimary       int
 	accountIDs           []int
@@ -223,7 +223,7 @@ func NewModel(snapshot Snapshot) Model {
 		killedCount:         snapshot.KilledCount,
 		suppressedCount:     snapshot.SuppressedCount,
 		refreshing:          snapshot.Refreshing,
-		reminderError:       snapshot.ReminderError,
+		scheduleError:       snapshot.ScheduleError,
 		primary:             validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		initialPrimary:      validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		accountIDs:          normalizedAccountIDs(snapshot.AccountIDs),
@@ -1030,7 +1030,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.suppressedCount = snapshot.SuppressedCount
 	model.refreshing = snapshot.Refreshing
 	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError)
-	model.reminderError = snapshot.ReminderError
+	model.scheduleError = snapshot.ScheduleError
 	for index := range model.rows {
 		id := model.rows[index].ID
 		if id != "" {
@@ -1208,7 +1208,7 @@ func (model *Model) rebuildOrder() {
 	for _, group := range model.groups {
 		for _, index := range group.indices {
 			row := model.rows[index]
-			if row.Reminded || !model.visibleInView(row) || !isNameGroupRow(row.Kind) || !model.inPlace(index) {
+			if row.ScheduleFired || !model.visibleInView(row) || !isNameGroupRow(row.Kind) || !model.inPlace(index) {
 				continue
 			}
 			if key, _, ok := workbenchNameGroup(row); ok {
@@ -1218,7 +1218,7 @@ func (model *Model) rebuildOrder() {
 	}
 	emitted := make(map[string]bool)
 	pinned := make(map[int]bool)
-	model.pinRemindedRows(pinned)
+	model.pinScheduleFiredRows(pinned)
 	if model.mergeNewChat {
 		// The update notice is an extra global action above the ordinary new-chat
 		// row. Neither row belongs to project activity order: pinning both keeps

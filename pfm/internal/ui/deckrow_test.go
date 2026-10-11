@@ -127,11 +127,11 @@ func deckRowKinds() []compose.Row {
 			Size:        1 << 40,
 		},
 		{
-			Kind:       compose.ResumeCodex,
-			Name:       "resume codex",
-			Project:    "b",
-			ActivityNS: fixtureNowNS - int64(3*24*time.Hour),
-			Reminded:   true,
+			Kind:          compose.ResumeCodex,
+			Name:          "resume codex",
+			Project:       "b",
+			ActivityNS:    fixtureNowNS - int64(3*24*time.Hour),
+			ScheduleFired: true,
 		},
 		{
 			Kind:       compose.ResumeOpenCode,

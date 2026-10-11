@@ -18,10 +18,10 @@ const (
 	// (internal/installer/assets/systemd/pfm-mcp.service, installer.go's
 	// mcpUnitName) — the daemon M47 names.
 	pfmMCPSystemdUnit = "pfm-mcp.service"
-	// pfmReminderSystemdUnit is the timer staged by the installer
-	// (internal/installer/assets/systemd/pfm-reminder.timer) that runs
-	// pfm internal reminder-fire every five minutes.
-	pfmReminderSystemdUnit = "pfm-reminder.timer"
+	// pfmScheduleSystemdUnit is the timer staged by the installer
+	// (internal/installer/assets/systemd/pfm-schedule.timer) that runs
+	// pfm internal schedule-fire every five minutes.
+	pfmScheduleSystemdUnit = "pfm-schedule.timer"
 )
 
 // serviceManagerIdentity names the manager and unit the row reports without
@@ -48,31 +48,31 @@ func probeServiceManager(ctx context.Context, runner deps.Runner) serviceManager
 	return report
 }
 
-// reminderScheduleIdentity names the manager and timer the reminders row
+// scheduleTimerIdentity names the manager and timer the schedules row
 // reports without asking the manager anything.
-func reminderScheduleIdentity() (manager, unit string) {
-	return serviceManagerLinuxName, pfmReminderSystemdUnit
+func scheduleTimerIdentity() (manager, unit string) {
+	return serviceManagerLinuxName, pfmScheduleSystemdUnit
 }
 
-// probeReminderSchedule asks systemd --user about the pfm reminder timer; a
+// probeScheduleTimer asks systemd --user about the pfm schedule timer; a
 // systemctl binary absent from PATH is Present=false, the same clean answer
 // probeServiceManager gives.
-func probeReminderSchedule(ctx context.Context, runner deps.Runner) serviceManagerReport {
+func probeScheduleTimer(ctx context.Context, runner deps.Runner) serviceManagerReport {
 	report := serviceManagerReport{
 		Manager: serviceManagerLinuxName,
-		Unit:    serviceManagerUnitState{Unit: pfmReminderSystemdUnit},
+		Unit:    serviceManagerUnitState{Unit: pfmScheduleSystemdUnit},
 	}
 	if _, err := runner.LookPath("systemctl"); err != nil {
 		return report
 	}
 	report.Present = true
-	report.Unit = probeSystemdUnit(ctx, runner, pfmReminderSystemdUnit)
+	report.Unit = probeSystemdUnit(ctx, runner, pfmScheduleSystemdUnit)
 	return report
 }
 
-// reminderScheduleArmed is true when the timer is installed, enabled and
-// running: only then does anything fire a due reminder.
-func reminderScheduleArmed(unit serviceManagerUnitState) bool {
+// scheduleTimerArmed is true when the timer is installed, enabled and
+// running: only then does anything fire a due schedule.
+func scheduleTimerArmed(unit serviceManagerUnitState) bool {
 	return unit.Present && unit.Enabled && unit.Active
 }
 

@@ -200,42 +200,42 @@ func TestClaudeContinuationFillsRowsAPreviousParserIndexed(t *testing.T) {
 	}
 }
 
-// TestContinuedChatCarriesItsReminders pins that a reminder follows its chat
+// TestContinuedChatCarriesItsSchedules pins that a schedule follows its chat
 // into the session Claude Code continued it in: it stays on the predecessor
 // while the successor is not indexed (the picker still shows the predecessor),
 // moves once the successor is indexed, and lands on the newest segment of a
-// chain — a reminder set later on a superseded id included. Left behind, it
+// chain — a schedule set later on a superseded id included. Left behind, it
 // fires at a segment the picker no longer holds.
-func TestContinuedChatCarriesItsReminders(t *testing.T) {
+func TestContinuedChatCarriesItsSchedules(t *testing.T) {
 	project, database, indexer := continuationJail(t)
 	ctx := context.Background()
 	if err := database.SharedDegraded(); err != nil {
 		t.Fatalf("shared state in the jail is degraded: %v", err)
 	}
 	shared := database.Shared()
-	setReminder := func(session string) int64 {
+	setSchedule := func(session string) int64 {
 		t.Helper()
-		id, err := shared.CreateReminder(ctx, fleetdb.Reminder{
+		id, err := shared.CreateSchedule(ctx, fleetdb.Schedule{
 			SessionID: session, Engine: "claude", Prompt: "check the lanes",
 			Interval: time.Hour, Created: time.Now(),
 		})
 		if err != nil {
-			t.Fatalf("CreateReminder(%s) = %v", session, err)
+			t.Fatalf("CreateSchedule(%s) = %v", session, err)
 		}
 		return id
 	}
 	sessionOf := func(id int64) string {
 		t.Helper()
-		reminders, err := shared.Reminders(ctx)
+		schedules, err := shared.Schedules(ctx)
 		if err != nil {
-			t.Fatalf("Reminders() = %v", err)
+			t.Fatalf("Schedules() = %v", err)
 		}
-		for index := range reminders {
-			if reminders[index].ID == id {
-				return reminders[index].SessionID
+		for index := range schedules {
+			if schedules[index].ID == id {
+				return schedules[index].SessionID
 			}
 		}
-		t.Fatalf("reminder %d is gone, want it carried", id)
+		t.Fatalf("schedule %d is gone, want it carried", id)
 		return ""
 	}
 	run := func() {
@@ -246,7 +246,7 @@ func TestContinuedChatCarriesItsReminders(t *testing.T) {
 	}
 	successorPath := filepath.Join(project, continuedSuccessor+".jsonl")
 
-	early := setReminder(continuedPredecessor)
+	early := setSchedule(continuedPredecessor)
 	rewriteJSONLines(t, filepath.Join(project, continuedPredecessor+".jsonl"), []any{
 		continuedPrompt("design the lanes"),
 		continuedIn(continuedPredecessor, continuedSuccessor),
@@ -254,7 +254,7 @@ func TestContinuedChatCarriesItsReminders(t *testing.T) {
 	run()
 	if got := sessionOf(early); got != continuedPredecessor {
 		t.Fatalf(
-			"reminder before the successor is indexed sits on %s, want %s — the picker still shows the predecessor",
+			"schedule before the successor is indexed sits on %s, want %s — the picker still shows the predecessor",
 			got,
 			continuedPredecessor,
 		)
@@ -264,13 +264,13 @@ func TestContinuedChatCarriesItsReminders(t *testing.T) {
 	run()
 	if got := sessionOf(early); got != continuedSuccessor {
 		t.Fatalf(
-			"reminder after the continuation sits on %s, want the successor %s — left behind, it fires at a dead segment",
+			"schedule after the continuation sits on %s, want the successor %s — left behind, it fires at a dead segment",
 			got,
 			continuedSuccessor,
 		)
 	}
 
-	late := setReminder(continuedPredecessor)
+	late := setSchedule(continuedPredecessor)
 	rewriteJSONLines(t, successorPath, []any{
 		continuedPrompt("design the lanes"),
 		continuedIn(continuedSuccessor, continuedThird),
@@ -280,7 +280,7 @@ func TestContinuedChatCarriesItsReminders(t *testing.T) {
 	for _, id := range []int64{early, late} {
 		if got := sessionOf(id); got != continuedThird {
 			t.Fatalf(
-				"reminder %d after a second handoff sits on %s, want the chain's newest segment %s",
+				"schedule %d after a second handoff sits on %s, want the chain's newest segment %s",
 				id,
 				got,
 				continuedThird,

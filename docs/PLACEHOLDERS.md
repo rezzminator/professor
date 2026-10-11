@@ -229,6 +229,6 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |
-| `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
+| `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md`, `global/agents/reviewer-pro.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
 | `{HHMMSS}` | `global/agents/agent-optimizer.md` | the UTC time of the report's write, hours, minutes and seconds |
 | `{RUN}` / `{ID}` / `{QUESTION}` | `global/agents/tracer.md`, `global/agents/sub-tracer.md`, `global/skills/read-tracer-run/SKILL.md` | the trace run's directory `tt new` printed; a sub-tracer's dotted node id; the card's `Q{n}` question number |

@@ -256,7 +256,7 @@ func (model Model) renderGroupedRow(
 	}
 	ink := tone{fg: shade, bg: bg}
 	switch {
-	case row.Reminded:
+	case row.ScheduleFired:
 		shade = palette.LimitRed
 		ink = tone{fg: shade, bg: bg, bold: true}
 	case selected:
@@ -345,7 +345,7 @@ func (model Model) columnSpans(
 			return blank()
 		}
 		hot := engineHexOf(row)
-		if row.Reminded {
+		if row.ScheduleFired {
 			hot = palette.LimitRed
 		}
 		return []span{{text: heatRuler(heat, hot, palette.HeatCold, palette.Border, bg)}}

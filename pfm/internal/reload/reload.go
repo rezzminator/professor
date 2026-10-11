@@ -403,7 +403,7 @@ func Run(
 	if promptWarning != "" {
 		announcePane(ctx, request, tmux, stderr, "pfm reload: "+promptWarning)
 	}
-	carryReminders(ctx, leftBehind, request.SessionID, stderr)
+	carrySchedules(ctx, leftBehind, request.SessionID, stderr)
 	if err := writeHandoff(lock, handoffRecord{
 		Engine: request.Engine, SessionID: request.SessionID, Account: request.Account,
 		LeftBehind: leftBehind, Cache1H: request.Cache1H, CWD: request.CWD, WrittenAt: options.Clock.Now(),

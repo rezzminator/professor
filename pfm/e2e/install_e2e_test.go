@@ -760,9 +760,9 @@ func (h *e2eHarness) assertUninstalled(home string) {
 			".config/systemd/user/pfm-name-sync.timer",
 			".config/systemd/user/default.target.wants/pfm-name-sync.path",
 			".config/systemd/user/timers.target.wants/pfm-name-sync.timer",
-			".config/systemd/user/pfm-reminder.service",
-			".config/systemd/user/pfm-reminder.timer",
-			".config/systemd/user/timers.target.wants/pfm-reminder.timer",
+			".config/systemd/user/pfm-schedule.service",
+			".config/systemd/user/pfm-schedule.timer",
+			".config/systemd/user/timers.target.wants/pfm-schedule.timer",
 		} {
 			if _, err := os.Lstat(filepath.Join(home, relative)); !os.IsNotExist(err) {
 				h.t.Fatalf("uninstall failed; differing paths: %s; status: %v", relative, err)
@@ -770,8 +770,8 @@ func (h *e2eHarness) assertUninstalled(home string) {
 		}
 	} else if _, err := os.Lstat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist")); !os.IsNotExist(err) {
 		h.t.Fatalf("uninstall failed; differing paths: launchd name-sync; status: %v", err)
-	} else if _, err := os.Lstat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")); !os.IsNotExist(err) {
-		h.t.Fatalf("uninstall failed; differing paths: launchd reminder; status: %v", err)
+	} else if _, err := os.Lstat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.schedule.plist")); !os.IsNotExist(err) {
+		h.t.Fatalf("uninstall failed; differing paths: launchd schedule; status: %v", err)
 	}
 	for _, shim := range []string{
 		filepath.Join(home, e2eManagedRoot, "shim", "pfm.zsh"),

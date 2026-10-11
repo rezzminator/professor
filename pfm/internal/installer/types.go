@@ -28,12 +28,12 @@ var ErrNameSyncRunning = errors.New("the pfm name-sync service is running")
 // mutating install must not rewrite the agent and its binary mid-execution.
 var ErrLaunchAgentRunning = errors.New("the pfm name-sync launch agent is running")
 
-// ErrReminderRunning refuses a mutating install while the Linux reminder fire
+// ErrScheduleRunning refuses a mutating install while the Linux schedule fire
 // is executing, for the same reason: its unit and binary must not move under it.
-var ErrReminderRunning = errors.New("the pfm reminder service is running")
+var ErrScheduleRunning = errors.New("the pfm schedule service is running")
 
-// ErrReminderAgentRunning is the macOS half of the reminder refusal.
-var ErrReminderAgentRunning = errors.New("the pfm reminder launch agent is running")
+// ErrScheduleAgentRunning is the macOS half of the schedule refusal.
+var ErrScheduleAgentRunning = errors.New("the pfm schedule launch agent is running")
 
 type Mode uint8
 

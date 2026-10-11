@@ -11,6 +11,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // StatusRequest selects one chat and the optional answers to attach.
@@ -47,7 +48,44 @@ func InspectSeat(
 	now time.Time,
 	capture PaneCapture,
 ) (headless.Status, error) {
-	status, err := headless.Inspect(ctx, target, now)
+	return inspectTarget(ctx, runtime, target, now, capture, nil)
+}
+
+// SeatInspector is InspectSeat for a watch: it carries every transcript it
+// reads from one poll to the next (transcript.Reader), so a poll reads what
+// each seat appended since the last, not its whole transcript.
+type SeatInspector struct {
+	runtime     *pfmconfig.Runtime
+	transcripts *transcript.Reader
+}
+
+// NewSeatInspector returns a watch's inspector.
+func NewSeatInspector(runtime *pfmconfig.Runtime) *SeatInspector {
+	return &SeatInspector{runtime: runtime, transcripts: new(transcript.Reader)}
+}
+
+// Inspect is InspectSeat with the real pane capture.
+func (inspector *SeatInspector) Inspect(
+	ctx context.Context,
+	target headless.Chat,
+	now time.Time,
+) (headless.Status, error) {
+	return inspectTarget(ctx, inspector.runtime, target, now, nil, inspector.transcripts)
+}
+
+// Sweep lets go of the transcripts not inspected since the last Sweep: a
+// watch sweeps once per poll, so it holds only the seats it still watches.
+func (inspector *SeatInspector) Sweep() { inspector.transcripts.Sweep() }
+
+func inspectTarget(
+	ctx context.Context,
+	runtime *pfmconfig.Runtime,
+	target headless.Chat,
+	now time.Time,
+	capture PaneCapture,
+	transcripts *transcript.Reader,
+) (headless.Status, error) {
+	status, err := headless.InspectWith(ctx, target, now, transcripts)
 	if err != nil {
 		return headless.Status{}, err
 	}

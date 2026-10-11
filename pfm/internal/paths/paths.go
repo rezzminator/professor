@@ -81,6 +81,9 @@ const (
 	// status line, `pfm tokens` and callmeter read; unset, it hangs off the
 	// pfm state directory (CostLedgerDir).
 	EnvCostLedgerDir = "PFM_COST_LEDGER_DIR"
+	// EnvWatchSnapshot names the fleet snapshot `pfm chat watch` processes
+	// share (WatchSnapshot); unset, it sits beside the fleet cache.
+	EnvWatchSnapshot = "PFM_WATCH_SNAPSHOT"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
@@ -652,6 +655,13 @@ func TestProfileParent() (string, bool) {
 // TestDeadlineEpoch is the step deadline in decimal epoch seconds, when one is set.
 func TestDeadlineEpoch() (string, bool) {
 	return OSEnv{}.Lookup(EnvTestDeadlineEpoch)
+}
+
+// WatchSnapshot names the short-lived fleet scan every `pfm chat watch`
+// process on the box shares, so watches polling together pay one scan; its
+// lock is the same path plus ".lock". PFM_WATCH_SNAPSHOT overrides it.
+func WatchSnapshot(values Values) string {
+	return EnvOr(EnvWatchSnapshot, filepath.Join(filepath.Dir(values.CacheDB), "watch-snapshot.json"))
 }
 
 // WorkbenchCache names the discovery cache beside the fleet index.

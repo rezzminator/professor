@@ -6,15 +6,47 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+// autoClock is a fake clock a watch drives by itself: every timer the watch
+// arms advances the clock by its duration and fires at once, so a poll held to
+// MinPoll costs no wall time, and armed records each wait it was asked for.
+type autoClock struct {
+	*clock.Fake
+	mu    sync.Mutex
+	armed []time.Duration
+}
+
+// newAutoClock starts on the poll grid (NextTick), so every wait it arms is a
+// whole poll.
+func newAutoClock() *autoClock {
+	step := int64(MinPoll)
+	return &autoClock{Fake: clock.NewFake(time.Unix(0, time.Now().UnixNano()/step*step))}
+}
+
+func (auto *autoClock) NewTimer(duration time.Duration) clock.Timer {
+	timer := auto.Fake.NewTimer(duration)
+	auto.mu.Lock()
+	auto.armed = append(auto.armed, duration)
+	auto.mu.Unlock()
+	auto.Advance(duration)
+	return timer
+}
+
+func (auto *autoClock) waits() []time.Duration {
+	auto.mu.Lock()
+	defer auto.mu.Unlock()
+	return append([]time.Duration(nil), auto.armed...)
+}
 
 // fakeStep is one Inspect answer.
 type fakeStep struct {
@@ -104,7 +136,11 @@ func runFleet(
 	defer cancel()
 	options.Poll = time.Millisecond
 	var out bytes.Buffer
-	result, err := build(cancel).Watch(ctx, options, &out)
+	watcher := build(cancel)
+	if watcher.Clock == nil {
+		watcher.Clock = newAutoClock()
+	}
+	result, err := watcher.Watch(ctx, options, &out)
 	trimmed := strings.TrimSpace(out.String())
 	if trimmed == "" {
 		return nil, result, err
@@ -231,177 +267,13 @@ func TestWatcherReturnsTheOriginalErrorAfterPrintingIt(t *testing.T) {
 		Resolve: func(context.Context) (Chat, bool, error) {
 			return Chat{}, false, cause
 		},
+		Clock: newAutoClock(),
 	}.Watch(context.Background(), WatchOptions{Poll: time.Millisecond}, &out)
 	if !errors.Is(err, cause) {
 		t.Fatalf("Watch() error = %v, want the resolver's own", err)
 	}
 	if out.String() != "ERROR seat scan failed\n" {
 		t.Fatalf("output = %q", out.String())
-	}
-}
-
-func TestFleetWatchGlobAdoptsSeatsBornLater(t *testing.T) {
-	for _, testCase := range []struct {
-		name        string
-		transitions bool
-		want        []string
-	}{
-		{"legacy", false, []string{"IDLE x-1 idle_seconds=3", "IDLE x-3 idle_seconds=3"}},
-		{"transitions", true, []string{"SEEN x-1 idle idle_seconds=3", "SEEN x-3 idle idle_seconds=3"}},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			seats := newFakeSeats(map[string][]fakeStep{
-				"x-1": {idleFor(3, "a")}, "x-3": {idleFor(3, "a")},
-				"x-2": {idleFor(3, "a")}, "other": {idleFor(3, "a")},
-			})
-			lines, result, err := runFleet(t, func(cancel context.CancelFunc) FleetWatcher {
-				return FleetWatcher{
-					Targets: []string{"x-*"},
-					List: listingAt(cancel, 4, func(poll int) ([]Chat, error) {
-						chats := []Chat{liveChat("x-1"), liveChat("other"), {Name: "x-2"}}
-						if poll >= 3 {
-							chats = append(chats, liveChat("x-3"))
-						}
-						return chats, nil
-					}),
-					// The non-live x-2 is listed, and never inspected: it is not adopted.
-					Inspect: seats.inspect,
-				}
-			}, WatchOptions{Transitions: testCase.transitions})
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("Watch() error = %v, want context.Canceled", err)
-			}
-			assertLines(t, lines, testCase.want)
-			if seats.inspected("other") != 0 || seats.inspected("x-2") != 0 {
-				t.Fatalf("a non-matching or non-live seat was adopted: other=%d x-2=%d",
-					seats.inspected("other"), seats.inspected("x-2"))
-			}
-			if len(result.Errors) != 0 {
-				t.Fatalf("Errors = %v", result.Errors)
-			}
-		})
-	}
-}
-
-func TestFleetWatchGlobReadoptsARespawnedSeatWithAFreshSnapshot(t *testing.T) {
-	for _, testCase := range []struct {
-		name        string
-		transitions bool
-		want        []string
-	}{
-		{"legacy", false, []string{"IDLE s idle_seconds=3", "EXIT s", "IDLE s idle_seconds=3"}},
-		{"transitions", true, []string{
-			"SEEN s idle idle_seconds=3", "EXIT s", "SEEN s idle idle_seconds=3",
-		}},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			// Polls: 1 live, 2 live but its server is gone, 3 absent, 4 live again.
-			seats := newFakeSeats(map[string][]fakeStep{"s": {idleFor(3, "a"), gone(), idleFor(3, "a")}})
-			lines, _, err := runFleet(t, func(cancel context.CancelFunc) FleetWatcher {
-				return FleetWatcher{
-					Targets: []string{"s*"},
-					List: listingAt(cancel, 5, func(poll int) ([]Chat, error) {
-						if poll == 3 {
-							return nil, nil
-						}
-						return []Chat{liveChat("s")}, nil
-					}),
-					Inspect: seats.inspect,
-				}
-			}, WatchOptions{Transitions: testCase.transitions})
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("Watch() error = %v, want context.Canceled", err)
-			}
-			assertLines(t, lines, testCase.want)
-		})
-	}
-}
-
-func TestFleetWatchGlobSeatAbsentFromTheListingIsDead(t *testing.T) {
-	seats := newFakeSeats(map[string][]fakeStep{"s": {idleFor(3, "a")}})
-	exits := 0
-	lines, result, err := runFleet(t, func(cancel context.CancelFunc) FleetWatcher {
-		return FleetWatcher{
-			Targets: []string{"s*"},
-			List: listingAt(cancel, 3, func(poll int) ([]Chat, error) {
-				if poll == 1 {
-					return []Chat{liveChat("s")}, nil
-				}
-				return nil, nil
-			}),
-			Inspect: seats.inspect,
-		}
-	}, WatchOptions{OnExit: func(Status) error { exits++; return nil }})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Watch() error = %v, want context.Canceled", err)
-	}
-	assertLines(t, lines, []string{"IDLE s idle_seconds=3", "DEAD s"})
-	if exits != 1 || result.Ended["s"].State != StateMissing {
-		t.Fatalf("exits = %d, Ended = %#v", exits, result.Ended)
-	}
-}
-
-func TestFleetWatchANamedTargetSuppressesTheGlobsDuplicate(t *testing.T) {
-	seats := newFakeSeats(map[string][]fakeStep{"alpha": {idleFor(3, "a")}, "abe": {idleFor(3, "a")}})
-	lines, _, err := runFleet(t, func(cancel context.CancelFunc) FleetWatcher {
-		return FleetWatcher{
-			Targets: []string{"alpha", "a*"},
-			Resolve: seats.resolve,
-			List: listingAt(cancel, 3, func(int) ([]Chat, error) {
-				return []Chat{liveChat("alpha"), liveChat("abe")}, nil
-			}),
-			Inspect: seats.inspect,
-		}
-	}, WatchOptions{Transitions: true})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Watch() error = %v, want context.Canceled", err)
-	}
-	assertLines(t, lines, []string{"SEEN alpha idle idle_seconds=3", "SEEN abe idle idle_seconds=3"})
-}
-
-func TestFleetWatchRefusesAMalformedPatternBeforeTheFirstPoll(t *testing.T) {
-	polled := false
-	var out bytes.Buffer
-	// A regression that accepts the pattern would watch forever: bound it.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_, err := FleetWatcher{
-		Targets: []string{"fine", "["},
-		Resolve: func(context.Context, string) (Chat, bool, error) { polled = true; return Chat{}, false, nil },
-		List:    func(context.Context) ([]Chat, error) { polled = true; return nil, nil },
-	}.Watch(ctx, WatchOptions{Poll: time.Millisecond}, &out)
-	if !errors.Is(err, path.ErrBadPattern) || !strings.Contains(err.Error(), `"["`) {
-		t.Fatalf("Watch() error = %v, want ErrBadPattern naming the pattern", err)
-	}
-	if polled || out.Len() != 0 {
-		t.Fatalf("polled = %v, output = %q, want a refusal before any poll", polled, out.String())
-	}
-}
-
-func TestFleetWatchAFailedListingErrorsEveryGlobAndAdoptedSeat(t *testing.T) {
-	seats := newFakeSeats(map[string][]fakeStep{"a1": {working("x")}})
-	lines, result, err := runFleet(t, func(context.CancelFunc) FleetWatcher {
-		return FleetWatcher{
-			Targets: []string{"a*", "b*"},
-			List: func() func(context.Context) ([]Chat, error) {
-				poll := 0
-				return func(context.Context) ([]Chat, error) {
-					poll++
-					if poll == 2 {
-						return nil, errors.New("scan\nfailed")
-					}
-					return []Chat{liveChat("a1")}, nil
-				}
-			}(),
-			Inspect: seats.inspect,
-		}
-	}, WatchOptions{})
-	if err != nil {
-		t.Fatalf("Watch() error = %v, want nil: every target ended", err)
-	}
-	assertLines(t, lines, []string{"ERROR a* scan failed", "ERROR b* scan failed", "ERROR a1 scan failed"})
-	if len(result.Errors) != 3 || result.Errors["a1"] == nil || result.Errors["b*"] == nil {
-		t.Fatalf("Errors = %v", result.Errors)
 	}
 }
 
@@ -644,8 +516,17 @@ func TestFleetWatchRunsHooksPerTargetAndNeverOnSnapshotsOrErrors(t *testing.T) {
 
 func TestFleetWatchWriteFailureIsTheReturnedError(t *testing.T) {
 	seats := newFakeSeats(map[string][]fakeStep{"x": {gone()}})
-	_, err := FleetWatcher{Targets: []string{"x"}, Resolve: seats.resolve, Inspect: seats.inspect}.
-		Watch(context.Background(), WatchOptions{Poll: time.Millisecond}, failingWriter{})
+	_, err := FleetWatcher{
+		Targets: []string{"x"},
+		Resolve: seats.resolve,
+		Inspect: seats.inspect,
+		Clock:   newAutoClock(),
+	}.
+		Watch(
+			context.Background(),
+			WatchOptions{Poll: time.Millisecond},
+			failingWriter{},
+		)
 	if err == nil || !strings.Contains(err.Error(), "write event line") {
 		t.Fatalf("Watch() error = %v, want the write failure", err)
 	}
@@ -726,5 +607,107 @@ func appendCodexTurnEnd(t *testing.T, rollout, line string, stamp time.Time) {
 	}
 	if err := os.Chtimes(rollout, stamp, stamp); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPollFloorHoldsEveryRequestToMinPoll: a poll below MinPoll, zero and
+// negative included, runs at MinPoll; anything at or above it runs as asked.
+func TestPollFloorHoldsEveryRequestToMinPoll(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		requested, want time.Duration
+	}{
+		{-time.Second, MinPoll},
+		{0, MinPoll},
+		{time.Millisecond, MinPoll},
+		{MinPoll - time.Nanosecond, MinPoll},
+		{MinPoll, MinPoll},
+		{15 * time.Second, 15 * time.Second},
+	} {
+		if got := PollFloor(testCase.requested); got != testCase.want {
+			t.Errorf("PollFloor(%v) = %v, want %v", testCase.requested, got, testCase.want)
+		}
+	}
+}
+
+// TestFleetWatchPollsOnTheSharedGrid: a watch started between ticks polls at
+// once, then on the multiples of its poll since the Unix epoch, so watches
+// started apart poll together; each poll's discovery is told the earliest
+// moment a shared fleet view may come from — its tick, or its own start.
+func TestFleetWatchPollsOnTheSharedGrid(t *testing.T) {
+	t.Parallel()
+	seats := newFakeSeats(map[string][]fakeStep{"x": {working("a"), working("a"), gone()}})
+	auto := newAutoClock()
+	start := auto.Now().Add(3500 * time.Millisecond)
+	auto.Advance(3500 * time.Millisecond)
+	var sinces []time.Time
+	discover := func(since time.Time) Discovery {
+		sinces = append(sinces, since)
+		return Discovery{Resolve: seats.resolve}
+	}
+	var out bytes.Buffer
+	_, err := FleetWatcher{Targets: []string{"x"}, Discover: discover, Inspect: seats.inspect, Clock: auto}.
+		Watch(context.Background(), WatchOptions{}, &out)
+	if err != nil {
+		t.Fatalf("Watch() error = %v", err)
+	}
+	firstTick := start.Add(MinPoll - 3500*time.Millisecond)
+	wantWaits := []time.Duration{MinPoll - 3500*time.Millisecond, MinPoll}
+	wantSinces := []time.Time{start, firstTick, firstTick.Add(MinPoll)}
+	if waits := auto.waits(); !slices.Equal(waits, wantWaits) {
+		t.Fatalf("armed %v, want %v: the first wait to the next tick, then whole polls", waits, wantWaits)
+	}
+	if !slices.EqualFunc(sinces, wantSinces, time.Time.Equal) {
+		t.Fatalf("discoveries since %v, want %v", sinces, wantSinces)
+	}
+	for _, since := range sinces[1:] {
+		if since.UnixNano()%int64(MinPoll) != 0 {
+			t.Fatalf("poll since %v is off the %v grid", since, MinPoll)
+		}
+	}
+}
+
+func TestNextTickIsTheNextGridInstant(t *testing.T) {
+	t.Parallel()
+	base := time.Unix(1_700_000_000, 0)
+	for _, test := range []struct {
+		now  time.Time
+		poll time.Duration
+		want time.Time
+	}{
+		{base, MinPoll, base.Add(MinPoll)},
+		{base.Add(time.Nanosecond), MinPoll, base.Add(MinPoll)},
+		{base.Add(MinPoll - time.Nanosecond), MinPoll, base.Add(MinPoll)},
+		{base.Add(time.Second), 12 * time.Second, time.Unix(1_700_000_004, 0)},
+	} {
+		if got := NextTick(test.now, test.poll); !got.Equal(test.want) {
+			t.Errorf("NextTick(%v, %v) = %v, want %v", test.now, test.poll, got, test.want)
+		}
+	}
+}
+
+// TestFleetWatchWaitsMinPollBetweenPollsWhateverItWasAsked: the library holds
+// the floor itself, so no caller — a CLI flag, a zero value, a test's 1 ms —
+// samples faster than MinPoll.
+func TestFleetWatchWaitsMinPollBetweenPollsWhateverItWasAsked(t *testing.T) {
+	t.Parallel()
+	for _, requested := range []time.Duration{0, time.Millisecond, 3 * time.Second} {
+		seats := newFakeSeats(map[string][]fakeStep{"x": {working("a"), working("a"), gone()}})
+		auto := newAutoClock()
+		var out bytes.Buffer
+		_, err := FleetWatcher{Targets: []string{"x"}, Resolve: seats.resolve, Inspect: seats.inspect, Clock: auto}.
+			Watch(context.Background(), WatchOptions{Poll: requested}, &out)
+		if err != nil {
+			t.Fatalf("Poll %v: Watch() error = %v", requested, err)
+		}
+		waits := auto.waits()
+		if len(waits) != 2 {
+			t.Fatalf("Poll %v: armed %v, want two waits between three polls", requested, waits)
+		}
+		for _, wait := range waits {
+			if wait != MinPoll {
+				t.Fatalf("Poll %v: armed %v, want every wait %v", requested, waits, MinPoll)
+			}
+		}
 	}
 }

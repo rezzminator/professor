@@ -13,7 +13,12 @@ import (
 // abandoned only when both hold: the same pane's crumb names another thread,
 // and the launch thread is empty — never written, or written without a
 // prompt. A session with prompts on that pane is a real conversation (a
-// headless child, a background job) and keeps its row.
+// headless child, a background job) and keeps its row — unless the agent is
+// the pane's own process: one Claude runs one thread, and the crumb names the
+// one it runs now, so after a /clear or /resume the launch thread it left is
+// no live seat, however many prompts it holds. Kept, it was a second live row
+// on the pane under the old title, and the name resolved to the thread nobody
+// was writing any more.
 func (current *composer) abandonedLaunch(
 	agent gather.Agent,
 	transcript store.Transcript,
@@ -25,6 +30,9 @@ func (current *composer) abandonedLaunch(
 	thread, crumbed := current.livePaneThreads[targetKey(agent.Socket, agent.PaneID)]
 	if !crumbed || thread == agent.SessionID {
 		return false
+	}
+	if agent.PID != 0 && agent.PID == agent.PanePID {
+		return true
 	}
 	return !indexed || transcript.PromptCount == 0
 }

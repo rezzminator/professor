@@ -4,6 +4,7 @@ package gather
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"time"
 
@@ -247,10 +248,11 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 			gatherer.codexName,
 			gatherer.codexIDName,
 		),
-		CrumblessLive: append([]CrumblessLive(nil), crumblessLive...),
-		CorpseSwept:   append([]string(nil), tmuxProbe.CorpseSwept...),
-		StaleSwept:    append([]string(nil), crumbs.StaleSwept...),
-		Warnings:      append(append([]string(nil), tmuxProbe.ProbeWarnings...), agentWarnings...),
+		CrumblessLive:     append([]CrumblessLive(nil), crumblessLive...),
+		CorpseSwept:       append([]string(nil), tmuxProbe.CorpseSwept...),
+		StaleSwept:        append([]string(nil), crumbs.StaleSwept...),
+		Warnings:          append(append([]string(nil), tmuxProbe.ProbeWarnings...), agentWarnings...),
+		UnreadableSockets: maps.Clone(tmuxProbe.Unreadable),
 	}, nil
 }
 

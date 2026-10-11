@@ -11,11 +11,15 @@ import unittest
 class FlightContracts(unittest.TestCase):
     def test_no_actor_continuation(self):
         foreman = Path('templates/global/agents/flights-foreman.md').read_text()
-        wait = re.search(r'^10\. (.+)$', foreman, re.M).group(1)
-        self.assertTrue('outstanding' in wait and 'step 12' in wait and 'step 13' in wait,
+        step = re.search(r'^(\d+)\. (Wait only .+)$', foreman, re.M)
+        self.assertIsNotNone(step, 'the run has a numbered "Wait only" step')
+        n, wait = int(step.group(1)), step.group(2)
+        self.assertTrue('outstanding' in wait and f'step {n + 2}' in wait and f'step {n + 3}' in wait,
                         'no-actor roots must continue to landing and children to return')
-        self.assertRegex(wait, r'returns? to verify.*step 11',
+        self.assertRegex(wait, rf'returns? to verify.*step {n + 1}\b',
                          'children already returned during the build must be verified before landing')
+        for name, k in (('Verify', 1), ('Land', 2), ('Return once', 3)):
+            self.assertRegex(foreman, rf'(?m)^{n + k}\. {name}\b', f'step {n + k} is {name}')
 
     def test_complete_inventory(self):
         foreman = Path('templates/global/agents/flights-foreman.md').read_text()

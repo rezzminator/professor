@@ -438,6 +438,29 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			t.Fatalf("parent row = %q, want 2/2 (a sub-agent call without stop_reason still waits on g1)", got)
 		}
 	})
+	t.Run(
+		"a parent silent 20 minutes after one of its parallel sub-agents returned waits on the other",
+		func(t *testing.T) {
+			parallel := `{"type":"assistant","timestamp":"2026-09-24T09:38:00Z","message":{"stop_reason":"tool_use",` +
+				`"content":[{"type":"tool_use","id":"x8","name":"Agent"},{"type":"tool_use","id":"x7","name":"Agent"}]}}`
+			firstBack := `{"type":"user","timestamp":"2026-09-24T09:40:00Z","message":{"content":[{"type":"tool_result",` +
+				`"tool_use_id":"x8","content":"g1 done"}]}}`
+			parents := map[string]string{"p": "", "c1": "p", "g1": "c1", "g2": "c1"}
+			session := nestedSession(t, map[string][]string{
+				"p": agentTranscriptLines, "c1": {parallel, firstBack}, "g1": {turnEnded}, "g2": {turnToolCall},
+			}, parents)
+			got := renderTasks(t, session, subagentNow, parentTask)["p"]
+			if !strings.HasPrefix(got, "2/3│") {
+				t.Fatalf("parent row = %q, want 2/3 (c1 still waits on its working child g2)", got)
+			}
+			allBack := nestedSession(t, map[string][]string{
+				"p": agentTranscriptLines, "c1": {parallel, firstBack}, "g1": {turnEnded}, "g2": {turnEnded},
+			}, parents)
+			if got := renderTasks(t, allBack, subagentNow, parentTask)["p"]; !strings.HasPrefix(got, "0/3│") {
+				t.Fatalf("parent row = %q, want 0/3 (no child works, so the silent parent is dead)", got)
+			}
+		},
+	)
 	t.Run("a silence shorter than any tool call is still working", func(t *testing.T) {
 		quiet := `{"type":"assistant","timestamp":"2026-09-24T09:55:00Z","message":{"stop_reason":"tool_use",` +
 			`"content":[{"type":"tool_use","id":"x9","name":"Bash"}]}}` // a Bash call 7 minutes in

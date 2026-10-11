@@ -608,6 +608,7 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) age
 	if _, _, err := transcript.ReadLines(path, 0, func(line []byte, _ bool) {
 		recordTranscriptLine(line, seen, &activity, spend)
 		if open, delegating, at, ok := messageTurnOpen(line); ok {
+			delegating = open && (delegating || activity.turn.open && activity.turn.delegating)
 			activity.turn = agentTurn{open: open, delegating: delegating, last: at, seen: true}
 			stamped = at
 		}

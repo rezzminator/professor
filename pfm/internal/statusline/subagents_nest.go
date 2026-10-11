@@ -217,9 +217,11 @@ func (tree *agentTree) turn(id string) turnState {
 
 // working says whether an agent whose transcript was read is working now. An
 // open turn counts while it is recent, never for a turn the task list calls
-// over. A turn whose last entry is a call to a sub-agent counts however long
-// it has been quiet while any agent it spawned works: it waits on that child,
-// and the child's own turn is what ends or outlives the wait.
+// over. A turn that called a sub-agent counts however long it has been quiet
+// while any agent it spawned works: it waits on that child, and the child's
+// own turn is what ends or outlives the wait. That holds after the call's own
+// line too: of sub-agents called in parallel, the first to return writes the
+// turn's last entry while the others still work.
 func (tree *agentTree) working(id string, activity *agentActivity) bool {
 	if !activity.turn.open || tree.over[id] {
 		return false
@@ -256,9 +258,10 @@ func (tree *agentTree) childWorking(id string, seen map[string]bool) bool {
 // toolEndsTurn reads as before. A transcript with no
 // message entry yet is a turn that has not produced its first reply. last is
 // when that entry was written, the file's mtime when it carries no timestamp.
-// delegating is an open turn whose entry calls a sub-agent, stop_reason
-// written or not. err is why last could not be read (the transcript went
-// between its read and its stat): only the turn's state is then unknown.
+// delegating is an open turn that called a sub-agent, stop_reason written or
+// not, from that call's entry until the turn closes. err is why last could
+// not be read (the transcript went between its read and its stat): only the
+// turn's state is then unknown.
 type agentTurn struct {
 	open       bool
 	last       time.Time

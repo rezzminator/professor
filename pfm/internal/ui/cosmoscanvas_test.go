@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"math"
+	"math/rand"
+	"strings"
 	"testing"
 )
 
@@ -144,5 +147,102 @@ func TestBezierAtRoundsEveryProductExplicitly(t *testing.T) {
 				index,
 			)
 		}
+	}
+}
+
+// renderReference is the frame encoder before it stopped formatting through
+// fmt: the oracle the byte-identity test holds render to.
+func renderReference(c *Canvas) string {
+	var b strings.Builder
+	for y := 0; y < c.Rows; y++ {
+		last := RGB{1, 1, 1}
+		lastBold := false
+		styleValid := false
+		for x := 0; x < c.Cols; x++ {
+			idx := y*c.Cols + x
+			ch := ' '
+			fg := RGB{}
+			bold := false
+			switch {
+			case c.cells[idx].used:
+				ch, fg, bold = c.cells[idx].ch, quantRGB(c.cells[idx].fg, c.Quant), c.cells[idx].bold
+			case c.dots[idx] != 0:
+				ch, fg = rune(0x2800+int(c.dots[idx])), quantRGB(c.dotColor[idx], c.Quant)
+			}
+			if ch != ' ' && (!styleValid || fg != last || bold != lastBold) {
+				if bold {
+					fmt.Fprintf(&b, "\x1b[1;38;2;%d;%d;%dm", fg.R, fg.G, fg.B)
+				} else {
+					fmt.Fprintf(&b, "\x1b[0;38;2;%d;%d;%dm", fg.R, fg.G, fg.B)
+				}
+				last, lastBold, styleValid = fg, bold, true
+			}
+			b.WriteRune(ch)
+		}
+		b.WriteString("\x1b[0m")
+		if y+1 < c.Rows {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func scatterCanvas(c *Canvas, seed int64) {
+	rng := rand.New(rand.NewSource(seed))
+	for range c.Cols * c.Rows {
+		color := RGB{uint8(rng.Intn(256)), uint8(rng.Intn(256)), uint8(rng.Intn(256))}
+		c.Dot(rng.Intn(c.PW()), rng.Intn(c.PH()), color)
+	}
+	for range c.Cols {
+		c.Text(rng.Intn(c.Cols), rng.Intn(c.Rows), "✳ planet", RGB{uint8(rng.Intn(256)), 200, 9}, rng.Intn(2) == 0)
+	}
+}
+
+// TestCanvasRenderIsByteIdenticalToTheFmtEncoder pins that the frame encoder
+// writes the same bytes it wrote through fmt, for plain, bold, dotted and
+// quantised cells.
+func TestCanvasRenderIsByteIdenticalToTheFmtEncoder(t *testing.T) {
+	for _, quant := range []uint16{0, 8, 16} {
+		for seed, size := range [][2]int{{118, 43}, {7, 3}, {1, 1}, {200, 60}} {
+			canvas := NewCanvas(size[0], size[1])
+			canvas.Quant = quant
+			scatterCanvas(canvas, int64(seed)+1)
+			if got, want := canvas.render(), renderReference(canvas); got != want {
+				t.Fatalf("quant %d %dx%d: render differs from the fmt encoder", quant, size[0], size[1])
+			}
+		}
+	}
+}
+
+// TestCanvasRenderAllocatesOncePerFrame pins the removed work: a frame is one
+// buffer, not a boxed argument list per colour change.
+func TestCanvasRenderAllocatesOncePerFrame(t *testing.T) {
+	canvas := NewCanvas(118, 43)
+	scatterCanvas(canvas, 7)
+	if allocs := testing.AllocsPerRun(20, func() { _ = canvas.render() }); allocs > 2 {
+		t.Fatalf("render allocated %.0f times per frame, want at most 2", allocs)
+	}
+}
+
+// TestAcquiredCanvasIsBlankAndReusesItsBuffers pins the pooled frame canvas: a
+// canvas handed back and acquired again is a blank canvas of the new size with
+// the default quantisation, and the cycle allocates nothing.
+func TestAcquiredCanvasIsBlankAndReusesItsBuffers(t *testing.T) {
+	dirty := acquireCanvas(118, 43)
+	dirty.Quant = 16
+	scatterCanvas(dirty, 3)
+	releaseCanvas(dirty)
+
+	clean := acquireCanvas(100, 40)
+	if clean.Cols != 100 || clean.Rows != 40 || clean.Quant != 8 {
+		t.Fatalf("acquired canvas = %dx%d quant %d, want 100x40 quant 8", clean.Cols, clean.Rows, clean.Quant)
+	}
+	if got, want := clean.render(), NewCanvas(100, 40).render(); got != want {
+		t.Fatal("an acquired canvas is not blank: a dirty frame leaked through the pool")
+	}
+	releaseCanvas(clean)
+
+	if allocs := testing.AllocsPerRun(20, func() { releaseCanvas(acquireCanvas(118, 43)) }); allocs > 0 {
+		t.Fatalf("acquiring and releasing a canvas allocated %.0f times, want 0", allocs)
 	}
 }

@@ -473,10 +473,11 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	if code := run([]string{"doctor"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
+	links := fmt.Sprintf("account-links: ok (1 accounts × %d entries)", len(installer.StoreEntries))
 	if !strings.Contains(stdout.String(), "doctor: clean") ||
 		!strings.Contains(stdout.String(), "transcripts=1") ||
 		!strings.Contains(stdout.String(), fmt.Sprintf("host-check: ok (%d checks)", len(hostcheck.Detectors()))) ||
-		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 22 entries)") {
+		!strings.Contains(stdout.String(), links) {
 		t.Fatalf("doctor stdout=%q", stdout.String())
 	}
 }
@@ -989,7 +990,7 @@ func TestInstallerManagedCleanupOptions(t *testing.T) {
 func stageStorePlugins(t *testing.T, home string) {
 	t.Helper()
 	storeDir := installer.ClaudeStore(home)
-	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
+	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()})
 	ids, err := installer.ClaudePluginsNotInstalled(t.TempDir(), targets)
 	if err != nil {
 		t.Fatal(err)

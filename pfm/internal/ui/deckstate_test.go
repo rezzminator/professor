@@ -2,6 +2,7 @@ package ui
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 func newArrival() compose.Row {
@@ -180,5 +182,103 @@ func TestKeyAfterALongIdleMarksTheHeaderRefreshingUntilTheSnapshotLands(t *testi
 	fresh, _ = applyKey(t, fresh, specialKey(tea.KeyDown))
 	if strings.Contains(ansi.Strip(fresh.chatsHeaderLine(100)), "refreshing") {
 		t.Error("a key on a fleet refreshed moments ago must not cry refreshing")
+	}
+}
+
+// TestRefreshFailureMarksTheFleetStaleUntilAPassLands pins the visible half of
+// "an error never renders as absence": a refresh pass that failed leaves the
+// previous rows on screen, and those rows must read as old — the stale marker
+// names the age of the fleet on screen and the error — until a pass lands.
+func TestRefreshFailureMarksTheFleetStaleUntilAPassLands(t *testing.T) {
+	model := deckModel(120, 30)
+	rows := len(model.rows)
+	if strings.Contains(ansi.Strip(model.mastheadTitle(160)), "stale") {
+		t.Fatal("a fleet that has not failed claims to be stale")
+	}
+	model.nowNS = model.deck.freshNS + int64(42*time.Second)
+	model.applyRefresh(Snapshot{RefreshFailure: &RefreshFailure{
+		Stage: "gather", Err: "tmux could not run:\n\x1b[2Jno server", AtNS: model.nowNS,
+	}})
+	raw := model.mastheadTitle(200)
+	title := ansi.Strip(raw)
+	for _, want := range []string{"fleet stale 42s", "gather", "tmux could not run"} {
+		if !strings.Contains(title, want) {
+			t.Errorf("the stale-fleet marker lacks %q: %q", want, title)
+		}
+	}
+	// The error is raw err.Error(), tmux stderr among it: a newline or an
+	// escape byte in it must not reach the frame.
+	if strings.Contains(raw, "\n") || strings.Contains(raw, "\x1b[2J") {
+		t.Errorf("the stale-fleet marker carries the error's control bytes: %q", raw)
+	}
+	// The fill cuts from the right: on a narrow terminal the marker must still
+	// be what shows, ahead of the fleet's counts.
+	if narrow := ansi.Strip(model.mastheadTitle(30)); !strings.Contains(narrow, "fleet stale 42s") {
+		t.Errorf("a 30-column masthead lost the stale-fleet marker: %q", narrow)
+	}
+	if len(model.rows) != rows {
+		t.Errorf("a failed pass carries no fleet: rows = %d, want the last good %d", len(model.rows), rows)
+	}
+	model.applyRefresh(deckFleet(120, 30))
+	if got := ansi.Strip(model.mastheadTitle(200)); strings.Contains(got, "stale") {
+		t.Errorf("the next good pass must clear the stale marker: %q", got)
+	}
+}
+
+// TestRefreshRebuildsTheCosmosFromTheRowsTheListShows pins the cosmos' last
+// door: a snapshot's graph is built from its own rows, but the model filters a
+// deactivated socket out of them and lets a typed kill override a row. The sky
+// must follow the rows the Chats tab lists, never the snapshot's unfiltered
+// ones, or a chat the list just stopped showing keeps shining.
+func TestRefreshRebuildsTheCosmosFromTheRowsTheListShows(t *testing.T) {
+	nowNS := fixtureNowNS
+	alpha := compose.Row{Kind: compose.LiveClaude, ID: "alpha-id", Name: "alpha", Socket: "cc-alpha", PaneID: "%1"}
+	beta := compose.Row{Kind: compose.LiveClaude, ID: "beta-id", Name: "beta", Socket: "cc-beta", PaneID: "%2"}
+	events := []fleetdb.CommsEvent{
+		{
+			AtNS:       nowNS - int64(time.Minute),
+			Kind:       fleetdb.KindInject,
+			SenderUUID: "alpha-id",
+			Target:     "beta-id",
+			Message:    "hi",
+		},
+		// No sender identity: BuildCosmos warns once for it.
+		{AtNS: nowNS - int64(time.Minute), Kind: fleetdb.KindInject, Target: "alpha-id", Message: "anon"},
+	}
+	rows := []compose.Row{alpha, beta}
+	snapshot := func() Snapshot {
+		return Snapshot{
+			Rows: rows, NowNS: nowNS, Width: 120, Height: 30,
+			Cosmos:       compose.BuildCosmos(rows, events, nowNS, true),
+			CosmosEvents: events,
+		}
+	}
+	keys := func(model Model) []string {
+		out := make([]string, 0, len(model.cosmos.Nodes))
+		for _, node := range model.cosmos.Nodes {
+			out = append(out, node.Key)
+		}
+		return out
+	}
+
+	model := NewModel(snapshot())
+	model.applyRefresh(snapshot())
+	if got := keys(model); len(got) != 2 {
+		t.Fatalf("both live chats are stars before anything is filtered, got %v", got)
+	}
+	model.deactivatedSockets["cc-beta"] = true
+	model.applyRefresh(snapshot())
+	if got := keys(model); len(got) != 1 || got[0] != "chat:id:alpha-id" {
+		t.Errorf("a deactivated chat is out of the list and out of the sky, got %v", got)
+	}
+	if want := snapshot().Cosmos.Warnings; len(want) != 1 || !slices.Equal(model.cosmos.Warnings, want) {
+		t.Errorf("the rebuilt sky's warnings = %q, want the snapshot's %q once each", model.cosmos.Warnings, want)
+	}
+
+	killed := NewModel(snapshot())
+	killed.killChanges = map[string]KillChange{"beta-id": {ID: "beta-id", Killed: true}}
+	killed.applyRefresh(snapshot())
+	if got := keys(killed); len(got) != 1 || got[0] != "chat:id:alpha-id" {
+		t.Errorf("a chat the picker just killed is not a live star, got %v", got)
 	}
 }

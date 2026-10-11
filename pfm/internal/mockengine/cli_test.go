@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
@@ -175,7 +176,9 @@ func pluginCLI(t *testing.T, fix *fixture, config string, args ...string) (int, 
 }
 
 // releaseTargets are the plugins a release build ensures: the GitHub ids.
-var releaseTargets = installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
+var releaseTargets = installer.ClaudePluginTargets(
+	installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()},
+)
 
 func TestClaudePluginInstallReaderContract(t *testing.T) {
 	fix := newFixture(t)

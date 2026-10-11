@@ -281,7 +281,10 @@ func Run(
 	tally.failures += depFailures
 	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
 	printClaudePluginsDoctor(stdout, installer.ClaudeStore(resolved.Home), installer.ClaudePluginBuild{
-		Version: runtime.Version, Home: resolved.Home, CheckoutRoot: runtime.Config.Claude.PluginCheckoutRoot,
+		Version:      runtime.Version,
+		Home:         resolved.Home,
+		CheckoutRoot: runtime.Config.Claude.PluginCheckoutRoot,
+		Plugins:      runtime.Config.Claude.Plugins,
 	}, tally)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(

@@ -263,6 +263,7 @@ For `account-entry-real`, the fix is selected by entry. Each fix is one shell li
 - `plugins`: `rm -r {path}  # the store keeps its copy (reinstallable)`.
 - `settings.json`: `jq -e -s '.[0] as $s | .[1] | to_entries | all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' {store}/settings.json {path} > /dev/null && jq -s '.[0] * .[1]' {store}/settings.json {path} > {store}/settings.json.new && mv {store}/settings.json.new {store}/settings.json && rm {path}  # adds the keys the store lacks; stops while a key differs`.
 - `CLAUDE.md`: `cat {path} >> {store}/CLAUDE.md && rm {path}  # appended whole; prune {store}/CLAUDE.md as you like`.
+- `tool-visibility-controller.json`: `mkdir -p {store} && { [ -e {store}/tool-visibility-controller.json ] || [ -L {store}/tool-visibility-controller.json ] || printf '{}\n' > {store}/tool-visibility-controller.json; } && ` followed by the `settings.json` line naming `tool-visibility-controller.json`: it first seeds a missing store copy, since install, which this row blocks, is what would seed it.
 - `stats-cache.json`, `.last-cleanup`, `gh-pr-status-cache.json`: `rm {path}  # a cache`.
 
 ### retired-store-entry

@@ -1,10 +1,11 @@
 package ui
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 )
 
 type RGB struct{ R, G, B uint8 }
@@ -74,6 +75,31 @@ func NewCanvas(cols, rows int) *Canvas {
 	c.dotLuma = make([]float64, n)
 	return c
 }
+
+// canvasPool keeps the frame canvas between frames: a cosmos frame at ~15fps
+// would otherwise allocate and zero four buffers the size of the terminal on
+// every tick and leave them to the collector.
+var canvasPool sync.Pool
+
+// acquireCanvas is NewCanvas on a recycled canvas: blank, the requested size,
+// default quantisation. The caller hands it back with releaseCanvas once the
+// frame is rendered to a string and nothing else holds the canvas.
+func acquireCanvas(cols, rows int) *Canvas {
+	n := cols * rows
+	c, _ := canvasPool.Get().(*Canvas)
+	if c == nil || cap(c.cells) < n || cap(c.dots) < n || cap(c.dotColor) < n || cap(c.dotLuma) < n {
+		return NewCanvas(cols, rows)
+	}
+	c.Cols, c.Rows, c.Quant = cols, rows, 8
+	c.cells, c.dots, c.dotColor, c.dotLuma = c.cells[:n], c.dots[:n], c.dotColor[:n], c.dotLuma[:n]
+	clear(c.cells)
+	clear(c.dots)
+	clear(c.dotColor)
+	clear(c.dotLuma)
+	return c
+}
+
+func releaseCanvas(c *Canvas) { canvasPool.Put(c) }
 
 func (c *Canvas) Clear() {
 	for i := range c.cells {
@@ -202,6 +228,12 @@ func quantRGB(c RGB, step uint16) RGB {
 // differential paint, so this boundary deliberately emits no cursor moves.
 func (c *Canvas) render() string {
 	var b strings.Builder
+	// Worst case per cell: a full colour escape and a four-byte rune.
+	b.Grow(c.Rows * (c.Cols*(len("\x1b[1;38;2;255;255;255m")+utf8.UTFMax) + len("\x1b[0m\n")))
+	var digits [3]byte
+	number := func(value uint8) {
+		b.Write(strconv.AppendUint(digits[:0], uint64(value), 10))
+	}
 	for y := 0; y < c.Rows; y++ {
 		last := RGB{1, 1, 1}
 		lastBold := false
@@ -219,10 +251,16 @@ func (c *Canvas) render() string {
 			}
 			if ch != ' ' && (!styleValid || fg != last || bold != lastBold) {
 				if bold {
-					fmt.Fprintf(&b, "\x1b[1;38;2;%d;%d;%dm", fg.R, fg.G, fg.B)
+					b.WriteString("\x1b[1;38;2;")
 				} else {
-					fmt.Fprintf(&b, "\x1b[0;38;2;%d;%d;%dm", fg.R, fg.G, fg.B)
+					b.WriteString("\x1b[0;38;2;")
 				}
+				number(fg.R)
+				b.WriteByte(';')
+				number(fg.G)
+				b.WriteByte(';')
+				number(fg.B)
+				b.WriteByte('m')
 				last, lastBold, styleValid = fg, bold, true
 			}
 			b.WriteRune(ch)

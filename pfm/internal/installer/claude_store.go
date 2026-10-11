@@ -58,6 +58,9 @@ var StoreEntries = []StoreEntry{
 	{Name: "stats-cache.json"},
 	{Name: ".last-cleanup"},
 	{Name: "gh-pr-status-cache.json"},
+	// The tool-visibility-controller plugin's user scope file; a missing file is no rule, so an
+	// install without one seeds the empty object, never an empty file, which is not valid JSON.
+	{Name: "tool-visibility-controller.json", Seed: "{}\n"},
 }
 
 var AccountEntries = []string{

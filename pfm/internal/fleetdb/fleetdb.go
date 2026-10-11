@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -108,6 +109,9 @@ type Store struct {
 	db       *sql.DB
 	path     string
 	degraded error
+	// commsWrites counts this Store's own committed comms rows: SQLite's
+	// data_version does not move for the asking connection's own commits.
+	commsWrites atomic.Uint64
 }
 
 // CheckLegacyState refuses a state database create while the legacy

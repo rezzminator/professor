@@ -66,6 +66,14 @@ type CosmosNode struct {
 	// it a short grace window (nowNS - LastNS) before calling a still-
 	// missing row GONE rather than PENDING.
 	Dead bool
+	// Offline marks a node whose identity DID resolve to a row, but a row with
+	// no live pane the picker would list as live: resumable, killed, or a BG
+	// job. That is positive evidence the chat is not running, so the live sky
+	// drops it exactly as it drops a Dead node — a comms event inside the
+	// window between dead chats must not resurrect them as live stars. Replay
+	// keeps the node (Dead and Offline both ignored there): the past is the
+	// ledger, and a chat that has since stopped is the ghost it was.
+	Offline bool
 	// DiedNS, as this package sets it, is the node's own last edge activity
 	// (LastNS), not a kill time — the store's kill table has no path into
 	// this package (compose.Row carries only the Killed bool, not a
@@ -175,7 +183,7 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 	if live {
 		for index := range rows {
 			row := rows[index]
-			if row.Killed || row.BG || !liveRow(row) {
+			if !drawnLive(row) {
 				continue
 			}
 			at := row.ActivityNS
@@ -246,14 +254,15 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 			// never "when did it die".
 			node.Dead = nowNS-node.LastNS > rowGrace
 		}
-		if live && node.Dead {
+		if live && (node.Dead || node.Offline) {
 			// The live sky never shows a dead or hidden chat — no blink,
-			// no fade, no debris; a node the picker would not list is not
-			// in the graph. A row explicitly Killed and an unmatched
-			// identity past rowGrace are both "dead" for this purpose, and
-			// this is the only place either verdict is acted on. Replay
-			// never takes this branch — live is false there — so a chat
-			// that has since died still renders as the ghost it was.
+			// no fade, no debris; a node the picker would not list as live
+			// is not in the graph. A row explicitly Killed, a row with no
+			// live pane (Offline) and an unmatched identity past rowGrace
+			// are all "dead" for this purpose, and this is the only place
+			// any of the three verdicts is acted on. Replay never takes
+			// this branch — live is false there — so a chat that has since
+			// died still renders as the ghost it was.
 			continue
 		}
 		if node.Dead {
@@ -328,6 +337,14 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 		return graph.Edges[left].Kind < graph.Edges[right].Kind
 	})
 	return graph
+}
+
+// drawnLive is the ONE verdict on whether the live sky draws a row's chat:
+// a live pane (liveRow) that is neither killed nor a BG job. The seeding walk
+// and chatNode's event-matched path both ask it, so a chat the picker would
+// not list as live cannot reach the graph by either door.
+func drawnLive(row Row) bool {
+	return !row.Killed && !row.BG && liveRow(row)
 }
 
 // liveRow reports whether row carries a live pane — a real process a human
@@ -413,6 +430,7 @@ func (builder *cosmosBuilder) chatNode(query resolve.Address) CosmosNode {
 		node.Live = answer.Chat.Socket != ""
 		node.Killed = answer.Chat.Killed
 		node.Dead = answer.Chat.Killed
+		node.Offline = !drawnLive(answer.Chat)
 		return node
 	}
 	if builder.unmatched == nil {

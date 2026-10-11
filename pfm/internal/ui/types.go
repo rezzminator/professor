@@ -130,8 +130,17 @@ type Snapshot struct {
 	// SamplingContext bounds provider workers to the interactive picker's life.
 	SamplingContext context.Context
 	Cosmos          compose.CosmosGraph
-	CosmosSampler   CosmosSampler
-	NoSky           bool
+	// CosmosEvents are the comms events Cosmos was built from. applyRefresh
+	// rebuilds the graph from them when it filters or overrides the snapshot's
+	// rows (a deactivated socket, a kill the store has not caught up with), so
+	// the sky never draws a chat the Chats tab no longer lists.
+	CosmosEvents  []fleetdb.CommsEvent
+	CosmosSampler CosmosSampler
+	// RefreshFailure marks a snapshot that carries no fleet: the refresh pass
+	// failed. applyRefresh keeps the rows it has and shows them as stale, with
+	// this error and its age, until a snapshot without it lands.
+	RefreshFailure *RefreshFailure
+	NoSky          bool
 	// CosmosSafe renders the cosmos tab in vscode-safe mode — a slower clock
 	// and coarser colour quantisation; resolved by resolveCosmosSafe in
 	// cmd/pfm from the --safe flag and TERM_PROGRAM.
@@ -183,6 +192,15 @@ type Outcome struct {
 	Cache1H              bool
 	Query                string
 	KillChanges          []KillChange
+}
+
+// RefreshFailure is why a refresh pass produced no fleet: the stage that
+// failed, its error text and the scan clock (unix ns) it failed at; 0 leaves the
+// date to the model's own clock.
+type RefreshFailure struct {
+	Stage string
+	Err   string
+	AtNS  int64
 }
 
 // RefreshMsg replaces the cached compose snapshot without doing I/O in Model.

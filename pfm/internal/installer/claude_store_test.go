@@ -44,6 +44,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"stats-cache.json",
 		".last-cleanup",
 		"gh-pr-status-cache.json",
+		"tool-visibility-controller.json",
 	}
 	var want []StoreEntry
 	for _, name := range dirs {
@@ -51,7 +52,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 	}
 	for _, name := range files {
 		seed := ""
-		if name == "settings.json" {
+		if name == "settings.json" || name == "tool-visibility-controller.json" {
 			seed = "{}\n"
 		}
 		want = append(want, StoreEntry{Name: name, Seed: seed})

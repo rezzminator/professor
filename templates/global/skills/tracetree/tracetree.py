@@ -282,8 +282,20 @@ def cmd_new(root, seek=None, questions=False):
         asked = sys.stdin.read()
         if not parse_questions(asked):
             fail("--questions read no numbered question from stdin: start each with `1.`, `1)` or `Q1`")
-    project = project_name(root)
-    run = os.path.join("/tmp", project, "tracer", time.strftime("%Y%m%d-%H%M%S") + f"-{random.randrange(16**4):04x}")
+    try:
+        run = open_run(root, asked)
+    except OSError as e:
+        fail(f"cannot create the run directory: {e}")
+    print(run)
+    if rx is not None:
+        seek_prior(run, root, rx)
+
+
+def open_run(root, asked):
+    """A new run directory for ROOT under /tmp/{project}/tracer/, holding ROOT, BASE and, when given, the questions
+    text; its path. An OSError names the directory it could not write."""
+    run = os.path.join("/tmp", project_name(root), "tracer",
+                       time.strftime("%Y%m%d-%H%M%S") + f"-{random.randrange(16**4):04x}")
     try:
         os.makedirs(run)
         with open(os.path.join(run, "ROOT"), "w") as f:
@@ -292,11 +304,99 @@ def cmd_new(root, seek=None, questions=False):
             with open(os.path.join(run, "questions"), "w", encoding="utf-8") as f:
                 f.write(asked)
     except OSError as e:
-        fail(f"cannot create run directory {run}: {e}")
+        raise OSError(f"{run}: {e}") from e
     write_base(run, root)
+    return run
+
+
+def cmd_seek(run, seek):
+    """The PRIOR lines of `new --seek` for a run that already exists — the run a caller opened and handed the tracer."""
+    run = os.path.abspath(run)
+    try:
+        with open(os.path.join(run, "ROOT"), encoding="utf-8") as f:
+            root = f.read().strip()
+    except OSError as e:
+        fail(f"{run} is not a tracetree run (no ROOT file: {e})")
+    try:
+        rx = re.compile(seek)
+    except re.error as e:
+        fail(f"seek {seek!r} is not a regular expression: {e}")
     print(run)
-    if rx is not None:
-        seek_prior(run, root, rx)
+    seek_prior(run, root, rx)
+
+
+INTAKE_ROOT = re.compile(r"(?im)^[ \t]*(?:repo(?:sitory)?[ \t]+root|root)\b[^\n]*?((?:~/|/)[^\s`'\"()\[\],;]+)")
+INTAKE_RUN = re.compile(r"(?m)^[ \t]*RUN:[ \t]*\S")
+TT = "python3 $HOME/.claude/skills/tracetree/tracetree.py"
+
+
+def intake_log(msg):
+    """A hook has no caller to tell when its payload is unreadable: the failure goes to intake.log in the tracer
+    scratch directory of the project the hook runs in, /tmp/{project}/tracer/, and to stderr when even that cannot be
+    written."""
+    folder = os.path.join("/tmp", project_name(os.getcwd()), "tracer")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "intake.log"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%S ") + msg + "\n")
+    except OSError as e:
+        sys.stderr.write(f"tracetree intake: {msg} (log not written to {folder}: {e})\n")
+
+
+def cmd_intake():
+    """PreToolUse hook on the Agent tool. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets
+    its run opened here — ROOT from the brief's `Repo root:` line, else the hook's cwd — the brief rewritten to carry
+    `RUN: {run}` after that line, and the caller told how to pull each answer. Every other call passes untouched; a
+    run that cannot be opened passes the spawn on unchanged and tells the caller why."""
+    raw = sys.stdin.read()
+    try:
+        event = json.loads(raw)
+        if not isinstance(event, dict) or not isinstance(event.get("tool_input") or {}, dict):
+            raise ValueError("not a hook payload object")
+    except ValueError as e:
+        intake_log(f"unreadable hook payload ({e}): {raw[:200]!r}")
+        return
+    tool, given = event.get("tool_name"), event.get("tool_input") or {}
+    if tool not in ("Agent", "Task") or given.get("subagent_type") != "tracer":
+        return
+    brief = given.get("prompt")
+    if not isinstance(brief, str) or INTAKE_RUN.search(brief):
+        return
+    asked = parse_questions(brief)
+    if not asked:
+        return
+    m = INTAKE_ROOT.search(brief)
+    named = m.group(1).rstrip(".:") if m else ""
+    root = os.path.abspath(os.path.expanduser(named or str(event.get("cwd") or "")))
+
+    def say(text, rewritten=None):
+        out = {"hookEventName": "PreToolUse", "additionalContext": text}
+        if rewritten is not None:
+            out.update(permissionDecision="allow", updatedInput=rewritten)
+        print(json.dumps({"hookSpecificOutput": out}))
+
+    if not os.path.isdir(root):
+        say(f"tracer intake opened no run: repo root {root} is not a directory — the brief goes to tracer unchanged, "
+            "and tracer opens its own run; its final names it.")
+        return
+    stored = "\n".join(f"{n}. {asked[n]}" for n in sorted(asked)) + "\n"
+    try:
+        run = open_run(root, stored)
+    except OSError as e:
+        say(f"tracer intake opened no run: {e} — the brief goes to tracer unchanged, and tracer opens its own run; "
+            "its final names it.")
+        return
+    lines = brief.split("\n")
+    lines.insert(brief[:m.end()].count("\n") + 1 if m else 0, f"RUN: {run}")
+    rewritten = dict(given, prompt="\n".join(lines))
+    nums = ", ".join(map(str, sorted(asked)))
+    say(f"tracer RUN {run} holds your questions {nums}. Its final, returned when the run ends, is your answer: it "
+        "drills the readers' threads, fills their gaps and names what they leave unsafe. To start work before then, "
+        f"`{TT} answer {run} {{n…}}` blocks until those questions' threads are walked, most within three minutes, "
+        "and prints the readers' raw answers, every cite re-read from disk — facts to build on, never a ruling: a "
+        "verdict, a SAFE or a closing claim waits for the final, so end your turn once only the final is left. Until "
+        "then work on what no question covers — the testing manual, fixtures, a doc; a file a pending question "
+        "covers, read now, is paid for twice. /tracer:use has the rest.", rewritten)
 
 
 def loose(s):
@@ -347,6 +447,7 @@ class Files:
         self.index = None
         self.alias = {}
         self.drifts = []
+        self.readdressed = []  # (key, given line, given end, line it holds at): hops the kit moved off their reader's address
         self.unknown = {}
         self.sidecars = {}
         self.git_dead = None
@@ -962,6 +1063,13 @@ def verify(run, files, names, counts, drift=True):
                 a, b = got[0] + 1, got[-1] + 1
                 ranges.append((fkey, a, b))
                 n.setdefault("held", []).append((fkey, a, b))
+                # the reader's own address for this hop: the stored one when the check moved it, the given one when the
+                # write did; a cite the reader made at it moves with the hop (check_answer)
+                given = {ln} if a != ln and quotes else set()
+                gm = re.search(r":(\d+)(?:-\d+)?$", side[hi].get("given", "")) if side is not None else None
+                if gm and int(gm.group(1)) != a:
+                    given.add(int(gm.group(1)))
+                files.readdressed += [(fkey, g, g + b - a, a) for g in given]
                 shown = files.shown(fkey, path)
                 if shown != path:
                     files.alias.setdefault(path, set()).add(fkey)
@@ -1066,7 +1174,8 @@ def span_line(lines, parts, near, reach=None):
 
 def check_answer(text, files, ranges):
     """One answer line, re-addressed: (text, flags, moves). A cite is backed by a verified hop or by a
-    backticked span found at it; a span found elsewhere in a cited file moves an unbacked cite there."""
+    backticked span found at it; a span found elsewhere in a cited file moves an unbacked cite there, and a cite still
+    unbacked within reach of the address its reader gave a hop the kit re-addressed moves with that hop."""
     found = list(CITE.finditer(text))
     if not found:
         return text, ["no [path:N] cite"], []
@@ -1114,6 +1223,14 @@ def check_answer(text, files, ranges):
         else:
             extra.append(f"[{c['path']}:{i + 1}]")
             moves.append(f"↻ +{c['path']}:{i + 1}")
+    for c in live:
+        if c["ok"]:
+            continue
+        shift = next((at - lo for k, lo, hi, at in files.readdressed
+                      if k == c["key"] and lo - CITE_SLACK <= c["a"] and c["b"] <= hi + CITE_SLACK), None)
+        if shift is not None and 1 <= c["a"] + shift and c["b"] + shift <= len(c["lines"]):
+            c["new"], c["ok"] = c["a"] + shift, True
+            moves.append(f"↻ {c['path']}:{c['a']}→{c['new']}")
     for c in live:
         if not c["ok"]:
             flags.append(stale.format(c["path"], c["a"]) if c["drift"] else
@@ -1676,6 +1793,136 @@ def cmd_wait(run, ids, timeout, grace, start):
     print(full if len(full) < CEILING else ceiling_view(run, head, warn, blocks, counts_line, map_line, opened))
 
 
+ANSWER_TRUST = ("every [path:N] below was re-read from disk just now: an unflagged line is evidence — cite it, never "
+                "re-read it; a flagged line is not")
+
+
+def started_questions(run, entries):
+    """{node: set of question numbers its card named} from each `.started` file; a child whose card names none takes
+    its dotted parent's. A `.started` file that cannot be read serves no question and is named in the second value."""
+    got, bad = {}, []
+    for f in entries:
+        if not f.endswith(".started") or not NODE_ID.fullmatch(f[:-8]):
+            continue
+        try:
+            with open(os.path.join(run, f), encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as e:
+            bad.append(f"{f}: {e}")
+            continue
+        got[f[:-8]] = {n for line in text.splitlines() for n in question_numbers(line.partition("\t")[2])}
+    for name in sorted(got, key=node_key):
+        if not got[name] and "." in name:
+            got[name] = set(got.get(name.rsplit(".", 1)[0], ()))
+    return got, bad
+
+
+def cmd_answer(run, wanted, timeout, grace, start):
+    """Block until every node serving the named questions — each node whose card named one, and every child it split
+    off — has written its file and none of them changed for `grace` seconds; then print those questions' answers, each
+    cite checked against the file as it is now. The caller pulls the answer it needs when it needs it while the rest
+    of the run walks. No number named: every question in RUN/questions. A question no node took within `start` seconds
+    of the first node starting is named, never waited for; a timeout prints what is in and names what still walks."""
+    run, t0 = os.path.abspath(run), time.time()
+    if not os.path.isfile(os.path.join(run, "ROOT")):
+        fail(f"{run} is not a tracetree run (no ROOT file) — `new ROOT --questions` prints one")
+    asked, qnote = {}, None
+    try:
+        with open(os.path.join(run, "questions"), encoding="utf-8") as f:
+            asked = parse_questions(f.read())
+    except FileNotFoundError:
+        qnote = f"QUESTIONS: none stored — {run}/questions is absent"
+    except OSError as e:
+        qnote = f"QUESTIONS UNREADABLE — {run}/questions: {e}"
+    wanted = sorted(set(wanted)) if wanted else sorted(asked)
+    if not wanted:
+        fail(f"answer needs question numbers: {qnote or run + '/questions holds none'}")
+    while True:
+        try:
+            entries = os.listdir(run)
+        except OSError as e:
+            fail(f"cannot list {run}: {e}")
+        have = {f[:-5]: os.path.getmtime(os.path.join(run, f)) for f in entries if f.endswith(".hops")}
+        took, bad = started_questions(run, entries)
+        first = min((os.path.getmtime(os.path.join(run, n + ".started")) for n in took), default=None)
+        serving = {}
+        for q in wanted:
+            heads = {n for n, nums in took.items() if q in nums}
+            serving[q] = sorted(heads | {n for n in set(have) | set(took) if any(n.startswith(h + ".") for h in heads)},
+                                key=node_key)
+        walking = sorted({n for q in wanted for n in serving[q]} - set(have), key=node_key)
+        late = first is not None and time.time() - first >= start
+        untaken = [q for q in wanted if not serving[q] and late]
+        pending = [q for q in wanted if not serving[q] and not late]
+        stamps = [have[n] for q in wanted for n in serving[q] if n in have]
+        quiet = time.time() - max(stamps, default=t0)
+        elapsed = time.time() - t0
+        if not walking and not pending and quiet >= grace:
+            head = f"ANSWER after {int(elapsed)}s"
+            break
+        if elapsed >= timeout:
+            head = f"ANSWER TIMEOUT after {int(elapsed)}s"
+            break
+        time.sleep(min(1.0, max(0.2, grace / 5)))
+    done = [q for q in wanted if serving[q] and not set(serving[q]) - set(have)]
+    names = sorted({n for q in done for n in serving[q]}, key=node_key)
+    top = [f"{head} · RUN {run} · Q{', Q'.join(map(str, done))} · {ANSWER_TRUST}" if done else
+           f"{head} · RUN {run} · no question answered yet"]
+    if qnote:
+        top.append(qnote)
+    top += [f"STARTED UNREADABLE — {b}" for b in bad]
+    for q in wanted:
+        if q in done:
+            continue
+        if serving[q]:
+            top.append(f"STILL WALKING Q{q}: nodes {', '.join(n for n in serving[q] if n not in have)} started, no "
+                       f"file yet — `answer {run} {q}` again")
+        elif q in untaken:
+            top.append(f"NO THREAD Q{q}: no node took it {int(start)}s after the first started — the tracer's final "
+                       f"answers it")
+        else:
+            top.append(f"NOT STARTED Q{q}: no node has started yet — `answer {run} {q}` again")
+    body, opened = [], []
+    if names:
+        loaded = load(run)
+        inc = incidents(loaded)
+        mine = [l for l in inc["lines"][1:] if l.startswith("⚠ run:")
+                or any(l.startswith(f"⚠ node {n}:") for n in names)]
+        if mine:
+            top += [inc["lines"][0], *mine]
+        blocks, _ = check_view("answers", names, loaded)
+        by_name, shown = {b["name"]: b for b in blocks}, set()
+        for q in done:
+            body.append(f"Q{q} · nodes {', '.join(serving[q])} · "
+                        f"{(asked.get(q) or '(not in questions)').splitlines()[0][:300]}")
+            for n in serving[q]:
+                if n in by_name and n not in shown:
+                    body += by_name[n]["lines"]
+                    shown.add(n)
+        opened = open_block(loaded, names)
+    full = "\n".join([*top, *body, *opened])
+    if len(full) < CEILING:
+        print(full)
+        return
+    path = os.path.join(run, "answer-Q" + "-".join(map(str, wanted)) + ".txt")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(full + "\n")
+    except OSError as e:
+        print(f"ANSWER FILE FAILED — {path} not written: {type(e).__name__}: {e}")
+        print(full)
+        return
+    room = CEILING - 200 - sum(len(l) + 1 for l in [*top, *opened[:40]])
+    kept, used = [], 0
+    for l in body:
+        if used + len(l) + 1 > room:
+            break
+        kept.append(l)
+        used += len(l) + 1
+    print("\n".join([*top, *kept, f"+{len(body) - len(kept)} answer lines: {path} — ask fewer questions per call",
+                     *opened[:40], *([f"+{len(opened) - 40} OPEN lines: {path}"] if len(opened) > 40 else [])]))
+
+
 def ceiling_view(run, head, warn, blocks, counts_line, map_line, opened):
     """The wait view cut to CEILING characters: the WARNINGS block whole, COUNTS, every flagged, MISSING and NOT READ line, OPEN, MAP, then each
     node's lines trimmed to its share, `+{k} lines: {RUN}/answers.txt` after a trimmed node, and the FULL line."""
@@ -2008,10 +2255,41 @@ def cmd_book(opts):
         sys.stdout.write(book_text(root, rows, failed))
 
 
+def timed_args(args, defaults):
+    """`wait`'s and `answer`'s arguments: ({--timeout, --grace, --start} seconds, each defaulted), the rest in order."""
+    opts, rest, i = dict(defaults), [], 0
+    while i < len(args):
+        if args[i] in opts and i + 1 < len(args):
+            try:
+                opts[args[i]] = float(args[i + 1])
+            except ValueError:
+                fail(f"{args[i]} needs a number of seconds, got {args[i + 1]!r}")
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    return opts, rest
+
+
 def main():
     a = sys.argv[1:]
-    if not a or a[0] not in ("new", "start", "check", "wait", "write", "map", "read", "show", "book") or (len(a) < 2 and a[0] != "book"):
-        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT]")
+    if a == ["intake"]:
+        return cmd_intake()
+    if not a or a[0] not in ("new", "seek", "start", "check", "wait", "answer", "write", "map", "read", "show", "book") or (len(a) < 2 and a[0] != "book"):
+        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | intake < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT]")
+    if a[0] == "seek":
+        if len(a) != 3:
+            fail("usage: tracetree.py seek RUN REGEX")
+        return cmd_seek(a[1], a[2])
+    if a[0] == "answer":
+        opts, rest = timed_args(a[2:], {"--timeout": 300.0, "--grace": 5.0, "--start": 90.0})
+        qs = []
+        for arg in rest:
+            m = re.fullmatch(r"[Qq]?(\d+)[.,]?", arg)
+            if not m:
+                fail(f"answer takes question numbers like 3 or Q3, got {arg!r}")
+            qs.append(int(m.group(1)))
+        return cmd_answer(a[1], qs, opts["--timeout"], opts["--grace"], opts["--start"])
     if a[0] == "book":
         if not (len(a) == 1 or (len(a) == 3 and a[1] == "--html" and not a[2].startswith("--"))):
             fail("book takes only --html OUT — usage: tracetree.py book [--html OUT]")
@@ -2048,18 +2326,8 @@ def main():
             fail("usage: tracetree.py show RUN FILE:A-B [FILE:A-B ...]")
         return cmd_show(a[1], a[2:])
     if a[0] == "wait":
-        opts = {"--timeout": 540.0, "--grace": 15.0, "--start": 120.0}
-        ids, i = [], 2
-        while i < len(a):
-            if a[i] in opts and i + 1 < len(a):
-                try:
-                    opts[a[i]] = float(a[i + 1])
-                except ValueError:
-                    fail(f"{a[i]} needs a number of seconds, got {a[i + 1]!r}")
-                i += 2
-            else:
-                ids.append(a[i].rstrip(".,"))
-                i += 1
+        opts, rest = timed_args(a[2:], {"--timeout": 540.0, "--grace": 15.0, "--start": 120.0})
+        ids = [arg.rstrip(".,") for arg in rest]
         if not ids:
             fail("wait needs the IDs of the sub-tracers spawned")
         bad = [i for i in ids if not NODE_ID.fullmatch(i)]

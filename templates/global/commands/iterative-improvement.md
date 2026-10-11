@@ -44,7 +44,7 @@ Quality is graded by an agent that did not design the change: blind A/B with the
 
 1. Diagnose: read the last runs' ledger rows, transcripts and outputs; an `agent-optimizer` audit of a run gives the why behind its numbers. Judge as the harshest expert in the target's field: where it is timid, where generic, what a first-time receiver reads it as. Name the single largest loss on the metric.
 2. Ideate wide: at least three candidate changes of different kinds — architecture, model or tier, moving a rule from prose into code or a check, cutting, caching, parallelism, a different data shape — one of them the version ten times bolder. Push past your first idea until one surprises you. Leap in kind, never in polish: live over static, executable over described, a mechanism over a rule; check the materials first (libraries reachable, tools installed, the target's limits). Take the candidate with the best expected gain per cost. A rule the target disobeyed two rounds running moves into a mechanism; a third rewording of it is no candidate.
-3. Build it as `v{N}` by your own hand, keeping `v{N-1}` restorable: every design decision yours, made on the spot; every detail chosen, the empty, error and edge states included. Sub-agents run, measure, judge and audit; they never make the change. Go deeper than the target, never wider: nothing outside it changes.
+3. Build it as `v{N}` by your own hand, keeping `v{N-1}` restorable: every design decision yours, made on the spot; every detail chosen, the empty, error and edge states included. Go deeper than the target, never wider: nothing outside it changes.
 4. Run it on this round's rungs, at least two runs per version per rung, more while two runs of one version differ as much as the effect. A probe runs what callers run, the installed path and the real invocation, in an isolated runner: for an agent, a throwaway chat from `chat_new` on a cheap model at low effort that only relays, closed with `chat_kill` once its result is in.
 5. Verdict: keep when the metric rises beyond the run-to-run spread; otherwise revert and record a negative result with its numbers.
 6. Record: a lesson row (what went wrong → what fixed it), the ledger rows, the rewritten brief.
@@ -70,6 +70,7 @@ A reaction to the delivered work is read by its content, never by its tone; an a
 
 ## Rules
 
+- The next move is yours alone: the diagnosis, the candidate taken, every edit to the target and every prompt, and the verdict. A sub-agent runs, measures, grades blind or audits, and reports what it found — never a fix, a next step or an edit; a fix its report carries anyway is no input.
 - A round changes one thing, and a change is kept only on repeated runs.
 - A fact the work needs that sits on disk is read, never asked for. A fact only the user holds is never invented: build around it and name it in the report; ask only for one the work cannot stand without, in one question.
 - A spend cap the brief sets binds, and the report names what it cut.

@@ -403,17 +403,28 @@ func sharedEntryFix(store, path, name string) string {
 	case "plugins":
 		return "rm -r " + path + "  # the store keeps its copy (reinstallable)"
 	case "settings.json":
-		return "jq -e -s '.[0] as $s | .[1] | to_entries | " +
-			"all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' " +
-			target + " " + path + " > /dev/null && jq -s '.[0] * .[1]' " + target + " " + path + " > " + target +
-			".new && mv " + target + ".new " + target + " && rm " + path +
-			"  # adds the keys the store lacks; stops while a key differs"
+		return jsonKeysMergeFix(target, path)
 	case "CLAUDE.md":
 		return "cat " + path + " >> " + target + " && rm " + path +
 			"  # appended whole; prune " + target + " as you like"
+	case "tool-visibility-controller.json":
+		// Install, blocked by this row, is what would seed the store copy, so the fix seeds it first.
+		return "mkdir -p " + store + " && { [ -e " + target + " ] || [ -L " + target + " ] || printf '{}\\n' > " +
+			target + "; } && " +
+			jsonKeysMergeFix(target, path)
 	default:
 		return "rm " + path + "  # a cache"
 	}
+}
+
+// jsonKeysMergeFix adds the account copy's top-level keys the store lacks, then
+// deletes the copy; jq -e stops the chain while a key both hold differs.
+func jsonKeysMergeFix(target, path string) string {
+	return "jq -e -s '.[0] as $s | .[1] | to_entries | " +
+		"all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' " +
+		target + " " + path + " > /dev/null && jq -s '.[0] * .[1]' " + target + " " + path + " > " + target +
+		".new && mv " + target + ".new " + target + " && rm " + path +
+		"  # adds the keys the store lacks; stops while a key differs"
 }
 
 func unclassified(env Env) ([]Row, error) {

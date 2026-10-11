@@ -27,8 +27,8 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 ## Host
 
 - Users install each plugin from its repository's `main`.
-- An alpha `pfm install` copies agent-effort, cache-live-control, sub-agent-compact and tool-visibility-controller from their installable plugin when `claude.pluginCheckoutRoot` in `pfm.config.json` names this directory, and disables their GitHub copies.
-- `pfm install` copies neither callmeter nor buddy: callmeter's `-dev` marketplace copy is refreshed by its own `CLAUDE.md`; buddy installs from its own dev marketplace as `buddy@buddy-dev`.
+- An alpha `pfm install` copies each plugin `claude.plugins` in `pfm.config.json` names bare from its installable plugin when `claude.pluginCheckoutRoot` names this directory, and disables its GitHub copy; a full `name@marketplace` id is installed as named.
+- A plugin listed by full id is never copied: callmeter (`callmeter@callmeter-dev`) has its `-dev` copy refreshed by its own `CLAUDE.md`; buddy installs from its own dev marketplace as `buddy@buddy-dev`.
 - `pfm install` copies no engine-sync: its wrapper downloads the checksum-verified release binary on first run and links the stable path pfm execs; `ENGINE_SYNC_BIN` points pfm at a local build, and the fence builds its own from `engine-sync/`.
 - An open chat loads a refreshed copy on `/reload-plugins`.
 

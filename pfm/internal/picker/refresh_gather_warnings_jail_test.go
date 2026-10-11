@@ -247,13 +247,28 @@ func TestInteractiveRefreshBuffersStreamErrorsUntilFlushed(t *testing.T) {
 	var warnings bufferedWarnings
 	var terminal bytes.Buffer
 	updates := make(chan ui.Snapshot, 4)
-	streamFleetRefreshesWith(context.Background(), database, scanRequest{}, warnings.add, &warnings, updates,
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// A failed opening pass no longer ends the stream: it publishes the failure
+	// for the picker's stale marker and keeps retrying, so the test waits for
+	// that failure and then stops the stream the way the picker's exit does.
+	go streamFleetRefreshesWith(ctx, database, scanRequest{}, warnings.add, &warnings, updates,
 		refreshDependencies{
 			newIndexer: func(*store.Store) (indexRunner, error) {
 				return nil, errors.New("index unavailable")
 			},
 		},
 	)
+	for snapshot := range updates {
+		if snapshot.RefreshFailure != nil {
+			if snapshot.RefreshFailure.Stage != "index" ||
+				!strings.Contains(snapshot.RefreshFailure.Err, "index unavailable") {
+				t.Fatalf("failure = %#v, want the index stage and its error", snapshot.RefreshFailure)
+			}
+			break
+		}
+	}
+	cancel()
 	for range updates {
 	}
 	warnings.flush(&terminal)

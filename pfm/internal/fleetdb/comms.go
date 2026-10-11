@@ -86,6 +86,7 @@ INSERT INTO comms(
 	); err != nil {
 		return fmt.Errorf("record comms event: %w", err)
 	}
+	s.commsWrites.Add(1)
 	return nil
 }
 
@@ -130,4 +131,34 @@ LIMIT ?`, sinceNS, limit)
 		)
 		return event, err
 	}, "scan comms event", "iterate comms events", "close comms rows")
+}
+
+// CommsStamp is the ledger's change signal: two stamps that compare equal mean
+// no comms row was committed between them.
+type CommsStamp struct {
+	// DataVersion is SQLite's data_version: it moves whenever a connection
+	// other than the asking one commits.
+	DataVersion int64
+	// OwnWrites counts this Store's own comms commits, which data_version
+	// does not report to the connection that made them.
+	OwnWrites uint64
+}
+
+// CommsVersion reads the ledger's change stamp. In WAL mode a commit lands in
+// pfm.db-wal and the main file's size and mtime stay put until a checkpoint, so
+// a stat gate on the file misses events for a checkpoint interval; data_version
+// does not, and survives checkpoints and WAL restarts. The pool is one
+// connection (sqlitedb), so every call reads the same connection's counter.
+// The statement runs in autocommit and ends with the call: no read snapshot is
+// held between calls, so a checkpoint is never blocked by it.
+func (s *Store) CommsVersion(ctx context.Context) (CommsStamp, error) {
+	if s.db == nil {
+		return CommsStamp{}, fmt.Errorf("read comms version: %w", s.degraded)
+	}
+	writes := s.commsWrites.Load()
+	var version int64
+	if err := s.db.QueryRowContext(ctx, "PRAGMA data_version").Scan(&version); err != nil {
+		return CommsStamp{}, fmt.Errorf("read comms version: %w", err)
+	}
+	return CommsStamp{DataVersion: version, OwnWrites: writes}, nil
 }

@@ -259,6 +259,34 @@ class CheckTest(Repo):
         self.assertIn("unbacked app/kill/kill.go:9 — no verified hop or quoted text there", got.stdout)
         self.assertIn("flagged=1 · recited=1", got.stdout)
 
+    def test_a_cite_at_the_line_its_reader_gave_a_re_addressed_hop_moves_with_the_hop(self):
+        for put in (self.write, self.store):
+            with self.subTest(put=put.__name__):
+                for f in os.listdir(self.run_dir):
+                    if f.startswith("1."):
+                        os.remove(os.path.join(self.run_dir, f))
+                put("1", hops("1", ["- Run wraps the tmux failure in its own error [app/kill/kill.go:2]",
+                                    "- and returns it to its caller [app/kill/kill.go:1-3]"],
+                              ["@ app/kill/kill.go:2", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)"],
+                              ["END returned: the wrapped error @ app/kill/kill.go:6"]))
+                out = tt(["check", self.run_dir]).stdout
+                self.assertIn("own error [app/kill/kill.go:6]   (↻ app/kill/kill.go:2→6)", out)
+                self.assertIn("its caller [app/kill/kill.go:5-7]   (↻ app/kill/kill.go:1→5)", out)
+                self.assertNotIn("unbacked", out)
+
+    def test_a_cite_near_a_re_addressed_hops_given_line_moves_and_one_beyond_reach_stays_unbacked(self):
+        path = os.path.join(self.root, "app", "wide", "wide.go")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write("\n".join(["package wide", ""] + [f"// line {i}" for i in range(3, 21)]) + "\n")
+        self.write("1", hops("1", ["- the hop's line, cited two short [app/wide/wide.go:11]",
+                                   "- far from both addresses [app/wide/wide.go:4]"],
+                             ["@ app/wide/wide.go:13", "> // line 15"],
+                             ["END returned: the line @ app/wide/wide.go:15"]))
+        out = tt(["check", self.run_dir]).stdout
+        self.assertIn("cited two short [app/wide/wide.go:13]   (↻ app/wide/wide.go:11→13)", out)
+        self.assertIn("unbacked app/wide/wide.go:4 — no verified hop or quoted text there", out)
+
     def test_a_bare_file_name_resolves_to_the_file_holding_the_quote(self):
         other = os.path.join(self.root, "app", "other", "server.go")
         os.makedirs(os.path.dirname(other))
@@ -357,6 +385,81 @@ class WaitTest(Repo):
         self.assertIn("Handle refuses an empty target", got.stdout)
         self.assertNotIn("[1] THREAD 1", got.stdout)
         self.assertIn("nodes=2", got.stdout)
+
+
+class AnswerTest(Repo):
+    """`answer RUN Q…` blocks until the nodes whose cards named those questions, and their children, have written,
+    then prints only those questions' checked answers."""
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.run_dir, "questions"), "w") as f:
+            f.write("1. Where does an empty target fail?\n2. What closes the pane?\n")
+
+    def answer(self, *args):
+        got = tt(["answer", self.run_dir, *args])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        return got.stdout
+
+    def test_answer_waits_for_a_late_child_and_prints_only_its_question(self):
+        tt(["start", self.run_dir, "1", "app/srv/server.go:3", "Q1 — the empty target"])
+        tt(["start", self.run_dir, "1.1", "app/kill/kill.go:4"])
+        tt(["start", self.run_dir, "2", "app/kill/kill.go:4", "Q2 — the pane"])
+        self.write("1", self.good())
+        late = threading.Timer(0.5, lambda: self.write("1.1", self.good("1.1")))
+        late.start()
+        try:
+            out = self.answer("1", "--grace", "0.5", "--timeout", "30")
+        finally:
+            late.join()
+        self.assertTrue(out.startswith("ANSWER after "), out)
+        self.assertIn("· Q1 · every [path:N] below was re-read from disk just now", out)
+        self.assertIn("Q1 · nodes 1, 1.1 · Where does an empty target fail?", out)
+        self.assertIn("[1.1] THREAD 1.1", out)
+        self.assertIn("Handle refuses an empty target", out)
+        self.assertNotIn("[2]", out)
+        self.assertNotIn("STILL WALKING", out)
+
+    def test_answer_times_out_naming_the_node_still_walking(self):
+        tt(["start", self.run_dir, "2", "app/kill/kill.go:4", "Q2 — the pane"])
+        began = time.time()
+        out = self.answer("2", "--grace", "0.2", "--timeout", "1.5")
+        self.assertLess(time.time() - began, 20)
+        self.assertTrue(out.startswith("ANSWER TIMEOUT after "), out)
+        self.assertIn(f"STILL WALKING Q2: nodes 2 started, no file yet — `answer {self.run_dir} 2` again", out)
+
+    def test_a_question_no_node_took_is_named_and_the_others_answered(self):
+        tt(["start", self.run_dir, "1", "app/srv/server.go:3", "Q1 — the empty target"])
+        self.write("1", self.good())
+        began = time.time()
+        out = self.answer("Q1", "Q2", "--start", "0.5", "--grace", "0.2", "--timeout", "30")
+        self.assertLess(time.time() - began, 15)
+        self.assertIn("NO THREAD Q2: no node took it", out)
+        self.assertIn("[1] THREAD 1", out)
+
+    def test_no_number_answers_every_stored_question(self):
+        tt(["start", self.run_dir, "1", "app/srv/server.go:3", "Q1 — the empty target"])
+        tt(["start", self.run_dir, "2", "app/kill/kill.go:4", "Q2 — the pane"])
+        self.write("1", self.good())
+        self.write("2", self.good("2"))
+        out = self.answer("--grace", "0.2", "--timeout", "30")
+        self.assertIn("· Q1, Q2 ·", out)
+        self.assertIn("[1] THREAD 1", out)
+        self.assertIn("[2] THREAD 2", out)
+
+    def test_a_run_with_no_node_started_reports_it_on_timeout(self):
+        out = self.answer("1", "--grace", "0.2", "--timeout", "1")
+        self.assertIn("no question answered yet", out)
+        self.assertIn(f"NOT STARTED Q1: no node has started yet — `answer {self.run_dir} 1` again", out)
+
+    def test_a_directory_that_is_no_run_fails_naming_it(self):
+        empty = tempfile.mkdtemp(prefix="tracetree-norun-")
+        try:
+            got = tt(["answer", empty, "1"])
+        finally:
+            shutil.rmtree(empty, ignore_errors=True)
+        self.assertEqual(got.returncode, 2)
+        self.assertIn("is not a tracetree run", got.stderr)
 
 
 class OpenTest(Repo):
@@ -1820,6 +1923,82 @@ class FollowedTest(Stored):
                                    "(app/kill/kill.go → app/proc/kill.go)")
 
 
+class IntakeTest(Repo):
+    """`intake`: the PreToolUse hook that opens a run for a tracer spawn and tells its caller how to pull answers."""
+
+    def setUp(self):
+        super().setUp()
+        self.parent = os.path.join("/tmp", os.path.basename(self.root), "tracer")
+
+    def tearDown(self):
+        shutil.rmtree(os.path.dirname(self.parent), ignore_errors=True)
+        super().tearDown()
+
+    def hook(self, prompt, subagent="tracer", tool="Agent", cwd="/nonexistent-cwd"):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": cwd,
+                   "tool_input": {"subagent_type": subagent, "description": "trace the pane", "prompt": prompt}}
+        got = tt(["intake"], input=json.dumps(payload))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        return got.stdout
+
+    def runs(self):
+        return sorted(os.listdir(self.parent)) if os.path.isdir(self.parent) else []
+
+    def test_a_tracer_spawn_gets_its_run_opened_and_its_brief_carries_it(self):
+        for head in (f"Repo root: {self.root} (read-only; Go module in app/)", f"Repo root / TREE = {self.root}",
+                     f"Repo root {self.root} (Go module in app/). Goal: I will add a cost ledger.",
+                     f"Repo root: {self.root}."):
+            with self.subTest(head=head):
+                out = json.loads(self.hook(f"{head}\nGoal: close panes safely\n"
+                                           "1. Where does an empty target fail?\n2. What closes the pane?\n"))
+                spec = out["hookSpecificOutput"]
+                lines = spec["updatedInput"]["prompt"].splitlines()
+                self.assertEqual(lines[0], head)
+                self.assertTrue(lines[1].startswith("RUN: " + self.parent + os.sep), lines[1])
+                run = lines[1][len("RUN: "):]
+                with open(os.path.join(run, "ROOT")) as f:
+                    self.assertEqual(f.read().strip(), self.root)
+                with open(os.path.join(run, "questions")) as f:
+                    self.assertEqual(f.read(), "1. Where does an empty target fail?\n2. What closes the pane?\n")
+                self.assertEqual(spec["updatedInput"]["description"], "trace the pane")
+                self.assertEqual(spec["updatedInput"]["subagent_type"], "tracer")
+                self.assertEqual(spec["permissionDecision"], "allow")
+                self.assertIn(f"tracer RUN {run} holds your questions 1, 2. Its final, returned when the run ends, "
+                              "is your answer", spec["additionalContext"])
+                self.assertIn(f"tracetree.py answer {run} ", spec["additionalContext"])
+                self.assertIn("never a ruling", spec["additionalContext"])
+
+    def test_a_brief_naming_no_root_takes_the_hook_cwd(self):
+        out = json.loads(self.hook("1. What closes the pane?", cwd=self.root))
+        first = out["hookSpecificOutput"]["updatedInput"]["prompt"].splitlines()[0]
+        self.assertTrue(first.startswith("RUN: " + self.parent + os.sep), first)
+
+    def test_every_other_call_passes_untouched(self):
+        asked = f"Repo root: {self.root}\n1. What closes the pane?"
+        for name, kw in (("another agent", dict(prompt=asked, subagent="reviewer")),
+                         ("another tool", dict(prompt=asked, tool="Bash")),
+                         ("a run its caller opened", dict(prompt=f"Repo root: {self.root}\nRUN: {os.path.join(self.parent, 'x')}\n1. What closes the pane?")),
+                         ("no numbered question", dict(prompt=f"Repo root: {self.root}\nHow does the pane close?"))):
+            with self.subTest(name):
+                self.assertEqual(self.hook(**kw), "")
+        self.assertEqual(self.runs(), [])
+
+    def test_a_root_that_is_no_directory_passes_the_brief_on_and_says_why(self):
+        out = json.loads(self.hook("Repo root: /nonexistent/tree\n1. What closes the pane?"))
+        spec = out["hookSpecificOutput"]
+        self.assertNotIn("updatedInput", spec)
+        self.assertIn("tracer intake opened no run: repo root /nonexistent/tree is not a directory", spec["additionalContext"])
+
+    def test_an_unreadable_payload_is_logged_never_swallowed(self):
+        log = os.path.join("/tmp", os.path.basename(self.root).lstrip("."), "tracer", "intake.log")
+        before = os.path.getsize(log) if os.path.exists(log) else 0
+        got = tt(["intake"], input="not a payload", cwd=self.root)
+        self.assertEqual((got.returncode, got.stdout), (0, ""), got.stderr)
+        with open(log, encoding="utf-8") as f:
+            f.seek(before)
+            self.assertIn("unreadable hook payload", f.read())
+
+
 class SeekTest(Repo):
     """`new ROOT --seek REGEX` and `new ROOT --questions`: earlier runs on the same root, and the stored questions."""
 
@@ -1859,6 +2038,18 @@ class SeekTest(Repo):
         self.assertTrue(run.startswith(self.parent + os.sep), run)
         self.assertEqual(rest, [f'PRIOR {prior} node 1: app/srv/server.go:5  return errors.New("target is required")',
                                 f"PRIOR: 1 hops in 1 runs — tt check {prior} --hops 1"])
+
+    def test_seek_on_a_run_the_caller_opened_prints_its_path_then_the_prior_hops(self):
+        prior = self.sibling("20260101-000000-aaaa", self.good("1"))
+        run, _ = self.new()
+        os.makedirs(run)
+        with open(os.path.join(run, "ROOT"), "w") as f:
+            f.write(self.root + "\n")
+        got = tt(["seek", run, "target is required"])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout.splitlines(),
+                         [run, f'PRIOR {prior} node 1: app/srv/server.go:5  return errors.New("target is required")',
+                          f"PRIOR: 1 hops in 1 runs — tt check {prior} --hops 1"])
 
     def test_the_first_output_line_stays_the_run_path_without_flags(self):
         self.sibling("20260101-000000-aaaa", self.good("1"))

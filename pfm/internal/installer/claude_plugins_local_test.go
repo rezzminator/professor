@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 const alphaVersion = "0.80.0-alpha"
@@ -80,7 +82,7 @@ func alphaPluginEngine(
 func devID(name string) string { return name + "@" + name + "-dev" }
 
 func TestClaudePluginTargets(t *testing.T) {
-	table := []claudePlugin{
+	table := []testPlugin{
 		{
 			Name:   "cache-live-control",
 			Source: "rezzminator/cache-live-control",
@@ -111,7 +113,7 @@ func TestClaudePluginTargets(t *testing.T) {
 	writePluginCheckout(t, partial, table[0].Name)
 	writePluginCheckout(t, partial, table[2].Name)
 	writePluginCheckout(t, partial, table[3].Name)
-	github := func(p claudePlugin, fallback string) ClaudePluginTarget {
+	github := func(p testPlugin, fallback string) ClaudePluginTarget {
 		return ClaudePluginTarget{
 			Name:     p.Name,
 			ID:       p.ID,
@@ -119,15 +121,19 @@ func TestClaudePluginTargets(t *testing.T) {
 			DevID:    devID(p.Name),
 			Source:   p.Source,
 			Fallback: fallback,
+			Own:      true,
 		}
 	}
-	local := func(p claudePlugin, root string) ClaudePluginTarget {
+	local := func(p testPlugin, root string) ClaudePluginTarget {
 		marketplace := filepath.Join(home, ".local", "share", p.Name+"-dev")
 		return ClaudePluginTarget{
 			Name: p.Name, ID: devID(p.Name), GitHubID: p.ID, DevID: devID(p.Name), Source: marketplace,
-			Local: true, Marketplace: marketplace, Checkout: filepath.Join(root, p.Name, "plugins", p.Name),
+			Local: true, Marketplace: marketplace, Checkout: filepath.Join(root, p.Name, "plugins", p.Name), Own: true,
 		}
 	}
+	defaults := pfmconfig.DefaultClaudePlugins()
+	extra := testPlugin{Name: "callmeter", Source: "rezzminator/callmeter", ID: "callmeter@callmeter"}
+	writePluginCheckout(t, root, extra.Name)
 	missing := filepath.Join(
 		partial,
 		table[1].Name,
@@ -141,27 +147,42 @@ func TestClaudePluginTargets(t *testing.T) {
 		build ClaudePluginBuild
 		want  []ClaudePluginTarget
 	}{
-		{"release", ClaudePluginBuild{Version: "0.80.0", Home: home, CheckoutRoot: root}, []ClaudePluginTarget{
+		{"release", ClaudePluginBuild{Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""),
 		}},
-		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root}, []ClaudePluginTarget{
+		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""),
 		}},
-		{"alpha without the key", ClaudePluginBuild{Version: alphaVersion, Home: home}, []ClaudePluginTarget{
+		{"alpha without the key", ClaudePluginBuild{Version: alphaVersion, Home: home, Plugins: defaults}, []ClaudePluginTarget{
 			github(table[0], "claude.pluginCheckoutRoot unset"),
 			github(table[1], "claude.pluginCheckoutRoot unset"),
 			github(table[2], "claude.pluginCheckoutRoot unset"),
 			github(table[3], "claude.pluginCheckoutRoot unset"),
 		}},
-		{"alpha with a checkout missing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: partial}, []ClaudePluginTarget{
+		{"alpha with a checkout missing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: partial, Plugins: defaults}, []ClaudePluginTarget{
 			local(table[0], partial),
 			github(table[1], "no checkout at "+missing+" (claude.pluginCheckoutRoot)"),
 			local(table[2], partial),
 			local(table[3], partial),
 		}},
-		{"alpha with every checkout", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root}, []ClaudePluginTarget{
+		{"alpha with every checkout", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
 		}},
+		{"the list decides which bare names", ClaudePluginBuild{
+			Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: table[2].Name}},
+		}, []ClaudePluginTarget{github(extra, ""), github(table[2], "")}},
+		{"a bare name beyond the default installs from its checkout", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}},
+		}, []ClaudePluginTarget{local(extra, root)}},
+		{"full ids are ensured as named, on any build", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{
+				{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, {ID: "agent-effort@some-market"},
+			},
+		}, []ClaudePluginTarget{
+			{Name: "typesafe", ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills", MarketplaceName: "typesafe-ai"},
+			{Name: "agent-effort", ID: "agent-effort@some-market", MarketplaceName: "some-market"},
+		}},
+		{"an empty list ensures nothing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{}}, []ClaudePluginTarget{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := ClaudePluginTargets(test.build)
@@ -176,13 +197,13 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	root := t.TempDir()
 	inst, runner, out, home, first := alphaPluginEngine(t, root)
 	checkouts := map[string]string{}
-	for _, p := range claudePlugins {
+	for _, p := range testPlugins {
 		checkouts[p.Name] = writePluginCheckout(t, root, p.Name)
 	}
 	marketplace := func(name string) string { return filepath.Join(home, ".local", "share", name+"-dev") }
 	mirror := func(name string) string { return filepath.Join(marketplace(name), "plugins", name) }
 	// plugin 0: a hand-made marketplace whose plugin dir is a symlink, its manifest carrying a description.
-	zero := claudePlugins[0].Name
+	zero := testPlugins[0].Name
 	handManifest := `{"name":"` + zero + `-dev","description":"Local install.","owner":{"name":"rezzminator","url":"https://github.com/rezzminator"},` +
 		`"plugins":[{"name":"` + zero + `","source":"./plugins/` + zero + `"}]}`
 	writeFixture(t, filepath.Join(marketplace(zero), ".claude-plugin", "marketplace.json"), handManifest)
@@ -193,14 +214,14 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	// plugin 1: a stale copy with a file the checkout no longer has.
-	one := claudePlugins[1].Name
+	one := testPlugins[1].Name
 	writeFixture(t, filepath.Join(mirror(one), ".claude-plugin", "plugin.json"), `{"name":"old"}`)
 	writeFixture(t, filepath.Join(mirror(one), "old.txt"), "gone")
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 	}
 	var want []pluginCall
-	for _, p := range claudePlugins {
+	for _, p := range testPlugins {
 		want = append(want,
 			pluginCall{"plugin marketplace add " + marketplace(p.Name), first},
 			pluginCall{"plugin install " + devID(p.Name) + " -y", first},
@@ -210,7 +231,7 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 		t.Fatalf("calls=%v want %v\n%s", runner.calls, want, out.String())
 	}
 	wantFiles := map[string]string{}
-	for _, p := range claudePlugins {
+	for _, p := range testPlugins {
 		wantFiles[p.Name] = fmt.Sprint(map[string]string{
 			filepath.Join(".claude-plugin", "plugin.json"): "-rw------- " + `{"name":"` + p.Name + `","version":"9.9.9"}`,
 			filepath.Join("hooks", "hook.ts"):              "-rwxr-xr-x export const hook = '" + p.Name + "'\n",
@@ -245,8 +266,8 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	for _, line := range []string{
 		"  change  replace symlink " + mirror(zero) + " with a copy of " + checkouts[zero] + "\n",
 		"  change  refresh " + mirror(one) + " from " + checkouts[one] + "\n",
-		"  change  copy " + checkouts[claudePlugins[2].Name] + " to " + mirror(claudePlugins[2].Name) + "\n",
-		"  change  copy " + checkouts[claudePlugins[3].Name] + " to " + mirror(claudePlugins[3].Name) + "\n",
+		"  change  copy " + checkouts[testPlugins[2].Name] + " to " + mirror(testPlugins[2].Name) + "\n",
+		"  change  copy " + checkouts[testPlugins[3].Name] + " to " + mirror(testPlugins[3].Name) + "\n",
 		"  change  write " + filepath.Join(marketplace(one), ".claude-plugin", "marketplace.json") + "\n",
 	} {
 		if !strings.Contains(out.String(), line) {
@@ -261,7 +282,7 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	// finds every copy current.
 	enabled := map[string]any{}
 	ids := []string{}
-	for _, p := range claudePlugins {
+	for _, p := range testPlugins {
 		enabled[devID(p.Name)] = true
 		ids = append(ids, devID(p.Name))
 	}
@@ -279,7 +300,7 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	if len(runner.calls) != 0 || strings.Contains(out.String(), "change") {
 		t.Fatalf("second run changed something: calls=%v\n%s", runner.calls, out.String())
 	}
-	for _, p := range claudePlugins {
+	for _, p := range testPlugins {
 		for _, line := range []string{
 			"  ok      claude plugin " + p.Name + " copy " + mirror(p.Name) + " matches " + checkouts[p.Name] + "\n",
 			"  ok      claude plugin " + devID(p.Name) + " installed and enabled in " + first + "\n",
@@ -292,18 +313,18 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 }
 
 func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
-	github := func(p claudePlugin) string { return p.ID }
+	github := func(p testPlugin) string { return p.ID }
 	for _, test := range []struct {
 		name      string
 		version   string
 		withRoot  bool
-		kept      func(claudePlugin) string
-		other     func(claudePlugin) string
+		kept      func(testPlugin) string
+		other     func(testPlugin) string
 		checkouts bool
 	}{
-		{"alpha keeps -dev", alphaVersion, true, func(p claudePlugin) string { return devID(p.Name) }, github, true},
-		{"release keeps GitHub", "0.80.0", true, github, func(p claudePlugin) string { return devID(p.Name) }, true},
-		{"alpha fallback keeps GitHub", alphaVersion, false, github, func(p claudePlugin) string { return devID(p.Name) }, false},
+		{"alpha keeps -dev", alphaVersion, true, func(p testPlugin) string { return devID(p.Name) }, github, true},
+		{"release keeps GitHub", "0.80.0", true, github, func(p testPlugin) string { return devID(p.Name) }, true},
+		{"alpha fallback keeps GitHub", alphaVersion, false, github, func(p testPlugin) string { return devID(p.Name) }, false},
 	} {
 		for _, apply := range []bool{true, false} {
 			t.Run(fmt.Sprint(test.name, " apply=", apply), func(t *testing.T) {
@@ -317,14 +338,14 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 				inst.apply = apply
 				enabled := map[string]any{}
 				ids := []string{}
-				for _, p := range claudePlugins {
+				for _, p := range testPlugins {
 					if test.checkouts {
 						writePluginCheckout(t, root, p.Name)
 					}
 					enabled[p.ID], enabled[devID(p.Name)] = true, true
 					ids = append(ids, test.kept(p))
 				}
-				zero, one := claudePlugins[0], claudePlugins[1]
+				zero, one := testPlugins[0], testPlugins[1]
 				document := map[string]any{
 					"enabledPlugins": enabled,
 					"pluginConfigs": map[string]any{
@@ -349,7 +370,7 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 					t.Fatalf("calls=%v, want none: every kept id is installed\n%s", runner.calls, out.String())
 				}
 				path := filepath.Join(first, "settings.json")
-				for _, p := range claudePlugins {
+				for _, p := range testPlugins {
 					line := "  change  disable " + test.other(p) + " in " + path + ": " + test.kept(p) + " replaces it"
 					if p.Name == zero.Name {
 						line += "; copy its pluginConfigs to " + test.kept(p)
@@ -376,7 +397,7 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 					t.Fatal(err)
 				}
 				wantEnabled := map[string]any{}
-				for _, p := range claudePlugins {
+				for _, p := range testPlugins {
 					wantEnabled[test.other(p)], wantEnabled[test.kept(p)] = false, true
 				}
 				wantConfigs := map[string]any{
@@ -408,18 +429,18 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 		withRoot  bool
 		checkouts []int
 		local     []bool
-		reason    func(root string, p claudePlugin) string
+		reason    func(root string, p testPlugin) string
 	}{
 		{
 			"alpha without the key", alphaVersion, false, nil,
 			[]bool{false, false, false, false},
-			func(string, claudePlugin) string { return "claude.pluginCheckoutRoot unset" },
+			func(string, testPlugin) string { return "claude.pluginCheckoutRoot unset" },
 		},
 		{
 			"alpha with a checkout missing", alphaVersion, true,
 			[]int{0, 2, 3},
 			[]bool{true, false, true, true},
-			func(root string, p claudePlugin) string {
+			func(root string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(root, p.Name, "plugins", p.Name, ".claude-plugin", "plugin.json") +
 					" (claude.pluginCheckoutRoot)"
 			},
@@ -429,7 +450,7 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			for _, index := range test.checkouts {
-				writePluginCheckout(t, root, claudePlugins[index].Name)
+				writePluginCheckout(t, root, testPlugins[index].Name)
 			}
 			configured := root
 			if !test.withRoot {
@@ -441,7 +462,7 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 			}
 			var want []pluginCall
-			for index, p := range claudePlugins {
+			for index, p := range testPlugins {
 				fallback := "  skip    claude plugin " + p.Name + ": alpha build falls back to the GitHub copy " + p.ID
 				if test.local[index] {
 					want = append(

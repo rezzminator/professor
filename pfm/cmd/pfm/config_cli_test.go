@@ -387,6 +387,35 @@ func TestConfigShowDistinguishesInputAndEffectiveSchema(t *testing.T) {
 	}
 }
 
+// TestConfigShowReportsClaudePlugins: config show lists claude.plugins entry by entry with the
+// source of the list: the four of today when the key is unset, "none" for an empty list.
+func TestConfigShowReportsClaudePlugins(t *testing.T) {
+	for _, test := range []struct{ name, content, want string }{
+		{
+			"unset", `{"version":2}`,
+			"config claude.plugins=cache-live-control,sub-agent-compact,agent-effort,tool-visibility-controller (default)",
+		},
+		{
+			"listed",
+			`{"version":2,"claude":{"plugins":["callmeter",{"id":"typesafe@typesafe-ai","source":"typesafe-ai/skills"}]}}`,
+			"config claude.plugins=callmeter,typesafe@typesafe-ai (source typesafe-ai/skills) (file)",
+		},
+		{"empty", `{"version":2,"claude":{"plugins":[]}}`, "config claude.plugins=none (file)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := jailTest(t)
+			path := writeConfigFixture(t, root, test.content)
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
+				t.Fatalf("config show code=%d stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), test.want+"\n") {
+				t.Fatalf("config show lacks %q: %s", test.want, stdout.String())
+			}
+		})
+	}
+}
+
 func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	root := jailTest(t)
 	path := writeConfigFixture(

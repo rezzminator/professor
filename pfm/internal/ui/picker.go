@@ -64,6 +64,17 @@ func (picker BubblePicker) Pick(
 				select {
 				case refresh, ok := <-picker.Updates:
 					if !ok {
+						// The stream ends only with the picker's own context. A
+						// stream that closes under a live picker has stopped
+						// refreshing: mark the fleet stale, never leave it
+						// looking current.
+						if ctx.Err() == nil {
+							program.Send(RefreshMsg{Snapshot: Snapshot{RefreshFailure: &RefreshFailure{
+								Stage: "stream",
+								Err:   "refresh stream ended",
+								// AtNS 0: the model stamps it with its own clock.
+							}}})
+						}
 						return
 					}
 					program.Send(RefreshMsg{Snapshot: refresh})

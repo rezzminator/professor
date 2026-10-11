@@ -1,106 +1,77 @@
-Provided proper attribution is provided, Google hereby grants permission to
-reproduce the tables and figures in this paper solely for use in journalistic or
-scholarly works.
+_Converter gap: PDF page 1: conversion omitted 11 text-layer tokens_
 
-## **Attention Is All You Need**
+_Converter gap: PDF page 1: using the native text layer instead, Markdown layout was lost_
 
-**Ashish Vaswani** _[∗]_
-Google Brain
-```
-avaswani@google.com
+_Converter gap: PDF page 4: conversion omitted 5 text-layer tokens_
 
-```
+_Converter gap: PDF page 4: using the native text layer instead, Markdown layout was lost_
 
-**Llion Jones** _[∗]_
-Google Research
-```
- llion@google.com
+_Converter gap: PDF page 5: conversion omitted 11 text-layer tokens_
 
-```
+_Converter gap: PDF page 5: using the native text layer instead, Markdown layout was lost_
 
+_Converter gap: PDF page 13: conversion omitted 96 text-layer tokens_
 
-**Noam Shazeer** _[∗]_
-Google Brain
-```
-noam@google.com
+_Converter gap: PDF page 13: using the native text layer instead, Markdown layout was lost_
 
-```
+_Converter gap: PDF page 14: conversion omitted 181 text-layer tokens_
 
+_Converter gap: PDF page 14: using the native text layer instead, Markdown layout was lost_
 
-**Aidan N. Gomez** _[∗†]_
-University of Toronto
-```
-aidan@cs.toronto.edu
+_Converter gap: PDF page 15: conversion omitted 161 text-layer tokens_
 
-```
+_Converter gap: PDF page 15: using the native text layer instead, Markdown layout was lost_
+
+_Converter gap: PDF page(s) 3, 4: images were not OCR-read, image-only text may be missing_
+
+                     Provided proper attribution is provided, Google hereby grants permission to
+                     reproduce the tables and figures in this paper solely for use in journalistic or
+                                                     scholarly works.
 
 
-**Niki Parmar** _[∗]_
-Google Research
-```
-nikip@google.com
+                          Attention Is All You Need
 
-```
-
-
-**Jakob Uszkoreit** _[∗]_
-Google Research
-```
-usz@google.com
-
-```
+                         Ashish Vaswani∗      Noam Shazeer∗       Niki Parmar∗     Jakob Uszkoreit∗2023                     Google Brain          Google Brain       Google Research     Google Research
+Aug               avaswani@google.comLlion Jones∗      noam@google.comAidan N. Gomez∗†nikip@google.comŁukaszusz@google.comKaiser∗
+2                    Google Research          University of Toronto              Google Brain
+                      llion@google.com     aidan@cs.toronto.edu     lukaszkaiser@google.com
 
 
-**Łukasz Kaiser** _[∗]_
-Google Brain
-```
-lukaszkaiser@google.com
+                                                                           Illia Polosukhin∗‡
+                                           author.one@example.invalid[cs.CL]
 
-```
+                                                 Abstract
 
 
-**Illia Polosukhin** _[∗‡]_
-```
-             author.one@example.invalid
-
-```
-
-**Abstract**
-
-
-The dominant sequence transduction models are based on complex recurrent or
-convolutional neural networks that include an encoder and a decoder. The best
-performing models also connect the encoder and decoder through an attention
-mechanism. We propose a new simple network architecture, the Transformer,
-based solely on attention mechanisms, dispensing with recurrence and convolutions
-entirely. Experiments on two machine translation tasks show these models to
-be superior in quality while being more parallelizable and requiring significantly
-less time to train. Our model achieves 28.4 BLEU on the WMT 2014 Englishto-German translation task, improving over the existing best results, including
-ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task,
-our model establishes a new single-model state-of-the-art BLEU score of 41.8 after
-training for 3.5 days on eight GPUs, a small fraction of the training costs of the
-best models from the literature. We show that the Transformer generalizes well to
-other tasks by applying it successfully to English constituency parsing both with
-large and limited training data.
+                         The dominant sequence transduction models are based on complex recurrent or
+                               convolutional neural networks that include an encoder and a decoder. The best
+                             performing models also connect the encoder and decoder through an attention
+                           mechanism. We propose a new simple network architecture, the Transformer,
+                              based solely on attention mechanisms, dispensing with recurrence and convolutions
+                                    entirely. Experiments on two machine translation tasks show these models to
+                            be superior in quality while being more parallelizable and requiring significantly
+                                   less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-
+                           to-German translation task, improving over the existing best results, including
+                               ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task,
+                               our model establishes a new single-model state-of-the-art BLEU score of 41.8 after
+                                  training for 3.5 days on eight GPUs, a small fraction of the training costs of thearXiv:1706.03762v7                           best models from the literature. We show that the Transformer generalizes well to
+                                other tasks by applying it successfully to English constituency parsing both with
+                                  large and limited training data.
 
 
-_∗_ Equal contribution. Listing order is random. Jakob proposed replacing RNNs with self-attention and started
-the effort to evaluate this idea. Ashish, with Illia, designed and implemented the first Transformer models and
-has been crucially involved in every aspect of this work. Noam proposed scaled dot-product attention, multi-head
-attention and the parameter-free position representation and became the other person involved in nearly every
-detail. Niki designed, implemented, tuned and evaluated countless model variants in our original codebase and
-tensor2tensor. Llion also experimented with novel model variants, was responsible for our initial codebase, and
-efficient inference and visualizations. Lukasz and Aidan spent countless long days designing various parts of and
-implementing tensor2tensor, replacing our earlier codebase, greatly improving results and massively accelerating
-our research.
+                          ∗Equal contribution. Listing order is random. Jakob proposed replacing RNNs with self-attention and started
+                          the effort to evaluate this idea. Ashish, with Illia, designed and implemented the first Transformer models and
+                         has been crucially involved in every aspect of this work. Noam proposed scaled dot-product attention, multi-head
+                            attention and the parameter-free position representation and became the other person involved in nearly every
+                               detail. Niki designed, implemented, tuned and evaluated countless model variants in our original codebase and
+                           tensor2tensor. Llion also experimented with novel model variants, was responsible for our initial codebase, and
+                               efficient inference and visualizations. Lukasz and Aidan spent countless long days designing various parts of and
+                        implementing tensor2tensor, replacing our earlier codebase, greatly improving results and massively accelerating
+                        our research.
+                       †Work performed while at Google Brain.
+                       ‡Work performed while at Google Research.
 
-_†_ Work performed while at Google Brain.
-
-_‡_ Work performed while at Google Research.
-
-
-31st Conference on Neural Information Processing Systems (NIPS 2017), Long Beach, CA, USA.
-
+                          31st Conference on Neural Information Processing Systems (NIPS 2017), Long Beach, CA, USA.
 
 **1** **Introduction**
 
@@ -176,7 +147,6 @@ sequence ( _y_ 1 _, ..., ym_ ) of symbols one element at a time. At each step th
 
 2
 
-
 Figure 1: The Transformer - model architecture.
 
 
@@ -214,143 +184,119 @@ where the query, keys, values, and output are all vectors. The output is compute
 
 3
 
+         Scaled Dot-Product Attention                     Multi-Head Attention
 
-Scaled Dot-Product Attention Multi-Head Attention
-
-
-Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several
+Figure 2: (left) Scaled Dot-Product Attention.  (right) Multi-Head Attention consists of several
 attention layers running in parallel.
-
 
 of the values, where the weight assigned to each value is computed by a compatibility function of the
 query with the corresponding key.
 
 
-**3.2.1** **Scaled Dot-Product Attention**
-
+3.2.1  Scaled Dot-Product Attention
 
 We call our particular attention "Scaled Dot-Product Attention" (Figure 2). The input consists of
-queries and keys of dimensionquery with all keys, divide each by _dk_, an _[√]_ d va _dk_, and apply a softmax function to obtain the weights on thelues of dimension _dv_ . We compute the dot products of the
+queries and keys of dimension dk, and values of dimension dv. We compute the dot products of the
+query with all keys, divide each by √dk, and apply a softmax function to obtain the weights on the
 values.
 
-
 In practice, we compute the attention function on a set of queries simultaneously, packed together
-into a matrix _Q_ . The keys and values are also packed together into matrices _K_ and _V_ . We compute
+into a matrix Q. The keys and values are also packed together into matrices K and V . We compute
 the matrix of outputs as:
 
+                        Attention(Q, K, V ) = softmax(QKT )V                           (1)                                          √dk
 
-Attention( _Q, K, V_ ) = softmax( _[QK]_ ~~_√_~~ _[T]_ ) _V_ (1)
-
-_dk_
-
-
-The two most commonly used attention functions are additive attention [2], and dot-product (multiplicative) attention. Dot-product attention is identical to our algorithm, except for the scaling factor
-of ~~_√_~~ 1 . Additive attention computes the compatibility function using a feed-forward network with
-_dk_
+The two most commonly used attention functions are additive attention [2], and dot-product (multi-
+plicative) attention. Dot-product attention is identical to our algorithm, except for the scaling factor
+of √dk1   . Additive attention computes the compatibility function using a feed-forward network with
 a single hidden layer. While the two are similar in theoretical complexity, dot-product attention is
 much faster and more space-efficient in practice, since it can be implemented using highly optimized
 matrix multiplication code.
 
+While for small values of dk the two mechanisms perform similarly, additive attention outperforms
+dot product attention without scaling for larger values of dk [3]. We suspect that for large values of
+dk, the dot products grow large in magnitude, pushing the softmax function into regions where it has
+extremely small gradients 4. To counteract this effect, we scale the dot products by √dk1   .
 
-While for small values of _dk_ the two mechanisms perform similarly, additive attention outperforms
-dot product attention without scaling for larger values of _dk_ [3]. We suspect that for large values of
-_dk_, the dot products grow large in magnitude, pushing the softmax function into regions where it has
-extremely small gradients [4] . To counteract this effect, we scale the dot products by ~~_√_~~ 1 .
-_dk_
+3.2.2  Multi-Head Attention
 
+Instead of performing a single attention function with dmodel-dimensional keys, values and queries,
+we found it beneficial to linearly project the queries, keys and values h times with different, learned
+linear projections to dk, dk and dv dimensions, respectively. On each of these projected versions of
+queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional
 
-**3.2.2** **Multi-Head Attention**
-
-
-Instead of performing a single attention function with _d_ model-dimensional keys, values and queries,
-we found it beneficial to linearly project the queries, keys and values _h_ times with different, learned
-linear projections to _dk_, _dk_ and _dv_ dimensions, respectively. On each of these projected versions of
-queries, keys and values we then perform the attention function in parallel, yielding _dv_ -dimensional
-
-
-4To illustrate why the dot products get large, assume that the components of _q_ and _k_ are independent random
-variables with mean 0 and variance 1. Then their dot product, _q · k_ = [�] _i_ _[d]_ =1 _[k]_ _[q][i][k][i]_ [, has mean][ 0][ and variance] _[ d][k]_ [.]
+   4To illustrate why the dot products get large, assume that the components of q and k are independent random
+variables with mean 0 and variance 1. Then their dot product, q · k = Pdki=1 qiki, has mean 0 and variance dk.
 
 
-4
-
+                                       4
 
 output values. These are concatenated and once again projected, resulting in the final values, as
 depicted in Figure 2.
-
 
 Multi-head attention allows the model to jointly attend to information from different representation
 subspaces at different positions. With a single attention head, averaging inhibits this.
 
 
-MultiHead( _Q, K, V_ ) = Concat(head1 _, ...,_ headh) _W_ _[O]_
-
-where headi = Attention( _QWi_ _[Q][, KW][ K]_ _i_ _[, V W][ V]_ _i_ [)]
-
-
-Where the projections are parameter matrices _Wi_ _[Q]_ _∈_ R _[d]_ [model] _[×][d][k]_, _Wi_ _[K]_ _∈_ R _[d]_ [model] _[×][d][k]_, _Wi_ _[V]_ _∈_ R _[d]_ [model] _[×][d][v]_
-and _W_ _[O]_ _∈_ R _[hd][v][×][d]_ [model] .
+                MultiHead(Q, K, V ) = Concat(head1, ..., headh)W O
+                        where headi = Attention(QWiQ , KW iK , V W iV )
 
 
-In this work we employ _h_ = 8 parallel attention layers, or heads. For each of these we use
-_dk_ = _dv_ = _d_ model _/h_ = 64. Due to the reduced dimension of each head, the total computational cost
+Where the projections are parameter matrices W iQ ∈Rdmodel×dk, W iK ∈Rdmodel×dk, W iV ∈Rdmodel×dv
+and W O ∈Rhdv×dmodel.
+
+In this work we employ h = 8 parallel attention layers, or heads.  For each of these we use
+dk = dv = dmodel/h = 64. Due to the reduced dimension of each head, the total computational cost
 is similar to that of single-head attention with full dimensionality.
 
 
-**3.2.3** **Applications of Attention in our Model**
-
+3.2.3  Applications of Attention in our Model
 
 The Transformer uses multi-head attention in three different ways:
 
+        • In "encoder-decoder attention" layers, the queries come from the previous decoder layer,
+       and the memory keys and values come from the output of the encoder. This allows every
+         position in the decoder to attend over all positions in the input sequence. This mimics the
+         typical encoder-decoder attention mechanisms in sequence-to-sequence models such as
+         [38, 2, 9].
 
-    - In "encoder-decoder attention" layers, the queries come from the previous decoder layer,
-and the memory keys and values come from the output of the encoder. This allows every
-position in the decoder to attend over all positions in the input sequence. This mimics the
-typical encoder-decoder attention mechanisms in sequence-to-sequence models such as
+        • The encoder contains self-attention layers. In a self-attention layer all of the keys, values
+       and queries come from the same place, in this case, the output of the previous layer in the
+         encoder. Each position in the encoder can attend to all positions in the previous layer of the
+         encoder.
 
-[38, 2, 9].
-
-
-    - The encoder contains self-attention layers. In a self-attention layer all of the keys, values
-and queries come from the same place, in this case, the output of the previous layer in the
-encoder. Each position in the encoder can attend to all positions in the previous layer of the
-encoder.
-
-
-    - Similarly, self-attention layers in the decoder allow each position in the decoder to attend to
-all positions in the decoder up to and including that position. We need to prevent leftward
-information flow in the decoder to preserve the auto-regressive property. We implement this
-inside of scaled dot-product attention by masking out (setting to _−∞_ ) all values in the input
-of the softmax which correspond to illegal connections. See Figure 2.
+        • Similarly, self-attention layers in the decoder allow each position in the decoder to attend to
+           all positions in the decoder up to and including that position. We need to prevent leftward
+         information flow in the decoder to preserve the auto-regressive property. We implement this
+         inside of scaled dot-product attention by masking out (setting to −∞) all values in the input
+         of the softmax which correspond to illegal connections. See Figure 2.
 
 
-**3.3** **Position-wise Feed-Forward Networks**
-
+3.3  Position-wise Feed-Forward Networks
 
 In addition to attention sub-layers, each of the layers in our encoder and decoder contains a fully
 connected feed-forward network, which is applied to each position separately and identically. This
 consists of two linear transformations with a ReLU activation in between.
 
 
-FFN( _x_ ) = max(0 _, xW_ 1 + _b_ 1) _W_ 2 + _b_ 2 (2)
-
+                     FFN(x) = max(0, xW1 + b1)W2 + b2                            (2)
 
 While the linear transformations are the same across different positions, they use different parameters
 from layer to layer. Another way of describing this is as two convolutions with kernel size 1.
-The dimensionality of input and output is _d_ model = 512, and the inner-layer has dimensionality
-_dff_ = 2048.
+The dimensionality of input and output is dmodel = 512, and the inner-layer has dimensionality
+dff = 2048.
 
 
-**3.4** **Embeddings and Softmax**
-
+3.4  Embeddings and Softmax
 
 Similarly to other sequence transduction models, we use learned embeddings to convert the input
-tokens and output tokens to vectors of dimension _d_ model. We also use the usual learned linear transformation and softmax function to convert the decoder output to predicted next-token probabilities. In
-our model, we share the same weight matrix between the two embedding layers and the pre-slinear transformation, similar to [30]. In the embedding layers, we multiply those weights by _[√]_ oftmax _d_ model.
+tokens and output tokens to vectors of dimension dmodel. We also use the usual learned linear transfor-
+mation and softmax function to convert the decoder output to predicted next-token probabilities. In
+our model, we share the same weight matrix between the two embedding layers and the pre-softmax
+linear transformation, similar to [30]. In the embedding layers, we multiply those weights by √dmodel.
 
 
-5
-
+                                       5
 
 Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations
 for different layer types. _n_ is the sequence length, _d_ is the representation dimension, _k_ is the kernel
@@ -426,7 +372,6 @@ computational complexity, self-attention layers are faster than recurrent layers
 
 6
 
-
 length _n_ is smaller than the representation dimensionality _d_, which is most often the case with
 sentence representations used by state-of-the-art models in machine translations, such as word-piece
 
@@ -501,7 +446,6 @@ We employ three types of regularization during training:
 
 
 7
-
 
 Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the
 English-to-German and English-to-French newstest2014 tests at a fraction of the training cost.
@@ -586,7 +530,6 @@ in different ways, measuring the change in performance on English-to-German tran
 
 8
 
-
 Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the base
 model. All metrics are on the English-to-German translation development set, newstest2013. Listed
 perplexities are per-wordpiece, according to our byte-pair encoding, and should not be compared to
@@ -643,7 +586,6 @@ remained unchanged from the English-to-German base translation model. During inf
 
 
 9
-
 
 Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23
 of WSJ)
@@ -715,7 +657,6 @@ reading. _[arXiv preprint arXiv:1601.06733](http://arxiv.org/abs/1601.06733)_, 2
 
 
 10
-
 
 [5] Kyunghyun Cho, Bart van Merrienboer, Caglar Gulcehre, Fethi Bougares, Holger Schwenk,
 and Yoshua Bengio. Learning phrase representations using rnn encoder-decoder for statistical
@@ -799,7 +740,6 @@ sequence to sequence learning. _[arXiv preprint arXiv:1511.06114](http://arxiv.o
 
 11
 
-
 [25] Mitchell P Marcus, Mary Ann Marcinkiewicz, and Beatrice Santorini. Building a large annotated
 corpus of english: The penn treebank. _Computational linguistics_, 19(2):313–330, 1993.
 
@@ -875,20 +815,48 @@ _1:_ _Long Papers)_, pages 434–443. ACL, August 2013.
 
 12
 
+Attention Visualizations
+
+  It is in this spirit that a majority of American governments have passed new laws since 2009 making the  registration or voting process more difficult . <EOS> <pad> <pad> <pad> <pad> <pad> <pad>
+
+
+  It is in this spirit that a majority of American governments have passed new laws since 2009 making the  registration or voting process more difficult . <EOS> <pad> <pad> <pad> <pad> <pad> <pad>
 
 Figure 3: An example of the attention mechanism following long-distance dependencies in the
 encoder self-attention in layer 5 of 6. Many of the attention heads attend to a distant dependency of
 the verb ‘making’, completing the phrase ‘making...more difficult’. Attentions here shown only for
 the word ‘making’. Different colors represent different heads. Best viewed in color.
 
+                                       13
 
-13
-
-
-14
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
 
 
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
+
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
+
+
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
+
+Figure 4: Two attention heads, also in layer 5 of 6, apparently involved in anaphora resolution. Top:
+Full attentions for head 5. Bottom: Isolated attentions from just the word ‘its’ for attention heads 5
+and 6. Note that the attentions are very sharp for this word.
+
+                                       14
+
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
+
+
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
+
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
+
+
+   The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad>
+
+Figure 5: Many of the attention heads exhibit behaviour that seems related to the structure of the
+sentence. We give two such examples above, from two different heads from the encoder self-attention
 at layer 5 of 6. The heads clearly learned to perform different tasks.
 
-
-15
+                                       15

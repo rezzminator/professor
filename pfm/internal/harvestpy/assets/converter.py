@@ -1522,8 +1522,33 @@ def _pymupdf4llm_markdown(path: pathlib.Path, layout: bool, pages: list[int] | N
     return result
 
 
+# A hyphen that only breaks a word across two lines: letters or digits on both
+# sides, the line break between them.
+_LINE_END_HYPHEN = re.compile(r"(?<=[^\W_])[-\u00ad\u2010][ \t]*\n[ \t]*(?=[^\W_])")
+# A word the audit takes for one missing token may be spelled by at most this
+# many surplus Markdown tokens, none longer than this many characters.
+_SPELLED_PARTS = 6
+_SPELLED_LENGTH = 24
+# Prefix checks one page's spelling search may make; past it every word still
+# unspelled counts as missing, so a crafted page cannot stall the worker.
+_SPELL_STEPS = 100_000
+# A Markdown link or image target is the renderer's addition, never pieces of
+# a source word: its tokens stay out of the surplus a missing word is spelled from.
+_MARKDOWN_LINK_TARGET = re.compile(r"\]\((?:[^()\s]|\([^()\s]*\))*\)")
+
+
 def _pdf_checked_text(page, markdown: str, ocr: bool) -> tuple[str, list[str]]:
-    """Zero-tolerance token recall against each page's independent text layer."""
+    """Zero-tolerance token recall against each page's independent text layer.
+
+    Two extraction artefacts are not losses: a hyphen that only breaks a word
+    across lines (a hyphen-minus joined across a line break reads as one too),
+    and a source word the Markdown carries as 2+ pieces (a subscript renders
+    dmodel as d + model, the text layer glues a word to its neighbour). Pieces
+    are Markdown tokens the source does not account for, counted page-wide and
+    used once; where they sit on the page is not checked. Requiring them to be
+    adjacent, in order, would also flag the pieces a formula or a table header
+    scatters across the Markdown, which costs more than it protects.
+    """
     from collections import Counter
     import unicodedata
 
@@ -1536,9 +1561,48 @@ def _pdf_checked_text(page, markdown: str, ocr: bool) -> tuple[str, list[str]]:
         text = unicodedata.normalize("NFKC", text)
         # Extra Markdown punctuation cannot count as missing source text,
         # but symbols in the source (math, identifiers, paths) must be audited.
-        return Counter(re.findall(r"[^\W_]+|[^\w\s]|_", text))
+        return Counter(re.findall(r"[^\W_]+|[^\w\s]|_", _LINE_END_HYPHEN.sub("", text)))
 
-    missing = tokens(source) - tokens(markdown)
+    def unspelled(missing, surplus):
+        """Missing words the surplus Markdown tokens do not spell, each surplus token used once.
+
+        Words are tried in sorted order and the first spelling found wins, so a
+        word can use a piece another needs; that errs toward reporting a gap.
+        """
+
+        steps = _SPELL_STEPS
+
+        def spell(word, depth):
+            nonlocal steps
+            if not word:
+                return True
+            if depth == _SPELLED_PARTS:
+                return False
+            for size in range(1, len(word) + 1):
+                if steps == 0:
+                    return False
+                steps -= 1
+                part = word[:size]
+                if surplus[part] > 0:
+                    surplus[part] -= 1
+                    if spell(word[size:], depth + 1):
+                        return True
+                    surplus[part] += 1
+            return False
+
+        left = Counter()
+        for token in sorted(missing):
+            spellable = re.fullmatch(r"[^\W_]{2,}", token) and len(token) <= _SPELLED_LENGTH
+            for spelled in range(missing[token]):
+                if not (spellable and spell(token, 0)):
+                    # A failed search leaves the surplus as it found it, so
+                    # every later copy of the word fails the same way.
+                    left[token] += missing[token] - spelled
+                    break
+        return left
+
+    found, wanted = tokens(source), tokens(markdown)
+    missing = unspelled(found - wanted, tokens(_MARKDOWN_LINK_TARGET.sub("]", markdown)) - found)
     gaps = []
     if missing:
         gaps.append(f"PDF page {page.number + 1}: conversion omitted {sum(missing.values())} text-layer tokens")

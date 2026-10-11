@@ -424,3 +424,26 @@ func TestContextWindowTakesTheHarnessSize(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderContextLineReadsEachTranscriptOnce pins the read-once law for the
+// main line: the gauge and the spend segment take their facts from one pass
+// over the session transcript, and each sub-agent transcript is read once.
+func TestRenderContextLineReadsEachTranscriptOnce(t *testing.T) {
+	data := input{SessionID: spendSession}
+	data.TranscriptPath = spendTranscript(t, spendChildResponse)
+	runtime := Runtime{
+		Home: t.TempDir(), Engine: pfmengine.Claude, Prices: testPrices(t),
+		Env: map[string]string{paths.EnvCostLedgerDir: t.TempDir()},
+	}
+	counts := readCounter(t)
+	_, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
+	if !strings.Contains(stripANSICodes(line), "💰") {
+		t.Fatalf("line %q has no spend segment", line)
+	}
+	child := transcript.SubagentTranscript(strings.TrimSuffix(data.TranscriptPath, ".jsonl")+"/subagents", "c1")
+	for _, path := range []string{data.TranscriptPath, child} {
+		if got := counts()[path]; got != 1 {
+			t.Errorf("%s read %d times in one render, want exactly 1", filepath.Base(path), got)
+		}
+	}
+}

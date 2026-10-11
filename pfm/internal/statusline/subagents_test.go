@@ -116,7 +116,7 @@ func renderSubagentWith(t *testing.T, session, task string, now time.Time, colum
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":` + jsonText(columns) +
 		`,"tasks":[` + task + `]}`
 	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", "", &warn)
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, "", &warn)
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}
@@ -378,7 +378,16 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 			payload := `{"transcript_path":` + jsonText(session) + `,"cwd":` + jsonText(cwd) +
 				`,"columns":200,"tasks":[` + task + `,` + strings.Replace(task, `"a1"`, `"a2"`, 1) + `]}`
 			var warn bytes.Buffer
-			got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), home, userDir, &warn)
+			got, err := RenderSubagents(
+				[]byte(payload),
+				subagentNow,
+				t.TempDir(),
+				testPrices(t),
+				home,
+				noEnv,
+				userDir,
+				&warn,
+			)
 			if err != nil {
 				t.Fatalf("RenderSubagents: %v", err)
 			}
@@ -412,7 +421,7 @@ func TestRenderSubagentsRoleIsReadAgainEachRender(t *testing.T) {
 		payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":200,"tasks":[` +
 			`{"id":"a1","type":"local_agent","status":"running","model":"gpt-6-sol","tokenCount":10}]}`
 		var warn bytes.Buffer
-		got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", userDir, &warn)
+		got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", noEnv, userDir, &warn)
 		if err != nil {
 			t.Fatalf("RenderSubagents: %v", err)
 		}
@@ -490,7 +499,7 @@ func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 	got, err := RenderSubagents([]byte(`{"tasks":[
 		{"id":"first","tokenCount":10,"contextWindowSize":100},
 		{"id":"skipped"},
-		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
+		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", noEnv, "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}
@@ -508,7 +517,16 @@ func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 }
 
 func TestRenderSubagentsRejectsMalformedInput(t *testing.T) {
-	got, err := RenderSubagents([]byte(`{"tasks":`), subagentNow, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
+	got, err := RenderSubagents(
+		[]byte(`{"tasks":`),
+		subagentNow,
+		t.TempDir(),
+		testPrices(t),
+		"",
+		noEnv,
+		"",
+		&bytes.Buffer{},
+	)
 	if err == nil {
 		t.Fatalf("malformed payload rendered %q with no error", got)
 	}
@@ -524,7 +542,16 @@ func TestRenderSubagentsRowIsBrightNotFaint(t *testing.T) {
 	payload := `{"transcript_path":` + jsonText(session) + `,"tasks":[{"id":"a1","type":"local_agent",` +
 		`"status":"running","label":"x","model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10,` +
 		`"tokenSamples":[5,10]}]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
+	got, err := RenderSubagents(
+		[]byte(payload),
+		subagentNow,
+		t.TempDir(),
+		testPrices(t),
+		"",
+		noEnv,
+		"",
+		&bytes.Buffer{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,7 +614,7 @@ func TestServeSubagentsNamesAnUnusableClonePricesFile(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	machine := paths.Values{Home: home, SIDDir: t.TempDir()}
-	if code := ServeSubagents(strings.NewReader(`{"tasks":[]}`), &stdout, &stderr, machine, ""); code != 0 {
+	if code := ServeSubagents(strings.NewReader(`{"tasks":[]}`), &stdout, &stderr, machine, noEnv, ""); code != 0 {
 		t.Fatalf("ServeSubagents exit %d, want the fail-open 0", code)
 	}
 	if !strings.Contains(stderr.String(), file) {
@@ -719,6 +746,23 @@ func TestRenderSubagentsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 			`"contextWindowSize":1000000,"tokenCount":10}`)
 	if !strings.Contains(got, "│💾5m✓3m:0s 90%") {
 		t.Fatalf("content = %q, want the Claude row's 5m window and 90%%", got)
+	}
+}
+
+// TestStampTurnFailureLeavesOnlyTheTurnUnknown pins that a transcript whose
+// mtime cannot be read after its lines were (it went in between) makes the
+// agent's turn unread, never the row's activity and spend.
+func TestStampTurnFailureLeavesOnlyTheTurnUnknown(t *testing.T) {
+	activity := agentActivity{turn: agentTurn{open: true}}
+	activity.stampTurn(filepath.Join(t.TempDir(), "agent-gone.jsonl"))
+	if activity.err != nil || activity.turn.err == nil {
+		t.Fatalf("err = %v, turn.err = %v; want the row readable and the turn unknown", activity.err, activity.turn.err)
+	}
+	tree := &agentTree{
+		open: map[string]turnState{}, reads: map[string]*agentActivity{"gone": &activity}, warned: map[string]bool{},
+	}
+	if got := tree.turn("gone"); got != turnUnread {
+		t.Fatalf("turn = %v, want turnUnread", got)
 	}
 }
 

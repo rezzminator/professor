@@ -116,7 +116,7 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 func TestRenderSubagentsSpendWithoutPrices(t *testing.T) {
 	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""})
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + parentTask + `]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), nil, "", "", &strings.Builder{})
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), nil, "", noEnv, "", &strings.Builder{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,8 +328,8 @@ const (
 	ledgerAgentSecond   = "a0000000000000003"
 )
 
-// useLedgerSample copies the sample ledger into a fresh ledger directory, points the process at it,
-// and returns that directory.
+// useLedgerSample copies the sample ledger into a fresh ledger directory and returns it; a render
+// reaches it only through the env ledgerEnv builds.
 func useLedgerSample(t *testing.T) string {
 	t.Helper()
 	sample, err := os.ReadFile(filepath.Join("..", "costledger", "testdata", "sample-15.jsonl"))
@@ -340,7 +340,6 @@ func useLedgerSample(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, ledgerSampleSession+".jsonl"), sample, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvCostLedgerDir, dir)
 	return dir
 }
 
@@ -350,7 +349,7 @@ func ledgerTask(id string) string {
 }
 
 // renderLedgerRows renders the tasks of one session and returns each row's content, ANSI stripped.
-func renderLedgerRows(t *testing.T, sessionID, session string, ids ...string) map[string]string {
+func renderLedgerRows(t *testing.T, ledgerDir, sessionID, session string, ids ...string) map[string]string {
 	t.Helper()
 	tasks := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -359,7 +358,16 @@ func renderLedgerRows(t *testing.T, sessionID, session string, ids ...string) ma
 	payload := `{"session_id":` + jsonText(sessionID) + `,"transcript_path":` + jsonText(session) +
 		`,"cwd":"/work/repo","tasks":[` + strings.Join(tasks, ",") + `]}`
 	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", "", &warn)
+	got, err := RenderSubagents(
+		[]byte(payload),
+		subagentNow,
+		t.TempDir(),
+		testPrices(t),
+		"",
+		ledgerEnv(ledgerDir),
+		"",
+		&warn,
+	)
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}
@@ -379,11 +387,19 @@ func renderLedgerRows(t *testing.T, sessionID, session string, ids ...string) ma
 // file at all) and the meta files. The main line's one dollar amount is the ledger total, and it is
 // the main thread's own rows plus every top-level row.
 func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
-	useLedgerSample(t)
+	ledgerDir := useLedgerSample(t)
 	session := nestedSession(t,
 		map[string][]string{ledgerAgentRoot: agentTranscriptLines, ledgerAgentFirst: agentTranscriptLines},
 		map[string]string{ledgerAgentRoot: "", ledgerAgentFirst: ledgerAgentRoot})
-	rows := renderLedgerRows(t, ledgerSampleSession, session, ledgerAgentRoot, ledgerAgentFirst, ledgerAgentSecond)
+	rows := renderLedgerRows(
+		t,
+		ledgerDir,
+		ledgerSampleSession,
+		session,
+		ledgerAgentRoot,
+		ledgerAgentFirst,
+		ledgerAgentSecond,
+	)
 	for id, want := range map[string]string{
 		ledgerAgentRoot:   "Σ$0.95/740.0K/3.2K/",
 		ledgerAgentFirst:  "Σ$0.08/224.3K/1.2K/2",
@@ -395,7 +411,7 @@ func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
 	}
 
 	var mainRows float64
-	ledger, err := costledger.ForSession(os.Getenv(paths.EnvCostLedgerDir), ledgerSampleSession)
+	ledger, err := costledger.ForSession(ledgerDir, ledgerSampleSession)
 	if err != nil || len(ledger.Rows) != 15 {
 		t.Fatalf("sample ledger = %d rows, %v; want 15", len(ledger.Rows), err)
 	}
@@ -410,7 +426,7 @@ func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
 		Engine: pfmengine.Claude,
 		Prices: testPrices(t),
 		Env: map[string]string{
-			paths.EnvCostLedgerDir:     os.Getenv(paths.EnvCostLedgerDir),
+			paths.EnvCostLedgerDir:     ledgerDir,
 			claudelaunch.EnvCostLedger: "on",
 		},
 	}
@@ -442,7 +458,7 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	session := nestedSession(t,
 		map[string][]string{"fresh": agentTranscriptLines, "adv1": {advisorResponse("claude-opus-5-5")}},
 		map[string]string{"fresh": "", "adv1": ""})
-	rows := renderLedgerRows(t, ledgerSampleSession, session, "fresh", "adv1")
+	rows := renderLedgerRows(t, dir, ledgerSampleSession, session, "fresh", "adv1")
 	if want := "1.0K/1.0M Σ$0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
@@ -493,5 +509,29 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// noEnv is an empty closed environment: a render under it can reach no ledger the test did not build.
+var noEnv paths.Env = &paths.MapEnv{Values: map[string]string{}}
+
+// ledgerEnv is the closed environment whose cost ledger directory is dir.
+func ledgerEnv(dir string) paths.Env {
+	return &paths.MapEnv{Values: map[string]string{paths.EnvCostLedgerDir: dir}}
+}
+
+// The sub-agent rows resolve the ledger from the env they are handed, never the process's: a decoy
+// ledger in the process environment (the real one a test must not reach) is not read, the injected
+// one is. The same ledger is read by the main line through its Runtime, so the totals add up.
+func TestRenderSubagentsReadsTheLedgerUnderTheInjectedEnv(t *testing.T) {
+	decoy := t.TempDir()
+	t.Setenv(paths.EnvCostLedgerDir, decoy)
+	ledgerDir := useLedgerSample(t)
+	session := nestedSession(t,
+		map[string][]string{ledgerAgentRoot: agentTranscriptLines},
+		map[string]string{ledgerAgentRoot: ""})
+	rows := renderLedgerRows(t, ledgerDir, ledgerSampleSession, session, ledgerAgentRoot)
+	if want := "$0.95/740.0K/3.2K/"; !strings.Contains(rows[ledgerAgentRoot], want) {
+		t.Fatalf("row = %q, want the injected ledger's %q", rows[ledgerAgentRoot], want)
 	}
 }

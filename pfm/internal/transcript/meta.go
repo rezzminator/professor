@@ -102,7 +102,14 @@ type metaScanState struct {
 }
 
 // ReadMeta streams a transcript for the run's own facts.
-func ReadMeta(path, engine string) (meta Meta, returnErr error) {
+func ReadMeta(path, engine string) (Meta, error) {
+	return ReadMetaObserving(path, engine, nil)
+}
+
+// ReadMetaObserving is ReadMeta that also hands every line it scans to observe
+// (nil for none), so a caller needing a second fact of the same file takes it
+// in this one read. A scan error leaves observe having seen only a prefix.
+func ReadMetaObserving(path, engine string, observe func(line []byte)) (meta Meta, returnErr error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return Meta{}, err
@@ -111,6 +118,7 @@ func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 		SizeBytes:      info.Size(),
 		ModifiedUnixNS: info.ModTime().UnixNano(),
 	}
+	noteWholeRead(path)
 	file, err := os.Open(path)
 	if err != nil {
 		return meta, err
@@ -126,6 +134,9 @@ func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 	state := metaScanState{}
 	for scanner.Scan() {
 		applyMeta(&meta, &state, scanner.Bytes(), engine)
+		if observe != nil {
+			observe(scanner.Bytes())
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return meta, fmt.Errorf("scan transcript %s: %w", path, err)

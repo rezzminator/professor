@@ -1,17 +1,16 @@
 package statusline
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -30,7 +29,8 @@ type agentNesting struct {
 // agentTree is one scan of the session's subagents directory: every agent's
 // parent from its meta file's parentAgentId, which Claude Code writes for an
 // agent spawned by another agent (a main-loop spawn carries none). open caches
-// each agent's own turn state for the render, spent each agent's billing.
+// each agent's own turn state for the render, reads each agent's one pass over
+// its transcript (activity, billing and turn state alike).
 // over and now (judgeLiveness) decide which agents with an open turn really
 // work: a transcript cannot say an agent was killed.
 type agentTree struct {
@@ -39,7 +39,10 @@ type agentTree struct {
 	err      error
 	warnings []string
 	open     map[string]turnState
-	spent    map[string]agentSpend
+	reads    map[string]*agentActivity
+	warned   map[string]bool
+	session  string
+	prices   *pricing.Prices
 	ids      []string
 	over     map[string]bool
 	now      time.Time
@@ -60,20 +63,14 @@ const (
 // answers, so past this its open turn is a dead one.
 const agentDeadAfter = 15 * time.Minute
 
-// tailWindow is the first read from a transcript's end; it doubles until a
-// message entry is found, so one huge tool result costs a longer read, never
-// a wrong answer.
-const tailWindow = 64 << 10
-
 // scanAgentTree reads every agent-<id>.meta.json beside the session's
 // transcript once per render. A directory that cannot be listed, or any meta
 // file that cannot be read, sets err: the parent of that agent is unknown, so
 // no row may claim a count it cannot vouch for.
-func scanAgentTree(sessionTranscript string) *agentTree {
+func scanAgentTree(sessionTranscript string, prices *pricing.Prices) *agentTree {
 	tree := &agentTree{
-		children: map[string][]string{},
-		open:     map[string]turnState{},
-		spent:    map[string]agentSpend{},
+		children: map[string][]string{}, open: map[string]turnState{}, reads: map[string]*agentActivity{},
+		warned: map[string]bool{}, session: sessionTranscript, prices: prices,
 	}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		tree.err = errors.New("payload names no session transcript")
@@ -173,74 +170,119 @@ func (tree *agentTree) drainWarnings() []string {
 	return warnings
 }
 
+// read is the agent's one pass over its transcript for the render: whoever
+// asks first (its task row, a count above it, a spend above it) reads it, and
+// everyone after gets the same result.
+func (tree *agentTree) read(id string) *agentActivity {
+	if activity, ok := tree.reads[id]; ok {
+		return activity
+	}
+	activity := readAgentActivity(tree.session, id, tree.prices)
+	tree.reads[id] = &activity
+	return &activity
+}
+
+// warnOnce reports an agent's unreadable transcript on the first render step
+// that depends on it.
+func (tree *agentTree) warnOnce(id string, err error) {
+	if err != nil && !tree.warned[id] {
+		tree.warned[id] = true
+		tree.warnings = append(tree.warnings, err.Error())
+	}
+}
+
 func (tree *agentTree) turn(id string) turnState {
 	if state, ok := tree.open[id]; ok {
 		return state
 	}
 	state := turnClosed
-	open, last, err := turnOpen(transcript.SubagentTranscript(tree.dir, id))
+	// Asked again while its own answer is being worked out (a parentAgentId
+	// cycle the liveness walk goes around), it reads closed: it is not yet
+	// known to work, and the walk must end.
+	tree.open[id] = state
+	activity := tree.read(id)
 	switch {
-	case err != nil:
-		tree.warnings = append(tree.warnings, err.Error())
+	case activity.err != nil:
+		tree.warnOnce(id, activity.err)
 		state = turnUnread
-	case open && !tree.over[id] && (tree.now.IsZero() || tree.now.Sub(last) < agentDeadAfter):
+	case activity.turn.err != nil:
+		tree.warnOnce(id, activity.turn.err)
+		state = turnUnread
+	case tree.working(id, activity):
 		state = turnWorking
 	}
 	tree.open[id] = state
 	return state
 }
 
-// turnOpen reads an agent transcript's last message entry: its turn is over
-// when that entry is an assistant message that stopped (a stop_reason) without
-// a tool_use, or a tool result Claude Code marks toolEndsTurn (the result of
+// working says whether an agent whose transcript was read is working now. An
+// open turn counts while it is recent, never for a turn the task list calls
+// over. A turn whose last entry is a call to a sub-agent counts however long
+// it has been quiet while any agent it spawned works: it waits on that child,
+// and the child's own turn is what ends or outlives the wait.
+func (tree *agentTree) working(id string, activity *agentActivity) bool {
+	if !activity.turn.open || tree.over[id] {
+		return false
+	}
+	if tree.now.IsZero() || tree.now.Sub(activity.turn.last) < agentDeadAfter {
+		return true
+	}
+	if !activity.turn.delegating {
+		return false
+	}
+	return tree.childWorking(id, map[string]bool{id: true})
+}
+
+func (tree *agentTree) childWorking(id string, seen map[string]bool) bool {
+	for _, child := range tree.children[id] {
+		if seen[child] {
+			continue
+		}
+		seen[child] = true
+		if tree.turn(child) == turnWorking {
+			return true
+		}
+	}
+	return false
+}
+
+// agentTurn is an agent transcript's last message entry: its turn is over when
+// that entry is an assistant message that stopped (a stop_reason) without a
+// tool_use, or a tool result Claude Code marks toolEndsTurn (the result of
 // SubagentHandback, the tool a sub-agent ends its turn with, or of
-// StructuredOutput in a workflow agent: nothing follows it). Any other tool call, tool result or prompt, or a message still
-// streaming (no stop_reason yet), means it is working; a transcript from a
-// Claude Code that writes no toolEndsTurn reads as before. A torn final line is the
-// agent mid-write and fails to parse, so it is skipped; a transcript with no message entry yet is a
-// turn that has not produced its first reply. last is when that entry was
-// written, the file's mtime for a transcript with no message entry yet.
-func turnOpen(path string) (open bool, last time.Time, err error) {
-	file, err := os.Open(path)
+// StructuredOutput in a workflow agent: nothing follows it). Any other tool
+// call, tool result or prompt, or a message still streaming (no stop_reason
+// yet), means it is working; a transcript from a Claude Code that writes no
+// toolEndsTurn reads as before. A transcript with no
+// message entry yet is a turn that has not produced its first reply. last is
+// when that entry was written, the file's mtime when it carries no timestamp.
+// delegating is an open turn whose entry calls a sub-agent, stop_reason
+// written or not. err is why last could not be read (the transcript went
+// between its read and its stat): only the turn's state is then unknown.
+type agentTurn struct {
+	open       bool
+	last       time.Time
+	delegating bool
+	seen       bool
+	err        error
+}
+
+// stampTurn dates a last message entry that carries no timestamp by the
+// transcript's mtime. A stat failing after the read leaves the row's read
+// facts standing: only the turn's state is unknown.
+func (activity *agentActivity) stampTurn(path string) {
+	info, err := os.Stat(path)
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("open sub-agent transcript %s: %w", path, err)
+		activity.turn.err = fmt.Errorf("stat sub-agent transcript %s: %w", path, err)
+		return
 	}
-	defer func() { _ = file.Close() }() // read-only handle; a close error loses nothing
-	info, err := file.Stat()
-	if err != nil {
-		return false, time.Time{}, fmt.Errorf("stat sub-agent transcript %s: %w", path, err)
-	}
-	size := info.Size()
-	for window := int64(tailWindow); ; window *= 2 {
-		start := max(size-window, 0)
-		chunk := make([]byte, size-start)
-		if _, err := file.ReadAt(chunk, start); err != nil && !errors.Is(err, io.EOF) {
-			return false, time.Time{}, fmt.Errorf("read sub-agent transcript %s: %w", path, err)
-		}
-		// The piece after the last newline stays: a torn one fails to parse
-		// and is skipped, as readAgentActivity skips it.
-		lines := bytes.Split(chunk, []byte{'\n'})
-		if start > 0 && len(lines) > 0 {
-			lines = lines[1:] // the window's first piece may start mid-line
-		}
-		for index := len(lines) - 1; index >= 0; index-- {
-			if open, stamped, ok := messageTurnOpen(lines[index]); ok {
-				if stamped.IsZero() {
-					stamped = info.ModTime()
-				}
-				return open, stamped, nil
-			}
-		}
-		if start == 0 {
-			return true, info.ModTime(), nil
-		}
-	}
+	activity.turn.last = info.ModTime()
 }
 
 // messageTurnOpen answers for one transcript line; ok is false for a line
 // that is not a user or assistant message. stamped is the line's timestamp,
 // zero when it carries none.
-func messageTurnOpen(line []byte) (open bool, stamped time.Time, ok bool) {
+func messageTurnOpen(line []byte) (open, delegating bool, stamped time.Time, ok bool) {
 	var entry struct {
 		Type         string    `json:"type"`
 		Timestamp    time.Time `json:"timestamp"`
@@ -251,30 +293,36 @@ func messageTurnOpen(line []byte) (open bool, stamped time.Time, ok bool) {
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &entry) != nil {
-		return false, time.Time{}, false
+		return false, false, time.Time{}, false
 	}
 	switch entry.Type {
 	case entryUser:
-		return !entry.ToolEndsTurn, entry.Timestamp, true
+		return !entry.ToolEndsTurn, false, entry.Timestamp, true
 	case entryAssistant:
 	default:
-		return false, time.Time{}, false
-	}
-	if entry.Message.StopReason == nil || *entry.Message.StopReason == "" {
-		return true, entry.Timestamp, true
+		return false, false, time.Time{}, false
 	}
 	var blocks []struct {
 		Type string `json:"type"`
+		Name string `json:"name"`
 	}
+	toolCall := false
 	if json.Unmarshal(entry.Message.Content, &blocks) == nil {
 		for _, block := range blocks {
 			if block.Type == blockToolUse {
-				return true, entry.Timestamp, true
+				toolCall = true
+				delegating = delegating || subagentCallTools[block.Name]
 			}
 		}
 	}
-	return false, entry.Timestamp, true
+	if toolCall || entry.Message.StopReason == nil || *entry.Message.StopReason == "" {
+		return true, delegating, entry.Timestamp, true
+	}
+	return false, false, entry.Timestamp, true
 }
+
+// subagentCallTools are the tool names that start a sub-agent.
+var subagentCallTools = map[string]bool{"Agent": true, "Task": true}
 
 // nestingSegment renders "2/5": the agents below the task working right now
 // (green) over all of them at every depth (the tools colour). "" when it

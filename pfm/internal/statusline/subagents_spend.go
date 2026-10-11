@@ -187,12 +187,17 @@ func (scan *spendScan) line(line []byte) {
 // response, a sub-agent transcript that cannot be read, or a subagents
 // directory that cannot be listed leaves the sum partial; a session that never
 // spawned one has no directory, which is not a failure.
-func sessionSpend(sessionTranscript string, prices *pricing.Prices) (agentSpend, error) {
-	total, err := readTranscriptSpend(sessionTranscript, prices)
-	if err != nil {
-		return agentSpend{}, err
+func sessionSpend(sessionTranscript string, prices *pricing.Prices, scanned *agentSpend) (agentSpend, error) {
+	var total agentSpend
+	if scanned != nil {
+		total = *scanned
+	} else {
+		var err error
+		if total, err = readTranscriptSpend(sessionTranscript, prices); err != nil {
+			return agentSpend{}, err
+		}
 	}
-	tree := scanAgentTree(sessionTranscript)
+	tree := scanAgentTree(sessionTranscript, prices)
 	if tree.err != nil {
 		if !errors.Is(tree.err, fs.ErrNotExist) {
 			total.partial = true
@@ -235,7 +240,7 @@ func transcriptError(path string, err error) (opened bool, wrapped error) {
 // transcript read once per render. A tree that could not be scanned, or a
 // transcript that could not be read, leaves the sum partial and its cause in
 // the tree's warnings.
-func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend {
+func (tree *agentTree) nestedSpend(id string) agentSpend {
 	if tree.err != nil {
 		return agentSpend{partial: true}
 	}
@@ -250,15 +255,11 @@ func (tree *agentTree) nestedSpend(id string, prices *pricing.Prices) agentSpend
 		}
 		seen[next] = true
 		queue = append(queue, tree.children[next]...)
-		spend, ok := tree.spent[next]
-		if !ok {
-			var err error
-			spend, err = readTranscriptSpend(transcript.SubagentTranscript(tree.dir, next), prices)
-			if err != nil {
-				tree.warnings = append(tree.warnings, err.Error())
-				spend.partial = true
-			}
-			tree.spent[next] = spend
+		activity := tree.read(next)
+		spend := activity.spend
+		if activity.err != nil {
+			tree.warnOnce(next, activity.err)
+			spend.partial = true
 		}
 		total.add(spend)
 	}

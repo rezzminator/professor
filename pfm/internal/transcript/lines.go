@@ -7,7 +7,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync/atomic"
 )
+
+// wholeReadObserver, when set, is told the path of every ReadLines and
+// ReadMeta pass: the reads whose cost grows with the transcript. It is a test
+// seam for the status line's read-once law and is never set in production.
+var wholeReadObserver atomic.Pointer[func(path string)]
+
+// ObserveWholeReads installs fn as the observer of whole-transcript reads and
+// returns the function that removes it.
+func ObserveWholeReads(fn func(path string)) (restore func()) {
+	wholeReadObserver.Store(&fn)
+	return func() { wholeReadObserver.Store(nil) }
+}
+
+func noteWholeRead(path string) {
+	if fn := wholeReadObserver.Load(); fn != nil {
+		(*fn)(path)
+	}
+}
 
 // OpenError is ReadLines failing to open its file: nothing was read.
 type OpenError struct {
@@ -31,6 +50,7 @@ func ReadLines(
 	start int64,
 	handle func(line []byte, complete bool),
 ) (parsedOffset, bytesRead int64, err error) {
+	noteWholeRead(path)
 	file, err := os.Open(path)
 	if err != nil {
 		return start, 0, &OpenError{Path: path, Err: err}

@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // Transcript tails as Claude Code writes them: a turn that ended with text, a
@@ -171,30 +174,38 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 
 // A real cycle (a → b → a) must not hang the walk or count an agent twice.
 func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
-	session := nestedSession(t, map[string][]string{
-		"p": agentTranscriptLines, "a": {turnEnded}, "b": {turnEnded},
-	}, map[string]string{"p": "", "a": "p", "b": "a"})
-	dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
-	// Rewrite a's parent to b after the fact: a → b → a, and p lists no child.
-	if err := os.WriteFile(filepath.Join(dir, "agent-a.meta.json"),
-		[]byte(`{"agentType":"x","parentAgentId":"b"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "▱") {
-		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
-	}
-	aRow, _ := renderOneSubagent(t, session,
-		`{"id":"a","type":"local_agent","status":"running","tokenCount":10}`)
-	if !strings.HasPrefix(aRow, "0/1│") {
-		t.Fatalf("cycle row = %q, want 0/1", aRow)
+	// Each turn of the cycle is ended, or silent 20 minutes on a sub-agent call
+	// (so its liveness asks the agents below it, around the cycle).
+	staleAgentCall := `{"type":"assistant","timestamp":"2026-09-24T09:40:00Z","message":{"stop_reason":"tool_use",` +
+		`"content":[{"type":"tool_use","id":"x7","name":"Agent"}]}}`
+	for name, last := range map[string]string{"ended turns": turnEnded, "stale sub-agent calls": staleAgentCall} {
+		t.Run(name, func(t *testing.T) {
+			session := nestedSession(t, map[string][]string{
+				"p": agentTranscriptLines, "a": {last}, "b": {last},
+			}, map[string]string{"p": "", "a": "p", "b": "a"})
+			dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
+			// Rewrite a's parent to b after the fact: a → b → a, and p lists no child.
+			if err := os.WriteFile(filepath.Join(dir, "agent-a.meta.json"),
+				[]byte(`{"agentType":"x","parentAgentId":"b"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := renderOneSubagent(t, session, parentTask)
+			if !strings.HasPrefix(got, "▱") {
+				t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
+			}
+			aRow, _ := renderOneSubagent(t, session,
+				`{"id":"a","type":"local_agent","status":"running","tokenCount":10}`)
+			if !strings.HasPrefix(aRow, "0/1│") {
+				t.Fatalf("cycle row = %q, want 0/1", aRow)
+			}
+		})
 	}
 }
 
-// A last message beyond the first tail window is still found.
+// A last message longer than the line reader's buffer is still found.
 func TestRenderSubagentsNestedLongTail(t *testing.T) {
 	long := `{"type":"assistant","timestamp":"2026-09-24T10:01:00Z","message":{"stop_reason":"end_turn",` +
-		`"content":[{"type":"text","text":"` + strings.Repeat("x", 3*tailWindow) + `"}]}}`
+		`"content":[{"type":"text","text":"` + strings.Repeat("x", 3*(64<<10)) + `"}]}}`
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
@@ -224,7 +235,7 @@ func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
 func renderRawSubagent(t *testing.T, session, task string, now time.Time) string {
 	t.Helper()
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + task + `]}`
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +347,7 @@ func renderTasks(t *testing.T, session string, now time.Time, tasks ...string) m
 	t.Helper()
 	list := strings.Join(tasks, ",")
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + list + `]}`
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", "", &bytes.Buffer{})
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,6 +412,32 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			t.Fatalf("parent row = %q, want 0/2 and completed", got)
 		}
 	})
+	t.Run("a parent silent 20 minutes on a sub-agent call that still works is working", func(t *testing.T) {
+		waiting := `{"type":"assistant","timestamp":"2026-09-24T09:40:00Z","message":{"stop_reason":"tool_use",` +
+			`"content":[{"type":"tool_use","id":"x8","name":"Agent"}]}}`
+		parents := map[string]string{"p": "", "c1": "p", "g1": "c1"}
+		session := nestedSession(t, map[string][]string{
+			"p": agentTranscriptLines, "c1": {waiting}, "g1": {turnToolCall},
+		}, parents)
+		got := renderTasks(t, session, subagentNow, parentTask)["p"]
+		if !strings.HasPrefix(got, "2/2│") {
+			t.Fatalf("parent row = %q, want 2/2 (the waiting c1 and its working child g1)", got)
+		}
+		ended := nestedSession(t, map[string][]string{
+			"p": agentTranscriptLines, "c1": {waiting}, "g1": {turnEnded},
+		}, parents)
+		if got := renderTasks(t, ended, subagentNow, parentTask)["p"]; !strings.HasPrefix(got, "0/2│") {
+			t.Fatalf("parent row = %q, want 0/2 (the child is done, so the silent parent is dead)", got)
+		}
+		// The call's line as the stream left it, no stop_reason written.
+		unstopped := strings.Replace(waiting, `"stop_reason":"tool_use"`, `"stop_reason":null`, 1)
+		streamed := nestedSession(t, map[string][]string{
+			"p": agentTranscriptLines, "c1": {unstopped}, "g1": {turnToolCall},
+		}, parents)
+		if got := renderTasks(t, streamed, subagentNow, parentTask)["p"]; !strings.HasPrefix(got, "2/2│") {
+			t.Fatalf("parent row = %q, want 2/2 (a sub-agent call without stop_reason still waits on g1)", got)
+		}
+	})
 	t.Run("a silence shorter than any tool call is still working", func(t *testing.T) {
 		quiet := `{"type":"assistant","timestamp":"2026-09-24T09:55:00Z","message":{"stop_reason":"tool_use",` +
 			`"content":[{"type":"tool_use","id":"x9","name":"Bash"}]}}` // a Bash call 7 minutes in
@@ -411,4 +448,47 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			t.Fatalf("parent row = %q, want 1/1 and delegating", got)
 		}
 	})
+}
+
+// readCounter counts whole-transcript reads per path while installed.
+func readCounter(t *testing.T) (counts func() map[string]int) {
+	t.Helper()
+	var mu sync.Mutex
+	seen := map[string]int{}
+	restore := transcript.ObserveWholeReads(func(path string) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen[path]++
+	})
+	t.Cleanup(restore)
+	return func() map[string]int {
+		mu.Lock()
+		defer mu.Unlock()
+		out := map[string]int{}
+		for path, count := range seen {
+			out[path] = count
+		}
+		return out
+	}
+}
+
+// TestRenderSubagentsReadsEachTranscriptOnce pins the read-once law: c1 is a
+// task row and also a descendant of the row p, g1 a descendant of both, and
+// one render reads each of their transcripts a single time.
+func TestRenderSubagentsReadsEachTranscriptOnce(t *testing.T) {
+	session := nestedSession(t, map[string][]string{
+		"p": agentTranscriptLines, "c1": {turnToolCall}, "g1": {turnToolCall},
+	}, map[string]string{"p": "", "c1": "p", "g1": "c1"})
+	counts := readCounter(t)
+	rows := renderTasks(t, session, subagentNow, agentTask("p", "running"), agentTask("c1", "running"))
+	if len(rows) != 2 {
+		t.Fatalf("rows = %v, want p and c1", rows)
+	}
+	dir := strings.TrimSuffix(session, ".jsonl") + "/subagents"
+	for _, id := range []string{"p", "c1", "g1"} {
+		path := filepath.Join(dir, "agent-"+id+".jsonl")
+		if got := counts()[path]; got != 1 {
+			t.Errorf("%s transcript read %d times in one render, want exactly 1", id, got)
+		}
+	}
 }

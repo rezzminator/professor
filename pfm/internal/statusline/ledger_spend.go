@@ -211,19 +211,15 @@ func (view *ledgerView) spend(id string, metaChildren map[string][]string) (agen
 	return ledgerSpend(rows), true
 }
 
-// loadLedgerView reads the session's ledger for the sub-agent rows: nil when the payload names no
-// session or the session has no ledger. A ledger that cannot be read is told on warn and leaves
+// loadLedgerView reads the session's ledger for the sub-agent rows, under the home and env the
+// render is handed (the main line's readLedgerBooks reads the same one through its Runtime): nil
+// when the payload names no session or the session has no ledger. A ledger that cannot be read is told on warn and leaves
 // the rows on their transcripts' pricing.
-func loadLedgerView(sessionID string, warn io.Writer) *ledgerView {
+func loadLedgerView(sessionID, home string, env paths.Env, warn io.Writer) *ledgerView {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
-	home, err := paths.Home()
-	if err != nil {
-		fmt.Fprintf(warn, "pfm statusline --subagents: cost ledger (rows price from transcripts): %v\n", err)
-		return nil
-	}
-	ledger, err := costledger.ForSession(paths.CostLedgerDir(paths.OSEnv{}, home), sessionID)
+	ledger, err := costledger.ForSession(paths.CostLedgerDir(env, home), sessionID)
 	if err != nil {
 		fmt.Fprintf(warn, "pfm statusline --subagents: cost ledger (rows price from transcripts): %v\n", err)
 		return nil

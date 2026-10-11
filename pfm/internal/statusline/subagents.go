@@ -78,6 +78,8 @@ type agentActivity struct {
 	err         error
 	nest        agentNesting
 	spend       agentSpend
+	// turn is its last message entry.
+	turn agentTurn
 
 	noCacheWindow bool
 }
@@ -181,7 +183,13 @@ var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // (pricing.LoadPrices: the clone file or the embedded copy, the override beside
 // pfmConfigPath merged), never fetched; one that cannot load leaves every
 // row's dollars "$?", its cause on stderr.
-func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, machine paths.Values, pfmConfigPath string) int {
+func ServeSubagents(
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+	machine paths.Values,
+	env paths.Env,
+	pfmConfigPath string,
+) int {
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: read input (fail-open): %v\n", err)
@@ -189,7 +197,7 @@ func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, machine paths.Val
 	}
 	prices := LoadServedPrices(machine.Home, pfmConfigPath, stderr, "pfm statusline --subagents")
 	userAgents := userAgentsDir(machine.Home)
-	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, machine.Home, userAgents, stderr)
+	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, machine.Home, env, userAgents, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: render (fail-open): %v\n", err)
 		return 0
@@ -236,7 +244,9 @@ func RenderSubagents(
 	now time.Time,
 	sidDir string,
 	prices *pricing.Prices,
-	home, userAgents string,
+	home string,
+	env paths.Env,
+	userAgents string,
 	warn io.Writer,
 ) (string, error) {
 	var data subagentInput
@@ -252,7 +262,7 @@ func RenderSubagents(
 	encoder.SetEscapeHTML(false)
 	var tree *agentTree // scanned once per render, on the first agent row
 	roles := newRoleLookup(data.Cwd, home, userAgents, warn)
-	ledger := loadLedgerView(data.SessionID, warn)
+	ledger := loadLedgerView(data.SessionID, home, env, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
 		if task.ID == "" || (task.TokenCount <= 0 && task.ContextWindowSize <= 0) {
@@ -261,16 +271,16 @@ func RenderSubagents(
 		var activity *agentActivity
 		if task.Type == localAgentTask {
 			if tree == nil {
-				tree = scanAgentTree(data.TranscriptPath)
+				tree = scanAgentTree(data.TranscriptPath, prices)
 				tree.judgeLiveness(now, finishedTasks(data.Tasks))
 			}
-			read := readAgentActivity(data.TranscriptPath, task.ID, prices)
+			read := *tree.read(task.ID)
 			read.noCacheWindow = openAIModel(task.Model) || openAIModel(read.model)
 			if read.roleErr == nil {
 				read.role = roles.name(read.role, warn)
 			}
 			read.nest = tree.nesting(task.ID)
-			read.spend.add(tree.nestedSpend(task.ID, prices))
+			read.spend.add(tree.nestedSpend(task.ID))
 			if ledger != nil {
 				if booked, ok := ledger.spend(task.ID, tree.children); ok {
 					read.spend = read.spend.withLedger(booked)
@@ -594,13 +604,24 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) age
 	activity.transcript = path
 	seen := map[string]struct{}{}
 	spend := newSpendScan(prices)
+	var stamped time.Time
 	if _, _, err := transcript.ReadLines(path, 0, func(line []byte, _ bool) {
 		recordTranscriptLine(line, seen, &activity, spend)
+		if open, delegating, at, ok := messageTurnOpen(line); ok {
+			activity.turn = agentTurn{open: open, delegating: delegating, last: at, seen: true}
+			stamped = at
+		}
 	}); err != nil {
 		var opened bool
 		if opened, activity.err = transcriptError(path, err); !opened {
 			return activity
 		}
+	}
+	if !activity.turn.seen {
+		activity.turn.open = true // no reply yet: the first turn is under way
+	}
+	if stamped.IsZero() {
+		activity.stampTurn(path)
 	}
 	activity.tools = len(seen)
 	activity.spend = spend.total()

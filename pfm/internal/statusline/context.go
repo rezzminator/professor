@@ -25,10 +25,18 @@ type contextGauge struct {
 	humanPrompts int
 	marker       string
 	transcript   bool
+	// scanned is what the gauge's pass over the transcript billed, nil when
+	// that pass did not complete: the spend segment reuses it instead of
+	// reading the same file again.
+	scanned *agentSpend
 }
 
 func renderContextLine(runtime Runtime, data input, project string, now time.Time) (contextGauge, string, int64) {
-	gauge := transcriptGauge(runtime, data, project)
+	var mainScan *spendScan
+	if runtime.Engine != pfmengine.Codex {
+		mainScan = newSpendScan(runtime.Prices)
+	}
+	gauge := transcriptGauge(runtime, data, project, mainScan)
 	percent := gauge.percent
 	l2 := urgencyEmoji(percent) + " " + makeBar(percent, 10) + " " + percentColor(percent) +
 		gauge.marker + strconv.Itoa(percent) + "%" + reset
@@ -45,7 +53,7 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 		}
 	}
 	if runtime.Engine != pfmengine.Codex {
-		l2 += sep + sessionSpendSegment(data, runtime.Prices, readLedgerBooks(runtime, data.SessionID))
+		l2 += sep + sessionSpendSegment(data, runtime.Prices, readLedgerBooks(runtime, data.SessionID), gauge.scanned)
 	}
 	// Never width-gated: a recorded launch reports its cache window and
 	// transcript readability. Codex reports no cache split.
@@ -76,13 +84,13 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 // call whose cost never arrived, a model the table cannot price); a transcript that cannot be
 // read is "?" in its place. A state worth flagging ends in one marker with no amount in it
 // (spendMarker); the amounts behind a marker are `pfm tokens`'.
-func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks) string {
+func sessionSpendSegment(data input, prices *pricing.Prices, books ledgerBooks, scanned *agentSpend) string {
 	total := data.Cost.TotalCostUSD
 	var spend agentSpend
 	readable := strings.TrimSpace(data.TranscriptPath) != ""
 	if readable {
 		var err error
-		if spend, err = sessionSpend(data.TranscriptPath, prices); err != nil {
+		if spend, err = sessionSpend(data.TranscriptPath, prices, scanned); err != nil {
 			readable = false
 		}
 	}
@@ -146,12 +154,16 @@ func spendDollars(usd float64, known bool) string {
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.
 // The harness percentage is retained only for absent or unreadable transcripts.
-func transcriptGauge(runtime Runtime, data input, project string) contextGauge {
+func transcriptGauge(runtime Runtime, data input, project string, scan *spendScan) contextGauge {
 	fallback := contextGauge{percent: gaugePercent(data.ContextWindow.UsedPercentage)}
 	if data.TranscriptPath == "" {
 		return fallback
 	}
-	meta, err := transcript.ReadMeta(data.TranscriptPath, string(runtime.Engine))
+	var observe func(line []byte)
+	if scan != nil {
+		observe = scan.line
+	}
+	meta, err := transcript.ReadMetaObserving(data.TranscriptPath, string(runtime.Engine), observe)
 	if err != nil {
 		return fallback
 	}
@@ -162,6 +174,10 @@ func transcriptGauge(runtime Runtime, data input, project string) contextGauge {
 		window:       window,
 		humanPrompts: meta.HumanPrompts,
 		transcript:   true,
+	}
+	if scan != nil {
+		scanned := scan.total()
+		gauge.scanned = &scanned
 	}
 	floorPath := contextFloorPath(runtime, project)
 	if meta.CompactedAfterUsage {

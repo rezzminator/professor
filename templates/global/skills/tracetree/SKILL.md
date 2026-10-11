@@ -1,6 +1,6 @@
 ---
 name: tracetree
-description: Internal kit of tracer and sub-tracer — tracetree.py opens a trace run, stores each node's hops once, waits for the whole tree, checks every quote against the file and maps the components. Not invoked directly — ask tracer; a finished run → /read-tracer-run.
+description: Internal kit of tracer and sub-tracer — tracetree.py opens a trace run, stores each node's hops once, waits for the whole tree, checks every quote against the file and maps the components. Not invoked directly — ask tracer; a finished run → /tracer:use.
 visibility:
   visible-to:
     include: [tracer, sub-tracer]

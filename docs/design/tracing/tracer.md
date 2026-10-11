@@ -1,6 +1,6 @@
 # tracer
 
-`tracer` answers a spec writer's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller works the finished run with the `read-tracer-run` skill. Exact text without a question goes to `collector`.
+`tracer` answers a spec writer's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller sends its questions and works the finished run by `/tracer:use`. Exact text without a question goes to `collector`.
 
 The kit's commands, check states and run directory are in [tracetree.md](tracetree.md); every measurement a rule below cites is in [tracer-bench.md](tracer-bench.md).
 
@@ -21,7 +21,7 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 | Lead | `templates/global/agents/tracer.md` | `sonnet`, `high` |
 | Reader | `templates/global/agents/sub-tracer.md` | `haiku`, `low` |
 | Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `tracemap.html`, `tracetree_test.py`, `SKILL.md` | — |
-| Caller's skill | `templates/global/skills/read-tracer-run/SKILL.md` | — |
+| Caller's manual | `templates/global/commands/tracer/use.md`, preloaded by agent frontmatter `skills: [tracer:use]` | — |
 
 `sub-tracer` and the `tracetree` skill are visible only to `tracer` and `sub-tracer`. In the prompts, `tt` stands for `python3 ~/.claude/skills/tracetree/tracetree.py`.
 
@@ -39,7 +39,7 @@ The tree pays where a brief makes one agent carry much code: on B4 it cost 29% l
 4. `tt wait` returns once every named and every started node has written and the run has been quiet 15 s. It prints the WARNINGS block, the answers view of the named nodes and their children, COUNTS, the `MAP` line and the OPEN block.
 5. After each wait the lead drills at most twice (`tt check --hops {ID}`, a node once), runs at most one gap round, reads what stays open through `tt read`, and writes the final.
 6. The final: the WARNINGS lines, if any; the answers by the brief's question numbers; `CHECK`, `TESTS`, `NOT READ`; the last wait's `MAP` line; `RUN {RUN} · {COUNTS}` with a runnable `check --hops | grep` command.
-7. The caller relays the WARNINGS lines to the user and, with `read-tracer-run`, asks the run before it asks tracer again or writes a NOT READ item as unsettled.
+7. The caller relays the WARNINGS lines and, by `/tracer:use`, asks the run before it asks tracer again or writes a NOT READ item as unsettled.
 
 ## Rules
 
@@ -83,20 +83,22 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - Facts come from unflagged answer lines, hops and the lead's own reads; a list claim names each item, or counts them and names the exceptions. The single-agent body wrote "all 12 catches give X" when 5 did not.
 - It always carries test homes, the check command and anchors. Fenced lines come only when the brief asks for quotes or writes task files, copied from `--full` with `path:A-B` above: probe 1's 2,903 fenced characters went unused.
 - NOT READ copies the last wait's unsettled OPEN lines with their suffix, and gives each sub-ask of the lead's own a next step: `run: node {ID}` only for what a drill left open or a node past the two drills of a wait, else `ask: {question}`. Probe 2's caller called 4 of 8 open items unsettled while the run held parts of 2; in probe 3, 12 of 34 items carried no next step.
-- The last two lines are the `MAP` line and `RUN {RUN} · {COUNTS} — before another tracer question or writing a NOT READ item as unsettled: … check {RUN} --hops | grep -n '{symbol}' shows what this run verified, and the same check with `--hops {ID}` drills a marked node; /read-tracer-run has the rest`. The callers of probes 2 and 3 never loaded the skill a pointer named; a runnable command needs no skill.
+- The last two lines are the `MAP` line and `RUN {RUN} · {COUNTS} — before another tracer question or writing a NOT READ item as unsettled: … check {RUN} --hops | grep -n '{symbol}' shows what this run verified, and the same check with `--hops {ID}` drills a marked node; /tracer:use has the rest`. The callers of probes 2 and 3 never loaded the skill a pointer named; a runnable command needs no skill.
 - A wake after the final is answered with the final again, unchanged: a late wake's reply replaces the final, and on v4 the lead rewrote it at 18K output tokens.
 
 ### The caller
 
-`read-tracer-run` triggers before any follow-up question to tracer, before writing a tracer NOT READ item as unsettled, and on any answer ending `RUN` or `MAP`. It has the caller:
+`/tracer:use` is the caller's manual, `templates/global/commands/tracer/use.md`: agent frontmatter `skills: [tracer:use]` preloads it into `flights-foreman`, `reviewer`, `reviewer-pro` and `clone-distiller`, none of which needs the `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
 
-- relay a final's WARNINGS lines to the user in its next reply, and drill an answer resting on them, or marked `⚠ node {ID}`, before using it;
+- trace code it will change, judge or brief on and has not read: a quick overview of file and symbol names, then one spawn of numbered fact questions in the terms of its next move, never a survey and never a closed-world door list; a run its brief hands it is drilled before it traces more;
+- do other work while tracer walks, never read the files its questions name;
+- relay a final's WARNINGS lines whole in its next output, and hold an answer line marked `⚠ node {ID}` unchecked until `--hops {ID}` shows its lines;
 - ask the run (`check --hops | grep`) before opening a file, and paste task-file lines from `--full {ID}`;
-- hand a child the run and the node IDs covering its unit, never a re-trace;
+- hand a child the run and the node IDs covering its unit, `TRACE {RUN} · nodes {IDs}`, never a re-trace;
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-`flights-foreman` sends code it has not read to tracer at intake or any later step, carries `Skill` to load `read-tracer-run`, keeps the `RUN` through every compaction and puts `RUN` and node IDs in each child's brief (`templates/global/agents/flights-foreman.md:32`, `:57`, `:91`). `reviewer` spawns `subagent_type: tracer` for each review seat, asked for facts and told to skip CHECK, TESTS and lines to paste (`templates/global/agents/reviewer.md:43`). `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself, reads the clone only for a NOT READ item its goal turns on, drops CHECK, TESTS, MAP and RUN except to drill a marked answer with the RUN line's check command, and treats a marked answer as unchecked (`templates/global/agents/clone-distiller.md:45-48`). `reviewer` and `clone-distiller` carry no `Skill` tool, so the RUN line alone must serve them. The reviewer prompt and the fleet prompt still lack the rule that a marked answer is unchecked until drilled and that a final's WARNINGS lines are relayed whole.
+`flights-foreman` writes `TRACE {RUN}`, or `TRACE skipped — {reason}`, to `run.md` at its step 2 and keeps the `RUN` through every compaction. Its PostToolUse hook `pfm internal tracer-nudge` (`pfm/internal/hookentry/tracer_nudge.go`) adds a reminder to its context on every call from the seventh until it spawns tracer, runs `tracetree.py` or writes `TRACE skipped`; a prose rule alone was skipped in 22 of 25 foreman flights and in both runs of its rewrite. `reviewer` and `reviewer-pro` spawn `subagent_type: tracer` for each review seat, told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
 
 ## Harness behaviour
 
@@ -125,5 +127,5 @@ What the tree rests on, each observed in the lab:
 - The 120 s `never started` window rests on lab starts 8–21 s after `tt new`; a depth-cap refusal was never observed in a run.
 - One thread per item of a list the brief asks to classify does not hold yet: on replay P0 the lead grouped 24 docs into three threads of 8, left two unread and ran no gap round.
 - The read-numbering fix behind P20's 12 wrong line numbers is unbenched on a replay.
-- Callers do not work the run. Across 84 callers in the field none re-asked a fact a final held, yet 3 ran `check` or `map` on a returned run, 1 loaded `read-tracer-run`, none of six audited callers relayed a final's `⚠` lines, and reviewer callers re-read quoted ranges with `sed` to verify them ([Caller audit](tracer-bench.md#caller-audit)). The per-line `⚠ node {ID}` mark sits where the caller reads the claim; whether callers act on it is unmeasured.
+- Callers working the run is unproven. Across 84 field callers before the manual was preloaded, none re-asked a fact a final held, yet 3 ran `check` or `map` on a returned run, 1 loaded the caller's manual, none of six audited callers relayed a final's `⚠` lines, and reviewer callers re-read quoted ranges with `sed` to verify them ([Caller audit](tracer-bench.md#caller-audit)). The per-line `⚠ node {ID}` mark sits where the caller reads the claim; whether callers act on it, or on the preloaded manual, is unmeasured.
 - 55 of the 88 rejected hops left after the resolver are one run on a submodule plugin since renamed: the resolver follows a moved file only where its basename, a sibling or a unique line places the quote ([Resolver and drift](tracer-bench.md#resolver-and-drift)).

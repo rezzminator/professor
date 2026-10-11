@@ -231,4 +231,4 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |
 | `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md`, `global/agents/reviewer-pro.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
 | `{HHMMSS}` | `global/agents/agent-optimizer.md` | the UTC time of the report's write, hours, minutes and seconds |
-| `{RUN}` / `{ID}` / `{QUESTION}` | `global/agents/tracer.md`, `global/agents/sub-tracer.md`, `global/skills/read-tracer-run/SKILL.md` | the trace run's directory `tt new` printed; a sub-tracer's dotted node id; the card's `Q{n}` question number |
+| `{RUN}` / `{ID}` / `{QUESTION}` | `global/agents/tracer.md`, `global/agents/sub-tracer.md`, `global/commands/tracer/use.md` | the trace run's directory `tt new` printed; a sub-tracer's dotted node id; the card's `Q{n}` question number |

@@ -15,10 +15,13 @@ const MinScheduleInterval = time.Minute
 // ErrInvalidSchedule marks a schedule refused at entry, before any write.
 var ErrInvalidSchedule = errors.New("invalid schedule")
 
-// Schedule is one recurring alarm that wakes a chat. Times are wall clock;
-// a zero LastFired or LastErrorAt means "never". LastError is the most recent
-// failed fire, cleared by the next successful one: a schedule that could not
-// be delivered stays due and says why, it is never silently dropped.
+// Schedule is one alarm that wakes a chat: recurring every Interval, or Once —
+// fired a single time at NextFire, then kept, fired, until its chat is opened.
+// A one-time schedule's Interval is its delay from Created to NextFire. Times
+// are wall clock; a zero LastFired or LastErrorAt means "never". LastError is
+// the most recent failed fire, cleared by the next successful one: a schedule
+// that could not be delivered stays due and says why, it is never silently
+// dropped.
 type Schedule struct {
 	ID          int64         `json:"id"`
 	SessionID   string        `json:"session_id"`
@@ -26,6 +29,7 @@ type Schedule struct {
 	Label       string        `json:"label"`
 	Prompt      string        `json:"prompt"`
 	Interval    time.Duration `json:"interval_ns"`
+	Once        bool          `json:"once"`
 	NextFire    time.Time     `json:"next_fire"`
 	Created     time.Time     `json:"created"`
 	LastFired   time.Time     `json:"last_fired"`
@@ -37,7 +41,11 @@ type Schedule struct {
 }
 
 const scheduleColumns = `id,session_id,engine,label,prompt,interval_ns,next_fire_ns,created_ns,
-last_fired_ns,unseen,set_by_id,set_by_label,last_error,last_error_ns`
+last_fired_ns,unseen,set_by_id,set_by_label,last_error,last_error_ns,once`
+
+// schedulePending keeps a one-time schedule that already fired out of every
+// due and overdue view: it waits only for its chat to be opened.
+const schedulePending = "NOT (once=1 AND last_fired_ns<>0)"
 
 func validateSchedule(schedule Schedule) error {
 	switch {
@@ -71,11 +79,11 @@ func (s *Store) CreateSchedule(ctx context.Context, schedule Schedule) (int64, e
 		next = schedule.Created.Add(schedule.Interval)
 	}
 	result, err := s.exec(ctx, `
-INSERT INTO schedules(session_id,engine,label,prompt,interval_ns,next_fire_ns,created_ns,set_by_id,set_by_label)
-VALUES(?,?,?,?,?,?,?,?,?)`,
+INSERT INTO schedules(session_id,engine,label,prompt,interval_ns,next_fire_ns,created_ns,set_by_id,set_by_label,once)
+VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		schedule.SessionID, schedule.Engine, schedule.Label, schedule.Prompt,
 		int64(schedule.Interval), next.UnixNano(), schedule.Created.UnixNano(),
-		schedule.SetByID, schedule.SetByLabel)
+		schedule.SetByID, schedule.SetByLabel, schedule.Once)
 	if err != nil {
 		return 0, fmt.Errorf("create schedule for %q: %w", schedule.SessionID, err)
 	}
@@ -92,10 +100,12 @@ func (s *Store) Schedules(ctx context.Context) ([]Schedule, error) {
 }
 
 // DueSchedules lists the schedules whose next fire is at or before now,
-// soonest first. A schedule whose last fire failed is still due.
+// soonest first. A schedule whose last fire failed is still due; a one-time
+// schedule that already fired never is again.
 func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]Schedule, error) {
 	return s.selectSchedules(
-		ctx, "list due schedules", "WHERE next_fire_ns<=? ORDER BY next_fire_ns,id", now.UnixNano(),
+		ctx, "list due schedules", "WHERE next_fire_ns<=? AND "+schedulePending+" ORDER BY next_fire_ns,id",
+		now.UnixNano(),
 	)
 }
 
@@ -105,7 +115,7 @@ func (s *Store) ScheduleProblems(ctx context.Context, now time.Time, grace time.
 	return s.selectSchedules(
 		ctx,
 		"list schedule problems",
-		"WHERE last_error<>'' OR next_fire_ns<=? ORDER BY next_fire_ns,id",
+		"WHERE last_error<>'' OR (next_fire_ns<=? AND "+schedulePending+") ORDER BY next_fire_ns,id",
 		now.Add(-grace).UnixNano(),
 	)
 }
@@ -142,11 +152,11 @@ func (s *Store) selectSchedules(
 	for rows.Next() {
 		var schedule Schedule
 		var interval, next, created, fired, errorAt int64
-		var unseen int
+		var unseen, once int
 		if err := rows.Scan(
 			&schedule.ID, &schedule.SessionID, &schedule.Engine, &schedule.Label, &schedule.Prompt,
 			&interval, &next, &created, &fired, &unseen,
-			&schedule.SetByID, &schedule.SetByLabel, &schedule.LastError, &errorAt,
+			&schedule.SetByID, &schedule.SetByLabel, &schedule.LastError, &errorAt, &once,
 		); err != nil {
 			return nil, fmt.Errorf("%s: scan: %w", what, err)
 		}
@@ -156,6 +166,7 @@ func (s *Store) selectSchedules(
 		schedule.LastFired = unixNanoOrZero(fired)
 		schedule.LastErrorAt = unixNanoOrZero(errorAt)
 		schedule.Unseen = unseen == 1
+		schedule.Once = once == 1
 		result = append(result, schedule)
 	}
 	if err := rows.Err(); err != nil {
@@ -179,9 +190,11 @@ func (s *Store) RemoveSchedule(ctx context.Context, id int64) (bool, error) {
 // MarkScheduleFired records a delivered fire: last_fired=now, unseen=1, the
 // failure cleared, and the next fire one interval from now — a schedule that
 // missed several intervals while the machine was down fires once, not in a burst.
+// A one-time schedule keeps its fire time and is never due again.
 func (s *Store) MarkScheduleFired(ctx context.Context, id int64, now time.Time) (bool, error) {
 	return s.changeSchedules(ctx, fmt.Sprintf("mark schedule %d fired", id), `
-UPDATE schedules SET last_fired_ns=?, unseen=1, next_fire_ns=?+interval_ns, last_error='', last_error_ns=0
+UPDATE schedules SET last_fired_ns=?, unseen=1, last_error='', last_error_ns=0,
+  next_fire_ns=CASE WHEN once=1 THEN next_fire_ns ELSE ?+interval_ns END
 WHERE id=?`, now.UnixNano(), now.UnixNano(), id)
 }
 
@@ -195,11 +208,18 @@ func (s *Store) RecordScheduleFailure(ctx context.Context, id int64, now time.Ti
 		"UPDATE schedules SET last_error=?, last_error_ns=? WHERE id=?", failure, now.UnixNano(), id)
 }
 
-// ClearScheduleUnseen marks every schedule of one chat seen, reporting
+// ClearScheduleUnseen marks every schedule of one chat seen and removes its
+// one-time schedules that already fired — once seen, they are done — reporting
 // whether any row changed.
 func (s *Store) ClearScheduleUnseen(ctx context.Context, sessionID string) (bool, error) {
-	return s.changeSchedules(ctx, fmt.Sprintf("clear unseen schedules of %q", sessionID),
+	done, err := s.changeSchedules(ctx, fmt.Sprintf("remove fired one-time schedules of %q", sessionID),
+		"DELETE FROM schedules WHERE session_id=? AND once=1 AND last_fired_ns<>0", sessionID)
+	if err != nil {
+		return false, err
+	}
+	seen, err := s.changeSchedules(ctx, fmt.Sprintf("clear unseen schedules of %q", sessionID),
 		"UPDATE schedules SET unseen=0 WHERE session_id=? AND unseen=1", sessionID)
+	return done || seen, err
 }
 
 // RekeySchedules moves every schedule of oldSessionID to newSessionID — a

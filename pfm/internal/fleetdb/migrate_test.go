@@ -223,8 +223,8 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 	}{
 		{name: "missing column waits for the lock", seed: v3Schema, waits: true},
 		{
-			name: "present column and schedules table open without it",
-			seed: v3Schema + hiddenRevisionDDL + ";" + schedulesRenameDDL,
+			name: "a current file opens without it",
+			seed: v3Schema + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

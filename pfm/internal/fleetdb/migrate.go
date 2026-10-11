@@ -17,7 +17,7 @@ import (
 // SchemaVersion is the user_version this build stamps on the shared database.
 // Every pfm refuses a file stamped newer than its own, so a column an older
 // pfm's statements survive (they name their columns, and its default fills
-// their inserts) is added at open with no bump: addHiddenRevision; a table
+// their inserts) is added at open with no bump: addColumnAtOpen; a table
 // rename likewise: renameRemindersTable.
 const SchemaVersion = 3
 
@@ -101,11 +101,26 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 }
 
 // addHiddenRevision adds hidden.revision to a file that lacks it: one created
-// or migrated here, or one a version-3 pfm left. It re-reads the columns under
-// the migration lock, or two first openers would both add the column; a file
-// that has it opens without taking the lock.
-func addHiddenRevision(ctx context.Context, db *sql.DB, path string) (returnErr error) {
-	present, err := hasHiddenRevision(ctx, db)
+// or migrated here, or one a version-3 pfm left.
+func addHiddenRevision(ctx context.Context, db *sql.DB, path string) error {
+	return addColumnAtOpen(ctx, db, path, "hidden", "revision", hiddenRevisionDDL)
+}
+
+// scheduleOnceDDL adds the column that marks a one-time schedule: it fires once
+// and is then kept, fired, until its chat is opened. A row written before it
+// existed takes its default and stays recurring.
+const scheduleOnceDDL = "ALTER TABLE schedules ADD COLUMN once INTEGER NOT NULL DEFAULT 0 CHECK(once IN (0,1))"
+
+// addScheduleOnce adds schedules.once to a file that lacks it.
+func addScheduleOnce(ctx context.Context, db *sql.DB, path string) error {
+	return addColumnAtOpen(ctx, db, path, "schedules", "once", scheduleOnceDDL)
+}
+
+// addColumnAtOpen runs ddl, which adds column to table, on a file that lacks
+// the column. It re-reads the columns under the migration lock, or two first
+// openers would both add it; a file that has it opens without taking the lock.
+func addColumnAtOpen(ctx context.Context, db *sql.DB, path, table, column, ddl string) (returnErr error) {
+	present, err := hasColumn(ctx, db, table, column)
 	if err != nil || present {
 		return err
 	}
@@ -114,13 +129,23 @@ func addHiddenRevision(ctx context.Context, db *sql.DB, path string) (returnErr 
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
-	if present, err := hasHiddenRevision(ctx, db); err != nil || present {
+	if present, err := hasColumn(ctx, db, table, column); err != nil || present {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, hiddenRevisionDDL); err != nil {
-		return fmt.Errorf("add hidden.revision to shared database %s: %w", path, err)
+	if _, err := db.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("add %s.%s to shared database %s: %w", table, column, path, err)
 	}
 	return nil
+}
+
+func hasColumn(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM pragma_table_info(?) WHERE name=?", table, column,
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("read shared database %s columns: %w", table, err)
+	}
+	return count == 1, nil
 }
 
 // schedulesRenameDDL renames the table migration 3 creates as reminders, with
@@ -175,16 +200,6 @@ func hasRemindersTable(ctx context.Context, db *sql.DB) (bool, error) {
 		ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='reminders'",
 	).Scan(&count); err != nil {
 		return false, fmt.Errorf("read shared database tables: %w", err)
-	}
-	return count == 1, nil
-}
-
-func hasHiddenRevision(ctx context.Context, db *sql.DB) (bool, error) {
-	var count int
-	if err := db.QueryRowContext(
-		ctx, "SELECT count(*) FROM pragma_table_info('hidden') WHERE name='revision'",
-	).Scan(&count); err != nil {
-		return false, fmt.Errorf("read shared database hidden columns: %w", err)
 	}
 	return count == 1, nil
 }

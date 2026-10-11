@@ -260,3 +260,71 @@ VALUES('kept','claude','check the build',3600000000000,5,1);`,
 		t.Fatalf("schema objects = %v, want %v", names, want)
 	}
 }
+
+// TestOneTimeScheduleFiresOnceThenLeavesWhenSeen: a one-time schedule is due at
+// its fire time, never again once fired — neither due nor an overdue problem —
+// keeps its unseen pin until its chat is opened, and is then gone; a recurring
+// schedule of the same chat stays.
+func TestOneTimeScheduleFiresOnceThenLeavesWhenSeen(t *testing.T) {
+	t.Parallel()
+	state, _ := openTestStore(t)
+	ctx := context.Background()
+	base := time.Unix(1_800_000_000, 0)
+	fireAt := base.Add(2 * time.Hour)
+	once, err := state.CreateSchedule(ctx, Schedule{
+		SessionID: "s-1", Engine: "claude", Prompt: "check once", Interval: 2 * time.Hour,
+		Once: true, NextFire: fireAt, Created: base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recurring, err := state.CreateSchedule(ctx, newTestSchedule("s-1", base, time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if due, err := state.DueSchedules(ctx, fireAt); err != nil || len(due) != 2 || !due[1].Once || due[1].ID != once {
+		t.Fatalf("DueSchedules(fire time) = %+v, %v; want the recurring then the one-time schedule", due, err)
+	}
+	if _, err := state.MarkScheduleFired(ctx, once, fireAt); err != nil {
+		t.Fatal(err)
+	}
+	later := fireAt.Add(48 * time.Hour)
+	if due, err := state.DueSchedules(ctx, later); err != nil || len(due) != 1 || due[0].ID != recurring {
+		t.Fatalf("DueSchedules(after its fire) = %+v, %v; want only the recurring schedule", due, err)
+	}
+	if problems, err := state.ScheduleProblems(ctx, later, 15*time.Minute); err != nil ||
+		len(problems) != 1 || problems[0].ID != recurring {
+		t.Fatalf("ScheduleProblems(after its fire) = %+v, %v; want only the overdue recurring schedule", problems, err)
+	}
+	fired, found, err := state.Schedule(ctx, once)
+	if err != nil || !found || !fired.Unseen || !fired.NextFire.Equal(fireAt) || !fired.LastFired.Equal(fireAt) {
+		t.Fatalf("fired one-time schedule = %+v, found %v, %v; want unseen, fired at %v", fired, found, err, fireAt)
+	}
+	if changed, err := state.ClearScheduleUnseen(ctx, "s-1"); err != nil || !changed {
+		t.Fatalf("ClearScheduleUnseen = %v, %v; want a change", changed, err)
+	}
+	all, err := state.Schedules(ctx)
+	if err != nil || len(all) != 1 || all[0].ID != recurring {
+		t.Fatalf("Schedules() after the chat was seen = %+v, %v; want only the recurring schedule", all, err)
+	}
+}
+
+// TestSharedOpenAddsScheduleOnceToARenamedFile: a file holding schedules
+// without the once column gains it at open, its rows recurring.
+func TestSharedOpenAddsScheduleOnceToARenamedFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	ctx := context.Background()
+	seedSharedState(t, path, v3Schema+hiddenRevisionDDL+";"+schedulesRenameDDL+`
+INSERT INTO schedules(session_id,engine,prompt,interval_ns,next_fire_ns,created_ns)
+VALUES('kept','claude','check the build',3600000000000,5,1);`)
+	state := OpenSharedState(ctx, paths.Values{StateDB: path})
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = state.Close() })
+	all, err := state.Schedules(ctx)
+	if err != nil || len(all) != 1 || all[0].SessionID != "kept" || all[0].Once {
+		t.Fatalf("Schedules() after adding once = %+v, %v; want the kept recurring row", all, err)
+	}
+}

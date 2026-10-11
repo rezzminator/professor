@@ -32,6 +32,10 @@ type engine struct {
 	// engineSyncAbsent is set when an uninstall found no engine-sync binary:
 	// the targets step then leaves targets.json with the Codex roles.
 	engineSyncAbsent bool
+	// processBirth reads a pid's start time in epoch seconds; nil is the
+	// native process table. A launch agent started before the pfm binary's
+	// last write runs a replaced build.
+	processBirth func(pid int) (int64, error)
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).

@@ -78,3 +78,88 @@ func TestMessageNamesIdIntervalAndPrompt(t *testing.T) {
 		t.Fatalf("Message = %q, want %q", got, want)
 	}
 }
+
+func TestParseAt(t *testing.T) {
+	t.Parallel()
+	zone := time.FixedZone("test", 2*3600)
+	now := time.Date(2026, 10, 11, 14, 30, 0, 0, zone)
+	for _, test := range []struct {
+		text string
+		want time.Time
+		err  string
+	}{
+		{text: "18:00", want: time.Date(2026, 10, 11, 18, 0, 0, 0, zone)},
+		{text: "09:15", want: time.Date(2026, 10, 12, 9, 15, 0, 0, zone)},
+		{text: "14:30", want: time.Date(2026, 10, 12, 14, 30, 0, 0, zone)},
+		{text: "2026-10-20 08:00", want: time.Date(2026, 10, 20, 8, 0, 0, 0, zone)},
+		{text: "2026-10-20T08:00", want: time.Date(2026, 10, 20, 8, 0, 0, 0, zone)},
+		{text: "2026-10-20T08:00:00Z", want: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)},
+		{text: "2026-10-11 14:30", err: "less than 1m from now"},
+		{text: "2026-01-01 00:00", err: "less than 1m from now"},
+		{text: "tomorrow", err: "HH:MM"},
+		{text: "", err: "HH:MM"},
+	} {
+		got, err := ParseAt(test.text, now)
+		if test.err != "" {
+			if err == nil || !strings.Contains(err.Error(), test.err) {
+				t.Errorf("ParseAt(%q) = %v, %v; want an error naming %q", test.text, got, err, test.err)
+			}
+			continue
+		}
+		if err != nil || !got.Equal(test.want) {
+			t.Errorf("ParseAt(%q) = %v, %v; want %v", test.text, got, err, test.want)
+		}
+	}
+}
+
+func TestScheduleWhenNamesExactlyOneTiming(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 11, 14, 30, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name     string
+		when     scheduleWhen
+		once     bool
+		interval time.Duration
+		next     time.Time
+		err      string
+	}{
+		{name: "every", when: scheduleWhen{every: "2h"}, interval: 2 * time.Hour},
+		{name: "in", when: scheduleWhen{in: "90m"}, once: true, interval: 90 * time.Minute},
+		{
+			name: "at", when: scheduleWhen{at: "16:00"}, once: true, interval: 90 * time.Minute,
+			next: time.Date(2026, 10, 11, 16, 0, 0, 0, time.UTC),
+		},
+		{name: "none", err: "exactly one"},
+		{name: "two", when: scheduleWhen{every: "2h", in: "1h"}, err: "exactly one"},
+		{name: "in too short", when: scheduleWhen{in: "30s"}, err: "--in"},
+		{name: "at unreadable", when: scheduleWhen{at: "noon"}, err: "--at"},
+	} {
+		got, err := test.when.schedule(now)
+		if test.err != "" {
+			if err == nil || !strings.Contains(err.Error(), test.err) {
+				t.Errorf("%s: %+v, %v; want an error naming %q", test.name, got, err, test.err)
+			}
+			continue
+		}
+		if err != nil || got.Once != test.once || got.Interval != test.interval ||
+			!got.NextFire.Equal(test.next) || !got.Created.Equal(now) {
+			t.Errorf(
+				"%s: %+v, %v; want once=%v interval=%v next=%v",
+				test.name,
+				got,
+				err,
+				test.once,
+				test.interval,
+				test.next,
+			)
+		}
+	}
+}
+
+func TestMessageNamesAOneTimeSchedule(t *testing.T) {
+	t.Parallel()
+	got := Message(fleetdb.Schedule{ID: 4, Once: true, Interval: time.Hour, Prompt: "check it"})
+	if want := "⏰ pfm schedule 4 (once): check it"; got != want {
+		t.Fatalf("Message = %q, want %q", got, want)
+	}
+}

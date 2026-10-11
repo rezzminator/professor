@@ -26,8 +26,11 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | --- | --- |
 | `tracetree.py` | The commands, the check, the resolver, drift, WARNINGS |
 | `tracemap.py` | The component map, imported by `tracetree.py` |
-| `tracemap_html.py` | The page writer, imported only for `map --html` |
-| `tracemap.html` | The page template, with its title, warnings and `/*TRACEMAP_DATA*/null` data slots |
+| `loom.py` | The data model of the Loom page, built from the map data, `page_data` and the incidents; imported only for `map --html` |
+| `tracemap_html.py` | The page writer for `map --html` and `book --html`: fills a shell's slots with the style, the view parts, the runtime and the data |
+| `loom.html`, `book.html` | The two page shells: title, tabs or header, and the `/*LOOM_STYLE*/`, `<!--LOOM_PARTS-->` and data slots |
+| `loom_wall.html`, `loom_custody.html`, `loom_hourglass.html`, `loom_key.html`, `book_view.html` | The views, one template and one component each, mounted by the runtime on first show |
+| `loom_dc.html`, `loom.css` | The small component runtime and the style every view shares |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
 | `SKILL.md` | The agents' command table and the check, visible to `tracer` and `sub-tracer` only |
 
@@ -120,6 +123,12 @@ The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s �
 **Function:** `cmd_map` — **Run by:** the caller
 
 `map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT]`: [the component map](#the-component-map).
+
+### book
+
+**Function:** `cmd_book` — **Run by:** the caller
+
+`book [--html OUT]`: [the swatch book](#the-swatch-book). It takes no run: it reads every run under `/tmp/{project}/tracer`.
 
 ## The check
 
@@ -254,7 +263,7 @@ The same findings ride every surface:
 - COUNTS carries `placed=` (hops, miscopied ones included) and `refused=` (nodes).
 - The `MAP` line and the first line of `map.txt` and `map` end `· ⚠ {b} nodes broke the hop contract` and `· ⚠ {k} drifted` when they apply.
 - `map --json` carries `"warnings"`, the block's lines, `[]` when none, and `"notes"`, the `·` lines.
-- `map --html` opens its ledger with a red block of the lines, ahead of the map, and a quiet block of the notes.
+- `map --html` opens its page with a red block of the lines (`role=alert`), ahead of the views, and a quiet block of the notes.
 - `write` prints to stderr for its own node and exits 0:
   - `⚠ WARNING — {k} of your hops named a path that is not the file; the kit placed them: {pairs}. Copy paths as your read printed them.` A miscopy warns here too: the node that typed the path is the one to learn.
   - `⚠ WARNING — stored with {b} hops that do not hold; your tracer sees them REJECTED and is warned`
@@ -295,7 +304,7 @@ Each part answers a probe ([Caller probes](tracer-bench.md#caller-probes)):
 
 ## The component map
 
-**Module:** `tracemap.py` (`build`, `text`, `tree`, `data`, `hub`) — **Page:** `tracemap_html.py`
+**Module:** `tracemap.py` (`build`, `text`, `tree`, `data`, `hub`) — **Page:** `loom.py`, `tracemap_html.py`
 
 `map` turns the verified hops into components and the links between them, for the model that called tracer. Rejected and drifted hops build nothing.
 
@@ -332,22 +341,29 @@ The `MAP` line reads `MAP {RUN}/map.txt — {n} components in {f} files, {c} cal
 - NAME, for `--from` and `--to`, is an exact id, else a component name, else a file or its tail, else any id containing it, ignoring case. One matching nothing or more than 6 components exits 2 and says which.
 - `--from NAME` prints the tree of everything NAME reaches, `--to NAME` everything that reaches it.
 - `--json` prints `run`, `root`, `components` (each with its first and last line, `line` and `end`), `edges`, `threads` with each thread's `walk` (each step's `line` to `b`, its `status` — `verified`, `moved`, `placed` or `followed` — the hop's flag, and its `link` from the step before — `call`, `names`, `then`, `same` within one component, null on the first), and `warnings`; with `--from` or `--to`, only that part.
-- `--html OUT` writes `tracemap.html` with the data inlined, every `<` escaped so no file text closes its script: one self-contained page that loads nothing from the network, written only when a person asks to see it.
+- `--html OUT` writes the Tracer Loom with the data inlined, every `<` escaped so no file text closes its script: one self-contained page that loads nothing from the network, written only when a person asks to see it. With `--to` or `--from` the hourglass opens on that component and the page opens on that view; a name matching several components, or both flags at once, exits 2 naming them; `--all` sets its walk-order toggle.
 
 ### The page
 
-Beside the map data the page carries what `page_data` reads from the run:
+`page_data` reads from the run what the page shows beside the map data:
 
 - the questions and `BASE`;
-- per node: its question and FROM from `{ID}.started`, its answers checked as the answers view checks them, its broken hops, its placed and followed paths;
+- per node: its question (the first Q number its card names; `questions` holds every number it names) and FROM from `{ID}.started`, its answers checked as the answers view checks them, its broken hops, its placed and followed paths, and its steps: each hop as the file and lines it stitched, its status and flag, the note the reader wrote under it, a rejected hop as a hole;
 - the nodes that started and never wrote;
 - the clock, from the run files' mtimes: `ROOT` for `new`, `{ID}.started`, `{ID}.hops`, `answers.txt` for `wait`;
-- the text of every file a shown component sits in: whole, most hops first, up to 4 MB; past that, the lines within 8 of a hop.
+- the text of every file a shown component sits in: whole, most hops first, up to 4 MB; past that, the lines within 8 of a hop; a file that cannot be read is named and drawn hatched, never dropped.
 
-It draws three parts:
+`loom.py` turns that into one model, and the page draws four views behind tabs, each mounted when first opened:
 
-- the ledger: the run, the warnings block, the evidence bar of how every hop holds, each question with its threads and their answers, every `[path:N]` a link to its line;
-- the code wall: one column per traced file, drawn to scale from its own text and grouped by directory, each thread's hops marked and its route drawn between them, solid where a call or a name in the code links two hops or they share a component, dashed and fainter for walk order only (`then`); the key says routes are the walkers' reading of the code, nothing run; zooming in reads the code itself, Fold collapses the lines no hop touches;
-- the clock: each node's bar from start to write; replay walks the threads in the order they ran.
+- the Loom wall: one column per traced file, drawn to scale from its own text and grouped by directory, each reader's hops stitched in at their lines and its route drawn between them, solid where a call or a name in the code links two hops or they share a component, dashed and fainter for walk order only (`then`); zooming in goes from the cloth through the lines to the code itself; following a reader steps its hops; a claim flies to its line; Fold collapses the lines no hop touches; replay sews the readers on the run's own clock, the playhead, the growing reader bars and the shuttles all read one frame time;
+- the chain of custody: each question, its readers, the hops of each in walk order with the lines they quote, and every claim beside the hop it cites, with its grade;
+- the hourglass: the component the map crosses at (or the one `--to` / `--from` names), what reaches it above and what it reaches below, and the readers that cross it;
+- the stitch key: every mark the other views use, drawn from the page's own drawing code.
 
-Search runs over the file text. Keys: `/` search, space replay, `←` `→` hops, `[` `]` threads, `z` Fold, `f` fit, `+` `-` zoom, `esc` clear.
+The palette is dark; the page follows no theme setting. Keys on the wall: `+` `-` zoom, `f` fit, `z` fold, `[` `]` readers, `←` `→` the followed reader's hops (pan otherwise), arrows pan, `space` replay, `esc` clear; with reduced motion the replay steps in tenths and flights jump.
+
+## The swatch book
+
+**Function:** `cmd_book` — **Page:** `tracemap_html.write_book`
+
+`book` lists every run under `/tmp/{project}/tracer`, newest first: one row per run from its `COUNTS` — id, repo, questions, wait time, nodes, hops with those held, re-addressed and worn, holes, claims and flagged answers. A run the kit cannot load (no `.hops` file, an unreadable file) is listed as `UNREADABLE — {reason}`, never left out; no runs prints `book: no runs under {root}`. `--html OUT` writes the swatch book: one swatch per run, a stitch per hop and a fringe strand per answer, sortable newest, most worn or most flagged, with the unloadable runs under the grid. It takes only `--html OUT`; any other argument exits 2 with the usage.

@@ -20,7 +20,7 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 | --- | --- | --- |
 | Lead | `templates/global/agents/tracer.md` | `sonnet`, `high` |
 | Reader | `templates/global/agents/sub-tracer.md` | `haiku`, `low` |
-| Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `tracemap.html`, `tracetree_test.py`, `SKILL.md` | — |
+| Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `loom.py`, the `loom*.html` and `book*.html` page parts with `loom.css`, `tracetree_test.py`, `SKILL.md` | — |
 | Caller's manual | `templates/global/commands/tracer/use.md`, preloaded by agent frontmatter `skills: [tracer:use]` | — |
 
 `sub-tracer` and the `tracetree` skill are visible only to `tracer` and `sub-tracer`. In the prompts, `tt` stands for `python3 $HOME/.claude/skills/tracetree/tracetree.py`.

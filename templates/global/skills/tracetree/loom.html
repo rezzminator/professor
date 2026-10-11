@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracer Loom</title>
+<style>
+/*LOOM_STYLE*/
+</style>
+</head>
+<body>
+<!--LOOM_WARNINGS-->
+<nav class="tabs" aria-label="Views">
+  <a href="#loom" data-view="loom">The Loom</a>
+  <a href="#custody" data-view="custody">Chain of custody</a>
+  <a href="#hourglass" data-view="hourglass">Hourglass</a>
+  <a href="#key" data-view="key">Stitch key</a>
+</nav>
+<noscript><p style="padding:24px">This page draws itself with JavaScript, from the run it carries; it loads nothing from the network.</p></noscript>
+<section id="view-loom" class="view" aria-label="The Loom"><div class="frame"><div class="board" id="board-wall" data-w="1680"></div></div></section>
+<section id="view-custody" class="view" aria-label="Chain of custody"><div class="frame"><div class="board" id="board-custody" data-w="1680"></div></div></section>
+<section id="view-hourglass" class="view" aria-label="Hourglass"><div class="frame"><div class="board" id="board-hourglass" data-w="1680"></div></div></section>
+<section id="view-key" class="view" aria-label="Stitch key"><div class="frame"><div class="board" id="board-key" data-w="560"></div></div></section>
+<script type="application/json" id="loom-data">/*LOOM_DATA*/null</script>
+<!--LOOM_PARTS-->
+<script>
+(function () {
+  const BOARD = { loom: 'wall', custody: 'custody', hourglass: 'hourglass', key: 'key' };
+  const run = DC.data.runs[0];
+  function show(name) {
+    if (!Object.prototype.hasOwnProperty.call(BOARD, name)) name = 'loom';
+    for (const v in BOARD) {
+      document.getElementById('view-' + v).classList.toggle('on', v === name);
+      const tab = document.querySelector('nav.tabs a[data-view="' + v + '"]');
+      if (v === name) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current');
+    }
+    DC.mount(BOARD[name]);
+    DC.fit();
+  }
+  const repo = document.createElement('span');
+  repo.className = 'repo';
+  repo.textContent = run.repo + ' · run ' + run.id;
+  document.querySelector('nav.tabs').appendChild(repo);
+  window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+  show(location.hash.slice(1) || (run.focal != null ? 'hourglass' : 'loom'));
+})();
+</script>
+</body>
+</html>

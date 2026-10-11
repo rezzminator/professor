@@ -37,13 +37,27 @@ KILL = [
 ]
 
 
-def tt(args, input=None, timeout=60):
+def tt(args, input=None, timeout=60, cwd=None):
     return subprocess.run([sys.executable, SCRIPT] + args, input=input, capture_output=True, text=True,
-                          timeout=timeout)
+                          timeout=timeout, cwd=cwd)
 
 
 def hops(node, answer, hop_lines, tail):
     return "\n".join([f"THREAD {node}: the handler's error path", "ANSWER", *answer, *hop_lines, *tail]) + "\n"
+
+
+def page_model(case, page, script):
+    """The JSON a page carries in its data script: parsed straight out of the page, so a `</` left unescaped in file
+    text would cut it short and fail here."""
+    m = re.search(r'<script type="application/json" id="' + script + '">(.*?)</script>', page, re.S)
+    case.assertIsNotNone(m, f"the page carries no {script} script")
+    return json.loads(m.group(1))
+
+
+def no_network(case, page):
+    """Nothing in the page reaches off the machine: no remote src or href, import, stylesheet font or url()."""
+    case.assertNotRegex(page, r"(src|href|action)\s*=\s*[\"']?(https?:)?//")
+    case.assertNotRegex(page, r"(?i)@import|googleapis|gstatic|url\(\s*[\"']?(https?:)?//|\bfetch\(|XMLHttpRequest|\bhttps?://")
 
 
 class Repo(unittest.TestCase):
@@ -173,6 +187,16 @@ class StartQuestionTest(Repo):
         worded = tt(["start", self.run_dir, "3", "srv/server.go:5", "which tests pin Run"])
         self.assertEqual(worded.returncode, 0, worded.stderr)
         self.assertEqual(worded.stdout.replace("started 3", "started 2"), plain.stdout)
+
+    def test_a_card_question_naming_several_numbers_prints_every_one_of_them_above_the_window(self):
+        self.ask("1. What calls Handle?\n2) What does Run wrap?\n3. Who kills the pane?\n")
+        got = tt(["start", self.run_dir, "2", "srv/server.go:5", "Q1 and Q3 — both ask for the caller (also Q3)"])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout.splitlines()[:3], ["QUESTION Q1: What calls Handle?",
+                                                       "QUESTION Q3: Who kills the pane?",
+                                                       "started 2 — app/srv/server.go"])
+        named = tt(["start", self.run_dir, "3", "srv/server.go:5", "which of Q1 or Q2 is it"])
+        self.assertEqual(named.stdout.splitlines()[0], "started 3 — app/srv/server.go")
 
     def test_start_records_its_from_and_question_for_the_map_page(self):
         tt(["start", self.run_dir, "2", "srv/server.go:5", "Q2"])
@@ -714,11 +738,9 @@ class MapTest(Repo):
                          [("app/srv/server.go::Handle", None), ("app/kill/kill.go::Run", "call"),
                           ("app/kill/kill.go::Run", "same"), ("app/log/log.go::Note", "then")])
         self.assertEqual([s["link"] for s in data["threads"]["2"]["walk"]], [None, "names"])
-        page, inlined = self.page()
-        self.assertEqual([s["link"] for s in inlined["threads"]["1"]["walk"]], [None, "call", "same", "then"])
-        self.assertIn('s.link === "then"', page)
-        self.assertIn("Routes are the walkers' reading of the code; nothing was run — dashed: walk order only, "
-                      "no call or name in the code links them.", page)
+        _, model = self.page()
+        self.assertEqual([s["ln"] for s in model["threads"][0]["steps"]], [None, "call", "same", "then"])
+        self.assertEqual([s["ln"] for s in model["threads"][1]["steps"]], [None, "names"])
 
     def test_html_is_written_only_on_request_and_loads_nothing_from_the_network(self):
         self.walk()
@@ -730,8 +752,63 @@ class MapTest(Repo):
         with open(out) as f:
             page = f.read()
         self.assertIn("app/kill/kill.go::Run", page)
-        self.assertNotRegex(page, r"(src|href)\s*=\s*[\"']?(https?:)?//")
-        self.assertNotIn("@import", page)
+        no_network(self, page)
+
+    def test_the_page_model_carries_the_components_and_links_the_views_draw(self):
+        self.walk()
+        _, model = self.page()
+        self.assertEqual(model["repo"], os.path.basename(self.root))
+        self.assertEqual([c["id"] for c in model["comps"]], ["app/kill/kill.go::Run", "app/srv/server.go::Handle"])
+        self.assertEqual([(model["comps"][e[0]]["name"], model["comps"][e[1]]["name"], e[2]) for e in model["edges"]],
+                         [("Handle", "Run", "call")])
+        self.assertEqual((model["focal"], model["all"]), (None, False))
+
+    def test_to_and_from_pick_the_hourglass_component_and_all_sets_its_toggle(self):
+        self.walk()
+        _, model = self.page(["--to", "Run", "--all"])
+        self.assertEqual((model["comps"][model["focal"]]["id"], model["all"]), ("app/kill/kill.go::Run", True))
+        _, model = self.page(["--from", "app/srv/server.go::Handle"])
+        self.assertEqual((model["comps"][model["focal"]]["name"], model["all"]), ("Handle", False))
+        out = os.path.join(self.run_dir, "none.html")
+        got = tt(["map", self.run_dir, "--html", out, "--to", "Nowhere"])
+        self.assertEqual(got.returncode, 2)
+        self.assertIn("no component matches Nowhere", got.stderr)
+        for extra, why in ((["--to", "app"], "app matches 2 components (app/kill/kill.go::Run, app/srv/server.go::Handle)"),
+                           (["--from", "Handle", "--to", "Run"], "--html centres the hourglass on one component")):
+            got = tt(["map", self.run_dir, "--html", out, *extra])
+            self.assertEqual(got.returncode, 2, extra)
+            self.assertIn(why, got.stderr)
+        self.assertFalse(os.path.exists(out))
+
+    def test_a_rejected_hop_is_a_hole_step_and_a_file_that_is_gone_is_named_not_dropped(self):
+        self.walk(extra=["a stray line of prose", "@ app/gone/gone.go:3", "> \tvanished()", "= a file no longer there",
+                         "@ app/log/log.go:4", "> \tprintln(msg)", "= the message is printed",
+                         "@ app/srv/server.go:2", "> \tghost()", "= a line no file holds"], raw=True)
+        _, model = self.page()
+        steps = model["threads"][0]["steps"]
+        self.assertEqual([(model["files"][s["f"]]["p"], s["st"]) for s in steps],
+                         [("app/srv/server.go", "verified"), ("app/kill/kill.go", "verified"), ("app/gone/gone.go", "rejected"),
+                          ("app/log/log.go", "verified"), ("app/srv/server.go", "rejected")])
+        self.assertEqual([s["c"] for s in steps][2::2], [-1, -1])
+        self.assertEqual([a["g"] for a in model["threads"][0]["answers"]], ["broke"])
+        files = {f["p"]: f for f in model["files"]}
+        self.assertTrue(files["app/gone/gone.go"]["gone"])
+        self.assertNotIn("lines", files["app/gone/gone.go"])
+        self.assertEqual(files["app/gone/gone.go"]["n"], 3)
+        self.assertEqual((files["app/srv/server.go"]["bad"], files["app/srv/server.go"]["hops"]), (1, 1))
+        self.assertNotIn("gone", files["app/srv/server.go"])
+
+    def test_every_question_a_node_names_reaches_the_page_the_first_as_its_question(self):
+        with open(os.path.join(self.run_dir, "questions"), "w") as f:
+            f.write("1. What does Handle hand on?\n2. Who kills the pane?\n3. Where is it logged?\n")
+        for node, q in (("1", "Q1 — tt start prints its text"), ("2", "Q2 and Q3 and what Run wraps (also Q6)"),
+                        ("3", "Q3"), ("4", "which tests pin Run")):
+            tt(["start", self.run_dir, node, "app/srv/server.go:3", q])
+            self.write(node, self.good(node))
+        _, model = self.page()
+        by = {t["id"]: t for t in model["threads"]}
+        self.assertEqual([(by[n]["q"], by[n]["qs"]) for n in "1234"],
+                         [(1, [1]), (2, [2, 3, 6]), (3, [3]), (None, [])])
 
     def test_wait_writes_the_text_map_beside_the_run_and_names_it(self):
         tt(["start", self.run_dir, "1", "app/srv/server.go:3"])
@@ -764,15 +841,13 @@ class MapTest(Repo):
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertLess(got.stdout.index("\napp/srv/server.go\n"), got.stdout.index("\napp/kill/kill.go\n"))
 
-    def page(self):
+    def page(self, extra=()):
         out = os.path.join(self.run_dir, "page.html")
-        got = tt(["map", self.run_dir, "--html", out])
+        got = tt(["map", self.run_dir, "--html", out, *extra])
         self.assertEqual(got.returncode, 0, got.stderr)
         with open(out, encoding="utf-8") as f:
             page = f.read()
-        m = re.search(r'<script type="application/json" id="tracemap-data">(.*?)</script>', page, re.S)
-        self.assertIsNotNone(m, "the page carries no data script")
-        return page, json.loads(m.group(1))
+        return page, page_model(self, page, "loom-data")
 
     def test_json_steps_say_how_each_hop_holds_and_components_where_they_end(self):
         self.walk(extra=["@ app/srv/server.go:3", "> \treturn kill.Run(req.Target)", "= the call again, cited at the func"],
@@ -794,34 +869,58 @@ class MapTest(Repo):
                              ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the target goes to kill.Run",
                               "@ app/kill/kill.go:5", f"> {EXEC}", "= tmux kills the pane"],
                              ["END executed: tmux kill-pane @ app/kill/kill.go:5"]))
-        _, data = self.page()
-        self.assertEqual(data["title"], os.path.basename(self.root))
-        self.assertEqual(data["questions"], {"1": "What does Handle hand on?", "2": "Who kills the pane?"})
-        node = data["nodes"]["1"]
-        self.assertEqual((node["question"], node["from"]), (2, "app/srv/server.go:3"))
-        self.assertEqual([a["flags"] for a in node["answers"]], [[], ["? `nothing at all` not in the cited file"]])
-        self.assertEqual((data["counts"]["answers"], data["counts"]["flagged"]), (2, 1))
-        self.assertLessEqual(data["times"]["new"], node["started"])
-        self.assertLessEqual(node["started"], node["written"])
-        self.assertIsNone(data["times"]["done"])
-        self.assertEqual((list(data["missing"]), list(data["nodes"])), (["2"], ["1"]))
-        self.assertEqual({f["path"]: f["lines"] for f in data["files"]},
+        _, model = self.page()
+        self.assertEqual(model["repo"], os.path.basename(self.root))
+        self.assertEqual(model["questions"], {"1": "What does Handle hand on?", "2": "Who kills the pane?"})
+        node = model["threads"][0]
+        self.assertEqual((node["id"], node["q"], node["from"]), ("1", 2, "app/srv/server.go:3"))
+        self.assertEqual([(a["g"], a["why"]) for a in node["answers"]],
+                         [("held", []), ("missing", ["? `nothing at all` not in the cited file"])])
+        self.assertEqual([c["p"] + ":" + str(c["l"]) for a in node["answers"] for c in a["cites"]],
+                         ["app/srv/server.go:7", "app/kill/kill.go:5"])
+        self.assertEqual((model["counts"]["answers"], model["counts"]["flagged"]), (2, 1))
+        self.assertEqual(node["end"][0]["k"], "executed")
+        self.assertGreaterEqual(node["s"], 0)
+        self.assertLessEqual(node["s"], node["w"])
+        self.assertEqual(model["missing"].keys(), {"2"})
+        self.assertIsNone(model["dur"])
+        self.assertEqual({f["p"]: f["lines"] for f in model["files"]},
                          {"app/srv/server.go": SERVER, "app/kill/kill.go": KILL})
 
+    def test_each_cite_is_graded_by_its_own_address_and_one_no_hop_backs_is_never_held(self):
+        wide = ["package wide", ""] + [f"// line {i}" for i in range(3, 21)]
+        path = os.path.join(self.root, "app", "wide", "wide.go")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write("\n".join(wide) + "\n")
+        self.store("1", hops("1", ["- The package is wide [app/wide/wide.go:1] and so is [app/wide/wide.go:15]",
+                                   "- Ghost lives in [app/nope/nope.go:3]",
+                                   "- Handle ends past its file [app/srv/server.go:99]",
+                                   "- Run calls `kill-pane` [app/kill/kill.go:1]"],
+                             ["@ app/wide/wide.go:1", "> package wide", "= the package line",
+                              "@ app/kill/kill.go:5", f"> {EXEC}", "= tmux kills the pane"],
+                             ["END executed: tmux kill-pane @ app/kill/kill.go:5"]))
+        _, model = self.page()
+        self.assertEqual([(a["g"], [(c["p"], c["l"], c["g"]) for c in a["cites"]]) for a in model["threads"][0]["answers"]],
+                         [("unbacked", [("app/wide/wide.go", 1, "held"), ("app/wide/wide.go", 15, "unbacked")]),
+                          ("unbacked", [("app/nope/nope.go", 3, "unbacked")]),
+                          ("unbacked", [("app/srv/server.go", 99, "unbacked")]),
+                          ("moved", [("app/kill/kill.go", 5, "moved")])])
+
     def test_file_text_that_closes_a_script_stays_inside_the_pages_data(self):
-        web = ["package web", "", "func Page() string {", '\treturn "<script>boot()</script>"', "}"]
+        web = ["package web", "", "func Page() string {", '\treturn "<script>boot()</script>"', "}",
+               f"// built in {self.root}/out and {self.root}2"]
         path = os.path.join(self.root, "app", "web", "web.go")
         os.makedirs(os.path.dirname(path))
         with open(path, "w") as f:
             f.write("\n".join(web) + "\n")
         self.write("1", hops("1", ["- Page closes its own </script> [app/web/web.go:4]"],
-                             ["@ app/web/web.go:4", f"> {web[3]}", "= the page ends its </script>"],
+                             ["@ app/web/web.go:4", f"> {web[3]}", f"= the page ends its </script> in {self.root}2"],
                              ["END returned: the markup @ app/web/web.go:4"]))
-        page, data = self.page()
-        with open(os.path.join(os.path.dirname(SCRIPT), "tracemap.html"), encoding="utf-8") as f:
-            self.assertEqual(page.count("</script>"), f.read().count("</script>"))
-        self.assertEqual(next(f["lines"] for f in data["files"] if f["path"] == "app/web/web.go"), web)
-        self.assertEqual(data["threads"]["1"]["walk"][0]["note"], "the page ends its </script>")
+        page, model = self.page()
+        self.assertNotIn("<script>boot()", page)
+        self.assertEqual(next(f["lines"] for f in model["files"] if f["p"] == "app/web/web.go"), web)
+        self.assertEqual(model["threads"][0]["steps"][0]["note"], f"the page ends its </script> in {self.root}2")
 
     def test_past_the_text_budget_a_file_carries_only_the_lines_near_its_hops(self):
         big = ["package big", "", "func Big() error {", "\treturn nil", "}"] + [f"// {i:06d} " + "x" * 80 for i in range(50000)]
@@ -831,9 +930,9 @@ class MapTest(Repo):
             f.write("\n".join(big) + "\n")
         self.write("1", hops("1", ["- Big returns nil [app/big/big.go:4]"], ["@ app/big/big.go:4", "> \treturn nil"],
                              ["END returned: nil @ app/big/big.go:4"]))
-        _, data = self.page()
-        entry = next(f for f in data["files"] if f["path"] == "app/big/big.go")
-        self.assertEqual((entry["count"], entry["lines"]), (len(big), None))
+        _, model = self.page()
+        entry = next(f for f in model["files"] if f["p"] == "app/big/big.go")
+        self.assertEqual((entry["n"], entry.get("lines")), (len(big), None))
         self.assertEqual(entry["sparse"], {str(i): big[i - 1] for i in range(1, 13)})
         self.assertLess(os.path.getsize(os.path.join(self.run_dir, "page.html")), 1024 * 1024)
 
@@ -1144,6 +1243,7 @@ class WarningsTest(Stored):
             page = f.read()
         self.assertNotIn('id="warnings"', page)
         self.assertIn(f'<section id="kitnotes" aria-label="Kit notes"><p>{MISCOPY}</p></section>', page)
+        self.assertLess(page.index('id="kitnotes"'), page.index('id="view-loom"'))
 
     def test_more_than_three_placed_paths_are_cut_with_the_count_left(self):
         self.placed_node(paths=("pkg/a/kill.go", "pkg/b/kill.go", "pkg/c/kill.go", "pkg/d/kill.go", "pkg/a/kill.go"))
@@ -1282,16 +1382,15 @@ class WarningsTest(Stored):
         with open(out) as f:
             page = f.read()
         self.assertIn('id="warnings"', page)
-        self.assertLess(page.index('id="warnings"'), page.index('id="stage"'))
+        self.assertIn('<section id="warnings" role="alert" aria-label="Warnings">', page)
+        self.assertLess(page.index('id="warnings"'), page.index('id="view-loom"'))
         self.assertIn("1 of 1 nodes broke the hop contract", page)
         self.assertIn("pkg/kill/kill.go → app/kill/kill.go", page)
-        self.assertLess(page.index('id="warnings"'), page.index('id="evidence"'))
         head = page[:page.index("</head>")]
-        for sel in (":root {", ':root:not([data-theme="light"]) {', ':root[data-theme="dark"] {'):
-            at = head.index(sel)
-            self.assertRegex(head[at:head.index("}", at)], r"--alarm: #[0-9a-f]{6}; --alarm-ink: #[0-9a-f]{6};", sel)
+        at = head.index(":root {")
+        self.assertRegex(head[at:head.index("}", at)], r"--alarm: #[0-9a-f]{6}; --alarm-ink: #[0-9a-f]{6};")
         self.assertRegex(head, r"#warnings \{[^}]*background: var\(--alarm\); color: var\(--alarm-ink\);")
-        self.assertNotRegex(page, r"(src|href)\s*=\s*[\"']?(https?:)?//")
+        no_network(self, page)
 
 
 class WriteWarnsItsOwnNodeTest(Stored):
@@ -2152,6 +2251,113 @@ class PinnedRevisionTest(Stored):
         tt(["map", self.run_dir, "--json"])
         self.assertIn("verified=1 · moved=0 · rejected=0", tt(["check", self.run_dir]).stdout)
         self.assertEqual(state(), before)
+
+
+class BookTest(Repo):
+    """`book` lists every run under this project's runs root, newest first, one swatch row each; `--html` draws them."""
+
+    def setUp(self):
+        super().setUp()
+        self.runs = os.path.join("/tmp", os.path.basename(self.root).lstrip("."), "tracer")
+        self.addCleanup(shutil.rmtree, os.path.dirname(self.runs), ignore_errors=True)
+
+    def make(self, rid, node_text=None, root=None, questions=None):
+        run = os.path.join(self.runs, rid)
+        os.makedirs(run)
+        with open(os.path.join(run, "ROOT"), "w") as f:
+            f.write((root or self.root) + "\n")
+        if questions:
+            with open(os.path.join(run, "questions"), "w") as f:
+                f.write(questions)
+        if node_text:
+            with open(os.path.join(run, "1.hops"), "w") as f:
+                f.write(node_text)
+        return run
+
+    def seed(self):
+        self.make("20261001-100000-aaaa", self.good())
+        self.make("20261003-090000-bbbb", self.good(), questions="1. What calls Handle?\n2. Who kills it?\n")
+        self.make("20261002-120000-cccc", hops("1", ["- x"], ["@ app/srv/server.go:2", "> \tghost()"],
+                                              ["END returned: x @ app/srv/server.go:5"]))
+
+    def book(self, *args):
+        return tt(["book", *args], cwd=self.root)
+
+    def test_book_lists_one_swatch_row_per_run_newest_first(self):
+        self.seed()
+        got = self.book()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        lines = got.stdout.splitlines()
+        self.assertEqual(lines[0], f"BOOK {self.runs} — 3 runs, newest first")
+        header = lines[1].split()
+        rows = [dict(zip(header, l.split())) for l in lines[2:5]]
+        self.assertEqual([r["RUN"] for r in rows], ["20261003-090000-bbbb", "20261002-120000-cccc", "20261001-100000-aaaa"])
+        self.assertEqual({r["REPO"] for r in rows}, {os.path.basename(self.root)})
+        self.assertEqual([(r["Q"], r["NODES"], r["HOPS"], r["HELD"], r["HOLES"], r["CLAIMS"]) for r in rows],
+                         [("2", "1", "1", "1", "0", "1"), ("0", "1", "1", "0", "1", "1"), ("0", "1", "1", "1", "0", "1")])
+        self.assertEqual(len(lines), 5)
+
+    def test_a_run_the_kit_cannot_load_is_listed_with_its_reason_not_dropped(self):
+        self.seed()
+        self.make("20261004-100000-dddd")
+        os.makedirs(os.path.join(self.runs, "20261005-100000-eeee"))
+        mixed = self.make("20261006-100000-ffff", self.good())
+        shutil.copy(os.path.join(mixed, "1.hops"), os.path.join(mixed, "x.hops"))
+        piped = self.make("20261007-100000-0000")
+        os.mkfifo(os.path.join(piped, "1.hops"))
+        os.symlink(os.path.join(self.runs, "20261001-100000-aaaa"), os.path.join(self.runs, "20261008-100000-1111"))
+        got = self.book()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn("8 runs, newest first", got.stdout)
+        row = {l.split()[0]: l for l in got.stdout.splitlines()[2:]}
+        self.assertRegex(row["20261006-100000-ffff"], r"  UNREADABLE — TypeError: ")
+        self.assertRegex(row["20261007-100000-0000"], r"  UNREADABLE — 1\.hops is not a regular file$")
+        self.assertRegex(row["20261008-100000-1111"], r"  UNREADABLE — a symlink, not a run directory$")
+        lines = got.stdout.splitlines()
+        self.assertIn("20261005-100000-eeee  UNREADABLE — ", next(l for l in lines if "eeee" in l))
+        self.assertRegex(next(l for l in lines if "dddd" in l), r"^20261004-100000-dddd  UNREADABLE — .*no \.hops file")
+        self.assertNotIn("TRACETREE FAILED", got.stdout + got.stderr)
+
+    def test_an_empty_runs_root_says_so_with_exit_zero_and_html_still_writes_a_page(self):
+        got = self.book()
+        self.assertEqual((got.returncode, got.stdout), (0, f"book: no runs under {self.runs}\n"))
+        out = os.path.join(self.root, "book.html")
+        again = self.book("--html", out)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        with open(out, encoding="utf-8") as f:
+            data = page_model(self, f.read(), "book-data")
+        self.assertEqual((data["book"], data["failed"]), ([], []))
+
+    def test_html_writes_the_swatch_book_page_with_every_run_and_every_failure(self):
+        self.seed()
+        self.make("20261004-100000-dddd")
+        weird = os.path.join(self.root, "a<img src=x>&b")
+        os.makedirs(weird)
+        self.make("20261006-100000-ffff", self.good(), root=weird)
+        out = os.path.join(self.root, "book.html")
+        got = self.book("--html", out)
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn(f"HTML {out}", got.stdout)
+        with open(out, encoding="utf-8") as f:
+            page = f.read()
+        data = page_model(self, page, "book-data")
+        self.assertEqual([r["id"] for r in data["book"]],
+                         ["20261006-100000-ffff", "20261003-090000-bbbb", "20261002-120000-cccc", "20261001-100000-aaaa"])
+        self.assertEqual(data["book"][0]["repo"], "a<img src=x>&b")
+        self.assertEqual([(r["id"], "no .hops file" in r["why"]) for r in data["failed"]], [("20261004-100000-dddd", True)])
+        self.assertEqual({"id", "repo", "live", "q", "dur", "broke", "comps", "edges", "nodes", "hops", "verified", "moved",
+                          "drifted", "rejected", "placed", "followed", "refused", "partial", "answers", "flagged",
+                          "recited", "badaddr", "missing"}, set(data["book"][1]))
+        self.assertEqual((data["book"][1]["q"], data["book"][2]["broke"], data["book"][2]["rejected"]), (2, 1, 1))
+        self.assertNotIn("a<img", page)
+        no_network(self, page)
+
+    def test_book_takes_only_html_and_names_its_usage_otherwise(self):
+        for args in (["--bogus"], ["--html"], ["extra"]):
+            got = self.book(*args)
+            self.assertEqual(got.returncode, 2, args)
+            self.assertIn("usage: tracetree.py", got.stderr)
+            self.assertIn("book [--html OUT]", got.stderr)
 
 
 if __name__ == "__main__":

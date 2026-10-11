@@ -29,7 +29,8 @@ description: 'MANDATORY for a tracer caller — before sending tracer questions,
 | `tt map {RUN} --from NAME` | the tree of everything NAME reaches: what you must understand before changing it |
 | `tt map {RUN} --to NAME` | the tree of everything that reaches NAME: what a change to its contract can break |
 | `tt map {RUN} --json [--from NAME] [--to NAME]` | the map, or that part of it, as data: `components`, `edges`, and `threads` with each thread's `walk` |
-| `tt map {RUN} --html OUT` | a page that draws the map and replays the run — only when the user asks to see it |
+| `tt map {RUN} --html OUT` | the Tracer Loom page: the traced files with every reader's hops, a replay of the run, the chain of custody per question, the hourglass of `--to` / `--from` — only when the user asks to see it |
+| `tt book [--html OUT]` | one line per past run under the runs root, newest first, and with `--html` the swatch book — only when the user asks for the history |
 
 NAME is a component id (`path::name`), a function or section name, a file, or a piece of an id; a name matching nothing, or too many, exits 2 and says which. `--all` adds walk-order links.
 

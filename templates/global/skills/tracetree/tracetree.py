@@ -38,10 +38,17 @@
   tracetree.py map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT]
                                         the component map built from the verified hops (tracemap.py): a text
                                         declaration, a tree below (--from) or above (--to) a component, the
-                                        map as JSON, or on request a self-contained page (tracemap_html.py) that also
-                                        carries the questions, the run's clock, each node's checked answers and the
+                                        map as JSON, or on request the Tracer Loom (loom.py, tracemap_html.py): one
+                                        self-contained page of four views — the wall of the files' true text with each
+                                        reader sewn across it, each reader's chain of custody, the hourglass around
+                                        one component (--from/--to pick it, --all sets its toggle) and the stitch key
+                                        — with the questions, the run's clock, each node's checked answers and the
                                         text of the files its hops sit in; `wait` also writes the text map to
                                         RUN/map.txt
+  tracetree.py book [--html OUT]        one swatch row per run under /tmp/{project}/tracer, newest first (id, repo,
+                                        questions, time, nodes, hops, held, moved, worn, holes, claims, flagged); a run
+                                        the kit cannot load is listed with its reason; --html OUT writes the swatch-book
+                                        page (sort by newest, most worn or most flagged) instead of the table
 
 A hop's quote is re-read from the file: found at its address it is verified, found within 30 lines or elsewhere
 in the file it is re-addressed, found nowhere it is REJECTED. A hop whose path places no file is resolved, in
@@ -88,12 +95,14 @@ it prints no node line and, beside other warnings only, one run line `⚠ run: {
 ({given} → {path}, …)`; alone it leaves `WARNINGS: none`.
 The MAP line and the first line of the map text end ` · ⚠ {n} nodes broke the hop contract` and ` · ⚠ {k} drifted` when
 they apply; `map --json` carries `"warnings": [lines]` and `"notes": [lines]`, `map --html` a red block of the warnings
-and a quiet one of the notes. `write` prints the
+and a quiet one of the notes, both above the views. `write` prints the
 same two findings to stderr for its own node, exit 0.
 A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2. Python 3 standard library only.
 """
+import contextlib
 import glob
 import hashlib
+import io
 import json
 import os
 import random
@@ -877,12 +886,14 @@ def hop_incident(files, run, side, hi, path, ln, quotes, real, how, drift):
 
 
 def verify(run, files, names, counts, drift=True):
-    """Per node: rendered hop lines (compact and full), answers, structure lines; plus every verified range."""
+    """Per node: rendered hop lines (compact and full), answers, structure lines, and `order`, every hop in the order
+    written (a broken one as its status, path, line and reason; a verified one None, its step the walk's next); plus
+    every verified range."""
     nodes, ranges = {}, []
     present = set(names)
     for name in names:
         n = {"head": f"THREAD {name}: (no THREAD line written)", "hops": [], "full": [], "answers": [],
-             "struct": [], "ok": 0, "bad": 0, "drift": 0, "seen": 0, "ended": False, "split": False, "walk": [], "unsettled": [],
+             "struct": [], "ok": 0, "bad": 0, "drift": 0, "seen": 0, "ended": False, "split": False, "walk": [], "order": [], "unsettled": [],
              "placed": [], "miscopied": [], "followed": [], "refused": False, "badnow": 0, "rej": 0}
         nodes[name] = n
         try:
@@ -920,6 +931,7 @@ def verify(run, files, names, counts, drift=True):
                     at = f" (at {gone['sha']})" if gone["sha"] else ""
                     msg = f"≈ DRIFTED {gone['shown']}:{gone['line']} — held when walked{at}; the file changed since: re-read before pasting"
                     n["hops"].append(msg); n["full"].append(msg)
+                    n["order"].append({"st": "drifted", "path": gone["shown"], "a": gone["line"], "flag": msg.split(" — ", 1)[1]})
                     continue
                 n["badnow"] += bool(bad_hop(placed))
                 if placed["status"] in ("rejected", "badaddr"):
@@ -932,6 +944,7 @@ def verify(run, files, names, counts, drift=True):
                         msg = f"✗ REJECTED {path}:{ln} — " + (f"{why}: {quotes[0].strip()[:90]}" if quotes and why.startswith("quote") else why)
                     n["bad"] += 1
                     n["hops"].append(msg); n["full"].append(msg)
+                    n["order"].append({"st": placed["status"], "path": path, "a": ln, "flag": msg.split(" — ", 1)[1]})
                     continue
                 fkey, lines, got, tag, how = placed["key"], placed["lines"], placed["got"], placed["tag"], placed["how"]
                 if placed["broke"] is not None:
@@ -966,6 +979,7 @@ def verify(run, files, names, counts, drift=True):
                           else "moved" if a != ln and quotes else "verified")
                 n["walk"].append({"t": "hop", "key": fkey, "line": a, "note": notes[0] if notes else "",
                                   "b": b, "shown": shown, "status": status, "flag": "; ".join(flag)})
+                n["order"].append(None)
                 flag = f"   ({'; '.join(flag)})" if flag else ""
                 addr = f"{shown}:{a}" if a == b else f"{shown}:{a}-{b}"
                 text = lines[a - 1].strip()
@@ -1540,26 +1554,39 @@ def cmd_write(run, name):
                          f"and is warned\n")
 
 
+def question_numbers(question):
+    """Every question number a card's QUESTION names, in the order it names them, each once: the numbers of
+    `Q1 — why`, `Q1 and Q2 (also Q6)`. A QUESTION that does not open with a Q{n} names none."""
+    if not re.match(r"\s*[Qq]\d+\b", question):
+        return []
+    got = []
+    for m in re.finditer(r"\b[Qq](\d+)\b", question):
+        if int(m.group(1)) not in got:
+            got.append(int(m.group(1)))
+    return got
+
+
 def question_line(run, question):
-    """`QUESTION Q{n}: {text}` for a card whose QUESTION is Q{n}, the text from {RUN}/questions; none for any other
-    QUESTION. A number the file lacks and a file that cannot be read are each named, never left out."""
-    m = re.fullmatch(r"[Qq](\d+)", question.strip())
-    if not m:
+    """One `QUESTION Q{n}: {text}` line per question number a card's QUESTION names, the text from {RUN}/questions;
+    none for a QUESTION that names no number. A number the file lacks and a file that cannot be read are each named,
+    never left out."""
+    nums = question_numbers(question)
+    if not nums:
         return None
-    n, path = int(m.group(1)), os.path.join(run, "questions")
+    path = os.path.join(run, "questions")
     try:
         with open(path, encoding="utf-8") as f:
             got = parse_questions(f.read())
     except FileNotFoundError:
-        return f"QUESTION Q{n}: (not in {path})"
+        return "\n".join(f"QUESTION Q{n}: (not in {path})" for n in nums)
     except OSError as e:
-        return f"QUESTION Q{n}: (cannot read {path}: {e})"
-    return f"QUESTION Q{n}: {got[n]}" if n in got else f"QUESTION Q{n}: (not in {path})"
+        return "\n".join(f"QUESTION Q{n}: (cannot read {path}: {e})" for n in nums)
+    return "\n".join(f"QUESTION Q{n}: {got[n]}" if n in got else f"QUESTION Q{n}: (not in {path})" for n in nums)
 
 
 def cmd_start(run, name, at, question=""):
     """Register node ID as running ({ID}.started, holding `FROM<tab>QUESTION` for the map page) and print its FROM line
-    with the 40 lines after it, numbered; above them the card's question when its QUESTION is Q{n}."""
+    with the 40 lines after it, numbered; above them each question the card's QUESTION opens by naming (Q{n})."""
     if not NODE_ID.fullmatch(name):
         fail(f"ID {name!r} is not dotted numbers like 3 or 3.1")
     run = os.path.abspath(run)
@@ -1779,32 +1806,44 @@ def run_file(run, name, read=False):
         return None
 
 
-def page_data(loaded, data):
+def page_data(loaded, data, text=True):
     """What the map page draws beside the map: the questions, BASE, the run's clock, COUNTS with the answers checked,
-    each node's checked answers, structure lines and broken hops, the nodes that started and never wrote, and the text
-    of every file a shown component sits in — whole, the files with the most hops first, until PAGE_TEXT_MAX bytes;
-    past it only the lines within PAGE_CONTEXT of a hop. Times are mtimes: `new` wrote ROOT, `start` {ID}.started,
-    `write` {ID}.hops, `wait` answers.txt; one that cannot be read is null."""
+    each node's checked answers (each with the nodes that broke the hop contract it rests on, as the answers view
+    marks them), structure lines, its hops in order as `steps` (a broken one a hole with no component) and broken hops, the nodes that started and never wrote, and with
+    `text` the text of every file a shown component sits in — whole, the files with the most hops first, until
+    PAGE_TEXT_MAX bytes; past it only the lines within PAGE_CONTEXT of a hop. A node's `questions` are every Q number
+    its QUESTION names, `question` the first. Times are mtimes: `new` wrote ROOT, `start` {ID}.started, `write`
+    {ID}.hops, `wait` answers.txt; one that cannot be read is null."""
     run, root, names, files, nodes, ranges, counts = loaded
     counts = dict(counts)
     out = {}
     for name in names:
         n = nodes[name]
         rec = (run_file(run, name + ".started", read=True) or "").split("\n")[0].split("\t")
-        q = re.fullmatch(r"[Qq](\d+)", rec[1].strip()) if len(rec) > 1 else None
+        nums = question_numbers(rec[1]) if len(rec) > 1 else []
         answers = []
         for ans in n["answers"]:
             text, flags, moves = check_answer(ans, files, ranges)
             counts["answers"] += 1
             counts["flagged"] += bool(flags)
             counts["recited"] += bool(moves)
-            answers.append({"text": text, "flags": flags, "moves": moves})
+            answers.append({"text": text, "flags": flags, "moves": moves, "broke": rested_on(text, files, nodes, name)})
         broken = [{"status": BROKEN_STATUS[m.group(1)], "path": m.group(2), "line": int(m.group(3)), "text": line}
                   for line in n["hops"] for m in [BROKEN.match(line)] if m]
+        walk = list(data["threads"].get(name, {}).get("walk", []))
+        steps = []
+        for hole in n["order"]:
+            if hole:
+                steps.append({"path": hole["path"], "c": None, "a": hole["a"], "b": hole["a"], "st": hole["st"], "ln": None,
+                              "note": "", "flag": hole["flag"]})
+            elif walk:
+                w = walk.pop(0)
+                steps.append({"path": w["c"].split("::")[0], "c": w["c"], "a": w["line"], "b": w["b"], "st": w["status"],
+                              "ln": w["link"], "note": w["note"], "flag": w["flag"]})
         out[name] = {"thread": data["threads"].get(name, {}).get("thread", n["head"]),
-                     "question": int(q.group(1)) if q else None, "from": rec[0] or None,
+                     "question": nums[0] if nums else None, "questions": nums, "from": rec[0] or None,
                      "started": run_file(run, name + ".started"), "written": run_file(run, name + ".hops"),
-                     "answers": answers, "struct": n["struct"], "verified": n["ok"], "broken": broken,
+                     "answers": answers, "struct": n["struct"], "verified": n["ok"], "broken": broken, "steps": steps,
                      "placed": [list(p) for p in n["placed"]],
                      "miscopied": [list(p) for p in n["miscopied"]], "followed": [list(p) for p in n["followed"]],
                      "refused": n["refused"]}
@@ -1821,7 +1860,7 @@ def page_data(loaded, data):
         for s in th["walk"]:
             hops.setdefault(s["c"].split("::")[0], set()).update(range(s["line"], s["b"] + 1))
     shown, spent = [], 0
-    for rel in sorted(hops, key=lambda r: (-len(hops[r]), r)):
+    for rel in sorted(hops, key=lambda r: (-len(hops[r]), r)) if text else ():
         lines = files.lines(rel)
         if lines is None:
             continue
@@ -1849,10 +1888,18 @@ def cmd_map(run, opts):
     show_all = opts["--all"]
     try:
         if opts["--html"]:
+            import loom
             import tracemap_html
             out = os.path.abspath(opts["--html"])
-            data = dict(tracemap.data(g, True, tracemap.focus(g, opts["--from"], opts["--to"], True)), warnings=inc["lines"], notes=inc["notes"])
-            tracemap_html.write(dict(data, **page_data(loaded, data)), out)
+            data = dict(tracemap.data(g, True, None), warnings=inc["lines"], notes=inc["notes"])
+            named = opts["--from"] or opts["--to"]
+            if opts["--from"] and opts["--to"]:
+                raise tracemap.MapError("--html centres the hourglass on one component: give --from or --to, not both")
+            hits = tracemap.resolve(g, named) if named else [None]
+            if len(hits) > 1:
+                raise tracemap.MapError(f"{named} matches {len(hits)} components ({', '.join(hits)}) — name one by its id")
+            focal = hits[0]
+            tracemap_html.write(loom.model(os.path.basename(run), root, data, page_data(loaded, data), inc, focal, show_all), out)
             print(f"HTML {out} — open it in a browser")
         elif opts["--json"]:
             import json
@@ -1869,10 +1916,106 @@ def cmd_map(run, opts):
         fail(f"cannot write {opts['--html']}: {e}")
 
 
+RUN_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}")
+BOOK_COLUMNS = (("RUN", "id"), ("REPO", "repo"), ("Q", "q"), ("TIME", "dur"), ("NODES", "nodes"), ("HOPS", "hops"),
+                ("HELD", "verified"), ("MOVED", "moved"), ("WORN", "drifted"), ("HOLES", "rejected"),
+                ("CLAIMS", "answers"), ("FLAGGED", "flagged"))
+
+
+def swatch(run):
+    """One run's swatch: its id, repository, questions, running time and every count the Loom's swatch weaves from.
+    Raises Unreadable with the kit's own reason when the run cannot be loaded; a symlinked run, or a run holding
+    anything but files and directories (a FIFO would block the read), is refused before any read."""
+    if os.path.islink(run):
+        raise Unreadable("a symlink, not a run directory")
+    try:
+        odd = [e.name for e in os.scandir(run) if not e.is_file(follow_symlinks=False) and not e.is_dir(follow_symlinks=False)]
+    except OSError as e:
+        raise Unreadable(f"{type(e).__name__}: {e}")
+    if odd:
+        raise Unreadable(f"{min(odd)} is not a regular file")
+    err = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        try:
+            loaded = load(run)
+            inc = incidents(loaded)
+            g = tracemap.build(loaded[0], loaded[1], loaded[2], loaded[4], loaded[3])
+            data = tracemap.data(g, True, None)
+            pd = page_data(loaded, data, text=False)
+        except SystemExit:
+            why = [l for l in err.getvalue().splitlines() if l.strip()]
+            raise Unreadable(re.sub(r"^TRACETREE FAILED — ", "", why[-1]) if why else "the kit could not load it")
+        except Exception as e:  # any run the kit cannot load is a listed reason, never the end of the book
+            raise Unreadable(f"{type(e).__name__}: {e}")
+    root, c, t0 = loaded[1], pd["counts"], pd["times"]["new"] or 0
+    done = pd["times"]["done"]
+    return {"id": os.path.basename(run), "repo": os.path.basename(root.rstrip("/")) or root, "live": os.path.isdir(root),
+            "q": len(pd["questions"]), "dur": round(done - t0, 1) if done else None, "broke": inc["broke"],
+            "comps": len(data["components"]), "edges": len(data["edges"]),
+            **{k: c.get(k, 0) for k in ("nodes", "hops", "verified", "moved", "drifted", "rejected", "placed", "followed",
+                                        "refused", "partial", "answers", "flagged", "recited", "badaddr", "missing")}}
+
+
+class Unreadable(Exception):
+    """A run the kit cannot load: the message is its reason, listed beside the book, never dropped."""
+
+
+def book_text(root, rows, failed):
+    """The book as a plain table, newest first, the runs the kit could not load among them with their reason."""
+    if not rows and not failed:
+        return f"book: no runs under {root}\n"
+
+    def cell(row, key):
+        if key == "dur":
+            return "-" if row["dur"] is None else f"{row['dur']:g}s"
+        return str(row[key])
+
+    table = [[h for h, _ in BOOK_COLUMNS]] + [[cell(r, k) for _, k in BOOK_COLUMNS] for r in rows]
+    width = [max(len(row[i]) for row in table) for i in range(len(BOOK_COLUMNS))]
+    lines = ["  ".join(c.ljust(w) for c, w in zip(row, width)).rstrip() for row in table]
+    entries = list(zip((r["id"] for r in rows), lines[1:])) + [(f["id"], f"{f['id']}  UNREADABLE — {f['why']}") for f in failed]
+    out = [f"BOOK {root} — {len(entries)} runs, newest first", lines[0]]
+    out += [text for _, text in sorted(entries, key=lambda e: e[0], reverse=True)]
+    return "\n".join(out) + "\n"
+
+
+def cmd_book(opts):
+    """Every run under this project's runs root, newest first, as one swatch row each; an unloadable run is listed with
+    its reason. With --html OUT the swatch-book page is written instead of the table."""
+    root = os.path.join("/tmp", project_name(os.getcwd()), "tracer")
+    try:
+        ids = sorted((d for d in os.listdir(root) if RUN_ID.fullmatch(d) and os.path.isdir(os.path.join(root, d))),
+                     reverse=True)
+    except FileNotFoundError:
+        ids = []
+    except OSError as e:
+        fail(f"cannot list {root}: {e}")
+    rows, failed = [], []
+    for rid in ids:
+        try:
+            rows.append(swatch(os.path.join(root, rid)))
+        except Unreadable as e:
+            failed.append({"id": rid, "why": str(e)})
+    if opts["--html"]:
+        import tracemap_html
+        out = os.path.abspath(opts["--html"])
+        try:
+            tracemap_html.write_book({"root": root, "book": rows, "failed": failed}, out)
+        except OSError as e:
+            fail(f"cannot write {opts['--html']}: {e}")
+        print(f"HTML {out} — open it in a browser")
+    else:
+        sys.stdout.write(book_text(root, rows, failed))
+
+
 def main():
     a = sys.argv[1:]
-    if len(a) < 2 or a[0] not in ("new", "start", "check", "wait", "write", "map", "read", "show"):
-        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...]")
+    if not a or a[0] not in ("new", "start", "check", "wait", "write", "map", "read", "show", "book") or (len(a) < 2 and a[0] != "book"):
+        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT]")
+    if a[0] == "book":
+        if not (len(a) == 1 or (len(a) == 3 and a[1] == "--html" and not a[2].startswith("--"))):
+            fail("book takes only --html OUT — usage: tracetree.py book [--html OUT]")
+        return cmd_book({"--html": a[2] if len(a) == 3 else None})
     if a[0] == "new":
         seek, questions, roots, i = None, False, [], 1
         while i < len(a):

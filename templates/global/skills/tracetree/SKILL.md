@@ -21,7 +21,8 @@ Run `python3 $HOME/.claude/skills/tracetree/tracetree.py {command}`, the path wr
 | `check RUN` | tracer | The answers view: each node's ANSWER lines, cites checked against the verified hops |
 | `check RUN --hops [ID]` | tracer | Every hop of the run, or of `ID`'s subtree, one line each, re-read from disk |
 | `check RUN --full [ID]` | tracer | Every hop with every line of its quoted range, numbered |
-| `map RUN [--from NAME \| --to NAME] [--all] [--json \| --html OUT]` | tracer's caller | The component map from the verified hops (`tracemap.py`): a text declaration, the tree below (`--from`) or above (`--to`) a component, JSON, or on request a self-contained page (`tracemap_html.py`) that adds the questions, each node's checked answers, the run's clock and the traced files' text; `wait` writes the text map to `RUN/map.txt` and prints a `MAP` line |
+| `map RUN [--from NAME \| --to NAME] [--all] [--json \| --html OUT]` | tracer's caller | The component map from the verified hops (`tracemap.py`): a text declaration, the tree below (`--from`) or above (`--to`) a component, JSON, or on request the Tracer Loom, one self-contained page (`loom.py`, `tracemap_html.py`) with four views: the Loom wall of the traced files with every reader's hops sewn in and a replay of the run, the chain of custody from each question to the line behind each claim, the hourglass of the `--to` / `--from` component (`--all` shows walk-order links) and the stitch key; `wait` writes the text map to `RUN/map.txt` and prints a `MAP` line |
+| `book [--html OUT]` | tracer's caller | One row per run under `/tmp/{project}/tracer`, newest first: id, repo, questions, wait time, nodes and the hop tallies (held, re-addressed, worn, holes), claims and flagged answers; a run the kit cannot load is listed with its reason; `--html OUT` writes the swatch book, one swatch per run, sortable newest, most worn or most flagged |
 
 ## The check
 

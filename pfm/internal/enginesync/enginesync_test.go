@@ -50,17 +50,10 @@ func TestResolveOrder(t *testing.T) {
 	stableUnderHome := filepath.Join(home, ".local", "share", "engine-sync", "bin", "engine-sync")
 	stableUnderXDG := filepath.Join(root, "xdg", "engine-sync", "bin", "engine-sync")
 	stableUnderOwnHome := filepath.Join(root, "own", "bin", "engine-sync")
-	notExecutable := filepath.Join(root, "plain", "engine-sync")
 	fakeBinary(t, override, "", "", 0)
 	fakeBinary(t, stableUnderHome, "", "", 0)
 	fakeBinary(t, stableUnderXDG, "", "", 0)
 	fakeBinary(t, stableUnderOwnHome, "", "", 0)
-	if err := os.MkdirAll(filepath.Dir(notExecutable), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(notExecutable, []byte("#!/bin/sh\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	cases := []struct {
 		name string
 		env  map[string]string
@@ -68,11 +61,6 @@ func TestResolveOrder(t *testing.T) {
 	}{
 		{name: "an executable override wins", env: map[string]string{EnvBin: override}, want: override},
 		{name: "no override takes the stable path under home", env: nil, want: stableUnderHome},
-		{
-			name: "an override that is not executable falls to the stable path",
-			env:  map[string]string{EnvBin: notExecutable},
-			want: stableUnderHome,
-		},
 		{
 			name: "XDG_DATA_HOME when absolute",
 			env:  map[string]string{envXDGDataHome: filepath.Join(root, "xdg")},
@@ -100,7 +88,23 @@ func TestResolveOrder(t *testing.T) {
 	}
 }
 
-func TestResolveUnavailableNamesTheStablePathAndTheOverride(t *testing.T) {
+func TestResolveRefusesANonExecutableOverrideNamingIt(t *testing.T) {
+	root := t.TempDir()
+	notExecutable := filepath.Join(root, "dev-engine-sync")
+	if err := os.WriteFile(notExecutable, []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stable := filepath.Join(root, ".local", "share", "engine-sync", "bin", "engine-sync")
+	fakeBinary(t, stable, "", "", 0)
+	runner := Runner{Env: &paths.MapEnv{Values: map[string]string{EnvBin: notExecutable}}, Home: root}
+	got, err := runner.Resolve()
+	var unavailable *UnavailableError
+	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), notExecutable) {
+		t.Fatalf("Resolve() = %q, %v; want an *UnavailableError naming %s", got, err, notExecutable)
+	}
+}
+
+func TestResolveUnavailableNamesTheOverride(t *testing.T) {
 	root := t.TempDir()
 	missing := filepath.Join(root, "dev", "engine-sync")
 	runner := Runner{Env: &paths.MapEnv{Values: map[string]string{EnvBin: missing}}, Home: root}
@@ -109,8 +113,7 @@ func TestResolveUnavailableNamesTheStablePathAndTheOverride(t *testing.T) {
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("Resolve() error = %v, want *UnavailableError", err)
 	}
-	stable := filepath.Join(root, ".local", "share", "engine-sync", "bin", "engine-sync")
-	if want := "engine-sync binary unavailable: " + stable + ": "; !strings.HasPrefix(err.Error(), want) {
+	if want := "engine-sync binary unavailable: " + missing + ": "; !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("error = %q, want prefix %q", err, want)
 	}
 	if !strings.Contains(err.Error(), EnvBin+"="+missing) {

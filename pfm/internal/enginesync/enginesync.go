@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	// EnvBin names a dev or fence build that wins over the stable path when it
-	// is an executable regular file. It is never linked anywhere.
+	// EnvBin names a dev or fence build that, when set, replaces the stable
+	// path: it must be an executable regular file, else Resolve fails naming
+	// it. It is never linked anywhere.
 	EnvBin = "ENGINE_SYNC_BIN"
 	// EnvHome overrides {engine-sync home} when absolute.
 	EnvHome          = "ENGINE_SYNC_HOME"
@@ -45,8 +46,8 @@ type Runner struct {
 	ChildEnv []string
 }
 
-// UnavailableError is the binary found neither at $ENGINE_SYNC_BIN nor at the
-// stable path. Its text is the interface's: every caller shows it as a
+// UnavailableError is the binary not executable at $ENGINE_SYNC_BIN when it is
+// set, else at the stable path. Its text is the interface's: every caller shows it as a
 // failure — a failed install step, a failing doctor row, exit 1 — and never
 // as a skip.
 type UnavailableError struct {
@@ -115,33 +116,27 @@ func StablePath(env paths.Env, home string) string {
 	return filepath.Join(DataHome(env, home), "bin", binaryName)
 }
 
-// Resolve returns the binary to run: $ENGINE_SYNC_BIN when it names an
-// executable regular file, else the stable path when it does. Neither is an
-// *UnavailableError naming the stable path; a set override that is not
-// executable is part of its cause, never silently passed over.
+// Resolve returns the binary to run: $ENGINE_SYNC_BIN when set, else the
+// stable path. Each must name an executable regular file; a set override that
+// does not is an *UnavailableError naming the override path, never silently
+// passed over for the stable binary.
 func (runner Runner) Resolve() (string, error) {
 	home, err := runner.home()
 	if err != nil {
 		return "", err
 	}
 	env := runner.env()
-	var override error
 	if bin := env.Get(EnvBin); bin != "" {
-		err := executableFile(bin)
-		if err == nil {
-			return bin, nil
+		if err := executableFile(bin); err != nil {
+			return "", &UnavailableError{Path: bin, Cause: fmt.Errorf("%s=%s: %w", EnvBin, bin, err)}
 		}
-		override = fmt.Errorf("%s=%s: %w", EnvBin, bin, err)
+		return bin, nil
 	}
 	stable := StablePath(env, home)
-	stableErr := executableFile(stable)
-	if stableErr == nil {
-		return stable, nil
+	if err := executableFile(stable); err != nil {
+		return "", &UnavailableError{Path: stable, Cause: err}
 	}
-	if override != nil {
-		stableErr = fmt.Errorf("%w; %w", stableErr, override)
-	}
-	return "", &UnavailableError{Path: stable, Cause: stableErr}
+	return stable, nil
 }
 
 // executableFile reports why path is not an executable regular file; a link

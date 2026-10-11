@@ -3,7 +3,7 @@ name: flights-lander
 description: 'FLIGHTS-ONLY — spawned once per flight by the root flights-foreman, or the main chat acting as root: every project''s checks, one whole-diff review, adversarial tests, its own fixes. Pass the flight directory, each project''s testing manual path, standing rules, worktree. flights-foreman → here → the landing. Returns PASS, FIXED or FAIL, each project''s last full-run verdict line, any residual.'
 visibility:
   visible-to:
-    include: [main, flights-foreman]
+    include: [main, flights-foreman, foreman-pro]
 model: opus
 effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact

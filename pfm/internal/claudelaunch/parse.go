@@ -187,17 +187,31 @@ func parseHooks(raw any) ([]Hook, error) {
 					return nil, fmt.Errorf("%s: expected command string", event)
 				}
 				async, _ := command["async"].(bool)
-				words := strings.Fields(text)
-				name := ""
-				if len(words) != 0 {
-					name = words[len(words)-1]
-				}
-				if name == "usage-hook" {
-					name = "usage"
-				}
-				result = append(result, Hook{Event: event, Matcher: matcher, Command: text, Name: name, Async: async})
+				result = append(
+					result,
+					Hook{Event: event, Matcher: matcher, Command: text, Name: parsedHookName(text), Async: async},
+				)
 			}
 		}
 	}
 	return result, nil
+}
+
+// parsedHookName is a rendered command's registry name: its last word, read
+// before a fail-open wrapper's " || { … }" tail, where the registry spells two
+// rows apart from that word.
+func parsedHookName(command string) string {
+	head, _, _ := strings.Cut(command, " || { ")
+	words := strings.Fields(head)
+	if len(words) == 0 {
+		return ""
+	}
+	switch name := words[len(words)-1]; name {
+	case "usage-hook":
+		return "usage"
+	case "intake":
+		return hookTracerIntake
+	default:
+		return name
+	}
 }

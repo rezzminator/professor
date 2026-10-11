@@ -209,12 +209,40 @@ func containsFlagPair(args []string, key, value string) bool {
 
 func shellWords(t *testing.T, run string) []string {
 	t.Helper()
-	run, _, _ = strings.Cut(run, " || ")
-	output, err := exec.Command("sh", "-c", "set -- "+run+"; printf '%s\\000' \"$@\"").Output()
+	output, err := exec.Command("sh", "-c", "set -- "+launchHead(run)+"; printf '%s\\000' \"$@\"").Output()
 	if err != nil {
 		t.Fatalf("parse shell launch: %v", err)
 	}
 	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+}
+
+// launchHead is a launch line up to its fallback tail, the first " || " outside
+// quotes: a quoted " || ", as in a hook command inside the --settings JSON, is
+// part of a word.
+func launchHead(run string) string {
+	var quote rune
+	escaped := false
+	for index, character := range run {
+		switch {
+		case escaped:
+			escaped = false
+		case quote == '\'':
+			if character == '\'' {
+				quote = 0
+			}
+		case character == '\\':
+			escaped = true
+		case quote == '"':
+			if character == '"' {
+				quote = 0
+			}
+		case character == '\'' || character == '"':
+			quote = character
+		case strings.HasPrefix(run[index:], " || "):
+			return run[:index]
+		}
+	}
+	return run
 }
 
 func parsedShell(t *testing.T, run string) claudelaunch.Parsed {

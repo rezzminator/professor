@@ -146,7 +146,7 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 
 ### intake
 
-**Function:** `cmd_intake` — **Run by:** a PreToolUse hook on `Agent|Task` that a settings file wires to `python3 $HOME/.claude/skills/tracetree/tracetree.py intake`
+**Function:** `cmd_intake` — **Run by:** pfm's launch hook `tracer-intake` (`claudelaunch.HookTemplates`, [hooks.md](../hooks/hooks.md#launch-time-claude-hooks-pfm-owned)): a PreToolUse hook on `Agent|Task`, running `python3 $HOME/.claude/skills/tracetree/tracetree.py intake` in every Claude session pfm launches
 
 `intake` reads the hook payload on stdin. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets its run opened, with ROOT taken from the brief's `Repo root:` line or else the hook's cwd, and its questions stored.
 

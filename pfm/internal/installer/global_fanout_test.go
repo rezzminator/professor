@@ -320,3 +320,56 @@ func TestReportGlobalAgentsWithoutEngineSyncIsAFailingRow(t *testing.T) {
 		t.Fatalf("output = %q, want prefix %q", output.String(), want)
 	}
 }
+
+// TestGlobalWiringPreservesEntriesThatAreNotProvenCopies pins every registry
+// door: a user's edited file at a shipped command name and a user-built
+// directory at a shipped skill name survive install and are named as
+// conflicts, while byte-equal copies are replaced by the links.
+func TestGlobalWiringPreservesEntriesThatAreNotProvenCopies(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	var output bytes.Buffer
+	installer, first, _ := globalFanoutEngine(t, home, true, &output)
+	repo := filepath.Join(home, "blueprint")
+	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "copied.md"), "shipped\n")
+	writeFixture(
+		t,
+		filepath.Join(repo, "templates", "global", "skills", "copied", "SKILL.md"),
+		"---\nname: copied\n---\n",
+	)
+	writeFixture(t, filepath.Join(first, "commands", "alpha.md"), "my edited command\n")
+	writeFixture(t, filepath.Join(first, "skills", "beta", "SKILL.md"), "my own skill\n")
+	writeFixture(t, filepath.Join(first, "skills", "beta", "notes.md"), "mine\n")
+	writeFixture(t, filepath.Join(first, "commands", "copied.md"), "shipped\n")
+	writeFixture(t, filepath.Join(first, "skills", "copied", "SKILL.md"), "---\nname: copied\n---\n")
+
+	if err := installer.wireGlobalCommands(); err != nil {
+		t.Fatalf("wireGlobalCommands: %v", err)
+	}
+	if err := installer.wireGlobalSkills(); err != nil {
+		t.Fatalf("wireGlobalSkills: %v", err)
+	}
+
+	for path, want := range map[string]string{
+		filepath.Join(first, "commands", "alpha.md"):       "my edited command\n",
+		filepath.Join(first, "skills", "beta", "SKILL.md"): "my own skill\n",
+		filepath.Join(first, "skills", "beta", "notes.md"): "mine\n",
+	} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("%s = %q, %v; want it preserved as %q", path, got, err, want)
+		}
+	}
+	for _, name := range []string{
+		filepath.Join(first, "commands", "alpha.md"),
+		filepath.Join(first, "skills", "beta"),
+	} {
+		if !strings.Contains(output.String(), "CONFLICT "+name) || !strings.Contains(output.String(), "preserved") {
+			t.Fatalf("install output does not name the conflict %s:\n%s", name, output.String())
+		}
+	}
+	assertFanoutLink(t, filepath.Join(first, "commands", "copied.md"),
+		filepath.Join(repo, "templates", "global", "commands", "copied.md"))
+	assertFanoutLink(t, filepath.Join(first, "skills", "copied"),
+		filepath.Join(repo, "templates", "global", "skills", "copied"))
+}

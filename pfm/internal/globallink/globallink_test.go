@@ -144,16 +144,15 @@ func TestClassifyStates(t *testing.T) {
 
 	t.Run("dir-kind copy is replaceable, unlike a dir-kind conflict", func(t *testing.T) {
 		target := filepath.Join(root, "dir-copy", "pcm")
-		if err := os.MkdirAll(filepath.Join(target, "nested"), 0o755); err != nil {
-			t.Fatal(err)
-		}
 		dirSource := filepath.Join(sourceRepo, "templates", "global", "skills", "pcm")
+		writeTree(t, dirSource, map[string]string{"SKILL.md": "skill\n", "nested/a.md": "a\n"})
+		writeTree(t, target, map[string]string{"SKILL.md": "skill\n", "nested/a.md": "a\n"})
 		state, _, err := ClassifyLink(target, dirSource, sourceRepo, Dir)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if state != Copy {
-			t.Fatalf("state=%s, want copy for a same-shape directory", state)
+			t.Fatalf("state=%s, want copy for a byte-equal directory", state)
 		}
 	})
 }
@@ -332,5 +331,135 @@ func TestApplyKeepsPolicyLinkVisibleDuringRepoint(t *testing.T) {
 	case err := <-observations:
 		t.Fatalf("policy reader observed a missing link during repoint: %v", err)
 	default:
+	}
+}
+
+func writeTree(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestClassifyRealEntryIsCopyOnlyWhenProven pins that a plain file or
+// directory under a shipped name is ours to replace only when it is a proven
+// copy of its source; anything else is a Conflict that Apply leaves alone.
+func TestClassifyRealEntryIsCopyOnlyWhenProven(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	fileSource := filepath.Join(repo, "cmd.md")
+	dirSource := filepath.Join(repo, "skill")
+	writeTree(t, repo, map[string]string{"cmd.md": "shipped\n"})
+	writeTree(t, dirSource, map[string]string{"SKILL.md": "shipped\n", "ref/a.md": "a\n"})
+	cases := []struct {
+		name   string
+		kind   Kind
+		source string
+		files  map[string]string
+		want   State
+	}{
+		{"edited file", File, fileSource, map[string]string{"": "mine\n"}, Conflict},
+		{"equal file", File, fileSource, map[string]string{"": "shipped\n"}, Copy},
+		{"user-built directory", Dir, dirSource, map[string]string{"SKILL.md": "mine\n"}, Conflict},
+		{
+			"edited file in directory",
+			Dir,
+			dirSource,
+			map[string]string{"SKILL.md": "shipped\n", "ref/a.md": "b\n"},
+			Conflict,
+		},
+		{
+			"directory with an extra file",
+			Dir,
+			dirSource,
+			map[string]string{"SKILL.md": "shipped\n", "ref/a.md": "a\n", "mine.md": "x\n"},
+			Conflict,
+		},
+		{"directory missing a file", Dir, dirSource, map[string]string{"SKILL.md": "shipped\n"}, Conflict},
+		{"equal directory", Dir, dirSource, map[string]string{"SKILL.md": "shipped\n", "ref/a.md": "a\n"}, Copy},
+	}
+	for index, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := filepath.Join(base, "target", string(rune('a'+index)), "entry")
+			if tc.kind == File {
+				writeTree(t, filepath.Dir(target), map[string]string{"entry": tc.files[""]})
+			} else {
+				writeTree(t, target, tc.files)
+			}
+			state, _, err := ClassifyLink(target, tc.source, repo, tc.kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state != tc.want {
+				t.Fatalf("state=%s, want %s", state, tc.want)
+			}
+			if tc.want == Conflict {
+				if err := Apply(target, tc.source, state); err != nil {
+					t.Fatal(err)
+				}
+				if info, err := os.Lstat(target); err != nil || info.Mode()&os.ModeSymlink != 0 {
+					t.Fatalf("conflict was replaced: %v %v", info, err)
+				}
+			}
+		})
+	}
+}
+
+// TestApplyCopyReplacesByRenameNeverAbsent pins that replacing a proven copy
+// (file or directory) with the link is a rename over the target: a reader
+// polling the target while Apply runs never sees it missing.
+func TestApplyCopyReplacesByRenameNeverAbsent(t *testing.T) {
+	for _, kind := range []Kind{File, Dir} {
+		base := t.TempDir()
+		source := filepath.Join(base, "src")
+		target := filepath.Join(base, "dst")
+		if kind == File {
+			writeTree(t, base, map[string]string{"src": "shipped\n"})
+		} else {
+			writeTree(t, source, map[string]string{"SKILL.md": "shipped\n"})
+		}
+		for i := 0; i < 300; i++ {
+			if kind == File {
+				writeTree(t, base, map[string]string{"dst": "shipped\n"})
+			} else {
+				writeTree(t, target, map[string]string{"SKILL.md": "shipped\n"})
+			}
+			stop := make(chan struct{})
+			absent := make(chan error, 1)
+			go func() {
+				defer close(absent)
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+					}
+					if _, err := os.Lstat(target); err != nil {
+						absent <- err
+						return
+					}
+				}
+			}()
+			applyErr := Apply(target, source, Copy)
+			close(stop)
+			if err := <-absent; err != nil {
+				t.Fatalf("kind %d: target absent during replacement: %v", kind, err)
+			}
+			if applyErr != nil {
+				t.Fatal(applyErr)
+			}
+			if info, err := os.Lstat(target); err != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Fatalf("kind %d: target is not the link: %v %v", kind, info, err)
+			}
+			if err := os.Remove(target); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }

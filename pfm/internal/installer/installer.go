@@ -382,7 +382,10 @@ func (installer *engine) wireGlobalLink(source, target, sourceRepoRoot string, i
 	}
 	message := globallink.DescribeState(state, target, source, found)
 	if state == globallink.Conflict {
-		installer.skip(message)
+		if found == "" {
+			message += "; a real entry that is not a copy of " + source
+		}
+		installer.skip(message + "; preserved")
 		return nil
 	}
 	return installer.change(message, func() error {
@@ -482,8 +485,10 @@ func (installer *engine) stageGlobalCommandPlan(target string) error {
 }
 
 // copyCommandPlanTree snapshots the current command source while omitting the
-// retired top-level swap command (swap.md); copyPlanTree skips any dangling
-// link, so a link the install is about to prune never fails the preview.
+// retired top-level swap command (swap.md) and a link stage an interrupted
+// install left behind (atomicfile.LinkStagePrefix: after a crash mid-swap it
+// is the displaced directory copy); copyPlanTree skips any dangling link, so a
+// link the install is about to prune never fails the preview.
 func copyCommandPlanTree(source, target string) error {
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		return err
@@ -493,7 +498,7 @@ func copyCommandPlanTree(source, target string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if entry.Name() == "swap.md" {
+		if entry.Name() == "swap.md" || strings.HasPrefix(entry.Name(), atomicfile.LinkStagePrefix) {
 			continue
 		}
 		if err := copyPlanTree(filepath.Join(source, entry.Name()), filepath.Join(target, entry.Name())); err != nil {

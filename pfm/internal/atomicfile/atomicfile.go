@@ -143,9 +143,14 @@ func WriteScratch(directory, pattern string, content []byte) (path string, clean
 	return path, cleanup, nil
 }
 
+// LinkStagePrefix names the entry Symlink and SymlinkOverDir stage beside a
+// target; a crash can leave one behind, and a reader listing the target's
+// directory skips it.
+const LinkStagePrefix = ".pfm-link-"
+
 // Symlink replaces a managed link atomically, so readers see the old or new target.
 func Symlink(target, source string) (err error) {
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".pfm-link-*")
+	temporary, err := os.CreateTemp(filepath.Dir(target), LinkStagePrefix+"*")
 	if err != nil {
 		return fmt.Errorf("stage global link %s: %w", target, err)
 	}

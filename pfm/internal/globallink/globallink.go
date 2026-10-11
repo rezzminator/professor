@@ -6,6 +6,7 @@
 package globallink
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,17 +29,19 @@ const (
 	Missing State = "missing"
 	// Correct: a symlink already resolves to the desired source.
 	Correct State = "correct"
-	// Copy: a plain file or directory sits at the target — the
-	// shape the old copy-based installer left behind, or one just like it.
-	// Its basename is the roster entry itself (that is what put a target
-	// here at all), so it is ours to replace with a link.
+	// Copy: a plain file or directory sits at the target and is PROVEN a copy
+	// of the source — a file byte-equal to it, or a directory whose every
+	// file is byte-equal and which holds no extra entry — the shape the old
+	// copy-based installer left behind. Ours to replace with a link.
 	Copy State = "copy"
 	// WrongTarget: a symlink exists but resolves somewhere else
 	// INSIDE the source repository — stale (a rename, a re-rostered file),
 	// still ours, safe to repoint.
 	WrongTarget State = "wrong-target"
-	// Conflict: a symlink resolving outside the source repository,
-	// or a directory sitting where a file link belongs (or vice versa).
+	// Conflict: a symlink resolving outside the source repository, a
+	// directory sitting where a file link belongs (or vice versa), or a plain
+	// entry that cannot be proven a copy of the source (a user's own file or
+	// directory under a shipped name).
 	// Never ours — reported, never overwritten, never deleted.
 	Conflict State = "conflict"
 	// Dangling: a symlink already points at the desired source
@@ -97,15 +100,111 @@ func ClassifyLink(target, source, sourceRepoRoot string, kind Kind) (State, stri
 		return Conflict, resolved, nil
 	}
 	wantDir := kind == Dir
-	if info.IsDir() == wantDir {
+	if info.IsDir() != wantDir {
+		return Conflict, "", nil
+	}
+	proven, err := provenCopy(target, source, wantDir)
+	if err != nil {
+		return "", "", err
+	}
+	if proven {
 		return Copy, "", nil
 	}
 	return Conflict, "", nil
 }
 
-// Apply keeps Correct and Conflict untouched, replaces same-shape copies,
-// and atomically repoints managed stale or dangling links so policy readers
-// always see either the previous target or the desired target.
+// provenCopy reports whether the plain entry at target is a copy of source:
+// a file byte-equal to it, or a directory whose every file is byte-equal and
+// which holds no entry the source lacks. A missing source proves nothing; a
+// read failure is an error, never "not a copy".
+func provenCopy(target, source string, isDir bool) (bool, error) {
+	if !isDir {
+		return equalFileBytes(target, source)
+	}
+	want, err := listTree(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	have, err := listTree(target)
+	if err != nil {
+		return false, err
+	}
+	if len(want) != len(have) {
+		return false, nil
+	}
+	for relative, wantDir := range want {
+		haveDir, found := have[relative]
+		if !found || haveDir != wantDir {
+			return false, nil
+		}
+		if wantDir {
+			continue
+		}
+		same, err := equalFileBytes(filepath.Join(target, relative), filepath.Join(source, relative))
+		if err != nil || !same {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// listTree maps every entry below root (relative path) to whether it is a
+// directory. A symlink inside the tree is listed as a non-directory entry
+// whose bytes are compared through it by equalFileBytes; the source's own symlinks
+// are followed, the target's are not trusted (see equalFileBytes).
+func listTree(root string) (map[string]bool, error) {
+	entries := map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		entries[relative] = entry.IsDir()
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", root, err)
+	}
+	return entries, nil
+}
+
+// equalFileBytes reports whether target is a regular file (not a link) with the
+// bytes of source.
+func equalFileBytes(target, source string) (bool, error) {
+	info, err := os.Lstat(target)
+	if err != nil {
+		return false, fmt.Errorf("inspect %s: %w", target, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, nil
+	}
+	want, err := os.ReadFile(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", source, err)
+	}
+	have, err := os.ReadFile(target)
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", target, err)
+	}
+	return bytes.Equal(want, have), nil
+}
+
+// Apply keeps Correct and Conflict untouched and replaces proven copies and
+// stale or dangling links, always by making the link beside the target and
+// renaming it over (a directory copy: exchanging it), so readers see either
+// the previous entry or the desired link and never an absent target.
 func Apply(target, source string, state State) error {
 	switch state {
 	case Correct, Conflict:
@@ -114,18 +213,12 @@ func Apply(target, source string, state State) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 		}
-		if state == WrongTarget || state == Dangling {
-			return atomicfile.Symlink(target, source)
-		}
-		if state != Missing {
-			if err := os.RemoveAll(target); err != nil {
-				return fmt.Errorf("remove %s: %w", target, err)
+		if state == Copy {
+			if info, err := os.Lstat(target); err == nil && info.IsDir() {
+				return atomicfile.SymlinkOverDir(target, source)
 			}
 		}
-		if err := os.Symlink(source, target); err != nil {
-			return fmt.Errorf("link %s -> %s: %w", target, source, err)
-		}
-		return nil
+		return atomicfile.Symlink(target, source)
 	default:
 		return fmt.Errorf("apply global link %s: unknown state %q", target, state)
 	}

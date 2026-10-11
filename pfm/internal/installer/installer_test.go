@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -1452,5 +1453,31 @@ func stageVSCodeExtensionFixture(t *testing.T, managedRoot string) {
 			t.Fatal(err)
 		}
 		writeFixture(t, filepath.Join(managedRoot, filepath.FromSlash(asset)), string(content))
+	}
+}
+
+// TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage pins that the directory a
+// crash mid-swap leaves under a link-stage name never reaches the Codex
+// command preview as a command.
+func TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	source := filepath.Join(root, "commands")
+	writeFixture(t, filepath.Join(source, "keep.md"), "# keep\n")
+	writeFixture(t, filepath.Join(source, atomicfile.LinkStagePrefix+"abc", "stale.md"), "# stale\n")
+	target := filepath.Join(root, "preview")
+	if err := copyCommandPlanTree(source, target); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if strings.Join(names, ",") != "keep.md" {
+		t.Fatalf("preview entries = %v, want only keep.md", names)
 	}
 }

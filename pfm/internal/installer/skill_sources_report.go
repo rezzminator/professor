@@ -77,6 +77,7 @@ const (
 	SkillSourceLinked      SkillSourceState = "linked"
 	SkillSourceMissing     SkillSourceState = "MISSING"
 	SkillSourceConflict    SkillSourceState = "CONFLICT"
+	SkillSourceCopy        SkillSourceState = "COPY"
 	SkillSourceNotFetched  SkillSourceState = "NOT-FETCHED"
 	SkillSourceOffline     SkillSourceState = "OFFLINE"
 	SkillSourceSkipped     SkillSourceState = "SKIPPED"
@@ -93,6 +94,7 @@ type SkillSourceStatus struct {
 	State     SkillSourceState
 	Missing   []string
 	Conflicts []string
+	Copies    []string
 	Error     string
 }
 
@@ -108,6 +110,9 @@ func (status SkillSourceStatus) Describe() string {
 	}
 	if len(status.Conflicts) != 0 {
 		line += " conflict=" + strings.Join(status.Conflicts, ",")
+	}
+	if len(status.Copies) != 0 {
+		line += " copy=" + strings.Join(status.Copies, ",")
 	}
 	if status.Error != "" {
 		line += " error=" + status.Error
@@ -208,7 +213,10 @@ func inspectSkillSource(
 		}
 		switch state {
 		case globallink.Correct:
-		case globallink.Copy, globallink.Conflict:
+		case globallink.Copy:
+			// A proven byte-equal copy: pfm install replaces it with the link itself.
+			status.Copies = append(status.Copies, target)
+		case globallink.Conflict:
 			status.Conflicts = append(status.Conflicts, target)
 		default:
 			status.Missing = append(status.Missing, target)
@@ -219,6 +227,8 @@ func inspectSkillSource(
 		status.State = SkillSourceMissing
 	case len(status.Conflicts) != 0:
 		status.State = SkillSourceConflict
+	case len(status.Copies) != 0:
+		status.State = SkillSourceCopy
 	}
 	return status
 }

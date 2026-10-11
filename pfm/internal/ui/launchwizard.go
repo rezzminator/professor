@@ -48,7 +48,9 @@ type wizardState struct {
 
 // launchWizard is one walk. engine, account and cache are the choices so far;
 // accountEngine and cacheAccount name what the account and cache were last
-// defaulted for, so going back and forth keeps a choice until its cause moves.
+// defaulted for, so going back and forth keeps a choice until its cause moves;
+// cacheSet marks the cache as defaulted at all, since account 0 (a machine with
+// no named accounts) is also the zero value of cacheAccount.
 type launchWizard struct {
 	on            bool
 	rowKey        string
@@ -60,6 +62,7 @@ type launchWizard struct {
 	pos           int
 	accountEngine pfmengine.ID
 	cacheAccount  int
+	cacheSet      bool
 }
 
 // wizardChoice is one chip of a step.
@@ -286,8 +289,8 @@ func (model Model) wizardEnter(row compose.Row, after wizardStep) (tea.Model, te
 	if step >= wizardAccount && wizard.accountEngine != wizard.engine {
 		wizard.account, wizard.accountEngine = model.defaultAccount(wizard.engine), wizard.engine
 	}
-	if step == wizardCache && wizard.cacheAccount != wizard.account {
-		wizard.cache, wizard.cacheAccount = model.defaultCache(wizard.account), wizard.account
+	if step == wizardCache && (!wizard.cacheSet || wizard.cacheAccount != wizard.account) {
+		wizard.cache, wizard.cacheAccount, wizard.cacheSet = model.defaultCache(wizard.account), wizard.account, true
 	}
 	model.wizard = model.seek(row, wizard)
 	return model, nil

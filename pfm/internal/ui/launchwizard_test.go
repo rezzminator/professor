@@ -338,3 +338,15 @@ func TestUnreadableLaunchMemoryIsNamedOnTheLaunchRow(t *testing.T) {
 		t.Errorf("dossier = %q, want the read failure", dossier)
 	}
 }
+
+func TestWizardOpensOnTheDefaultCacheOfAnUnnamedAccount(t *testing.T) {
+	snapshot := wizardSnapshot([]int{1}, nil, nil)
+	snapshot.AccountIDs, snapshot.PrimaryAccount = nil, 0
+	snapshot.Cache1H, snapshot.Cache1HByAccount = true, map[int]bool{}
+	model := walk(t, NewModel(snapshot), "enter")
+	if model.wizard.step != wizardCache || model.wizard.account != 0 ||
+		!model.orderedChoices(model.rows[0], model.wizard)[model.wizard.pos].cache {
+		t.Fatalf("step %v account %d pos %d, want the cache step on unnamed account 0 opening on 1h",
+			model.wizard.step, model.wizard.account, model.wizard.pos)
+	}
+}

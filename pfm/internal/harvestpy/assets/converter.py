@@ -1537,6 +1537,105 @@ _SPELL_STEPS = 100_000
 _MARKDOWN_LINK_TARGET = re.compile(r"\]\((?:[^()\s]|\([^()\s]*\))*\)")
 
 
+# A page keeps its Markdown, and the words its layout never rendered (a rotated
+# margin stamp) are appended, when they are few: at most _MARGIN_TOKENS tokens,
+# at most _MARGIN_SHARE of the page's text-layer tokens, in at most _MARGIN_RUNS
+# runs of consecutive text-layer tokens. The alignment that places them reads at
+# most _MARGIN_ALIGN text-layer tokens (twice that many of Markdown); a bigger
+# page falls back to the native text layer, as any larger loss does.
+_MARGIN_TOKENS = 16
+_MARGIN_SHARE = 0.03
+_MARGIN_RUNS = 6
+_MARGIN_ALIGN = 2000
+# Alignment work one page may spend: each search scans, for each text-layer
+# token in its range, the Markdown copies of it up to the range's end. Past it
+# the page falls back.
+_MARGIN_STEPS = 5_000_000
+# A missing word this long that sits inside a longer Markdown word was fused by
+# the renderer (dimension + query as dimensionquery), not dropped: the Markdown
+# itself is damaged and appending the word would not repair it.
+_FUSED_LENGTH = 3
+_PDF_TOKEN = re.compile(r"[^\W_]+|[^\w\s]|_")
+
+
+def _margin_runs(source: str, markdown: str, missing) -> list[str] | None:
+    """The text-layer runs the Markdown never rendered, in text-layer order, or None.
+
+    None when they are not few (see _MARGIN_TOKENS), when a missing word is
+    fused into a longer Markdown word, or when the missing tokens cannot be
+    placed in the text layer: the page then falls back to the native text.
+    A token is placed at a text-layer position the Markdown does not align to;
+    a token that occurs more often than it is missing (a full stop) is placed
+    next to an already placed token, pass after pass until no placement is
+    left to make, and anything still unplaced is ambiguous.
+    """
+    import bisect
+    import difflib
+
+    spans = list(_PDF_TOKEN.finditer(source))
+    total = sum(missing.values())
+    if not 0 < total <= _MARGIN_TOKENS or total > len(spans) * _MARGIN_SHARE or len(spans) > _MARGIN_ALIGN:
+        return None
+    rendered = _PDF_TOKEN.findall(markdown)
+    if len(rendered) > 2 * _MARGIN_ALIGN:
+        return None
+    words = {token for token in rendered if token.isalnum()}
+    for token in missing:
+        if len(token) >= _FUSED_LENGTH and token.isalnum() and any(token in word and token != word for word in words):
+            return None
+    values = [match.group() for match in spans]
+    # get_matching_blocks, its cost counted: a rendering that never lets two
+    # tokens align in a row (a pipe between every table cell) splits it into one
+    # search per token, each scanning every Markdown copy of its tokens.
+    matcher = difflib.SequenceMatcher(None, values, rendered, autojunk=False)
+    aligned, pending, steps = set(), [(0, len(values), 0, len(rendered))], _MARGIN_STEPS
+    while pending:
+        alo, ahi, blo, bhi = pending.pop()
+        steps -= sum(1 + bisect.bisect_left(matcher.b2j.get(values[index], ()), bhi) for index in range(alo, ahi))
+        if steps < 0:
+            return None
+        start, other, size = matcher.find_longest_match(alo, ahi, blo, bhi)
+        if size:
+            aligned.update(range(start, start + size))
+            if alo < start and blo < other:
+                pending.append((alo, start, blo, other))
+            if start + size < ahi and other + size < bhi:
+                pending.append((start + size, ahi, other + size, bhi))
+    free = {}
+    for index, value in enumerate(values):
+        if index not in aligned and value in missing:
+            free.setdefault(value, []).append(index)
+    placed, ambiguous = set(), []
+    for token in sorted(missing):
+        places = free.get(token, [])
+        if len(places) < missing[token]:
+            return None
+        if len(places) == missing[token]:
+            placed.update(places)
+        else:
+            ambiguous.append(token)
+    while ambiguous:
+        waiting = []
+        for token in ambiguous:
+            beside = [index for index in free[token] if index - 1 in placed or index + 1 in placed]
+            if len(beside) == missing[token]:
+                placed.update(beside)
+            else:
+                waiting.append(token)
+        if len(waiting) == len(ambiguous):
+            return None
+        ambiguous = waiting
+    runs = []
+    for index in sorted(placed):
+        if runs and index == runs[-1][1] + 1:
+            runs[-1][1] = index
+        else:
+            runs.append([index, index])
+    if len(runs) > _MARGIN_RUNS:
+        return None
+    return [source[spans[first].start() : spans[last].end()] for first, last in runs]
+
+
 def _pdf_checked_text(page, markdown: str, ocr: bool) -> tuple[str, list[str]]:
     """Zero-tolerance token recall against each page's independent text layer.
 
@@ -1548,6 +1647,12 @@ def _pdf_checked_text(page, markdown: str, ocr: bool) -> tuple[str, list[str]]:
     used once; where they sit on the page is not checked. Requiring them to be
     adjacent, in order, would also flag the pieces a formula or a table header
     scatters across the Markdown, which costs more than it protects.
+
+    A page that still misses tokens falls back to its native text layer, except
+    when the missing words are few and the Markdown is otherwise sound: then
+    the Markdown keeps its layout and the missing runs are appended to it in
+    text-layer order, as the audit reads them: NFKC-normalized, line-end
+    hyphens joined (_margin_runs).
     """
     from collections import Counter
     import unicodedata
@@ -1557,11 +1662,13 @@ def _pdf_checked_text(page, markdown: str, ocr: bool) -> tuple[str, list[str]]:
     flags = pymupdf.TEXTFLAGS_TEXT & ~pymupdf.TEXT_PRESERVE_LIGATURES
     source = page.get_text("text", flags=flags, sort=True)
 
+    def normalized(text):
+        return _LINE_END_HYPHEN.sub("", unicodedata.normalize("NFKC", text))
+
     def tokens(text):
-        text = unicodedata.normalize("NFKC", text)
         # Extra Markdown punctuation cannot count as missing source text,
         # but symbols in the source (math, identifiers, paths) must be audited.
-        return Counter(re.findall(r"[^\W_]+|[^\w\s]|_", _LINE_END_HYPHEN.sub("", text)))
+        return Counter(_PDF_TOKEN.findall(normalized(text)))
 
     def unspelled(missing, surplus):
         """Missing words the surplus Markdown tokens do not spell, each surplus token used once.
@@ -1613,11 +1720,19 @@ def _pdf_checked_text(page, markdown: str, ocr: bool) -> tuple[str, list[str]]:
         unreadable = "\ufffd" in source or re.search(r"\(cid:\d+\)", source)
         controls = sum(1 for ch in source if unicodedata.category(ch) == "Cc" and ch not in "\n\t\r")
         if substantive and len(source.strip()) >= 20 and not unreadable and controls <= len(source) * OCR_CONTROL_SHARE:
-            markdown = source
-            recovery = "using the native text layer instead, Markdown layout was lost"
-            if ocr:
-                recovery += " and image-only OCR text was not retained"
-            gaps.append(f"PDF page {page.number + 1}: {recovery}")
+            runs = None if ocr else _margin_runs(normalized(source), normalized(markdown), missing)
+            if runs:
+                gaps[-1] = (
+                    f"PDF page {page.number + 1}: {sum(missing.values())} text-layer tokens"
+                    " missing from the layout, appended below"
+                )
+                markdown = markdown.rstrip() + "\n\n" + "\n".join(runs)
+            else:
+                markdown = source
+                recovery = "using the native text layer instead, Markdown layout was lost"
+                if ocr:
+                    recovery += " and image-only OCR text was not retained"
+                gaps.append(f"PDF page {page.number + 1}: {recovery}")
     if "\ufffd" in source or re.search(r"\(cid:\d+\)", source):
         gaps.append(f"PDF page {page.number + 1}: font encoding leaves unreadable text")
     return markdown, gaps

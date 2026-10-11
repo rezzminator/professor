@@ -385,7 +385,7 @@
       "raw_path": "raw/binary/scholar-arxiv-attention.pdf",
       "raw_bytes": 2215244,
       "raw_sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
-      "oracle_sha256": "b0eb34f81f4e734ad450dee510d9ef73581fda1218f1aaf042e457ff0fcf945d",
+      "oracle_sha256": "970269dcc6de4e5c731de94720763d472d36eaa0e67feeb37b432c41a5c0f66b",
       "raw_sha256s": [
         "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697"
       ]

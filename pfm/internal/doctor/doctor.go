@@ -299,6 +299,7 @@ func Run(
 	hookWarnings, hookFailures := installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
+	tally.failures += printTracerIntakeDoctor(ctx, stdout, resolved.Home, dependencies)
 	hostWarnings, hostFailures := printHostChecks(stdout, runtime, dependencies.Clock.Now())
 	tally.warnings += hostWarnings
 	tally.failures += hostFailures + printClaudeStoreChecks(stdout, runtime)

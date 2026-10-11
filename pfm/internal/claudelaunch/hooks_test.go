@@ -222,3 +222,20 @@ func TestTracerIntakeHookNeverBlocksASpawn(t *testing.T) {
 		})
 	}
 }
+
+// TestTracerIntakeHookIsTheRegistryRow pins the accessor the doctor check
+// reads: the hook is HookTemplates' own tracer-intake row, and the kit it
+// returns is the file that row's command runs.
+func TestTracerIntakeHookIsTheRegistryRow(t *testing.T) {
+	home := t.TempDir()
+	hook, kit, ok := TracerIntakeHook(home)
+	if !ok {
+		t.Fatal("TracerIntakeHook found no tracer-intake row in HookTemplates")
+	}
+	if !slices.Contains(HookTemplates(home), hook) {
+		t.Errorf("hook = %+v, want a HookTemplates row", hook)
+	}
+	if want := "python3 " + shellQuote(kit) + " intake || "; !strings.HasPrefix(hook.Command, want) {
+		t.Errorf("command=%q, want prefix %q (the returned kit is not the file the command runs)", hook.Command, want)
+	}
+}

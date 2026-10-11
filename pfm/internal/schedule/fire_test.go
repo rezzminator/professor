@@ -200,3 +200,61 @@ func TestFireDeliversAOneTimeScheduleOnce(t *testing.T) {
 		t.Fatalf("delivered %+v, want one-time schedule %d delivered once", deliverer.delivered, id)
 	}
 }
+
+// markFailingStore is a real store whose reschedule write fails.
+type markFailingStore struct {
+	*fleetdb.Store
+	err error
+}
+
+func (store markFailingStore) MarkScheduleFired(context.Context, int64, time.Time) (bool, error) {
+	return false, store.err
+}
+
+func TestFireCountsADeliveryWarningAsFiredAndReportsItWarned(t *testing.T) {
+	cases := []struct {
+		name      string
+		markErr   error
+		wantFired bool
+	}{
+		{name: "rescheduled", wantFired: true},
+		{name: "reschedule fails", markErr: errors.New("disk I/O error")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fleetStore := openStore(t)
+			now := time.Unix(1_800_000_000, 0)
+			id := seed(t, fleetStore, "hidden", time.Hour, now.Add(-2*time.Hour))
+			var store Store = fleetStore
+			if tc.markErr != nil {
+				store = markFailingStore{Store: fleetStore, err: tc.markErr}
+			}
+			warning := &DeliveryWarning{Err: errors.New("unhide chat sess-hidden: database is locked")}
+			deliverer := &fakeDeliverer{failing: map[int64]error{id: warning}}
+
+			report, err := Fire(context.Background(), store, deliverer, filepath.Join(t.TempDir(), "fire.lock"), now)
+			if err != nil {
+				t.Fatalf("Fire: %v", err)
+			}
+			got := mustSchedule(t, fleetStore, id)
+			if got.LastError != "" {
+				t.Fatalf("schedule = %+v, want no recorded failure for a delivered schedule", got)
+			}
+			if !tc.wantFired {
+				if len(report.Fired) != 0 || len(report.Warned) != 0 || len(report.Failed) != 1 ||
+					!strings.Contains(report.Failed[0].Err.Error(), "disk I/O error") ||
+					!strings.Contains(report.Failed[0].Err.Error(), "unhide chat sess-hidden: database is locked") {
+					t.Fatalf("report=%+v, want only a failure carrying the reschedule error and the warning", report)
+				}
+				return
+			}
+			if len(report.Fired) != 1 || report.Fired[0].ID != id || len(report.Failed) != 0 ||
+				len(report.Warned) != 1 || report.Warned[0].Schedule.ID != id || report.Warned[0].Err != warning.Err {
+				t.Fatalf("report=%+v, want the schedule fired and warned with the warning's cause", report)
+			}
+			if !got.NextFire.After(now) {
+				t.Fatalf("schedule = %+v, want it rescheduled", got)
+			}
+		})
+	}
+}

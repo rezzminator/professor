@@ -33,12 +33,23 @@ type Failure struct {
 	Err      error
 }
 
+// DeliveryWarning is a failure that follows a delivery which already happened:
+// Fire counts the schedule fired and carries the failure in Report.Warned.
+type DeliveryWarning struct{ Err error }
+
+func (warning *DeliveryWarning) Error() string { return warning.Err.Error() }
+
+func (warning *DeliveryWarning) Unwrap() error { return warning.Err }
+
 // Report is what one Fire did. Skipped means another fire held the lock and
 // this one touched nothing.
 type Report struct {
 	Skipped bool
 	Fired   []fleetdb.Schedule
 	Failed  []Failure
+	// Warned lists fired schedules whose delivery left a failure behind; a
+	// warned delivery that could not be rescheduled is in Failed, carrying both.
+	Warned []Failure
 }
 
 // FireLockPath is the fire lock, beside the shared state database.
@@ -92,7 +103,12 @@ func Fire(
 	}
 	for index := range due {
 		r := due[index]
-		if err := deliverer.Deliver(ctx, r, Message(r)); err != nil {
+		err := deliverer.Deliver(ctx, r, Message(r))
+		var warning *DeliveryWarning
+		if errors.As(err, &warning) {
+			err = nil
+		}
+		if err != nil {
 			failure := err
 			if _, recordErr := store.RecordScheduleFailure(ctx, r.ID, now, err.Error()); recordErr != nil {
 				failure = errors.Join(err, fmt.Errorf("record failure of schedule %d: %w", r.ID, recordErr))
@@ -101,13 +117,17 @@ func Fire(
 			continue
 		}
 		if _, err := store.MarkScheduleFired(ctx, r.ID, now); err != nil {
-			report.Failed = append(report.Failed, Failure{
-				Schedule: r,
-				Err:      fmt.Errorf("schedule %d was delivered but could not be rescheduled: %w", r.ID, err),
-			})
+			failure := fmt.Errorf("schedule %d was delivered but could not be rescheduled: %w", r.ID, err)
+			if warning != nil {
+				failure = fmt.Errorf("%w; %w", failure, warning.Err)
+			}
+			report.Failed = append(report.Failed, Failure{Schedule: r, Err: failure})
 			continue
 		}
 		report.Fired = append(report.Fired, r)
+		if warning != nil {
+			report.Warned = append(report.Warned, Failure{Schedule: r, Err: warning.Err})
+		}
 	}
 	return report, nil
 }

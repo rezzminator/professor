@@ -14,10 +14,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/archive"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmstore "github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type deliveryRig struct {
@@ -28,10 +31,30 @@ type deliveryRig struct {
 	injectErr  error
 	injected   []string
 	socketPath string
+
+	hidden    bool // the chat is hidden until the unhide seam lifts it
+	unhideErr error
+	events    []string // "inject" and "unhide" in the order they ran
+	unhides   []string
+	stdout    bytes.Buffer
+}
+
+// unhideSeam stands in for the kill store: it lifts a hidden chat once, as the store does.
+func (rig *deliveryRig) unhideSeam(_ context.Context, sessionID string) (bool, error) {
+	rig.events = append(rig.events, "unhide")
+	rig.unhides = append(rig.unhides, sessionID)
+	if rig.unhideErr != nil {
+		return false, rig.unhideErr
+	}
+	removed := rig.hidden
+	rig.hidden = false
+	return removed, nil
 }
 
 func (rig *deliveryRig) deliverer() *chatDeliverer {
 	return &chatDeliverer{
+		stdout:  &rig.stdout,
+		unhide:  rig.unhideSeam,
 		tmuxDir: "/tmux",
 		open: func(context.Context, string) (action.OpenResult, error) {
 			return action.OpenResult{State: rig.state, Socket: "cc-revived"}, rig.openErr
@@ -43,6 +66,7 @@ func (rig *deliveryRig) deliverer() *chatDeliverer {
 			return rig.captures[index], nil
 		},
 		inject: func(_ context.Context, _ fleetdb.Schedule, target, _ string) error {
+			rig.events = append(rig.events, "inject")
 			rig.injected = append(rig.injected, target)
 			return rig.injectErr
 		},
@@ -116,6 +140,140 @@ func TestScheduleDelivererReportsResolveAndInjectFailures(t *testing.T) {
 	}
 }
 
+func TestScheduleDelivererUnhidesAHiddenChatAfterTheInject(t *testing.T) {
+	rig := &deliveryRig{state: "live", captures: []string{""}, hidden: true}
+	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rig.events, ","); got != "inject,unhide" || rig.unhides[0] != "sess-7" {
+		t.Fatalf("events=%q unhides=%v, want the prompt typed first, then the session id un-hidden", got, rig.unhides)
+	}
+	if want := "unhid chat sess-7\n"; rig.stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", rig.stdout.String(), want)
+	}
+}
+
+func TestScheduleDelivererLeavesAVisibleChatAlone(t *testing.T) {
+	rig := &deliveryRig{state: "live", captures: []string{""}}
+	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
+		t.Fatal(err)
+	}
+	if rig.stdout.Len() != 0 || len(rig.injected) != 1 {
+		t.Fatalf("stdout=%q injected=%v, want a delivery and no unhid line for a visible chat",
+			rig.stdout.String(), rig.injected)
+	}
+}
+
+func TestScheduleDelivererDoesNotUnhideAChatItFailedToDeliverTo(t *testing.T) {
+	rig := &deliveryRig{state: "live", injectErr: errors.New("pane gone"), hidden: true}
+	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err == nil {
+		t.Fatal("want the inject failure")
+	}
+	if len(rig.unhides) != 0 || !rig.hidden || rig.stdout.Len() != 0 {
+		t.Fatalf(
+			"unhides=%v hidden=%v stdout=%q, want the undelivered chat left hidden",
+			rig.unhides,
+			rig.hidden,
+			rig.stdout.String(),
+		)
+	}
+}
+
+// failingWriter is a stdout whose every write fails.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+func TestScheduleDelivererUnhideFailureStillDeliversAndIsReportedWithIdAndCause(t *testing.T) {
+	cases := []struct {
+		name       string
+		removed    bool
+		unhideErr  error
+		stdoutFail bool
+		wantStdout string
+		wantIn     []string
+	}{
+		{
+			name: "store refuses", unhideErr: errors.New("database is locked"),
+			wantIn: []string{"unhide chat sess-7", "database is locked"},
+		},
+		{
+			name:       "kill removed, then the store fails",
+			removed:    true,
+			unhideErr:  errors.New("close the kill store: busy"),
+			wantStdout: "unhid chat sess-7\n",
+			wantIn:     []string{"unhide chat sess-7", "close the kill store: busy"},
+		},
+		{
+			name: "kill removed, stdout fails", removed: true, stdoutFail: true,
+			wantIn: []string{"report unhid chat sess-7", "broken pipe"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := &deliveryRig{state: "live", hidden: true}
+			deliverer := rig.deliverer()
+			deliverer.unhide = func(context.Context, string) (bool, error) { return tc.removed, tc.unhideErr }
+			if tc.stdoutFail {
+				deliverer.stdout = failingWriter{}
+			}
+			err := deliverer.Deliver(context.Background(), testSchedule, "msg")
+			var warning *DeliveryWarning
+			if !errors.As(err, &warning) || len(rig.injected) != 1 || rig.stdout.String() != tc.wantStdout {
+				t.Fatalf("err=%v injected=%v stdout=%q, want a delivery warning after one inject and stdout %q",
+					err, rig.injected, rig.stdout.String(), tc.wantStdout)
+			}
+			for _, want := range tc.wantIn {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("warning = %q, want it to contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestScheduleDelivererRealUnhideLiftsAKillInTheFleetStore runs the production
+// seam over a scratch fleet store: the same operation `pfm chat unkill` runs.
+func TestScheduleDelivererRealUnhideLiftsAKillInTheFleetStore(t *testing.T) {
+	testjail.Fleet(t)
+	const id = "22222222-2222-4222-8222-222222222222"
+	ctx := context.Background()
+	database, err := pfmstore.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Kill(ctx, pfmstore.Killed{ID: id, KilledAt: 1_800_000_000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	deliverer := newChatDeliverer(&pfmconfig.Runtime{}, &bytes.Buffer{}, &stderr)
+	for _, want := range []bool{true, false} {
+		removed, err := deliverer.unhide(ctx, id)
+		if err != nil || removed != want {
+			t.Fatalf("unhide removed=%v err=%v stderr=%q, want removed=%v", removed, err, stderr.String(), want)
+		}
+	}
+}
+
+func TestWriteReportPrintsAWarnedScheduleOnStderrAndExitsOne(t *testing.T) {
+	hidden := fleetdb.Schedule{ID: 4, SessionID: "sess-hidden", Label: "hidden"}
+	report := Report{
+		Fired:  []fleetdb.Schedule{hidden},
+		Warned: []Failure{{Schedule: hidden, Err: errors.New("unhide chat sess-hidden: database is locked")}},
+	}
+	var stdout, stderr bytes.Buffer
+	code := writeReport(report, &stdout, &stderr)
+	wantStderr := "pfm internal schedule-fire: schedule 4 (hidden, sess-hidden): delivered, " +
+		"but unhide chat sess-hidden: database is locked\n"
+	if code != 1 || stdout.String() != "fired schedule 4 → hidden\n" || stderr.String() != wantStderr {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want the fired line, the warning on stderr and rc 1",
+			code, stdout.String(), stderr.String())
+	}
+}
+
 // archiveRig is a deliverer over a real archive in a temp dir. Its open seam
 // stands in for the index: a chat is "indexed" exactly when its transcript sits
 // at its original path, so the order of restore and open is decided by real files.
@@ -127,6 +285,8 @@ type archiveRig struct {
 	openErr  error
 	reopen   error // every open after the first fails with it
 	indexed  bool  // the index holds the chat whatever the files say
+	hidden   bool  // the chat is hidden until the unhide seam lifts it
+	events   []string
 	injected []string
 	messages []string
 	stdout   bytes.Buffer
@@ -202,8 +362,15 @@ func (rig *archiveRig) deliverer() *chatDeliverer {
 		stdout:     &rig.stdout,
 		tmuxDir:    "/tmux",
 		archiveDir: rig.values.ArchiveDir,
+		unhide: func(_ context.Context, _ string) (bool, error) {
+			rig.events = append(rig.events, "unhide")
+			removed := rig.hidden
+			rig.hidden = false
+			return removed, nil
+		},
 		open: func(_ context.Context, sessionID string) (action.OpenResult, error) {
 			rig.opens++
+			rig.events = append(rig.events, "open")
 			if rig.openErr != nil {
 				return action.OpenResult{}, rig.openErr
 			}
@@ -217,6 +384,7 @@ func (rig *archiveRig) deliverer() *chatDeliverer {
 		},
 		capture: func(context.Context, string, string) (string, error) { return "❯ ", nil },
 		inject: func(_ context.Context, _ fleetdb.Schedule, target, message string) error {
+			rig.events = append(rig.events, "inject")
 			rig.injected = append(rig.injected, target)
 			rig.messages = append(rig.messages, message)
 			return nil
@@ -242,6 +410,21 @@ func TestScheduleDelivererRestoresAnArchivedChatThenDeliversIt(t *testing.T) {
 			rig.opens, rig.injected, rig.messages)
 	}
 	if want := "restored archived chat " + rig.id + "\n"; rig.stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", rig.stdout.String(), want)
+	}
+}
+
+func TestScheduleDelivererUnhidesAnArchivedChatItRestored(t *testing.T) {
+	shortenComposerWait(t, time.Millisecond, 5*time.Second)
+	rig := newArchiveRig(t, true)
+	rig.hidden = true
+	if err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if got := strings.Join(rig.events, ","); got != "open,open,inject,unhide" || rig.hidden {
+		t.Fatalf("events=%q hidden=%v, want restore between two opens, then inject, then unhide", got, rig.hidden)
+	}
+	if want := "restored archived chat " + rig.id + "\nunhid chat " + rig.id + "\n"; rig.stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", rig.stdout.String(), want)
 	}
 }

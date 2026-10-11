@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -52,6 +53,7 @@ type chatDeliverer struct {
 	open    func(ctx context.Context, sessionID string) (action.OpenResult, error)
 	capture func(ctx context.Context, socketPath, target string) (string, error)
 	inject  func(ctx context.Context, r fleetdb.Schedule, target, message string) error
+	unhide  func(ctx context.Context, sessionID string) (removed bool, err error)
 
 	// archiveDir is the archive the fire restores a chat from when the index no longer holds it.
 	archiveDir string
@@ -69,6 +71,7 @@ func newChatDeliverer(runtime *pfmconfig.Runtime, stdout, stderr io.Writer) *cha
 		return (inject.TmuxInjector{}).Capture(ctx, socketPath, target, false, scheduleCaptureLines)
 	}
 	deliverer.inject = deliverer.injectSchedule
+	deliverer.unhide = deliverer.unkill
 	return deliverer
 }
 
@@ -88,7 +91,53 @@ func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Schedule,
 		}
 		target = result.Socket
 	}
-	return deliverer.inject(ctx, r, target, message)
+	if err := deliverer.inject(ctx, r, target, message); err != nil {
+		return err
+	}
+	return deliverer.unhideDelivered(ctx, r.SessionID)
+}
+
+// unhideDelivered lifts the kill standing on a delivered-to chat: a schedule
+// woke it, so that kill no longer describes it. A chat with no kill row is
+// reported false by the store and costs no output — one not hidden, or one
+// hidden only by a `_KILL`/`_HIDE` name, which renaming lifts, as with
+// `pfm chat unkill`. A kill the store removed is reported on stdout even when
+// the store failed afterwards. The prompt is already typed, so a failure never
+// fails the delivery: it comes back as a DeliveryWarning, which Fire reports.
+func (deliverer *chatDeliverer) unhideDelivered(ctx context.Context, sessionID string) error {
+	removed, unhideErr := deliverer.unhide(ctx, sessionID)
+	var warning error
+	if unhideErr != nil {
+		warning = fmt.Errorf("unhide chat %s: %w", sessionID, unhideErr)
+	}
+	if removed {
+		if _, err := fmt.Fprintf(deliverer.stdout, "unhid chat %s\n", sessionID); err != nil {
+			reportErr := fmt.Errorf("report unhid chat %s: %w", sessionID, err)
+			if warning != nil {
+				reportErr = fmt.Errorf("%w; %w", warning, reportErr)
+			}
+			warning = reportErr
+		}
+	}
+	if warning == nil {
+		return nil
+	}
+	return &DeliveryWarning{Err: warning}
+}
+
+// unkill is `pfm chat unkill`'s own operation: the kill manager's Unkill over
+// the fleet store, so a Codex resume lineage is cleared root and members alike.
+func (deliverer *chatDeliverer) unkill(ctx context.Context, sessionID string) (removed bool, err error) {
+	database, manager, code := fleet.OpenKillManager(deliverer.stderr, *deliverer.runtime)
+	if code != 0 {
+		return false, fmt.Errorf("open the kill store (exit %d)", code)
+	}
+	defer func() {
+		if closeErr := database.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close the kill store: %w", closeErr))
+		}
+	}()
+	return manager.Unkill(ctx, sessionID)
 }
 
 // openArchived answers a chat the index does not hold. A chat the archive
@@ -229,9 +278,24 @@ func RunFire(args []string, stdout, stderr io.Writer, runtime *pfmconfig.Runtime
 		fmt.Fprintf(stderr, "%s: another fire holds the lock; skipped\n", scheduleFireCommand)
 		return code
 	}
+	if reportCode := writeReport(report, stdout, stderr); reportCode != 0 {
+		code = reportCode
+	}
+	return code
+}
+
+// writeReport prints what a fire did and returns 1 when any schedule failed or was delivered with a warning.
+func writeReport(report Report, stdout, stderr io.Writer) int {
+	code := 0
 	for index := range report.Fired {
 		fired := &report.Fired[index]
 		fmt.Fprintf(stdout, "fired schedule %d → %s\n", fired.ID, scheduleChatColumnFull(fired))
+	}
+	for index := range report.Warned {
+		warned := &report.Warned[index]
+		fmt.Fprintf(stderr, "%s: schedule %d (%s, %s): delivered, but %v\n",
+			scheduleFireCommand, warned.Schedule.ID, warned.Schedule.Label, warned.Schedule.SessionID, warned.Err)
+		code = 1
 	}
 	for index := range report.Failed {
 		failure := &report.Failed[index]

@@ -58,7 +58,10 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 				installer.skip(err.Error() + " (no source clone or Codex homes configured)")
 				return nil
 			} else if inspectErr != nil {
-				return fmt.Errorf("inspect engine-sync global source repository %s: %w", sourceRepo, inspectErr)
+				return errors.Join(
+					err,
+					fmt.Errorf("inspect engine-sync global source repository %s: %w", sourceRepo, inspectErr),
+				)
 			}
 		}
 		return err

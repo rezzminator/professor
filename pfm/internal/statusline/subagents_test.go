@@ -159,20 +159,20 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			task: task(`"id":"a1","name":"scout","type":"local_agent","status":"running","label":"map the resolver",` +
 				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000,"tokenCount":312000,` +
 				`"tokenSamples":[0,125000,250000,500000,1000000]`),
-			want: "solo│▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M $0.01/2.0K/35/2│scout·tracer│opus·🏎️ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
+			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M $0.01/2.0K/35/2│scout·tracer│opus·🏎️ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
 				"⟲1│pfm│map the resolver",
 		},
 		{
 			name: "a finished agent's time stops at its transcript's last entry",
 			task: task(`"id":"a1","type":"local_agent","status":"completed","label":"x","model":"claude-sonnet-5",` +
 				`"contextWindowSize":1000000,"tokenCount":90000,"tokenSamples":[900000,90000]`),
-			want: "solo│▱▱▱▱▱▱▱▱ 9% 90.0K/1.0M $0.01/2.0K/35/2│tracer│sonnet│completed 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│x",
+			want: "▱▱▱▱▱▱▱▱ 9% 90.0K/1.0M $0.01/2.0K/35/2│tracer│sonnet│completed 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│x",
 		},
 		{
 			name: "no model turn yet: zero tools, an empty cache, and idle since its prompt",
 			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x","model":"haiku",` +
 				`"contextWindowSize":200000,"tokenCount":1`),
-			want: "solo│▱▱▱▱▱▱▱▱ 0% 1/200.0K $0.00/0/0/0│general-purpose│haiku│running 2m:0s│idle 2m0s│💾–│pfm│x",
+			want: "▱▱▱▱▱▱▱▱ 0% 1/200.0K $0.00/0/0/0│general-purpose│haiku│running 2m:0s│idle 2m0s│💾–│pfm│x",
 		},
 		{
 			name: "a non-agent task carries no transcript facts; label falls back to the description",
@@ -408,7 +408,7 @@ func TestRenderSubagentsUnreadableTranscriptIsNotZero(t *testing.T) {
 	session := subagentSession(t, nil, nil)
 	got, warned := renderOneSubagent(t, session,
 		`{"id":"gone","type":"local_agent","status":"running","contextWindowSize":1000,"tokenCount":10}`)
-	if got != "solo│▱▱▱▱▱▱▱▱ 1% 10/1.0K $?/?/?/?│role ?│running│💾!" {
+	if got != "▱▱▱▱▱▱▱▱ 1% 10/1.0K $?/?/?/?│role ?│running│💾!" {
 		t.Fatalf("content = %q, want the ? markers", got)
 	}
 	for _, cause := range []string{"row gone: read sub-agent meta", "row gone: open sub-agent transcript"} {
@@ -423,7 +423,7 @@ func TestRenderSubagentsMetaWithoutRoleIsNotEmpty(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"m": agentTranscriptLines[:1]}, map[string]string{"m": ""})
 	got, warned := renderOneSubagent(t, session,
 		`{"id":"m","type":"local_agent","status":"running","tokenCount":10}`)
-	if !strings.HasPrefix(got, "solo│10 $0.00/0/0/0│role ?│running") ||
+	if !strings.HasPrefix(got, "10 $0.00/0/0/0│role ?│running") ||
 		!strings.Contains(warned, "names no agentType") {
 		t.Fatalf("content = %q warn = %q, want role ? and the cause", got, warned)
 	}

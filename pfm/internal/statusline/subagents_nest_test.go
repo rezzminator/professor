@@ -153,10 +153,10 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			warn:        "row p: nested agents: open sub-agent transcript",
 		},
 		{
-			name:        "an agent that spawned none reads solo",
+			name:        "an agent that spawned none has no nesting segment, the row opens on the gauge",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "other": {turnToolCall}},
 			parents:     map[string]string{"p": "", "other": ""},
-			nested:      "solo",
+			nested:      "",
 			status:      finished,
 		},
 	}
@@ -193,7 +193,7 @@ func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "solo│▱") {
+	if !strings.HasPrefix(got, "▱") {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := renderOneSubagent(t, session,
@@ -284,7 +284,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "completed, first minute: the whole line muted, Claude Code's faint left on",
 			task:      row("a1", "completed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: "solo│" + fullRow + "completed" + fullTail,
+			wantPlain: fullRow + "completed" + fullTail,
 			check:     mutedWhole,
 		},
 		{
@@ -298,7 +298,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "failed, first minute: full colour, it is an alert",
 			task:      row("a1", "failed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: "solo│" + fullRow + "failed" + fullTail,
+			wantPlain: fullRow + "failed" + fullTail,
 			check:     bright,
 		},
 		{

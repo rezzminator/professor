@@ -67,6 +67,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			KeyClaudePluginCheckoutRoot,
 		)
 	}
+	if raw.Plugins != nil && index >= 0 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.plugins is machine-wide: set %s",
+			path,
+			configScope(scope, index),
+			KeyClaudePlugins,
+		)
+	}
 	if raw.CostLedger != nil && index >= 0 {
 		return ClaudePrefs{}, fmt.Errorf(
 			"config %s: %s.costLedger is machine-wide: set %s",
@@ -115,6 +123,35 @@ func copyClaudeLaunchPrefs(target *ClaudePrefs, source ClaudePrefs) {
 	target.TmuxTruecolor = source.TmuxTruecolor
 	target.CleanupPeriodDays = source.CleanupPeriodDays
 	target.RequireManagedCleanup = source.RequireManagedCleanup
+}
+
+// applyClaudeMachinePrefs sets the top-level claude keys no account may carry
+// (decodeClaudePrefs refuses them there): the plugin checkout root, the plugin
+// list and the cost ledger switch.
+func applyClaudeMachinePrefs(
+	target *ClaudePrefs, raw rawClaude, home, path string, sources map[string]Source,
+) error {
+	if raw.PluginCheckoutRoot != nil {
+		root, err := expandHomePath(*raw.PluginCheckoutRoot, home)
+		if err != nil {
+			return fmt.Errorf("config %s: %s %w", path, KeyClaudePluginCheckoutRoot, err)
+		}
+		target.PluginCheckoutRoot = root
+		sources[KeyClaudePluginCheckoutRoot] = SourceFile
+	}
+	if raw.Plugins != nil {
+		plugins, err := decodeClaudePlugins(*raw.Plugins)
+		if err != nil {
+			return fmt.Errorf("config %s: %w", path, err)
+		}
+		target.Plugins = plugins
+		sources[KeyClaudePlugins] = SourceFile
+	}
+	if raw.CostLedger != nil {
+		target.CostLedger = *raw.CostLedger
+		sources[KeyClaudeCostLedger] = SourceFile
+	}
+	return nil
 }
 
 func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[string]Source, scope string, index int) {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
@@ -23,7 +24,9 @@ var doctorDevIDs = []string{
 	"tool-visibility-controller@tool-visibility-controller-dev",
 }
 
-var releaseTargets = installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
+var releaseTargets = installer.ClaudePluginTargets(
+	installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()},
+)
 
 // writeDoctorInstalledPlugins records ids in dir's plugins/installed_plugins.json
 // the way claude does, each with an installPath that exists.
@@ -43,6 +46,91 @@ func writeDoctorInstalledPlugins(t *testing.T, dir string, ids ...string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "plugins", "installed_plugins.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestClaudePluginsDoctorNamesAPluginItCannotInstall: a listed third-party id whose marketplace
+// Claude Code does not know and whose entry has no source is one warning naming it, the reason
+// and the repair, in place of the generic "run pfm install --yes" lines that would not help, even
+// beside the skipped row of a store with no settings.json; with a source it is the generic lines;
+// an id installed and enabled needs no marketplace; and an unreadable marketplace record is a
+// failure for the ids that need it while every other listed plugin is still checked.
+func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
+	cannot := "doctor: claude_plugins plugin typesafe@typesafe-ai cannot be installed: marketplace typesafe-ai" +
+		" is not known to Claude Code and its claude.plugins entry has no source — " +
+		installer.ClaudePluginUnresolvedFix + "\n"
+	for _, test := range []struct {
+		name               string
+		plugin             pfmconfig.ClaudePlugin
+		noSettings         bool
+		known              string
+		want               func(path, store string) string
+		warnings, failures int
+	}{
+		{
+			"no source",
+			pfmconfig.ClaudePlugin{ID: "typesafe@typesafe-ai"},
+			false, `{"some-other":{}}`,
+			func(string, string) string { return cannot }, 1, 0,
+		},
+		{
+			"no source and no settings.json",
+			pfmconfig.ClaudePlugin{ID: "typesafe@typesafe-ai"},
+			true, `{"some-other":{}}`,
+			func(path, _ string) string {
+				// Nothing is enabled in a store never set up: the installed id needs its marketplace too.
+				return "doctor: claude_plugins skipped: no settings.json at " + path + " (store never set up)\n" + cannot +
+					"doctor: claude_plugins plugin installed@gone-market cannot be installed: marketplace gone-market" +
+					" is not known to Claude Code and its claude.plugins entry has no source — " +
+					installer.ClaudePluginUnresolvedFix + "\n"
+			}, 2, 0,
+		},
+		{"with a source", pfmconfig.ClaudePlugin{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, false, `{"some-other":{}}`, func(path, store string) string {
+			return "doctor: claude_plugins plugin typesafe@typesafe-ai not enabled in " + path + " — run pfm install --yes\n" +
+				"doctor: claude_plugins plugin typesafe@typesafe-ai not installed in " + store + " — run pfm install --yes\n"
+		}, 2, 0},
+		{
+			"an unreadable marketplace record",
+			pfmconfig.ClaudePlugin{ID: "agent-effort"},
+			false, `{`,
+			func(path, store string) string {
+				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
+					filepath.Join(store, "plugins", "known_marketplaces.json") + ": unexpected end of JSON input\n" +
+					"doctor: claude_plugins plugin agent-effort@agent-effort not enabled in " + path + " — run pfm install --yes\n" +
+					"doctor: claude_plugins plugin agent-effort@agent-effort not installed in " + store + " — run pfm install --yes\n"
+			}, 2, 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := t.TempDir()
+			path := filepath.Join(store, "settings.json")
+			if !test.noSettings {
+				raw, _ := json.Marshal(map[string]any{"enabledPlugins": map[string]bool{"installed@gone-market": true}})
+				if err := os.WriteFile(path, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeDoctorInstalledPlugins(t, store, "installed@gone-market")
+			if err := os.WriteFile(
+				filepath.Join(store, "plugins", "known_marketplaces.json"),
+				[]byte(test.known),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			tally := &doctorTally{}
+			plugins := []pfmconfig.ClaudePlugin{test.plugin, {ID: "installed@gone-market"}}
+			if test.known == `{` {
+				plugins = append(plugins, pfmconfig.ClaudePlugin{ID: "typesafe@typesafe-ai"})
+			}
+			printClaudePluginsDoctor(&out, store, installer.ClaudePluginBuild{Plugins: plugins}, tally)
+			want := test.want(path, store)
+			if out.String() != want || tally.warnings != test.warnings || tally.failures != test.failures {
+				t.Fatalf("got %q tally=%+v\nwant %q warnings=%d failures=%d",
+					out.String(), tally, want, test.warnings, test.failures)
+			}
+		})
 	}
 }
 
@@ -111,7 +199,9 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			}
 			var out bytes.Buffer
 			tally := &doctorTally{}
-			printClaudePluginsDoctor(&out, store, installer.ClaudePluginBuild{}, tally)
+			printClaudePluginsDoctor(
+				&out, store, installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()}, tally,
+			)
 			if out.String() != want || tally.warnings != warnings || tally.failures != failures {
 				t.Fatalf(
 					"got %q tally=%+v want %q warnings=%d failures=%d",
@@ -155,7 +245,9 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			home := t.TempDir()
 			store := filepath.Join(home, ".claude")
 			root := filepath.Join(home, "src")
-			build := installer.ClaudePluginBuild{Version: "0.80.0-alpha", Home: home, CheckoutRoot: root}
+			build := installer.ClaudePluginBuild{
+				Version: "0.80.0-alpha", Home: home, CheckoutRoot: root, Plugins: pfmconfig.DefaultClaudePlugins(),
+			}
 			if state == "alpha fallback" {
 				build.CheckoutRoot = ""
 			}

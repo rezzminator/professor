@@ -17,13 +17,13 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-// An -alpha build installs each table plugin from a local marketplace pfm
+// An -alpha build installs each bare plugin name from a local marketplace pfm
 // owns, ~/.local/share/{plugin}-dev: its .claude-plugin/marketplace.json names
 // the one plugin at ./plugins/{plugin}, a copy of the checkout's
 // plugins/{plugin} refreshed on every install. A copy, never a symlink: Claude
 // Code refuses a plugin file that resolves outside its marketplace dir.
 
-// claudePluginOwner is the GitHub owner every table plugin's marketplace names.
+// claudePluginOwner is the GitHub owner every bare plugin name's marketplace names.
 const claudePluginOwner = "rezzminator"
 
 // devMarketplaceName is the local marketplace a plugin installs from on -alpha.
@@ -343,7 +343,7 @@ func mirrorPluginTree(source, target string) error {
 	return os.RemoveAll(aside)
 }
 
-// otherID is the table plugin's id this build does not ensure: the GitHub id
+// otherID is the id of ours this build does not ensure: the GitHub id
 // when it ensures the -dev copy, the -dev id otherwise.
 func (target ClaudePluginTarget) otherID() string {
 	if target.ID == target.DevID {

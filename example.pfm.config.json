@@ -21,6 +21,12 @@
     "maxSubagentSpawnDepth": 8,
     "maxConcurrentSubagents": null,
     "pluginCheckoutRoot": null,
+    "plugins": [
+      "cache-live-control",
+      "sub-agent-compact",
+      "agent-effort",
+      "tool-visibility-controller"
+    ],
     "costLedger": true
   },
   "codex": {

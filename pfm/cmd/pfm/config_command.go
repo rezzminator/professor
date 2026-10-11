@@ -227,6 +227,18 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
 	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
 	printClaude("pluginCheckoutRoot", config.Claude.PluginCheckoutRoot)
+	plugins := make([]string, 0, len(config.Claude.Plugins))
+	for _, plugin := range config.Claude.Plugins {
+		entry := plugin.ID
+		if plugin.Source != "" {
+			entry += " (source " + plugin.Source + ")"
+		}
+		plugins = append(plugins, entry)
+	}
+	if len(plugins) == 0 {
+		plugins = append(plugins, "none")
+	}
+	printClaude("plugins", strings.Join(plugins, ","))
 	printClaude("costLedger", config.Claude.CostLedger)
 	fmt.Fprintf(
 		stdout,

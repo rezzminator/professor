@@ -148,7 +148,7 @@ Codex hook trust (P3): pfm registers it for the fleet through `codexappendix.Reg
 
 ## pfm after the cut
 
-- **`pfm install`** installs the plugin into every Claude config dir as one row of `claudePlugins` (`pfm/internal/installer/claude_plugins.go:51`); an alpha build copies it from the checkout like the other four (`claude_plugins_local.go`). It writes `targets.json` and runs `engine-sync global --codex-home H` for every home.
+- **`pfm install`** installs no engine-sync plugin on its own; listing the full id `engine-sync@professor` in `claude.plugins` has it ensured through the primary account like any listed plugin (`pfm/internal/installer/claude_plugins.go`). It writes `targets.json` and runs `engine-sync global --codex-home H` for every home.
 - **Workbench:** `EnsureMirror` and `CheckMirror` (`pfm/internal/workbench/mirror.go:21`) exec `engine-sync build|check {bench}`.
 - **`pfm doctor`** runs `engine-sync doctor` and renders its rows; a missing binary is a failing row, never an absent one.
 - **Forwarders:** for one release `pfm codex build|check|agents` and `pfm opencode build|check|doctor` exec the stable binary with the same arguments, print one stderr line naming the engine-sync command, and pass its exit code through. Without them every adopter's Stop hook calls a `pfm codex` that answers `unknown action`, which `codex-sync.sh` turns into `decision: block` on every Stop.

@@ -101,6 +101,9 @@ type ClaudePrefs struct {
 	PluginCheckoutRoot string
 	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
 	CostLedger bool
+	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
+	// Machine-wide: an account may not set it.
+	Plugins []ClaudePlugin
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -298,6 +301,8 @@ type rawClaude struct {
 	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
 	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
 	CostLedger             *bool   `json:"costLedger,omitempty"`
+	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
+	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
 }
 
 type rawOpenCode struct {
@@ -452,6 +457,7 @@ func defaultsWithMCPServers(
 		"claude.cleanupPeriodDays":                           SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
 		KeyClaudePluginCheckoutRoot:                          SourceDefault,
+		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
@@ -505,6 +511,7 @@ func defaultsWithMCPServers(
 			RequireManagedCleanup: true,
 			Cache1H:               true,
 			CostLedger:            true,
+			Plugins:               DefaultClaudePlugins(),
 
 			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 		},
@@ -742,17 +749,8 @@ func loadWithMCPServers(
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
 		}
-		if raw.Claude.PluginCheckoutRoot != nil {
-			root, err := expandHomePath(*raw.Claude.PluginCheckoutRoot, home)
-			if err != nil {
-				return Config{}, fmt.Errorf("config %s: %s %w", result.Path, KeyClaudePluginCheckoutRoot, err)
-			}
-			result.Claude.PluginCheckoutRoot = root
-			result.Sources[KeyClaudePluginCheckoutRoot] = SourceFile
-		}
-		if raw.Claude.CostLedger != nil {
-			result.Claude.CostLedger = *raw.Claude.CostLedger
-			result.Sources[KeyClaudeCostLedger] = SourceFile
+		if err := applyClaudeMachinePrefs(&result.Claude, *raw.Claude, home, result.Path, result.Sources); err != nil {
+			return Config{}, err
 		}
 		if err := applySubagentCaps(
 			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
@@ -1448,6 +1446,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			"cache1h":               config.Claude.Cache1H,
 			"nativeCursor":          config.Claude.NativeCursor,
 			"pluginCheckoutRoot":    pluginRoot,
+			"plugins":               marshalClaudePlugins(config.Claude.Plugins),
 			"costLedger":            config.Claude.CostLedger,
 		},
 		codexName: codexValue,

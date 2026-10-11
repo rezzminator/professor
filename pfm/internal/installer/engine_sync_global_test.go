@@ -376,6 +376,54 @@ func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T)
 	}
 }
 
+// An engine-sync global step that fails outright (here the clone's policy
+// source cannot be inspected) is deferred as install defers it: the uninstall
+// still unwires the scheduler and the engine-sync targets, and the error comes
+// back at the end. The uninstall runs without the preflight, which would have
+// refused the same failure before touching anything.
+func TestUninstallEngineSyncFailureStillUnwiresTheSchedulerAndTargets(t *testing.T) {
+	home := t.TempDir()
+	runner := &fakeRunner{manager: true}
+	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targets := enginesync.TargetsPath(paths.OSEnv{}, home)
+	if _, err := os.Lstat(targets); err != nil {
+		t.Fatalf("install wrote no %s: %v", targets, err)
+	}
+	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "engine-sync"), "not a directory\n")
+	options, err := normalizeInstallerOptions(Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Runner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	options.Stdout = &output
+	installer := &engine{
+		options: options, apply: true, stamp: "fixture", managedRoot: managedRootForHome(options.Home),
+	}
+	runner.calls = nil
+	failure := errors.Join(installer.uninstall(context.Background()), errors.Join(installer.deferred...))
+	if failure == nil || !strings.Contains(failure.Error(), "inspect engine-sync machine policy") {
+		t.Fatalf("uninstall error = %v, want the engine-sync failure\n%s", failure, output.String())
+	}
+	if _, statErr := os.Lstat(targets); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("uninstall left %s after the engine-sync failure: %v", targets, statErr)
+	}
+	teardown := "disable --now"
+	if schedulerIsLaunchd {
+		teardown = "launchctl bootout"
+	}
+	if joined := strings.Join(runner.calls, "\n"); !strings.Contains(joined, teardown) {
+		t.Fatalf("the unit teardown (%q) did not run after the engine-sync failure:\n%s\n%s",
+			teardown, joined, output.String())
+	}
+}
+
 func TestWireEngineSyncGlobalMachinePolicy(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	for _, name := range []string{"apply", "plan", "plan wrong target", "plan targets", "operator", "uninstall owned", "uninstall operator"} {

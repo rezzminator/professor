@@ -590,12 +590,10 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.retireDeadRegistryLinks(); err != nil {
 		return err
 	}
-	if err := installer.wireEngineSyncGlobal(nil); err != nil {
-		return err
-	}
-	if err := installer.wireEngineSyncTargets(); err != nil {
-		return err
-	}
+	// Deferred, as install defers them: a failing engine-sync step must not
+	// leave the launch agent loaded and the machine targets wired.
+	installer.deferFailure(installer.wireEngineSyncGlobal(nil))
+	installer.deferFailure(installer.wireEngineSyncTargets())
 	if schedulerIsLaunchd {
 		if err := installer.unwireLaunchAgent(ctx); err != nil {
 			return err

@@ -33,6 +33,14 @@ const (
 	titleRecord  = `{"type":"custom-title","customTitle":"x"}`
 )
 
+// SubagentHandback is the tool a sub-agent ends its turn with: Claude Code marks its result toolEndsTurn.
+const (
+	handback = `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]},` +
+		`"toolEndsTurn":true}`
+	notEnding = `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]},` +
+		`"toolEndsTurn":false}`
+)
+
 func TestScanClaudeDecidesFromTheNewestAssistantOrUserRecord(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -46,6 +54,8 @@ func TestScanClaudeDecidesFromTheNewestAssistantOrUserRecord(t *testing.T) {
 		{"a streaming message is open", []string{assistant("claude-opus-5-5", "")}, true, "claude-opus-5-5"},
 		{"a fresh prompt owes an answer", []string{assistant("claude-opus-5-5", "end_turn"), userPrompt}, true, "claude-opus-5-5"},
 		{"a tool result owes an answer", []string{assistant("claude-opus-5-5", "tool_use"), toolResult}, true, "claude-opus-5-5"},
+		{"a handback result ends the turn", []string{assistant("claude-opus-5-5", "tool_use"), handback}, false, "claude-opus-5-5"},
+		{"a result not marked as ending the turn owes an answer", []string{assistant("claude-opus-5-5", "tool_use"), notEnding}, true, "claude-opus-5-5"},
 		{"an interrupt ends the turn", []string{assistant("claude-opus-5-5", "tool_use"), interrupted}, false, "claude-opus-5-5"},
 		{"a slash command is not a turn", []string{assistant("claude-opus-5-5", "end_turn"), slashCommand}, false, "claude-opus-5-5"},
 		{

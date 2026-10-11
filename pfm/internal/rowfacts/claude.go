@@ -20,7 +20,10 @@ var claudeScanWidths = []int64{16 << 10, 256 << 10, 2 << 20}
 
 // claudeRecord is the part of a transcript line the facts come from.
 type claudeRecord struct {
-	Message *struct {
+	// ToolEndsTurn marks a user record that carries the result of a tool that
+	// ends the turn (SubagentHandback, StructuredOutput): nothing follows it.
+	ToolEndsTurn bool `json:"toolEndsTurn"`
+	Message      *struct {
 		Model      string          `json:"model"`
 		StopReason *string         `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
@@ -38,14 +41,18 @@ var finishedStops = map[string]bool{"end_turn": true, "stop_sequence": true, "ma
 
 // claudeTurn decides from the newest assistant or user record whether a turn is
 // open. A user record closes it only when it is Claude's own marker for a turn
-// that ended without an answer — an interrupt, a local slash command — and
-// otherwise (a prompt, a tool result) the assistant owes an answer.
+// that ended without an answer — an interrupt, a local slash command, the
+// result of a tool that ends the turn (toolEndsTurn) — and otherwise (a prompt,
+// a tool result) the assistant owes an answer.
 func claudeTurn(line []byte, record claudeRecord, isAssistant bool) (working bool) {
 	if record.Message == nil {
 		return false
 	}
 	if isAssistant {
 		return record.Message.StopReason == nil || !finishedStops[*record.Message.StopReason]
+	}
+	if record.ToolEndsTurn {
+		return false
 	}
 	content := bytes.TrimSpace(record.Message.Content)
 	switch {

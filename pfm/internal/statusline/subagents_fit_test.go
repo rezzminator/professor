@@ -58,3 +58,53 @@ func TestRenderSubagentsFitsColumns(t *testing.T) {
 		t.Fatalf("content = %q, want cache and cwd dropped, the label kept", got)
 	}
 }
+
+// The roster shortens before the effort goes and is the last part to leave:
+// the cwd, the cache and the compactions go first, the effort after its
+// shortening.
+func TestFitRowShortensThenDropsRoster(t *testing.T) {
+	parts := func() []rowPart {
+		return []rowPart{
+			{text: "2/9"},
+			{
+				text:  "1/4 tracer · 2/3 sub-tracer · 1 lander",
+				short: "1/4 tracer · 2/3 sub-tracer +1",
+				drop:  dropRosterShort,
+				gone:  dropRoster,
+			},
+			{text: "gauge $1/2/3"},
+			{text: "opus·high", short: "opus", drop: dropEffort},
+			{text: "cache", drop: dropCache},
+			{text: "label"},
+		}
+	}
+	cases := []struct {
+		name    string
+		columns int
+		want    string
+	}{
+		{
+			"the cache goes before the roster shortens", 80,
+			"2/9│1/4 tracer · 2/3 sub-tracer · 1 lander│gauge $1/2/3│opus·high│label",
+		},
+		{
+			"short of the full roster: the working roles, the rest counted", 74,
+			"2/9│1/4 tracer · 2/3 sub-tracer +1│gauge $1/2/3│opus·high│label",
+		},
+		{
+			"shorter still: the effort shortens to the family", 70,
+			"2/9│1/4 tracer · 2/3 sub-tracer +1│gauge $1/2/3│opus│label",
+		},
+		{
+			"narrowest: the roster leaves, the count stays", 30,
+			"2/9│gauge $1/2/3│opus│label",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripANSICodes(fitRow(parts(), tc.columns)); got != tc.want {
+				t.Fatalf("fitRow(%d) =\n  %q\nwant\n  %q", tc.columns, got, tc.want)
+			}
+		})
+	}
+}

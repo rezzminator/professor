@@ -8,34 +8,52 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // agentNesting is what a row says about the agents below its task, at every
 // depth: how many there are, how many are working right now (their own turn
-// is open), and how many could not be read. err is a failure to look (the
-// subagents directory or a meta file could not be read) and renders "?/?",
-// never as "none".
+// is open), and how many could not be read; roles says which they are, grouped
+// by role. err is a failure to look (the subagents directory or a meta file
+// could not be read) and renders "?/?", never as "none".
 type agentNesting struct {
 	total   int
 	active  int
 	unknown int
+	roles   []roleCount
 	err     error
+}
+
+// roleCount is the agents below a task that share one role: how many, how many
+// work, how many could not be read, and the depth of the first of them (1 =
+// spawned by the task itself), which orders the roster. name "" is the agents
+// whose meta file names no agentType: their role could not be read.
+type roleCount struct {
+	name    string
+	total   int
+	active  int
+	unknown int
+	depth   int
 }
 
 // agentTree is one scan of the session's subagents directory: every agent's
 // parent from its meta file's parentAgentId, which Claude Code writes for an
-// agent spawned by another agent (a main-loop spawn carries none). open caches
+// agent spawned by another agent (a main-loop spawn carries none), and its
+// agentType (types, "" when the meta names none). open caches
 // each agent's own turn state for the render, spent each agent's billing.
 // over and now (judgeLiveness) decide which agents with an open turn really
 // work: a transcript cannot say an agent was killed.
 type agentTree struct {
 	dir      string
 	children map[string][]string
+	types    map[string]string
 	err      error
 	warnings []string
 	open     map[string]turnState
@@ -60,6 +78,11 @@ const (
 // answers, so past this its open turn is a dead one.
 const agentDeadAfter = 15 * time.Minute
 
+// unknownRole is what the roster shows, in the warn colour, for agents whose
+// meta file names no agentType: a failure to read their role, as the identity
+// segment's "role ?".
+const unknownRole = "?"
+
 // tailWindow is the first read from a transcript's end; it doubles until a
 // message entry is found, so one huge tool result costs a longer read, never
 // a wrong answer.
@@ -70,7 +93,12 @@ const tailWindow = 64 << 10
 // file that cannot be read, sets err: the parent of that agent is unknown, so
 // no row may claim a count it cannot vouch for.
 func scanAgentTree(sessionTranscript string) *agentTree {
-	tree := &agentTree{children: map[string][]string{}, open: map[string]turnState{}, spent: map[string]agentSpend{}}
+	tree := &agentTree{
+		children: map[string][]string{},
+		types:    map[string]string{},
+		open:     map[string]turnState{},
+		spent:    map[string]agentSpend{},
+	}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		tree.err = errors.New("payload names no session transcript")
 		return tree
@@ -95,6 +123,7 @@ func scanAgentTree(sessionTranscript string) *agentTree {
 			tree.warnings = append(tree.warnings, tree.err.Error())
 			continue
 		}
+		tree.types[id] = strings.TrimSpace(meta.AgentType)
 		if parent := strings.TrimSpace(meta.ParentAgentID); parent != "" && parent != id {
 			tree.children[parent] = append(tree.children[parent], id)
 		}
@@ -134,30 +163,70 @@ func finishedTasks(tasks []subagentTask) map[string]bool {
 
 // nesting counts every agent below one task, at any depth, and how many of
 // them are working: their own turn is open. An orchestrator that ended its
-// turn to wait on background workers is not working; its workers are.
-func (tree *agentTree) nesting(id string) agentNesting {
+// turn to wait on background workers is not working; its workers are. It also
+// groups them by role (roles resolves an agentType to its definition's role, as
+// the identity segment does), nearest spawn depth first, then by name: an order
+// that holds from one render to the next while agents come and go.
+func (tree *agentTree) nesting(id string, roles *roleLookup, warn io.Writer) agentNesting {
 	if tree.err != nil {
 		return agentNesting{err: tree.err}
 	}
 	var nest agentNesting
 	seen := map[string]bool{id: true}
-	queue := append([]string(nil), tree.children[id]...)
+	type queued struct {
+		id    string
+		depth int
+	}
+	var queue []queued
+	for _, child := range tree.children[id] {
+		queue = append(queue, queued{child, 1})
+	}
+	byRole := map[string]int{} // role name → index in nest.roles
 	for len(queue) > 0 {
 		next := queue[0]
 		queue = queue[1:]
-		if seen[next] {
+		if seen[next.id] {
 			continue
 		}
-		seen[next] = true
-		queue = append(queue, tree.children[next]...)
+		seen[next.id] = true
+		for _, child := range tree.children[next.id] {
+			queue = append(queue, queued{child, next.depth + 1})
+		}
+		name := ""
+		if agentType := tree.types[next.id]; agentType != "" {
+			name = roles.name(agentType, warn)
+		} else {
+			fmt.Fprintf(
+				warn,
+				"pfm statusline --subagents: row %s: nested agents: meta of %s names no agentType (roster shows %s)\n",
+				id,
+				next.id,
+				unknownRole,
+			)
+		}
+		index, ok := byRole[name]
+		if !ok {
+			index = len(nest.roles)
+			byRole[name] = index
+			nest.roles = append(nest.roles, roleCount{name: name, depth: next.depth})
+		}
 		nest.total++
-		switch tree.turn(next) {
+		nest.roles[index].total++
+		switch tree.turn(next.id) {
 		case turnWorking:
 			nest.active++
+			nest.roles[index].active++
 		case turnUnread:
 			nest.unknown++
+			nest.roles[index].unknown++
 		}
 	}
+	sort.SliceStable(nest.roles, func(a, b int) bool {
+		if nest.roles[a].depth != nest.roles[b].depth {
+			return nest.roles[a].depth < nest.roles[b].depth
+		}
+		return nest.roles[a].name < nest.roles[b].name
+	})
 	return nest
 }
 
@@ -187,9 +256,12 @@ func (tree *agentTree) turn(id string) turnState {
 }
 
 // turnOpen reads an agent transcript's last message entry: its turn is over
-// only when that entry is an assistant message that stopped (a stop_reason)
-// without a tool_use. A tool call, a tool result, a prompt or a message still
-// streaming (no stop_reason yet) means it is working. A torn final line is the
+// when that entry is an assistant message that stopped (a stop_reason) without
+// a tool_use, or a tool result Claude Code marks toolEndsTurn (the result of
+// SubagentHandback, the tool a sub-agent ends its turn with, or of
+// StructuredOutput in a workflow agent: nothing follows it). Any other tool call, tool result or prompt, or a message still
+// streaming (no stop_reason yet), means it is working; a transcript from a
+// Claude Code that writes no toolEndsTurn reads as before. A torn final line is the
 // agent mid-write and fails to parse, so it is skipped; a transcript with no message entry yet is a
 // turn that has not produced its first reply. last is when that entry was
 // written, the file's mtime for a transcript with no message entry yet.
@@ -235,9 +307,10 @@ func turnOpen(path string) (open bool, last time.Time, err error) {
 // zero when it carries none.
 func messageTurnOpen(line []byte) (open bool, stamped time.Time, ok bool) {
 	var entry struct {
-		Type      string    `json:"type"`
-		Timestamp time.Time `json:"timestamp"`
-		Message   struct {
+		Type         string    `json:"type"`
+		Timestamp    time.Time `json:"timestamp"`
+		ToolEndsTurn bool      `json:"toolEndsTurn"`
+		Message      struct {
 			StopReason *string         `json:"stop_reason"`
 			Content    json.RawMessage `json:"content"`
 		} `json:"message"`
@@ -247,7 +320,7 @@ func messageTurnOpen(line []byte) (open bool, stamped time.Time, ok bool) {
 	}
 	switch entry.Type {
 	case entryUser:
-		return true, entry.Timestamp, true
+		return !entry.ToolEndsTurn, entry.Timestamp, true
 	case entryAssistant:
 	default:
 		return false, time.Time{}, false
@@ -285,4 +358,64 @@ func nestingSegment(nest agentNesting) string {
 		line += cWarn + " (" + strconv.Itoa(nest.unknown) + " unread)" + reset
 	}
 	return line
+}
+
+// rosterSep joins the roles of a roster.
+const rosterSep = cMuted + " · " + reset
+
+// roleText is one role of a roster: "4 tracer" muted when none of its agents
+// works, "2/4 tracer" with the working count in the running colour (and a "?"
+// for agents that could not be read) when some do; agents whose role could not
+// be read are named by a "?" in the warn colour.
+func roleText(role roleCount) string {
+	name := cRole + role.name + reset
+	if role.name == "" {
+		name = cWarn + unknownRole + reset
+	}
+	if role.active == 0 && role.unknown == 0 {
+		if role.name == "" {
+			return cMuted + strconv.Itoa(role.total) + " " + reset + name
+		}
+		return cMuted + strconv.Itoa(role.total) + " " + role.name + reset
+	}
+	working := cMuted + "0" + reset
+	if role.active > 0 {
+		working = cRunning + strconv.Itoa(role.active) + reset
+	}
+	text := working + cMuted + "/" + reset + cTools + strconv.Itoa(role.total) + reset
+	if role.unknown > 0 {
+		text += cWarn + "?" + reset
+	}
+	return text + " " + name
+}
+
+// rosterPart names the agents below the task, grouped by role: "1 flights-lander
+// · 2/4 tracer · 14/32 sub-tracer". Short, for a narrow panel, keeps the roles
+// with working or unread agents and counts the rest ("… +2"), or says "3 roles"
+// when none works, unless that is no narrower than the full roster. A failed scan has no roster (the count already says "?/?"),
+// and neither has a task that spawned nothing.
+func rosterPart(nest agentNesting) (rowPart, bool) {
+	if nest.err != nil || len(nest.roles) == 0 {
+		return rowPart{}, false
+	}
+	var all, live []string
+	for _, role := range nest.roles {
+		text := roleText(role)
+		all = append(all, text)
+		if role.active > 0 || role.unknown > 0 {
+			live = append(live, text)
+		}
+	}
+	full := strings.Join(all, rosterSep)
+	short := cMuted + plural(len(nest.roles), "role") + reset
+	if ansi.StringWidth(short) >= ansi.StringWidth(full) {
+		short = full // "1 role" is no shorter than "2 qa", and loses the name
+	}
+	if len(live) > 0 {
+		short = strings.Join(live, rosterSep)
+		if hidden := len(all) - len(live); hidden > 0 {
+			short += cMuted + " +" + strconv.Itoa(hidden) + reset
+		}
+	}
+	return rowPart{text: full, short: short, drop: dropRosterShort, gone: dropRoster}, true
 }

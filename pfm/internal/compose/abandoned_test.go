@@ -28,6 +28,19 @@ func TestAbandonedLaunch(t *testing.T) {
 			transcript: store.Transcript{PromptCount: 1},
 		},
 		{
+			// /clear or /resume inside the pane's own Claude: that one
+			// process runs the crumb's thread now, so the launch id in its
+			// argv names a conversation nothing runs, prompts or not.
+			name:    "the pane's own process moved on from a launch thread with prompts",
+			agent:   gather.Agent{PID: 7, PanePID: 7, Socket: "cc-1-1-1", PaneID: "%0", SessionID: "launch"},
+			indexed: true, transcript: store.Transcript{PromptCount: 3}, want: true,
+		},
+		{
+			name:    "a child process in the pane keeps a launch thread with prompts",
+			agent:   gather.Agent{PID: 8, PanePID: 7, Socket: "cc-1-1-1", PaneID: "%0", SessionID: "launch"},
+			indexed: true, transcript: store.Transcript{PromptCount: 1},
+		},
+		{
 			name:  "pane runs its launch thread",
 			agent: gather.Agent{Socket: "cc-1-1-1", PaneID: "%0", SessionID: "resumed"},
 		},

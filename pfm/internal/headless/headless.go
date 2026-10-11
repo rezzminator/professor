@@ -64,6 +64,9 @@ type Chat struct {
 	Session string
 	Pane    string
 	Live    bool
+	// PanePID is the process at the root of the seat's pane, as the fleet
+	// last listed it; 0 when unknown.
+	PanePID int
 }
 
 // Status is the machine-readable verdict. Field names are a contract — a
@@ -159,6 +162,18 @@ func Inspect(
 	chat Chat,
 	now time.Time,
 ) (Status, error) {
+	return InspectWith(ctx, chat, now, nil)
+}
+
+// InspectWith is Inspect reading the transcript through transcripts, which
+// carries each transcript a watch reads from one poll to the next
+// (transcript.Reader); nil reads it whole.
+func InspectWith(
+	ctx context.Context,
+	chat Chat,
+	now time.Time,
+	transcripts *transcript.Reader,
+) (Status, error) {
 	status := Status{
 		Name:      chat.Name,
 		Engine:    chat.Engine,
@@ -175,7 +190,7 @@ func Inspect(
 		}
 		return status, nil
 	}
-	meta, err := transcript.ReadMeta(chat.Path, string(chat.Engine))
+	reading, err := transcripts.Read(ctx, chat.Path, string(chat.Engine), transcript.TextCap)
 	if err != nil {
 		// A live engine can publish its fleet seat before it creates the first
 		// rollout record. That is the same honest state as an empty Path: the
@@ -185,8 +200,9 @@ func Inspect(
 			status.State = StateWorking
 			return status, nil
 		}
-		return status, fmt.Errorf("read chat transcript metadata %s: %w", chat.Path, err)
+		return status, fmt.Errorf("read chat transcript %s: %w", chat.Path, err)
 	}
+	meta := reading.Meta
 	status.Model = meta.Model
 	status.ContextPct = meta.ContextPercent()
 	if meta.ModifiedUnixNS > 0 {
@@ -200,14 +216,10 @@ func Inspect(
 		}
 	}
 
-	entries, _, err := transcript.Tail(ctx, chat.Path, string(chat.Engine), 1, transcript.TextCap)
-	if err != nil {
-		return status, fmt.Errorf("read chat transcript tail %s: %w", chat.Path, err)
-	}
-	if len(entries) > 0 {
-		status.Last = transcript.Condensed(entries[len(entries)-1])
+	if reading.HasLast {
+		status.Last = transcript.Condensed(reading.Last)
 		if chat.Live {
-			last := entries[len(entries)-1]
+			last := reading.Last
 			if last.Role == transcript.RoleTool {
 				status.PendingTool = last.Tool
 			}

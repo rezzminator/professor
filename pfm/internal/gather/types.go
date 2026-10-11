@@ -29,6 +29,10 @@ type TmuxSnapshot struct {
 	// ProbeWarnings.
 	EmptyServers  []string
 	ProbeWarnings []string
+	// Unreadable names each socket whose server could not be read (any
+	// failure but ErrServerGone), with why: a socket the probe failed to
+	// read, never one it proved empty. Each also carries a ProbeWarnings line.
+	Unreadable map[string]string
 }
 
 // Crumb maps a socket or pane to its current Claude transcript.
@@ -154,4 +158,7 @@ type Snapshot struct {
 	CorpseSwept     []string
 	StaleSwept      []string
 	Warnings        []string
+	// UnreadableSockets is TmuxSnapshot.Unreadable: each chat socket whose
+	// server could not be read this pass, with why.
+	UnreadableSockets map[string]string
 }

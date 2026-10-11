@@ -1,4 +1,4 @@
-package reminder
+package schedule
 
 import (
 	"context"
@@ -33,7 +33,7 @@ func (rig *deliveryRig) deliverer() *chatDeliverer {
 			rig.captured++
 			return rig.captures[index], nil
 		},
-		inject: func(_ context.Context, _ fleetdb.Reminder, target, _ string) error {
+		inject: func(_ context.Context, _ fleetdb.Schedule, target, _ string) error {
 			rig.injected = append(rig.injected, target)
 			return rig.injectErr
 		},
@@ -42,18 +42,18 @@ func (rig *deliveryRig) deliverer() *chatDeliverer {
 
 func shortenComposerWait(t *testing.T, poll, wait time.Duration) {
 	t.Helper()
-	oldPoll, oldWait := reminderComposerPoll, reminderComposerWait
-	reminderComposerPoll, reminderComposerWait = poll, wait
-	t.Cleanup(func() { reminderComposerPoll, reminderComposerWait = oldPoll, oldWait })
+	oldPoll, oldWait := scheduleComposerPoll, scheduleComposerWait
+	scheduleComposerPoll, scheduleComposerWait = poll, wait
+	t.Cleanup(func() { scheduleComposerPoll, scheduleComposerWait = oldPoll, oldWait })
 }
 
-var testReminder = fleetdb.Reminder{
+var testSchedule = fleetdb.Schedule{
 	ID: 7, SessionID: "sess-7", Label: "seven", SetByID: "setter-id", SetByLabel: "setter",
 }
 
-func TestReminderDelivererInjectsALiveChatByItsSessionId(t *testing.T) {
+func TestScheduleDelivererInjectsALiveChatByItsSessionId(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}}
-	if err := rig.deliverer().Deliver(context.Background(), testReminder, "msg"); err != nil {
+	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if len(rig.injected) != 1 || rig.injected[0] != "sess-7" || rig.captured != 0 {
@@ -62,10 +62,10 @@ func TestReminderDelivererInjectsALiveChatByItsSessionId(t *testing.T) {
 	}
 }
 
-func TestReminderDelivererWaitsForThreeConsecutiveComposerReads(t *testing.T) {
+func TestScheduleDelivererWaitsForThreeConsecutiveComposerReads(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := &deliveryRig{state: "opened", captures: []string{"booting", "❯ ", "booting", "❯ ", "❯ ", "❯ "}}
-	if err := rig.deliverer().Deliver(context.Background(), testReminder, "msg"); err != nil {
+	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if rig.captured != 6 || len(rig.injected) != 1 || rig.injected[0] != "cc-revived" ||
@@ -75,33 +75,33 @@ func TestReminderDelivererWaitsForThreeConsecutiveComposerReads(t *testing.T) {
 	}
 }
 
-func TestReminderDelivererRefusesAFolderTrustDialog(t *testing.T) {
+func TestScheduleDelivererRefusesAFolderTrustDialog(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := &deliveryRig{state: "opened", captures: []string{"Yes, I trust this folder\nNo, exit\n❯ 1. Yes"}}
-	err := rig.deliverer().Deliver(context.Background(), testReminder, "msg")
+	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "folder-trust dialog; nothing typed") || len(rig.injected) != 0 {
 		t.Fatalf("err=%v injected=%v, want the trust-dialog refusal and nothing typed", err, rig.injected)
 	}
 }
 
-func TestReminderDelivererTimesOutWithoutAComposer(t *testing.T) {
+func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 30*time.Millisecond)
 	rig := &deliveryRig{state: "opened", captures: []string{"still booting"}}
-	err := rig.deliverer().Deliver(context.Background(), testReminder, "msg")
+	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "showed no composer within") ||
 		!strings.Contains(err.Error(), "cc-revived") || len(rig.injected) != 0 {
 		t.Fatalf("err=%v injected=%v", err, rig.injected)
 	}
 }
 
-func TestReminderDelivererReportsResolveAndInjectFailures(t *testing.T) {
+func TestScheduleDelivererReportsResolveAndInjectFailures(t *testing.T) {
 	rig := &deliveryRig{openErr: errors.New("chat is not indexed")}
-	err := rig.deliverer().Deliver(context.Background(), testReminder, "msg")
+	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "resolve chat sess-7 (seven)") {
 		t.Fatalf("open failure err=%v", err)
 	}
 	rig = &deliveryRig{state: "live", injectErr: errors.New("pane gone")}
-	err = rig.deliverer().Deliver(context.Background(), testReminder, "msg")
+	err = rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "pane gone") {
 		t.Fatalf("inject failure err=%v", err)
 	}

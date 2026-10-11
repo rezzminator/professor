@@ -167,9 +167,9 @@ type scanRequest struct {
 	Safe    string
 	Runtime *pfmconfig.Runtime
 	Comms   commsReader
-	// Reminders reads which sessions have an unseen reminder; nil leaves every
+	// Schedules reads which sessions have an unseen schedule; nil leaves every
 	// row unmarked.
-	Reminders unseenReminderReader
+	Schedules unseenScheduleReader
 	// Facts reads each chat's model, effort and working state from its
 	// transcript tail; nil — every non-interactive caller, so --plain and --tsv
 	// stay byte-identical — leaves the rows as composed.
@@ -196,8 +196,8 @@ type commsReader interface {
 	CommsSince(context.Context, int64, int) ([]fleetdb.CommsEvent, error)
 }
 
-type unseenReminderReader interface {
-	UnseenReminderSessionIDs(context.Context) (map[string]bool, error)
+type unseenScheduleReader interface {
+	UnseenScheduleSessionIDs(context.Context) (map[string]bool, error)
 }
 
 type cosmosSampler struct{ reader commsReader }
@@ -284,17 +284,17 @@ func buildSnapshot(
 		}
 	}
 	rows := output.Rows
-	reminderError := ""
-	if request.Reminders != nil {
-		unseen, err := request.Reminders.UnseenReminderSessionIDs(ctx)
+	scheduleError := ""
+	if request.Schedules != nil {
+		unseen, err := request.Schedules.UnseenScheduleSessionIDs(ctx)
 		if err != nil {
-			reminderError = fmt.Errorf("read reminder flags: %w", err).Error()
+			scheduleError = fmt.Errorf("read schedule flags: %w", err).Error()
 		} else {
 			// Clone: output.Rows is shared with scanResult.Output.
 			rows = slices.Clone(output.Rows)
 			for index := range rows {
 				if rows[index].ID != "" {
-					rows[index].Reminded = unseen[rows[index].ID]
+					rows[index].ScheduleFired = unseen[rows[index].ID]
 				}
 			}
 		}
@@ -314,7 +314,7 @@ func buildSnapshot(
 	}
 	return ui.Snapshot{
 		Rows:                   rows,
-		ReminderError:          reminderError,
+		ScheduleError:          scheduleError,
 		FactsError:             factsError,
 		View:                   request.View,
 		KilledCount:            output.KilledCount,

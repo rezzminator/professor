@@ -30,8 +30,10 @@ class FlightContracts(unittest.TestCase):
                      'templates/global/commands/flights/orchestrate-cross-harness.md'):
             self.assertIn('Change inventory', Path(file).read_text(), f'{file}: canonical inventory')
         lander = Path('templates/global/agents/flights-lander.md').read_text()
-        self.assertTrue('untracked line counts' in lander and 'review input' in lander,
-                        'review sizing and input include untracked source')
+        reviewers = [Path(f'templates/global/agents/{name}.md').read_text() for name in ('reviewer', 'reviewer-pro')]
+        self.assertTrue('UNTRACKED the owned untracked files' in lander
+                        and all('untracked line count' in r and 'WORKTREE' in r for r in reviewers),
+                        'review sizing and input include untracked source, whichever tier the lander picks')
 
 unittest.main()
 PY

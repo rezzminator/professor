@@ -325,9 +325,9 @@ func TestOpenDetachedTargetKeepsAgentRouterSemantics(t *testing.T) {
 	}
 }
 
-// seedUnseenReminder fires one reminder for sessionID in the jail's shared
+// seedUnseenSchedule fires one schedule for sessionID in the jail's shared
 // state database, leaving the session's unseen flag set.
-func seedUnseenReminder(t *testing.T, runtime config.Runtime, sessionID string) {
+func seedUnseenSchedule(t *testing.T, runtime config.Runtime, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
 	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
@@ -337,20 +337,20 @@ func seedUnseenReminder(t *testing.T, runtime config.Runtime, sessionID string) 
 		}
 	}()
 	created := time.Unix(1_800_000_000, 0)
-	reminderID, err := state.CreateReminder(ctx, fleetdb.Reminder{
+	scheduleID, err := state.CreateSchedule(ctx, fleetdb.Schedule{
 		SessionID: sessionID, Engine: "claude", Label: "worker", Prompt: "check the build",
 		Interval: time.Hour, Created: created,
 	})
 	if err != nil {
-		t.Fatalf("create reminder for %q: %v", sessionID, err)
+		t.Fatalf("create schedule for %q: %v", sessionID, err)
 	}
-	if changed, err := state.MarkReminderFired(ctx, reminderID, created.Add(time.Hour)); err != nil || !changed {
-		t.Fatalf("MarkReminderFired(%d) = %v, %v", reminderID, changed, err)
+	if changed, err := state.MarkScheduleFired(ctx, scheduleID, created.Add(time.Hour)); err != nil || !changed {
+		t.Fatalf("MarkScheduleFired(%d) = %v, %v", scheduleID, changed, err)
 	}
 	requireUnseen(t, runtime, sessionID, true)
 }
 
-// requireUnseen fails unless the session's unseen-reminder flag reads want.
+// requireUnseen fails unless the session's unseen-schedule flag reads want.
 func requireUnseen(t *testing.T, runtime config.Runtime, sessionID string, want bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -360,16 +360,16 @@ func requireUnseen(t *testing.T, runtime config.Runtime, sessionID string, want 
 			t.Errorf("close shared state: %v", err)
 		}
 	}()
-	unseen, err := state.UnseenReminderSessionIDs(ctx)
+	unseen, err := state.UnseenScheduleSessionIDs(ctx)
 	if err != nil {
-		t.Fatalf("read unseen reminders: %v", err)
+		t.Fatalf("read unseen schedules: %v", err)
 	}
 	if unseen[sessionID] != want {
-		t.Fatalf("unseen reminder of %q = %t, want %t (all unseen: %v)", sessionID, unseen[sessionID], want, unseen)
+		t.Fatalf("unseen schedule of %q = %t, want %t (all unseen: %v)", sessionID, unseen[sessionID], want, unseen)
 	}
 }
 
-func TestOpenRowClearsUnseenReminder(t *testing.T) {
+func TestOpenRowClearsUnseenSchedule(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
 		row  compose.Row
@@ -397,8 +397,8 @@ func TestOpenRowClearsUnseenReminder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			seedUnseenReminder(t, runtime, testCase.row.ID)
-			seedUnseenReminder(t, runtime, "other-session")
+			seedUnseenSchedule(t, runtime, testCase.row.ID)
+			seedUnseenSchedule(t, runtime, "other-session")
 			tmux := &fakeOpenTmux{alive: map[string]bool{"cc-live": testCase.live}}
 			stubOpenExecutor(t, tmux)
 			var stdout, stderr bytes.Buffer
@@ -412,7 +412,7 @@ func TestOpenRowClearsUnseenReminder(t *testing.T) {
 	}
 }
 
-func TestOpenIDClearsUnseenReminder(t *testing.T) {
+func TestOpenIDClearsUnseenSchedule(t *testing.T) {
 	root := testjail.Fleet(t)
 	const id = "d3333333-3333-4333-8333-333333333333"
 	seedClaudeChat(t, root, id)
@@ -420,7 +420,7 @@ func TestOpenIDClearsUnseenReminder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedUnseenReminder(t, runtime, id)
+	seedUnseenSchedule(t, runtime, id)
 	stubOpenExecutor(t, &fakeOpenTmux{alive: map[string]bool{}})
 	var stdout, stderr bytes.Buffer
 	if code := OpenID(context.Background(), id, &stdout, &stderr, &runtime); code != 0 {
@@ -429,10 +429,10 @@ func TestOpenIDClearsUnseenReminder(t *testing.T) {
 	requireUnseen(t, runtime, id, false)
 }
 
-// TestOpenDetachedIDKeepsUnseenReminder pins that the detached door — the
-// reminder fire and the MCP agent open — is not a human looking: the flag the
+// TestOpenDetachedIDKeepsUnseenSchedule pins that the detached door — the
+// schedule fire and the MCP agent open — is not a human looking: the flag the
 // fire just set must survive it.
-func TestOpenDetachedIDKeepsUnseenReminder(t *testing.T) {
+func TestOpenDetachedIDKeepsUnseenSchedule(t *testing.T) {
 	root := testjail.Fleet(t)
 	const id = "d4444444-4444-4444-8444-444444444444"
 	seedClaudeChat(t, root, id)
@@ -440,7 +440,7 @@ func TestOpenDetachedIDKeepsUnseenReminder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedUnseenReminder(t, runtime, id)
+	seedUnseenSchedule(t, runtime, id)
 	stubOpenExecutor(t, &fakeOpenTmux{alive: map[string]bool{}})
 	if _, err := OpenDetachedID(context.Background(), id, io.Discard, &runtime); err != nil {
 		t.Fatalf("OpenDetachedID() error = %v", err)

@@ -7,34 +7,34 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
-// TestRemindedRowsSortAboveEveryPinAndGroup pins the reminder order: a row
-// with an unseen fired reminder precedes the pinned update and new-chat rows
+// TestScheduleFiredRowsSortAboveEveryPinAndGroup pins the schedule order: a row
+// with an unseen fired schedule precedes the pinned update and new-chat rows
 // and every project and name group, and leaves its name group.
-func TestRemindedRowsSortAboveEveryPinAndGroup(t *testing.T) {
+func TestScheduleFiredRowsSortAboveEveryPinAndGroup(t *testing.T) {
 	tests := []struct {
 		name           string
-		reminded       []string
+		fired          []string
 		wantFirst      []string
 		wantGroupCount int
 		wantGrouped    []string
 	}{
 		{
 			name:           "group member and later-project row",
-			reminded:       []string{"grp:b", "late"},
+			fired:          []string{"grp:b", "late"},
 			wantFirst:      []string{"grp:b", "late", "update", "new"},
 			wantGroupCount: 2,
 			wantGrouped:    []string{"grp:a", "grp:c"},
 		},
 		{
 			name:           "later-project row only",
-			reminded:       []string{"late"},
+			fired:          []string{"late"},
 			wantFirst:      []string{"late", "update", "new"},
 			wantGroupCount: 3,
 			wantGrouped:    []string{"grp:a", "grp:b", "grp:c"},
 		},
 		{
-			name:           "every group member reminded empties the group",
-			reminded:       []string{"grp:a", "grp:b", "grp:c"},
+			name:           "every group member fired empties the group",
+			fired:          []string{"grp:a", "grp:b", "grp:c"},
 			wantFirst:      []string{"grp:a", "grp:b", "grp:c", "update", "new"},
 			wantGroupCount: 0,
 			wantGrouped:    nil,
@@ -53,7 +53,7 @@ func TestRemindedRowsSortAboveEveryPinAndGroup(t *testing.T) {
 				{Kind: compose.LiveClaude, ID: "late", Name: "late", Project: "omega", ActivityNS: 70},
 			}
 			for index := range snapshot.Rows {
-				snapshot.Rows[index].Reminded = slices.Contains(test.reminded, snapshot.Rows[index].ID)
+				snapshot.Rows[index].ScheduleFired = slices.Contains(test.fired, snapshot.Rows[index].ID)
 			}
 			model := NewModel(snapshot)
 			if len(model.filtered) < len(test.wantFirst) {

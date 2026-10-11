@@ -131,10 +131,10 @@ func TestChatsHeaderLineKeepsItsContextTokens(t *testing.T) {
 	if line := ansi.Strip(model.chatsHeaderLine(100)); !strings.Contains(line, "⟳ refreshing") {
 		t.Errorf("a refreshing picker says so: %q", line)
 	}
-	model.reminderError = "disk on fire"
+	model.scheduleError = "disk on fire"
 	line = ansi.Strip(model.chatsHeaderLine(100))
-	if !strings.Contains(line, "reminder flags unreadable: disk on fire") {
-		t.Errorf("an unreadable flag store never reads as no reminders: %q", line)
+	if !strings.Contains(line, "schedule flags unreadable: disk on fire") {
+		t.Errorf("an unreadable flag store never reads as no schedules: %q", line)
 	}
 }
 

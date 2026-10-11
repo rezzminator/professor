@@ -210,10 +210,11 @@ PRAGMA user_version=4;`,
 	}
 }
 
-// TestSharedOpenAddsHiddenRevisionUnderTheMigrationLock: an open that must add
-// hidden.revision waits for the migration lock, so two first openers never
-// both add it; a file that already has the column opens without the lock.
-func TestSharedOpenAddsHiddenRevisionUnderTheMigrationLock(t *testing.T) {
+// TestSharedOpenMigratesAtOpenUnderTheMigrationLock: an open that must add
+// hidden.revision or rename reminders to schedules waits for the migration
+// lock, so two first openers never both apply it; a file that already has both
+// opens without the lock.
+func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name  string
@@ -222,8 +223,8 @@ func TestSharedOpenAddsHiddenRevisionUnderTheMigrationLock(t *testing.T) {
 	}{
 		{name: "missing column waits for the lock", seed: v3Schema, waits: true},
 		{
-			name: "present column opens without it",
-			seed: v3Schema + "ALTER TABLE hidden ADD COLUMN revision TEXT NOT NULL DEFAULT '';",
+			name: "a current file opens without it",
+			seed: v3Schema + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -235,7 +236,8 @@ func TestSharedOpenAddsHiddenRevisionUnderTheMigrationLock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			waiting, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			// A held lock never releases, so only the configure step races this deadline.
+			waiting, cancel := context.WithTimeout(ctx, 2*time.Second)
 			held := OpenSharedState(waiting, paths.Values{StateDB: path})
 			cancel()
 			heldErr := held.Degraded()

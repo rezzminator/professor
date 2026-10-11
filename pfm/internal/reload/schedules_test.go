@@ -17,18 +17,18 @@ import (
 )
 
 const (
-	reminderOldID = "11111111-1111-4111-8111-111111111111"
-	reminderMidID = "22222222-2222-4222-8222-222222222222"
+	scheduleOldID = "11111111-1111-4111-8111-111111111111"
+	scheduleMidID = "22222222-2222-4222-8222-222222222222"
 )
 
-// reminderJail points the shared state database at a fresh temp file.
-func reminderJail(t *testing.T) {
+// scheduleJail points the shared state database at a fresh temp file.
+func scheduleJail(t *testing.T) {
 	t.Helper()
 	t.Setenv(paths.EnvHome, t.TempDir())
 	t.Setenv(paths.EnvStateDB, filepath.Join(t.TempDir(), "pfm.db"))
 }
 
-func openReminderState(t *testing.T) *fleetdb.Store {
+func openScheduleState(t *testing.T) *fleetdb.Store {
 	t.Helper()
 	values, err := pfmconfig.ResolvePaths()
 	if err != nil {
@@ -46,9 +46,9 @@ func openReminderState(t *testing.T) *fleetdb.Store {
 	return state
 }
 
-func seedReminder(t *testing.T, sessionID string, engine pfmengine.ID) {
+func seedSchedule(t *testing.T, sessionID string, engine pfmengine.ID) {
 	t.Helper()
-	if _, err := openReminderState(t).CreateReminder(context.Background(), fleetdb.Reminder{
+	if _, err := openScheduleState(t).CreateSchedule(context.Background(), fleetdb.Schedule{
 		SessionID: sessionID, Engine: string(engine), Prompt: "check the build",
 		Interval: time.Hour, Created: time.Unix(1_700_000_000, 0),
 	}); err != nil {
@@ -56,35 +56,35 @@ func seedReminder(t *testing.T, sessionID string, engine pfmengine.ID) {
 	}
 }
 
-// reminderSessions is the session id of every stored reminder.
-func reminderSessions(t *testing.T) []string {
+// scheduleSessions is the session id of every stored schedule.
+func scheduleSessions(t *testing.T) []string {
 	t.Helper()
-	reminders, err := openReminderState(t).Reminders(context.Background())
+	schedules, err := openScheduleState(t).Schedules(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var ids []string
-	for i := range reminders {
-		ids = append(ids, reminders[i].SessionID)
+	for i := range schedules {
+		ids = append(ids, schedules[i].SessionID)
 	}
 	return ids
 }
 
-func claudeReminderRequest(t *testing.T) Request {
+func claudeScheduleRequest(t *testing.T) Request {
 	t.Helper()
 	return Request{
-		Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-reminder", Pane: "%7",
+		Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-schedule", Pane: "%7",
 		CWD: "/jail/project", Account: 2, AccountIDs: []int{2},
 		Machine: reloadTestMachine("", t.TempDir()),
 	}
 }
 
-func TestRunNewCarriesTheChatsRemindersToTheRebornSession(t *testing.T) {
-	reminderJail(t)
-	seedReminder(t, reminderOldID, pfmengine.Claude)
-	request := claudeReminderRequest(t)
+func TestRunNewCarriesTheChatsSchedulesToTheRebornSession(t *testing.T) {
+	scheduleJail(t)
+	seedSchedule(t, scheduleOldID, pfmengine.Claude)
+	request := claudeScheduleRequest(t)
 	// What `pfm chat reload --new` hands Run: no session, the old one left behind.
-	request.New, request.LeftBehind = true, reminderOldID
+	request.New, request.LeftBehind = true, scheduleOldID
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
 	result, err := Run(context.Background(), request,
@@ -93,45 +93,45 @@ func TestRunNewCarriesTheChatsRemindersToTheRebornSession(t *testing.T) {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}
 	reborn := parsedReloadShell(t, tmux.respawn).SessionID
-	if !result.New || reborn == "" || reborn == reminderOldID {
+	if !result.New || reborn == "" || reborn == scheduleOldID {
 		t.Fatalf("result=%+v reborn=%q", result, reborn)
 	}
-	if got := reminderSessions(t); len(got) != 1 || got[0] != reborn {
-		t.Fatalf("reminders on %v, want on the reborn session %s; stderr=%q", got, reborn, stderr.String())
+	if got := scheduleSessions(t); len(got) != 1 || got[0] != reborn {
+		t.Fatalf("schedules on %v, want on the reborn session %s; stderr=%q", got, reborn, stderr.String())
 	}
 }
 
-func TestRunInPlaceKeepsTheRemindersOnTheResumedSession(t *testing.T) {
-	reminderJail(t)
-	seedReminder(t, reminderOldID, pfmengine.Claude)
-	request := claudeReminderRequest(t)
-	request.SessionID, request.LeftBehind = reminderOldID, reminderOldID
+func TestRunInPlaceKeepsTheSchedulesOnTheResumedSession(t *testing.T) {
+	scheduleJail(t)
+	seedSchedule(t, scheduleOldID, pfmengine.Claude)
+	request := claudeScheduleRequest(t)
+	request.SessionID, request.LeftBehind = scheduleOldID, scheduleOldID
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
 	if _, err := Run(context.Background(), request,
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr); err != nil {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}
-	if resume := parsedReloadShell(t, tmux.respawn).Resume; resume != reminderOldID {
+	if resume := parsedReloadShell(t, tmux.respawn).Resume; resume != scheduleOldID {
 		t.Fatalf("respawn resume=%q", resume)
 	}
-	if got := reminderSessions(t); len(got) != 1 || got[0] != reminderOldID {
-		t.Fatalf("reminders on %v, want on %s", got, reminderOldID)
+	if got := scheduleSessions(t); len(got) != 1 || got[0] != scheduleOldID {
+		t.Fatalf("schedules on %v, want on %s", got, scheduleOldID)
 	}
 }
 
-// TestRunQueuedNewCarriesRemindersFromTheHandoffSession pins the handoff door:
+// TestRunQueuedNewCarriesSchedulesFromTheHandoffSession pins the handoff door:
 // a --new reload queued behind an earlier --new continues from the session
-// that reboot left in the pane — where the earlier reload put the reminders —
+// that reboot left in the pane — where the earlier reload put the schedules —
 // not from the one it resolved before it queued.
-func TestRunQueuedNewCarriesRemindersFromTheHandoffSession(t *testing.T) {
-	reminderJail(t)
-	seedReminder(t, reminderMidID, pfmengine.Claude)
+func TestRunQueuedNewCarriesSchedulesFromTheHandoffSession(t *testing.T) {
+	scheduleJail(t)
+	seedSchedule(t, scheduleMidID, pfmengine.Claude)
 	dir := t.TempDir()
-	request := claudeReminderRequest(t)
-	request.New, request.LeftBehind = true, reminderOldID
+	request := claudeScheduleRequest(t)
+	request.New, request.LeftBehind = true, scheduleOldID
 	content, err := json.Marshal(handoffRecord{
-		Engine: pfmengine.Claude, SessionID: reminderMidID, LeftBehind: reminderOldID,
+		Engine: pfmengine.Claude, SessionID: scheduleMidID, LeftBehind: scheduleOldID,
 		Account: 2, CWD: t.TempDir(), WrittenAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
@@ -148,26 +148,26 @@ func TestRunQueuedNewCarriesRemindersFromTheHandoffSession(t *testing.T) {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}
 	reborn := parsedReloadShell(t, tmux.respawn).SessionID
-	if result.LeftBehind != reminderMidID || reborn == "" || reborn == reminderMidID {
+	if result.LeftBehind != scheduleMidID || reborn == "" || reborn == scheduleMidID {
 		t.Fatalf("result=%+v reborn=%q stderr=%q", result, reborn, stderr.String())
 	}
-	if got := reminderSessions(t); len(got) != 1 || got[0] != reborn {
-		t.Fatalf("reminders on %v, want on the reborn session %s; stderr=%q", got, reborn, stderr.String())
+	if got := scheduleSessions(t); len(got) != 1 || got[0] != reborn {
+		t.Fatalf("schedules on %v, want on the reborn session %s; stderr=%q", got, reborn, stderr.String())
 	}
 }
 
-// TestRunNewTellsWhenTheRemindersCannotMove pins the failure path: the reboot
+// TestRunNewTellsWhenTheSchedulesCannotMove pins the failure path: the reboot
 // already happened, so it stands, and the move that failed is told with both
 // session ids and the cause.
-func TestRunNewTellsWhenTheRemindersCannotMove(t *testing.T) {
+func TestRunNewTellsWhenTheSchedulesCannotMove(t *testing.T) {
 	t.Setenv(paths.EnvHome, t.TempDir())
 	notDir := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvStateDB, filepath.Join(notDir, "pfm.db"))
-	request := claudeReminderRequest(t)
-	request.New, request.LeftBehind = true, reminderOldID
+	request := claudeScheduleRequest(t)
+	request.New, request.LeftBehind = true, scheduleOldID
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
 	if _, err := Run(context.Background(), request,
@@ -175,21 +175,21 @@ func TestRunNewTellsWhenTheRemindersCannotMove(t *testing.T) {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}
 	reborn := parsedReloadShell(t, tmux.respawn).SessionID
-	want := "reminders of session " + reminderOldID + " did NOT move to " + reborn + ":"
+	want := "schedules of session " + scheduleOldID + " did NOT move to " + reborn + ":"
 	if !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
 	}
 }
 
-// TestRunNewCodexTellsTheRemindersStayBehind pins the one door with no new id
+// TestRunNewCodexTellsTheSchedulesStayBehind pins the one door with no new id
 // to move to: a Codex --new conversation has none until it answers.
-func TestRunNewCodexTellsTheRemindersStayBehind(t *testing.T) {
-	reminderJail(t)
-	seedReminder(t, reminderOldID, pfmengine.Codex)
+func TestRunNewCodexTellsTheSchedulesStayBehind(t *testing.T) {
+	scheduleJail(t)
+	seedSchedule(t, scheduleOldID, pfmengine.Codex)
 	dir := t.TempDir()
 	request := Request{
-		Engine: pfmengine.Codex, SocketPath: "/tmp/cx-reminder", Pane: "%7",
-		New: true, LeftBehind: reminderOldID, CWD: dir, Account: 1, AccountIDs: []int{1},
+		Engine: pfmengine.Codex, SocketPath: "/tmp/cx-schedule", Pane: "%7",
+		New: true, LeftBehind: scheduleOldID, CWD: dir, Account: 1, AccountIDs: []int{1},
 		Machine: pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: dir}}},
 	}
 	tmux := &fakeReloadTmux{}
@@ -198,11 +198,11 @@ func TestRunNewCodexTellsTheRemindersStayBehind(t *testing.T) {
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr); err != nil {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}
-	want := "1 reminder(s) of session " + reminderOldID + " stay on the conversation left behind"
+	want := "1 schedule(s) of session " + scheduleOldID + " stay on the conversation left behind"
 	if !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
 	}
-	if got := reminderSessions(t); len(got) != 1 || got[0] != reminderOldID {
-		t.Fatalf("reminders on %v, want on %s", got, reminderOldID)
+	if got := scheduleSessions(t); len(got) != 1 || got[0] != scheduleOldID {
+		t.Fatalf("schedules on %v, want on %s", got, scheduleOldID)
 	}
 }

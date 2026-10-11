@@ -105,7 +105,7 @@ type CodexPaneAction struct {
 	// following cannot have been observed to clear.
 	ClearKill string
 	// BindRoot is the lineage root of Bind, set beside ClearKill: the id the
-	// chat's row carries once the pane moved, where the reminders of the
+	// chat's row carries once the pane moved, where the schedules of the
 	// cleared chat follow it.
 	BindRoot string
 	// Skip names why the pane was left alone. Never empty when Bind is.

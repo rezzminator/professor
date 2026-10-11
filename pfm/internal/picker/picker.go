@@ -110,7 +110,7 @@ func Run(
 		Safe:      *safe,
 		Runtime:   &runtime,
 		Comms:     sharedState,
-		Reminders: sharedState,
+		Schedules: sharedState,
 	}
 	var scan scanResult
 	var outcome ui.Outcome
@@ -120,8 +120,8 @@ func Run(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
-		if scan.Snapshot.ReminderError != "" {
-			fmt.Fprintf(stderr, "pfm ls: %s\n", scan.Snapshot.ReminderError)
+		if scan.Snapshot.ScheduleError != "" {
+			fmt.Fprintf(stderr, "pfm ls: %s\n", scan.Snapshot.ScheduleError)
 		}
 		var picker ui.Picker
 		if *plain {

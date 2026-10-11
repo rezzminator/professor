@@ -106,7 +106,7 @@ func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
 }
 
 func TestInstallCheckPreChangeChecks(t *testing.T) {
-	for _, scenario := range []string{"quiet", "running", "short reminder", "unprobed", "dependency", "explicit missing"} {
+	for _, scenario := range []string{"quiet", "running", "short schedule", "unprobed", "dependency", "explicit missing"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, _, _ := installCheckHome(t, false)
 			bin, _ := writeManagerFakes(
@@ -130,11 +130,11 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				}
 				wantCode, wantErr = 4, installer.SchedulerRefusal(installCommand, schedulerErr)+"\n"
 			}
-			if scenario == "short reminder" {
+			if scenario == "short schedule" {
 				bin, _ = writeManagerFakes(
 					t,
-					`case "$*" in *pfm-reminder.service*) if [ -e "$0.once" ]; then echo inactive; else : > "$0.once"; echo activating; fi;; *ActiveState*) echo inactive;; esac`+"\nexit 0",
-					`case "$*" in *com.professor.pfm.reminder*) if [ -e "$0.once" ]; then echo 'state = not running'; else : > "$0.once"; echo 'state = running'; fi;; *) echo 'state = not running';; esac`,
+					`case "$*" in *pfm-schedule.service*) if [ -e "$0.once" ]; then echo inactive; else : > "$0.once"; echo activating; fi;; *ActiveState*) echo inactive;; esac`+"\nexit 0",
+					`case "$*" in *com.professor.pfm.schedule*) if [ -e "$0.once" ]; then echo 'state = not running'; else : > "$0.once"; echo 'state = running'; fi;; *) echo 'state = not running';; esac`,
 				)
 			}
 			if scenario == "unprobed" {
@@ -186,7 +186,7 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				t.Fatal("check changed home")
 			}
 			switch scenario {
-			case "quiet", "short reminder":
+			case "quiet", "short schedule":
 				if out.String() != "install check: ok — pfm install --yes would pass its pre-change checks\n" ||
 					errOut.Len() != 0 {
 					t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
@@ -196,9 +196,9 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 					t.Fatalf("stderr=%q want=%q", errOut.String(), wantErr)
 				}
 			case "unprobed":
-				note := "name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or reminder run is not refused"
+				note := "name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or schedule run is not refused"
 				if runtime.GOOS == "darwin" {
-					note = "launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or reminder run is not refused"
+					note = "launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or schedule run is not refused"
 				}
 				want := "install check: ok — pfm install --yes would pass its pre-change checks\n  skip    " + note + "\n"
 				if out.String() != want || errOut.Len() != 0 {

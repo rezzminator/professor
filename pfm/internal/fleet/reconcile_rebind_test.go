@@ -416,13 +416,13 @@ func startNoopCodexPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	}
 }
 
-// TestReconcileCodexPanesCarriesRemindersAcrossAReset: a Codex reset rotates
+// TestReconcileCodexPanesCarriesSchedulesAcrossAReset: a Codex reset rotates
 // the pane onto a thread of a new lineage without a restart, so the chat's
-// row id moves from the retired lineage root to the new one. A reminder set on
+// row id moves from the retired lineage root to the new one. A schedule set on
 // that chat — by name, keyed on the lineage root, or from inside it, keyed on
 // the compacted child the pane was bound to — follows the pane onto the new
-// thread; a reminder of another chat stays where it is.
-func TestReconcileCodexPanesCarriesRemindersAcrossAReset(t *testing.T) {
+// thread; a schedule of another chat stays where it is.
+func TestReconcileCodexPanesCarriesSchedulesAcrossAReset(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -479,13 +479,13 @@ func TestReconcileCodexPanesCarriesRemindersAcrossAReset(t *testing.T) {
 		t.Fatalf("bind the compacted child: moved=%v err=%v", moved, err)
 	}
 	created := time.Unix(1_900_000_000, 0)
-	for _, reminder := range []fleetdb.Reminder{
+	for _, schedule := range []fleetdb.Schedule{
 		{SessionID: rootID, Prompt: "set by name"},
 		{SessionID: childID, Prompt: "set from inside"},
 		{SessionID: otherID, Prompt: "another chat"},
 	} {
-		reminder.Engine, reminder.Interval, reminder.Created = string(pfmengine.Codex), time.Hour, created
-		if _, err := database.Shared().CreateReminder(ctx, reminder); err != nil {
+		schedule.Engine, schedule.Interval, schedule.Created = string(pfmengine.Codex), time.Hour, created
+		if _, err := database.Shared().CreateSchedule(ctx, schedule); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -506,16 +506,16 @@ func TestReconcileCodexPanesCarriesRemindersAcrossAReset(t *testing.T) {
 	if err != nil || !found || bound != resetID {
 		t.Fatalf("binding = (%q, %v, %v), want %q: stderr=%q", bound, found, err, resetID, stderr.String())
 	}
-	reminders, err := database.Shared().Reminders(ctx)
+	schedules, err := database.Shared().Schedules(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := make(map[string]string, len(reminders))
-	for index := range reminders {
-		got[reminders[index].Prompt] = reminders[index].SessionID
+	got := make(map[string]string, len(schedules))
+	for index := range schedules {
+		got[schedules[index].Prompt] = schedules[index].SessionID
 	}
 	want := map[string]string{"set by name": resetID, "set from inside": resetID, "another chat": otherID}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("reminders by prompt = %v, want %v: stderr=%q", got, want, stderr.String())
+		t.Fatalf("schedules by prompt = %v, want %v: stderr=%q", got, want, stderr.String())
 	}
 }

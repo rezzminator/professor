@@ -9,13 +9,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
-// carryReminders moves the reminders of the session a reboot left behind onto
-// the session the pane runs now: a reminder belongs to the chat, and a --new
+// carrySchedules moves the schedules of the session a reboot left behind onto
+// the session the pane runs now: a schedule belongs to the chat, and a --new
 // reboot, or a queued reload continuing one, carries the chat on under a new
 // session id. A resume keeps its id, so nothing moves. The reboot has already
 // happened when this runs, so a failed move does not undo it: it is told on
 // stderr with both ids and its cause, never swallowed.
-func carryReminders(ctx context.Context, leftBehind, sessionID string, stderr io.Writer) {
+func carrySchedules(ctx context.Context, leftBehind, sessionID string, stderr io.Writer) {
 	if leftBehind == "" || leftBehind == sessionID {
 		return
 	}
@@ -25,8 +25,8 @@ func carryReminders(ctx context.Context, leftBehind, sessionID string, stderr io
 	}
 	failed := func(err error) {
 		fmt.Fprintf(stderr,
-			"pfm chat reload: the reminders of session %s did NOT move to %s: %v — "+
-				"check pfm chat reminder ls and set them again on this chat\n",
+			"pfm chat reload: the schedules of session %s did NOT move to %s: %v — "+
+				"check pfm chat schedule ls and set them again on this chat\n",
 			leftBehind, target, err)
 	}
 	values, err := pfmconfig.ResolvePaths()
@@ -37,7 +37,7 @@ func carryReminders(ctx context.Context, leftBehind, sessionID string, stderr io
 	state := fleetdb.OpenSharedState(ctx, values)
 	defer func() {
 		if err := state.Close(); err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: close the reminder store after moving %s: %v\n", leftBehind, err)
+			fmt.Fprintf(stderr, "pfm chat reload: close the schedule store after moving %s: %v\n", leftBehind, err)
 		}
 	}()
 	if err := state.Degraded(); err != nil {
@@ -45,27 +45,27 @@ func carryReminders(ctx context.Context, leftBehind, sessionID string, stderr io
 		return
 	}
 	if sessionID != "" {
-		if _, err := state.RekeyReminders(ctx, leftBehind, sessionID); err != nil {
+		if _, err := state.RekeySchedules(ctx, leftBehind, sessionID); err != nil {
 			failed(err)
 		}
 		return
 	}
 	// A Codex --new conversation has no id until it answers: nothing to move
-	// to, so the reminders stay on the conversation left behind, told.
-	reminders, err := state.Reminders(ctx)
+	// to, so the schedules stay on the conversation left behind, told.
+	schedules, err := state.Schedules(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: read the reminders of session %s: %v\n", leftBehind, err)
+		fmt.Fprintf(stderr, "pfm chat reload: read the schedules of session %s: %v\n", leftBehind, err)
 		return
 	}
 	stayed := 0
-	for i := range reminders {
-		if reminders[i].SessionID == leftBehind {
+	for i := range schedules {
+		if schedules[i].SessionID == leftBehind {
 			stayed++
 		}
 	}
 	if stayed > 0 {
 		fmt.Fprintf(stderr,
-			"pfm chat reload: %d reminder(s) of session %s stay on the conversation left behind — "+
+			"pfm chat reload: %d schedule(s) of session %s stay on the conversation left behind — "+
 				"the new conversation has no id yet; set them again on this chat once it has answered\n",
 			stayed, leftBehind)
 	}

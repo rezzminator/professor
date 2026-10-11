@@ -352,7 +352,7 @@ func OpenRow(
 	}
 	// Dispatch execs tmux or zsh when stdout is a terminal and never returns,
 	// so the unseen flag clears before it.
-	markRemindersSeen(ctx, effective.Paths, row.ID, stderr)
+	markSchedulesSeen(ctx, effective.Paths, row.ID, stderr)
 	if line != "" {
 		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
@@ -362,10 +362,10 @@ func OpenRow(
 	return 0
 }
 
-// markRemindersSeen clears the unseen-reminder flag of a chat a human is now
+// markSchedulesSeen clears the unseen-schedule flag of a chat a human is now
 // opening. A failed clear is reported and the open proceeds: the chat is
 // already open, and the flag stays visible as a still-marked row.
-func markRemindersSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
+func markSchedulesSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
 	if id == "" {
 		return
 	}
@@ -375,8 +375,8 @@ func markRemindersSeen(ctx context.Context, values paths.Values, id string, stde
 			fmt.Fprintf(stderr, "pfm chat open: close shared state: %v\n", err)
 		}
 	}()
-	if _, err := state.ClearReminderUnseen(ctx, id); err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: clear reminder flag of %s: %v\n", id, err)
+	if _, err := state.ClearScheduleUnseen(ctx, id); err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: clear schedule flag of %s: %v\n", id, err)
 	}
 }
 

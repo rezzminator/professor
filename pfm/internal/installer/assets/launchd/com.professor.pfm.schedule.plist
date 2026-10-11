@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Fire every due pfm reminder (pfm internal reminder-fire).
+  Fire every due pfm schedule (pfm internal schedule-fire).
 
-  The macOS twin of pfm-reminder.timer: StartInterval 300 is the timer's
+  The macOS twin of pfm-schedule.timer: StartInterval 300 is the timer's
   5-minute tick. The plist is written as a real file, not a symlink, because
   launchd refuses a symlinked plist. __PFM_HOME__ is substituted at install
   time — launchd has no %h.
 
-  The fire exits 1 while a reminder stays due, so the job may read "failed"
+  The fire exits 1 while a schedule stays due, so the job may read "failed"
   between ticks; the next tick still starts it, and an overlapping tick is a
   no-op under the fire's flock.
 
@@ -20,18 +20,18 @@
   tmux.
 
   StandardOutPath / StandardErrorPath land this job's own stdout/stderr in
-  __PFM_HOME__/Library/Logs/pfm/reminder.log. The installer creates
+  __PFM_HOME__/Library/Logs/pfm/schedule.log. The installer creates
   ~/Library/Logs/pfm (ensureLaunchdLogDir) before loading this agent.
 -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.professor.pfm.reminder</string>
+	<string>com.professor.pfm.schedule</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>__PFM_HOME__/.local/bin/pfm</string>
 		<string>internal</string>
-		<string>reminder-fire</string>
+		<string>schedule-fire</string>
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>
@@ -47,8 +47,8 @@
 	<key>LowPriorityIO</key>
 	<true/>
 	<key>StandardOutPath</key>
-	<string>__PFM_HOME__/Library/Logs/pfm/reminder.log</string>
+	<string>__PFM_HOME__/Library/Logs/pfm/schedule.log</string>
 	<key>StandardErrorPath</key>
-	<string>__PFM_HOME__/Library/Logs/pfm/reminder.log</string>
+	<string>__PFM_HOME__/Library/Logs/pfm/schedule.log</string>
 </dict>
 </plist>

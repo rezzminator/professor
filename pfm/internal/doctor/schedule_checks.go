@@ -17,49 +17,49 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// reminderDoctorGrace is three 5-minute ticks of pfm-reminder.timer. One missed
+// scheduleDoctorGrace is three 5-minute ticks of pfm-schedule.timer. One missed
 // tick (a suspend, a slow fire, a tick that found the fire lock held) is
-// normal, but a reminder due three ticks running means nothing is firing.
-const reminderDoctorGrace = 15 * time.Minute
+// normal, but a schedule due three ticks running means nothing is firing.
+const scheduleDoctorGrace = 15 * time.Minute
 
-type reminderScheduleDrift struct {
+type scheduleTimerDrift struct {
 	Path    string
 	Drifted bool
 	Err     error
 }
 
-// reminderScheduleProbeOverride lets tests exercise printReminderDoctor
+// scheduleTimerProbeOverride lets tests exercise printScheduleDoctor
 // without a real service manager, as ServiceManagerProbeOverride does for the
 // MCP row. Production leaves it nil.
-var reminderScheduleProbeOverride func(context.Context, deps.Runner) serviceManagerReport
+var scheduleTimerProbeOverride func(context.Context, deps.Runner) serviceManagerReport
 
-func configuredReminderScheduleProbe(ctx context.Context, runner deps.Runner) serviceManagerReport {
-	if reminderScheduleProbeOverride != nil {
-		return reminderScheduleProbeOverride(ctx, runner)
+func configuredScheduleTimerProbe(ctx context.Context, runner deps.Runner) serviceManagerReport {
+	if scheduleTimerProbeOverride != nil {
+		return scheduleTimerProbeOverride(ctx, runner)
 	}
-	return probeReminderSchedule(ctx, runner)
+	return probeScheduleTimer(ctx, runner)
 }
 
-// reminderSource is the part of *fleetdb.Store the reminders row reads.
-type reminderSource interface {
+// scheduleSource is the part of *fleetdb.Store the schedules row reads.
+type scheduleSource interface {
 	Degraded() error
-	DueReminders(context.Context, time.Time) ([]fleetdb.Reminder, error)
-	ReminderProblems(context.Context, time.Time, time.Duration) ([]fleetdb.Reminder, error)
+	DueSchedules(context.Context, time.Time) ([]fleetdb.Schedule, error)
+	ScheduleProblems(context.Context, time.Time, time.Duration) ([]fleetdb.Schedule, error)
 }
 
 // printSupervisionDoctor prints the two supervision rows: the MCP daemon and
-// the reminder schedule. It returns their warnings.
+// the schedule timer. It returns their warnings.
 func printSupervisionDoctor(
 	ctx context.Context, stdout io.Writer, dependencies Dependencies, runtime config.Runtime,
 ) int {
 	return printServiceManagerDoctor(ctx, stdout, dependencies.Runner, runtime) +
-		printReminderDoctor(ctx, stdout, dependencies.Runner, runtime.Paths, dependencies.Clock.Now())
+		printScheduleDoctor(ctx, stdout, dependencies.Runner, runtime.Paths, dependencies.Clock.Now())
 }
 
-// printReminderDoctor opens the shared state database read-only (never
+// printScheduleDoctor opens the shared state database read-only (never
 // creating or migrating it; this row only queries it), prints the one
-// reminders line and returns its warnings.
-func printReminderDoctor(
+// schedules line and returns its warnings.
+func printScheduleDoctor(
 	ctx context.Context, stdout io.Writer, runner deps.Runner, values paths.Values, now time.Time,
 ) (warnings int) {
 	if runner == nil {
@@ -68,34 +68,34 @@ func printReminderDoctor(
 	store := fleetdb.OpenSharedStateReadOnly(ctx, values)
 	defer func() {
 		if err := store.Close(); err != nil {
-			fmt.Fprintf(stdout, "doctor: reminders close state db=%s error=%v\n", values.StateDB, err)
+			fmt.Fprintf(stdout, "doctor: schedules close state db=%s error=%v\n", values.StateDB, err)
 			warnings++
 		}
 	}()
-	schedule := configuredReminderScheduleProbe(ctx, runner)
-	var drift reminderScheduleDrift
-	drift.Path, drift.Drifted, drift.Err = installer.ReminderScheduleDrift(
+	schedule := configuredScheduleTimerProbe(ctx, runner)
+	var drift scheduleTimerDrift
+	drift.Path, drift.Drifted, drift.Err = installer.ScheduleTimerDrift(
 		values.Home,
-		reminderScheduleArmed(schedule.Unit),
+		scheduleTimerArmed(schedule.Unit),
 	)
-	return renderReminderDoctor(ctx, stdout, schedule, drift, store, now)
+	return renderScheduleDoctor(ctx, stdout, schedule, drift, store, now)
 }
 
-// renderReminderDoctor writes the one `doctor: reminders` line: the scheduler
+// renderScheduleDoctor writes the one `doctor: schedules` line: the scheduler
 // part, the database part and the hints for what needs doing. It returns 1 when
 // any problem holds. An unreadable database renders as db=unreadable with no
-// counts — a failure to look never reads as zero reminders.
-func renderReminderDoctor(
+// counts — a failure to look never reads as zero schedules.
+func renderScheduleDoctor(
 	ctx context.Context,
 	stdout io.Writer,
 	schedule serviceManagerReport,
-	drift reminderScheduleDrift,
-	source reminderSource,
+	drift scheduleTimerDrift,
+	source scheduleSource,
 	now time.Time,
 ) int {
 	manager, unit := schedule.Manager, schedule.Unit.Unit
 	if unit == "" {
-		manager, unit = reminderScheduleIdentity()
+		manager, unit = scheduleTimerIdentity()
 	}
 	problem := false
 	var hints []string
@@ -104,12 +104,12 @@ func renderReminderDoctor(
 	case !schedule.Present:
 		scheduler = fmt.Sprintf("scheduler=none unit=%s", unit)
 		hints = append(hints, fmt.Sprintf(
-			"no %s user manager on this host: reminders fire only when pfm internal reminder-fire is run", manager,
+			"no %s user manager on this host: schedules fire only when pfm internal schedule-fire is run", manager,
 		))
 	case schedule.Unit.Err != nil:
 		scheduler = fmt.Sprintf("scheduler=%s unit=%s could_not_ask error=%v", manager, unit, schedule.Unit.Err)
 		problem = true
-	case reminderScheduleArmed(schedule.Unit):
+	case scheduleTimerArmed(schedule.Unit):
 		scheduler = fmt.Sprintf("scheduler=%s unit=%s armed=true state=%s", manager, unit, schedule.Unit.State)
 	default:
 		state := schedule.Unit.State
@@ -139,9 +139,9 @@ func renderReminderDoctor(
 		}
 	}
 
-	database, dbHints, dbProblem := reminderDatabasePart(ctx, source, now)
+	database, dbHints, dbProblem := scheduleDatabasePart(ctx, source, now)
 	hints = append(hints, dbHints...)
-	line := "doctor: reminders " + scheduler + " " + database
+	line := "doctor: schedules " + scheduler + " " + database
 	if len(hints) > 0 {
 		line += " — " + strings.Join(hints, "; ")
 	}
@@ -152,51 +152,51 @@ func renderReminderDoctor(
 	return 0
 }
 
-// reminderDatabasePart renders the database half of the line, its hints and
+// scheduleDatabasePart renders the database half of the line, its hints and
 // whether it holds a problem.
-func reminderDatabasePart(ctx context.Context, source reminderSource, now time.Time) (string, []string, bool) {
+func scheduleDatabasePart(ctx context.Context, source scheduleSource, now time.Time) (string, []string, bool) {
 	unreadable := func(err error) (string, []string, bool) {
-		return fmt.Sprintf("db=unreadable error=%v", err), []string{"reminder state unknown"}, true
+		return fmt.Sprintf("db=unreadable error=%v", err), []string{"schedule state unknown"}, true
 	}
 	if err := source.Degraded(); errors.Is(err, fleetdb.ErrAbsent) {
-		// Not created yet: no reminder was ever set, and nothing is wrong.
+		// Not created yet: no schedule was ever set, and nothing is wrong.
 		return "db=absent", nil, false
 	} else if err != nil {
 		return fmt.Sprintf("db=unreadable error=%v", err),
-			[]string{"reminder state unknown; the doctor: shared store row counts it"}, false
+			[]string{"schedule state unknown; the doctor: shared store row counts it"}, false
 	}
-	due, err := source.DueReminders(ctx, now)
+	due, err := source.DueSchedules(ctx, now)
 	if err != nil {
 		return unreadable(err)
 	}
-	problems, err := source.ReminderProblems(ctx, now, reminderDoctorGrace)
+	problems, err := source.ScheduleProblems(ctx, now, scheduleDoctorGrace)
 	if err != nil {
 		return unreadable(err)
 	}
 	overdue, failed := 0, 0
-	var latest *fleetdb.Reminder
+	var latest *fleetdb.Schedule
 	for i := range problems {
-		reminder := &problems[i]
-		if reminder.LastError == "" && !reminder.NextFire.After(now.Add(-reminderDoctorGrace)) {
+		schedule := &problems[i]
+		if schedule.LastError == "" && !schedule.NextFire.After(now.Add(-scheduleDoctorGrace)) {
 			overdue++
 		}
-		if reminder.LastError == "" {
+		if schedule.LastError == "" {
 			continue
 		}
 		failed++
-		if latest == nil || reminder.LastErrorAt.After(latest.LastErrorAt) {
-			latest = reminder
+		if latest == nil || schedule.LastErrorAt.After(latest.LastErrorAt) {
+			latest = schedule
 		}
 	}
 	var hints []string
 	if overdue > 0 {
 		hints = append(hints, fmt.Sprintf(
-			"%d reminder(s) due longer than %s: nothing is firing them", overdue, reminderDoctorGrace,
+			"%d schedule(s) due longer than %s: nothing is firing them", overdue, scheduleDoctorGrace,
 		))
 	}
 	if latest != nil {
 		hints = append(hints, fmt.Sprintf(
-			"last failure: reminder %d (%s): %s", latest.ID, latest.Label, latest.LastError,
+			"last failure: schedule %d (%s): %s", latest.ID, latest.Label, latest.LastError,
 		))
 	}
 	return fmt.Sprintf("due=%d overdue=%d failed=%d", len(due), overdue, failed), hints, len(hints) > 0

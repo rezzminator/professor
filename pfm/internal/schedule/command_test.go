@@ -1,4 +1,4 @@
-package reminder
+package schedule
 
 import (
 	"bytes"
@@ -19,26 +19,26 @@ import (
 
 func unreachableNotFound(name string, _ io.Writer) int { panic("chat lookup reached for " + name) }
 
-func TestRunReminderCommandRefusesBadUsageBeforeTouchingAnyStore(t *testing.T) {
+func TestRunScheduleCommandRefusesBadUsageBeforeTouchingAnyStore(t *testing.T) {
 	cases := []struct {
 		name    string
 		args    []string
 		wantErr string
 	}{
-		{"no verb", nil, "pfm chat reminder set --every"},
+		{"no verb", nil, "pfm chat schedule set {--every <interval> | --in <delay> | --at <time>}"},
 		{"unknown verb", []string{"bogus"}, `unknown command "bogus"`},
 		{"interval below minimum", []string{"set", "--every", "30s", "--prompt", "x"}, "minimum 1m"},
 		{"interval garbage", []string{"set", "--every", "soon", "--prompt", "x"}, "weekly, <N>d"},
 		{"blank prompt", []string{"set", "--every", "1h", "--prompt", " "}, "--prompt must not be empty"},
-		{"two chats", []string{"set", "--every", "1h", "--prompt", "x", "a", "b"}, "usage: pfm chat reminder set"},
-		{"ls stray argument", []string{"ls", "extra"}, "usage: pfm chat reminder ls"},
-		{"rm without id", []string{"rm"}, "usage: pfm chat reminder rm <id>"},
-		{"rm non integer", []string{"rm", "abc"}, "usage: pfm chat reminder rm <id>"},
-		{"rm zero", []string{"rm", "0"}, "not a reminder id"},
+		{"two chats", []string{"set", "--every", "1h", "--prompt", "x", "a", "b"}, "usage: pfm chat schedule set"},
+		{"ls stray argument", []string{"ls", "extra"}, "usage: pfm chat schedule ls"},
+		{"rm without id", []string{"rm"}, "usage: pfm chat schedule rm <id>"},
+		{"rm non integer", []string{"rm", "abc"}, "usage: pfm chat schedule rm <id>"},
+		{"rm zero", []string{"rm", "0"}, "not a schedule id"},
 	}
 	for _, tc := range cases {
 		var stdout, stderr bytes.Buffer
-		code := RunReminderCommand(tc.args, &stdout, &stderr, nil, unreachableNotFound)
+		code := RunScheduleCommand(tc.args, &stdout, &stderr, nil, unreachableNotFound)
 		if code != 2 || !strings.Contains(stderr.String(), tc.wantErr) || stdout.Len() != 0 {
 			t.Errorf("%s: code=%d stdout=%q stderr=%q, want 2 and %q",
 				tc.name, code, stdout.String(), stderr.String(), tc.wantErr)
@@ -46,9 +46,9 @@ func TestRunReminderCommandRefusesBadUsageBeforeTouchingAnyStore(t *testing.T) {
 	}
 }
 
-func TestWriteReminderTableRendersColumnsAndAFailedFire(t *testing.T) {
+func TestWriteScheduleTableRendersColumnsAndAFailedFire(t *testing.T) {
 	when := time.Date(2026, 10, 3, 9, 30, 0, 0, time.Local)
-	reminders := []fleetdb.Reminder{
+	schedules := []fleetdb.Schedule{
 		{
 			ID: 1, SessionID: "12345678-aaaa", Label: "docs", Prompt: "line one\nline two", Interval: 24 * time.Hour,
 			NextFire: when, LastFired: when.Add(-time.Hour), Unseen: true,
@@ -60,7 +60,7 @@ func TestWriteReminderTableRendersColumnsAndAFailedFire(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	if err := writeReminderTable(&out, reminders); err != nil {
+	if err := writeScheduleTable(&out, schedules); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
@@ -83,9 +83,9 @@ func TestWriteReminderTableRendersColumnsAndAFailedFire(t *testing.T) {
 	}
 }
 
-func TestWriteReminderTableEmptyIsSaidOutLoud(t *testing.T) {
+func TestWriteScheduleTableEmptyIsSaidOutLoud(t *testing.T) {
 	var out bytes.Buffer
-	if err := writeReminderTable(&out, nil); err != nil || out.String() != "no reminders\n" {
+	if err := writeScheduleTable(&out, nil); err != nil || out.String() != "no schedules\n" {
 		t.Fatalf("out=%q err=%v", out.String(), err)
 	}
 }
@@ -115,7 +115,7 @@ func standInsideCodexThread(t *testing.T, thread string, rollouts ...store.Rollo
 	t.Cleanup(func() { callerIdentity = previous })
 }
 
-func storedReminders(t *testing.T) []fleetdb.Reminder {
+func storedSchedules(t *testing.T) []fleetdb.Schedule {
 	t.Helper()
 	values, err := paths.Resolve()
 	if err != nil {
@@ -130,17 +130,17 @@ func storedReminders(t *testing.T) []fleetdb.Reminder {
 	if err := state.Degraded(); err != nil {
 		t.Fatal(err)
 	}
-	reminders, err := state.Reminders(context.Background())
+	schedules, err := state.Schedules(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return reminders
+	return schedules
 }
 
-// A reminder set from inside a Codex chat is keyed on the chat's lineage root,
+// A schedule set from inside a Codex chat is keyed on the chat's lineage root,
 // the id its fleet row carries and a fire matches: CODEX_THREAD_ID may name a
-// resumed member of the lineage, and a reminder keyed on it would never fire.
-func TestReminderSetFromInsideCodexChatKeysTheLineageRoot(t *testing.T) {
+// resumed member of the lineage, and a schedule keyed on it would never fire.
+func TestScheduleSetFromInsideCodexChatKeysTheLineageRoot(t *testing.T) {
 	const (
 		root   = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d"
 		member = "0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e"
@@ -153,29 +153,29 @@ func TestReminderSetFromInsideCodexChatKeysTheLineageRoot(t *testing.T) {
 		},
 	)
 	var stdout, stderr bytes.Buffer
-	code := RunReminderCommand(
+	code := RunScheduleCommand(
 		[]string{"set", "--every", "1h", "--prompt", "check the build"}, &stdout, &stderr, nil, unreachableNotFound,
 	)
 	if code != 0 {
 		t.Fatalf("set from inside Codex thread: code=%d stderr=%q", code, stderr.String())
 	}
-	reminders := storedReminders(t)
-	if len(reminders) != 1 {
-		t.Fatalf("stored reminders = %+v, want one", reminders)
+	schedules := storedSchedules(t)
+	if len(schedules) != 1 {
+		t.Fatalf("stored schedules = %+v, want one", schedules)
 	}
-	if got := reminders[0]; got.SessionID != root || got.SetByID != root || got.Engine != string(pfmengine.Codex) {
+	if got := schedules[0]; got.SessionID != root || got.SetByID != root || got.Engine != string(pfmengine.Codex) {
 		t.Fatalf("stored chat id = %q, set by %q, engine %q; want the lineage root %q for both, engine %q",
 			got.SessionID, got.SetByID, got.Engine, root, pfmengine.Codex)
 	}
 }
 
 // A Codex thread the index cannot map to its chat is refused out loud and
-// stores nothing: a reminder keyed on it could never fire.
-func TestReminderSetFromInsideUnindexedCodexThreadIsRefused(t *testing.T) {
+// stores nothing: a schedule keyed on it could never fire.
+func TestScheduleSetFromInsideUnindexedCodexThreadIsRefused(t *testing.T) {
 	const thread = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f"
 	standInsideCodexThread(t, thread)
 	var stdout, stderr bytes.Buffer
-	code := RunReminderCommand(
+	code := RunScheduleCommand(
 		[]string{"set", "--every", "1h", "--prompt", "check the build"}, &stdout, &stderr, nil, unreachableNotFound,
 	)
 	if code != 1 || stdout.Len() != 0 ||
@@ -183,7 +183,7 @@ func TestReminderSetFromInsideUnindexedCodexThreadIsRefused(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want 1 and the unindexed-thread refusal",
 			code, stdout.String(), stderr.String())
 	}
-	if reminders := storedReminders(t); len(reminders) != 0 {
-		t.Fatalf("stored reminders = %+v, want none", reminders)
+	if schedules := storedSchedules(t); len(schedules) != 0 {
+		t.Fatalf("stored schedules = %+v, want none", schedules)
 	}
 }

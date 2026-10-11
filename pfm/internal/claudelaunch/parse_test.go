@@ -146,13 +146,17 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Error("cleanup missing")
 				}
 			case "hooks":
-				if len(parsed.Hooks) != 11 {
-					t.Errorf("hooks=%d", len(parsed.Hooks))
-				}
+				var got, want []string
 				for _, hook := range parsed.Hooks {
-					if hook.Name == "" {
-						t.Errorf("unnamed hook: %#v", hook)
-					}
+					got = append(got, hook.Name)
+				}
+				for _, hook := range HookTemplates(home) {
+					want = append(want, hook.Name)
+				}
+				slices.Sort(got)
+				slices.Sort(want)
+				if !slices.Equal(got, want) {
+					t.Errorf("parsed hook names %q, want the registry's %q", got, want)
 				}
 			case "statusLine", "subagentStatusLine":
 				if parsed.Settings[knob.Name] == nil {

@@ -78,7 +78,8 @@ var DC = (function () {
       apply(el, v);
       if (el === cur) cur = cur.nextSibling; else parent.insertBefore(el, cur);
     }
-    while (cur) { const next = cur.nextSibling; if (cur.__ref) cur.__ref(null); parent.removeChild(cur); cur = next; }
+    // only nodes this runtime made are its to drop: text a view writes into a ref'd element by hand stays
+    while (cur) { const next = cur.nextSibling; if (cur.__k !== undefined) { if (cur.__ref) cur.__ref(null); parent.removeChild(cur); } cur = next; }
   }
 
   class DCLogic {

@@ -114,6 +114,22 @@ func TestPrintCostLedgerDoctorReadsOnlyTheEndOfALongLog(t *testing.T) {
 	}
 }
 
+// A last line longer than the window is named, never shown as an empty tail.
+func TestPrintCostLedgerDoctorSaysWhenTheLastLineIsLongerThanTheWindow(t *testing.T) {
+	runtime, logPath := costLedgerRuntime(t)
+	writeSinkLog(t, logPath, []string{
+		"2026-01-02T03:04:05.000Z cost-sink: first",
+		"2026-01-02T03:04:06.000Z cost-sink: " + strings.Repeat("x", costSinkTailWindow+1024),
+	})
+	var stdout bytes.Buffer
+	printCostLedgerDoctor(&stdout, runtime, &paths.MapEnv{})
+	out := stdout.String()
+	want := fmt.Sprintf("last line is longer than the %d-byte window", costSinkTailWindow)
+	if !strings.Contains(out, want) {
+		t.Fatalf("output lacks %q:\n%s", want, out)
+	}
+}
+
 func TestPrintCostLedgerDoctorSeparatesAnAbsentLogFromAFailedLook(t *testing.T) {
 	runtime, logPath := costLedgerRuntime(t)
 	var absent bytes.Buffer

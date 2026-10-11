@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // cacheWindowSegment renders the prompt cache's time left and the share of
@@ -397,13 +398,13 @@ func cacheAnchor(path string) cacheWindow {
 func cacheAnchorIn(path string, sidechain bool) cacheWindow {
 	var replied cacheWindow
 	for _, size := range []int64{65_536, 1_048_576} {
-		body, err := readTail(path, size)
+		body, _, err := transcript.ReadTailLines(path, size)
 		if err != nil {
 			continue
 		}
 		var window cacheWindow
 		scanner := bufio.NewScanner(strings.NewReader(string(body)))
-		scanner.Buffer(make([]byte, 64*1024), int(size)+1)
+		scanner.Buffer(make([]byte, 64*1024), len(body)+1)
 		for scanner.Scan() {
 			var record struct {
 				Type      string `json:"type"`

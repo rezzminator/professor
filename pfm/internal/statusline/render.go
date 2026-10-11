@@ -6,9 +6,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -722,30 +720,6 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 			_ = os.Remove(filepath.Join(runtime.RateLimitDir, entry.Name()))
 		}
 	}
-}
-
-func readTail(path string, size int64) (tail []byte, returnErr error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close tail file %s: %w", path, err))
-		}
-	}()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	start := info.Size() - size
-	if start < 0 {
-		start = 0
-	}
-	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return nil, err
-	}
-	return io.ReadAll(file)
 }
 
 func formatCacheTime(duration time.Duration, expired bool) string {

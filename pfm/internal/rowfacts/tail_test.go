@@ -45,3 +45,19 @@ func TestScanTailWidensUntilTheTailAnswersOrTheFileEnds(t *testing.T) {
 		t.Errorf("a file read whole is not read again at a wider width: %d reads", reads)
 	}
 }
+
+func TestScanTailHandsOverALastLineLongerThanEveryWidth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	big := strings.Repeat("x", 4096)
+	writeFile(t, path, "needle\n"+strings.Repeat("filler line\n", 40)+big+"\n")
+	seen := false
+	err := scanTail(path, []int64{64, 128}, func(data []byte) bool {
+		if strings.HasSuffix(string(data), big+"\n") && strings.Contains(string(data), "filler line\n") {
+			seen = true
+		}
+		return seen
+	})
+	if err != nil || !seen {
+		t.Fatalf("no scan saw the whole last line with the lines before it: seen=%v err=%v", seen, err)
+	}
+}

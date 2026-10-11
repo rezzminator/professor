@@ -38,7 +38,7 @@ func printCostLedgerDoctor(stdout io.Writer, runtime config.Runtime, env paths.E
 		state, runtime.Config.Source(config.KeyClaudeCostLedger), paths.CostLedgerDir(env, runtime.Paths.Home),
 	)
 	logPath := paths.CostSinkLog(runtime.Paths.Home)
-	size, tail, err := readLogTail(logPath, costSinkTailLines)
+	size, tail, overlong, err := readLogTail(logPath, costSinkTailLines)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		fmt.Fprintf(stdout, "doctor: cost sink log path=%s state=absent\n", logPath)
@@ -48,6 +48,10 @@ func printCostLedgerDoctor(stdout io.Writer, runtime config.Runtime, env paths.E
 		return 1
 	}
 	fmt.Fprintf(stdout, "doctor: cost sink log path=%s bytes=%d\n", logPath, size)
+	if overlong {
+		fmt.Fprintf(stdout, "doctor: cost sink log: last line is longer than the %d-byte window, not shown\n",
+			costSinkTailWindow)
+	}
 	for _, line := range tail {
 		fmt.Fprintf(stdout, "doctor: cost sink log: %s\n", line)
 	}
@@ -56,28 +60,29 @@ func printCostLedgerDoctor(stdout io.Writer, runtime config.Runtime, env paths.E
 
 // readLogTail returns the file's size and its last count non-empty lines, reading at most
 // costSinkTailWindow bytes from its end; a line the window cuts is dropped, never shown half.
-func readLogTail(path string, count int) (int64, []string, error) {
+// overlong reports that the window lies inside the file's last line, so no line was whole to read.
+func readLogTail(path string, count int) (size int64, tail []string, overlong bool, err error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, false, err
 	}
 	defer func() { _ = file.Close() }() // read-only: a close error loses nothing
 	info, err := file.Stat()
 	if err != nil {
-		return 0, nil, fmt.Errorf("stat %s: %w", path, err)
+		return 0, nil, false, fmt.Errorf("stat %s: %w", path, err)
 	}
 	if info.IsDir() {
-		return 0, nil, fmt.Errorf("%s is a directory, not a log file", path)
+		return 0, nil, false, fmt.Errorf("%s is a directory, not a log file", path)
 	}
 	start := max(info.Size()-costSinkTailWindow, 0)
 	window := make([]byte, info.Size()-start)
 	if _, err := file.ReadAt(window, start); err != nil && !errors.Is(err, io.EOF) {
-		return 0, nil, fmt.Errorf("read %s: %w", path, err)
+		return 0, nil, false, fmt.Errorf("read %s: %w", path, err)
 	}
 	if start > 0 {
 		cut := bytes.IndexByte(window, '\n')
-		if cut < 0 {
-			return info.Size(), nil, nil
+		if cut < 0 || cut == len(window)-1 {
+			return info.Size(), nil, true, nil
 		}
 		window = window[cut+1:]
 	}
@@ -87,5 +92,5 @@ func readLogTail(path string, count int) (int64, []string, error) {
 			lines = append(lines, line)
 		}
 	}
-	return info.Size(), lines[max(len(lines)-count, 0):], nil
+	return info.Size(), lines[max(len(lines)-count, 0):], false, nil
 }

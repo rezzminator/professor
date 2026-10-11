@@ -74,6 +74,29 @@ func TestNameLookupStopsOnceTheContextIsDone(t *testing.T) {
 	}
 }
 
+// TestNameLookupFindsAChatWhoseLastLineIsLargerThanTheTailWindow: a transcript
+// that ends in one very large entry (a big tool result) still resolves by its
+// title, which sits before that entry.
+func TestNameLookupFindsAChatWhoseLastLineIsLargerThanTheTailWindow(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "-work-repo")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session := filepath.Join(project, "aaaaaaaa-1111-2222-3333-444444444444.jsonl")
+	big := `{"type":"user","message":{"content":"` + strings.Repeat("x", nameTail+1024) + `"}}`
+	content := `{"type":"custom-title","customTitle":"wanted","sessionId":"x"}` + "\n" +
+		`{"type":"user","message":{"content":"hello"}}` + "\n" + big + "\n"
+	if err := os.WriteFile(session, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := Env{ClaudeRoots: []string{root}}
+	if out, err := DigestTranscript(context.Background(), []string{"locate", "wanted"}, env); err != nil ||
+		out.Text != resolvedPath(session)+"\n" {
+		t.Fatalf("locate by title = %q, %v; want the session", out.Text, err)
+	}
+}
+
 // TestNameLookupIsNotFailedByAnUnreadableCodexHome: a Claude chat named by its
 // title resolves even when the id search could not walk a Codex home — the
 // name lookup reads no Codex home; the place the id search missed is a warning.

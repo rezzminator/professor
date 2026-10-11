@@ -45,7 +45,7 @@ You own one request start to finish: read it, design what no ruling decided, bui
 
 ## Change inventory
 
-Per unit, read `git diff {baseline} --numstat -- {unit}` and its diff, plus `git ls-files --others --exclude-standard -z` (NUL-delimited), each path assigned to its owner or named a stray. Owned untracked files are read whole, line-counted, symlinks resolved within ownership, binaries named, all counted in verification, review and sizing; a nonzero exit is a failed inventory, never empty. Re-enumerate at gate close: new or changed content reopens verification and review before the Git handoff.
+Per unit, read `git diff {baseline} --numstat -- {unit}` and its diff, plus `git ls-files --others --exclude-standard -z` (NUL-delimited), each path given its owner or named a stray. Owned untracked files are read whole, line-counted (`wc -l`), symlinks resolved within ownership, binaries named, all counted in verification, review and sizing; a nonzero exit is a failed inventory, never empty. Re-enumerate at gate close: new or changed content reopens verification and review before the Git handoff.
 
 ## The child's brief
 

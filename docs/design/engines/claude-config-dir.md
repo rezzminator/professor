@@ -66,8 +66,9 @@ Claude's state file is `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`. With the vari
 | `stats-cache.json` | file | statistics cache; empty seed |
 | `.last-cleanup` | file | cleanup marker; empty seed |
 | `gh-pr-status-cache.json` | file | pull-request status cache; empty seed |
+| `tool-visibility-controller.json` | file | the tool-visibility-controller plugin's user scope file; seed `{}\n` (a missing file is no rule, an empty one is invalid JSON) |
 
-Every missing entry is created empty (apart from the `settings.json` seed). Existing entries are left intact. Transcript readers use `~/.claude/projects` (`engine.claudeDefaultRoots`); `PFM_CLAUDE_ROOTS` is a jail override. The transcript path does not identify its account; the [launch record](claude-launch.md#the-launch-record) does.
+Every missing entry is created empty (apart from the `settings.json` and `tool-visibility-controller.json` seeds). Existing entries are left intact. Transcript readers use `~/.claude/projects` (`engine.claudeDefaultRoots`); `PFM_CLAUDE_ROOTS` is a jail override. The transcript path does not identify its account; the [launch record](claude-launch.md#the-launch-record) does.
 
 ## Account dirs
 

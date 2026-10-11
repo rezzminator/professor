@@ -361,7 +361,7 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 			writeFile(t, filepath.Join(path, "both"), "same")
 			writeFile(t, filepath.Join(target, "both"), "same")
 			writeFile(t, filepath.Join(target, "store"), "store")
-		case entry.Name == "settings.json":
+		case entry.Name == "settings.json" || entry.Name == "tool-visibility-controller.json":
 			writeFile(t, path, `{"account":1,"both":{"k":2}}`)
 			writeFile(t, target, `{"both":{"k":2},"store":3}`)
 		case entry.Name == "history.jsonl":
@@ -397,7 +397,7 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 				filepath.Join(target, "both"):           "same",
 				filepath.Join(target, "sub", "account"): "account",
 			}
-		case entry.Name == "settings.json":
+		case entry.Name == "settings.json" || entry.Name == "tool-visibility-controller.json":
 			raw, err := os.ReadFile(target)
 			var got map[string]any
 			merged := map[string]any{"account": 1.0, "both": map[string]any{"k": 2.0}, "store": 3.0}
@@ -416,7 +416,7 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"projects", "settings.json"} {
+	for _, name := range []string{"projects", "settings.json", "tool-visibility-controller.json"} {
 		t.Run(name+"-stops-on-a-difference", func(t *testing.T) {
 			env := fixtureEnv(t)
 			path, target := filepath.Join(env.Accounts[0].ConfigDir, name), filepath.Join(env.Store, name)
@@ -439,6 +439,32 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 			}
 		})
 	}
+	// A plugin user's rules live in each account dir (CLAUDE_CONFIG_DIR) and the store has no copy yet:
+	// the printed fixes, run in turn, move them into the store whole, so install is unblocked.
+	t.Run("tool-visibility-controller.json-adopts-into-a-missing-store", func(t *testing.T) {
+		env := fixtureEnv(t)
+		const name, rules = "tool-visibility-controller.json", `{"loops":{"main":{"tools":{"exclude":["WebSearch"]}}}}`
+		env.Accounts = append(env.Accounts, config.Account{ID: 2, ConfigDir: config.DefaultAccountDir(env.Home, 2)})
+		for _, account := range env.Accounts {
+			writeFile(t, filepath.Join(account.ConfigDir, name), rules)
+		}
+		rows := detect(t, "account-entry-real", env)
+		if len(rows) != len(env.Accounts) {
+			t.Fatalf("rows=%+v", rows)
+		}
+		for _, row := range rows {
+			if output, err := exec.Command("sh", "-c", row.Fix).CombinedOutput(); err != nil {
+				t.Fatalf("fix %q: %v: %s", row.Fix, err, output)
+			}
+		}
+		assertRows(t, detect(t, "account-entry-real", env))
+		raw, err := os.ReadFile(filepath.Join(env.Store, name))
+		var got, want any
+		if err != nil || json.Unmarshal(raw, &got) != nil || json.Unmarshal([]byte(rules), &want) != nil ||
+			!reflect.DeepEqual(got, want) {
+			t.Fatalf("store copy=%q %v, want the account rules", raw, err)
+		}
+	})
 	t.Run("foreign-link", func(t *testing.T) {
 		env := fixtureEnv(t)
 		path := filepath.Join(env.Accounts[0].ConfigDir, "CLAUDE.md")
@@ -602,10 +628,12 @@ func TestAccountEntryReal(t *testing.T) {
 		"rm {path}  # interleaved by timestamp"
 	fixes["plugins"] = "rm -r {path}  # the store keeps its copy (reinstallable)"
 	fixes["settings.json"] = "jq -e -s '.[0] as $s | .[1] | to_entries | all(.key as $k | ($s | has($k) | not) or " +
-		"$s[$k] == .value)' {store}/settings.json {path} > /dev/null && " +
-		"jq -s '.[0] * .[1]' {store}/settings.json {path} > " +
-		"{store}/settings.json.new && mv {store}/settings.json.new {store}/settings.json && rm {path}  " +
+		"$s[$k] == .value)' {store}/{entry} {path} > /dev/null && " +
+		"jq -s '.[0] * .[1]' {store}/{entry} {path} > " +
+		"{store}/{entry}.new && mv {store}/{entry}.new {store}/{entry} && rm {path}  " +
 		"# adds the keys the store lacks; stops while a key differs"
+	fixes["tool-visibility-controller.json"] = "mkdir -p {store} && { [ -e {store}/{entry} ] || [ -L {store}/{entry} ] || " +
+		"printf '{}\\n' > {store}/{entry}; } && " + fixes["settings.json"]
 	fixes["CLAUDE.md"] = "cat {path} >> {store}/CLAUDE.md && rm {path}  " +
 		"# appended whole; prune {store}/CLAUDE.md as you like"
 	for _, entry := range installer.StoreEntries {

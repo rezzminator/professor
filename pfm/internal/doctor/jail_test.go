@@ -69,7 +69,7 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	if !strings.Contains(stdout.String(), "doctor: clean") ||
 		!strings.Contains(stdout.String(), "doctor: claude_plugins ok\n") ||
 		!strings.Contains(stdout.String(), fmt.Sprintf("host-check: ok (%d checks)", len(hostcheck.Detectors()))) ||
-		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 22 entries)") {
+		!strings.Contains(stdout.String(), accountLinksOK()) {
 		t.Fatalf("fresh target HOME doctor output=%q", stdout.String())
 	}
 }

@@ -191,15 +191,97 @@ cases = [
     ('tilde', 'Estimate ~ 3', 'Estimate 3', True),
     ('backtick', 'literal ' + chr(96) + ' marker', 'literal marker', True),
     ('backslash', r'path \ segment', 'path segment', True),
+    # Extraction artefacts that carry no loss: the page keeps its Markdown.
+    ('hyphen joined at line end', 'transfor-\nmation and softmax', 'transformation and softmax', False),
+    ('hyphen kept at line end', 'position-\nwise', 'position-wise', False),
+    ('soft hyphen at line end', 'recur\u00ad\nrent', 'recurrent', False),
+    ('subscript split', 'dimension dmodel = 512', 'dimension _d_ model = 512', False),
+    ('superscript split', '1020', '10 20', False),
+    ('subscripts on a formula', 'FFN(x) = max(0, xW1 + b1)W2 + b2',
+     'FFN( _x_ ) = max(0 _, xW_ 1 + _b_ 1) _W_ 2 + _b_ 2', False),
+    ('native text glues neighbours', 'avaswani@google.comLlion Jones', 'avaswani@google.com\nLlion Jones', False),
+    # Real losses the artefact rules must still report.
+    ('hyphen drops the second half', 'sequence-\naligned recurrence', 'sequence recurrence', True),
+    ('hyphen inside a line', 'state-of-the-art', 'state of the art', True),
+    ('words fused by the renderer', 'the values of', 'thelues of va', True),
+    ('number spelled by a link target', 'ran 100 steps', 'ran steps\n\n[10](https://example.org/0)', True),
 ]
+failures = []
 for name, source, markdown, missing in cases:
     page.text = source
     c._pymupdf4llm_markdown = lambda *a, **kw: markdown
     result = c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})
     assert result['ok'], (name, result)
-    assert ('_Converter gap:' in result['markdown']) == missing, (name, result)
+    if ('_Converter gap:' in result['markdown']) != missing:
+        failures.append((name, 'gap reported' if not missing else 'gap not reported', result['markdown']))
+    elif not missing and result['markdown'].strip() != markdown.strip():
+        failures.append((name, 'Markdown not kept', result['markdown']))
     if name == 'missing caption':
         assert source in result['markdown'], result
+# A small set of text-layer words the layout never rendered (a rotated margin stamp) is appended to the
+# page's Markdown, which keeps its layout; a loss that is not small still falls back to the native text.
+words = ['w%d' % index for index in range(600)]
+body = ' '.join(words)
+def page_markdown(source, markdown):
+    page.text = source
+    c._pymupdf4llm_markdown = lambda *a, **kw: markdown
+    return c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})['markdown']
+def judge(name, out, markdown, appended, fallback):
+    if fallback:
+        if 'using the native text layer' not in out:
+            failures.append((name, 'no native text fallback', out[:200]))
+        return
+    if 'using the native text layer' in out or markdown not in out:
+        failures.append((name, 'Markdown not kept', out[:200]))
+    elif 'missing from the layout, appended below' not in out:
+        failures.append((name, 'no appended-below gap note', out[:200]))
+    elif not out.rstrip().endswith(appended):
+        failures.append((name, 'missing run not appended in text-layer order', out[-120:]))
+stamp = 'arXiv:1706.03762v7 [cs.CL] 2 Aug 2023'
+markdown = '**' + body + '**'
+judge('margin stamp, one run', page_markdown(body + '\n' + stamp + '\n', markdown), markdown, stamp, False)
+split = '\n'.join([' '.join(words[:200]), 'Aug', ' '.join(words[200:400]), '2023', ' '.join(words[400:])])
+judge('margin words, two runs', page_markdown(split, markdown), markdown, 'Aug\n2023', False)
+scattered = '\n'.join(' '.join(words[index * 75:(index + 1) * 75] + ['lost%d' % index]) for index in range(8))
+judge('eight scattered words', page_markdown(scattered, '**' + ' '.join(words[:600]) + '**'), '', '', True)
+judge('stamp on a short page', page_markdown(' '.join(words[:100]) + '\n' + stamp, '**' + ' '.join(words[:100]) + '**'), '', '', True)
+fused = ' '.join(words[:300]) + ' alpha beta ' + ' '.join(words[300:])
+judge('word fused by the renderer', page_markdown(fused, '**' + ' '.join(words[:300]) + ' alphabeta ' + ' '.join(words[300:]) + '**'), '', '', True)
+# A run whose tokens recur elsewhere is placed outward from its one certain token, whatever their names sort as.
+shuffled = words[:300] + ['pp', 'qq'] + words[300:] + ['xs', 'qq', 'pp']
+markdown = '**pp qq ' + ' '.join(words) + '**'
+judge('run placed outward from its certain token', page_markdown(' '.join(shuffled), markdown), markdown, 'xs qq pp', False)
+assert not failures, failures
+# A repeated word the surplus pieces cannot spell costs one search, not one per copy.
+import time
+word = 'a' * 23 + 'b'
+page.text = ' '.join([word] * 300)
+c._pymupdf4llm_markdown = lambda *a, **kw: ' '.join('a' * size for size in range(1, 24) for _ in range(300))
+started = time.monotonic()
+result = c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})
+elapsed = time.monotonic() - started
+assert 'conversion omitted 300 text-layer tokens' in result['markdown'], result['markdown'][:300]
+assert elapsed < 3, ('an unspellable repeated word was searched once per copy', elapsed)
+# Distinct unspellable words share one search budget per page: a crafted page cannot stall the worker.
+words = [chr(0x4e00 + index) + 'a' * 22 + 'b' for index in range(1000)]
+page.text = ' '.join(words)
+c._pymupdf4llm_markdown = lambda *a, **kw: ' '.join(
+    [word[0] for word in words] + ['a' * size for size in range(1, 23) for _ in range(6)])
+started = time.monotonic()
+result = c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})
+elapsed = time.monotonic() - started
+assert 'conversion omitted 1000 text-layer tokens' in result['markdown'], result['markdown'][:300]
+assert elapsed < 3, ('distinct unspellable words were each searched in full', elapsed)
+# Aligning a page against its Markdown stays bounded: a numeric table renders a pipe between every cell,
+# so no two tokens align in a row.
+cells = [str(index % 10) for index in range(1990)]
+page.text = ' '.join(cells[:995] + ['m%d' % index for index in range(10)] + cells[995:])
+c._pymupdf4llm_markdown = lambda *a, **kw: '|' + '|'.join(cells) + '|'
+started = time.monotonic()
+result = c.convert({'path': 'fixture.pdf', 'kind': 'pdf'})
+elapsed = time.monotonic() - started
+assert 'using the native text layer' in result['markdown'], ('alignment budget did not fall back', result['markdown'][:300])
+assert elapsed < 3, ('aligning a table page was not bounded', elapsed)
 page.text = 'Readable native text'
 def broken(*a, **kw): raise RuntimeError('text layer unreadable')
 page.get_text = broken

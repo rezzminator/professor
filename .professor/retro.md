@@ -336,6 +336,31 @@ Observed: the foreman's brief to the lander of a callmeter flight did not name t
 Amend: templates/global/agents/flights-foreman.md — the section that spawns the flights-lander: its gate brief names each project's long run the testing manual assigns the lander and says to run it in the background with stdin from /dev/null.
 Resolved:
 
+## 2026-10-11 — gitter ran the pfm suite on the host before a merge commit
+Observed: landing the watch-footprint flight, gitter confirmed the gate by running pfm tests on macOS outside the fence; the frozen-tmux-server ladder rung and some install/doctor tests failed there while the fence gate was green, leaving an unexplained host-only red in the return.
+Amend: .claude/agents/gitter.md#COMMIT hard gate — "confirm it yourself where it is cheap" names how: read the gate log or rerun through `.claude/scripts/dev.sh iso`, never `go test` on the host (root CLAUDE.md § Testing).
+Resolved:
+
+## 2026-10-11 — Claude Code's SubagentHandback made every finished nested agent read "working"
+Observed: Claude Code now ends a sub-agent's turn with a SubagentHandback tool_use whose tool_result carries top-level `toolEndsTurn: true`; the statusline nest scan and the picker's rowfacts read any trailing user entry as an open turn, so a foreman row read 14/38 working with all 38 done. Fixed in c19fb949 (both doors), plus a per-role roster and no `solo` segment (3eb1cbbc).
+Amend: .claude/commands/pfm-testing-manual.md — any code that infers a Claude transcript's turn state carries a fixture whose last entry is a handback tool_result with toolEndsTurn.
+Resolved:
+
+## 2026-10-11 — a flight ran check-templates.sh on the host from a fresh worktree and reported GAP install
+Observed: two flights ran `.claude/scripts/check-templates.sh` on the host inside `.worktrees/{flight}/`; it exited 3 naming PyYAML and jscpd. The fence image has both (python3-yaml in pfm-dev.Dockerfile, jscpd via tools.sh); the host's Homebrew python3 lacks PyYAML, and jscpd resolves only under the checkout's own tmp/tools, absent in a fresh worktree. Each lander then read the GAP as a residual FAIL. A fresh worktree also lacks scripts/leak-terms.txt, so the leak check needs LEAK_TERMS pointed at the main checkout's copy.
+Amend: templates/global/agents/flights-foreman.md and flights-lander.md — a templates check in a flight runs through `.claude/scripts/dev.sh iso … templates`, never check-templates.sh on the host; the lander brief names LEAK_TERMS for a fresh worktree.
+Resolved:
+
+## 2026-10-11 — a one-unit plugin feature ran the full flight ceremony for 2.5 hours
+Observed: the cache-live-control main auto-raise (one option, one state machine) went through flights-foreman with two lander rounds, a residual send-back and four live proofs of about 11 minutes each; the first working, live-proven commit landed at about 1h40, the rest was edge-case polish the user never asked for. The user called the duration out.
+Amend: fleet prompt § Orchestration and the main chat's dispatch habit: a single-unit plugin feature with a clear spec takes the direct rung or a foreman brief that orders one live proof and one review round; a residual send-back needs a named user-visible defect, not "the lander said FAIL".
+Resolved:
+
+## 2026-10-11 — per-agent prompt-cache TTL is impossible; GPT-backed agents miss cache 13% of consecutive calls
+Observed: CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL is read process-wide: a live probe on Claude Code 2.1.296 with 4 concurrent sub-agents saw a one-agent raise reach 5 of the other agents' 9 requests, so cache-live-control 0.4.0 ships a shared raise (agentRaiseWaiting) instead. A month's sub-agent transcripts (2026-09-09..10-11) showed 321 expired-cache rewrites, $137.74 at API prices (long tool / background shell $72.82, waiting on a child $35.91, resumed via SendMessage $28.48); separately, gpt-6-sol / gpt-6.1-sol agents missed cache on 12.97% of consecutive in-TTL calls vs 0.29% for Claude, $158.44 — more than all expiries.
+Amend: open — the GPT-backed agents' cache-miss rate needs its own investigation in the model-gateway / gpt-subagent-router path (docs/dev/gpt-subagent-router.md).
+Resolved:
+
 ## 2026-10-11 — "beyond the run-to-run spread" passed every change on a deterministic target
 Observed: the Jev classifier lab (`/iterative-improvement` on a TypeSafe Jev question) repeats a run to within
 ≤0.04 M, so its run-to-run spread is near zero and any change "rose beyond the spread" — v1→v3 looked like
@@ -355,4 +380,24 @@ one fingerprint (14 clones before and after) and the second run passed.
 Amend: .claude/commands/pfm-testing-manual.md — an edit to any twin pair (a `.claude/**` file and its
 `templates/project/**` twin) runs `scripts/clone-check.sh --measure` in the same pass and names the
 `.jscpd-baseline.json` swap in the commit message.
+Resolved:
+
+## 2026-10-12 — a one-file pfm change sent through a flight worktree the user did not want
+Observed: for the tracer-intake doctor check the main chat had gitter set up `.worktrees/tracer-intake-doctor` per § Process ("Code flights build inside the fence: a git worktree under .worktrees/{flight}/"); the user stopped it: "Doesn't need a worktree, just do it damn on develop". The flight built on develop in the main checkout, tests still in the fence, gitter committing by explicit pathspec and by hunk where another session's edit shared a file.
+Amend: CLAUDE.md#Process — name when a code flight needs a worktree (parallel flights, an overlap with another session's dirty files) and that otherwise it builds on develop in the main checkout, fence tests unchanged.
+Resolved:
+
+## 2026-10-12 — `dev.sh iso run bash -c '…'` runs only the first word under bash
+Observed: `iso run bash -c 'go -C pfm test …'` printed `go help`: the wrapper hands one shell string to the container, so `bash -c` received `go` alone. An earlier `iso run bash -c 'set -e; K=…; cd $K; python3 -m unittest …'` passed by coincidence — `bash -c set` was a no-op and the rest ran under the outer shell. The working form is one quoted string: `iso run 'go -C pfm test ./internal/{pkg}/'`.
+Amend: .claude/commands/pfm-testing-manual.md — `iso run` takes one quoted shell string; never `bash -c`.
+Resolved:
+
+## 2026-10-12 — host `check-templates.sh` exits GAP and runs nothing
+Observed: on this host `check-templates.sh` exits `GAP install (PyYAML)` before any check, so two flights' template steps ran only through the fence gate or by hand (`rumdl check FILES`, `bash scripts/leak-check.sh --files FILES`).
+Amend: .claude/scripts/dev.sh or the templates testing manual — name the GAP and the by-hand fallback, or provision PyYAML the way the fence does.
+Resolved:
+
+## 2026-10-12 — an invented python3 policy reversed one turn later
+Observed: asked to keep `pfm doctor` from failing on a tracer kit not installed yet, the main chat also wrote "python3 is never a blocker in the pre-change install check" into the requirements; the user's next message made python3 a required install dependency (c48043ca). The user's ask covered the kit alone.
+Amend: judgment — a rule the user did not state stays out of a spec; name it as a question instead.
 Resolved:

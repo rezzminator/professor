@@ -5,6 +5,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 # Vocabulary
 
 - agent-effort: a tag at the start of an Agent prompt sets that sub-agent's reasoning effort · `agent-effort/`
+- auto-effort: sets the main chat's reasoning effort each turn; the model moves it with `set_effort`, failing tests raise it, a cache gate per model · `auto-effort/`
 - tool-visibility-controller: a `visibility` field in agent, skill and command frontmatter, plus a scope file, decides per loop which agents, skills, MCP tools and built-in tools it sees and may invoke · `tool-visibility-controller/`
 - buddy: an ASCII companion above the prompt that reacts to the work and answers `/buddy` · `buddy/`
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`

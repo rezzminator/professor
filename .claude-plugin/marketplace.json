@@ -46,6 +46,19 @@
       "keywords": ["claude-code", "sub-agent", "effort", "reasoning-effort", "function-hooks", "professor"]
     },
     {
+      "name": "auto-effort",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/auto-effort.git",
+        "path": "plugins/auto-effort",
+        "ref": "main"
+      },
+      "description": "Automatic reasoning effort for the Claude Code main chat: the plugin plans each turn, the model raises or lowers it with set_effort, and a cache check keeps it safe.",
+      "homepage": "https://github.com/rezzminator/auto-effort",
+      "license": "MIT",
+      "keywords": ["claude-code", "claude-code-plugin", "effort", "reasoning-effort", "thinking", "function-hooks", "claude-mods", "token-cost", "prompt-cache", "professor"]
+    },
+    {
       "name": "tool-visibility-controller",
       "source": {
         "source": "git-subdir",

@@ -42,7 +42,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | --- | --- | --- |
 | `ROOT` | `new` | The repository root, absolute |
 | `BASE` | `new`, in a git work tree with a commit | The commit `HEAD` was at |
-| `questions` | `new --questions` | The brief's numbered questions, as read from stdin |
+| `questions` | `new --questions`, or `intake` | The brief's numbered questions: as read from stdin, or as `intake` parsed them from the brief, one `{n}. {text}` each |
 | `{ID}.started` | `start` | `{PATH:LINE}<tab>{QUESTION}`, a line per `start`: the node is running; the map page reads its question and its time |
 | `{ID}.refused` | `write`, at its refusal | Nothing: the node's first write was refused |
 | `{ID}.hops` | `write`, once | The node's file, each placed hop's `@` rewritten to its real `path:line` |
@@ -84,7 +84,7 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 
 **Function:** `cmd_seek` — **Run by:** the lead, in its first call, on a brief carrying `RUN:`
 
-`seek RUN REGEX` prints the run's path, then the `PRIOR` lines `new --seek` prints, for a run that already exists: the run [intake](#intake) opened at the spawn.
+`seek RUN REGEX` prints the run's path, then the `PRIOR` lines `new --seek` prints, for a run that already exists: the run [intake](#intake) opened at the spawn. A RUN with no `ROOT` file, or a REGEX that does not compile, fails.
 
 ### start
 
@@ -108,11 +108,11 @@ The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s �
 
 ### answer
 
-**Function:** `cmd_answer` — **Run by:** the caller, when a step of its work rests on a question
+**Function:** `cmd_answer` — **Run by:** the caller, when a step of its work rests on a question before the final arrives; what it prints is facts to start work on, never a ruling: the final is the caller's answer
 
-`answer RUN [Q…] [--timeout S] [--grace S] [--start S]`, defaults 300, 5 and 90 seconds; no number means every question in `questions`. A node serves question n when a line of its `.started` names `Q{n}`; a child whose card names none takes its dotted parent's; every child of a serving node serves too. It polls until every serving node has written and none of their `.hops` changed for `--grace` seconds. A question no node took `--start` seconds after the first `.started` appeared is `NO THREAD Q{n}`, never waited for; a question whose nodes still walk at `--timeout` is `STILL WALKING Q{n}: nodes {IDs} …`; one with no node started yet is `NOT STARTED Q{n}`.
+`answer RUN [Q…] [--timeout S] [--grace S] [--start S]`, defaults 300, 5 and 90 seconds; a question is `3` or `Q3`, and no number means every question in `questions`. A node serves question n when a line of its `.started` names `Q{n}`; a child whose card names none takes its dotted parent's; every child of a serving node serves too. It polls until every serving node has written and none of their `.hops` changed for `--grace` seconds. A question no node took `--start` seconds after the first `.started` appeared is `NO THREAD Q{n}`, never waited for; a question whose nodes still walk at `--timeout` is `STILL WALKING Q{n}: nodes {IDs} …`; one no node has taken while that window is open is `NOT STARTED Q{n}`.
 
-The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, the answered questions and the trust note: every cite was re-read from disk just now, so an unflagged line is evidence. Then the status lines, the WARNINGS lines of the serving nodes and the run, then per answered question `Q{n} · nodes {IDs} · {its text}` and those nodes' blocks of the answers view, each node once, then their [OPEN block](#the-wait-printout). Past 28000 characters the whole printout goes to `answer-Q{n…}.txt` and the answers are trimmed, the status, WARNINGS and OPEN lines kept.
+The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, the answered questions and the trust note (`ANSWER_TRUST`): every cite was re-read from disk just now, so an unflagged line is evidence; with none answered it ends `no question answered yet`. Then the status lines, the WARNINGS lines of the answered questions' nodes and the run, then per answered question `Q{n} · nodes {IDs} · {its text}` and those nodes' blocks of the answers view, each node once, then their [OPEN block](#the-wait-printout). At 28000 characters (`CEILING`) or more the whole printout goes to `answer-Q{n}-{m}….txt`, named by the questions asked, and the answers are trimmed to a `+{k} answer lines: {path} — ask fewer questions per call` line, the status, WARNINGS and first 40 OPEN lines kept; a file that cannot be written prints `ANSWER FILE FAILED — …` and the whole printout.
 
 ### read
 
@@ -146,7 +146,7 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 
 ### intake
 
-**Function:** `cmd_intake` — **Run by:** pfm's launch hook `tracer-intake` (`claudelaunch.HookTemplates`, [hooks.md](../hooks/hooks.md#launch-time-claude-hooks-pfm-owned)): a PreToolUse hook on `Agent|Task`, running `python3 $HOME/.claude/skills/tracetree/tracetree.py intake` in every Claude session pfm launches
+**Function:** `cmd_intake` — **Run by:** pfm's launch hook `tracer-intake` (`claudelaunch.HookTemplates`, [hooks.md](../hooks/hooks.md#launch-time-claude-hooks-pfm-owned)): a PreToolUse hook on `Agent|Task`, running `python3 {home}/.claude/skills/tracetree/tracetree.py intake` in every Claude session pfm launches, wrapped so any failure is a non-blocking exit 1 that names the hook and the kit
 
 `intake` reads the hook payload on stdin. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets its run opened, with ROOT taken from the brief's `Repo root:` line or else the hook's cwd, and its questions stored.
 
@@ -155,6 +155,8 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 - Every other call passes untouched and the hook prints nothing.
 - A root that is not a directory, or a run that cannot be opened, passes the spawn on unchanged and says why.
 - An unreadable payload is logged to `/tmp/{project}/tracer/intake.log`, `{project}` taken from the hook's own working directory, and to stderr when that log cannot be written.
+- python3 is a required install dependency (`deps.Registry`): a missing one stops `pfm install`'s pre-change check with `install python3; the tracer's tracetree kit and its launch hook run on it`.
+- `pfm doctor`'s `doctor: tracer-intake:` rows prove the hook on the host: python3, the kit file, a non-tracer smoke that passes silently and a tracer smoke that returns a `RUN:` line, a FAIL row and exit 3 on any broken need ([hooks.md](../hooks/hooks.md#launch-hook-tracer-intake)).
 
 ## The check
 
@@ -173,11 +175,13 @@ Each hop's quote is re-read from the file at check time, in every view, so the p
 
 A `=` clause whose backticked names appear nowhere within 40 lines of its hop is marked `(? not near: {names})`. A SPLIT naming a child that started and wrote nothing is `✗ MISSING`; one naming a child that never started is `not spawned`. A node with neither END nor SPLIT gets `(no END line: where the thread ends is not stated)`.
 
-The answers view checks each ANSWER line's cites against the verified hops. A cite is backed when a verified hop's range, give or take 3 lines, holds it, or its backticked text sits there.
+**Function:** `check_answer` — **Constant:** `CITE_SLACK` (3 lines)
+
+The answers view checks each ANSWER line's cites against the verified hops. A cite is backed when a verified hop's range, give or take `CITE_SLACK` lines, holds it, or its backticked text sits there.
 
 | Flag | When |
 | --- | --- |
-| `↻ {path}:{a}→{b}` | The cite's backticked text sits on another line of the cited file; the cite moves there. A cite still unbacked within 3 lines of the line its reader gave a hop the kit re-addressed (at write or at check) moves by that hop's shift |
+| `↻ {path}:{a}→{b}` | The cite's backticked text sits on another line of the cited file; the cite moves there. A cite still unbacked at, or within `CITE_SLACK` lines of, the line its reader gave a hop the kit re-addressed (at write or at check, `files.readdressed`) moves by that hop's shift, so a correct claim is not graded unbacked |
 | `unbacked {path}:{n}` | No verified hop and no quoted text at the cite |
 | `` ? `{text}` not in the cited file `` | A backticked text found in no cited file |
 | `≈ {path}:{n}` | The cite's only hops drifted |

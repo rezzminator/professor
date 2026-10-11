@@ -1,6 +1,6 @@
 # tracer bench
 
-Every measured `tracer` run: the single-agent bench behind the model, the tree bench behind the lead and its sub-tracers, the replay of past heavy briefs, the caller probes and their audits, the rejected-hop survey behind the resolver and drift, the runs that checked the kit, and the field runs swept from disk. The design is [tracer.md](tracer.md), the kit [tracetree.md](tracetree.md).
+Every measured `tracer` run: the single-agent bench behind the model, the tree bench behind the lead and its sub-tracers, the replay of past heavy briefs, the caller probes and their audits, the caller bench behind the final-is-the-answer contract and the intake hook, the rejected-hop survey behind the resolver and drift, the runs that checked the kit, and the field runs swept from disk. The design is [tracer.md](tracer.md), the kit [tracetree.md](tracetree.md).
 
 ## Contents
 
@@ -8,6 +8,7 @@ Every measured `tracer` run: the single-agent bench behind the model, the tree b
 - [Tree bench](#tree-bench)
 - [Replay bench](#replay-bench)
 - [Caller probes](#caller-probes)
+- [Caller bench](#caller-bench)
 - [Rejected-hop survey](#rejected-hop-survey)
 - [Resolver and drift](#resolver-and-drift)
 - [Engine trace](#engine-trace)
@@ -191,6 +192,45 @@ These drove the kit mechanisms: `new --seek` PRIOR hops, `--questions` with `QUE
 - Its tracer questions were survey-shaped where the build needed each door's surface and test fixture.
 - A compaction dropped the `RUN`, so the return reported as unchecked a door the run held verified.
 - The run directory landed under the worktree's name instead of the project's; the kit now names it from git's common directory.
+
+## Caller bench
+
+Callers spawning tracer through the [intake hook](tracer.md#intake-hook), with `tt answer` to pull raw reader answers early, against callers with no tracer.
+
+### Reviewer rung
+
+The large reviewer rung: a review target holding 23 known defects. Recall counts the defects a review found; false SAFE counts the defects it called safe. The pull wording told callers the final repeats what `answer` printed; the shipped wording makes the final the answer and pulled answers facts to start work on, never a ruling.
+
+| Arm | Recall /23 | False SAFE /23 |
+| --- | --- | --- |
+| Tracer seats and kit before `tt answer` | 12, 9 | 2, 4 |
+| Tracer, the final said to repeat `answer` | 4, 5, 3 | 8–9 |
+| Tracer, the final as the answer (shipped) | 8, 9 | 4, 5 |
+| No tracer | 9, 7 | 8, 9 |
+
+- Told the final only repeats the pulls, reviewers wrote their review from raw pulls before the final arrived: recall 3–5 against the baseline's 12 and 9.
+- With the final restored as the answer, recall matched the no-tracer arms' and false SAFE was 4 and 5 against their 8 and 9.
+
+### Foreman probes
+
+`flights-foreman` probes stopped at their first write, 20 key files per target.
+
+| Arm | Key files known before the first write (of 20) |
+| --- | --- |
+| Tracer with the hook | 18, 19, 18, 16 |
+| No tracer | 14 |
+| Tracer with an erroring hook | 11 |
+
+The foreman's own code reading before its first write:
+
+| Arm | Calls (mean) | Chars (mean) |
+| --- | --- | --- |
+| No tracer | 22 | 169k |
+| Tracer with the hook | 16 | 92k |
+
+- With the tracer the foreman read 45% fewer characters itself; adding about 42k characters of tracer answers, the code text in its context was 20% lower.
+- The tracer cost about 1 minute and $0.60 more to the first write.
+- The first pulled answers arrived 1.7, 2.2, 1.8 and 2.7 minutes after the spawn.
 
 ## Rejected-hop survey
 

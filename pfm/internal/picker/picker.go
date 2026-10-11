@@ -185,7 +185,7 @@ func Run(
 		// disk-cache-backed HTTP path) — see CodexLiveLimitsTTL.
 		statsSampler.Limits.CodexTTL = pfmstats.CodexLiveLimitsTTL
 		scan.Snapshot.StatsSampler = statsSampler
-		scan.Snapshot.CosmosSampler = cosmosSampler{reader: sharedState}
+		scan.Snapshot.CosmosSampler = &cosmosSampler{reader: sharedState}
 		refreshContext, refreshCancel := context.WithCancel(ctx)
 		updates := make(chan ui.Snapshot, 1)
 		// Bubble Tea owns the tty for as long as Pick runs: a probe warning

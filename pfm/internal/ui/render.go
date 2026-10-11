@@ -599,13 +599,10 @@ func framePanelWithBottom(title string, lines []string, width int, bottom string
 	}
 	framed := make([]string, 0, len(lines)+2)
 	framed = append(framed, borderStyle.Render(top))
+	// The side edge is the same string on every line: render it once.
+	edge := borderStyle.Render("│")
 	for _, line := range lines {
-		framed = append(
-			framed,
-			borderStyle.Render("│")+
-				fillLine(line, innerWidth)+
-				borderStyle.Render("│"),
-		)
+		framed = append(framed, edge+fillLine(line, innerWidth)+edge)
 	}
 	framed = append(framed, bottom)
 	return strings.Join(framed, "\n")

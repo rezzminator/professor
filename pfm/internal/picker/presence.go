@@ -32,6 +32,8 @@ type presenceBaseline struct {
 	// and must not spend a full pass every poll — but a NEW gone pid, a chat
 	// that died while the pass ran, still owes its own.
 	forcedGone map[string]bool
+	// held is set while a change waits one poll for its pass (see moved).
+	held bool
 }
 
 func presenceProbeFor(environment fleet.Env) gather.PresenceProbe {
@@ -45,6 +47,7 @@ func presenceProbeFor(environment fleet.Env) gather.PresenceProbe {
 // begin fingerprints the directories at the start of a pass.
 func (baseline *presenceBaseline) begin(environment fleet.Env, now time.Time) {
 	baseline.passAt = now
+	baseline.held = false
 	files, err := presenceProbeFor(environment).Files()
 	if err != nil {
 		baseline.filesErr = err
@@ -73,12 +76,18 @@ func (baseline *presenceBaseline) record(environment fleet.Env, live gather.Snap
 	return nil
 }
 
-// moved reports whether the fleet differs from the baseline. A probe that
-// cannot run is a change plus the error: an unreadable directory never reads as
-// an unchanged fleet. With no baseline at all (the last pass could not take
-// one) the poll cannot answer, and a full pass is due once per
-// fleetRefreshParkThreshold — never on every poll, or a persistent error would
-// cost a multi-second pass every two seconds.
+// moved reports whether the fleet differs from the baseline, and a full pass is
+// due. A probe that cannot run is a change plus the error: an unreadable
+// directory never reads as an unchanged fleet. With no baseline at all (the
+// last pass could not take one) the poll cannot answer, and a full pass is due
+// once per fleetRefreshParkThreshold — never on every poll, or a persistent
+// error would cost a multi-second pass every two seconds.
+//
+// A change is held for one poll before it buys its pass. A chat's birth and
+// death each land in two steps a poll apart (its socket, then its pane crumb;
+// its server going down, then its crumb swept), and a pass per step doubles
+// the seconds of CPU the change costs; the held poll sees both. The pass is
+// still due within two polls of the change.
 func (baseline *presenceBaseline) moved(environment fleet.Env, live gather.Snapshot, now time.Time) (bool, error) {
 	if !baseline.have {
 		return now.Sub(baseline.passAt) >= fleetRefreshParkThreshold, nil
@@ -86,27 +95,40 @@ func (baseline *presenceBaseline) moved(environment fleet.Env, live gather.Snaps
 	probe := presenceProbeFor(environment)
 	files, err := probe.Files()
 	if err != nil {
+		baseline.held = false
 		return true, err
 	}
 	procs, _, err := probe.Procs(live)
 	if err != nil {
+		baseline.held = false
 		return true, err
 	}
-	if files != baseline.files || procs != baseline.procs {
-		return true, nil
-	}
-	owed := false
-	for _, line := range strings.Split(procs, "\n") {
-		if !strings.HasSuffix(line, ":gone") || baseline.forcedGone[line] {
-			continue
+	changed := files != baseline.files || procs != baseline.procs
+	var owed []string
+	if !changed {
+		for _, line := range strings.Split(procs, "\n") {
+			if strings.HasSuffix(line, ":gone") && !baseline.forcedGone[line] {
+				owed = append(owed, line)
+			}
 		}
+		changed = len(owed) > 0
+	}
+	if !changed {
+		baseline.held = false
+		return false, nil
+	}
+	if !baseline.held {
+		baseline.held = true
+		return false, nil
+	}
+	baseline.held = false
+	for _, line := range owed {
 		if baseline.forcedGone == nil {
 			baseline.forcedGone = make(map[string]bool)
 		}
 		baseline.forcedGone[line] = true
-		owed = true
 	}
-	return owed, nil
+	return true, nil
 }
 
 // hasLiveRow reports whether any composed row is a live chat: the only rows

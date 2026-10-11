@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"sort"
 	"strings"
 	"time"
@@ -15,12 +14,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
-
-type star struct {
-	px, py int
-	phase  float64
-	speed  float64
-}
 
 type cosmosPoint struct{ x, y float64 }
 
@@ -393,7 +386,8 @@ func (model Model) renderCosmosPanel(width, height int) string {
 	if width < 20 || height < 8 {
 		return model.renderCompactCosmos(width, innerWidth, innerHeight)
 	}
-	canvas := NewCanvas(innerWidth, innerHeight)
+	canvas := acquireCanvas(innerWidth, innerHeight)
+	defer releaseCanvas(canvas)
 	title := " cosmos "
 	if model.cosmosSafe {
 		// Safe mode names itself — a viewer must never wonder why the sky
@@ -556,47 +550,6 @@ func (model Model) renderCompactCosmos(width, innerWidth, innerHeight int) strin
 		lines = append(lines, strings.Repeat(" ", innerWidth))
 	}
 	return framePanel(" cosmos ", lines, width)
-}
-
-func drawCosmosStars(canvas *Canvas, now time.Time) {
-	t := float64(now.UnixNano()) / 1e9
-	starColor := rgbFromHex(configuredPalette.CosmosStar)
-	// Far layer: dimmer, slower, sparser — depth behind the main twinkle.
-	far := rand.New(rand.NewSource(56))
-	for range canvas.Cols * canvas.Rows / 32 {
-		px, py := far.Intn(canvas.PW()), far.Intn(canvas.PH())
-		phase := far.Float64() * 2 * math.Pi
-		speed := 0.2 + far.Float64()*0.5
-		canvas.Dot(px, py, scaleRGB(starColor, 0.10+0.16*(0.5+0.5*math.Sin(t*speed+phase))))
-	}
-	rng := rand.New(rand.NewSource(55))
-	count := canvas.Cols * canvas.Rows / 20
-	for range count {
-		star := star{
-			px: rng.Intn(canvas.PW()), py: rng.Intn(canvas.PH()),
-			phase: rng.Float64() * 2 * math.Pi,
-			speed: 0.6 + rng.Float64()*1.8,
-		}
-		brightness := 0.18 + 0.42*(0.5+0.5*math.Sin(t*star.speed+star.phase))
-		canvas.Dot(star.px, star.py, scaleRGB(starColor, brightness))
-	}
-	// A few bright stars that flare into a four-point sparkle at their peak.
-	bright := rgbFromHex(configuredPalette.CosmosBright)
-	poles := rand.New(rand.NewSource(57))
-	for range 4 {
-		px, py := poles.Intn(canvas.PW()), poles.Intn(canvas.PH())
-		phase := poles.Float64() * 2 * math.Pi
-		glow := 0.5 + 0.5*math.Sin(t*0.7+phase)
-		canvas.Dot(px, py, scaleRGB(bright, 0.20+0.50*glow))
-		if glow > 0.75 {
-			cross := scaleRGB(bright, (glow-0.75)*2.2)
-			canvas.Dot(px+1, py, cross)
-			canvas.Dot(px-1, py, cross)
-			canvas.Dot(px, py+1, cross)
-			canvas.Dot(px, py-1, cross)
-		}
-	}
-	drawCosmosMeteor(canvas, now)
 }
 
 // drawCosmosMeteor streaks one meteor across the sky roughly every half

@@ -214,14 +214,14 @@ func TestPresenceBaselineOwesOnePassPerNewlyGonePid(t *testing.T) {
 	}
 
 	pass(live)
-	if got := verdicts(live, 4); !slices.Equal(got, []bool{true, false, false, false}) {
-		t.Fatalf("a pid already gone at record: polls = %v, want one owed pass, then unchanged", got)
+	if got := verdicts(live, 4); !slices.Equal(got, []bool{false, true, false, false}) {
+		t.Fatalf("a pid already gone at record: polls = %v, want one owed pass (held one poll), then unchanged", got)
 	}
 	// That pass ran and the pid is still listed gone (the host's fact); now a
 	// second chat dies while a pass runs.
 	live.ClaudeProcesses = append(live.ClaudeProcesses, gather.ClaudeProcess{PID: goneProcessPID(t), PanePID: pane.PID})
 	pass(live)
-	if got := verdicts(live, 3); !slices.Equal(got, []bool{true, false, false}) {
+	if got := verdicts(live, 3); !slices.Equal(got, []bool{false, true, false}) {
 		t.Fatalf("a newly gone pid beside a permanently gone one: polls = %v, want its own owed pass, then unchanged",
 			got)
 	}
@@ -272,5 +272,66 @@ func TestRowFactsMovedSeesBusyIdleAndUnreadableFacts(t *testing.T) {
 	}
 	if !hasLiveRow(idle.Rows) || hasLiveRow([]compose.Row{{Kind: compose.ResumeClaude, ID: "r"}}) {
 		t.Fatal("only a live seat has working state that can change under a parked picker")
+	}
+}
+
+// TestPresenceBaselineHoldsAChangeOnePollSoTwoStepsBuyOnePass pins the held
+// poll: a chat's socket and its crumb land a poll apart, and the pass the first
+// step would buy waits for the second. A change that reverts before the next
+// poll buys nothing, and a held change always buys its pass at the next poll.
+func TestPresenceBaselineHoldsAChangeOnePollSoTwoStepsBuyOnePass(t *testing.T) {
+	environment := presenceEnv(t)
+	if err := os.MkdirAll(environment.Paths.SIDDir, 0o700); err != nil {
+		t.Fatalf("make crumb dir: %v", err)
+	}
+	now := time.Now()
+	var baseline presenceBaseline
+	baseline.begin(environment, now)
+	if err := baseline.record(environment, gather.Snapshot{}); err != nil {
+		t.Fatalf("record an empty fleet: %v", err)
+	}
+	poll := func() bool {
+		t.Helper()
+		moved, err := baseline.moved(environment, gather.Snapshot{}, now)
+		if err != nil {
+			t.Fatalf("probe a readable fleet: %v", err)
+		}
+		return moved
+	}
+	crumb := func(socket string) string { return filepath.Join(environment.Paths.SIDDir, socket) }
+	write := func(socket string) {
+		t.Helper()
+		if err := os.WriteFile(crumb(socket), nil, 0o600); err != nil {
+			t.Fatalf("write crumb %s: %v", socket, err)
+		}
+	}
+
+	if poll() {
+		t.Fatal("an unchanged fleet bought a pass")
+	}
+	write("cc-1800000041-1-1")
+	if poll() {
+		t.Fatal("the first step of a change bought its pass at once: the second step would buy another")
+	}
+	if err := os.Remove(crumb("cc-1800000041-1-1")); err != nil {
+		t.Fatalf("remove crumb: %v", err)
+	}
+	if poll() {
+		t.Fatal("a change that reverted before the next poll bought a pass")
+	}
+	write("cc-1800000041-1-1")
+	if poll() {
+		t.Fatal("a reverted change left its hold behind: the next change was not held")
+	}
+	write("cc-1800000042-1-1")
+	if !poll() {
+		t.Fatal("two steps a poll apart bought no pass at the second poll")
+	}
+	baseline.begin(environment, now)
+	if err := baseline.record(environment, gather.Snapshot{}); err != nil {
+		t.Fatalf("record after the pass: %v", err)
+	}
+	if poll() {
+		t.Fatal("the pass left the fleet changed")
 	}
 }

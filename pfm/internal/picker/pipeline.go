@@ -157,12 +157,6 @@ type unseenScheduleReader interface {
 	UnseenScheduleSessionIDs(context.Context) (map[string]bool, error)
 }
 
-type cosmosSampler struct{ reader commsReader }
-
-func (sampler cosmosSampler) Sample(ctx context.Context, sinceNS int64) ([]fleetdb.CommsEvent, error) {
-	return sampler.reader.CommsSince(ctx, sinceNS, compose.CosmosEventCap)
-}
-
 type scanResult struct {
 	Output   compose.Output
 	Snapshot ui.Snapshot
@@ -503,7 +497,7 @@ func streamFleetRefreshesWith(
 		}
 		reread := environment
 		reread.NowNS = refreshClock.Now().UnixNano()
-		snapshot := buildSnapshot(ctx, reread, request, lastSent.output)
+		snapshot := rereadFacts(reread, request, lastSent)
 		if !rowFactsMoved(lastSent.snapshot, snapshot) {
 			return true
 		}

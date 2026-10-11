@@ -57,14 +57,7 @@ func buildSnapshot(
 			}
 		}
 	}
-	factsError := ""
-	if request.Facts != nil {
-		var failures []error
-		rows, failures = request.Facts.Enrich(rows, environment.NowNS)
-		if len(failures) > 0 {
-			factsError = fmt.Sprintf("%d unreadable, first: %v", len(failures), failures[0])
-		}
-	}
+	rows, factsError := enrichFacts(request, rows, environment.NowNS)
 	machine := environment.Config
 	cacheByAccount := make(map[int]bool)
 	for _, account := range machine.AccountIDs() {
@@ -98,6 +91,38 @@ func buildSnapshot(
 		Cosmos:                 cosmos,
 		CosmosEvents:           cosmosEvents,
 	}
+}
+
+// enrichFacts fills each row's model, effort and working state from its
+// transcript, and names the rows whose facts could not be read.
+func enrichFacts(request scanRequest, rows []compose.Row, nowNS int64) ([]compose.Row, string) {
+	if request.Facts == nil {
+		return rows, ""
+	}
+	rows, failures := request.Facts.Enrich(rows, nowNS)
+	if len(failures) > 0 {
+		return rows, fmt.Sprintf("%d unreadable, first: %v", len(failures), failures[0])
+	}
+	return rows, ""
+}
+
+// rereadFacts is the parked picker's busy/idle refresh: the last pass's
+// snapshot with only the rows' facts read again. The rows are the composed
+// output (so a fact that stopped being readable falls back to the composed
+// value, as it does in a full pass) carrying the schedule flags the last pass
+// read; the ledger, the schedule flags, the cosmos and the compose are the last
+// pass's own. It costs a stat per transcript and reads no store.
+func rereadFacts(environment fleet.Env, request scanRequest, last sentRefresh) ui.Snapshot {
+	rows := slices.Clone(last.output.Rows)
+	if len(last.snapshot.Rows) == len(rows) {
+		for index := range rows {
+			rows[index].ScheduleFired = last.snapshot.Rows[index].ScheduleFired
+		}
+	}
+	snapshot := last.snapshot
+	snapshot.Rows, snapshot.FactsError = enrichFacts(request, rows, environment.NowNS)
+	snapshot.NowNS = environment.NowNS
+	return snapshot
 }
 
 // sentRefresh is one published pass: the composed output (kept so a parked

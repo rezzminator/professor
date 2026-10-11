@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 )
 
 type fakeCommsReader struct {
@@ -196,4 +197,73 @@ func scheduleFiredFlags(rows []compose.Row) []bool {
 		flags[index] = rows[index].ScheduleFired
 	}
 	return flags
+}
+
+// countingStoreReaders stands for the two store reads buildSnapshot makes: the
+// comms ledger and the schedule flags.
+type countingStoreReaders struct{ comms, schedules int }
+
+func (readers *countingStoreReaders) CommsSince(context.Context, int64, int) ([]fleetdb.CommsEvent, error) {
+	readers.comms++
+	return nil, nil
+}
+
+func (readers *countingStoreReaders) UnseenScheduleSessionIDs(context.Context) (map[string]bool, error) {
+	readers.schedules++
+	return map[string]bool{"live": true}, nil
+}
+
+// TestRereadFactsRefreshesWorkingStateWithoutAStoreRead pins what a parked
+// poll costs when it only re-reads the rows' working state: a stat per
+// transcript. The ledger and the schedule flags are not read again, the last
+// pass's schedule flags and cosmos stand, and an unchanged re-read is not a
+// change.
+func TestRereadFactsRefreshesWorkingStateWithoutAStoreRead(t *testing.T) {
+	output := factsFixture(t)
+	transcript := output.Rows[0].Path
+	readers := &countingStoreReaders{}
+	request := scanRequest{Facts: rowfacts.NewReader(t.TempDir()), Comms: readers, Schedules: readers}
+	environment := fleet.Env{NowNS: statNowNS(t, transcript)}
+	last := sentRefresh{output: output, snapshot: buildSnapshot(context.Background(), environment, request, output)}
+	if !last.snapshot.Rows[0].Working || !last.snapshot.Rows[0].ScheduleFired {
+		t.Fatalf("the pass's snapshot lacks the working state or the schedule flag: %+v", last.snapshot.Rows[0])
+	}
+	if readers.comms != 1 || readers.schedules != 1 {
+		t.Fatalf(
+			"a full pass reads the ledger and the flags once: comms=%d schedules=%d",
+			readers.comms,
+			readers.schedules,
+		)
+	}
+
+	if again := rereadFacts(environment, request, last); rowFactsMoved(last.snapshot, again) {
+		t.Fatalf("an unchanged re-read must not look like a change: %+v", again.Rows[0])
+	}
+
+	done := `{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[],"stop_reason":"end_turn"}}` + "\n"
+	file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open transcript to append: %v", err)
+	}
+	if _, err := file.WriteString(done); err != nil {
+		t.Fatalf("append the finished turn: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close transcript: %v", err)
+	}
+	environment.NowNS = statNowNS(t, transcript)
+	idle := rereadFacts(environment, request, last)
+	if idle.Rows[0].Working || !rowFactsMoved(last.snapshot, idle) {
+		t.Fatalf("a chat that finished its turn must re-read idle and count as a change: %+v", idle.Rows[0])
+	}
+	if !idle.Rows[0].ScheduleFired {
+		t.Error("the re-read dropped the schedule flag the last pass read")
+	}
+	if idle.NowNS != environment.NowNS {
+		t.Errorf("NowNS = %d, want the re-read's clock %d", idle.NowNS, environment.NowNS)
+	}
+	if readers.comms != 1 || readers.schedules != 1 {
+		t.Fatalf("a facts re-read must not touch the store: comms=%d schedules=%d, want 1 and 1",
+			readers.comms, readers.schedules)
+	}
 }

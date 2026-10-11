@@ -88,7 +88,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 
 ### The caller
 
-`/tracer:use` is the caller's manual, `templates/global/commands/tracer/use.md`: agent frontmatter `skills: [tracer:use]` preloads it into `flights-foreman`, `reviewer`, `reviewer-pro` and `clone-distiller`, none of which needs the `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
+`/tracer:use` is the caller's manual, `templates/global/commands/tracer/use.md`: agent frontmatter `skills: [tracer:use]` preloads it into `reviewer`, `reviewer-pro` and `clone-distiller`, none of which needs the `Skill` tool for it, `flights-foreman` loads it with its `Skill` tool when it traces, and its `MANDATORY` description routes the main chat to it. It has the caller:
 
 - trace code it will change, judge or brief on and has not read: a quick overview of file and symbol names, then one spawn of numbered fact questions in the terms of its next move, never a survey and never a closed-world door list; a run its brief hands it is drilled before it traces more;
 - do other work while tracer walks, never read the files its questions name;
@@ -98,7 +98,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-`flights-foreman` traces at its step 2 on every flight, whatever its brief quotes, writes `TRACE {RUN}` to `run.md` and keeps the `RUN` through every compaction; its intake opens no code the brief names. `reviewer` and `reviewer-pro` spawn `subagent_type: tracer` for each review seat, told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
+`flights-foreman` sends code it has not read to tracer at intake or any later step, keeps the `RUN` through every compaction and puts `RUN` and node IDs in each child's brief. `reviewer` and `reviewer-pro` spawn `subagent_type: tracer` for each review seat, told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
 
 ## Harness behaviour
 

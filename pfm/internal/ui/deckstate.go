@@ -35,6 +35,9 @@ type deckState struct {
 	// factsError is the snapshot's FactsError: why the rows' model, effort and
 	// working state may be missing.
 	factsError string
+	// refreshFailure is the last pass's failure, nil once a pass lands: the
+	// rows on screen are then older than freshNS says, and the masthead says so.
+	refreshFailure *RefreshFailure
 	// sweeping is true while the masthead's fast clock is running.
 	sweeping bool
 }
@@ -81,6 +84,7 @@ func (state *deckState) refreshed(nowNS int64, factsError string) {
 	state.freshNS = nowNS
 	state.waking = false
 	state.factsError = factsError
+	state.refreshFailure = nil
 }
 
 const (

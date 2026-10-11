@@ -956,6 +956,15 @@ func trimLastWord(value string) string {
 }
 
 func (model *Model) applyRefresh(snapshot Snapshot) {
+	if snapshot.RefreshFailure != nil {
+		// A failed pass carries no fleet: the rows on screen stay (they are the
+		// last good look) but are marked stale with the error until a pass
+		// lands. Nothing else in the snapshot is applied — it is empty.
+		failure := *snapshot.RefreshFailure
+		model.deck.refreshFailure = &failure
+		model.refreshing = false
+		return
+	}
 	follow := model.selectedKey()
 	fallback := model.cursor
 	if snapshot.ProjectDirs != nil {
@@ -971,6 +980,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 			rows = append([]compose.Row{model.rows[previous]}, rows...)
 		}
 	}
+	rowsAdjusted := false
 	if len(model.deactivatedSockets) != 0 {
 		live := trackedChatSockets(rows)
 		for socket := range model.deactivatedSockets {
@@ -982,6 +992,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		for index := range rows {
 			row := &rows[index]
 			if row.Kind.IsLiveSeat() && model.deactivatedSockets[row.Socket] {
+				rowsAdjusted = true
 				continue
 			}
 			filtered = append(filtered, *row)
@@ -1015,16 +1026,6 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	}
 	model.rows = append(model.rows[:0], rows...)
 	model.adoptClock(snapshot.NowNS)
-	if snapshot.Cosmos.Err != "" {
-		model.cosmos.Err = snapshot.Cosmos.Err
-		model.cosmos.Warnings = append(model.cosmos.Warnings[:0], snapshot.Cosmos.Warnings...)
-	} else {
-		model.applyCosmosGraph(snapshot.Cosmos)
-	}
-	// A refresh may have changed which rows exist or are killed: the past
-	// graph's ghosts are cut against the rows of NOW, so it is re-cut too.
-	model.rebuildCosmosPast()
-	model.mergeCosmosSeats()
 	model.view = snapshot.View
 	model.killedCount = snapshot.KilledCount
 	model.suppressedCount = snapshot.SuppressedCount
@@ -1041,10 +1042,32 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		if change, ok := model.killChanges[id]; ok {
 			if model.rows[index].Killed != change.Killed {
 				model.adjustKilledCount(change.Killed)
+				rowsAdjusted = true
 			}
 			model.rows[index].Killed = change.Killed
 		}
 	}
+	// The snapshot's graph was built from its own rows. When this model
+	// filtered or overrode them (a deactivated socket, a kill the store has not
+	// caught up with) the graph is rebuilt from the rows the Chats tab lists, so
+	// the sky never draws a chat the list no longer shows as live.
+	switch {
+	case snapshot.Cosmos.Err != "":
+		model.cosmos.Err = snapshot.Cosmos.Err
+		model.cosmos.Warnings = append(model.cosmos.Warnings[:0], snapshot.Cosmos.Warnings...)
+	case rowsAdjusted:
+		graph := compose.BuildCosmos(model.rows, snapshot.CosmosEvents, snapshot.NowNS, true)
+		// The snapshot's warnings already hold everything BuildCosmos warns
+		// about these same events, plus the truncation warning it cannot know.
+		graph.Warnings = snapshot.Cosmos.Warnings
+		model.applyCosmosGraph(graph)
+	default:
+		model.applyCosmosGraph(snapshot.Cosmos)
+	}
+	// A refresh may have changed which rows exist or are killed: the past
+	// graph's ghosts are cut against the rows of NOW, so it is re-cut too.
+	model.rebuildCosmosPast()
+	model.mergeCosmosSeats()
 	model.rebuild(follow, fallback)
 }
 

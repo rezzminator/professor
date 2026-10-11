@@ -23,7 +23,7 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 | Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `tracemap.html`, `tracetree_test.py`, `SKILL.md` | — |
 | Caller's manual | `templates/global/commands/tracer/use.md`, preloaded by agent frontmatter `skills: [tracer:use]` | — |
 
-`sub-tracer` and the `tracetree` skill are visible only to `tracer` and `sub-tracer`. In the prompts, `tt` stands for `python3 ~/.claude/skills/tracetree/tracetree.py`.
+`sub-tracer` and the `tracetree` skill are visible only to `tracer` and `sub-tracer`. In the prompts, `tt` stands for `python3 $HOME/.claude/skills/tracetree/tracetree.py`.
 
 ## Why a tree
 
@@ -93,12 +93,12 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - trace code it will change, judge or brief on and has not read: a quick overview of file and symbol names, then one spawn of numbered fact questions in the terms of its next move, never a survey and never a closed-world door list; a run its brief hands it is drilled before it traces more;
 - do other work while tracer walks, never read the files its questions name;
 - relay a final's WARNINGS lines whole in its next output, and hold an answer line marked `⚠ node {ID}` unchecked until `--hops {ID}` shows its lines;
-- ask the run (`check --hops | grep`) before opening a file, and paste task-file lines from `--full {ID}`;
+- read code through the run (`show`, each held line marked with its node) in place of `sed -n`, and paste task-file lines from `--full {ID}`;
 - hand a child the run and the node IDs covering its unit, `TRACE {RUN} · nodes {IDs}`, never a re-trace;
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-`flights-foreman` writes `TRACE {RUN}`, or `TRACE skipped — {reason}`, to `run.md` at its step 2 and keeps the `RUN` through every compaction. Its PostToolUse hook `pfm internal tracer-nudge` (`pfm/internal/hookentry/tracer_nudge.go`) adds a reminder to its context on every call from the seventh until it spawns tracer, runs `tracetree.py` or writes `TRACE skipped`; a prose rule alone was skipped in 22 of 25 foreman flights and in both runs of its rewrite. `reviewer` and `reviewer-pro` spawn `subagent_type: tracer` for each review seat, told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
+`flights-foreman` traces at its step 2 on every flight, whatever its brief quotes, writes `TRACE {RUN}` to `run.md` and keeps the `RUN` through every compaction; its intake opens no code the brief names. `reviewer` and `reviewer-pro` spawn `subagent_type: tracer` for each review seat, told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
 
 ## Harness behaviour
 

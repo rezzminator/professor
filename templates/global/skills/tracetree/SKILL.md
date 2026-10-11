@@ -8,7 +8,7 @@ visibility:
 
 # tracetree
 
-Run `python3 ~/.claude/skills/tracetree/tracetree.py {command}`, the path written in full in every command. Python 3 standard library; it reads the repo and writes only the run directory under `/tmp/{project}/tracer/`. A failure prints `TRACETREE FAILED — {reason}` and exits 2.
+Run `python3 $HOME/.claude/skills/tracetree/tracetree.py {command}`, the path written in full in every command, `$HOME` and never `~`. Python 3 standard library; it reads the repo and writes only the run directory under `/tmp/{project}/tracer/`. A failure prints `TRACETREE FAILED — {reason}` and exits 2.
 
 | Command | Who runs it | Does |
 | --- | --- | --- |
@@ -17,6 +17,7 @@ Run `python3 ~/.claude/skills/tracetree/tracetree.py {command}`, the path writte
 | `write RUN ID` | sub-tracer, once | Stores stdin as `{ID}.hops`, each `@` rewritten to its resolved address, beside `{ID}.write.json` (each hop's status and file hash at write); refuses an incomplete file unstored, refuses once unstored a file with a hop that does not hold — the file's own lines printed beside it — stores the second attempt as it is, and refuses any write after the store |
 | `wait RUN ID… [--timeout S] [--grace S] [--start S]` | tracer | Blocks until the named nodes and every node that ran `start` have written, then prints the answers view of the named nodes and their children (COUNTS tallies the whole run), the `MAP` line and an `OPEN` block — each node's NOT READ and LEAD lines suffixed `run: node {ID}`, a `path:line` no hop holds marked `(grep only — read it)`, a line range (`path:A-B`, `path lines A-B`) verified hops hold marked `(held: node {ID} verified {path}:{lines})`; the full view goes to `RUN/answers.txt`, and past 28000 characters the printout keeps the flagged lines, OPEN and MAP whole and trims the answers; a named node not started after `--start` seconds (default 120) is reported `never started`, never waited for; a timeout names each node that started and never wrote |
 | `read RUN FILE:A-B…` | tracer | Prints each block numbered by the file's lines (`FILE` may be `{rev}:{path}`); refuses a block over 30 lines or one a verified hop holds (naming its `--full ID`), and a second call before the next `wait` |
+| `show RUN FILE:A-B…` | tracer's caller | Prints each block as the file holds it now under `== FILE:A-B · held N/M`, each line a verified hop holds marked `[{IDs}]` (re-addressed after edits), then the holding nodes' NOT READ and LEAD lines; any size, any number of calls; a block not `FILE:A-B`, in no file or outside the file is refused on its own line |
 | `check RUN` | tracer | The answers view: each node's ANSWER lines, cites checked against the verified hops |
 | `check RUN --hops [ID]` | tracer | Every hop of the run, or of `ID`'s subtree, one line each, re-read from disk |
 | `check RUN --full [ID]` | tracer | Every hop with every line of its quoted range, numbered |

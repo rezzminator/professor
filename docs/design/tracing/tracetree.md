@@ -2,7 +2,7 @@
 
 The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`: it opens a trace run, stores each node's hops once, waits for the whole tree, re-reads every quoted line from disk, places a hop whose path names no file, bounds its work on a very large file, checks hops pinned to a git revision, tells drifted code and moved files from a wrong quote, warns when a node broke the hop contract, and maps the components. The agents' rules are in [tracer.md](tracer.md); the measurements behind each mechanism are in [tracer-bench.md](tracer-bench.md).
 
-`tt` below stands for `python3 ~/.claude/skills/tracetree/tracetree.py`. Python 3 standard library only; it reads the repository and writes only the run directory. A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2.
+`tt` below stands for `python3 $HOME/.claude/skills/tracetree/tracetree.py`; every prompt spells it with `$HOME`, since a `~` inside a quoted string or variable never expands and the call fails with `can't open file` (a field foreman's only kit call died that way). Python 3 standard library only; it reads the repository and writes only the run directory. A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2.
 
 ## Contents
 
@@ -103,6 +103,12 @@ The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s �
 
 `read RUN FILE:A-B…` (FILE may be `{rev}:{path}`) prints each block as `== FILE:A-B` then its lines, numbered by the file. One call a round: a second call before the next `wait` fails whole (`one read per round`). A block is refused on its own line, `REFUSED {block} — {why}`, when it is over 30 lines, not `FILE:A-B`, in no file under ROOT, outside the file, or held whole by one verified hop's quoted range, naming `tt check {RUN} --full {ID}`. A file the kit does not read (past 128 MB, or a revision that names no commit or lacks the path) is refused with that reason. A refused range is read as blocks of at most 30 lines in the same call.
 
+### show
+
+**Function:** `cmd_show` — **Run by:** the caller
+
+`show RUN FILE:A-B…` is the caller's read through the run: each block as the file holds it now, under `== FILE:A-B · held N/M`, its lines numbered by the file, each line a verified hop holds marked `[{IDs}]` — hops placed as `check` places them, so after the caller's edits the marks follow the quoted lines — then `open: {line} — run: node {ID}` for each NOT READ and LEAD line of the nodes holding a line in it. No size cap and no per-round count; a block not `FILE:A-B`, in no file under ROOT or outside the file is refused on its own line, as `read` refuses it (`read_block`).
+
 ### check
 
 **Function:** `cmd_check` — **Run by:** the lead and the caller
@@ -147,7 +153,7 @@ A flagged line is not evidence. Each node's block ends `hops: {v} verified, {r} 
 
 ## The resolver
 
-**Function:** `place_hop`, `resolve_elsewhere`, `Files.find` — **Used by:** `write`, every `check` view, the answers view, `read`, `--seek`, the map
+**Function:** `place_hop`, `resolve_elsewhere`, `Files.find` — **Used by:** `write`, every `check` view, the answers view, `read`, `show`, `--seek`, the map
 
 One resolver places a hop at write and at check alike, in this order:
 
@@ -181,7 +187,7 @@ The regression tests (`BigFileTest`) assert the bound by what the kit reports, n
 
 ## Pinned revisions
 
-**Function:** `Files.pin`, `Files.key`, `Files.revision_lines`, `drift_of` — **Run by:** `start`, `write`, `read`, every `check` view, `map`
+**Function:** `Files.pin`, `Files.key`, `Files.revision_lines`, `drift_of` — **Run by:** `start`, `write`, `read`, `show`, every `check` view, `map`
 
 A hop, FROM or cite whose path is `{rev}:{path}` is pinned to a git revision of ROOT, so one run answers a brief that compares revisions. A path is read as pinned only when it holds `:`, names no existing file, its rev does not start with `-` and its path holds no `..`.
 

@@ -16,7 +16,7 @@ Your brief is a card: RUN, ROOT, ID, FUEL, QUESTION, THREAD, FROM.
 
 ## Walk
 
-- Your first call is `python3 ~/.claude/skills/tracetree/tracetree.py start {RUN} {ID} {FROM's path:line} {QUESTION}`: it registers you as running — the tracer waits for every node that started — and prints the text of the question your card's `Q{n}` names, then FROM's line and the 40 after it, numbered.
+- Your first call is `python3 $HOME/.claude/skills/tracetree/tracetree.py start {RUN} {ID} {FROM's path:line} {QUESTION}`: it registers you as running — the tracer waits for every node that started — and prints the text of the question your card's `Q{n}` names, then FROM's line and the 40 after it, numbered.
 - At each hop read the code that decides where the thread goes next — the function, not the whole file: the Read tool with offset and limit, or `grep -n` then `cat -n FILE | sed -n 'A,Bp'` — number before slicing, since `sed -n 'A,Bp' FILE | cat -n` counts from 1; every read shows the file's own line numbers. Find a definition with `grep -rn` over ROOT (`func Name(`, `def name(`, `function name`, `Name =`). Several reads of one step go out in one message.
 - A FROM shaped `{rev}:{path}:{line}` pins the thread to a git revision: pass it to `start` as given, read with `git -C ROOT show {rev}:./{path} | cat -n | sed -n 'A,Bp'` and `git -C ROOT grep -n 'text' {rev} -- {path}`, and address every hop `@ {rev}:{path}:LINE`. Never check out, extract or build a tree of a revision, and never read it with an unnumbered `sed`.
 - Follow what the THREAD names, nothing else. A call that does not carry it — logging, metrics, formatting — is not a hop.
@@ -36,7 +36,7 @@ Where the thread goes to two or more places the QUESTION needs:
 
 ## Write — one Bash call when your walk is done
 
-`python3 ~/.claude/skills/tracetree/tracetree.py write {RUN} {ID} <<'HOPS'` … `HOPS` (the quoted delimiter keeps the shell off your text). It stores the file once: a file missing a THREAD, ANSWER, hop or END/SPLIT line is refused unstored — fix it and write again. It also checks every hop against the file: the first write holding a hop that does not hold — a path naming no file, a quote not on its lines, a `...`, a directory — is refused unstored, the file's own lines printed beside each; fix those hops from that printout and write again, and the second write stores the file as it is. Once stored, the file is final.
+`python3 $HOME/.claude/skills/tracetree/tracetree.py write {RUN} {ID} <<'HOPS'` … `HOPS` (the quoted delimiter keeps the shell off your text). It stores the file once: a file missing a THREAD, ANSWER, hop or END/SPLIT line is refused unstored — fix it and write again. It also checks every hop against the file: the first write holding a hop that does not hold — a path naming no file, a quote not on its lines, a `...`, a directory — is refused unstored, the file's own lines printed beside each; fix those hops from that printout and write again, and the second write stores the file as it is. Once stored, the file is final.
 
 ```text
 THREAD {ID}: {the THREAD line of your card}

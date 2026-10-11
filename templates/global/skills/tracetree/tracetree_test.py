@@ -520,6 +520,81 @@ class ReadTest(Repo):
         self.assertIn("no ROOT file", stray.stderr)
 
 
+class ShowTest(Repo):
+    """`show RUN FILE:A-B ...`: the caller's read through the run — each block as the file holds it now, every line a
+    verified hop holds marked with its nodes, the open items of those nodes under it; any size, any number of calls."""
+
+    def show(self, *blocks):
+        return tt(["show", self.run_dir, *blocks])
+
+    def held(self):
+        self.write("1", hops("1", ["- x [app/srv/server.go:3]"],
+                             ["@ app/srv/server.go:3", "> func Handle(req Request) error {",
+                              "> \tif req.Target == \"\" {", "> \t\treturn errors.New(\"target is required\")"],
+                             ["NOT READ whether Run retries after a failed kill",
+                              "END returned: x @ app/srv/server.go:5"]))
+        self.write("2", self.good("2"))
+
+    def test_each_line_a_verified_hop_holds_is_marked_with_its_nodes_and_their_open_items_follow(self):
+        self.held()
+        got = self.show("app/srv/server.go:2-7", "app/kill/kill.go:4")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout.splitlines(), [
+            "== app/srv/server.go:2-7 · held 3/6",
+            "     2\t",
+            "     3 [1]\tfunc Handle(req Request) error {",
+            "     4 [1]\t\tif req.Target == \"\" {",
+            "     5 [1,2]\t\t\treturn errors.New(\"target is required\")",
+            "     6\t\t}",
+            "     7\t\treturn kill.Run(req.Target)",
+            "   open: NOT READ whether Run retries after a failed kill — run: node 1",
+            "== app/kill/kill.go:4-4 · held 0/1",
+            "     4\tfunc Run(target string) error {"])
+
+    def test_after_an_edit_moves_the_code_the_marks_follow_the_quoted_lines(self):
+        self.held()
+        with open(os.path.join(self.root, "app", "srv", "server.go"), "w") as f:
+            f.write("\n".join([*SERVER[:2], "// Handle serves one request.", "// It refuses an empty target.",
+                               *SERVER[2:]]) + "\n")
+        got = self.show("app/srv/server.go:4-7")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout.splitlines()[:5], [
+            "== app/srv/server.go:4-7 · held 3/4",
+            "     4\t// It refuses an empty target.",
+            "     5 [1]\tfunc Handle(req Request) error {",
+            "     6 [1]\t\tif req.Target == \"\" {",
+            "     7 [1,2]\t\t\treturn errors.New(\"target is required\")"])
+
+    def test_a_block_over_thirty_lines_prints_whole_and_a_second_call_still_prints(self):
+        self.held()
+        with open(os.path.join(self.root, "app", "big.txt"), "w") as f:
+            f.write("".join(f"row {i}\n" for i in range(1, 60)))
+        got = self.show("app/big.txt:1-59")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(len(got.stdout.splitlines()), 60)
+        self.assertIn("    59\trow 59", got.stdout)
+        again = self.show("app/srv/server.go:3-3")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("     3 [1]\tfunc Handle(req Request) error {", again.stdout)
+
+    def test_a_missing_file_or_range_is_refused_on_its_own_line_and_the_others_still_print(self):
+        self.held()
+        got = self.show("nowhere.go:1-3", "app/srv/server.go:6-12", "app/srv/server.go:x", "app/srv/server.go:8")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        lines = got.stdout.splitlines()
+        self.assertTrue(lines[0].startswith("REFUSED nowhere.go:1-3 — no such file"), lines[0])
+        self.assertTrue(lines[1].startswith("REFUSED app/srv/server.go:6-12 — "), lines[1])
+        self.assertIn("8 lines", lines[1])
+        self.assertEqual(lines[2], "REFUSED app/srv/server.go:x — not FILE:A-B")
+        self.assertEqual(lines[3:], ["== app/srv/server.go:8-8 · held 0/1", "     8\t}"])
+
+    def test_show_needs_a_run_with_hops_and_a_block(self):
+        self.assertEqual(tt(["show", self.run_dir]).returncode, 2)
+        empty = self.show("app/srv/server.go:1-2")
+        self.assertEqual(empty.returncode, 2)
+        self.assertIn("no .hops file", empty.stderr)
+
+
 LOG = ["package log", "", "func Note(msg string) {", "\tprintln(msg)", "}"]
 MAKEFILE = ["test:", "\t./scripts/check.sh all", "", "lint:", "\techo lint"]
 CHECK_SH = ["#!/usr/bin/env bash", "set -euo pipefail", "", "main() {", "  go test ./...", "}", "", "main \"$@\""]

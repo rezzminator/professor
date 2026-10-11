@@ -1352,26 +1352,11 @@ def cmd_read(run, blocks):
     nodes, _ = verify(run, files, names, counters(names), drift=False)
     out = []
     for spec in blocks:
-        m = BLOCK.fullmatch(spec.strip("`"))
-        if not m:
-            out.append(f"REFUSED {spec} — not FILE:A-B")
+        got = read_block(files, root, spec, READ_MAX)
+        if isinstance(got, str):
+            out.append(got)
             continue
-        path, a = m.group(1), int(m.group(2))
-        b = int(m.group(3) or a)
-        label = f"{path}:{a}-{b}"
-        if b - a + 1 > READ_MAX:
-            out.append(f"REFUSED {label} — over {READ_MAX} lines")
-            continue
-        lines = files.lines(path)
-        if lines is None:
-            why = files.why_unread(path)
-            out.append(f"REFUSED {label} — " + (f"no such file under {root}" if why == "no such file" else why))
-            continue
-        count = len(lines) - (1 if lines and lines[-1] == "" else 0)
-        if a < 1 or b < a or b > count:
-            out.append(f"REFUSED {label} — lines {a}-{b} are not in the file, which has {count} lines")
-            continue
-        key = files.key(path)
+        label, key, a, b, lines = got
         holder = next((x for x in names for w in nodes[x]["walk"]
                        if w["t"] == "hop" and w["key"] == key and w["line"] <= a and b <= w["b"]), None)
         if holder:
@@ -1379,6 +1364,53 @@ def cmd_read(run, blocks):
             continue
         out.append(f"== {label}")
         out += [f"{i:>6}\t{lines[i - 1]}" for i in range(a, b + 1)]
+    print("\n".join(out))
+
+
+def read_block(files, root, spec, most=None):
+    """(label, key, A, B, lines) of one FILE:A-B block, or its `REFUSED` line: not FILE:A-B, over `most` lines, no
+    readable file, or a range outside the file."""
+    m = BLOCK.fullmatch(spec.strip("`"))
+    if not m:
+        return f"REFUSED {spec} — not FILE:A-B"
+    path, a = m.group(1), int(m.group(2))
+    b = int(m.group(3) or a)
+    label = f"{path}:{a}-{b}"
+    if most and b - a + 1 > most:
+        return f"REFUSED {label} — over {most} lines"
+    lines = files.lines(path)
+    if lines is None:
+        why = files.why_unread(path)
+        return f"REFUSED {label} — " + (f"no such file under {root}" if why == "no such file" else why)
+    count = len(lines) - (1 if lines and lines[-1] == "" else 0)
+    if a < 1 or b < a or b > count:
+        return f"REFUSED {label} — lines {a}-{b} are not in the file, which has {count} lines"
+    return label, files.key(path), a, b, lines
+
+
+def cmd_show(run, blocks):
+    """The caller's read through the run: each FILE:A-B as the file holds it now, under `== FILE:A-B · held N/M`,
+    every line a verified hop holds marked ` [{IDs}]` (hops re-addressed after edits), then each holding node's NOT
+    READ and LEAD lines. Any size, any number of calls; a block it cannot read is refused on its own line."""
+    run, root, names, files, nodes, _, _ = load(run)
+    out = []
+    for spec in blocks:
+        got = read_block(files, root, spec)
+        if isinstance(got, str):
+            out.append(got)
+            continue
+        label, key, a, b, lines = got
+        held = {}
+        for name in names:
+            for w in nodes[name]["walk"]:
+                if w["t"] == "hop" and w["key"] == key and w["line"] <= b and a <= w["b"]:
+                    for i in range(max(a, w["line"]), min(b, w["b"]) + 1):
+                        held.setdefault(i, {})[name] = True
+        out.append(f"== {label} · held {len(held)}/{b - a + 1}")
+        out += [f"{i:>6}" + (f" [{','.join(held[i])}]" if i in held else "") + f"\t{lines[i - 1]}"
+                for i in range(a, b + 1)]
+        holders = sorted({name for ids in held.values() for name in ids}, key=node_key)
+        out += [f"   open: {text} — run: node {name}" for name in holders for text in nodes[name]["unsettled"]]
     print("\n".join(out))
 
 
@@ -1839,8 +1871,8 @@ def cmd_map(run, opts):
 
 def main():
     a = sys.argv[1:]
-    if len(a) < 2 or a[0] not in ("new", "start", "check", "wait", "write", "map", "read"):
-        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...]")
+    if len(a) < 2 or a[0] not in ("new", "start", "check", "wait", "write", "map", "read", "show"):
+        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...]")
     if a[0] == "new":
         seek, questions, roots, i = None, False, [], 1
         while i < len(a):
@@ -1868,6 +1900,10 @@ def main():
         if len(a) < 3:
             fail("usage: tracetree.py read RUN FILE:A-B [FILE:A-B ...]")
         return cmd_read(a[1], a[2:])
+    if a[0] == "show":
+        if len(a) < 3:
+            fail("usage: tracetree.py show RUN FILE:A-B [FILE:A-B ...]")
+        return cmd_show(a[1], a[2:])
     if a[0] == "wait":
         opts = {"--timeout": 540.0, "--grace": 15.0, "--start": 120.0}
         ids, i = [], 2

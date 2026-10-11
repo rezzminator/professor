@@ -15,7 +15,7 @@ Walk the whole conversation from its first message, not the last few turns, and 
 - Asks: every request the user made, each part of each; one counts as done only where the transcript shows it done and verified.
 - Promises: "I'll…", "next step", "later", deferred items, TODOs this chat left in files, questions asked and never answered, by either side.
 - Claims: every "done", "passes", "fixed" — backed by a run watched in this chat, or open.
-- Trees: in every repository this chat touched, `git status --short`, commits not on the upstream, the branch it sits on, scratch files the chat left inside the tree.
+- Trees: in every repository this chat touched, `git status --short`, commits not on the upstream, the branch it sits on, scratch files the chat left inside the tree, every linked worktree holding commits or hunks its base lacks, and every `$HOME/.local/state/pfm/flights/{project}/*/UNLANDED.md`. Work another session left is never skipped as theirs: it is a Do the user's request covers, else an Ask.
 - Background: sub-agents whose return has not arrived or was never read, background shells, monitors, scheduled wake-ups and crons, workflows, servers this chat started.
 - Inbox: pending notifications, read with the harness's notification tool where it has one.
 - Lessons: a fact the next session must know — a gotcha found, a decision with its reason. Where the project's `CLAUDE.md` names a ledger for them (a retro inbox, a memory file), it goes there.

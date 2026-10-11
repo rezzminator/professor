@@ -335,3 +335,14 @@ Resolved:
 Observed: the foreman's brief to the lander of a callmeter flight did not name the e2e run docs/testing.md assigns the lander (about 250 s); the lander found it itself, and a foreground call of that length blocks the lander's turn.
 Amend: templates/global/agents/flights-foreman.md — the section that spawns the flights-lander: its gate brief names each project's long run the testing manual assigns the lander and says to run it in the background with stdin from /dev/null.
 Resolved:
+
+## 2026-10-11 — "beyond the run-to-run spread" passed every change on a deterministic target
+Observed: the Jev classifier lab (`/iterative-improvement` on a TypeSafe Jev question) repeats a run to within
+≤0.04 M, so its run-to-run spread is near zero and any change "rose beyond the spread" — v1→v3 looked like
+sure wins while item sampling, not the model, carried most of the uncertainty. The verdict only became honest
+once the lab added a paired item bootstrap (P(better) ≥ 0.9 on pooled rungs): v3 held at 0.946, while the later
+Haiku track scored better by point estimate (0.387 vs 0.412) and landed at 0.669, a tie.
+Amend: templates/global/commands/iterative-improvement.md#Round step 5 — keep only when the metric rises beyond
+the run-to-run spread AND a paired bootstrap over the rung's items gives P(better) ≥ 0.9; a deterministic
+target's near-zero spread is no evidence.
+Resolved:

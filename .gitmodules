@@ -33,3 +33,8 @@
 	url = https://github.com/rezzminator/sub-agent-compact.git
 	branch = develop
 	ignore = dirty
+[submodule "auto-effort"]
+	path = plugins/auto-effort
+	url = https://github.com/rezzminator/auto-effort.git
+	branch = develop
+	ignore = dirty

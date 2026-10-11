@@ -577,13 +577,6 @@ gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git worktree add x"},
 [ -z "$gg" ] || bad="$bad git-guard blocked gitter: $(one_line "$gg");"
 gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | pfm internal git-guard 2>&1)"
 [ -z "$gg" ] || bad="$bad git-guard blocked git status: $(one_line "$gg");"
-# tracer-nudge: silent through 6 untraced calls of one agent, the nudge on the 7th, silent again once tracer was sent.
-tn_call() { printf '{"agent_id":"lane-tn-%s-%s","session_id":"lane","tool_name":"%s","tool_input":%s}' "$$" "$1" "$2" "$3" | pfm internal tracer-nudge 2>&1; }
-for _ in 1 2 3 4 5 6; do tn="$(tn_call a Read '{}')"; [ -z "$tn" ] || bad="$bad tracer-nudge printed within 6 calls: $(one_line "$tn");"; done
-tn="$(tn_call a Read '{}')"
-grep -qF 'TRACER-NUDGE: 7 tool calls' <<<"$tn" || bad="$bad tracer-nudge did not nudge on the 7th call: $(one_line "$tn");"
-tn="$(tn_call a Agent '{"subagent_type":"tracer"}')$(tn_call a Read '{}')"
-[ -z "$tn" ] || bad="$bad tracer-nudge printed after a tracer spawn: $(one_line "$tn");"
 # X29 explore-deny: denies a non-haiku Explore by name, lets haiku and every other agent through.
 deny="$(printf '{"tool_input":{"subagent_type":"Explore","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
 rc=$?

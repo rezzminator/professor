@@ -5,7 +5,7 @@ description: 'MANDATORY for a tracer caller — before sending tracer questions,
 
 # tracer:use
 
-`tracer` answers numbered questions from code: Haiku readers walk each thread hop by hop and its kit re-reads every quoted line from disk, at a third of what your own reading costs. Its answer ends with a run, `{RUN}`, a directory under `/tmp/{project}/tracer/` holding one write-once `{ID}.hops` file per reader and `map.txt`. Every command below re-reads each quoted line from the repository when you run it, so it prints the file's current text, never the tracer's memory of it. `tt` stands for `python3 $HOME/.claude/skills/tracetree/tracetree.py` — write it out in full in every call, `$HOME` and never `~`, which a quoted string or variable leaves unexpanded.
+`tracer` answers numbered questions from code: Haiku readers walk each thread hop by hop and its kit re-reads every quoted line from disk, at a third of what your own reading costs. Each trace is a run, `{RUN}`, a directory under `/tmp/{project}/tracer/` holding one write-once `{ID}.hops` file per reader and `map.txt`. Every command below re-reads each quoted line from the repository when you run it, so it prints the file's current text, never the tracer's memory of it. `tt` stands for `python3 $HOME/.claude/skills/tracetree/tracetree.py` — write it out in full in every call, `$HOME` and never `~`, which a quoted string or variable leaves unexpanded.
 
 ## Sending
 
@@ -15,12 +15,13 @@ description: 'MANDATORY for a tracer caller — before sending tracer questions,
    - ✓ `1. Where does install replace an entry under ~/.claude/skills/, and what happens to a real directory already there? 2. Which test pins that replacement, and which fixture does it build?`
    - ✗ `How does the installer work?` — a survey: every thread, none deep.
    - ✗ `Every place that writes ~/.claude/`, when your change must hold at each — a closed-world list is your own chained `grep`; a run is evidence of what it walked, never proof that nothing else exists.
-4. While it walks, do the work its questions leave untouched — the testing manual, a base check, a doc; a file it is walking, read now, is paid for twice.
+4. While it walks, do the work its questions leave untouched — the testing manual, a base check, a doc; a file it is walking, read now, is paid for twice. The tracer's final is your answer: it drills the readers' threads, fills their gaps and names what they leave unsafe, so a verdict, a SAFE or a closing claim waits for it. When the spawn's hook names a run, `tt answer {RUN} {n…}` prints a question's raw reader answers once its threads are walked, most within three minutes: facts to start work on, never a ruling — ✗ a review written from pulled answers while the final, still out, names the gap.
 
 ## The run
 
 | Command | Gives |
 | --- | --- |
+| `tt answer {RUN} {n…}` | the readers' raw answers to questions `n…` once their threads are walked, blocking until then, every cite re-read from disk: an unflagged line is evidence to cite, never to re-read; the final still drills them and names their gaps |
 | `tt check {RUN}` | each node's ANSWER lines, every cite checked against the verified hops |
 | `tt check {RUN} --hops {ID}` | node `{ID}` and the children it split off, one line per hop: `path:line  the line as it is now` |
 | `tt check {RUN} --full {ID}` | the same, with every line of each hop's quoted range numbered `NNN\|` |

@@ -74,11 +74,17 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 
 ### new
 
-**Function:** `cmd_new` — **Run by:** the lead, in its first call
+**Function:** `cmd_new` — **Run by:** the lead, in its first call, when the brief carries no `RUN:`
 
 `new ROOT [--seek REGEX] [--questions]` creates the run directory, writes `ROOT` and prints the run's path. `--questions` reads stdin to EOF and fails unless it finds a question numbered `1.`, `1)` or `Q1`; it stores the text as `questions`. In a git work tree with a commit it writes `BASE`; a git that cannot answer is named on stderr, never fatal.
 
 `--seek` then lists every verified hop of an earlier run on the same ROOT, modified within the last 6 hours, running runs included, whose path or current line matches REGEX: `PRIOR {run} node {ID}: {path}:{line}  {text}`, newest run first, at most 30; a text past 160 characters is cut to 157 and ends `...`. The last line is `PRIOR: {n} hops in {k} runs — tt check {run} --hops {ID}`, naming any not shown and any run it could not read, or `PRIOR: none in {k} earlier runs on this root`, or `PRIOR: could not look — {reason}`.
+
+### seek
+
+**Function:** `cmd_seek` — **Run by:** the lead, in its first call, on a brief carrying `RUN:`
+
+`seek RUN REGEX` prints the run's path, then the `PRIOR` lines `new --seek` prints, for a run that already exists: the run [intake](#intake) opened at the spawn.
 
 ### start
 
@@ -99,6 +105,14 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 `wait RUN ID… [--timeout S] [--grace S] [--start S]`, defaults 540, 15 and 120 seconds. It removes `.reads`, then polls until every node it waits for has written and no `.hops` or `.started` file changed for `--grace` seconds. It waits for the named nodes and every node that ran `start`. A named node with neither `.started` nor `.hops` after `--start` seconds never ran and is reported `never started`, never waited for.
 
 The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s — started but never wrote: {IDs}` or `WAIT ended after {t}s: no node started`, each ending `— never started: {IDs}` when one did not. The rest is [the wait printout](#the-wait-printout).
+
+### answer
+
+**Function:** `cmd_answer` — **Run by:** the caller, when a step of its work rests on a question
+
+`answer RUN [Q…] [--timeout S] [--grace S] [--start S]`, defaults 300, 5 and 90 seconds; no number means every question in `questions`. A node serves question n when a line of its `.started` names `Q{n}`; a child whose card names none takes its dotted parent's; every child of a serving node serves too. It polls until every serving node has written and none of their `.hops` changed for `--grace` seconds. A question no node took `--start` seconds after the first `.started` appeared is `NO THREAD Q{n}`, never waited for; a question whose nodes still walk at `--timeout` is `STILL WALKING Q{n}: nodes {IDs} …`; one with no node started yet is `NOT STARTED Q{n}`.
+
+The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, the answered questions and the trust note: every cite was re-read from disk just now, so an unflagged line is evidence. Then the status lines, the WARNINGS lines of the serving nodes and the run, then per answered question `Q{n} · nodes {IDs} · {its text}` and those nodes' blocks of the answers view, each node once, then their [OPEN block](#the-wait-printout). Past 28000 characters the whole printout goes to `answer-Q{n…}.txt` and the answers are trimmed, the status, WARNINGS and OPEN lines kept.
 
 ### read
 
@@ -130,6 +144,18 @@ The first line is `WAIT done after {t}s: {n} files`, `WAIT TIMEOUT after {t}s �
 
 `book [--html OUT]`: [the swatch book](#the-swatch-book). It takes no run: it reads every run under `/tmp/{project}/tracer`.
 
+### intake
+
+**Function:** `cmd_intake` — **Run by:** a PreToolUse hook on `Agent|Task` that a settings file wires to `python3 $HOME/.claude/skills/tracetree/tracetree.py intake`
+
+`intake` reads the hook payload on stdin. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets its run opened, with ROOT taken from the brief's `Repo root:` line or else the hook's cwd, and its questions stored.
+
+- The brief is rewritten to carry `RUN: {run}` after that line (`updatedInput`, `permissionDecision: allow`).
+- The caller is told, through `additionalContext`, that the tracer's final is its answer. It is also told that `answer RUN n…` prints a question's raw reader answers once its threads are walked: facts to start work on, never a ruling, since a verdict waits for the final.
+- Every other call passes untouched and the hook prints nothing.
+- A root that is not a directory, or a run that cannot be opened, passes the spawn on unchanged and says why.
+- An unreadable payload is logged to `/tmp/{project}/tracer/intake.log`, `{project}` taken from the hook's own working directory, and to stderr when that log cannot be written.
+
 ## The check
 
 Each hop's quote is re-read from the file at check time, in every view, so the printout shows the file's own text, never the node's. A quote line matches `exact`, else `loose` (whitespace collapsed), else as a `fragment` of at least 12 characters; a match short of exact is tagged. A pasted line-number prefix, wrapping backticks and one backslash escaping the indentation (`> \    def f():`) are dropped before matching.
@@ -151,7 +177,7 @@ The answers view checks each ANSWER line's cites against the verified hops. A ci
 
 | Flag | When |
 | --- | --- |
-| `↻ {path}:{a}→{b}` | The cite's backticked text sits on another line of the cited file; the cite moves there |
+| `↻ {path}:{a}→{b}` | The cite's backticked text sits on another line of the cited file; the cite moves there. A cite still unbacked within 3 lines of the line its reader gave a hop the kit re-addressed (at write or at check) moves by that hop's shift |
 | `unbacked {path}:{n}` | No verified hop and no quoted text at the cite |
 | `` ? `{text}` not in the cited file `` | A backticked text found in no cited file |
 | `≈ {path}:{n}` | The cite's only hops drifted |

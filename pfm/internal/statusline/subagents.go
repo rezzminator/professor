@@ -108,10 +108,8 @@ const (
 )
 
 // Drop ranks, in the order a row too wide for its panel gives parts up: the
-// cwd, the cache, the compactions, then the roster of nested agents shortens to
-// the roles that work, then the effort goes (the model family stays), and last
-// the roster. The roster outlasts the effort and the cache: which agents work
-// below a row is what it is read for. Unranked parts — the nested count, gauge and spend, identity, status,
+// cwd, the cache, the compactions, then the effort (the model
+// family stays). Unranked parts — nesting, gauge and spend, identity, status,
 // idle, errors, label — always stay; the label is last, so Claude Code's own
 // truncation cuts only it.
 const (
@@ -119,17 +117,14 @@ const (
 	dropCwd
 	dropCache
 	dropCompactions
-	dropRosterShort
 	dropEffort
-	dropRoster
 )
 
 // rowPart is one segment of a full row; short is what it becomes once its
-// drop rank is reached ("" removes it). A part with a gone rank is removed
-// there, after it shortened at its drop rank.
+// drop rank is reached ("" removes it).
 type rowPart struct {
 	text, short string
-	drop, gone  int
+	drop        int
 }
 
 func appendRowSegment(line, segment string) string {
@@ -155,13 +150,10 @@ func fitRow(parts []rowPart, columns int) string {
 	}
 	line := join()
 	budget := columns - rowPrefixWidth
-	for rank := dropCwd; columns > 0 && rank <= dropRoster && ansi.StringWidth(line) > budget; rank++ {
+	for rank := dropCwd; columns > 0 && rank <= dropEffort && ansi.StringWidth(line) > budget; rank++ {
 		for index := range parts {
-			switch rank {
-			case parts[index].drop:
+			if parts[index].drop == rank {
 				parts[index].text = parts[index].short
-			case parts[index].gone:
-				parts[index].text = ""
 			}
 		}
 		line = join()
@@ -277,7 +269,7 @@ func RenderSubagents(
 			if read.roleErr == nil {
 				read.role = roles.name(read.role, warn)
 			}
-			read.nest = tree.nesting(task.ID, roles, warn)
+			read.nest = tree.nesting(task.ID)
 			read.spend.add(tree.nestedSpend(task.ID, prices))
 			if ledger != nil {
 				if booked, ok := ledger.spend(task.ID, tree.children); ok {
@@ -305,10 +297,9 @@ func RenderSubagents(
 	return out.String(), nil
 }
 
-// subagentContent renders nested count → roster → gauge and spend → name·role →
-// model·effort → status and time → idle → tools → errors → cache → compactions →
-// cwd → label; the nested count (working/all) and the roster naming those
-// agents by role lead because they are what a parent row is read for, and the
+// subagentContent renders nested → gauge and spend → name·role → model·effort → status
+// and time → idle → tools → errors → cache → compactions → cwd → label; the
+// nested count (working/all) leads because it is what a parent row is read for, and the
 // label goes last because Claude Code truncates the row's tail.
 // The cwd shows only when the agent works outside the session's own
 // directory — the same one is noise. A finished row steps back: completed, it
@@ -393,9 +384,6 @@ func activeContent(
 	var parts []rowPart
 	if activity != nil {
 		parts = append(parts, rowPart{text: nestingSegment(activity.nest)})
-		if roster, ok := rosterPart(activity.nest); ok {
-			parts = append(parts, roster)
-		}
 		gauge += " " + spendSegment(*activity)
 	}
 	parts = append(parts, rowPart{text: gauge}, rowPart{text: subagentIdentity(task.Name, activity)})

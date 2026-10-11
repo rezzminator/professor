@@ -258,7 +258,10 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 		outer   map[string]string // path under home → body, outside the project
 		below   string            // the session cwd under <project>; "" = the project itself
 		noGit   bool              // the project is no git repository
+		meta    string            // the row's own agentType; "" = gpt-foreman
+		torn    bool              // the user's definition is a directory, unreadable
 		want    string
+		warn    string // what stderr must carry; "" = nothing
 	}{
 		{
 			name: "the user's twin definition names its role",
@@ -300,6 +303,18 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 			want:    "│project-foreman│sol-6·🏎️ high│",
 		},
 		{
+			name: "a padded agentType in the meta resolves its definition",
+			meta: " gpt-foreman ",
+			user: map[string]string{"gpt-foreman.md": definition("role: flights-foreman")},
+			want: "│flights-foreman│sol-6·🏎️ high│",
+		},
+		{
+			name: "an unreadable definition keeps the agentType and says why",
+			torn: true,
+			want: "│gpt-foreman│sol-6·🏎️ high│",
+			warn: "agent definition (rows show gpt-foreman)",
+		},
+		{
 			name: "a definition above the git root is no project's",
 			outer: map[string]string{
 				filepath.Join("work", ".claude", "agents", "gpt-foreman.md"): definition("role: outer-foreman"),
@@ -317,9 +332,21 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines[:1]},
-				map[string]string{"a1": "gpt-foreman"})
+			agentType := tc.meta
+			if agentType == "" {
+				agentType = "gpt-foreman"
+			}
+			// Two rows of one type: the definition is read, and an unreadable
+			// one reported, once per render.
+			session := subagentSession(t,
+				map[string][]string{"a1": agentTranscriptLines[:1], "a2": agentTranscriptLines[:1]},
+				map[string]string{"a1": agentType, "a2": agentType})
 			home, userDir := t.TempDir(), t.TempDir()
+			if tc.torn {
+				if err := os.Mkdir(filepath.Join(userDir, "gpt-foreman.md"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			project := filepath.Join(home, "work", "proj")
 			cwd := filepath.Join(project, tc.below)
 			if err := os.MkdirAll(cwd, 0o700); err != nil {
@@ -349,21 +376,27 @@ func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
 				}
 			}
 			payload := `{"transcript_path":` + jsonText(session) + `,"cwd":` + jsonText(cwd) +
-				`,"columns":200,"tasks":[` + task + `]}`
+				`,"columns":200,"tasks":[` + task + `,` + strings.Replace(task, `"a1"`, `"a2"`, 1) + `]}`
 			var warn bytes.Buffer
 			got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), home, userDir, &warn)
 			if err != nil {
 				t.Fatalf("RenderSubagents: %v", err)
 			}
-			var row subagentRow
-			if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
-				t.Fatalf("row %q: %v", got, err)
+			lines := strings.Split(strings.TrimSpace(got), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("rows = %q, want two", got)
 			}
-			if content := stripANSICodes(row.Content); !strings.Contains(content, tc.want) {
-				t.Fatalf("content =\n  %q\nwant it to hold\n  %q", content, tc.want)
+			for _, line := range lines {
+				var row subagentRow
+				if err := json.Unmarshal([]byte(line), &row); err != nil {
+					t.Fatalf("row %q: %v", line, err)
+				}
+				if content := stripANSICodes(row.Content); !strings.Contains(content, tc.want) {
+					t.Fatalf("row %s content =\n  %q\nwant it to hold\n  %q", row.ID, content, tc.want)
+				}
 			}
-			if warn.Len() != 0 {
-				t.Fatalf("readable definitions warned: %q", warn.String())
+			if tc.warn == "" && warn.Len() != 0 || tc.warn != "" && strings.Count(warn.String(), tc.warn) != 1 {
+				t.Fatalf("warn = %q, want %q once", warn.String(), tc.warn)
 			}
 		})
 	}

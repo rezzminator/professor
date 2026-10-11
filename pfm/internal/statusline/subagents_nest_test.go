@@ -69,7 +69,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 		transcripts map[string][]string
 		parents     map[string]string
 		nested      string // the row's first segment; "" = none
-		roster      string // the segment after it; "" = none
 		status      string
 		warn        string
 	}{
@@ -82,7 +81,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "g1": "c3", "g2": "c1"},
 			nested:  "2/5",
-			roster:  "2/5 general-purpose",
 			status:  working,
 		},
 		{
@@ -92,7 +90,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
 			nested:  "1/2",
-			roster:  "1/2 general-purpose",
 			status:  working,
 		},
 		{
@@ -103,7 +100,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			nested:  "0/2",
-			roster:  "2 general-purpose",
 			status:  finished,
 		},
 		{
@@ -114,7 +110,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "g1": "c1"},
 			nested:  "0/3",
-			roster:  "3 general-purpose",
 			status:  finished,
 		},
 		{
@@ -124,7 +119,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			nested:  "1/2",
-			roster:  "1/2 general-purpose",
 			status:  working,
 		},
 		{
@@ -132,7 +126,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {turnStreaming}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			nested:      "1/1",
-			roster:      "1/1 general-purpose",
 			status:      working,
 		},
 		{
@@ -140,7 +133,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			nested:      "1/1",
-			roster:      "1/1 general-purpose",
 			status:      working,
 		},
 		{
@@ -148,7 +140,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			nested:      "0/1 (1 unread)",
-			roster:      "0/1? general-purpose",
 			status:      finished,
 			warn:        "row p: nested agents: open sub-agent transcript",
 		},
@@ -165,9 +156,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			session := nestedSession(t, tc.transcripts, tc.parents)
 			got, warned := renderOneSubagent(t, session, parentTask)
 			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M $0.01/2.0K/35"
-			if tc.roster != "" {
-				wantStart = tc.roster + "│" + wantStart
-			}
 			if tc.nested != "" {
 				wantStart = tc.nested + "│" + wantStart
 			}
@@ -309,16 +297,11 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			check:     redStatus,
 		},
 		{
-			name: "completed with a child still working: delegating, not finished",
-			task: row("p", "completed"),
-			now:  ended.Add(2 * time.Minute),
-			wantPlain: "1/1│1/1 general-purpose│" + strings.Replace(
-				fullRow,
-				"35/2",
-				"35/3",
-				1,
-			) + "delegating" + parentTail,
-			check: bright,
+			name:      "completed with a child still working: delegating, not finished",
+			task:      row("p", "completed"),
+			now:       ended.Add(2 * time.Minute),
+			wantPlain: "1/1│" + strings.Replace(fullRow, "35/2", "35/3", 1) + "delegating" + parentTail,
+			check:     bright,
 		},
 	}
 	for _, tc := range cases {
@@ -428,169 +411,4 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			t.Fatalf("parent row = %q, want 1/1 and delegating", got)
 		}
 	})
-}
-
-// setRoles rewrites the agentType of the named agents' meta files.
-func setRoles(t *testing.T, session string, roles map[string]string) {
-	t.Helper()
-	dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
-	for id, role := range roles {
-		path := filepath.Join(dir, "agent-"+id+".meta.json")
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var meta map[string]any
-		if err := json.Unmarshal(body, &meta); err != nil {
-			t.Fatal(err)
-		}
-		meta["agentType"] = role
-		out, err := json.Marshal(meta)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, out, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-// rosterSession is an orchestrator p with a lander and a reviewer that handed
-// back, four tracers (t1 works, t2 handed back, t3 and t4 ended), and three
-// sub-tracers below t1 (s1 and s2 work, s3 ended): 3 of 9 work.
-func rosterSession(t *testing.T) string {
-	t.Helper()
-	session := nestedSession(t, map[string][]string{
-		"p":  agentTranscriptLines,
-		"l1": {turnHandbackCall, turnHandbackResult}, "r1": {turnEnded},
-		"t1": {turnToolCall}, "t2": {turnToolCall, turnHandbackCall, turnHandbackResult},
-		"t3": {turnEnded}, "t4": {turnEnded},
-		"s1": {turnToolCall}, "s2": {turnToolResult}, "s3": {turnEnded},
-	}, map[string]string{
-		"p": "", "l1": "p", "r1": "p", "t1": "p", "t2": "p", "t3": "p", "t4": "p",
-		"s1": "t1", "s2": "t1", "s3": "t1",
-	})
-	setRoles(t, session, map[string]string{
-		"p": "flights-foreman", "l1": "flights-lander", "r1": "reviewer-pro",
-		"t1": "tracer", "t2": "tracer", "t3": "tracer", "t4": "tracer",
-		"s1": "sub-tracer", "s2": "sub-tracer", "s3": "sub-tracer",
-	})
-	return session
-}
-
-const rosterFull = "1 flights-lander · 1 reviewer-pro · 1/4 tracer · 2/3 sub-tracer"
-
-// The row of an agent that spawned others names them: the roles below it at
-// every depth, nearest first, each with its count — working over all when some
-// of its members work, plain and muted when none does.
-func TestRenderSubagentsRosterNamesTheAgentsBelow(t *testing.T) {
-	session := rosterSession(t)
-	got := renderTasks(t, session, subagentNow, parentTask)["p"]
-	want := "3/9│" + rosterFull + "│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M "
-	if !strings.HasPrefix(got, want) {
-		t.Fatalf("parent row = %q, want it to start with %q", got, want)
-	}
-	raw := renderRawSubagent(t, session, parentTask, subagentNow)
-	working := cRunning + "1" + reset + cMuted + "/" + reset + cTools + "4" + reset + " " + cRole + "tracer" + reset
-	finished := cMuted + "1 flights-lander" + reset
-	if !strings.Contains(raw, working) || !strings.Contains(raw, finished) {
-		t.Fatalf("row = %q, want the working role as %q and the finished one as %q", raw, working, finished)
-	}
-}
-
-// A role named by a definition's `role:` shows under that name, as in the
-// identity segment, and two types that map to one role are one entry. A type
-// whose definition cannot be read keeps its own name and warns once per
-// render, however many agents carry it; a meta naming no agentType is a
-// yellow "?" with its cause on stderr. The row's own padded agentType resolves
-// as the roster's does.
-func TestRenderSubagentsRosterUsesDefinitionRoles(t *testing.T) {
-	session := nestedSession(t, map[string][]string{
-		"p": agentTranscriptLines, "c1": {turnToolCall}, "c2": {turnEnded},
-		"c3": {turnEnded}, "c4": {turnEnded}, "c5": {turnEnded},
-	}, map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "c4": "p", "c5": "p"})
-	setRoles(t, session, map[string]string{
-		"p": " scout-a ", "c1": "scout-a", "c2": "scout-b", "c3": "broken", "c4": "broken", "c5": "",
-	})
-	agents := filepath.Join(t.TempDir(), "agents")
-	if err := os.MkdirAll(filepath.Join(agents, "broken.md"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"scout-a", "scout-b"} {
-		body := "---\nname: " + name + "\nrole: scout\n---\n"
-		if err := os.WriteFile(filepath.Join(agents, name+".md"), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + parentTask + `]}`
-	var warned bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", agents, &warned)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var row subagentRow
-	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
-		t.Fatalf("row is not JSON: %v: %q", err, got)
-	}
-	plain := stripANSICodes(row.Content)
-	if !strings.HasPrefix(plain, "1/5│1 ? · 2 broken · 1/2 scout│") || !strings.Contains(plain, "│scout│") {
-		t.Fatalf("row = %q, want 1/5│1 ? · 2 broken · 1/2 scout│ and the row's own role scout", plain)
-	}
-	if untyped := cMuted + "1 " + reset + cWarn + unknownRole + reset; !strings.Contains(row.Content, untyped) {
-		t.Fatalf("row = %q, want the untyped agent as %q", row.Content, untyped)
-	}
-	if !strings.Contains(warned.String(), "meta of c5 names no agentType") {
-		t.Fatalf("warn = %q, want the untyped agent's cause", warned.String())
-	}
-	if count := strings.Count(warned.String(), "agent definition (rows show broken)"); count != 1 {
-		t.Fatalf("warn = %q, want the unreadable definition once, got %d", warned.String(), count)
-	}
-}
-
-// A narrow panel shortens the roster to the roles that work (what is hidden is
-// counted), then drops it, the count staying; a failed scan shows no roster,
-// only the "?/?" it already says.
-func TestRenderSubagentsRosterFitsColumns(t *testing.T) {
-	session := rosterSession(t)
-	task := `{"id":"p","type":"local_agent","status":"completed","startTime":1790244000000,"label":"x",` +
-		`"cwd":"/work/repo/pfm","model":"claude-opus-5-5","effort":"high","contextWindowSize":1000000,"tokenCount":1000}`
-	cases := []struct {
-		columns int
-		want    string // what the row carries between its count and its gauge
-	}{
-		{0, "3/9│" + rosterFull + "│▱"},
-		{140, "3/9│1/4 tracer · 2/3 sub-tracer +2│▱"},
-		{125, "3/9│▱"},
-	}
-	for _, tc := range cases {
-		got, _ := renderOneSubagentColumns(t, session, task, tc.columns)
-		if !strings.HasPrefix(got, tc.want) {
-			t.Errorf("columns %d: row = %q, want it to start with %q", tc.columns, got, tc.want)
-		}
-	}
-	idle := nestedSession(t, map[string][]string{"p": agentTranscriptLines, "c1": {turnEnded}, "c2": {turnEnded}},
-		map[string]string{"p": "", "c1": "p", "c2": "p"})
-	setRoles(t, idle, map[string]string{"c1": "tracer", "c2": "scout"})
-	narrow, _ := renderOneSubagentColumns(t, idle, task, 120)
-	if !strings.HasPrefix(narrow, "0/2│2 roles│▱") {
-		t.Errorf("columns 120, nothing working: row = %q, want it to start with 0/2│2 roles│▱", narrow)
-	}
-	// "1 role" would be wider than "2 qa" and lose its name: the short form keeps the roster.
-	single, _ := rosterPart(agentNesting{total: 2, roles: []roleCount{{name: "qa", total: 2, depth: 1}}})
-	if got := stripANSICodes(single.short); got != "2 qa" {
-		t.Errorf("one idle role: short = %q, want 2 qa", got)
-	}
-}
-
-func TestRenderSubagentsRosterTornMetaShowsNoRoster(t *testing.T) {
-	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines, "c1": {turnEnded}},
-		map[string]string{"p": "", "c1": "p"})
-	dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
-	if err := os.WriteFile(filepath.Join(dir, "agent-c2.meta.json"), []byte(`{"agentTy`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "?/?│▱") {
-		t.Fatalf("row = %q, want ?/? and no roster after it", got)
-	}
 }

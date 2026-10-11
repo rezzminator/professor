@@ -17,6 +17,7 @@ One read-only shell call gathers:
 - every linked worktree (`git worktree list --porcelain`): branch, tip, ahead and behind `{base}`, dirty count, last commit age and subject
 - local branches `git branch --no-merged {base}`, and the remote branch of each
 - `git stash list`, each entry with `git stash show --include-untracked --stat`
+- every `$HOME/.local/state/pfm/flights/{project}/*/UNLANDED.md`: a flight that passed its gate and never landed; its worktree is WAITING, and a gone worktree makes the file stale, reported for deletion
 
 `{base}`, the release branch and branches sharing no history with `{base}` (`gh-pages`-like) are not work branches: list them under left alone.
 

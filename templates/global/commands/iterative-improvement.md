@@ -52,6 +52,8 @@ Quality is graded by an agent that did not design the change: blind A/B with the
 
 Stop when two consecutive rounds gain nothing beyond the spread on the hardest rung reached and a whole look finds only polish, at the brief's round or spend cap, or on the user's word.
 
+On stop, every worktree and branch a probe left ends one way, recorded in `lab.md`: landed, removed with its reason, or listed in the report as real work the lab did not land (what it fixes, its worktree, what finishing takes). A probe that fixed a real defect is never removed unlisted.
+
 ## Report
 
 After each round, one short status: the round, its change, its verdict, the spend so far. At the end, in order:

@@ -829,11 +829,11 @@ func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
 
 // TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover pins
 // issue #14 F5: the frr->rr global-agent rename (3976b53) left a stale
-// {config}/agents/frr.md RunGlobalAgents no longer visits. A symlink at that
+// {config}/agents/frr.md engine-sync's global step no longer visits. A symlink at that
 // path is always the installer's own — nothing else in this registry ever
 // creates one — so it retires unconditionally, dangling target or not; a
 // regular file retires only when its YAML frontmatter `name:` still reads
-// "frr", the same field RunGlobalAgents keys identity on, so a user's own
+// "frr", the same field engine-sync's global step keys identity on, so a user's own
 // same-named agent (different frontmatter, or none at all) is never touched.
 func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *testing.T) {
 	t.Parallel()

@@ -116,16 +116,3 @@ func (model Model) newChatEngines() []pfmengine.ID {
 	}
 	return ids
 }
-
-// AdjacentEngine returns the previous or next registered engine in stable
-// picker order. Unknown inputs start at the first registered engine.
-func AdjacentEngine(current pfmengine.ID, direction int) pfmengine.ID {
-	ids := spawn.RegisteredLaunchers()
-	if len(ids) == 0 {
-		// Unit packages do not execute cmd/pfm's composition root. Keep the two
-		// shipped launchers available there without registering production
-		// behaviour outside that root.
-		ids = []pfmengine.ID{pfmengine.Claude, pfmengine.Codex}
-	}
-	return adjacentID(current, direction, ids)
-}

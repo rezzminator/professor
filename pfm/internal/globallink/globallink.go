@@ -45,14 +45,14 @@ const (
 	// Never ours — reported, never overwritten, never deleted.
 	Conflict State = "conflict"
 	// Dangling: a symlink already points at the desired source
-	// path, but nothing exists there anymore — the pfm-owned generated
-	// directory a compiled Codex agent twin lives in was removed (partial
-	// uninstall, a wiped state dir) while the registry link survived. Ours,
-	// but a build cannot silently call this "correct": the link resolving to
-	// the right NAME is not the same as an operator actually having the
-	// agent. Apply repoints it exactly like Missing/WrongTarget —
-	// the recompile step that runs first in RunGlobalAgents' build phase
-	// recreates the missing file before this link is re-applied.
+	// path, but nothing exists there anymore — a command, skill or the
+	// engine-sync machine policy removed from the clone, or a fetched skill's
+	// store wiped, while the registry link survived. Ours, but not "correct":
+	// the link resolving to the right NAME is not the same as an operator
+	// actually having the entry. Apply repoints it exactly like
+	// Missing/WrongTarget; the source comes back only from its own writer (the
+	// clone checkout, the skill fetch). Agent links are engine-sync's own and
+	// never reach this package.
 	Dangling State = "dangling"
 )
 

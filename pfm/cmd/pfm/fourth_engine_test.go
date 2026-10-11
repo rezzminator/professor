@@ -21,7 +21,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/theme"
-	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 const fourthEngineHelper = "PFM_FOURTH_ENGINE_HELPER"
@@ -95,17 +94,6 @@ func TestFourthEngineNeedsOnlyItsOwnPackage(t *testing.T) {
 		t.Fatalf("doctor row omitted fourth engine: %q", doctorOutput.String())
 	}
 
-	current := pfmengine.Claude
-	seen := false
-	for range pfmengine.All() {
-		current = ui.AdjacentEngine(current, 1)
-		if current == id {
-			seen = true
-		}
-	}
-	if !seen {
-		t.Fatalf("picker cycle %v omitted %s", pfmengine.All(), id)
-	}
 	if rendered := sky.StarClass(id); rendered == "" {
 		t.Fatal("fallback star rendered empty")
 	}

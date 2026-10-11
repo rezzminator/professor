@@ -1864,7 +1864,7 @@ var retiredGlobalAgents = []string{"frr", "rr-super"}
 //   - a symlink retires only when it targets a known Professor source;
 //     unrelated personal links are preserved, including dangling ones;
 //   - a regular file retires only when its YAML frontmatter `name:` field
-//     still reads the retired name — the exact field RunGlobalAgents itself
+//     still reads the retired name — the exact field engine-sync's global step
 //     keys the compiled TOML and the registry identity on, so a user who
 //     repurposed the filename for their own agent (and so changed its
 //     frontmatter name) is left alone, untouched and unreported.

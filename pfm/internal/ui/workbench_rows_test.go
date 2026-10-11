@@ -1,7 +1,11 @@
 package ui
 
 import (
+	"context"
+	"os"
+	"os/exec"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 const (
@@ -237,4 +242,40 @@ func TestWorkbenchDossierLaunchPurpose(t *testing.T) {
 	) {
 		t.Errorf("dossier does not name the steps and the workbench: %s", joined)
 	}
+}
+
+const ownLauncherHelper = "PFM_UI_OWN_LAUNCHER_HELPER"
+
+// TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage pins that the
+// new-chat picker reads the launcher registry, never a fixed engine list: an
+// engine whose launcher is registered only in its own package (a fourth
+// engine) is offered. The registration runs in a child process of this test
+// binary, so every other test here keeps the shipped engines.
+func TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage(t *testing.T) {
+	const name = "TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage"
+	if os.Getenv(ownLauncherHelper) != "1" {
+		t.Parallel()
+		command := exec.Command(os.Args[0], "-test.run=^"+name+"$", "-test.v")
+		command.Env = append(os.Environ(), ownLauncherHelper+"=1")
+		output, err := command.CombinedOutput()
+		if err != nil || !strings.Contains(string(output), "--- PASS: "+name) {
+			t.Fatalf("own-launcher proof failed: %v\n%s", err, output)
+		}
+		return
+	}
+	id := pfmengine.ID("zz")
+	spawn.RegisterLauncher(id, ownLauncher{})
+	if got := workbenchGoldenModel(80).newChatEngines(); !slices.Contains(got, id) {
+		t.Fatalf("new-chat engines = %v, want the launcher registered as %s", got, id)
+	}
+}
+
+type ownLauncher struct{}
+
+func (ownLauncher) ComposerReady(string) bool { return true }
+
+func (ownLauncher) Rename(
+	context.Context, spawn.Tmux, string, string, string, spawn.Timings, spawn.Trace,
+) (string, error) {
+	return "", nil
 }

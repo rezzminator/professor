@@ -36,8 +36,8 @@ func watchCommand(
 	runner deps.Runner,
 	runtimes ...commandRuntime,
 ) int {
-	usage := "usage: pfm chat watch <target|glob>... [--transitions [--quiet-after SECS]] [--idle-after SECS] " +
-		"[--on-idle CMD] [--on-exit CMD] [--once] [--poll SECS]"
+	usage := "usage: pfm chat watch <target|glob>... [--transitions [--no-working] [--quiet-after SECS]] " +
+		"[--idle-after SECS] [--on-idle CMD] [--on-exit CMD] [--once] [--poll SECS]"
 	flags := cli.NewFlagSet("chat watch", usage, stderr)
 	// The flags' own lines follow the usage line, so --help states the poll
 	// default and floor a caller sizes its wait by.
@@ -46,6 +46,11 @@ func watchCommand(
 		flags.PrintDefaults()
 	}
 	transitions := flags.Bool("transitions", false, "announce every state change, after one SEEN snapshot per target")
+	noWorking := flags.Bool(
+		"no-working",
+		false,
+		"with --transitions: omit WORKING lines and include the last answer on idle lines",
+	)
 	quietAfter := flags.Int("quiet-after", 0, "with --transitions: seconds of unchanged transcript before QUIET")
 	idleAfter := flags.Int("idle-after", 0, "seconds of idle before IDLE is emitted")
 	onIdle := flags.String("on-idle", "", "shell command to run on IDLE")
@@ -58,7 +63,7 @@ func watchCommand(
 	if !ok {
 		return code
 	}
-	if len(targets) == 0 || *idleAfter < 0 || *quietAfter < 0 || (*quietAfter > 0 && !*transitions) {
+	if len(targets) == 0 || *idleAfter < 0 || *quietAfter < 0 || ((*quietAfter > 0 || *noWorking) && !*transitions) {
 		flags.Usage()
 		return 2
 	}
@@ -133,15 +138,30 @@ func watchCommand(
 		Fingerprint: fingerprint,
 		Clock:       pollClock,
 	}
-	result, err := fleet.Watch(ctx, headless.WatchOptions{
+	options := headless.WatchOptions{
 		IdleAfter:   time.Duration(*idleAfter) * time.Second,
 		Poll:        time.Duration(*poll) * time.Second,
 		Once:        *once,
 		Transitions: *transitions,
+		NoWorking:   *noWorking,
 		QuietAfter:  time.Duration(*quietAfter) * time.Second,
 		OnIdle:      hookRunner(*onIdle, runner, stderr),
 		OnExit:      hookRunner(*onExit, runner, stderr),
-	}, stdout)
+	}
+	if *noWorking {
+		options.Answer = func(ctx context.Context, chat headless.Chat) (string, error) {
+			target := chat.ID
+			if target == "" {
+				target = chat.Name
+			}
+			last, err := pfmchat.LastAnswer(ctx, runtime, pfmchat.LastRequest{Target: target})
+			if err != nil {
+				return "", fmt.Errorf("last answer for %q: %w", chat.Name, err)
+			}
+			return last.Text, nil
+		}
+	}
+	result, err := fleet.Watch(ctx, options, stdout)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat watch: %v\n", err)
 		return 1

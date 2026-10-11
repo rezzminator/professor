@@ -277,6 +277,54 @@ func TestWatcherReturnsTheOriginalErrorAfterPrintingIt(t *testing.T) {
 	}
 }
 
+func TestTransitionsQuietMonitorCarriesAnswerWithoutWorking(t *testing.T) {
+	seats := newFakeSeats(map[string][]fakeStep{
+		"x": {idleFor(7, "first"), working("first"), working("first"), idleFor(1, "second"), gone()},
+	})
+	lines, _, err := runFleet(t, namedFleet(seats, "x"), WatchOptions{
+		Transitions: true, NoWorking: true,
+		Answer: func(_ context.Context, chat Chat) (string, error) {
+			if chat.Name != "x" {
+				return "", fmt.Errorf("unexpected chat %q", chat.Name)
+			}
+			return "Heading\n\n**Verdict:** DONE with a \"quote\"\nAnother line", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLines(t, lines, []string{
+		`SEEN x idle idle_seconds=7 answer="**Verdict:** DONE with a \"quote\""`,
+		`IDLE x idle_seconds=1 answer="**Verdict:** DONE with a \"quote\""`,
+		"EXIT x",
+	})
+}
+
+func TestTransitionsQuietMonitorReportsAnswerFailuresAndCapsText(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		text string
+		err  error
+		want string
+	}{
+		{"read failed", "", errors.New("read transcript: denied\nagain"), `answer_error="read transcript: denied again"`},
+		{"no answer", "  \n\t", nil, `answer_error="empty answer"`},
+		{"first line and cap", strings.Repeat("é", 205), nil, `answer="` + strings.Repeat("é", 199) + `…"`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			seats := newFakeSeats(map[string][]fakeStep{"x": {working("before"), idleFor(2, "after"), gone()}})
+			lines, _, err := runFleet(t, namedFleet(seats, "x"), WatchOptions{
+				Transitions: true, NoWorking: true,
+				Answer: func(context.Context, Chat) (string, error) { return testCase.text, testCase.err },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertLines(t, lines, []string{"SEEN x working", "IDLE x idle_seconds=2 " + testCase.want, "EXIT x"})
+		})
+	}
+}
+
 func TestTransitionsAnnounceEachChangeOnce(t *testing.T) {
 	for _, testCase := range []struct {
 		name  string
@@ -709,5 +757,44 @@ func TestFleetWatchWaitsMinPollBetweenPollsWhateverItWasAsked(t *testing.T) {
 				t.Fatalf("Poll %v: armed %v, want every wait %v", requested, waits, MinPoll)
 			}
 		}
+	}
+}
+
+// TestTransitionsQuietMonitorWritesOneIdlePerTurnOnly explains the back-to-back
+// IDLE lines a --no-working monitor shows: a turn that begins and ends between
+// two polls is a new answer, announced as WORKING then IDLE, and the monitor
+// drops only the WORKING. A seat that stays at rest on the same answer writes
+// nothing more, so two IDLE lines in a row are always two turns.
+func TestTransitionsQuietMonitorWritesOneIdlePerTurnOnly(t *testing.T) {
+	steps := []fakeStep{idleFor(5, "first"), idleFor(1, "second"), idleFor(2, "second"), gone()}
+	// The reader answers each idle turn in order: the first rest, then the turn after it.
+	answers := []string{"**Verdict:** one", "**Verdict:** two"}
+	for _, testCase := range []struct {
+		name      string
+		noWorking bool
+		want      []string
+	}{
+		{"the monitor", true, []string{
+			`SEEN x idle idle_seconds=5 answer="**Verdict:** one"`,
+			`IDLE x idle_seconds=1 answer="**Verdict:** two"`,
+			"EXIT x",
+		}},
+		{"the full stream", false, []string{"SEEN x idle idle_seconds=5", "WORKING x", "IDLE x idle_seconds=1", "EXIT x"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			seats := newFakeSeats(map[string][]fakeStep{"x": steps})
+			calls := 0
+			lines, _, err := runFleet(t, namedFleet(seats, "x"), WatchOptions{
+				Transitions: true, NoWorking: testCase.noWorking,
+				Answer: func(context.Context, Chat) (string, error) {
+					calls++
+					return answers[min(calls, len(answers))-1], nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertLines(t, lines, testCase.want)
+		})
 	}
 }

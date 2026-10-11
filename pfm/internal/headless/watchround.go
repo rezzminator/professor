@@ -171,7 +171,7 @@ func (run *fleetRun) leaveBound(ctx context.Context, seat *watchedSeat, chats []
 		Socket: bound.Socket, State: StateDead,
 	}
 	if run.options.Transitions && !seat.seen {
-		return run.snapshot(seat)
+		return run.snapshot(ctx, seat)
 	}
 	return run.leave(seat, "EXIT")
 }

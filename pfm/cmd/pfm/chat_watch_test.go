@@ -121,6 +121,20 @@ func TestRunHeadlessWatchRefusesBadTargetsAsUsage(t *testing.T) {
 // TestWatchTransitionsAnswersAnUnknownSeatWithSeen: under --transitions there
 // is no pre-check, so first sight of a name nothing answers to is the SEEN
 // snapshot; the target ends and the exit code says it was not alive.
+func TestWatchNoWorkingRequiresTransitionsAndAppearsInHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runHeadlessWatch([]string{"ghost", "--no-working"}, &stdout, &stderr, &deps.FakeRunner{}); code != 2 ||
+		!strings.Contains(stderr.String(), "usage: pfm chat watch") {
+		t.Fatalf("without transitions: rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runHeadlessWatch([]string{"--help"}, &stdout, &stderr, &deps.FakeRunner{}); code != 0 ||
+		!strings.Contains(stderr.String(), "--no-working") {
+		t.Fatalf("help: rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestWatchTransitionsAnswersAnUnknownSeatWithSeen(t *testing.T) {
 	jail := newRunJail(t)
 	defer jail.killSockets(t)

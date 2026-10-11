@@ -31,6 +31,12 @@ type WatchOptions struct {
 	// never hears an event twice. Without it only IDLE, EXIT, DEAD and ERROR
 	// are written, exactly as before.
 	Transitions bool
+	// NoWorking omits WORKING event lines under Transitions. SEEN snapshots
+	// still name a working chat, and BLOCKED, QUIET, EXIT and ERROR remain.
+	NoWorking bool
+	// Answer reads the last answer only for the NoWorking monitor's idle
+	// events. Failures appear on the event line, never as an empty answer.
+	Answer func(context.Context, Chat) (string, error)
 	// QuietAfter, under Transitions and when positive, announces a working
 	// seat whose transcript has sat unchanged that long as QUIET, once, and
 	// WORKING again when the transcript moves: a hung stream, a reconnect
@@ -226,6 +232,7 @@ type watchedSeat struct {
 	seen    bool
 	ended   bool
 	status  Status
+	chat    Chat
 	// announcedIdle is the legacy rule's one bit: IDLE already written.
 	announcedIdle bool
 	// announced is the transitions rule's memory: the last state key written.
@@ -399,7 +406,7 @@ func (run *fleetRun) advance(ctx context.Context, seat *watchedSeat, chat Chat, 
 	if !found {
 		seat.status = Missing(seat.name)
 		if run.options.Transitions && !seat.seen {
-			return run.snapshot(seat)
+			return run.snapshot(ctx, seat)
 		}
 		return run.leave(seat, "DEAD")
 	}
@@ -407,17 +414,18 @@ func (run *fleetRun) advance(ctx context.Context, seat *watchedSeat, chat Chat, 
 	if err != nil {
 		return run.failSeat(ctx, seat, err)
 	}
+	seat.chat = chat
 	seat.status = status
 	if run.options.Transitions && !seat.seen {
-		return run.snapshot(seat)
+		return run.snapshot(ctx, seat)
 	}
 	if !status.Alive() {
 		return run.leave(seat, "EXIT")
 	}
 	if run.options.Transitions {
-		return run.announceTransition(seat)
+		return run.announceTransition(ctx, seat)
 	}
-	return run.announceLegacy(seat)
+	return run.announceLegacy(ctx, seat)
 }
 
 // say writes one event line.
@@ -478,8 +486,49 @@ func (run *fleetRun) failGlobs(ctx context.Context, cause error) error {
 	return nil
 }
 
+// answerSuffix keeps the monitor's verdict on one line, with explicit read
+// failures. The default watch never calls the reader or changes its format.
+func (run *fleetRun) answerSuffix(ctx context.Context, seat *watchedSeat) string {
+	if !run.options.NoWorking {
+		return ""
+	}
+	if run.options.Answer == nil {
+		return ` answer_error="reader not configured"`
+	}
+	text, err := run.options.Answer(ctx, seat.chat)
+	if err != nil {
+		return fmt.Sprintf(" answer_error=%q", strings.Join(strings.Fields(err.Error()), " "))
+	}
+	first, verdict := "", ""
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = line
+		}
+		if strings.HasPrefix(line, "**Verdict:**") {
+			verdict = line
+			break
+		}
+	}
+	if verdict != "" {
+		first = verdict
+	}
+	if first == "" {
+		return ` answer_error="empty answer"`
+	}
+	const limit = 200
+	characters := []rune(first)
+	if len(characters) > limit {
+		first = string(characters[:limit-1]) + "…"
+	}
+	return fmt.Sprintf(" answer=%q", first)
+}
+
 // idle writes the IDLE line, runs OnIdle, and ends the seat under Once.
-func (run *fleetRun) idle(seat *watchedSeat) error {
+func (run *fleetRun) idle(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	// A turn ended on an error waits for its human exactly as an answered one
 	// does, so it is announced as idle with its kind.
@@ -487,6 +536,7 @@ func (run *fleetRun) idle(seat *watchedSeat) error {
 	if status.State == StateError {
 		suffix = " error=" + status.Error
 	}
+	suffix += run.answerSuffix(ctx, seat)
 	if err := run.say("IDLE %s idle_seconds=%d%s", seat.name, status.IdleSeconds, suffix); err != nil {
 		return err
 	}
@@ -511,12 +561,12 @@ func idleLongEnough(status Status, after time.Duration) bool {
 
 // announceLegacy is the original rule: IDLE once per rest, re-armed by any
 // alive state that is not a rest.
-func (run *fleetRun) announceLegacy(seat *watchedSeat) error {
+func (run *fleetRun) announceLegacy(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	switch {
 	case endedTurn(status) && idleLongEnough(status, run.options.IdleAfter) && !seat.announcedIdle:
 		seat.announcedIdle = true
-		return run.idle(seat)
+		return run.idle(ctx, seat)
 	case !endedTurn(status):
 		// Back to work: the next idle is a new event worth announcing.
 		seat.announcedIdle = false
@@ -550,7 +600,7 @@ func (run *fleetRun) stateKey(status Status) string {
 
 // snapshot writes the one SEEN line a target gets, on first sight, and seeds
 // what later transitions are compared with. A target seen not alive ends here.
-func (run *fleetRun) snapshot(seat *watchedSeat) error {
+func (run *fleetRun) snapshot(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	seat.seen = true
 	line := fmt.Sprintf("SEEN %s %s", seat.name, status.State)
@@ -562,6 +612,9 @@ func (run *fleetRun) snapshot(seat *watchedSeat) error {
 	}
 	if run.quiet(status) {
 		line += fmt.Sprintf(" quiet_seconds=%d", status.QuietSeconds)
+	}
+	if endedTurn(status) {
+		line += run.answerSuffix(ctx, seat)
 	}
 	if err := run.say("%s", line); err != nil {
 		return err
@@ -577,15 +630,17 @@ func (run *fleetRun) snapshot(seat *watchedSeat) error {
 
 // announceTransition writes a line only when the state differs from the last
 // one written.
-func (run *fleetRun) announceTransition(seat *watchedSeat) error {
+func (run *fleetRun) announceTransition(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	previous := seat.lastSeen
 	seat.lastSeen = status.Last
 	// A turn that began and ended between two polls leaves the seat at rest
 	// with a new last answer: say it worked, then judge the rest anew.
 	if endedTurn(status) && strings.HasPrefix(seat.announced, StateIdle+":") && status.Last != previous {
-		if err := run.say("%s %s", strings.ToUpper(StateWorking), seat.name); err != nil {
-			return err
+		if !run.options.NoWorking {
+			if err := run.say("%s %s", strings.ToUpper(StateWorking), seat.name); err != nil {
+				return err
+			}
 		}
 		seat.announced = StateWorking
 	}
@@ -595,7 +650,7 @@ func (run *fleetRun) announceTransition(seat *watchedSeat) error {
 			return nil
 		}
 		seat.announced = key
-		return run.idle(seat)
+		return run.idle(ctx, seat)
 	}
 	if key == seat.announced {
 		return nil
@@ -603,6 +658,9 @@ func (run *fleetRun) announceTransition(seat *watchedSeat) error {
 	seat.announced = key
 	if key == stateQuiet {
 		return run.say("QUIET %s quiet_seconds=%d", seat.name, status.QuietSeconds)
+	}
+	if run.options.NoWorking && key == StateWorking {
+		return nil
 	}
 	return run.say("%s %s", strings.ToUpper(status.State), seat.name)
 }

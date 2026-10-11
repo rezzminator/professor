@@ -74,14 +74,14 @@ The wrapper records its decision as `PFM_COST_LEDGER` in Claude's environment (`
 | --- | --- | --- |
 | `on` | a sink is armed and the exporters point at it | `Prepare` after a successful `Arm` |
 | `off` | `claude.costLedger` is `false` | `Render` (no wrapper) and `Prepare` |
-| `preempted` | the user's own telemetry settings were kept; no ledger | `Prepare`, cause in the sink log |
+| `preempted` | the user's own telemetry settings were kept, or `settings.json` could not be read so they cannot be ruled out; no ledger | `Prepare`, cause in the sink log |
 | `failed` | the sink could not be armed, or `~/.local/bin/pfm` is not installed where the wrapper must run | `Prepare`, or `Render` when the wrapper is missing (a warning in the activity log) |
 
 A Claude started with no marker is one pfm did not launch, or a `claude -p` run: the status lines treat it as "no ledger decision", never as `off`.
 
 ### Pre-emption
 
-`claudelaunch.CostPreemptedReason` returns the reason a launch must keep the user's telemetry: the process environment names `CLAUDE_CODE_ENABLE_TELEMETRY` or an `OTEL_*` variable, or the `env` block of the account's `settings.json` does (`claudelaunch.SettingsEnvNames`). One exception: a chat started from inside a pfm chat inherits pfm's own exporter variables and `PFM_COST_LEDGER=on`; when every inherited variable is exactly pfm's own, they are vouched for and replaced by the new launch's own sink, because the parent's sink dies with the parent. A launch that arms nothing (off, pre-empted, failed) drops those inherited variables (`claudelaunch.InheritedCostNames`: in the wrapper, and in `Render`'s `Unset`), so its Claude never exports to the parent's sink. An unreadable `settings.json` is logged and the launch proceeds, since its real state is unknown.
+`claudelaunch.CostPreemptedReason` returns the reason a launch must keep the user's telemetry: the process environment names `CLAUDE_CODE_ENABLE_TELEMETRY` or an `OTEL_*` variable, or the `env` block of the account's `settings.json` does (`claudelaunch.SettingsEnvNames`). One exception: a chat started from inside a pfm chat inherits pfm's own exporter variables and `PFM_COST_LEDGER=on`; when every inherited variable is exactly pfm's own, they are vouched for and replaced by the new launch's own sink, because the parent's sink dies with the parent. A launch that arms nothing (off, pre-empted, failed) drops those inherited variables (`claudelaunch.InheritedCostNames`: in the wrapper, and in `Render`'s `Unset`), so its Claude never exports to the parent's sink. An unreadable or unparseable `settings.json` is logged and pre-empts the ledger, since its real state is unknown and a caller must not read it as naming nothing. An empty or whitespace-only `settings.json` names nothing.
 
 ### Doors
 
@@ -125,7 +125,7 @@ A half waits 20 seconds for its partner (`costsink.DefaultWait`). Matched, the r
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `request_id` | string | Anthropic API request id; unique after dedupe |
-| `ts` | string | RFC 3339 UTC with milliseconds: the log half's `event.timestamp`, a span-only row's end time |
+| `ts` | string | RFC 3339 UTC with milliseconds: the log half's `event.timestamp`, else the span's end time, else the sink's first receipt of the request |
 | `session_id` | string | the file's session |
 | `agent_id` | string | `""` main thread, `"?"` a log-only row whose agent is unknown, else the sub-agent id |
 | `parent_agent_id` | string | the spawning sub-agent; `""` for main, a top-level sub-agent and a log-only row |
@@ -176,7 +176,7 @@ A state the line must flag ends in one marker (`spendMarker`, `pfm/internal/stat
 | Marker | When |
 | --- | --- |
 | `sink failed` | `PFM_COST_LEDGER=failed` |
-| `ledger preempted` | `PFM_COST_LEDGER=preempted`: the user's own telemetry kept the ledger from starting |
+| `ledger preempted` | `PFM_COST_LEDGER=preempted`: the user's own telemetry (or a `settings.json` that could not be read) kept the ledger from starting |
 | `ledger off` | `PFM_COST_LEDGER=off`: `claude.costLedger` is `false` |
 | `ledger unreadable` | the ledger file exists and could not be read, or its session id is invalid; the line then shows Claude Code's total and the cause goes to the activity log |
 | `pre-ledger` | [spend before the ledger](#before-the-ledger) exceeds `max($0.01, 0.5% of the line's amount)`: the chat began before the ledger, or ran a launch without a sink. A fact of the files, so it does not flicker with a call in flight and a healthy resume (every earlier launch fully logged) never shows it |

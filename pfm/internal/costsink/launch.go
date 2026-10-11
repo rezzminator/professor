@@ -37,7 +37,7 @@ type LaunchOptions struct {
 // Prepare decides the ledger for one launch and returns the environment Claude starts with and the
 // decision (a claudelaunch.CostLedger* word, also recorded in the environment as the marker the
 // status line reads): off when claude.costLedger is false; preempted when the user's own telemetry
-// settings (process environment or the account's settings.json env) must be kept; failed when the
+// settings (process environment or the account's settings.json env, or one that cannot be read) must be kept; failed when the
 // sink could not be armed — never fatal, the cause is in the sink log; else on, with the exporter
 // variables pointed at a freshly armed sink. Exporters inherited from a parent pfm chat are
 // replaced, or dropped when no sink is armed, never kept: their sink dies with that chat. A launch
@@ -60,7 +60,11 @@ func Prepare(opts LaunchOptions) ([]string, string) {
 	if err != nil {
 		logf("settings.json unreadable, so the user's telemetry settings cannot be ruled out: %v", err)
 	}
-	if reason := claudelaunch.CostPreemptedReason(opts.Environ, names); reason != "" {
+	reason := claudelaunch.CostPreemptedReason(opts.Environ, names)
+	if err != nil && reason == "" {
+		reason = "settings.json is unreadable, so the user's telemetry settings cannot be ruled out"
+	}
+	if reason != "" {
 		logf("pre-empted, no cost ledger for pid %d: %s", opts.PID, reason)
 		return withEnv(
 			opts.Environ,

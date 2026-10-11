@@ -105,6 +105,16 @@ func TestJoinerWritesALogOnlyRowAfterTheWaitAndUpgradesItWhenTheSpanArrives(t *t
 	if len(c.rows) != 2 {
 		t.Fatalf("a repeated half re-emitted: %d rows", len(c.rows))
 	}
+	// Halves with no time of their own: the upgraded row keeps the request's first receipt, the
+	// log-only row's ts, never the late span's arrival.
+	unstampedLog, unstampedSpan := logHalf("req_2", 2118), spanHalf("req_2", "a0000000000000001", "")
+	unstampedLog.TS, unstampedSpan.EndTS = "", ""
+	j.AddLog(unstampedLog, epoch)
+	j.Flush(epoch.Add(21 * time.Second))
+	j.AddSpan(unstampedSpan, epoch.Add(40*time.Second))
+	if len(c.rows) != 4 || c.rows[2].TS != "2026-10-09T18:27:00.000Z" || c.rows[3].TS != c.rows[2].TS {
+		t.Fatalf("rows = %+v, want the log-only and upgraded rows both at the first receipt", c.rows[2:])
+	}
 }
 
 func TestJoinerWritesASpanOnlyRowWithNullCostAndUpgradesItWhenTheLogArrives(t *testing.T) {
@@ -131,15 +141,23 @@ func TestJoinerDrainFlushesEverythingPendingNow(t *testing.T) {
 	j := NewJoiner(20*time.Second, c.emit)
 	j.AddLog(logHalf("req_1", 10), epoch)
 	j.AddSpan(spanHalf("req_2", "a0000000000000001", ""), epoch)
+	// A lone half without its own time is stamped with its receipt, never left untimed.
+	unstampedLog, unstampedSpan := logHalf("req_3", 10), spanHalf("req_4", "a0000000000000001", "")
+	unstampedLog.TS, unstampedSpan.EndTS = "", ""
+	j.AddLog(unstampedLog, epoch.Add(time.Second))
+	j.AddSpan(unstampedSpan, epoch.Add(2*time.Second))
 	j.Drain()
-	if len(c.rows) != 2 {
-		t.Fatalf("Drain emitted %d rows, want 2", len(c.rows))
+	if len(c.rows) != 4 {
+		t.Fatalf("Drain emitted %d rows, want 4", len(c.rows))
 	}
-	joins := map[string]string{}
+	joins, stamps := map[string]string{}, map[string]string{}
 	for _, r := range c.rows {
-		joins[r.RequestID] = r.Join
+		joins[r.RequestID], stamps[r.RequestID] = r.Join, r.TS
 	}
 	if joins["req_1"] != costledger.JoinLog || joins["req_2"] != costledger.JoinSpan {
 		t.Fatalf("joins = %v", joins)
+	}
+	if stamps["req_3"] != "2026-10-09T18:27:01.000Z" || stamps["req_4"] != "2026-10-09T18:27:02.000Z" {
+		t.Fatalf("stamps = %v, want each unstamped lone half at its receipt time", stamps)
 	}
 }

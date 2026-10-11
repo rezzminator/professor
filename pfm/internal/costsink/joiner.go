@@ -26,6 +26,8 @@ type entry struct {
 	log   LogHalf
 	span  SpanHalf
 	at    time.Time
+	// first is when the request's first half arrived, the receipt fallback of every row it yields.
+	first time.Time
 }
 
 // Joiner pairs the two halves of an API call on request_id and hands each finished row to emit.
@@ -62,13 +64,13 @@ func (j *Joiner) add(id string, now time.Time, pending, partnerPending, partnerF
 	e, seen := j.entries[id]
 	switch {
 	case !seen:
-		e = &entry{state: pending, at: now}
+		e = &entry{state: pending, at: now, first: now}
 		set(e)
 		j.entries[id] = e
 	case e.state == partnerPending || e.state == partnerFlushed:
 		set(e)
 		e.state, e.at = joined, now
-		j.emit(logSpanRow(e.log, e.span))
+		j.emit(logSpanRow(e.log, e.span, e.first))
 	}
 }
 
@@ -103,10 +105,10 @@ func (j *Joiner) Drain() {
 func (j *Joiner) flushAlone(e *entry, now time.Time) {
 	if e.state == pendingLog {
 		e.state = flushedLog
-		j.emit(logOnlyRow(e.log))
+		j.emit(logOnlyRow(e.log, e.first))
 	} else {
 		e.state = flushedSpan
-		j.emit(spanOnlyRow(e.span))
+		j.emit(spanOnlyRow(e.span, e.first))
 	}
 	e.at = now
 }
@@ -120,9 +122,12 @@ func firstFilled(values ...string) string {
 	return ""
 }
 
-func logSpanRow(l LogHalf, s SpanHalf) costledger.Row {
+// receiptStamp spells the time a request's first half was received, the last fallback of a row's ts.
+func receiptStamp(at time.Time) string { return at.UTC().Format(timeLayoutMS) }
+
+func logSpanRow(l LogHalf, s SpanHalf, received time.Time) costledger.Row {
 	return costledger.Row{
-		RequestID: l.RequestID, TS: firstFilled(l.TS, s.EndTS), SessionID: l.SessionID,
+		RequestID: l.RequestID, TS: firstFilled(l.TS, s.EndTS, receiptStamp(received)), SessionID: l.SessionID,
 		AgentID: s.AgentID, ParentAgentID: s.ParentAgentID,
 		QuerySource: firstFilled(l.QuerySource, s.QuerySource), Model: firstFilled(l.Model, s.Model),
 		InputTokens: l.InputTokens, OutputTokens: l.OutputTokens,
@@ -132,9 +137,10 @@ func logSpanRow(l LogHalf, s SpanHalf) costledger.Row {
 	}
 }
 
-func logOnlyRow(l LogHalf) costledger.Row {
+func logOnlyRow(l LogHalf, received time.Time) costledger.Row {
 	return costledger.Row{
-		RequestID: l.RequestID, TS: l.TS, SessionID: l.SessionID, AgentID: costledger.UnknownAgent,
+		RequestID: l.RequestID, TS: firstFilled(l.TS, receiptStamp(received)),
+		SessionID: l.SessionID, AgentID: costledger.UnknownAgent,
 		QuerySource: l.QuerySource, Model: l.Model,
 		InputTokens: l.InputTokens, OutputTokens: l.OutputTokens,
 		CacheReadTokens: l.CacheReadTokens, CacheCreationTokens: l.CacheCreationTokens,
@@ -142,12 +148,21 @@ func logOnlyRow(l LogHalf) costledger.Row {
 	}
 }
 
-func spanOnlyRow(s SpanHalf) costledger.Row {
+func spanOnlyRow(s SpanHalf, received time.Time) costledger.Row {
 	return costledger.Row{
-		RequestID: s.RequestID, TS: s.EndTS, SessionID: s.SessionID, AgentID: s.AgentID, ParentAgentID: s.ParentAgentID,
-		QuerySource: s.QuerySource, Model: s.Model,
-		InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
-		CacheReadTokens: s.CacheReadTokens, CacheCreationTokens: s.CacheCreationTokens,
-		Speed: s.Speed, Effort: s.Effort, Join: costledger.JoinSpan,
+		RequestID:           s.RequestID,
+		TS:                  firstFilled(s.EndTS, receiptStamp(received)),
+		SessionID:           s.SessionID,
+		AgentID:             s.AgentID,
+		ParentAgentID:       s.ParentAgentID,
+		QuerySource:         s.QuerySource,
+		Model:               s.Model,
+		InputTokens:         s.InputTokens,
+		OutputTokens:        s.OutputTokens,
+		CacheReadTokens:     s.CacheReadTokens,
+		CacheCreationTokens: s.CacheCreationTokens,
+		Speed:               s.Speed,
+		Effort:              s.Effort,
+		Join:                costledger.JoinSpan,
 	}
 }

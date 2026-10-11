@@ -213,24 +213,51 @@ func TestPrepareDisabledLaunchesMarkedOffWithoutArming(t *testing.T) {
 	}
 }
 
-func TestPrepareLogsAnUnreadableSettingsFileAndStillArms(t *testing.T) {
-	configDir, home, calls := t.TempDir(), t.TempDir(), 0
-	if err := os.WriteFile(filepath.Join(configDir, "settings.json"), []byte(`{broken`), 0o600); err != nil {
+func TestPrepareNeverArmsWhenTheSettingsFileCannotBeRead(t *testing.T) {
+	unparseable := filepath.Join(t.TempDir(), "unparseable")
+	unreadable := filepath.Join(t.TempDir(), "unreadable")
+	if err := os.MkdirAll(unparseable, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, state := Prepare(LaunchOptions{
-		Environ: []string{
-			"CLAUDE_CONFIG_DIR=" + configDir,
-		},
-		Home:    home,
-		PID:     3,
-		Enabled: true,
-		Arm:     fakeArm(4321, nil, &calls),
-	})
-	if state != claudelaunch.CostLedgerOn || calls != 1 {
-		t.Fatalf("state = %q after %d arms", state, calls)
+	content := `{"env": {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4318"},}`
+	if err := os.WriteFile(filepath.Join(unparseable, "settings.json"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if got := logText(t, home); !strings.Contains(got, "settings.json") {
-		t.Fatalf("sink log = %q, want the unreadable settings named", got)
+	// A directory where the file should be cannot be read as a file, whatever the uid.
+	if err := os.MkdirAll(filepath.Join(unreadable, "settings.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, configDir string
+		env             []string
+	}{
+		{"unparseable", unparseable, nil},
+		{"unreadable", unreadable, nil},
+		// The launch's own telemetry pre-empts first; the broken file is still named in the log.
+		{
+			"unparseable beside the user's exporter", unparseable,
+			[]string{"OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home, calls := t.TempDir(), 0
+			environ, state := Prepare(LaunchOptions{
+				Environ: append([]string{"CLAUDE_CONFIG_DIR=" + c.configDir}, c.env...),
+				Home:    home,
+				PID:     3,
+				Enabled: true,
+				Arm:     fakeArm(4321, nil, &calls),
+			})
+			if state != claudelaunch.CostLedgerPreempted || calls != 0 {
+				t.Fatalf("state = %q after %d arms, want preempted and no arm", state, calls)
+			}
+			if !slices.Contains(environ, "PFM_COST_LEDGER=preempted") {
+				t.Fatalf("environ = %q, want the preempted marker", environ)
+			}
+			if got := logText(t, home); !strings.Contains(got, "settings.json") {
+				t.Fatalf("sink log = %q, want the unreadable settings named", got)
+			}
+		})
 	}
 }

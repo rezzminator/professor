@@ -172,10 +172,22 @@ func DecodeLogs(body []byte) ([]LogHalf, error) {
 		}
 	}
 	if len(refused) > 0 {
-		return halves, fmt.Errorf("decode OTLP logs: %d records refused: %s", len(refused), refused[0])
+		return halves, &RefusedError{
+			Count:  len(refused),
+			Reason: fmt.Sprintf("decode OTLP logs: %d records refused: %s", len(refused), refused[0]),
+		}
 	}
 	return halves, nil
 }
+
+// RefusedError reports records a well-formed body held that were refused for want of an identity;
+// the halves returned beside it are valid and joined, so the POST is not a bad request.
+type RefusedError struct {
+	Count  int
+	Reason string
+}
+
+func (e *RefusedError) Error() string { return e.Reason }
 
 // DecodeSpans reduces an OTLP/HTTP JSON traces body to its claude_code.llm_request spans, the
 // query source spelled as the log half spells it.
@@ -221,10 +233,13 @@ func DecodeSpans(body []byte) ([]SpanHalf, error) {
 		}
 	}
 	if refused > 0 {
-		return halves, fmt.Errorf(
-			"decode OTLP traces: %d llm_request spans refused: no request_id or session.id",
-			refused,
-		)
+		return halves, &RefusedError{
+			Count: refused,
+			Reason: fmt.Sprintf(
+				"decode OTLP traces: %d llm_request spans refused: no request_id or session.id",
+				refused,
+			),
+		}
 	}
 	return halves, nil
 }
@@ -244,7 +259,8 @@ func NormalizeSpanQuerySource(source string) string {
 }
 
 // normalizeTimestamp writes an RFC 3339 instant as UTC with milliseconds; text it cannot parse is
-// returned empty so the sink stamps its own clock instead of copying an unknown form.
+// returned empty so the row falls back to the span's end or the receipt time instead of copying an
+// unknown form.
 func normalizeTimestamp(text string) string {
 	if text == "" {
 		return ""

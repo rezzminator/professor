@@ -114,6 +114,12 @@ func TestSettingsEnvNamesReadsTheEnvBlockKeys(t *testing.T) {
 	if names, err := SettingsEnvNames(dir); err != nil || len(names) != 0 {
 		t.Fatalf("no env block = %v, %v", names, err)
 	}
+	for _, empty := range []string{"", " \n\t\n"} {
+		write(empty)
+		if names, err := SettingsEnvNames(dir); err != nil || len(names) != 0 {
+			t.Fatalf("empty settings.json %q = %v, %v; want no names, no error", empty, names, err)
+		}
+	}
 	write(`{broken`)
 	if _, err := SettingsEnvNames(dir); err == nil {
 		t.Fatal("a settings.json that cannot be parsed read as no names")

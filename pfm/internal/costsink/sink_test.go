@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -123,6 +124,82 @@ func TestSinkAnswers400ForABrokenBodyAndLogsWhy(t *testing.T) {
 	if !strings.Contains(logs.String(), "/v1/logs") {
 		t.Fatalf("sink log = %q, want a line naming the failed path", logs.String())
 	}
+}
+
+// A record without an identity is a fault, not a refused POST: the batch's other records are
+// joined, the sink answers 200 with the OTLP partial success naming how many it refused, and each
+// refused record counts once.
+func TestSinkAnswers200ForAPartiallyRefusedBatchAndCountsTheRefusal(t *testing.T) {
+	cases := []struct {
+		name, path, rejectedField string
+		body                      []byte
+		faults                    int
+	}{
+		{"logs", "/v1/logs", "rejectedLogRecords", logBody(
+			apiRequest(testSession, "req_good", "repl_main_thread", 100),
+			apiRequest(testSession, "", "repl_main_thread", 5),
+			apiRequest("", "req_anonymous", "repl_main_thread", 5),
+		), 2},
+		{"traces", "/v1/traces", "rejectedSpans", spanBody(
+			llmSpan(testSession, "req_good", "", "", "repl_main_thread"),
+			llmSpan(testSession, "", "", "", "repl_main_thread"),
+		), 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sink, _, _, logs := newTestSink(t)
+			response := post(t, sink, http.MethodPost, c.path, c.body, nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("partially refused batch = %d, want 200", response.Code)
+			}
+			var answer struct {
+				PartialSuccess map[string]string `json:"partialSuccess"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil ||
+				answer.PartialSuccess[c.rejectedField] != strconv.Itoa(c.faults) ||
+				!strings.Contains(answer.PartialSuccess["errorMessage"], "refused") {
+				t.Fatalf("body = %q (%v); want partialSuccess.%s = %d with the reason",
+					response.Body.String(), err, c.rejectedField, c.faults)
+			}
+			if sink.Faults() != c.faults || !strings.Contains(logs.String(), "refused") {
+				t.Fatalf("faults = %d, log = %q; want %d refused records counted and logged",
+					sink.Faults(), logs.String(), c.faults)
+			}
+			sink.Drain()
+			ledger, err := costledger.ForSession(sink.dir, testSession)
+			if err != nil || len(ledger.Rows) != 1 || ledger.Rows[0].RequestID != "req_good" {
+				t.Fatalf("ledger = %v, %v; want the good record kept", ledger, err)
+			}
+		})
+	}
+}
+
+// A log without its own stamp no longer takes the sink's clock: the joined row carries the span's
+// end. The rest of the fallback order is the joiner's (joiner_test.go).
+func TestSinkStampsAJoinedRowWithTheCallsOwnTimeNotTheReceiptTime(t *testing.T) {
+	sink, _, dir, _ := newTestSink(t)
+	logAttrs := withoutKey(apiRequest(testSession, "req_1", "repl_main_thread", 100), "event.timestamp")
+	post(t, sink, http.MethodPost, "/v1/logs", logBody(logAttrs), nil)
+	span := llmSpan(testSession, "req_1", "", "", "repl_main_thread")
+	post(t, sink, http.MethodPost, "/v1/traces", spanBody(span), nil)
+	sink.Drain()
+	ledger, err := costledger.ForSession(dir, testSession)
+	if err != nil || len(ledger.Rows) != 1 {
+		t.Fatalf("ledger = %v, %v", ledger, err)
+	}
+	if got := ledger.Rows[0].TS; got != "2026-10-09T18:27:28.025Z" {
+		t.Fatalf("joined row ts = %q, want the span's end", got)
+	}
+}
+
+func withoutKey(attrs []map[string]any, key string) []map[string]any {
+	var out []map[string]any
+	for _, a := range attrs {
+		if a["key"] != key {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Any local process can POST to the sink: a session id outside the ledger's character class never

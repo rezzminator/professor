@@ -7,10 +7,12 @@ package costsink
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -139,13 +141,39 @@ func (s *Sink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		err = s.ingestSpans(body, now)
 	}
-	if err != nil {
+	answer := []byte("{}")
+	var refused *RefusedError
+	switch {
+	case errors.As(err, &refused):
+		// The batch was well-formed and its other records are joined: each refused one is a fault.
+		s.faults.Add(int64(refused.Count - 1))
+		s.fault("%s: %v", r.URL.Path, err)
+		answer = s.partialSuccess(r.URL.Path, refused)
+	case err != nil:
 		s.fault("%s: %v", r.URL.Path, err)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = io.WriteString(w, "{}")
+	_, _ = w.Write(answer)
+}
+
+// partialSuccess is the OTLP/HTTP answer to a batch accepted in part: partialSuccess naming how
+// many records were refused and why, the count a string as proto3 JSON spells an int64.
+func (s *Sink) partialSuccess(path string, refused *RefusedError) []byte {
+	field := "rejectedSpans"
+	if path == pathLogs {
+		field = "rejectedLogRecords"
+	}
+	answer, err := json.Marshal(map[string]map[string]string{"partialSuccess": {
+		field:          strconv.Itoa(refused.Count),
+		"errorMessage": refused.Reason,
+	}})
+	if err != nil {
+		s.Logf("%s: partial success answer not encoded, answering {}: %v", path, err)
+		return []byte("{}")
+	}
+	return answer
 }
 
 // readBody reads the request body, gunzipping when asked, never holding more than the cap.
@@ -189,9 +217,6 @@ func (s *Sink) ingestLogs(body []byte, now time.Time) error {
 			)
 			continue
 		}
-		if half.TS == "" {
-			half.TS = now.UTC().Format(timeLayoutMS)
-		}
 		s.joiner.AddLog(*half, now)
 	}
 	return err
@@ -208,9 +233,6 @@ func (s *Sink) ingestSpans(body []byte, now time.Time) error {
 				half.SessionID,
 			)
 			continue
-		}
-		if half.EndTS == "" {
-			half.EndTS = now.UTC().Format(timeLayoutMS)
 		}
 		s.joiner.AddSpan(*half, now)
 	}

@@ -176,8 +176,8 @@ func CostPreemptedReason(environ, settingsEnv []string) string {
 }
 
 // SettingsEnvNames lists the keys of the "env" block of settingsDir/settings.json: none for an
-// absent file or block, an error for a file that cannot be read or parsed (its real state is
-// unknown, which a caller must not read as "names nothing").
+// absent, empty or whitespace-only file or an absent block, an error for a file that cannot be
+// read or parsed (its real state is unknown, which a caller must not read as "names nothing").
 func SettingsEnvNames(settingsDir string) ([]string, error) {
 	path := filepath.Join(settingsDir, "settings.json")
 	raw, err := os.ReadFile(path)
@@ -186,6 +186,9 @@ func SettingsEnvNames(settingsDir string) ([]string, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return nil, nil
 	}
 	var settings struct {
 		Env map[string]json.RawMessage `json:"env"`

@@ -27,7 +27,7 @@ const (
 	scheduleTimeLayout   = "2006-01-02 15:04"
 	schedulePromptRunes  = 60
 	scheduleShortSession = 8
-	scheduleSetUsage     = "usage: pfm chat schedule set --every <interval> --prompt <text> [chat]"
+	scheduleSetUsage     = "usage: pfm chat schedule set {--every <interval> | --in <delay> | --at <time>} --prompt <text> [chat]"
 	scheduleLsUsage      = "usage: pfm chat schedule ls [--json]"
 	scheduleRmUsage      = "usage: pfm chat schedule rm <id>"
 )
@@ -36,10 +36,12 @@ func printScheduleUsage(w io.Writer) {
 	fmt.Fprintln(w, scheduleSetUsage)
 	fmt.Fprintln(w, "       pfm chat schedule ls [--json]")
 	fmt.Fprintln(w, "       pfm chat schedule rm <id>")
-	fmt.Fprintln(w, "interval: weekly, <N>d, or a Go duration like 90m, minimum 1m")
+	fmt.Fprintln(w, "interval, delay: weekly, <N>d, or a Go duration like 90m, minimum 1m")
+	fmt.Fprintln(w, "time: "+acceptedTimes)
+	fmt.Fprintln(w, "--every repeats; --in and --at fire once")
 }
 
-// RunScheduleCommand dispatches `pfm chat schedule set|ls|rm`: recurring alarms stored
+// RunScheduleCommand dispatches `pfm chat schedule set|ls|rm`: recurring and one-time alarms stored
 // in the shared state database and fired by `pfm internal schedule-fire`.
 // notFound renders the caller's "no such chat" refusal and returns its exit code.
 func RunScheduleCommand(
@@ -181,6 +183,8 @@ func runScheduleSet(
 ) int {
 	flags := cli.NewFlagSet("schedule set", scheduleSetUsage, stderr)
 	every := flags.String("every", "", "recurrence: weekly, <N>d, or a Go duration like 90m, minimum 1m")
+	in := flags.String("in", "", "one-time: fire once after this delay — <N>d or a Go duration like 90m, minimum 1m")
+	at := flags.String("at", "", "one-time: fire once at this local time — "+acceptedTimes)
 	prompt := flags.String("prompt", "", "the text typed into the chat on every fire")
 	positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
@@ -190,9 +194,10 @@ func runScheduleSet(
 		flags.Usage()
 		return 2
 	}
-	interval, err := ParseInterval(*every)
+	when := scheduleWhen{every: *every, in: *in, at: *at}
+	entry, err := when.schedule(clock.Real.Now())
 	if err != nil {
-		fmt.Fprintf(stderr, "%s set: --every: %v\n", scheduleCommand, err)
+		fmt.Fprintf(stderr, "%s set: %v\n", scheduleCommand, err)
 		return 2
 	}
 	if strings.TrimSpace(*prompt) == "" {
@@ -202,7 +207,7 @@ func runScheduleSet(
 	}
 	ctx := context.Background()
 	caller, callerLabel, callerKnown, callerKeyErr := scheduleCaller(ctx, runtime)
-	entry := fleetdb.Schedule{Prompt: *prompt, Interval: interval, Created: clock.Real.Now()}
+	entry.Prompt = *prompt
 	if callerKnown {
 		entry.SetByID, entry.SetByLabel = caller.ID, callerLabel
 	}
@@ -294,6 +299,53 @@ func scheduleTime(moment time.Time) string {
 	return moment.Local().Format(scheduleTimeLayout)
 }
 
+// scheduleWhen is the timing a set names: exactly one of every (recurring),
+// in (one-time, after a delay) and at (one-time, at a clock time).
+type scheduleWhen struct {
+	every, in, at string
+}
+
+// schedule turns the timing into a schedule created at now, refusing none or
+// more than one of the three.
+func (when scheduleWhen) schedule(now time.Time) (fleetdb.Schedule, error) {
+	named := 0
+	for _, value := range []string{when.every, when.in, when.at} {
+		if strings.TrimSpace(value) != "" {
+			named++
+		}
+	}
+	if named != 1 {
+		return fleetdb.Schedule{}, errors.New("set exactly one of --every (repeats), --in or --at (once)")
+	}
+	switch {
+	case strings.TrimSpace(when.every) != "":
+		interval, err := ParseInterval(when.every)
+		if err != nil {
+			return fleetdb.Schedule{}, fmt.Errorf("--every: %w", err)
+		}
+		return fleetdb.Schedule{Interval: interval, Created: now}, nil
+	case strings.TrimSpace(when.in) != "":
+		delay, err := ParseInterval(when.in)
+		if err != nil {
+			return fleetdb.Schedule{}, fmt.Errorf("--in: %w", err)
+		}
+		return fleetdb.Schedule{Interval: delay, Once: true, Created: now}, nil
+	default:
+		fireAt, err := ParseAt(when.at, now)
+		if err != nil {
+			return fleetdb.Schedule{}, fmt.Errorf("--at: %w", err)
+		}
+		return fleetdb.Schedule{Interval: fireAt.Sub(now), Once: true, NextFire: fireAt, Created: now}, nil
+	}
+}
+
+func scheduleEveryColumn(r *fleetdb.Schedule) string {
+	if r.Once {
+		return "once"
+	}
+	return FormatInterval(r.Interval)
+}
+
 func scheduleChatColumn(r *fleetdb.Schedule) string {
 	if r.Label != "" {
 		return r.Label
@@ -331,7 +383,7 @@ func writeScheduleTable(out io.Writer, schedules []fleetdb.Schedule) error {
 		}
 		fmt.Fprintf(
 			writer, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, scheduleChatColumn(r), FormatInterval(r.Interval),
+			r.ID, scheduleChatColumn(r), scheduleEveryColumn(r),
 			scheduleTime(r.NextFire), scheduleTime(r.LastFired), unseen, schedulePromptColumn(r.Prompt),
 		)
 	}

@@ -182,7 +182,7 @@ func stageStorePlugins(t *testing.T, home string) {
 	storeDir := installer.ClaudeStore(home)
 	ids, err := installer.ClaudePluginsNotInstalled(
 		t.TempDir(),
-		installer.ClaudePluginTargets(installer.ClaudePluginBuild{}),
+		installer.ClaudePluginTargets(installer.ClaudePluginBuild{Plugins: config.DefaultClaudePlugins()}),
 	)
 	if err != nil {
 		t.Fatal(err)

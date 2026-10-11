@@ -137,6 +137,8 @@ type Options struct {
 	Version string
 	// ClaudePluginCheckoutRoot is claude.pluginCheckoutRoot; empty when unset.
 	ClaudePluginCheckoutRoot string
+	// ClaudePlugins is claude.plugins: the plugins the Claude plugin step ensures.
+	ClaudePlugins []pfmconfig.ClaudePlugin
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches

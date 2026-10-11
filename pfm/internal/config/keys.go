@@ -21,6 +21,13 @@ const DefaultHelperModel = "claude-haiku-5-5"
 // -alpha build installs each plugin from a copy of its checkout there.
 const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
 
+// KeyClaudePlugins names the list of Claude Code plugins pfm install ensures
+// once, through the primary account, in the store every account links: each
+// entry a bare plugin name of ours, a full name@marketplace id, or an
+// {"id","source"} object whose source `claude plugin marketplace add` takes.
+// Unset, it is DefaultClaudePlugins; machine-wide, an account may not set it.
+const KeyClaudePlugins = "claude.plugins"
+
 // KeyClaudeCostLedger is the machine-wide switch of the per-call cost ledger:
 // false launches Claude without the OTel knobs and starts no cost sink.
 const KeyClaudeCostLedger = "claude.costLedger"
@@ -55,6 +62,7 @@ func Keys() []KeyDefault {
 		{"claude.maxSubagentSpawnDepth", DefaultSubagentSpawnDepth},
 		{"claude.maxConcurrentSubagents", nil},
 		{KeyClaudePluginCheckoutRoot, nil},
+		{KeyClaudePlugins, defaultClaudePluginIDs()},
 		{KeyClaudeCostLedger, true},
 		{"codex.yolo", true},
 		{"codex.binary", pfmengine.MustLookup(pfmengine.Codex).Binary},

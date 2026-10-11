@@ -990,7 +990,7 @@ func TestInstallerManagedCleanupOptions(t *testing.T) {
 func stageStorePlugins(t *testing.T, home string) {
 	t.Helper()
 	storeDir := installer.ClaudeStore(home)
-	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
+	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()})
 	ids, err := installer.ClaudePluginsNotInstalled(t.TempDir(), targets)
 	if err != nil {
 		t.Fatal(err)

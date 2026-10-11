@@ -26,14 +26,18 @@ import (
 )
 
 func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
+	plugins := []pfmconfig.ClaudePlugin{{ID: "callmeter"}, {ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}}
 	runtime := commandRuntime{
 		Paths:   paths.Values{Home: t.TempDir()},
-		Config:  pfmconfig.Config{Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins"}},
+		Config:  pfmconfig.Config{Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins}},
 		Version: "0.80.0-alpha",
 	}
 	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
 	if options.Version != "0.80.0-alpha" || options.ClaudePluginCheckoutRoot != "/opt/plugins" {
 		t.Fatalf("plugin options version=%q root=%q", options.Version, options.ClaudePluginCheckoutRoot)
+	}
+	if !reflect.DeepEqual(options.ClaudePlugins, plugins) {
+		t.Fatalf("plugin options list = %#v, want %#v", options.ClaudePlugins, plugins)
 	}
 }
 

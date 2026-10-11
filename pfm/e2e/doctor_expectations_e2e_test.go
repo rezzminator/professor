@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -164,7 +165,7 @@ func (h *e2eHarness) assertInstalled(home string) {
 		}
 	}
 	store := installer.ClaudeStore(home)
-	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{})
+	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()})
 	settings := filepath.Join(store, "settings.json")
 	if gaps, err := installer.ClaudePluginGaps(settings, targets); err != nil || len(gaps) != 0 {
 		h.t.Fatalf("store plugin settings gaps=%v: %v", gaps, err)

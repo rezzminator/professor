@@ -78,7 +78,7 @@
           </button>
           <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="3">
             <button class="bt row" onClick="{{r.pick}}" onMouseEnter="{{r.enter}}" onMouseLeave="{{r.leave}}" aria-label="{{r.aria}}" style="flex:none; display:flex; flex-direction:column; justify-content:center; gap:1px; height:38px; padding:0 6px 0 {{r.pad}}px; border-radius:4px; border-left:2px solid {{r.color}}; background:{{r.bg}}; opacity:{{r.op}}">
-              <span class="ell" style="display:block; width:100%; font-size:11px; color:#E8E6DF"><b style="color:{{r.color}}; font-weight:600">{{r.idText}}</b> <sc-if value="{{r.reading}}" hint-placeholder-val="{{ false }}"><span style="margin-right:4px; font-size:10px; font-weight:600; color:{{r.color}}"><span class="rdot" style="display:inline-block; width:6px; height:6px; margin:0 5px 1px 2px; border-radius:3px; vertical-align:middle; background:{{r.color}}; box-shadow:0 0 0 3px {{r.ring}}"></span>reading</span></sc-if>{{r.text}}</span>
+              <span class="ell" style="display:block; width:100%; font-size:11px; color:#E8E6DF"><b style="color:{{r.color}}; font-weight:600">{{r.idText}}</b> <sc-if value="{{r.walkOn}}" hint-placeholder-val="{{ false }}"><span style="margin-right:4px; padding:0 5px; border-radius:7px; border:1px solid {{r.walkColor}}; font-size:10px; font-weight:600; color:{{r.walkColor}}">{{r.walk}}</span></sc-if>{{r.text}}</span>
               <span class="ell" style="display:block; width:100%; font-size:10px; color:#9AA3C2">{{r.stats}}</span>
             </button>
           </sc-for>
@@ -162,8 +162,8 @@
     </div>
 
     <div style="position:absolute; left:24px; top:900px; width:300px; display:flex; flex-direction:column; gap:6px">
-      <div style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Run clock</div>
-      <div style="font-family:var(--sans); font-size:12px; line-height:1.4; color:#9AA3C2">Each bar is one reader, from <span style="font-family:var(--mono)">tt start</span> to its write. While it reads, its shuttle waits on the wall at its start address; the kit stores its hops when it writes, so the walk sews on from there, hop by hop. Click or drag the clock to scrub.</div>
+      <div style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Walk — one hop per step</div>
+      <div style="font-family:var(--sans); font-size:12px; line-height:1.4; color:#9AA3C2">Each bar is one reader's walk through the code: it grows one hop per step from its <span style="font-family:var(--mono)">tt start</span> line, every reader taking hop 1 together, then hop 2, so a short walk finishes early. Click or drag the track to seek a hop.</div>
       <div style="display:flex; gap:8px; margin-top:4px">
         <button class="bt" onClick="{{play}}" aria-label="{{playAria}}" style="height:44px; padding:0 18px; border-radius:22px; background:#FFB454; color:#14161F; font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:8px">
           <svg aria-hidden="true" width="12" height="12"><path d="{{playIcon}}" style="fill:#14161F"></path></svg>{{playLabel}}
@@ -175,17 +175,12 @@
     </div>
 
     <svg aria-hidden="true" width="1680" height="1120" style="position:absolute; left:0; top:0; pointer-events:none">
-      <path d="{{clock.grid}}" style="fill:none; stroke:#262F52; stroke-width:1"></path>
-      <path d="{{clock.area}}" style="fill:rgba(255,180,84,0.16); stroke:none"></path>
-      <path d="{{clock.line}}" style="fill:none; stroke:#FFB454; stroke-width:1.3"></path>
-      <path d="{{clock.done}}" style="fill:none; stroke:#8FE3B0; stroke-width:1.2; stroke-dasharray:3 3"></path>
+      <path d="{{track.grid}}" style="fill:none; stroke:#262F52; stroke-width:1"></path>
     </svg>
-    <div style="position:absolute; left:1426px; top:1066px; font-size:10px; color:#8FE3B0">{{clock.doneLabel}}</div>
-    <div style="position:absolute; left:1426px; top:898px; font-size:10px; color:#FFB454">{{clock.peakLabel}}</div>
     <sc-for list="{{lanes}}" as="l" hint-placeholder-count="12">
-      <div class="grow" title="{{l.title}}" style="position:absolute; left:{{l.x}}px; top:{{l.y}}px; width:{{l.w}}px; height:{{l.h}}px; border-radius:2px; background:{{l.color}}; opacity:{{l.op}}; transition:opacity .3s ease; transform-origin:0 50%; transform:scaleX({{l.f}})"></div>
+      <div class="grow" style="position:absolute; left:{{l.x}}px; top:{{l.y}}px; width:{{l.w}}px; height:{{l.h}}px; background:{{l.bg}}; opacity:{{l.op}}; transition:opacity .3s ease; clip-path:inset(0 {{l.cut}}% 0 0)"></div>
     </sc-for>
-    <div class="bt scrub" ref="{{scrubRef}}" tabindex="0" role="slider" aria-label="Run clock — click or drag to scrub the replay; arrow keys step, space plays" aria-valuemin="0" aria-valuemax="{{scrub.max}}" aria-valuenow="{{scrub.now}}" aria-valuetext="{{scrub.text}}" style="position:absolute; left:340px; top:894px; width:1080px; height:194px; cursor:ew-resize; touch-action:none"></div>
+    <div class="bt scrub" ref="{{scrubRef}}" tabindex="0" role="slider" aria-label="Walk track — click or drag to seek a hop; arrow keys step one hop, Shift ten, space plays" aria-valuemin="0" aria-valuemax="{{scrub.max}}" aria-valuenow="{{scrub.now}}" aria-valuetext="{{scrub.text}}" style="position:absolute; left:340px; top:894px; width:1080px; height:194px; cursor:ew-resize; touch-action:none"></div>
     <sc-if value="{{hasPos}}" hint-placeholder-val="{{ false }}">
       <div class="head" style="position:absolute; left:340px; top:894px; width:2px; height:194px; background:#F3F1EA; pointer-events:none; transform:translateX({{headX}}px)">
         <div ref="{{headTRef}}" style="position:absolute; left:-31px; top:-17px; width:64px; text-align:center; font-size:10.5px; font-weight:600; line-height:15px; border-radius:7px; background:#F3F1EA; color:#14161F"></div>
@@ -203,6 +198,9 @@
 const DCLogic = DC.DCLogic;
 // the wall canvas sits at (340,140) on the board, 1080 x 732; its top 74 px are the file-label band
 const CW = 1080, CHT = 732, LB = 74, MIDY = LB + (CHT - LB) / 2, X0 = 340, X1 = 1420;
+// the walk track under the wall: hop 0..hmax across X0..X1, one lane per reader between LANE0 and LANE1
+const TRK_TOP = 900, LANE0 = 906, LANE1 = 1084;
+const laneHOf = (n) => Math.min(9, (LANE1 - LANE0) / Math.max(1, n));
 // world units: one source line is 1 unit tall, a file column COLW wide (the kit's own proportions)
 const COLW = 54, GAP = 34, DGAP = 30, FOLD_H = 7, CTX = 10, CHU = 0.37, KREAD = 19, KMIN = 0.02, KMAX = 26, KTEXT = 8.5, KLINES = 1.6;
 const OVW = 196, OVH = 112, OVX = CW - OVW - 12, OVY = CHT - OVH - 12;
@@ -273,7 +271,7 @@ function lineAt(col, wy) {
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { data: null, err: null, run: null, follow: null, hop: null, selQ: undefined, hovT: null, fold: false, playMode: null, readSig: '', textGen: 0 };
+    this.state = { data: null, err: null, run: null, follow: null, hop: null, selQ: undefined, hovT: null, fold: false, playMode: null, walkSig: '', textGen: 0 };
     this.cache = {}; this.walls = {}; this.views = {}; this.texts = {};
     this.raf = 0; this.fly = null; this.play = null; this.flash = null; this.hover = null; this.mono = DC.fonts.mono;
     this.pointers = new Map(); this.drag = null; this.pinch = null; this.ov = false; this.lastStitchClick = 0; this.zoomTxt = '';
@@ -298,7 +296,7 @@ class Component extends DCLogic {
       wheel: (e) => this.onWheel(e), dbl: (e) => this.onDbl(e), key: (e) => this.onKey(e),
     };
     this.sh = [['pointerdown', (e) => this.scrubDown(e)], ['pointermove', (e) => this.scrubMove(e)], ['pointerup', (e) => this.scrubUp(e)],
-      ['pointercancel', (e) => this.scrubUp(e)], ['pointerleave', () => { if (!this.scrubbing) this.clockTip(null); }], ['keydown', (e) => this.scrubKey(e)]];
+      ['pointercancel', (e) => this.scrubUp(e)], ['pointerleave', () => { if (!this.scrubbing) this.trackTip(null); }], ['keydown', (e) => this.scrubKey(e)]];
   }
 
   componentDidMount() {
@@ -363,8 +361,9 @@ class Component extends DCLogic {
       if (!groups.length || groups[groups.length - 1].g !== r.g) groups.push({ g: r.g, rows: [] });
       groups[groups.length - 1].rows.push(r);
     });
-    const dur = Math.max(run.dur || 0, ...T.map((t) => t.w || 0), 1);
-    const out = { run, order, groups, byId, dur };
+    // the replay's axis: walk steps, 0 at every reader's tt start line to the longest walk's hop count
+    const hmax = Math.max(1, ...T.map((t) => t.steps.length));
+    const out = { run, order, groups, byId, hmax };
     this.cache[ri] = out;
     return out;
   }
@@ -687,102 +686,105 @@ class Component extends DCLogic {
     if (prev !== this.hover) this.wake();
   }
 
-  // ---------- the replay: one position, pos, in run seconds ----------
-  // play = { pos, playing, anchorNow, anchorPos }, or null for the full static wall. The window runs w0..w1: w0 skips the
-  // dead prefix before the first reader started, w1 is the run's end; the axis keeps its full 0..dur scale.
-  win(L) {
-    const secs = Number(this.props.replaySeconds ?? 14) || 14;
-    if (L.win && L.win.secs === secs) return L.win;
-    const ss = L.order.map((r) => r.t.s).filter((s) => s != null), w1 = L.dur, s0 = ss.length ? Math.min(...ss) : 0;
-    const w0 = clamp(s0 - 0.03 * (w1 - s0), 0, w1);
-    L.win = { secs, w0, w1, rate: Math.max(w1 - w0, 1e-3) / secs };
-    return L.win;
+  // ---------- the replay: one position, pos, in walk steps ----------
+  // play = { pos, playing, anchorNow, anchorPos }, or null for the full static wall. pos runs 0..hmax: step 0 is every
+  // reader at its tt start line, hop j of a walk lands at step j + 1, a walk of m hops is complete at step m.
+  // It plays over clamp(hmax × 0.22, 8, 30) seconds, or the replaySeconds prop.
+  rate(L) {
+    const secs = Number(this.props.replaySeconds) || clamp(L.hmax * 0.22, 8, 30);
+    return L.hmax / secs;
   }
-  // a playing position advances from its anchor; reduced motion steps it in tenths of the window; the end pauses it there
+  // a playing position advances from its anchor; reduced motion steps whole hops; hmax pauses it there
   posAt(now) {
     const P = this.play;
     if (!P) return null;
     if (P.playing) {
-      const Wn = this.win(this.layout(this.runIndex()));
-      let d = Math.max(0, (now - P.anchorNow) / 1000) * Wn.rate;
-      if (reduced()) { const st = (Wn.w1 - Wn.w0) / 10; d = Math.floor(d / st) * st; }
-      P.pos = Math.min(Wn.w1, P.anchorPos + d);
-      if (P.pos >= Wn.w1) { P.playing = false; this.set({ playMode: 'pause' }); }
+      const L = this.layout(this.runIndex());
+      let d = Math.max(0, (now - P.anchorNow) / 1000) * this.rate(L);
+      if (reduced()) d = Math.floor(d);
+      P.pos = Math.min(L.hmax, P.anchorPos + d);
+      if (P.pos >= L.hmax) { P.playing = false; this.set({ playMode: 'pause' }); }
     }
     return P.pos;
   }
   seekTo(pos, playing) {
-    const Wn = this.win(this.layout(this.runIndex()));
-    pos = clamp(pos, 0, Wn.w1);
+    pos = clamp(pos, 0, this.layout(this.runIndex()).hmax);
     this.play = { pos, playing: !!playing, anchorNow: performance.now(), anchorPos: pos };
     const mode = playing ? 'play' : 'pause';
     if (this.state.playMode !== mode) this.set({ playMode: mode }); else this.wake();
   }
-  stopPlay() { this.play = null; this.clockTip(null); if (this.state.playMode) this.set({ playMode: null, readSig: '' }); }
+  stopPlay() { this.play = null; this.trackTip(null); if (this.state.playMode) this.set({ playMode: null, walkSig: '' }); }
   togglePlay() {
-    const P = this.play, Wn = this.win(this.layout(this.runIndex()));
-    if (!P) this.seekTo(Wn.w0, true);
+    const P = this.play, hmax = this.layout(this.runIndex()).hmax;
+    if (!P) this.seekTo(0, true);
     else if (P.playing) this.seekTo(this.posAt(performance.now()), false);
-    else this.seekTo(P.pos >= Wn.w1 ? Wn.w0 : P.pos, true);
+    else this.seekTo(P.pos >= hmax ? 0 : P.pos, true);
   }
-  // a reader that never wrote reads to the window's end, where it shows as never wrote
-  reading(t, pos) { return t.s != null && pos >= t.s && pos < (t.w ?? this.win(this.layout(this.runIndex())).w1); }
+  // the hops a walk has sewn by pos, and its state at pos: walking, done, or no walk at all
+  sewn(m, pos) { return clamp(Math.floor(pos + 1e-9), 0, m); }
+  walkState(m, pos) { return !m ? 'no walk' : pos >= m ? 'done' : `hop ${this.sewn(m, pos)}/${m}`; }
 
-  // the run clock is the scrubber: press seeks and pauses, a drag scrubs under pointer capture, release stays paused
-  clockAt(e) {
+  // the walk track is the scrubber: press seeks a whole hop and pauses, a drag seeks under pointer capture, release stays paused
+  trackAt(e) {
     const b = this.scrubEl && this.scrubEl.getBoundingClientRect();
     if (!b || !b.width || !b.height) return null;
-    const f = clamp((e.clientX - b.left) / b.width, 0, 1);
-    return { t: f * this.layout(this.runIndex()).dur, x: X0 + f * (X1 - X0), y: 894 + ((e.clientY - b.top) / b.height) * 194 };
+    const f = clamp((e.clientX - b.left) / b.width, 0, 1), hmax = this.layout(this.runIndex()).hmax;
+    return { h: Math.round(f * hmax), x: X0 + f * (X1 - X0), y: 894 + ((e.clientY - b.top) / b.height) * 194 };
   }
   scrubDown(e) {
-    const c = this.clockAt(e);
+    const c = this.trackAt(e);
     if (!c || !this.state.data) return;
     e.preventDefault();
     try { this.scrubEl.focus({ preventScroll: true }); } catch (err) { this.scrubEl.focus(); }
     try { this.scrubEl.setPointerCapture(e.pointerId); } catch (err) { /* capture is a nicety */ }
     this.scrubbing = true;
-    this.seekTo(c.t, false);
-    this.clockTip(c);
+    this.seekTo(c.h, false);
+    this.trackTip(c);
   }
   scrubMove(e) {
-    const c = this.clockAt(e);
+    const c = this.trackAt(e);
     if (!c || !this.state.data) return;
-    if (this.scrubbing) this.seekTo(c.t, false);
-    this.clockTip(c);
+    if (this.scrubbing && (!this.play || this.play.pos !== c.h)) this.seekTo(c.h, false);
+    this.trackTip(c);
   }
   scrubUp(e) {
     try { this.scrubEl.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
     this.scrubbing = false;
   }
   scrubKey(e) {
-    const k = e.key, Wn = this.win(this.layout(this.runIndex())), P = this.play;
-    const at = P ? this.posAt(performance.now()) : Wn.w0, keep = !!(P && P.playing);
+    const k = e.key, hmax = this.layout(this.runIndex()).hmax, P = this.play;
+    const at = P ? this.posAt(performance.now()) : 0, keep = !!(P && P.playing), n = e.shiftKey ? 10 : 1;
     let used = true;
-    if (k === 'ArrowLeft' || k === 'ArrowRight') this.seekTo(at + (k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1), keep);
-    else if (k === 'Home') this.seekTo(Wn.w0, keep);
-    else if (k === 'End') this.seekTo(Wn.w1, false);
+    if (k === 'ArrowRight') this.seekTo(Math.floor(at + 1e-9) + n, keep);
+    else if (k === 'ArrowLeft') this.seekTo(Math.ceil(at - 1e-9) - n, keep);
+    else if (k === 'Home') this.seekTo(0, keep);
+    else if (k === 'End') this.seekTo(hmax, false);
     else if (k === ' ') this.togglePlay();
     else if (k === 'Escape') this.clearAll(true);
     else used = false;
     if (used) { e.preventDefault(); e.stopPropagation(); }
   }
-  // the clock's hover line: the moment under the pointer, how many read and wrote by then, the lane under it
-  clockTip(c) {
+  // the track's hover line: the hop under the pointer, how many walk and are done by then, the lane under it at that hop
+  trackTip(c) {
     const tip = this.tip;
     if (!tip) return;
-    if (!c || !this.state.data) { if (this.clockTipOn) { tip.style.display = 'none'; this.clockTipOn = false; } return; }
-    const L = this.layout(this.runIndex());
-    const nr = L.order.filter((r) => this.reading(r.t, c.t)).length, nw = L.order.filter((r) => r.t.w != null && r.t.w <= c.t).length;
-    const lines = [`${mmss(c.t)} · ${nr} reading · ${nw} written`];
-    const laneH = Math.min(9, (1084 - 938) / Math.max(1, L.order.length)), li = Math.floor((c.y - 938) / laneH), r = li >= 0 ? L.order[li] : null;
-    if (r) lines.push(`${r.g == null ? 'Q?' : 'Q' + r.g}·${r.t.id}: started ${mmss(r.t.s)}, wrote ${r.t.w != null ? mmss(r.t.w) : 'never'}`);
+    if (!c || !this.state.data) { if (this.trackTipOn) { tip.style.display = 'none'; this.trackTipOn = false; } return; }
+    const W = this.wall(this.runIndex()), th = W.th, h = c.h;
+    const nw = th.filter((T) => T.steps.length > h).length, nd = th.filter((T) => T.steps.length && T.steps.length <= h).length, nn = th.filter((T) => !T.steps.length).length;
+    const lines = [`hop ${h} · ${nw} walking · ${nd} done${nn ? ` · ${nn} no walk` : ''}`];
+    const li = Math.floor((c.y - LANE0) / laneHOf(th.length)), T = li >= 0 ? th[li] : null;
+    if (T) {
+      const t = T.t, m = T.steps.length, s = m ? T.steps[clamp(h, 1, m) - 1] : null;
+      lines.push(!s ? `${T.label} · no walk written` : h === 0 ? `${T.label} hop 0/${m} · at its start ${t.from || s.col.path + ':' + s.s.a}`
+        : `${T.label} hop ${Math.min(h, m)}/${m} · ${s.col.path}:${s.s.a}${s.s.b > s.s.a ? '–' + s.s.b : ''} · ${STS[s.st] || s.st}${h >= m ? ' · done' : ''}`);
+      lines.push(`started ${mmss(t.s)}, wrote ${t.w != null ? mmss(t.w) : 'never'}${t.refused ? ' — first write refused' : ''}`);
+    }
     tip.textContent = lines.join('\n');
-    tip.style.borderLeftColor = r ? hue(r.g) : '#FFB454';
+    tip.style.borderLeftColor = T ? T.color : '#FFB454';
     tip.style.display = 'block';
     tip.style.left = `${clamp(c.x - 60, 24, 1680 - 380)}px`;
-    tip.style.top = '846px';
-    this.clockTipOn = true;
+    tip.style.top = `${886 - tip.offsetHeight}px`;
+    this.trackTipOn = true;
   }
 
   // ---------- drawing ----------
@@ -794,12 +796,9 @@ class Component extends DCLogic {
     if (!ids.size && S.selQ !== undefined) W.th.forEach((T) => { if (T.q === S.selQ) ids.add(T.t.id); });
     return ids;
   }
-  // everything on the wall and the clock derives from pos: a reader sews at its write, hop j at w + j × hopDt (run seconds)
-  sewAt(T) { return T.t.w == null ? Infinity : T.t.w; }
-  hopDt(T) { return Math.min(0.2, 1.4 / Math.max(1, T.steps.length)) * this.win(this.layout(this.runIndex())).rate; }
-  seen(s) { return !this.play || this.play.pos >= this.sewAt(s.T) + s.j * this.hopDt(s.T); }
-  laneF(t, pos, dur) { const s = t.s ?? 0, w = t.w ?? dur; return clamp((pos - s) / Math.max(1e-6, w - s), 0, 1); }
-  // where a reader waits while it reads: its tt start address, else its first hop, else nowhere on the wall
+  // everything on the wall and the track derives from pos: hop j of every walk lands at step j + 1
+  seen(s) { return !this.play || this.play.pos >= s.j + 1 - 1e-9; }
+  // where a reader's walk leaves from: its tt start address, else its first hop, else nowhere on the wall
   startAt(W, T) {
     if (T.home !== undefined) return T.home;
     const m = /^(.*?)(?::(\d+))?$/.exec(T.t.from || ''), col = m && m[1] ? W.findCol(m[1]) : null;
@@ -807,20 +806,23 @@ class Component extends DCLogic {
     T.home = col ? { col, n: clamp(m[2] ? Number(m[2]) : own ? own.a : 1, 1, col.n) } : T.steps.length ? { col: T.steps[0].col, n: T.steps[0].a } : null;
     return T.home;
   }
-  // the run clock under the wall, moved by the same pos: the playhead at tx(pos), every lane grown to it
-  drawClock(pos, L) {
+  // the part of a lane cut off at pos: a walk of m hops shows min(pos, m) of its m hop ticks
+  laneCut(m, pos) { return m ? r1(100 * (1 - clamp(pos / m, 0, 1))) : 100; }
+  // the walk track under the wall, moved by the same pos: the playhead at hop pos, every lane grown to it
+  drawTrack(pos, W) {
     const root = this.cv && this.cv.closest('[id^="board-"]');
     if (!root) return;
-    const head = root.querySelector('.head'), lanes = root.querySelectorAll('.grow'), tr = `translateX(${((X1 - X0) * pos) / L.dur}px)`;
+    const head = root.querySelector('.head'), lanes = root.querySelectorAll('.grow'), tr = `translateX(${((X1 - X0) * pos) / W.L.hmax}px)`;
+    const lab = `hop ${this.sewn(W.L.hmax, pos)}`;
     if (head && head.style.transform !== tr) head.style.transform = tr;
-    if (this.headT && this.headT.textContent !== mmss(pos)) this.headT.textContent = mmss(pos);
-    if (this.scrubEl) { this.scrubEl.setAttribute('aria-valuenow', String(Math.round(pos))); this.scrubEl.setAttribute('aria-valuetext', mmss(pos)); }
-    lanes.forEach((el, i) => { const r = L.order[i]; if (r) el.style.transform = `scaleX(${this.laneF(r.t, pos, L.dur)})`; });
+    if (this.headT && this.headT.textContent !== lab) this.headT.textContent = lab;
+    if (this.scrubEl) { this.scrubEl.setAttribute('aria-valuenow', String(this.sewn(W.L.hmax, pos))); this.scrubEl.setAttribute('aria-valuetext', `${lab} of ${W.L.hmax}`); }
+    lanes.forEach((el, i) => { const T = W.th[i]; if (T) el.style.clipPath = `inset(0 ${this.laneCut(T.steps.length, pos)}% 0 0)`; });
   }
-  // the readers list re-renders only when someone starts reading or writes: its reading markers follow pos
-  syncReading(W, pos) {
-    const sig = W.th.map((T) => (this.reading(T.t, pos) ? 'r' : T.t.w != null && pos >= T.t.w ? 'w' : '-')).join('');
-    if (sig !== this.state.readSig) this.setState({ readSig: sig });
+  // the readers list re-renders only when a walk takes a hop or finishes: its walk markers follow pos
+  syncWalk(W, pos) {
+    const sig = W.th.map((T) => this.walkState(T.steps.length, pos)).join('|');
+    if (sig !== this.state.walkSig) this.setState({ walkSig: sig });
   }
   drawShuttle(g, x, y, T, pulse, hollow) {
     g.save();
@@ -829,7 +831,7 @@ class Component extends DCLogic {
       g.strokeStyle = withA(T.color, 0.15 + 0.6 * (1 - pulse)); g.lineWidth = 1.4; g.beginPath(); g.arc(x, y, 6 + 7 * pulse, 0, Math.PI * 2); g.stroke();
       g.fillStyle = T.color; g.shadowColor = T.color; g.shadowBlur = 10; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); g.shadowBlur = 0;
     }
-    const txt = hollow ? `${T.label} · never wrote` : T.label;
+    const txt = hollow ? `${T.label} · no walk written` : T.label;
     g.font = `600 10px ${this.mono}`; g.textBaseline = 'middle'; g.textAlign = 'left';
     const tw = g.measureText(txt).width + 8;
     g.fillStyle = 'rgba(15,20,38,0.88)'; g.fillRect(x + 11, y - 7, tw, 14);
@@ -929,17 +931,11 @@ class Component extends DCLogic {
     const k = v.k, sw = COLW * k, SX = (wx) => v.x + wx * k, SY = (wy) => v.y + wy * k;
     const textMode = k >= KTEXT, lineMode = !textMode && k >= KLINES;
     const fIds = this.focusIds(W), anyF = fIds.size > 0, on = (T) => !anyF || fIds.has(T.t.id);
-    const pos = this.play ? this.posAt(now) : 0, P = this.play, playing = !!P, rate = this.win(W.L).rate;
+    const pos = this.play ? this.posAt(now) : 0, P = this.play, playing = !!P;
     if (P && P.playing) again = true;
     if (P) {
-      this.drawClock(pos, W.L);
-      this.syncReading(W, pos);
-      // the list's reading dots breathe with the frame clock; whether a dot shows at all is pos's (syncReading)
-      if (this.state.readSig.includes('r') && !reduced()) {
-        again = true;
-        const root = el.closest('[id^="board-"]');
-        if (root) root.querySelectorAll('.rdot').forEach((d, i) => { d.style.opacity = String(0.55 + 0.45 * Math.sin(now / 380 + i * 1.7)); });
-      }
+      this.drawTrack(pos, W);
+      this.syncWalk(W, pos);
     }
 
     // the weave ground
@@ -989,11 +985,11 @@ class Component extends DCLogic {
       const lit = on(T), base0 = anyF ? (lit ? 0.95 : 0.06) : 0.45;
       for (let j = 1; j < T.steps.length; j++) {
         const a = T.steps[j - 1], b = T.steps[j];
+        // the thread into hop j draws between steps j and j + 1
         let u = 1;
         if (playing) {
-          const ta = this.sewAt(T) + (j - 1) * this.hopDt(T), dt = this.hopDt(T);
-          if (pos < ta) break;
-          u = clamp((pos - ta) / dt, 0, 1);
+          if (pos <= j) break;
+          u = clamp(pos - j, 0, 1);
         }
         const sg = this.segment(a, b, v), kind = b.ln;
         const lo = Math.min(sg.same ? sg.pts[0][0] : Math.min(sg.p0[0], sg.p1[0]), sg.same ? sg.pts[1][0] : Infinity), hi = Math.max(sg.same ? sg.pts[1][0] : Math.max(sg.p0[0], sg.p1[0]), -Infinity);
@@ -1046,7 +1042,8 @@ class Component extends DCLogic {
       if (B.y1 < LB - 10 || B.y0 > CHT + 10) continue;
       const T = s.T, lit = on(T), a = anyF && !lit ? 0.12 : 1;
       let pop = 1;
-      if (playing) { const t = pos - (this.sewAt(T) + s.j * this.hopDt(T)); pop = clamp(t / (0.25 * rate), 0, 1); }
+      // a stitch pops in over the quarter step after it lands; paused or stepping whole hops, it stands whole
+      if (P && P.playing && !reduced()) pop = clamp((pos - s.j - 1) / 0.25, 0, 1);
       g.save();
       g.globalAlpha = a * pop;
       if (isHole(s.st)) {
@@ -1078,7 +1075,7 @@ class Component extends DCLogic {
     // ends: the knot a reader tied, and the fringe it left open
     for (const e of W.ends) {
       if (anyF && !fIds.has(e.T.t.id)) continue;
-      if (playing && pos < this.sewAt(e.T) + e.T.steps.length * this.hopDt(e.T)) continue;
+      if (playing && pos < e.T.steps.length) continue;
       const X = SX(e.col.x) + sw + this.lane(e.T) + 6, Y = SY(yWorld(e.col, e.n + 0.5));
       if (Y < LB - 8 || Y > CHT + 8 || X < -10 || X > CW + 10) continue;
       g.save();
@@ -1092,37 +1089,36 @@ class Component extends DCLogic {
       if (anyF || k >= 1.2) { g.font = `600 10px ${this.mono}`; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#C9CED9'; g.fillText(e.kind + (e.open ? ` · ${e.open} open` : ''), X + 8, Y); }
       g.restore();
     }
-    // the shuttles: a reader waits at its start address while it reads, then sews its walk from there at its write;
-    // a reader that never wrote keeps waiting to the window's end, where a hollow ring says so
+    // the shuttles: at step 0 each reader sits at its tt start line; between steps j and j + 1 it rides the thread into
+    // hop j, hop 0's being the lead-in from the start line; a walk of m hops is complete at step m and its shuttle goes;
+    // a reader with no hops written shows a hollow ring at its start
     if (playing) {
-      const w1 = this.win(W.L).w1, slots = new Map(), calm = reduced();
+      const slots = new Map(), calm = reduced();
       for (const T of W.th) {
-        const t = T.t, t0 = this.sewAt(T), dt = this.hopDt(T), m = T.steps.length, a = anyF && !fIds.has(t.id) ? 0.25 : 1;
-        const waiting = t.s != null && pos >= t.s && pos < t0, home = (waiting || (m && pos >= t0)) ? this.startAt(W, T) : null;
-        if (waiting && home) {
+        const m = T.steps.length, a = anyF && !fIds.has(T.t.id) ? 0.25 : 1, home = this.startAt(W, T);
+        const hx = home ? SX(home.col.x) + sw + 8 : 0, hy = home ? SY(yWorld(home.col, home.n + 0.5)) : 0;
+        if (m && home && pos > 0 && (home.col !== T.steps[0].col || home.n < T.steps[0].a || home.n > T.steps[0].b)) {
+          const B = this.stepBox(T.steps[0], v), u = clamp(pos, 0, 1);
+          g.save(); g.globalAlpha = a; g.strokeStyle = withA(T.color, 0.5); g.lineWidth = 1; g.setLineDash([2, 3]);
+          g.beginPath(); g.moveTo(hx, hy); g.lineTo(lerp(hx, B.x + B.w, u), lerp(hy, B.ym, u)); g.stroke(); g.restore();
+        }
+        if (m && pos >= m) continue;
+        if (!m || pos <= 0) {
+          if (!home) continue;
           const key = `${home.col.k}:${home.n}`, slot = slots.get(key) || 0;
           slots.set(key, slot + 1);
-          const x = SX(home.col.x) + sw + 8, y = SY(yWorld(home.col, home.n + 0.5)) + slot * 15;
-          if (y < LB - 10 || y > CHT + 10 || x < -40 || x > CW + 10) continue;
-          const hollow = t.w == null && pos >= w1;
-          if (!hollow && !calm) again = true;
+          const y = hy + slot * 15;
+          if (y < LB - 10 || y > CHT + 10 || hx < -40 || hx > CW + 10) continue;
+          if (m && !calm) again = true;
           g.save(); g.globalAlpha = a;
-          this.drawShuttle(g, x, y, T, calm ? 0.5 : 0.5 + 0.5 * Math.sin(now / 380 + T.oi * 1.7), hollow);
+          this.drawShuttle(g, hx, y, T, calm ? 0.5 : 0.5 + 0.5 * Math.sin(now / 380 + T.oi * 1.7), !m);
           g.restore();
           continue;
         }
-        if (!m || pos < t0) continue;
-        // the walk leaves from where the reader waited
-        if (home && (home.col !== T.steps[0].col || home.n < T.steps[0].a || home.n > T.steps[0].b)) {
-          const B = this.stepBox(T.steps[0], v), hx = SX(home.col.x) + sw + 8, hy = SY(yWorld(home.col, home.n + 0.5));
-          g.save(); g.globalAlpha = a; g.strokeStyle = withA(T.color, 0.5); g.lineWidth = 1; g.setLineDash([2, 3]);
-          g.beginPath(); g.moveTo(hx, hy); g.lineTo(B.x + B.w, B.ym); g.stroke(); g.restore();
-        }
-        if (pos > t0 + m * dt) continue;
-        const j = Math.floor((pos - t0) / dt), u = (pos - t0 - j * dt) / dt;
+        const j = Math.floor(pos), u = pos - j;
         let at;
-        if (j + 1 < m) at = this.pointOn(this.segment(T.steps[j], T.steps[j + 1], v), clamp(u, 0, 1));
-        else { const B = this.stepBox(T.steps[m - 1], v); at = [B.x + B.w, B.ym]; }
+        if (j > 0) at = this.pointOn(this.segment(T.steps[j - 1], T.steps[j], v), u);
+        else { const B = this.stepBox(T.steps[0], v); at = home ? [lerp(hx, B.x + B.w, u), lerp(hy, B.ym, u)] : [B.x + B.w, B.ym]; }
         g.save(); g.globalAlpha = a; g.fillStyle = withA(T.color, 0.22); g.beginPath(); g.arc(at[0], at[1], 9, 0, Math.PI * 2); g.fill();
         g.fillStyle = T.color; g.shadowColor = T.color; g.shadowBlur = 12; g.beginPath(); g.arc(at[0], at[1], 4, 0, Math.PI * 2); g.fill(); g.restore();
       }
@@ -1336,10 +1332,10 @@ class Component extends DCLogic {
   renderVals() {
     const S = this.state;
     const empty = { notReady: true, ready: false, loadText: S.err ? `The run data could not load — ${S.err}` : 'Loading the run…', loadColor: S.err ? '#FF8A65' : '#9AA3C2',
-      head: {}, stats: [], runs: [], bars: [], lanes: [], ticks: [], clock: {}, groups: [], claims: [], card: { on: false, open: [] }, hop: { on: false, cites: [] }, key: { on: false, items: [] },
+      head: {}, stats: [], runs: [], bars: [], lanes: [], ticks: [], track: {}, groups: [], claims: [], card: { on: false, open: [] }, hop: { on: false, cites: [] }, key: { on: false, items: [] },
       listOn: false, wallMsg: { on: false }, cvRef: this.cvRef, tipRef: this.tipRef, zoomRef: this.zoomRef, leftHead: '', rightHead: '', wallAria: '',
       play: () => {}, clear: () => {}, zoomIn: () => {}, zoomOut: () => {}, fitAll: () => {}, toggleFold: () => {}, foldLabel: 'Fold', foldPressed: 'false', foldBorder: '#3A4677', foldColor: '#E8E6DF',
-      playLabel: 'Replay the run', playAria: 'Replay the run', playIcon: '', hasSel: false, hasPos: false, headX: 0, scrub: {}, scrubRef: this.scrubRef, headTRef: this.headTRef };
+      playLabel: 'Play the walks', playAria: 'Play the walks', playIcon: '', hasSel: false, hasPos: false, headX: 0, scrub: {}, scrubRef: this.scrubRef, headTRef: this.headTRef };
     if (!S.data) return empty;
     if (!S.data.runs || !S.data.runs.length) return { ...empty, loadText: 'The run data holds no runs.', loadColor: '#FF8A65' };
     const ri = this.runIndex();
@@ -1358,11 +1354,6 @@ class Component extends DCLogic {
     const grades = {};
     T.forEach((t) => t.answers.forEach((a) => { grades[a.g] = (grades[a.g] || 0) + 1; }));
     const nAns = T.reduce((a, t) => a + t.answers.length, 0);
-    const events = [];
-    T.forEach((t) => { if (t.s != null) events.push([t.s, 1]); if (t.w != null) events.push([t.w, -1]); });
-    events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    let cur = 0, peak = 0;
-    events.forEach((e) => { cur += e[1]; peak = Math.max(peak, cur); });
     const pct = (x) => (nh ? Math.round((1000 * x) / nh) / 10 : 0);
     const stats = [
       { big: String(T.length), label: 'readers', color: '#F3F1EA' },
@@ -1406,7 +1397,8 @@ class Component extends DCLogic {
         return { idText: (r.d ? '└ ' : '') + t.id, text: tidy(t.text), color: hue(r.g), pad: 8 + r.d * 12,
           stats: `${t.steps.length} hops${hd ? ' · ' + hd + ' worn' : ''}${ho ? ' · ' + ho + ' holes' : ''} · ${t.answers.length} claims${bad ? ' · ' + bad + ' flagged' : ''}${t.w == null ? ' · never wrote' : ''}`,
           bg: S.hovT === t.id ? '#1E2747' : 'transparent', op: !anyF || fIds.has(t.id) ? 1 : 0.45,
-          reading: P ? this.reading(t, pos) : false, ring: withA(hue(r.g), 0.28),
+          walkOn: !!P, walk: P ? this.walkState(t.steps.length, pos) : '',
+          walkColor: !P || !t.steps.length ? '#FF8A65' : pos >= t.steps.length ? '#9AA3C2' : hue(r.g),
           aria: `Follow reader ${t.id} on the wall: ${tidy(t.text)}`,
           pick: () => this.follow(t.id), enter: () => this.set({ hovT: t.id }), leave: () => { if (this.state.hovT === t.id) this.set({ hovT: null }); }, _T: TT };
       }),
@@ -1472,35 +1464,30 @@ class Component extends DCLogic {
 
     const wallMsg = { on: false };
 
-    // the run clock
-    const C_TOP = 900, C_BASE = 930, LANE0 = 938, LANE1 = 1084;
-    const tx = (t) => X0 + ((X1 - X0) * t) / L.dur;
-    const laneH = Math.min(9, (LANE1 - LANE0) / Math.max(1, L.order.length));
-    const lanes = L.order.map((r, i) => {
-      const t = r.t, s = t.s ?? 0, w = t.w ?? L.dur;
-      return { x: r1(tx(s)), y: r1(LANE0 + i * laneH), w: r1(Math.max(2, tx(w) - tx(s))), h: r1(Math.max(1.5, laneH - 1.6)), color: hue(r.g),
+    // the walk track: hop 0..hmax across X0..X1; each reader's lane is its walk, one tick per hop dyed by its stitch,
+    // over a base line in its question's hue
+    const hmax = L.hmax, pitch = (X1 - X0) / hmax, tx = (h) => X0 + pitch * h;
+    const laneH = laneHOf(W.th.length), lh = Math.max(1.5, laneH - 1), baseH = Math.min(2, lh / 3), tickH = Math.max(1, lh - baseH - 1), gap = pitch >= 3 ? 1 : 0;
+    const hopC = (st) => (isHole(st) ? HOPC.rejected : st === 'drifted' ? HOPC.drifted : st === 'moved' ? HOPC.moved : st === 'placed' || st === 'followed' ? HOPC.placed : HOPC.exact);
+    const lanes = W.th.map((TT, i) => {
+      const t = TT.t, m = TT.steps.length, under = `linear-gradient(${TT.color}, ${TT.color}) left bottom / 100% ${r1(baseH)}px no-repeat`;
+      const stops = TT.steps.map((s, j) => `${hopC(s.st)} ${r1(j * pitch)}px ${r1((j + 1) * pitch - gap)}px, transparent ${r1((j + 1) * pitch - gap)}px ${r1((j + 1) * pitch)}px`).join(', ');
+      return { x: X0, y: r1(LANE0 + i * laneH), w: r1(Math.max(3, pitch * m)), h: r1(lh),
+        bg: m ? `linear-gradient(90deg, ${stops}) left top / 100% ${r1(tickH)}px no-repeat, ${under}` : under,
         op: !anyF || fIds.has(t.id) ? 0.95 : 0.15,
-        f: P ? this.laneF(t, pos, L.dur) : 1,
-        title: `Thread ${t.id}: started ${mmss(t.s)}, wrote ${t.w != null ? mmss(t.w) : 'never'}${t.refused ? ' — first write refused' : ''}` };
+        cut: P ? this.laneCut(m, pos) : 0 };
     });
-    let area = `M${X0} ${C_BASE}`, line = '', c2 = 0;
-    events.forEach((e, i) => {
-      const xx = r1(tx(e[0])), y1 = r1(C_BASE - (26 * c2) / Math.max(1, peak));
-      c2 += e[1];
-      const y2 = r1(C_BASE - (26 * c2) / Math.max(1, peak));
-      area += `L${xx} ${y1}L${xx} ${y2}`;
-      line += `${i ? 'L' : 'M'}${xx} ${y1}L${xx} ${y2}`;
-    });
-    area += `L${X1} ${C_BASE}Z`;
-    const stepS = L.dur > 420 ? 120 : L.dur > 160 ? 60 : 30;
+    const stepH = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find((s) => hmax / s <= 12) || 1000;
     const ticks = [];
     let grid = '';
-    for (let s = 0; s <= L.dur + 0.1; s += stepS) { ticks.push({ x: r1(tx(s) - 4), label: s ? mmss(s) : '0' }); grid += `M${r1(tx(s))} ${C_TOP}V${LANE1}`; }
-    const clock = { area, line, grid, done: run.dur == null ? '' : `M${r1(tx(run.dur))} ${C_TOP}V${LANE1}`, doneLabel: run.dur == null ? 'wait not done' : `wait done ${mmss(run.dur)}`, peakLabel: `${peak} at once` };
+    const tick = (h) => { ticks.push({ x: r1(tx(h) - 4), label: h ? String(h) : 'hop 0' }); grid += `M${r1(tx(h))} ${TRK_TOP}V${LANE1}`; };
+    for (let h = 0; h <= hmax; h += stepH) tick(h);
+    if (hmax % stepH >= stepH * 0.4) tick(hmax);
+    const track = { grid };
 
     return {
       notReady: false, ready: true, cvRef: this.cvRef, tipRef: this.tipRef, zoomRef: this.zoomRef,
-      head, stats, runs, bars, lanes, ticks, clock, groups, claims, card, hop, key, wallMsg,
+      head, stats, runs, bars, lanes, ticks, track, groups, claims, card, hop, key, wallMsg,
       listOn: !fT,
       leftHead: fT ? 'Following one reader' : 'Readers — hover to trace · click to follow',
       rightHead: fT ? 'Claims — click to fly to the line' : 'On the wall',
@@ -1509,10 +1496,10 @@ class Component extends DCLogic {
       foldLabel: S.fold ? 'Unfold' : 'Fold', foldPressed: S.fold ? 'true' : 'false', foldBorder: S.fold ? '#FFB454' : '#3A4677', foldColor: S.fold ? '#FFB454' : '#E8E6DF',
       play: () => this.togglePlay(),
       clear: () => this.clearAll(true),
-      hasPos: !!P, headX: P ? ((X1 - X0) * pos) / L.dur : 0, scrubRef: this.scrubRef, headTRef: this.headTRef,
-      scrub: { max: Math.round(L.dur), now: P ? Math.round(pos) : 0, text: P ? mmss(pos) : 'no replay position — click to place one' },
-      playLabel: !P ? 'Replay the run' : P.playing ? 'Pause' : 'Play from here',
-      playAria: !P ? 'Replay the run on its own clock' : P.playing ? 'Pause the replay' : 'Play the replay from here',
+      hasPos: !!P, headX: P ? r1(pitch * pos) : 0, scrubRef: this.scrubRef, headTRef: this.headTRef,
+      scrub: { max: hmax, now: P ? this.sewn(hmax, pos) : 0, text: P ? `hop ${this.sewn(hmax, pos)} of ${hmax}` : 'no replay position — click to seek a hop' },
+      playLabel: !P ? 'Play the walks' : P.playing ? 'Pause' : 'Play from here',
+      playAria: !P ? 'Play the walks one hop per step' : P.playing ? 'Pause the walks' : 'Play the walks from here',
       playIcon: P && P.playing ? 'M1 1h4v10H1zM7 1h4v10H7z' : 'M1 0.5L11 6L1 11.5z',
       hasSel: !!fT || S.selQ !== undefined || !!P,
     };

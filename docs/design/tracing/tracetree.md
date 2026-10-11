@@ -355,12 +355,12 @@ The `MAP` line reads `MAP {RUN}/map.txt — {n} components in {f} files, {c} cal
 
 `loom.py` turns that into one model, and the page draws four views behind tabs, each mounted when first opened:
 
-- the Loom wall: one column per traced file, drawn to scale from its own text and grouped by directory, each reader's hops stitched in at their lines and its route drawn between them, solid where a call or a name in the code links two hops or they share a component, dashed and fainter for walk order only (`then`); zooming in goes from the cloth through the lines to the code itself; following a reader steps its hops; a claim flies to its line; Fold collapses the lines no hop touches; replay sews the readers on the run's own clock, the playhead, the growing reader bars and the shuttles all read one frame time;
+- the Loom wall: one column per traced file, drawn to scale from its own text and grouped by directory, each reader's hops stitched in at their lines and its route drawn between them, solid where a call or a name in the code links two hops or they share a component, dashed and fainter for walk order only (`then`); zooming in goes from the cloth through the lines to the code itself; following a reader steps its hops; a claim flies to its line; Fold collapses the lines no hop touches; replay walks the code one hop per step, every reader leaving its `tt start` line together and taking hop 1, then hop 2, until the longest walk's last hop, a short walk finishing early; the playhead, the walk track's growing per-hop bars and the shuttles all read one position in steps, and the track seeks a hop on click or drag;
 - the chain of custody: each question, its readers, the hops of each in walk order with the lines they quote, and every claim beside the hop it cites, with its grade;
 - the hourglass: the component the map crosses at (or the one `--to` / `--from` names), what reaches it above and what it reaches below, and the readers that cross it;
 - the stitch key: every mark the other views use, drawn from the page's own drawing code.
 
-The palette is dark; the page follows no theme setting. Keys on the wall: `+` `-` zoom, `f` fit, `z` fold, `[` `]` readers, `←` `→` the followed reader's hops (pan otherwise), arrows pan, `space` replay, `esc` clear; with reduced motion the replay steps in tenths and flights jump.
+The palette is dark; the page follows no theme setting. Keys on the wall: `+` `-` zoom, `f` fit, `z` fold, `[` `]` readers, `←` `→` the followed reader's hops (pan otherwise), arrows pan, `space` replay, `esc` clear; on the walk track `←` `→` step a hop, `Shift` ten, `Home` `End` the ends; with reduced motion the replay steps whole hops and flights jump.
 
 ## The swatch book
 

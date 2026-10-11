@@ -12,7 +12,7 @@ We campaign for these freedoms because everyone deserves them. With these freedo
 
 - [The Free Software Definition](#fs-definition)
   - [The four essential freedoms](#four-freedoms)
-  - [Free software](#selling)*can*be commercial
+  - [Free software *can* be commercial](#selling)
 - [Clarifying the Boundary Between Free and Nonfree](#clarifying)
   - [The freedom to run the program as you wish](#run-the-program)
   - [The freedom to study the source code and make changes](#make-changes)

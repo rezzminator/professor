@@ -410,6 +410,19 @@ func (converter pythonConverter) ConvertFullDOM(
 	)
 }
 
+// baseAddress is the address a document's relative links resolve against: the
+// one it was finally fetched from, else the source it was asked for when that
+// is a web address; "" for a local path, whose links stay as the page wrote them.
+func baseAddress(fetched, source string) string {
+	if fetched != "" {
+		return fetched
+	}
+	if lower := strings.ToLower(source); strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return source
+	}
+	return ""
+}
+
 // convertScratch writes body to a private scratch file input.{extension},
 // hands the worker request with that path, and removes the scratch; label
 // names the scratch in every error, a failed cleanup included.
@@ -430,6 +443,7 @@ func (converter pythonConverter) convertScratch(
 	}()
 	request.Path = filepath.Join(directory, "input."+extension)
 	request.OCRLang = harvest.OCRLangFrom(ctx)
+	request.BaseURL = baseAddress(harvest.BaseURLFrom(ctx), request.Source)
 	if err := os.WriteFile(request.Path, body, 0o600); err != nil {
 		return "", fmt.Errorf("write %s scratch: %w", label, err)
 	}

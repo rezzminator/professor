@@ -7,8 +7,8 @@
 - [Frequently Asked Questions about the GNU licenses](/licenses/gpl-faq.html)
 - [How to use GNU licenses for your own software](/licenses/gpl-howto.html)
 - [Translations of the GPL](/licenses/translations.html)
-- The GPL in other formats: [plain text](/licenses/gpl-3.0.txt),[Texinfo](/licenses/gpl-3.0.texi),[LaTeX](/licenses/gpl-3.0.tex),[standalone HTML](/licenses/gpl-3.0-standalone.html),[ODF](/licenses/gpl-3.0.odt), Docbook[v4](/licenses/gpl-3.0.dbk)or[v5](/licenses/gpl-3.0.xml),[reStructuredText](/licenses/gpl-3.0.rst),[Markdown](/licenses/gpl-3.0.md), and[RTF](/licenses/gpl-3.0.rtf).
-- [GPLv3 logos](/graphics/license-logos.html)to use with your project
+- The GPL in other formats: [plain text](/licenses/gpl-3.0.txt), [Texinfo](/licenses/gpl-3.0.texi), [LaTeX](/licenses/gpl-3.0.tex), [standalone HTML](/licenses/gpl-3.0-standalone.html), [ODF](/licenses/gpl-3.0.odt), Docbook [v4](/licenses/gpl-3.0.dbk) or [v5](/licenses/gpl-3.0.xml), [reStructuredText](/licenses/gpl-3.0.rst), [Markdown](/licenses/gpl-3.0.md), and [RTF](/licenses/gpl-3.0.rtf).
+- [GPLv3 logos](/graphics/license-logos.html) to use with your project
 - [Old versions of the GNU GPL](/licenses/old-licenses/old-licenses.html#GPL)
 - [What to do if you see a possible GPL violation](/licenses/gpl-violation.html)
 

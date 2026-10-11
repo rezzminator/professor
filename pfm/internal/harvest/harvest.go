@@ -319,7 +319,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				}
 			}
 		}
-		converted, page, err := h.convertFetchedDocument(ctx, kind, source, body, loaders)
+		converted, page, err := h.convertFetchedDocument(withBaseURL(ctx, gaps.final), kind, source, body, loaders)
 		gaps = page.carry(gaps)
 		if err != nil {
 			staticConverterOutage = true // named a tool outage by convertOutageNote below (F12)
@@ -383,13 +383,13 @@ func (h *Harvester) fetchURLWithPolicy(
 		if kind == kindHTML && partialReason(converted) != "" && h.settings.browser && !isPrivateURL(source) &&
 			!shared && guess != kindPDF && page.renderMayComplete {
 			partialPage = func() Result {
-				stored := page.withGaps(h.localizedImages(ctx, kind, converted, source), gaps, loaders)
+				stored := page.withGaps(converted, gaps, loaders)
 				return h.storeResult(source, kind, method, stored, int64(len(body)), status, rungs, options)
 			}
 			keptExtractor = page.extractor
 			break
 		}
-		converted = page.withGaps(h.localizedImages(ctx, kind, converted, source), gaps, loaders)
+		converted = page.withGaps(converted, gaps, loaders)
 		return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
 	}
 	if shared {
@@ -489,7 +489,9 @@ func (h *Harvester) fetchURLWithPolicy(
 					lastChallenge = true
 					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", logSource(source), status)
 				} else {
-					converted, page, convErr := h.convertFetchedDocument(ctx, kindHTML, source, []byte(html), loaders)
+					converted, page, convErr := h.convertFetchedDocument(
+						withBaseURL(ctx, outcome.finalURL), kindHTML, source, []byte(html), loaders,
+					)
 					switch {
 					case convErr != nil:
 						// The render SUCCEEDED; the conversion step failing is

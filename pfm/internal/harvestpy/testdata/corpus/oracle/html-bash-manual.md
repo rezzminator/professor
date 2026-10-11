@@ -175,47 +175,47 @@ Shells offer features geared specifically for interactive use rather than to aug
 
 These definitions are used throughout the remainder of this manual.
 
-- `POSIX`[¶](#index-POSIX)
+- `POSIX` [¶](#index-POSIX)
 - A family of open system standards based on Unix. Bash is primarily concerned with the Shell and Utilities portion of the POSIX 1003.1 standard.
 - `blank`
 - A space or tab character.
 - `whitespace`
 - A character belonging to the `space` character class in the current locale, or for which `isspace()` returns true.
-- `builtin`[¶](#index-builtin-1)
+- `builtin` [¶](#index-builtin-1)
 - A command that is implemented internally by the shell itself, rather than by an executable program somewhere in the file system.
-- `control operator`[¶](#index-control-operator)
+- `control operator` [¶](#index-control-operator)
 - A `token` that performs a control function. It is a `newline` or one of the following: ‘`||`’, ‘`&&`’, ‘`&`’, ‘`;`’, ‘`;;`’, ‘`;&`’, ‘`;;&`’, ‘`|`’, ‘`|&`’, ‘`(`’, or ‘`)`’.
-- `exit status`[¶](#index-exit-status)
+- `exit status` [¶](#index-exit-status)
 - The value returned by a command to its caller. The value is restricted to eight bits, so the maximum value is 255.
-- `field`[¶](#index-field)
+- `field` [¶](#index-field)
 - A unit of text that is the result of one of the shell expansions. After expansion, when executing a command, the resulting fields are used as the command name and arguments.
-- `filename`[¶](#index-filename)
+- `filename` [¶](#index-filename)
 - A string of characters used to identify a file.
-- `job`[¶](#index-job)
+- `job` [¶](#index-job)
 - A set of processes comprising a pipeline, and any processes descended from it, that are all in the same process group.
-- `job control`[¶](#index-job-control)
+- `job control` [¶](#index-job-control)
 - A mechanism by which users can selectively stop (suspend) and restart (resume) execution of processes.
-- `metacharacter`[¶](#index-metacharacter)
+- `metacharacter` [¶](#index-metacharacter)
 - A character that, when unquoted, separates words. A metacharacter is a `space`, `tab`, `newline`, or one of the following characters: ‘`|`’, ‘`&`’, ‘`;`’, ‘`(`’, ‘`)`’, ‘`<`’, or ‘`>`’.
-- `name`[¶](#index-name)
+- `name` [¶](#index-name)
 - A `word` consisting solely of letters, numbers, and underscores, and beginning with a letter or underscore. `Name`s are used as shell variable and function names. Also referred to as an `identifier`.
-- `operator`[¶](#index-operator_002c-shell)
+- `operator` [¶](#index-operator_002c-shell)
 - A `control operator` or a `redirection operator`. See [Redirections](#Redirections), for a list of redirection operators. Operators contain at least one unquoted `metacharacter`.
-- `process group`[¶](#index-process-group)
+- `process group` [¶](#index-process-group)
 - A collection of related processes each having the same process group ID.
-- `process group ID`[¶](#index-process-group-ID)
+- `process group ID` [¶](#index-process-group-ID)
 - A unique identifier that represents a `process group` during its lifetime.
-- `reserved word`[¶](#index-reserved-word)
+- `reserved word` [¶](#index-reserved-word)
 - A `word` that has a special meaning to the shell. Most reserved words introduce shell flow control constructs, such as `for` and `while`.
-- `return status`[¶](#index-return-status)
+- `return status` [¶](#index-return-status)
 - A synonym for `exit status`.
-- `signal`[¶](#index-signal)
+- `signal` [¶](#index-signal)
 - A mechanism by which a process may be notified by the kernel of an event occurring in the system.
-- `special builtin`[¶](#index-special-builtin)
+- `special builtin` [¶](#index-special-builtin)
 - A shell builtin command that has been classified as special by the POSIX standard.
-- `token`[¶](#index-token)
+- `token` [¶](#index-token)
 - A sequence of characters considered a single unit by the shell. It is either a `word` or an `operator`.
-- `word`[¶](#index-word)
+- `word` [¶](#index-word)
 - A sequence of characters treated as a unit by the shell. Words may not include unquoted `metacharacters`.
 
 Bash is an acronym for ‘`Bourne-Again SHell`’. The Bourne shell is the traditional Unix shell originally written by Stephen Bourne. All of the Bourne shell builtin commands are available in Bash, and the rules for evaluation and quoting are taken from the POSIX specification for the ‘standard’ Unix shell.
@@ -243,10 +243,10 @@ The shell then parses these tokens into commands and other constructs, removes t
 
 The following is a brief description of the shell’s operation when it reads and executes a command. Basically, the shell does the following:
 
-1. Reads its input from a file (see [Shell Scripts](#Shell-Scripts)), from a string supplied as an argument to the `-c` invocation option (see[Invoking Bash](#Invoking-Bash)), or from the user’s terminal.
-2. Breaks the input into words and operators, obeying the quoting rules described in [Quoting](#Quoting). These tokens are separated by `metacharacters`. This step performs alias expansion (see[Aliases](#Aliases)).
+1. Reads its input from a file (see [Shell Scripts](#Shell-Scripts)), from a string supplied as an argument to the `-c` invocation option (see [Invoking Bash](#Invoking-Bash)), or from the user’s terminal.
+2. Breaks the input into words and operators, obeying the quoting rules described in [Quoting](#Quoting). These tokens are separated by `metacharacters`. This step performs alias expansion (see [Aliases](#Aliases)).
 3. Parses the tokens into simple and compound commands (see [Shell Commands](#Shell-Commands)).
-4. Performs the various shell expansions (see [Shell Expansions](#Shell-Expansions)), breaking the expanded tokens into lists of filenames (see[Filename Expansion](#Filename-Expansion)) and commands and arguments.
+4. Performs the various shell expansions (see [Shell Expansions](#Shell-Expansions)), breaking the expanded tokens into lists of filenames (see [Filename Expansion](#Filename-Expansion)) and commands and arguments.
 5. Performs any necessary redirections (see [Redirections](#Redirections)) and removes the redirection operators and their operands from the argument list.
 6. Executes the command (see [Executing Commands](#Executing-Commands)).
 7. Optionally waits for the command to complete and collects its exit status (see [Exit Status](#Exit-Status)).
@@ -321,13 +321,17 @@ The rest of this section is a brief overview of how you use gettext to create tr
 
 Once you’ve marked the strings in your script that you want to translate using $"…", you create a gettext "template" file using the command
 
-> bash --dump-po-stringsscriptname>domain.pot
+```
+bash --dump-po-strings scriptname > domain.pot
+```
 
 The `domain` is your *message domain*. It’s just an arbitrary string that’s used to identify the files gettext needs, like a package or script name. It needs to be unique among all the message domains on systems where you install the translations, so gettext knows which translations correspond to your script. You’ll use the template file to create translations for each target language. The template file conventionally has the suffix ‘`.pot`’.
 
 You copy this template file to a separate file for each target language you want to support (called "PO" files, which use the suffix ‘`.po`’). PO files use various naming conventions, but when you are working to translate a template file into a particular language, you first copy the template file to a file whose name is the language you want to target, with the ‘`.po`’ suffix. For instance, the Spanish translations of your strings would be in a file named ‘`es.po`’, and to get started using a message domain named "example," you would run
 
-> cp example.pot es.po
+```
+cp example.pot es.po
+```
 
 Ultimately, PO files are often named `domain`.po and installed in directories that contain multiple translation files for a particular language.
 
@@ -335,7 +339,9 @@ Whichever naming convention you choose, you will need to translate the strings i
 
 When you have the translations and PO files complete, you’ll use the gettext tools to produce what are called "MO" files, which are compiled versions of the PO files the gettext tools use to look up translations efficiently. MO files are also called "message catalog" files. You use the `msgfmt` program to do this. For instance, if you had a file with Spanish translations, you could run
 
-> msgfmt -o es.mo es.po
+```
+msgfmt -o es.mo es.po
+```
 
 to produce the corresponding MO file.
 
@@ -396,7 +402,9 @@ A `pipeline` is a sequence of one or more commands separated by one of the contr
 
 The format for a pipeline is
 
-> [time [-p]] [!]command1[ | or |&command2] ...
+```
+[time [-p]] [!] command1 [ | or |& command2 ] ...
+```
 
 The output of each command in the pipeline is connected via a pipe to the input of the next command. That is, each command reads the previous command’s output. This connection is performed before any redirections specified by `command1`.
 
@@ -426,13 +434,17 @@ AND and OR lists are sequences of one or more pipelines separated by the control
 
 An AND list has the form
 
-> command1&&command2
+```
+command1 && command2
+```
 
 `command2` is executed if, and only if, `command1` returns an exit status of zero (success).
 
 An OR list has the form
 
-> command1||command2
+```
+command1 || command2
+```
 
 `command2` is executed if, and only if, `command1` returns a non-zero exit status.
 
@@ -452,61 +464,92 @@ Bash supports the following looping constructs.
 
 Note that wherever a ‘`;`’ appears in the description of a command’s syntax, it may be replaced with one or more newlines.
 
-- `until`[¶](#index-until)
+- `until` [¶](#index-until)
 - The syntax of the `until` command is:
-  > until `test-commands`; do`consequent-commands`; done
-
+  ```
+  until test-commands; do consequent-commands; done
+  ```
   Execute *consequent-commands* as long as *test-commands* has an exit status which is not zero. The return status is the exit status of the last command executed in *consequent-commands*, or zero if none was executed.
-- `while`[¶](#index-while)
+- `while` [¶](#index-while)
 - The syntax of the `while` command is:
-  > while `test-commands`; do`consequent-commands`; done
-
+  ```
+  while test-commands; do consequent-commands; done
+  ```
   Execute *consequent-commands* as long as *test-commands* has an exit status of zero. The return status is the exit status of the last command executed in *consequent-commands*, or zero if none was executed.
-- `for`[¶](#index-for)
+- `for` [¶](#index-for)
 - The syntax of the `for` command is:
-  > for `name`[ [in`words`...] ; ] do`commands`; done
-
+  ```
+  for name [ [in words ...] ; ] do commands; done
+  ```
   Expand *words* (see [Shell Expansions](#Shell-Expansions)), and then execute *commands* once for each word in the resultant list, with *name* bound to the current word. If ‘`in words`’ is not present, the `for` command executes the *commands* once for each positional parameter that is set, as if ‘`in "$@"`’ had been specified (see [Special Parameters](#Special-Parameters)).
   The return status is the exit status of the last command that executes. If there are no items in the expansion of *words*, no commands are executed, and the return status is zero.
   There is an alternate form of the `for` command which is similar to the C language:
-  > for (( `expr1`;`expr2`;`expr3`)) [;] do`commands`; done
-
+  ```
+  for (( expr1 ; expr2 ; expr3 )) [;] do commands ; done
+  ```
   First, evaluate the arithmetic expression *expr1* according to the rules described below (see [Shell Arithmetic](#Shell-Arithmetic)). Then, repeatedly evaluate the arithmetic expression *expr2* until it evaluates to zero. Each time *expr2* evaluates to a non-zero value, execute *commands* and evaluate the arithmetic expression *expr3*. If any expression is omitted, it behaves as if it evaluates to 1. The return value is the exit status of the last command in *commands* that is executed, or non-zero if any of the expressions is invalid.
 
 Use the `break` and `continue` builtins (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)) to control loop execution.
 
-- `if`[¶](#index-if)
+- `if` [¶](#index-if)
 - The syntax of the `if` command is:
-  > if `test-commands`; then`consequent-commands`; [elif`more-test-commands`; then`more-consequents`;] [else`alternate-consequents`;] fi
-
+  ```
+  if test-commands; then
+    consequent-commands;
+  [elif more-test-commands; then
+    more-consequents;]
+  [else alternate-consequents;]
+  fi
+  ```
   The *test-commands* list is executed, and if its return status is zero, the *consequent-commands* list is executed. If *test-commands* returns a non-zero status, each `elif` list is executed in turn, and if its exit status is zero, the corresponding *more-consequents* is executed and the command completes. If ‘`else alternate-consequents`’ is present, and the final command in the final `if` or `elif` clause has a non-zero exit status, then *alternate-consequents* is executed. The return status is the exit status of the last command executed, or zero if no condition tested true.
-- `case`[¶](#index-case)
+- `case` [¶](#index-case)
 - The syntax of the `case` command is:
-  > case `word`in [ [(]`pattern`[|`pattern`]...)`command-list`;;]... esac
-
+  ```
+  case word in
+      [ [(] pattern [| pattern]...) command-list ;;]...
+  esac
+  ```
   `case` will selectively execute the *command-list* corresponding to the first *pattern* that matches *word*, proceeding from the first pattern to the last. The match is performed according to the rules described below in [Pattern Matching](#Pattern-Matching). If the `nocasematch` shell option (see the description of `shopt` in [The Shopt Builtin](#The-Shopt-Builtin)) is enabled, the match is performed without regard to the case of alphabetic characters. The ‘`|`’ is used to separate multiple patterns in a pattern list, and the ‘`)`’ operator terminates the pattern list. A pattern list and an associated *command-list* is known as a *clause*.
   Each clause must be terminated with ‘`;;`’, ‘`;&`’, or ‘`;;&`’. The *word* undergoes tilde expansion, parameter expansion, command substitution, process substitution, arithmetic expansion, and quote removal (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)) before the shell attempts to match the pattern. Each *pattern* undergoes tilde expansion, parameter expansion, command substitution, arithmetic expansion, process substitution, and quote removal.
   There may be an arbitrary number of `case` clauses, each terminated by a ‘`;;`’, ‘`;&`’, or ‘`;;&`’. The first pattern that matches determines the command-list that is executed. It’s a common idiom to use ‘`*`’ as the final pattern to define the default case, since that pattern will always match.
   Here is an example using `case` in a script that could be used to describe one interesting feature of an animal:
-  > echo -n "Enter the name of an animal: " read ANIMAL echo -n "The $ANIMAL has " case $ANIMAL in horse | dog | cat) echo -n "four";; man | kangaroo ) echo -n "two";; *) echo -n "an unknown number of";; esac echo " legs."
-
+  ```
+  echo -n "Enter the name of an animal: "
+  read ANIMAL
+  echo -n "The $ANIMAL has "
+  case $ANIMAL in
+    horse | dog | cat) echo -n "four";;
+    man | kangaroo ) echo -n "two";;
+    *) echo -n "an unknown number of";;
+  esac
+  echo " legs."
+  ```
   If the ‘`;;`’ operator is used, the `case` command completes after the first pattern match. Using ‘`;&`’ in place of ‘`;;`’ causes execution to continue with the *command-list* associated with the next clause, if any. Using ‘`;;&`’ in place of ‘`;;`’ causes the shell to test the patterns in the next clause, if any, and execute any associated *command-list* if the match succeeds, continuing the case statement execution as if the pattern list had not matched.
   The return status is zero if no *pattern* matches. Otherwise, the return status is the exit status of the last *command-list* executed.
-- `select`[¶](#index-select)
+- `select` [¶](#index-select)
 - The `select` construct allows the easy generation of menus. It has almost the same syntax as the `for` command:
-  > select `name`[in`words`...]; do`commands`; done
-
+  ```
+  select name [in words ...]; do commands; done
+  ```
   First, expand the list of words following `in`, generating a list of items, and print the set of expanded words on the standard error stream, each preceded by a number. If the ‘`in words`’ is omitted, print the positional parameters, as if ‘`in "$@"`’ had been specified. `select` then displays the `PS3` prompt and reads a line from the standard input. If the line consists of a number corresponding to one of the displayed words, then `select` sets the value of *name* to that word. If the line is empty, `select` displays the words and prompt again. If `EOF` is read, `select` completes and returns 1. Any other value read causes *name* to be set to null. The line read is saved in the variable `REPLY`.
   The *commands* are executed after each selection until a `break` command is executed, at which point the `select` command completes.
   Here is an example that allows the user to pick a filename from the current directory, and displays the name and index of the file selected.
-  > select fname in *; do echo you picked $fname \($REPLY\) break; done
+  ```
+  select fname in *;
+  do
+  	echo you picked $fname \($REPLY\)
+  	break;
+  done
+  ```
 - `((…))`
-- > (( `expression`))
-
+- ```
+  (( expression ))
+  ```
   The arithmetic *expression* is evaluated according to the rules described below (see [Shell Arithmetic](#Shell-Arithmetic)). The *expression* undergoes the same expansions as if it were within double quotes, but unescaped double quote characters in *expression* are not treated specially and are removed. Since this can potentially result in empty strings, this command treats those as expressions that evaluate to 0. If the value of the expression is non-zero, the return status is 0; otherwise the return status is 1.
-- `[[…]]`[¶](#index-_005b_005b)
-- > [[ `expression`]]
-
+- `[[…]]` [¶](#index-_005b_005b)
+- ```
+  [[ expression ]]
+  ```
   Evaluate the conditional expression *expression* and return a status of zero (true) or non-zero (false). Expressions are composed of the primaries described below in [Bash Conditional Expressions](#Bash-Conditional-Expressions). The words between the `[[` and `]]` do not undergo word splitting and filename expansion. The shell performs tilde expansion, parameter and variable expansion, arithmetic expansion, command substitution, process substitution, and quote removal on those words. Conditional operators such as ‘`-f`’ must be unquoted to be recognized as primaries.
   When used with `[[`, the ‘`<`’ and ‘`>`’ operators sort lexicographically using the current locale.
   When the ‘`==`’ and ‘`!=`’ operators are used, the string to the right of the operator is considered a pattern and matched according to the rules described below in [Pattern Matching](#Pattern-Matching), as if the `extglob` shell option were enabled. The ‘`=`’ operator is identical to ‘`==`’. If the `nocasematch` shell option (see the description of `shopt` in [The Shopt Builtin](#The-Shopt-Builtin)) is enabled, the match is performed without regard to the case of alphabetic characters. The return value is 0 if the string matches (‘`==`’) or does not match (‘`!=`’) the pattern, and 1 otherwise.
@@ -515,30 +558,43 @@ Use the `break` and `continue` builtins (see [Bourne Shell Builtins](#Bourne-She
   You can quote any part of the pattern to force the quoted portion to be matched literally instead of as a regular expression (see above). If the pattern is stored in a shell variable, quoting the variable expansion forces the entire pattern to be matched literally.
   The match succeeds if the pattern matches any part of the string. If you want to force the pattern to match the entire string, anchor the pattern using the ‘`^`’ and ‘`$`’ regular expression operators.
   For example, the following will match a line (stored in the shell variable `line`) if there is a sequence of characters anywhere in the value consisting of any number, including zero, of characters in the `space` character class, immediately followed by zero or one instances of ‘`a`’, then a ‘`b`’:
-  > [[ $line =~ [[:space:]]*(a)?b ]]
-
+  ```
+  [[ $line =~ [[:space:]]*(a)?b ]]
+  ```
   That means values for `line` like ‘`aab`’, ‘`aaaaaab`’, ‘`xaby`’, and ‘`ab`’ will all match, as will a line containing a ‘`b`’ anywhere in its value.
   If you want to match a character that’s special to the regular expression grammar (‘`^$|[]()\.*+?`’), it has to be quoted to remove its special meaning. This means that in the pattern ‘`xxx.txt`’, the ‘`.`’ matches any character in the string (its usual regular expression meaning), but in the pattern ‘`"xxx.txt"`’, it can only match a literal ‘`.`’.
   Likewise, if you want to include a character in your pattern that has a special meaning to the regular expression grammar, you must make sure it’s not quoted. If you want to anchor a pattern at the beginning or end of the string, for instance, you cannot quote the ‘`^`’ or ‘`$`’ characters using any form of shell quoting.
   If you want to match ‘`initial string`’ at the start of a line, the following will work:
-  > [[ $line =~ ^"initial string" ]]
-
+  ```
+  [[ $line =~ ^"initial string" ]]
+  ```
   but this will not:
-  > [[ $line =~ "^initial string" ]]
-
+  ```
+  [[ $line =~ "^initial string" ]]
+  ```
   because in the second example the ‘`^`’ is quoted and doesn’t have its usual special meaning.
   It is sometimes difficult to specify a regular expression properly without using quotes, or to keep track of the quoting used by regular expressions while paying attention to shell quoting and the shell’s quote removal. Storing the regular expression in a shell variable is often a useful way to avoid problems with quoting characters that are special to the shell. For example, the following is equivalent to the pattern used above:
-  > pattern='[[:space:]]*(a)?b' [[ $line =~ $pattern ]]
-
+  ```
+  pattern='[[:space:]]*(a)?b'
+  [[ $line =~ $pattern ]]
+  ```
   Shell programmers should take special care with backslashes, since backslashes are used by both the shell and regular expressions to remove the special meaning from the following character. This means that after the shell’s word expansions complete (see [Shell Expansions](#Shell-Expansions)), any backslashes remaining in parts of the pattern that were originally not quoted can remove the special meaning of pattern characters. If any part of the pattern is quoted, the shell does its best to ensure that the regular expression treats those remaining backslashes as literal, if they appeared in a quoted portion.
   The following two sets of commands are *not* equivalent:
-  > pattern='\.' [[ . =~ $pattern ]] [[ . =~ \. ]] [[ . =~ "$pattern" ]] [[ . =~ '\.' ]]
+  ```
+  pattern='\.'
 
+  [[ . =~ $pattern ]]
+  [[ . =~ \. ]]
+
+  [[ . =~ "$pattern" ]]
+  [[ . =~ '\.' ]]
+  ```
   The first two matches will succeed, but the second two will not, because in the second two the backslash will be part of the pattern to be matched. In the first two examples, the pattern passed to the regular expression parser is ‘`\.`’. The backslash removes the special meaning from ‘`.`’, so the literal ‘`.`’ matches. In the second two examples, the pattern passed to the regular expression parser has the backslash quoted (e.g., ‘`\\\.`’), which will not match the string, since it does not contain a backslash. If the string in the first examples were anything other than ‘`.`’, say ‘`a`’, the pattern would not match, because the quoted ‘`.`’ in the pattern loses its special meaning of matching any single character.
   Bracket expressions in regular expressions can be sources of errors as well, since characters that are normally special in regular expressions lose their special meanings between brackets. However, you can use bracket expressions to match special pattern characters without quoting them, so they are sometimes useful for this purpose.
   Though it might seem like a strange way to write it, the following pattern will match a ‘`.`’ in the string:
-  > [[ . =~ [.] ]]
-
+  ```
+  [[ . =~ [.] ]]
+  ```
   The shell performs any word expansions before passing the pattern to the regular expression functions, so you can assume that the shell’s quoting takes precedence. As noted above, the regular expression parser will interpret any unquoted backslashes remaining in the pattern after shell expansion according to its own rules. The intention is to avoid making shell programmers quote things twice as much as possible, so shell quoting should be sufficient to quote special pattern characters where that’s necessary.
   The array variable `BASH_REMATCH` records which parts of the string matched the pattern. The element of `BASH_REMATCH` with index 0 contains the portion of the string matching the entire regular expression. Substrings matched by parenthesized subexpressions within the regular expression are saved in the remaining `BASH_REMATCH` indices. The element of `BASH_REMATCH` with index *n* is the portion of the string matching the *n*th parenthesized subexpression.
   Bash sets `BASH_REMATCH` in the global scope; declaring it as a local variable will lead to unexpected results.
@@ -556,11 +612,14 @@ Use the `break` and `continue` builtins (see [Bourne Shell Builtins](#Bourne-She
 Bash provides two ways to group a list of commands to be executed as a unit. When commands are grouped, redirections may be applied to the entire command list. For example, the output of all the commands in the list may be redirected to a single stream.
 
 - `()`
-- > ( `list`)
-
+- ```
+  ( list )
+  ```
   Placing a list of commands between parentheses forces the shell to create a subshell (see [Command Execution Environment](#Command-Execution-Environment)), and each of the commands in *list* is executed in that subshell environment. Since the *list* is executed in a subshell, variable assignments do not remain in effect after the subshell completes.
-- `{}`[¶](#index-_007b)
-- `{``list`; }
+- `{}` [¶](#index-_007b)
+- ```
+  { list; }
+  ```
   Placing a list of commands between curly braces causes the list to be executed in the current shell environment. No subshell is created. The semicolon (or newline) following *list* is required.
 
 In addition to the creation of a subshell, there is a subtle difference between these two constructs due to historical reasons. The braces are reserved words, so they must be separated from the `list` by `blank`s or other shell metacharacters. The parentheses are operators, and are recognized as separate tokens by the shell even if they are not separated from the `list` by whitespace.
@@ -571,19 +630,27 @@ A `coprocess` is a shell command preceded by the `coproc` reserved word. A copro
 
 The syntax for a coprocess is:
 
-> coproc [NAME]command[redirections]
+```
+coproc [NAME] command [redirections]
+```
 
 This creates a coprocess named `NAME`. `command` may be either a simple command (see [Simple Commands](#Simple-Commands)) or a compound command (see [Compound Commands](#Compound-Commands)). `NAME` is a shell variable name. If `NAME` is not supplied, the default name is `COPROC`.
 
 The recommended form to use for a coprocess is
 
-> coprocNAME{command; }
+```
+coproc NAME { command; }
+```
 
 This form is preferred because simple commands result in the coprocess always being named `COPROC`, and it is simpler to use and more complete than the other compound commands.
 
 There are other forms of coprocesses:
 
-> coprocNAMEcompound-commandcoproccompound-commandcoprocsimple-command
+```
+coproc NAME compound-command
+coproc compound-command
+coproc simple-command
+```
 
 If `command` is a compound command, `NAME` is optional. The word following `coproc` determines whether that word is interpreted as a variable name: it is interpreted as `NAME` if it is not a reserved word that introduces a compound command. If `command` is a simple command, `NAME` is not allowed; this is to avoid confusion between `NAME` and the first word of the simple command.
 
@@ -603,11 +670,15 @@ Shell functions are a way to group commands for later execution using a single n
 
 Functions are declared using this syntax:
 
-> fname()compound-command[redirections]
+```
+fname () compound-command [ redirections ]
+```
 
 or
 
-> functionfname[()]compound-command[redirections]
+```
+function fname [()] compound-command [ redirections ]
+```
 
 This defines a shell function named `fname`. The reserved word `function` is optional. If the `function` reserved word is supplied, the parentheses are optional. The *body* of the function is the compound command `compound-command` (see [Compound Commands](#Compound-Commands)). That command is usually a `list` enclosed between { and }, but may be any compound command listed above. If the `function` reserved word is used, but the parentheses are not supplied, the braces are recommended. When the shell is in POSIX mode (see [Bash and POSIX](#Bash-POSIX-Mode)), `fname` must be a valid shell name and may not be the same as one of the special builtins (see [Special Builtins](#Special-Builtins)). When not in POSIX mode, a function name can be any unquoted shell word that does not contain ‘`$`’.
 
@@ -639,7 +710,9 @@ For example, if a variable `var` is declared as local in function `func1`, and `
 
 The following script demonstrates this behavior. When executed, the script displays
 
-> In func2, var = func1 local
+```
+In func2, var = func1 local
+```
 
 ```
 func1()
@@ -669,17 +742,23 @@ A parameter is set if it has been assigned a value. The null string is a valid v
 
 A variable is assigned to using a statement of the form
 
-> name=[value]
+```
+name=[value]
+```
 
 If `value` is not given, the variable is assigned the null string. All `value`s undergo tilde expansion, parameter and variable expansion, command substitution, arithmetic expansion, and quote removal (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)). If the variable has its `integer` attribute set, then `value` is evaluated as an arithmetic expression even if the `$((…))` expansion is not used (see [Arithmetic Expansion](#Arithmetic-Expansion)). Word splitting and filename expansion are not performed. Assignment statements may also appear as arguments to the `alias`, `declare`, `typeset`, `export`, `readonly`, and `local` builtin commands (*declaration commands*). When in POSIX mode (see [Bash and POSIX](#Bash-POSIX-Mode)), these builtins may appear in a command after one or more instances of the `command` builtin and retain these assignment statement properties. For example,
 
-> command export var=value
+```
+command export var=value
+```
 
 In the context where an assignment statement is assigning a value to a shell variable or array index (see [Arrays](#Arrays)), the ‘`+=`’ operator appends to or adds to the variable’s previous value. This includes arguments to declaration commands such as `declare` that accept assignment statements. When ‘`+=`’ is applied to a variable for which the `integer` attribute has been set, the variable’s current value and `value` are each evaluated as arithmetic expressions, and the sum of the results is assigned as the variable’s value. The current value is usually an integer constant, but may be an expression. When ‘`+=`’ is applied to an array variable using compound assignment (see [Arrays](#Arrays)), the variable’s value is not unset (as it is when using ‘`=`’), and new values are appended to the array beginning at one greater than the array’s maximum index (for indexed arrays), or added as additional key-value pairs in an associative array. When applied to a string-valued variable, `value` is expanded and appended to the variable’s value.
 
 A variable can be assigned the `nameref` attribute using the `-n` option to the `declare` or `local` builtin commands (see [Bash Builtin Commands](#Bash-Builtins)) to create a *nameref*, or a reference to another variable. This allows variables to be manipulated indirectly. Whenever the nameref variable is referenced, assigned to, unset, or has its attributes modified (other than using or changing the nameref attribute itself), the operation is actually performed on the variable specified by the nameref variable’s value. A nameref is commonly used within shell functions to refer to a variable whose name is passed as an argument to the function. For instance, if a variable name is passed to a shell function as its first argument, running
 
-> declare -n ref=$1
+```
+declare -n ref=$1
+```
 
 inside the function creates a local nameref variable `ref` whose value is the variable name passed as the first argument. References and assignments to `ref`, and changes to its attributes, are treated as references, assignments, and attribute modifications to the variable whose name was passed as `$1`.
 
@@ -696,21 +775,21 @@ When a positional parameter consisting of more than a single digit is expanded, 
 
 The shell treats several parameters specially. These parameters may only be referenced; assignment to them is not allowed. Special parameters are denoted by one of the following characters.
 
-- `*`[¶](#index-_002a)
+- `*` [¶](#index-_002a)
 - ($*) Expands to the positional parameters, starting from one. When the expansion is not within double quotes, each positional parameter expands to a separate word. In contexts where word expansions are performed, those words are subject to further word splitting and filename expansion. When the expansion occurs within double quotes, it expands to a single word with the value of each parameter separated by the first character of the `IFS` variable. That is, `"$*"` is equivalent to `"$1c$2c…"`, where *c* is the first character of the value of the `IFS` variable. If `IFS` is unset, the parameters are separated by spaces. If `IFS` is null, the parameters are joined without intervening separators.
-- `@`[¶](#index-_0040)
+- `@` [¶](#index-_0040)
 - ($@) Expands to the positional parameters, starting from one. In contexts where word splitting is performed, this expands each positional parameter to a separate word; if not within double quotes, these words are subject to word splitting. In contexts where word splitting is not performed, such as the value portion of an assignment statement, this expands to a single word with each positional parameter separated by a space. When the expansion occurs within double quotes, and word splitting is performed, each parameter expands to a separate word. That is, `"$@"` is equivalent to `"$1" "$2" …`. If the double-quoted expansion occurs within a word, the expansion of the first parameter is joined with the expansion of the beginning part of the original word, and the expansion of the last parameter is joined with the expansion of the last part of the original word. When there are no positional parameters, `"$@"` and `$@` expand to nothing (i.e., they are removed).
-- `#`[¶](#index-_0023)
+- `#` [¶](#index-_0023)
 - ($#) Expands to the number of positional parameters in decimal.
-- `?`[¶](#index-_003f)
+- `?` [¶](#index-_003f)
 - ($?) Expands to the exit status of the most recently executed command.
-- `-`[¶](#index-_002d)
+- `-` [¶](#index-_002d)
 - ($-, a hyphen.) Expands to the current option flags as specified upon invocation, by the `set` builtin command, or those set by the shell itself (such as the `-i` option).
-- `$`[¶](#index-_0024)
+- `$` [¶](#index-_0024)
 - ($$) Expands to the process ID of the shell. In a subshell, it expands to the process ID of the invoking shell, not the subshell.
-- `!`[¶](#index-_0021-1)
+- `!` [¶](#index-_0021-1)
 - ($!) Expands to the process ID of the job most recently placed into the background, whether executed as an asynchronous command or using the `bg` builtin (see [Job Control Builtins](#Job-Control-Builtins)).
-- `0`[¶](#index-0)
+- `0` [¶](#index-0)
 - ($0) Expands to the name of the shell or shell script. This is set at shell initialization. If Bash is invoked with a file of commands (see [Shell Scripts](#Shell-Scripts)), `$0` is set to the name of that file. If Bash is started with the `-c` option (see [Invoking Bash](#Invoking-Bash)), then `$0` is set to the first argument after the string to be executed, if one is present. Otherwise, it is set to the filename used to invoke Bash, as given by argument zero.
 
 Expansion is performed on the command line after it has been split into `token`s. Bash performs these expansions:
@@ -820,29 +899,175 @@ When not performing substring expansion, using the forms described below (e.g., 
 
 - `${parameter:−word}`
 - If *parameter* is unset or null, the expansion of *word* is substituted. Otherwise, the value of *parameter* is substituted.
-  `$ v=123 $ echo ${v-unset} 123 $ echo ${v:-unset-or-null} 123 $ unset v $ echo ${v-unset} unset $ v= $ echo ${v-unset} $ echo ${v:-unset-or-null} unset-or-null`
+  ```
+  $ v=123
+  $ echo ${v-unset}
+  123
+  $ echo ${v:-unset-or-null}
+  123
+  $ unset v
+  $ echo ${v-unset}
+  unset
+  $ v=
+  $ echo ${v-unset}
+
+  $ echo ${v:-unset-or-null}
+  unset-or-null
+  ```
 - `${parameter:=word}`
 - If *parameter* is unset or null, the expansion of *word* is assigned to *parameter*, and the result of the expansion is the final value of *parameter*. Positional parameters and special parameters may not be assigned in this way.
-  `$ unset var $ : ${var=DEFAULT} $ echo $var DEFAULT $ var= $ : ${var=DEFAULT} $ echo $var $ var= $ : ${var:=DEFAULT} $ echo $var DEFAULT $ unset var $ : ${var:=DEFAULT} $ echo $var DEFAULT`
+  ```
+  $ unset var
+  $ : ${var=DEFAULT}
+  $ echo $var
+  DEFAULT
+  $ var=
+  $ : ${var=DEFAULT}
+  $ echo $var
+
+  $ var=
+  $ : ${var:=DEFAULT}
+  $ echo $var
+  DEFAULT
+  $ unset var
+  $ : ${var:=DEFAULT}
+  $ echo $var
+  DEFAULT
+  ```
 - `${parameter:?word}`
 - If *parameter* is null or unset, the shell writes the expansion of *word* (or a message to that effect if *word* is not present) to the standard error and, if it is not interactive, exits with a non-zero status. An interactive shell does not exit, but does not execute the command associated with the expansion. Otherwise, the value of *parameter* is substituted.
-  `$ var= $ : ${var:?var is unset or null} bash: var: var is unset or null $ echo ${var?var is unset} $ unset var $ : ${var?var is unset} bash: var: var is unset $ : ${var:?var is unset or null} bash: var: var is unset or null $ var=123 $ echo ${var:?var is unset or null} 123`
+  ```
+  $ var=
+  $ : ${var:?var is unset or null}
+  bash: var: var is unset or null
+  $ echo ${var?var is unset}
+
+  $ unset var
+  $ : ${var?var is unset}
+  bash: var: var is unset
+  $ : ${var:?var is unset or null}
+  bash: var: var is unset or null
+  $ var=123
+  $ echo ${var:?var is unset or null}
+  123
+  ```
 - `${parameter:+word}`
 - If *parameter* is null or unset, nothing is substituted, otherwise the expansion of *word* is substituted. The value of *parameter* is not used.
-  `$ var=123 $ echo ${var:+var is set and not null} var is set and not null $ echo ${var+var is set} var is set $ var= $ echo ${var:+var is set and not null} $ echo ${var+var is set} var is set $ unset var $ echo ${var+var is set} $ echo ${var:+var is set and not null} $`
+  ```
+  $ var=123
+  $ echo ${var:+var is set and not null}
+  var is set and not null
+  $ echo ${var+var is set}
+  var is set
+  $ var=
+  $ echo ${var:+var is set and not null}
+
+  $ echo ${var+var is set}
+  var is set
+  $ unset var
+  $ echo ${var+var is set}
+
+  $ echo ${var:+var is set and not null}
+
+  $ 
+  ```
 - `${parameter:offset}`
 - `${parameter:offset:length}`
 - This is referred to as Substring Expansion. It expands to up to *length* characters of the value of *parameter* starting at the character specified by *offset*. If *parameter* is ‘`@`’ or ‘`*`’, an indexed array subscripted by ‘`@`’ or ‘`*`’, or an associative array name, the results differ as described below. If :*length* is omitted (the first form above), this expands to the substring of the value of *parameter* starting at the character specified by *offset* and extending to the end of the value. If *offset* is omitted, it is treated as 0. If *length* is omitted, but the colon after *offset* is present, it is treated as 0. *length* and *offset* are arithmetic expressions (see [Shell Arithmetic](#Shell-Arithmetic)).
   If *offset* evaluates to a number less than zero, the value is used as an offset in characters from the end of the value of *parameter*. If *length* evaluates to a number less than zero, it is interpreted as an offset in characters from the end of the value of *parameter* rather than a number of characters, and the expansion is the characters between *offset* and that result.
   Note that a negative offset must be separated from the colon by at least one space to avoid being confused with the ‘`:-`’ expansion.
   Here are some examples illustrating substring expansion on parameters and subscripted arrays:
-  `$ string=01234567890abcdefgh $ echo ${string:7} 7890abcdefgh $ echo ${string:7:0} $ echo ${string:7:2} 78 $ echo ${string:7:-2} 7890abcdef $ echo ${string: -7} bcdefgh $ echo ${string: -7:0} $ echo ${string: -7:2} bc $ echo ${string: -7:-2} bcdef $ set -- 01234567890abcdefgh $ echo ${1:7} 7890abcdefgh $ echo ${1:7:0} $ echo ${1:7:2} 78 $ echo ${1:7:-2} 7890abcdef $ echo ${1: -7} bcdefgh $ echo ${1: -7:0} $ echo ${1: -7:2} bc $ echo ${1: -7:-2} bcdef $ array[0]=01234567890abcdefgh $ echo ${array[0]:7} 7890abcdefgh $ echo ${array[0]:7:0} $ echo ${array[0]:7:2} 78 $ echo ${array[0]:7:-2} 7890abcdef $ echo ${array[0]: -7} bcdefgh $ echo ${array[0]: -7:0} $ echo ${array[0]: -7:2} bc $ echo ${array[0]: -7:-2} bcdef`
+  ```
+  $ string=01234567890abcdefgh
+  $ echo ${string:7}
+  7890abcdefgh
+  $ echo ${string:7:0}
+
+  $ echo ${string:7:2}
+  78
+  $ echo ${string:7:-2}
+  7890abcdef
+  $ echo ${string: -7}
+  bcdefgh
+  $ echo ${string: -7:0}
+
+  $ echo ${string: -7:2}
+  bc
+  $ echo ${string: -7:-2}
+  bcdef
+  $ set -- 01234567890abcdefgh
+  $ echo ${1:7}
+  7890abcdefgh
+  $ echo ${1:7:0}
+
+  $ echo ${1:7:2}
+  78
+  $ echo ${1:7:-2}
+  7890abcdef
+  $ echo ${1: -7}
+  bcdefgh
+  $ echo ${1: -7:0}
+
+  $ echo ${1: -7:2}
+  bc
+  $ echo ${1: -7:-2}
+  bcdef
+  $ array[0]=01234567890abcdefgh
+  $ echo ${array[0]:7}
+  7890abcdefgh
+  $ echo ${array[0]:7:0}
+
+  $ echo ${array[0]:7:2}
+  78
+  $ echo ${array[0]:7:-2}
+  7890abcdef
+  $ echo ${array[0]: -7}
+  bcdefgh
+  $ echo ${array[0]: -7:0}
+
+  $ echo ${array[0]: -7:2}
+  bc
+  $ echo ${array[0]: -7:-2}
+  bcdef
+  ```
   If *parameter* is ‘`@`’ or ‘`*`’, the result is *length* positional parameters beginning at *offset*. A negative *offset* is taken relative to one greater than the greatest positional parameter, so an offset of -1 evaluates to the last positional parameter (or 0 if there are no positional parameters). It is an expansion error if *length* evaluates to a number less than zero.
   The following examples illustrate substring expansion using positional parameters:
-  `$ set -- 1 2 3 4 5 6 7 8 9 0 a b c d e f g h $ echo ${@:7} 7 8 9 0 a b c d e f g h $ echo ${@:7:0} $ echo ${@:7:2} 7 8 $ echo ${@:7:-2} bash: -2: substring expression < 0 $ echo ${@: -7:2} b c $ echo ${@:0} ./bash 1 2 3 4 5 6 7 8 9 0 a b c d e f g h $ echo ${@:0:2} ./bash 1 $ echo ${@: -7:0}`
+  ```
+  $ set -- 1 2 3 4 5 6 7 8 9 0 a b c d e f g h
+  $ echo ${@:7}
+  7 8 9 0 a b c d e f g h
+  $ echo ${@:7:0}
+
+  $ echo ${@:7:2}
+  7 8
+  $ echo ${@:7:-2}
+  bash: -2: substring expression < 0
+  $ echo ${@: -7:2}
+  b c
+  $ echo ${@:0}
+  ./bash 1 2 3 4 5 6 7 8 9 0 a b c d e f g h
+  $ echo ${@:0:2}
+  ./bash 1
+  $ echo ${@: -7:0}
+  ```
   If *parameter* is an indexed array name subscripted by ‘`@`’ or ‘`*`’, the result is the *length* members of the array beginning with `${parameter[offset]}`. A negative *offset* is taken relative to one greater than the maximum index of the specified array. It is an expansion error if *length* evaluates to a number less than zero.
   These examples show how you can use substring expansion with indexed arrays:
-  `$ array=(0 1 2 3 4 5 6 7 8 9 0 a b c d e f g h) $ echo ${array[@]:7} 7 8 9 0 a b c d e f g h $ echo ${array[@]:7:2} 7 8 $ echo ${array[@]: -7:2} b c $ echo ${array[@]: -7:-2} bash: -2: substring expression < 0 $ echo ${array[@]:0} 0 1 2 3 4 5 6 7 8 9 0 a b c d e f g h $ echo ${array[@]:0:2} 0 1 $ echo ${array[@]: -7:0}`
+  ```
+  $ array=(0 1 2 3 4 5 6 7 8 9 0 a b c d e f g h)
+  $ echo ${array[@]:7}
+  7 8 9 0 a b c d e f g h
+  $ echo ${array[@]:7:2}
+  7 8
+  $ echo ${array[@]: -7:2}
+  b c
+  $ echo ${array[@]: -7:-2}
+  bash: -2: substring expression < 0
+  $ echo ${array[@]:0}
+  0 1 2 3 4 5 6 7 8 9 0 a b c d e f g h
+  $ echo ${array[@]:0:2}
+  0 1
+  $ echo ${array[@]: -7:0}
+  ```
   Substring expansion applied to an associative array produces undefined results.
   Substring indexing is zero-based unless the positional parameters are used, in which case the indexing starts at 1 by default. If *offset* is 0, and the positional parameters are used, `$0` is prefixed to the list.
 - `${!prefix*}`
@@ -869,12 +1094,31 @@ When not performing substring expansion, using the forms described below (e.g., 
   If the `patsub_replacement` shell option is enabled using `shopt` (see [The Shopt Builtin](#The-Shopt-Builtin)), any unquoted instances of ‘`&`’ in *string* are replaced with the matching portion of *pattern*. This is intended to duplicate a common `sed` idiom.
   Quoting any part of *string* inhibits replacement in the expansion of the quoted portion, including replacement strings stored in shell variables. Backslash escapes ‘`&`’ in *string*; the backslash is removed in order to permit a literal ‘`&`’ in the replacement string. Users should take care if *string* is double-quoted to avoid unwanted interactions between the backslash and double-quoting, since backslash has special meaning within double quotes. Pattern substitution performs the check for unquoted ‘`&`’ after expanding *string*, so users should ensure to properly quote any occurrences of ‘`&`’ they want to be taken literally in the replacement and ensure any instances of ‘`&`’ they want to be replaced are unquoted.
   For instance,
-  `var=abcdef rep='& ' echo ${var/abc/& } echo "${var/abc/& }" echo ${var/abc/$rep} echo "${var/abc/$rep}"`
+  ```
+  var=abcdef
+  rep='& '
+  echo ${var/abc/& }
+  echo "${var/abc/& }"
+  echo ${var/abc/$rep}
+  echo "${var/abc/$rep}"
+  ```
   will display four lines of "abc def", while
-  `var=abcdef rep='& ' echo ${var/abc/\& } echo "${var/abc/\& }" echo ${var/abc/"& "} echo ${var/abc/"$rep"}`
+  ```
+  var=abcdef
+  rep='& '
+  echo ${var/abc/\& }
+  echo "${var/abc/\& }"
+  echo ${var/abc/"& "}
+  echo ${var/abc/"$rep"}
+  ```
   will display four lines of "& def". Like the pattern removal operators, double quotes surrounding the replacement string quote the expanded characters, while double quotes enclosing the entire parameter substitution do not, since the expansion is performed in a context that doesn’t take any enclosing double quotes into account.
   Since backslash can escape ‘`&`’, it can also escape a backslash in the replacement string. This means that ‘`\\`’ will insert a literal backslash into the replacement, so these two `echo` commands
-  `var=abcdef rep='\\&xyz' echo ${var/abc/\\&xyz} echo ${var/abc/$rep}`
+  ```
+  var=abcdef
+  rep='\\&xyz'
+  echo ${var/abc/\\&xyz}
+  echo ${var/abc/$rep}
+  ```
   will both output ‘`\abcxyzdef`’.
   It should rarely be necessary to enclose only *string* in double quotes.
   If the `nocasematch` shell option (see the description of `shopt` in [The Shopt Builtin](#The-Shopt-Builtin)) is enabled, the match is performed without regard to the case of alphabetic characters.
@@ -914,11 +1158,15 @@ When not performing substring expansion, using the forms described below (e.g., 
 
 Command substitution allows the output of a command to replace the command itself. The standard form of command substitution occurs when a command is enclosed as follows:
 
-> $(command)
+```
+$(command)
+```
 
 or (deprecated)
 
-> `command`.
+```
+`command`.
+```
 
 Bash performs command substitution by executing `command` in a subshell environment and replacing the command substitution with the standard output of the command, with any trailing newlines deleted. Embedded newlines are not deleted, but they may be removed during word splitting. The command substitution `$(cat file)` can be replaced by the equivalent but faster `$(< file)`.
 
@@ -960,7 +1208,9 @@ If the substitution appears within double quotes, Bash does not perform word spl
 
 Arithmetic expansion evaluates an arithmetic expression and substitutes the result. The format for arithmetic expansion is:
 
-> $((expression))
+```
+$(( expression ))
+```
 
 The `expression` undergoes the same expansions as if it were within double quotes, but unescaped double quote characters in `expression` are not treated specially and are removed. All tokens in the expression undergo parameter and variable expansion, command substitution, and quote removal. The result is treated as the arithmetic expression to be evaluated. Since the way Bash handles double quotes can potentially result in empty strings, arithmetic expansion treats those as expressions that evaluate to 0. Arithmetic expansions may be nested.
 
@@ -968,11 +1218,15 @@ The evaluation is performed according to the rules listed below (see [Shell Arit
 
 Process substitution allows a process’s input or output to be referred to using a filename. It takes the form of
 
-> <(list)
+```
+<(list)
+```
 
 or
 
-> >(list)
+```
+>(list)
+```
 
 The process `list` is run asynchronously, and its input or output appears as a filename. This filename is passed as an argument to the current command as the result of the expansion.
 
@@ -1029,12 +1283,15 @@ The special pattern characters have the following meanings:
   The sorting order of characters in range expressions, and the characters included in the range, are determined by the current locale and the values of the `LC_COLLATE` and `LC_ALL` shell variables, if set.
   For example, in the default C locale, ‘`[a-dx-z]`’ is equivalent to ‘`[abcdxyz]`’. Many locales sort characters in dictionary order, and in these locales ‘`[a-dx-z]`’ is typically not equivalent to ‘`[abcdxyz]`’; it might be equivalent to ‘`[aBbCcDdxYyZz]`’, for example. To obtain the traditional interpretation of ranges in bracket expressions, you can force the use of the C locale by setting the `LC_COLLATE` or `LC_ALL` environment variable to the value ‘`C`’, or enable the `globasciiranges` shell option.
   Within a bracket expression, *character classes* can be specified using the syntax `[:`*class*`:]`, where *class* is one of the following classes defined in the POSIX standard:
-  > alnum alpha ascii blank cntrl digit graph lower print punct space upper word xdigit
-
+  ```
+  alnum   alpha   ascii   blank   cntrl   digit   graph   lower
+  print   punct   space   upper   word    xdigit
+  ```
   A character class matches any character belonging to that class. The `word` character class matches letters, digits, and the character ‘`_`’.
   For instance, the following pattern will match any character belonging to the `space` character class in the current locale, then any upper case letter or ‘`!`’, a dot, and finally any lower case letter or a hyphen.
-  > [[:space:]][[:upper:]!].[-[:lower:]]
-
+  ```
+  [[:space:]][[:upper:]!].[-[:lower:]]
+  ```
   Within a bracket expression, an *equivalence class* can be specified using the syntax `[=`*c*`=]`, which matches all characters with the same collation weight (as defined by the current locale) as the character *c*.
   Within a bracket expression, the syntax `[.`*symbol*`.]` matches the collating symbol *symbol*.
 
@@ -1069,11 +1326,15 @@ The `word` following the redirection operator in the following descriptions, unl
 
 The order of redirections is significant. For example, the command
 
-> ls >dirlist2>&1
+```
+ls > dirlist 2>&1
+```
 
 directs both standard output (file descriptor 1) and standard error (file descriptor 2) to the file `dirlist`, while the command
 
-> ls 2>&1 >dirlist
+```
+ls 2>&1 > dirlist
+```
 
 directs only the standard output to file `dirlist`, because the standard error was made a copy of the standard output before the standard output was redirected to `dirlist`.
 
@@ -1111,13 +1372,17 @@ Redirecting input opens the file whose name results from the expansion of `word`
 
 The general format for redirecting input is:
 
-> [n]<word
+```
+[n]<word
+```
 
 Redirecting output opens the file whose name results from the expansion of `word` for writing on file descriptor `n`, or the standard output (file descriptor 1) if `n` is not specified. If the file does not exist it is created; if it does exist it is truncated to zero size.
 
 The general format for redirecting output is:
 
-> [n]>[|]word
+```
+[n]>[|]word
+```
 
 If the redirection operator is ‘`>`’, and the `noclobber` option to the `set` builtin command has been enabled, the redirection fails if the file whose name results from the expansion of `word` exists and is a regular file. If the redirection operator is ‘`>|`’, or the redirection operator is ‘`>`’ and the `noclobber` option to the `set` builtin is not enabled, Bash attempts the redirection even if the file named by `word` exists.
 
@@ -1125,21 +1390,29 @@ Redirecting output in this fashion opens the file whose name results from the ex
 
 The general format for appending output is:
 
-> [n]>>word
+```
+[n]>>word
+```
 
 This construct redirects both the standard output (file descriptor 1) and the standard error output (file descriptor 2) to the file whose name is the expansion of `word`.
 
 There are two formats for redirecting standard output and standard error:
 
-> &>word
+```
+&>word
+```
 
 and
 
-> >&word
+```
+>&word
+```
 
 Of the two forms, the first is preferred. This is semantically equivalent to
 
-> >word2>&1
+```
+>word 2>&1
+```
 
 When using the second form, `word` may not expand to a number or ‘`-`’. If it does, other redirection operators apply (see Duplicating File Descriptors below) for compatibility reasons.
 
@@ -1147,11 +1420,15 @@ This construct appends both the standard output (file descriptor 1) and the stan
 
 The format for appending standard output and standard error is:
 
-> &>>word
+```
+&>>word
+```
 
 This is semantically equivalent to
 
-> >>word2>&1
+```
+>>word 2>&1
+```
 
 (see Duplicating File Descriptors below).
 
@@ -1159,7 +1436,11 @@ This type of redirection instructs the shell to read input from the current sour
 
 The format of here-documents is:
 
-> [n]<<[−]wordhere-documentdelimiter
+```
+[n]<<[−]word
+        here-document
+delimiter
+```
 
 The shell does not perform parameter and variable expansion, command substitution, arithmetic expansion, or filename expansion on `word`.
 
@@ -1171,37 +1452,49 @@ If the delimiter is not quoted, the `\<newline>` sequence is treated as a line c
 
 A variant of here documents, the format is:
 
-> [n]<<<word
+```
+[n]<<< word
+```
 
 The `word` undergoes tilde expansion, parameter and variable expansion, command substitution, arithmetic expansion, and quote removal. Filename expansion and word splitting are not performed. The result is supplied as a single string, with a newline appended, to the command on its standard input (or file descriptor `n` if `n` is specified).
 
 The redirection operator
 
-> [n]<&word
+```
+[n]<&word
+```
 
 is used to duplicate input file descriptors. If `word` expands to one or more digits, file descriptor `n` is made to be a copy of that file descriptor. It is a redirection error if the digits in `word` do not specify a file descriptor open for input. If `word` evaluates to ‘`-`’, file descriptor `n` is closed. If `n` is not specified, this uses the standard input (file descriptor 0).
 
 The operator
 
-> [n]>&word
+```
+[n]>&word
+```
 
 is used similarly to duplicate output file descriptors. If `n` is not specified, this uses the standard output (file descriptor 1). It is a redirection error if the digits in `word` do not specify a file descriptor open for output. If `word` evaluates to ‘`-`’, file descriptor `n` is closed. As a special case, if `n` is omitted, and `word` does not expand to one or more digits or ‘`-`’, this redirects the standard output and standard error as described previously.
 
 The redirection operator
 
-> [n]<&digit-
+```
+[n]<&digit-
+```
 
 moves the file descriptor `digit` to file descriptor `n`, or the standard input (file descriptor 0) if `n` is not specified. `digit` is closed after being duplicated to `n`.
 
 Similarly, the redirection operator
 
-> [n]>&digit-
+```
+[n]>&digit-
+```
 
 moves the file descriptor `digit` to file descriptor `n`, or the standard output (file descriptor 1) if `n` is not specified.
 
 The redirection operator
 
-> [n]<>word
+```
+[n]<>word
+```
 
 opens the file whose name is the expansion of `word` for both reading and writing on file descriptor `n`, or on file descriptor 0 if `n` is not specified. If the file does not exist, it is created.
 
@@ -1231,7 +1524,7 @@ After a command has been split into words, if it results in a simple command and
 2. If the name does not match a function, the shell searches for it in the list of shell builtins. If a match is found, that builtin is invoked.
 3. If the name is neither a shell function nor a builtin, and contains no slashes, Bash searches each element of `$PATH` for a directory containing an executable file by that name. Bash uses a hash table to remember the full pathnames of executable files to avoid multiple `PATH` searches (see the description of `hash` in [Bourne Shell Builtins](#Bourne-Shell-Builtins)). Bash performs a full search of the directories in `$PATH` only if the command is not found in the hash table. If the search is unsuccessful, the shell searches for a defined shell function named `command_not_found_handle`. If that function exists, it is invoked in a separate execution environment with the original command and the original command’s arguments as its arguments, and the function’s exit status becomes the exit status of that subshell. If that function is not defined, the shell prints an error message and returns an exit status of 127.
 4. If the search is successful, or if the command name contains one or more slashes, the shell executes the named program in a separate execution environment. Argument 0 is set to the name given, and the remaining arguments to the command are set to the arguments supplied, if any.
-5. If this execution fails because the file is not in executable format, and the file is not a directory, it is assumed to be a *shell script*, a file containing shell commands, and the shell executes it as described in[Shell Scripts](#Shell-Scripts).
+5. If this execution fails because the file is not in executable format, and the file is not a directory, it is assumed to be a *shell script*, a file containing shell commands, and the shell executes it as described in [Shell Scripts](#Shell-Scripts).
 6. If the command was not begun asynchronously, the shell waits for the command to complete and collects its exit status.
 
 The shell has an *execution environment*, which consists of the following:
@@ -1324,11 +1617,15 @@ When Bash runs a shell script, it sets the special parameter `0` to the name of 
 
 A shell script may be made executable by using the `chmod` command to turn on the execute bit. When Bash finds such a file while searching the `$PATH` for a command, it creates a new instance of itself to execute it. In other words, executing
 
-> filenamearguments
+```
+filename arguments
+```
 
 is equivalent to executing
 
-> bash filenamearguments
+```
+bash filename arguments
+```
 
 if `filename` is an executable shell script. This subshell reinitializes itself, so that the effect is as if a new shell had been invoked to interpret the script, with the exception that the locations of commands remembered by the parent (see the description of `hash` in [Bourne Shell Builtins](#Bourne-Shell-Builtins)) are retained by the child.
 
@@ -1355,24 +1652,29 @@ Unless otherwise noted, each builtin command documented as accepting options pre
 
 The following shell builtin commands are inherited from the Bourne Shell. These commands are implemented as specified by the POSIX standard.
 
-- `: (a colon)`[¶](#index-_003a)
-- > : [`arguments`]
-
+- `: (a colon)` [¶](#index-_003a)
+- ```
+  : [arguments]
+  ```
   Do nothing beyond expanding *arguments* and performing redirections. The return status is zero.
-- `. (a period)`[¶](#index-_002e)
-- > . [-p `path`]`filename`[`arguments`]
-
+- `. (a period)` [¶](#index-_002e)
+- ```
+  . [-p path] filename [arguments]
+  ```
   The `.` command reads and execute commands from the *filename* argument in the current shell context.
   If *filename* does not contain a slash, `.` searches for it. If `-p` is supplied, `.` treats *path* as a colon-separated list of directories in which to find *filename*; otherwise, `.` uses the directories in `PATH` to find *filename*. *filename* does not need to be executable. When Bash is not in POSIX mode, it searches the current directory if *filename* is not found in `$PATH`, but does not search the current directory if `-p` is supplied. If the `sourcepath` option (see [The Shopt Builtin](#The-Shopt-Builtin)) is turned off, `.` does not search `PATH`.
   If any *arguments* are supplied, they become the positional parameters when *filename* is executed. Otherwise the positional parameters are unchanged.
   If the `-T` option is enabled, `.` inherits any trap on `DEBUG`; if it is not, any `DEBUG` trap string is saved and restored around the call to `.`, and `.` unsets the `DEBUG` trap while it executes. If `-T` is not set, and the sourced file changes the `DEBUG` trap, the new value persists after `.` completes. The return status is the exit status of the last command executed from *filename*, or zero if no commands are executed. If *filename* is not found, or cannot be read, the return status is non-zero. This builtin is equivalent to `source`.
-- `break`[¶](#index-break)
-- > break [`n`]
-
+- `break` [¶](#index-break)
+- ```
+  break [n]
+  ```
   Exit from a `for`, `while`, `until`, or `select` loop. If *n* is supplied, `break` exits the *n*th enclosing loop. *n* must be greater than or equal to 1. The return status is zero unless *n* is not greater than or equal to 1.
-- `cd`[¶](#index-cd)
-- > cd [-L] [-@] [`directory`] cd -P [-e] [-@] [`directory`]
-
+- `cd` [¶](#index-cd)
+- ```
+  cd [-L] [-@] [directory]
+  cd -P [-e] [-@] [directory]
+  ```
   Change the current working directory to *directory*. If *directory* is not supplied, the value of the `HOME` shell variable is used as *directory*. If the shell variable `CDPATH` exists, and *directory* does not begin with a slash, `cd` uses it as a search path: `cd` searches each directory name in `CDPATH` for *directory*, with alternative directory names in `CDPATH` separated by a colon (‘`:`’). A null directory name in `CDPATH` means the same thing as the current directory.
   The `-P` option means not to follow symbolic links: symbolic links are resolved while `cd` is traversing *directory* and before processing an instance of `..` in *directory*.
   By default, or when the `-L` option is supplied, symbolic links in *directory* are resolved after `cd` processes an instance of `..` in *directory*.
@@ -1383,38 +1685,45 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   If `cd` uses a non-empty directory name from `CDPATH`, or if ‘`-`’ is the first argument, and the directory change is successful, `cd` writes the absolute pathname of the new working directory to the standard output.
   If the directory change is successful, `cd` sets the value of the `PWD` environment variable to the new directory name, and sets the `OLDPWD` environment variable to the value of the current working directory before the change.
   The return status is zero if the directory is successfully changed, non-zero otherwise.
-- `continue`[¶](#index-continue)
-- > continue [`n`]
-
+- `continue` [¶](#index-continue)
+- ```
+  continue [n]
+  ```
   `continue` resumes the next iteration of an enclosing `for`, `while`, `until`, or `select` loop. If *n* is supplied, Bash resumes the execution of the *n*th enclosing loop. *n* must be greater than or equal to 1. The return status is zero unless *n* is not greater than or equal to 1.
-- `eval`[¶](#index-eval)
-- > eval [`arguments`]
-
+- `eval` [¶](#index-eval)
+- ```
+  eval [arguments]
+  ```
   The *arguments* are concatenated together into a single command, separated by spaces. Bash then reads and executes this command and returns its exit status as the exit status of `eval`. If there are no arguments or only empty arguments, the return status is zero.
-- `exec`[¶](#index-exec)
-- > exec [-cl] [-a `name`] [`command`[`arguments`]]
-
+- `exec` [¶](#index-exec)
+- ```
+  exec [-cl] [-a name] [command [arguments]]
+  ```
   If *command* is supplied, it replaces the shell without creating a new process. *command* cannot be a shell builtin or function. The *arguments* become the arguments to *command* If the `-l` option is supplied, the shell places a dash at the beginning of the zeroth argument passed to *command*. This is what the `login` program does. The `-c` option causes *command* to be executed with an empty environment. If `-a` is supplied, the shell passes *name* as the zeroth argument to *command*.
   If *command* cannot be executed for some reason, a non-interactive shell exits, unless the `execfail` shell option is enabled. In that case, it returns a non-zero status. An interactive shell returns a non-zero status if the file cannot be executed. A subshell exits unconditionally if `exec` fails.
   If *command* is not specified, redirections may be used to affect the current shell environment. If there are no redirection errors, the return status is zero; otherwise the return status is non-zero.
-- `exit`[¶](#index-exit)
-- > exit [`n`]
-
+- `exit` [¶](#index-exit)
+- ```
+  exit [n]
+  ```
   Exit the shell, returning a status of *n* to the shell’s parent. If *n* is omitted, the exit status is that of the last command executed. Any trap on `EXIT` is executed before the shell terminates.
-- `export`[¶](#index-export)
-- > export [-fn] [-p] [`name`[=`value`]]
-
+- `export` [¶](#index-export)
+- ```
+  export [-fn] [-p] [name[=value]]
+  ```
   Mark each *name* to be passed to subsequently executed commands in the environment. If the `-f` option is supplied, the *name*s refer to shell functions; otherwise the names refer to shell variables.
   The `-n` option means to unexport each name: no longer mark it for export. If no *name*s are supplied, or if only the `-p` option is given, `export` displays a list of names of all exported variables on the standard output. Using `-p` and `-f` together displays exported functions. The `-p` option displays output in a form that may be reused as input.
   `export` allows the value of a variable to be set at the same time it is exported or unexported by following the variable name with =*value*. This sets the value of the variable is to *value* while modifying the export attribute.
   The return status is zero unless an invalid option is supplied, one of the names is not a valid shell variable name, or `-f` is supplied with a name that is not a shell function.
-- `false`[¶](#index-false)
-- > false
-
+- `false` [¶](#index-false)
+- ```
+  false
+  ```
   Does nothing; returns a non-zero status.
-- `getopts`[¶](#index-getopts)
-- > getopts `optstring``name`[`arg`...]
-
+- `getopts` [¶](#index-getopts)
+- ```
+  getopts optstring name [arg ...]
+  ```
   `getopts` is used by shell scripts or functions to parse positional parameters and obtain options and their arguments. *optstring* contains the option characters to be recognized; if a character is followed by a colon, the option is expected to have an argument, which should be separated from it by whitespace. The colon (‘`:`’) and question mark (‘`?`’) may not be used as option characters.
   Each time it is invoked, `getopts` places the next option in the shell variable *name*, initializing *name* if it does not exist, and the index of the next argument to be processed into the variable `OPTIND`. `OPTIND` is initialized to 1 each time the shell or a shell script is invoked. When an option requires an argument, `getopts` places that argument into the variable `OPTARG`.
   The shell does not reset `OPTIND` automatically; it must be manually reset between multiple calls to `getopts` within the same shell invocation to use a new set of parameters.
@@ -1424,39 +1733,45 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   If `getopts` detects an invalid option, it places ‘`?`’ into *name* and, if not silent, prints an error message and unsets `OPTARG`. If `getopts` is silent, it assigns the option character found to `OPTARG` and does not print a diagnostic message.
   If a required argument is not found, and `getopts` is not silent, it sets the value of *name* to a question mark (‘`?`’), unsets `OPTARG`, and prints a diagnostic message. If `getopts` is silent, it sets the value of *name* to a colon (‘`:`’), and sets `OPTARG` to the option character found.
   `getopts` returns true if an option, specified or unspecified, is found. It returns false when it encounters the end of options or if an error occurs.
-- `hash`[¶](#index-hash)
-- > hash [-r] [-p `filename`] [-dt] [`name`]
-
+- `hash` [¶](#index-hash)
+- ```
+  hash [-r] [-p filename] [-dt] [name]
+  ```
   Each time `hash` is invoked, it remembers the full filenames of the commands specified as *name* arguments, so they need not be searched for on subsequent invocations. The commands are found by searching through the directories listed in `$PATH`. Any previously-remembered filename associated with *name* is discarded. The `-p` option inhibits the path search, and `hash` uses *filename* as the location of *name*.
   The `-r` option causes the shell to forget all remembered locations. Assigning to the `PATH` variable also clears all hashed filenames. The `-d` option causes the shell to forget the remembered location of each *name*.
   If the `-t` option is supplied, `hash` prints the full pathname corresponding to each *name*. If multiple *name* arguments are supplied with `-t`, `hash` prints each *name* before the corresponding hashed full path. The `-l` option displays output in a format that may be reused as input.
   If no arguments are given, or if only `-l` is supplied, `hash` prints information about remembered commands. The `-t`, `-d`, and `-p` options (the options that act on the *name* arguments) are mutually exclusive. Only one will be active. If more than one is supplied, `-t` has higher priority than `-p`, and both have higher priority than `-d`.
   The return status is zero unless a *name* is not found or an invalid option is supplied.
-- `pwd`[¶](#index-pwd)
-- > pwd [-LP]
-
+- `pwd` [¶](#index-pwd)
+- ```
+  pwd [-LP]
+  ```
   Print the absolute pathname of the current working directory. If the `-P` option is supplied, or the `-o physical` option to the `set` builtin (see [The Set Builtin](#The-Set-Builtin)) is enabled, the pathname printed will not contain symbolic links. If the `-L` option is supplied, the pathname printed may contain symbolic links. The return status is zero unless an error is encountered while determining the name of the current directory or an invalid option is supplied.
-- `readonly`[¶](#index-readonly)
-- > readonly [-aAf] [-p] [`name`[=`value`]] ...
-
+- `readonly` [¶](#index-readonly)
+- ```
+  readonly [-aAf] [-p] [name[=value]] ...
+  ```
   Mark each *name* as readonly. The values of these names may not be changed by subsequent assignment or unset. If the `-f` option is supplied, each *name* refers to a shell function. The `-a` option means each *name* refers to an indexed array variable; the `-A` option means each *name* refers to an associative array variable. If both options are supplied, `-A` takes precedence. If no *name* arguments are supplied, or if the `-p` option is supplied, print a list of all readonly names. The other options may be used to restrict the output to a subset of the set of readonly names. The `-p` option displays output in a format that may be reused as input.
   `readonly` allows the value of a variable to be set at the same time the readonly attribute is changed by following the variable name with =*value*. This sets the value of the variable is to *value* while modifying the readonly attribute.
   The return status is zero unless an invalid option is supplied, one of the *name* arguments is not a valid shell variable or function name, or the `-f` option is supplied with a name that is not a shell function.
-- `return`[¶](#index-return)
-- > return [`n`]
-
+- `return` [¶](#index-return)
+- ```
+  return [n]
+  ```
   Stop executing a shell function or sourced file and return the value *n* to its caller. If *n* is not supplied, the return value is the exit status of the last command executed. If `return` is executed by a trap handler, the last command used to determine the status is the last command executed before the trap handler. If `return` is executed during a `DEBUG` trap, the last command used to determine the status is the last command executed by the trap handler before `return` was invoked.
   When `return` is used to terminate execution of a script being executed with the `.` (`source`) builtin, it returns either *n* or the exit status of the last command executed within the script as the exit status of the script. If *n* is supplied, the return value is its least significant 8 bits.
   Any command associated with the `RETURN` trap is executed before execution resumes after the function or script.
   The return status is non-zero if `return` is supplied a non-numeric argument or is used outside a function and not during the execution of a script by `.` or `source`.
-- `shift`[¶](#index-shift)
-- > shift [`n`]
-
+- `shift` [¶](#index-shift)
+- ```
+  shift [n]
+  ```
   Shift the positional parameters to the left by *n*: the positional parameters from *n*+1 … `$#` are renamed to `$1` … `$#`-*n*. Parameters represented by the numbers `$#` down to `$#`-*n*+1 are unset. *n* must be a non-negative number less than or equal to `$#`. If *n* is not supplied, it is assumed to be 1. If *n* is zero or greater than `$#`, the positional parameters are not changed. The return status is zero unless *n* is greater than `$#` or less than zero, non-zero otherwise.
-- `test`[¶](#index-test)
+- `test` [¶](#index-test)
 - `[`
-- > test `expr`
-
+- ```
+  test expr
+  ```
   Evaluate a conditional expression *expr* and return a status of 0 (true) or 1 (false). Each operator and operand must be a separate argument. Expressions are composed of the primaries described below in [Bash Conditional Expressions](#Bash-Conditional-Expressions). `test` does not accept any options, nor does it accept and ignore an argument of `--` as signifying the end of options. When using the `[` form, the last argument to the command must be a `]`.
   Expressions may be combined using the following operators, listed in decreasing order of precedence. The evaluation depends on the number of arguments; see below. `test` uses operator precedence when there are five or more arguments.
   - `! expr`
@@ -1480,7 +1795,6 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
     2. If the first argument is ‘`!`’, the value is the negation of the two-argument test using the second and third arguments.
     3. If the first argument is exactly ‘`(`’ and the third argument is exactly ‘`)`’, the result is the one-argument test of the second argument.
     4. Otherwise, the expression is false.
-  - If the second argument is one of the binary conditional operators (see
   - 4 arguments
   - The following conditions are applied in the order listed.
     1. If the first argument is ‘`!`’, the result is the negation of the three-argument expression composed of the remaining arguments.
@@ -1490,17 +1804,22 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   - The expression is parsed and evaluated according to precedence using the rules listed above.
   If the shell is in POSIX mode, or if the expression is part of the `[[` command, the ‘`<`’ and ‘`>`’ operators sort using the current locale. If the shell is not in POSIX mode, the `test` and ‘`[`’ commands sort lexicographically using ASCII ordering.
   The historical operator-precedence parsing with 4 or more arguments can lead to ambiguities when it encounters strings that look like primaries. The POSIX standard has deprecated the `-a` and `-o` primaries and enclosing expressions within parentheses. Scripts should no longer use them. It’s much more reliable to restrict test invocations to a single primary, and to replace uses of `-a` and `-o` with the shell’s `&&` and `||` list operators. For example, use
-  > test -n string1 && test -n string2
-
+  ```
+  test -n string1 && test -n string2
+  ```
   instead of
-  > test -n string1 -a -n string2
-- `times`[¶](#index-times)
-- > times
-
+  ```
+  test -n string1 -a -n string2
+  ```
+- `times` [¶](#index-times)
+- ```
+  times
+  ```
   Print out the user and system times used by the shell and its children. The return status is zero.
-- `trap`[¶](#index-trap)
-- > trap [-lpP] [`action`] [`sigspec`...]
-
+- `trap` [¶](#index-trap)
+- ```
+  trap [-lpP] [action] [sigspec ...]
+  ```
   The *action* is a command that is read and executed when the shell receives any of the signals *sigspec*. If *action* is absent (and there is a single *sigspec*) or equal to ‘`-`’, each specified *sigspec*’s disposition is reset to the value it had when the shell was started. If *action* is the null string, then the signal specified by each *sigspec* is ignored by the shell and commands it invokes.
   If no arguments are supplied, `trap` prints the actions associated with each trapped signal as a set of `trap` commands that can be reused as shell input to restore the current signal dispositions.
   If *action* is not present and `-p` has been supplied, `trap` displays the trap commands associated with each *sigspec*, or, if no *sigspec*s are supplied, for all trapped signals, as a set of `trap` commands that can be reused as shell input to restore the current signal dispositions. The `-P` option behaves similarly, but displays only the actions associated with each *sigspec* argument. `-P` requires at least one *sigspec* argument. The `-P` or `-p` options may be used in a subshell environment (e.g., command substitution) and, as long as they are used before `trap` is used to change a signal’s handling, will display the state of its parent’s traps.
@@ -1509,29 +1828,41 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   If a *sigspec* is `ERR`, *action* is executed whenever a pipeline (which may consist of a single simple command), a list, or a compound command returns a non-zero exit status, subject to the following conditions. The `ERR` trap is not executed if the failed command is part of the command list immediately following an `until` or `while` reserved word, part of the test following the `if` or `elif` reserved words, part of a command executed in a `&&` or `||` list except the command following the final `&&` or `||`, any command in a pipeline but the last, (subject to the state of the `pipefail` shell option), or if the command’s return status is being inverted using `!`. These are the same conditions obeyed by the `errexit` (`-e`) option.
   When the shell is not interactive, signals ignored upon entry to a non-interactive shell cannot be trapped or reset. Interactive shells permit trapping signals ignored on entry. Trapped signals that are not being ignored are reset to their original values in a subshell or subshell environment when one is created.
   The return status is zero unless a *sigspec* does not specify a valid signal; non-zero otherwise.
-- `true`[¶](#index-true)
-- > true
-
+- `true` [¶](#index-true)
+- ```
+  true
+  ```
   Does nothing, returns a 0 status.
-- `umask`[¶](#index-umask)
-- > umask [-p] [-S] [`mode`]
-
+- `umask` [¶](#index-umask)
+- ```
+  umask [-p] [-S] [mode]
+  ```
   Set the shell process’s file creation mask to *mode*. If *mode* begins with a digit, it is interpreted as an octal number; if not, it is interpreted as a symbolic mode mask similar to that accepted by the `chmod` command. If *mode* is omitted, `umask` prints the current value of the mask. If the `-S` option is supplied without a *mode* argument, `umask` prints the mask in a symbolic format; the default output is an octal number. If the `-p` option is supplied, and *mode* is omitted, the output is in a form that may be reused as input. The return status is zero if the mode is successfully changed or if no *mode* argument is supplied, and non-zero otherwise.
   Note that when the mode is interpreted as an octal number, each number of the umask is subtracted from `7`. Thus, a umask of `022` results in permissions of `755`.
-- `unset`[¶](#index-unset)
-- > unset [-fnv] [`name`]
-
+- `unset` [¶](#index-unset)
+- ```
+  unset [-fnv] [name]
+  ```
   Remove each variable or function *name*. If the `-v` option is given, each *name* refers to a shell variable and that variable is removed. If the `-f` option is given, the *name*s refer to shell functions, and the function definition is removed. If the `-n` option is supplied, and *name* is a variable with the `nameref` attribute, *name* will be unset rather than the variable it references. `-n` has no effect if the `-f` option is supplied. If no options are supplied, each *name* refers to a variable; if there is no variable by that name, a function with that name, if any, is unset. Readonly variables and functions may not be unset. When variables or functions are removed, they are also removed from the environment passed to subsequent commands. Some shell variables may not be unset. Some shell variables lose their special behavior if they are unset; such behavior is noted in the description of the individual variables. The return status is zero unless a *name* is readonly or may not be unset.
 
 This section describes builtin commands which are unique to or have been extended in Bash. Some of these commands are specified in the POSIX standard.
 
-- `alias`[¶](#index-alias)
-- > alias [-p] [`name`[=`value`] ...]
-
+- `alias` [¶](#index-alias)
+- ```
+  alias [-p] [name[=value] ...]
+  ```
   Without arguments or with the `-p` option, `alias` prints the list of aliases on the standard output in a form that allows them to be reused as input. If arguments are supplied, define an alias for each *name* whose *value* is given. If no *value* is given, print the name and value of the alias *name*. A trailing space in *value* causes the next word to be checked for alias substitution when the alias is expanded during command parsing. `alias` returns true unless a *name* is given (without a corresponding =*value*) for which no alias has been defined. Aliases are described in [Aliases](#Aliases).
-- `bind`[¶](#index-bind)
-- > bind [-m `keymap`] [-lsvSVX] bind [-m`keymap`] [-q`function`] [-u`function`] [-r`keyseq`] bind [-m`keymap`] -f`filename`bind [-m`keymap`] -x`keyseq[: ]shell-command`bind [-m`keymap`]`keyseq:function-name`bind [-m`keymap`]`keyseq:readline-command`bind [-m`keymap`] -p|-P [`readline-command`] bind`readline-command-line`
-
+- `bind` [¶](#index-bind)
+- ```
+  bind [-m keymap] [-lsvSVX]
+  bind [-m keymap] [-q function] [-u function] [-r keyseq]
+  bind [-m keymap] -f filename
+  bind [-m keymap] -x keyseq[: ]shell-command
+  bind [-m keymap] keyseq:function-name
+  bind [-m keymap] keyseq:readline-command
+  bind [-m keymap] -p|-P [readline-command]
+  bind readline-command-line
+  ```
   Display current Readline (see [Command Line Editing](#Command-Line-Editing)) key and function bindings, bind a key sequence to a Readline function or macro or to a shell command, or set a Readline variable. Each non-option argument is a key binding or command as it would appear in a Readline initialization file (see [Readline Init File](#Readline-Init-File)), but each binding or command must be passed as a separate argument; e.g., ‘`"\C-x\C-r":re-read-init-file`’.
   In the following descriptions, options that display output in a form available to be re-read format their output as commands that would appear in a Readline initialization file or that would be supplied as individual arguments to a `bind` command.
   Options, if supplied, have the following meanings:
@@ -1564,24 +1895,28 @@ This section describes builtin commands which are unique to or have been extende
   - `-X`
   - List all key sequences bound to shell commands and the associated commands in a format that can be reused as an argument to a subsequent `bind` command.
   The return status is zero unless an invalid option is supplied or an error occurs.
-- `builtin`[¶](#index-builtin)
-- > builtin [`shell-builtin`[`args`]]
-
+- `builtin` [¶](#index-builtin)
+- ```
+  builtin [shell-builtin [args]]
+  ```
   Execute the specified shell builtin *shell-builtin*, passing it *args*, and return its exit status. This is useful when defining a shell function with the same name as a shell builtin, retaining the functionality of the builtin within the function. The return status is non-zero if *shell-builtin* is not a shell builtin command.
-- `caller`[¶](#index-caller)
-- > caller [`expr`]
-
+- `caller` [¶](#index-caller)
+- ```
+  caller [expr]
+  ```
   Returns the context of any active subroutine call (a shell function or a script executed with the `.` or `source` builtins).
   Without *expr*, `caller` displays the line number and source filename of the current subroutine call. If a non-negative integer is supplied as *expr*, `caller` displays the line number, subroutine name, and source file corresponding to that position in the current execution call stack. This extra information may be used, for example, to print a stack trace. The current frame is frame 0.
   The return value is 0 unless the shell is not executing a subroutine call or *expr* does not correspond to a valid position in the call stack.
-- `command`[¶](#index-command)
-- > command [-pVv] `command`[`arguments`...]
-
+- `command` [¶](#index-command)
+- ```
+  command [-pVv] command [arguments ...]
+  ```
   The `command` builtin runs *command* with *arguments* ignoring any shell function named *command*. Only shell builtin commands or commands found by searching the `PATH` are executed. If there is a shell function named `ls`, running ‘`command ls`’ within the function will execute the external command `ls` instead of calling the function recursively. The `-p` option means to use a default value for `PATH` that is guaranteed to find all of the standard utilities. The return status in this case is 127 if *command* cannot be found or an error occurred, and the exit status of *command* otherwise.
   If either the `-V` or `-v` option is supplied, `command` prints a description of *command*. The `-v` option displays a single word indicating the command or file name used to invoke *command*; the `-V` option produces a more verbose description. In this case, the return status is zero if *command* is found, and non-zero if not.
-- `declare`[¶](#index-declare)
-- > declare [-aAfFgiIlnrtux] [-p] [`name`[=`value`] ...]
-
+- `declare` [¶](#index-declare)
+- ```
+  declare [-aAfFgiIlnrtux] [-p] [name[=value] ...]
+  ```
   Declare variables and give them attributes. If no *name*s are given, then display the values of variables or shell functions instead.
   The `-p` option will display the attributes and values of each *name*. When `-p` is used with *name* arguments, additional options, other than `-f` and `-F`, are ignored.
   When `-p` is supplied without *name* arguments, `declare` will display the attributes and values of all variables having the attributes specified by the additional options. If no other options are supplied with `-p`, `declare` will display the attributes and values of all shell variables. The `-f` option restricts the display to shell functions.
@@ -1613,9 +1948,10 @@ This section describes builtin commands which are unique to or have been extende
   When used in a function, `declare` makes each *name* local, as with the `local` command, unless the `-g` option is supplied. If a variable name is followed by =*value*, the value of the variable is set to *value*.
   When using `-a` or `-A` and the compound assignment syntax to create array variables, additional attributes do not take effect until subsequent assignments.
   The return status is zero unless an invalid option is encountered, an attempt is made to define a function using ‘`-f foo=bar`’, an attempt is made to assign a value to a readonly variable, an attempt is made to assign a value to an array variable without using the compound assignment syntax (see [Arrays](#Arrays)), one of the *name*s is not a valid shell variable name, an attempt is made to turn off readonly status for a readonly variable, an attempt is made to turn off array status for an array variable, or an attempt is made to display a non-existent function with `-f`.
-- `echo`[¶](#index-echo)
-- > echo [-neE] [`arg`...]
-
+- `echo` [¶](#index-echo)
+- ```
+  echo [-neE] [arg ...]
+  ```
   Output the *arg*s, separated by spaces, terminated with a newline. The return status is 0 unless a write error occurs. If `-n` is specified, the trailing newline is not printed.
   If the `-e` option is given, `echo` interprets the following backslash-escaped characters. The `-E` option disables interpretation of these escape characters, even on systems where they are interpreted by default. The `xpg_echo` shell option determines whether or not `echo` interprets any options and expands these escape characters. `echo` does not interpret `--` to mean the end of options.
   `echo` interprets the following escape sequences:
@@ -1649,18 +1985,20 @@ This section describes builtin commands which are unique to or have been extende
   - `\UHHHHHHHH`
   - The Unicode (ISO/IEC 10646) character whose value is the hexadecimal value *HHHHHHHH* (one to eight hex digits).
   `echo` writes any unrecognized backslash-escaped characters unchanged.
-- `enable`[¶](#index-enable)
-- > enable [-a] [-dnps] [-f `filename`] [`name`...]
-
+- `enable` [¶](#index-enable)
+- ```
+  enable [-a] [-dnps] [-f filename] [name ...]
+  ```
   Enable and disable builtin shell commands. Disabling a builtin allows an executable file which has the same name as a shell builtin to be executed without specifying a full pathname, even though the shell normally searches for builtins before files.
   If `-n` is supplied, the *name*s are disabled. Otherwise *name*s are enabled. For example, to use the `test` binary found using `$PATH` instead of the shell builtin version, type ‘`enable -n test`’.
   If the `-p` option is supplied, or no *name* arguments are supplied, print a list of shell builtins. With no other arguments, the list consists of all enabled shell builtins. The `-n` option means to print only disabled builtins. The `-a` option means to list each builtin with an indication of whether or not it is enabled. The `-s` option means to restrict `enable` to the POSIX special builtins.
   The `-f` option means to load the new builtin command *name* from shared object *filename*, on systems that support dynamic loading. If *filename* does not contain a slash. Bash will use the value of the `BASH_LOADABLES_PATH` variable as a colon-separated list of directories in which to search for *filename*. The default for `BASH_LOADABLES_PATH` is system-dependent, and may include "." to force a search of the current directory. The `-d` option will delete a builtin loaded with `-f`. If `-s` is used with `-f`, the new builtin becomes a POSIX special builtin (see [Special Builtins](#Special-Builtins)).
   If no options are supplied and a *name* is not a shell builtin, `enable` will attempt to load *name* from a shared object named *name*, as if the command were ‘`enable -f name name`’.
   The return status is zero unless a *name* is not a shell builtin or there is an error loading a new builtin from a shared object.
-- `help`[¶](#index-help)
-- > help [-dms] [`pattern`]
-
+- `help` [¶](#index-help)
+- ```
+  help [-dms] [pattern]
+  ```
   Display helpful information about builtin commands. If *pattern* is specified, `help` gives detailed help on all commands matching *pattern* as described below; otherwise it displays a list of all builtins and shell compound commands.
   Options, if supplied, have the following meanings:
   - `-d`
@@ -1672,24 +2010,29 @@ This section describes builtin commands which are unique to or have been extende
   If *pattern* contains pattern matching characters (see [Pattern Matching](#Pattern-Matching)) it’s treated as a shell pattern and `help` prints the description of each help topic matching *pattern*.
   If not, and *pattern* exactly matches the name of a help topic, `help` prints the description associated with that topic. Otherwise, `help` performs prefix matching and prints the descriptions of all matching help topics.
   The return status is zero unless no command matches *pattern*.
-- `let`[¶](#index-let)
-- > let `expression`[`expression`...]
-
+- `let` [¶](#index-let)
+- ```
+  let expression [expression ...]
+  ```
   The `let` builtin allows arithmetic to be performed on shell variables. Each *expression* is evaluated as an arithmetic expression according to the rules given below in [Shell Arithmetic](#Shell-Arithmetic). If the last *expression* evaluates to 0, `let` returns 1; otherwise `let` returns 0.
-- `local`[¶](#index-local)
-- > local [`option`]`name`[=`value`] ...
-
+- `local` [¶](#index-local)
+- ```
+  local [option] name[=value] ...
+  ```
   For each argument, create a local variable named *name*, and assign it *value*. The *option* can be any of the options accepted by `declare`. `local` can only be used within a function; it makes the variable *name* have a visible scope restricted to that function and its children. It is an error to use `local` when not within a function.
   If *name* is ‘`-`’, it makes the set of shell options local to the function in which `local` is invoked: any shell options changed using the `set` builtin inside the function after the call to `local` are restored to their original values when the function returns. The restore is performed as if a series of `set` commands were executed to restore the values that were in place before the function.
   With no operands, `local` writes a list of local variables to the standard output.
   The return status is zero unless `local` is used outside a function, an invalid *name* is supplied, or *name* is a readonly variable.
-- `logout`[¶](#index-logout)
-- > logout [`n`]
-
+- `logout` [¶](#index-logout)
+- ```
+  logout [n]
+  ```
   Exit a login shell, returning a status of *n* to the shell’s parent.
-- `mapfile`[¶](#index-mapfile)
-- > mapfile [-d `delim`] [-n`count`] [-O`origin`] [-s`count`] [-t] [-u`fd`] [-C`callback`] [-c`quantum`] [`array`]
-
+- `mapfile` [¶](#index-mapfile)
+- ```
+  mapfile [-d delim] [-n count] [-O origin] [-s count]
+      [-t] [-u fd] [-C callback] [-c quantum] [array]
+  ```
   Read lines from the standard input, or from file descriptor *fd* if the `-u` option is supplied, into the indexed array variable *array*. The variable `MAPFILE` is the default *array*. Options, if supplied, have the following meanings:
   - `-d`
   - Use the first character of *delim* to terminate each input line, rather than newline. If *delim* is the empty string, `mapfile` will terminate a line when it reads a NUL character.
@@ -1710,9 +2053,10 @@ This section describes builtin commands which are unique to or have been extende
   If `-C` is specified without `-c`, the default quantum is 5000. When *callback* is evaluated, it is supplied the index of the next array element to be assigned and the line to be assigned to that element as additional arguments. *callback* is evaluated after the line is read but before the array element is assigned.
   If not supplied with an explicit origin, `mapfile` will clear *array* before assigning to it.
   `mapfile` returns zero unless an invalid option or option argument is supplied, *array* is invalid or unassignable, or if *array* is not an indexed array.
-- `printf`[¶](#index-printf)
-- > printf [-v `var`]`format`[`arguments`]
-
+- `printf` [¶](#index-printf)
+- ```
+  printf [-v var] format [arguments]
+  ```
   Write the formatted *arguments* to the standard output under the control of the *format*. The `-v` option assigns the output to the variable *var* rather than printing it to the standard output.
   The *format* is a character string which contains three types of objects: plain characters, which are simply copied to standard output, character escape sequences, which are converted and copied to the standard output, and format specifications, each of which causes printing of the next successive *argument*. In addition to the standard `printf(3)` format characters `cCsSndiouxXeEfFgGaA`, `printf` interprets the following additional format specifiers:
   - `%b`
@@ -1728,9 +2072,11 @@ This section describes builtin commands which are unique to or have been extende
   The %s and %c format specifiers accept an l (long) modifier, which forces them to convert the argument string to a wide-character string and apply any supplied field width and precision in terms of characters, not bytes. The %S and %C format specifiers are equivalent to %ls and %lc, respectively.
   Arguments to non-string format specifiers are treated as C language constants, except that a leading plus or minus sign is allowed, and if the leading character is a single or double quote, the value is the numeric value of the following character, using the current locale.
   The *format* is reused as necessary to consume all of the *arguments*. If the *format* requires more *arguments* than are supplied, the extra format specifications behave as if a zero value or null string, as appropriate, had been supplied. The return value is zero on success, non-zero if an invalid option is supplied or a write or assignment error occurs.
-- `read`[¶](#index-read)
-- > read [-Eers] [-a `aname`] [-d`delim`] [-i`text`] [-n`nchars`] [-N`nchars`] [-p`prompt`] [-t`timeout`] [-u`fd`] [`name`...]
-
+- `read` [¶](#index-read)
+- ```
+  read [-Eers] [-a aname] [-d delim] [-i text] [-n nchars]
+      [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]
+  ```
   Read one line from the standard input, or from the file descriptor *fd* supplied as an argument to the `-u` option, split it into words as described above in [Word Splitting](#Word-Splitting), and assign the first word to the first *name*, the second word to the second *name*, and so on. If there are more words than names, the remaining words and their intervening delimiters are assigned to the last *name*. If there are fewer words read from the input stream than names, the remaining names are assigned empty values. The characters in the value of the `IFS` variable are used to split the line into words using the same rules the shell uses for expansion (described above in [Word Splitting](#Word-Splitting)). The backslash character ‘`\`’ removes any special meaning for the next character read and is used for line continuation.
   Options, if supplied, have the following meanings:
   - `-a aname`
@@ -1760,18 +2106,22 @@ This section describes builtin commands which are unique to or have been extende
   Other than the case where *delim* is the empty string, `read` ignores any NUL characters in the input.
   If no *name*s are supplied, `read` assigns the line read, without the ending delimiter but otherwise unmodified, to the variable `REPLY`.
   The exit status is zero, unless end-of-file is encountered, `read` times out (in which case the status is greater than 128), a variable assignment error (such as assigning to a readonly variable) occurs, or an invalid file descriptor is supplied as the argument to `-u`.
-- `readarray`[¶](#index-readarray)
-- > readarray [-d `delim`] [-n`count`] [-O`origin`] [-s`count`] [-t] [-u`fd`] [-C`callback`] [-c`quantum`] [`array`]
-
+- `readarray` [¶](#index-readarray)
+- ```
+  readarray [-d delim] [-n count] [-O origin] [-s count]
+      [-t] [-u fd] [-C callback] [-c quantum] [array]
+  ```
   Read lines from the standard input into the indexed array variable *array*, or from file descriptor *fd* if the `-u` option is supplied.
   A synonym for `mapfile`.
-- `source`[¶](#index-source)
-- > source [-p `path`]`filename`[`arguments`]
-
+- `source` [¶](#index-source)
+- ```
+  source [-p path] filename [arguments]
+  ```
   A synonym for `.` (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)).
-- `type`[¶](#index-type)
-- > type [-afptP] [`name`...]
-
+- `type` [¶](#index-type)
+- ```
+  type [-afptP] [name ...]
+  ```
   Indicate how each *name* would be interpreted if used as a command name.
   If the `-t` option is used, `type` prints a single word which is one of ‘`alias`’, ‘`keyword`’, ‘`function`’, ‘`builtin`’, or ‘`file`’, if *name* is an alias, shell reserved word, shell function, shell builtin, or executable file, respectively. If the *name* is not found, `type` prints nothing and returns a failure status.
   If the `-p` option is used, `type` either returns the name of the executable file that would be found by searching `$PATH` for `name`, or nothing if `-t` would not return ‘`file`’.
@@ -1780,13 +2130,16 @@ This section describes builtin commands which are unique to or have been extende
   If the `-a` option is used, `type` returns all of the places that contain a command named *name*. This includes aliases, reserved words, functions, and builtins, but the path search options (`-p` and `-P`) can be supplied to restrict the output to executable files. If `-a` is supplied with `-p`, `type` does not look in the table of hashed commands, and only performs a `PATH` search for *name*.
   If the `-f` option is used, `type` does not attempt to find shell functions, as with the `command` builtin.
   The return status is zero if all of the *name*s are found, non-zero if any are not found.
-- `typeset`[¶](#index-typeset)
-- > typeset [-afFgrxilnrtux] [-p] [`name`[=`value`] ...]
-
+- `typeset` [¶](#index-typeset)
+- ```
+  typeset [-afFgrxilnrtux] [-p] [name[=value] ...]
+  ```
   The `typeset` command is supplied for compatibility with the Korn shell. It is a synonym for the `declare` builtin command.
-- `ulimit`[¶](#index-ulimit)
-- > ulimit [-HS] -a ulimit [-HS] [-bcdefiklmnpqrstuvxPRT] [`limit`]
-
+- `ulimit` [¶](#index-ulimit)
+- ```
+  ulimit [-HS] -a
+  ulimit [-HS] [-bcdefiklmnpqrstuvxPRT] [limit]
+  ```
   `ulimit` provides control over the resources available to the shell and to processes it starts, on systems that allow such control. If an option is given, it is interpreted as follows:
   - `-S`
   - Change and report the soft limit associated with a resource.
@@ -1839,9 +2192,10 @@ This section describes builtin commands which are unique to or have been extende
   If *limit* is supplied, and the `-a` option is not used, *limit* is the new value of the specified resource. The special *limit* values `hard`, `soft`, and `unlimited` stand for the current hard limit, the current soft limit, and no limit, respectively. A hard limit cannot be increased by a non-root user once it is set; a soft limit may be increased up to the value of the hard limit. Otherwise, `ulimit` prints the current value of the soft limit for the specified resource, unless the `-H` option is supplied. When more than one resource is specified, the limit name and unit, if appropriate, are printed before the value. When setting new limits, if neither `-H` nor `-S` is supplied, `ulimit` sets both the hard and soft limits. If no option is supplied, then `-f` is assumed.
   Values are in 1024-byte increments, except for `-t`, which is in seconds; `-R`, which is in microseconds; `-p`, which is in units of 512-byte blocks; `-P`, `-T`, `-b`, `-k`, `-n` and `-u`, which are unscaled values; and, when in POSIX mode (see [Bash and POSIX](#Bash-POSIX-Mode)), `-c` and `-f`, which are in 512-byte increments.
   The return status is zero unless an invalid option or argument is supplied, or an error occurs while setting a new limit.
-- `unalias`[¶](#index-unalias)
-- > unalias [-a] [`name`... ]
-
+- `unalias` [¶](#index-unalias)
+- ```
+  unalias [-a] [name ... ]
+  ```
   Remove each *name* from the list of aliases. If `-a` is supplied, remove all aliases. The return value is true unless a supplied *name* is not a defined alias. Aliases are described in [Aliases](#Aliases).
 
 - [The Set Builtin](#The-Set-Builtin)
@@ -1849,9 +2203,13 @@ This section describes builtin commands which are unique to or have been extende
 
 This builtin is so complicated that it deserves its own section. `set` allows you to change the values of shell options and set the positional parameters, or to display the names and values of shell variables.
 
-- `set`[¶](#index-set)
-- > set [-abefhkmnptuvxBCEHPT] [-o `option-name`] [--] [-] [`argument`...] set [+abefhkmnptuvxBCEHPT] [+o`option-name`] [--] [-] [`argument`...] set -o set +o
-
+- `set` [¶](#index-set)
+- ```
+  set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [argument ...]
+  set [+abefhkmnptuvxBCEHPT] [+o option-name] [--] [-] [argument ...]
+  set -o
+  set +o
+  ```
   If no options or arguments are supplied, `set` displays the names and values of all shell variables and functions, sorted according to the current locale, in a format that may be reused as input for setting or resetting the currently-set variables. Read-only variables cannot be reset. In POSIX mode, only shell variables are listed.
   When options are supplied, they set or unset shell attributes. Any arguments remaining after option processing replace the positional parameters.
   Options, if specified, have the following meanings:
@@ -1950,10 +2308,19 @@ This builtin is so complicated that it deserves its own section. `set` allows yo
   - `-P`
   - If set, Bash does not resolve symbolic links when executing commands such as `cd` which change the current directory. It uses the physical directory structure instead. By default, Bash follows the logical chain of directories when performing commands which change the current directory.
     For example, if `/usr/sys` is a symbolic link to `/usr/local/sys` then:
-    > $ cd /usr/sys; echo $PWD /usr/sys $ cd ..; pwd /usr
-
+    ```
+    $ cd /usr/sys; echo $PWD
+    /usr/sys
+    $ cd ..; pwd
+    /usr
+    ```
     If `set -P` is on, then:
-    > $ cd /usr/sys; echo $PWD /usr/local/sys $ cd ..; pwd /usr/local
+    ```
+    $ cd /usr/sys; echo $PWD
+    /usr/local/sys
+    $ cd ..; pwd
+    /usr/local
+    ```
   - `-T`
   - If set, any traps on `DEBUG` and `RETURN` are inherited by shell functions, command substitutions, and commands executed in a subshell environment. The `DEBUG` and `RETURN` traps are normally not inherited in such cases.
   - `--`
@@ -1966,9 +2333,10 @@ This builtin is so complicated that it deserves its own section. `set` allows yo
 
 This builtin allows you to change additional optional shell behavior.
 
-- `shopt`[¶](#index-shopt)
-- > shopt [-pqsu] [-o] [`optname`...]
-
+- `shopt` [¶](#index-shopt)
+- ```
+  shopt [-pqsu] [-o] [optname ...]
+  ```
   Toggle the values of settings controlling optional shell behavior. The settings can be either those listed below, or, if the `-o` option is used, those available with the `-o` option to the `set` builtin command (see [The Set Builtin](#The-Set-Builtin)).
   With no options, or with the `-p` option, display a list of all settable options, with an indication of whether or not each is set; if any *optname*s are supplied, the output is restricted to those options. The `-p` option displays output in a form that may be reused as input.
   Other options have the following meanings:
@@ -2032,7 +2400,6 @@ This builtin allows you to change additional optional shell behavior.
     4. `BASH_ARGC` and `BASH_ARGV` are updated as described in their descriptions (see [Bash Variables](#Bash-Variables)).
     5. Function tracing is enabled: command substitution, shell functions, and subshells invoked with `( command )` inherit the `DEBUG` and `RETURN` traps.
     6. Error tracing is enabled: command substitution, shell functions, and subshells invoked with `( command )` inherit the `ERR` trap.
-  - The `-F` option to the `declare` builtin (see
   - `extglob`
   - If set, enable the extended pattern matching features described above (see [Pattern Matching](#Pattern-Matching)).
   - `extquote`
@@ -2114,7 +2481,10 @@ When Bash is not executing in POSIX mode, these builtins behave no differently t
 
 These are the POSIX special builtins:
 
-> break : . source continue eval exec exit export readonly return set shift times trap unset
+```
+break : . source continue eval exec exit export readonly return set
+shift times trap unset
+```
 
 This chapter describes the shell variables that Bash uses. Bash automatically assigns default values to a number of variables.
 
@@ -2123,72 +2493,72 @@ This chapter describes the shell variables that Bash uses. Bash automatically as
 
 Bash uses certain shell variables in the same way as the Bourne shell. In some cases, Bash assigns a default value to the variable.
 
-- `CDPATH`[¶](#index-CDPATH)
+- `CDPATH` [¶](#index-CDPATH)
 - A colon-separated list of directories used as a search path for the `cd` builtin command.
-- `HOME`[¶](#index-HOME)
+- `HOME` [¶](#index-HOME)
 - The current user’s home directory; the default for the `cd` builtin command. The value of this variable is also used by tilde expansion (see [Tilde Expansion](#Tilde-Expansion)).
-- `IFS`[¶](#index-IFS)
+- `IFS` [¶](#index-IFS)
 - A list of characters that separate fields; used when the shell splits words as part of expansion and by the `read` builtin to split lines into words. See [Word Splitting](#Word-Splitting), for a description of word splitting.
-- `MAIL`[¶](#index-MAIL)
+- `MAIL` [¶](#index-MAIL)
 - If the value is set to a filename or directory name and the `MAILPATH` variable is not set, Bash informs the user of the arrival of mail in the specified file or Maildir-format directory.
-- `MAILPATH`[¶](#index-MAILPATH)
+- `MAILPATH` [¶](#index-MAILPATH)
 - A colon-separated list of filenames which the shell periodically checks for new mail. Each list entry can specify the message that is printed when new mail arrives in the mail file by separating the filename from the message with a ‘`?`’. When used in the text of the message, `$_` expands to the name of the current mail file.
-- `OPTARG`[¶](#index-OPTARG)
+- `OPTARG` [¶](#index-OPTARG)
 - The value of the last option argument processed by the `getopts` builtin.
-- `OPTIND`[¶](#index-OPTIND)
+- `OPTIND` [¶](#index-OPTIND)
 - The index of the next argument to be processed by the `getopts` builtin.
-- `PATH`[¶](#index-PATH)
+- `PATH` [¶](#index-PATH)
 - A colon-separated list of directories in which the shell looks for commands. A zero-length (null) directory name in the value of `PATH` indicates the current directory. A null directory name may appear as two adjacent colons, or as an initial or trailing colon. The default path is system-dependent, and is set by the administrator who installs `bash`. A common value is "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin".
-- `PS1`[¶](#index-PS1)
+- `PS1` [¶](#index-PS1)
 - The primary prompt string. The default value is ‘`\s-\v\$`’. See [Controlling the Prompt](#Controlling-the-Prompt), for the complete list of escape sequences that are expanded before `PS1` is displayed.
-- `PS2`[¶](#index-PS2)
+- `PS2` [¶](#index-PS2)
 - The secondary prompt string. The default value is ‘`>`’. `PS2` is expanded in the same way as `PS1` before being displayed.
 
 These variables are set or used by Bash, but other shells do not normally treat them specially.
 
 A few variables used by Bash are described in different chapters: variables for controlling the job control facilities (see [Job Control Variables](#Job-Control-Variables)).
 
-- `_`[¶](#index-_005f)
+- `_` [¶](#index-_005f)
 - ($_, an underscore.) This has a number of meanings depending on context. At shell startup, $_ set to the pathname used to invoke the shell or shell script being executed as passed in the environment or argument list. Subsequently, it expands to the last argument to the previous simple command executed in the foreground, after expansion. It is also set to the full pathname used to invoke each command executed and placed in the environment exported to that command. When checking mail, $_ expands to the name of the mail file.
-- `BASH`[¶](#index-BASH)
+- `BASH` [¶](#index-BASH)
 - The full pathname used to execute the current instance of Bash.
-- `BASHOPTS`[¶](#index-BASHOPTS)
+- `BASHOPTS` [¶](#index-BASHOPTS)
 - A colon-separated list of enabled shell options. Each word in the list is a valid argument for the `-s` option to the `shopt` builtin command (see [The Shopt Builtin](#The-Shopt-Builtin)). The options appearing in `BASHOPTS` are those reported as ‘`on`’ by ‘`shopt`’. If this variable is in the environment when Bash starts up, the shell enables each option in the list before reading any startup files. If this variable is exported, child shells will enable each option in the list. This variable is readonly.
-- `BASHPID`[¶](#index-BASHPID)
+- `BASHPID` [¶](#index-BASHPID)
 - Expands to the process ID of the current Bash process. This differs from `$$` under certain circumstances, such as subshells that do not require Bash to be re-initialized. Assignments to `BASHPID` have no effect. If `BASHPID` is unset, it loses its special properties, even if it is subsequently reset.
-- `BASH_ALIASES`[¶](#index-BASH_005fALIASES)
+- `BASH_ALIASES` [¶](#index-BASH_005fALIASES)
 - An associative array variable whose members correspond to the internal list of aliases as maintained by the `alias` builtin. (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)). Elements added to this array appear in the alias list; however, unsetting array elements currently does not cause aliases to be removed from the alias list. If `BASH_ALIASES` is unset, it loses its special properties, even if it is subsequently reset.
-- `BASH_ARGC`[¶](#index-BASH_005fARGC)
+- `BASH_ARGC` [¶](#index-BASH_005fARGC)
 - An array variable whose values are the number of parameters in each frame of the current Bash execution call stack. The number of parameters to the current subroutine (shell function or script executed with `.` or `source`) is at the top of the stack. When a subroutine is executed, the number of parameters passed is pushed onto `BASH_ARGC`. The shell sets `BASH_ARGC` only when in extended debugging mode (see [The Shopt Builtin](#The-Shopt-Builtin) for a description of the `extdebug` option to the `shopt` builtin). Setting `extdebug` after the shell has started to execute a subroutine, or referencing this variable when `extdebug` is not set, may result in inconsistent values. Assignments to `BASH_ARGC` have no effect, and it may not be unset.
-- `BASH_ARGV`[¶](#index-BASH_005fARGV)
+- `BASH_ARGV` [¶](#index-BASH_005fARGV)
 - An array variable containing all of the parameters in the current Bash execution call stack. The final parameter of the last subroutine call is at the top of the stack; the first parameter of the initial call is at the bottom. When a subroutine is executed, the shell pushes the supplied parameters onto `BASH_ARGV`. The shell sets `BASH_ARGV` only when in extended debugging mode (see [The Shopt Builtin](#The-Shopt-Builtin) for a description of the `extdebug` option to the `shopt` builtin). Setting `extdebug` after the shell has started to execute a script, or referencing this variable when `extdebug` is not set, may result in inconsistent values. Assignments to `BASH_ARGV` have no effect, and it may not be unset.
-- `BASH_ARGV0`[¶](#index-BASH_005fARGV0)
+- `BASH_ARGV0` [¶](#index-BASH_005fARGV0)
 - When referenced, this variable expands to the name of the shell or shell script (identical to `$0`; See [Special Parameters](#Special-Parameters), for the description of special parameter 0). Assigning a value to `BASH_ARGV0` sets `$0` to the same value. If `BASH_ARGV0` is unset, it loses its special properties, even if it is subsequently reset.
-- `BASH_CMDS`[¶](#index-BASH_005fCMDS)
+- `BASH_CMDS` [¶](#index-BASH_005fCMDS)
 - An associative array variable whose members correspond to the internal hash table of commands as maintained by the `hash` builtin (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)). Adding elements to this array makes them appear in the hash table; however, unsetting array elements currently does not remove command names from the hash table. If `BASH_CMDS` is unset, it loses its special properties, even if it is subsequently reset.
-- `BASH_COMMAND`[¶](#index-BASH_005fCOMMAND)
+- `BASH_COMMAND` [¶](#index-BASH_005fCOMMAND)
 - Expands to the command currently being executed or about to be executed, unless the shell is executing a command as the result of a trap, in which case it is the command executing at the time of the trap. If `BASH_COMMAND` is unset, it loses its special properties, even if it is subsequently reset.
-- `BASH_COMPAT`[¶](#index-BASH_005fCOMPAT)
+- `BASH_COMPAT` [¶](#index-BASH_005fCOMPAT)
 - The value is used to set the shell’s compatibility level. See [Shell Compatibility Mode](#Shell-Compatibility-Mode), for a description of the various compatibility levels and their effects. The value may be a decimal number (e.g., 4.2) or an integer (e.g., 42) corresponding to the desired compatibility level. If `BASH_COMPAT` is unset or set to the empty string, the compatibility level is set to the default for the current version. If `BASH_COMPAT` is set to a value that is not one of the valid compatibility levels, the shell prints an error message and sets the compatibility level to the default for the current version. A subset of the valid values correspond to the compatibility levels described below (see [Shell Compatibility Mode](#Shell-Compatibility-Mode)). For example, 4.2 and 42 are valid values that correspond to the `compat42` `shopt` option and set the compatibility level to 42. The current version is also a valid value.
-- `BASH_ENV`[¶](#index-BASH_005fENV)
+- `BASH_ENV` [¶](#index-BASH_005fENV)
 - If this variable is set when Bash is invoked to execute a shell script, its value is expanded and used as the name of a startup file to read before executing the script. Bash does not use `PATH` to search for the resultant filename. See [Bash Startup Files](#Bash-Startup-Files).
-- `BASH_EXECUTION_STRING`[¶](#index-BASH_005fEXECUTION_005fSTRING)
+- `BASH_EXECUTION_STRING` [¶](#index-BASH_005fEXECUTION_005fSTRING)
 - The command argument to the `-c` invocation option.
-- `BASH_LINENO`[¶](#index-BASH_005fLINENO)
+- `BASH_LINENO` [¶](#index-BASH_005fLINENO)
 - An array variable whose members are the line numbers in source files where each corresponding member of `FUNCNAME` was invoked. `${BASH_LINENO[$i]}` is the line number in the source file (`${BASH_SOURCE[$i+1]}`) where `${FUNCNAME[$i]}` was called (or `${BASH_LINENO[$i-1]}` if referenced within another shell function). Use `LINENO` to obtain the current line number. Assignments to `BASH_LINENO` have no effect, and it may not be unset.
-- `BASH_LOADABLES_PATH`[¶](#index-BASH_005fLOADABLES_005fPATH)
+- `BASH_LOADABLES_PATH` [¶](#index-BASH_005fLOADABLES_005fPATH)
 - A colon-separated list of directories in which the `enable` command looks for dynamically loadable builtins.
-- `BASH_MONOSECONDS`[¶](#index-BASH_005fMONOSECONDS)
+- `BASH_MONOSECONDS` [¶](#index-BASH_005fMONOSECONDS)
 - Each time this variable is referenced, it expands to the value returned by the system’s monotonic clock, if one is available. If there is no monotonic clock, this is equivalent to `EPOCHSECONDS`. If `BASH_MONOSECONDS` is unset, it loses its special properties, even if it is subsequently reset.
-- `BASH_REMATCH`[¶](#index-BASH_005fREMATCH)
+- `BASH_REMATCH` [¶](#index-BASH_005fREMATCH)
 - An array variable whose members are assigned by the ‘`=~`’ binary operator to the `[[` conditional command (see [Conditional Constructs](#Conditional-Constructs)). The element with index 0 is the portion of the string matching the entire regular expression. The element with index *n* is the portion of the string matching the *n*th parenthesized subexpression.
-- `BASH_SOURCE`[¶](#index-BASH_005fSOURCE)
+- `BASH_SOURCE` [¶](#index-BASH_005fSOURCE)
 - An array variable whose members are the source filenames where the corresponding shell function names in the `FUNCNAME` array variable are defined. The shell function `${FUNCNAME[$i]}` is defined in the file `${BASH_SOURCE[$i]}` and called from `${BASH_SOURCE[$i+1]}` Assignments to `BASH_SOURCE` have no effect, and it may not be unset.
-- `BASH_SUBSHELL`[¶](#index-BASH_005fSUBSHELL)
+- `BASH_SUBSHELL` [¶](#index-BASH_005fSUBSHELL)
 - Incremented by one within each subshell or subshell environment when the shell begins executing in that environment. The initial value is 0. If `BASH_SUBSHELL` is unset, it loses its special properties, even if it is subsequently reset.
-- `BASH_TRAPSIG`[¶](#index-BASH_005fTRAPSIG)
+- `BASH_TRAPSIG` [¶](#index-BASH_005fTRAPSIG)
 - Set to the signal number corresponding to the trap action being executed during its execution. See the description of `trap` (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)) for information about signal numbers and trap execution.
-- `BASH_VERSINFO`[¶](#index-BASH_005fVERSINFO)
+- `BASH_VERSINFO` [¶](#index-BASH_005fVERSINFO)
 - A readonly array variable (see [Arrays](#Arrays)) whose members hold version information for this instance of Bash. The values assigned to the array members are as follows:
   - `BASH_VERSINFO[0]`
   - The major version number (the *release*).
@@ -2202,58 +2572,58 @@ A few variables used by Bash are described in different chapters: variables for 
   - The release status (e.g., `beta`).
   - `BASH_VERSINFO[5]`
   - The value of `MACHTYPE`.
-- `BASH_VERSION`[¶](#index-BASH_005fVERSION)
+- `BASH_VERSION` [¶](#index-BASH_005fVERSION)
 - Expands to a string describing the version of this instance of Bash (e.g., 5.2.37(3)-release).
-- `BASH_XTRACEFD`[¶](#index-BASH_005fXTRACEFD)
+- `BASH_XTRACEFD` [¶](#index-BASH_005fXTRACEFD)
 - If set to an integer corresponding to a valid file descriptor, Bash writes the trace output generated when ‘`set -x`’ is enabled to that file descriptor, instead of the standard error. This allows tracing output to be separated from diagnostic and error messages. The file descriptor is closed when `BASH_XTRACEFD` is unset or assigned a new value. Unsetting `BASH_XTRACEFD` or assigning it the empty string causes the trace output to be sent to the standard error. Note that setting `BASH_XTRACEFD` to 2 (the standard error file descriptor) and then unsetting it will result in the standard error being closed.
-- `CHILD_MAX`[¶](#index-CHILD_005fMAX)
+- `CHILD_MAX` [¶](#index-CHILD_005fMAX)
 - Set the number of exited child status values for the shell to remember. Bash will not allow this value to be decreased below a POSIX-mandated minimum, and there is a maximum value (currently 8192) that this may not exceed. The minimum value is system-dependent.
-- `COLUMNS`[¶](#index-COLUMNS)
+- `COLUMNS` [¶](#index-COLUMNS)
 - Used by the `select` command to determine the terminal width when printing selection lists. Automatically set if the `checkwinsize` option is enabled (see [The Shopt Builtin](#The-Shopt-Builtin)), or in an interactive shell upon receipt of a `SIGWINCH`.
-- `COMP_CWORD`[¶](#index-COMP_005fCWORD)
+- `COMP_CWORD` [¶](#index-COMP_005fCWORD)
 - An index into `${COMP_WORDS}` of the word containing the current cursor position. This variable is available only in shell functions invoked by the programmable completion facilities (see [Programmable Completion](#Programmable-Completion)).
-- `COMP_KEY`[¶](#index-COMP_005fKEY)
+- `COMP_KEY` [¶](#index-COMP_005fKEY)
 - The key (or final key of a key sequence) used to invoke the current completion function. This variable is available only in shell functions and external commands invoked by the programmable completion facilities (see [Programmable Completion](#Programmable-Completion)).
-- `COMP_LINE`[¶](#index-COMP_005fLINE)
+- `COMP_LINE` [¶](#index-COMP_005fLINE)
 - The current command line. This variable is available only in shell functions and external commands invoked by the programmable completion facilities (see [Programmable Completion](#Programmable-Completion)).
-- `COMP_POINT`[¶](#index-COMP_005fPOINT)
+- `COMP_POINT` [¶](#index-COMP_005fPOINT)
 - The index of the current cursor position relative to the beginning of the current command. If the current cursor position is at the end of the current command, the value of this variable is equal to `${#COMP_LINE}`. This variable is available only in shell functions and external commands invoked by the programmable completion facilities (see [Programmable Completion](#Programmable-Completion)).
-- `COMP_TYPE`[¶](#index-COMP_005fTYPE)
+- `COMP_TYPE` [¶](#index-COMP_005fTYPE)
 - Set to an integer value corresponding to the type of attempted completion that caused a completion function to be called: `TAB`, for normal completion, ‘`?`’, for listing completions after successive tabs, ‘`!`’, for listing alternatives on partial word completion, ‘`@`’, to list completions if the word is not unmodified, or ‘`%`’, for menu completion. This variable is available only in shell functions and external commands invoked by the programmable completion facilities (see [Programmable Completion](#Programmable-Completion)).
-- `COMP_WORDBREAKS`[¶](#index-COMP_005fWORDBREAKS)
+- `COMP_WORDBREAKS` [¶](#index-COMP_005fWORDBREAKS)
 - The set of characters that the Readline library treats as word separators when performing word completion. If `COMP_WORDBREAKS` is unset, it loses its special properties, even if it is subsequently reset.
-- `COMP_WORDS`[¶](#index-COMP_005fWORDS)
+- `COMP_WORDS` [¶](#index-COMP_005fWORDS)
 - An array variable consisting of the individual words in the current command line. The line is split into words as Readline would split it, using `COMP_WORDBREAKS` as described above. This variable is available only in shell functions invoked by the programmable completion facilities (see [Programmable Completion](#Programmable-Completion)).
-- `COMPREPLY`[¶](#index-COMPREPLY)
+- `COMPREPLY` [¶](#index-COMPREPLY)
 - An array variable from which Bash reads the possible completions generated by a shell function invoked by the programmable completion facility (see [Programmable Completion](#Programmable-Completion)). Each array element contains one possible completion.
-- `COPROC`[¶](#index-COPROC)
+- `COPROC` [¶](#index-COPROC)
 - An array variable created to hold the file descriptors for output from and input to an unnamed coprocess (see [Coprocesses](#Coprocesses)).
-- `DIRSTACK`[¶](#index-DIRSTACK)
+- `DIRSTACK` [¶](#index-DIRSTACK)
 - An array variable containing the current contents of the directory stack. Directories appear in the stack in the order they are displayed by the `dirs` builtin. Assigning to members of this array variable may be used to modify directories already in the stack, but the `pushd` and `popd` builtins must be used to add and remove directories. Assigning to this variable does not change the current directory. If `DIRSTACK` is unset, it loses its special properties, even if it is subsequently reset.
-- `EMACS`[¶](#index-EMACS)
+- `EMACS` [¶](#index-EMACS)
 - If Bash finds this variable in the environment when the shell starts, and its value is ‘`t`’, Bash assumes that the shell is running in an Emacs shell buffer and disables line editing.
-- `ENV`[¶](#index-ENV)
+- `ENV` [¶](#index-ENV)
 - Expanded and executed similarly to `BASH_ENV` (see [Bash Startup Files](#Bash-Startup-Files)) when an interactive shell is invoked in POSIX mode (see [Bash and POSIX](#Bash-POSIX-Mode)).
-- `EPOCHREALTIME`[¶](#index-EPOCHREALTIME)
+- `EPOCHREALTIME` [¶](#index-EPOCHREALTIME)
 - Each time this parameter is referenced, it expands to the number of seconds since the Unix Epoch as a floating-point value with micro-second granularity (see the documentation for the C library function `time` for the definition of Epoch). Assignments to `EPOCHREALTIME` are ignored. If `EPOCHREALTIME` is unset, it loses its special properties, even if it is subsequently reset.
-- `EPOCHSECONDS`[¶](#index-EPOCHSECONDS)
+- `EPOCHSECONDS` [¶](#index-EPOCHSECONDS)
 - Each time this parameter is referenced, it expands to the number of seconds since the Unix Epoch (see the documentation for the C library function `time` for the definition of Epoch). Assignments to `EPOCHSECONDS` are ignored. If `EPOCHSECONDS` is unset, it loses its special properties, even if it is subsequently reset.
-- `EUID`[¶](#index-EUID)
+- `EUID` [¶](#index-EUID)
 - The numeric effective user id of the current user. This variable is readonly.
-- `EXECIGNORE`[¶](#index-EXECIGNORE)
+- `EXECIGNORE` [¶](#index-EXECIGNORE)
 - A colon-separated list of shell patterns (see [Pattern Matching](#Pattern-Matching)) defining the set of filenames to be ignored by command search using `PATH`. Files whose full pathnames match one of these patterns are not considered executable files for the purposes of completion and command execution via `PATH` lookup. This does not affect the behavior of the `[`, `test`, and `[[` commands. Full pathnames in the command hash table are not subject to `EXECIGNORE`. Use this variable to ignore shared library files that have the executable bit set, but are not executable files. The pattern matching honors the setting of the `extglob` shell option.
-- `FCEDIT`[¶](#index-FCEDIT)
+- `FCEDIT` [¶](#index-FCEDIT)
 - The editor used as a default by the `fc` builtin command.
-- `FIGNORE`[¶](#index-FIGNORE)
+- `FIGNORE` [¶](#index-FIGNORE)
 - A colon-separated list of suffixes to ignore when performing filename completion. A filename whose suffix matches one of the entries in `FIGNORE` is excluded from the list of matched filenames. A sample value is ‘`.o:~`’
-- `FUNCNAME`[¶](#index-FUNCNAME)
+- `FUNCNAME` [¶](#index-FUNCNAME)
 - An array variable containing the names of all shell functions currently in the execution call stack. The element with index 0 is the name of any currently-executing shell function. The bottom-most element (the one with the highest index) is `"main"`. This variable exists only when a shell function is executing. Assignments to `FUNCNAME` have no effect. If `FUNCNAME` is unset, it loses its special properties, even if it is subsequently reset.
   This variable can be used with `BASH_LINENO` and `BASH_SOURCE`. Each element of `FUNCNAME` has corresponding elements in `BASH_LINENO` and `BASH_SOURCE` to describe the call stack. For instance, `${FUNCNAME[$i]}` was called from the file `${BASH_SOURCE[$i+1]}` at line number `${BASH_LINENO[$i]}`. The `caller` builtin displays the current call stack using this information.
-- `FUNCNEST`[¶](#index-FUNCNEST)
+- `FUNCNEST` [¶](#index-FUNCNEST)
 - A numeric value greater than 0 defines a maximum function nesting level. Function invocations that exceed this nesting level cause the current command to abort.
-- `GLOBIGNORE`[¶](#index-GLOBIGNORE)
+- `GLOBIGNORE` [¶](#index-GLOBIGNORE)
 - A colon-separated list of patterns defining the set of file names to be ignored by filename expansion. If a file name matched by a filename expansion pattern also matches one of the patterns in `GLOBIGNORE`, it is removed from the list of matches. The pattern matching honors the setting of the `extglob` shell option.
-- `GLOBSORT`[¶](#index-GLOBSORT)
+- `GLOBSORT` [¶](#index-GLOBSORT)
 - Controls how the results of filename expansion are sorted. The value of this variable specifies the sort criteria and sort order for the results of filename expansion. If this variable is unset or set to the null string, filename expansion uses the historical behavior of sorting by name, in ascending lexicographic order as determined by the `LC_COLLATE` shell variable.
   If set, a valid value begins with an optional ‘`+`’, which is ignored, or ‘`-`’, which reverses the sort order from ascending to descending, followed by a sort specifier. The valid sort specifiers are ‘`name`’, ‘`numeric`’, ‘`size`’, ‘`mtime`’, ‘`atime`’, ‘`ctime`’, and ‘`blocks`’, which sort the files on name, names in numeric rather than lexicographic order, file size, modification time, access time, inode change time, and number of blocks, respectively. If any of the non-name keys compare as equal (e.g., if two files are the same size), sorting uses the name as a secondary sort key.
   For example, a value of `-mtime` sorts the results in descending order by modification time (newest first).
@@ -2261,110 +2631,112 @@ A few variables used by Bash are described in different chapters: variables for 
   A sort specifier of ‘`nosort`’ disables sorting completely; Bash returns the results in the order they are read from the file system, ignoring any leading ‘`-`’.
   If the sort specifier is missing, it defaults to *name*, so a value of ‘`+`’ is equivalent to the null string, and a value of ‘`-`’ sorts by name in descending order.
   Any invalid value restores the historical sorting behavior.
-- `GROUPS`[¶](#index-GROUPS)
+- `GROUPS` [¶](#index-GROUPS)
 - An array variable containing the list of groups of which the current user is a member. Assignments to `GROUPS` have no effect. If `GROUPS` is unset, it loses its special properties, even if it is subsequently reset.
-- `histchars`[¶](#index-histchars)
+- `histchars` [¶](#index-histchars)
 - The two or three characters which control history expansion, quick substitution, and tokenization (see [History Expansion](#History-Interaction)). The first character is the *history expansion* character, the character which begins a history expansion, normally ‘`!`’. The second character is the *quick substitution* character, normally ‘`^`’. When it appears as the first character on the line, history substitution repeats the previous command, replacing one string with another. The optional third character is the *history comment* character, normally ‘`#`’, which indicates that the remainder of the line is a comment when it appears as the first character of a word. The history comment character disables history substitution for the remaining words on the line. It does not necessarily cause the shell parser to treat the rest of the line as a comment.
-- `HISTCMD`[¶](#index-HISTCMD)
+- `HISTCMD` [¶](#index-HISTCMD)
 - The history number, or index in the history list, of the current command. Assignments to `HISTCMD` have no effect. If `HISTCMD` is unset, it loses its special properties, even if it is subsequently reset.
-- `HISTCONTROL`[¶](#index-HISTCONTROL)
+- `HISTCONTROL` [¶](#index-HISTCONTROL)
 - A colon-separated list of values controlling how commands are saved on the history list. If the list of values includes ‘`ignorespace`’, lines which begin with a space character are not saved in the history list. A value of ‘`ignoredups`’ causes lines which match the previous history entry not to be saved. A value of ‘`ignoreboth`’ is shorthand for ‘`ignorespace`’ and ‘`ignoredups`’. A value of ‘`erasedups`’ causes all previous lines matching the current line to be removed from the history list before that line is saved. Any value not in the above list is ignored. If `HISTCONTROL` is unset, or does not include a valid value, Bash saves all lines read by the shell parser on the history list, subject to the value of `HISTIGNORE`. If the first line of a multi-line compound command was saved, the second and subsequent lines are not tested, and are added to the history regardless of the value of `HISTCONTROL`. If the first line was not saved, the second and subsequent lines of the command are not saved either.
-- `HISTFILE`[¶](#index-HISTFILE)
+- `HISTFILE` [¶](#index-HISTFILE)
 - The name of the file to which the command history is saved. Bash assigns a default value of `~/.bash_history`. If `HISTFILE` is unset or null, the shell does not save the command history when it exits.
-- `HISTFILESIZE`[¶](#index-HISTFILESIZE)
+- `HISTFILESIZE` [¶](#index-HISTFILESIZE)
 - The maximum number of lines contained in the history file. When this variable is assigned a value, the history file is truncated, if necessary, to contain no more than the number of history entries that total no more than that number of lines by removing the oldest entries. If the history list contains multi-line entries, the history file may contain more lines than this maximum to avoid leaving partial history entries. The history file is also truncated to this size after writing it when a shell exits or by the `history` builtin. If the value is 0, the history file is truncated to zero size. Non-numeric values and numeric values less than zero inhibit truncation. The shell sets the default value to the value of `HISTSIZE` after reading any startup files.
-- `HISTIGNORE`[¶](#index-HISTIGNORE)
+- `HISTIGNORE` [¶](#index-HISTIGNORE)
 - A colon-separated list of patterns used to decide which command lines should be saved on the history list. If a command line matches one of the patterns in the value of `HISTIGNORE`, it is not saved on the history list. Each pattern is anchored at the beginning of the line and must match the complete line (Bash does not implicitly append a ‘`*`’). Each pattern is tested against the line after the checks specified by `HISTCONTROL` are applied. In addition to the normal shell pattern matching characters, ‘`&`’ matches the previous history line. A backslash escapes the ‘`&`’; the backslash is removed before attempting a match. If the first line of a multi-line compound command was saved, the second and subsequent lines are not tested, and are added to the history regardless of the value of `HISTIGNORE`. If the first line was not saved, the second and subsequent lines of the command are not saved either. The pattern matching honors the setting of the `extglob` shell option.
   `HISTIGNORE` subsumes some of the function of `HISTCONTROL`. A pattern of ‘`&`’ is identical to `ignoredups`, and a pattern of ‘`[ ]*`’ is identical to `ignorespace`. Combining these two patterns, separating them with a colon, provides the functionality of `ignoreboth`.
-- `HISTSIZE`[¶](#index-HISTSIZE)
+- `HISTSIZE` [¶](#index-HISTSIZE)
 - The maximum number of commands to remember on the history list. If the value is 0, commands are not saved in the history list. Numeric values less than zero result in every command being saved on the history list (there is no limit). The shell sets the default value to 500 after reading any startup files.
-- `HISTTIMEFORMAT`[¶](#index-HISTTIMEFORMAT)
+- `HISTTIMEFORMAT` [¶](#index-HISTTIMEFORMAT)
 - If this variable is set and not null, its value is used as a format string for `strftime`(3) to print the time stamp associated with each history entry displayed by the `history` builtin. If this variable is set, the shell writes time stamps to the history file so they may be preserved across shell sessions. This uses the history comment character to distinguish timestamps from other history lines.
-- `HOSTFILE`[¶](#index-HOSTFILE)
+- `HOSTFILE` [¶](#index-HOSTFILE)
 - Contains the name of a file in the same format as `/etc/hosts` that should be read when the shell needs to complete a hostname. The list of possible hostname completions may be changed while the shell is running; the next time hostname completion is attempted after the value is changed, Bash adds the contents of the new file to the existing list. If `HOSTFILE` is set, but has no value, or does not name a readable file, Bash attempts to read `/etc/hosts` to obtain the list of possible hostname completions. When `HOSTFILE` is unset, Bash clears the hostname list.
-- `HOSTNAME`[¶](#index-HOSTNAME)
+- `HOSTNAME` [¶](#index-HOSTNAME)
 - The name of the current host.
-- `HOSTTYPE`[¶](#index-HOSTTYPE)
+- `HOSTTYPE` [¶](#index-HOSTTYPE)
 - A string describing the machine Bash is running on.
-- `IGNOREEOF`[¶](#index-IGNOREEOF)
+- `IGNOREEOF` [¶](#index-IGNOREEOF)
 - Controls the action of the shell on receipt of an `EOF` character as the sole input. If set, the value is the number of consecutive `EOF` characters that can be read as the first character on an input line before Bash exits. If the variable is set but does not have a numeric value, or the value is null, then the default is 10. If the variable is unset, then `EOF` signifies the end of input to the shell. This is only in effect for interactive shells.
-- `INPUTRC`[¶](#index-INPUTRC)
+- `INPUTRC` [¶](#index-INPUTRC)
 - The name of the Readline initialization file, overriding the default of `~/.inputrc`.
-- `INSIDE_EMACS`[¶](#index-INSIDE_005fEMACS)
+- `INSIDE_EMACS` [¶](#index-INSIDE_005fEMACS)
 - If Bash finds this variable in the environment when the shell starts, it assumes that the shell is running in an Emacs shell buffer and may disable line editing depending on the value of `TERM`.
-- `LANG`[¶](#index-LANG-1)
+- `LANG` [¶](#index-LANG-1)
 - Used to determine the locale category for any category not specifically selected with a variable starting with `LC_`.
-- `LC_ALL`[¶](#index-LC_005fALL)
+- `LC_ALL` [¶](#index-LC_005fALL)
 - This variable overrides the value of `LANG` and any other `LC_` variable specifying a locale category.
-- `LC_COLLATE`[¶](#index-LC_005fCOLLATE)
+- `LC_COLLATE` [¶](#index-LC_005fCOLLATE)
 - This variable determines the collation order used when sorting the results of filename expansion, and determines the behavior of range expressions, equivalence classes, and collating sequences within filename expansion and pattern matching (see [Filename Expansion](#Filename-Expansion)).
-- `LC_CTYPE`[¶](#index-LC_005fCTYPE)
+- `LC_CTYPE` [¶](#index-LC_005fCTYPE)
 - This variable determines the interpretation of characters and the behavior of character classes within filename expansion and pattern matching (see [Filename Expansion](#Filename-Expansion)).
-- `LC_MESSAGES`[¶](#index-LC_005fMESSAGES-1)
+- `LC_MESSAGES` [¶](#index-LC_005fMESSAGES-1)
 - This variable determines the locale used to translate double-quoted strings preceded by a ‘`$`’ (see [Locale-Specific Translation](#Locale-Translation)).
-- `LC_NUMERIC`[¶](#index-LC_005fNUMERIC)
+- `LC_NUMERIC` [¶](#index-LC_005fNUMERIC)
 - This variable determines the locale category used for number formatting.
-- `LC_TIME`[¶](#index-LC_005fTIME)
+- `LC_TIME` [¶](#index-LC_005fTIME)
 - This variable determines the locale category used for data and time formatting.
-- `LINENO`[¶](#index-LINENO)
+- `LINENO` [¶](#index-LINENO)
 - The line number in the script or shell function currently executing. Line numbers start with 1. When not in a script or function, the value is not guaranteed to be meaningful. If `LINENO` is unset, it loses its special properties, even if it is subsequently reset.
-- `LINES`[¶](#index-LINES)
+- `LINES` [¶](#index-LINES)
 - Used by the `select` command to determine the column length for printing selection lists. Automatically set if the `checkwinsize` option is enabled (see [The Shopt Builtin](#The-Shopt-Builtin)), or in an interactive shell upon receipt of a `SIGWINCH`.
-- `MACHTYPE`[¶](#index-MACHTYPE)
+- `MACHTYPE` [¶](#index-MACHTYPE)
 - A string that fully describes the system type on which Bash is executing, in the standard GNU *cpu-company-system* format.
-- `MAILCHECK`[¶](#index-MAILCHECK)
+- `MAILCHECK` [¶](#index-MAILCHECK)
 - How often (in seconds) that the shell should check for mail in the files specified in the `MAILPATH` or `MAIL` variables. The default is 60 seconds. When it is time to check for mail, the shell does so before displaying the primary prompt. If this variable is unset, or set to a value that is not a number greater than or equal to zero, the shell disables mail checking.
-- `MAPFILE`[¶](#index-MAPFILE)
+- `MAPFILE` [¶](#index-MAPFILE)
 - An array variable created to hold the text read by the `mapfile` builtin when no variable name is supplied.
-- `OLDPWD`[¶](#index-OLDPWD)
+- `OLDPWD` [¶](#index-OLDPWD)
 - The previous working directory as set by the `cd` builtin.
-- `OPTERR`[¶](#index-OPTERR)
+- `OPTERR` [¶](#index-OPTERR)
 - If set to the value 1, Bash displays error messages generated by the `getopts` builtin command. `OPTERR` is initialized to 1 each time the shell is invoked.
-- `OSTYPE`[¶](#index-OSTYPE)
+- `OSTYPE` [¶](#index-OSTYPE)
 - A string describing the operating system Bash is running on.
-- `PIPESTATUS`[¶](#index-PIPESTATUS)
+- `PIPESTATUS` [¶](#index-PIPESTATUS)
 - An array variable (see [Arrays](#Arrays)) containing a list of exit status values from the commands in the most-recently-executed foreground pipeline, which may consist of only a simple command (see [Shell Commands](#Shell-Commands)). Bash sets `PIPESTATUS` after executing multi-element pipelines, timed and negated pipelines, simple commands, subshells created with the ‘`(`’ operator, the `[[` and `((` compound commands, and after error conditions that result in the shell aborting command execution.
-- `POSIXLY_CORRECT`[¶](#index-POSIXLY_005fCORRECT)
+- `POSIXLY_CORRECT` [¶](#index-POSIXLY_005fCORRECT)
 - If this variable is in the environment when Bash starts, the shell enters POSIX mode (see [Bash and POSIX](#Bash-POSIX-Mode)) before reading the startup files, as if the `--posix` invocation option had been supplied. If it is set while the shell is running, Bash enables POSIX mode, as if the command
-  `set -o posix`
+  ```
+  set -o posix
+  ```
   had been executed. When the shell enters POSIX mode, it sets this variable if it was not already set.
-- `PPID`[¶](#index-PPID)
+- `PPID` [¶](#index-PPID)
 - The process ID of the shell’s parent process. This variable is readonly.
-- `PROMPT_COMMAND`[¶](#index-PROMPT_005fCOMMAND)
+- `PROMPT_COMMAND` [¶](#index-PROMPT_005fCOMMAND)
 - If this variable is set, and is an array, the value of each set element is interpreted as a command to execute before printing the primary prompt (`$PS1`). If this is set but not an array variable, its value is used as a command to execute instead.
-- `PROMPT_DIRTRIM`[¶](#index-PROMPT_005fDIRTRIM)
+- `PROMPT_DIRTRIM` [¶](#index-PROMPT_005fDIRTRIM)
 - If set to a number greater than zero, the value is used as the number of trailing directory components to retain when expanding the `\w` and `\W` prompt string escapes (see [Controlling the Prompt](#Controlling-the-Prompt)). Characters removed are replaced with an ellipsis.
-- `PS0`[¶](#index-PS0)
+- `PS0` [¶](#index-PS0)
 - The value of this parameter is expanded like `PS1` and displayed by interactive shells after reading a command and before the command is executed.
-- `PS3`[¶](#index-PS3)
+- `PS3` [¶](#index-PS3)
 - The value of this variable is used as the prompt for the `select` command. If this variable is not set, the `select` command prompts with ‘`#?`’
-- `PS4`[¶](#index-PS4)
+- `PS4` [¶](#index-PS4)
 - The value of this parameter is expanded like `PS1` and the expanded value is the prompt printed before the command line is echoed when the `-x` option is set (see [The Set Builtin](#The-Set-Builtin)). The first character of the expanded value is replicated multiple times, as necessary, to indicate multiple levels of indirection. The default is ‘`+`’.
-- `PWD`[¶](#index-PWD)
+- `PWD` [¶](#index-PWD)
 - The current working directory as set by the `cd` builtin.
-- `RANDOM`[¶](#index-RANDOM)
+- `RANDOM` [¶](#index-RANDOM)
 - Each time this parameter is referenced, it expands to a random integer between 0 and 32767. Assigning a value to `RANDOM` initializes (seeds) the sequence of random numbers. Seeding the random number generator with the same constant value produces the same sequence of values. If `RANDOM` is unset, it loses its special properties, even if it is subsequently reset.
-- `READLINE_ARGUMENT`[¶](#index-READLINE_005fARGUMENT)
+- `READLINE_ARGUMENT` [¶](#index-READLINE_005fARGUMENT)
 - Any numeric argument given to a Readline command that was defined using ‘`bind -x`’ (see [Bash Builtin Commands](#Bash-Builtins) when it was invoked.
-- `READLINE_LINE`[¶](#index-READLINE_005fLINE)
+- `READLINE_LINE` [¶](#index-READLINE_005fLINE)
 - The contents of the Readline line buffer, for use with ‘`bind -x`’ (see [Bash Builtin Commands](#Bash-Builtins)).
-- `READLINE_MARK`[¶](#index-READLINE_005fMARK)
+- `READLINE_MARK` [¶](#index-READLINE_005fMARK)
 - The position of the *mark* (saved insertion point) in the Readline line buffer, for use with ‘`bind -x`’ (see [Bash Builtin Commands](#Bash-Builtins)). The characters between the insertion point and the mark are often called the *region*.
-- `READLINE_POINT`[¶](#index-READLINE_005fPOINT)
+- `READLINE_POINT` [¶](#index-READLINE_005fPOINT)
 - The position of the insertion point in the Readline line buffer, for use with ‘`bind -x`’ (see [Bash Builtin Commands](#Bash-Builtins)).
-- `REPLY`[¶](#index-REPLY)
+- `REPLY` [¶](#index-REPLY)
 - The default variable for the `read` builtin; set to the line read when `read` is not supplied a variable name argument.
-- `SECONDS`[¶](#index-SECONDS)
+- `SECONDS` [¶](#index-SECONDS)
 - This variable expands to the number of seconds since the shell was started. Assignment to this variable resets the count to the value assigned, and the expanded value becomes the value assigned plus the number of seconds since the assignment. The number of seconds at shell invocation and the current time are always determined by querying the system clock at one-second resolution. If `SECONDS` is unset, it loses its special properties, even if it is subsequently reset.
-- `SHELL`[¶](#index-SHELL)
+- `SHELL` [¶](#index-SHELL)
 - This environment variable expands to the full pathname to the shell. If it is not set when the shell starts, Bash assigns to it the full pathname of the current user’s login shell.
-- `SHELLOPTS`[¶](#index-SHELLOPTS)
+- `SHELLOPTS` [¶](#index-SHELLOPTS)
 - A colon-separated list of enabled shell options. Each word in the list is a valid argument for the `-o` option to the `set` builtin command (see [The Set Builtin](#The-Set-Builtin)). The options appearing in `SHELLOPTS` are those reported as ‘`on`’ by ‘`set -o`’. If this variable is in the environment when Bash starts up, the shell enables each option in the list before reading any startup files. If this variable is exported, child shells will enable each option in the list. This variable is readonly.
-- `SHLVL`[¶](#index-SHLVL)
+- `SHLVL` [¶](#index-SHLVL)
 - Incremented by one each time a new instance of Bash is started. This is intended to be a count of how deeply your Bash shells are nested.
-- `SRANDOM`[¶](#index-SRANDOM)
+- `SRANDOM` [¶](#index-SRANDOM)
 - This variable expands to a 32-bit pseudo-random number each time it is referenced. The random number generator is not linear on systems that support `/dev/urandom` or `arc4random`, so each returned number has no relationship to the numbers preceding it. The random number generator cannot be seeded, so assignments to this variable have no effect. If `SRANDOM` is unset, it loses its special properties, even if it is subsequently reset.
-- `TIMEFORMAT`[¶](#index-TIMEFORMAT)
+- `TIMEFORMAT` [¶](#index-TIMEFORMAT)
 - The value of this parameter is used as a format string specifying how the timing information for pipelines prefixed with the `time` reserved word should be displayed. The ‘`%`’ character introduces an escape sequence that is expanded to a time value or other information. The escape sequences and their meanings are as follows; the brackets denote optional portions.
   - `%%`
   - A literal ‘`%`’.
@@ -2379,14 +2751,16 @@ A few variables used by Bash are described in different chapters: variables for 
   The optional *p* is a digit specifying the precision, the number of fractional digits after a decimal point. A value of 0 causes no decimal point or fraction to be output. `time` prints at most six digits after the decimal point; values of *p* greater than 6 are changed to 6. If *p* is not specified, `time` prints three digits after the decimal point.
   The optional `l` specifies a longer format, including minutes, of the form *MM*m*SS*.*FF*s. The value of *p* determines whether or not the fraction is included.
   If this variable is not set, Bash acts as if it had the value
-  `$'\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS'`
+  ```
+  $'\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS'
+  ```
   If the value is null, Bash does not display any timing information. A trailing newline is added when the format string is displayed.
-- `TMOUT`[¶](#index-TMOUT)
+- `TMOUT` [¶](#index-TMOUT)
 - If set to a value greater than zero, the `read` builtin uses the value as its default timeout (see [Bash Builtin Commands](#Bash-Builtins)). The `select` command (see [Conditional Constructs](#Conditional-Constructs)) terminates if input does not arrive after `TMOUT` seconds when input is coming from a terminal.
   In an interactive shell, the value is interpreted as the number of seconds to wait for a line of input after issuing the primary prompt. Bash terminates after waiting for that number of seconds if a complete line of input does not arrive.
-- `TMPDIR`[¶](#index-TMPDIR)
+- `TMPDIR` [¶](#index-TMPDIR)
 - If set, Bash uses its value as the name of a directory in which Bash creates temporary files for the shell’s use.
-- `UID`[¶](#index-UID)
+- `UID` [¶](#index-UID)
 - The numeric real user id of the current user. This variable is readonly.
 
 This chapter describes features unique to Bash.
@@ -2404,7 +2778,14 @@ This chapter describes features unique to Bash.
 - [Bash and POSIX](#Bash-POSIX-Mode)
 - [Shell Compatibility Mode](#Shell-Compatibility-Mode)
 
-> bash [long-opt] [-ir] [-abefhkmnptuvxdBCDHP] [-ooption] [-Oshopt_option] [argument...] bash [long-opt] [-abefhkmnptuvxdBCDHP] [-ooption] [-Oshopt_option] -cstring[argument...] bash [long-opt] -s [-abefhkmnptuvxdBCDHP] [-ooption] [-Oshopt_option] [argument...]
+```
+bash [long-opt] [-ir] [-abefhkmnptuvxdBCDHP] [-o option]
+    [-O shopt_option] [argument ...]
+bash [long-opt] [-abefhkmnptuvxdBCDHP] [-o option]
+    [-O shopt_option] -c string [argument ...]
+bash [long-opt] -s [-abefhkmnptuvxdBCDHP] [-o option]
+    [-O shopt_option] [argument ...]
+```
 
 All of the single-character options used with the `set` builtin (see [The Set Builtin](#The-Set-Builtin)) can be used as options when the shell is invoked. In addition, there are several multi-character options that you can use. These options must appear on the command line before the single-character options to be recognized.
 
@@ -2519,7 +2900,12 @@ The `-s` invocation option may be used to set the positional parameters when an 
 
 To determine within a startup script whether or not Bash is running interactively, test the value of the ‘`-`’ special parameter. It contains `i` when the shell is interactive. For example:
 
-> case "$-" in *i*) echo This shell is interactive ;; *) echo This shell is not interactive ;; esac
+```
+case "$-" in
+*i*)	echo This shell is interactive ;;
+*)	echo This shell is not interactive ;;
+esac
+```
 
 Alternatively, startup scripts may examine the variable `PS1`; it is unset in non-interactive shells, and set in interactive shells. Thus:
 
@@ -2539,7 +2925,7 @@ When the shell is running interactively, it changes its behavior in several ways
 4. Bash expands and displays `PS1` before reading the first line of a command, and expands and displays `PS2` before reading the second and subsequent lines of a multi-line command. Bash expands and displays `PS0` after it reads a command but before executing it. See [Controlling the Prompt](#Controlling-the-Prompt), for a complete list of prompt string escape sequences.
 5. Bash uses Readline (see [Command Line Editing](#Command-Line-Editing)) to read commands from the user’s terminal.
 6. Bash inspects the value of the `ignoreeof` option to `set -o` instead of exiting immediately when it receives an `EOF` on its standard input when reading a command (see [The Set Builtin](#The-Set-Builtin)).
-7. Bash enables Command history (see [Bash History Facilities](#Bash-History-Facilities)) and history expansion (see[History Expansion](#History-Interaction)) by default. When a shell with history enabled exits, Bash saves the command history to the file named by `$HISTFILE`.
+7. Bash enables Command history (see [Bash History Facilities](#Bash-History-Facilities)) and history expansion (see [History Expansion](#History-Interaction)) by default. When a shell with history enabled exits, Bash saves the command history to the file named by `$HISTFILE`.
 8. Alias expansion (see [Aliases](#Aliases)) is performed by default.
 9. In the absence of any traps, Bash ignores `SIGTERM` (see [Signals](#Signals)).
 10. In the absence of any traps, `SIGINT` is caught and handled (see [Signals](#Signals)). `SIGINT` will interrupt some shell builtins.
@@ -2547,7 +2933,7 @@ When the shell is running interactively, it changes its behavior in several ways
 12. The `-n` option has no effect, whether at invocation or when using ‘`set -n`’ (see [The Set Builtin](#The-Set-Builtin)).
 13. Bash will check for mail periodically, depending on the values of the `MAIL`, `MAILPATH`, and `MAILCHECK` shell variables (see [Bash Variables](#Bash-Variables)).
 14. The shell will not exit on expansion errors due to references to unbound shell variables after ‘`set -u`’ has been enabled (see [The Set Builtin](#The-Set-Builtin)).
-15. The shell will not exit on expansion errors caused by `var`being unset or null in `${var:?word}` expansions (see[Shell Parameter Expansion](#Shell-Parameter-Expansion)).
+15. The shell will not exit on expansion errors caused by *var* being unset or null in `${var:?word}` expansions (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)).
 16. Redirection errors encountered by shell builtins will not cause the shell to exit.
 17. When running in POSIX mode, a special builtin returning an error status will not cause the shell to exit (see [Bash and POSIX](#Bash-POSIX-Mode)).
 18. A failed `exec` will not cause the shell to exit (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)).
@@ -2712,27 +3098,37 @@ The shell performs tilde expansion, parameter and variable expansion, arithmetic
 
 Bash automatically creates an indexed array if any variable is assigned to using the syntax
 
-> name[subscript]=value
+```
+name[subscript]=value
+```
 
 The `subscript` is treated as an arithmetic expression that must evaluate to a number greater than or equal to zero. To explicitly declare an indexed array, use
 
-> declare -aname
+```
+declare -a name
+```
 
 (see [Bash Builtin Commands](#Bash-Builtins)). The syntax
 
-> declare -aname[subscript]
+```
+declare -a name[subscript]
+```
 
 is also accepted; the `subscript` is ignored.
 
 Associative arrays are created using
 
-> declare -Aname
+```
+declare -A name
+```
 
 Attributes may be specified for an array variable using the `declare` and `readonly` builtins. Each attribute applies to all members of an array.
 
 Arrays are assigned using compound assignments of the form
 
-> name=(value1value2... )
+```
+name=(value1 value2 ... )
+```
 
 where each `value` may be of the form `[subscript]=``string`. Indexed array assignments do not require anything but `string`.
 
@@ -2772,9 +3168,10 @@ The contents of the directory stack are also visible as the value of the `DIRSTA
 
 - [Directory Stack Builtins](#Directory-Stack-Builtins)
 
-- `dirs`[¶](#index-dirs)
-- > dirs [-clpv] [+`N`| -`N`]
-
+- `dirs` [¶](#index-dirs)
+- ```
+  dirs [-clpv] [+N | -N]
+  ```
   Without options, display the list of currently remembered directories. Directories are added to the list with the `pushd` command; the `popd` command removes directories from the list. The current directory is always the first directory in the stack.
   Options, if supplied, have the following meanings:
   - `-c`
@@ -2789,9 +3186,10 @@ The contents of the directory stack are also visible as the value of the `DIRSTA
   - Displays the *N*th directory (counting from the left of the list printed by `dirs` when invoked without options), starting with zero.
   - `-N`
   - Displays the *N*th directory (counting from the right of the list printed by `dirs` when invoked without options), starting with zero.
-- `popd`[¶](#index-popd)
-- > popd [-n] [+`N`| -`N`]
-
+- `popd` [¶](#index-popd)
+- ```
+  popd [-n] [+N | -N]
+  ```
   Remove elements from the directory stack. The elements are numbered from 0 starting at the first directory listed by `dirs`; that is, `popd` is equivalent to `popd +0`.
   When no arguments are given, `popd` removes the top directory from the stack and changes to the new top directory.
   Arguments, if supplied, have the following meanings:
@@ -2804,9 +3202,10 @@ The contents of the directory stack are also visible as the value of the `DIRSTA
   If the top element of the directory stack is modified, and the `-n` option was not supplied, `popd` uses the `cd` builtin to change to the directory at the top of the stack. If the `cd` fails, `popd` returns a non-zero value.
   Otherwise, `popd` returns an unsuccessful status if an invalid option is specified, the directory stack is empty, or *N* specifies a non-existent directory stack entry.
   If the `popd` command is successful, Bash runs `dirs` to show the final contents of the directory stack, and the return status is 0.
-- `pushd`[¶](#index-pushd)
-- > pushd [-n] [`+N`|`-N`|`dir`]
-
+- `pushd` [¶](#index-pushd)
+- ```
+  pushd [-n] [+N | -N | dir]
+  ```
   Add a directory to the top of the directory stack, or rotate the stack, making the new top of the stack the current working directory. With no arguments, `pushd` exchanges the top two elements of the directory stack.
   Arguments, if supplied, have the following meanings:
   - `-n`
@@ -3072,7 +3471,9 @@ Job control refers to the ability to selectively stop (suspend) the execution of
 
 The shell associates a `job` with each pipeline. It keeps a table of currently executing jobs, which the `jobs` command will display. Each job has a *job number*, which `jobs` displays between brackets. Job numbers start at 1. When Bash starts a job asynchronously, it prints a line that looks like:
 
-> [1] 25647
+```
+[1] 25647
+```
 
 indicating that this job is job number 1 and that the process ID of the last process in the pipeline associated with this job is 25647. All of the processes in a single pipeline are members of the same job. Bash uses the `job` abstraction as the basis for job control.
 
@@ -3098,17 +3499,21 @@ If a user attempts to exit Bash while jobs are stopped, (or running, if the `che
 
 When the shell is waiting for a job or process using the `wait` builtin, and job control is enabled, `wait` will return when the job changes state. The `-f` option causes `wait` to wait until the job or process terminates before returning.
 
-- `bg`[¶](#index-bg)
-- > bg [`jobspec`...]
-
+- `bg` [¶](#index-bg)
+- ```
+  bg [jobspec ...]
+  ```
   Resume each suspended job *jobspec* in the background, as if it had been started with ‘`&`’. If *jobspec* is not supplied, the shell uses its notion of the current job. `bg` returns zero unless it is run when job control is not enabled, or, when run with job control enabled, any *jobspec* was not found or specifies a job that was started without job control.
-- `fg`[¶](#index-fg)
-- > fg [`jobspec`]
-
+- `fg` [¶](#index-fg)
+- ```
+  fg [jobspec]
+  ```
   Resume the job *jobspec* in the foreground and make it the current job. If *jobspec* is not supplied, `fg` resumes the current job. The return status is that of the command placed into the foreground, or non-zero if run when job control is disabled or, when run with job control enabled, *jobspec* does not specify a valid job or *jobspec* specifies a job that was started without job control.
-- `jobs`[¶](#index-jobs)
-- > jobs [-lnprs] [`jobspec`] jobs -x`command`[`arguments`]
-
+- `jobs` [¶](#index-jobs)
+- ```
+  jobs [-lnprs] [jobspec]
+  jobs -x command [arguments]
+  ```
   The first form lists the active jobs. The options have the following meanings:
   - `-l`
   - List process IDs in addition to the normal information.
@@ -3122,36 +3527,41 @@ When the shell is waiting for a job or process using the `wait` builtin, and job
   - Display only stopped jobs.
   If *jobspec* is supplied, `jobs` restricts output to information about that job. If *jobspec* is not supplied, `jobs` lists the status of all jobs. The return status is zero unless an invalid option is encountered or an invalid *jobspec* is supplied.
   If the `-x` option is supplied, `jobs` replaces any *jobspec* found in *command* or *arguments* with the corresponding process group ID, and executes *command*, passing it *argument*s, returning its exit status.
-- `kill`[¶](#index-kill)
-- > kill [-s `sigspec`] [-n`signum`] [-`sigspec`]`id`[...] kill -l|-L [`exit_status`]
-
+- `kill` [¶](#index-kill)
+- ```
+  kill [-s sigspec] [-n signum] [-sigspec] id [...]
+  kill -l|-L [exit_status]
+  ```
   Send a signal specified by *sigspec* or *signum* to the processes named by each *id*. Each *id* may be a job specification *jobspec* or process ID *pid*. *sigspec* is either a case-insensitive signal name such as `SIGINT` (with or without the `SIG` prefix) or a signal number; *signum* is a signal number. If *sigspec* and *signum* are not present, `kill` sends `SIGTERM`.
   The `-l` option lists the signal names. If any arguments are supplied when `-l` is supplied, `kill` lists the names of the signals corresponding to the arguments, and the return status is zero. *exit_status* is a number specifying a signal number or the exit status of a process terminated by a signal; if it is supplied, `kill` prints the name of the signal that caused the process to terminate. `kill` assumes that process exit statuses are greater than 128; anything less than that is a signal number. The `-L` option is equivalent to `-l`.
   The return status is zero if at least one signal was successfully sent, or non-zero if an error occurs or an invalid option is encountered.
-- `wait`[¶](#index-wait)
-- > wait [-fn] [-p `varname`] [`id`...]
-
+- `wait` [¶](#index-wait)
+- ```
+  wait [-fn] [-p varname] [id ...]
+  ```
   Wait until the child process specified by each *id* exits and return the exit status of the last *id*. Each *id* may be a process ID *pid* or a job specification *jobspec*; if a jobspec is supplied, `wait` waits for all processes in the job.
   If no options or *id*s are supplied, `wait` waits for all running background jobs and the last-executed process substitution, if its process id is the same as *$!*, and the return status is zero.
   If the `-n` option is supplied, `wait` waits for any one of the *id*s or, if no *id*s are supplied, any job or process substitution, to complete and returns its exit status. If none of the supplied *id*s is a child of the shell, or if no arguments are supplied and the shell has no unwaited-for children, the exit status is 127.
   If the `-p` option is supplied, `wait` assigns the process or job identifier of the job for which the exit status is returned to the variable *varname* named by the option argument. The variable, which cannot be readonly, will be unset initially, before any assignment. This is useful only when used with the `-n` option.
   Supplying the `-f` option, when job control is enabled, forces `wait` to wait for each *id* to terminate before returning its status, instead of returning when it changes status.
   If none of the *id*s specify one of the shell’s an active child processes, the return status is 127. If `wait` is interrupted by a signal, any *varname* will remain unset, and the return status will be greater than 128, as described above (see [Signals](#Signals)). Otherwise, the return status is the exit status of the last *id*.
-- `disown`[¶](#index-disown)
-- > disown [-ar] [-h] [`id`...]
-
+- `disown` [¶](#index-disown)
+- ```
+  disown [-ar] [-h] [id ...]
+  ```
   Without options, remove each *id* from the table of active jobs. Each *id* may be a job specification *jobspec* or a process ID *pid*; if *id* is a *pid*, `disown` uses the job containing *pid* as *jobspec*.
   If the `-h` option is supplied, `disown` does not remove the jobs corresponding to each `id` from the jobs table, but rather marks them so the shell does not send `SIGHUP` to the job if the shell receives a `SIGHUP`.
   If no *id* is supplied, the `-a` option means to remove or mark all jobs; the `-r` option without an *id* argument removes or marks running jobs. If no *id* is supplied, and neither the `-a` nor the `-r` option is supplied, `disown` removes or marks the current job.
   The return value is 0 unless an *id* does not specify a valid job.
-- `suspend`[¶](#index-suspend)
-- > suspend [-f]
-
+- `suspend` [¶](#index-suspend)
+- ```
+  suspend [-f]
+  ```
   Suspend the execution of this shell until it receives a `SIGCONT` signal. A login shell, or a shell without job control enabled, cannot be suspended; the `-f` option will override this and force the suspension. The return status is 0 unless the shell is a login shell or job control is not enabled and `-f` is not supplied.
 
 When job control is not active, the `kill` and `wait` builtins do not accept `jobspec` arguments. They must be supplied process IDs.
 
-- `auto_resume`[¶](#index-auto_005fresume)
+- `auto_resume` [¶](#index-auto_005fresume)
 - This variable controls how the shell interacts with the user and job control. If this variable exists then simple commands consisting of only a single word, without redirections, are treated as candidates for resumption of an existing job. There is no ambiguity allowed; if there is more than one job beginning with or containing the word, then this selects the most recently accessed job. The name of a stopped job, in this context, is the command line used to start it, as displayed by `jobs`. If this variable is set to the value ‘`exact`’, the word must match the name of a stopped job exactly; if set to ‘`substring`’, the word needs to match a substring of the name of a stopped job. The ‘`substring`’ value provides functionality analogous to the ‘`%?string`’ job ID (see [Job Control Basics](#Job-Control-Basics)). If set to any other value (e.g., ‘`prefix`’), the word must be a prefix of a stopped job’s name; this provides functionality analogous to the ‘`%string`’ job ID.
 
 This chapter describes the basic features of the GNU command line editing interface. Command line editing is provided by the Readline library, which is used by several different programs, including Bash. Command line editing is enabled by default when using an interactive shell, unless the `--noediting` option is supplied at shell invocation. Line editing is also used when using the `-e` option to the `read` builtin command (see [Bash Builtin Commands](#Bash-Builtins)). By default, the line editing commands are similar to those of Emacs; a vi-style line editing interface is also available. Line editing can be enabled at any time using the `-o emacs` or `-o vi` options to the `set` builtin command (see [The Set Builtin](#The-Set-Builtin)), or disabled using the `+o emacs` or `+o vi` options to `set`.
@@ -3279,112 +3689,114 @@ There are only a few basic constructs allowed in the Readline init file. Blank l
 
 - Variable Settings
 - You can modify the run-time behavior of Readline by altering the values of variables in Readline using the `set` command within the init file. The syntax is simple:
-  > set `variable``value`
-
+  ```
+  set variable value
+  ```
   Here, for example, is how to change from the default Emacs-like key binding to use `vi` line editing commands:
-  > set editing-mode vi
-
+  ```
+  set editing-mode vi
+  ```
   Variable names and values, where appropriate, are recognized without regard to case. Unrecognized variable names are ignored.
   Boolean variables (those that can be set to on or off) are set to on if the value is null or empty, *on* (case-insensitive), or 1. Any other value results in the variable being set to off.
   The `bind -V` command lists the current Readline variable names and values. See [Bash Builtin Commands](#Bash-Builtins).
   A great deal of run-time behavior is changeable with the following variables.
-  - `active-region-start-color`[¶](#index-active_002dregion_002dstart_002dcolor)
+  - `active-region-start-color` [¶](#index-active_002dregion_002dstart_002dcolor)
   - A string variable that controls the text color and background when displaying the text in the active region (see the description of `enable-active-region` below). This string must not take up any physical character positions on the display, so it should consist only of terminal escape sequences. It is output to the terminal before displaying the text in the active region. This variable is reset to the default value whenever the terminal type changes. The default value is the string that puts the terminal in standout mode, as obtained from the terminal’s terminfo description. A sample value might be ‘`\e[01;33m`’.
-  - `active-region-end-color`[¶](#index-active_002dregion_002dend_002dcolor)
+  - `active-region-end-color` [¶](#index-active_002dregion_002dend_002dcolor)
   - A string variable that “undoes” the effects of `active-region-start-color` and restores “normal” terminal display appearance after displaying text in the active region. This string must not take up any physical character positions on the display, so it should consist only of terminal escape sequences. It is output to the terminal after displaying the text in the active region. This variable is reset to the default value whenever the terminal type changes. The default value is the string that restores the terminal from standout mode, as obtained from the terminal’s terminfo description. A sample value might be ‘`\e[0m`’.
-  - `bell-style`[¶](#index-bell_002dstyle)
+  - `bell-style` [¶](#index-bell_002dstyle)
   - Controls what happens when Readline wants to ring the terminal bell. If set to ‘`none`’, Readline never rings the bell. If set to ‘`visible`’, Readline uses a visible bell if one is available. If set to ‘`audible`’ (the default), Readline attempts to ring the terminal’s bell.
-  - `bind-tty-special-chars`[¶](#index-bind_002dtty_002dspecial_002dchars)
+  - `bind-tty-special-chars` [¶](#index-bind_002dtty_002dspecial_002dchars)
   - If set to ‘`on`’ (the default), Readline attempts to bind the control characters that are treated specially by the kernel’s terminal driver to their Readline equivalents. These override the default Readline bindings described here. Type ‘`stty -a`’ at a Bash prompt to see your current terminal settings, including the special control characters (usually `cchars`).
-  - `blink-matching-paren`[¶](#index-blink_002dmatching_002dparen)
+  - `blink-matching-paren` [¶](#index-blink_002dmatching_002dparen)
   - If set to ‘`on`’, Readline attempts to briefly move the cursor to an opening parenthesis when a closing parenthesis is inserted. The default is ‘`off`’.
-  - `colored-completion-prefix`[¶](#index-colored_002dcompletion_002dprefix)
+  - `colored-completion-prefix` [¶](#index-colored_002dcompletion_002dprefix)
   - If set to ‘`on`’, when listing completions, Readline displays the common prefix of the set of possible completions using a different color. The color definitions are taken from the value of the `LS_COLORS` environment variable. If there is a color definition in `LS_COLORS` for the custom suffix ‘`readline-colored-completion-prefix`’, Readline uses this color for the common prefix instead of its default. The default is ‘`off`’.
-  - `colored-stats`[¶](#index-colored_002dstats)
+  - `colored-stats` [¶](#index-colored_002dstats)
   - If set to ‘`on`’, Readline displays possible completions using different colors to indicate their file type. The color definitions are taken from the value of the `LS_COLORS` environment variable. The default is ‘`off`’.
-  - `comment-begin`[¶](#index-comment_002dbegin)
+  - `comment-begin` [¶](#index-comment_002dbegin)
   - The string to insert at the beginning of the line by the `insert-comment` command. The default value is `"#"`.
-  - `completion-display-width`[¶](#index-completion_002ddisplay_002dwidth)
+  - `completion-display-width` [¶](#index-completion_002ddisplay_002dwidth)
   - The number of screen columns used to display possible matches when performing completion. The value is ignored if it is less than 0 or greater than the terminal screen width. A value of 0 causes matches to be displayed one per line. The default value is -1.
-  - `completion-ignore-case`[¶](#index-completion_002dignore_002dcase)
+  - `completion-ignore-case` [¶](#index-completion_002dignore_002dcase)
   - If set to ‘`on`’, Readline performs filename matching and completion in a case-insensitive fashion. The default value is ‘`off`’.
-  - `completion-map-case`[¶](#index-completion_002dmap_002dcase)
+  - `completion-map-case` [¶](#index-completion_002dmap_002dcase)
   - If set to ‘`on`’, and *completion-ignore-case* is enabled, Readline treats hyphens (‘`-`’) and underscores (‘`_`’) as equivalent when performing case-insensitive filename matching and completion. The default value is ‘`off`’.
-  - `completion-prefix-display-length`[¶](#index-completion_002dprefix_002ddisplay_002dlength)
+  - `completion-prefix-display-length` [¶](#index-completion_002dprefix_002ddisplay_002dlength)
   - The maximum length in characters of the common prefix of a list of possible completions that is displayed without modification. When set to a value greater than zero, Readline replaces common prefixes longer than this value with an ellipsis when displaying possible completions. If a completion begins with a period, and Readline is completing filenames, it uses three underscores instead of an ellipsis.
-  - `completion-query-items`[¶](#index-completion_002dquery_002ditems)
+  - `completion-query-items` [¶](#index-completion_002dquery_002ditems)
   - The number of possible completions that determines when the user is asked whether the list of possibilities should be displayed. If the number of possible completions is greater than or equal to this value, Readline asks whether or not the user wishes to view them; otherwise, Readline simply lists the completions. This variable must be set to an integer value greater than or equal to zero. A zero value means Readline should never ask; negative values are treated as zero. The default limit is `100`.
-  - `convert-meta`[¶](#index-convert_002dmeta)
+  - `convert-meta` [¶](#index-convert_002dmeta)
   - If set to ‘`on`’, Readline converts characters it reads that have the eighth bit set to an ASCII key sequence by clearing the eighth bit and prefixing an `ESC` character, converting them to a meta-prefixed key sequence. The default value is ‘`on`’, but Readline sets it to ‘`off`’ if the locale contains characters whose encodings may include bytes with the eighth bit set. This variable is dependent on the `LC_CTYPE` locale category, and may change if the locale changes. This variable also affects key bindings; see the description of `force-meta-prefix` below.
-  - `disable-completion`[¶](#index-disable_002dcompletion)
+  - `disable-completion` [¶](#index-disable_002dcompletion)
   - If set to ‘`On`’, Readline inhibits word completion. Completion characters are inserted into the line as if they had been mapped to `self-insert`. The default is ‘`off`’.
-  - `echo-control-characters`[¶](#index-echo_002dcontrol_002dcharacters)
+  - `echo-control-characters` [¶](#index-echo_002dcontrol_002dcharacters)
   - When set to ‘`on`’, on operating systems that indicate they support it, Readline echoes a character corresponding to a signal generated from the keyboard. The default is ‘`on`’.
-  - `editing-mode`[¶](#index-editing_002dmode)
+  - `editing-mode` [¶](#index-editing_002dmode)
   - The `editing-mode` variable controls the default set of key bindings. By default, Readline starts up in emacs editing mode, where the keystrokes are most similar to Emacs. This variable can be set to either ‘`emacs`’ or ‘`vi`’.
-  - `emacs-mode-string`[¶](#index-emacs_002dmode_002dstring)
+  - `emacs-mode-string` [¶](#index-emacs_002dmode_002dstring)
   - If the *show-mode-in-prompt* variable is enabled, this string is displayed immediately before the last line of the primary prompt when emacs editing mode is active. The value is expanded like a key binding, so the standard set of meta- and control- prefixes and backslash escape sequences is available. The ‘`\1`’ and ‘`\2`’ escapes begin and end sequences of non-printing characters, which can be used to embed a terminal control sequence into the mode string. The default is ‘`@`’.
-  - `enable-active-region`[¶](#index-enable_002dactive_002dregion-The)
+  - `enable-active-region` [¶](#index-enable_002dactive_002dregion-The)
   - *point* is the current cursor position, and *mark* refers to a saved cursor position (see [Commands For Moving](#Commands-For-Moving)). The text between the point and mark is referred to as the *region*. When this variable is set to ‘`On`’, Readline allows certain commands to designate the region as *active*. When the region is active, Readline highlights the text in the region using the value of the `active-region-start-color`, which defaults to the string that enables the terminal’s standout mode. The active region shows the text inserted by bracketed-paste and any matching text found by incremental and non-incremental history searches. The default is ‘`On`’.
-  - `enable-bracketed-paste`[¶](#index-enable_002dbracketed_002dpaste)
+  - `enable-bracketed-paste` [¶](#index-enable_002dbracketed_002dpaste)
   - When set to ‘`On`’, Readline configures the terminal to insert each paste into the editing buffer as a single string of characters, instead of treating each character as if it had been read from the keyboard. This is called putting the terminal into *bracketed paste mode*; it prevents Readline from executing any editing commands bound to key sequences appearing in the pasted text. The default is ‘`On`’.
-  - `enable-keypad`[¶](#index-enable_002dkeypad)
+  - `enable-keypad` [¶](#index-enable_002dkeypad)
   - When set to ‘`on`’, Readline tries to enable the application keypad when it is called. Some systems need this to enable the arrow keys. The default is ‘`off`’.
-  - `enable-meta-key`[¶](#index-enable_002dmeta_002dkey)
+  - `enable-meta-key` [¶](#index-enable_002dmeta_002dkey)
   - When set to ‘`on`’, Readline tries to enable any meta modifier key the terminal claims to support when it is called. On many terminals, the Meta key is used to send eight-bit characters; this variable checks for the terminal capability that indicates the terminal can enable and disable a mode that sets the eighth bit of a character (0200) if the Meta key is held down when the character is typed (a meta character). The default is ‘`on`’.
-  - `expand-tilde`[¶](#index-expand_002dtilde)
+  - `expand-tilde` [¶](#index-expand_002dtilde)
   - If set to ‘`on`’, Readline attempts tilde expansion when it attempts word completion. The default is ‘`off`’.
-  - `force-meta-prefix`[¶](#index-force_002dmeta_002dprefix)
+  - `force-meta-prefix` [¶](#index-force_002dmeta_002dprefix)
   - If set to ‘`on`’, Readline modifies its behavior when binding key sequences containing `\M-` or `Meta-` (see `Key Bindings` in [Readline Init File Syntax](#Readline-Init-File-Syntax)) by converting a key sequence of the form `\M-`*C* or `Meta-`*C* to the two-character sequence `ESC` *C* (adding the meta prefix). If `force-meta-prefix` is set to ‘`off`’ (the default), Readline uses the value of the `convert-meta` variable to determine whether to perform this conversion: if `convert-meta` is ‘`on`’, Readline performs the conversion described above; if it is ‘`off`’, Readline converts *C* to a meta character by setting the eighth bit (0200). The default is ‘`off`’.
-  - `history-preserve-point`[¶](#index-history_002dpreserve_002dpoint)
+  - `history-preserve-point` [¶](#index-history_002dpreserve_002dpoint)
   - If set to ‘`on`’, the history code attempts to place the point (the current cursor position) at the same location on each history line retrieved with `previous-history` or `next-history`. The default is ‘`off`’.
-  - `history-size`[¶](#index-history_002dsize)
+  - `history-size` [¶](#index-history_002dsize)
   - Set the maximum number of history entries saved in the history list. If set to zero, any existing history entries are deleted and no new entries are saved. If set to a value less than zero, the number of history entries is not limited. By default, Bash sets the maximum number of history entries to the value of the `HISTSIZE` shell variable. If you try to set *history-size* to a non-numeric value, the maximum number of history entries will be set to 500.
-  - `horizontal-scroll-mode`[¶](#index-horizontal_002dscroll_002dmode)
+  - `horizontal-scroll-mode` [¶](#index-horizontal_002dscroll_002dmode)
   - Setting this variable to ‘`on`’ means that the text of the lines being edited will scroll horizontally on a single screen line when the lines are longer than the width of the screen, instead of wrapping onto a new screen line. This variable is automatically set to ‘`on`’ for terminals of height 1. By default, this variable is set to ‘`off`’.
-  - `input-meta`[¶](#index-input_002dmeta)
+  - `input-meta` [¶](#index-input_002dmeta)
   - If set to ‘`on`’, Readline enables eight-bit input (that is, it does not clear the eighth bit in the characters it reads), regardless of what the terminal claims it can support. The default value is ‘`off`’, but Readline sets it to ‘`on`’ if the locale contains characters whose encodings may include bytes with the eighth bit set. This variable is dependent on the `LC_CTYPE` locale category, and its value may change if the locale changes. The name `meta-flag` is a synonym for `input-meta`.
-  - `isearch-terminators`[¶](#index-isearch_002dterminators)
+  - `isearch-terminators` [¶](#index-isearch_002dterminators)
   - The string of characters that should terminate an incremental search without subsequently executing the character as a command (see [Searching for Commands in the History](#Searching)). If this variable has not been given a value, the characters `ESC` and `C-j` terminate an incremental search.
-  - `keymap`[¶](#index-keymap)
+  - `keymap` [¶](#index-keymap)
   - Sets Readline’s idea of the current keymap for key binding commands. Built-in `keymap` names are `emacs`, `emacs-standard`, `emacs-meta`, `emacs-ctlx`, `vi`, `vi-move`, `vi-command`, and `vi-insert`. `vi` is equivalent to `vi-command` (`vi-move` is also a synonym); `emacs` is equivalent to `emacs-standard`. Applications may add additional names. The default value is `emacs`; the value of the `editing-mode` variable also affects the default keymap.
   - `keyseq-timeout`
   - Specifies the duration Readline will wait for a character when reading an ambiguous key sequence (one that can form a complete key sequence using the input read so far, or can take additional input to complete a longer key sequence). If Readline doesn’t receive any input within the timeout, it uses the shorter but complete key sequence. Readline uses this value to determine whether or not input is available on the current input source (`rl_instream` by default). The value is specified in milliseconds, so a value of 1000 means that Readline will wait one second for additional input. If this variable is set to a value less than or equal to zero, or to a non-numeric value, Readline waits until another key is pressed to decide which key sequence to complete. The default value is `500`.
   - `mark-directories`
   - If set to ‘`on`’, completed directory names have a slash appended. The default is ‘`on`’.
-  - `mark-modified-lines`[¶](#index-mark_002dmodified_002dlines)
+  - `mark-modified-lines` [¶](#index-mark_002dmodified_002dlines)
   - When this variable is set to ‘`on`’, Readline displays an asterisk (‘`*`’) at the start of history lines which have been modified. This variable is ‘`off`’ by default.
-  - `mark-symlinked-directories`[¶](#index-mark_002dsymlinked_002ddirectories)
+  - `mark-symlinked-directories` [¶](#index-mark_002dsymlinked_002ddirectories)
   - If set to ‘`on`’, completed names which are symbolic links to directories have a slash appended, subject to the value of `mark-directories`. The default is ‘`off`’.
-  - `match-hidden-files`[¶](#index-match_002dhidden_002dfiles)
+  - `match-hidden-files` [¶](#index-match_002dhidden_002dfiles)
   - This variable, when set to ‘`on`’, forces Readline to match files whose names begin with a ‘`.`’ (hidden files) when performing filename completion. If set to ‘`off`’, the user must include the leading ‘`.`’ in the filename to be completed. This variable is ‘`on`’ by default.
-  - `menu-complete-display-prefix`[¶](#index-menu_002dcomplete_002ddisplay_002dprefix)
+  - `menu-complete-display-prefix` [¶](#index-menu_002dcomplete_002ddisplay_002dprefix)
   - If set to ‘`on`’, menu completion displays the common prefix of the list of possible completions (which may be empty) before cycling through the list. The default is ‘`off`’.
-  - `output-meta`[¶](#index-output_002dmeta)
+  - `output-meta` [¶](#index-output_002dmeta)
   - If set to ‘`on`’, Readline displays characters with the eighth bit set directly rather than as a meta-prefixed escape sequence. The default is ‘`off`’, but Readline sets it to ‘`on`’ if the locale contains characters whose encodings may include bytes with the eighth bit set. This variable is dependent on the `LC_CTYPE` locale category, and its value may change if the locale changes.
-  - `page-completions`[¶](#index-page_002dcompletions)
+  - `page-completions` [¶](#index-page_002dcompletions)
   - If set to ‘`on`’, Readline uses an internal pager resembling *more*(1) to display a screenful of possible completions at a time. This variable is ‘`on`’ by default.
   - `prefer-visible-bell`
   - See `bell-style`.
   - `print-completions-horizontally`
   - If set to ‘`on`’, Readline displays completions with matches sorted horizontally in alphabetical order, rather than down the screen. The default is ‘`off`’.
-  - `revert-all-at-newline`[¶](#index-revert_002dall_002dat_002dnewline)
+  - `revert-all-at-newline` [¶](#index-revert_002dall_002dat_002dnewline)
   - If set to ‘`on`’, Readline will undo all changes to history lines before returning when executing `accept-line`. By default, history lines may be modified and retain individual undo lists across calls to `readline()`. The default is ‘`off`’.
-  - `search-ignore-case`[¶](#index-search_002dignore_002dcase)
+  - `search-ignore-case` [¶](#index-search_002dignore_002dcase)
   - If set to ‘`on`’, Readline performs incremental and non-incremental history list searches in a case-insensitive fashion. The default value is ‘`off`’.
-  - `show-all-if-ambiguous`[¶](#index-show_002dall_002dif_002dambiguous)
+  - `show-all-if-ambiguous` [¶](#index-show_002dall_002dif_002dambiguous)
   - This alters the default behavior of the completion functions. If set to ‘`on`’, words which have more than one possible completion cause the matches to be listed immediately instead of ringing the bell. The default value is ‘`off`’.
-  - `show-all-if-unmodified`[¶](#index-show_002dall_002dif_002dunmodified)
+  - `show-all-if-unmodified` [¶](#index-show_002dall_002dif_002dunmodified)
   - This alters the default behavior of the completion functions in a fashion similar to *show-all-if-ambiguous*. If set to ‘`on`’, words which have more than one possible completion without any possible partial completion (the possible completions don’t share a common prefix) cause the matches to be listed immediately instead of ringing the bell. The default value is ‘`off`’.
-  - `show-mode-in-prompt`[¶](#index-show_002dmode_002din_002dprompt)
+  - `show-mode-in-prompt` [¶](#index-show_002dmode_002din_002dprompt)
   - If set to ‘`on`’, add a string to the beginning of the prompt indicating the editing mode: emacs, vi command, or vi insertion. The mode strings are user-settable (e.g., *emacs-mode-string*). The default value is ‘`off`’.
-  - `skip-completed-text`[¶](#index-skip_002dcompleted_002dtext)
+  - `skip-completed-text` [¶](#index-skip_002dcompleted_002dtext)
   - If set to ‘`on`’, this alters the default completion behavior when inserting a single match into the line. It’s only active when performing completion in the middle of a word. If enabled, Readline does not insert characters from the completion that match characters after point in the word being completed, so portions of the word following the cursor are not duplicated. For instance, if this is enabled, attempting completion when the cursor is after the first ‘`e`’ in ‘`Makefile`’ will result in ‘`Makefile`’ rather than ‘`Makefilefile`’, assuming there is a single possible completion. The default value is ‘`off`’.
-  - `vi-cmd-mode-string`[¶](#index-vi_002dcmd_002dmode_002dstring)
+  - `vi-cmd-mode-string` [¶](#index-vi_002dcmd_002dmode_002dstring)
   - If the *show-mode-in-prompt* variable is enabled, this string is displayed immediately before the last line of the primary prompt when vi editing mode is active and in command mode. The value is expanded like a key binding, so the standard set of meta- and control- prefixes and backslash escape sequences is available. The ‘`\1`’ and ‘`\2`’ escapes begin and end sequences of non-printing characters, which can be used to embed a terminal control sequence into the mode string. The default is ‘`(cmd)`’.
-  - `vi-ins-mode-string`[¶](#index-vi_002dins_002dmode_002dstring)
+  - `vi-ins-mode-string` [¶](#index-vi_002dins_002dmode_002dstring)
   - If the *show-mode-in-prompt* variable is enabled, this string is displayed immediately before the last line of the primary prompt when vi editing mode is active and in insertion mode. The value is expanded like a key binding, so the standard set of meta- and control- prefixes and backslash escape sequences is available. The ‘`\1`’ and ‘`\2`’ escapes begin and end sequences of non-printing characters, which can be used to embed a terminal control sequence into the mode string. The default is ‘`(ins)`’.
-  - `visible-stats`[¶](#index-visible_002dstats)
+  - `visible-stats` [¶](#index-visible_002dstats)
   - If set to ‘`on`’, a character denoting a file’s type is appended to the filename when listing possible completions. The default is ‘`off`’.
 - Key Bindings
 - The syntax for controlling key bindings in the init file is simple. First you need to find the name of the command that you want to change. The following sections contain tables of the command name, the default keybinding, if any, and a short description of what the command does.
@@ -3393,14 +3805,20 @@ There are only a few basic constructs allowed in the Readline init file. Blank l
   The `bind -p` command displays Readline function names and bindings in a format that can be put directly into an initialization file. See [Bash Builtin Commands](#Bash-Builtins).
   - `keyname`:`function-name`or`macro`
   - *keyname* is the name of a key spelled out in English. For example:
-    > Control-u: universal-argument Meta-Rubout: backward-kill-word Control-o: "> output"
-
+    ```
+    Control-u: universal-argument
+    Meta-Rubout: backward-kill-word
+    Control-o: "> output"
+    ```
     In the example above, `C-u` is bound to the function `universal-argument`, `M-DEL` is bound to the function `backward-kill-word`, and `C-o` is bound to run the macro expressed on the right hand side (that is, to insert the text ‘`> output`’ into the line).
     This key binding syntax recognizes a number of symbolic character names: *DEL*, *ESC*, *ESCAPE*, *LFD*, *NEWLINE*, *RET*, *RETURN*, *RUBOUT* (a destructive backspace), *SPACE*, *SPC*, and *TAB*.
   - "`keyseq`":`function-name`or`macro`
   - *keyseq* differs from *keyname* above in that strings denoting an entire key sequence can be specified, by placing the key sequence in double quotes. Some GNU Emacs style key escapes can be used, as in the following example, but none of the special character names are recognized.
-    > "\C-u": universal-argument "\C-x\C-r": re-read-init-file "\e[11~": "Function Key 1"
-
+    ```
+    "\C-u": universal-argument
+    "\C-x\C-r": re-read-init-file
+    "\e[11~": "Function Key 1"
+    ```
     In the above example, `C-u` is again bound to the function `universal-argument` (just as it was in the first example), ‘`C-x C-r`’ is bound to the function `re-read-init-file`, and ‘`ESC [ 1 1 ~`’ is bound to insert the text ‘`Function Key 1`’.
   The following GNU Emacs style escape sequences are available when specifying key sequences:
   - `\C-`
@@ -3437,7 +3855,9 @@ There are only a few basic constructs allowed in the Readline init file. Blank l
   - `\xHH`
   - The eight-bit character whose value is the hexadecimal value *HH* (one or two hex digits).
   When entering the text of a macro, single or double quotes must be used to indicate a macro definition. Unquoted text is assumed to be a function name. The backslash escapes described above are expanded in the macro body. Backslash will quote any other character in the macro text, including ‘`"`’ and ‘`'`’. For example, the following binding will make ‘`C-x \`’ insert a single ‘`\`’ into the line:
-  > "\C-x\\": "\\"
+  ```
+  "\C-x\\": "\\"
+  ```
 
 Readline implements a facility similar in spirit to the conditional compilation features of the C preprocessor which allows key bindings and variable settings to be performed as the result of tests. There are four parser directives available.
 
@@ -3449,20 +3869,35 @@ Readline implements a facility similar in spirit to the conditional compilation 
   - The `term=` form may be used to include terminal-specific key bindings, perhaps to bind the key sequences output by the terminal’s function keys. The word on the right side of the ‘`=`’ is tested against both the full name of the terminal and the portion of the terminal name before the first ‘`-`’. This allows `xterm` to match both `xterm` and `xterm-256color`, for instance.
   - `version`
   - The `version` test may be used to perform comparisons against specific Readline versions. The `version` expands to the current Readline version. The set of comparison operators includes ‘`=`’ (and ‘`==`’), ‘`!=`’, ‘`<=`’, ‘`>=`’, ‘`<`’, and ‘`>`’. The version number supplied on the right side of the operator consists of a major version number, an optional decimal point, and an optional minor version (e.g., ‘`7.1`’). If the minor version is omitted, it defaults to ‘`0`’. The operator may be separated from the string `version` and from the version number argument by whitespace. The following example sets a variable if the Readline version being used is 7.0 or newer:
-    > $if version >= 7.0 set show-mode-in-prompt on $endif
+    ```
+    $if version >= 7.0
+    set show-mode-in-prompt on
+    $endif
+    ```
   - `application`
   - The *application* construct is used to include application-specific settings. Each program using the Readline library sets the *application name*, and you can test for a particular value. This could be used to bind key sequences to functions useful for a specific program. For instance, the following command adds a key sequence that quotes the current or previous word in Bash:
-    > $if Bash # Quote the current or previous word "\C-xq": "\eb\"\ef\"" $endif
+    ```
+    $if Bash
+    # Quote the current or previous word
+    "\C-xq": "\eb\"\ef\""
+    $endif
+    ```
   - `variable`
   - The *variable* construct provides simple equality tests for Readline variables and values. The permitted comparison operators are ‘`=`’, ‘`==`’, and ‘`!=`’. The variable name must be separated from the comparison operator by whitespace; the operator may be separated from the value on the right hand side by whitespace. String and boolean variables may be tested. Boolean variables must be tested against the values *on* and *off*. The following example is equivalent to the `mode=emacs` test described above:
-    > $if editing-mode == emacs set show-mode-in-prompt on $endif
+    ```
+    $if editing-mode == emacs
+    set show-mode-in-prompt on
+    $endif
+    ```
 - `$else`
 - Commands in this branch of the `$if` directive are executed if the test fails.
 - `$endif`
 - This command, as seen in the previous example, terminates an `$if` command.
 - `$include`
 - This directive takes a single filename as an argument and reads commands and key bindings from that file. For example, the following directive reads from `/etc/inputrc`:
-  > $include /etc/inputrc
+  ```
+  $include /etc/inputrc
+  ```
 
 Here is an example of an `inputrc` file. This illustrates key binding, variable assignment, and conditional syntax.
 
@@ -3481,7 +3916,7 @@ $include /etc/Inputrc
 #
 # Set various bindings for emacs mode.
 
-set editing-mode emacs
+set editing-mode emacs 
 
 $if mode=emacs
 
@@ -3581,151 +4016,151 @@ In the following descriptions, *point* refers to the current cursor position, an
 - [Keyboard Macros](#Keyboard-Macros)
 - [Some Miscellaneous Commands](#Miscellaneous-Commands)
 
-- `beginning-of-line (C-a)`[¶](#index-beginning_002dof_002dline-_0028C_002da_0029)
+- `beginning-of-line (C-a)` [¶](#index-beginning_002dof_002dline-_0028C_002da_0029)
 - Move to the start of the current line. This may also be bound to the Home key on some keyboards.
-- `end-of-line (C-e)`[¶](#index-end_002dof_002dline-_0028C_002de_0029)
+- `end-of-line (C-e)` [¶](#index-end_002dof_002dline-_0028C_002de_0029)
 - Move to the end of the line. This may also be bound to the End key on some keyboards.
-- `forward-char (C-f)`[¶](#index-forward_002dchar-_0028C_002df_0029)
+- `forward-char (C-f)` [¶](#index-forward_002dchar-_0028C_002df_0029)
 - Move forward a character. This may also be bound to the right arrow key on some keyboards.
-- `backward-char (C-b)`[¶](#index-backward_002dchar-_0028C_002db_0029)
+- `backward-char (C-b)` [¶](#index-backward_002dchar-_0028C_002db_0029)
 - Move back a character. This may also be bound to the left arrow key on some keyboards.
-- `forward-word (M-f)`[¶](#index-forward_002dword-_0028M_002df_0029)
+- `forward-word (M-f)` [¶](#index-forward_002dword-_0028M_002df_0029)
 - Move forward to the end of the next word. Words are composed of letters and digits.
-- `backward-word (M-b)`[¶](#index-backward_002dword-_0028M_002db_0029)
+- `backward-word (M-b)` [¶](#index-backward_002dword-_0028M_002db_0029)
 - Move back to the start of the current or previous word. Words are composed of letters and digits.
-- `shell-forward-word (M-C-f)`[¶](#index-shell_002dforward_002dword-_0028M_002dC_002df_0029)
+- `shell-forward-word (M-C-f)` [¶](#index-shell_002dforward_002dword-_0028M_002dC_002df_0029)
 - Move forward to the end of the next word. Words are delimited by non-quoted shell metacharacters.
-- `shell-backward-word (M-C-b)`[¶](#index-shell_002dbackward_002dword-_0028M_002dC_002db_0029)
+- `shell-backward-word (M-C-b)` [¶](#index-shell_002dbackward_002dword-_0028M_002dC_002db_0029)
 - Move back to the start of the current or previous word. Words are delimited by non-quoted shell metacharacters.
-- `previous-screen-line ()`[¶](#index-previous_002dscreen_002dline-_0028_0029)
+- `previous-screen-line ()` [¶](#index-previous_002dscreen_002dline-_0028_0029)
 - Attempt to move point to the same physical screen column on the previous physical screen line. This will not have the desired effect if the current Readline line does not take up more than one physical line or if point is not greater than the length of the prompt plus the screen width.
-- `next-screen-line ()`[¶](#index-next_002dscreen_002dline-_0028_0029)
+- `next-screen-line ()` [¶](#index-next_002dscreen_002dline-_0028_0029)
 - Attempt to move point to the same physical screen column on the next physical screen line. This will not have the desired effect if the current Readline line does not take up more than one physical line or if the length of the current Readline line is not greater than the length of the prompt plus the screen width.
-- `clear-display (M-C-l)`[¶](#index-clear_002ddisplay-_0028M_002dC_002dl_0029)
+- `clear-display (M-C-l)` [¶](#index-clear_002ddisplay-_0028M_002dC_002dl_0029)
 - Clear the screen and, if possible, the terminal’s scrollback buffer, then redraw the current line, leaving the current line at the top of the screen.
-- `clear-screen (C-l)`[¶](#index-clear_002dscreen-_0028C_002dl_0029)
+- `clear-screen (C-l)` [¶](#index-clear_002dscreen-_0028C_002dl_0029)
 - Clear the screen, then redraw the current line, leaving the current line at the top of the screen. If given a numeric argument, this refreshes the current line without clearing the screen.
-- `redraw-current-line ()`[¶](#index-redraw_002dcurrent_002dline-_0028_0029)
+- `redraw-current-line ()` [¶](#index-redraw_002dcurrent_002dline-_0028_0029)
 - Refresh the current line. By default, this is unbound.
 
-- `accept-line (Newline or Return)`[¶](#index-accept_002dline-_0028Newline-or-Return_0029)
+- `accept-line (Newline or Return)` [¶](#index-accept_002dline-_0028Newline-or-Return_0029)
 - Accept the line regardless of where the cursor is. If this line is non-empty, add it to the history list according to the setting of the `HISTCONTROL` and `HISTIGNORE` variables. If this line is a modified history line, then restore the history line to its original state.
-- `previous-history (C-p)`[¶](#index-previous_002dhistory-_0028C_002dp_0029)
+- `previous-history (C-p)` [¶](#index-previous_002dhistory-_0028C_002dp_0029)
 - Move ‘back’ through the history list, fetching the previous command. This may also be bound to the up arrow key on some keyboards.
-- `next-history (C-n)`[¶](#index-next_002dhistory-_0028C_002dn_0029)
+- `next-history (C-n)` [¶](#index-next_002dhistory-_0028C_002dn_0029)
 - Move ‘forward’ through the history list, fetching the next command. This may also be bound to the down arrow key on some keyboards.
-- `beginning-of-history (M-<)`[¶](#index-beginning_002dof_002dhistory-_0028M_002d_003c_0029)
+- `beginning-of-history (M-<)` [¶](#index-beginning_002dof_002dhistory-_0028M_002d_003c_0029)
 - Move to the first line in the history.
-- `end-of-history (M->)`[¶](#index-end_002dof_002dhistory-_0028M_002d_003e_0029)
+- `end-of-history (M->)` [¶](#index-end_002dof_002dhistory-_0028M_002d_003e_0029)
 - Move to the end of the input history, i.e., the line currently being entered.
-- `reverse-search-history (C-r)`[¶](#index-reverse_002dsearch_002dhistory-_0028C_002dr_0029)
+- `reverse-search-history (C-r)` [¶](#index-reverse_002dsearch_002dhistory-_0028C_002dr_0029)
 - Search backward starting at the current line and moving ‘up’ through the history as necessary. This is an incremental search. This command sets the region to the matched text and activates the region.
-- `forward-search-history (C-s)`[¶](#index-forward_002dsearch_002dhistory-_0028C_002ds_0029)
+- `forward-search-history (C-s)` [¶](#index-forward_002dsearch_002dhistory-_0028C_002ds_0029)
 - Search forward starting at the current line and moving ‘down’ through the history as necessary. This is an incremental search. This command sets the region to the matched text and activates the region.
-- `non-incremental-reverse-search-history (M-p)`[¶](#index-non_002dincremental_002dreverse_002dsearch_002dhistory-_0028M_002dp_0029)
+- `non-incremental-reverse-search-history (M-p)` [¶](#index-non_002dincremental_002dreverse_002dsearch_002dhistory-_0028M_002dp_0029)
 - Search backward starting at the current line and moving ‘up’ through the history as necessary using a non-incremental search for a string supplied by the user. The search string may match anywhere in a history line.
-- `non-incremental-forward-search-history (M-n)`[¶](#index-non_002dincremental_002dforward_002dsearch_002dhistory-_0028M_002dn_0029)
+- `non-incremental-forward-search-history (M-n)` [¶](#index-non_002dincremental_002dforward_002dsearch_002dhistory-_0028M_002dn_0029)
 - Search forward starting at the current line and moving ‘down’ through the history as necessary using a non-incremental search for a string supplied by the user. The search string may match anywhere in a history line.
-- `history-search-backward ()`[¶](#index-history_002dsearch_002dbackward-_0028_0029)
+- `history-search-backward ()` [¶](#index-history_002dsearch_002dbackward-_0028_0029)
 - Search backward through the history for the string of characters between the start of the current line and the point. The search string must match at the beginning of a history line. This is a non-incremental search. By default, this command is unbound, but may be bound to the Page Down key on some keyboards.
-- `history-search-forward ()`[¶](#index-history_002dsearch_002dforward-_0028_0029)
+- `history-search-forward ()` [¶](#index-history_002dsearch_002dforward-_0028_0029)
 - Search forward through the history for the string of characters between the start of the current line and the point. The search string must match at the beginning of a history line. This is a non-incremental search. By default, this command is unbound, but may be bound to the Page Up key on some keyboards.
-- `history-substring-search-backward ()`[¶](#index-history_002dsubstring_002dsearch_002dbackward-_0028_0029)
+- `history-substring-search-backward ()` [¶](#index-history_002dsubstring_002dsearch_002dbackward-_0028_0029)
 - Search backward through the history for the string of characters between the start of the current line and the point. The search string may match anywhere in a history line. This is a non-incremental search. By default, this command is unbound.
-- `history-substring-search-forward ()`[¶](#index-history_002dsubstring_002dsearch_002dforward-_0028_0029)
+- `history-substring-search-forward ()` [¶](#index-history_002dsubstring_002dsearch_002dforward-_0028_0029)
 - Search forward through the history for the string of characters between the start of the current line and the point. The search string may match anywhere in a history line. This is a non-incremental search. By default, this command is unbound.
-- `yank-nth-arg (M-C-y)`[¶](#index-yank_002dnth_002darg-_0028M_002dC_002dy_0029)
+- `yank-nth-arg (M-C-y)` [¶](#index-yank_002dnth_002darg-_0028M_002dC_002dy_0029)
 - Insert the first argument to the previous command (usually the second word on the previous line) at point. With an argument *n*, insert the *n*th word from the previous command (the words in the previous command begin with word 0). A negative argument inserts the *n*th word from the end of the previous command. Once the argument *n* is computed, this uses the history expansion facilities to extract the *n*th word, as if the ‘`!n`’ history expansion had been specified.
-- `yank-last-arg (M-. or M-_)`[¶](#index-yank_002dlast_002darg-_0028M_002d_002e-or-M_002d_005f_0029)
+- `yank-last-arg (M-. or M-_)` [¶](#index-yank_002dlast_002darg-_0028M_002d_002e-or-M_002d_005f_0029)
 - Insert last argument to the previous command (the last word of the previous history entry). With a numeric argument, behave exactly like `yank-nth-arg`. Successive calls to `yank-last-arg` move back through the history list, inserting the last word (or the word specified by the argument to the first call) of each line in turn. Any numeric argument supplied to these successive calls determines the direction to move through the history. A negative argument switches the direction through the history (back or forward). This uses the history expansion facilities to extract the last word, as if the ‘`!$`’ history expansion had been specified.
-- `operate-and-get-next (C-o)`[¶](#index-operate_002dand_002dget_002dnext-_0028C_002do_0029)
+- `operate-and-get-next (C-o)` [¶](#index-operate_002dand_002dget_002dnext-_0028C_002do_0029)
 - Accept the current line for return to the calling application as if a newline had been entered, and fetch the next line relative to the current line from the history for editing. A numeric argument, if supplied, specifies the history entry to use instead of the current line.
-- `fetch-history ()`[¶](#index-fetch_002dhistory-_0028_0029)
+- `fetch-history ()` [¶](#index-fetch_002dhistory-_0028_0029)
 - With a numeric argument, fetch that entry from the history list and make it the current line. Without an argument, move back to the first entry in the history list.
 
-- `end-of-file (usually C-d)`[¶](#index-end_002dof_002dfile-_0028usually-C_002dd_0029)
+- `end-of-file (usually C-d)` [¶](#index-end_002dof_002dfile-_0028usually-C_002dd_0029)
 - The character indicating end-of-file as set, for example, by `stty`. If this character is read when there are no characters on the line, and point is at the beginning of the line, Readline interprets it as the end of input and returns EOF.
-- `delete-char (C-d)`[¶](#index-delete_002dchar-_0028C_002dd_0029)
+- `delete-char (C-d)` [¶](#index-delete_002dchar-_0028C_002dd_0029)
 - Delete the character at point. If this function is bound to the same character as the tty EOF character, as `C-d` commonly is, see above for the effects. This may also be bound to the Delete key on some keyboards.
-- `backward-delete-char (Rubout)`[¶](#index-backward_002ddelete_002dchar-_0028Rubout_0029)
+- `backward-delete-char (Rubout)` [¶](#index-backward_002ddelete_002dchar-_0028Rubout_0029)
 - Delete the character behind the cursor. A numeric argument means to kill the characters, saving them on the kill ring, instead of deleting them.
-- `forward-backward-delete-char ()`[¶](#index-forward_002dbackward_002ddelete_002dchar-_0028_0029)
+- `forward-backward-delete-char ()` [¶](#index-forward_002dbackward_002ddelete_002dchar-_0028_0029)
 - Delete the character under the cursor, unless the cursor is at the end of the line, in which case the character behind the cursor is deleted. By default, this is not bound to a key.
-- `quoted-insert (C-q or C-v)`[¶](#index-quoted_002dinsert-_0028C_002dq-or-C_002dv_0029)
+- `quoted-insert (C-q or C-v)` [¶](#index-quoted_002dinsert-_0028C_002dq-or-C_002dv_0029)
 - Add the next character typed to the line verbatim. This is how to insert key sequences like `C-q`, for example.
-- `self-insert (a, b, A, 1, !, …)`[¶](#index-self_002dinsert-_0028a_002c-b_002c-A_002c-1_002c-_0021_002c-_002e_002e_002e_0029)
+- `self-insert (a, b, A, 1, !, …)` [¶](#index-self_002dinsert-_0028a_002c-b_002c-A_002c-1_002c-_0021_002c-_002e_002e_002e_0029)
 - Insert the character typed.
-- `bracketed-paste-begin ()`[¶](#index-bracketed_002dpaste_002dbegin-_0028_0029)
+- `bracketed-paste-begin ()` [¶](#index-bracketed_002dpaste_002dbegin-_0028_0029)
 - This function is intended to be bound to the "bracketed paste" escape sequence sent by some terminals, and such a binding is assigned by default. It allows Readline to insert the pasted text as a single unit without treating each character as if it had been read from the keyboard. The characters are inserted as if each one was bound to `self-insert` instead of executing any editing commands.
   Bracketed paste sets the region (the characters between point and the mark) to the inserted text. It sets the *active region*.
-- `transpose-chars (C-t)`[¶](#index-transpose_002dchars-_0028C_002dt_0029)
+- `transpose-chars (C-t)` [¶](#index-transpose_002dchars-_0028C_002dt_0029)
 - Drag the character before the cursor forward over the character at the cursor, moving the cursor forward as well. If the insertion point is at the end of the line, then this transposes the last two characters of the line. Negative arguments have no effect.
-- `transpose-words (M-t)`[¶](#index-transpose_002dwords-_0028M_002dt_0029)
+- `transpose-words (M-t)` [¶](#index-transpose_002dwords-_0028M_002dt_0029)
 - Drag the word before point past the word after point, moving point past that word as well. If the insertion point is at the end of the line, this transposes the last two words on the line.
-- `shell-transpose-words (M-C-t)`[¶](#index-shell_002dtranspose_002dwords-_0028M_002dC_002dt_0029)
+- `shell-transpose-words (M-C-t)` [¶](#index-shell_002dtranspose_002dwords-_0028M_002dC_002dt_0029)
 - Drag the word before point past the word after point, moving point past that word as well. If the insertion point is at the end of the line, this transposes the last two words on the line. Word boundaries are the same as `shell-forward-word` and `shell-backward-word`.
-- `upcase-word (M-u)`[¶](#index-upcase_002dword-_0028M_002du_0029)
+- `upcase-word (M-u)` [¶](#index-upcase_002dword-_0028M_002du_0029)
 - Uppercase the current (or following) word. With a negative argument, uppercase the previous word, but do not move the cursor.
-- `downcase-word (M-l)`[¶](#index-downcase_002dword-_0028M_002dl_0029)
+- `downcase-word (M-l)` [¶](#index-downcase_002dword-_0028M_002dl_0029)
 - Lowercase the current (or following) word. With a negative argument, lowercase the previous word, but do not move the cursor.
-- `capitalize-word (M-c)`[¶](#index-capitalize_002dword-_0028M_002dc_0029)
+- `capitalize-word (M-c)` [¶](#index-capitalize_002dword-_0028M_002dc_0029)
 - Capitalize the current (or following) word. With a negative argument, capitalize the previous word, but do not move the cursor.
-- `overwrite-mode ()`[¶](#index-overwrite_002dmode-_0028_0029)
+- `overwrite-mode ()` [¶](#index-overwrite_002dmode-_0028_0029)
 - Toggle overwrite mode. With an explicit positive numeric argument, switches to overwrite mode. With an explicit non-positive numeric argument, switches to insert mode. This command affects only `emacs` mode; `vi` mode does overwrite differently. Each call to `readline()` starts in insert mode.
   In overwrite mode, characters bound to `self-insert` replace the text at point rather than pushing the text to the right. Characters bound to `backward-delete-char` replace the character before point with a space.
   By default, this command is unbound, but may be bound to the Insert key on some keyboards.
 
-- `kill-line (C-k)`[¶](#index-kill_002dline-_0028C_002dk_0029)
+- `kill-line (C-k)` [¶](#index-kill_002dline-_0028C_002dk_0029)
 - Kill the text from point to the end of the current line. With a negative numeric argument, kill backward from the cursor to the beginning of the line.
-- `backward-kill-line (C-x Rubout)`[¶](#index-backward_002dkill_002dline-_0028C_002dx-Rubout_0029)
+- `backward-kill-line (C-x Rubout)` [¶](#index-backward_002dkill_002dline-_0028C_002dx-Rubout_0029)
 - Kill backward from the cursor to the beginning of the current line. With a negative numeric argument, kill forward from the cursor to the end of the line.
-- `unix-line-discard (C-u)`[¶](#index-unix_002dline_002ddiscard-_0028C_002du_0029)
+- `unix-line-discard (C-u)` [¶](#index-unix_002dline_002ddiscard-_0028C_002du_0029)
 - Kill backward from the cursor to the beginning of the current line.
-- `kill-whole-line ()`[¶](#index-kill_002dwhole_002dline-_0028_0029)
+- `kill-whole-line ()` [¶](#index-kill_002dwhole_002dline-_0028_0029)
 - Kill all characters on the current line, no matter where point is. By default, this is unbound.
-- `kill-word (M-d)`[¶](#index-kill_002dword-_0028M_002dd_0029)
+- `kill-word (M-d)` [¶](#index-kill_002dword-_0028M_002dd_0029)
 - Kill from point to the end of the current word, or if between words, to the end of the next word. Word boundaries are the same as `forward-word`.
-- `backward-kill-word (M-DEL)`[¶](#index-backward_002dkill_002dword-_0028M_002dDEL_0029)
+- `backward-kill-word (M-DEL)` [¶](#index-backward_002dkill_002dword-_0028M_002dDEL_0029)
 - Kill the word behind point. Word boundaries are the same as `backward-word`.
-- `shell-kill-word (M-C-d)`[¶](#index-shell_002dkill_002dword-_0028M_002dC_002dd_0029)
+- `shell-kill-word (M-C-d)` [¶](#index-shell_002dkill_002dword-_0028M_002dC_002dd_0029)
 - Kill from point to the end of the current word, or if between words, to the end of the next word. Word boundaries are the same as `shell-forward-word`.
-- `shell-backward-kill-word ()`[¶](#index-shell_002dbackward_002dkill_002dword-_0028_0029)
+- `shell-backward-kill-word ()` [¶](#index-shell_002dbackward_002dkill_002dword-_0028_0029)
 - Kill the word behind point. Word boundaries are the same as `shell-backward-word`.
-- `unix-word-rubout (C-w)`[¶](#index-unix_002dword_002drubout-_0028C_002dw_0029)
+- `unix-word-rubout (C-w)` [¶](#index-unix_002dword_002drubout-_0028C_002dw_0029)
 - Kill the word behind point, using white space as a word boundary, saving the killed text on the kill-ring.
-- `unix-filename-rubout ()`[¶](#index-unix_002dfilename_002drubout-_0028_0029)
+- `unix-filename-rubout ()` [¶](#index-unix_002dfilename_002drubout-_0028_0029)
 - Kill the word behind point, using white space and the slash character as the word boundaries, saving the killed text on the kill-ring.
-- `delete-horizontal-space ()`[¶](#index-delete_002dhorizontal_002dspace-_0028_0029)
+- `delete-horizontal-space ()` [¶](#index-delete_002dhorizontal_002dspace-_0028_0029)
 - Delete all spaces and tabs around point. By default, this is unbound.
-- `kill-region ()`[¶](#index-kill_002dregion-_0028_0029)
+- `kill-region ()` [¶](#index-kill_002dregion-_0028_0029)
 - Kill the text in the current region. By default, this command is unbound.
-- `copy-region-as-kill ()`[¶](#index-copy_002dregion_002das_002dkill-_0028_0029)
+- `copy-region-as-kill ()` [¶](#index-copy_002dregion_002das_002dkill-_0028_0029)
 - Copy the text in the region to the kill buffer, so it can be yanked right away. By default, this command is unbound.
-- `copy-backward-word ()`[¶](#index-copy_002dbackward_002dword-_0028_0029)
+- `copy-backward-word ()` [¶](#index-copy_002dbackward_002dword-_0028_0029)
 - Copy the word before point to the kill buffer. The word boundaries are the same as `backward-word`. By default, this command is unbound.
-- `copy-forward-word ()`[¶](#index-copy_002dforward_002dword-_0028_0029)
+- `copy-forward-word ()` [¶](#index-copy_002dforward_002dword-_0028_0029)
 - Copy the word following point to the kill buffer. The word boundaries are the same as `forward-word`. By default, this command is unbound.
-- `yank (C-y)`[¶](#index-yank-_0028C_002dy_0029)
+- `yank (C-y)` [¶](#index-yank-_0028C_002dy_0029)
 - Yank the top of the kill ring into the buffer at point.
-- `yank-pop (M-y)`[¶](#index-yank_002dpop-_0028M_002dy_0029)
+- `yank-pop (M-y)` [¶](#index-yank_002dpop-_0028M_002dy_0029)
 - Rotate the kill-ring, and yank the new top. You can only do this if the prior command is `yank` or `yank-pop`.
 
-- `digit-argument (M-0, M-1, … M--)`[¶](#index-digit_002dargument-_0028M_002d0_002c-M_002d1_002c-_002e_002e_002e-M_002d_002d_0029)
+- `digit-argument (M-0, M-1, … M--)` [¶](#index-digit_002dargument-_0028M_002d0_002c-M_002d1_002c-_002e_002e_002e-M_002d_002d_0029)
 - Add this digit to the argument already accumulating, or start a new argument. `M--` starts a negative argument.
-- `universal-argument ()`[¶](#index-universal_002dargument-_0028_0029)
+- `universal-argument ()` [¶](#index-universal_002dargument-_0028_0029)
 - This is another way to specify an argument. If this command is followed by one or more digits, optionally with a leading minus sign, those digits define the argument. If the command is followed by digits, executing `universal-argument` again ends the numeric argument, but is otherwise ignored. As a special case, if this command is immediately followed by a character that is neither a digit nor minus sign, the argument count for the next command is multiplied by four. The argument count is initially one, so executing this function the first time makes the argument count four, a second time makes the argument count sixteen, and so on. By default, this is not bound to a key.
 
-- `complete (TAB)`[¶](#index-complete-_0028TAB_0029)
+- `complete (TAB)` [¶](#index-complete-_0028TAB_0029)
 - Attempt to perform completion on the text before point. The actual completion performed is application-specific. Bash attempts completion by first checking for any programmable completions for the command word (see [Programmable Completion](#Programmable-Completion)), otherwise treating the text as a variable (if the text begins with ‘`$`’), username (if the text begins with ‘`~`’), hostname (if the text begins with ‘`@`’), or command (including aliases, functions, and builtins) in turn. If none of these produces a match, it falls back to filename completion.
-- `possible-completions (M-?)`[¶](#index-possible_002dcompletions-_0028M_002d_003f_0029)
+- `possible-completions (M-?)` [¶](#index-possible_002dcompletions-_0028M_002d_003f_0029)
 - List the possible completions of the text before point. When displaying completions, Readline sets the number of columns used for display to the value of `completion-display-width`, the value of the environment variable `COLUMNS`, or the screen width, in that order.
-- `insert-completions (M-*)`[¶](#index-insert_002dcompletions-_0028M_002d_002a_0029)
+- `insert-completions (M-*)` [¶](#index-insert_002dcompletions-_0028M_002d_002a_0029)
 - Insert all completions of the text before point that would have been generated by `possible-completions`, separated by a space.
-- `menu-complete ()`[¶](#index-menu_002dcomplete-_0028_0029)
+- `menu-complete ()` [¶](#index-menu_002dcomplete-_0028_0029)
 - Similar to `complete`, but replaces the word to be completed with a single match from the list of possible completions. Repeatedly executing `menu-complete` steps through the list of possible completions, inserting each match in turn. At the end of the list of completions, `menu-complete` rings the bell (subject to the setting of `bell-style`) and restores the original text. An argument of *n* moves *n* positions forward in the list of matches; a negative argument moves backward through the list. This command is intended to be bound to `TAB`, but is unbound by default.
-- `menu-complete-backward ()`[¶](#index-menu_002dcomplete_002dbackward-_0028_0029)
+- `menu-complete-backward ()` [¶](#index-menu_002dcomplete_002dbackward-_0028_0029)
 - Identical to `menu-complete`, but moves backward through the list of possible completions, as if `menu-complete` had been given a negative argument. This command is unbound by default.
-- `export-completions ()`[¶](#index-export_002dcompletions-_0028_0029)
+- `export-completions ()` [¶](#index-export_002dcompletions-_0028_0029)
 - Perform completion on the word before point as described above and write the list of possible completions to Readline’s output stream using the following format, writing information on separate lines:
   - the number of matches `N`;
   - the word being completed;
@@ -3734,101 +4169,101 @@ In the following descriptions, *point* refers to the current cursor position, an
   If there are no matches, the first line will be “0”, and this command does not print any output after the *S*:*E*. If there is only a single match, this prints a single line containing it. If there is more than one match, this prints the common prefix of the matches, which may be empty, on the first line after the *S*:*E*, then the matches on subsequent lines. In this case, *N* will include the first line with the common prefix.
   The user or application should be able to accommodate the possibility of a blank line. The intent is that the user or application reads *N* lines after the line containing *S*:*E* to obtain the match list. This command is unbound by default.
 - the number of matches
-- `delete-char-or-list ()`[¶](#index-delete_002dchar_002dor_002dlist-_0028_0029)
+- `delete-char-or-list ()` [¶](#index-delete_002dchar_002dor_002dlist-_0028_0029)
 - Deletes the character under the cursor if not at the beginning or end of the line (like `delete-char`). At the end of the line, it behaves identically to `possible-completions`. This command is unbound by default.
-- `complete-filename (M-/)`[¶](#index-complete_002dfilename-_0028M_002d_002f_0029)
+- `complete-filename (M-/)` [¶](#index-complete_002dfilename-_0028M_002d_002f_0029)
 - Attempt filename completion on the text before point.
-- `possible-filename-completions (C-x /)`[¶](#index-possible_002dfilename_002dcompletions-_0028C_002dx-_002f_0029)
+- `possible-filename-completions (C-x /)` [¶](#index-possible_002dfilename_002dcompletions-_0028C_002dx-_002f_0029)
 - List the possible completions of the text before point, treating it as a filename.
-- `complete-username (M-~)`[¶](#index-complete_002dusername-_0028M_002d_007e_0029)
+- `complete-username (M-~)` [¶](#index-complete_002dusername-_0028M_002d_007e_0029)
 - Attempt completion on the text before point, treating it as a username.
-- `possible-username-completions (C-x ~)`[¶](#index-possible_002dusername_002dcompletions-_0028C_002dx-_007e_0029)
+- `possible-username-completions (C-x ~)` [¶](#index-possible_002dusername_002dcompletions-_0028C_002dx-_007e_0029)
 - List the possible completions of the text before point, treating it as a username.
-- `complete-variable (M-$)`[¶](#index-complete_002dvariable-_0028M_002d_0024_0029)
+- `complete-variable (M-$)` [¶](#index-complete_002dvariable-_0028M_002d_0024_0029)
 - Attempt completion on the text before point, treating it as a shell variable.
-- `possible-variable-completions (C-x $)`[¶](#index-possible_002dvariable_002dcompletions-_0028C_002dx-_0024_0029)
+- `possible-variable-completions (C-x $)` [¶](#index-possible_002dvariable_002dcompletions-_0028C_002dx-_0024_0029)
 - List the possible completions of the text before point, treating it as a shell variable.
-- `complete-hostname (M-@)`[¶](#index-complete_002dhostname-_0028M_002d_0040_0029)
+- `complete-hostname (M-@)` [¶](#index-complete_002dhostname-_0028M_002d_0040_0029)
 - Attempt completion on the text before point, treating it as a hostname.
-- `possible-hostname-completions (C-x @)`[¶](#index-possible_002dhostname_002dcompletions-_0028C_002dx-_0040_0029)
+- `possible-hostname-completions (C-x @)` [¶](#index-possible_002dhostname_002dcompletions-_0028C_002dx-_0040_0029)
 - List the possible completions of the text before point, treating it as a hostname.
-- `complete-command (M-!)`[¶](#index-complete_002dcommand-_0028M_002d_0021_0029)
+- `complete-command (M-!)` [¶](#index-complete_002dcommand-_0028M_002d_0021_0029)
 - Attempt completion on the text before point, treating it as a command name. Command completion attempts to match the text against aliases, reserved words, shell functions, shell builtins, and finally executable filenames, in that order.
-- `possible-command-completions (C-x !)`[¶](#index-possible_002dcommand_002dcompletions-_0028C_002dx-_0021_0029)
+- `possible-command-completions (C-x !)` [¶](#index-possible_002dcommand_002dcompletions-_0028C_002dx-_0021_0029)
 - List the possible completions of the text before point, treating it as a command name.
-- `dynamic-complete-history (M-TAB)`[¶](#index-dynamic_002dcomplete_002dhistory-_0028M_002dTAB_0029)
+- `dynamic-complete-history (M-TAB)` [¶](#index-dynamic_002dcomplete_002dhistory-_0028M_002dTAB_0029)
 - Attempt completion on the text before point, comparing the text against history list entries for possible completion matches.
-- `dabbrev-expand ()`[¶](#index-dabbrev_002dexpand-_0028_0029)
+- `dabbrev-expand ()` [¶](#index-dabbrev_002dexpand-_0028_0029)
 - Attempt menu completion on the text before point, comparing the text against lines from the history list for possible completion matches.
-- `complete-into-braces (M-{)`[¶](#index-complete_002dinto_002dbraces-_0028M_002d_007b_0029)
+- `complete-into-braces (M-{)` [¶](#index-complete_002dinto_002dbraces-_0028M_002d_007b_0029)
 - Perform filename completion and insert the list of possible completions enclosed within braces so the list is available to the shell (see [Brace Expansion](#Brace-Expansion)).
 
-- `start-kbd-macro (C-x ()`[¶](#index-start_002dkbd_002dmacro-_0028C_002dx-_0028_0029)
+- `start-kbd-macro (C-x ()` [¶](#index-start_002dkbd_002dmacro-_0028C_002dx-_0028_0029)
 - Begin saving the characters typed into the current keyboard macro.
-- `end-kbd-macro (C-x ))`[¶](#index-end_002dkbd_002dmacro-_0028C_002dx-_0029_0029)
+- `end-kbd-macro (C-x ))` [¶](#index-end_002dkbd_002dmacro-_0028C_002dx-_0029_0029)
 - Stop saving the characters typed into the current keyboard macro and save the definition.
-- `call-last-kbd-macro (C-x e)`[¶](#index-call_002dlast_002dkbd_002dmacro-_0028C_002dx-e_0029)
+- `call-last-kbd-macro (C-x e)` [¶](#index-call_002dlast_002dkbd_002dmacro-_0028C_002dx-e_0029)
 - Re-execute the last keyboard macro defined, by making the characters in the macro appear as if typed at the keyboard.
-- `print-last-kbd-macro ()`[¶](#index-print_002dlast_002dkbd_002dmacro-_0028_0029)
+- `print-last-kbd-macro ()` [¶](#index-print_002dlast_002dkbd_002dmacro-_0028_0029)
 - Print the last keyboard macro defined in a format suitable for the *inputrc* file.
 
-- `re-read-init-file (C-x C-r)`[¶](#index-re_002dread_002dinit_002dfile-_0028C_002dx-C_002dr_0029)
+- `re-read-init-file (C-x C-r)` [¶](#index-re_002dread_002dinit_002dfile-_0028C_002dx-C_002dr_0029)
 - Read in the contents of the *inputrc* file, and incorporate any bindings or variable assignments found there.
-- `abort (C-g)`[¶](#index-abort-_0028C_002dg_0029)
+- `abort (C-g)` [¶](#index-abort-_0028C_002dg_0029)
 - Abort the current editing command and ring the terminal’s bell (subject to the setting of `bell-style`).
-- `do-lowercase-version (M-A, M-B, M-x, …)`[¶](#index-do_002dlowercase_002dversion-_0028M_002dA_002c-M_002dB_002c-M_002dx_002c-_002e_002e_002e_0029)
+- `do-lowercase-version (M-A, M-B, M-x, …)` [¶](#index-do_002dlowercase_002dversion-_0028M_002dA_002c-M_002dB_002c-M_002dx_002c-_002e_002e_002e_0029)
 - If the metafied character *x* is upper case, run the command that is bound to the corresponding metafied lower case character. The behavior is undefined if *x* is already lower case.
-- `prefix-meta (ESC)`[¶](#index-prefix_002dmeta-_0028ESC_0029)
+- `prefix-meta (ESC)` [¶](#index-prefix_002dmeta-_0028ESC_0029)
 - Metafy the next character typed. Typing ‘`ESC f`’ is equivalent to typing `M-f`.
-- `undo (C-_ or C-x C-u)`[¶](#index-undo-_0028C_002d_005f-or-C_002dx-C_002du_0029)
+- `undo (C-_ or C-x C-u)` [¶](#index-undo-_0028C_002d_005f-or-C_002dx-C_002du_0029)
 - Incremental undo, separately remembered for each line.
-- `revert-line (M-r)`[¶](#index-revert_002dline-_0028M_002dr_0029)
+- `revert-line (M-r)` [¶](#index-revert_002dline-_0028M_002dr_0029)
 - Undo all changes made to this line. This is like executing the `undo` command enough times to get back to the initial state.
-- `tilde-expand (M-&)`[¶](#index-tilde_002dexpand-_0028M_002d_0026_0029)
+- `tilde-expand (M-&)` [¶](#index-tilde_002dexpand-_0028M_002d_0026_0029)
 - Perform tilde expansion on the current word.
-- `set-mark (C-@)`[¶](#index-set_002dmark-_0028C_002d_0040_0029)
+- `set-mark (C-@)` [¶](#index-set_002dmark-_0028C_002d_0040_0029)
 - Set the mark to the point. If a numeric argument is supplied, set the mark to that position.
-- `exchange-point-and-mark (C-x C-x)`[¶](#index-exchange_002dpoint_002dand_002dmark-_0028C_002dx-C_002dx_0029)
+- `exchange-point-and-mark (C-x C-x)` [¶](#index-exchange_002dpoint_002dand_002dmark-_0028C_002dx-C_002dx_0029)
 - Swap the point with the mark. Set the current cursor position to the saved position, then set the mark to the old cursor position.
-- `character-search (C-])`[¶](#index-character_002dsearch-_0028C_002d_005d_0029)
+- `character-search (C-])` [¶](#index-character_002dsearch-_0028C_002d_005d_0029)
 - Read a character and move point to the next occurrence of that character. A negative argument searches for previous occurrences.
-- `character-search-backward (M-C-])`[¶](#index-character_002dsearch_002dbackward-_0028M_002dC_002d_005d_0029)
+- `character-search-backward (M-C-])` [¶](#index-character_002dsearch_002dbackward-_0028M_002dC_002d_005d_0029)
 - Read a character and move point to the previous occurrence of that character. A negative argument searches for subsequent occurrences.
-- `skip-csi-sequence ()`[¶](#index-skip_002dcsi_002dsequence-_0028_0029)
+- `skip-csi-sequence ()` [¶](#index-skip_002dcsi_002dsequence-_0028_0029)
 - Read enough characters to consume a multi-key sequence such as those defined for keys like Home and End. CSI sequences begin with a Control Sequence Indicator (CSI), usually `ESC [`. If this sequence is bound to "\e[", keys producing CSI sequences have no effect unless explicitly bound to a Readline command, instead of inserting stray characters into the editing buffer. This is unbound by default, but usually bound to `ESC [`.
-- `insert-comment (M-#)`[¶](#index-insert_002dcomment-_0028M_002d_0023_0029)
+- `insert-comment (M-#)` [¶](#index-insert_002dcomment-_0028M_002d_0023_0029)
 - Without a numeric argument, insert the value of the `comment-begin` variable at the beginning of the current line. If a numeric argument is supplied, this command acts as a toggle: if the characters at the beginning of the line do not match the value of `comment-begin`, insert the value; otherwise delete the characters in `comment-begin` from the beginning of the line. In either case, the line is accepted as if a newline had been typed. The default value of `comment-begin` causes this command to make the current line a shell comment. If a numeric argument causes the comment character to be removed, the line will be executed by the shell.
-- `dump-functions ()`[¶](#index-dump_002dfunctions-_0028_0029)
+- `dump-functions ()` [¶](#index-dump_002dfunctions-_0028_0029)
 - Print all of the functions and their key bindings to the Readline output stream. If a numeric argument is supplied, the output is formatted in such a way that it can be made part of an *inputrc* file. This command is unbound by default.
-- `dump-variables ()`[¶](#index-dump_002dvariables-_0028_0029)
+- `dump-variables ()` [¶](#index-dump_002dvariables-_0028_0029)
 - Print all of the settable variables and their values to the Readline output stream. If a numeric argument is supplied, the output is formatted in such a way that it can be made part of an *inputrc* file. This command is unbound by default.
-- `dump-macros ()`[¶](#index-dump_002dmacros-_0028_0029)
+- `dump-macros ()` [¶](#index-dump_002dmacros-_0028_0029)
 - Print all of the Readline key sequences bound to macros and the strings they output to the Readline output stream. If a numeric argument is supplied, the output is formatted in such a way that it can be made part of an *inputrc* file. This command is unbound by default.
-- `execute-named-command (M-x)`[¶](#index-execute_002dnamed_002dcommand-_0028M_002dx_0029)
+- `execute-named-command (M-x)` [¶](#index-execute_002dnamed_002dcommand-_0028M_002dx_0029)
 - Read a bindable Readline command name from the input and execute the function to which it’s bound, as if the key sequence to which it was bound appeared in the input. If this function is supplied with a numeric argument, it passes that argument to the function it executes.
-- `spell-correct-word (C-x s)`[¶](#index-spell_002dcorrect_002dword-_0028C_002dx-s_0029)
+- `spell-correct-word (C-x s)` [¶](#index-spell_002dcorrect_002dword-_0028C_002dx-s_0029)
 - Perform spelling correction on the current word, treating it as a directory or filename, in the same way as the `cdspell` shell option. Word boundaries are the same as those used by `shell-forward-word`.
-- `glob-complete-word (M-g)`[¶](#index-glob_002dcomplete_002dword-_0028M_002dg_0029)
+- `glob-complete-word (M-g)` [¶](#index-glob_002dcomplete_002dword-_0028M_002dg_0029)
 - Treat the word before point as a pattern for pathname expansion, with an asterisk implicitly appended, then use the pattern to generate a list of matching file names for possible completions.
-- `glob-expand-word (C-x *)`[¶](#index-glob_002dexpand_002dword-_0028C_002dx-_002a_0029)
+- `glob-expand-word (C-x *)` [¶](#index-glob_002dexpand_002dword-_0028C_002dx-_002a_0029)
 - Treat the word before point as a pattern for pathname expansion, and insert the list of matching file names, replacing the word. If a numeric argument is supplied, append a ‘`*`’ before pathname expansion.
-- `glob-list-expansions (C-x g)`[¶](#index-glob_002dlist_002dexpansions-_0028C_002dx-g_0029)
+- `glob-list-expansions (C-x g)` [¶](#index-glob_002dlist_002dexpansions-_0028C_002dx-g_0029)
 - Display the list of expansions that would have been generated by `glob-expand-word`, and redisplay the line. If a numeric argument is supplied, append a ‘`*`’ before pathname expansion.
-- `shell-expand-line (M-C-e)`[¶](#index-shell_002dexpand_002dline-_0028M_002dC_002de_0029)
+- `shell-expand-line (M-C-e)` [¶](#index-shell_002dexpand_002dline-_0028M_002dC_002de_0029)
 - Expand the line by performing shell word expansions. This performs alias and history expansion, $’*string*’ and $"*string*" quoting, tilde expansion, parameter and variable expansion, arithmetic expansion, command and process substitution, word splitting, and quote removal. An explicit argument suppresses command and process substitution.
-- `history-expand-line (M-^)`[¶](#index-history_002dexpand_002dline-_0028M_002d_005e_0029)
+- `history-expand-line (M-^)` [¶](#index-history_002dexpand_002dline-_0028M_002d_005e_0029)
 - Perform history expansion on the current line.
-- `magic-space ()`[¶](#index-magic_002dspace-_0028_0029)
+- `magic-space ()` [¶](#index-magic_002dspace-_0028_0029)
 - Perform history expansion on the current line and insert a space (see [History Expansion](#History-Interaction)).
-- `alias-expand-line ()`[¶](#index-alias_002dexpand_002dline-_0028_0029)
+- `alias-expand-line ()` [¶](#index-alias_002dexpand_002dline-_0028_0029)
 - Perform alias expansion on the current line (see [Aliases](#Aliases)).
-- `history-and-alias-expand-line ()`[¶](#index-history_002dand_002dalias_002dexpand_002dline-_0028_0029)
+- `history-and-alias-expand-line ()` [¶](#index-history_002dand_002dalias_002dexpand_002dline-_0028_0029)
 - Perform history and alias expansion on the current line.
-- `insert-last-argument (M-. or M-_)`[¶](#index-insert_002dlast_002dargument-_0028M_002d_002e-or-M_002d_005f_0029)
+- `insert-last-argument (M-. or M-_)` [¶](#index-insert_002dlast_002dargument-_0028M_002d_002e-or-M_002d_005f_0029)
 - A synonym for `yank-last-arg`.
-- `edit-and-execute-command (C-x C-e)`[¶](#index-edit_002dand_002dexecute_002dcommand-_0028C_002dx-C_002de_0029)
+- `edit-and-execute-command (C-x C-e)` [¶](#index-edit_002dand_002dexecute_002dcommand-_0028C_002dx-C_002de_0029)
 - Invoke an editor on the current command line, and execute the result as shell commands. Bash attempts to invoke `$VISUAL`, `$EDITOR`, and `emacs` as the editor, in that order.
-- `display-shell-version (C-x C-v)`[¶](#index-display_002dshell_002dversion-_0028C_002dx-C_002dv_0029)
+- `display-shell-version (C-x C-v)` [¶](#index-display_002dshell_002dversion-_0028C_002dx-C_002dv_0029)
 - Display version information about the current instance of Bash.
 
 While the Readline library does not have a full set of `vi` editing functions, it does contain enough to allow simple editing of the line. The Readline `vi` mode behaves as specified in the `sh` description in the POSIX standard.
@@ -3885,26 +4320,22 @@ complete -D -F _completion_loader -o bashdefault -o default
 
 Three builtin commands are available to manipulate the programmable completion facilities: one to specify how the arguments to a particular command are to be completed, and two to modify the completion as it is happening.
 
-- `compgen`[¶](#index-compgen)
-- `compgen [-V``varname`] [`option`] [`word`]
+- `compgen` [¶](#index-compgen)
+- ```
+  compgen [-V varname] [option] [word]
+  ```
   Generate possible completion matches for *word* according to the *option*s, which may be any option accepted by the `complete` builtin with the exceptions of `-p`, `-r`, `-D`, `-E`, and `-I`, and write the matches to the standard output.
   If the `-V` option is supplied, `compgen` stores the generated completions into the indexed array variable *varname* instead of writing them to the standard output.
   When using the `-F` or `-C` options, the various shell variables set by the programmable completion facilities, while available, will not have useful values.
   The matches will be generated in the same way as if the programmable completion code had generated them directly from a completion specification with the same flags. If *word* is specified, only those completions matching *word* will be displayed or stored.
   The return value is true unless an invalid option is supplied, or no matches were generated.
-- `complete`[¶](#index-complete)
-- > ```
-  > complete [-abcdefgjksuv] [-o
-  > ```
-  >
-  > `comp-option`] [-DEI] [-A`action`] [-G`globpat`] [-W`wordlist`] [-F`function`] [-C`command`] [-X`filterpat`] [-P`prefix`] [-S`suffix`]`name`[`name`...]
-  >
-  > ```
-  > complete -pr [-DEI] [
-  > ```
-  >
-  > `name`...]
-
+- `complete` [¶](#index-complete)
+- ```
+  complete [-abcdefgjksuv] [-o comp-option] [-DEI] [-A action]
+  [-G globpat] [-W wordlist] [-F function] [-C command]
+  [-X filterpat] [-P prefix] [-S suffix] name [name ...]
+  complete -pr [-DEI] [name ...]
+  ```
   Specify how arguments to each *name* should be completed.
   If the `-p` option is supplied, or if no options or *name*s are supplied, print existing completion specifications in a way that allows them to be reused as input. The `-r` option removes a completion specification for each *name*, or, if no *name*s are supplied, all completion specifications.
   The `-D` option indicates that other supplied options and actions should apply to the “default” command completion; that is, completion attempted on a command for which no completion has previously been defined. The `-E` option indicates that other supplied options and actions should apply to “empty” command completion; that is, completion attempted on a blank line. The `-I` option indicates that other supplied options and actions should apply to completion on the initial non-assignment word on the line, or after a command delimiter such as ‘`;`’ or ‘`|`’, which is usually command name completion. If multiple options are supplied, the `-D` option takes precedence over `-E`, and both take precedence over `-I`. If any of `-D`, `-E`, or `-I` are supplied, any other *name* arguments are ignored; these completions only apply to the case specified by the option.
@@ -3995,13 +4426,10 @@ Three builtin commands are available to manipulate the programmable completion f
   - `-X filterpat`
   - *filterpat* is a pattern as used for filename expansion. It is applied to the list of possible completions generated by the preceding options and arguments, and each completion matching *filterpat* is removed from the list. A leading ‘`!`’ in *filterpat* negates the pattern; in this case, any completion not matching *filterpat* is removed.
   The return value is true unless an invalid option is supplied, an option other than `-p`, `-r`, `-D`, `-E`, or `-I` is supplied without a *name* argument, an attempt is made to remove a completion specification for a *name* for which no specification exists, or an error occurs adding a completion specification.
-- `compopt`[¶](#index-compopt)
-- > ```
-  > compopt
-  > ```
-  >
-  > [-o`option`] [-DEI] [+o`option`] [`name`]
-
+- `compopt` [¶](#index-compopt)
+- ```
+  compopt [-o option] [-DEI] [+o option] [name]
+  ```
   Modify completion options for each *name* according to the *option*s, or for the currently-executing completion if no *name*s are supplied. If no *option*s are given, display the completion options for each *name* or the current completion. The possible values of *option* are those valid for the `complete` builtin described above.
   The `-D` option indicates that other supplied options should apply to the “default” command completion; the `-E` option indicates that other supplied options should apply to “empty” command completion; and the `-I` option indicates that other supplied options should apply to completion on the initial word on the line. These are determined in the same way as the `complete` builtin.
   If multiple options are supplied, the `-D` option takes precedence over `-E`, and both take precedence over `-I`
@@ -4066,7 +4494,11 @@ _comp_cd()
 
 We install the completion function using the `-F` option to `complete`:
 
-> # Tell readline to quote appropriate and append slashes to directories; # use the bash default completion for other arguments complete -o filenames -o nospace -o bashdefault -F _comp_cd cd
+```
+# Tell readline to quote appropriate and append slashes to directories;
+# use the bash default completion for other arguments
+complete -o filenames -o nospace -o bashdefault -F _comp_cd cd
+```
 
 Since we’d like Bash and Readline to take care of some of the other details for us, we use several other options to tell Bash and Readline what to do. The `-o filenames` option tells Readline that the possible completions should be treated as filenames, and quoted appropriately. That option will also cause Readline to append a slash to filenames it can determine are directories (which is why we might want to extend `_comp_cd` to append a slash if we’re using directories found via `CDPATH`: Readline can’t tell those completions are directories). The `-o nospace` option tells Readline to not append a space character to the directory name, in case we want to append to it. The `-o bashdefault` option brings in the rest of the “Bash default” completions – possible completions that Bash adds to the default Readline set. These include things like command name completion, variable completion for words beginning with ‘`$`’ or ‘`${`’, completions containing pathname expansion patterns (see [Filename Expansion](#Filename-Expansion)), and so on.
 
@@ -4098,19 +4530,11 @@ The shell allows control over which commands are saved on the history list. The 
 
 Bash provides two builtin commands which manipulate the history list and history file.
 
-- `fc`[¶](#index-fc)
-- > ```
-  > fc [-e
-  > ```
-  >
-  > `ename`] [-lnr] [`first`] [`last`]
-  >
-  > ```
-  > fc -s [
-  > ```
-  >
-  > `pat`=`rep`] [`command`]
-
+- `fc` [¶](#index-fc)
+- ```
+  fc [-e ename] [-lnr] [first] [last]
+  fc -s [pat=rep] [command]
+  ```
   The first form selects a range of commands from *first* to *last* from the history list and displays or edits and re-executes them. Both *first* and *last* may be specified as a string (to locate the most recent command beginning with that string) or as a number (an index into the history list, where a negative number is used as an offset from the current command number).
   When listing, a *first* or *last* of 0 is equivalent to -1 and -0 is equivalent to the current command (usually the `fc` command); otherwise 0 is equivalent to -1 and -0 is invalid.
   If *last* is not specified, it is set to the current command for listing and to *first* otherwise. If *first* is not specified, it is set to the previous command for editing and −16 for listing.
@@ -4119,9 +4543,15 @@ Bash provides two builtin commands which manipulate the history list and history
   In the second form, `fc` re-executes *command* after replacing each instance of *pat* in the selected command with *rep*. *command* is interpreted the same as *first* above.
   A useful alias to use with the `fc` command is `r='fc -s'`, so that typing ‘`r cc`’ runs the last command beginning with `cc` and typing ‘`r`’ re-executes the last command (see [Aliases](#Aliases)).
   If the first form is used, the return value is zero unless an invalid option is encountered or *first* or *last* specify history lines out of range. When editing and re-executing a file of commands, the return value is the value of the last command executed or failure if an error occurs with the temporary file. If the second form is used, the return status is that of the re-executed command, unless *command* does not specify a valid history entry, in which case `fc` returns a non-zero status.
-- `history`[¶](#index-history)
-- > history [`n`] history -c history -d`offset`history -d`start`-`end`history [-anrw] [`filename`] history -ps`arg`
-
+- `history` [¶](#index-history)
+- ```
+  history [n]
+  history -c
+  history -d offset
+  history -d start-end
+  history [-anrw] [filename]
+  history -ps arg
+  ```
   With no options, display the history list with numbers. Entries prefixed with a ‘`*`’ have been modified. An argument of *n* lists only the last *n* entries. If the shell variable `HISTTIMEFORMAT` is set and not null, it is used as a format string for `strftime`(3) to display the time stamp associated with each displayed history entry. If `history` uses `HISTTIMEFORMAT`, it does not print an intervening space between the formatted time stamp and the history entry.
   Options, if supplied, have the following meanings:
   - `-c`
@@ -4282,13 +4712,20 @@ The `configure` shell script attempts to guess correct values for various system
 
 To find out more about the options and arguments that the `configure` script understands, type
 
-> bash-4.2$ ./configure --help
+```
+bash-4.2$ ./configure --help
+```
 
 at the Bash prompt in your Bash source directory.
 
 If you want to build Bash in a directory separate from the source directory – to build for multiple architectures, for example – just use the full path to the configure script. The following commands will build Bash in a directory under `/usr/local/build` from the source code in `/usr/local/src/bash-4.4`:
 
-> mkdir /usr/local/build/bash-4.4 cd /usr/local/build/bash-4.4 bash /usr/local/src/bash-4.4/configure make
+```
+mkdir /usr/local/build/bash-4.4
+cd /usr/local/build/bash-4.4
+bash /usr/local/src/bash-4.4/configure
+make
+```
 
 See [Compiling For Multiple Architectures](#Compiling-For-Multiple-Architectures) for more information about building in a directory separate from the source.
 
@@ -4300,11 +4737,15 @@ You can remove the program binaries and object files from the source code direct
 
 Some systems require unusual options for compilation or linking that the `configure` script does not know about. You can give `configure` initial values for variables by setting them in the environment. Using a Bourne-compatible shell, you can do that on the command line like this:
 
-> CC=c89 CFLAGS=-O2 LIBS=-lposix ./configure
+```
+CC=c89 CFLAGS=-O2 LIBS=-lposix ./configure
+```
 
 On systems that have the `env` program, you can do it like this:
 
-> env CPPFLAGS=-I/usr/local/include LDFLAGS=-s ./configure
+```
+env CPPFLAGS=-I/usr/local/include LDFLAGS=-s ./configure
+```
 
 The configuration process uses GCC to build Bash if it is available.
 
@@ -4314,7 +4755,9 @@ If you have to use a `make` that does not support the `VPATH` variable, you can 
 
 Alternatively, if your system supports symbolic links, you can use the `support/mkclone` script to create a build tree which has symbolic links back to each file in the source directory. Here’s an example that creates a build directory in the current directory from a source directory `/usr/gnu/src/bash-2.0`:
 
-> bash /usr/gnu/src/bash-2.0/support/mkclone -s /usr/gnu/src/bash-2.0 .
+```
+bash /usr/gnu/src/bash-2.0/support/mkclone -s /usr/gnu/src/bash-2.0 .
+```
 
 The `mkclone` script requires Bash, so you must have already built Bash for at least one architecture before you can create build directories for other architectures.
 
@@ -4326,7 +4769,10 @@ If you would like to change the installation locations for a single run, you can
 
 If you want to see the files Bash will install and where it will install them without changing anything on your system, specify the variable `DESTDIR` as an argument to `make`. Its value should be the absolute directory path you’d like to use as the root of your sample installation tree. For example,
 
-> mkdir /fs1/bash-install make install DESTDIR=/fs1/bash-install
+```
+mkdir /fs1/bash-install
+make install DESTDIR=/fs1/bash-install
+```
 
 will install `bash` into `/fs1/bash-install/usr/local/bin/bash`, the documentation into directories within `/fs1/bash-install/usr/local/share`, the example loadable builtins into `/fs1/bash-install/usr/local/lib/bash`, and so on. You can use the usual `exec_prefix` and `prefix` variables to alter the directory paths beneath the value of `DESTDIR`.
 
@@ -4502,9 +4948,9 @@ Bash implements essentially the same grammar, parameter and variable expansion, 
 - Bash implements `csh`-like history expansion (see [History Expansion](#History-Interaction)).
 - Bash supports the `$'…'` quoting syntax, which expands ANSI-C backslash-escaped characters in the text between the single quotes (see [ANSI-C Quoting](#ANSI_002dC-Quoting)).
 - Bash supports the `$"…"` quoting syntax and performs locale-specific translation of the characters between the double quotes. The `-D`, `--dump-strings`, and `--dump-po-strings` invocation options list the translatable strings found in a script (see [Locale-Specific Translation](#Locale-Translation)).
-- Bash includes brace expansion (see [Brace Expansion](#Brace-Expansion)) and tilde expansion (see[Tilde Expansion](#Tilde-Expansion)).
+- Bash includes brace expansion (see [Brace Expansion](#Brace-Expansion)) and tilde expansion (see [Tilde Expansion](#Tilde-Expansion)).
 - Bash implements command aliases and the `alias` and `unalias` builtins (see [Aliases](#Aliases)).
-- Bash implements the `!` reserved word to negate the return value of a pipeline (see [Pipelines](#Pipelines)). This is very useful when an `if` statement needs to act only if a test fails. The Bash ‘`-o pipefail`’ option to `set` will cause a pipeline to return a failure status if any command fails (see[The Set Builtin](#The-Set-Builtin)).
+- Bash implements the `!` reserved word to negate the return value of a pipeline (see [Pipelines](#Pipelines)). This is very useful when an `if` statement needs to act only if a test fails. The Bash ‘`-o pipefail`’ option to `set` will cause a pipeline to return a failure status if any command fails (see [The Set Builtin](#The-Set-Builtin)).
 - Bash has the `time` reserved word and command timing (see [Pipelines](#Pipelines)). The display of the timing statistics may be controlled with the `TIMEFORMAT` variable.
 - Bash provides coprocesses and the `coproc` reserved word (see [Coprocesses](#Coprocesses)).
 - Bash implements the `for (( expr1 ; expr2 ; expr3 ))` arithmetic for command, similar to the C language (see [Looping Constructs](#Looping-Constructs)).
@@ -4512,16 +4958,16 @@ Bash implements essentially the same grammar, parameter and variable expansion, 
 - Bash includes the `[[` compound command, which makes conditional testing part of the shell grammar (see [Conditional Constructs](#Conditional-Constructs)), including optional regular expression matching.
 - Bash provides optional case-insensitive matching for the `case` and `[[` constructs (see [Conditional Constructs](#Conditional-Constructs)).
 - Bash provides additional `case` statement action list terminators: ‘`;&`’ and ‘`;;&`’ (see [Conditional Constructs](#Conditional-Constructs)).
-- Bash provides shell arithmetic, the `((` compound command (see [Conditional Constructs](#Conditional-Constructs)), the `let` builtin, and arithmetic expansion (see[Shell Arithmetic](#Shell-Arithmetic)).
+- Bash provides shell arithmetic, the `((` compound command (see [Conditional Constructs](#Conditional-Constructs)), the `let` builtin, and arithmetic expansion (see [Shell Arithmetic](#Shell-Arithmetic)).
 - Bash has one-dimensional array variables (see [Arrays](#Arrays)), and the appropriate variable expansions and assignment syntax to use them. Several of the Bash builtins take options to act on arrays. Bash provides a number of built-in array variables.
 - Variables present in the shell’s initial environment are automatically exported to child processes (see [Command Execution Environment](#Command-Execution-Environment)). The Bourne shell does not normally do this unless the variables are explicitly marked using the `export` command.
 - Bash can expand positional parameters beyond `$9` using `${num}` (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)).
 - Bash supports the ‘`+=`’ assignment operator, which appends to the value of the variable named on the left hand side (see [Shell Parameters](#Shell-Parameters)).
 - Bash includes the POSIX pattern removal ‘`%`’, ‘`#`’, ‘`%%`’ and ‘`##`’ expansions to remove leading or trailing substrings from variable values (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)).
 - The expansion `${#xx}`, which returns the length of `${xx}`, is supported (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)).
-- The expansion `${var:``offset``[:``length``]}`, which expands to the substring of `var`’s value of length`length`, beginning at`offset`, is present (see[Shell Parameter Expansion](#Shell-Parameter-Expansion)).
-- The expansion `${var/[/]``pattern``[/``replacement``]}`, which matches`pattern`and replaces it with`replacement`in the value of`var`, is available (see[Shell Parameter Expansion](#Shell-Parameter-Expansion)), with a mechanism to use the matched text in`replacement`.
-- The expansion `${!prefix*}` expansion, which expands to the names of all shell variables whose names begin with `prefix`, is available (see[Shell Parameter Expansion](#Shell-Parameter-Expansion)).
+- The expansion `${var:`*offset*`[:`*length*`]}`, which expands to the substring of `var`’s value of length *length*, beginning at *offset*, is present (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)).
+- The expansion `${var/[/]`*pattern*`[/`*replacement*`]}`, which matches *pattern* and replaces it with *replacement* in the value of *var*, is available (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)), with a mechanism to use the matched text in *replacement*.
+- The expansion `${!prefix*}` expansion, which expands to the names of all shell variables whose names begin with *prefix*, is available (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)).
 - Bash has indirect variable expansion using `${!word}` (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)) and implements the `nameref` variable attribute for automatic indirect variable expansion.
 - Bash includes a set of parameter transformation word expansions of the form `${var@X}`, where ‘`X`’ specifies the transformation (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)).
 - The POSIX `$()` form of command substitution is implemented (see [Command Substitution](#Command-Substitution)), and preferred to the Bourne shell’s ``` `` ``` (which is also implemented for backwards compatibility).
@@ -4542,7 +4988,7 @@ Bash implements essentially the same grammar, parameter and variable expansion, 
 - Bash includes the ‘`<<<`’ redirection operator, allowing a string to be used as the standard input to a command (see [Redirections](#Redirections)).
 - Bash implements the ‘`[n]<&word`’ and ‘`[n]>&word`’ redirection operators, which move one file descriptor to another.
 - Bash treats a number of filenames specially when they are used in redirection operators (see [Redirections](#Redirections)).
-- Bash provides the {`var`}<`word`capability to have the shell allocate file descriptors for redirections and assign them to`var`(see[Redirections](#Redirections)). This works with multiple redirection operators.
+- Bash provides the {*var*}<*word* capability to have the shell allocate file descriptors for redirections and assign them to *var* (see [Redirections](#Redirections)). This works with multiple redirection operators.
 - Bash can open network connections to arbitrary machines and services with the redirection operators (see [Redirections](#Redirections)).
 - The `noclobber` option is available to avoid overwriting existing files with output redirection (see [The Set Builtin](#The-Set-Builtin)). The ‘`>|`’ redirection operator may be used to override `noclobber`.
 - Variable assignments preceding commands affect only that command, even builtins and functions (see [Environment](#Environment)). In `sh`, all variable assignments preceding commands are global unless the command is executed from the file system.
@@ -4557,7 +5003,7 @@ Bash implements essentially the same grammar, parameter and variable expansion, 
 - The `enable` builtin (see [Bash Builtin Commands](#Bash-Builtins)) can enable or disable individual builtins and implements support for dynamically loading builtin commands from shared objects.
 - The Bash `exec` builtin takes additional options that allow users to control the contents of the environment passed to the executed command, and what the zeroth argument to the command is to be (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)).
 - Shell functions may be exported to children via the environment using `export -f` (see [Shell Functions](#Shell-Functions)).
-- The Bash `export` and `readonly` builtins (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)can take a `-f` option to act on shell functions, a `-p` option to display variables with various attributes set in a format that can be used as shell input, a `-n` option to remove various variable attributes, and ‘`name=value`’ arguments to set variable attributes and values simultaneously.
+- The Bash `export` and `readonly` builtins (see [Bourne Shell Builtins](#Bourne-Shell-Builtins) can take a `-f` option to act on shell functions, a `-p` option to display variables with various attributes set in a format that can be used as shell input, a `-n` option to remove various variable attributes, and ‘`name=value`’ arguments to set variable attributes and values simultaneously.
 - The Bash `hash` builtin allows a name to be associated with an arbitrary filename, even when that filename cannot be found by searching the `$PATH`, using ‘`hash -p`’ (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)).
 - Bash includes a `help` builtin for quick reference to shell facilities (see [Bash Builtin Commands](#Bash-Builtins)).
 - Bash includes the `mapfile` builtin to quickly read the contents of a file into an indexed array variable (see [Bash Builtin Commands](#Bash-Builtins)).
@@ -4567,7 +5013,7 @@ Bash implements essentially the same grammar, parameter and variable expansion, 
 - The `return` builtin may be used to abort execution of scripts executed with the `.` or `source` builtins (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)).
 - Bash has much more optional behavior controllable with the `set` builtin (see [The Set Builtin](#The-Set-Builtin)).
 - The `-x` (`xtrace`) option displays commands other than simple commands when performing an execution trace (see [The Set Builtin](#The-Set-Builtin)).
-- Bash includes the `shopt` builtin, for finer control of shell optional capabilities (see [The Shopt Builtin](#The-Shopt-Builtin)), and allows these options to be set and unset at shell invocation (see[Invoking Bash](#Invoking-Bash)).
+- Bash includes the `shopt` builtin, for finer control of shell optional capabilities (see [The Shopt Builtin](#The-Shopt-Builtin)), and allows these options to be set and unset at shell invocation (see [Invoking Bash](#Invoking-Bash)).
 - The `test` builtin (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)) is slightly different, as it implements the POSIX algorithm, which specifies the behavior based on the number of arguments.
 - The `trap` builtin (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)) allows a `DEBUG` pseudo-signal specification, similar to `EXIT`. Commands specified with a `DEBUG` trap are executed before every simple command, `for` command, `case` command, `select` command, every arithmetic `for` command, and before the first command executes in a shell function. The `DEBUG` trap is not inherited by shell functions unless the function has been given the `trace` attribute or the `functrace` option has been enabled using the `shopt` builtin. The `extdebug` shell option has additional effects on the `DEBUG` trap.
   The `trap` builtin (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)) allows an `ERR` pseudo-signal specification, similar to `EXIT` and `DEBUG`. Commands specified with an `ERR` trap are executed after a simple command fails, with a few exceptions. The `ERR` trap is not inherited by shell functions unless the `-o errtrace` option to the `set` builtin is enabled.
@@ -4601,7 +5047,13 @@ Since Bash is a completely new implementation, it does not suffer from many of t
 
 Version 1.3, 3 November 2008
 
-> Copyright © 2000, 2001, 2002, 2007, 2008 Free Software Foundation, Inc.[http://fsf.org/](http://fsf.org/)Everyone is permitted to copy and distribute verbatim copies of this license document, but changing it is not allowed.
+```
+Copyright © 2000, 2001, 2002, 2007, 2008 Free Software Foundation, Inc.
+http://fsf.org/
+
+Everyone is permitted to copy and distribute verbatim copies
+of this license document, but changing it is not allowed.
+```
 
 1. PREAMBLE
    The purpose of this License is to make a manual, textbook, or other functional and useful document *free* in the sense of freedom: to assure everyone the effective freedom to copy and redistribute it, with or without modifying it, either commercially or noncommercially. Secondarily, this License preserves for the author and publisher a way to get credit for their work, while not being considered responsible for modifications made by others.
@@ -4678,11 +5130,23 @@ Version 1.3, 3 November 2008
 
 To use this License in a document you have written, include a copy of the License in the document and put the following copyright and license notices just after the title page:
 
-> Copyright (C)yearyour name. Permission is granted to copy, distribute and/or modify this document under the terms of the GNU Free Documentation License, Version 1.3 or any later version published by the Free Software Foundation; with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts. A copy of the license is included in the section entitled ``GNU Free Documentation License''.
+```
+  Copyright (C)  year  your name.
+  Permission is granted to copy, distribute and/or modify this document
+  under the terms of the GNU Free Documentation License, Version 1.3
+  or any later version published by the Free Software Foundation;
+  with no Invariant Sections, no Front-Cover Texts, and no Back-Cover
+  Texts.  A copy of the license is included in the section entitled ``GNU
+  Free Documentation License''.
+```
 
 If you have Invariant Sections, Front-Cover Texts and Back-Cover Texts, replace the “with…Texts.” line with this:
 
-> with the Invariant Sections beinglist their titles, with the Front-Cover Texts beinglist, and with the Back-Cover Texts beinglist.
+```
+    with the Invariant Sections being list their titles, with
+    the Front-Cover Texts being list, and with the Back-Cover Texts
+    being list.
+```
 
 If you have Invariant Sections without Cover Texts, or some other combination of the three, merge those two alternatives to suit the situation.
 

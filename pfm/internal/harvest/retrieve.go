@@ -27,10 +27,9 @@ const (
 type Policy string
 
 const (
-	PolicyPage        Policy = "page"
-	PolicyFile        Policy = "file"
-	PolicyInlineImage Policy = "inline-image"
-	PolicyGateway     Policy = "gateway"
+	PolicyPage    Policy = "page"
+	PolicyFile    Policy = "file"
+	PolicyGateway Policy = "gateway"
 )
 
 const (
@@ -67,11 +66,9 @@ type retrieveRequest struct {
 	want    Want
 	policy  Policy
 	options FetchOptions
-	referer string
 	// accept, when set, is the kinds a file rung may keep; any other body
 	// falls to the next rung.
-	accept   func(kind string) bool
-	maxBytes int64 // file cap; 0 = the harvester's download cap
+	accept func(kind string) bool
 	// gateway is the full request of a PolicyGateway caller (method, form,
 	// headers, cookie jar); empty uses a plain GET of target.
 	gateway gatewayRequest
@@ -86,9 +83,6 @@ type retrieveRequest struct {
 //     → browser download (browserFileRung: the browser's download, or the
 //     navigation's own response body; headless only). Reader rungs never
 //     run: they return text, not bytes.
-//   - PolicyInlineImage: direct → Chrome impersonation, with the page as
-//     Referer. It never starts a browser: a page with 60 images must not start
-//     60 browsers.
 //   - PolicyGateway: direct → Chrome → headless browser, for the scholarly
 //     providers and the DOI mirror.
 //
@@ -104,7 +98,7 @@ func (h *Harvester) retrieveWith(ctx context.Context, req retrieveRequest) (Retr
 		}
 		result := h.fetchURLWithPolicy(ctx, req.target, req.options, true)
 		return Retrieved{Result: result, Status: result.HTTPStatus, Rungs: result.Rungs}, nil
-	case PolicyFile, PolicyInlineImage:
+	case PolicyFile:
 		if req.want != WantFile {
 			return Retrieved{}, fmt.Errorf(
 				"retrieve %s: the %s policy downloads files; a page uses the page policy",
@@ -152,19 +146,12 @@ func (h *Harvester) retrieveFile(ctx context.Context, req retrieveRequest) (Retr
 	if err := validateFetchURL(req.target, false); err != nil {
 		return out, err
 	}
-	limit := req.maxBytes
-	if limit <= 0 {
-		limit = h.maxDownloadBytes()
-	}
-	var headers http.Header
-	if req.referer != "" {
-		headers = http.Header{headerReferer: {req.referer}}
-	}
+	limit := h.maxDownloadBytes()
 	var lastErr error
 	answered := false // a rung got an HTTP answer below 400: the origin is up
 	attempt := func(name, target string, client *http.Client, ua string) (bool, error) {
 		out.Rungs = append(out.Rungs, name)
-		g := gatewayRequest{url: target, client: client, ua: ua, headers: headers}
+		g := gatewayRequest{url: target, client: client, ua: ua}
 		result, status, err := h.fileAttempt(ctx, g, req, limit)
 		if err != nil {
 			lastErr = err

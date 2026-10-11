@@ -176,8 +176,8 @@ func TestRewritePublicImagesRefusesPrivateMetadataPaths(t *testing.T) {
 	}
 }
 
-// writeCachedImage stores a PNG under cacheDir at the name the localizer
-// (storeBinary via CacheKey) writes for remote, and returns its path.
+// writeCachedImage stores a PNG under cacheDir at the name an older cache
+// entry (storeBinary via CacheKey) holds for remote, and returns its path.
 func writeCachedImage(t *testing.T, cacheDir, remote string) string {
 	t.Helper()
 	path := filepath.Join(cacheDir, strings.TrimSuffix(CacheKey(remote, "png"), ".md")+".png")
@@ -208,7 +208,7 @@ func writeCachedPage(t *testing.T, cacheDir, source, body string) Result {
 // TestPublicResultRelocatesHebrewAndPercentEncodedImages pins the he.wikipedia
 // failure: images whose remote names are Hebrew or percent-encoded are all
 // relocated into public/, and a protocol-relative (//host/…) link the
-// localizer left remote is a remote link, never a local path to refuse.
+// page left remote is a remote link, never a local path to refuse.
 func TestPublicResultRelocatesHebrewAndPercentEncodedImages(t *testing.T) {
 	setHarvestTestJail(t)
 	cacheDir := t.TempDir()
@@ -251,7 +251,7 @@ func TestPublicResultRelocatesHebrewAndPercentEncodedImages(t *testing.T) {
 }
 
 // TestPublicResultDropsAnImageThatCannotBePublished pins the Lemmy failure: a
-// site-relative image link no localizer stored is dropped from the published
+// site-relative image link no cache entry holds is dropped from the published
 // page, its alt text kept and the drop named in the partial, while the rest of
 // the page and its other images are published.
 func TestPublicResultDropsAnImageThatCannotBePublished(t *testing.T) {

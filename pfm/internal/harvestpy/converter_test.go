@@ -286,6 +286,17 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 		heads, rows, bullets []string
 		code, absent, text   []string
 		fences, once         []string
+		// base is the page's final address (Request.BaseURL): with it every
+		// link and image target in the output is absolute.
+		base string
+		// blocks are fenced code blocks: content lines byte-exact between a
+		// fence longer than any backtick run in them, under the container's
+		// prefix (list indent or quote marker) when nested.
+		blocks []string
+		// tables are consecutive lines of a markdown table, matched without
+		// the container's prefix; contains are substrings of the markdown.
+		tables, contains []string
+		meta             map[string]string
 	}{
 		{
 			fixture: "wikitable.html",
@@ -536,6 +547,172 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			},
 		},
 		{
+			// R1, R2, R9: every target resolves against the page's final
+			// address; a link inside code keeps its target; the spaces around a
+			// link inside a list item survive; a javascript: href is no link.
+			fixture: "links.html",
+			base:    "https://docs.example.test/3/library/functions.html",
+			text: []string{
+				"The module is described in [the reference](https://docs.example.test/3/library/x.html#y) and in the" +
+					" [http package](https://docs.example.test/pkg/net/http/), next to" +
+					" [the mirror](https://cdn.example.test/lib.html) and" +
+					" [an absolute page](https://other.example.test/a?b=1#c).",
+				"Jump to [this section](#local), or write to [the editors](mailto:docs@example.test).",
+				"Profile a server with [`net/http/pprof`](https://docs.example.test/pkg/net/http/pprof/) and read" +
+					" [`runtime`](https://docs.example.test/pkg/runtime/) next to it.",
+				"Press Disable math to stop the typesetting, or *Switch theme* to change it.",
+				"![Request chart](https://docs.example.test/3/library/img/chart.png)",
+				"![Site logo](https://cdn.example.test/logo.png)",
+				// A target urljoin cannot parse (a placeholder host) stays as
+				// written; the page still converts.
+				"Replace the host in [the endpoint template](https://[your-host]/api/v1) with the name of your own" +
+					" server before calling it.",
+			},
+			bullets: []string{
+				// An item's text before a block stays in front of it.
+				"Read the setup notes first",
+				"feature we [announced for preview in 1.20](https://docs.example.test/blog/pgo-preview) is now generally available!",
+				"See the [PGO documentation](https://docs.example.test/doc/pgo) for more details.",
+				"The [`go` tool](https://docs.example.test/cmd/go) now supports [backward](https://docs.example.test/doc/godebug)" +
+					" compatibility settings for every release.",
+			},
+			absent: []string{"javascript:", "JavaScript:"},
+		},
+		{
+			// R1: the page's <base href> outranks the address it was fetched from.
+			fixture: "base-href.html",
+			base:    "https://docs.example.test/3/library/functions.html",
+			once: []string{
+				"read [the first guide](https://cdn.example.test/docs/a/b.html) and" +
+					" [the second guide](https://cdn.example.test/c.html), or jump to [the top](#top) of this page.",
+			},
+			text: []string{"![Mirror layout](https://cdn.example.test/docs/layout.png)"},
+		},
+		{
+			// R1: a <base href> that is no URL (a placeholder host) is ignored,
+			// as a browser ignores it: targets resolve against the page's address.
+			fixture: "base-unparsable.html",
+			base:    "https://docs.example.test/3/library/functions.html",
+			once: []string{
+				"read [the first guide](https://docs.example.test/3/library/a/b.html) and [the top](#top) of this page.",
+			},
+		},
+		{
+			// A page laid out in a table (its menu in one cell, its article in
+			// the next) is no data table: its headings, paragraphs and lists
+			// stay blocks, never one table row.
+			fixture: "layout-table.html",
+			heads:   []string{"## Spring readings"},
+			bullets: []string{"the gauge was emptied each morning"},
+			absent:  []string{"|---|"},
+		},
+		{
+			// R3: every <pre> is a fenced block, one-line, nested in a
+			// definition, a list item or a quote, with its newlines, indentation
+			// and blank lines byte-exact; a backtick run in it lengthens the fence.
+			fixture: "code-blocks.html",
+			blocks: []string{
+				"go get example.test/x",
+				"def all(iterable):\n    for element in iterable:\n        if not element:\n            return False\n    return True",
+				"cd project\nmake   build\n\nmake test",
+				"echo   \"spaced\"\n  indented",
+				"printf '```'\necho done",
+				"first = 1  \n\n\n\nsecond = 2",
+			},
+			// The page's own text that reads like an island token is text.
+			text: []string{
+				"A broken build prints the marker PFMISLAND0E in its log, which names the step that failed.",
+			},
+			bullets: []string{"Then run `make install` and read the output."},
+			absent:  []string{"> go get", "> def all", "> cd project"},
+		},
+		{
+			fixture: "table-code.html",
+			// A <pre> in a cell keeps its lines (a numbered listing loses its
+			// gutter); an island writes nothing the reader never sees.
+			blocks: []string{
+				"def area(width, height):\n    if width < 0 or height < 0:\n        raise ValueError(\"negative side\")\n" +
+					"    return width | height",
+				"retries = 3\nbackoff = 2.0",
+				"full = area(2, 3)\nprint(full)",
+				"area(1, 1)\narea(2, 2)",
+			},
+			contains: []string{"| badge | ![mark \\[old\\]](</img/mark (old).png>) shown beside the name |"},
+			absent:   []string{"1 2 3 4", "ghost text", "teal", "track(", "base64", "Hidden series", "*shown here"},
+		},
+		{
+			// R4, R7: a table in a definition, a list item or a quote is a
+			// markdown table, a cell holding blocks keeps them apart, and an
+			// infobox's nested table is a table of its own.
+			fixture: "tables.html",
+			tables: []string{
+				"| Built-in Functions |  |\n|---|---|\n" +
+					"| **A** [`abs()`](#abs) [`all()`](#all) | **B** [`bin()`](#bin) [`bool()`](#bool) |",
+				"| Character | Meaning |\n|---|---|\n| `'r'` | open for reading (default) |\n" +
+					"| `'w'` | open for [writing](/modes/write.html), truncating the file first |",
+				"| Name | Summary |\n|---|---|\n| [abs](/f/abs.html) | Absolute value |",
+				"| Rule | Reason |\n|---|---|\n| Name things | Names are read more often than written |",
+				"| Hash table |  |\n|---|---|\n| Type | Unordered associative array |\n| Invented | 1953 |",
+				"| Time complexity in big O notation |  |  |\n|---|---|---|\n| Operation | **Average** | **Worst case** |\n" +
+					"| Search | Θ(1) | O(*n*) |",
+			},
+			absent: []string{"Character Meaning", "Name Summary", "A[`abs()`]", "| 1953 |\n|  |  |"},
+		},
+		{
+			// R5: MathML (alttext, the x-tex annotation, Wikipedia's fallback
+			// image alt) is LaTeX in place; display math is its own $$ line.
+			fixture: "math.html",
+			text: []string{
+				"The keys stem from the universe $U$, where the bit length of $n$ is confined to $m=2^{k}$ bits.",
+				"A fallback image alone still carries its LaTeX: $O(1)$ per lookup on average.",
+				"$$\\alpha ={\\frac {n}{m}}$$",
+			},
+			absent: []string{"displaystyle", "![", "example.test/m/svg"},
+		},
+		{
+			// R7: a hatnote (role="note") is the page's own text; a citation
+			// whose title link holds markup keeps the link, where the title is.
+			fixture: "wiki-notes.html",
+			text: []string{
+				"Not to be confused with [Hash list](https://wiki.example.test/wiki/Hash_list) or" +
+					" [Hash tree](https://wiki.example.test/wiki/Hash_tree).",
+				"See also: [Hash function](https://wiki.example.test/wiki/Hash_function)",
+			},
+			contains: []string{
+				"Wayne, Kevin (2011). [*Algorithms*](https://algs4.example.test/). Vol. 1 (4 ed.). Addison-Wesley Professional" +
+					" – via [Princeton University](https://wiki.example.test/wiki/Princeton_University), Department of Computer Science.",
+			},
+		},
+		{
+			// R8: a scholarly landing page (it declares citation_title) writes
+			// its authors with their links, the metadata table, the DOI and the
+			// cite-as id; its sidebar, labs panel and javascript: toggle stay
+			// out; front matter names each author "First Last".
+			fixture: "scholar-abs.html",
+			text: []string{
+				"Authors: [Ashish Vaswani](https://scholar.example.test/search?searchtype=author&query=Vaswani,+A)," +
+					" [Aidan N. Gomez](https://scholar.example.test/search?searchtype=author&query=Gomez,+A+N)",
+			},
+			tables: []string{
+				"| Comments: | 15 pages, 5 figures |",
+				"| Subjects: | Computation and Language (cs.CL); Machine Learning (cs.LG) |",
+				"| Cite as: | [arXiv:1706.00001](https://scholar.example.test/abs/1706.00001) [cs.CL] |",
+			},
+			contains: []string{
+				"[https://doi.org/10.48550/arXiv.1706.00001](https://doi.org/10.48550/arXiv.1706.00001)",
+			},
+			absent: []string{
+				"arXivLabs",
+				"Disable MathJax",
+				"javascript:",
+				"Access Paper",
+				"Which authors",
+				"DataCite",
+				"Focus to learn more",
+			},
+			meta: map[string]string{"author": "Ashish Vaswani; Aidan N. Gomez; Example Labs, Inc."},
+		},
+		{
 			// A news article's last paragraph, its correction note, sits in the
 			// article's own <footer>: written after the body; the newsletter
 			// promotion inside the article and the site footer stay out.
@@ -557,7 +734,7 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 		t.Run(tc.fixture, func(t *testing.T) {
 			result, err := converter.Convert(
 				context.Background(),
-				Request{Path: filepath.Join("testdata", "blocks", tc.fixture), Kind: "html"},
+				Request{Path: filepath.Join("testdata", "blocks", tc.fixture), Kind: "html", BaseURL: tc.base},
 			)
 			if err != nil {
 				t.Fatalf("convert: %v", err)
@@ -611,6 +788,34 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			for _, word := range tc.absent {
 				if strings.Contains(result.Markdown, word) {
 					t.Errorf("%q leaked into the content", word)
+				}
+			}
+			for _, block := range tc.blocks {
+				if !hasFencedBlock(lines, block) {
+					t.Errorf("code block %q is not one fence with every line byte-exact", block)
+				}
+			}
+			for _, table := range tc.tables {
+				if !hasTableLines(lines, strings.Split(table, "\n")) {
+					t.Errorf("table lines %q are missing or not consecutive", table)
+				}
+			}
+			for _, text := range tc.contains {
+				if !strings.Contains(result.Markdown, text) {
+					t.Errorf("%q is missing", text)
+				}
+			}
+			for key, want := range tc.meta {
+				if got := result.Meta[key]; got != want {
+					t.Errorf("meta %s = %q, want %q", key, got, want)
+				}
+			}
+			if tc.base != "" {
+				for _, match := range linkTargetRE.FindAllStringSubmatch(result.Markdown, -1) {
+					if target := match[1]; !strings.HasPrefix(target, "https://") && !strings.HasPrefix(target, "#") &&
+						!strings.HasPrefix(target, "mailto:") {
+						t.Errorf("link target %q is neither absolute nor a same-page fragment", target)
+					}
 				}
 			}
 			if t.Failed() {

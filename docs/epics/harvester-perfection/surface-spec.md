@@ -2,6 +2,8 @@
 
 Part of the harvester-perfection epic (`manifest.md` § Surface redesign holds the user's decisions; this file turns them into build tasks). Every claim about today's code was mapped from the code on `wave/consent` at 58e9c2ba.
 
+> Since retired (flight harvester-fidelity): `LocalizeImages` (`images.go`) and `PolicyInlineImage` no longer exist. A page's images are not downloaded while it is read; each links its original address and `download_file` fetches one on demand. The lines below that name them describe the epic as it was built.
+
 ## Goal
 
 Four tools whose names say what they do, one retrieval function behind every network read, typed results, and a remote server that exposes only MCP. Nothing of the old surface survives: no alias, no deprecated name, no reference.

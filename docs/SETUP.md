@@ -253,7 +253,7 @@ Claude takes your answers and:
 
 7b-i. **Installs global settings** — `pfm install` manages `cleanupPeriodDays` in the Claude managed-settings directory, using sudo when required. It preserves other keys and writes no cleanup key into account `settings.json`; doctor inspects the managed file for missing, wrong and unreadable states.
 
-7c. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, the docs hub (`docs/_index.md`, `docs/standards.md`) and its `architecture/`, `api/`, `map/` and `features/` clusters, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files and generated mirrors are ignored. Add to `.claude/settings.json`:
+7c. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, the docs hub (`docs/_index.md`, `docs/standards.md`) and its `architecture/`, `api/`, `map/` and `features/` clusters, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files, generated mirrors and any repository other than the session's project that has no `.rumdl.toml` of its own (a plugin submodule) are ignored; the session's own project without one gets a stderr hint instead. Add to `.claude/settings.json`:
 
     ```json
     {

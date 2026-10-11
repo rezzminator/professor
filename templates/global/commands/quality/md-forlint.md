@@ -98,7 +98,7 @@ Step 3 is the one that matters. A merged sentinel fails loudly; a dissolved untr
 
 ## The hook
 
-`format-md.sh` (PostToolUse on Edit/Write, Professor-owned paths only) runs `rumdl fmt` on the one file just written, so hand formatting is rarely needed. It exits 0 for every path it does not own, and says so on stderr when `rumdl` is missing rather than skipping silently. A Bash-driven write bypasses the hook — run `rumdl fmt <file>` yourself after one.
+`format-md.sh` (PostToolUse on Edit/Write, Professor-owned paths only) runs `rumdl fmt` on the one file just written, so hand formatting is rarely needed. It exits 0 for every path it does not own, and says so on stderr when `rumdl` is missing rather than skipping silently; a repository without `.rumdl.toml` is left unformatted — silently when it is not the session's project (a plugin submodule), with one stderr line when it is. A Bash-driven write bypasses the hook — run `rumdl fmt <file>` yourself after one.
 
 ## Changing the policy
 

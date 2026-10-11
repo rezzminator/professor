@@ -13,10 +13,15 @@ set -uo pipefail
 # stderr to the model; the write itself stands). Clean or standing-only issues
 # exit 0, silent.
 #
+# The repo-root `.rumdl.toml` marks a repository this hook formats. Any other
+# repository without one (a plugin submodule, a vendored or sibling checkout)
+# keeps its own conventions: its files are left alone, silent.
+#
 # What this reports when IT is broken: a failing `rumdl fmt` or `rumdl check`
-# exits 2 naming the step; a missing `jq` or `rumdl` prints one stderr line and
-# exits 0 (a tool to install, not an issue in the file) — never a silent skip
-# that looks like a clean format.
+# exits 2 naming the step; a missing `jq` or `rumdl`, or a session project
+# (`CLAUDE_PROJECT_DIR`) without its `.rumdl.toml`, prints one stderr line and
+# exits 0 (a tool to install or a policy to scaffold, not an issue in the file) —
+# never a silent skip that looks like a clean format.
 
 INPUT=$(cat)
 
@@ -65,6 +70,17 @@ case "$REL_PATH" in
   */CLAUDE.md|*/.claude/*.md) ;;
   *) exit 0 ;;
 esac
+
+if [[ ! -f "$REPO_ROOT/.rumdl.toml" ]]; then
+  PROJECT_ROOT=""
+  if PROJECT_TOP=$(git -C "${CLAUDE_PROJECT_DIR:-$REPO_ROOT}" rev-parse --show-toplevel 2>/dev/null); then
+    PROJECT_ROOT=$(cd "$PROJECT_TOP" && pwd -P) || PROJECT_ROOT=""
+  fi
+  if [[ -z "$PROJECT_ROOT" || "$PROJECT_ROOT" == "$REPO_ROOT" ]]; then
+    echo "format-md: no .rumdl.toml at ${REPO_ROOT} — ${REL_PATH} left unformatted (\`pfm init\` scaffolds it; an initialized project: \`pfm doctor --project-updates\` names it)" >&2
+  fi
+  exit 0
+fi
 
 if ! command -v rumdl >/dev/null 2>&1; then
   echo "format-md: rumdl not found — ${REL_PATH} left unformatted (\`pfm install\` provisions it)" >&2

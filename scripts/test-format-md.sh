@@ -17,10 +17,13 @@ SHTEST_TAG=format-md
 # shellcheck source=scripts/shtest.sh
 source "$(dirname "$0")/shtest.sh"
 shtest_isolate_host
+unset CLAUDE_PROJECT_DIR
 
 R="$(cd "$T" && pwd -P)/repo"
 mkdir -p "$R/docs/dev" "$R/src" "$T/bin"
 git -C "$R" init -q
+# A repo-root .rumdl.toml marks a project the hook formats; the stub rumdl never reads it.
+printf '[global]\n' > "$R/.rumdl.toml"
 printf '# T\n' > "$R/docs/dev/a.md"
 printf '# T\n' > "$R/src/b.md"
 # The stdin check replays the committed version; other checks replay the written file.
@@ -54,6 +57,34 @@ hook() { # hook <file>: RC and ERR of one hook run
 }
 
 if [[ $readiness_only == 0 ]]; then
+# A repository without .rumdl.toml is not a project the hook formats: a nested one
+# (a plugin submodule) is left alone, silent; the session's own one says so and exits 0.
+N="$R/plugins/p"
+mkdir -p "$N" && git -C "$N" init -q && printf '# T\n' > "$N/CLAUDE.md" ||
+  { echo 'test-format-md: nested fixture setup failed' >&2; exit 2; }
+long=$'CLAUDE.md:1:81: [MD013] Line length 120 exceeds 80 characters\n'
+STUB_CHECK_RC=1 STUB_CHECK_OUT="$long" CLAUDE_PROJECT_DIR="$R" hook "$N/CLAUDE.md"
+if [[ $RC == 0 && -z $ERR ]]; then ok "a nested repository without .rumdl.toml is left alone, silent"
+else bad "a nested repository without .rumdl.toml" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
+Q="$R/plugins/q"
+mkdir -p "$Q" && git -C "$Q" init -q && printf '[global]\n' > "$Q/.rumdl.toml" && printf '# T\n' > "$Q/CLAUDE.md" ||
+  { echo 'test-format-md: nested-policy fixture setup failed' >&2; exit 2; }
+STUB_CHECK_RC=1 STUB_CHECK_OUT='CLAUDE.md:1:1: [MD041] x' CLAUDE_PROJECT_DIR="$R" hook "$Q/CLAUDE.md"
+if [[ $RC == 2 && $ERR == *"UNFIXED CLAUDE.md:1:1 MD041"* ]]; then ok "a nested repository with its own .rumdl.toml is formatted, paths relative to its root"
+else bad "a nested repository with its own .rumdl.toml" "rc $RC (want 2)" "stderr: ${ERR:-<empty>}"; fi
+P="$(cd "$T" && pwd -P)/nopolicy"
+mkdir -p "$P" && git -C "$P" init -q && printf '# T\n' > "$P/CLAUDE.md" && ln -s "$P" "$T/plink" ||
+  { echo 'test-format-md: no-policy fixture setup failed' >&2; exit 2; }
+# The session's own project is told under any spelling of CLAUDE_PROJECT_DIR; an unresolvable one is told too.
+told="format-md: no .rumdl.toml at $P — CLAUDE.md left unformatted"
+for row in "$P|the project's own repository" "$T/plink|a symlinked spelling of the project" \
+  "$T|a project directory outside any repository" "-|an unset project directory"; do
+  pd=${row%%|*}
+  if [[ $pd == - ]]; then STUB_CHECK_RC=1 STUB_CHECK_OUT="$long" hook "$P/CLAUDE.md"
+  else STUB_CHECK_RC=1 STUB_CHECK_OUT="$long" CLAUDE_PROJECT_DIR="$pd" hook "$P/CLAUDE.md"; fi
+  if [[ $RC == 0 && $ERR == "$told"* && $ERR != *$'\n'* ]]; then ok "${row#*|} without .rumdl.toml exits 0 with one stderr line naming it"
+  else bad "${row#*|} without .rumdl.toml" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
+done
 STUB_CHECK_RC=0 hook "$R/docs/dev/a.md"
 if [[ $RC == 0 && -z $ERR ]]; then ok "a clean file exits 0 with nothing on stderr"
 else bad "a clean file" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
@@ -97,7 +128,7 @@ fi
 
 # A committed baseline belongs to a second repo; the cases above have no HEAD.
 C="$(cd "$T" && pwd -P)/committed"
-mkdir -p "$C/docs/dev" && git -C "$C" init -q &&
+mkdir -p "$C/docs/dev" && git -C "$C" init -q && printf '[global]\n' > "$C/.rumdl.toml" &&
   printf '# T\n' > "$C/docs/dev/a.md" && git -C "$C" add docs/dev/a.md &&
   git -C "$C" -c user.name=t -c user.email=t@t commit -qm baseline ||
   { echo 'test-format-md: committed fixture setup failed' >&2; exit 2; }

@@ -49,13 +49,13 @@
 #   checkouts       a checkout's own fence state lives as long as the checkout:
 #                   its `iso sim` volume pfm-sim-harvest-<key> (fence_sim_volume)
 #                   and its scratch root /tmp/<checkout name minus a leading dot>
-#                   (dev.sh, lanes/run.sh, the guard derive it from the checkout
+#                   (dev.sh, lanes/run.sh derive it from the checkout
 #                   they run in). Every checkout `git worktree list` names is
 #                   recorded in the ledger {stamp dir}/checkouts as three
 #                   tab-separated fields: checkout path, scratch root, sim volume.
 #                   Once it is gone, only its recorded sim volume is removed
 #                   (docker refuses one a container mounts: kept for retry).
-#                   Only timing/, build/, lanes/ and guard/ in its recorded root
+#                   Only timing/, build/ and lanes/ in its recorded root
 #                   are removed, each after 1 day without modification. Other
 #                   content stays; rmdir removes an empty root. The row stays
 #                   while its root is nonempty or its sim volume needs retry.
@@ -459,7 +459,7 @@ _fence_hk_checkouts() {
       if [ -L "$root" ] || [ ! -d "$root" ]; then
         _fence_hk_warn checkouts "kept $root — recorded scratch root is not a directory or is a symlink"; pending=1
       else
-        for purpose in timing build lanes guard; do
+        for purpose in timing build lanes; do
           [ -d "$root/$purpose" ] && [ ! -L "$root/$purpose" ] || continue
           _fence_hk_stale "$root/$purpose" 1 && _fence_hk_rmtree checkouts "$root/$purpose"
         done

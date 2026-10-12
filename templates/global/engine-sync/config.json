@@ -100,12 +100,9 @@
       "doom_loop": "allow",
       "edit": {
         "**": "allow",
-        "**/.claude/**": "deny",
         "**/AGENTS.md": "deny",
-        "**/CLAUDE.md": "deny",
         ".opencode/**": "deny",
-        "AGENTS.md": "deny",
-        "CLAUDE.md": "deny"
+        "AGENTS.md": "deny"
       },
       "external_directory": "allow"
     }

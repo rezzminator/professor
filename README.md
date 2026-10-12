@@ -40,7 +40,7 @@ You already run more than one AI chat. They cannot see each other, they forget t
 | --- | --- | --- |
 | Many chats, many accounts | Scattered terminal tabs; a closed tab is a lost chat | One picker — every chat on every harness, live or resumable |
 | One chat needs another | You copy-paste between windows | `chat_inject` — a signed turn, delivered and acknowledged |
-| The rules, after compaction | Whatever the prompt still remembers | Hooks that refuse, with the unlock steps in the refusal |
+| The rules, after compaction | Whatever the prompt still remembers | Hooks that refuse, naming the right way in the refusal |
 | A bot-blocked page | A 403, or an empty page reported as content | A seven-rung fetch ladder; a block is reported as a block |
 | Claude and Codex rules | Two files that drift apart | One `CLAUDE.md`, compiled mirrors, drift fails the check |
 | An account hits its limit | Start over in a new chat | `/reload --account 2` — same pane, same history |
@@ -77,14 +77,14 @@ Two panes, two harnesses. You type one line into the Claude chat on the left; th
 
 ### 3. Rules that bite
 
-A subagent tries to `Edit` a file under `.claude/`. The PreToolUse guard answers:
+A subagent tries to run `git commit`. The `git-guard` PreToolUse hook answers:
 
 ```text
-DENIED — infra edits route through /pcm: open this session's gate from the repo root …
-Do NOT route around this by disabling the hook or editing infra outside /pcm.
+git-guard blocked `git commit -m wip`.
+Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.
 ```
 
-The refusal carries its own unlock steps. That is one of the mandatory rules every install ships with: only `gitter` writes git; guarded files sit behind `/pcm`; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
+The refusal names the right way. That is one of the mandatory rules every install ships with: only `gitter` writes git; framework edits go through the `pcm` agent; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
 
 ### 4. Read what the web hides from bots
 
@@ -162,7 +162,7 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 > An empty enumeration is never a verdict.
 
 - **One agent writes git.** `gitter` is the only agent that commits; every other agent is read-only.
-- **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pcm` plus a session that has read the quality-prompt contract.
+- **Framework edits.** A change to `.claude/**`, a `CLAUDE.md` or `templates/**` goes through the `pcm` agent (the user's `/pcm` dispatches it); it loads the quality-prompt contract before its first edit.
 - **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
 - **The flight pipeline.** `/flights:spec` writes `requirements.md` and hands it to `flights-foreman`, which builds the request and splits only by build-unit ownership into child foremen; each return is verified against its diff; one `flights-lander` for the whole flight runs every project's checks, one review of the whole diff and adversarial tests, then `gitter` commits. `/flights:audit` re-reads the whole flight from its own artifacts, never from what an agent said it did.
 - **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.

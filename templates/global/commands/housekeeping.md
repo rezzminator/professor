@@ -1,5 +1,5 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: housekeeping
 description: Clears stale worktrees, branches, stashes — `/housekeeping [repo]`, or asks like "are these worktrees stale", "clean up old branches", "housekeeping time". Returns a state and evidence row per item, what stayed and why, recovery lines.
 argument-hint: "[repo]"

@@ -101,7 +101,7 @@ The report path, then one line of totals, then the findings, one line each: clas
 
 | Left out | Reason |
 | --- | --- |
-| Editing the audited prompt, or prescribing its fix | The auditor is not the author: the caller decides each change, and a prompt edit goes through `/pcm`, where the prompt laws and the guard apply |
+| Editing the audited prompt, or prescribing its fix | The auditor is not the author: the caller decides each change, and a prompt edit goes through `/pcm`, where the prompt laws apply |
 | One report for a lead and its diggers together | Different prompts, different causes; a mixed report ranks a digger's waste against a lead's |
 
 ## Surfaces that stay in sync

@@ -1,5 +1,5 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: ultimate-spec
 description: 'Builds visions with sub-agents — `/ultimate-spec [vision | file]`, or "spec it first, then build it with agents". /ultimate-spec → ultimate → builders. Returns the work and its spec path. Not for one piece made in this chat → /ultimate.'
 argument-hint: '[vision | file holding it]'

@@ -14,7 +14,7 @@ docs/epics/{name}/
 
 **Load protocol:** read `manifest.md` + `update.md`, then open topic files from `## Files` (fall back to `ls`) only as the task requires. Never read `archive/`.
 
-**Ownership:** the Professor owns the lifecycle and narrative (`## Vision & Scope`, `status:`, topic files, epic creation/deletion). The main-loop session consolidates shipped work (after a flight lands) and session work (on "save the epic" / at a milestone) into `update.md` + the manifest's working sections per § Consolidation contract.
+**Ownership:** the Professor owns the lifecycle and narrative (`## Vision & Scope`, `status:`, topic files, epic creation/deletion). The main-loop session, or the `documenter` agent it dispatches, consolidates shipped work (after a flight lands) and session work (on "save the epic" / at a milestone) into `update.md` + the manifest's working sections per § Consolidation contract.
 
 ## Consolidation contract
 

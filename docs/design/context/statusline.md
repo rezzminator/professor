@@ -63,6 +63,10 @@ A row wider than the panel fits itself to the payload's `columns`, less 8 for Cl
 
 The row opens with `ESC[22m`, which cancels Claude Code's faint, so the colours read at full strength.
 
+### A fault
+
+The command exits 0 on a fault, so the harness logs no failed command each tick, but a fault never renders as absence. Input that cannot be read whole (a read error, or more than 16 MiB: `maxSubagentInput`) or rendered (a payload that does not parse) turns every task row whose id can still be read from the input into a bold red `pfm statusline: {cause}` row, and the cause goes to stderr. Rows past a 16 MiB cut are not shown, and the row says so. Input with no readable task id has no row to carry the cause: stderr alone says `no task id to show it on` (`ServeSubagents`, `failSubagents`, `subagentTaskIDs`).
+
 ### A finished row
 
 A row is finished once its status is `completed`, `failed`, `killed` or `error` and no agent below it still works. Claude Code marks an orchestrator completed while its background workers work on; that row says `delegating` and stays a full row.

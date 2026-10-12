@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -322,5 +325,140 @@ func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
 	if code := runStatuslineWithRuntime([]string{"--subagents", "--refresh-gpt"}, strings.NewReader(""), &stdout,
 		&stderr, runtime, paths.OSEnv{}); code != 2 {
 		t.Fatalf("--subagents with --refresh-gpt: code=%d, want usage error 2", code)
+	}
+}
+
+// subagentErrorRows parses the {id,content} lines a failing --subagents run printed.
+func subagentErrorRows(t *testing.T, stdout string) map[string]string {
+	t.Helper()
+	rows := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(stdout, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var row struct{ ID, Content string }
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("line %q is not an {id,content} row: %v", line, err)
+		}
+		rows[row.ID] = row.Content
+	}
+	return rows
+}
+
+// failingReader yields its data, then the error.
+type failingReader struct {
+	data []byte
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestStatuslineSubagentsShowsAnErrorOnEveryRow(t *testing.T) {
+	jailTest(t)
+	root := t.TempDir()
+	t.Setenv("PFM_HOME", root)
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+	runtime := statuslineTestRuntime(t)
+	const rowA = `{"id":"t1","model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10}`
+	const rowB = `{"id":"t2","model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":20}`
+	overflow := `{"tasks":[` + rowA + `,` + rowB + `,{"id":"t3","label":"` +
+		strings.Repeat("x", 17<<20) + `"}]}`
+
+	cases := []struct {
+		name    string
+		input   io.Reader
+		rows    []string
+		logged  string
+		inError string
+	}{
+		{
+			"torn payload", strings.NewReader(`{"tasks":[` + rowA + `,` + rowB),
+			[]string{"t1", "t2"},
+			"--subagents: render (rows show the error)", "pfm statusline: parse subagent row context",
+		},
+		{
+			"wrong field type", strings.NewReader(`{"tasks":[{"id":"t1","tokenCount":"many"},` + rowB + `]}`),
+			[]string{"t1", "t2"},
+			"--subagents: render (rows show the error)", "pfm statusline: parse subagent row context",
+		},
+		{
+			"read error", &failingReader{
+				data: []byte(`{"tasks":[` + rowA + `,` + rowB + `,{"id":"t3"`),
+				err:  errors.New("pipe broke"),
+			},
+			[]string{"t1", "t2"},
+			"--subagents: input (rows show the error)", "pfm statusline: read input: pipe broke",
+		},
+		{
+			"input past the cap", strings.NewReader(overflow),
+			[]string{"t1", "t2"},
+			"--subagents: input (rows show the error)", "pfm statusline: read input: over 16 MiB",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runStatuslineWithRuntime([]string{"--subagents"}, tc.input, &stdout, &stderr, runtime,
+				paths.OSEnv{}); code != 0 {
+				t.Fatalf("code=%d, want 0 (fail-open exit, visible rows)", code)
+			}
+			if !strings.Contains(stderr.String(), tc.logged) {
+				t.Fatalf("stderr=%q, want %q", stderr.String(), tc.logged)
+			}
+			rows := subagentErrorRows(t, stdout.String())
+			if len(rows) != len(tc.rows) {
+				t.Fatalf("rows=%v, want exactly the ids %v", rows, tc.rows)
+			}
+			for _, id := range tc.rows {
+				if !strings.Contains(rows[id], tc.inError) {
+					t.Fatalf("row %s=%q, want %q", id, rows[id], tc.inError)
+				}
+			}
+		})
+	}
+}
+
+func TestStatuslineSubagentsKeepsEveryRowPastOneMebibyte(t *testing.T) {
+	jailTest(t)
+	root := t.TempDir()
+	t.Setenv("PFM_HOME", root)
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+	runtime := statuslineTestRuntime(t)
+	const tasks = 2000
+	var payload strings.Builder
+	payload.WriteString(`{"columns":100,"tasks":[`)
+	for index := range tasks {
+		if index > 0 {
+			payload.WriteString(",")
+		}
+		fmt.Fprintf(
+			&payload,
+			`{"id":"t%d","model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10,"description":%q}`,
+			index,
+			strings.Repeat("d", 1024),
+		)
+	}
+	payload.WriteString(`]}`)
+	if payload.Len() <= 1<<20 {
+		t.Fatalf("payload is %d bytes, want one past the old 1 MiB cap", payload.Len())
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runStatuslineWithRuntime([]string{"--subagents"}, strings.NewReader(payload.String()), &stdout, &stderr,
+		runtime, paths.OSEnv{}); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	rows := subagentErrorRows(t, stdout.String())
+	if len(rows) != tasks {
+		t.Fatalf("rows=%d, want all %d", len(rows), tasks)
+	}
+	if !strings.Contains(rows["t1999"], "10") {
+		t.Fatalf("last row = %q, want a rendered gauge row", rows["t1999"])
 	}
 }

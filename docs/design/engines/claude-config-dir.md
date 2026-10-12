@@ -174,7 +174,7 @@ Each item is written once under the store. Every account sees the same agents, c
 | `skills/handoff/SKILL.md` | `~/.local/share/pfm/install/handoff.skill.md` |
 | `skills/*` | `{clone}/templates/global/skills/` dirs with a `SKILL.md` |
 | `skills/{name}` | `~/.local/share/pfm/install/skills/{name}/` source clone |
-| `agents/*.md` | clone sources or generated variants under `~/.local/state/pfm/generated/claude-agents` |
+| `agents/*.md` | clone sources, or rendered declarations under the clone's tracked `templates/generated/agents/` |
 | `themes/*` | manifest-selected files; `theme-ownership.json` records ownership |
 
 Source-fetched skills also link under `~/.agents/skills/{name}`. `templates/global/skills/sources.json` registers their repos; `templates/global/agents/` supplies agents; `templates/themes/sources.json` supplies themes.

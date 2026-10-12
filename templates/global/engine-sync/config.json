@@ -16,6 +16,7 @@
       ".codex/agents/explorer.toml"
     ],
     "generatedAgentsDir": ".local/state/pfm/generated/claude-agents",
+    "sourceGeneratedAgentsDir": "templates/generated/agents",
     "claudeAgentsDir": "",
     "sourceAgentsDir": "templates/global/agents",
     "agentMarkerDir": "templates/global/agents"

@@ -4,7 +4,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 # Vocabulary
 
-- machine-global tier: agents, commands and skills whose original lives in this clone, symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`; nothing generated is written into the clone · `templates/global/`
+- machine-global tier: agents, commands and skills whose original lives in this clone, symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`; a `from:` declaration renders into the tracked `templates/generated/agents/`, the only generated output in the clone, which the fence gate holds equal to a fresh render · `templates/global/`
 - project tier: templates `pfm init` scaffolds into an adopter once and pins in `{adopter}/.professor/baseline.json`; the adopter's local file is the truth, and pfm never rewrites it after init · `templates/project/`
 - project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for retired references in project files, including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, then `pfm update {adopt|pin|ignore|drop}` · `pfm/internal/update/`
 - placeholder: the registered token for a project-specific value in a template · `docs/PLACEHOLDERS.md`

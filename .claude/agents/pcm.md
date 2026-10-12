@@ -1,7 +1,7 @@
 ---
 name: pcm
 description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/**, templates/** or the .codex/ mirror. `audit [scope|all]` reports framework consistency, read-only; `retro` folds the .professor/retro.md inbox. Returns changed files and a consistency verdict. Not for the pfm CLI → /pfm; publishing the blueprint → /pfm:release; context budget → /context-meter.
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
 skills: [quality:prompt]
 model: opus
 effort: high
@@ -119,7 +119,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 ## Special operations
 
 - Full rename: grep all occurrences (`templates/**`, `README.md`, `docs/BLUEPRINT.md`, `docs/SETUP.md`, `refresh-map.json` included), update agents, then `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
-- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__compact` unless it is an rr-family agent), compile with `pfm codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
+- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__compact` and `mcp__sub-agent-compact__handoff` unless it is an rr-family agent), compile with `pfm codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
 - New skill: create `.claude/skills/{name}/SKILL.md`; a skill for adopters is registered in `templates/project/skills/sources.json` and lives in its own public repo.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` only as a non-obvious routing decision.
 

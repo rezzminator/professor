@@ -4,7 +4,7 @@ description: INVESTIGATOR-ONLY pulls the lines a chat-investigator's orders name
 visibility:
   visible-to:
     include: [chat-investigator]
-tools: Read, Grep, Bash, mcp__sub-agent-compact__compact
+tools: Read, Grep, Bash, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
 model: haiku
 effort: medium
 ---

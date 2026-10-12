@@ -4,7 +4,7 @@ description: TRACER-ONLY follows one thread of code — spawned by tracer and su
 visibility:
   visible-to:
     include: [tracer, sub-tracer]
-tools: Read, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact
+tools: Read, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
 model: haiku
 effort: low
 engines:

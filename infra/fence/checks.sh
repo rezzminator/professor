@@ -148,7 +148,7 @@ checks_templates_scratch_paths() {
     # grep needs /dev/null as a second operand: BSD xargs runs the utility
     # even on empty input, and a bare `grep PATTERN` then reads stdin and
     # hangs the gate forever instead of reporting an empty sweep.
-    all_hits=$(xargs -0 grep -lE '(^|[^/[:alnum:]_.-])tmp/(timing|flights|lanes|guard|professor_)' /dev/null \
+    all_hits=$(xargs -0 grep -lE '(^|[^/[:alnum:]_.-])tmp/(timing|flights|lanes|professor_)' /dev/null \
       < "$TMP_BASE/templates/tracked.z" 2>/dev/null || true)
     strays=$(printf '%s\n' "$all_hits" | grep -vE "$exclude" | grep -v '^$' || true)
     excluded=$(printf '%s\n' "$all_hits" | grep -cE "$exclude" || true)
@@ -402,16 +402,6 @@ checks_templates_worktree_script() {
   fi
 }
 
-checks_templates_pfm_guard() {
-  head_ "templates — pfm-guard across repositories"
-  if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-guard-stamp.sh"; then
-    ok "pfm-guard and both guard-stamp twins preserve session-keyed law stamps, cross-repo edits, and marker cleanup"
-  else
-    fail_step "pfm-guard/guard-stamp regression FAILED — session law stamps, cross-repo enforcement, or marker cleanup broke (see output)"
-  fi
-
-}
-
 checks_templates_codex_sync() {
   head_ "templates — codex-sync door"
   local cs_copy
@@ -543,7 +533,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
   checks_named_template_steps "$add" clone leak placeholders scratch-paths descriptions mirrors \
-    global-variants release-check codex-sync refresh-scope pfm-guard worktree-script dev-report \
+    global-variants release-check codex-sync refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name"

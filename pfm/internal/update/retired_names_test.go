@@ -98,6 +98,10 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"the /chat route",
 		"https://example.com/wave and http://localhost:3000/jc",
 		"/wave-something",
+		"subagent_type: documenter",
+		"templates/global/agents/documenter.md and .claude/agents/documenter.md",
+		"spawn the documenter agent",
+		"the pfm guard script and a xpfm-guard.sh or guard-stamp.shx",
 	} {
 		if hits := retiredNameHits("f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
@@ -123,6 +127,22 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		hits := retiredNameHits("f", line)
 		if len(hits) != 1 || hits[0].Name != name {
 			t.Errorf("line %q hits %+v, want exactly %q", line, hits, name)
+		}
+	}
+}
+
+// TestRetiredNamesPinTheRemovedGuardScripts: a settings file or script that
+// still names the removed PreToolUse guard scripts is reported as a retired
+// path with no successor, in the form an adopter writes it.
+func TestRetiredNamesPinTheRemovedGuardScripts(t *testing.T) {
+	for line, name := range map[string]string{
+		`"command": "bash $CLAUDE_PROJECT_DIR/.claude/scripts/pfm-guard.sh"`: "pfm-guard.sh",
+		"bash .claude/scripts/guard-stamp.sh --read":                         "guard-stamp.sh",
+		"pfm-guard.sh": "pfm-guard.sh",
+	} {
+		want := []professor.RetiredNameHit{{Path: "f", Line: 1, Name: name, Kind: "path"}}
+		if hits := retiredNameHits("f", line); !reflect.DeepEqual(hits, want) {
+			t.Errorf("line %q hits %+v, want %+v", line, hits, want)
 		}
 	}
 }

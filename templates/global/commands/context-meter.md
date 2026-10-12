@@ -30,7 +30,7 @@ Flag a file when:
 - The injected fleet prompt bills against the always-loaded floor (main-loop only; subagents never receive it)
 - `.mcp.json`: a server wrapping a CLI already on PATH (`gh`) — schemas are deferred, so tool count costs little until fetched
 
-The size limits are `/pcm`'s (§ Hard thresholds, § Critical invariants); this command only measures against them.
+The size limits are the `pcm` agent's (§ Claude-harness prompt law, § Critical invariants); this command only measures against them.
 
 ## Classify
 

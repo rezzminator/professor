@@ -203,11 +203,11 @@ The dead compiler has been unwired since v0.58.0 (`releases/v0.58.0.md:14`) and 
 5. `go list -deps ./...` in `pfm/` lists neither package; the forwarders keep today's exit codes; `pfm doctor` shows a failing row when the binary is absent.
 6. `.claude/scripts/dev.sh iso gate pfm` and `iso gate templates` pass; every door in the table is gone or execs the binary.
 
-**Guarded files** (`.claude/**`, `templates/**`, `CLAUDE.md`) land through `/pcm` in the main chat; the flight reports the exact change each needs.
+Prompt files (`.claude/**`, `templates/**`, `CLAUDE.md`) land through `/pcm`, which dispatches the `pcm` agent; the flight reports the exact change each needs.
 
 ### P2 configuration and policy as data
 
-`.claude/codex-build.json` and the never-created `.claude/opencode-build.json` merge into `.claude/engine-sync.json`. Professor policy hardcoded in Go becomes data in Professor's machine policy, `templates/global/engine-sync/config.json`, which `pfm install` links into the engine-sync config directory (a project's own `.claude/engine-sync.json` holds only its overrides): the OpenCode guarded-file and Git-write denies (`plugins/engine-sync/internal/target/opencode/config.go`). gitter's sandbox exemption (`plugins/engine-sync/internal/target/codex/agents.go`) becomes `engines.codex.sandbox` in gitter's own frontmatter, read by the one Codex role renderer both paths share. Global roles come from `{claude config dir}/agents/`, not from the Professor checkout. engine-sync's own marker replaces pfm's.
+`.claude/codex-build.json` and the never-created `.claude/opencode-build.json` merge into `.claude/engine-sync.json`. Professor policy hardcoded in Go becomes data in Professor's machine policy, `templates/global/engine-sync/config.json`, which `pfm install` links into the engine-sync config directory (a project's own `.claude/engine-sync.json` holds only its overrides): the OpenCode generated-file and Git-write denies (`plugins/engine-sync/internal/target/opencode/config.go`). gitter's sandbox exemption (`plugins/engine-sync/internal/target/codex/agents.go`) becomes `engines.codex.sandbox` in gitter's own frontmatter, read by the one Codex role renderer both paths share. Global roles come from `{claude config dir}/agents/`, not from the Professor checkout. engine-sync's own marker replaces pfm's.
 
 ### P3 rules
 

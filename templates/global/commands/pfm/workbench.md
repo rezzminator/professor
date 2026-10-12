@@ -10,7 +10,7 @@ A workbench is a directory holding `.professor/workbench.json` below a managed r
 
 A workbench owns its own CLAUDE.md: pfm codex build {dir} compiles it into {dir}/AGENTS.md, and without it every Codex launch in the workbench is refused.
 
-`$ARGUMENTS` selects the verb and directory; resolve a relative directory under the managed root. Pass `.claude/**` and `CLAUDE.md` writes through the project's guard. Use invented examples when writing shared instructions; the example here is `/work/acme/docs/scribe` under managed root `/work/acme`.
+`$ARGUMENTS` selects the verb and directory; resolve a relative directory under the managed root. Pass `.claude/**` and `CLAUDE.md` writes through the project's `pcm` agent. Use invented examples when writing shared instructions; the example here is `/work/acme/docs/scribe` under managed root `/work/acme`.
 
 | field | type | default | rule |
 | --- | --- | --- | --- |

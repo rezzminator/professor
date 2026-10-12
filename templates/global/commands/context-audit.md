@@ -57,7 +57,7 @@ Back up each file before its edit, in the scratch directory.
 - Bundled or claude.ai-synced skill: `"skillOverrides": {"{name}": "off"}` in `settings.json`; set the bare and the `plugin:`-prefixed name until `/context` shows which matched.
 - A tool no loop needs: `permissions.deny`.
 - Hide per loop: tool-visibility-controller — `visibility:` frontmatter on an owned agent, skill or command; for the main chat, built-in tools, plugin items and MCP, the scope file `tool-visibility-controller.json`, kept in `~/.claude/` and linked into every account's `$CLAUDE_CONFIG_DIR`.
-- Trim a description: a guarded file → `/pcm`; a description compiled from source code → `flights-foreman`; any other file → edit in place.
+- Trim a description: a `.claude/**`, `CLAUDE.md` or `templates/**` file → the `pcm` agent; a description compiled from source code → `flights-foreman`; any other file → edit in place.
 - An integration's system-prompt section: the integration's own toggle.
 - A plugin to install: `pfm install --yes` skips plugins while any chat is live — the user runs it from a plain terminal with every chat closed.
 

@@ -418,7 +418,7 @@ if logged "volume rm $BUSYK" && ! grep -qxF "$BUSYROW" "$PFM_FENCE_STAMP_DIR/che
   ok "checkouts: an unmounted recorded sim volume is retried and its completed row dropped"
 else bad "checkouts sim retry" "$(cat "$T/err")"; fi
 
-# 18 — checkouts: a gone checkout loses only stale timing/build/lanes/guard
+# 18 — checkouts: a gone checkout loses only stale timing/build/lanes
 #      directories; young purpose directories, other content and unrecorded
 #      roots stay. An empty root can be removed and its row retired.
 THIRD="$T/hk3-$$"; R3="/tmp/hk3-$$"; STRAY="/tmp/hkstray-$$"
@@ -430,17 +430,17 @@ fresh; touch "$STAMP"; mkdir -p "$R3/timing/run.x" "$STRAY/timing" "$PFM_FENCE_P
 cp "$PFM_FENCE_STAMP_DIR/checkouts" "$T/scratch-ledger"
 git -C "$FX" worktree remove --force "$THIRD"
 printf 'another owner\n' >"$R3/keep"
-for purpose in build lanes guard; do mkdir -p "$R3/$purpose"; : >"$R3/$purpose/f"; done
-find "$R3/build" "$R3/lanes" "$R3/guard" "$STRAY" -exec touch -d '2 days ago' {} +
+for purpose in build lanes; do mkdir -p "$R3/$purpose"; : >"$R3/$purpose/f"; done
+find "$R3/build" "$R3/lanes" "$STRAY" -exec touch -d '2 days ago' {} +
 fresh; touch "$STAMP"; cp "$T/scratch-ledger" "$PFM_FENCE_STAMP_DIR/checkouts"; hk
 if [ -d "$R3/timing/run.x" ] && [ "$(cat "$R3/keep" 2>/dev/null)" = 'another owner' ] &&
   [ -d "$STRAY/timing" ] && [ -d "$PFM_FENCE_PROJECT_TMP/review" ] && nowarn; then
   ok "checkouts: gone checkout keeps young timing and non-purpose content; an unrecorded root stays"
 else bad "checkouts scratch preservation" "$(cat "$T/err")"; fi
-if [ ! -e "$R3/build" ] && [ ! -e "$R3/lanes" ] && [ ! -e "$R3/guard" ] &&
-  grep -q "removed $R3/build, freed" "$T/err" && grep -q "removed $R3/lanes, freed" "$T/err" && grep -q "removed $R3/guard, freed" "$T/err" &&
+if [ ! -e "$R3/build" ] && [ ! -e "$R3/lanes" ] &&
+  grep -q "removed $R3/build, freed" "$T/err" && grep -q "removed $R3/lanes, freed" "$T/err" &&
   grep -qxF "$ROW3" "$PFM_FENCE_STAMP_DIR/checkouts"; then
-  ok "checkouts: only stale build, lanes and guard are removed; a nonempty root retains its ledger row"
+  ok "checkouts: only stale build and lanes are removed; a nonempty root retains its ledger row"
 else bad "checkouts purpose cleanup" "$(cat "$T/err")"; fi
 mkdir -p "$R3/timing/run.x"; printf 'another owner\n' >"$R3/keep"
 find "$R3/timing" -exec touch -d '2 days ago' {} +

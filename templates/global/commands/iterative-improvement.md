@@ -76,4 +76,4 @@ A reaction to the delivered work is read by its content, never by its tone; an a
 - A round changes one thing, and a change is kept only on repeated runs.
 - A fact the work needs that sits on disk is read, never asked for. A fact only the user holds is never invented: build around it and name it in the report; ask only for one the work cannot stand without, in one question.
 - A spend cap the brief sets binds, and the report names what it cut.
-- Iterative improvement raises the target, never the permissions: every project rule, gate, Git writer and publication boundary holds, and a guarded file changes only through its owner.
+- Iterative improvement raises the target, never the permissions: every project rule, gate, Git writer and publication boundary holds, and a framework file changes only through its owner (the `pcm` agent).

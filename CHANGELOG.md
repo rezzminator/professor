@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.80.1](releases/v0.80.1.md) — gpt-gateway, the local gateway the GPT twins need, published at rezzminator/gpt-gateway (v0.1.0) and pinned as the `plugins/gpt-gateway` submodule
 - [v0.80.0](releases/v0.80.0.md) — tracer redesign (lead + sub-tracers + tracetree kit), unlanded-work protocol, statusline/install fixes, pfm chat watch --no-working, codex-sync ENGINE_SYNC_BIN check, cache-live-control 0.4.1 (agent auto-raise removed), gpt twin agent sources and pfm-managed hook assets (twin linking not yet wired), release-review hardening fixes
 - [v0.79.0](releases/v0.79.0.md) — workbenches (nested sub-projects), the fleet-deck picker, chat reminders, account-sync, flights that land themselves with one lander per flight, and research tiers renamed to rr / rr-pro / rr-pro-max
 - [v0.78.0](releases/v0.78.0.md) — one `professor` MCP server and four harvester tools named for their intent (no aliases), the flights family in place of the wave engine with a machine-global flights cast, a machine-wide git-guard that leaves git writes to `gitter`, OpenCode as a live fleet engine, the callmeter and activity log, and whole-thread harvesting across two dozen sites.

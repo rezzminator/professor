@@ -251,6 +251,20 @@ func codexTurnEnd(raw json.RawMessage, timestamp string) (Entry, bool) {
 // human interrupts a turn ("[Request interrupted by user]", "... for tool use]").
 const claudeInterruptMarker = "[Request interrupted by user"
 
+// handoffInstallMarker opens the synthetic user record the sub-agent-compact
+// plugin installs at a compaction ("[sub-agent-compact: handoff] Your context
+// was reset. ..."). Claude Code writes it as a plain user record, with neither
+// isMeta nor isCompactSummary, so the text is the only mark it carries.
+const handoffInstallMarker = "[sub-agent-compact: handoff]"
+
+// IsHandoffInstall reports whether the entry is that install: the chat's own
+// stored past handed back to it, not a message anyone sent to the chat. It is
+// kept in the record (a reader sees the reset happen), and a consumer that
+// counts senders skips it.
+func (entry Entry) IsHandoffInstall() bool {
+	return entry.Role == RoleUser && strings.HasPrefix(entry.Text, handoffInstallMarker)
+}
+
 // interruptedTurn is the entry for a turn its human aborted (Codex's
 // turn_aborted, Claude's interrupt marker). The abort stands in the assistant's
 // place exactly as codexTurnEnd's error does: the turn ended and the chat waits

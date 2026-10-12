@@ -3,6 +3,7 @@
   "agents": {
     "passthroughKeys": [
       "autoCompact",
+      "effortControl",
       "visibility"
     ]
   },
@@ -10,7 +11,11 @@
     "legacyCodexAgentsDir": ".local/state/pfm/generated/codex-agents",
     "retiredAgents": [
       "frr",
-      "rr-super"
+      "gpt-executor",
+      "gpt-foreman",
+      "gpt-lander",
+      "rr-super",
+      "terra"
     ],
     "retiredFiles": [
       ".codex/agents/explorer.toml"

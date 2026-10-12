@@ -1,4 +1,4 @@
-"""Stop hook of the GPT role twins: a sub-tracer stores its .hops, a gpt-foreman returns a well-formed first line.
+"""Stop hook of the GPT role twins: a sub-tracer stores its .hops, a gpt-flights-foreman returns a well-formed first line.
 
 Claude Code runs it from a twin's frontmatter `Stop` hook, converted to `SubagentStop` for that agent only, as
 `gpt-agent-stop.py {role}`. Each role reads the agent's own transcript and, while its rule is unmet, refuses the

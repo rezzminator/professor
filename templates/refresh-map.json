@@ -40,16 +40,16 @@
     "global/agents/foreman-pro.md": {
       "curated": true
     },
-    "global/agents/gpt-executor.md": {
+    "global/agents/gpt-flights-mechanical-executor.md": {
       "curated": true
     },
     "global/agents/gpt-foreman-pro.md": {
       "curated": true
     },
-    "global/agents/gpt-foreman.md": {
+    "global/agents/gpt-flights-foreman.md": {
       "curated": true
     },
-    "global/agents/gpt-lander.md": {
+    "global/agents/gpt-flights-lander.md": {
       "curated": true
     },
     "global/agents/gpt-reviewer-pro.md": {
@@ -71,9 +71,6 @@
       "curated": true
     },
     "global/agents/sol.md": {
-      "curated": true
-    },
-    "global/agents/terra.md": {
       "curated": true
     },
     "global/agents/agent-optimizer.md": {

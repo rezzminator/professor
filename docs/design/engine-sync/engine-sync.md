@@ -15,6 +15,7 @@ engine-sync carries a project's Claude Code configuration to Codex and OpenCode.
 - [The binary](#the-binary)
 - [The Claude plugin](#the-claude-plugin)
 - [Machine-level writes](#machine-level-writes)
+- [Agent sources](#agent-sources)
 - [pfm after the cut](#pfm-after-the-cut)
 - [Doors](#doors)
 - [Phases](#phases)
@@ -94,7 +95,7 @@ The repository's `CLAUDE.md` follows `plugins/callmeter/CLAUDE.md`: its gates (`
 | `engine-sync build [repo]` | compiles the Codex and the OpenCode mirror | `pfm codex build` + `pfm opencode build` |
 | `engine-sync check [repo]` | reports drift, writes nothing, exits 1 on any finding | `pfm codex check` + `pfm opencode check` |
 | `engine-sync doctor [repo]` | `check` plus OpenCode surface validation, targets and owned-file state | `pfm opencode doctor` |
-| `engine-sync global [--codex-home H]…` | role TOMLs, global prompts, skills and skill links into each Codex home and OpenCode's global dir | `pfm codex agents` and the installer's Codex steps |
+| `engine-sync global [--codex-home H]…` | role TOMLs, global prompts, skills and skill links into each Codex home, and commands and agents into OpenCode's global dir | `pfm codex agents` and the installer's Codex steps |
 | `engine-sync hook claude {mark\|stop\|start}` | the Claude plugin's hooks | `codex-sync.sh mark\|sync` |
 | `engine-sync hook {codex\|opencode}` | path-scoped rule injection (P3) | nothing; `rules.md` |
 
@@ -140,11 +141,21 @@ A repository cannot install an external-source plugin for its contributors from 
 
 ## Machine-level writes
 
-`{engine-sync config}/targets.json` lists the Codex homes: `{"codexHomes": ["{codex home}", …]}`. `pfm install` writes it from `config.CodexHomes()` (`pfm/internal/config/accounts.go:15`); without it the targets are `$CODEX_HOME`, else `~/.codex`. OpenCode's global dir is `~/.config/opencode`, as `pfm/internal/installer/mcp.go:445` hardcodes.
+`{engine-sync config}/targets.json` lists the Codex homes and the host's capabilities: `{"codexHomes": ["{codex home}", …], "capabilities": […]}`. Either key may be absent: `pfm install` writes it from `config.CodexHomes()` (`pfm/internal/config/accounts.go:15`); without the file, or without `codexHomes`, the targets are `$CODEX_HOME`, else `~/.codex`. OpenCode's global dir is `~/.config/opencode`, as `pfm/internal/installer/mcp.go:445` hardcodes.
 
-`engine-sync global` writes, per Codex home: role TOMLs under `agents/` as marker-owned regular files (Codex refuses a symlinked role), global prompts and skills, and skill links. In P3 it adds the two hook entries and the global rules block of `rules.md`. Into OpenCode's global dir it writes `command/` and, in P3, the rules shim and the `instructions` entry, each with an engine-sync receipt beside pfm's.
+`engine-sync global` writes, per Codex home: role TOMLs under `agents/` as marker-owned regular files (Codex refuses a symlinked role), global prompts and skills, and skill links. In P3 it adds the two hook entries and the global rules block of `rules.md`. Into OpenCode's global dir it writes `command/`, the machine-global agents unless their `engines.opencode` is `false`, and, in P3, the rules shim and the `instructions` entry, each with an engine-sync receipt beside pfm's.
 
 Codex hook trust (P3): pfm registers it for the fleet through `codexappendix.RegisterHookTrust` (`pfm/internal/codexappendix/trust.go:264`); a standalone user trusts once in `/hooks`. `codex exec` silently skips an untrusted hook, so `engine-sync doctor` reports `UNTRUSTED` per home.
+
+## Agent sources
+
+Each agent's settings live in its own frontmatter, per-engine settings included; engine-sync parses every source kind with one YAML node parser, and a frontmatter that does not parse is `FRONTMATTER-INVALID {file}:{line}`, never body. A header failing strict YAML is retried once with each single-line `key: value` that does not parse on its own read as a literal string, so the single-line values Claude Code accepts (`argument-hint: [pr-number] [priority]`, `description: Review: run the checks`) still parse.
+
+- **`engines:`** — `codex: {model, effort, sandbox}` and `opencode: {model, mode, permission}`; either engine may be `false`, so the agent is not emitted there. A `model` naming a `codex.modelMap` or `opencode.modelMap` key is mapped, any other value is emitted verbatim; `engines.codex.effort` precedes `effort`, and Codex receives `max` as `xhigh`. gitter's OpenCode Git allow is `engines.opencode.permission` in its three `gitter.md` sources. The flat `codex-*` and `opencode-*` keys are refused, naming the `engines.*` path that replaced them.
+- **`requires:`** — capability names; an agent is installed or emitted only when the host holds all of them. The capability set is `--capability NAME` on every rendering verb plus `capabilities` in `targets.json`; names mean nothing inside engine-sync. pfm passes `--capability gpt-agents` when `claude.gptAgents` is true ([GPT twins](../gpt-twins/gpt-twins.md)).
+- **Keys** — Claude Code's native sub-agent keys, engine-sync's own `engines`, `requires` and `role`, and the host's `agents.passthroughKeys` (Professor's machine policy lists `autoCompact` and `visibility`); any other key warns `UNKNOWN-KEY`.
+- **Derived agents** — `templates/global/agents/variants.json`, schema version 2: each variant names `from` (an original, another variant, or `general-purpose`), optional `profile` chains, frontmatter `set`, `add` and `unset`, hash-pinned `## Section` overrides, `rename`, and `prepend`/`append` text, with shared `fragments`. engine-sync stamps `role: {root original}`; a drifted pin fails `SECTION-DRIFT` until `engine-sync variants pin` re-pins it after review. The schema is `plugins/engine-sync/docs/interface.md`.
+- **Machine doctor** is closed-world per engine: each declared agent is `INSTALLED`, `MISSING`, `STALE`, `SHADOWED`, `SKIPPED` or `BROKEN` (its source or render fails, a failing row that leaves the healthy agents inspected), and an unowned file at an undeclared name in a managed registry is a `STRAY` warning. `engine-sync global --adopt` (`pfm install --adopt-agents`) moves a shadowing hand file under `{XDG state}/engine-sync/adopted/{UTC timestamp}/` and installs the declared agent.
 
 ## pfm after the cut
 
@@ -196,7 +207,7 @@ The dead compiler has been unwired since v0.58.0 (`releases/v0.58.0.md:14`) and 
 
 ### P2 configuration and policy as data
 
-`.claude/codex-build.json` and the never-created `.claude/opencode-build.json` merge into `.claude/engine-sync.json`. Professor policy hardcoded in Go becomes data in Professor's machine policy, `templates/global/engine-sync/config.json`, which `pfm install` links into the engine-sync config directory (a project's own `.claude/engine-sync.json` holds only its overrides): the OpenCode guarded-file and Git-write denies (`plugins/engine-sync/internal/target/opencode/config.go`). gitter's sandbox exemption (`plugins/engine-sync/internal/target/codex/agents.go`) becomes `codex-sandbox:` in gitter's own frontmatter, a key the compiler already reads in the same renderer. Global roles come from `{claude config dir}/agents/`, not from the Professor checkout. engine-sync's own marker replaces pfm's.
+`.claude/codex-build.json` and the never-created `.claude/opencode-build.json` merge into `.claude/engine-sync.json`. Professor policy hardcoded in Go becomes data in Professor's machine policy, `templates/global/engine-sync/config.json`, which `pfm install` links into the engine-sync config directory (a project's own `.claude/engine-sync.json` holds only its overrides): the OpenCode guarded-file and Git-write denies (`plugins/engine-sync/internal/target/opencode/config.go`). gitter's sandbox exemption (`plugins/engine-sync/internal/target/codex/agents.go`) becomes `engines.codex.sandbox` in gitter's own frontmatter, read by the one Codex role renderer both paths share. Global roles come from `{claude config dir}/agents/`, not from the Professor checkout. engine-sync's own marker replaces pfm's.
 
 ### P3 rules
 
@@ -213,7 +224,8 @@ On the user's plain ask: the GitHub repository and push, the first tagged releas
 | `engine-sync check` | `CONFLICT`, `ORPHAN`, `UNPARSEABLE`, `INVALID`, `STALE` for a mirror out of date |
 | `engine-sync check` | `NEWER-WRITER {version}` when an older binary meets a newer one's output |
 | `engine-sync doctor` | `TARGET-MISSING {codex home}` for a listed home that does not exist |
-| `engine-sync doctor` | owned role, prompt or skill `MISSING` or `STALE` in a target |
+| `engine-sync doctor` | owned role, prompt or skill `MISSING` or `STALE` in a target; a declared agent `MISSING`, `STALE`, `SHADOWED`, `SKIPPED` or `BROKEN`, and a `STRAY` warning |
+| `engine-sync check` | `FRONTMATTER-INVALID`, a retired flat key, `SECTION-DRIFT`, `SECTION-MISSING`, `RENAME-UNUSED`, `UNSET-MISSING` in an agent source or a rendered variant |
 | `engine-sync doctor` | `UNTRUSTED` Codex hook entry (P3) |
 | `pfm doctor` | engine-sync binary `MISSING`, or its doctor exit status, as a failing row |
 | Stop hook | `decision: block` naming the failed `build` or `check` stage |

@@ -31,30 +31,6 @@
     ".claude/scripts/prod-deploy-watch.sh"
   ],
   "templates": {
-    "global/agents/gpt-foreman.md": {
-      "curated": true
-    },
-    "global/agents/gpt-foreman-pro.md": {
-      "curated": true
-    },
-    "global/agents/gpt-lander.md": {
-      "curated": true
-    },
-    "global/agents/gpt-executor.md": {
-      "curated": true
-    },
-    "global/agents/sol.md": {
-      "curated": true
-    },
-    "global/agents/luna.md": {
-      "curated": true
-    },
-    "global/agents/terra.md": {
-      "curated": true
-    },
-    "global/agents/astra.md": {
-      "curated": true
-    },
     "global/agents/agent-optimizer.md": {
       "curated": true
     },

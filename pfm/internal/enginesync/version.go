@@ -11,8 +11,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
-// MinimumVersion is the first engine-sync that accepts Professor's machine policy and role sandbox inheritance.
-const MinimumVersion = "0.2.0-alpha"
+// MinimumVersion is the first engine-sync that takes --capability and --adopt
+// (and refuses the retired --gpt-agents), which pfm passes on every
+// agent-rendering call.
+const MinimumVersion = "0.3.0-alpha.1"
 
 var releaseVersion = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`)
 

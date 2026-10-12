@@ -44,6 +44,11 @@ type Runner struct {
 	Home string
 	// ChildEnv is the child's whole environment; nil inherits this process's.
 	ChildEnv []string
+	// Capabilities are the host's capability names (HostCapabilities): a
+	// Runner that sets them passes one --capability flag each on every call
+	// that renders or checks agents; one that leaves them unset (the workbench
+	// mirror) leaves engine-sync to the capabilities in targets.json.
+	Capabilities []string
 }
 
 // UnavailableError is the binary not executable at $ENGINE_SYNC_BIN when it is

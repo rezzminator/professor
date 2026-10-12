@@ -267,7 +267,9 @@ checks_templates_global_variants() {
   # never read or written). Its own broken state is a red line: a declaration
   # that cannot be read, one that declares nothing, a render error, or a
   # rendered count that differs from the declared count (a lookup that found
-  # nothing would otherwise read as clean).
+  # nothing would otherwise read as clean). The jail declares the gpt-agents
+  # capability, so the opt-in variants render too; the render without it is
+  # scripts/check-agent-roster.test.mjs's.
   if ! need_tool go templates || ! need_tool node templates; then
     fail_step "global agent variants NOT RENDERED — the toolchain is missing"
     return
@@ -277,7 +279,7 @@ checks_templates_global_variants() {
   elif [[ ! -f "$decl" ]]; then
     fail_step "global agent variants NOT RENDERED — $decl is missing, so nothing was looked up"
     return
-  elif ! names="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(d===null||typeof d!=="object"||Array.isArray(d))throw new Error("not an object of variants");console.log(Object.keys(d).sort().join("\n"))' "$decl" 2>&1)"; then
+  elif ! names="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(d===null||typeof d!=="object"||Array.isArray(d))throw new Error("not a version 2 declaration object");if(d.version!==2)throw new Error("version "+d.version+" is retired — rewrite as version 2");const v=d.variants;if(v===null||typeof v!=="object"||Array.isArray(v))throw new Error("no variants object");console.log(Object.keys(v).sort().join("\n"))' "$decl" 2>&1)"; then
     fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: $names"
     return
   fi
@@ -301,16 +303,21 @@ checks_templates_global_variants() {
   fi
   env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u ENGINE_SYNC_HOME -u ENGINE_SYNC_STATE -u CODEX_HOME \
     HOME="$home" "$es_bin" global --home "$home" --source-repo "$REPO_ROOT" \
-    --claude-config-dir "$home/.claude" --codex-home "$home/.codex" >"$out" 2>&1 || rc=$?
+    --claude-config-dir "$home/.claude" --codex-home "$home/.codex" --capability gpt-agents >"$out" 2>&1 || rc=$?
+  if (( rc == 0 )) && grep -Eq 'SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING' "$out"; then
+    rc=1 # a section override whose original moved on is a named drift, never a clean render
+  fi
   if (( rc != 0 )); then
     cat "$out"
     while IFS= read -r name; do
-      if grep -qF "variant \"$name\"" "$out"; then named="${named:+$named, }$name"; fi
+      if grep -qE "variant \"$name\"|(SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING) $name:" "$out"; then named="${named:+$named, }$name"; fi
     done <<<"$names"
     fail_step "global agent variants FAILED to render (engine-sync global exit $rc; variant named in the error: ${named:-none — read the output above})"
   else
     while IFS= read -r name; do
-      if [[ -f "$home/.codex/agents/$name.toml" && -L "$home/.claude/agents/$name.md" && -s "$home/.claude/agents/$name.md" ]]; then
+      # A variant whose rendered engines block turns Codex off (`codex: false`) has no Codex role by design.
+      if [[ -L "$home/.claude/agents/$name.md" && -s "$home/.claude/agents/$name.md" ]] &&
+        { [[ -f "$home/.codex/agents/$name.toml" ]] || grep -Eq '^  codex: false$' "$home/.claude/agents/$name.md"; }; then
         rendered=$((rendered + 1))
       else
         missing="${missing:+$missing, }$name"

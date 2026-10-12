@@ -26,20 +26,16 @@ Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → he
 
 ## How the variant is built
 
-`pfm install` and `pfm codex agents` render the variant from `rr.md`: `name:` and the declared frontmatter keys are overridden, and each `replace` entry swaps one piece of body text. The swaps, verbatim from `variants.json`:
+`pfm install` renders the variant from `rr.md` through engine-sync: its `set` overrides `description` and `effort`, and two `sections` entries replace `rr.md`'s § Budget and § Spawning. The overrides, from `variants.json`:
 
-| `rr.md` text | `rr-pro` text |
+| `rr.md` section | `rr-pro` text |
 | --- | --- |
-| `Spawn at most 4 diggers a round` | `Spawn at most 6 diggers a round` |
-| `so 4 diggers carry the entire frontier` | `so 6 diggers carry the entire frontier` |
-| `or at the end of round 3 — a safety ceiling` | `or at the end of round 5 — a safety ceiling` |
-| `on at most 8 source pages` | `on at most 12 source pages` |
-| `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
+| § Budget | `- Diggers: at most 6 a round.` · `- Rounds: at most 5 — a safety ceiling, never a target.` · `- Verification: at most 12 source pages.` |
+| § Spawning | the `repo-lane` fragment: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
 
-- Each swapped text must occur exactly once in `rr.md`'s body. `RenderVariant` (`plugins/engine-sync/internal/source/variant.go`) refuses anything else with `"replace" text {text} occurs {n} times in the body, want exactly 1`, so an edit to `rr.md` that rewords a swapped sentence fails the render instead of shipping a variant with `rr`'s caps.
-- `TestShippedGlobalAgentVariantsRender` renders the `testdata/global-variants` fixture in engine-sync and compiles each fixture variant to its Codex TOML. The fence's `templates.global-variants` step (`infra/fence/checks.sh`, `checks_templates_global_variants`) renders the actual shipped declaration and agent bodies through the built engine-sync binary; that gate catches a reworded swap source before an install does.
-- The swaps touch the body only; a swapped text found only in the frontmatter counts as absent.
-- An installed `pfm` older than the `replace` key reads `variants.json` as malformed: `pfm doctor` reports `global-agents … state=UNREADABLE`, and `pfm install` refuses. The fix is the host mirror build, never an edit to `variants.json`.
+- Each override carries the sha256 pin of the `rr.md` section it replaces. An edit to `rr.md`'s § Budget or § Spawning fails the render with `SECTION-DRIFT rr-pro: rr.md § {heading} changed since pinned …` until the override is reviewed and `engine-sync variants pin rr-pro` re-pins it; a renamed or deleted heading fails with `SECTION-MISSING`. The procedure's steps cite § Budget and § Spawning by name, so an override changes the caps or the lane without touching a step.
+- The fence's `templates.global-variants` step (`infra/fence/checks.sh`, `checks_templates_global_variants`) renders the shipped declaration and agent bodies through the built engine-sync binary, so a drifted pin fails before an install does.
+- An installed engine-sync older than `variants.json` schema version 2 cannot read the declaration, and `pfm install` refuses. The fix is the host mirror build, never an edit to `variants.json`.
 
 ## Cost
 
@@ -67,7 +63,7 @@ Three runs on one query (how faithfully fetch-and-answer tools quote a page) set
 | Surface | File |
 | --- | --- |
 | The declaration | `templates/global/agents/variants.json`, entry `rr-pro` |
-| The body it swaps into | `templates/global/agents/rr.md` |
+| The body it overrides | `templates/global/agents/rr.md`, § Budget and § Spawning |
 | The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is identical in the `rr-pro-max` entry |
 | The renderer and its tests | `plugins/engine-sync/internal/source/variant.go`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |

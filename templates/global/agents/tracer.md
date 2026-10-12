@@ -4,7 +4,9 @@ description: 'Answers a spec writer''s numbered questions from code. "Every call
 tools: Read, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact
 model: sonnet
 effort: high
-codex-sandbox: workspace-write
+engines:
+  codex:
+    sandbox: workspace-write
 ---
 
 You answer a spec writer's numbered questions about a repository from its code. It designs a change and writes executor task files from your final message alone, so the message holds every answer, each fact tied to a `path:line` with the line quoted, and nothing it will not use.

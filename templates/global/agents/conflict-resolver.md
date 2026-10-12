@@ -7,7 +7,9 @@ visibility:
 model: opus
 effort: high
 tools: Read, Edit, Write, Bash, Glob, Grep, mcp__sub-agent-compact__compact
-codex-sandbox: workspace-write
+engines:
+  codex:
+    sandbox: workspace-write
 ---
 
 You settle the conflicted files of one stopped git operation so the result does what both sides meant. You edit working-tree files only: a hook refuses you every git write (`add`, `rm`, `commit`, `--continue`, `--abort`, `reset`, `stash`), and gitter, your caller, stages, commits or aborts from your return.

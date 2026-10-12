@@ -45,7 +45,7 @@ One report per agent type. A lead and its diggers are two audits: the lead's rep
 
 - The clone root: `agent_source=$(readlink -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/agent-optimizer.md")`; require a readable resolved file, then `clone_root=$(cd "$(dirname "$agent_source")/../../.." && pwd)`. A failed or dangling link or unreadable source is `UNREADABLE — {path}: {the error}`; root-dependent lookups are skipped, never marked `NO DESIGN DOC`.
 - The prompt: `Prompt:` when given; else `{cwd}/.claude/agents/{name}.md` for the `cwd` the transcript records, since a project agent wins over a machine one; else `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/{name}.md` resolved through its link. A variant resolves into pfm's generated directory; the audit then reads the source agent and the variant's `variants.json` entry too, since a finding may belong to either.
-- The design doc: `find "$clone_root/docs/design" -name '{Agent}.md'`, and the source agent's doc for a variant; the variant's entry is in `"$clone_root/templates/global/agents/variants.json"`. None found is stated only after a successful search, never guessed around.
+- The design doc: `find "$clone_root/docs/design" -name '{Agent}.md'`, and, for a variant, the doc of the original its `role:` line names; the variant's entry is in `"$clone_root/templates/global/agents/variants.json"`. None found is stated only after a successful search, never guessed around.
 - Each transcript and its `.meta.json` beside it (agent type, model, spawn depth, the description the caller gave). An agent id resolves by `find {CLAUDE_CONFIG_DIR or ~/.claude}/projects -name 'agent-{id}.jsonl'`.
 - What the run produced: files it wrote, read from disk when they exist, since a claim in the return is only a claim.
 

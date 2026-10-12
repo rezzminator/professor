@@ -6,26 +6,30 @@ These machine-global agents are optional entry points. Invoke them by registered
 
 Installation and mirror compilation are local file operations: they do not contact a model provider or require a gateway. A host without one can install normally and use the ordinary Claude agents; invoking a GPT twin without a matching route fails at the provider boundary.
 
-## Agent sources
+## Declarations
 
-| Agent | Model | Effort | Role manual |
-| --- | --- | --- | --- |
-| `gpt-foreman` | `gpt-6.1-sol[1m]` | `high` | `flights-foreman.md` |
-| `gpt-foreman-pro` | `gpt-6.1-sol[1m]` | `xhigh` | `flights-foreman.md` |
-| `gpt-lander` | `gpt-6.1-sol[1m]` | `high` | `flights-lander.md` |
-| `gpt-executor` | `gpt-6-luna[1m]` | `high` | `flights-mechanical-executor.md` |
-| `sol` | `gpt-6.1-sol[1m]` | `high` | General-purpose body |
-| `luna` | `gpt-6-luna[1m]` | `medium` | General-purpose body |
-| `terra` | `gpt-5.6-terra[1m]` | `high` | General-purpose body |
-| `astra` | `gpt-6-astra[1m]` | `high` | General-purpose body |
+| Agent | From | Model | Effort | Body |
+| --- | --- | --- | --- | --- |
+| `gpt-foreman` | `flights-foreman` | `gpt-6.1-sol[1m]` | `high` | the manual, the return law prepended, its three spawned roles renamed |
+| `gpt-foreman-pro` | `gpt-foreman` | `gpt-6.1-sol[1m]` | `xhigh` | as `gpt-foreman` |
+| `gpt-lander` | `flights-lander` | `gpt-6.1-sol[1m]` | `high` | the manual, the return law prepended |
+| `gpt-executor` | `flights-mechanical-executor` | `gpt-6-luna[1m]` | `high` | the manual, the return law prepended |
+| `sol` | `general-purpose` | `gpt-6.1-sol[1m]` | `high` | the general-worker fragment |
+| `luna` | `general-purpose` | `gpt-6-luna[1m]` | `medium` | the general-worker fragment |
+| `terra` | `general-purpose` | `gpt-5.6-terra[1m]` | `high` | the general-worker fragment |
+| `astra` | `general-purpose` | `gpt-6-astra[1m]` | `high` | the general-worker fragment |
 
-The originals live under `templates/global/agents/`; `pfm install` links them into every configured Claude account's `agents/` directory. `templates/refresh-map.json` marks them curated, so refresh never re-derives them from a host's hand copies. Their `autoCompact` block pins `forceAt: 230k`, `nudgeFrom: 190k`, `nudgeEvery: 20k`.
+The twins are declarations in `templates/global/agents/variants.json` (schema version 2), not source files; engine-sync renders them into its generated directory and `pfm install` links them like any variant. Profile `gpt` gives every twin `requires: [gpt-agents]`, `engines: {codex: false, opencode: false}` and the `autoCompact` block `forceAt: 230k`, `nudgeFrom: 190k`, `nudgeEvery: 20k`. Profile `gpt-flights` adds the `return-law` fragment ahead of the manual; profile `gpt-worker` appends the `general-worker` fragment to the empty `general-purpose` body.
 
-They are source files, not `variants.json` declarations: engine-sync variants accept single-line scalar overrides of existing keys, replacing any nested continuation block. That cannot replace the foreman's hooks or the original manuals' compaction block faithfully. The thin role bodies resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/{manual}`, read that installed manual and redirect child flight roles to the GPT twins. `gpt-foreman-pro` keeps ordinary `gpt-foreman` children; its xhigh effort belongs to the entry agent only. The bodies retain the explicit artifact-writing and return-only contract.
+A flight twin carries its original's whole manual, so an edit to the original reaches the twin at the next `pfm install`. `gpt-foreman` renames `flights-foreman`, `flights-mechanical-executor` and `flights-lander` to `gpt-foreman`, `gpt-executor` and `gpt-lander` where the manual spawns them; a file path such as `flights-foreman.md` is never renamed, so `gpt-lander` still reads the foreman's § Change inventory. `gpt-foreman-pro` derives from `gpt-foreman`: its xhigh effort belongs to the entry agent only, and its children stay `gpt-foreman`. `gpt-lander` and `gpt-executor` replace their original's `visibility` with `main`, `gpt-foreman` and `gpt-foreman-pro`, the agents that spawn them; `gpt-lander` adds `Skill` to its tools. engine-sync stamps `role: {original}` on each flight twin; a `general-purpose` worker carries none.
+
+## Opt-in
+
+The twins install only on a host that opts in with `"gptAgents": true` under `claude` in the machine config `pfm.config.json`: pfm then writes `gpt-agents` into the `capabilities` list of engine-sync's `targets.json`, which every engine-sync call reads, passes `--capability gpt-agents` on its own install and doctor calls, and stages the hook assets below. Without it, check reports each twin `SKIPPED {twin} — requires gpt-agents`, machine doctor prints its `agent SKIPPED all {twin} {path} (requires gpt-agents unmet)` row, and an install retires the twins' links and generated files an earlier opted-in install owned, never a file it does not own.
 
 ## Owned hook assets
 
-`pfm/internal/installer/assets/gpt-return-watch.py` and `gpt-agent-stop.py` are the canonical scripts. Installation stages embedded managed copies and creates exact-source symlinks under `hooks/` in the default Claude config directory, an explicit install store and every configured account directory. Subsequent installs repair owned content and missing links; regular operator files and foreign links are visibly refused, never overwritten. `gpt-hook-ownership.json` records successful physical target paths so uninstall retires owned links even after an account is removed or a directory alias moves. Each retirement rechecks the exact source link; the receipt grants no right to delete an operator replacement. Malformed receipts are visible failures. Doctor names missing, unreadable or changed scripts. They are agent-frontmatter hooks, not machine-wide `settings.json` hooks.
+`pfm/internal/installer/assets/gpt-return-watch.py` and `gpt-agent-stop.py` are the canonical scripts. Installation stages embedded managed copies and creates exact-source symlinks under `hooks/` in the default Claude config directory, an explicit install store and every configured account directory. Subsequent installs repair owned content and missing links; regular operator files and foreign links are visibly refused, never overwritten. `gpt-hook-ownership.json` records successful physical target paths so uninstall retires owned links even after an account is removed or a directory alias moves. Each retirement rechecks the exact source link; the receipt grants no right to delete an operator replacement. Malformed receipts are visible failures. Doctor names missing, unreadable or changed scripts. They are agent-frontmatter hooks, not machine-wide `settings.json` hooks: `gpt-foreman` adds them with `add.hooks` beside `flights-foreman`'s own `pfm internal orchestrator-wait`, and `gpt-foreman-pro` inherits all three.
 
 The foreman and pro invoke them through `python3 -I` and `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/`, so account-local paths and spaces resolve without a machine-specific interpreter path. `python3` is the existing host prerequisite.
 
@@ -36,12 +40,12 @@ For both hooks, `{fleet home}` is `PFM_HOME` when set, otherwise the user's home
 
 ## Engine mirrors
 
-Each source pins `codex-model` to the same GPT ID without `[1m]` and `codex-effort` to its declared effort. Codex honors those pins before `modelMap`, so an adopter does not need entries for the full Claude-side IDs. The machine-global path links Claude sources and writes Codex roles; it does not emit global OpenCode agents. Repository Codex and OpenCode mirrors still compile independently. When a source is compiled in project scope, OpenCode follows its existing `opencode-model`/`modelMap` policy: an unmapped full GPT ID produces a named warning and omits the model, inheriting the session model. An adopter wanting that project-scoped backend configures its provider and maps the full source ID to that provider's model. The adapter does not install provider credentials or translate Claude hooks into another engine's hooks.
+The twins are Claude-only: profile `gpt` sets `engines.codex` and `engines.opencode` to `false`, so engine-sync writes no Codex role and no OpenCode agent for them in any scope. A Codex or OpenCode session runs the ordinary roles on its own models. The adapter installs no provider credentials and translates no Claude hook into another engine's hook.
 
 ## Hand-copy conflicts
 
-A pre-existing regular agent file is not pfm-owned: installation reports the conflict instead of replacing it. Back up the hand-written twins from each configured account's `agents/` directory before `pfm install --yes`, along with any hand-deployed `hooks/gpt-return-watch.py` and `hooks/gpt-agent-stop.py` entries that conflict with the owned links. Once linked, changes belong in the clone's source files; recreating hand copies defeats install ownership. The hooks are owned installer assets, not hand-deployed prerequisites.
+A pre-existing regular file at a twin's name in an account's `agents/` directory is not pfm-owned: installation reports the conflict instead of replacing it, and doctor reports it `SHADOWED`. `pfm install --adopt-agents` moves each such file under `{XDG state}/engine-sync/adopted/{UTC timestamp}/` and links the rendered twin in its place. Hand-deployed `hooks/gpt-return-watch.py` and `hooks/gpt-agent-stop.py` entries that conflict with the owned links are backed up by hand before `pfm install --yes`. A change to a twin belongs in its `variants.json` declaration or its original; recreating a hand copy defeats install ownership.
 
 ## Verification
 
-`scripts/check-agent-roster.test.mjs` includes cases checking the eight GPT source frontmatters, portable manuals, child redirects, hook commands, model/effort pins, compaction, curated registrations and 15 KB cap. Its existing `templates.mirrors` gate registration runs the cases; no standalone unregistered test file is required. The installer and install-health tests check account fan-out, repair and named failures; hook fixtures check runtime behavior without a provider account. Run the affected scripts through the fenced testing runners and both full gates, `iso gate pfm` and `iso gate templates`, before landing.
+`scripts/check-agent-roster.test.mjs` renders the shipped `variants.json` through the built engine-sync, with and without `--capability gpt-agents`, and pins on the rendered twins what it pinned on the old source files: no machine-absolute path, the renames applied, the hook commands, model and effort, the compaction block and the size cap — 15 KiB for a worker twin, 2 KiB over the larger of 15 KiB and its original for a role twin. It also proves each twin linked only with the capability, `SKIPPED` without it, and written as no Codex role and no OpenCode agent. Its `templates.mirrors` gate registration runs the cases. The installer and install-health tests check account fan-out, repair and named failures; hook fixtures check runtime behavior without a provider account. Run the affected scripts through the fenced testing runners and both full gates, `iso gate pfm` and `iso gate templates`, before landing.

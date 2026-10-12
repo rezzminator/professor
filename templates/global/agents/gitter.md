@@ -4,7 +4,13 @@ description: 'The only agent that writes git on this machine — delegate every 
 model: sonnet
 effort: medium
 tools: Read, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact
-codex-sandbox: inherit
+engines:
+  codex:
+    sandbox: inherit
+  opencode:
+    permission:
+      bash:
+        "git *": allow
 visibility:
   agents:
     include: [conflict-resolver]

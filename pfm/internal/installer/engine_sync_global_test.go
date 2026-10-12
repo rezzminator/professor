@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -90,9 +91,19 @@ func TestWireEngineSyncGlobalArgv(t *testing.T) {
 		name       string
 		mode       Mode
 		codexHomes []string
+		gptAgents  bool
+		adopt      bool
 		want       []string
 		absent     []string
 	}{
+		{
+			name: "gpt agents on and adoption ordered", mode: ModeApply, gptAgents: true, adopt: true,
+			want: []string{"--adopt", "--capability gpt-agents"},
+		},
+		{
+			name: "neither ordered", mode: ModeApply,
+			absent: []string{"--adopt", "--capability"},
+		},
 		{
 			name: "a dry run plans over the staged future commands",
 			mode: ModeDryRun,
@@ -111,6 +122,7 @@ func TestWireEngineSyncGlobalArgv(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			installer, output, _ := engineSyncGlobalEngine(t, testCase.mode, testCase.codexHomes)
+			installer.options.GptAgents, installer.options.AdoptAgents = testCase.gptAgents, testCase.adopt
 			if testCase.name == "an uninstall preview" {
 				installer.apply = false
 			}
@@ -254,14 +266,18 @@ func TestBinaryOnlyInstallWithoutEngineSync(t *testing.T) {
 // is left alone when unchanged and retired by uninstall.
 func TestWireEngineSyncTargetsWritesThenRetires(t *testing.T) {
 	for _, testCase := range []struct {
-		name   string
-		roster []string
+		name         string
+		roster       []string
+		gptAgents    bool
+		capabilities string
 	}{
-		{name: "one Codex home"},
-		{name: "the empty roster", roster: []string{}},
+		{name: "one Codex home", capabilities: "[]"},
+		{name: "the empty roster", roster: []string{}, capabilities: "[]"},
+		{name: "gpt agents on", gptAgents: true, capabilities: "[\n    \"gpt-agents\"\n  ]"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			installer, output, home := engineSyncGlobalEngine(t, ModeApply, testCase.roster)
+			installer.options.GptAgents = testCase.gptAgents
 			installer.options.Env = &paths.MapEnv{
 				Values: map[string]string{"XDG_CONFIG_HOME": filepath.Join(home, "xdg")},
 			}
@@ -275,7 +291,8 @@ func TestWireEngineSyncTargetsWritesThenRetires(t *testing.T) {
 			}
 			want := "{\n  \"codexHomes\": " + homes + ",\n" +
 				"  \"claudeConfigDirs\": [\n    \"" + filepath.Join(home, ".claude") + "\"\n  ],\n" +
-				"  \"sourceRepo\": \"" + filepath.Join(home, "blueprint") + "\"\n}\n"
+				"  \"sourceRepo\": \"" + filepath.Join(home, "blueprint") + "\",\n" +
+				"  \"capabilities\": " + testCase.capabilities + "\n}\n"
 			if got := readFixture(t, path); got != want {
 				t.Fatalf("targets.json:\n%s\nwant:\n%s", got, want)
 			}
@@ -329,6 +346,42 @@ func TestInstallAndUninstallRunEngineSyncGlobal(t *testing.T) {
 	}
 	if !planned || !applied || !uninstalled {
 		t.Fatalf("planned=%t applied=%t uninstalled=%t, want all three", planned, applied, uninstalled)
+	}
+}
+
+// An install writes targets.json before it runs engine-sync global, which
+// unions the file's capabilities with its flags: an opt-out never leaves the
+// previous capability in force for that run, nor for its preview, which runs
+// against the scratch targets the apply will write.
+func TestInstallWritesTargetsBeforeEngineSyncGlobal(t *testing.T) {
+	for name, mode := range map[string]Mode{"apply": ModeApply, "preview": ModeDryRun} {
+		t.Run(name, func(t *testing.T) { installRunsAgainstTheCapabilitiesItWrites(t, mode) })
+	}
+}
+
+func installRunsAgainstTheCapabilitiesItWrites(t *testing.T, mode Mode) {
+	home := t.TempDir()
+	targets := enginesync.TargetsPath(paths.OSEnv{}, home)
+	if err := os.MkdirAll(filepath.Dir(targets), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(targets, []byte(`{"codexHomes":[],"capabilities":["gpt-agents"]}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	record := testjail.FakeEngineSync(t, everyEventReply, 0)
+	var output bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t),
+		Mode:          mode, Home: home, Stdout: &output, Runner: &fakeRunner{},
+	}); err != nil {
+		t.Fatalf("install: %v\n%s", err, output.String())
+	}
+	seen, err := os.ReadFile(record + ".targets")
+	if err != nil {
+		t.Fatalf("engine-sync global saw no targets.json: %v", err)
+	}
+	if strings.Contains(string(seen), "gpt-agents") {
+		t.Fatalf("engine-sync global ran against the stale capability list:\n%s", seen)
 	}
 }
 
@@ -653,9 +706,13 @@ func TestWireEngineSyncGlobalMachinePolicy(t *testing.T) {
 				t.Fatalf("machine policy = %q (%v), want %q", got, err, policy)
 			}
 			if name == "plan targets" {
+				want, err := installer.engineSyncTargetsFile(installer.options.SourceRepo)
+				if err != nil {
+					t.Fatal(err)
+				}
 				got, err := os.ReadFile(record + ".targets")
-				if err != nil || string(got) != `{"codexHomes":["/recorded"]}` {
-					t.Fatalf("preview targets = %q (%v), want the recorded targets", got, err)
+				if err != nil || !bytes.Equal(got, want) {
+					t.Fatalf("preview targets = %q (%v), want the targets the apply writes %q", got, err, want)
 				}
 			}
 			switch {
@@ -688,7 +745,8 @@ func TestWireEngineSyncGlobalMachinePolicy(t *testing.T) {
 }
 
 func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
-	for _, version := range []string{"0.1.0", "0.2.0-alpha"} {
+	// 0.2.0 is the last release, and 0.3.0-alpha the last development build, without --capability and --adopt.
+	for _, version := range []string{"0.1.0", "0.2.0", "0.3.0-alpha", "0.3.0-alpha.1"} {
 		t.Run(version, func(t *testing.T) {
 			installer, _, _ := engineSyncGlobalEngine(t, ModeApply, nil)
 			binary := filepath.Join(t.TempDir(), "engine-sync")
@@ -698,11 +756,11 @@ func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
 			}
 			t.Setenv(enginesync.EnvBin, binary)
 			err := installer.wireEngineSyncGlobal(nil)
-			if version == "0.1.0" {
+			if version != "0.3.0-alpha.1" {
 				if err == nil ||
 					!strings.Contains(
 						err.Error(),
-						"engine-sync 0.1.0 is older than required 0.2.0-alpha — update the plugin "+
+						"engine-sync "+version+" is older than required 0.3.0-alpha.1 — update the plugin "+
 							"(`claude plugin update engine-sync@professor`), then start a new Claude session",
 					) || strings.Contains(err.Error(), "make host-install") {
 					t.Fatalf("old binary = %v", err)
@@ -781,11 +839,15 @@ func TestEngineSyncPolicyMigratesMissingAndMovedClones(t *testing.T) {
 
 func TestMissingEngineSyncPolicyPreviewPreservesOperatorPolicy(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
-	for _, kind := range []string{"regular", "foreign link"} {
+	for _, kind := range []string{"regular", "foreign link", "fifo"} {
 		t.Run(kind, func(t *testing.T) {
 			installer, _, home := engineSyncGlobalEngine(t, ModeDryRun, nil)
 			configHome := filepath.Join(home, ".config")
 			target := filepath.Join(configHome, "engine-sync", "config.json")
+			if kind == "fifo" {
+				previewRefusesANonRegularPolicy(t, installer, target)
+				return
+			}
 			if kind == "regular" {
 				writeFixture(t, target, `{"version":1,"operator":true}`)
 			} else {
@@ -813,10 +875,51 @@ func TestMissingEngineSyncPolicyPreviewPreservesOperatorPolicy(t *testing.T) {
 					found = strings.TrimPrefix(entry, "XDG_CONFIG_HOME=")
 				}
 			}
-			if found != configHome {
-				t.Fatalf("preview hides operator policy: XDG_CONFIG_HOME=%s, want %s", found, configHome)
+			if got, err := os.ReadFile(filepath.Join(found, "engine-sync", "config.json")); err != nil ||
+				string(got) != `{"version":1,"operator":true}` {
+				t.Fatalf("preview hides operator policy: %s/engine-sync/config.json = %q (%v)", found, got, err)
+			}
+			want, err := installer.engineSyncTargetsFile(installer.options.SourceRepo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(filepath.Join(found, "engine-sync", "targets.json")); err != nil ||
+				!bytes.Equal(got, want) {
+				t.Fatalf("preview targets = %q (%v), want the targets the apply writes", got, err)
 			}
 		})
+	}
+}
+
+// previewRefusesANonRegularPolicy puts a FIFO at the operator's policy path:
+// the preview names it instead of reading it (a reader would block until a
+// writer came, here the fed goroutine below).
+func previewRefusesANonRegularPolicy(t *testing.T, installer *engine, target string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(target, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fed := make(chan struct{})
+	go func() {
+		defer close(fed)
+		if writer, err := os.OpenFile(target, os.O_WRONLY, 0); err == nil {
+			_, _ = writer.WriteString(`{"version":1,"operator":true}`)
+			_ = writer.Close()
+		}
+	}()
+	_, cleanup, err := installer.engineSyncConfig(installer.options.SourceRepo)
+	if reader, openErr := os.OpenFile(target, os.O_RDONLY|syscall.O_NONBLOCK, 0); openErr == nil {
+		<-fed
+		_ = reader.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), target+": not a regular file") {
+		if err == nil {
+			_ = cleanup()
+		}
+		t.Fatalf("preview over a FIFO policy = %v, want %s named not a regular file", err, target)
 	}
 }
 

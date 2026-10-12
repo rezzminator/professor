@@ -240,9 +240,10 @@ func ReportGlobalRegistries(
 	home string,
 	claudeAbsent bool,
 	env paths.Env,
+	capabilities []string,
 	codexHomes ...string,
 ) (warnings, failures int) {
-	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, codexHomes...)
+	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, capabilities, codexHomes...)
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures

@@ -129,3 +129,37 @@ func TestForwardAgentsSourceUsesOnlyAnExistingClone(t *testing.T) {
 		})
 	}
 }
+
+// claude.gptAgents reaches the forwarder as --capability gpt-agents, beside a
+// typed --source-repo; which verbs take it is TestCapabilityArgs' decision.
+func TestForwardersPassTheGptAgentsCapability(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"codex build", []string{"codex", "build", "."}, "codex build --capability gpt-agents ."},
+		{
+			"codex agents",
+			[]string{"codex", "agents", "--source-repo=/custom"},
+			"codex agents --capability gpt-agents --source-repo=/custom",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			jailTest(t)
+			if err := os.WriteFile(
+				os.Getenv("PFM_CONFIG"), []byte(`{"version":2,"claude":{"gptAgents":true}}`), 0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			record := testjail.FakeEngineSync(t, "", 0)
+			var stdout, stderr bytes.Buffer
+			if code := run(testCase.args, &stdout, &stderr); code != 0 {
+				t.Fatalf("pfm %q exit = %d; stderr=%q", testCase.args, code, stderr.String())
+			}
+			if calls := testjail.EngineSyncCalls(t, record); !slices.Equal(calls, []string{testCase.want}) {
+				t.Fatalf("engine-sync calls = %q, want %q", calls, []string{testCase.want})
+			}
+		})
+	}
+}

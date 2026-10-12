@@ -34,7 +34,12 @@ const engineSyncMissingRepair = "install the engine-sync plugin: run `claude plu
 // engineSync is the engine-sync runner this install drives: its environment
 // and home.
 func (installer *engine) engineSync() enginesync.Runner {
-	return enginesync.Runner{Env: installer.env(), Home: installer.options.Home, Exec: installer.engineSyncExec}
+	return enginesync.Runner{
+		Env:          installer.env(),
+		Home:         installer.options.Home,
+		Exec:         installer.engineSyncExec,
+		Capabilities: enginesync.HostCapabilities(installer.options.GptAgents),
+	}
 }
 
 // engineSyncGlobalDeadline is the bound of one `engine-sync global` run.
@@ -113,6 +118,7 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 		CodexHomes:       installer.codexHomes(),
 		Plan:             !installer.apply,
 		Uninstall:        installer.options.Mode == ModeUninstall,
+		Adopt:            installer.options.AdoptAgents,
 	}
 	if options.Plan && !options.Uninstall && len(options.CodexHomes) != 0 &&
 		filepath.Clean(
@@ -222,6 +228,9 @@ type engineSyncTargets struct {
 	CodexHomes       []string `json:"codexHomes"`
 	ClaudeConfigDirs []string `json:"claudeConfigDirs"`
 	SourceRepo       string   `json:"sourceRepo"`
+	// Capabilities are the host's capability names: engine-sync reads them on
+	// every run, including the `hook claude start` refresh pfm does not flag.
+	Capabilities []string `json:"capabilities"`
 }
 
 // wireEngineSyncTargets writes targets.json on install and retires it on
@@ -239,16 +248,10 @@ func (installer *engine) wireEngineSyncTargets() error {
 	if err != nil {
 		return fmt.Errorf("resolve the engine-sync targets source repository: %w", err)
 	}
-	targets := engineSyncTargets{
-		CodexHomes:       append([]string{}, installer.codexHomes()...),
-		ClaudeConfigDirs: []string{installer.options.ConfigDir},
-		SourceRepo:       sourceRepo,
-	}
-	encoded, err := json.MarshalIndent(targets, "", "  ")
+	encoded, err := installer.engineSyncTargetsFile(sourceRepo)
 	if err != nil {
-		return fmt.Errorf("encode engine-sync targets: %w", err)
+		return err
 	}
-	encoded = append(encoded, '\n')
 	if sameFile(path, encoded, 0o600) {
 		installer.ok(path)
 		return nil
@@ -256,6 +259,33 @@ func (installer *engine) wireEngineSyncTargets() error {
 	return installer.change("write "+path, func() error {
 		return atomicfile.Write(path, encoded, 0o600)
 	})
+}
+
+// engineSyncTargetsFile is the targets.json an install writes: its roster,
+// source repository and host capabilities.
+func (installer *engine) engineSyncTargetsFile(sourceRepo string) ([]byte, error) {
+	targets := engineSyncTargets{
+		CodexHomes:       append([]string{}, installer.codexHomes()...),
+		ClaudeConfigDirs: []string{installer.options.ConfigDir},
+		SourceRepo:       sourceRepo,
+		Capabilities:     append([]string{}, enginesync.HostCapabilities(installer.options.GptAgents)...),
+	}
+	encoded, err := json.MarshalIndent(targets, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode engine-sync targets: %w", err)
+	}
+	return append(encoded, '\n'), nil
+}
+
+// previewTargets writes the targets.json the install will write into a
+// preview's scratch config home: engine-sync unions their capabilities with
+// its flags, so the recorded list would keep an opted-out capability in force.
+func (installer *engine) previewTargets(configHome, sourceRepo string) error {
+	planned, err := installer.engineSyncTargetsFile(sourceRepo)
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(filepath.Join(configHome, "engine-sync", "targets.json"), planned, 0o600)
 }
 
 // engineSyncConfig wires Professor's machine policy through the public file
@@ -284,7 +314,8 @@ func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner,
 		if err := installer.retireEngineSyncConfig(sourceRepo); err != nil {
 			return runner, cleanup, err
 		}
-		if !installer.apply && owned {
+		install := installer.options.Mode != ModeUninstall
+		if !installer.apply && (owned || install) {
 			temporary, err := os.MkdirTemp("", "pfm-engine-sync-plan-")
 			if err != nil {
 				return runner, cleanup, fmt.Errorf("create engine-sync missing-policy preview: %w", err)
@@ -294,6 +325,26 @@ func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner,
 					return fmt.Errorf("remove engine-sync policy plan root %s: %w", temporary, err)
 				}
 				return nil
+			}
+			// An operator's policy stays the one the preview reads.
+			if !owned {
+				policy, err := readOperatorPolicy(target)
+				if err == nil {
+					err = atomicfile.Write(filepath.Join(temporary, "engine-sync", "config.json"), policy, 0o600)
+					if err != nil {
+						return runner, func() error { return nil }, errors.Join(err, cleanup())
+					}
+				} else if !errors.Is(err, fs.ErrNotExist) {
+					return runner, func() error { return nil }, errors.Join(
+						fmt.Errorf("read engine-sync machine policy: %w", err),
+						cleanup(),
+					)
+				}
+			}
+			if install {
+				if err := installer.previewTargets(temporary, sourceRepo); err != nil {
+					return runner, func() error { return nil }, errors.Join(err, cleanup())
+				}
 			}
 			runner.ChildEnv = append(runner.ChildEnv, "XDG_CONFIG_HOME="+temporary)
 		}
@@ -369,24 +420,27 @@ func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner,
 		return runner, func() error { return nil }, errors.Join(err, cleanup())
 	}
 	// The scratch config home replaces the real one for the preview, so the
-	// recorded machine targets travel with the policy.
-	targetsPath := enginesync.TargetsPath(installer.env(), installer.options.Home)
-	if targets, err := os.ReadFile(targetsPath); err == nil {
-		if err := atomicfile.Write(
-			filepath.Join(temporary, "engine-sync", filepath.Base(targetsPath)),
-			targets,
-			0o600,
-		); err != nil {
-			return runner, func() error { return nil }, errors.Join(err, cleanup())
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return runner, func() error { return nil }, errors.Join(
-			fmt.Errorf("read engine-sync machine targets: %w", err),
-			cleanup(),
-		)
+	// machine targets travel with the policy: an install previews against the
+	// targets it will write (engine-sync unions their capabilities with its
+	// flags).
+	if err := installer.previewTargets(temporary, sourceRepo); err != nil {
+		return runner, func() error { return nil }, errors.Join(err, cleanup())
 	}
 	runner.ChildEnv = append(runner.ChildEnv, "XDG_CONFIG_HOME="+temporary)
 	return runner, cleanup, nil
+}
+
+// readOperatorPolicy reads an operator's policy file, following a link, and
+// refuses anything but a regular file: a FIFO there would block the preview.
+func readOperatorPolicy(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", path)
+	}
+	return os.ReadFile(path)
 }
 
 // retireEngineSyncConfig removes only a clone-owned policy link, after the

@@ -206,6 +206,12 @@ func Await(
 					fmt.Fprintln(options.Progress, line)
 				}
 			}
+			if entry.IsHandoffInstall() {
+				// The plugin's reinstall of the chat's own handoff after a
+				// compaction: nobody spoke, so it is neither a delivery nor a
+				// second sender, and the turn it interrupts goes on.
+				continue
+			}
 			switch entry.Role {
 			case transcript.RoleUser:
 				if turn.Delivered {

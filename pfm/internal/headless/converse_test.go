@@ -410,6 +410,83 @@ func TestAwaitFlagsAnAnswerSomebodyElseMayOwn(t *testing.T) {
 	}
 }
 
+// TestAwaitReadsAHandoffInstallAsNobodysTurn: a chat that stored a
+// sub-agent-compact handoff gets, at its next compaction, a synthetic user
+// record opening "[sub-agent-compact: handoff]" — the chat's own past, not a
+// second sender. Reading it as a human turn made `chat await` exit 7 on a
+// chat nobody else had spoken to. A real second sender, before or after the
+// install, is still reported, and an install alone proves no delivery.
+func TestAwaitReadsAHandoffInstallAsNobodysTurn(t *testing.T) {
+	installed := user("[sub-agent-compact: handoff] Your context was reset. Below is the handoff you wrote.")
+	cases := []struct {
+		name       string
+		lines      []string
+		delivered  bool
+		superseded bool
+		answer     string
+		tools      int
+	}{
+		{
+			name: "install mid-turn is the same turn",
+			lines: []string{
+				user("my question"),
+				tool("Read"),
+				installed,
+				tool("Read"),
+				assistant("the answer"),
+			},
+			delivered: true,
+			answer:    "the answer",
+			tools:     2,
+		},
+		{
+			name: "a real second sender after the install is still flagged",
+			lines: []string{
+				user("my question"),
+				installed,
+				user("somebody else's question"),
+				assistant("one answer"),
+			},
+			delivered:  true,
+			superseded: true,
+			answer:     "one answer",
+		},
+		{
+			name: "a real second sender before the install is still flagged",
+			lines: []string{
+				user("my question"),
+				user("somebody else's question"),
+				installed,
+				assistant("one answer"),
+			},
+			delivered:  true,
+			superseded: true,
+			answer:     "one answer",
+		},
+		{
+			name:   "an install alone is no delivery",
+			lines:  []string{installed, assistant("old answer")},
+			answer: "old answer",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			talk := newConversation(t)
+			talk.say(tc.lines...)
+			turn, err := Await(context.Background(), talk.resolve, fastOptions())
+			if err != nil {
+				t.Fatalf("Await() error = %v", err)
+			}
+			if turn.Delivered != tc.delivered || turn.Superseded != tc.superseded ||
+				turn.Answer != tc.answer || turn.Tools != tc.tools {
+				t.Fatalf("Delivered=%v Superseded=%v Answer=%q Tools=%d, want %v %v %q %d",
+					turn.Delivered, turn.Superseded, turn.Answer, turn.Tools,
+					tc.delivered, tc.superseded, tc.answer, tc.tools)
+			}
+		})
+	}
+}
+
 // TestAwaitReadsOneTranscriptOnceThroughTwoSpellings: the fleet names a fresh
 // Claude chat's transcript by its hook crumb's spelling until the index has
 // it, then by the index's — and with an account's projects/ symlinked to a

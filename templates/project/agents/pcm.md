@@ -1,7 +1,7 @@
 ---
 name: pcm
 description: MANDATORY — Edits framework prompt files — any change to CLAUDE.md, .claude/** or the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro` folds the .professor/retro.md inbox. Returns changed files and a consistency verdict. Not for the pfm CLI or `pfm update` → /pfm; context budget → /context-meter.
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
 skills: [quality:prompt]
 model: opus
 effort: high

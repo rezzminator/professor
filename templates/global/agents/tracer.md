@@ -1,7 +1,7 @@
 ---
 name: tracer
 description: 'Answers a spec writer''s numbered questions from code. "Every caller of X and what each does", "which tests pin X", "what happens when X fails", "quote X". Pass the repo root and the questions. Returns prose by question with path:line and quoted lines, test homes, the check command, NOT READ. Exact text → collector.'
-tools: Read, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact
+tools: Read, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
 model: sonnet
 effort: high
 engines:

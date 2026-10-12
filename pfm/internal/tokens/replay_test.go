@@ -38,7 +38,7 @@ func TestReplayPricesEachBillingColumnAtItsRate(t *testing.T) {
 	}
 }
 
-// A gpt model run through the model-gateway's chatgpt route leaves a Claude
+// A gpt model run through the gpt-gateway's chatgpt route leaves a Claude
 // transcript with Anthropic-shaped usage: its Codex row prices input and a cache
 // write at in, the cache read at cached, output at out.
 func TestReplayPricesAGatewayGptAtItsCodexRow(t *testing.T) {

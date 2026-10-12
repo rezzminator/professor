@@ -637,7 +637,7 @@ func TestRecordTranscriptLineReadsEachBlockOnItsOwn(t *testing.T) {
 	}
 }
 
-// gptAgentLines is a sub-agent transcript the way the model gateway's chatgpt
+// gptAgentLines is a sub-agent transcript the way the gpt-gateway's chatgpt
 // route leaves it, taken from a live gpt-6-luna tracer: the translated usage
 // counts the uncached remainder in input_tokens (the gateway log for the
 // second call reads input=7619 cached=5888, the fourth input=13719

@@ -538,7 +538,7 @@ func TestCodexCost(t *testing.T) {
 	}
 }
 
-// A transcript is Claude Code's whatever model wrote it: the model-gateway's
+// A transcript is Claude Code's whatever model wrote it: the gpt-gateway's
 // chatgpt route writes a Codex model's usage as input_tokens = total - cached -
 // written, cache read = cached, cache creation = written. A Codex row prices
 // those fields at its in, cached and out rates; Codex bills no cache write, so

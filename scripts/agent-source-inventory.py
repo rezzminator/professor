@@ -50,7 +50,8 @@ def frontmatter(path):
 def inventory(directory, project=False, codex=False):
     rows = []
     for path in sorted(directory.iterdir()):
-        if path.suffix != ".md" or path.name in ("README.md", "SKILL.md"):
+        # engine-sync skips README.md alone; every other .md is a source.
+        if path.suffix != ".md" or path.name == "README.md":
             continue
         info = path.stat()  # A dangling/unreadable source is an error, never an absent agent.
         if stat.S_ISDIR(info.st_mode) and not path.is_symlink():
@@ -61,13 +62,15 @@ def inventory(directory, project=False, codex=False):
         if project and ("from" in front or "abstract" in front):
             raise ValueError(f"{path}: from/abstract declarations are machine scope only")
         abstract = front.get("abstract", False)
-        if not isinstance(abstract, bool):
-            raise ValueError(f"{path}: abstract must be a boolean")
+        if "abstract" in front and abstract is not True:
+            raise ValueError(f"{path}: abstract must be true")
         parent = front.get("from")
         if "from" in front and (not isinstance(parent, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", parent)):
             raise ValueError(f"{path}: from must name an agent")
         if abstract and parent is not None:
             raise ValueError(f"{path}: an abstract cannot carry from")
+        if (abstract or parent is not None) and front.get("name", path.stem) != path.stem:
+            raise ValueError(f"{path}: a declaration's name must equal its file base {path.stem!r}")
         kind = "abstract" if abstract else "declaration" if parent is not None else "original"
         engines = front.get("engines", {})
         if codex and (abstract or isinstance(engines, dict) and engines.get("codex") is False):

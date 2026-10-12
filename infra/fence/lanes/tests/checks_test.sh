@@ -823,7 +823,7 @@ es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names" HOME=/real-h
   XDG_STATE_HOME=/real-home/.local/state XDG_DATA_HOME=/real-home/.local/share ENGINE_SYNC_HOME=/real-home/es \
   ENGINE_SYNC_STATE=/real-home/es-state CODEX_HOME=/real-home/.codex
 if [ "$(wc -l < "$MIRROR_CALLS" | tr -d ' ')" -eq 1 ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
-  [[ "$(cat "$MIRROR_CALLS")" == "global --home $TMP_BASE/engine-sync/global-variants."*"/home --source-repo $REPO_ROOT --claude-config-dir $TMP_BASE/engine-sync/global-variants."*"/home/.claude --codex-home $TMP_BASE/engine-sync/global-variants."*"/home/.codex --capability gpt-agents" ]] &&
+  [[ "$(cat "$MIRROR_CALLS")" == "global --home $TMP_BASE/engine-sync/global-variants."*"/home --source-repo $TMP_BASE/engine-sync/global-variants."*"/src --claude-config-dir $TMP_BASE/engine-sync/global-variants."*"/home/.claude --codex-home $TMP_BASE/engine-sync/global-variants."*"/home/.codex --capability gpt-agents" ]] &&
   [[ "$(cat "$MIRROR_CALLS.env")" == "HOME=$TMP_BASE/engine-sync/global-variants."*"/home XDG_CONFIG_HOME=unset XDG_STATE_HOME=unset XDG_DATA_HOME=unset ENGINE_SYNC_HOME=unset ENGINE_SYNC_STATE=unset CODEX_HOME=unset" ]] &&
   grep -Fq "all $gv_count global agent variant(s) render through engine-sync into a jail home" "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out" &&
   cmp -s "$MIRROR_CALLS.policy" "$REPO_ROOT/templates/global/engine-sync/config.json" && gv_jailed; then
@@ -1084,5 +1084,18 @@ else
   boot_rc=$?
   bad 'sampler stop waits for armed-trap header and finishes after bootstrap' "rc=$boot_rc" "$(cat "$T/boot/out")"
 fi
+# A tracked templates/generated/agents file no fresh render produces (an
+# orphan, or a render the sources moved past) is a red step naming it.
+mkdir -p "$REPO_ROOT/templates/generated/agents"
+printf -- '---\nname: ghost\n---\n' > "$REPO_ROOT/templates/generated/agents/ghost.md"
+es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names"
+if grep -Fq 'ghost.md' "$T/es.out" &&
+  grep -Fq 'FAILSTEP global agent variants: tracked templates/generated/agents differs from a fresh render' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+  ok "global agent variants: a tracked generated agent no fresh render produces is red and named"
+else
+  bad "global variants, tracked generated drift" "$(cat "$T/es.out")"
+fi
+rm -rf "$REPO_ROOT/templates/generated"
 
 shtest_end

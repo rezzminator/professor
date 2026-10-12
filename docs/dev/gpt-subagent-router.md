@@ -1,6 +1,6 @@
 # GPT sub-agents behind a model-fork router
 
-**Status:** Implemented as the standalone `plugins/model-gateway` plugin, with its ChatGPT translation in `model_gateway/chatgpt/`; the build plan below records the original design rather than the current file layout. Wire facts were measured on 2026-09-22 (Claude Code 2.1.280, codex-cli 0.155.1) against a loopback fake Anthropic server (§ Reproducing the probes). The translator design (2026-10-09) rests on two source maps, both cited in § Prior art. Current setup and behavior are documented in the plugin's README and `docs/design/model-gateway-layout.md`.
+**Status:** Implemented as the standalone `plugins/gpt-gateway` plugin, with its ChatGPT translation in `gpt_gateway/chatgpt/`; the build plan below records the original design rather than the current file layout. Wire facts were measured on 2026-09-22 (Claude Code 2.1.280, codex-cli 0.155.1) against a loopback fake Anthropic server (§ Reproducing the probes). The translator design (2026-10-09) rests on two source maps, both cited in § Prior art. Current setup and behavior are documented in the plugin's README and `docs/design/gpt-gateway-layout.md`.
 
 ## Contents
 
@@ -31,7 +31,7 @@
 
 ## The finding
 
-A sub-agent's model travels in its **definition**, and Claude Code puts whatever ID the definition names on the wire, unvalidated: `model: gpt-5.6-sol` leaves as `"model": "gpt-5.6-sol"` while the main thread's requests leave as `claude-opus-5-5`. A router in front of Claude Code can therefore fork per request on the `model` field — `claude-*` to Anthropic untouched, every GPT catalog ID to a translator. The four-name limit (`sonnet|opus|haiku|fable`) binds only the `Agent` tool's per-spawn `model` override, which is enum-validated and overrides the definition, so a GPT agent is spawned by **name**, with no `model`. claude-code-proxy alone cannot do the fork: it has no Anthropic upstream and maps every Claude ID to a GPT tier. The implemented fork lives in `plugins/model-gateway`, with the translator split across `model_gateway/chatgpt/` (the original design is in § Translator).
+A sub-agent's model travels in its **definition**, and Claude Code puts whatever ID the definition names on the wire, unvalidated: `model: gpt-5.6-sol` leaves as `"model": "gpt-5.6-sol"` while the main thread's requests leave as `claude-opus-5-5`. A router in front of Claude Code can therefore fork per request on the `model` field — `claude-*` to Anthropic untouched, every GPT catalog ID to a translator. The four-name limit (`sonnet|opus|haiku|fable`) binds only the `Agent` tool's per-spawn `model` override, which is enum-validated and overrides the definition, so a GPT agent is spawned by **name**, with no `model`. claude-code-proxy alone cannot do the fork: it has no Anthropic upstream and maps every Claude ID to a GPT tier. The implemented fork lives in `plugins/gpt-gateway`, with the translator split across `gpt_gateway/chatgpt/` (the original design is in § Translator).
 
 ## Goal and boundary
 
@@ -88,12 +88,12 @@ What they settle:
 
 ```text
 claude  (ANTHROPIC_BASE_URL=http://127.0.0.1:18787/{per-install-secret})
-  └─ model-gateway                              one process, loopback, fail-open supervisor
+  └─ gpt-gateway                              one process, loopback, fail-open supervisor
        ├─ model starts with "claude-" → https://api.anthropic.com          byte-for-byte passthrough
        └─ model in the GPT catalog    → in-process translator → https://chatgpt.com/backend-api/codex/responses
 ```
 
-The router is the standalone `plugins/model-gateway`, not a second process. Its implemented contract includes:
+The router is the standalone `plugins/gpt-gateway`, not a second process. Its implemented contract includes:
 
 - loopback bind
 - chunk-flushed SSE relay
@@ -133,7 +133,7 @@ A GPT agent exists only in a session started through the router. pfm's launch li
 
 ## Translator
 
-The implementation is a Python stdlib package under `plugins/model-gateway/model_gateway/chatgpt/` (routing in `route.py`, translation in `request.py` and `stream.py`, authentication in `auth.py` and `codex_login.py`). The rule for every choice below: **send what Codex sends.** Each deviation is listed in § Deviations from Codex with its reason. "Codex" means `openai/codex` at `9a59289`, and "raine" means claude-code-proxy at `4b5c058a`.
+The implementation is a Python stdlib package under `plugins/gpt-gateway/gpt_gateway/chatgpt/` (routing in `route.py`, translation in `request.py` and `stream.py`, authentication in `auth.py` and `codex_login.py`). The rule for every choice below: **send what Codex sends.** Each deviation is listed in § Deviations from Codex with its reason. "Codex" means `openai/codex` at `9a59289`, and "raine" means claude-code-proxy at `4b5c058a`.
 
 ### Upstream and identity
 
@@ -285,14 +285,14 @@ Every error line in the gateway log carries the lane key, the slug and the upstr
 
 ### Authentication
 
-- **Login source (implemented).** `model_gateway/chatgpt/codex_login.py` re-reads Codex's `auth.json` before refreshing and writes rotated credentials back in Codex's format; its own store is used only when Codex has no ChatGPT login. See the plugin README for the active credential precedence.
+- **Login source (implemented).** `gpt_gateway/chatgpt/codex_login.py` re-reads Codex's `auth.json` before refreshing and writes rotated credentials back in Codex's format; its own store is used only when Codex has no ChatGPT login. See the plugin README for the active credential precedence.
 - **Own login fallback.** `gateway.py chatgpt-login` runs the browser PKCE flow every bridge uses:
   - `https://auth.openai.com/oauth/authorize` with `client_id=app_EMoamEEZ73f0CkXaXp7hrann`, scope `openid profile email offline_access` and redirect `http://localhost:1455/auth/callback`;
   - the state is checked on the callback;
   - the code is exchanged at `/oauth/token`.
 
   A device-code flow (`/api/accounts/deviceauth/usercode`) covers headless use (raine `pkce.rs:48-98`, `device.rs`). The client id is OpenAI's public Codex value and is identical in all five bridges.
-- **Storage (implemented).** `model_gateway/chatgpt/codex_login.py` uses Codex's login in place when available; otherwise `model_gateway/chatgpt/auth.py` uses a `0600` file under `~/.local/state/model-gateway/` (or Keychain when explicitly selected).
+- **Storage (implemented).** `gpt_gateway/chatgpt/codex_login.py` uses Codex's login in place when available; otherwise `gpt_gateway/chatgpt/auth.py` uses a `0600` file under `~/.local/state/gpt-gateway/` (or Keychain when explicitly selected).
 - **Refresh.** It runs when the access token's JWT `exp` is within 5 minutes, or after a 401. Refreshes are single-flight behind a lock, and the store is re-read before each one. Codex's request body is used: JSON `{client_id, grant_type: "refresh_token", refresh_token}` (`login/src/oauth/client.rs:76-126`).
 - **Account id.** `tokens.account_id`, falling back to the id_token claim `chatgpt_account_id` (`login/src/token_data.rs:88-117`).
 
@@ -348,7 +348,7 @@ Ruled on 2026-10-09:
 
 - **D1, client identity: Codex's identity.** The Responses-Lite models (Sol, Terra, Luna) answer "Model not found" unless the request carries `originator: codex_cli_rs` (claude-code-proxy #45). The translator sends Codex's `originator` and `User-Agent`. The user ruled that third-party clients on a ChatGPT subscription are accepted practice, opencode being one.
 - **D2, build.** The translator is built in this repo in stdlib Python, distilled from existing adapters where they fit. The distillation source map is the next research step.
-- **D3, rename.** The gateway becomes `model-gateway`, renamed end to end: launchd label, install paths, log names, README, tests.
+- **D3, rename.** The gateway becomes `gpt-gateway`, renamed end to end: launchd label, install paths, log names, README, tests.
 
 ## Costs and risks
 

@@ -1,6 +1,6 @@
 ---
 name: pfm:workbench
-description: "Create and maintain sub-projects — load for /pfm:workbench new|adopt|modify|check [dir], or a nested directory needing its own persona. Framework edits → /pcm; fleet verbs → /pfm."
+description: "Create and maintain sub-projects — load for /pfm:workbench new|adopt|modify|check [dir], or a nested directory needing its own persona. Framework edits → the `pcm` agent; fleet verbs → /pfm."
 argument-hint: "[new|adopt|modify|check] [dir]"
 ---
 

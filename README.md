@@ -80,7 +80,7 @@ Two panes, two harnesses. You type one line into the Claude chat on the left; th
 A subagent tries to run `git commit`. The `git-guard` PreToolUse hook answers:
 
 ```text
-DENIED — git commit is a shared git write.
+git-guard blocked `git commit -m wip`.
 Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.
 ```
 

@@ -1,5 +1,5 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: context-audit
 description: 'USER-ONLY — /context-audit [pasted /context output]: finds what loads into this chat but never earns its place here — skills, agents, MCP and built-in tools, system-prompt sections — proves each at its source, ranks it, applies your per-row ruling. Prompt-file size → /context-meter.'
 argument-hint: '[pasted /context output]'

@@ -39,7 +39,7 @@ A change to one record touches only that record's lines — zero reflow of its n
 
 A reference doc describes what IS, now. When a record is removed, delete it — no `~~strikethrough~~`, no "Removed {date}" / "Deprecated" / "Added in flight-N" note, and no grouping of records by the build that added them. Stale annotations poison retrieval: the agent reads a dead endpoint as real and builds on it. Rationale prose ("Background", "Why we chose X in 2024") goes the same way — encode the current rule, drop the story. History lives in `git log` and epic manifests.
 
-Authorship follows the same law: no `> Author:` / `> Last updated:` / `> Flight:` byline. Git owns authorship and last-edited date; the path owns ownership (the docs hub `docs/_index.md`, its clusters and each project's `docs/` → the main loop or the `documenter` agent it dispatches; `docs/standards.md` → `/pcm`; `docs/business/**` → its owning command).
+Authorship follows the same law: no `> Author:` / `> Last updated:` / `> Flight:` byline. Git owns authorship and last-edited date; the path owns ownership (the docs hub `docs/_index.md`, its clusters and each project's `docs/` → the main loop or the `documenter` agent it dispatches; `docs/standards.md` → the `pcm` agent; `docs/business/**` → its owning command).
 
 ## Name fidelity — docs are grep-true
 

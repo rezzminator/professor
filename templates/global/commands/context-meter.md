@@ -1,7 +1,7 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: context-meter
-description: Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → /pcm; runtime spend → /chatlog; loaded-but-unused junk → /context-audit.
+description: Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → the `pcm` agent; runtime spend → /chatlog; loaded-but-unused junk → /context-audit.
 ---
 
 # Context Budget
@@ -48,6 +48,6 @@ In order: the always-loaded total read from `/context`, with its composition nam
 
 ## Rules
 
-- Report only — never edit. Trimming a prompt file routes through `/pcm`, which loads `/quality:prompt` and verifies consistency. Surface the savings; the user approves the cut.
+- Report only — never edit. Trimming a prompt file routes through the `pcm` agent, which loads `/quality:prompt` and verifies consistency. Surface the savings; the user approves the cut.
 - Rank by tokens reclaimed, not file count — and since MCP schemas are deferred, target the always-loaded floor before chasing tool counts.
 - Derive every count from the filesystem and reconcile it against `/context`; an inventory claim written in any prompt file, this one included, is not evidence.

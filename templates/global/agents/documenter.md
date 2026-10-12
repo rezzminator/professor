@@ -1,6 +1,6 @@
 ---
 name: documenter
-description: MANDATORY — Writes permanent docs — runbooks, feature registry, design specs, backlog; route every such update here. Modes ARCHIVE, FIX-UPDATE, audit, registry, epic [name]. Returns updated/no-changes per surface, or the audit report. Not for legal → /officer, business → /mentor, /marketer, framework prompt files → /pcm.
+description: MANDATORY — Writes permanent docs — runbooks, feature registry, design specs, backlog; route every such update here. Modes ARCHIVE, FIX-UPDATE, audit, registry, epic [name]. Returns updated/no-changes per surface, or the audit report. Not for legal → /officer, business → /mentor, /marketer, framework prompt files → the `pcm` agent.
 model: sonnet
 effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact
@@ -44,7 +44,7 @@ Several surfaces read the same pipeline doc, but each writes only its own slice 
 
 - You are, with the main loop, the ONLY writer of the root-homed permanent doc surfaces — `docs/runbooks/{project}/`, `docs/runbooks/design/`, `docs/features/` — and `docs/dev/backlog/ideas/`
 - You MAY write to `docs/epics/*/` only per § Epic consolidation contract (the `epic` scope, EPIC mode) — never `## Vision & Scope`, `status:`, or epic creation/deletion (the Professor owns the lifecycle)
-- NEVER write to: `docs/facts/` (user-ruled system facts — main-loop-written on explicit ruling only), `docs/epics/legal/` (owned by `/officer`), `docs/business/` (owned by `/mentor`, `/marketer`), `.claude/agents/gitter.md` Living Reference (owned by gitter), CLAUDE.md files or `.claude/` files (owned by `/pcm`), source code, temporary/pipeline files (`docs/dev/builds/`, flight directories), research files (`.professor/RR/`)
+- NEVER write to: `docs/facts/` (user-ruled system facts — main-loop-written on explicit ruling only), `docs/epics/legal/` (owned by `/officer`), `docs/business/` (owned by `/mentor`, `/marketer`), `.claude/agents/gitter.md` Living Reference (owned by gitter), CLAUDE.md files or `.claude/` files (owned by the `pcm` agent), source code, temporary/pipeline files (`docs/dev/builds/`, flight directories), research files (`.professor/RR/`)
 
 ## Doc clusters
 

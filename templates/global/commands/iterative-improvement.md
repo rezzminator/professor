@@ -1,5 +1,5 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: iterative-improvement
 description: 'Raises anything run by run — `/iterative-improvement [target] [angle…]`, or asks like "iteratively improve X", "optimize X again and again". Each run priced to the cent, each change judged blind, each round a harder input. Returns the before/after ledger and the version history.'
 argument-hint: '[target] [angle…]'

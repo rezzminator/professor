@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -621,6 +622,10 @@ func TestWireEngineSyncGlobalMachinePolicy(t *testing.T) {
 				policy = `{"version":1,"machine":{"retiredAgents":["personal-role"]}}`
 				writeFixture(t, target, policy)
 			case name == "plan wrong target":
+				// A stale link into a real clone is ours to repair: the clone must pass professor.IsSourceRepo.
+				for _, marker := range []string{professor.ClaudeInstructionsFile, "pfm/go.mod", ".claude/settings.json"} {
+					writeFixture(t, filepath.Join(installer.options.SourceRepo, filepath.FromSlash(marker)), "")
+				}
 				stale := filepath.Join(installer.options.SourceRepo, "old", "config.json")
 				writeFixture(t, stale, `{"version":1,"machine":{"retiredAgents":["stale-role"]}}`)
 				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {

@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.80.0](releases/v0.80.0.md) — tracer redesign (lead + sub-tracers + tracetree kit), unlanded-work protocol, statusline/install fixes, pfm chat watch --no-working, codex-sync ENGINE_SYNC_BIN check, cache-live-control 0.4.1 (agent auto-raise removed), shipped gpt twin family with pfm-managed hook assets, release-review hardening fixes
 - [v0.79.0](releases/v0.79.0.md) — workbenches (nested sub-projects), the fleet-deck picker, chat reminders, account-sync, flights that land themselves with one lander per flight, and research tiers renamed to rr / rr-pro / rr-pro-max
 - [v0.78.0](releases/v0.78.0.md) — one `professor` MCP server and four harvester tools named for their intent (no aliases), the flights family in place of the wave engine with a machine-global flights cast, a machine-wide git-guard that leaves git writes to `gitter`, OpenCode as a live fleet engine, the callmeter and activity log, and whole-thread harvesting across two dozen sites.
 - [v0.77.2](releases/v0.77.2.md) — the repository clears the HOL AI Plugin Scanner bar (56/F with 11 high findings → 88/B with none): no fixture that reads as a credential, the pricing check parses instead of `eval`, SHA-pinned actions, `SECURITY.md`, Dependabot, and the scanner in CI; `pfm update` from the source clone names `pfm update check` as its next step instead of `pfm init`.

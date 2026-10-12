@@ -7,7 +7,7 @@ argument-hint: "[repo]"
 
 # Housekeeping
 
-Repository: $ARGUMENTS — with none, the main checkout of the current one. This chat only reads; every git write goes to `gitter`.
+Repository: $ARGUMENTS — with none, the main checkout of the current one. This chat only reads and deletes the `UNLANDED.md` of a worktree removed (§ 4); every git write goes to `gitter`.
 
 ## 1. Inventory
 
@@ -39,9 +39,11 @@ A worktree holding initialised submodules is removable only when, per submodule 
 
 One `gitter` dispatch carries every local removal. Per item: the path, the branch, the tip to re-verify (a moved tip stops that item), the evidence line, and the command:
 
-- `git worktree remove`, with `--force` named only for dirty files classified same or older, or submodules § 3 cleared
+- the removal: `.claude/scripts/worktree.sh remove {name}` when the repository has that script (it frees the ports, tears the stack down and judges submodules itself), with `--discard` named only for dirty files classified same or older; without the script, `git worktree remove`, with `--force` named only for those files or submodules § 3 cleared
 - `git branch -d` for MERGED; `git branch -D` for LANDED, its landing commit named
 - `git worktree prune` last
+
+Once the final `git worktree list` shows an item's worktree gone, this chat deletes the `UNLANDED.md` whose worktree line names it: a removed worktree leaves its flight landed or discarded, and the file lies outside the repository, so no `gitter` dispatch carries it.
 
 Out of scope in that brief: pushes, remote branches, stashes, `{base}` and the main checkout's untracked files. A refusal `gitter` returns is traced to its cause; a cause the evidence clears goes back with that evidence, any other cause makes the item WAITING.
 
@@ -61,4 +63,5 @@ WAITING work stays. Report what it holds and what finishing it takes; when the u
 - a table: item · state · evidence (landing commit, file comparison, where moved tests live)
 - what was left alone, and why
 - recovery lines for dropped stashes
+- the `UNLANDED.md` files deleted, one line each
 - the final `git worktree list`, `git branch --list` and `git stash list`, read by this chat, never relayed from `gitter`

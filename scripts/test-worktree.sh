@@ -11,20 +11,25 @@ cat > "$T/bin/git" <<'EOF'
 if [[ "$*" == *'worktree remove'* && "${FAIL_REMOVE:-0}" == 1 ]]; then echo 'synthetic removal failure' >&2; exit 3; fi
 if [[ "$*" == *'worktree list'* && "${FAIL_LIST:-0}" == 1 ]]; then echo 'synthetic enumeration failure' >&2; exit 3; fi
 if [[ "$*" == *'submodule update'* && "${FAIL_SUBMODULE:-0}" == 1 ]]; then echo 'synthetic submodule failure' >&2; exit 3; fi
+if [[ "$*" == *'hash-object'* && "${FAIL_HASH:-0}" == 1 ]]; then echo 'synthetic content hash failure' >&2; exit 3; fi
 exec /usr/bin/git "$@"
 EOF
 chmod +x "$T/bin/git"
 # lifecycle <install case>: the script under test with the roster the case names: 0 none,
-# 1 an install that fails, 2 a multi-command install whose last command succeeds after a failure.
+# 1 an install that fails, 2 a multi-command install whose last command succeeds after a failure;
+# ENV_FILES (default none) names the env files the roster entry copies from main into a worktree.
 lifecycle() {
-  python3 -I - "$SUT" "$repo/.runner/scripts/lifecycle.sh" "$1" "${NUKE_CASE:-0}" <<'PY'
+  python3 -I - "$SUT" "$repo/.runner/scripts/lifecycle.sh" "$1" "${NUKE_CASE:-0}" "${ENV_FILES:--}" "${REWRITE_ENV:-1}" <<'PY'
 from pathlib import Path
 import sys
 infra='.' if sys.argv[4] == '1' else '-'
 source=Path(sys.argv[1]).read_text().replace('INFRA_MAKE_DIR="{project}"', 'INFRA_MAKE_DIR="' + infra + '"')
-install={'1': 'false', '2': 'false; printf finished'}.get(sys.argv[3])
-if install:
-    source=source.replace('PROJECTS=(\n', 'PROJECTS=(\n  ".|install|' + install + '|-"\n')
+install={'1': 'false', '2': 'false; printf finished'}.get(sys.argv[3], '')
+if install or sys.argv[5] != '-':
+    source=source.replace('PROJECTS=(\n', 'PROJECTS=(\n  ".|install|' + install + '|' + sys.argv[5] + '"\n')
+if sys.argv[5] == '.env.test' and sys.argv[6] == '1':
+    source=source.replace('  # {ENV_FILE_PROVISION} — SETUP fills this from the roster\'s env_files + port map.',
+                          '  printf \'PORT=%s\\n\' "$FIXTURE_PORT" > "$worktree_dir/.env.test"')
 Path(sys.argv[2]).write_text(source)
 PY
 }
@@ -47,7 +52,7 @@ EOF
   trace="$repo/alloc-trace"
 }
 invoke() {
-  (cd "$repo" && env PATH="$T/bin:$PATH" ALLOC_TRACE="$trace" FAIL_REMOVE="${FAIL_REMOVE:-0}" FAIL_LIST="${FAIL_LIST:-0}" FAIL_SUBMODULE="${FAIL_SUBMODULE:-0}" FAIL_FREE="${FAIL_FREE:-0}" bash .runner/scripts/lifecycle.sh "$@") > "$T/out" 2>&1
+  (cd "$repo" && env PATH="$T/bin:$PATH" ALLOC_TRACE="$trace" FAIL_REMOVE="${FAIL_REMOVE:-0}" FAIL_LIST="${FAIL_LIST:-0}" FAIL_SUBMODULE="${FAIL_SUBMODULE:-0}" FAIL_FREE="${FAIL_FREE:-0}" FAIL_HASH="${FAIL_HASH:-0}" bash .runner/scripts/lifecycle.sh "$@") > "$T/out" 2>&1
   rc=$?; out="$(cat "$T/out")"
 }
 add_worktree() { /usr/bin/git -C "$repo" worktree add -q -b "pipeline/$1" "$repo/.worktrees/$1" || exit 2; }
@@ -129,6 +134,109 @@ invoke remove teardown
 if [[ "$rc" -ne 0 && ! -d "$repo/.worktrees/teardown" && "$out" == *'teardown failed'* && "$out" != *'Pipeline cleaned up'* ]]; then
   ok 'F1: teardown failure after successful removal is propagated, never reported as cleaned'
 else bad 'F1: teardown failure after successful removal is propagated, never reported as cleaned' "rc=$rc; out=$out"; fi
+# A Makefile owning the stack teardown: it records each pipeline it nukes in nuke-trace and fails for a pipeline
+# whose name ends in -nukefails.
+nuke_makefile() {
+  printf 'nuke-test-pipeline:\n\t@echo $(PIPELINE) >> nuke-trace\n\t@case "$(PIPELINE)" in *-nukefails) exit 1;; esac\n' > "$repo/Makefile"
+}
+fgit() { /usr/bin/git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false "${@:2}"; }
+NUKE_CASE=1 fixture; nuke_makefile; add_worktree unmerged
+fgit "$repo/.worktrees/unmerged" commit -q --allow-empty -m work || exit 2
+invoke remove unmerged --delete-branch
+if [[ "$rc" -ne 0 && ! -d "$repo/.worktrees/unmerged" && "$out" == *'branch deletion failed'* && "$out" != *'Pipeline cleaned up'* ]] && grep -qx 'free unmerged' "$trace" && grep -qx unmerged "$repo/nuke-trace" && /usr/bin/git -C "$repo" show-ref --verify --quiet refs/heads/pipeline/unmerged; then
+  ok 'F4: a refused branch deletion still frees the ports and tears the stack down, and fails visibly'
+else bad 'F4: a refused branch deletion still frees the ports and tears the stack down, and fails visibly' "rc=$rc; out=$out; nuke-trace=$(cat "$repo/nuke-trace" 2>&1)"; fi
+NUKE_CASE=1 fixture; nuke_makefile; mkdir -p "$repo/.worktrees/a-nukefails" "$repo/.worktrees/b-orphan"
+invoke prune
+if [[ "$rc" -ne 0 && ! -d "$repo/.worktrees/a-nukefails" && ! -d "$repo/.worktrees/b-orphan" && "$out" == *'Prune complete: 2 orphaned'* && "$out" == *'teardown failed for 1 pruned worktree(s): a-nukefails'* ]] && grep -qx a-nukefails "$repo/nuke-trace" && grep -qx b-orphan "$repo/nuke-trace" && grep -qx 'free b-orphan' "$trace"; then
+  ok 'F5: a failed stack teardown does not abort the prune: the rest is pruned, the summary printed, the failure named and non-zero'
+else bad 'F5: a failed stack teardown does not abort the prune: the rest is pruned, the summary printed, the failure named and non-zero' "rc=$rc; out=$out"; fi
+# provisioned_fixture <name> [tracked|ignored]: copy/rewrite inside create, before final bytes are recorded.
+provisioned_fixture() {
+  ENV_FILES=.env.test fixture
+  printf 'PORT=1\n' > "$repo/.env.test"
+  if [[ "${2:-}" == tracked ]]; then fgit "$repo" add .env.test && fgit "$repo" commit -q -m env || exit 2; fi
+  if [[ "${2:-}" == ignored ]]; then printf '.env.test\n.env.ports\n' > "$repo/.gitignore"; fgit "$repo" add .gitignore && fgit "$repo" commit -q -m ignored || exit 2; fi
+  invoke create "$1"
+  [[ "$rc" -eq 0 && -f "$repo/.worktrees/$1/.env.test" && -f "$repo/.worktrees/$1/.env.ports" ]] || { echo "test-worktree: setup failure: create did not provision the env file: $out" >&2; exit 2; }
+  local expected=12345
+  [[ "${REWRITE_ENV:-1}" == 1 ]] || expected=1
+  [[ "$(cat "$repo/.worktrees/$1/.env.test")" == "PORT=$expected" ]] || { echo 'test-worktree: setup failure: env rewrite did not run inside create' >&2; exit 2; }
+}
+provisioned_fixture env-untracked
+invoke remove env-untracked
+if [[ "$rc" -eq 0 && ! -d "$repo/.worktrees/env-untracked" && "$out" == *'Worktree removed'* ]] && grep -qx 'free env-untracked' "$trace"; then
+  ok 'F6: an untracked env file the script provisioned and rewrote does not make a worktree dirty'
+else bad 'F6: an untracked env file the script provisioned and rewrote does not make a worktree dirty' "rc=$rc; out=$out"; fi
+provisioned_fixture env-tracked tracked
+invoke remove env-tracked
+if [[ "$rc" -eq 0 && ! -d "$repo/.worktrees/env-tracked" && "$out" == *'Worktree removed'* ]] && grep -qx 'free env-tracked' "$trace"; then
+  ok 'F6: a tracked env file the script provisioned and rewrote does not make a worktree dirty'
+else bad 'F6: a tracked env file the script provisioned and rewrote does not make a worktree dirty' "rc=$rc; out=$out"; fi
+provisioned_fixture env-and-work
+printf 'uncommitted\n' > "$repo/.worktrees/env-and-work/base.txt"
+invoke remove env-and-work
+if [[ "$rc" -ne 0 && "$(cat "$repo/.worktrees/env-and-work/base.txt")" == uncommitted && "$out" == *'dirty worktree refused'* && "$out" != *'Worktree removed'* ]] && ! grep -qx 'free env-and-work' "$trace"; then
+  ok 'F6: a real dirty file still refuses removal beside a provisioned env file'
+else bad 'F6: a real dirty file still refuses removal beside a provisioned env file' "rc=$rc; out=$out"; fi
+for kind in untracked tracked; do
+  REWRITE_ENV=0 provisioned_fixture "env-copied-$kind" "$kind"
+  invoke remove "env-copied-$kind"
+  if [[ "$rc" -eq 0 && ! -d "$repo/.worktrees/env-copied-$kind" && "$out" == *'Pipeline cleaned up'* ]]; then
+    ok "F6: unchanged copied $kind env bytes permit removal"
+  else bad "F6: unchanged copied $kind env bytes permit removal" "rc=$rc; out=$out"; fi
+done
+for kind in untracked tracked ignored; do
+  provisioned_fixture "env-edited-$kind" "$kind"
+  w="$repo/.worktrees/env-edited-$kind"
+  cp -p "$w/.env.test" "$repo/env-before"
+  printf 'PORT=54321\n' > "$w/.env.test"
+  touch -r "$repo/env-before" "$w/.env.test"
+  # An already-ready create must not bless edits by recording a fresh hash.
+  invoke create "env-edited-$kind"
+  [[ "$rc" -eq 0 && "$out" == *'Worktree already exists:'* ]] || { echo "test-worktree: setup failure: ready create failed: $out" >&2; exit 2; }
+  invoke remove "env-edited-$kind"
+  if [[ "$rc" -ne 0 && -f "$w/.env.test" && "$(cat "$w/.env.test")" == 'PORT=54321' && "$out" == *'dirty worktree refused'* ]]; then
+    ok "F6: later $kind env edit with unchanged size/mtime is preserved and refused"
+  else bad "F6: later $kind env edit with unchanged size/mtime is preserved and refused" "rc=$rc; out=$out"; fi
+done
+provisioned_fixture env-ports-edited ignored
+w="$repo/.worktrees/env-ports-edited"
+printf 'USER_PORT=54321\n' >> "$w/.env.ports"
+invoke remove env-ports-edited
+if [[ "$rc" -ne 0 && -f "$w/.env.ports" && "$out" == *'dirty worktree refused'* ]] && grep -qx 'USER_PORT=54321' "$w/.env.ports"; then
+  ok 'F6: later edits to ignored generated port bytes are preserved and refused'
+else bad 'F6: later edits to ignored generated port bytes are preserved and refused' "rc=$rc; out=$out"; fi
+for change in deleted symlink; do
+  provisioned_fixture "env-$change" ignored
+  w="$repo/.worktrees/env-$change"
+  rm "$w/.env.test"
+  if [[ "$change" == symlink ]]; then ln -s "$repo/.env.test" "$w/.env.test"; fi
+  invoke remove "env-$change"
+  if [[ "$rc" -ne 0 && -d "$w" && "$out" == *'dirty worktree refused'* ]]; then
+    ok "F6: $change provisioned env is refused even when gitignored"
+  else bad "F6: $change provisioned env is refused even when gitignored" "rc=$rc; out=$out"; fi
+done
+for change in missing corrupt; do
+  provisioned_fixture "env-metadata-$change" ignored
+  w="$repo/.worktrees/env-metadata-$change"
+  hashes="$(fgit "$w" rev-parse --absolute-git-dir)/provisioned-env-hashes"
+  if [[ "$change" == missing ]]; then rm -rf "$hashes"; else mkdir -p "$hashes"; printf 'broken\n' > "$hashes/complete"; fi
+  invoke remove "env-metadata-$change"
+  if [[ "$rc" -ne 0 && -f "$w/.env.test" && "$(cat "$w/.env.test")" == 'PORT=12345' && "$out" == *'could not inspect provisioned env hashes'* ]]; then
+    ok "F6: $change provisioning metadata keeps user bytes and fails visibly"
+  else bad "F6: $change provisioning metadata keeps user bytes and fails visibly" "rc=$rc; out=$out"; fi
+done
+fixture
+FAIL_HASH=1 invoke create hash-failed
+w="$repo/.worktrees/hash-failed"
+if [[ "$rc" -ne 0 && -f "$w/.env.ports" && "$out" == *'could not record provisioned env hashes'* && "$out" != *'Worktree ready:'* ]]; then
+  ok 'F6: failed content hashing leaves incomplete provisioning and reports why'
+else bad 'F6: failed content hashing leaves incomplete provisioning and reports why' "rc=$rc; out=$out"; fi
+invoke create hash-failed
+if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && "$out" == *'Resuming incomplete provisioning:'* ]]; then
+  ok 'F6: retry after hashing recovers records final bytes before readiness'
+else bad 'F6: retry after hashing recovers records final bytes before readiness' "rc=$rc; out=$out"; fi
 # A repo with a submodule: create populates it, so a clean worktree holds an initialized submodule
 # (`ignore = dirty`, as this repo's plugins carry it, hides the submodule's own edits from plain status).
 submodule_fixture() {

@@ -369,7 +369,7 @@ func TestInstallHarvestPrunesSupersededEnvironments(t *testing.T) {
 		t.Fatalf("healthy apply: %v\n%s", err, output.String())
 	}
 	want := "  change  remove superseded harvestpy environment " + superseded + " (freed 7 bytes)\n"
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		want = "  skip    keep superseded harvestpy environment " + superseded + ": liveness unreadable: "
 	}
 	if !strings.Contains(output.String(), want) {

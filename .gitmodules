@@ -38,3 +38,8 @@
 	url = https://github.com/rezzminator/auto-effort.git
 	branch = develop
 	ignore = dirty
+[submodule "gpt-gateway"]
+	path = plugins/gpt-gateway
+	url = https://github.com/rezzminator/gpt-gateway.git
+	branch = develop
+	ignore = dirty

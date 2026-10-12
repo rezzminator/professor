@@ -922,10 +922,13 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		}
 	}
 	installer.say("")
-	return systemdChanged, nil
+	return systemdChanged, installer.wireGptHookAssets()
 }
 
 func (installer *engine) removeManagedAssets(assets []assetFile) error {
+	if err := installer.unwireGptHookAssets(); err != nil {
+		return err
+	}
 	installer.say("managed assets -> %s", installer.managedRoot)
 	for _, asset := range assets {
 		target := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))

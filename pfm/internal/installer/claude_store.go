@@ -77,7 +77,7 @@ var AccountEntries = []string{
 var IgnoredEntries = []string{
 	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
 	"debug", "daemon.lock", "daemon.status.json", "tmp",
-	"chrome", "dev-mods", "keybindings.json",
+	"chrome", "dev-mods", "keybindings.json", "hooks",
 }
 
 // EntryClass classifies a top-level Claude entry.

@@ -76,6 +76,8 @@ func TestGlobalWiringWritesTheStoreForThreeAccounts(t *testing.T) {
 	if _, err := installer.stageAssets(assets); err != nil {
 		t.Fatalf("stageAssets: %v", err)
 	}
+	// Asset staging also links account-local hooks; judge only registry writes below.
+	output.Reset()
 
 	for _, step := range []struct {
 		name string

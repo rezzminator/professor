@@ -96,6 +96,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"chrome",
 		"dev-mods",
 		"keybindings.json",
+		"hooks",
 	}
 	if !reflect.DeepEqual(IgnoredEntries, ignored) {
 		t.Fatalf("ignored=%v", IgnoredEntries)

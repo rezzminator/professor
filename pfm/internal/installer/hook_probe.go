@@ -85,6 +85,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		})
 	}
 	results = append(results, probeCodexHooks(home, config, binary)...)
+	results = append(results, probeGptHookAssets(home, config)...)
 	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
 	ownership, _, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
@@ -361,6 +362,16 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool
 		case stateDrift:
 			warnings++
 			fmt.Fprintf(stdout, "%s DRIFT ledger ownership=%s file=%s\n", prefix, result.Want, result.Got)
+		case stateHookDrift:
+			failures++
+			fmt.Fprintf(
+				stdout,
+				"%s DRIFT what=%s want=%s got=%s — run pfm install --yes\n",
+				prefix,
+				result.What,
+				result.Want,
+				result.Got,
+			)
 		case stateUnreadable:
 			failures++
 			fmt.Fprintf(stdout, "doctor: hook %s %s UNREADABLE error=%s\n", hook.Target, file, result.Error)

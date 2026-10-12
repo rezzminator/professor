@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
@@ -16,10 +17,47 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+// engineSyncGlobalTimeout bounds one `engine-sync global` run, which an install
+// makes twice (the preflight --plan and the apply): a wedged engine-sync ends
+// the step with an error naming it and this deadline instead of hanging
+// `pfm install` and `pfm update` with no message.
+const engineSyncGlobalTimeout = 5 * time.Minute
+
+// engineSyncMissingRepair is what an adopter does when the install finds no
+// engine-sync binary and has Codex homes or a Professor clone to wire: the
+// plugin's wrapper downloads the release binary at the next Claude session
+// start and links it at the stable path (README.md § engine-sync).
+const engineSyncMissingRepair = "install the engine-sync plugin: run `claude plugin install engine-sync@professor`, " +
+	"start a new Claude session so the plugin wrapper downloads and links the binary, " +
+	"then rerun pfm update (or pfm install --yes)"
+
 // engineSync is the engine-sync runner this install drives: its environment
 // and home.
 func (installer *engine) engineSync() enginesync.Runner {
-	return enginesync.Runner{Env: installer.env(), Home: installer.options.Home}
+	return enginesync.Runner{Env: installer.env(), Home: installer.options.Home, Exec: installer.engineSyncExec}
+}
+
+// engineSyncGlobalDeadline is the bound of one `engine-sync global` run.
+func (installer *engine) engineSyncGlobalDeadline() time.Duration {
+	if installer.engineSyncDeadline > 0 {
+		return installer.engineSyncDeadline
+	}
+	return engineSyncGlobalTimeout
+}
+
+// deferEngineSyncUninstallFault handles an engine-sync fault on an uninstall
+// that is not an absent binary (too old, a failing global run, a conflict):
+// the preview skips with the fault's text, so the preflight does not refuse the
+// teardown; the apply defers the failure, so every unwire step still runs and
+// the run exits non-zero naming the fault.
+func (installer *engine) deferEngineSyncUninstallFault(fault error) {
+	if !installer.apply {
+		installer.skip(fmt.Sprintf(
+			"engine-sync fault, deferred to the apply (Codex roles, global commands left in place): %v", fault,
+		))
+		return
+	}
+	installer.deferFailure(fault)
 }
 
 // wireEngineSyncGlobal runs the installer's Codex steps through `engine-sync
@@ -50,7 +88,7 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 				}
 				return installer.leaveEngineSyncOwned(err)
 			}
-			installer.deferFailure(err)
+			installer.deferEngineSyncUninstallFault(err)
 			return installer.retireEngineSyncConfig(sourceRepo)
 		}
 		if errors.As(err, &unavailable) && len(installer.codexHomes()) == 0 {
@@ -63,6 +101,9 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 					fmt.Errorf("inspect engine-sync global source repository %s: %w", sourceRepo, inspectErr),
 				)
 			}
+		}
+		if errors.As(err, &unavailable) {
+			return fmt.Errorf("%w — %s", err, engineSyncMissingRepair)
 		}
 		return err
 	}
@@ -91,7 +132,13 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 		}()
 		options.SourceHome = sourceHome
 	}
-	result, runErr := runner.Global(context.Background(), options)
+	deadline := installer.engineSyncGlobalDeadline()
+	globalContext, cancelGlobal := context.WithTimeout(context.Background(), deadline)
+	result, runErr := runner.Global(globalContext, options)
+	if runErr != nil && errors.Is(globalContext.Err(), context.DeadlineExceeded) {
+		runErr = fmt.Errorf("engine-sync global timed out after %s: %w", deadline, runErr)
+	}
+	cancelGlobal()
 	var conflicts []string
 	for _, event := range result.Events {
 		switch event.Verb {
@@ -123,7 +170,7 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 			return installer.leaveEngineSyncOwned(runErr)
 		}
 		if options.Uninstall {
-			installer.deferFailure(runErr)
+			installer.deferEngineSyncUninstallFault(runErr)
 			return installer.retireEngineSyncConfig(sourceRepo)
 		}
 		return runErr
@@ -136,7 +183,7 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 	}
 	conflictErr := fmt.Errorf("engine-sync global: %s", strings.Join(conflicts, "; "))
 	if options.Uninstall {
-		installer.deferFailure(conflictErr)
+		installer.deferEngineSyncUninstallFault(conflictErr)
 		return installer.retireEngineSyncConfig(sourceRepo)
 	}
 	if !installer.apply {

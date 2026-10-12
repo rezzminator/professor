@@ -2,6 +2,7 @@ package harvestmcp
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
@@ -81,6 +82,10 @@ func failedItem(n, total int, item, message string) string {
 	return itemHeader(n, total, item) + "\nerror: " + message
 }
 
+// thinPageChars is the length under which a page answered with an HTTP error or a challenge is
+// that error's receipt, not a document.
+const thinPageChars = 500
+
 // itemFailure is why a read item is a failure, or "": the harvester's own
 // error, a size probe of an empty extraction, an empty body, or a thin HTTP
 // error or challenge page standing in for one.
@@ -100,6 +105,12 @@ func itemFailure(label string, result harvest.Result, view ReadView) string {
 			return fmt.Sprintf(
 				"Fetched %s but it yielded no readable content (empty after extraction) — nothing to size. %s",
 				label, hint)
+		}
+		// The probe blanks the content, so a thin HTTP error page is judged by its char count.
+		if result.HTTPStatus >= http.StatusBadRequest && result.Chars < thinPageChars {
+			return harvest.PublicFailureMessage(
+				harvest.Result{HTTPStatus: result.HTTPStatus, ErrorKind: result.ErrorKind},
+			)
 		}
 		return ""
 	}
@@ -121,7 +132,7 @@ func itemFailure(label string, result harvest.Result, view ReadView) string {
 	lowerBody := strings.ToLower(stripped)
 	challenge := strings.Contains(lowerBody, "cloudflare") || strings.Contains(lowerBody, "captcha") ||
 		strings.Contains(lowerBody, "verify you are human")
-	if len([]rune(stripped)) < 500 && (status >= 400 || challenge) {
+	if len([]rune(stripped)) < thinPageChars && (status >= http.StatusBadRequest || challenge) {
 		return harvest.PublicFailureMessage(
 			harvest.Result{HTTPStatus: status, ErrorKind: result.ErrorKind, Challenge: challenge},
 		)

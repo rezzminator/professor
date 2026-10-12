@@ -13,6 +13,10 @@ const (
 	launchGateUnprobedNote   = "launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or schedule run is not refused"
 	nameSyncGateUnprobedNote = "name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or schedule run is not refused"
 	scheduleGatePoll         = 5 * time.Second
+	// retiredScheduleServiceUnit is the systemd unit the schedule job was
+	// renamed from. The install about to retire it waits out a fire of it,
+	// as it waits out the schedule job.
+	retiredScheduleServiceUnit = "pfm-reminder.service"
 )
 
 // schedulerServiceRunning reports whether the Linux scheduler service unit
@@ -68,7 +72,11 @@ func schedulerGate(ctx context.Context, runner CommandRunner) (probed bool, err 
 		if scheduleRunning {
 			return true, ErrScheduleAgentRunning
 		}
-		return syncAnswered && scheduleAnswered, nil
+		reminderRunning, reminderAnswered := launchAgentRunning(ctx, runner, retiredScheduleLaunchdLabel)
+		if reminderRunning {
+			return true, ErrScheduleAgentRunning
+		}
+		return syncAnswered && scheduleAnswered && reminderAnswered, nil
 	}
 	syncRunning, syncAnswered := schedulerServiceRunning(ctx, runner, "pfm-name-sync.service")
 	if syncRunning {
@@ -78,7 +86,11 @@ func schedulerGate(ctx context.Context, runner CommandRunner) (probed bool, err 
 	if scheduleRunning {
 		return true, ErrScheduleRunning
 	}
-	return syncAnswered && scheduleAnswered, nil
+	reminderRunning, reminderAnswered := schedulerServiceRunning(ctx, runner, retiredScheduleServiceUnit)
+	if reminderRunning {
+		return true, ErrScheduleRunning
+	}
+	return syncAnswered && scheduleAnswered && reminderAnswered, nil
 }
 
 func SchedulerRefusal(command string, err error) string {

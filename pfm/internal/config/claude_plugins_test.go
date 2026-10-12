@@ -29,14 +29,12 @@ func TestClaudePluginsKey(t *testing.T) {
 				{ID: "agent-effort"},
 				{ID: "tool-visibility-controller"},
 			},
-			wantMarshal: []any{"cache-live-control", "sub-agent-compact", "agent-effort", "tool-visibility-controller"},
-			source:      SourceDefault,
+			source: SourceDefault,
 		},
 		{
 			name: "null is absent", content: `{"version":2,"claude":{"plugins":null}}`,
-			want:        DefaultClaudePlugins(),
-			wantMarshal: []any{"cache-live-control", "sub-agent-compact", "agent-effort", "tool-visibility-controller"},
-			source:      SourceDefault,
+			want:   DefaultClaudePlugins(),
+			source: SourceDefault,
 		},
 		{
 			name: "an empty list names no plugin", content: `{"version":2,"claude":{"plugins":[]}}`,
@@ -179,8 +177,17 @@ func TestClaudePluginsKey(t *testing.T) {
 			if err := json.Unmarshal(encoded, &value); err != nil {
 				t.Fatal(err)
 			}
-			if got := value.Claude["plugins"]; !reflect.DeepEqual(got, any(tc.wantMarshal)) {
-				t.Fatalf("Marshal plugins = %#v, want %#v", got, tc.wantMarshal)
+			// The default list left unset stays out of the file (a v0.79.0 pfm refuses the key); a list
+			// the file set is written back as it was.
+			got, found := value.Claude["plugins"]
+			if tc.source == SourceDefault {
+				if found {
+					t.Fatalf("Marshal wrote the unset default plugins list: %#v", got)
+				}
+				return
+			}
+			if !found || !reflect.DeepEqual(got, any(tc.wantMarshal)) {
+				t.Fatalf("Marshal plugins = %#v (found %v), want %#v", got, found, tc.wantMarshal)
 			}
 		})
 	}

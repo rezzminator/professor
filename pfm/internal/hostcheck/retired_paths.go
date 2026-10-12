@@ -203,7 +203,8 @@ var stateBackupProblems = map[string]string{
 
 // staleStateBackups lists the backups pfm install expires after 30 days
 // (installer.StateBackups, the one registry both read), whatever their age,
-// except doctor's own move-aside dirs: --purge cannot move a dir into itself.
+// except doctor's own move-aside dirs: --purge cannot move a dir into itself,
+// and install never expires them (doctor promised they are never deleted).
 func staleStateBackups(env Env) ([]Row, error) {
 	var rows []Row
 	for _, backup := range installer.StateBackups(env.Home, env.StateDB, env.CacheDB) {

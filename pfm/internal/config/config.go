@@ -1322,7 +1322,8 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 
 // MarshalDefault returns the strict, comment-free JSON used by `pfm config
 // init`. It deliberately emits resolved defaults so the file is useful as a
-// documented starting point while the loader remains backward compatible.
+// documented starting point while the loader remains backward compatible; the
+// claude keys added since v0.79.0 stay out at their defaults (marshalClaude).
 func MarshalDefault(home string, projectRoots []string) ([]byte, error) {
 	defaults := Defaults(home, projectRoots)
 	defaults.Log.Level = InstallLogLevel
@@ -1357,26 +1358,38 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	claudeName := pfmengine.MustLookup(pfmengine.Claude).LongName
 	codexName := pfmengine.MustLookup(pfmengine.Codex).LongName
 	accounts := make([]map[string]any, 0, len(config.Accounts))
-	for _, account := range config.Accounts {
+	for index, account := range config.Accounts {
 		value := map[string]any{
 			"id":        account.ID,
 			"configDir": account.ConfigDir,
 			"emoji":     account.Emoji,
 		}
 		if account.Claude != nil {
-			value[claudeName] = map[string]any{
+			claude := map[string]any{
 				"webSearchesPerSession": account.Claude.WebSearchesPerSession,
 				"autoCompactWindow":     account.Claude.AutoCompactWindow,
-				"helperModel":           account.Claude.HelperModel,
 				"tmuxTruecolor":         account.Claude.TmuxTruecolor,
 				"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
 				"requireManagedCleanup": account.Claude.RequireManagedCleanup,
-				"permissionMode":        account.Claude.PermissionMode,
-				engineKeyBinary:         account.Claude.Binary,
 				keyTheme:                themeMarshalValue(account.Claude.Theme),
 				"cache1h":               account.Claude.Cache1H,
 				"nativeCursor":          account.Claude.NativeCursor,
 			}
+			// These empty sentinels mean inherit. Writing them as explicit empty
+			// values makes our strict loader reject its own output.
+			if account.Claude.PermissionMode != "" {
+				claude["permissionMode"] = account.Claude.PermissionMode
+			}
+			if account.Claude.Binary != "" {
+				claude[engineKeyBinary] = account.Claude.Binary
+			}
+			// Preserve explicit account preferences, even when currently equal to the
+			// machine value: a later machine edit must not turn them into inheritance.
+			if account.Claude.HelperModel != config.Claude.HelperModel ||
+				config.Source(fmt.Sprintf("accounts[%d].claude.helperModel", index)) == SourceFile {
+				claude["helperModel"] = account.Claude.HelperModel
+			}
+			value[claudeName] = claude
 		}
 		if account.Codex != nil {
 			value[codexName] = map[string]any{
@@ -1423,33 +1436,13 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	if engine, err := config.DefaultEngine(); err == nil {
 		askValue["engine"] = pfmengine.MustLookup(engine).LongName
 	}
-	// An unset checkout root is null in the file, never "": "" fails Load.
-	var pluginRoot any
-	if config.Claude.PluginCheckoutRoot != "" {
-		pluginRoot = config.Claude.PluginCheckoutRoot
-	}
 	value := map[string]any{
 		keyVersion: config.Version,
 		keyTheme:   config.Theme,
 		"state":    map[string]any{"db": config.State.DB, "cacheDb": config.State.CacheDB},
 		"accounts": accounts,
-		claudeName: map[string]any{
-			"webSearchesPerSession": config.Claude.WebSearchesPerSession,
-			"autoCompactWindow":     config.Claude.AutoCompactWindow,
-			"helperModel":           config.Claude.HelperModel,
-			"tmuxTruecolor":         config.Claude.TmuxTruecolor,
-			"cleanupPeriodDays":     config.Claude.CleanupPeriodDays,
-			"requireManagedCleanup": config.Claude.RequireManagedCleanup,
-			"permissionMode":        config.Claude.PermissionMode,
-			engineKeyBinary:         config.Claude.Binary,
-			keyTheme:                themeMarshalValue(config.Claude.Theme),
-			"cache1h":               config.Claude.Cache1H,
-			"nativeCursor":          config.Claude.NativeCursor,
-			"pluginCheckoutRoot":    pluginRoot,
-			"plugins":               marshalClaudePlugins(config.Claude.Plugins),
-			"costLedger":            config.Claude.CostLedger,
-		},
-		codexName: codexValue,
+		claudeName: marshalClaude(config),
+		codexName:  codexValue,
 		"tmux": map[string]any{
 			"titles": map[string]any{jsonKeyEnabled: config.Tmux.Titles.Enabled},
 		},

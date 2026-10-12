@@ -2,9 +2,11 @@ package installer
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -227,5 +229,74 @@ func TestSeedConfigPreservesValidatedBytesAndConcurrentTarget(t *testing.T) {
 				assertContent(t, target, string(content))
 			}
 		})
+	}
+}
+
+// installSeedClaude plans a first install from example (a file body) and
+// returns the claude object of the bytes the apply would write, and the seed
+// path.
+func installSeedClaude(t *testing.T, example []byte) map[string]json.RawMessage {
+	t.Helper()
+	home, clone := t.TempDir(), t.TempDir()
+	target := filepath.Join(home, "config", pfmconfig.FileName)
+	if err := os.WriteFile(filepath.Join(clone, "example.pfm.config.json"), example, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtimeConfig := pfmconfig.Runtime{
+		Config: pfmconfig.Config{Path: target},
+		Paths: paths.Values{
+			Home:  home,
+			Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, "codex")}},
+		},
+	}
+	got, seeded, err := InstallConfig(runtimeConfig, &paths.MapEnv{}, clone)
+	if err != nil || seeded == "" {
+		t.Fatalf("InstallConfig seeded=%q err=%v", seeded, err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(got.SeedContent, &document); err != nil {
+		t.Fatalf("seed bytes are not JSON: %v\n%s", err, got.SeedContent)
+	}
+	var claude map[string]json.RawMessage
+	if err := json.Unmarshal(document["claude"], &claude); err != nil {
+		t.Fatalf("seed claude block: %v\n%s", err, got.SeedContent)
+	}
+	return claude
+}
+
+// The seed a first install writes leaves out the four claude keys a pfm of the
+// last release refuses (helperModel, pluginCheckoutRoot, plugins, costLedger)
+// while they sit at their defaults, exactly as `pfm config init` does
+// (marshalClaude); the example file itself keeps them, for its parity test.
+func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("find test source")
+	}
+	example, err := os.ReadFile(filepath.Join(filepath.Dir(source), "..", "..", "..", "example.pfm.config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude := installSeedClaude(t, example)
+	for _, key := range []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger"} {
+		if _, present := claude[key]; present {
+			t.Errorf("the seed keeps claude.%s at its default", key)
+		}
+	}
+	if string(claude["permissionMode"]) != `"bypass"` || string(claude["binary"]) != `"claude"` {
+		t.Errorf("the seed lost the other claude keys: %s", claude)
+	}
+}
+
+// A value the example sets away from its default is kept.
+func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
+	claude := installSeedClaude(t, []byte(`{"version":2,"claude":{"helperModel":"claude-custom-1","costLedger":false,`+
+		`"plugins":["agent-effort"],"theme":null}}`))
+	for key, want := range map[string]string{
+		"helperModel": `"claude-custom-1"`, "costLedger": "false", "plugins": `["agent-effort"]`,
+	} {
+		if got := strings.Join(strings.Fields(string(claude[key])), ""); got != want {
+			t.Errorf("seed claude.%s = %q, want %q", key, got, want)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -81,7 +82,78 @@ func InstallConfig(
 		values.Roots[pfmengine.Claude],
 		values.FirstRoot(pfmengine.Codex),
 	)
+	if err != nil {
+		return config, example, err
+	}
+	config.SeedContent, err = seedWithoutDefaultNewKeys(config)
 	return config, example, err
+}
+
+// seedNewClaudeKeys are the claude keys added since v0.79.0, which a pfm of
+// that release refuses as unknown (config.marshalClaude).
+var seedNewClaudeKeys = []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger"}
+
+// seedWithoutDefaultNewKeys is the seed a first install writes: the example's
+// bytes, less each key of seedNewClaudeKeys that config.Marshal would leave out
+// at its default. A fresh config then rolls back to the last release as
+// `pfm config init`'s does; a key the example sets away from its default stays.
+// The probe marshals the loaded config as if the file had not set those keys,
+// so the omission rule stays marshalClaude's alone.
+func seedWithoutDefaultNewKeys(loaded pfmconfig.Config) ([]byte, error) {
+	probe := loaded
+	probe.Sources = make(map[string]pfmconfig.Source, len(loaded.Sources))
+	for key, source := range loaded.Sources {
+		probe.Sources[key] = source
+	}
+	for _, key := range seedNewClaudeKeys {
+		delete(probe.Sources, "claude."+key)
+	}
+	marshaled, err := pfmconfig.Marshal(probe, false)
+	if err != nil {
+		return nil, fmt.Errorf("marshal the seed config for its default claude keys: %w", err)
+	}
+	claudeKey := pfmengine.MustLookup(pfmengine.Claude).LongName
+	var emitted map[string]json.RawMessage
+	if err := json.Unmarshal(marshaled, &emitted); err != nil {
+		return nil, fmt.Errorf("read the marshaled seed config: %w", err)
+	}
+	var emittedClaude map[string]json.RawMessage
+	if err := json.Unmarshal(emitted[claudeKey], &emittedClaude); err != nil {
+		return nil, fmt.Errorf("read the marshaled seed claude block: %w", err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(loaded.SeedContent, &document); err != nil {
+		return nil, fmt.Errorf("read the seed config bytes: %w", err)
+	}
+	var claude map[string]json.RawMessage
+	raw, found := document[claudeKey]
+	if !found {
+		return loaded.SeedContent, nil
+	}
+	if err := json.Unmarshal(raw, &claude); err != nil {
+		return nil, fmt.Errorf("read the seed claude block: %w", err)
+	}
+	removed := false
+	for _, key := range seedNewClaudeKeys {
+		if _, kept := emittedClaude[key]; kept {
+			continue
+		}
+		if _, present := claude[key]; present {
+			delete(claude, key)
+			removed = true
+		}
+	}
+	if !removed {
+		return loaded.SeedContent, nil
+	}
+	if document[claudeKey], err = json.Marshal(claude); err != nil {
+		return nil, fmt.Errorf("encode the seed claude block: %w", err)
+	}
+	seed, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode the seed config: %w", err)
+	}
+	return append(seed, '\n'), nil
 }
 
 func (installer *engine) seedConfig() error {

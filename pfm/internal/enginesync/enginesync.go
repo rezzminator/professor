@@ -49,7 +49,8 @@ type Runner struct {
 // UnavailableError is the binary not executable at $ENGINE_SYNC_BIN when it is
 // set, else at the stable path. Its text is the interface's: every caller shows it as a
 // failure — a failed install step, a failing doctor row, exit 1 — and never
-// as a skip.
+// as a skip, except an install with no source clone and no Codex homes, which
+// has nothing to wire and says so in a visible skip line.
 type UnavailableError struct {
 	Path  string
 	Cause error

@@ -88,7 +88,11 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 				}
 			case "backwards stable":
 				if warnings == 0 || !strings.Contains(text, "stable link moved backwards") ||
-					!strings.Contains(text, "0.3.0") {
+					!strings.Contains(text, "0.3.0") ||
+					!strings.Contains(
+						text,
+						"start a new Claude session so the engine-sync plugin wrapper moves the stable link forward",
+					) {
 					t.Fatalf("doctor %d/%d: %s", warnings, failures, text)
 				}
 			}

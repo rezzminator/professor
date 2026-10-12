@@ -12,8 +12,10 @@ import (
 	goRuntime "runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
@@ -32,6 +34,11 @@ type engine struct {
 	// engineSyncAbsent is set when an uninstall found no engine-sync binary:
 	// the targets step then leaves targets.json with the Codex roles.
 	engineSyncAbsent bool
+	// engineSyncExec and engineSyncDeadline are the test seams of the
+	// engine-sync runner: its process runner and the deadline of `global`;
+	// nil and zero are the real process table and engineSyncGlobalTimeout.
+	engineSyncExec     deps.Runner
+	engineSyncDeadline time.Duration
 	// processBirth reads a pid's start time in epoch seconds; nil is the
 	// native process table. A launch agent started before the pfm binary's
 	// last write runs a replaced build.
@@ -222,6 +229,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireGlobalCommands())
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
+	installer.deferFailure(installer.retireStaleLinkStages())
 	installer.deferFailure(installer.retireLegacySwapCommand())
 	installer.deferFailure(installer.wireEngineSyncGlobal(assets))
 	if len(installer.codexHomes()) != 0 {
@@ -611,6 +619,11 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if _, err := installer.retireUnitEnablements(
 		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
 		retiredUnitNames,
+	); err != nil {
+		return err
+	}
+	if _, err := installer.retireRenamedUnits(
+		ctx, filepath.Join(installer.options.Home, ".config", "systemd", "user"), managerAvailable,
 	); err != nil {
 		return err
 	}
@@ -1346,21 +1359,20 @@ var unitEnablements = []struct {
 	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
 
-func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
-	directory := filepath.Join(installer.options.Home, ".config", "systemd", "user")
-	installer.say("systemd user units -> %s", directory)
-	managerAvailable := installer.userManagerAvailable(ctx)
+// retireRenamedUnits disables each unit pfm renamed away from (a unit file in
+// directory or one the manager still knows) and unlinks its file, reporting
+// whether a file was removed. Install and uninstall both retire them.
+func (installer *engine) retireRenamedUnits(
+	ctx context.Context,
+	directory string,
+	managerAvailable bool,
+) (bool, error) {
 	changed := false
-	enablementChanged, err := installer.retireUnitEnablements(directory, retiredUnitNames)
-	if err != nil {
-		return false, err
-	}
-	changed = changed || enablementChanged
 	for _, name := range retiredUnitNames {
 		target := filepath.Join(directory, name)
 		_, statErr := os.Lstat(target)
 		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
-			return false, fmt.Errorf("inspect retired unit %s: %w", target, statErr)
+			return changed, fmt.Errorf("inspect retired unit %s: %w", target, statErr)
 		}
 		known := statErr == nil
 		if managerAvailable && !known {
@@ -1375,11 +1387,29 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 		}
 		if statErr == nil {
 			if err := installer.retire(target, "superseded by a renamed pfm unit"); err != nil {
-				return false, err
+				return changed, err
 			}
 			changed = true
 		}
 	}
+	return changed, nil
+}
+
+func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
+	directory := filepath.Join(installer.options.Home, ".config", "systemd", "user")
+	installer.say("systemd user units -> %s", directory)
+	managerAvailable := installer.userManagerAvailable(ctx)
+	changed := false
+	enablementChanged, err := installer.retireUnitEnablements(directory, retiredUnitNames)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || enablementChanged
+	retiredChanged, err := installer.retireRenamedUnits(ctx, directory, managerAvailable)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || retiredChanged
 	managedNames := append([]string(nil), unitNames...)
 	if installer.mcpAnyEnabled() {
 		managedNames = append(managedNames, mcpUnitName)

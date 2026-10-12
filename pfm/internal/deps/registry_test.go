@@ -281,3 +281,18 @@ func TestPython3RegistryEntryIsRequiredAndPlatformGated(t *testing.T) {
 		t.Errorf("python3 Parse(%q) = %q, %v; want 3.12.1", "Python 3.12.1\n", got, err)
 	}
 }
+
+func TestGoRegistryInstallHintNamesTheModuleToolchainFloor(t *testing.T) {
+	entries := Registry(Options{Home: t.TempDir(), GOOS: "linux", GOARCH: "amd64"})
+	for _, entry := range entries {
+		if entry.Name != "go" {
+			continue
+		}
+		const want = "install Go 1.27.1 or newer to use pfm update"
+		if entry.InstallHint != want {
+			t.Errorf("go InstallHint = %q, want %q", entry.InstallHint, want)
+		}
+		return
+	}
+	t.Fatal("registry has no go entry")
+}

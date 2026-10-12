@@ -144,8 +144,10 @@ func WriteScratch(directory, pattern string, content []byte) (path string, clean
 }
 
 // LinkStagePrefix names the entry Symlink and SymlinkOverDir stage beside a
-// target; a crash can leave one behind, and a reader listing the target's
-// directory skips it.
+// target; a crash can leave one behind (SymlinkOverDir: the displaced
+// directory). The Codex command preview skips one, and pfm install removes one
+// older than ten minutes from the registry directories it manages; no other
+// reader skips it.
 const LinkStagePrefix = ".pfm-link-"
 
 // Symlink replaces a managed link atomically, so readers see the old or new target.

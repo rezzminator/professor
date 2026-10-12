@@ -66,12 +66,12 @@ func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got := rewriteCodeReview(testCase.in)
+			got := RewriteCodeReview(testCase.in)
 			if got != testCase.want {
-				t.Fatalf("rewriteCodeReview(%q) = %q, want %q", testCase.in, got, testCase.want)
+				t.Fatalf("RewriteCodeReview(%q) = %q, want %q", testCase.in, got, testCase.want)
 			}
-			if again := rewriteCodeReview(got); again != got {
-				t.Fatalf("rewriteCodeReview is not idempotent: second pass = %q, first = %q", again, got)
+			if again := RewriteCodeReview(got); again != got {
+				t.Fatalf("RewriteCodeReview is not idempotent: second pass = %q, first = %q", again, got)
 			}
 		})
 	}
@@ -83,7 +83,7 @@ func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
 // slot the surrounding prose tells the lander to fill — a baked effort would
 // silently review a 40-file flight at the cheapest tier.
 func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T) {
-	got := rewriteCodeReview("Run `/code-review " + codeReviewSlot + "` over the flight's diff.")
+	got := RewriteCodeReview("Run `/code-review " + codeReviewSlot + "` over the flight's diff.")
 	want := "Run `" + codexReviewShellCommand(reviewTestModel, codeReviewSlot) + "` over the flight's diff."
 	if got != want {
 		t.Fatalf("slot form = %q, want %q", got, want)
@@ -94,10 +94,10 @@ func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T)
 	if !strings.Contains(got, codeReviewFlightPrompt) || strings.Contains(got, codeReviewPrompt) {
 		t.Fatalf("slot form carries the task-scoped prompt, want the flight-scoped one: %q", got)
 	}
-	if again := rewriteCodeReview(got); again != got {
+	if again := RewriteCodeReview(got); again != got {
 		t.Fatalf("slot rewrite is not idempotent: second pass = %q, first = %q", again, got)
 	}
-	level := rewriteCodeReview("/code-review low")
+	level := RewriteCodeReview("/code-review low")
 	if !strings.Contains(level, codeReviewPrompt) || strings.Contains(level, codeReviewSlot) {
 		t.Fatalf("a written level must stay task-scoped at a baked effort: %q", level)
 	}
@@ -111,7 +111,7 @@ func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {
 	if strings.Contains(prompt, codeReviewCommand) {
 		t.Fatalf("the composed Codex fleet prompt still spells %s", codeReviewCommand)
 	}
-	mapped := rewriteCodeReview("- Your last step is `" + codeReviewCommand + " low` over your own change.\n")
+	mapped := RewriteCodeReview("- Your last step is `" + codeReviewCommand + " low` over your own change.\n")
 	if strings.Contains(mapped, codeReviewCommand) || !strings.Contains(mapped, reviewWant("low")) {
 		t.Fatalf("the compose-time mapping left a fixture tail unmapped:\n%s", mapped)
 	}

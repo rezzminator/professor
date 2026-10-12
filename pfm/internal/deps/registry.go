@@ -151,7 +151,7 @@ var fixedCommands = []Entry{
 		Purpose:     "building a staged pfm update",
 		VersionArgs: []string{"version"},
 		Parse:       firstVersion,
-		InstallHint: "install Go 1.24 or newer to use pfm update",
+		InstallHint: "install Go 1.27.1 or newer to use pfm update",
 	},
 	{
 		Name:        "systemctl",

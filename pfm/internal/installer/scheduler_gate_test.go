@@ -30,6 +30,10 @@ type fakeRunner struct {
 	// "inactive"; otherwise the probe fails like an unanswered one.
 	scheduleActive bool
 	scheduleStates []string
+	// reminderStates is the same script for the retired pfm-reminder.service /
+	// com.professor.pfm.reminder probe: unset, it answers idle wherever the
+	// other probes are scripted to answer at all.
+	reminderStates []string
 	// mcpState is pfm-mcp.service's ActiveState after its restart ("" is
 	// active).
 	mcpState string
@@ -63,9 +67,33 @@ const nameSyncStateProbe = "systemctl --user show --property=ActiveState --value
 // schedule fire.
 const scheduleStateProbe = "systemctl --user show --property=ActiveState --value pfm-schedule.service"
 
+// reminderStateProbe is the exact argv schedulerServiceRunning runs for the
+// retired reminder fire.
+const reminderStateProbe = "systemctl --user show --property=ActiveState --value pfm-reminder.service"
+
 func (runner *fakeRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
 	runner.calls = append(runner.calls, call)
+	if call == reminderStateProbe || (name == "launchctl" && strings.HasSuffix(call, "/"+retiredScheduleLaunchdLabel)) {
+		switch {
+		case len(runner.reminderStates) != 0:
+			state := runner.reminderStates[0]
+			if len(runner.reminderStates) > 1 {
+				runner.reminderStates = runner.reminderStates[1:]
+			}
+			if name == "launchctl" {
+				if state == "activating" {
+					return []byte("state = running\n"), nil
+				}
+				return []byte("state = not running\n"), nil
+			}
+			return []byte(state + "\n"), nil
+		case name == "launchctl" && len(runner.scheduleStates) != 0:
+			return []byte("state = not running\n"), nil
+		case name != "launchctl" && (runner.nameSyncIdle || runner.nameSyncActive):
+			return []byte("inactive\n"), nil
+		}
+	}
 	if len(runner.scheduleStates) != 0 {
 		if call == scheduleStateProbe || (name == "launchctl" && strings.HasSuffix(call, "/"+scheduleLaunchdLabel)) {
 			state := runner.scheduleStates[0]
@@ -492,5 +520,44 @@ func TestCheckSchedulerWaitsForShortSchedule(t *testing.T) {
 	unprobed, err := CheckScheduler(context.Background(), runner, func(time.Duration) {})
 	if unprobed != "" || err != nil {
 		t.Fatalf("check=(%q,%v); want short schedule to finish", unprobed, err)
+	}
+}
+
+// The install about to retire the old reminder agent/unit waits out a fire of
+// it exactly as it waits out the schedule job: booting it out or stopping it
+// mid-delivery would cut a half-typed message.
+func TestAwaitSchedulerGateWaitsOutTheRetiredReminder(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"finishes", "bound"} {
+		t.Run(scenario, func(t *testing.T) {
+			wantErr := ErrScheduleRunning
+			if schedulerIsLaunchd {
+				wantErr = ErrScheduleAgentRunning
+			}
+			runner := &fakeRunner{
+				nameSyncIdle: true, scheduleStates: []string{"inactive"},
+				reminderStates: []string{"activating", "activating", "inactive"},
+			}
+			wantSleeps := []time.Duration{5 * time.Second, 5 * time.Second}
+			if scenario == "bound" {
+				runner.reminderStates = []string{"activating"}
+				wantSleeps = make([]time.Duration, 18)
+				for i := range wantSleeps {
+					wantSleeps[i] = 5 * time.Second
+				}
+			} else {
+				wantErr = nil
+			}
+			var output bytes.Buffer
+			var sleeps []time.Duration
+			probed, err := awaitSchedulerGate(context.Background(), Options{
+				Runner: runner, Stdout: &output,
+				Sleep: func(d time.Duration) { sleeps = append(sleeps, d) },
+			})
+			if !probed || !errors.Is(err, wantErr) || (wantErr == nil && err != nil) ||
+				!reflect.DeepEqual(sleeps, wantSleeps) {
+				t.Fatalf("gate=(%v,%v) sleeps=%v, want (true,%v) %v", probed, err, sleeps, wantErr, wantSleeps)
+			}
+		})
 	}
 }

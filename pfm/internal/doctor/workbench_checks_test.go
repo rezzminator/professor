@@ -233,13 +233,13 @@ func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
 				testjail.FakeEngineSync(t, `{"ok":false,"problems":["`+conflict+`","`+stale+`"],`+
 					`"rebuildable":["`+stale+`"],"error":""}`, 1)
 				want = fmt.Sprintf(
-					"doctor: workbench %s opencode mirror FAILED: %s — the next launch there fails; fix it, then run engine-sync opencode build %s\n",
+					"doctor: workbench %s opencode mirror FAILED: %s — the next launch there fails; fix it, then run pfm opencode build %s\n",
 					dir,
 					conflict,
 					dir,
 				) +
 					fmt.Sprintf(
-						"doctor: workbench %s opencode mirror STALE: %s — rebuilt by engine-sync opencode build %s once the failures are fixed\n",
+						"doctor: workbench %s opencode mirror STALE: %s — rebuilt by pfm opencode build %s once the failures are fixed\n",
 						dir,
 						stale,
 						dir,

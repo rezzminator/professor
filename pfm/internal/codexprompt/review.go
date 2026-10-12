@@ -67,11 +67,11 @@ var codeReviewEfforts = map[string]string{
 // the set is left in the text where a reader can see it, never silently eaten.
 var codeReviewFlags = []string{"--fix", "--comment", "--post", "--no-post"}
 
-// rewriteCodeReview replaces every /code-review invocation in text with the
+// RewriteCodeReview replaces every /code-review invocation in text with the
 // Codex shell review command, leaving the prose around it exactly as it was.
 // The model is Professor's review model, independent of engine-sync's
 // neutral model defaults.
-func rewriteCodeReview(text string) string {
+func RewriteCodeReview(text string) string {
 	if !strings.Contains(text, codeReviewCommand) {
 		return text
 	}

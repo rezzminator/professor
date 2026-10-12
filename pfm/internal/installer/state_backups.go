@@ -16,7 +16,9 @@ import (
 )
 
 // stateBackupMaxAge is how long a backup or archive pfm set aside under its
-// state dir is kept: pfm install removes it once it is older.
+// state dir is kept: pfm install removes it once it is older. The dirs pfm
+// doctor moved aside (DoctorAside) are the exception: doctor told the user
+// they were "moved aside, never deleted", so install keeps them at any age.
 const stateBackupMaxAge = 30 * 24 * time.Hour
 
 // stateStampLength is the length of the stamp every stamping writer below
@@ -38,7 +40,8 @@ type StateBackup struct {
 	// Err is a failed look at Path; Made is then zero.
 	Err error
 	// DoctorAside marks pfm doctor's own move-aside dirs: --stale never lists
-	// them, since --purge would move its backup dir into itself.
+	// them, since --purge would move its backup dir into itself, and install's
+	// expiry never removes them, since doctor promised they are never deleted.
 	DoctorAside bool
 }
 
@@ -100,7 +103,7 @@ func stateBackupKinds(home, stateDB, cacheDB string) []stateBackupKind {
 			made: madeByStamp(".pre-professor-", time.Local),
 		},
 		// doctor --stale --purge's createStaleBackupDir (local stamp) and
-		// hostcheck's strayAsideDir (UTC stamp).
+		// hostcheck's strayAsideDir (UTC stamp): kept, never expired.
 		stateBackupKind{
 			check: "stale-backup", dir: filepath.Join(state, "stale-backup"),
 			made: madeByStamp("", time.Local), doctorAside: true,
@@ -151,7 +154,8 @@ func StateBackups(home, stateDB, cacheDB string) []StateBackup {
 }
 
 // expireStateBackups removes each backup made more than stateBackupMaxAge
-// ago, naming what it freed; a backup inside its window is never touched.
+// ago, naming what it freed; a backup inside its window and a doctor-aside dir
+// of any age are never touched.
 func (installer *engine) expireStateBackups() {
 	_, cacheDB, err := pfmconfig.StatePathsFrom(installer.env(), installer.options.Home)
 	if err != nil {
@@ -163,7 +167,7 @@ func (installer *engine) expireStateBackups() {
 			installer.warnStateExpiry(backup.Path, backup.Err)
 			continue
 		}
-		if now.Sub(backup.Made) <= stateBackupMaxAge {
+		if backup.DoctorAside || now.Sub(backup.Made) <= stateBackupMaxAge {
 			continue
 		}
 		installer.removeStatePath(backup.Path, "expired backup", "made "+backup.Made.Format("2006-01-02")+", ")

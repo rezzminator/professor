@@ -81,7 +81,7 @@ func ReportEngineSyncVersions(w io.Writer, home string, env paths.Env) (warnings
 		if order < 0 {
 			fmt.Fprintf(
 				w,
-				"doctor: engine-sync state=WARN stable link moved backwards: stable %s at %s, cached %s at %s — run make host-install; inspect any FORCE=1 downgrade\n",
+				"doctor: engine-sync state=WARN stable link moved backwards: stable %s at %s, cached %s at %s — start a new Claude session so the engine-sync plugin wrapper moves the stable link forward; inspect any FORCE=1 downgrade\n",
 				stableVersion,
 				stable,
 				version,

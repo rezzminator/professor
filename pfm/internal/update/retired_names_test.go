@@ -98,6 +98,7 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"the /chat route",
 		"https://example.com/wave and http://localhost:3000/jc",
 		"/wave-something",
+		"/random, /rndx and /rnd-seed; https://example.com/rnd",
 	} {
 		if hits := retiredNameHits("f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
@@ -118,6 +119,8 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"/documenter:archive":              "/documenter",
 		"skills/wave-builder/SKILL.md":     "wave-builder",
 		"/qa:live":                         "/qa:live",
+		"run /rnd new chain slug goal":     "/rnd",
+		"(/rnd:hammer)":                    "/rnd",
 		"x .claude/commands/pfm/references/audit-scopes.md": ".claude/commands/pfm/references/audit-scopes.md",
 	} {
 		hits := retiredNameHits("f", line)

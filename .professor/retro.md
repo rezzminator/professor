@@ -169,6 +169,7 @@ Amend: judgment — verbatim text travels by file the script wrote, named in a s
 ## 2026-09-25 — Claude Code refuses a sub-agent's REPORT.md
 Observed: the reviewer benchmark's lead wrote `SANDBOX/REPORT.md` and got `Subagents should return findings as text, not write report files` — Claude Code 2.1.282 refuses any sub-agent Write whose basename matches `^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$`. `reviewer` now writes `review.md`. `templates/project/commands/rnd.md` still has its `general-purpose` run agent write `REPORT.md` (lines 27, 39, 43, 49), so that deliverable can never land.
 Amend: templates/project/commands/rnd.md — rename the run's REPORT.md to a name outside the refused pattern (e.g. `RESULT.md`) end to end; any prompt that names a sub-agent's output file keeps it outside that pattern.
+Resolved: 2026-10-12 — moot: /rnd and templates/project/commands/rnd.md are removed from the blueprint
 
 ## 2026-10-02 — managed settings shut every user plugin out of the system prompt
 Observed: a cache-live-control probe's `prompt.section` hook never ran: the debug log showed 94 of 94 calls `bypassed by cc-plugin-sec-default (tier user)`, and `prompt.context` the same. The trigger is `cc-plugin-sec-default@builtin seated outermost: this machine has managed settings`; the only managed file is pfm's `managed-settings.d/pfm.json` (`cleanupPeriodDays` alone). Every Professor plugin that shapes prompts is limited to `prompt.submit` context on a pfm host. Whether a host without managed settings admits user-tier section hooks is unproven.

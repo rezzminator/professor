@@ -8,7 +8,7 @@ An epic is an initiative-level persistent context at `docs/epics/{name}/`. It su
 docs/epics/{name}/
 ├── manifest.md          ← anchor: frontmatter + narrative + decisions + load index
 ├── update.md            ← work doc: current state + per-area delivered
-├── {topic}.md           ← optional topic files (RND results, RR reports, POC notes), each registered in manifest ## Files
+├── {topic}.md           ← optional topic files (research results, RR reports, POC notes), each registered in manifest ## Files
 └── archive/             ← superseded material (cold — never auto-loaded)
 ```
 

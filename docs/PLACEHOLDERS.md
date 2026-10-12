@@ -163,7 +163,6 @@ The opt-in Tier B commands ship as archetype skeletons whose domain content is o
 | `/officer` | `{REGULATION}`, `{REGULATION_FRAMEWORK_DOCS}`, `{ENFORCEMENT_AUTHORITY}`, `{DATA_SUBJECT_RIGHTS}`, `{INCIDENT_NOTIFICATION_TIMELINE}` |
 | `/mentor` | `{MARKET_SEGMENT}`, `{JURISDICTION}`, `{LEGAL_ENTITY_TYPE}`, `{FUNDING_LANDSCAPE}`, `{REGULATORY_BODIES}` |
 | `/marketer` | `{CHANNEL_LANDSCAPE}`, `{TARGET_LANGUAGE}`, `{COMPETITIVE_LANDSCAPE}`, `{INDUSTRY_CONFERENCES}`, `{AUDIENCE_VOCABULARY}`, `{USER_PERSONA}` |
-| `/rnd` | `{SECONDARY_LANG}` |
 
 A named regulator, competitor, conference, or association surviving in one of these templates is a leak, not a default — the archetype keeps the SHAPE of the answer, never the answer.
 

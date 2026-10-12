@@ -30,7 +30,9 @@ function fixture(t, codex = {}, project = { version: 1 }, machine = {}, files = 
   if (project !== null) put(".claude/engine-sync.json", JSON.stringify(project));
   put("home/.config/engine-sync/config.json", JSON.stringify({ version: 1, codex, ...machine }));
   mkdirSync(join(root, "scripts"));
-  copyFileSync(join(ROOT, "scripts/check-agent-roster.mjs"), join(root, "scripts/check-agent-roster.mjs"));
+  copyFileSync(process.env.ROSTER_CHECK_SUT || join(ROOT, "scripts/check-agent-roster.mjs"), join(root, "scripts/check-agent-roster.mjs"));
+  if (existsSync(join(ROOT, "scripts/agent-source-inventory.py")))
+    copyFileSync(join(ROOT, "scripts/agent-source-inventory.py"), join(root, "scripts/agent-source-inventory.py"));
   const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: configHome, ENGINE_SYNC_BIN: binary };
   for (const key of ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "ENGINE_SYNC_HOME", "ENGINE_SYNC_STATE", "ENGINE_SYNC_WORKBENCH_MARKER",
     "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"])
@@ -71,6 +73,22 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
     const result = check(fixture(t, codex, project, machine, files));
     assert.equal(result.status, 0, result.out);
     assert.match(result.out, new RegExp(`agent-roster: clean — ${codexCount} Codex and ${openCodeCount} OpenCode agents match source`));
+  });
+}
+
+for (const [name, path, header, status, message] of [
+  ["project from", ".claude/agents/local.md", "from: general-purpose", 2, /machine scope only/],
+  ["project abstract", ".claude/agents/local.md", "abstract: true", 2, /machine scope only/],
+  ["abstract quoted model", "templates/global/agents/layer.md", 'abstract: true\nmodel: "smart"', 0, /agent-roster: clean/],
+  ["abstract model hygiene", "templates/global/agents/layer.md", 'abstract: true\nmodel: "smart invalid"', 1, /not one bare alias/],
+  ["quoted declaration key", "templates/global/agents/derived.md", '"from": general-purpose\nmodel: "smart"', 0, /agent-roster: clean/],
+]) {
+  test(`machine declaration headers: ${name}`, (t) => {
+    const result = check(fixture(t, {}, {version: 1}, {}, {
+      [path]: `---\nname: ${path.endsWith('layer.md') ? 'layer' : path.endsWith('derived.md') ? 'derived' : 'local'}\ndescription: Fixture role\n${header}\n---\nFixture body.\n`,
+    }, true));
+    assert.equal(result.status, status, result.out);
+    assert.match(result.out, message);
   });
 }
 
@@ -264,7 +282,7 @@ for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
   });
 }
 
-// The GPT twins are derived agents: templates/global/agents/variants.json declares them, engine-sync renders
+// The GPT twins are derived agents: their machine-scoped .md declarations name their base, engine-sync renders
 // them, and a host that opts in with --capability gpt-agents links them. The properties below are therefore
 // pinned against what engine-sync RENDERS from the shipped declaration, never against a source file.
 const CAPABILITY = 'gpt-agents';
@@ -273,6 +291,8 @@ const twins = [
   ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],
   ['gpt-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
   ['gpt-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
+  ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
+  ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
   ['sol', 'gpt-6.1-sol', 'high'],
   ['luna', 'gpt-6-luna', 'medium'],
   ['terra', 'gpt-5.6-terra', 'high'],
@@ -343,7 +363,7 @@ test('the shipped variants render with zero errors with and without the gpt-agen
   }
 });
 
-test('the gpt-agents capability decides whether the eight GPT twins are linked', () => {
+test('the gpt-agents capability decides whether the ten GPT twins are linked', () => {
   const on = renderShipped([CAPABILITY]);
   const off = renderShipped([]);
   for (const [name] of twins) {
@@ -386,13 +406,23 @@ for (const [name, model, effort, role] of twins) {
     const renamed = name.startsWith('gpt-foreman')
       ? original.replaceAll('"flights-foreman"', '"gpt-foreman"').replaceAll('"flights-mechanical-executor"', '"gpt-executor"')
         .replaceAll('"flights-lander"', '"gpt-lander"')
-      : original;
+      : role === 'flights-lander'
+        ? original.replace(/(^|[^A-Za-z0-9_./:-])(reviewer-pro|reviewer)(?![A-Za-z0-9_/-]|\.[A-Za-z0-9])/g,
+          (_, before, agent) => `${before}gpt-${agent}`)
+        : original;
     assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(renamed).trimEnd()), `${name}: the rendered body is not the full ${role} manual`);
-    assert.ok(text.includes('your parent hears from you only by that return'), `${name}: the return law is not prepended`);
-    assert.ok(text.includes('run.md, briefs, returns/*.md, gate.md, red/*'), `${name}: the return law lost its file list`);
+    if (role.startsWith('flights-')) {
+      assert.ok(text.includes('your parent hears from you only by that return'), `${name}: the return law is not prepended`);
+      assert.ok(text.includes('run.md, briefs, returns/*.md, gate.md, red/*'), `${name}: the return law lost its file list`);
+    } else {
+      assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
+      assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-lander']);
+    }
     if (role === 'flights-lander') {
       assert.ok(fm.tools.split(',').map((tool) => tool.trim()).includes('Agent'),
         `${name}: lander manual requires Agent for review dispatch`);
+      for (const reviewer of ['gpt-reviewer', 'gpt-reviewer-pro'])
+        assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
     }
     if (role === 'flights-foreman') {
       for (const spawned of ['gpt-foreman', 'gpt-executor', 'gpt-lander'])

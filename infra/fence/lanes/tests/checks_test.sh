@@ -688,7 +688,7 @@ case "$1" in
       cat "$home/.config/engine-sync/config.json" > "$MIRROR_CALLS.policy"
     else printf 'missing\n' > "$MIRROR_CALLS.policy"; fi
     if [ "${STUB_ES_GLOBAL_RC:-0}" -ne 0 ]; then
-      echo 'engine-sync global: variants.json: variant "beta-max" from beta.md: "replace" text "ghost" occurs 0 times in the body, want exactly 1'
+      echo 'engine-sync global: beta-max.md: variant "beta-max" from beta.md: "replace" text "ghost" occurs 0 times in the body, want exactly 1'
       exit "$STUB_ES_GLOBAL_RC"
     fi
     mkdir -p "$home/.claude/agents" "$home/.codex/agents"
@@ -800,10 +800,22 @@ cs_case "STUB_CS_FAIL=$REPO_ROOT/.claude/scripts/codex-sync.sh"
 if [ "$(wc -l < "$T/cs.calls" | tr -d ' ')" = 2 ] && grep -Fxq 'FAILSTEP codex-sync regression FAILED (.claude/scripts/codex-sync.sh) — see output' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'a red codex-sync door test on one twin is one red step naming it'
 else bad 'codex-sync door failure' "$(cat "$T/cs.calls")" "$(cat "$T/es.out")"; fi
-# checks_templates_global_variants: every variant templates/global/agents/variants.json declares is rendered by the
+# checks_templates_global_variants: every machine agent-file declaration is rendered by the
 # engine-sync it built into a jail home; a render error, a short count and an unbuilt binary are each one red step.
 mkdir -p "$REPO_ROOT/templates/global/agents"
-printf '%s\n' '{"version":2,"variants":{"gamma-lite":{"from":"gamma"},"alpha-pro":{"from":"alpha"},"beta-max":{"from":"beta"}}}' > "$REPO_ROOT/templates/global/agents/variants.json"
+gv_sources() {
+  mkdir -p "$REPO_ROOT/templates/global/agents"
+  for n in alpha-pro beta-max gamma-lite; do
+    printf -- '---\nname: %s\nfrom: %s\n---\n' "$n" "${n%-*}" > "$REPO_ROOT/templates/global/agents/$n.md"
+  done
+  printf -- '---\nname: shared\nabstract: true\n---\n' > "$REPO_ROOT/templates/global/agents/shared.md"
+}
+gv_sources
+# The fixture owns its scanner; the real compiler remains stubbed at its boundary.
+mkdir -p "$REPO_ROOT/scripts"
+if [ -f "${SUT%/*}/../../scripts/agent-source-inventory.py" ]; then
+  cp "${SUT%/*}/../../scripts/agent-source-inventory.py" "$REPO_ROOT/scripts/agent-source-inventory.py"
+fi
 gv_names='alpha-pro beta-max gamma-lite'
 gv_count=3
 gv_jailed() { [ -z "$(ls -A "$TMP_BASE/engine-sync" | grep '^global-variants\.')" ]; } # no jail left under $TMP_BASE
@@ -849,27 +861,51 @@ if [ ! -s "$MIRROR_CALLS" ] &&
   grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'global agent variants without an engine-sync binary are NOT RENDERED, never a pass'
 else bad 'global variants, no binary' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
-gv_decl="$REPO_ROOT/templates/global/agents/variants.json"
-for gv_state in missing unparseable empty retired array; do # a declaration that names nothing renderable is red before engine-sync runs
+gv_dir="$REPO_ROOT/templates/global/agents"
+for gv_state in missing unparseable empty invalid; do
+  rm -rf "$gv_dir"
   case "$gv_state" in
-    missing) rm -f "$gv_decl"; gv_want="FAILSTEP global agent variants NOT RENDERED — $gv_decl is missing, so nothing was looked up" ;;
-    unparseable) printf '%s\n' '{"alpha-pro":' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: ' ;;
-    empty) printf '%s\n' '{"version":2,"variants":{}}' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json declares no variant, so nothing could render' ;;
-    retired) printf '%s\n' '{"alpha-pro":{"from":"alpha"}}' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: ' ;;
-    array) printf '%s\n' '["alpha-pro"]' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: ' ;;
+    missing) gv_want="FAILSTEP global agent variants NOT RENDERED — $gv_dir is missing, so nothing was looked up" ;;
+    unparseable) mkdir -p "$gv_dir"; printf -- '---\nfrom: [\n---\n' > "$gv_dir/broken.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources do not parse: ' ;;
+    empty) mkdir -p "$gv_dir"; printf -- '---\nabstract: true\n---\n' > "$gv_dir/shared.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources declare no variant, so nothing could render' ;;
+    invalid) mkdir -p "$gv_dir"; printf -- '---\nfrom: []\n---\n' > "$gv_dir/broken.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources do not parse: ' ;;
   esac
   es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names"
   if [ ! -s "$MIRROR_CALLS" ] && grep -Fq "$gv_want" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
-    ok "variants.json ($gv_state) is NOT RENDERED, red, with engine-sync never run"
-  else bad "global variants, $gv_state declaration" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+    ok "agent sources ($gv_state) are NOT RENDERED, red, with engine-sync never run"
+  else bad "global variants, $gv_state source" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 done
-printf '%s\n' '{"version":2,"variants":{"gamma-lite":{"from":"gamma"},"alpha-pro":{"from":"alpha"},"beta-max":{"from":"beta"}}}' > "$gv_decl"
-gv_without_node() { need_tool() { [ "$1" != node ]; }; checks_templates_global_variants; }
-es_case gv_without_node "STUB_ES_RENDER=$gv_names"
+rm -rf "$gv_dir"; gv_sources
+gv_without_python() { need_tool() { [ "$1" != python3 ]; }; checks_templates_global_variants; }
+es_case gv_without_python "STUB_ES_RENDER=$gv_names"
 if [ ! -s "$MIRROR_CALLS" ] && [ ! -s "$T/es-build.calls" ] &&
   grep -Fxq 'FAILSTEP global agent variants NOT RENDERED — the toolchain is missing' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
-  ok 'global agent variants without node are NOT RENDERED, nothing built or run'
-else bad 'global variants, no node' "$(cat "$T/es-build.calls")" "$(cat "$T/es.out")"; fi
+  ok 'global agent variants without python3 are NOT RENDERED, nothing built or run'
+else bad 'global variants, no python3' "$(cat "$T/es-build.calls")" "$(cat "$T/es.out")"; fi
+# A.09 counts effective Claude agents eligible for Codex, not raw layers or declarations.
+lane_agents="$T/lane-agents"
+mkdir -p "$lane_agents/blueprint/templates/global/agents" "$lane_agents/home/.claude/agents" "$lane_agents/home/.codex/agents" "$lane_agents/blueprint/scripts"
+cp "${SUT%/*}/../../scripts/agent-source-inventory.py" "$lane_agents/blueprint/scripts/agent-source-inventory.py"
+printf -- '---\nname: alpha\nmodel: smart\n---\n' > "$lane_agents/blueprint/templates/global/agents/alpha.md"
+printf -- '---\nname: layer\nabstract: true\n---\n' > "$lane_agents/blueprint/templates/global/agents/layer.md"
+printf -- '---\nname: derived\nfrom: alpha\n---\n' > "$lane_agents/blueprint/templates/global/agents/derived.md"
+cp "$lane_agents/blueprint/templates/global/agents/alpha.md" "$lane_agents/home/.claude/agents/alpha.md"
+printf -- '---\nname: derived\nengines:\n  codex: false\n---\n' > "$lane_agents/home/.claude/agents/derived.md"
+printf '# Generated by engine-sync from alpha.md\n' > "$lane_agents/home/.codex/agents/alpha.toml"
+sed -n '/^beat A.09-codex-agents$/,/^# .*A.10/p' "${SUT%/*}/lanes/A.sh" > "$lane_agents/beat.sh"
+(
+  export HOME="$lane_agents/home"
+  BLUEPRINT="$lane_agents/blueprint"
+  beat() { :; }; spends() { :; }; _lane_log_only() { :; }
+  one_line() { tr '\n' ' ' <<<"$1"; }
+  pfm() { printf '%s\nCODEX AGENTS PASS\n' "$HOME/.codex/agents/alpha.toml: 43 B, parses clean"; }
+  fail() { printf 'FAIL %s\n' "$*"; }
+  pass() { printf 'PASS %s\n' "$*"; }
+  source "$lane_agents/beat.sh"
+) > "$T/lane-agents.out" 2>&1
+if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
+  ok 'A.09 judges one compiled agent, not an abstract or a Claude-only declaration'
+else bad 'A.09 effective agents' "$(cat "$T/lane-agents.out")"; fi
 es_case checks_templates_mirrors_opencode
 want="$(printf '%s\n%s' \
   "opencode check $REPO_ROOT --home $TMP_BASE/engine-sync/opencode-verify-home" \

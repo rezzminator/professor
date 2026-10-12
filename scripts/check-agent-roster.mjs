@@ -76,6 +76,42 @@ const generatedNames = (dir, extension) => existsSync(dir)
       .map((name) => name.slice(0, -extension.length)).sort()
   : [];
 
+// Claude Code sends an agent's frontmatter `model:` value to the API verbatim —
+// an inline `# comment` included — so `fable # …` is a 404 model_not_found.
+// Every agent source's model value is one bare alias or id.
+const agentSourceDirs = [
+  ".claude/agents",
+  "templates/global/agents",
+  "templates/project/agents",
+];
+let modelLinesRead = 0;
+for (const dir of agentSourceDirs) {
+  const directory = join(ROOT, dir);
+  if (!probe(directory)) continue;
+  const args = ["-I", join(ROOT, "scripts/agent-source-inventory.py"), directory];
+  if (dir !== "templates/global/agents") args.push("--project");
+  const scan = spawnSync("python3", args, { encoding: "utf8" });
+  if (scan.error || scan.status !== 0)
+    compilerError(scan.error || scan.stderr || `agent source inventory exited ${scan.status}`, args);
+  for (const {name, kind, model} of JSON.parse(scan.stdout)) {
+    const text = readFileSync(join(directory, `${name}.md`), "utf8");
+    const front = text.startsWith("---\n") ? text.slice(4, text.indexOf("\n---", 4)) : "";
+    const line = front.split("\n").find((l) => /^model:/.test(l));
+    if (!line) continue;
+    modelLinesRead++;
+    // Declarations are parsed and re-emitted by the compiler; Claude never reads their YAML quotes.
+    const value = kind !== "original" ? model : line.slice("model:".length).trim();
+    if (typeof value !== "string" || !/^[A-Za-z0-9._\[\]-]+$/.test(value))
+      failures.push(
+        `${dir}/${name}.md: frontmatter model "${value}" is not one bare alias — the harness sends it to the API verbatim`,
+      );
+  }
+}
+if (!modelLinesRead)
+  failures.push(
+    `agent model check read no model line in ${agentSourceDirs.join(", ")} — the check did not run`,
+  );
+
 // Generated mirrors are never tracked (see .gitignore); a fresh clone has
 // neither directory until its compiler runs. That is the pre-generate state,
 // not a roster mismatch — reported by name, distinct exit code, so a
@@ -209,34 +245,6 @@ if (openCodeExpected.includes("gitter")) {
     );
   }
 }
-
-// Claude Code sends an agent's frontmatter `model:` value to the API verbatim —
-// an inline `# comment` included — so `fable # …` is a 404 model_not_found.
-// Every agent source's model value is one bare alias or id.
-const agentSourceDirs = [
-  ".claude/agents",
-  "templates/global/agents",
-  "templates/project/agents",
-];
-let modelLinesRead = 0;
-for (const dir of agentSourceDirs) {
-  for (const name of markdownNames(join(ROOT, dir))) {
-    const text = readFileSync(join(ROOT, dir, `${name}.md`), "utf8");
-    const front = text.startsWith("---\n") ? text.slice(4, text.indexOf("\n---", 4)) : "";
-    const line = front.split("\n").find((l) => /^model:/.test(l));
-    if (!line) continue;
-    modelLinesRead++;
-    const value = line.slice("model:".length).trim();
-    if (!/^[A-Za-z0-9._\[\]-]+$/.test(value))
-      failures.push(
-        `${dir}/${name}.md: frontmatter model "${value}" is not one bare alias — the harness sends it to the API verbatim`,
-      );
-  }
-}
-if (!modelLinesRead)
-  failures.push(
-    `agent model check read no model line in ${agentSourceDirs.join(", ")} — the check did not run`,
-  );
 
 if (failures.length) {
   for (const failure of failures) console.error(`agent-roster: ${failure}`);

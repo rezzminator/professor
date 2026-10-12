@@ -256,11 +256,11 @@ checks_templates_mirrors_generate() {
 }
 
 checks_templates_global_variants() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync" decl="$REPO_ROOT/templates/global/agents/variants.json"
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
   local jail home names declared name rendered=0 missing="" out rc=0 named=""
   head_ "templates — global agent variants render"
-  # templates/global/agents/variants.json declares agents re-emitted from a
-  # source agent with swapped body text. A swap whose text drifted from its
+  # Machine agent .md files with from: declare agents re-emitted from a
+  # source agent with swapped body text; abstract files are layers, not agents. A swap whose text drifted from its
   # source fails only when engine-sync renders it, which an adopter's install
   # does: this step renders every declared variant with the real binary, built
   # from the mounted source, into a jail home and Codex home (the real $HOME is
@@ -270,22 +270,22 @@ checks_templates_global_variants() {
   # nothing would otherwise read as clean). The jail declares the gpt-agents
   # capability, so the opt-in variants render too; the render without it is
   # scripts/check-agent-roster.test.mjs's.
-  if ! need_tool go templates || ! need_tool node templates; then
+  if ! need_tool go templates || ! need_tool python3 templates; then
     fail_step "global agent variants NOT RENDERED — the toolchain is missing"
     return
   elif ! engine_sync_build "$es_bin"; then
     fail_step "global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)"
     return
-  elif [[ ! -f "$decl" ]]; then
-    fail_step "global agent variants NOT RENDERED — $decl is missing, so nothing was looked up"
+  elif [[ ! -d "$sources" ]]; then
+    fail_step "global agent variants NOT RENDERED — $sources is missing, so nothing was looked up"
     return
-  elif ! names="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(d===null||typeof d!=="object"||Array.isArray(d))throw new Error("not a version 2 declaration object");if(d.version!==2)throw new Error("version "+d.version+" is retired — rewrite as version 2");const v=d.variants;if(v===null||typeof v!=="object"||Array.isArray(v))throw new Error("no variants object");console.log(Object.keys(v).sort().join("\n"))' "$decl" 2>&1)"; then
-    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: $names"
+  elif ! names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
+    fail_step "global agent variants NOT RENDERED — agent sources do not parse: $names"
     return
   fi
   declared=$(grep -c . <<<"$names" || true)
   if (( declared == 0 )); then
-    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json declares no variant, so nothing could render"
+    fail_step "global agent variants NOT RENDERED — agent sources declare no variant, so nothing could render"
     return
   fi
   mkdir -p "$TMP_BASE/engine-sync"

@@ -11,10 +11,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
-// MinimumVersion is the first engine-sync that takes --capability and --adopt
-// (and refuses the retired --gpt-agents), which pfm passes on every
-// agent-rendering call.
-const MinimumVersion = "0.3.0-alpha.1"
+// MinimumVersion is the first engine-sync that compiles machine agent-file
+// declarations and excludes abstracts instead of linking them raw.
+const MinimumVersion = "0.3.0-alpha.2"
 
 var releaseVersion = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`)
 

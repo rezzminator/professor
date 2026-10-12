@@ -35,9 +35,9 @@ The description is the agent file's `description:`.
 
 ## Who spawns it
 
-Any caller with a question about code outside this repository: a spec writer learning how an upstream implements a feature, a foreman checking a dependency's behaviour, a research lead. The deeper RR leads reach it through the repository lane, which is not in `rr.md`'s body: `variants.json` puts it into `rr-pro` and `rr-pro-max` as their override of `rr.md`'s § Spawning, whose `rr` text is `` `sub-rr` is the only agent type you spawn. `` A plain `rr` run keeps its one digger and reads a repository only as web pages. The lane costs an `opus` digger and a clone per repository, which the cheap map does not buy.
+Any caller with a question about code outside this repository: a spec writer learning how an upstream implements a feature, a foreman checking a dependency's behaviour, a research lead. The deeper RR leads reach it through the repository lane, which is not in `rr.md`'s body: the `repo-lane.md` abstract puts it into the `rr-pro.md` and `rr-pro-max.md` declarations through `extends: [repo-lane]` as their override of `rr.md`'s § Spawning, whose `rr` text is `` `sub-rr` is the only agent type you spawn. `` A plain `rr` run keeps its one digger and reads a repository only as web pages. The lane costs an `opus` digger and a clone per repository, which the cheap map does not buy.
 
-The override text, the `repo-lane` fragment both entries name:
+The override text, the `repo-lane.md` abstract both declarations extend:
 
 - A sub-area whose answer lives in a public repository's code (how a project implements something, not what a page says about it) goes to `clone-distiller`: one digger per repository, never two on one repository in a round, counted in the round's cap. A sub-area spanning several repositories gets one `clone-distiller` per named repository: a `sub-rr` sent to read several repositories' code guessed raw file URLs that did not exist in a trial run. A later question about a repository a `clone-distiller` already dug goes to a `clone-distiller` on that repository, never to a `sub-rr`, which would re-derive it from web pages.
 - Its brief carries `Repository:`, `Ref:` when the query names one, `History: yes` when a sub-query asks how the code changed over time, the numbered sub-queries, the `Goal:` line and `OUT-DIR: {the RR directory}`.
@@ -139,7 +139,7 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | --- | --- |
 | The agent | `templates/global/agents/clone-distiller.md` |
 | The code reader it spawns | `templates/global/agents/tracer.md`, whose brief contract the code call follows |
-| The lane its briefs come from | `templates/global/agents/variants.json`, the `repo-lane` fragment `rr-pro` and `rr-pro-max` put in § Spawning |
+| The lane its briefs come from | `templates/global/agents/repo-lane.md`, the abstract `rr-pro` and `rr-pro-max` put in § Spawning |
 | The section the lane overrides | `templates/global/agents/rr.md`, § Spawning |
 | The renderer's gate | `scripts/check-agent-roster.test.mjs`, "the shipped variants render with zero errors with and without the gpt-agents capability" |
 | The family doc | `docs/design/RR/rr.md` |

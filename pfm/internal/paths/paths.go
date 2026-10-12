@@ -506,8 +506,8 @@ func Resolve() (Values, error) {
 }
 
 // GeneratedClaudeAgentsDir is where engine-sync global renders the
-// machine-global Claude agent VARIANTS templates/global/agents/variants.json
-// declares — one source agent re-emitted under another name with overridden
+// machine-global Claude agents declared by `from:` in their source .md files
+// — one source agent re-emitted under another name with overridden
 // frontmatter. An original agent is linked straight from the clone and never
 // lands here; only a variant's `{config}/agents/<name>.md` link points into
 // this directory, which pfm's unwire and orphan sweep recognise as pfm-owned.

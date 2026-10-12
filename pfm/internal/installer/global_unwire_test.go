@@ -166,7 +166,11 @@ func TestUninstallRemovesGlobalAgentVariantLinks(t *testing.T) {
 	agentsSource := filepath.Join(home, ".professor", "templates", "global", "agents")
 	writeFixture(t, filepath.Join(agentsSource, "lead.md"),
 		"---\nname: lead\ndescription: lead role.\neffort: low\n---\n\nbody\n")
-	writeFixture(t, filepath.Join(agentsSource, "variants.json"), `{"super-lead":{"from":"lead","effort":"medium"}}`)
+	writeFixture(
+		t,
+		filepath.Join(agentsSource, "super-lead.md"),
+		"---\nname: super-lead\nfrom: lead\neffort: medium\n---\n",
+	)
 	accounts := []string{ClaudeStore(home)}
 	codexHomes := []string{filepath.Join(home, ".codex")}
 	generated := paths.GeneratedClaudeAgentsDir(home)

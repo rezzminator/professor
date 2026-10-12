@@ -1,41 +1,102 @@
 package testjail
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-// StageGlobalAgents links the checkout's machine-global agent sources into
-// {home}/.claude/agents, the Claude half of what pfm install's engine-sync
-// global step wires; a jail reading a role by name finds it there. The
-// compiled Codex roles are engine-sync's, proven in its own gate.
+// StageGlobalAgents links original agents and stages generated stand-ins for
+// declarations. Like the jail's fake engine-sync, these are fixtures, not a
+// second compiler: engine-sync's gate proves the rendered manuals and settings.
+// Abstract layers never enter the registry.
 func StageGlobalAgents(t *testing.T, home string) {
 	t.Helper()
-	source := filepath.Join(checkoutRoot(), "templates", "global", "agents")
-	entries, err := os.ReadDir(source)
+	rows, err := globalAgentFixtures()
 	if err != nil {
-		t.Fatalf("read the global agent sources %s: %v", source, err)
+		t.Fatalf("inventory global agent fixtures: %v", err)
 	}
 	registry := filepath.Join(home, ".claude", "agents")
-	if err := os.MkdirAll(registry, 0o755); err != nil {
-		t.Fatal(err)
+	generated := filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
+	for _, dir := range []string{registry, generated} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create agent fixture directory %s: %v", dir, err)
+		}
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+	for _, row := range rows {
+		if row.Kind == "abstract" {
 			continue
 		}
-		target, link := filepath.Join(source, entry.Name()), filepath.Join(registry, entry.Name())
+		target := row.Path
+		if row.Kind == "declaration" {
+			target = filepath.Join(generated, row.Name+".md")
+			role := ""
+			if row.Role != "" {
+				role = "role: " + row.Role + "\n"
+			}
+			data := "---\nname: " + row.Name + "\n" + role + "description: Generated jail agent fixture.\n---\n\nFixture constitution for " + row.Name + ".\n"
+			if err := os.WriteFile(target, []byte(data), 0o644); err != nil {
+				t.Fatalf("write declaration fixture %s: %v", target, err)
+			}
+		}
+		link := filepath.Join(registry, row.Name+".md")
 		if found, err := os.Readlink(link); err == nil && found == target {
 			continue
 		}
 		if err := os.Symlink(target, link); err != nil {
-			t.Fatal(err)
+			t.Fatalf("link agent fixture %s -> %s: %v", link, target, err)
 		}
 	}
+}
+
+type globalAgentFixture struct{ Name, Path, Kind, Role string }
+
+var agentFixtureCache struct {
+	sync.Once
+	rows []globalAgentFixture
+	err  error
+}
+
+func globalAgentFixtures() ([]globalAgentFixture, error) {
+	agentFixtureCache.Do(func() {
+		python, err := deps.Resolve("python3")
+		if err != nil {
+			agentFixtureCache.err = fmt.Errorf("resolve agent inventory interpreter: %w", err)
+			return
+		}
+		root := checkoutRoot()
+		result, err := (deps.RealRunner{}).Run(context.Background(), []string{
+			python,
+			"-I",
+			filepath.Join(root, "scripts", "agent-source-inventory.py"),
+			filepath.Join(root, "templates", "global", "agents"),
+		}, deps.RunOptions{})
+		if err != nil {
+			agentFixtureCache.err = fmt.Errorf(
+				"read agent fixture inventory: %w: %s%s",
+				err,
+				result.Stderr,
+				result.Stdout,
+			)
+			return
+		}
+		if result.ExitCode != 0 {
+			agentFixtureCache.err = fmt.Errorf(
+				"read agent fixture inventory: exit status %d: %s%s", result.ExitCode, result.Stderr, result.Stdout,
+			)
+			return
+		}
+		if err := json.Unmarshal(result.Stdout, &agentFixtureCache.rows); err != nil {
+			agentFixtureCache.err = fmt.Errorf("decode agent fixture inventory: %w", err)
+		}
+	})
+	return agentFixtureCache.rows, agentFixtureCache.err
 }
 
 // stageTracerIntakeKit stages what the tracer-intake launch hook needs on a

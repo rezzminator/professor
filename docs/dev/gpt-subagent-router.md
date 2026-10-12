@@ -121,7 +121,7 @@ A GPT agent exists only in a session started through the router. pfm's launch li
 
 - **General workers:** `sol`, `terra`, `luna`, pinned to the catalog's current Sol, Terra and Luna IDs.
 - **Fleet roles:** a same-named GPT twin (for example `flights-mechanical-executor`) replaces the file definition, in that session only.
-- **Not an ungated file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails. The shipped twins are therefore `variants.json` declarations that require the `gpt-agents` capability, installed only on a host that sets `claude.gptAgents` ([GPT twins](../design/gpt-twins/gpt-twins.md)).
+- **Not an ungated file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails. The shipped twins are therefore machine-source `{name}.md` declarations with `from:` that require the `gpt-agents` capability, installed only on a host that sets `claude.gptAgents` ([GPT twins](../design/gpt-twins/gpt-twins.md)).
 - **Not an alias remap:** see W2 and W8.
 
 ### Spawning a GPT agent

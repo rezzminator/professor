@@ -17,9 +17,9 @@
 
 | Field | Value |
 | --- | --- |
-| Kind | variant of `rr`, declared in `templates/global/agents/variants.json` |
+| Kind | variant of `rr`, declared in `templates/global/agents/rr-pro-max.md` |
 | Model, effort | `opus`, `medium` |
-| Tools | `WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` — `rr.md`'s list plus `Read`, added by `add.tools` in `variants.json` |
+| Tools | `WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` — `rr.md`'s list plus `Read`, added by `add.tools` in its declaration |
 | Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line; an existing file of the same name is overwritten (§ Read, and the name guard it gives up) |
 | Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |
@@ -28,16 +28,16 @@ Description, verbatim: `Maps a query exhaustively — tier 3, the ultimate: rr-p
 
 ## How the variant is built
 
-`pfm install` renders it from `rr.md` by the same mechanism as `rr-pro`: its `set` overrides `description` and `effort`, its `add` appends `Read` to `tools`, and two `sections` entries replace `rr.md`'s § Budget and § Spawning. The overrides, from `variants.json`:
+`pfm install` renders it from `rr.md` by the same mechanism as `rr-pro`: its frontmatter overrides `description` and `effort`, its `add` appends `Read` to `tools`, its body replaces § Budget, and `extends: [repo-lane]` supplies § Spawning. Both sections carry their base-text hash in `pins:`:
 
 | `rr.md` section | `rr-pro-max` text |
 | --- | --- |
 | § Budget | `- Diggers: at most 8 a round.` · `- Rounds: no ceiling — digging ends only on step 5's other two conditions.` · `- Verification: at most 16 source pages.` |
-| § Spawning | the `repo-lane` fragment: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
+| § Spawning | the `repo-lane.md` abstract: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
 
 - Each override carries the sha256 pin of the `rr.md` section it replaces. An edit to `rr.md`'s § Budget or § Spawning fails the render with `SECTION-DRIFT rr-pro-max: rr.md § {heading} changed since pinned …` until the override is reviewed and `engine-sync variants pin rr-pro-max` re-pins it; a renamed or deleted heading fails with `SECTION-MISSING`. The procedure's steps cite § Budget and § Spawning by name, so an override changes the caps or the lane without touching a step.
 - The fence's `templates.global-variants` step (`infra/fence/checks.sh`, `checks_templates_global_variants`) renders the shipped declaration and agent bodies through the built engine-sync binary, so a drifted pin fails before an install does.
-- An installed engine-sync older than `variants.json` schema version 2 cannot read the declaration, and `pfm install` refuses. The fix is the host mirror build, never an edit to `variants.json`.
+- An installed engine-sync older than `0.3.0-alpha.2` cannot compile declaration files, and `pfm install` refuses. The fix is the host mirror build, never an edit to the declaration.
 
 ## No round ceiling
 
@@ -75,10 +75,10 @@ Two completed runs and one orphaned run on one query (what benchmarks evaluate d
 
 | Surface | File |
 | --- | --- |
-| The declaration | `templates/global/agents/variants.json`, entry `rr-pro-max` |
+| The declaration | `templates/global/agents/rr-pro-max.md` |
 | The body it overrides | `templates/global/agents/rr.md`, § Budget and § Spawning |
-| The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is identical in the `rr-pro` entry |
-| The renderer and its tests | `plugins/engine-sync/internal/source/variant.go`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
+| The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is shared through `templates/global/agents/repo-lane.md` |
+| The renderer and its tests | `plugins/engine-sync/internal/source/variantrender.go`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The hook's docs | `docs/design/hooks/hooks.md`, `docs/dev/pfm-surface.md` |
 | The family doc | `docs/design/RR/rr.md` |

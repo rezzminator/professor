@@ -4,7 +4,7 @@
 
 `reviewer-pro` (`templates/global/agents/reviewer-pro.md`) is `reviewer` plus a trust tracer in every review, a TRUST thread kind in place of EXTERNAL, and a judging rule that treats the commit's own safety claims as the author's threat model. Both tiers read an uncommitted tree (HEAD `WORKTREE`). The pro costs about a third more per review and finds about a third more of the known defects, the hostile-input class above all, at the same price per defect found, while `reviewer` holds the R1 floor. `flights-lander` picks the tier per flight from the sinks the change adds (one hit or more: `reviewer-pro`); `releaser` and merge-gating stay on `reviewer`.
 
-`reviewer-nt` (a `templates/global/agents/variants.json` declaration from `reviewer`) runs without seats: the lead walks every thread and every changed body itself, on a 140-call budget, without the `Agent` tool or the `tracer:use` skill. Five hash-pinned section overrides of `reviewer.md` carry the difference — the opening, Phase 0, Phase 1 (retitled `Walk, then hunt`), Phase 2 and the report — so a later edit to any of them fails its render with `SECTION-DRIFT` until the override is reviewed.
+`reviewer-nt` (a `templates/global/agents/reviewer-nt.md` declaration with `from: reviewer`) runs without seats: the lead walks every thread and every changed body itself, on a 140-call budget, without the `Agent` tool or the `tracer:use` skill. Five hash-pinned section overrides of `reviewer.md` carry the difference — the opening, Phase 0, Phase 1 (retitled `Walk, then hunt`), Phase 2 and the report — so a later edit to any of them fails its render with `SECTION-DRIFT` until the override is reviewed.
 
 ## Contents
 

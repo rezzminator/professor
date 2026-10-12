@@ -27,7 +27,7 @@ A change lands in this file first, then in the templates, then in every surface 
 | Member | Kind | Does | Runs at | Design |
 | --- | --- | --- | --- | --- |
 | `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only agent holding `Write`, and it holds no `Read` | smart (`opus`), effort `low` | this file |
-| `rr-pro` | variant of `rr` | The same body at higher effort with wider caps and the repository lane set in `rr.md`'s § Budget and § Spawning by `variants.json` section overrides, rendered by `pfm install` | `opus`, effort `medium` | [rr-pro.md](rr-pro.md) |
+| `rr-pro` | variant of `rr` | The same body at higher effort with wider caps and the repository lane set in `rr.md`'s § Budget and § Spawning by `rr-pro.md` and its `repo-lane.md` abstract section overrides, rendered by `pfm install` | `opus`, effort `medium` | [rr-pro.md](rr-pro.md) |
 | `rr-pro-max` | variant of `rr` | As `rr-pro`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [rr-pro-max.md](rr-pro-max.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | mechanical (`sonnet`), effort `low` | [sub-rr.md](sub-rr.md) |
 | `clone-distiller` | agent | The general repository digger, the code lane of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [clone-distiller.md](../clone-distiller/clone-distiller.md) |
@@ -202,7 +202,7 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `clone-distiller.md`, `variants.json` | The three protocols; the `rr-pro` and `rr-pro-max` overrides of `rr.md`'s § Budget and § Spawning, each hash-pinned, and their repository lane, the shared `repo-lane` fragment |
+| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `clone-distiller.md`, `rr-pro.md`, `rr-pro-max.md`, `repo-lane.md` | The three protocols; the `rr-pro` and `rr-pro-max` overrides of `rr.md`'s § Budget and § Spawning, each hash-pinned, and their repository lane, the shared `repo-lane.md` abstract |
 | The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro` and `rr-pro-max`, re-rendered by `pfm codex agents` after every edit of `rr.md` |
 | The hook | `pfm internal rr-dir`, wired by `pfm/internal/installer/expected_hooks.go` | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
 | The roster line | `docs/BLUEPRINT.md` | The family's members and the variant mechanism |

@@ -31,6 +31,60 @@
     ".claude/scripts/prod-deploy-watch.sh"
   ],
   "templates": {
+    "global/agents/astra.md": {
+      "curated": true
+    },
+    "global/agents/foreman-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-executor.md": {
+      "curated": true
+    },
+    "global/agents/gpt-flights.md": {
+      "curated": true
+    },
+    "global/agents/gpt-foreman-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-foreman.md": {
+      "curated": true
+    },
+    "global/agents/gpt-lander.md": {
+      "curated": true
+    },
+    "global/agents/gpt-reviewer-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-reviewer.md": {
+      "curated": true
+    },
+    "global/agents/gpt-worker.md": {
+      "curated": true
+    },
+    "global/agents/gpt.md": {
+      "curated": true
+    },
+    "global/agents/luna.md": {
+      "curated": true
+    },
+    "global/agents/repo-lane.md": {
+      "curated": true
+    },
+    "global/agents/reviewer-nt.md": {
+      "curated": true
+    },
+    "global/agents/rr-pro-max.md": {
+      "curated": true
+    },
+    "global/agents/rr-pro.md": {
+      "curated": true
+    },
+    "global/agents/sol.md": {
+      "curated": true
+    },
+    "global/agents/terra.md": {
+      "curated": true
+    },
     "global/agents/agent-optimizer.md": {
       "curated": true
     },

@@ -75,6 +75,18 @@ var fixedCommands = []Entry{
 		Parse:       prefixedVersion("git version"),
 		InstallHint: "install git",
 	},
+	// python3 is checked, never provisioned: pfm install does not install it. The
+	// tracer's tracetree kit is Python 3 standard library only and states no
+	// minimum version, so none is pinned here.
+	{
+		Name:        "python3",
+		Purpose:     "the tracer's tracetree kit and its launch hook",
+		Required:    true,
+		Platforms:   []string{platformLinux, platformDarwin},
+		VersionArgs: []string{versionFlag},
+		Parse:       prefixedVersion("Python"),
+		InstallHint: "install python3; the tracer's tracetree kit and its launch hook run on it",
+	},
 	{Name: "sh", Purpose: "portable shell command execution", Required: true, InstallHint: "install a POSIX shell"},
 	{
 		Name:        "bash",
@@ -139,7 +151,7 @@ var fixedCommands = []Entry{
 		Purpose:     "building a staged pfm update",
 		VersionArgs: []string{"version"},
 		Parse:       firstVersion,
-		InstallHint: "install Go 1.24 or newer to use pfm update",
+		InstallHint: "install Go 1.27.1 or newer to use pfm update",
 	},
 	{
 		Name:        "systemctl",

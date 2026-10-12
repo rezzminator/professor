@@ -589,4 +589,33 @@ else
   bad "a killed check job: could not build the green fixture"
 fi
 
+# ---- a baseline entry naming a Go file that is gone is stale, never a "fixed" pass
+
+REPO_STALE="$T/stale-baseline"
+if fixture "$REPO_STALE"; then
+  printf 'cmd/pfm/main.go\ninternal/loud/loud.go\ninternal/obs/obs.go\n' > "$REPO_STALE/.arch/untested-sources.txt"
+  line=$(check_line "$REPO_STALE" C13-test-mirror)
+  if [[ "$line" == *PASS* ]]; then
+    ok "C13: a baseline naming only existing files passes"
+  else
+    bad "C13: expected PASS for a correct untested-sources baseline" "$line"
+  fi
+  echo 'internal/gone/gone.go' >> "$REPO_STALE/.arch/untested-sources.txt"
+  line=$(check_line "$REPO_STALE" C13-test-mirror)
+  if [[ "$line" == *FAIL* && "$line" == *"stale: internal/gone/gone.go"* ]]; then
+    ok "C13: a baseline entry for a deleted source file FAILs naming it"
+  else
+    bad "C13: expected FAIL naming the stale entry" "$line"
+  fi
+  printf 'internal/loud/loud.go 1\nhttp:internal/gone/gone.go 2\n' > "$REPO_STALE/.arch/bare-log.txt"
+  line=$(check_line "$REPO_STALE" C23-bare-log)
+  if [[ "$line" == *FAIL* && "$line" == *"stale: internal/gone/gone.go"* ]]; then
+    ok "C23: a counted baseline entry for a deleted file FAILs naming it, a kind prefix stripped"
+  else
+    bad "C23: expected FAIL naming the stale counted entry" "$line"
+  fi
+else
+  bad "stale baseline: could not build the git fixture"
+fi
+
 shtest_end

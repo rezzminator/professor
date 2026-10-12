@@ -604,6 +604,19 @@ rc=$?
 pfm internal launcher-repair stray >/dev/null 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || bad="$bad launcher-repair with a positional argument exited $rc (want 2);"
+# X32b cost-launch / cost-sink: both refuse a call that names nothing to run or serve (usage, rc 2); the
+# launcher execs its command (rc 0 for `true`) and says in the sink log that it armed a sink on loopback.
+for verb in cost-sink cost-launch; do
+  pfm internal "$verb" >/dev/null 2>"$int_err"
+  rc=$?
+  [ "$rc" -eq 2 ] || bad="$bad $verb with no arguments exited $rc (want 2, usage): $(one_line "$(cat "$int_err")");"
+done
+cost_log="$HOME/.local/state/pfm/log/cost-sink.log"
+pfm internal cost-launch -- true >/dev/null 2>"$int_err"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad cost-launch -- true exited $rc: $(one_line "$(cat "$int_err")");"
+grep -qF 'armed a sink on 127.0.0.1:' "$cost_log" 2>/dev/null ||
+  bad="$bad cost-launch left no 'armed a sink on 127.0.0.1' line in $cost_log;"
 # X33/X34 primary-get / primary-set: the roster gate, then the value round-trips, then restored.
 primary0="$(pfm internal primary-get 2>&1)"
 rc=$?
@@ -670,7 +683,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · git-guard denies a main-chat worktree add, passes gitter and git status · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────
@@ -1066,7 +1079,6 @@ while IFS= read -r dir; do
   [ -n "$dir" ] || continue
   [ ! -e "$dir/commands/reload.md" ] || bad="$bad $dir/commands/reload.md still present;"
   [ ! -e "$dir/skills/handoff" ] && [ ! -L "$dir/skills/handoff" ] || bad="$bad $dir/skills/handoff still present;"
-  [ ! -e "$dir/commands/bb.md" ] || bad="$bad $dir/commands/bb.md remnant still present;"
   [ -z "$(find "$dir/commands/chat" -maxdepth 1 -name '*.md' 2>/dev/null | head -1)" ] || bad="$bad /chat:* command remnants still under $dir/commands/chat;"
   [ -z "$(find "$dir" -maxdepth 2 -name 'professor-*.json' 2>/dev/null | head -1)" ] || bad="$bad a staged professor-*.json theme still under $dir;"
   if [ -f "$dir/settings.json" ]; then

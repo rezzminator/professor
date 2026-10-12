@@ -2,6 +2,8 @@ package gather
 
 import (
 	"context"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -78,27 +80,69 @@ func CaptureCodexIdentity(
 	return identities
 }
 
-// parseCodexIdentity reads the last non-empty line of a captured codex pane
-// screen — Codex's TUI status line, fields separated by U+00B7 (·) — and
-// trims its first field. A field that parses as a thread id is the thread
-// id; anything else is the thread's name.
+var codexContextField = regexp.MustCompile(`^Context ?\d+% (left|used)$`)
+
+// codexFooters are the native toolbar rows Codex draws below its status row.
+var codexFooters = []string{"? for shortcuts", "← for agents", "→ for agents"}
+
+// parseCodexIdentity reads only the bottommost status row: blank rows and the
+// native shortcut and agent footers below it are skipped, and any other row
+// ends the search, since modals can hide today's status while an older
+// status-shaped transcript remains above them. A configurable status row's
+// exact UUID field wins over model/project labels; a legacy row (identity,
+// directory, metadata) names its thread by its first field; prose elsewhere is
+// never searched.
 func parseCodexIdentity(capture string) (name, threadID string) {
-	last := ""
-	for _, line := range strings.Split(capture, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
+	last, toolbar := "", false
+	lines := strings.Split(capture, "\n")
+	for index := len(lines) - 1; index >= 0 && last == ""; index-- {
+		line := strings.TrimSpace(lines[index])
+		switch {
+		case line == "":
+		case slices.ContainsFunc(codexFooters, func(footer string) bool { return strings.HasPrefix(line, footer) }):
+			toolbar = true
+		default:
+			last = line
 		}
-		last = line
 	}
 	if last == "" {
 		return "", ""
 	}
-	field := strings.TrimSpace(strings.SplitN(last, "·", 2)[0])
-	if field == "" {
+	fields := strings.Split(last, "·")
+	hasContext := false
+	for _, field := range fields {
+		hasContext = hasContext || codexContextField.MatchString(strings.TrimSpace(field))
+	}
+	legacy := len(fields) > 2 && strings.TrimSpace(fields[2]) != "" && codexDirectory(strings.TrimSpace(fields[1]))
+	bareSession := toolbar && len(fields) == 1 && pfmengine.IsUUID(strings.TrimSpace(fields[0]))
+	if !hasContext && !legacy && !bareSession {
 		return "", ""
 	}
-	if pfmengine.IsUUID(field) {
-		return "", field
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if pfmengine.IsUUID(field) {
+			if threadID != "" {
+				return "", ""
+			}
+			threadID = field
+		}
+	}
+	if threadID != "" {
+		return "", threadID
+	}
+	field := strings.TrimSpace(fields[0])
+	// Configurable model-first layouts do not provide a name without an
+	// explicit name field. Guessing the model as a title breaks /clear binding.
+	legacyTitle := legacy && strings.TrimSpace(fields[2]) == "Full Access"
+	if field == "" || toolbar && !legacyTitle || strings.Contains(last, "Main [") {
+		return "", ""
 	}
 	return field, ""
+}
+
+// codexDirectory reports whether a status field is the directory Codex prints:
+// home, a home-relative path, or an absolute Unix or Windows path.
+func codexDirectory(field string) bool {
+	windowsAbsolute := len(field) > 2 && field[1] == ':' && (field[2] == '\\' || field[2] == '/')
+	return field == "~" || strings.HasPrefix(field, "~/") || strings.HasPrefix(field, "/") || windowsAbsolute
 }

@@ -1,0 +1,21 @@
+{
+ "test": "--session selects one session and refuses a prefix that matches nothing",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-quiet-ycBECd",
+  "--session",
+  "sess-q"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 2,
+ "signal": null,
+ "inputs": [
+  "price-quiet-ycBECd"
+ ],
+ "outputs": {}
+}

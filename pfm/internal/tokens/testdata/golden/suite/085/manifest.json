@@ -1,0 +1,25 @@
+{
+ "test": "pricing: unavailable read prices render tool-carry estimates n/a while uncached calls stay priced",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--root",
+  "{TMP}/price-missing-tool-read-hGGD0m",
+  "--since",
+  "99999d",
+  "--out",
+  "{TMP}/missing-tool-read-report.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{TMP}/missing-tool-read-table.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "missing-tool-read-report.json",
+  "missing-tool-read-table.json",
+  "price-missing-tool-read-hGGD0m"
+ ],
+ "outputs": {
+  "--out": "{TMP}/missing-tool-read-report.json"
+ }
+}

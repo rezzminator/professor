@@ -3,6 +3,7 @@ package codexappendix
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,7 @@ done
 
 type listedHook struct {
 	Key         string `json:"key"`
+	HandlerType string `json:"handlerType"`
 	Command     string `json:"command"`
 	SourcePath  string `json:"sourcePath"`
 	Source      string `json:"source"`
@@ -40,6 +42,7 @@ type listedHook struct {
 	EventName   string `json:"eventName"`
 	Matcher     string `json:"matcher"`
 	TrustStatus string `json:"trustStatus"`
+	Enabled     bool   `json:"enabled"`
 }
 
 func registerOwn(binary, account string) error {
@@ -50,7 +53,7 @@ func ownHook(account, status string) listedHook {
 	return listedHook{
 		Key: account + "/hooks.json:session_start:0:0", Command: trustCommand,
 		SourcePath: account + "/hooks.json", Source: "user", CurrentHash: trustHash,
-		EventName: "sessionStart", Matcher: "resume", TrustStatus: status,
+		HandlerType: "command", EventName: "sessionStart", Matcher: "resume", TrustStatus: status, Enabled: true,
 	}
 }
 
@@ -156,27 +159,39 @@ func TestRegisterHookTrustErrorsWithTheCountWhenTheHandlerIsNotListed(t *testing
 }
 
 func TestRegisterHookTrustIsANoopWhenTrustedAndReceiptMatches(t *testing.T) {
-	account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
-		return []listedHook{ownHook(account, "trusted")}
-	})
-	key := account + "/hooks.json:session_start:0:0"
-	writeReceiptFile(t, account, `{"`+key+`":"`+trustHash+`"}`)
-	if err := registerOwn(binary, account); err != nil {
-		t.Fatal(err)
-	}
-	if writes := writeRequests(t, requestLog); len(writes) != 0 {
-		t.Fatalf("a trusted hook with its receipt was written again: %v", writes)
-	}
-
-	// Trusted by hand, no receipt: the receipt is recorded so uninstall can clean it.
-	if err := os.Remove(filepath.Join(account, ".professor-hook-trust.json")); err != nil {
-		t.Fatal(err)
-	}
-	if err := registerOwn(binary, account); err != nil {
-		t.Fatal(err)
-	}
-	if !HookTrustRecorded(account) || len(writeRequests(t, requestLog)) != 1 {
-		t.Fatal("a hand-trusted hook was not recorded")
+	for _, test := range []struct {
+		name             string
+		enabled, receipt bool
+		writes           int
+	}{
+		{"trusted enabled recorded", true, true, 0},
+		{"trusted disabled recorded", false, true, 0},
+		{"trusted enabled unrecorded", true, false, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
+				h := ownHook(account, "trusted")
+				h.Enabled = test.enabled
+				return []listedHook{h}
+			})
+			key := account + "/hooks.json:session_start:0:0"
+			if test.receipt {
+				writeReceiptFile(t, account, `{"`+key+`":"`+trustHash+`"}`)
+			}
+			if err := registerOwn(binary, account); err != nil {
+				t.Fatal(err)
+			}
+			writes := writeRequests(t, requestLog)
+			if len(writes) != test.writes {
+				t.Fatalf("writes=%v, want %d", writes, test.writes)
+			}
+			if test.writes != 0 && !strings.Contains(writes[0], `"enabled":true`) {
+				t.Fatalf("owned handler not enabled by registration: %v", writes)
+			}
+			if !HookTrustRecorded(account) {
+				t.Fatal("registration did not preserve hook receipt")
+			}
+		})
 	}
 }
 
@@ -324,6 +339,115 @@ func TestHookTrustStateReportsUnknownNativeTrust(t *testing.T) {
 			recorded, err := HookTrustState(account, "owned")
 			if recorded || err == nil || !strings.Contains(err.Error(), "native trust") {
 				t.Fatalf("historical receipt presented native trust as healthy: recorded=%v err=%v", recorded, err)
+			}
+		})
+	}
+}
+
+func TestRegisterHookTrustPreservesDisabledHandler(t *testing.T) {
+	account, binary, log := stageTrustAccount(t, func(account string) []listedHook {
+		h := ownHook(account, "trusted")
+		h.Enabled = false
+		return []listedHook{h}
+	})
+	writeReceiptFile(t, account, `{"`+account+`/hooks.json:session_start:0:0":"`+trustHash+`"}`)
+	if err := registerOwn(binary, account); err != nil {
+		t.Fatal(err)
+	}
+	writes := writeRequests(t, log)
+	if len(writes) != 0 {
+		t.Fatalf("disabled native handler was changed: %v", writes)
+	}
+}
+
+func TestNativeHookTrustState(t *testing.T) {
+	for _, variant := range []string{
+		"trusted", "disabled", "untrusted", "stale", "missing-hash", "wrong-source", "foreign-source", "wrong-key",
+		"wrong-command", "wrong-matcher", "wrong-event", "wrong-handler", "duplicate", "malformed", "failed",
+	} {
+		t.Run(variant, func(t *testing.T) {
+			account, binary, _ := stageTrustAccount(t, func(account string) []listedHook {
+				h := ownHook(account, "trusted")
+				switch variant {
+				case "disabled":
+					h.Enabled = false
+				case "untrusted":
+					h.TrustStatus = "untrusted"
+				case "stale":
+					h.CurrentHash = "sha256:new"
+				case "missing-hash":
+					h.CurrentHash = ""
+				case "wrong-source":
+					h.SourcePath += "other"
+				case "foreign-source":
+					h.Source = "project"
+				case "wrong-key":
+					h.Key = "different"
+				case "wrong-command":
+					h.Command = "echo other"
+				case "wrong-matcher":
+					h.Matcher = "startup"
+				case "wrong-event":
+					h.EventName = "stop"
+				case "wrong-handler":
+					h.HandlerType = "function"
+				}
+				if variant == "duplicate" {
+					return []listedHook{h, h}
+				}
+				return []listedHook{h}
+			})
+			source := filepath.Join(account, "hooks.json")
+			raw, err := json.Marshal(
+				map[string]any{
+					"hooks": map[string]any{
+						"SessionStart": []any{
+							map[string]any{
+								"matcher": "resume",
+								"hooks":   []any{map[string]string{"command": trustCommand}},
+							},
+						},
+					},
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(source, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			key := account + "/hooks.json:session_start:0:0"
+			writeReceiptFile(t, account, `{"`+key+`":"`+trustHash+`"}`)
+			if variant == "malformed" || variant == "failed" {
+				script := "#!/bin/sh\nexit 1\n"
+				if variant == "malformed" {
+					script = "#!/bin/sh\nwhile IFS= read -r line; do\ncase \"$line\" in\n*'\"method\":\"initialize\"'*) echo '{\"id\":0,\"result\":{}}';;\n*'\"method\":\"hooks/list\"'*) echo '{\"id\":1,\"result\":{\"data\":null}}';;\nesac\ndone\n"
+				}
+				if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			trusted, err := NativeHookTrustState(t.Context(), binary, account, trustCommand)
+			if variant == "disabled" && !errors.Is(err, ErrNativeHookDisabled) {
+				t.Fatalf("disabled state indistinguishable from repairable trust: %v", err)
+			}
+			switch variant {
+			case "trusted":
+				if !trusted || err != nil {
+					t.Fatalf("trusted=%v err=%v", trusted, err)
+				}
+			case "failed":
+				if trusted || !errors.Is(err, ErrNativeHookTrustUnknown) {
+					t.Fatalf("failed readback=%v %v", trusted, err)
+				}
+			case "wrong-source", "malformed":
+				if trusted || err == nil {
+					t.Fatalf("invalid native response=%v %v", trusted, err)
+				}
+			default:
+				if trusted || !errors.Is(err, ErrNativeHookUntrusted) {
+					t.Fatalf("untrusted handler=%v %v", trusted, err)
+				}
 			}
 		})
 	}

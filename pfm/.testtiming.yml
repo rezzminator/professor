@@ -30,20 +30,24 @@ suites:
       github.com/rezzminator/professor/pfm/internal/cli: 2
       github.com/rezzminator/professor/pfm/internal/clock: 2
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2
-      github.com/rezzminator/professor/pfm/internal/codexgen: 6
       github.com/rezzminator/professor/pfm/internal/codexmeta: 2
+      github.com/rezzminator/professor/pfm/internal/codexprompt: 2
       github.com/rezzminator/professor/pfm/internal/compose: 6
       github.com/rezzminator/professor/pfm/internal/config: 6
+      github.com/rezzminator/professor/pfm/internal/costledger: 2
+      github.com/rezzminator/professor/pfm/internal/costsink: 2
       github.com/rezzminator/professor/pfm/internal/deps: 14
       github.com/rezzminator/professor/pfm/internal/doctor: 30
       github.com/rezzminator/professor/pfm/internal/engine: 4
       github.com/rezzminator/professor/pfm/internal/engine/claude: 2
       github.com/rezzminator/professor/pfm/internal/engine/codex: 2
       github.com/rezzminator/professor/pfm/internal/engine/opencode: 2
+      github.com/rezzminator/professor/pfm/internal/enginesync: 2
       github.com/rezzminator/professor/pfm/internal/fleet: 6
       github.com/rezzminator/professor/pfm/internal/fleetdb: 2
       github.com/rezzminator/professor/pfm/internal/gather: 4
       github.com/rezzminator/professor/pfm/internal/gitroot: 2
+      github.com/rezzminator/professor/pfm/internal/globallink: 2
       github.com/rezzminator/professor/pfm/internal/harvest: 20
       github.com/rezzminator/professor/pfm/internal/harvestcli: 2
       github.com/rezzminator/professor/pfm/internal/harvestmcp: 4
@@ -58,27 +62,29 @@ suites:
       github.com/rezzminator/professor/pfm/internal/inject: 16
       github.com/rezzminator/professor/pfm/internal/installer: 48
       github.com/rezzminator/professor/pfm/internal/installer/shim: 6
+      github.com/rezzminator/professor/pfm/internal/jsvalue: 2
       github.com/rezzminator/professor/pfm/internal/kill: 16
+      github.com/rezzminator/professor/pfm/internal/launchnotice: 2
       github.com/rezzminator/professor/pfm/internal/mcpserv: 44
       github.com/rezzminator/professor/pfm/internal/mockengine: 36
       github.com/rezzminator/professor/pfm/internal/modelglyph: 2
       github.com/rezzminator/professor/pfm/internal/naming: 2
       github.com/rezzminator/professor/pfm/internal/obs: 2
-      github.com/rezzminator/professor/pfm/internal/opencodegen: 2
       github.com/rezzminator/professor/pfm/internal/paths: 2
       github.com/rezzminator/professor/pfm/internal/picker: 16
       github.com/rezzminator/professor/pfm/internal/pricing: 2
       github.com/rezzminator/professor/pfm/internal/pricing/command: 2
+      github.com/rezzminator/professor/pfm/internal/pricing/modelcost: 2
       github.com/rezzminator/professor/pfm/internal/professor: 4
+      github.com/rezzminator/professor/pfm/internal/pyvalue: 2
       github.com/rezzminator/professor/pfm/internal/reap: 2
       github.com/rezzminator/professor/pfm/internal/recovery: 2
       github.com/rezzminator/professor/pfm/internal/reload: 8
-      github.com/rezzminator/professor/pfm/internal/reminder: 2
+      github.com/rezzminator/professor/pfm/internal/schedule: 2
       github.com/rezzminator/professor/pfm/internal/resolve: 16
       github.com/rezzminator/professor/pfm/internal/rowfacts: 2
       github.com/rezzminator/professor/pfm/internal/semver: 2
       github.com/rezzminator/professor/pfm/internal/sky: 2
-      github.com/rezzminator/professor/pfm/internal/sourcelink: 2
       github.com/rezzminator/professor/pfm/internal/spawn: 8
       github.com/rezzminator/professor/pfm/internal/sqlitedb: 2
       github.com/rezzminator/professor/pfm/internal/stale: 2
@@ -88,7 +94,9 @@ suites:
       github.com/rezzminator/professor/pfm/internal/testjail: 12
       github.com/rezzminator/professor/pfm/internal/theme: 2
       github.com/rezzminator/professor/pfm/internal/tmux: 2
+      github.com/rezzminator/professor/pfm/internal/tokens: 6
       github.com/rezzminator/professor/pfm/internal/transcript: 2
+      github.com/rezzminator/professor/pfm/internal/transcript/digest: 8
       github.com/rezzminator/professor/pfm/internal/ui: 4
       github.com/rezzminator/professor/pfm/internal/update: 10
       github.com/rezzminator/professor/pfm/internal/updatecheck: 2

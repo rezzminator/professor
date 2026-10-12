@@ -56,6 +56,21 @@ func (spawn ClaudeSpawn) request() claudelaunch.Request {
 	}
 }
 
+// PromptWarning is the verdict on whether this launch carries the system
+// prompt file it should: empty when it does, else why not. A surface that
+// starts the chat prints it, since the launch goes ahead without the prompt.
+func (spawn ClaudeSpawn) PromptWarning() string {
+	return claudelaunch.PromptWarning(spawn.request(), spawn.Machine)
+}
+
+// warnings is PromptWarning as the list the plans carry.
+func (spawn ClaudeSpawn) warnings() []string {
+	if warning := spawn.PromptWarning(); warning != "" {
+		return []string{warning}
+	}
+	return nil
+}
+
 func (spawn ClaudeSpawn) render() (claudelaunch.Launch, error) {
 	if spawn.Purpose < PurposeInteractive || spawn.Purpose > PurposeQuery {
 		return claudelaunch.Launch{}, fmt.Errorf("claude spawn: unknown purpose %d", spawn.Purpose)
@@ -81,6 +96,10 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	var command strings.Builder
 	command.WriteString(envStripWords(launch.Unset))
 	writeAssignments(&command, launch.Env)
+	for _, word := range launch.Wrapper {
+		command.WriteByte(' ')
+		command.WriteString(Quote(word))
+	}
 	command.WriteByte(' ')
 	command.WriteString(Quote(launch.Binary))
 	for _, argument := range launch.Argv {
@@ -109,9 +128,14 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 		return nil, err
 	}
 	path := deps.Executable(launch.Binary)
+	args := append(append([]string{}, launch.Wrapper...), path)
+	args = append(args, launch.Argv...)
+	if len(launch.Wrapper) != 0 {
+		path = launch.Wrapper[0]
+	}
 	return &ProcessCommand{
 		ctx: ctx, runner: spawn.runner(), Path: path,
-		Args: append([]string{path}, launch.Argv...),
+		Args: args,
 		Env:  launchEnvironment(os.Environ(), launch),
 	}, nil
 }

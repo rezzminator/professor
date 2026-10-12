@@ -1,0 +1,10 @@
+{
+ "args": [
+  "locate",
+  "Audit Desk"
+ ],
+ "dirs": [],
+ "links": {
+  ".cc/1/projects": "../../.claude/projects"
+ }
+}

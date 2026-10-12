@@ -14,12 +14,14 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func renderMachine(t *testing.T) (string, pfmconfig.Config) {
 	t.Helper()
 	home := t.TempDir()
+	installFakePFM(t, home)
 	machine := pfmconfig.Defaults(
 		home,
 		[]string{filepath.Join(home, ".claude", "projects", "one"), filepath.Join(home, ".cc", "2", "projects", "two")},
@@ -156,12 +158,13 @@ func TestRenderFreshInteractive(t *testing.T) {
 		"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "9007199254740991", "CLAUDE_CODE_TMUX_TRUECOLOR": "1",
 		"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
 		"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":    "1", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
+		"ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-5-5",
 	} {
 		if got := parsed.SettingsEnv[name]; got != want {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 11 {
+	if len(parsed.Hooks) != 12 {
 		t.Errorf("hooks=%d", len(parsed.Hooks))
 	}
 	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
@@ -210,20 +213,68 @@ func TestRenderFreshInteractive(t *testing.T) {
 func TestRenderPluginEnvEveryPurposeAndAccount(t *testing.T) {
 	home, machine := renderMachine(t)
 	machine.Claude.AutoCompactWindow = 250000
+	machine.Claude.HelperModel = "claude-haiku-4-5"
 	account := machine.Claude
 	account.AutoCompactWindow = 50000
+	account.HelperModel = "claude-sonnet-5-5"
 	machine.Accounts[1].Claude = &account
 	for _, purpose := range []Purpose{PurposeResume, PurposeLauncher, PurposeQuery} {
 		for _, tc := range []struct {
 			account int
 			window  string
-		}{{1, "250000"}, {2, "50000"}} {
+			helper  string
+		}{{1, "250000", "claude-haiku-4-5"}, {2, "50000", "claude-sonnet-5-5"}} {
 			_, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Account: tc.account}, machine)
 			if got := parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != tc.window {
 				t.Errorf("purpose %d account %d window=%q, want %q", purpose, tc.account, got, tc.window)
 			}
+			if got := parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"]; got != tc.helper {
+				t.Errorf("purpose %d account %d helper model=%q, want %q", purpose, tc.account, got, tc.helper)
+			}
 			if got := parsed.SettingsEnv["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"]; got != "1" {
 				t.Errorf("purpose %d account %d function hooks=%q", purpose, tc.account, got)
+			}
+		}
+	}
+}
+
+// Every launch purpose, with and without the cost ledger, defaults Claude's
+// helper calls to Haiku 5.5 through the --settings env block, never the process
+// environment: a stray export must not reach the helper model. A hand-built
+// machine config (the busy-agent and agent-registry queries state ClaudePrefs
+// with only a binary) never sends an empty helper model either.
+func TestRenderHelperModelDefaultsToHaikuEveryPurpose(t *testing.T) {
+	home, machine := renderMachine(t)
+	for _, ledger := range []bool{true, false} {
+		machine.Claude.CostLedger = ledger
+		for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
+			for _, account := range []int{1, 2} {
+				launch, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Account: account}, machine)
+				if got := parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"]; got != "claude-haiku-5-5" {
+					t.Errorf("ledger=%t purpose %d account %d helper model=%q", ledger, purpose, account, got)
+				}
+				handBuilt := machine
+				handBuilt.Claude.HelperModel = ""
+				_, bare := renderParsed(t, Request{Purpose: purpose, Home: home, Account: account}, handBuilt)
+				if got := bare.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"]; got != "claude-haiku-5-5" {
+					t.Errorf("ledger=%t purpose %d account %d hand-built config helper model=%q",
+						ledger, purpose, account, got)
+				}
+				if !slices.Contains(launch.Unset, "ANTHROPIC_SMALL_FAST_MODEL") {
+					t.Errorf(
+						"ledger=%t purpose %d account %d: a stray ANTHROPIC_SMALL_FAST_MODEL export is not unset: %q",
+						ledger,
+						purpose,
+						account,
+						launch.Unset,
+					)
+				}
+				for _, entry := range launch.Env {
+					if strings.HasPrefix(entry, "ANTHROPIC_SMALL_FAST_MODEL=") {
+						t.Errorf("ledger=%t purpose %d account %d: helper model in the process env: %q",
+							ledger, purpose, account, launch.Env)
+					}
+				}
 			}
 		}
 	}
@@ -666,6 +717,128 @@ func TestRenderNameFlag(t *testing.T) {
 			if request.Args != nil && slices.Contains(request.Args, "--name=keep") &&
 				slices.Contains(launch.Argv, flagName) {
 				t.Fatal("a second --name rode beside --name=keep")
+			}
+		})
+	}
+}
+
+// stageComposedPrompt records a clone for home and, when write is set, puts a
+// composed Claude prompt where the door looks for it.
+func stageComposedPrompt(t *testing.T, home string, write bool) string {
+	t.Helper()
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	path := paths.ComposedHarnessPromptIn(clone, pfmengine.Claude)
+	if !write {
+		return path
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("fleet prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A launch that should carry a system prompt file and does not says so, with
+// the cause: one verdict, shared by every surface that tells the person who
+// started the chat, and true to the argv Render builds — the flag is dropped
+// exactly when the verdict says so.
+func TestPromptWarning(t *testing.T) {
+	seat := filepath.Join(t.TempDir(), "seat.md")
+	if err := os.WriteFile(seat, []byte("seat"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []struct {
+		name    string
+		mode    string
+		stage   string // "", "marker", "file"
+		request Request
+		want    string // substring of the warning; "" is no warning
+		carries bool   // Render adds --system-prompt-file itself
+	}{
+		{"professor, no clone recorded", "professor", "", Request{}, "no source repository recorded", false},
+		{"professor, composed file missing", "professor", "marker", Request{}, "claude.md", false},
+		{"professor, composed file present", "professor", "file", Request{}, "", true},
+		{"production wants no fleet prompt", "production", "", Request{}, "", false},
+		{"lean wants no fleet prompt", "lean", "", Request{}, "", false},
+		{"seat file present", "professor", "", Request{PromptFile: seat}, "", true},
+		{
+			"seat file missing", "production", "",
+			Request{PromptFile: "/nonexistent/seat.md"},
+			"/nonexistent/seat.md", false,
+		},
+		{"seat file is a directory", "production", "", Request{PromptFile: filepath.Dir(seat)}, "is a directory", false},
+		{
+			"caller states its own prompt file", "professor", "",
+			Request{Args: []string{"--system-prompt-file", "/elsewhere.md"}},
+			"", false,
+		},
+		{
+			"caller states its own prompt file with =", "professor", "",
+			Request{Args: []string{"--system-prompt-file=/elsewhere.md"}},
+			"", false,
+		},
+		{
+			"caller states its own inline prompt", "professor", "marker",
+			Request{Args: []string{"--system-prompt", "be brief"}},
+			"", false,
+		},
+		{
+			"caller states its own inline prompt with =", "professor", "marker",
+			Request{Args: []string{"--system-prompt=be brief"}},
+			"", false,
+		},
+		{
+			"inline prompt leaves the fleet file in the argv", "professor", "file",
+			Request{Args: []string{"--system-prompt", "be brief"}},
+			"", true,
+		},
+		{"query carries no prompt", "professor", "", Request{Purpose: PurposeQuery}, "", false},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			home, machine := renderMachine(t)
+			machine.Claude.SystemPrompt = entry.mode
+			switch entry.stage {
+			case "marker":
+				stageComposedPrompt(t, home, false)
+			case "file":
+				stageComposedPrompt(t, home, true)
+			}
+			entry.request.Home = home
+			got := PromptWarning(entry.request, machine)
+			if entry.want == "" {
+				if got != "" {
+					t.Fatalf("PromptWarning = %q, want none", got)
+				}
+			} else if !strings.Contains(got, entry.want) {
+				t.Fatalf("PromptWarning = %q, want it to name %q", got, entry.want)
+			}
+			launch, err := Render(entry.request, machine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			added := 0
+			for _, arg := range launch.Argv {
+				if arg == "--system-prompt-file" {
+					added++
+				}
+			}
+			for _, arg := range entry.request.Args {
+				if arg == "--system-prompt-file" {
+					added--
+				}
+			}
+			if carried := added == 1; carried != entry.carries || added > 1 {
+				t.Fatalf(
+					"Render added --system-prompt-file %d times, want carried=%t: %q",
+					added,
+					entry.carries,
+					launch.Argv,
+				)
 			}
 		})
 	}

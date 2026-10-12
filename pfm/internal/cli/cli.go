@@ -96,3 +96,10 @@ func (list *StringList) Set(value string) error {
 }
 
 var _ flag.Value = (*StringList)(nil)
+
+// WriteLines renders CLI usage with one newline per line, including blank lines.
+func WriteLines(writer io.Writer, lines []string) {
+	for _, line := range lines {
+		fmt.Fprintln(writer, line)
+	}
+}

@@ -1,0 +1,10 @@
+{
+ "args": [
+  "locate",
+  "Audit Desk"
+ ],
+ "dirs": [],
+ "links": {
+  ".claude/projects/unreadable-project": "../../missing-project"
+ }
+}

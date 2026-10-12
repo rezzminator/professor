@@ -1,13 +1,11 @@
 package ui
 
 import (
-	"slices"
-
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 func isFleetNewChatRow(row compose.Row) bool {
@@ -25,19 +23,21 @@ func (model Model) newChatEnginesFor(row compose.Row) []pfmengine.ID {
 	return model.newChatEngines()
 }
 
+// effectiveNewChatEngine is the engine a ✦ row shows: the one its wizard is on
+// while the wizard is open, else the one the last launch started (launchwizard.go).
 func (model Model) effectiveNewChatEngine(row compose.Row) pfmengine.ID {
-	if row.Workbench == "" || !isNewChatActionKind(row.Kind) {
-		return model.newChatEngine
+	if model.wizardOn(row) {
+		return model.wizard.engine
 	}
-	ids := model.newChatEnginesFor(row)
-	if slices.Contains(ids, model.newChatEngine) || len(ids) == 0 {
-		return model.newChatEngine
-	}
-	return ids[0]
+	return model.idleEngine(row)
 }
 
 func (model Model) newChatActionRow(row compose.Row) (compose.Row, bool) {
-	id := model.effectiveNewChatEngine(row)
+	return model.newChatRowFor(row, model.effectiveNewChatEngine(row))
+}
+
+// newChatRowFor turns a ✦ row into the launch row of engine id.
+func (model Model) newChatRowFor(row compose.Row, id pfmengine.ID) (compose.Row, bool) {
 	switch id {
 	case pfmengine.Claude:
 		row.Kind = compose.NewClaude
@@ -51,19 +51,6 @@ func (model Model) newChatActionRow(row compose.Row) (compose.Row, bool) {
 	row.Name = "New " + pfmengine.MustLookup(id).Short + " chat"
 	row.Account = model.accountForKind(row.Kind)
 	return row, true
-}
-
-func (model Model) selectNewChat(row compose.Row) (tea.Model, tea.Cmd) {
-	selected, ok := model.newChatActionRow(row)
-	if !ok {
-		model.killStatus = "new chat is not available for " + pfmengine.MustLookup(
-			model.effectiveNewChatEngine(row),
-		).Short
-		return model, nil
-	}
-	model.outcome = OutcomeSelected
-	model.outcomeRow = selected
-	return model, tea.Quit
 }
 
 func workbenchNameGroup(row compose.Row) (key, prefix string, ok bool) {
@@ -81,4 +68,51 @@ func renderWorkbenchInvalidRow(pointer, name string, selected bool, width int) s
 		return professorUpdateFailedSelectedStyle.Render(line)
 	}
 	return professorUpdateFailedStyle.Render(line)
+}
+
+func adjacentID(current pfmengine.ID, direction int, ids []pfmengine.ID) pfmengine.ID {
+	if len(ids) == 0 {
+		return ""
+	}
+	for index, id := range ids {
+		if id == current {
+			if direction < 0 {
+				return ids[(index+len(ids)-1)%len(ids)]
+			}
+			return ids[(index+1)%len(ids)]
+		}
+	}
+	return ids[0]
+}
+
+func (model Model) newChatEngines() []pfmengine.ID {
+	ids := make([]pfmengine.ID, 0, len(pfmengine.All()))
+	appendUnique := func(id pfmengine.ID) {
+		for _, present := range ids {
+			if present == id {
+				return
+			}
+		}
+		ids = append(ids, id)
+	}
+	for index := range model.rows {
+		row := &model.rows[index]
+		if row.Workbench != "" {
+			continue
+		}
+		switch row.Kind {
+		case compose.NewClaude:
+			appendUnique(pfmengine.Claude)
+		case compose.NewCodex:
+			appendUnique(pfmengine.Codex)
+		case compose.NewOpenCode:
+			appendUnique(pfmengine.OpenCode)
+		}
+	}
+	for _, id := range spawn.RegisteredLaunchers() {
+		if id != pfmengine.Claude && id != pfmengine.Codex {
+			appendUnique(id)
+		}
+	}
+	return ids
 }

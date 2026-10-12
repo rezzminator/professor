@@ -62,15 +62,3 @@ func normalizedAccountIDs(values []int) []int {
 	}
 	return result
 }
-
-func nextAccount(current int, ids []int) int {
-	if len(ids) == 0 {
-		return 0
-	}
-	for index, id := range ids {
-		if id == current {
-			return ids[(index+1)%len(ids)]
-		}
-	}
-	return ids[0]
-}

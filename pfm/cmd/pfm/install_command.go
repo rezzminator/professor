@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/pricing/modelcost"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -42,7 +44,7 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--check] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
@@ -51,6 +53,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		false,
 		"answer whether --yes would refuse before any change (exit 4: a blocking host check or a running name-sync job)",
 	)
+	plan := flags.Bool("plan", false, "with --check: print every host check's fix in the order to apply them")
 	vscode := flags.Bool(
 		"vscode",
 		false,
@@ -62,6 +65,10 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
+	}
+	if *plan && !*check {
+		fmt.Fprintln(stderr, "pfm install: --plan needs --check: run pfm install --check --plan")
+		return 2
 	}
 	if flags.NArg() != 0 || *check && *yes {
 		flags.Usage()
@@ -100,7 +107,16 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 		fmt.Fprintf(stdout, "  skip    %s\n", refusal)
 	}
-	rows := hostcheck.RunAll(hostcheck.EnvFor(runtime, clock.Real.Now()))
+	env := hostcheck.EnvFor(runtime, clock.Real.Now())
+	// --plan prints and judges every row itself; the gate below then sees
+	// none, so a plan with only WARN rows goes on to the remaining checks.
+	var rows []hostcheck.Row
+	if !*plan {
+		rows = hostcheck.RunAll(env)
+	} else if code, refusal := hostcheck.RunPlan(env).Print(stdout); code != 0 {
+		fmt.Fprintln(stderr, "pfm install: "+refusal)
+		return code
+	}
 	if blocking := hostcheck.Count(rows, hostcheck.Block); blocking != 0 {
 		for _, row := range rows {
 			if row.Severity == hostcheck.Block {
@@ -200,7 +216,18 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		if *skipThemes {
 			confirmation += " --skip-themes"
 		}
+		if *configDir != "" {
+			confirmation += " --config-dir " + action.Quote(*configDir)
+		}
 		fmt.Fprintln(stdout, confirmation)
+	}
+	if code == 0 && mode == installer.ModeApply {
+		installer.RefreshPrices(stdout, modelcost.Options{
+			Home:       runtime.Paths.Home,
+			ConfigPath: runtime.Config.Path,
+			Offline:    paths.PricesOffline(),
+			Clock:      clock.Real,
+		})
 	}
 	return code
 }
@@ -236,6 +263,10 @@ func newInstallerOptions(
 		options.MCPConfigPath = runtime.Config.Path
 		options.OpenCodeConfigPath = installer.OpenCodeConfigPath(runtime.Paths.Home)
 		options.ClaudeBinary = runtime.Config.Claude.Binary
+		options.GptAgents = runtime.Config.Claude.GptAgents
+		options.Version = runtime.Version
+		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
+		options.ClaudePlugins = runtime.Config.Claude.Plugins
 		options.CodexBinary = runtime.Config.Codex.Binary
 		if options.CodexBinary == "" {
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary

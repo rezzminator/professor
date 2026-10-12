@@ -169,7 +169,7 @@ func newDiscourseSite(stated int) *discourseSite {
 func (site *discourseSite) roundTrip(request *http.Request) (*http.Response, error) {
 	uri := request.URL.RequestURI()
 	if strings.HasPrefix(request.URL.Path, "/t/") {
-		// The topic's own requests; the images the artifact localizes are not.
+		// The topic's own requests; the images the page links are not.
 		site.mu.Lock()
 		site.requests = append(site.requests, request.Method+" "+uri)
 		site.mu.Unlock()

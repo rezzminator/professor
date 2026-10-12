@@ -104,22 +104,15 @@ func TestRemoteDownloadAnswersASignedExpiringURL(t *testing.T) {
 		!strings.Contains(item.URL, "&sig=") {
 		t.Fatalf("url = %q", item.URL)
 	}
-	structured, err := json.Marshal(DownloadOutput{Items: []DownloadItem{item}})
+	wire, err := json.Marshal(downloadResult([]DownloadItem{item}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := downloadResult([]DownloadItem{item})
-	result.StructuredContent = DownloadOutput{Items: []DownloadItem{item}}
-	wire, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The typed result stays under 1 KB; the whole wire result (text render +
-	// resource_link block + structuredContent) under 2 KB, for a 2 MB file.
-	if len(structured) >= 1024 || len(wire) >= 2048 || bytes.Contains(wire, []byte("JVBERi0")) ||
+	// The whole wire result (text render + resource_link block) stays under
+	// 2 KB for a 2 MB file: no bytes, no server path.
+	if len(wire) >= 2048 || bytes.Contains(wire, []byte("JVBERi0")) ||
 		bytes.Contains(wire, []byte(filepath.Dir(gateway.server.service.runtime.CacheDir))) {
-		t.Fatalf("tool result is %d bytes, structured %d (want < 2048 / < 1024, no bytes, no server path): %s",
-			len(wire), len(structured), wire)
+		t.Fatalf("tool result is %d bytes (want < 2048, no bytes, no server path): %s", len(wire), wire)
 	}
 	if !strings.Contains(downloadFileDescription, "curl -fL -o <file> <url>") ||
 		!strings.Contains(downloadFileDescription, "restart") {

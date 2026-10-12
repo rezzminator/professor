@@ -63,7 +63,8 @@ func acquireTargetLock(
 			// The settle/re-read closes chat.sh's double-steal race.
 			if poll > 0 {
 				if err := clk.Sleep(ctx, minDuration(poll, 50*time.Millisecond)); err != nil {
-					return nil, err
+					lock.release()
+					return nil, fmt.Errorf("settle inject target lock %s: %w", path, err)
 				}
 			}
 			ownerPID, _, _ := readLockOwner(path)

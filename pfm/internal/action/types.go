@@ -76,6 +76,9 @@ type Plan struct {
 	Line       string
 	ChatServer *ChatServer
 	Record     *fleetdb.Launch
+	// Warnings are what the person opening the chat must be told: the chat
+	// opens anyway. The executor prints them on its stderr.
+	Warnings []string
 }
 
 // Pane is the tmux state needed by solo and self-switch.

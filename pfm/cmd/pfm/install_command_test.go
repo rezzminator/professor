@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
@@ -23,6 +24,22 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
+	plugins := []pfmconfig.ClaudePlugin{{ID: "callmeter"}, {ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}}
+	runtime := commandRuntime{
+		Paths:   paths.Values{Home: t.TempDir()},
+		Config:  pfmconfig.Config{Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins}},
+		Version: "0.80.0-alpha",
+	}
+	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
+	if options.Version != "0.80.0-alpha" || options.ClaudePluginCheckoutRoot != "/opt/plugins" {
+		t.Fatalf("plugin options version=%q root=%q", options.Version, options.ClaudePluginCheckoutRoot)
+	}
+	if !reflect.DeepEqual(options.ClaudePlugins, plugins) {
+		t.Fatalf("plugin options list = %#v, want %#v", options.ClaudePlugins, plugins)
+	}
+}
 
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 	home := t.TempDir()
@@ -290,10 +307,48 @@ func TestInstallUnknownFlagPrintsTheUsage(t *testing.T) {
 		if code := runInstall(args, &stdout, &stderr); code != wantCode {
 			t.Fatalf("args=%q code=%d stderr=%q", args, code, stderr.String())
 		}
-		want := "usage: pfm install [--yes] [--check] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]\n"
+		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]\n"
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr=%q want=%q", stderr.String(), want)
 		}
+	}
+}
+
+func TestInstallConfirmationPreservesConfigDir(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	var captured installer.Options
+	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+		captured = options
+		return installer.Report{}, nil
+	}
+	home := t.TempDir()
+	dir := filepath.Join(home, "claude's config")
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	var stdout, stderr bytes.Buffer
+	if code := runInstall([]string{"--config-dir", dir, "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	_, confirmation, found := strings.Cut(stdout.String(), "if you agree, run again: ")
+	if !found || !strings.Contains(confirmation, " --config-dir "+action.Quote(dir)) {
+		t.Fatalf("confirmation dropped shell-quoted config-dir %q: %q", dir, confirmation)
+	}
+	command := exec.Command("sh", "-c", "set -- "+strings.TrimSpace(confirmation)+"; printf '%s\\000' \"$@\"")
+	parsed, err := command.Output()
+	if err != nil {
+		t.Fatalf("parse confirmation %q: %v", confirmation, err)
+	}
+	words := strings.Split(strings.TrimSuffix(string(parsed), "\x00"), "\x00")
+	if len(words) < 2 || words[0] != "pfm" || words[1] != "install" {
+		t.Fatalf("confirmation argv=%q", words)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runInstall(words[2:], &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("reparsed apply code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if captured.ConfigDir != dir || captured.Mode != installer.ModeApply {
+		t.Fatalf("reparsed options ConfigDir=%q mode=%d, want %q apply", captured.ConfigDir, captured.Mode, dir)
 	}
 }
 

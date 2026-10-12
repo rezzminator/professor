@@ -56,7 +56,7 @@ An omitted engine in `chat new` / MCP `chat_new` keeps the current engine when e
 | door | mode | source and route |
 | --- | --- | --- |
 | Picker ✦ new Claude | `New` | `pfm/internal/action/persona.go`, `pfm/internal/action/synth.go`: `Executor.Open` / `OpenDetached` → `Synthesize(NewClaude)`. |
-| Picker resume/agent, `chat open`, MCP `chat_open`, reminder | `Resume` | `pfm/internal/chat/open.go`, `pfm/internal/action/executor.go`, `pfm/internal/action/open_detached.go`, `pfm/internal/action/synth.go`: `Synthesize(ResumeClaude, Agent, ResumeCodex, ResumeOpenCode)`. |
+| Picker resume/agent, `chat open`, MCP `chat_open`, schedule | `Resume` | `pfm/internal/chat/open.go`, `pfm/internal/action/executor.go`, `pfm/internal/action/open_detached.go`, `pfm/internal/action/synth.go`: `Synthesize(ResumeClaude, Agent, ResumeCodex, ResumeOpenCode)`. |
 | Picker ✦ new OpenCode | `New` | `pfm/internal/action/persona.go`, `pfm/internal/action/synth.go`: mirror/plugin preparation → `Synthesize(NewOpenCode)`. |
 | Picker ✦ new Codex, bare `cx` | `New` or `Resume` for resume/continue/fork | `pfm/internal/action/persona.go` checks the picker request; `pfm/internal/hookentry/codex_launch.go`: `CodexLaunch` builds the mirror and inserts persona flags. |
 | Bare `claude`, `internal launch`, `internal claude-launch` | `New` or `Resume` for resume/continue/fork | `pfm/internal/hookentry/launch.go`, `pfm/internal/hookentry/claude_launch.go`, `pfm/internal/action/synth.go`, `pfm/internal/claudelaunch/render.go`: `Launch` → `LauncherRunAs`. |
@@ -74,9 +74,9 @@ A workbench owns its own CLAUDE.md: pfm codex build {dir} compiles it into {dir}
 
 `EnsureMirror` builds Codex/OpenCode before a persona launch; a compiler failure refuses it as `build the {engine} mirror of workbench {dir}: {error}`. `CheckMirror` returns every mirror problem, split into rebuildable outputs and failures, with compiler errors returned separately. Claude needs no mirror. Source: `pfm/internal/workbench/mirror.go`.
 
-`codexgen` and `opencodegen` skip a child marked by a workbench manifest whether discovered or explicitly listed: each bench builds as its own root. An unreadable manifest is an error; a symlinked manifest or `.professor` directory is no workbench. `pfm codex build` without a root inside a bench resolves that bench rather than its git/managed parent. Builds at a bench write no home-level Codex skills/prompts or OpenCode commands. Sources: `pfm/internal/codexgen/project_discovery.go`, `pfm/internal/codexgen/compiler.go`, `pfm/internal/opencodegen/compiler.go`, `pfm/internal/opencodegen/reconcile.go`, `pfm/cmd/pfm/codex_command.go`.
+engine-sync's Codex and OpenCode compilers skip a child marked by a workbench manifest whether discovered or explicitly listed: each bench builds as its own root. An unreadable manifest is an error; a symlinked manifest or `.professor` directory is no workbench. `pfm codex build` without a root inside a bench resolves that bench rather than its git/managed parent. Builds at a bench write no home-level Codex skills/prompts or OpenCode commands. Sources (under `plugins/engine-sync/internal/`): `target/codex/project_discovery.go`, `target/codex/target.go`, `target/opencode/target.go`, `reconcile/reconcile.go`, `cli/codex.go`.
 
-Codex `.codex/agents/` is generated only from the bench's own `.claude/agents/*.md`. A bench without roles gets no empty agents directory: the role lookup can continue to the managed root. Codex and OpenCode also load ancestor `AGENTS.md` files, so the parent repo's rules reach their workbench seats. Sources: `pfm/internal/codexgen/compiler.go`, `pfm/internal/agentrole/agentrole.go` (`roleLadderRoot`).
+Codex `.codex/agents/` is generated only from the bench's own `.claude/agents/*.md`. A bench without roles gets no empty agents directory: the role lookup can continue to the managed root. Codex and OpenCode also load ancestor `AGENTS.md` files, so the parent repo's rules reach their workbench seats. Sources: `plugins/engine-sync/internal/target/codex/agents.go`, `pfm/internal/agentrole/agentrole.go` (`roleLadderRoot`).
 
 ## Picker rows
 

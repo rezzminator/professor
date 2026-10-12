@@ -52,7 +52,7 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
 				return 5
 			}
-			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime)
+			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime, nil)
 		}
 	}
 	flags := cli.NewFlagSet(
@@ -91,7 +91,19 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 		fmt.Fprintf(stderr, "pfm update: resolve repository: %v\n", err)
 		return 5
 	}
-	if err := updateRepository(context.Background(), repo, *target, *skipHarvest, stdout, stderr, runtime); err != nil {
+	progress := stdout
+	if *jsonOutput {
+		progress = stderr
+	}
+	if err := updateRepository(
+		context.Background(),
+		repo,
+		*target,
+		*skipHarvest,
+		progress,
+		stderr,
+		runtime,
+	); err != nil {
 		fmt.Fprintf(stderr, "pfm update: %v\n", err)
 		return 5
 	}
@@ -99,7 +111,7 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	if *jsonOutput {
 		postArgs = append(postArgs, "--json")
 	}
-	return professor.RunProjectUpdate("", postArgs, stdout, stderr, runtime)
+	return professor.RunProjectUpdate("", postArgs, stdout, stderr, runtime, ScanRetiredNames)
 }
 
 // refuseSourceDowngrade guards a target the source (previousRef, a commit)
@@ -187,6 +199,9 @@ func updateRepository(
 	if !slices.Contains(tags, target) {
 		return fmt.Errorf("target tag %q is not present after fetch", target)
 	}
+	if err := restoreRefreshedPrices(ctx, repo, updateBackupDir(runtime.Paths.Home), stdout); err != nil {
+		return err
+	}
 	status, err := updateGitOutput(ctx, repo, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return fmt.Errorf("inspect worktree: %w", err)
@@ -211,6 +226,7 @@ func updateRepository(
 		return fmt.Errorf("stage update beside managed root: %w", err)
 	}
 	worktreeAdded := false
+	var replacements []updateReplacement
 	defer func() {
 		var cleanupErr error
 		if worktreeAdded {
@@ -225,8 +241,14 @@ func updateRepository(
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup staged source worktree: %w", removeErr))
 			}
 		}
-		if removeErr := os.RemoveAll(stage); removeErr != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup update stage %s: %w", stage, removeErr))
+		// A failed binary restore leaves its backup as the manual repair source.
+		if !slices.ContainsFunc(
+			replacements,
+			func(replacement updateReplacement) bool { return replacement.restoreFailed },
+		) {
+			if removeErr := os.RemoveAll(stage); removeErr != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup update stage %s: %w", stage, removeErr))
+			}
 		}
 		if cleanupErr == nil {
 			return
@@ -274,7 +296,7 @@ func updateRepository(
 		return errors.New("binary ownership ledger is empty; refusing to overwrite PATH copies")
 	}
 	installSourceRepo := preferredUpdateSourceRepo(runtime.Paths.Home, repo)
-	replacements := make([]updateReplacement, 0, len(ledger.Paths))
+	replacements = make([]updateReplacement, 0, len(ledger.Paths))
 	for _, targetPath := range ledger.Paths {
 		if strings.TrimSpace(targetPath) == "" || !filepath.IsAbs(targetPath) {
 			return fmt.Errorf("binary ownership ledger contains invalid path %q", targetPath)
@@ -308,6 +330,12 @@ func updateRepository(
 	}
 	sourceAdvanced := false
 	if !sourceAlreadyContainsTarget {
+		// Update's own children never refresh prices (updateSourceRepoEnv),
+		// but another pfm process may have since the dirty check: a table it
+		// rewrote goes back first, or the fast-forward refuses it.
+		if err := restoreRefreshedPrices(ctx, repo, updateBackupDir(runtime.Paths.Home), stdout); err != nil {
+			return err
+		}
 		if err := updateGitRun(ctx, repo, "merge", "--ff-only", "--quiet", target); err != nil {
 			return fmt.Errorf("fast-forward source branch to %s: %w", target, err)
 		}
@@ -507,15 +535,9 @@ func updateGitRun(ctx context.Context, repo string, args ...string) error {
 }
 
 func updateGitOutput(ctx context.Context, repo string, args ...string) (string, error) {
-	// Source ownership, reads and writes select the same requested repository.
-	// Preserve transport settings, and restore only the explicit fence mapping.
-	env := deps.WithoutGitRepoVars(os.Environ())
-	if gitDir, useFenceGit := paths.DevRepoGitDir(repo); useFenceGit {
-		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+repo)
-	}
-	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo, Env: env})
+	result, err := updateGitCapture(ctx, repo, nil, args...)
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return "", err
 	}
 	if result.ExitCode != 0 {
 		return "", fmt.Errorf(
@@ -526,6 +548,28 @@ func updateGitOutput(ctx context.Context, repo string, args ...string) (string, 
 		)
 	}
 	return string(result.Stdout), nil
+}
+
+// updateGitCapture runs git in repo and returns its result whatever the exit
+// code; the error is a git that could not be run. extraEnv is appended last.
+func updateGitCapture(
+	ctx context.Context,
+	repo string,
+	extraEnv []string,
+	args ...string,
+) (deps.RunResult, error) {
+	// Source ownership, reads and writes select the same requested repository.
+	// Preserve transport settings, and restore only the explicit fence mapping.
+	env := deps.WithoutGitRepoVars(os.Environ())
+	if gitDir, useFenceGit := paths.DevRepoGitDir(repo); useFenceGit {
+		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+repo)
+	}
+	env = append(env, extraEnv...)
+	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo, Env: env})
+	if err != nil {
+		return result, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return result, nil
 }
 
 func buildUpdateCandidate(ctx context.Context, repo, version, output string) error {

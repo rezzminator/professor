@@ -554,6 +554,7 @@ func (current *backend) callerForRequest(
 				naming.DisplayName(transcript.CustomTitle, transcript.AITitle, transcript.FirstPrompt),
 				"",
 				"",
+				"",
 				transcript.LastPrompt,
 				true,
 			)

@@ -1,0 +1,8 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "extra"
+ ],
+ "dirs": []
+}

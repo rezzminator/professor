@@ -1,12 +1,12 @@
 package statusline
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,8 +16,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
+	"github.com/rezzminator/professor/pfm/internal/pyvalue"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // subagentInput is the row context Claude Code's subagentStatusLine setting
@@ -57,7 +61,9 @@ type subagentRow struct {
 // until the first model turn lands; effort is the level its latest request
 // went out at, "" until one records it; err means the transcript could not be
 // read and roleErr the meta file, each rendering "?" — never as zero or empty.
-// spend is its own billing plus every agent's below it.
+// spend is its own billing plus every agent's below it. noCacheWindow is set
+// for an agent whose provider names no cache lifetime (a gpt- model through the
+// gateway's chatgpt route): its row shows the hit share and no countdown.
 type agentActivity struct {
 	role        string
 	roleErr     error
@@ -66,11 +72,16 @@ type agentActivity struct {
 	errors      int
 	compactions int
 	cacheHit    int
+	model       string
 	transcript  string
 	last        time.Time
 	err         error
 	nest        agentNesting
 	spend       agentSpend
+	// turn is its last message entry.
+	turn agentTurn
+
+	noCacheWindow bool
 }
 
 const (
@@ -86,6 +97,7 @@ const (
 	finishedCollapse = time.Minute
 	entryAssistant   = "assistant"
 	entryUser        = "user"
+	entryCostState   = "cost-state"
 	blockToolUse     = "tool_use"
 	// stallAfter is the quiet time before a running agent's row says idle:
 	// shorter gaps are ordinary model latency.
@@ -151,6 +163,15 @@ func fitRow(parts []rowPart, columns int) string {
 	return line
 }
 
+// userAgentsDir is the user's agent definitions directory, where Claude Code
+// reads them: $CLAUDE_CONFIG_DIR/agents when that is set, else ~/.claude/agents.
+func userAgentsDir(home string) string {
+	if dir := pfmconfig.AmbientClaudeConfigDir(); dir != "" {
+		return filepath.Join(dir, "agents")
+	}
+	return filepath.Join(home, ".claude", "agents")
+}
+
 // ansiSGR matches one colour escape: a muted row drops them all and wears one.
 var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
@@ -158,21 +179,25 @@ var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // row context in, one {id,content} JSON line per agent-panel row out.
 // Fail-open like the main line — any error prints nothing and exits 0, so
 // every row keeps Claude Code's own body instead of the harness logging a
-// failed command each tick. The price table is the one beside pfmConfigPath;
-// one that cannot load leaves every row's dollars "$?", its cause on stderr.
-func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, sidDir, pfmConfigPath string) int {
+// failed command each tick. The price table is the machine's served one
+// (pricing.LoadPrices: the clone file or the embedded copy, the override beside
+// pfmConfigPath merged), never fetched; one that cannot load leaves every
+// row's dollars "$?", its cause on stderr.
+func ServeSubagents(
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+	machine paths.Values,
+	env paths.Env,
+	pfmConfigPath string,
+) int {
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: read input (fail-open): %v\n", err)
 		return 0
 	}
-	var prices *pricing.Table
-	if table, err := pricing.Effective(pfmConfigPath); err != nil {
-		fmt.Fprintf(stderr, "pfm statusline --subagents: price table (rows show $?): %v\n", err)
-	} else {
-		prices = &table
-	}
-	rows, err := RenderSubagents(raw, clock.Real.Now(), sidDir, prices, stderr)
+	prices := LoadServedPrices(machine.Home, pfmConfigPath, stderr, "pfm statusline --subagents")
+	userAgents := userAgentsDir(machine.Home)
+	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, machine.Home, env, userAgents, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: render (fail-open): %v\n", err)
 		return 0
@@ -183,12 +208,47 @@ func ServeSubagents(stdin io.Reader, stdout, stderr io.Writer, sidDir, pfmConfig
 	return 0
 }
 
+// LoadServedPrices is the machine's served price table (pricing.LoadPrices:
+// the clone file or the embedded copy, the override beside pfmConfigPath
+// merged), never fetched. A table that cannot load is nil — every dollar then
+// renders "$?" — and its cause goes to stderr under who, as does a clone file
+// the embedded copy stood in for.
+func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) *pricing.Prices {
+	table, err := pricing.LoadPrices(home, pfmConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: price table (dollars show $?): %v\n", who, err)
+		return nil
+	}
+	if table.FileError != nil {
+		fmt.Fprintf(
+			stderr,
+			"%s: clone prices unusable, pricing from the %s table: %v\n",
+			who,
+			table.From,
+			table.FileError,
+		)
+	}
+	return &table
+}
+
 // RenderSubagents turns one subagentStatusLine payload into the JSON lines
 // Claude Code reads back, one per task that reports a model or a token count;
 // a task it omits keeps Claude Code's own row body. A sub-agent transcript
 // that cannot be read renders "?" in its row and its cause goes to warn. A nil
-// prices leaves every row's dollars unpriced.
-func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.Table, warn io.Writer) (string, error) {
+// prices leaves every row's dollars unpriced. A session with a cost ledger prices each row from it:
+// the ledger rows of that agent and every agent below it (ledger_spend.go); an agent it holds no
+// row of yet keeps its transcripts' price. An agent row's identity is the role its definition names
+// (roleLookup), found under the session cwd up to its git root, short of home, then in userAgents.
+func RenderSubagents(
+	raw []byte,
+	now time.Time,
+	sidDir string,
+	prices *pricing.Prices,
+	home string,
+	env paths.Env,
+	userAgents string,
+	warn io.Writer,
+) (string, error) {
 	var data subagentInput
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("parse subagent row context: %w", err)
@@ -201,6 +261,8 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.T
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
 	var tree *agentTree // scanned once per render, on the first agent row
+	roles := newRoleLookup(data.Cwd, home, userAgents, warn)
+	ledger := loadLedgerView(data.SessionID, home, env, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
 		if task.ID == "" || (task.TokenCount <= 0 && task.ContextWindowSize <= 0) {
@@ -209,11 +271,21 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, prices *pricing.T
 		var activity *agentActivity
 		if task.Type == localAgentTask {
 			if tree == nil {
-				tree = scanAgentTree(data.TranscriptPath)
+				tree = scanAgentTree(data.TranscriptPath, prices)
+				tree.judgeLiveness(now, finishedTasks(data.Tasks))
 			}
-			read := readAgentActivity(data.TranscriptPath, task.ID, prices)
+			read := *tree.read(task.ID)
+			read.noCacheWindow = openAIModel(task.Model) || openAIModel(read.model)
+			if read.roleErr == nil {
+				read.role = roles.name(read.role, warn)
+			}
 			read.nest = tree.nesting(task.ID)
-			read.spend.add(tree.nestedSpend(task.ID, prices))
+			read.spend.add(tree.nestedSpend(task.ID))
+			if ledger != nil {
+				if booked, ok := ledger.spend(task.ID, tree.children); ok {
+					read.spend = read.spend.withLedger(booked)
+				}
+			}
 			for _, cause := range tree.drainWarnings() {
 				fmt.Fprintf(warn, "pfm statusline --subagents: row %s: nested agents: %s\n", task.ID, cause)
 			}
@@ -290,9 +362,7 @@ func subagentContent(
 // Claude Code marks an orchestrator completed while its background workers
 // work on, and that row is not finished.
 func rowFinished(task *subagentTask, activity *agentActivity) bool {
-	switch strings.TrimSpace(task.Status) {
-	case taskCompleted, "failed", "killed", "error":
-	default:
+	if !terminalStatus(task.Status) {
 		return false
 	}
 	return activity == nil || activity.nest.active == 0 && activity.nest.unknown == 0 && activity.nest.err == nil
@@ -316,7 +386,7 @@ func activeContent(
 ) []rowPart {
 	gauge := cTokens + formatContextTokens(task.TokenCount) + reset
 	if task.ContextWindowSize > 0 {
-		percent := int(task.TokenCount * 100 / task.ContextWindowSize)
+		percent := gaugePercent(float64(task.TokenCount) * 100 / float64(task.ContextWindowSize))
 		gauge = makeBar(percent, subagentBarWidth) + " " +
 			percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " +
 			gauge + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
@@ -416,9 +486,21 @@ func modelVersion(model string) string {
 	return model
 }
 
-// modelFamily is the model's family alone: claude-opus-5-5[1m] → opus.
+// modelFamily is the model's family alone: claude-opus-5-5[1m] → opus. A gpt-
+// id names its tier last and its version first, so it renders tier-version:
+// gpt-6-sol → sol-6, gpt-5.6-terra → terra-5.6; one with no tier renders
+// whole, gpt-6 → gpt-6. The gateway's priority-tier suffix is no tier and
+// drops like the window tag: gpt-6-sol-fast → sol-6, gpt-5.5-fast → gpt-5.5.
 func modelFamily(model string) string {
 	model = modelVersion(model)
+	if strings.HasPrefix(model, "gpt-") {
+		model = strings.TrimSuffix(model, "-fast")
+		rest := strings.TrimPrefix(model, "gpt-")
+		if cut := strings.LastIndexByte(rest, '-'); cut > 0 && cut < len(rest)-1 {
+			return rest[cut+1:] + "-" + rest[:cut]
+		}
+		return model
+	}
 	if cut := strings.IndexByte(model, '-'); cut > 0 {
 		model = model[:cut]
 	}
@@ -485,7 +567,11 @@ func activitySegments(activity agentActivity, running bool, now time.Time) []row
 	if activity.errors > 0 {
 		parts = append(parts, rowPart{text: cBad + plural(activity.errors, "error") + reset})
 	}
-	parts = append(parts, rowPart{text: agentCacheText(activity.transcript, activity.cacheHit, now), drop: dropCache})
+	cache := agentCacheText(activity.transcript, activity.cacheHit, now)
+	if activity.noCacheWindow {
+		cache = unmeasuredCacheText(activity.cacheHit)
+	}
+	parts = append(parts, rowPart{text: cache, drop: dropCache})
 	if activity.compactions > 0 {
 		compactions := cCompaction + fmt.Sprintf("⟲%d", activity.compactions) + reset
 		parts = append(parts, rowPart{text: compactions, drop: dropCompactions})
@@ -506,38 +592,37 @@ func plural(count int, noun string) string {
 // boundaries, takes the cache hit and the effort from the newest assistant
 // entry that carries each, the newest entry timestamp, and what its responses
 // billed. A torn final line — the agent is mid-write — is skipped, not an error.
-func readAgentActivity(sessionTranscript, id string, prices *pricing.Table) agentActivity {
+func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices) agentActivity {
 	activity := agentActivity{cacheHit: -1}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		activity.err = errors.New("payload names no session transcript")
 		activity.roleErr = activity.err
 		return activity
 	}
-	base := filepath.Join(strings.TrimSuffix(sessionTranscript, ".jsonl"), "subagents", "agent-"+id)
-	activity.role, activity.roleErr = readAgentRole(base + ".meta.json")
-	path := base + ".jsonl"
+	path := transcript.SubagentTranscript(transcript.SubagentsDir(sessionTranscript), id)
+	activity.role, activity.roleErr = readAgentRole(transcript.SubagentMetaPath(path))
 	activity.transcript = path
-	file, err := os.Open(path)
-	if err != nil {
-		activity.err = fmt.Errorf("open sub-agent transcript %s: %w", path, err)
-		return activity
-	}
-	defer func() { _ = file.Close() }() // read-only handle; a close error loses nothing
-
 	seen := map[string]struct{}{}
 	spend := newSpendScan(prices)
-	reader := bufio.NewReaderSize(file, 1<<16)
-	for {
-		line, readErr := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			recordTranscriptLine(line, seen, &activity, spend)
+	var stamped time.Time
+	if _, _, err := transcript.ReadLines(path, 0, func(line []byte, _ bool) {
+		recordTranscriptLine(line, seen, &activity, spend)
+		if open, delegating, at, ok := messageTurnOpen(line); ok {
+			delegating = open && (delegating || activity.turn.open && activity.turn.delegating)
+			activity.turn = agentTurn{open: open, delegating: delegating, last: at, seen: true}
+			stamped = at
 		}
-		if readErr != nil {
-			if !errors.Is(readErr, io.EOF) {
-				activity.err = fmt.Errorf("read sub-agent transcript %s: %w", path, readErr)
-			}
-			break
+	}); err != nil {
+		var opened bool
+		if opened, activity.err = transcriptError(path, err); !opened {
+			return activity
 		}
+	}
+	if !activity.turn.seen {
+		activity.turn.open = true // no reply yet: the first turn is under way
+	}
+	if stamped.IsZero() {
+		activity.stampTurn(path)
 	}
 	activity.tools = len(seen)
 	activity.spend = spend.total()
@@ -545,35 +630,115 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Table) agen
 	return activity
 }
 
+// roleLookup maps an agentType to the role its definition file names. It lives
+// for one render, so an edited definition shows on the next one.
+type roleLookup struct {
+	dirs  []string // the project's agent definitions, nearest first, then the user's
+	names map[string]string
+}
+
+// newRoleLookup lists the definition directories the way Claude Code collects
+// them: <dir>/.claude/agents for the cwd and each parent, nearest first, through
+// the git root (the first directory holding .git) and never home itself, whose
+// .claude is the user's config; then the user's agents directory.
+func newRoleLookup(cwd, home, userAgents string, warn io.Writer) *roleLookup {
+	lookup := &roleLookup{names: map[string]string{}}
+	if strings.TrimSpace(cwd) != "" {
+		if home != "" {
+			home = filepath.Clean(home)
+		}
+		for dir := filepath.Clean(cwd); dir != home; {
+			lookup.dirs = append(lookup.dirs, filepath.Join(dir, ".claude", "agents"))
+			_, err := os.Lstat(filepath.Join(dir, ".git"))
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, fs.ErrNotExist) {
+				fmt.Fprintf(warn, "pfm statusline --subagents: git root (definitions read past %s): %v\n", dir, err)
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	if userAgents != "" {
+		lookup.dirs = append(lookup.dirs, userAgents)
+	}
+	return lookup
+}
+
+// name is the `role:` of the first definition file that exists, searched the
+// way Claude Code resolves an agent (the project's, then the user's, symlinks
+// followed). A type with no file, no `role:` key or an unreadable file is its
+// own name; an unreadable one also reaches warn.
+func (lookup *roleLookup) name(agentType string, warn io.Writer) string {
+	if role, ok := lookup.names[agentType]; ok {
+		return role
+	}
+	role := agentType
+	if agentType != "" && !strings.ContainsAny(agentType, `/\`) && agentType != "." && agentType != ".." {
+		for _, dir := range lookup.dirs {
+			body, err := os.ReadFile(filepath.Join(dir, agentType+".md"))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				fmt.Fprintf(warn, "pfm statusline --subagents: agent definition (rows show %s): %v\n", agentType, err)
+			} else if named := definitionRole(string(body)); named != "" {
+				role = named
+			}
+			break
+		}
+	}
+	lookup.names[agentType] = role
+	return role
+}
+
+// definitionRole is the `role:` value in a definition's frontmatter, the block
+// between its leading "---" line and the next one; "" when there is none.
+func definitionRole(body string) string {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return ""
+	}
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			return ""
+		}
+		if value, ok := strings.CutPrefix(line, "role:"); ok {
+			return strings.Trim(strings.TrimSpace(value), `"'`)
+		}
+	}
+	return ""
+}
+
 // readAgentRole reads agentType from the sub-agent's meta file.
 func readAgentRole(path string) (string, error) {
-	raw, err := os.ReadFile(path)
+	meta, err := transcript.ReadSubagentMeta(path)
 	if err != nil {
-		return "", fmt.Errorf("read sub-agent meta %s: %w", path, err)
+		return "", err
 	}
-	var meta struct {
-		AgentType string `json:"agentType"`
-	}
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		return "", fmt.Errorf("parse sub-agent meta %s: %w", path, err)
-	}
-	if strings.TrimSpace(meta.AgentType) == "" {
+	agentType := strings.TrimSpace(meta.AgentType)
+	if agentType == "" {
 		return "", fmt.Errorf("sub-agent meta %s names no agentType", path)
 	}
-	return meta.AgentType, nil
+	return agentType, nil
 }
 
 func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agentActivity, spend *spendScan) {
 	var entry struct {
 		Type      string    `json:"type"`
 		Subtype   string    `json:"subtype"`
+		RequestID string    `json:"requestId"`
 		Timestamp time.Time `json:"timestamp"`
 		Effort    any       `json:"effort"`
 		Message   struct {
-			ID      string          `json:"id"`
-			Model   string          `json:"model"`
-			Content json.RawMessage `json:"content"`
-			Usage   *billedUsage    `json:"usage"`
+			ID      string           `json:"id"`
+			Model   string           `json:"model"`
+			Content json.RawMessage  `json:"content"`
+			Usage   *transcriptUsage `json:"usage"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &entry) != nil {
@@ -589,19 +754,15 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if entry.Type != entryAssistant && entry.Type != entryUser {
 		return
 	}
-	var blocks []struct {
-		Type    string `json:"type"`
-		ID      string `json:"id"`
-		IsError bool   `json:"is_error"`
-	}
-	if json.Unmarshal(entry.Message.Content, &blocks) == nil {
-		for _, block := range blocks {
-			switch {
-			case entry.Type == entryAssistant && block.Type == blockToolUse && block.ID != "":
-				seen[block.ID] = struct{}{}
-			case entry.Type == entryUser && block.Type == "tool_result" && block.IsError:
-				activity.errors++
-			}
+	blocks, _ := transcript.DecodeContent(entry.Message.Content)
+	for index := range blocks {
+		block := &blocks[index]
+		id, _ := pyvalue.String(block.ID)
+		switch {
+		case entry.Type == entryAssistant && block.Kind() == blockToolUse && id != "":
+			seen[id] = struct{}{}
+		case entry.Type == entryUser && block.Kind() == "tool_result" && string(block.IsError) == "true":
+			activity.errors++
 		}
 	}
 	if entry.Type != entryAssistant {
@@ -611,8 +772,20 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	if level, ok := entry.Effort.(string); ok && strings.TrimSpace(level) != "" {
 		activity.effort = strings.TrimSpace(level)
 	}
-	spend.record(entry.Message.ID, entry.Message.Model, entry.Message.Usage)
-	if usage := entry.Message.Usage; usage != nil {
+	if model := entry.Message.Model; model != "" && model != "<synthetic>" {
+		activity.model = model
+	}
+	usage := entry.Message.Usage
+	if usage == nil {
+		spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, nil)
+		return
+	}
+	spend.record(entry.Message.ID, entry.RequestID, entry.Message.Model, &usage.UsageBlock)
+	// A line that reports no cache counters is a call still streaming (the
+	// gateway's message_start carries its whole-prompt estimate in
+	// input_tokens and nothing else): reading it as a call would drop the
+	// newest completed call's share to 0%.
+	if usage.reportsCache {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
 			activity.cacheHit = hit
 		}

@@ -22,7 +22,7 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	home := t.TempDir()
 	base := t.TempDir()
 	repos := map[string]string{}
-	for _, name := range []string{"linked", "missing", "conflict"} {
+	for _, name := range []string{"linked", "missing", "conflict", "copy"} {
 		repos[name] = "file://" + skillFixtureRepo(
 			t,
 			filepath.Join(base, name),
@@ -42,6 +42,19 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFixture(t, filepath.Join(conflict, "SKILL.md"), "# own\n")
+	// A byte-equal copy where the link belongs is one install replaces itself,
+	// never a conflict the operator must clear by hand.
+	copied := filepath.Join(home, ".claude", "skills", "copy")
+	store, err := filepath.EvalSymlinks(copied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(copied); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.CopyFS(copied, os.DirFS(store)); err != nil {
+		t.Fatal(err)
+	}
 
 	states := map[string]SkillSourceStatus{}
 	for _, status := range InspectSkillSources(home, false) {
@@ -49,6 +62,7 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	}
 	for name, want := range map[string]SkillSourceState{
 		"linked": SkillSourceLinked, "missing": SkillSourceMissing, "conflict": SkillSourceConflict,
+		"copy":      SkillSourceCopy,
 		"unfetched": SkillSourceNotFetched, "odd": SkillSourceSkipped,
 	} {
 		if states[name].State != want {
@@ -61,6 +75,13 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	if got := states["conflict"].Conflicts; len(got) != 1 || got[0] != conflict {
 		t.Fatalf("CONFLICT row does not name %s: %v", conflict, got)
 	}
+	if got := states["copy"]; len(got.Copies) != 1 || got.Copies[0] != copied || len(got.Conflicts) != 0 {
+		t.Fatalf("COPY row does not name %s as a copy alone: %+v", copied, got)
+	}
+	if row := states["copy"].Describe(); !strings.Contains(row, " copy="+copied) ||
+		!strings.Contains(row, `hint="run pfm install --yes"`) {
+		t.Fatalf("COPY row does not name the copy and the install that relinks it: %s", row)
+	}
 	for _, status := range InspectSkillSources(home, true) {
 		if status.Name == "unfetched" && status.State != SkillSourceOffline {
 			t.Fatalf("offline unfetched state=%s want OFFLINE", status.State)
@@ -68,9 +89,9 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	}
 	var report bytes.Buffer
 	warnings, failures := ReportSkillSources(&report, home, false)
-	if warnings != 3 || failures != 1 {
+	if warnings != 4 || failures != 1 {
 		t.Fatalf(
-			"warnings=%d failures=%d, want 3 (conflict, unfetched, odd) and 1 (missing)\n%s",
+			"warnings=%d failures=%d, want 4 (conflict, copy, unfetched, odd) and 1 (missing)\n%s",
 			warnings,
 			failures,
 			report.String(),

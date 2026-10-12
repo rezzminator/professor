@@ -81,10 +81,6 @@ func TestHeaderAccountAndCacheAreReadableByTheLaneRegexes(t *testing.T) {
 	if got := regexp.MustCompile(`⚡ 1h|🪫 5m`).FindString(line); got != "⚡ 1h" {
 		t.Errorf("tui_cache reads %q from the frame", got)
 	}
-	model, _ = applyKey(t, model, controlKey('e'))
-	if got := regexp.MustCompile(`⚡ 1h|🪫 5m`).FindString(strings.Join(frameLines(model), "\n")); got != "🪫 5m" {
-		t.Errorf("⌃E must flip the header's cache, got %q", got)
-	}
 }
 
 func TestGroupedCursorRowKeepsItsIndentedChevron(t *testing.T) {

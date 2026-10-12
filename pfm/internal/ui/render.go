@@ -143,6 +143,9 @@ func (model Model) render() string {
 	query := model.renderQuery(width)
 	footer := model.renderFooter(width)
 	bodyHeight := maxInt(4, height-6)
+	if model.tab == TabChats && model.mergeNewChat {
+		bodyHeight = maxInt(4, height-7) // the place rail
+	}
 	// Only one of these ever reaches the frame; building renderListPanel
 	// unconditionally then discarding it on every Stats/Limits/Cosmos frame
 	// paid for a full fleet-row layout nobody saw (2026-09-08: the Limits
@@ -596,13 +599,10 @@ func framePanelWithBottom(title string, lines []string, width int, bottom string
 	}
 	framed := make([]string, 0, len(lines)+2)
 	framed = append(framed, borderStyle.Render(top))
+	// The side edge is the same string on every line: render it once.
+	edge := borderStyle.Render("│")
 	for _, line := range lines {
-		framed = append(
-			framed,
-			borderStyle.Render("│")+
-				fillLine(line, innerWidth)+
-				borderStyle.Render("│"),
-		)
+		framed = append(framed, edge+fillLine(line, innerWidth)+edge)
 	}
 	framed = append(framed, bottom)
 	return strings.Join(framed, "\n")

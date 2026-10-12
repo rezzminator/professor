@@ -81,29 +81,6 @@ func TestFindWorksFanOutRecoversPanickingProvider(t *testing.T) {
 	}
 }
 
-// TestLocalizeImagesRecoversPanickingDownload pins F1 at images.go:65.
-func TestLocalizeImagesRecoversPanickingDownload(t *testing.T) {
-	t.Parallel()
-	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		panic("simulated image download panic")
-	})}
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = h.LocalizeImages(
-			context.Background(),
-			"![figure](https://example.test/panics.png)",
-			"https://example.test/article",
-		)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("LocalizeImages never returned — a download panic likely hung the fan-out")
-	}
-}
-
 // TestDoHQueryRecoversPanickingQueryType pins F1 at doh.go:368.
 func TestDoHQueryRecoversPanickingQueryType(t *testing.T) {
 	t.Parallel()

@@ -2,7 +2,6 @@ package harvestmcp
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -38,27 +37,25 @@ func TestSearchLiteratureTypeRoundTrips(t *testing.T) {
 		}
 		return http.StatusOK, `{}`
 	})}
-	session := connectHarvesterInProcess(t, service)
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: toolSearchLiterature, Arguments: map[string]any{"query": "Deep learning", "type": "paper"},
-	})
-	if err != nil {
-		t.Fatal(err)
+	found, err := service.SearchLiterature(context.Background(), FindInput{Query: "Deep learning", Type: "paper"})
+	if err != nil || len(found.Candidates) == 0 {
+		t.Fatalf("search_literature(type paper) = %+v (err %v), want candidates", found, err)
 	}
-	encoded, err := json.Marshal(result.StructuredContent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var output struct {
-		Candidates []map[string]any `json:"candidates"`
-	}
-	if err := json.Unmarshal(encoded, &output); err != nil || result.IsError || len(output.Candidates) == 0 {
-		t.Fatalf("search_literature(type paper) = %s (err %v), want candidates", encoded, err)
-	}
-	for _, candidate := range output.Candidates {
-		if _, stale := candidate["kind"]; stale || candidate["type"] == "" || candidate["type"] == nil {
-			t.Fatalf("candidate = %v, want its type under type, never kind", candidate)
+	for _, candidate := range found.Candidates {
+		if candidate.Type == "" {
+			t.Fatalf("candidate = %+v, want its type", candidate)
 		}
+	}
+	session := connectHarvesterInProcess(t, service)
+	result, text := callText(
+		t,
+		session,
+		toolSearchLiterature,
+		map[string]any{"query": "Deep learning", "type": "paper"},
+	)
+	if result.IsError || !strings.Contains(text, "=== [1/") ||
+		!strings.Contains(text, "\n"+found.Candidates[0].Type) {
+		t.Fatalf("search_literature(type paper) text = %q, want a block naming its type", text)
 	}
 }
 
@@ -76,40 +73,26 @@ func TestSearchLiteratureNamesAFailedSource(t *testing.T) {
 		}
 		return http.StatusOK, `{}`
 	})}
-	session := connectHarvesterInProcess(t, service)
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: toolSearchLiterature, Arguments: map[string]any{"query": "Deep learning"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.IsError {
-		t.Fatalf("search_literature = %+v, want candidates with the failed source named", result)
-	}
-	encoded, err := json.Marshal(result.StructuredContent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var output FindOutput
-	if err := json.Unmarshal(encoded, &output); err != nil {
-		t.Fatal(err)
-	}
-	if len(output.Candidates) == 0 {
-		t.Fatalf("candidates = none, want OpenAlex's record: %s", encoded)
+	output, err := service.SearchLiterature(context.Background(), FindInput{Query: "Deep learning"})
+	if err != nil || len(output.Candidates) == 0 {
+		t.Fatalf("search_literature = %+v (err %v), want OpenAlex's record", output, err)
 	}
 	named := map[string]FindSource{}
 	for _, source := range output.Sources {
 		named[source.Source] = source
 	}
 	if got := named["Semantic Scholar"]; got.Status != "failed" || !strings.Contains(got.Error, "HTTP 429") {
-		t.Fatalf("Semantic Scholar = %+v, want failed with HTTP 429: %s", got, encoded)
+		t.Fatalf("Semantic Scholar = %+v, want failed with HTTP 429", got)
 	}
 	if got := named["Crossref"]; got.Status != "answered" {
-		t.Fatalf("Crossref = %+v, want answered with no result: %s", got, encoded)
+		t.Fatalf("Crossref = %+v, want answered with no result", got)
 	}
-	text := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, "Semantic Scholar (HTTP 429") {
-		t.Fatalf("text does not name the failed source:\n%s", text)
+	session := connectHarvesterInProcess(t, service)
+	result, text := callText(t, session, toolSearchLiterature, map[string]any{"query": "Deep learning"})
+	if result.IsError || !strings.Contains(text, "Semantic Scholar failed (0): ") ||
+		!strings.Contains(text, "HTTP 429") ||
+		!strings.Contains(text, "Crossref answered (0)") {
+		t.Fatalf("text does not name every source's status:\n%s", text)
 	}
 }
 

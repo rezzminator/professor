@@ -40,7 +40,6 @@ func TestChatArgumentMatrix(t *testing.T) {
 		{"read with tail 0", []string{"chat", "read", "x", "--tail", "0"}, 2},
 		{"stream with a bad regexp", []string{"chat", "stream", "x", "--filter", "("}, 2},
 		{"inject without a message", []string{"chat", "inject", "x"}, 2},
-		{"watch with a bad poll", []string{"chat", "watch", "x", "--poll", "0"}, 2},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer

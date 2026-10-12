@@ -17,8 +17,8 @@
     ".claude/scripts/*.mjs",
     ".claude/workflows/*.js",
     "{project:backend}/CLAUDE.md",
-    "docs/agents/_index.md",
-    "docs/agents/standards.md",
+    "docs/_index.md",
+    "docs/standards.md",
     ".claude/skills/legal/**",
     "docs/references/*"
   ],
@@ -31,7 +31,34 @@
     ".claude/scripts/prod-deploy-watch.sh"
   ],
   "templates": {
+    "global/agents/gpt-foreman.md": {
+      "curated": true
+    },
+    "global/agents/gpt-foreman-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-lander.md": {
+      "curated": true
+    },
+    "global/agents/gpt-executor.md": {
+      "curated": true
+    },
+    "global/agents/sol.md": {
+      "curated": true
+    },
+    "global/agents/luna.md": {
+      "curated": true
+    },
+    "global/agents/terra.md": {
+      "curated": true
+    },
+    "global/agents/astra.md": {
+      "curated": true
+    },
     "global/agents/agent-optimizer.md": {
+      "curated": true
+    },
+    "global/agents/reviewer-pro.md": {
       "curated": true
     },
     "global/agents/reviewer.md": {
@@ -40,13 +67,19 @@
     "global/agents/rr.md": {
       "curated": true
     },
-    "global/agents/tracer-rr.md": {
+    "global/agents/clone-distiller.md": {
       "curated": true
     },
     "global/agents/tracer.md": {
       "curated": true
     },
     "global/codex/config.toml": {
+      "curated": true
+    },
+    "global/engine-sync/config.json": {
+      "curated": true
+    },
+    "global/commands/context-audit.md": {
       "curated": true
     },
     "global/commands/context-meter.md": {
@@ -58,7 +91,16 @@
     "global/commands/h/gh.md": {
       "curated": true
     },
+    "global/commands/housekeeping.md": {
+      "curated": true
+    },
+    "global/commands/iterative-improvement.md": {
+      "curated": true
+    },
     "global/commands/pfm.md": {
+      "curated": true
+    },
+    "global/commands/pfm/schedule.md": {
       "curated": true
     },
     "global/commands/pfm/workbench.md": {
@@ -85,91 +127,19 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
-    "global/commands/reminder.md": {
-      "curated": true
-    },
-    "global/commands/tokens/README.md": {
-      "curated": true
-    },
-    "global/commands/tokens/SKILL.md": {
-      "curated": true
-    },
-    "global/commands/tokens/fake-pfm.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl": {
-      "curated": true
-    },
-    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.meta.json": {
-      "curated": true
-    },
-    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t2.jsonl": {
-      "curated": true
-    },
-    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t2.meta.json": {
-      "curated": true
-    },
-    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t3.jsonl": {
-      "curated": true
-    },
-    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t4.jsonl": {
-      "curated": true
-    },
-    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t5.jsonl": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/claude.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/codex.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/flight.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/format.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/options.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/pricing.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/report.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/scan.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/lib/timeline.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/pricing.test.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/token-audit.mjs": {
-      "curated": true
-    },
-    "global/commands/tokens/token-audit.test.mjs": {
-      "curated": true
-    },
     "global/commands/ultimate.md": {
       "curated": true
     },
-    "global/skills/close-out/SKILL.md": {
+    "global/skills/chatlog/README.md": {
+      "curated": true
+    },
+    "global/skills/chatlog/SKILL.md": {
+      "curated": true
+    },
+    "global/skills/done-herewith/SKILL.md": {
       "curated": true
     },
     "global/skills/sources.json": {
-      "curated": true
-    },
-    "global/skills/transcript/SKILL.md": {
-      "curated": true
-    },
-    "global/skills/transcript/transcript.py": {
-      "curated": true
-    },
-    "global/skills/transcript/transcript_test.py": {
       "curated": true
     },
     "project/CLAUDE.md": {
@@ -239,12 +209,6 @@
         ".claude/commands/rnd.md": "398a09d18a16b286d5552dd1b3ebb57fb908368107b5daa2da3e1d5425cc8506"
       }
     },
-    "project/docs-agents/_index.md": {
-      "curated": true
-    },
-    "project/docs-agents/standards.md": {
-      "curated": true
-    },
     "project/docs-commands/build/references/qa-commons.md": {
       "curated": true
     },
@@ -273,6 +237,12 @@
         "docs/references/gitter-phase-setup.md": "0ad4ff2e1d174e8db9fcb652fd6bd42d4fd7679395cba7205f90e6a1bbe1502c"
       }
     },
+    "project/docs-hub/_index.md": {
+      "curated": true
+    },
+    "project/docs-hub/standards.md": {
+      "curated": true
+    },
     "project/epics/TEMPLATE.md": {
       "curated": true
     },
@@ -285,9 +255,6 @@
       "curated": true
     },
     "project/scripts/alloc-ports.sh": {
-      "curated": true
-    },
-    "project/scripts/build-codex.mjs": {
       "curated": true
     },
     "project/scripts/checkpoint.sh": {

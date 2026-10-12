@@ -6,7 +6,7 @@
 # Units: pfm is pfm/; templates is every other path of the repository. Needs ROOT (the physical
 # repository root, `pwd -P`) and the caller's usage() (prints the usage, exits 2).
 # An arg is a file, optionally <file>::<selector>. Candidates for <file>, each collapsed with
-# `realpath -m`: an absolute path itself; else cwd-relative, unit-relative (pfm/<file>, pfm only) and
+# `unit_canon` (GNU `realpath -m`, portable): an absolute path itself; else cwd-relative, unit-relative (pfm/<file>, pfm only) and
 # repository-relative. The existing file among them is the target:
 #   - an empty arg or a flag → usage (exit 2);
 #   - two different existing files → `{script}: {arg} resolves to two files: {a} and {b}`, then usage;
@@ -23,6 +23,25 @@
 # BROKEN STATE: scripts/test-unit-path.sh fails a case; a caller sourcing a missing file errors on source.
 
 # shellcheck disable=SC2034 # UNIT_PATHS, UNIT_PATHS_RC and UNIT_LOG are read by the sourcing script
+
+unit_canon() { # unit_canon <absolute path>: GNU `realpath -m` on any host — the deepest existing ancestor resolved, the rest collapsed lexically
+  local head="$1" rest="" seg out
+  local -a segs
+  while [ "$head" != / ] && [ ! -e "$head" ] && [ ! -L "$head" ]; do
+    rest="/${head##*/}$rest"; head="${head%/*}"; [ -n "$head" ] || head=/
+  done
+  out="$(realpath -- "$head")" || return
+  [ "$out" != / ] || out=
+  IFS=/ read -r -a segs <<< "$rest"
+  for seg in "${segs[@]}"; do
+    case "$seg" in
+      '' | .) ;;
+      ..) out="${out%/*}" ;;
+      *) out="$out/$seg" ;;
+    esac
+  done
+  printf '%s\n' "${out:-/}"
+}
 
 unit_in() { # unit_in <unit> <absolute path>: 0 when the path lies inside the unit
   case "$1" in
@@ -53,7 +72,7 @@ unit_paths() {
     fi
     target=; other=
     for c in "${!cands[@]}"; do
-      cands[c]="$(realpath -m -- "${cands[c]}")"
+      cands[c]="$(unit_canon "${cands[c]}")"
       [ -f "${cands[c]}" ] || continue
       if [ -z "$target" ]; then target="${cands[c]}"
       elif [ -z "$other" ] && [ "${cands[c]}" != "$target" ]; then other="${cands[c]}"; fi

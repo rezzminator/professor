@@ -1,6 +1,11 @@
 package claudelaunch
 
-import pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+import (
+	"strings"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+)
 
 const (
 	knobBinary                     = "binary"
@@ -11,6 +16,7 @@ const (
 	knobMaxConcurrentSubagents     = "maxConcurrentSubagents"
 	knobWebSearchesPerSession      = "webSearchesPerSession"
 	knobAutoCompactWindow          = "autoCompactWindow"
+	knobHelperModel                = "helperModel"
 	knobTmuxTruecolor              = "tmuxTruecolor"
 	knobTheme                      = "theme"
 	knobCleanupPeriodDays          = "cleanupPeriodDays"
@@ -71,6 +77,7 @@ const (
 	flagName                       = "--name"
 	flagNameShort                  = "-n"
 	flagPromptFile                 = "--system-prompt-file"
+	flagSystemPrompt               = "--system-prompt"
 	flagForkSession                = "--fork-session"
 	flagAllowBypass                = "--allow-dangerously-skip-permissions"
 	flagBypass                     = "--dangerously-skip-permissions"
@@ -88,6 +95,11 @@ const (
 	WireEnv
 	WireUnset
 	WireFlag
+	// WireWrapper is a launch decision the wrapper `pfm internal cost-launch` makes at exec time.
+	WireWrapper
+	// WireWrapperEnv is a process-environment value only the wrapper can set: it depends on a
+	// socket the wrapper binds just before exec.
+	WireWrapperEnv
 )
 
 func (wire Wire) String() string {
@@ -100,6 +112,10 @@ func (wire Wire) String() string {
 		return unsetWord
 	case WireFlag:
 		return "flag"
+	case WireWrapper:
+		return "wrapper"
+	case WireWrapperEnv:
+		return "wrapper-env"
 	default:
 		return "unknown"
 	}
@@ -153,6 +169,19 @@ var Knobs = func() []Knob {
 	for _, name := range hygiene {
 		rows = append(rows, Knob{name, WireUnset, name, SourceConstant, nil, "Discard inherited launch state."})
 	}
+	for _, v := range costVars {
+		rows = append(rows, Knob{
+			v.name, WireWrapperEnv, v.name, SourceConstant, v.value,
+			"Point Claude Code's OpenTelemetry exporters at the launch's loopback cost sink.",
+		})
+	}
+	rows = append(rows, Knob{
+		EnvCostLedger, WireWrapperEnv, EnvCostLedger, SourceConstant, "on|off|preempted|failed",
+		"Record what the cost ledger decided for this launch, for the status line.",
+	}, Knob{
+		EnvCostLedgerPID, WireWrapperEnv, EnvCostLedgerPID, SourceConstant, "{pid}",
+		"Name the process the armed sink serves, so a second pass of the same process reuses it.",
+	})
 	return append(
 		rows,
 		Knob{
@@ -167,6 +196,14 @@ var Knobs = func() []Knob {
 			SourceLaunchThenConfig,
 			true,
 			"Hand the main chat's starting prompt-cache TTL to the cache-live-control plugin in the process environment; the plugin owns every TTL from then on.",
+		},
+		Knob{
+			knobCostLedger,
+			WireWrapper,
+			"pfm internal cost-launch",
+			SourceConfig,
+			true,
+			"Arm a per-launch cost sink on 127.0.0.1 and exec Claude with the exporter variables pointed at it; false, or the user's own telemetry settings, launch without.",
 		},
 		Knob{
 			knobShell,
@@ -225,6 +262,14 @@ var Knobs = func() []Knob {
 			"Set the auto-compact window the compaction plugin reads.",
 		},
 		Knob{
+			knobHelperModel,
+			WireSettings,
+			"env." + envAnthropicSmallFastModel,
+			SourceConfig,
+			pfmconfig.DefaultHelperModel,
+			"Run Claude Code's helper calls (page summaries, web search, titles) on a small model, Haiku 5.5 unless configured.",
+		},
+		Knob{
 			knobTmuxTruecolor,
 			WireSettings,
 			"env." + envTmuxTruecolor,
@@ -273,7 +318,7 @@ var Knobs = func() []Knob {
 			36500,
 			"Keep managed transcripts.",
 		},
-		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "11 registrations", "Attach the fleet hook set."},
+		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "12 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},
 		Knob{
 			knobSubagentStatusLine,
@@ -311,5 +356,47 @@ func IdentityHygiene() []string {
 		configDirEnv,
 		ConfigDirDefaultEnv,
 		envCodexThreadID,
+	}
+}
+
+// FunctionHooksEnv is the variable the function-hooks knob sets on every
+// launch. Claude Code still loads no plugin hook module while its cached
+// rollout flag is false, so a host check names both.
+const FunctionHooksEnv = envFunctionHooks
+
+// SessionMarkerEnv is set in every process Claude Code spawns: a pfm whose
+// environment carries it runs inside a chat, not a login shell.
+const SessionMarkerEnv = envClaudeCode
+
+// EnvPrefixes are the name families of the variables Claude Code reads.
+func EnvPrefixes() []string { return []string{"CLAUDE_", "ANTHROPIC_"} }
+
+// LaunchEnvNames names every variable a pfm Claude launch sets itself, in the
+// process environment or the --settings env block, so a chat carries it
+// whichever process spawned it.
+func LaunchEnvNames() []string {
+	var names []string
+	for _, knob := range Knobs {
+		switch {
+		case knob.Wire == WireEnv, knob.Wire == WireWrapperEnv:
+			names = append(names, knob.Target)
+		case knob.Wire == WireSettings && strings.HasPrefix(knob.Target, "env."):
+			names = append(names, strings.TrimPrefix(knob.Target, "env."))
+		}
+	}
+	return names
+}
+
+// RuntimeEnvNames names Claude's per-session exports, not account policy.
+// The harness emits these to child shells and may leave them inherited after
+// a bridge launches another engine without CLAUDECODE. Persisting them would
+// reuse a stale identity, messaging credential, executable or turn effort.
+func RuntimeEnvNames() []string {
+	return []string{
+		envSessionID, envChildSession, envProjectDir,
+		"CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
+		"CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_MESSAGING_SOCKET",
+		"CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_SESSION_ATTENDED",
+		"CLAUDE_PID", "CLAUDE_EFFORT",
 	}
 }

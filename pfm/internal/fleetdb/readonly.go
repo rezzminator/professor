@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -40,8 +41,9 @@ func (e *SchemaMismatchError) Newer() bool { return e.Found > e.Expected }
 // a diagnostic: it never creates, initializes or migrates the file, so a newer
 // build's doctor leaves an older installed pfm the database it can still
 // read. A missing or empty file is ErrAbsent; a file at another schema version
-// is a *SchemaMismatchError, its handle closed.
-func OpenReadOnlyAtSchema(ctx context.Context, name, path string, expected int) (*sql.DB, error) {
+// is a *SchemaMismatchError, its handle closed. equivalent names the other
+// versions whose files hold the expected schema.
+func OpenReadOnlyAtSchema(ctx context.Context, name, path string, expected int, equivalent ...int) (*sql.DB, error) {
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) || err == nil && info.Size() == 0 {
 		return nil, fmt.Errorf("%s database %s: %w", name, path, ErrAbsent)
@@ -61,7 +63,7 @@ func OpenReadOnlyAtSchema(ctx context.Context, name, path string, expected int) 
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("read %s database %s schema version: %w", name, path, err), db.Close())
 	}
-	if version != expected {
+	if version != expected && !slices.Contains(equivalent, version) {
 		mismatch := &SchemaMismatchError{Name: name, Path: path, Found: version, Expected: expected}
 		if err := db.Close(); err != nil {
 			return nil, errors.Join(mismatch, fmt.Errorf("close %s database %s: %w", name, path, err))
@@ -82,7 +84,7 @@ func OpenSharedStateReadOnly(ctx context.Context, values paths.Values) *Store {
 		store.degraded = err
 		return store
 	}
-	db, err := OpenReadOnlyAtSchema(ctx, "state", values.StateDB, SchemaVersion)
+	db, err := OpenReadOnlyAtSchema(ctx, "state", values.StateDB, SchemaVersion, RetiredSchemaVersion)
 	if err != nil {
 		store.degraded = err
 		return store

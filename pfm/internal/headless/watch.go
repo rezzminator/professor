@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"sort"
 	"strings"
 	"time"
 
@@ -17,7 +16,8 @@ type WatchOptions struct {
 	// IdleAfter is how long a chat must sit idle before IDLE is emitted. Zero
 	// emits as soon as the transcript says the assistant has spoken.
 	IdleAfter time.Duration
-	// Poll is the sampling cadence.
+	// Poll is the sampling cadence, floored at MinPoll: zero or anything
+	// shorter runs at MinPoll.
 	Poll time.Duration
 	// OnIdle and OnExit run once, when their event fires: OnIdle on an IDLE
 	// line, OnExit on an EXIT or DEAD line — never on SEEN or ERROR.
@@ -31,11 +31,33 @@ type WatchOptions struct {
 	// never hears an event twice. Without it only IDLE, EXIT, DEAD and ERROR
 	// are written, exactly as before.
 	Transitions bool
+	// NoWorking omits WORKING event lines under Transitions. SEEN snapshots
+	// still name a working chat, and BLOCKED, QUIET, EXIT and ERROR remain.
+	NoWorking bool
+	// Answer reads the last answer only for the NoWorking monitor's idle
+	// events. Failures appear on the event line, never as an empty answer.
+	Answer func(context.Context, Chat) (string, error)
 	// QuietAfter, under Transitions and when positive, announces a working
 	// seat whose transcript has sat unchanged that long as QUIET, once, and
 	// WORKING again when the transcript moves: a hung stream, a reconnect
 	// loop or an unseen dialog never ends a turn, so IDLE alone misses it.
 	QuietAfter time.Duration
+}
+
+// MinPoll is the shortest cadence a watch samples at, and its default. A
+// sample costs a fleet discovery plus a transcript read per target, and a
+// watcher is a background wait for a calling chat that acts on its events in
+// turns of its own: polling faster bought no event it could use sooner, only
+// the CPU fourteen concurrent watchers burned between them.
+const MinPoll = 10 * time.Second
+
+// PollFloor is the cadence a requested poll runs at: MinPoll for anything
+// shorter, zero and negative included.
+func PollFloor(requested time.Duration) time.Duration {
+	if requested < MinPoll {
+		return MinPoll
+	}
+	return requested
 }
 
 // Watcher samples one chat. Resolve is re-run every tick rather than cached:
@@ -75,22 +97,63 @@ func (watcher Watcher) Watch(
 	return seat.status, run.result.Errors[watcher.Name]
 }
 
+// UnreadablePolls is how many polls in a row a followed seat's tmux server may
+// go unread before the watch says so with an ERROR line. A server that cannot
+// be read is no evidence the chat ended: until then the seat's verdict is
+// held, and nothing is announced for it.
+const UnreadablePolls = 3
+
+// Discovery is one poll's view of the fleet, shared by every target of the
+// poll, so a poll costs one discovery however many targets it serves.
+type Discovery struct {
+	// Resolve finds one named target.
+	Resolve func(ctx context.Context, name string) (Chat, bool, error)
+	// List reports every seat. Nil when the discovery offers no listing.
+	List func(ctx context.Context) ([]Chat, error)
+	// Unreadable names each tmux socket whose server this discovery could
+	// not read, with why. Asked only after Resolve or List answered.
+	Unreadable func() map[string]string
+}
+
 // FleetWatcher watches many seats in one process. A target is a seat name or a
 // shell-style glob; a glob picks up seats born after the watch began.
+//
+// A named target is the seat it first resolves to live: the watch follows
+// that seat (its socket and pane) through a /clear or a rename, and ends it
+// with EXIT when the seat is gone — a newcomer taking the name is a different
+// chat, never a continuation. A glob follows every live seat whose name
+// matches, each seat on its own, so two seats sharing a name are two seats.
 type FleetWatcher struct {
 	// Targets are seat names and globs; a target containing any of `*?[` is a
 	// glob (path.Match syntax). A malformed pattern is refused before the first
 	// poll with path.ErrBadPattern wrapped.
 	Targets []string
+	// Discover opens each poll's shared discovery. since is the earliest
+	// instant a fleet view shared with other watches may have been taken at
+	// and still serve this poll: the poll's tick on the shared grid, or the
+	// poll's own start when that came first. Nil polls Resolve and List
+	// directly.
+	Discover func(since time.Time) Discovery
 	// Resolve finds one named target, re-run every poll.
 	Resolve func(ctx context.Context, name string) (Chat, bool, error)
 	// List reports every seat, re-run every poll while any glob is live.
 	List func(ctx context.Context) ([]Chat, error)
 	// Inspect reads a seat's state; nil is Inspect, the transcript-only rule.
 	Inspect func(context.Context, Chat, time.Time) (Status, error)
-	Now     func() time.Time
-	Clock   clock.Clock
+	// Fingerprint condenses everything a followed seat's listing row rests on
+	// into one value read cheaply, without a fleet scan; ok is false when the
+	// seat cannot be fingerprinted. While a named target's seat keeps the
+	// fingerprint taken before the scan its row came from, the watch reuses
+	// that row instead of scanning (and scans anyway every SeatPrintReuse
+	// polls). Nil scans every poll.
+	Fingerprint func(ctx context.Context, chat Chat) (string, bool)
+	Now         func() time.Time
+	Clock       clock.Clock
 }
+
+// SeatPrintReuse is how many polls in a row a followed seat's row is reused on
+// an unchanged fingerprint before the watch scans anyway.
+const SeatPrintReuse = 30
 
 // ClassifyTarget says whether a watch target is a glob (it contains any of
 // `*?[`) rather than a seat name, and refuses a malformed pattern with
@@ -150,10 +213,12 @@ func (watcher FleetWatcher) Watch(
 			run.named = append(run.named, &watchedSeat{name: target})
 		}
 	}
-	if len(run.named) > 0 && run.resolve == nil {
+	run.discover = watcher.Discover
+	run.fingerprint = watcher.Fingerprint
+	if len(run.named) > 0 && run.resolve == nil && run.discover == nil {
 		return run.result, fmt.Errorf("watch: named targets need a Resolve")
 	}
-	if len(run.globs) > 0 && run.list == nil {
+	if len(run.globs) > 0 && run.list == nil && run.discover == nil {
 		return run.result, fmt.Errorf("watch: glob targets need a List")
 	}
 	err := run.run(ctx)
@@ -167,27 +232,82 @@ type watchedSeat struct {
 	seen    bool
 	ended   bool
 	status  Status
+	chat    Chat
 	// announcedIdle is the legacy rule's one bit: IDLE already written.
 	announcedIdle bool
 	// announced is the transitions rule's memory: the last state key written.
 	announced string
 	lastSeen  string // the previous poll's Status.Last, for the missed-turn rule
+	// bound is the live seat a named target first resolved to, or the seat a
+	// glob adopted: what the watch follows from then on.
+	bound *Chat
+	// unread counts the polls in a row this seat's server could not be read.
+	unread int
+	// print is the fingerprint taken before the scan the bound row came from,
+	// "" when there is none to trust; reused counts the polls since that scan.
+	print  string
+	reused int
+}
+
+// seatPrint is one followed seat's fingerprint this poll.
+type seatPrint struct {
+	value string
+	ok    bool
+}
+
+// seatKey is a glob-adopted seat: its name (what the glob matched), and the
+// socket and pane that make two seats sharing one name two seats.
+type seatKey struct{ name, socket, pane string }
+
+func keyOf(chat Chat) seatKey { return seatKey{name: chat.Name, socket: chat.Socket, pane: chat.Pane} }
+
+// sameSeat says two chats are one seat: one pane on one socket. A chat with
+// neither (a test fake, a seat known by name alone) is its name.
+func sameSeat(left, right Chat) bool {
+	if left.Socket == "" && left.Pane == "" && right.Socket == "" && right.Pane == "" {
+		return left.Name == right.Name
+	}
+	return left.Socket == right.Socket && left.Pane == right.Pane
+}
+
+// socketless says a listing row carries neither socket nor pane: its tmux
+// server went unread that scan (a probe timed out under load), or its socket
+// file was unlinked under a running engine. The seat is then known by its
+// conversation alone.
+func socketless(chat Chat) bool { return chat.Socket == "" && chat.Pane == "" }
+
+// sameConversation says chat is the seat bound follows when either was listed
+// without its socket: one conversation, listed with its socket one scan and
+// without it the next, is one seat.
+func sameConversation(bound, chat Chat) bool {
+	return bound.ID != "" && chat.ID == bound.ID && (socketless(bound) || socketless(chat))
+}
+
+// claimKey is what a named target claims so no glob streams its seat twice.
+func claimKey(chat Chat) string {
+	if chat.Socket == "" && chat.Pane == "" {
+		return "name\x00" + chat.Name
+	}
+	return "seat\x00" + chat.Socket + "\x00" + chat.Pane
 }
 
 // fleetRun is one watch: the state machine every target shares.
 type fleetRun struct {
-	options WatchOptions
-	out     io.Writer
-	resolve func(ctx context.Context, name string) (Chat, bool, error)
-	list    func(ctx context.Context) ([]Chat, error)
-	inspect func(context.Context, Chat, time.Time) (Status, error)
-	now     func() time.Time
-	clock   clock.Clock
+	options  WatchOptions
+	out      io.Writer
+	resolve  func(ctx context.Context, name string) (Chat, bool, error)
+	list     func(ctx context.Context) ([]Chat, error)
+	discover func(since time.Time) Discovery
+	inspect  func(context.Context, Chat, time.Time) (Status, error)
+	now      func() time.Time
+	clock    clock.Clock
+	// fingerprint reads a followed seat's fingerprint (FleetWatcher.Fingerprint).
+	fingerprint func(ctx context.Context, chat Chat) (string, bool)
 
 	named   []*watchedSeat
 	globs   []*watchedSeat
-	adopted map[string]*watchedSeat
-	// claimed holds the last resolved name of every named target, so a glob
+	adopted map[seatKey]*watchedSeat
+	// claimed holds the seat of every named target (claimKey), so a glob
 	// never streams a seat a named target already does.
 	claimed map[string]bool
 	result  WatchResult
@@ -209,16 +329,14 @@ func newFleetRun(
 	if now == nil {
 		now = timerClock.Now
 	}
-	if options.Poll <= 0 {
-		options.Poll = time.Second
-	}
+	options.Poll = PollFloor(options.Poll)
 	return &fleetRun{
 		options: options,
 		out:     out,
 		inspect: inspect,
 		now:     now,
 		clock:   timerClock,
-		adopted: map[string]*watchedSeat{},
+		adopted: map[seatKey]*watchedSeat{},
 		claimed: map[string]bool{},
 		result: WatchResult{
 			Ended:  map[string]Status{},
@@ -228,20 +346,36 @@ func newFleetRun(
 }
 
 func (run *fleetRun) run(ctx context.Context) error {
+	since := run.now()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := run.pollRound(ctx); err != nil {
+		if err := run.pollRound(ctx, since); err != nil {
 			return err
 		}
 		if run.finished() {
 			return nil
 		}
-		if err := waitForNextPoll(ctx, run.clock, run.options.Poll); err != nil {
+		now := run.now()
+		tick := NextTick(now, run.options.Poll)
+		if err := waitForNextPoll(ctx, run.clock, tick.Sub(now)); err != nil {
 			return err
 		}
+		since = tick
+		if woke := run.now(); woke.Before(tick) {
+			since = woke
+		}
 	}
+}
+
+// NextTick is the first instant after now on poll's grid, the multiples of
+// poll since the Unix epoch. Every watch with the same poll samples on the
+// same grid, so watches started apart still poll together and one fleet scan
+// serves them all; no wait is ever longer than poll.
+func NextTick(now time.Time, poll time.Duration) time.Time {
+	step := int64(poll)
+	return time.Unix(0, (now.UnixNano()/step+1)*step)
 }
 
 // finished is true once nothing is left to watch: every named target ended and
@@ -265,96 +399,14 @@ func (run *fleetRun) liveGlobs() int {
 	return live
 }
 
-// pollRound is one poll: every live named target in argument order, then the
-// seats the globs adopted, sorted by name.
-func (run *fleetRun) pollRound(ctx context.Context) error {
-	for _, seat := range run.named {
-		if seat.ended {
-			continue
-		}
-		chat, found, err := run.resolve(ctx, seat.name)
-		if err != nil {
-			if err := run.failSeat(ctx, seat, err); err != nil {
-				return err
-			}
-			continue
-		}
-		if found {
-			run.claimed[chat.Name] = true
-		}
-		if err := run.advance(ctx, seat, chat, found); err != nil {
-			return err
-		}
-	}
-	if run.liveGlobs() == 0 {
-		return nil
-	}
-	chats, err := run.list(ctx)
-	if err != nil {
-		return run.failGlobs(ctx, err)
-	}
-	listed := map[string]Chat{}
-	for index := range chats {
-		chat := &chats[index]
-		if previous, dup := listed[chat.Name]; !dup || (!previous.Live && chat.Live) {
-			listed[chat.Name] = *chat
-		}
-	}
-	// A seat that ended is let go only once a listing no longer shows it live,
-	// so a respawn under the same name is a fresh seat with a fresh SEEN.
-	for name, seat := range run.adopted {
-		chat, ok := listed[name]
-		if seat.ended && (!ok || !chat.Live || !run.globMatches(name)) {
-			delete(run.adopted, name)
-		}
-	}
-	for index := range chats {
-		chat := &chats[index]
-		if !chat.Live || run.adopted[chat.Name] != nil || run.claimed[chat.Name] || !run.globMatches(chat.Name) {
-			continue
-		}
-		run.adopted[chat.Name] = &watchedSeat{name: chat.Name}
-	}
-	for _, name := range run.liveAdopted() {
-		chat, found := listed[name]
-		if err := run.advance(ctx, run.adopted[name], chat, found); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (run *fleetRun) globMatches(name string) bool {
-	for _, glob := range run.globs {
-		if glob.ended {
-			continue
-		}
-		if ok, err := path.Match(glob.name, name); err == nil && ok {
-			return true
-		}
-	}
-	return false
-}
-
-// liveAdopted is the adopted seats still being followed, sorted by name.
-func (run *fleetRun) liveAdopted() []string {
-	names := make([]string, 0, len(run.adopted))
-	for name, seat := range run.adopted {
-		if !seat.ended {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
 // advance reads one target once: found false is a name that resolves to
 // nothing, otherwise chat is inspected.
 func (run *fleetRun) advance(ctx context.Context, seat *watchedSeat, chat Chat, found bool) error {
+	seat.unread = 0
 	if !found {
 		seat.status = Missing(seat.name)
 		if run.options.Transitions && !seat.seen {
-			return run.snapshot(seat)
+			return run.snapshot(ctx, seat)
 		}
 		return run.leave(seat, "DEAD")
 	}
@@ -362,17 +414,18 @@ func (run *fleetRun) advance(ctx context.Context, seat *watchedSeat, chat Chat, 
 	if err != nil {
 		return run.failSeat(ctx, seat, err)
 	}
+	seat.chat = chat
 	seat.status = status
 	if run.options.Transitions && !seat.seen {
-		return run.snapshot(seat)
+		return run.snapshot(ctx, seat)
 	}
 	if !status.Alive() {
 		return run.leave(seat, "EXIT")
 	}
 	if run.options.Transitions {
-		return run.announceTransition(seat)
+		return run.announceTransition(ctx, seat)
 	}
-	return run.announceLegacy(seat)
+	return run.announceLegacy(ctx, seat)
 }
 
 // say writes one event line.
@@ -425,16 +478,57 @@ func (run *fleetRun) failGlobs(ctx context.Context, cause error) error {
 			return err
 		}
 	}
-	for _, name := range run.liveAdopted() {
-		if err := run.failSeat(ctx, run.adopted[name], cause); err != nil {
+	for _, key := range run.liveAdopted() {
+		if err := run.failSeat(ctx, run.adopted[key], cause); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// answerSuffix keeps the monitor's verdict on one line, with explicit read
+// failures. The default watch never calls the reader or changes its format.
+func (run *fleetRun) answerSuffix(ctx context.Context, seat *watchedSeat) string {
+	if !run.options.NoWorking {
+		return ""
+	}
+	if run.options.Answer == nil {
+		return ` answer_error="reader not configured"`
+	}
+	text, err := run.options.Answer(ctx, seat.chat)
+	if err != nil {
+		return fmt.Sprintf(" answer_error=%q", strings.Join(strings.Fields(err.Error()), " "))
+	}
+	first, verdict := "", ""
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = line
+		}
+		if strings.HasPrefix(line, "**Verdict:**") {
+			verdict = line
+			break
+		}
+	}
+	if verdict != "" {
+		first = verdict
+	}
+	if first == "" {
+		return ` answer_error="empty answer"`
+	}
+	const limit = 200
+	characters := []rune(first)
+	if len(characters) > limit {
+		first = string(characters[:limit-1]) + "…"
+	}
+	return fmt.Sprintf(" answer=%q", first)
+}
+
 // idle writes the IDLE line, runs OnIdle, and ends the seat under Once.
-func (run *fleetRun) idle(seat *watchedSeat) error {
+func (run *fleetRun) idle(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	// A turn ended on an error waits for its human exactly as an answered one
 	// does, so it is announced as idle with its kind.
@@ -442,6 +536,7 @@ func (run *fleetRun) idle(seat *watchedSeat) error {
 	if status.State == StateError {
 		suffix = " error=" + status.Error
 	}
+	suffix += run.answerSuffix(ctx, seat)
 	if err := run.say("IDLE %s idle_seconds=%d%s", seat.name, status.IdleSeconds, suffix); err != nil {
 		return err
 	}
@@ -466,12 +561,12 @@ func idleLongEnough(status Status, after time.Duration) bool {
 
 // announceLegacy is the original rule: IDLE once per rest, re-armed by any
 // alive state that is not a rest.
-func (run *fleetRun) announceLegacy(seat *watchedSeat) error {
+func (run *fleetRun) announceLegacy(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	switch {
 	case endedTurn(status) && idleLongEnough(status, run.options.IdleAfter) && !seat.announcedIdle:
 		seat.announcedIdle = true
-		return run.idle(seat)
+		return run.idle(ctx, seat)
 	case !endedTurn(status):
 		// Back to work: the next idle is a new event worth announcing.
 		seat.announcedIdle = false
@@ -505,7 +600,7 @@ func (run *fleetRun) stateKey(status Status) string {
 
 // snapshot writes the one SEEN line a target gets, on first sight, and seeds
 // what later transitions are compared with. A target seen not alive ends here.
-func (run *fleetRun) snapshot(seat *watchedSeat) error {
+func (run *fleetRun) snapshot(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	seat.seen = true
 	line := fmt.Sprintf("SEEN %s %s", seat.name, status.State)
@@ -517,6 +612,9 @@ func (run *fleetRun) snapshot(seat *watchedSeat) error {
 	}
 	if run.quiet(status) {
 		line += fmt.Sprintf(" quiet_seconds=%d", status.QuietSeconds)
+	}
+	if endedTurn(status) {
+		line += run.answerSuffix(ctx, seat)
 	}
 	if err := run.say("%s", line); err != nil {
 		return err
@@ -532,15 +630,17 @@ func (run *fleetRun) snapshot(seat *watchedSeat) error {
 
 // announceTransition writes a line only when the state differs from the last
 // one written.
-func (run *fleetRun) announceTransition(seat *watchedSeat) error {
+func (run *fleetRun) announceTransition(ctx context.Context, seat *watchedSeat) error {
 	status := seat.status
 	previous := seat.lastSeen
 	seat.lastSeen = status.Last
 	// A turn that began and ended between two polls leaves the seat at rest
 	// with a new last answer: say it worked, then judge the rest anew.
 	if endedTurn(status) && strings.HasPrefix(seat.announced, StateIdle+":") && status.Last != previous {
-		if err := run.say("%s %s", strings.ToUpper(StateWorking), seat.name); err != nil {
-			return err
+		if !run.options.NoWorking {
+			if err := run.say("%s %s", strings.ToUpper(StateWorking), seat.name); err != nil {
+				return err
+			}
 		}
 		seat.announced = StateWorking
 	}
@@ -550,7 +650,7 @@ func (run *fleetRun) announceTransition(seat *watchedSeat) error {
 			return nil
 		}
 		seat.announced = key
-		return run.idle(seat)
+		return run.idle(ctx, seat)
 	}
 	if key == seat.announced {
 		return nil
@@ -558,6 +658,9 @@ func (run *fleetRun) announceTransition(seat *watchedSeat) error {
 	seat.announced = key
 	if key == stateQuiet {
 		return run.say("QUIET %s quiet_seconds=%d", seat.name, status.QuietSeconds)
+	}
+	if run.options.NoWorking && key == StateWorking {
+		return nil
 	}
 	return run.say("%s %s", strings.ToUpper(status.State), seat.name)
 }

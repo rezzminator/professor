@@ -19,6 +19,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - composed prompts: the tracked fleet prompt per engine, drift-gated by a test · `harness-prompts/composed/` · generated from `harness-prompts/` by `make -C pfm prompts`
 - machine config: gitignored `{clone}/pfm.config.json`, seeded from `example.pfm.config.json`; `PFM_CONFIG` overrides · design `docs/design/engines/pfm-home.md`
 - launch registry: every flag, env value and `--settings` key a Claude chat starts with · `internal/claudelaunch/` · design `docs/design/engines/claude-launch.md`
+- cost ledger: every Claude API call's price, `{session_id}.jsonl` joined from the OpenTelemetry log and span a per-chat `pfm internal cost-sink` receives on loopback; the one source of the status line's dollars, `pfm tokens` and callmeter · `internal/costledger/`, `internal/costsink/` · design `docs/design/engines/cost-ledger.md`
 - workbench: a nested sub-project marked by `.professor/workbench.json`, its own picker group `{project} › {title}`, every launch door running on its prompt · `internal/workbench/` · manual `/pfm:workbench` · design `docs/design/engines/workbench.md`
 - `deps.Registry`: the single place a platform difference is declared; `deps.Resolve` refuses a gated name off-platform even when it is on PATH · `internal/deps/registry.go`
 - config: account identity, emoji, theme and permission posture · `internal/config/`
@@ -36,7 +37,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Environment Variables
 
-- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF` · `PFM_SKILL_SOURCES_OFFLINE` (install fetches no source-fetched skill; doctor reports OFFLINE).
+- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF` · `PFM_SKILL_SOURCES_OFFLINE` (install fetches no source-fetched skill; doctor reports OFFLINE) · `PFM_PRICES_OFFLINE` (no price refresh fetches, `--force` included; the embedded or clone table serves) · `PFM_COST_LEDGER_DIR` (the cost ledger's directory) · `PFM_WATCH_SNAPSHOT` (the fleet scan snapshot `chat watch` processes share).
 - `PFM_TMUX_CONF` unset: a chat's tmux server loads the user's own `~/.tmux.conf`, since a chat is a terminal the user lives in; a jail sets it to `/dev/null` so a real machine config never steers a fixture.
 - Test knobs outside `internal/paths/`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`), `PFM_TEST_FRESH_SOCKET` (`internal/spawn/socket.go`).
 

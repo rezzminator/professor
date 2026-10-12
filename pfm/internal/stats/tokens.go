@@ -1,7 +1,6 @@
 package stats
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const (
@@ -26,24 +27,21 @@ const (
 type tokenCacheEntry struct {
 	offset       int64
 	modifiedNS   int64
-	partial      []byte
 	claudeTokens int64
 	codexTokens  int64
+	codexPeak    int64
+	codexClosed  int64
 	known        bool
 	generation   uint64
 	fileInfo     os.FileInfo
 	rewriteGuard []byte
-	// countedMessages remembers the ids of the assistant messages already
-	// added to claudeTokens. Claude writes one record per content block of a
-	// message and every record repeats the same usage block, so the id — not
-	// the record — is the unit of counting. A short ring is enough: a
-	// message's records are written together.
-	countedMessages []string
+	// countedMessages holds each billable response's latest contribution by
+	// response key, so a later content-block record revises its partial usage
+	// and is never added a second time, however many responses came between.
+	// It grows with the transcript's responses and goes with the entry when
+	// the chat leaves the fleet.
+	countedMessages map[string]int64
 }
-
-// countedMessageRing bounds countedMessages; a message never spans more
-// records than this between its first and last block.
-const countedMessageRing = 16
 
 type tokenMeasure struct {
 	total      int64
@@ -76,21 +74,12 @@ type tokenRecord struct {
 	Type      string `json:"type"`
 	RequestID string `json:"requestId"`
 	Message   struct {
-		ID    string `json:"id"`
-		Usage struct {
-			InputTokens         int64 `json:"input_tokens"`
-			OutputTokens        int64 `json:"output_tokens"`
-			CacheReadTokens     int64 `json:"cache_read_input_tokens"`
-			CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
-		} `json:"usage"`
+		ID    string              `json:"id"`
+		Usage *pricing.UsageBlock `json:"usage"`
 	} `json:"message"`
 	Payload struct {
-		Type string `json:"type"`
-		Info struct {
-			TotalTokenUsage struct {
-				TotalTokens int64 `json:"total_tokens"`
-			} `json:"total_token_usage"`
-		} `json:"info"`
+		Type string                     `json:"type"`
+		Info *transcript.CodexTokenInfo `json:"info"`
 	} `json:"payload"`
 }
 
@@ -319,30 +308,20 @@ func (sampler *Sampler) readTokenUsageLocked(path string) (tokenMeasure, []strin
 		return tokenMeasure{}, []string{fmt.Sprintf("seek chat token transcript %s: %v", path, err)}
 	}
 
-	reader := bufio.NewReaderSize(file, 64<<10)
+	// A torn last line is left unread: the offset stops before it and the next
+	// sample reads it whole.
 	var warnings []string
-	for {
-		chunk, readErr := reader.ReadBytes('\n')
-		entry.offset += int64(len(chunk))
-		if len(chunk) > 0 {
-			line := append([]byte{}, entry.partial...)
-			line = append(line, chunk...)
-			entry.partial = nil
-			if line[len(line)-1] == '\n' {
-				line = line[:len(line)-1]
-				if parseErr := applyTokenRecord(entry, line); parseErr != nil {
-					warnings = append(warnings, fmt.Sprintf("parse chat token transcript %s: %v", path, parseErr))
-				}
-			} else {
-				entry.partial = line
-			}
+	parsedOffset, _, readErr := transcript.ScanLines(file, entry.offset, func(line []byte, complete bool) {
+		if !complete {
+			return
 		}
-		if readErr != nil {
-			if readErr != io.EOF {
-				warnings = append(warnings, fmt.Sprintf("read chat token transcript %s: %v", path, readErr))
-			}
-			break
+		if parseErr := applyTokenRecord(entry, line); parseErr != nil {
+			warnings = append(warnings, fmt.Sprintf("parse chat token transcript %s: %v", path, parseErr))
 		}
+	})
+	entry.offset = parsedOffset
+	if readErr != nil {
+		warnings = append(warnings, fmt.Sprintf("read chat token transcript %s: %v", path, readErr))
 	}
 	postInfo, statErr := file.Stat()
 	if statErr != nil {
@@ -425,51 +404,80 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 			return fmt.Errorf("parse timestamp %q: %w", record.Timestamp, err)
 		}
 	}
-	if record.Type == "assistant" {
-		usage := record.Message.Usage
-		if usage.InputTokens < 0 || usage.OutputTokens < 0 ||
-			usage.CacheReadTokens < 0 || usage.CacheCreationTokens < 0 {
+	if record.Type == "assistant" && record.Message.Usage != nil {
+		usage := *record.Message.Usage
+		if negativeUsage(usage) {
 			return fmt.Errorf("assistant usage contains a negative token count")
 		}
-		total := usage.InputTokens + usage.OutputTokens +
-			usage.CacheReadTokens + usage.CacheCreationTokens
-		if total > 0 && !entry.messageCounted(record.Message.ID, record.RequestID) {
-			entry.claudeTokens += total
+		total := claudeTokens(usage)
+		entry.claudeTokens += entry.messageTokenDelta(record.Message.ID, record.RequestID, total)
+		if total > 0 {
 			entry.known = true
 		}
 	}
-	if record.Payload.Type == "token_count" {
-		total := record.Payload.Info.TotalTokenUsage.TotalTokens
+	if info := record.Payload.Info; record.Payload.Type == "token_count" && info != nil {
+		total := info.TotalTokenUsage.Total()
 		if total < 0 {
 			return fmt.Errorf("lifetime usage for Codex contains a negative token count")
 		}
-		if total > 0 {
-			entry.codexTokens = total
-			entry.known = true
+		if info.TotalTokenUsage != nil {
+			if total < entry.codexPeak {
+				entry.codexClosed += entry.codexPeak
+			}
+			entry.codexPeak = total
+			entry.codexTokens = entry.codexClosed + entry.codexPeak
+			if total > 0 {
+				entry.known = true
+			}
 		}
 	}
 	return nil
 }
 
-// messageCounted reports whether this assistant record's message was already
-// added, and records it when not. A record naming neither a message id nor a
-// request id is counted on its own — the shape every pre-id fixture has.
-func (entry *tokenCacheEntry) messageCounted(messageID, requestID string) bool {
-	key := messageID
-	if key == "" {
-		key = requestID
+// claudeTokens is every token the response billed: the executor's and each
+// advisor consultation's, which the executor's top level never carries.
+func claudeTokens(usage pricing.UsageBlock) int64 {
+	billed, _ := usage.Billed()
+	total := billed.Context() + billed.Output
+	for _, advisor := range usage.Advisors() {
+		total += advisor.Usage.Context() + advisor.Usage.Output
 	}
-	if key == "" {
-		return false
+	return total
+}
+
+// negativeUsage reports a negative count at the top level or in any
+// iteration: either would subtract from the chat's tokens.
+func negativeUsage(usage pricing.UsageBlock) bool {
+	if usage.Input < 0 || usage.Output < 0 || usage.CacheRead < 0 || usage.CacheCreation < 0 {
+		return true
 	}
-	for _, seen := range entry.countedMessages {
-		if seen == key {
+	for _, iteration := range usage.Iterations {
+		if negativeUsage(iteration) {
 			return true
 		}
 	}
-	entry.countedMessages = append(entry.countedMessages, key)
-	if len(entry.countedMessages) > countedMessageRing {
-		entry.countedMessages = entry.countedMessages[len(entry.countedMessages)-countedMessageRing:]
-	}
 	return false
+}
+
+// messageTokenDelta records this response's latest usage and returns only its
+// change from the previously counted contribution. Identical repeats add zero.
+// A record naming neither a message id nor a request id is counted on its own —
+// the shape every pre-id fixture has.
+func (entry *tokenCacheEntry) messageTokenDelta(messageID, requestID string, total int64) int64 {
+	key := transcript.ResponseKey(messageID, requestID, "", "")
+	if key == "" {
+		return total
+	}
+	if counted, seen := entry.countedMessages[key]; seen {
+		entry.countedMessages[key] = total
+		return total - counted
+	}
+	if total == 0 {
+		return 0 // An unseen zero contribution adds nothing and is not kept.
+	}
+	if entry.countedMessages == nil {
+		entry.countedMessages = make(map[string]int64)
+	}
+	entry.countedMessages[key] = total
+	return total
 }

@@ -103,8 +103,9 @@ func Run(m *testing.M) int {
 		}
 	}
 	// No test fetches a source-fetched global skill from its public repo: an
-	// install run in the jail skips the fetch and doctor reports OFFLINE.
-	for _, name := range []string{paths.EnvSkillSourcesOffline, paths.EnvThemesOffline} {
+	// install run in the jail skips the fetch and doctor reports OFFLINE; no
+	// price refresh fetches a publisher's pricing page.
+	for _, name := range []string{paths.EnvSkillSourcesOffline, paths.EnvThemesOffline, paths.EnvPricesOffline} {
 		if err := os.Setenv(name, "1"); err != nil {
 			warnSetup("set %s: %v", name, err)
 			return 1
@@ -239,10 +240,21 @@ func jailHome(base string) (func(), error) {
 	if err != nil {
 		return func() {}, fmt.Errorf("create jailed home under %s: %w", base, err)
 	}
+	engineSync, err := os.MkdirTemp(base, "pfm-jail-engine-sync-")
+	if err != nil {
+		return func() {}, errors.Join(
+			fmt.Errorf("create the engine-sync fake directory under %s: %w", base, err), os.RemoveAll(home),
+		)
+	}
 	cleanup := func() {
-		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			warnSetup("remove jail home %s: %v", home, err)
+		for _, dir := range []string{home, engineSync} {
+			if err := os.RemoveAll(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				warnSetup("remove jail directory %s: %v", dir, err)
+			}
 		}
+	}
+	if err := installDefaultEngineSync(engineSync); err != nil {
+		return cleanup, err
 	}
 	accountDir := config.DefaultAccountDir(home, 1)
 	if err := os.MkdirAll(accountDir, 0o700); err != nil {
@@ -406,7 +418,7 @@ func InstalledHome(t *testing.T) string {
 		t.Fatal(err)
 	}
 	canonical := filepath.Join(jailedHome, ".local", "bin", "pfm")
-	if err := WriteExecutable(canonical, []byte("jailed-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(canonical, []byte(jailedPfmStub), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", claudeBinary)
@@ -597,6 +609,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	stageTracerIntakeKit(t, home, hostShimDir)
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)

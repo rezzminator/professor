@@ -16,12 +16,12 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 - child CLAUDE.md: a roster entry's own conventions and code placement, beside its agents and skills · `{project}/CLAUDE.md`, `{project}/.claude/`
 - fleet prompt: the main chat's system layer — voice, § Model Selection, § Orchestration — composed at build time by `make -C pfm prompts` into the clone's tracked `composed/`; `pfm install` stages none of it · `{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`
 - guard: the PreToolUse hook gating `.claude/**` and every `CLAUDE.md` · `.claude/scripts/pfm-guard.sh`
-- permanent docs: the main loop's reference docs · `docs/agents/`, each roster entry's `{project}/docs/`
+- permanent docs: the main loop's reference docs · `docs/_index.md` and the clusters it links, each roster entry's `{project}/docs/`
 - flight directory: a flight's task files and audit trail, kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
 
 <!-- OPTIONAL docs map: add entries like these if the project keeps clustered reference docs, or delete the block.
-- docs hub: links every architecture, API, system-map, feature and child-project doc; a cluster is read `_index.md` first, then grepped for the exact code/DB symbol — doc identifiers match code verbatim · `docs/agents/_index.md`
-- DB diagram: every table, column and FK under its real {DATABASE} name · `docs/agents/graph/db/postgres.mmd`
+- docs hub: links every architecture, API, system-map, feature and child-project doc; a cluster is read `_index.md` first, then grepped for the exact code/DB symbol — doc identifiers match code verbatim · `docs/_index.md`
+- DB diagram: every table, column and FK under its real {DATABASE} name · `docs/graph/db/postgres.mmd`
 - facts: invariants the user has ruled; read before touching data lifecycle, {SENSITIVE_DATA} or an external service; code contradicting a fact → escalate, never edit either side · `docs/facts/_index.md`
 - runbooks: how-to per project · `docs/runbooks/{project}/`; features `docs/features/`; runtime reference cards `docs/references/`; business `docs/business/` (`marketing/`); legal and compliance `docs/epics/legal/`
 - Code truth: grep the code. Schema truth: introspect the live DB. -->

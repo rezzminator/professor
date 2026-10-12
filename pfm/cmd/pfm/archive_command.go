@@ -119,11 +119,19 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		Subagents: *subagents,
 		OlderThan: time.Duration(*olderThan) * 24 * time.Hour,
 	})
+	printArchiveReport(report, *apply, *subagents, resolved, stdout)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm archive: %v\n", err)
 		return 1
 	}
-	printArchiveReport(report, *apply, *subagents, resolved, stdout)
+	if len(report.Unresolved) != 0 {
+		return 1
+	}
+	for index := range report.Moves {
+		if report.Moves[index].Failed != "" {
+			return 1
+		}
+	}
 	return 0
 }
 
@@ -175,11 +183,17 @@ func printArchiveReport(
 		switch {
 		case move.Failed != "":
 			fmt.Fprintf(stdout, "  FAILED %s -> %s: %s\n", move.Source, move.Target, move.Failed)
-		case apply:
+		case move.Applied:
 			fmt.Fprintf(stdout, "  moved  %s -> %s\n", move.Source, move.Target)
 		default:
 			fmt.Fprintf(stdout, "  plan   %s -> %s\n", move.Source, move.Target)
 		}
+	}
+	for _, id := range report.Unresolved {
+		fmt.Fprintf(stdout, "  UNRESOLVED %s — kept killed: %s\n", id, report.UnresolvedErrors[id])
+	}
+	for _, warning := range report.Unclassified {
+		fmt.Fprintf(stdout, "  UNCLASSIFIED — kept sidecar line: %s\n", warning)
 	}
 	for _, id := range report.Unsupported {
 		fmt.Fprintf(

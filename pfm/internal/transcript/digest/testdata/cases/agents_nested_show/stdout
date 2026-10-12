@@ -1,0 +1,8 @@
+TRANSCRIPT claude · agent a2nested of session aaaaaaaa-1111-2222-3333-444444444444 · model ?
+FILE {HOME}/.claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444/subagents/workflows/wf_one/agent-a2nested.jsonl · 164 bytes · 1 records · cwd ? (shown as ./)
+SPAN 2026-09-29 20:00:20Z → 20:00:20Z · 0s wall
+CALLS 0, 0 err, 0 without result: none
+FILTER only prompt,reply,call,note,final · results brief · text 500 · shown 1 of 1 events
+L1 20:00:20 PROMPT go
+UNFINISHED — the last turn has no final reply: the run was cut off or is still running
+SKIPPED 0 records

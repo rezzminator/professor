@@ -6,13 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -47,7 +47,7 @@ func TestReloadWorkbench(t *testing.T) {
 			}
 			want := request
 			want.Effort = "xhigh"
-			var wantError string
+			var wantError, mirrorRecord string
 			switch name {
 			case "explicit":
 				request.Effort, want.Effort = "low", "low"
@@ -55,10 +55,12 @@ func TestReloadWorkbench(t *testing.T) {
 				request.Engine, request.CWD = pfmengine.Codex, duo
 				want = request
 				want.Model, want.Effort = "gpt-x", "high"
+				reply, code := testjail.CleanMirrorReply, 0
 				if name == "mirror failure" {
-					if err := atomicfile.Write(filepath.Join(duo, ".mcp.json"), []byte("{"), 0o600); err != nil {
-						t.Fatal(err)
-					}
+					reply, code = testjail.FailedMirrorReply, 1
+				}
+				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
+				if name == "mirror failure" {
 					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
 					if err != nil {
 						t.Fatal(err)
@@ -86,23 +88,8 @@ func TestReloadWorkbench(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("request = %#v, err = %v; want %#v", got, err, want)
 			}
-			if name == "Codex" {
-				body, err := os.ReadFile(filepath.Join(duo, "AGENTS.md"))
-				if err != nil || !strings.Contains(string(body), "Duo.") {
-					t.Fatalf("Codex mirror = %q, err = %v", body, err)
-				}
-				persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if check, err := workbench.CheckMirror(
-					persona.Bench,
-					pfmengine.Codex,
-					request.Home,
-				); err != nil ||
-					len(check.Rebuildable) != 0 || len(check.Failing) != 0 {
-					t.Fatalf("mirror check = %#v, err = %v", check, err)
-				}
+			if name == "Codex" && !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
+				t.Fatalf("the reload built no codex mirror of %s", duo)
 			}
 		})
 	}

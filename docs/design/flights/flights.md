@@ -22,7 +22,7 @@ A change lands in the design doc first, then in the template, then in every surf
 
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
-| `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors, data shapes, decision, build; freezes the interface and spawns one child foreman per other build unit or unrelated problem; verifies their returns; lands through the lander | `opus`, effort `high` |
+| `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors, data shapes, decision, build; freezes the interface and spawns one child foreman per other build unit or unrelated problem; verifies their returns; lands through the lander | `sonnet`, effort `high` |
 | `flights-lander` | agent | The landing's gate, one per flight: every project's gate, one review of the whole diff across every project, adversarial tests, its own fixes; the testing manuals' floors are its gate rows | `opus`, effort `high` |
 | `flights-mechanical-executor` | agent | One bulk edit a foreman fully fixed (a rename across many files), from a task file the foreman writes | `sonnet` |
 | `/flights:init` | command | Readies a project for flights, once: maps its build units inside-out, writes the project map, and gives each unit a testing manual, a test command and a static-check command | the main chat |
@@ -50,7 +50,7 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
   briefs/         one brief file per spawn                   written by the spawning foreman
   tasks/          one task file per mechanical bulk edit     written by the foreman that fixed it
   returns/        one return file per child foreman (sub-agent or seat) and per gate round   written by each child and by flights-lander
-  metrics.md      per-agent calls, context, tokens, price    written by token-audit.mjs at landing
+  metrics.md      per-agent calls, context, tokens, price    written by pfm tokens at landing
   gate.md         the gate's attack map and findings         written by flights-lander
   REVIEW.md       the merge-gating report, from gate.md      written by the root flights-foreman
   audit.md        the last audit's report                    written by /flights:audit

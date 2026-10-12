@@ -9,4 +9,4 @@ parse: internal/claudelaunch/parse.go internal/engine/engine.go internal/recover
 render: internal/claudelaunch/render.go internal/statusline/render.go
 renderheadless: internal/claudelaunch/headless.go internal/harvest/gateway.go
 resolve: internal/agentrole/agentrole.go internal/chat/target.go internal/claudelaunch/resolve.go internal/deps/registry.go internal/headless/run/run.go internal/paths/paths.go
-run: cmd/pfm/main.go internal/codexgen/compiler.go internal/doctor/doctor.go internal/headless/run/run.go internal/installer/installer.go internal/picker/picker.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go internal/update/run.go
+run: cmd/pfm/main.go internal/doctor/doctor.go internal/headless/run/run.go internal/installer/installer.go internal/picker/picker.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go internal/update/run.go

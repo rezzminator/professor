@@ -1,0 +1,25 @@
+{
+ "test": "pricing: a published model with an unavailable used rate keeps tokens and renders n/a",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--root",
+  "{TMP}/price-missing-cache-bxTUYt",
+  "--since",
+  "99999d",
+  "--out",
+  "{TMP}/missing-cache-report.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{TMP}/missing-cache-table.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "missing-cache-report.json",
+  "missing-cache-table.json",
+  "price-missing-cache-bxTUYt"
+ ],
+ "outputs": {
+  "--out": "{TMP}/missing-cache-report.json"
+ }
+}

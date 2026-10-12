@@ -1,0 +1,86 @@
+{
+ "v": 1,
+ "flight": "att-flight-MWMk41",
+ "source": "agents.tsv",
+ "baseline": "",
+ "window": [
+  "2026-09-20T09:01:00.000Z",
+  "2026-09-20T09:01:28.000Z"
+ ],
+ "scan": {
+  "roots": [
+   "{FIX}/claude/projects",
+   "{TMP}/att-root-awQxxh"
+  ],
+  "files": 7,
+  "skippedOld": 0,
+  "dupFiles": 0,
+  "badLines": 0,
+  "noTimestamp": 0,
+  "unpricedCalls": 2,
+  "unpricedModels": {
+   "claude-unobtanium-9": 2
+  },
+  "tierUnknownCalls": 0,
+  "syntheticCalls": 1,
+  "identityUnknownRecords": 0,
+  "copiedCalls": 0,
+  "copiesOnly": [],
+  "readErrors": [],
+  "notes": []
+ },
+ "total": {
+  "n": 1,
+  "calls": 10,
+  "usd": 0.0156,
+  "unpriced": 0,
+  "in": 1100,
+  "cr": 54500,
+  "out": 200,
+  "fail": 0,
+  "poll": 8,
+  "reread": 0,
+  "contract": 0,
+  "compact": 0,
+  "over": 0,
+  "peak": 6010,
+  "lc": 0.0156
+ },
+ "rows": [
+  {
+   "taskId": "1-p",
+   "agentType": "executor",
+   "agentId": "p1",
+   "round": "1",
+   "at": 1789894860000,
+   "dateOnly": false,
+   "engine": "claude",
+   "how": "id",
+   "model": "claude-sonnet-5",
+   "calls": 10,
+   "wallMs": 18000,
+   "ctxFirst": 5110,
+   "ctxPeak": 6010,
+   "tok": {
+    "in": 100,
+    "out": 200,
+    "cw5": 1000,
+    "cw1": 0,
+    "cr": 54500
+   },
+   "usd": 0.0156,
+   "failedCmds": 0,
+   "pollN": 8,
+   "rereadN": 0,
+   "contractReads": 0,
+   "compactions": 0,
+   "overCap": false
+  }
+ ],
+ "unmatched": [],
+ "unledgered": {
+  "n": 0,
+  "usd": 0,
+  "unpriced": 0
+ }
+}

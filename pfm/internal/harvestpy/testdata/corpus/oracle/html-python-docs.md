@@ -1,15 +1,10 @@
-**Title:** Python 3.14 documentation
-**Source:** Python documentation
-
----
-
 # Python 3.14.7 documentation
 
 Welcome! This is the official documentation for Python 3.14.7.
 
 **Documentation sections:**
 
-- [What's new in Python 3.14?](whatsnew/3.14.html) Or[all "What's new" documents since Python 2.0](whatsnew/index.html)
+- [What's new in Python 3.14?](whatsnew/3.14.html) Or [all "What's new" documents since Python 2.0](whatsnew/index.html)
 - [Tutorial](tutorial/index.html) Start here: a tour of Python's syntax and features
 - [Library reference](library/index.html) Standard library and builtins
 - [Language reference](reference/index.html) Syntax and language elements

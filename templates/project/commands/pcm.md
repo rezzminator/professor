@@ -21,13 +21,13 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### How the pieces connect
 
 - `CLAUDE.md` — the orientation file: Vocabulary, Runtime, Rules; shaped by `/quality:claude-md`
-- `.claude/commands/*.md` — project slash commands (/pcm, /dev, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
+- `.claude/commands/*.md` — project slash commands (/pcm, /dev, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
 - `.claude/agents/*.md` — root pipeline agents (gitter) + any `{proj}-{role}` specialist wrappers the project wrote
 - `.claude/commands/{project}-testing-manual.md` — one per project: its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set)
 - `.claude/scripts/*.{sh,mjs}` — worktree.sh, alloc-ports.sh, dev.sh, pfm-guard.sh + guard-stamp.sh (the framework-edit gate), codex-sync.sh (the `pfm codex` hook bridge)
 - `{project}/.claude/agents/*.md` — child project agents; `{project}/CLAUDE.md` — child project conventions. A `{project}` held as a git submodule lands its commits in the child repo, and the root repo pins a pointer (gitter-owned)
-- `docs/commands/{cmd}/references/` — command-owned reference docs ($CDOCS/$CMD/$REFS/); `docs/agents/` — main-loop-owned cross-project reference clusters (`api/`, `architecture/`, `map/`, `features/`) + `standards.md`, `graph/`; `docs/facts/` — user-ruled system facts (main-loop-written, on explicit ruling only)
+- `docs/commands/{cmd}/references/` — command-owned reference docs ($CDOCS/$CMD/$REFS/); `docs/_index.md` — the hub of the main-loop-owned cross-project reference clusters (`docs/{api,architecture,map,features}/`), + `docs/standards.md`, `docs/graph/`; `docs/facts/` — user-ruled system facts (main-loop-written, on explicit ruling only)
 
 ### Critical invariants
 
@@ -271,7 +271,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 - **Project dirs:** every roster project exists (`{project}/`, repeated per entry)
 - **Child CLAUDE.md:** each project dir has a `CLAUDE.md`
 - **Child agents:** each project dir has `.claude/agents/`; rosters match a live `ls`
-- **Permanent docs:** `docs/agents/`, `docs/commands/` dirs exist with expected subdirs
+- **Permanent docs:** the hub `docs/_index.md` and `docs/commands/` exist, with expected subdirs
 - **Stale names:** grep all CLAUDE.md files and agents for old/renamed project names or typos
 - **Package managers:** each roster project's lock file (`{PROJECT_PKG_MGR}` per project) present
 - **Codex mirror:** `pfm codex check` exits 0 — report its output verbatim; a non-zero exit names each generated Codex artifact (AGENTS.md, `.codex/`, `$HOME/.codex/`) that is MISSING, STALE, ORPHANed, or CONFLICTing with an unmarked file
@@ -297,7 +297,7 @@ Catches what no single-domain audit can see. Reads across ALL domains simultaneo
 
 **Full rename:** Grep ALL occurrences → update agents → update CLAUDE.md → update the flights commands → final grep for zero stale refs.
 
-**New agent:** Create `.claude/agents/{name}.md` → update pipeline if needed (the Inventory derives; nothing to count).
+**New agent:** Create `.claude/agents/{name}.md` (a `tools:` allowlist names `mcp__sub-agent-compact__compact`) → update pipeline if needed (the Inventory derives; nothing to count).
 
 **New skill:** Create `.claude/skills/{name}/SKILL.md` → no CLAUDE.md edit needed (skills self-index from `description:` frontmatter).
 

@@ -1,8 +1,3 @@
-**Title:** pandas documentation#
-**Source:** pandas 3.0.5 documentation
-
----
-
 # pandas documentation
 
 **Date**: Jul 22, 2026 **Version**: 3.0.5

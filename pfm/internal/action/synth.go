@@ -75,12 +75,29 @@ func LauncherRunAs(
 	name string,
 	sessionID ...string,
 ) (string, error) {
+	run, _, err := LauncherLaunchAs(persona, realBinary, args, configDir, home, machine, claude, name, sessionID...)
+	return run, err
+}
+
+// LauncherLaunchAs is LauncherRunAs with the same spawn's verdict on the system
+// prompt file: warning is empty when the launched Claude carries the file it
+// should, else why not. The launcher prints it, since the chat starts anyway.
+func LauncherLaunchAs(
+	persona workbench.Persona,
+	realBinary string,
+	args []string,
+	configDir, home string,
+	machine pfmconfig.Config,
+	claude pfmconfig.ClaudePrefs,
+	name string,
+	sessionID ...string,
+) (run, warning string, err error) {
 	values := append([]string{realBinary, configDir}, args...)
 	if hasNUL(values...) {
-		return "", errors.New("launcher values cannot contain NUL")
+		return "", "", errors.New("launcher values cannot contain NUL")
 	}
 	if realBinary == "" {
-		return "", errors.New("real Claude binary is empty")
+		return "", "", errors.New("real Claude binary is empty")
 	}
 	// The launcher states its own binary and config dir — it has already
 	// resolved the real Claude behind the shim, and its config dir came from
@@ -97,10 +114,10 @@ func LauncherRunAs(
 		var err error
 		id, err = newSessionID()
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return ClaudeSpawn{
+	spawn := ClaudeSpawn{
 		Purpose:           PurposeLauncher,
 		Home:              home,
 		Args:              args,
@@ -112,7 +129,11 @@ func LauncherRunAs(
 		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
 		explicitConfigDir: configDir,
 		binary:            realBinary,
-	}.ShellCommand()
+	}
+	if run, err = spawn.ShellCommand(); err != nil {
+		return "", "", err
+	}
+	return run, spawn.PromptWarning(), nil
 }
 
 var newSessionID = claudelaunch.NewSessionID
@@ -256,17 +277,19 @@ func Synthesize(request Request) (Plan, error) {
 		if err != nil {
 			return Plan{}, fmt.Errorf("new Claude session id: %w", err)
 		}
-		run, err := ClaudeSpawn{
+		spawn := ClaudeSpawn{
 			Purpose: PurposeInteractive, Home: request.Home,
 			Account: request.PrimaryAccount, Cache1H: &request.Cache1H,
 			SessionID: id, Args: arguments, Machine: machine,
 			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
 			Model: request.Persona.Model, Name: request.LaunchName,
-		}.ShellCommand()
+		}
+		run, err := spawn.ShellCommand()
 		if err != nil {
 			return Plan{}, err
 		}
 		plan.Run = run
+		plan.Warnings = spawn.warnings()
 		plan.Record = &fleetdb.Launch{
 			SessionID: id,
 			Engine:    pfmengine.Claude,
@@ -364,7 +387,7 @@ func Synthesize(request Request) (Plan, error) {
 			owningConfig,
 		)
 		account := deadClaudeAccount(request, machine)
-		resume, err := claudeCommandForPersona(
+		resumeSpawn := claudePersonaSpawn(
 			PurposeResume,
 			request.Home,
 			account,
@@ -375,9 +398,11 @@ func Synthesize(request Request) (Plan, error) {
 			claudeResumeFlag,
 			request.Row.ID,
 		)
+		resume, err := resumeSpawn.ShellCommand()
 		if err != nil {
 			return Plan{}, err
 		}
+		plan.Warnings = resumeSpawn.warnings()
 		plan.Run = agentRun +
 			" || { echo; echo " +
 			Quote("agent router failed — resuming fresh:") +
@@ -397,7 +422,7 @@ func Synthesize(request Request) (Plan, error) {
 			)
 		}
 		account := deadClaudeAccount(request, machine)
-		resume, err := claudeCommandForPersona(
+		resumeSpawn := claudePersonaSpawn(
 			PurposeResume,
 			request.Home,
 			account,
@@ -408,9 +433,11 @@ func Synthesize(request Request) (Plan, error) {
 			claudeResumeFlag,
 			request.Row.ID,
 		)
+		resume, err := resumeSpawn.ShellCommand()
 		if err != nil {
 			return Plan{}, err
 		}
+		plan.Warnings = resumeSpawn.warnings()
 		agent := agentCommand(
 			request.Cache1H,
 			request.Row.ID,
@@ -521,7 +548,8 @@ func claudeCommandWith(
 	args ...string,
 ) (string, error) {
 	_ = strip
-	return claudeCommandForPersona(purpose, home, account, cache1H, machine, workbench.Persona{}, name, args...)
+	spawn := claudePersonaSpawn(purpose, home, account, cache1H, machine, workbench.Persona{}, name, args...)
+	return spawn.ShellCommand()
 }
 
 // ProfessorPromptPath resolves the clone's composed Claude prompt.

@@ -1,7 +1,3 @@
-**Title:** Just a moment...
-
----
-
 [Skip to main content](https://www.ietf.org/#content)
 
  Search

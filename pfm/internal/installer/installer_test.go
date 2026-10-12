@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -255,7 +256,15 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	legacyPathWant := filepath.Join(unitDir, "default.target.wants", "cc-name-sync.path")
 	legacyTimerWant := filepath.Join(unitDir, "timers.target.wants", "cc-name-sync.timer")
-	for _, target := range []string{legacyPathWant, legacyTimerWant} {
+	renamedTimerWant := filepath.Join(unitDir, "timers.target.wants", "pfm-reminder.timer")
+	renamedUnits := []string{
+		filepath.Join(unitDir, "pfm-reminder.service"),
+		filepath.Join(unitDir, "pfm-reminder.timer"),
+	}
+	for _, unit := range renamedUnits {
+		writeFixture(t, unit, "[Unit]\nDescription=renamed\n")
+	}
+	for _, target := range []string{legacyPathWant, legacyTimerWant, renamedTimerWant} {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -263,8 +272,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bbTarget := filepath.Join(config, "commands", "bb.md")
-	writeFixture(t, bbTarget, "operator copy\n")
 	seed := fleetdb.OpenSharedState(context.Background(), paths.Values{
 		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 	})
@@ -289,9 +296,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if _, err := os.Lstat(stagedClaude); !os.IsNotExist(err) {
 		t.Fatalf("dry run staged assets: %v", err)
 	}
-	if content := readFixture(t, bbTarget); content != "operator copy\n" {
-		t.Fatalf("dry run changed bb.md: %q", content)
-	}
 
 	var applied bytes.Buffer
 	report, err := Run(context.Background(), Options{
@@ -302,9 +306,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		t.Fatalf("apply report=%#v err=%v\n%s", report, err, applied.String())
 	}
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
-	if content := readFixture(t, bbTarget); content != "operator copy\n" {
-		t.Fatalf("install changed operator bb.md: %q", content)
-	}
 	assertLink(t, filepath.Join(config, "commands", "reload.md"), filepath.Join(managed, "reload.command.md"))
 	// T3: the staged /reload command's frontmatter description opens with
 	// the USER-ONLY law and then carries reload.Usage itself, folded to one
@@ -340,9 +341,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	// T4: /handoff is a global skill, linked the same way /reload is a
 	// global command.
 	assertLink(t, filepath.Join(config, "skills", "handoff", "SKILL.md"), filepath.Join(managed, "handoff.skill.md"))
-	if _, err := os.Lstat(filepath.Join(config, "commands", "chat", "group", "send.md")); !os.IsNotExist(err) {
-		t.Fatalf("install wired a retired /chat: command link: %v", err)
-	}
 	// One job, two schedulers: assert the one this platform actually installs,
 	// and that it did NOT leave the other platform's files behind.
 	if schedulerIsLaunchd {
@@ -382,26 +380,23 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
 			filepath.Join(unitDir, nameSyncTimerUnit),
 		)
-		for _, unit := range []string{reminderServiceUnit, reminderTimerUnit} {
+		for _, unit := range []string{scheduleServiceUnit, scheduleTimerUnit} {
 			assertLink(t, filepath.Join(unitDir, unit), filepath.Join(managed, "systemd", unit))
 		}
 		assertLink(
 			t,
-			filepath.Join(unitDir, "timers.target.wants", reminderTimerUnit),
-			filepath.Join(unitDir, reminderTimerUnit),
+			filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
+			filepath.Join(unitDir, scheduleTimerUnit),
 		)
 	}
 	// The predecessor's enablement links are a systemd concept; a launchd host
 	// never wires systemd at all, so it has none to retire.
 	if !schedulerIsLaunchd {
-		for _, retired := range []string{legacyPathWant, legacyTimerWant} {
+		for _, retired := range append([]string{legacyPathWant, legacyTimerWant, renamedTimerWant}, renamedUnits...) {
 			if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-				t.Fatalf("retired enablement link remains at %s: %v", retired, err)
+				t.Fatalf("retired unit or enablement link remains at %s: %v", retired, err)
 			}
 		}
-	}
-	if _, err := os.Lstat(bbTarget + ".pre-professor-20300102-030405"); !os.IsNotExist(err) {
-		t.Fatalf("install backed up an unowned bb.md: %v", err)
 	}
 	for _, retired := range []string{
 		filepath.Join(config, ".cc-ls-hidden"),
@@ -415,9 +410,14 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	// at their contracted ~/.local/bin names, including the Claude launcher.
 	managedClaude := filepath.Join(managed, "bin", "claude")
 	assertLink(t, filepath.Join(home, ".local", "bin", "claude"), managedClaude)
-	wantClaude := "#!/bin/sh\n" + `exec "$HOME/.local/bin/pfm" internal claude-launch "$@"` + "\n"
-	if got := readFixture(t, managedClaude); got != wantClaude {
-		t.Fatalf("managed claude=%q, want exact native exec shim", got)
+	// The shim's own behaviour (the login-default CLAUDE_CONFIG_DIR, then the
+	// native exec) is pinned in launcher_test.go; install materializes it verbatim.
+	wantClaude, err := readAsset("bin/claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, managedClaude); got != string(wantClaude) {
+		t.Fatalf("managed claude=%q, want the shipped shim %q", got, wantClaude)
 	}
 	for name, command := range map[string]string{"pfm-statusline": "statusline", "tmux-title-renudge": "tmux-title-renudge"} {
 		managedShim := filepath.Join(managed, "bin", name)
@@ -493,9 +493,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, removed.String())
 	}
-	if content := readFixture(t, bbTarget); content != "operator copy\n" {
-		t.Fatalf("uninstall changed operator bb.md = %q", content)
-	}
 	if settings := readFixture(
 		t,
 		filepath.Join(config, "settings.json"),
@@ -539,9 +536,9 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	for _, removed := range []string{
 		filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
 		filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
-		filepath.Join(unitDir, "timers.target.wants", reminderTimerUnit),
-		filepath.Join(unitDir, reminderServiceUnit),
-		filepath.Join(unitDir, reminderTimerUnit),
+		filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
+		filepath.Join(unitDir, scheduleServiceUnit),
+		filepath.Join(unitDir, scheduleTimerUnit),
 	} {
 		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
 			t.Fatalf("uninstall left enablement link at %s: %v", removed, err)
@@ -550,16 +547,13 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 }
 
 func TestEmptyCodexRosterSkipsCommandAndAgentMirrors(t *testing.T) {
-	t.Parallel()
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".claude", "commands", "fixture.md"), "# Fixture command\n")
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "fixture.md"), `---
-name: fixture
-description: fixture agent
----
-
-# Fixture agent
-`)
+	skips := []string{
+		"no Codex accounts configured — command mirror has nothing to write",
+		"no Codex accounts configured — agent mirror has nothing to write",
+	}
+	record := testjail.FakeEngineSync(t, `{"ok":true,"events":[{"verb":"skip","message":"`+skips[0]+`"},`+
+		`{"verb":"skip","message":"`+skips[1]+`"}],"error":""}`, 0)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
@@ -568,21 +562,14 @@ description: fixture agent
 	if err != nil {
 		t.Fatalf("zero-Codex preview: %v\n%s", err, output.String())
 	}
-	for _, wanted := range []string{
-		"no Codex accounts configured — command mirror has nothing to write",
-		"no Codex accounts configured — agent mirror has nothing to write",
-	} {
-		if !strings.Contains(output.String(), wanted) {
+	for _, wanted := range skips {
+		if !strings.Contains(output.String(), "  skip    "+wanted+"\n") {
 			t.Errorf("zero-account mirror skip omitted %q:\n%s", wanted, output.String())
 		}
 	}
-	for _, forbidden := range []string{
-		filepath.Join(home, ".codex", "prompts"),
-		filepath.Join(home, ".codex", "skills"),
-		filepath.Join(home, ".codex", "agents"),
-	} {
-		if strings.Contains(output.String(), forbidden) {
-			t.Errorf("zero-account preview still plans Codex mirror %s:\n%s", forbidden, output.String())
+	for _, call := range testjail.EngineSyncCalls(t, record) {
+		if !strings.Contains(call, " --no-codex-home") || strings.Contains(call, " --codex-home ") {
+			t.Errorf("engine-sync call %q does not carry the empty roster", call)
 		}
 	}
 }
@@ -642,8 +629,11 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 	}
 }
 
-func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T) {
-	t.Parallel()
+// An engine-sync conflict on an uninstall is not a preflight refusal: the
+// preview skips it, every unwire step runs (the global commands pfm linked go),
+// engine-sync's own apply still refuses to write past the conflict, and the run
+// exits non-zero naming it.
+func TestUninstallCodexConflictFailsTheRunAfterEveryUnwireStep(t *testing.T) {
 	home := t.TempDir()
 	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -653,88 +643,24 @@ func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T)
 	if _, err := os.Lstat(command); err != nil {
 		t.Fatalf("install did not wire command fixture: %v", err)
 	}
-	operatorSource := filepath.Join(home, ".claude", "commands", "audit-fixture.md")
-	writeFixture(t, operatorSource, "# Operator command\n")
-	conflict := filepath.Join(home, ".codex", "prompts", "audit-fixture.md")
-	writeFixture(t, conflict, "operator-owned conflict\n")
+	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "audit-fixture.md")
+	record := testjail.FakeEngineSync(
+		t,
+		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
+		1,
+	)
 
 	options.Mode = ModeUninstall
 	_, err := Run(context.Background(), options)
-	if err == nil || !strings.Contains(err.Error(), "CONFLICT "+conflict) {
-		t.Fatalf("uninstall error=%v, want Codex conflict", err)
+	if err == nil || !strings.Contains(err.Error(), conflict) || strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("uninstall error=%v, want the engine-sync conflict and no preflight refusal", err)
 	}
-	if _, err := os.Lstat(command); err != nil {
-		t.Fatalf("uninstall conflict removed global command before aborting: %v", err)
+	if _, err := os.Lstat(command); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("uninstall left the global command after an engine-sync conflict: %v", err)
 	}
-	if got := readFixture(t, conflict); got != "operator-owned conflict\n" {
-		t.Fatalf("uninstall conflict changed operator file: %q", got)
-	}
-}
-
-// TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads pins the install call
-// site's two promises apart: Claude's agent is a symlink to the clone, while
-// Codex — whose loader opens a role with O_NOFOLLOW — gets a REGULAR FILE
-// carrying the generated marker that proves pfm owns it.
-func TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
-		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	assertLink(t,
-		filepath.Join(home, ".claude", "agents", "alpha.md"),
-		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
-	assertOwnedCodexRole(t, filepath.Join(home, ".codex", "agents", "alpha.toml"))
-	twin := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")
-	if _, err := os.Lstat(twin); !os.IsNotExist(err) {
-		t.Fatalf("install wrote a .toml twin inside the source clone, lstat err=%v", err)
-	}
-}
-
-// TestWireCodexAgentsReportsAndPreservesAForeignConflict is the conflict-law
-// pin at the installer boundary: a symlink pointing entirely outside the
-// source repository is reported by the exact "CONFLICT ...: not ours"
-// wording and is never overwritten or deleted — and, critically, a conflict
-// never aborts the rest of the install.
-func TestWireCodexAgentsReportsAndPreservesAForeignConflict(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
-		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-	elsewhere := filepath.Join(home, "elsewhere.md")
-	writeFixture(t, elsewhere, "operator file\n")
-	foreignLink := filepath.Join(home, ".claude", "agents", "alpha.md")
-	if err := os.MkdirAll(filepath.Dir(foreignLink), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(elsewhere, foreignLink); err != nil {
-		t.Fatal(err)
-	}
-
-	var output bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatalf("apply refused on a conflict it must only report: %v\n%s", err, output.String())
-	}
-	want := "CONFLICT " + foreignLink + ": not ours"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("apply output omitted %q:\n%s", want, output.String())
-	}
-	resolved, err := os.Readlink(foreignLink)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != elsewhere {
-		t.Fatalf("conflict link was rewritten: now -> %s", resolved)
+	calls := testjail.EngineSyncCalls(t, record)
+	if len(calls) != 2 || !strings.Contains(calls[0], " --plan") || strings.Contains(calls[1], " --plan") {
+		t.Fatalf("engine-sync calls = %q, want the preview --plan, then the apply", calls)
 	}
 }
 
@@ -758,6 +684,60 @@ func TestWireGlobalCommandsLinksFilesAndDirectories(t *testing.T) {
 
 	assertLink(t, filepath.Join(home, ".claude", "commands", "git.md"), filepath.Join(source, "git.md"))
 	assertLink(t, filepath.Join(home, ".claude", "commands", "tools"), filepath.Join(source, "tools"))
+}
+
+func TestFutureCommandSourceIncludesTemplateGlobalCommands(t *testing.T) {
+	for _, test := range []struct {
+		entry    string
+		conflict bool
+	}{
+		{"newcmd.md", false},
+		{filepath.Join("newtools", "newcmd.md"), false},
+		{"newcmd.md", true},
+	} {
+		name := test.entry
+		if test.conflict {
+			name += " conflict"
+		}
+		t.Run(name, func(t *testing.T) {
+			entry := test.entry
+			home := t.TempDir()
+			source := filepath.Join(home, ".professor", "templates", "global", "commands")
+			content := "# new clone command\n"
+			writeFixture(t, filepath.Join(source, entry), content)
+			registry := filepath.Join(home, ".claude", "commands")
+			writeFixture(t, filepath.Join(registry, "local.md"), "# retained local command\n")
+			if test.conflict {
+				content = "# local conflict must win\n"
+				external := filepath.Join(home, "custom-command.md")
+				writeFixture(t, external, content)
+				if err := os.Symlink(external, filepath.Join(registry, entry)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			installer := &engine{options: Options{Home: home, ConfigDir: filepath.Join(home, ".claude")}}
+			staged, cleanup, err := installer.futureCommandSource(nil)
+			if err != nil {
+				t.Fatalf("futureCommandSource: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := cleanup(); err != nil {
+					t.Errorf("cleanup command plan: %v", err)
+				}
+			})
+			path := filepath.Join(staged, ".claude", "commands", entry)
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != content {
+				t.Fatalf("staged clone command %s = %q, %v; want %q", entry, got, err, content)
+			}
+			if got := readFixture(
+				t,
+				filepath.Join(staged, ".claude", "commands", "local.md"),
+			); got != "# retained local command\n" {
+				t.Fatalf("staged local command = %q", got)
+			}
+		})
+	}
 }
 
 // TestWireGlobalCommandsSkipsAnAbsentOrEmptySource pins the spec's explicit
@@ -850,43 +830,13 @@ func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
 	}
 }
 
-// TestRetireOrphanCodexAgentsDeletesExactlyTheKnownStrays pins bullet 4's
-// narrow, hardcoded sweep: the retired explorer agent's compiled TOML and
-// any timestamped backup are deleted; a genuinely unrelated agent file next
-// to them is never touched.
-func TestRetireOrphanCodexAgentsDeletesExactlyTheKnownStrays(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	explorer := filepath.Join(home, ".codex", "agents", "explorer.toml")
-	writeFixture(t, explorer, "stale explorer agent\n")
-	backup := explorer + ".bak-20300101"
-	writeFixture(t, backup, "stale backup\n")
-	keeper := filepath.Join(home, ".codex", "agents", "tracer.toml")
-	writeFixture(t, keeper, "keeper\n")
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	for _, retired := range []string{explorer, backup} {
-		if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-			t.Fatalf("orphan sweep left %s: %v", retired, err)
-		}
-	}
-	if got := readFixture(t, keeper); got != "keeper\n" {
-		t.Fatalf("orphan sweep touched an unrelated agent file: %q", got)
-	}
-}
-
 // TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover pins
 // issue #14 F5: the frr->rr global-agent rename (3976b53) left a stale
-// {config}/agents/frr.md RunGlobalAgents no longer visits. A symlink at that
+// {config}/agents/frr.md engine-sync's global step no longer visits. A symlink at that
 // path is always the installer's own — nothing else in this registry ever
 // creates one — so it retires unconditionally, dangling target or not; a
 // regular file retires only when its YAML frontmatter `name:` still reads
-// "frr", the same field RunGlobalAgents keys identity on, so a user's own
+// "frr", the same field engine-sync's global step keys identity on, so a user's own
 // same-named agent (different frontmatter, or none at all) is never touched.
 func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *testing.T) {
 	t.Parallel()
@@ -1030,50 +980,27 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 		filepath.Join(elsewhere, "templates", "global", "skills", "pcm"))
 }
 
-func TestDryRunNamesFutureCodexWritesAndRefusesTheirConflicts(t *testing.T) {
-	t.Parallel()
+// An engine-sync global conflict is a dry run's error and refuses the apply
+// in its preflight, before pfm writes anything; the apply itself never runs.
+func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.md"), `---
-name: tracer
-description: Trace a target.
----
-Read only.
-`)
-	conflict := filepath.Join(home, ".codex", "prompts", "reload.md")
-	writeFixture(t, conflict, "operator-owned\n")
+	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "reload.md")
+	record := testjail.FakeEngineSync(
+		t,
+		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
+		1,
+	)
 
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
-	if err == nil || !strings.Contains(err.Error(), "CONFLICT "+conflict) {
-		t.Fatalf("dry-run error=%v, want future Codex conflict; output:\n%s", err, output.String())
+	if err == nil || !strings.Contains(err.Error(), conflict) {
+		t.Fatalf("dry-run error=%v, want the engine-sync conflict; output:\n%s", err, output.String())
 	}
-	for _, path := range []string{
-		conflict,
-		filepath.Join(home, ".claude", "agents", "tracer.md"),
-		filepath.Join(home, ".codex", "agents", "tracer.toml"),
-	} {
-		if !strings.Contains(output.String(), path) {
-			t.Errorf("dry-run omitted planned path %s:\n%s", path, output.String())
-		}
-	}
-	if strings.Contains(output.String(), "would reconcile") ||
-		strings.Contains(output.String(), "would run pfm codex agents") {
-		t.Fatalf("dry-run retained vague placeholders:\n%s", output.String())
-	}
-	if got := readFixture(t, conflict); got != "operator-owned\n" {
-		t.Fatalf("dry-run mutated conflict = %q", got)
-	}
-	for _, path := range []string{
-		filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.toml"),
-		filepath.Join(home, ".claude", "agents", "tracer.md"),
-		filepath.Join(home, ".codex", "agents", "tracer.toml"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("dry-run wrote agent artifact %s: %v", path, err)
-		}
+	if !strings.Contains(output.String(), "  conflict "+conflict+"\n") {
+		t.Fatalf("dry-run transcript lacks the conflict:\n%s", output.String())
 	}
 
 	output.Reset()
@@ -1082,20 +1009,22 @@ Read only.
 		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
-		!strings.Contains(err.Error(), "CONFLICT "+conflict) {
-		t.Fatalf("apply error=%v, want pre-mutation conflict refusal; output:\n%s", err, output.String())
+		!strings.Contains(err.Error(), conflict) {
+		t.Fatalf("apply error=%v, want the pre-mutation conflict refusal; output:\n%s", err, output.String())
 	}
 	for _, path := range []string{
 		filepath.Join(home, ".local", "share", "pfm", "install"),
-		filepath.Join(home, ".claude", "agents", "tracer.md"),
+		filepath.Join(home, ".claude", "agents"),
 		binaryOwnershipPath(home),
 	} {
 		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
-			t.Errorf("apply preflight wrote %s before refusing conflict: %v", path, statErr)
+			t.Errorf("apply preflight wrote %s before refusing the conflict: %v", path, statErr)
 		}
 	}
-	if got := readFixture(t, conflict); got != "operator-owned\n" {
-		t.Fatalf("apply preflight mutated conflict = %q", got)
+	for _, call := range testjail.EngineSyncCalls(t, record) {
+		if !strings.Contains(call, " --plan") {
+			t.Fatalf("engine-sync ran %q past a planned conflict", call)
+		}
 	}
 }
 
@@ -1113,7 +1042,7 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 	wantCalls := []string{
 		nameSyncStateProbe,
 		"systemctl --user daemon-reload",
-		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit + " " + reminderTimerUnit,
+		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit + " " + scheduleTimerUnit,
 	}
 	if schedulerIsLaunchd {
 		// launchd has no manager probe to fail: the agent is bootstrapped into
@@ -1227,28 +1156,44 @@ func TestShimSourceUsesRecordedCloneAndKeepsLegacyPosition(t *testing.T) {
 	}
 }
 
-func TestShimSourceSkipsWithoutRecordedClone(t *testing.T) {
-	home := t.TempDir()
-	zshrc := filepath.Join(home, ".zshrc")
-	if err := os.WriteFile(zshrc, []byte("untouched\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	installer := &engine{
-		options: Options{Home: home, Mode: ModeApply, Stdout: io.Discard},
-		apply:   true, stamp: "test", managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
-	}
-	if err := installer.wireShell(false); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(zshrc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(raw) != "untouched\n" {
-		t.Fatalf("zshrc=%q", raw)
-	}
-	if installer.report.Skipped == 0 {
-		t.Fatal("missing skip report")
+func TestShimSourceWithoutRecordedClone(t *testing.T) {
+	for _, scenario := range []string{"fallback exists", "fallback absent", "marker unusable"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			zshrc := filepath.Join(home, ".zshrc")
+			writeFixture(t, zshrc, "untouched\n")
+			shim := filepath.Join(home, ".professor", "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
+			var want string
+			switch scenario {
+			case "fallback exists":
+				writeFixture(t, shim, "fixture shim\n")
+			case "fallback absent":
+				want = "  skip    zshrc: no source repo recorded and " + shim + " does not exist\n"
+			case "marker unusable":
+				writeFixture(t, paths.SourceRepoPath(home), filepath.Join(home, "moved-away")+"\n")
+				_, markerErr := paths.ReadSourceRepoMarker(home)
+				want = "  skip    zshrc: " + markerErr.Error() +
+					" — rerun pfm install --yes from inside your Professor clone\n"
+			}
+			var output bytes.Buffer
+			installer := &engine{
+				options: Options{Home: home, Mode: ModeApply, Stdout: &output},
+				apply:   true, stamp: "test", managedRoot: managedRootForHome(home),
+			}
+			if err := installer.wireShell(false); err != nil {
+				t.Fatalf("wireShell: %v", err)
+			}
+			got := readFixture(t, zshrc)
+			if scenario == "fallback exists" {
+				if !strings.Contains(got, sourceLine(shim)) {
+					t.Fatalf("zshrc=%q, want source line %q", got, sourceLine(shim))
+				}
+				return
+			}
+			if got != "untouched\n" || output.String() != want {
+				t.Fatalf("zshrc=%q output=%q, want untouched zshrc and %q", got, output.String(), want)
+			}
+		})
 	}
 }
 
@@ -1511,5 +1456,65 @@ func stageVSCodeExtensionFixture(t *testing.T, managedRoot string) {
 			t.Fatal(err)
 		}
 		writeFixture(t, filepath.Join(managedRoot, filepath.FromSlash(asset)), string(content))
+	}
+}
+
+// TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage pins that the directory a
+// crash mid-swap leaves under a link-stage name never reaches the Codex
+// command preview as a command.
+func TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	source := filepath.Join(root, "commands")
+	writeFixture(t, filepath.Join(source, "keep.md"), "# keep\n")
+	writeFixture(t, filepath.Join(source, atomicfile.LinkStagePrefix+"abc", "stale.md"), "# stale\n")
+	target := filepath.Join(root, "preview")
+	if err := copyCommandPlanTree(source, target); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if strings.Join(names, ",") != "keep.md" {
+		t.Fatalf("preview entries = %v, want only keep.md", names)
+	}
+}
+
+// A host that never ran an install of the build that renamed the reminder
+// still holds pfm-reminder.service and .timer: uninstall disables and unlinks
+// both, as the install that retires them does.
+func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
+	if schedulerIsLaunchd {
+		t.Skip("the systemd units are Linux-only")
+	}
+	home := t.TempDir()
+	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	units := []string{
+		filepath.Join(unitDir, "pfm-reminder.service"),
+		filepath.Join(unitDir, "pfm-reminder.timer"),
+	}
+	for _, unit := range units {
+		writeFixture(t, unit, "[Unit]\nDescription=renamed\n")
+	}
+	runner := &fakeRunner{manager: true, nameSyncIdle: true}
+	var removed bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &removed, Runner: runner,
+	}); err != nil {
+		t.Fatalf("uninstall: %v\n%s", err, removed.String())
+	}
+	for _, unit := range units {
+		if _, err := os.Lstat(unit); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("uninstall left %s: %v", unit, err)
+		}
+		if !strings.Contains(strings.Join(runner.calls, "\n"), "systemctl --user disable --now "+filepath.Base(unit)) {
+			t.Errorf("uninstall never disabled %s:\n%s", filepath.Base(unit), strings.Join(runner.calls, "\n"))
+		}
 	}
 }

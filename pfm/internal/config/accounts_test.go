@@ -77,6 +77,11 @@ func TestAccountProjectionsFollowTheRoster(t *testing.T) {
 	if got := machine.PrimaryOpenCodeAccount(); got != 5 {
 		t.Errorf("PrimaryOpenCodeAccount() = %d", got)
 	}
+	for engine, want := range map[pfmengine.ID]int{pfmengine.Claude: 2, pfmengine.Codex: 2, pfmengine.OpenCode: 1} {
+		if got := machine.AccountChoices(engine); got != want {
+			t.Errorf("AccountChoices(%s) = %d, want %d", engine, got, want)
+		}
+	}
 	emojis := machine.AccountEmojis()
 	if len(emojis) != 2 || emojis[1] != machine.EmojiFor(1) || emojis[2] != machine.EmojiFor(2) {
 		t.Errorf("AccountEmojis() = %v", emojis)
@@ -90,7 +95,8 @@ func TestAccountProjectionsFollowTheRoster(t *testing.T) {
 		}
 	}
 	var empty Config
-	if empty.PrimaryCodexAccount() != 0 || empty.PrimaryOpenCodeAccount() != 0 || len(empty.CodexHomes()) != 0 {
+	if empty.PrimaryCodexAccount() != 0 || empty.PrimaryOpenCodeAccount() != 0 || len(empty.CodexHomes()) != 0 ||
+		empty.AccountChoices(pfmengine.Claude) != 0 {
 		t.Error("an engine with no accounts must project to zero values")
 	}
 }

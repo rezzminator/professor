@@ -1,0 +1,24 @@
+{
+ "test": "pricing: a requestId key never collides with a message.id string",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{TMP}/price-request-namespace-HyJaHp",
+  "--out",
+  "{TMP}/price-1b02gz7yux.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-1b02gz7yux.json",
+  "price-request-namespace-HyJaHp"
+ ],
+ "outputs": {
+  "--out": "{TMP}/price-1b02gz7yux.json"
+ }
+}

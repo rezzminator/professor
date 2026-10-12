@@ -264,3 +264,13 @@ func TestOpenLogNamesTheSettingThatStaysInForce(t *testing.T) {
 		t.Fatalf("a bad override silenced the log: %s", text)
 	}
 }
+
+func TestAlphaBuild(t *testing.T) {
+	for version, want := range map[string]bool{
+		"0.80.0-alpha": true, " 0.80.0-alpha\n": true, "0.80.0": false, "dev": false, "dev (abc, modified)": false, "": false,
+	} {
+		if got := AlphaBuild(version); got != want {
+			t.Errorf("AlphaBuild(%q) = %v, want %v", version, got, want)
+		}
+	}
+}

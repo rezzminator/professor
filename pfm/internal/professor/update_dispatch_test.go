@@ -15,7 +15,7 @@ func TestRunProjectUpdateRecordsATransition(t *testing.T) {
 	_, recorder := obs.Test(t)
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	if code := RunProjectUpdate("", []string{"--root", root}, &stdout, &stderr, config.Runtime{}); code != 0 {
+	if code := RunProjectUpdate("", []string{"--root", root}, &stdout, &stderr, config.Runtime{}, nil); code != 0 {
 		t.Fatalf("RunProjectUpdate() code = %d, stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var found bool

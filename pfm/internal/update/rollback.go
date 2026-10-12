@@ -10,9 +10,10 @@ import (
 )
 
 type updateReplacement struct {
-	target   string
-	backup   string
-	replaced bool
+	target        string
+	backup        string
+	replaced      bool
+	restoreFailed bool
 }
 
 func updateFailure(primary, rollbackErr error) error {
@@ -34,7 +35,11 @@ func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writ
 			continue
 		}
 		if err := copyUpdateFile(replacement.backup, replacement.target); err != nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%s: %w", replacement.target, err))
+			replacements[index].restoreFailed = true
+			rollbackErr = errors.Join(
+				rollbackErr,
+				fmt.Errorf("%s (backup retained at %s): %w", replacement.target, replacement.backup, err),
+			)
 			continue
 		}
 		fmt.Fprintf(stderr, "pfm update: rolled back %s\n", replacement.target)
@@ -56,6 +61,12 @@ func rollbackUpdateState(
 ) error {
 	rollbackErr := rollbackUpdateReplacements(replacements, stderr)
 	if sourceAdvanced {
+		// A refresh since the fast-forward leaves prices.json modified, and
+		// reset --keep refuses to overwrite a modified file the two revisions
+		// differ in.
+		if err := restoreRefreshedPrices(ctx, repo, updateBackupDir(runtime.Paths.Home), stdout); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
 		if err := updateGitRun(ctx, repo, "reset", "--keep", previousRef); err != nil {
 			return errors.Join(rollbackErr, fmt.Errorf("restore source revision %s: %w", previousRef, err))
 		}

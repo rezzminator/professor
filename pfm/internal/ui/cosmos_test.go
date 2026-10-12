@@ -31,6 +31,23 @@ func (sampler *countingCosmosSampler) Sample(_ context.Context, sinceNS int64) (
 	return append([]fleetdb.CommsEvent(nil), sampler.events...), sampler.err
 }
 
+func TestCosmosSeededRailCoordinates(t *testing.T) {
+	model := cosmosSeededGoldenModel(80)
+	graph := model.viewGraph()
+	canvas := NewCanvas(78, 9)
+	frame := cosmosLayout(canvas, model.cosmosSeats, cosmosNodeMap(graph.Nodes), graph.Edges,
+		time.Unix(0, model.cosmosNowNS), false, false, "")
+	// Fused orbital rounding puts this endpoint just below pixel row 15.
+	// Separately rounded multiply/add lands exactly on 15, exposing an extra
+	// braille dot at the end of the seeded golden's rail on amd64.
+	key := "chat:id:22222222-2222-4222-8222-222222222222"
+	want := cosmosPoint{x: 123.03332099679081, y: 14.999999999999998}
+	if got, ok := frame.points[key]; !ok || got != want {
+		t.Fatalf("seeded rail endpoint = (%.17g, %.17g), present=%v; want (%.17g, %.17g)",
+			got.x, got.y, ok, want.x, want.y)
+	}
+}
+
 func TestCosmosCanvasQuantizesEveryColorWithoutCursorAddressing(t *testing.T) {
 	canvas := NewCanvas(2, 1)
 	canvas.SetCell(0, 0, 'X', RGB{101, 102, 103}, true)

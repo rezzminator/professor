@@ -78,3 +78,37 @@ func TestCaptureCodexIdentityFiltersToLiveCodexPanes(t *testing.T) {
 		t.Fatalf("CaptureCodexIdentity() = %#v, want no candidates", got)
 	}
 }
+
+func TestParseCodexIdentityFindsStatusAboveFooter(t *testing.T) {
+	const id = "01a02e86-f64d-7253-bb68-1b8956cf9fd7"
+	const other = "01a02e86-f64d-7253-bb68-1b8956cf9fd8"
+	const toolbar = " ← for agents · ? for shortcuts   ⚠ 1 warning · f2 to view"
+	status := "gpt-6-astra medium · /tmp/demo-project · Working · Context71% left · " + id + " · Main [default]"
+	for _, test := range []struct{ name, screen, wantName, wantID string }{
+		{"shortcut footer", "  BUILD · /work · Full Access · model\n  ? for shortcuts · 3 warnings\n", "BUILD", ""},
+		{"agent footer", "  11111111-1111-4111-8111-111111111111 · /work · Full Access\n  ← for agents · ? for shortcuts\n", "", "11111111-1111-4111-8111-111111111111"},
+		{"multiple status lines", "  OLD · /work · Full Access\ntranscript\n  NEW · /work · Full Access\n  ? for shortcuts\n", "NEW", ""},
+		{"modal transcript UUID", "Listed another thread:\n11111111-1111-4111-8111-111111111111 · /work\nChoose a session to resume\n? for shortcuts\n", "", ""},
+		{"transcript path pair", "BUILD · /work\n? for shortcuts\n", "", ""},
+		{"modal after historical status", "OLD · /work · Full Access\nChoose a session to resume\n? for shortcuts\n", "", ""},
+		{"home status", "BUILD · ~ · Full Access\n? for shortcuts\n", "BUILD", ""},
+		{"windows status", "BUILD · C:/work · Full Access\n? for shortcuts\n", "BUILD", ""},
+		{"no status", "Transcript answer · unrelated text\n  ? for shortcuts · 3 warnings\n", "", ""},
+		{"legacy named footer with toolbar", "ENGINE_BUILDER · ~/.professor · Full Access · gpt-5.6-sol xhigh · Context 66% used\n" + toolbar, "ENGINE_BUILDER", ""},
+		{"UUID in configurable field", status, "", id},
+		{"separate toolbar", status + "\n" + toolbar, "", id},
+		{"only session field with toolbar", id + "\n" + toolbar, "", id},
+		{"transcript UUID ignored", id + "\nhello\n" + toolbar, "", ""},
+		{"unrecognized last row", "quoted · " + id + " · ordinary prose", "", ""},
+		{"quoted status above prose", status + "\nHere is a quote\n" + toolbar, "", ""},
+		{"ambiguous IDs", status + " · " + other + "\n" + toolbar, "", ""},
+		{"model alone is not identity", "gpt-6-astra medium · /tmp/demo-project · Working · Context71% left · Main [default]\n" + toolbar, "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			name, id := parseCodexIdentity(test.screen)
+			if name != test.wantName || id != test.wantID {
+				t.Fatalf("identity=(%q,%q), want (%q,%q)", name, id, test.wantName, test.wantID)
+			}
+		})
+	}
+}

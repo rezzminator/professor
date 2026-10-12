@@ -1,7 +1,11 @@
 package ui
 
 import (
+	"context"
+	"os"
+	"os/exec"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 const (
@@ -74,15 +79,19 @@ func TestWorkbenchLaunchRowsKeepGroupPosition(t *testing.T) {
 	t.Fatalf("missing workbench header:\n%s", strings.Join(lines, "\n"))
 }
 
-func TestWorkbenchTopCarousel(t *testing.T) {
+func TestWorkbenchTopLaunchRowArrowsDoNothing(t *testing.T) {
 	model := workbenchGoldenModel(80)
-	for _, want := range []pfmengine.ID{pfmengine.Codex, pfmengine.Claude} {
-		model, _ = applyKey(t, model, specialKey(tea.KeyRight))
-		if model.newChatEngine != want {
-			t.Fatalf("top engine = %q, want %q", model.newChatEngine, want)
-		}
+	place := model.place
+	model, _ = applyKey(t, model, specialKey(tea.KeyRight))
+	if model.newChatEngine != pfmengine.Claude || model.place != place || model.wizard.on {
+		t.Fatalf(
+			"→ on the launch row = engine %q place %q wizard %t, want nothing moved",
+			model.newChatEngine,
+			model.place,
+			model.wizard.on,
+		)
 	}
-	// A bench-only engine must not enlarge the fleet launcher's carousel.
+	// A bench-only engine must not enlarge the fleet launcher's roster.
 	model.rows[4].Kind = compose.NewOpenCode
 	model.rows[4].Engines = []pfmengine.ID{pfmengine.OpenCode}
 	if got := model.newChatEngines(); !reflect.DeepEqual(got, []pfmengine.ID{pfmengine.Claude, pfmengine.Codex}) {
@@ -90,35 +99,28 @@ func TestWorkbenchTopCarousel(t *testing.T) {
 	}
 }
 
-func TestWorkbenchCarouselAndEffectiveEngine(t *testing.T) {
+func TestWorkbenchLaunchRowOffersOnlyItsOwnEngines(t *testing.T) {
 	for _, test := range []struct {
-		engine pfmengine.ID
-		label  string
-		right  pfmengine.ID
-		left   pfmengine.ID
+		remembered pfmengine.ID
+		label      string
 	}{
-		{pfmengine.Claude, "[ Claude ]", pfmengine.Codex, pfmengine.Codex},
-		{pfmengine.OpenCode, "[ Codex ]", pfmengine.Claude, pfmengine.Claude},
+		{pfmengine.Claude, "New chat → acme › Scribe  Claude"},
+		{pfmengine.Codex, "New chat → acme › Scribe  Codex"},
+		{pfmengine.OpenCode, "New chat → acme › Scribe  Claude"}, // the bench has no OpenCode: the configured default stands in
 	} {
-		t.Run(string(test.engine), func(t *testing.T) {
+		t.Run(string(test.remembered), func(t *testing.T) {
 			model := workbenchSelectedModel(4)
-			model.newChatEngine = test.engine
+			model.remembered.Engine = string(test.remembered)
 			row, _ := model.selectedRow()
 			plain := ansi.Strip(model.renderGroupedRow(row, true, 120, false))
-			if !strings.Contains(plain, test.label) || !strings.Contains(plain, "Claude") ||
-				!strings.Contains(plain, "Codex") || strings.Contains(plain, "OpenCode") {
-				t.Errorf("workbench carousel = %q, want only Codex/Claude with %s", plain, test.label)
+			if !strings.Contains(plain, test.label) {
+				t.Errorf("workbench launch row = %q, want %q", plain, test.label)
 			}
-			right, _ := applyKey(t, model, specialKey(tea.KeyRight))
-			left, _ := applyKey(t, model, specialKey(tea.KeyLeft))
-			if right.newChatEngine != test.right || left.newChatEngine != test.left {
-				t.Errorf(
-					"adjacent engines = %q/%q, want %q/%q",
-					right.newChatEngine,
-					left.newChatEngine,
-					test.right,
-					test.left,
-				)
+			model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			chips := ansi.Strip(model.renderGroupedRow(row, true, 120, false))
+			if !strings.Contains(chips, "Codex") || !strings.Contains(chips, "Claude") ||
+				strings.Contains(chips, "OpenCode") {
+				t.Errorf("workbench wizard chips = %q, want only Codex and Claude", chips)
 			}
 		})
 	}
@@ -131,15 +133,21 @@ func TestWorkbenchEnterEngine(t *testing.T) {
 		name    string
 		account int
 	}{
-		{pfmengine.OpenCode, compose.NewCodex, "New Codex chat", 3},
+		{pfmengine.Codex, compose.NewCodex, "New Codex chat", 3},
 		{pfmengine.Claude, compose.NewClaude, "New Claude chat", 2},
+		{pfmengine.OpenCode, compose.NewClaude, "New Claude chat", 2}, // the bench has no OpenCode
 	} {
 		t.Run(string(test.engine), func(t *testing.T) {
 			model := workbenchSelectedModel(4)
-			model.newChatEngine = test.engine
-			selected, command := applyKey(t, model, specialKey(tea.KeyEnter))
-			result := selected.Result()
-			if command == nil || result.Kind != OutcomeSelected || result.Row.Kind != test.kind ||
+			model.remembered.Engine = string(test.engine)
+			model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			// The engine step opens on the remembered engine; a bench that does
+			// not offer it opens on its own first one. ⏎ walks the rest.
+			for step := 0; step < 3 && model.outcome == OutcomeNone; step++ {
+				model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			}
+			result := model.Result()
+			if result.Kind != OutcomeSelected || result.Row.Kind != test.kind ||
 				result.Row.Name != test.name || result.Row.Account != test.account || result.PrimaryAccount != test.account ||
 				result.Row.CWD != scribeWorkbench || result.Row.Workbench != scribeWorkbench || result.Row.Project != "acme › Scribe" {
 				t.Fatalf(
@@ -152,20 +160,6 @@ func TestWorkbenchEnterEngine(t *testing.T) {
 				)
 			}
 		})
-	}
-}
-
-func TestWorkbenchAccountCycleUsesEffectiveEngine(t *testing.T) {
-	model := workbenchSelectedModel(4)
-	model.newChatEngine = pfmengine.OpenCode
-	model, _ = applyKey(t, model, controlKey('s'))
-	if model.codexPrimary != 1 || model.primary != 2 || model.openCodePrimary != 0 {
-		t.Fatalf(
-			"workbench account cycle = Codex %d, Claude %d, OpenCode %d",
-			model.codexPrimary,
-			model.primary,
-			model.openCodePrimary,
-		)
 	}
 }
 
@@ -228,24 +222,60 @@ func TestWorkbenchNameGroupsStayWithOwner(t *testing.T) {
 
 func TestWorkbenchDossierLaunchPurpose(t *testing.T) {
 	model := workbenchSelectedModel(4)
-	model.newChatEngine = pfmengine.OpenCode
 	row, _ := model.selectedRow()
 	want := "Enter starts a new Codex chat in /work/acme/docs/scribe on its workbench prompt."
 	if got := dossierPurpose(row); got != want {
 		t.Errorf("workbench purpose = %q, want %q", got, want)
 	}
-	model.newChatEngine = pfmengine.Claude
 	lines := model.dossierLines(row, 100, 15)
-	var plain strings.Builder
+	var plain []string
 	for _, line := range lines {
+		text := ""
 		for _, part := range line {
-			plain.WriteString(part.text)
+			text += part.text
 		}
+		plain = append(plain, strings.TrimSpace(text))
 	}
-	if !strings.Contains(
-		plain.String(),
-		"Enter starts a new Claude chat in "+scribeWorkbench+" on its workbench prompt.",
+	if joined := strings.Join(plain, " "); !strings.Contains(
+		joined,
+		"Enter chooses the engine, account and cache of a new chat in "+scribeWorkbench+" on its workbench prompt",
 	) {
-		t.Errorf("dossier does not follow selected engine: %s", plain.String())
+		t.Errorf("dossier does not name the steps and the workbench: %s", joined)
 	}
+}
+
+const ownLauncherHelper = "PFM_UI_OWN_LAUNCHER_HELPER"
+
+// TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage pins that the
+// new-chat picker reads the launcher registry, never a fixed engine list: an
+// engine whose launcher is registered only in its own package (a fourth
+// engine) is offered. The registration runs in a child process of this test
+// binary, so every other test here keeps the shipped engines.
+func TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage(t *testing.T) {
+	const name = "TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage"
+	if os.Getenv(ownLauncherHelper) != "1" {
+		t.Parallel()
+		command := exec.Command(os.Args[0], "-test.run=^"+name+"$", "-test.v")
+		command.Env = append(os.Environ(), ownLauncherHelper+"=1")
+		output, err := command.CombinedOutput()
+		if err != nil || !strings.Contains(string(output), "--- PASS: "+name) {
+			t.Fatalf("own-launcher proof failed: %v\n%s", err, output)
+		}
+		return
+	}
+	id := pfmengine.ID("zz")
+	spawn.RegisterLauncher(id, ownLauncher{})
+	if got := workbenchGoldenModel(80).newChatEngines(); !slices.Contains(got, id) {
+		t.Fatalf("new-chat engines = %v, want the launcher registered as %s", got, id)
+	}
+}
+
+type ownLauncher struct{}
+
+func (ownLauncher) ComposerReady(string) bool { return true }
+
+func (ownLauncher) Rename(
+	context.Context, spawn.Tmux, string, string, string, spawn.Timings, spawn.Trace,
+) (string, error) {
+	return "", nil
 }

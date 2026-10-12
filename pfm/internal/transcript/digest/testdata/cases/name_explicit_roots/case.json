@@ -1,0 +1,14 @@
+{
+ "args": [
+  "locate",
+  "Extra Desk",
+  "--root",
+  "{HOME}/extra",
+  "--root",
+  "{HOME}/alias"
+ ],
+ "dirs": [],
+ "links": {
+  "alias": "extra"
+ }
+}

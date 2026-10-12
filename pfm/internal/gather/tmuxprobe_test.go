@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -234,5 +235,78 @@ func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
 	_, err = client.ConvergeGlobalOptions(context.Background(), "cc-missing", options)
 	if err == nil || !strings.Contains(err.Error(), "set-titles") {
 		t.Fatalf("unreadable server error = %v, want one naming the option it could not read", err)
+	}
+}
+
+// TestEmptyServerIsListedWithTheReapFix runs real tmux: a pfm chat server left
+// running with no session answers list-panes -a with "no current target" and
+// exit 1, which the probe used to pass on as a bare "exit status 1" warning.
+// It is now ErrServerEmpty, listed in EmptyServers with a warning naming the
+// socket and the reap command, and its socket is never swept.
+func TestEmptyServerIsListedWithTheReapFix(t *testing.T) {
+	jail := newTmuxJail(t)
+	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
+	const socket = "probe-empty-server"
+	jail.startServer(t, socket, "doomed", "work", "title")
+	for _, arguments := range [][]string{
+		{"set-option", "-g", "exit-empty", "off"},
+		{"kill-session", "-t", "doomed"},
+	} {
+		if output, err := jail.command(append([]string{"-L", socket}, arguments...)...).CombinedOutput(); err != nil {
+			t.Fatalf("tmux %v on %s: %v: %s", arguments, socket, err, output)
+		}
+	}
+	ctx := context.Background()
+	client := TmuxProbe{TmuxTmpDir: jail.root}
+	if _, err := client.ListPanes(ctx, socket); !errors.Is(err, ErrServerEmpty) {
+		t.Fatalf("an empty server probed as %v, want ErrServerEmpty", err)
+	}
+	if pid, err := client.ServerPID(ctx, socket); err != nil || pid <= 0 {
+		t.Fatalf("ServerPID on the empty server = %d, %v", pid, err)
+	}
+	probe, err := ProbeTmux(ctx, jail.tmuxDir, client, time.Now().Add(48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(probe.EmptyServers, []string{socket}) ||
+		!reflect.DeepEqual(probe.ProbeWarnings, []string{EmptyServerWarning(socket)}) {
+		t.Fatalf("probe = %#v, want the empty server listed once", probe)
+	}
+	if want := socket + ": abandoned empty tmux server"; !strings.HasPrefix(probe.ProbeWarnings[0], want) ||
+		!strings.HasSuffix(probe.ProbeWarnings[0], "reap it: pfm chat ls --reap") {
+		t.Fatalf("warning = %q, want it to name the server and the reap command", probe.ProbeWarnings[0])
+	}
+	if len(probe.CorpseSwept) != 0 {
+		t.Fatalf("the socket of a running empty server was swept: %v", probe.CorpseSwept)
+	}
+}
+
+// TestProbeFailureCarriesTmuxReasonAndAHandCheck: a probe that failed for a
+// reason other than an empty or dead server stays a failure — never
+// ErrServerEmpty, never absence — and its warning carries tmux's own stderr
+// and the command that checks the server by hand.
+func TestProbeFailureCarriesTmuxReasonAndAHandCheck(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\necho 'tmux: connect failed: permission denied' >&2\nexit 1\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const socket = "cc-7-8-9"
+	tmuxDir := t.TempDir()
+	createCorpseSocket(t, filepath.Join(tmuxDir, socket), time.Now())
+	client := TmuxProbe{Binary: binary, TmuxTmpDir: t.TempDir()}
+	_, err := client.ListPanes(context.Background(), socket)
+	if err == nil || errors.Is(err, ErrServerEmpty) || errors.Is(err, ErrServerGone) ||
+		!strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("ListPanes error = %v, want a failure carrying tmux's reason", err)
+	}
+	probe, err := ProbeTmux(context.Background(), tmuxDir, client, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := socket + ": could not read this tmux server: list-panes: exit status 1: " +
+		"tmux: connect failed: permission denied — check it by hand: tmux -L " + socket + " list-sessions"
+	if !reflect.DeepEqual(probe.ProbeWarnings, []string{want}) || len(probe.EmptyServers) != 0 {
+		t.Fatalf("probe = %#v, want the one failure warning %q", probe, want)
 	}
 }

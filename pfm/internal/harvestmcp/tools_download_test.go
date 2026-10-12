@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -69,42 +68,41 @@ func TestRemoteDownloadIsAResourceLinkServedOnlyThroughMCP(t *testing.T) {
 	}
 }
 
-// TestDownloadFileRoundTripsItsTypedOutput: a real call through the SDK takes
-// urls and returns structuredContent that validates; a local path and a work
-// identifier are per-item named errors pointing at read's right field.
-func TestDownloadFileRoundTripsItsTypedOutput(t *testing.T) {
+// TestDownloadFileAnswersAnItemBlockPerURL: each URL answers its own block,
+// numbered over the call; a misplaced item names where it belongs.
+func TestDownloadFileAnswersAnItemBlockPerURL(t *testing.T) {
 	session := connectHarvesterInProcess(t, newTestService(t, Runtime{}))
-	var out DownloadOutput
-	callStructured(t, session, toolDownloadFile, map[string]any{
+	_, text := callText(t, session, toolDownloadFile, map[string]any{
 		"urls": []string{"/tmp/x.zip", "10.1038/nature14539"},
-	}, &out)
-	if len(out.Items) != 2 ||
-		out.Items[0].Error != "this is a local path; harvester_download_file takes URLs — read a local document with `harvester_read` (files)." ||
-		!strings.Contains(
-			out.Items[1].Error,
-			"; read it with `harvester_read` (publications), or download the URL of its file.",
-		) {
-		t.Fatalf("download_file(local path, DOI) = %+v", out.Items)
+	})
+	if !strings.HasPrefix(
+		text,
+		"=== [1/2] /tmp/x.zip\nerror: this is a local path; harvester_download_file takes URLs — "+
+			"read a local document with `harvester_read` (files).\n\n=== [2/2] 10.1038/nature14539\nerror: ",
+	) ||
+		!strings.Contains(text, "; read it with `harvester_read` (publications), or download the URL of its file.") {
+		t.Fatalf("download_file(local path, DOI) = %q", text)
 	}
 }
 
 // TestDownloadFileItemNamesItsRungVia: the rung that served a file is the
-// item's via, in the structured output and the text.
+// item's via, never its method.
 func TestDownloadFileItemNamesItsRungVia(t *testing.T) {
 	service := newTestService(t, Runtime{})
 	zipPath := filepath.Join(t.TempDir(), "bundle.zip")
 	writeTestZip(t, zipPath, map[string]string{"a.txt": "hi"})
 	item := service.downloadItem(context.Background(), "https://example.test/bundle.zip",
 		harvest.Result{Kind: "zip", Path: zipPath, Method: "direct"})
-	encoded, err := json.Marshal(item)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(encoded), `"via":"direct"`) || strings.Contains(string(encoded), `"method"`) {
-		t.Fatalf("download_file item = %s, want via and no method", encoded)
-	}
-	if text := renderDownload(item); !strings.Contains(text, "/ via: direct /") {
-		t.Fatalf("download_file text = %q, want via", text)
+	if text := renderDownload(
+		1,
+		1,
+		item,
+	); !strings.HasPrefix(
+		text,
+		"=== [1/1] https://example.test/bundle.zip\nkind: zip / ",
+	) ||
+		!strings.Contains(text, " / via: direct\npath: ") {
+		t.Fatalf("download_file text = %q, want its header, via and path", text)
 	}
 }
 

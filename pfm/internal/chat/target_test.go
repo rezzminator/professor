@@ -124,15 +124,22 @@ func TestMatchAcceptsAFullSocketPathAndTheBareName(t *testing.T) {
 func TestFromRowCarriesTheRowAndItsLiveness(t *testing.T) {
 	row := compose.Row{
 		Kind: compose.Booting, ID: "id-1", Name: "seat", Path: "/t/id-1.jsonl", CWD: "/work",
-		Socket: "cc-1-2-3", SessionName: "cc-1-2-3", PaneID: "%4",
+		Socket: "cc-1-2-3", SessionName: "cc-1-2-3", PaneID: "%4", PanePIDs: []int{77},
 	}
 	want := headless.Chat{
 		Name: "seat", ID: "id-1", Engine: compose.EngineForKind(compose.Booting),
 		Path: "/t/id-1.jsonl", CWD: "/work", Socket: "cc-1-2-3", Session: "cc-1-2-3",
-		Pane: "%4", Live: true,
+		Pane: "%4", Live: true, PanePID: 77,
 	}
 	if got := FromRow(row); got != want {
 		t.Fatalf("FromRow() = %#v, want %#v", got, want)
+	}
+	// A row with no pane root, or a socket's several, names no one pane root.
+	for _, pids := range [][]int{nil, {77, 78}} {
+		row.PanePIDs = pids
+		if got := FromRow(row).PanePID; got != 0 {
+			t.Fatalf("FromRow(PanePIDs %v).PanePID = %d, want 0", pids, got)
+		}
 	}
 	for _, kind := range []compose.Kind{compose.ResumeClaude, compose.ResumeCodex} {
 		if kind.IsAddressable() {

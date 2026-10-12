@@ -1,0 +1,19 @@
+{
+ "test": "--timeline: a missing path prints UNREADABLE and exits non-zero, never an empty run",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline",
+  "{TMP}/no-such-transcript.jsonl"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-YoDi67"
+ },
+ "exit": 1,
+ "signal": null,
+ "inputs": [
+  "no-such-transcript.jsonl",
+  "tl-home-YoDi67"
+ ],
+ "outputs": {}
+}

@@ -1,9 +1,11 @@
 package inject
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
@@ -25,6 +27,10 @@ var (
 	claudeBusyPattern = regexp.MustCompile(
 		`(?im)esc to interrupt|\((?:\d+[hm] )*\d+s ·|^[✻✢✶✳✽·*] +\S[^\n]*…|…\s*·\s*(?:\d+[hm] )*\d+s`,
 	)
+	// exitDialogPattern is the selected row of Claude Code's background-work
+	// exit confirmation ("❯ 1. Exit and stop tasks"). The marker has to sit on
+	// the Exit row: a human who moved it to "Stay" gets that choice respected.
+	exitDialogPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]*Exit`)
 	// The receipt Claude Code prints once a compaction has actually happened.
 	// It is the only positive evidence a pane carries that the turn a --then
 	// waiter was sent to ride out was a compaction AND that it finished.
@@ -55,6 +61,15 @@ func isCompactCommand(message string) bool {
 
 func isHarnessCommand(message string) bool {
 	return strings.HasPrefix(strings.TrimLeftFunc(message, unicode.IsSpace), "/")
+}
+
+// ExitDialogOpen reports Claude Code's background-work confirmation on
+// screen with its Exit row selected — the dialog /exit opens over a running
+// background shell, scheduled task or sub-agent, where Enter confirms the
+// exit. Both closers of a chat answer it: reload's worker and the kill-exit
+// finisher.
+func ExitDialogOpen(capture string) bool {
+	return exitDialogPattern.MatchString(capture)
 }
 
 // IsBusy mirrors chat.sh's live spinner-detail test.
@@ -195,6 +210,39 @@ func LastComposerLine(capture string) string {
 	return lastComposerLine(capture)
 }
 
+// ComposerDraftText is the active composer's draft, whitespace-normalised;
+// empty when the composer is empty or not drawn. Shared by internal/reload and
+// the kill finisher, so both read the same draft off the same row.
+func ComposerDraftText(capture string) string {
+	return strings.Join(strings.Fields(composerDraft(lastComposerLine(capture))), " ")
+}
+
+// composerDraft is the text after the composer row's leading ❯/› marker.
+func composerDraft(line string) string {
+	line = strings.TrimLeftFunc(stripTerminalControl(line), unicode.IsSpace)
+	if strings.HasPrefix(line, "❯") || strings.HasPrefix(line, "›") {
+		return line[len("❯"):]
+	}
+	return ""
+}
+
+// ComposerEmpty reports whether the composer holds no draft — no text after
+// its marker, or only dim hint text — and returns the plain draft it read.
+// styled is read only for a non-empty draft; a styled capture that fails is an
+// error, never an empty composer. A composer not drawn reads empty here: a
+// caller that must prove the box is up checks LastComposerLine first.
+func ComposerEmpty(capture string, styled func() (string, error)) (bool, string, error) {
+	draft := ComposerDraftText(capture)
+	if draft == "" {
+		return true, "", nil
+	}
+	styledCapture, err := styled()
+	if err != nil {
+		return false, draft, fmt.Errorf("read composer styling (draft %q): %w", draft, err)
+	}
+	return ComposerIsDimPlaceholder(styledCapture), draft, nil
+}
+
 func isDimPlaceholder(styledLine string) bool {
 	if !strings.Contains(styledLine, "\x1b[2m") && !strings.Contains(styledLine, ";2m") {
 		return false
@@ -250,9 +298,25 @@ func isDimPlaceholder(styledLine string) bool {
 }
 
 func lastComposerLine(capture string) string {
-	last := ""
-	for _, line := range strings.Split(capture, "\n") {
+	lines := strings.Split(capture, "\n")
+	if row := lastComposerRow(lines); row >= 0 {
+		return lines[row]
+	}
+	return ""
+}
+
+// lastComposerRow is the index of lastComposerLine's row in lines, -1 when
+// no row starts with a composer marker.
+func lastComposerRow(lines []string) int {
+	last, boxWidth := -1, 0
+	for index, line := range lines {
 		clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
+		if boxWidth > 0 {
+			if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= boxWidth {
+				boxWidth = 0
+			}
+			continue // A marker inside the bounded draft is continuation text.
+		}
 		visible := strings.TrimLeftFunc(clean, unicode.IsSpace)
 		if strings.HasPrefix(visible, "❯") {
 			// Claude renders live agent activity as a bullet row beneath the
@@ -262,14 +326,71 @@ func lastComposerLine(capture string) string {
 			if claudeAgentRow.MatchString(visible) {
 				continue
 			}
-			last = line
-			continue
 		}
-		if strings.HasPrefix(visible, "›") {
-			last = line
+		if strings.HasPrefix(visible, "❯") || strings.HasPrefix(visible, "›") {
+			last = index
+			if index > 0 {
+				top := strings.TrimSpace(stripTerminalControl(lines[index-1]))
+				if ComposerBoxRule(top) {
+					boxWidth = utf8.RuneCountInString(top)
+				}
+			}
 		}
 	}
 	return last
+}
+
+// ComposerBoxEmpty reports whether the rows beneath the active composer row,
+// down to the input box's closing rule, hold no text: a draft led by a newline
+// leaves the marker row empty and its text a row lower, where ComposerEmpty
+// never looks. False with no closing rule — the box has no known end, so its
+// rows cannot be proven empty — and with no composer row at all. Claude Code
+// draws the box; Codex does not. A row there is empty only when it shows no
+// visible character at all: hasDraft's marker-row allowances (a lone spinner
+// frame, Codex's braille sparkle) are a typed "-" or text on these rows.
+func ComposerBoxEmpty(capture string) bool {
+	lines := strings.Split(capture, "\n")
+	row := lastComposerRow(lines)
+	if row < 0 {
+		return false
+	}
+	topWidth := 0
+	if row > 0 {
+		top := strings.TrimSpace(stripTerminalControl(lines[row-1]))
+		if ComposerBoxRule(top) {
+			topWidth = utf8.RuneCountInString(top)
+		}
+	}
+	for _, line := range lines[row+1:] {
+		clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
+		if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= topWidth {
+			return true
+		}
+		if strings.IndexFunc(clean, func(character rune) bool {
+			return unicode.IsGraphic(character) && !unicode.IsSpace(character)
+		}) >= 0 {
+			return false
+		}
+	}
+	return false
+}
+
+// ComposerBoxRule reports whether a captured line is one of the input box's
+// horizontal rules — visible content that is nothing but box-drawing glyphs.
+// Matching the CLASS (U+2500-U+257F) rather than one theme's glyph keeps a
+// restyled border from silently reopening the wrap bug.
+func ComposerBoxRule(line string) bool {
+	drawn := false
+	for _, character := range line {
+		switch {
+		case unicode.IsSpace(character):
+		case character >= 0x2500 && character <= 0x257F:
+			drawn = true
+		default:
+			return false
+		}
+	}
+	return drawn
 }
 
 func stripTerminalControl(value string) string {

@@ -65,7 +65,7 @@ func TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig(t *testing.T) {
 
 	t.Run("diff ran", func(t *testing.T) {
 		var stdout bytes.Buffer
-		if code := RunProjectUpdates(project, home, true, &stdout); code != 1 {
+		if code := RunProjectUpdates(project, home, true, &stdout, nil); code != 1 {
 			t.Fatalf("RunProjectUpdates(--json) code=%d, want 1 (review): %s", code, stdout.String())
 		}
 		var report struct {
@@ -110,6 +110,7 @@ func TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig(t *testing.T) {
 			home,
 			false,
 			&stdout,
+			nil,
 		); code != 1 ||
 			!strings.Contains(stdout.String(), "REVIEW REQUIRED — 1 items; nothing was written.") {
 			t.Fatalf("renderProjectCheck() code=%d, want 1 (review): %s", code, stdout.String())
@@ -126,7 +127,7 @@ func TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig(t *testing.T) {
 		}
 		runStoreGit(t, "-C", store, "config", "diff.upper.textconv", "tr a-z A-Z")
 		var stdout bytes.Buffer
-		code := RunProjectUpdates(project, home, true, &stdout)
+		code := RunProjectUpdates(project, home, true, &stdout, nil)
 		var report struct {
 			Items []projectReportItem `json:"items"`
 		}
@@ -157,7 +158,7 @@ func TestProjectUpdatesDiffIgnoresAnInheritedForeignRepository(t *testing.T) {
 	t.Setenv("GIT_DIR", filepath.Join(foreign, ".git"))
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(t.TempDir(), "missing-index"))
 	var stdout bytes.Buffer
-	code := RunProjectUpdates(project, home, true, &stdout)
+	code := RunProjectUpdates(project, home, true, &stdout, nil)
 	var report struct {
 		Items []projectReportItem `json:"items"`
 	}
@@ -186,7 +187,7 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 	linkedRoot := filepath.Join(t.TempDir(), "linked-worktree")
 	runStoreGit(t, "-C", repository, "worktree", "add", "--detach", "-q", linkedRoot, "HEAD")
 	for _, dir := range []string{ // git carries no empty directory; the store layout needs them
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-agents",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
 	} {
 		if err := os.MkdirAll(filepath.Join(linkedRoot, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)
@@ -205,7 +206,7 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 	project, home := newUpdatedGitStoreProject(t, linkedRoot)
 
 	var stdout bytes.Buffer
-	code := RunProjectUpdates(project, home, false, &stdout)
+	code := RunProjectUpdates(project, home, false, &stdout, nil)
 	if code != 1 || strings.Contains(stdout.String(), "UNREADABLE") ||
 		!strings.Contains(stdout.String(), "      +upstream line\n") {
 		t.Fatalf("RunProjectUpdates() code=%d, want 1 with the upstream diff printed:\n%s", code, stdout.String())
@@ -229,7 +230,7 @@ func TestProjectUpdatesDiffUnreadableIsAFailure(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	if code := RunProjectUpdates(project, home, false, &stdout); code != 3 {
+	if code := RunProjectUpdates(project, home, false, &stdout, nil); code != 3 {
 		t.Fatalf("RunProjectUpdates() code=%d stdout=%q, want 3 (diff unreadable is a failure)", code, stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "upstream change UNREADABLE — ") {
@@ -242,7 +243,7 @@ func TestProjectUpdatesDiffUnreadableIsAFailure(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if code := RunProjectUpdates(project, home, true, &stdout); code != 3 {
+	if code := RunProjectUpdates(project, home, true, &stdout, nil); code != 3 {
 		t.Fatalf("RunProjectUpdates(JSON) code=%d stdout=%q, want 3", code, stdout.String())
 	}
 	var payload struct {
@@ -260,7 +261,7 @@ func TestProjectUpdatesDiffUnreadableIsAFailure(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if code := renderProjectCheck(project, home, false, &stdout); code != 3 {
+	if code := renderProjectCheck(project, home, false, &stdout, nil); code != 3 {
 		t.Fatalf("renderProjectCheck() code=%d stdout=%q, want 3", code, stdout.String())
 	}
 	got = strings.TrimSpace(stdout.String())
@@ -289,7 +290,7 @@ func TestProjectUpdatesRefusesAPinnedSHAThatIsNotAnObjectName(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	code := RunProjectUpdates(project, home, false, &stdout)
+	code := RunProjectUpdates(project, home, false, &stdout, nil)
 	if _, statErr := os.Stat(planted); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("git diff wrote the pin-named file %s (stat err %v):\n%s", planted, statErr, stdout.String())
 	}
@@ -319,14 +320,14 @@ func TestProjectUpdatesSelfHostedPinIsAReviewNotAFailure(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	code := RunProjectUpdates(project, home, false, &stdout)
+	code := RunProjectUpdates(project, home, false, &stdout, nil)
 	got := strings.TrimSpace(stdout.String())
 	if code != 1 || strings.Contains(got, "UNREADABLE") || strings.Contains(got, "FAILED") ||
 		!strings.HasSuffix(got, "REVIEW REQUIRED — 1 items; nothing was written.") {
 		t.Fatalf("RunProjectUpdates() code=%d, want 1 with a REVIEW REQUIRED terminal:\n%s", code, got)
 	}
 	stdout.Reset()
-	if code := RunProjectUpdates(project, home, true, &stdout); code != 1 {
+	if code := RunProjectUpdates(project, home, true, &stdout, nil); code != 1 {
 		t.Fatalf("RunProjectUpdates(--json) code=%d, want 1: %s", code, stdout.String())
 	}
 	var report struct {
@@ -359,7 +360,7 @@ func TestProjectUpdatesSelfHostedPinIsAReviewNotAFailure(t *testing.T) {
 // see the RED-first record in the qa report.
 func TestProjectUpdatesMissingBaselineNamesAdoptCommand(t *testing.T) {
 	var stdout bytes.Buffer
-	if code := RunProjectUpdates(t.TempDir(), t.TempDir(), false, &stdout); code != 3 {
+	if code := RunProjectUpdates(t.TempDir(), t.TempDir(), false, &stdout, nil); code != 3 {
 		t.Fatalf("missing baseline check code=%d stdout=%q", code, stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "pfm update adopt pins an existing install") {
@@ -391,7 +392,7 @@ func TestProjectUpdatesDistinguishesDirtyPinHistory(t *testing.T) {
 				args = []string{"--root", project, "--template", template, local}
 			}
 			var stdout, stderr bytes.Buffer
-			if code := RunProjectUpdate("pin", args, &stdout, &stderr, config.Runtime{}); code != 0 {
+			if code := RunProjectUpdate("pin", args, &stdout, &stderr, config.Runtime{}, nil); code != 0 {
 				t.Fatalf("pin = %d %s", code, stderr.String())
 			}
 			if err := os.WriteFile(
@@ -402,7 +403,7 @@ func TestProjectUpdatesDistinguishesDirtyPinHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 			stdout.Reset()
-			if code := RunProjectUpdates(project, home, true, &stdout); code != 1 {
+			if code := RunProjectUpdates(project, home, true, &stdout, nil); code != 1 {
 				t.Fatalf("report = %d %s", code, stdout.String())
 			}
 			var payload struct {
@@ -425,11 +426,262 @@ func TestProjectUpdatesDistinguishesDirtyPinHistory(t *testing.T) {
 				t.Fatal("missing pinned item")
 			}
 			stdout.Reset()
-			RunProjectUpdates(project, home, false, &stdout)
+			RunProjectUpdates(project, home, false, &stdout, nil)
 			if !strings.Contains(stdout.String(), "upstream change UNAVAILABLE") ||
 				!strings.Contains(stdout.String(), "compare by hand") {
 				t.Errorf("human report lacks dirty history warning: %s", stdout.String())
 			}
 		})
+	}
+}
+
+// TestProjectUpdatesReportsRetiredNamesAsReviewAndAScanFailureAsFailed: the
+// scan RunProjectUpdates is handed gets every pinned local to skip; each hit
+// renders as a `path:line` row under RETIRED-NAME and counts as a review
+// item (exit 1), in the human body and the JSON object alike; a file the
+// scan could not read renders UNREADABLE and fails the run (exit 3), never
+// reading clean.
+func TestProjectUpdatesReportsRetiredNamesAsReviewAndAScanFailureAsFailed(t *testing.T) {
+	project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
+	var gotRoot string
+	var gotPinned map[string]bool
+	hits := func(root string, pinned map[string]bool) RetiredNameScan {
+		gotRoot, gotPinned = root, pinned
+		return RetiredNameScan{Hits: []RetiredNameHit{
+			{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
+			{Path: ".claude/codex-build.json", Line: 3, Name: "/jc", Kind: "command"},
+		}}
+	}
+
+	var stdout bytes.Buffer
+	if code := RunProjectUpdates(project, home, false, &stdout, hits); code != 1 {
+		t.Fatalf("RunProjectUpdates() code=%d, want 1 (review):\n%s", code, stdout.String())
+	}
+	if gotRoot != project || !gotPinned[ClaudeInstructionsFile] {
+		t.Fatalf("scan root=%q pinned=%v, want %q with %s pinned", gotRoot, gotPinned, project, ClaudeInstructionsFile)
+	}
+	for _, want := range []string{
+		"  RETIRED-NAME  2\n",
+		"    scripts/legacy.sh:2   /wave — retired command, now /flights:spec\n",
+		"    .claude/codex-build.json:3   /jc — retired command, no successor\n",
+		"REVIEW REQUIRED — 3 items; nothing was written.\n",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("report missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	if code := RunProjectUpdates(project, home, true, &stdout, hits); code != 1 {
+		t.Fatalf("RunProjectUpdates(--json) code=%d, want 1:\n%s", code, stdout.String())
+	}
+	var payload struct {
+		RetiredNames RetiredNameScan `json:"retiredNames"`
+		Terminal     string          `json:"terminal"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("JSON report: %v\n%s", err, stdout.String())
+	}
+	if len(payload.RetiredNames.Hits) != 2 || payload.RetiredNames.Hits[0].Line != 2 ||
+		payload.Terminal != "REVIEW REQUIRED — 3 items" {
+		t.Fatalf("JSON retiredNames/terminal = %+v / %q", payload.RetiredNames, payload.Terminal)
+	}
+
+	unreadable := func(string, map[string]bool) RetiredNameScan {
+		return RetiredNameScan{
+			Failures: []RetiredNameFailure{{Path: "scripts/locked.sh", Error: "open: permission denied"}},
+		}
+	}
+	stdout.Reset()
+	if code := RunProjectUpdates(project, home, false, &stdout, unreadable); code != 3 {
+		t.Fatalf("RunProjectUpdates(unreadable) code=%d, want 3:\n%s", code, stdout.String())
+	}
+	for _, want := range []string{
+		"  RETIRED-NAME  0\n",
+		"    scripts/locked.sh   retired-name scan UNREADABLE — open: permission denied\n",
+		"FAILED — 1 file(s) could not be scanned for retired names; nothing was written.\n",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("report missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+// TestProjectUpdatesScanSkipsOnlyThePinsTheItemDiffCovers: the scan is told to
+// skip the pinned files whose row already carries an upstream diff (UPDATED
+// here), and only those — a CURRENT pin's file holds the project's own edits
+// the diff never shows, so it is scanned.
+func TestProjectUpdatesScanSkipsOnlyThePinsTheItemDiffCovers(t *testing.T) {
+	project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
+	var gotPinned map[string]bool
+	scan := func(_ string, pinned map[string]bool) RetiredNameScan {
+		gotPinned = pinned
+		return RetiredNameScan{}
+	}
+
+	var stdout bytes.Buffer
+	if code := RunProjectUpdates(project, home, false, &stdout, scan); code != 1 {
+		t.Fatalf("RunProjectUpdates() code=%d, want 1 (CLAUDE.md UPDATED):\n%s", code, stdout.String())
+	}
+	if !gotPinned[ClaudeInstructionsFile] {
+		t.Errorf("scan not told to skip the UPDATED pinned file %s: %v", ClaudeInstructionsFile, gotPinned)
+	}
+	for _, local := range []string{".claude/settings.json", ".rumdl.toml"} {
+		if gotPinned[local] {
+			t.Errorf("scan told to skip the CURRENT pinned file %s: %v", local, gotPinned)
+		}
+	}
+}
+
+// TestBarePfmUpdateReportRunsTheRetiredNameScan: the post-update report that
+// bare `pfm update` prints carries the RETIRED-NAME section, so an adopter who
+// reads only that output learns of a retired reference.
+func TestBarePfmUpdateReportRunsTheRetiredNameScan(t *testing.T) {
+	project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
+	scan := func(string, map[string]bool) RetiredNameScan {
+		return RetiredNameScan{Hits: []RetiredNameHit{
+			{Path: "docs/runbook.md", Line: 4, Name: "pfm price", Kind: "command", Successor: "pfm model-cost"},
+		}}
+	}
+	runtime := config.Runtime{Paths: pfmpaths.Values{Home: home}}
+
+	var stdout, stderr bytes.Buffer
+	code := RunProjectUpdate("", []string{"--root", project}, &stdout, &stderr, runtime, scan)
+
+	for _, want := range []string{
+		"  RETIRED-NAME  1\n",
+		"    docs/runbook.md:4   pfm price — retired command, now pfm model-cost\n",
+		"REVIEW REQUIRED — 2 items; nothing was written.\n",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("pfm update report missing %q (code %d):\n%s", want, code, stdout.String())
+		}
+	}
+	if code != 1 {
+		t.Fatalf("code = %d, want 1 (review)", code)
+	}
+}
+
+// newRenamedDocsHubProject is a project whose baseline pins the two
+// pre-rename docs templates, against a store that holds only their successors.
+func newRenamedDocsHubProject(t *testing.T) (project, home, store string) {
+	t.Helper()
+	store = newGitScaffoldStore(t)
+	for name, content := range map[string]string{"_index.md": "# hub\n", "standards.md": "# standards\n"} {
+		path := filepath.Join(store, "templates", "project", "docs-hub", name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runStoreGit(t, "-C", store, "add", "-A")
+	runStoreGit(t, "-C", store, "commit", "-qm", "docs hub")
+	project, home = t.TempDir(), t.TempDir()
+	manifest, err := json.Marshal(map[string]any{"interview": map[string]string{"blueprint_clone_path": store}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pins := make(map[string]FilePin)
+	for _, name := range []string{"_index.md", "standards.md"} {
+		local := filepath.Join(project, "docs", "agents", name)
+		if err := os.MkdirAll(filepath.Dir(local), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(local, []byte("# my populated hub\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		pins["docs/agents/"+name] = FilePin{
+			Template:     "project/docs-agents/" + name,
+			TemplateHash: "sha256:old",
+			PinnedSHA:    "0123abc",
+			PinnedAt:     "2026-09-01",
+		}
+	}
+	if err := Save(project, Baseline{Version: BaselineVersion, Files: pins}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".professor", "manifest.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return project, home, store
+}
+
+// TestRenamedDocsHubReportsMovedNotGoneUpstreamAndNew: a project scaffolded
+// before the docs hub moved from docs/agents/ to docs/ pins the old templates.
+// Each is reported MOVED, naming the successor template and target and the
+// verbs that re-pin the moved file — never as retired upstream next to an
+// unrelated NEW row for the successor.
+func TestRenamedDocsHubReportsMovedNotGoneUpstreamAndNew(t *testing.T) {
+	project, home, _ := newRenamedDocsHubProject(t)
+
+	var stdout bytes.Buffer
+	if code := RunProjectUpdates(project, home, false, &stdout, nil); code != 1 {
+		t.Fatalf("RunProjectUpdates() code=%d, want 1 (review):\n%s", code, stdout.String())
+	}
+	report := stdout.String()
+	for _, want := range []string{
+		"  MOVED         2\n",
+		"    docs/agents/_index.md   project/docs-agents/_index.md — moved upstream to project/docs-hub/_index.md (docs/_index.md)",
+		"    docs/agents/standards.md   project/docs-agents/standards.md — moved upstream to project/docs-hub/standards.md (docs/standards.md)",
+		"pfm update pin --template project/docs-hub/_index.md docs/_index.md",
+		"pfm update drop docs/agents/_index.md",
+		"  GONE-UPSTREAM 0\n",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report missing %q:\n%s", want, report)
+		}
+	}
+	for _, banned := range []string{"delete it", "retired upstream", "project/docs-hub/_index.md — adopt", "project/docs-hub/standards.md — adopt"} {
+		if strings.Contains(report, banned) {
+			t.Errorf("report holds %q:\n%s", banned, report)
+		}
+	}
+}
+
+// TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream: only
+// a successor that is absent from the store leaves the old pin GONE-UPSTREAM;
+// one the store cannot be asked about fails the report by name, never printing
+// advice to delete a populated hub.
+func TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream(t *testing.T) {
+	project, home, store := newRenamedDocsHubProject(t)
+	hub := filepath.Join(store, "templates", "project", "docs-hub")
+	if err := os.RemoveAll(hub); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hub, []byte("not a directory\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	code := RunProjectUpdates(project, home, false, &stdout, nil)
+
+	report := stdout.String()
+	if code != 3 || !strings.Contains(report, "FAILED — UNREADABLE ") ||
+		!strings.Contains(report, filepath.Join("docs-hub", "_index.md")) {
+		t.Fatalf("code=%d, want 3 and FAILED — UNREADABLE naming the successor:\n%s", code, report)
+	}
+	if strings.Contains(report, "delete it") {
+		t.Fatalf("report advises deleting while the successor is unreadable:\n%s", report)
+	}
+}
+
+func TestRetiredCoverageIncompleteIsVisibleAndNonfatal(t *testing.T) {
+	var scan RetiredNameScan
+	if err := json.Unmarshal(
+		[]byte(`{"hits":[],"failures":[],"incomplete":[{"path":"lock.json","error":"read limit"}]}`),
+		&scan,
+	); err != nil {
+		t.Fatal(err)
+	}
+	report := projectReport{Retired: &scan}
+	var stdout bytes.Buffer
+	writeRetiredNamesHuman(&stdout, &scan)
+	if !strings.Contains(stdout.String(), "lock.json   retired-name scan INCOMPLETE — read limit") {
+		t.Errorf("incomplete row missing: %s", stdout.String())
+	}
+	if got := projectTerminal(report); got != "INCOMPLETE — 1 file(s) partially scanned for retired names" {
+		t.Errorf("terminal=%q, want incomplete not clean or failed", got)
+	}
+	if failed := captureRetiredNames(&report, func(string, map[string]bool) RetiredNameScan { return scan }); failed {
+		t.Error("incomplete scan marked failed")
 	}
 }

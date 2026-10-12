@@ -1,0 +1,1510 @@
+<template id="tpl-wall">
+<div style="position:relative; width:1680px; height:1120px; overflow:hidden; background:#0F1426; color:#E8E6DF; font-family:var(--mono)">
+
+  <sc-if value="{{notReady}}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px">
+      <div style="font-family:var(--display); font-weight:800; font-size:64px; color:#2A3460">TRACER LOOM</div>
+      <div style="font-size:13px; color:{{loadColor}}">{{loadText}}</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ready}}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute; left:24px; top:20px; width:640px; display:flex; flex-direction:column; gap:6px">
+      <div style="font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA3C2">Tracer loom · run {{head.id}} · base {{head.base}}</div>
+      <div style="display:flex; align-items:baseline; gap:14px">
+        <h1 style="margin:0; flex:none; white-space:nowrap; font-family:var(--display); font-weight:800; font-size:{{head.size}}px; line-height:0.92; letter-spacing:0.01em; color:#F3F1EA">{{head.repo}}</h1>
+        <span class="ell" style="flex:1; min-width:0; font-size:13px; color:#9AA3C2">{{head.sub}}</span>
+      </div>
+      <div class="ell" title="{{head.warn}}" style="font-size:11.5px; color:{{head.warnColor}}">{{head.warn}}</div>
+    </div>
+    <button class="bt ell" onClick="{{head.hubPick}}" title="{{head.hubTitle}}" style="position:absolute; left:24px; top:126px; max-width:300px; font-size:11px; color:#C9CED9">{{head.hub}}</button>
+
+    <div style="position:absolute; left:676px; top:26px; display:flex; gap:14px">
+      <sc-for list="{{stats}}" as="s" hint-placeholder-count="5">
+        <div style="display:flex; flex-direction:column; gap:2px; min-width:60px">
+          <div style="font-family:var(--display); font-weight:800; font-size:40px; line-height:1; color:{{s.color}}">{{s.big}}</div>
+          <div style="font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:#9AA3C2">{{s.label}}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="position:absolute; left:1262px; top:18px; width:394px; display:flex; flex-direction:column; gap:8px">
+      <div style="display:flex; gap:6px">
+        <sc-for list="{{runs}}" as="r" hint-placeholder-count="3">
+          <button class="bt" onClick="{{r.pick}}" aria-pressed="{{r.pressed}}" style="flex:1; min-width:0; height:44px; padding:5px 9px; border-radius:7px; border:1px solid {{r.border}}; background:{{r.bg}}; display:flex; flex-direction:column; justify-content:center; gap:1px">
+            <span class="ell" style="display:block; font-size:12px; font-weight:600; color:{{r.color}}">{{r.repo}}</span>
+            <span class="ell" style="display:block; font-size:10px; color:#9AA3C2">{{r.when}}</span>
+          </button>
+        </sc-for>
+      </div>
+      <sc-for list="{{bars}}" as="b" hint-placeholder-count="2">
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="flex:none; width:52px; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#9AA3C2">{{b.label}}</span>
+          <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:3px">
+            <div style="display:flex; height:7px; border-radius:2px; overflow:hidden; background:#1A2140">
+              <sc-for list="{{b.parts}}" as="p"><span title="{{p.title}}" style="width:{{p.w}}%; background:{{p.c}}"></span></sc-for>
+            </div>
+            <div class="ell" title="{{b.legend}}" style="font-size:10px; color:#9AA3C2">{{b.legend}}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="position:absolute; left:24px; top:194px; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">{{leftHead}}</div>
+    <div style="position:absolute; left:1434px; top:194px; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">{{rightHead}}</div>
+
+    <canvas class="wall" ref="{{cvRef}}" tabindex="0" aria-label="{{wallAria}}" width="1080" height="732" style="position:absolute; left:340px; top:140px; width:1080px; height:732px; touch-action:none; cursor:grab"></canvas>
+
+    <sc-if value="{{wallMsg.on}}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; left:356px; top:228px; max-width:620px; padding:8px 12px; border-radius:6px; background:rgba(15,20,38,0.92); border:1px solid {{wallMsg.border}}; font-size:11.5px; line-height:1.45; color:{{wallMsg.color}}; pointer-events:none">{{wallMsg.text}}</div>
+    </sc-if>
+
+    <div style="position:absolute; left:352px; top:826px; display:flex; align-items:center; gap:6px">
+      <button class="bt zb" onClick="{{zoomOut}}" aria-label="Zoom out" title="Zoom out (−)" style="font-size:16px">−</button>
+      <button class="bt zb" onClick="{{zoomIn}}" aria-label="Zoom in" title="Zoom in (+)" style="font-size:16px">+</button>
+      <button class="bt zb" onClick="{{fitAll}}" title="The whole wall at once (F)">Fit</button>
+      <button class="bt zb" onClick="{{toggleFold}}" aria-pressed="{{foldPressed}}" title="Fold the stretches no hop came near (Z)" style="border-color:{{foldBorder}}; color:{{foldColor}}">{{foldLabel}}</button>
+      <span ref="{{zoomRef}}" style="margin-left:6px; padding:0 10px; height:26px; display:flex; align-items:center; border-radius:13px; background:rgba(15,20,38,0.88); font-size:11px; color:#C9CED9; white-space:nowrap"></span>
+    </div>
+
+    <div ref="{{tipRef}}" style="position:absolute; left:0; top:0; display:none; max-width:360px; padding:7px 10px; border-radius:6px; background:#1A2140; border:1px solid #3A4677; border-left:3px solid #9AA3C2; box-shadow:0 10px 30px rgba(0,0,0,0.5); font-size:11px; line-height:1.45; color:#E8E6DF; white-space:pre-line; pointer-events:none"></div>
+
+    <sc-if value="{{listOn}}" hint-placeholder-val="{{ true }}">
+      <div class="scroller" style="position:absolute; left:24px; top:214px; width:304px; height:658px; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:2px; padding-right:4px; box-sizing:border-box">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+          <button class="bt row" onClick="{{g.pick}}" title="{{g.full}}" aria-pressed="{{g.pressed}}" style="flex:none; display:flex; align-items:center; gap:8px; height:30px; padding:0 6px; border-radius:4px; margin-top:6px; background:{{g.bg}}">
+            <span style="flex:none; font-family:var(--display); font-weight:800; font-size:20px; line-height:1; color:{{g.color}}">{{g.label}}</span>
+            <span class="ell" style="flex:1; min-width:0; font-family:var(--sans); font-size:11.5px; color:#9AA3C2">{{g.text}}</span>
+          </button>
+          <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="3">
+            <button class="bt row" onClick="{{r.pick}}" onMouseEnter="{{r.enter}}" onMouseLeave="{{r.leave}}" aria-label="{{r.aria}}" style="flex:none; display:flex; flex-direction:column; justify-content:center; gap:1px; height:38px; padding:0 6px 0 {{r.pad}}px; border-radius:4px; border-left:2px solid {{r.color}}; background:{{r.bg}}; opacity:{{r.op}}">
+              <span class="ell" style="display:block; width:100%; font-size:11px; color:#E8E6DF"><b style="color:{{r.color}}; font-weight:600">{{r.idText}}</b> <sc-if value="{{r.walkOn}}" hint-placeholder-val="{{ false }}"><span style="margin-right:4px; padding:0 5px; border-radius:7px; border:1px solid {{r.walkColor}}; font-size:10px; font-weight:600; color:{{r.walkColor}}">{{r.walk}}</span></sc-if>{{r.text}}</span>
+              <span class="ell" style="display:block; width:100%; font-size:10px; color:#9AA3C2">{{r.stats}}</span>
+            </button>
+          </sc-for>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{card.on}}" hint-placeholder-val="{{ false }}">
+      <div class="in" style="position:absolute; left:24px; top:214px; width:300px; height:658px; display:flex; flex-direction:column; gap:9px">
+        <div style="display:flex; align-items:center; gap:8px">
+          <button class="bt" onClick="{{card.prev}}" aria-label="Previous reader" title="Previous reader ([)" style="width:44px; height:36px; border-radius:18px; border:1px solid #3A4677; display:flex; align-items:center; justify-content:center; font-size:15px">‹</button>
+          <button class="bt" onClick="{{card.next}}" aria-label="Next reader" title="Next reader (])" style="width:44px; height:36px; border-radius:18px; border:1px solid #3A4677; display:flex; align-items:center; justify-content:center; font-size:15px">›</button>
+          <button class="bt" onClick="{{card.close}}" title="Back to every reader (Esc)" style="height:36px; padding:0 14px; border-radius:18px; background:#E8E6DF; color:#14161F; font-size:12px; font-weight:600">All readers</button>
+        </div>
+        <div style="font-family:var(--display); font-weight:800; font-size:30px; line-height:1; color:{{card.color}}">{{card.title}}</div>
+        <div class="cl6" title="{{card.text}}" style="font-family:var(--sans); font-size:13px; line-height:1.45; color:#F3F1EA">{{card.text}}</div>
+        <div style="font-size:11px; line-height:1.5; color:#9AA3C2">{{card.stats}}</div>
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; background:#1A2140; border:1px solid #262F52">
+          <button class="bt" onClick="{{card.hopPrev}}" aria-label="Previous hop" title="Previous hop (←)" style="width:36px; height:36px; border-radius:18px; border:1px solid #3A4677; display:flex; align-items:center; justify-content:center">←</button>
+          <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:1px">
+            <span style="font-size:11px; color:#F3F1EA">{{card.hopLabel}}</span>
+            <span class="ell" title="{{card.hopWhere}}" style="font-size:10px; color:#9AA3C2">{{card.hopWhere}}</span>
+          </div>
+          <button class="bt" onClick="{{card.hopNext}}" aria-label="Next hop" title="Next hop (→)" style="width:36px; height:36px; border-radius:18px; border:1px solid #3A4677; display:flex; align-items:center; justify-content:center">→</button>
+        </div>
+        <div style="font-size:10.5px; color:#9AA3C2">{{card.from}}</div>
+        <div class="scroller" style="display:flex; flex-direction:column; gap:6px; overflow:auto; min-height:0; flex:1">
+          <sc-for list="{{card.open}}" as="o" hint-placeholder-count="3">
+            <button class="bt" onClick="{{o.go}}" title="{{o.full}}" style="flex:none; display:flex; gap:8px; font-size:11px; line-height:1.4">
+              <span style="flex:none; width:62px; color:{{o.kc}}">{{o.k}}</span>
+              <span class="cl3" style="flex:1; min-width:0; color:#C9CED9">{{o.t}}</span>
+            </button>
+          </sc-for>
+        </div>
+        <a href="#custody" style="font-size:12px; text-decoration:none">Open its chain of custody →</a>
+      </div>
+    </sc-if>
+
+    <div class="scroller" style="position:absolute; left:1434px; top:214px; width:226px; height:658px; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:6px; padding-right:4px; box-sizing:border-box">
+      <sc-if value="{{hop.on}}" hint-placeholder-val="{{ false }}">
+        <div class="in" style="flex:none; display:flex; flex-direction:column; gap:4px; padding:9px 10px; border-radius:8px; background:#1A2140; border:1px solid {{hop.color}}">
+          <div style="display:flex; align-items:center; gap:6px; font-size:11px">
+            <span style="color:#7D86A8">#{{hop.n}}</span>
+            <span style="font-weight:600; color:{{hop.stc}}">{{hop.st}}</span>
+            <span style="margin-left:auto; color:#C9CED9">{{hop.link}}</span>
+          </div>
+          <div style="font-size:11px; color:#F3F1EA; word-break:break-all">{{hop.where}}</div>
+          <sc-if value="{{hop.hasNote}}" hint-placeholder-val="{{ true }}">
+            <div class="cl6" title="{{hop.note}}" style="font-family:var(--sans); font-size:12px; line-height:1.4; color:#C9CED9">= {{hop.note}}</div>
+          </sc-if>
+          <sc-if value="{{hop.hasFlag}}" hint-placeholder-val="{{ false }}">
+            <div class="cl3" title="{{hop.flag}}" style="font-size:10.5px; line-height:1.4; color:#F2B33D">{{hop.flag}}</div>
+          </sc-if>
+          <div style="display:flex; flex-wrap:wrap; gap:4px">
+            <sc-for list="{{hop.cites}}" as="c"><span title="{{c.title}}" style="padding:0 6px; border-radius:8px; border:1px solid {{c.color}}; color:{{c.color}}; font-size:10.5px">{{c.label}}</span></sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <sc-for list="{{claims}}" as="a" hint-placeholder-count="4">
+        <button class="bt" onClick="{{a.go}}" title="{{a.full}}" style="flex:none; display:flex; flex-direction:column; gap:2px; padding:6px 8px; border-radius:6px; border:1px solid {{a.border}}; min-height:44px; box-sizing:border-box">
+          <span style="font-size:10.5px; font-weight:600; color:{{a.color}}">{{a.label}}</span>
+          <span class="cl2" style="font-family:var(--sans); font-size:11.5px; line-height:1.35; color:#C9CED9">{{a.t}}</span>
+        </button>
+      </sc-for>
+      <sc-if value="{{key.on}}" hint-placeholder-val="{{ true }}">
+        <div style="flex:none; display:flex; flex-direction:column; gap:10px">
+          <div style="font-family:var(--sans); font-size:12.5px; line-height:1.45; color:#E8E6DF">{{key.facts}}</div>
+          <div style="font-family:var(--sans); font-size:11.5px; line-height:1.45; color:#9AA3C2">{{key.src}}</div>
+          <div style="display:flex; flex-direction:column; gap:5px">
+            <sc-for list="{{key.items}}" as="k" hint-placeholder-count="8">
+              <div style="display:flex; align-items:center; gap:8px; font-size:10.5px; color:#C9CED9">
+                <svg aria-hidden="true" width="34" height="16" style="flex:none"><path d="{{k.d1}}" style="{{k.s1}}"></path><path d="{{k.d2}}" style="{{k.s2}}"></path><path d="{{k.d3}}" style="{{k.s3}}"></path></svg>
+                <span>{{k.t}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:10.5px; line-height:1.6; color:#9AA3C2">⌘-scroll or pinch · zoom<br>drag or scroll · pan<br>double-click · dive in<br>click a stitch · read its lines<br>+ − F Z · zoom, fit, fold</div>
+          <a href="#key" style="font-size:11.5px; text-decoration:none">The full stitch key →</a>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="position:absolute; left:24px; top:900px; width:300px; display:flex; flex-direction:column; gap:6px">
+      <div style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Walk — one hop per step</div>
+      <div style="font-family:var(--sans); font-size:12px; line-height:1.4; color:#9AA3C2">Each bar is one reader's walk through the code: it grows one hop per step from its <span style="font-family:var(--mono)">tt start</span> line, every reader taking hop 1 together, then hop 2, so a short walk finishes early. Click or drag the track to seek a hop.</div>
+      <div style="display:flex; gap:8px; margin-top:4px">
+        <button class="bt" onClick="{{play}}" aria-label="{{playAria}}" style="height:44px; padding:0 18px; border-radius:22px; background:#FFB454; color:#14161F; font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:8px">
+          <svg aria-hidden="true" width="12" height="12"><path d="{{playIcon}}" style="fill:#14161F"></path></svg>{{playLabel}}
+        </button>
+        <sc-if value="{{hasSel}}" hint-placeholder-val="{{ false }}">
+          <button class="bt" onClick="{{clear}}" style="height:44px; padding:0 16px; border-radius:22px; border:1px solid #3A4677; font-size:12px; color:#E8E6DF">Clear focus</button>
+        </sc-if>
+      </div>
+    </div>
+
+    <svg aria-hidden="true" width="1680" height="1120" style="position:absolute; left:0; top:0; pointer-events:none">
+      <path d="{{track.grid}}" style="fill:none; stroke:#262F52; stroke-width:1"></path>
+    </svg>
+    <sc-for list="{{lanes}}" as="l" hint-placeholder-count="12">
+      <div class="grow" style="position:absolute; left:{{l.x}}px; top:{{l.y}}px; width:{{l.w}}px; height:{{l.h}}px; background:{{l.bg}}; opacity:{{l.op}}; transition:opacity .3s ease; clip-path:inset(0 {{l.cut}}% 0 0)"></div>
+    </sc-for>
+    <div class="bt scrub" ref="{{scrubRef}}" tabindex="0" role="slider" aria-label="Walk track — click or drag to seek a hop; arrow keys step one hop, Shift ten, space plays" aria-valuemin="0" aria-valuemax="{{scrub.max}}" aria-valuenow="{{scrub.now}}" aria-valuetext="{{scrub.text}}" style="position:absolute; left:340px; top:894px; width:1080px; height:194px; cursor:ew-resize; touch-action:none"></div>
+    <sc-if value="{{hasPos}}" hint-placeholder-val="{{ false }}">
+      <div class="head" style="position:absolute; left:340px; top:894px; width:2px; height:194px; background:#F3F1EA; pointer-events:none; transform:translateX({{headX}}px)">
+        <div ref="{{headTRef}}" style="position:absolute; left:-31px; top:-17px; width:64px; text-align:center; font-size:10.5px; font-weight:600; line-height:15px; border-radius:7px; background:#F3F1EA; color:#14161F"></div>
+      </div>
+    </sc-if>
+    <sc-for list="{{ticks}}" as="t" hint-placeholder-count="5">
+      <div style="position:absolute; left:{{t.x}}px; top:1092px; font-size:10px; color:#7D86A8">{{t.label}}</div>
+    </sc-for>
+    <a href="#key" style="position:absolute; left:24px; top:1072px; font-size:11.5px; text-decoration:none">Stitch key — how to read the cloth →</a>
+  </sc-if>
+</div>
+</template>
+<script>
+(function () {
+const DCLogic = DC.DCLogic;
+// the wall canvas sits at (340,140) on the board, 1080 x 732; its top 74 px are the file-label band
+const CW = 1080, CHT = 732, LB = 74, MIDY = LB + (CHT - LB) / 2, X0 = 340, X1 = 1420;
+// the walk track under the wall: hop 0..hmax across X0..X1, one lane per reader between LANE0 and LANE1
+const TRK_TOP = 900, LANE0 = 906, LANE1 = 1084;
+const laneHOf = (n) => Math.min(9, (LANE1 - LANE0) / Math.max(1, n));
+// world units: one source line is 1 unit tall, a file column COLW wide (the kit's own proportions)
+const COLW = 54, GAP = 34, DGAP = 30, FOLD_H = 7, CTX = 10, CHU = 0.37, KREAD = 19, KMIN = 0.02, KMAX = 26, KTEXT = 8.5, KLINES = 1.6;
+const OVW = 196, OVH = 112, OVX = CW - OVW - 12, OVY = CHT - OVH - 12;
+const HUES = ['#FFB454', '#5DD6F5', '#FF7EB6', '#A6E36A', '#B9A2FF', '#FF8F5E', '#6FE3C1', '#F4E06D'];
+const UNDYED = '#C9CED9';
+const HOPC = { exact: '#E8E6DF', moved: '#AFC0F0', placed: '#7FD1FF', drifted: '#F2B33D', rejected: '#FF5A5F' };
+const ANSC = { held: '#8FE3B0', moved: '#7FD1FF', drift: '#F2B33D', unbacked: '#FF8A65', missing: '#FF5A5F', broke: '#D7263D', uncited: '#7D86A8' };
+const ANSW = { held: 'held', moved: 'moved', drift: 'drifted', unbacked: 'unbacked', missing: 'quote not found', broke: 'contract broken', uncited: 'no cite' };
+const STW = { verified: ['held', '#8FE3B0'], moved: ['moved ↻', '#AFC0F0'], placed: ['placed', '#7FD1FF'], followed: ['followed', '#7FD1FF'], drifted: ['worn ≈ changed since the walk', '#F2B33D'], rejected: ['hole ✗ quote not found', '#FF5A5F'], badaddr: ['hole ✗ bad address', '#FF5A5F'] };
+const STS = { verified: 'held', moved: 'moved ↻', placed: 'placed', followed: 'followed', drifted: 'worn ≈', rejected: 'hole ✗', badaddr: 'hole ✗' };
+const LINKW = { call: '→ call', names: '⇢ names', then: '· then', same: '= same' };
+const KW = new Set('func package import return if else for range switch case default type struct interface var const go defer chan map def class from as with try except finally raise pass lambda yield while in not and or is None True False self let fn pub use mod impl match mut async await new this function export extends static true false nil null undefined break continue elif local then fi do done esac echo select where'.split(' '));
+const COMMENT = /^\s*(\/\/|#|\/\*|\*|--|;|<!--|%)/;
+const TOKRX = /(\/\/.*$)|("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|`[^`]*`?)|(\b\d[\w.]*)|([A-Za-z_]\w*)|(\s+)|([^\sA-Za-z_\d"'`]+)/g;
+const r1 = (v) => Math.round(v * 10) / 10;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const hue = (q) => (q == null ? UNDYED : HUES[(q - 1) % HUES.length]);
+const withA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
+const tidy = (s) => String(s || '').replace(/^`?tt start`? prints its text\s*(\([^)]*\))?\s*[—–-]?\s*/i, '').trim();
+const mmss = (s) => { if (s == null) return '—'; s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`; }; // an unknown time is —, never 0s
+const whenOf = (id) => { const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(id); const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m ? `${Number(m[3])} ${mon[Number(m[2]) - 1]} ${m[4]}:${m[5]}` : id; };
+const idCmp = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? -1) - (y[i] ?? -1); if (d) return d; } return 0; };
+const base = (p) => String(p || '').split('/').pop();
+const dirOf = (p) => { const i = String(p).lastIndexOf('/'); return i < 0 ? '.' : p.slice(0, i); };
+const isHole = (st) => st === 'rejected' || st === 'badaddr';
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const indentOf = (t) => { let n = 0; for (const ch of t) { if (ch === ' ') n++; else if (ch === '\t') n += 4; else break; } return n; };
+const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+
+function buildPieces(col) {
+  const keep = col.steps.map((s) => [s.a - CTX, Math.min(s.b, col.n) + CTX]).sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [a0, b0] of keep) {
+    const a = clamp(a0, 1, col.n), b = clamp(b0, 1, col.n), last = merged[merged.length - 1];
+    if (last && a <= last[1] + 6) last[1] = Math.max(last[1], b); else merged.push([a, b]);
+  }
+  const pieces = [];
+  let cur = 1;
+  for (const [a, b] of merged) { if (a > cur) pieces.push({ a: cur, b: a - 1, fold: true }); pieces.push({ a, b, fold: false }); cur = b + 1; }
+  if (cur <= col.n) pieces.push({ a: cur, b: col.n, fold: true });
+  let yf = 0;
+  for (const p of pieces) { p.n = p.b - p.a + 1; p.yw = p.a - 1; p.yf = yf; p.hf = p.fold ? FOLD_H : p.n; yf += p.hf; }
+  col.pieces = pieces; col.hW = col.n; col.hF = yf;
+}
+function layoutPieces(W, m) {
+  if (W.laidM === m) return;
+  W.laidM = m;
+  W.maxH = 1;
+  for (const col of W.cols) {
+    for (const p of col.pieces) { p.y = lerp(p.yw, p.yf, m); p.h = lerp(p.n, p.hf, m); }
+    col.h = lerp(col.hW, col.hF, m);
+    W.maxH = Math.max(W.maxH, col.h);
+  }
+}
+function yWorld(col, n) {
+  const ps = col.pieces;
+  if (n <= ps[0].a) return ps[0].y;
+  for (const p of ps) if (n <= p.b + 1) return p.y + (Math.min(n, p.b + 1) - p.a) * (p.h / p.n);
+  const last = ps[ps.length - 1];
+  return last.y + last.h;
+}
+function lineAt(col, wy) {
+  for (const p of col.pieces) if (wy < p.y + p.h) return p.fold && p.h < p.n * 0.5 ? null : clamp(p.a + Math.floor((wy - p.y) / (p.h / p.n)), p.a, p.b);
+  return null;
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { data: null, err: null, run: null, follow: null, hop: null, selQ: undefined, hovT: null, fold: false, playMode: null, walkSig: '', textGen: 0 };
+    this.cache = {}; this.walls = {}; this.views = {}; this.texts = {};
+    this.raf = 0; this.fly = null; this.play = null; this.flash = null; this.hover = null; this.mono = DC.fonts.mono;
+    this.pointers = new Map(); this.drag = null; this.pinch = null; this.ov = false; this.lastStitchClick = 0; this.zoomTxt = '';
+    this.loop = (now) => { this.raf = 0; this.draw(now); };
+    this.cvRef = (el) => {
+      if (el === this.cv) return;
+      if (this.cv) this.unbind(this.cv);
+      this.cv = el; this.ctx = el ? el.getContext('2d') : null;
+      if (el) { this.bind(el); this.wake(); }
+    };
+    this.tipRef = (el) => { this.tip = el; };
+    this.zoomRef = (el) => { this.zoomEl = el; this.zoomTxt = ''; this.wake(); };
+    this.headTRef = (el) => { this.headT = el; this.wake(); };
+    this.scrubRef = (el) => {
+      if (el === this.scrubEl) return;
+      if (this.scrubEl) for (const [type, f] of this.sh) this.scrubEl.removeEventListener(type, f);
+      this.scrubEl = el;
+      if (el) for (const [type, f] of this.sh) el.addEventListener(type, f);
+    };
+    this.h = {
+      down: (e) => this.onDown(e), move: (e) => this.onMove(e), up: (e) => this.onUp(e), leave: () => this.setHover(null, null),
+      wheel: (e) => this.onWheel(e), dbl: (e) => this.onDbl(e), key: (e) => this.onKey(e),
+    };
+    this.sh = [['pointerdown', (e) => this.scrubDown(e)], ['pointermove', (e) => this.scrubMove(e)], ['pointerup', (e) => this.scrubUp(e)],
+      ['pointercancel', (e) => this.scrubUp(e)], ['pointerleave', () => { if (!this.scrubbing) this.trackTip(null); }], ['keydown', (e) => this.scrubKey(e)]];
+  }
+
+  componentDidMount() {
+    this.setState({ data: DC.data });
+    this.loadText(this.runIndex(DC.data));
+    this.wake();
+  }
+
+  componentWillUnmount() {
+    if (this.raf) cancelAnimationFrame(this.raf);
+    if (this.cv) this.unbind(this.cv);
+    this.scrubRef(null);
+  }
+
+  set(o) { this.setState(o); this.wake(); }
+  wake() { if (!this.raf) this.raf = requestAnimationFrame(this.loop); }
+
+  bind(el) {
+    el.addEventListener('pointerdown', this.h.down); el.addEventListener('pointermove', this.h.move);
+    el.addEventListener('pointerup', this.h.up); el.addEventListener('pointercancel', this.h.up); el.addEventListener('pointerleave', this.h.leave);
+    el.addEventListener('wheel', this.h.wheel, { passive: false }); el.addEventListener('dblclick', this.h.dbl); el.addEventListener('keydown', this.h.key);
+  }
+  unbind(el) {
+    el.removeEventListener('pointerdown', this.h.down); el.removeEventListener('pointermove', this.h.move);
+    el.removeEventListener('pointerup', this.h.up); el.removeEventListener('pointercancel', this.h.up); el.removeEventListener('pointerleave', this.h.leave);
+    el.removeEventListener('wheel', this.h.wheel); el.removeEventListener('dblclick', this.h.dbl); el.removeEventListener('keydown', this.h.key);
+  }
+
+  runIndex(d) {
+    d = d || this.state.data;
+    const want = this.state.run != null ? this.state.run : Number(this.props.run ?? 0);
+    return Math.min(Math.max(0, want || 0), d.runs.length - 1);
+  }
+
+  // the page carries every file's text with the run: whole, only the lines near its hops past the text budget, or none
+  // when it could not be read (that file hatches)
+  loadText(ri) {
+    const run = this.state.data ? this.state.data.runs[ri] : null;
+    if (!run || this.texts[ri]) return;
+    this.texts[ri] = { files: run.files.map((f) => {
+      if (f.gone) return null;
+      if (f.lines) return { s: 'disk', l: f.lines };
+      const l = new Array(f.n);
+      for (const k in f.sparse) l[Number(k) - 1] = f.sparse[k];
+      return { s: 'sparse', l };
+    }) };
+    delete this.walls[ri];
+  }
+
+  layout(ri) {
+    if (this.cache[ri]) return this.cache[ri];
+    const run = this.state.data.runs[ri];
+    const T = run.threads, byId = {};
+    T.forEach((t) => { byId[t.id] = t; });
+    const cmp = (a, b) => ((a.q ?? 99) - (b.q ?? 99)) || idCmp(a.id, b.id);
+    const order = [];
+    const visit = (t, d) => { order.push({ t, d }); T.filter((k) => k.parent === t.id).sort(cmp).forEach((k) => visit(k, d + 1)); };
+    T.filter((t) => !t.parent || !byId[t.parent]).sort(cmp).forEach((t) => visit(t, 0));
+    const groups = [];
+    order.forEach((r, i) => {
+      r.g = r.d === 0 ? r.t.q : order[i - 1].g;
+      if (!groups.length || groups[groups.length - 1].g !== r.g) groups.push({ g: r.g, rows: [] });
+      groups[groups.length - 1].rows.push(r);
+    });
+    // the replay's axis: walk steps, 0 at every reader's tt start line to the longest walk's hop count
+    const hmax = Math.max(1, ...T.map((t) => t.steps.length));
+    const out = { run, order, groups, byId, hmax };
+    this.cache[ri] = out;
+    return out;
+  }
+
+  // the wall: every file a hop sits in hung as a warp column at true line scale, every reader a weft across them
+  wall(ri) {
+    if (this.walls[ri]) return this.walls[ri];
+    const L = this.layout(ri), run = L.run, F = run.files, text = this.texts[ri];
+    const first = new Map();
+    L.order.forEach((r) => r.t.steps.forEach((s) => { if (!first.has(s.f)) first.set(s.f, first.size); }));
+    const dirFirst = new Map();
+    for (const [f, k] of first) { const d = dirOf(F[f].p); if (!dirFirst.has(d) || dirFirst.get(d) > k) dirFirst.set(d, k); }
+    const fo = [...first.keys()].sort((a, b) => (dirFirst.get(dirOf(F[a].p)) - dirFirst.get(dirOf(F[b].p))) || (first.get(a) - first.get(b)));
+    const cols = [], byF = {}, byPath = new Map();
+    let x = 0, prev = null;
+    for (const f of fo) {
+      const d = dirOf(F[f].p);
+      if (prev !== null && d !== prev) x += DGAP;
+      const e = text && text.files[f];
+      const col = { f, path: F[f].p, dir: d, base: base(F[f].p), x, lines: e && Array.isArray(e.l) ? e.l : null, src: e ? e.s : text ? 'none' : null,
+        n: Math.max(1, e && Array.isArray(e.l) ? e.l.length : F[f].n || 1), steps: [], threads: new Set(), off: null, k: cols.length };
+      cols.push(col); byF[f] = col; byPath.set(col.path, col);
+      x += COLW + GAP; prev = d;
+    }
+    const steps = [];
+    const th = L.order.map((r, oi) => ({ t: r.t, oi, q: r.g, color: hue(r.g), steps: [], label: `${r.g == null ? 'Q?' : 'Q' + r.g}·${r.t.id}` }));
+    const thById = {};
+    th.forEach((T) => { thById[T.t.id] = T; });
+    th.forEach((T) => T.t.steps.forEach((s, j) => {
+      const col = byF[s.f];
+      const st = { T, j, s, col, a: Math.max(1, s.a), b: Math.max(1, s.a, s.b), st: s.st, ln: s.ln, gi: steps.length };
+      steps.push(st); T.steps.push(st); col.steps.push(st); col.threads.add(T.t.id);
+    }));
+    for (const col of cols) {
+      col.n = Math.max(col.n, ...col.steps.filter((s) => !isHole(s.st)).map((s) => s.b));
+      for (const s of col.steps) if (isHole(s.st)) { s.a = Math.min(s.a, col.n); s.b = Math.min(s.b, col.n); }
+      buildPieces(col);
+    }
+    const findCol = (p) => { if (!p) return null; if (byPath.has(p)) return byPath.get(p); const hit = cols.filter((c) => c.path.endsWith('/' + p) || p.endsWith('/' + c.path)); return hit.length === 1 ? hit[0] : null; };
+    const at = (s) => { const m = /^(.*):(\d+)$/.exec(s || ''); return m ? { col: findCol(m[1]), n: Number(m[2]) } : null; };
+    const ends = [], splits = [];
+    for (const T of th) {
+      const last = T.steps[T.steps.length - 1];
+      const e = T.t.end[0], where = e ? at(e.at) : null;
+      const open = T.t.lead.length + T.t.notread.length + T.t.split.filter((x) => !x.spawned).length;
+      if (where && where.col) ends.push({ T, col: where.col, n: Math.min(where.n, where.col.n), kind: e.k || 'end', open, has: true });
+      else if (last) ends.push({ T, col: last.col, n: last.b, kind: e ? e.k || 'end' : 'no END', open, has: !!e, after: true });
+      const parent = thById[T.t.parent];
+      if (parent && T.steps.length && parent.steps.length) {
+        const sp = parent.t.split.find((x) => x.child === T.t.id) || null, w = sp ? at(sp.at) : null;
+        const from = w && w.col ? { col: w.col, n: Math.min(w.n, w.col.n) } : { col: parent.steps[parent.steps.length - 1].col, n: parent.steps[parent.steps.length - 1].b };
+        splits.push({ T, parent, from, to: T.steps[0] });
+      }
+    }
+    const W = { ri, L, run, cols, byF, findCol, steps, th, thById, ends, splits, wallW: cols.length ? cols[cols.length - 1].x + COLW : COLW, laidM: null, maxH: 1, m: this.state.fold ? 1 : 0, text: !!text };
+    layoutPieces(W, W.m);
+    this.walls[ri] = W;
+    return W;
+  }
+
+  // ---------- the camera ----------
+  view(ri) {
+    if (!this.views[ri]) { this.views[ri] = { k: 1, x: 0, y: LB }; this.home(ri); }
+    return this.views[ri];
+  }
+  home(ri) {
+    const W = this.wall(ri), v = this.views[ri];
+    const fitW = (CW - 48) / W.wallW, fitH = (CHT - LB - 40) / W.maxH;
+    v.k = clamp(Math.min(fitH, Math.max(fitW, 13 / COLW)), KMIN, KMAX);
+    const used = W.wallW * v.k;
+    v.x = used < CW - 48 ? (CW - used) / 2 : 24;
+    v.y = LB + 16;
+  }
+  center(v) { return [(CW / 2 - v.x) / v.k, (MIDY - v.y) / v.k]; }
+  setCenter(v, cx, cy, k) { v.k = k; v.x = CW / 2 - cx * k; v.y = MIDY - cy * k; }
+  // smooth zoom-and-pan (van Wijk and Nuij): pulls out on a long flight, so the eye never loses its place
+  flyTo(cx, cy, k1) {
+    const ri = this.runIndex(), v = this.view(ri);
+    k1 = clamp(k1, KMIN, KMAX);
+    const [x0, y0] = this.center(v), k0 = v.k;
+    if (reduced()) { this.setCenter(v, cx, cy, k1); this.fly = null; this.wake(); return; }
+    const rho = Math.SQRT2, w0 = CW / k0, w1 = CW / k1, dx = cx - x0, dy = cy - y0, d2 = dx * dx + dy * dy, d1 = Math.sqrt(d2);
+    let S, at;
+    if (d1 < 1e-6 * w0) {
+      S = Math.log(w1 / w0) / rho;
+      at = (s) => [x0, y0, w0 * Math.exp(rho * s)];
+    } else {
+      const b0 = (w1 * w1 - w0 * w0 + rho ** 4 * d2) / (2 * w0 * rho * rho * d1), b1 = (w1 * w1 - w0 * w0 - rho ** 4 * d2) / (2 * w1 * rho * rho * d1);
+      const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0), rr1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      S = (rr1 - r0) / rho;
+      const cosh = Math.cosh(r0), sinh = Math.sinh(r0);
+      at = (s) => { const u = (w0 / (rho * rho)) * (cosh * Math.tanh(rho * s + r0) - sinh); return [x0 + (u * dx) / d1, y0 + (u * dy) / d1, (w0 * cosh) / Math.cosh(rho * s + r0)]; };
+    }
+    const ms = clamp(Math.abs(S) * 520, 380, 1500);
+    this.fly = { ri, t0: performance.now(), ms, S, at, end: [cx, cy, k1] };
+    this.wake();
+  }
+  stopFly() { this.fly = null; }
+  zoomAt(px, py, f) {
+    const v = this.view(this.runIndex()), k = clamp(v.k * f, KMIN, KMAX);
+    v.x = px - ((px - v.x) * k) / v.k; v.y = py - ((py - v.y) * k) / v.k; v.k = k;
+    this.wake();
+  }
+  zoomBtn(f) {
+    const v = this.view(this.runIndex());
+    // a press during a flight compounds on where that flight was going, never on the frame it caught
+    const [cx, cy, k] = this.fly ? this.fly.end : [...this.center(v), v.k];
+    this.flyTo(cx, cy, k * f);
+  }
+  fitAll() {
+    const ri = this.runIndex(), W = this.wall(ri);
+    const k = Math.min((CW - 48) / W.wallW, (CHT - LB - 40) / W.maxH);
+    this.flyTo(W.wallW / 2, W.maxH / 2, k);
+  }
+  fitBox(x0, y0, x1, y1, kmax) {
+    const k = Math.min((CW - 140) / Math.max(1, x1 - x0), (CHT - LB - 90) / Math.max(1, y1 - y0), kmax || KREAD);
+    this.flyTo((x0 + x1) / 2, (y0 + y1) / 2, k);
+  }
+  fitSteps(list, kmax) {
+    if (!list.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const s of list) { x0 = Math.min(x0, s.col.x); x1 = Math.max(x1, s.col.x + COLW); y0 = Math.min(y0, yWorld(s.col, s.a)); y1 = Math.max(y1, yWorld(s.col, s.b + 1)); }
+    this.fitBox(x0, y0, x1, y1, kmax);
+  }
+  flyToLines(col, a, b, flash) {
+    const span = Math.max(1, b - a + 1);
+    const k = clamp(Math.min(KREAD, (CHT - LB - 140) / span), 6, KREAD);
+    this.flyTo(col.x + COLW / 2, (yWorld(col, a) + yWorld(col, b + 1)) / 2, k);
+    if (flash) this.flash = { col, a, b, t0: performance.now() + 250, color: flash };
+  }
+
+  // ---------- picking ----------
+  follow(tid, fly) {
+    const ri = this.runIndex(), W = this.wall(ri), T = W.thById[tid];
+    this.set({ follow: tid, hop: null, selQ: undefined, hovT: null });
+    if (fly !== false && T && T.steps.length) this.fitSteps(T.steps, 6);
+  }
+  pickHop(st, fly) {
+    this.set({ follow: st.T.t.id, hop: st.gi, selQ: undefined });
+    if (fly !== false) this.flyToLines(st.col, st.a, st.b, null);
+  }
+  hopStep(d) {
+    const W = this.wall(this.runIndex()), S = this.state, T = S.follow ? W.thById[S.follow] : null;
+    if (!T || !T.steps.length) return;
+    const cur = S.hop != null && W.steps[S.hop] && W.steps[S.hop].T === T ? W.steps[S.hop].j : d > 0 ? -1 : T.steps.length;
+    this.pickHop(T.steps[clamp(cur + d, 0, T.steps.length - 1)]);
+  }
+  readerStep(d) {
+    const W = this.wall(this.runIndex()), n = W.th.length;
+    if (!n) return;
+    const cur = this.state.follow && W.thById[this.state.follow] ? W.thById[this.state.follow].oi : d > 0 ? -1 : n;
+    this.follow(W.th[(cur + d + n) % n].t.id);
+  }
+  claimGo(a) {
+    const W = this.wall(this.runIndex());
+    for (const c of a.cites) {
+      const col = W.findCol(c.p);
+      if (!col) continue;
+      const n = clamp(c.l, 1, col.n);
+      if (c.s >= 0) { const T = W.thById[this.state.follow]; const st = T && T.steps[c.s]; if (st) this.set({ hop: st.gi }); }
+      this.flyToLines(col, n, n, ANSC[a.g] || '#FFB454');
+      return;
+    }
+  }
+  // leave: also leave the replay, back to the full static wall (Esc, Clear focus)
+  clearAll(leave) { if (leave) this.stopPlay(); this.set({ follow: null, hop: null, selQ: undefined, hovT: null }); }
+
+  // ---------- pointer, wheel, keys ----------
+  local(e) {
+    const b = this.cv.getBoundingClientRect();
+    if (!b.width || !b.height) return null;
+    return { x: ((e.clientX - b.left) * CW) / b.width, y: ((e.clientY - b.top) * CHT) / b.height };
+  }
+  inOv(p) { return p.x >= OVX && p.x <= OVX + OVW && p.y >= OVY && p.y <= OVY + OVH; }
+  ovGo(p) {
+    const ri = this.runIndex(), W = this.wall(ri), v = this.view(ri), o = this.ovMap(W);
+    this.setCenter(v, (p.x - o.x) / o.s, (p.y - o.y) / o.s, v.k);
+    this.wake();
+  }
+  onDown(e) {
+    const p = this.local(e);
+    if (!p || !this.state.data) return;
+    try { this.cv.focus({ preventScroll: true }); } catch (err) { this.cv.focus(); }
+    e.preventDefault(); e.stopPropagation();
+    try { this.cv.setPointerCapture(e.pointerId); } catch (err) { /* capture is a nicety */ }
+    this.pointers.set(e.pointerId, p);
+    this.stopFly();
+    if (this.pointers.size === 2) {
+      const [a, b] = [...this.pointers.values()];
+      this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, k: this.view(this.runIndex()).k };
+      this.drag = null;
+      return;
+    }
+    if (this.inOv(p)) { this.ov = true; this.ovGo(p); return; }
+    const v = this.view(this.runIndex());
+    this.drag = { x: p.x, y: p.y, vx: v.x, vy: v.y, moved: false };
+    this.cv.style.cursor = 'grabbing';
+  }
+  onMove(e) {
+    const p = this.local(e);
+    if (!p || !this.state.data) return;
+    if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, p);
+    if (this.pinch && this.pointers.size === 2) {
+      const [a, b] = [...this.pointers.values()], d = Math.hypot(a.x - b.x, a.y - b.y) || 1, v = this.view(this.runIndex());
+      this.zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, (this.pinch.k * d) / this.pinch.d / v.k);
+      return;
+    }
+    if (this.ov) { this.ovGo(p); return; }
+    if (this.drag) {
+      const dx = p.x - this.drag.x, dy = p.y - this.drag.y;
+      if (!this.drag.moved && Math.hypot(dx, dy) > 3) this.drag.moved = true;
+      if (this.drag.moved) { const v = this.view(this.runIndex()); v.x = this.drag.vx + dx; v.y = this.drag.vy + dy; this.setHover(null, null); this.wake(); }
+      return;
+    }
+    this.setHover(this.hitTest(p), p);
+  }
+  onUp(e) {
+    const p = this.local(e);
+    this.pointers.delete(e.pointerId);
+    if (this.pointers.size < 2) this.pinch = null;
+    if (this.ov) { this.ov = false; return; }
+    const d = this.drag;
+    this.drag = null;
+    if (this.cv) this.cv.style.cursor = 'grab';
+    if (d && !d.moved && p) this.click(p);
+  }
+  click(p) {
+    const h = this.hitTest(p);
+    if (!h) return;
+    if (h.label) { const s = h.col.steps[0]; if (s) this.flyToLines(h.col, s.a, s.b, null); return; }
+    if (h.step) { this.lastStitchClick = performance.now(); this.pickHop(h.step, this.view(this.runIndex()).k < KTEXT); }
+  }
+  onDbl(e) {
+    e.preventDefault(); e.stopPropagation();
+    if (performance.now() - this.lastStitchClick < 450) return;
+    const p = this.local(e);
+    if (!p || p.y < LB) return;
+    const v = this.view(this.runIndex());
+    this.flyTo((p.x - v.x) / v.k, (p.y - v.y) / v.k, v.k * (e.shiftKey ? 1 / 2.6 : 2.6));
+  }
+  onWheel(e) {
+    if (!this.state.data) return;
+    e.preventDefault(); e.stopPropagation();
+    this.stopFly();
+    const p = this.local(e);
+    if (!p) return;
+    let dx = e.deltaX, dy = e.deltaY;
+    if (e.deltaMode === 1) { dx *= 16; dy *= 16; } else if (e.deltaMode === 2) { dx *= CW; dy *= CHT; }
+    if (e.ctrlKey || e.metaKey) this.zoomAt(p.x, Math.max(p.y, LB), Math.exp(-dy * (e.ctrlKey && !e.metaKey ? 0.012 : 0.004)));
+    else { if (e.shiftKey && !dx) { dx = dy; dy = 0; } const v = this.view(this.runIndex()); v.x -= dx; v.y -= dy; this.wake(); }
+    this.setHover(null, null);
+  }
+  onKey(e) {
+    const k = e.key, v = this.view(this.runIndex()), S = this.state;
+    let used = true;
+    if (k === '+' || k === '=') this.zoomBtn(1.8);
+    else if (k === '-' || k === '_') this.zoomBtn(1 / 1.8);
+    else if (k === 'f' || k === 'F' || k === '0') this.fitAll();
+    else if (k === 'z' || k === 'Z') this.toggleFold();
+    else if (k === 'Escape') this.clearAll(true);
+    else if (k === '[') this.readerStep(-1);
+    else if (k === ']') this.readerStep(1);
+    else if ((k === 'ArrowLeft' || k === 'ArrowRight') && S.follow) this.hopStep(k === 'ArrowLeft' ? -1 : 1);
+    else if (k.startsWith('Arrow')) { const s = 90; v.x += k === 'ArrowLeft' ? s : k === 'ArrowRight' ? -s : 0; v.y += k === 'ArrowUp' ? s : k === 'ArrowDown' ? -s : 0; this.wake(); }
+    else if (k === ' ') this.togglePlay();
+    else used = false;
+    if (used) { e.preventDefault(); e.stopPropagation(); }
+  }
+  toggleFold() { this.stopFly(); this.set({ fold: !this.state.fold }); }
+
+  hitTest(p) {
+    const ri = this.runIndex(), W = this.wall(ri), v = this.view(ri), sw = COLW * v.k;
+    if (p.y < LB) {
+      let best = null, bd = 20;
+      for (const col of W.cols) { const d = Math.abs(v.x + (col.x + COLW / 2) * v.k - p.x); if (d < bd && d < Math.max(sw / 2 + 4, 9)) { bd = d; best = col; } }
+      return best ? { col: best, label: true } : null;
+    }
+    if (this.inOv(p)) return null;
+    const wx = (p.x - v.x) / v.k, wy = (p.y - v.y) / v.k;
+    const col = W.cols.find((c) => wx >= c.x - 4 / v.k && wx <= c.x + COLW + 14 / v.k);
+    if (!col) return null;
+    const tol = Math.max(0, 4 / v.k);
+    const fT = this.focusIds(W);
+    let best = null, score = Infinity;
+    for (const s of col.steps) {
+      const y0 = yWorld(s.col, s.a) - tol, y1 = yWorld(s.col, s.b + 1) + tol;
+      if (wy < y0 || wy > y1 || !this.seen(s)) continue;
+      const sc = (fT.size && !fT.has(s.T.t.id) ? 1e6 : 0) + (s.b - s.a);
+      if (sc < score) { score = sc; best = s; }
+    }
+    const n = lineAt(col, wy);
+    return { col, n: n && n >= 1 && n <= col.n ? n : null, step: best };
+  }
+  setHover(h, p) {
+    const prev = this.hover;
+    this.hover = h && (h.step || h.n || h.label) ? h : null;
+    if (this.cv && !this.drag) this.cv.style.cursor = this.hover && (this.hover.step || this.hover.label) ? 'pointer' : 'grab';
+    const tip = this.tip;
+    if (tip) {
+      if (!this.hover || !p) tip.style.display = 'none';
+      else {
+        const H = this.hover;
+        let lines, edge = '#9AA3C2';
+        if (H.step) {
+          const s = H.step, T = s.T;
+          edge = T.color;
+          lines = [`${T.label} · hop #${s.j + 1} · ${STW[s.st] ? STW[s.st][0] : s.st}`, `${s.col.path}:${s.s.a}${s.s.b > s.s.a ? '–' + s.s.b : ''}`];
+          if (s.s.note) lines.push(`= ${s.s.note.slice(0, 140)}`);
+          if (this.view(this.runIndex()).k < KTEXT) lines.push('click to read its lines');
+        } else if (H.label) lines = [H.col.path, `${H.col.n} lines · ${H.col.steps.length} hops · ${H.col.threads.size} readers`, 'click to fly to its first hop'];
+        else lines = [`${H.col.path}:${H.n}`, `${H.col.n} lines · ${H.col.steps.length} hops · ${H.col.threads.size} readers`];
+        tip.textContent = lines.join('\n');
+        tip.style.borderLeftColor = edge;
+        tip.style.display = 'block';
+        const bx = X0 + p.x + 16, by = 140 + p.y + 16;
+        tip.style.left = `${Math.min(bx, X1 - 300)}px`;
+        tip.style.top = `${Math.min(by, 830)}px`;
+      }
+    }
+    if (prev !== this.hover) this.wake();
+  }
+
+  // ---------- the replay: one position, pos, in walk steps ----------
+  // play = { pos, playing, anchorNow, anchorPos }, or null for the full static wall. pos runs 0..hmax: step 0 is every
+  // reader at its tt start line, hop j of a walk lands at step j + 1, a walk of m hops is complete at step m.
+  // It plays over clamp(hmax × 0.22, 8, 30) seconds, or the replaySeconds prop.
+  rate(L) {
+    const secs = Number(this.props.replaySeconds) || clamp(L.hmax * 0.22, 8, 30);
+    return L.hmax / secs;
+  }
+  // a playing position advances from its anchor; reduced motion steps whole hops; hmax pauses it there
+  posAt(now) {
+    const P = this.play;
+    if (!P) return null;
+    if (P.playing) {
+      const L = this.layout(this.runIndex());
+      let d = Math.max(0, (now - P.anchorNow) / 1000) * this.rate(L);
+      if (reduced()) d = Math.floor(d);
+      P.pos = Math.min(L.hmax, P.anchorPos + d);
+      if (P.pos >= L.hmax) { P.playing = false; this.set({ playMode: 'pause' }); }
+    }
+    return P.pos;
+  }
+  seekTo(pos, playing) {
+    pos = clamp(pos, 0, this.layout(this.runIndex()).hmax);
+    this.play = { pos, playing: !!playing, anchorNow: performance.now(), anchorPos: pos };
+    const mode = playing ? 'play' : 'pause';
+    if (this.state.playMode !== mode) this.set({ playMode: mode }); else this.wake();
+  }
+  stopPlay() { this.play = null; this.trackTip(null); if (this.state.playMode) this.set({ playMode: null, walkSig: '' }); }
+  togglePlay() {
+    const P = this.play, hmax = this.layout(this.runIndex()).hmax;
+    if (!P) this.seekTo(0, true);
+    else if (P.playing) this.seekTo(this.posAt(performance.now()), false);
+    else this.seekTo(P.pos >= hmax ? 0 : P.pos, true);
+  }
+  // the hops a walk has sewn by pos, and its state at pos: walking, done, or no walk at all
+  sewn(m, pos) { return clamp(Math.floor(pos + 1e-9), 0, m); }
+  walkState(m, pos) { return !m ? 'no walk' : pos >= m ? 'done' : `hop ${this.sewn(m, pos)}/${m}`; }
+
+  // the walk track is the scrubber: press seeks a whole hop and pauses, a drag seeks under pointer capture, release stays paused
+  trackAt(e) {
+    const b = this.scrubEl && this.scrubEl.getBoundingClientRect();
+    if (!b || !b.width || !b.height) return null;
+    const f = clamp((e.clientX - b.left) / b.width, 0, 1), hmax = this.layout(this.runIndex()).hmax;
+    return { h: Math.round(f * hmax), x: X0 + f * (X1 - X0), y: 894 + ((e.clientY - b.top) / b.height) * 194 };
+  }
+  scrubDown(e) {
+    const c = this.trackAt(e);
+    if (!c || !this.state.data) return;
+    e.preventDefault();
+    try { this.scrubEl.focus({ preventScroll: true }); } catch (err) { this.scrubEl.focus(); }
+    try { this.scrubEl.setPointerCapture(e.pointerId); } catch (err) { /* capture is a nicety */ }
+    this.scrubbing = true;
+    this.seekTo(c.h, false);
+    this.trackTip(c);
+  }
+  scrubMove(e) {
+    const c = this.trackAt(e);
+    if (!c || !this.state.data) return;
+    if (this.scrubbing && (!this.play || this.play.pos !== c.h)) this.seekTo(c.h, false);
+    this.trackTip(c);
+  }
+  scrubUp(e) {
+    try { this.scrubEl.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
+    this.scrubbing = false;
+  }
+  scrubKey(e) {
+    const k = e.key, hmax = this.layout(this.runIndex()).hmax, P = this.play;
+    const at = P ? this.posAt(performance.now()) : 0, keep = !!(P && P.playing), n = e.shiftKey ? 10 : 1;
+    let used = true;
+    if (k === 'ArrowRight') this.seekTo(Math.floor(at + 1e-9) + n, keep);
+    else if (k === 'ArrowLeft') this.seekTo(Math.ceil(at - 1e-9) - n, keep);
+    else if (k === 'Home') this.seekTo(0, keep);
+    else if (k === 'End') this.seekTo(hmax, false);
+    else if (k === ' ') this.togglePlay();
+    else if (k === 'Escape') this.clearAll(true);
+    else used = false;
+    if (used) { e.preventDefault(); e.stopPropagation(); }
+  }
+  // the track's hover line: the hop under the pointer, how many walk and are done by then, the lane under it at that hop
+  trackTip(c) {
+    const tip = this.tip;
+    if (!tip) return;
+    if (!c || !this.state.data) { if (this.trackTipOn) { tip.style.display = 'none'; this.trackTipOn = false; } return; }
+    const W = this.wall(this.runIndex()), th = W.th, h = c.h;
+    const nw = th.filter((T) => T.steps.length > h).length, nd = th.filter((T) => T.steps.length && T.steps.length <= h).length, nn = th.filter((T) => !T.steps.length).length;
+    const lines = [`hop ${h} · ${nw} walking · ${nd} done${nn ? ` · ${nn} no walk` : ''}`];
+    const li = Math.floor((c.y - LANE0) / laneHOf(th.length)), T = li >= 0 ? th[li] : null;
+    if (T) {
+      const t = T.t, m = T.steps.length, s = m ? T.steps[clamp(h, 1, m) - 1] : null;
+      lines.push(!s ? `${T.label} · no walk written` : h === 0 ? `${T.label} hop 0/${m} · at its start ${t.from || s.col.path + ':' + s.s.a}`
+        : `${T.label} hop ${Math.min(h, m)}/${m} · ${s.col.path}:${s.s.a}${s.s.b > s.s.a ? '–' + s.s.b : ''} · ${STS[s.st] || s.st}${h >= m ? ' · done' : ''}`);
+      lines.push(`started ${mmss(t.s)}, wrote ${t.w != null ? mmss(t.w) : 'never'}${t.refused ? ' — first write refused' : ''}`);
+    }
+    tip.textContent = lines.join('\n');
+    tip.style.borderLeftColor = T ? T.color : '#FFB454';
+    tip.style.display = 'block';
+    tip.style.left = `${clamp(c.x - 60, 24, 1680 - 380)}px`;
+    tip.style.top = `${886 - tip.offsetHeight}px`;
+    this.trackTipOn = true;
+  }
+
+  // ---------- drawing ----------
+  focusIds(W) {
+    const S = this.state, ids = new Set();
+    if (S.hop != null && W.steps[S.hop]) ids.add(W.steps[S.hop].T.t.id);
+    if (S.follow) ids.add(S.follow);
+    if (S.hovT) ids.add(S.hovT);
+    if (!ids.size && S.selQ !== undefined) W.th.forEach((T) => { if (T.q === S.selQ) ids.add(T.t.id); });
+    return ids;
+  }
+  // everything on the wall and the track derives from pos: hop j of every walk lands at step j + 1
+  seen(s) { return !this.play || this.play.pos >= s.j + 1 - 1e-9; }
+  // where a reader's walk leaves from: its tt start address, else its first hop, else nowhere on the wall
+  startAt(W, T) {
+    if (T.home !== undefined) return T.home;
+    const m = /^(.*?)(?::(\d+))?$/.exec(T.t.from || ''), col = m && m[1] ? W.findCol(m[1]) : null;
+    const own = col ? T.steps.find((s) => s.col === col) : null;
+    T.home = col ? { col, n: clamp(m[2] ? Number(m[2]) : own ? own.a : 1, 1, col.n) } : T.steps.length ? { col: T.steps[0].col, n: T.steps[0].a } : null;
+    return T.home;
+  }
+  // the part of a lane cut off at pos: a walk of m hops shows min(pos, m) of its m hop ticks
+  laneCut(m, pos) { return m ? r1(100 * (1 - clamp(pos / m, 0, 1))) : 100; }
+  // the walk track under the wall, moved by the same pos: the playhead at hop pos, every lane grown to it
+  drawTrack(pos, W) {
+    const root = this.cv && this.cv.closest('[id^="board-"]');
+    if (!root) return;
+    const head = root.querySelector('.head'), lanes = root.querySelectorAll('.grow'), tr = `translateX(${((X1 - X0) * pos) / W.L.hmax}px)`;
+    const lab = `hop ${this.sewn(W.L.hmax, pos)}`;
+    if (head && head.style.transform !== tr) head.style.transform = tr;
+    if (this.headT && this.headT.textContent !== lab) this.headT.textContent = lab;
+    if (this.scrubEl) { this.scrubEl.setAttribute('aria-valuenow', String(this.sewn(W.L.hmax, pos))); this.scrubEl.setAttribute('aria-valuetext', `${lab} of ${W.L.hmax}`); }
+    lanes.forEach((el, i) => { const T = W.th[i]; if (T) el.style.clipPath = `inset(0 ${this.laneCut(T.steps.length, pos)}% 0 0)`; });
+  }
+  // the readers list re-renders only when a walk takes a hop or finishes: its walk markers follow pos
+  syncWalk(W, pos) {
+    const sig = W.th.map((T) => this.walkState(T.steps.length, pos)).join('|');
+    if (sig !== this.state.walkSig) this.setState({ walkSig: sig });
+  }
+  drawShuttle(g, x, y, T, pulse, hollow) {
+    g.save();
+    if (hollow) { g.strokeStyle = withA(T.color, 0.8); g.lineWidth = 1.4; g.setLineDash([2, 2]); g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
+    else {
+      g.strokeStyle = withA(T.color, 0.15 + 0.6 * (1 - pulse)); g.lineWidth = 1.4; g.beginPath(); g.arc(x, y, 6 + 7 * pulse, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = T.color; g.shadowColor = T.color; g.shadowBlur = 10; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); g.shadowBlur = 0;
+    }
+    const txt = hollow ? `${T.label} · no walk written` : T.label;
+    g.font = `600 10px ${this.mono}`; g.textBaseline = 'middle'; g.textAlign = 'left';
+    const tw = g.measureText(txt).width + 8;
+    g.fillStyle = 'rgba(15,20,38,0.88)'; g.fillRect(x + 11, y - 7, tw, 14);
+    g.fillStyle = hollow ? '#9AA3C2' : T.color; g.fillText(txt, x + 15, y + 0.5);
+    g.restore();
+  }
+  stepBox(s, v) {
+    const x = v.x + s.col.x * v.k, w = COLW * v.k;
+    let y0 = v.y + yWorld(s.col, s.a) * v.k, y1 = v.y + yWorld(s.col, s.b + 1) * v.k;
+    if (y1 - y0 < 2.6) { const m = (y0 + y1) / 2; y0 = m - 1.3; y1 = m + 1.3; }
+    return { x, w, y0, y1, ym: (y0 + y1) / 2 };
+  }
+  lane(T) { return 5 + (T.oi % 5) * 2.4; }
+  segment(a, b, v) {
+    const A = this.stepBox(a, v), B = this.stepBox(b, v);
+    if (a.col === b.col) {
+      const lx = A.x + A.w + this.lane(a.T);
+      return { same: true, pts: [[A.x + A.w, A.ym], [lx, A.ym], [lx, B.ym], [B.x + B.w, B.ym]] };
+    }
+    const fwd = b.col.x > a.col.x, x0 = fwd ? A.x + A.w : A.x, x1 = fwd ? B.x : B.x + B.w;
+    const d = Math.max(18, Math.abs(x1 - x0) * 0.42) * (fwd ? 1 : -1);
+    return { same: false, p0: [x0, A.ym], c1: [x0 + d, A.ym], c2: [x1 - d, B.ym], p1: [x1, B.ym] };
+  }
+  pointOn(sg, u) {
+    if (sg.same) {
+      const P = sg.pts, Ls = [0];
+      for (let i = 1; i < 4; i++) Ls.push(Ls[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+      const want = u * Ls[3];
+      for (let i = 1; i < 4; i++) if (want <= Ls[i] || i === 3) { const t = Ls[i] === Ls[i - 1] ? 0 : (want - Ls[i - 1]) / (Ls[i] - Ls[i - 1]); return [lerp(P[i - 1][0], P[i][0], t), lerp(P[i - 1][1], P[i][1], t)]; }
+    }
+    const { p0, c1, c2, p1 } = sg, w = 1 - u;
+    return [w * w * w * p0[0] + 3 * w * w * u * c1[0] + 3 * w * u * u * c2[0] + u * u * u * p1[0], w * w * w * p0[1] + 3 * w * w * u * c1[1] + 3 * w * u * u * c2[1] + u * u * u * p1[1]];
+  }
+  trace(g, sg, u) {
+    if (u < 1) { const p = this.pointOn(sg, 0); g.moveTo(p[0], p[1]); for (let i = 1; i <= 18; i++) { const q = this.pointOn(sg, (u * i) / 18); g.lineTo(q[0], q[1]); } return; }
+    if (sg.same) { g.moveTo(...sg.pts[0]); for (let i = 1; i < 4; i++) g.lineTo(...sg.pts[i]); }
+    else { g.moveTo(...sg.p0); g.bezierCurveTo(...sg.c1, ...sg.c2, ...sg.p1); }
+  }
+  minimap(col) {
+    if (col.off !== null) return col.off;
+    if (!col.lines) { col.off = false; return false; }
+    const OW = COLW * 2, OH = Math.min(col.n, 8000), vy = OH / col.n;
+    const c = document.createElement('canvas');
+    c.width = OW; c.height = Math.max(1, OH);
+    const g = c.getContext('2d');
+    for (let n = 1; n <= col.lines.length; n++) {
+      const t = col.lines[n - 1];
+      if (!t || !t.trim()) continue;
+      const x = (3 + indentOf(t) * CHU) * 2, w = Math.min(t.trim().length * CHU * 2, OW - x);
+      if (w <= 0) continue;
+      g.fillStyle = COMMENT.test(t) ? 'rgba(154,163,194,0.45)' : 'rgba(232,230,223,0.95)';
+      g.fillRect(x, (n - 1) * vy, w, Math.max(vy * 0.72, 0.72));
+    }
+    col.off = c; col.vy = vy;
+    return c;
+  }
+  twill(g) {
+    if (this.pat) return this.pat;
+    const c = document.createElement('canvas'); c.width = 7; c.height = 7;
+    const x = c.getContext('2d'); x.strokeStyle = 'rgba(232,230,223,0.03)'; x.lineWidth = 2; x.beginPath(); x.moveTo(-1, 8); x.lineTo(8, -1); x.stroke();
+    this.pat = g.createPattern(c, 'repeat');
+    return this.pat;
+  }
+  ovMap(W) {
+    const s = Math.min((OVW - 12) / W.wallW, (OVH - 18) / W.maxH);
+    return { s, x: OVX + (OVW - W.wallW * s) / 2, y: OVY + 12 };
+  }
+
+  draw(now) {
+    const el = this.cv, g = this.ctx, S = this.state;
+    if (!el || !g || !S.data || !S.data.runs || !S.data.runs.length) return;
+    now = now || performance.now();
+    const ri = this.runIndex(), W = this.wall(ri), v = this.view(ri);
+    let again = false;
+    if (this.fly && this.fly.ri === ri) {
+      const t = clamp((now - this.fly.t0) / this.fly.ms, 0, 1), e = ease(t);
+      if (t >= 1) { this.setCenter(v, this.fly.end[0], this.fly.end[1], this.fly.end[2]); this.fly = null; }
+      else { const [cx, cy, w] = this.fly.at(this.fly.S * e); this.setCenter(v, cx, cy, CW / w); again = true; }
+    } else this.fly = null;
+    const target = S.fold ? 1 : 0;
+    if (W.m !== target) {
+      const [cx, cy] = this.center(v);
+      W.m = reduced() ? target : clamp(W.m + (target > W.m ? 1 : -1) * 0.075, 0, 1);
+      // keep the line under the centre where it is while the slack folds
+      const ref = W.cols.reduce((best, c) => (Math.abs(c.x + COLW / 2 - cx) < Math.abs(best.x + COLW / 2 - cx) ? c : best), W.cols[0]);
+      const n = ref ? lineAt(ref, cy) : null;
+      layoutPieces(W, W.m);
+      if (ref && n) v.y = MIDY - yWorld(ref, n) * v.k;
+      if (W.m !== target) again = true;
+    }
+    const rect = el.getBoundingClientRect();
+    const sc = clamp(((rect.width || CW) / CW) * (window.devicePixelRatio || 1), 1, 3);
+    const bw = Math.round(CW * sc), bh = Math.round(CHT * sc);
+    if (el.width !== bw || el.height !== bh) { el.width = bw; el.height = bh; }
+    g.setTransform(bw / CW, 0, 0, bh / CHT, 0, 0);
+    g.clearRect(0, 0, CW, CHT);
+    const k = v.k, sw = COLW * k, SX = (wx) => v.x + wx * k, SY = (wy) => v.y + wy * k;
+    const textMode = k >= KTEXT, lineMode = !textMode && k >= KLINES;
+    const fIds = this.focusIds(W), anyF = fIds.size > 0, on = (T) => !anyF || fIds.has(T.t.id);
+    const pos = this.play ? this.posAt(now) : 0, P = this.play, playing = !!P;
+    if (P && P.playing) again = true;
+    if (P) {
+      this.drawTrack(pos, W);
+      this.syncWalk(W, pos);
+    }
+
+    // the weave ground
+    g.fillStyle = '#131A31'; g.fillRect(0, LB, CW, CHT - LB);
+    g.fillStyle = this.twill(g); g.fillRect(0, LB, CW, CHT - LB);
+    g.save();
+    g.beginPath(); g.rect(0, LB, CW, CHT - LB); g.clip();
+    const vis = W.cols.filter((c) => SX(c.x) < CW + 40 && SX(c.x) + sw + 40 > 0);
+
+    // ruler: line numbers down the left while the wall is whole
+    if (!textMode && W.m < 0.5) {
+      const steps = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000], step = steps.find((s) => s * k >= 64) || 10000;
+      g.font = `10px ${this.mono}`; g.textBaseline = 'middle'; g.textAlign = 'left';
+      for (let n = step; n <= W.maxH; n += step) {
+        const y = SY(n);
+        if (y < LB + 8 || y > CHT) continue;
+        g.fillStyle = 'rgba(232,230,223,0.035)'; g.fillRect(0, Math.round(y), CW, 1);
+        g.fillStyle = 'rgba(125,134,168,0.75)'; g.fillText(String(n), 6, y - 7);
+      }
+    }
+    // warp: each file a column, its own text drawn to scale
+    for (const col of vis) {
+      const x = SX(col.x), top = SY(0), h = col.h * k, lit = !anyF || [...fIds].some((id) => col.threads.has(id));
+      g.fillStyle = lit ? 'rgba(232,230,223,0.045)' : 'rgba(232,230,223,0.022)';
+      g.fillRect(x, top, sw, h);
+      g.fillStyle = lit ? 'rgba(232,230,223,0.22)' : 'rgba(232,230,223,0.1)';
+      g.fillRect(x, top, sw, 1); g.fillRect(x, top + h - 1, sw, 1);
+      if (W.text && !col.lines) {
+        g.save(); g.beginPath(); g.rect(x, top, sw, h); g.clip();
+        g.strokeStyle = 'rgba(255,138,101,0.16)'; g.lineWidth = 1; g.beginPath();
+        for (let yy = Math.max(top, LB) - 12; yy < Math.min(top + h, CHT) + 12; yy += 9) { g.moveTo(x, yy + 9); g.lineTo(x + sw, yy); }
+        g.stroke(); g.restore();
+      }
+    }
+    // weft under the warp text: hop bands, then the threads between them
+    for (const col of vis) for (const s of col.steps) {
+      if (isHole(s.st) || !this.seen(s)) continue;
+      const B = this.stepBox(s, v);
+      if (B.y1 < LB || B.y0 > CHT) continue;
+      const lit = on(s.T);
+      g.fillStyle = withA(s.T.color, anyF ? (lit ? (textMode ? 0.2 : 0.55) : 0.05) : textMode ? 0.14 : 0.36);
+      g.fillRect(B.x, B.y0, B.w, B.y1 - B.y0);
+    }
+    const order = W.th.filter((T) => !on(T)).concat(W.th.filter((T) => on(T) && anyF), anyF ? [] : []);
+    const routeList = anyF ? order : W.th;
+    for (const T of routeList) {
+      const lit = on(T), base0 = anyF ? (lit ? 0.95 : 0.06) : 0.45;
+      for (let j = 1; j < T.steps.length; j++) {
+        const a = T.steps[j - 1], b = T.steps[j];
+        // the thread into hop j draws between steps j and j + 1
+        let u = 1;
+        if (playing) {
+          if (pos <= j) break;
+          u = clamp(pos - j, 0, 1);
+        }
+        const sg = this.segment(a, b, v), kind = b.ln;
+        const lo = Math.min(sg.same ? sg.pts[0][0] : Math.min(sg.p0[0], sg.p1[0]), sg.same ? sg.pts[1][0] : Infinity), hi = Math.max(sg.same ? sg.pts[1][0] : Math.max(sg.p0[0], sg.p1[0]), -Infinity);
+        if (hi < -20 || lo > CW + 20) continue;
+        g.save();
+        g.lineJoin = 'round'; g.lineCap = 'round';
+        g.strokeStyle = withA(T.color, kind === 'then' ? base0 * 0.6 : base0);
+        g.lineWidth = anyF && lit ? 2 : kind === 'then' ? 0.9 : 1.2;
+        if (kind === 'names') g.setLineDash([6, 4]); else if (kind === 'then') g.setLineDash([1.5, 4]);
+        if (anyF && lit && kind !== 'then') { g.shadowColor = withA(T.color, 0.6); g.shadowBlur = 7; }
+        g.beginPath(); this.trace(g, sg, u); g.stroke();
+        g.restore();
+      }
+    }
+    // splits: a reader handing a branch to its child
+    g.save(); g.setLineDash([5, 3]); g.lineWidth = 1.1;
+    for (const sp of W.splits) {
+      if (!this.seen(sp.to)) continue;
+      const lit = !anyF || fIds.has(sp.T.t.id) || fIds.has(sp.parent.t.id);
+      const x0 = SX(sp.from.col.x) + sw + this.lane(sp.parent), y0 = SY(yWorld(sp.from.col, sp.from.n + 0.5));
+      const B = this.stepBox(sp.to, v), d = Math.max(30, Math.abs(B.x - x0) * 0.5);
+      g.strokeStyle = withA('#E8E6DF', lit ? 0.6 : 0.05);
+      g.beginPath(); g.moveTo(x0, y0); g.bezierCurveTo(x0 + d, y0, B.x - d, B.ym, B.x, B.ym); g.stroke();
+    }
+    g.restore();
+
+    // the warp's own text, over the weft: minimap far out, line bars nearer, readable code up close
+    for (const col of vis) {
+      const x = SX(col.x);
+      g.save(); g.beginPath(); g.rect(x, SY(0), sw, col.h * k); g.clip();
+      if (textMode) this.drawText(g, W, col, x, sw, k, v, fIds, anyF);
+      else if (lineMode) this.drawBars(g, col, x, sw, k, v, W.m);
+      else {
+        const off = this.minimap(col);
+        for (const p of col.pieces) {
+          const py = SY(p.y), ph = p.h * k;
+          if (py > CHT || py + ph < LB) continue;
+          if (p.fold && W.m > 0.02) { this.drawFold(g, p, x, py, sw, ph, W.m); continue; }
+          if (off) { g.globalAlpha = 0.32; g.drawImage(off, 0, (p.a - 1) * col.vy, off.width, Math.max(1, p.n * col.vy), x, py, sw, ph); g.globalAlpha = 1; }
+        }
+      }
+      g.restore();
+    }
+
+    // stitches: the mark each hop leaves on the warp, in the stitch key's language
+    const pills = new Map();
+    for (const col of vis) for (const s of col.steps) {
+      if (!this.seen(s)) continue;
+      const B = this.stepBox(s, v);
+      if (B.y1 < LB - 10 || B.y0 > CHT + 10) continue;
+      const T = s.T, lit = on(T), a = anyF && !lit ? 0.12 : 1;
+      let pop = 1;
+      // a stitch pops in over the quarter step after it lands; paused or stepping whole hops, it stands whole
+      if (P && P.playing && !reduced()) pop = clamp((pos - s.j - 1) / 0.25, 0, 1);
+      g.save();
+      g.globalAlpha = a * pop;
+      if (isHole(s.st)) {
+        const cx = textMode ? B.x + 10 : B.x + B.w / 2, r = clamp(k * 0.9, 3.4, 7) * (1.6 - 0.6 * pop);
+        g.fillStyle = '#0B0F1E'; g.strokeStyle = '#FF5A5F'; g.lineWidth = 1.3;
+        g.beginPath(); g.arc(cx, B.ym, r, 0, Math.PI * 2); g.fill(); g.stroke();
+        const q = r * 0.55; g.beginPath(); g.moveTo(cx - q, B.ym - q); g.lineTo(cx + q, B.ym + q); g.moveTo(cx + q, B.ym - q); g.lineTo(cx - q, B.ym + q); g.stroke();
+      } else {
+        const bw2 = clamp(k * 1.4, 1.6, 3.4), lx = B.x + Math.min((T.oi % 5) * (bw2 + 0.6), B.w * 0.4);
+        g.fillStyle = T.color;
+        g.fillRect(lx, B.y0, bw2, B.y1 - B.y0);
+        if (s.st === 'moved') { g.fillStyle = '#0F1426'; g.beginPath(); g.arc(lx + bw2 / 2, B.ym, Math.max(0.9, bw2 * 0.36), 0, Math.PI * 2); g.fill(); }
+        if (s.st === 'placed' || s.st === 'followed') { g.strokeStyle = '#7FD1FF'; g.lineWidth = 1; g.setLineDash([2, 2]); g.strokeRect(B.x - 1.5, B.y0 - 1.5, B.w + 3, B.y1 - B.y0 + 3); }
+        if (s.st === 'drifted') {
+          g.strokeStyle = '#F2B33D'; g.lineWidth = 1.3; g.setLineDash([1.2, 2.2]); g.lineCap = 'round';
+          g.strokeRect(B.x - 1, B.y0 - 1, B.w + 2, B.y1 - B.y0 + 2);
+          g.setLineDash([]); g.lineWidth = 0.9;
+          const rx = B.x + B.w + 1;
+          g.beginPath(); g.moveTo(rx, B.y0); g.lineTo(rx + 3, B.y0 - 3); g.moveTo(rx, B.y1); g.lineTo(rx + 3, B.y1 + 3); g.stroke();
+        }
+      }
+      g.restore();
+      if (textMode && (!anyF || lit) && B.y0 > LB - 20 && B.y0 < CHT) {
+        const key = `${col.k}:${s.a}`, slot = pills.get(key) || 0;
+        pills.set(key, slot + 1);
+        this.drawPill(g, s, B, slot, k, pop);
+      }
+    }
+    // ends: the knot a reader tied, and the fringe it left open
+    for (const e of W.ends) {
+      if (anyF && !fIds.has(e.T.t.id)) continue;
+      if (playing && pos < e.T.steps.length) continue;
+      const X = SX(e.col.x) + sw + this.lane(e.T) + 6, Y = SY(yWorld(e.col, e.n + 0.5));
+      if (Y < LB - 8 || Y > CHT + 8 || X < -10 || X > CW + 10) continue;
+      g.save();
+      g.fillStyle = e.has ? e.T.color : '#0F1426'; g.strokeStyle = e.T.color; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(X, Y - 4.2); g.lineTo(X + 4.2, Y); g.lineTo(X, Y + 4.2); g.lineTo(X - 4.2, Y); g.closePath(); g.fill(); g.stroke();
+      g.strokeStyle = withA(e.T.color, 0.8); g.lineWidth = 1;
+      for (let i = 0; i < Math.min(e.open, 7); i++) {
+        const sx = X - 3 + i * 2.6;
+        g.beginPath(); g.moveTo(sx, Y + 5); g.bezierCurveTo(sx + 2.2, Y + 8, sx - 2.2, Y + 11, sx, Y + 15); g.stroke();
+      }
+      if (anyF || k >= 1.2) { g.font = `600 10px ${this.mono}`; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#C9CED9'; g.fillText(e.kind + (e.open ? ` · ${e.open} open` : ''), X + 8, Y); }
+      g.restore();
+    }
+    // the shuttles: at step 0 each reader sits at its tt start line; between steps j and j + 1 it rides the thread into
+    // hop j, hop 0's being the lead-in from the start line; a walk of m hops is complete at step m and its shuttle goes;
+    // a reader with no hops written shows a hollow ring at its start
+    if (playing) {
+      const slots = new Map(), calm = reduced();
+      for (const T of W.th) {
+        const m = T.steps.length, a = anyF && !fIds.has(T.t.id) ? 0.25 : 1, home = this.startAt(W, T);
+        const hx = home ? SX(home.col.x) + sw + 8 : 0, hy = home ? SY(yWorld(home.col, home.n + 0.5)) : 0;
+        if (m && home && pos > 0 && (home.col !== T.steps[0].col || home.n < T.steps[0].a || home.n > T.steps[0].b)) {
+          const B = this.stepBox(T.steps[0], v), u = clamp(pos, 0, 1);
+          g.save(); g.globalAlpha = a; g.strokeStyle = withA(T.color, 0.5); g.lineWidth = 1; g.setLineDash([2, 3]);
+          g.beginPath(); g.moveTo(hx, hy); g.lineTo(lerp(hx, B.x + B.w, u), lerp(hy, B.ym, u)); g.stroke(); g.restore();
+        }
+        if (m && pos >= m) continue;
+        if (!m || pos <= 0) {
+          if (!home) continue;
+          const key = `${home.col.k}:${home.n}`, slot = slots.get(key) || 0;
+          slots.set(key, slot + 1);
+          const y = hy + slot * 15;
+          if (y < LB - 10 || y > CHT + 10 || hx < -40 || hx > CW + 10) continue;
+          if (m && !calm) again = true;
+          g.save(); g.globalAlpha = a;
+          this.drawShuttle(g, hx, y, T, calm ? 0.5 : 0.5 + 0.5 * Math.sin(now / 380 + T.oi * 1.7), !m);
+          g.restore();
+          continue;
+        }
+        const j = Math.floor(pos), u = pos - j;
+        let at;
+        if (j > 0) at = this.pointOn(this.segment(T.steps[j - 1], T.steps[j], v), u);
+        else { const B = this.stepBox(T.steps[0], v); at = home ? [lerp(hx, B.x + B.w, u), lerp(hy, B.ym, u)] : [B.x + B.w, B.ym]; }
+        g.save(); g.globalAlpha = a; g.fillStyle = withA(T.color, 0.22); g.beginPath(); g.arc(at[0], at[1], 9, 0, Math.PI * 2); g.fill();
+        g.fillStyle = T.color; g.shadowColor = T.color; g.shadowBlur = 12; g.beginPath(); g.arc(at[0], at[1], 4, 0, Math.PI * 2); g.fill(); g.restore();
+      }
+    }
+    // the selected hop, the flashed line, the line under the pointer
+    if (S.hop != null && W.steps[S.hop]) {
+      const B = this.stepBox(W.steps[S.hop], v);
+      g.save(); g.strokeStyle = '#F3F1EA'; g.lineWidth = 1.5; g.strokeRect(B.x - 3, B.y0 - 3, B.w + 6, B.y1 - B.y0 + 6); g.restore();
+    }
+    if (this.flash) {
+      const t = (now - this.flash.t0) / 1800;
+      if (t > 1) this.flash = null;
+      else {
+        again = true;
+        if (t > 0) {
+          const f = this.flash, x = SX(f.col.x), y0 = SY(yWorld(f.col, f.a)), y1 = Math.max(y0 + 3, SY(yWorld(f.col, f.b + 1))), a = 1 - t;
+          g.save(); g.fillStyle = withA(f.color, 0.22 * a); g.fillRect(x, y0, sw, y1 - y0);
+          g.strokeStyle = withA(f.color, a); g.lineWidth = 2; g.strokeRect(x - 3, y0 - 3, sw + 6, y1 - y0 + 6); g.restore();
+        }
+      }
+    }
+    if (this.hover && this.hover.n && !this.hover.step && k >= KLINES) {
+      const c = this.hover.col, y0 = SY(yWorld(c, this.hover.n)), y1 = SY(yWorld(c, this.hover.n + 1));
+      g.fillStyle = 'rgba(232,230,223,0.07)'; g.fillRect(SX(c.x), y0, sw, Math.max(1, y1 - y0));
+    }
+    g.restore();
+
+    this.drawLabels(g, W, v, vis, fIds, anyF);
+    g.globalAlpha = textMode ? 0.55 : 1;
+    this.drawOverview(g, W, v, fIds, anyF);
+    g.globalAlpha = 1;
+
+    const mode = textMode ? 'code' : lineMode ? 'lines' : 'cloth';
+    const where = this.hover && this.hover.n ? ` · ${base(this.hover.col.path)}:${this.hover.n}` : '';
+    const txt = `${mode} · ×${k < 1 ? k.toFixed(2) : k.toFixed(1)}${W.m > 0.5 ? ' · folded' : ''}${where}`;
+    if (this.zoomEl && txt !== this.zoomTxt) { this.zoomEl.textContent = txt; this.zoomTxt = txt; }
+    if (again) this.wake();
+  }
+
+  drawFold(g, p, x, py, sw, ph, m) {
+    g.save();
+    g.fillStyle = withA('#131A31', m); g.fillRect(x, py, sw, ph);
+    const ym = py + ph / 2, zig = Math.min(3, ph / 3);
+    g.strokeStyle = `rgba(154,163,194,${0.4 * m})`; g.lineWidth = 1; g.beginPath(); g.moveTo(x, ym);
+    for (let xx = x, i = 0; xx < x + sw; xx += 6, i++) g.lineTo(Math.min(xx + 6, x + sw), ym + (i % 2 ? -zig : zig));
+    g.stroke();
+    if (ph >= 13 && sw >= 80) {
+      g.font = `10.5px ${this.mono}`; g.textBaseline = 'middle'; g.textAlign = 'center';
+      const label = `${p.n} lines folded`, tw = g.measureText(label).width + 10;
+      g.fillStyle = withA('#131A31', m); g.fillRect(x + sw / 2 - tw / 2, ym - 7, tw, 14);
+      g.fillStyle = `rgba(154,163,194,${m})`; g.fillText(label, x + sw / 2, ym);
+    }
+    g.restore();
+  }
+  drawBars(g, col, x, sw, k, v, m) {
+    if (!col.lines) return;
+    for (const p of col.pieces) {
+      const py = v.y + p.y * k, ph = p.h * k, lh = ph / p.n;
+      if (py > CHT || py + ph < LB) continue;
+      if (p.fold && m > 0.02) { this.drawFold(g, p, x, py, sw, ph, m); if (m > 0.5) continue; }
+      const n0 = Math.max(p.a, p.a + Math.floor((LB - py) / lh) - 1), n1 = Math.min(p.b, p.a + Math.ceil((CHT - py) / lh) + 1);
+      for (let n = n0; n <= n1; n++) {
+        const t = col.lines[n - 1];
+        if (!t || !t.trim()) continue;
+        const lx = x + (3 + indentOf(t) * CHU) * k, lw = Math.min(t.trim().length * CHU * k, x + sw - lx - 2);
+        if (lw <= 0) continue;
+        g.fillStyle = COMMENT.test(t) ? 'rgba(154,163,194,0.16)' : 'rgba(232,230,223,0.3)';
+        g.fillRect(lx, py + (n - p.a) * lh + lh * 0.16, lw, lh * 0.66);
+      }
+    }
+  }
+  drawText(g, W, col, x, sw, k, v, fIds, anyF) {
+    const fs = Math.min(13.5, k * 0.64);
+    g.font = `${fs}px ${this.mono}`; g.textBaseline = 'middle';
+    const cw = g.measureText('0').width, gut = cw * 5 + 14, maxChars = Math.max(4, Math.floor((sw - gut - 10) / cw));
+    const gx = clamp(0, x, x + sw - gut), sticky = gx > x + 0.5;
+    if (sticky) { g.fillStyle = 'rgba(19,26,49,0.94)'; g.fillRect(gx, LB, gut, CHT - LB); g.fillStyle = 'rgba(232,230,223,0.12)'; g.fillRect(gx + gut - 1, LB, 1, CHT - LB); }
+    // which lines carry a hop of a lit reader: their numbers take its dye
+    const dye = new Map();
+    for (const s of col.steps) { if (isHole(s.st) || !this.seen(s) || (anyF && !fIds.has(s.T.t.id))) continue; for (let n = s.a; n <= s.b; n++) if (!dye.has(n)) dye.set(n, s.T.color); }
+    for (const p of col.pieces) {
+      const py = v.y + p.y * k, ph = p.h * k, lh = ph / p.n;
+      if (py > CHT || py + ph < LB) continue;
+      if (p.fold && W.m > 0.02) { this.drawFold(g, p, x, py, sw, ph, W.m); if (W.m > 0.5) continue; }
+      const n0 = Math.max(p.a, p.a + Math.floor((LB - py) / lh) - 1), n1 = Math.min(p.b, p.a + Math.ceil((CHT - py) / lh) + 1);
+      for (let n = n0; n <= n1; n++) {
+        const y = py + (n - p.a) * lh + lh / 2, d = dye.get(n);
+        g.textAlign = 'right'; g.fillStyle = d || '#5B6488'; g.font = `${d ? '600 ' : ''}${fs}px ${this.mono}`;
+        if (!sticky) g.fillText(String(n), x + gut - 8, y);
+        g.font = `${fs}px ${this.mono}`; g.textAlign = 'left';
+        if (!col.lines) continue;
+        const raw = col.lines[n - 1];
+        if (raw == null) continue;
+        let s = raw.replace(/\t/g, '    ');
+        const cut = s.length > maxChars;
+        if (cut) s = s.slice(0, maxChars - 1);
+        const x0 = x + gut;
+        if (COMMENT.test(s)) { g.fillStyle = '#6B7499'; g.fillText(s + (cut ? '…' : ''), x0, y); continue; }
+        let m, ci = 0;
+        TOKRX.lastIndex = 0;
+        while ((m = TOKRX.exec(s)) && m[0].length) {
+          const tok = m[0];
+          if (!m[5]) {
+            g.fillStyle = m[1] ? '#6B7499' : m[2] ? '#D8C79A' : m[3] ? '#D8C79A' : m[4] ? (KW.has(tok) ? '#F3F1EA' : d ? '#E8E6DF' : '#B4BBD6') : '#8D96B8';
+            g.fillText(tok, x0 + ci * cw, y);
+          }
+          ci += tok.length;
+        }
+        if (cut) { g.fillStyle = '#5B6488'; g.fillText('…', x0 + ci * cw, y); }
+      }
+    }
+    if (sticky) {
+      g.fillStyle = 'rgba(19,26,49,0.94)'; g.fillRect(gx, LB, gut, CHT - LB);
+      g.fillStyle = 'rgba(232,230,223,0.14)'; g.fillRect(gx + gut - 1, LB, 1, CHT - LB);
+      g.textAlign = 'right';
+      for (const p of col.pieces) {
+        const py = v.y + p.y * k, ph = p.h * k, lh = ph / p.n;
+        if (py > CHT || py + ph < LB || (p.fold && W.m > 0.5)) continue;
+        const n0 = Math.max(p.a, p.a + Math.floor((LB - py) / lh) - 1), n1 = Math.min(p.b, p.a + Math.ceil((CHT - py) / lh) + 1);
+        for (let n = n0; n <= n1; n++) { const d = dye.get(n); g.font = `${d ? '600 ' : ''}${fs}px ${this.mono}`; g.fillStyle = d || '#5B6488'; g.fillText(String(n), gx + gut - 8, py + (n - p.a) * lh + lh / 2); }
+      }
+      g.textAlign = 'left';
+    }
+    if (W.text && !col.lines) {
+      const y = Math.max(LB + 30, v.y + 20);
+      g.font = `11px ${this.mono}`; g.textAlign = 'left'; g.fillStyle = '#FF8A65';
+      g.fillText('this file could not be read — no text, only its hops', x + gut, y);
+    }
+  }
+  drawPill(g, s, B, slot, k, pop) {
+    const T = s.T, txt = `${T.label} #${s.j + 1} ${STS[s.st] || s.st}${s.j && s.ln ? '  ' + (LINKW[s.ln] || '') : ''}`;
+    g.save();
+    g.globalAlpha = pop;
+    g.font = `600 10.5px ${this.mono}`; g.textBaseline = 'middle'; g.textAlign = 'left';
+    const right = Math.min(B.x + B.w, CW - 4), tw = g.measureText(txt).width + 12, h = 17, x = right - tw - 8, y = Math.max(B.y0, LB + 2) + slot * (h + 2);
+    g.fillStyle = 'rgba(15,20,38,0.94)'; g.strokeStyle = T.color; g.lineWidth = 1;
+    g.beginPath(); if (g.roundRect) g.roundRect(x, y, tw, h, 8); else g.rect(x, y, tw, h); g.fill(); g.stroke();
+    g.fillStyle = T.color; g.fillText(txt, x + 6, y + h / 2 + 0.5);
+    if (s.s.note && k >= 12 && slot === 0) {
+      g.font = `11px ${DC.fonts.sans}`;
+      const maxW = Math.min(B.w, CW) * 0.5;
+      let note = `= ${s.s.note}`;
+      while (note.length > 6 && g.measureText(note).width > maxW) note = note.slice(0, Math.floor(note.length * 0.9));
+      if (note !== `= ${s.s.note}`) note = note.replace(/\s+\S*$/, '') + '…';
+      const nw = g.measureText(note).width + 12, ny = y + h + 3;
+      g.fillStyle = 'rgba(15,20,38,0.94)'; g.fillRect(right - nw - 8, ny, nw, 17);
+      g.fillStyle = '#C9CED9'; g.fillText(note, right - nw - 2, ny + 9);
+    }
+    g.restore();
+  }
+  drawLabels(g, W, v, vis, fIds, anyF) {
+    const k = v.k, sw = COLW * k;
+    g.save();
+    g.beginPath(); g.rect(0, 0, CW, LB); g.clip();
+    g.textBaseline = 'middle';
+    const litCol = (c) => !anyF || [...fIds].some((id) => c.threads.has(id));
+    const hov = this.hover && this.hover.col;
+    if (sw >= 150) {
+      for (const c of vis) {
+        const x = v.x + c.x * k, lx = clamp(8, x + 2, x + sw - 180), maxW = Math.min(sw, x + sw - lx) - 12;
+        g.font = `10px ${this.mono}`; g.textAlign = 'left'; g.fillStyle = '#7D86A8';
+        g.fillText(this.fit(g, c.dir + '/', maxW, true), lx, LB - 36);
+        g.font = `600 12px ${this.mono}`; g.fillStyle = c === hov ? '#FFB454' : litCol(c) ? '#F3F1EA' : '#7D86A8';
+        const t = this.fit(g, `${c.base}  ·  ${c.n} lines${c.src === 'sparse' ? '  ·  only the lines near a hop' : c.src === 'none' ? '  ·  text unreadable' : ''}`, maxW, false);
+        g.fillText(t, lx, LB - 17);
+      }
+    } else {
+      const pitch = (COLW + GAP) * k, taken = [];
+      const pri = vis.slice().sort((a, b) => (b.threads.size - a.threads.size) || (b.steps.length - a.steps.length));
+      for (const c of pri) {
+        const cx = v.x + (c.x + COLW / 2) * k;
+        if (cx < -10 || cx > CW + 10) continue;
+        if (pitch < 15 && taken.some((t) => Math.abs(t - cx) < 15) && c !== hov) continue;
+        taken.push(cx);
+        g.save(); g.translate(cx + 3, LB - 6); g.rotate(-Math.PI / 4);
+        g.font = `${c === hov ? 600 : 500} 10.5px ${this.mono}`; g.textAlign = 'left';
+        g.fillStyle = c === hov ? '#FFB454' : litCol(c) ? '#AEB6D3' : 'rgba(125,134,168,0.55)';
+        g.fillText(this.fit(g, c.base + (c.src === 'sparse' ? ' ·S' : ''), 96, false), 0, 0);
+        g.restore();
+      }
+    }
+    g.restore();
+  }
+  fit(g, s, max, left) {
+    if (g.measureText(s).width <= max) return s;
+    let lo = 0, hi = s.length;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; const t = left ? '…' + s.slice(s.length - mid) : s.slice(0, mid) + '…'; if (g.measureText(t).width <= max) lo = mid; else hi = mid - 1; }
+    return lo ? (left ? '…' + s.slice(s.length - lo) : s.slice(0, lo) + '…') : '';
+  }
+  drawOverview(g, W, v, fIds, anyF) {
+    const o = this.ovMap(W);
+    g.save();
+    g.fillStyle = 'rgba(11,15,30,0.9)'; g.strokeStyle = '#3A4677'; g.lineWidth = 1;
+    g.beginPath(); if (g.roundRect) g.roundRect(OVX, OVY, OVW, OVH, 6); else g.rect(OVX, OVY, OVW, OVH); g.fill(); g.stroke();
+    g.font = `9px ${this.mono}`; g.fillStyle = '#7D86A8'; g.textBaseline = 'middle'; g.textAlign = 'left';
+    g.fillText('THE WHOLE WALL', OVX + 6, OVY + 7);
+    for (const c of W.cols) { g.fillStyle = 'rgba(232,230,223,0.13)'; g.fillRect(o.x + c.x * o.s, o.y, Math.max(1, COLW * o.s), Math.max(1, c.h * o.s)); }
+    for (const s of W.steps) {
+      if (!this.seen(s) || (anyF && !fIds.has(s.T.t.id))) continue;
+      g.fillStyle = isHole(s.st) ? '#FF5A5F' : s.T.color;
+      g.fillRect(o.x + s.col.x * o.s, o.y + yWorld(s.col, s.a) * o.s, Math.max(1.4, COLW * o.s), 1.4);
+    }
+    const x0 = o.x + (-v.x / v.k) * o.s, y0 = o.y + ((LB - v.y) / v.k) * o.s, x1 = o.x + ((CW - v.x) / v.k) * o.s, y1 = o.y + ((CHT - v.y) / v.k) * o.s;
+    const cx0 = clamp(x0, OVX + 1, OVX + OVW - 1), cy0 = clamp(y0, OVY + 1, OVY + OVH - 1), cx1 = clamp(x1, OVX + 1, OVX + OVW - 1), cy1 = clamp(y1, OVY + 1, OVY + OVH - 1);
+    g.strokeStyle = '#FFB454'; g.lineWidth = 1.2;
+    if (cx1 - cx0 < 3 && cy1 - cy0 < 3) { g.beginPath(); g.arc((cx0 + cx1) / 2, (cy0 + cy1) / 2, 3, 0, Math.PI * 2); g.stroke(); }
+    else g.strokeRect(cx0, cy0, Math.max(2, cx1 - cx0), Math.max(2, cy1 - cy0));
+    g.restore();
+  }
+
+  renderVals() {
+    const S = this.state;
+    const empty = { notReady: true, ready: false, loadText: S.err ? `The run data could not load — ${S.err}` : 'Loading the run…', loadColor: S.err ? '#FF8A65' : '#9AA3C2',
+      head: {}, stats: [], runs: [], bars: [], lanes: [], ticks: [], track: {}, groups: [], claims: [], card: { on: false, open: [] }, hop: { on: false, cites: [] }, key: { on: false, items: [] },
+      listOn: false, wallMsg: { on: false }, cvRef: this.cvRef, tipRef: this.tipRef, zoomRef: this.zoomRef, leftHead: '', rightHead: '', wallAria: '',
+      play: () => {}, clear: () => {}, zoomIn: () => {}, zoomOut: () => {}, fitAll: () => {}, toggleFold: () => {}, foldLabel: 'Fold', foldPressed: 'false', foldBorder: '#3A4677', foldColor: '#E8E6DF',
+      playLabel: 'Play the walks', playAria: 'Play the walks', playIcon: '', hasSel: false, hasPos: false, headX: 0, scrub: {}, scrubRef: this.scrubRef, headTRef: this.headTRef };
+    if (!S.data) return empty;
+    if (!S.data.runs || !S.data.runs.length) return { ...empty, loadText: 'The run data holds no runs.', loadColor: '#FF8A65' };
+    const ri = this.runIndex();
+    const L = this.layout(ri), W = this.wall(ri);
+    const run = L.run, T = run.threads, F = run.files;
+    const P = this.play, pos = P ? P.pos : null;
+    const fT = S.follow ? W.thById[S.follow] : null;
+    const hopSt = S.hop != null ? W.steps[S.hop] : null;
+    const fIds = this.focusIds(W), anyF = fIds.size > 0;
+
+    // header
+    const steps = T.flatMap((t) => t.steps), nh = steps.length;
+    const tally = { exact: 0, moved: 0, placed: 0, drifted: 0, rejected: 0 };
+    steps.forEach((s) => { if (isHole(s.st)) tally.rejected++; else if (s.st === 'drifted') tally.drifted++; else if (s.st === 'moved') tally.moved++; else if (s.st === 'placed' || s.st === 'followed') tally.placed++; else tally.exact++; });
+    const heldN = nh - tally.drifted - tally.rejected;
+    const grades = {};
+    T.forEach((t) => t.answers.forEach((a) => { grades[a.g] = (grades[a.g] || 0) + 1; }));
+    const nAns = T.reduce((a, t) => a + t.answers.length, 0);
+    const pct = (x) => (nh ? Math.round((1000 * x) / nh) / 10 : 0);
+    const stats = [
+      { big: String(T.length), label: 'readers', color: '#F3F1EA' },
+      { big: String(nh), label: 'hops', color: '#F3F1EA' },
+      { big: `${pct(heldN)}%`, label: 'held now', color: heldN === nh ? '#8FE3B0' : heldN / Math.max(1, nh) > 0.9 ? '#F3F1EA' : '#F2B33D' },
+      { big: String(nAns), label: 'claims', color: '#F3F1EA' },
+      { big: String(run.counts.flagged || 0), label: 'flagged', color: (run.counts.flagged || 0) ? '#FF8A65' : '#8FE3B0' },
+      { big: mmss(run.dur), label: 'wall clock', color: '#F3F1EA' },
+    ];
+    const part = (n, total, c, title) => ({ w: total ? (100 * n) / total : 0, c, title });
+    const bars = [
+      { label: 'hops', parts: [part(tally.exact, nh, HOPC.exact, `${tally.exact} held at their address`), part(tally.moved, nh, HOPC.moved, `${tally.moved} moved, re-addressed`), part(tally.placed, nh, HOPC.placed, `${tally.placed} placed or followed`), part(tally.drifted, nh, HOPC.drifted, `${tally.drifted} drifted since the walk`), part(tally.rejected, nh, HOPC.rejected, `${tally.rejected} rejected`)],
+        legend: [[tally.exact, 'held'], [tally.moved, 'moved'], [tally.placed, 'placed'], [tally.drifted, 'worn'], [tally.rejected, 'holes']].filter((x) => x[0]).map((x) => `${x[0]} ${x[1]}`).join(' · ') },
+      { label: 'claims', parts: Object.keys(ANSC).map((g) => part(grades[g] || 0, nAns, ANSC[g], `${grades[g] || 0} ${ANSW[g]}`)),
+        legend: Object.keys(ANSC).filter((g) => grades[g]).map((g) => `${grades[g]} ${ANSW[g]}`).join(' · ') },
+    ];
+    const runs = S.data.runs.map((r, i) => ({ repo: r.repo, when: `${whenOf(r.id)} · ${r.threads.length} readers`, pressed: i === ri ? 'true' : 'false',
+      border: i === ri ? '#E8E6DF' : '#2E3863', bg: i === ri ? '#1E2747' : 'transparent', color: i === ri ? '#F3F1EA' : '#C9CED9',
+      pick: () => { this.stopPlay(); this.stopFly(); this.flash = null; this.set({ run: i, follow: null, hop: null, selQ: undefined, hovT: null }); this.loadText(i); } }));
+    const warnLines = (run.warnings || []).filter((w) => !/no node broke the hop contract/.test(w)).concat(run.notes || []);
+    const broke = (run.warnings || []).some((w) => /\d+ of \d+ nodes broke/.test(w));
+    const hubC = run.comps.slice().sort((a, b) => (b.th.length - a.th.length) || (b.hops.length - a.hops.length))[0];
+    const hubCol = hubC ? W.byF[hubC.f] : null;
+    const head = { id: run.id, base: run.base || 'not a git tree', repo: run.repo, size: run.repo.length <= 11 ? 54 : run.repo.length <= 16 ? 44 : 36,
+      sub: `${Object.keys(run.questions).length} questions · ${run.files.length} files · ${run.comps.length} components`,
+      warn: warnLines.length ? warnLines.join('   ') : 'WARNINGS: none — every node kept the hop contract',
+      warnColor: broke ? '#FF8A65' : warnLines.length ? '#F2B33D' : '#8FE3B0',
+      hub: hubC ? `MAP hub · ${base(F[hubC.f] ? F[hubC.f].p : hubC.id)}${hubC.name ? '::' + hubC.name : ''} · ${hubC.th.length} threads →` : 'MAP hub · none',
+      hubTitle: hubC ? `${hubC.id} — the component the most threads cross (${hubC.th.length}). Click to fly to it on the wall.` : 'No component holds a verified hop.',
+      hubPick: () => { if (hubC && hubCol) { this.set({ follow: null, hop: null, selQ: undefined }); this.flyToLines(hubCol, hubC.a || 1, hubC.z || hubC.a || 1, '#FFB454'); } } };
+
+    // readers, by question
+    const groups = L.groups.map((gq) => ({
+      label: gq.g == null ? 'Q?' : `Q${gq.g}`, color: hue(gq.g), pressed: S.selQ === gq.g ? 'true' : 'false', bg: S.selQ === gq.g ? '#1E2747' : 'transparent',
+      text: gq.g == null ? 'readers the kit could not tie to a question' : run.questions[String(gq.g)] || '',
+      full: gq.g == null ? 'Readers whose QUESTION the kit could not match' : `Question ${gq.g}: ${run.questions[String(gq.g)] || ''} — click to light its readers`,
+      pick: () => { const was = S.selQ === gq.g; this.set({ selQ: was ? undefined : gq.g, follow: null, hop: null }); if (!was) this.fitSteps(gq.rows.flatMap((r) => W.thById[r.t.id].steps), 6); },
+      rows: gq.rows.map((r) => {
+        const t = r.t, TT = W.thById[t.id], hd = t.steps.filter((s) => s.st === 'drifted').length, ho = t.steps.filter((s) => isHole(s.st)).length;
+        const bad = t.answers.filter((a) => !['held', 'moved', 'uncited'].includes(a.g)).length;
+        return { idText: (r.d ? '└ ' : '') + t.id, text: tidy(t.text), color: hue(r.g), pad: 8 + r.d * 12,
+          stats: `${t.steps.length} hops${hd ? ' · ' + hd + ' worn' : ''}${ho ? ' · ' + ho + ' holes' : ''} · ${t.answers.length} claims${bad ? ' · ' + bad + ' flagged' : ''}${t.w == null ? ' · never wrote' : ''}`,
+          bg: S.hovT === t.id ? '#1E2747' : 'transparent', op: !anyF || fIds.has(t.id) ? 1 : 0.45,
+          walkOn: !!P, walk: P ? this.walkState(t.steps.length, pos) : '',
+          walkColor: !P || !t.steps.length ? '#FF8A65' : pos >= t.steps.length ? '#9AA3C2' : hue(r.g),
+          aria: `Follow reader ${t.id} on the wall: ${tidy(t.text)}`,
+          pick: () => this.follow(t.id), enter: () => this.set({ hovT: t.id }), leave: () => { if (this.state.hovT === t.id) this.set({ hovT: null }); }, _T: TT };
+      }),
+    }));
+
+    // the followed reader
+    let card = { on: false, open: [] }, claims = [], hop = { on: false, cites: [] };
+    if (fT) {
+      const t = fT.t, gcount = {};
+      t.answers.forEach((a) => { gcount[a.g] = (gcount[a.g] || 0) + 1; });
+      const open = [];
+      const goAt = (at) => () => { const m = /^(.*):(\d+)$/.exec(at || ''); const col = m ? W.findCol(m[1]) : null; if (col) this.flyToLines(col, clamp(Number(m[2]), 1, col.n), clamp(Number(m[2]), 1, col.n), fT.color); };
+      t.end.forEach((e) => open.push({ k: `■ ${e.k || 'END'}`, kc: '#C9CED9', t: e.t, full: `${e.t}${e.at ? ' @ ' + e.at : ''}`, go: goAt(e.at) }));
+      t.lead.forEach((e) => open.push({ k: 'LEAD', kc: '#FFB454', t: e.t, full: `${e.t}${e.at ? ' @ ' + e.at : ''}`, go: goAt(e.at) }));
+      t.notread.forEach((e) => open.push({ k: 'NOT READ', kc: '#FF8A65', t: e.t, full: e.t, go: () => {} }));
+      t.split.forEach((e) => open.push({ k: 'SPLIT', kc: '#7FD1FF', t: `${e.child || ''} ${e.t}${e.spawned ? '' : ' — never spawned'}`, full: `${e.t}${e.at ? ' @ ' + e.at : ''}`, go: e.child && W.thById[e.child] ? () => this.follow(e.child) : goAt(e.at) }));
+      if (!t.end.length) open.unshift({ k: 'no END', kc: '#FF8A65', t: 'the reader wrote no END line', full: '', go: () => {} });
+      const hd = t.steps.filter((s) => s.st === 'drifted').length, ho = t.steps.filter((s) => isHole(s.st)).length, mv = t.steps.filter((s) => s.st === 'moved').length;
+      const cj = hopSt && hopSt.T === fT ? hopSt.j : -1;
+      card = { on: true, color: fT.color, title: `${fT.q == null ? 'Q?' : 'Q' + fT.q} · reader ${t.id}`, text: tidy(t.text),
+        stats: `${t.steps.length} hops · ${t.steps.length - hd - ho - mv} held · ${mv} moved · ${hd} worn · ${ho} holes · read for ${t.s != null && t.w != null ? mmss(t.w - t.s) : '—'}${t.refused ? ' · first write refused' : ''} · ${t.answers.length} claims`,
+        from: t.from ? `tt start @ ${t.from}` : '', open,
+        hopLabel: t.steps.length ? (cj >= 0 ? `hop ${cj + 1} of ${t.steps.length}` : `${t.steps.length} hops — step through them`) : 'no hops written',
+        hopWhere: cj >= 0 ? `${hopSt.col.path}:${hopSt.s.a}${hopSt.s.b > hopSt.s.a ? '–' + hopSt.s.b : ''}` : 'arrow keys walk the hops',
+        hopPrev: () => this.hopStep(-1), hopNext: () => this.hopStep(1), prev: () => this.readerStep(-1), next: () => this.readerStep(1), close: () => this.clearAll() };
+      const citedBy = {};
+      t.answers.forEach((a, i) => a.cites.forEach((c) => { if (c.s >= 0) (citedBy[c.s] = citedBy[c.s] || []).push({ i, g: a.g, t: a.t }); }));
+      claims = t.answers.map((a, i) => {
+        const onWall = a.cites.some((c) => W.findCol(c.p));
+        const hit = cj >= 0 && a.cites.some((c) => c.s === cj);
+        return { label: `A${i + 1} · ${ANSW[a.g] || a.g}${a.cites.length ? (onWall ? '' : ' · file not on the wall') : ''}`, color: ANSC[a.g] || '#C9CED9', t: a.t,
+          border: hit ? (ANSC[a.g] || '#C9CED9') : '#262F52',
+          full: `${a.t}${a.cites.length ? '\n' + a.cites.map((c) => `[${c.p}:${c.l}] ${c.g}`).join('\n') : ''}${a.why && a.why.length ? '\n' + a.why.join('\n') : ''}`,
+          go: () => this.claimGo(a) };
+      });
+      if (hopSt && hopSt.T === fT) {
+        const s = hopSt, stw = STW[s.st] || [s.st, '#C9CED9'];
+        hop = { on: true, n: s.j + 1, st: stw[0], stc: stw[1], color: fT.color, link: s.j && s.ln ? LINKW[s.ln] || '' : 'first hop',
+          where: `${s.col.path}:${s.s.a}${s.s.b > s.s.a ? '–' + s.s.b : ''}`, hasNote: !!s.s.note, note: s.s.note, hasFlag: !!s.s.flag, flag: s.s.flag,
+          cites: (citedBy[s.j] || []).map((c) => ({ label: `A${c.i + 1}`, color: ANSC[c.g] || '#C9CED9', title: `A${c.i + 1} · ${ANSW[c.g] || c.g}: ${c.t}` })) };
+      }
+    }
+
+    // what the wall holds, when nobody is followed
+    const totalLines = W.cols.reduce((a, c) => a + (c.lines ? c.lines.length : 0), 0);
+    const srcN = { disk: 0, sparse: 0, none: 0 };
+    W.cols.forEach((c) => { if (c.src) srcN[c.src] = (srcN[c.src] || 0) + 1; });
+    const hk = (d1, s1, d2, s2, d3, s3, t) => ({ d1, s1, d2: d2 || '', s2: s2 || 'fill:none', d3: d3 || '', s3: s3 || 'fill:none', t });
+    const key = { on: !fT,
+      facts: `${W.cols.length} files hung as warp, ${totalLines.toLocaleString('en-US')} lines of source at true scale; ${W.th.length} readers woven through them in ${W.steps.length} stitches.`,
+      src: this.texts[ri] ? [srcN.disk ? `${srcN.disk} files as they sat on disk when the page was made` : '', srcN.sparse ? `${srcN.sparse} past the page's text budget, carried only near their hops` : '', srcN.none ? `${srcN.none} unreadable (hatched)` : ''].filter(Boolean).join(' · ') + '.' : '',
+      items: [
+        hk('M2 3h30v10H2z', 'fill:rgba(255,180,84,0.4)', 'M2 3h2.6v10H2z', 'fill:#FFB454', '', '', 'held — a hop, dyed by its question'),
+        hk('M2 3h30v10H2z', 'fill:rgba(255,180,84,0.4)', 'M2 3h2.6v10H2z', 'fill:#FFB454', 'M2.3 8a1 1 0 1 0 2 0a1 1 0 1 0 -2 0', 'fill:#0F1426', 'moved — found a few lines away'),
+        hk('M2 3h30v10H2z', 'fill:rgba(255,180,84,0.4)', 'M0.5 1.5h33v13H0.5z', 'fill:none;stroke:#7FD1FF;stroke-dasharray:2 2', '', '', 'placed or followed'),
+        hk('M2 3h28v10H2z', 'fill:rgba(255,180,84,0.4)', 'M1 2h30v12H1z', 'fill:none;stroke:#F2B33D;stroke-width:1.3;stroke-dasharray:1.2 2.2', 'M31 2l3 -2M31 14l3 2', 'stroke:#F2B33D', 'worn — the code changed since'),
+        hk('M12 8a5 5 0 1 0 10 0a5 5 0 1 0 -10 0', 'fill:#0B0F1E;stroke:#FF5A5F;stroke-width:1.3', 'M14.3 5.3l5.4 5.4M19.7 5.3l-5.4 5.4', 'stroke:#FF5A5F;stroke-width:1.3', '', '', 'hole — no file holds the quote'),
+        hk('M2 12C14 12 20 4 32 4', 'fill:none;stroke:#FFB454;stroke-width:1.3', '', '', '', '', 'call — the code links them'),
+        hk('M2 12C14 12 20 4 32 4', 'fill:none;stroke:#FFB454;stroke-width:1.3;stroke-dasharray:6 4', '', '', '', '', 'names — one names the other'),
+        hk('M2 12C14 12 20 4 32 4', 'fill:none;stroke:#FFB454;stroke-width:1;stroke-dasharray:1.5 4;stroke-linecap:round', '', '', '', '', 'then — walk order only'),
+        hk('M10 3l4.2 4.2 -4.2 4.2 -4.2 -4.2z', 'fill:#FFB454;stroke:#FFB454', 'M18 4c2 3 -2 5 0 10M22 4c2 3 -2 5 0 10M26 4c2 3 -2 5 0 10', 'fill:none;stroke:#FFB454', '', '', 'END knot, and its open fringe'),
+      ] };
+
+    const wallMsg = { on: false };
+
+    // the walk track: hop 0..hmax across X0..X1; each reader's lane is its walk, one tick per hop dyed by its stitch,
+    // over a base line in its question's hue
+    const hmax = L.hmax, pitch = (X1 - X0) / hmax, tx = (h) => X0 + pitch * h;
+    const laneH = laneHOf(W.th.length), lh = Math.max(1.5, laneH - 1), baseH = Math.min(2, lh / 3), tickH = Math.max(1, lh - baseH - 1), gap = pitch >= 3 ? 1 : 0;
+    const hopC = (st) => (isHole(st) ? HOPC.rejected : st === 'drifted' ? HOPC.drifted : st === 'moved' ? HOPC.moved : st === 'placed' || st === 'followed' ? HOPC.placed : HOPC.exact);
+    const lanes = W.th.map((TT, i) => {
+      const t = TT.t, m = TT.steps.length, under = `linear-gradient(${TT.color}, ${TT.color}) left bottom / 100% ${r1(baseH)}px no-repeat`;
+      const stops = TT.steps.map((s, j) => `${hopC(s.st)} ${r1(j * pitch)}px ${r1((j + 1) * pitch - gap)}px, transparent ${r1((j + 1) * pitch - gap)}px ${r1((j + 1) * pitch)}px`).join(', ');
+      return { x: X0, y: r1(LANE0 + i * laneH), w: r1(Math.max(3, pitch * m)), h: r1(lh),
+        bg: m ? `linear-gradient(90deg, ${stops}) left top / 100% ${r1(tickH)}px no-repeat, ${under}` : under,
+        op: !anyF || fIds.has(t.id) ? 0.95 : 0.15,
+        cut: P ? this.laneCut(m, pos) : 0 };
+    });
+    const stepH = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find((s) => hmax / s <= 12) || 1000;
+    const ticks = [];
+    let grid = '';
+    const tick = (h) => { ticks.push({ x: r1(tx(h) - 4), label: h ? String(h) : 'hop 0' }); grid += `M${r1(tx(h))} ${TRK_TOP}V${LANE1}`; };
+    for (let h = 0; h <= hmax; h += stepH) tick(h);
+    if (hmax % stepH >= stepH * 0.4) tick(hmax);
+    const track = { grid };
+
+    return {
+      notReady: false, ready: true, cvRef: this.cvRef, tipRef: this.tipRef, zoomRef: this.zoomRef,
+      head, stats, runs, bars, lanes, ticks, track, groups, claims, card, hop, key, wallMsg,
+      listOn: !fT,
+      leftHead: fT ? 'Following one reader' : 'Readers — hover to trace · click to follow',
+      rightHead: fT ? 'Claims — click to fly to the line' : 'On the wall',
+      wallAria: `The wall: ${W.cols.length} files of ${run.repo} at true line scale with every reader's hops stitched in. Scroll or drag to pan, Command-scroll or pinch to zoom, double-click to dive, plus and minus to zoom, F to fit, Z to fold, bracket keys to change reader, arrow keys to walk hops.`,
+      zoomIn: () => this.zoomBtn(1.8), zoomOut: () => this.zoomBtn(1 / 1.8), fitAll: () => this.fitAll(), toggleFold: () => this.toggleFold(),
+      foldLabel: S.fold ? 'Unfold' : 'Fold', foldPressed: S.fold ? 'true' : 'false', foldBorder: S.fold ? '#FFB454' : '#3A4677', foldColor: S.fold ? '#FFB454' : '#E8E6DF',
+      play: () => this.togglePlay(),
+      clear: () => this.clearAll(true),
+      hasPos: !!P, headX: P ? r1(pitch * pos) : 0, scrubRef: this.scrubRef, headTRef: this.headTRef,
+      scrub: { max: hmax, now: P ? this.sewn(hmax, pos) : 0, text: P ? `hop ${this.sewn(hmax, pos)} of ${hmax}` : 'no replay position — click to seek a hop' },
+      playLabel: !P ? 'Play the walks' : P.playing ? 'Pause' : 'Play from here',
+      playAria: !P ? 'Play the walks one hop per step' : P.playing ? 'Pause the walks' : 'Play the walks from here',
+      playIcon: P && P.playing ? 'M1 1h4v10H1zM7 1h4v10H7z' : 'M1 0.5L11 6L1 11.5z',
+      hasSel: !!fT || S.selQ !== undefined || !!P,
+    };
+  }
+}
+DC.register("wall", Component);
+})();
+</script>

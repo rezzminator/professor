@@ -354,6 +354,7 @@ func TestGoogleDriveFileViewFetchesCompleteDownloadInsteadOfPreviewHTML(t *testi
 		strings.Repeat("Drive preview page 1 through page 4 only\n", 20),
 		0,
 		[]string{"direct", "chrome-impersonation", "jina"},
+		nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +536,10 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 		t.Fatalf("redirect result=%#v", result)
 	}
 	path := filepath.Join(t.TempDir(), "meta.txt")
-	if _, err := h.cache.save("https://example.test/a\nmethod: injected", "txt", "direct", "body", 0, nil); err != nil {
+	if _, err := h.cache.save(
+		"https://example.test/a\nmethod: injected", "txt", "direct", "body", 0, nil,
+		map[string]string{"title": "Page title\nrungs: injected", "author": "Page author\r\nhttp_status: 999"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(
@@ -544,8 +548,10 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "\nmethod: injected\n") {
-		t.Fatalf("frontmatter injection survived: %q", raw)
+	for _, injected := range []string{"\nmethod: injected\n", "\nrungs: injected\n", "\nhttp_status: 999\n"} {
+		if strings.Contains(string(raw), injected) {
+			t.Fatalf("frontmatter injection survived: %q", raw)
+		}
 	}
 	_ = path
 }
@@ -690,63 +696,6 @@ func TestFetchBareTitleRefusesToGuess(t *testing.T) {
 	got := h.Fetch(context.Background(), "A Mathematical Theory of Communication")
 	if got.Error == "" || !strings.Contains(got.Error, "harvester_search_literature") {
 		t.Fatalf("bare title result = %#v", got)
-	}
-}
-
-func TestLocalizeImagesSkipsOverLimitResponse(t *testing.T) {
-	t.Parallel()
-	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return response(r, http.StatusOK, "image/png", strings.Repeat("x", maxImageBytes+1)), nil
-	})
-	h := mustNew(
-		t,
-		Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}},
-	)
-	markdown, err := h.LocalizeImages(
-		context.Background(),
-		"![figure](https://example.test/too-large.png)",
-		"https://example.test/article",
-	)
-	if err != nil || !strings.Contains(markdown, "too-large.png") {
-		t.Fatalf("localized over-limit image = %q err=%v", markdown, err)
-	}
-}
-
-// TestLocalizeImagesSendsThePageAsReferer: an image localized out of a
-// harvested page was REACHED from that page, so it must carry the page's own
-// URL as Referer — never the Google provenance one, never empty. The fake
-// host is hotlink-protected the real way: it 403s anything but the exact
-// page URL.
-func TestLocalizeImagesSendsThePageAsReferer(t *testing.T) {
-	t.Parallel()
-	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64)
-	const pageURL = "https://example.test/article"
-	var referers []string
-	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		referer := r.Header.Get("Referer")
-		referers = append(referers, referer)
-		if referer != pageURL {
-			return response(r, http.StatusForbidden, "text/html", "<html>hotlinking forbidden</html>"), nil
-		}
-		return response(r, http.StatusOK, "image/png", png), nil
-	})
-	h := mustNew(
-		t,
-		Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}},
-	)
-	markdown, err := h.LocalizeImages(
-		context.Background(),
-		"![figure](https://example.test/figure.png)",
-		pageURL,
-	)
-	if err != nil {
-		t.Fatalf("LocalizeImages error = %v", err)
-	}
-	if strings.Contains(markdown, "https://example.test/figure.png") {
-		t.Fatalf("image was not localized (hotlink wall not passed): markdown=%q referers=%q", markdown, referers)
-	}
-	if len(referers) == 0 || referers[0] != pageURL {
-		t.Fatalf("localized image Referer = %q, want %q", referers, pageURL)
 	}
 }
 

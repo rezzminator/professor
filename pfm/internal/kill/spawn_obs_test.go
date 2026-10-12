@@ -20,7 +20,7 @@ func TestCommandSpawnerDefaultRunnerRecordsTheFinisherLaunch(t *testing.T) {
 	if err := testjail.WriteExecutable(setsid, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	spawner := CommandSpawner{Executable: filepath.Join(root, "pfm"), Setsid: setsid}
+	spawner := CommandSpawner{Executable: filepath.Join(root, "pfm"), Setsid: setsid, LogDir: root}
 	err := spawner.Spawn(ctx, ExitArgs{
 		Engine: pfmengine.Claude, ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", DataPath: filepath.Join(root, "t.jsonl"),
 		SocketPath: filepath.Join(root, "cc-2-1-1"), SocketName: "cc-2-1-1", PaneID: "%4",

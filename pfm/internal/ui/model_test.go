@@ -12,29 +12,42 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
-func TestNewClaudeCacheFollowsSelectedAccount(t *testing.T) {
-	snapshot := Snapshot{
-		Rows:           []compose.Row{{Kind: compose.NewClaude, Name: "New Claude chat"}},
-		PrimaryAccount: 1, AccountIDs: []int{1, 2},
-		Cache1H: true, Cache1HByAccount: map[int]bool{1: true, 2: false},
-	}
-	model := NewModel(snapshot)
-	if !model.Cache1H() {
-		t.Fatal("account 1 should start with 1h")
-	}
-	model, _ = applyKey(t, model, controlKey('s'))
-	if model.PrimaryAccount() != 2 || model.Cache1H() {
-		t.Fatalf("account 2 = primary %d cache %t, want 2/5m", model.PrimaryAccount(), model.Cache1H())
-	}
-	model, _ = applyKey(t, model, controlKey('e'))
-	if !model.Cache1H() {
-		t.Fatal("toggle did not choose 1h for this launch")
-	}
-	model, _ = applyKey(t, model, controlKey('s'))
-	if model.PrimaryAccount() != 1 || !model.Cache1H() {
-		t.Fatalf("account 1 = primary %d cache %t, want 1/1h", model.PrimaryAccount(), model.Cache1H())
+// A chat resumed from the picker opens on its engine's remembered account and
+// that account's remembered cache, falling back to the configured one.
+func TestResumeOpensOnTheRememberedAccountAndItsCache(t *testing.T) {
+	resume := compose.Row{Kind: compose.ResumeClaude, ID: "r", Name: "r", Project: "p", Account: 1}
+	for _, test := range []struct {
+		name    string
+		last    fleetdb.LaunchMemory
+		primary int
+		want    bool
+	}{
+		{"configured cache when nothing is remembered", fleetdb.LaunchMemory{}, 2, true},
+		{"the remembered cache of the primary account", fleetdb.LaunchMemory{Cache1H: map[int]bool{2: false}}, 2, false},
+		{"another account's memory is not borrowed", fleetdb.LaunchMemory{Cache1H: map[int]bool{1: false}}, 2, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := NewModel(Snapshot{
+				Rows:           []compose.Row{resume},
+				PrimaryAccount: test.primary, AccountIDs: []int{1, 2},
+				Cache1H: true, Cache1HByAccount: map[int]bool{1: true, 2: true},
+				LastLaunch: test.last,
+			})
+			model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			result := model.Result()
+			if result.Kind != OutcomeSelected || result.PrimaryAccount != test.primary || result.Cache1H != test.want {
+				t.Fatalf(
+					"resume result account %d cache %t, want %d/%t",
+					result.PrimaryAccount,
+					result.Cache1H,
+					test.primary,
+					test.want,
+				)
+			}
+		})
 	}
 }
 
@@ -74,21 +87,6 @@ func TestModelKeysKillModifiersAndCancel(t *testing.T) {
 	undo := model.Result()
 	if len(undo.KillChanges) != 1 || undo.KillChanges[0].Killed {
 		t.Fatalf("second ⌃X did not record an unkill: %#v", undo)
-	}
-
-	model, _ = applyKey(t, model, controlKey('e'))
-	if model.Cache1H() {
-		t.Fatal("ctrl+e did not toggle 1h off")
-	}
-	// The selected row is Codex, so ⌃S cycles the Codex roster and leaves the
-	// independently persisted Claude primary alone.
-	for step := 0; step < 4; step++ {
-		before := model.codexPrimary
-		model, _ = applyKey(t, model, controlKey('s'))
-		want := before%3 + 1
-		if model.codexPrimary != want || model.PrimaryAccount() != 2 {
-			t.Fatalf("codex account=%d want=%d; Claude primary=%d", model.codexPrimary, want, model.PrimaryAccount())
-		}
 	}
 
 	ignored, command := applyKey(t, model, controlKey('t'))
@@ -156,32 +154,19 @@ func TestChatCursorMovementIsNoOpForEmptyList(t *testing.T) {
 	}
 }
 
-func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
+func TestChatActionCarouselAndTheLaunchRowArrows(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.Rows = []compose.Row{
 		{Kind: compose.NewClaude, Name: "New Claude chat", Project: "new"},
 		{Kind: compose.NewCodex, Name: "New Codex chat", Project: "new"},
-		{Kind: compose.NewOpenCode, Name: "New OpenCode chat", Project: "new", Account: 5},
 	}
-	snapshot.OpenCodePrimaryAccount = 5
-	snapshot.OpenCodeAccountIDs = []int{5}
 	snapshot.MergeNewChat = true
 	model := NewModel(snapshot)
-	if model.NewChatEngine() != pfmengine.Claude {
-		t.Fatalf("new chat engine=%q, want %s", model.NewChatEngine(), pfmengine.Claude)
-	}
+	before := model
 	model, command := applyKey(t, model, specialKey(tea.KeyRight))
-	if command != nil || model.NewChatEngine() != pfmengine.Codex {
-		t.Fatalf("right new-chat engine=%q command=%v", model.NewChatEngine(), command)
-	}
-	model, command = applyKey(t, model, specialKey(tea.KeyRight))
-	if command != nil || model.NewChatEngine() != pfmengine.OpenCode {
-		t.Fatalf("second right new-chat engine=%q command=%v", model.NewChatEngine(), command)
-	}
-	model, command = applyKey(t, model, specialKey(tea.KeyEnter))
-	if command == nil || model.Result().Kind != OutcomeSelected || model.Result().Row.Kind != compose.NewOpenCode ||
-		model.Result().PrimaryAccount != 5 {
-		t.Fatalf("new-chat Enter result=%#v command=%v", model.Result(), command)
+	if command != nil || model.wizard.on || model.place != before.place || model.NewChatEngine() != pfmengine.Claude ||
+		model.ActionIndex() != 0 {
+		t.Fatalf("→ on the idle launch row changed something (command %v, wizard %t)", command, model.wizard.on)
 	}
 
 	snapshot.Rows = []compose.Row{{Kind: compose.LiveClaude, ID: "live", Name: "live", Project: "p", Socket: "s"}}
@@ -314,38 +299,6 @@ func TestProfessorUpdateFailureRowPersistsAcrossRefresh(t *testing.T) {
 	}
 }
 
-func TestProfessorUpdateCtrlSCyclesVisibleClaudeAccountEvenWhenCodexChosen(t *testing.T) {
-	snapshot := Snapshot{
-		Rows: []compose.Row{
-			{Kind: compose.ProfessorUpdate, ID: "pfm-update-v0.61.2", Name: "v0.61.2", Project: ".professor"},
-			{Kind: compose.NewClaude, Name: "New Claude chat", Project: "project"},
-			{Kind: compose.NewCodex, Name: "New Codex chat", Project: "project"},
-		},
-		View:                compose.DefaultView,
-		PrimaryAccount:      2,
-		AccountIDs:          []int{1, 2},
-		CodexPrimaryAccount: 7,
-		CodexAccountIDs:     []int{7},
-		MergeNewChat:        true,
-		NowNS:               fixtureNowNS,
-		Width:               120,
-		Height:              20,
-	}
-	model := NewModel(snapshot)
-	model, command := applyKey(t, model, specialKey(tea.KeyRight))
-	if command != nil || model.NewChatEngine() != pfmengine.Codex {
-		t.Fatalf("update engine after Right = %q command=%v, want Codex", model.NewChatEngine(), command)
-	}
-	model, command = applyKey(t, model, controlKey('s'))
-	if command != nil || model.PrimaryAccount() != 1 {
-		t.Fatalf(
-			"Ctrl+S on update selected for Codex left visible Claude account=%d command=%v, want 1",
-			model.PrimaryAccount(),
-			command,
-		)
-	}
-}
-
 func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 	snapshot := Snapshot{
 		Rows: []compose.Row{
@@ -380,7 +333,7 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 	}
 }
 
-func TestNewChatUsesOnlyPresentEnginesAndCyclesTheirOwnRoster(t *testing.T) {
+func TestNewChatUsesOnlyPresentEnginesAndAsksTheirOwnRoster(t *testing.T) {
 	codexOnly := Snapshot{
 		Rows: []compose.Row{
 			{Kind: compose.NewCodex, Name: "New Codex chat", CWD: "/work/new", Account: 7},
@@ -398,10 +351,11 @@ func TestNewChatUsesOnlyPresentEnginesAndCyclesTheirOwnRoster(t *testing.T) {
 	if model.NewChatEngine() != pfmengine.Codex {
 		t.Fatalf("single-engine carousel exposed Claude: %q", model.NewChatEngine())
 	}
-	model, _ = applyKey(t, model, controlKey('s'))
+	model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+	model, _ = applyKey(t, model, specialKey(tea.KeyRight))
 	selected, command := applyKey(t, model, specialKey(tea.KeyEnter))
 	if command == nil || selected.Result().Row.Kind != compose.NewCodex || selected.Result().PrimaryAccount != 9 {
-		t.Fatalf("Codex account cycle result = %#v", selected.Result())
+		t.Fatalf("Codex account step result = %#v", selected.Result())
 	}
 
 	claudeOnly := Snapshot{
@@ -462,13 +416,12 @@ func TestLiveSelectionKeepsBirthAccountSeparateFromSelectedAccount(t *testing.T)
 	}
 }
 
-// TestCancelKeepsAppliedKillsAndDropsPrimaryChange pins the split that ⌃X
-// acting immediately creates: Esc still abandons a ⌃S account switch, which is
-// only ever a pending intent, but it can no longer take back a kill. Batching
+// TestCancelKeepsAppliedKills pins what ⌃X acting immediately creates: Esc
+// can no longer take back a kill. Batching
 // the kill until quit meant the only exits that applied one were the ones that
 // launched something, so closing the list the natural way silently threw every
 // ⌃X away.
-func TestCancelKeepsAppliedKillsAndDropsPrimaryChange(t *testing.T) {
+func TestCancelKeepsAppliedKills(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.PrimaryAccount = 1
 	var applied []KillChange
@@ -482,11 +435,6 @@ func TestCancelKeepsAppliedKillsAndDropsPrimaryChange(t *testing.T) {
 	if len(applied) != 1 || !applied[0].Killed {
 		t.Fatalf("⌃X did not apply on the keypress: %#v", applied)
 	}
-	model, _ = applyKey(t, model, controlKey('s'))
-	if model.PrimaryAccount() == 1 {
-		t.Fatal("setup: ⌃S did not change the account")
-	}
-
 	cancelled, command := applyKey(t, model, specialKey(tea.KeyEscape))
 	if command == nil {
 		t.Fatal("cancel returned no quit command")

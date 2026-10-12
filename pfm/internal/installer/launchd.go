@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
@@ -196,9 +197,21 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 	domain := "gui/" + strconv.Itoa(os.Getuid())
 	loaded := installer.options.Runner.Run(ctx, "launchctl", "print", domain+"/"+label) == nil
 	if loaded && !plistChanged {
-		installer.ok("launchctl " + label + " already loaded, plist unchanged — left running")
-		installer.say("")
-		return nil
+		reason, err := installer.launchAgentStale(ctx, domain+"/"+label)
+		if err != nil {
+			installer.skip(
+				"launchctl " + label + " already loaded, plist unchanged — health NOT probed (" + err.Error() +
+					"); left as loaded",
+			)
+			installer.say("")
+			return nil
+		}
+		if reason == "" {
+			installer.ok("launchctl " + label + " already loaded, plist unchanged — left running")
+			installer.say("")
+			return nil
+		}
+		installer.say("  reload  launchctl %s: %s", label, reason)
 	}
 	if loaded {
 		// Best effort: a job already gone reports failure here for exactly the
@@ -232,6 +245,78 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 	installer.ok("launchctl bootstrap " + label)
 	installer.say("")
 	return nil
+}
+
+// launchdSpawnFailed is the exit code launchd records when it could not start
+// the job at all (EX_CONFIG); pfm's own exits never use it — a daemon leaving
+// for a new binary exits binwatch.ExitReplaced.
+const launchdSpawnFailed = 78
+
+// launchAgentStale names why a loaded agent whose plist did not change must
+// still be reloaded, or returns "" for a healthy one. A pfm binary swap leaves
+// two such states: launchd wedged on a job it can no longer spawn (`spawn
+// failed`, last exit 78, not running), and a job still running the binary the
+// swap replaced, which exits for its restart moments later and can wedge the
+// same way. An error means the state could not be read, never "healthy".
+func (installer *engine) launchAgentStale(ctx context.Context, target string) (string, error) {
+	reader, ok := installer.options.Runner.(OutputRunner)
+	if !ok {
+		return "", errors.New("the command runner cannot read launchctl output")
+	}
+	output, err := reader.Output(ctx, "launchctl", "print", target)
+	if err != nil {
+		return "", fmt.Errorf("launchctl print %s: %w", target, err)
+	}
+	running, spawnFailed, pid := false, false, 0
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "state = running":
+			running = true
+		case line == "job state = spawn failed",
+			strings.HasPrefix(line, "last exit code = "+strconv.Itoa(launchdSpawnFailed)+":"):
+			spawnFailed = true
+		case strings.HasPrefix(line, "pid = "):
+			if value, err := strconv.Atoi(strings.TrimPrefix(line, "pid = ")); err == nil {
+				pid = value
+			}
+		}
+	}
+	if !running {
+		if spawnFailed {
+			return "launchd could not spawn it (spawn failed, last exit 78)", nil
+		}
+		return "", nil
+	}
+	if pid <= 0 {
+		return "", fmt.Errorf("launchctl print %s shows it running with no pid", target)
+	}
+	birth := installer.processBirth
+	if birth == nil {
+		birth = nativeProcessBirth
+	}
+	started, err := birth(pid)
+	if err != nil {
+		return "", fmt.Errorf("start time of pid %d: %w", pid, err)
+	}
+	binary := installer.mcpChatCommand()
+	info, err := os.Stat(binary)
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", binary, err)
+	}
+	if started < info.ModTime().Unix() {
+		return fmt.Sprintf("pid %d runs the pfm binary %s replaced since it started", pid, binary), nil
+	}
+	return "", nil
+}
+
+// nativeProcessBirth reads a process's start time in epoch seconds.
+func nativeProcessBirth(pid int) (int64, error) {
+	proc, ok := gather.NewProcFS("").(gather.ProcBirth)
+	if !ok {
+		return 0, errors.New("this platform's process table reports no start time")
+	}
+	return proc.Birth(pid)
 }
 
 // pause waits, through the Options seam when one was supplied. Options is
@@ -333,7 +418,7 @@ func probeAnswered(err error) bool {
 }
 
 // launchAgentRunning reports whether the launch agent labelled label (name-sync
-// or the reminder fire) is executing right now, and whether the question could
+// or the schedule fire) is executing right now, and whether the question could
 // be asked at all.
 //
 // "state = not running" contains "running", so the state line is compared whole

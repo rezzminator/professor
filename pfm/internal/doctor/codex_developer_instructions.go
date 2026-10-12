@@ -10,7 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 )
 
 // The Codex fleet prompt reaches a session through config.toml's
@@ -42,11 +42,11 @@ type codexInstructionsReport struct {
 // account whose config carries something else is a state `pfm install --yes`
 // owns and did not produce, so it is a FAILURE, never a warning.
 func PrintCodexDeveloperInstructions(stdout io.Writer, homes []string) int {
-	// codexgen is the one door that composes this prompt: it applies the Codex
+	// codexprompt is the one door that composes this prompt: it applies the Codex
 	// mappings (review.go) the shared parts do not carry on disk, so comparing
 	// a config against the raw parts would read a correctly installed account
 	// as a mismatch.
-	prompt, err := codexgen.FleetPrompt()
+	prompt, err := codexprompt.FleetPrompt()
 	if err != nil {
 		fmt.Fprintf(
 			stdout,

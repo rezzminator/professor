@@ -210,10 +210,10 @@ type Row struct {
 	AgeNS          int64
 	Account        int
 	LaunchUnread   bool
-	// Reminded marks a chat with a fired reminder nobody has looked at yet
-	// (fleetdb reminders.unseen). The picker sets it from the shared state
+	// ScheduleFired marks a chat with a fired schedule nobody has looked at yet
+	// (fleetdb schedules.unseen). The picker sets it from the shared state
 	// database; the row renders red and sorts above every other row.
-	Reminded bool
+	ScheduleFired bool
 	// Model, Effort, Working and AgentsWorking are read from the chat's
 	// transcript tail by the picker (internal/rowfacts), never by composition:
 	// the model id and effort level it runs at ("" when unknown), whether it is

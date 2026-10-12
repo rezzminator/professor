@@ -1,0 +1,7 @@
+{
+ "args": [
+  "show",
+  "./nope.jsonl"
+ ],
+ "dirs": []
+}

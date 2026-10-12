@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +20,9 @@ import (
 // The states of one doctor hook row (docs/design/hooks/hooks.md § The pfm
 // doctor check). MISSING reuses HostOverlayMissing's "missing".
 const (
-	stateOK = "ok"
+	stateOK           = "ok"
+	stateHookConflict = "conflict"
+	stateHookDisabled = "disabled"
 	// stateMissing is an expected hook absent from its file; the same word the
 	// host overlay rows use.
 	stateMissing = string(HostOverlayMissing)
@@ -84,6 +87,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		})
 	}
 	results = append(results, probeCodexHooks(home, config, binary)...)
+	results = append(results, probeGptHookAssets(home, config)...)
 	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
 	ownership, _, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
@@ -171,8 +175,9 @@ func executableVerdict(path string) string {
 }
 
 // probeCodexHooks reads every configured Codex home's hooks.json for the one
-// hook pfm owns there and for pfm residue. It never runs Codex or writes a
-// file: an absent file or a missing SessionStart "resume" resume-unkill handler
+// hook pfm owns there and for pfm residue. It writes no file and starts no
+// model turn: native trust is read through Codex app-server hooks/list. An
+// absent file or a missing SessionStart "resume" resume-unkill handler
 // is a MISSING row, a handler with no recorded hook trust an UNTRUSTED row
 // naming `pfm install --yes`, a healthy account none; STALE and UNREADABLE
 // rows report residue and files that could not be read.
@@ -223,8 +228,23 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 		case codexHookHandlerCount(document, expected) == 0:
 			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
 		default:
-			recorded, err := codexappendix.HookTrustState(account.Home, expected.Command)
+			recorded, err := codexappendix.NativeHookTrustState(
+				context.Background(),
+				config.EffectiveCodex(account.ID).Binary,
+				account.Home,
+				expected.Command,
+			)
 			switch {
+			case errors.Is(err, codexappendix.ErrNativeHookDisabled):
+				results = append(
+					results,
+					HookProbeResult{Hook: expectedHook, State: stateHookDisabled, Error: err.Error()},
+				)
+			case errors.Is(err, codexappendix.ErrNativeHookUntrusted):
+				results = append(
+					results,
+					HookProbeResult{Hook: expectedHook, State: stateUntrusted, Error: err.Error()},
+				)
 			case errors.Is(err, codexappendix.ErrNativeHookTrustUnknown):
 				results = append(results, HookProbeResult{
 					Hook: expectedHook, State: stateNativeTrustUnknown, Error: err.Error(),
@@ -334,9 +354,20 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool
 		switch result.State {
 		case stateOK:
 			fmt.Fprintln(stdout, prefix+" ok")
+		case stateHookConflict:
+			failures++
+			fmt.Fprintf(
+				stdout,
+				"%s CONFLICT %s — move the operator entry aside before pfm install --yes\n",
+				prefix,
+				hook.File,
+			)
 		case stateMissing:
 			failures++
 			fmt.Fprintf(stdout, "%s MISSING — run pfm install --yes\n", prefix)
+		case stateHookDisabled:
+			warnings++
+			fmt.Fprintf(stdout, "%s DISABLED — operator choice preserved; re-enable in Codex only if wanted\n", prefix)
 		case stateUntrusted:
 			warnings++
 			fmt.Fprintf(stdout, "%s UNTRUSTED %s — run pfm install --yes\n", prefix, result.Error)
@@ -349,6 +380,16 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool
 		case stateDrift:
 			warnings++
 			fmt.Fprintf(stdout, "%s DRIFT ledger ownership=%s file=%s\n", prefix, result.Want, result.Got)
+		case stateHookDrift:
+			failures++
+			fmt.Fprintf(
+				stdout,
+				"%s DRIFT what=%s want=%s got=%s — run pfm install --yes\n",
+				prefix,
+				result.What,
+				result.Want,
+				result.Got,
+			)
 		case stateUnreadable:
 			failures++
 			fmt.Fprintf(stdout, "doctor: hook %s %s UNREADABLE error=%s\n", hook.Target, file, result.Error)

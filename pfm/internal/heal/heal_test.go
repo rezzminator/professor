@@ -453,7 +453,7 @@ func TestLiveThreadsAreSkipped(t *testing.T) {
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		t.Fatalf("hold the writer lock: %v", err)
 	}
-	if !Live(jail.root, wedged) {
+	if live, err := Live(jail.root, wedged); err != nil || !live {
 		t.Fatal("a held writer lock did not read as live")
 	}
 
@@ -479,7 +479,7 @@ func TestLiveThreadsAreSkipped(t *testing.T) {
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_UN); err != nil {
 		t.Fatal(err)
 	}
-	if Live(jail.root, wedged) {
+	if live, err := Live(jail.root, wedged); err != nil || live {
 		t.Fatal("a released lock still reads as live")
 	}
 	report, err = runner.Run(context.Background(), Options{Apply: true})
@@ -491,9 +491,9 @@ func TestLiveThreadsAreSkipped(t *testing.T) {
 	}
 }
 
-// Thread is the pre-resume shape: it repairs a broken thread, says so in one
-// line, and is completely silent about everything else — including a Codex
-// home that does not exist, because a resume must never fail over a repair.
+// Thread is the pre-resume shape: it repairs a broken thread and says so in one
+// line; a healthy thread, an empty id and a home with no store are silent
+// (failed checks: TestThreadWarnsOnRepairFailureWithoutBlockingResume).
 func TestThreadIsSilentUnlessItRepairs(t *testing.T) {
 	jail := newCodexJail(t)
 	const (
@@ -520,11 +520,12 @@ func TestThreadIsSilentUnlessItRepairs(t *testing.T) {
 	if rows := jail.projectionRows(t, wedged); rows != 0 {
 		t.Fatalf("Thread() reported a heal but left %d rows", rows)
 	}
-	if message := Thread(ctx, filepath.Join(jail.root, "nowhere"), wedged); message != "" {
-		t.Fatalf("a missing Codex home reported %q instead of staying silent", message)
-	}
 	if message := Thread(ctx, jail.root, ""); message != "" {
 		t.Fatalf("an empty thread id reported %q", message)
+	}
+	// A Codex build that keeps no thread store leaves nothing to heal, so every resume stays quiet.
+	if message := Thread(ctx, t.TempDir(), wedged); message != "" {
+		t.Fatalf("a Codex home with no thread store warned on resume: %q", message)
 	}
 }
 

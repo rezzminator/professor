@@ -42,6 +42,11 @@ func (verbs Verbs) Read(ctx context.Context, target string, tail int) (headless.
 	return ReadEntries(ctx, target, tail, verbs.Runtime)
 }
 
+// Exit is chat.ExitResolved over the bound runtime.
+func (verbs Verbs) Exit(ctx context.Context, self headless.Chat) (string, error) {
+	return ExitResolved(ctx, verbs.Runtime, self)
+}
+
 func (verbs Verbs) warnings() io.Writer {
 	if verbs.Warnings == nil {
 		return io.Discard

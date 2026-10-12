@@ -1,0 +1,29 @@
+{
+ "test": "--flight: agents.tsv rows match by agent id, and the report names the engine per row",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--flight",
+  "{FIX}/flight",
+  "--root",
+  "{FIX}/claude/projects",
+  "--codex-root",
+  "{FIX}/codex",
+  "--metrics-out",
+  "{TMP}/report-cvw8jja77eh.md",
+  "--out",
+  "{TMP}/report-cvw8jja77eh.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "report-cvw8jja77eh.json",
+  "report-cvw8jja77eh.md"
+ ],
+ "outputs": {
+  "--out": "{TMP}/report-cvw8jja77eh.json",
+  "--metrics-out": "{TMP}/report-cvw8jja77eh.md"
+ }
+}

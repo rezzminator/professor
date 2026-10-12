@@ -20,10 +20,15 @@
 #
 # The mount and env contract is the fence's (infra/fence/docker-compose.yml),
 # resolved through infra/fence/fence-env.sh like every other caller: the
-# worktree read-only at /worktree, the common git dir read-only, the build
-# caches as named volumes (never committed — docker commit excludes mounts).
-# Every lane container carries --label pfm.fence=1, so fence housekeeping
-# (infra/fence/housekeeping.sh) reaps it once exited or past its age limit.
+# worktree read-only at /worktree, the common git dir read-only, the engine-sync
+# source read-only at /engine-sync (provision.sh tools builds the binary
+# ENGINE_SYNC_BIN names from it; an absent source travels in as
+# PFM_DEV_ENGINE_SYNC_MISSING), the build caches as named volumes (never
+# committed — docker commit excludes mounts).
+# PFM_PRICES_OFFLINE=1 keeps pfm install, doctor and model-cost from fetching
+# prices in any lane step. Every lane container carries --label pfm.fence=1, so
+# fence housekeeping (infra/fence/housekeeping.sh) reaps it once exited or past
+# its age limit.
 #
 # BROKEN STATE: a failing build or run prints docker's own message and returns
 # non-zero; neither function ever falls back to a host-local execution.
@@ -62,12 +67,16 @@ lane_run() { # lane_run <name> <image> [network] [docker-run args…]
     "$@" \
     -v "$PFM_DEV_WORKTREE:/worktree:ro" \
     -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" \
+    -v "$PFM_DEV_ENGINE_SYNC_SRC:/engine-sync:ro" \
     -v pfm-dev-gocache:/root/.cache/go-build \
     -v pfm-dev-gomod:/root/go/pkg/mod \
     -w /worktree \
     -e PFM_DEV_FENCE=1 -e IS_SANDBOX=1 -e LANG=C.UTF-8 -e GOFLAGS=-buildvcs=false \
     -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json \
     -e MOCK_ENGINE_SCENARIO=/root/.local/share/pfm-lanes/default.json \
+    -e PFM_PRICES_OFFLINE=1 \
+    -e ENGINE_SYNC_BIN=/usr/local/libexec/pfm-lanes/engine-sync \
+    -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" \
     -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" \
     -e PFM_DEV_REPO_WORK_TREE=/worktree \
     "$image" sleep infinity >/dev/null

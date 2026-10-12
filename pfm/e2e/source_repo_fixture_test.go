@@ -28,6 +28,7 @@ var sharedStage = struct {
 var e2eStageRoot string
 
 func TestPrepareSourceRepoStagesEvenAReadyRepository(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "ready-source")
 	for _, relative := range []string{
 		"CLAUDE.md", "AGENTS.md", ".claude/settings.json",
@@ -60,6 +61,7 @@ func TestPrepareSourceRepoStagesEvenAReadyRepository(t *testing.T) {
 }
 
 func TestCopySourceTreePreservesInternalSymlinks(t *testing.T) {
+	t.Parallel()
 	source := filepath.Join(t.TempDir(), "source")
 	target := filepath.Join(t.TempDir(), "target")
 	linkedDir := filepath.Join(source, ".claude", "skills", "fixture")
@@ -99,6 +101,7 @@ func TestCopySourceTreePreservesInternalSymlinks(t *testing.T) {
 	}
 }
 
+// Serial: t.Setenv rewrites the process environment copySourceTree reads.
 func TestCopySourceTreeEnumeratesLinkedWorktreeWithFenceGitDir(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repository")
 	if err := os.MkdirAll(root, 0o700); err != nil {
@@ -144,6 +147,7 @@ func TestCopySourceTreeEnumeratesLinkedWorktreeWithFenceGitDir(t *testing.T) {
 }
 
 func TestCopySourceTreeSkipsTrackedDeletedPaths(t *testing.T) {
+	t.Parallel()
 	source := filepath.Join(t.TempDir(), "source")
 	target := filepath.Join(t.TempDir(), "target")
 	if err := os.MkdirAll(source, 0o700); err != nil {
@@ -171,7 +175,36 @@ func TestCopySourceTreeSkipsTrackedDeletedPaths(t *testing.T) {
 	}
 }
 
+func TestCopySourceTreeLeavesSubmodulesOut(t *testing.T) {
+	t.Parallel()
+	source := filepath.Join(t.TempDir(), "source")
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.MkdirAll(filepath.Join(source, "plugins", "demo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"kept": "kept\n", filepath.Join("plugins", "demo", "file"): "other repository\n"} {
+		if err := os.WriteFile(filepath.Join(source, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGitFixture(t, source, "init", "-q")
+	runGitFixture(t, source, "add", "kept")
+	runGitFixture(t, source, "update-index", "--add", "--cacheinfo",
+		"160000,1111111111111111111111111111111111111111,plugins/demo")
+
+	if err := copySourceTree(source, target); err != nil {
+		t.Fatalf("copy source tree with a populated submodule: %v", err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(target, "kept")); err != nil || string(contents) != "kept\n" {
+		t.Fatalf("read copied kept file: contents=%q err=%v", contents, err)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "plugins", "demo", "file")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("submodule content was copied like a plain clone never holds it, or inspect failed: %v", err)
+	}
+}
+
 func TestCopySourceTreeRejectsExternalSymlinks(t *testing.T) {
+	t.Parallel()
 	for name, linkTarget := range map[string]string{
 		"absolute": filepath.Join(string(filepath.Separator), "outside"),
 		"escape":   "../outside",
@@ -435,6 +468,12 @@ func copySourceTreeWithGit(source, target, workTree, gitDir string) error {
 			if err := os.Symlink(linkTarget, destination); err != nil {
 				return fmt.Errorf("copy source fixture symlink %s: %w", relative, err)
 			}
+			continue
+		}
+		if info.IsDir() {
+			// The only directory ls-files names is a submodule's gitlink (or an
+			// untracked nested repository): another repository, which a plain
+			// clone of this one does not hold either.
 			continue
 		}
 		if !info.Mode().IsRegular() {

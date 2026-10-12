@@ -1,0 +1,1 @@
+token-audit: --timeline reads whole files: it takes no --flight, --codex, --project or --since

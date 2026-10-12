@@ -17,7 +17,7 @@ For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`
 Operator verbs:
 
 - ls: list or pick fleet chats (`--killed` for the graveyard)
-- chat: operate on one chat — new, open, status, last, read, stream, inject, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, reminder
+- chat: operate on one chat — new, open, status, last, read, stream, inject, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, schedule
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
 - index: refresh the transcript index
@@ -40,16 +40,16 @@ Wiring verbs (hooks and services call these; you rarely type them): name-sync, s
 
 The blueprint never rewrites a project file after `pfm init`; every upstream change is hand-applied.
 
-1. `pfm doctor --project-updates` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, or `LOCAL-DELETED`, and prints under each `UPDATED` row the upstream diff since its pin; it writes nothing and exits 0 clean, 1 review, 3 failure. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-run the report.
-2. Read what upstream changed in each printed diff — the intent of the change — and decide per file what applies locally; install-time values are never read on update.
+1. `pfm doctor --project-updates` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, `MOVED`, or `LOCAL-DELETED`, and prints under each `UPDATED` row the upstream diff since its pin. Its `RETIRED-NAME` section lists retired references in project files, including CURRENT pins; non-CURRENT pins are covered by their report rows, and the baseline ledger and generated engine mirrors are excluded; `UNREADABLE` names scan failures. A readable text file over 1 MiB gets one `INCOMPLETE` coverage row, with prefix hits retained; cap alone never exits 3. A report with only such gaps ends INCOMPLETE at exit 0, not clean. It writes nothing: exit 0 for clean or incomplete coverage, 1 for review (including prefix hits), 3 for failure. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-run the report.
+2. Read each printed diff and `RETIRED-NAME` hit, and decide per file what applies locally; install-time values are never read on update.
 3. Port what applies through `/pcm`, keeping the project's own edits (the guarded framework-edit flow).
-4. Advance the pin: `pfm update pin <local>...` (or `--all`); a `NEW` template you adopt: `pfm update pin --template <template> <local>`; one you will never take: `pfm update ignore <template>...` (`--undo` reverses); a `GONE-UPSTREAM` or `LOCAL-DELETED` file you keep or forget: `pfm update drop <local>...`.
+4. Advance the pin: `pfm update pin <local>...` (or `--all`); a `NEW` template you adopt: `pfm update pin --template <template> <local>`; a `MOVED` file: keep it, move it to the row's new local path, then `pfm update pin --template <new-template> <new-local>` and `pfm update drop <old-local>`; one you will never take: `pfm update ignore <template>...` (`--undo` reverses); a `GONE-UPSTREAM` or `LOCAL-DELETED` file you keep or forget: `pfm update drop <local>...`.
 
 `pfm update` (bare) advances the source clone to the latest release tag (or `--to vX.Y.Z`), rebuilds and installs the binary, runs `pfm doctor` (rolling back on failure), then prints the same report `pfm doctor --project-updates` prints for this project — start step 2 from there.
 
 ## Codex mirror
 
-`pfm codex build [repo-root]` is the SINGLE writer of `AGENTS.md`, `.codex/` and `$HOME/.codex/`; `pfm codex check` gates drift (non-zero names each MISSING, STALE, ORPHANed, or CONFLICTing artifact). The `codex-sync.sh` hooks run both after any Edit/Write to a Claude source; a Bash-driven write bypasses the hook, so run `pfm codex build . && pfm codex check .` yourself. `pfm codex agents` compiles the machine-global agent `.toml` twins.
+engine-sync, the `engine-sync` plugin's binary that `pfm codex build [repo-root]` forwards to, is the SINGLE writer of `AGENTS.md`, `.codex/` and `$HOME/.codex/`; `pfm codex check` gates drift (non-zero names each MISSING, STALE, ORPHANed, or CONFLICTing artifact). The `codex-sync.sh` hooks run both after any Edit/Write to a Claude source; a Bash-driven write bypasses the hook, so run `pfm codex build . && pfm codex check .` yourself. `pfm codex agents` compiles the machine-global agent `.toml` twins.
 
 ## Host integration
 

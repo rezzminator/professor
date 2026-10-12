@@ -1,0 +1,10 @@
+{
+ "args": [
+  "locate",
+  "a2nested"
+ ],
+ "dirs": [],
+ "links": {
+  ".claude/projects/-work-repo/aaaaaaaa-1111-2222-3333-444444444444/subagents/workflows/wf_one/agent-alias.jsonl": "../../agent-a1flat.jsonl"
+ }
+}

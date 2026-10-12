@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -19,6 +20,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -471,10 +473,11 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	if code := run([]string{"doctor"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
+	links := fmt.Sprintf("account-links: ok (1 accounts × %d entries)", len(installer.StoreEntries))
 	if !strings.Contains(stdout.String(), "doctor: clean") ||
 		!strings.Contains(stdout.String(), "transcripts=1") ||
-		!strings.Contains(stdout.String(), "host-check: ok (22 checks)") ||
-		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 22 entries)") {
+		!strings.Contains(stdout.String(), fmt.Sprintf("host-check: ok (%d checks)", len(hostcheck.Detectors()))) ||
+		!strings.Contains(stdout.String(), links) {
 		t.Fatalf("doctor stdout=%q", stdout.String())
 	}
 }
@@ -880,7 +883,7 @@ func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
 	}
 }
 
-// Only stale answers config-free: every other internal command still refuses.
+// Every other internal command still refuses while the legacy config waits.
 func TestInternalCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
 	legacyConfigJail(t)
 	var stdout, stderr bytes.Buffer
@@ -987,7 +990,8 @@ func TestInstallerManagedCleanupOptions(t *testing.T) {
 func stageStorePlugins(t *testing.T, home string) {
 	t.Helper()
 	storeDir := installer.ClaudeStore(home)
-	ids, err := installer.ClaudePluginsNotInstalled(t.TempDir())
+	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()})
+	ids, err := installer.ClaudePluginsNotInstalled(t.TempDir(), targets)
 	if err != nil {
 		t.Fatal(err)
 	}

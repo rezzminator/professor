@@ -1,7 +1,3 @@
-**Title:** Keyboard shortcuts
-
----
-
 # The Rust Programming Language
 
 *by Steve Klabnik, Carol Nichols, and Chris Krycho, with contributions from the Rust Community*

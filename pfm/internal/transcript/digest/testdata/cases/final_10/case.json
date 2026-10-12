@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--final",
+  "10"
+ ],
+ "dirs": []
+}

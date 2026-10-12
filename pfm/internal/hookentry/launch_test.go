@@ -2,11 +2,15 @@ package hookentry
 
 import (
 	"bytes"
+	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -15,7 +19,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -207,6 +213,133 @@ func TestLaunchWorkbench(t *testing.T) {
 	}
 }
 
+func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
+	const want = "Claude started WITHOUT its system prompt file"
+	for _, test := range []struct {
+		name    string
+		policy  string
+		stage   bool
+		refused bool // the chat's tmux server cannot be created: no chat starts
+		warning bool
+		// terminal: stdin and stderr are a terminal; wait: the launcher holds for Enter.
+		terminal, wait bool
+		// cancel: the starter presses Ctrl-C at the Enter prompt; the launch is
+		// abandoned and the server it already made is killed, not orphaned.
+		cancel bool
+	}{
+		{"professor policy with no source clone", config.SystemPromptProfessor, false, false, true, true, true, false},
+		{"professor policy with no source clone off a terminal", config.SystemPromptProfessor, false, false, true, false, false, false},
+		{"professor policy with the composed prompt staged", config.SystemPromptProfessor, true, false, false, true, false, false},
+		{"production policy needs no prompt", config.SystemPromptProduction, false, false, false, true, false, false},
+		{"professor policy with no source clone, server refused", config.SystemPromptProfessor, false, true, false, true, false, false},
+		{"professor policy with no source clone, Ctrl-C at the prompt", config.SystemPromptProfessor, false, false, true, true, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := testjail.ShortRoot(t)
+			dir := filepath.Join(root, "acme", "src")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := atomicfile.Write(
+				filepath.Join(root, "acme", ".professor", "baseline.json"), []byte("{}"), 0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if test.stage {
+				if err := paths.WriteSourceRepoMarker(root, t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+				promptPath, err := action.ProfessorPromptPath(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(promptPath, []byte("professor prompt\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			binary, argvPath := filepath.Join(root, "claude"), filepath.Join(root, "argv")
+			if err := testjail.WriteExecutable(
+				binary,
+				[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+action.Quote(argvPath)+"\n"),
+				0o700,
+			); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			t.Setenv("TMUX", "")
+			t.Setenv(paths.EnvHome, root)
+			t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
+			runtime := config.Runtime{
+				Config: config.Config{Claude: config.ClaudePrefs{SystemPrompt: test.policy}},
+				Paths: paths.Values{
+					Home:    root,
+					StateDB: filepath.Join(root, "state", "pfm.db"),
+					SIDDir:  filepath.Join(root, "sid"),
+					TmuxDir: filepath.Join(root, "tmux"),
+				},
+			}
+			if test.refused {
+				if err := os.WriteFile(runtime.Paths.TmuxDir, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var stderr, stdout bytes.Buffer
+			enter := strings.NewReader("\n")
+			var input io.Reader = enter
+			if test.cancel {
+				t.Setenv(spawn.TestFreshSocketEnv, "cc-cancel")
+				// The test process outlives the interrupt whatever the launcher does.
+				guard := make(chan os.Signal, 1)
+				signal.Notify(guard, os.Interrupt)
+				t.Cleanup(func() { signal.Stop(guard) })
+				released := make(chan struct{})
+				t.Cleanup(func() { close(released) })
+				input = interruptingReader{released: released}
+			}
+			t.Cleanup(launchnotice.Replace(input, test.terminal))
+			code := Launch(
+				[]string{"--real", binary, "--cwd", dir, "--"}, &stdout, &stderr, runtime, &paths.MapEnv{},
+			)
+			if test.cancel {
+				if code != 130 {
+					t.Fatalf("launch cancelled at the prompt = %d, want 130: %s", code, stderr.String())
+				}
+				socket := filepath.Join(runtime.Paths.TmuxDir, "cc-cancel")
+				if exec.Command("tmux", "-S", socket, "has-session").Run() == nil {
+					_ = exec.Command("tmux", "-S", socket, "kill-server").Run()
+					t.Fatalf("the cancelled launch left its tmux server %s running", socket)
+				}
+			} else if waited := enter.Len() == 0; waited != test.wait {
+				t.Fatalf("read Enter = %t, want %t: %q", waited, test.wait, stderr.String())
+			} else if (code != 0) != test.refused {
+				t.Fatalf("launch = %d, want refused=%t: %s", code, test.refused, stderr.String())
+			}
+			if got := strings.Contains(stderr.String(), want); got != test.warning {
+				t.Fatalf("stderr warns=%t, want %t: %q", got, test.warning, stderr.String())
+			}
+		})
+	}
+}
+
+// interruptingReader is a starter pressing Ctrl-C at the Enter prompt: its read
+// interrupts the process, then waits for a line that never comes, giving up
+// after a bound so an interrupt nobody handles fails the test, not hangs it.
+type interruptingReader struct{ released chan struct{} }
+
+func (reader interruptingReader) Read([]byte) (int, error) {
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		return 0, err
+	}
+	select {
+	case <-reader.released:
+	case <-time.After(5 * time.Second):
+	}
+	return 0, io.EOF
+}
+
 func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 	accountDir := t.TempDir()
 	wantNames := claudelaunch.SessionEnv(config.ClaudePrefs{AutoCompactWindow: 50000})
@@ -220,27 +353,32 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 	machine := config.Runtime{Config: config.Config{
 		Claude: config.ClaudePrefs{AutoCompactWindow: 100000},
 		Accounts: []config.Account{
-			{ID: 2, ConfigDir: accountDir, Claude: &config.ClaudePrefs{AutoCompactWindow: 50000}},
+			{
+				ID:        2,
+				ConfigDir: accountDir,
+				Claude:    &config.ClaudePrefs{AutoCompactWindow: 50000, HelperModel: "claude-sonnet-5-5"},
+			},
 		},
 	}}
 	for _, test := range []struct {
 		name, ambient, tmux, forced string
 		args                        []string
 		wantWindow                  int64
+		wantHelper                  string
 		session                     bool
 	}{
-		{"print account override", accountDir + "/.", "", "", []string{"-p", "hi"}, 50000, true},
-		{"forced resume", accountDir, "", "1", []string{"--resume", "X"}, 50000, true},
-		{"pfm socket", accountDir, "/tmp/tmux-1000/cc-1-2-3,123,0", "", []string{"--resume", "X"}, 50000, true},
-		{"unmatched ambient", "", "", "", []string{"-p", "hi"}, 100000, true},
-		{"plugin", accountDir, "", "", []string{"plugin", "install", "x"}, 0, false},
-		{"mcp", accountDir, "", "", []string{"mcp", "list"}, 0, false},
-		{"config", accountDir, "", "", []string{"config"}, 0, false},
-		{"agents query", accountDir, "", "", []string{"agents", "--json"}, 0, false},
-		{"version", accountDir, "", "", []string{"--version"}, 0, false},
-		{"short version", accountDir, "", "", []string{"-v"}, 0, false},
-		{"help", accountDir, "", "", []string{"-h"}, 0, false},
-		{"long help", accountDir, "", "", []string{"--help"}, 0, false},
+		{"print account override", accountDir + "/.", "", "", []string{"-p", "hi"}, 50000, "claude-sonnet-5-5", true},
+		{"forced resume", accountDir, "", "1", []string{"--resume", "X"}, 50000, "claude-sonnet-5-5", true},
+		{"pfm socket", accountDir, "/tmp/tmux-1000/cc-1-2-3,123,0", "", []string{"--resume", "X"}, 50000, "claude-sonnet-5-5", true},
+		{"unmatched ambient", "", "", "", []string{"-p", "hi"}, 100000, "", true},
+		{"plugin", accountDir, "", "", []string{"plugin", "install", "x"}, 0, "", false},
+		{"mcp", accountDir, "", "", []string{"mcp", "list"}, 0, "", false},
+		{"config", accountDir, "", "", []string{"config"}, 0, "", false},
+		{"agents query", accountDir, "", "", []string{"agents", "--json"}, 0, "", false},
+		{"version", accountDir, "", "", []string{"--version"}, 0, "", false},
+		{"short version", accountDir, "", "", []string{"-v"}, 0, "", false},
+		{"help", accountDir, "", "", []string{"-h"}, 0, "", false},
+		{"long help", accountDir, "", "", []string{"--help"}, 0, "", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", test.ambient)
@@ -270,7 +408,7 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 				}
 				return
 			}
-			for _, want := range claudelaunch.SessionEnv(config.ClaudePrefs{AutoCompactWindow: test.wantWindow}) {
+			for _, want := range claudelaunch.SessionEnv(config.ClaudePrefs{AutoCompactWindow: test.wantWindow, HelperModel: test.wantHelper}) {
 				if count := countEnvironmentEntry(got, want); count != 1 {
 					t.Errorf("%q occurs %d times in exec env", want, count)
 				}
@@ -278,6 +416,14 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 				if count := countEnvironmentEntry(got, name+"=inherited"); count != 0 {
 					t.Errorf("inherited %q survived %d times in exec env", name, count)
 				}
+			}
+			// The helper model is the account's, else Haiku 5.5, whatever the shell exported.
+			wantHelper := test.wantHelper
+			if wantHelper == "" {
+				wantHelper = "claude-haiku-5-5"
+			}
+			if want := "ANTHROPIC_SMALL_FAST_MODEL=" + wantHelper; countEnvironmentEntry(got, want) != 1 {
+				t.Errorf("%q occurs %d times in exec env, want once", want, countEnvironmentEntry(got, want))
 			}
 			if countEnvironmentEntry(got, "PFM_KEEP=kept") != 1 {
 				t.Errorf("unrelated env lost from exec: %q", got)
@@ -294,6 +440,63 @@ func countEnvironmentEntry(environment []string, want string) int {
 		}
 	}
 	return count
+}
+
+func TestLaunchReadsCompletedStatusAfterServerExit(t *testing.T) {
+	realTmux, err := exec.LookPath("tmux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, exitStatus := range []int{0, 7} {
+		t.Run(strconv.Itoa(exitStatus), func(t *testing.T) {
+			root := testjail.ShortRoot(t)
+			binDir := filepath.Join(root, "bin")
+			if err := os.MkdirAll(binDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// Force the done waiter to connect only after the last pane exited.
+			// The signal cannot survive that server, but the recorded status must.
+			wrapper := "#!/bin/sh\n" +
+				"if [ \"$3\" = wait-for ] && [ \"$4\" != -S ]; then\n" +
+				"  case \"$4\" in pfm-launch-done-*)\n" +
+				"    n=0; while " + action.Quote(realTmux) + " -S \"$2\" has-session 2>/dev/null; do\n" +
+				"      n=$((n + 1)); [ \"$n\" -lt 500 ] || exit 99; sleep 0.01\n" +
+				"    done;; esac\nfi\nexec " + action.Quote(realTmux) + " \"$@\"\n"
+			if err := testjail.WriteExecutable(filepath.Join(binDir, "tmux"), []byte(wrapper), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(binDir, "claude")
+			if err := testjail.WriteExecutable(
+				binary,
+				[]byte("#!/bin/sh\nexit "+strconv.Itoa(exitStatus)+"\n"),
+				0o700,
+			); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			t.Setenv("TMUX", "")
+			t.Setenv(paths.EnvHome, root)
+			t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
+			machine := config.Runtime{
+				Config: config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
+				Paths: paths.Values{
+					Home: root, StateDB: filepath.Join(root, "state", "pfm.db"),
+					SIDDir: filepath.Join(root, "sid"), TmuxDir: filepath.Join(root, "tmux"),
+				},
+			}
+			var stdout, stderr bytes.Buffer
+			if got := Launch(
+				[]string{"--real", binary, "--cwd", root, "--"},
+				&stdout,
+				&stderr,
+				machine,
+				&paths.MapEnv{},
+			); got != exitStatus {
+				t.Fatalf("completed launch = %d, want %d: %s", got, exitStatus, stderr.String())
+			}
+		})
+	}
 }
 
 func TestReadLaunchStatusRejectsMissingAndInvalidFiles(t *testing.T) {
@@ -384,5 +587,58 @@ func TestLaunchPassthroughWaitsForParentAccountRegistration(t *testing.T) {
 	}
 	if code != 0 {
 		t.Fatalf("parent registration rejected healthy managed child: code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestLaunchPassthroughDecidesTheCostLedgerOfASessionOnly(t *testing.T) {
+	previousExec, previousArm := LaunchExec, armCostLedger
+	t.Cleanup(func() { LaunchExec, armCostLedger = previousExec, previousArm })
+	t.Setenv("PFM_LAUNCH_PASSTHROUGH", "1")
+	t.Setenv("TMUX", "")
+	for _, test := range []struct {
+		name      string
+		args      []string
+		ledger    bool
+		wantCalls int
+	}{
+		{"interactive resume with the ledger on", []string{"--resume", "X"}, true, 1},
+		{"interactive start with the ledger switched off", []string{"--model", "opus"}, false, 1},
+		{"print mode is no chat", []string{"-p", "hi"}, true, 0},
+		{"output-format is print mode", []string{"--output-format=json", "hi"}, true, 0},
+		{"a subcommand starts no session", []string{"mcp", "list"}, true, 0},
+		{"help starts no session", []string{"--help"}, true, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var enabled []bool
+			armCostLedger = func(environ []string, _ paths.Env, ledger bool, _ io.Writer) ([]string, string) {
+				enabled = append(enabled, ledger)
+				return append(append([]string(nil), environ...), "PFM_COST_LEDGER=armed-by-test"), "on"
+			}
+			var execEnv []string
+			LaunchExec = func(_ string, _, environment []string) error {
+				execEnv = append([]string(nil), environment...)
+				return nil
+			}
+			machine := config.Runtime{Config: config.Config{Claude: config.ClaudePrefs{CostLedger: test.ledger}}}
+			if code := Launch(
+				append([]string{"--real", "/bin/echo", "--"}, test.args...),
+				&bytes.Buffer{}, &bytes.Buffer{}, machine, paths.OSEnv{},
+			); code != 0 {
+				t.Fatalf("Launch code = %d", code)
+			}
+			if len(enabled) != test.wantCalls {
+				t.Fatalf("the ledger was decided %d times, want %d", len(enabled), test.wantCalls)
+			}
+			if test.wantCalls == 1 {
+				if enabled[0] != test.ledger {
+					t.Errorf("decided with claude.costLedger=%t, want %t", enabled[0], test.ledger)
+				}
+				if countEnvironmentEntry(execEnv, "PFM_COST_LEDGER=armed-by-test") != 1 {
+					t.Errorf("the exec environment lacks the ledger decision: %q", execEnv)
+				}
+			} else if countEnvironmentEntry(execEnv, "PFM_COST_LEDGER=armed-by-test") != 0 {
+				t.Errorf("a run that starts no chat carries a ledger decision: %q", execEnv)
+			}
+		})
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -40,10 +41,7 @@ func KillResolved(
 		return code
 	}
 	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
-	target, err := manager.Kill(ctx, kill.Request{
-		ID: chat.ID, Engine: chat.Engine, RolloutPath: chat.Path,
-		SocketName: chat.Socket, PaneID: chat.Pane, Exit: exit,
-	})
+	target, err := manager.Kill(ctx, resolvedKillRequest(chat, exit))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 		return 1
@@ -59,6 +57,43 @@ func KillResolved(
 	}
 	fmt.Fprintln(stdout, KillOutcome(target.ID, "", "", recorded))
 	return 0
+}
+
+// ExitResolved ends the live chat that asked to end itself: the kill is
+// recorded and the detached exit finisher spawned exactly as KillResolved
+// does with exit, and it returns at once, without ConfirmExit. Its caller is
+// that chat, mid-turn: the pane closes only after the turn this call belongs
+// to ends, so waiting here for the pane would hold that turn open until the
+// finisher's fallback kill-pane, and the chat would never read the answer.
+func ExitResolved(ctx context.Context, runtime *config.Runtime, chat headless.Chat) (outcome string, returnErr error) {
+	var runtimes []config.Runtime
+	if runtime != nil {
+		runtimes = append(runtimes, *runtime)
+	}
+	var stderr strings.Builder
+	database, manager, code := fleet.OpenKillManager(&stderr, runtimes...)
+	if code != 0 {
+		return "", fmt.Errorf("open the kill manager: %s", strings.TrimSpace(stderr.String()))
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close the kill database: %w", err))
+		}
+	}()
+	target, err := manager.Kill(ctx, resolvedKillRequest(chat, true))
+	if err != nil {
+		return "", err
+	}
+	return KillOutcome(target.ID, target.SocketName, target.PaneID, !kill.AddressOnly(target)), nil
+}
+
+// resolvedKillRequest is the one kill a resolved chat asks for: its exact id,
+// engine, transcript, socket and pane, so a split pane stays pane-scoped.
+func resolvedKillRequest(chat headless.Chat, exit bool) kill.Request {
+	return kill.Request{
+		ID: chat.ID, Engine: chat.Engine, RolloutPath: chat.Path,
+		SocketName: chat.Socket, PaneID: chat.Pane, Exit: exit,
+	}
 }
 
 // OpenID resolves an indexed chat ID through a read-only fleet scan and opens it.
@@ -110,6 +145,10 @@ func OpenID(
 	return 1
 }
 
+// ErrNotIndexed is OpenDetachedID's answer for an id the fleet scan does not
+// hold: the wrapped text reads `chat "<id>" is not indexed`.
+var ErrNotIndexed = errors.New("not indexed")
+
 // OpenDetachedID opens an indexed chat for a caller that has no terminal to be
 // replaced by an attach — the MCP daemon. It is OpenID's own resolution and
 // preparation over action.Executor.OpenDetached: no K1 eval line, no attach,
@@ -137,7 +176,7 @@ func OpenDetachedID(
 		}
 		return openDetachedResolvedRow(ctx, row, stderr, effective)
 	}
-	return action.OpenResult{}, fmt.Errorf("chat %q is not indexed", id)
+	return action.OpenResult{}, fmt.Errorf("chat %q is %w", id, ErrNotIndexed)
 }
 
 // OpenDetachedTarget opens one already-resolved chat without scanning for its
@@ -317,7 +356,7 @@ func OpenRow(
 	}
 	// Dispatch execs tmux or zsh when stdout is a terminal and never returns,
 	// so the unseen flag clears before it.
-	markRemindersSeen(ctx, effective.Paths, row.ID, stderr)
+	markSchedulesSeen(ctx, effective.Paths, row.ID, stderr)
 	if line != "" {
 		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
@@ -327,10 +366,10 @@ func OpenRow(
 	return 0
 }
 
-// markRemindersSeen clears the unseen-reminder flag of a chat a human is now
+// markSchedulesSeen clears the unseen-schedule flag of a chat a human is now
 // opening. A failed clear is reported and the open proceeds: the chat is
 // already open, and the flag stays visible as a still-marked row.
-func markRemindersSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
+func markSchedulesSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
 	if id == "" {
 		return
 	}
@@ -340,8 +379,8 @@ func markRemindersSeen(ctx context.Context, values paths.Values, id string, stde
 			fmt.Fprintf(stderr, "pfm chat open: close shared state: %v\n", err)
 		}
 	}()
-	if _, err := state.ClearReminderUnseen(ctx, id); err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: clear reminder flag of %s: %v\n", id, err)
+	if _, err := state.ClearScheduleUnseen(ctx, id); err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: clear schedule flag of %s: %v\n", id, err)
 	}
 }
 

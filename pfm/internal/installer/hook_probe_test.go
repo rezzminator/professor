@@ -14,6 +14,7 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 	home := t.TempDir()
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
+	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	for _, testCase := range []struct {
 		name  string
 		setup func(t *testing.T)
@@ -50,6 +51,7 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 
 func TestReportHooksNoClaudeAccountAndCodexResidue(t *testing.T) {
 	home := t.TempDir()
+	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -64,6 +66,7 @@ func TestReportHooksNoClaudeAccountAndCodexResidue(t *testing.T) {
 
 func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	home := t.TempDir()
+	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -98,6 +101,7 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 func stageCodexProbeHome(t *testing.T, hooksBody string) (home string, machine pfmconfig.Config, hooksPath string) {
 	t.Helper()
 	home = t.TempDir()
+	stageGptHookProbeAssets(t, filepath.Join(home, ".claude"))
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -249,5 +253,19 @@ func TestHookTrustReceiptMustNameExpectedHandler(t *testing.T) {
 				t.Fatalf("wrong-handler receipt accepted: %+v", rows)
 			}
 		})
+	}
+}
+
+func TestDoctorDisabledHookDoesNotPromiseInstallRepair(t *testing.T) {
+	old := HookProbeOverride
+	t.Cleanup(func() { HookProbeOverride = old })
+	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
+		return []HookProbeResult{{Hook: ExpectedHook{Target: "codex[1]", File: "hooks.json"}, State: "disabled"}}
+	}
+	var output bytes.Buffer
+	warnings, failures := ReportHooks(&output, t.TempDir(), pfmconfig.Config{}, false)
+	if warnings != 1 || failures != 0 || !strings.Contains(output.String(), "DISABLED") ||
+		strings.Contains(output.String(), "pfm install") {
+		t.Fatalf("disabled advice warnings=%d failures=%d: %s", warnings, failures, output.String())
 	}
 }

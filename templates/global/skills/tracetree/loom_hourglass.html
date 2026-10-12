@@ -1,0 +1,464 @@
+<template id="tpl-hourglass">
+<div style="position:relative; width:1680px; height:1100px; overflow:hidden; background:#0F1426; color:#E8E6DF; font-family:var(--mono)">
+  <sc-if value="{{notReady}}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px">
+      <div style="font-family:var(--display); font-weight:800; font-size:64px; color:#2A3460">HOURGLASS</div>
+      <div style="font-size:13px; color:{{loadColor}}">{{loadText}}</div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ready}}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute; left:24px; top:20px; width:1050px; display:flex; flex-direction:column; gap:6px">
+      <div class="ell" style="font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA3C2">Hourglass · run {{runId}} · {{repo}} — tt map --to above the waist, --from below it</div>
+      <h1 class="ell" title="{{focalId}}" style="margin:0; font-family:var(--display); font-weight:800; font-size:{{titleSize}}px; line-height:1; color:#F3F1EA">{{title}}</h1>
+      <div class="ell" style="font-size:12.5px; color:#C9CED9">{{subtitle}}</div>
+    </div>
+    <button class="bt" onClick="{{toggleAll}}" aria-pressed="{{allPressed}}" title="--all adds the walk-order links: the step a reader took next, whether or not the code calls it" style="position:absolute; left:1100px; top:18px; width:146px; height:44px; box-sizing:border-box; padding:5px 10px; border-radius:7px; border:1px solid {{allBorder}}; background:{{allBg}}; display:flex; flex-direction:column; justify-content:center">
+      <span style="font-size:13px; font-weight:600; color:{{allColor}}">--all {{allState}}</span>
+      <span class="ell" style="font-size:10px; color:#9AA3C2">walk-order links</span>
+    </button>
+    <div style="position:absolute; left:1262px; top:18px; width:394px; display:flex; gap:6px">
+      <sc-for list="{{runs}}" as="r" hint-placeholder-count="3">
+        <button class="bt" onClick="{{r.pick}}" aria-pressed="{{r.pressed}}" style="flex:1; min-width:0; height:44px; padding:5px 9px; border-radius:7px; border:1px solid {{r.border}}; background:{{r.bg}}; display:flex; flex-direction:column; justify-content:center">
+          <span class="ell" style="display:block; font-size:12px; font-weight:600; color:{{r.color}}">{{r.repo}}</span>
+          <span class="ell" style="display:block; font-size:10px; color:#9AA3C2">{{r.when}}</span>
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="position:absolute; left:24px; top:124px; width:320px; display:flex; flex-direction:column; gap:3px">
+      <span style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Crossroads · {{compCount}} components</span>
+      <span style="font-size:10.5px; color:#9AA3C2">ranked like the kit's hub: readers, then hops</span>
+    </div>
+    <div class="scroller" style="position:absolute; left:24px; top:166px; width:328px; height:910px; overflow-y:auto; overflow-x:hidden">
+      <div style="display:flex; flex-direction:column; gap:4px; width:320px">
+        <sc-for list="{{cross}}" as="x" hint-placeholder-count="12">
+          <button class="bt fade" onClick="{{x.pick}}" onMouseEnter="{{x.enter}}" onMouseLeave="{{x.leave}}" aria-pressed="{{x.pressed}}" title="{{x.title}}" style="flex:none; position:relative; width:320px; height:46px; box-sizing:border-box; padding:5px 10px 6px 34px; border-radius:7px; border:1px solid {{x.border}}; background:{{x.bg}}; display:flex; flex-direction:column; justify-content:center; gap:2px; overflow:hidden">
+            <span style="position:absolute; left:8px; top:7px; width:20px; text-align:right; font-size:10px; color:#5B6488">{{x.rank}}</span>
+            <span style="display:flex; align-items:baseline; gap:8px">
+              <span class="ell" style="flex:1; min-width:0; font-size:12px; font-weight:600; color:{{x.color}}">{{x.name}}</span>
+              <span style="flex:none; font-size:10.5px; color:#9AA3C2">↑{{x.up}} ↓{{x.dn}}</span>
+            </span>
+            <span style="display:flex; align-items:center; gap:8px">
+              <span class="ell" style="flex:1; min-width:0; font-size:10px; color:#7D86A8">{{x.sub}}</span>
+              <span style="flex:none; display:flex; height:3px; width:{{x.barW}}px; gap:1px">
+                <sc-for list="{{x.bar}}" as="b"><span style="flex:1; border-radius:1px; background:{{b.c}}"></span></sc-for>
+              </span>
+            </span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+
+    <svg aria-hidden="true" width="1680" height="1100" style="position:absolute; left:0; top:0; pointer-events:none">
+      <defs>
+        <linearGradient id="hgGlass" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#1E2850" stop-opacity="0.75"></stop>
+          <stop offset="0.5" stop-color="#151C36" stop-opacity="0.35"></stop>
+          <stop offset="1" stop-color="#1E2850" stop-opacity="0.75"></stop>
+        </linearGradient>
+      </defs>
+      <path d="{{glass}}" style="fill:url(#hgGlass); stroke:#3A4677; stroke-width:1.5"></path>
+      <path d="{{shine}}" style="fill:none; stroke:rgba(243,241,234,0.07); stroke-width:6; stroke-linecap:round"></path>
+    </svg>
+    <div style="position:absolute; left:{{capTop.l}}px; top:{{capTop.t}}px; width:{{capTop.w}}px; height:10px; border-radius:5px; background:#2A3460; box-shadow:0 2px 0 #0B0F1E"></div>
+    <div style="position:absolute; left:{{capBot.l}}px; top:{{capBot.t}}px; width:{{capBot.w}}px; height:10px; border-radius:5px; background:#2A3460; box-shadow:0 -2px 0 #0B0F1E"></div>
+
+    <sc-for list="{{strands}}" as="s" hint-placeholder-count="12">
+      <svg class="fade" aria-hidden="true" width="1680" height="1100" style="position:absolute; left:0; top:0; pointer-events:none; opacity:{{s.op}}">
+        <path class="{{s.cls}}" d="{{s.d}}" style="fill:none; stroke:{{s.color}}; stroke-width:{{s.w}}; stroke-dasharray:{{s.dash}}; stroke-opacity:{{s.so}}; animation-delay:{{s.dly}}s"></path>
+        <path class="{{s.gcls}}" d="{{s.d}}" style="fill:none; stroke:{{s.color}}; stroke-width:{{s.gw}}; stroke-linecap:round; stroke-dasharray:0.1 16; animation-duration:{{s.dur}}s, .5s; animation-delay:{{s.gd}}s, {{s.dly}}s"></path>
+      </svg>
+    </sc-for>
+
+    <sc-for list="{{rowLabels}}" as="l" hint-placeholder-count="4">
+      <span title="{{l.title}}" style="position:absolute; left:{{l.l}}px; top:{{l.t}}px; width:34px; text-align:right; white-space:nowrap; font-size:10px; color:#7D86A8">{{l.text}}</span>
+    </sc-for>
+
+    <sc-if value="{{upEmpty}}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; left:644px; top:440px; width:400px; text-align:center; font-family:var(--sans); font-size:12.5px; line-height:1.45; color:#9AA3C2">{{upEmptyText}}</div>
+    </sc-if>
+    <sc-if value="{{dnEmpty}}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; left:644px; top:632px; width:400px; text-align:center; font-family:var(--sans); font-size:12.5px; line-height:1.45; color:#9AA3C2">{{dnEmptyText}}</div>
+    </sc-if>
+
+    <sc-for list="{{pills}}" as="p" hint-placeholder-count="8">
+      <button class="bt {{p.cls}}" onClick="{{p.pick}}" onMouseEnter="{{p.enter}}" onMouseLeave="{{p.leave}}" title="{{p.title}}" style="position:absolute; left:{{p.l}}px; top:{{p.t}}px; width:160px; height:48px; box-sizing:border-box; padding:5px 9px 6px 13px; border-radius:8px; background:{{p.bg}}; border:1px solid {{p.border}}; opacity:{{p.op}}; animation-delay:{{p.dly}}s; display:flex; flex-direction:column; justify-content:center; gap:2px; overflow:hidden; transition:opacity .25s ease, border-color .25s ease">
+        <span style="position:absolute; left:0; top:0; bottom:0; width:4px; display:flex; flex-direction:column">
+          <sc-for list="{{p.bar}}" as="b"><span style="flex:1; background:{{b.c}}"></span></sc-for>
+        </span>
+        <span class="ell" style="font-size:12px; font-weight:600; color:#F3F1EA">{{p.name}}</span>
+        <span class="ell" style="font-size:10px; color:#9AA3C2">{{p.sub}}</span>
+      </button>
+    </sc-for>
+    <sc-for list="{{mores}}" as="m" hint-placeholder-count="1">
+      <div class="{{m.cls}}" title="{{m.title}}" style="position:absolute; left:{{m.l}}px; top:{{m.t}}px; width:160px; height:48px; box-sizing:border-box; padding:6px 10px; border-radius:8px; border:1px dashed #3A4677; display:flex; flex-direction:column; justify-content:center; gap:2px; animation-delay:{{m.dly}}s">
+        <span style="font-size:12px; font-weight:600; color:#C9CED9">{{m.text}}</span>
+        <span class="ell" style="font-size:10px; color:#7D86A8">{{m.sub}}</span>
+      </div>
+    </sc-for>
+
+    <button class="bt {{waist.cls}}" onMouseEnter="{{waist.enter}}" onMouseLeave="{{waist.leave}}" title="{{waist.title}}" style="position:absolute; left:{{waist.l}}px; top:{{waist.t}}px; width:360px; height:104px; box-sizing:border-box; padding:10px 16px 10px 20px; border-radius:12px; background:#1E2850; border:1.5px solid {{waist.border}}; box-shadow:0 0 0 6px rgba(15,20,38,0.9), 0 0 36px rgba(255,180,84,0.18); display:flex; flex-direction:column; justify-content:center; gap:3px; overflow:hidden; animation-delay:{{waist.dly}}s; cursor:default">
+      <span style="position:absolute; left:0; top:0; bottom:0; width:6px; display:flex; flex-direction:column">
+        <sc-for list="{{waist.bar}}" as="b"><span style="flex:1; background:{{b.c}}"></span></sc-for>
+      </span>
+      <span style="font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:#FFB454">The waist{{waist.hub}}</span>
+      <span class="ell" style="font-family:var(--display); font-weight:800; font-size:28px; line-height:1; color:#F3F1EA">{{waist.name}}</span>
+      <span class="ell" style="font-size:10.5px; color:#9AA3C2">{{waist.sub}}</span>
+    </button>
+
+    <div style="position:absolute; left:376px; top:516px; width:254px; display:flex; flex-direction:column; gap:3px; text-align:right">
+      <span style="font-size:12px; font-weight:600; color:#C9CED9">▲ --to · {{upN}} above</span>
+      <span style="font-family:var(--sans); font-size:11.5px; line-height:1.4; color:#9AA3C2">what reaches it, nearest first; the grains fall the way each link was walked</span>
+    </div>
+    <div style="position:absolute; left:1058px; top:516px; width:256px; display:flex; flex-direction:column; gap:3px">
+      <span style="font-size:12px; font-weight:600; color:#C9CED9">▼ --from · {{dnN}} below</span>
+      <span style="font-family:var(--sans); font-size:11.5px; line-height:1.4; color:#9AA3C2">what it reaches; ■ marks a component where a reader stopped</span>
+    </div>
+
+    <div class="scroller" style="position:absolute; left:1340px; top:124px; width:324px; height:952px; overflow-y:auto; overflow-x:hidden">
+      <div style="width:316px; display:flex; flex-direction:column; gap:16px">
+        <div style="display:flex; flex-direction:column; gap:4px">
+          <span style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">The waist, held</span>
+          <span style="font-size:12px; line-height:1.5; color:#E8E6DF; word-break:break-all">{{detail.where}}</span>
+          <span style="font-size:11px; line-height:1.5; color:#9AA3C2">{{detail.kind}}</span>
+          <span style="font-size:11px; line-height:1.5; color:#9AA3C2">{{detail.hops}}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px">
+          <span style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Readers crossing · hover one to trace its grains</span>
+          <div style="display:flex; flex-wrap:wrap; gap:5px">
+            <sc-for list="{{readers}}" as="c" hint-placeholder-count="3">
+              <span class="fade" onMouseEnter="{{c.enter}}" onMouseLeave="{{c.leave}}" title="{{c.title}}" style="padding:3px 8px; border-radius:6px; font-size:11px; font-weight:600; color:{{c.color}}; background:{{c.bg}}; border:1px solid {{c.color}}; cursor:default">{{c.label}}</span>
+            </sc-for>
+          </div>
+        </div>
+        <sc-if value="{{hasEnds}}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; flex-direction:column; gap:6px">
+            <span style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Ends here</span>
+            <sc-for list="{{ends}}" as="e" hint-placeholder-count="1">
+              <div style="display:flex; flex-direction:column; gap:2px; font-size:11px; line-height:1.4">
+                <span style="color:#C9CED9; font-weight:600">■ {{e.k}} <span style="color:#7D86A8; font-weight:400">{{e.who}}</span></span>
+                <span class="cl2" title="{{e.note}}" style="font-family:var(--sans); color:#AEB6D3">{{e.note}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div style="display:flex; flex-direction:column; gap:8px">
+          <span style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">{{linkHead}}</span>
+          <sc-for list="{{links}}" as="k" hint-placeholder-count="5">
+            <div style="display:flex; flex-direction:column; gap:2px; padding-left:8px; border-left:2px solid {{k.color}}">
+              <span style="display:flex; gap:6px; font-size:11px; align-items:baseline">
+                <span style="flex:none; color:{{k.color}}; font-weight:600">{{k.arrow}}</span>
+                <span class="ell" style="flex:1; min-width:0; color:#E8E6DF">{{k.other}}</span>
+                <span style="flex:none; color:#7D86A8; font-size:10px">{{k.who}}</span>
+              </span>
+              <span class="cl2" title="{{k.note}}" style="font-family:var(--sans); font-size:11.5px; line-height:1.4; color:#AEB6D3">{{k.note}}</span>
+            </div>
+          </sc-for>
+          <span style="font-size:10.5px; color:#7D86A8">{{linkTail}}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ell" title="{{cmd}}" style="position:absolute; left:372px; top:1030px; width:944px; text-align:center; font-size:11px; color:#7D86A8; user-select:all">{{cmd}}</div>
+    <div style="position:absolute; left:372px; top:1060px; width:944px; display:flex; justify-content:center; gap:18px; align-items:center; font-size:10.5px; color:#9AA3C2">
+      <sc-for list="{{legend}}" as="g" hint-placeholder-count="5">
+        <span style="display:flex; align-items:center; gap:6px"><svg aria-hidden="true" width="26" height="6"><path d="M1 3H25" style="stroke:#C9CED9; stroke-width:{{g.w}}; stroke-dasharray:{{g.dash}}; stroke-opacity:{{g.so}}"></path></svg>{{g.t}}</span>
+      </sc-for>
+      <span style="display:flex; align-items:center; gap:6px"><svg aria-hidden="true" width="26" height="6"><path d="M2 3H25" style="stroke:#FFB454; stroke-width:3; stroke-linecap:round; stroke-dasharray:0.1 7"></path></svg>grains · a reader, dyed by its question</span>
+    </div>
+  </sc-if>
+</div>
+</template>
+<script>
+(function () {
+const DCLogic = DC.DCLogic;
+const HUES = ['#FFB454', '#5DD6F5', '#FF7EB6', '#A6E36A', '#B9A2FF', '#FF8F5E', '#6FE3C1', '#F4E06D'];
+const UNDYED = '#C9CED9';
+const KIND = {
+  call: { dash: 'none', glyph: '→', back: '←', w: 1.6, so: 0.55, dur: 1.1, word: 'call' },
+  names: { dash: '6 4', glyph: '⇢', back: '⇠', w: 1.6, so: 0.55, dur: 1.4, word: 'names' },
+  split: { dash: '12 3 2 3', glyph: '⇉', back: '⇇', w: 1.8, so: 0.6, dur: 1.2, word: 'split' },
+  then: { dash: '1.5 4', glyph: '·', back: '·', w: 1.2, so: 0.4, dur: 2.4, word: 'then' },
+};
+const ORDER = { split: 0, call: 1, names: 2, then: 3 };
+const CX = 844, PW = 160, PH = 48, GAP = 12, MAXROW = 5, COL0 = 362, COL1 = 1326;
+const UPY = [430, 346, 262, 178], DNY = [682, 766, 850, 934];
+const WY = 556, WW = 360, WH = 104;
+const r1 = (v) => Math.round(v * 10) / 10;
+const hue = (q) => (q == null ? UNDYED : HUES[(q - 1) % HUES.length]);
+const tidy = (s) => String(s || '').replace(/^`?tt start`? prints its text\s*(\([^)]*\))?\s*[—–-]?\s*/i, '').trim();
+const base = (p) => String(p || '').split('/').pop();
+const whenOf = (id) => { const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(id); const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m ? `${Number(m[3])} ${mon[Number(m[2]) - 1]} ${m[4]}:${m[5]}` : id; };
+const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; };
+// through pts with a vertical tangent at each one: the glass swells between rows and never overshoots a pill
+const smooth = (pts) => {
+  let d = '';
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[i + 1], m = (y2 - y1) * 0.55;
+    d += `C${r1(x1)} ${r1(y1 + m)} ${r1(x2)} ${r1(y2 - m)} ${r1(x2)} ${r1(y2)}`;
+  }
+  return d;
+};
+const clampOff = (A, B) => { const half = (A.w || PW) / 2 - 14; return Math.max(-half, Math.min(half, (B.x - A.x) * 0.3)); };
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { data: null, err: null, run: null, focal: DC.data.runs[0].focal, all: DC.data.runs[0].all, hovC: null, hovT: null, gen: 0 };
+    this.cache = {};
+  }
+
+  componentDidMount() {
+    this.setState({ data: DC.data });
+  }
+
+  runIndex() {
+    const want = this.state.run != null ? this.state.run : Number(this.props.run ?? 1);
+    return Math.min(Math.max(0, want || 0), this.state.data.runs.length - 1);
+  }
+
+  nameOf(run, i) {
+    const c = run.comps[i];
+    return c.name || `(file) ${base(run.files[c.f] ? run.files[c.f].p : c.id)}`;
+  }
+
+  // the kit's hub order: most threads, then most hops, then id (comps arrive sorted by id)
+  ranked(ri) {
+    const key = `rank/${ri}`;
+    if (this.cache[key]) return this.cache[key];
+    const run = this.state.data.runs[ri];
+    const order = run.comps.map((c, i) => i).sort((a, b) => (run.comps[b].th.length - run.comps[a].th.length) || (run.comps[b].hops.length - run.comps[a].hops.length) || (a - b));
+    const pos = {};
+    order.forEach((c, k) => { pos[c] = k; });
+    return (this.cache[key] = { order, pos });
+  }
+
+  graph(ri, all) {
+    const key = `g/${ri}/${all}`;
+    if (this.cache[key]) return this.cache[key];
+    const run = this.state.data.runs[ri], n = run.comps.length;
+    const out = Array.from({ length: n }, () => []), inn = Array.from({ length: n }, () => []), kept = [];
+    run.edges.forEach((e, k) => {
+      if ((!all && e[2] === 'then') || e[0] === e[1]) return;
+      out[e[0]].push(k); inn[e[1]].push(k); kept.push(k);
+    });
+    const bfs = (s, dir) => {
+      const d = new Map([[s, 0]]);
+      let fr = [s], dep = 0;
+      while (fr.length) {
+        dep += 1;
+        const nx = [];
+        fr.forEach((c) => (dir === 'from' ? out[c] : inn[c]).forEach((k) => {
+          const o = dir === 'from' ? run.edges[k][1] : run.edges[k][0];
+          if (!d.has(o)) { d.set(o, dep); nx.push(o); }
+        }));
+        fr = nx;
+      }
+      return d;
+    };
+    const reach = run.comps.map((c, i) => ({ up: bfs(i, 'to').size - 1, dn: bfs(i, 'from').size - 1 }));
+    return (this.cache[key] = { out, inn, kept, bfs, reach });
+  }
+
+  layout(ri, all, fid) {
+    const key = `l/${ri}/${all}/${fid}`;
+    if (this.cache[key]) return this.cache[key];
+    const run = this.state.data.runs[ri], G = this.graph(ri, all), R = this.ranked(ri);
+    const up = G.bfs(fid, 'to'), dn = G.bfs(fid, 'from');
+    const side = new Map();
+    up.forEach((d, c) => { if (c !== fid) side.set(c, { half: 'up', d, both: dn.has(c) }); });
+    dn.forEach((d, c) => { if (c === fid) return; const s = side.get(c); if (!s || d < s.d) side.set(c, { half: 'dn', d, both: up.has(c) }); });
+    const rows = { up: [[], [], [], []], dn: [[], [], [], []] };
+    side.forEach((s, c) => rows[s.half][Math.min(s.d, 4) - 1].push(c));
+    const focal = { c: fid, x: CX, y: WY, h: WH, w: WW };
+    const nodes = new Map([[fid, focal]]);
+    const pills = [], mores = [], labels = [], hw = { up: [0, 0, 0, 0], dn: [0, 0, 0, 0] };
+    ['up', 'dn'].forEach((half) => rows[half].forEach((list, r) => {
+      if (!list.length) return;
+      list.sort((a, b) => (side.get(a).d - side.get(b).d) || (R.pos[a] - R.pos[b]));
+      const shown = list.length > MAXROW ? list.slice(0, MAXROW - 1) : list;
+      const hidden = list.length > MAXROW ? list.slice(MAXROW - 1) : [];
+      const n = shown.length + (hidden.length ? 1 : 0);
+      const spread = n * PW + (n - 1) * GAP, x0 = CX - spread / 2 + PW / 2;
+      const y = (half === 'up' ? UPY : DNY)[r];
+      shown.forEach((c, i) => {
+        const nd = { c, x: x0 + i * (PW + GAP), y, h: PH, half, r, d: side.get(c).d, both: side.get(c).both };
+        nodes.set(c, nd); pills.push(nd);
+      });
+      if (hidden.length) {
+        const nd = { more: true, x: x0 + shown.length * (PW + GAP), y, h: PH, half, r, hidden };
+        mores.push(nd); hidden.forEach((c) => nodes.set(c, nd));
+      }
+      hw[half][r] = spread / 2 + 44;
+      const ds = list.map((c) => side.get(c).d), lo = Math.min(...ds), hi = Math.max(...ds);
+      labels.push({ y, x: x0 - PW / 2 - 38, half, text: `${half === 'up' ? '↑' : '↓'}${lo}${hi > lo ? '–' + hi : ''}`, n: list.length });
+    }));
+
+    // the glass: each bulb widens monotonically away from the waist and wraps every row it holds
+    const bulb = (half) => {
+      const ys = half === 'up' ? UPY : DNY, w = hw[half];
+      let outer = -1;
+      w.forEach((v, r) => { if (v) outer = r; });
+      const pts = [];
+      if (outer < 0) {
+        const tip = half === 'up' ? WY - WH / 2 - 96 : WY + WH / 2 + 96;
+        return { pts: [[CX - 250, tip]], outerY: tip, outerW: 250 };
+      }
+      const mono = w.map((v, r) => Math.max(WW / 2 + 40, ...w.slice(0, r + 1)));
+      const sg = half === 'up' ? -1 : 1;
+      for (let r = outer; r >= 0; r--) pts.push([CX - mono[r], ys[r] + sg * (PH / 2 + 10)], [CX - mono[r], ys[r] - sg * (PH / 2 + 10)]);
+      const edgeY = ys[outer] + sg * (PH / 2 + 24);
+      return { pts: [[CX - mono[outer], edgeY]].concat(pts), outerY: edgeY, outerW: mono[outer] };
+    };
+    const U = bulb('up'), D = bulb('dn');
+    const neck = WW / 2 + 16;
+    const left = U.pts.concat([[CX - neck, WY - WH / 2 + 4], [CX - neck, WY + WH / 2 - 4]]).concat(D.pts.slice().reverse());
+    const right = left.map(([x, y]) => [2 * CX - x, y]).reverse();
+    const glass = `M${r1(left[0][0])} ${r1(left[0][1])}${smooth(left)}L${r1(right[0][0])} ${r1(right[0][1])}${smooth(right)}Z`;
+    const shineL = left.map(([x, y]) => [x + 12, y]).slice(1, -1);
+    const shine = shineL.length > 1 ? `M${r1(shineL[0][0])} ${r1(shineL[0][1])}${smooth(shineL)}` : '';
+
+    // the strands: one per (link, reader), anchored on the visible pills
+    const strands = [];
+    G.kept.forEach((k) => {
+      const e = run.edges[k], A = nodes.get(e[0]), B = nodes.get(e[1]);
+      if (!A || !B || A === B) return;
+      const ths = e[4].length ? e[4].slice(0, 4) : [null];
+      ths.forEach((t, i) => {
+        const off = (i - (ths.length - 1) / 2) * 4;
+        let d;
+        if (B.y > A.y + 10) {
+          const sx = A.x + clampOff(A, B) + off, sy = A.y + A.h / 2, tx = B.x + clampOff(B, A) + off, ty = B.y - B.h / 2, m = (ty - sy) / 2;
+          d = `M${r1(sx)} ${r1(sy)}C${r1(sx)} ${r1(sy + m)} ${r1(tx)} ${r1(ty - m)} ${r1(tx)} ${r1(ty)}`;
+        } else if (B.y < A.y - 10) {
+          const sd = (A.x + B.x) / 2 >= CX ? 1 : -1;
+          const sx = A.x + sd * (A.w || PW) / 2, sy = A.y + off, tx = B.x + sd * (B.w || PW) / 2, ty = B.y + off;
+          const room = sd > 0 ? COL1 - Math.max(sx, tx) : Math.min(sx, tx) - COL0;
+          const bow = Math.max(8, Math.min(70 + Math.abs(A.y - B.y) * 0.15, room));
+          d = `M${r1(sx)} ${r1(sy)}C${r1(sx + sd * bow)} ${r1(sy)} ${r1(tx + sd * bow)} ${r1(ty)} ${r1(tx)} ${r1(ty)}`;
+        } else {
+          const dir = A.half === 'dn' ? 1 : -1, sy = A.y + dir * A.h / 2, ty = B.y + dir * B.h / 2;
+          d = `M${r1(A.x + off)} ${r1(sy)}C${r1(A.x + off)} ${r1(sy + dir * 46)} ${r1(B.x + off)} ${r1(ty + dir * 46)} ${r1(B.x + off)} ${r1(ty)}`;
+        }
+        const lane = Math.max(A.r == null ? -1 : A.half === 'up' ? 3 - A.r : 4 + A.r, B.r == null ? 4 : B.half === 'up' ? 3 - B.r : 5 + B.r);
+        strands.push({ k, kind: e[2], a: e[0], b: e[1], t, d, lane, seed: hash(`${k}/${t}`) });
+      });
+    });
+    const out = { up, dn, pills, mores, labels, focal, strands, glass, shine,
+      capTop: { l: r1(CX - U.outerW - 20), t: r1(U.outerY - 10), w: r1(2 * U.outerW + 40) },
+      capBot: { l: r1(CX - D.outerW - 20), t: r1(D.outerY), w: r1(2 * D.outerW + 40) },
+      upN: up.size - 1, dnN: dn.size - 1 };
+    return (this.cache[key] = out);
+  }
+
+  refocus(patch) { this.setState({ ...patch, hovC: null, hovT: null, gen: this.state.gen + 1 }); }
+
+  renderVals() {
+    const S = this.state;
+    const empty = { notReady: true, ready: false, loadText: S.err ? `The run data could not load — ${S.err}` : 'Loading the run…', loadColor: S.err ? '#FF8A65' : '#9AA3C2',
+      runs: [], cross: [], strands: [], rowLabels: [], pills: [], mores: [], readers: [], ends: [], links: [], legend: [],
+      waist: { bar: [] }, detail: {}, capTop: {}, capBot: {} };
+    if (!S.data) return empty;
+    const ri = this.runIndex(), run = S.data.runs[ri];
+    if (!run.comps.length) return { ...empty, loadText: 'This run holds no components: no reader stored a hop that held.', loadColor: '#FF8A65' };
+    const R = this.ranked(ri), G = this.graph(ri, S.all);
+    const fid = S.focal != null && S.focal < run.comps.length ? S.focal : R.order[0];
+    const L = this.layout(ri, S.all, fid);
+    const fc = run.comps[fid], F = run.files, T = run.threads;
+    const g = S.gen % 2 ? 'b' : 'a';
+    const adj = new Set();
+    if (S.hovC != null) G.kept.forEach((k) => { const e = run.edges[k]; if (e[0] === S.hovC) adj.add(e[1]); if (e[1] === S.hovC) adj.add(e[0]); });
+    const focusOn = S.hovC != null || S.hovT != null;
+    const litC = (c) => (S.hovT != null ? run.comps[c].th.includes(S.hovT) : S.hovC != null ? c === S.hovC || adj.has(c) : true);
+    const bar = (ths) => (ths.length ? ths.slice(0, 6).map((t) => ({ c: hue(T[t] ? T[t].q : null) })) : [{ c: '#3A4677' }]);
+    const who = (ths) => ths.map((t) => (T[t] ? `${T[t].q == null ? 'Q?' : 'Q' + T[t].q}·${T[t].id}` : '?')).join(' ');
+    const at = (c) => `${F[c.f] ? F[c.f].p : c.id}${c.a != null ? ':' + c.a + (c.z != null && c.z !== c.a ? '–' + c.z : '') : ''}`;
+    const delayOf = (half, r) => (half === 'up' ? (3 - r) * 0.09 : 0.5 + r * 0.09);
+
+    const pills = L.pills.map((p) => {
+      const c = run.comps[p.c], on = litC(p.c);
+      return { l: r1(p.x - PW / 2), t: r1(p.y - PH / 2), cls: `p${g}`, dly: r1(delayOf(p.half, p.r)),
+        name: this.nameOf(run, p.c), sub: `${c.kind} · ${base(F[c.f] ? F[c.f].p : '')}${c.a != null ? ':' + c.a : ''}${c.ends.length ? ' ■' : ''}${p.both ? ' ↺' : ''}`,
+        title: `${c.id}\n${at(c)} · ${c.th.length} readers · hops at ${c.hops.join(', ') || '—'}${p.both ? '\n↺ also on the other side of the waist: a loop runs through it' : ''}${c.ends.length ? '\n■ ' + c.ends.map((e) => e.k + (e.note ? ' — ' + e.note : '')).join('\n■ ') : ''}\nclick to put it at the waist`,
+        bar: bar(c.th), bg: S.hovC === p.c ? '#26305C' : '#1A2140', border: focusOn && on ? '#C9CED9' : '#2E3863', op: focusOn && !on ? 0.3 : 1,
+        pick: () => this.refocus({ focal: p.c }),
+        enter: () => this.setState({ hovC: p.c }), leave: () => { if (this.state.hovC === p.c) this.setState({ hovC: null }); } };
+    });
+    const mores = L.mores.map((m) => ({ l: r1(m.x - PW / 2), t: r1(m.y - PH / 2), cls: `p${g}`, dly: r1(delayOf(m.half, m.r)),
+      text: `+${m.hidden.length} more`, sub: 'hover for names',
+      title: m.hidden.map((c) => this.nameOf(run, c)).join('\n') }));
+    const rowLabels = L.labels.map((l) => ({ l: r1(l.x), t: r1(l.y - 8), text: l.text, title: `${l.n} component${l.n === 1 ? '' : 's'} ${l.half === 'up' ? l.text.slice(1) + ' link(s) above' : l.text.slice(1) + ' link(s) below'} the waist` }));
+
+    const strands = L.strands.map((s) => {
+      const K = KIND[s.kind] || KIND.call;
+      const lit = S.hovT != null ? s.t === S.hovT : S.hovC != null ? s.a === S.hovC || s.b === S.hovC : true;
+      const color = s.t == null ? UNDYED : hue(T[s.t] ? T[s.t].q : null);
+      return { d: s.d, color, dash: K.dash, w: focusOn && lit ? K.w + 0.8 : K.w, so: K.so, gw: focusOn && lit ? 3.4 : 2.6,
+        op: focusOn ? (lit ? 1 : 0.07) : 0.9, cls: `s${g}`, gcls: `g${g}`, dly: r1(0.2 + s.lane * 0.09),
+        dur: r1(K.dur * (0.85 + s.seed * 0.3)), gd: r1(-s.seed * K.dur) };
+    });
+
+    const waistLit = !focusOn || litC(fid);
+    const hubTag = fid === R.order[0] ? ' · the MAP hub' : '';
+    const waist = { l: CX - WW / 2, t: WY - WH / 2, cls: `p${g}`, dly: 0.4, bar: bar(fc.th), hub: hubTag, name: this.nameOf(run, fid),
+      sub: `${fc.kind} · ${base(F[fc.f] ? F[fc.f].p : '')}${fc.a != null ? ':' + fc.a + (fc.z != null && fc.z !== fc.a ? '–' + fc.z : '') : ''} · ${fc.th.length} readers · ${fc.hops.length} hops`,
+      title: fc.id, border: waistLit ? '#FFB454' : '#3A4677',
+      enter: () => this.setState({ hovC: fid }), leave: () => { if (this.state.hovC === fid) this.setState({ hovC: null }); } };
+
+    const cross = R.order.map((c, k) => {
+      const x = run.comps[c], on = c === fid, rc = G.reach[c];
+      return { rank: k + 1, name: this.nameOf(run, c), sub: `${x.kind} · ${base(F[x.f] ? F[x.f].p : '')}${x.a != null ? ':' + x.a : ''} · ${x.hops.length} hops`,
+        up: rc.up, dn: rc.dn, bar: bar(x.th), barW: Math.min(60, 10 * Math.max(1, x.th.length)),
+        color: on ? '#0F1426' : '#F3F1EA', bg: on ? '#FFB454' : S.hovC === c ? '#222B55' : '#182040', border: on ? '#FFB454' : '#2E3863',
+        pressed: on ? 'true' : 'false', title: `${x.id}\n${x.th.length} readers · ${rc.up} above · ${rc.dn} below`,
+        pick: () => this.refocus({ focal: c }),
+        enter: () => this.setState({ hovC: c }), leave: () => { if (this.state.hovC === c) this.setState({ hovC: null }); } };
+    });
+
+    const readers = fc.th.map((t) => ({ label: `${T[t].q == null ? 'Q?' : 'Q' + T[t].q}·${T[t].id}`, color: hue(T[t].q),
+      bg: S.hovT === t ? '#26305C' : 'transparent', title: tidy(T[t].text),
+      enter: () => this.setState({ hovT: t }), leave: () => { if (this.state.hovT === t) this.setState({ hovT: null }); } }));
+    const ends = fc.ends.map((e) => ({ k: e.k, note: e.note || 'no note', who: who(e.th) }));
+
+    const subject = S.hovC != null ? S.hovC : fid;
+    const linkRows = G.kept.filter((k) => run.edges[k][0] === subject || run.edges[k][1] === subject)
+      .map((k) => { const e = run.edges[k], outw = e[0] === subject; return { e, outw, other: outw ? e[1] : e[0] }; })
+      .sort((p, q) => (ORDER[p.e[2]] - ORDER[q.e[2]]) || (p.outw === q.outw ? 0 : p.outw ? 1 : -1) || (R.pos[p.other] - R.pos[q.other]));
+    const links = linkRows.slice(0, 14).map(({ e, outw, other }) => {
+      const K = KIND[e[2]] || KIND.call;
+      return { arrow: `${outw ? K.glyph : K.back} ${K.word}`, other: this.nameOf(run, other), note: e[3] || 'the reader left no note on this link',
+        who: who(e[4]), color: e[4].length ? hue(T[e[4][0]] ? T[e[4][0]].q : null) : UNDYED };
+    });
+    const thenHidden = run.edges.filter((e) => e[2] === 'then').length;
+
+    const runs = S.data.runs.map((r, i) => ({ repo: r.repo, when: `${whenOf(r.id)} · ${r.comps.length} components`, pressed: i === ri ? 'true' : 'false',
+      border: i === ri ? '#E8E6DF' : '#2E3863', bg: i === ri ? '#1E2747' : 'transparent', color: i === ri ? '#F3F1EA' : '#C9CED9',
+      pick: () => this.refocus({ run: i, focal: null }) }));
+    const legend = ['call', 'names', 'split', 'then'].map((k) => ({ t: `${KIND[k].glyph} ${k}${k === 'then' ? ' (--all)' : ''}`, dash: KIND[k].dash, w: KIND[k].w + 0.4, so: Math.min(1, KIND[k].so + 0.3) }));
+    const name = this.nameOf(run, fid);
+    const noLink = S.all ? '' : ' — --all adds the walk-order links';
+
+    return {
+      notReady: false, ready: true, runId: run.id, repo: run.repo, focalId: fc.id,
+      title: name, titleSize: name.length > 34 ? 30 : name.length > 24 ? 36 : 44,
+      subtitle: `${L.upN} component${L.upN === 1 ? ' reaches' : 's reach'} it · it reaches ${L.dnN}${!S.all && thenHidden ? ` · ${thenHidden} walk-order link${thenHidden === 1 ? '' : 's'} hidden (--all shows them)` : ''} · ${fc.th.length} readers cross it`,
+      allPressed: S.all ? 'true' : 'false', allState: S.all ? 'on' : 'off', allBorder: S.all ? '#FFB454' : '#2E3863', allBg: S.all ? '#2A2410' : 'transparent', allColor: S.all ? '#FFB454' : '#C9CED9',
+      toggleAll: () => this.refocus({ all: !this.state.all }),
+      runs, compCount: run.comps.length, cross,
+      glass: L.glass, shine: L.shine, capTop: L.capTop, capBot: L.capBot,
+      strands, rowLabels, pills, mores, waist, upN: L.upN, dnN: L.dnN,
+      upEmpty: L.upN === 0, dnEmpty: L.dnN === 0,
+      upEmptyText: `Nothing reaches it through a call, a name or a split${noLink}.`,
+      dnEmptyText: `It reaches nothing a reader followed${noLink}.`,
+      detail: { where: at(fc), kind: `${fc.kind}${fc.name ? ' ' + fc.name : ' — the reader stayed at file level'}`, hops: `hops at ${fc.hops.join(' · ') || '—'}` },
+      readers, hasEnds: ends.length > 0, ends,
+      linkHead: `Links of ${subject === fid ? 'the waist' : this.nameOf(run, subject)} · ${linkRows.length}`,
+      links, linkTail: linkRows.length > 14 ? `+${linkRows.length - 14} more links` : linkRows.length ? '' : `No link touches it${noLink}.`,
+      cmd: `tt map …/${run.id} --to '${fc.id}'   ·   tt map …/${run.id} --from '${fc.id}'${S.all ? ' --all' : ''}`,
+      legend,
+    };
+  }
+}
+DC.register("hourglass", Component);
+})();
+</script>

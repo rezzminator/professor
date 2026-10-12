@@ -387,14 +387,10 @@ dispatch() { # dispatch <project> <action>
 # probed explicitly: an installed `docker` binary with nothing behind it is the
 # common failure, and it must be named as TOOLCHAIN-MISSING here rather than
 # surfacing later as an opaque compose connect error.
-# sim_volume — this worktree's harvester volume for `iso sim`: the basename,
-# folded to docker's volume-name alphabet, plus a checksum of the full path so
-# two checkouts with one basename never share a sidecar.
-sim_volume() {
-  local wt
-  wt="$(basename "$REPO_ROOT" | tr -c 'A-Za-z0-9_.\n-' '-')"; wt="${wt#.}"
-  printf 'pfm-sim-harvest-%s-%s' "$wt" "$(printf '%s' "$REPO_ROOT" | cksum | cut -d' ' -f1)"
-}
+# sim_volume — this worktree's harvester volume for `iso sim`, named by
+# infra/fence/housekeeping.sh's fence_sim_volume (sourced in cmd_iso), whose
+# checkouts step removes it once the worktree is gone.
+sim_volume() { fence_sim_volume "$REPO_ROOT"; }
 
 cmd_iso() { # cmd_iso <action> [project | command…]
   local action="${1:-}" target="${2:-pfm}"

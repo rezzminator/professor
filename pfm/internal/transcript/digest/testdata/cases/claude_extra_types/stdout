@@ -1,0 +1,4 @@
+RECORDS 22 in {HOME}/.claude/projects/-work-repo/cccccccc-1111-2222-3333-444444444444.jsonl (claude)
+rendered 13: user 5 · assistant 5 · user.compact_summary 1 · system.compact_boundary 1 · attachment.queued_command 1
+header 1: custom-title 1
+skipped 8: system.api_error 1 · system.? 1 · user.document 1 · user.text 1 · unparseable line 1 · attachment.? 1 · summary 1 · 7 1

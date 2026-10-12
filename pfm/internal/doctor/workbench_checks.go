@@ -71,7 +71,11 @@ func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failu
 			if len(check.Rebuildable) != 0 {
 				repair := "the next launch there rebuilds it"
 				if len(check.Failing) != 0 {
-					repair = fmt.Sprintf("rebuilt by pfm %s build %s once the failures are fixed", name, bench.Dir)
+					repair = fmt.Sprintf(
+						"rebuilt by pfm %s build %s once the failures are fixed",
+						name,
+						bench.Dir,
+					)
 				}
 				fmt.Fprintf(stdout, "doctor: workbench %s %s mirror STALE: %s — %s\n",
 					bench.Dir, name, strings.Join(check.Rebuildable, "; "), repair)

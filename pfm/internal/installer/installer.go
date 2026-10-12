@@ -12,10 +12,12 @@ import (
 	goRuntime "runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -29,6 +31,18 @@ type engine struct {
 	outputErr   error
 	planErrors  []error
 	deferred    []error
+	// engineSyncAbsent is set when an uninstall found no engine-sync binary:
+	// the targets step then leaves targets.json with the Codex roles.
+	engineSyncAbsent bool
+	// engineSyncExec and engineSyncDeadline are the test seams of the
+	// engine-sync runner: its process runner and the deadline of `global`;
+	// nil and zero are the real process table and engineSyncGlobalTimeout.
+	engineSyncExec     deps.Runner
+	engineSyncDeadline time.Duration
+	// processBirth reads a pid's start time in epoch seconds; nil is the
+	// native process table. A launch agent started before the pfm binary's
+	// last write runs a replaced build.
+	processBirth func(pid int) (int64, error)
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).
@@ -205,8 +219,6 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retireStoreEntries())
 	installer.deferFailure(installer.retirePredecessors())
 	installer.deferFailure(installer.retireRenamedGlobalAgents())
-	installer.deferFailure(installer.retireBBInstall())
-	installer.deferFailure(installer.retireChatCommands())
 	installer.deferFailure(installer.retireStagedManagedSurfaces(false))
 	if err == nil {
 		installer.deferFailure(installer.wireCommands(assets))
@@ -217,16 +229,13 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireGlobalCommands())
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
+	installer.deferFailure(installer.retireStaleLinkStages())
 	installer.deferFailure(installer.retireLegacySwapCommand())
-	installer.deferFailure(installer.wireCodexAgents())
-	if len(installer.codexHomes()) == 0 {
-		installer.skip("no Codex accounts configured — command mirror has nothing to write")
-		installer.skip("no Codex accounts configured — agent mirror has nothing to write")
-	} else {
-		installer.deferFailure(installer.reconcileCodexCommands(assets))
+	installer.deferFailure(installer.wireEngineSyncGlobal(assets))
+	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(installer.wireCodexDefaults())
-		installer.deferFailure(installer.retireOrphanCodexAgents())
 	}
+	installer.deferFailure(installer.wireEngineSyncTargets())
 	// The periodic name-sync has one job and two schedulers. Linux gets the
 	// systemd units; macOS gets a launchd agent that carries both triggers.
 	// Staging the other platform's files would leave an operator with a
@@ -241,7 +250,7 @@ func (installer *engine) install(ctx context.Context) error {
 		}
 		installer.deferFailure(installer.ensureLaunchdLogDir())
 		installer.deferFailure(installer.wireLaunchAgent(ctx))
-		installer.deferFailure(installer.wireReminderLaunchAgent(ctx))
+		installer.deferFailure(installer.wireScheduleLaunchAgent(ctx))
 		installer.deferFailure(installer.wireMCPLaunchAgent(ctx))
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
@@ -251,7 +260,7 @@ func (installer *engine) install(ctx context.Context) error {
 		installer.deferFailure(err)
 		reload := systemdAssetChanged || unitChanged
 		if !reload && installer.apply {
-			for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit} {
+			for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit} {
 				state, err := fleetUnitState(ctx, installer.options.Runner, unit)
 				if err != nil || state != unitStateActive {
 					reload = true
@@ -271,6 +280,8 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.removeRetiredNudgeState(); err != nil {
 		installer.warnRetiredNudge("retired compact-nudge state", err)
 	}
+	installer.retireMigrationJournal()
+	installer.expireStateBackups()
 	mcpErr := installer.wireMCP()
 	// A host build replaces the binary without changing the unit file, and MCP
 	// client wiring can change without changing either. enable --now leaves an
@@ -293,69 +304,6 @@ func (installer *engine) install(ctx context.Context) error {
 	return nil
 }
 
-// wireCodexAgents runs on every install: it serves the Claude agent
-// registries (links, orphaned-link and undeclared-variant retirement) whatever
-// the codex roster, and compiles, writes and retires Codex roles only in the
-// Codex homes configured — an empty roster plans none.
-func (installer *engine) wireCodexAgents() error {
-	sourceRepo, err := installer.globalSourceRepoRoot()
-	if err != nil {
-		return fmt.Errorf("resolve Codex global agents source repository: %w", err)
-	}
-	source := filepath.Join(sourceRepo, "templates", "global", "agents")
-	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) {
-		installer.skip("Codex global agents source absent at " + source)
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("inspect Codex global agents source %s: %w", source, err)
-	}
-	plan, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
-		Home:             installer.options.Home,
-		SourceRepo:       sourceRepo,
-		ClaudeConfigDirs: []string{installer.options.ConfigDir},
-		CodexHomes:       installer.codexHomes(),
-		Mode:             codexgen.ModeCheck,
-	})
-	if err != nil {
-		return fmt.Errorf("plan pfm codex agents: %w", err)
-	}
-	for _, action := range plan.Actions {
-		message := action.Kind + " " + action.Path
-		if action.Target != "" {
-			message += " -> " + action.Target
-		}
-		if err := installer.change(message, nil); err != nil {
-			return err
-		}
-	}
-	for _, problem := range plan.Problems {
-		installer.skip(problem)
-	}
-	// Before the early dry-run return, so the preview IS the apply's plan:
-	// installer.retire only removes when this run applies.
-	if err := installer.retireOrphanCodexRoles(sourceRepo, plan.Roles); err != nil {
-		return err
-	}
-	if err := installer.retireOrphanGlobalAgents(plan.Installed); err != nil {
-		return err
-	}
-	if !installer.apply {
-		return nil
-	}
-	result, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
-		Home:             installer.options.Home,
-		SourceRepo:       sourceRepo,
-		ClaudeConfigDirs: []string{installer.options.ConfigDir},
-		CodexHomes:       installer.codexHomes(),
-		Mode:             codexgen.ModeBuild,
-	})
-	if err != nil {
-		return fmt.Errorf("run pfm codex agents: %w", err)
-	}
-	installer.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
-	return nil
-}
-
 // globalSourceRepoRoot resolves the clone every global agent/command/skill
 // symlink target and conflict check is anchored on: this run's explicit
 // --source-repo when set, else the marker a prior install recorded, else the
@@ -370,28 +318,18 @@ func (installer *engine) globalSourceRepoRoot() (string, error) {
 		}
 		return filepath.Clean(abs), nil
 	}
-	return GlobalSourceRepo(installer.options.Home)
-}
-
-// retireOrphanCodexAgents deletes the exactly two known strays a retired
-// "explorer" Codex agent left behind: its compiled TOML and any timestamped
-// backup an earlier copy-based install wrote before this installer learned
-// to symlink instead. Nothing else here is ever deleted.
-func (installer *engine) retireOrphanCodexAgents() error {
-	target := filepath.Join(installer.options.Home, ".codex", "agents", "explorer.toml")
-	if err := installer.retire(target, "retired explorer agent"); err != nil {
-		return err
-	}
-	matches, err := filepath.Glob(target + ".bak-*")
-	if err != nil {
-		return fmt.Errorf("glob retired explorer agent backups: %w", err)
-	}
-	for _, match := range matches {
-		if err := installer.retire(match, "retired explorer agent backup"); err != nil {
-			return err
+	repo, err := GlobalSourceRepo(installer.options.Home)
+	if installer.options.Mode == ModeUninstall && errors.Is(err, paths.ErrSourceRepoUnusable) {
+		repos, historyErr := installer.engineSyncPolicySourceRepos()
+		if historyErr != nil {
+			return "", fmt.Errorf("resolve recorded uninstall ownership: %w", historyErr)
+		}
+		if len(repos) != 0 {
+			installer.say("  source clone unavailable at %s; using recorded ownership for uninstall", repos[0])
+			return repos[0], nil
 		}
 	}
-	return nil
+	return repo, err
 }
 
 // wireGlobalCommands links each top-level clone command into the store commands registry.
@@ -430,7 +368,7 @@ func (installer *engine) wireGlobalCommands() error {
 	return nil
 }
 
-// wireGlobalLink classifies target against source with codexgen's shared
+// wireGlobalLink classifies target against source with the shared
 // global-link machinery and reports/fixes it through this installer's own
 // change/ok/skip transcript — the same ensureLink pattern (correct link is a
 // no-op, anything else routed through installer.change so apply/dry-run
@@ -438,133 +376,29 @@ func (installer *engine) wireGlobalCommands() error {
 // is neither ours nor a link into the source repo is a conflict this
 // installer refuses to touch.
 func (installer *engine) wireGlobalLink(source, target, sourceRepoRoot string, isDir bool) error {
-	kind := codexgen.GlobalLinkFile
+	kind := globallink.File
 	if isDir {
-		kind = codexgen.GlobalLinkDir
+		kind = globallink.Dir
 	}
-	state, found, err := codexgen.ClassifyGlobalLink(target, source, sourceRepoRoot, kind)
+	state, found, err := globallink.ClassifyLink(target, source, sourceRepoRoot, kind)
 	if err != nil {
 		return fmt.Errorf("inspect global link %s: %w", target, err)
 	}
-	if state == codexgen.GlobalLinkCorrect {
+	if state == globallink.Correct {
 		installer.ok(target)
 		return nil
 	}
-	message := codexgen.DescribeGlobalLinkState(state, target, source, found)
-	if state == codexgen.GlobalLinkConflict {
-		installer.skip(message)
+	message := globallink.DescribeState(state, target, source, found)
+	if state == globallink.Conflict {
+		if found == "" {
+			message += "; a real entry that is not a copy of " + source
+		}
+		installer.skip(message + "; preserved")
 		return nil
 	}
 	return installer.change(message, func() error {
-		return codexgen.ApplyGlobalLink(target, source, state)
+		return globallink.Apply(target, source, state)
 	})
-}
-
-func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
-	plan, err := installer.planCodexCommands(assets, !installer.apply)
-	if err != nil {
-		return err
-	}
-	for _, action := range plan.Actions {
-		message := action.Kind + " " + action.Path
-		if action.Target != "" {
-			message += " -> " + action.Target
-		}
-		if err := installer.change(message, nil); err != nil {
-			return err
-		}
-	}
-	if blockers := codexPlanBlockers(plan.Problems); len(blockers) != 0 {
-		for _, blocker := range blockers {
-			installer.say("  conflict %s", blocker)
-		}
-		conflictErr := fmt.Errorf("reconcile Codex global commands: %s", strings.Join(blockers, "; "))
-		if !installer.apply {
-			installer.planErrors = append(installer.planErrors, conflictErr)
-			return nil
-		}
-		return conflictErr
-	}
-	if !installer.apply {
-		return nil
-	}
-	sourceHome := ""
-	if installer.options.Mode == ModeUninstall {
-		// Uninstall must never WRITE a fresh Codex command mirror entry — only
-		// retire the ones this installer already owns. RunGlobalCommands derives
-		// its "wanted" set by scanning SourceHome/.claude/commands; pointing it
-		// at a fresh, guaranteed-empty directory makes that set unconditionally
-		// empty, so the ModeBuild call below can only ever delete managed
-		// entries, never create one for whatever still happens to sit in
-		// ~/.claude/commands at this point in the teardown — one of this
-		// installer's own not-yet-unwired commands, or a user's own foreign one
-		// sharing the directory.
-		empty, err := os.MkdirTemp("", "pfm-uninstall-codex-commands-")
-		if err != nil {
-			return fmt.Errorf("create empty Codex command source for uninstall: %w", err)
-		}
-		defer func() {
-			if removeErr := os.RemoveAll(empty); removeErr != nil {
-				installer.say("warning: remove temporary uninstall command source %s: %v", empty, removeErr)
-			}
-		}()
-		sourceHome = empty
-	}
-	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home:       installer.options.Home,
-		SourceHome: sourceHome,
-		Mode:       codexgen.ModeBuild,
-	})
-	if err != nil {
-		return fmt.Errorf("reconcile Codex global commands: %w", err)
-	}
-	if !result.OK {
-		return fmt.Errorf("reconcile Codex global commands: %s", strings.Join(result.Problems, "; "))
-	}
-	installer.ok(fmt.Sprintf(
-		"Codex global commands wrote=%d unchanged=%d deleted=%d",
-		result.Wrote,
-		result.Unchanged,
-		result.Deleted,
-	))
-	return nil
-}
-
-func codexPlanBlockers(problems []string) []string {
-	blockers := make([]string, 0)
-	for _, problem := range problems {
-		if strings.HasPrefix(problem, "MISSING ") || strings.HasPrefix(problem, "STALE ") ||
-			strings.HasPrefix(problem, "ORPHAN ") {
-			continue
-		}
-		blockers = append(blockers, problem)
-	}
-	return blockers
-}
-
-func (installer *engine) planCodexCommands(assets []assetFile, future bool) (result codexgen.Result, returnErr error) {
-	sourceHome := ""
-	cleanup := func() error { return nil }
-	if future && filepath.Clean(installer.options.ConfigDir) ==
-		filepath.Join(filepath.Clean(installer.options.Home), ".claude") {
-		var err error
-		sourceHome, cleanup, err = installer.futureCommandSource(assets)
-		if err != nil {
-			return codexgen.Result{}, err
-		}
-	}
-	defer func() {
-		if err := cleanup(); err != nil {
-			returnErr = errors.Join(returnErr, err)
-		}
-	}()
-	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home: installer.options.Home, SourceHome: sourceHome, Mode: codexgen.ModeCheck,
-	})
-	if err != nil {
-		return codexgen.Result{}, fmt.Errorf("plan Codex global commands: %w", err)
-	}
-	return result, nil
 }
 
 func (installer *engine) futureCommandSource(assets []assetFile) (string, func() error, error) {
@@ -590,6 +424,9 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fail(fmt.Errorf("inspect Claude commands for preview: %w", err))
 	}
+	if err := installer.stageGlobalCommandPlan(target); err != nil {
+		return fail(err)
+	}
 	for _, asset := range assets {
 		commandTarget, found := installer.commandTarget(asset.path)
 		if !found {
@@ -607,17 +444,59 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 			return fail(fmt.Errorf("stage planned command %s: %w", relative, err))
 		}
 	}
-	for _, retired := range []string{"bb.md", "swap.md"} {
-		if err := os.RemoveAll(filepath.Join(target, retired)); err != nil {
-			return fail(fmt.Errorf("retire %s from command preview: %w", retired, err))
-		}
+	if err := os.RemoveAll(filepath.Join(target, "swap.md")); err != nil {
+		return fail(fmt.Errorf("retire swap.md from command preview: %w", err))
 	}
 	return temporary, cleanup, nil
 }
 
+// stageGlobalCommandPlan snapshots the clone entries wireGlobalCommands would
+// link, preserving the registry entries that its shared classifier refuses.
+// Embedded commands are overlaid afterwards: their managed links precede the
+// global step during apply, so they remain conflicts rather than clone links.
+func (installer *engine) stageGlobalCommandPlan(target string) error {
+	sourceRepo, err := installer.globalSourceRepoRoot()
+	if err != nil {
+		return fmt.Errorf("resolve global commands source repository for preview: %w", err)
+	}
+	source := filepath.Join(sourceRepo, "templates", "global", "commands")
+	entries, err := os.ReadDir(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect global commands source for preview %s: %w", source, err)
+	}
+	for _, entry := range entries {
+		kind := globallink.File
+		if entry.IsDir() {
+			kind = globallink.Dir
+		}
+		commandSource := filepath.Join(source, entry.Name())
+		commandTarget := filepath.Join(installer.options.ConfigDir, "commands", entry.Name())
+		state, _, err := globallink.ClassifyLink(commandTarget, commandSource, sourceRepo, kind)
+		if err != nil {
+			return fmt.Errorf("inspect global command for preview %s: %w", commandTarget, err)
+		}
+		if state == globallink.Conflict {
+			continue
+		}
+		staged := filepath.Join(target, entry.Name())
+		if err := os.RemoveAll(staged); err != nil {
+			return fmt.Errorf("replace global command in preview %s: %w", staged, err)
+		}
+		if err := copyPlanTree(commandSource, staged); err != nil {
+			return fmt.Errorf("stage global command for preview %s: %w", commandSource, err)
+		}
+	}
+	return nil
+}
+
 // copyCommandPlanTree snapshots the current command source while omitting the
-// two retired top-level commands. In particular, an old dangling /bb symlink
-// must not make preview fail before the installer can report and retire it.
+// retired top-level swap command (swap.md) and a link stage an interrupted
+// install left behind (atomicfile.LinkStagePrefix: after a crash mid-swap it
+// is the displaced directory copy); copyPlanTree skips any dangling link, so a
+// link the install is about to prune never fails the preview.
 func copyCommandPlanTree(source, target string) error {
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		return err
@@ -627,7 +506,7 @@ func copyCommandPlanTree(source, target string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if entry.Name() == "bb.md" || entry.Name() == "swap.md" {
+		if entry.Name() == "swap.md" || strings.HasPrefix(entry.Name(), atomicfile.LinkStagePrefix) {
 			continue
 		}
 		if err := copyPlanTree(filepath.Join(source, entry.Name()), filepath.Join(target, entry.Name())); err != nil {
@@ -710,45 +589,41 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.unwireSkills(assets); err != nil {
 		return err
 	}
-	// Before the Codex mirror is reconciled: that step's wanted set is
-	// derived from the Claude command registries this call just emptied, so
-	// unwiring first is what lets the mirror drop the same globals instead of
-	// recompiling them for an install that is going away.
+	// Before engine-sync retires the Codex mirror: unwiring the Claude
+	// registries first means no global is recompiled for an install that is
+	// going away.
 	if err := installer.unwireGlobalRegistries(); err != nil {
 		return err
 	}
 	if err := installer.retireDeadRegistryLinks(); err != nil {
 		return err
 	}
-	if err := installer.reconcileCodexCommands(nil); err != nil {
-		return err
-	}
-	if err := installer.unwireGeneratedCodexAgents(); err != nil {
-		return err
-	}
-	if err := installer.retireBBInstall(); err != nil {
-		return err
-	}
-	if err := installer.retireChatCommands(); err != nil {
-		return err
-	}
+	// Deferred, as install defers them: a failing engine-sync step must not
+	// leave the launch agent loaded and the machine targets wired.
+	installer.deferFailure(installer.wireEngineSyncGlobal(nil))
+	installer.deferFailure(installer.wireEngineSyncTargets())
 	if schedulerIsLaunchd {
 		if err := installer.unwireLaunchAgent(ctx); err != nil {
 			return err
 		}
-		if err := installer.unwireReminderLaunchAgent(ctx); err != nil {
+		if err := installer.unwireScheduleLaunchAgent(ctx); err != nil {
 			return err
 		}
 	}
 	managerAvailable := installer.userManagerAvailable(ctx)
 	if managerAvailable && installer.apply {
 		installer.runSystemctl(
-			ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit, mcpUnitName,
+			ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit, mcpUnitName,
 		)
 	}
 	if _, err := installer.retireUnitEnablements(
 		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
 		retiredUnitNames,
+	); err != nil {
+		return err
+	}
+	if _, err := installer.retireRenamedUnits(
+		ctx, filepath.Join(installer.options.Home, ".config", "systemd", "user"), managerAvailable,
 	); err != nil {
 		return err
 	}
@@ -863,6 +738,7 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 	check, checkErr := provider.Check(ctx, root, platform)
 	if checkErr == nil && check.Healthy {
 		installer.ok("harvestpy environment already healthy (Check fast-path; no download)")
+		installer.reportHarvestPrune(harvestpy.PruneEnvironments(ctx, root, platform, installer.options.ProcRoot))
 		return installer.stageHarvestModels(ctx, provider, root, platform)
 	}
 	if checkErr != nil {
@@ -875,6 +751,7 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 		Cache:    filepath.Join(root, "cache"),
 		Platform: platform,
 		Offline:  installer.options.HarvestOffline,
+		ProcRoot: installer.options.ProcRoot,
 	})
 	if provisionErr != nil {
 		if errors.Is(provisionErr, harvestpy.ErrOfflineUnavailable) {
@@ -889,7 +766,25 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
 	}
 	installer.ok("harvestpy environment provisioned digest=" + result.Digest)
+	installer.reportHarvestPrune(result.Pruned)
 	return installer.stageHarvestModels(ctx, provider, root, platform)
+}
+
+// reportHarvestPrune prints a prune of superseded harvestpy environments:
+// each removal with the bytes it freed, each kept env with its reason, each
+// failure one warn line that never fails the install.
+func (installer *engine) reportHarvestPrune(report harvestpy.PruneReport) {
+	for _, env := range report.Removed {
+		_ = installer.change(
+			fmt.Sprintf("remove superseded harvestpy environment %s (freed %d bytes)", env.Path, env.Bytes), nil,
+		)
+	}
+	for _, kept := range report.Kept {
+		installer.skip("keep superseded harvestpy environment " + kept.Path + ": " + kept.Reason)
+	}
+	for _, failure := range report.Failed {
+		installer.warnStateExpiry(failure.Path, failure.Err)
+	}
 }
 
 func (installer *engine) uninstallHarvest() error {
@@ -1040,10 +935,13 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		}
 	}
 	installer.say("")
-	return systemdChanged, nil
+	return systemdChanged, installer.wireGptHookAssets()
 }
 
 func (installer *engine) removeManagedAssets(assets []assetFile) error {
+	if err := installer.unwireGptHookAssets(); err != nil {
+		return err
+	}
 	installer.say("managed assets -> %s", installer.managedRoot)
 	for _, asset := range assets {
 		target := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
@@ -1437,8 +1335,8 @@ var unitNames = []string{
 	nameSyncPathUnit,
 	"pfm-name-sync.service",
 	nameSyncTimerUnit,
-	reminderServiceUnit,
-	reminderTimerUnit,
+	scheduleServiceUnit,
+	scheduleTimerUnit,
 }
 
 const (
@@ -1451,6 +1349,7 @@ const (
 var retiredUnitNames = []string{
 	"cc-fleet-name-sync.path", "cc-fleet-name-sync.service", "cc-fleet-name-sync.timer",
 	"cc-name-sync.path", "cc-name-sync.service", "cc-name-sync.timer",
+	"pfm-reminder.service", "pfm-reminder.timer",
 }
 
 var unitEnablements = []struct {
@@ -1459,25 +1358,24 @@ var unitEnablements = []struct {
 }{
 	{unit: nameSyncPathUnit, wants: systemdDefaultWants},
 	{unit: nameSyncTimerUnit, wants: "timers.target.wants"},
-	{unit: reminderTimerUnit, wants: "timers.target.wants"},
+	{unit: scheduleTimerUnit, wants: "timers.target.wants"},
 	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
 
-func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
-	directory := filepath.Join(installer.options.Home, ".config", "systemd", "user")
-	installer.say("systemd user units -> %s", directory)
-	managerAvailable := installer.userManagerAvailable(ctx)
+// retireRenamedUnits disables each unit pfm renamed away from (a unit file in
+// directory or one the manager still knows) and unlinks its file, reporting
+// whether a file was removed. Install and uninstall both retire them.
+func (installer *engine) retireRenamedUnits(
+	ctx context.Context,
+	directory string,
+	managerAvailable bool,
+) (bool, error) {
 	changed := false
-	enablementChanged, err := installer.retireUnitEnablements(directory, retiredUnitNames)
-	if err != nil {
-		return false, err
-	}
-	changed = changed || enablementChanged
 	for _, name := range retiredUnitNames {
 		target := filepath.Join(directory, name)
 		_, statErr := os.Lstat(target)
 		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
-			return false, fmt.Errorf("inspect retired unit %s: %w", target, statErr)
+			return changed, fmt.Errorf("inspect retired unit %s: %w", target, statErr)
 		}
 		known := statErr == nil
 		if managerAvailable && !known {
@@ -1491,12 +1389,30 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 			installer.runSystemctl(ctx, "reset-failed", name)
 		}
 		if statErr == nil {
-			if err := installer.retire(target, "superseded by pfm-name-sync"); err != nil {
-				return false, err
+			if err := installer.retire(target, "superseded by a renamed pfm unit"); err != nil {
+				return changed, err
 			}
 			changed = true
 		}
 	}
+	return changed, nil
+}
+
+func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
+	directory := filepath.Join(installer.options.Home, ".config", "systemd", "user")
+	installer.say("systemd user units -> %s", directory)
+	managerAvailable := installer.userManagerAvailable(ctx)
+	changed := false
+	enablementChanged, err := installer.retireUnitEnablements(directory, retiredUnitNames)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || enablementChanged
+	retiredChanged, err := installer.retireRenamedUnits(ctx, directory, managerAvailable)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || retiredChanged
 	managedNames := append([]string(nil), unitNames...)
 	if installer.mcpAnyEnabled() {
 		managedNames = append(managedNames, mcpUnitName)
@@ -1589,7 +1505,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		return
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
-	enablements := [][]string{{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit}}
+	enablements := [][]string{{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit}}
 	if installer.mcpAnyEnabled() {
 		enablements = append(enablements, []string{mcpUnitName})
 	}
@@ -1981,7 +1897,7 @@ var retiredGlobalAgents = []string{"frr", "rr-super"}
 //   - a symlink retires only when it targets a known Professor source;
 //     unrelated personal links are preserved, including dangling ones;
 //   - a regular file retires only when its YAML frontmatter `name:` field
-//     still reads the retired name — the exact field RunGlobalAgents itself
+//     still reads the retired name — the exact field engine-sync's global step
 //     keys the compiled TOML and the registry identity on, so a user who
 //     repurposed the filename for their own agent (and so changed its
 //     frontmatter name) is left alone, untouched and unreported.
@@ -2038,12 +1954,12 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 		}
 	}
 
-	return installer.retireRenamedCodexAgents()
+	return nil
 }
 
 // agentFrontmatterName reads the `name:` field out of an agent Markdown
 // file's leading YAML frontmatter block, empty when the file has none or
-// the field is absent — the same shape codexgen compiles agent identity
+// the field is absent — the same shape engine-sync compiles agent identity
 // from.
 func agentFrontmatterName(path string) (string, error) {
 	content, err := os.ReadFile(path)

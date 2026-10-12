@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./.claude/scripts/worktree.sh create <pipeline>
-#   ./.claude/scripts/worktree.sh remove <pipeline> [--delete-branch]
+#   ./.claude/scripts/worktree.sh remove <pipeline> [--delete-branch] [--discard]
 #   ./.claude/scripts/worktree.sh list [pipeline]
 #   ./.claude/scripts/worktree.sh prune          # remove orphaned worktree dirs
 #
@@ -69,38 +69,144 @@ proj_path() {
 # Makefile. No-op when no roster entry owns infra (INFRA_MAKE_DIR = "-").
 nuke_pipeline_stack() {
   [ "$INFRA_MAKE_DIR" != "-" ] || return 0
-  make -C "$(proj_path "$ROOT" "$INFRA_MAKE_DIR")" "$INFRA_PIPELINE_NUKE" PIPELINE="$1" 2>/dev/null || true
+  if ! make -C "$(proj_path "$ROOT" "$INFRA_MAKE_DIR")" "$INFRA_PIPELINE_NUKE" PIPELINE="$1"; then
+    echo "Error: pipeline stack teardown failed for $1" >&2
+    return 1
+  fi
+}
+
+# The marker of a worktree whose provisioning has not finished lives in its private
+# Git directory: invisible to `git status`, and removed with the worktree.
+provision_marker() {
+  local gitdir
+  if ! gitdir="$(git -C "$1" rev-parse --absolute-git-dir)"; then
+    echo "Error: could not locate the Git directory of $1" >&2
+    return 1
+  fi
+  echo "${gitdir}/provisioning-incomplete"
+}
+
+# Snapshot final provisioned bytes in the private Git directory, not the checkout.
+# Git's read-only object hash needs no extra tool and --no-filters hashes the actual bytes.
+# On success PROVISIONED_ENV_FILES is the list whose snapshots were recorded or verified.
+provisioned_env_hashes() {
+  local mode="$1" tree="$2" marker hashes action=inspect entry dir kind install env_files ef path key digest saved
+  [ "$mode" != record ] || action=record
+  marker="$(provision_marker "$tree")" || return 1
+  hashes="${marker%/*}/provisioned-env-hashes"
+  PROVISIONED_ENV_FILES=(.env.ports)
+  for entry in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
+    IFS='|' read -r dir kind install env_files <<< "$entry"
+    [ -n "$env_files" ] && [ "$env_files" != '-' ] || continue
+    for ef in $env_files; do
+      if [ "$dir" = '.' ]; then PROVISIONED_ENV_FILES+=("$ef"); else PROVISIONED_ENV_FILES+=("$dir/$ef"); fi
+    done
+  done
+  local error="Error: could not $action provisioned env hashes for $tree"
+  if [[ -L "$hashes" || ( -e "$hashes" && ! -d "$hashes" ) ]]; then
+    echo "$error: invalid metadata directory $hashes" >&2; return 1
+  fi
+  if [ "$mode" = record ]; then
+    if ! mkdir -p "$hashes" || ! rm -f "$hashes/complete"; then
+      echo "$error: cannot prepare $hashes; provisioning remains incomplete" >&2; return 1
+    fi
+  else
+    if [ -e "$marker" ]; then
+      echo "$error: provisioning remains incomplete; back up env files and verify worktree/submodule work is expendable, then use remove ${tree##*/} --discard (discards worktree changes and stack volumes); nothing torn down" >&2; return 1
+    fi
+    if [ ! -d "$hashes" ]; then
+      # A manually added, artifact-free worktree needs no snapshot. Legacy artifacts
+      # are unknown bytes, never silently blessed by remove or by an already-ready create.
+      for path in "${PROVISIONED_ENV_FILES[@]}"; do
+        if [[ -e "$tree/$path" || -L "$tree/$path" ]]; then
+          echo "$error: missing metadata for $path; back up env files and verify worktree/submodule work is expendable, then use remove ${tree##*/} --discard (discards worktree changes and stack volumes); nothing torn down" >&2; return 1
+        fi
+      done
+      PROVISIONED_ENV_FILES=(); return 0
+    fi
+    if [[ ! -f "$hashes/complete" || -L "$hashes/complete" ]] || ! saved="$(cat "$hashes/complete")" || [ "$saved" != v1 ]; then
+      echo "$error: incomplete or invalid metadata $hashes; nothing torn down" >&2; return 1
+    fi
+  fi
+  for path in "${PROVISIONED_ENV_FILES[@]}"; do
+    if [[ "$path" = /* || "$path" = .. || "$path" = ../* || "$path" = */../* || "$path" = */.. ]]; then
+      echo "$error: invalid relative env path $path" >&2; return 1
+    fi
+    if ! key="$(printf '%s' "$path" | git -C "$tree" hash-object --stdin)"; then
+      echo "$error: cannot hash path $path" >&2; return 1
+    fi
+    if [[ -L "$tree/$path" || ( -e "$tree/$path" && ! -f "$tree/$path" ) ]]; then
+      if [ "$mode" = record ]; then echo "$error: $path is not a regular file" >&2
+      else echo "Error: dirty worktree refused; provisioned file changed type: $path; use --discard: $tree" >&2; fi
+      return 1
+    fi
+    digest=absent
+    if [ -f "$tree/$path" ] && ! digest="$(git -C "$tree" hash-object --no-filters -- "$tree/$path")"; then
+      echo "$error: cannot hash file $path" >&2; return 1
+    fi
+    if [ "$mode" = record ]; then
+      if [[ -L "$hashes/$key" ]] || ! printf '%s\n' "$digest" > "$hashes/$key"; then
+        echo "$error: cannot write snapshot for $path" >&2; return 1
+      fi
+    else
+      if [[ ! -f "$hashes/$key" || -L "$hashes/$key" ]] || ! saved="$(cat "$hashes/$key")" || [[ ! "$saved" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|absent)$ ]]; then
+        echo "$error: missing, unreadable or invalid snapshot for $path; nothing torn down" >&2; return 1
+      fi
+      if [ "$saved" != "$digest" ]; then
+        echo "Error: dirty worktree refused; provisioned bytes changed: $path; use --discard: $tree" >&2; return 1
+      fi
+    fi
+  done
+  if [ "$mode" = record ] && ! printf 'v1\n' > "$hashes/complete"; then
+    echo "$error: cannot finish metadata $hashes; provisioning remains incomplete" >&2; return 1
+  fi
+  return 0
 }
 
 cmd_create() {
   local pipeline="$1"
   local branch="pipeline/${pipeline}"
   local worktree_dir="${ROOT}/.worktrees/${pipeline}"
+  local marker
 
   if [ -d "$worktree_dir" ]; then
-    echo "Worktree already exists: $worktree_dir"
-    # Still print ports for convenience
-    "$ALLOC" alloc "$pipeline"
-    exit 0
-  fi
+    marker="$(provision_marker "$worktree_dir")" || return 1
+    if [ ! -e "$marker" ]; then
+      echo "Worktree already exists: $worktree_dir"
+      # Still print ports for convenience
+      "$ALLOC" alloc "$pipeline"
+      exit 0
+    fi
+    # A worktree that exists is ready only once provisioning finished: an earlier
+    # failed or interrupted create resumes here and reports readiness only on success.
+    echo "Resuming incomplete provisioning: $worktree_dir"
+  else
+    # Create branch from main if it doesn't exist
+    if ! git rev-parse --verify "$branch" >/dev/null 2>&1; then
+      git branch "$branch" main
+    fi
 
-  # Create branch from main if it doesn't exist
-  if ! git rev-parse --verify "$branch" >/dev/null 2>&1; then
-    git branch "$branch" main
+    # Create worktree — full repo checkout
+    git worktree add "$worktree_dir" "$branch"
+    marker="$(provision_marker "$worktree_dir")" || return 1
+    if ! : > "$marker"; then
+      echo "Error: could not mark provisioning incomplete; partial worktree: $worktree_dir" >&2
+      return 1
+    fi
   fi
-
-  # Create worktree — full repo checkout
-  git worktree add "$worktree_dir" "$branch"
 
   # A roster entry backed by a git submodule is left EMPTY by `git worktree add`.
   # Its install would then run against an empty directory and silently produce a
   # worktree with no dependencies, so populate submodules before installing. No-op
   # in a repo that has none.
-  git -C "$worktree_dir" submodule update --init --recursive 2>/dev/null || true
+  if ! git -C "$worktree_dir" submodule update --init --recursive; then
+    echo "Error: submodule initialization failed; partial worktree: $worktree_dir" >&2
+    return 1
+  fi
 
   # Install dependencies for each project in the roster — a REAL install per
   # worktree, per the NO-SYMLINK LAW above.
-  local entry dir install_kind install_cmd env_files src_path dst_path ef
+  local entry dir install_kind install_cmd env_files src_path dst_path ef install_rc
   for entry in "${PROJECTS[@]}"; do
     IFS='|' read -r dir install_kind install_cmd env_files <<< "$entry"
     src_path="$(proj_path "$ROOT" "$dir")"
@@ -118,7 +224,16 @@ cmd_create() {
           done
         fi
         if [ -n "$install_cmd" ]; then
-          (cd "$dst_path" && eval "$install_cmd" 2>/dev/null) || true
+          # errexit runs in a subshell outside any `if` or `||` list, where bash ignores it:
+          # a multi-command install fails on its first failing command, not only its last.
+          set +e
+          ( set -e; cd "$dst_path"; eval "$install_cmd" )
+          install_rc=$?
+          set -e
+          if [ "$install_rc" -ne 0 ]; then
+            echo "Error: dependency installation failed for $dir; partial worktree: $worktree_dir" >&2
+            return 1
+          fi
         fi
         ;;
       none) : ;;  # nothing to install
@@ -176,6 +291,11 @@ cmd_create() {
   #
   # {ENV_FILE_PROVISION} — SETUP fills this from the roster's env_files + port map.
 
+  provisioned_env_hashes record "$worktree_dir" || return 1
+  if ! rm -f "$marker"; then
+    echo "Error: could not clear the provisioning marker $marker; partial worktree: $worktree_dir" >&2
+    return 1
+  fi
   echo "Worktree ready: $worktree_dir"
   echo "Branch: $branch"
   echo "$ports"
@@ -183,13 +303,62 @@ cmd_create() {
 
 cmd_remove() {
   local pipeline="$1"
-  local delete_branch=""
-  [ "${2:-}" = "--delete-branch" ] && delete_branch=1
+  shift
+  local delete_branch="" discard="" status rc=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --delete-branch) delete_branch=1 ;;
+      --discard) discard=1 ;;
+      *) echo "Error: unknown removal option: $1" >&2; return 2 ;;
+    esac
+    shift
+  done
   local branch="pipeline/${pipeline}"
   local worktree_dir="${ROOT}/.worktrees/${pipeline}"
 
   if [ -d "$worktree_dir" ]; then
-    git worktree remove "$worktree_dir" --force 2>/dev/null || true
+    if [[ -z "$discard" ]]; then
+      # Exclude only recorded bytes still matching, including gitignored env files;
+      # later edits refuse removal before Git status or any teardown. Submodule edits still count.
+      provisioned_env_hashes check "$worktree_dir" || return 1
+      local -a provisioned=()
+      local path
+      for path in "${PROVISIONED_ENV_FILES[@]+"${PROVISIONED_ENV_FILES[@]}"}"; do
+        provisioned+=(":(exclude,literal)$path")
+      done
+      if ! status="$(git -C "$worktree_dir" status --porcelain --untracked-files=all --ignore-submodules=none \
+        -- . "${provisioned[@]+"${provisioned[@]}"}")"; then
+        echo "Error: could not inspect worktree; nothing torn down: $worktree_dir" >&2
+        return 1
+      fi
+      if [[ -n "$status" ]]; then
+        echo "Error: dirty worktree refused; use --discard to discard its changes: $worktree_dir" >&2
+        return 1
+      fi
+      # A submodule's objects live in this worktree's private Git directory and go with it,
+      # so work a clean status cannot show is refused: a commit reachable from HEAD or a local
+      # branch that no remote branch or tag holds, or a stash. A failed reading names the path.
+      local unpushed
+      if ! unpushed="$(git -C "$worktree_dir" submodule foreach --quiet --recursive \
+        'if [ -n "$(git rev-list -n 1 HEAD --branches --not --remotes --tags 2>&1)" ] \
+          || git rev-parse -q --verify refs/stash >/dev/null; then echo "$displaypath"; fi')"; then
+        echo "Error: could not inspect submodule commits; nothing torn down: $worktree_dir" >&2
+        return 1
+      fi
+      if [[ -n "$unpushed" ]]; then
+        echo "Error: submodule commits or stashes on no remote branch (${unpushed//$'\n'/, }); push them or use --discard: $worktree_dir" >&2
+        return 1
+      fi
+      # Proven clean above: --force only lets Git drop .env.ports and initialized
+      # submodules, both of which a plain `worktree remove` refuses.
+      if ! git worktree remove --force "$worktree_dir"; then
+        echo "Error: worktree removal failed; nothing torn down: $worktree_dir" >&2
+        return 1
+      fi
+    elif ! git worktree remove --force "$worktree_dir"; then
+      echo "Error: explicit-discard removal failed; nothing torn down: $worktree_dir" >&2
+      return 1
+    fi
     echo "Worktree removed: $worktree_dir"
   else
     echo "No worktree found: $worktree_dir"
@@ -198,19 +367,29 @@ cmd_remove() {
   # Branch survives by default — it is the merged flight's revert path and can still
   # be LIVE (a post-merge gate still running) when cleanup runs; deletion is a
   # separate, explicit act, never bundled into worktree teardown.
+  # The worktree is gone by now: a refused deletion (an unmerged or squash-merged branch) is
+  # reported non-zero after the ports and the stack are cleaned, never instead of cleaning them.
   if [ -n "$delete_branch" ]; then
-    git branch -d "$branch" 2>/dev/null || true
-    echo "Branch deleted: $branch"
+    if git branch -d "$branch"; then
+      echo "Branch deleted: $branch"
+    else
+      echo "Error: branch deletion failed: $branch" >&2
+      rc=1
+    fi
   else
     echo "Branch kept: $branch (pass --delete-branch to delete)"
   fi
 
   # Free port allocation
-  "$ALLOC" free "$pipeline"
+  "$ALLOC" free "$pipeline" || rc=1
 
   # Tear down the pipeline's docker test stack (containers + volumes).
-  nuke_pipeline_stack "$pipeline"
+  nuke_pipeline_stack "$pipeline" || rc=1
 
+  if [ "$rc" -ne 0 ]; then
+    echo "Error: cleanup of $pipeline finished with failures (see above)" >&2
+    return "$rc"
+  fi
   echo "Pipeline cleaned up: $pipeline"
 }
 
@@ -218,43 +397,99 @@ cmd_prune() {
   # Remove ORPHANED worktree directories: present on disk but not a registered
   # git worktree AND with no active pipeline docs. Registered-but-inactive
   # worktrees are reported, never auto-removed (may hold uncommitted work).
-  git -C "$ROOT" worktree prune 2>/dev/null || true  # drop git records for vanished dirs
-
-  # Registered worktree BASENAMES — matched by name, not full path, so a symlinked or
-  # canonicalized repo path can't misclassify a live worktree as orphaned.
-  # Fail-safe: if git can't list worktrees, prune nothing rather than risk a live one.
-  local registered
-  if ! registered="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{n=split($2,a,"/"); print a[n]}')"; then
-    echo "Prune skipped: could not list git worktrees."
-    return 0
+  if ! git -C "$ROOT" worktree prune; then
+    echo "Error: worktree record pruning failed; no directories removed" >&2
+    return 1
   fi
 
-  local pruned=0
+  # NUL-delimited porcelain preserves complete paths, including spaces/newlines.
+  # A failed or empty enumeration is unknown registration, never an orphan list.
+  local registered_file record path canonical
+  local -a registered=()
+  registered_file="$(mktemp)" || return 1
+  if ! git -C "$ROOT" worktree list --porcelain -z > "$registered_file"; then
+    rm -f "$registered_file"
+    echo "Error: could not enumerate worktree registration; no directories removed" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' record; do
+    case "$record" in
+      'worktree '*)
+        path="${record#worktree }"
+        if [[ "$path" != /* ]] || ! canonical="$(cd "$path" && pwd -P)"; then
+          rm -f "$registered_file"
+          echo "Error: unresolved worktree registration: $path; no directories removed" >&2
+          return 1
+        fi
+        registered+=("$canonical") ;;
+    esac
+  done < "$registered_file"
+  rm -f "$registered_file"
+  if [[ ${#registered[@]} -eq 0 ]]; then
+    echo "Error: empty worktree registration enumeration; no directories removed" >&2
+    return 1
+  fi
+
+  local pruned=0 failed=0
+  local -a nuke_failed=()
   for d in "${ROOT}/.worktrees"/*/; do
     [ -d "$d" ] || continue
     local name
     name="$(basename "$d")"
     [[ "$name" == .* ]] && continue
 
-    if printf '%s\n' "$registered" | grep -qx "$name"; then
+    if [[ -L "${d%/}" ]]; then
+      echo "SKIP: $name (symlink; registration unknown)"
+      continue
+    fi
+    canonical="$(cd "$d" && pwd -P)" || return 1
+    local is_registered=0
+    for path in "${registered[@]}"; do
+      [[ "$canonical" != "$path" ]] || is_registered=1
+    done
+    if (( is_registered )); then
       # Registered worktree with no active pipeline → possible abandon. Report only.
       [ -d "${ROOT}/docs/dev/builds/${name}" ] || echo "REGISTERED-NO-DOCS: $name (registered worktree, no active pipeline — inspect; not auto-removed)"
       continue
     fi
 
+    # A foreign/stale Git checkout is not proven safe to recursively delete.
+    if [[ -e "$d/.git" || -L "$d/.git" ]]; then
+      echo "SKIP: $name (Git metadata present; registration unknown)"
+      continue
+    fi
     # Unregistered leftover directory
     if [ -d "${ROOT}/docs/dev/builds/${name}" ]; then
       echo "SKIP: $name (unregistered but has pipeline docs — inspect manually)"
       continue
     fi
 
+    # Release the allocation BEFORE deleting: a failed release keeps the directory,
+    # so the next prune retries it instead of stranding the allocation.
+    if ! "$ALLOC" free "$name"; then
+      echo "Error: port allocation release failed for $name; directory kept: $d" >&2
+      failed=$((failed + 1))
+      continue
+    fi
     rm -rf "$d"
-    "$ALLOC" free "$name" 2>/dev/null || true
-    nuke_pipeline_stack "$name"
+    # The directory is gone, so a failed teardown is named at the end, never allowed to end the loop.
+    nuke_pipeline_stack "$name" || nuke_failed+=("$name")
     echo "PRUNED: $name (orphaned worktree dir)"
     pruned=$((pruned + 1))
   done
   echo "Prune complete: $pruned orphaned worktree(s) removed."
+  local rc=0
+  if (( failed )); then
+    echo "Error: $failed orphaned worktree(s) kept: port allocation release failed" >&2
+    rc=1
+  fi
+  if (( ${#nuke_failed[@]} )); then
+    local names
+    printf -v names '%s, ' "${nuke_failed[@]}"
+    echo "Error: stack teardown failed for ${#nuke_failed[@]} pruned worktree(s): ${names%, }" >&2
+    rc=1
+  fi
+  return "$rc"
 }
 
 cmd_list() {
@@ -292,7 +527,7 @@ cmd_list() {
 
 case "${1:-help}" in
   create)  cmd_create "${2:?pipeline required}" ;;
-  remove)  cmd_remove "${2:?pipeline required}" "${3:-}" ;;
+  remove)  shift; cmd_remove "${1:?pipeline required}" "${@:2}" ;;
   list)    cmd_list   "${2:-}" ;;
   prune)   cmd_prune ;;
   *)

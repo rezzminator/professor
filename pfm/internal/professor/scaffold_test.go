@@ -2,8 +2,11 @@ package professor
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -33,7 +36,7 @@ func newScaffoldFixtureStore(t *testing.T) string {
 		}
 	}
 	for _, dir := range []string{
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-agents",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
 	} {
 		if err := os.MkdirAll(filepath.Join(root, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)
@@ -131,5 +134,41 @@ func TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure(t *testing.T) {
 	}
 	if _, ok := baseline.Files[".rumdl.toml"]; ok {
 		t.Fatalf("baseline.json pins .rumdl.toml, which never wrote successfully: %#v", baseline.Files)
+	}
+}
+
+// TestScaffoldRefusesTwoTemplatesForOneLocalPath: project/docs-hub deploys
+// into docs/, the parent of the docs/epics and docs/commands targets, so a
+// blueprint shipping docs-hub/epics/TEMPLATE.md beside epics/TEMPLATE.md maps
+// two templates onto one local path. Scaffold refuses the store before it
+// writes anything, naming the path and both templates, rather than letting
+// one silently overwrite the other and its pin.
+func TestScaffoldRefusesTwoTemplatesForOneLocalPath(t *testing.T) {
+	source := newScaffoldFixtureStore(t)
+	for _, relative := range []string{"epics/TEMPLATE.md", "docs-hub/epics/TEMPLATE.md"} {
+		path := filepath.Join(source, "templates", "project", filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# "+relative+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := t.TempDir()
+	var stdout bytes.Buffer
+	count, err := Scaffold(source, target, false, &stdout)
+	if err == nil {
+		t.Fatalf(
+			"Scaffold() err = nil, want a refusal of two templates mapped to docs/epics/TEMPLATE.md; count=%d",
+			count,
+		)
+	}
+	for _, want := range []string{"docs/epics/TEMPLATE.md", "project/epics/TEMPLATE.md", "project/docs-hub/epics/TEMPLATE.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Scaffold() err = %q, want it to name %s", err, want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "CLAUDE.md")); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("a refused store still deployed CLAUDE.md (stat err %v)", statErr)
 	}
 }

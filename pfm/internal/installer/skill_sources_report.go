@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -26,6 +26,14 @@ type skillLinkLedger struct {
 
 func skillLinkLedgerPath(home string) string {
 	return filepath.Join(managedRootForHome(home), skillLinkLedgerName)
+}
+
+// SkillLinkDirs is the directories the installer's skill-links.json records it
+// links skills into. recorded is false only when the file is absent (no
+// install has written it); a file that is present but unreadable or invalid
+// is an error, never absence.
+func SkillLinkDirs(home string) (dirs []string, recorded bool, err error) {
+	return readSkillLinkLedger(home)
 }
 
 func readSkillLinkLedger(home string) ([]string, bool, error) {
@@ -69,6 +77,7 @@ const (
 	SkillSourceLinked      SkillSourceState = "linked"
 	SkillSourceMissing     SkillSourceState = "MISSING"
 	SkillSourceConflict    SkillSourceState = "CONFLICT"
+	SkillSourceCopy        SkillSourceState = "COPY"
 	SkillSourceNotFetched  SkillSourceState = "NOT-FETCHED"
 	SkillSourceOffline     SkillSourceState = "OFFLINE"
 	SkillSourceSkipped     SkillSourceState = "SKIPPED"
@@ -85,6 +94,7 @@ type SkillSourceStatus struct {
 	State     SkillSourceState
 	Missing   []string
 	Conflicts []string
+	Copies    []string
 	Error     string
 }
 
@@ -100,6 +110,9 @@ func (status SkillSourceStatus) Describe() string {
 	}
 	if len(status.Conflicts) != 0 {
 		line += " conflict=" + strings.Join(status.Conflicts, ",")
+	}
+	if len(status.Copies) != 0 {
+		line += " copy=" + strings.Join(status.Copies, ",")
 	}
 	if status.Error != "" {
 		line += " error=" + status.Error
@@ -193,14 +206,17 @@ func inspectSkillSource(
 	}
 	for _, dir := range linkDirs {
 		target := filepath.Join(dir, source.Name)
-		state, _, err := codexgen.ClassifyGlobalLink(target, store, storeRoot, codexgen.GlobalLinkDir)
+		state, _, err := globallink.ClassifyLink(target, store, storeRoot, globallink.Dir)
 		if err != nil {
 			status.State, status.Error = SkillSourceCheckFailed, err.Error()
 			return status
 		}
 		switch state {
-		case codexgen.GlobalLinkCorrect:
-		case codexgen.GlobalLinkCopy, codexgen.GlobalLinkConflict:
+		case globallink.Correct:
+		case globallink.Copy:
+			// A proven byte-equal copy: pfm install replaces it with the link itself.
+			status.Copies = append(status.Copies, target)
+		case globallink.Conflict:
 			status.Conflicts = append(status.Conflicts, target)
 		default:
 			status.Missing = append(status.Missing, target)
@@ -211,6 +227,8 @@ func inspectSkillSource(
 		status.State = SkillSourceMissing
 	case len(status.Conflicts) != 0:
 		status.State = SkillSourceConflict
+	case len(status.Copies) != 0:
+		status.State = SkillSourceCopy
 	}
 	return status
 }
@@ -224,11 +242,10 @@ func ReportGlobalRegistries(
 	env paths.Env,
 	codexHomes ...string,
 ) (warnings, failures int) {
-	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, codexHomes...)
+	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, codexHomes...)
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures
-	failures += reportTranscriptArtifact(w, home)
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
 		fmt.Fprintf(w, "doctor: registry dead-link check failed: %s\n", err)

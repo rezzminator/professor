@@ -339,7 +339,9 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 			if !ok {
 				t.Fatal("stream closed after clear")
 			}
-			if snapshot.Refreshing {
+			// A failed pass publishes a snapshot with no fleet (the injected
+			// index failure above): it is the stale marker, not a look at the rows.
+			if snapshot.Refreshing || snapshot.RefreshFailure != nil {
 				continue
 			}
 			for index := range snapshot.Rows {

@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -41,6 +42,9 @@ const (
 	// The answer is real and is printed; the claim on it is not provable, so
 	// it is not a 0.
 	codeAwaitSuperseded = 7
+	// codeTurnError says the prompt was delivered and the model server
+	// refused it: the turn ended on an API error, not an answer.
+	codeTurnError = 8
 )
 
 func runHeadless(
@@ -61,7 +65,7 @@ func runHeadless(
 		switch args[0] {
 		case "run":
 			args[0] = newAction
-		case "transcript":
+		case transcriptCommand:
 			args[0] = "read"
 		}
 	}
@@ -113,8 +117,8 @@ func runChatWithRuntime(
 		return runChatUnkillContext(ctx, rest, stdout, stderr, runtime)
 	case "end":
 		return runChatEnd(rest, stdout, stderr, runtime)
-	case "reminder":
-		return runChatReminder(rest, stdout, stderr, runtime)
+	case "schedule":
+		return runChatSchedule(rest, stdout, stderr, runtime)
 	case "reload":
 		return runChatReloadWithRuntime(rest, stdout, stderr, runtime, paths.OSEnv{})
 	case whoamiCommand:
@@ -123,6 +127,9 @@ func runChatWithRuntime(
 	case "save":
 		return runChatSaveContext(ctx, rest, stdout, stderr, paths.OSEnv{}, runtime)
 	case "find", branchAction, "history", "ls":
+		if verb == "ls" && len(rest) == 1 && rest[0] == "--reap" {
+			return hostcheck.RunTmuxReap(&runtime, stdout, stderr)
+		}
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, paths.OSEnv{}, clock.Real, runtime)
 	case "modal":
 		return runChatModal(rest, stdout, stderr, clock.Real)
@@ -158,7 +165,7 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  kill        kill a chat, optionally closing it")
 	fmt.Fprintln(w, "  unkill      remove a chat kill")
 	fmt.Fprintln(w, "  end         end a chat's tmux server")
-	fmt.Fprintln(w, "  reminder    recurring alarms that wake a chat: set | ls | rm")
+	fmt.Fprintln(w, "  schedule    recurring alarms that wake a chat: set | ls | rm")
 	fmt.Fprintln(w, "  reload      reboot a Claude chat in place under another configured account/cache mode")
 	fmt.Fprintln(w, "  find/save/branch/history/ls/resolve")
 	fmt.Fprintln(w)

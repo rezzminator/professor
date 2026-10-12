@@ -7,6 +7,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 func TestProfessorPromptPathUsesRecordedClone(t *testing.T) {
@@ -98,5 +99,44 @@ func TestClaudeCommandSystemPromptModes(t *testing.T) {
 		if got := parsed.PromptFile == mustProfessorPromptPath(t, home); got != testCase.wantFile {
 			t.Fatalf("mode %q: professor flag present=%v, want %v", testCase.mode, got, testCase.wantFile)
 		}
+	}
+}
+
+// The managed launcher states a professor-mode chat started without the fleet
+// prompt, with the cause; a staged prompt and a caller that states its own
+// prompt file are clean. The launcher's policy reaching it is
+// hookentry.TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat's.
+func TestLauncherLaunchAsPromptWarning(t *testing.T) {
+	for _, entry := range []struct {
+		name  string
+		mode  string
+		stage bool
+		args  []string
+		want  string
+	}{
+		{"professor, no clone recorded", pfmconfig.SystemPromptProfessor, false, nil, "no source repository recorded"},
+		{"professor, prompt staged", pfmconfig.SystemPromptProfessor, true, nil, ""},
+		{
+			"professor, caller states its own file", pfmconfig.SystemPromptProfessor, false,
+			[]string{"--system-prompt-file", "/elsewhere.md"},
+			"",
+		},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			home := t.TempDir()
+			if entry.stage {
+				stageProfessorPrompt(t, home)
+			}
+			_, got, err := LauncherLaunchAs(
+				workbench.Persona{}, "/usr/bin/claude", entry.args, "", home, pfmconfig.Config{},
+				pfmconfig.ClaudePrefs{SystemPrompt: entry.mode}, "",
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.want == "" && got != "" || !strings.Contains(got, entry.want) {
+				t.Fatalf("LauncherLaunchAs warning = %q, want %q", got, entry.want)
+			}
+		})
 	}
 }

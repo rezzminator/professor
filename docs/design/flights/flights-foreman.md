@@ -6,6 +6,7 @@ The one agent that builds. It takes a request, with a spec (the rulings and requ
 
 - [Why one agent reads and builds](#why-one-agent-reads-and-builds)
 - [Input](#input)
+- [Code it has not read](#code-it-has-not-read)
 - [Rulings bind](#rulings-bind)
 - [Before the first edit](#before-the-first-edit)
 - [Split only at ownership](#split-only-at-ownership)
@@ -35,6 +36,12 @@ So the reader builds, and the work splits only where one context cannot or shoul
 ## Input
 
 A request; its scope (a build unit or a problem); acceptance; each testing manual's path; the worktree; the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`; the project map beside the project's flight directories. With a spec, the request is `requirements.md` in the flight directory: the binding rulings and the requirement rows. A child also gets the frozen interface it builds against. The same agent serves a main chat's "fix X" with no flight directory: it then creates one under the project, so its run log and the lander's files have a home.
+
+## Code it has not read
+
+Code the foreman has not read goes first to `tracer`, as numbered questions, at intake or at any later step. It works the answer with `/tracer:use` — a node's hops, the component map, the tree below or above a component, exact lines for a brief — and then reads only the ranges it changes, so the reading is paid at the sub-tracers' price and every line it relies on was re-read from disk. Tracing is not mandatory: in a blind A/B on five unrelated pfm defects, a foreman that traced first at every flight fixed the same defects with the same test strength and regression count as one that read the code itself, at about $1 more build cost per flight. A child's brief carries the run's `RUN` and the node IDs covering its unit, so the child starts from verified lines rather than a second trace. The door search stays the foreman's own chained search: a tracer run is evidence, while a door list must be a closed-world search. The agent carries `Skill` to load `/tracer:use` and any other skill the work names; without it a foreman could read a skill's file but never invoke one.
+
+The questions are asked in the build's terms — where each change lands, the surface it reports to, the test and fixture a new case copies — never as a survey, and a fact the run holds is never reported unchecked. The tracer `RUN` rides every compaction focus, and a compaction waits until the step in hand is done. The first flight under this rule, a fleet-prompt launch warning, spawned tracer as its first call after the brief. Its tracer run cost $0.56 of a $3.41 round, and the run held 5% of the 4,871 code lines the foreman went on to read: the brief had surveyed every engine and the doctor, and 5 of its 13 threads traced paths the build ruled out. The foreman then spent about 17 calls reading test fixtures and output surfaces no thread had asked for. A compaction dropped the `RUN`, so the return listed a door as unchecked although the run held it verified. It compacted between reading a door and editing it, and re-read the same ranges in five calls.
 
 ## Rulings bind
 

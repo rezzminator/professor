@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -107,7 +107,7 @@ func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	fleetPrompt, err := codexgen.FleetPrompt()
+	fleetPrompt, err := codexprompt.FleetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +117,39 @@ func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	}
 	if strings.Contains(role, "name") || strings.Contains(got, "reads diffs") {
 		t.Fatalf("Resolve() = %q, want no leakage of the name/description keys", got)
+	}
+}
+
+// A Claude-authored role body that spells Claude's /code-review reaches a Codex seat as the shell
+// review command: the role-body door rewrites the invocation as the fleet prompt's door does, and
+// leaves the prose around it as it was.
+func TestResolveCodexRewritesTheCodeReviewInvocationInTheRoleBody(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, ".codex", "agents", "builder.toml"),
+		"name = \"builder\"\n"+
+			"developer_instructions = \"\"\"\n"+
+			"Your last step is `/code-review low` over your own change.\n"+
+			"\"\"\"\n")
+
+	got, _, err := Resolve(pfmengine.Codex, "builder", repo, home)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	fleetPrompt, err := codexprompt.FleetPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, found := strings.CutPrefix(got, fleetPrompt+"\n---\n\n")
+	if !found {
+		t.Fatalf("Resolve() = %q, want the fleet prompt then the role body", got)
+	}
+	if want := "Your last step is `" + codexprompt.RewriteCodeReview("/code-review low") +
+		"` over your own change.\n"; role != want {
+		t.Fatalf("role body = %q, want %q", role, want)
+	}
+	if strings.Contains(role, "/code-review") || !strings.Contains(role, "codex review -c") {
+		t.Fatalf("role body still spells Claude's /code-review: %q", role)
 	}
 }
 
@@ -379,8 +412,8 @@ func TestNoCrossEngineFallback(t *testing.T) {
 		t.Fatal("the .claude source body leaked into a cx resolution")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "pfm codex build "+repo) {
-		t.Fatalf("error = %q, want it to name the compile fix %q", msg, "pfm codex build "+repo)
+	if !strings.Contains(msg, "run: pfm codex build "+repo) {
+		t.Fatalf("error = %q, want it to name the compile fix %q", msg, "run: pfm codex build "+repo)
 	}
 	if !strings.Contains(msg, "reviewer") {
 		t.Fatalf("error = %q, want it to name the role", msg)

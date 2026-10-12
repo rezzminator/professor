@@ -39,6 +39,7 @@ reap() {
 
 case "$MODE" in
   read)
+    [[ -z "$SID" ]] && exit 0
     FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
     [[ -z "$FILE_PATH" ]] && exit 0
     case "$FILE_PATH" in

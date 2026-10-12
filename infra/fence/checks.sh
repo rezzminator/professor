@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Check catalogue sourced by dev.sh. The serial blocks retain their original rows.
 
+# engine_sync_build: the fence's one way to get the engine-sync binary (infra/fence/engine-sync.sh).
+# shellcheck source=engine-sync.sh
+. "${BASH_SOURCE[0]%/*}/engine-sync.sh"
+
 checks_templates_clone() {
   # Clone ratchet over the shell / JS / Python surface (scripts/clone-check.sh,
   # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
@@ -33,13 +37,19 @@ checks_templates_leak() {
   # once printed "clean" having scanned none of docs/, .claude/ or infra/,
   # and the count made the claim look earned. Deleted paths are dropped and
   # COUNTED rather than handed to leak-check, whose --files mode correctly
-  # refuses to call a list of non-files clean. BROKEN STATE: a git listing
-  # that could not be read is a red row, never a scan of nothing.
-  local tracked porcelain changed candidate leak_list
-  local present=0 changed_n=0 gone=0
-  if ! tracked="$(repo_git ls-files)" || ! porcelain="$(repo_git status --porcelain --untracked-files=all)"; then
+  # refuses to call a list of non-files clean. A submodule (a gitlink, mode
+  # 160000) is another repository, scanned by that repository's own gate: it
+  # is left out by name and COUNTED, never read as a deleted path. BROKEN
+  # STATE: a git listing that could not be read is a red row, never a scan of
+  # nothing.
+  local tracked stage gitlinks porcelain changed candidate leak_list
+  local present=0 changed_n=0 gone=0 submodules=0 leak_out leak_rc
+  if ! tracked="$(repo_git ls-files)" || ! stage="$(repo_git ls-files --stage)" ||
+    ! porcelain="$(repo_git status --porcelain --untracked-files=all)"; then
     fail_step "leak-check: the tracked or changed file list could not be read from git — nothing was scanned"
   else
+    gitlinks=$(awk -F '\t' '$1 ~ /^160000 / { print $2 }' <<<"$stage")
+    submodules=$(grep -c . <<<"$gitlinks" || true)
     changed=$(awk '{print $NF}' <<<"$porcelain" | grep -v '/$' || true)
     mkdir -p "$TMP_BASE/templates"
     leak_list="$TMP_BASE/templates/leak-candidates.z"
@@ -51,18 +61,29 @@ checks_templates_leak() {
       else
         gone=$((gone + 1))
       fi
-    done < <(printf '%s\n%s\n' "$tracked" "$changed" | sort -u)
+    done < <(printf '%s\n%s\n' "$tracked" "$changed" | sort -u | grep -vxF -f <(printf '%s\n' "$gitlinks"))
     while IFS= read -r candidate; do
       [[ -n "$candidate" && -f "$candidate" ]] && changed_n=$((changed_n + 1))
     done <<<"$changed"
     if (( present == 0 )); then
       fail_step "leak-check: the candidate list holds no file present on disk — the LIST is broken, nothing was scanned"
-    # xargs batches the list so no argument list overflows; any red batch
-    # makes xargs non-zero, and a non-empty list never yields an empty batch.
-    elif xargs -0 scripts/leak-check.sh --files < "$leak_list"; then
-      ok "leak-check clean (${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped)"
     else
-      fail_step "leak-check FAILED — brand / PII / machine-path string in a public file, or a batch could not be scanned"
+      # xargs batches the list so no argument list overflows; any red batch
+      # makes xargs non-zero, and a non-empty list never yields an empty batch.
+      # The output is kept: a scan under the explicit `!structural-only` policy
+      # applied no private denylist, prints PRIVATE COVERAGE SKIPPED, and its
+      # row must say so instead of reading as the full scan.
+      leak_out="$TMP_BASE/templates/leak-out.txt"
+      leak_rc=0
+      xargs -0 scripts/leak-check.sh --files < "$leak_list" > "$leak_out" 2>&1 || leak_rc=$?
+      cat "$leak_out"
+      if (( leak_rc != 0 )); then
+        fail_step "leak-check FAILED — brand / PII / machine-path string in a public file, or a batch could not be scanned"
+      elif grep -q 'PRIVATE COVERAGE SKIPPED' "$leak_out"; then
+        ok "leak-check clean (STRUCTURAL-ONLY: the private denylist was NOT applied — ${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped, ${submodules} submodule(s) left to their own repository's gate)"
+      else
+        ok "leak-check clean (${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped, ${submodules} submodule(s) left to their own repository's gate)"
+      fi
     fi
   fi
 
@@ -197,72 +218,153 @@ checks_templates_descriptions() {
 
 }
 
+checks_engine_sync_policy() { # <config-home>: stage the shipped machine policy for a compiler's jail
+  local policy="$REPO_ROOT/templates/global/engine-sync/config.json" destination="$1/engine-sync"
+  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/config.json"; then
+    echo "engine-sync: machine policy could not be staged from $policy into $destination/config.json" >&2
+    return 1
+  fi
+}
+
 checks_templates_mirrors_generate() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config"
   head_ "templates — generate the engine mirrors"
   # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
   # clone holds none, so verify generates them from the Claude sources
   # before any gate reads them. Current mirrors are left alone (the fence
-  # mounts the tree read-only and CI generates on the host first); the
-  # tree's own compiler runs, never a host pfm binary (a stale host build
-  # rewrites what it does not understand).
+  # mounts the tree read-only and CI generates on the host first). The writer
+  # is engine-sync built from its mounted source, never a host binary (a stale
+  # host build rewrites what it does not understand).
   if ! need_tool go templates || ! need_tool node templates; then
     fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
-  elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex check "$REPO_ROOT") >/dev/null 2>&1 \
-    && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode check "$REPO_ROOT") >/dev/null 2>&1; then
-    ok "engine mirrors current — nothing generated"
-  elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex build "$REPO_ROOT") \
-    && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode build "$REPO_ROOT"); then
-    ok "engine mirrors generated from the Claude sources"
+  elif ! engine_sync_build "$es_bin"; then
+    fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
+  elif ! checks_engine_sync_policy "$config_home"; then
+    fail_step "mirror generation could not run — the machine policy could not be staged (see above); no mirror gate below is a verdict on the tree"
   else
-    fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
+    local report="$TMP_BASE/engine-sync/project-check.log" rc=0
+    XDG_CONFIG_HOME="$config_home" "$es_bin" check "$REPO_ROOT" >"$report" 2>&1 || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      ok "engine mirrors current — nothing generated"
+    else
+      cat "$report"
+      fail_step "host mirrors STALE or unreadable (engine-sync check exit $rc) — the fence mount is read-only; no mirror gate below is a verdict on the tree"
+      echo 'On the host, from this worktree: make -C pfm host-install; pfm install --yes; pfm codex build . && pfm opencode build .'
+    fi
   fi
+
+}
+
+checks_templates_global_variants() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" decl="$REPO_ROOT/templates/global/agents/variants.json"
+  local jail home names declared name rendered=0 missing="" out rc=0 named=""
+  head_ "templates — global agent variants render"
+  # templates/global/agents/variants.json declares agents re-emitted from a
+  # source agent with swapped body text. A swap whose text drifted from its
+  # source fails only when engine-sync renders it, which an adopter's install
+  # does: this step renders every declared variant with the real binary, built
+  # from the mounted source, into a jail home and Codex home (the real $HOME is
+  # never read or written). Its own broken state is a red line: a declaration
+  # that cannot be read, one that declares nothing, a render error, or a
+  # rendered count that differs from the declared count (a lookup that found
+  # nothing would otherwise read as clean).
+  if ! need_tool go templates || ! need_tool node templates; then
+    fail_step "global agent variants NOT RENDERED — the toolchain is missing"
+    return
+  elif ! engine_sync_build "$es_bin"; then
+    fail_step "global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)"
+    return
+  elif [[ ! -f "$decl" ]]; then
+    fail_step "global agent variants NOT RENDERED — $decl is missing, so nothing was looked up"
+    return
+  elif ! names="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(d===null||typeof d!=="object"||Array.isArray(d))throw new Error("not an object of variants");console.log(Object.keys(d).sort().join("\n"))' "$decl" 2>&1)"; then
+    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: $names"
+    return
+  fi
+  declared=$(grep -c . <<<"$names" || true)
+  if (( declared == 0 )); then
+    fail_step "global agent variants NOT RENDERED — templates/global/agents/variants.json declares no variant, so nothing could render"
+    return
+  fi
+  mkdir -p "$TMP_BASE/engine-sync"
+  if ! jail="$(mktemp -d "$TMP_BASE/engine-sync/global-variants.XXXXXX")"; then
+    fail_step "global agent variants NOT RENDERED — the jail home could not be created under $TMP_BASE/engine-sync"
+    return
+  fi
+  home="$jail/home"
+  mkdir -p "$home/.claude" "$home/.codex"
+  out="$jail/engine-sync-global.out"
+  if ! checks_engine_sync_policy "$home/.config"; then
+    fail_step "global agent variants NOT RENDERED — the machine policy could not be staged in the jail"
+    rm -rf "$jail"
+    return
+  fi
+  env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u ENGINE_SYNC_HOME -u ENGINE_SYNC_STATE -u CODEX_HOME \
+    HOME="$home" "$es_bin" global --home "$home" --source-repo "$REPO_ROOT" \
+    --claude-config-dir "$home/.claude" --codex-home "$home/.codex" >"$out" 2>&1 || rc=$?
+  if (( rc != 0 )); then
+    cat "$out"
+    while IFS= read -r name; do
+      if grep -qF "variant \"$name\"" "$out"; then named="${named:+$named, }$name"; fi
+    done <<<"$names"
+    fail_step "global agent variants FAILED to render (engine-sync global exit $rc; variant named in the error: ${named:-none — read the output above})"
+  else
+    while IFS= read -r name; do
+      if [[ -f "$home/.codex/agents/$name.toml" && -L "$home/.claude/agents/$name.md" && -s "$home/.claude/agents/$name.md" ]]; then
+        rendered=$((rendered + 1))
+      else
+        missing="${missing:+$missing, }$name"
+      fi
+    done <<<"$names"
+    if (( rendered != declared )); then
+      cat "$out"
+      fail_step "global agent variants: $rendered of $declared declared variant(s) rendered — missing: $missing"
+    else
+      ok "all $declared global agent variant(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
+    fi
+  fi
+  rm -rf "$jail"
 
 }
 
 checks_templates_mirrors_marker() {
   head_ "templates — codex generated-marker claim"
-  # The templates dir's shipped JS compiler and this repo's `pfm codex build`
-  # write the same $HOME/.codex outputs on adopter hosts. A copy that stops
-  # claiming the other's marker reports its files STALE forever; the gate
-  # also reconciles every marked file's declared source against disk, so a
-  # fossil generated from a deleted file fails BY NAME.
-  if node scripts/check-codex-markers.mjs; then
-    ok "compiler marker claims hold; every marked file has a live source"
+  # engine-sync never touches a file it does not recognize as generated, so a
+  # marked file whose source is gone is a fossil no build can heal: the gate
+  # reconciles every marked file's declared source, and every tracked symlink's
+  # target, against disk, and fails a fossil BY NAME.
+  # The row carries the script's own count line: `0 marked file(s)` reads as the
+  # vacuous run it is, instead of the claim that every marked file was examined.
+  local marker_out marker_rc=0
+  marker_out="$(node scripts/check-codex-markers.mjs 2>&1)" || marker_rc=$?
+  printf '%s\n' "$marker_out"
+  if [ "$marker_rc" -eq 0 ]; then
+    ok "every marked file has a live source; every tracked symlink a tracked target — $(tail -n 1 <<<"$marker_out")"
   else
     fail_step "codex marker claim FAILED — a stranded marker or an orphaned generated file (see output)"
   fi
+  node_test_suite "generated marker claims" "$TMP_BASE/templates/codex-markers.tap" scripts/check-codex-markers.test.mjs
 
 }
 
 checks_templates_mirrors_roster() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config" rc
   head_ "templates — generated agent rosters"
-  if node scripts/check-agent-roster.mjs; then
+  if ! checks_engine_sync_policy "$config_home"; then
+    fail_step "agent roster ERROR — the machine policy could not be staged (see above)"
+  elif ENGINE_SYNC_BIN="$es_bin" XDG_CONFIG_HOME="$config_home" node scripts/check-agent-roster.mjs; then
     ok "Codex and OpenCode agent rosters match their Claude sources"
   else
-    fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      fail_step "agent roster ERROR — effective configuration could not be read or the check crashed (see the error above)"
+    elif [ "$rc" -eq 3 ]; then
+      fail_step "agent roster NOT GENERATED — the engine mirrors are absent, so no roster was compared (see above)"
+    else
+      fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
+    fi
   fi
-
-}
-
-checks_templates_token_audit() {
-  head_ "templates — token-audit tests"
-  # node --test exits 0 when it finds no tests, so a moved or renamed suite
-  # would read as a pass: enumerate the files and count the passes instead.
-  local token_tests=(templates/global/commands/tokens/*.test.mjs)
-  local token_out="$TMP_BASE/templates/token-audit.tap"
-  mkdir -p "$TMP_BASE/templates"
-  if [[ ! -f "${token_tests[0]}" ]]; then
-    fail_step "token-audit tests NOT RUN — templates/global/commands/tokens/*.test.mjs matched no file; the suite was never executed"
-  elif ! node --test --test-reporter=tap "${token_tests[@]}" >"$token_out" 2>&1; then
-    cat "$token_out"
-    fail_step "token-audit tests FAILED — a measure, the flight selection, or an error path regressed, or node could not run the suite (see output)"
-  elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$token_out"; then
-    cat "$token_out"
-    fail_step "token-audit tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
-  else
-    ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
-  fi
-
+  ENGINE_SYNC_BIN="$es_bin" node_test_suite "generated agent rosters" "$TMP_BASE/templates/agent-roster.tap" scripts/check-agent-roster.test.mjs
 }
 
 checks_templates_release_check() {
@@ -277,32 +379,42 @@ checks_templates_release_check() {
 
 }
 
-checks_templates_codex_sync() {
-  head_ "templates — codex-sync missing compiler"
-  local cs_copy
-  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
-    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
-      ok "codex-sync ($cs_copy) names unavailable compiler and retains dirty flag"
-    else
-      fail_step "codex-sync regression FAILED ($cs_copy) — unavailable compiler must be named and dirty flag retained"
-    fi
-  done
+checks_templates_refresh_scope() {
+  head_ "templates — refresh-scope and verify leak policy fixtures"
+  run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
+  run "templates: verify leak policy fixtures" -- python3 "$REPO_ROOT/scripts/test-verify-leak-policy.py"
 
 }
 
-checks_templates_refresh_scope() {
-  head_ "templates — refresh-scope fixtures"
-  run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
-
+checks_templates_worktree_script() {
+  head_ "templates — shipped worktree.sh lifecycle safety"
+  if bash "$REPO_ROOT/scripts/test-worktree.sh"; then
+    ok "worktree.sh refuses dirty removal, keeps registered paths with spaces, and names failed provisioning"
+  else
+    fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, or provisioning failure handling broke (see output)"
+  fi
 }
 
 checks_templates_pfm_guard() {
   head_ "templates — pfm-guard across repositories"
-  if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh"; then
-    ok "pfm-guard finds the session's law stamp for another repo's edit and denies an unread law"
+  if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-guard-stamp.sh"; then
+    ok "pfm-guard and both guard-stamp twins preserve session-keyed law stamps, cross-repo edits, and marker cleanup"
   else
-    fail_step "pfm-guard regression FAILED — a cross-repo edit must open on the session's law stamp and stay shut without one"
+    fail_step "pfm-guard/guard-stamp regression FAILED — session law stamps, cross-repo enforcement, or marker cleanup broke (see output)"
   fi
+
+}
+
+checks_templates_codex_sync() {
+  head_ "templates — codex-sync door"
+  local cs_copy
+  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
+    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
+      ok "codex-sync ($cs_copy) forwards each stage, refuses a bad ENGINE_SYNC_BIN by name, and warns of an unavailable compiler only with a pending edit"
+    else
+      fail_step "codex-sync regression FAILED ($cs_copy) — see output"
+    fi
+  done
 
 }
 
@@ -336,25 +448,17 @@ checks_templates_unit_script() { # <name>: scripts/test-<name>.sh, the self-test
   run "templates: test-$1.sh self-test" -- bash "$REPO_ROOT/scripts/test-$1.sh"
 }
 
-checks_templates_mirrors_opencode() { # optional: an executable pfm already built from this tree
-  local prebuilt="${1:-}" build_opencode
+checks_templates_mirrors_opencode() {
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" opencode_home="$TMP_BASE/engine-sync/opencode-verify-home"
   head_ "templates — native opencode mirror"
-  # Build the source-under-test inside the fence; verification must never
-  # depend on or install a host binary. The ignored artifact also gives this
-  # repo's Stop hook a current compiler while develop remains uninstalled.
-  # /pfm-timing exists only as the fence's bind mount; on the host the same
-  # scratch is $TMP_BASE/timing, so resolve it the way the timing ledger does.
-  local opencode_scratch="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
-  local opencode_bin="$opencode_scratch/pfm-dev-bin"
-  local opencode_home="$opencode_scratch/opencode-verify-home"
-  # The gate's pfm.unit leaves its prebuilt pfm in the run dir (test-shard.sh --bin-dir): a copy of it
-  # is the same binary a build here would make. Absent (the verify path, a templates-only gate): build.
-  build_opencode=(go -C pfm build -o "$opencode_bin" ./cmd/pfm)
-  if [[ -n "$prebuilt" && -x "$prebuilt" ]]; then build_opencode=(cp "$prebuilt" "$opencode_bin"); fi
-  if need_tool go templates && mkdir -p "$opencode_scratch" \
-    && "${build_opencode[@]}" \
-    && "$opencode_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
-    && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
+  # engine-sync built from its mounted source checks and doctors the mirror
+  # under a scratch home; verification never depends on or installs a host binary.
+  if ! need_tool go templates || ! engine_sync_build "$es_bin"; then
+    fail_step "opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)"
+  elif ! checks_engine_sync_policy "$opencode_home/.config"; then
+    fail_step "opencode mirror NOT CHECKED — the machine policy could not be staged (see above)"
+  elif XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
+    && XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
     ok "opencode mirror current and parseable"
   else
     fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
@@ -368,9 +472,15 @@ checks_templates_opencode_writer_tests() {
 
 }
 
+checks_templates_engine_sync_action_tests() {
+  head_ "templates — CI engine-sync action tests"
+  node_test_suite "engine-sync action" "$TMP_BASE/templates/engine-sync-action.tap" scripts/engine-sync-action.test.mjs
+
+}
+
 checks_templates_skill_tests() {
   local skill cp_out
-  for skill in codeprobe transcript; do
+  for skill in codeprobe tracetree; do
     head_ "templates — $skill skill tests"
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
@@ -398,9 +508,9 @@ checks_templates_skill_tests() {
 checks_templates_opencode_writer_refs() {
   head_ "templates — OpenCode writer references"
   if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then
-    ok "live surfaces use native pfm opencode"
+    ok "live surfaces name the native writer, none the deleted one"
   else
-    fail_step "OpenCode writer reference FAILED — use native pfm opencode on every named surface"
+    fail_step "OpenCode writer reference FAILED — every named surface names engine-sync, the native writer, and none the deleted one (see output)"
   fi
 }
 
@@ -413,36 +523,34 @@ checks_templates_mirrors_manifest() {
   fi
 }
 
+# One catalogue for the serial runner and the parallel gate. Scheduling-only
+# lane/demo aggregates and the gate's heavy check-map stay at their boundaries.
+checks_named_template_steps() { # <callback> <name>...: register the matching checks_templates_<name> command
+  local add="$1" name
+  shift
+  for name in "$@"; do
+    "$add" "templates.$name" "checks_templates_${name//-/_}"
+  done
+}
+
+checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
+  local add="$1" name
+  checks_named_template_steps "$add" clone leak placeholders scratch-paths descriptions mirrors \
+    global-variants release-check codex-sync refresh-scope pfm-guard worktree-script dev-report \
+    format-md flight-templates
+  for name in check-pfm check-templates test-pfm test-templates unit-path; do
+    "$add" "templates.$name-tests" checks_templates_unit_script "$name"
+  done
+  checks_named_template_steps "$add" opencode-writer-tests engine-sync-action-tests skill-tests opencode-writer-refs
+}
+
+checks_templates_step_serial() { shift; "$@"; }
+
 checks_templates() {
-  checks_templates_clone
   checks_templates_check_map_serial
   checks_templates_lanes_serial
   checks_templates_demo_serial
-  checks_templates_leak
-  checks_templates_placeholders
-  checks_templates_scratch_paths
-  checks_templates_descriptions
-  checks_templates_mirrors_generate
-  checks_templates_mirrors_marker
-  checks_templates_mirrors_roster
-  checks_templates_token_audit
-  checks_templates_release_check
-  checks_templates_codex_sync
-  checks_templates_refresh_scope
-  checks_templates_pfm_guard
-  checks_templates_dev_report
-  checks_templates_format_md
-  checks_templates_flight_templates
-  checks_templates_unit_script check-pfm
-  checks_templates_unit_script check-templates
-  checks_templates_unit_script test-pfm
-  checks_templates_unit_script test-templates
-  checks_templates_unit_script unit-path
-  checks_templates_mirrors_opencode
-  checks_templates_opencode_writer_tests
-  checks_templates_skill_tests
-  checks_templates_opencode_writer_refs
-  checks_templates_mirrors_manifest
+  checks_templates_steps checks_templates_step_serial
 }
 
 checks_pfm_verify() {
@@ -460,6 +568,8 @@ checks_pfm_verify() {
   # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
   # is rc 2 (an enumerator or grep that could not run), never a PASS.
   run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh"
+  # The flow matrix: every test and file TESTPLAN.md cites must exist.
+  run "pfm: flow-matrix citations" -- bash "$d/scripts/testplan-check.sh"
   # The gate scripts' own fixture suites: a ratchet nobody tests is trusted
   # on faith. Each prints "N passed, M failed" and is non-zero on any FAIL.
   run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d"
@@ -533,7 +643,7 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   [[ -z "$history" ]] || shard_args=(--history "$history")
   # Positional arguments keep flags and output paths out of shell code.
   # The JSON is retained even on failure; timing is a separate verdict.
-  # --bin-dir keeps the prebuilt pfm in the run dir for the templates.check-map and templates.mirrors steps.
+  # --bin-dir keeps the prebuilt pfm in the run dir for the templates.check-map step.
   run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" --bin-dir "$run_dir/bin" "${shard_args[@]}" -- "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
   checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
@@ -555,6 +665,44 @@ checks_pfm_e2e() {
   if wait "$load_pid"; then load_rc=0; else load_rc=$?; fi
   (( load_rc == 0 )) || printf '  PROFILE e2e.load NOT RECORDED — test-shard.sh sample exit %s (its stderr above)\n' "$load_rc"
   checks_pfm_profile_pointers "$run_dir/e2e.json" "$run_dir/profile" "$before"
+}
+
+# The tests the gate's race step runs under -race: the harvester chaos suites and the race regressions
+# they found, as <package dir under pfm/> <Test> lines. A test that guards a race joins here; the step
+# demands a pass event of each, so a rename here or there is a red step, never "no tests to run".
+CHECKS_PFM_RACE_TESTS='internal/harvest TestHarvesterChaos
+internal/harvest TestFetchFailureIsCachedBeforeItsFlightEnds
+internal/harvest TestFetchSizeOnlyLeaderSharesTheWholePage
+internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
+internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
+internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
+internal/harvestmcp TestServiceChaos
+internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence'
+
+# checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo
+# (the pfm-dev image carries gcc; CGO_ENABLED=1 for this command alone, every other build stays static),
+# its stream kept as <run dir>/race.json and profiled into its own root <run dir>/profile/race — its
+# packages are pfm.unit's too, and failure pointers match a process by package. BROKEN STATE: a named test
+# with no pass event in the stream — skipped, renamed, unbuilt, or a stream that was never written — is
+# a red line naming each such test; no C compiler is TOOLCHAIN-MISSING and no test runs.
+checks_pfm_race() {
+  local d="$1" run_dir="$2" json="$2/race.json" before="$FAILURES" regex pkgs=() pkg test passed missing="" n=0 total=0
+  local -x PFM_TEST_ARTIFACT_DIR="$run_dir/profile/race"
+  need_tool gcc pfm || return 1
+  regex="^($(awk '{print $2}' <<< "$CHECKS_PFM_RACE_TESTS" | paste -sd'|' -))\$"
+  while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$CHECKS_PFM_RACE_TESTS" | awk '!seen[$0]++')
+  run "pfm: go test -race (harvester chaos and race regressions)" -- bash -c '
+    CGO_ENABLED=1 go -C "$1" test -race -count=1 -json -timeout 10m -run "$2" "${@:4}" > "$3"
+  ' _ "$d" "$regex" "$json" "${pkgs[@]}"
+  go_test_report "$json"
+  checks_pfm_profile_pointers "$json" "$run_dir/profile/race" "$before"
+  passed="$(jq -r 'select(.Action=="pass" and .Test != null) | .Package + " " + .Test' "$json" 2>/dev/null)" || passed=""
+  while read -r pkg test; do
+    total=$((total + 1))
+    grep -Fxq "github.com/rezzminator/professor/pfm/$pkg $test" <<< "$passed" && continue
+    n=$((n + 1)); missing+="${missing:+, }$pkg $test"
+  done <<< "$CHECKS_PFM_RACE_TESTS"
+  (( n == 0 )) || fail_step "pfm: race — $n of $total named test(s) never passed: $missing"
 }
 
 # The RUN DIR line: a test run's caller reads the run dir it made from the output's last line,
@@ -756,11 +904,11 @@ gate_write_meta() {
   } > "$run_dir/gate.meta"
 }
 
-checks_templates_mirrors() { # optional: an executable pfm already built from this tree
+checks_templates_mirrors() {
   checks_templates_mirrors_generate
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
-  checks_templates_mirrors_opencode "${1:-}"
+  checks_templates_mirrors_opencode
   checks_templates_mirrors_manifest
 }
 
@@ -780,8 +928,20 @@ checks_gate_check_map() { # run dir
 # gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
 # record is missing — the judge then reads "not measured", never a quiet pass.
 gate_resources_stop() {
-  local pid="$1" run_dir="$2" rc
-  kill -TERM "$pid" 2>/dev/null || true # already gone: its exit status below says why
+  local pid="$1" run_dir="$2" rc attempt
+  # sampler.sh emits its header only after arming TERM; a stop during bootstrap
+  # can otherwise be lost and leave wait hanging after a very short steps_run.
+  for ((attempt=0; attempt<50; attempt++)); do
+    [[ -s "$run_dir/resources.tsv" ]] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if [[ ! -s "$run_dir/resources.tsv" ]] && kill -0 "$pid" 2>/dev/null; then
+    printf 'PROFILE resources NOT RECORDED — sampler readiness timed out\n'
+    kill -KILL "$pid" 2>/dev/null || true
+  else
+    kill -TERM "$pid" 2>/dev/null || true # already gone: its exit status below says why
+  fi
   if wait "$pid"; then rc=0; else rc=$?; fi
   if (( rc != 0 )); then
     printf 'PROFILE resources NOT RECORDED — sampler.sh exit %s (its stderr above)\n' "$rc"
@@ -827,6 +987,7 @@ gate_run() { # pfm, templates, or all
   if [[ "$target" == pfm || "$target" == all ]]; then
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir"
     steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir"
+    steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir"
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
@@ -859,31 +1020,11 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy pfm.vet run 'pfm: go vet' -- go -C "$d" vet ./...
     steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./...
     steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh"
+    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh"
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
     steps_add_heavy templates.check-map checks_gate_check_map "$run_dir"
-    steps_add templates.clone checks_templates_clone
-    steps_add templates.leak checks_templates_leak
-    steps_add templates.placeholders checks_templates_placeholders
-    steps_add templates.scratch-paths checks_templates_scratch_paths
-    steps_add templates.descriptions checks_templates_descriptions
-    steps_add templates.mirrors checks_templates_mirrors "$run_dir/bin/pfm"
-    steps_add templates.token-audit checks_templates_token_audit
-    steps_add templates.release-check checks_templates_release_check
-    steps_add templates.codex-sync checks_templates_codex_sync
-    steps_add templates.refresh-scope checks_templates_refresh_scope
-    steps_add templates.pfm-guard checks_templates_pfm_guard
-    steps_add templates.dev-report checks_templates_dev_report
-    steps_add templates.format-md checks_templates_format_md
-    steps_add templates.flight-templates checks_templates_flight_templates
-    steps_add templates.check-pfm-tests checks_templates_unit_script check-pfm
-    steps_add templates.check-templates-tests checks_templates_unit_script check-templates
-    steps_add templates.test-pfm-tests checks_templates_unit_script test-pfm
-    steps_add templates.test-templates-tests checks_templates_unit_script test-templates
-    steps_add templates.unit-path-tests checks_templates_unit_script unit-path
-    steps_add templates.opencode-writer-tests checks_templates_opencode_writer_tests
-    steps_add templates.skill-tests checks_templates_skill_tests
-    steps_add templates.opencode-writer-refs checks_templates_opencode_writer_refs
+    checks_templates_steps steps_add
   fi
   if gate_derive_bound "$target"; then derived=1; fi
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -30,10 +30,10 @@ A change lands in this file first, then in the templates, then in every surface 
 | `rr-pro` | variant of `rr` | The same body at higher effort with wider caps and the repository lane swapped in by `variants.json` `replace`, rendered by `pfm codex agents` | `opus`, effort `medium` | [rr-pro.md](rr-pro.md) |
 | `rr-pro-max` | variant of `rr` | As `rr-pro`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [rr-pro-max.md](rr-pro-max.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | mechanical (`sonnet`), effort `low` | [sub-rr.md](sub-rr.md) |
-| `tracer-rr` | agent | The repository digger of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [tracer-rr.md](tracer-rr.md) |
+| `clone-distiller` | agent | The general repository digger, the code lane of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [clone-distiller.md](../clone-distiller/clone-distiller.md) |
 | `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max` | `pfm internal rr-dir` | this file |
 
-The leads differ in their caps and in the repository lane, which sends a sub-area whose answer lives in a repository's code to `tracer-rr` ([tracer-rr.md](tracer-rr.md), § Who spawns it); every other line of the body is `rr.md`'s:
+The leads differ in their caps and in the repository lane, which sends a sub-area whose answer lives in a repository's code to `clone-distiller` ([clone-distiller.md](../clone-distiller/clone-distiller.md), § Who spawns it); every other line of the body is `rr.md`'s:
 
 | Lead | Diggers a round | Round ceiling | Verification pages | Repository lane |
 | --- | --- | --- | --- | --- |
@@ -58,7 +58,7 @@ Vocabulary, one term per concept: a rabbit hole is a link, gap or missing piece 
 
 One run produces one markdown document, `{RR dir}/{slug}-{YYYY-MM-DD}.md`, and nothing beside it: no part files, no sidecar directory, no log.
 
-- One writer. The lead is the only agent that writes it. `sub-rr` holds no `Write`, `Edit` or `Bash`; its `tools:` line carries that invariant, so the harness enforces it and no prose has to. `tracer-rr` holds `Bash` to clone and writes only its own result file under `{RR dir}/tracer-rr/`, which the document lists and never absorbs.
+- One writer. The lead is the only agent that writes it. `sub-rr` holds no `Write`, `Edit` or `Bash`; its `tools:` line carries that invariant, so the harness enforces it and no prose has to. `clone-distiller` holds `Bash` to clone and writes only its own result file under `{RR dir}/clone-distiller/`, which the document lists and never absorbs.
 - One write. The finished document is written once, at SAVE. Nothing is written before it and nothing is appended, so the lead needs no `Edit` tool and no sentinel lines.
 - No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing. It is what turns a second run on a taken name into a refusal instead of the silent loss of the first run's document. Adding `Read` to the lead's `tools:` line removes the guard. It would also let a lead open the ledger and inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path. `rr-pro-max` alone opts out: its `tools` override adds `Read`, accepting both costs ([rr-pro-max.md](rr-pro-max.md) § Read, and the name guard it gives up).
 - A failed save is loud. With no `RR-DIR:` line, an `RR-DIR-ERROR:` line, or a Write that fails for any reason but a taken name, the return opens `NOT SAVED — {reason}` and carries the synthesis inline.
@@ -180,7 +180,7 @@ An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOU
 | A log of findings written round by round | Every finding would be emitted twice, once by the digger and once by the lead |
 | A `RUNNING` stub written at the start and replaced at the end | Replacing it is a Write over an existing file: refused without `Read`, even for the lead's own stub, and allowed for every file with it, which removes the name guard. A dead run leaves no document; its plan and findings are in the transcript |
 | A human gate on the plan | The lead is a sub-agent and holds no way to ask; the plan is reported in `Coverage` |
-| Source-routing modules per domain | The harvester covers the scholarly lane and `tracer-rr` the code lane of the deeper leads; nothing measured supports more |
+| Source-routing modules per domain | The harvester covers the scholarly lane and `clone-distiller` the code lane of the deeper leads; nothing measured supports more |
 
 ## What the evidence says
 
@@ -196,13 +196,13 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 ## Measuring a run
 
-`/tokens --filter rr` lists each lead and digger with its tokens and tool uses. Three numbers say whether a run held the budget: the lead's calls against `r(d + 1) + 5`, the rounds used against the lead's round ceiling, and the `NOT ON PAGE` count in the document's `Verification` section. A `NOT ON PAGE` rate that stays above zero across runs means findings are still being paraphrased, and the fix is in the digger's fetch prompt, not in a larger verification sample.
+`pfm tokens --family {the chat's session-id prefix}` (`--since` widening its 24 h window to the run's start) prices the chat's agents per agent type, the lead's and the diggers', then its 14 costliest agents one by one with their calls, context and price; `pfm tokens --timeline {the lead's transcript}` lists the lead's calls one by one with their tokens and tool uses. Three numbers say whether a run held the budget: the lead's calls against `r(d + 1) + 5`, the rounds used against the lead's round ceiling, and the `NOT ON PAGE` count in the document's `Verification` section. A `NOT ON PAGE` rate that stays above zero across runs means findings are still being paraphrased, and the fix is in the digger's fetch prompt, not in a larger verification sample.
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `tracer-rr.md`, `variants.json` | The three protocols; the `rr-pro` and `rr-pro-max` overrides, whose `replace` text must occur exactly once in `rr.md`, and their repository lane, identical in both entries |
+| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `clone-distiller.md`, `variants.json` | The three protocols; the `rr-pro` and `rr-pro-max` overrides, whose `replace` text must occur exactly once in `rr.md`, and their repository lane, identical in both entries |
 | The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro` and `rr-pro-max`, re-rendered by `pfm codex agents` after every edit of `rr.md` |
 | The hook | `pfm internal rr-dir`, wired by `pfm/internal/installer/expected_hooks.go` | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
 | The roster line | `docs/BLUEPRINT.md` | The family's members and the variant mechanism |

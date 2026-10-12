@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -115,12 +116,13 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 		)
 		label = ""
 	}
-	command, err := action.ClaudeSpawn{
+	spawn := action.ClaudeSpawn{
 		Purpose: claudelaunch.PurposeResume,
 		Account: account, Cache1H: &cache1H, Resume: id, Name: label,
 		Home: commands.Home, Machine: commands.Machine,
 		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
-	}.Command(ctx)
+	}
+	command, err := spawn.Command(ctx)
 	if err != nil {
 		return fmt.Errorf("resume agent session: %w", err)
 	}
@@ -135,6 +137,12 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 	}
 	if resolveErr != nil {
 		fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", id, resolveErr)
+	}
+	// The pane is a terminal whether or not anyone is attached, and the door
+	// that attaches has already held: a wait here would stall a detached open
+	// and swallow the first injected message as its Enter.
+	if warning := spawn.PromptWarning(); warning != "" {
+		launchnotice.Print(stderr, "pfm internal agent-open", []string{warning})
 	}
 	return command.Run()
 }

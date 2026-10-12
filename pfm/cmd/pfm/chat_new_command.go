@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -304,6 +305,7 @@ func runRun(
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(stderr, "pfm chat new: %s\n", warning)
 	}
+	plan.Report(stderr, "pfm chat new")
 	// With --await the reply owns stdout, so the launch summary steps aside:
 	// `answer=$(pfm chat new --await …)` must be the answer and
 	// nothing else.
@@ -354,7 +356,7 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm: comms ledger: close shared state: %v\n", err)
 	}
 	if prompt == "" {
-		return attachRunResult(*attach, result, stdout, stderr)
+		return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
 	}
 	var progressOut io.Writer
 	if *progress && *await {
@@ -379,7 +381,7 @@ func runRun(
 	if code != 0 {
 		return code
 	}
-	return attachRunResult(*attach, result, stdout, stderr)
+	return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
 }
 
 func resolveRunEngineAccount(
@@ -467,10 +469,11 @@ func registerDetachedChild(state *fleetdb.Store, parent, socket string, createdA
 	)
 }
 
-func attachRunResult(attach bool, result spawn.Result, stdout, stderr io.Writer) int {
+func attachRunResult(attach bool, warnings []string, result spawn.Result, stdout, stderr io.Writer) int {
 	if !attach {
 		return 0
 	}
+	launchnotice.Pause(stderr, "pfm chat new", warnings)
 	line := "TMUX= tmux -L " + action.Quote(result.Socket) +
 		" attach -t " + action.Quote(result.Session)
 	if err := action.Dispatch(stdout, line); err != nil {
@@ -490,19 +493,29 @@ func attachRunResult(attach bool, result spawn.Result, stdout, stderr io.Writer)
 //
 // Both are variables so a test can drive the refusal path in seconds instead
 // of minutes; nothing outside a test changes them.
+//
+// launchReplyWindow bounds the reply watch after delivery: long enough for a
+// model server that refuses the request outright (a 400 comes back at once)
+// to have said so, short enough that a healthy launch still busy thinking
+// costs a script only seconds. Silence past it is a chat at work, not a
+// failure.
 var (
 	launchGrace       = 45 * time.Second
 	launchProofWindow = 90 * time.Second
+	launchReplyWindow = 10 * time.Second
 )
 
-// awaitLaunch proves the launch prompt reached the model, and — with
-// --await — brings back the answer.
+// awaitLaunch proves the launch prompt reached the model, that the model
+// server did not refuse it, and — with --await — brings back the answer.
 //
 // A prompt that was typed is not a prompt that was delivered: the keystrokes
 // can go into a startup overlay, a modal, or an engine that dropped the Enter,
 // and every one of those looks like success from the sending end. The engine's
 // own transcript is the proof, and this refuses to report a delivery it cannot
-// find there.
+// find there. A prompt that was delivered is not one the model took either:
+// a model server refusing every request leaves the chat in state error with
+// a synthetic reply, so the first reply is read before the launch is called
+// good.
 func awaitLaunch(
 	ctx context.Context,
 	name string,
@@ -515,7 +528,12 @@ func awaitLaunch(
 ) int {
 	handle := chatHandle(result.Socket, name)
 	if await {
-		return awaitAnswer(ctx, "run", name, handle, options, false, stdout, stderr, runtimes...)
+		turn, err := headless.Await(ctx, chatResolver(handle, runtimes...), options)
+		if turnRefused(turn, err) {
+			fmt.Fprintf(stderr, "pfm chat new: %s\n", turnErrorMessage(name, turn, result))
+			return codeTurnError
+		}
+		return reportTurn(turn, err, "run", name, options.Timeout, false, stdout, stderr)
 	}
 	turn, err := headless.Await(
 		ctx,
@@ -523,7 +541,7 @@ func awaitLaunch(
 		deliveryProofOptions(options, launchProofWindow),
 	)
 	if turn.Delivered {
-		return 0
+		return watchFirstReply(ctx, name, handle, options, result, stderr, runtimes...)
 	}
 	outcome := retryLaunchPrompt(ctx, handle, stderr, clk, runtimes...)
 	if outcome == inject.RescueTrustHeld {
@@ -544,7 +562,7 @@ func awaitLaunch(
 					"recorded it\n",
 				name,
 			)
-			return 0
+			return watchFirstReply(ctx, name, handle, options, result, stderr, runtimes...)
 		}
 	}
 	fmt.Fprintf(
@@ -560,6 +578,71 @@ func awaitLaunch(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 	}
 	return codeUndelivered
+}
+
+// watchFirstReply reads the chat's first reply to a delivered launch prompt
+// and answers with the launch's exit code: 0 for a reply or a chat still at
+// work when the window closes, non-zero for a refused turn, a chat that died
+// before replying, or a reply that could not be read.
+func watchFirstReply(
+	ctx context.Context,
+	name, handle string,
+	options headless.AwaitOptions,
+	result spawn.Result,
+	stderr io.Writer,
+	runtimes ...commandRuntime,
+) int {
+	turn, err := headless.Await(ctx, chatResolver(handle, runtimes...), replyWatchOptions(options))
+	code, message := firstReplyVerdict(name, turn, err, result)
+	if code != 0 {
+		fmt.Fprintf(stderr, "pfm chat new: %s\n", message)
+	}
+	return code
+}
+
+// replyWatchOptions re-reads the transcript from the launch frontier, so a
+// refusal written in the same breath as the prompt's own record is seen too.
+func replyWatchOptions(options headless.AwaitOptions) headless.AwaitOptions {
+	watch := options
+	watch.StopOnDelivery = false
+	watch.StopOnReply = true
+	watch.Timeout = launchReplyWindow
+	return watch
+}
+
+// firstReplyVerdict judges the reply watch. Silence is not a failure — a
+// model thinking, or a chat still booting, has written nothing yet — but a
+// watch that could not read the chat is never a success.
+func firstReplyVerdict(name string, turn headless.Turn, err error, result spawn.Result) (int, string) {
+	switch {
+	case turnRefused(turn, err):
+		return codeTurnError, turnErrorMessage(name, turn, result)
+	case err == nil, errors.Is(err, headless.ErrAwaitTimeout):
+		return 0, ""
+	case errors.Is(err, headless.ErrChatGone):
+		return codeDeadChat, fmt.Sprintf("%s received its prompt and died before replying", name)
+	default:
+		return 1, fmt.Sprintf(
+			"%s received its prompt, but its first reply could not be read: %v", name, err,
+		)
+	}
+}
+
+// turnRefused says the wait ended on an API error rather than an answer.
+func turnRefused(turn headless.Turn, err error) bool {
+	return turn.Error != "" && (err == nil || errors.Is(err, headless.ErrChatGone))
+}
+
+func turnErrorMessage(name string, turn headless.Turn, result spawn.Result) string {
+	message := fmt.Sprintf("%s's first turn ended on an API error (%s)", name, turn.Error)
+	if reply := strings.Join(strings.Fields(turn.Answer), " "); reply != "" {
+		message += ": " + reply
+	}
+	return message + fmt.Sprintf(
+		" — the model server refused the prompt; attach it and look: tmux -L %s attach -t %s",
+		result.Socket,
+		result.Session,
+	)
 }
 
 // launchRescueWindow bounds the second proof wait. The prompt is already in

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -81,72 +80,6 @@ func TestRetrieveBinaryGuardLeavesPagesAndArchivesAlone(t *testing.T) {
 	archive := h.Fetch(context.Background(), "https://203.0.113.10/bundle.zip")
 	if archive.Kind != kindArchive || !strings.Contains(archive.Error, "archive") {
 		t.Fatalf("zip under a page read: Kind=%q Error=%q, want the archive refusal", archive.Kind, archive.Error)
-	}
-}
-
-// countingBrowser is a Converter that counts browser starts.
-type countingBrowser struct {
-	fakeConverter
-	mu     sync.Mutex
-	starts int
-}
-
-func (b *countingBrowser) FetchBrowser(context.Context, string, bool) (string, int, string, error) {
-	b.mu.Lock()
-	b.starts++
-	b.mu.Unlock()
-	return "<html><body>rendered</body></html>", http.StatusOK, "", nil
-}
-
-func (b *countingBrowser) DownloadBrowser(context.Context, string, string, int64, bool) (BrowserFile, error) {
-	b.mu.Lock()
-	b.starts++
-	b.mu.Unlock()
-	return BrowserFile{}, errors.New("the inline-image policy must never start a browser download")
-}
-
-// TestRetrieveInlineImagePolicyFallsToChromeAndNeverStartsABrowser: an inline
-// image the direct rung is refused falls to Chrome impersonation, both with
-// the page as Referer, and no rung ever starts a browser. Watched FAILING
-// before PolicyInlineImage (the one-rung fetch left the image remote).
-func TestRetrieveInlineImagePolicyFallsToChromeAndNeverStartsABrowser(t *testing.T) {
-	t.Parallel()
-	const page = "https://203.0.113.10/article"
-	var mu sync.Mutex
-	var referers []string
-	serve := func(ok bool) roundTripFunc {
-		return func(request *http.Request) (*http.Response, error) {
-			mu.Lock()
-			referers = append(referers, request.Header.Get(headerReferer))
-			mu.Unlock()
-			if !ok {
-				return response(request, http.StatusForbidden, "text/html", "<html>blocked</html>"), nil
-			}
-			return response(request, http.StatusOK, "image/png", retrievePNG), nil
-		}
-	}
-	browser := &countingBrowser{}
-	h := mustNew(t, Options{
-		CacheDir:    t.TempDir(),
-		Client:      &http.Client{Transport: serve(false)},
-		Chrome:      &http.Client{Transport: serve(true)},
-		Converter:   browser,
-		BrowserRung: browserOn(),
-	})
-	out, err := h.LocalizeImages(context.Background(), "![fig](https://203.0.113.10/fig.png)", page)
-	if err != nil {
-		t.Fatalf("LocalizeImages: %v", err)
-	}
-	if strings.Contains(out, "https://203.0.113.10/fig.png") {
-		t.Fatalf("image refused by the direct rung was not fetched by Chrome impersonation: %q", out)
-	}
-	if browser.starts != 0 {
-		t.Fatalf("the inline-image policy started %d browser(s)", browser.starts)
-	}
-	for _, referer := range referers {
-		if referer != page {
-			t.Fatalf("inline image rungs sent Referer %q, want the page %q (all: %v)", referer, page, referers)
-		}
 	}
 }
 
@@ -282,7 +215,7 @@ func TestRetrieveWantAndPolicyMustAgree(t *testing.T) {
 		want   Want
 		policy Policy
 	}{
-		{WantFile, PolicyPage}, {WantPage, PolicyFile}, {WantPage, PolicyInlineImage}, {WantPage, Policy("bogus")},
+		{WantFile, PolicyPage}, {WantPage, PolicyFile}, {WantPage, Policy("bogus")},
 	} {
 		if _, err := h.retrieveWith(
 			context.Background(),

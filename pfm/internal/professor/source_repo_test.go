@@ -25,7 +25,7 @@ func writeSourceRepoFixture(t *testing.T, root string, files ...string) {
 func TestIsSourceRepoRecognisesAFreshCloneWithoutGeneratedMirrors(t *testing.T) {
 	root := t.TempDir()
 	writeSourceRepoFixture(t, root, ClaudeInstructionsFile, "pfm/go.mod", ".claude/settings.json")
-	if !isSourceRepo(root) {
+	if !IsSourceRepo(root) {
 		t.Fatal("a fresh clone without AGENTS.md was not recognised as the source repository")
 	}
 }
@@ -35,7 +35,7 @@ func TestIsSourceRepoRecognisesAFreshCloneWithoutGeneratedMirrors(t *testing.T) 
 func TestIsSourceRepoRefusesAScaffoldedAdopterProject(t *testing.T) {
 	root := t.TempDir()
 	writeSourceRepoFixture(t, root, ClaudeInstructionsFile, "AGENTS.md", ".claude/settings.json")
-	if isSourceRepo(root) {
+	if IsSourceRepo(root) {
 		t.Fatal("an adopter project without pfm/go.mod was mistaken for the source repository")
 	}
 }

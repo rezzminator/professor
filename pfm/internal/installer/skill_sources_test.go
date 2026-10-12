@@ -312,14 +312,23 @@ func TestSourceFetchedSkillsNeverOverwriteARealDirectory(t *testing.T) {
 		filepath.Join(t.TempDir(), "ghost-writer"),
 		map[string]string{"SKILL.md": "# upstream\n"},
 	)
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo}))
+	pen := skillFixtureRepo(t, filepath.Join(t.TempDir(), "pen"), map[string]string{"SKILL.md": "# pen\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo, "pen": "file://" + pen}))
 	own := filepath.Join(home, ".claude", "skills", "quill")
 	writeFixture(t, filepath.Join(own, "SKILL.md"), "# hand-copied\n")
+	ownFile := filepath.Join(home, ".claude", "skills", "pen")
+	writeFixture(t, ownFile, "# a file, not a skill directory\n")
 
 	output := runSkillInstall(t, home, ModeApply)
 
 	if !strings.Contains(output, "CONFLICT "+own+": a real directory, not ours; preserved") {
 		t.Fatalf("the real directory was not reported as a conflict:\n%s", output)
+	}
+	if !strings.Contains(output, "CONFLICT "+ownFile+": a real file, not ours; preserved") {
+		t.Fatalf("the real file was not reported as a file conflict:\n%s", output)
+	}
+	if got := readSkillFile(t, ownFile); got != "# a file, not a skill directory\n" {
+		t.Fatalf("the operator's file was overwritten: %q", got)
 	}
 	if got := readSkillFile(t, filepath.Join(own, "SKILL.md")); got != "# hand-copied\n" {
 		t.Fatalf("the operator's directory was overwritten: %q", got)

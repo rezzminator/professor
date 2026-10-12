@@ -877,45 +877,6 @@ func TestCorpusPythonConversionOwnedPairsAreByteExact(t *testing.T) {
 	}
 }
 
-func TestCSVAndJSONConversionPathsAreByteExact(t *testing.T) {
-	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
-	if python == "" {
-		t.Skip("HARVESTPY_CORPUS_PYTHON is not set; exact converter fixtures require the pinned interpreter")
-	}
-	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
-	dir := t.TempDir()
-	csvPath := filepath.Join(dir, "sample.csv")
-	if err := os.WriteFile(csvPath, []byte("name,value\nalpha,1\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	jsonPath := filepath.Join(dir, "sample.json")
-	if err := os.WriteFile(jsonPath, []byte("{\"b\":2,\"a\":[1,true]}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	invalidJSONPath := filepath.Join(dir, "invalid.json")
-	if err := os.WriteFile(invalidJSONPath, []byte("{not-json\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	converter := testConverter(t, python)
-	for _, tc := range []struct {
-		path string
-		kind string
-		want string
-	}{
-		{csvPath, "csv", "| name | value |\n| --- | --- |\n| alpha | 1 |\n"},
-		{jsonPath, "json", "```json\n{\n  \"b\": 2,\n  \"a\": [\n    1,\n    true\n  ]\n}\n```\n"},
-		{invalidJSONPath, "json", "```json\n{not-json\n```\n"},
-	} {
-		got, err := converter.Convert(context.Background(), Request{Path: tc.path, Kind: tc.kind})
-		if err != nil {
-			t.Fatalf("%s conversion failed: %v", tc.kind, err)
-		}
-		if got.Markdown != tc.want {
-			t.Errorf("%s output drift: got %q want %q", tc.kind, got.Markdown, tc.want)
-		}
-	}
-}
-
 func fakePython(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-python")

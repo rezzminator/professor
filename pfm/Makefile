@@ -31,6 +31,9 @@ DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
 # The local build artifact lives in the repo's gitignored tmp/, never in the tree.
 LOCAL   := $(REPO)/tmp/bin/pfm.dev
+# The plugin submodule host-install builds unstamped, installing under its
+# own reported version in {engine-sync home} (scripts/install-engine-sync.sh).
+ENGINE_SYNC_SRC := $(REPO)/plugins/engine-sync
 UNIT    := pfm-mcp.service
 # The macOS twin of UNIT: the launch agent pfm install wires for the daemon.
 AGENT   := com.professor.pfm.mcp
@@ -121,12 +124,14 @@ lint: ## Every finding in the module — the burn-down view
 # `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
 # fence-wide it hijacks every `git init` the test suite runs.
 FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
+# LINT_PKGS: the packages lint-new analyzes; check-pfm.sh passes only its named files' packages.
+LINT_PKGS ?= ./...
 # GOMEMLIMIT: a change to a widely imported package (testjail, deps) leaves the
 # lint cache cold for its importers; golangci-lint then peaked at 1752 MiB and
 # was OOM-killed in the 2 GiB fence. Capped at 1000MiB it peaked at 1289 MiB.
 lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gate view
 	$(call need-tool,LINT)
-	$(FENCE_GIT) GOMEMLIMIT=1000MiB $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
+	$(FENCE_GIT) GOMEMLIMIT=1000MiB $(LINT) run --new-from-merge-base=$(LINT_BASE) $(LINT_PKGS)
 
 vet: ## go vet the whole module
 	go vet ./...
@@ -188,7 +193,7 @@ install: ## Swap in a new build, restart the daemon, sweep obsolete processes, a
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
+host-install: ## Build engine-sync from plugins/engine-sync unstamped, install into {engine-sync home}/versions/{reported version} and link bin/engine-sync; build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
 	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
 	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
 	@# build even starts — $(BIN) is never touched. FORCE=1 in the
@@ -196,7 +201,19 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview i
 	@# the guard and prints a FORCED line instead of refusing.
 	@mkdir -p "$$(dirname "$(BIN)")"; \
 	tmp="$$(mktemp "$(BIN).new.XXXXXX")"; \
-	trap 'rm -f "$$tmp"' EXIT; \
+	journal="$$(mktemp -d "$(BIN).engine-sync.XXXXXX")"; \
+	completed=0; \
+	trap 'if [ "$$completed" = 0 ] && [ -f "$$journal/path" ]; then \
+	  es_link="$$(cat "$$journal/path")"; \
+	  if [ "$$(readlink "$$es_link" 2>/dev/null || true)" = "$$(readlink "$$journal/installed")" ]; then \
+	    if [ -L "$$journal/previous" ]; then \
+	      restored=0; cp -P "$$journal/previous" "$$journal/restore" && mv -f "$$journal/restore" "$$es_link" && restored=1; \
+	    else restored=0; rm -f "$$es_link" && restored=1; fi; \
+	    if [ "$$restored" = 1 ]; then echo "host-install: restored engine-sync stable link $$es_link after refused pfm swap" >&2; \
+	    else echo "host-install: FAILED to restore engine-sync stable link $$es_link" >&2; fi; \
+	  else echo "host-install: engine-sync stable link changed concurrently; kept $$es_link" >&2; fi; \
+	fi; rm -f "$$tmp"; rm -rf "$$journal"' EXIT; \
+	ENGINE_SYNC_LINK_JOURNAL="$$journal" bash "$(REPO)/pfm/scripts/install-engine-sync.sh" "$(ENGINE_SYNC_SRC)"; \
 	go build $(LDFLAGS) -o "$$tmp" ./cmd/pfm || { echo "host-install: build FAILED — $(BIN) untouched" >&2; exit 1; }; \
 	reported="$$("$$tmp" --version 2>&1)" || { echo "host-install: smoke test FAILED ($$reported) — $(BIN) untouched" >&2; exit 1; }; \
 	case "$$reported" in *"$(VERSION)"*) ;; \
@@ -212,7 +229,7 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview i
 	  fi; \
 	fi; \
 	kept=""; if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev" && kept="; previous kept at $(BIN).prev"; fi; \
-	mv -f "$$tmp" "$(BIN)"; \
+	mv -f "$$tmp" "$(BIN)"; completed=1; \
 	echo "installed: $(BIN) ($$reported$$kept)"
 	@# The new binary answers `pfm install --check` before the swap. Any
 	@# refusal keeps $(BIN) untouched and prints the check's own answer.

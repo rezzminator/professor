@@ -37,9 +37,9 @@ const (
 )
 
 // partialMarkerPrefix opens the content of an artifact known to be
-// incomplete. It is the ONE record of partiality: the cache stores it with the
-// content, every surface that shows the content shows it, and Result.Partial
-// is read back from it (partialReason).
+// incomplete while the ladder carries it. It is the ONE in-pipeline record of
+// partiality: the store lifts it off the body into the artifact's frontmatter
+// gaps (splitArtifact), and Result.Partial is read from there.
 const partialMarkerPrefix = "> **Partial artifact:** "
 
 // lazyLoadMarker is the <meta name> the browser worker leaves in a render its

@@ -55,11 +55,17 @@ type pane struct {
 	status      string
 	glyph       string
 	placeholder string
+	rule        string
 	renameDraft *composer
 	renameError string
 }
 
 const historyKeep = 12
+
+// claudeComposerRule is a horizontal rule of Claude Code's input box, drawn
+// above and below its composer row; the kill-exit finisher reads the box down
+// to the closing one (inject.ComposerBoxEmpty). Codex draws no box.
+const claudeComposerRule = "────────────────────────────────────────\r\n"
 
 // These dialog strings are read by internal/spawn/spawn.go's Codex birth.
 const (
@@ -115,7 +121,7 @@ func (screen *pane) render() string {
 				text = "\x1b[2m" + screen.placeholder + "\x1b[0m"
 			}
 		}
-		out.WriteString("\r\n" + screen.glyph + " " + text + "\r\n")
+		out.WriteString("\r\n" + screen.rule + screen.glyph + " " + text + "\r\n" + screen.rule)
 		if screen.placeholder != "" && draft != "" && strings.HasPrefix(codexRenameCommand, draft) {
 			out.WriteString(codexRenameOffer + "\r\n")
 		}
@@ -155,6 +161,9 @@ func runPane(proc *process, engine paneEngine, launchPrompt string, resumed bool
 	loop := &paneLoop{proc: proc, engine: engine, screen: &pane{glyph: engine.composerGlyph()}}
 	if codex, ok := engine.(interface{ composerPlaceholder() string }); ok {
 		loop.screen.placeholder = codex.composerPlaceholder()
+	}
+	if proc.engine == engineClaude {
+		loop.screen.rule = claudeComposerRule
 	}
 	if proc.engine == engineCodex {
 		// Codex repaints in an alternate screen so old busy footers cannot
@@ -294,7 +303,8 @@ func (loop *paneLoop) closeMenu(confirmed bool) {
 }
 
 // exitMenuName tags the /exit confirmation Claude Code shows over background
-// work (internal/reload/reload.go:535 presses Enter on its ❯ row).
+// work (inject.ExitDialogOpen matches its ❯ row; reload and the kill-exit
+// finisher press Enter on it).
 const exitMenuName = "exit-dialog"
 
 // submit handles one submitted line: a slash command or a prompt.

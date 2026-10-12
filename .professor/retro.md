@@ -181,3 +181,223 @@ Amend: judgment — a behaviour probe through `chat_new` runs one chat, reads it
 ## 2026-10-02 — two pfm surfaces answer "fine" when they failed
 Observed: `pfm chat new` returned `the chat drew nothing within 30s` (exit 1) for ttl-n-5m-1 and ttl-s-1h-2, both running normally; `--settle 90` did not change the 30s check. `.claude/scripts/dev.sh iso run bash -c 'cd pfm && go test …'` printed `go: cannot find main module` and then `all steps passed`.
 Amend: pfm chat new — the draw check honours `settle` and confirms the pane before reporting a failed launch; .claude/scripts/dev.sh#iso run — exit and report the command's own status, never "all steps passed" after it failed.
+
+## 2026-10-07 — v0.79.0 update: host conflicts survive the rollback
+
+Observed: updating from `0.79.0-alpha` with `pfm update --to v0.79.0` exited 1. The candidate installer exited 4 on account identity entries in the shared Claude store. Source and binary rolled back, but reapplying the previous installer also exited 4 on the same host; the updater correctly printed `rollback residue`. Post-rollback `pfm doctor` exited 3 with six failures and 110 warnings, while `pfm config validate` exited 0. A restored source revision and version string did not mean that host integration had been restored.
+
+Recovery: inspect the actual account/store paths and live-process config directories; compare stable identity fields without exposing their values; quarantine conflicting entries with verified file/tree manifests instead of executing the printed removal commands. Preserve the established account data. Five misplaced store entries and one account cache were preserved intact. The retry exited 0, installed `v0.79.0`, and a subsequent `pfm install --yes` exited 0. All three accounts retained their identity fields. Unrelated untracked work was stashed by explicit path, restored, and checked byte-for-byte on both attempts.
+
+Amend: investigate preflight before a binary/source swap when the current host already has operator-owned conflicts. Keep source rollback, binary rollback and installer-state restoration as separately evidenced results. A failed reapply must retain its exact diagnostics and name the remaining operator action; do not reduce it to "rolled back safely". Prove the failure and recovery with a fixture containing valid account data plus misplaced store identity, without live credentials. These are follow-up requirements, not a claim that the updater repair has shipped.
+
+## 2026-10-07 — an account cache changes ownership across the update
+
+Observed: the installed alpha classified `.last-update-result.json` as shared data and blocked a real copy in an account directory. Stable v0.79.0 classifies it as per-account data and retires the shared copy. Satisfying the old host check with a shared-store link therefore left two new `retired-store-entry` warnings after the successful update. The new installer explicitly skipped retirement because that account had live chats; rerunning installation while those chats remained live still exited 0 with the migration skipped.
+
+Amend: cover this exact old-to-new ownership transition in the adopter rehearsal. Explain the live-chat precondition before updating, and distinguish a successfully installed binary from deferred migration work. Retain and restore the original account cache when appropriate; never overwrite account-owned data or bypass the live-account guard. Verify archival and unlinking after the account becomes idle. Determine whether the old-binary precheck can avoid a temporary repair that the target release immediately retires.
+
+Recovery completed: after explicit authorization to finish the deferred migration, both affected chats were confirmed idle and ended with `pfm chat end`; their histories remained resumable. `pfm install --yes` exited 0, removed the retired account link and archived the shared copy. The original account-owned cache was restored from its verified backup, with no existing file overwritten. A fresh doctor run showed healthy account links, no blocking failures and no retired-store-entry warnings. Other pre-existing host warnings remained visible. The product follow-up above remains open; the host migration is complete.
+
+## 2026-10-07 — the source clone gets inconsistent project-update verdicts
+
+Observed: after the successful v0.79.0 update, the updater printed `NOT-MANAGED` and explained that a missing `.professor/baseline.json` is expected in the Professor source clone. Running the recommended `pfm doctor --project-updates` in that same clone exited 3 with `FAILED` and suggested `pfm update adopt` or `pfm init`. No baseline was created: this was the framework source, not an adopted project.
+
+Amend: make the source-clone distinction consistent across the updater and standalone project report. An adopted project with a missing baseline must still report its real failure; the source clone should not be steered into scaffolding or adoption. Add a paired source-clone/adopter fixture and preserve exit/output parity for both commands.
+
+## 2026-10-07 — successful installation is not a zero-warning health result
+
+Observed: the repaired update and explicit installer both exited 0, but final `pfm doctor` exited 1 with 112 warnings and no failure rows. Account links were healthy, managed plugins were healthy, and the reminder scheduler was armed with no overdue or failed jobs. Two warnings were the deferred account-cache migration above; the remainder included retained operator/plugin files and backups, stale state, an orphaned-kill audit, an unfollowable pane, and a browser worker that reprovisions on its next browser fetch. The release's blanket "doctor exits 0" action was not achieved. No unrelated operator data was deleted or warning filter changed to manufacture a clean result.
+
+Amend: release actions should distinguish blocking failures, actionable migration warnings, explicitly retained operator state and deferred runtime provisioning. Preserve the full private diagnostic record; publish only a sanitized incident summary. Installation success, migration completion and a zero-warning doctor are three different acceptance checks.
+
+## 2026-10-08 — flight chat-exit: host tooling, a moving base, and findings left outside the flight
+
+Observed: the flight shipping MCP `chat_exit` (develop `bcd3f969`) took five lander rounds and hit four process gaps. (1) Host `check-pfm.sh`/`test-pfm.sh` fail under BSD `realpath` (no `-m`); they only ran with GNU coreutils prefixed onto `PATH`. (2) `check-templates.sh` cannot run on the host (no PyYAML) nor through `iso run` (no Linux tools in the read-only mount), so templates are verified by `iso gate` alone. (3) `develop` moved from `69b46e83` to `50aa3877` during the three-hour flight; gitter's MERGE was refused as non-fast-forward and the green gate covered the stale base, costing a rebase and a re-gate. (4) After that rebase the untracked engine mirrors were stale, and `iso gate`'s `templates.mirrors` step failed on the read-only mount until `pfm codex build . && pfm opencode build .` ran on the host.
+
+Left open by the lander, outside the flight: V9 — the `"reload-"` log prefix is a bare literal (`pfm/cmd/pfm/chat_reload_command.go`, `pfm/internal/doctor/crumbs.go`) while the new `SIDKillExitLogPrefix` is a constant. V6 — two simultaneous kills of one chat plus a failed finisher launch can race `Manager.Kill`'s check-then-write rollback; closing it needs a create-if-absent in the kill store. Flakes seen: `templates.lanes.mcp-stdio` "reply after server exit" under host load, and lane M.04-doctor-mcp's "context canceled" record.
+
+Amend: make the host check scripts portable or have their preflight name the missing GNU tool; have the gate's mirrors step name stale mirrors with the host regeneration command instead of a write failure; have the flight close re-check its base against `develop` before the lander runs; route V9 and V6 to their own small flights; and track the two flaky beats until they are deterministic.
+
+## 2026-10-09 — housekeeping session: relayed push refused, a red develop after clean landings, iso run quoting
+
+Observed: (1) The user asked in-turn to delete a stale remote branch; the main chat relayed the ask to gitter quoting the user verbatim, and gitter refused because a relayed quote is not the user's own message — yet the global `gitter.md` says a push runs "when the caller quotes the user asking for it in the current turn". The user had to run `git push origin --delete` from their own prompt. (2) Three flights landed green, each gated before its rebase; re-gating develop's tip afterward (fresh worktree at c867316c) found `pfm/internal/tokens` TestAuditReplaysTheNodeGoldens/suite/014 red — Go prints "--flight … is not readable: stat …" where the Node golden expects "no agents.tsv, and …/run.md is not readable" — introduced by 12f2e454 and merged without a tip re-gate. (3) `dev.sh iso run bash -c '…'` splits the quoted string, so `cd /worktree/pfm && go test …` runs in `/worktree`. (4) The 2026-10-08 entry's item (1), BSD `realpath -m`, is fixed by ddfb551a (`unit_canon` in `.claude/scripts/unit-path.sh`); its PyYAML item stands.
+
+Amend: templates/global/agents/gitter.md#Push — say whether a caller's verbatim quote of the user's in-turn ask suffices, and make this repo's gitter agree; the flight close (flights-lander or the root foreman) re-runs `iso gate` on develop's tip after the landing commit, not only on the pre-rebase tree; `.claude/scripts/dev.sh` `iso run` passes its argv through unsplit, or documents the quoting it needs.
+
+## 2026-10-09 — foreman model benchmark (round 5) and advisor scope
+
+Observed: (1) A bench testing manual that said "run changed packages and their importers" made five parallel arms race-test most of pfm and pegged the host at load 29; a manual for parallel runs must name exact packages. (2) `pfm tokens --out` keeps `usd` buckets and a separate `total`; a grader summing the buckets under-scored a correct arm 0/3 — `total` is the canonical figure. (3) Round 5 (real bug: advisor iterations unpriced by `pricing.UsageBlock.Billed`), one run per arm, blind Opus review: Sonnet high + Opus advisor capped at 2048 scored 8/10 at $7.13; an Opus foreman scored 5.5 at $12.00 and locked a defect in with its own test. (4) The advisor was effectively on for every Sonnet request machine-wide (user `advisorModel: opus` + the live gateway's `advisor_models: [claude-sonnet-5-5]`), mechanical executors and gitter included; a sub-agent request is identifiable at the gateway by the `x-claude-code-agent-id` header and its agent prompt in system block 3.
+
+Amend: flights testing-manual guidance — name exact packages, never "importers", when runs go parallel; advisor-cache-gateway — scope the advisor per agent (`advisor_agents`, handoff 20261009-180119), with a start check that the matched prompt line still exists.
+
+## 2026-10-09 — tokens/transcript into pfm: a landing gated pfm only left develop's templates gate red; close-out cannot be ordered
+Observed: (1) Flight transcript-into-pfm landed with its pfm gate green, but it committed 14 symlinks as golden fixtures under pfm/internal/transcript/digest/testdata; scripts/check-codex-markers.mjs (templates gate, step templates.mirrors) rejects every tracked symlink that dangles or points at an untracked target, so develop's templates gate stayed red until the next flight (chatlog-skill) moved them into case.json `links`, created at test time. (2) Host python3 has no PyYAML, so check-templates.sh prints only "FAIL install". (3) `iso gate pfm` and `iso gate templates` run in parallel on one host produce contention failures. (4) check-pfm.sh skips TestNoEngineLiteralOutsideEnginePackage, so a Go fix that passed it still failed the gate on a bare "codex" literal. (5) The user ordered "merge, then /close-out, then self exit" under god speed; close-out carries disable-model-invocation, so the model could not run it and had to hold the exit for the user.
+Amend: templates/global/agents/flights-lander.md — every landing runs both gates, sequentially, whatever projects the diff names (the templates gate scans the whole tree); .claude/commands/pfm-testing-manual.md — golden fixtures never commit a symlink or an empty directory, they declare them in the case manifest (`links`, `dirs`); infra/fence/check-templates.sh — name the missing Python module instead of a bare "FAIL install"; .claude/scripts/check-pfm.sh — run the engine-literal sweep or say it skipped it; templates/global/skills/close-out/SKILL.md — judgment: whether a user's in-turn order may invoke it.
+
+## 2026-10-10 — a preview binary handed over beside an installed one reads as "the change does not work"
+Observed: the ls-picker flight gave the user `tmp/bin/pfm.dev ls` to preview; the user's second try was plain `pfm`, the old installed binary, and the run looked like the new design had failed (shortcuts still there, no menu). Diagnosis needed shell history plus the launch-memory row.
+Amend: templates/global/commands/flights/ (the foreman's preview hand-off) — a preview command for a binary that also exists installed says in the same line that plain `{tool}` is still the old one until the landing installs it.
+Resolved:
+
+## 2026-10-10 — a write after an exec-ing open never runs
+Observed: the picker's launch memory was written after `chat.OpenRow` returned; in a real terminal OpenRow execs the attach, so the write never ran. Tests passed because the jail's open returns. flights-lander caught it.
+Amend: pfm/CLAUDE.md#Code Standards — any state an action must record is written before the call that may exec (OpenRow, action.Dispatch), and rolled back on its error; a test that calls the open through a returning fake proves nothing about the exec path.
+Resolved:
+
+## 2026-10-10 — engine-sync-p2: a host probe with the real HOME wrote into ~/.codex; narrowing validate-only roots changed ownership
+Observed: (1) The root foreman rebuilt host mirrors with a scratch engine-sync while redirecting only XDG/STATE; HOME stayed real, so `build .` wrote 39 global prompts/SKILL.md into ~/.codex with a newer marker; restored by deleting them and rerunning the installed `pfm codex build .`. (2) Ruling 15 narrowed Codex validate-only roots; reconcile.Claimable reads every root's SourceRoots and falls back to ClaudeTarget on an empty list, so dropping the Claude agents roots made a no-Codex-home `global` overwrite a user's foreign link — flights-lander round 5 caught it. (3) A 200-call flights-lander cap ends re-landing mid-round; a fresh lander per round finished each in under 50 calls. (4) Host `dev.sh iso` needs /opt/homebrew/bin/bash explicitly.
+Amend: .claude/commands/pfm-testing-manual.md — any host probe of an engine-sync binary redirects HOME with XDG_*/ENGINE_SYNC_STATE/ENGINE_SYNC_HOME, never XDG alone; plugins/engine-sync CLAUDE.md — grep Claimable before removing a ValidateOnly root; templates/global/commands/flights/ — re-landing rounds spawn a fresh lander.
+Resolved:
+
+## 2026-10-10 — a relaying agent summarizes a sub-agent's return unless told to quote it, and the statuses vanish
+Observed: in the conflict-resolver lab (rung C, gitter end to end), the v2 gitter received the resolver's `{path} · {status} · …` rows and reported them as prose bullets in 2 of 2 runs. Every status label was lost, so a `dropped` row (one side's change the merge did not keep) would never have reached the caller. One run also reworded its fixed refusal line. The clause "quote the resolver's return verbatim, never a summary" (c33296bd) held in 3 of 4 runs, including both runs that carried a `dropped` row. Even "verbatim" is retyped: one run introduced a typo and then corrected it below.
+Amend: templates/global/commands/quality/prompt.md#Correctness & model behavior — an agent that relays a sub-agent's machine-read return quotes it verbatim, and the prompt gives the reason (the caller parses its statuses). A status that must survive every relay goes in a file the caller reads, not in relayed text.
+Resolved:
+
+## 2026-10-10 — `visibility.visible-to` is not enforced on this host; GITTER-ONLY held only through the description
+Observed: tool-visibility-controller is missing from `enabledPlugins` in both `~/.claude/settings.json` and `~/.cc/2/settings.json`. The main chat's agent list shows conflict-resolver (`visible-to: [gitter]`) and every TRACER-ONLY, RR-ONLY and INVESTIGATOR-ONLY helper. A haiku test relay spawned conflict-resolver directly 9 times once its prompt carried the user's authorization. The only refusal came from the model reading "GITTER-ONLY" in the description.
+Amend: judgment — either enable tool-visibility-controller on the host (a fleet-wide change and its own task), or have `pfm doctor` warn when an installed agent declares `visibility` while the plugin is off.
+Resolved:
+
+## 2026-10-10 — `pfm doctor`'s repair for a missing plugin cannot work from a live chat
+Observed: `pfm doctor` reported `tool-visibility-controller@tool-visibility-controller-dev not enabled … — run pfm install --yes`. Two `pfm install --yes` runs from a chat both exited 0, and both skipped the plugin step ("skip claude plugins: live chats … — close them and rerun"). The chat running the install is itself one of those live chats, so following the repair from inside any chat never closes the gap. The plugin had silently stayed off on every account since it joined the table. Separately, BSD `pgrep` leaves out its own ancestors, so a live-chat count taken from inside a chat is one short.
+Amend: pfm/internal/doctor/claude_plugins_checks.go — the plugin-gap repair names the live-chat gate ("close every Claude chat, then run pfm install --yes from a plain terminal"), and `pfm install` reports a skipped plugin step as a warning in its summary line, never an exit-0 skip buried among the rows.
+Resolved:
+
+## 2026-10-10 — a context-junk claim rested on a check that exited 2
+Observed: the main loop's first context audit read `~/.claude.json` (absent; the active config is `$CLAUDE_CONFIG_DIR/.claude.json`), the chained step exited 2 with no FAILED line, and a row on the Chrome integration was reported as if the check had run. The buddy plugin caught it; the corrected check reversed half the row.
+Amend: judgment — the rule exists (fleet prompt § Command execution: a chained step that fails says so on its own line); `/context-audit` step 3 now carries it for this workflow.
+Resolved:
+
+## 2026-10-11 — a forced worktree removal judged submodules by HEAD alone
+Observed: the shipped `worktree.sh remove` (safety-repairs flight) refused unpushed submodule work by checking only each submodule's HEAD; the landing review proved a commit on a local submodule branch (HEAD back on the recorded commit) and a submodule stash were both deleted by `git worktree remove --force` with rc 0, since a linked worktree's submodule gitdirs live under its private Git directory. The fix judges `git rev-list -n 1 HEAD --branches --not --remotes --tags` plus `refs/stash`.
+Amend: templates/global/agents/gitter.md#Phases — the Worktree remove rule proves "HEAD is on its remote"; it should prove no commit reachable from HEAD or a local branch is missing from every remote branch and tag (or from the main checkout's copy), and that no stash exists.
+Resolved: 2026-10-11 — templates/global/agents/gitter.md and .claude/agents/gitter.md, Worktree remove: rev-list over HEAD and local branches against remotes and tags, plus the stash check
+
+## 2026-10-11 — GPT role twins redirected the tracer kit off Claude
+Observed: `gpt-foreman` spawned `gpt-tracer` (sol), which spawned `gpt-sub-tracer` (luna), because its role line mapped "a tracer, spawn `gpt-tracer`". The twins are generated by the `/iterative-improvement` lab (`gpt-subagent-route`) into `~/.claude/agents/`, not by the repo, so no repo check saw the mapping. The user ruled the tracer kit stays on Claude; both twins and their lab copies were deleted.
+Amend: judgment — the lab owns the twins; any future twin generator maps only roles the user named for GPT, never `tracer`/`sub-tracer`.
+Resolved: 2026-10-11 — judgment; the twins no longer route the tracer kit and gpt-tracer/gpt-sub-tracer are deleted
+
+## 2026-10-11 — a guarded patch applied by Bash left the flight worktree's engine mirrors stale
+Observed: in the price-gap flight the main chat applied `patches/guarded.patch` (`.claude/scripts/check-pfm.sh`, `.claude/commands/pfm-testing-manual.md`) with `git apply`, which the Stop hook's mirror compile never sees, then told the foreman to skip the worktree mirrors; the flight's first `iso gate` failed only on `templates.mirrors` and the lander rebuilt them.
+Amend: judgment — the rule exists (root `CLAUDE.md` § Runtime, Claude: after a Bash-driven write, `pfm codex build . && pfm codex check .` then `pfm opencode build . && pfm opencode doctor .`); the main chat applying a guarded patch runs it in the worktree before resuming the foreman.
+Resolved: 2026-10-11 — judgment; root CLAUDE.md § Runtime already holds the rule
+
+## 2026-10-11 — the flights roles have no rule for a check's `GAP install`, exit 3
+Observed: `check-templates.sh` (safety-repairs) and `check-pfm.sh` (price-gap, `8c663472`) now print only `GAP install ({unit} is missing: …)` and exit 3 when a tool is absent; the role prompts say only "a red fixed and the same command again", so a builder reading exit 3 as a red may chase a tool gap in code, and one reading it as non-FAIL may report a pass.
+Amend: templates/global/agents/flights-foreman.md#Tests, templates/global/agents/flights-lander.md steps 2 and 8, templates/global/agents/flights-mechanical-executor.md step 7 — a `GAP install` exit 3 is no red to fix and no pass: the return names it as a gap with the missing tools, and the builder installs nothing.
+Resolved: 2026-10-11 — flights-foreman.md § Tests, flights-lander.md step 2, flights-mechanical-executor.md step 7
+
+## 2026-10-11 — an agent's tools allowlist hid the self-compaction tool
+Observed: a nudged flights-foreman ran from 143k to 264k without compacting: its `tools:` allowlist left out `mcp__sub-agent-compact__compact`, and its `<compact-now>` markers landed in messages that ended its turn at a wait, where the plugin arms nothing; the plugin's decision log held about 100 skipped asks and no armed row. Every agent but the rr family now lists the tool (`e6865dae`).
+Amend: .claude/commands/pcm.md#Special Operations — a new agent with a `tools:` allowlist lists `mcp__sub-agent-compact__compact`, the rr family excepted.
+Resolved: 2026-10-11 — .claude/commands/pcm.md and templates/project/commands/pcm.md, New agent
+
+## 2026-10-11 — a brief capped the total number of test chats an agent could launch but not how many could run at once
+Observed: the auto-effort experiments brief allowed 40 test chats in total with no concurrency limit. The agent launched its 14-chat pilot at once, an hour after a host crash, and the load average reached 137. The user had every chat killed, and three pilot runs were lost. The same run also showed two side effects of test chats: `/effort` typed into a test chat saved its level into the shared `~/.claude/settings.json`, and a test chat followed `pfm chat ask`'s "to reply" line and messaged the user's main chat.
+Amend: CLAUDE.md § Dispatch: a dispatch that lets an agent launch chats or processes caps how many run at once, as well as the total. A test chat changes settings only through launch flags, never through a slash command that saves a default, and is told to answer only in its own chat.
+
+## 2026-10-11 — a builder wrote a guarded template through Bash, and the guard never saw it
+Observed: a general-purpose builder changing `templates/global/skills/tracetree/loom_wall.html` (commit `c1e55f14`) made its first edit with a Python script run through Bash. The PreToolUse guard gates Edit and Write only, so that write went through unchecked. When its next Edit was denied, the builder ran the unlock stamp the deny message names, and its later edits were guarded. The next builder's brief said "every template edit through the Edit tool, never Bash", and it complied.
+Amend: CLAUDE.md#Process (Guarded files) — a guarded file is written through Edit or Write only, never through a shell command; and `.claude/scripts/pfm-guard.sh` — consider gating Bash commands that write under a guarded path.
+
+## 2026-10-11 — a host reboot wiped every tracer run, and the history `tt book` reads
+Observed: a Mac crash and reboot cleared `/tmp`, the tracer runs root `/tmp/professor/tracer`. Every earlier run was gone: the 478-hop run open in the user's browser, the A/B seats' runs, the swatch book's history (46 runs before, 1 after) and every Loom page generated under `/tmp`. Only records copied to `~/.local/state/pfm/` survived.
+Amend: templates/global/skills/tracetree/SKILL.md (runs root) — decide whether runs that a caller keeps (a bench, a book, a published page) belong under a durable root such as `~/.local/state/pfm/tracer/`, or whether `/tmp` stays and the caller copies what it keeps; or `judgment`.
+
+## 2026-10-11 — a flight brief ordered "commit the live pfm.config.json", which is gitignored
+Observed: the plugin-list flight could not commit its R8 config edit; pfm.config.json is ignored (`.gitignore:2`), and the old pfm binary rejected the new key, so the edit had to wait until after `make host-install`.
+Amend: CLAUDE.md#Vocabulary — name pfm.config.json as the host's untracked live config: a flight edits it in place after the host install and never commits it.
+Resolved:
+
+## 2026-10-11 — pfm test files near the 1000-line C2 ceiling block new tests
+Observed: claude_store_test.go (992) and main_test.go (998) could not grow; the tvc-store-entry flight found this only at the gate.
+Amend: .claude/commands/pfm-testing-manual.md — before adding a test, `wc -l` the target; at or near the ceiling, put the test in a sibling file.
+Resolved:
+
+## 2026-10-11 — the picker parked forever on one quiet interval, so cosmos drew dead chats after a reboot
+Observed: two root causes. `compose/cosmos.go` gave an event-matched node `Dead = Killed` only, so a resumable chat with comms in the 24h window drew live. `picker/pipeline.go` parked after one untouched 5s pass and ran no full pass until a keystroke, so births and deaths never reached the TUI. Fixed in 5fcc59d4 (liveness) and 2d38712b (CPU). Idle Limits under chat churn is still 0.87–1.49% of a core against the old 0.3%, because each presence-triggered pass is a full two-phase pass.
+Amend: pfm/internal/picker/pipeline.go — move code out to get under the C1 ceiling, then make a presence-triggered pass lean (full load first, skip the first publish and the reload when the indexer touched nothing; ~40% of its CPU). Close R2 as well: `/tmp/cc-sid` crumb owner is never checked (gather/crumbs.go, statusline, doctor).
+Resolved:
+
+## 2026-10-11 — a stat on pfm.db misses WAL commits; PRAGMA data_version is the change gate
+Observed: pfm.db runs in WAL mode, and its mtime moves only at checkpoint. The cosmos ledger gate uses `PRAGMA data_version` plus an own-writes counter, because data_version does not move for the committing connection. The pool is one connection, and a second dedicated connection would deadlock it.
+Amend: .claude/commands/pfm-testing-manual.md — a cross-process change gate on pfm.db is tested with a second connection and a forced `wal_checkpoint(TRUNCATE)` between inserts.
+Resolved:
+
+## 2026-10-11 — an offline analysis opened paths named in transcripts and took the host down
+Observed: a throwaway script that sized every file path found in transcript tool calls opened each with an unbounded read(); one path was /dev/zero, the read never ended, two orphan python copies grew past 12 GB each and the host panicked on swap exhaustion. The repair was a helper that stats first, refuses anything but a regular file (S_ISREG), never opens /dev, /proc or /sys, caps every read and runs under an alarm plus a CPU limit. The user's standing rule since: any analysis that opens paths from transcripts reads only S_ISREG files with a bounded read().
+Amend: templates/global/skills/chatlog/SKILL.md#rules — any ad-hoc analysis that opens a path found in a transcript stats it first, reads only regular files with a bounded read, never /dev, /proc or /sys, and runs under a timeout; /pcm retro may find a wider home (a global rule) for the same line.
+Resolved:
+
+## 2026-10-11 — a flights gate brief leaves out the lander's long run
+Observed: the foreman's brief to the lander of a callmeter flight did not name the e2e run docs/testing.md assigns the lander (about 250 s); the lander found it itself, and a foreground call of that length blocks the lander's turn.
+Amend: templates/global/agents/flights-foreman.md — the section that spawns the flights-lander: its gate brief names each project's long run the testing manual assigns the lander and says to run it in the background with stdin from /dev/null.
+Resolved:
+
+## 2026-10-11 — gitter ran the pfm suite on the host before a merge commit
+Observed: landing the watch-footprint flight, gitter confirmed the gate by running pfm tests on macOS outside the fence; the frozen-tmux-server ladder rung and some install/doctor tests failed there while the fence gate was green, leaving an unexplained host-only red in the return.
+Amend: .claude/agents/gitter.md#COMMIT hard gate — "confirm it yourself where it is cheap" names how: read the gate log or rerun through `.claude/scripts/dev.sh iso`, never `go test` on the host (root CLAUDE.md § Testing).
+Resolved:
+
+## 2026-10-11 — Claude Code's SubagentHandback made every finished nested agent read "working"
+Observed: Claude Code now ends a sub-agent's turn with a SubagentHandback tool_use whose tool_result carries top-level `toolEndsTurn: true`; the statusline nest scan and the picker's rowfacts read any trailing user entry as an open turn, so a foreman row read 14/38 working with all 38 done. Fixed in c19fb949 (both doors), plus a per-role roster and no `solo` segment (3eb1cbbc).
+Amend: .claude/commands/pfm-testing-manual.md — any code that infers a Claude transcript's turn state carries a fixture whose last entry is a handback tool_result with toolEndsTurn.
+Resolved:
+
+## 2026-10-11 — a flight ran check-templates.sh on the host from a fresh worktree and reported GAP install
+Observed: two flights ran `.claude/scripts/check-templates.sh` on the host inside `.worktrees/{flight}/`; it exited 3 naming PyYAML and jscpd. The fence image has both (python3-yaml in pfm-dev.Dockerfile, jscpd via tools.sh); the host's Homebrew python3 lacks PyYAML, and jscpd resolves only under the checkout's own tmp/tools, absent in a fresh worktree. Each lander then read the GAP as a residual FAIL. A fresh worktree also lacks scripts/leak-terms.txt, so the leak check needs LEAK_TERMS pointed at the main checkout's copy.
+Amend: templates/global/agents/flights-foreman.md and flights-lander.md — a templates check in a flight runs through `.claude/scripts/dev.sh iso … templates`, never check-templates.sh on the host; the lander brief names LEAK_TERMS for a fresh worktree.
+Resolved:
+
+## 2026-10-11 — a one-unit plugin feature ran the full flight ceremony for 2.5 hours
+Observed: the cache-live-control main auto-raise (one option, one state machine) went through flights-foreman with two lander rounds, a residual send-back and four live proofs of about 11 minutes each; the first working, live-proven commit landed at about 1h40, the rest was edge-case polish the user never asked for. The user called the duration out.
+Amend: fleet prompt § Orchestration and the main chat's dispatch habit: a single-unit plugin feature with a clear spec takes the direct rung or a foreman brief that orders one live proof and one review round; a residual send-back needs a named user-visible defect, not "the lander said FAIL".
+Resolved:
+
+## 2026-10-11 — per-agent prompt-cache TTL is impossible; GPT-backed agents miss cache 13% of consecutive calls
+Observed: CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL is read process-wide: a live probe on Claude Code 2.1.296 with 4 concurrent sub-agents saw a one-agent raise reach 5 of the other agents' 9 requests, so cache-live-control 0.4.0 ships a shared raise (agentRaiseWaiting) instead. A month's sub-agent transcripts (2026-09-09..10-11) showed 321 expired-cache rewrites, $137.74 at API prices (long tool / background shell $72.82, waiting on a child $35.91, resumed via SendMessage $28.48); separately, gpt-6-sol / gpt-6.1-sol agents missed cache on 12.97% of consecutive in-TTL calls vs 0.29% for Claude, $158.44 — more than all expiries.
+Amend: open — the GPT-backed agents' cache-miss rate needs its own investigation in the model-gateway / gpt-subagent-router path (docs/dev/gpt-subagent-router.md).
+Resolved:
+
+## 2026-10-11 — "beyond the run-to-run spread" passed every change on a deterministic target
+Observed: the Jev classifier lab (`/iterative-improvement` on a TypeSafe Jev question) repeats a run to within
+≤0.04 M, so its run-to-run spread is near zero and any change "rose beyond the spread" — v1→v3 looked like
+sure wins while item sampling, not the model, carried most of the uncertainty. The verdict only became honest
+once the lab added a paired item bootstrap (P(better) ≥ 0.9 on pooled rungs): v3 held at 0.946, while the later
+Haiku track scored better by point estimate (0.387 vs 0.412) and landed at 0.669, a tie.
+Amend: templates/global/commands/iterative-improvement.md#Round step 5 — keep only when the metric rises beyond
+the run-to-run spread AND a paired bootstrap over the rung's items gives P(better) ≥ 0.9; a deterministic
+target's near-zero spread is no evidence.
+Resolved:
+
+## 2026-10-11 — an edit to a twinned script reds the fence gate's templates.clone
+Observed: the format-md-nested flight edited `.claude/scripts/format-md.sh` and its byte-identical twin
+`templates/project/scripts/format-md.sh`; the known twin clone took a new jscpd fingerprint, so `iso gate`
+reported it NEW and failed `templates.clone` on its first run. `scripts/clone-check.sh --measure` swapped the
+one fingerprint (14 clones before and after) and the second run passed.
+Amend: .claude/commands/pfm-testing-manual.md — an edit to any twin pair (a `.claude/**` file and its
+`templates/project/**` twin) runs `scripts/clone-check.sh --measure` in the same pass and names the
+`.jscpd-baseline.json` swap in the commit message.
+Resolved:
+
+## 2026-10-12 — a one-file pfm change sent through a flight worktree the user did not want
+Observed: for the tracer-intake doctor check the main chat had gitter set up `.worktrees/tracer-intake-doctor` per § Process ("Code flights build inside the fence: a git worktree under .worktrees/{flight}/"); the user stopped it: "Doesn't need a worktree, just do it damn on develop". The flight built on develop in the main checkout, tests still in the fence, gitter committing by explicit pathspec and by hunk where another session's edit shared a file.
+Amend: CLAUDE.md#Process — name when a code flight needs a worktree (parallel flights, an overlap with another session's dirty files) and that otherwise it builds on develop in the main checkout, fence tests unchanged.
+Resolved:
+
+## 2026-10-12 — `dev.sh iso run bash -c '…'` runs only the first word under bash
+Observed: `iso run bash -c 'go -C pfm test …'` printed `go help`: the wrapper hands one shell string to the container, so `bash -c` received `go` alone. An earlier `iso run bash -c 'set -e; K=…; cd $K; python3 -m unittest …'` passed by coincidence — `bash -c set` was a no-op and the rest ran under the outer shell. The working form is one quoted string: `iso run 'go -C pfm test ./internal/{pkg}/'`.
+Amend: .claude/commands/pfm-testing-manual.md — `iso run` takes one quoted shell string; never `bash -c`.
+Resolved:
+
+## 2026-10-12 — host `check-templates.sh` exits GAP and runs nothing
+Observed: on this host `check-templates.sh` exits `GAP install (PyYAML)` before any check, so two flights' template steps ran only through the fence gate or by hand (`rumdl check FILES`, `bash scripts/leak-check.sh --files FILES`).
+Amend: .claude/scripts/dev.sh or the templates testing manual — name the GAP and the by-hand fallback, or provision PyYAML the way the fence does.
+Resolved:
+
+## 2026-10-12 — an invented python3 policy reversed one turn later
+Observed: asked to keep `pfm doctor` from failing on a tracer kit not installed yet, the main chat also wrote "python3 is never a blocker in the pre-change install check" into the requirements; the user's next message made python3 a required install dependency (c48043ca). The user's ask covered the kit alone.
+Amend: judgment — a rule the user did not state stays out of a spec; name it as a question instead.
+Resolved:

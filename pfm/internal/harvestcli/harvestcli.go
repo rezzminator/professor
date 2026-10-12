@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -102,8 +101,10 @@ func runRead(args []string, stdout, stderr io.Writer, runtime config.Runtime) in
 		fmt.Fprintf(stderr, "pfm harvest: configure: %v\n", err)
 		return 1
 	}
+	view := harvestmcp.ReadView{SizeOnly: !*includeContent, InlineCap: harvesterRuntime(runtime).MaxInlineChars}
 	results := make([]harvest.Result, 0, len(sources))
-	for _, source := range sources {
+	printedFailure := false // a block printed as an error line exits nonzero, whatever the result's Error
+	for index, source := range sources {
 		result := headers.Fetch(
 			context.Background(),
 			harvester,
@@ -112,7 +113,12 @@ func runRead(args []string, stdout, stderr io.Writer, runtime config.Runtime) in
 		)
 		results = append(results, result)
 		if !*jsonOutput {
-			fmt.Fprintln(stdout, renderRead(result, *includeContent))
+			if index > 0 {
+				fmt.Fprintln(stdout)
+			}
+			block, failed := harvestmcp.RenderReadItem(index+1, len(sources), source, result, view)
+			printedFailure = printedFailure || failed
+			fmt.Fprintln(stdout, block)
 		}
 	}
 	if *jsonOutput {
@@ -123,6 +129,9 @@ func runRead(args []string, stdout, stderr io.Writer, runtime config.Runtime) in
 		}
 		fmt.Fprintln(stdout, string(encoded))
 	}
+	if printedFailure {
+		return 1
+	}
 	for index := range results {
 		result := &results[index]
 		if result.Error != "" {
@@ -130,40 +139,4 @@ func runRead(args []string, stdout, stderr io.Writer, runtime config.Runtime) in
 		}
 	}
 	return 0
-}
-
-// gapsSuffix names every known gap of an incomplete artifact in each receipt.
-func gapsSuffix(gaps []string) string {
-	if len(gaps) == 0 {
-		return ""
-	}
-	return " / gaps: " + strings.Join(gaps, "; ")
-}
-
-func renderRead(result harvest.Result, includeContent bool) string {
-	if result.Error != "" {
-		return fmt.Sprintf("# %s\nERROR: %s", result.Source, result.Error)
-	}
-	gaps := gapsSuffix(harvest.PublicGaps(result.Partial)) // the size receipt says so too
-	if !includeContent {
-		return fmt.Sprintf(
-			"source: %s\ntokens: %d / chars: %d / path: %s / cached: %t%s",
-			result.Source,
-			result.Tokens,
-			result.Chars,
-			result.Path,
-			harvest.Cached(result),
-			gaps,
-		)
-	}
-	return fmt.Sprintf(
-		"# %s\ncached: %t / bytes: %d / tokens: %d / path: %s%s\n\n%s",
-		result.Source,
-		harvest.Cached(result),
-		result.Bytes,
-		result.Tokens,
-		result.Path,
-		gaps,
-		strings.TrimSpace(result.Content),
-	)
 }

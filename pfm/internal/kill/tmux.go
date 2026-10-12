@@ -2,7 +2,9 @@ package kill
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -49,26 +51,58 @@ func (tmux TmuxKiller) PaneExists(
 	ctx context.Context,
 	socketPath, paneID string,
 ) (bool, error) {
-	output, err := tmux.command(
-		ctx,
-		socketPath,
-		"list-panes",
-		"-a",
-		"-F",
-		"#{pane_id}",
-	).Output()
+	panes, err := tmux.PaneIDs(ctx, socketPath)
 	if err != nil {
-		if pfmtmux.CouldNotRun(err) {
-			return false, err
-		}
-		return false, nil
+		return false, err
 	}
-	for _, candidate := range strings.Split(string(output), "\n") {
+	for _, candidate := range panes {
 		if candidate == paneID {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// PaneIDs queries the complete server, never folding a failed query into absence.
+func (tmux TmuxKiller) PaneIDs(ctx context.Context, socketPath string) ([]string, error) {
+	output, err := tmux.command(ctx, socketPath, "list-panes", "-a", "-F", "#{pane_id}").Output()
+	if err != nil {
+		stderr := exitStderr(err)
+		if !pfmtmux.CouldNotRun(err) && tmuxServerGone(stderr) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list panes on %s: %w: %s", socketPath, err, stderr)
+	}
+	var panes []string
+	for _, line := range strings.Split(string(output), "\n") {
+		if pane := strings.TrimSpace(line); pane != "" {
+			panes = append(panes, pane)
+		}
+	}
+	return panes, nil
+}
+
+// KillServerIfSolePane evaluates every session/window's pane IDs inside tmux's
+// synchronous command queue. No client-side snapshot can become stale before
+// kill-server. Linked windows may repeat a pane ID; that conservatively refuses.
+func (tmux TmuxKiller) KillServerIfSolePane(ctx context.Context, socketPath, paneID string) error {
+	id, err := strconv.Atoi(strings.TrimPrefix(paneID, "%"))
+	if err != nil || id < 0 || !strings.HasPrefix(paneID, "%") {
+		return fmt.Errorf("invalid pane ID for exclusive server kill: %q", paneID)
+	}
+	condition := "#{==:#{S:#{W:#{P:#{pane_id}}}}," + paneID + "}"
+	_, err = tmux.command(ctx, socketPath, "if-shell", "-F", "-t", paneID, condition, "kill-server").Output()
+	if err != nil {
+		return fmt.Errorf("kill exclusive server for pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+	}
+	return nil
+}
+
+func tmuxServerGone(message string) bool {
+	message = strings.TrimSpace(message)
+	return strings.HasPrefix(message, "no server running") ||
+		strings.HasPrefix(message, "error connecting to") &&
+			(strings.HasSuffix(message, "(No such file or directory)") || strings.HasSuffix(message, "(Connection refused)"))
 }
 
 func (tmux TmuxKiller) SendLine(
@@ -100,11 +134,61 @@ func (tmux TmuxKiller) SendLine(
 	return nil
 }
 
+// Capture reads paneID's visible screen, joined lines, no history.
+func (tmux TmuxKiller) Capture(
+	ctx context.Context,
+	socketPath, paneID string,
+) (string, error) {
+	output, err := tmux.command(ctx, socketPath, "capture-pane", "-p", "-J", "-t", paneID).Output()
+	if err != nil {
+		return "", fmt.Errorf("capture pane %s: %w: %s", paneID, err, exitStderr(err))
+	}
+	return string(output), nil
+}
+
+// CaptureStyled is Capture with the escape sequences kept (-e): the dim
+// styling that tells a composer's suggestion from a typed draft.
+func (tmux TmuxKiller) CaptureStyled(
+	ctx context.Context,
+	socketPath, paneID string,
+) (string, error) {
+	output, err := tmux.command(ctx, socketPath, "capture-pane", "-p", "-J", "-e", "-t", paneID).Output()
+	if err != nil {
+		return "", fmt.Errorf("capture pane %s styled: %w: %s", paneID, err, exitStderr(err))
+	}
+	return string(output), nil
+}
+
+// exitStderr is what a failed tmux wrote to stderr. A capture reads stdout
+// alone: the screen is parsed, and a tmux warning must never join it.
+func exitStderr(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return strings.TrimSpace(string(exitErr.Stderr))
+	}
+	return ""
+}
+
+// SendKey presses one named tmux key (Enter, Escape) in paneID.
+func (tmux TmuxKiller) SendKey(
+	ctx context.Context,
+	socketPath, paneID, key string,
+) error {
+	if output, err := tmux.command(ctx, socketPath, "send-keys", "-t", paneID, key).CombinedOutput(); err != nil {
+		return fmt.Errorf("send key %s to pane %s: %w: %s", key, paneID, err, output)
+	}
+	return nil
+}
+
 func (tmux TmuxKiller) KillPane(
 	ctx context.Context,
 	socketPath, paneID string,
 ) error {
-	return tmux.socket().KillPane(ctx, socketPath, paneID)
+	_, err := tmux.command(ctx, socketPath, "kill-pane", "-t", paneID).Output()
+	if err != nil {
+		return fmt.Errorf("kill pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+	}
+	return nil
 }
 
 // ClientTTYs lists the terminals attached to this server. A chat's clients ARE
@@ -160,7 +244,11 @@ func (tmux TmuxKiller) KillServer(
 	ctx context.Context,
 	socketPath string,
 ) error {
-	return tmux.socket().KillServer(ctx, socketPath)
+	_, err := tmux.command(ctx, socketPath, "kill-server").Output()
+	if err != nil {
+		return fmt.Errorf("kill server on %s: %w: %s", socketPath, err, exitStderr(err))
+	}
+	return nil
 }
 
 // socket is the one tmux-addressing wrapper (internal/tmux.Socket): Dir

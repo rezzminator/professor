@@ -58,6 +58,9 @@ var StoreEntries = []StoreEntry{
 	{Name: "stats-cache.json"},
 	{Name: ".last-cleanup"},
 	{Name: "gh-pr-status-cache.json"},
+	// The tool-visibility-controller plugin's user scope file; a missing file is no rule, so an
+	// install without one seeds the empty object, never an empty file, which is not valid JSON.
+	{Name: "tool-visibility-controller.json", Seed: "{}\n"},
 }
 
 var AccountEntries = []string{
@@ -67,7 +70,15 @@ var AccountEntries = []string{
 	"telemetry", "feedback", ".last-update-result.json", gather.AccountLaunchClaimsName,
 }
 
-var IgnoredEntries = []string{"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName}
+// IgnoredEntries are neither shared nor per-account identity: IDE locks, pfm's
+// pane bookkeeping, a project settings name, Claude Code's own runtime scratch
+// (debug logs, the daemon's lock and status, temp files) and the native runtime
+// and user customization paths it keeps in place (chrome, dev-mods, keybindings).
+var IgnoredEntries = []string{
+	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
+	"debug", "daemon.lock", "daemon.status.json", "tmp",
+	"chrome", "dev-mods", "keybindings.json", "hooks",
+}
 
 // EntryClass classifies a top-level Claude entry.
 func EntryClass(name string) string {

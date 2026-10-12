@@ -131,14 +131,16 @@ func TestChatsHeaderLineKeepsItsContextTokens(t *testing.T) {
 	if line := ansi.Strip(model.chatsHeaderLine(100)); !strings.Contains(line, "⟳ refreshing") {
 		t.Errorf("a refreshing picker says so: %q", line)
 	}
-	model.reminderError = "disk on fire"
+	model.scheduleError = "disk on fire"
 	line = ansi.Strip(model.chatsHeaderLine(100))
-	if !strings.Contains(line, "reminder flags unreadable: disk on fire") {
-		t.Errorf("an unreadable flag store never reads as no reminders: %q", line)
+	if !strings.Contains(line, "schedule flags unreadable: disk on fire") {
+		t.Errorf("an unreadable flag store never reads as no schedules: %q", line)
 	}
 }
 
-func TestRenderHeaderIsThreeFullLinesWithOrWithoutTheSky(t *testing.T) {
+// The Chats tab adds the place rail as a fourth line once it has a launch row;
+// every other tab keeps the three-line masthead.
+func TestRenderHeaderLinesSpanTheWidthWithOrWithoutTheSky(t *testing.T) {
 	for _, noSky := range []bool{false, true} {
 		snapshot := deckFleet(120, 30)
 		snapshot.NoSky = noSky
@@ -146,7 +148,11 @@ func TestRenderHeaderIsThreeFullLinesWithOrWithoutTheSky(t *testing.T) {
 		for _, tab := range []Tab{TabChats, TabStats, TabLimits, TabCosmos} {
 			model.tab = tab
 			lines := strings.Split(model.renderHeader(120), "\n")
-			if len(lines) != 3 {
+			want := 3
+			if tab == TabChats && model.mergeNewChat {
+				want = 4
+			}
+			if len(lines) != want {
 				t.Fatalf("noSky=%v tab=%d: header has %d lines", noSky, tab, len(lines))
 			}
 			for number, line := range lines {

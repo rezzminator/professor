@@ -1,0 +1,87 @@
+{
+ "v": 1,
+ "flight": "pathflight-drHchz",
+ "source": "agents.tsv",
+ "baseline": "",
+ "window": [
+  "2026-09-20T00:00:00.000Z",
+  "2026-09-20T09:22:00.000Z"
+ ],
+ "scan": {
+  "roots": [
+   "{FIX}/claude/projects"
+  ],
+  "files": 5,
+  "skippedOld": 0,
+  "dupFiles": 0,
+  "badLines": 0,
+  "noTimestamp": 0,
+  "unpricedCalls": 2,
+  "unpricedModels": {
+   "claude-unobtanium-9": 2
+  },
+  "tierUnknownCalls": 0,
+  "syntheticCalls": 1,
+  "identityUnknownRecords": 0,
+  "copiedCalls": 0,
+  "copiesOnly": [],
+  "readErrors": [],
+  "notes": [
+   "agents.tsv line 1: spawn time \"2026-09-20\" has no clock — the row matches by id or agent path only, never by window"
+  ]
+ },
+ "total": {
+  "n": 1,
+  "calls": 9,
+  "usd": 0.4692,
+  "unpriced": 0,
+  "in": 44000,
+  "cr": 33000,
+  "out": 14000,
+  "fail": 1,
+  "poll": 3,
+  "reread": 1,
+  "contract": 1,
+  "compact": 1,
+  "over": 0,
+  "peak": 63000,
+  "lc": 0.4692
+ },
+ "rows": [
+  {
+   "taskId": "1-p",
+   "agentType": "executor",
+   "agentId": "/root/fix_1p",
+   "round": "1",
+   "at": 1789862400000,
+   "dateOnly": true,
+   "engine": "codex",
+   "how": "path",
+   "model": "gpt-5.6-sol",
+   "calls": 9,
+   "wallMs": 960000,
+   "ctxFirst": 10800,
+   "ctxPeak": 63000,
+   "tok": {
+    "in": 44000,
+    "out": 14000,
+    "cw5": 0,
+    "cw1": 0,
+    "cr": 33000
+   },
+   "usd": 0.4692,
+   "failedCmds": 1,
+   "pollN": 3,
+   "rereadN": 1,
+   "contractReads": 1,
+   "compactions": 1,
+   "overCap": false
+  }
+ ],
+ "unmatched": [],
+ "unledgered": {
+  "n": 0,
+  "usd": 0,
+  "unpriced": 0
+ }
+}

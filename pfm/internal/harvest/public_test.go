@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -23,7 +24,7 @@ func TestFetchPublicResolvesDOIIdentityAndISBNNamedLocalFile(t *testing.T) {
 	cacheDir := t.TempDir()
 	h := mustNew(t, Options{CacheDir: cacheDir})
 	article := strings.Repeat("cached DOI article body ", 30)
-	cachedPath, err := h.cache.save(publicTestDOI, "html", "oa:fixture", article, 0, []string{"oa:fixture"})
+	cachedPath, err := h.cache.save(publicTestDOI, "html", "oa:fixture", article, 0, []string{"oa:fixture"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +245,184 @@ func TestJSONResultsCarriesGapsAndVia(t *testing.T) {
 			if _, found := decoded[index][old]; found {
 				t.Fatalf("result %d carries the old key %q: %s", index, old, encoded)
 			}
+		}
+	}
+}
+
+// frontmatterOf reads path and parses it with the one parser.
+func frontmatterOf(t *testing.T, path string) (map[string]string, string, string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, body := readFrontmatter(string(raw))
+	return meta, body, string(raw)
+}
+
+// TestBothStoresWriteTheirFrontmatterAndBodiesCarryNone: what the harvester
+// knows about an artifact (where it came from, what the converter read about
+// it, what it is missing) is frontmatter in both stores, through one writer;
+// the body is the document alone. The public store is the privacy projection
+// of the same record (README § Public results): its rung class as via, never
+// the method, the rung trace or the site name a mirror's markup carries.
+// Page-sourced title and author values cannot write a key of their own.
+func TestBothStoresWriteTheirFrontmatterAndBodiesCarryNone(t *testing.T) {
+	setHarvestTestJail(t)
+	h := mustNew(t, Options{CacheDir: t.TempDir()})
+	const source = "https://example.test/notes"
+	const body = "# Gauge notes\n\nThe body.\n"
+	content := withPartial(WithConverterMeta(body, map[string]string{
+		"title": "Gauge notes\nmethod: injected", "author": "Ada\nvia: forged", "published": "2024-05-06",
+		"site": "Mirror Site", "license": "CC BY", "transformed": "json-outline",
+	}), "login wall")
+	stored := h.storeResult(source, "html", "browser-chrome", content, 10, 200,
+		[]string{"direct", "browser-chrome"}, FetchOptions{})
+	if stored.Error != "" {
+		t.Fatalf("storeResult error = %q", stored.Error)
+	}
+	if stored.Content != body || stored.Partial != "login wall" {
+		t.Errorf("stored content %q partial %q, want the bare body and its gaps", stored.Content, stored.Partial)
+	}
+	private, privateBody, privateRaw := frontmatterOf(t, stored.Path)
+	wantPrivate := map[string]string{
+		"source":      "harvester",
+		"url":         source,
+		"kind":        "html",
+		"method":      "browser-chrome",
+		"rungs":       "direct, browser-chrome",
+		"http_status": "200",
+		"title":       "Gauge notes\nmethod: injected",
+		"author":      "Ada\nvia: forged",
+		"published":   "2024-05-06",
+		"site":        "Mirror Site",
+		"license":     "CC BY",
+		"chars": strconv.Itoa(
+			contentChars(body),
+		),
+		"token_count": strconv.Itoa(EstimateTokens(body)),
+		"gaps":        "login wall",
+		"transformed": "json-outline",
+	}
+	for key, value := range wantPrivate {
+		if private[key] != value {
+			t.Errorf("private %s = %q, want %q", key, private[key], value)
+		}
+	}
+	if private["fetched_at"] == "" || privateBody != body {
+		t.Errorf("private fetched_at %q body %q, want a stamp and the bare body", private["fetched_at"], privateBody)
+	}
+
+	public := h.exportResult(source, "urls", stored, false)
+	if public.Error != "" {
+		t.Fatalf("exportResult error = %q", public.Error)
+	}
+	meta, publicBody, publicRaw := frontmatterOf(t, public.Path)
+	wantPublic := map[string]string{
+		"source":      "harvester",
+		"request":     source,
+		"field":       "urls",
+		"url":         source,
+		"kind":        "html",
+		"via":         "browser-chrome",
+		"http_status": "200",
+		"fetched_at":  private["fetched_at"],
+		"title":       "Gauge notes\nmethod: injected",
+		"author":      "Ada\nvia: forged",
+		"published":   "2024-05-06",
+		"license":     "CC BY",
+		"chars":       strconv.Itoa(contentChars(body)),
+		"token_count": strconv.Itoa(EstimateTokens(body)),
+		"gaps":        "login wall",
+		"transformed": "json-outline",
+	}
+	for key, value := range wantPublic {
+		if meta[key] != value {
+			t.Errorf("public %s = %q, want %q", key, meta[key], value)
+		}
+	}
+	for _, private := range []string{"method", "rungs", "site"} {
+		if _, ok := meta[private]; ok {
+			t.Errorf("public frontmatter carries the private key %q: %v", private, meta)
+		}
+	}
+	if publicBody != body || public.Content != body || public.Partial != "login wall" {
+		t.Errorf("public body %q content %q partial %q, want the bare body and its gaps",
+			publicBody, public.Content, public.Partial)
+	}
+	for _, raw := range []string{privateRaw, publicRaw} {
+		for _, forged := range []string{"\nmethod: injected\n", "\nvia: forged\n"} {
+			if strings.Contains(raw, forged) {
+				t.Errorf("a page-sourced value wrote its own key %q:\n%s", forged, raw)
+			}
+		}
+	}
+}
+
+// TestLegacyArtifactsReadWithTheirBannerAndMetadataLifted: a cache entry
+// written before frontmatter carried gaps and the converter's metadata keeps
+// its partial banner and **Title:** block in the body. Read back, it is partial
+// for the same reason, its body is the document alone, and the public copy
+// carries the lifted gaps and title in frontmatter.
+func TestLegacyArtifactsReadWithTheirBannerAndMetadataLifted(t *testing.T) {
+	setHarvestTestJail(t)
+	cacheDir := t.TempDir()
+	h := mustNew(t, Options{CacheDir: cacheDir})
+	const source = "https://example.test/legacy"
+	document := "# Legacy page\n\n" + strings.Repeat("The stilling well agrees with the staff gauge. ", 6) + "\n"
+	path := filepath.Join(cacheDir, CacheKey(source, "html"))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := "---\nurl: " + source + "\nfetched_at: 2099-01-02T03:04:05Z\nsource: harvester\nmethod: direct\n" +
+		"token_count: 9\n---\n\n" + partialMarkerPrefix + "old gap\n\n**Title:** Old title\n**Source:** Old site\n\n---\n\n" +
+		document
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, meta, loaded, ok := h.cache.load(source, "html")
+	if !ok {
+		t.Fatal("the legacy entry did not load")
+	}
+	result := h.resultFromCache(source, "html", content, meta, loaded)
+	if result.Partial != "old gap" || result.Content != document {
+		t.Errorf(
+			"legacy read partial %q content %q, want the old gap and the bare document",
+			result.Partial,
+			result.Content,
+		)
+	}
+	public := h.exportResult(source, "urls", result, false)
+	if public.Error != "" {
+		t.Fatalf("exportResult error = %q", public.Error)
+	}
+	publicMeta, publicBody, _ := frontmatterOf(t, public.Path)
+	if publicMeta["gaps"] != "old gap" || publicMeta["title"] != "Old title" || publicMeta["site"] != "" ||
+		publicMeta["fetched_at"] != "2099-01-02T03:04:05Z" || publicBody != document {
+		t.Errorf("legacy public copy meta %v body %q, want gaps, title and stamp lifted, no site, the bare document",
+			publicMeta, publicBody)
+	}
+}
+
+// TestWithReasonMergesWholeReasons: a reason joins the gaps unless one of them
+// is that same reason; one reason's words inside another never count.
+func TestWithReasonMergesWholeReasons(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ reasons, reason, want string }{
+		{
+			"12 image(s) could not be published", "2 image(s) could not be published",
+			"12 image(s) could not be published; 2 image(s) could not be published",
+		},
+		{
+			"login wall; 3 of 9 comments loaded", "login wall; lazy content still loading",
+			"login wall; 3 of 9 comments loaded; lazy content still loading",
+		},
+		{"login wall; 3 of 9 comments loaded", "3 of 9 comments loaded", "login wall; 3 of 9 comments loaded"},
+		{"", "login wall", "login wall"},
+		{"login wall", "", "login wall"},
+	} {
+		if got := withReason(tc.reasons, tc.reason); got != tc.want {
+			t.Errorf("withReason(%q, %q) = %q, want %q", tc.reasons, tc.reason, got, tc.want)
 		}
 	}
 }

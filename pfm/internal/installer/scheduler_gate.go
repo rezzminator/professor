@@ -6,17 +6,21 @@ import (
 	"io"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/reminder"
+	"github.com/rezzminator/professor/pfm/internal/schedule"
 )
 
 const (
-	launchGateUnprobedNote   = "launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or reminder run is not refused"
-	nameSyncGateUnprobedNote = "name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or reminder run is not refused"
-	reminderGatePoll         = 5 * time.Second
+	launchGateUnprobedNote   = "launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or schedule run is not refused"
+	nameSyncGateUnprobedNote = "name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or schedule run is not refused"
+	scheduleGatePoll         = 5 * time.Second
+	// retiredScheduleServiceUnit is the systemd unit the schedule job was
+	// renamed from. The install about to retire it waits out a fire of it,
+	// as it waits out the schedule job.
+	retiredScheduleServiceUnit = "pfm-reminder.service"
 )
 
 // schedulerServiceRunning reports whether the Linux scheduler service unit
-// (pfm-name-sync.service, pfm-reminder.service) is executing right now, and
+// (pfm-name-sync.service, pfm-schedule.service) is executing right now, and
 // whether the question could be asked at all.
 //
 // Each is Type=oneshot: while it runs its state is "activating", and
@@ -64,21 +68,29 @@ func schedulerGate(ctx context.Context, runner CommandRunner) (probed bool, err 
 		if syncRunning {
 			return true, ErrLaunchAgentRunning
 		}
-		reminderRunning, reminderAnswered := launchAgentRunning(ctx, runner, reminderLaunchdLabel)
-		if reminderRunning {
-			return true, ErrReminderAgentRunning
+		scheduleRunning, scheduleAnswered := launchAgentRunning(ctx, runner, scheduleLaunchdLabel)
+		if scheduleRunning {
+			return true, ErrScheduleAgentRunning
 		}
-		return syncAnswered && reminderAnswered, nil
+		reminderRunning, reminderAnswered := launchAgentRunning(ctx, runner, retiredScheduleLaunchdLabel)
+		if reminderRunning {
+			return true, ErrScheduleAgentRunning
+		}
+		return syncAnswered && scheduleAnswered && reminderAnswered, nil
 	}
 	syncRunning, syncAnswered := schedulerServiceRunning(ctx, runner, "pfm-name-sync.service")
 	if syncRunning {
 		return true, ErrNameSyncRunning
 	}
-	reminderRunning, reminderAnswered := schedulerServiceRunning(ctx, runner, reminderServiceUnit)
-	if reminderRunning {
-		return true, ErrReminderRunning
+	scheduleRunning, scheduleAnswered := schedulerServiceRunning(ctx, runner, scheduleServiceUnit)
+	if scheduleRunning {
+		return true, ErrScheduleRunning
 	}
-	return syncAnswered && reminderAnswered, nil
+	reminderRunning, reminderAnswered := schedulerServiceRunning(ctx, runner, retiredScheduleServiceUnit)
+	if reminderRunning {
+		return true, ErrScheduleRunning
+	}
+	return syncAnswered && scheduleAnswered && reminderAnswered, nil
 }
 
 func SchedulerRefusal(command string, err error) string {
@@ -86,12 +98,12 @@ func SchedulerRefusal(command string, err error) string {
 	case errors.Is(err, ErrNameSyncRunning):
 		return "pfm " + command +
 			": the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop pfm-name-sync.service`, then retry"
-	case errors.Is(err, ErrReminderRunning):
+	case errors.Is(err, ErrScheduleRunning):
 		return "pfm " + command +
-			": the pfm reminder service is running; wait for it to finish or run `systemctl --user stop pfm-reminder.service`, then retry"
-	case errors.Is(err, ErrReminderAgentRunning):
+			": the pfm schedule service is running; wait for it to finish or run `systemctl --user stop pfm-schedule.service`, then retry"
+	case errors.Is(err, ErrScheduleAgentRunning):
 		return "pfm " + command +
-			": the pfm reminder launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.reminder` first"
+			": the pfm schedule launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.schedule` first"
 	case errors.Is(err, ErrLaunchAgentRunning):
 		return "pfm " + command +
 			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first"
@@ -101,15 +113,15 @@ func SchedulerRefusal(command string, err error) string {
 
 func awaitSchedulerGate(ctx context.Context, options Options) (probed bool, err error) {
 	probed, err = schedulerGate(ctx, options.Runner)
-	if !errors.Is(err, ErrReminderRunning) && !errors.Is(err, ErrReminderAgentRunning) {
+	if !errors.Is(err, ErrScheduleRunning) && !errors.Is(err, ErrScheduleAgentRunning) {
 		return probed, err
 	}
 	waiter := &engine{options: options}
-	waiter.say("  wait    the pfm reminder is delivering; waiting up to %s for it to finish", reminder.ComposerWait)
-	for waited := time.Duration(0); waited < reminder.ComposerWait; waited += reminderGatePoll {
-		waiter.pause(reminderGatePoll)
+	waiter.say("  wait    the pfm schedule is delivering; waiting up to %s for it to finish", schedule.ComposerWait)
+	for waited := time.Duration(0); waited < schedule.ComposerWait; waited += scheduleGatePoll {
+		waiter.pause(scheduleGatePoll)
 		probed, err = schedulerGate(ctx, options.Runner)
-		if !errors.Is(err, ErrReminderRunning) && !errors.Is(err, ErrReminderAgentRunning) {
+		if !errors.Is(err, ErrScheduleRunning) && !errors.Is(err, ErrScheduleAgentRunning) {
 			return probed, err
 		}
 	}

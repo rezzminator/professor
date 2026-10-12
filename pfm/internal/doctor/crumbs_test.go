@@ -101,6 +101,7 @@ func TestDoctorRecognizesThenFailedAsSatelliteMetadata(t *testing.T) {
 		"cc-1-2-3": "/transcripts/live.jsonl", "cc-1-2-3.then-failed": "prompt preserved for retry",
 		"reload-cc-1-2-3.log": "completed fleet reload", "reload-vsct.log": "completed bunker reload",
 		"reload-probe.log": "not a fleet reload", ".open.uuid": "lock metadata",
+		"kill-exit-cc-1-2-3.log": "no exit command typed", "kill-exit-probe.log": "not a fleet kill-exit",
 		"cc-1-2-3.not-metadata": "invalid",
 	} {
 		if err := os.WriteFile(filepath.Join(sidDir, name), []byte(content), 0o600); err != nil {
@@ -111,7 +112,7 @@ func TestDoctorRecognizesThenFailedAsSatelliteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries != 7 || invalid != 2 {
+	if entries != 9 || invalid != 3 {
 		t.Fatalf("crumbHealth() entries=%d invalid=%d", entries, invalid)
 	}
 }

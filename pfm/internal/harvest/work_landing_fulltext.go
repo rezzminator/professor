@@ -170,7 +170,7 @@ func (h *Harvester) storeThinCopy(
 	thin thinCopy,
 	options FetchOptions,
 ) Result {
-	result, content := thin.result, thin.result.Content
+	result, content := thin.result, inlineContent(thin.result)
 	if result.Path != "" {
 		raw, err := os.ReadFile(result.Path)
 		if err != nil {
@@ -179,7 +179,7 @@ func (h *Harvester) storeThinCopy(
 				"path", result.Path, "err", err,
 			)
 		} else {
-			_, content = parseCacheFrontmatter(string(raw))
+			content = pipelineContent(storedArtifact(string(raw)))
 		}
 	}
 	reason := "the open-access copy at " + webOrigin(thin.url) + " carries no full text (" + thin.measure +

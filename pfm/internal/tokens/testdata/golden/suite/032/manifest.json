@@ -1,0 +1,17 @@
+{
+ "test": "--timeline: a bare flag with no path exits 2 naming the missing path",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--timeline"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json",
+  "HOME": "{TMP}/tl-home-r9lujb"
+ },
+ "exit": 2,
+ "signal": null,
+ "inputs": [
+  "tl-home-r9lujb"
+ ],
+ "outputs": {}
+}

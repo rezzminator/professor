@@ -13,7 +13,7 @@ type exploreDenyHookInput struct {
 	} `json:"tool_input"`
 }
 
-const exploreDenyReason = "Explore is disabled — use the `tracer` agent instead.\n\nSpawn `subagent_type: \"tracer\"` with the mission in the prompt. It returns the\nsame read-only map with evidence Explore cannot give you: every edge quoted at\nfile:line, every bucket file dispositioned (EDGE / RED-HERRING / FRONTIER /\nFAILED-TO-LOOK), caller greps behind every named consumer, and a coverage close\nthat distinguishes \"looked and found nothing\" from \"failed to look\".\n\nThe tracer dispatches its own Explore children internally; that path is allowed\nand needs nothing from you."
+const exploreDenyReason = "Explore is disabled — use the `tracer` agent instead.\n\nSpawn `subagent_type: \"tracer\"` with `Repo root: {path}` and numbered questions.\nIts haiku sub-tracers do the reading; it returns prose by question, each fact at\npath:line with the line quoted and re-checked against the file, plus test homes,\nthe check command and NOT READ, so \"found nothing\" and \"did not look\" stay apart.\n\n/tracer:use is the caller's manual."
 
 // ExploreDeny is the fail-open PreToolUse hook.
 func ExploreDeny(input io.Reader, stdout, stderr io.Writer) int {

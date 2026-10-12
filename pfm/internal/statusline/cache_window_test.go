@@ -330,7 +330,7 @@ func configRuntime(t *testing.T, home, flagPath, envPath, stateEnv string) Runti
 		t.Fatal(err)
 	}
 	runtime := Runtime{Home: home, Env: map[string]string{}}
-	runtime.UseConfig(machine)
+	runtime.UseConfig(machine, io.Discard)
 	return runtime
 }
 
@@ -410,5 +410,19 @@ func TestStatuslineCacheWindowShowsConfigError(t *testing.T) {
 				t.Fatalf("window = %q, want a visible config error, never an absent segment", got)
 			}
 		})
+	}
+}
+
+// A transcript's last line can be larger than the biggest window read (a big
+// attachment or tool echo): the anchor is still the newest request before it.
+func TestCacheAnchorReadsFurtherWhenTheLastLineIsLargerThanEveryWindow(t *testing.T) {
+	path := writeTranscript(
+		t,
+		`{"type":"user","timestamp":"2026-09-01T23:48:00.000Z","message":{"role":"user","content":"go"}}`,
+		`{"type":"attachment","padding":"`+strings.Repeat("x", 2<<20)+`"}`,
+	)
+	want := time.Date(2026, 9, 1, 23, 48, 0, 0, time.UTC)
+	if got := cacheAnchor(path).anchor; !got.Equal(want) {
+		t.Fatalf("cacheAnchor = %s, want the request before the large last line %s", got, want)
 	}
 }

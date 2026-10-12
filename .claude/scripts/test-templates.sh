@@ -25,13 +25,13 @@ source "$ROOT/.claude/scripts/unit-path.sh"
 usage() { echo 'usage: test-templates.sh ALL | <test file>[::<test id>]...' >&2; exit 2; }
 
 # Four tests take the script under test as $1; infra/fence/checks.sh runs each once per path
-# (checks_templates_codex_sync, _pfm_guard, _format_md, _dev_report). One row per test file.
+# (checks_templates_pfm_guard, _format_md, _dev_report, _codex_sync). One row per test file.
 sut_rows() { # sut_rows <test file>: sets SUTS, returns 1 for any other file
   case "$1" in
-    scripts/test-codex-sync.sh) SUTS=(templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh) ;;
     scripts/test-pfm-guard.sh) SUTS=(templates/project/scripts/pfm-guard.sh .claude/scripts/pfm-guard.sh) ;;
     scripts/test-format-md.sh) SUTS=(templates/project/scripts/format-md.sh .claude/scripts/format-md.sh) ;;
     scripts/test-dev-report.sh) SUTS=(.claude/scripts/dev.sh) ;;
+    scripts/test-codex-sync.sh) SUTS=(templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh) ;;
     *) SUTS=(); return 1 ;;
   esac
 }

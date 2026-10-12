@@ -46,6 +46,32 @@
       "keywords": ["claude-code", "sub-agent", "effort", "reasoning-effort", "function-hooks", "professor"]
     },
     {
+      "name": "auto-effort",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/auto-effort.git",
+        "path": "plugins/auto-effort",
+        "ref": "main"
+      },
+      "description": "Automatic reasoning effort for the Claude Code main chat: the plugin plans each turn, the model raises or lowers it with set_effort, and a cache check keeps it safe.",
+      "homepage": "https://github.com/rezzminator/auto-effort",
+      "license": "MIT",
+      "keywords": ["claude-code", "claude-code-plugin", "effort", "reasoning-effort", "thinking", "function-hooks", "claude-mods", "token-cost", "prompt-cache", "professor"]
+    },
+    {
+      "name": "tool-visibility-controller",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/tool-visibility-controller.git",
+        "path": "plugins/tool-visibility-controller",
+        "ref": "main"
+      },
+      "description": "Claude Code plugin for per-agent tool visibility — hide and refuse subagents, skills, MCP and built-in tools per loop",
+      "homepage": "https://github.com/rezzminator/tool-visibility-controller",
+      "license": "MIT",
+      "keywords": ["claude-code", "subagents", "mcp", "claude-skills", "tool-permissions", "function-hooks", "professor"]
+    },
+    {
       "name": "buddy",
       "source": {
         "source": "git-subdir",
@@ -70,6 +96,19 @@
       "homepage": "https://github.com/rezzminator/callmeter",
       "license": "MIT",
       "keywords": ["claude-code", "hooks", "telemetry", "tool-calls", "token-usage", "sqlite", "sub-agents", "observability", "professor"]
+    },
+    {
+      "name": "engine-sync",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/engine-sync.git",
+        "path": "plugins/engine-sync",
+        "ref": "main"
+      },
+      "description": "Carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode, and keeps the mirrors in step after every turn",
+      "homepage": "https://github.com/rezzminator/engine-sync",
+      "license": "MIT",
+      "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"]
     }
   ]
 }

@@ -67,8 +67,8 @@ func (e *BrowserDownloadError) Error() string {
 }
 
 // browserFileRung is PolicyFile's last rung: one headless browser download,
-// whose challenge verdict stands (renderHeadless's policy, for a download). It runs only for the file policy — the inline-image
-// policy never starts a browser — with the browser rung on and an adapter
+// whose challenge verdict stands (renderHeadless's policy, for a download). It
+// runs only for the file policy, with the browser rung on and an adapter
 // wired. kept reports a file stored in out.Result; err is the rung's named
 // failure, nil when the rung did not run.
 func (h *Harvester) browserFileRung(
@@ -162,6 +162,7 @@ func (h *Harvester) keepBrowserFile(
 	if err != nil {
 		return false, fmt.Errorf("%s: cache file: %w", rung, err)
 	}
+	h.afterCacheWrite()
 	cache := cacheStatusMiss
 	if req.options.Refresh {
 		cache = cacheStatusRefresh

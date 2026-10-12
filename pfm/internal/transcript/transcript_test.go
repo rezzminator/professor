@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -305,6 +306,69 @@ func TestReadMetaClaudeContextExcludesOutputTokens(t *testing.T) {
 	}
 }
 
+// A response whose counts sit only in usage.iterations (claude-opus-5-5)
+// reports its context through its last iteration: the request that ran last.
+func TestReadMetaClaudeContextReadsTheLastIteration(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200}}}`+"\n"+
+			`{"type":"assistant","message":{"usage":{"input_tokens":0,"output_tokens":0,"iterations":[`+
+			`{"input_tokens":5,"cache_read_input_tokens":900,"output_tokens":40},`+
+			`{"input_tokens":7,"cache_read_input_tokens":1200,"cache_creation_input_tokens":30,"output_tokens":9}]}}}`+"\n",
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 1237 {
+		t.Fatalf("context tokens = %d, want the last iteration's 1237, never the stale 300", meta.ContextTokens)
+	}
+}
+
+// An advisor iteration is another model's request: it never stands for the
+// executor's context, even when it is the last iteration recorded.
+func TestReadMetaClaudeContextSkipsAnAdvisorIteration(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":0,"output_tokens":0,"iterations":[`+
+			`{"input_tokens":7,"cache_read_input_tokens":1200,"output_tokens":9,"type":"message"},`+
+			`{"input_tokens":177,"cache_creation_input_tokens":89334,"output_tokens":1422,"type":"advisor_message","model":"claude-opus-5-5"}]}}}`+"\n",
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 1207 {
+		t.Fatalf(
+			"context tokens = %d, want the executor's last iteration 1207, never the advisor's 89511",
+			meta.ContextTokens,
+		)
+	}
+}
+
+// An advised response's top level sums its executor's requests: the context
+// is the last request's, never the sum.
+func TestReadMetaClaudeContextReadsTheLastRequestOfAnAdvisedResponse(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":4,"cache_read_input_tokens":175106,`+
+			`"cache_creation_input_tokens":1442,"output_tokens":1240,"iterations":[`+
+			`{"input_tokens":2,"cache_read_input_tokens":87277,"cache_creation_input_tokens":552,"output_tokens":26,"type":"message"},`+
+			`{"input_tokens":177,"cache_creation_input_tokens":89334,"output_tokens":1422,"type":"advisor_message","model":"claude-opus-5-5"},`+
+			`{"input_tokens":2,"cache_read_input_tokens":87829,"cache_creation_input_tokens":890,"output_tokens":1214,"type":"message"}]}}}`+"\n",
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 88721 {
+		t.Fatalf("context tokens = %d, want the last request's 88721, never the summed 176552", meta.ContextTokens)
+	}
+}
+
 func TestReadMetaClaudeIgnoresNewerSidechainUsage(t *testing.T) {
 	path := writeTranscript(
 		t,
@@ -487,5 +551,20 @@ func TestReadMetaFollowsTheNewestCodexTurnRecord(t *testing.T) {
 				t.Fatalf("CodexTurn = %d, want %d", meta.CodexTurn, testCase.want)
 			}
 		})
+	}
+}
+
+// TestContentListsReadEachBlockOnItsOwn: Visible and the tool-call reader
+// decode content through DecodeContent, so one odd element never hides its
+// siblings (INTENDED: a list holding one used to read as empty).
+func TestContentListsReadEachBlockOnItsOwn(t *testing.T) {
+	if got := Visible(json.RawMessage(`[{"type":"text","text":"kept"},7,{"type":"text","text":5}]`)); got != "kept" {
+		t.Errorf("Visible = %q, want kept", got)
+	}
+	entry, ok := toolCall(
+		json.RawMessage(`[5,{"type":"tool_use","name":7},{"type":"tool_use","name":"Read","input":{"a":1}}]`),
+	)
+	if !ok || entry.Tool != "Read" || entry.Input != `{"a":1}` {
+		t.Errorf("toolCall = %+v, %t; want the Read call", entry, ok)
 	}
 }

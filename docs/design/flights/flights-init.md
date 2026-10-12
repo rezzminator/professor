@@ -90,13 +90,13 @@ An existing test command is aligned, never rewritten.
 `check-{unit}.sh <file>...` in the agent-scripts directory, the static-check command a builder runs once, last, with the files it changed:
 
 - No argument, a flag or an empty argument exits 2 with the usage line `Name the files you changed.`; paths go through I4's resolver.
-- It calls the unit's installed tools only, never a runner that fetches a tool: a fetched tool is unpinned, and its verdict is not the unit's. A unit the map's offline check finds not installed prints only the line `FAIL install ({unit} has no installed dependencies — run: {install command})`, runs no check and exits 1; a unit with `no dependencies` never prints it.
+- It calls the unit's installed tools only, never a runner that fetches a tool: a fetched tool is unpinned, and its verdict is not the unit's. A unit the map's offline check finds not installed prints only the line `GAP install ({unit} is missing: {each missing tool} — no check ran, this is a missing tool and not a failed check; run: {install command})`, runs no check and exits 3: a missing tool is a gap in the machine, never a red, so a caller tells it from a failed check (exit 1); a unit with `no dependencies` never prints it.
 - File-scoped checks (format check, lint) run on the named files their tool applies to; one that no named file applies to prints exactly `SKIP {check} (no named file it applies to)`, one wording in every unit, never `PASS`, since it checked nothing. Unit-wide checks (type check, an architecture ratchet, any other static check the testing manual requires for a builder's change) run whole.
 - A check that builds, serves or reaches beyond the machine stays out of the check command; the lander's gate does not run it either, so the return names it under GAPS as a landing check the owner places. A check another listed check already runs is listed once.
 - A check that needs a running service probes it only after the check fails, never on a green run: the probe decorates that `FAIL` line with the missing service and the command that starts it in the current checkout, since a worktree may start it differently from the main checkout. A probe that itself errors says so and why, never reporting the service as up, so a down service never reads as a code red. A probe never interpolates a config value into a shell string.
 - A check that mutates the tree (regenerate-and-compare) serialises per checkout, because parallel foremen share one worktree: a lock keyed to the checkout path, a bounded wait that ends in a `FAIL {check}` line naming the holder, freed when its holder dies; the check leaves the tree as it found it.
 - Every check runs even after one fails, each printing one `PASS {check}`, `FAIL {check}` or `SKIP {check}` line; the full output goes to `check-{unit}/{UTC timestamp}-{pid}.log` under the temp-artifact directory, and the command prints its path.
-- Exit 1 when any line is `FAIL`, else 0.
+- Exit 1 when any line is `FAIL`, else 3 on the `GAP install` line, else 0.
 - No change to the unit's package manifest.
 
 ## I6 — Tests for both
@@ -125,7 +125,7 @@ The smoke cell holds each command's verdict lines and exit code on one line, a `
 
 ```text
 | unit | test command | check command | manual | smoke |
-| {unit} | {path} created|aligned|ok | {path} created|aligned|ok | {path} created|aligned|ok | test exit {code} · check {its PASS, FAIL and SKIP lines} exit {code} |
+| {unit} | {path} created|aligned|ok | {path} created|aligned|ok | {path} created|aligned|ok | test exit {code} · check {its GAP, PASS, FAIL and SKIP lines} exit {code} |
 RESOLVER {path} created|aligned|ok
 PROJECT MAP {path} created|aligned|ok
 ENGINE COPIES regenerated|none
@@ -144,7 +144,7 @@ Run 1 on a six-unit repository, 2026-10-05, and the merge-gating review of the s
 | Hot files still exist | Undefined, the history listed paths since deleted |
 | `SKIP` line (I5) | A file-scoped check that no named file applied to printed `PASS` over nothing checked |
 | Service probe (I5) | A check that needs a running service read as a code red with the service down; a worktree starts the service with a different command than the main checkout |
-| Installed tools, `FAIL install` (I5, I9) | In a fresh worktree with no dependencies installed, a fetching runner downloaded an unpinned tool and printed a false `PASS` |
+| Installed tools, `GAP install` (I5, I9) | In a fresh worktree with no dependencies installed, a fetching runner downloaded an unpinned tool and printed a false `PASS` |
 | Landing checks, listed once (I5) | "Any other static check the testing manual requires" forced a ruling per heavy gate (build, end-to-end, checks nested in another) |
 | Path forms (I4) | The test command took unit-relative paths only; a flight's repository-relative task path failed with exit 1 |
 | Presence watched failing (I6) | "Watch them red" could not hold for an absence assertion, which passes against a missing command |

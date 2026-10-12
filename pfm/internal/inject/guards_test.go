@@ -51,6 +51,36 @@ func TestSelectorLineExactChatShGuards(t *testing.T) {
 	}
 }
 
+// TestExitDialogOpenNeedsTheExitRowSelected is the one matcher both chat
+// closers press Enter on: reload's worker and the kill-exit finisher. Only
+// Claude Code's background-work confirmation with its Exit row selected
+// reads open — a human who moved the marker to Stay, or a permission
+// selector, gets no Enter.
+func TestExitDialogOpenNeedsTheExitRowSelected(t *testing.T) {
+	t.Parallel()
+	const dialog = "   Background work is running\n" +
+		"   The following will stop when you exit:\n" +
+		"   shell · sleep 25 && echo done\n"
+	tests := []struct {
+		name    string
+		capture string
+		want    bool
+	}{
+		{name: "exit row selected", capture: dialog + "   ❯ 1. Exit and stop tasks\n     2. Stay\n", want: true},
+		{name: "marker moved to stay", capture: dialog + "     1. Exit and stop tasks\n   ❯ 2. Stay\n"},
+		{name: "permission selector", capture: "Do you want to proceed?\n ❯ 1. Yes\n   2. No\n"},
+		{name: "idle composer", capture: "⏺ done\n────────\n❯ \n────────\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ExitDialogOpen(test.capture); got != test.want {
+				t.Fatalf("ExitDialogOpen(%q) = %v, want %v", test.capture, got, test.want)
+			}
+		})
+	}
+}
+
 func TestIsBusyExactMarkers(t *testing.T) {
 	t.Parallel()
 	for _, capture := range []string{
@@ -157,6 +187,40 @@ func TestDeliveryProvenPlaceholderOnlyCountsForPasteTransport(t *testing.T) {
 	}
 	if deliveryProven(pfmengine.Claude, before, after, message, false, false) {
 		t.Fatalf("collapsed-paste placeholder incorrectly counted as proof for the literal transport")
+	}
+}
+
+func TestComposerEmptyPreservesMarkerCharactersInDraft(t *testing.T) {
+	for _, test := range []struct{ marker, draft, tail string }{
+		{"  ❯ ", "explain this symbol ›", ""},
+		{"  ❯ ", "explain this symbol ❯", ""},
+		{"  ❯ ", "open Settings › Privacy", ""},
+		{"\t› ", "open Settings ❯ Privacy", ""},
+		{"\x1b[32m  › \x1b[0m", "explain this symbol ›", ""},
+		{"❯ ", "unfinished draft", "\n  ›"},
+		{"❯ ", "unfinished draft", "\n  ❯"},
+	} {
+		t.Run(test.marker+test.draft, func(t *testing.T) {
+			frame := "────────\n" + test.marker + test.draft + test.tail + "\n────────\n"
+			empty, got, err := ComposerEmpty(frame, func() (string, error) { return frame, nil })
+			if err != nil || empty || got != test.draft || ComposerDraftText(frame) != test.draft {
+				t.Fatalf("ComposerEmpty = %v, %q, %v; want false, %q", empty, got, err, test.draft)
+			}
+		})
+	}
+}
+
+func TestComposerBoxEmptyRejectsBoxDrawingDraftRows(t *testing.T) {
+	for _, glyph := range []string{"─", "│"} {
+		t.Run(glyph, func(t *testing.T) {
+			frame := "────────\n❯ \n  " + glyph + "\n  unfinished draft\n────────\n"
+			if ComposerBoxEmpty(frame) {
+				t.Fatalf("box-drawing draft row %q was read as the closing rule", glyph)
+			}
+		})
+	}
+	if !ComposerBoxEmpty("❯ \n─\n") || !ComposerBoxEmpty("────────\n❯ \n────────\n") {
+		t.Fatal("existing no-top-rule and empty-box frames must remain empty")
 	}
 }
 

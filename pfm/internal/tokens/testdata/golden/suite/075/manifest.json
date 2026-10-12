@@ -1,0 +1,22 @@
+{
+ "test": "prices: an active override leads every data-gaps line, naming its file and row count",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{FIX}/claude/projects"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{TMP}/override-table.json",
+  "HOME": "{TMP}/override-SZ2ntP"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "override-SZ2ntP",
+  "override-table.json",
+  "pfm-KaeWoJ"
+ ],
+ "outputs": {}
+}

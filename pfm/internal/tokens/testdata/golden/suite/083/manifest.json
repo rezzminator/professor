@@ -1,0 +1,25 @@
+{
+ "test": "pricing: published prompt tiers price every cache column at the request context",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--root",
+  "{TMP}/price-live-tiers-2zfsBv",
+  "--since",
+  "99999d",
+  "--out",
+  "{TMP}/tier-report.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{TMP}/tier-table.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "price-live-tiers-2zfsBv",
+  "tier-report.json",
+  "tier-table.json"
+ ],
+ "outputs": {
+  "--out": "{TMP}/tier-report.json"
+ }
+}

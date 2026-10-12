@@ -1,6 +1,7 @@
 package harvest
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,8 +176,8 @@ func TestRewritePublicImagesRefusesPrivateMetadataPaths(t *testing.T) {
 	}
 }
 
-// writeCachedImage stores a PNG under cacheDir at the name the localizer
-// (storeBinary via CacheKey) writes for remote, and returns its path.
+// writeCachedImage stores a PNG under cacheDir at the name an older cache
+// entry (storeBinary via CacheKey) holds for remote, and returns its path.
 func writeCachedImage(t *testing.T, cacheDir, remote string) string {
 	t.Helper()
 	path := filepath.Join(cacheDir, strings.TrimSuffix(CacheKey(remote, "png"), ".md")+".png")
@@ -207,7 +208,7 @@ func writeCachedPage(t *testing.T, cacheDir, source, body string) Result {
 // TestPublicResultRelocatesHebrewAndPercentEncodedImages pins the he.wikipedia
 // failure: images whose remote names are Hebrew or percent-encoded are all
 // relocated into public/, and a protocol-relative (//host/…) link the
-// localizer left remote is a remote link, never a local path to refuse.
+// page left remote is a remote link, never a local path to refuse.
 func TestPublicResultRelocatesHebrewAndPercentEncodedImages(t *testing.T) {
 	setHarvestTestJail(t)
 	cacheDir := t.TempDir()
@@ -250,7 +251,7 @@ func TestPublicResultRelocatesHebrewAndPercentEncodedImages(t *testing.T) {
 }
 
 // TestPublicResultDropsAnImageThatCannotBePublished pins the Lemmy failure: a
-// site-relative image link no localizer stored is dropped from the published
+// site-relative image link no cache entry holds is dropped from the published
 // page, its alt text kept and the drop named in the partial, while the rest of
 // the page and its other images are published.
 func TestPublicResultDropsAnImageThatCannotBePublished(t *testing.T) {
@@ -282,8 +283,10 @@ func TestPublicResultDropsAnImageThatCannotBePublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(stored), partialMarkerPrefix+"1 image(s) could not be published") {
-		t.Fatalf("the public artifact does not carry the partial marker: %q", stored)
+	meta, body := readFrontmatter(string(stored))
+	if !strings.Contains(meta["gaps"], "1 image(s) could not be published") ||
+		strings.Contains(body, partialMarkerPrefix) {
+		t.Fatalf("the public artifact does not name the dropped image in its frontmatter gaps alone: %q", stored)
 	}
 }
 
@@ -310,5 +313,42 @@ func TestPublicExportFailureSaysPermanentOrTransient(t *testing.T) {
 	)
 	if !strings.Contains(transient.Error, "Retry later") {
 		t.Fatalf("transient export failure = %q, want Retry later", transient.Error)
+	}
+}
+
+// TestFetchPublicLocalMarkdownResolvesRelativeImagesAgainstItsOwnDirectory
+// pins that a local Markdown file's relative image links resolve against the
+// file's own directory, never the cache copy's: an existing image is
+// published, and only a link whose target is truly missing is a gap.
+func TestFetchPublicLocalMarkdownResolvesRelativeImagesAgainstItsOwnDirectory(t *testing.T) {
+	setHarvestTestJail(t)
+	root := t.TempDir()
+	docs := filepath.Join(root, "docs")
+	if err := os.MkdirAll(filepath.Join(docs, "img"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{filepath.Join(docs, "img", "a.png"), filepath.Join(root, "b.png")} {
+		if err := os.WriteFile(image, []byte(pngMagic), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	docPath := filepath.Join(docs, "doc.md")
+	doc := "# Report\n\n![a](img/a.png)\n\n![b](../b.png)\n\n![gone](img/gone.png)\n"
+	if err := os.WriteFile(docPath, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
+	got := h.FetchPublic(context.Background(), docPath, FetchOptions{})
+	if got.Error != "" {
+		t.Fatalf("FetchPublic(%q) error = %q", docPath, got.Error)
+	}
+	if got.Partial != "1 image(s) could not be published" {
+		t.Fatalf("FetchPublic(%q) partial = %q, want only the missing image as a gap\n%s",
+			docPath, got.Partial, got.Content)
+	}
+	if strings.Contains(got.Content, "img/a.png") || strings.Contains(got.Content, "../b.png") ||
+		strings.Contains(got.Content, "img/gone.png") || strings.Count(got.Content, "](./") != 2 {
+		t.Fatalf("FetchPublic(%q) did not publish the two existing images and drop the missing one:\n%s",
+			docPath, got.Content)
 	}
 }

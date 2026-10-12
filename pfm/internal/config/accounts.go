@@ -73,6 +73,19 @@ func (config Config) PrimaryAccountFor(engine pfmengine.ID, claudePrimary int) i
 	}
 }
 
+// AccountChoices counts the configured accounts a chat of engine can run on:
+// with one, the account a chat runs on is never a guess.
+func (config Config) AccountChoices(engine pfmengine.ID) int {
+	switch engine {
+	case pfmengine.Codex:
+		return len(config.CodexAccounts)
+	case pfmengine.OpenCode:
+		return len(config.OpenCodeAccounts)
+	default:
+		return len(config.Accounts)
+	}
+}
+
 // ImplicitAccount prefers account 1, then the first configured account, then 1.
 func (config Config) ImplicitAccount() int {
 	for _, account := range config.Accounts {

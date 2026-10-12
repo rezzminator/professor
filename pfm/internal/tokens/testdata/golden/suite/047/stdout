@@ -1,0 +1,58 @@
+TOKEN AUDIT · last 2399976h · host golden-host · 2026-10-09T10:28:46.000Z
+scanned {TMP}/price-b5only-MwhBSP · 1 transcripts (1 main, 0 agent runs with priced calls) · 1 API calls
+pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: none
+
+== 1 · TOTAL $0.04 by billing class
+      $0.00   0.0%  re-reading cached context (per-model read rate) · 0.0M tok
+      $0.03  71.1%  writing context to the 5-minute cache (1.25x) · 0.0M tok
+      $0.01  28.4%  writing context to the 1-hour cache (2x) · 0.0M tok
+      $0.00   0.4%  output tokens · 0.0M tok
+      $0.00   0.1%  uncached input (1x) · 0.0M tok
+  main chat loops $0.04 (100.0%) · sub-agents $0.00 (0.0%) · thinking 0.0M of 0.0M output tok
+  cache writes by main runs: 5-minute $0.03 · 1-hour $0.01
+
+== 2 · BY PROJECT
+      $0.04 100.0%  /tmp/price-proj                              main $0.04 · agents $0.00 · 1 runs · rewrites $0.00
+
+== 3 · BY KIND · MODEL · EFFORT
+      $0.04 100.0%       1 calls ·  $4.22/100 calls · main · sonnet-4-6 · effort medium
+
+== 4 · WHAT THE MONEY PAID FOR (every dollar traced to the context that caused it)
+      $0.04  99.6%  fixed prefix (system prompt, tool schemas, CLAUDE.md)
+      $0.00   0.4%  OUTPUT generated (text + thinking + tool inputs)
+  · /tmp/price-proj: fixed prefix 99.6% · OUTPUT generated 0.4% · prompts + briefs 0.0% · task notifications 0.0% · own earlier output 0.0%
+
+== 5 · HOW BIG WAS THE CONTEXT WHEN THE MONEY WAS SPENT
+      $0.04 100.0%       1 calls ·   $4.22/100 calls · context under 50K
+  and how deep into a run it was spent (a run's context only grows, so late calls are the dear ones):
+      $0.04 100.0%       1 calls · mean context   10K · main · calls 1–50
+  calls that moved almost nothing yet re-read the whole context:
+
+== 6 · FULL CACHE REWRITES (the whole context re-billed at write price)
+  $0.00 total (0.0%)
+
+== 7 · TOP 12 CHAT FAMILIES (a chat + the agents it spawned)
+      $0.04 100.0%  price s                            price-proj   own    $0.04 ·   0 agents    $0.00 · rewrites   $0.00 · peak 10K
+
+== 8 · AGENT GROUPS (project · agent type · model) — same job, different cost?
+      total    n   median      p90      max  calls  peakK  wall m  errs  tests  reread  poll$ small$     ttl  group (calls/peak/wall = median, errs/tests/reread = per run, poll/small = share of group $, ttl = where its cache writes went)
+
+== 9 · TOP 15 SINGLE RUNS
+      $0.04  MAIN price s                                 sonnet-4-6       1 calls · ctx  10→ 10K ·    0m wall/   0m in tools · rw  $0.00 · errs   0 · reread   0 · poll  $0.00 · ttl 1h 20%
+
+== 10 · TOOLS (results entering context; ~4 chars per token)
+  harness injections by type:
+
+== 11 · LOOPS
+  the same shell command, repeated inside one run:
+  the same file, read again while already in context:
+  single tool results that were then carried the longest (estimate: tokens × later calls × read price):
+
+== 12 · BUSIEST HOURS (UTC)
+  2026-09-20T09h    $0.04
+
+== CROSS-CHECK (this estimate vs the harness's own cost-state line, chats wholly inside the window)
+  no chat qualifies — the estimate is UNCHECKED on this host
+
+full data → {TMP}/price-hhsplgd5ojd.json (0.0 MB)

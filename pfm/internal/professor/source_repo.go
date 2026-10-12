@@ -21,7 +21,7 @@ func DiscoverSourceRepo() string {
 		return ""
 	}
 	for {
-		if isSourceRepo(current) {
+		if IsSourceRepo(current) {
 			return mainWorktreeOf(current)
 		}
 		parent := filepath.Dir(current)
@@ -36,18 +36,18 @@ func DiscoverSourceRepo() string {
 // checkout; anything else, or a main checkout that is not the clone, is root.
 func mainWorktreeOf(root string) string {
 	main, ok := gitroot.MainCheckout(root)
-	if !ok || !isSourceRepo(main) {
+	if !ok || !IsSourceRepo(main) {
 		return root
 	}
 	return main
 }
 
-// isSourceRepo names the blueprint clone by files a FRESH clone carries.
+// IsSourceRepo names the blueprint clone by files a FRESH clone carries.
 // AGENTS.md is a generated engine mirror, gitignored and absent until the first
 // compile, so it can never be one of them. pfm/go.mod is the engine source:
 // present in every clone and worktree, absent from a scaffolded adopter
 // project, which must never be mistaken for the blueprint.
-func isSourceRepo(root string) bool {
+func IsSourceRepo(root string) bool {
 	for _, relative := range []string{ClaudeInstructionsFile, "pfm/go.mod", ".claude/settings.json"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
 			return false

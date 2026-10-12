@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
@@ -85,6 +86,46 @@ func TestProcessStartFailureIsAnErrorRecordWithoutAPid(t *testing.T) {
 	wantField(t, record, FieldErr, "start harvestpy worker: no such file")
 	if _, found := record.Field(FieldPID); found {
 		t.Fatalf("a process that never started has a pid: %v", record.Fields)
+	}
+}
+
+// A sidecar its caller cancelled on purpose (a harvest cancelled while the
+// sidecar is provisioning or checked) records the cancel at INFO at every
+// Process door, its err kept; a deadline that cut the child short stays ERROR.
+func TestProcessCancelledByItsCallerIsNotAnError(t *testing.T) {
+	cancelled := fmt.Errorf("run %q: %w", "uv", context.Canceled)
+	deadline := fmt.Errorf("run %q: %w", "uv", context.DeadlineExceeded)
+	doors := []struct {
+		op     string
+		record func(process *Process, err error)
+	}{
+		{"start", func(process *Process, err error) { process.Started(0, err) }},
+		{"request", func(process *Process, err error) { process.Request("sync")(0, err) }},
+		{"kill", func(process *Process, err error) { process.Killed(err) }},
+		{"exit", func(process *Process, err error) { process.Exited(err) }},
+	}
+	for _, door := range doors {
+		for _, tc := range []struct {
+			name string
+			err  error
+			want slog.Level
+		}{
+			{"cancelled", cancelled, slog.LevelInfo},
+			{"deadline", deadline, slog.LevelError},
+		} {
+			t.Run(door.op+"/"+tc.name, func(t *testing.T) {
+				ctx, recorder := Test(t)
+				door.record(NewProcess(ctx, "provision"), tc.err)
+				record := onlyRecord(t, recorder)
+				if record.Message != "harvestpy."+door.op {
+					t.Fatalf("record = %q, want harvestpy.%s", record.Message, door.op)
+				}
+				if record.Level != tc.want.String() {
+					t.Fatalf("%s logged at %s, want %s", tc.err, record.Level, tc.want)
+				}
+				wantField(t, record, FieldErr, tc.err.Error())
+			})
+		}
 	}
 }
 

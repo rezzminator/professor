@@ -433,28 +433,93 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "version/config show/config validate/issues answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
 fi
 
-# ─── O1.14 — price table report and usage error ────────────────────────────
+# ─── O1.15 — model-cost offline surface ────────────────────────────────────
 
-beat O1.14-price
+beat O1.15-model-cost
 spends none
 bad=""
-price_out="$(pfm price 2>&1)"; price_rc=$?
-if [ "$price_rc" -ne 0 ]; then
-  bad="$bad pfm price exited $price_rc: $(one_line "$price_out");"
-elif ! grep -qE '^price table: [0-9]+ rows · override: ' <<<"$price_out" ||
-  ! grep -qE '^KEY[[:space:]]+ENGINE[[:space:]]+MATCH[[:space:]]+IN[[:space:]]+OUT[[:space:]]+HIT[[:space:]]+CACHED[[:space:]]+W5M[[:space:]]+W1H[[:space:]]+LONG[[:space:]]+SOURCE$' <<<"$price_out"; then
-  bad="$bad pfm price omitted its summary or table header: $(one_line "$price_out");"
+help_out="$(pfm model-cost --help 2>&1)"; help_rc=$?
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--all' <<<"$help_out" || ! grep -q -- '--force' <<<"$help_out" || ! grep -q -- '--check' <<<"$help_out"; then
+  bad="$bad pfm model-cost --help lacks --all, --force or --check (exit $help_rc): $(one_line "$help_out");"
 fi
-check_out="$(pfm price --check 2>&1)"; check_rc=$?
-if [ "$check_rc" -ne 0 ] || ! grep -qE '^price table: ok · [0-9]+ rows · override: ' <<<"$check_out"; then
-  bad="$bad pfm price --check did not report a valid table (exit $check_rc): $(one_line "$check_out");"
+usage_out="$(pfm model-cost --all gpt-6.1-sol 2>&1)"; usage_rc=$?
+if [ "$usage_rc" -ne 2 ]; then
+  bad="$bad pfm model-cost with both a model and --all exited $usage_rc, want 2: $(one_line "$usage_out");"
 fi
-error_out="$(pfm price --json --check 2>&1)"; error_rc=$?
-if [ "$error_rc" -ne 2 ] || ! grep -qF 'pfm price: --json and --check are exclusive' <<<"$error_out"; then
-  bad="$bad pfm price conflicting flags did not name the usage error (exit $error_rc): $(one_line "$error_out");"
+json_out="$(pfm model-cost --check --json 2>&1)"; json_rc=$?
+if [ "$json_rc" -ne 2 ]; then
+  bad="$bad pfm model-cost --check --json exited $json_rc, want 2: $(one_line "$json_out");"
 fi
+check_out="$(PFM_PRICES_OFFLINE=1 pfm model-cost --check 2>&1)"; check_rc=$?
+if [ "$check_rc" -ne 0 ] || ! grep -qE '^prices: .* · refresh offline' <<<"$check_out"; then
+  bad="$bad pfm model-cost --check offline did not print its prices: summary (exit $check_rc): $(one_line "$check_out");"
+fi
+unknown_out="$(PFM_PRICES_OFFLINE=1 pfm model-cost lane-unpriced-model-9 2>&1)"; unknown_rc=$?
+if [ "$unknown_rc" -ne 1 ] || ! grep -qF 'pfm model-cost --all' <<<"$unknown_out"; then
+  bad="$bad pfm model-cost with an unknown id did not exit 1 naming pfm model-cost --all (exit $unknown_rc): $(one_line "$unknown_out");"
+fi
+# The lane has no network: refresh, derivation and exact rates are proven by the
+# fixture tests of internal/pricing and internal/pricing/modelcost.
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "price table summary, columns and --check report; conflicting flags exit 2 with a named error"
+  pass "model-cost help names --all/--force/--check; model plus --all and --check plus --json exit 2; offline --check prints its summary; an unknown id exits 1 naming --all"
+fi
+
+# ─── O1.16 — tokens offline surface ────────────────────────────────────────
+
+beat O1.16-tokens
+spends none
+bad=""
+help_out="$(pfm tokens --help 2>&1)"; help_rc=$?
+if [ "$help_rc" -ne 0 ] || ! grep -q -- '--codex' <<<"$help_out" || ! grep -q -- '--flight' <<<"$help_out" || ! grep -q -- '--timeline' <<<"$help_out"; then
+  bad="$bad pfm tokens --help lacks --codex, --flight or --timeline (exit $help_rc): $(one_line "$help_out");"
+fi
+since_out="$(pfm tokens --since 3x 2>&1)"; since_rc=$?
+if [ "$since_rc" -ne 2 ] || ! grep -qF -- '--since wants' <<<"$since_out"; then
+  bad="$bad pfm tokens --since 3x exited $since_rc, want 2 naming --since: $(one_line "$since_out");"
+fi
+tokens_root="$(mktemp -d)"
+root_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --root "$tokens_root/missing" 2>&1)"; root_rc=$?
+if [ "$root_rc" -ne 1 ] || ! grep -qF -- '--root' <<<"$root_out"; then
+  bad="$bad pfm tokens over an unreadable --root exited $root_rc, want 1 naming --root: $(one_line "$root_out");"
+fi
+empty_out="$(PFM_PRICES_OFFLINE=1 pfm tokens --root "$tokens_root" 2>&1)"; empty_rc=$?
+if [ "$empty_rc" -ne 0 ] || ! grep -q '^TOKEN AUDIT · ' <<<"$empty_out"; then
+  bad="$bad pfm tokens over an empty root did not print its report (exit $empty_rc): $(one_line "$empty_out");"
+fi
+rm -rf "$tokens_root"
+# The report's numbers are proven by the golden replay of internal/tokens.
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "tokens help names --codex/--flight/--timeline; a bad --since exits 2; an unreadable --root exits 1; an empty root prints its report"
+fi
+
+# ─── O1.17 — transcript offline surface ────────────────────────────────────
+# One fixture transcript, no chat: the digest, a refused verb, an id nothing holds.
+beat O1.17-transcript
+spends none
+bad=""
+help_out="$(pfm transcript --help 2>&1)"; help_rc=$?
+if [ "$help_rc" -ne 0 ] || ! grep -q -- 'show,counts,types,locate,agents' <<<"$help_out"; then
+  bad="$bad pfm transcript --help lacks its verbs (exit $help_rc): $(one_line "$help_out");"
+fi
+verb_out="$(pfm transcript list x 2>&1)"; verb_rc=$?
+if [ "$verb_rc" -ne 2 ] || ! grep -qF -- "invalid choice: 'list'" <<<"$verb_out"; then
+  bad="$bad pfm transcript list exited $verb_rc, want 2 naming the invalid choice: $(one_line "$verb_out");"
+fi
+transcript_dir="$(mktemp -d)"
+printf '%s\n' '{"type":"user","sessionId":"lane-o1-17","timestamp":"2026-09-29T20:00:00Z","message":{"content":"lane prompt"}}' \
+  > "$transcript_dir/session.jsonl"
+show_out="$(pfm transcript show "$transcript_dir/session.jsonl" 2>&1)"; show_rc=$?
+if [ "$show_rc" -ne 0 ] || ! grep -q '^TRANSCRIPT claude · lane-o1-17' <<<"$show_out" || ! grep -qF 'PROMPT lane prompt' <<<"$show_out"; then
+  bad="$bad pfm transcript show did not digest the fixture (exit $show_rc): $(one_line "$show_out");"
+fi
+locate_out="$(pfm transcript locate no-such-session-anywhere 2>&1)"; locate_rc=$?
+if [ "$locate_rc" -ne 1 ] || ! grep -qF 'TRANSCRIPT FAILED — NOT FOUND no-such-session-anywhere' <<<"$locate_out"; then
+  bad="$bad pfm transcript locate of nothing exited $locate_rc, want 1 naming NOT FOUND: $(one_line "$locate_out");"
+fi
+rm -rf "$transcript_dir"
+# The digest's bytes are proven by the golden replay of internal/transcript/digest.
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "transcript help names its verbs; an unknown verb exits 2; a fixture digests; an id nothing holds exits 1 NOT FOUND"
 fi
 
 lane_end

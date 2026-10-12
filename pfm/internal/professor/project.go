@@ -28,6 +28,7 @@ const (
 	projectUpdated         projectStatus = "UPDATED"
 	projectNew             projectStatus = "NEW"
 	projectGoneUpstream    projectStatus = "GONE-UPSTREAM"
+	projectMoved           projectStatus = "MOVED"
 	projectLocalDeleted    projectStatus = "LOCAL-DELETED"
 	missingBaselineMessage               = ".professor/baseline.json not found — pfm update adopt pins an existing install; pfm init scaffolds a new one"
 	emptySummary                         = "none"
@@ -40,6 +41,7 @@ var (
 		projectUpdated,
 		projectNew,
 		projectGoneUpstream,
+		projectMoved,
 		projectLocalDeleted,
 	}
 	errBaselineNotFound = errors.New(missingBaselineMessage)
@@ -53,6 +55,7 @@ type projectReportItem struct {
 	Diff        string        `json:"diff,omitempty"`
 	DiffError   string        `json:"diffError,omitempty"`
 	DiffSkipped string        `json:"diffSkipped,omitempty"`
+	projectMove
 }
 type projectReport struct {
 	Root     string
@@ -60,6 +63,7 @@ type projectReport struct {
 	Baseline Baseline
 	Counts   map[projectStatus]int
 	Items    []projectReportItem
+	Retired  *RetiredNameScan // nil when no retired-name scan ran
 }
 type projectTerminalEnvelope struct {
 	Error    string `json:"error,omitempty"`
@@ -67,7 +71,12 @@ type projectTerminalEnvelope struct {
 }
 
 func (r projectReport) reviewRequired() int {
-	return r.Counts[projectUpdated] + r.Counts[projectNew] + r.Counts[projectGoneUpstream] + r.Counts[projectLocalDeleted]
+	review := r.Counts[projectUpdated] + r.Counts[projectNew] +
+		r.Counts[projectGoneUpstream] + r.Counts[projectMoved] + r.Counts[projectLocalDeleted]
+	if r.Retired != nil {
+		review += len(r.Retired.Hits)
+	}
+	return review
 }
 
 func buildProjectReport(root, home string) (projectReport, error) {
@@ -111,8 +120,11 @@ func buildProjectReport(root, home string) (projectReport, error) {
 		pinned[template] = true
 		templatePath := filepath.Join(store.Templates, filepath.FromSlash(template))
 		status := projectCurrent
+		var move projectMove
 		if _, err := os.Stat(templatePath); errors.Is(err, fs.ErrNotExist) {
-			status = projectGoneUpstream
+			if status, move, err = goneOrMoved(store.Templates, template, pinned); err != nil {
+				return projectReport{}, err
+			}
 		} else if err != nil {
 			return projectReport{}, fmt.Errorf("UNREADABLE %s: %w", templatePath, err)
 		} else {
@@ -135,7 +147,7 @@ func buildProjectReport(root, home string) (projectReport, error) {
 		if status != projectCurrent {
 			report.Items = append(
 				report.Items,
-				projectReportItem{Status: status, Local: local, Template: template, Pin: pin},
+				projectReportItem{Status: status, Local: local, Template: template, Pin: pin, projectMove: move},
 			)
 		}
 	}
@@ -264,6 +276,8 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 					item.Template,
 					item.Local,
 				)
+			case projectMoved:
+				writeProjectMovedRow(stdout, item)
 			case projectLocalDeleted:
 				fmt.Fprintf(
 					stdout,
@@ -275,34 +289,12 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 			}
 		}
 	}
+	writeRetiredNamesHuman(stdout, r.Retired)
 	terminal := projectTerminal(r)
 	if terminal != "clean" {
 		terminal += "; nothing was written."
 	}
 	fmt.Fprintln(stdout, terminal)
-}
-
-func writeProjectJSON(stdout io.Writer, r projectReport) error {
-	type blueprintJSON struct {
-		Pinned  string `json:"pinned"`
-		Current string `json:"current"`
-	}
-	payload := struct {
-		Professor      string                `json:"professor"`
-		Blueprint      blueprintJSON         `json:"blueprint"`
-		Counts         map[projectStatus]int `json:"counts"`
-		Items          []projectReportItem   `json:"items"`
-		Ignored        []string              `json:"ignored"`
-		ReviewRequired int                   `json:"reviewRequired"`
-		Terminal       string                `json:"terminal"`
-	}{r.Root, blueprintJSON{r.Baseline.Blueprint.SHA, r.Store.SHA}, r.Counts, r.Items, r.Baseline.Ignored, r.reviewRequired(), ""}
-	payload.Terminal = projectTerminal(r)
-	encoder := json.NewEncoder(stdout)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(payload); err != nil {
-		return fmt.Errorf("encode project report: %w", err)
-	}
-	return nil
 }
 
 func writeProjectFailure(stdout io.Writer, jsonOutput bool, err error) {
@@ -315,20 +307,6 @@ func writeProjectFailure(stdout io.Writer, jsonOutput bool, err error) {
 		return
 	}
 	fmt.Fprintln(stdout, terminal)
-}
-
-// RunPostUpdate reports project drift after a successful binary update. No baseline is a successful NOT-MANAGED terminal.
-func runPostUpdate(rootFlag string, jsonOutput bool, stdout io.Writer, runtime config.Runtime) int {
-	root, found, err := ResolveProjectRoot(rootFlag)
-	if err != nil {
-		writeProjectFailure(stdout, jsonOutput, err)
-		return 3
-	}
-	if found {
-		return renderProjectCheck(root, runtime.Paths.Home, jsonOutput, stdout)
-	}
-	writeProjectUnmanaged(stdout, jsonOutput)
-	return 0
 }
 
 // writeProjectUnmanaged prints the successful post-update terminal for a source clone outside a managed project.

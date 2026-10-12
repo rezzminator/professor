@@ -157,4 +157,146 @@ else
   bad "install-guard: (g) could not build the unrelated-repo fixture binary"
 fi
 
+# Rebase equivalents still carry every installed change, but new commit IDs.
+gitc "$REPO" checkout -q -b installed-series "$SHA_B"
+printf 'package main\n\nfunc main() { _ = 1; _ = 3 }\n' > "$REPO/main.go"
+gitc "$REPO" commit -q -am B2
+SHA_B2="$(git -C "$REPO" rev-parse HEAD)"
+buildbin "$REPO" "$BIN/B2"
+gitc "$REPO" checkout -q -b rebased-series "$SHA_A"
+printf 'upstream\n' > "$REPO/upstream.txt"
+gitc "$REPO" add upstream.txt
+gitc "$REPO" commit -q -m upstream
+gitc "$REPO" cherry-pick "$SHA_B" "$SHA_B2" >/dev/null
+out="$(run "$BIN/B2" "$REPO")"; rc=$?
+if [[ "$out" == *"install-guard: ok"* && "$out" == *"rebase-equivalent"* ]] && [ $rc -eq 0 ]; then
+  ok "install-guard: complete two-commit rebase is safe, exit 0"
+else
+  bad "install-guard: expected complete rebase to pass" "$out (rc $rc)"
+fi
+
+# Matching only the installed tip cannot excuse a missing earlier change.
+gitc "$REPO" checkout -q -b partial-series "$SHA_A"
+printf 'package main\n\nfunc main() { _ = 1 }\n' > "$REPO/main.go"
+printf 'different combined patch\n' > "$REPO/combined.txt"
+gitc "$REPO" add -A
+gitc "$REPO" commit -q -m combined
+gitc "$REPO" cherry-pick "$SHA_B2" >/dev/null
+out="$(run "$BIN/B2" "$REPO")"; rc=$?
+if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
+  ok "install-guard: only equivalent tip with unmatched earlier history refuses"
+else
+  bad "install-guard: incomplete equivalence must refuse" "$out (rc $rc)"
+fi
+
+# Ordinary patch-id strips semantic whitespace inside source strings.
+gitc "$REPO" checkout -q -b spaced "$SHA_A"
+printf 'package main\n\nfunc main() { _ = "a b" }\n' > "$REPO/main.go"
+gitc "$REPO" commit -q -am spaced
+buildbin "$REPO" "$BIN/spaced"
+gitc "$REPO" checkout -q -b unspaced "$SHA_A"
+printf 'package main\n\nfunc main() { _ = "ab" }\n' > "$REPO/main.go"
+gitc "$REPO" commit -q -am unspaced
+out="$(run "$BIN/spaced" "$REPO")"; rc=$?
+if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
+  ok "install-guard: semantic whitespace difference is divergent, exit 1"
+else
+  bad "install-guard: whitespace-only semantic divergence must refuse" "$out (rc $rc)"
+fi
+
+# An empty installed-only commit has no patch proof and must remain refused.
+gitc "$REPO" checkout -q -b installed-empty "$SHA_B2"
+gitc "$REPO" commit -q --allow-empty -m empty
+buildbin "$REPO" "$BIN/empty"
+gitc "$REPO" checkout -q rebased-series
+out="$(run "$BIN/empty" "$REPO")"; rc=$?
+if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
+  ok "install-guard: empty installed-only commit has no equivalence proof"
+else
+  bad "install-guard: empty installed-only history must refuse" "$out (rc $rc)"
+fi
+
+# Independent changes cannot be accepted in the opposite history order.
+gitc "$REPO" checkout -q -b ordered-installed "$SHA_A"
+printf 'first\n' > "$REPO/first.txt"
+gitc "$REPO" add first.txt
+gitc "$REPO" commit -q -m first
+SHA_FIRST="$(git -C "$REPO" rev-parse HEAD)"
+printf 'second\n' > "$REPO/second.txt"
+gitc "$REPO" add second.txt
+gitc "$REPO" commit -q -m second
+SHA_SECOND="$(git -C "$REPO" rev-parse HEAD)"
+buildbin "$REPO" "$BIN/ordered"
+gitc "$REPO" checkout -q -b reverse-candidate "$SHA_A"
+gitc "$REPO" cherry-pick "$SHA_SECOND" "$SHA_FIRST" >/dev/null
+out="$(run "$BIN/ordered" "$REPO")"; rc=$?
+if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
+  ok "install-guard: reversed independent patch order refuses despite identical trees"
+else
+  bad "install-guard: reversed patch history must refuse" "$out (rc $rc)"
+fi
+
+# A merge-only installed commit cannot be proved by its individual side patches.
+gitc "$REPO" checkout -q -b merge-installed "$SHA_A"
+printf 'main\n' > "$REPO/merge-main.txt"
+gitc "$REPO" add merge-main.txt
+gitc "$REPO" commit -q -m merge-main
+SHA_MERGE_MAIN="$(git -C "$REPO" rev-parse HEAD)"
+gitc "$REPO" checkout -q -b merge-side "$SHA_A"
+printf 'side\n' > "$REPO/merge-side.txt"
+gitc "$REPO" add merge-side.txt
+gitc "$REPO" commit -q -m merge-side
+SHA_MERGE_SIDE="$(git -C "$REPO" rev-parse HEAD)"
+gitc "$REPO" checkout -q merge-installed
+gitc "$REPO" merge -q --no-ff -m merge merge-side
+buildbin "$REPO" "$BIN/merge"
+gitc "$REPO" checkout -q -b linear-candidate "$SHA_A"
+gitc "$REPO" cherry-pick "$SHA_MERGE_MAIN" "$SHA_MERGE_SIDE" >/dev/null
+out="$(run "$BIN/merge" "$REPO")"; rc=$?
+if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
+  ok "install-guard: installed merge refuses despite matching linear side patches"
+else
+  bad "install-guard: installed merge history must refuse" "$out (rc $rc)"
+fi
+
+gitc "$REPO" checkout -q rebased-series
+
+# A shared patch reverted before divergence cannot prove installed replay.
+gitc "$REPO" checkout -q -b shared-reverted "$SHA_A"
+printf 'replayed\n' > "$REPO/replay.txt"
+gitc "$REPO" add replay.txt
+gitc "$REPO" commit -q -m shared-add
+SHA_SHARED_ADD="$(git -C "$REPO" rev-parse HEAD)"
+gitc "$REPO" revert --no-edit "$SHA_SHARED_ADD" >/dev/null
+SHA_SHARED_REVERT="$(git -C "$REPO" rev-parse HEAD)"
+gitc "$REPO" checkout -q -b installed-replay
+gitc "$REPO" cherry-pick "$SHA_SHARED_ADD" >/dev/null
+buildbin "$REPO" "$BIN/replay"
+gitc "$REPO" checkout -q -b missing-replay "$SHA_SHARED_REVERT"
+printf 'unrelated\n' > "$REPO/unrelated.txt"
+gitc "$REPO" add unrelated.txt
+gitc "$REPO" commit -q -m unrelated
+out="$(run "$BIN/replay" "$REPO")"; rc=$?
+if [[ "$out" == *"REFUSED"* ]] && [ $rc -eq 1 ]; then
+  ok "install-guard: shared reverted patch cannot excuse missing installed replay"
+else
+  bad "install-guard: historical reverted patch must not prove current installed replay" "$out (rc $rc)"
+fi
+
+gitc "$REPO" checkout -q rebased-series
+
+# A failed fingerprint producer is ERROR, never unmatched/accepted history.
+REAL_GIT="$(command -v git)"
+mkdir -p "$T/error-bin"
+{
+  printf '#!/usr/bin/env bash\nfor arg; do [ "$arg" != log ] || exit 17; done\nexec %q "$@"\n' "$REAL_GIT"
+} > "$T/error-bin/git"
+chmod +x "$T/error-bin/git"
+out="$(PATH="$T/error-bin:$PATH" run "$BIN/B2" "$REPO")"; rc=$?
+if [[ "$out" == *"install-guard: ERROR"* && "$out" == *"fingerprint installed-only history"* ]] && [ $rc -eq 2 ]; then
+  ok "install-guard: failed Git fingerprint producer is ERROR, exit 2"
+else
+  bad "install-guard: fingerprint failure must be visible ERROR" "$out (rc $rc)"
+fi
+
 shtest_end

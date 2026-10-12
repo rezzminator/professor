@@ -1,10 +1,3 @@
-**Title:** PostgreSQL 18.6 Documentation
-**Authors:** The PostgreSQL Global Development Group
-**Published:** 2026-08-13
-**Source:** PostgreSQL Documentation
-
----
-
 August 13, 2026: [PostgreSQL 18.6, 17.11, 16.15, 15.19, 14.24 and 19 Beta 3 Released!](/about/news/postgresql-186-1711-1615-1519-1424-and-19-beta-3-released-3365/)
 
 Supported Versions: [Current](/docs/current/index.html) ([18](/docs/18/index.html)) / [17](/docs/17/index.html) / [16](/docs/16/index.html) / [15](/docs/15/index.html) / [14](/docs/14/index.html)

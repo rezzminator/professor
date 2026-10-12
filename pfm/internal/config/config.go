@@ -80,6 +80,7 @@ type ClaudePrefs struct {
 	TmuxTruecolor         bool
 	CleanupPeriodDays     int
 	RequireManagedCleanup bool
+	HelperModel           string // Claude Code's helper-call model; never empty after Load
 	// SystemPrompt is one of the SystemPrompt* values; empty means
 	// SystemPromptProduction.
 	SystemPrompt string
@@ -95,6 +96,16 @@ type ClaudePrefs struct {
 	// the unset sentinel on both.
 	MaxSubagentSpawnDepth  int
 	MaxConcurrentSubagents int
+	// PluginCheckoutRoot is claude.pluginCheckoutRoot, an absolute path; empty
+	// when unset. Machine-wide: an account may not set it.
+	PluginCheckoutRoot string
+	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
+	CostLedger bool
+	// GptAgents opts into gpt twins and their managed hook assets machine-wide.
+	GptAgents bool
+	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
+	// Machine-wide: an account may not set it.
+	Plugins []ClaudePlugin
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -276,6 +287,7 @@ type rawClaude struct {
 	PermissionMode        *string `json:"permissionMode,omitempty"`
 	WebSearchesPerSession *int64  `json:"webSearchesPerSession,omitempty"`
 	AutoCompactWindow     *int64  `json:"autoCompactWindow,omitempty"`
+	HelperModel           *string `json:"helperModel,omitempty"`
 	TmuxTruecolor         *bool   `json:"tmuxTruecolor,omitempty"`
 	CleanupPeriodDays     *int    `json:"cleanupPeriodDays,omitempty"`
 	RequireManagedCleanup *bool   `json:"requireManagedCleanup,omitempty"`
@@ -287,8 +299,13 @@ type rawClaude struct {
 	// RetiredCompactNudge accepts old config files; it is never read or written.
 	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
-	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
-	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
+	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
+	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
+	CostLedger             *bool   `json:"costLedger,omitempty"`
+	GptAgents              *bool   `json:"gptAgents,omitempty"`
+	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
+	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
 }
 
 type rawOpenCode struct {
@@ -438,20 +455,26 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
 		"claude.webSearchesPerSession":                       SourceDefault,
 		"claude.autoCompactWindow":                           SourceDefault,
+		"claude.helperModel":                                 SourceDefault,
 		"claude.tmuxTruecolor":                               SourceDefault,
 		"claude.cleanupPeriodDays":                           SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
+		KeyClaudePluginCheckoutRoot:                          SourceDefault,
+		KeyClaudePlugins:                                     SourceDefault,
+		KeyClaudeCostLedger:                                  SourceDefault,
+		KeyClaudeGptAgents:                                   SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
 		engineConfigKey(pfmengine.OpenCode, engineKeyBinary): SourceDefault,
-		"mcp.http.port":         SourceDefault,
-		"ask.engine":            SourceDefault,
-		"tmux.titles.enabled":   SourceDefault,
-		"nameSync.interval":     SourceDefault,
-		keyDoctorIgnoreWarnings: SourceDefault,
+		"mcp.http.port":                                      SourceDefault,
+		"ask.engine":                                         SourceDefault,
+		"tmux.titles.enabled":                                SourceDefault,
+		"nameSync.interval":                                  SourceDefault,
+		keyDoctorIgnoreWarnings:                              SourceDefault,
+		keyDoctorAcceptedMCP:                                 SourceDefault,
 	}
 	for _, id := range pfmengine.All() {
 		name := pfmengine.MustLookup(id).LongName
@@ -486,10 +509,13 @@ func defaultsWithMCPServers(
 			Binary:                pfmengine.MustLookup(pfmengine.Claude).Binary,
 			WebSearchesPerSession: 9007199254740991,
 			AutoCompactWindow:     100000,
+			HelperModel:           DefaultHelperModel,
 			TmuxTruecolor:         true,
 			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
 			Cache1H:               true,
+			CostLedger:            true,
+			Plugins:               DefaultClaudePlugins(),
 
 			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 		},
@@ -727,6 +753,9 @@ func loadWithMCPServers(
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
 		}
+		if err := applyClaudeMachinePrefs(&result.Claude, *raw.Claude, home, result.Path, result.Sources); err != nil {
+			return Config{}, err
+		}
 		if err := applySubagentCaps(
 			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
 		); err != nil {
@@ -754,11 +783,7 @@ func loadWithMCPServers(
 				if err != nil {
 					return Config{}, err
 				}
-				prefs.WebSearchesPerSession = result.Claude.WebSearchesPerSession
-				prefs.AutoCompactWindow = result.Claude.AutoCompactWindow
-				prefs.TmuxTruecolor = result.Claude.TmuxTruecolor
-				prefs.CleanupPeriodDays = result.Claude.CleanupPeriodDays
-				prefs.RequireManagedCleanup = result.Claude.RequireManagedCleanup
+				copyClaudeLaunchPrefs(&prefs, result.Claude)
 				applyClaudeLaunchPrefs(&prefs, *value.Claude, result.Sources, "accounts", index)
 				if value.Claude.Cache1H == nil {
 					// No account-level override: inherit the already-resolved
@@ -1168,11 +1193,7 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
 		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
-		result.WebSearchesPerSession = account.Claude.WebSearchesPerSession
-		result.AutoCompactWindow = account.Claude.AutoCompactWindow
-		result.TmuxTruecolor = account.Claude.TmuxTruecolor
-		result.CleanupPeriodDays = account.Claude.CleanupPeriodDays
-		result.RequireManagedCleanup = account.Claude.RequireManagedCleanup
+		copyClaudeLaunchPrefs(&result, *account.Claude)
 		// Zero is unset on both caps, so Load's inheritance already put the
 		// resolved top-level value here — same unconditional copy as Cache1H.
 		result.MaxSubagentSpawnDepth = account.Claude.MaxSubagentSpawnDepth
@@ -1305,7 +1326,8 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 
 // MarshalDefault returns the strict, comment-free JSON used by `pfm config
 // init`. It deliberately emits resolved defaults so the file is useful as a
-// documented starting point while the loader remains backward compatible.
+// documented starting point while the loader remains backward compatible; the
+// claude keys added since v0.79.0 stay out at their defaults (marshalClaude).
 func MarshalDefault(home string, projectRoots []string) ([]byte, error) {
 	defaults := Defaults(home, projectRoots)
 	defaults.Log.Level = InstallLogLevel
@@ -1340,25 +1362,38 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	claudeName := pfmengine.MustLookup(pfmengine.Claude).LongName
 	codexName := pfmengine.MustLookup(pfmengine.Codex).LongName
 	accounts := make([]map[string]any, 0, len(config.Accounts))
-	for _, account := range config.Accounts {
+	for index, account := range config.Accounts {
 		value := map[string]any{
 			"id":        account.ID,
 			"configDir": account.ConfigDir,
 			"emoji":     account.Emoji,
 		}
 		if account.Claude != nil {
-			value[claudeName] = map[string]any{
+			claude := map[string]any{
 				"webSearchesPerSession": account.Claude.WebSearchesPerSession,
 				"autoCompactWindow":     account.Claude.AutoCompactWindow,
 				"tmuxTruecolor":         account.Claude.TmuxTruecolor,
 				"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
 				"requireManagedCleanup": account.Claude.RequireManagedCleanup,
-				"permissionMode":        account.Claude.PermissionMode,
-				engineKeyBinary:         account.Claude.Binary,
 				keyTheme:                themeMarshalValue(account.Claude.Theme),
 				"cache1h":               account.Claude.Cache1H,
 				"nativeCursor":          account.Claude.NativeCursor,
 			}
+			// These empty sentinels mean inherit. Writing them as explicit empty
+			// values makes our strict loader reject its own output.
+			if account.Claude.PermissionMode != "" {
+				claude["permissionMode"] = account.Claude.PermissionMode
+			}
+			if account.Claude.Binary != "" {
+				claude[engineKeyBinary] = account.Claude.Binary
+			}
+			// Preserve explicit account preferences, even when currently equal to the
+			// machine value: a later machine edit must not turn them into inheritance.
+			if account.Claude.HelperModel != config.Claude.HelperModel ||
+				config.Source(fmt.Sprintf("accounts[%d].claude.helperModel", index)) == SourceFile {
+				claude["helperModel"] = account.Claude.HelperModel
+			}
+			value[claudeName] = claude
 		}
 		if account.Codex != nil {
 			value[codexName] = map[string]any{
@@ -1410,19 +1445,8 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		keyTheme:   config.Theme,
 		"state":    map[string]any{"db": config.State.DB, "cacheDb": config.State.CacheDB},
 		"accounts": accounts,
-		claudeName: map[string]any{
-			"webSearchesPerSession": config.Claude.WebSearchesPerSession,
-			"autoCompactWindow":     config.Claude.AutoCompactWindow,
-			"tmuxTruecolor":         config.Claude.TmuxTruecolor,
-			"cleanupPeriodDays":     config.Claude.CleanupPeriodDays,
-			"requireManagedCleanup": config.Claude.RequireManagedCleanup,
-			"permissionMode":        config.Claude.PermissionMode,
-			engineKeyBinary:         config.Claude.Binary,
-			keyTheme:                themeMarshalValue(config.Claude.Theme),
-			"cache1h":               config.Claude.Cache1H,
-			"nativeCursor":          config.Claude.NativeCursor,
-		},
-		codexName: codexValue,
+		claudeName: marshalClaude(config),
+		codexName:  codexValue,
 		"tmux": map[string]any{
 			"titles": map[string]any{jsonKeyEnabled: config.Tmux.Titles.Enabled},
 		},
@@ -1437,12 +1461,8 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
 	}
-	if len(config.Doctor.IgnoreWarnings) != 0 || config.Source(keyDoctorIgnoreWarnings) == SourceFile {
-		ids := config.Doctor.IgnoreWarnings
-		if ids == nil {
-			ids = []string{}
-		}
-		value["doctor"] = map[string]any{"ignoreWarnings": ids}
+	if doctor := marshalDoctor(config); len(doctor) != 0 {
+		value["doctor"] = doctor
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

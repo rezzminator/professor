@@ -122,8 +122,12 @@ func TestRedditPartialPageIsKeptAndFlaggedWhenTheBrowserCannotDoBetter(t *testin
 				t.Fatalf("rungs=%s, want %s", got, tc.rungs)
 			}
 			if !strings.Contains(result.Partial, "3 of 12 comments loaded") ||
-				!strings.HasPrefix(result.Content, partialMarkerPrefix) {
-				t.Fatalf("partial thread reported as complete: partial=%q", result.Partial)
+				strings.Contains(result.Content, partialMarkerPrefix) {
+				t.Fatalf(
+					"partial thread not flagged in Partial alone: partial=%q content=%.120q",
+					result.Partial,
+					result.Content,
+				)
 			}
 			for _, want := range []string{"u/alpha_placeholder", "  - **u/bravo_placeholder**", "u/foxtrot_placeholder"} {
 				if !strings.Contains(result.Content, want) {
@@ -286,8 +290,12 @@ func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
 					tc.browserCalls,
 				)
 			}
-			if !strings.Contains(result.Partial, tc.gap) || !strings.HasPrefix(result.Content, partialMarkerPrefix) {
-				t.Fatalf("the gap is not flagged: partial=%q", result.Partial)
+			if !strings.Contains(result.Partial, tc.gap) || strings.Contains(result.Content, partialMarkerPrefix) {
+				t.Fatalf(
+					"the gap is not flagged in Partial alone: partial=%q content=%.120q",
+					result.Partial,
+					result.Content,
+				)
 			}
 		})
 	}

@@ -305,10 +305,20 @@ func TestDoctorHarvestMissingRootIsSkipped(t *testing.T) {
 	// The skipped conversion env is followed by the informational gate-off
 	// browser row (absence of an opt-in environment is not a defect).
 	// S7: even disabled, never-provisioned is NAMED, not folded into a bare "disabled".
-	if got, want := output.String(), "doctor: harvestpy skipped\ndoctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=fetch.browser\n"; got != want {
+	if got, want := output.String(), "doctor: harvestpy skipped\ndoctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=fetch.browser "+browserProvisionHintOff+"\n"; got != want {
 		t.Fatalf("missing harvest root output=%q, want %q", got, want)
 	}
 }
+
+// The NOT_PROVISIONED rows name how to provision the browser rung: it has no
+// command of its own; the fetch.browser gate in harvester.config.json and the
+// next browser fetch provision it (harvestpy.ProvisionBrowser).
+const (
+	browserProvisionHintOff = "hint=set fetch.browser=true in harvester.config.json; " +
+		"the next browser fetch provisions it (needs uv and network access)"
+	browserProvisionHintOn = "hint=fetch.browser is already true; " +
+		"the next fetch that reaches the browser rung provisions it (needs uv and network access)"
+)
 
 func TestDoctorHarvestUnreadableRootIsNotSkipped(t *testing.T) {
 	home := t.TempDir()
@@ -360,7 +370,8 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 		var output strings.Builder
 		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, false)
 		if warnings != 0 || !strings.Contains(output.String(), "NOT_PROVISIONED") ||
-			!strings.Contains(output.String(), "disabled") {
+			!strings.Contains(output.String(), "disabled") ||
+			!strings.Contains(output.String(), browserProvisionHintOff) {
 			t.Fatalf("gate-off row=%q warnings=%d", output.String(), warnings)
 		}
 	})
@@ -389,7 +400,8 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 	t.Run("gate on without an environment reports NOT provisioned", func(t *testing.T) {
 		var output strings.Builder
 		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
-		if warnings != 1 || !strings.Contains(output.String(), "NOT_PROVISIONED") {
+		if warnings != 1 || !strings.Contains(output.String(), "NOT_PROVISIONED") ||
+			!strings.Contains(output.String(), browserProvisionHintOn) {
 			t.Fatalf("unprovisioned row=%q warnings=%d", output.String(), warnings)
 		}
 	})

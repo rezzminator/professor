@@ -7,7 +7,7 @@ github.com/rezzminator/professor/pfm/e2e	TestClaudePluginInstallFixture	helper	r
 github.com/rezzminator/professor/pfm/e2e	TestClaudeHarnessCaptureFixture	helper	re-exec fixture: runs only as the jailed claude -p stub of its parent test (loopback sink only)
 github.com/rezzminator/professor/pfm/e2e	TestCodexHookAPIFixture	helper	re-exec fixture: runs only as the jailed codex app-server stub of its parent test
 github.com/rezzminator/professor/pfm/internal/agentrole	TestUnreadableDirectoryIsAnError	root-noop	the fence runs as root, where permission bits deny nothing
-github.com/rezzminator/professor/pfm/internal/codexgen	TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/globallink	TestClassifyUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/compose	TestCodexLineageStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/compose	TestComposeStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/deps	TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence	platform	darwin-only gate
@@ -20,6 +20,7 @@ github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderMD5Catalog
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderPMC	opt-in-live	live network provider probe; opt-in
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderScholar	opt-in-live	live network provider probe; opt-in
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderUnpaywall	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestNoInertContainerSkipsTheWindowScan	race-mode	testing.AllocsPerRun ceiling; skips only in a -race build (raceEnabled), where the detector allocates on the measured paths
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCSVAndJSONConversionPathsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonAcceptanceExactHTMLFixture	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonConversionOwnedPairsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
@@ -28,6 +29,7 @@ github.com/rezzminator/professor/pfm/internal/harvestpy	TestFormatParsersRefuseB
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLConversionKeepsBlockStructure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLFullDOMConversionDropsHiddenElements	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLMetadataDateComesFromMarkupOnly	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLScreenReaderAndTitleCopiesAreWrittenOnce	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestInflateXZAndArabicOCRAvailable	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestLiveBrowserCallerHeadersStayOnTheOrigin	opt-in-live	real-browser rung; runs only with HARVESTER_BROWSER=1
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRMissingModelIsANamedFailure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
@@ -44,11 +46,10 @@ github.com/rezzminator/professor/pfm/internal/installer	TestGlobalAgentsDoctorUn
 github.com/rezzminator/professor/pfm/internal/installer	TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateAnnouncesWhenItCannotProbe	platform	darwin-only gate
 github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateRefusesOnlyMidExecution	platform	darwin-only gate
-github.com/rezzminator/professor/pfm/internal/installer	TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/kill	TestKillStressProcessHelper	helper	re-exec fixture: runs only as the child of its parent test
-github.com/rezzminator/professor/pfm/internal/naming	TestNamingStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/statusline	TestCodexAppServerFixture	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/store	TestKilledWriteHelperProcess	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/store	TestSharedKillsNeedNoBridgeInEitherDirection	tool-absent	needs the sqlite3 CLI, absent from the fence image
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStressKilledHelper	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/internal/transcript	TestFlattenPromptTextStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1

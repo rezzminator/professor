@@ -13,5 +13,6 @@ func SessionEnv(prefs pfmconfig.ClaudePrefs) []string {
 	return append([]string{
 		envFunctionHooks + "=1",
 		envAutoCompactWindow + "=" + strconv.FormatInt(prefs.AutoCompactWindow, 10),
+		envAnthropicSmallFastModel + "=" + helperModel(prefs),
 	}, ShellEnv(paths.OSEnv{}.Lookup)...)
 }

@@ -18,7 +18,7 @@ docker run --rm \
   golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac \
   bash -euo pipefail -c '
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git tmux zsh
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git tmux zsh python3
     mkdir -p "$HOME"
     go -C pfm test -tags e2e -p 1 ./e2e/...
   '

@@ -1,0 +1,46 @@
+TRANSCRIPT claude · cccccccc-1111-2222-3333-444444444444 · claude-fable-5-1
+FILE {HOME}/.claude/projects/-work-repo/cccccccc-1111-2222-3333-444444444444.jsonl · 5982 bytes · 22 records · cwd /work/repo (shown as ./)
+NAME Extra Desk
+SPAN 2026-09-29 18:00:27Z → 20:00:30Z · 7203s wall
+CALLS 10, 1 err, 1 without result: Read 2 · Edit 1 · Agent 1 · Skill 1 · WebFetch 1 (1 err) · mcp__x__y 1 · Write 1 · Glob 1 · Bash 1
+FILTER only prompt,reply,call,note,final · results full · text 0 · shown 21 of 21 events
+L2 20:00:00 PROMPT Look at this
+L2 20:00:00 PROMPT [image]
+L3 20:00:01 SAY plain string reply
+L4 20:00:02 Read ./a.go @10+20 → ok 69B · 6s
+    | line1
+    | line2
+    | [image]
+    | [tool Grep]
+    | {"type": "custom", "value": {"a": 1}}
+L4 20:00:02 Edit ./a.go (-2 +1 lines) → ok 6B · 6s
+    | edited
+L4 20:00:02 Agent tracer: Map it → ok 6B · 6s
+    | traced
+L4 20:00:02 Skill flights:spec --fast → ok 9B · 6s
+    | skill ran
+L4 20:00:02 WebFetch https://example.com/x → ERR 13B · 6s
+    | 404 Not Found
+L4 20:00:02 mcp__x__y {"n": 1.5, "big": 1e+20, "small": 1e-05, "flag": true, "none": null, "text": "naïve — \"q\" <tag> & \t", "list": [1, 2.0, "x"], "nested": {"k": []}} → ok 12B · 6s
+    | dict content
+L4 20:00:02 Write ./b.go → ok 0B · 6s
+L4 20:00:02 Glob **/*.go → ok 9B · 6s
+    | a.go
+    | b.go
+L4 20:00:02 Read ./c.go → NO RESULT
+L6 20:00:09 NOTE COMPACT SUMMARY Summary of earlier work
+L7 20:00:10 NOTE COMPACTED — the context was compacted here
+L10 20:00:13 NOTE Caveat: meta text
+L11 20:00:14 NOTE <system-reminder>remember</system-reminder>
+L14 20:00:17 SAY Thinking aloud
+L14 20:00:17 Bash ls -la pwd → ok 18B · 6s
+    | total 0
+    | file.txt
+    | 
+L16 20:00:24 SAY Wrong turn
+L18 20:00:25 PROMPT(queued) queued as blocks
+L22 20:00:30 FINAL
+  Line one
+  Line two
+  Line three
+SKIPPED 8 records: system.api_error 1 · system.? 1 · user.document 1 · user.text 1 · unparseable line 1 · attachment.? 1 · summary 1 · 7 1 | HEADER 1: custom-title 1

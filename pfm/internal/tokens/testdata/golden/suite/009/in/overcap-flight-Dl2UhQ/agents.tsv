@@ -1,0 +1,6 @@
+task-id	agent-type	agent-id	round	spawn-time	engine
+1-a	executor	a1	1	2026-09-20T09:01:00.000Z	claude
+1-b	executor	cx-thread-unknown-form	1	2026-09-20T09:05:00.000Z	codex
+1-d	executor	b2	1	2026-09-20T09:01:00.000Z	claude
+1-e	lander	c3	1	2026-09-20T09:02:00.000Z	claude
+1-c	executor	ghost-agent	1	2026-09-20T19:00:00.000Z	claude

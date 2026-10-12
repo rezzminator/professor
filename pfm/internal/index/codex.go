@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
-	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 type codexRecord struct {
@@ -44,7 +44,10 @@ func parseCodexRolloutFile(
 	// session_meta line normally establishes the source before messages, but
 	// the fallback remains user for older files without thread_source.
 	sourceKnown := start > 0
-	parsedOffset, bytesRead, err := readCompleteLines(file.Path, start, func(line []byte) {
+	parsedOffset, bytesRead, err := claudetranscript.ReadLines(file.Path, start, func(line []byte, complete bool) {
+		if !complete {
+			return
+		}
 		if !relevantCodexLine(line) {
 			return
 		}
@@ -97,7 +100,7 @@ func parseCodexRolloutFile(
 		// mid-turn write ONLY the response_item.
 		if record.Type == "response_item" && record.Payload.Type == "message" &&
 			record.Payload.Role == messageRoleUser {
-			prompt := naming.FlattenPromptText(record.Payload.Content)
+			prompt := claudetranscript.FlattenPromptText(record.Payload.Content)
 			if prompt == "" || protocolPrompt(prompt) {
 				return
 			}
@@ -114,7 +117,7 @@ func parseCodexRolloutFile(
 			return
 		}
 		// Legacy user_message event: seeds the name for eras whose
-		// response_items predate the block shapes FlattenPromptText reads;
+		// response_items predate the block shapes transcript.FlattenPromptText reads;
 		// the count is taken from the paired response_item above.
 		if !sourceKnown {
 			rollout.UserThread = true
@@ -123,7 +126,7 @@ func parseCodexRolloutFile(
 		if len(message) == 0 {
 			message = record.Message
 		}
-		if prompt := naming.FlattenPromptText(message); rollout.FirstPrompt == "" && prompt != "" {
+		if prompt := claudetranscript.FlattenPromptText(message); rollout.FirstPrompt == "" && prompt != "" {
 			rollout.FirstPrompt = prompt
 		}
 	})

@@ -296,6 +296,12 @@ func planSocket(input Input, socket Socket) Decision {
 		return decision
 	}
 
+	if !input.AgentsOK && socket.HasCrumb {
+		decision.State = StateSkip
+		decision.Reason = "busy-unknown (busy query failed)"
+		return decision
+	}
+
 	if socket.Attached {
 		return planAttached(input, socket, decision)
 	}
@@ -313,11 +319,6 @@ func planSocket(input Input, socket Socket) Decision {
 	// grinding a task; with no breadcrumb, its busy state was never readable
 	// in the first place. Codex writes no breadcrumb BY DESIGN and explicitly
 	// accepts the tab-or-die tradeoff. Every other known engine fails closed.
-	if !input.AgentsOK && socket.HasCrumb {
-		decision.State = StateSkip
-		decision.Reason = "busy-unknown (busy query failed)"
-		return decision
-	}
 	id, known := pfmengine.FromSocket(socket.Name)
 	if !socket.HasCrumb && known && id != pfmengine.Codex {
 		decision.State = StateSkip

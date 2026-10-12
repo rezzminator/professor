@@ -1,0 +1,10 @@
+{
+ "args": [
+  "show",
+  "Nobody Here"
+ ],
+ "dirs": [],
+ "links": {
+  ".cc/1/projects": "../../.claude/projects"
+ }
+}

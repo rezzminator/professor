@@ -11,10 +11,9 @@
 # terms now live in an untracked, gitignored terms file (scripts/leak-terms.txt;
 # override: LEAK_TERMS env), and this script is scanned like any other file.
 #
-# A MISSING OR EMPTY TERMS FILE IS A HARD FAILURE, never a pass. A fresh clone has no
-# terms file; without this rule the gate would scan for the structural patterns alone,
-# find nothing, and print "clean" — the exact coincidence-detector shape it exists to
-# refuse. "We have no denylist" and "we found no leak" must never print the same word.
+# A MISSING OR EMPTY TERMS FILE IS A HARD FAILURE, never a pass. Fork CI may explicitly
+# select !structural-only in its policy file; that runs the structural patterns and
+# visibly reports PRIVATE COVERAGE SKIPPED. Absence never implicitly selects that mode.
 #
 # Structural patterns stay inline because they name nobody. Their discriminator: a home
 # path is a leak only when it names a CONCRETE directory, so the blueprint's own
@@ -83,19 +82,23 @@ line_is_real_hit() {
 }
 
 usage() {
-  echo "Usage: leak-check.sh [--range OLD NEW | --files f1 [f2 ...]]" >&2
+  echo "Usage: leak-check.sh [--range OLD NEW [--remote NAME] | --files f1 [f2 ...]]" >&2
   exit 2
 }
 
 mode="staged"
 range_old=""
 range_new=""
+range_remote=""
 files=()
 
 if [[ $# -eq 0 ]]; then
   mode="staged"
 elif [[ "$1" == "--range" ]]; then
-  [[ $# -eq 3 ]] || usage
+  # --remote NAME: the remote the push goes to (pre-push's $1). A new ref's commits that configured
+  # remote already holds were judged by the push that published them; another remote's were not, and
+  # a target that is no configured remote (a URL, or no --remote) excludes nothing.
+  if [[ $# -eq 5 && "$4" == "--remote" && -n "$5" ]]; then range_remote="$5"; else [[ $# -eq 3 ]] || usage; fi
   mode="range"
   range_old="$2"
   range_new="$3"
@@ -130,11 +133,13 @@ fi
 terms=()
 ignore_tokens=()
 ignore_paths=()
+structural_only=0
 while IFS= read -r term || [[ -n "$term" ]]; do
   term="${term%$'\r'}"
   [[ "$term" =~ ^[[:space:]]*# ]] && continue
   [[ -z "${term//[[:space:]]/}" ]] && continue
   case "$term" in
+    '!structural-only') structural_only=1; continue ;;
     '!ignore-token '*) ignore_tokens+=("${term#!ignore-token }"); continue ;;
     '!ignore-path '*) ignore_paths+=("${term#!ignore-path }"); continue ;;
     '!'*) echo "leak-check: FAILED — unknown directive in $terms_file: $term" >&2; exit 1 ;;
@@ -145,7 +150,13 @@ if (( ${#ignore_paths[@]} > 0 )); then
   printf 'leak-check: %d configured path ignore(s) — NOT scanned: %s\n' "${#ignore_paths[@]}" "${ignore_paths[*]}" >&2
 fi
 
-if (( ${#terms[@]} == 0 )); then
+if (( structural_only )); then
+  if (( ${#terms[@]} + ${#ignore_tokens[@]} + ${#ignore_paths[@]} > 0 )); then
+    echo "leak-check: FAILED — !structural-only cannot be mixed with private terms or ignores: $terms_file" >&2
+    exit 1
+  fi
+  echo "leak-check: PRIVATE COVERAGE SKIPPED — explicit structural-only policy; scanning $STRUCTURAL_COUNT structural pattern(s)" >&2
+elif (( ${#terms[@]} == 0 )); then
   echo "leak-check: FAILED — terms file has zero usable terms: $terms_file" >&2
   echo "leak-check: an empty denylist finds nothing, which is not the same as finding nothing." >&2
   exit 1
@@ -175,8 +186,11 @@ if [[ -z "$match_locale" ]]; then
   exit 1
 fi
 
-terms_alt="$(IFS='|'; printf '%s' "${terms[*]}")"
-PATTERN="(${terms_alt}|${STRUCTURAL_PATTERN})"
+PATTERN="$STRUCTURAL_PATTERN"
+if (( ! structural_only )); then
+  terms_alt="$(IFS='|'; printf '%s' "${terms[*]}")"
+  PATTERN="(${terms_alt}|${STRUCTURAL_PATTERN})"
+fi
 
 # Validate at data entry: a term or ignore token the tools cannot compile would otherwise
 # fail open — every --range hit judged "suppressed", a --range grep that "finds nothing".
@@ -212,20 +226,23 @@ else
 fi
 cd "$repo_root"
 
-# The two data files that hold real private values by design are the only self-exclusions
-# left. leak-check.sh is NOT among them any more: it scans itself.
+# Private policy inputs are self-excluded; required public licenses are justified below.
+# leak-check.sh is NOT excluded: it scans itself.
 terms_rel=""
 case "$terms_file" in
   "$repo_root"/*) terms_rel="${terms_file#"$repo_root"/}" ;;
 esac
 
+# placeholder-map holds source-specific replacement values; leak-terms holds the
+# private denylist. A configured in-repo denylist is the same private policy input.
+# Licenses require public copyright attribution; exclude them, but always scan hooks.
 diff_excludes=(
-  ':(exclude)scripts/placeholder-map.tsv'
-  ':(exclude)scripts/leak-terms.txt'
-  ':(exclude).githooks'
   ':(exclude)LICENSE'
   ':(exclude).opencode/LICENSE'
+  ':(exclude)scripts/placeholder-map.tsv'
+  ':(exclude)scripts/leak-terms.txt'
 )
+[[ -z "$terms_rel" ]] || diff_excludes+=(":(exclude,literal)$terms_rel")
 for glob in ${ignore_paths[@]+"${ignore_paths[@]}"}; do
   diff_excludes+=(":(exclude,glob)$glob")
 done
@@ -233,8 +250,7 @@ done
 is_excluded_path() {
   local p="$1" glob
   case "$p" in
-    scripts/placeholder-map.tsv|scripts/leak-terms.txt|LICENSE|.opencode/LICENSE) return 0 ;;
-    .githooks/*|.githooks) return 0 ;;
+    LICENSE|.opencode/LICENSE|scripts/placeholder-map.tsv|scripts/leak-terms.txt) return 0 ;;
   esac
   [[ -n "$terms_rel" && "$p" == "$terms_rel" ]] && return 0
   for glob in ${ignore_paths[@]+"${ignore_paths[@]}"}; do
@@ -356,7 +372,93 @@ scan_diff_stream() {
 
 hits_file="$(mktemp)"
 coverage_file="$(mktemp)"
-trap 'rm -f "$hits_file" "$coverage_file"' EXIT
+commits_file="$(mktemp)"
+trap 'rm -f "$hits_file" "$coverage_file" "$commits_file"' EXIT
+
+range_diff_stream() {
+  local old_type commit count=0 empty_tree remote_list known remote_name
+  local ref_list ref object nested_remote revisions
+  if ! old_type="$(repo_git cat-file -t "$range_old")"; then
+    echo "leak-check: FAILED — cannot classify range base $range_old; commit enumeration did not run" >&2
+    return 1
+  fi
+  # Commit enumeration walks commits: a tip that is a tree or a blob has none, and would read as an
+  # empty push. Refuse it by name.
+  if ! repo_git cat-file -e "${range_new}^{commit}" 2> /dev/null; then
+    echo "leak-check: FAILED — range tip $range_new does not resolve to a commit (a tree or blob ref has no commits to enumerate); refusing to report clean" >&2
+    return 1
+  fi
+  case "$old_type" in
+    tree)
+      empty_tree="$(repo_git hash-object -t tree /dev/null)" || return 1
+      if [[ "$range_old" != "$empty_tree" ]]; then
+        echo 'leak-check: FAILED — a tree range base must be the empty-tree new-ref sentinel' >&2
+        return 1
+      fi
+      # A new ref pushed to a configured remote: every commit that remote does not hold; what it holds
+      # was judged by the push that published it, and another remote's refs prove nothing about this
+      # target. A target git does not know by name (a URL pushed to directly, or no --remote at all)
+      # has no provably pre-scanned refs: every reachable commit is scanned, no remote excluded.
+      known=""
+      if [[ -n "$range_remote" ]]; then
+        if ! remote_list="$(repo_git remote)"; then
+          echo "leak-check: FAILED — cannot list the configured remotes to exclude those $range_remote holds" >&2
+          return 1
+        fi
+        while IFS= read -r remote_name; do
+          [[ "$remote_name" == "$range_remote" ]] && known=1
+        done <<< "$remote_list"
+      fi
+      if [[ -n "$known" ]]; then
+        if ! ref_list="$(repo_git for-each-ref --format='%(objectname) %(refname)' refs/remotes/)"; then
+          echo "leak-check: FAILED — cannot list remote-tracking refs for $range_remote; commit enumeration did not run" >&2
+          return 1
+        fi
+        revisions="$range_new"
+        while read -r object ref; do
+          [[ "$ref" == "refs/remotes/$range_remote/"* ]] || continue
+          # Git's --remotes glob crosses slashes. A configured remote beneath this target owns
+          # its own namespace; ambiguous branch names there are scanned conservatively too.
+          nested_remote=""
+          while IFS= read -r remote_name; do
+            if [[ "$remote_name" == "$range_remote/"* && "$ref" == "refs/remotes/$remote_name/"* ]]; then
+              nested_remote=1
+              break
+            fi
+          done <<< "$remote_list"
+          [[ -n "$nested_remote" ]] || revisions+=$'\n^'"$object"
+        done <<< "$ref_list"
+        repo_git rev-list --stdin <<< "$revisions" > "$commits_file" || known=failed
+      else
+        repo_git rev-list "$range_new" > "$commits_file" || known=failed
+      fi
+      if [[ "$known" == failed ]]; then
+        echo "leak-check: FAILED — cannot enumerate commits reachable from $range_new that the push target does not hold" >&2
+        return 1
+      fi
+      ;;
+    commit|tag)
+      if ! repo_git rev-list "$range_new" "^$range_old" > "$commits_file"; then
+        echo "leak-check: FAILED — cannot enumerate newly reachable commits in $range_old..$range_new" >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "leak-check: FAILED — unsupported range base type $old_type; commit enumeration did not run" >&2
+      return 1
+      ;;
+  esac
+  while IFS= read -r commit; do
+    [[ -n "$commit" ]] || continue
+    count=$((count + 1))
+    # -m examines additions against EVERY merge parent; --root includes root commits.
+    if ! repo_git diff-tree --root -m --no-commit-id -r --text -U0 --no-color "$commit" -- . "${diff_excludes[@]}"; then
+      echo "leak-check: FAILED — cannot scan diff for reachable commit $commit" >&2
+      return 1
+    fi
+  done < "$commits_file"
+  printf 'leak-check: commit enumeration completed — %d newly reachable commit(s), merges included\n' "$count" >&2
+}
 
 case "$mode" in
   staged)
@@ -364,8 +466,10 @@ case "$mode" in
       | scan_diff_stream > "$hits_file"
     ;;
   range)
-    repo_git diff "$range_old" "$range_new" --text -U0 --no-color -- . "${diff_excludes[@]}" \
-      | scan_diff_stream > "$hits_file"
+    if ! range_diff_stream | scan_diff_stream > "$hits_file"; then
+      echo 'leak-check: FAILED — reachable-commit scan failed; refusing to report clean' >&2
+      exit 1
+    fi
     ;;
   files)
     : > "$hits_file"
@@ -432,7 +536,7 @@ case "$mode" in
           normalized_file="$coverage_file.normalized"
           lower_file="$coverage_file.lower"
           real_file="$coverage_file.real"
-          trap 'rm -f "$hits_file" "$coverage_file" "$normalized_file" "$lower_file" "$real_file"' EXIT
+          trap 'rm -f "$hits_file" "$coverage_file" "$commits_file" "$normalized_file" "$lower_file" "$real_file"' EXIT
           printf '%s \n' "${matched_contents[@]}" \
             | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g" > "$normalized_file"
           if (( ${#ignore_tokens[@]} > 0 )); then

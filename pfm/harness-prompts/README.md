@@ -52,7 +52,7 @@ newer — a clone checked out to an older revision than the binary is the binary
 
 ## The Claude drift baseline
 
-- `claude/baselines/harness-original-v2.1.280.md` and `claude/baselines/harness-opus-v2.1.280.md`
+- `claude/baselines/harness-original-v2.1.292.md` and `claude/baselines/harness-opus-v2.1.280.md`
   are reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic
   sections excluded. These are frozen captures: no test or suite re-captures or re-verifies them
   against a real Claude CLI. The only live capture is `pfm doctor` on a host; re-pinning follows
@@ -87,6 +87,8 @@ no model inference occurs. Render system blocks with
 `jq -r '.system | map(.text) | join("\n\n=== SYSTEM BLOCK ===\n\n")'` before normalization.
 Re-pinning requires human review of instruction differences, followed by updating the prompt,
 SHA256, and model provenance together. Never automatically accept a newly captured prompt.
+`pfm doctor --verbose` retains each successful request as a private
+`harness-prompt-<alias>.request.json` in its printed verbose directory for that review.
 
 `claude.systemPrompt` values: `production` (default — the CLI's own prompt, untouched), `lean` (the CLI's
 built-in minimal prompt via `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`), `professor` (inject the clone's

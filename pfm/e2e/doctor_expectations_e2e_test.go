@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -74,8 +75,6 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 		"doctor: pre-push gate=armed core.hooksPath=.githooks",
 		"doctor: harness-prompt: matches baseline",
 		"doctor: service-manager=",
-		"doctor: hook codex[1] hooks.json SessionStart resume-unkill NATIVE-TRUST-UNKNOWN",
-		"doctor has no native readback",
 	} {
 		if !strings.Contains(output, want) {
 			h.t.Fatalf(
@@ -86,7 +85,7 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 			)
 		}
 	}
-	wantWarnings := fmt.Sprintf("doctor: warnings=%d", 3+schedulerRowWarnings(output)+h.hostCheckRowWarnings(output))
+	wantWarnings := fmt.Sprintf("doctor: warnings=%d", 2+schedulerRowWarnings(output)+h.hostCheckRowWarnings(output))
 	if !strings.Contains("\n"+output, "\n"+wantWarnings+"\n") {
 		h.t.Fatalf("doctor omitted exact tally %q: %s", wantWarnings, output)
 	}
@@ -154,7 +153,7 @@ func (h *e2eHarness) assertInstalled(home string) {
 	if runtime.GOOS == "linux" {
 		for _, relative := range []string{
 			"systemd/pfm-name-sync.path", "systemd/pfm-name-sync.service", "systemd/pfm-name-sync.timer",
-			"systemd/pfm-reminder.service", "systemd/pfm-reminder.timer",
+			"systemd/pfm-schedule.service", "systemd/pfm-schedule.timer",
 		} {
 			if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
 				h.t.Fatalf(
@@ -166,10 +165,12 @@ func (h *e2eHarness) assertInstalled(home string) {
 		}
 	}
 	store := installer.ClaudeStore(home)
-	if gaps, err := installer.ClaudePluginGaps(filepath.Join(store, "settings.json")); err != nil || len(gaps) != 0 {
+	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()})
+	settings := filepath.Join(store, "settings.json")
+	if gaps, err := installer.ClaudePluginGaps(settings, targets); err != nil || len(gaps) != 0 {
 		h.t.Fatalf("store plugin settings gaps=%v: %v", gaps, err)
 	}
-	if missing, err := installer.ClaudePluginsNotInstalled(store); err != nil || len(missing) != 0 {
+	if missing, err := installer.ClaudePluginsNotInstalled(store, targets); err != nil || len(missing) != 0 {
 		h.t.Fatalf("store plugins missing=%v: %v", missing, err)
 	}
 	for _, entry := range installer.StoreEntries {
@@ -230,15 +231,15 @@ func (h *e2eHarness) assertInstalled(home string) {
 		h.t.Fatalf("install surface failed; differing paths: %s; status: %v", e2eCanonicalPFM, err)
 	}
 	if runtime.GOOS == "linux" {
-		for _, name := range []string{"pfm-name-sync.path", "pfm-name-sync.service", "pfm-name-sync.timer", "pfm-reminder.service", "pfm-reminder.timer"} {
+		for _, name := range []string{"pfm-name-sync.path", "pfm-name-sync.service", "pfm-name-sync.timer", "pfm-schedule.service", "pfm-schedule.timer"} {
 			if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", name)); err != nil {
 				h.t.Fatalf("install surface failed; differing paths: systemd/%s; status: %v", name, err)
 			}
 		}
 	} else if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist")); err != nil {
 		h.t.Fatalf("install surface failed; differing paths: launchd name-sync; status: %v", err)
-	} else if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")); err != nil {
-		h.t.Fatalf("install surface failed; differing paths: launchd reminder; status: %v", err)
+	} else if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.schedule.plist")); err != nil {
+		h.t.Fatalf("install surface failed; differing paths: launchd schedule; status: %v", err)
 	}
 }
 

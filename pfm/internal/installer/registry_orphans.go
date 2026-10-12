@@ -1,16 +1,16 @@
 package installer
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-	"syscall"
+	"strings"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -135,74 +135,85 @@ func (installer *engine) retireDeadRegistryLinks() error {
 	return nil
 }
 
-// reportTranscriptArtifact checks the installed dependency chat_digest uses,
-// independently of cwd discovery or the account's configured directory.
-// Equality is measured against the prior install's recorded source clone.
-func reportTranscriptArtifact(w io.Writer, home string) (failures int) {
-	installed := filepath.Join(ClaudeStore(home), "skills", "transcript", "transcript.py")
-	repo, err := GlobalSourceRepo(home)
-	if err != nil {
-		fmt.Fprintf(w, "doctor: transcript path=%s state=CHECK-FAILED error=%s\n", installed, err)
-		return 1
-	}
-	source := filepath.Join(repo, "templates", "global", "skills", "transcript", "transcript.py")
-	// A binary-only install has no clone-owned transcript to stage. A recorded
-	// source still implies an expected artifact, even when that source is gone.
-	if _, repoErr := os.Lstat(repo); errors.Is(repoErr, fs.ErrNotExist) {
-		if _, markerErr := os.Lstat(paths.SourceRepoPath(home)); errors.Is(markerErr, fs.ErrNotExist) {
-			fmt.Fprintf(w, "doctor: transcript path=%s source=%s state=NO-CLONE\n", installed, source)
-			return 0
-		}
-		fmt.Fprintf(w, "doctor: transcript path=%s source=%s state=CHECK-FAILED error=%s\n", installed, source, repoErr)
-		return 1
-	}
-	state, detail := "installed", ""
-	actual, err := readTranscriptArtifact(installed)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		state, detail = "MISSING", err.Error()
-	case err != nil:
-		state, detail = "CHECK-FAILED", err.Error()
-	default:
-		expected, sourceErr := readTranscriptArtifact(source)
-		if sourceErr != nil {
-			state, detail = "CHECK-FAILED", sourceErr.Error()
-		} else if !bytes.Equal(actual, expected) {
-			state, detail = "MISMATCH", "installed bytes differ from shipped source"
-		}
-	}
-	fmt.Fprintf(w, "doctor: transcript path=%s source=%s state=%s", installed, source, state)
-	if detail != "" {
-		fmt.Fprintf(w, " error=%s — run pfm install --yes", detail)
-		failures = 1
-	}
-	fmt.Fprintln(w)
-	return failures
+// linkStageMinAge is how old a leftover link stage must be before install
+// removes it: a younger one may belong to a swap still in flight.
+const linkStageMinAge = 10 * time.Minute
+
+// retireStaleLinkStages removes the .pfm-link-* stages a crash left in the
+// registries install manages (atomicfile.Symlink and SymlinkOverDir stage a
+// link beside its target; SymlinkOverDir leaves the displaced directory there
+// when it dies after the swap). A stage younger than linkStageMinAge is left
+// alone. Each removal is a change of the install's own transcript.
+func (installer *engine) retireStaleLinkStages() error {
+	return installer.retireStaleLinkStagesWithWalk(filepath.WalkDir)
 }
 
-// readTranscriptArtifact follows installed skill links, but validates the
-// opened object itself. O_NONBLOCK prevents a FIFO replacement from hanging
-// doctor between lookup and read; only regular-file bytes may prove parity.
-func readTranscriptArtifact(path string) (_ []byte, resultErr error) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+func (installer *engine) retireStaleLinkStagesWithWalk(walk func(string, fs.WalkDirFunc) error) error {
+	storeRoot := skillStoreRoot(installer.options.Home)
+	unlock, busy, err := installer.lockSkillStore(storeRoot)
 	if err != nil {
-		return nil, fmt.Errorf("open transcript artifact %s: %w", path, err)
+		installer.skip("stale link stage sweep skipped: " + err.Error())
+		return nil
 	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("close transcript artifact %s: %w", path, err))
+	if busy {
+		installer.skip("stale link stage sweep skipped: another pfm install holds " + storeRoot)
+		return nil
+	}
+	defer unlock()
+	recorded, _, err := readSkillLinkLedger(installer.options.Home)
+	if err != nil {
+		return fmt.Errorf("stale link stage registries: %w", err)
+	}
+	now := installer.now()
+	registries := []string{
+		filepath.Join(installer.options.ConfigDir, "agents"),
+		filepath.Join(installer.options.ConfigDir, "commands"),
+		filepath.Join(installer.options.ConfigDir, "skills"),
+		filepath.Join(installer.options.Home, ".agents", "skills"),
+	}
+	registries = append(registries, recorded...)
+	registries = append(registries, filepath.Join(installer.options.Home, ".config", "engine-sync"))
+	seen := map[string]bool{}
+	for _, registry := range registries {
+		if seen[registry] {
+			continue
 		}
-	}()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("inspect transcript artifact %s: %w", path, err)
+		seen[registry] = true
+		err := walk(registry, func(path string, entry fs.DirEntry, walkErr error) error {
+			if path == registry && errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
+			}
+			if walkErr != nil {
+				installer.skip(fmt.Sprintf("stale link stage path %s unreadable: %v", path, walkErr))
+				return nil
+			}
+			if !strings.HasPrefix(entry.Name(), atomicfile.LinkStagePrefix) {
+				return nil
+			}
+			skipBelow := error(nil)
+			if entry.IsDir() {
+				skipBelow = fs.SkipDir
+			}
+			info, err := entry.Info()
+			if err != nil {
+				installer.skip(fmt.Sprintf("stale link stage %s unreadable: %v", path, err))
+				return skipBelow
+			}
+			if now.Sub(info.ModTime()) < linkStageMinAge {
+				return skipBelow
+			}
+			installer.markRemoved(path)
+			if err := installer.change(
+				"remove stale link stage "+path+" (left by an interrupted link swap)",
+				func() error { return os.RemoveAll(path) },
+			); err != nil {
+				return fmt.Errorf("remove link stage %s: %w", path, err)
+			}
+			return skipBelow
+		})
+		if err != nil {
+			return err
+		}
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("transcript artifact %s is not a regular file", path)
-	}
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("read transcript artifact %s: %w", path, err)
-	}
-	return content, nil
+	return nil
 }

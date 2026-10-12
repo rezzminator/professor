@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/costsink"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -22,10 +23,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
-	pricecmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
+	modelcostcmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/tokens"
+	"github.com/rezzminator/professor/pfm/internal/transcript/digest"
 	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
@@ -48,6 +51,7 @@ const (
 	checkAction       = "check"
 	statuslineCommand = "statusline"
 	staleCommand      = "stale"
+	transcriptCommand = "transcript"
 )
 
 var version = config.DevelopmentVersion
@@ -59,16 +63,17 @@ var topLevelSubcommands = []string{
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
-	"price",
+	"model-cost", "tokens", transcriptCommand,
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
-	"codex-launch", "epic-inject", "reminder-fire",
+	"codex-launch", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
-	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
+	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge",
+	"update-check",
 }
 
 func main() {
@@ -125,7 +130,6 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	if len(args) == 0 {
 		return picker.Run(nil, stdout, stderr, runtime)
 	}
-
 	switch args[0] {
 	case "version", "--version":
 		return runVersion(args[1:], stdout, stderr)
@@ -141,8 +145,12 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runIndex(args[1:], stdout, stderr, runtime, clock.Real)
 	case "log":
 		return runLog(args[1:], stdout, stderr, runtime)
-	case "price":
-		return pricecmd.Price(args[1:], stdout, stderr, runtime)
+	case "model-cost":
+		return modelcostcmd.ModelCost(args[1:], stdout, stderr, runtime)
+	case "tokens":
+		return tokens.Main(args[1:], stdout, stderr, runtime)
+	case "transcript":
+		return digest.Invoke(context.Background(), args[1:], stdout, stderr, digest.EnvOf(runtime.Paths))
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -196,7 +204,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 }
 
 func printUsage(w io.Writer) {
-	for _, line := range []string{
+	cli.WriteLines(w, []string{
 		"usage: pfm [--config PATH] <command> [options]", "", "operator commands:",
 		"  ls        list or pick fleet chats",
 		"  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end",
@@ -215,17 +223,17 @@ func printUsage(w io.Writer) {
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
-		"  price     print the model price table pfm owns: --json --check",
+		"  model-cost the model price table, refreshed daily: MODEL_ID --all --check --json --force",
+		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --flight DIR, --timeline FILE)",
+		"  transcript digest one Claude, Codex or OpenCode transcript: show, counts, types, locate, agents",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
 		"  statusline render the native Claude status line",
 		"  usage-hook the fail-open usage-limit prompt hook",
 		"  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)",
-		"  codex     compile or check the Codex project mirror",
-		"  opencode  compile, check, or inspect the OpenCode project mirror",
-	} {
-		fmt.Fprintln(w, line)
-	}
+		"  codex     forwards to engine-sync codex (retiring: run engine-sync)",
+		"  opencode  forwards to engine-sync opencode (retiring: run engine-sync)",
+	})
 }
 
 func diagnosticCommand(args []string) bool {
@@ -427,6 +435,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "explore-deny" {
 		return hookentry.ExploreDeny(os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && (args[0] == "cost-launch" || args[0] == "cost-sink") {
+		return costsink.Main(args, stderr, paths.OSEnv{})
+	}
 	if len(args) != 0 && args[0] == "git-guard" {
 		return hookentry.GitGuard(os.Stdin, stdout, stderr)
 	}
@@ -454,8 +465,8 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "reload-run" {
 		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime, paths.OSEnv{})
 	}
-	if len(args) != 0 && args[0] == "reminder-fire" {
-		return runReminderFire(args[1:], os.Stdout, stderr, runtime)
+	if len(args) != 0 && args[0] == "schedule-fire" {
+		return runScheduleFire(args[1:], os.Stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "then" {
 		return hookentry.Then(args[1:], stderr, runtime)
@@ -508,7 +519,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|reminder-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}
@@ -563,6 +574,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	}
 	defer func() { cli.CloseResource(database, "pfm internal kill-exit: close database", stderr, &exitCode) }()
 	finisher, err := kill.NewFinisher(database, kill.Dependencies{
+		Log:         stderr,
 		Paths:       runtime.Paths,
 		ClaudeRoots: runtime.Paths.Roots[pfmengine.Claude],
 		CodexHomes:  runtime.Config.CodexHomes(),

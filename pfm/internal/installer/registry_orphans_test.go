@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInspectDeadRegistryLinks(t *testing.T) {
@@ -26,7 +28,7 @@ func TestInspectDeadRegistryLinks(t *testing.T) {
 		want                                                    int
 	}{
 		{name: "dead command", registry: "commands", source: "repo", want: 1},
-		{name: "nested managed command", registry: "commands/chat/group", source: "managed", want: 1},
+		{name: "nested managed command", registry: "commands/legacy/group", source: "managed", want: 1},
 		{name: "retired skill", registry: "skills", source: "repo", want: 1},
 		{name: "dead agent", registry: "agents", source: "generated", want: 1},
 		{name: "live pfm link", registry: "commands", source: "repo", live: true},
@@ -60,7 +62,7 @@ func TestInspectDeadRegistryLinks(t *testing.T) {
 				case "repo":
 					target = filepath.Join(repo, "workflows", "deep-rr")
 				case "managed":
-					target = filepath.Join(managed, "chat", "group", "ls.command.md")
+					target = filepath.Join(managed, "legacy", "group", "ls.command.md")
 				case "generated":
 					target = filepath.Join(paths.GeneratedClaudeAgentsDir(home), "old.md")
 				default:
@@ -132,9 +134,9 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 			t.Run(fmt.Sprintf("apply=%t/keep=%t", apply, keep), func(t *testing.T) {
 				home := t.TempDir()
 				store, repo := ClaudeStore(home), filepath.Join(home, ".professor")
-				group := filepath.Join(store, "commands", "chat", "group")
+				group := filepath.Join(store, "commands", "legacy", "group")
 				link := filepath.Join(group, "ls.md")
-				target := filepath.Join(managedRootForHome(home), "chat", "group", "ls.command.md")
+				target := filepath.Join(managedRootForHome(home), "legacy", "group", "ls.command.md")
 				if err := os.MkdirAll(group, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -209,12 +211,12 @@ func TestRegistryDeadLinkDoctorRows(t *testing.T) {
 				}
 			}
 			var output bytes.Buffer
-			warnings, failures := ReportGlobalRegistries(&output, home, true, &paths.MapEnv{})
-			// This fixture has no clone, so transcript audit reports NO-CLONE
-			// without adding a failure to the aggregate doctor tally.
-			if !strings.Contains(output.String(), "doctor: transcript ") {
-				t.Fatalf("transcript dependency was not audited: %s", output.String())
-			}
+			warnings, failures := ReportGlobalRegistries(
+				&output,
+				home,
+				true,
+				&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
+			)
 			var rows []string
 			for _, line := range strings.Split(output.String(), "\n") {
 				if strings.HasPrefix(line, "doctor: registry ") {
@@ -394,116 +396,81 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 	}
 }
 
-func TestTranscriptArtifactDoctorParity(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name, state, detail string
-		wantFailures        int
-	}{
-		{"linked", "installed", "", 0},
-		{"identical copy", "installed", "", 0},
-		{"relative alias", "installed", "", 0},
-		{"missing installed", "MISSING", "", 1},
-		{"different copy", "MISMATCH", "", 1},
-		{"source missing", "CHECK-FAILED", "no such file", 1},
-		{"installed fifo", "CHECK-FAILED", "not a regular file", 1},
-		{"source fifo", "CHECK-FAILED", "not a regular file", 1},
-		{"installed loop", "CHECK-FAILED", "too many levels", 1},
-		{"source loop", "CHECK-FAILED", "too many levels", 1},
-		{"no-clone", "NO-CLONE", "", 0},
-		{"recorded missing clone", "CHECK-FAILED", "no such file", 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+// A crash between SymlinkOverDir's swap and its cleanup leaves the displaced
+// copy at {registry}/.pfm-link-XXXX. Install removes a stage in a registry it
+// manages once it is older than linkStageMinAge, through its own transcript,
+// and leaves a younger one (a swap in flight) and every non-stage entry alone.
+func TestRetireStaleLinkStages(t *testing.T) {
+	for _, apply := range []bool{false, true} {
+		t.Run(fmt.Sprintf("apply=%t", apply), func(t *testing.T) {
 			home := t.TempDir()
-			source := filepath.Join(home, ".professor", "templates", "global", "skills", "transcript", "transcript.py")
-			installed := filepath.Join(ClaudeStore(home), "skills", "transcript", "transcript.py")
-			writeFixture(t, source, "shipped transcript script\n")
-			if err := os.MkdirAll(filepath.Dir(installed), 0o700); err != nil {
+			store := ClaudeStore(home)
+			now := time.Now()
+			old, young := now.Add(-linkStageMinAge-time.Minute), now.Add(-linkStageMinAge/2)
+			age := func(path string, at time.Time) string {
+				t.Helper()
+				if err := os.Chtimes(path, at, at); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			}
+			staleDir := filepath.Join(store, "skills", ".pfm-link-1234")
+			writeFixture(t, filepath.Join(staleDir, "SKILL.md"), "displaced copy")
+			stale := []string{
+				staleDir,
+				filepath.Join(store, "commands", "group", ".pfm-link-5678"),
+				filepath.Join(store, "agents", ".pfm-link-9abc"),
+				filepath.Join(home, ".agents", "skills", ".pfm-link-def0"),
+			}
+			for _, path := range stale[1:] {
+				writeFixture(t, path, "staged")
+			}
+			keep := []string{
+				filepath.Join(store, "skills", ".pfm-link-fresh"),
+				filepath.Join(store, "skills", "demo", "SKILL.md"),
+				filepath.Join(store, "commands", "pfm-link-notastage.md"),
+			}
+			for _, path := range keep {
+				writeFixture(t, path, "keep")
+			}
+			for _, path := range stale {
+				age(path, old)
+			}
+			age(keep[0], young)
+			age(keep[1], old)
+			age(keep[2], old)
+
+			var output bytes.Buffer
+			installer := &engine{
+				options: Options{
+					Home: home, ConfigDir: store, Stdout: &output, Now: func() time.Time { return now },
+				},
+				managedRoot: managedRootForHome(home),
+				apply:       apply,
+			}
+			if err := installer.retireStaleLinkStages(); err != nil {
 				t.Fatal(err)
 			}
-			switch tc.name {
-			case "missing installed":
-			case "different copy":
-				writeFixture(t, installed, "unrelated script\n")
-			case "identical copy":
-				writeFixture(t, installed, "shipped transcript script\n")
-			case "installed fifo":
-				if err := syscall.Mkfifo(installed, 0o600); err != nil {
-					t.Fatal(err)
+			for _, path := range stale {
+				line := "  change  remove stale link stage " + path
+				if !strings.Contains(output.String(), line) {
+					t.Errorf("transcript lacks %q:\n%s", line, output.String())
 				}
-			case "installed loop":
-				if err := os.Symlink(installed, installed); err != nil {
-					t.Fatal(err)
-				}
-			default:
-				target := source
-				if tc.name == "relative alias" {
-					var err error
-					target, err = filepath.Rel(filepath.Dir(installed), source)
-					if err != nil {
-						t.Fatal(err)
-					}
-				}
-				if err := os.Symlink(target, installed); err != nil {
-					t.Fatal(err)
+				_, err := os.Lstat(path)
+				if apply != errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("stage %s after apply=%t: %v", path, apply, err)
 				}
 			}
-			if strings.HasPrefix(tc.name, "source ") {
-				// Keep the installed artifact independent so source errors do not
-				// become installed-artifact absence through a dangling link.
-				if err := os.Remove(installed); err != nil {
-					t.Fatal(err)
+			for _, path := range keep {
+				if _, err := os.Lstat(path); err != nil {
+					t.Errorf("%s was removed: %v", path, err)
 				}
-				writeFixture(t, installed, "shipped transcript script\n")
-				if err := os.Remove(source); err != nil {
-					t.Fatal(err)
-				}
-				switch tc.name {
-				case "source fifo":
-					if err := syscall.Mkfifo(source, 0o600); err != nil {
-						t.Fatal(err)
-					}
-				case "source loop":
-					if err := os.Symlink(source, source); err != nil {
-						t.Fatal(err)
-					}
+				if strings.Contains(output.String(), path) {
+					t.Errorf("transcript names the kept %s:\n%s", path, output.String())
 				}
 			}
-			if tc.name == "no-clone" || tc.name == "recorded missing clone" {
-				if tc.name == "recorded missing clone" {
-					if err := paths.WriteSourceRepoMarker(home, filepath.Join(home, ".professor")); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if err := os.RemoveAll(filepath.Join(home, ".professor")); err != nil {
-					t.Fatal(err)
-				}
-			}
-			var output bytes.Buffer
-			var failures int
-			if tc.name == "recorded missing clone" {
-				// Other registry audits independently report the same invalid marker.
-				failures = reportTranscriptArtifact(&output, home)
-				source = filepath.Join(home, ".professor")
-			} else {
-				_, failures = ReportGlobalRegistries(&output, home, true, &paths.MapEnv{})
-			}
-			var row string
-			for _, line := range strings.Split(output.String(), "\n") {
-				if strings.HasPrefix(line, "doctor: transcript ") {
-					row = line
-				}
-			}
-			if row == "" || !strings.Contains(row, "state="+tc.state) || !strings.Contains(row, installed) ||
-				!strings.Contains(row, source) || !strings.Contains(row, tc.detail) || failures != tc.wantFailures {
-				t.Fatalf(
-					"transcript parity: failures=%d row=%q, want state=%s detail=%q failures=%d",
-					failures,
-					row,
-					tc.state,
-					tc.detail,
-					tc.wantFailures,
-				)
+			if installer.report.Changed != len(stale) {
+				t.Fatalf("changed=%d, want %d:\n%s", installer.report.Changed, len(stale), output.String())
 			}
 		})
 	}

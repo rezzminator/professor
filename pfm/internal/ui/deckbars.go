@@ -88,22 +88,32 @@ func keycap(key, label string, enabled bool) []span {
 }
 
 // enterLabel names what Enter does on the selected row: the armed carousel
-// action on a chat, and its own verb on a row that is an action.
+// action on a chat, and its own verb on a row that is an action. On a ✦ row
+// it starts the chat, or opens the steps that choose it.
 func (model Model) enterLabel(row compose.Row, hasRow bool) string {
 	switch {
 	case hasRow && row.Kind == compose.ProfessorUpdate:
 		return "upgrade"
 	case hasRow && isLaunchFailureNotice(row.Kind):
 		return "—"
-	case hasRow && isNewChatActionKind(row.Kind):
+	case hasRow && isNewChatActionKind(row.Kind) && model.wizardOn(row):
+		if _, more := model.wizardNext(row, model.wizard.step, model.wizard.engine); more {
+			return "next"
+		}
 		return "start"
+	case hasRow && isNewChatActionKind(row.Kind) && model.wizardStartsAtOnce(row):
+		return "start"
+	case hasRow && isNewChatActionKind(row.Kind):
+		return "choose"
 	}
 	return carouselActions[model.actionIndex].Label
 }
 
 // chatsFooterKeys lists the Chats footer's two lines for the selected row. The
 // armed carousel action names the Enter key, and a key the row would refuse
-// (reboot on a resumable chat, say) is shown dimmed rather than hidden.
+// (reboot on a resumable chat, say) is shown dimmed rather than hidden. While
+// a ✦ row's steps are open the arrows choose, esc steps back, and the line
+// names the step.
 func (model Model) chatsFooterKeys(compact bool) (first, second []span) {
 	row, hasRow := model.selectedRow()
 	live := hasRow && row.Kind.IsLiveSeat()
@@ -115,29 +125,27 @@ func (model Model) chatsFooterKeys(compact bool) (first, second []span) {
 	case live:
 		kill = "kill"
 	}
-	cache := "1h cache off"
-	if model.cache1H {
-		cache = "1h cache on"
-	}
-	if compact {
-		first = append(first, keycap("↑↓", "move", true)...)
-		first = append(first, keycap("⏎", enter, hasRow)...)
-		first = append(first, keycap("esc", "close", true)...)
-		second = append(second, keycap("⌃X", kill, hasRow)...)
-		second = append(second, keycap("⌃O", "reboot", live)...)
-		second = append(second, keycap("⌃E", "1h", true)...)
-		second = append(second, keycap("⌃S", "acct", true)...)
-		return first, second
+	stepping := hasRow && isNewChatActionKind(row.Kind) && model.wizardOn(row)
+	arrows, escape := "action", "close"
+	if stepping {
+		arrows, escape = "choose", "back"
 	}
 	first = append(first, keycap("↑↓", "move", true)...)
-	first = append(first, keycap("←→", "action", hasRow)...)
+	if !compact {
+		first = append(first, keycap("←→", arrows, hasRow && (stepping || !isNewChatActionKind(row.Kind)))...)
+	}
 	first = append(first, keycap("⏎", enter, hasRow)...)
-	first = append(first, keycap("esc", "close", true)...)
-	first = append(first, span{text: "type to fuzzy-find", paint: tone{fg: configuredPalette.Dim}})
+	first = append(first, keycap("esc", escape, true)...)
 	second = append(second, keycap("⌃X", kill, hasRow)...)
 	second = append(second, keycap("⌃O", "reboot", live)...)
-	second = append(second, keycap("⌃E", cache, true)...)
-	second = append(second, keycap("⌃S", "account", true)...)
+	if compact {
+		return first, second
+	}
+	hint := "type to find · @ go · ⇧←→ place"
+	if stepping {
+		hint = model.wizardStatus(row)
+	}
+	first = append(first, span{text: hint, paint: tone{fg: configuredPalette.Dim}})
 	return first, second
 }
 

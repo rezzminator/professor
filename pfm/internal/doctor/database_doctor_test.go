@@ -141,9 +141,9 @@ func TestDoctorReadsAnOlderStateDatabaseWithoutMigratingIt(t *testing.T) {
 	}
 	paneRow := "doctor: codex_pane_bindings " + unread +
 		" — binding audit skipped: its kill state lives in the shared store\n"
-	reminderSuffix := "reminder state unknown; the doctor: shared store row counts it\n"
+	scheduleSuffix := "schedule state unknown; the doctor: shared store row counts it\n"
 	if code != 1 || strings.Count(output, warning) != 1 || strings.Count(output, paneRow) != 1 ||
-		!strings.Contains(output, reminderSuffix) || strings.Contains(output, "kill-state-unreadable") ||
+		!strings.Contains(output, scheduleSuffix) || strings.Contains(output, "kill-state-unreadable") ||
 		!strings.Contains(output, "doctor: warnings=1\n") {
 		t.Fatalf("one unread state database must count once and skip dependent audits: code=%d\n%s", code, output)
 	}
@@ -264,7 +264,7 @@ func TestPrintCodexPaneDoctor(t *testing.T) {
 func TestDoctorNamesANewerStateDatabaseWithoutTouchingIt(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	path := runtime.Paths.StateDB
-	newer := fleetdb.SchemaVersion + 1
+	newer := fleetdb.RetiredSchemaVersion + 1
 	stageDoctorDatabaseVersion(t, path, newer)
 	before := readDoctorDatabaseFile(t, path)
 

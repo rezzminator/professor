@@ -1,7 +1,6 @@
 package naming
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -53,6 +52,7 @@ func TestLiveFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		indexed     string
+		windowName  string
 		paneTitle   string
 		sessionName string
 		lastPrompt  string
@@ -67,6 +67,47 @@ func TestLiveFallback(t *testing.T) {
 			lastPrompt:  "last",
 			isCCSock:    true,
 			want:        "indexed",
+		},
+		{
+			name:        "indexed transcript name wins over the launch window name",
+			indexed:     "indexed",
+			windowName:  "GATEWAY",
+			paneTitle:   "✳ GATEWAY",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "indexed",
+		},
+		{
+			name:        "Claude socket before its first prompt uses its launch window name",
+			windowName:  "GATEWAY",
+			paneTitle:   "✳ Claude Code",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "GATEWAY",
+		},
+		{
+			name:        "placeholder chat window falls through to the pane title",
+			windowName:  "chat",
+			paneTitle:   "operator title",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "operator title",
+		},
+		{
+			name:        "engine short window falls through to the pane title",
+			windowName:  "Claude",
+			paneTitle:   "operator title",
+			sessionName: "cc-1-2-3",
+			isCCSock:    true,
+			want:        "operator title",
+		},
+		{
+			name:        "window named after its socket falls through to the last prompt",
+			windowName:  "cc-1-2-3",
+			sessionName: "cc-1-2-3",
+			lastPrompt:  "last real prompt",
+			isCCSock:    true,
+			want:        "last real prompt",
 		},
 		{
 			name:       "Claude socket uses pane title",
@@ -114,6 +155,7 @@ func TestLiveFallback(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got := LiveFallback(
 				test.indexed,
+				test.windowName,
 				test.paneTitle,
 				test.sessionName,
 				test.lastPrompt,
@@ -152,75 +194,6 @@ func TestIsJunkPrompt(t *testing.T) {
 		t.Run(test.prompt, func(t *testing.T) {
 			if got := IsJunkPrompt(test.prompt); got != test.want {
 				t.Fatalf("IsJunkPrompt(%q) = %v, want %v", test.prompt, got, test.want)
-			}
-		})
-	}
-}
-
-func TestFlattenPromptText(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{
-			name:    "string content",
-			content: `"hello"`,
-			want:    "hello",
-		},
-		{
-			name:    "string whitespace is flattened",
-			content: "\"line one\\n\\tline two\"",
-			want:    "line one line two",
-		},
-		{
-			name:    "top-level text blocks join",
-			content: `[{"type":"text","text":"one"},{"type":"text","text":"two"}]`,
-			want:    "one two",
-		},
-		{
-			name:    "tool results never contribute",
-			content: `[{"type":"text","text":"before"},{"type":"tool_result","text":"secret"},{"type":"text","text":"after"}]`,
-			want:    "before after",
-		},
-		{
-			name:    "nested text never contributes",
-			content: `[{"type":"container","content":[{"type":"text","text":"nested"}]},{"type":"text","text":"top"}]`,
-			want:    "top",
-		},
-		{
-			name:    "top-level strings are not text blocks",
-			content: `["ignored",{"type":"text","text":"kept"}]`,
-			want:    "kept",
-		},
-		{
-			name:    "array whitespace is flattened after joining",
-			content: `[{"type":"text","text":"one\n"},{"type":"text","text":"\ttwo"}]`,
-			want:    "one   two",
-		},
-		{
-			name:    "empty array",
-			content: `[]`,
-		},
-		{
-			name:    "null",
-			content: `null`,
-		},
-		{
-			name:    "object is not content",
-			content: `{"type":"text","text":"not an array"}`,
-		},
-		{
-			name:    "invalid JSON",
-			content: `[{"type":`,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := FlattenPromptText(json.RawMessage(test.content))
-			if got != test.want {
-				t.Fatalf("FlattenPromptText() = %q, want %q", got, test.want)
 			}
 		})
 	}

@@ -14,11 +14,21 @@
     "systemPrompt": null,
     "webSearchesPerSession": 9007199254740991,
     "autoCompactWindow": 100000,
+    "helperModel": "claude-haiku-5-5",
     "tmuxTruecolor": true,
     "cleanupPeriodDays": 36500,
     "requireManagedCleanup": true,
     "maxSubagentSpawnDepth": 8,
-    "maxConcurrentSubagents": null
+    "maxConcurrentSubagents": null,
+    "pluginCheckoutRoot": null,
+    "plugins": [
+      "cache-live-control",
+      "sub-agent-compact",
+      "agent-effort",
+      "tool-visibility-controller"
+    ],
+    "costLedger": true,
+    "gptAgents": false
   },
   "codex": {
     "yolo": true,
@@ -69,6 +79,7 @@
     "keepDays": 30
   },
   "doctor": {
-    "ignoreWarnings": []
+    "ignoreWarnings": [],
+    "acceptedMCP": []
   }
 }

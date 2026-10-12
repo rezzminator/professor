@@ -76,7 +76,19 @@ func (failure *TargetError) Unwrap() error { return failure.Err }
 
 // Target resolves a verb's target to exactly one chat, or a *TargetError.
 func Target(ctx context.Context, name string, runtime *pfmconfig.Runtime) (headless.Chat, error) {
-	found, ok, err := Resolve(ctx, name, io.Discard, runtime)
+	return TargetIn(ctx, name, func(ctx context.Context) ([]compose.Row, error) {
+		return Rows(ctx, io.Discard, runtime)
+	}, runtime)
+}
+
+// TargetIn is Target over a scan the caller already holds (ResolveIn).
+func TargetIn(
+	ctx context.Context,
+	name string,
+	rows func(context.Context) ([]compose.Row, error),
+	runtime *pfmconfig.Runtime,
+) (headless.Chat, error) {
+	found, ok, err := ResolveIn(ctx, name, rows, io.Discard, runtime)
 	if err != nil {
 		return headless.Chat{}, &TargetError{Name: name, Err: err}
 	}
@@ -136,6 +148,22 @@ func Resolve(
 	warn io.Writer,
 	runtime *pfmconfig.Runtime,
 ) (headless.Chat, bool, error) {
+	return ResolveIn(ctx, name, func(ctx context.Context) ([]compose.Row, error) {
+		return Rows(ctx, warn, runtime)
+	}, warn, runtime)
+}
+
+// ResolveIn is Resolve over a scan the caller already holds: rows answers the
+// roster (and the self enrichment) instead of a fresh fleet scan each time, so
+// a watch resolving every target of one poll pays for one scan. The ladder,
+// its rungs and its refusals are Resolve's own.
+func ResolveIn(
+	ctx context.Context,
+	name string,
+	rows func(context.Context) ([]compose.Row, error),
+	warn io.Writer,
+	runtime *pfmconfig.Runtime,
+) (headless.Chat, bool, error) {
 	normalized := resolve.NormalizeTarget(name)
 	selfTarget := normalized == "self" || normalized == "me"
 	if selfTarget {
@@ -173,11 +201,11 @@ func Resolve(
 		ctx context.Context,
 		name, requiredEngine string,
 	) (resolve.Seat, int, string, error) {
-		rows, rowsErr := Rows(ctx, warn, runtime)
+		roster, rowsErr := rows(ctx)
 		if rowsErr != nil {
 			return resolve.Seat{}, resolve.CodeUndelivered, "", rowsErr
 		}
-		matched, found, matchErr := Match(rows, name)
+		matched, found, matchErr := Match(roster, name)
 		if matchErr != nil {
 			var ambiguity *resolve.RosterAmbiguityError
 			if errors.As(matchErr, &ambiguity) {
@@ -225,7 +253,7 @@ func Resolve(
 			Pane: seat.Pane, Live: true,
 		}
 		if selfTarget {
-			rows, rowsErr := Rows(ctx, warn, runtime)
+			roster, rowsErr := rows(ctx)
 			if rowsErr != nil {
 				return headless.Chat{}, false, rowsErr
 			}
@@ -238,7 +266,7 @@ func Resolve(
 				if candidate == "" {
 					continue
 				}
-				indexed, found, matchErr := Match(rows, candidate)
+				indexed, found, matchErr := Match(roster, candidate)
 				if matchErr != nil {
 					return headless.Chat{}, false, matchErr
 				}
@@ -330,10 +358,28 @@ func targetPaths(runtime *pfmconfig.Runtime) (paths.Values, error) {
 }
 
 // Rows is one read-only scan of the whole fleet (the all view).
-func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (rows []compose.Row, returnErr error) {
-	database, err := store.Open(store.WithWarningWriter(warn))
+func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) ([]compose.Row, error) {
+	scan, err := ScanRows(ctx, warn, runtime)
 	if err != nil {
 		return nil, err
+	}
+	return scan.Rows, nil
+}
+
+// FleetScan is one read-only scan of the whole fleet: its rows (the all view),
+// and each chat socket whose tmux server it could not read, with why. A seat
+// on such a socket is missing from Rows because the scan failed to look, not
+// because it ended.
+type FleetScan struct {
+	Rows       []compose.Row
+	Unreadable map[string]string
+}
+
+// ScanRows is Rows with the sockets the scan could not read.
+func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (result FleetScan, returnErr error) {
+	database, err := store.Open(store.WithWarningWriter(warn))
+	if err != nil {
+		return FleetScan{}, err
 	}
 	defer func() {
 		if err := database.Close(); err != nil {
@@ -344,9 +390,9 @@ func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (rows
 		View: compose.AllView, ReadOnly: true, Runtime: runtime,
 	}, warn)
 	if err != nil {
-		return nil, err
+		return FleetScan{}, err
 	}
-	return scan.Output.Rows, nil
+	return FleetScan{Rows: scan.Output.Rows, Unreadable: scan.Live.UnreadableSockets}, nil
 }
 
 // RosterCandidates projects composed rows onto the roster matching rule's input.
@@ -394,7 +440,16 @@ func FromRow(row compose.Row) headless.Chat {
 		Session: row.SessionName,
 		Pane:    row.PaneID,
 		Live:    row.Kind.IsAddressable(),
+		PanePID: panePID(row.PanePIDs),
 	}
+}
+
+// panePID is a row's one pane root, or 0 when it has none or several.
+func panePID(pids []int) int {
+	if len(pids) != 1 {
+		return 0
+	}
+	return pids[0]
 }
 
 // SeatIdentity is the last identity rung for a Codex tool shell under `codex

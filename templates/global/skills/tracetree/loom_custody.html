@@ -1,0 +1,307 @@
+<template id="tpl-custody">
+<div style="position:relative; width:1680px; height:1240px; overflow:hidden; background:#0F1426; color:#E8E6DF; font-family:var(--mono)">
+  <sc-if value="{{notReady}}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px">
+      <div style="font-family:var(--display); font-weight:800; font-size:64px; color:#2A3460">CHAIN OF CUSTODY</div>
+      <div style="font-size:13px; color:{{loadColor}}">{{loadText}}</div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ready}}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute; left:24px; top:20px; width:1200px; display:flex; flex-direction:column; gap:6px">
+      <div style="font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA3C2">Chain of custody · run {{runId}} · {{repo}} — every claim tied to the line that holds it</div>
+      <div style="display:flex; align-items:baseline; gap:16px">
+        <h1 style="margin:0; flex:none; font-family:var(--display); font-weight:800; font-size:48px; line-height:0.95; color:{{color}}">{{title}}</h1>
+        <span class="ell" style="flex:1; min-width:0; font-size:12.5px; color:#C9CED9">{{verdict}}</span>
+      </div>
+    </div>
+    <div style="position:absolute; left:1262px; top:18px; width:394px; display:flex; gap:6px">
+      <sc-for list="{{runs}}" as="r" hint-placeholder-count="3">
+        <button class="bt" onClick="{{r.pick}}" aria-pressed="{{r.pressed}}" style="flex:1; min-width:0; height:44px; padding:5px 9px; border-radius:7px; border:1px solid {{r.border}}; background:{{r.bg}}; display:flex; flex-direction:column; justify-content:center">
+          <span class="ell" style="display:block; font-size:12px; font-weight:600; color:{{r.color}}">{{r.repo}}</span>
+          <span class="ell" style="display:block; font-size:10px; color:#9AA3C2">{{r.when}}</span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="position:absolute; left:24px; top:96px; width:1632px; display:flex; flex-wrap:wrap; gap:6px">
+      <sc-for list="{{chips}}" as="c" hint-placeholder-count="12">
+        <button class="bt" onClick="{{c.pick}}" aria-pressed="{{c.pressed}}" title="{{c.title}}" style="height:44px; min-width:58px; padding:0 10px; box-sizing:border-box; border-radius:8px; border:1px solid {{c.border}}; background:{{c.bg}}; display:flex; flex-direction:column; justify-content:center; gap:2px">
+          <span style="font-size:12px; font-weight:600; color:{{c.color}}">{{c.label}}</span>
+          <span style="display:flex; height:3px; width:44px; border-radius:2px; overflow:hidden; background:#262F52">
+            <sc-for list="{{c.bar}}" as="p"><span style="width:{{p.w}}%; background:{{p.c}}"></span></sc-for>
+          </span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="position:absolute; left:24px; top:{{headY}}px; width:1632px; display:flex; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">
+      <span style="width:376px">The question · the reader · what it left open</span>
+      <span style="width:690px">The walk — {{walkHead}}</span>
+      <span style="flex:1">The claims — {{claimHead}}</span>
+    </div>
+
+    <div class="scroller" style="position:absolute; left:24px; top:{{bodyY}}px; width:1640px; height:{{bodyH}}px; overflow-y:auto; overflow-x:hidden">
+      <div style="position:relative; width:1632px; height:{{contentH}}px">
+        <div class="enter" style="position:absolute; left:0; top:0; width:352px; display:flex; flex-direction:column; gap:12px">
+          <sc-for list="{{qs}}" as="q" hint-placeholder-count="1">
+            <div style="display:flex; flex-direction:column; gap:6px; padding:12px 14px; border-radius:8px; background:#1A2140; border:1px solid #2E3863">
+              <span style="font-family:var(--display); font-weight:800; font-size:22px; line-height:1; color:{{q.color}}">{{q.label}}</span>
+              <span class="cl6" title="{{q.text}}" style="font-family:var(--sans); font-size:13px; line-height:1.45; color:#F3F1EA">{{q.text}}</span>
+            </div>
+          </sc-for>
+          <div style="display:flex; flex-direction:column; gap:6px">
+            <span style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Reader {{tid}} was told</span>
+            <span class="cl6" title="{{threadText}}" style="font-family:var(--sans); font-size:12.5px; line-height:1.45; color:#C9CED9">{{threadText}}</span>
+            <span style="font-size:11px; line-height:1.5; color:#9AA3C2">{{timing}}</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px">
+            <span style="font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#7D86A8">Loose ends — where to trace next</span>
+            <sc-for list="{{open}}" as="o" hint-placeholder-count="3">
+              <div style="display:flex; flex-direction:column; gap:2px; font-size:11px; line-height:1.4">
+                <span style="color:{{o.kc}}; font-weight:600">{{o.k}}</span>
+                <span class="cl3" title="{{o.t}}" style="color:#C9CED9">{{o.t}}</span>
+                <span class="ell" style="color:#7D86A8">{{o.at}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <sc-for list="{{ties}}" as="t" hint-placeholder-count="6">
+          <svg class="fade" aria-hidden="true" width="1632" height="{{contentH}}" style="position:absolute; left:0; top:0; pointer-events:none; opacity:{{t.op}}">
+            <path class="draw" pathLength="1" d="{{t.tied}}" style="fill:none; stroke:{{t.color}}; stroke-width:{{t.sw}}; animation-delay:{{t.dly}}s"></path>
+            <path d="{{t.loose}}" style="fill:none; stroke:#FF8A65; stroke-width:1.3; stroke-dasharray:3 3"></path>
+            <path d="{{t.tuft}}" style="fill:none; stroke:#FF8A65; stroke-width:1"></path>
+          </svg>
+        </sc-for>
+
+        <sc-for list="{{hops}}" as="h" hint-placeholder-count="6">
+          <div class="enter" onMouseEnter="{{h.enter}}" onMouseLeave="{{h.leave}}" style="position:absolute; left:376px; top:{{h.y}}px; width:640px; height:{{h.h}}px; box-sizing:border-box; padding:7px 12px 8px 26px; border-radius:7px; background:{{h.bg}}; border:1px solid {{h.border}}; display:flex; flex-direction:column; gap:2px; opacity:{{h.op}}; animation-delay:{{h.dly}}s">
+            <svg aria-hidden="true" width="20" height="20" style="position:absolute; left:4px; top:6px"><path d="{{h.mark}}" style="fill:none; stroke:{{h.markC}}; stroke-width:2.6; stroke-linecap:round; stroke-dasharray:{{h.markDash}}"></path></svg>
+            <div style="display:flex; align-items:center; gap:8px; font-size:10.5px; height:16px">
+              <span style="color:#7D86A8">#{{h.n}}</span>
+              <span style="color:{{h.stc}}; font-weight:600">{{h.st}}</span>
+              <span class="ell" style="flex:1; min-width:0; color:#9AA3C2" title="{{h.where}}">{{h.where}}</span>
+              <span style="color:#C9CED9">{{h.link}}</span>
+            </div>
+            <sc-for list="{{h.lines}}" as="l" hint-placeholder-count="2">
+              <div style="display:flex; gap:10px; font-size:11.5px; line-height:15px; height:15px">
+                <span style="flex:none; width:36px; text-align:right; color:#5B6488">{{l.no}}</span>
+                <span class="ell" style="flex:1; min-width:0; white-space:pre; color:{{l.color}}">{{l.text}}</span>
+              </div>
+            </sc-for>
+            <sc-if value="{{h.hasNote}}" hint-placeholder-val="{{ true }}">
+              <div class="ell" title="{{h.note}}" style="font-family:var(--sans); font-size:12px; line-height:18px; color:#AEB6D3">= {{h.note}}</div>
+            </sc-if>
+          </div>
+        </sc-for>
+
+        <sc-for list="{{claims}}" as="a" hint-placeholder-count="6">
+          <button class="bt enter" onClick="{{a.pin}}" onMouseEnter="{{a.enter}}" onMouseLeave="{{a.leave}}" aria-pressed="{{a.pressed}}" title="{{a.full}}" style="position:absolute; left:1132px; top:{{a.y}}px; width:500px; height:{{a.h}}px; box-sizing:border-box; padding:9px 12px; border-radius:8px; background:{{a.bg}}; border:1px solid {{a.border}}; display:flex; flex-direction:column; gap:4px; opacity:{{a.op}}; animation-delay:{{a.dly}}s">
+            <span style="display:flex; align-items:center; gap:8px; font-size:10.5px">
+              <span style="font-weight:600; color:{{a.color}}">{{a.label}}</span>
+              <span class="ell" style="flex:1; min-width:0; color:#7D86A8">{{a.cites}}</span>
+            </span>
+            <span class="cl3" style="font-family:var(--sans); font-size:12.5px; line-height:1.4; color:#E8E6DF">{{a.t}}</span>
+            <sc-if value="{{a.hasWhy}}" hint-placeholder-val="{{ false }}">
+              <span class="ell" style="font-size:10.5px; color:{{a.color}}">{{a.why}}</span>
+            </sc-if>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="position:absolute; left:24px; top:1206px; width:1632px; display:flex; gap:18px; align-items:center; font-size:10.5px; color:#9AA3C2">
+      <sc-for list="{{legend}}" as="g" hint-placeholder-count="6">
+        <span style="display:flex; align-items:center; gap:6px"><span style="width:16px; height:3px; border-radius:2px; background:{{g.c}}"></span>{{g.t}}</span>
+      </sc-for>
+      <span style="flex:1"></span>
+      <a href="#loom" style="font-size:11.5px; text-decoration:none">← The Loom</a>
+    </div>
+  </sc-if>
+</div>
+</template>
+<script>
+(function () {
+const DCLogic = DC.DCLogic;
+const HUES = ['#FFB454', '#5DD6F5', '#FF7EB6', '#A6E36A', '#B9A2FF', '#FF8F5E', '#6FE3C1', '#F4E06D'];
+const UNDYED = '#C9CED9';
+const ANSC = { held: '#8FE3B0', moved: '#7FD1FF', drift: '#F2B33D', unbacked: '#FF8A65', missing: '#FF5A5F', broke: '#D7263D', uncited: '#7D86A8' };
+const ANSW = { held: 'held', moved: 'held, moved', drift: 'drifted', unbacked: 'unbacked', missing: 'quote not found', broke: 'contract broken', uncited: 'no cite' };
+const STW = { verified: ['held', '#8FE3B0'], moved: ['moved ↻', '#AFC0F0'], placed: ['placed', '#7FD1FF'], followed: ['followed', '#7FD1FF'], drifted: ['worn ≈ changed since the walk', '#F2B33D'], rejected: ['hole ✗', '#FF5A5F'], badaddr: ['hole ✗ bad address', '#FF5A5F'] };
+const LINKW = { call: '→ call', names: '⇢ names', then: '· then', same: '= same' };
+const HOP_X1 = 1016, CLAIM_X = 1132, CLAIM_H = 104;
+const r1 = (v) => Math.round(v * 10) / 10;
+const hue = (q) => (q == null ? UNDYED : HUES[(q - 1) % HUES.length]);
+const tidy = (s) => String(s || '').replace(/^`?tt start`? prints its text\s*(\([^)]*\))?\s*[—–-]?\s*/i, '').trim();
+const mmss = (s) => { if (s == null) return '—'; s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`; }; // an unknown time is —, never 0s
+const whenOf = (id) => { const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(id); const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m ? `${Number(m[3])} ${mon[Number(m[2]) - 1]} ${m[4]}:${m[5]}` : id; };
+const idCmp = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? -1) - (y[i] ?? -1); if (d) return d; } return 0; };
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { data: null, err: null, run: null, tid: null, hovA: null, pinA: null, hovH: null };
+    this.cache = {};
+  }
+
+  componentDidMount() {
+    this.setState({ data: DC.data });
+  }
+
+  runIndex() {
+    const want = this.state.run != null ? this.state.run : Number(this.props.run ?? 0);
+    return Math.min(Math.max(0, want || 0), this.state.data.runs.length - 1);
+  }
+
+  pickDefault(run) {
+    let best = null, score = -1;
+    run.threads.forEach((t) => {
+      const bad = t.answers.filter((a) => !['held', 'moved'].includes(a.g)).length;
+      const sc = Math.min(t.steps.length, 30) + 5 * Math.min(bad, 4) + t.answers.length;
+      if (sc > score) { score = sc; best = t.id; }
+    });
+    return best;
+  }
+
+  chain(ri, tid) {
+    const key = `${ri}/${tid}`;
+    if (this.cache[key]) return this.cache[key];
+    const run = this.state.data.runs[ri], t = run.threads.find((x) => x.id === tid);
+    let y = 0;
+    const hops = t.steps.map((s, j) => {
+      const code = run.code[String(s.f)] || {};
+      const n = s.b - s.a + 1, shown = Math.min(n, 3);
+      const broken = s.st === 'drifted' || s.st === 'rejected' || s.st === 'badaddr';
+      const lines = [];
+      for (let ln = s.a; ln < s.a + shown; ln++) {
+        const text = code[String(ln)];
+        lines.push({ no: String(ln), text: text == null ? '(this line is not in the file now)' : text, color: text == null ? '#7D86A8' : broken ? '#9AA3C2' : '#E8E6DF' });
+      }
+      if (n > shown) lines.push({ no: '', text: `+${n - shown} more lines`, color: '#7D86A8' });
+      const h = 33 + lines.length * 17 + (s.note ? 20 : 0);
+      const out = { j, s, y, h, lines, cy: y + h / 2 };
+      y += h + 12;
+      return out;
+    });
+    const walkEnd = y;
+    const want = t.answers.map((a, k) => {
+      const hit = a.cites.filter((c) => c.s >= 0).map((c) => hops[c.s].cy);
+      return { k, a, desired: hit.length ? hit.reduce((p, q) => p + q, 0) / hit.length - CLAIM_H / 2 : null };
+    });
+    const placed = want.filter((w) => w.desired != null).sort((p, q) => p.desired - q.desired);
+    const loose = want.filter((w) => w.desired == null);
+    let cy = 0;
+    placed.forEach((w) => { w.y = Math.max(cy, w.desired); cy = w.y + CLAIM_H + 10; });
+    loose.forEach((w) => { w.y = cy; cy += CLAIM_H + 10; });
+    const claims = placed.concat(loose).sort((p, q) => p.k - q.k);
+    const ties = claims.map((w) => {
+      const ay = w.y + CLAIM_H / 2;
+      let tied = '', lo = '', tuft = '';
+      w.a.cites.forEach((c, ci) => {
+        const yy = ay - 10 + ci * 6;
+        if (c.s >= 0 && c.g !== 'unbacked') {
+          const hy = hops[c.s].cy;
+          tied += `M${CLAIM_X} ${r1(yy)}C${CLAIM_X - 60} ${r1(yy)} ${HOP_X1 + 60} ${r1(hy)} ${HOP_X1} ${r1(hy)}`;
+        } else {
+          const ex = CLAIM_X - 70, ey = yy + 18;
+          lo += `M${CLAIM_X} ${r1(yy)}C${CLAIM_X - 30} ${r1(yy)} ${ex + 10} ${r1(ey - 14)} ${ex} ${r1(ey)}`;
+          tuft += `M${ex} ${r1(ey)}l-6 4M${ex} ${r1(ey)}l-3 7M${ex} ${r1(ey)}l2 7`;
+        }
+      });
+      return { k: w.k, tied, loose: lo, tuft };
+    });
+    const out = { t, run, hops, claims, ties, height: Math.max(walkEnd, cy, 900) + 40 };
+    this.cache[key] = out;
+    return out;
+  }
+
+  renderVals() {
+    const S = this.state;
+    const empty = { notReady: true, ready: false, loadText: S.err ? `The run data could not load — ${S.err}` : 'Loading the run…', loadColor: S.err ? '#FF8A65' : '#9AA3C2',
+      runs: [], chips: [], qs: [], open: [], ties: [], hops: [], claims: [], legend: [] };
+    if (!S.data) return empty;
+    const ri = this.runIndex(), run = S.data.runs[ri];
+    if (!run.threads.length) return { ...empty, loadText: 'This run holds no readers.', loadColor: '#FF8A65' };
+    const tid = S.tid && run.threads.some((t) => t.id === S.tid) ? S.tid : this.pickDefault(run);
+    const C = this.chain(ri, tid), t = C.t;
+    const color = hue(t.q);
+    const focusA = S.pinA != null ? S.pinA : S.hovA;
+    const citedBy = {};
+    t.answers.forEach((a, k) => a.cites.forEach((c) => { if (c.s >= 0) (citedBy[c.s] = citedBy[c.s] || []).push(k); }));
+    const litHop = (j) => (focusA != null ? t.answers[focusA].cites.some((c) => c.s === j) : S.hovH != null ? S.hovH === j : true);
+    const litA = (k) => (focusA != null ? k === focusA : S.hovH != null ? (citedBy[S.hovH] || []).includes(k) : true);
+    const anyFocus = focusA != null || S.hovH != null;
+
+    const sorted = run.threads.slice().sort((a, b) => ((a.q ?? 99) - (b.q ?? 99)) || idCmp(a.id, b.id));
+    const chips = sorted.map((x) => {
+      const n = x.answers.length || 1, g = {};
+      x.answers.forEach((a) => { g[a.g] = (g[a.g] || 0) + 1; });
+      return { label: `${x.q == null ? 'Q?' : 'Q' + x.q}·${x.id}`, color: x.id === tid ? '#0F1426' : hue(x.q), bg: x.id === tid ? hue(x.q) : 'transparent', border: x.id === tid ? hue(x.q) : '#2E3863',
+        pressed: x.id === tid ? 'true' : 'false', title: tidy(x.text),
+        bar: Object.keys(ANSC).filter((k) => g[k]).map((k) => ({ w: (100 * g[k]) / n, c: ANSC[k] })),
+        pick: () => this.setState({ tid: x.id, hovA: null, pinA: null, hovH: null }) };
+    });
+    const chipRows = Math.ceil((chips.length * 64) / 1632);
+    const headY = 96 + chipRows * 50 + 10;
+    const bodyY = headY + 22;
+
+    const hops = C.hops.map((h) => {
+      const s = h.s, broken = s.st === 'drifted' || s.st === 'rejected' || s.st === 'badaddr';
+      const stw = STW[s.st] || [s.st, '#C9CED9'];
+      const on = litHop(h.j);
+      return { n: h.j + 1, y: r1(h.y), h: h.h, lines: h.lines, st: stw[0], stc: stw[1],
+        where: `${run.files[s.f].p}:${s.a}${s.b > s.a ? '–' + s.b : ''}${s.flag ? '  (' + s.flag + ')' : ''}`,
+        link: h.j && s.ln ? LINKW[s.ln] || '' : h.j ? '' : 'entry', hasNote: !!s.note, note: s.note,
+        mark: s.st === 'rejected' || s.st === 'badaddr' ? 'M5 5L15 15M15 5L5 15' : 'M4 10h12',
+        markC: s.st === 'rejected' || s.st === 'badaddr' ? '#FF5A5F' : s.st === 'drifted' ? '#F2B33D' : color,
+        markDash: s.st === 'drifted' ? '1.5 2.5' : 'none',
+        bg: anyFocus && on ? '#1E2850' : '#182040', border: anyFocus && on ? color : 'rgba(154,163,194,0.2)',
+        op: anyFocus && !on ? 0.45 : 1, dly: r1(Math.min(h.j * 0.025, 0.8)),
+        enter: () => this.setState({ hovH: h.j }), leave: () => { if (this.state.hovH === h.j) this.setState({ hovH: null }); } };
+    });
+    const claims = C.claims.map((w) => {
+      const a = w.a, k = w.k, on = litA(k), c = ANSC[a.g] || '#C9CED9';
+      const cited = a.cites.map((x) => `${x.p.split('/').pop()}:${x.l}${x.s < 0 ? ' · no hop near' : x.g === 'unbacked' ? ' · nearest hop #' + (x.s + 1) : ' → #' + (x.s + 1)}`).join('  ');
+      return { y: r1(w.y), h: CLAIM_H, label: `A${k + 1} · ${ANSW[a.g] || a.g}`, color: c, t: a.t, cites: cited || 'cites nothing',
+        full: `${a.t}${a.why && a.why.length ? '\n\n' + a.why.join('\n') : ''}`,
+        hasWhy: !!(a.why && a.why.length), why: a.why && a.why.length ? a.why[0] : '',
+        bg: S.pinA === k ? '#222B55' : '#1A2140', border: on && anyFocus ? c : '#2E3863', op: anyFocus && !on ? 0.4 : 1,
+        pressed: S.pinA === k ? 'true' : 'false', dly: r1(0.2 + k * 0.04),
+        pin: () => this.setState({ pinA: this.state.pinA === k ? null : k }),
+        enter: () => this.setState({ hovA: k }), leave: () => { if (this.state.hovA === k) this.setState({ hovA: null }); } };
+    });
+    const ties = C.ties.map((x) => ({ tied: x.tied, loose: x.loose, tuft: x.tuft, color: ANSC[t.answers[x.k].g] || '#C9CED9',
+      sw: litA(x.k) && anyFocus ? 2.2 : 1.3, op: anyFocus ? (litA(x.k) ? 1 : 0.1) : 0.75, dly: r1(0.3 + x.k * 0.05) }));
+
+    const open = [];
+    t.end.forEach((e) => open.push({ k: `■ END ${e.k || ''}`, kc: '#C9CED9', t: e.t, at: e.at ? `@ ${e.at}` : '' }));
+    if (!t.end.length) open.push({ k: 'no END line', kc: '#FF8A65', t: 'The reader wrote no END: where its thread leaves the code is unrecorded.', at: '' });
+    t.lead.forEach((e) => open.push({ k: 'LEAD', kc: '#FFB454', t: e.t, at: e.at ? `@ ${e.at}` : '' }));
+    t.notread.forEach((e) => open.push({ k: 'NOT READ', kc: '#FF8A65', t: e.t, at: e.at ? `@ ${e.at}` : '' }));
+    t.split.forEach((e) => open.push({ k: `SPLIT ${e.child || ''}${e.spawned ? '' : ' · never spawned'}`, kc: '#7FD1FF', t: e.t, at: e.at ? `@ ${e.at}` : '' }));
+
+    const g = {};
+    t.answers.forEach((a) => { g[a.g] = (g[a.g] || 0) + 1; });
+    const tiedN = (g.held || 0) + (g.moved || 0);
+    const verdict = t.answers.length
+      ? `${tiedN} of ${t.answers.length} claims are tied to a line the kit holds now${t.answers.length - tiedN ? ' · ' + Object.keys(ANSC).filter((k) => k !== 'held' && k !== 'moved' && g[k]).map((k) => g[k] + ' ' + ANSW[k]).join(' · ') : ''}`
+      : 'This reader wrote no ANSWER lines';
+    const qs = (t.qs && t.qs.length ? t.qs : t.q != null ? [t.q] : []).map((q) => ({ label: `Question ${q}`, color: hue(q), text: run.questions[String(q)] || 'Question text not stored' }));
+    if (!qs.length) qs.push({ label: 'Question unknown', color: UNDYED, text: 'This reader named no numbered question the kit could match.' });
+    const runs = S.data.runs.map((r, i) => ({ repo: r.repo, when: `${whenOf(r.id)} · ${r.threads.length} readers`, pressed: i === ri ? 'true' : 'false',
+      border: i === ri ? '#E8E6DF' : '#2E3863', bg: i === ri ? '#1E2747' : 'transparent', color: i === ri ? '#F3F1EA' : '#C9CED9',
+      pick: () => this.setState({ run: i, tid: null, hovA: null, pinA: null, hovH: null }) }));
+    const legend = [['held', 'tied — the cited line is a verified hop'], ['moved', 'tied after the kit re-addressed it'], ['drift', 'tied to a line that changed since'], ['unbacked', 'loose end — no hop or quote there'], ['missing', 'its quoted text is not in the file'], ['broke', 'its node broke the hop contract']]
+      .map(([k, w]) => ({ c: ANSC[k], t: w }));
+
+    return {
+      notReady: false, ready: true, runId: run.id, repo: run.repo, color, title: `${t.q == null ? 'Q?' : 'Q' + t.q} · reader ${t.id}`,
+      verdict, runs, chips, headY, bodyY, bodyH: 1196 - bodyY, contentH: C.height,
+      walkHead: `${t.steps.length} hops in walk order`, claimHead: `${t.answers.length}, each beside the hop it cites`,
+      qs, tid: t.id, threadText: tidy(t.text),
+      timing: `tt start @ ${t.from || '—'} · started ${t.s == null ? '—' : '+' + mmss(t.s)} · wrote ${t.w == null ? 'never' : '+' + mmss(t.w)} · ${t.s != null && t.w != null ? mmss(t.w - t.s) : '—'} reading${t.refused ? ' · first write refused, stored on the second' : ''}`,
+      open, hops, claims, ties, legend,
+    };
+  }
+}
+DC.register("custody", Component);
+})();
+</script>

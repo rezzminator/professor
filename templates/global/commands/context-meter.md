@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: context-meter
-description: Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → /pcm; runtime spend → /tokens.
+description: Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → /pcm; runtime spend → /chatlog; loaded-but-unused junk → /context-audit.
 ---
 
 # Context Budget

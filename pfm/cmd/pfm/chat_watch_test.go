@@ -121,6 +121,20 @@ func TestRunHeadlessWatchRefusesBadTargetsAsUsage(t *testing.T) {
 // TestWatchTransitionsAnswersAnUnknownSeatWithSeen: under --transitions there
 // is no pre-check, so first sight of a name nothing answers to is the SEEN
 // snapshot; the target ends and the exit code says it was not alive.
+func TestWatchNoWorkingRequiresTransitionsAndAppearsInHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runHeadlessWatch([]string{"ghost", "--no-working"}, &stdout, &stderr, &deps.FakeRunner{}); code != 2 ||
+		!strings.Contains(stderr.String(), "usage: pfm chat watch") {
+		t.Fatalf("without transitions: rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runHeadlessWatch([]string{"--help"}, &stdout, &stderr, &deps.FakeRunner{}); code != 0 ||
+		!strings.Contains(stderr.String(), "--no-working") {
+		t.Fatalf("help: rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestWatchTransitionsAnswersAnUnknownSeatWithSeen(t *testing.T) {
 	jail := newRunJail(t)
 	defer jail.killSockets(t)
@@ -164,5 +178,34 @@ func TestWatchScanFailureIsAnErrorLineNeverAbsence(t *testing.T) {
 				t.Fatalf("rc = %d stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 			}
 		})
+	}
+}
+
+// TestWatchPollBelowTheFloorRunsAtTheFloorWithOneWarning: a --poll under the
+// 10-second minimum is not refused; the watch runs at the floor and says so
+// once on stderr, leaving stdout to the event lines.
+func TestWatchPollBelowTheFloorRunsAtTheFloorWithOneWarning(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	for _, poll := range []string{"3", "0", "-5"} {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"chat", "watch", "ghost", "--transitions", "--poll", poll}, &stdout, &stderr)
+		want := "pfm chat watch: --poll " + poll + " is below the 10-second minimum; polling every 10 seconds\n"
+		if code != codeDeadChat || stdout.String() != "SEEN ghost not-found\n" || stderr.String() != want {
+			t.Fatalf("--poll %s: rc = %d stdout = %q stderr = %q, want rc %d, the SEEN row and stderr %q",
+				poll, code, stdout.String(), stderr.String(), codeDeadChat, want)
+		}
+	}
+}
+
+// TestWatchHelpStatesTheTenSecondDefault: the flag's own help carries the
+// default and the floor, so a caller reading --help learns both.
+func TestWatchHelpStatesTheTenSecondDefault(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	runHeadlessWatch([]string{"--help"}, &stdout, &stderr, &deps.FakeRunner{})
+	help := stdout.String() + stderr.String()
+	if !strings.Contains(help, "seconds between samples (minimum 10; a smaller value runs as 10) (default 10)") {
+		t.Fatalf("help = %q, want the --poll line naming the minimum and the default 10", help)
 	}
 }

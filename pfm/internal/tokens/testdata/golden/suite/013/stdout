@@ -1,0 +1,38 @@
+# runmd-OmC5hn · metrics
+
+source run.md (no agents.tsv — every row matched by window) · baseline 0000000000000000000000000000000000000000 · window 2026-09-20T09:00:00.000Z → 2026-09-20T09:06:00.000Z
+1 matched of 1 ledger rows · claude 1 · codex 0 · by id 0 · by agent path 0 · by window 1
+
+| task | agent | engine | model | calls | wall | ctx0 | peak | +/call | input | cached | output | ttl | $ | fail | poll | reread | contract | compact | cap | matched |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1-a | executor | claude | sonnet-5 | 3 | 5m | 10K | 210K | 67K | 11K | 220K | 120 | 5m | $0.07 | 0 | 0 | 0 | 1 | 0 | ok/150 | window |
+
+## totals by agent type
+
+| agent type | n | calls | input | cached | output | $ | fail | poll | reread | contract | compact | over cap |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| executor | 1 | 3 | 11K | 220K | 120 | $0.07 | 0 | 0 | 0 | 1 | 0 | 0 |
+
+## flight total
+
+1 agents · 3 calls · peak context 210K · input 11K · cached 220K · output 120 · **$0.07**
+failed commands 0 · poll calls 0 · re-reads 0 · contract-file reads 1 · compactions 0 · over cap 0 of 1
+unledgered 3 transcript(s) under this flight's session · $0.27 + 1 n/a — the flight's spend is $0.35 (see the unmatched section)
+
+## three most expensive agents
+
+- $0.07 · 1-a · executor · claude · 3 calls · peak 210K · 5m
+
+## unmatched
+
+- TRANSCRIPT executor · claude · b2 · 2026-09-20T09:01 · $0.25 · ran under this flight's session with no ledger row
+- TRANSCRIPT lander · claude · c3 · 2026-09-20T09:02 · n/a · ran under this flight's session with no ledger row
+- TRANSCRIPT executor · claude · d4 · 2026-09-20T09:01 · $0.02 · ran under this flight's session with no ledger row
+
+pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: 1 synthetic/zero-usage calls (dropped: the harness billed nothing for them) · 2 UNPRICED calls {"claude-unobtanium-9":2} — tokens counted, dollars "n/a"; check exact IDs and available rates with pfm model-cost --json --all · 3 UNMATCHED (see the unmatched section)
+
+cross-check: at the published context tiers (per-model rate in the pfm model-cost table — an estimate) this flight reads $0.07 (1.00x the headline). The harness writes its own cost-state line only for a main chat, and a flight's agents are sub-runs, so these dollars are UNCHECKED against the harness on this host.
+
+metrics → {TMP}/report-0wyj890s5z2.md (34 lines)
+full data → {TMP}/report-0wyj890s5z2.json

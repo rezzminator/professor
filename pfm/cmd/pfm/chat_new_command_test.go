@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,8 +15,10 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -69,6 +72,7 @@ func TestChatNewWorkbench(t *testing.T) {
 			extra := []string{}
 			wantEffort, wantChannel := "xhigh", filepath.Join(dir, ".professor", "scribe.md")
 			wantCode, wantError := 0, ""
+			mirrorRecord := ""
 			switch name {
 			case "next number":
 				t.Setenv(spawn.TestFreshSocketEnv, "cc-first-workbench")
@@ -188,12 +192,12 @@ func TestChatNewWorkbench(t *testing.T) {
 			case "Codex", "mirror failure":
 				engine, socket, dir, wantName = "cx", "cx-workbench", duo, "DUO:1"
 				t.Setenv("CX_STUB_ARGV", filepath.Join(jail.root, "cx-argv"))
+				reply, code := testjail.CleanMirrorReply, 0
 				if name == "mirror failure" {
-					if err := os.WriteFile(filepath.Join(duo, ".mcp.json"), []byte("{"), 0o600); err != nil {
-						t.Fatal(err)
-					}
+					reply, code = testjail.FailedMirrorReply, 1
 					wantCode, wantError = 2, "pfm chat new: build the codex mirror of workbench "+duo+":"
 				}
+				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
 			case "role":
 				extra = []string{"--agent-role", "r"}
 			}
@@ -238,8 +242,8 @@ func TestChatNewWorkbench(t *testing.T) {
 				if !strings.Contains(argv, "developer_instructions=") || !strings.Contains(argv, "You are duo.") {
 					t.Fatalf("Codex argv = %q", argv)
 				}
-				if _, err := os.Stat(filepath.Join(duo, "AGENTS.md")); err != nil {
-					t.Fatalf("mirror: %v", err)
+				if !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
+					t.Fatalf("the launch built no codex mirror of %s", duo)
 				}
 			} else {
 				if name == "role" {
@@ -302,5 +306,50 @@ func TestChatNewExplicitNamePreservesAnotherProducersReservation(t *testing.T) {
 			err,
 			stderr.String(),
 		)
+	}
+}
+
+// TestFirstReplyVerdict: the reply watch after a delivered launch prompt calls
+// silence a chat at work, a refused turn an error naming it, and a watch that
+// could not read the chat that failure — never ok.
+func TestFirstReplyVerdict(t *testing.T) {
+	result := spawn.Result{Socket: "cc-sock", Session: "cc-sess"}
+	refused := headless.Turn{Error: "invalid_request", Answer: "API Error: 400\nbad beta"}
+	readFailure := errors.New("read transcript: permission denied")
+	for _, check := range []struct {
+		name     string
+		turn     headless.Turn
+		err      error
+		wantCode int
+		want     []string
+	}{
+		{name: "replied", turn: headless.Turn{Answer: "on it"}, wantCode: 0},
+		{name: "still working", err: headless.ErrAwaitTimeout, wantCode: 0},
+		{
+			name: "refused", turn: refused, wantCode: codeTurnError,
+			want: []string{"API error (invalid_request)", "API Error: 400 bad beta", "tmux -L cc-sock attach -t cc-sess"},
+		},
+		{
+			name: "refused then gone", turn: refused, err: headless.ErrChatGone, wantCode: codeTurnError,
+			want: []string{"invalid_request"},
+		},
+		{name: "gone", err: headless.ErrChatGone, wantCode: codeDeadChat, want: []string{"died before replying"}},
+		{name: "read failure", err: readFailure, wantCode: 1, want: []string{"could not be read", readFailure.Error()}},
+		{name: "cancelled", err: context.Canceled, wantCode: 1, want: []string{context.Canceled.Error()}},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			code, message := firstReplyVerdict("worker", check.turn, check.err, result)
+			if code != check.wantCode {
+				t.Fatalf("code = %d, want %d (message %q)", code, check.wantCode, message)
+			}
+			if check.wantCode == 0 && message != "" {
+				t.Fatalf("message = %q, want none for an ok launch", message)
+			}
+			for _, want := range check.want {
+				if !strings.Contains(message, want) {
+					t.Fatalf("message = %q, want it to contain %q", message, want)
+				}
+			}
+		})
 	}
 }

@@ -1,6 +1,6 @@
 # agent-optimizer
 
-`agent-optimizer` audits how one agent actually ran against what it was built to do. It reads the agent's prompt, its design doc when one exists, the brief the run received and the run's transcript, walks the run end to end, and reports where the run lost time, tokens or correctness, each finding traced to the prompt line, design decision or harness behaviour that caused it, with the edit that would remove it. The prompt is the claim under test, never evidence that the run was right.
+`agent-optimizer` audits how one agent actually ran against what it was built to do. It reads the agent's prompt, its design doc when one exists, the brief the run received and the run's transcript, walks the run end to end, and reports where the run lost time, tokens or correctness, each finding traced to the prompt line, design decision or harness behaviour that caused it. It identifies and reports, never prescribes: no fix, no next step, no edit — the caller decides every change. The prompt is the claim under test, never evidence that the run was right.
 
 ## Contents
 
@@ -51,13 +51,13 @@ One report per agent type. A lead and its diggers are two audits: the lead's rep
 
 ## The digest
 
-A transcript can run to megabytes; it is never read whole. One call to `token-audit.mjs --timeline` (repeatable, one flag per transcript) turns every run into a timeline:
+A transcript can run to megabytes; it is never read whole. One call to `pfm tokens --timeline` (repeatable, one flag per transcript) turns every run into a timeline:
 
-- A header per run: agent type, model, effort, calls, wall time first to last record, peak context, output tokens, tool errors, results over 20 KB, and USD from the same replay and pfm's price table (`pfm price --json`) as `token-audit`'s default report.
+- A header per run: agent type, model, effort, calls, wall time first to last record, peak context, output tokens, tool errors, results over 20 KB, and USD from the same replay and Professor's price table (`pfm model-cost --json --all`) as `pfm tokens`'s default report.
 - One row per model call (several `assistant` records sharing one `requestId` are one call): clock, seconds since the previous tool result, context (`input + cache read + cache write`), output, USD, and each tool the call issued with its target, result size, `ERR` and wait.
 - `UNREADABLE — {path}: {error}` or `NO CALLS — {path}` for a run it cannot digest, a mark the report carries rather than an estimate.
 
-A second call prints each run's content with `transcript.py show`, one call per run: one line per event with its transcript line number, holding the brief, every tool call with its target and result status, a failure's tail and the return. The timeline's tool targets are cut at 100 characters and often share one prefix, so without that view every audit built its own transcript dumper (about 21 calls over four self-audited runs). The prompt, a variant's source and the design doc are read whole with `cat -n` in the same first message, so later citations never re-grep for line numbers. Every Bash command opens with `emulate sh 2>/dev/null;`, since zsh aborts on `echo ====`. The transcript is opened beyond that only at a line number a finding needs. The installed script runs as `node ~/.claude/commands/tokens/token-audit.mjs --timeline {transcript} --timeline {transcript}…`; a worktree's prompt still comes in through `Prompt:`.
+A second call prints each run's content with `pfm transcript show`, one call per run: one line per event with its transcript line number, holding the brief, every tool call with its target and result status, a failure's tail and the return. The timeline's tool targets are cut at 100 characters and often share one prefix, so without that view every audit built its own transcript dumper (about 21 calls over four self-audited runs). The prompt, a variant's source and the design doc are read whole with `cat -n` in the same first message, so later citations never re-grep for line numbers. Every Bash command opens with `emulate sh 2>/dev/null;`, since zsh aborts on `echo ====`. The transcript is opened beyond that only at a line number a finding needs. The timeline runs as `pfm tokens --timeline {transcript} --timeline {transcript}…`; a worktree's prompt still comes in through `Prompt:`.
 
 ## The audit
 
@@ -65,7 +65,7 @@ A second call prints each run's content with `transcript.py show`, one call per 
 2. Flow: the prompt's procedure step by step against the timeline: where each step ran, which were skipped, repeated or reordered, and where the run did something no step asks for.
 3. Output: the delivered artifact against the intent and against the prompt's own output contract; claims in it checked against the files and sources the transcript shows it read.
 4. Cost: which calls and results carried the tokens and the seconds, and whether the work needed them.
-5. Cause: each finding traced to the prompt line (`path:line` quoted), the design decision (doc section), the brief, or the harness or a tool. An instruction that produced the waste is a finding against the prompt; a run that broke a sound instruction is a compliance finding, whose fix escalates per `/quality:prompt` (a contrastive example from this run, then a mechanism) rather than louder wording.
+5. Cause: each finding traced to the prompt line (`path:line` quoted), the design decision (doc section), the brief, or the harness or a tool. An instruction that produced the waste is a finding against the prompt; a run that broke a sound instruction is a compliance finding, the instruction quoted beside the call that broke it.
 
 ## Finding classes
 
@@ -83,12 +83,12 @@ A second call prints each run's content with `transcript.py show`, one call per 
 
 - a header: the prompt and design doc paths the audit resolved (the brief is not echoed back);
 - the totals line from the digest;
-- the flow table: each prompt step, where it ran (call numbers), and its verdict, which names what worked so a fix does not break it;
-- findings ranked by cost, heaviest first, one `###` each: class, cost (calls, seconds, tokens), evidence (call number, timestamp, an excerpt of 200 characters at most), cause, fix. A fix is an exact edit (old text → new text in the named file) or a named mechanism, never "consider improving";
+- the flow table: each prompt step, where it ran (call numbers), and its verdict, which names what worked so the caller's change keeps it;
+- findings ranked by cost, heaviest first, one `###` each: class, cost (calls, seconds, tokens), evidence (call number, timestamp, an excerpt of 200 characters at most), cause;
 
 ## The return
 
-The report path, then one line of totals, then the findings, one line each: class, cost, the fix in a clause, and nothing else. The report holds the evidence and the caveats: in the self-audit, every one of four returns ran two to three thousand characters of sub-bullets the caller never needed.
+The report path, then one line of totals, then the findings, one line each: class, cost, the cause in a clause, and nothing else. The report holds the evidence and the caveats: in the self-audit, every one of four returns ran two to three thousand characters of sub-bullets the caller never needed.
 
 ## Marks
 
@@ -101,8 +101,8 @@ The report path, then one line of totals, then the findings, one line each: clas
 
 | Left out | Reason |
 | --- | --- |
-| Editing the audited prompt | The auditor is not the author; fixes go to `/pcm`, where the prompt laws and the guard apply |
-| One report for a lead and its diggers together | Different prompts, different fixes; a mixed report ranks a digger's waste against a lead's |
+| Editing the audited prompt, or prescribing its fix | The auditor is not the author: the caller decides each change, and a prompt edit goes through `/pcm`, where the prompt laws and the guard apply |
+| One report for a lead and its diggers together | Different prompts, different causes; a mixed report ranks a digger's waste against a lead's |
 
 ## Surfaces that stay in sync
 
@@ -110,5 +110,5 @@ The report path, then one line of totals, then the findings, one line each: clas
 | --- | --- |
 | The agent | `templates/global/agents/agent-optimizer.md` |
 | The transcript record shape it digests | Claude Code's `projects/{project}/{session}/subagents/agent-{id}.jsonl` and `.meta.json` |
-| The digest and dollar source | `templates/global/commands/tokens/token-audit.mjs --timeline` |
+| The digest and dollar source | `pfm tokens --timeline` |
 | The roster line | `docs/BLUEPRINT.md` |

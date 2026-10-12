@@ -129,7 +129,12 @@ type Request struct {
 	Path   string `json:"path"`
 	Kind   string `json:"kind"`
 	Source string `json:"source,omitempty"`
-	OCR    bool   `json:"ocr,omitempty"`
+	// BaseURL is the address the document was finally fetched from, after
+	// every redirect (harvest.BaseURLFrom): the base its relative links and
+	// image sources resolve against, unless the page names a <base href>.
+	// "" leaves a relative target as the page wrote it.
+	BaseURL string `json:"base_url,omitempty"`
+	OCR     bool   `json:"ocr,omitempty"`
 	// OCRLang is the caller's script for a scan (harvest.OCRLangFrom); ""
 	// lets the document's text layer, /Lang or metadata decide.
 	OCRLang string `json:"ocr_language,omitempty"`
@@ -141,10 +146,14 @@ type Request struct {
 }
 
 // Result is one successful conversion result and its optional feature prices.
+// Meta is what the converter read ABOUT the document (title, author,
+// published, site, license; transformed when the body is a rendering of the
+// source rather than its text) — never written into Markdown.
 type Result struct {
-	Markdown string        `json:"markdown"`
-	Kind     string        `json:"kind"`
-	Features FeatureStatus `json:"features"`
+	Markdown string            `json:"markdown"`
+	Kind     string            `json:"kind"`
+	Features FeatureStatus     `json:"features"`
+	Meta     map[string]string `json:"meta,omitempty"`
 }
 
 // ErrConverterFailed is a conversion the sidecar could NOT complete: a
@@ -321,12 +330,13 @@ func (converter *Converter) run(ctx context.Context, request Request) (Result, e
 		return Result{}, err
 	}
 	var response struct {
-		OK         bool          `json:"ok"`
-		Markdown   string        `json:"markdown"`
-		Kind       string        `json:"kind"`
-		Features   FeatureStatus `json:"features"`
-		Error      string        `json:"error"`
-		ErrorClass string        `json:"error_class"`
+		OK         bool              `json:"ok"`
+		Markdown   string            `json:"markdown"`
+		Kind       string            `json:"kind"`
+		Features   FeatureStatus     `json:"features"`
+		Meta       map[string]string `json:"meta"`
+		Error      string            `json:"error"`
+		ErrorClass string            `json:"error_class"`
 	}
 	if err := json.Unmarshal(line, &response); err != nil {
 		return Result{}, fmt.Errorf("decode harvestpy response JSON: %w (stderr: %s)", err, stderr)
@@ -337,7 +347,12 @@ func (converter *Converter) run(ctx context.Context, request Request) (Result, e
 	if response.Markdown == "" {
 		return Result{}, ErrConverterEmpty
 	}
-	return Result{Markdown: response.Markdown, Kind: response.Kind, Features: response.Features}, nil
+	return Result{
+		Markdown: response.Markdown,
+		Kind:     response.Kind,
+		Features: response.Features,
+		Meta:     response.Meta,
+	}, nil
 }
 
 // converterFailure names one ok:false answer as ErrConverterFailed carrying

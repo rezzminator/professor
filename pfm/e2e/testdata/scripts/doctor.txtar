@@ -2,6 +2,7 @@
 exec jail-pfm-rc 3 doctor
 stdout 'doctor: dep tmux '
 stdout 'doctor: dep git '
+stdout 'doctor: dep python3 '
 stdout 'doctor: dep sh '
 stdout 'doctor: dep bash '
 stdout 'doctor: dep zsh '

@@ -1,0 +1,181 @@
+<template id="tpl-key">
+<div style="position:relative; width:560px; height:1120px; overflow:hidden; background:#0F1426; color:#E8E6DF; font-family:var(--mono)">
+  <div style="position:absolute; left:24px; top:20px; width:512px; display:flex; flex-direction:column; gap:6px">
+    <div class="h" style="color:#9AA3C2">Stitch key · read this first</div>
+    <h1 style="margin:0; font-family:var(--display); font-weight:800; font-size:40px; line-height:1; color:#F3F1EA">How to read the cloth</h1>
+    <div style="font-family:var(--sans); font-size:12.5px; line-height:1.45; color:#C9CED9">A reader is a weft thread; each file is a warp column. Every mark below is drawn from the run's own files — nothing is estimated.</div>
+  </div>
+
+  <div style="position:absolute; left:24px; top:124px; width:512px; height:224px; border-radius:10px; border:1px solid #262F52; background:#131A31; background-image:repeating-linear-gradient(135deg, rgba(255,255,255,0.018) 0 2px, transparent 2px 6px); overflow:hidden">
+    <sc-for list="{{cols}}" as="c" hint-placeholder-count="3">
+      <div style="position:absolute; left:{{c.x}}px; top:0; width:{{c.w}}px; height:224px; background:rgba(154,163,194,0.05); border-left:1px solid rgba(154,163,194,0.12); border-right:1px solid rgba(154,163,194,0.12)"></div>
+      <div style="position:absolute; left:{{c.x}}px; top:6px; width:{{c.w}}px; text-align:center; font-size:9.5px; color:#7D86A8">{{c.name}}</div>
+    </sc-for>
+    <svg aria-hidden="true" width="512" height="224" style="position:absolute; left:0; top:0">
+      <path d="{{P.split}}" style="fill:none; stroke:#E8E6DF; stroke-width:1.1; stroke-dasharray:5 3; opacity:0.7"></path>
+      <path d="{{P.slack1}}" style="fill:none; stroke:#FFB454; stroke-width:0.9; opacity:0.55"></path>
+      <path d="{{P.dash1}}" style="fill:none; stroke:#FFB454; stroke-width:1; stroke-dasharray:3 2.5; opacity:0.75"></path>
+      <path d="{{P.solid1}}" style="fill:none; stroke:#FFB454; stroke-width:1.25; opacity:0.85"></path>
+      <path d="{{P.held1}}" style="fill:none; stroke:#FFB454; stroke-width:3.4; stroke-linecap:round"></path>
+      <path d="{{P.dots1}}" style="fill:#0F1426; stroke:none"></path>
+      <path d="{{P.halo1}}" style="fill:none; stroke:#7FD1FF; stroke-width:1; stroke-dasharray:1.6 1.6"></path>
+      <path d="{{P.worn1}}" style="fill:none; stroke:#FFB454; stroke-width:1.5; stroke-dasharray:1.2 1.8; stroke-linecap:round"></path>
+      <path d="{{P.fray1}}" style="fill:none; stroke:#F2B33D; stroke-width:0.9; opacity:0.85"></path>
+      <path d="{{P.holes1}}" style="fill:#0B0F1E; stroke:#FF5A5F; stroke-width:1.2"></path>
+      <path d="{{P.hx1}}" style="fill:none; stroke:#FF5A5F; stroke-width:1"></path>
+      <path d="{{P.knot1}}" style="fill:#FFB454; stroke:#FFB454; stroke-width:1.2"></path>
+      <path d="{{P.strands1}}" style="fill:none; stroke:#FFB454; stroke-width:1.1; stroke-linecap:round; opacity:0.8"></path>
+      <path d="{{P.slack2}}" style="fill:none; stroke:#5DD6F5; stroke-width:0.9; opacity:0.55"></path>
+      <path d="{{P.solid2}}" style="fill:none; stroke:#5DD6F5; stroke-width:1.25; opacity:0.85"></path>
+      <path d="{{P.held2}}" style="fill:none; stroke:#5DD6F5; stroke-width:3.4; stroke-linecap:round"></path>
+      <path d="{{P.knot2}}" style="fill:#0F1426; stroke:#5DD6F5; stroke-width:1.2"></path>
+    </svg>
+    <div style="position:absolute; left:8px; top:{{P.y1}}px; font-size:9.5px; font-weight:600; color:#FFB454">Q1·1</div>
+    <div style="position:absolute; left:8px; top:{{P.y2}}px; font-size:9.5px; font-weight:600; color:#5DD6F5">Q2·1.1</div>
+    <sc-for list="{{tags}}" as="t" hint-placeholder-count="12">
+      <span class="num" style="position:absolute; left:{{t.x}}px; top:{{t.y}}px">{{t.n}}</span>
+    </sc-for>
+  </div>
+
+  <div style="position:absolute; left:24px; top:362px; width:512px; display:flex; flex-direction:column; gap:7px">
+    <sc-for list="{{sections}}" as="s" hint-placeholder-count="3">
+      <div style="display:flex; flex-direction:column; gap:2px">
+        <span class="h">{{s.head}}</span>
+        <sc-for list="{{s.items}}" as="i" hint-placeholder-count="4">
+          <div style="display:flex; align-items:center; gap:10px">
+            <span class="num" style="background:{{i.numBg}}; color:{{i.numC}}">{{i.n}}</span>
+            <svg aria-hidden="true" width="72" height="24" viewBox="0 0 60 20" style="flex:none">
+              <path d="{{i.slack}}" style="fill:none; stroke:{{i.c}}; stroke-width:0.9; opacity:0.55"></path>
+              <path d="{{i.dash}}" style="fill:none; stroke:{{i.c}}; stroke-width:1; stroke-dasharray:3 2.5; opacity:0.8"></path>
+              <path d="{{i.solid}}" style="fill:none; stroke:{{i.c}}; stroke-width:1.25; opacity:0.9"></path>
+              <path d="{{i.split}}" style="fill:none; stroke:#E8E6DF; stroke-width:1.1; stroke-dasharray:5 3; opacity:0.75"></path>
+              <path d="{{i.held}}" style="fill:none; stroke:{{i.c}}; stroke-width:3.4; stroke-linecap:round"></path>
+              <path d="{{i.dots}}" style="fill:#0F1426; stroke:none"></path>
+              <path d="{{i.halo}}" style="fill:none; stroke:#7FD1FF; stroke-width:1; stroke-dasharray:1.6 1.6"></path>
+              <path d="{{i.worn}}" style="fill:none; stroke:{{i.c}}; stroke-width:1.5; stroke-dasharray:1.2 1.8; stroke-linecap:round"></path>
+              <path d="{{i.fray}}" style="fill:none; stroke:#F2B33D; stroke-width:0.9"></path>
+              <path d="{{i.holes}}" style="fill:#0B0F1E; stroke:#FF5A5F; stroke-width:1.2"></path>
+              <path d="{{i.hx}}" style="fill:none; stroke:#FF5A5F; stroke-width:1"></path>
+              <path d="{{i.knot}}" style="fill:{{i.knotFill}}; stroke:{{i.c}}; stroke-width:1.2"></path>
+              <path d="{{i.strands}}" style="fill:none; stroke:{{i.c}}; stroke-width:1.1; stroke-linecap:round; opacity:0.85"></path>
+            </svg>
+            <span style="flex:1; min-width:0; display:flex; flex-direction:column; gap:1px">
+              <span style="font-size:11.5px; font-weight:600; color:#F3F1EA">{{i.name}} <span style="font-weight:400; color:#7D86A8">{{i.src}}</span></span>
+              <span class="ell" title="{{i.what}}" style="font-family:var(--sans); font-size:11.5px; line-height:1.3; color:#AEB6D3">{{i.what}}</span>
+            </span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-for>
+
+    <div style="display:flex; flex-direction:column; gap:6px">
+      <span class="h">Dye — the question a reader answers</span>
+      <div style="display:flex; flex-wrap:wrap; gap:5px">
+        <sc-for list="{{hues}}" as="q" hint-placeholder-count="9">
+          <span style="padding:2px 7px; border-radius:5px; font-size:10.5px; font-weight:600; color:{{q.c}}; border:1px solid {{q.c}}">{{q.t}}</span>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:6px">
+      <span class="h">Claims — the grade of each ANSWER (Chain of custody)</span>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 16px">
+        <sc-for list="{{grades}}" as="g" hint-placeholder-count="7">
+          <span style="display:flex; align-items:center; gap:7px; font-size:10.5px; color:#C9CED9"><span style="flex:none; width:16px; height:3px; border-radius:2px; background:{{g.c}}"></span><span style="color:{{g.c}}; font-weight:600">{{g.k}}</span>{{g.t}}</span>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:4px">
+      <span class="h">Where each board reads from</span>
+      <sc-for list="{{sources}}" as="o" hint-placeholder-count="5">
+        <span style="display:flex; gap:8px; font-size:10.5px; line-height:1.4"><span style="flex:none; width:84px; color:#F3F1EA; font-weight:600">{{o.b}}</span><span style="flex:1; color:#9AA3C2">{{o.t}}</span></span>
+      </sc-for>
+    </div>
+  </div>
+  <div style="position:absolute; left:24px; top:1092px; width:512px; display:flex; justify-content:space-between; font-size:11px">
+    <a href="#loom">← The Loom</a><a href="#custody">Chain of custody →</a>
+  </div>
+</div>
+</template>
+<script>
+(function () {
+const DCLogic = DC.DCLogic;
+const HUES = ['#FFB454', '#5DD6F5', '#FF7EB6', '#A6E36A', '#B9A2FF', '#FF8F5E', '#6FE3C1', '#F4E06D'];
+const r1 = (v) => Math.round(v * 10) / 10;
+const circ = (cx, cy, r) => `M${r1(cx - r)} ${r1(cy)}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`;
+const xmark = (cx, cy) => `M${r1(cx - 1.9)} ${r1(cy - 1.9)}L${r1(cx + 1.9)} ${r1(cy + 1.9)}M${r1(cx + 1.9)} ${r1(cy - 1.9)}L${r1(cx - 1.9)} ${r1(cy + 1.9)}`;
+const fray = (x, y, len) => `M${x} ${y}l-2.4 -2.6M${x} ${y}l-2.4 2.6M${r1(x + len)} ${y}l2.4 -2.6M${r1(x + len)} ${y}l2.4 2.6`;
+const knot = (x, y) => `M${x} ${r1(y - 4.2)}l4.2 4.2 -4.2 4.2 -4.2 -4.2z`;
+const strand = (x, top, h) => `M${r1(x)} ${r1(top)}c2.2 ${r1(h * 0.3)} -2.2 ${r1(h * 0.6)} 0 ${r1(h)}`;
+const sag = (a, b, by) => `M${a[0]} ${a[1]}Q${r1((a[0] + b[0]) / 2)} ${r1(by)} ${b[0]} ${b[1]}`;
+
+class Component extends DCLogic {
+  renderVals() {
+    // the specimen: two readers across three files, every stitch the Loom draws, at the Loom's own scale
+    const cols = [{ x: 56, w: 132, name: 'server.go' }, { x: 204, w: 132, name: 'store.go' }, { x: 352, w: 96, name: 'deploy.sh' }];
+    const y1 = [34, 52, 70, 88, 106], y2 = [150, 170, 190];
+    const h1 = [[70, 34, 40], [222, 52, 26], [290, 70, 14], [372, 88, 30], [150, 106, 0]];   // x, y, len per hop of reader 1
+    const c = (h) => [r1(h[0] + h[2] / 2), h[1]];
+    const P = {
+      y1: 64, y2: 162,
+      held1: `M${h1[0][0]} ${h1[0][1]}h${h1[0][2]}M${h1[1][0]} ${h1[1][1]}h${h1[1][2]}M${h1[2][0]} ${h1[2][1]}h${h1[2][2]}`,
+      dots1: circ(...c(h1[1]), 1),
+      halo1: circ(...c(h1[2]), 5),
+      worn1: `M${h1[3][0]} ${h1[3][1]}h${h1[3][2]}`, fray1: fray(h1[3][0], h1[3][1], h1[3][2]),
+      holes1: circ(h1[4][0], h1[4][1], 3.4), hx1: xmark(h1[4][0], h1[4][1]),
+      solid1: `M${c(h1[0]).join(' ')}L${c(h1[1]).join(' ')}M${c(h1[3]).join(' ')}L${h1[4][0]} ${h1[4][1]}`,
+      dash1: `M${c(h1[1]).join(' ')}L${c(h1[2]).join(' ')}`,
+      slack1: sag(c(h1[2]), c(h1[3]), 100),
+      knot1: knot(470, 70),
+      strands1: strand(488, 58, 22) + strand(493, 58, 22) + strand(498, 58, 22),
+      held2: 'M96 150h30M398 170h22M246 190h36',
+      solid2: 'M111 150L409 170',
+      slack2: sag([409, 170], [264, 190], 204),
+      knot2: knot(470, 170),
+      split: 'M86 34C30 34 30 150 96 150',
+    };
+    const tags = [
+      [88, 14, 1], [234, 32, 2], [300, 48, 3], [392, 66, 4], [160, 110, 5],
+      [150, 30, 6], [254, 70, 7], [330, 98, 8], [32, 92, 9], [462, 84, 10], [490, 82, 11], [462, 184, 12],
+    ].map(([x, y, n]) => ({ x, y, n }));
+
+    const C = '#FFB454';
+    const S = (o) => ({ slack: '', dash: '', solid: '', split: '', held: '', dots: '', halo: '', worn: '', fray: '', holes: '', hx: '', knot: '', knotFill: 'none', strands: '', c: C, numBg: '#E8E6DF', numC: '#0F1426', ...o });
+    const sections = [
+      { head: 'Hops — one stitch per hop, at its lines in the file', items: [
+        S({ n: 1, name: 'held', src: 'verified', held: 'M14 10h32', what: 'the kit re-read them: the lines still say what was quoted' }),
+        S({ n: 2, name: 're-addressed', src: 'moved ↻', held: 'M14 10h32', dots: circ(30, 10, 1), what: 'the quote moved a few lines; the kit followed it there' }),
+        S({ n: 3, name: 'placed / followed', src: 'placed · followed', held: 'M22 10h16', halo: circ(30, 10, 5), what: 'the kit found the text itself, or followed a renamed file' }),
+        S({ n: 4, name: 'worn', src: 'drifted', worn: 'M16 10h28', fray: fray(16, 10, 28), what: 'the code changed after the walk — re-read it first' }),
+        S({ n: 5, name: 'hole', src: 'rejected · badaddr', holes: circ(30, 10, 3.4), hx: xmark(30, 10), what: 'quote not found, or the address runs past the end of the file' }),
+      ] },
+      { head: 'Links — how the reader stepped to the next hop', items: [
+        S({ n: 6, name: 'call', src: '→', solid: 'M6 15L54 5', held: 'M4 15h4M52 5h4', what: 'the code at this hop calls the next one' }),
+        S({ n: 7, name: 'names', src: '⇢', dash: 'M6 15L54 5', held: 'M4 15h4M52 5h4', what: 'it names the next one: a string, a key, a path' }),
+        S({ n: 8, name: 'then', src: '·', slack: sag([6, 6], [54, 6], 19), held: 'M4 6h4M52 6h4', what: 'the reader just went on; tt map hides these without --all' }),
+        S({ n: 9, name: 'split', src: '⇉ SPLIT', split: 'M8 3C0 3 0 17 14 17', held: 'M8 3h10M14 17h12', c: '#E8E6DF', what: 'a branch handed to a child reader, who weaves its own thread' }),
+      ] },
+      { head: 'Ends — where a reader stopped', items: [
+        S({ n: 10, name: 'END knot', src: '■ END', knot: knot(30, 10), knotFill: C, what: 'filled: the reader wrote where its thread leaves the code' }),
+        S({ n: 11, name: 'fringe', src: 'LEAD · NOT READ', strands: strand(24, 3, 14) + strand(30, 3, 14) + strand(36, 3, 14), what: 'one strand per open lead, unread file or unspawned split' }),
+        S({ n: 12, name: 'hollow knot', src: 'no END', knot: knot(30, 10), knotFill: '#0F1426', c: '#5DD6F5', what: 'the reader wrote no END line: its exit is unrecorded' }),
+      ] },
+    ];
+    const hues = HUES.map((c2, i) => ({ c: c2, t: `Q${i + 1}` })).concat([{ c: '#C9CED9', t: 'undyed · no question' }]);
+    const grades = [
+      ['held', '#8FE3B0', 'cited line is a held hop'], ['moved', '#7FD1FF', 'held after a re-address'], ['drift', '#F2B33D', 'cites a worn line'],
+      ['unbacked', '#FF8A65', 'no hop or quote there'], ['missing', '#FF5A5F', 'quoted text not in file'], ['broke', '#D7263D', 'its node broke the contract'], ['uncited', '#7D86A8', 'cites nothing'],
+    ].map(([k, c2, t]) => ({ k, c: c2, t }));
+    const sources = [
+      { b: 'The Loom', t: '{ID}.hops in walk order · write times · every touched file in full (only the lines near a hop past the text budget)' },
+      { b: 'Custody', t: 'ANSWER lines and their [path:line] cites, as the check grades them' },
+      { b: 'Hourglass', t: 'tt map --to / --from: components, links, ends' },
+      { b: 'Swatch book', t: 'tt book --html: one swatch per run under the runs root, from its COUNTS line, newest first' },
+    ];
+    return { cols, P, tags, sections, hues, grades, sources };
+  }
+}
+DC.register("key", Component);
+})();
+</script>

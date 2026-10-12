@@ -136,7 +136,8 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 	if !reflect.DeepEqual(got.Accounts, wantAccounts) {
 		t.Fatalf("Accounts = %#v, want %#v", got.Accounts, wantAccounts)
 	}
-	if got.Claude != (Claude{
+	if !reflect.DeepEqual(got.Claude, Claude{
+		Plugins:               DefaultClaudePlugins(),
 		PermissionMode:        PermissionBypass,
 		Binary:                "claude",
 		WebSearchesPerSession: 9007199254740991,
@@ -144,7 +145,9 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		TmuxTruecolor:         true,
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
+		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
+		CostLedger:            true,
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -294,7 +297,8 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 	if got.AccountIDs() == nil || !reflect.DeepEqual(got.AccountIDs(), []int{9, 2, 17}) {
 		t.Fatalf("AccountIDs = %#v, want [9 2 17]", got.AccountIDs())
 	}
-	if got.Claude != (Claude{
+	if !reflect.DeepEqual(got.Claude, Claude{
+		Plugins:               DefaultClaudePlugins(),
 		PermissionMode:        PermissionPrompt,
 		Binary:                "claude-custom",
 		WebSearchesPerSession: 9007199254740991,
@@ -302,7 +306,9 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		TmuxTruecolor:         true,
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
+		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
+		CostLedger:            true,
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {

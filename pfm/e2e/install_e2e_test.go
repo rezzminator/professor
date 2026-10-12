@@ -210,7 +210,8 @@ func runInstallE2E(t *testing.T) {
 			"init Codex check",
 			harness.pfm(freshHome, "codex", "check", "--home", freshHome, project),
 		)
-		harness.assertInitPath(filepath.Join(project, "AGENTS.md"), "AGENTS.md")
+		// The AGENTS.md those forwarders reach engine-sync to compile is
+		// engine-sync's to prove; the jail's stand-in writes none.
 	})
 
 	t.Run("launcher", func(t *testing.T) {
@@ -438,7 +439,7 @@ func (h *e2eHarness) environment(home string) []string {
 		"PFM_HARVESTPY_OFFLINE": "1",
 		// Keep the whole-home refusal snapshot free of diagnostic log writes.
 		"PFM_LOG_LEVEL":             "off",
-		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1",
+		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1", "PFM_PRICES_OFFLINE": "1",
 	}
 	return appendCleanEnv(os.Environ(), values)
 }
@@ -613,7 +614,7 @@ func (h *e2eHarness) assertInit(project, source string) {
 		{"epics", "docs/epics", ""},
 		{"codex", ".codex", ""},
 		{"docs-commands", "docs/commands", ""},
-		{"docs-agents", "docs/agents", ""},
+		{"docs-hub", "docs", ""},
 	} {
 		sourceDir := filepath.Join(templates, mapping.source)
 		targetDir := filepath.Join(project, mapping.target)
@@ -759,9 +760,9 @@ func (h *e2eHarness) assertUninstalled(home string) {
 			".config/systemd/user/pfm-name-sync.timer",
 			".config/systemd/user/default.target.wants/pfm-name-sync.path",
 			".config/systemd/user/timers.target.wants/pfm-name-sync.timer",
-			".config/systemd/user/pfm-reminder.service",
-			".config/systemd/user/pfm-reminder.timer",
-			".config/systemd/user/timers.target.wants/pfm-reminder.timer",
+			".config/systemd/user/pfm-schedule.service",
+			".config/systemd/user/pfm-schedule.timer",
+			".config/systemd/user/timers.target.wants/pfm-schedule.timer",
 		} {
 			if _, err := os.Lstat(filepath.Join(home, relative)); !os.IsNotExist(err) {
 				h.t.Fatalf("uninstall failed; differing paths: %s; status: %v", relative, err)
@@ -769,8 +770,8 @@ func (h *e2eHarness) assertUninstalled(home string) {
 		}
 	} else if _, err := os.Lstat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist")); !os.IsNotExist(err) {
 		h.t.Fatalf("uninstall failed; differing paths: launchd name-sync; status: %v", err)
-	} else if _, err := os.Lstat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")); !os.IsNotExist(err) {
-		h.t.Fatalf("uninstall failed; differing paths: launchd reminder; status: %v", err)
+	} else if _, err := os.Lstat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.schedule.plist")); !os.IsNotExist(err) {
+		h.t.Fatalf("uninstall failed; differing paths: launchd schedule; status: %v", err)
 	}
 	for _, shim := range []string{
 		filepath.Join(home, e2eManagedRoot, "shim", "pfm.zsh"),

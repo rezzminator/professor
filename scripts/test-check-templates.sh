@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Exercise .claude/scripts/check-templates.sh, the templates unit's static-check command, against a
-# fake repository: usage, the install FAIL line (alone, no check run), path handling, the file-scoped
+# fake repository: usage, the install GAP line (alone, naming each missing tool, exit 3, no check run), path handling, the file-scoped
 # checks (rumdl on .md files only, leak on every file, SKIP wording), the unit-wide checks (every one
 # runs after a failure; agent-roster is not one of them), the infra/fence/checks.sh shims and the branch
 # where that file is missing, a directory argument, the per-run private scratch directory (the log's name
@@ -26,7 +26,7 @@ shtest_clean_also "/tmp/$PROJECT"
 # The EXIT trap keeps shtest.sh's PID guard: run by a forked shell it must leave the suite's scratch alone.
 shtest_probe_trap_guard "/tmp/$PROJECT"
 USAGE='Name the files you changed.'
-INSTALL='FAIL install (templates has no installed dependencies — run: pfm install --yes && bash infra/fence/tools.sh)'
+gap() { printf 'GAP install (templates is missing: %s — no check ran, this is a missing tool and not a failed check; run: pfm install --yes && bash infra/fence/tools.sh, and PyYAML for python3)' "$1"; }
 
 # PATH = stubs, then symlinks to the real basics. The stub records name, arguments, cwd and
 # LEAK_TERMS, prints STUB_LINES numbered lines, and exits with the next code of $REC/rc.<name>.<first
@@ -41,6 +41,7 @@ name="${0##*/}"
 { printf '%s' "$name"; [ "$#" = 0 ] || printf ' %q' "$@"; printf '\n'; } >> "$STUB_REC/calls"
 printf '%s %s LEAK_TERMS=%s\n' "$name" "$PWD" "${LEAK_TERMS-unset}" >> "$STUB_REC/env"
 echo "OUT-OF-$name"
+[ "$name" != leak-check.sh ] || [ -z "${STUB_NOTE:-}" ] || echo "$STUB_NOTE"
 [ -z "${STUB_LINES:-}" ] || seq -f 'line %g' 1 "$STUB_LINES"
 for key in "$name.${1##*/}" "$name"; do
   f="$STUB_REC/rc.$key"
@@ -82,7 +83,7 @@ R="$(cd "$R" && pwd -P)"
 reset() { rm -rf "$REC"; mkdir -p "$REC"; }
 rcseq() { local key="$1"; shift; printf '%s\n' "$@" > "$REC/rc.$key"; }
 go() { OUT="$(cd "${CWD:-$R}" && env -i PATH="$T/bin:$T/real" HOME="$T/home" STUB_REC="$REC" ${STUB_RESOLVE_RC:+STUB_RESOLVE_RC="$STUB_RESOLVE_RC"} ${TEST_LEAK_TERMS:+LEAK_TERMS="$TEST_LEAK_TERMS"} \
-  ${STUB_PH:+STUB_PH=1} ${STUB_SP_CRASH:+STUB_SP_CRASH=1} ${STUB_SP_RC:+STUB_SP_RC="$STUB_SP_RC"} ${STUB_LINES:+STUB_LINES="$STUB_LINES"} \
+  ${STUB_NOTE:+STUB_NOTE="$STUB_NOTE"} ${STUB_PH:+STUB_PH=1} ${STUB_SP_CRASH:+STUB_SP_CRASH=1} ${STUB_SP_RC:+STUB_SP_RC="$STUB_SP_RC"} ${STUB_LINES:+STUB_LINES="$STUB_LINES"} \
   bash "$R/.claude/scripts/check-templates.sh" "$@" 2>&1)"; RC=$?; }
 want() { printf '%s' "$1"; shift; [ "$#" = 0 ] || printf ' %q' "$@"; }
 chk() { local n="$1"; shift; if "$@"; then ok "$n"; else bad "$n" "rc=$RC" "$OUT"; fi; }
@@ -100,7 +101,7 @@ reset; go; chk "usage: no argument prints the usage line, exit 2, no check run" 
 reset; go docs/a.md ''; chk "usage: an empty argument beside a file" rejected "$USAGE"
 
 reset; go docs/a.md
-chk "all green: exit 0 and the verdict lines, one each, in order" bash -c '[ "$1" = 0 ] && [ "$(grep -E "^(PASS|FAIL|SKIP) " <<<"$0" | cut -d" " -f2 | tr "\n" " ")" = "rumdl leak clone placeholders scratch-paths descriptions manifest codex-markers opencode-writer-refs " ] && ! grep -qE "^(FAIL|SKIP) " <<<"$0"' "$OUT" "$RC"
+chk "all green: exit 0 and the verdict lines, one each, in order" bash -c '[ "$1" = 0 ] && [ "$(grep -E "^(PASS|FAIL|SKIP) " <<<"$0" | cut -d" " -f2 | tr "\n" " ")" = "rumdl leak clone placeholders scratch-paths descriptions manifest codex-markers opencode-writer-refs " ] && ! grep -qE "^(FAIL|SKIP) " <<<"$0" && grep -qxF "PASS leak" <<<"$0" && ! grep -q "structural-only" <<<"$0"' "$OUT" "$RC"
 
 reset; CWD="$R/docs" go a.md
 chk "path: cwd-relative resolves, rumdl gets the repository path" called "$(want rumdl check --output-format concise docs/a.md)"
@@ -123,6 +124,11 @@ reset; go docs/a.md scripts/a.sh
 chk "leak: every named file, as --files, run from the root" called "$(want leak-check.sh --files docs/a.md scripts/a.sh)"
 reset; go docs/nope.md
 chk "leak: no resolved file prints SKIP leak" line "SKIP leak (no named file it applies to)"
+reset; STUB_NOTE='leak-check: PRIVATE COVERAGE SKIPPED — explicit structural-only policy; scanning 4 structural pattern(s)' go docs/a.md
+chk "leak: a scan under the structural-only policy passes as PASS leak (structural-only), the denylist applied to none" line "PASS leak (structural-only)"
+# The plain denylist PASS case is covered by the all-green assertion above.
+reset; STUB_NOTE='leak-check: PRIVATE COVERAGE SKIPPED — explicit structural-only policy' rcseq leak-check.sh 1; go docs/a.md
+chk "leak: a failing structural-only scan is FAIL leak, never the structural-only PASS" bash -c 'grep -qxF "FAIL leak" <<<"$0" && ! grep -q "structural-only" <<<"$0"' "$OUT"
 reset; go docs/a.md
 chk "leak: LEAK_TERMS defaults to the main checkout's scripts/leak-terms.txt" grep -qxF "leak-check.sh $R LEAK_TERMS=$R/scripts/leak-terms.txt" "$REC/env"
 reset; TEST_LEAK_TERMS=/elsewhere/terms.txt go docs/a.md
@@ -186,26 +192,29 @@ chk "log: the path is printed as 'log: /tmp/{project}/check-templates/{UTC}-{pid
 chk "log: the checks' full output is in the file and not on the screen" bash -c 'grep -qx "OUT-OF-clone-check.sh" "$0" && grep -qx "line 3" "$0" && ! grep -q "OUT-OF" <<<"$1"' "$LOGF" "$OUT"
 
 reset; rm "$T/bin/jq"; go docs/a.md
-chk "install: a missing jq prints only the FAIL install line, exit 1, no check run" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: a missing jq prints only the GAP install line naming jq, exit 3, no check run" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap jq)"
 cp "$T/stub.sh" "$T/bin/jq"
 reset; rm "$T/bin/node"; go docs/a.md
-chk "install: a missing node" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: a missing node is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap node)"
 cp "$T/stub.sh" "$T/bin/node"
 reset; rm "$T/bin/python3"; go docs/a.md
-chk "install: a missing python3" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: a missing python3 is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap python3)"
 cp "$T/stub.sh" "$T/bin/python3"
 reset; rcseq python3.-c 1; go docs/a.md
-chk "install: PyYAML not importable" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: PyYAML not importable is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap PyYAML)"
 reset; rm "$T/bin/rumdl"; go docs/a.md
-chk "install: rumdl on neither PATH nor the uv tool dir" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: rumdl on neither PATH nor the uv tool dir is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap rumdl)"
 mkdir -p "$T/home/.local/share/uv/tools/rumdl/bin"; cp "$T/stub.sh" "$T/home/.local/share/uv/tools/rumdl/bin/rumdl"
 reset; go docs/a.md
 chk "install: rumdl found in the uv tool dir passes and is the one run" bash -c '[ "$1" = 0 ] && grep -qxF "rumdl check --output-format concise docs/a.md" "$2/calls"' "$OUT" "$RC" "$REC"
+rm "$T/bin/jq" "$T/home/.local/share/uv/tools/rumdl/bin/rumdl"; reset; STUB_RESOLVE_RC=2 go docs/a.md
+chk "install: every missing tool is named in the one GAP line, exit 3 and never a failed check's 1" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap 'jq, rumdl, jscpd')"
+cp "$T/stub.sh" "$T/bin/jq"; cp "$T/stub.sh" "$T/home/.local/share/uv/tools/rumdl/bin/rumdl"
 reset; STUB_RESOLVE_RC=2 go docs/a.md
-chk "install: clone-check cannot resolve the pinned jscpd" bash -c '[ "$1" = 1 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$INSTALL"
+chk "install: clone-check cannot resolve the pinned jscpd, which is named" bash -c '[ "$1" = 3 ] && [ "$0" = "$2" ]' "$OUT" "$RC" "$(gap jscpd)"
 reset; go docs/a.md
 chk "install: clone-check resolves the pinned jscpd, install passes" bash -c '[ "$1" = 0 ]' "$OUT" "$RC"
 reset; STUB_RESOLVE_RC=2 go nope.md
-chk "install: no FAIL path line beside the install line" bash -c '[ "$0" = "$1" ]' "$OUT" "$INSTALL"
+chk "install: no FAIL path line beside the install line" bash -c '[ "$0" = "$1" ]' "$OUT" "$(gap jscpd)"
 
 shtest_end

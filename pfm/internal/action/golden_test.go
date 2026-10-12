@@ -17,6 +17,8 @@ func TestGoldenCommandLines(t *testing.T) {
 	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
 	t.Cleanup(func() { newSessionID = previous })
 	home := t.TempDir()
+	// The launcher is part of every interactive launch line, so the goldens pin its words.
+	installCostLauncher(t, home)
 	var actual bytes.Buffer
 	lastRoute := Route(0)
 	personaRows, prompt := personaGoldenRequests(t, home)

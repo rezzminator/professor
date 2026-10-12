@@ -1,8 +1,3 @@
-**Title:** Tutorials | Ubuntu
-**Source:** Ubuntu
-
----
-
 # Tutorials
 
 These tutorials provide a step-by-step process to doing development and dev-ops activities on Ubuntu machines, servers or devices.
@@ -105,4 +100,4 @@ Install and configure Samba to share files across a network.
 4. [3](?page=3)
 5. [4](?page=4)
 6. [5](?page=5)
-7. *Next page*
+7. [*Next page*](?page=2)

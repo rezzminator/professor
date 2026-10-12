@@ -1,0 +1,22 @@
+{
+ "test": "--flight: a directory with neither agents.tsv nor run.md fails loudly",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--flight",
+  "{TMP}/empty-aRutlO",
+  "--root",
+  "{FIX}/claude/projects"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 2,
+ "signal": null,
+ "inputs": [
+  "empty-aRutlO"
+ ],
+ "outputs": {},
+ "dirs": [
+  "empty-aRutlO"
+ ]
+}

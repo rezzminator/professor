@@ -35,7 +35,54 @@ var initTemplatePaths = []struct {
 	{source: "project/epics", target: "docs/epics"},
 	{source: "project/codex", target: ".codex"},
 	{source: "project/docs-commands", target: "docs/commands"},
-	{source: "project/docs-agents", target: "docs/agents"},
+	{source: "project/docs-hub", target: "docs"},
+}
+
+// renamedProjectTemplates are the project templates a release renamed, with the
+// target each was deployed to and the one its successor deploys to. A pin of
+// the old template reads MOVED, naming the successor, never GONE-UPSTREAM next
+// to an unrelated NEW row; keep the targets in step with initTemplatePaths.
+var renamedProjectTemplates = []struct {
+	oldTemplate, newTemplate string
+	oldTarget, newTarget     string
+}{
+	{"project/docs-agents/_index.md", "project/docs-hub/_index.md", "docs/agents/_index.md", "docs/_index.md"},
+	{
+		"project/docs-agents/standards.md",
+		"project/docs-hub/standards.md",
+		"docs/agents/standards.md",
+		"docs/standards.md",
+	},
+}
+
+// projectMove is where a renamed template went: its successor template and the
+// local path that successor deploys to. The zero value is no move.
+type projectMove struct {
+	MovedTo    string `json:"movedTo,omitempty"`
+	MovedLocal string `json:"movedLocal,omitempty"`
+}
+
+// goneOrMoved classifies a pinned template the store no longer holds: MOVED
+// when this release renamed it and the store holds the successor (which is then
+// marked in pinned, so the successor is no separate NEW row for an adopter who
+// holds the old pin), GONE-UPSTREAM otherwise. Only an absent successor leaves
+// the pin GONE-UPSTREAM; a successor the store cannot be asked about is an
+// error, never advice to delete.
+func goneOrMoved(templates, template string, pinned map[string]bool) (projectStatus, projectMove, error) {
+	for _, renamed := range renamedProjectTemplates {
+		if renamed.oldTemplate != template {
+			continue
+		}
+		successor := filepath.Join(templates, filepath.FromSlash(renamed.newTemplate))
+		if _, err := os.Stat(successor); errors.Is(err, fs.ErrNotExist) {
+			break
+		} else if err != nil {
+			return "", projectMove{}, fmt.Errorf("UNREADABLE %s: %w", successor, err)
+		}
+		pinned[renamed.newTemplate] = true
+		return projectMoved, projectMove{MovedTo: renamed.newTemplate, MovedLocal: renamed.newTarget}, nil
+	}
+	return projectGoneUpstream, projectMove{}, nil
 }
 
 type initCopy struct {
@@ -186,6 +233,19 @@ func planInitCopies(store Store) ([]initCopy, error) {
 		}
 	}
 	sort.Slice(plan, func(i, j int) bool { return plan[i].local < plan[j].local })
+	// Mappings nest (project/docs-hub deploys into docs/, the parent of
+	// docs/epics and docs/commands): two templates on one local path would
+	// overwrite each other's file and pin, so the store is refused.
+	for i := 1; i < len(plan); i++ {
+		if plan[i].local == plan[i-1].local {
+			return nil, fmt.Errorf(
+				"templates %s and %s both deploy to %s",
+				plan[i-1].template,
+				plan[i].template,
+				plan[i].local,
+			)
+		}
+	}
 	return plan, nil
 }
 

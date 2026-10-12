@@ -147,6 +147,31 @@ func TestRunUpdateCandidateCommandClearsInheritedSourceRepo(t *testing.T) {
 	t.Fatalf("candidate environment omitted an explicit empty PFM_SOURCE_REPO: %v", capturedEnv)
 }
 
+// Every update child (baseline doctor, candidate install and doctor, the
+// rollback's install) runs with no price refresh: a rewritten tracked
+// prices.json would refuse the fast-forward and a rollback's reset --keep.
+func TestRunUpdateCandidateCommandNeverRefreshesPrices(t *testing.T) {
+	var capturedEnv []string
+	restore := StubRunnerForTest(scriptedUpdateRunner{startEnv: &capturedEnv})
+	t.Cleanup(restore)
+	t.Setenv(paths.EnvPricesOffline, "0")
+
+	if err := runUpdateCandidateCommand(
+		context.Background(), "/tmp/pfm-candidate", "", t.TempDir(), "", io.Discard, io.Discard, "install", "--yes",
+	); err != nil {
+		t.Fatalf("runUpdateCandidateCommand() error = %v", err)
+	}
+	var offline []string
+	for _, entry := range capturedEnv {
+		if strings.HasPrefix(entry, paths.EnvPricesOffline+"=") {
+			offline = append(offline, entry)
+		}
+	}
+	if len(offline) != 1 || offline[0] != paths.EnvPricesOffline+"=1" {
+		t.Fatalf("candidate price knob = %q, want exactly %s=1", offline, paths.EnvPricesOffline)
+	}
+}
+
 func TestApplyUpdateInstallConfig(t *testing.T) {
 	for _, testcase := range []struct {
 		name        string

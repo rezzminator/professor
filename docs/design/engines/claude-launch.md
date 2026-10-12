@@ -29,8 +29,9 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 - **One `--settings` payload carries almost everything.** Environment variables ride its `env` block and every other setting rides its own key. `--settings` outranks the project and account settings files, and its `env` overwrites the shell's value, so a launch value cannot be shadowed by a project file or an exported variable.
 - **Three things stay outside it.** `CLAUDE_CONFIG_DIR` is process environment because it chooses where Claude reads settings from; the unset list is `env -u` because a settings `env` block can set a variable but not remove one; `--system-prompt-file`, `--mcp-config` and the session verbs (`--session-id`, `--resume`, `--fork-session`, `--name`) are flags because no settings key replaces them; the autonomy pair, `--model` and `--effort` stay flags because a flag outranks its settings key.
 - **Defaults come only from `pfm.config.json`.** A per-launch choice changes one launch; no door carries a default of its own ([pfm-home.md](pfm-home.md#decisions)).
+- **Helper calls run on Haiku, always.** Claude Code's helper calls (the page summary behind WebFetch, session and tool-use-summary titles, a hook's prompt, and the WebSearch call while its server flag `tengu_plum_vx3` is true) take their model from one resolver that reads `ANTHROPIC_SMALL_FAST_MODEL` first; unset, a gateway host runs them on the main chat's model. `helperModel` carries the variable through every door, defaulting to the full id `claude-haiku-5-5`, and the hygiene unset stays so an exported value never reaches a launch the settings do not carry. `ANTHROPIC_DEFAULT_HAIKU_MODEL` is not used: it redefines the `haiku` alias, so it would move Haiku sub-agents too. A caller's own `--settings` on a headless run replaces pfm's whole payload, this key included.
 - **Agent teams are off, always.** `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` is a constant row, not a config key, and no project file needs to carry it.
-- **The plugin env rides the launch.** `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and the auto-compact window are launch values, never account `settings.json` keys; keys an older install wrote there stay, outranked by `--settings`.
+- **The plugin env rides the launch.** `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and the auto-compact window are launch values, never account `settings.json` keys; keys an older install wrote there stay, outranked by `--settings`. The variable does not override a cached `cachedGrowthBookFeatures.tengu_plugin_hooks_modules: false` in `{configDir}/.claude.json`, which a gateway host never refreshes; `pfm doctor`'s `function-hook-modules` row reports it.
 
 ## How Claude layers its settings
 
@@ -52,7 +53,7 @@ type Knob struct {
 }
 ```
 
-`Knobs` lists every row. `Render(Request, pfmconfig.Config) (Launch, error)` resolves each row for one launch and returns `Launch{Unset, Env, Argv}`. `ClaudeSpawn.ShellCommand` (`pfm/internal/action/claude_spawn.go`) prints it as `env -u … NAME=value … claude <argv>` for a tmux pane; `ClaudeSpawn.Command` execs it directly. Neither adds a word of its own.
+`Knobs` lists every row. `Render(Request, pfmconfig.Config) (Launch, error)` resolves each row for one launch and returns `Launch{Unset, Env, Wrapper, Binary, Argv}`. `ClaudeSpawn.ShellCommand` (`pfm/internal/action/claude_spawn.go`) prints it as `env -u … NAME=value … [wrapper] claude <argv>` for a tmux pane; `ClaudeSpawn.Command` execs it directly, the wrapper first when there is one. Neither adds a word of its own. The wrapper is the cost ledger's launcher ([cost-ledger.md](cost-ledger.md#the-launch)); it execs Claude and keeps its pid, so the process a live chat shows is Claude's own.
 
 ## Wires
 
@@ -62,6 +63,8 @@ type Knob struct {
 | `WireEnv` | a process environment assignment | `CLAUDE_CONFIG_DIR`, the cache handoff `CACHE_LIVE_CONTROL_MAIN_TTL`, `CLAUDE_CODE_SHELL` |
 | `WireUnset` | `env -u NAME` before exec | the hygiene list |
 | `WireFlag` | a command-line flag | the prompt file, MCP config, autonomy pair, model, effort, session verbs |
+| `WireWrapper` | argv words in front of the binary (`Launch.Wrapper`) | `costLedger` |
+| `WireWrapperEnv` | a process environment value only the wrapper can set, because it depends on a socket the wrapper binds just before exec | the nine exporter variables, the `PFM_COST_LEDGER` marker and `PFM_COST_LEDGER_PID` |
 
 ## Knobs
 
@@ -77,6 +80,7 @@ type Knob struct {
 | `maxConcurrentSubagents` | settings `env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | config | unset (Claude's own default) |
 | `webSearchesPerSession` | settings `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | config | `9007199254740991` |
 | `autoCompactWindow` | settings `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` | config | `100000` |
+| `helperModel` | settings `env.ANTHROPIC_SMALL_FAST_MODEL`: the model of Claude Code's helper calls (WebFetch's page summary, the WebSearch call, session and tool-use-summary titles); the main chat and the sub-agents keep their own models. Every door carries it: `Render`, the passthrough launcher (`SessionEnv`, as a process-environment value replacing an inherited one), a headless run's `--settings`, where it is the default or `helperModel` from `--pfm-settings`, since headless reads no config ([claude-headless.md](claude-headless.md#decisions)) | config | `claude-haiku-5-5` |
 | `tmuxTruecolor` | settings `env.CLAUDE_CODE_TMUX_TRUECOLOR=1` | config | `true` |
 | `noFlicker` | settings `env.CLAUDE_CODE_NO_FLICKER=1`, keeping the fullscreen renderer past Claude's boot canary; not on a query | account settings `tui: fullscreen` | off |
 | agent teams | settings `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` | constant | — |
@@ -86,6 +90,10 @@ type Knob struct {
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
 | status lines | settings `statusLine`, `subagentStatusLine` — `docs/design/context/statusline.md` | constant | — |
+| `costLedger` | wrapper `pfm internal cost-launch --` in front of the binary: it binds a loopback sink and execs Claude with the exporter variables below; `false`, or the user's own telemetry settings, launch without and record `PFM_COST_LEDGER=off` or `preempted` — [cost-ledger.md](cost-ledger.md#the-launch) | config (machine-wide) | `true` |
+| cost exporters | wrapper env `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_TRACES_EXPORTER=otlp`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_METRICS_EXPORTER=none`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:{port}`, `OTEL_LOGS_EXPORT_INTERVAL=1000`, `OTEL_BSP_SCHEDULE_DELAY=1000` | constant | — |
+| cost marker | wrapper env `PFM_COST_LEDGER=on\|off\|preempted\|failed`, the decision the status lines read | constant | — |
+| cost pid | wrapper env `PFM_COST_LEDGER_PID={pid}`, the process the armed sink serves: a second pass of that same process (the wrapper exec'd pfm's `claude` shim) keeps its sink | constant | — |
 | MCP | flag `--mcp-config {file}` — a per-launch 0600 file holding `professor` and third-party entries | config | — |
 | `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass` | config | `bypass` |
 | model | flag `--model` | launch | unset |
@@ -146,15 +154,18 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `maxConcurrentSubagents` | unset | sub-agent concurrency |
 | `webSearchesPerSession` | `9007199254740991` | web-search cap |
 | `autoCompactWindow` | `100000` | auto-compact window |
+| `helperModel` | `claude-haiku-5-5` | the helper-call model (`ANTHROPIC_SMALL_FAST_MODEL`); a full model id or alias with no whitespace, an empty value is refused; an account may override it |
 | `tmuxTruecolor` | `true` | truecolor under tmux |
 | `noFlicker` | off | not a config key: on when the account's `settings.json` has top-level `"tui": "fullscreen"` |
+| `costLedger` | `true` | the per-call cost ledger ([cost-ledger.md](cost-ledger.md)); machine-wide, an account-level value is refused |
 | `cleanupPeriodDays` | `36500` | transcript retention (also the managed value) |
 | `requireManagedCleanup` | `true` | `pfm doctor` warns when the managed `cleanupPeriodDays` file is absent; `false` silences it |
 
 ## The rendered launch
 
 ```text
-env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} {binary} {door verbs} \
+env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} [PFM_COST_LEDGER=off|failed] \
+  [~/.local/bin/pfm internal cost-launch --] {binary} {door verbs} \
   --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
   [--mcp-config ~/.local/state/pfm/mcp-config/claude-mcp-{random}.json] \
   [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions]
@@ -166,7 +177,7 @@ env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={
 - **Launch points at the repo.** `--system-prompt-file` is `{clone}/pfm/harness-prompts/composed/claude.md`, `{clone}` from the source-repo record. Nothing is copied at install.
 - **Workbench launches** replace the composed file with the manifest prompt; explicit `--system-prompt-file` / `--harness-prompt` win, and a role seat composes on that base (`internal/workbench/persona.go`, `internal/agentrole/base_prompt.go`).
 - **Role seats** compose the claude prompt with the role into a seat file under the SID dir and pass that instead (`agentrole.ComposeSeatPrompt`); `pfm chat reload` refreshes it before respawning.
-- **Missing file fails open:** the launch omits the flag and starts on Claude's own prompt; spawn-audit reports it.
+- **Missing file fails open, loudly:** the launch omits the flag and starts on Claude's own prompt, and the starter is told why (`claudelaunch.PromptWarning`, the one verdict) on the surface they launched from: stderr for `chat new` / `chat branch` / the picker / the launcher, the tool message for `chat_open`, the pane for agent resume, the reload worker's log plus a pane display for reload; spawn-audit reports it too. A surface that attaches next (the picker, the launcher, `chat new --attach`) holds for Enter when stdin and stderr are both a terminal, so the attach cannot cover the warning (`internal/launchnotice`); off a terminal it only prints, and Ctrl-C at the launcher's prompt kills the server it made. Agent resume prints in the pane without waiting, since a detached pane has nobody to press Enter. A caller-stated `--system-prompt` or `--system-prompt-file` is deliberate and never warned.
 
 ## Doors
 
@@ -178,7 +189,7 @@ Each door builds a `claudelaunch.Request` — account, purpose, door verbs, per-
 
 ### HeadlessFork
 
-`pfm chat branch`. Verbs: `--resume {id} --fork-session --name {name}`; model from the running chat. It records the launch once the fork's new session id resolves.
+`pfm chat branch`. Verbs: `--resume {id} --fork-session --name {name}`; model from the running chat. Its account is `--account`, else the parent's launch record, else the account its live seat runs on; with none of them and more than one configured account it refuses and asks for `--account`. It records the launch once the fork's new session id resolves. Claude writes the fork's transcript at its first prompt, so until then the fork is listed by its crumb under the window name it was launched with.
 
 ### Synthesize
 
@@ -204,7 +215,7 @@ A `claude` typed at a shell, through [the managed launcher](#the-managed-launche
 
 1. Render doors: `PlanClaude`, `HeadlessFork`, `Synthesize` (fresh, resume and agent fallback), `AgentOpen` resume, `claudeRun` and `LauncherRun` call `claudelaunch.Render`.
 2. Headless: `claudelaunch.RenderHeadless` supplies `--settings` for `pfm headless exec`, `pfm ask`, the limits ACK and the doctor capture.
-3. Passthrough that starts a session: `pfm internal launch` supplies the two plugin values in its process environment.
+3. Passthrough that starts a session: `pfm internal launch` supplies the two plugin values in its process environment and, for an interactive start, arms the cost ledger itself (`costsink.PrepareCurrent`: the exporter variables and the `PFM_COST_LEDGER` marker, [cost-ledger.md](cost-ledger.md#doors)).
 4. VS Code terminal: its `PATH` finds pfm's `claude` shim, so a typed session takes a render or passthrough door.
 
 Query-purpose `agents --json` and the exempt subcommands start no session.
@@ -215,9 +226,9 @@ The VS Code Claude extension's panel is not a pfm launch door. pfm never launche
 
 ## The managed launcher
 
-1. `~/.local/bin/claude` links to `~/.local/share/pfm/install/bin/claude`, which runs `pfm internal claude-launch "$@"`.
+1. `~/.local/bin/claude` links to `~/.local/share/pfm/install/bin/claude`, which runs `pfm internal claude-launch "$@"`, first giving an unset `CLAUDE_CONFIG_DIR` the login default ([claude-config-dir.md](claude-config-dir.md#launches-outside-pfm)).
 2. `claude-launch` resolves the real binary — `claude.binary`, else the newest native version under `~/.local/share/claude/versions/`, else `PATH` — never the launcher itself.
-3. **Passthrough** — `PFM_LAUNCH_PASSTHROUGH=1`, already inside a pfm tmux socket, `-p`/`--print`/`--output-format`/`-h`/`--help`/`--version`/`-v`, or the subcommands `agents mcp update install doctor setup-token plugin config` — execs the real binary. Such a run carries no pfm settings except, when it starts a session, the two plugin env values in its process environment; the managed `cleanupPeriodDays` still applies to it.
+3. **Passthrough** — `PFM_LAUNCH_PASSTHROUGH=1`, already inside a pfm tmux socket, `-p`/`--print`/`--output-format`/`-h`/`--help`/`--version`/`-v`, or the subcommands `agents mcp update install doctor setup-token plugin config` — execs the real binary. Such a run carries no pfm settings except, when it starts a session, the two plugin env values in its process environment and, unless it is a print-mode run, the cost ledger's exporter variables and marker; the managed `cleanupPeriodDays` still applies to it.
 4. Otherwise it renders `LauncherRun` into a fresh `cc-` tmux socket.
 
 The `SessionStart` hook `launcher-repair` re-links a displaced launcher. Version retention keeps the newest two versions plus any a live process runs.
@@ -254,4 +265,5 @@ Values set through the `--settings` `env` block are read from argv, never from `
 - `claudelaunch.Knobs` ↔ `example.pfm.config.json` (every config-sourced knob has its key there) ↔ `pfm config claude` ↔ the mock engine's accepted flags (`pfm/internal/mockengine/claude.go`).
 - The hygiene rows ↔ the Codex launch's unset list (`pfm internal codex-launch`) ↔ the headless strip lists ↔ the doctor harness probe's capture environment — all read from the registry.
 - `outputStyle` constant ↔ the gate in `infra/check-self-hosted-manifest.sh`.
+- The cost rows (`costLedger`, the exporter variables, the `PFM_COST_LEDGER` marker) ↔ `pfm/internal/claudelaunch/cost.go` ↔ [cost-ledger.md](cost-ledger.md); `PFM_COST_LEDGER_DIR` (`pfm/internal/paths/paths.go`) names the ledger directory the sink writes and every reader opens.
 - `pfm/harness-prompts/composed/*.md` ↔ their parts.

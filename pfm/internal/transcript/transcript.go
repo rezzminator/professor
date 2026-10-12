@@ -20,6 +20,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 )
 
 // Roles an Entry can carry.
@@ -96,13 +97,6 @@ type payloadRecord struct {
 type codexTurnError struct {
 	Message string          `json:"message"`
 	Info    json.RawMessage `json:"codex_error_info"`
-}
-
-type contentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
 }
 
 // Parse reads one transcript line. The second result is false for every line
@@ -287,17 +281,19 @@ func turnErrorKind(raw json.RawMessage) string {
 
 // toolCall extracts the first tool_use block of a Claude message.
 func toolCall(raw json.RawMessage) (Entry, bool) {
-	blocks, ok := decodeBlocks(raw)
+	blocks, ok := DecodeContent(raw)
 	if !ok {
 		return Entry{}, false
 	}
-	for _, block := range blocks {
-		if block.Type != "tool_use" || block.Name == "" {
+	for index := range blocks {
+		block := &blocks[index]
+		name, _ := pyvalue.String(block.Name)
+		if block.Kind() != "tool_use" || name == "" {
 			continue
 		}
 		return Entry{
 			Role:  RoleTool,
-			Tool:  block.Name,
+			Tool:  name,
 			Input: strings.TrimSpace(string(block.Input)),
 		}, true
 	}
@@ -314,31 +310,21 @@ func Visible(raw json.RawMessage) string {
 		}
 		return text
 	}
-	blocks, ok := decodeBlocks(raw)
+	blocks, ok := DecodeContent(raw)
 	if !ok {
 		return ""
 	}
 	texts := make([]string, 0, len(blocks))
-	for _, block := range blocks {
-		switch block.Type {
+	for index := range blocks {
+		block := &blocks[index]
+		switch block.Kind() {
 		case "text", "input_text", "output_text":
-			if block.Text != "" && !strings.HasPrefix(block.Text, "<system-reminder>") {
-				texts = append(texts, block.Text)
+			if text, _ := pyvalue.String(block.Text); text != "" && !strings.HasPrefix(text, "<system-reminder>") {
+				texts = append(texts, text)
 			}
 		}
 	}
 	return strings.Join(texts, "\n\n")
-}
-
-func decodeBlocks(raw json.RawMessage) ([]contentBlock, bool) {
-	if len(raw) == 0 {
-		return nil, false
-	}
-	var blocks []contentBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return nil, false
-	}
-	return blocks, true
 }
 
 // Condensed renders one entry as a single line: T for a tool call, A for the

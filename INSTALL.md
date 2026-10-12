@@ -24,7 +24,24 @@ Shortest path first.
 
 ## Runtime prerequisites for the `pfm` install paths
 
-Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `jq`, a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires `setsid`; macOS requires `ps`, `lsof`, and `launchctl`. `systemd` on Linux is optional when user units are unavailable, but the scheduler surface cannot be enabled without it.
+Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `jq`, `python3` (the tracer's tracetree kit and its launch hook run on it; `pfm install` checks it and never installs it), a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires `setsid`; macOS requires `ps`, `lsof`, `launchctl`, and `/usr/bin/security`. `systemd` on Linux is optional when user units are unavailable, but the scheduler surface cannot be enabled without it.
+
+### The engine-sync binary
+
+`pfm install --yes` renders machine-global agents and Codex outputs through `engine-sync global`, which links the Claude agent registry out of the Professor clone. The install therefore needs the engine-sync binary at `~/.local/share/engine-sync/bin/engine-sync` (under an absolute `$ENGINE_SYNC_HOME`, else an absolute `$XDG_DATA_HOME/engine-sync`, when configured) whenever either of these holds:
+
+- a Professor source clone exists at the path `pfm` recorded, or at `~/.professor` by default: path 2, path 3, the README's discipline-layer clone, and every host that runs `pfm update`;
+- a Codex home is configured: `codex.homes`, below, or a logged-in `~/.codex` discovered when that key is absent. An explicitly empty `codex.homes` list or `--skip-engine codex` means none.
+
+When required but unavailable, the binary produces `engine-sync binary unavailable: {path}: …`. Other install steps still apply; `pfm install --yes` reports its changes and exits 1 with that error. Produce the binary and rerun install to complete the step. `pfm update` rolls back on the install error (exit 5). `pfm install --check` stops before this step and does not report it. A binary-only install (path 1) with no clone and no configured or discovered Codex home skips the unavailable-binary step with a visible note and needs no binary.
+
+`pfm install` never installs engine-sync. Produce the binary before the first `pfm install --yes` or `pfm update` on a clone host:
+
+1. Install the plugin: `claude plugin marketplace add rezzminator/professor`, then `claude plugin install engine-sync@professor`.
+2. Start a new Claude session. The plugin's `SessionStart` hook runs its wrapper, which downloads the release binary for the plugin's version, checks it against the plugin's `SHA256SUMS` and links it at the stable path above. A failed download backs off for a minute and is retried by a later session start.
+3. Confirm: `test -x ~/.local/share/engine-sync/bin/engine-sync && echo ok` (use the resolved path above if you configured another engine-sync home).
+
+An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@professor`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link; rebuilding pfm does not produce engine-sync.
 
 The `claude` and `codex` executables are not installed by `pfm`. Their self-doctors are optional engine diagnostics even when accounts are configured: a broken engine capability stays visible, but it cannot block unrelated host installation. Use `--skip-engine codex` to skip the Codex probe and leave Codex mirror and hook surfaces unmanaged for this run.
 
@@ -106,9 +123,9 @@ Use `pfm`, `pfm chat open <target>` and the picker’s account selector. Reload 
 
 Optional memory helpers use `memory-wire.sh` and `memory-consolidate.sh`. The `memory-helpers` host check refuses recognized copies under their old names and prints the moves and hook edits; run those fixes before installation. Helpers are never executed by the check.
 
-**Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` covers host checks (a BLOCK row exits 4), existence of an explicit `--config` (missing exits 1), required dependencies (failure exits 1), and both name-sync and reminder scheduler jobs. It never waits for a running job: either job exits 4. A scheduler it cannot probe prints a `skip` line and the check still passes if the other checks pass. It stops before the config seed and the installer's own plan pass, so exit 0 is no promise that `pfm install --yes` will not refuse.
+**Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` covers host checks (a BLOCK row exits 4), existence of an explicit `--config` (missing exits 1), required dependencies (failure exits 1), and both name-sync and schedule-fire jobs. A running name-sync job exits 4 at once. A running schedule fire is waited out: the check pauses for up to 90 s and prints nothing meanwhile, then exits 4 if the fire is still running. A scheduler it cannot probe prints a `skip` line and the check still passes if the other checks pass. It stops before the config seed and the installer's own plan pass, so exit 0 is no promise that `pfm install --yes` will not refuse.
 
-A mutating install refuses a running name-sync job at once with exit 97. It waits up to 90 s for a running reminder fire, then refuses with exit 97 if the fire is still running. Wait for the job to finish, or stop it before retrying: on Linux, `systemctl --user stop pfm-name-sync.service` or `systemctl --user stop pfm-reminder.service`; on macOS, `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` or `launchctl bootout gui/$(id -u)/com.professor.pfm.reminder`. Installation does not move legacy config or databases; `pfm doctor` prints those fixes.
+A mutating install refuses a running name-sync job at once with exit 97. It waits up to 90 s for a running schedule fire, then refuses with exit 97 if the fire is still running. Wait for the job to finish, or stop it before retrying: on Linux, `systemctl --user stop pfm-name-sync.service` or `systemctl --user stop pfm-schedule.service`; on macOS, `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` or `launchctl bootout gui/$(id -u)/com.professor.pfm.schedule`. Installation does not move legacy config or databases; `pfm doctor` prints those fixes.
 
 ### First install on a host that already used Claude
 
@@ -174,7 +191,7 @@ pfm install
 pfm install --yes
 ```
 
-Same eight base surfaces, the same optional VS Code surface, and the same rc-97 gate.
+Same eight base surfaces, the same optional VS Code surface, and the same rc-97 gate. The clone is what makes the [engine-sync binary](#the-engine-sync-binary) a requirement: produce it before the `pfm install --yes` above.
 
 ---
 
@@ -182,7 +199,7 @@ Same eight base surfaces, the same optional VS Code surface, and the same rc-97 
 
 Everything above, plus `CLAUDE.md`, per-project agents, commands, docs scaffolding, and the whole pipeline. `pfm init` scaffolds the project layer once, with template tokens intact and per-file baseline pins; the Claude-guided interview then records your answers in `.professor/manifest.json` `tokens`, runs `pfm init --render` to fill the install-time tokens once, and adapts the roster and structure of those local files in place. Updates never re-render. Nothing here duplicates what paths 1/2 already do.
 
-**Prerequisites:** Claude Code CLI, logged in. A git repository — if the project isn't one, Claude asks before `git init`. `jq` — required by the host installer and several hooks (`brew install jq` / `apt install jq`). `rumdl` — the markdown lint/format engine behind `/quality:md-forlint` and the format hook; `pfm install` provisions it, and `pfm doctor` carries its row. Optional, per opt-in: `tmux` (host fleet), `gh`/`glab` (git-host skill). Ten to fifteen minutes of your attention.
+**Prerequisites:** Claude Code CLI, logged in. The [engine-sync binary](#the-engine-sync-binary), because this path runs from a clone. A git repository — if the project isn't one, Claude asks before `git init`. `jq` — required by the host installer and several hooks (`brew install jq` / `apt install jq`). `rumdl` — the markdown lint/format engine behind `/quality:md-forlint` and the format hook; `pfm install` provisions it, and `pfm doctor` carries its row. Optional, per opt-in: `tmux` (host fleet), `gh`/`glab` (git-host skill). Ten to fifteen minutes of your attention.
 
 Initialize the target project, then follow the path printed by `pfm init`:
 
@@ -250,6 +267,8 @@ Each tier has one source of truth and one update mechanism:
 
 A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.md`, `.codex/**`, `.opencode/**` are generated, never tracked (see [`.gitignore`](.gitignore)). Opening it in Claude Code first generates them via the `Stop` hook; opening it in Codex or OpenCode before that first Claude turn needs `pfm codex build .` and `pfm opencode build .` run once by hand. `pfm install` compiles the machine-global `.toml` twins the same way, into pfm's own generated directory — never into the clone.
 
+**Before `pfm update` on a clone host, confirm the engine-sync binary exists** (`test -x ~/.local/share/engine-sync/bin/engine-sync`; the steps that produce it are under [The engine-sync binary](#the-engine-sync-binary)). The update ends in `pfm install --yes`, which refuses without it, and the update then rolls back. A host updating from a release that compiled Codex output in-process has no such binary yet, so install the plugin first; the binary you run today does not need it.
+
 **Read every release you skipped before you update.** `pfm version` names the installed release; each later `releases/vX.Y.Z.md` up to the target is one release's changes, and its `#### → For:` lines are what that release asks of you, each marked `before update`, `after update` or `per project` (the grammar is `docs/RELEASE.md` § Release notes). A release whose note carries `#### → Stop:` is a required stop: update to it first, finish its actions, then continue. Read all of them first — five versions behind is five files — and merge their actions into one list, a later release's action superseding an earlier one on the same surface. Then run `pfm update` and work through the list; `pfm update` prints the release-notes files it moved past once the source has advanced.
 
 ### Building and restoring the host binary
@@ -260,8 +279,8 @@ The swap keeps the previous binary as `pfm.prev`. `make -C pfm rollback` restore
 
 The project flow is deliberately non-destructive:
 
-1. Run `pfm doctor --project-updates` for a report only (exit 0 clean, 1 review, 3 failure). Bare `pfm update` performs the machine update first and appends the same report when run inside a managed project.
-2. For each `UPDATED` item, read the diff printed under the row — the intent of the upstream change — carry what applies into the local file, and keep the project's own edits. `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` each print their own adoption or cleanup action.
+1. Run `pfm doctor --project-updates` for a report only (exit 0 no review or failure, 1 review, 3 failure). After a successful machine update, bare `pfm update` appends the same report, including the retired-name scan, when run inside a managed project. Outside one it prints `NOT-MANAGED` and asks you to run `pfm doctor --project-updates` inside each adopted project. Besides the template rows, the report ends in a `RETIRED-NAME` section: a count, then one `path:line` row per hit. It scans the project's own text files: Git-tracked and unignored files in a Git worktree, otherwise a directory walk excluding dependency, build and cache directories. Pinned files with a non-CURRENT template status are excluded because their report rows already cover them; CURRENT pinned files remain scanned for local retired references. The baseline ledger, `AGENTS.md`, generated `.codex/**` outputs and `.opencode/**` are excluded; hand-written `.codex/config.toml` remains scanned. It looks for a command, agent, skill, phase, tool or path name Professor has retired. A hit means your file still names something that no longer exists: edit that reference to the successor the row prints (`now {successor}`), or delete the reference when the row says `no successor`. An `UNREADABLE` row names a file or directory the scan could not read, or a failed file enumeration; the report is incomplete until you resolve it, and the exit code is 3. A readable file larger than 1 MiB instead prints one `INCOMPLETE` coverage row; its scanned prefix retains any hits, and truncation alone does not cause exit 3. A report with only such coverage gaps ends `INCOMPLETE`, not `clean`, even at exit 0.
+2. Review each template status: `UPDATED`, `NEW`, `GONE-UPSTREAM`, `MOVED`, or `LOCAL-DELETED`. For each `UPDATED` item, read the upstream diff, carry what applies into the local file, and keep the project's own edits. `MOVED` names a renamed template and its new local path: keep your file, move it to that path, then run the row's `pfm update pin --template <new-template> <new-local>` and `pfm update drop <old-local>` commands. Do not delete it as though it were `GONE-UPSTREAM`. `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` print their own adoption or cleanup action.
 3. Accept a reviewed file with `pfm update pin <local>`. Adopt a new template mapping with `pfm update pin --template <template> <local>`; forget an obsolete mapping with `pfm update drop <local>`; silence a template you will never take with `pfm update ignore <template>...`.
 4. Rebuild opted-in engine mirrors from the resulting local source files.
 

@@ -42,11 +42,14 @@ type (
 		Root, Cache string
 		Platform    Platform
 		Offline     bool
-		Runner      deps.Runner
-		Clock       clock.Clock
-		Download    DownloadFunc
-		Run         RunFunc
-		Smoke       SmokeFunc
+		// ProcRoot is the /proc a prune reads process executables from; empty
+		// is /proc.
+		ProcRoot string
+		Runner   deps.Runner
+		Clock    clock.Clock
+		Download DownloadFunc
+		Run      RunFunc
+		Smoke    SmokeFunc
 	}
 )
 
@@ -54,6 +57,8 @@ type ProvisionResult struct {
 	Digest      string
 	Environment EnvironmentDigest
 	Runtime     Runtime
+	// Pruned is the prune of superseded environments this call ran.
+	Pruned PruneReport
 }
 
 // InstallPlan is a pinned target's machine-readable price; blocked targets carry a reason.
@@ -199,7 +204,7 @@ func provisionWithTargets(
 				Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 				Script: filepath.Join(current, "project", "converter.py"),
 				Runner: options.Runner,
-			}}, nil
+			}, Pruned: pruneEnvironmentRoot(envRoot, options.ProcRoot, pruneHostGOOS)}, nil
 		}
 	}
 	uvArchive := filepath.Join(options.Cache, "uv-"+platform.String()+".tar.gz")
@@ -379,7 +384,7 @@ func provisionWithTargets(
 		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(current, "project", "converter.py"),
 		Runner: options.Runner,
-	}}, nil
+	}, Pruned: pruneEnvironmentRoot(envRoot, options.ProcRoot, pruneHostGOOS)}, nil
 }
 
 func smokeRuntime(ctx context.Context, converterRuntime Runtime) (map[string]any, error) {

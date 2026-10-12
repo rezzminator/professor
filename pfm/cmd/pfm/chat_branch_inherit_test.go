@@ -49,7 +49,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 			scribe, duo := newWorkbenchRunFixture(t, jail)
 			engine, dir, socket, argvFile := "claude", scribe, "cc-workbench-branch", "cc-argv"
 			parentID := "a1000000-1111-4111-8111-111111111111"
-			var wantError string
+			var wantError, mirrorRecord string
 			wantArgs := []string{
 				"--resume " + parentID,
 				"--fork-session",
@@ -79,10 +79,12 @@ func TestChatBranchWorkbench(t *testing.T) {
 				wantArgs = []string{
 					`--model gpt-x -c model_reasoning_effort="high" -c developer_instructions="""` + "\n" + `You are duo.""" fork ` + parentID,
 				}
+				reply, code := testjail.CleanMirrorReply, 0
 				if name == "mirror failure" {
-					if err := atomicfile.Write(filepath.Join(duo, ".mcp.json"), []byte("{"), 0o600); err != nil {
-						t.Fatal(err)
-					}
+					reply, code = testjail.FailedMirrorReply, 1
+				}
+				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
+				if name == "mirror failure" {
 					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
 					if err != nil {
 						t.Fatal(err)
@@ -151,9 +153,8 @@ func TestChatBranchWorkbench(t *testing.T) {
 				}
 			}
 			if name == "Codex" {
-				body, err := os.ReadFile(filepath.Join(duo, "AGENTS.md"))
-				if err != nil || !strings.Contains(string(body), "Duo.") {
-					t.Fatalf("branch mirror=%q, err=%v", body, err)
+				if !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
+					t.Fatalf("the branch built no codex mirror of %s", duo)
 				}
 			}
 		})
@@ -379,9 +380,6 @@ func TestChatBranchInheritsParentAccountWhenNoFlagGiven(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if strings.Contains(stderr, "could not be resolved") {
-		t.Fatalf("unexpected unresolved-parent warning for an indexed parent: stderr=%q", stderr)
-	}
 	environment := forkedEnvironment(t, jail)
 	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.parentDir {
 		t.Fatalf(
@@ -517,66 +515,14 @@ func TestChatBranchInheritsFiveMinuteCacheFromLaunchRecord(t *testing.T) {
 	}
 }
 
-// A parent without a launch record takes the configured primary account and
-// its cache policy, even if a transcript happens to be indexed elsewhere.
-func TestChatBranchNoParentLaunchUsesPrimaryConfiguredCache(t *testing.T) {
+// A parent whose account neither a launch record nor a live seat names, on a
+// machine with more than one account of its engine, is refused by name: the
+// fork is never guessed onto the primary.
+func TestChatBranchUnresolvableParentAccountRefuses(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
 	jail := newBranchInheritJail(t)
-	// Account 7 differs from the primary account, so reading the transcript
-	// row would choose a different cache policy from the no-record fallback.
-	config := fmt.Sprintf(
-		`{"version":1,"claude":{"cache1h":false},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q,"claude":{"cache1h":true}}]}`,
-		jail.primaryDir,
-		jail.parentDir,
-	)
-	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	clearBranchCache1HEnv(t)
-
-	const parentID = "a5000000-5555-4555-8555-555555555555"
-	const branchSocket = "probe-branch-cache-default"
-	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
-	cleanupBranchSocket(t, jail, branchSocket)
-
-	registerParentTranscript(t, jail.parentDir, parentID)
-
-	stdout, stderr, code := runBranchForked(t, jail,
-		"--engine", "claude", "--session-id", parentID,
-		"--cwd", jail.root, "--name", "cache-default-branch",
-	)
-	if code != 0 {
-		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
-	}
-	environment := forkedEnvironment(t, jail)
-	if got := environment["CACHE_LIVE_CONTROL_MAIN_TTL"]; got != "5m" {
-		t.Fatalf(
-			"CACHE_LIVE_CONTROL_MAIN_TTL=%q, want \"5m\" from primary account without a parent launch record",
-			got,
-		)
-	}
-	if got, present := environment["FORCE_PROMPT_CACHING_5M"]; present {
-		t.Fatalf(
-			"FORCE_PROMPT_CACHING_5M=%q present, want absent without a parent launch record",
-			got,
-		)
-	}
-}
-
-// TestChatBranchUnresolvableParentAccountWarnsAndUsesPrimary is the
-// silent-substitution guard: when the parent session is not indexed at all,
-// the fork must still land somewhere usable (the primary account), but it
-// must say so on stderr — an absent parent row must never look identical to
-// a parent that genuinely sits on the primary account.
-func TestChatBranchUnresolvableParentAccountWarnsAndUsesPrimary(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	jail := newBranchInheritJail(t)
-	// Deliberately never indexed anywhere — a fork of a session pfm has
-	// never seen.
 	const unknownID = "a6000000-6666-4666-8666-666666666666"
 	const branchSocket = "probe-branch-acct-unresolvable"
 	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
@@ -586,22 +532,88 @@ func TestChatBranchUnresolvableParentAccountWarnsAndUsesPrimary(t *testing.T) {
 		"--engine", "claude", "--session-id", unknownID,
 		"--cwd", jail.root, "--name", "acct-unresolvable-branch",
 	)
-	if code != 0 {
-		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	want := "pfm chat branch: the account of session " + unknownID +
+		" could not be resolved (no launch record, no live seat naming it); pass --account N\n"
+	if code != 1 || stderr != want || stdout != "" {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want rc=1 and stderr %q", code, stdout, stderr, want)
 	}
-	if !strings.Contains(stderr, "parent account for session") || !strings.Contains(stderr, "could not be resolved") {
-		t.Fatalf("stderr=%q, want the unresolved-parent-account warning naming the fallback", stderr)
+
+	// A Codex parent no index row names, on a machine with two Codex homes,
+	// is refused the same way: never forked onto the first home.
+	codexHomes := fmt.Sprintf(`{"version":2,"codex":{"homes":[{"id":1,"home":%q},{"id":2,"home":%q}]}}`,
+		filepath.Join(jail.root, "codex"), filepath.Join(jail.root, "codex-2"))
+	if err := os.WriteFile(jail.configPath, []byte(codexHomes), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(stderr, "forking on primary account 1") {
-		t.Fatalf("stderr=%q, want the warning to name primary account 1 as the fallback used", stderr)
+	stdout, stderr, code = runBranchForked(t, jail,
+		"--engine", "codex", "--session-id", unknownID,
+		"--cwd", jail.root, "--name", "acct-unresolvable-codex-branch",
+	)
+	if code != 1 || stderr != want || stdout != "" {
+		t.Fatalf("codex chat branch rc=%d stdout=%q stderr=%q, want rc=1 and stderr %q", code, stdout, stderr, want)
+	}
+
+	// With one configured account there is no choice to guess: the fork
+	// lands on it, with no refusal.
+	single := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q}]}`, jail.primaryDir)
+	if err := os.WriteFile(jail.configPath, []byte(single), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", unknownID,
+		"--cwd", jail.root, "--name", "acct-single-branch",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("single-account chat branch rc=%d stdout=%q stderr=%q, want rc=0 and no refusal", code, stdout, stderr)
+	}
+	if got := forkedEnvironment(t, jail)["CLAUDE_CONFIG_DIR"]; got != jail.primaryDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q, want the only account's dir %q", got, jail.primaryDir)
+	}
+}
+
+// TestChatBranchLiveParentAccountWithoutALaunchRecord is the owner's report:
+// the parent seat runs on account 7, but its current session id has no launch
+// record (its seat rotated to a new session id after pfm launched it). The
+// fork lands on account 7 with account 7's configured cache policy, silently,
+// never on primary account 1.
+func TestChatBranchLiveParentAccountWithoutALaunchRecord(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	config := fmt.Sprintf(
+		`{"version":1,"claude":{"cache1h":false},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q,"claude":{"cache1h":true}}]}`,
+		jail.primaryDir,
+		jail.parentDir,
+	)
+	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clearBranchCache1HEnv(t)
+	const parentID = "07ec0d2e-5410-4f47-9f39-b222de8465a5"
+	parentSocket := freshClaudeSocketName(61)
+	const branchSocket = "probe-branch-acct-live-seat"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+
+	registerLiveParent(t, jail, parentSocket, jail.parentDir, parentID, 95006, map[string]string{
+		"CLAUDE_CONFIG_DIR": jail.parentDir,
+	})
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "GATEWAY",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want rc=0 and no warning", code, stdout, stderr)
 	}
 	environment := forkedEnvironment(t, jail)
-	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.primaryDir {
-		t.Fatalf(
-			"CLAUDE_CONFIG_DIR=%q, want the primary account dir %q — the warned fallback did not actually land there",
-			got,
-			jail.primaryDir,
-		)
+	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.parentDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q, want the live parent seat's account dir %q, not primary %q",
+			got, jail.parentDir, jail.primaryDir)
+	}
+	if got := environment["CACHE_LIVE_CONTROL_MAIN_TTL"]; got != "1h" {
+		t.Fatalf("CACHE_LIVE_CONTROL_MAIN_TTL=%q, want \"1h\" from account 7's configured policy", got)
 	}
 }
 
@@ -619,13 +631,13 @@ func TestChatBranchRecordsResolvedForkFromParentLaunch(t *testing.T) {
 	registerParentTranscript(t, jail.parentDir, parentID)
 	recordBranchParent(t, jail, parentID, 7, false)
 	sharedState := paths.Values{StateDB: filepath.Join(jail.root, "shared.db")}
-	// A branch is a different chat: the parent's reminder stays the parent's.
-	reminders := fleetdb.OpenSharedState(context.Background(), sharedState)
-	if err := reminders.Degraded(); err != nil {
+	// A branch is a different chat: the parent's schedule stays the parent's.
+	schedules := fleetdb.OpenSharedState(context.Background(), sharedState)
+	if err := schedules.Degraded(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = reminders.Close() }()
-	if _, err := reminders.CreateReminder(context.Background(), fleetdb.Reminder{
+	defer func() { _ = schedules.Close() }()
+	if _, err := schedules.CreateSchedule(context.Background(), fleetdb.Schedule{
 		SessionID: parentID, Engine: string(pfmengine.Claude), Prompt: "check the build",
 		Interval: time.Hour, Created: time.Unix(1_700_000_000, 0),
 	}); err != nil {
@@ -659,9 +671,9 @@ func TestChatBranchRecordsResolvedForkFromParentLaunch(t *testing.T) {
 	if err != nil || fork.Account != 7 || fork.Cache1H {
 		t.Fatalf("fork launch=%#v err=%v", fork, err)
 	}
-	kept, err := reminders.Reminders(context.Background())
+	kept, err := schedules.Schedules(context.Background())
 	if err != nil || len(kept) != 1 || kept[0].SessionID != parentID {
-		t.Fatalf("reminders after branch=%#v err=%v, want one on the parent %s", kept, err, parentID)
+		t.Fatalf("schedules after branch=%#v err=%v, want one on the parent %s", kept, err, parentID)
 	}
 }
 
@@ -743,7 +755,7 @@ func TestChatBranchReportsAFailedParentScanInsteadOfForkingBlind(t *testing.T) {
 	if !strings.Contains(stderr, "resolve parent session:") {
 		t.Fatalf("stderr=%q, want it to name the failed parent-session resolve, not silence", stderr)
 	}
-	if strings.Contains(stderr, "forking on primary account") {
+	if strings.Contains(stderr, "could not be resolved") {
 		t.Fatalf("stderr=%q, a scan failure must not be reported as a resolved-but-unknown parent", stderr)
 	}
 	if strings.Contains(stdout, "Branched") {
@@ -793,5 +805,62 @@ func TestChatBranchCodexRequiresLogin(t *testing.T) {
 	if code != 1 || !strings.HasPrefix(stderr.String(), "pfm chat branch: create detached seat:") ||
 		!strings.Contains(stderr.String(), "run codex login") {
 		t.Fatalf("chat branch code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+// A fork that cannot carry the fleet prompt its policy asks for says so on the
+// starter's stderr, with the cause, and still forks.
+func TestChatBranchWarnsWhenTheFleetPromptCannotReachTheFork(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "a3000000-3333-4333-8333-333333333333"
+	const branchSocket = "probe-branch-prompt-warn"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+	config := fmt.Sprintf(
+		`{"version":1,"claude":{"systemPrompt":"professor"},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q}]}`,
+		jail.primaryDir,
+		jail.parentDir,
+	)
+	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "prompt-warn-branch",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "pfm chat branch: Claude started WITHOUT its system prompt file") ||
+		!strings.Contains(stderr, "no source repository recorded") {
+		t.Fatalf("chat branch stderr=%q, want the prompt warning naming the missing clone", stderr)
+	}
+
+	// A fork whose seat cannot be created never started: it is not told it
+	// started without its prompt. A server already holding the seat's session
+	// name refuses the seat after the fork is planned.
+	const refusedSocket = "probe-branch-prompt-refused"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", refusedSocket)
+	cleanupBranchSocket(t, jail, refusedSocket)
+	if output, err := exec.Command(
+		"tmux", "-f", "/dev/null", "-S", filepath.Join(jail.tmuxDir, refusedSocket),
+		"new-session", "-d", "-s", refusedSocket,
+	).CombinedOutput(); err != nil {
+		t.Fatalf("hold the seat's session name: %v: %s", err, output)
+	}
+	stdout, stderr, code = runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "prompt-refused-branch",
+	)
+	if code != 1 || !strings.Contains(stderr, "pfm chat branch: create detached seat:") ||
+		strings.Contains(stderr, "WITHOUT") {
+		t.Fatalf("refused chat branch rc=%d stdout=%q stderr=%q, want the refusal and no prompt warning",
+			code, stdout, stderr)
 	}
 }

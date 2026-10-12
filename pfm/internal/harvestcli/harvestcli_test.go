@@ -4,44 +4,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
-
-// TestRenderReadNamesTheGapsOfAnIncompleteArtifact pins the CLI receipt
-// header: a known-incomplete artifact names its gaps on the cached line,
-// before the blank line and the content; a complete one names none.
-func TestRenderReadNamesTheGapsOfAnIncompleteArtifact(t *testing.T) {
-	result := harvest.Result{
-		Source:      "https://fixture.example/source",
-		CacheStatus: "miss",
-		Bytes:       12,
-		Tokens:      3,
-		Path:        "/cache/source.md",
-		Content:     "body text",
-	}
-	complete := renderRead(result, true)
-	if strings.Contains(complete, "gaps:") {
-		t.Fatalf("complete receipt names gaps:\n%s", complete)
-	}
-	result.Partial = "page 3 of 9 failed to convert; 2 images unreadable"
-	want := "cached: false / bytes: 12 / tokens: 3 / path: /cache/source.md" +
-		" / gaps: page 3 of 9 failed to convert; 2 images unreadable\n\nbody text"
-	if got := renderRead(result, true); !strings.Contains(got, want) {
-		t.Fatalf("incomplete receipt header:\n%s\nwant it to contain:\n%s", got, want)
-	}
-	// The size receipt (--include-content=false) is a receipt too: a caller
-	// budgeting a read must learn the artifact is incomplete before it reads it.
-	if got := renderRead(result, false); !strings.Contains(got, " / gaps: page 3 of 9 failed to convert") {
-		t.Fatalf("size receipt hides the gaps:\n%s", got)
-	}
-	result.Partial = ""
-	if got := renderRead(result, false); strings.Contains(got, "gaps:") {
-		t.Fatalf("complete size receipt names gaps:\n%s", got)
-	}
-}
 
 // harvestLocal runs `pfm harvest` over args with a fresh local text file
 // appended, returning the exit code, stdout and stderr.
@@ -57,20 +23,42 @@ func harvestLocal(t *testing.T, args ...string) (int, string, string) {
 	return code, stdout.String(), stderr.String()
 }
 
-// TestHarvestIncludeContentFalsePrintsOnlyTheSizeReceipt: the read caches the
-// source and prints its size and cache path, never its body.
-func TestHarvestIncludeContentFalsePrintsOnlyTheSizeReceipt(t *testing.T) {
-	code, stdout, stderr := harvestLocal(t, "--include-content=false")
-	if code != 0 {
-		t.Fatalf("--include-content=false code=%d stdout=%q stderr=%q", code, stdout, stderr)
+// TestHarvestPrintsTheReadToolsBlock: pfm harvest prints each source as the
+// read tool's block — its header, its artifact's path, then the content, or
+// with --include-content=false the size line in place of the body.
+func TestHarvestPrintsTheReadToolsBlock(t *testing.T) {
+	sizeLine := regexp.MustCompile(`^size: 18 chars, ~\d+ tokens$`)
+	for _, test := range []struct {
+		name string
+		args []string
+		last func(string) bool
+	}{
+		{"content", nil, func(line string) bool { return line == "plain harvest body" }},
+		{"size only", []string{"--include-content=false"}, sizeLine.MatchString},
+	} {
+		code, stdout, stderr := harvestLocal(t, test.args...)
+		lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+		if code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], "=== [1/1] ") ||
+			!strings.HasSuffix(lines[0], "plain.txt") || !filepath.IsAbs(lines[1]) || !test.last(lines[2]) {
+			t.Errorf("%s: code=%d stdout=%q stderr=%q, want the header, path and %s line", test.name, code, stdout,
+				stderr, test.name)
+		}
 	}
-	if !strings.Contains(stdout, "\ntokens: ") || !strings.Contains(stdout, " / path: ") ||
-		strings.Contains(stdout, "plain harvest body") {
-		t.Fatalf("--include-content=false printed:\n%s\nwant the size receipt without the body", stdout)
+}
+
+// TestHarvestExitsNonzeroForAnItemItPrintsAsFailed: a read that returns a
+// thin challenge page has no harvester error, yet its block is an error line;
+// the exit code says what the block says, so a script never takes it as read.
+func TestHarvestExitsNonzeroForAnItemItPrintsAsFailed(t *testing.T) {
+	runtime := downloadRuntime(t)
+	source := filepath.Join(runtime.Paths.Home, "challenge.txt")
+	if err := os.WriteFile(source, []byte("Please complete the captcha to continue.\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	code, stdout, stderr = harvestLocal(t)
-	if code != 0 || !strings.Contains(stdout, "plain harvest body") {
-		t.Fatalf("default read code=%d stdout=%q stderr=%q, want the body", code, stdout, stderr)
+	var stdout, stderr bytes.Buffer
+	code := Harvest([]string{source}, &stdout, &stderr, runtime)
+	if !strings.Contains(stdout.String(), "\nerror: ") || code != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want an error block and exit 1", code, stdout.String(), stderr.String())
 	}
 }
 
@@ -98,33 +86,5 @@ func TestHarvestDownloadVerbPointsAtDownloadFile(t *testing.T) {
 			stdout,
 			stderr,
 		)
-	}
-}
-
-// TestRenderReadUsesTheItemFieldNames: both CLI receipts name what the MCP
-// read item names — cached, tokens, chars — and no old field name.
-func TestRenderReadUsesTheItemFieldNames(t *testing.T) {
-	result := harvest.Result{
-		Source:      "https://fixture.example/source",
-		CacheStatus: "hit",
-		Bytes:       12,
-		Chars:       9,
-		Tokens:      3,
-		Path:        "/cache/source.md",
-		Content:     "body text",
-	}
-	full := renderRead(result, true)
-	want := "\ncached: true / bytes: 12 / tokens: 3 / path: /cache/source.md\n\nbody text"
-	if !strings.Contains(full, want) {
-		t.Fatalf("full receipt:\n%s\nwant it to contain:\n%s", full, want)
-	}
-	size := renderRead(result, false)
-	if want = "\ntokens: 3 / chars: 9 / path: /cache/source.md / cached: true"; !strings.Contains(size, want) {
-		t.Fatalf("size receipt:\n%s\nwant it to contain:\n%s", size, want)
-	}
-	for _, old := range []string{"cache_status", "size:"} {
-		if strings.Contains(full, old) || strings.Contains(size, old) {
-			t.Fatalf("a receipt carries the old word %q:\n%s\n%s", old, full, size)
-		}
 	}
 }

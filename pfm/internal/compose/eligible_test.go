@@ -2,7 +2,7 @@ package compose
 
 import "testing"
 
-func TestDefaultEligibleSuppressesAZeroPromptResumableClaudeRow(t *testing.T) {
+func TestDefaultEligibleSuppressesOnlyAnUnusedResumableClaudeRow(t *testing.T) {
 	tests := []struct {
 		name string
 		row  Row
@@ -17,6 +17,16 @@ func TestDefaultEligibleSuppressesAZeroPromptResumableClaudeRow(t *testing.T) {
 			name: "answered transcript",
 			row:  Row{Kind: ResumeClaude, Size: 4096, PromptCount: 3},
 			want: true,
+		},
+		{
+			name: "live claude seat before its first prompt",
+			row:  Row{Kind: LiveClaude, Name: "GATEWAY", Socket: "cc-1-2-3"},
+			want: true,
+		},
+		{
+			name: "live background claude seat",
+			row:  Row{Kind: LiveClaude, BG: true, Size: 4096, PromptCount: 3},
+			want: false,
 		},
 	}
 	for _, test := range tests {

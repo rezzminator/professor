@@ -1,7 +1,3 @@
-**Title:** Just a moment...
-
----
-
 RFC 9449 OAuth DPoP September 2023
 Fett, et al.Standards Track[Page]
 

@@ -1,0 +1,31 @@
+{
+ "test": "--flight: a Codex ledger row carrying an agent path matches the rollout spawned at that path",
+ "now": "2026-10-09T10:28:46.000Z",
+ "args": [
+  "--flight",
+  "{TMP}/pathflight-drHchz",
+  "--root",
+  "{FIX}/claude/projects",
+  "--codex-root",
+  "{TMP}/cxpath-zcBQYK",
+  "--metrics-out",
+  "{TMP}/report-3valwgeskhb.md",
+  "--out",
+  "{TMP}/report-3valwgeskhb.json"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [
+  "cxpath-zcBQYK",
+  "pathflight-drHchz",
+  "report-3valwgeskhb.json",
+  "report-3valwgeskhb.md"
+ ],
+ "outputs": {
+  "--out": "{TMP}/report-3valwgeskhb.json",
+  "--metrics-out": "{TMP}/report-3valwgeskhb.md"
+ }
+}

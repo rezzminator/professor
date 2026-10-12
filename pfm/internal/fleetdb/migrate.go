@@ -14,7 +14,18 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
+// SchemaVersion is the user_version this build stamps on the shared database.
+// Every pfm refuses a file stamped newer than its own, so a column an older
+// pfm's statements survive (they name their columns, and its default fills
+// their inserts) is added at open with no bump: addColumnAtOpen; a table
+// rename likewise: renameRemindersTable.
 const SchemaVersion = 3
+
+// RetiredSchemaVersion is the user_version a develop build stamped when it
+// added hidden.revision as migration 4. Such a file holds version 3's tables
+// plus that column, so a read-write open stamps it 3 again and a read-only
+// open reads it as 3. The next schema version is 5.
+const RetiredSchemaVersion = 4
 
 //go:embed migration_v2.sql
 var migrationV2 string
@@ -26,12 +37,16 @@ var migrationV3 string
 // schemaDDL itself, so the first two slots stay empty.
 var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3}
 
+// hiddenRevisionDDL adds the column KillWithRevision decides rollback
+// ownership by. A version-3 pfm's inserts take its default.
+const hiddenRevisionDDL = "ALTER TABLE hidden ADD COLUMN revision TEXT NOT NULL DEFAULT ''"
+
 func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (returnErr error) {
 	var version int
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read shared database schema version: %w", err)
 	}
-	if version < SchemaVersion {
+	if version < SchemaVersion || version == RetiredSchemaVersion {
 		unlock, err := LockMigration(ctx, path)
 		if err != nil {
 			return err
@@ -40,6 +55,12 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 		if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 			return fmt.Errorf("re-read shared database schema version: %w", err)
 		}
+	}
+	if version == RetiredSchemaVersion {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
+			return fmt.Errorf("stamp retired shared database schema version %d as %d: %w", version, SchemaVersion, err)
+		}
+		return nil
 	}
 	if version > SchemaVersion {
 		return fmt.Errorf(
@@ -77,6 +98,110 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 		return fmt.Errorf("commit shared database migration %d: %w", SchemaVersion, err)
 	}
 	return nil
+}
+
+// addHiddenRevision adds hidden.revision to a file that lacks it: one created
+// or migrated here, or one a version-3 pfm left.
+func addHiddenRevision(ctx context.Context, db *sql.DB, path string) error {
+	return addColumnAtOpen(ctx, db, path, "hidden", "revision", hiddenRevisionDDL)
+}
+
+// scheduleOnceDDL adds the column that marks a one-time schedule: it fires once
+// and is then kept, fired, until its chat is opened. A row written before it
+// existed takes its default and stays recurring.
+const scheduleOnceDDL = "ALTER TABLE schedules ADD COLUMN once INTEGER NOT NULL DEFAULT 0 CHECK(once IN (0,1))"
+
+// addScheduleOnce adds schedules.once to a file that lacks it.
+func addScheduleOnce(ctx context.Context, db *sql.DB, path string) error {
+	return addColumnAtOpen(ctx, db, path, "schedules", "once", scheduleOnceDDL)
+}
+
+// addColumnAtOpen runs ddl, which adds column to table, on a file that lacks
+// the column. It re-reads the columns under the migration lock, or two first
+// openers would both add it; a file that has it opens without taking the lock.
+func addColumnAtOpen(ctx context.Context, db *sql.DB, path, table, column, ddl string) (returnErr error) {
+	present, err := hasColumn(ctx, db, table, column)
+	if err != nil || present {
+		return err
+	}
+	unlock, err := LockMigration(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	if present, err := hasColumn(ctx, db, table, column); err != nil || present {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("add %s.%s to shared database %s: %w", table, column, path, err)
+	}
+	return nil
+}
+
+func hasColumn(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM pragma_table_info(?) WHERE name=?", table, column,
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("read shared database %s columns: %w", table, err)
+	}
+	return count == 1, nil
+}
+
+// schedulesRenameDDL renames the table migration 3 creates as reminders, with
+// its indexes, to the schedules name every statement here uses. It runs at
+// open with no version bump, like hidden.revision, so a version-3 pfm still
+// opens the file; only its own reminder statements stop finding their table.
+const schedulesRenameDDL = `
+ALTER TABLE reminders RENAME TO schedules;
+DROP INDEX IF EXISTS reminders_next_fire;
+DROP INDEX IF EXISTS reminders_session;
+CREATE INDEX IF NOT EXISTS schedules_next_fire ON schedules(next_fire_ns);
+CREATE INDEX IF NOT EXISTS schedules_session ON schedules(session_id);`
+
+// renameRemindersTable moves a file's reminders table to schedules. It re-reads
+// the tables under the migration lock, or two first openers would both rename;
+// a file already holding schedules opens without taking the lock.
+func renameRemindersTable(ctx context.Context, db *sql.DB, path string) (returnErr error) {
+	pending, err := hasRemindersTable(ctx, db)
+	if err != nil || !pending {
+		return err
+	}
+	unlock, err := LockMigration(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	if pending, err := hasRemindersTable(ctx, db); err != nil || !pending {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin reminders-to-schedules rename on shared database %s: %w", path, err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("roll back reminders-to-schedules rename: %w", err))
+		}
+	}()
+	if _, err := tx.ExecContext(ctx, schedulesRenameDDL); err != nil {
+		return fmt.Errorf("rename reminders to schedules on shared database %s: %w", path, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reminders-to-schedules rename on shared database %s: %w", path, err)
+	}
+	return nil
+}
+
+// hasRemindersTable reports a reminders table still waiting for its rename.
+func hasRemindersTable(ctx context.Context, db *sql.DB) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='reminders'",
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("read shared database tables: %w", err)
+	}
+	return count == 1, nil
 }
 
 // LockMigration serializes one database file's schema upgrade across

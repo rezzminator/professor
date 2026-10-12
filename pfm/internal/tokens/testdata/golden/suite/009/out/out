@@ -1,0 +1,177 @@
+{
+ "v": 1,
+ "flight": "overcap-flight-Dl2UhQ",
+ "source": "agents.tsv",
+ "baseline": "",
+ "window": [
+  "2026-09-20T09:01:00.000Z",
+  "2026-09-20T10:30:09.000Z"
+ ],
+ "scan": {
+  "roots": [
+   "{TMP}/overcap-nPGBic/projects"
+  ],
+  "files": 5,
+  "skippedOld": 0,
+  "dupFiles": 0,
+  "badLines": 0,
+  "noTimestamp": 0,
+  "unpricedCalls": 172,
+  "unpricedModels": {
+   "claude-unobtanium-9": 172
+  },
+  "tierUnknownCalls": 0,
+  "syntheticCalls": 1,
+  "identityUnknownRecords": 0,
+  "copiedCalls": 0,
+  "copiesOnly": [],
+  "readErrors": [],
+  "notes": [
+   "2 UNMATCHED (see the unmatched section)"
+  ]
+ },
+ "total": {
+  "n": 4,
+  "calls": 339,
+  "usd": 0.9327500000000015,
+  "unpriced": 1,
+  "in": 95840,
+  "cr": 3175550,
+  "out": 22480,
+  "fail": 2,
+  "poll": 72,
+  "reread": 2,
+  "contract": 2,
+  "compact": 2,
+  "over": 1,
+  "peak": 210420,
+  "lc": 0.9327500000000015
+ },
+ "rows": [
+  {
+   "taskId": "1-b",
+   "agentType": "executor",
+   "agentId": "cx-thread-unknown-form",
+   "round": "1",
+   "at": 1789895100000,
+   "dateOnly": false,
+   "engine": "codex",
+   "how": "window",
+   "model": "gpt-5.6-sol",
+   "calls": 9,
+   "wallMs": 960000,
+   "ctxFirst": 10800,
+   "ctxPeak": 63000,
+   "tok": {
+    "in": 44000,
+    "out": 14000,
+    "cw5": 0,
+    "cw1": 0,
+    "cr": 33000
+   },
+   "usd": 0.4692,
+   "failedCmds": 1,
+   "pollN": 3,
+   "rereadN": 1,
+   "contractReads": 1,
+   "compactions": 1,
+   "overCap": false
+  },
+  {
+   "taskId": "1-d",
+   "agentType": "executor",
+   "agentId": "b2",
+   "round": "1",
+   "at": 1789894860000,
+   "dateOnly": false,
+   "engine": "claude",
+   "how": "id",
+   "model": "claude-sonnet-5",
+   "calls": 155,
+   "wallMs": 5329000,
+   "ctxFirst": 9000,
+   "ctxPeak": 12170,
+   "tok": {
+    "in": 6380,
+    "out": 4800,
+    "cw5": 22000,
+    "cw1": 0,
+    "cr": 1382550
+   },
+   "usd": 0.3923,
+   "failedCmds": 1,
+   "pollN": 69,
+   "rereadN": 1,
+   "contractReads": 0,
+   "compactions": 1,
+   "overCap": true
+  },
+  {
+   "taskId": "1-a",
+   "agentType": "executor",
+   "agentId": "a1",
+   "round": "1",
+   "at": 1789894860000,
+   "dateOnly": false,
+   "engine": "claude",
+   "how": "id",
+   "model": "claude-sonnet-5",
+   "calls": 3,
+   "wallMs": 290000,
+   "ctxFirst": 10000,
+   "ctxPeak": 210420,
+   "tok": {
+    "in": 4040,
+    "out": 120,
+    "cw5": 7200,
+    "cw1": 0,
+    "cr": 220000
+   },
+   "usd": 0.0713,
+   "failedCmds": 0,
+   "pollN": 0,
+   "rereadN": 0,
+   "contractReads": 1,
+   "compactions": 0,
+   "overCap": false
+  },
+  {
+   "taskId": "1-e",
+   "agentType": "lander",
+   "agentId": "c3",
+   "round": "1",
+   "at": 1789894920000,
+   "dateOnly": false,
+   "engine": "claude",
+   "how": "id",
+   "model": "claude-unobtanium-9",
+   "calls": 172,
+   "wallMs": 379000,
+   "ctxFirst": 10000,
+   "ctxPeak": 10520,
+   "tok": {
+    "in": 8720,
+    "out": 3560,
+    "cw5": 3500,
+    "cw1": 0,
+    "cr": 1540000
+   },
+   "usd": null,
+   "failedCmds": 0,
+   "pollN": 0,
+   "rereadN": 0,
+   "contractReads": 0,
+   "compactions": 0,
+   "overCap": false
+  }
+ ],
+ "unmatched": [
+  "LEDGER ROW 1-c · executor · id ghost-agent · engine claude · no transcript found in the window",
+  "TRANSCRIPT executor · claude · d4 · 2026-09-20T09:01 · $0.02 · ran under this flight's session with no ledger row"
+ ],
+ "unledgered": {
+  "n": 1,
+  "usd": 0.0236,
+  "unpriced": 0
+ }
+}

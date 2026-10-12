@@ -320,6 +320,9 @@ type FetchOptions struct {
 	Refresh  bool
 	SizeOnly bool
 	OCRLang  string
+	// Field is the request field the source came in (urls, files,
+	// publications), recorded in the public artifact's frontmatter.
+	Field string
 }
 
 // Result is deliberately JSON-friendly so the MCP adapter can return it
@@ -344,8 +347,9 @@ type Result struct {
 	// Partial names why the artifact is known to be INCOMPLETE — a recall gate
 	// below its floor, lazy-loaded content still arriving when the browser
 	// rung's scroll cap hit, a thread whose comments are only partly in the
-	// page. It mirrors the marker line the content itself opens with
-	// (partialMarkerPrefix), so every surface that shows the content shows it.
+	// page. It is the artifact's frontmatter gaps; inside the ladder it
+	// travels as the marker line the content opens with (partialMarkerPrefix),
+	// which the store lifts off the body (splitArtifact).
 	Partial string `json:"partial,omitempty"`
 }
 
@@ -364,7 +368,11 @@ type Harvester struct {
 	neg          *negativeCache
 	flightMu     sync.Mutex
 	flights      map[string]*fetchFlight
+	hooks        flightHooks
 	settings     settings
+	// scopes holds one clone per caller header set (scopedTo), by its hash.
+	scopeMu sync.Mutex
+	scopes  map[string]*Harvester
 }
 
 func (h *Harvester) nowClock() clock.Clock {
@@ -381,6 +389,9 @@ type fetchFlight struct {
 	// joined callers walk again rather than read its result
 	// (Harvester.fetchShared).
 	abandoned bool
+	// overtaken marks a walk a successful refresh of its key read past while
+	// it ran (Harvester.clearFailure): its failure is not cached over that read.
+	overtaken bool
 }
 
 // New constructs a Harvester. A nil Converter is valid for callers that only

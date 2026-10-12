@@ -30,8 +30,8 @@ Every seat is one-shot: born for one unit, killed after its verdict. Waiting is 
 Arm both at the first spawn, each `timeout_ms: 1800000`, and re-arm each on its expiry; a re-armed watch prints one `SEEN` line per seat, a snapshot, not news. Keep `grep --line-buffered`, never a `head` or `tail` stage.
 
 - Returns: `bash -c 'G="$1"; seen=$(ls -1 $G 2>/dev/null); while :; do now=$(ls -1 $G 2>/dev/null); comm -13 <(printf "%s\n" "$seen") <(printf "%s\n" "$now") | sed -u "s/^/RETURN /"; seen=$now; sleep 1; done' _ "{flight directory}/returns/*"`
-- Seats: `cd /tmp && pfm chat watch '{flight}-*' --transitions --quiet-after 900 --poll 15 2>&1 | grep --line-buffered -vE '^WORKING '`
-- Claim, one call after `pfm chat new` exits 0: `bash -c 'exec 3< <(exec timeout 120 pfm chat watch "$1" --transitions --poll 5 2>&1); w=$!; while IFS= read -r l <&3; do case $l in "SEEN "*" working"*|"WORKING "*) r=0;; "SEEN "*" idle"*|"IDLE "*) r=1;; "SEEN "*|"BLOCKED "*|"EXIT "*|"DEAD "*) continue;; *) r=2;; esac; echo "$l"; kill $w; exit $r; done; echo "NO CLAIM in 120s"; exit 3' _ '{flight}-{unit}'`, by exit code: 0 write `CLAIMED`; 1 its row below; 2 a failed probe — capture the pane, never kill; 3 a full-screen `chat_capture`, judged by the rows below.
+- Seats: `cd /tmp && pfm chat watch '{flight}-*' --transitions --no-working --quiet-after 900 --poll 15 2>&1`
+- Claim, one call after `pfm chat new` exits 0: `bash -c 'exec 3< <(exec timeout 120 pfm chat watch "$1" --transitions --poll 12 2>&1); w=$!; while IFS= read -r l <&3; do case $l in "SEEN "*" working"*|"WORKING "*) r=0;; "SEEN "*" idle"*|"IDLE "*) r=1;; "SEEN "*|"BLOCKED "*|"EXIT "*|"DEAD "*) continue;; *) r=2;; esac; echo "$l"; kill $w; exit $r; done; echo "NO CLAIM in 120s"; exit 3' _ '{flight}-{unit}'`, by exit code: 0 write `CLAIMED`; 1 its row below; 2 a failed probe — capture the pane, never kill; 3 a full-screen `chat_capture`, judged by the rows below.
 
 A seat that stopped without finishing, by the watch line:
 

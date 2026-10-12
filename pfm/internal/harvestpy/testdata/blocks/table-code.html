@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Listings · Example Docs</title></head>
+<body>
+<nav><a href="/">Home</a> <a href="/docs/">Docs</a></nav>
+<main>
+<article>
+<h1>Listings</h1>
+<p>The listings below come from the docs generator, which numbers the lines of every listing in a table of its own.</p>
+<table class="rouge-table"><tbody><tr><td class="rouge-gutter gl"><pre class="lineno">1
+2
+3
+4</pre></td><td class="rouge-code"><pre>def area(width, height):
+    if width &lt; 0 or height &lt; 0:
+        raise ValueError("negative side")
+    return width | height</pre></td></tr></tbody></table>
+<p>The settings each take a value of their own, and the table lists one example of each with its meaning.</p>
+<table>
+<thead><tr><th>Setting</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td>retries</td><td><div><pre>retries = 3
+backoff = 2.0</pre></div></td></tr>
+<tr><td>badge</td><td><style>.badge{color:teal}</style><img alt="badge" src="data:image/png;base64,QkFER0VQQVlMT0FE"> <img alt="mark [old]" src="/img/mark (old).png"><span style="display:none">ghost text of the badge</span> shown beside the name<script>track("badge")</script></td></tr>
+</tbody>
+</table>
+<table class="sidebar" style="display:none">
+<tr><th>Series</th></tr>
+<tr><td><div>Hidden series sidebar entry</div></td></tr>
+</table>
+<p>The full listing opens in its own page when its code is clicked, as the next block shows.</p>
+<a href="/listing/full"><pre>full = area(2, 3)
+print(full)</pre></a>
+<p>The short form, <em>shown here <pre>area(1, 1)
+area(2, 2)</pre> for squares</em>, is the same call.</p>
+<p>The last listing is the shortest one, kept here to close the page with a plain paragraph of prose.</p>
+</article>
+</main>
+</body>
+</html>

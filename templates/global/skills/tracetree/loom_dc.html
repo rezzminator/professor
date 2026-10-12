@@ -1,0 +1,160 @@
+<script>
+/* loom_dc — the runtime the views run on. A view is a <template> of markup with {{path}} bindings, <sc-if value>,
+   <sc-for list as>, on* handlers and ref callbacks, and a class extending DCLogic that hands it values (renderVals) from
+   its state (setState). A render patches the page's DOM in place: elements keep their identity, so a CSS animation
+   plays once, a scroll position stays and a canvas is never rebuilt. The page loads nothing from the network. */
+var DC = (function () {
+  const BIND = /\{\{\s*([A-Za-z_$][\w$]*(?:\.[\w$]+)*)\s*\}\}/g;
+  const WHOLE = /^\s*\{\{\s*([A-Za-z_$][\w$]*(?:\.[\w$]+)*)\s*\}\}\s*$/;
+  const EVENTS = { onclick: 'click', onmouseenter: 'mouseenter', onmouseleave: 'mouseleave' }; // the HTML parser lowercases attribute names
+  const lookup = (scope, path) => { let v = scope; for (const k of path.split('.')) { if (v == null) return undefined; v = v[k]; } return v; };
+  const text = (str, scope) => str.replace(BIND, (_, p) => { const v = lookup(scope, p); return v == null ? '' : String(v); });
+
+  function kids(node, scope, key, out) {
+    let i = 0;
+    for (const c of node.childNodes) expand(c, scope, key + '/' + i++, out);
+  }
+  function whole(node, name, scope) {
+    const m = WHOLE.exec(node.getAttribute(name) || '');
+    return m ? lookup(scope, m[1]) : undefined;
+  }
+  function expand(node, scope, key, out) {
+    if (node.nodeType === 3) {
+      if (node.nodeValue.trim()) out.push({ k: key, text: text(node.nodeValue, scope) });
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const tag = node.localName;
+    if (tag === 'sc-if') { if (whole(node, 'value', scope)) kids(node, scope, key, out); return; }
+    if (tag === 'sc-for') {
+      const as = node.getAttribute('as');
+      (whole(node, 'list', scope) || []).forEach((item, j) => { const sub = Object.create(scope); sub[as] = item; kids(node, sub, key + ':' + j, out); });
+      return;
+    }
+    const v = { k: key, tag, ns: node.namespaceURI, attrs: {}, on: {}, ref: null, kids: [] };
+    for (const a of node.attributes) {
+      if (a.name === 'ref') v.ref = whole(node, 'ref', scope) || null;
+      else if (EVENTS[a.name]) v.on[EVENTS[a.name]] = whole(node, a.name, scope);
+      else v.attrs[a.name] = text(a.value, scope);
+    }
+    kids(node, scope, key, v.kids);
+    out.push(v);
+  }
+
+  const same = (el, v) => (v.tag === undefined ? el.nodeType === 3 : el.nodeType === 1 && el.localName === v.tag && el.namespaceURI === v.ns);
+  function apply(el, v) {
+    if (v.tag === undefined) { if (el.nodeValue !== v.text) el.nodeValue = v.text; return; }
+    const fresh = !el.__made;
+    el.__made = true;
+    for (const name in v.attrs) {
+      if (!fresh && v.tag === 'canvas' && (name === 'width' || name === 'height')) continue; // the wall sizes its own canvas
+      if (el.getAttribute(name) !== v.attrs[name]) el.setAttribute(name, v.attrs[name]);
+    }
+    for (const a of Array.from(el.attributes)) {
+      if (!(a.name in v.attrs) && !(v.tag === 'canvas' && (a.name === 'width' || a.name === 'height'))) el.removeAttribute(a.name);
+    }
+    el.__on = v.on;
+    el.__ls = el.__ls || {};
+    for (const type in v.on) {
+      if (el.__ls[type]) continue;
+      el.__ls[type] = true;
+      el.addEventListener(type, (e) => { const f = el.__on[type]; if (f) f(e); });
+    }
+    patch(el, v.kids);
+    if (v.ref && el.__ref !== v.ref) { el.__ref = v.ref; v.ref(el); }
+  }
+  function make(v) {
+    const el = v.tag === undefined ? document.createTextNode('') : document.createElementNS(v.ns, v.tag);
+    el.__k = v.k;
+    return el;
+  }
+  function patch(parent, vkids) {
+    const old = new Map();
+    for (let n = parent.firstChild; n; n = n.nextSibling) if (n.__k !== undefined) old.set(n.__k, n);
+    let cur = parent.firstChild;
+    for (const v of vkids) {
+      let el = old.get(v.k);
+      if (el && same(el, v)) old.delete(v.k); else el = make(v);
+      apply(el, v);
+      if (el === cur) cur = cur.nextSibling; else parent.insertBefore(el, cur);
+    }
+    // only nodes this runtime made are its to drop: text a view writes into a ref'd element by hand stays
+    while (cur) { const next = cur.nextSibling; if (cur.__k !== undefined) { if (cur.__ref) cur.__ref(null); parent.removeChild(cur); } cur = next; }
+  }
+
+  class DCLogic {
+    constructor(props) { this.props = props || {}; this.state = {}; this.queued = false; }
+    setState(o) {
+      Object.assign(this.state, o);
+      if (this.queued || !this.host) return;
+      this.queued = true;
+      Promise.resolve().then(() => { this.queued = false; this.render(); });
+    }
+    render() {
+      const out = [];
+      kids(this.tpl.content, this.renderVals(), 'r', out);
+      patch(this.host, out);
+    }
+  }
+
+  // run.code[file][line]: the lines a hop covers and two around them, tabs spread, for the views that show hop code
+  function codeOf(run) {
+    const code = {};
+    run.files.forEach((fl, i) => {
+      const want = new Set();
+      run.threads.forEach((t) => t.steps.forEach((s) => { if (s.f === i) for (let n = s.a - 2; n <= s.b + 2; n++) if (n >= 1) want.add(n); }));
+      const got = {};
+      for (const n of want) {
+        const txt = fl.lines ? fl.lines[n - 1] : fl.sparse ? fl.sparse[String(n)] : null;
+        if (txt != null) got[String(n)] = txt.replace(/\t/g, '    ').slice(0, 150);
+      }
+      if (Object.keys(got).length) code[String(i)] = got;
+    });
+    return code;
+  }
+
+  const DC = {
+    fonts: {
+      display: '"Avenir Next Condensed", "DIN Condensed", "Arial Narrow", "Roboto Condensed", Impact, sans-serif',
+      mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace',
+      sans: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    },
+    DCLogic,
+    views: {},
+    data: { runs: [], book: null },
+    register(name, Cls) { DC.views[name] = Cls; },
+    // mount a registered view onto #board-{name}; a view mounts once, the first time it is shown
+    mount(name, props) {
+      const host = document.getElementById('board-' + name), tpl = document.getElementById('tpl-' + name), Cls = DC.views[name];
+      if (!host || !tpl || !Cls || host.__logic) return host && host.__logic;
+      const logic = new Cls(props || {});
+      logic.host = host; logic.tpl = tpl;
+      host.__logic = logic;
+      logic.render();
+      if (logic.componentDidMount) logic.componentDidMount();
+      return logic;
+    },
+  };
+  // every .frame holds one fixed-size .board (its width in data-w); the board is scaled to the window, never reflowed
+  DC.fit = function () {
+    for (const frame of document.querySelectorAll('.frame')) {
+      const board = frame.firstElementChild, w = Number(board.dataset.w);
+      if (!board.offsetParent && !board.offsetHeight) continue;
+      const s = Math.min(1.6, document.documentElement.clientWidth / w);
+      board.style.width = w + 'px';
+      board.style.transform = 'scale(' + s + ')';
+      frame.style.width = Math.round(w * s) + 'px';
+      frame.style.height = Math.round(board.offsetHeight * s) + 'px';
+      if (!board.__watch && window.ResizeObserver) { board.__watch = new ResizeObserver(DC.fit); board.__watch.observe(board); }
+    }
+  };
+  window.addEventListener('resize', DC.fit);
+  const el = document.getElementById('loom-data');
+  if (el) {
+    const run = JSON.parse(el.textContent);
+    run.code = codeOf(run);
+    DC.data.runs = [run];
+  }
+  return DC;
+})();
+</script>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -80,6 +82,10 @@ type Runtime struct {
 
 	Command CommandRunner
 	Spawn   func(RefreshKind) error
+
+	// Prices is the machine's served price table (LoadServedPrices); nil
+	// leaves the main line's own dollars unpriced, "$?".
+	Prices *pricing.Prices
 }
 
 func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
@@ -155,10 +161,12 @@ func CodexStatuslineCachePath(jailHome string, uid int) string {
 }
 
 // UseConfig takes the state database and any load error from the machine
-// runtime the config loader produced, so a render never re-resolves either.
-func (runtime *Runtime) UseConfig(machine pfmconfig.Runtime) {
+// runtime the config loader produced, so a render never re-resolves either,
+// and loads the machine's served price table, its failure told on stderr.
+func (runtime *Runtime) UseConfig(machine pfmconfig.Runtime, stderr io.Writer) {
 	runtime.StateDB = machine.Paths.StateDB
 	runtime.ConfigError = machine.ConfigError
+	runtime.Prices = LoadServedPrices(machine.Paths.Home, machine.Config.Path, stderr, "pfm statusline")
 }
 
 func (runtime Runtime) getenv(name string) string {

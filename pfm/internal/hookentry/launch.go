@@ -20,11 +20,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/costsink"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -93,6 +95,24 @@ func launchStartsSession(arguments []string) bool {
 	return true
 }
 
+// armCostLedger decides the cost ledger of a session the pass-through is about to exec; a seam so
+// the launcher tests never start a sink.
+var armCostLedger = costsink.PrepareCurrent
+
+// launchIsHeadless reports a print-mode run: one prompt in, one answer out, no chat to meter.
+func launchIsHeadless(arguments []string) bool {
+	for _, argument := range arguments {
+		if argument == "--" {
+			return false
+		}
+		if argument == "-p" || argument == "--print" || argument == "--output-format" ||
+			strings.HasPrefix(argument, "--output-format=") {
+			return true
+		}
+	}
+	return false
+}
+
 // Launch is the managed Claude launcher entry.
 func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
 	if env == nil {
@@ -144,6 +164,9 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			}
 			filtered = append(filtered, sessionEnv...)
 			environment = filtered
+			if !launchIsHeadless(arguments) {
+				environment, _ = armCostLedger(environment, env, prefs.CostLedger, stderr)
+			}
 		}
 		stamped := make([]string, 0, len(environment)+1)
 		for _, entry := range environment {
@@ -234,7 +257,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			name = label
 		}
 	}
-	realRun, err := action.LauncherRunAs(
+	realRun, promptWarning, err := action.LauncherLaunchAs(
 		persona,
 		*realBinary,
 		arguments,
@@ -311,6 +334,10 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			_ = launchTmuxCommand(ctx, tmuxBinary, socketPath, "kill-server").Run()
 		}
 	}()
+	if promptWarning != "" && launchnotice.HoldCancellable(stderr, "pfm internal launch", []string{promptWarning}) {
+		fmt.Fprintln(stderr, "pfm internal launch: cancelled at the warning — the chat was not started")
+		return 130
+	}
 	if interactive {
 		failed = false
 		arguments := attachArguments(socketPath, startChannel, session, env.Get("TMUX") != "")
@@ -354,11 +381,14 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: launcher wait-for timeout after %s\n", launcherWaitTimeout)
 		return 1
 	}
+	// Starting the waiter does not prove its client connected: a fast child
+	// can record its status and close the last pane before that connection.
+	// The durable status is authoritative only after the bounded wait ended;
+	// a timeout above still fails, and absent or invalid status never succeeds.
+	status, err := readLaunchStatus(statusPath)
 	if waitErr != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
-		return 1
 	}
-	status, err := readLaunchStatus(statusPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1

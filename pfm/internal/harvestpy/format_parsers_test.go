@@ -305,3 +305,78 @@ func TestFormatParsersRefuseByName(t *testing.T) {
 		}
 	}
 }
+
+func TestCSVAndJSONConversionPathsAreByteExact(t *testing.T) {
+	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
+	if python == "" {
+		t.Skip("HARVESTPY_CORPUS_PYTHON is not set; exact converter fixtures require the pinned interpreter")
+	}
+	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "sample.csv")
+	if err := os.WriteFile(csvPath, []byte("name,value\nalpha,1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jsonPath := filepath.Join(dir, "sample.json")
+	if err := os.WriteFile(jsonPath, []byte("{\"b\":2,\"a\":[1,true]}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nestedJSONPath := filepath.Join(dir, "nested.json")
+	nested := `{"name":"gauge","site":{"river":"Ouse","depth":null},` +
+		`"readings":[{"day":"mon","mm":4},{"day":"tue","mm":null}],"tags":[],"notes":"two\nlines",` +
+		`"stations":[{"id":1,"tags":["upper"]},{"id":2}]}`
+	if err := os.WriteFile(nestedJSONPath, []byte(nested), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tableJSONPath := filepath.Join(dir, "table.json")
+	if err := os.WriteFile(
+		tableJSONPath,
+		[]byte(`[{"day":"mon","mm":4},{"day":"tue","mm":"a | b"}]`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	invalidJSONPath := filepath.Join(dir, "invalid.json")
+	if err := os.WriteFile(invalidJSONPath, []byte("{not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	converter := testConverter(t, python)
+	for _, tc := range []struct {
+		path string
+		kind string
+		want string
+	}{
+		{csvPath, "csv", "| name | value |\n| --- | --- |\n| alpha | 1 |\n"},
+		{jsonPath, "json", "b: 2\na:\n  - 1\n  - true\n"},
+		{nestedJSONPath, "json", "name: gauge\n" +
+			"site:\n  river: Ouse\n  depth: null\n" +
+			"readings:\n  | day | mm |\n  | --- | --- |\n  | mon | 4 |\n  | tue | null |\n" +
+			"tags: []\n" +
+			"notes: two\n  lines\n" +
+			"stations:\n  - id: 1\n    tags:\n      - upper\n  - id: 2\n"},
+		{tableJSONPath, "json", "| day | mm |\n| --- | --- |\n| mon | 4 |\n| tue | a \\| b |\n"},
+		{invalidJSONPath, "json", "_Converter gap: JSON could not be parsed; the raw text is shown_\n\n{not-json\n"},
+	} {
+		got, err := converter.Convert(context.Background(), Request{Path: tc.path, Kind: tc.kind})
+		if err != nil {
+			t.Fatalf("%s conversion failed: %v", tc.kind, err)
+		}
+		if got.Markdown != tc.want {
+			t.Errorf("%s output drift: got %q want %q", tc.kind, got.Markdown, tc.want)
+		}
+		// A parsed JSON body is the outline, a rendering of the source, and
+		// says so; raw text kept for an unparseable one is the source itself.
+		wantTransformed := ""
+		if tc.kind == "json" && tc.path != invalidJSONPath {
+			wantTransformed = "json-outline"
+		}
+		if got.Meta["transformed"] != wantTransformed {
+			t.Errorf(
+				"%s meta transformed = %q, want %q",
+				filepath.Base(tc.path),
+				got.Meta["transformed"],
+				wantTransformed,
+			)
+		}
+	}
+}

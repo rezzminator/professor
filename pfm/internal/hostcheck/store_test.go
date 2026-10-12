@@ -192,7 +192,7 @@ func TestStoreIdentity(t *testing.T) {
 					entry = "state/mcp-discover-verdicts.json"
 				}
 				path, target := filepath.Join(env.Store, entry), filepath.Join(first, entry)
-				writeFile(t, path, "data")
+				writeBorn(t, path, "data", env.Now)
 				dirs := first
 				if filepath.Dir(target) != first {
 					dirs += " " + filepath.Dir(target)
@@ -200,18 +200,17 @@ func TestStoreIdentity(t *testing.T) {
 				fix := "mkdir -m 700 -p " + dirs + " && mv " + path + " " + target
 				if present {
 					writeFile(t, target, "data")
-					fix = "keep " + target + "; after checking, rm -r " + path
+					fix = asideFix(env, path)
 				}
-				want = append(
-					want,
-					Row{
-						Block,
-						"store-identity",
-						path,
-						entry + " is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)",
-						fix,
-					},
-				)
+				problem := entry + storeIdentityText
+				switch entry {
+				case "backups":
+					problem += "; a Claude launched without CLAUDE_CONFIG_DIR writes backups here too"
+					fallthrough
+				case ".claude.json", ".claude.json.backup":
+					problem += " (mtime 2026-08-01T12:00:00Z, firstStartTime unreadable: not JSON (invalid character 'd' looking for beginning of value))"
+				}
+				want = append(want, Row{Block, "store-identity", path, problem, fix})
 			}
 			assertRows(t, detect(t, "store-identity", env), want...)
 		})
@@ -362,7 +361,7 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 			writeFile(t, filepath.Join(path, "both"), "same")
 			writeFile(t, filepath.Join(target, "both"), "same")
 			writeFile(t, filepath.Join(target, "store"), "store")
-		case entry.Name == "settings.json":
+		case entry.Name == "settings.json" || entry.Name == "tool-visibility-controller.json":
 			writeFile(t, path, `{"account":1,"both":{"k":2}}`)
 			writeFile(t, target, `{"both":{"k":2},"store":3}`)
 		case entry.Name == "history.jsonl":
@@ -398,7 +397,7 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 				filepath.Join(target, "both"):           "same",
 				filepath.Join(target, "sub", "account"): "account",
 			}
-		case entry.Name == "settings.json":
+		case entry.Name == "settings.json" || entry.Name == "tool-visibility-controller.json":
 			raw, err := os.ReadFile(target)
 			var got map[string]any
 			merged := map[string]any{"account": 1.0, "both": map[string]any{"k": 2.0}, "store": 3.0}
@@ -417,7 +416,7 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"projects", "settings.json"} {
+	for _, name := range []string{"projects", "settings.json", "tool-visibility-controller.json"} {
 		t.Run(name+"-stops-on-a-difference", func(t *testing.T) {
 			env := fixtureEnv(t)
 			path, target := filepath.Join(env.Accounts[0].ConfigDir, name), filepath.Join(env.Store, name)
@@ -440,6 +439,32 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 			}
 		})
 	}
+	// A plugin user's rules live in each account dir (CLAUDE_CONFIG_DIR) and the store has no copy yet:
+	// the printed fixes, run in turn, move them into the store whole, so install is unblocked.
+	t.Run("tool-visibility-controller.json-adopts-into-a-missing-store", func(t *testing.T) {
+		env := fixtureEnv(t)
+		const name, rules = "tool-visibility-controller.json", `{"loops":{"main":{"tools":{"exclude":["WebSearch"]}}}}`
+		env.Accounts = append(env.Accounts, config.Account{ID: 2, ConfigDir: config.DefaultAccountDir(env.Home, 2)})
+		for _, account := range env.Accounts {
+			writeFile(t, filepath.Join(account.ConfigDir, name), rules)
+		}
+		rows := detect(t, "account-entry-real", env)
+		if len(rows) != len(env.Accounts) {
+			t.Fatalf("rows=%+v", rows)
+		}
+		for _, row := range rows {
+			if output, err := exec.Command("sh", "-c", row.Fix).CombinedOutput(); err != nil {
+				t.Fatalf("fix %q: %v: %s", row.Fix, err, output)
+			}
+		}
+		assertRows(t, detect(t, "account-entry-real", env))
+		raw, err := os.ReadFile(filepath.Join(env.Store, name))
+		var got, want any
+		if err != nil || json.Unmarshal(raw, &got) != nil || json.Unmarshal([]byte(rules), &want) != nil ||
+			!reflect.DeepEqual(got, want) {
+			t.Fatalf("store copy=%q %v, want the account rules", raw, err)
+		}
+	})
 	t.Run("foreign-link", func(t *testing.T) {
 		env := fixtureEnv(t)
 		path := filepath.Join(env.Accounts[0].ConfigDir, "CLAUDE.md")
@@ -468,24 +493,63 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 	})
 }
 
+// strayAside is where a fixture env's move-aside fixes put a stray file:
+// its path under home, mirrored under the run's timestamped directory.
+func strayAside(env Env, path string) string {
+	relative, err := filepath.Rel(env.Home, path)
+	if err != nil {
+		panic(err)
+	}
+	return filepath.Join(env.Home, ".local", "state", "pfm", "stray-claude-state", "20260801-120000", relative)
+}
+
+// writeBorn writes text at path with a fixed mtime, so a row naming it is exact.
+func writeBorn(t *testing.T, path, text string, born time.Time) {
+	t.Helper()
+	writeFile(t, path, text)
+	if err := os.Chtimes(path, born, born); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func asideFix(env Env, path string) string {
+	target := strayAside(env, path)
+	return "mkdir -m 700 -p " + filepath.Dir(target) + " && [ ! -e " + target + " ] && mv " + path + " " + target +
+		"  # moved aside, never deleted"
+}
+
 func TestHomeStateFile(t *testing.T) {
-	env := fixtureEnv(t)
-	path := filepath.Join(env.Home, ".claude.json")
-	writeFile(t, path, "{}")
-	assertRows(
-		t,
-		detect(t, "home-state-file", env),
-		Row{
-			Warn,
-			"home-state-file",
-			path,
-			"a Claude launched without CLAUDE_CONFIG_DIR wrote this state file",
-			"check it names the same oauthAccount as " + filepath.Join(
-				env.Accounts[0].ConfigDir,
-				".claude.json",
-			) + ", then rm " + path,
-		},
-	)
+	born := time.Date(2026, 7, 30, 8, 15, 0, 0, time.UTC)
+	for _, test := range []struct{ name, text, birth string }{
+		{"stamped", `{"firstStartTime":"2026-07-30T08:14:59.120Z"}`, "mtime 2026-07-30T08:15:00Z, firstStartTime 2026-07-30T08:14:59.120Z"},
+		{"absent", `{"numStartups":1}`, "mtime 2026-07-30T08:15:00Z, firstStartTime absent"},
+		{"not-json", "{", "mtime 2026-07-30T08:15:00Z, firstStartTime unreadable: not JSON (unexpected end of JSON input)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := fixtureEnv(t)
+			path := filepath.Join(env.Home, ".claude.json")
+			writeBorn(t, path, test.text, born)
+			rows := detect(t, "home-state-file", env)
+			assertRows(
+				t,
+				rows,
+				Row{
+					Warn,
+					"home-state-file",
+					path,
+					"a Claude launched without CLAUDE_CONFIG_DIR wrote this state file (" + test.birth + ")",
+					asideFix(env, path),
+				},
+			)
+			if output, err := exec.Command("sh", "-c", rows[0].Fix).CombinedOutput(); err != nil {
+				t.Fatalf("fix %q: %v: %s", rows[0].Fix, err, output)
+			}
+			if raw, err := os.ReadFile(strayAside(env, path)); err != nil || string(raw) != test.text {
+				t.Fatalf("aside copy %q %v", raw, err)
+			}
+			assertRows(t, detect(t, "home-state-file", env))
+		})
+	}
 	t.Run("unreadable", func(t *testing.T) {
 		env := fixtureEnv(t)
 		path := filepath.Join(env.Home, ".claude.json")
@@ -493,6 +557,56 @@ func TestHomeStateFile(t *testing.T) {
 		assertUnreadable(t, detect(t, "home-state-file", env), "home-state-file", path, syscall.EISDIR)
 	})
 }
+
+// TestStrayBackupsReportBirthAndMoveAside is the issue's shape: an unscoped
+// Claude recreated the store's backups beside account 1's own. The BLOCK names
+// the newest backup's birth, and its fix moves the dir aside, deleting nothing.
+func TestStrayBackupsReportBirthAndMoveAside(t *testing.T) {
+	env := fixtureEnv(t)
+	backups := filepath.Join(env.Store, "backups")
+	writeBorn(t, filepath.Join(backups, ".claude.json.backup.1"), "{}", time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC))
+	writeBorn(
+		t,
+		filepath.Join(backups, ".claude.json.backup.2"),
+		`{"firstStartTime":"2026-07-31T23:59:58.000Z"}`,
+		time.Date(2026, 7, 31, 23, 59, 59, 0, time.UTC),
+	)
+	makeDir(t, filepath.Join(env.Accounts[0].ConfigDir, "backups"))
+	rows := detect(t, "store-identity", env)
+	assertRows(
+		t,
+		rows,
+		Row{
+			Block,
+			"store-identity",
+			backups,
+			"backups" + storeIdentityText + "; a Claude launched without CLAUDE_CONFIG_DIR writes backups here too " +
+				"(newest .claude.json.backup.2: mtime 2026-07-31T23:59:59Z, firstStartTime 2026-07-31T23:59:58.000Z)",
+			asideFix(env, backups),
+		},
+	)
+	if output, err := exec.Command("sh", "-c", rows[0].Fix).CombinedOutput(); err != nil {
+		t.Fatalf("fix %q: %v: %s", rows[0].Fix, err, output)
+	}
+	for _, name := range []string{".claude.json.backup.1", ".claude.json.backup.2"} {
+		if _, err := os.Stat(filepath.Join(strayAside(env, backups), name)); err != nil {
+			t.Fatalf("%s not moved aside: %v", name, err)
+		}
+	}
+	assertRows(t, detect(t, "store-identity", env))
+	t.Run("empty", func(t *testing.T) {
+		env := fixtureEnv(t)
+		backups := filepath.Join(env.Store, "backups")
+		makeDir(t, backups)
+		makeDir(t, filepath.Join(env.Accounts[0].ConfigDir, "backups"))
+		rows := detect(t, "store-identity", env)
+		if len(rows) != 1 || !strings.HasSuffix(rows[0].Problem, "(holds no file)") {
+			t.Fatalf("rows=%+v", rows)
+		}
+	})
+}
+
+const storeIdentityText = " is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)"
 
 func TestAccountEntryReal(t *testing.T) {
 	env := fixtureEnv(t)
@@ -514,10 +628,12 @@ func TestAccountEntryReal(t *testing.T) {
 		"rm {path}  # interleaved by timestamp"
 	fixes["plugins"] = "rm -r {path}  # the store keeps its copy (reinstallable)"
 	fixes["settings.json"] = "jq -e -s '.[0] as $s | .[1] | to_entries | all(.key as $k | ($s | has($k) | not) or " +
-		"$s[$k] == .value)' {store}/settings.json {path} > /dev/null && " +
-		"jq -s '.[0] * .[1]' {store}/settings.json {path} > " +
-		"{store}/settings.json.new && mv {store}/settings.json.new {store}/settings.json && rm {path}  " +
+		"$s[$k] == .value)' {store}/{entry} {path} > /dev/null && " +
+		"jq -s '.[0] * .[1]' {store}/{entry} {path} > " +
+		"{store}/{entry}.new && mv {store}/{entry}.new {store}/{entry} && rm {path}  " +
 		"# adds the keys the store lacks; stops while a key differs"
+	fixes["tool-visibility-controller.json"] = "mkdir -p {store} && { [ -e {store}/{entry} ] || [ -L {store}/{entry} ] || " +
+		"printf '{}\\n' > {store}/{entry}; } && " + fixes["settings.json"]
 	fixes["CLAUDE.md"] = "cat {path} >> {store}/CLAUDE.md && rm {path}  " +
 		"# appended whole; prune {store}/CLAUDE.md as you like"
 	for _, entry := range installer.StoreEntries {
@@ -720,7 +836,7 @@ func TestStaleStateTmpAge(t *testing.T) {
 
 func TestUnclassifiedExcludesKnownAndBackupNames(t *testing.T) {
 	env := fixtureEnv(t)
-	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture"} {
+	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture", "debug", "daemon.lock", "daemon.status.json", "tmp"} {
 		writeFile(t, filepath.Join(env.Store, name), "{}")
 	}
 	assertRows(t, detect(t, "unclassified", env))
@@ -771,4 +887,43 @@ func TestStoreIdentityFixRunsOnAFirstMigration(t *testing.T) {
 		}
 	}
 	assertRows(t, detect(t, "store-identity", env))
+}
+
+// TestUnclassifiedKnowsPluginDirs: a top-level dir named after an installed
+// plugin is that plugin's (its logs), in the store and in every account dir; a
+// plugin registry that cannot be read is named, and the dirs it would have
+// classified stay unclassified.
+func TestUnclassifiedKnowsPluginDirs(t *testing.T) {
+	env := fixtureEnv(t)
+	registry := filepath.Join(env.Store, "plugins", "installed_plugins.json")
+	writeFile(t, registry, `{"version":2,"plugins":{"logbook@fixture-market":[],"other@fixture-market":[]}}`)
+	for _, dir := range []string{env.Store, env.Accounts[0].ConfigDir} {
+		writeFile(t, filepath.Join(dir, "logbook", "logbook.log"), "line")
+	}
+	assertRows(t, detect(t, "unclassified", env))
+	t.Run("registry-unreadable", func(t *testing.T) {
+		env := fixtureEnv(t)
+		registry := filepath.Join(env.Store, "plugins", "installed_plugins.json")
+		writeFile(t, registry, "{")
+		path := filepath.Join(env.Store, "logbook")
+		makeDir(t, path)
+		assertRows(
+			t,
+			detect(t, "unclassified", env),
+			Row{
+				Warn,
+				"unclassified",
+				registry,
+				"UNREADABLE plugin registry: unexpected end of JSON input — a dir named after a plugin reports unclassified",
+				"make " + registry + " readable JSON, then rerun pfm doctor",
+			},
+			Row{
+				Warn,
+				"unclassified",
+				path,
+				"UNCLASSIFIED — on neither the shared nor the per-account list",
+				"keep it; pfm doctor names it until a pfm release classifies it",
+			},
+		)
+	})
 }

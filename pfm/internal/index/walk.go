@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 type diskFile struct {
@@ -90,53 +92,23 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 	return sortedDiskFiles(filesByPath), nil
 }
 
+// walkCodexRollouts lists codexHome's live rollouts. The index reads sessions/
+// only: an archived thread is no live or resumable seat.
 func walkCodexRollouts(ctx context.Context, codexHome string) ([]diskFile, error) {
-	root := filepath.Join(codexHome, "sessions")
-	absolute, err := filepath.Abs(root)
-	if err != nil {
-		return nil, fmt.Errorf("make Codex rollout root absolute: %w", err)
+	rollouts, errs := codexmeta.WalkRollouts(ctx, codexHome, codexmeta.SessionsDir)
+	if err := errors.Join(errs...); err != nil {
+		return nil, fmt.Errorf("walk Codex rollouts under %q: %w", codexHome, err)
 	}
-	resolved, err := filepath.EvalSymlinks(absolute)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+	files := make([]diskFile, 0, len(rollouts))
+	for _, rollout := range rollouts {
+		files = append(files, diskFile{
+			ID:      codexmeta.RolloutID(filepath.Base(rollout.Path)),
+			Path:    rollout.Path,
+			Size:    rollout.Size,
+			MTimeNS: rollout.ModTime.UnixNano(),
+		})
 	}
-	if err != nil {
-		return nil, fmt.Errorf("resolve Codex rollout root %q: %w", root, err)
-	}
-
-	filesByPath := make(map[string]diskFile)
-	err = filepath.WalkDir(resolved, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 ||
-			filepath.Ext(entry.Name()) != ".jsonl" ||
-			!strings.HasPrefix(entry.Name(), "rollout-") {
-			return nil
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		filesByPath[path] = diskFile{
-			ID:      rolloutIDFromFilename(entry.Name()),
-			Path:    path,
-			Size:    info.Size(),
-			MTimeNS: info.ModTime().UnixNano(),
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk Codex rollouts %q: %w", resolved, err)
-	}
-	return sortedDiskFiles(filesByPath), nil
+	return files, nil
 }
 
 func sortedDiskFiles(filesByPath map[string]diskFile) []diskFile {
@@ -148,19 +120,4 @@ func sortedDiskFiles(filesByPath map[string]diskFile) []diskFile {
 		return files[left].Path < files[right].Path
 	})
 	return files
-}
-
-func rolloutIDFromFilename(name string) string {
-	stem := strings.TrimSuffix(name, ".jsonl")
-	rest := strings.TrimPrefix(stem, "rollout-")
-	if len(rest) > 20 &&
-		rest[4] == '-' &&
-		rest[7] == '-' &&
-		rest[10] == 'T' &&
-		rest[13] == '-' &&
-		rest[16] == '-' &&
-		rest[19] == '-' {
-		return rest[20:]
-	}
-	return rest
 }

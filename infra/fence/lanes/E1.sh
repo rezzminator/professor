@@ -919,50 +919,50 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
-# ─── E1.27 — reminder set / ls / rm, and the fire tick ─────────────────────
+# ─── E1.27 — schedule set / ls / rm, and the fire tick ─────────────────────
 
-beat E1.27-reminder
+beat E1.27-schedule
 spends none
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
-  prompt="lane reminder probe $$"
+  prompt="lane schedule probe $$"
   session="$(live_field "$CHAT" 2)"
-  set_out="$(pfm chat reminder set --every 2h --prompt "$prompt" "$CHAT" 2>&1)"
+  set_out="$(pfm chat schedule set --every 2h --prompt "$prompt" "$CHAT" 2>&1)"
   rc=$?
-  [ "$rc" -eq 0 ] || bad="$bad reminder set on $CHAT exited $rc: $(one_line "$set_out");"
-  listed="$(pfm chat reminder ls --json 2>&1)"
+  [ "$rc" -eq 0 ] || bad="$bad schedule set on $CHAT exited $rc: $(one_line "$set_out");"
+  listed="$(pfm chat schedule ls --json 2>&1)"
   rc=$?
   row="$(jq -c --arg p "$prompt" '[.[] | select(.prompt == $p)] | first // empty' <<<"$listed" 2>/dev/null)"
   id="$(jq -r '.id // empty' <<<"$row" 2>/dev/null)"
   if [ "$rc" -ne 0 ] || [ -z "$id" ]; then
-    bad="$bad reminder ls --json (exit $rc) does not list the reminder just set: $(one_line "$listed");"
+    bad="$bad schedule ls --json (exit $rc) does not list the schedule just set: $(one_line "$listed");"
   else
     keyed="$(jq -r '.session_id' <<<"$row")"
-    [ "$keyed" = "$session" ] || bad="$bad the reminder is keyed to session '$keyed', want $CHAT's live session '$session';"
-    fire_out="$(pfm internal reminder-fire 2>&1)"
+    [ "$keyed" = "$session" ] || bad="$bad the schedule is keyed to session '$keyed', want $CHAT's live session '$session';"
+    fire_out="$(pfm internal schedule-fire 2>&1)"
     rc=$?
-    [ "$rc" -eq 0 ] || bad="$bad the fire tick exited $rc with no reminder due: $(one_line "$fire_out");"
-    fired="$(pfm chat reminder ls --json 2>/dev/null | jq -r --argjson id "$id" '.[] | select(.id == $id) | .last_fired' 2>/dev/null)"
+    [ "$rc" -eq 0 ] || bad="$bad the fire tick exited $rc with no schedule due: $(one_line "$fire_out");"
+    fired="$(pfm chat schedule ls --json 2>/dev/null | jq -r --argjson id "$id" '.[] | select(.id == $id) | .last_fired' 2>/dev/null)"
     case "$fired" in
       0001-*) ;;
-      "") bad="$bad reminder $id is missing from ls after the fire tick;" ;;
-      *) bad="$bad the fire tick fired reminder $id two hours early (last_fired '$fired');" ;;
+      "") bad="$bad schedule $id is missing from ls after the fire tick;" ;;
+      *) bad="$bad the fire tick fired schedule $id two hours early (last_fired '$fired');" ;;
     esac
-    rm_out="$(pfm chat reminder rm "$id" 2>&1)"
+    rm_out="$(pfm chat schedule rm "$id" 2>&1)"
     rc=$?
-    [ "$rc" -eq 0 ] || bad="$bad reminder rm $id exited $rc: $(one_line "$rm_out");"
-    pfm chat reminder ls --json 2>/dev/null | jq -e --argjson id "$id" 'any(.[]; .id == $id)' >/dev/null 2>&1 &&
-      bad="$bad reminder $id is still listed after rm;"
-    pfm chat reminder rm "$id" >/dev/null 2>&1
+    [ "$rc" -eq 0 ] || bad="$bad schedule rm $id exited $rc: $(one_line "$rm_out");"
+    pfm chat schedule ls --json 2>/dev/null | jq -e --argjson id "$id" 'any(.[]; .id == $id)' >/dev/null 2>&1 &&
+      bad="$bad schedule $id is still listed after rm;"
+    pfm chat schedule rm "$id" >/dev/null 2>&1
     rc=$?
-    [ "$rc" -eq 1 ] || bad="$bad a second rm of reminder $id exited $rc (want 1, no such reminder);"
+    [ "$rc" -eq 1 ] || bad="$bad a second rm of schedule $id exited $rc (want 1, no such schedule);"
   fi
-  pfm chat reminder >/dev/null 2>&1
+  pfm chat schedule >/dev/null 2>&1
   rc=$?
-  [ "$rc" -eq 2 ] || bad="$bad reminder with no verb exited $rc (want 2, usage);"
+  [ "$rc" -eq 2 ] || bad="$bad schedule with no verb exited $rc (want 2, usage);"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "a reminder set on $CHAT is keyed to its live session, left unfired by a tick before it is due, and removed by rm"
+    pass "a schedule set on $CHAT is keyed to its live session, left unfired by a tick before it is due, and removed by rm"
   fi
 fi
 

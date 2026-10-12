@@ -9,6 +9,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 type claudeRecord struct {
@@ -30,7 +31,7 @@ type claudeRecord struct {
 }
 
 // borrowedRawMessage is consumed before json.Unmarshal returns control to
-// readCompleteLines' caller. Unlike json.RawMessage it deliberately borrows
+// transcript.ReadLines' caller. Unlike json.RawMessage it deliberately borrows
 // the current line buffer, avoiding one full prompt copy per transcript row.
 // It must never escape the parse callback.
 type borrowedRawMessage []byte
@@ -45,7 +46,10 @@ func parseClaudeTranscriptFile(
 	start int64,
 	transcript store.Transcript,
 ) (store.Transcript, int64, error) {
-	parsedOffset, bytesRead, err := readCompleteLines(file.Path, start, func(line []byte) {
+	parsedOffset, bytesRead, err := claudetranscript.ReadLines(file.Path, start, func(line []byte, complete bool) {
+		if !complete {
+			return
+		}
 		if !relevantClaudeLine(line) {
 			return
 		}
@@ -66,9 +70,8 @@ func parseClaudeTranscriptFile(
 
 		switch record.Type {
 		case "custom-title", "agent-name":
-			transcript.CustomTitle = record.CustomTitle
-			if transcript.CustomTitle == "" {
-				transcript.CustomTitle = record.AgentName
+			if title, ok := claudetranscript.TitleOf(record.Type, record.CustomTitle, record.AgentName); ok {
+				transcript.CustomTitle = title
 			}
 		case "ai-title":
 			transcript.AITitle = record.AITitle
@@ -82,7 +85,7 @@ func parseClaudeTranscriptFile(
 			if record.IsCompactSummary {
 				return
 			}
-			prompt := naming.FlattenPromptText(json.RawMessage(record.Message.Content))
+			prompt := claudetranscript.FlattenPromptText(json.RawMessage(record.Message.Content))
 			if prompt == "" || naming.IsJunkPrompt(prompt) {
 				return
 			}

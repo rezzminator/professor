@@ -169,7 +169,7 @@ A named regulator, competitor, conference, or association surviving in one of th
 
 ## Paths (mostly generic pipeline paths — KEEP unchanged)
 
-Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,backlog.md}`, `$HOME/.local/state/pfm/flights/{project}/`, `.worktrees/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
+Keep verbatim: `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,backlog.md}`, `$HOME/.local/state/pfm/flights/{project}/`, `.worktrees/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
 
 ## Model pins
 
@@ -204,7 +204,6 @@ These slot into the concept families above — registered here to close prior ga
 | transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
 | illustrative persona example — a domain risk (Three lenses at once, § Rules → Meta) | `{DOMAIN_RISK_EXAMPLE}` | Persona |
 | the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
-| the Codex model id named per tier in `templates/project/scripts/build-codex.mjs`'s `MODEL_MAP` (smart / mechanical / collector) | `{CODEX_MODEL_SMART}` / `{CODEX_MODEL_MECHANICAL}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
 | the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
 | the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
 | the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |
@@ -230,5 +229,6 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |
-| `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
+| `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md`, `global/agents/reviewer-pro.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
 | `{HHMMSS}` | `global/agents/agent-optimizer.md` | the UTC time of the report's write, hours, minutes and seconds |
+| `{RUN}` / `{ID}` / `{QUESTION}` | `global/agents/tracer.md`, `global/agents/sub-tracer.md`, `global/commands/tracer/use.md` | the trace run's directory `tt new` printed; a sub-tracer's dotted node id; the card's `Q{n}` question number |

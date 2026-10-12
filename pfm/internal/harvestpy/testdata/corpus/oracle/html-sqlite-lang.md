@@ -1,8 +1,3 @@
-**Title:** SQL As Understood By SQLite
-**Published:** 2024-04-01
-
----
-
 Small. Fast. Reliable. Choose any three.
 
 Choose any three.

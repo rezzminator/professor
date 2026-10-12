@@ -2,19 +2,17 @@ package harvestcli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/ask"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // askAlias keeps the originally attempted `pfm harvest --ask -p ...`
@@ -64,6 +62,25 @@ func runAsk(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
 		fmt.Fprintf(stderr, "pfm harvest ask: resolve engine: %v\n", err)
 		return 2
 	}
+	if strings.TrimSpace(*model) != "" {
+		prices, err := pricing.LoadPrices(runtime.Paths.Home, runtime.Config.Path)
+		if err != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm harvest ask: model %q: load the price table that names the models: %v\n",
+				*model,
+				err,
+			)
+			return 1
+		}
+		// The model launched is the one checked: trimmed, an alias lower-cased.
+		*model, err = ask.CheckModel(engineID, *model, prices.Table)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm harvest ask: %v\n", err)
+			return 2
+		}
+	}
+
 	runner, err := ask.ResolveEngine(engineID, runtime.Config)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm harvest ask: resolve %s engine: %v\n", engineID, err)
@@ -75,73 +92,19 @@ func runAsk(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
 		fmt.Fprintf(stderr, "pfm harvest ask: configure harvester: %v\n", err)
 		return 1
 	}
-	files := make([]string, 0, len(sources))
-	labels := make([]string, 0, len(sources))
-	receiptDir := ""
-	for index, source := range sources {
-		result := harvester.FetchPublic(
+	results := make([]harvest.Result, 0, len(sources))
+	for _, source := range sources {
+		results = append(results, harvester.FetchPublic(
 			context.Background(),
 			source,
 			harvest.FetchOptions{Refresh: *refresh, SizeOnly: true},
-		)
-		path := result.Path
-		if result.Error == "" && path != "" {
-			path, err = filepath.Abs(path)
-			if err != nil {
-				result.Error = fmt.Sprintf("resolve cache path %s: %v", result.Path, err)
-				result.ErrorKind = "cache_path"
-			}
-		} else if result.Error == "" {
-			result.Error = "harvester returned success without a full cache path"
-			result.ErrorKind = "cache_path"
-		}
-		if result.Error != "" {
-			path, receiptDir, err = writeAskReceipt(runtime.Paths.Home, receiptDir, index, source, result)
-			if err != nil {
-				fmt.Fprintf(stderr, "pfm harvest ask: prepare receipt for %q: %v\n", source, err)
-				if receiptDir != "" {
-					if cleanupErr := os.RemoveAll(receiptDir); cleanupErr != nil {
-						fmt.Fprintf(stderr, "pfm harvest ask: cleanup receipts %s: %v\n", receiptDir, cleanupErr)
-					}
-				}
-				return 1
-			}
-		}
-		files = append(files, path)
-		labels = append(labels, source)
+		))
 	}
-
-	input, err := ask.ResolveInput(ask.AskInput{
-		ContentFiles: files,
-		SourceLabels: labels,
-		Prompt:       *prompt,
-		Engine:       engineID,
-		Model:        *model,
-		Effort:       *effort,
-	}, runtime.Config)
+	answer, err := harvestmcp.AskOver(context.Background(), runtime.Config, runtime.Paths.Home, runner, ask.AskInput{
+		Prompt: *prompt, Engine: engineID, Model: *model, Effort: *effort,
+	}, sources, results)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm harvest ask: prepare model input: %v\n", err)
-		if receiptDir != "" {
-			if cleanupErr := os.RemoveAll(receiptDir); cleanupErr != nil {
-				fmt.Fprintf(stderr, "pfm harvest ask: cleanup receipts %s: %v\n", receiptDir, cleanupErr)
-			}
-		}
-		return 1
-	}
-	answer, runErr := runner.Run(context.Background(), input)
-	cleanupErr := error(nil)
-	if receiptDir != "" {
-		cleanupErr = os.RemoveAll(receiptDir)
-	}
-	if runErr != nil {
-		fmt.Fprintf(stderr, "pfm harvest ask: %v\n", runErr)
-		if cleanupErr != nil {
-			fmt.Fprintf(stderr, "pfm harvest ask: cleanup receipts %s: %v\n", receiptDir, cleanupErr)
-		}
-		return 1
-	}
-	if cleanupErr != nil {
-		fmt.Fprintf(stderr, "pfm harvest ask: cleanup receipts %s: %v\n", receiptDir, cleanupErr)
+		fmt.Fprintf(stderr, "pfm harvest ask: %v\n", err)
 		return 1
 	}
 	fmt.Fprintln(stdout, answer.Answer)
@@ -158,36 +121,4 @@ func runAsk(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
 		fmt.Fprintln(stderr, "pfm harvest ask: usage unknown: the engine reported no token counts")
 	}
 	return 0
-}
-
-func writeAskReceipt(
-	home, receiptDir string,
-	index int,
-	source string,
-	result harvest.Result,
-) (string, string, error) {
-	if receiptDir == "" {
-		root := filepath.Join(home, ".local", "state", "pfm", "harvest-ask")
-		if err := os.MkdirAll(root, 0o700); err != nil {
-			return "", "", fmt.Errorf("create receipt root %s: %w", root, err)
-		}
-		var err error
-		receiptDir, err = os.MkdirTemp(root, "run-")
-		if err != nil {
-			return "", "", fmt.Errorf("create receipt directory under %s: %w", root, err)
-		}
-	}
-	payload, err := json.MarshalIndent(struct {
-		Status string         `json:"status"`
-		Input  string         `json:"input"`
-		Result harvest.Result `json:"result"`
-	}{Status: doctor.StateUnavailable, Input: source, Result: harvest.PublicFailure(source, result)}, "", "  ")
-	if err != nil {
-		return "", receiptDir, fmt.Errorf("encode receipt: %w", err)
-	}
-	path := filepath.Join(receiptDir, fmt.Sprintf("source-%03d.json", index+1))
-	if err := os.WriteFile(path, append(payload, '\n'), 0o600); err != nil {
-		return "", receiptDir, fmt.Errorf("write receipt %s: %w", path, err)
-	}
-	return path, receiptDir, nil
 }

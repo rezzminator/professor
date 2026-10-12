@@ -24,6 +24,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -256,7 +257,9 @@ func readTOMLConstitution(path, cwd, home string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("agent role: compose the Codex base prompt for %s: %w", path, err)
 	}
-	return fleetPrompt + "\n---\n\n" + doc.DeveloperInstructions, nil
+	// The role body is Claude-authored text: it reaches Codex with Claude's /code-review mapped
+	// to the shell review command, as the fleet prompt does (codexprompt/review.go).
+	return fleetPrompt + "\n---\n\n" + codexprompt.RewriteCodeReview(doc.DeveloperInstructions), nil
 }
 
 // roleLadderRoot walks upward from start (inclusive) to the nearest ancestor that

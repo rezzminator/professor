@@ -222,9 +222,25 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("theme", config.Claude.Theme)
 	printClaude("webSearchesPerSession", config.Claude.WebSearchesPerSession)
 	printClaude("autoCompactWindow", config.Claude.AutoCompactWindow)
+	printClaude("helperModel", config.Claude.HelperModel)
 	printClaude("tmuxTruecolor", config.Claude.TmuxTruecolor)
 	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
 	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
+	printClaude("pluginCheckoutRoot", config.Claude.PluginCheckoutRoot)
+	plugins := make([]string, 0, len(config.Claude.Plugins))
+	for _, plugin := range config.Claude.Plugins {
+		entry := plugin.ID
+		if plugin.Source != "" {
+			entry += " (source " + plugin.Source + ")"
+		}
+		plugins = append(plugins, entry)
+	}
+	if len(plugins) == 0 {
+		plugins = append(plugins, "none")
+	}
+	printClaude("plugins", strings.Join(plugins, ","))
+	printClaude("costLedger", config.Claude.CostLedger)
+	printClaude("gptAgents", config.Claude.GptAgents)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

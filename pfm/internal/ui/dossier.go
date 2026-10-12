@@ -171,7 +171,7 @@ func dossierPurpose(row compose.Row) string {
 		if row.Workbench != "" {
 			return "Enter starts a new " + short + " in " + row.CWD + " on its workbench prompt."
 		}
-		return "Enter starts a new " + short + " in your current directory."
+		return "Enter starts a new " + short + " in " + row.CWD + "."
 	}
 	return ""
 }
@@ -219,6 +219,7 @@ func (model Model) dossierActions(row compose.Row, inner int) []dossierLine {
 
 // dossierLines composes the pane for the selected row.
 func (model Model) dossierLines(row compose.Row, inner, rows int) []dossierLine {
+	original := row
 	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
 		row, _ = model.newChatActionRow(row)
 	}
@@ -261,6 +262,9 @@ func (model Model) dossierLines(row compose.Row, inner, rows int) []dossierLine 
 	details := model.dossierDetails(row, inner, heat)
 	actions := model.dossierActions(row, inner)
 	purpose := dossierPurpose(row)
+	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
+		purpose = model.wizardPurpose(original)
+	}
 	if purpose != "" {
 		details = nil
 		actions = []dossierLine{model.dossierEnterLine(row, inner)}

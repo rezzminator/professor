@@ -18,10 +18,12 @@ import (
 type Severity string
 
 const (
-	Block             Severity = "BLOCK"
-	Warn              Severity = "WARN"
-	checkPFMMCP                = "pfm-mcp"
-	classUnclassified          = "unclassified"
+	Block              Severity = "BLOCK"
+	Warn               Severity = "WARN"
+	Accepted           Severity = "ACCEPTED"
+	checkPFMMCP                 = "pfm-mcp"
+	checkThirdPartyMCP          = "third-party-mcp"
+	classUnclassified           = "unclassified"
 )
 
 type Row struct {
@@ -41,6 +43,9 @@ func (row Row) Line() string {
 // install refusal: "{prefix}{Line}\n{prefix}  fix: {Fix}\n". The refusal
 // carries the fix because a rolled-back binary's doctor may have no host checks.
 func (row Row) Render(prefix string) string {
+	if row.Severity == Accepted {
+		return prefix + row.Line() + "\n"
+	}
 	return prefix + row.Line() + "\n" + prefix + "  fix: " + row.Fix + "\n"
 }
 
@@ -51,7 +56,15 @@ type Env struct {
 	HarvesterCacheDir                                                       string
 	MCPPort                                                                 int
 	Accounts                                                                []config.Account
+	AcceptedMCP                                                             []config.AcceptedMCP
 	Now                                                                     time.Time
+	// Environ is pfm's own process environment, KEY=VALUE: the login shell's
+	// exports when pfm runs from a terminal, a chat's when it runs in one.
+	Environ []string
+	// TmuxDir is pfm's tmux socket directory, the one the chat probe reads.
+	TmuxDir string
+	// Tmux probes the servers under TmuxDir; nil is the real tmux.
+	Tmux TmuxServerClient
 }
 
 // EnvFor builds the read-only detector environment from the loaded runtime.
@@ -69,6 +82,8 @@ func EnvFor(runtime config.Runtime, now time.Time) Env {
 		ManagedRoot: installer.ManagedRoot(home), ConfigExplicit: runtime.ConfigExplicit,
 		HarvesterCacheDir: runtime.Config.Harvester.Cache.Dir,
 		MCPPort:           runtime.Config.MCP.HTTP.Port, Accounts: runtime.Config.Accounts, Now: now,
+		Environ: os.Environ(), TmuxDir: runtime.Paths.TmuxDir,
+		AcceptedMCP: runtime.Config.Doctor.AcceptedMCP,
 	}
 }
 
@@ -98,9 +113,12 @@ func Detectors() []Detector {
 		{"account-entry-real", accountEntryReal},
 		{checkRetiredStoreEntry, retiredStoreEntry},
 		{classUnclassified, unclassified},
-		{"third-party-mcp", thirdPartyMCP},
+		{checkThirdPartyMCP, thirdPartyMCP},
 		{"stale-state-tmp", staleStateTmp},
 		{"beside-backup", besideBackup},
+		{checkFunctionHookModules, functionHookModules},
+		{checkShellClaudeEnv, shellClaudeEnv},
+		{checkTmuxServers, tmuxServers},
 	}
 }
 

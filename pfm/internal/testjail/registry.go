@@ -3,36 +3,64 @@ package testjail
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-// StageGlobalAgents wires the checkout's current role roster into a doctor jail.
+// StageGlobalAgents links the checkout's machine-global agent sources into
+// {home}/.claude/agents, the Claude half of what pfm install's engine-sync
+// global step wires; a jail reading a role by name finds it there. The
+// compiled Codex roles are engine-sync's, proven in its own gate.
 func StageGlobalAgents(t *testing.T, home string) {
 	t.Helper()
-	// A healthy clone-backed registry also carries the real transcript script
-	// that doctor audits and chat_digest uses at its installed fallback.
-	transcript := filepath.Join(home, ".claude", "skills", "transcript", "transcript.py")
-	if err := os.MkdirAll(filepath.Dir(transcript), 0o700); err != nil {
+	source := filepath.Join(checkoutRoot(), "templates", "global", "agents")
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		t.Fatalf("read the global agent sources %s: %v", source, err)
+	}
+	registry := filepath.Join(home, ".claude", "agents")
+	if err := os.MkdirAll(registry, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(transcript); os.IsNotExist(err) {
-		if err := os.Symlink(
-			filepath.Join(checkoutRoot(), "templates", "global", "skills", "transcript", "transcript.py"),
-			transcript,
-		); err != nil {
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		target, link := filepath.Join(source, entry.Name()), filepath.Join(registry, entry.Name())
+		if found, err := os.Readlink(link); err == nil && found == target {
+			continue
+		}
+		if err := os.Symlink(target, link); err != nil {
 			t.Fatal(err)
 		}
-	} else if err != nil {
+	}
+}
+
+// stageTracerIntakeKit stages what the tracer-intake launch hook needs on a
+// healthy host: the checkout's tracetree skill linked at
+// {home}/.claude/skills/tracetree, the link pfm install makes, and a python3 in
+// shimDir, the one directory beyond the canonical bin the jail's PATH holds.
+// The shim runs the interpreter the test process resolved; a host without one
+// fails the test here, as the doctor check would fail it later.
+func stageTracerIntakeKit(t *testing.T, home, shimDir string) {
+	t.Helper()
+	python, err := deps.Resolve("python3")
+	if err != nil {
+		t.Fatalf("the jail's healthy HOME needs python3 for the tracer-intake hook: %v", err)
+	}
+	if err := WriteExecutable(
+		filepath.Join(shimDir, "python3"), []byte("#!/bin/sh\nexec '"+python+"' \"$@\"\n"), 0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
-	_, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
-		Home: home, SourceRepo: checkoutRoot(),
-		ClaudeConfigDirs: []string{filepath.Join(home, ".claude")},
-		CodexHomes:       []string{filepath.Join(home, ".codex")}, Mode: codexgen.ModeBuild,
-	})
-	if err != nil {
+	skills := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(skills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(checkoutRoot(), "templates", "global", "skills", "tracetree")
+	if err := os.Symlink(source, filepath.Join(skills, "tracetree")); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -28,7 +28,7 @@ const (
 	downloadURITemplate           = downloadURIPrefix + "{id}"
 	defaultMaxResourceBytes int64 = 25 << 20
 	resourceLinkType              = "resource_link"
-	downloadFileDescription       = `Downloads 1–50 files of any kind — a PDF, zip, image, audio, dataset — as bytes, unparsed, input order kept. Call harvester_download_file{urls:["https://…/data.zip"]}. Each item returns kind, content type, size, sha256 and via, the rung that served it. On the local server it returns path, the file's absolute path on this machine: take the file from there. On the remote server it returns id, url and expires, plus a resource_link to read with resources/read: run ` + "`curl -fL -o <file> <url>`" + ` in a shell and check the sha256; never read the file into context. The url expires 10 minutes after the call, and a server restart invalidates every url; call harvester_download_file again for a fresh one. Nothing is converted: to read a web page, a local document or a paper, call ` + "`harvester_read`" + ` with urls, files or publications. A failing item carries its own error and the others still return.`
+	downloadFileDescription       = `Downloads any file as bytes — 1–50, unparsed: a PDF, zip, image, audio, dataset. Call harvester_download_file{urls:["https://…/data.zip"]}. Returns a ` + "`=== [n/N] {url}`" + ` block per item, input order: kind, content type, bytes, sha256, via, then path (local: take the file there) or url and expiry plus a resource_link (remote: run ` + "`curl -fL -o <file> <url>`" + `, check the sha256, never read it into context; a url dies in 10 minutes or at a server restart, so call again). Reading a page or paper → ` + "`harvester_read`" + `. A failed item is its header and an error: line; the others still return.`
 )
 
 // DownloadInput is download_file's input.
@@ -66,11 +66,6 @@ type DownloadItem struct {
 	Resource    *ResourceRef `json:"resource,omitempty"`
 	Note        string       `json:"note,omitempty"`
 	Error       string       `json:"error,omitempty"`
-}
-
-// DownloadOutput is download_file's typed output.
-type DownloadOutput struct {
-	Items []DownloadItem `json:"items"`
 }
 
 // downloadStore is the files this service downloaded, by sha256: the only
@@ -113,13 +108,13 @@ func (service *Service) maxResourceBytes() int64 {
 
 func (service *Service) downloadFile(
 	ctx context.Context, _ *mcp.CallToolRequest, input DownloadInput,
-) (*mcp.CallToolResult, DownloadOutput, error) {
+) (*mcp.CallToolResult, any, error) {
 	if len(input.URLs) < 1 || len(input.URLs) > maxDownloadSources {
-		return nil, DownloadOutput{}, fmt.Errorf("urls must contain 1-%d items", maxDownloadSources)
+		return nil, nil, fmt.Errorf("urls must contain 1-%d items", maxDownloadSources)
 	}
 	headers, err := harvest.ParseCallerHeaders(input.Headers)
 	if err != nil {
-		return nil, DownloadOutput{}, err
+		return nil, nil, err
 	}
 	items := make([]DownloadItem, len(input.URLs))
 	var wait sync.WaitGroup
@@ -146,7 +141,7 @@ func (service *Service) downloadFile(
 		}()
 	}
 	wait.Wait()
-	return downloadResult(items), DownloadOutput{Items: items}, nil
+	return downloadResult(items), nil, nil
 }
 
 // downloadResult renders the items as the tool's content: one text block per
@@ -160,7 +155,7 @@ func downloadResult(items []DownloadItem) *mcp.CallToolResult {
 		if item.Error == "" {
 			result.IsError = false
 		}
-		result.Content = append(result.Content, &mcp.TextContent{Text: renderDownload(*item)})
+		result.Content = append(result.Content, &mcp.TextContent{Text: renderDownload(index+1, len(items), *item)})
 		if item.Resource != nil {
 			size := item.Resource.Size
 			result.Content = append(result.Content, &mcp.ResourceLink{
@@ -296,9 +291,11 @@ func downloadName(source, digest string) string {
 	return digest
 }
 
-func renderDownload(item DownloadItem) string {
+// renderDownload is item's text block, n of total in its call: what the file
+// is (kind, content type, size, sha256, via), then where to take it.
+func renderDownload(n, total int, item DownloadItem) string {
 	if item.Error != "" {
-		return "# " + harvest.PublicSourceLabel(item.Source) + "\nERROR: " + item.Error
+		return failedItem(n, total, item.Source, item.Error)
 	}
 	where := "path: " + item.Path
 	switch {
@@ -308,10 +305,8 @@ func renderDownload(item DownloadItem) string {
 		where = "resource: " + item.Resource.URI + " (resources/read returns the bytes)"
 	}
 	text := fmt.Sprintf(
-		"# %s\nkind: %s / content_type: %s / bytes: %d / sha256: %s / via: %s / %s",
-		harvest.PublicSourceLabel(
-			item.Source,
-		),
+		"%s\nkind: %s / content_type: %s / bytes: %d / sha256: %s / via: %s\n%s",
+		itemHeader(n, total, item.Source),
 		item.Kind,
 		item.ContentType,
 		item.Bytes,
@@ -320,7 +315,7 @@ func renderDownload(item DownloadItem) string {
 		where,
 	)
 	if item.Note != "" {
-		text += "\nNOTE: " + item.Note
+		text += "\nnote: " + item.Note
 	}
 	return text
 }

@@ -154,3 +154,11 @@ func renderDownloadReceipt(item downloadItem) string {
 		gapsSuffix(item.Gaps),
 	)
 }
+
+// gapsSuffix names every known gap of an incomplete download in its receipt.
+func gapsSuffix(gaps []string) string {
+	if len(gaps) == 0 {
+		return ""
+	}
+	return " / gaps: " + strings.Join(gaps, "; ")
+}

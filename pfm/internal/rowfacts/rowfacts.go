@@ -26,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
+	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const (
@@ -222,7 +223,7 @@ func (reader *Reader) agentNames(dir string) ([]string, error) {
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if !entry.IsDir() && strings.HasPrefix(name, "agent-") && strings.HasSuffix(name, ".jsonl") {
+		if _, ok := claudetranscript.SubagentID(name); ok && !entry.IsDir() {
 			names = append(names, name)
 		}
 	}

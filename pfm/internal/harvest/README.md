@@ -22,9 +22,17 @@ For a web page, call `harvester_read` with the URL in `urls`. For an exact DOI, 
 
 CLI, MCP tools, and `harvest ask` return exported artifacts. Retrieval methods, mirror URLs, fallback traces, and internal cache filenames are kept out of those results. A direct discovered download URL becomes a persistent opaque `harvest:` handle. Bibliographic identity and article citations remain in the document.
 
-Complete exported Markdown and binary artifacts live under `<cache>/public/` with hashed filenames and private filesystem permissions. Inline limits do not truncate the saved document. Internal cache entries, handle mappings, and telemetry cannot be fetched through public Harvester calls, including through symlinks. The authenticated external gateway confines local reads to exported artifacts.
+Complete exported Markdown and binary artifacts live under `<cache>/public/` with hashed filenames and private filesystem permissions. Inline limits do not truncate the saved document.
+
+An exported Markdown artifact opens with frontmatter and its body is the document alone. The frontmatter keys, in order: `source`, `request`, `field`, `url` (an http(s) address, never a mirror's), `kind`, `via`, `http_status`, `fetched_at`, `title`, `author`, `published`, `license`, `chars`, `token_count`, `gaps` (why the artifact is incomplete, `; `-joined), `transformed` (`json-outline` when JSON was rendered as an outline). Every value is escaped (`%`, CR and LF as `%25`, `%0D`, `%0A`), so a page's own title or author never writes a second key. The private cache writes the same keys plus `method`, `rungs` and `site`, through the same writer (`frontmatter.go`). An artifact whose body opens with a partial banner or a metadata block (the older layout) still reads: both lift into its facts on read.
+
+The read tool and `pfm harvest` print each artifact as one block: `=== [n/N] {item}`, its path, a `partial:` or `truncated:` line when incomplete, then the body. Internal cache entries, handle mappings, and telemetry cannot be fetched through public Harvester calls, including through symlinks. The authenticated external gateway confines local reads to exported artifacts.
 
 Detailed retrieval diagnostics stay in the internal cache and process logs. Public errors distinguish failed retrieval, timeout, access refusal, challenge, conversion failure, and storage failure without including provider addresses. These output controls do not remove publisher attribution or citations contained in the original document, or replace operating-system access controls on logs.
+
+## Asking over the items
+
+`harvester_read`'s optional `ask` is one question answered over every item of the call, and `pfm harvest ask -p` is the same step on the command line: both read the items, then hand them to one engine run through `internal/ask` (`harvestmcp.AskOver`), item N as the prompt's `[file N]` and a failed item as a temporary receipt of its public failure. The read tool prints the answer after the item blocks as `=== answer ({engine} {model})`, then the answer or an `error:` line; the items show their size, not their content, unless `include_content` is true. `engine` is `claude` (default) or `codex`; `model` is a Claude alias (`haiku`, `sonnet`, `opus`, `fable`, in any case, `[1m]` allowed; launched lower-cased) or a model id the price table lists for that engine, defaulting to `haiku` on Claude and the configured ask model on Codex. An unknown engine or a model its engine cannot run is refused by name before any item is read, as are `engine` or `model` without `ask`. The answer is not cached, and the remote server has no `ask`: its schema leaves the three fields out.
 
 ## Conversion
 

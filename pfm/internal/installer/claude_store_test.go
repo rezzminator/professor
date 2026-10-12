@@ -44,6 +44,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"stats-cache.json",
 		".last-cleanup",
 		"gh-pr-status-cache.json",
+		"tool-visibility-controller.json",
 	}
 	var want []StoreEntry
 	for _, name := range dirs {
@@ -51,7 +52,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 	}
 	for _, name := range files {
 		seed := ""
-		if name == "settings.json" {
+		if name == "settings.json" || name == "tool-visibility-controller.json" {
 			seed = "{}\n"
 		}
 		want = append(want, StoreEntry{Name: name, Seed: seed})
@@ -83,7 +84,20 @@ func TestClaudeStoreEntries(t *testing.T) {
 	if retired := []string{".last-update-result.json"}; !reflect.DeepEqual(RetiredStoreEntries, retired) {
 		t.Fatalf("retired=%v, want %v", RetiredStoreEntries, retired)
 	}
-	ignored := []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json"}
+	ignored := []string{
+		"ide",
+		".cc-new-children",
+		".cc-pane-children",
+		"settings.local.json",
+		"debug",
+		"daemon.lock",
+		"daemon.status.json",
+		"tmp",
+		"chrome",
+		"dev-mods",
+		"keybindings.json",
+		"hooks",
+	}
 	if !reflect.DeepEqual(IgnoredEntries, ignored) {
 		t.Fatalf("ignored=%v", IgnoredEntries)
 	}

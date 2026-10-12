@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -96,6 +97,91 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 			}
 			if got := updateGitBranch(t, repo); got != previousBranch {
 				t.Errorf("source branch = %q, want %q", got, previousBranch)
+			}
+		})
+	}
+}
+
+func TestUpdateRetainsBackupAfterFailedBinaryRollback(t *testing.T) {
+	for _, phase := range []string{"success", "clean rollback", "binary rollback residue", "installer residue"} {
+		t.Run(phase, func(t *testing.T) {
+			repo := newUpdateGitFixture(t)
+			runtime := updateTestRuntime(t)
+			stubUpdatePipeline(t, runtime)
+			canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+			var stage string
+			updateApplyInstall = func(_ context.Context, candidate, _, _ string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+				stage = filepath.Dir(candidate)
+				if phase == "success" {
+					return nil
+				}
+				if phase == "binary rollback residue" {
+					if err := os.Remove(canonical); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(canonical, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(
+						filepath.Join(canonical, "obstruction"),
+						[]byte("keep\n"),
+						0o600,
+					); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return errors.New("injected install failure")
+			}
+			oldInstall, oldDoctor := updateRollbackInstall, updateRollbackDoctor
+			t.Cleanup(func() { updateRollbackInstall, updateRollbackDoctor = oldInstall, oldDoctor })
+			updateRollbackInstall = func(_ context.Context, previous, _, _ string, _ pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
+				if got, err := os.ReadFile(previous); err != nil || string(got) != "old\n" {
+					t.Fatalf("previous installer binary=%q err=%v, want old", got, err)
+				}
+				if phase == "installer residue" {
+					return errors.New("injected previous install failure")
+				}
+				return nil
+			}
+			updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+				return doctorOutcome{}, nil
+			}
+			var stdout, stderr bytes.Buffer
+			wantCode := 5
+			if phase == "success" {
+				wantCode = 0
+			}
+			if code := Run(
+				[]string{"--repo", repo, "--root", t.TempDir()},
+				&stdout,
+				&stderr,
+				runtime,
+			); code != wantCode {
+				t.Fatalf("Run() code=%d, want %d; stderr=%q", code, wantCode, stderr.String())
+			}
+			if stage == "" {
+				t.Fatal("candidate installer did not receive the update stage")
+			}
+			if phase == "binary rollback residue" {
+				backup := filepath.Join(stage, "previous-0")
+				if got, err := os.ReadFile(backup); err != nil || string(got) != "old\n" {
+					t.Fatalf("retained backup=%q err=%v, want old binary bytes at %s", got, err, backup)
+				}
+				if !strings.Contains(stderr.String(), "rollback residue") ||
+					!strings.Contains(stderr.String(), backup) {
+					t.Fatalf("rollback failure=%q, want retained backup path %s", stderr.String(), backup)
+				}
+				return
+			}
+			if _, err := os.Stat(stage); !os.IsNotExist(err) {
+				t.Fatalf("stage cleanup=%v, want stage removed after %s", err, phase)
+			}
+			wantBinary := "old\n"
+			if phase == "success" {
+				wantBinary = "new\n"
+			}
+			if got, err := os.ReadFile(canonical); err != nil || string(got) != wantBinary {
+				t.Fatalf("installed binary=%q err=%v, want %q", got, err, wantBinary)
 			}
 		})
 	}
@@ -192,5 +278,45 @@ func TestUpdateRejectsOverlappingOwners(t *testing.T) {
 				t.Fatalf("lock release = %d %s", code, stderr.String())
 			}
 		})
+	}
+}
+
+// A price refresh that lands between the fast-forward and a rollback leaves
+// the clone's tracked prices.json modified; git reset --keep refuses to
+// overwrite it, so the rollback puts the refreshed table back first.
+func TestUpdateRollbackResetsSourceDespiteARefreshedPriceTable(t *testing.T) {
+	runtime, repo := updateRollbackTestRuntime(t)
+	file := filepath.Join(repo, filepath.FromSlash(pricing.FileRel))
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, release := range []string{"previous", "advanced"} {
+		if err := os.WriteFile(file, []byte(release+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitTemp(t, repo, "add", pricing.FileRel)
+		gitTemp(t, repo, "commit", "-qm", "fixture prices "+release)
+		if release == "previous" {
+			gitTemp(t, repo, "tag", "previous-release")
+		}
+	}
+	previousRef := updateGitRevision(t, repo, "previous-release")
+	if err := os.WriteFile(file, []byte("refreshed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := rollbackUpdateState(
+		context.Background(), repo, repo, previousRef, true, nil, nil, runtime, false, &stdout, &stderr,
+	)
+
+	if err != nil && strings.Contains(err.Error(), "restore source revision") {
+		t.Fatalf("rollback error = %v; the refreshed price table must not refuse the source reset", err)
+	}
+	if got := updateGitRevision(t, repo, "HEAD"); got != previousRef {
+		t.Fatalf("source after rollback = %s, want %s (err %v)", got, previousRef, err)
+	}
+	if content, readErr := os.ReadFile(file); readErr != nil || string(content) != "previous\n" {
+		t.Fatalf("prices after rollback = %q, %v; want the previous release's table", content, readErr)
 	}
 }

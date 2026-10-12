@@ -15,7 +15,12 @@ cat > "$T/bin/git" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$*" == 'rev-parse --show-toplevel' ]]; then
   printf '%s\n' "$TEST_REPO"
-elif [[ "${1:-}" == 'diff' ]]; then
+elif [[ "${1:-}" == 'cat-file' ]]; then
+  printf 'commit\n'
+elif [[ "${1:-}" == 'rev-list' ]]; then
+  if [[ "${GIT_ENUM_FAIL:-}" == 1 ]]; then echo 'synthetic enumeration failure' >&2; exit 3; fi
+  printf 'fixture-commit\n'
+elif [[ "${1:-}" == 'diff' || "${1:-}" == 'diff-tree' ]]; then
   cat "$GIT_DIFF_FILE"
 else
   exit 3
@@ -71,7 +76,7 @@ leak_run() {
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE \
     TEST_REPO="$T/repo" GREP_FAIL_FILE="${GREP_FAIL_FILE:-}" GREP_FAIL_SUFFIX="${GREP_FAIL_SUFFIX:-}" \
     GREP_FAIL_STDIN="${GREP_FAIL_STDIN:-}" GREP_FORCE_C="${GREP_FORCE_C:-}" GREP_NOFOLD_LOCALE="${GREP_NOFOLD_LOCALE:-}" GREP_NOFOLD_SCOPE="${GREP_NOFOLD_SCOPE:-}" \
-    GIT_DIFF_FILE="$T/diff" LEAK_TERMS="$terms" LC_ALL="${LEAK_LC_ALL:-C.UTF-8}" \
+    GIT_ENUM_FAIL="${GIT_ENUM_FAIL:-}" GIT_DIFF_FILE="$T/diff" LEAK_TERMS="$terms" LC_ALL="${LEAK_LC_ALL:-C.UTF-8}" \
     PATH="$T/bin:$PATH" \
     bash "$ROOT/scripts/leak-check.sh" "$@" > "$T/out" 2> "$T/err" < /dev/null
   rc=$?
@@ -108,14 +113,16 @@ else
   bad 'ignore token suppresses its own substring but keeps a separate hit' "rc=$rc; out=$out; err=$err"
 fi
 
+mkdir -p "$T/repo/.opencode"
 printf 'syntheticsecret\n' > "$T/repo/LICENSE"
+printf 'syntheticsecret\n' > "$T/repo/.opencode/LICENSE"
 printf 'syntheticsecret\n' > "$T/repo/.githooks/guard"
 printf 'syntheticsecret\n' > "$T/repo/fixtures/ignore/skip.txt"
-run_check LICENSE .githooks/guard fixtures/ignore/skip.txt clean-1.txt
-if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'scanned 1 file(s) (3 excluded by design, 0 not a regular file)'* ]]; then
-  ok 'license, hook, and configured path are excluded and counted'
+run_check LICENSE .opencode/LICENSE .githooks/guard fixtures/ignore/skip.txt clean-1.txt
+if [[ "$rc" -eq 1 && "$out" == 'LEAK .githooks/guard: syntheticsecret' && "$err" == *'scanned 2 file(s) (3 excluded by design, 0 not a regular file)'* ]]; then
+  ok 'F14: required public licenses stay excluded while hooks are scanned in files mode'
 else
-  bad 'license, hook, and configured path are excluded and counted' "rc=$rc; out=$out; err=$err"
+  bad 'F14: required public licenses stay excluded while hooks are scanned in files mode' "rc=$rc; out=$out; err=$err"
 fi
 
 run_check missing.txt hit.txt
@@ -366,5 +373,215 @@ for mode in staged range; do
     fi
   done
 done
+
+# Every reachable commit matters, even if the tip no longer contains the leak.
+range_from="$(pgit rev-parse HEAD)"
+printf 'syntheticsecret\n' > "$pushed/transient.txt"
+pgit add transient.txt && pgit commit -q -m transient
+rm "$pushed/transient.txt"
+pgit add -u && pgit commit -q -m removed
+real_range() {
+  out="$(PFM_DEV_REPO_GIT_DIR="$pushed/.git" PFM_DEV_REPO_WORK_TREE="$pushed" LEAK_TERMS="${TERMS:-$T/terms}" LC_ALL=C.UTF-8 \
+    bash "$ROOT/scripts/leak-check.sh" --range "$1" "$2" 2> "$T/err" < /dev/null)"
+  rc=$?; err="$(cat "$T/err")"
+}
+real_range "$range_from" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK transient.txt: syntheticsecret'* ]]; then
+  ok 'F7: a leak added then removed in the same push is blocked'
+else
+  bad 'F7: a leak added then removed in the same push is blocked' "rc=$rc; out=$out; err=$err"
+fi
+
+# A merge may add a line present in neither parent; ordinary log patches omit it.
+pgit checkout -q -b side
+printf 'side\n' > "$pushed/side.txt"
+pgit add side.txt && pgit commit -q -m side
+pgit checkout -q -
+merge_from="$(pgit rev-parse HEAD)"
+pgit merge -q --no-ff --no-commit side
+mkdir -p "$pushed/.githooks" "$pushed/.opencode"
+printf 'syntheticsecret\n' > "$pushed/.githooks/merged"
+printf 'syntheticsecret\n' > "$pushed/LICENSE"
+printf 'syntheticsecret\n' > "$pushed/.opencode/LICENSE"
+pgit add .githooks/merged LICENSE .opencode/LICENSE && pgit commit -q -m merged
+real_range "$merge_from" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK .githooks/merged: syntheticsecret'* && "$out" != *'LEAK LICENSE:'* && "$out" != *'LEAK .opencode/LICENSE:'* ]]; then
+  ok 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded'
+else
+  bad 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded' "rc=$rc; out=$out; err=$err"
+fi
+
+GIT_ENUM_FAIL=1 run_range
+if [[ "$rc" -ne 0 && "$out$err" == *'FAILED'* && "$out$err" == *'enumerat'* && "$out$err" != *'leak-check: clean'* ]]; then
+  ok 'F7: commit enumeration failure is visible and refuses clean'
+else
+  bad 'F7: commit enumeration failure is visible and refuses clean' "rc=$rc; out=$out; err=$err"
+fi
+
+empty_tree="$(pgit hash-object -t tree /dev/null)"
+real_range "$empty_tree" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK transient.txt: syntheticsecret'* ]]; then
+  ok 'F7: new-ref empty-tree base enumerates every reachable commit'
+else
+  bad 'F7: new-ref empty-tree base enumerates every reachable commit' "rc=$rc; out=$out; err=$err"
+fi
+# A new ref's commits the remote already holds were judged by the push that published them:
+# a leak scrubbed long ago must not block every later new-branch push.
+pgit remote add other "$pushed/.git" 2> /dev/null || true
+pgit remote add origin "$pushed/.git" 2> /dev/null || true
+real_range_remote() { # real_range_remote <old> <new> <remote>
+  out="$(PFM_DEV_REPO_GIT_DIR="$pushed/.git" PFM_DEV_REPO_WORK_TREE="$pushed" LEAK_TERMS="$T/terms" LC_ALL=C.UTF-8 \
+    bash "$ROOT/scripts/leak-check.sh" --range "$1" "$2" --remote "$3" 2> "$T/err" < /dev/null)"
+  rc=$?; err="$(cat "$T/err")"
+}
+pgit update-ref refs/remotes/origin/main HEAD
+pgit checkout -q -b fresh-branch
+printf 'clean\n' > "$pushed/fresh.txt"
+pgit add fresh.txt && pgit commit -q -m fresh
+real_range_remote "$empty_tree" HEAD origin
+if [[ "$rc" -eq 0 && "$err" == *'1 newly reachable commit'* ]]; then
+  ok 'F7: new-ref empty-tree base scans only commits the push target holds nowhere'
+else
+  bad 'F7: new-ref empty-tree base scans only commits the push target holds nowhere' "rc=$rc; out=$out; err=$err"
+fi
+# No push target named: nothing is provably pre-scanned, so no remote's refs exclude a commit.
+real_range "$empty_tree" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK transient.txt: syntheticsecret'* ]]; then
+  ok 'F5: a new ref with no push target named scans every reachable commit'
+else
+  bad 'F5: a new ref with no push target named scans every reachable commit' "rc=$rc; out=$out; err=$err"
+fi
+
+# F4: a pushed ref whose target is a tree has no commit to enumerate; it is refused by name, never
+# reported as NOTHING TO SCAN, whichever kind of base the hook picked.
+tree_tip="$(pgit rev-parse 'HEAD^{tree}')"
+for base_name in empty_tree head_commit; do
+  case "$base_name" in empty_tree) base="$empty_tree" ;; head_commit) base="$(pgit rev-parse HEAD)" ;; esac
+  real_range "$base" "$tree_tip"
+  if [[ "$rc" -ne 0 && "$err" == *"$tree_tip"* && "$err" == *'does not resolve to a commit'* && "$out$err" != *'NOTHING TO SCAN'* && "$out" != *'leak-check: clean'* ]]; then
+    ok "F4: a range whose NEW is a tree is refused by name ($base_name base)"
+  else
+    bad "F4: a range whose NEW is a tree is refused by name ($base_name base)" "rc=$rc; out=$out; err=$err"
+  fi
+done
+
+# F5: the exclusion covers the push target's remote alone. A leak that only ANOTHER remote holds is
+# still scanned when the push goes to origin; a push target git does not know excludes no remote at all.
+pgit checkout -q -b other-held
+printf 'syntheticsecret\n' > "$pushed/other-held.txt"
+pgit add other-held.txt && pgit commit -q -m other-held
+pgit update-ref refs/remotes/other/held HEAD
+real_range_remote "$empty_tree" HEAD origin
+if [[ "$rc" -eq 1 && "$out" == *'LEAK other-held.txt: syntheticsecret'* ]]; then
+  ok 'F5: a leak only another remote holds is scanned when the push goes to origin'
+else
+  bad 'F5: a leak only another remote holds is scanned when the push goes to origin' "rc=$rc; out=$out; err=$err"
+fi
+real_range_remote "$empty_tree" HEAD other
+if [[ "$rc" -eq 0 && "$out" != *'LEAK '* ]]; then
+  ok 'F5: the same commits are skipped when the push target is the remote that holds them'
+else
+  bad 'F5: the same commits are skipped when the push target is the remote that holds them' "rc=$rc; out=$out; err=$err"
+fi
+real_range_remote "$empty_tree" HEAD 'https://example.invalid/some.git'
+if [[ "$rc" -eq 1 && "$out" == *'LEAK other-held.txt: syntheticsecret'* ]]; then
+  ok 'F5: a push target that is no configured remote scans commits only another remote holds'
+else
+  bad 'F5: a push target that is no configured remote scans commits only another remote holds' "rc=$rc; out=$out; err=$err"
+fi
+
+# F9: nested remote names share a tracking namespace, but do not prove the parent target holds a commit.
+for nested_remote in origin/fork origin/fork/deep; do
+  pgit remote add "$nested_remote" "$pushed/.git"
+  pgit update-ref "refs/remotes/$nested_remote/held" HEAD
+  real_range_remote "$empty_tree" HEAD origin
+  if [[ "$rc" -eq 1 && "$out" == *'LEAK other-held.txt: syntheticsecret'* ]]; then
+    ok "F9: $nested_remote does not exclude a leak pushed to origin"
+  else
+    bad "F9: $nested_remote does not exclude a leak pushed to origin" "rc=$rc; out=$out; err=$err"
+  fi
+  real_range_remote "$empty_tree" HEAD "$nested_remote"
+  if [[ "$rc" -eq 0 && "$err" == *'0 newly reachable commit'* ]]; then
+    ok "F9: $nested_remote still excludes commits its own tracking ref holds"
+  else
+    bad "F9: $nested_remote still excludes commits its own tracking ref holds" "rc=$rc; out=$out; err=$err"
+  fi
+  pgit update-ref -d "refs/remotes/$nested_remote/held"
+done
+# A slash inside the target's branch name is not a nested configured remote.
+pgit update-ref refs/remotes/origin/release/held HEAD
+real_range_remote "$empty_tree" HEAD origin
+if [[ "$rc" -eq 0 && "$err" == *'0 newly reachable commit'* ]]; then
+  ok 'F9: a slash-containing target branch still excludes its own held commits'
+else
+  bad 'F9: a slash-containing target branch still excludes its own held commits' "rc=$rc; out=$out; err=$err"
+fi
+pgit update-ref -d refs/remotes/origin/release/held
+
+# Ref enumeration must fail visibly, never turn an unreadable list into an empty exclusion set.
+mkdir -p "$T/ref-bin"
+real_git="$(command -v git)"
+printf '#!/usr/bin/env bash\nfor arg in "$@"; do\n  if [[ "$arg" == for-each-ref ]]; then echo "synthetic ref enumeration failure" >&2; exit 3; fi\ndone\nexec %q "$@"\n' "$real_git" > "$T/ref-bin/git"
+chmod +x "$T/ref-bin/git"
+PATH="$T/ref-bin:$PATH" real_range_remote "$empty_tree" HEAD origin
+if [[ "$rc" -ne 0 && "$err" == *'cannot list remote-tracking refs for origin'* && "$err" == *'synthetic ref enumeration failure'* ]]; then
+  ok 'F9: remote-tracking ref enumeration failure is named and refuses clean'
+else
+  bad 'F9: remote-tracking ref enumeration failure is named and refuses clean' "rc=$rc; out=$out; err=$err"
+fi
+
+# F5, hook side: pre-push hands the remote name it receives as $1 to leak-check, and nothing when git gave none.
+hook_repo="$T/hook-repo"
+mkdir -p "$hook_repo/.githooks" "$hook_repo/scripts"
+cp "$ROOT/.githooks/pre-push" "$hook_repo/.githooks/pre-push"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$T/hook-calls" > "$hook_repo/scripts/leak-check.sh"
+chmod +x "$hook_repo/scripts/leak-check.sh"
+git init -q "$hook_repo" && git -C "$hook_repo" config core.hooksPath .githooks
+git -C "$hook_repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m hook
+hook_sha="$(git -C "$hook_repo" rev-parse HEAD)"
+hook_push() { # hook_push <hook args>...: one new-ref push of HEAD to refs/heads/feature
+  : > "$T/hook-calls"
+  printf 'refs/heads/feature %s refs/heads/feature %s\n' "$hook_sha" 0000000000000000000000000000000000000000 \
+    | (cd "$hook_repo" && bash .githooks/pre-push "$@" > /dev/null 2> "$T/hook-err")
+  rc=$?
+}
+hook_push origin 'https://example.invalid/r.git'
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-calls")" == *"--range "*" $hook_sha --remote origin" ]]; then
+  ok 'F5: pre-push passes the remote name to leak-check as --remote'
+else
+  bad 'F5: pre-push passes the remote name to leak-check as --remote' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
+fi
+hook_push
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-calls")" == *"--range "*" $hook_sha" && "$(cat "$T/hook-calls")" != *--remote* ]]; then
+  ok 'F5: pre-push without a remote name passes no --remote'
+else
+  bad 'F5: pre-push without a remote name passes no --remote' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
+fi
+
+printf '!structural-only\n' > "$T/structural-terms"
+TERMS="$T/structural-terms" run_check clean-1.txt
+if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'PRIVATE COVERAGE SKIPPED'* && "$err" == *'4 structural pattern(s)'* ]]; then
+  ok 'F13: explicit structural policy runs without private terms and names the coverage gap'
+else
+  bad 'F13: explicit structural policy runs without private terms and names the coverage gap' "rc=$rc; out=$out; err=$err"
+fi
+TERMS="$T/structural-terms" run_check gm.txt
+if [[ "$rc" -eq 1 && "$out" == "LEAK gm.txt: $gm_addr" && "$err" == *'PRIVATE COVERAGE SKIPPED'* ]]; then
+  ok 'F13: structural policy still rejects identifying structure on forks'
+else
+  bad 'F13: structural policy still rejects identifying structure on forks' "rc=$rc; out=$out; err=$err"
+fi
+printf '!structural-only\nsyntheticsecret\n' > "$T/mixed-terms"
+TERMS="$T/mixed-terms" run_check clean-1.txt
+if [[ "$rc" -ne 0 && "$err" == *'FAILED'* ]]; then ok 'F13: mixed structural-only and private policy is refused'
+else bad 'F13: mixed structural-only and private policy is refused' "rc=$rc; out=$out; err=$err"; fi
+
+mkdir -p "$T/scan-temp"
+TMPDIR="$T/scan-temp" run_check hit.txt
+if [[ "$rc" == 1 && -z "$(find "$T/scan-temp" -type f -print)" ]]; then
+  ok 'files scan removes every allocated temporary artifact'
+else
+  bad 'files scan removes every allocated temporary artifact' "rc=$rc; leftovers=$(find "$T/scan-temp" -type f -print)"
+fi
 
 shtest_end

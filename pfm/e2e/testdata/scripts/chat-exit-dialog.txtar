@@ -1,0 +1,26 @@
+# A kill-exit over background work: /exit opens Claude Code's "Background work
+# is running" confirmation, and the finisher presses Enter on its preselected
+# "Exit and stop tasks" row. The pane closes within jail-gone's bound — long
+# before the finisher's fallback kill-pane would have ended it.
+exec sh -c 'sed -e "s|@PROC@|$PFM_PROC_ROOT|" -e "s|@SID@|$PFM_SID_DIR|" scenario.tmpl > scenario.json'
+env MOCK_ENGINE_SCENARIO=$WORK/scenario.json
+exec jail-pfm chat new --engine claude --name worker --cwd $WORK 'map it'
+stdout 'worker'
+exec jail-until cc-1700000000-4242-7 cc-1700000000-4242-7 dispatched
+exec jail-pfm chat kill worker --exit &
+exec jail-gone cc-1700000000-4242-7
+wait
+stdout 'killed'
+
+-- scenario.tmpl --
+{
+  "version": "2.1.238 (Claude Code)",
+  "session_id": "b1111111-1111-4111-8111-111111111111",
+  "busy_ms": 0,
+  "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0, "context_window": 0},
+  "jail": {"proc_root": "@PROC@", "sid_dir": "@SID@"},
+  "steps": [
+    {"type": "background_agent", "name": "tracer", "status": "mapping the seams"},
+    {"type": "turn", "reply": "dispatched"}
+  ]
+}

@@ -354,7 +354,7 @@ func Run(
 		switch {
 		case captureErr != nil:
 			fmt.Fprintf(stderr, "pfm chat reload: confirm /exit submission (try %d): %v\n", i+1, captureErr)
-		case exitDialogOpen(capture):
+		case inject.ExitDialogOpen(capture):
 			// Claude Code answers /exit with a confirmation whenever the chat
 			// has background work — a scheduled task, a background shell, a
 			// sub-agent — with "Exit and stop tasks" preselected. Nothing the
@@ -396,10 +396,14 @@ func Run(
 			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
 		}
 	}
+	promptWarning := warnPromptMissing(request, stderr)
 	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
-	carryReminders(ctx, leftBehind, request.SessionID, stderr)
+	if promptWarning != "" {
+		announcePane(ctx, request, tmux, stderr, "pfm reload: "+promptWarning)
+	}
+	carrySchedules(ctx, leftBehind, request.SessionID, stderr)
 	if err := writeHandoff(lock, handoffRecord{
 		Engine: request.Engine, SessionID: request.SessionID, Account: request.Account,
 		LeftBehind: leftBehind, Cache1H: request.Cache1H, CWD: request.CWD, WrittenAt: options.Clock.Now(),
@@ -527,7 +531,7 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 		)
 	}
 	switch {
-	case exitDialogOpen(capture):
+	case inject.ExitDialogOpen(capture):
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Escape"); err != nil {
 			return errors.Join(
 				cause,
@@ -542,7 +546,7 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 				cause,
 				fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err),
 			)
-		} else if exitDialogOpen(capture) {
+		} else if inject.ExitDialogOpen(capture) {
 			return errors.Join(
 				cause,
 				errors.New(
@@ -561,7 +565,7 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 		cause,
 		fmt.Errorf(
 			"the pane shows neither the typed /exit nor an exit dialog (composer shows %q)",
-			composerDraftText(capture),
+			inject.ComposerDraftText(capture),
 		),
 	)
 }

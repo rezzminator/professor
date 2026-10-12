@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -484,5 +485,76 @@ func TestUpdateMetadataResolvesAliasOnce(t *testing.T) {
 	repos, err := installer.recordedProfessorSourceRepos()
 	if err != nil || len(repos) != 1 || repos[0] != repo {
 		t.Fatalf("repos=%q err=%v", repos, err)
+	}
+}
+
+func TestManagedRootUninstallRetirement(t *testing.T) {
+	for _, scenario := range []string{"fresh", "root leftover", "asset leftover", "rumdl config"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			managed := managedRootForHome(home)
+			var output bytes.Buffer
+			options := Options{
+				Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &output,
+				CodexHomes: []string{}, MCPConfigPath: testConfigPath(t), Env: &paths.MapEnv{
+					HomeDir: home, Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()},
+				},
+			}
+			if _, err := Run(context.Background(), options); err != nil {
+				t.Fatalf("install: %v\n%s", err, output.String())
+			}
+			var leftover, want string
+			switch scenario {
+			case "root leftover":
+				leftover = filepath.Join(managed, "operator-note.txt")
+				writeFixture(t, leftover, "operator note\n")
+				want = "  skip    leave non-empty managed root " + managed + ": operator-note.txt\n"
+			case "asset leftover":
+				leftover = filepath.Join(managed, "bin", "operator-extra")
+				writeFixture(t, leftover, "operator note\n")
+				want = "  skip    leave non-empty managed directory " + filepath.Dir(leftover) + ": "
+			case "rumdl config":
+				writeFixture(t, filepath.Join(home, ".config", "rumdl", "rumdl.toml"), rumdlUserConfig)
+			}
+			output.Reset()
+			options.Mode = ModeUninstall
+			if _, err := Run(context.Background(), options); err != nil {
+				t.Fatalf("uninstall: %v\n%s", err, output.String())
+			}
+			if leftover != "" {
+				if !strings.Contains(output.String(), want) {
+					t.Fatalf("output missing %q:\n%s", want, output.String())
+				}
+				if got := readFixture(t, leftover); got != "operator note\n" {
+					t.Fatalf("operator leftover=%q", got)
+				}
+			} else {
+				requireNoPath(t, managed, "uninstall left managed root")
+			}
+			if scenario == "rumdl config" {
+				requireNoPath(t, filepath.Join(home, ".config", "rumdl", "rumdl.toml"), "owned rumdl config remains")
+			}
+		})
+	}
+}
+
+func TestMovedCloneInstallRefreshesMarker(t *testing.T) {
+	home, clone, _ := aliasInstallFixture(t)
+	writeFixture(t, paths.SourceRepoPath(home), filepath.Join(home, "moved-away")+"\n")
+	_, markerErr := paths.ReadSourceRepoMarker(home)
+	var output bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, SourceRepo: clone, Runner: &fakeRunner{}, Stdout: &output,
+		CodexHomes: []string{}, MCPConfigPath: testConfigPath(t),
+	}); err != nil {
+		t.Fatalf("install from moved clone: %v\n%s", err, output.String())
+	}
+	want := "  skip    registry dead-link check skipped: read source repository marker for registry dead-link check: " +
+		markerErr.Error() + " — rerun pfm install --yes from inside your Professor clone\n"
+	if !strings.Contains(output.String(), want) {
+		t.Errorf("output missing %q:\n%s", want, output.String())
+	}
+	if got, err := paths.ReadSourceRepoMarker(home); err != nil || got != clone {
+		t.Fatalf("refreshed marker=%q err=%v, want %q", got, err, clone)
 	}
 }

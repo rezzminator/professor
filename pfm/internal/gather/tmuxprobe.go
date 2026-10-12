@@ -57,6 +57,61 @@ func serverGone(err error) bool {
 		strings.Contains(stderr, "No such file or directory")
 }
 
+// ErrServerEmpty marks a probe whose server answered but holds no session and
+// no pane. tmux keeps such a server only with exit-empty off or when it is
+// wedged, and nothing pfm runs lives there — yet its socket still reads as an
+// open chat. It is neither a dead socket (the process is running and holds
+// the socket) nor a failed probe (the server answered): it is an abandoned
+// server, and the one fix is ReapCommand.
+var ErrServerEmpty = errors.New("tmux server holds no session")
+
+// ErrServerUnresponsive marks a server that did not answer a read-only probe
+// within ProbeTimeout: a stopped or wedged server. It may well hold a live
+// chat, so it is never read as gone — and never waited on past the timeout,
+// since one frozen server would otherwise stall every scan of the fleet.
+var ErrServerUnresponsive = errors.New("tmux server did not answer")
+
+// ProbeTimeout bounds one list-panes call. A healthy server answers in
+// milliseconds; a server past this is reported unreadable for this scan.
+const ProbeTimeout = 2 * time.Second
+
+// probeWaitDelay is how long a probe whose client was killed may keep its
+// output pipes open before they are closed under it.
+const probeWaitDelay = 500 * time.Millisecond
+
+// ReapCommand is the command that ends abandoned empty pfm tmux servers; every
+// message naming such a server names it as the fix.
+const ReapCommand = "pfm chat ls --reap"
+
+// EmptyServerWarning is the one probe warning for an abandoned empty server:
+// it names the socket and the fix.
+func EmptyServerWarning(socket string) string {
+	return fmt.Sprintf(
+		"%s: abandoned empty tmux server — it runs with no session and no pane yet holds this pfm chat socket; reap it: %s",
+		socket,
+		ReapCommand,
+	)
+}
+
+// serverEmpty reads tmux's own words for a running server with no session:
+// list-panes -a finds no target to resolve.
+func serverEmpty(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && strings.Contains(string(exit.Stderr), "no current target")
+}
+
+// withStderr carries the reason tmux wrote to stderr into the error text,
+// which an ExitError alone renders as a bare "exit status 1".
+func withStderr(err error) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		if reason := strings.TrimSpace(string(exit.Stderr)); reason != "" {
+			return fmt.Errorf("%w: %s", err, reason)
+		}
+	}
+	return err
+}
+
 // TmuxProbe invokes a tmux binary inside a caller-supplied TMUX_TMPDIR.
 type TmuxProbe struct {
 	Binary     string
@@ -74,6 +129,11 @@ func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments
 	}
 	command := exec.CommandContext(ctx, binary, append([]string{"-L", socket}, arguments...)...)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmux.TmuxTmpDir)
+	// A tmux client hands its stdout to the server it talks to, so a client
+	// killed for a stopped server leaves that server holding the pipe: Wait
+	// would block on it forever. Past the delay the pipes are closed and the
+	// probe returns its error.
+	command.WaitDelay = probeWaitDelay
 	return pfmtmux.Observe(ctx, command, arguments...)
 }
 
@@ -99,8 +159,13 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 		"#{pane_current_path}",
 		"#{pane_current_command}",
 	}, "\x1f")
-	command := tmux.probeCommand(ctx, socket, "list-panes", "-a", "-F", format)
+	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	defer cancel()
+	command := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", format)
 	output, err := command.Output()
+	if err != nil && ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+		return nil, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+	}
 	if err != nil {
 		// Match the legacy probe's older field set as a compatibility fallback.
 		// Some long-lived servers reject newer format fields while remaining
@@ -117,8 +182,11 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 			"#{window_name}",
 			"#{pane_pid}",
 		}, "\t")
-		legacyCommand := tmux.probeCommand(ctx, socket, "list-panes", "-a", "-F", legacyFormat)
+		legacyCommand := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", legacyFormat)
 		legacyOutput, legacyErr := legacyCommand.Output()
+		if legacyErr != nil && ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+		}
 		if legacyErr != nil {
 			// Both probes agree there is nothing behind the socket: say so in a
 			// form the caller can classify, since the bare ExitError reads only
@@ -126,7 +194,10 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 			if serverGone(err) && serverGone(legacyErr) {
 				return nil, fmt.Errorf("%w: %s", ErrServerGone, socket)
 			}
-			return nil, err
+			if serverEmpty(err) && serverEmpty(legacyErr) {
+				return nil, fmt.Errorf("%w: %s", ErrServerEmpty, socket)
+			}
+			return nil, fmt.Errorf("list-panes: %w", withStderr(err))
 		}
 		return parseLegacyPaneOutput(socket, legacyOutput)
 	}
@@ -227,6 +298,27 @@ func parseLegacyPaneOutput(socket string, output []byte) ([]ProbePane, error) {
 		})
 	}
 	return panes, nil
+}
+
+// ServerPID asks the server on socket for its own process id: the pid a reap
+// signals comes from the server itself, never from a guess over a process
+// listing.
+func (tmux TmuxProbe) ServerPID(ctx context.Context, socket string) (int, error) {
+	output, err := tmux.probeCommand(ctx, socket, "display-message", "-p", "#{pid}").Output()
+	if err != nil {
+		if serverGone(err) {
+			return 0, fmt.Errorf("read tmux server pid on %s: %w", socket, ErrServerGone)
+		}
+		return 0, fmt.Errorf("read tmux server pid on %s: %w", socket, withStderr(err))
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		return 0, fmt.Errorf("tmux server on %s answered pid %q: %w", socket, output, err)
+	}
+	if pid <= 0 {
+		return 0, fmt.Errorf("tmux server on %s answered pid %d", socket, pid)
+	}
+	return pid, nil
 }
 
 // CapturePane returns one pane's visible screen inside the same jailed tmux
@@ -481,7 +573,7 @@ func probeTmux(
 		socket := socket
 		group.Go(func() error {
 			panes, err := client.ListPanes(groupCtx, socket.name)
-			if err != nil && groupCtx.Err() == nil {
+			if err != nil && groupCtx.Err() == nil && !errors.Is(err, ErrServerUnresponsive) {
 				// A server can rotate its active window between tmux accepting
 				// the client and list-panes. One immediate read-only retry
 				// avoids turning that transient into missing live rows.
@@ -521,11 +613,29 @@ func probeTmux(
 			// This is the root law at its sharpest. A probe that could not run
 			// never returns "nothing found" — and it certainly never deletes
 			// the thing it failed to read.
+			// An empty server answered: it is listed with its reap fix, and its
+			// socket is never swept — the server behind it still runs.
+			if errors.Is(err, ErrServerEmpty) {
+				mutex.Lock()
+				result.EmptyServers = append(result.EmptyServers, socket.name)
+				result.ProbeWarnings = append(result.ProbeWarnings, EmptyServerWarning(socket.name))
+				mutex.Unlock()
+				return nil
+			}
 			if !errors.Is(err, ErrServerGone) {
 				mutex.Lock()
+				if result.Unreadable == nil {
+					result.Unreadable = map[string]string{}
+				}
+				result.Unreadable[socket.name] = err.Error()
 				result.ProbeWarnings = append(
 					result.ProbeWarnings,
-					fmt.Sprintf("%s: %v", socket.name, err),
+					fmt.Sprintf(
+						"%s: could not read this tmux server: %v — check it by hand: tmux -L %s list-sessions",
+						socket.name,
+						err,
+						socket.name,
+					),
 				)
 				mutex.Unlock()
 				return nil
@@ -553,6 +663,7 @@ func probeTmux(
 		return result.Panes[left].PaneID < result.Panes[right].PaneID
 	})
 	sort.Strings(result.CorpseSwept)
+	sort.Strings(result.EmptyServers)
 	sort.Strings(result.ProbeWarnings)
 	return result, nil
 }

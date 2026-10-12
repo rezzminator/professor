@@ -41,7 +41,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `E1.24-exit-contract` · the shared headless-verb exit contract holds across the matrix · spends none
 - `E1.25-end` · `end` kills the whole tmux server, ending the lane · spends none
 - `E1.26-resolver-prefers-live` · a name held by exactly one live row plus its own resume row (what `E1.06`'s `--new` leaves behind) resolves to the live row · spends cc:$SEAT
-- `E1.27-reminder` · `chat reminder set`/`ls`/`rm` keep a reminder on the chat's live session; the `reminder-fire` tick leaves one not yet due unfired · spends none
+- `E1.27-schedule` · `chat schedule set`/`ls`/`rm` keep a schedule on the chat's live session; the `schedule-fire` tick leaves one not yet due unfired · spends none
 
 ## Lane E2 — Codex
 
@@ -95,9 +95,9 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `M.07-stdio-transports` · `pfm mcp serve --stdio`: forwards to the daemon, serves in process without one, the caller's ambient identity; malformed-frame parse error · spends none
 - `M.08-mcp-cli` · `pfm mcp` CLI surface: `ls`, `enable`/`disable`, the usage exit, `serve` dispatch · spends none
 - `M.09-chat-tools` · chat family tools driven by a direct MCP client against the loopback daemon's `/mcp/professor`, including dying-pane `chat_keys` reporting dead/3/partial · spends cc:$SEAT
-- `M.10-chat-tools-gap` · chat family tools with no dedicated test file: open/name/kill/unkill/save/`servicedesk` · spends cc:$SEAT
+- `M.10-chat-tools-gap` · chat family tools with no dedicated test file: open/name/kill/unkill/exit/save/`servicedesk` · spends cc:$SEAT
 - `M.11-harvester-tools` · harvester tools read local content and return named per-item errors for offline public sources; `pfm harvest download-file` is exercised · spends none
-- `M.12-harvester-cache-gate` · harvest local cache (an `include_content: false` `harvester_read` re-read is `cached`) + search-backend gating of `harvester_search_web` · spends none
+- `M.12-harvester-cache-gate` · harvest local cache (an `include_content: false` `harvester_read` re-read is a cache hit: its artifact's frontmatter `fetched_at` precedes the re-read) + search-backend gating of `harvester_search_web` · spends none
 - `M.13-dropped-seat-roster` · a dropped seat's absence shows up in the daemon's own seat roster · spends none
 - `M.14-end-to-end` · mock Claude and Codex chats drive MCP calls through their registered stdio server and report the resulting tool records · spends cc:$SEAT+cx
 - `M.15-live-chats-survive-daemon-restart` · **cross-lane** — after the exit-75 restart, E1's Claude chat (stdio) and E2's Codex chat (stdio) each make their next MCP call successfully · spends cc:$SEAT+cx
@@ -137,7 +137,9 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 - `O1.11-heal` · `pfm heal` reports/rebuilds wedged Codex thread-history · spends none
 - `O1.12-doc-vs-code` · doc-vs-code confirmed behaviors (settings-global merge, project hooks, git-bridge skill, themes, MCP) · spends none
 - `O1.13-misc-ops` · misc ops CLI: version, config, issues, whoami, usage-hook · spends none
-- `O1.14-price` · `pfm price` reports a table header and valid-table summary; conflicting output flags fail with a named usage error · spends none
+- `O1.15-model-cost` · `pfm model-cost` help names `--all`, `--force` and `--check`; a model plus `--all` and `--check` plus `--json` exit 2; `--check` under `PFM_PRICES_OFFLINE=1` prints the `prices:` summary and exits 0; an unknown id exits 1 naming `pfm model-cost --all` · spends none
+- `O1.16-tokens` · `pfm tokens` help names `--codex`, `--flight` and `--timeline`; `--since 3x` exits 2 naming `--since`; under `PFM_PRICES_OFFLINE=1` an unreadable `--root` exits 1 naming `--root`, and an empty root prints its `TOKEN AUDIT` report and exits 0 · spends none
+- `O1.17-transcript` · `pfm transcript` help names its verbs; an unknown verb exits 2 naming the invalid choice; a fixture transcript's `show` prints its `TRANSCRIPT claude` header and its prompt; `locate` of an id nothing holds exits 1 naming `NOT FOUND` · spends none
 
 ## Lane O2 — ops & host, the destructive tail
 
@@ -148,7 +150,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives the fixture transcr
 - `O2.02-archive` · `pfm archive` (apply / subagents / restore / prune-orphans) over fixture transcript history · spends none
 - `O2.03-index` · `pfm index` · spends none
 - `O2.04-headless` · headless Claude selector returns a cc envelope; the codex selector runs through OpenCode's server and returns an ox envelope with usage · spends cc:$SEAT+cx
-- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, git-guard, epic-inject, title-renudge · spends none
+- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, cost-launch and cost-sink usage and arming, git-guard, epic-inject, title-renudge · spends none
 - `O2.05b-activity-log` · the activity-log reader: `pfm log` shows the lane's own records, a filter narrows, an unknown `--comp`/`--level` and a positional argument exit 2 · spends none
 - `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none
 - `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `inject` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -73,7 +72,7 @@ func claudeArgs(extra ...string) []string {
 	return append(
 		extra,
 		"--settings",
-		`{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`,
+		`{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`,
 		"--model",
 		"claude-sonnet-4-5-fixture",
 	)
@@ -253,11 +252,6 @@ func TestClaudeCompactPrintsTheReceiptAndMarksTheTranscript(t *testing.T) {
 	}
 }
 
-// exitDialogPattern is internal/reload/reload.go:535's spelling of the
-// background-work exit confirmation, repeated here because reload keeps it
-// unexported.
-var exitDialogPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]*Exit`)
-
 func TestClaudeBackgroundAgentIsIdleAndExitAsksToStopIt(t *testing.T) {
 	fix := newFixture(t)
 	t.Chdir(fix.work)
@@ -278,7 +272,7 @@ func TestClaudeBackgroundAgentIsIdleAndExitAsksToStopIt(t *testing.T) {
 		t.Fatalf("the agent row read as a menu: %q", inject.SelectorLine(frame))
 	}
 	session.typeLine("/exit")
-	frame = session.waitFrame("the exit confirmation reload.go:535 presses Enter on", exitDialogPattern.MatchString)
+	frame = session.waitFrame("the exit confirmation inject.ExitDialogOpen matches", inject.ExitDialogOpen)
 	if !strings.Contains(inject.SelectorLine(frame), "Exit") {
 		t.Fatalf("selector = %q, want the Exit row preselected", inject.SelectorLine(frame))
 	}
@@ -303,7 +297,7 @@ func TestClaudeExitWithoutBackgroundWorkQuitsAtOnce(t *testing.T) {
 	if code := session.waitExit(); code != 0 {
 		t.Fatalf("exit code = %d", code)
 	}
-	if exitDialogPattern.MatchString(session.out.all()) {
+	if inject.ExitDialogOpen(session.out.all()) {
 		t.Fatal("an exit dialog appeared with no background work to stop")
 	}
 }

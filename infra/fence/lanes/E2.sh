@@ -230,7 +230,7 @@ if requires E2.01-open-seat; then
   if [ -f "$CODEX_HOME/hooks.json" ] && grep -q 'reload-intercept' "$CODEX_HOME/hooks.json"; then
     bad="$bad $CODEX_HOME/hooks.json carries a reload-intercept hook — Codex has no UserPromptSubmit, this beat's premise is wrong;"
   fi
-  [ -f "$CODEX_HOME/prompts/reload.md" ] || bad="$bad no compiled reload card at $CODEX_HOME/prompts/reload.md (pfm install → codexgen writes it) — \$reload has nothing to expand to;"
+  [ -f "$CODEX_HOME/prompts/reload.md" ] || bad="$bad no compiled reload card at $CODEX_HOME/prompts/reload.md (pfm install → engine-sync global writes it) — \$reload has nothing to expand to;"
   # --model: the chat's OWN model from its rollout (pfm chat status --json), so
   # the flag is exercised without guessing a name the Codex roster may not hold.
   model="$(pfm chat status "$(addr)" --json 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"

@@ -53,8 +53,12 @@ func (model Model) renderHeader(width int) string {
 	default:
 		lines = append(lines, model.chatsHeaderLine(contentWidth))
 	}
+	rail := ""
+	if model.tab == TabChats && model.mergeNewChat {
+		rail = "\n" + model.renderPlaceRail(width)
+	}
 	if !model.skyEnabled {
-		return strings.Join(lines, "\n")
+		return strings.Join(lines, "\n") + rail
 	}
 	widget := sky.Frame(sky.Options{
 		Counts:   liveEngineCounts(model.rows),
@@ -67,7 +71,7 @@ func (model Model) renderHeader(width int) string {
 	for index := range lines {
 		lines[index] = fillLine(lines[index], contentWidth) + widget[index]
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n") + rail
 }
 
 // fleetVitals counts what the masthead reports: live chats per engine, and the
@@ -122,6 +126,12 @@ func (model Model) mastheadTitle(width int) string {
 		{text: " ◆ pfm ", paint: tone{fg: mastheadInk, bg: palette.Accent, bold: true}},
 		{text: "  ", paint: ink},
 	}
+	// The stale marker leads the vitals: the fill cuts from the right, and a
+	// fleet that stopped refreshing must say so at every width, even when the
+	// counts it pushes out are what a narrow terminal loses.
+	if stale := model.staleFleetText(); stale != "" {
+		spans = append(spans, span{text: "⚠ " + stale + "   ", paint: tone{fg: palette.Warn, bold: true}})
+	}
 	vitals := model.fleetVitals()
 	anyLive := false
 	for _, id := range pfmengine.All() {
@@ -160,6 +170,25 @@ func (model Model) mastheadTitle(width int) string {
 		)
 	}
 	return model.mastheadFill(spans, width)
+}
+
+// staleFleetText is the masthead's stale-fleet marker: set while the last
+// refresh pass failed, it names how old the rows on screen are and what failed,
+// so a fleet that stopped updating never reads as a fleet that stopped changing.
+func (model Model) staleFleetText() string {
+	failure := model.deck.refreshFailure
+	if failure == nil {
+		return ""
+	}
+	// AtNS 0 is a failure the stream could not date: the model's clock is now.
+	age := limitAge(time.Unix(0, max(model.nowNS, failure.AtNS)), time.Unix(0, model.deck.freshNS))
+	// The error text is raw err.Error() (a tmux stderr line among them):
+	// cleanField keeps its newlines and escape bytes out of the frame.
+	stage := cleanField(failure.Stage)
+	if stage == "" {
+		stage = "refresh"
+	}
+	return fmt.Sprintf("fleet stale %s · %s: %s", age, stage, cleanField(failure.Err))
 }
 
 // sweepCentre is where the keystroke's light is, in cells from the left edge,
@@ -301,12 +330,12 @@ func (model Model) renderTabs(width int) string {
 }
 
 // chatsHeaderLine is the Chats tab's third header line: the context the list is
-// read in — account, cache, counts — or, when the reminder flags could not be
-// read, that failure: an unreadable flag store never renders as "no reminders".
+// read in — account, cache, counts — or, when the schedule flags could not be
+// read, that failure: an unreadable flag store never renders as "no schedules".
 func (model Model) chatsHeaderLine(width int) string {
 	palette := configuredPalette
-	if model.reminderError != "" {
-		return warnStyle.Render(fillLine(" Chats · reminder flags unreadable: "+model.reminderError, width))
+	if model.scheduleError != "" {
+		return warnStyle.Render(fillLine(" Chats · schedule flags unreadable: "+model.scheduleError, width))
 	}
 	headerAccount := model.primary
 	headerMedal := accountMedal(headerAccount)

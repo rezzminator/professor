@@ -50,7 +50,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		"docs/epics/TEMPLATE.md",
 		".codex/config.toml",
 		"docs/commands/git/references/gitter-history.md",
-		"docs/agents/_index.md",
+		"docs/_index.md",
 	} {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("deployed %s: %v", relative, err)
@@ -331,7 +331,7 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "# Gitter History\n",
 			mode:    0o600,
 		},
-		"templates/project/docs-agents/_index.md": {content: "# Agents\n", mode: 0o600},
+		"templates/project/docs-hub/_index.md": {content: "# Documentation Hub\n", mode: 0o600},
 		"docs/PLACEHOLDERS.md": {
 			content: "# Placeholders\n\nInstall-time: {TOKEN}.\n\n## Runtime metavariables\n\nRuntime: {SHA}.\n",
 			mode:    0o600,

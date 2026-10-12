@@ -63,7 +63,7 @@ chmod +x "$T/stub.sh" "$R/.claude/scripts/dev.sh"
 cp "$T/stub.sh" "$T/bin/node"; cp "$T/stub.sh" "$T/bin/python3"
 cp "$HERE/.claude/scripts/unit-path.sh" "$R/.claude/scripts/unit-path.sh"
 cp "$SUT" "$R/.claude/scripts/test-templates.sh" || echo "test-test-templates: cannot copy $SUT" >&2
-for f in scripts/test-pfm-guard.sh scripts/test-codex-sync.sh scripts/test-format-md.sh scripts/test-dev-report.sh scripts/test-flight-templates.sh \
+for f in scripts/test-pfm-guard.sh scripts/test-format-md.sh scripts/test-dev-report.sh scripts/test-codex-sync.sh scripts/test-flight-templates.sh \
   scripts/test-plain.sh scripts/test-x.py infra/fence/lanes/tests/y_test.sh; do
   mkdir -p "$R/$(dirname "$f")"; cp "$T/stub.sh" "$R/$f"
 done
@@ -167,18 +167,18 @@ chk "zero: a zero-test red (1) wins over a later runner failure (5), which still
 reset; STUB_PASS=3 go "$X" "$S"
 chk "zero: passing tests with nothing skipped stay green" bash -c '[ "$1" = 0 ]' "$REC" "$RC"
 
-# infra/fence/checks.sh passes these four their scripts under test (checks_templates_codex_sync,
-# _pfm_guard, _format_md, _dev_report): one run per path, in this order.
+# infra/fence/checks.sh passes these four their scripts under test (checks_templates_pfm_guard,
+# _format_md, _dev_report, _codex_sync): one run per path, in this order.
 sut_case() { # sut_case <test file> <script under test>...
   local f="$1"; shift; local s calls=()
   reset; go "$f"
   for s in "$@"; do calls+=("$(want "${f##*/}" "$R/$s")"); done
   chk "route: $f runs once per script under test: $*" bash -c '[ "$1" = 0 ] && shift && diff <(printf "%s\n" "$@") <(grep -v "^dev" "$0") >/dev/null' "$REC/calls" "$RC" "${calls[@]}"
 }
-sut_case scripts/test-codex-sync.sh templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh
 sut_case scripts/test-pfm-guard.sh templates/project/scripts/pfm-guard.sh .claude/scripts/pfm-guard.sh
 sut_case scripts/test-format-md.sh templates/project/scripts/format-md.sh .claude/scripts/format-md.sh
 sut_case scripts/test-dev-report.sh .claude/scripts/dev.sh
+sut_case scripts/test-codex-sync.sh templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh
 
 reset; go scripts/test-flight-templates.sh
 chk "route: flight contracts run once as a plain shell suite" ran 0 "$(want test-flight-templates.sh)"
@@ -188,11 +188,11 @@ chk "one container: every invocation of a selection runs inside ONE iso run" bas
 reset; go "$X" scripts/test-plain.sh
 chk "order: invocations run in argument order" bash -c 'diff <(cut -d" " -f1 "$0/calls") <(printf "node\ntest-plain.sh\n")' "$REC"
 
-reset; rcseq test-codex-sync.sh 3 5; go scripts/test-codex-sync.sh
+reset; rcseq test-pfm-guard.sh 3 5; go scripts/test-pfm-guard.sh
 chk "exit: the first non-zero invocation code wins and the later one still ran" bash -c '[ "$1" = 3 ] && [ "$(wc -l < "$0/calls")" = 2 ]' "$REC" "$RC"
-reset; rcseq test-codex-sync.sh 0 5; go scripts/test-codex-sync.sh
+reset; rcseq test-pfm-guard.sh 0 5; go scripts/test-pfm-guard.sh
 chk "exit: a later non-zero code is the exit when the first passed" [ "$RC" = 5 ]
-reset; go scripts/test-codex-sync.sh
+reset; go scripts/test-pfm-guard.sh
 chk "exit: all green is 0" [ "$RC" = 0 ]
 
 reset; go ALL

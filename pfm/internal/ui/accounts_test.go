@@ -29,19 +29,6 @@ func TestNormalizedAccountIDsDropsNonPositiveAndDuplicates(t *testing.T) {
 	}
 }
 
-func TestNextAccountCyclesAndRecoversFromAnUnknownOne(t *testing.T) {
-	ids := []int{1, 2, 3}
-	cases := []struct{ current, want int }{{1, 2}, {2, 3}, {3, 1}, {9, 1}}
-	for _, tc := range cases {
-		if got := nextAccount(tc.current, ids); got != tc.want {
-			t.Errorf("nextAccount(%d) = %d, want %d", tc.current, got, tc.want)
-		}
-	}
-	if got := nextAccount(1, nil); got != 0 {
-		t.Errorf("an empty roster has no next account, got %d", got)
-	}
-}
-
 func TestPositiveOrFallsBackOnZeroAndNegative(t *testing.T) {
 	if positiveOr(5, 9) != 5 || positiveOr(0, 9) != 9 || positiveOr(-3, 9) != 9 {
 		t.Error("positiveOr keeps a positive value and falls back otherwise")

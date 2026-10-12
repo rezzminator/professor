@@ -16,21 +16,27 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
+// maxImageBytes caps a stored image the published page relocates.
+const maxImageBytes = 10 * 1024 * 1024
+
+// markdownImageRE finds the link of every markdown image: its capture group.
+var markdownImageRE = regexp.MustCompile(`!\[[^\]]*\]\(\s*([^\s)]+)`)
+
 // markdownImageWholeRE is one whole markdown image — alt text, link and an
 // optional title — the span an image that cannot be published is replaced by.
 var markdownImageWholeRE = regexp.MustCompile(`!\[([^\]]*)\]\(\s*([^\s)]+)(?:\s+"[^"]*")?\s*\)`)
 
 // withPublicImages is body with its local images relocated into public/
 // (rewritePublicImages). An image that cannot be published is dropped, its alt
-// text kept, and the drop is named in out.Partial and in body's partial
-// marker; only a failure of the public store itself is an error.
+// text kept, and the drop is named in out.Partial (the public frontmatter's
+// gaps); only a failure of the public store itself is an error.
 func (h *Harvester) withPublicImages(source, body, basePath string, out *Result) (string, error) {
 	rewritten, dropped, err := h.rewritePublicImages(source, body, basePath)
 	if err != nil || dropped == 0 {
 		return rewritten, err
 	}
 	out.Partial = joinReasons(out.Partial, fmt.Sprintf("%d image(s) could not be published", dropped))
-	return withPartial(partialBody(rewritten), out.Partial), nil
+	return rewritten, nil
 }
 
 // rewritePublicImages copies each local image body embeds into public/ and
@@ -173,9 +179,34 @@ func readPublicImage(canonical string) ([]byte, string, string) {
 	return data, ext, ""
 }
 
+// publicImageBase is the path a stored document's relative image links
+// resolve against: a local document's own file — its author wrote them against
+// its directory — else the cached artifact (an older entry's page-relative
+// image links resolve against it). An archive keeps the cached artifact: its members are not files
+// beside the archive.
+func publicImageBase(result Result) string {
+	if result.Kind == kindArchive || result.Kind == kindArchiveMember {
+		return result.Path
+	}
+	source := strings.TrimSpace(result.Source)
+	if strings.HasPrefix(strings.ToLower(source), "file://") {
+		path, err := fileURLPath(source)
+		if err != nil {
+			obs.Logger(context.Background()).Warn("harvest: a local source URL cannot anchor its relative images",
+				"target", logSource(source), obs.FieldErr, err.Error())
+			return result.Path
+		}
+		return path
+	}
+	if filepath.IsAbs(source) {
+		return source
+	}
+	return result.Path
+}
+
 // publicImagePath is the local file raw names, and whether it names one. A
 // remote link — http(s), data:, or protocol-relative (//host/…, which a page
-// may carry past the localizer's image cap) — names none.
+// may carry) — names none.
 func publicImagePath(raw, basePath string) (string, bool) {
 	trimmed := strings.TrimSpace(raw)
 	lower := strings.ToLower(trimmed)

@@ -1,0 +1,43 @@
+# flight · metrics
+
+source agents.tsv · window 2026-09-20T09:01:00.000Z → 2026-09-20T10:28:00.000Z
+4 matched of 5 ledger rows · claude 3 · codex 1 · by id 3 · by agent path 0 · by window 1
+
+| task | agent | engine | model | calls | wall | ctx0 | peak | +/call | input | cached | output | ttl | $ | fail | poll | reread | contract | compact | cap | matched |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1-b | executor | codex | 5.6-sol | 9 | 16m | 11K | 63K | 6K | 44K | 33K | 14K | — | $0.47 | 1 | 3 | 1 | 1 | 1 | ok/150 | window |
+| 1-d | executor | claude | sonnet-5 | 85 | 87m | 9K | 12K | 37 | 28K | 753K | 3K | 5m | $0.25 | 1 | 0 | 1 | 0 | 1 | ok/150 | id |
+| 1-a | executor | claude | sonnet-5 | 3 | 5m | 10K | 210K | 67K | 11K | 220K | 120 | 5m | $0.07 | 0 | 0 | 0 | 1 | 0 | ok/150 | id |
+| 1-e | lander | claude | unobtanium-9 | 2 | 3m | 10K | 11K | 260 | 11K | 10K | 160 | 5m | n/a | 0 | 0 | 0 | 0 | 0 | ok/200 | id |
+
+## totals by agent type
+
+| agent type | n | calls | input | cached | output | $ | fail | poll | reread | contract | compact | over cap |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| executor | 3 | 97 | 83K | 1.0M | 18K | $0.79 | 2 | 3 | 2 | 2 | 2 | 0 |
+| lander | 1 | 2 | 11K | 10K | 160 | $0.00 + 1 n/a | 0 | 0 | 0 | 0 | 0 | 0 |
+
+## flight total
+
+4 agents · 99 calls · peak context 210K · input 93K · cached 1.0M · output 18K · **$0.79** + 1 unpriced agent(s) at "n/a" (their tokens ARE above, their dollars are NOT)
+failed commands 2 · poll calls 3 · re-reads 2 · contract-file reads 2 · compactions 2 · over cap 0 of 4
+unledgered 1 transcript(s) under this flight's session · $0.02 — the flight's spend is $0.81 (see the unmatched section)
+
+## three most expensive agents
+
+- $0.47 · 1-b · executor · codex · 9 calls · peak 63K · 16m
+- $0.25 · 1-d · executor · claude · 85 calls · peak 12K · 87m
+- $0.07 · 1-a · executor · claude · 3 calls · peak 210K · 5m
+
+## unmatched
+
+- LEDGER ROW 1-c · executor · id ghost-agent · engine claude · no transcript found in the window
+- TRANSCRIPT executor · claude · d4 · 2026-09-20T09:01 · $0.02 · ran under this flight's session with no ledger row
+
+pricing: saved table {FIX}/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: 1 synthetic/zero-usage calls (dropped: the harness billed nothing for them) · 2 UNPRICED calls {"claude-unobtanium-9":2} — tokens counted, dollars "n/a"; check exact IDs and available rates with pfm model-cost --json --all · 2 UNMATCHED (see the unmatched section)
+
+cross-check: at the published context tiers (per-model rate in the pfm model-cost table — an estimate) this flight reads $0.79 (1.00x the headline). The harness writes its own cost-state line only for a main chat, and a flight's agents are sub-runs, so these dollars are UNCHECKED against the harness on this host.
+
+metrics → {TMP}/report-8thqrish7hf.md (39 lines)
+full data → {TMP}/report-8thqrish7hf.json

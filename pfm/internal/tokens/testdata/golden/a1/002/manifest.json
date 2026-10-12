@@ -1,0 +1,19 @@
+{
+ "test": "A1 default top 3 since 99999d",
+ "now": "2026-09-21T06:00:00.000Z",
+ "args": [
+  "--since",
+  "99999d",
+  "--root",
+  "{FIX}/claude/projects",
+  "--top",
+  "3"
+ ],
+ "env": {
+  "TOKEN_AUDIT_PRICES": "{FIX}/model-cost.json"
+ },
+ "exit": 0,
+ "signal": null,
+ "inputs": [],
+ "outputs": {}
+}

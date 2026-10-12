@@ -1,7 +1,10 @@
 package hostcheck
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -145,7 +148,8 @@ func storeIdentity(env Env) ([]Row, error) {
 			entry = filepath.Join(entry, "mcp-discover-verdicts.json")
 		}
 		path := filepath.Join(env.Store, entry)
-		if inspectPath(&rows, "store-identity", path) == nil {
+		info := inspectPath(&rows, "store-identity", path)
+		if info == nil {
 			continue
 		}
 		target := filepath.Join(acct, entry)
@@ -173,21 +177,100 @@ func storeIdentity(env Env) ([]Row, error) {
 			}
 			if info != nil {
 				var ok bool
-				fix, ok = removeKeeping(
-					&rows,
-					"store-identity",
-					target,
-					"keep "+target+"; after checking, rm -r "+path,
-					path,
-				)
+				fix, ok = removeKeeping(&rows, "store-identity", target, moveAsideFix(env, path), path)
 				if !ok {
 					continue
 				}
 			}
 		}
-		rows = append(rows, Row{Block, "store-identity", path, entry + storeIdentityProblem, fix})
+		problem := entry + storeIdentityProblem
+		if entry == "backups" {
+			problem += "; a Claude launched without CLAUDE_CONFIG_DIR writes backups here too"
+		}
+		if slices.Contains(strayStateEntries, entry) {
+			problem += " (" + strayBirth(path, info) + ")"
+		}
+		rows = append(rows, Row{Block, "store-identity", path, problem, fix})
 	}
 	return rows, nil
+}
+
+// strayStateEntries are the Claude state files a launch with the wrong config
+// dir writes: their rows name when the file was born.
+var strayStateEntries = []string{".claude.json", ".claude.json.backup", "backups"}
+
+// strayBirth names when a stray Claude state file was born: its mtime and the
+// firstStartTime it records, or for a dir (backups) its newest file's. A value
+// it cannot read says why, never blank.
+func strayBirth(path string, info os.FileInfo) string {
+	if !info.IsDir() {
+		return fileBirth(path, info)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return "contents unreadable: " + err.Error()
+	}
+	var newest os.FileInfo
+	for _, entry := range entries {
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return "contents unreadable: " + err.Error()
+		}
+		if entryInfo.Mode().IsRegular() && (newest == nil || entryInfo.ModTime().After(newest.ModTime())) {
+			newest = entryInfo
+		}
+	}
+	if newest == nil {
+		return "holds no file"
+	}
+	return "newest " + newest.Name() + ": " + fileBirth(filepath.Join(path, newest.Name()), newest)
+}
+
+func fileBirth(path string, info os.FileInfo) string {
+	return "mtime " + info.ModTime().UTC().Format(time.RFC3339) + ", firstStartTime " + firstStartTime(path)
+}
+
+// firstStartTime is the firstStartTime Claude recorded in a state file, or
+// why there is none to show.
+func firstStartTime(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "unreadable: " + err.Error()
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return "unreadable: not JSON (" + err.Error() + ")"
+	}
+	value, found := document["firstStartTime"]
+	if !found {
+		return "absent"
+	}
+	var text string
+	if err := json.Unmarshal(value, &text); err != nil {
+		return "not a string: " + string(value)
+	}
+	return text
+}
+
+// strayAsideDir is the timestamped directory one doctor run's move-aside
+// fixes file stray Claude state under, each at its path below home: nothing
+// is deleted, and the operator compares or restores it from there.
+func strayAsideDir(env Env) string {
+	return filepath.Join(
+		env.Home, ".local", "state", "pfm", "stray-claude-state", env.Now.UTC().Format("20060102-150405"),
+	)
+}
+
+// moveAsideFix moves path into the run's aside dir, refusing to land on
+// anything already there.
+func moveAsideFix(env Env, path string) string {
+	relative, err := filepath.Rel(env.Home, path)
+	if err != nil || strings.HasPrefix(relative, "..") {
+		relative = strings.TrimPrefix(filepath.Clean(path), string(filepath.Separator))
+	}
+	target := filepath.Join(strayAsideDir(env), relative)
+	return "mkdir -m 700 -p " + filepath.Dir(target) + " && [ ! -e " + target + " ] && mv " + path + " " + target +
+		"  # moved aside, never deleted"
 }
 
 func homeStateFile(env Env) ([]Row, error) {
@@ -196,14 +279,12 @@ func homeStateFile(env Env) ([]Row, error) {
 	if _, ok := readFile(&rows, "home-state-file", path); !ok {
 		return rows, nil
 	}
+	info := inspectPath(&rows, "home-state-file", path)
+	if info == nil {
+		return rows, nil
+	}
 	keep := filepath.Join(firstAccountDir(env), ".claude.json")
-	fix, ok := removeKeeping(
-		&rows,
-		"home-state-file",
-		keep,
-		"check it names the same oauthAccount as "+keep+", then rm "+path,
-		path,
-	)
+	fix, ok := removeKeeping(&rows, "home-state-file", keep, moveAsideFix(env, path), path)
 	if ok {
 		rows = append(
 			rows,
@@ -211,7 +292,7 @@ func homeStateFile(env Env) ([]Row, error) {
 				Warn,
 				"home-state-file",
 				path,
-				"a Claude launched without CLAUDE_CONFIG_DIR wrote this state file",
+				"a Claude launched without CLAUDE_CONFIG_DIR wrote this state file (" + strayBirth(path, info) + ")",
 				fix,
 			},
 		)
@@ -322,26 +403,38 @@ func sharedEntryFix(store, path, name string) string {
 	case "plugins":
 		return "rm -r " + path + "  # the store keeps its copy (reinstallable)"
 	case "settings.json":
-		return "jq -e -s '.[0] as $s | .[1] | to_entries | " +
-			"all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' " +
-			target + " " + path + " > /dev/null && jq -s '.[0] * .[1]' " + target + " " + path + " > " + target +
-			".new && mv " + target + ".new " + target + " && rm " + path +
-			"  # adds the keys the store lacks; stops while a key differs"
+		return jsonKeysMergeFix(target, path)
 	case "CLAUDE.md":
 		return "cat " + path + " >> " + target + " && rm " + path +
 			"  # appended whole; prune " + target + " as you like"
+	case "tool-visibility-controller.json":
+		// Install, blocked by this row, is what would seed the store copy, so the fix seeds it first.
+		return "mkdir -p " + store + " && { [ -e " + target + " ] || [ -L " + target + " ] || printf '{}\\n' > " +
+			target + "; } && " +
+			jsonKeysMergeFix(target, path)
 	default:
 		return "rm " + path + "  # a cache"
 	}
 }
 
+// jsonKeysMergeFix adds the account copy's top-level keys the store lacks, then
+// deletes the copy; jq -e stops the chain while a key both hold differs.
+func jsonKeysMergeFix(target, path string) string {
+	return "jq -e -s '.[0] as $s | .[1] | to_entries | " +
+		"all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' " +
+		target + " " + path + " > /dev/null && jq -s '.[0] * .[1]' " + target + " " + path + " > " + target +
+		".new && mv " + target + ".new " + target + " && rm " + path +
+		"  # adds the keys the store lacks; stops while a key differs"
+}
+
 func unclassified(env Env) ([]Row, error) {
 	var rows []Row
+	known := runtimeEntries(&rows, env)
 	for _, dir := range claudeDirs(env) {
 		for _, entry := range readDir(&rows, classUnclassified, dir) {
 			name := entry.Name()
 			if installer.EntryClass(name) != classUnclassified || backupName(name) ||
-				strings.HasPrefix(name, ".claude.json.tmp.") {
+				strings.HasPrefix(name, ".claude.json.tmp.") || known[paths.PhysicalPath(filepath.Join(dir, name))] {
 				continue
 			}
 			rows = append(
@@ -357,6 +450,75 @@ func unclassified(env Env) ([]Row, error) {
 		}
 	}
 	return rows, nil
+}
+
+// installedPlugins names every plugin the store's registry lists, the part of
+// each "name@marketplace" key before the @: a top-level entry of that name is
+// the plugin's own (its logs). A registry that cannot be read, or whose plugins
+// object, registrations or keys are malformed, is a row, so the entries it
+// would classify report unclassified, never silently.
+func installedPlugins(rows *[]Row, env Env) map[string]bool {
+	registry := filepath.Join(env.Store, "plugins", "installed_plugins.json")
+	raw, err := os.ReadFile(registry)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	var names map[string]bool
+	if err == nil {
+		names, err = pluginNames(raw)
+	}
+	if err != nil {
+		if store, statErr := os.Stat(env.Store); statErr != nil || !store.IsDir() {
+			// The store's own UNREADABLE row, from the scan below, names the cause.
+			return nil
+		}
+		*rows = append(*rows, Row{
+			Warn,
+			classUnclassified,
+			registry,
+			"UNREADABLE plugin registry: " + err.Error() + " — a dir named after a plugin reports unclassified",
+			"make " + registry + " readable JSON, then rerun pfm doctor",
+		})
+		return nil
+	}
+	return names
+}
+
+// pluginNames reads the registry's plugins object: every key is
+// "name@marketplace" with a plain name, every value a list of registrations
+// (possibly empty, never null), each a non-empty object. Any other shape is an
+// error, never a partial list.
+func pluginNames(raw []byte) (map[string]bool, error) {
+	var document struct {
+		Plugins map[string]json.RawMessage `json:"plugins"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	if document.Plugins == nil {
+		return nil, errors.New("missing plugins object")
+	}
+	names := map[string]bool{}
+	for key, value := range document.Plugins {
+		var registrations []map[string]json.RawMessage
+		if err := json.Unmarshal(value, &registrations); err != nil {
+			return nil, fmt.Errorf("invalid registrations for plugin %q: %w", key, err)
+		}
+		if registrations == nil {
+			return nil, fmt.Errorf("invalid registrations for plugin %q: null", key)
+		}
+		for _, entry := range registrations {
+			if len(entry) == 0 {
+				return nil, fmt.Errorf("empty registration for plugin %q", key)
+			}
+		}
+		name, market, ok := strings.Cut(key, "@")
+		if !ok || name == "" || market == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+			return nil, fmt.Errorf("invalid plugin key %q", key)
+		}
+		names[name] = true
+	}
+	return names, nil
 }
 
 func staleStateTmp(env Env) ([]Row, error) {

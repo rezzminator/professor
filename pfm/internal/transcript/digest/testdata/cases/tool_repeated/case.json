@@ -1,0 +1,11 @@
+{
+ "args": [
+  "show",
+  "{CLAUDE}",
+  "--tool",
+  "Bash",
+  "--tool",
+  "read"
+ ],
+ "dirs": []
+}

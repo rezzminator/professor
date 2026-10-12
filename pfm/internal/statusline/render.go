@@ -6,9 +6,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,6 +45,7 @@ type input struct {
 	CWD           string `json:"cwd"`
 	ContextWindow struct {
 		UsedPercentage    float64 `json:"used_percentage"`
+		ContextWindowSize int64   `json:"context_window_size"`
 		TotalInputTokens  int64   `json:"total_input_tokens"`
 		TotalOutputTokens int64   `json:"total_output_tokens"`
 		CurrentUsage      struct {
@@ -357,7 +356,7 @@ func appendRateSegments(line string, now time.Time, data input) string {
 			line = appendSegment(line, makeBar(0, 5)+" "+dim+descriptor.Label+"-used:—"+reset)
 			continue
 		}
-		used := int(window.UsedPercentage)
+		used := gaugePercent(window.UsedPercentage)
 		segment := makeBar(used, 5) + " " + percentColor(used) +
 			descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
 		remaining := window.ResetsAt - now.Unix()
@@ -723,30 +722,6 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	}
 }
 
-func readTail(path string, size int64) (tail []byte, returnErr error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close tail file %s: %w", path, err))
-		}
-	}()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	start := info.Size() - size
-	if start < 0 {
-		start = 0
-	}
-	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return nil, err
-	}
-	return io.ReadAll(file)
-}
-
 func formatCacheTime(duration time.Duration, expired bool) string {
 	seconds := int64(duration / time.Second)
 	if seconds < 0 {
@@ -837,7 +812,7 @@ func codexSegment(
 			if window == nil || window.UsedPercent < 0 {
 				continue
 			}
-			percent := int(window.UsedPercent)
+			percent := gaugePercent(window.UsedPercent)
 			segment += sep + makeBar(percent, 5) + " " + percentColor(percent) +
 				windowLabel(window.WindowDurationMins) + "-used:" + strconv.Itoa(percent) + "%" + reset +
 				resetCountdown(now, window.ResetsAt)
@@ -858,7 +833,7 @@ func codexSegment(
 		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)
 	}
 	if !transcriptGauge && window > 0 && contextTokens > 0 {
-		percent := int(contextTokens * 100 / window)
+		percent := gaugePercent(float64(contextTokens) * 100 / float64(window))
 		if percent > 100 {
 			percent = 100
 		}

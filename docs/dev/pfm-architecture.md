@@ -100,7 +100,7 @@ pfm/
     engine/  claude/ codex/ opencode/   # matchutil/ folded into engine/match.go
     installer/                      # installer.go split by surface; migrations/ below
       migrations/                   # NEW. v<version>_<slug>.go per step + steps.go ordered slice
-    unchanged: action agentopen agentrole archive ask codexappendix codexgen codexmeta compose config deps
+    unchanged: action agentopen agentrole archive ask codexappendix codexmeta codexprompt compose config deps
                gather harvest harvestmcp harvestpy headless headless/run heal index inject kill
                mcpserv naming nudge paths recovery reap reload resolve sky spawn stats statusline
                testjail theme transcript ui updatecheck usagehook
@@ -121,7 +121,7 @@ One term per concept, spelled the same in the directory, the identifier, the wir
 | Account usage windows | limits | `internal/limits` · `limits.Sampler` | cache `cc-usage-<uid>/acct-N.json` (unchanged) | lives in `stats` beside resource sampling |
 | A one-time host migration | migration step | `internal/installer/migrations/v<ver>_<slug>.go` · `migrations.Steps` | — | 49 `retire*`/`migrate*`/`*Legacy*` funcs across 12 files |
 | Executable matching per engine | engine match | `engine.MatchCommand` | — | package `engine/matchutil` |
-| Removing a chat from the list (and ending it if live) | **Open ruling 4** | — | CLI `kill`, MCP `chat_kill` | CLI/package say `kill`, the UI and MCP description say `hide`, the SQL table says `hidden` |
+| Removing a chat from the list (and ending it if live) | **Open ruling 4** | — | CLI `kill`, MCP `chat_kill` and `chat_exit` (the caller itself) | CLI/package say `kill`, the UI and MCP description say `hide`, the SQL table says `hidden` |
 
 ## 4. Façades
 
@@ -140,7 +140,7 @@ A unit calls the façade and never the primitive. Checks C4–C7 enforce the fir
 | Accounts, emoji, theme, posture | `internal/config` (exists) | `.cc/N` literals | sound per `pfm/CLAUDE.md` |
 | Chat operations | `internal/chat` (new) | argv into `package main` | every surface (CLI, MCP, picker actions, pfmd RPC) calls `chat.X(ctx, rt, req)` |
 
-Tiny duplicates that die rather than getting a façade: the `min`/`max` shadows of Go builtins (`codexgen/reconcile.go:242`, `usagehook/hook.go:788`), `contains` / `rosterContains` in place of `slices.Contains` (`codexgen/compiler.go:683`, `reload/reload.go:482`), and the `firstNonEmpty`/`first` triplet (`compose/compose.go:879`, `index/codex.go:174`, `codexmeta/header.go:108`), which moves into `codexmeta` beside its heaviest user. The rollout locator `archive/archive.go:378` calls `recovery.locate` instead of re-walking `sessions/`.
+Tiny duplicates that die rather than getting a façade: the `min`/`max` shadows of Go builtins (`usagehook/hook.go:788`), `contains` / `rosterContains` in place of `slices.Contains` (`reload/reload.go:482`), and the `firstNonEmpty`/`first` triplet (`compose/compose.go:879`, `index/codex.go:174`, `codexmeta/header.go:108`), which moves into `codexmeta` beside its heaviest user. The rollout locator `archive/archive.go:378` calls `recovery.locate` instead of re-walking `sessions/`.
 
 ## 5. Registries
 

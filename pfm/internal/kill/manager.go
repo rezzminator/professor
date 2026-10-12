@@ -49,6 +49,7 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 		spawner = CommandSpawner{
 			Executable: dependencies.Executable,
 			ConfigPath: dependencies.ConfigPath,
+			LogDir:     resolved.SIDDir,
 		}
 	}
 	codexHomes := dependencies.CodexHomes
@@ -94,9 +95,10 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 }
 
 // ConfirmExit must never race the detached finisher it verifies: that process
-// waits defaultExitDelay, types the engine's exit command, then gives the chat
-// defaultPollAttempts x defaultPollEvery to save its session and close before
-// its own fallback kill. The first confirm stage therefore outlasts that whole
+// waits defaultExitDelay, then up to defaultIdleAttempts x defaultPollEvery for
+// the chat's running turn to end, types the engine's exit command, then gives
+// the chat defaultPollAttempts x defaultPollEvery to save its session and
+// close before its own fallback kill. The first confirm stage therefore outlasts that whole
 // window (it returns the moment the pane is gone, so a healthy kill is still
 // prompt); only a pane that outlived the finisher is escalated, and each
 // escalation stage then waits defaultEscalateAttempts polls.
@@ -108,8 +110,10 @@ const (
 	// answer the finisher (a `sleep` pane), which escalate either way.
 	TestConfirmEveryMSEnv = "PFM_TEST_KILL_CONFIRM_EVERY_MS"
 
-	defaultConfirmEvery     = 500 * time.Millisecond
-	defaultConfirmAttempts  = int((defaultExitDelay+defaultPollAttempts*defaultPollEvery)/defaultConfirmEvery) + 6
+	defaultConfirmEvery    = 500 * time.Millisecond
+	defaultConfirmAttempts = int(
+		(defaultExitDelay+(defaultIdleAttempts+defaultPollAttempts)*defaultPollEvery)/defaultConfirmEvery,
+	) + 6
 	defaultEscalateAttempts = 6
 )
 
@@ -127,8 +131,8 @@ const (
 // When the pane is still there after the bounded wait, ConfirmExit escalates
 // exactly the way Finisher.Run's own fallback does — kill-pane, then (one
 // rung further, since the finisher's own kill-pane may itself be the thing
-// that never landed) kill-server of THIS target's own socket, never any
-// other. Only once every escalation has also failed to clear the pane does
+// that never landed) kill-server only if THIS target is the socket's sole
+// pane. A shared server is never killed. Only once every escalation has also failed to clear the pane does
 // it return a named error; a caller must never print success past that
 // point.
 func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
@@ -136,14 +140,14 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 		return nil
 	}
 	landed, probeErr, err := pollPaneGone(
-		ctx, manager.tmux, target.SocketPath, target.PaneID, manager.confirmAttempts, manager.confirmEvery,
+		ctx, manager.tmux, target.SocketPath, target.PaneID, manager.confirmAttempts, manager.confirmEvery, nil,
 	)
 	if err != nil {
 		return err
 	}
 	for _, escalate := range []func() error{
 		func() error { return manager.tmux.KillPane(ctx, target.SocketPath, target.PaneID) },
-		func() error { return manager.tmux.KillServer(ctx, target.SocketPath) },
+		func() error { return manager.tmux.KillServerIfSolePane(ctx, target.SocketPath, target.PaneID) },
 	} {
 		if landed {
 			break
@@ -155,7 +159,7 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 		var pollErr error
 		landed, pollErr, stageErr = pollPaneGone(
 			ctx, manager.tmux, target.SocketPath, target.PaneID,
-			min(manager.confirmAttempts, defaultEscalateAttempts), manager.confirmEvery,
+			min(manager.confirmAttempts, defaultEscalateAttempts), manager.confirmEvery, nil,
 		)
 		probeErr = errors.Join(probeErr, pollErr)
 		if stageErr != nil {
@@ -230,6 +234,14 @@ func (manager *Manager) Kill(
 		return Target{}, errors.New("--exit requires a live --self tmux pane")
 	}
 	live := target.SocketPath != "" && target.PaneID != ""
+	spawn := request.Exit || live
+	// Whatever can fail before the launch without a side effect (the
+	// finisher's log) fails here, while nothing has changed yet.
+	if spawn {
+		if err := manager.spawner.Prepare(ExitArgs(target)); err != nil {
+			return Target{}, err
+		}
+	}
 
 	// A seat with no id, or keyed on its own socket name, has no identity to
 	// tombstone: the key names where the chat is, not which chat it is, and it
@@ -237,22 +249,49 @@ func (manager *Manager) Kill(
 	// composer already refuses to apply such a kill (compose.applyKill), so
 	// writing one only leaves a row nobody can unkill. The pane still closes
 	// below.
+	rollbackRevision := ""
 	if !AddressOnly(target) {
-		if err := manager.database.Kill(ctx, store.Killed{
+		// The write itself decides rollback ownership atomically: only an insert,
+		// never an existing kill, including one that raced this request.
+		revision, err := manager.database.KillWithRevision(ctx, store.Killed{
 			ID:       target.ID,
 			Engine:   target.Engine,
 			KilledAt: manager.now().Unix(),
-		}); err != nil {
+		})
+		if err != nil {
 			return Target{}, err
 		}
+		rollbackRevision = revision
 	}
 
-	if request.Exit || live {
+	if spawn {
 		if err := manager.spawner.Spawn(ctx, ExitArgs(target)); err != nil {
-			return Target{}, err
+			return Target{}, manager.rollBackKill(ctx, target.ID, rollbackRevision, err)
 		}
 	}
 	return target, nil
+}
+
+// rollBackKill undoes the kill row a failed finisher launch left behind, so
+// the chat is not hidden with its pane still open — only when this call
+// created the row. A rollback that fails too names both failures and says
+// the chat is hidden with its pane still open. The rollback outlives a
+// cancelled request: a launch cancelled with its caller must not leave the
+// row behind.
+func (manager *Manager) rollBackKill(ctx context.Context, id, revision string, launchErr error) error {
+	if revision == "" {
+		return launchErr
+	}
+	if _, err := manager.database.UnkillIfRevision(context.WithoutCancel(ctx), id, revision); err != nil {
+		return fmt.Errorf(
+			"%w; roll back the kill row of %s: %w — the chat is hidden with its pane still open; run pfm chat unkill %s",
+			launchErr,
+			id,
+			err,
+			id,
+		)
+	}
+	return launchErr
 }
 
 // KillCleared records a prompt-baseline kill only when id is already an

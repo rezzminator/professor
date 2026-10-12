@@ -1,0 +1,9 @@
+{
+ "args": [
+  "show",
+  "01a0eee7",
+  "--err-lines",
+  "2"
+ ],
+ "dirs": []
+}

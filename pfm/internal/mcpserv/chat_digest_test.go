@@ -3,48 +3,22 @@ package mcpserv
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// digestSourceRepo points chat_digest at the checkout this test runs in, so
-// the script under test is the worktree's own, never the host's ~/.claude.
-func digestSourceRepo(t *testing.T) {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, err := os.Stat(
-			filepath.Join(dir, "templates", "global", "skills", "transcript", "transcript.py"),
-		); err == nil {
-			t.Setenv("PFM_SOURCE_REPO", dir)
-			return
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatalf("no checkout above the test's directory carries templates/global/skills/transcript/transcript.py")
-		}
-		dir = parent
-	}
-}
-
-// digestFixture is a jailed home, the source repo pointed at this checkout and
-// one transcript passed by path; it returns the session and that path.
+// digestFixture is a jailed home and one transcript passed by path; it returns
+// the session and that path.
 func digestFixture(t *testing.T, service *Service) (*mcp.ClientSession, string) {
 	t.Helper()
 	root := setupBackendFixture(t)
-	digestSourceRepo(t)
 	path := filepath.Join(root, "digest-fixture.jsonl")
 	writeJSONL(t, path, []any{
 		map[string]any{
@@ -121,14 +95,11 @@ func TestChatDigestRejectsBadInputNamingTheField(t *testing.T) {
 		field string
 		input DigestInput
 	}{
-		{"source", DigestInput{Source: "-x"}},
 		{"source", DigestInput{}},
 		{"results", DigestInput{Source: path, Results: "bogus"}},
 		{"results", DigestInput{Source: path, Results: "tail:0"}},
-		{"grep", DigestInput{Source: path, Grep: "--out=/tmp/x"}},
 		{"lines", DigestInput{Source: path, Lines: "-5"}},
 		{"only", DigestInput{Source: path, Only: "-x"}},
-		{"tool", DigestInput{Source: path, Tool: "-x"}},
 		{"last", DigestInput{Source: path, Last: -1}},
 		{"first", DigestInput{Source: path, First: -1}},
 		{"text", DigestInput{Source: path, Text: -1}},
@@ -153,53 +124,13 @@ func TestChatDigestAcceptsADashedSinceAndUntil(t *testing.T) {
 	}
 }
 
-func TestChatDigestNamesBothScriptPathsWhenNeitherExists(t *testing.T) {
-	root := setupBackendFixture(t)
-	t.Setenv("PFM_SOURCE_REPO", filepath.Join(root, "no-source-repo"))
-	service := newService("test", &backend{})
-	session := connectInMemory(t, service.Server()).clientSession
-	message := callDigestError(t, session, DigestInput{Source: "x"})
-	for _, want := range []string{
-		filepath.Join(root, "no-source-repo", "templates", "global", "skills", "transcript", "transcript.py"),
-		filepath.Join(root, "home", ".claude", "skills", "transcript", "transcript.py"),
-	} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("chat_digest error = %s, want it to list %s", message, want)
-		}
-	}
-}
-
-// blockingRunner never answers until its context ends, as a hung python3 does.
-type blockingRunner struct{ deps.Runner }
-
-func (blockingRunner) LookPath(name string) (string, error) { return "/fake/" + name, nil }
-
-func (blockingRunner) Run(ctx context.Context, _ []string, _ deps.RunOptions) (deps.RunResult, error) {
-	<-ctx.Done()
-	return deps.RunResult{ExitCode: -1}, nil
-}
-
+// A digest that outlives its deadline stops reading and answers the timeout.
 func TestChatDigestTimeoutIsAToolErrorSayingSo(t *testing.T) {
-	setupBackendFixture(t)
-	digestSourceRepo(t)
-	service := newService("test", &backend{runner: blockingRunner{}, digestTimeout: 50 * time.Millisecond})
-	session := connectInMemory(t, service.Server()).clientSession
-	message := callDigestError(t, session, DigestInput{Source: "x"})
+	service := newService("test", &backend{digestTimeout: time.Nanosecond})
+	session, path := digestFixture(t, service)
+	message := callDigestError(t, session, DigestInput{Source: path})
 	if !strings.Contains(message, "timed out after") || !strings.Contains(message, "lines") {
 		t.Fatalf("chat_digest timeout error = %s, want it to say it timed out and to narrow", message)
-	}
-}
-
-func TestChatDigestPython3MissingIsAToolErrorSayingSo(t *testing.T) {
-	setupBackendFixture(t)
-	digestSourceRepo(t)
-	runner := &deps.FakeRunner{}
-	runner.ScriptLookPath("python3", "", os.ErrNotExist)
-	service := newService("test", &backend{runner: runner})
-	session := connectInMemory(t, service.Server()).clientSession
-	message := callDigestError(t, session, DigestInput{Source: "x"})
-	if !strings.Contains(message, "python3") || !strings.Contains(message, "not found") {
-		t.Fatalf("chat_digest error = %s, want it to say python3 was not found", message)
 	}
 }
 
@@ -266,37 +197,23 @@ func TestChatDigestMaxBytesBeforeFirstLine(t *testing.T) {
 	}
 }
 
-func TestDigestScriptRejectsNonregularCandidates(t *testing.T) {
+// An id resolves under the backend's own Claude roots, in-process.
+func TestChatDigestResolvesAnIdUnderTheBackendRoots(t *testing.T) {
 	root := setupBackendFixture(t)
-	repo := filepath.Join(root, "source")
-	source := filepath.Join(repo, filepath.FromSlash(digestScriptUnderSource))
-	home := filepath.Join(root, "home", filepath.FromSlash(digestScriptUnderHome))
-	t.Setenv("PFM_SOURCE_REPO", repo)
-	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
+	writeJSONL(t, filepath.Join(root, "claude", "project-alpha", "digest-resolve-0001.jsonl"), []any{
+		map[string]any{
+			"type": "user", "cwd": "/work/alpha", "sessionId": "digest-resolve-0001",
+			"timestamp": "2026-01-01T10:00:00Z", "message": map[string]any{"content": "resolved by id"},
+		},
+	})
+	resolved, err := paths.Resolve()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(home), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(home, []byte("installed script"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Mkfifo(source, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := digestScript()
-	if err != nil || got != home {
-		t.Errorf("nonregular source lookup=%q error=%v, want installed fallback %q", got, err, home)
-	}
-	if err := os.Remove(home); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(source, home); err != nil {
-		t.Fatal(err)
-	}
-	got, err = digestScript()
-	if err == nil || !strings.Contains(err.Error(), "not a regular file") || !strings.Contains(err.Error(), home) ||
-		!strings.Contains(err.Error(), source) {
-		t.Errorf("nonregular installed lookup=%q error=%v, want visible rejection naming both paths", got, err)
+	service := newService("test", &backend{paths: resolved})
+	session := connectInMemory(t, service.Server()).clientSession
+	got := callTool[DigestOutput](t, session, "chat_digest", DigestInput{Source: "digest-resolve"})
+	if !strings.Contains(got.Text, "PROMPT resolved by id") {
+		t.Fatalf("chat_digest by id prefix = %+v, want the transcript under the backend's Claude root", got)
 	}
 }

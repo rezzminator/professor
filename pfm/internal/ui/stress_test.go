@@ -133,8 +133,8 @@ func stressRandomKeys(t *testing.T) {
 		specialKey(tea.KeyBackspace),
 		controlKey('r'),
 		controlKey('x'),
-		controlKey('e'),
-		controlKey('s'),
+		specialKey(tea.KeyLeft),
+		specialKey(tea.KeyRight),
 		printableKey('a'),
 		printableKey('界'),
 	}

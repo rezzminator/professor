@@ -9,6 +9,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // metaMaxLine bounds memory while leaving room for large tool and prompt
@@ -61,44 +62,38 @@ func (meta Meta) ContextPercent() float64 {
 	return percent
 }
 
-type usageRecord struct {
-	InputTokens         int64 `json:"input_tokens"`
-	OutputTokens        int64 `json:"output_tokens"`
-	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
-	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
-}
-
-func (usage usageRecord) contextTokens() int64 {
-	return usage.InputTokens + usage.CacheReadTokens + usage.CacheCreationTokens
+// contextOf is the context a Claude usage block reports: its prompt tokens.
+// A context is one request's, never a sum, so a response that billed several
+// requests (counts only in iterations, or an advisor consulted between two)
+// reports its last request, the one that ran last; an advisor's request is
+// another model's and never this one's.
+func contextOf(usage pricing.UsageBlock) int64 {
+	requests := usage.Requests()
+	if len(requests) == 0 {
+		return 0
+	}
+	return requests[len(requests)-1].Context()
 }
 
 type metaRecord struct {
-	Type             string      `json:"type"`
-	Subtype          string      `json:"subtype"`
-	IsMeta           bool        `json:"isMeta"`
-	IsSidechain      bool        `json:"isSidechain"`
-	IsCompactSummary bool        `json:"isCompactSummary"`
-	Usage            usageRecord `json:"usage"`
+	Type             string             `json:"type"`
+	Subtype          string             `json:"subtype"`
+	IsMeta           bool               `json:"isMeta"`
+	IsSidechain      bool               `json:"isSidechain"`
+	IsCompactSummary bool               `json:"isCompactSummary"`
+	Usage            pricing.UsageBlock `json:"usage"`
 	Message          struct {
-		Model   string          `json:"model"`
-		Content json.RawMessage `json:"content"`
-		Usage   usageRecord     `json:"usage"`
+		Model   string             `json:"model"`
+		Content json.RawMessage    `json:"content"`
+		Usage   pricing.UsageBlock `json:"usage"`
 	} `json:"message"`
 	CompactMetadata struct {
 		PostTokens int64 `json:"postTokens"`
 	} `json:"compactMetadata"`
 	Payload struct {
-		Type  string `json:"type"`
-		Model string `json:"model"`
-		Info  struct {
-			LastTokenUsage struct {
-				TotalTokens int64 `json:"total_tokens"`
-			} `json:"last_token_usage"`
-			TotalTokenUsage struct {
-				TotalTokens int64 `json:"total_tokens"`
-			} `json:"total_token_usage"`
-			ModelContextWindow int64 `json:"model_context_window"`
-		} `json:"info"`
+		Type  string          `json:"type"`
+		Model string          `json:"model"`
+		Info  *CodexTokenInfo `json:"info"`
 	} `json:"payload"`
 }
 
@@ -107,7 +102,14 @@ type metaScanState struct {
 }
 
 // ReadMeta streams a transcript for the run's own facts.
-func ReadMeta(path, engine string) (meta Meta, returnErr error) {
+func ReadMeta(path, engine string) (Meta, error) {
+	return ReadMetaObserving(path, engine, nil)
+}
+
+// ReadMetaObserving is ReadMeta that also hands every line it scans to observe
+// (nil for none), so a caller needing a second fact of the same file takes it
+// in this one read. A scan error leaves observe having seen only a prefix.
+func ReadMetaObserving(path, engine string, observe func(line []byte)) (meta Meta, returnErr error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return Meta{}, err
@@ -116,6 +118,7 @@ func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 		SizeBytes:      info.Size(),
 		ModifiedUnixNS: info.ModTime().UnixNano(),
 	}
+	noteWholeRead(path)
 	file, err := os.Open(path)
 	if err != nil {
 		return meta, err
@@ -131,6 +134,9 @@ func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 	state := metaScanState{}
 	for scanner.Scan() {
 		applyMeta(&meta, &state, scanner.Bytes(), engine)
+		if observe != nil {
+			observe(scanner.Bytes())
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return meta, fmt.Errorf("scan transcript %s: %w", path, err)
@@ -164,12 +170,16 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 			// total. The latter grows for the whole thread and can exceed the
 			// window many times over; it is only a compatibility fallback for
 			// older rollout records that predate last_token_usage.
-			if current := parsed.Payload.Info.LastTokenUsage.TotalTokens; current > 0 {
+			info := parsed.Payload.Info
+			if info == nil {
+				info = &CodexTokenInfo{}
+			}
+			if current := info.LastTokenUsage.Total(); current > 0 {
 				meta.ContextTokens = current
-			} else if total := parsed.Payload.Info.TotalTokenUsage.TotalTokens; total > 0 {
+			} else if total := info.TotalTokenUsage.Total(); total > 0 {
 				meta.ContextTokens = total
 			}
-			if window := parsed.Payload.Info.ModelContextWindow; window > 0 {
+			if window := info.ModelContextWindow; window > 0 {
 				meta.ContextWindow = window
 			}
 		}
@@ -179,7 +189,7 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 		return
 	}
 	if parsed.Type == RoleUser && !parsed.IsMeta && !parsed.IsCompactSummary {
-		prompt := naming.FlattenPromptText(parsed.Message.Content)
+		prompt := FlattenPromptText(parsed.Message.Content)
 		if prompt != "" && !naming.IsJunkPrompt(prompt) {
 			meta.HumanPrompts++
 		}
@@ -200,12 +210,12 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 		meta.Model = parsed.Message.Model
 	}
 	usage := parsed.Usage
-	if usage.contextTokens() <= 0 {
+	if contextOf(usage) <= 0 {
 		usage = parsed.Message.Usage
 	}
 	// Claude's occupancy is what entered the model: direct input plus both
 	// cache classes. Output belongs to the response and is not in that gauge.
-	if used := usage.contextTokens(); used > 0 {
+	if used := contextOf(usage); used > 0 {
 		meta.ContextTokens = used
 		state.claudeUsageSeen = true
 		meta.CompactedAfterUsage = false

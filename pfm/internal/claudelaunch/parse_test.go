@@ -49,6 +49,24 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				}
 				return
 			}
+			if knob.Wire == WireWrapper {
+				if len(launch.Wrapper) != 4 || launch.Wrapper[1] != "internal" || launch.Wrapper[2] != "cost-launch" {
+					t.Errorf("wrapper=%q, want the cost launcher", launch.Wrapper)
+				}
+				return
+			}
+			if knob.Wire == WireWrapperEnv {
+				// Only the wrapper knows the sink's port, so Render itself sets none of these.
+				if !slices.Contains(CostEnvNames(), knob.Target) {
+					t.Errorf("%s is not among CostEnvNames", knob.Target)
+				}
+				for _, entry := range launch.Env {
+					if strings.HasPrefix(entry, knob.Target+"=") {
+						t.Errorf("Render set %s, which only the wrapper may set", entry)
+					}
+				}
+				return
+			}
 			switch knob.Name {
 			case "configDir":
 				if !slices.Contains(launch.Env, "CLAUDE_CONFIG_DIR="+machine.Accounts[1].ConfigDir) {
@@ -95,6 +113,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "100000" {
 					t.Error("auto compact window missing")
 				}
+			case "helperModel":
+				if parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"] != "claude-haiku-5-5" {
+					t.Error("helper model missing")
+				}
 			case "tmuxTruecolor":
 				if parsed.SettingsEnv["CLAUDE_CODE_TMUX_TRUECOLOR"] != "1" {
 					t.Error("truecolor missing")
@@ -124,13 +146,17 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Error("cleanup missing")
 				}
 			case "hooks":
-				if len(parsed.Hooks) != 11 {
-					t.Errorf("hooks=%d", len(parsed.Hooks))
-				}
+				var got, want []string
 				for _, hook := range parsed.Hooks {
-					if hook.Name == "" {
-						t.Errorf("unnamed hook: %#v", hook)
-					}
+					got = append(got, hook.Name)
+				}
+				for _, hook := range HookTemplates(home) {
+					want = append(want, hook.Name)
+				}
+				slices.Sort(got)
+				slices.Sort(want)
+				if !slices.Equal(got, want) {
+					t.Errorf("parsed hook names %q, want the registry's %q", got, want)
 				}
 			case "statusLine", "subagentStatusLine":
 				if parsed.Settings[knob.Name] == nil {

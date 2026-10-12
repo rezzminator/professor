@@ -22,6 +22,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Initialize engine-sync source for the fence
+        run: git submodule update --init -- plugins/engine-sync
+
       - name: Create a clean linked worktree
         shell: bash
         run: git worktree add --detach "$RUNNER_TEMP/professor-fence" HEAD
@@ -31,6 +34,15 @@ jobs:
         with:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
+
+      # engine-sync writes the mirrors below, and the fence builds its own
+      # copy from the same checked-out source (infra/fence/fence-env.sh).
+      # The action stages the shipped machine policy and exports its config
+      # home; the fence stages the same file from the same commit for its
+      # checks (infra/fence/checks.sh checks_engine_sync_policy), so runner
+      # generation and fence checks resolve the same policy.
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
 
       # Generated mirrors (AGENTS.md, .codex/**, .opencode/**) are never
       # tracked — the fence worktree starts with none of them, and the
@@ -42,12 +54,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/professor-fence/pfm"
-          go run ./cmd/pfm codex build ..
-          cd "$RUNNER_TEMP/professor-fence"
-          (cd pfm && go run ./cmd/pfm opencode build ..)
+          "$ENGINE_SYNC_BIN" build "$RUNNER_TEMP/professor-fence"
 
-      - name: Stage private leak-check policy
+      # Structural checks need no repository secret and always run, including forks.
+      - name: Stage structural leak-check policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '!structural-only\n' > "$RUNNER_TEMP/professor-fence/scripts/leak-terms.txt"
+
+      - name: Stage private leak-check policy (trusted events only)
+        if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           PFM_PRIVATE_LEAK_TERMS: ${{ secrets.PFM_PRIVATE_LEAK_TERMS }}
         shell: bash
@@ -55,12 +72,38 @@ jobs:
           set -euo pipefail
           test -n "$PFM_PRIVATE_LEAK_TERMS" || { echo "Missing repository secret PFM_PRIVATE_LEAK_TERMS" >&2; exit 1; }
           umask 077
-          printf '%s\n' "$PFM_PRIVATE_LEAK_TERMS" > "$RUNNER_TEMP/professor-fence/scripts/leak-terms.txt"
+          printf '%s\n' "$PFM_PRIVATE_LEAK_TERMS" > "$RUNNER_TEMP/professor-leak-terms-private.txt"
 
-      - name: Run the repository gate through the isolated fence
+      - name: Report skipped private leak coverage
+        if: ${{ !(github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
         shell: bash
         run: |
-          "$RUNNER_TEMP/professor-fence/.claude/scripts/dev.sh" iso test templates
+          echo '::warning::PRIVATE COVERAGE SKIPPED — fork or Dependabot PR has no ordinary Actions private leak-term secret; structural checks still run.'
+          echo 'PRIVATE COVERAGE SKIPPED — fork or Dependabot PR; structural checks still run.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run structural checks through the isolated fence
+        shell: bash
+        run: |
+          LEAK_TERMS="$RUNNER_TEMP/professor-fence/scripts/leak-terms.txt" \
+            "$RUNNER_TEMP/professor-fence/.claude/scripts/dev.sh" iso test templates
+
+      - name: Scan private leak terms (trusted events only)
+        if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        shell: bash
+        run: |
+          LEAK_TERMS="$RUNNER_TEMP/professor-leak-terms-private.txt" \
+            "$RUNNER_TEMP/professor-fence/.claude/scripts/dev.sh" iso run '
+              set -euo pipefail
+              paths="$(mktemp)"
+              trap '\''rm -f "$paths"'\'' EXIT
+              git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" ls-files -z > "$paths" || {
+                echo "Private leak scan FAILED — tracked-file enumeration failed" >&2; exit 1;
+              }
+              files=()
+              while IFS= read -r -d "" path; do files+=("$path"); done < "$paths"
+              (( ${#files[@]} > 0 )) || { echo "Private leak scan FAILED — empty tracked-file enumeration" >&2; exit 1; }
+              bash scripts/leak-check.sh --files "${files[@]}"
+            '
 
   cross-compile:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
@@ -106,6 +149,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Initialize engine-sync source for the fence
+        run: git submodule update --init -- plugins/engine-sync
 
       # Mirrors `.claude/scripts/dev.sh`'s own derivation: scratch artifacts land
       # outside the checkout at /tmp/<project>, <project> = the checkout

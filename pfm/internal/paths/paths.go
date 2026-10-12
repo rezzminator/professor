@@ -25,6 +25,10 @@ const (
 	// SIDEffortPrefix names the statusline's per-session effort record,
 	// SIDEffortPrefix+sessionID, so the doctor's crumb audit accepts it.
 	SIDEffortPrefix = "statusline-effort-"
+	// SIDKillExitLogPrefix names the detached kill-exit finisher's log,
+	// SIDKillExitLogPrefix+socketName+".log", beside reload's worker logs
+	// (reload-{socket}.log); the doctor's crumb audit accepts both.
+	SIDKillExitLogPrefix = "kill-exit-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
 	// a crash can leave one behind, so the crumb audit accepts it.
@@ -67,6 +71,19 @@ const (
 	// manifest or remote theme file; themes bundled in the source clone still install.
 	// The test harness sets it so no test fetches themes from a public repository.
 	EnvThemesOffline = "PFM_THEMES_OFFLINE"
+	// EnvPricesOffline=1 stops every price refresh — pfm model-cost, pfm
+	// install, pfm doctor — from fetching the publishers' pricing pages; the
+	// served table stays the clone file or the embedded copy. The test harness
+	// and the fence lanes set it so no test fetches a pricing page.
+	EnvPricesOffline = "PFM_PRICES_OFFLINE"
+	// EnvCostLedgerDir names the directory of the per-call cost ledger
+	// ({session_id}.jsonl, one line per API call) the cost sink writes and the
+	// status line, `pfm tokens` and callmeter read; unset, it hangs off the
+	// pfm state directory (CostLedgerDir).
+	EnvCostLedgerDir = "PFM_COST_LEDGER_DIR"
+	// EnvWatchSnapshot names the fleet snapshot `pfm chat watch` processes
+	// share (WatchSnapshot); unset, it sits beside the fleet cache.
+	EnvWatchSnapshot = "PFM_WATCH_SNAPSHOT"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
@@ -124,6 +141,12 @@ var (
 	ErrNoSourceRepoMarker = errors.New("no source repository recorded")
 	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
 )
+
+// PricesStampPath is the record of the last price check that confirmed the
+// clone's prices.json, kept outside the clone so a check never dirties it.
+func PricesStampPath(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "prices-checked")
+}
 
 // SourceRepoPath returns the install-owned clone marker location.
 func SourceRepoPath(home string) string {
@@ -482,22 +505,12 @@ func Resolve() (Values, error) {
 	}, nil
 }
 
-// GeneratedCodexAgentsDir is where pfm compiles the machine-global Codex
-// agent .toml twins (codexgen.RunGlobalAgents) — pfm-owned state, never
-// inside the source clone a template's .md lives in, so a stale compiler on
-// any host can never rewrite a tracked file. A `~/.codex/agents/<name>.toml`
-// link points here; uninstall removes this whole directory along with the
-// links it owns.
-func LegacyGeneratedCodexAgentsDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "generated", "codex-agents")
-}
-
-// GeneratedClaudeAgentsDir is where pfm renders the machine-global Claude
-// agent VARIANTS templates/global/agents/variants.json declares
-// (codexgen.RunGlobalAgents) — one source agent re-emitted under another name
-// with overridden frontmatter. An original agent is linked straight from the
-// clone and never lands here; only a variant's `{config}/agents/<name>.md`
-// link points into this directory, and uninstall removes it with those links.
+// GeneratedClaudeAgentsDir is where engine-sync global renders the
+// machine-global Claude agent VARIANTS templates/global/agents/variants.json
+// declares — one source agent re-emitted under another name with overridden
+// frontmatter. An original agent is linked straight from the clone and never
+// lands here; only a variant's `{config}/agents/<name>.md` link points into
+// this directory, which pfm's unwire and orphan sweep recognise as pfm-owned.
 func GeneratedClaudeAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
 }
@@ -507,6 +520,19 @@ func GeneratedClaudeAgentsDir(home string) string {
 // carry env values and headers that must never reach argv.
 func ClaudeMCPConfigDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "mcp-config")
+}
+
+// CostLedgerDir is the directory of the per-call cost ledger: EnvCostLedgerDir
+// when set, else cost-ledger under the pfm state directory. The cost sink
+// creates it 0700; callmeter reads the same path as optional data.
+func CostLedgerDir(env Env, home string) string {
+	return EnvOrFrom(env, EnvCostLedgerDir, filepath.Join(home, ".local", "state", "pfm", "cost-ledger"))
+}
+
+// CostSinkLog is the file the detached cost sink logs its failures to, beside
+// the activity log, so `pfm doctor` can show the cause of a sink that stopped.
+func CostSinkLog(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "log", "cost-sink.log")
 }
 
 // LegacyHarnessPromptsDir identifies the former managed prompt directory.
@@ -588,6 +614,17 @@ func ThemesOfflineIn(env Env) bool {
 	return env.Get(EnvThemesOffline) == "1"
 }
 
+// PricesOffline reports EnvPricesOffline=1: no price refresh fetches the
+// publishers' pricing pages.
+func PricesOffline() bool {
+	return PricesOfflineIn(OSEnv{})
+}
+
+// PricesOfflineIn is PricesOffline read from env, the environment a caller was handed.
+func PricesOfflineIn(env Env) bool {
+	return env.Get(EnvPricesOffline) == "1"
+}
+
 // PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.
 func PrebuiltPFMBinary() (string, bool) {
 	return OSEnv{}.Lookup(EnvTestPFMBinary)
@@ -618,6 +655,13 @@ func TestProfileParent() (string, bool) {
 // TestDeadlineEpoch is the step deadline in decimal epoch seconds, when one is set.
 func TestDeadlineEpoch() (string, bool) {
 	return OSEnv{}.Lookup(EnvTestDeadlineEpoch)
+}
+
+// WatchSnapshot names the short-lived fleet scan every `pfm chat watch`
+// process on the box shares, so watches polling together pay one scan; its
+// lock is the same path plus ".lock". PFM_WATCH_SNAPSHOT overrides it.
+func WatchSnapshot(values Values) string {
+	return EnvOr(EnvWatchSnapshot, filepath.Join(filepath.Dir(values.CacheDB), "watch-snapshot.json"))
 }
 
 // WorkbenchCache names the discovery cache beside the fleet index.

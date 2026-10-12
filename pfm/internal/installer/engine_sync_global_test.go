@@ -746,7 +746,7 @@ func TestWireEngineSyncGlobalMachinePolicy(t *testing.T) {
 
 func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
 	// The declaration-aware compiler is required; older builds would link declarations raw.
-	for _, version := range []string{"0.1.0", "0.2.0", "0.3.0-alpha", "0.3.0-alpha.1", "0.3.0-alpha.2"} {
+	for _, version := range []string{"0.1.0", "0.2.0", "0.3.0-alpha", "0.3.0-alpha.1", "0.3.0-alpha.2", "0.3.0-alpha.4"} {
 		t.Run(version, func(t *testing.T) {
 			installer, _, _ := engineSyncGlobalEngine(t, ModeApply, nil)
 			binary := filepath.Join(t.TempDir(), "engine-sync")
@@ -756,11 +756,11 @@ func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
 			}
 			t.Setenv(enginesync.EnvBin, binary)
 			err := installer.wireEngineSyncGlobal(nil)
-			if version != "0.3.0-alpha.2" {
+			if version != "0.3.0-alpha.4" {
 				if err == nil ||
 					!strings.Contains(
 						err.Error(),
-						"engine-sync "+version+" is older than required 0.3.0-alpha.2 — update the plugin "+
+						"engine-sync "+version+" is older than required 0.3.0-alpha.4 — update the plugin "+
 							"(`claude plugin update engine-sync@professor`), then start a new Claude session",
 					) || strings.Contains(err.Error(), "make host-install") {
 					t.Fatalf("old binary = %v", err)

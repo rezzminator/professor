@@ -91,6 +91,11 @@ for (const dir of agentSourceDirs) {
   const args = ["-I", join(ROOT, "scripts/agent-source-inventory.py"), directory];
   if (dir !== "templates/global/agents") args.push("--project");
   const scan = spawnSync("python3", args, { encoding: "utf8" });
+  // Exit 3 is the inventory's missing PyYAML: a toolchain gap, never a source error.
+  if (scan.status === 3) {
+    console.error(`agent-roster: ${scan.stderr.trim()}`);
+    process.exit(3);
+  }
   if (scan.error || scan.status !== 0)
     compilerError(scan.error || scan.stderr || `agent source inventory exited ${scan.status}`, args);
   for (const {name, kind, model} of JSON.parse(scan.stdout)) {

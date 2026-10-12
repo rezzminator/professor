@@ -50,7 +50,8 @@ def frontmatter(path):
 def inventory(directory, project=False, codex=False):
     rows = []
     for path in sorted(directory.iterdir()):
-        if path.suffix != ".md" or path.name in ("README.md", "SKILL.md"):
+        # engine-sync skips README.md alone; every other .md is a source.
+        if path.suffix != ".md" or path.name == "README.md":
             continue
         info = path.stat()  # A dangling/unreadable source is an error, never an absent agent.
         if stat.S_ISDIR(info.st_mode) and not path.is_symlink():
@@ -60,17 +61,16 @@ def inventory(directory, project=False, codex=False):
         front, _ = frontmatter(path)
         if project and ("from" in front or "abstract" in front):
             raise ValueError(f"{path}: from/abstract declarations are machine scope only")
-        abstract = front.get("abstract", False)
-        if not isinstance(abstract, bool):
-            raise ValueError(f"{path}: abstract must be a boolean")
+        if "abstract" in front:
+            raise ValueError(f"{path}: abstract is retired — a shared file lives below a subdirectory, with no name and no from")
         parent = front.get("from")
         if "from" in front and (not isinstance(parent, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", parent)):
             raise ValueError(f"{path}: from must name an agent")
-        if abstract and parent is not None:
-            raise ValueError(f"{path}: an abstract cannot carry from")
-        kind = "abstract" if abstract else "declaration" if parent is not None else "original"
+        if parent is not None and front.get("name", path.stem) != path.stem:
+            raise ValueError(f"{path}: a declaration's name must equal its file base {path.stem!r}")
+        kind = "declaration" if parent is not None else "original"
         engines = front.get("engines", {})
-        if codex and (abstract or isinstance(engines, dict) and engines.get("codex") is False):
+        if codex and isinstance(engines, dict) and engines.get("codex") is False:
             continue
         rows.append({"name": path.stem, "path": str(path), "kind": kind,
                      "from": parent, "model": front.get("model")})
@@ -95,14 +95,14 @@ def main():
     parser.add_argument("directory", type=pathlib.Path)
     parser.add_argument("--project", action="store_true")
     parser.add_argument("--codex", action="store_true", help="filter already rendered Claude agents for Codex")
-    parser.add_argument("--names", action="store_true", help="print non-abstract agent names, one per line")
+    parser.add_argument("--names", action="store_true", help="print agent names, one per line")
     parser.add_argument("--declarations", action="store_true", help="print declaration names, one per line")
     args = parser.parse_args()
     try:
         rows = inventory(args.directory, args.project, args.codex)
         if args.declarations or args.names:
             print("\n".join(row["name"] for row in rows if
-                            (row["kind"] == "declaration" if args.declarations else row["kind"] != "abstract")))
+                            (row["kind"] == "declaration" or not args.declarations)))
         else:
             print(json.dumps(rows))
     except (OSError, ValueError, yaml.YAMLError) as error:

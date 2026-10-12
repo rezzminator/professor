@@ -13,14 +13,16 @@ import (
 )
 
 var doctorPluginIDs = []string{
-	"cache-live-control@cache-live-control", "sub-agent-compact@sub-agent-compact", "agent-effort@agent-effort",
+	"cache-live-control@cache-live-control",
+	"sub-agent-compact@sub-agent-compact",
+	"effort-live-control@effort-live-control",
 	"tool-visibility-controller@tool-visibility-controller",
 }
 
 var doctorDevIDs = []string{
 	"cache-live-control@cache-live-control-dev",
 	"sub-agent-compact@sub-agent-compact-dev",
-	"agent-effort@agent-effort-dev",
+	"effort-live-control@effort-live-control-dev",
 	"tool-visibility-controller@tool-visibility-controller-dev",
 }
 
@@ -97,13 +99,13 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 		}, 2, 0},
 		{
 			"an unreadable marketplace record",
-			pfmconfig.ClaudePlugin{ID: "agent-effort"},
+			pfmconfig.ClaudePlugin{ID: "effort-live-control"},
 			false, `{`,
 			func(path, store string) string {
 				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
 					filepath.Join(store, "plugins", "known_marketplaces.json") + ": unexpected end of JSON input\n" +
-					"doctor: claude_plugins plugin agent-effort@agent-effort not enabled in " + path + " — " + bareNameFix("agent-effort") + "\n" +
-					"doctor: claude_plugins plugin agent-effort@agent-effort not installed in " + store + " — " + bareNameFix("agent-effort") + "\n" +
+					"doctor: claude_plugins plugin effort-live-control@effort-live-control not enabled in " + path + " — " + bareNameFix("effort-live-control") + "\n" +
+					"doctor: claude_plugins plugin effort-live-control@effort-live-control not installed in " + store + " — " + bareNameFix("effort-live-control") + "\n" +
 					"doctor: claude_plugins plugin typesafe@typesafe-ai cannot be checked: marketplace typesafe-ai cannot be looked up" +
 					" while the plugin records are unreadable, and its claude.plugins entry has no source — " +
 					"repair the unreadable file named above, then run pfm doctor again\n"
@@ -418,7 +420,7 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 // checkouts checks the -dev ids and their copies, a fallback names its reason
 // and checks the GitHub ids, and both copies enabled at once is a duplicate.
 func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
-	names := []string{"cache-live-control", "sub-agent-compact", "agent-effort", "tool-visibility-controller"}
+	names := []string{"cache-live-control", "sub-agent-compact", "effort-live-control", "tool-visibility-controller"}
 	for _, state := range []string{
 		"alpha clean", "alpha duplicate", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release duplicate",
 	} {

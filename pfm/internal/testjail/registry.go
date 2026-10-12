@@ -10,12 +10,14 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // StageGlobalAgents links original agents and stages generated stand-ins for
 // declarations. Like the jail's fake engine-sync, these are fixtures, not a
 // second compiler: engine-sync's gate proves the rendered manuals and settings.
-// Abstract layers never enter the registry.
+// Shared files below a subdirectory are never agents: the inventory never
+// lists them.
 func StageGlobalAgents(t *testing.T, home string) {
 	t.Helper()
 	rows, err := globalAgentFixtures()
@@ -23,16 +25,13 @@ func StageGlobalAgents(t *testing.T, home string) {
 		t.Fatalf("inventory global agent fixtures: %v", err)
 	}
 	registry := filepath.Join(home, ".claude", "agents")
-	generated := filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
+	generated := paths.GeneratedClaudeAgentsDir(home)
 	for _, dir := range []string{registry, generated} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("create agent fixture directory %s: %v", dir, err)
 		}
 	}
 	for _, row := range rows {
-		if row.Kind == "abstract" {
-			continue
-		}
 		target := row.Path
 		if row.Kind == "declaration" {
 			target = filepath.Join(generated, row.Name+".md")

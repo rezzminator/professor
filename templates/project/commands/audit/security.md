@@ -217,7 +217,7 @@ argument-hint: [scope]
 
 2. **Unpinned actions:** third-party CI actions are pinned to a full commit SHA, not a floating tag (`@v4`).
 
-3. **Framework-file trust:** any new or changed file under `.claude/**` or the {AI_SERVICE_NAME} prompt dir gets a static injection/code-exec scan before merge — a marketplace skill or prompt file is untrusted input injected verbatim into an agent or the runtime LLM. The `pfm-guard.sh` gate owns this boundary.
+3. **Framework-file trust:** any new or changed file under `.claude/**` or the {AI_SERVICE_NAME} prompt dir gets a static injection/code-exec scan before merge — a marketplace skill or prompt file is untrusted input injected verbatim into an agent or the runtime LLM.
 
 **Files to check:** CI workflow files, `.claude/**`, the {AI_SERVICE_NAME} prompt/knowledge dir.
 

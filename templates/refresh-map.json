@@ -34,22 +34,22 @@
     "global/agents/astra.md": {
       "curated": true
     },
+    "global/agents/documenter.md": {
+      "curated": true
+    },
     "global/agents/foreman-pro.md": {
       "curated": true
     },
-    "global/agents/gpt-executor.md": {
-      "curated": true
-    },
-    "global/agents/gpt-flights.md": {
+    "global/agents/gpt-flights-mechanical-executor.md": {
       "curated": true
     },
     "global/agents/gpt-foreman-pro.md": {
       "curated": true
     },
-    "global/agents/gpt-foreman.md": {
+    "global/agents/gpt-flights-foreman.md": {
       "curated": true
     },
-    "global/agents/gpt-lander.md": {
+    "global/agents/gpt-flights-lander.md": {
       "curated": true
     },
     "global/agents/gpt-reviewer-pro.md": {
@@ -58,16 +58,7 @@
     "global/agents/gpt-reviewer.md": {
       "curated": true
     },
-    "global/agents/gpt-worker.md": {
-      "curated": true
-    },
-    "global/agents/gpt.md": {
-      "curated": true
-    },
     "global/agents/luna.md": {
-      "curated": true
-    },
-    "global/agents/repo-lane.md": {
       "curated": true
     },
     "global/agents/reviewer-nt.md": {
@@ -80,9 +71,6 @@
       "curated": true
     },
     "global/agents/sol.md": {
-      "curated": true
-    },
-    "global/agents/terra.md": {
       "curated": true
     },
     "global/agents/agent-optimizer.md": {
@@ -188,6 +176,11 @@
         ".claude/agents/gitter.md": "58fb69d44305534f7eef5a61dbf3b9fac3b8a42f8a6b0bb47874f8900ab2fbb2"
       }
     },
+    "project/agents/pcm.md": {
+      "sources": {
+        ".claude/agents/pcm.md": "3aaf0efb2a655347a4d588433855bbc66a03558f7c2daa8007d5bb799c4b1cf1"
+      }
+    },
     "project/codex/README.md": {
       "curated": true
     },
@@ -234,7 +227,7 @@
     },
     "project/commands/pcm.md": {
       "sources": {
-        ".claude/commands/pcm.md": "80bb645c20d6b1f18b8288bf1fd1b8cfd77257bd4f409e222055f3dc277de63a"
+        ".claude/commands/pcm.md": "80ed770caa8bfc1b798c17427148e79912880e67609ca5076cd274473f68af9c"
       }
     },
     "project/commands/per-project/testing-manual.md": {
@@ -267,6 +260,9 @@
       "sources": {
         "docs/references/gitter-phase-setup.md": "0ad4ff2e1d174e8db9fcb652fd6bd42d4fd7679395cba7205f90e6a1bbe1502c"
       }
+    },
+    "project/docs-commands/pcm/references/audit-scopes.md": {
+      "curated": true
     },
     "project/docs-hub/_index.md": {
       "curated": true
@@ -314,11 +310,6 @@
         ".claude/scripts/git-lock.sh": "05fafa1527026175f8cbaca74fc03155f2a6bb359304f826a830e44b3e798b43"
       }
     },
-    "project/scripts/guard-stamp.sh": {
-      "sources": {
-        ".claude/scripts/guard-stamp.sh": "8035abb2e9b02d3d07de66b3db73a6e544e0a89149d83c0cc8e356dbb67a6c97"
-      }
-    },
     "project/scripts/memory-consolidate.sh": {
       "curated": true
     },
@@ -327,11 +318,6 @@
     },
     "project/scripts/memory-wire.sh": {
       "curated": true
-    },
-    "project/scripts/pfm-guard.sh": {
-      "sources": {
-        ".claude/scripts/pfm-guard.sh": "dc6720da1d5a76735eac0ad081945f5302ce2a324216f528540dbb619cfe97bc"
-      }
     },
     "project/scripts/worktree.sh": {
       "curated": true
@@ -422,6 +408,18 @@
       "curated": true
     },
     "themes/sources.json": {
+      "curated": true
+    },
+    "global/agents/shared/gpt.md": {
+      "curated": true
+    },
+    "global/agents/shared/gpt-flights.md": {
+      "curated": true
+    },
+    "global/agents/shared/gpt-worker.md": {
+      "curated": true
+    },
+    "global/agents/shared/repo-lane.md": {
       "curated": true
     }
   }

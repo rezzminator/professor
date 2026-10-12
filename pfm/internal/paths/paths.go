@@ -505,12 +505,13 @@ func Resolve() (Values, error) {
 	}, nil
 }
 
-// GeneratedClaudeAgentsDir is where engine-sync global renders the
-// machine-global Claude agents declared by `from:` in their source .md files
-// — one source agent re-emitted under another name with overridden
-// frontmatter. An original agent is linked straight from the clone and never
-// lands here; only a variant's `{config}/agents/<name>.md` link points into
-// this directory, which pfm's unwire and orphan sweep recognise as pfm-owned.
+// GeneratedClaudeAgentsDir is the home store Professor's engine-sync policy
+// rendered `from:` declarations into before they moved into the clone's
+// templates/generated/agents (machine.sourceGeneratedAgentsDir). engine-sync
+// global retires what it owns there; pfm's unwire and orphan sweep still
+// recognise a `{config}/agents/<name>.md` link into it as pfm-owned, and the
+// test jail stages its declaration stand-ins here, since a test never writes
+// into the clone.
 func GeneratedClaudeAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
 }

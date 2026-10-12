@@ -45,7 +45,7 @@ gitter merges worktree → develop only after in-fence verification (project gat
 
 ## Unchanged
 
-gitter-only git writes; guarded files; the leak gate; the publication boundary; flight verification order.
+gitter-only git writes; the leak gate; the publication boundary; flight verification order.
 
 ## Sequence
 

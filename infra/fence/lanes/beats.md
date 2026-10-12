@@ -114,7 +114,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `A.08-codex-mirror` · `pfm codex build`/`pfm codex check` PASS · spends none
 - `A.09-codex-agents` · `pfm codex agents` compiles the global agent mirror · spends none
 - `A.10-symlinked-blueprint` · a symlinked blueprint is reached correctly through `pfm update` (P10.1 class, update side) · spends none
-- `A.11-guard-hook` · the guard hook DENIES a mock chat's Edit of `.claude/**` without the `/pcm` stamp and ALLOWS it with the stamp; the Stop hook recompiles `AGENTS.md` · spends cc:$SEAT
+- `A.11-codex-sync-hook` · a mock chat's Edit of `.claude/**` is admitted, the PostToolUse hook sets the engine-sync dirty flag and the Stop hook recompiles `AGENTS.md` and clears it · spends cc:$SEAT
 - `A.12-dev-suite` · `/dev status|test` runs express's own suite · spends none
 - `A.13-opencode-layer` · the OpenCode compile layer for adopters: `pfm opencode build|check|doctor` all PASS over the adopter project · spends none
 - `A.14-release-notice` · the picker's cached release-notice refreshes · spends none

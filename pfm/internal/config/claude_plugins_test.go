@@ -26,7 +26,7 @@ func TestClaudePluginsKey(t *testing.T) {
 			want: []ClaudePlugin{
 				{ID: "cache-live-control"},
 				{ID: "sub-agent-compact"},
-				{ID: "agent-effort"},
+				{ID: "effort-live-control"},
 				{ID: "tool-visibility-controller"},
 			},
 			source: SourceDefault,
@@ -129,18 +129,18 @@ func TestClaudePluginsKey(t *testing.T) {
 			source: SourceFile,
 		},
 		{
-			name: "a full id of a listed bare name's -dev copy", content: `{"version":2,"claude":{"plugins":["agent-effort","agent-effort@agent-effort-dev"]}}`,
-			err: `claude.plugins[1] agent-effort@agent-effort-dev is a copy of claude.plugins[0] agent-effort, which ensures one copy and disables the other: list the plugin once`,
+			name: "a full id of a listed bare name's -dev copy", content: `{"version":2,"claude":{"plugins":["effort-live-control","effort-live-control@effort-live-control-dev"]}}`,
+			err: `claude.plugins[1] effort-live-control@effort-live-control-dev is a copy of claude.plugins[0] effort-live-control, which ensures one copy and disables the other: list the plugin once`,
 		},
 		{
-			name: "a full id of a listed bare name's GitHub copy", content: `{"version":2,"claude":{"plugins":["agent-effort@agent-effort","c","agent-effort"]}}`,
-			err: `claude.plugins[2] agent-effort is a bare name of claude.plugins[0] agent-effort@agent-effort, which it ensures or disables: list the plugin once`,
+			name: "a full id of a listed bare name's GitHub copy", content: `{"version":2,"claude":{"plugins":["effort-live-control@effort-live-control","c","effort-live-control"]}}`,
+			err: `claude.plugins[2] effort-live-control is a bare name of claude.plugins[0] effort-live-control@effort-live-control, which it ensures or disables: list the plugin once`,
 		},
 		{
 			name:        "a bare name beside the same plugin of another marketplace",
-			content:     `{"version":2,"claude":{"plugins":["agent-effort","agent-effort@some-market"]}}`,
-			want:        []ClaudePlugin{{ID: "agent-effort"}, {ID: "agent-effort@some-market"}},
-			wantMarshal: []any{"agent-effort", "agent-effort@some-market"},
+			content:     `{"version":2,"claude":{"plugins":["effort-live-control","effort-live-control@some-market"]}}`,
+			want:        []ClaudePlugin{{ID: "effort-live-control"}, {ID: "effort-live-control@some-market"}},
+			wantMarshal: []any{"effort-live-control", "effort-live-control@some-market"},
 			source:      SourceFile,
 		},
 		{

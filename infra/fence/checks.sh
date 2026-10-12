@@ -148,7 +148,7 @@ checks_templates_scratch_paths() {
     # grep needs /dev/null as a second operand: BSD xargs runs the utility
     # even on empty input, and a bare `grep PATTERN` then reads stdin and
     # hangs the gate forever instead of reporting an empty sweep.
-    all_hits=$(xargs -0 grep -lE '(^|[^/[:alnum:]_.-])tmp/(timing|flights|lanes|guard|professor_)' /dev/null \
+    all_hits=$(xargs -0 grep -lE '(^|[^/[:alnum:]_.-])tmp/(timing|flights|lanes|professor_)' /dev/null \
       < "$TMP_BASE/templates/tracked.z" 2>/dev/null || true)
     strays=$(printf '%s\n' "$all_hits" | grep -vE "$exclude" | grep -v '^$' || true)
     excluded=$(printf '%s\n' "$all_hits" | grep -cE "$exclude" || true)
@@ -257,10 +257,11 @@ checks_templates_mirrors_generate() {
 
 checks_templates_global_variants() {
   local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
-  local jail home names declared name rendered=0 missing="" out rc=0 named=""
+  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale
+  local tracked="$REPO_ROOT/templates/generated/agents"
   head_ "templates — global agent variants render"
   # Machine agent .md files with from: declare agents re-emitted from a
-  # source agent with swapped body text; abstract files are layers, not agents. A swap whose text drifted from its
+  # source agent with swapped body text; shared files below a subdirectory are layers, not agents. A swap whose text drifted from its
   # source fails only when engine-sync renders it, which an adopter's install
   # does: this step renders every declared variant with the real binary, built
   # from the mounted source, into a jail home and Codex home (the real $HOME is
@@ -269,7 +270,10 @@ checks_templates_global_variants() {
   # rendered count that differs from the declared count (a lookup that found
   # nothing would otherwise read as clean). The jail declares the gpt-agents
   # capability, so the opt-in variants render too; the render without it is
-  # scripts/check-agent-roster.test.mjs's.
+  # scripts/check-agent-roster.test.mjs's. The policy renders declarations into
+  # the clone's templates/generated/agents, which is tracked: the render runs
+  # on a copy of templates/, and any difference from the tracked directory (a
+  # stale, missing or orphan file) is a red line naming the files.
   if ! need_tool go templates || ! need_tool python3 templates; then
     fail_step "global agent variants NOT RENDERED — the toolchain is missing"
     return
@@ -280,7 +284,12 @@ checks_templates_global_variants() {
     fail_step "global agent variants NOT RENDERED — $sources is missing, so nothing was looked up"
     return
   elif ! names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
-    fail_step "global agent variants NOT RENDERED — agent sources do not parse: $names"
+    # The inventory's exit 3 is a missing PyYAML, a toolchain gap, never a parse failure.
+    if [[ "$names" == "GAP install"* ]]; then
+      fail_step "global agent variants NOT RENDERED — $names"
+    else
+      fail_step "global agent variants NOT RENDERED — agent sources do not parse: $names"
+    fi
     return
   fi
   declared=$(grep -c . <<<"$names" || true)
@@ -294,7 +303,14 @@ checks_templates_global_variants() {
     return
   fi
   home="$jail/home"
-  mkdir -p "$home/.claude" "$home/.codex"
+  src="$jail/src"
+  mkdir -p "$home/.claude" "$home/.codex" "$src"
+  # The copy drops the tracked render so an orphan or a stale file shows.
+  if ! cp -a "$REPO_ROOT/templates" "$src/templates" || ! rm -rf "$src/templates/generated"; then
+    fail_step "global agent variants NOT RENDERED — templates/ could not be copied into the jail"
+    rm -rf "$jail"
+    return
+  fi
   out="$jail/engine-sync-global.out"
   if ! checks_engine_sync_policy "$home/.config"; then
     fail_step "global agent variants NOT RENDERED — the machine policy could not be staged in the jail"
@@ -302,7 +318,7 @@ checks_templates_global_variants() {
     return
   fi
   env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u ENGINE_SYNC_HOME -u ENGINE_SYNC_STATE -u CODEX_HOME \
-    HOME="$home" "$es_bin" global --home "$home" --source-repo "$REPO_ROOT" \
+    HOME="$home" "$es_bin" global --home "$home" --source-repo "$src" \
     --claude-config-dir "$home/.claude" --codex-home "$home/.codex" --capability gpt-agents >"$out" 2>&1 || rc=$?
   if (( rc == 0 )) && grep -Eq 'SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING' "$out"; then
     rc=1 # a section override whose original moved on is a named drift, never a clean render
@@ -323,9 +339,19 @@ checks_templates_global_variants() {
         missing="${missing:+$missing, }$name"
       fi
     done <<<"$names"
+    # A policy without a source-repository generated directory renders into
+    # the home store: neither side exists and there is nothing to compare.
+    stale=""
+    if [[ -e "$src/templates/generated/agents" || -e "$tracked" ]]; then
+      mkdir -p "$src/templates/generated/agents" # a render of nothing is an empty directory: each tracked file is named
+      stale="$(diff -rq "$src/templates/generated/agents" "$tracked" 2>&1 || true)"
+    fi
     if (( rendered != declared )); then
       cat "$out"
       fail_step "global agent variants: $rendered of $declared declared variant(s) rendered — missing: $missing"
+    elif [[ -n "$stale" ]]; then
+      printf '%s\n' "$stale"
+      fail_step "global agent variants: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents"
     else
       ok "all $declared global agent variant(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
     fi
@@ -400,16 +426,6 @@ checks_templates_worktree_script() {
   else
     fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, or provisioning failure handling broke (see output)"
   fi
-}
-
-checks_templates_pfm_guard() {
-  head_ "templates — pfm-guard across repositories"
-  if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-guard-stamp.sh"; then
-    ok "pfm-guard and both guard-stamp twins preserve session-keyed law stamps, cross-repo edits, and marker cleanup"
-  else
-    fail_step "pfm-guard/guard-stamp regression FAILED — session law stamps, cross-repo enforcement, or marker cleanup broke (see output)"
-  fi
-
 }
 
 checks_templates_codex_sync() {
@@ -543,7 +559,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
   checks_named_template_steps "$add" clone leak placeholders scratch-paths descriptions mirrors \
-    global-variants release-check codex-sync refresh-scope pfm-guard worktree-script dev-report \
+    global-variants release-check codex-sync refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name"

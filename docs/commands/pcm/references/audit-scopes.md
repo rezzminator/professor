@@ -1,6 +1,6 @@
 # PCM audit — per-scope deep checks
 
-Loaded by `/pcm audit`: PCM reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in `pcm.md § Execution model`). Read-only checks — report `PASS/FAIL/WARN`, never fix.
+Loaded by `/pcm audit`: PCM reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in the `pcm` agent § Audit). Read-only checks — report `PASS/FAIL/WARN`, never fix.
 
 ## `agents` — Walk every agent file
 
@@ -70,11 +70,11 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 
 Catches what no single-domain audit can see. Reads across ALL domains simultaneously.
 
-- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (where to `ls`, never a recalled count); root `CLAUDE.md` carries no agent roster — each agent's `description:` is its entry
+- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches the `pcm` agent's rule that rosters are discovered (where to `ls`, never a recalled count); root `CLAUDE.md` carries no agent roster — each agent's `description:` is its entry
 - **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry)
 - **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter
 - **Frontmatter validity:** every agent has non-empty `name`/`description`/`tools`; root agent `name` matches its `subagent_type` registry entry
 - **Orientation files:** `/quality:claude-md check` over `CLAUDE.md` and `pfm/CLAUDE.md` — each verdict line verbatim; a REJECTED or UNREAD file is a FAIL
-- **Invariant spot-check:** sample 3 critical invariants from `pcm.md § Critical invariants` → verify they hold in the actual files
+- **Invariant spot-check:** sample 3 critical invariants from the `pcm` agent § Critical invariants → verify they hold in the actual files
 - **Co-loaded duplication sweep:** the same rule stated in two co-loaded files (pcm.md ↔ root CLAUDE.md ↔ quality/prompt.md; child CLAUDE.md ↔ root; a command ↔ its reference cards) — each rule lives in exactly ONE canonical home, others carry at most a pointer (quality/prompt anti-patterns 3 & 11)
 - **Claims ↔ code:** spot-check factual claims (paths, mechanisms, configs, counts) in root + child CLAUDE.md against the code — a claim wrong in the reassuring direction is CRITICAL, never INFO

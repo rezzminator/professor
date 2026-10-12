@@ -1,9 +1,9 @@
 ---
-name: gpt-foreman
+name: gpt-flights-foreman
 from: flights-foreman
 extends:
-  - gpt-flights
-description: Builds one request — GPT flights through an OpenAI-compatible gateway; spawn by name without a model override. gpt-foreman → gpt-executor, gpt-lander. Returns DONE, PARTIAL, FAILED or BLOCKED.
+  - shared/gpt-flights.md
+description: flights-foreman on GPT sol high
 model: gpt-6.1-sol[1m]
 effort: high
 add:
@@ -18,7 +18,7 @@ add:
           - type: command
             command: python3 -I "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/gpt-agent-stop.py" foreman
 rename:
-  flights-foreman: gpt-foreman
-  flights-mechanical-executor: gpt-executor
-  flights-lander: gpt-lander
+  flights-foreman: gpt-flights-foreman
+  flights-mechanical-executor: gpt-flights-mechanical-executor
+  flights-lander: gpt-flights-lander
 ---

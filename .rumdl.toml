@@ -58,6 +58,7 @@ exclude = [
   "**/testdata/**",
   "docs/dev/trains",
   "pfm/harness-prompts",
+  "templates/generated",
   "pfm/internal/installer/assets",
   "**/*.prompt.md",
   "tmp",

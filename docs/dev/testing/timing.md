@@ -197,7 +197,6 @@ templates.mirrors	PASS	4.2
 templates.flight-index	PASS	0.5
 templates.release-check	PASS	1.6
 templates.refresh-scope	PASS	0.6
-templates.pfm-guard	PASS	0.2
 templates.dev-report	PASS	0.3
 templates.opencode-writer-tests	PASS	0.1
 templates.skill-tests	PASS	1.3

@@ -7,4 +7,4 @@
 - Everything you read stays in your context and is re-sent on every later call. `AGENTS.md` is already in your context: never read it or `CLAUDE.md`. Find the lines with `rg -n`, then read that range; never a whole file to find your place, never again a file still in your context. A log is read through `tail` or `rg`, never whole.
 - A fresh or partial-history child whose role or custom instruction replaces this prompt gets the two orchestration sections below pasted into its briefing.
 - If the collaboration messaging tool is unavailable, return the result and that limitation in the final answer; the harness delivers it to the parent.
-- The tiers map to the configured Codex roles and their model/effort settings; the delegating parent owns the result and its correction.
+- The tiers map to the configured Codex roles and their model/effort settings.

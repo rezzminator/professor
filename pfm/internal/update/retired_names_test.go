@@ -101,6 +101,11 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"/wave-something",
 		"evidence: https://opencode.ai/docs/agents/ and [agents](https://opencode.ai/docs/agents)",
 		"<https://example.com/docs/agents/API.md>",
+		"subagent_type: documenter",
+		"templates/global/agents/documenter.md and .claude/agents/documenter.md",
+		"spawn the documenter agent",
+		"the pfm guard script and a xpfm-guard.sh or guard-stamp.shx",
+		"/random, /rndx and /rnd-seed; https://example.com/rnd",
 	} {
 		if hits := retiredNameHits("f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
@@ -121,11 +126,29 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"/documenter:archive":              "/documenter",
 		"skills/wave-builder/SKILL.md":     "wave-builder",
 		"/qa:live":                         "/qa:live",
+		"run /rnd new chain slug goal":     "/rnd",
+		"(/rnd:hammer)":                    "/rnd",
 		"x .claude/commands/pfm/references/audit-scopes.md": ".claude/commands/pfm/references/audit-scopes.md",
 	} {
 		hits := retiredNameHits("f", line)
 		if len(hits) != 1 || hits[0].Name != name {
 			t.Errorf("line %q hits %+v, want exactly %q", line, hits, name)
+		}
+	}
+}
+
+// TestRetiredNamesPinTheRemovedGuardScripts: a settings file or script that
+// still names the removed PreToolUse guard scripts is reported as a retired
+// path with no successor, in the form an adopter writes it.
+func TestRetiredNamesPinTheRemovedGuardScripts(t *testing.T) {
+	for line, name := range map[string]string{
+		`"command": "bash $CLAUDE_PROJECT_DIR/.claude/scripts/pfm-guard.sh"`: "pfm-guard.sh",
+		"bash .claude/scripts/guard-stamp.sh --read":                         "guard-stamp.sh",
+		"pfm-guard.sh": "pfm-guard.sh",
+	} {
+		want := []professor.RetiredNameHit{{Path: "f", Line: 1, Name: name, Kind: "path"}}
+		if hits := retiredNameHits("f", line); !reflect.DeepEqual(hits, want) {
+			t.Errorf("line %q hits %+v, want %+v", line, hits, want)
 		}
 	}
 }

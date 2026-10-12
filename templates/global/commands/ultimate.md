@@ -1,5 +1,5 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: ultimate
 description: Pushes work past its ceiling — `/ultimate [work]`, or asks like "go nuts", "the best of your best", "your imagination at full stretch". Returns the work, the idea behind it and what was verified on it.
 argument-hint: [work]

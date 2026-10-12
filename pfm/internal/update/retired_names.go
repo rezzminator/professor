@@ -116,6 +116,9 @@ var retiredNames = []retiredName{
 	{name: "/documenter", kind: retiredCommand, successor: "/quality:doc", match: matchFamily},
 	{name: "/km", kind: retiredCommand, match: matchExact},
 	{name: "/audit:ai-output", kind: retiredCommand, match: matchExact},
+	// Commit "remove /rnd end to end": the project-scope research command and
+	// its former /rnd:hammer and /rnd:referee sub-commands have no successor.
+	{name: "/rnd", kind: retiredCommand, match: matchFamily},
 	{name: "mono-architect", kind: retiredAgent, match: matchExact},
 	{name: "mono-documenter", kind: retiredAgent, match: matchExact},
 	{name: "mono-planner", kind: retiredAgent, match: matchExact},
@@ -155,6 +158,12 @@ var retiredNames = []retiredName{
 		name: "docs/agents", kind: retiredPath, successor: "docs/_index.md and docs/standards.md",
 		match: matchExact,
 	},
+	// The PreToolUse guard hook is removed with its stamp script: framework
+	// files are edited through /pcm, which dispatches the pcm agent, and no
+	// hook gates the edit. A settings.json hook entry or a script still
+	// naming either one is dead wiring.
+	{name: "pfm-guard.sh", kind: retiredPath, match: matchExact},
+	{name: "guard-stamp.sh", kind: retiredPath, match: matchExact},
 }
 
 // definitionProbes are the root-relative paths whose existence means the

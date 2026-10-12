@@ -33,14 +33,14 @@
       "keywords": ["claude-code", "prompt-cache", "cache-ttl", "function-hooks", "professor"]
     },
     {
-      "name": "agent-effort",
+      "name": "effort-live-control",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/rezzminator/agent-effort.git",
-        "path": "plugins/agent-effort",
+        "path": "plugins/effort-live-control",
         "ref": "main"
       },
-      "description": "Set each Claude Code sub-agent's reasoning effort per spawn: start the Agent prompt with [effort: low|medium|high|xhigh|max].",
+      "description": "Set each Claude Code sub-agent's reasoning effort per spawn with [effort: low|medium|high|xhigh|max], and let an opted-in agent's effort rise at each failing test run or red sub-task and come home once the trouble resolves.",
       "homepage": "https://github.com/rezzminator/agent-effort",
       "license": "MIT",
       "keywords": ["claude-code", "sub-agent", "effort", "reasoning-effort", "function-hooks", "professor"]

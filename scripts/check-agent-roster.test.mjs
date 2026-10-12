@@ -290,6 +290,10 @@ for (const [name, model, effort, role] of twins) {
       assert.ok(source.includes('your parent hears from you only by that return'));
       assert.ok(source.includes('run.md, briefs, returns/*.md, gate.md, red/*'));
     }
+    if (role === 'flights-lander') {
+      assert.ok(fm.tools.split(',').map((tool) => tool.trim()).includes('Agent'),
+        `${name}: lander manual requires Agent for review dispatch`);
+    }
     if (role === 'flights-foreman') {
       assert.deepEqual(fm.hooks, {
         PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command',

@@ -6,7 +6,7 @@ model: gpt-6.1-sol[1m]
 effort: high
 codex-model: gpt-6.1-sol
 codex-effort: high
-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, mcp__sub-agent-compact__compact
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 230k
   nudgeFrom: 190k

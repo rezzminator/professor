@@ -248,6 +248,21 @@ test("a symlinked source directory is independently enumerated", (t) => {
   assert.match(result.out, /3 Codex and 2 OpenCode agents match source/);
 });
 
+for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
+  test(`a cyclic agent source directory fails both compiler and roster (${sourceDir})`, (t) => {
+    const f = fixture(t);
+    symlinkSync(".", join(f.root, sourceDir, "cycle"));
+    const built = spawnSync(binary, ["build", "."], { cwd: f.root, env: f.env, encoding: "utf8" });
+    // Codex skips the cycle with a warning, but OpenCode promotes the same warning to a problem.
+    assert.equal(built.status, 1, built.stdout + built.stderr);
+    assert.match(built.stdout + built.stderr, /command source symlink cycle: skip cyclic command directory .*\/cycle/);
+    const result = check(f);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, /agent-roster: compiler: .*command source symlink cycle: skip cyclic command directory .*\/cycle/);
+    assert.match(result.out, /agent-roster: cyclic agent source directory .*\/cycle/);
+  });
+}
+
 const twins = [
   ['gpt-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
   ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],

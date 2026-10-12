@@ -377,6 +377,7 @@ trap 'rm -f "$hits_file" "$coverage_file" "$commits_file"' EXIT
 
 range_diff_stream() {
   local old_type commit count=0 empty_tree remote_list known remote_name
+  local ref_list ref object nested_remote revisions
   if ! old_type="$(repo_git cat-file -t "$range_old")"; then
     echo "leak-check: FAILED — cannot classify range base $range_old; commit enumeration did not run" >&2
     return 1
@@ -409,7 +410,25 @@ range_diff_stream() {
         done <<< "$remote_list"
       fi
       if [[ -n "$known" ]]; then
-        repo_git rev-list "$range_new" --not "--remotes=$range_remote" > "$commits_file" || known=failed
+        if ! ref_list="$(repo_git for-each-ref --format='%(objectname) %(refname)' refs/remotes/)"; then
+          echo "leak-check: FAILED — cannot list remote-tracking refs for $range_remote; commit enumeration did not run" >&2
+          return 1
+        fi
+        revisions="$range_new"
+        while read -r object ref; do
+          [[ "$ref" == "refs/remotes/$range_remote/"* ]] || continue
+          # Git's --remotes glob crosses slashes. A configured remote beneath this target owns
+          # its own namespace; ambiguous branch names there are scanned conservatively too.
+          nested_remote=""
+          while IFS= read -r remote_name; do
+            if [[ "$remote_name" == "$range_remote/"* && "$ref" == "refs/remotes/$remote_name/"* ]]; then
+              nested_remote=1
+              break
+            fi
+          done <<< "$remote_list"
+          [[ -n "$nested_remote" ]] || revisions+=$'\n^'"$object"
+        done <<< "$ref_list"
+        repo_git rev-list --stdin <<< "$revisions" > "$commits_file" || known=failed
       else
         repo_git rev-list "$range_new" > "$commits_file" || known=failed
       fi

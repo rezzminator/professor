@@ -490,6 +490,46 @@ else
   bad 'F5: a push target that is no configured remote scans commits only another remote holds' "rc=$rc; out=$out; err=$err"
 fi
 
+# F9: nested remote names share a tracking namespace, but do not prove the parent target holds a commit.
+for nested_remote in origin/fork origin/fork/deep; do
+  pgit remote add "$nested_remote" "$pushed/.git"
+  pgit update-ref "refs/remotes/$nested_remote/held" HEAD
+  real_range_remote "$empty_tree" HEAD origin
+  if [[ "$rc" -eq 1 && "$out" == *'LEAK other-held.txt: syntheticsecret'* ]]; then
+    ok "F9: $nested_remote does not exclude a leak pushed to origin"
+  else
+    bad "F9: $nested_remote does not exclude a leak pushed to origin" "rc=$rc; out=$out; err=$err"
+  fi
+  real_range_remote "$empty_tree" HEAD "$nested_remote"
+  if [[ "$rc" -eq 0 && "$err" == *'0 newly reachable commit'* ]]; then
+    ok "F9: $nested_remote still excludes commits its own tracking ref holds"
+  else
+    bad "F9: $nested_remote still excludes commits its own tracking ref holds" "rc=$rc; out=$out; err=$err"
+  fi
+  pgit update-ref -d "refs/remotes/$nested_remote/held"
+done
+# A slash inside the target's branch name is not a nested configured remote.
+pgit update-ref refs/remotes/origin/release/held HEAD
+real_range_remote "$empty_tree" HEAD origin
+if [[ "$rc" -eq 0 && "$err" == *'0 newly reachable commit'* ]]; then
+  ok 'F9: a slash-containing target branch still excludes its own held commits'
+else
+  bad 'F9: a slash-containing target branch still excludes its own held commits' "rc=$rc; out=$out; err=$err"
+fi
+pgit update-ref -d refs/remotes/origin/release/held
+
+# Ref enumeration must fail visibly, never turn an unreadable list into an empty exclusion set.
+mkdir -p "$T/ref-bin"
+real_git="$(command -v git)"
+printf '#!/usr/bin/env bash\nfor arg in "$@"; do\n  if [[ "$arg" == for-each-ref ]]; then echo "synthetic ref enumeration failure" >&2; exit 3; fi\ndone\nexec %q "$@"\n' "$real_git" > "$T/ref-bin/git"
+chmod +x "$T/ref-bin/git"
+PATH="$T/ref-bin:$PATH" real_range_remote "$empty_tree" HEAD origin
+if [[ "$rc" -ne 0 && "$err" == *'cannot list remote-tracking refs for origin'* && "$err" == *'synthetic ref enumeration failure'* ]]; then
+  ok 'F9: remote-tracking ref enumeration failure is named and refuses clean'
+else
+  bad 'F9: remote-tracking ref enumeration failure is named and refuses clean' "rc=$rc; out=$out; err=$err"
+fi
+
 # F5, hook side: pre-push hands the remote name it receives as $1 to leak-check, and nothing when git gave none.
 hook_repo="$T/hook-repo"
 mkdir -p "$hook_repo/.githooks" "$hook_repo/scripts"

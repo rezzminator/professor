@@ -364,7 +364,7 @@ func TestRunPostUpdateUnreadableRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := RunProjectUpdate("", []string{"--root", root}, &stdout, &stderr, config.Runtime{})
+	code := RunProjectUpdate("", []string{"--root", root}, &stdout, &stderr, config.Runtime{}, nil)
 	if code != 3 || !strings.HasPrefix(stdout.String(), "FAILED — UNREADABLE ") {
 		t.Fatalf(
 			"RunProjectUpdate() code=%d stdout=%q stderr=%q, want 3 and FAILED — UNREADABLE",

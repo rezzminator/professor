@@ -13,7 +13,8 @@ const doctorUsage = "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 clea
 
 // projectUpdatesFlags are doctor's --project-updates mode: the project-template
 // report alone, through professor.RunProjectUpdates with the retired-name
-// scan of the project's unpinned files (update.ScanRetiredNames), never the
+// scan of the project's files (update.ScanRetiredNames; a CURRENT pin's file
+// included, a non-CURRENT pin's file left to its row's diff), never the
 // health pass.
 type projectUpdatesFlags struct {
 	enabled, json *bool

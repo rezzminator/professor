@@ -2,10 +2,16 @@ package update
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -45,8 +51,11 @@ type retiredName struct {
 	match     retiredMatch
 }
 
+// chatlogSuccessor is what replaced the /tokens command and the transcript skill.
+const chatlogSuccessor = "the chatlog skill"
+
 // retiredNames is the one registry of retired names `pfm doctor
-// --project-updates` scans a project's unpinned files for. Every entry cites
+// --project-updates` scans a project's files for. Every entry cites
 // the release note or commit that retired it. A retired name that is also a
 // live one, or an everyday word or route, is left out with its reason: a
 // scan that false-hits trains the reader to skip it.
@@ -115,6 +124,34 @@ var retiredNames = []retiredName{
 	// releases/v0.78.0.md "Global: rr family": "rr-super is retired"; its
 	// stronger variant is super-rr.
 	{name: "rr-super", kind: retiredAgent, successor: "super-rr", match: matchExact},
+	// Commit 4bb529c7 "one tracer — the tracer-pro and tracer-pro-max tiers
+	// are gone". Two rows: a match followed by `-` is a longer name, so
+	// tracer-pro never hits tracer-pro-max.
+	{name: "tracer-pro", kind: retiredAgent, successor: "tracer", match: matchExact},
+	{name: "tracer-pro-max", kind: retiredAgent, successor: "tracer", match: matchExact},
+	// Commit f0c88ffb "tracer-rr is clone-distiller".
+	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
+	// Commit 73f2ae2b "/reminder becomes /pfm:schedule".
+	{name: "/reminder", kind: retiredCommand, successor: "/pfm:schedule", match: matchFamily},
+	// Commit b9f530c9 "/tokens and the transcript skill become one skill":
+	// chatlog, over `pfm tokens` and `pfm transcript` (both live). The
+	// transcript skill is named by its path or as "transcript skill" only —
+	// the bare word is everyday prose.
+	{name: "/tokens", kind: retiredCommand, successor: chatlogSuccessor, match: matchFamily},
+	{name: "skills/transcript", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
+	{name: "transcript skill", kind: retiredSkill, successor: chatlogSuccessor, match: matchExact},
+	// Commit 8bde61ab "/close-out is /done-herewith"; the skill by its path
+	// too, the bare word "close-out" being prose.
+	{name: "/close-out", kind: retiredCommand, successor: "/done-herewith", match: matchFamily},
+	{name: "skills/close-out", kind: retiredSkill, successor: "/done-herewith", match: matchExact},
+	// Commit abbcf405 "`pfm price` is gone": `pfm model-cost` is the one
+	// price command (a following `s` or `-` is another name, never a hit).
+	{name: "pfm price", kind: retiredCommand, successor: "pfm model-cost", match: matchExact},
+	// Commit c867316c "retire docs/agents": the docs hub scaffolds to docs/.
+	{
+		name: "docs/agents", kind: retiredPath, successor: "docs/_index.md and docs/standards.md",
+		match: matchExact,
+	},
 }
 
 // retiredSkippedDirs are directory names the scan never enters at any depth:
@@ -122,30 +159,90 @@ var retiredNames = []retiredName{
 // project), installed dependencies, and OpenCode's generated engine mirror.
 var retiredSkippedDirs = map[string]bool{".git": true, ".worktrees": true, "node_modules": true, ".opencode": true}
 
+// retiredWalkSkippedDirs are the further directory names a walk outside a git
+// work tree skips: with no git to say what is the project's own text, the
+// dependency, build and cache directories are named. Inside a work tree git's
+// own file list decides, and these names are not special.
+var retiredWalkSkippedDirs = map[string]bool{
+	".venv": true, "venv": true, "target": true, "dist": true, "build": true, "vendor": true, "__pycache__": true,
+}
+
 // retiredBinaryProbe is how many leading bytes are searched for a NUL: one
 // there marks the file binary and unscanned.
 const retiredBinaryProbe = 8000
 
+// retiredMaxRead is the most of one file the scan reads.
+const retiredMaxRead = 1 << 20
+
 // ScanRetiredNames is the retired-name pass of `pfm doctor --project-updates`:
-// every text file under root except the pinned ones (slash-separated,
-// root-relative), pfm's own baseline and the generated engine mirrors, each
-// line checked against retiredNames. A file or directory it cannot read is a
-// Failure, never a clean result.
+// the project's own text files except the ones the caller skips (pinned files
+// whose report row covers them; slash-separated, root-relative), pfm's own
+// baseline and the generated engine mirrors, each line checked against
+// retiredNames. In a git work tree the project's own
+// text is git's tracked and unignored files; elsewhere it is a walk of the
+// root minus the dependency, build and cache directories. A file or
+// directory it cannot read is a Failure, never a clean result.
 func ScanRetiredNames(root string, pinned map[string]bool) professor.RetiredNameScan {
-	return scanRetiredNamesWith(root, pinned, os.ReadFile)
+	return scanRetiredNamesWith(root, pinned, openRetiredFile)
 }
 
 func scanRetiredNamesWith(
 	root string,
 	pinned map[string]bool,
-	readFile func(string) ([]byte, error),
+	open func(string) (io.ReadCloser, error),
 ) professor.RetiredNameScan {
 	scan := professor.RetiredNameScan{Hits: []professor.RetiredNameHit{}, Failures: []professor.RetiredNameFailure{}}
 	fail := func(relative string, err error) {
 		scan.Failures = append(scan.Failures, professor.RetiredNameFailure{Path: relative, Error: err.Error()})
 	}
-	walkErr := filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
-		relative, relErr := filepath.Rel(root, current)
+	scanFile := func(current, relative string) {
+		hits, err := scanRetiredFile(open, current, relative)
+		if err != nil {
+			fail(relative, err)
+		}
+		scan.Hits = append(scan.Hits, hits...)
+	}
+	// A root reached through a symlink is the directory it names: WalkDir
+	// would lstat the link itself and visit nothing.
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		fail(".", fmt.Errorf("resolve project root %s: %w", root, err))
+		return scan
+	}
+	if info, statErr := os.Stat(resolved); statErr != nil || !info.IsDir() {
+		if statErr == nil {
+			statErr = fmt.Errorf("project root %s is not a directory", resolved)
+		}
+		fail(".", statErr)
+		return scan
+	}
+	listed, inWorkTree, listErr := gitProjectFiles(resolved)
+	if listErr != nil {
+		fail(".", listErr)
+		return scan
+	}
+	if inWorkTree {
+		for _, relative := range listed {
+			current := filepath.Join(resolved, filepath.FromSlash(relative))
+			if retiredInSkippedDir(relative) || retiredSkippedFile(relative, pinned) {
+				continue
+			}
+			info, statErr := os.Lstat(current)
+			switch {
+			case errors.Is(statErr, fs.ErrNotExist):
+				continue // tracked, deleted from the work tree
+			case statErr != nil:
+				fail(relative, statErr)
+				continue
+			case !info.Mode().IsRegular():
+				continue
+			}
+			scanFile(current, relative)
+		}
+		return scan
+	}
+	walkErr := filepath.WalkDir(resolved, func(current string, entry fs.DirEntry, err error) error {
+		relative, relErr := filepath.Rel(resolved, current)
 		if relErr != nil {
 			fail(current, relErr)
 			return nil
@@ -159,7 +256,7 @@ func scanRetiredNamesWith(
 			return nil
 		}
 		if entry.IsDir() {
-			if relative != "." && retiredSkippedDirs[entry.Name()] {
+			if relative != "." && (retiredSkippedDirs[entry.Name()] || retiredWalkSkippedDirs[entry.Name()]) {
 				return fs.SkipDir
 			}
 			return nil
@@ -167,21 +264,103 @@ func scanRetiredNamesWith(
 		if !entry.Type().IsRegular() || retiredSkippedFile(relative, pinned) {
 			return nil
 		}
-		content, readErr := readFile(current)
-		if readErr != nil {
-			fail(relative, readErr)
-			return nil
-		}
-		if bytes.IndexByte(content[:min(len(content), retiredBinaryProbe)], 0) >= 0 {
-			return nil
-		}
-		scan.Hits = append(scan.Hits, retiredNameHits(relative, string(content))...)
+		scanFile(current, relative)
 		return nil
 	})
 	if walkErr != nil {
 		fail(".", walkErr)
 	}
 	return scan
+}
+
+// gitProjectFiles lists, slash-separated and sorted, the files git tracks or
+// leaves unignored under root. inWorkTree is false only when git is absent or
+// says root is not inside a work tree, where the caller walks instead; any
+// other failure of git, before or during the listing, is an error — a failed
+// enumeration of the project's own text never widens into reading everything.
+func gitProjectFiles(root string) (files []string, inWorkTree bool, err error) {
+	ctx := context.Background()
+	// LC_ALL=C keeps git's "not a git repository" message in the one language
+	// it is matched in.
+	probe, err := updateGitCapture(ctx, root, []string{"LC_ALL=C"}, "rev-parse", "--is-inside-work-tree")
+	switch {
+	case errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist):
+		return nil, false, nil
+	case err != nil:
+		return nil, true, fmt.Errorf("inspect git work tree: %w", err)
+	case probe.ExitCode != 0 && strings.Contains(string(probe.Stderr), "not a git repository"):
+		return nil, false, nil
+	case probe.ExitCode != 0:
+		return nil, true, fmt.Errorf(
+			"inspect git work tree: git rev-parse exited %d: %s",
+			probe.ExitCode, strings.TrimSpace(string(probe.Stderr)),
+		)
+	case strings.TrimSpace(string(probe.Stdout)) != "true":
+		return nil, false, nil
+	}
+	listing, err := updateGitOutput(ctx, root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, true, fmt.Errorf("list the project's files: %w", err)
+	}
+	for _, name := range strings.Split(listing, "\x00") {
+		if name != "" {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(files)
+	return files, true, nil
+}
+
+// retiredInSkippedDir: some directory on the path is one the scan never enters.
+func retiredInSkippedDir(relative string) bool {
+	parts := strings.Split(relative, "/")
+	for _, part := range parts[:len(parts)-1] {
+		if retiredSkippedDirs[part] {
+			return true
+		}
+	}
+	return false
+}
+
+// scanRetiredFile reads one file through open and returns its hits. It reads
+// the first retiredBinaryProbe bytes to decide the file is binary (a NUL) and
+// stops there; a text file is read to retiredMaxRead at most, the cap cutting
+// at its last whole line. Reaching the cap is visibly incomplete; hits in the
+// readable prefix are retained, never presented as full coverage.
+func scanRetiredFile(
+	open func(string) (io.ReadCloser, error),
+	current, relative string,
+) (hits []professor.RetiredNameHit, err error) {
+	file, err := open(current)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	content := make([]byte, retiredBinaryProbe)
+	count, err := io.ReadFull(file, content)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	content = content[:count]
+	if bytes.IndexByte(content, 0) >= 0 {
+		return nil, nil
+	}
+	if count == retiredBinaryProbe {
+		rest, err := io.ReadAll(io.LimitReader(file, retiredMaxRead-retiredBinaryProbe))
+		if err != nil {
+			return nil, err
+		}
+		content = append(content, rest...)
+		if len(content) == retiredMaxRead {
+			if cut := bytes.LastIndexByte(content, '\n'); cut >= 0 {
+				content = content[:cut]
+			}
+			return retiredNameHits(relative, string(content)), fmt.Errorf(
+				"retired-name scan incomplete: %s reached the %d-byte read limit", relative, retiredMaxRead,
+			)
+		}
+	}
+	return retiredNameHits(relative, string(content)), nil
 }
 
 // retiredSkippedFile: a pinned file (the project-tier diff already covers
@@ -264,3 +443,6 @@ func (r retiredName) boundedAt(line string, start, end int) bool {
 func isRetiredNameByte(b byte) bool {
 	return b == '_' || b == '-' || ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') || ('0' <= b && b <= '9')
 }
+
+// openRetiredFile opens a file for the scan.
+func openRetiredFile(name string) (io.ReadCloser, error) { return os.Open(name) }

@@ -14,7 +14,13 @@ import (
 // (spec § Middleware, `state`) — requested to updated on success, failed
 // with the exit code as the error shape otherwise — comp=state, kind=
 // professor, never the project root or store path it read.
-func RunProjectUpdate(action string, args []string, stdout, stderr io.Writer, runtime config.Runtime) (code int) {
+func RunProjectUpdate(
+	action string,
+	args []string,
+	stdout, stderr io.Writer,
+	runtime config.Runtime,
+	scan RetiredNameScanner,
+) (code int) {
 	trail := obs.NewTrail(context.Background(), "professor", "requested")
 	defer func() {
 		var err error
@@ -38,7 +44,7 @@ func RunProjectUpdate(action string, args []string, stdout, stderr io.Writer, ru
 			flags.Usage()
 			return 2
 		}
-		return runPostUpdate(*rootFlag, *jsonOutput, stdout, runtime)
+		return runPostUpdate(*rootFlag, *jsonOutput, stdout, runtime, scan)
 	case "pin":
 		return runProjectPin(args, stdout, stderr, runtime)
 	case "drop":

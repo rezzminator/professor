@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -551,4 +552,131 @@ func TestRefreshReportsAnUnreadableIdentityOnlyWhereAStampIsJudged(t *testing.T)
 			)
 		}
 	})
+}
+
+// A pfm update older than this build sets no PFM_PRICES_OFFLINE for its
+// children, so the lock it holds is the only sign the clone is mid-update: a
+// refresh then must not rewrite the clone's tracked prices.json, which would
+// refuse the update's fast-forward and its rollback's reset --keep.
+func TestRefreshDuringAnUpdateWritesNothingAndSaysWhy(t *testing.T) {
+	home, file := refreshHome(t, fixtureTable(t, t0, 99))
+	before := readFile(t, file)
+	lockPath := UpdateLockPath(home)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+
+	fetch := &fakeFetch{}
+	_, result := refreshAt(t, home, t0.Add(48*time.Hour), fetch, true, false)
+	if result.Status != StatusOffline || !strings.Contains(result.Reason, "pfm update") ||
+		readFile(t, file) != before {
+		t.Fatalf(
+			"during an update: status %q reason %q, file changed %v; want offline, a reason naming pfm update, unchanged",
+			result.Status,
+			result.Reason,
+			readFile(t, file) != before,
+		)
+	}
+
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	_, result = refreshAt(t, home, t0.Add(48*time.Hour), fetch, true, false)
+	if result.Status != StatusRefreshed || result.Reason != "" || fetch.calls != 1 || !result.Persisted {
+		t.Fatalf("after the update: status %q reason %q, %d fetches, persisted %v; want refreshed, no reason, 1, true",
+			result.Status, result.Reason, fetch.calls, result.Persisted)
+	}
+}
+
+// The updater must not enter between a refresh's fetch and persistence, even
+// on a home whose persistent ownership inode has not been created yet.
+func TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing lock %v", existing), func(t *testing.T) {
+			home, _ := refreshHome(t, fixtureTable(t, t0, 99))
+			lockPath := UpdateLockPath(home)
+			if existing {
+				if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fetch := (&fakeFetch{}).fetch(t)
+			_, result, err := Refresh(context.Background(), Options{
+				Home:   home,
+				Force:  true,
+				Clock:  clock.NewFake(t0.Add(48 * time.Hour)),
+				Binary: func() (string, error) { return "fixture", nil },
+				Fetch: func(ctx context.Context) ([]Catalog, error) {
+					if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					updater, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer func() { _ = updater.Close() }()
+					if err := syscall.Flock(
+						int(updater.Fd()),
+						syscall.LOCK_EX|syscall.LOCK_NB,
+					); !errors.Is(
+						err,
+						syscall.EWOULDBLOCK,
+					) {
+						t.Errorf("updater entered during price fetch: flock = %v; want ownership contention", err)
+					}
+					return fetch(ctx)
+				},
+			})
+			if err != nil || result.Status != StatusRefreshed || !result.Persisted {
+				t.Fatalf("refresh = %+v, %v; want persisted", result, err)
+			}
+			updater, err := os.OpenFile(lockPath, os.O_RDWR, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = updater.Close() }()
+			if err := syscall.Flock(int(updater.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+				t.Fatalf("refresh retained ownership after persistence: %v", err)
+			}
+		})
+	}
+}
+
+// A lock file that cannot be looked up (anything but absent) is no proof that
+// no update is running: the refresh writes nothing and says so by name.
+func TestRefreshWithAnUnreadableUpdateLockFailsAndWritesNothing(t *testing.T) {
+	home, file := refreshHome(t, fixtureTable(t, t0, 99))
+	before := readFile(t, file)
+	lockPath := UpdateLockPath(home)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(lockPath, lockPath); err != nil {
+		t.Fatal(err)
+	}
+
+	fetch := &fakeFetch{}
+	_, result := refreshAt(t, home, t0.Add(48*time.Hour), fetch, true, false)
+
+	if result.Status != StatusFailed || result.Err == nil || !strings.Contains(result.Err.Error(), lockPath) ||
+		readFile(t, file) != before {
+		t.Fatalf(
+			"unreadable lock: status %q err %v, file changed %v; want failed, an error naming %s, unchanged",
+			result.Status,
+			result.Err,
+			readFile(t, file) != before,
+			lockPath,
+		)
+	}
 }

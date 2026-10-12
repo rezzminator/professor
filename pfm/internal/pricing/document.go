@@ -11,6 +11,7 @@ import (
 // states it: Changed and Persisted only for a refreshed table.
 type RefreshReport struct {
 	Status       string `json:"status"`
+	Reason       string `json:"reason,omitempty"`
 	Error        string `json:"error,omitempty"`
 	Changed      *bool  `json:"changed,omitempty"`
 	Persisted    *bool  `json:"persisted,omitempty"`

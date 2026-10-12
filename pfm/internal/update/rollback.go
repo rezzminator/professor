@@ -61,6 +61,12 @@ func rollbackUpdateState(
 ) error {
 	rollbackErr := rollbackUpdateReplacements(replacements, stderr)
 	if sourceAdvanced {
+		// A refresh since the fast-forward leaves prices.json modified, and
+		// reset --keep refuses to overwrite a modified file the two revisions
+		// differ in.
+		if err := restoreRefreshedPrices(ctx, repo, updateBackupDir(runtime.Paths.Home), stdout); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
 		if err := updateGitRun(ctx, repo, "reset", "--keep", previousRef); err != nil {
 			return errors.Join(rollbackErr, fmt.Errorf("restore source revision %s: %w", previousRef, err))
 		}

@@ -2,7 +2,7 @@
 
 Global Claude agents, commands and skills are written once into the shared store `~/.claude`. The per-account loop was replaced by one write into this store; every configured account links its shared registry entries there. Adding an account creates its links rather than another copy of each registry.
 
-`wireGlobalCommands`, `wireGlobalSkills` and `wireGlobalSkill` use the installer's store config directory. `codexgen.GlobalAgentsOptions.ClaudeConfigDirs` receives only the store directory and selects the store's agent registry. Codex roles are separate regular files, because Codex opens them without following symlinks.
+`wireGlobalCommands`, `wireGlobalSkills` and `wireGlobalSkill` use the installer's store config directory. `wireEngineSyncGlobal` passes `engine-sync global` (`pfm/internal/installer/engine_sync_global.go`) only the store directory as `enginesync.GlobalOptions.ClaudeConfigDirs`, which selects the store's agent registry. Codex roles are separate regular files, because Codex opens them without following symlinks.
 
 `pfm install` runs read-only host checks before building missing store entries and account links. Real shared entries in an account directory are BLOCK rows; `pfm doctor` prints the merge or removal fix. Existing store contents survive installation. Doctor checks the store registry once and checks every account link against it.
 

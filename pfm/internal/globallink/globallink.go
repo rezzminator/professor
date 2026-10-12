@@ -16,6 +16,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
 // State is the on-disk shape check found at one desired global
@@ -94,7 +95,7 @@ func ClassifyLink(target, source, sourceRepoRoot string, kind Kind) (State, stri
 			}
 			return Correct, resolved, nil
 		}
-		if withinRoot(resolved, sourceRepoRoot) {
+		if professor.IsSourceRepo(sourceRepoRoot) && withinRoot(resolved, sourceRepoRoot) {
 			return WrongTarget, resolved, nil
 		}
 		return Conflict, resolved, nil
@@ -214,9 +215,24 @@ func Apply(target, source string, state State) error {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 		}
 		if state == Copy {
-			if info, err := os.Lstat(target); err == nil && info.IsDir() {
-				return atomicfile.SymlinkOverDir(target, source)
+			info, err := os.Lstat(target)
+			if err != nil {
+				return fmt.Errorf("reinspect copy %s: %w", target, err)
 			}
+			check := func(path string) error {
+				same, err := provenCopy(path, source, info.IsDir())
+				if err != nil {
+					return err
+				}
+				if !same {
+					return fmt.Errorf("%s is no longer a proven copy of %s", target, source)
+				}
+				return nil
+			}
+			if err := check(target); err != nil {
+				return err
+			}
+			return atomicfile.SymlinkOverDir(target, source, check)
 		}
 		return atomicfile.Symlink(target, source)
 	default:

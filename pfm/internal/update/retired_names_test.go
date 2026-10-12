@@ -2,6 +2,7 @@ package update
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -170,6 +172,8 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"spawn tracer-pro for the review", "tracer-pro", "agent", "tracer"},
 	{"model: tracer-pro-max", "tracer-pro-max", "agent", "tracer"},
 	{"use tracer-rr to read the repo", "tracer-rr", "agent", "clone-distiller"},
+	{"run pfm chat reminder ls", "pfm chat reminder", "command", "pfm chat schedule"},
+	{"node .claude/scripts/build-codex.mjs check", "build-codex.mjs", "path", "pfm codex build|check"},
 	{"arm it with /reminder 30d", "/reminder", "command", "/pfm:schedule"},
 	{"run /tokens for the spend", "/tokens", "command", chatlogSuccessor},
 	{"see .claude/skills/transcript/SKILL.md", "skills/transcript", "skill", chatlogSuccessor},
@@ -203,6 +207,9 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 	}
 
 	for _, line := range []string{
+		"POST /tokens", "GET /tokens/{id}", "DELETE /reminder/:id",
+		"POST `/tokens`", "an API endpoint /tokens/{id}",
+		"pfm chat schedule ls and build-codex.mjsx",
 		"spawn tracer and tracer-loom; tracer-product is a word",
 		"pfm model-cost --json and pfm prices",
 		"the price of the plan; a price list",
@@ -302,12 +309,15 @@ func TestScanRetiredNamesNeverReadsPastTheProbeOrTheCap(t *testing.T) {
 	if got := files["dump.bin"].read; got > retiredBinaryProbe {
 		t.Errorf("binary file: %d bytes read, want at most the %d-byte probe", got, retiredBinaryProbe)
 	}
-	if got := files["huge.log"].read; got > retiredMaxRead {
-		t.Errorf("text file: %d bytes read, want at most the %d-byte cap", got, retiredMaxRead)
+	if got := files["huge.log"].read; got > retiredMaxRead+1 {
+		t.Errorf("text file: %d bytes read, want at most the %d-byte cap plus one EOF probe", got, retiredMaxRead)
 	}
-	if len(scan.Failures) != 1 || scan.Failures[0].Path != "data/huge.log" ||
-		!strings.Contains(scan.Failures[0].Error, "incomplete") {
-		t.Errorf("truncated text coverage = %+v; want a named incomplete scan", scan.Failures)
+	encoded, err := json.Marshal(scan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.Failures) != 0 || !strings.Contains(string(encoded), `"incomplete":[{"path":"data/huge.log"`) {
+		t.Errorf("truncated text coverage = %s; want named nonfatal incomplete coverage", encoded)
 	}
 	if len(scan.Hits) != 1 || scan.Hits[0].Path != "data/huge.log" || scan.Hits[0].Line != 1 {
 		t.Fatalf("hits = %+v, want only the huge text file's first line", scan.Hits)
@@ -438,5 +448,43 @@ func TestRetiredNameInACurrentPinnedFileIsReported(t *testing.T) {
 	}
 	if strings.Contains(report, ".claude/updated-one.md:2") {
 		t.Errorf("the UPDATED pinned file was scanned:\n%s", report)
+	}
+}
+
+func TestScanRetiredNamesExactlyAtCapIsComplete(t *testing.T) {
+	root := t.TempDir()
+	writeRetiredFixture(t, root, map[string]string{"exact.txt": "/wave\n" + strings.Repeat("x", retiredMaxRead-6)})
+	scan := ScanRetiredNames(root, nil)
+	if len(scan.Failures) != 0 || len(scan.Hits) != 1 {
+		t.Fatalf("exact cap scan = %+v; want complete coverage with hit", scan)
+	}
+}
+
+func TestRetiredGitEnumerationReportsWarningsAndDeduplicates(t *testing.T) {
+	for _, warning := range []string{"", "warning: could not open directory 'locked/': Permission denied\n"} {
+		t.Run(warning, func(t *testing.T) {
+			fake := &deps.FakeRunner{}
+			fake.Script(
+				[]string{"git", "rev-parse", "--is-inside-work-tree"},
+				deps.RunResult{Stdout: []byte("true\n")},
+				nil,
+			)
+			fake.Script(
+				[]string{"git", "ls-files"},
+				deps.RunResult{Stdout: []byte("a.md\x00a.md\x00"), Stderr: []byte(warning)},
+				nil,
+			)
+			t.Cleanup(StubRunnerForTest(fake))
+			files, _, err := gitProjectFiles(t.TempDir())
+			if warning != "" {
+				if err == nil || !strings.Contains(err.Error(), "locked/") {
+					t.Fatalf("enumeration error=%v, want directory warning", err)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(files, []string{"a.md"}) {
+				t.Fatalf("files=%v error=%v, want one path", files, err)
+			}
+		})
 	}
 }

@@ -255,3 +255,17 @@ func TestHookTrustReceiptMustNameExpectedHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctorDisabledHookDoesNotPromiseInstallRepair(t *testing.T) {
+	old := HookProbeOverride
+	t.Cleanup(func() { HookProbeOverride = old })
+	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
+		return []HookProbeResult{{Hook: ExpectedHook{Target: "codex[1]", File: "hooks.json"}, State: "disabled"}}
+	}
+	var output bytes.Buffer
+	warnings, failures := ReportHooks(&output, t.TempDir(), pfmconfig.Config{}, false)
+	if warnings != 1 || failures != 0 || !strings.Contains(output.String(), "DISABLED") ||
+		strings.Contains(output.String(), "pfm install") {
+		t.Fatalf("disabled advice warnings=%d failures=%d: %s", warnings, failures, output.String())
+	}
+}

@@ -245,7 +245,7 @@ var v079ClaudeKeys = map[string]bool{
 }
 
 // releaseClaudeKeys are the claude.* keys added after v0.79.0.
-var releaseClaudeKeys = []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger"}
+var releaseClaudeKeys = []string{"helperModel", "pluginCheckoutRoot", "plugins", "costLedger", "gptAgents"}
 
 // pfm config init writes a file a pfm of the last release still decodes: a claude.* key added
 // since stays out of the default file (machine block and account block alike) while it is unset or
@@ -363,5 +363,41 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 				}
 			}
 		})
+	}
+}
+
+func TestGptAgentsMachineWideOptInAndDefaultOmission(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, FileName)
+	defaults := Defaults(home, nil)
+	body, err := Marshal(defaults, false)
+	if err != nil || strings.Contains(string(body), `"gptAgents"`) {
+		t.Fatalf("default gpt key emitted: %s %v", body, err)
+	}
+	for _, enabled := range []string{"true", "false"} {
+		if err := os.WriteFile(path, []byte(`{"version":2,"claude":{"gptAgents":`+enabled+`}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, home, nil)
+		if err != nil {
+			t.Fatalf("registered opt-in refused: %v", err)
+		}
+		if loaded.Source("claude.gptAgents") != SourceFile {
+			t.Fatal("opt-in lost provenance")
+		}
+		body, err := Marshal(loaded, false)
+		if err != nil || !strings.Contains(string(body), `"gptAgents": `+enabled) {
+			t.Fatalf("explicit key lost: %s %v", body, err)
+		}
+	}
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"version":2,"accounts":[{"id":1,"configDir":"~/account","claude":{"gptAgents":true}}]}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, home, nil); err == nil || !strings.Contains(err.Error(), "machine-wide") {
+		t.Fatalf("account opt-in refusal=%v", err)
 	}
 }

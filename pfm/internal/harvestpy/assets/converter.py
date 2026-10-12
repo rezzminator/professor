@@ -48,6 +48,14 @@ _JUNK_AUTHORS = frozenset(
 # harvester writes it into the artifact's frontmatter. convert() clears it
 # before every request (one request at a time per worker).
 _RESULT_META: dict[str, str] = {}
+_RESULT_GAPS: list[str] = []
+
+
+def _conversion_gap(reason: str) -> str:
+    note = f"_Converter gap: {reason}_"
+    if note not in _RESULT_GAPS:
+        _RESULT_GAPS.append(note)
+    return note
 
 
 def html_metadata(raw: str) -> dict[str, str]:
@@ -57,8 +65,10 @@ def html_metadata(raw: str) -> dict[str, str]:
         # htmldate's extensive search turns a bare year or a stray number into a publication date; the date comes from the page's structured markup (meta tags, JSON-LD, <time>) or is absent.
         meta = extract_metadata(raw, extensive=False)
     except Exception as exc:
-        print(f"metadata extraction failed: {exc}", file=sys.stderr)
-        return {}
+        reason = f"HTML metadata extraction failed: {type(exc).__name__}: {exc}"
+        print(reason, file=sys.stderr)
+        _conversion_gap(reason)
+        return {"metadata_error": reason}
     if meta is None:
         return {}
     author = _clean(getattr(meta, "author", ""))
@@ -151,7 +161,8 @@ def convert_html(path: pathlib.Path, base_url: str = "") -> str:
     if document is not None:
         part = document.get if isinstance(document, dict) else lambda name: getattr(document, name, None)
         blocks = [_render_blocks(part("body")), _render_blocks(part("commentsbody"))]
-        body = _restore_islands("\n\n".join(block for block in blocks if block), islands)
+        body = "\n\n".join(block for block in blocks if block)
+    body = _restore_islands(body, islands)
     _RESULT_META.update(html_metadata(raw))
     return tidy_markdown(body)
 
@@ -597,7 +608,8 @@ def _document_base(tree, base_url: str) -> str:
         try:
             declared = urljoin(base, element.get("href").strip())
             urlsplit(declared)
-        except ValueError:
+        except ValueError as exc:
+            print(f"HTML base href {element.get('href')!r} against {base!r}: ValueError: {exc}", file=sys.stderr)
             break
         if declared.lower().startswith(("http://", "https://")):
             return declared
@@ -610,7 +622,8 @@ def _resolved(base: str, target: str) -> str:
         return target
     try:
         return urljoin(base, target)
-    except ValueError:
+    except ValueError as exc:
+        print(f"HTML resolve link {target!r} against {base!r}: ValueError: {exc}", file=sys.stderr)
         return target
 
 
@@ -622,6 +635,9 @@ def _absolutize(tree, base: str) -> None:
         else:
             link.set("href", _resolved(base, href))
     for image in tree.iter("img"):
+        sources = [image.get(attribute) or "" for attribute in ("src", "data-src")]
+        if not any(source and not source.casefold().startswith("data:") for source in sources):
+            _conversion_gap(f"Image {' '.join((image.get('alt') or '').split()) or '(no alt text)'} has no web source")
         for attribute in ("src", "data-src"):
             if image.get(attribute):
                 image.set(attribute, _resolved(base, image.get(attribute).strip()))
@@ -894,7 +910,8 @@ def _table_markdown(table) -> str:
                 pre.drop_tree()
             try:
                 span = min(max(int(cell.get("colspan") or 1), 1), _MAX_COLSPAN)
-            except ValueError:
+            except ValueError as exc:
+                print(f"HTML table colspan {cell.get('colspan')!r}: ValueError: {exc}; using 1", file=sys.stderr)
                 span = 1
             texts.extend([_cell_markdown(cell)] + [""] * (span - 1))
         if not any(texts):
@@ -977,6 +994,10 @@ def _restore_islands(markdown: str, islands: _Islands) -> str:
             if lines and lines[-1].strip(" >") and not _LIST_MARKER.search(prefix):
                 lines.append(prefix.rstrip())
         lines.extend(restored)
+    present = {int(match.group(1)) for match in islands.token.finditer(markdown)}
+    for index in range(len(islands.blocks)):
+        if index not in present:
+            lines.extend(["", f"_Converter gap: HTML extraction omitted table or code block {index + 1}_"])
     return "\n".join(lines)
 
 
@@ -1249,9 +1270,9 @@ def _phrasing_child(element) -> str:
 def _image_markdown(element) -> str:
     sources = (element.get("src") or "", element.get("data-src") or "")
     source = next((value for value in sources if value and not value.casefold().startswith("data:")), "")
-    if not source:
-        return ""
     alt = " ".join((element.get("alt") or "").split()).replace("[", "\\[").replace("]", "\\]")
+    if not source:
+        return _conversion_gap(f"Image {alt or '(no alt text)'} has no web source")
     if re.search(r"[\s()<>]", source):
         source = "<" + source.replace("<", "%3C").replace(">", "%3E") + ">"
     return f"![{alt}]({source})"
@@ -3294,6 +3315,7 @@ def convert(request: dict) -> dict:
         if converter is None:
             raise ValueError(f"unsupported conversion kind: {kind!r}")
         _RESULT_META.clear()
+        _RESULT_GAPS.clear()
         markdown, features = converter(path, request)
     except Exception as exc:
         # A crashed pipeline is a FAILED conversion, never an empty document.
@@ -3313,6 +3335,9 @@ def convert(request: dict) -> dict:
             "error": summary,
         }
     markdown = tidy_markdown(markdown)
+    for gap in _RESULT_GAPS:
+        if gap not in markdown:
+            markdown += "\n\n" + gap
     response = {"ok": True, "markdown": markdown, "kind": kind, "features": features}
     if _RESULT_META:
         response["meta"] = dict(_RESULT_META)

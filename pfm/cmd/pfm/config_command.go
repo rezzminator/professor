@@ -240,6 +240,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	}
 	printClaude("plugins", strings.Join(plugins, ","))
 	printClaude("costLedger", config.Claude.CostLedger)
+	printClaude("gptAgents", config.Claude.GptAgents)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

@@ -323,3 +323,16 @@ func procArgs(pid int) (argv, env []string, err error) {
 	}
 	return argv, env, nil
 }
+
+// Executable reads the kernel's exec_path instead of the mutable argv[0].
+func (proc *DarwinProcFS) Executable(pid int) (string, error) {
+	buffer, err := unix.SysctlRaw("kern.procargs2", pid)
+	if err != nil {
+		return "", fmt.Errorf("read executable via kern.procargs2 for %d: %w", pid, err)
+	}
+	path, err := procExecutablePath(buffer)
+	if err != nil {
+		return "", fmt.Errorf("decode executable for %d: %w", pid, err)
+	}
+	return path, nil
+}

@@ -27,7 +27,8 @@
       "agent-effort",
       "tool-visibility-controller"
     ],
-    "costLedger": true
+    "costLedger": true,
+    "gptAgents": false
   },
   "codex": {
     "yolo": true,

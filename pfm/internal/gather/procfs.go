@@ -82,6 +82,9 @@ type FileID struct {
 // ProcImage is the optional ProcFS extension that reports which file a
 // process is EXECUTING. Only the stale sweep needs it; a table without it is
 // refused there rather than read as "every process is fresh".
+// ProcExecutable exposes the kernel executable path, never argv[0].
+type ProcExecutable interface{ Executable(pid int) (string, error) }
+
 type ProcImage interface {
 	Image(pid int) (FileID, error)
 }
@@ -327,4 +330,25 @@ func SplitNUL(content []byte) []string {
 		parts = parts[:len(parts)-1]
 	}
 	return parts
+}
+
+func (proc RealProcFS) Executable(pid int) (string, error) {
+	path, err := os.Readlink(proc.path(pid, "exe"))
+	if err != nil {
+		return "", fmt.Errorf("read process %d executable: %w", pid, err)
+	}
+	return strings.TrimSuffix(path, " (deleted)"), nil
+}
+
+// procExecutablePath reads exec_path from the documented kern.procargs2 layout.
+// argv[0] is operator-controlled and cannot prove an environment is in use.
+func procExecutablePath(buffer []byte) (string, error) {
+	if len(buffer) < 5 {
+		return "", fmt.Errorf("short kern.procargs2 executable buffer: %d bytes", len(buffer))
+	}
+	path, _, found := strings.Cut(string(buffer[4:]), "\x00")
+	if !found || !filepath.IsAbs(path) {
+		return "", fmt.Errorf("invalid kern.procargs2 executable path %q", path)
+	}
+	return filepath.Clean(path), nil
 }

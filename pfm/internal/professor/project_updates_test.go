@@ -663,3 +663,25 @@ func TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream(t *te
 		t.Fatalf("report advises deleting while the successor is unreadable:\n%s", report)
 	}
 }
+
+func TestRetiredCoverageIncompleteIsVisibleAndNonfatal(t *testing.T) {
+	var scan RetiredNameScan
+	if err := json.Unmarshal(
+		[]byte(`{"hits":[],"failures":[],"incomplete":[{"path":"lock.json","error":"read limit"}]}`),
+		&scan,
+	); err != nil {
+		t.Fatal(err)
+	}
+	report := projectReport{Retired: &scan}
+	var stdout bytes.Buffer
+	writeRetiredNamesHuman(&stdout, &scan)
+	if !strings.Contains(stdout.String(), "lock.json   retired-name scan INCOMPLETE — read limit") {
+		t.Errorf("incomplete row missing: %s", stdout.String())
+	}
+	if got := projectTerminal(report); got != "INCOMPLETE — 1 file(s) partially scanned for retired names" {
+		t.Errorf("terminal=%q, want incomplete not clean or failed", got)
+	}
+	if failed := captureRetiredNames(&report, func(string, map[string]bool) RetiredNameScan { return scan }); failed {
+		t.Error("incomplete scan marked failed")
+	}
+}

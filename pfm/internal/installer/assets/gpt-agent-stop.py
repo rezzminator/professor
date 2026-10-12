@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import stat
 import sys
 import tempfile
@@ -33,12 +34,21 @@ def log(role, entry):
     path = os.path.join(LOG_DIR, role + '.jsonl')
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
-        with open(path, 'a') as f:
-            f.write(json.dumps(entry) + '\n')
+        state_helpers()['append_decision_log'](path, entry)
         return True
-    except OSError as e:
+    except Exception as e:
         print('gpt-agent-stop: cannot write the decision log %s; stop allowed: %r' % (path, e), file=sys.stderr)
         return False
+
+
+_STATE_HELPERS = None
+
+
+def state_helpers():
+    global _STATE_HELPERS
+    if _STATE_HELPERS is None:
+        _STATE_HELPERS = runpy.run_path(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'gpt-return-watch.py'))
+    return _STATE_HELPERS
 
 
 def texts(value):
@@ -89,6 +99,7 @@ def blocks_so_far(role, agent_id):
 def store_block_count(role, agent_id, count):
     path = counter_path(role, agent_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    state_helpers()['prune_counts'](os.path.dirname(path))
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', dir=os.path.dirname(path), delete=False) as f:
@@ -245,13 +256,14 @@ def main():
             return
         decision, reason = ROLES[role](data, rows(transcript), entry)
         if decision == 'block':
-            count = blocks_so_far(role, entry['agent_id'])
+            identity = entry['agent_id'] or ['transcript', os.path.realpath(transcript)]
+            count = blocks_so_far(role, identity)
             if count >= CAPS[role]:
                 decision = 'allow-cap'
                 print('gpt-agent-stop: %s rule still unmet after %d refusals; stop allowed' % (role, CAPS[role]),
                       file=sys.stderr)
             else:
-                store_block_count(role, entry['agent_id'], count + 1)
+                store_block_count(role, identity, count + 1)
         entry['decision'] = decision
     except Exception as e:
         entry['decision'] = 'allow-error'

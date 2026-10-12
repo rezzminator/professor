@@ -1,6 +1,7 @@
 package globallink
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,11 @@ import (
 func TestClassifyStates(t *testing.T) {
 	root := t.TempDir()
 	sourceRepo := filepath.Join(root, "repo")
+	writeTree(
+		t,
+		sourceRepo,
+		map[string]string{"CLAUDE.md": "clone", "pfm/go.mod": "module fixture", ".claude/settings.json": "{}"},
+	)
 	source := filepath.Join(sourceRepo, "templates", "global", "agents", "alpha.md")
 	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
 		t.Fatal(err)
@@ -163,6 +169,11 @@ func TestClassifyAliasRoot(t *testing.T) {
 	if err := os.Mkdir(repo, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeTree(
+		t,
+		repo,
+		map[string]string{"CLAUDE.md": "clone", "pfm/go.mod": "module fixture", ".claude/settings.json": "{}"},
+	)
 	alias := filepath.Join(root, "alias")
 	if err := os.Symlink(repo, alias); err != nil {
 		t.Fatal(err)
@@ -461,5 +472,61 @@ func TestApplyCopyReplacesByRenameNeverAbsent(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+}
+
+func TestCopyChangedAfterClassificationIsPreserved(t *testing.T) {
+	for _, dir := range []bool{false, true} {
+		t.Run(fmt.Sprint(dir), func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "source")
+			target := filepath.Join(root, "target")
+			kind := File
+			srcFile, dstFile := source, target
+			if dir {
+				kind = Dir
+				srcFile = filepath.Join(source, "SKILL.md")
+				dstFile = filepath.Join(target, "SKILL.md")
+				if err := os.MkdirAll(source, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(target, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(srcFile, []byte("same"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(dstFile, []byte("same"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			state, _, err := ClassifyLink(target, source, root, kind)
+			if err != nil || state != Copy {
+				t.Fatalf("classify %s %v", state, err)
+			}
+			if err := os.WriteFile(dstFile, []byte("user edit"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := Apply(target, source, state); err == nil {
+				t.Fatal("changed copy replaced without refusal")
+			}
+			if got, err := os.ReadFile(dstFile); err != nil || string(got) != "user edit" {
+				t.Fatalf("user edit lost: %q %v", got, err)
+			}
+		})
+	}
+}
+
+func TestBroadSourceRootDoesNotClaimForeignLink(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.md")
+	other := filepath.Join(root, "other.md")
+	target := filepath.Join(root, "target.md")
+	if err := os.Symlink(other, target); err != nil {
+		t.Fatal(err)
+	}
+	state, _, err := ClassifyLink(target, source, root, File)
+	if err != nil || state != Conflict {
+		t.Fatalf("unproven root claims link: %s %v", state, err)
 	}
 }

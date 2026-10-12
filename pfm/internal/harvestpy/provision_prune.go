@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // pruneRemoveAll removes one superseded environment; a test swaps it to fail.
@@ -132,6 +134,9 @@ func pruneEnvironmentRoot(envRoot, procRoot, goos string) PruneReport {
 // gone mid-read, a kernel thread and another user's process are skipped:
 // envs are 0700, so another user cannot run from one.
 func liveExecutables(procRoot, goos string) (map[string]string, error) {
+	if goos == "darwin" {
+		return darwinLiveExecutables(procRoot)
+	}
 	if goos != "linux" {
 		return nil, fmt.Errorf("%s has no /proc to show a process's executable", goos)
 	}
@@ -174,4 +179,40 @@ func runningFrom(executables map[string]string, env string) string {
 		}
 	}
 	return ""
+}
+
+func darwinLiveExecutables(procRoot string) (map[string]string, error) {
+	table := gather.NewProcFS(procRoot)
+	images, ok := table.(gather.ProcExecutable)
+	if !ok {
+		return nil, fmt.Errorf("process table does not expose executable paths")
+	}
+	pids, err := table.PIDs()
+	if err != nil {
+		return nil, fmt.Errorf("list executable processes: %w", err)
+	}
+	result := map[string]string{}
+	for _, pid := range pids {
+		if identities, ok := table.(gather.ProcIdentity); ok {
+			identity, err := identities.ProcessIdentity(pid)
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("identify executable process %d: %w", pid, err)
+			}
+			if identity.Zombie || identity.EffectiveUID != uint32(os.Geteuid()) {
+				continue
+			}
+		}
+		path, err := images.Executable(pid)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspect live executable %d: %w", pid, err)
+		}
+		result[strconv.Itoa(pid)] = path
+	}
+	return result, nil
 }

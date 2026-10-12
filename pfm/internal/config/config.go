@@ -101,6 +101,8 @@ type ClaudePrefs struct {
 	PluginCheckoutRoot string
 	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
 	CostLedger bool
+	// GptAgents opts into gpt twins and their managed hook assets machine-wide.
+	GptAgents bool
 	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
 	// Machine-wide: an account may not set it.
 	Plugins []ClaudePlugin
@@ -301,6 +303,7 @@ type rawClaude struct {
 	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
 	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
 	CostLedger             *bool   `json:"costLedger,omitempty"`
+	GptAgents              *bool   `json:"gptAgents,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
 }
@@ -459,6 +462,7 @@ func defaultsWithMCPServers(
 		KeyClaudePluginCheckoutRoot:                          SourceDefault,
 		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
+		KeyClaudeGptAgents:                                   SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,

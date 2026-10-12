@@ -137,6 +137,8 @@ type Options struct {
 	Version string
 	// ClaudePluginCheckoutRoot is claude.pluginCheckoutRoot; empty when unset.
 	ClaudePluginCheckoutRoot string
+	// GptAgents is the machine-wide gpt twin and hook asset opt-in.
+	GptAgents bool
 	// ClaudePlugins is claude.plugins: the plugins the Claude plugin step ensures.
 	ClaudePlugins []pfmconfig.ClaudePlugin
 	// NameSyncInterval is the machine config's nameSync.interval. It renders

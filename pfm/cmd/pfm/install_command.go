@@ -263,6 +263,7 @@ func newInstallerOptions(
 		options.MCPConfigPath = runtime.Config.Path
 		options.OpenCodeConfigPath = installer.OpenCodeConfigPath(runtime.Paths.Home)
 		options.ClaudeBinary = runtime.Config.Claude.Binary
+		options.GptAgents = runtime.Config.Claude.GptAgents
 		options.Version = runtime.Version
 		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
 		options.ClaudePlugins = runtime.Config.Claude.Plugins

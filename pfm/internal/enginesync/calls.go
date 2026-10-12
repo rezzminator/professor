@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -113,6 +114,7 @@ func (runner Runner) Mirror(ctx context.Context, engine, action, repo string) (M
 // CodexHomes is the explicit empty roster (--no-codex-home): pfm always names
 // its roster, never leaving engine-sync to read targets.json for it.
 type GlobalOptions struct {
+	GptAgents        bool
 	SourceRepo       string
 	ClaudeConfigDirs []string
 	CodexHomes       []string
@@ -167,6 +169,9 @@ func (runner Runner) GlobalArgs(options GlobalOptions) ([]string, error) {
 	if options.Uninstall {
 		args = append(args, "--uninstall")
 	}
+	if options.GptAgents {
+		args = append(args, "--gpt-agents")
+	}
 	return append(args, flagJSON), nil
 }
 
@@ -212,6 +217,7 @@ func (runner Runner) Global(ctx context.Context, options GlobalOptions) (GlobalR
 // agents registry against the source clone. An empty SourceRepo is the
 // no-clone state.
 type MachineDoctorOptions struct {
+	GptAgents       bool
 	SourceRepo      string
 	ClaudeConfigDir string
 	CodexHomes      []string
@@ -250,6 +256,9 @@ func (runner Runner) MachineDoctor(ctx context.Context, options MachineDoctorOpt
 	}
 	if options.ClaudeAbsent {
 		args = append(args, "--claude-absent")
+	}
+	if options.GptAgents {
+		args = append(args, "--gpt-agents")
 	}
 	args = append(args, flagJSON)
 	var reply machineDoctorReply
@@ -303,4 +312,27 @@ func (runner Runner) runJSON(ctx context.Context, args []string, reply any, ok f
 		return fmt.Errorf("%s: exit %d disagrees with its reply's ok=%t", command, result.ExitCode, ok())
 	}
 	return nil
+}
+
+// GlobalAgentArgs makes pfm's machine opt-in authoritative, including before a flag sentinel.
+func GlobalAgentArgs(args []string, enabled bool) []string {
+	return insertFlags(args, "--gpt-agents="+strconv.FormatBool(enabled))
+}
+
+// SourceArgs supplies a recorded clone before the forwarding flag sentinel.
+func SourceArgs(args []string, source string) []string {
+	return insertFlags(args, "--source-repo", source)
+}
+
+func insertFlags(args []string, flags ...string) []string {
+	split := len(args)
+	for index, value := range args {
+		if value == "--" {
+			split = index
+			break
+		}
+	}
+	forwarded := append([]string(nil), args[:split]...)
+	forwarded = append(forwarded, flags...)
+	return append(forwarded, args[split:]...)
 }

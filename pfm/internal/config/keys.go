@@ -32,6 +32,9 @@ const KeyClaudePlugins = "claude.plugins"
 // false launches Claude without the OTel knobs and starts no cost sink.
 const KeyClaudeCostLedger = "claude.costLedger"
 
+// KeyClaudeGptAgents is the machine-wide opt-in for the gpt agent family.
+const KeyClaudeGptAgents = "claude.gptAgents"
+
 // KeyDefault describes a machine-config leaf and the value shown by the
 // tracked example when the key is unset. Roster arrays are intentionally
 // absent: accounts are discovered from the local machine.
@@ -64,6 +67,7 @@ func Keys() []KeyDefault {
 		{KeyClaudePluginCheckoutRoot, nil},
 		{KeyClaudePlugins, defaultClaudePluginIDs()},
 		{KeyClaudeCostLedger, true},
+		{KeyClaudeGptAgents, false},
 		{"codex.yolo", true},
 		{"codex.binary", pfmengine.MustLookup(pfmengine.Codex).Binary},
 		{"opencode.binary", pfmengine.MustLookup(pfmengine.OpenCode).Binary},

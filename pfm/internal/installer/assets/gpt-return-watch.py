@@ -7,6 +7,7 @@ GPT models swap its `cat` for another reader; a `python3 -c "..."` nested in `ba
 back, its timeout, sleep and path kept, and is allowed; every other call passes untouched. Every decision is one
 JSON line in `{log dir}/return-watch.jsonl`. Any failure is logged and the call passes unchanged.
 """
+import fcntl
 import json
 import os
 import re
@@ -25,10 +26,51 @@ def log(entry):
     path = os.path.join(LOG_DIR, 'return-watch.jsonl')
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
-        with open(path, 'a') as f:
-            f.write(json.dumps(entry) + '\n')
+        append_decision_log(path, entry)
     except OSError as e:
         print('gpt-return-watch: cannot write the decision log %s: %r' % (path, e), file=sys.stderr)
+
+
+# Shared with the stop hook via this shipped sibling, resolved from its managed source.
+MAX_LOG_BYTES = 256 * 1024
+MAX_COUNTERS = 1024
+COUNTER_DAYS = 7
+
+
+def append_decision_log(path, entry):
+    encoded = (json.dumps(entry) + '\n').encode()
+    if len(encoded) > MAX_LOG_BYTES:
+        encoded = (json.dumps({'decision': entry.get('decision'), 'error': 'audit entry exceeded byte limit'}) + '\n').encode()
+    with open(path + '.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if os.path.exists(path) and os.path.getsize(path) + len(encoded) > MAX_LOG_BYTES:
+            # Even a preexisting oversized audit leaves at most one bounded backup.
+            with open(path, 'rb') as previous:
+                previous.seek(max(0, os.path.getsize(path) - MAX_LOG_BYTES))
+                tail = previous.read(MAX_LOG_BYTES)
+            if os.path.getsize(path) > MAX_LOG_BYTES:
+                tail = tail.partition(b'\n')[2]
+            with open(path + '.1', 'wb') as backup:
+                backup.write(tail)
+            with open(path, 'wb'):
+                pass
+        with open(path, 'ab') as current:
+            current.write(encoded)
+
+
+def prune_counts(directory):
+    now = time.time()
+    retained = []
+    for entry in os.scandir(directory):
+        if not re.fullmatch(r'[a-f0-9]{64}', entry.name) or not entry.is_file(follow_symlinks=False):
+            continue
+        modified = entry.stat(follow_symlinks=False).st_mtime
+        if now - modified > COUNTER_DAYS * 86400:
+            os.unlink(entry.path)
+        else:
+            retained.append((modified, entry.path))
+    for _, path in sorted(retained)[:max(0, len(retained) - MAX_COUNTERS + 1)]:
+        os.unlink(path)
 
 
 def decide(payload):
@@ -45,7 +87,13 @@ def decide(payload):
     # Shell operators, expansions and globs must go through normal permission checks.
     path = watch.group('path')
     literal = path[1:-1] if path[:1] in ('"', "'") else path
-    if not re.fullmatch(r'[A-Za-z0-9_./@%+=:,~-]+', literal):
+    if not re.fullmatch(r'[A-Za-z0-9_./@%+=:,-]+', literal) or '..' in literal.split('/'):
+        return 'pass', None
+    root = literal[:literal.rfind('/returns/') + len('/returns')]
+    # Parent aliases are fine, but returns itself and its children cannot escape by symlink.
+    expected_root = os.path.join(os.path.realpath(os.path.dirname(root)), 'returns')
+    resolved_root = os.path.realpath(root)
+    if resolved_root != expected_root or os.path.commonpath((resolved_root, os.path.realpath(literal))) != resolved_root:
         return 'pass', None
     if watch.group('reader') == READER:
         return 'canonical', None

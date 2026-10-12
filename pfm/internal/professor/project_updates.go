@@ -61,11 +61,11 @@ type RetiredNameFailure struct {
 	Error string `json:"error"`
 }
 
-// RetiredNameScan is the retired-name pass's result; both slices are non-nil
-// once a scan ran.
+// RetiredNameScan distinguishes unreadable files from readable text beyond the scan limit.
 type RetiredNameScan struct {
-	Hits     []RetiredNameHit     `json:"hits"`
-	Failures []RetiredNameFailure `json:"failures"`
+	Hits       []RetiredNameHit     `json:"hits"`
+	Failures   []RetiredNameFailure `json:"failures"`
+	Incomplete []RetiredNameFailure `json:"incomplete,omitempty"`
 }
 
 // RetiredNameScanner scans root's files for retired names, skipping every
@@ -118,6 +118,9 @@ func writeRetiredNamesHuman(stdout io.Writer, scan *RetiredNameScan) {
 	}
 	for _, failure := range scan.Failures {
 		fmt.Fprintf(stdout, "    %s   retired-name scan UNREADABLE — %s\n", failure.Path, failure.Error)
+	}
+	for _, partial := range scan.Incomplete {
+		fmt.Fprintf(stdout, "    %s   retired-name scan INCOMPLETE — %s\n", partial.Path, partial.Error)
 	}
 }
 
@@ -188,6 +191,12 @@ func projectTerminal(report projectReport) string {
 	}
 	if review := report.reviewRequired(); review != 0 {
 		return fmt.Sprintf("REVIEW REQUIRED — %d items", review)
+	}
+	if report.Retired != nil && len(report.Retired.Incomplete) != 0 {
+		return fmt.Sprintf(
+			"INCOMPLETE — %d file(s) partially scanned for retired names",
+			len(report.Retired.Incomplete),
+		)
 	}
 	return "clean"
 }

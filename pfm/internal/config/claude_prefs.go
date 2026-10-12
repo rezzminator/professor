@@ -76,6 +76,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			KeyClaudePlugins,
 		)
 	}
+	if raw.GptAgents != nil && index >= 0 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.gptAgents is machine-wide: set %s",
+			path,
+			configScope(scope, index),
+			KeyClaudeGptAgents,
+		)
+	}
 	if raw.CostLedger != nil && index >= 0 {
 		return ClaudePrefs{}, fmt.Errorf(
 			"config %s: %s.costLedger is machine-wide: set %s",
@@ -148,6 +156,10 @@ func applyClaudeMachinePrefs(
 		target.Plugins = plugins
 		sources[KeyClaudePlugins] = SourceFile
 	}
+	if raw.GptAgents != nil {
+		target.GptAgents = *raw.GptAgents
+		sources[KeyClaudeGptAgents] = SourceFile
+	}
 	if raw.CostLedger != nil {
 		target.CostLedger = *raw.CostLedger
 		sources[KeyClaudeCostLedger] = SourceFile
@@ -215,6 +227,9 @@ func marshalClaude(config Config) map[string]any {
 	}
 	if set(KeyClaudeCostLedger) || !config.Claude.CostLedger {
 		value["costLedger"] = config.Claude.CostLedger
+	}
+	if set(KeyClaudeGptAgents) || config.Claude.GptAgents {
+		value["gptAgents"] = config.Claude.GptAgents
 	}
 	return value
 }

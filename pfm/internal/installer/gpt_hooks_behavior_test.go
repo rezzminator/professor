@@ -29,6 +29,13 @@ func runGptHookProcess(t *testing.T, name, role, root, raw string, env ...string
 	}
 	script := filepath.Join(root, name)
 	writeFixture(t, script, string(content))
+	if name == "gpt-agent-stop.py" {
+		shared, err := readAsset("gpt-return-watch.py")
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, filepath.Join(root, "gpt-return-watch.py"), string(shared))
+	}
 	python, err := exec.LookPath("python3")
 	if err != nil {
 		t.Fatalf("TOOLCHAIN-MISSING python3: %v", err)
@@ -94,6 +101,7 @@ func TestGptReturnWatchBehavior(t *testing.T) {
 		{"substitution-path", watch(`head "$1"`, path+`$(id)`), "Bash", "", "pass"},
 		{"quoted-substitution", watch(`head "$1"`, `"`+path+`$(id)"`), "Bash", "", "pass"},
 		{"glob-path", watch(`head "$1"`, path+`*`), "Bash", "", "pass"},
+		{"traversal", watch(`head "$1"`, path+`/../../../../secret`), "Bash", "", "pass"},
 		{"canonical", watch(`cat "$1"`, path), "Bash", "", "canonical"},
 		{"multi-file", watch(`head "$1"`, path+" "+path), "Bash", "", "pass"},
 		{"non-return", watch(`head "$1"`, "fixture/notes/compute.md"), "Bash", "", "pass"},
@@ -393,6 +401,93 @@ func TestGptAgentStopTracerBehavior(t *testing.T) {
 				}
 				if want == "block" && !strings.Contains(got.stdout, "tracetree.py write") {
 					t.Fatalf("missing store repair: %s", got.stdout)
+				}
+			}
+		})
+	}
+}
+
+func TestGptReturnWatchPreservesSymlinkEscapes(t *testing.T) {
+	root := t.TempDir()
+	returns := filepath.Join(root, "flight", "returns")
+	writeFixture(t, filepath.Join(root, "secret"), "private")
+	if err := os.MkdirAll(returns, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(returns, "result.md")
+	if err := os.Symlink(filepath.Join(root, "secret"), target); err != nil {
+		t.Fatal(err)
+	}
+	command := fmt.Sprintf(`timeout 5 bash -c 'until [ -s "$1" ]; do sleep 1; done; head "$1"' _ %s`, target)
+	got := runGptHook(
+		t,
+		"gpt-return-watch.py",
+		"",
+		root,
+		gptHookJSON(t, map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": command}}),
+	)
+	if got.decision != "pass" || got.stdout != "" {
+		t.Fatalf("symlink escape autoallowed: %+v", got)
+	}
+}
+
+func TestGptAgentStopMissingIDUsesTranscriptIdentity(t *testing.T) {
+	root := t.TempDir()
+	for agent := range 3 {
+		raw := gptStopPayload(t, root, "DONE")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			t.Fatal(err)
+		}
+		delete(payload, "agent_id")
+		transcript := filepath.Join(root, fmt.Sprintf("agent-%d.jsonl", agent))
+		if err := os.Rename(filepath.Join(root, "agent.jsonl"), transcript); err != nil {
+			t.Fatal(err)
+		}
+		payload["agent_transcript_path"] = transcript
+		for _, want := range []string{"block", "block", "allow-cap"} {
+			got := runGptHook(t, "gpt-agent-stop.py", "foreman", root, gptHookJSON(t, payload))
+			if got.decision != want {
+				t.Fatalf("agent %d decision %s, want independent %s", agent, got.decision, want)
+			}
+		}
+	}
+}
+
+func TestGptHookStateRetentionIsBounded(t *testing.T) {
+	for _, hook := range []struct{ name, role, log string }{
+		{"gpt-return-watch.py", "", "return-watch.jsonl"}, {"gpt-agent-stop.py", "foreman", "foreman.jsonl"},
+	} {
+		t.Run(hook.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, ".local", "state", "pfm", strings.TrimSuffix(hook.name, ".py"))
+			log := filepath.Join(dir, hook.log)
+			writeFixture(t, log, strings.Repeat("x", 262144))
+			raw := `{}`
+			if hook.role != "" {
+				raw = gptStopPayload(t, root, "DONE")
+				for count := range 1025 {
+					writeFixture(t, filepath.Join(dir, "counts", fmt.Sprintf("%064x", count)), "1\n")
+				}
+				old := filepath.Join(dir, "counts", fmt.Sprintf("%064x", 1026))
+				writeFixture(t, old, "1\n")
+				at := time.Now().Add(-8 * 24 * time.Hour)
+				if err := os.Chtimes(old, at, at); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runGptHookProcess(t, hook.name, hook.role, root, raw)
+			info, err := os.Stat(log)
+			if err != nil || info.Size() > 262144 {
+				t.Errorf("audit not bounded: info=%v error=%v", info, err)
+			}
+			if _, err := os.Stat(log + ".1"); err != nil {
+				t.Errorf("previous audit not retained: %v", err)
+			}
+			if hook.role != "" {
+				entries, err := os.ReadDir(filepath.Join(dir, "counts"))
+				if err != nil || len(entries) > 1024 {
+					t.Errorf("counts unbounded: %d, %v", len(entries), err)
 				}
 			}
 		})

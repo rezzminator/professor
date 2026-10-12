@@ -242,6 +242,12 @@ func TestRestoreRefreshedPricesKeepsOnlyTheNewestSavedCopies(t *testing.T) {
 			updateBackupsKept,
 		)
 	}
+	for _, path := range seeded[:3] {
+		want := "update: pruned saved price table " + path + "\n"
+		if strings.Count(stdout.String(), want) != 1 {
+			t.Errorf("progress missing unique prune line %q:\n%s", want, stdout.String())
+		}
+	}
 	if _, err := os.Stat(seeded[0]); err == nil {
 		t.Errorf("oldest copy %s survived the bound", seeded[0])
 	}

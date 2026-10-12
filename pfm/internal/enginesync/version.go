@@ -22,6 +22,13 @@ func CompareVersions(left, right string) (int, error) {
 		return 0, fmt.Errorf("invalid engine-sync versions %q and %q", left, right)
 	}
 	for _, value := range []string{left, right} {
+		core, _, _ := strings.Cut(value, "-")
+		core, _, _ = strings.Cut(core, "+")
+		for _, part := range strings.Split(core, ".") {
+			if len(part) > 1 && part[0] == '0' {
+				return 0, fmt.Errorf("invalid engine-sync version %q: core part with a leading zero", value)
+			}
+		}
 		if leadingZeroPrereleaseID(value) {
 			return 0, fmt.Errorf("invalid engine-sync version %q: numeric prerelease id with a leading zero", value)
 		}

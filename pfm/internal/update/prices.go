@@ -59,7 +59,7 @@ func restoreRefreshedPrices(ctx context.Context, repo, backupDir string, stdout 
 		pricing.FileRel,
 		saved,
 	)
-	if err := pruneSavedPrices(backupDir); err != nil {
+	if err := pruneSavedPrices(backupDir, stdout); err != nil {
 		fmt.Fprintf(stdout, "update: warning: older saved price tables in %s were not pruned: %v\n", backupDir, err)
 	}
 	return nil
@@ -68,7 +68,7 @@ func restoreRefreshedPrices(ctx context.Context, repo, backupDir string, stdout 
 // pruneSavedPrices removes all but the newest updateBackupsKept saved price
 // tables in backupDir; the names carry a fixed-width UTC timestamp, so name
 // order is save order. Files of other names are left alone.
-func pruneSavedPrices(backupDir string) error {
+func pruneSavedPrices(backupDir string, stdout io.Writer) error {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		return fmt.Errorf("list saved price tables in %s: %w", backupDir, err)
@@ -89,7 +89,11 @@ func pruneSavedPrices(backupDir string) error {
 	sort.Strings(saved)
 	var pruneErr error
 	for len(saved) > updateBackupsKept {
-		pruneErr = errors.Join(pruneErr, os.Remove(saved[0]))
+		if err := os.Remove(saved[0]); err != nil {
+			pruneErr = errors.Join(pruneErr, fmt.Errorf("remove saved price table %s: %w", saved[0], err))
+		} else {
+			fmt.Fprintf(stdout, "update: pruned saved price table %s\n", saved[0])
+		}
 		saved = saved[1:]
 	}
 	return pruneErr

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -132,6 +133,8 @@ var retiredNames = []retiredName{
 	// Commit f0c88ffb "tracer-rr is clone-distiller".
 	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
 	// Commit 73f2ae2b "/reminder becomes /pfm:schedule".
+	{name: "pfm chat reminder", kind: retiredCommand, successor: "pfm chat schedule", match: matchExact},
+	{name: "build-codex.mjs", kind: retiredPath, successor: "pfm codex build|check", match: matchExact},
 	{name: "/reminder", kind: retiredCommand, successor: "/pfm:schedule", match: matchFamily},
 	// Commit b9f530c9 "/tokens and the transcript skill become one skill":
 	// chatlog, over `pfm tokens` and `pfm transcript` (both live). The
@@ -196,7 +199,16 @@ func scanRetiredNamesWith(
 		scan.Failures = append(scan.Failures, professor.RetiredNameFailure{Path: relative, Error: err.Error()})
 	}
 	scanFile := func(current, relative string) {
-		hits, err := scanRetiredFile(open, current, relative)
+		hits, incomplete, err := scanRetiredFile(open, current, relative)
+		if incomplete {
+			scan.Incomplete = append(
+				scan.Incomplete,
+				professor.RetiredNameFailure{
+					Path:  relative,
+					Error: fmt.Sprintf("read limit of %d bytes; remaining text was not scanned", retiredMaxRead),
+				},
+			)
+		}
 		if err != nil {
 			fail(relative, err)
 		}
@@ -298,17 +310,34 @@ func gitProjectFiles(root string) (files []string, inWorkTree bool, err error) {
 	case strings.TrimSpace(string(probe.Stdout)) != "true":
 		return nil, false, nil
 	}
-	listing, err := updateGitOutput(ctx, root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	listing, err := updateGitCapture(
+		ctx,
+		root,
+		[]string{"LC_ALL=C"},
+		"ls-files",
+		"-z",
+		"--cached",
+		"--others",
+		"--exclude-standard",
+		"--deduplicate",
+	)
 	if err != nil {
 		return nil, true, fmt.Errorf("list the project's files: %w", err)
 	}
-	for _, name := range strings.Split(listing, "\x00") {
+	if listing.ExitCode != 0 || len(bytes.TrimSpace(listing.Stderr)) != 0 {
+		return nil, true, fmt.Errorf(
+			"list the project's files: git ls-files exited %d: %s",
+			listing.ExitCode,
+			strings.TrimSpace(string(listing.Stderr)),
+		)
+	}
+	for _, name := range strings.Split(string(listing.Stdout), "\x00") {
 		if name != "" {
 			files = append(files, name)
 		}
 	}
 	sort.Strings(files)
-	return files, true, nil
+	return slices.Compact(files), true, nil
 }
 
 // retiredInSkippedDir: some directory on the path is one the scan never enters.
@@ -324,43 +353,42 @@ func retiredInSkippedDir(relative string) bool {
 
 // scanRetiredFile reads one file through open and returns its hits. It reads
 // the first retiredBinaryProbe bytes to decide the file is binary (a NUL) and
-// stops there; a text file is read to retiredMaxRead at most, the cap cutting
+// stops there; a text file reads at most retiredMaxRead plus one EOF probe, the cap cutting
 // at its last whole line. Reaching the cap is visibly incomplete; hits in the
 // readable prefix are retained, never presented as full coverage.
 func scanRetiredFile(
 	open func(string) (io.ReadCloser, error),
 	current, relative string,
-) (hits []professor.RetiredNameHit, err error) {
+) (hits []professor.RetiredNameHit, incomplete bool, err error) {
 	file, err := open(current)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { err = errors.Join(err, file.Close()) }()
 	content := make([]byte, retiredBinaryProbe)
 	count, err := io.ReadFull(file, content)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return nil, err
+		return nil, false, err
 	}
 	content = content[:count]
 	if bytes.IndexByte(content, 0) >= 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	if count == retiredBinaryProbe {
-		rest, err := io.ReadAll(io.LimitReader(file, retiredMaxRead-retiredBinaryProbe))
+		rest, err := io.ReadAll(io.LimitReader(file, retiredMaxRead-retiredBinaryProbe+1))
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		content = append(content, rest...)
-		if len(content) == retiredMaxRead {
+		if len(content) > retiredMaxRead {
+			content = content[:retiredMaxRead]
 			if cut := bytes.LastIndexByte(content, '\n'); cut >= 0 {
 				content = content[:cut]
 			}
-			return retiredNameHits(relative, string(content)), fmt.Errorf(
-				"retired-name scan incomplete: %s reached the %d-byte read limit", relative, retiredMaxRead,
-			)
+			return retiredNameHits(relative, string(content)), true, nil
 		}
 	}
-	return retiredNameHits(relative, string(content)), nil
+	return retiredNameHits(relative, string(content)), false, nil
 }
 
 // retiredSkippedFile: a pinned file (the project-tier diff already covers
@@ -421,6 +449,18 @@ func (r retiredName) foundIn(line string) bool {
 // On the right a name byte ends the match for every kind but a prefix, and a
 // `:` continues it only for a family.
 func (r retiredName) boundedAt(line string, start, end int) bool {
+	if r.name == "/tokens" || r.name == "/reminder" {
+		if end < len(line) && (line[end] == '/' || line[end] == '{') {
+			return false
+		}
+		before := strings.Fields(strings.TrimRight(line[:start], " `\"'"))
+		if len(before) != 0 {
+			switch strings.ToUpper(before[len(before)-1]) {
+			case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE":
+				return false
+			}
+		}
+	}
 	if start > 0 {
 		before := line[start-1]
 		if isRetiredNameByte(before) {

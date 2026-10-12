@@ -291,3 +291,20 @@ func TestRealProcFSImageIsTheExecutablesFileID(t *testing.T) {
 		t.Fatalf("Image = %+v, want %+v", got, want)
 	}
 }
+
+func TestProcExecutablePathUsesKernelPathNotArgv(t *testing.T) {
+	for _, test := range []struct {
+		raw, want string
+		bad       bool
+	}{
+		{"\x01\x00\x00\x00/env/python\x00\x00spoofed\x00", "/env/python", false},
+		{"\x00\x00", "", true},
+		{"\x01\x00\x00\x00relative\x00", "", true},
+		{"\x01\x00\x00\x00/env/python", "", true},
+	} {
+		path, err := procExecutablePath([]byte(test.raw))
+		if (err != nil) != test.bad || path != test.want {
+			t.Errorf("kernel path=%q %v want=%q bad=%t", path, err, test.want, test.bad)
+		}
+	}
+}

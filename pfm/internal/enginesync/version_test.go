@@ -50,6 +50,9 @@ func TestCompareEngineSyncVersionPrecedence(t *testing.T) {
 
 func TestCompareVersionsRefusesALeadingZeroNumericPrereleaseID(t *testing.T) {
 	for _, tc := range []struct{ left, right, offender string }{
+		{"01.2.3", "1.2.3", "01.2.3"},
+		{"1.02.3", "1.2.3", "1.02.3"},
+		{"1.2.3", "1.2.03", "1.2.03"},
 		{"1.0.0-01", "1.0.0-1", "1.0.0-01"},
 		{"1.0.0-1", "1.0.0-01", "1.0.0-01"},
 		{"1.0.0-alpha.007", "1.0.0-alpha.7", "1.0.0-alpha.007"},

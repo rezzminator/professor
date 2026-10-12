@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -146,14 +147,18 @@ func seedWithoutDefaultNewKeys(loaded pfmconfig.Config) ([]byte, error) {
 	if !removed {
 		return loaded.SeedContent, nil
 	}
-	if document[claudeKey], err = json.Marshal(claude); err != nil {
+	if document[claudeKey], err = marshalSeedInOrder(raw, claude); err != nil {
 		return nil, fmt.Errorf("encode the seed claude block: %w", err)
 	}
-	seed, err := json.MarshalIndent(document, "", "  ")
+	seed, err := marshalSeedInOrder(loaded.SeedContent, document)
 	if err != nil {
 		return nil, fmt.Errorf("encode the seed config: %w", err)
 	}
-	return append(seed, '\n'), nil
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, seed, "", "  "); err != nil {
+		return nil, fmt.Errorf("format the seed config: %w", err)
+	}
+	return append(formatted.Bytes(), '\n'), nil
 }
 
 func (installer *engine) seedConfig() error {
@@ -171,4 +176,49 @@ func (installer *engine) seedConfig() error {
 		}
 		return nil
 	})
+}
+
+// marshalSeedInOrder emits the retained fields in the validated seed's order.
+func marshalSeedInOrder(raw []byte, fields map[string]json.RawMessage) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if _, err := decoder.Token(); err != nil {
+		return nil, fmt.Errorf("read seed object: %w", err)
+	}
+	var output bytes.Buffer
+	output.WriteByte('{')
+	first := true
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, fmt.Errorf("read seed key: %w", err)
+		}
+		key, ok := token.(string)
+		if !ok {
+			return nil, fmt.Errorf("seed object key is not a string: %v", token)
+		}
+		var original json.RawMessage
+		if err := decoder.Decode(&original); err != nil {
+			return nil, fmt.Errorf("read seed value %s: %w", key, err)
+		}
+		value, keep := fields[key]
+		if !keep {
+			continue
+		}
+		encoded, err := json.Marshal(key)
+		if err != nil {
+			return nil, fmt.Errorf("encode seed key %s: %w", key, err)
+		}
+		if !first {
+			output.WriteByte(',')
+		}
+		first = false
+		output.Write(encoded)
+		output.WriteByte(':')
+		output.Write(value)
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, fmt.Errorf("close seed object: %w", err)
+	}
+	output.WriteByte('}')
+	return output.Bytes(), nil
 }

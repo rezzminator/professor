@@ -20,7 +20,9 @@ import (
 // The states of one doctor hook row (docs/design/hooks/hooks.md § The pfm
 // doctor check). MISSING reuses HostOverlayMissing's "missing".
 const (
-	stateOK = "ok"
+	stateOK           = "ok"
+	stateHookConflict = "conflict"
+	stateHookDisabled = "disabled"
 	// stateMissing is an expected hook absent from its file; the same word the
 	// host overlay rows use.
 	stateMissing = string(HostOverlayMissing)
@@ -233,6 +235,11 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 				expected.Command,
 			)
 			switch {
+			case errors.Is(err, codexappendix.ErrNativeHookDisabled):
+				results = append(
+					results,
+					HookProbeResult{Hook: expectedHook, State: stateHookDisabled, Error: err.Error()},
+				)
 			case errors.Is(err, codexappendix.ErrNativeHookUntrusted):
 				results = append(
 					results,
@@ -347,9 +354,20 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool
 		switch result.State {
 		case stateOK:
 			fmt.Fprintln(stdout, prefix+" ok")
+		case stateHookConflict:
+			failures++
+			fmt.Fprintf(
+				stdout,
+				"%s CONFLICT %s — move the operator entry aside before pfm install --yes\n",
+				prefix,
+				hook.File,
+			)
 		case stateMissing:
 			failures++
 			fmt.Fprintf(stdout, "%s MISSING — run pfm install --yes\n", prefix)
+		case stateHookDisabled:
+			warnings++
+			fmt.Fprintf(stdout, "%s DISABLED — operator choice preserved; re-enable in Codex only if wanted\n", prefix)
 		case stateUntrusted:
 			warnings++
 			fmt.Fprintf(stdout, "%s UNTRUSTED %s — run pfm install --yes\n", prefix, result.Error)

@@ -95,13 +95,9 @@ func TestPruneEnvironments(t *testing.T) {
 			kept:    map[string]string{pruneLive: "pid 4242 runs from it"},
 		},
 		{
-			name: "darwin cannot read liveness", goos: "darwin",
-			removed: []string{pruneStaging},
-			kept: map[string]string{
-				pruneSuperseded: "liveness unreadable",
-				pruneLive:       "liveness unreadable",
-				pruneRepair:     "liveness unreadable",
-			},
+			name: "darwin reaps superseded with process executable facade", goos: "darwin",
+			removed: []string{pruneSuperseded, pruneRepair, pruneStaging},
+			kept:    map[string]string{pruneLive: "pid 4242 runs from it"},
 		},
 		{
 			name: "unreadable proc keeps every superseded env", goos: "linux", missingProc: true,

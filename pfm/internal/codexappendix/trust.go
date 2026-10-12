@@ -27,6 +27,9 @@ const (
 // failed receipt read. Historical registration can never prove current trust.
 var ErrNativeHookTrustUnknown = errors.New("native trust is unknown")
 
+// ErrNativeHookDisabled names a matching handler deliberately disabled by its operator.
+var ErrNativeHookDisabled = fmt.Errorf("%w: operator disabled handler", ErrNativeHookUntrusted)
+
 // hook is one entry of the harness's hooks/list answer.
 type hook struct {
 	Key         string `json:"key"`
@@ -181,6 +184,9 @@ func NativeHookTrustState(ctx context.Context, binary, account, command string) 
 		)
 	}
 	h := found[0]
+	if !h.Enabled {
+		return false, fmt.Errorf("%w: native handler %s is disabled", ErrNativeHookDisabled, h.Key)
+	}
 	receipt, err := readHookReceipt(physical)
 	if err != nil {
 		return false, err
@@ -190,9 +196,6 @@ func NativeHookTrustState(ctx context.Context, binary, account, command string) 
 			"%w: native key or current hash differs from recorded fingerprint",
 			ErrNativeHookUntrusted,
 		)
-	}
-	if !h.Enabled {
-		return false, fmt.Errorf("%w: native handler %s is disabled", ErrNativeHookUntrusted, h.Key)
 	}
 	if h.TrustStatus != trustedState {
 		return false, fmt.Errorf("%w: handler %s trustStatus=%q", ErrNativeHookUntrusted, h.Key, h.TrustStatus)
@@ -254,7 +257,8 @@ func RegisterHookTrust(ctx context.Context, binary, account, event, matcher, com
 	if err != nil {
 		return err
 	}
-	if h.Enabled && h.TrustStatus == trustedState && receipt[h.Key] == h.CurrentHash {
+	// A listed disabled handler is an operator choice, not missing trust to repair.
+	if !h.Enabled || (h.TrustStatus == trustedState && receipt[h.Key] == h.CurrentHash) {
 		return nil
 	}
 	key, err := json.Marshal(h.Key)

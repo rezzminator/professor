@@ -145,6 +145,10 @@ const linkStageMinAge = 10 * time.Minute
 // when it dies after the swap). A stage younger than linkStageMinAge is left
 // alone. Each removal is a change of the install's own transcript.
 func (installer *engine) retireStaleLinkStages() error {
+	return installer.retireStaleLinkStagesWithWalk(filepath.WalkDir)
+}
+
+func (installer *engine) retireStaleLinkStagesWithWalk(walk func(string, fs.WalkDirFunc) error) error {
 	storeRoot := skillStoreRoot(installer.options.Home)
 	unlock, busy, err := installer.lockSkillStore(storeRoot)
 	if err != nil {
@@ -156,6 +160,10 @@ func (installer *engine) retireStaleLinkStages() error {
 		return nil
 	}
 	defer unlock()
+	recorded, _, err := readSkillLinkLedger(installer.options.Home)
+	if err != nil {
+		return fmt.Errorf("stale link stage registries: %w", err)
+	}
 	now := installer.now()
 	registries := []string{
 		filepath.Join(installer.options.ConfigDir, "agents"),
@@ -163,13 +171,21 @@ func (installer *engine) retireStaleLinkStages() error {
 		filepath.Join(installer.options.ConfigDir, "skills"),
 		filepath.Join(installer.options.Home, ".agents", "skills"),
 	}
+	registries = append(registries, recorded...)
+	registries = append(registries, filepath.Join(installer.options.Home, ".config", "engine-sync"))
+	seen := map[string]bool{}
 	for _, registry := range registries {
-		err := filepath.WalkDir(registry, func(path string, entry fs.DirEntry, walkErr error) error {
+		if seen[registry] {
+			continue
+		}
+		seen[registry] = true
+		err := walk(registry, func(path string, entry fs.DirEntry, walkErr error) error {
 			if path == registry && errors.Is(walkErr, fs.ErrNotExist) {
 				return nil
 			}
 			if walkErr != nil {
-				return fmt.Errorf("inspect registry path %s: %w", path, walkErr)
+				installer.skip(fmt.Sprintf("stale link stage path %s unreadable: %v", path, walkErr))
+				return nil
 			}
 			if !strings.HasPrefix(entry.Name(), atomicfile.LinkStagePrefix) {
 				return nil
@@ -180,7 +196,8 @@ func (installer *engine) retireStaleLinkStages() error {
 			}
 			info, err := entry.Info()
 			if err != nil {
-				return fmt.Errorf("inspect link stage %s: %w", path, err)
+				installer.skip(fmt.Sprintf("stale link stage %s unreadable: %v", path, err))
+				return skipBelow
 			}
 			if now.Sub(info.ModTime()) < linkStageMinAge {
 				return skipBelow

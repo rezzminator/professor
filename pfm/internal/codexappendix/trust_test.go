@@ -165,7 +165,7 @@ func TestRegisterHookTrustIsANoopWhenTrustedAndReceiptMatches(t *testing.T) {
 		writes           int
 	}{
 		{"trusted enabled recorded", true, true, 0},
-		{"trusted disabled recorded", false, true, 1},
+		{"trusted disabled recorded", false, true, 0},
 		{"trusted enabled unrecorded", true, false, 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -344,7 +344,7 @@ func TestHookTrustStateReportsUnknownNativeTrust(t *testing.T) {
 	}
 }
 
-func TestRegisterHookTrustReenablesDisabledHandler(t *testing.T) {
+func TestRegisterHookTrustPreservesDisabledHandler(t *testing.T) {
 	account, binary, log := stageTrustAccount(t, func(account string) []listedHook {
 		h := ownHook(account, "trusted")
 		h.Enabled = false
@@ -355,8 +355,8 @@ func TestRegisterHookTrustReenablesDisabledHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	writes := writeRequests(t, log)
-	if len(writes) != 1 || !strings.Contains(writes[0], `"enabled":true`) {
-		t.Fatalf("disabled native handler was not enabled: %v", writes)
+	if len(writes) != 0 {
+		t.Fatalf("disabled native handler was changed: %v", writes)
 	}
 }
 
@@ -428,6 +428,9 @@ func TestNativeHookTrustState(t *testing.T) {
 				}
 			}
 			trusted, err := NativeHookTrustState(t.Context(), binary, account, trustCommand)
+			if variant == "disabled" && !errors.Is(err, ErrNativeHookDisabled) {
+				t.Fatalf("disabled state indistinguishable from repairable trust: %v", err)
+			}
 			switch variant {
 			case "trusted":
 				if !trusted || err != nil {

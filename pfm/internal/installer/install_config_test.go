@@ -253,6 +253,13 @@ func installSeedClaude(t *testing.T, example []byte) map[string]json.RawMessage 
 	if err != nil || seeded == "" {
 		t.Fatalf("InstallConfig seeded=%q err=%v", seeded, err)
 	}
+	// Removing default keys must not alphabetize either object in the seed.
+	for _, pair := range [][2]string{{`"version"`, `"claude"`}, {`"permissionMode"`, `"binary"`}} {
+		left, right := bytes.Index(got.SeedContent, []byte(pair[0])), bytes.Index(got.SeedContent, []byte(pair[1]))
+		if left >= 0 && right >= 0 && left > right {
+			t.Errorf("seed key order %s after %s: %s", pair[0], pair[1], got.SeedContent)
+		}
+	}
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(got.SeedContent, &document); err != nil {
 		t.Fatalf("seed bytes are not JSON: %v\n%s", err, got.SeedContent)

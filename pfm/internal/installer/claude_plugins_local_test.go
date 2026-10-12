@@ -94,9 +94,9 @@ func TestClaudePluginTargets(t *testing.T) {
 			ID:     "sub-agent-compact@sub-agent-compact",
 		},
 		{
-			Name:   "agent-effort",
-			Source: "rezzminator/agent-effort",
-			ID:     "agent-effort@agent-effort",
+			Name:   "effort-live-control",
+			Source: "rezzminator/effort-live-control",
+			ID:     "effort-live-control@effort-live-control",
 		},
 		{
 			Name:   "tool-visibility-controller",
@@ -176,11 +176,11 @@ func TestClaudePluginTargets(t *testing.T) {
 		}, []ClaudePluginTarget{local(extra, root)}},
 		{"full ids are ensured as named, on any build", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{
-				{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, {ID: "agent-effort@some-market"},
+				{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, {ID: "effort-live-control@some-market"},
 			},
 		}, []ClaudePluginTarget{
 			{Name: "typesafe", ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills", MarketplaceName: "typesafe-ai"},
-			{Name: "agent-effort", ID: "agent-effort@some-market", MarketplaceName: "some-market"},
+			{Name: "effort-live-control", ID: "effort-live-control@some-market", MarketplaceName: "some-market"},
 		}},
 		{"an empty list ensures nothing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{}}, []ClaudePluginTarget{}},
 	} {

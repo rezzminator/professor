@@ -1,9 +1,9 @@
 ---
-name: "reviewer-nt"
-from: "reviewer"
-tools: "Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__compact"
+name: reviewer-nt
+from: reviewer
+tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__compact
 unset:
-  - "skills"
+  - skills
 pins:
   "(intro)": "sha256:8b70b9c6cdc3f271ae1434243b733e4a2a50e9da6226f7b20c99a13305e023aa"
   "Phase 0 — Read the change and cut threads (≤10 calls)": "sha256:c8e51ae9d7466b83fe8eec38e024a28899f0e1ead4dffa3390af12122f9a2de3"

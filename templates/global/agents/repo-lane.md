@@ -1,8 +1,8 @@
 ---
-name: "repo-lane"
+name: repo-lane
 abstract: true
 pins:
-  Spawning: "sha256:27889d0b3c5627ba7084416e8036b2f2329a9f2e6c893dba8b760e353a928c19"
+  Spawning: sha256:27889d0b3c5627ba7084416e8036b2f2329a9f2e6c893dba8b760e353a928c19
 ---
 
 ## Spawning

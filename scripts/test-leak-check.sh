@@ -427,15 +427,95 @@ else
 fi
 # A new ref's commits the remote already holds were judged by the push that published them:
 # a leak scrubbed long ago must not block every later new-branch push.
+pgit remote add other "$pushed/.git" 2> /dev/null || true
+pgit remote add origin "$pushed/.git" 2> /dev/null || true
+real_range_remote() { # real_range_remote <old> <new> <remote>
+  out="$(PFM_DEV_REPO_GIT_DIR="$pushed/.git" PFM_DEV_REPO_WORK_TREE="$pushed" LEAK_TERMS="$T/terms" LC_ALL=C.UTF-8 \
+    bash "$ROOT/scripts/leak-check.sh" --range "$1" "$2" --remote "$3" 2> "$T/err" < /dev/null)"
+  rc=$?; err="$(cat "$T/err")"
+}
 pgit update-ref refs/remotes/origin/main HEAD
 pgit checkout -q -b fresh-branch
 printf 'clean\n' > "$pushed/fresh.txt"
 pgit add fresh.txt && pgit commit -q -m fresh
-real_range "$empty_tree" HEAD
+real_range_remote "$empty_tree" HEAD origin
 if [[ "$rc" -eq 0 && "$err" == *'1 newly reachable commit'* ]]; then
-  ok 'F7: new-ref empty-tree base scans only commits no remote holds'
+  ok 'F7: new-ref empty-tree base scans only commits the push target holds nowhere'
 else
-  bad 'F7: new-ref empty-tree base scans only commits no remote holds' "rc=$rc; out=$out; err=$err"
+  bad 'F7: new-ref empty-tree base scans only commits the push target holds nowhere' "rc=$rc; out=$out; err=$err"
+fi
+# No push target named: nothing is provably pre-scanned, so no remote's refs exclude a commit.
+real_range "$empty_tree" HEAD
+if [[ "$rc" -eq 1 && "$out" == *'LEAK transient.txt: syntheticsecret'* ]]; then
+  ok 'F5: a new ref with no push target named scans every reachable commit'
+else
+  bad 'F5: a new ref with no push target named scans every reachable commit' "rc=$rc; out=$out; err=$err"
+fi
+
+# F4: a pushed ref whose target is a tree has no commit to enumerate; it is refused by name, never
+# reported as NOTHING TO SCAN, whichever kind of base the hook picked.
+tree_tip="$(pgit rev-parse 'HEAD^{tree}')"
+for base_name in empty_tree head_commit; do
+  case "$base_name" in empty_tree) base="$empty_tree" ;; head_commit) base="$(pgit rev-parse HEAD)" ;; esac
+  real_range "$base" "$tree_tip"
+  if [[ "$rc" -ne 0 && "$err" == *"$tree_tip"* && "$err" == *'does not resolve to a commit'* && "$out$err" != *'NOTHING TO SCAN'* && "$out" != *'leak-check: clean'* ]]; then
+    ok "F4: a range whose NEW is a tree is refused by name ($base_name base)"
+  else
+    bad "F4: a range whose NEW is a tree is refused by name ($base_name base)" "rc=$rc; out=$out; err=$err"
+  fi
+done
+
+# F5: the exclusion covers the push target's remote alone. A leak that only ANOTHER remote holds is
+# still scanned when the push goes to origin; a push target git does not know excludes no remote at all.
+pgit checkout -q -b other-held
+printf 'syntheticsecret\n' > "$pushed/other-held.txt"
+pgit add other-held.txt && pgit commit -q -m other-held
+pgit update-ref refs/remotes/other/held HEAD
+real_range_remote "$empty_tree" HEAD origin
+if [[ "$rc" -eq 1 && "$out" == *'LEAK other-held.txt: syntheticsecret'* ]]; then
+  ok 'F5: a leak only another remote holds is scanned when the push goes to origin'
+else
+  bad 'F5: a leak only another remote holds is scanned when the push goes to origin' "rc=$rc; out=$out; err=$err"
+fi
+real_range_remote "$empty_tree" HEAD other
+if [[ "$rc" -eq 0 && "$out" != *'LEAK '* ]]; then
+  ok 'F5: the same commits are skipped when the push target is the remote that holds them'
+else
+  bad 'F5: the same commits are skipped when the push target is the remote that holds them' "rc=$rc; out=$out; err=$err"
+fi
+real_range_remote "$empty_tree" HEAD 'https://example.invalid/some.git'
+if [[ "$rc" -eq 1 && "$out" == *'LEAK other-held.txt: syntheticsecret'* ]]; then
+  ok 'F5: a push target that is no configured remote scans commits only another remote holds'
+else
+  bad 'F5: a push target that is no configured remote scans commits only another remote holds' "rc=$rc; out=$out; err=$err"
+fi
+
+# F5, hook side: pre-push hands the remote name it receives as $1 to leak-check, and nothing when git gave none.
+hook_repo="$T/hook-repo"
+mkdir -p "$hook_repo/.githooks" "$hook_repo/scripts"
+cp "$ROOT/.githooks/pre-push" "$hook_repo/.githooks/pre-push"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$T/hook-calls" > "$hook_repo/scripts/leak-check.sh"
+chmod +x "$hook_repo/scripts/leak-check.sh"
+git init -q "$hook_repo" && git -C "$hook_repo" config core.hooksPath .githooks
+git -C "$hook_repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m hook
+hook_sha="$(git -C "$hook_repo" rev-parse HEAD)"
+hook_push() { # hook_push <hook args>...: one new-ref push of HEAD to refs/heads/feature
+  : > "$T/hook-calls"
+  printf 'refs/heads/feature %s refs/heads/feature %s\n' "$hook_sha" 0000000000000000000000000000000000000000 \
+    | (cd "$hook_repo" && bash .githooks/pre-push "$@" > /dev/null 2> "$T/hook-err")
+  rc=$?
+}
+hook_push origin 'https://example.invalid/r.git'
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-calls")" == *"--range "*" $hook_sha --remote origin" ]]; then
+  ok 'F5: pre-push passes the remote name to leak-check as --remote'
+else
+  bad 'F5: pre-push passes the remote name to leak-check as --remote' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
+fi
+hook_push
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-calls")" == *"--range "*" $hook_sha" && "$(cat "$T/hook-calls")" != *--remote* ]]; then
+  ok 'F5: pre-push without a remote name passes no --remote'
+else
+  bad 'F5: pre-push without a remote name passes no --remote' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
 fi
 
 printf '!structural-only\n' > "$T/structural-terms"

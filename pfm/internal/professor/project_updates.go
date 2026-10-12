@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
@@ -18,7 +19,7 @@ import (
 // builds the report, captures the pinned→current diff for every UPDATED
 // item, and writes the human or JSON body. Both callers use projectReportExit
 // for the same clean/review/failure mapping. A non-nil scan adds retired-name
-// hits in unpinned files as review items and unreadable files as failures.
+// hits as review items and unreadable files as failures.
 func renderProjectReport(
 	root, home string,
 	jsonOutput bool,
@@ -44,7 +45,7 @@ func renderProjectReport(
 }
 
 // RetiredNameHit is one retired command, agent, skill, phase, tool or path
-// name found on one line of a project file the baseline does not pin.
+// name found on one line of a project file.
 type RetiredNameHit struct {
 	Path      string `json:"path"`
 	Line      int    `json:"line"`
@@ -73,9 +74,11 @@ type RetiredNameScan struct {
 // package, so the caller passes it in.
 type RetiredNameScanner func(root string, pinned map[string]bool) RetiredNameScan
 
-// captureRetiredNames runs scan over the project, skipping every pinned
-// local file (the item diff already covers it), and records the result on
-// the report. A nil scan records nothing: the report then carries no
+// captureRetiredNames runs scan over the project, skipping the pinned local
+// files whose report row already covers them (every non-CURRENT pin: the
+// upstream diff or the advice on its row), and records the result on the
+// report. A CURRENT pin's file is scanned: the project's own edits to it show
+// in no diff. A nil scan records nothing: the report then carries no
 // retired-name section at all, never an empty one.
 func captureRetiredNames(report *projectReport, scan RetiredNameScanner) (anyFailed bool) {
 	if scan == nil {
@@ -225,10 +228,49 @@ func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
 }
 
 // renderProjectCheck is the bare `pfm update` post-update report: 0 clean, 1
-// review required, 3 failure (an unreadable diff is a failure).
-func renderProjectCheck(root, home string, jsonOutput bool, stdout io.Writer) int {
-	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout, nil)
+// review required, 3 failure (an unreadable diff or file scan is a failure).
+// scan is the retired-name scan, so an adopter who reads only this report
+// learns of retired references too.
+func renderProjectCheck(root, home string, jsonOutput bool, stdout io.Writer, scan RetiredNameScanner) int {
+	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout, scan)
 	return projectReportExit(reviewRequired, failed)
+}
+
+// runPostUpdate reports project drift after a successful binary update. No baseline is a successful NOT-MANAGED terminal.
+func runPostUpdate(
+	rootFlag string,
+	jsonOutput bool,
+	stdout io.Writer,
+	runtime config.Runtime,
+	scan RetiredNameScanner,
+) int {
+	root, found, err := ResolveProjectRoot(rootFlag)
+	if err != nil {
+		writeProjectFailure(stdout, jsonOutput, err)
+		return 3
+	}
+	if found {
+		return renderProjectCheck(root, runtime.Paths.Home, jsonOutput, stdout, scan)
+	}
+	writeProjectUnmanaged(stdout, jsonOutput)
+	return 0
+}
+
+// writeProjectMovedRow is a MOVED item's report row: the renamed template's
+// successor and the verbs that carry the adopter's file over.
+func writeProjectMovedRow(stdout io.Writer, item projectReportItem) {
+	fmt.Fprintf(
+		stdout,
+		"    %s   %s — moved upstream to %s (%s): keep your file, move it to %s, then pfm update pin --template %s %s and pfm update drop %s\n",
+		item.Local,
+		item.Template,
+		item.MovedTo,
+		item.MovedLocal,
+		item.MovedLocal,
+		item.MovedTo,
+		item.MovedLocal,
+		item.Local,
+	)
 }
 
 func projectReportExit(reviewRequired, failed bool) int {
@@ -246,7 +288,7 @@ func projectReportExit(reviewRequired, failed bool) int {
 // or store unreadable, any UPDATED diff unreadable, any file scan could not
 // read). It resolves the root itself and shares its report writing with
 // renderProjectCheck; scan (update.ScanRetiredNames from doctor) adds the
-// retired-name hits in the project's unpinned files.
+// retired-name hits in the project's files.
 func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer, scan RetiredNameScanner) int {
 	root, found, err := ResolveProjectRoot(rootFlag)
 	if err != nil {

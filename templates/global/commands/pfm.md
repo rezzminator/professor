@@ -40,10 +40,10 @@ Wiring verbs (hooks and services call these; you rarely type them): name-sync, s
 
 The blueprint never rewrites a project file after `pfm init`; every upstream change is hand-applied.
 
-1. `pfm doctor --project-updates` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, or `LOCAL-DELETED`, and prints under each `UPDATED` row the upstream diff since its pin; it writes nothing and exits 0 clean, 1 review, 3 failure. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-run the report.
-2. Read what upstream changed in each printed diff — the intent of the change — and decide per file what applies locally; install-time values are never read on update.
+1. `pfm doctor --project-updates` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, `MOVED`, or `LOCAL-DELETED`, and prints under each `UPDATED` row the upstream diff since its pin. Its `RETIRED-NAME` section lists retired references outside pinned files; `UNREADABLE` names scan failures. It writes nothing and exits 0 clean, 1 review, 3 failure. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-run the report.
+2. Read each printed diff and `RETIRED-NAME` hit, and decide per file what applies locally; install-time values are never read on update.
 3. Port what applies through `/pcm`, keeping the project's own edits (the guarded framework-edit flow).
-4. Advance the pin: `pfm update pin <local>...` (or `--all`); a `NEW` template you adopt: `pfm update pin --template <template> <local>`; one you will never take: `pfm update ignore <template>...` (`--undo` reverses); a `GONE-UPSTREAM` or `LOCAL-DELETED` file you keep or forget: `pfm update drop <local>...`.
+4. Advance the pin: `pfm update pin <local>...` (or `--all`); a `NEW` template you adopt: `pfm update pin --template <template> <local>`; a `MOVED` file: keep it, move it to the row's new local path, then `pfm update pin --template <new-template> <new-local>` and `pfm update drop <old-local>`; one you will never take: `pfm update ignore <template>...` (`--undo` reverses); a `GONE-UPSTREAM` or `LOCAL-DELETED` file you keep or forget: `pfm update drop <local>...`.
 
 `pfm update` (bare) advances the source clone to the latest release tag (or `--to vX.Y.Z`), rebuilds and installs the binary, runs `pfm doctor` (rolling back on failure), then prints the same report `pfm doctor --project-updates` prints for this project — start step 2 from there.
 

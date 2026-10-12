@@ -39,7 +39,9 @@ func stateExpiryEngine(home string, now time.Time, output *bytes.Buffer, apply b
 // writer's own stamp where the name carries one (an archive moved by rename
 // keeps its old mtime, so a backup made yesterday must not read as old), else
 // the mtime a copy got; live state, unstamped names and a flight's hand
-// archive are never touched.
+// archive are never touched. The dirs pfm doctor moved aside (stale-backup,
+// stray-claude-state) were promised "never deleted", so install keeps them at
+// any age.
 func TestExpireStateBackups(t *testing.T) {
 	now := time.Date(2031, 2, 3, 4, 5, 6, 0, time.Local)
 	old, young := now.Add(-31*24*time.Hour), now.Add(-24*time.Hour)
@@ -61,9 +63,16 @@ func TestExpireStateBackups(t *testing.T) {
 		{"archived store entry stamped yesterday keeps its old mtime", "retired-store-entries/.claude.json" +
 			".pre-professor-" + stamp(young) + ".1", "", old, young, false},
 		{"retired command backup", "retired-commands/cc-ls.pre-professor-" + stamp(old), "", old, old, true},
-		{"doctor stale backup past its window", "stale-backup/" + stamp(old), ".zshrc", young, old, true},
+		{"doctor stale backup past its window is kept", "stale-backup/" + stamp(old), ".zshrc", young, old, false},
 		{"doctor stale backup inside its window", "stale-backup/" + stamp(young) + ".1", ".zshrc", old, young, false},
-		{"stray claude state stamped in UTC", "stray-claude-state/" + utc(old), ".claude.json", young, old, true},
+		{
+			"stray claude state stamped in UTC past its window is kept",
+			"stray-claude-state/" + utc(old),
+			".claude.json",
+			young,
+			old,
+			false,
+		},
 		{"stray claude state inside its window", "stray-claude-state/" + utc(young), ".claude.json", old, young, false},
 		{"unstamped file in an archive dir", "retired-store-entries/notes.txt", "", old, time.Time{}, false},
 		{"the live state db", "pfm.db", "", old, time.Time{}, false},

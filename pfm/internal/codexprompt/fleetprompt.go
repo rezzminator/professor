@@ -20,12 +20,13 @@ var codexFleetPrompt = sync.OnceValues(func() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The shared parts stay engine-neutral ON DISK: the tail writes Claude's
-	// /code-review, the spelling a Claude executor runs. Codex's mapping is
-	// applied HERE, at compose time, so the staged codex.md, every account's
-	// developer_instructions, doctor's comparison and every role seat carry
-	// the same bytes (review.go).
-	return rewriteCodeReview(string(prompt)), nil
+	// The shared parts stay engine-neutral ON DISK, so a part that spells
+	// Claude's /code-review (none does today) keeps the spelling a Claude
+	// executor runs. Codex's mapping is applied HERE, at compose time, so the
+	// staged codex.md, every account's developer_instructions and doctor's
+	// comparison carry the same bytes; a role body, which is Claude-authored
+	// text of its own, takes the same mapping in agentrole (review.go).
+	return RewriteCodeReview(string(prompt)), nil
 })
 
 // FleetPrompt is the composed Codex fleet prompt and the ONE door every

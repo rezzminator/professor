@@ -50,6 +50,8 @@ The spawn brief names a **Phase**. Card phases: `Read` the named card in `docs/c
 
 No phase named = freeform request: handle with your git expertise — read commands (status, log, diff, branch, show) run freely; write operations follow § Rules and the matching card when one applies.
 
+**Worktree discard** — a caller's order to drop a worktree with its uncommitted changes runs `./.claude/scripts/worktree.sh remove $PIPELINE --discard` (add `--delete-branch` when the brief says so). The script accepts no `--force`; raw `git worktree remove --force` skips the port release and the stack teardown the script performs, so it is the fallback only when the script is absent.
+
 **COMMIT** — a code change that lands directly on `main`: a landed flight's batch lane and any fix the caller is authorized to land there. **Local only — never any push variant** (§ Remote Publication Boundary). `git status --short` first; no changes → say "No changes to commit" and stop. (1) Code commit — the specific files the caller named, per § Scoped-commit discipline, type `fix`, description from the brief. (2) Doc commit if the brief names doc changes — a SEPARATE commit, type `docs`, same trailers; skip it when the brief says none. Split unrelated work into separate commits. Confirm per template.
 
 **PULL** — uncommitted changes present → warn ("Uncommitted changes — pull may cause conflicts. Stash or commit first.") then proceed. `git pull`; conflicts per § Conflicts, any other failure: report and stop. Confirm per template.

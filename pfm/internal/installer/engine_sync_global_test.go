@@ -8,9 +8,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -163,20 +166,57 @@ func TestWireEngineSyncGlobalWithoutTheBinaryFailsTheStep(t *testing.T) {
 	t.Setenv("ENGINE_SYNC_HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
 	for _, name := range []string{"Codex home configured", "clone present with empty Codex roster"} {
-		t.Run(name, func(t *testing.T) {
-			installer, _, home := engineSyncGlobalEngine(t, ModeApply, nil)
-			if name == "clone present with empty Codex roster" {
-				installer.options.CodexHomes = []string{}
-				if err := os.MkdirAll(installer.options.SourceRepo, 0o700); err != nil {
-					t.Fatal(err)
+		for _, mode := range []Mode{ModeApply, ModeDryRun} {
+			t.Run(fmt.Sprintf("%s mode-%d", name, mode), func(t *testing.T) {
+				installer, _, home := engineSyncGlobalEngine(t, mode, nil)
+				if strings.HasPrefix(name, "clone present") {
+					installer.options.CodexHomes = []string{}
+					if err := os.MkdirAll(installer.options.SourceRepo, 0o700); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			err := installer.wireEngineSyncGlobal(nil)
-			stable := enginesync.StablePath(installer.env(), home)
-			if err == nil || !strings.HasPrefix(err.Error(), "engine-sync binary unavailable: "+stable+": ") {
-				t.Fatalf("wireEngineSyncGlobal = %v, want the unavailable binary at %s", err, stable)
-			}
-		})
+				err := installer.wireEngineSyncGlobal(nil)
+				stable := enginesync.StablePath(installer.env(), home)
+				if err == nil || !strings.HasPrefix(err.Error(), "engine-sync binary unavailable: "+stable+": ") {
+					t.Fatalf("wireEngineSyncGlobal = %v, want the unavailable binary at %s", err, stable)
+				}
+				var unavailable *enginesync.UnavailableError
+				if !errors.As(err, &unavailable) {
+					t.Fatalf("wireEngineSyncGlobal = %v, want it to wrap the UnavailableError", err)
+				}
+				for _, repair := range []string{
+					"claude plugin install engine-sync@professor",
+					"start a new Claude session",
+					"pfm update",
+					"pfm install --yes",
+				} {
+					if !strings.Contains(err.Error(), repair) {
+						t.Fatalf("error %q does not name the repair step %q", err, repair)
+					}
+				}
+			})
+		}
+	}
+}
+
+// The adopter reads the repair in the preflight refusal that stops the install
+// before any step applies, not only in the step's own error.
+func TestInstallPreflightWithoutEngineSyncNamesTheRepair(t *testing.T) {
+	withoutEngineSync(t)
+	home := t.TempDir()
+	clone := filepath.Join(home, ".professor")
+	if err := os.MkdirAll(clone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: clone,
+		Runner: &fakeRunner{}, Stdout: &output,
+	})
+	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
+		!strings.Contains(err.Error(), "claude plugin install engine-sync@professor") ||
+		!strings.Contains(err.Error(), "start a new Claude session") {
+		t.Fatalf("Run = %v, want the preflight refusal naming the engine-sync repair\n%s", err, output.String())
 	}
 }
 
@@ -320,6 +360,142 @@ func TestWireEngineSyncGlobalUninstallPreviewWithoutTheBinarySkips(t *testing.T)
 	}
 	if !installer.engineSyncAbsent {
 		t.Fatal("the absent binary was not remembered for the targets step")
+	}
+}
+
+// engineSyncFault points ENGINE_SYNC_BIN at an engine-sync that fails the
+// named way (not one that is absent) and returns the text the fault carries.
+func engineSyncFault(t *testing.T, fault string) string {
+	t.Helper()
+	switch fault {
+	case "too old":
+		t.Setenv("ENGINE_SYNC_BIN", writeScript(t, t.TempDir(), "engine-sync", "#!/bin/sh\necho 'engine-sync 0.0.1'\n"))
+		return "older than required"
+	case "run error":
+		testjail.FakeEngineSync(t, `{"ok":false,"events":[],"error":"boom"}`, 1)
+		return "boom"
+	case "conflict":
+		testjail.FakeEngineSync(t,
+			`{"ok":false,"events":[{"verb":"conflict","message":"CONFLICT /h/.codex/prompts/a.md"}],"error":""}`, 1)
+		return "CONFLICT /h/.codex/prompts/a.md"
+	}
+	t.Fatalf("unknown engine-sync fault %q", fault)
+	return ""
+}
+
+// An uninstall whose engine-sync is present but faulty (too old, a failing
+// global run, a conflict) is not a preflight refusal: the preview skips with
+// the fault's text and raises no plan error, and the apply defers the failure
+// so every unwire step still runs and the run exits non-zero naming it.
+func TestWireEngineSyncGlobalUninstallFaultPreviewSkipsAndApplyDefers(t *testing.T) {
+	for _, fault := range []string{"too old", "run error", "conflict"} {
+		for _, apply := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s apply=%v", fault, apply), func(t *testing.T) {
+				installer, output, _ := engineSyncGlobalEngine(t, ModeUninstall, nil)
+				installer.apply = apply
+				writeFixture(
+					t,
+					filepath.Join(installer.options.SourceRepo, "templates", "global", "engine-sync", "config.json"),
+					`{"version":1}`,
+				)
+				want := engineSyncFault(t, fault)
+				if err := installer.wireEngineSyncGlobal(nil); err != nil {
+					t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
+				}
+				if len(installer.planErrors) != 0 {
+					t.Fatalf("planErrors = %v, want none", installer.planErrors)
+				}
+				if !apply {
+					if len(installer.deferred) != 0 {
+						t.Fatalf(
+							"the preview deferred %v: the preflight would refuse the uninstall",
+							installer.deferred,
+						)
+					}
+					if !regexp.MustCompile(`(?m)^  skip    .*` + regexp.QuoteMeta(want)).MatchString(output.String()) {
+						t.Fatalf("the preview transcript has no skip naming %q:\n%s", want, output.String())
+					}
+					return
+				}
+				if len(installer.deferred) != 1 || !strings.Contains(installer.deferred[0].Error(), want) {
+					t.Fatalf("apply deferred = %v, want one failure naming %q", installer.deferred, want)
+				}
+			})
+		}
+	}
+}
+
+// A faulty engine-sync on a whole uninstall run: the preflight lets it
+// through, every unwire step runs, and the run's error names the fault.
+func TestUninstallEngineSyncFaultIsNotAPreflightRefusal(t *testing.T) {
+	home := t.TempDir()
+	runner := &fakeRunner{manager: true}
+	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targets := enginesync.TargetsPath(paths.OSEnv{}, home)
+	if _, err := os.Lstat(targets); err != nil {
+		t.Fatalf("install wrote no %s: %v", targets, err)
+	}
+	want := engineSyncFault(t, "run error")
+	runner.calls = nil
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Runner: runner,
+	})
+	if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("uninstall error = %v, want the engine-sync fault %q and no preflight refusal", err, want)
+	}
+	if _, statErr := os.Lstat(targets); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("uninstall left %s after the engine-sync fault: %v", targets, statErr)
+	}
+	teardown := "disable --now"
+	if schedulerIsLaunchd {
+		teardown = "launchctl bootout"
+	}
+	if joined := strings.Join(runner.calls, "\n"); !strings.Contains(joined, teardown) {
+		t.Fatalf("the unit teardown (%q) did not run after the engine-sync fault:\n%s", teardown, joined)
+	}
+}
+
+// hungEngineSync answers the version probe and then blocks `global` until its
+// context ends, as a wedged engine-sync does.
+type hungEngineSync struct{ deps.Runner }
+
+func (hungEngineSync) Run(ctx context.Context, argv []string, _ deps.RunOptions) (deps.RunResult, error) {
+	if len(argv) > 1 && argv[1] == "version" {
+		return deps.RunResult{Stdout: []byte("engine-sync 9.0.0\n")}, nil
+	}
+	<-ctx.Done()
+	return deps.RunResult{ExitCode: -1}, ctx.Err()
+}
+
+// engine-sync global is bounded: a hung run ends at the deadline with an error
+// naming engine-sync and that deadline, never a silent hang. The deadline is
+// injected, so the test does not wait the real five minutes.
+func TestWireEngineSyncGlobalHasADeadline(t *testing.T) {
+	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	for _, mode := range []Mode{ModeApply, ModeDryRun} {
+		t.Run(fmt.Sprintf("mode-%d", mode), func(t *testing.T) {
+			installer, output, _ := engineSyncGlobalEngine(t, mode, nil)
+			installer.engineSyncExec = hungEngineSync{}
+			installer.engineSyncDeadline = 50 * time.Millisecond
+			err := installer.wireEngineSyncGlobal(nil)
+			if err == nil || !strings.Contains(err.Error(), "engine-sync global") ||
+				!strings.Contains(err.Error(), "timed out after 50ms") {
+				t.Fatalf(
+					"wireEngineSyncGlobal = %v, want engine-sync global timed out after 50ms\n%s",
+					err,
+					output.String(),
+				)
+			}
+		})
+	}
+	fresh, _, _ := engineSyncGlobalEngine(t, ModeApply, nil)
+	if got := fresh.engineSyncGlobalDeadline(); got != 5*time.Minute {
+		t.Fatalf("default engine-sync global deadline = %s, want 5m0s", got)
 	}
 }
 
@@ -521,8 +697,9 @@ func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
 				if err == nil ||
 					!strings.Contains(
 						err.Error(),
-						"engine-sync 0.1.0 is older than required 0.2.0-alpha — run make host-install",
-					) {
+						"engine-sync 0.1.0 is older than required 0.2.0-alpha — update the plugin "+
+							"(`claude plugin update engine-sync@professor`), then start a new Claude session",
+					) || strings.Contains(err.Error(), "make host-install") {
 					t.Fatalf("old binary = %v", err)
 				}
 			} else if err != nil {

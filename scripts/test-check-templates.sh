@@ -41,6 +41,7 @@ name="${0##*/}"
 { printf '%s' "$name"; [ "$#" = 0 ] || printf ' %q' "$@"; printf '\n'; } >> "$STUB_REC/calls"
 printf '%s %s LEAK_TERMS=%s\n' "$name" "$PWD" "${LEAK_TERMS-unset}" >> "$STUB_REC/env"
 echo "OUT-OF-$name"
+[ "$name" != leak-check.sh ] || [ -z "${STUB_NOTE:-}" ] || echo "$STUB_NOTE"
 [ -z "${STUB_LINES:-}" ] || seq -f 'line %g' 1 "$STUB_LINES"
 for key in "$name.${1##*/}" "$name"; do
   f="$STUB_REC/rc.$key"
@@ -82,7 +83,7 @@ R="$(cd "$R" && pwd -P)"
 reset() { rm -rf "$REC"; mkdir -p "$REC"; }
 rcseq() { local key="$1"; shift; printf '%s\n' "$@" > "$REC/rc.$key"; }
 go() { OUT="$(cd "${CWD:-$R}" && env -i PATH="$T/bin:$T/real" HOME="$T/home" STUB_REC="$REC" ${STUB_RESOLVE_RC:+STUB_RESOLVE_RC="$STUB_RESOLVE_RC"} ${TEST_LEAK_TERMS:+LEAK_TERMS="$TEST_LEAK_TERMS"} \
-  ${STUB_PH:+STUB_PH=1} ${STUB_SP_CRASH:+STUB_SP_CRASH=1} ${STUB_SP_RC:+STUB_SP_RC="$STUB_SP_RC"} ${STUB_LINES:+STUB_LINES="$STUB_LINES"} \
+  ${STUB_NOTE:+STUB_NOTE="$STUB_NOTE"} ${STUB_PH:+STUB_PH=1} ${STUB_SP_CRASH:+STUB_SP_CRASH=1} ${STUB_SP_RC:+STUB_SP_RC="$STUB_SP_RC"} ${STUB_LINES:+STUB_LINES="$STUB_LINES"} \
   bash "$R/.claude/scripts/check-templates.sh" "$@" 2>&1)"; RC=$?; }
 want() { printf '%s' "$1"; shift; [ "$#" = 0 ] || printf ' %q' "$@"; }
 chk() { local n="$1"; shift; if "$@"; then ok "$n"; else bad "$n" "rc=$RC" "$OUT"; fi; }
@@ -100,7 +101,7 @@ reset; go; chk "usage: no argument prints the usage line, exit 2, no check run" 
 reset; go docs/a.md ''; chk "usage: an empty argument beside a file" rejected "$USAGE"
 
 reset; go docs/a.md
-chk "all green: exit 0 and the verdict lines, one each, in order" bash -c '[ "$1" = 0 ] && [ "$(grep -E "^(PASS|FAIL|SKIP) " <<<"$0" | cut -d" " -f2 | tr "\n" " ")" = "rumdl leak clone placeholders scratch-paths descriptions manifest codex-markers opencode-writer-refs " ] && ! grep -qE "^(FAIL|SKIP) " <<<"$0"' "$OUT" "$RC"
+chk "all green: exit 0 and the verdict lines, one each, in order" bash -c '[ "$1" = 0 ] && [ "$(grep -E "^(PASS|FAIL|SKIP) " <<<"$0" | cut -d" " -f2 | tr "\n" " ")" = "rumdl leak clone placeholders scratch-paths descriptions manifest codex-markers opencode-writer-refs " ] && ! grep -qE "^(FAIL|SKIP) " <<<"$0" && grep -qxF "PASS leak" <<<"$0" && ! grep -q "structural-only" <<<"$0"' "$OUT" "$RC"
 
 reset; CWD="$R/docs" go a.md
 chk "path: cwd-relative resolves, rumdl gets the repository path" called "$(want rumdl check --output-format concise docs/a.md)"
@@ -123,6 +124,11 @@ reset; go docs/a.md scripts/a.sh
 chk "leak: every named file, as --files, run from the root" called "$(want leak-check.sh --files docs/a.md scripts/a.sh)"
 reset; go docs/nope.md
 chk "leak: no resolved file prints SKIP leak" line "SKIP leak (no named file it applies to)"
+reset; STUB_NOTE='leak-check: PRIVATE COVERAGE SKIPPED — explicit structural-only policy; scanning 4 structural pattern(s)' go docs/a.md
+chk "leak: a scan under the structural-only policy passes as PASS leak (structural-only), the denylist applied to none" line "PASS leak (structural-only)"
+# The plain denylist PASS case is covered by the all-green assertion above.
+reset; STUB_NOTE='leak-check: PRIVATE COVERAGE SKIPPED — explicit structural-only policy' rcseq leak-check.sh 1; go docs/a.md
+chk "leak: a failing structural-only scan is FAIL leak, never the structural-only PASS" bash -c 'grep -qxF "FAIL leak" <<<"$0" && ! grep -q "structural-only" <<<"$0"' "$OUT"
 reset; go docs/a.md
 chk "leak: LEAK_TERMS defaults to the main checkout's scripts/leak-terms.txt" grep -qxF "leak-check.sh $R LEAK_TERMS=$R/scripts/leak-terms.txt" "$REC/env"
 reset; TEST_LEAK_TERMS=/elsewhere/terms.txt go docs/a.md

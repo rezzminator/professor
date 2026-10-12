@@ -28,6 +28,12 @@ var releaseTargets = installer.ClaudePluginTargets(
 	installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()},
 )
 
+// bareNameFix is what doctor tells for a bare plugin name of ours that is not enabled or not
+// installed: the repair, the source it installs from and what a persistent failure means.
+func bareNameFix(name string) string {
+	return "run pfm install --yes; if it keeps failing, " + installer.BareClaudePluginRepair(name)
+}
+
 // writeDoctorInstalledPlugins records ids in dir's plugins/installed_plugins.json
 // the way claude does, each with an installPath that exists.
 func writeDoctorInstalledPlugins(t *testing.T, dir string, ids ...string) {
@@ -96,9 +102,12 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 			func(path, store string) string {
 				return "doctor: claude_plugins could not read the plugin records in " + store + ": parse " +
 					filepath.Join(store, "plugins", "known_marketplaces.json") + ": unexpected end of JSON input\n" +
-					"doctor: claude_plugins plugin agent-effort@agent-effort not enabled in " + path + " — run pfm install --yes\n" +
-					"doctor: claude_plugins plugin agent-effort@agent-effort not installed in " + store + " — run pfm install --yes\n"
-			}, 2, 1,
+					"doctor: claude_plugins plugin agent-effort@agent-effort not enabled in " + path + " — " + bareNameFix("agent-effort") + "\n" +
+					"doctor: claude_plugins plugin agent-effort@agent-effort not installed in " + store + " — " + bareNameFix("agent-effort") + "\n" +
+					"doctor: claude_plugins plugin typesafe@typesafe-ai cannot be checked: marketplace typesafe-ai cannot be looked up" +
+					" while the plugin records are unreadable, and its claude.plugins entry has no source — " +
+					"repair the unreadable file named above, then run pfm doctor again\n"
+			}, 3, 1,
 		},
 		{
 			"a marketplace record of the wrong type",
@@ -221,10 +230,12 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			switch state {
 			case "disabled":
 				warnings = 1
-				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not enabled in " + path + " — run pfm install --yes\n"
+				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not enabled in " + path + " — " +
+					bareNameFix("sub-agent-compact") + "\n"
 			case "uninstalled":
 				warnings = 1
-				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not installed in " + store + " — run pfm install --yes\n"
+				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not installed in " + store + " — " +
+					bareNameFix("sub-agent-compact") + "\n"
 			case "absent":
 				_, err := installer.ClaudePluginGaps(path, releaseTargets)
 				want = fmt.Sprintf("doctor: claude_plugins skipped: %v (store never set up)\n", err)
@@ -272,6 +283,115 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 					warnings,
 					failures,
 				)
+			}
+		})
+	}
+}
+
+// TestClaudePluginsDoctorBareNameNamesItsSource: a bare claude.plugins name that is not enabled or
+// not installed is told where pfm install gets it from and that a failing install means the entry
+// is wrong, not only "run pfm install --yes" (a typo installs from no repository, so that repair
+// can never close the gap). An -alpha build that falls back to the GitHub copy says the same.
+func TestClaudePluginsDoctorBareNameNamesItsSource(t *testing.T) {
+	for _, test := range []struct {
+		name, version, note string
+	}{
+		{"release", "", ""},
+		{"alpha falls back to GitHub", "0.80.0-alpha", "doctor: claude_plugins agent-efort: alpha build falls back to the GitHub copy" +
+			" agent-efort@agent-efort — claude.pluginCheckoutRoot unset\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := t.TempDir()
+			path := filepath.Join(store, "settings.json")
+			raw, _ := json.Marshal(map[string]any{"enabledPlugins": map[string]bool{}})
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(store, "plugins"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			tally := &doctorTally{}
+			printClaudePluginsDoctor(&out, store, installer.ClaudePluginBuild{
+				Version: test.version, Home: t.TempDir(), Plugins: []pfmconfig.ClaudePlugin{{ID: "agent-efort"}},
+			}, tally)
+			want := test.note +
+				"doctor: claude_plugins plugin agent-efort@agent-efort not enabled in " + path + " — " + bareNameFix("agent-efort") + "\n" +
+				"doctor: claude_plugins plugin agent-efort@agent-efort not installed in " + store + " — " + bareNameFix("agent-efort") + "\n"
+			if out.String() != want || tally.warnings != 2 || tally.failures != 0 {
+				t.Fatalf("got %q tally=%+v\nwant %q warnings=2", out.String(), tally, want)
+			}
+		})
+	}
+}
+
+// TestClaudePluginsDoctorNamesIdsWhilePluginRecordsAreUnreadable: the ids a listed entry needs a
+// known marketplace for come from claude.plugins, not from the unreadable records, so doctor names
+// each one it cannot verify beside the failure naming the file: a settings.json that is unreadable
+// as well, and the one id the readable records show enabled and installed, change nothing about
+// that; an id with a source needs no known marketplace and is never named here.
+func TestClaudePluginsDoctorNamesIdsWhilePluginRecordsAreUnreadable(t *testing.T) {
+	cannotCheck := func(id, marketplace string) string {
+		return "doctor: claude_plugins plugin " + id + " cannot be checked: marketplace " + marketplace +
+			" cannot be looked up while the plugin records are unreadable, and its claude.plugins entry has no source — " +
+			"repair the unreadable file named above, then run pfm doctor again\n"
+	}
+	for _, state := range []string{"known_marketplaces.json unreadable", "settings.json unreadable"} {
+		t.Run(state, func(t *testing.T) {
+			store := t.TempDir()
+			path := filepath.Join(store, "settings.json")
+			known := filepath.Join(store, "plugins", "known_marketplaces.json")
+			raw, _ := json.Marshal(map[string]any{"enabledPlugins": map[string]bool{"fine@fine-market": true}})
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			writeDoctorInstalledPlugins(t, store, "fine@fine-market")
+			if err := os.WriteFile(known, []byte("{"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var want string
+			var unreadable error
+			if state == "settings.json unreadable" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				_, unreadable = installer.ClaudePluginGaps(path, nil)
+			}
+			plugins := []pfmconfig.ClaudePlugin{
+				{ID: "first@one-market"},
+				{ID: "fine@fine-market"},
+				{ID: "sourced@two-market", Source: "o/two"},
+				{ID: "last@three-market"},
+			}
+			build := installer.ClaudePluginBuild{Plugins: plugins}
+			var out bytes.Buffer
+			tally := &doctorTally{}
+			printClaudePluginsDoctor(&out, store, build, tally)
+			_, recordErr := installer.ClaudePluginsUnresolved(store, installer.ClaudePluginTargets(build))
+			records := "doctor: claude_plugins could not read the plugin records in " + store + ": " + recordErr.Error() + "\n"
+			first, fine, last := cannotCheck("first@one-market", "one-market"),
+				cannotCheck("fine@fine-market", "fine-market"), cannotCheck("last@three-market", "three-market")
+			switch state {
+			case "known_marketplaces.json unreadable":
+				want = records +
+					"doctor: claude_plugins plugin sourced@two-market not enabled in " + path + " — run pfm install --yes\n" +
+					"doctor: claude_plugins plugin sourced@two-market not installed in " + store + " — run pfm install --yes\n" +
+					first + last
+				if tally.warnings != 4 || tally.failures != 1 {
+					t.Fatalf("tally=%+v, want 4 warnings 1 failure\n%s", tally, out.String())
+				}
+			case "settings.json unreadable":
+				want = records + first + fine + last +
+					"doctor: claude_plugins could not read " + path + ": " + unreadable.Error() + "\n"
+				if tally.warnings != 3 || tally.failures != 2 {
+					t.Fatalf("tally=%+v, want 3 warnings 2 failures\n%s", tally, out.String())
+				}
+			}
+			if out.String() != want {
+				t.Fatalf("got %q\nwant %q", out.String(), want)
 			}
 		})
 	}

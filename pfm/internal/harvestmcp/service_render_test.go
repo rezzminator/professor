@@ -130,6 +130,46 @@ func TestRenderReadItemNamesTheGapsOfAnIncompleteArtifact(t *testing.T) {
 	}
 }
 
+// TestRenderReadItemSizeProbeFailsAThinErrorPageLikeTheFullRead: a size probe (the default of a read
+// with `ask`) blanks the content, so it judges a thin HTTP error page by its char count and status
+// as the full read judges it by its text: under 500 chars at status 400 or above is a failure
+// block, not a size line for the answering model to treat as a good file; a thin page that was
+// answered 200 and a long page that was answered 404 stay size lines.
+func TestRenderReadItemSizeProbeFailsAThinErrorPageLikeTheFullRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.pdf")
+	source := "https://fixture.example/source.pdf"
+	for _, test := range []struct {
+		name         string
+		status       int
+		chars        int
+		wantFailed   bool
+		wantContains string
+	}{
+		{"thin page answered 404", 404, 120, true, harvest.PublicFailureMessage(harvest.Result{HTTPStatus: 404})},
+		{"thin page answered 200", 200, 120, false, "size: 120 chars"},
+		{"long page answered 404", 404, 900, false, "size: 900 chars"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := harvest.Result{
+				HTTPStatus: test.status, Bytes: 4096, Chars: test.chars, Tokens: 30, Path: path,
+			}
+			got, failed := RenderReadItem(1, 1, source, result, ReadView{SizeOnly: true})
+			if failed != test.wantFailed || !strings.Contains(got, test.wantContains) {
+				t.Fatalf(
+					"failed=%v block %q, want failed=%v containing %q",
+					failed,
+					got,
+					test.wantFailed,
+					test.wantContains,
+				)
+			}
+			if test.wantFailed && strings.Contains(got, "size:") {
+				t.Fatalf("a failed probe still renders a size line: %q", got)
+			}
+		})
+	}
+}
+
 // TestRenderFindNamesTheHarvesterSearchTool: an empty candidate list points
 // at harvester_search_web.
 func TestRenderFindNamesTheHarvesterSearchTool(t *testing.T) {

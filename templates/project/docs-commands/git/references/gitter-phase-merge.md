@@ -67,6 +67,8 @@ git branch --list "pipeline/$PIPELINE"  # VERIFY: must print nothing unless the 
 
 When the brief says to keep the branch, run `./.claude/scripts/worktree.sh remove $PIPELINE` instead. A branch still listed when deletion was required means the MERGE is unfinished: report the failure, even if the script printed "Branch deleted".
 
+Once the worktree is verified gone and the brief names the flight directory, delete `{flight directory}/UNLANDED.md` if it exists (the flight is landed) and report it on its own line before the final line.
+
 The completion report's final line states `worktree removed: {name} · branch {deleted|kept}` — the orchestrator treats a MERGE report without it as unfinished.
 
 ## 6. Update § Gotchas (only if needed)

@@ -629,7 +629,11 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 	}
 }
 
-func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T) {
+// An engine-sync conflict on an uninstall is not a preflight refusal: the
+// preview skips it, every unwire step runs (the global commands pfm linked go),
+// engine-sync's own apply still refuses to write past the conflict, and the run
+// exits non-zero naming it.
+func TestUninstallCodexConflictFailsTheRunAfterEveryUnwireStep(t *testing.T) {
 	home := t.TempDir()
 	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -648,16 +652,15 @@ func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T)
 
 	options.Mode = ModeUninstall
 	_, err := Run(context.Background(), options)
-	if err == nil || !strings.Contains(err.Error(), conflict) {
-		t.Fatalf("uninstall error=%v, want the engine-sync conflict", err)
+	if err == nil || !strings.Contains(err.Error(), conflict) || strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("uninstall error=%v, want the engine-sync conflict and no preflight refusal", err)
 	}
-	if _, err := os.Lstat(command); err != nil {
-		t.Fatalf("uninstall conflict removed global command before aborting: %v", err)
+	if _, err := os.Lstat(command); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("uninstall left the global command after an engine-sync conflict: %v", err)
 	}
-	for _, call := range testjail.EngineSyncCalls(t, record) {
-		if !strings.Contains(call, " --plan") {
-			t.Fatalf("engine-sync ran %q past a planned conflict", call)
-		}
+	calls := testjail.EngineSyncCalls(t, record)
+	if len(calls) != 2 || !strings.Contains(calls[0], " --plan") || strings.Contains(calls[1], " --plan") {
+		t.Fatalf("engine-sync calls = %q, want the preview --plan, then the apply", calls)
 	}
 }
 
@@ -1479,5 +1482,39 @@ func TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "keep.md" {
 		t.Fatalf("preview entries = %v, want only keep.md", names)
+	}
+}
+
+// A host that never ran an install of the build that renamed the reminder
+// still holds pfm-reminder.service and .timer: uninstall disables and unlinks
+// both, as the install that retires them does.
+func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
+	if schedulerIsLaunchd {
+		t.Skip("the systemd units are Linux-only")
+	}
+	home := t.TempDir()
+	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	units := []string{
+		filepath.Join(unitDir, "pfm-reminder.service"),
+		filepath.Join(unitDir, "pfm-reminder.timer"),
+	}
+	for _, unit := range units {
+		writeFixture(t, unit, "[Unit]\nDescription=renamed\n")
+	}
+	runner := &fakeRunner{manager: true, nameSyncIdle: true}
+	var removed bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &removed, Runner: runner,
+	}); err != nil {
+		t.Fatalf("uninstall: %v\n%s", err, removed.String())
+	}
+	for _, unit := range units {
+		if _, err := os.Lstat(unit); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("uninstall left %s: %v", unit, err)
+		}
+		if !strings.Contains(strings.Join(runner.calls, "\n"), "systemctl --user disable --now "+filepath.Base(unit)) {
+			t.Errorf("uninstall never disabled %s:\n%s", filepath.Base(unit), strings.Join(runner.calls, "\n"))
+		}
 	}
 }

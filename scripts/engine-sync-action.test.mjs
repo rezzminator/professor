@@ -4,13 +4,8 @@
 // Each case runs the action's actual YAML run script in a throwaway workspace;
 // only the Go compiler build is played, by a `go` function writing a stub binary.
 
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { test, assert, execFileSync, spawnSync, existsSync, mkdirSync, mkdtempSync, readFileSync,
+  rmSync, symlinkSync, writeFileSync, tmpdir, dirname, join, fileURLToPath } from "./node-test-helpers.mjs";
 
 const ACTION = join(dirname(fileURLToPath(import.meta.url)), "../.github/actions/engine-sync/action.yml");
 const RUNS = JSON.parse(execFileSync("python3", ["-c",

@@ -86,6 +86,83 @@ provision_marker() {
   echo "${gitdir}/provisioning-incomplete"
 }
 
+# Snapshot final provisioned bytes in the private Git directory, not the checkout.
+# Git's read-only object hash needs no extra tool and --no-filters hashes the actual bytes.
+# On success PROVISIONED_ENV_FILES is the list whose snapshots were recorded or verified.
+provisioned_env_hashes() {
+  local mode="$1" tree="$2" marker hashes action=inspect entry dir kind install env_files ef path key digest saved
+  [ "$mode" != record ] || action=record
+  marker="$(provision_marker "$tree")" || return 1
+  hashes="${marker%/*}/provisioned-env-hashes"
+  PROVISIONED_ENV_FILES=(.env.ports)
+  for entry in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
+    IFS='|' read -r dir kind install env_files <<< "$entry"
+    [ -n "$env_files" ] && [ "$env_files" != '-' ] || continue
+    for ef in $env_files; do
+      if [ "$dir" = '.' ]; then PROVISIONED_ENV_FILES+=("$ef"); else PROVISIONED_ENV_FILES+=("$dir/$ef"); fi
+    done
+  done
+  local error="Error: could not $action provisioned env hashes for $tree"
+  if [[ -L "$hashes" || ( -e "$hashes" && ! -d "$hashes" ) ]]; then
+    echo "$error: invalid metadata directory $hashes" >&2; return 1
+  fi
+  if [ "$mode" = record ]; then
+    if ! mkdir -p "$hashes" || ! rm -f "$hashes/complete"; then
+      echo "$error: cannot prepare $hashes; provisioning remains incomplete" >&2; return 1
+    fi
+  else
+    if [ -e "$marker" ]; then
+      echo "$error: provisioning remains incomplete" >&2; return 1
+    fi
+    if [ ! -d "$hashes" ]; then
+      # A manually added, artifact-free worktree needs no snapshot. Legacy artifacts
+      # are unknown bytes, never silently blessed by remove or by an already-ready create.
+      for path in "${PROVISIONED_ENV_FILES[@]}"; do
+        if [[ -e "$tree/$path" || -L "$tree/$path" ]]; then
+          echo "$error: missing metadata for $path; nothing torn down" >&2; return 1
+        fi
+      done
+      PROVISIONED_ENV_FILES=(); return 0
+    fi
+    if [[ ! -f "$hashes/complete" || -L "$hashes/complete" ]] || ! saved="$(cat "$hashes/complete")" || [ "$saved" != v1 ]; then
+      echo "$error: incomplete or invalid metadata $hashes; nothing torn down" >&2; return 1
+    fi
+  fi
+  for path in "${PROVISIONED_ENV_FILES[@]}"; do
+    if [[ "$path" = /* || "$path" = .. || "$path" = ../* || "$path" = */../* || "$path" = */.. ]]; then
+      echo "$error: invalid relative env path $path" >&2; return 1
+    fi
+    if ! key="$(printf '%s' "$path" | git -C "$tree" hash-object --stdin)"; then
+      echo "$error: cannot hash path $path" >&2; return 1
+    fi
+    if [[ -L "$tree/$path" || ( -e "$tree/$path" && ! -f "$tree/$path" ) ]]; then
+      if [ "$mode" = record ]; then echo "$error: $path is not a regular file" >&2
+      else echo "Error: dirty worktree refused; provisioned file changed type: $path; use --discard: $tree" >&2; fi
+      return 1
+    fi
+    digest=absent
+    if [ -f "$tree/$path" ] && ! digest="$(git -C "$tree" hash-object --no-filters -- "$tree/$path")"; then
+      echo "$error: cannot hash file $path" >&2; return 1
+    fi
+    if [ "$mode" = record ]; then
+      if [[ -L "$hashes/$key" ]] || ! printf '%s\n' "$digest" > "$hashes/$key"; then
+        echo "$error: cannot write snapshot for $path" >&2; return 1
+      fi
+    else
+      if [[ ! -f "$hashes/$key" || -L "$hashes/$key" ]] || ! saved="$(cat "$hashes/$key")" || [[ ! "$saved" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|absent)$ ]]; then
+        echo "$error: missing, unreadable or invalid snapshot for $path; nothing torn down" >&2; return 1
+      fi
+      if [ "$saved" != "$digest" ]; then
+        echo "Error: dirty worktree refused; provisioned bytes changed: $path; use --discard: $tree" >&2; return 1
+      fi
+    fi
+  done
+  if [ "$mode" = record ] && ! printf 'v1\n' > "$hashes/complete"; then
+    echo "$error: cannot finish metadata $hashes; provisioning remains incomplete" >&2; return 1
+  fi
+  return 0
+}
+
 cmd_create() {
   local pipeline="$1"
   local branch="pipeline/${pipeline}"
@@ -214,6 +291,7 @@ cmd_create() {
   #
   # {ENV_FILE_PROVISION} — SETUP fills this from the roster's env_files + port map.
 
+  provisioned_env_hashes record "$worktree_dir" || return 1
   if ! rm -f "$marker"; then
     echo "Error: could not clear the provisioning marker $marker; partial worktree: $worktree_dir" >&2
     return 1
@@ -226,7 +304,7 @@ cmd_create() {
 cmd_remove() {
   local pipeline="$1"
   shift
-  local delete_branch="" discard="" status
+  local delete_branch="" discard="" status rc=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --delete-branch) delete_branch=1 ;;
@@ -240,10 +318,16 @@ cmd_remove() {
 
   if [ -d "$worktree_dir" ]; then
     if [[ -z "$discard" ]]; then
-      # Judge only work: .env.ports is this script's own artifact, and an edit inside a
-      # submodule counts even where .gitmodules marks it `ignore = dirty`.
+      # Exclude only recorded bytes still matching, including gitignored env files;
+      # later edits refuse removal before Git status or any teardown. Submodule edits still count.
+      provisioned_env_hashes check "$worktree_dir" || return 1
+      local -a provisioned=()
+      local path
+      for path in "${PROVISIONED_ENV_FILES[@]+"${PROVISIONED_ENV_FILES[@]}"}"; do
+        provisioned+=(":(exclude,literal)$path")
+      done
       if ! status="$(git -C "$worktree_dir" status --porcelain --untracked-files=all --ignore-submodules=none \
-        -- . ':(exclude).env.ports')"; then
+        -- . "${provisioned[@]+"${provisioned[@]}"}")"; then
         echo "Error: could not inspect worktree; nothing torn down: $worktree_dir" >&2
         return 1
       fi
@@ -283,22 +367,29 @@ cmd_remove() {
   # Branch survives by default — it is the merged flight's revert path and can still
   # be LIVE (a post-merge gate still running) when cleanup runs; deletion is a
   # separate, explicit act, never bundled into worktree teardown.
+  # The worktree is gone by now: a refused deletion (an unmerged or squash-merged branch) is
+  # reported non-zero after the ports and the stack are cleaned, never instead of cleaning them.
   if [ -n "$delete_branch" ]; then
-    if ! git branch -d "$branch"; then
+    if git branch -d "$branch"; then
+      echo "Branch deleted: $branch"
+    else
       echo "Error: branch deletion failed: $branch" >&2
-      return 1
+      rc=1
     fi
-    echo "Branch deleted: $branch"
   else
     echo "Branch kept: $branch (pass --delete-branch to delete)"
   fi
 
   # Free port allocation
-  "$ALLOC" free "$pipeline"
+  "$ALLOC" free "$pipeline" || rc=1
 
   # Tear down the pipeline's docker test stack (containers + volumes).
-  nuke_pipeline_stack "$pipeline"
+  nuke_pipeline_stack "$pipeline" || rc=1
 
+  if [ "$rc" -ne 0 ]; then
+    echo "Error: cleanup of $pipeline finished with failures (see above)" >&2
+    return "$rc"
+  fi
   echo "Pipeline cleaned up: $pipeline"
 }
 
@@ -340,6 +431,7 @@ cmd_prune() {
   fi
 
   local pruned=0 failed=0
+  local -a nuke_failed=()
   for d in "${ROOT}/.worktrees"/*/; do
     [ -d "$d" ] || continue
     local name
@@ -380,15 +472,24 @@ cmd_prune() {
       continue
     fi
     rm -rf "$d"
-    nuke_pipeline_stack "$name"
+    # The directory is gone, so a failed teardown is named at the end, never allowed to end the loop.
+    nuke_pipeline_stack "$name" || nuke_failed+=("$name")
     echo "PRUNED: $name (orphaned worktree dir)"
     pruned=$((pruned + 1))
   done
   echo "Prune complete: $pruned orphaned worktree(s) removed."
+  local rc=0
   if (( failed )); then
     echo "Error: $failed orphaned worktree(s) kept: port allocation release failed" >&2
-    return 1
+    rc=1
   fi
+  if (( ${#nuke_failed[@]} )); then
+    local names
+    printf -v names '%s, ' "${nuke_failed[@]}"
+    echo "Error: stack teardown failed for ${#nuke_failed[@]} pruned worktree(s): ${names%, }" >&2
+    rc=1
+  fi
+  return "$rc"
 }
 
 cmd_list() {

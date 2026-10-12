@@ -164,7 +164,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.refresh-scope,templates.pfm-guard,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -775,6 +775,25 @@ if grep -Fq 'FAILSTEP agent roster ERROR' "$T/es.out" && grep -Fxq 'FAILURES=1' 
   ok 'roster reports policy staging failure as ERROR'
 else bad 'roster policy staging error' "$(cat "$T/es.out")"; fi
 mv "$T/saved-roster-policy.json" "$REPO_ROOT/templates/global/engine-sync/config.json"
+# checks_templates_codex_sync: the door test runs once per twin, the project-tier copy first; a red run is one red step
+# naming the twin that failed, and the other twin still runs.
+cs_case() { # cs_case [VAR=value…]: run it with `bash` stubbed to record each test invocation; output in $T/es.out
+  : > "$T/cs.calls"; FAILURES=0
+  (
+    [ $# -eq 0 ] || export "$@"
+    bash() { printf '%s\n' "$*" >> "$T/cs.calls"; [ "${STUB_CS_FAIL:-}" != "$2" ]; }
+    checks_templates_codex_sync
+    echo "FAILURES=$FAILURES"
+  ) >"$T/es.out" 2>&1
+}
+cs_case
+if [ "$(cat "$T/cs.calls")" = "$(printf '%s\n%s\n' "$REPO_ROOT/scripts/test-codex-sync.sh $REPO_ROOT/templates/project/scripts/codex-sync.sh" "$REPO_ROOT/scripts/test-codex-sync.sh $REPO_ROOT/.claude/scripts/codex-sync.sh")" ] && grep -Fxq 'FAILURES=0' "$T/es.out"; then
+  ok 'the codex-sync door test runs against the project-tier copy and then the .claude twin'
+else bad 'codex-sync door runs' "$(cat "$T/cs.calls")" "$(cat "$T/es.out")"; fi
+cs_case "STUB_CS_FAIL=$REPO_ROOT/.claude/scripts/codex-sync.sh"
+if [ "$(wc -l < "$T/cs.calls" | tr -d ' ')" = 2 ] && grep -Fxq 'FAILSTEP codex-sync regression FAILED (.claude/scripts/codex-sync.sh) — see output' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'a red codex-sync door test on one twin is one red step naming it'
+else bad 'codex-sync door failure' "$(cat "$T/cs.calls")" "$(cat "$T/es.out")"; fi
 # checks_templates_global_variants: every variant templates/global/agents/variants.json declares is rendered by the
 # engine-sync it built into a jail home; a render error, a short count and an unbuilt binary are each one red step.
 mkdir -p "$REPO_ROOT/templates/global/agents"
@@ -844,7 +863,7 @@ if [ "$(cat "$MIRROR_CALLS")" = "$want" ] && [ "$(cat "$T/es-build.calls")" = "e
   ok 'the opencode mirror is checked and doctored by the engine-sync it built, under its own scratch home'
 else bad 'opencode mirror' "$(cat "$T/es-build.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 es_case checks_templates_mirrors_opencode STUB_ES_OPENCODE_RC=1
-if grep -Fxq "FAILSTEP opencode mirror FAILED — run: engine-sync opencode build $REPO_ROOT" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+if grep -Fxq "FAILSTEP opencode mirror FAILED — run: pfm opencode build $REPO_ROOT" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'a failing opencode check names the engine-sync repair'
 else bad 'opencode mirror failure' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 es_case checks_templates_mirrors_opencode STUB_ES_BIN_RC=1
@@ -922,6 +941,7 @@ printf 'other repository\n' > "$leak_repo/plugins/demo/file.md"
 cat > "$leak_repo/scripts/leak-check.sh" <<'STUB'
 #!/usr/bin/env bash
 shift; printf '%s\n' "$@" >> "$LEAK_FILES_OUT"
+[ -z "${LEAK_STUB_NOTE:-}" ] || printf '%s\n' "$LEAK_STUB_NOTE" >&2
 STUB
 chmod +x "$leak_repo/scripts/leak-check.sh"
 git -C "$leak_repo" init -q &&
@@ -944,6 +964,13 @@ out="$(leak_gate)"
 if [ "$out" = "$leak_clean" ] && [ "$(cat "$T/leak-files" 2>&1)" = "$leak_scanned" ]; then
   ok 'the leak gate scans the tracked files and counts a submodule as its own repository, not a deleted path'
 else bad 'leak gate submodule' "$out" "$(cat "$T/leak-files" 2>&1)"; fi
+# F6: a scan run under the explicit `!structural-only` policy applied no private denylist; its row says so,
+# and the denylist row's text stays as it was.
+leak_structural_note='leak-check: PRIVATE COVERAGE SKIPPED — explicit structural-only policy; scanning 4 structural pattern(s)'
+out="$(LEAK_STUB_NOTE="$leak_structural_note" leak_gate)"
+if [[ "$out" == *'ok [leak-check clean (STRUCTURAL-ONLY: the private denylist was NOT applied — 2 file(s):'* && "$out" != *"$leak_clean"* ]]; then
+  ok 'F6: the leak row names a structural-only scan, distinct from the denylist row'
+else bad 'F6: structural-only leak row' "$out"; fi
 # The same plugin once it holds commits its gitlink lacks: status names the gitlink as changed, still neither scanned nor deleted.
 git -C "$leak_repo/plugins/demo" init -q &&
   git -C "$leak_repo/plugins/demo" add file.md &&
@@ -954,6 +981,27 @@ out="$(leak_gate)"
 if [ "$status" = ' M plugins/demo' ] && [ "$out" = "$leak_clean" ] && [ "$(cat "$T/leak-files" 2>&1)" = "$leak_scanned" ]; then
   ok 'a submodule with new commits is a changed gitlink, never a changed file or a deleted path'
 else bad 'leak gate submodule with new commits' "$status" "$out" "$(cat "$T/leak-files" 2>&1)"; fi
+
+# F7: the generated-marker row carries the script's own count line, so a run that examined nothing reads as one.
+marker_repo="$T/marker-row"
+mkdir -p "$marker_repo/scripts"
+marker_gate() { # marker_gate <script body>
+  printf '%s\n' "$1" > "$marker_repo/scripts/check-codex-markers.mjs"
+  (
+    cd "$marker_repo" || exit 1
+    head_() { :; }; node_test_suite() { :; }
+    ok() { printf 'ok [%s]\n' "$*"; }; fail_step() { printf 'fail [%s]\n' "$*"; }
+    checks_templates_mirrors_marker
+  ) 2>&1
+}
+out="$(marker_gate 'console.log("codex marker claim OK — 0 marked file(s) (0 tracked, 0 generated mirror), 0 orphans");')"
+if [[ "$out" == *'ok [every marked file has a live source; every tracked symlink a tracked target — codex marker claim OK — 0 marked file(s) (0 tracked, 0 generated mirror), 0 orphans]'* ]]; then
+  ok 'F7: the marker row shows how many marked files the script examined'
+else bad 'F7: marker row count' "$out"; fi
+out="$(marker_gate 'console.error("FAIL ORPHAN x"); process.exit(1);')"
+if [[ "$out" == *'FAIL ORPHAN x'* && "$out" == *'fail [codex marker claim FAILED'* && "$out" != *'ok ['* ]]; then
+  ok 'F7: a failing marker script fails the row and its output is shown'
+else bad 'F7: marker row failure' "$out"; fi
 
 # A sampler still bootstrapping may not yet honor TERM. Its emitted header
 # is the existing readiness door: real sampler.sh emits it after arming traps.

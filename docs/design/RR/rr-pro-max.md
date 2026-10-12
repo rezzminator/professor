@@ -79,7 +79,7 @@ Two completed runs and one orphaned run on one query (what benchmarks evaluate d
 | The declaration | `templates/global/agents/variants.json`, entry `rr-pro-max` |
 | The body it swaps into | `templates/global/agents/rr.md` — the stop sentence is swapped whole |
 | The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is identical in the `rr-pro` entry |
-| The renderer and its tests | `plugins/engine-sync/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
+| The renderer and its tests | `plugins/engine-sync/internal/source/variant.go`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The hook's docs | `docs/design/hooks/hooks.md`, `docs/dev/pfm-surface.md` |
 | The family doc | `docs/design/RR/rr.md` |

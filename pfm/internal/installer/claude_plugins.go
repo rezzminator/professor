@@ -120,6 +120,17 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 	return targets
 }
 
+// BareClaudePluginRepair is the repair install's FAIL line (and pfm doctor)
+// names when a bare claude.plugins name could not be installed: pfm cannot know
+// offline whether the GitHub repository the name stands for exists.
+func BareClaudePluginRepair(name string) string {
+	return fmt.Sprintf(
+		"claude.plugins entry %q is a bare name: pfm installs it from github.com/%s/%s — "+
+			"fix or remove the entry in claude.plugins if that repository does not exist",
+		name, claudePluginOwner, name,
+	)
+}
+
 // FallbackNote is the one line install and doctor print for a Fallback.
 func (target ClaudePluginTarget) FallbackNote() string {
 	return target.Name + ": alpha build falls back to the GitHub copy " + target.GitHubID + " — " + target.Fallback
@@ -581,6 +592,9 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 				continue
 			}
 			if err := installer.installClaudePlugin(ctx, binary, dir, target); err != nil {
+				if target.Own && !target.Local {
+					err = fmt.Errorf("%w — %s", err, BareClaudePluginRepair(target.Name))
+				}
 				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
 				continue
 			}

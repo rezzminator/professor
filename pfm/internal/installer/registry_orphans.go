@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -127,6 +130,72 @@ func (installer *engine) retireDeadRegistryLinks() error {
 		}
 		if err := os.Remove(dir); err != nil {
 			return fmt.Errorf("remove empty registry directory %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+// linkStageMinAge is how old a leftover link stage must be before install
+// removes it: a younger one may belong to a swap still in flight.
+const linkStageMinAge = 10 * time.Minute
+
+// retireStaleLinkStages removes the .pfm-link-* stages a crash left in the
+// registries install manages (atomicfile.Symlink and SymlinkOverDir stage a
+// link beside its target; SymlinkOverDir leaves the displaced directory there
+// when it dies after the swap). A stage younger than linkStageMinAge is left
+// alone. Each removal is a change of the install's own transcript.
+func (installer *engine) retireStaleLinkStages() error {
+	storeRoot := skillStoreRoot(installer.options.Home)
+	unlock, busy, err := installer.lockSkillStore(storeRoot)
+	if err != nil {
+		installer.skip("stale link stage sweep skipped: " + err.Error())
+		return nil
+	}
+	if busy {
+		installer.skip("stale link stage sweep skipped: another pfm install holds " + storeRoot)
+		return nil
+	}
+	defer unlock()
+	now := installer.now()
+	registries := []string{
+		filepath.Join(installer.options.ConfigDir, "agents"),
+		filepath.Join(installer.options.ConfigDir, "commands"),
+		filepath.Join(installer.options.ConfigDir, "skills"),
+		filepath.Join(installer.options.Home, ".agents", "skills"),
+	}
+	for _, registry := range registries {
+		err := filepath.WalkDir(registry, func(path string, entry fs.DirEntry, walkErr error) error {
+			if path == registry && errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
+			}
+			if walkErr != nil {
+				return fmt.Errorf("inspect registry path %s: %w", path, walkErr)
+			}
+			if !strings.HasPrefix(entry.Name(), atomicfile.LinkStagePrefix) {
+				return nil
+			}
+			skipBelow := error(nil)
+			if entry.IsDir() {
+				skipBelow = fs.SkipDir
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return fmt.Errorf("inspect link stage %s: %w", path, err)
+			}
+			if now.Sub(info.ModTime()) < linkStageMinAge {
+				return skipBelow
+			}
+			installer.markRemoved(path)
+			if err := installer.change(
+				"remove stale link stage "+path+" (left by an interrupted link swap)",
+				func() error { return os.RemoveAll(path) },
+			); err != nil {
+				return fmt.Errorf("remove link stage %s: %w", path, err)
+			}
+			return skipBelow
+		})
+		if err != nil {
+			return err
 		}
 	}
 	return nil

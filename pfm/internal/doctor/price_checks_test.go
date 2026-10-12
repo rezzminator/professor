@@ -134,3 +134,23 @@ func TestDoctorPricesRow(t *testing.T) {
 		})
 	}
 }
+
+// A table pfm cannot serve is the embedded one this binary carries or the user's pfm.prices.json
+// override; the row names which, so a corrupt build never points the user at an override file that
+// may not exist.
+func TestPriceFailureLabelNamesTheTableThatFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		embeddedErr error
+		want        string
+	}{
+		{"embedded table decodes", nil, "override=invalid"},
+		{"embedded table does not", errors.New("prices embedded prices.json: version must be 2"), "embedded=invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := priceFailureLabel(tc.embeddedErr); got != tc.want {
+				t.Fatalf("priceFailureLabel(%v) = %q, want %q", tc.embeddedErr, got, tc.want)
+			}
+		})
+	}
+}

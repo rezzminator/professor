@@ -43,7 +43,7 @@ checks_templates_leak() {
   # STATE: a git listing that could not be read is a red row, never a scan of
   # nothing.
   local tracked stage gitlinks porcelain changed candidate leak_list
-  local present=0 changed_n=0 gone=0 submodules=0
+  local present=0 changed_n=0 gone=0 submodules=0 leak_out leak_rc
   if ! tracked="$(repo_git ls-files)" || ! stage="$(repo_git ls-files --stage)" ||
     ! porcelain="$(repo_git status --porcelain --untracked-files=all)"; then
     fail_step "leak-check: the tracked or changed file list could not be read from git — nothing was scanned"
@@ -67,12 +67,23 @@ checks_templates_leak() {
     done <<<"$changed"
     if (( present == 0 )); then
       fail_step "leak-check: the candidate list holds no file present on disk — the LIST is broken, nothing was scanned"
-    # xargs batches the list so no argument list overflows; any red batch
-    # makes xargs non-zero, and a non-empty list never yields an empty batch.
-    elif xargs -0 scripts/leak-check.sh --files < "$leak_list"; then
-      ok "leak-check clean (${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped, ${submodules} submodule(s) left to their own repository's gate)"
     else
-      fail_step "leak-check FAILED — brand / PII / machine-path string in a public file, or a batch could not be scanned"
+      # xargs batches the list so no argument list overflows; any red batch
+      # makes xargs non-zero, and a non-empty list never yields an empty batch.
+      # The output is kept: a scan under the explicit `!structural-only` policy
+      # applied no private denylist, prints PRIVATE COVERAGE SKIPPED, and its
+      # row must say so instead of reading as the full scan.
+      leak_out="$TMP_BASE/templates/leak-out.txt"
+      leak_rc=0
+      xargs -0 scripts/leak-check.sh --files < "$leak_list" > "$leak_out" 2>&1 || leak_rc=$?
+      cat "$leak_out"
+      if (( leak_rc != 0 )); then
+        fail_step "leak-check FAILED — brand / PII / machine-path string in a public file, or a batch could not be scanned"
+      elif grep -q 'PRIVATE COVERAGE SKIPPED' "$leak_out"; then
+        ok "leak-check clean (STRUCTURAL-ONLY: the private denylist was NOT applied — ${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped, ${submodules} submodule(s) left to their own repository's gate)"
+      else
+        ok "leak-check clean (${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped, ${submodules} submodule(s) left to their own repository's gate)"
+      fi
     fi
   fi
 
@@ -322,8 +333,13 @@ checks_templates_mirrors_marker() {
   # marked file whose source is gone is a fossil no build can heal: the gate
   # reconciles every marked file's declared source, and every tracked symlink's
   # target, against disk, and fails a fossil BY NAME.
-  if node scripts/check-codex-markers.mjs; then
-    ok "every marked file has a live source; every tracked symlink a tracked target"
+  # The row carries the script's own count line: `0 marked file(s)` reads as the
+  # vacuous run it is, instead of the claim that every marked file was examined.
+  local marker_out marker_rc=0
+  marker_out="$(node scripts/check-codex-markers.mjs 2>&1)" || marker_rc=$?
+  printf '%s\n' "$marker_out"
+  if [ "$marker_rc" -eq 0 ]; then
+    ok "every marked file has a live source; every tracked symlink a tracked target — $(tail -n 1 <<<"$marker_out")"
   else
     fail_step "codex marker claim FAILED — a stranded marker or an orphaned generated file (see output)"
   fi
@@ -389,6 +405,19 @@ checks_templates_pfm_guard() {
 
 }
 
+checks_templates_codex_sync() {
+  head_ "templates — codex-sync door"
+  local cs_copy
+  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
+    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
+      ok "codex-sync ($cs_copy) forwards each stage, refuses a bad ENGINE_SYNC_BIN by name, and warns of an unavailable compiler only with a pending edit"
+    else
+      fail_step "codex-sync regression FAILED ($cs_copy) — see output"
+    fi
+  done
+
+}
+
 checks_templates_dev_report() {
   head_ "templates — go test report under pipefail"
   if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
@@ -432,7 +461,7 @@ checks_templates_mirrors_opencode() {
     && XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
     ok "opencode mirror current and parseable"
   else
-    fail_step "opencode mirror FAILED — run: engine-sync opencode build $REPO_ROOT"
+    fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
   fi
 
 }
@@ -496,31 +525,23 @@ checks_templates_mirrors_manifest() {
 
 # One catalogue for the serial runner and the parallel gate. Scheduling-only
 # lane/demo aggregates and the gate's heavy check-map stay at their boundaries.
+checks_named_template_steps() { # <callback> <name>...: register the matching checks_templates_<name> command
+  local add="$1" name
+  shift
+  for name in "$@"; do
+    "$add" "templates.$name" "checks_templates_${name//-/_}"
+  done
+}
+
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
-  local add="$1"
-  "$add" templates.clone checks_templates_clone
-  "$add" templates.leak checks_templates_leak
-  "$add" templates.placeholders checks_templates_placeholders
-  "$add" templates.scratch-paths checks_templates_scratch_paths
-  "$add" templates.descriptions checks_templates_descriptions
-  "$add" templates.mirrors checks_templates_mirrors
-  "$add" templates.global-variants checks_templates_global_variants
-  "$add" templates.release-check checks_templates_release_check
-  "$add" templates.refresh-scope checks_templates_refresh_scope
-  "$add" templates.pfm-guard checks_templates_pfm_guard
-  "$add" templates.worktree-script checks_templates_worktree_script
-  "$add" templates.dev-report checks_templates_dev_report
-  "$add" templates.format-md checks_templates_format_md
-  "$add" templates.flight-templates checks_templates_flight_templates
-  "$add" templates.check-pfm-tests checks_templates_unit_script check-pfm
-  "$add" templates.check-templates-tests checks_templates_unit_script check-templates
-  "$add" templates.test-pfm-tests checks_templates_unit_script test-pfm
-  "$add" templates.test-templates-tests checks_templates_unit_script test-templates
-  "$add" templates.unit-path-tests checks_templates_unit_script unit-path
-  "$add" templates.opencode-writer-tests checks_templates_opencode_writer_tests
-  "$add" templates.engine-sync-action-tests checks_templates_engine_sync_action_tests
-  "$add" templates.skill-tests checks_templates_skill_tests
-  "$add" templates.opencode-writer-refs checks_templates_opencode_writer_refs
+  local add="$1" name
+  checks_named_template_steps "$add" clone leak placeholders scratch-paths descriptions mirrors \
+    global-variants release-check codex-sync refresh-scope pfm-guard worktree-script dev-report \
+    format-md flight-templates
+  for name in check-pfm check-templates test-pfm test-templates unit-path; do
+    "$add" "templates.$name-tests" checks_templates_unit_script "$name"
+  done
+  checks_named_template_steps "$add" opencode-writer-tests engine-sync-action-tests skill-tests opencode-writer-refs
 }
 
 checks_templates_step_serial() { shift; "$@"; }
@@ -655,7 +676,8 @@ internal/harvest TestFetchSizeOnlyLeaderSharesTheWholePage
 internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
 internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
 internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
-internal/harvestmcp TestServiceChaos'
+internal/harvestmcp TestServiceChaos
+internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence'
 
 # checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo
 # (the pfm-dev image carries gcc; CGO_ENABLED=1 for this command alone, every other build stays static),

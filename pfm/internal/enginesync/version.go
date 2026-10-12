@@ -133,7 +133,12 @@ func (runner Runner) RequireMinimumVersion(ctx context.Context) error {
 		return err
 	}
 	if order < 0 {
-		return fmt.Errorf("engine-sync %s is older than required %s — run make host-install", version, MinimumVersion)
+		return fmt.Errorf(
+			"engine-sync %s is older than required %s — update the plugin (`claude plugin update engine-sync@professor`), "+
+				"then start a new Claude session so its wrapper links the newer binary",
+			version,
+			MinimumVersion,
+		)
 	}
 	return nil
 }

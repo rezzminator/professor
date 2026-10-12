@@ -395,3 +395,83 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 		})
 	}
 }
+
+// A crash between SymlinkOverDir's swap and its cleanup leaves the displaced
+// copy at {registry}/.pfm-link-XXXX. Install removes a stage in a registry it
+// manages once it is older than linkStageMinAge, through its own transcript,
+// and leaves a younger one (a swap in flight) and every non-stage entry alone.
+func TestRetireStaleLinkStages(t *testing.T) {
+	for _, apply := range []bool{false, true} {
+		t.Run(fmt.Sprintf("apply=%t", apply), func(t *testing.T) {
+			home := t.TempDir()
+			store := ClaudeStore(home)
+			now := time.Now()
+			old, young := now.Add(-linkStageMinAge-time.Minute), now.Add(-linkStageMinAge/2)
+			age := func(path string, at time.Time) string {
+				t.Helper()
+				if err := os.Chtimes(path, at, at); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			}
+			staleDir := filepath.Join(store, "skills", ".pfm-link-1234")
+			writeFixture(t, filepath.Join(staleDir, "SKILL.md"), "displaced copy")
+			stale := []string{
+				staleDir,
+				filepath.Join(store, "commands", "group", ".pfm-link-5678"),
+				filepath.Join(store, "agents", ".pfm-link-9abc"),
+				filepath.Join(home, ".agents", "skills", ".pfm-link-def0"),
+			}
+			for _, path := range stale[1:] {
+				writeFixture(t, path, "staged")
+			}
+			keep := []string{
+				filepath.Join(store, "skills", ".pfm-link-fresh"),
+				filepath.Join(store, "skills", "demo", "SKILL.md"),
+				filepath.Join(store, "commands", "pfm-link-notastage.md"),
+			}
+			for _, path := range keep {
+				writeFixture(t, path, "keep")
+			}
+			for _, path := range stale {
+				age(path, old)
+			}
+			age(keep[0], young)
+			age(keep[1], old)
+			age(keep[2], old)
+
+			var output bytes.Buffer
+			installer := &engine{
+				options: Options{
+					Home: home, ConfigDir: store, Stdout: &output, Now: func() time.Time { return now },
+				},
+				managedRoot: managedRootForHome(home),
+				apply:       apply,
+			}
+			if err := installer.retireStaleLinkStages(); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range stale {
+				line := "  change  remove stale link stage " + path
+				if !strings.Contains(output.String(), line) {
+					t.Errorf("transcript lacks %q:\n%s", line, output.String())
+				}
+				_, err := os.Lstat(path)
+				if apply != errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("stage %s after apply=%t: %v", path, apply, err)
+				}
+			}
+			for _, path := range keep {
+				if _, err := os.Lstat(path); err != nil {
+					t.Errorf("%s was removed: %v", path, err)
+				}
+				if strings.Contains(output.String(), path) {
+					t.Errorf("transcript names the kept %s:\n%s", path, output.String())
+				}
+			}
+			if installer.report.Changed != len(stale) {
+				t.Fatalf("changed=%d, want %d:\n%s", installer.report.Changed, len(stale), output.String())
+			}
+		})
+	}
+}

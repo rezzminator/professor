@@ -242,7 +242,7 @@ Fix: the move-aside fix below, through `removeKeeping` with `{acct1}/.claude.jso
 
 `{birth}` is `mtime {RFC 3339 UTC}, firstStartTime {value}`, the file's mtime and the `firstStartTime` Claude recorded in it; for a dir (`backups`) it is `newest {name}: …` for its newest regular file, or `holds no file`. A value that cannot be read says why: `firstStartTime absent`, `firstStartTime unreadable: not JSON ({cause})`, `firstStartTime unreadable: {cause}`, `firstStartTime not a string: {raw}`, `contents unreadable: {cause}`.
 
-The move-aside fix deletes nothing: `mkdir -m 700 -p {dir(aside)} && [ ! -e {aside} ] && mv {path} {aside}  # moved aside, never deleted`, where `{aside}` is `{path}` below `{home}` mirrored under `{home}/.local/state/pfm/stray-claude-state/{run stamp YYYYMMDD-HHMMSS}/`, so one doctor run's rows share one directory and never land on an earlier file.
+The move-aside fix deletes nothing: `mkdir -m 700 -p {dir(aside)} && [ ! -e {aside} ] && mv {path} {aside}  # moved aside, never deleted`, where `{aside}` is `{path}` below `{home}` mirrored under `{home}/.local/state/pfm/stray-claude-state/{run stamp YYYYMMDD-HHMMSS}/`, so one doctor run's rows share one directory and never land on an earlier file. Install never expires doctor-aside directories (`stray-claude-state` and `stale-backup`), regardless of age; the operator decides when their contents are no longer needed.
 
 ### account-entry-real
 
@@ -263,7 +263,7 @@ For `account-entry-real`, the fix is selected by entry. Each fix is one shell li
 - `plugins`: `rm -r {path}  # the store keeps its copy (reinstallable)`.
 - `settings.json`: `jq -e -s '.[0] as $s | .[1] | to_entries | all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' {store}/settings.json {path} > /dev/null && jq -s '.[0] * .[1]' {store}/settings.json {path} > {store}/settings.json.new && mv {store}/settings.json.new {store}/settings.json && rm {path}  # adds the keys the store lacks; stops while a key differs`.
 - `CLAUDE.md`: `cat {path} >> {store}/CLAUDE.md && rm {path}  # appended whole; prune {store}/CLAUDE.md as you like`.
-- `tool-visibility-controller.json`: `mkdir -p {store} && { [ -e {store}/tool-visibility-controller.json ] || [ -L {store}/tool-visibility-controller.json ] || printf '{}\n' > {store}/tool-visibility-controller.json; } && ` followed by the `settings.json` line naming `tool-visibility-controller.json`: it first seeds a missing store copy, since install, which this row blocks, is what would seed it.
+- `tool-visibility-controller.json`: `mkdir -p {store} && { [ -e {store}/tool-visibility-controller.json ] || [ -L {store}/tool-visibility-controller.json ] || printf '{}\n' > {store}/tool-visibility-controller.json; } &&` followed by the `settings.json` line naming `tool-visibility-controller.json`: it first seeds a missing store copy, since install, which this row blocks, is what would seed it.
 - `stats-cache.json`, `.last-cleanup`, `gh-pr-status-cache.json`: `rm {path}  # a cache`.
 
 ### retired-store-entry

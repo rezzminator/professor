@@ -1232,6 +1232,35 @@ class WriteVerifyTest(Stored):
         self.assertIn("@ pkg/zzz.go:5 — no such file; no file named zzz.go under ROOT", lines[2])
         self.assertIn("@ pkg/kill.go:5 — ", lines[1])
 
+    def test_a_second_writer_of_one_id_cannot_replace_the_winners_sidecar(self):
+        won = self.put("1", ["@ app/srv/server.go:5", f"> {REQUIRED}"])
+        self.assertEqual(won.returncode, 0, won.stderr)
+        sidecar, hops_file = (os.path.join(self.run_dir, "1" + ext) for ext in (".write.json", ".hops"))
+        with open(sidecar, "rb") as f:
+            winners_sidecar = f.read()
+        with open(hops_file, "rb") as f:
+            winners_hops = f.read()
+        # the loser passed the "already written" check before the winner stored: its view of the hops file is absent
+        loser = ("import importlib.util, os, sys\n"
+                 "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))\n"
+                 "spec = importlib.util.spec_from_file_location('tracetree_loser', sys.argv[1])\n"
+                 "kit = importlib.util.module_from_spec(spec)\n"
+                 "spec.loader.exec_module(kit)\n"
+                 "stale, exists = os.path.join(os.path.abspath(sys.argv[2]), '1.hops'), os.path.exists\n"
+                 "os.path.exists = lambda p: False if p == stale else exists(p)\n"
+                 "kit.cmd_write(sys.argv[2], '1')\n")
+        got = subprocess.run([sys.executable, "-c", loser, SCRIPT, self.run_dir],
+                             input=hops("1", ["- x"], ["@ app/kill/kill.go:5", f"> {EXEC}"],
+                                        ["END returned: x @ app/kill/kill.go:5"]),
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(got.returncode, 2, got.stdout + got.stderr)
+        with open(sidecar, "rb") as f:
+            self.assertEqual(f.read(), winners_sidecar)
+        with open(hops_file, "rb") as f:
+            self.assertEqual(f.read(), winners_hops)
+        self.assertIn("already written", got.stderr)
+        self.assertEqual(sorted(os.listdir(self.run_dir)), ["1.hops", "1.write.json", "ROOT"])
+
     def test_a_clean_write_is_stored_as_written_with_only_the_sidecar_added(self):
         text = self.good()
         got = tt(["write", self.run_dir, "1"], input=text)
@@ -1967,6 +1996,36 @@ class IntakeTest(Repo):
                               "is your answer", spec["additionalContext"])
                 self.assertIn(f"tracetree.py answer {run} ", spec["additionalContext"])
                 self.assertIn("never a ruling", spec["additionalContext"])
+
+    def test_a_root_cause_line_is_no_root_and_the_repo_root_line_after_it_is(self):
+        prompt = (f"Root cause: /a/b was suspected\nRepo root: {self.root}\nGoal: close panes safely\n"
+                  "1. Where does an empty target fail?\n")
+        spec = json.loads(self.hook(prompt))["hookSpecificOutput"]
+        self.assertIn("updatedInput", spec, spec["additionalContext"])
+        lines = spec["updatedInput"]["prompt"].splitlines()
+        self.assertEqual(lines[:2], ["Root cause: /a/b was suspected", f"Repo root: {self.root}"])
+        self.assertTrue(lines[2].startswith("RUN: " + self.parent + os.sep), lines[2])
+        with open(os.path.join(lines[2][len("RUN: "):], "ROOT")) as f:
+            self.assertEqual(f.read().strip(), self.root)
+
+    def test_a_root_cause_line_alone_leaves_the_root_to_the_hook_cwd(self):
+        spec = json.loads(self.hook("Root cause: /a/b\n1. What closes the pane?", cwd=self.root))["hookSpecificOutput"]
+        self.assertIn("updatedInput", spec, spec["additionalContext"])
+        lines = spec["updatedInput"]["prompt"].splitlines()
+        self.assertEqual(lines[1], "Root cause: /a/b")
+        run = lines[0][len("RUN: "):]
+        with open(os.path.join(run, "ROOT")) as f:
+            self.assertEqual(f.read().strip(), self.root)
+
+    def test_a_root_label_followed_directly_by_the_path_names_the_root(self):
+        for head in (f"Root: {self.root}", f"root = {self.root}", f"Root {self.root}", f"Repository root: {self.root}",
+                     f"Root: `{self.root}`"):
+            with self.subTest(head=head):
+                spec = json.loads(self.hook(f"{head}\n1. What closes the pane?"))["hookSpecificOutput"]
+                self.assertIn("updatedInput", spec, spec["additionalContext"])
+                run = spec["updatedInput"]["prompt"].splitlines()[1][len("RUN: "):]
+                with open(os.path.join(run, "ROOT")) as f:
+                    self.assertEqual(f.read().strip(), self.root)
 
     def test_a_brief_naming_no_root_takes_the_hook_cwd(self):
         out = json.loads(self.hook("1. What closes the pane?", cwd=self.root))

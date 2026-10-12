@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -277,5 +278,45 @@ func TestUpdateRejectsOverlappingOwners(t *testing.T) {
 				t.Fatalf("lock release = %d %s", code, stderr.String())
 			}
 		})
+	}
+}
+
+// A price refresh that lands between the fast-forward and a rollback leaves
+// the clone's tracked prices.json modified; git reset --keep refuses to
+// overwrite it, so the rollback puts the refreshed table back first.
+func TestUpdateRollbackResetsSourceDespiteARefreshedPriceTable(t *testing.T) {
+	runtime, repo := updateRollbackTestRuntime(t)
+	file := filepath.Join(repo, filepath.FromSlash(pricing.FileRel))
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, release := range []string{"previous", "advanced"} {
+		if err := os.WriteFile(file, []byte(release+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitTemp(t, repo, "add", pricing.FileRel)
+		gitTemp(t, repo, "commit", "-qm", "fixture prices "+release)
+		if release == "previous" {
+			gitTemp(t, repo, "tag", "previous-release")
+		}
+	}
+	previousRef := updateGitRevision(t, repo, "previous-release")
+	if err := os.WriteFile(file, []byte("refreshed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := rollbackUpdateState(
+		context.Background(), repo, repo, previousRef, true, nil, nil, runtime, false, &stdout, &stderr,
+	)
+
+	if err != nil && strings.Contains(err.Error(), "restore source revision") {
+		t.Fatalf("rollback error = %v; the refreshed price table must not refuse the source reset", err)
+	}
+	if got := updateGitRevision(t, repo, "HEAD"); got != previousRef {
+		t.Fatalf("source after rollback = %s, want %s (err %v)", got, previousRef, err)
+	}
+	if content, readErr := os.ReadFile(file); readErr != nil || string(content) != "previous\n" {
+		t.Fatalf("prices after rollback = %q, %v; want the previous release's table", content, readErr)
 	}
 }

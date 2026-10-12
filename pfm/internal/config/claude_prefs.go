@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -183,4 +184,37 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 		target.RequireManagedCleanup = *raw.RequireManagedCleanup
 		sources[base+"requireManagedCleanup"] = SourceFile
 	}
+}
+
+// marshalClaude is the machine claude block. The keys a pfm of the last release (v0.79.0) does
+// not know — helperModel, pluginCheckoutRoot, plugins, costLedger — are written only when the file
+// set them or the value differs from the default, so `pfm config init` writes a file that pfm still
+// decodes: its loader refuses an unknown key. An unset value loads as its default either way.
+func marshalClaude(config Config) map[string]any {
+	value := map[string]any{
+		"webSearchesPerSession": config.Claude.WebSearchesPerSession,
+		"autoCompactWindow":     config.Claude.AutoCompactWindow,
+		"tmuxTruecolor":         config.Claude.TmuxTruecolor,
+		"cleanupPeriodDays":     config.Claude.CleanupPeriodDays,
+		"requireManagedCleanup": config.Claude.RequireManagedCleanup,
+		"permissionMode":        config.Claude.PermissionMode,
+		engineKeyBinary:         config.Claude.Binary,
+		keyTheme:                themeMarshalValue(config.Claude.Theme),
+		"cache1h":               config.Claude.Cache1H,
+		"nativeCursor":          config.Claude.NativeCursor,
+	}
+	set := func(key string) bool { return config.Source(key) == SourceFile }
+	if set("claude.helperModel") || config.Claude.HelperModel != DefaultHelperModel {
+		value["helperModel"] = config.Claude.HelperModel
+	}
+	if config.Claude.PluginCheckoutRoot != "" { // an unset root is left out: null would also be an unknown key
+		value["pluginCheckoutRoot"] = config.Claude.PluginCheckoutRoot
+	}
+	if set(KeyClaudePlugins) || !slices.Equal(config.Claude.Plugins, DefaultClaudePlugins()) {
+		value["plugins"] = marshalClaudePlugins(config.Claude.Plugins)
+	}
+	if set(KeyClaudeCostLedger) || !config.Claude.CostLedger {
+		value["costLedger"] = config.Claude.CostLedger
+	}
+	return value
 }

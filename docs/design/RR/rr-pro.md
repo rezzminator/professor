@@ -36,8 +36,8 @@ Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → he
 | `on at most 8 source pages` | `on at most 12 source pages` |
 | `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
 
-- Each swapped text must occur exactly once in `rr.md`'s body. `renderGlobalAgentVariant` (`plugins/engine-sync/internal/codexgen/globalvariants.go`) refuses anything else with `"replace" text {text} occurs {n} times in the body, want exactly 1`, so an edit to `rr.md` that rewords a swapped sentence fails the render instead of shipping a variant with `rr`'s caps.
-- `TestShippedGlobalAgentVariantsRender` renders the shipped `variants.json` against the shipped `rr.md` and compiles each variant to its Codex TOML; it is the gate that catches the rewording before an install does.
+- Each swapped text must occur exactly once in `rr.md`'s body. `RenderVariant` (`plugins/engine-sync/internal/source/variant.go`) refuses anything else with `"replace" text {text} occurs {n} times in the body, want exactly 1`, so an edit to `rr.md` that rewords a swapped sentence fails the render instead of shipping a variant with `rr`'s caps.
+- `TestShippedGlobalAgentVariantsRender` renders the `testdata/global-variants` fixture in engine-sync and compiles each fixture variant to its Codex TOML. The fence's `templates.global-variants` step (`infra/fence/checks.sh`, `checks_templates_global_variants`) renders the actual shipped declaration and agent bodies through the built engine-sync binary; that gate catches a reworded swap source before an install does.
 - The swaps touch the body only; a swapped text found only in the frontmatter counts as absent.
 - An installed `pfm` older than the `replace` key reads `variants.json` as malformed: `pfm doctor` reports `global-agents … state=UNREADABLE`, and `pfm install` refuses. The fix is the host mirror build, never an edit to `variants.json`.
 
@@ -69,6 +69,6 @@ Three runs on one query (how faithfully fetch-and-answer tools quote a page) set
 | The declaration | `templates/global/agents/variants.json`, entry `rr-pro` |
 | The body it swaps into | `templates/global/agents/rr.md` |
 | The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is identical in the `rr-pro-max` entry |
-| The renderer and its tests | `plugins/engine-sync/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
+| The renderer and its tests | `plugins/engine-sync/internal/source/variant.go`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The family doc | `docs/design/RR/rr.md` |

@@ -325,7 +325,10 @@ def cmd_seek(run, seek):
     seek_prior(run, root, rx)
 
 
-INTAKE_ROOT = re.compile(r"(?im)^[ \t]*(?:repo(?:sitory)?[ \t]+root|root)\b[^\n]*?((?:~/|/)[^\s`'\"()\[\],;]+)")
+# `Repo root` / `Repository root` may carry an alias before the path (`Repo root / TREE = /a`); a bare `Root` takes the
+# path only directly after it, so `Root cause: /a/b` names no root
+INTAKE_ROOT = re.compile(r"(?im)^[ \t]*(?:repo(?:sitory)?[ \t]+root\b[^\n]*?|root[ \t]*[:=]?[ \t]*[`'\"(]?)"
+                         r"((?:~/|/)[^\s`'\"()\[\],;]+)")
 INTAKE_RUN = re.compile(r"(?m)^[ \t]*RUN:[ \t]*\S")
 TT = "python3 $HOME/.claude/skills/tracetree/tracetree.py"
 
@@ -1650,15 +1653,33 @@ def cmd_write(run, name):
     # notes is stored as its commit
     out = [line if line.startswith(">") or line.lstrip().startswith("=")
            else PINREF.sub(lambda m: pinned_commit(files, m.group(1)), line) for line in out]
+    # The exclusive create of {ID}.hops decides the one writer; only that winner writes the sidecar, through a temporary
+    # name and a rename, so a loser never replaces the winner's entries.
     sidecar = os.path.join(run, name + ".write.json")
+    scratch = f"{sidecar}.{os.getpid()}.tmp"
     try:
-        with open(sidecar, "w", encoding="utf-8") as f:
-            json.dump(entries, f, indent=1, ensure_ascii=False)
-            f.write("\n")
-        with open(path, "x", encoding="utf-8") as f:
-            f.write("\n".join(out))
+        claim = open(path, "x", encoding="utf-8")
+    except FileExistsError:
+        fail(f"{name}.hops is already written — a node writes once; reply with your one return line now")
     except OSError as e:
         fail(f"cannot write {path}: {e}")
+    try:
+        with claim:
+            claim.write("\n".join(out))
+        with open(scratch, "w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=1, ensure_ascii=False)
+            f.write("\n")
+        os.replace(scratch, sidecar)
+    except OSError as e:
+        # the claim is this writer's own: release it, so the node can be written again
+        for leftover in (scratch, path):
+            try:
+                os.remove(leftover)
+            except FileNotFoundError:
+                pass
+            except OSError as e2:
+                sys.stderr.write(f"TRACETREE WARNING — cannot remove {leftover}: {e2}\n")
+        fail(f"cannot write {path} and its sidecar: {e}")
     notes = (f", {readdressed} re-addressed" if readdressed else "") + (f", {len(bad)} not holding stored as they are" if bad else "")
     print(f"stored {name}: {kinds.count('hop')} hops, {kinds.count('answer')} answer lines{notes} — {path}")
     moved = [(r[1], e["path"]) for r, e in zip(hop_recs, entries)

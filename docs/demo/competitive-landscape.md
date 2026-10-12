@@ -7,7 +7,7 @@ Snapshot taken 2026-09-14. Every number below was read with read-only `gh api` c
 - **Metadata**: `gh api repos/{owner}/{repo}` gave stars, creation date, last push, language and license. `releases?per_page=100` gave release counts; a count of 100 means **≥100** because of the page cap. `contributors?anon=1` gave contributor counts.
 - **Test signal**: grep over depth-1 clones for Rust `#[test]`/`#[tokio::test]`, Go `func Test`, JS/TS `it(`/`test(` in `*.test.*`/`*.spec.*`, and Python `def test_`, excluding `node_modules`/`vendor`. This is a rough size signal. It does not measure quality, and it misses table-driven subtests and unusual test layouts.
 - **CI**: the number of files under `.github/workflows/`.
-- **Professor's own numbers** come from the local `develop` checkout. Its capability claims are its README's claims. Only the package names in `pfm/internal/` (`reload`, `inject`, `sky`, `usagehook`, `harvest`, `headless`, `codexgen`) were checked to confirm the named subsystems exist. Their behaviour was not exercised in this pass.
+- **Professor's own numbers** come from the local `develop` checkout. Its capability claims are its README's claims. Only the package names in `pfm/internal/` (`reload`, `inject`, `sky`, `usagehook`, `harvest`, `headless`) were checked to confirm the named subsystems exist. Their behaviour was not exercised in this pass.
 
 ## The field (12 in scope)
 

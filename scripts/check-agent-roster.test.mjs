@@ -1,11 +1,6 @@
 // Exercise the roster checker against mirrors and effective config from the same compiler.
-import { before, after, test } from "node:test";
-import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { before, after, test, assert, execFileSync, spawnSync, copyFileSync, existsSync, mkdirSync, mkdtempSync,
+  readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, dirname, join, fileURLToPath } from "./node-test-helpers.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const scratch = mkdtempSync(join(tmpdir(), "agent-roster-tests-"));
@@ -60,6 +55,7 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
   ["machine suffixPrefix strips the project prefix", { suffixMode: "strip-prefix", suffixPrefix: "demo-" }, { version: 1, codex: {} }, 2, 2],
   ["machine projects list of none builds the root alone", { projects: [] }, { version: 1, codex: {} }, 1, 1],
   ["compiler applies exclusions to an explicit project list", { projects: ["demo-child"], excludeProjects: ["demo-child"] }, { version: 1, codex: {} }, 1, 1],
+  ["neverRegister names a root role neither runtime emits", { neverRegister: ["alpha"] }, { version: 1, codex: {} }, 1, 1],
   ["compiler shares neverRegister across both runtimes", { neverRegister: ["beta"] }, { version: 1, codex: {} }, 1, 1],
   ["machine workbenchMarker child builds as its own root", {}, { version: 1, codex: {} }, 1, 1,
     { workbenchMarker: ".bench/workbench.json" }, { "demo-child/.bench/workbench.json": "{}\n" }],
@@ -152,6 +148,104 @@ test("empty stripped suffix forwards the compiler's own finding", (t) => {
   const result = check(f);
   assert.equal(result.status, 1, result.out);
   assert.match(result.out, /compiler:.*empty agent suffix/);
+});
+
+// The judge is never the thing being judged: a stub that reports its own check clean (as an
+// engine-sync with a source-discovery defect would) while every other verb is the real binary.
+function cleanVerdictStub(f) {
+  f.put("clean-engine-sync", `#!/bin/sh\nif [ "$1" = check ]; then printf '%s\\n' '{"ok":true,"problems":[]}'; exit 0; fi\nexec "${binary}" "$@"\n`);
+  execFileSync("chmod", ["+x", join(f.root, "clean-engine-sync")]);
+  f.env.ENGINE_SYNC_BIN = join(f.root, "clean-engine-sync");
+}
+
+test("a role with no generated Codex twin fails although engine-sync's check reports clean", (t) => {
+  const f = fixture(t);
+  unlinkSync(join(f.root, ".codex/agents/alpha.toml"));
+  cleanVerdictStub(f);
+  const result = check(f);
+  assert.equal(result.status, 1, result.out);
+  assert.match(result.out, /agent-roster: codex: source agent missing from generated roster: alpha\.toml/);
+  assert.doesNotMatch(result.out, /agent-roster: clean/);
+});
+
+test("a role with no generated OpenCode twin fails although engine-sync's check reports clean", (t) => {
+  const f = fixture(t);
+  unlinkSync(join(f.root, ".opencode/agent/beta-demo-child.md"));
+  cleanVerdictStub(f);
+  const result = check(f);
+  assert.equal(result.status, 1, result.out);
+  assert.match(result.out, /agent-roster: opencode: source agent missing from generated roster: beta-demo-child\.md/);
+});
+
+test("a generated role with no source fails although engine-sync's check reports clean", (t) => {
+  const f = fixture(t);
+  f.put(".opencode/agent/ghost.md", "ghost\n");
+  f.put(".codex/agents/ghost.toml", "ghost\n");
+  cleanVerdictStub(f);
+  const result = check(f);
+  assert.equal(result.status, 1, result.out);
+  assert.match(result.out, /agent-roster: codex: generated agent has no source: ghost\.toml/);
+  assert.match(result.out, /agent-roster: opencode: generated agent has no source: ghost\.md/);
+});
+
+test("sources that define no agent name what the comparison could not do", (t) => {
+  const f = fixture(t);
+  rmSync(join(f.root, ".claude/agents"), { recursive: true });
+  rmSync(join(f.root, "demo-child/.claude/agents"), { recursive: true });
+  rmSync(join(f.root, ".codex/agents"), { recursive: true });
+  rmSync(join(f.root, ".opencode/agent"), { recursive: true });
+  mkdirSync(join(f.root, ".codex/agents"), { recursive: true });
+  mkdirSync(join(f.root, ".opencode/agent"), { recursive: true });
+  cleanVerdictStub(f);
+  const result = check(f);
+  assert.equal(result.status, 1, result.out);
+  assert.match(result.out, /codex: the sources under \.claude\/agents \(root and child projects\) define no registered agent/);
+  assert.match(result.out, /opencode: the sources under \.claude\/agents \(root and child projects\) define no registered agent/);
+});
+
+// Only ENOENT and ENOTDIR mean a path is absent. Any other lookup error (neither is a permission error
+// root would bypass: a symlink loop and an over-long name fail for every user) is a named failure.
+test("a child whose CLAUDE.md lookup fails is a named failure, not an absent project", (t) => {
+  const f = fixture(t);
+  unlinkSync(join(f.root, "demo-child/CLAUDE.md"));
+  symlinkSync("CLAUDE.md", join(f.root, "demo-child/CLAUDE.md"));
+  cleanVerdictStub(f);
+  const result = check(f);
+  assert.equal(result.status, 1, result.out);
+  assert.match(result.out, /agent-roster: cannot stat .*demo-child\/CLAUDE\.md: ELOOP/);
+  assert.doesNotMatch(result.out, /agent-roster: clean/);
+});
+
+test("a workbench marker lookup that fails is a named failure, not an absent marker", (t) => {
+  const f = fixture(t);
+  mkdirSync(join(f.root, "demo-child/.bench"));
+  f.put("home/.config/engine-sync/config.json", JSON.stringify({ version: 1, workbenchMarker: `.bench/${"x".repeat(300)}` }));
+  cleanVerdictStub(f);
+  const result = check(f);
+  assert.equal(result.status, 1, result.out);
+  assert.match(result.out, /agent-roster: cannot stat .*demo-child\/\.bench\/x+: ENAMETOOLONG/);
+  assert.doesNotMatch(result.out, /agent-roster: clean/);
+});
+
+test("a missing CLAUDE.md or workbench marker is plain absence, not a failure", (t) => {
+  const f = fixture(t, {}, { version: 1 }, { workbenchMarker: ".bench/workbench.json" });
+  const result = check(f);
+  assert.equal(result.status, 0, result.out);
+  assert.doesNotMatch(result.out, /cannot stat/);
+});
+
+// The compiler follows directory symlinks; the independent reader must agree
+// from filesystem evidence, not from the compiler's reported source roster.
+test("a symlinked source directory is independently enumerated", (t) => {
+  const f = fixture(t, {}, { version: 1 }, {}, {
+    "shared/gamma.md": "---\nname: gamma\ndescription: Fixture role\nmodel: smart\n---\nRead the shared role.\n",
+  });
+  symlinkSync("../../shared", join(f.root, ".claude/agents/shared"));
+  const built = spawnSync(binary, ["build", "."], { cwd: f.root, env: f.env, encoding: "utf8" });
+  assert.equal(built.status, 0, built.stdout + built.stderr);
+  const result = check(f);
+  assert.equal(result.status, 0, result.out);
+  assert.match(result.out, /3 Codex and 2 OpenCode agents match source/);
 });
 
 const twins = [

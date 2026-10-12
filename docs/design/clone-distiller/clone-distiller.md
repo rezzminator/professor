@@ -141,6 +141,6 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | The code reader it spawns | `templates/global/agents/tracer.md`, whose brief contract the code call follows |
 | The lane its briefs come from | `templates/global/agents/variants.json`, the `replace` entry of `rr-pro` and of `rr-pro-max`, identical text |
 | The sentence the lane swaps | `templates/global/agents/rr.md`, step 4's last sentence |
-| The renderer's gate | `TestShippedGlobalAgentVariantsRender`, `plugins/engine-sync/internal/codexgen/globalvariants_test.go` |
+| The renderer's gate | `TestShippedGlobalAgentVariantsRender`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
 | The family doc | `docs/design/RR/rr.md` |
 | The roster line | `docs/BLUEPRINT.md` |

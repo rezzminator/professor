@@ -120,6 +120,39 @@ func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	}
 }
 
+// A Claude-authored role body that spells Claude's /code-review reaches a Codex seat as the shell
+// review command: the role-body door rewrites the invocation as the fleet prompt's door does, and
+// leaves the prose around it as it was.
+func TestResolveCodexRewritesTheCodeReviewInvocationInTheRoleBody(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(repo, ".codex", "agents", "builder.toml"),
+		"name = \"builder\"\n"+
+			"developer_instructions = \"\"\"\n"+
+			"Your last step is `/code-review low` over your own change.\n"+
+			"\"\"\"\n")
+
+	got, _, err := Resolve(pfmengine.Codex, "builder", repo, home)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	fleetPrompt, err := codexprompt.FleetPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, found := strings.CutPrefix(got, fleetPrompt+"\n---\n\n")
+	if !found {
+		t.Fatalf("Resolve() = %q, want the fleet prompt then the role body", got)
+	}
+	if want := "Your last step is `" + codexprompt.RewriteCodeReview("/code-review low") +
+		"` over your own change.\n"; role != want {
+		t.Fatalf("role body = %q, want %q", role, want)
+	}
+	if strings.Contains(role, "/code-review") || !strings.Contains(role, "codex review -c") {
+		t.Fatalf("role body still spells Claude's /code-review: %q", role)
+	}
+}
+
 // Test 4 — stripFrontmatter's three shapes: a normal "---"/"---" block; a
 // file that never opens one (the whole file is the constitution); and a file
 // that opens one but never closes it (left untouched — there is no
@@ -361,7 +394,7 @@ func TestEmptyConstitutionIsAnError(t *testing.T) {
 
 // Test 9 — no cross-engine fallback. A role that exists ONLY as
 // .claude/agents/<role>.md, asked for on a cx seat, must error and name the
-// compile fix (engine-sync codex build <repo>) — never silently return the .md body.
+// compile fix (pfm codex build <repo>) — never silently return the .md body.
 func TestNoCrossEngineFallback(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -379,8 +412,8 @@ func TestNoCrossEngineFallback(t *testing.T) {
 		t.Fatal("the .claude source body leaked into a cx resolution")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "engine-sync codex build "+repo) {
-		t.Fatalf("error = %q, want it to name the compile fix %q", msg, "engine-sync codex build "+repo)
+	if !strings.Contains(msg, "run: pfm codex build "+repo) {
+		t.Fatalf("error = %q, want it to name the compile fix %q", msg, "run: pfm codex build "+repo)
 	}
 	if !strings.Contains(msg, "reviewer") {
 		t.Fatalf("error = %q, want it to name the role", msg)

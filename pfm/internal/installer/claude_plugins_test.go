@@ -536,6 +536,18 @@ func TestEnsureClaudePluginsFailureNamesThePluginAndOthersContinue(t *testing.T)
 	if !strings.Contains(out.String(), wantLine) || !strings.Contains(out.String(), "plugin not found") {
 		t.Fatalf("output missing %q with stderr:\n%s", wantLine, out.String())
 	}
+	// A bare name that fails to install names the entry, the repository pfm
+	// tried and the repair, in the install's own FAIL line.
+	for _, want := range []string{
+		`claude.plugins entry "sub-agent-compact"`,
+		"github.com/rezzminator/sub-agent-compact",
+		"fix or remove the entry in claude.plugins if that repository does not exist",
+		BareClaudePluginRepair("sub-agent-compact"),
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("FAIL line lacks %q:\n%s", want, out.String())
+		}
+	}
 	if len(runner.calls) != 2*len(testPlugins) {
 		t.Fatalf("other plugins did not continue: %v", runner.calls)
 	}
@@ -830,7 +842,7 @@ func TestClaudePluginFailedCommandKeepsItsWrites(t *testing.T) {
 	installer.options.PrimaryConfigDir = second
 	err := installer.ensureClaudePlugins(context.Background())
 	want := "claude plugin " + testPlugins[0].ID + " in " + second + ": " + argv +
-		`: exit 1 stderr="plugin failed"`
+		`: exit 1 stderr="plugin failed" — ` + BareClaudePluginRepair(testPlugins[0].Name)
 	if err == nil || err.Error() != want || !strings.Contains(output.String(), "  FAIL    "+want+"\n") {
 		t.Fatalf("failure = %v, want %q\n%s", err, want, output.String())
 	}

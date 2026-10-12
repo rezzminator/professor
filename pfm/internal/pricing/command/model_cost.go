@@ -133,6 +133,9 @@ func summary(prices pricing.Prices, result modelcost.Result) string {
 		from += " " + prices.File
 	}
 	line += " · from " + from + " · refresh " + result.Status
+	if result.Reason != "" {
+		line += " (" + result.Reason + ")"
+	}
 	if result.Status == modelcost.StatusRefreshed {
 		detail := "unchanged"
 		if result.Changed {

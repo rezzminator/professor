@@ -337,12 +337,13 @@ The blueprint evolves through semver git tags. Each tier has one source of truth
 0. An install without a baseline (it predates `pfm init`) runs `pfm update adopt [--at <ref>]` once to pin its existing local files; `--at` anchors the pins at the blueprint ref it last synced from.
 1. Run `pfm doctor --project-updates` inside the project (exit 0 clean, 1 review, 3 failure). It reads the blueprint, baseline pins, and local paths, then reports without writing. Bare `pfm update` performs the machine update first and appends the same project report when it finds a baseline.
 2. Review every non-current status:
-   - `UPDATED` — read the diff printed under the row (the intent of the upstream change), carry what applies into the local file, keep the project's own edits.
+   - `UPDATED` — read the diff printed under the row (the intent of the upstream change), carry what applies into the local file, keep the project's own edits, then `pfm update pin <local>`; a version kept apart on purpose is `pfm update pin <local> --keep "<what you did not take, and why>"`, recorded and shown as a `KEPT` row (never review).
    - `NEW` — adopt it only if useful, then create its mapping with `pfm update pin --template <template> <local>`; `pfm update ignore <template>...` keeps a template the project will never take out of every later report.
    - `GONE-UPSTREAM` — delete the retired local file and run `pfm update drop <local>`; keep it and drop only its pin if the project still uses it.
    - `LOCAL-DELETED` — restore the local file or drop its pin.
+   - `RETIRED-NAME` — edit the line to its successor; a mention that must stay is recorded with `pfm update accept <path> --reason "<why>"` (an `ACCEPTED` row, never review). A name the project defines itself and a match inside a URL are not hits.
 3. After porting an `UPDATED` file, advance that one baseline with `pfm update pin <local>`. Use `--all` only after reviewing and porting every reported updated file.
-4. Re-run `pfm doctor --project-updates`; it ends `clean` with exit 0 only when nothing needs review. Rebuild enabled engine mirrors from the resulting local sources.
+4. Re-run `pfm doctor --project-updates` until it ends `clean` with exit 0; a session ends only there, every row closed by a verb. Rebuild enabled engine mirrors from the resulting local sources.
 
 The report is the update UI. Project updates never regenerate local files, replay the interview, apply template changes automatically, or perform a three-way merge. See `SETUP.md` § "Staying current" for the command-level workflow.
 

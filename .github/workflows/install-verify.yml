@@ -68,8 +68,13 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
+      # The agent source inventory the installer tests read imports yaml; Linux gets python3-yaml from apt.
       - name: Install e2e tools
-        run: brew install tmux jq
+        run: |
+          set -euo pipefail
+          brew install tmux jq
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
+          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
 
       # Exercise the fixture with system Bash; dev.sh verify templates runs it too.
       - name: Verify refresh scope with system Bash

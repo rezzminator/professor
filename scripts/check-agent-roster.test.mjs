@@ -2,7 +2,7 @@
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -153,3 +153,56 @@ test("empty stripped suffix forwards the compiler's own finding", (t) => {
   assert.equal(result.status, 1, result.out);
   assert.match(result.out, /compiler:.*empty agent suffix/);
 });
+
+const twins = [
+  ['gpt-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
+  ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],
+  ['gpt-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
+  ['gpt-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
+  ['sol', 'gpt-6.1-sol', 'high'],
+  ['luna', 'gpt-6-luna', 'medium'],
+  ['terra', 'gpt-5.6-terra', 'high'],
+  ['astra', 'gpt-6-astra', 'high'],
+];
+const configDir = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}';
+
+for (const [name, model, effort, role] of twins) {
+  test(`${name} ships its runtime and portable role contract`, () => {
+    const path = join(ROOT, 'templates/global/agents', `${name}.md`);
+    assert.ok(existsSync(path), `${name}: shipped machine-global source is missing`);
+    const source = readFileSync(path, 'utf8');
+    const parsed = spawnSync('python3', ['-I', '-c',
+      'import json,sys,yaml; print(json.dumps(yaml.safe_load(sys.stdin.read().split("---", 2)[1])))'],
+    { input: source, encoding: 'utf8' });
+    assert.equal(parsed.status, 0, `${name}: frontmatter parser failed: ${parsed.error ?? parsed.stderr}`);
+    const fm = JSON.parse(parsed.stdout);
+    assert.equal(fm.name, name);
+    assert.equal(fm.model, `${model}[1m]`);
+    assert.equal(fm.effort, effort);
+    assert.equal(fm['codex-model'], model);
+    assert.equal(fm['codex-effort'], effort);
+    assert.deepEqual(fm.autoCompact, { forceAt: '230k', nudgeFrom: '190k', nudgeEvery: '20k' });
+    assert.ok(Buffer.byteLength(source) <= 15 * 1024, `${name}: exceeds the agent size cap`);
+    const refresh = JSON.parse(readFileSync(join(ROOT, 'templates/refresh-map.json'), 'utf8'));
+    assert.deepEqual(refresh.templates[`global/agents/${name}.md`], { curated: true },
+      `${name}: refresh-map registration is missing`);
+    if (role) {
+      assert.equal(fm.role, role);
+      assert.ok(source.includes(`${configDir}/agents/${role}.md`), `${name}: role pointer is not portable`);
+      assert.ok(existsSync(join(ROOT, 'templates/global/agents', `${role}.md`)), `${name}: role manual is missing`);
+      assert.ok(source.includes('spawn `gpt-foreman`'));
+      assert.ok(source.includes('spawn `gpt-executor`'));
+      assert.ok(source.includes('spawn `gpt-lander`'));
+      assert.ok(source.includes('your parent hears from you only by that return'));
+      assert.ok(source.includes('run.md, briefs, returns/*.md, gate.md, red/*'));
+    }
+    if (role === 'flights-foreman') {
+      assert.deepEqual(fm.hooks, {
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command',
+          command: `python3 -I "${configDir}/hooks/gpt-return-watch.py"` }] }],
+        Stop: [{ hooks: [{ type: 'command',
+          command: `python3 -I "${configDir}/hooks/gpt-agent-stop.py" foreman` }] }],
+      });
+    }
+  });
+}

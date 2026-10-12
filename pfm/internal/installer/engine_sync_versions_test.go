@@ -19,7 +19,7 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 			t.Setenv("XDG_DATA_HOME", "")
 			t.Setenv("ENGINE_SYNC_HOME", "")
 			esHome := filepath.Join(home, ".local", "share", "engine-sync")
-			stableVersion := "0.3.0-alpha.3"
+			stableVersion := "0.3.0-alpha.4"
 			if name == "older required" {
 				stableVersion = "0.1.0"
 			}
@@ -71,11 +71,11 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 			text := output.String()
 			switch name {
 			case "older required":
-				if failures == 0 || !strings.Contains(text, "engine-sync 0.1.0 is older than required 0.3.0-alpha.3") {
+				if failures == 0 || !strings.Contains(text, "engine-sync 0.1.0 is older than required 0.3.0-alpha.4") {
 					t.Fatalf("doctor %d/%d: %s", warnings, failures, text)
 				}
 			case "two versions":
-				if warnings == 0 || !strings.Contains(text, "stable 0.3.0-alpha.3") ||
+				if warnings == 0 || !strings.Contains(text, "stable 0.3.0-alpha.4") ||
 					!strings.Contains(text, "plugin cache 0.1.0") ||
 					!strings.Contains(text, "ENGINE_SYNC_BIN") {
 					t.Fatalf("doctor %d/%d: %s", warnings, failures, text)

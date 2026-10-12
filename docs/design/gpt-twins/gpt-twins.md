@@ -16,12 +16,12 @@ Installation and mirror compilation are local file operations: they do not conta
 | `gpt-reviewer` | `reviewer` | `gpt-6.1-sol[1m]` | `high` | the full review manual, Claude tracers unchanged |
 | `gpt-reviewer-pro` | `reviewer-pro` | `gpt-6.1-sol[1m]` | `high` | the full deep-review manual, Claude tracers unchanged |
 | `gpt-executor` | `flights-mechanical-executor` | `gpt-6-luna[1m]` | `high` | the manual, the return law prepended |
-| `sol` | `general-purpose` | `gpt-6.1-sol[1m]` | `high` | the `gpt-worker.md` append text |
-| `luna` | `general-purpose` | `gpt-6-luna[1m]` | `medium` | the `gpt-worker.md` append text |
-| `terra` | `general-purpose` | `gpt-5.6-terra[1m]` | `high` | the `gpt-worker.md` append text |
-| `astra` | `general-purpose` | `gpt-6-astra[1m]` | `high` | the `gpt-worker.md` append text |
+| `sol` | `general-purpose` | `gpt-6.1-sol[1m]` | `high` | the `shared/gpt-worker.md` append text |
+| `luna` | `general-purpose` | `gpt-6-luna[1m]` | `medium` | the `shared/gpt-worker.md` append text |
+| `terra` | `general-purpose` | `gpt-5.6-terra[1m]` | `high` | the `shared/gpt-worker.md` append text |
+| `astra` | `general-purpose` | `gpt-6-astra[1m]` | `high` | the `shared/gpt-worker.md` append text |
 
-Each of the ten twins is a declaration in `templates/global/agents/{name}.md`, with `from:` and its settings in frontmatter; engine-sync renders it into its generated directory and `pfm install` links the result. The shared files are `abstract: true` and never installed. Abstract `gpt.md` gives every twin `requires: [gpt-agents]`, `engines: {codex: false, opencode: false}` and the `autoCompact` block `forceAt: 230k`, `nudgeFrom: 190k`, `nudgeEvery: 20k`. `gpt-flights.md` extends it and prepends the return law to the manual; `gpt-worker.md` extends it and appends the general-worker text to the empty `general-purpose` body.
+Each of the ten twins is a declaration in `templates/global/agents/{name}.md`, with `from:` and its settings in frontmatter; engine-sync renders it into its generated directory and `pfm install` links the result. The shared files live in `templates/global/agents/shared/`, carry no `name`, and are never installed. `shared/gpt.md` gives every twin `requires: [gpt-agents]`, `engines: {codex: false, opencode: false}` and the `autoCompact` block `forceAt: 230k`, `nudgeFrom: 190k`, `nudgeEvery: 20k`. `shared/gpt-flights.md` extends it and prepends the return law to the manual; `shared/gpt-worker.md` extends it and appends the general-worker text to the empty `general-purpose` body.
 
 A flight twin carries its original's whole manual, so an edit to the original reaches the twin at the next `pfm install`. `gpt-foreman` renames `flights-foreman`, `flights-mechanical-executor` and `flights-lander` to `gpt-foreman`, `gpt-executor` and `gpt-lander` where the manual spawns them; a file path such as `flights-foreman.md` is never renamed, so `gpt-lander` still reads the foreman's § Change inventory. `gpt-foreman-pro` derives from `gpt-foreman`: its xhigh effort belongs to the entry agent only, and its children stay `gpt-foreman`. `gpt-lander` and `gpt-executor` replace their original's `visibility` with `main`, `gpt-foreman` and `gpt-foreman-pro`, the agents that spawn them; `gpt-lander` adds `Skill` to its tools and renames `reviewer` and `reviewer-pro` to `gpt-reviewer` and `gpt-reviewer-pro`. Those reviewers remain visible to `main` and `gpt-lander`; their `tracer` and `sub-tracer` readers stay Claude agents and are never renamed. engine-sync stamps `role: {original}` on each flight twin; a `general-purpose` worker carries none.
 
@@ -42,7 +42,7 @@ For both hooks, `{fleet home}` is `PFM_HOME` when set, otherwise the user's home
 
 ## Engine mirrors
 
-The twins are Claude-only: abstract `gpt.md` sets `engines.codex` and `engines.opencode` to `false`, so engine-sync writes no Codex role and no OpenCode agent for them in any scope. A Codex or OpenCode session runs the ordinary roles on its own models. The adapter installs no provider credentials and translates no Claude hook into another engine's hook.
+The twins are Claude-only: `shared/gpt.md` sets `engines.codex` and `engines.opencode` to `false`, so engine-sync writes no Codex role and no OpenCode agent for them in any scope. A Codex or OpenCode session runs the ordinary roles on its own models. The adapter installs no provider credentials and translates no Claude hook into another engine's hook.
 
 ## Hand-copy conflicts
 

@@ -2,7 +2,7 @@
 name: gpt-lander
 from: flights-lander
 extends:
-  - gpt-flights
+  - shared/gpt-flights.md
 description: Gates one whole flight — after gpt-foreman through an OpenAI-compatible gateway; spawn by name without a model override. Returns PASS, FIXED or FAIL and the gate path.
 model: gpt-6.1-sol[1m]
 effort: high

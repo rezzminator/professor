@@ -2,7 +2,7 @@
 name: gpt-foreman
 from: flights-foreman
 extends:
-  - gpt-flights
+  - shared/gpt-flights.md
 description: Builds one request — GPT flights through an OpenAI-compatible gateway; spawn by name without a model override. gpt-foreman → gpt-executor, gpt-lander. Returns DONE, PARTIAL, FAILED or BLOCKED.
 model: gpt-6.1-sol[1m]
 effort: high

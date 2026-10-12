@@ -79,8 +79,7 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
 for (const [name, path, header, status, message] of [
   ["project from", ".claude/agents/local.md", "from: general-purpose", 2, /machine scope only/],
   ["project abstract", ".claude/agents/local.md", "abstract: true", 2, /machine scope only/],
-  ["abstract quoted model", "templates/global/agents/layer.md", 'abstract: true\nmodel: "smart"', 0, /agent-roster: clean/],
-  ["abstract model hygiene", "templates/global/agents/layer.md", 'abstract: true\nmodel: "smart invalid"', 1, /not one bare alias/],
+  ["abstract retired", "templates/global/agents/layer.md", "abstract: true", 2, /abstract is retired/],
   ["quoted declaration key", "templates/global/agents/derived.md", '"from": general-purpose\nmodel: "smart"', 0, /agent-roster: clean/],
 ]) {
   test(`machine declaration headers: ${name}`, (t) => {

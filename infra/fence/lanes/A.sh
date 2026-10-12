@@ -761,7 +761,7 @@ beat A.09-codex-agents
 spends none
 bad=""
 # Judge the compiled Claude registry: inherited engine settings are already resolved,
-# unmet capabilities have no linked agent, and abstracts are never installed.
+# unmet capabilities have no linked agent, and shared files are never installed.
 agent_names=""
 if ! agent_names="$(python3 -I "$BLUEPRINT/scripts/agent-source-inventory.py" "$HOME/.claude/agents" --codex --names 2>&1)"; then
   bad="$bad effective global agents NOT SCANNED: $agent_names;"

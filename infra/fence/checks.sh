@@ -261,7 +261,7 @@ checks_templates_global_variants() {
   local tracked="$REPO_ROOT/templates/generated/agents"
   head_ "templates — global agent variants render"
   # Machine agent .md files with from: declare agents re-emitted from a
-  # source agent with swapped body text; abstract files are layers, not agents. A swap whose text drifted from its
+  # source agent with swapped body text; shared files below a subdirectory are layers, not agents. A swap whose text drifted from its
   # source fails only when engine-sync renders it, which an adopter's install
   # does: this step renders every declared variant with the real binary, built
   # from the mounted source, into a jail home and Codex home (the real $HOME is

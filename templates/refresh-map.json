@@ -40,9 +40,6 @@
     "global/agents/gpt-executor.md": {
       "curated": true
     },
-    "global/agents/gpt-flights.md": {
-      "curated": true
-    },
     "global/agents/gpt-foreman-pro.md": {
       "curated": true
     },
@@ -58,16 +55,7 @@
     "global/agents/gpt-reviewer.md": {
       "curated": true
     },
-    "global/agents/gpt-worker.md": {
-      "curated": true
-    },
-    "global/agents/gpt.md": {
-      "curated": true
-    },
     "global/agents/luna.md": {
-      "curated": true
-    },
-    "global/agents/repo-lane.md": {
       "curated": true
     },
     "global/agents/reviewer-nt.md": {
@@ -422,6 +410,18 @@
       "curated": true
     },
     "themes/sources.json": {
+      "curated": true
+    },
+    "global/agents/shared/gpt.md": {
+      "curated": true
+    },
+    "global/agents/shared/gpt-flights.md": {
+      "curated": true
+    },
+    "global/agents/shared/gpt-worker.md": {
+      "curated": true
+    },
+    "global/agents/shared/repo-lane.md": {
       "curated": true
     }
   }

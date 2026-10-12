@@ -217,6 +217,16 @@ for change in deleted symlink; do
     ok "F6: $change provisioned env is refused even when gitignored"
   else bad "F6: $change provisioned env is refused even when gitignored" "rc=$rc; out=$out"; fi
 done
+# A pre-metadata worktree has provisioned bytes, not a trusted hash receipt.
+NUKE_CASE=1 fixture; nuke_makefile; add_worktree legacy
+w="$repo/.worktrees/legacy"
+printf 'FIXTURE_PORT=12345\n' > "$w/.env.ports"
+printf 'keep this work\n' > "$w/base.txt"
+invoke remove legacy
+if [[ "$rc" -ne 0 && -f "$w/.env.ports" && "$(cat "$w/base.txt")" == 'keep this work' && "$out" == *'back up'* && "$out" == *'--discard'* && "$out" == *'stack volumes'* && ! -f "$trace" && ! -f "$repo/nuke-trace" ]]; then
+  ok 'F15: legacy metadata refusal names an explicit backup-and-discard route and preserves work and stack'
+else bad 'F15: legacy metadata refusal names an explicit backup-and-discard route and preserves work and stack' "rc=$rc; out=$out"; fi
+
 for change in missing corrupt; do
   provisioned_fixture "env-metadata-$change" ignored
   w="$repo/.worktrees/env-metadata-$change"

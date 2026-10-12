@@ -112,14 +112,14 @@ provisioned_env_hashes() {
     fi
   else
     if [ -e "$marker" ]; then
-      echo "$error: provisioning remains incomplete" >&2; return 1
+      echo "$error: provisioning remains incomplete; back up env files and verify worktree/submodule work is expendable, then use remove ${tree##*/} --discard (discards worktree changes and stack volumes); nothing torn down" >&2; return 1
     fi
     if [ ! -d "$hashes" ]; then
       # A manually added, artifact-free worktree needs no snapshot. Legacy artifacts
       # are unknown bytes, never silently blessed by remove or by an already-ready create.
       for path in "${PROVISIONED_ENV_FILES[@]}"; do
         if [[ -e "$tree/$path" || -L "$tree/$path" ]]; then
-          echo "$error: missing metadata for $path; nothing torn down" >&2; return 1
+          echo "$error: missing metadata for $path; back up env files and verify worktree/submodule work is expendable, then use remove ${tree##*/} --discard (discards worktree changes and stack volumes); nothing torn down" >&2; return 1
         fi
       done
       PROVISIONED_ENV_FILES=(); return 0

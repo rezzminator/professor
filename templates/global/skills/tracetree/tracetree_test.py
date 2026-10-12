@@ -484,8 +484,9 @@ class OpenTest(Repo):
         self.assertEqual(held[-3], "LEAD the handler refuses first @ app/srv/server.go:5 — run: node 1")
         self.assertEqual(held[-2], "NOT READ what Run does at app/kill/kill.go:6 and at app/srv/server.go:5 — run: node 1")
         self.assertEqual(held[-1], "NOT READ the wrapped error at app/kill/kill.go:6 — run: node 1")
-        os.remove(os.path.join(self.run_dir, "2.hops"))
-        os.remove(os.path.join(self.run_dir, "1.hops"))
+        for node in ("1", "2"):
+            for extension in (".hops", ".write.json"):
+                os.remove(os.path.join(self.run_dir, node + extension))
         self.node("1", ["LEAD the handler refuses first @ app/srv/server.go:5",
                         "NOT READ the wrapped error at app/kill/kill.go:6"])
         flagged = self.wait("1").splitlines()
@@ -1365,7 +1366,10 @@ class WarningsTest(Stored):
         self.assertEqual(self.put("1", ["@ pkg/kill/kill.go:5", f"> {EXEC}"]).returncode, 0)
         self.store("2", hops("2", ["- x"], ["@ app/srv/server.go:5", f"> {GHOST_HOP}"],
                              ["END returned: x @ app/srv/server.go:5"]))
-        self.assertEqual(self.check().splitlines()[:3], [HEADER_BROKE.format(n=1, m=2), "⚠ node 2: 1 hop REJECTED", MISCOPY])
+        lines = self.check().splitlines()
+        self.assertEqual(lines[:2], [HEADER_BROKE.format(n=1, m=2), "⚠ node 2: 1 hop REJECTED"])
+        self.assertIn(MISCOPY, lines)
+        self.assertTrue(any("could not look" in line and "2.write.json" in line for line in lines))
 
     def test_the_page_shows_a_miscopy_as_a_quiet_note_and_no_red_block(self):
         self.assertEqual(self.put("1", ["@ pkg/kill/kill.go:5", f"> {EXEC}"]).returncode, 0)
@@ -1436,6 +1440,56 @@ class WarningsTest(Stored):
         for flags in (("--hops",), ("--hops", "1"), ("--full",)):
             self.assertEqual(self.check(*flags).splitlines()[:2], block, flags)
 
+    def test_missing_sidecar_in_a_modern_run_reports_unknown_placement(self):
+        self.write("1", self.good())
+        self.write("2", self.good("2"))
+        os.remove(os.path.join(self.run_dir, "2.write.json"))
+        for flags in ((), ("--hops", "2"), ("--full", "2")):
+            with self.subTest(flags=flags):
+                out = self.check(*flags)
+                self.assertIn("2.write.json cannot be used", out)
+                self.assertIn("missing sidecar", out)
+                self.assertIn("could not look", out)
+
+        self.store("3", hops("3", ["- rejected quote"], ["@ app/srv/server.go:5", f"> {GHOST_HOP}"],
+                             ["END returned: x @ app/srv/server.go:5"]))
+        for flags in ((), ("--hops", "2"), ("--full", "2")):
+            with self.subTest(incident="rejected", flags=flags):
+                out = self.check(*flags)
+                self.assertIn("REJECTED", out)
+                self.assertIn("2.write.json cannot be used", out)
+                self.assertIn("missing sidecar", out)
+                self.assertIn("could not look", out)
+        mapped = tt(["map", self.run_dir, "--json"])
+        self.assertEqual(mapped.returncode, 0, mapped.stderr)
+        warnings = json.loads(mapped.stdout)["warnings"]
+        self.assertTrue(any("REJECTED" in line for line in warnings))
+        self.assertTrue(any("could not look" in line and "2.write.json" in line for line in warnings))
+
+    def test_interrupted_writer_never_leaves_hops_without_metadata(self):
+        # Stop at sidecar publication. Old order has already published hops;
+        # metadata-first publication leaves no readable node at this point.
+        interrupted = ("import builtins, importlib.util, os, sys\n"
+                       "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))\n"
+                       "spec = importlib.util.spec_from_file_location('interrupted_kit', sys.argv[1])\n"
+                       "kit = importlib.util.module_from_spec(spec)\n"
+                       "spec.loader.exec_module(kit)\n"
+                       "real_open = builtins.open\n"
+                       "def stop_at_sidecar(path, mode='r', *args, **kwargs):\n"
+                       "    if '.write.json' in str(path) and mode in ('w', 'x'):\n"
+                       "        os._exit(97)\n"
+                       "    return real_open(path, mode, *args, **kwargs)\n"
+                       "builtins.open = stop_at_sidecar\n"
+                       "kit.cmd_write(sys.argv[2], '1')\n")
+        got = subprocess.run([sys.executable, '-I', '-c', interrupted, SCRIPT, self.run_dir],
+                             input=self.good(), capture_output=True, text=True, timeout=60)
+        self.assertEqual(got.returncode, 97, got.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.run_dir, '1.hops')),
+                         'an interrupted writer must not publish a node before its placement metadata')
+        checked = tt(['check', self.run_dir])
+        self.assertEqual(checked.returncode, 2)
+        self.assertIn('holds no .hops file', checked.stderr)
+
     def test_an_unusable_sidecar_is_a_could_not_look_never_a_clean_none(self):
         self.write("1", self.good())
         with open(os.path.join(self.run_dir, "1.write.json"), "w") as f:
@@ -1496,7 +1550,8 @@ class WarningsTest(Stored):
         self.write("1", self.good())
         clean = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
         self.assertEqual(clean["warnings"], [])
-        os.remove(os.path.join(self.run_dir, "1.hops"))
+        for extension in (".hops", ".write.json"):
+            os.remove(os.path.join(self.run_dir, "1" + extension))
         self.placed_node()
         dirty = json.loads(tt(["map", self.run_dir, "--json"]).stdout)
         self.assertEqual(dirty["warnings"], self.check().splitlines()[:2])
@@ -1508,7 +1563,8 @@ class WarningsTest(Stored):
         with open(out) as f:
             clean = f.read()
         self.assertNotIn('id="warnings"', clean)
-        os.remove(os.path.join(self.run_dir, "1.hops"))
+        for extension in (".hops", ".write.json"):
+            os.remove(os.path.join(self.run_dir, "1" + extension))
         self.placed_node()
         self.assertEqual(tt(["map", self.run_dir, "--html", out]).returncode, 0)
         with open(out) as f:

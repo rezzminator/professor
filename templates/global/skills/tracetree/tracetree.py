@@ -915,11 +915,18 @@ def sidecar_entries(files, run, node, hops):
                 raise ValueError("not a list of entries")
             if len(got) != hops:
                 raise ValueError(f"{len(got)} entries for {hops} hops")
-        except FileNotFoundError:
-            got = None
         except (OSError, ValueError) as e:
-            why = f"{node}.write.json cannot be used: {e}"
-            files.unknown[why] = files.unknown.get(why, 0) + 1
+            if isinstance(e, FileNotFoundError):
+                try:
+                    modern = any(entry.endswith(".write.json") for entry in os.listdir(run))
+                except OSError as lookup:
+                    why = f"{node}.write.json cannot be used: missing sidecar; cannot inspect {run}: {lookup}"
+                else:
+                    why = f"{node}.write.json cannot be used: missing sidecar in a run with write metadata" if modern else ""
+            else:
+                why = f"{node}.write.json cannot be used: {e}"
+            if why:
+                files.unknown[why] = files.unknown.get(why, 0) + 1
             got = None
         files.sidecars[(run, node)] = got
     return files.sidecars[(run, node)]
@@ -1361,7 +1368,7 @@ def incidents(loaded):
     The run's drifted hops print their own line and count no node as broken; followed hops (a file moved since the walk)
     print a run line only beside other lines and count no node as broken; flagged answers stay in COUNTS only, so a
     clean walk never warns. A
-    sidecar that could not be read, with nothing else found, is a could-not-look line, never an empty block."""
+    sidecar that could not be read is a could-not-look line, including beside other incidents."""
     run, root, names, files, nodes, ranges, counts = loaded
     broke, details, notes = 0, [], []
     for name in names:
@@ -1387,6 +1394,8 @@ def incidents(loaded):
         moved = [pair for name in names for pair in nodes[name]["followed"]]
         details.append(f"⚠ run: {count(counts['followed'], 'hop')} followed files moved since the walk ({pair_list(moved)})")
     if details:
+        if files.unknown:
+            details.append(f"⚠ run: the kit could not look: {'; '.join(files.unknown)}")
         head = (f"⚠ WARNINGS — {broke} of {len(names)} nodes broke the hop contract; their answers rest on placed, "
                 f"refused or rejected hops: drill before trusting them") if broke else "⚠ WARNINGS — no node broke the hop contract"
         return dict(lines=[head, *details], notes=notes, broke=broke, drifted=counts["drifted"])
@@ -1653,26 +1662,26 @@ def cmd_write(run, name):
     # notes is stored as its commit
     out = [line if line.startswith(">") or line.lstrip().startswith("=")
            else PINREF.sub(lambda m: pinned_commit(files, m.group(1)), line) for line in out]
-    # The exclusive create of {ID}.hops decides the one writer; only that winner writes the sidecar, through a temporary
-    # name and a rename, so a loser never replaces the winner's entries.
+    # Claim the sidecar exclusively, finish it, then publish hops. A killed writer can leave metadata without a node,
+    # never a node missing its metadata; a loser cannot replace the winner's entries.
     sidecar = os.path.join(run, name + ".write.json")
-    scratch = f"{sidecar}.{os.getpid()}.tmp"
     try:
-        claim = open(path, "x", encoding="utf-8")
+        claim = open(sidecar, "x", encoding="utf-8")
     except FileExistsError:
-        fail(f"{name}.hops is already written — a node writes once; reply with your one return line now")
+        fail(f"{name}.hops is already written or its metadata write is incomplete — a node writes once; inspect {sidecar}")
     except OSError as e:
-        fail(f"cannot write {path}: {e}")
+        fail(f"cannot write {sidecar}: {e}")
+    owned = [sidecar]
     try:
         with claim:
-            claim.write("\n".join(out))
-        with open(scratch, "w", encoding="utf-8") as f:
-            json.dump(entries, f, indent=1, ensure_ascii=False)
-            f.write("\n")
-        os.replace(scratch, sidecar)
+            json.dump(entries, claim, indent=1, ensure_ascii=False)
+            claim.write("\n")
+        with open(path, "x", encoding="utf-8") as f:
+            owned.append(path)
+            f.write("\n".join(out))
     except OSError as e:
-        # the claim is this writer's own: release it, so the node can be written again
-        for leftover in (scratch, path):
+        # Release only this writer's claims; a pre-existing hops file is never removed.
+        for leftover in owned:
             try:
                 os.remove(leftover)
             except FileNotFoundError:

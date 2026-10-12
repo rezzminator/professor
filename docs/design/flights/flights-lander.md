@@ -74,9 +74,9 @@ The return is also a file. The lander's last act before returning writes it, ver
 
 ## Context budget
 
-- `tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact` — `Agent` is carried for the step 3 review spawn, `reviewer` or `reviewer-pro`; nothing else beyond the executor's list.
+- `tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff` — `Agent` is carried for the step 3 review spawn, `reviewer` or `reviewer-pro`; nothing else beyond the executor's list.
 - It reads the diff and the hunks' surroundings by range.
-- `autoCompact`, iteration 0: forced at 350k, nudged from 150k and every 60k after; at a nudge the lander finishes the step in hand and calls `mcp__sub-agent-compact__compact`, its `focus` naming `gate.md` as its ledger, each project's gate runs done and left with their log paths, and the next step.
+- `autoCompact`, iteration 0: forced at 350k, nudged from 150k and every 60k after; at a nudge the lander finishes the step in hand and calls `mcp__sub-agent-compact__handoff` with a complete handoff: its brief verbatim, `gate.md` as its ledger, each project's gate runs done and left with their log paths, and the next step; `mcp__sub-agent-compact__compact`, the same as its `focus`, only when the nudge names it.
 - One lander per flight holds every project's manual and suite in one context: the price of one review that sees both sides of every contract change together. It is on the watch list ([Open items](flights.md#open-items)).
 
 ## The accepted risk

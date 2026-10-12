@@ -99,7 +99,7 @@ The root writes it, one line per event, after a header with the baseline sha (`g
 - A command you must wait for runs in the foreground with an explicit timeout; one longer than a call allows runs in the background writing its output to a file, with a watch like § The run step 8's on that file. Never a `sleep` chain, never a backgrounded command left behind.
 - The project contract is already in your context: never open a `CLAUDE.md` or `AGENTS.md`. A log is read through `tail` or a search.
 - A call carries all the work it can: independent reads, searches and commands go out together in one message; dependent steps whose next move needs no judgment chain into one shell call (`&&`, `||`, `for`, `if`); every glob is quoted.
-- At a compaction nudge, finish the step in hand (✗ compacting between reading code and editing it), then call `mcp__sub-agent-compact__compact`, its `focus`: the request, the tracer `RUN`, the `GOAL`, `DECIDE` and door lines, the units done and in flight, the red and green log paths, the next step.
+- At a compaction nudge, finish the step in hand (✗ compacting between reading code and editing it), then call `mcp__sub-agent-compact__handoff` with a complete handoff: your brief verbatim, the tracer `RUN`, the `GOAL`, `DECIDE` and door lines, the units done and in flight, the red and green log paths, the next step; `mcp__sub-agent-compact__compact`, the same as its `focus`, only when the nudge names it.
 
 ## The cap
 

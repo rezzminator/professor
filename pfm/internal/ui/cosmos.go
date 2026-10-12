@@ -1310,9 +1310,12 @@ func cosmosLayout(
 		// ring-mates is preserved by construction. --no-sky never ticks, so
 		// there Orbit stays zero and the frame stays still.
 		angle += seat.Orbit
+		// Use the fused rounding explicitly on every CPU. arm64 already
+		// contracted these multiply/adds; amd64's separate rounding moved
+		// rail endpoints across integer pixel boundaries.
 		points[key] = cosmosPoint{
-			x: anchor.x + systemRx*seat.Ring*breath*math.Cos(angle),
-			y: anchor.y + systemRy*seat.Ring*breath*math.Sin(angle),
+			x: math.FMA(systemRx*seat.Ring*breath, math.Cos(angle), anchor.x),
+			y: math.FMA(systemRy*seat.Ring*breath, math.Sin(angle), anchor.y),
 		}
 		if parents[key] == "" && !hidden[key] {
 			if ringSets[home] == nil {

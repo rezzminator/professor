@@ -1,6 +1,7 @@
 package professor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,6 +67,48 @@ func TestBaselineRoundTripNormalizesIgnored(t *testing.T) {
 	}
 }
 
+// TestBaselineWithDecisionRecordsIsWrittenAtTheDecisionsVersion: a baseline
+// holding a keep or an accepted rule is saved at version 2, so an older pfm
+// (which reads only version 1) refuses the file instead of rewriting it without
+// the records; a baseline with none stays at version 1, readable by every pfm.
+func TestBaselineWithDecisionRecordsIsWrittenAtTheDecisionsVersion(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		baseline Baseline
+		want     int
+	}{
+		{"no records", Baseline{Version: BaselineVersion}, BaselineVersion},
+		{"the last record undone", Baseline{Version: BaselineDecisionsVersion}, BaselineVersion},
+		{"a keep", Baseline{Version: BaselineVersion, Files: map[string]FilePin{
+			"a.md": {Template: "project/a.md", Kept: &KeptNote{Reason: "own", FromSHA: "abc1234", At: "2026-10-12"}},
+		}}, BaselineDecisionsVersion},
+		{"an accepted rule", Baseline{Version: BaselineVersion, RetiredAccepted: []RetiredRule{
+			{Path: "docs", Reason: "records"},
+		}}, BaselineDecisionsVersion},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := Save(root, test.baseline); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			raw, err := os.ReadFile(BaselinePath(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := fmt.Sprintf("\"version\": %d,", test.want); !strings.Contains(string(raw), want) {
+				t.Fatalf("saved baseline lacks %s:\n%s", want, raw)
+			}
+			loaded, err := Load(root)
+			if err != nil || loaded.Version != test.want {
+				t.Fatalf("Load() = version %d, err %v, want version %d", loaded.Version, err, test.want)
+			}
+			if err := Save(root, loaded); err != nil {
+				t.Fatalf("re-Save() of a loaded baseline error = %v", err)
+			}
+		})
+	}
+}
+
 func TestBaselineMalformedAndUnsupportedAreNamed(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -73,7 +116,7 @@ func TestBaselineMalformedAndUnsupportedAreNamed(t *testing.T) {
 		want    string
 	}{
 		{name: "malformed", content: "{", want: "BASELINE-MALFORMED"},
-		{name: "unsupported", content: `{"version":2,"blueprint":{},"files":{}}`, want: "BASELINE-VERSION 2: unsupported"},
+		{name: "unsupported", content: `{"version":3,"blueprint":{},"files":{}}`, want: "BASELINE-VERSION 3: unsupported"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()

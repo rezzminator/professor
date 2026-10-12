@@ -66,31 +66,8 @@ func TestDoctorProjectUpdatesUsageRejectsMixedFlags(t *testing.T) {
 // prefix is no hit.
 func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
-	store := t.TempDir()
-	for relative, content := range map[string]string{
-		"VERSION":                             "0.1.0\n",
-		"templates/project/CLAUDE.md":         "# fixture contract\n",
-		"templates/project/settings.json":     "{}\n",
-		"templates/project/rumdl-policy.toml": "[global]\n",
-	} {
-		writeProjectUpdatesFixture(t, store, relative, content)
-	}
-	for _, dir := range []string{
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
-	} {
-		if err := os.MkdirAll(filepath.Join(store, "templates", "project", dir), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	project := t.TempDir()
-	if _, err := professor.Scaffold(store, project, false, io.Discard); err != nil {
-		t.Fatalf("Scaffold() err = %v", err)
-	}
-	manifest, err := json.Marshal(map[string]any{"interview": map[string]string{"blueprint_clone_path": store}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeProjectUpdatesFixture(t, project, ".professor/manifest.json", string(manifest))
+	store := newProjectUpdatesStore(t)
+	project := scaffoldAdopter(t, store)
 	writeProjectUpdatesFixture(t, project, "scripts/legacy.sh", "#!/bin/sh\nclaude -p '/wave:refine the spec'\n")
 	writeProjectUpdatesFixture(
 		t, project, ".claude/codex-build.json", "{\n  \"skills\": [],\n  \"tools\": [\"mcp__chat__chat_ls\"]\n}\n",
@@ -128,4 +105,43 @@ func writeProjectUpdatesFixture(t *testing.T, root, relative, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// newProjectUpdatesStore is a minimal blueprint store: the templates a
+// scaffold needs and nothing else.
+func newProjectUpdatesStore(t *testing.T) string {
+	t.Helper()
+	store := t.TempDir()
+	for relative, content := range map[string]string{
+		"VERSION":                             "0.1.0\n",
+		"templates/project/CLAUDE.md":         "# fixture contract\n",
+		"templates/project/settings.json":     "{}\n",
+		"templates/project/rumdl-policy.toml": "[global]\n",
+	} {
+		writeProjectUpdatesFixture(t, store, relative, content)
+	}
+	for _, dir := range []string{
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+	} {
+		if err := os.MkdirAll(filepath.Join(store, "templates", "project", dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return store
+}
+
+// scaffoldAdopter is a project scaffolded from store whose manifest names the
+// store as its blueprint clone.
+func scaffoldAdopter(t *testing.T, store string) string {
+	t.Helper()
+	project := t.TempDir()
+	if _, err := professor.Scaffold(store, project, false, io.Discard); err != nil {
+		t.Fatalf("Scaffold() err = %v", err)
+	}
+	manifest, err := json.Marshal(map[string]any{"interview": map[string]string{"blueprint_clone_path": store}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeProjectUpdatesFixture(t, project, ".professor/manifest.json", string(manifest))
+	return project
 }

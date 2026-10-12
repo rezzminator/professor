@@ -487,7 +487,28 @@ else
     [ -z "$want" ] || grep -qF -- "$want" <<<"$out" || bad="$bad $what did not report '$want': $(one_line "$out");"
   }
   step "pin $D_L1" 0 "pinned 1 file(s) at $D_SHA" pfm update pin "$D_L1"
-  step "pin --all (one UPDATED left)" 0 "pinned 1 file(s) at $D_SHA" pfm update pin --all
+  step "pin $D_L2 --keep with a blank reason" 2 "" pfm update pin "$D_L2" --keep " "
+  step "pin --all --keep" 2 "" pfm update pin --all --keep why
+  step "pin --keep of a CURRENT file" 1 "is not UPDATED" pfm update pin "$D_L1" --keep why
+  step "pin $D_L2 --keep" 0 "kept 1 file(s) apart from upstream at $D_SHA: lane-a keeps its own version" pfm update pin "$D_L2" --keep "lane-a keeps its own version"
+  step "pin --all (no UPDATED left)" 0 "pinned 0 file(s) at $D_SHA" pfm update pin --all
+  jq -e --arg l "$D_L2" '.files[$l].kept.reason == "lane-a keeps its own version" and (.files[$l].kept.fromSha | length) > 0' "$BASELINE" >/dev/null 2>&1 ||
+    bad="$bad baseline.json does not record the keep reason and fromSha of $D_L2;"
+  kept_rep="$(in_express pfm doctor --project-updates)"
+  grep -qE '^  KEPT +1 ' <<<"$kept_rep" && grep -qF "lane-a keeps its own version" <<<"$kept_rep" ||
+    bad="$bad the report has no KEPT row carrying the reason: $(one_line "$(printf '%s' "$kept_rep" | head -8)");"
+  step "pin $D_L1 --unkeep (no keep recorded)" 1 "no recorded keep" pfm update pin "$D_L1" --unkeep
+  step "pin $D_L2 --unkeep" 0 "pinned 1 file(s) at $D_SHA" pfm update pin "$D_L2" --unkeep
+  jq -e --arg l "$D_L2" '.files[$l].kept == null' "$BASELINE" >/dev/null 2>&1 ||
+    bad="$bad pin --unkeep left the keep recorded for $D_L2;"
+  printf '%s\n' 'run /jc now' >"$EXPRESS/lane-a-retired.txt"
+  step "accept a path no hit lives at" 1 "covers no retired-name hit" pfm update accept lane-a-nothing-here --reason "no hit"
+  step "accept without a reason" 2 "" pfm update accept lane-a-retired.txt
+  step "accept lane-a-retired.txt" 0 "accepted retired-name hits under 1 path(s)" pfm update accept lane-a-retired.txt --reason "lane-a record"
+  acc_rep="$(in_express pfm doctor --project-updates)"
+  grep -qE '^  ACCEPTED +1 ' <<<"$acc_rep" || bad="$bad the report has no ACCEPTED row after accept: $(one_line "$(printf '%s' "$acc_rep" | head -8)");"
+  step "accept --undo lane-a-retired.txt" 0 "removed 1 retired-name rule(s)" pfm update accept --undo lane-a-retired.txt
+  rm -f "$EXPRESS/lane-a-retired.txt"
   step "pin of a local with no pin" 1 "pfm update pin: lane-a-no-such-local has no pin; use --template for a new adoption" pfm update pin lane-a-no-such-local
   cp "$B/templates/$NEW_T" "$EXPRESS/$NEW_L" || bad="$bad the NEW template could not be copied locally;"
   step "pin --template (adopt NEW)" 0 "pinned 1 file(s) at $D_SHA" pfm update pin --template "$NEW_T" "$NEW_L"
@@ -516,7 +537,7 @@ else
   final="$(in_express pfm doctor --project-updates)"
   [ $? -eq 0 ] && [ "$(printf '%s\n' "$final" | tail -1)" = clean ] || bad="$bad after restore doctor --project-updates is not clean;"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "pin <local>, pin --all, pin --template (NEW adopted; a second adoption refused), drop (a pin forgotten; no pin and no argument refused by name), ignore (gone-upstream and pinned templates refused by name; already-ignored counted), ignore --undo (a non-ignored refused) — the drift ended clean and express was restored"
+    pass "pin <local>, pin --keep (reason recorded, KEPT row), accept (a path with no hit refused; ACCEPTED row; --undo), pin --all, pin --template (NEW adopted; a second adoption refused), drop (a pin forgotten; no pin and no argument refused by name), ignore (gone-upstream and pinned templates refused by name; already-ignored counted), ignore --undo (a non-ignored refused) — the drift ended clean and express was restored"
   fi
 fi
 

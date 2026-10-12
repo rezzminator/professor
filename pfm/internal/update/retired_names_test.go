@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -98,6 +99,8 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"the /chat route",
 		"https://example.com/wave and http://localhost:3000/jc",
 		"/wave-something",
+		"evidence: https://opencode.ai/docs/agents/ and [agents](https://opencode.ai/docs/agents)",
+		"<https://example.com/docs/agents/API.md>",
 		"subagent_type: documenter",
 		"templates/global/agents/documenter.md and .claude/agents/documenter.md",
 		"spawn the documenter agent",
@@ -509,5 +512,63 @@ func TestRetiredGitEnumerationReportsWarningsAndDeduplicates(t *testing.T) {
 				t.Fatalf("files=%v error=%v, want one path", files, err)
 			}
 		})
+	}
+}
+
+// TestScanRetiredNamesSkipsANameTheProjectDefines: a project that keeps its own
+// /km command, agent or skill file, or the retired path itself, is not naming
+// a retired thing; the same name in a project without that file is a hit.
+func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
+	defining := t.TempDir()
+	writeRetiredFixture(t, defining, map[string]string{
+		".claude/commands/km.md":        "mine\n",
+		".claude/commands/qa/live.md":   "mine\n",
+		".claude/agents/rndier.md":      "mine\n",
+		".claude/skills/wave-builder/x": "mine\n",
+		"docs/agents/API.md":            "kept hub\n",
+		"docs/notes.md":                 "/km /qa:live rndier wave-builder docs/agents /jc JC-UPDATE\n",
+		"docs/other.md":                 "mcp__chat__chat_ls\n",
+	})
+	bare := t.TempDir()
+	writeRetiredFixture(t, bare, map[string]string{
+		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc\n",
+	})
+
+	names := func(scan professor.RetiredNameScan) []string {
+		var got []string
+		for _, hit := range scan.Hits {
+			if hit.Path == "docs/notes.md" || hit.Path == "docs/other.md" {
+				got = append(got, hit.Name)
+			}
+		}
+		sort.Strings(got)
+		return got
+	}
+	if got, want := names(
+		ScanRetiredNames(defining, nil),
+	), []string{
+		"/jc",
+		"JC-UPDATE",
+		"mcp__chat__",
+	}; !slices.Equal(
+		got,
+		want,
+	) {
+		t.Errorf("hits where the project defines the names = %v, want %v", got, want)
+	}
+	if got, want := names(
+		ScanRetiredNames(bare, nil),
+	), []string{
+		"/jc",
+		"/km",
+		"/qa:live",
+		"docs/agents",
+		"rndier",
+		"wave-builder",
+	}; !slices.Equal(
+		got,
+		want,
+	) {
+		t.Errorf("hits in a project defining nothing = %v, want %v", got, want)
 	}
 }

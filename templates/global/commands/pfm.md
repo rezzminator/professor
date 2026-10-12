@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop`), `pfm codex build|check`, `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → /pcm.
+description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop`), `pfm codex build|check`, `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → the `pcm` agent.
 argument-hint: [verb|question]
 ---
 
@@ -42,7 +42,7 @@ The blueprint never rewrites a project file after `pfm init`; every upstream cha
 
 1. `pfm doctor --project-updates` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, `MOVED`, or `LOCAL-DELETED`, and prints under each `UPDATED` row the upstream diff since its pin. Its `RETIRED-NAME` section lists retired references in project files, including CURRENT pins; non-CURRENT pins are covered by their report rows, and the baseline ledger and generated engine mirrors are excluded; `UNREADABLE` names scan failures. A readable text file over 1 MiB gets one `INCOMPLETE` coverage row, with prefix hits retained; cap alone never exits 3. A report with only such gaps ends INCOMPLETE at exit 0, not clean. It writes nothing: exit 0 for clean or incomplete coverage, 1 for review (including prefix hits), 3 for failure. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-run the report.
 2. Read each printed diff and `RETIRED-NAME` hit, and decide per file what applies locally; install-time values are never read on update.
-3. Port what applies through `/pcm`, keeping the project's own edits (the guarded framework-edit flow).
+3. Port what applies through the `pcm` agent, keeping the project's own edits.
 4. Advance the pin: `pfm update pin <local>...` (or `--all`); a `NEW` template you adopt: `pfm update pin --template <template> <local>`; a `MOVED` file: keep it, move it to the row's new local path, then `pfm update pin --template <new-template> <new-local>` and `pfm update drop <old-local>`; one you will never take: `pfm update ignore <template>...` (`--undo` reverses); a `GONE-UPSTREAM` or `LOCAL-DELETED` file you keep or forget: `pfm update drop <local>...`.
 
 `pfm update` (bare) advances the source clone to the latest release tag (or `--to vX.Y.Z`), rebuilds and installs the binary, runs `pfm doctor` (rolling back on failure), then prints the same report `pfm doctor --project-updates` prints for this project — start step 2 from there.

@@ -28,12 +28,12 @@ Description, verbatim: `Maps a query exhaustively — tier 3, the ultimate: rr-p
 
 ## How the variant is built
 
-`pfm install` renders it from `rr.md` by the same mechanism as `rr-pro`: its frontmatter overrides `description` and `effort`, its `add` appends `Read` to `tools`, its body replaces § Budget, and `extends: [repo-lane]` supplies § Spawning. Both sections carry their base-text hash in `pins:`:
+`pfm install` renders it from `rr.md` by the same mechanism as `rr-pro`: its frontmatter overrides `description` and `effort`, its `add` appends `Read` to `tools`, its body replaces § Budget, and `extends: [shared/repo-lane.md]` supplies § Spawning. Both sections carry their base-text hash in `pins:`:
 
 | `rr.md` section | `rr-pro-max` text |
 | --- | --- |
 | § Budget | `- Diggers: at most 8 a round.` · `- Rounds: no ceiling — digging ends only on step 5's other two conditions.` · `- Verification: at most 16 source pages.` |
-| § Spawning | the `repo-lane.md` abstract: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
+| § Spawning | the shared file `shared/repo-lane.md`: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
 
 - Each override carries the sha256 pin of the `rr.md` section it replaces. An edit to `rr.md`'s § Budget or § Spawning fails the render with `SECTION-DRIFT rr-pro-max: rr.md § {heading} changed since pinned …` until the override is reviewed and `engine-sync variants pin rr-pro-max` re-pins it; a renamed or deleted heading fails with `SECTION-MISSING`. The procedure's steps cite § Budget and § Spawning by name, so an override changes the caps or the lane without touching a step.
 - The fence's `templates.global-variants` step (`infra/fence/checks.sh`, `checks_templates_global_variants`) renders the shipped declaration and agent bodies through the built engine-sync binary, so a drifted pin fails before an install does.
@@ -77,7 +77,7 @@ Two completed runs and one orphaned run on one query (what benchmarks evaluate d
 | --- | --- |
 | The declaration | `templates/global/agents/rr-pro-max.md` |
 | The body it overrides | `templates/global/agents/rr.md`, § Budget and § Spawning |
-| The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is shared through `templates/global/agents/repo-lane.md` |
+| The repository digger | `templates/global/agents/clone-distiller.md`, `docs/design/clone-distiller/clone-distiller.md` — the lane text is shared through `templates/global/agents/shared/repo-lane.md` |
 | The renderer and its tests | `plugins/engine-sync/internal/source/variantrender.go`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The hook's docs | `docs/design/hooks/hooks.md`, `docs/dev/pfm-surface.md` |

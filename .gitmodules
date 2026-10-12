@@ -1,5 +1,5 @@
 [submodule "agent-effort"]
-	path = plugins/agent-effort
+	path = plugins/effort-live-control
 	url = https://github.com/rezzminator/agent-effort.git
 	branch = develop
 	ignore = dirty

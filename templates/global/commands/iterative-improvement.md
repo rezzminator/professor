@@ -1,5 +1,5 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: iterative-improvement
 description: 'Raises anything run by run — `/iterative-improvement [target] [angle…]`, or asks like "iteratively improve X", "optimize X again and again". Each run priced to the cent, each change judged blind, each round a harder input. Returns the before/after ledger and the version history.'
 argument-hint: '[target] [angle…]'
@@ -76,4 +76,4 @@ A reaction to the delivered work is read by its content, never by its tone; an a
 - A round changes one thing, and a change is kept only on repeated runs.
 - A fact the work needs that sits on disk is read, never asked for. A fact only the user holds is never invented: build around it and name it in the report; ask only for one the work cannot stand without, in one question.
 - A spend cap the brief sets binds, and the report names what it cut.
-- Iterative improvement raises the target, never the permissions: every project rule, gate, Git writer and publication boundary holds, and a guarded file changes only through its owner.
+- Iterative improvement raises the target, never the permissions: every project rule, gate, Git writer and publication boundary holds, and a framework file changes only through its owner (the `pcm` agent).

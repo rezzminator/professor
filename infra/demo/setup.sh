@@ -7,7 +7,7 @@
 #   install  pfm install from the checkout (professor MCP, statusline, hooks, the
 #            professor system prompt, the harvester), Claude Code's first-run
 #            state per seat, the demo projects (/work/demo is a `pfm init`
-#            Professor project — its guard hook is the "rules that bite" demo),
+#            Professor project — its git-guard hook is the "rules that bite" demo),
 #            and the headless kit.
 # Run from /tmp: /worktree's .git file points at a host path the container cannot
 # resolve, so any git command there fails.

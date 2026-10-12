@@ -20,7 +20,7 @@ func TestStageGlobalAgentsLinksTheSources(t *testing.T) {
 	}
 	// A declaration is staged as a rendered-agent stand-in, not a raw Claude source.
 	for _, row := range []struct{ name, role string }{
-		{"gpt-foreman", "flights-foreman"}, {"gpt-reviewer", "reviewer"},
+		{"gpt-flights-foreman", "flights-foreman"}, {"gpt-reviewer", "reviewer"},
 	} {
 		data, err := os.ReadFile(filepath.Join(home, ".claude", "agents", row.name+".md"))
 		if err != nil || !strings.Contains(string(data), "role: "+row.role+"\n") {
@@ -31,10 +31,15 @@ func TestStageGlobalAgentsLinksTheSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shared, err := os.ReadDir(filepath.Join(checkoutRoot(), "templates", "global", "agents", "shared"))
+	if err != nil || len(shared) == 0 {
+		t.Fatalf("read the shared files the registry must not list: %v (%d)", err, len(shared))
+	}
 	for _, entry := range entries {
-		if entry.Name() == "gpt.md" || entry.Name() == "gpt-flights.md" || entry.Name() == "gpt-worker.md" ||
-			entry.Name() == "repo-lane.md" {
-			t.Fatalf("abstract source became an agent: %s", entry.Name())
+		for _, file := range shared {
+			if entry.Name() == file.Name() {
+				t.Fatalf("shared file became an agent: %s", entry.Name())
+			}
 		}
 	}
 	// A second staging over the same home keeps the correct links.

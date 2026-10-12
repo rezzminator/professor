@@ -1,6 +1,4 @@
 ---
-name: gpt
-abstract: true
 requires:
   - gpt-agents
 engines:

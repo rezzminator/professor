@@ -164,7 +164,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -808,7 +808,8 @@ gv_sources() {
   for n in alpha-pro beta-max gamma-lite; do
     printf -- '---\nname: %s\nfrom: %s\n---\n' "$n" "${n%-*}" > "$REPO_ROOT/templates/global/agents/$n.md"
   done
-  printf -- '---\nname: shared\nabstract: true\n---\n' > "$REPO_ROOT/templates/global/agents/shared.md"
+  mkdir -p "$REPO_ROOT/templates/global/agents/shared"
+  printf -- '---\nmodel: smart\n---\n' > "$REPO_ROOT/templates/global/agents/shared/base.md"
 }
 gv_sources
 # The fixture owns its scanner; the real compiler remains stubbed at its boundary.
@@ -867,7 +868,7 @@ for gv_state in missing unparseable empty invalid; do
   case "$gv_state" in
     missing) gv_want="FAILSTEP global agent variants NOT RENDERED — $gv_dir is missing, so nothing was looked up" ;;
     unparseable) mkdir -p "$gv_dir"; printf -- '---\nfrom: [\n---\n' > "$gv_dir/broken.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources do not parse: ' ;;
-    empty) mkdir -p "$gv_dir"; printf -- '---\nabstract: true\n---\n' > "$gv_dir/shared.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources declare no variant, so nothing could render' ;;
+    empty) mkdir -p "$gv_dir"; printf -- '---\nname: solo\n---\n' > "$gv_dir/solo.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources declare no variant, so nothing could render' ;;
     invalid) mkdir -p "$gv_dir"; printf -- '---\nfrom: []\n---\n' > "$gv_dir/broken.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources do not parse: ' ;;
   esac
   es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names"
@@ -887,7 +888,8 @@ lane_agents="$T/lane-agents"
 mkdir -p "$lane_agents/blueprint/templates/global/agents" "$lane_agents/home/.claude/agents" "$lane_agents/home/.codex/agents" "$lane_agents/blueprint/scripts"
 cp "${SUT%/*}/../../scripts/agent-source-inventory.py" "$lane_agents/blueprint/scripts/agent-source-inventory.py"
 printf -- '---\nname: alpha\nmodel: smart\n---\n' > "$lane_agents/blueprint/templates/global/agents/alpha.md"
-printf -- '---\nname: layer\nabstract: true\n---\n' > "$lane_agents/blueprint/templates/global/agents/layer.md"
+mkdir -p "$lane_agents/blueprint/templates/global/agents/shared"
+printf -- '---\nmodel: smart\n---\n' > "$lane_agents/blueprint/templates/global/agents/shared/layer.md"
 printf -- '---\nname: derived\nfrom: alpha\n---\n' > "$lane_agents/blueprint/templates/global/agents/derived.md"
 cp "$lane_agents/blueprint/templates/global/agents/alpha.md" "$lane_agents/home/.claude/agents/alpha.md"
 printf -- '---\nname: derived\nengines:\n  codex: false\n---\n' > "$lane_agents/home/.claude/agents/derived.md"
@@ -904,7 +906,7 @@ sed -n '/^beat A.09-codex-agents$/,/^# .*A.10/p' "${SUT%/*}/lanes/A.sh" > "$lane
   source "$lane_agents/beat.sh"
 ) > "$T/lane-agents.out" 2>&1
 if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
-  ok 'A.09 judges one compiled agent, not an abstract or a Claude-only declaration'
+  ok 'A.09 judges one compiled agent, not a shared file or a Claude-only declaration'
 else bad 'A.09 effective agents' "$(cat "$T/lane-agents.out")"; fi
 es_case checks_templates_mirrors_opencode
 want="$(printf '%s\n%s' \

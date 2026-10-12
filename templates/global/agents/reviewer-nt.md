@@ -1,6 +1,7 @@
 ---
 name: reviewer-nt
 from: reviewer
+description: reviewer without tracers on opus high
 tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__compact
 unset:
   - skills

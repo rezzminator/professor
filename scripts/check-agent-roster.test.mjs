@@ -79,8 +79,7 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
 for (const [name, path, header, status, message] of [
   ["project from", ".claude/agents/local.md", "from: general-purpose", 2, /machine scope only/],
   ["project abstract", ".claude/agents/local.md", "abstract: true", 2, /machine scope only/],
-  ["abstract quoted model", "templates/global/agents/layer.md", 'abstract: true\nmodel: "smart"', 0, /agent-roster: clean/],
-  ["abstract model hygiene", "templates/global/agents/layer.md", 'abstract: true\nmodel: "smart invalid"', 1, /not one bare alias/],
+  ["abstract retired", "templates/global/agents/layer.md", "abstract: true", 2, /abstract is retired/],
   ["quoted declaration key", "templates/global/agents/derived.md", '"from": general-purpose\nmodel: "smart"', 0, /agent-roster: clean/],
 ]) {
   test(`machine declaration headers: ${name}`, (t) => {
@@ -287,15 +286,14 @@ for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
 // pinned against what engine-sync RENDERS from the shipped declaration, never against a source file.
 const CAPABILITY = 'gpt-agents';
 const twins = [
-  ['gpt-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
+  ['gpt-flights-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
   ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],
-  ['gpt-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
-  ['gpt-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
+  ['gpt-flights-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
+  ['gpt-flights-mechanical-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
   ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
   ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
   ['sol', 'gpt-6.1-sol', 'high'],
   ['luna', 'gpt-6-luna', 'medium'],
-  ['terra', 'gpt-5.6-terra', 'high'],
   ['astra', 'gpt-6-astra', 'high'],
 ];
 const otherVariants = ['foreman-pro', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
@@ -363,7 +361,7 @@ test('the shipped variants render with zero errors with and without the gpt-agen
   }
 });
 
-test('the gpt-agents capability decides whether the ten GPT twins are linked', () => {
+test('the gpt-agents capability decides whether the nine GPT twins are linked', () => {
   const on = renderShipped([CAPABILITY]);
   const off = renderShipped([]);
   for (const [name] of twins) {
@@ -403,9 +401,9 @@ for (const [name, model, effort, role] of twins) {
       return;
     }
     assert.equal(fm.role, role);
-    const renamed = name.startsWith('gpt-foreman')
-      ? original.replaceAll('"flights-foreman"', '"gpt-foreman"').replaceAll('"flights-mechanical-executor"', '"gpt-executor"')
-        .replaceAll('"flights-lander"', '"gpt-lander"')
+    const renamed = role === 'flights-foreman'
+      ? original.replaceAll('"flights-foreman"', '"gpt-flights-foreman"').replaceAll('"flights-mechanical-executor"', '"gpt-flights-mechanical-executor"')
+        .replaceAll('"flights-lander"', '"gpt-flights-lander"')
       : role === 'flights-lander'
         ? original.replace(/(^|[^A-Za-z0-9_./:-])(reviewer-pro|reviewer)(?![A-Za-z0-9_/-]|\.[A-Za-z0-9])/g,
           (_, before, agent) => `${before}gpt-${agent}`)
@@ -416,7 +414,7 @@ for (const [name, model, effort, role] of twins) {
       assert.ok(text.includes('run.md, briefs, returns/*.md, gate.md, red/*'), `${name}: the return law lost its file list`);
     } else {
       assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
-      assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-lander']);
+      assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-flights-lander']);
     }
     if (role === 'flights-lander') {
       assert.ok(fm.tools.split(',').map((tool) => tool.trim()).includes('Agent'),
@@ -425,7 +423,7 @@ for (const [name, model, effort, role] of twins) {
         assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
     }
     if (role === 'flights-foreman') {
-      for (const spawned of ['gpt-foreman', 'gpt-executor', 'gpt-lander'])
+      for (const spawned of ['gpt-flights-foreman', 'gpt-flights-mechanical-executor', 'gpt-flights-lander'])
         assert.ok(text.includes(`subagent_type: "${spawned}"`), `${name}: rename to ${spawned} not applied`);
       assert.doesNotMatch(text, /subagent_type: "flights-/, `${name}: a flights-* spawn survived the renames`);
       const commands = (event) => fm.hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));

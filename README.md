@@ -40,7 +40,7 @@ You already run more than one AI chat. They cannot see each other, they forget t
 | --- | --- | --- |
 | Many chats, many accounts | Scattered terminal tabs; a closed tab is a lost chat | One picker — every chat on every harness, live or resumable |
 | One chat needs another | You copy-paste between windows | `chat_inject` — a signed turn, delivered and acknowledged |
-| The rules, after compaction | Whatever the prompt still remembers | Hooks that refuse, with the unlock steps in the refusal |
+| The rules, after compaction | Whatever the prompt still remembers | Hooks that refuse, naming the right way in the refusal |
 | A bot-blocked page | A 403, or an empty page reported as content | A seven-rung fetch ladder; a block is reported as a block |
 | Claude and Codex rules | Two files that drift apart | One `CLAUDE.md`, compiled mirrors, drift fails the check |
 | An account hits its limit | Start over in a new chat | `/reload --account 2` — same pane, same history |
@@ -77,14 +77,14 @@ Two panes, two harnesses. You type one line into the Claude chat on the left; th
 
 ### 3. Rules that bite
 
-A subagent tries to `Edit` a file under `.claude/`. The PreToolUse guard answers:
+A subagent tries to run `git commit`. The `git-guard` PreToolUse hook answers:
 
 ```text
-DENIED — infra edits route through /pcm: open this session's gate from the repo root …
-Do NOT route around this by disabling the hook or editing infra outside /pcm.
+git-guard blocked `git commit -m wip`.
+Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.
 ```
 
-The refusal carries its own unlock steps. That is one of the mandatory rules every install ships with: only `gitter` writes git; guarded files sit behind `/pcm`; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
+The refusal names the right way. That is one of the mandatory rules every install ships with: only `gitter` writes git; framework edits go through the `pcm` agent; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
 
 ### 4. Read what the web hides from bots
 
@@ -162,12 +162,12 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 > An empty enumeration is never a verdict.
 
 - **One agent writes git.** `gitter` is the only agent that commits; every other agent is read-only.
-- **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pcm` plus a session that has read the quality-prompt contract.
+- **Framework edits.** A change to `.claude/**`, a `CLAUDE.md` or `templates/**` goes through the `pcm` agent (the user's `/pcm` dispatches it); it loads the quality-prompt contract before its first edit.
 - **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
 - **The flight pipeline.** `/flights:spec` writes `requirements.md` and hands it to `flights-foreman`, which builds the request and splits only by build-unit ownership into child foremen; each return is verified against its diff; one `flights-lander` for the whole flight runs every project's checks, one review of the whole diff and adversarial tests, then `gitter` commits. `/flights:audit` re-reads the whole flight from its own artifacts, never from what an agent said it did.
 - **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
 
-With `"gptAgents": true` under `claude` in the machine config `pfm.config.json`, `pfm install` also renders and links the GPT twins: `gpt-foreman`, `gpt-foreman-pro` (xhigh), `gpt-lander`, `gpt-reviewer`, `gpt-reviewer-pro`, `gpt-executor`, and the general-purpose `sol`, `luna`, `terra`, `astra`. Invoking them requires a gateway serving their model IDs; installation does not. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) is that gateway: a local passthrough that routes the GPT model IDs over your ChatGPT login, installed on its own from its repository. [GPT twin setup and ownership](docs/design/gpt-twins/gpt-twins.md).
+With `"gptAgents": true` under `claude` in the machine config `pfm.config.json`, `pfm install` also renders and links the GPT twins: `gpt-flights-foreman`, `gpt-foreman-pro` (xhigh), `gpt-flights-lander`, `gpt-reviewer`, `gpt-reviewer-pro`, `gpt-flights-mechanical-executor`, and the general-purpose `sol`, `luna`, `astra`. Invoking them requires a gateway serving their model IDs; installation does not. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) is that gateway: a local passthrough that routes the GPT model IDs over your ChatGPT login, installed on its own from its repository. [GPT twin setup and ownership](docs/design/gpt-twins/gpt-twins.md).
 
 Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**
 
@@ -203,14 +203,14 @@ claude plugin install sub-agent-compact@professor
 
 - [sub-agent-compact](https://github.com/rezzminator/sub-agent-compact): a separate auto-compact point for the main chat and every sub-agent, and self-compaction at a milestone the model chooses.
 - [cache-live-control](https://github.com/rezzminator/cache-live-control): a `/cache` command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn.
-- [agent-effort](https://github.com/rezzminator/agent-effort): per-spawn reasoning effort for sub-agents — start the Agent prompt with `[effort: low|medium|high|xhigh|max]`.
+- [effort-live-control](https://github.com/rezzminator/agent-effort): per-spawn reasoning effort for sub-agents — start the Agent prompt with `[effort: low|medium|high|xhigh|max]` — and live control for an agent whose frontmatter opts in with `effortControl`: its effort rises at each failing test run or red sub-task and comes home once the trouble resolves.
 - [auto-effort](https://github.com/rezzminator/auto-effort): automatic reasoning effort for the main chat — each turn starts at a planned level, the model raises or lowers it with a `set_effort` tool, failing tests raise it, and a per-model cache check switches it off where an effort change would break the prompt cache.
 - [tool-visibility-controller](https://github.com/rezzminator/tool-visibility-controller): one `visibility` field in agent, skill and command frontmatter decides, per agent, which sub-agents, skills, MCP tools and built-in tools it sees and may call — hidden from the listing and refused, never just discouraged.
 - [buddy](https://github.com/rezzminator/buddy): a tiny ASCII companion above your prompt — Quack the duck, seven more characters or your own — that comments on each turn, suggests your next prompt and answers `/buddy` questions from what it remembers of the chat.
 - [callmeter](https://github.com/rezzminator/callmeter): records every tool call, model request, sub-agent turn and session event into one local SQLite store — counts and sizes, never your prompts or file contents — and answers which files, commands and agents cost the most.
 - [engine-sync](https://github.com/rezzminator/engine-sync): carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode — `AGENTS.md`, `.codex/`, `.opencode/` and the role TOMLs in each Codex home — and keeps them in step after every turn; `pfm codex` and `pfm opencode` forward to it.
 
-`pfm install` ensures the plugins `claude.plugins` in `pfm.config.json` lists; unset, that is cache-live-control, sub-agent-compact, agent-effort and tool-visibility-controller. A bare name is one of ours, installed from its GitHub marketplace. An alpha build of pfm installs a bare name instead from a local checkout when `claude.pluginCheckoutRoot` in `pfm.config.json` names the directory holding `{plugin}/plugins/{plugin}` — in a clone, `plugins/`, where each plugin is a git submodule on its `develop` branch (`git submodule update --init`): it copies each into `~/.local/share/{plugin}-dev`, installs `{plugin}@{plugin}-dev` and disables the GitHub copy. Claude reads the `-dev` copy in place, so `/reload-plugins` picks up a refresh. Every build keeps exactly one copy of each bare name enabled: a release build, or an alpha build without a checkout, disables the `-dev` copy instead. A full `name@marketplace` id is installed as named, from Claude Code's own marketplace of that name when it knows one; an entry `{"id": "name@marketplace", "source": "owner/repo"}` adds the marketplace first (`source` is what `claude plugin marketplace add` takes: `owner/repo`, a git or https URL, a path). An id with neither is reported by name, with its repair, in install and doctor. A plugin the list does not name is never touched in any `settings.json`.
+`pfm install` ensures the plugins `claude.plugins` in `pfm.config.json` lists; unset, that is cache-live-control, sub-agent-compact, effort-live-control and tool-visibility-controller. A bare name is one of ours, installed from its GitHub marketplace. An alpha build of pfm installs a bare name instead from a local checkout when `claude.pluginCheckoutRoot` in `pfm.config.json` names the directory holding `{plugin}/plugins/{plugin}` — in a clone, `plugins/`, where each plugin is a git submodule on its `develop` branch (`git submodule update --init`): it copies each into `~/.local/share/{plugin}-dev`, installs `{plugin}@{plugin}-dev` and disables the GitHub copy. Claude reads the `-dev` copy in place, so `/reload-plugins` picks up a refresh. Every build keeps exactly one copy of each bare name enabled: a release build, or an alpha build without a checkout, disables the `-dev` copy instead. A full `name@marketplace` id is installed as named, from Claude Code's own marketplace of that name when it knows one; an entry `{"id": "name@marketplace", "source": "owner/repo"}` adds the marketplace first (`source` is what `claude plugin marketplace add` takes: `owner/repo`, a git or https URL, a path). An id with neither is reported by name, with its repair, in install and doctor. A plugin the list does not name is never touched in any `settings.json`.
 
 `pfm install` installs no engine-sync, and on any host with a Professor clone (the discipline-layer clone above, every `pfm update` host) or a Codex home it refuses without the binary, naming the missing path; a binary-only install with neither skips the step. So install the plugin before the first `pfm install --yes` or `pfm update`: `claude plugin install engine-sync@professor` (after the `marketplace add` above), then start a new Claude session. At that session start its wrapper downloads the release binary, checks it against the plugin's `SHA256SUMS`, and links it at `~/.local/share/engine-sync/bin/engine-sync`, the binary `pfm codex` and `pfm opencode` run; `test -x` on that path confirms it.
 

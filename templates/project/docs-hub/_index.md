@@ -18,7 +18,7 @@ Cross-project docs live in the clusters below (`docs/{cluster}/`); single-projec
 | API | [api/\_index.md](api/_index.md) | Operation surface, endpoints, inter-service contracts, shared types |
 | System Map | [map/\_index.md](map/_index.md) | Components, workflows, DB schema, access control, ports/env/tests |
 | Features | [features/\_index.md](features/_index.md) | Feature inventory by category |
-| Standards | [standards.md](standards.md) | Architecture source-of-truth — invariants every architect reads (owned by `/pcm`) |
+| Standards | [standards.md](standards.md) | Architecture source-of-truth — invariants every architect reads (owned by the `pcm` agent) |
 
 ## Child Projects (`{project}/docs/`)
 

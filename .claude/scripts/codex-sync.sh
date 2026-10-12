@@ -12,7 +12,8 @@ set -uo pipefail
 #          clears it silently. A failure blocks the stop ONCE naming each failed
 #          stage with only its output, then lets the turn end with a
 #          systemMessage warning and keeps the flag; it always exits 0.
-# The binary: $ENGINE_SYNC_BIN when it names an executable regular file, else
+# The binary: $ENGINE_SYNC_BIN when set (one that is not an executable regular
+# file is refused by name, never replaced by the default), else
 # {engine-sync home}/bin/engine-sync ({engine-sync home}: $ENGINE_SYNC_HOME when
 # absolute, else $XDG_DATA_HOME/engine-sync when absolute, else
 # $HOME/.local/share/engine-sync). Neither: mark exits 0, and sync lets the turn
@@ -27,8 +28,14 @@ case "${1:-mark}" in
   sync) STAGE=stop ;;
   *) exit 0 ;;
 esac
-if [[ -n "${ENGINE_SYNC_BIN:-}" && -f "$ENGINE_SYNC_BIN" && -x "$ENGINE_SYNC_BIN" ]]; then
+if [[ -n "${ENGINE_SYNC_BIN:-}" ]]; then
   BIN="$ENGINE_SYNC_BIN"
+  if [[ ! -f "$BIN" || ! -x "$BIN" ]]; then
+    if [[ "$STAGE" == stop ]]; then
+      jq -n --arg m "engine-sync WARNING: ENGINE_SYNC_BIN=$BIN is not an executable file — mirrors were not checked; dirty flag retained" '{systemMessage: $m}'
+    fi
+    exit 0
+  fi
 else
   ES_HOME="${ENGINE_SYNC_HOME:-}"
   if [[ "$ES_HOME" != /* ]]; then

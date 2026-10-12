@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -319,6 +320,43 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     ])
       assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
     assert.match(r.out, /^AREA pfm-update .*pfm\/internal\/mcpserv\/.*pfm\/internal\/harvestmcp\/.*:\(glob\)pfm\/cmd\/pfm\/mcp_serve\*/m);
+  });
+
+  test("every pfm/internal package install and update run through is pfm-update tier 1 or named generic, and the doc table lists the same set", async () => {
+    const root = resolve(dirname(SCRIPT), "..");
+    // The packages install, uninstall and update import directly (non-test sources). A new import has
+    // to be classified here: tier 1 when it carries install or update behavior, generic otherwise.
+    const imported = new Set();
+    for (const pkg of ["installer", "update"]) {
+      const dir = join(root, "pfm/internal", pkg);
+      const sources = readdirSync(dir).filter((n) => n.endsWith(".go") && !n.endsWith("_test.go"));
+      assert.ok(sources.length > 0, `no Go source read under ${dir}`);
+      for (const n of sources)
+        for (const m of readFileSync(join(dir, n), "utf8").matchAll(/"[^"\n]*\/pfm\/internal\/([^"]+)"/g))
+          imported.add(m[1]);
+    }
+    assert.ok(imported.has("enginesync") && imported.has("globallink"), `import scan lost its known imports: ${[...imported]}`);
+    const generic = new Set([
+      "action", "atomicfile", "clock", "cli", "deps", "engine", "fleetdb", "gather", "obs", "paths",
+      "pricing", "pricing/modelcost", "reload", "schedule", "semver",
+    ]);
+    const script = readFileSync(SCRIPT, "utf8");
+    const listed = (text) => new Set(text.split(",").map((n) => n.replace(/["\s]/g, "")).filter(Boolean));
+    const tier1 = listed(script.match(/dir: "pfm\/internal\/",\s*subdirs: \[([^\]]*)\]/)?.[1] ?? "");
+    assert.ok(tier1.size > 0, "no pfm/internal subdirs found in the TIER1 table");
+    const unruled = [...imported].filter((n) => !tier1.has(n) && !generic.has(n));
+    assert.deepEqual(unruled, [], `imported by installer or update, in neither tier 1 nor the generic list: ${unruled}`);
+    const doc = readFileSync(join(root, "docs/design/release/release-check.md"), "utf8");
+    const docRow = doc.match(/`pfm-update` \| `pfm\/internal\/\{([^}]*)\}\/`/)?.[1] ?? "";
+    assert.deepEqual([...listed(docRow)].sort(), [...tier1].sort(), "the doc's pfm-update row differs from the script's TIER1 table");
+    const r0 = await repo();
+    const files = (body) => Object.fromEntries(["enginesync", "globallink"].map((n) => [`pfm/internal/${n}/x.go`, body]));
+    const base = await commit(r0, files("package x\n"));
+    await commit(r0, files("package x\n\nfunc y() {}\n"));
+    const r = await run(r0, "scope", "--base", base, "--head", "HEAD");
+    assertClean(r, "scope");
+    for (const n of ["enginesync", "globallink"])
+      assert.ok(r.out.split("\n").includes(`FILE M 1 tier1 pfm-update pfm/internal/${n}/x.go`), r.out);
   });
 
   test("ERROR, not FAIL, when --base is not an ancestor of --head", async () => {

@@ -82,19 +82,23 @@ line_is_real_hit() {
 }
 
 usage() {
-  echo "Usage: leak-check.sh [--range OLD NEW | --files f1 [f2 ...]]" >&2
+  echo "Usage: leak-check.sh [--range OLD NEW [--remote NAME] | --files f1 [f2 ...]]" >&2
   exit 2
 }
 
 mode="staged"
 range_old=""
 range_new=""
+range_remote=""
 files=()
 
 if [[ $# -eq 0 ]]; then
   mode="staged"
 elif [[ "$1" == "--range" ]]; then
-  [[ $# -eq 3 ]] || usage
+  # --remote NAME: the remote the push goes to (pre-push's $1). A new ref's commits that configured
+  # remote already holds were judged by the push that published them; another remote's were not, and
+  # a target that is no configured remote (a URL, or no --remote) excludes nothing.
+  if [[ $# -eq 5 && "$4" == "--remote" && -n "$5" ]]; then range_remote="$5"; else [[ $# -eq 3 ]] || usage; fi
   mode="range"
   range_old="$2"
   range_new="$3"
@@ -372,9 +376,15 @@ commits_file="$(mktemp)"
 trap 'rm -f "$hits_file" "$coverage_file" "$commits_file"' EXIT
 
 range_diff_stream() {
-  local old_type commit count=0 empty_tree
+  local old_type commit count=0 empty_tree remote_list known remote_name
   if ! old_type="$(repo_git cat-file -t "$range_old")"; then
     echo "leak-check: FAILED — cannot classify range base $range_old; commit enumeration did not run" >&2
+    return 1
+  fi
+  # Commit enumeration walks commits: a tip that is a tree or a blob has none, and would read as an
+  # empty push. Refuse it by name.
+  if ! repo_git cat-file -e "${range_new}^{commit}" 2> /dev/null; then
+    echo "leak-check: FAILED — range tip $range_new does not resolve to a commit (a tree or blob ref has no commits to enumerate); refusing to report clean" >&2
     return 1
   fi
   case "$old_type" in
@@ -384,10 +394,27 @@ range_diff_stream() {
         echo 'leak-check: FAILED — a tree range base must be the empty-tree new-ref sentinel' >&2
         return 1
       fi
-      # A new ref: every commit no remote-tracking ref holds. Those the remote holds were
-      # judged by the push that published them; without remote refs this is all history.
-      if ! repo_git rev-list "$range_new" --not --remotes > "$commits_file"; then
-        echo "leak-check: FAILED — cannot enumerate commits reachable from $range_new and on no remote" >&2
+      # A new ref pushed to a configured remote: every commit that remote does not hold; what it holds
+      # was judged by the push that published it, and another remote's refs prove nothing about this
+      # target. A target git does not know by name (a URL pushed to directly, or no --remote at all)
+      # has no provably pre-scanned refs: every reachable commit is scanned, no remote excluded.
+      known=""
+      if [[ -n "$range_remote" ]]; then
+        if ! remote_list="$(repo_git remote)"; then
+          echo "leak-check: FAILED — cannot list the configured remotes to exclude those $range_remote holds" >&2
+          return 1
+        fi
+        while IFS= read -r remote_name; do
+          [[ "$remote_name" == "$range_remote" ]] && known=1
+        done <<< "$remote_list"
+      fi
+      if [[ -n "$known" ]]; then
+        repo_git rev-list "$range_new" --not "--remotes=$range_remote" > "$commits_file" || known=failed
+      else
+        repo_git rev-list "$range_new" > "$commits_file" || known=failed
+      fi
+      if [[ "$known" == failed ]]; then
+        echo "leak-check: FAILED — cannot enumerate commits reachable from $range_new that the push target does not hold" >&2
         return 1
       fi
       ;;

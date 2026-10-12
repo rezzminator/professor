@@ -66,14 +66,17 @@ cat "$PATH_LINES"
 cat "$PATH_LINES" >> "$UNIT_LOG"
 [ "$UNIT_PATHS_RC" = 0 ] || FAILED=1
 
-verdict() { # verdict <name> <rc>
-  if [ "$2" = 0 ]; then echo "PASS $1"; else echo "FAIL $1"; FAILED=1; fi
+verdict() { # verdict <name> <rc> [note]
+  if [ "$2" = 0 ]; then echo "PASS $1${3:+ $3}"; else echo "FAIL $1"; FAILED=1; fi
 }
 run_check() { # run_check <name> <command...>: set +e so the command's own -e rules apply, as in dev.sh
-  local name="$1" rc; shift
+  local name="$1" rc note="" out="$SCRATCH/out.$1"; shift
   { printf '\n== %s: %s\n' "$name" "$*"; } >> "$UNIT_LOG"
-  set +e; "$@" >> "$UNIT_LOG" 2>&1; rc=$?; set -e
-  verdict "$name" "$rc"
+  set +e; "$@" > "$out" 2>&1; rc=$?; set -e
+  cat "$out" >> "$UNIT_LOG"
+  # A leak scan under the explicit `!structural-only` policy applied no private denylist: its PASS says so.
+  if [ "$name" = leak ] && grep -q 'PRIVATE COVERAGE SKIPPED' "$out"; then note='(structural-only)'; fi
+  verdict "$name" "$rc" "$note"
 }
 skip_check() { echo "SKIP $1 (no named file it applies to)"; }
 

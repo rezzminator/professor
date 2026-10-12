@@ -240,11 +240,6 @@
     "project/commands/per-project/testing-manual.md": {
       "curated": true
     },
-    "project/commands/rnd.md": {
-      "sources": {
-        ".claude/commands/rnd.md": "398a09d18a16b286d5552dd1b3ebb57fb908368107b5daa2da3e1d5425cc8506"
-      }
-    },
     "project/docs-commands/build/references/qa-commons.md": {
       "curated": true
     },

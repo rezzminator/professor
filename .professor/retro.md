@@ -446,3 +446,28 @@ Resolved:
 Observed: another chat kept landing on develop during the release, forcing repeated REVIEW/NOTES/GATE rounds until a hold was agreed.
 Amend: .claude/commands/pfm/release.md — the release opens by announcing a develop hold to live chats on the project.
 Resolved:
+
+## 2026-10-13 — a probe script's glob deleted 221 transcripts
+Observed: on 2026-10-11 a flights-foreman probe script (`drive.sh`, transcript d560ba39…/subagents/agent-afa3f7dcaf0e4af12.jsonl:85) cleaned up with `rm -rf "$PROJECTS"/*"$(basename "$WORK")"*`; `WORK` ended in `/work`, so it ran `rm -rf ~/.claude/projects/*work*` and erased every project folder containing "work" — 221 sessions, a private project's 9 chats among them. No backup existed (Time Machine never configured).
+Amend: the Claude transcript store is never a glob target — a cleanup removes only the exact paths it created, and a probe runs under its own CLAUDE_CONFIG_DIR/HOME (the fence) so its transcripts never land in the real store; candidate homes: templates/global/agents/flights-foreman.md and the git-guard/kill-guard hook family as a transcript-store rm guard.
+Resolved:
+
+## 2026-10-13 — private community research shipped publicly through tracked .professor/RR
+Observed: commit a042f717 (2026-10-07) added five strategy reports on a private community project to tracked `.professor/RR/`; they reached the public origin/main. The same files had been set aside as private-research in a pfm incident that morning; leak-check passed them because the community's names are not in the term list.
+Amend: decide whether `.professor/RR/` is tracked at all (an RR names whatever the user researched); if tracked, `rr` saves research about a private project into that project, and leak-terms gains the user's private project names.
+Resolved:
+
+## 2026-10-13 — transcript parsers broke on a raw U+2028
+Observed: Claude Code writes U+2028/U+2029 unescaped inside transcript JSON lines; sub-agent-compact's `^(\d+):(.*)$` parsers (look_back, priorPrompts, priorCalls) failed or silently skipped those lines. 520 unit tests were green; only a live call against a real transcript caught it.
+Amend: any parser of `grep -n` transcript output matches with `[\s\S]*`, never `.`; a tool that reads transcripts gets one live run against a real transcript before it lands.
+Resolved:
+
+## 2026-10-13 — plugin tools invisible to agents with a fixed tools list
+Observed: 23 agent templates list `mcp__sub-agent-compact__compact` in `tools:`; none lists `forward_handoff` or `look_back`, so a real flights-foreman sub-agent cannot call either; the forward-handoff benchmark ran foremen as main chats (agentRole), which hid this.
+Amend: a plugin tool meant for sub-agents ships with its name added to every agent's tools list that names the plugin's other tools, in the same pass.
+Resolved:
+
+## 2026-10-13 — donor replays read live, later flight state
+Observed: forward-handoff probes replaying foreman donors loaded the live flight directory (state written after the cut), producing WRONG grades (fhf-4, fhf-7) until `donor.py --map` reset each flight dir.
+Amend: every donor replay maps its flight directory to a reset copy; a mapped copy lacks pre-cut files not written by Write/Edit, which reads as "not found", not as wrong.
+Resolved:

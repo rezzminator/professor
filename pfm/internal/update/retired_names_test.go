@@ -192,8 +192,9 @@ func projectReportNoScan(root, home string, jsonOutput bool, stdout *bytes.Buffe
 	return professor.RunProjectUpdates(root, home, jsonOutput, stdout, nil)
 }
 
-// retiredThisRelease is one line per name v0.80.0 retires, each in the form
-// an adopter's file writes it, with the hit the scan owes it.
+// retiredThisRelease is one line per name v0.80.0 and the imagine rename
+// retire, each in the form an adopter's file writes it, with the hit the scan
+// owes it.
 var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"spawn tracer-pro for the review", "tracer-pro", "agent", "tracer"},
 	{"model: tracer-pro-max", "tracer-pro-max", "agent", "tracer"},
@@ -208,12 +209,25 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"see .claude/skills/close-out/SKILL.md", "skills/close-out", "skill", "/done-herewith"},
 	{"run pfm price --json", "pfm price", "command", "pfm model-cost"},
 	{"see docs/agents/_index.md", "docs/agents", "path", "docs/_index.md and docs/standards.md"},
+	{"type /ultimate-spec to spec first", "/ultimate-spec", "command", "/imagine:build"},
+	{`Agent(subagent_type: "ultimate", prompt: "spec it")`, `subagent_type: "ultimate"`, "agent", "imagine"},
+	{"subagent_type: ultimate", "subagent_type: ultimate", "agent", "imagine"},
+	{`{"subagent_type": "ultimate"}`, `subagent_type": "ultimate"`, "agent", "imagine"},
+	{`{"subagent_type":"ultimate"}`, `subagent_type":"ultimate"`, "agent", "imagine"},
+	{"see .claude/agents/ultimate.md", "agents/ultimate.md", "agent", "imagine"},
+	{"an `ultimate` agent specs it", "`ultimate` agent", "agent", "imagine"},
+	{`Agent({subagent_type:"ultimate"})`, `subagent_type:"ultimate"`, "agent", "imagine"},
+	{`subagent_type: 'ultimate'`, `subagent_type: 'ultimate'`, "agent", "imagine"},
+	{`Task(subagent_type="ultimate")`, `subagent_type="ultimate"`, "agent", "imagine"},
+	{"the `ultimate` sub-agent specs it", "`ultimate` sub-agent", "agent", "imagine"},
+	{"the `ultimate` subagent specs it", "`ultimate` subagent", "agent", "imagine"},
+	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine:callmeter"},
 }
 
 // TestRetiredNamesPinEveryNameThisReleaseRetires: a project file naming any
-// of the names v0.80.0 retires is reported with its successor, and the live
-// neighbours of those names (their successors, the everyday word, a longer
-// name) are no hit.
+// of the names v0.80.0 and the imagine rename retire is reported with its
+// successor, and the live neighbours of those names (their successors, the
+// everyday word, a longer name, the live /ultimate skill) are no hit.
 func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 	root := t.TempDir()
 	var content strings.Builder
@@ -247,6 +261,16 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 		"super-rr and .claude/agents/tracer.md",
 		"docs/_index.md, docs/standards.md and docs/agents-guide",
 		"~/.claude/skills/chatlog/SKILL.md",
+		"the ultimate goal; it ultimately works; the ultimate agent of change",
+		"/ultimately and /ultimate-pro and /imagine:ultimate and /callmeter:ultimate",
+		"run /ultimate; the ultimate skill loaded through the Skill tool",
+		"Skill(skill: \"ultimate\") and `ultimate` skill and skill: ultimate",
+		"templates/global/skills/ultimate/SKILL.md and .claude/skills/ultimate/SKILL.md",
+		"/ultimate-visualization and /imagine/ultimate.md and commands/ultimate.md",
+		"https://example.com/ultimate and https://example.com/ultimate-spec",
+		"/imagine:build-fast, /imagine:build, /imagine:callmeter and the imagine agent",
+		`subagent_type: "imagine" and subagent_type: "ultimate-pro" and subagent_type: ultimately`,
+		"agents/ultimate-pro.md and `ultimate-pro` agent and ultimate agents",
 	} {
 		if hits := retiredNameHits("f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
@@ -526,12 +550,24 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		".claude/agents/rndier.md":      "mine\n",
 		".claude/skills/wave-builder/x": "mine\n",
 		"docs/agents/API.md":            "kept hub\n",
-		"docs/notes.md":                 "/km /qa:live rndier wave-builder docs/agents /jc JC-UPDATE\n",
-		"docs/other.md":                 "mcp__chat__chat_ls\n",
+		".claude/agents/ultimate.md":    "mine\n",
+		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc JC-UPDATE\n" +
+			"subagent_type: \"ultimate\" subagent_type:\"ultimate\" subagent_type: 'ultimate' " +
+			"subagent_type: ultimate subagent_type=\"ultimate\" {\"subagent_type\": \"ultimate\"} " +
+			"{\"subagent_type\":\"ultimate\"} .claude/agents/ultimate.md the `ultimate` agent, " +
+			"the `ultimate` sub-agent, the `ultimate` subagent\n",
+		"docs/other.md": "mcp__chat__chat_ls\n",
+	})
+	// The live ultimate skill is not the retired agent: its own files leave the
+	// agent references flagged.
+	skillOnly := t.TempDir()
+	writeRetiredFixture(t, skillOnly, map[string]string{
+		".claude/skills/ultimate/SKILL.md": "mine\n",
+		"docs/notes.md":                    "/ultimate subagent_type: \"ultimate\"\n",
 	})
 	bare := t.TempDir()
 	writeRetiredFixture(t, bare, map[string]string{
-		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc\n",
+		"docs/notes.md": "/km /qa:live rndier wave-builder docs/agents /jc subagent_type: \"ultimate\"\n",
 	})
 
 	names := func(scan professor.RetiredNameScan) []string {
@@ -556,6 +592,12 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 	) {
 		t.Errorf("hits where the project defines the names = %v, want %v", got, want)
 	}
+	if got, want := names(ScanRetiredNames(skillOnly, nil)), []string{"subagent_type: \"ultimate\""}; !slices.Equal(
+		got,
+		want,
+	) {
+		t.Errorf("hits where the project keeps only the live ultimate skill = %v, want %v", got, want)
+	}
 	if got, want := names(
 		ScanRetiredNames(bare, nil),
 	), []string{
@@ -564,6 +606,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		"/qa:live",
 		"docs/agents",
 		"rndier",
+		"subagent_type: \"ultimate\"",
 		"wave-builder",
 	}; !slices.Equal(
 		got,

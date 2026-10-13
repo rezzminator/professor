@@ -50,6 +50,10 @@ type retiredName struct {
 	kind      string
 	successor string // "" when nothing replaced it
 	match     retiredMatch
+	// probe is the root-relative file whose existence means the project defines
+	// the thing itself, for a name that is a context around the thing rather
+	// than the thing (`subagent_type: "ultimate"`); "" derives it from name.
+	probe string
 }
 
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
@@ -164,6 +168,42 @@ var retiredNames = []retiredName{
 	// naming either one is dead wiring.
 	{name: "pfm-guard.sh", kind: retiredPath, match: matchExact},
 	{name: "guard-stamp.sh", kind: retiredPath, match: matchExact},
+	// Commit 09d16b64 "the ultimate family becomes /imagine:build, build-spec,
+	// build-fast, evolve and callmeter" retired /ultimate-spec and the ultimate
+	// agent, and callmeter commit 156f558 "remove ultimate-visualization; it
+	// moved to professor as /imagine:callmeter" its skill. /ultimate itself is
+	// live again as a standalone skill, so it is no row and no agent row below
+	// matches a reference to that skill (`/ultimate`, skills/ultimate/).
+	{name: "/ultimate-spec", kind: retiredCommand, successor: "/imagine:build", match: matchExact},
+	{
+		name: "/callmeter:ultimate-visualization", kind: retiredSkill, successor: "/imagine:callmeter",
+		match: matchExact,
+	},
+	// The agent is named by its context only — the bare word is everyday prose.
+	// One row per spelling an agent reference takes: the Agent tool's
+	// subagent_type in YAML, call, keyword and JSON form, the agent file's path,
+	// and the backticked name beside the word agent or sub-agent.
+	ultimateAgentRow(`subagent_type: "ultimate"`),
+	ultimateAgentRow(`subagent_type:"ultimate"`),
+	ultimateAgentRow(`subagent_type: 'ultimate'`),
+	ultimateAgentRow("subagent_type: ultimate"),
+	ultimateAgentRow(`subagent_type="ultimate"`),
+	ultimateAgentRow(`subagent_type": "ultimate"`),
+	ultimateAgentRow(`subagent_type":"ultimate"`),
+	ultimateAgentRow("agents/ultimate.md"),
+	ultimateAgentRow("`ultimate` agent"),
+	ultimateAgentRow("`ultimate` sub-agent"),
+	ultimateAgentRow("`ultimate` subagent"),
+}
+
+// ultimateAgentRow is one spelling of a reference to the retired ultimate
+// agent. Its definition probe is the agent file: a project keeping its own
+// ultimate agent is not naming the retired one.
+func ultimateAgentRow(spelling string) retiredName {
+	return retiredName{
+		name: spelling, kind: retiredAgent, successor: "imagine", match: matchExact,
+		probe: ".claude/agents/ultimate.md",
+	}
 }
 
 // definitionProbes are the root-relative paths whose existence means the
@@ -171,6 +211,9 @@ var retiredNames = []retiredName{
 // skill file, or the retired path itself. A phase, an MCP tool and a command
 // spelled with a space are defined by no project file.
 func (r retiredName) definitionProbes() []string {
+	if r.probe != "" {
+		return []string{r.probe}
+	}
 	switch r.kind {
 	case retiredCommand:
 		command := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(r.name, "/"), ":"), ":", "/")

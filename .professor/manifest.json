@@ -97,8 +97,8 @@
   "file_hashes": {
     ".claude/agents/changelogger.md": "2f0e0aeff57ae98ce3c04f9a0f57cdb853094c28c0560f4bedd2f13826fd36a6",
     ".claude/agents/gitter.md": "50288f0991dcdf19bb3ebba88474651495704a45c4d0f113db89206a2ab33a77",
-    ".claude/agents/pcm.md": "3aaf0efb2a655347a4d588433855bbc66a03558f7c2daa8007d5bb799c4b1cf1",
-    ".claude/agents/releaser.md": "0bb2a0fc21e94c50c506a59701a0a10536be94ae31e2ff8f5a676eab2f3ba82a",
+    ".claude/agents/pcm.md": "6540e5573ef38575893446ed439c0dc1b002e846221457516fe88e95b17e0e12",
+    ".claude/agents/releaser.md": "6d8c5ad6a8005b185555656e45106e9add75cc935d8555f382d7e8021ecbf9c7",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
     ".claude/commands/pcm.md": "80ed770caa8bfc1b798c17427148e79912880e67609ca5076cd274473f68af9c",
@@ -116,9 +116,9 @@
     ".claude/settings.json": "a597044e71b987be74274cb8f59e44bba33facea60f798ddb57d91ca18770909",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "80d1ad72eeaed2351f6d938350b77dbfea8c246c452a9d77352a2e1d405772a7",
-    "CLAUDE.md": "c6dec9a70c2a05cf2ccd191f137fc765c37fa02ccfebbc68042d2ffdfecc226d",
-    "docs/commands/pcm/references/audit-scopes.md": "1e8428a950e8f9cd7eceafeae958702ab63d5972326594740d8b7ece17586c5e",
-    "docs/commands/pcm/references/refresh.md": "5cc0324655faedffda704d32b1a80e92d490018f3d08b09988b16253cb204daa",
+    "CLAUDE.md": "aaf5a0463b546931a63dfbc457c4500226d2b2c78413abbbcb0067c32f62c55d",
+    "docs/commands/pcm/references/audit-scopes.md": "697602baeda9943ad3299cb7d9b9924fea0d9d8b47144b03af81eec89022a760",
+    "docs/commands/pcm/references/refresh.md": "d21e629f15337e2c36c150be0128d05f1782dfc1681aa1fd342ed7e6c7df4038",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
     "pfm/CLAUDE.md": "b4b0709cb4f2a0142600cab907c765c647d75fda53fa7f18cf359b4bd66b63b7"
   }

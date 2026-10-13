@@ -197,7 +197,6 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 ## Discrepancies
 
 1. **The Codex adapter says "Codex has NO hook layer"** (`.claude/engine-sync.json` `codex.rootAdapter`). Codex has one, and pfm reads and writes `{codex home}/hooks.json`. The adapter's conclusion (generated files are read-only) holds, because pfm installs no Codex project hook.
-2. **`docs/BLUEPRINT.md` lists "statusline" among the hooks** in its tree diagram; it is a `statusLine` key in the launch payload, and the list omits the mirror sync.
 
 ## Surfaces that stay in sync
 
@@ -222,4 +221,4 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 | This repo's install | `.claude/settings.json`, `.claude/scripts/` | The project tier this repo runs |
 | The engine adapters | `.claude/engine-sync.json` | What Codex and OpenCode are told about hooks |
 | The CLI surface | `docs/dev/pfm-surface.md` | The `doctor`, `install` and `internal` rows |
-| The setup docs | `docs/SETUP.md`, `docs/BLUEPRINT.md`, `docs/references/memory-backup.md` | What an adopter is told to install |
+| The setup docs | `docs/SETUP.md`, `docs/references/memory-backup.md` | What an adopter is told to install |

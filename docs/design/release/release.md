@@ -89,7 +89,7 @@ $HOME/.local/state/pfm/releases/{project}/v{NEW}/
   scope.md          range, counts, the tier and area table                      written by releaser (REVIEW)
   review/{area}.md  one merge-gating report per area                            written by reviewer
   review/seams.md   deleted and renamed names still referenced                  written by releaser (REVIEW)
-  review/reconcile.md  README and BLUEPRINT lists reconciled against templates/ written by releaser (REVIEW)
+  review/reconcile.md  README lists reconciled against templates/           written by releaser (REVIEW)
   review/sandbox-{area}/  a reviewer's scratch                                  written by reviewer
   review/scope-delta-{sha7}.md  the scope of one delta pass                     written by releaser (REVIEW)
   review/HEAD       the commit the last REVIEW covered                          written by releaser (REVIEW)

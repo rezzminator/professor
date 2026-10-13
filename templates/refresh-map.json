@@ -91,7 +91,13 @@
     "global/agents/tracer.md": {
       "curated": true
     },
-    "global/agents/ultimate.md": {
+    "global/agents/imagine.md": {
+      "curated": true
+    },
+    "global/agents/imagine-historian.md": {
+      "curated": true
+    },
+    "global/agents/imagination.md": {
       "curated": true
     },
     "global/codex/config.toml": {
@@ -113,6 +119,21 @@
       "curated": true
     },
     "global/commands/housekeeping.md": {
+      "curated": true
+    },
+    "global/commands/imagine/build-fast.md": {
+      "curated": true
+    },
+    "global/commands/imagine/build-spec.md": {
+      "curated": true
+    },
+    "global/commands/imagine/build.md": {
+      "curated": true
+    },
+    "global/commands/imagine/callmeter.md": {
+      "curated": true
+    },
+    "global/commands/imagine/evolve.md": {
       "curated": true
     },
     "global/commands/iterative-improvement.md": {
@@ -148,10 +169,10 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
-    "global/commands/ultimate-spec.md": {
+    "global/skills/imagine-core/SKILL.md": {
       "curated": true
     },
-    "global/commands/ultimate.md": {
+    "global/skills/ultimate/SKILL.md": {
       "curated": true
     },
     "global/skills/chatlog/README.md": {

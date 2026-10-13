@@ -410,7 +410,7 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 | Its neighbour | `templates/global/commands/quality/llm-codebase.md` | § Protocol, cited as it stands |
 | The testing-manual template | `templates/project/commands/per-project/testing-manual.md` | § Tiers in the tier names unit / hermetic / live, § Lanes and registries, § What not to test |
 | The testing-manual design | [`docs/design/flights/testing-manual.md`](../flights/testing-manual.md) | § What stays out names this command |
-| Registries | `templates/refresh-map.json`, `docs/BLUEPRINT.md`, `docs/SETUP.md`, `docs/README.md` | The command's entry |
+| Registries | `templates/refresh-map.json`, `docs/SETUP.md`, `docs/README.md` | The command's entry |
 | This directory | `docs/design/integration-suite/` | How the command works and why its laws are shaped as they are |
 
 ## Open items

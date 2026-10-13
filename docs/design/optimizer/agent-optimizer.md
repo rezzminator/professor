@@ -111,4 +111,3 @@ The report path, then one line of totals, then the findings, one line each: clas
 | The agent | `templates/global/agents/agent-optimizer.md` |
 | The transcript record shape it digests | Claude Code's `projects/{project}/{session}/subagents/agent-{id}.jsonl` and `.meta.json` |
 | The digest and dollar source | `pfm tokens --timeline` |
-| The roster line | `docs/BLUEPRINT.md` |

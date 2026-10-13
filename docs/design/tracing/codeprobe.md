@@ -82,5 +82,4 @@ Read the usage before the findings: `tool_uses: 0` beside a claim is a fabricate
 
 - `templates/global/skills/codeprobe/{codeprobe.py,SKILL.md}`
 - `templates/global/agents/collector.md`
-- `docs/BLUEPRINT.md` — the cast line naming the collector and the skill
 - The Codex and OpenCode mirrors, by `pfm codex build` and `pfm opencode build`

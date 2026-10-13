@@ -26,7 +26,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - `.claude/skills/*/SKILL.md`: reusable skills, source-fetched per `templates/project/skills/sources.json`, never vendored
 - `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh, codex-sync.sh (mirror auto-compile; the compiler itself is `pfm codex build`)
 - `docs/commands/{cmd}/references/`: command-owned reference docs (`$CDOCS/$CMD/$REFS/`); `pcm/references/{audit-scopes,refresh}.md` are yours
-- The shipped product: `templates/**` is an adopter's live framework. A change there ships to every future install; `docs/{BLUEPRINT,SETUP,PLACEHOLDERS}.md` are its spec and `templates/refresh-map.json` maps each template to its live source.
+- The shipped product: `templates/**` is an adopter's live framework. A change there ships to every future install; `docs/{SETUP,PLACEHOLDERS}.md` are its spec and `templates/refresh-map.json` maps each template to its live source.
 
 ### Critical invariants
 
@@ -118,7 +118,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 
 ## Special operations
 
-- Full rename: grep all occurrences (`templates/**`, `README.md`, `docs/BLUEPRINT.md`, `docs/SETUP.md`, `refresh-map.json` included), update agents, then `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
+- Full rename: grep all occurrences (`templates/**`, `README.md`, `docs/SETUP.md`, `refresh-map.json` included), update agents, then `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
 - New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__compact` unless it is an rr-family agent), compile with `pfm codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
 - New skill: create `.claude/skills/{name}/SKILL.md`; a skill for adopters is registered in `templates/project/skills/sources.json` and lives in its own public repo.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` only as a non-obvious routing decision.

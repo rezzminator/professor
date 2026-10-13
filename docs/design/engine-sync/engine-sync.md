@@ -263,7 +263,7 @@ OpenCode's V1 `config` hook can add agents, commands, instructions and MCP serve
 
 - `docs/design/rules/rules.md`: built by engine-sync (P3).
 - `docs/design/hooks/hooks.md`: the Codex and OpenCode hook rows.
-- `docs/BLUEPRINT.md` § Optional: Codex dual-runtime and `docs/SETUP.md` § 7b: the compiler is engine-sync.
+- `docs/SETUP.md` § 7b: the compiler is engine-sync.
 - `CLAUDE.md` § Vocabulary (engine mirrors, plugins) and § Runtime (Codex, OpenCode), through `/pcm`.
 - `plugins/CLAUDE.md`: the plugin list and alpha copies; `README.md`: the plugin list.
 - `.professor/manifest.json`: the `codex-build.json` and `codex-sync.sh` rows; `scripts/arch-check.sh` rows naming the moved packages.

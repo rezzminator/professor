@@ -234,7 +234,7 @@ Claude passed 1–5 on 2.1.295 in `/tmp/professor/rules-test/`.
 - `docs/design/engines/claude-config-dir.md`: the `rules` shared entry gains its non-Claude consumers.
 - `CLAUDE.md` § Vocabulary: a `rules` entry and the engine-mirror line, through `/pcm`.
 - `.claude/commands/pfm-testing-manual.md`: the `paths:` key, through `/pcm`.
-- `README.md`, `docs/BLUEPRINT.md`, `docs/SETUP.md`: wherever they list what the engine mirrors compile.
+- `README.md`, `docs/SETUP.md`: wherever they list what the engine mirrors compile.
 
 ## Sources
 

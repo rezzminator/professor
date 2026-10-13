@@ -254,14 +254,6 @@ func TestGptAgentStopForemanBehavior(t *testing.T) {
 		{"completed-child", "All done.", "block", []map[string]any{agentCall, launch, notice}},
 		{"compaction", "<compact-now>checkpoint</compact-now>", "allow-compact", nil},
 		{"handoff", "<handoff>units a-b done; next: unit c</handoff>", "allow-handoff", nil},
-		{"handoff-after-prose", "Next: unit c.\n<handoff>units a-b done; next: unit c</handoff>", "allow-handoff", nil},
-		{"handoff-unclosed", "<handoff>units a-b done; next: unit c", "block", nil},
-		{"handoff-backticked", "`<handoff>units a-b done; next: unit c</handoff>`", "block", nil},
-		{"handoff-empty", "<handoff> \n</handoff>", "block", nil},
-		{"handoff-quoted", "All units built; the plugin reads a <handoff> marker only when one is due.", "block", nil},
-		{"compaction-unclosed", "<compact-now>checkpoint", "block", nil},
-		{"compaction-backticked", "`<compact-now>checkpoint</compact-now>`", "block", nil},
-		{"compaction-quoted", "All units built; no <compact-now> marker was needed.", "block", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

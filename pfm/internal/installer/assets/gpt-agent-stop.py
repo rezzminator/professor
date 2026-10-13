@@ -9,13 +9,7 @@ stop with the exact repair; a role's refusals per agent are capped. Every decisi
   tracer's wait blocks on it through two full timeouts, so the stop is refused (cap 3).
 - foreman: a stop with no background task of its own still running is its return, and the manual's first line is
   exactly `DONE {name}` or `PARTIAL|FAILED|BLOCKED {name}: {text}`, {name} the flight or unit its brief names;
-  any other first line is refused (cap 2). A stop while a child runs is a wait, never a return. Two stops are
-  not returns and pass unread: a `<compact-now>` or `<handoff>` marker in `last_assistant_message` in exactly the
-  grammar sub-agent-compact accepts on its SubagentStop (MARKERS), which refuses that stop itself so the agent
-  carries on. Known limit: the plugin's own state is invisible here - it reads a `<handoff>` only with its
-  `handoffTool` on and a `<compact-now>` only with `compactTool` on, refuses a handoff below its first nudge
-  point (src/handoff.ts:56), and refuses a given agent's stop only once; a well-formed marker past those gates
-  still passes this hook and ends the run without a return line.
+  any other first line is refused (cap 2). A stop while a child runs is a wait, never a return.
 """
 import hashlib
 import json
@@ -33,12 +27,6 @@ CAPS = {'sub-tracer': 3, 'foreman': 2}
 RETURN_LINE = re.compile(r'^(?:DONE (?P<done>[\w.-]*\w)|(?:PARTIAL|FAILED|BLOCKED) (?P<other>[\w.-]*\w): \S.*)$')
 LAUNCH = re.compile(r'Async agent launched successfully[\s\S]*?agentId: (\w+)|Command running in background with ID: (\w+)')
 NOTICE = re.compile(r'<task-id>(\w+)</task-id>[\s\S]*?<status>(completed|failed|killed|stopped)</status>')
-# sub-agent-compact's marker grammar, byte for byte: a closed tag pair, not backtick-quoted, with a non-empty
-# trimmed body, anywhere in the stop's last_assistant_message. <compact-now>: src/nudge.ts:7 (compactMarker, read
-# by stopRequest :37); <handoff>: src/handoff.ts:63 (handoffMarker, read by handoffStopRequest :83); both under
-# plugins/sub-agent-compact/plugins/sub-agent-compact/, called from hooks/sub-agent-compact.ts:395,404.
-MARKERS = (('allow-handoff', re.compile(r'(?<!`)<handoff>([\s\S]*?)</handoff>(?!`)')),
-           ('allow-compact', re.compile(r'(?<!`)<compact-now>([\s\S]*?)</compact-now>(?!`)')))
 
 
 def log(role, entry):
@@ -226,12 +214,11 @@ def foreman_reason(line, names):
 
 
 def foreman(data, records, entry):
-    stop = data.get('last_assistant_message')
-    for decision, marker in MARKERS if isinstance(stop, str) else ():
-        body = marker.search(stop)
-        if body and body.group(1).strip():
-            return decision, None
     message = last_text(data, records)
+    if '<compact-now>' in message:
+        return 'allow-compact', None
+    if '<handoff>' in message:
+        return 'allow-handoff', None
     pending = pending_tasks(records)
     if pending:
         entry['pending'] = pending

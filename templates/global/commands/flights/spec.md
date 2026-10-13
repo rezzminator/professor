@@ -1,6 +1,6 @@
 ---
 name: flights:spec
-description: 'The main chat''s front of a flight whose requirements are not settled — /flights:spec [work | file]: walks only what asking needs, grills the user until no gap is left, writes requirements.md, hands it to flights-foreman. /flights:init → /flights:spec → flights-foreman → flights-lander → /flights:audit. Returns the foreman''s return.'
+description: 'Settles requirements with the user — the main chat''s front of a flight whose requirements are open: /flights:spec [work | file] grills until no gap is left, writes requirements.md. /flights:init → /flights:spec → flights-foreman (→ flights-speccer) → flights-lander → /flights:audit. Returns the foreman''s return.'
 argument-hint: [work | file holding it]
 ---
 

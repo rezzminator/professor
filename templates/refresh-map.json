@@ -52,6 +52,9 @@
     "global/agents/gpt-flights-lander.md": {
       "curated": true
     },
+    "global/agents/gpt-flights-speccer.md": {
+      "curated": true
+    },
     "global/agents/gpt-reviewer-pro.md": {
       "curated": true
     },

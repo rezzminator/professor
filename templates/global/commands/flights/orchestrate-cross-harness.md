@@ -1,6 +1,6 @@
 ---
 name: flights:orchestrate-cross-harness
-description: 'Child foremen on another engine — /flights:orchestrate-cross-harness {requirements.md or work} [engine claude|codex] [worktree {path}] [commit]: this chat acts as the root flights-foreman, one chat seat per child unit instead of a sub-agent, default engine codex. /flights:spec → here → child foreman seats, flights-lander.'
+description: 'Runs foremen on another engine — /flights:orchestrate-cross-harness {requirements.md or work} [engine claude|codex] [worktree {path}] [commit]: this chat acts as the root flights-foreman, one chat seat per child unit instead of a sub-agent, default engine codex. /flights:spec → here → child foreman seats, flights-speccer, flights-lander.'
 argument-hint: <requirements.md | work> [engine <claude|codex>] [worktree <path>] [commit]
 ---
 
@@ -13,7 +13,7 @@ Role-bearing seats support `claude` and `codex`. An `opencode` request returns `
 | In the manual | Here |
 | --- | --- |
 | Spawn a child `Agent(subagent_type: "flights-foreman")` | A seat of the engine, named `{flight}-{unit}`, in the project directory or the worktree, born with the foreman role: the shell `pfm chat new --name {flight}-{unit} --engine {engine} --cwd {dir} --agent-role flights-foreman --prompt-file {flight directory}/briefs/{unit}-r{round}.md` (on `codex` add `--model gpt-6.1-sol --effort high`; another engine keeps the role's own pin) — the MCP verb carries no role. Its exit 0 is the brief confirmed as the seat's first turn; write `{unit} CLAIMED · sid {session id}` only once the Claim call (§ Monitors) exits 0. Any other exit is no claim: `chat_kill` the seat it left, if any; one retry, then the unit holds and the return names it |
-| Spawn the lander, or a mechanical executor | Unchanged: a sub-agent of this chat, never a seat |
+| Spawn the speccer, the lander or a mechanical executor | Unchanged: a sub-agent of this chat, never a seat |
 | The child's brief file | The same file, verbatim, as the seat's first turn through `--prompt-file`, never a later `chat_inject`. Its last item becomes: "your last act writes your return to `{flight directory}/returns/{unit}-r{round}.md` and sends it with `pfm chat inject {this chat's name} --file {path}`" — your name from `chat_whoami`; the return file is the return, and a trailing `**Verdict:**` line in it is ignored |
 | The return watch per child | The returns Monitor's `RETURN {path}` line; the seat's inject is a bonus, never the signal |
 | Verify from the return and § Change inventory | The same tracked and untracked inventory; `chat_last` on the seat when the inject arrived cut short |

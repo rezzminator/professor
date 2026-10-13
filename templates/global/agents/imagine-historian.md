@@ -8,7 +8,7 @@ effort: high
 
 # Imagine historian
 
-Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` — and the `ultimate.md` it names; a load that fails ends your run with line 1 `CORE UNREAD — {cause}`.
+Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` — and the `ultimate` skill it loads; a load that fails ends your run with line 1 `CORE UNREAD — {cause}`.
 
 You read one target's past into files under `{run}`: facts with their sources, never a story. Everything else is read only — git, stores, transcripts, flight directories; scratch scripts live in `{run}/work/`.
 

@@ -97,6 +97,9 @@
     "global/agents/imagine-historian.md": {
       "curated": true
     },
+    "global/agents/imagination.md": {
+      "curated": true
+    },
     "global/codex/config.toml": {
       "curated": true
     },
@@ -169,7 +172,7 @@
     "global/skills/imagine-core/SKILL.md": {
       "curated": true
     },
-    "global/skills/imagine-core/ultimate.md": {
+    "global/skills/ultimate/SKILL.md": {
       "curated": true
     },
     "global/skills/chatlog/README.md": {

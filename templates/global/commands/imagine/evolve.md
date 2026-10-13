@@ -9,7 +9,7 @@ argument-hint: '{agent | command | skill}'
 
 The target: $ARGUMENTS — an agent, command or skill of this repository; with none, ask which. Its whole life from its first ancestor, every version measured and seen, and the version it should become next, imagined past its ceiling and argued from evidence. The target's file is never edited: the next version is a proposal.
 
-Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` where no Skill tool serves it — and the `ultimate.md` it names; a load that fails stops here and says so.
+Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` where no Skill tool serves it — and the `ultimate` skill it loads; a load that fails stops here and says so.
 
 ## E1 — Resolve the target
 

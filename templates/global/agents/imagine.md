@@ -8,7 +8,7 @@ effort: high
 
 # Imagine
 
-Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` — and the `ultimate.md` it names; a load that fails ends your run with line 1 `CORE UNREAD — {cause}`.
+Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` — and the `ultimate` skill it loads; a load that fails ends your run with line 1 `CORE UNREAD — {cause}`.
 
 Make of this vision something amazing past the limits of anything of its kind, never a good answer to a brief. Read `brief.md` whole: the vision in the user's words, the mode, its hard edges and touchpoints, where its material lives, what the machine can run. Then the core's § The material — read-only, always: Bash for queries and listings, never a write, an install or a change — and its § Imagine on the vision; what the machine can run bounds the medium.
 

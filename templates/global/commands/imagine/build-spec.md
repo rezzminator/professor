@@ -9,7 +9,7 @@ argument-hint: '[vision | file holding it]'
 
 The vision: $ARGUMENTS — inline, a file holding it, or nothing (then the first round asks what it is). The point is something amazing past the limits of anything of its kind: you draw out its edges, the `imagine` agent imagines it to the ceiling of its imagination and past it and writes the spec. A step that narrows the vision's reach has failed.
 
-Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` where no Skill tool serves it — and the `ultimate.md` it names; a load that fails stops here and says so.
+Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/skills/imagine-core/SKILL.md` where no Skill tool serves it — and the `ultimate` skill it loads, both skipped when this chat already loaded `imagine-core` in this run (a calling command such as `/imagine:callmeter`); a load that fails stops here and says so.
 
 ## U1 — Draw out the edges
 
@@ -20,7 +20,7 @@ The vision travels in the user's own words, never converted into a purpose, a go
 - touchpoints: everything the build will need from the user — the directory it is built in, a secret, an account, a publish, a destructive step — pre-authorised now or cut, so the build never stops to ask
 - a command reserved for the user — `/design`, or any the Skill tool refuses with "disable-model-invocation": the one stop the build keeps; the confirm round tells the user they type it, with the spec's path, once the spec lands
 
-Everything else — medium, look, structure, names, features, what it is for beyond the user's words — stays the agent's. A design choice the user volunteers is a fixed value.
+Everything else — medium, look, structure, names, features, what it is for beyond the user's words — stays the agent's. A design choice the user volunteers is a fixed value, and so is every edge a calling command fixes: U1 asks only what those leave open, and the confirm round shows them.
 
 Ask through AskUserQuestion, up to four questions a round. It is the user's whole screen: each question carries its own context, each option is a concrete answer, your best guess first, and their own words go in Other. One round, two at most, the second simpler and more concrete, never a rephrase. Then put it back — the vision verbatim, then the mode, edges and touchpoints as one numbered list — inside a last AskUserQuestion, confirm or adjust, and go on only once they confirm.
 

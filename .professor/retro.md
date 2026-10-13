@@ -169,6 +169,7 @@ Amend: judgment — verbatim text travels by file the script wrote, named in a s
 ## 2026-09-25 — Claude Code refuses a sub-agent's REPORT.md
 Observed: the reviewer benchmark's lead wrote `SANDBOX/REPORT.md` and got `Subagents should return findings as text, not write report files` — Claude Code 2.1.282 refuses any sub-agent Write whose basename matches `^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$`. `reviewer` now writes `review.md`. `templates/project/commands/rnd.md` still has its `general-purpose` run agent write `REPORT.md` (lines 27, 39, 43, 49), so that deliverable can never land.
 Amend: templates/project/commands/rnd.md — rename the run's REPORT.md to a name outside the refused pattern (e.g. `RESULT.md`) end to end; any prompt that names a sub-agent's output file keeps it outside that pattern.
+Resolved: 2026-10-12 — moot: /rnd and templates/project/commands/rnd.md are removed from the blueprint
 
 ## 2026-10-02 — managed settings shut every user plugin out of the system prompt
 Observed: a cache-live-control probe's `prompt.section` hook never ran: the debug log showed 94 of 94 calls `bypassed by cc-plugin-sec-default (tier user)`, and `prompt.context` the same. The trigger is `cc-plugin-sec-default@builtin seated outermost: this machine has managed settings`; the only managed file is pfm's `managed-settings.d/pfm.json` (`cleanupPeriodDays` alone). Every Professor plugin that shapes prompts is limited to `prompt.submit` context on a pfm host. Whether a host without managed settings admits user-tier section hooks is unproven.
@@ -358,7 +359,7 @@ Resolved:
 
 ## 2026-10-11 — per-agent prompt-cache TTL is impossible; GPT-backed agents miss cache 13% of consecutive calls
 Observed: CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL is read process-wide: a live probe on Claude Code 2.1.296 with 4 concurrent sub-agents saw a one-agent raise reach 5 of the other agents' 9 requests, so cache-live-control 0.4.0 ships a shared raise (agentRaiseWaiting) instead. A month's sub-agent transcripts (2026-09-09..10-11) showed 321 expired-cache rewrites, $137.74 at API prices (long tool / background shell $72.82, waiting on a child $35.91, resumed via SendMessage $28.48); separately, gpt-6-sol / gpt-6.1-sol agents missed cache on 12.97% of consecutive in-TTL calls vs 0.29% for Claude, $158.44 — more than all expiries.
-Amend: open — the GPT-backed agents' cache-miss rate needs its own investigation in the model-gateway / gpt-subagent-router path (docs/dev/gpt-subagent-router.md).
+Amend: open — the GPT-backed agents' cache-miss rate needs its own investigation in the gpt-gateway / gpt-subagent-router path (docs/dev/gpt-subagent-router.md).
 Resolved:
 
 ## 2026-10-11 — "beyond the run-to-run spread" passed every change on a deterministic target
@@ -401,3 +402,7 @@ Resolved:
 Observed: asked to keep `pfm doctor` from failing on a tracer kit not installed yet, the main chat also wrote "python3 is never a blocker in the pre-change install check" into the requirements; the user's next message made python3 a required install dependency (c48043ca). The user's ask covered the kit alone.
 Amend: judgment — a rule the user did not state stays out of a spec; name it as a question instead.
 Resolved:
+
+## 2026-10-12 — /ultimate-spec shipped a 7 MB Design artboard that the editor silently dropped
+Observed: the build was published to a Design canvas as one inline artboard (three.js, data and app, 7.3 MB). The editor syncs an artboard only up to 240 KB inline (2 MB as an uploaded blob), so the canvas opened with "no artboards yet" and the user found it by screenshot; a local test under the runtime and the preview CSP had passed. The fix was a 16 KB artboard loading two uploaded script assets by `/_blob/<id>`.
+Amend: templates/global/commands/ultimate-spec.md#U5 — the builder's brief carries the target's own limits (an editor's per-file sync cap, a frame's CSP) and the build is met on the real target, not a stand-in, before its first publish.

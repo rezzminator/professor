@@ -53,6 +53,8 @@ func RunProjectUpdate(
 		return runProjectAdopt(args, stdout, stderr, runtime)
 	case "ignore":
 		return runProjectIgnore(args, stdout, stderr, runtime)
+	case "accept":
+		return runProjectAccept(args, stdout, stderr, runtime, scan)
 	default:
 		fmt.Fprintf(stderr, "pfm update: unknown project action %q\n", action)
 		return 2

@@ -135,6 +135,7 @@ pfm statusline	E3	E3.01-open-seat
 pfm statusline	O2	O2.05-internal-plumbing
 pfm uninstall	O2	O2.10-uninstall
 pfm update	A	A.07-self-update
+pfm update accept	A	A.05-update-verbs
 pfm update adopt	A	A.06-update-adopt
 pfm update drop	A	A.05-update-verbs
 pfm update ignore	A	A.05-update-verbs

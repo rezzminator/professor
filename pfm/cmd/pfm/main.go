@@ -218,7 +218,7 @@ func printUsage(w io.Writer) {
 		"  heal      report or repair wedged Codex history projections",
 		"  install   wire or remove the self-contained host integration",
 		"  uninstall remove the self-contained host integration",
-		"  update    update the binary; check, adopt, pin, ignore, or drop project template baselines",
+		"  update    update the binary; check, adopt, pin, ignore, drop or accept project template baselines",
 		"  init      scaffold project templates once and pin their baselines",
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",

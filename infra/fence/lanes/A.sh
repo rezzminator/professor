@@ -3,7 +3,7 @@
 # (`pfm init` + scripted fill, infra/fence/lanes/adopt.sh), walked depth-first from the
 # scaffold roster through the baseline pin, the whole `pfm update` flow against
 # a SECOND blueprint clone inside the container, the self-update preflight and
-# body, the Codex mirror, the guard hook driven by a scripted chat, express's own
+# body, the Codex mirror, the codex-sync hooks driven by a scripted chat, express's own
 # suite, the release-notice refresh, and the cross-lane "fleet unchanged by an
 # update" seam. Runs INSIDE a lane container (run.sh), never on a host.
 #
@@ -15,8 +15,8 @@
 # Every beat asserts from pfm's OWN report (`pfm doctor --project-updates`'s lines and exit
 # code, a verb's stdout/stderr, a file pfm wrote, `pfm ls --tsv`) or from the
 # pane and the transcript the harness itself wrote — never from a model's prose.
-# The two scripted turns (A.11) are stimuli: the evidence is the file on disk, the
-# hook's deny text, and the recompiled AGENTS.md.
+# The scripted turn (A.11) is a stimulus: the evidence is the file on disk, the
+# dirty flag, and the recompiled AGENTS.md.
 #
 # The second blueprint — $HOME/blueprint-b — is a real git clone of the mounted
 # repository's common git dir, checked out at the mounted worktree's HEAD with
@@ -487,7 +487,28 @@ else
     [ -z "$want" ] || grep -qF -- "$want" <<<"$out" || bad="$bad $what did not report '$want': $(one_line "$out");"
   }
   step "pin $D_L1" 0 "pinned 1 file(s) at $D_SHA" pfm update pin "$D_L1"
-  step "pin --all (one UPDATED left)" 0 "pinned 1 file(s) at $D_SHA" pfm update pin --all
+  step "pin $D_L2 --keep with a blank reason" 2 "" pfm update pin "$D_L2" --keep " "
+  step "pin --all --keep" 2 "" pfm update pin --all --keep why
+  step "pin --keep of a CURRENT file" 1 "is not UPDATED" pfm update pin "$D_L1" --keep why
+  step "pin $D_L2 --keep" 0 "kept 1 file(s) apart from upstream at $D_SHA: lane-a keeps its own version" pfm update pin "$D_L2" --keep "lane-a keeps its own version"
+  step "pin --all (no UPDATED left)" 0 "pinned 0 file(s) at $D_SHA" pfm update pin --all
+  jq -e --arg l "$D_L2" '.files[$l].kept.reason == "lane-a keeps its own version" and (.files[$l].kept.fromSha | length) > 0' "$BASELINE" >/dev/null 2>&1 ||
+    bad="$bad baseline.json does not record the keep reason and fromSha of $D_L2;"
+  kept_rep="$(in_express pfm doctor --project-updates)"
+  grep -qE '^  KEPT +1 ' <<<"$kept_rep" && grep -qF "lane-a keeps its own version" <<<"$kept_rep" ||
+    bad="$bad the report has no KEPT row carrying the reason: $(one_line "$(printf '%s' "$kept_rep" | head -8)");"
+  step "pin $D_L1 --unkeep (no keep recorded)" 1 "no recorded keep" pfm update pin "$D_L1" --unkeep
+  step "pin $D_L2 --unkeep" 0 "pinned 1 file(s) at $D_SHA" pfm update pin "$D_L2" --unkeep
+  jq -e --arg l "$D_L2" '.files[$l].kept == null' "$BASELINE" >/dev/null 2>&1 ||
+    bad="$bad pin --unkeep left the keep recorded for $D_L2;"
+  printf '%s\n' 'run /jc now' >"$EXPRESS/lane-a-retired.txt"
+  step "accept a path no hit lives at" 1 "covers no retired-name hit" pfm update accept lane-a-nothing-here --reason "no hit"
+  step "accept without a reason" 2 "" pfm update accept lane-a-retired.txt
+  step "accept lane-a-retired.txt" 0 "accepted retired-name hits under 1 path(s)" pfm update accept lane-a-retired.txt --reason "lane-a record"
+  acc_rep="$(in_express pfm doctor --project-updates)"
+  grep -qE '^  ACCEPTED +1 ' <<<"$acc_rep" || bad="$bad the report has no ACCEPTED row after accept: $(one_line "$(printf '%s' "$acc_rep" | head -8)");"
+  step "accept --undo lane-a-retired.txt" 0 "removed 1 retired-name rule(s)" pfm update accept --undo lane-a-retired.txt
+  rm -f "$EXPRESS/lane-a-retired.txt"
   step "pin of a local with no pin" 1 "pfm update pin: lane-a-no-such-local has no pin; use --template for a new adoption" pfm update pin lane-a-no-such-local
   cp "$B/templates/$NEW_T" "$EXPRESS/$NEW_L" || bad="$bad the NEW template could not be copied locally;"
   step "pin --template (adopt NEW)" 0 "pinned 1 file(s) at $D_SHA" pfm update pin --template "$NEW_T" "$NEW_L"
@@ -516,7 +537,7 @@ else
   final="$(in_express pfm doctor --project-updates)"
   [ $? -eq 0 ] && [ "$(printf '%s\n' "$final" | tail -1)" = clean ] || bad="$bad after restore doctor --project-updates is not clean;"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "pin <local>, pin --all, pin --template (NEW adopted; a second adoption refused), drop (a pin forgotten; no pin and no argument refused by name), ignore (gone-upstream and pinned templates refused by name; already-ignored counted), ignore --undo (a non-ignored refused) — the drift ended clean and express was restored"
+    pass "pin <local>, pin --keep (reason recorded, KEPT row), accept (a path with no hit refused; ACCEPTED row; --undo), pin --all, pin --template (NEW adopted; a second adoption refused), drop (a pin forgotten; no pin and no argument refused by name), ignore (gone-upstream and pinned templates refused by name; already-ignored counted), ignore --undo (a non-ignored refused) — the drift ended clean and express was restored"
   fi
 fi
 
@@ -760,8 +781,15 @@ fi
 beat A.09-codex-agents
 spends none
 bad=""
-n_md="$(find "$BLUEPRINT/templates/global/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
-[ "$n_md" -gt 0 ] || bad="$bad no templates/global/agents/*.md in $BLUEPRINT to compile;"
+# Judge the compiled Claude registry: inherited engine settings are already resolved,
+# unmet capabilities have no linked agent, and shared files are never installed.
+agent_names=""
+if ! agent_names="$(python3 -I "$BLUEPRINT/scripts/agent-source-inventory.py" "$HOME/.claude/agents" --codex --names 2>&1)"; then
+  bad="$bad effective global agents NOT SCANNED: $agent_names;"
+  agent_names=""
+fi
+n_md="$(grep -c . <<<"$agent_names" || true)"
+[ "$n_md" -gt 0 ] || bad="$bad no effective global Claude agents eligible for Codex to compile;"
 first="$(pfm codex agents 2>/tmp/lane-a-codex-agents.err)"
 first_rc=$?
 _lane_log_only "   A.09: first run printed $(printf '%s\n' "$first" | grep -c .) line(s); $(printf '%s' "$first" | grep -cE '^(missing|copy|wrong-target) ') link(s) were not yet correct"
@@ -777,14 +805,14 @@ not_correct="$(printf '%s' "$second" | grep -E '^(missing|copy|wrong-target|conf
 # A role must be a REGULAR FILE: Codex opens it with O_NOFOLLOW and rejects a
 # symlink as "agent type is currently not available", so a linked registry
 # passes every stat-shaped check while no global agent can spawn at all.
-for src in "$BLUEPRINT"/templates/global/agents/*.md; do
-  name="$(basename "$src" .md)"
+while IFS= read -r name; do
+  [ -n "$name" ] || continue
   role="$HOME/.codex/agents/$name.toml"
   [ -L "$role" ] && { bad="$bad $role is a symlink — Codex refuses to load it;"; continue; }
   [ -f "$role" ] || { bad="$bad $role is not a regular role file;"; continue; }
   grep -q '^# Generated by engine-sync from ' <<<"$(head -1 "$role")" ||
     bad="$bad $role carries no generated marker, so engine-sync cannot prove it owns the file;"
-done
+done <<<"$agent_names"
 rm -f /tmp/lane-a-codex-agents.err
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "$n_md global agents compiled to parsing .toml roles, every registry entry settled on the second run, $HOME/.codex/agents/*.toml regular marker-owned files Codex can load, no problem on stderr"
@@ -822,7 +850,7 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "the default store $BLUEPRINT is a link and resolves the worktree's HEAD $WT_SHA; $B reached through $LINK reports the same clean check with the same store sha $B_BASE_SHORT"
 fi
 
-# ─── A.11 — the guard hook, driven by scripted mock turns in express ────────
+# ─── A.11 — the codex-sync hooks, driven by scripted mock turns in express ────────
 
 open_main() {
   pfm chat new --name "$CHAT" --engine cc --account "$SEAT" --cwd "$EXPRESS" --await --timeout 300 \
@@ -830,7 +858,7 @@ open_main() {
 }
 lane_reopen 'open_main'
 
-beat A.11-guard-hook
+beat A.11-codex-sync-hook
 spends "cc:$SEAT"
 target "$CHAT"
 bad=""
@@ -846,20 +874,16 @@ while IFS= read -r cmd; do
 done <<EOF
 $hooks
 EOF
-jq -e '.hooks.PreToolUse[] | select(.matcher == "Edit|Write") | .hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/pfm-guard.sh")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
-  bad="$bad no pfm-guard.sh PreToolUse Edit|Write hook wired;"
 jq -e '.hooks.Stop[].hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh sync")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
   bad="$bad no codex-sync.sh sync Stop hook wired;"
-jq -e '.hooks.PostToolUse[] | select(.matcher == "Read") | .hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/guard-stamp.sh")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
-  bad="$bad no guard-stamp.sh PostToolUse Read hook wired;"
 jq -e '.hooks.PostToolUse[] | select(.matcher == "Edit|Write") | .hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh mark")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
   bad="$bad no codex-sync.sh mark PostToolUse Edit|Write hook wired;"
-GUARD_FILE=".claude/agents/gitter.md"
+EDIT_FILE=".claude/agents/gitter.md"
 ROOT_FILE="CLAUDE.md"
 if [ -n "$bad" ]; then
-  fail "the express hook wiring is not the shape the guard needs:$bad"
-elif [ ! -f "$EXPRESS/$GUARD_FILE" ] || [ ! -f "$EXPRESS/$ROOT_FILE" ]; then
-  fail "express has no $GUARD_FILE or no $ROOT_FILE to edit"
+  fail "the express hook wiring is not the shape codex-sync needs:$bad"
+elif [ ! -f "$EXPRESS/$EDIT_FILE" ] || [ ! -f "$EXPRESS/$ROOT_FILE" ]; then
+  fail "express has no $EDIT_FILE or no $ROOT_FILE to edit"
 else
   if live_chat "$CHAT"; then
     _lane_log_only "   A.11: $CHAT was already live — reused"
@@ -869,24 +893,9 @@ else
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
     target_live "$CHAT"
-    sid="$(live_field "$CHAT" 2)"
     EXPRESS_PROJECT="$(basename "$EXPRESS")"; EXPRESS_PROJECT="${EXPRESS_PROJECT#.}"
-    GUARD_DIR="/tmp/$EXPRESS_PROJECT/guard"
     # engine-sync hook claude mark's flag: {engine-sync state}/dirty/{project}-{root hash}.
     DIRTY_GLOB="$HOME/.local/state/engine-sync/dirty/$EXPRESS_PROJECT-*"
-    mkdir -p "$GUARD_DIR"
-    ACTIVE="$GUARD_DIR/pfm_active.$sid"
-    QUALITY="$GUARD_DIR/quality_loaded.$sid"
-    LAW_FILE="$HOME/.claude/commands/quality/prompt.md"
-    law_root="$(git -C "$(dirname "$LAW_FILE")" rev-parse --show-toplevel 2>/dev/null || true)"
-    LAW_QUALITY=""
-    if [ -n "$law_root" ]; then
-      law_project="$(basename "$law_root")"; law_project="${law_project#.}"
-      LAW_QUALITY="/tmp/$law_project/guard/quality_loaded.$sid"
-    fi
-    rm -f "$ACTIVE" "$QUALITY" "$GUARD_DIR/codex_dirty"
-    [ -z "$LAW_QUALITY" ] || rm -f "$LAW_QUALITY"
-    guard_before="$(sha256sum "$EXPRESS/$GUARD_FILE" | cut -d' ' -f1)"
     agents_before="$(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1)"
     opencode_had=0
     opencode_backup_ok=1
@@ -909,37 +918,20 @@ else
     has_probe_result() { read_probe_result | jq -e 'type == "object"' >/dev/null 2>&1; }
     # The reader supplies the transcript path; its entries omit tool_result,
     # so inspect that record at the supplied path.
-    # 1. Without the stamp: the Edit is DENIED, the file unchanged.
-    result_start="$(wc -l <"$transcript")"
-    deny_steps="$(jq -cn --arg file "$EXPRESS/$GUARD_FILE" '[{type:"tool_call",tool:"Edit",input:{file_path:$file,old_string:"",new_string:"Lane A probe: LANE-A-DENY"}},{type:"turn",reply:"ok"}]')"
-    pfm chat inject --allow-unsigned "$CHAT" "A-DENY-PROBE $(mock_steps "$deny_steps")" >/dev/null 2>&1 ||
-      bad="$bad the deny stimulus could not be injected;"
-    wait_prompt "$CHAT" A-DENY-PROBE 60 || bad="$bad no deny prompt in 60s (${LANE_WAIT_WHY:-no wait reason});"
-    wait_for 60 has_probe_result || bad="$bad no deny tool_result in 60s (${LANE_WAIT_WHY:-no wait reason});"
-    deny_result="$(read_probe_result)"
-    deny_needle='infra edits route through /pcm'
-    jq -e --arg needle "$deny_needle" '.is_error == true and (.content | contains($needle))' <<<"$deny_result" >/dev/null 2>&1 ||
-      bad="$bad deny Edit did not yield an error tool_result carrying '$deny_needle': $(one_line "$deny_result");"
-    guard_after="$(sha256sum "$EXPRESS/$GUARD_FILE" | cut -d' ' -f1)"
-    [ "$guard_after" = "$guard_before" ] || bad="$bad $GUARD_FILE changed without a stamp;"
-    [ ! -e "$ACTIVE" ] || bad="$bad the deny turn created $ACTIVE;"
-    ! compgen -G "$DIRTY_GLOB" >/dev/null || bad="$bad the denied Edit set the engine-sync dirty flag without PostToolUse;"
-    # 2. With the stamp (the deny message's own unlock, written by the lane for
-    #    this session id): the same Edit is ALLOWED, and Stop recompiles.
-    date +%s >"$ACTIVE"
+    # 1. An Edit of a Claude source is admitted with no gate; the PostToolUse
+    #    mark sets the engine-sync dirty flag and the Stop hook recompiles.
+    ! compgen -G "$DIRTY_GLOB" >/dev/null || bad="$bad the dirty flag was set before any edit;"
     gate="$BK/a11-gate"
     : >"$gate"
     result_start="$(wc -l <"$transcript")"
-    allow_steps="$(jq -cn --arg law "$LAW_FILE" --arg file "$EXPRESS/$GUARD_FILE" --arg gate "$gate" '[{type:"tool_call",tool:"Read",input:{file_path:$law}},{type:"tool_call",tool:"Edit",input:{file_path:$file,old_string:"",new_string:"Lane A probe: LANE-A-ALLOW-AGENT"}},{type:"hold",until_gone:$gate},{type:"turn",reply:"ok"}]')"
+    allow_steps="$(jq -cn --arg file "$EXPRESS/$EDIT_FILE" --arg gate "$gate" '[{type:"tool_call",tool:"Edit",input:{file_path:$file,old_string:"",new_string:"Lane A probe: LANE-A-ALLOW-AGENT"}},{type:"hold",until_gone:$gate},{type:"turn",reply:"ok"}]')"
     pfm chat inject --allow-unsigned "$CHAT" "A-ALLOW-PROBE $(mock_steps "$allow_steps")" >/dev/null 2>&1 ||
       bad="$bad the allow stimulus could not be injected;"
     wait_prompt "$CHAT" A-ALLOW-PROBE 60 || bad="$bad no allow prompt in 60s (${LANE_WAIT_WHY:-no wait reason});"
     wait_for 60 has_probe_result || bad="$bad no allow tool_result in 60s (${LANE_WAIT_WHY:-no wait reason});"
     allow_result="$(read_probe_result)"
     jq -e '.is_error != true and .content == "done"' <<<"$allow_result" >/dev/null 2>&1 ||
-      bad="$bad stamped Edit was not admitted by PreToolUse: $(one_line "$allow_result");"
-    wait_for 10 "[ -f '$QUALITY' ]" ||
-      bad="$bad guard-stamp.sh PostToolUse(Read) did not set $QUALITY (${LANE_WAIT_WHY:-no wait reason});"
+      bad="$bad the Edit was not admitted: $(one_line "$allow_result");"
     wait_for 10 "compgen -G '$DIRTY_GLOB' >/dev/null" ||
       bad="$bad codex-sync.sh mark PostToolUse(Edit|Write) did not set the engine-sync dirty flag $DIRTY_GLOB (${LANE_WAIT_WHY:-no wait reason});"
     printf '\nLane A probe: LANE-A-ALLOW-ROOT\n' >>"$EXPRESS/$ROOT_FILE" ||
@@ -950,9 +942,8 @@ else
     fi
     wait_for 30 "! compgen -G '$DIRTY_GLOB' >/dev/null" ||
       bad="$bad the engine-sync dirty flag is still set after the turn — codex-sync.sh sync did not clear it (${LANE_WAIT_WHY:-no wait reason});"
-    # Restore express: the committed files back, the mirror rebuilt from them,
-    # the session markers gone.
-    git -C "$EXPRESS" checkout -q -- "$GUARD_FILE" "$ROOT_FILE" 2>/dev/null || bad="$bad git checkout of $GUARD_FILE/$ROOT_FILE failed;"
+    # Restore express: the committed files back, the mirror rebuilt from them.
+    git -C "$EXPRESS" checkout -q -- "$EDIT_FILE" "$ROOT_FILE" 2>/dev/null || bad="$bad git checkout of $EDIT_FILE/$ROOT_FILE failed;"
     in_express pfm codex build . >/dev/null || bad="$bad the mirror could not be rebuilt after the restore;"
     if [ "$opencode_backup_ok" -eq 1 ]; then
       rm -rf "$EXPRESS/.opencode"
@@ -961,11 +952,10 @@ else
       fi
     fi
     rm -rf "$BK/a11-opencode"
-    rm -f "$ACTIVE" "$QUALITY" "$GUARD_DIR/codex_dirty" "$gate"
-    [ -z "$LAW_QUALITY" ] || rm -f "$LAW_QUALITY"
+    rm -f "$gate"
     if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after restore: $(one_line "$after");"; fi
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "without stamps the Edit of $GUARD_FILE returned a deny error and left the file unchanged; PostToolUse hooks set the quality stamp and dirty flag for the admitted Edit, then Stop recompiled AGENTS.md and cleared codex_dirty; express restored"
+      pass "the Edit of $EDIT_FILE was admitted and the PostToolUse mark set the dirty flag; Stop recompiled AGENTS.md and cleared it; express restored"
     fi
   fi
 fi

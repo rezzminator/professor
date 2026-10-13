@@ -6,8 +6,10 @@ visibility:
     include: [main, flights-foreman, foreman-pro]
 model: claude-sonnet-5-5
 effort: high
-codex-model: gpt-6-luna
-codex-effort: xhigh
+engines:
+  codex:
+    model: sonnet
+    effort: xhigh
 tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 300k

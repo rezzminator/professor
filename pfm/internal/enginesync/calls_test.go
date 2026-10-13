@@ -128,12 +128,93 @@ func TestMirror(t *testing.T) {
 	}
 }
 
+func TestMirrorPassesEveryHostCapability(t *testing.T) {
+	runner, binary := fakeRunner(t, `{"ok":true,"problems":[],"rebuildable":[],"warnings":[]}`, "", 0)
+	runner.Capabilities = []string{CapabilityGptAgents, "other"}
+	if _, err := runner.Mirror(context.Background(), EngineCodex, ActionBuild, "/r"); err != nil {
+		t.Fatalf("Mirror: %v", err)
+	}
+	want := []string{
+		EngineCodex, ActionBuild, "/r", "--home", "/h",
+		"--capability", CapabilityGptAgents, "--capability", "other", "--json",
+	}
+	if argv := recordedArgv(t, binary); !reflect.DeepEqual(argv, want) {
+		t.Fatalf("argv = %q, want %q", argv, want)
+	}
+}
+
+func TestHostCapabilities(t *testing.T) {
+	if got := HostCapabilities(true); !reflect.DeepEqual(got, []string{"gpt-agents"}) {
+		t.Fatalf("HostCapabilities(true) = %q, want [gpt-agents]", got)
+	}
+	if got := HostCapabilities(false); len(got) != 0 {
+		t.Fatalf("HostCapabilities(false) = %q, want none", got)
+	}
+}
+
+func TestCapabilityArgs(t *testing.T) {
+	gpt := []string{"gpt-agents"}
+	flag := []string{"--capability", "gpt-agents"}
+	cases := []struct {
+		name         string
+		engine       string
+		args         []string
+		capabilities []string
+		want         []string
+	}{
+		{"codex build", EngineCodex, []string{"build", "."}, gpt, append(append([]string{"build"}, flag...), ".")},
+		{
+			"codex check before a trailing value flag",
+			EngineCodex,
+			[]string{"check", ".", "--home"},
+			gpt,
+			append(append([]string{"check"}, flag...), ".", "--home"),
+		},
+		{
+			"codex agents before a sentinel",
+			EngineCodex,
+			[]string{"agents", "--", "x"},
+			gpt,
+			append(append([]string{"agents"}, flag...), "--", "x"),
+		},
+		{"opencode doctor", EngineOpenCode, []string{"doctor"}, gpt, append([]string{"doctor"}, flag...)},
+		{"a codex verb that renders no agent", EngineCodex, []string{"generate"}, gpt, []string{"generate"}},
+		{"opencode has no agents verb", EngineOpenCode, []string{"agents"}, gpt, []string{"agents"}},
+		{"no capability", EngineCodex, []string{"build", "."}, nil, []string{"build", "."}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := CapabilityArgs(testCase.engine, testCase.args, testCase.capabilities)
+			if !reflect.DeepEqual(got, testCase.want) {
+				t.Fatalf("CapabilityArgs = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestGlobalArgs(t *testing.T) {
 	cases := []struct {
-		name    string
-		options GlobalOptions
-		want    []string
+		name         string
+		options      GlobalOptions
+		capabilities []string
+		want         []string
 	}{
+		{
+			name:         "the adoption order and the host capability",
+			options:      GlobalOptions{CodexHomes: []string{"/h/.codex"}, Adopt: true},
+			capabilities: []string{"gpt-agents"},
+			want: []string{
+				"global",
+				"--home",
+				"/h",
+				"--codex-home",
+				"/h/.codex",
+				"--adopt",
+				"--capability",
+				"gpt-agents",
+				"--json",
+			},
+		},
 		{
 			name: "an apply over two Codex homes",
 			options: GlobalOptions{
@@ -163,7 +244,7 @@ func TestGlobalArgs(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got, err := Runner{Home: "/h"}.GlobalArgs(testCase.options)
+			got, err := Runner{Home: "/h", Capabilities: testCase.capabilities}.GlobalArgs(testCase.options)
 			if err != nil || !reflect.DeepEqual(got, testCase.want) {
 				t.Fatalf("GlobalArgs = %q, %v; want %q", got, err, testCase.want)
 			}
@@ -237,14 +318,25 @@ func TestGlobal(t *testing.T) {
 
 func TestMachineDoctor(t *testing.T) {
 	cases := []struct {
-		name    string
-		options MachineDoctorOptions
-		stdout  string
-		code    int
-		want    []Row
-		argv    []string
-		wantErr string
+		name         string
+		options      MachineDoctorOptions
+		capabilities []string
+		stdout       string
+		code         int
+		want         []Row
+		argv         []string
+		wantErr      string
 	}{
+		{
+			name:         "the host capability reaches the doctor",
+			options:      MachineDoctorOptions{ClaudeAbsent: true},
+			capabilities: []string{"gpt-agents"},
+			stdout:       `{"ok":true,"rows":[{"level":"ok","message":"SKIPPED sol — requires gpt-agents"}]}`,
+			want:         []Row{{Level: LevelOK, Message: "SKIPPED sol — requires gpt-agents"}},
+			argv: []string{
+				"doctor", "--machine", "--home", "/h", "--claude-absent", "--capability", "gpt-agents", "--json",
+			},
+		},
 		{
 			name: "a failing row",
 			options: MachineDoctorOptions{
@@ -281,8 +373,8 @@ func TestMachineDoctor(t *testing.T) {
 		{
 			name:    "a configuration error retains its file and key",
 			code:    1,
-			stdout:  `{"ok":false,"rows":[],"configSources":[],"error":"/h/.config/engine-sync/config.json: machine.modelMap: expected object"}`,
-			wantErr: "/h/.config/engine-sync/config.json: machine.modelMap: expected object",
+			stdout:  `{"ok":false,"rows":[],"configSources":[],"error":"/h/.config/engine-sync/config.json: machine.modelMap is removed; use codex.modelMap"}`,
+			wantErr: "/h/.config/engine-sync/config.json: machine.modelMap is removed; use codex.modelMap",
 		},
 		{
 			name: "an unknown level is an error", stdout: `{"ok":true,"rows":[{"level":"info","message":"m"}]}`,
@@ -296,6 +388,7 @@ func TestMachineDoctor(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			runner, binary := fakeRunner(t, testCase.stdout, "", testCase.code)
+			runner.Capabilities = testCase.capabilities
 			got, err := runner.MachineDoctor(context.Background(), testCase.options)
 			if testCase.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), testCase.wantErr) {

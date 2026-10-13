@@ -164,7 +164,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -667,7 +667,7 @@ if [ "$FAILURES" -eq 1 ] && [ ! -s "$T/unit.calls" ] && grep -Fxq 'FAILSTEP temp
 else bad 'check-map build failure' "$(cat "$T/unit.calls")" "$(cat "$T/cm-build-fail.out")"; fi
 
 mkdir -p "$REPO_ROOT/templates/global/engine-sync"
-printf '%s\n' '{"version":1,"machine":{"modelMap":{"smart":"fixture-model"}}}' > "$REPO_ROOT/templates/global/engine-sync/config.json"
+printf '%s\n' '{"version":1,"codex":{"modelMap":{"smart":"fixture-model"}}}' > "$REPO_ROOT/templates/global/engine-sync/config.json"
 # checks_templates_mirrors_generate and _opencode: engine-sync, built from the mounted source onto
 # $TMP_BASE/engine-sync/engine-sync, checks and builds the mirrors; a failed build is its own red line.
 cat > "$T/es-stub" <<'SH'
@@ -688,12 +688,18 @@ case "$1" in
       cat "$home/.config/engine-sync/config.json" > "$MIRROR_CALLS.policy"
     else printf 'missing\n' > "$MIRROR_CALLS.policy"; fi
     if [ "${STUB_ES_GLOBAL_RC:-0}" -ne 0 ]; then
-      echo 'engine-sync global: variants.json: variant "beta-max" from beta.md: "replace" text "ghost" occurs 0 times in the body, want exactly 1'
+      echo 'engine-sync global: beta-max.md: variant "beta-max" from beta.md: "replace" text "ghost" occurs 0 times in the body, want exactly 1'
       exit "$STUB_ES_GLOBAL_RC"
     fi
     mkdir -p "$home/.claude/agents" "$home/.codex/agents"
+    if [ "${STUB_ES_DRIFT:-0}" -ne 0 ]; then # exit 0 with a named drift: the check must still go red
+      echo 'SECTION-DRIFT beta-max: beta.md § Budget changed since pinned (pin sha256:a, now sha256:b) — review the override, then run engine-sync variants pin beta-max'
+    fi
     for n in $STUB_ES_RENDER; do
       printf 'x\n' > "$home/gen-$n.md"; printf 'x\n' > "$home/.codex/agents/$n.toml"; ln -s "$home/gen-$n.md" "$home/.claude/agents/$n.md"
+    done
+    for n in $STUB_ES_CLAUDE_ONLY; do # a derived agent whose engines block turns Codex off: a Claude link and no Codex role
+      printf -- '---\nengines:\n  codex: false\n---\n' > "$home/gen-$n.md"; ln -s "$home/gen-$n.md" "$home/.claude/agents/$n.md"
     done ;;
   *) exit "${STUB_ES_OPENCODE_RC:-0}" ;;
 esac
@@ -794,10 +800,23 @@ cs_case "STUB_CS_FAIL=$REPO_ROOT/.claude/scripts/codex-sync.sh"
 if [ "$(wc -l < "$T/cs.calls" | tr -d ' ')" = 2 ] && grep -Fxq 'FAILSTEP codex-sync regression FAILED (.claude/scripts/codex-sync.sh) — see output' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'a red codex-sync door test on one twin is one red step naming it'
 else bad 'codex-sync door failure' "$(cat "$T/cs.calls")" "$(cat "$T/es.out")"; fi
-# checks_templates_global_variants: every variant templates/global/agents/variants.json declares is rendered by the
+# checks_templates_global_variants: every machine agent-file declaration is rendered by the
 # engine-sync it built into a jail home; a render error, a short count and an unbuilt binary are each one red step.
 mkdir -p "$REPO_ROOT/templates/global/agents"
-printf '%s\n' '{"gamma-lite":{"from":"gamma"},"alpha-pro":{"from":"alpha"},"beta-max":{"from":"beta"}}' > "$REPO_ROOT/templates/global/agents/variants.json"
+gv_sources() {
+  mkdir -p "$REPO_ROOT/templates/global/agents"
+  for n in alpha-pro beta-max gamma-lite; do
+    printf -- '---\nname: %s\nfrom: %s\n---\n' "$n" "${n%-*}" > "$REPO_ROOT/templates/global/agents/$n.md"
+  done
+  mkdir -p "$REPO_ROOT/templates/global/agents/shared"
+  printf -- '---\nmodel: smart\n---\n' > "$REPO_ROOT/templates/global/agents/shared/base.md"
+}
+gv_sources
+# The fixture owns its scanner; the real compiler remains stubbed at its boundary.
+mkdir -p "$REPO_ROOT/scripts"
+if [ -f "${SUT%/*}/../../scripts/agent-source-inventory.py" ]; then
+  cp "${SUT%/*}/../../scripts/agent-source-inventory.py" "$REPO_ROOT/scripts/agent-source-inventory.py"
+fi
 gv_names='alpha-pro beta-max gamma-lite'
 gv_count=3
 gv_jailed() { [ -z "$(ls -A "$TMP_BASE/engine-sync" | grep '^global-variants\.')" ]; } # no jail left under $TMP_BASE
@@ -805,7 +824,7 @@ es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names" HOME=/real-h
   XDG_STATE_HOME=/real-home/.local/state XDG_DATA_HOME=/real-home/.local/share ENGINE_SYNC_HOME=/real-home/es \
   ENGINE_SYNC_STATE=/real-home/es-state CODEX_HOME=/real-home/.codex
 if [ "$(wc -l < "$MIRROR_CALLS" | tr -d ' ')" -eq 1 ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
-  [[ "$(cat "$MIRROR_CALLS")" == "global --home $TMP_BASE/engine-sync/global-variants."*"/home --source-repo $REPO_ROOT --claude-config-dir $TMP_BASE/engine-sync/global-variants."*"/home/.claude --codex-home $TMP_BASE/engine-sync/global-variants."*"/home/.codex" ]] &&
+  [[ "$(cat "$MIRROR_CALLS")" == "global --home $TMP_BASE/engine-sync/global-variants."*"/home --source-repo $TMP_BASE/engine-sync/global-variants."*"/src --claude-config-dir $TMP_BASE/engine-sync/global-variants."*"/home/.claude --codex-home $TMP_BASE/engine-sync/global-variants."*"/home/.codex --capability gpt-agents" ]] &&
   [[ "$(cat "$MIRROR_CALLS.env")" == "HOME=$TMP_BASE/engine-sync/global-variants."*"/home XDG_CONFIG_HOME=unset XDG_STATE_HOME=unset XDG_DATA_HOME=unset ENGINE_SYNC_HOME=unset ENGINE_SYNC_STATE=unset CODEX_HOME=unset" ]] &&
   grep -Fq "all $gv_count global agent variant(s) render through engine-sync into a jail home" "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out" &&
   cmp -s "$MIRROR_CALLS.policy" "$REPO_ROOT/templates/global/engine-sync/config.json" && gv_jailed; then
@@ -827,32 +846,68 @@ es_case checks_templates_global_variants "STUB_ES_RENDER="
 if grep -Fq "FAILSTEP global agent variants: 0 of $gv_count declared variant(s) rendered — missing: " "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'an engine-sync that renders nothing is red, never clean'
 else bad 'global variants, none rendered' "$(cat "$T/es.out")"; fi
+es_case checks_templates_global_variants "STUB_ES_RENDER=${gv_names% *}" STUB_ES_CLAUDE_ONLY="${gv_names##* }"
+if grep -Fq "all $gv_count global agent variant(s) render through engine-sync into a jail home" "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out" && gv_jailed; then
+  ok 'a derived agent whose engines block turns Codex off renders as a Claude link alone'
+else bad 'global variants, Claude-only variant' "$(cat "$T/es.out")"; fi
+es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names" STUB_ES_DRIFT=1
+if grep -Fq 'SECTION-DRIFT beta-max' "$T/es.out" &&
+  grep -Fq 'FAILSTEP global agent variants FAILED to render (engine-sync global exit 1; variant named in the error: beta-max)' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+  ok 'a SECTION-DRIFT is red and names the variant even when engine-sync exits 0'
+else bad 'global variants, drift' "$(cat "$T/es.out")"; fi
 es_case checks_templates_global_variants STUB_ES_BIN_RC=1
 if [ ! -s "$MIRROR_CALLS" ] &&
   grep -Fxq 'FAILSTEP global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)' "$T/es.out" &&
   grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'global agent variants without an engine-sync binary are NOT RENDERED, never a pass'
 else bad 'global variants, no binary' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
-gv_decl="$REPO_ROOT/templates/global/agents/variants.json"
-for gv_state in missing unparseable empty array; do # a declaration that names nothing renderable is red before engine-sync runs
+gv_dir="$REPO_ROOT/templates/global/agents"
+for gv_state in missing unparseable empty invalid; do
+  rm -rf "$gv_dir"
   case "$gv_state" in
-    missing) rm -f "$gv_decl"; gv_want="FAILSTEP global agent variants NOT RENDERED — $gv_decl is missing, so nothing was looked up" ;;
-    unparseable) printf '%s\n' '{"alpha-pro":' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: ' ;;
-    empty) printf '%s\n' '{}' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json declares no variant, so nothing could render' ;;
-    array) printf '%s\n' '["alpha-pro"]' > "$gv_decl"; gv_want='FAILSTEP global agent variants NOT RENDERED — templates/global/agents/variants.json does not parse: ' ;;
+    missing) gv_want="FAILSTEP global agent variants NOT RENDERED — $gv_dir is missing, so nothing was looked up" ;;
+    unparseable) mkdir -p "$gv_dir"; printf -- '---\nfrom: [\n---\n' > "$gv_dir/broken.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources do not parse: ' ;;
+    empty) mkdir -p "$gv_dir"; printf -- '---\nname: solo\n---\n' > "$gv_dir/solo.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources declare no variant, so nothing could render' ;;
+    invalid) mkdir -p "$gv_dir"; printf -- '---\nfrom: []\n---\n' > "$gv_dir/broken.md"; gv_want='FAILSTEP global agent variants NOT RENDERED — agent sources do not parse: ' ;;
   esac
   es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names"
   if [ ! -s "$MIRROR_CALLS" ] && grep -Fq "$gv_want" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
-    ok "variants.json ($gv_state) is NOT RENDERED, red, with engine-sync never run"
-  else bad "global variants, $gv_state declaration" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+    ok "agent sources ($gv_state) are NOT RENDERED, red, with engine-sync never run"
+  else bad "global variants, $gv_state source" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 done
-printf '%s\n' '{"gamma-lite":{"from":"gamma"},"alpha-pro":{"from":"alpha"},"beta-max":{"from":"beta"}}' > "$gv_decl"
-gv_without_node() { need_tool() { [ "$1" != node ]; }; checks_templates_global_variants; }
-es_case gv_without_node "STUB_ES_RENDER=$gv_names"
+rm -rf "$gv_dir"; gv_sources
+gv_without_python() { need_tool() { [ "$1" != python3 ]; }; checks_templates_global_variants; }
+es_case gv_without_python "STUB_ES_RENDER=$gv_names"
 if [ ! -s "$MIRROR_CALLS" ] && [ ! -s "$T/es-build.calls" ] &&
   grep -Fxq 'FAILSTEP global agent variants NOT RENDERED — the toolchain is missing' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
-  ok 'global agent variants without node are NOT RENDERED, nothing built or run'
-else bad 'global variants, no node' "$(cat "$T/es-build.calls")" "$(cat "$T/es.out")"; fi
+  ok 'global agent variants without python3 are NOT RENDERED, nothing built or run'
+else bad 'global variants, no python3' "$(cat "$T/es-build.calls")" "$(cat "$T/es.out")"; fi
+# A.09 counts effective Claude agents eligible for Codex, not raw layers or declarations.
+lane_agents="$T/lane-agents"
+mkdir -p "$lane_agents/blueprint/templates/global/agents" "$lane_agents/home/.claude/agents" "$lane_agents/home/.codex/agents" "$lane_agents/blueprint/scripts"
+cp "${SUT%/*}/../../scripts/agent-source-inventory.py" "$lane_agents/blueprint/scripts/agent-source-inventory.py"
+printf -- '---\nname: alpha\nmodel: smart\n---\n' > "$lane_agents/blueprint/templates/global/agents/alpha.md"
+mkdir -p "$lane_agents/blueprint/templates/global/agents/shared"
+printf -- '---\nmodel: smart\n---\n' > "$lane_agents/blueprint/templates/global/agents/shared/layer.md"
+printf -- '---\nname: derived\nfrom: alpha\n---\n' > "$lane_agents/blueprint/templates/global/agents/derived.md"
+cp "$lane_agents/blueprint/templates/global/agents/alpha.md" "$lane_agents/home/.claude/agents/alpha.md"
+printf -- '---\nname: derived\nengines:\n  codex: false\n---\n' > "$lane_agents/home/.claude/agents/derived.md"
+printf '# Generated by engine-sync from alpha.md\n' > "$lane_agents/home/.codex/agents/alpha.toml"
+sed -n '/^beat A.09-codex-agents$/,/^# .*A.10/p' "${SUT%/*}/lanes/A.sh" > "$lane_agents/beat.sh"
+(
+  export HOME="$lane_agents/home"
+  BLUEPRINT="$lane_agents/blueprint"
+  beat() { :; }; spends() { :; }; _lane_log_only() { :; }
+  one_line() { tr '\n' ' ' <<<"$1"; }
+  pfm() { printf '%s\nCODEX AGENTS PASS\n' "$HOME/.codex/agents/alpha.toml: 43 B, parses clean"; }
+  fail() { printf 'FAIL %s\n' "$*"; }
+  pass() { printf 'PASS %s\n' "$*"; }
+  source "$lane_agents/beat.sh"
+) > "$T/lane-agents.out" 2>&1
+if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
+  ok 'A.09 judges one compiled agent, not a shared file or a Claude-only declaration'
+else bad 'A.09 effective agents' "$(cat "$T/lane-agents.out")"; fi
 es_case checks_templates_mirrors_opencode
 want="$(printf '%s\n%s' \
   "opencode check $REPO_ROOT --home $TMP_BASE/engine-sync/opencode-verify-home" \
@@ -1031,5 +1086,18 @@ else
   boot_rc=$?
   bad 'sampler stop waits for armed-trap header and finishes after bootstrap' "rc=$boot_rc" "$(cat "$T/boot/out")"
 fi
+# A tracked templates/generated/agents file no fresh render produces (an
+# orphan, or a render the sources moved past) is a red step naming it.
+mkdir -p "$REPO_ROOT/templates/generated/agents"
+printf -- '---\nname: ghost\n---\n' > "$REPO_ROOT/templates/generated/agents/ghost.md"
+es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names"
+if grep -Fq 'ghost.md' "$T/es.out" &&
+  grep -Fq 'FAILSTEP global agent variants: tracked templates/generated/agents differs from a fresh render' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+  ok "global agent variants: a tracked generated agent no fresh render produces is red and named"
+else
+  bad "global variants, tracked generated drift" "$(cat "$T/es.out")"
+fi
+rm -rf "$REPO_ROOT/templates/generated"
 
 shtest_end

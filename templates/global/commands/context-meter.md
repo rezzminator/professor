@@ -1,7 +1,7 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: context-meter
-description: Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → /pcm; runtime spend → /chatlog; loaded-but-unused junk → /context-audit.
+description: Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → the `pcm` agent; runtime spend → /chatlog; loaded-but-unused junk → /context-audit.
 ---
 
 # Context Budget
@@ -25,12 +25,12 @@ Flag a file when:
 
 - `CLAUDE.md`, root or child: over the line or byte budget of `/quality:claude-md`; a child that restates root rules rather than holding only its delta
 - `.claude/agents/*.md` and `{project}/.claude/agents/*.md`: over 15 KB, or `description` over 30 words — every agent description loads into every spawn
-- `.claude/commands/**/*.md`, nested command dirs included (`pfm/`, `flights/`, `quality/`, `audit/`, `rnd/`, `h/`): over 35 KB
+- `.claude/commands/**/*.md`, nested command dirs included (`pfm/`, `flights/`, `quality/`, `audit/`, `h/`): over 35 KB
 - `SKILL.md`, under `.claude/skills/*/` and embedded in command dirs: over 500 lines, or `description` plus when-to-use over 1,536 chars combined
 - The injected fleet prompt bills against the always-loaded floor (main-loop only; subagents never receive it)
 - `.mcp.json`: a server wrapping a CLI already on PATH (`gh`) — schemas are deferred, so tool count costs little until fetched
 
-The size limits are `/pcm`'s (§ Hard thresholds, § Critical invariants); this command only measures against them.
+The size limits are the `pcm` agent's (§ Claude-harness prompt law, § Critical invariants); this command only measures against them.
 
 ## Classify
 
@@ -48,6 +48,6 @@ In order: the always-loaded total read from `/context`, with its composition nam
 
 ## Rules
 
-- Report only — never edit. Trimming a prompt file routes through `/pcm`, which loads `/quality:prompt` and verifies consistency. Surface the savings; the user approves the cut.
+- Report only — never edit. Trimming a prompt file routes through the `pcm` agent, which loads `/quality:prompt` and verifies consistency. Surface the savings; the user approves the cut.
 - Rank by tokens reclaimed, not file count — and since MCP schemas are deferred, target the always-loaded floor before chasing tool counts.
 - Derive every count from the filesystem and reconcile it against `/context`; an inventory claim written in any prompt file, this one included, is not evidence.

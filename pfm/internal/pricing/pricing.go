@@ -667,7 +667,7 @@ func (r Row) codexCostParts(usage CodexUsage, context int64) (ClaudeParts, bool)
 
 // ResponseCostParts prices one response of a Claude Code transcript, whichever
 // model wrote it, by billing column. A Claude row prices it as ClaudeCostParts.
-// A Codex row is a model the model-gateway's chatgpt route served: the gateway
+// A Codex row is a model the gpt-gateway's chatgpt route served: the gateway
 // writes its usage Anthropic-shaped (input_tokens = total - cached - written,
 // cache read = cached, cache creation = written), so the request's whole input
 // is Context() and selects the tier, the input and cache read price as

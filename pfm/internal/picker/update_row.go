@@ -221,6 +221,11 @@ func professorUpdatePrompt(row compose.Row) string {
 		"Merge the `#### → For:` actions into one checklist per update: each names its timing — `before update`, `after update` or `per project` — and the surface it touches, and a later release's action supersedes an earlier one on the same surface; an older note's action that names no timing, including one written `#### For:` or `#### → For adopters …:`, gets the timing you judge. " +
 		"Then present a concise overview of every change and migration impact, with that checklist. " +
 		"Ask the user for explicit approval before making any change. Only after approval, do the before-update actions, run `pfm update --to " + target + "` (or the stop's tag), do the after-update actions, run `pfm doctor`, " +
-		"then in each adopted project run `pfm doctor --project-updates`, read what upstream changed under each `UPDATED` row, carry what applies into the local file keeping the project's own edits, and run `pfm update pin <local>`, then do the `per project` actions; report the exact result of each step. " +
+		"then in each adopted project run `pfm doctor --project-updates` and take it to `clean`, exit 0: every row ends in a verb, and the approval above covers every row, so no row waits for another question. " +
+		"`UPDATED`: port each listed upstream commit's intent into the local file, keeping the project's own edits, then `pfm update pin <local>`; a version kept on purpose is `pfm update pin <local> --keep \"<what you did not take, and why>\"`, never a row left open. " +
+		"`NEW`: decide from the project's own rules, then adopt it (`pfm update pin --template <template> <local>`) or `pfm update ignore <template>`. " +
+		"`RETIRED-NAME`: edit the line to its successor, or `pfm update accept <path> --reason \"<why>\"` for a mention that must stay. " +
+		"`GONE-UPSTREAM`, `MOVED` and `LOCAL-DELETED`: the verbs printed on the row. " +
+		"Run the verbs one at a time, never in parallel: each rewrites `.professor/baseline.json`. Re-run the report after each project and quote its last line; then do the `per project` actions; report the exact result of each step. " +
 		"Do not push, tag, publish, release, or edit the source manually."
 }

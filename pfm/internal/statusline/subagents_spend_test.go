@@ -160,7 +160,7 @@ func TestSpendAgreesWithPfmTokens(t *testing.T) {
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m2", "claude-sonnet-5", 30, 250, 3400, 600, 200),
 		line("m3", "claude-opus-5-5", 12, 900, 4000, 0, 1500),
-		// a gpt model through the model-gateway: Anthropic-shaped usage, priced at its Codex row on both surfaces
+		// a gpt model through the gpt-gateway: Anthropic-shaped usage, priced at its Codex row on both surfaces
 		line("m4", "gpt-5.6-sol", 1000, 100, 2000, 400, 0),
 		// a response that consulted the advisor: priced at the advisor's model on both surfaces
 		strings.Replace(strings.Replace(advisorResponse("claude-opus-5-5"), `{"type":"assistant",`,
@@ -467,7 +467,7 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	}
 }
 
-// A sub-agent that ran through the model-gateway's chatgpt route leaves a
+// A sub-agent that ran through the gpt-gateway's chatgpt route leaves a
 // Claude Code transcript whose usage the gateway wrote Anthropic-shaped
 // (input_tokens = total - cached - written): the row prices it at its Codex
 // row's rates, input and a cache write at in, cache read at cached, output at

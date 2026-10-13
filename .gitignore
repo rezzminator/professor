@@ -44,8 +44,6 @@ templates/global/agents/*.toml
 # .codex/skills/; the goals/ tree is the goal plugin's live session state.
 .opencode/skills/
 .opencode/goals/
-# R&D scratch (walker consumer trees and the like): never a tracked artifact.
-.professor/RND/
 # clone-distiller result files (tracer-rr/ holds those from before its rename):
 # machine-local dig evidence (verbatim third-party code, paths into /tmp clones);
 # the RR document carries the commit-pinned links.

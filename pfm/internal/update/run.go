@@ -46,18 +46,22 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 		switch args[0] {
 		case "check":
 			return runUpdateCheckAlias(args[1:], stdout, stderr, runtimes)
-		case "adopt", "pin", "ignore", "drop":
+		case "adopt", "pin", "ignore", "drop", "accept":
 			runtime, err := config.OptionalRuntime(runtimes)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
 				return 5
 			}
-			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime, nil)
+			var scan professor.RetiredNameScanner
+			if args[0] == "accept" {
+				scan = ScanRetiredNames // accept checks its path against the live hits
+			}
+			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime, scan)
 		}
 	}
 	flags := cli.NewFlagSet(
 		updateCommand,
-		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop} [options]",
+		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop|accept} [options]",
 		stderr,
 	)
 	target := flags.String("to", "", "target semantic-version tag")

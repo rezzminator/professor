@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -19,6 +18,22 @@ const (
 	flagClaudeConfigDir = "--claude-config-dir"
 	flagCodexHome       = "--codex-home"
 )
+
+// CapabilityGptAgents is the capability name pfm declares when claude.gptAgents
+// is true: the agents whose frontmatter requires it are linked and emitted.
+// engine-sync gives names no meaning; the name is pfm's and the templates'.
+const CapabilityGptAgents = "gpt-agents"
+
+const flagCapability = "--capability"
+
+// HostCapabilities is the capability set pfm declares for the host's config:
+// the Runner field every agent-rendering call passes as --capability flags.
+func HostCapabilities(gptAgents bool) []string {
+	if gptAgents {
+		return []string{CapabilityGptAgents}
+	}
+	return nil
+}
 
 // The two engines a mirror call names: engine-sync spells each by its registry long name.
 var (
@@ -81,7 +96,8 @@ func (runner Runner) Mirror(ctx context.Context, engine, action, repo string) (M
 	if err != nil {
 		return result, err
 	}
-	args := []string{engine, action, repo, flagHome, home, flagJSON}
+	args := append([]string{engine, action, repo, flagHome, home}, runner.capabilityArgs()...)
+	args = append(args, flagJSON)
 	if err := runner.runJSON(ctx, args, &result, func() bool { return result.OK }); err != nil {
 		return result, err
 	}
@@ -114,7 +130,9 @@ func (runner Runner) Mirror(ctx context.Context, engine, action, repo string) (M
 // CodexHomes is the explicit empty roster (--no-codex-home): pfm always names
 // its roster, never leaving engine-sync to read targets.json for it.
 type GlobalOptions struct {
-	GptAgents        bool
+	// Adopt passes --adopt: an unowned regular file at a declared agent's path
+	// is moved aside into engine-sync's adopted store and replaced.
+	Adopt            bool
 	SourceRepo       string
 	ClaudeConfigDirs []string
 	CodexHomes       []string
@@ -169,9 +187,10 @@ func (runner Runner) GlobalArgs(options GlobalOptions) ([]string, error) {
 	if options.Uninstall {
 		args = append(args, "--uninstall")
 	}
-	if options.GptAgents {
-		args = append(args, "--gpt-agents")
+	if options.Adopt {
+		args = append(args, "--adopt")
 	}
+	args = append(args, runner.capabilityArgs()...)
 	return append(args, flagJSON), nil
 }
 
@@ -217,7 +236,6 @@ func (runner Runner) Global(ctx context.Context, options GlobalOptions) (GlobalR
 // agents registry against the source clone. An empty SourceRepo is the
 // no-clone state.
 type MachineDoctorOptions struct {
-	GptAgents       bool
 	SourceRepo      string
 	ClaudeConfigDir string
 	CodexHomes      []string
@@ -257,9 +275,7 @@ func (runner Runner) MachineDoctor(ctx context.Context, options MachineDoctorOpt
 	if options.ClaudeAbsent {
 		args = append(args, "--claude-absent")
 	}
-	if options.GptAgents {
-		args = append(args, "--gpt-agents")
-	}
+	args = append(args, runner.capabilityArgs()...)
 	args = append(args, flagJSON)
 	var reply machineDoctorReply
 	if err := runner.runJSON(ctx, args, &reply, func() bool { return reply.OK }); err != nil {
@@ -314,9 +330,42 @@ func (runner Runner) runJSON(ctx context.Context, args []string, reply any, ok f
 	return nil
 }
 
-// GlobalAgentArgs makes pfm's machine opt-in authoritative, including before a flag sentinel.
-func GlobalAgentArgs(args []string, enabled bool) []string {
-	return insertFlags(args, "--gpt-agents="+strconv.FormatBool(enabled))
+// capabilityArgs is one --capability flag per name the host declares.
+func (runner Runner) capabilityArgs() []string {
+	return capabilityFlags(runner.Capabilities)
+}
+
+func capabilityFlags(capabilities []string) []string {
+	var flags []string
+	for _, name := range capabilities {
+		flags = append(flags, flagCapability, name)
+	}
+	return flags
+}
+
+// forwardedCapabilityVerbs are the forwarded verbs that render or check agents,
+// per engine: only these accept --capability.
+var forwardedCapabilityVerbs = map[string][]string{
+	EngineCodex:    {"build", "check", "agents"},
+	EngineOpenCode: {"build", "check", "doctor"},
+}
+
+// CapabilityArgs adds the host's --capability flags to a forwarded
+// `engine-sync {engine} {verb} …` argument list (args after the engine) when
+// the verb renders or checks agents, right after the verb, so a trailing
+// value flag such as --home never takes one as its value; any other verb is
+// returned as given.
+func CapabilityArgs(engine string, args, capabilities []string) []string {
+	if len(capabilities) == 0 || len(args) == 0 {
+		return args
+	}
+	for _, verb := range forwardedCapabilityVerbs[engine] {
+		if args[0] == verb {
+			forwarded := append([]string{verb}, capabilityFlags(capabilities)...)
+			return append(forwarded, args[1:]...)
+		}
+	}
+	return args
 }
 
 // SourceArgs supplies a recorded clone before the forwarding flag sentinel.

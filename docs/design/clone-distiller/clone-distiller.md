@@ -28,16 +28,16 @@
 | Budget | 30 tool calls |
 | Spawns | one `tracer`, for the code part of every question (§ Reading) |
 | Writes | its clone under `/tmp/clone-distiller/repos/`, and one result file under `{OUT-DIR}/clone-distiller/`, or `/tmp/clone-distiller/results/` with no `OUT-DIR:` |
-| Codex sandbox | workspace-write (codex-sandbox): the clone and the result file are writes; network inside Codex's sandbox is the engine's |
+| Codex sandbox | workspace-write (`engines.codex.sandbox`): the clone and the result file are writes; network inside Codex's sandbox is the engine's |
 | Start hook | none — `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) lists exact names and omits it; an RR lead passes its directory as `OUT-DIR:` in the brief |
 
 The description is the agent file's `description:`.
 
 ## Who spawns it
 
-Any caller with a question about code outside this repository: a spec writer learning how an upstream implements a feature, a foreman checking a dependency's behaviour, a research lead. The deeper RR leads reach it through the repository lane, which is not in `rr.md`'s body: `variants.json` swaps it into `rr-pro` and `rr-pro-max` by one `replace` entry each, keyed on the DIG step's last sentence, `` `sub-rr` is the only agent type you spawn. `` A plain `rr` run keeps its one digger and reads a repository only as web pages. The lane costs an `opus` digger and a clone per repository, which the cheap map does not buy.
+Any caller with a question about code outside this repository: a spec writer learning how an upstream implements a feature, a foreman checking a dependency's behaviour, a research lead. The deeper RR leads reach it through the repository lane, which is not in `rr.md`'s body: the shared file `shared/repo-lane.md` puts it into the `rr-pro.md` and `rr-pro-max.md` declarations through `extends: [repo-lane]` as their override of `rr.md`'s § Spawning, whose `rr` text is `` `sub-rr` is the only agent type you spawn. `` A plain `rr` run keeps its one digger and reads a repository only as web pages. The lane costs an `opus` digger and a clone per repository, which the cheap map does not buy.
 
-The swapped-in text, identical in both entries:
+The override text, the shared file `shared/repo-lane.md` both declarations extend:
 
 - A sub-area whose answer lives in a public repository's code (how a project implements something, not what a page says about it) goes to `clone-distiller`: one digger per repository, never two on one repository in a round, counted in the round's cap. A sub-area spanning several repositories gets one `clone-distiller` per named repository: a `sub-rr` sent to read several repositories' code guessed raw file URLs that did not exist in a trial run. A later question about a repository a `clone-distiller` already dug goes to a `clone-distiller` on that repository, never to a `sub-rr`, which would re-derive it from web pages.
 - Its brief carries `Repository:`, `Ref:` when the query names one, `History: yes` when a sub-query asks how the code changed over time, the numbered sub-queries, the `Goal:` line and `OUT-DIR: {the RR directory}`.
@@ -139,8 +139,8 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | --- | --- |
 | The agent | `templates/global/agents/clone-distiller.md` |
 | The code reader it spawns | `templates/global/agents/tracer.md`, whose brief contract the code call follows |
-| The lane its briefs come from | `templates/global/agents/variants.json`, the `replace` entry of `rr-pro` and of `rr-pro-max`, identical text |
-| The sentence the lane swaps | `templates/global/agents/rr.md`, step 4's last sentence |
-| The renderer's gate | `TestShippedGlobalAgentVariantsRender`, `plugins/engine-sync/internal/machine/globalvariants_test.go` |
+| The lane its briefs come from | `templates/global/agents/shared/repo-lane.md`, the shared file `rr-pro` and `rr-pro-max` put in § Spawning |
+| The section the lane overrides | `templates/global/agents/rr.md`, § Spawning |
+| The renderer's gate | `scripts/check-agent-roster.test.mjs`, "the shipped variants render with zero errors with and without the gpt-agents capability" |
 | The family doc | `docs/design/RR/rr.md` |
 | The roster line | `docs/BLUEPRINT.md` |

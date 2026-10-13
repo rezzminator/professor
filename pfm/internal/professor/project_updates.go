@@ -66,6 +66,12 @@ type RetiredNameScan struct {
 	Hits       []RetiredNameHit     `json:"hits"`
 	Failures   []RetiredNameFailure `json:"failures"`
 	Incomplete []RetiredNameFailure `json:"incomplete,omitempty"`
+	// Accepted are the baseline's recorded rules and the hits each covers;
+	// those hits are absent from Hits.
+	Accepted []RetiredAccepted `json:"accepted,omitempty"`
+	// AcceptedHits counts the hits the rules took out of Hits, each once
+	// however many rules cover it.
+	AcceptedHits int `json:"acceptedHits,omitempty"`
 }
 
 // RetiredNameScanner scans root's files for retired names, skipping every
@@ -84,19 +90,14 @@ func captureRetiredNames(report *projectReport, scan RetiredNameScanner) (anyFai
 	if scan == nil {
 		return false
 	}
-	pinned := make(map[string]bool, len(report.Items))
-	for index := range report.Items {
-		if local := report.Items[index].Local; local != "" {
-			pinned[local] = true
-		}
-	}
-	result := scan(report.Root, pinned)
+	result := scan(report.Root, retiredScanPinned(report))
 	if result.Hits == nil {
 		result.Hits = []RetiredNameHit{}
 	}
 	if result.Failures == nil {
 		result.Failures = []RetiredNameFailure{}
 	}
+	partitionRetired(&result, report.Baseline.RetiredAccepted)
 	report.Retired = &result
 	return len(result.Failures) != 0
 }
@@ -159,7 +160,14 @@ func captureProjectDiffs(report *projectReport) (anyFailed bool) {
 			item.DiffSkipped = "pin was taken from uncommitted or untracked template bytes; committed history cannot show its exact change"
 			continue
 		}
+		commits, err := commitsSincePin(report.Store, *item)
+		if err != nil {
+			item.DiffError = err.Error()
+			anyFailed = true
+			continue
+		}
 		item.Diff = diff
+		item.Commits = commits
 	}
 	return anyFailed
 }
@@ -234,6 +242,43 @@ func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
 		return "", adoptGitFailure("git diff", err, string(result.Stderr))
 	}
 	return string(result.Stdout), nil
+}
+
+// updatedCommitCap is the most upstream commits one UPDATED row lists.
+const updatedCommitCap = 40
+
+// commitsSincePin lists, oldest first, the blueprint commits since the pin
+// that changed this template: a pin many releases back is ported commit by
+// commit, never as one diff applied whole. At most updatedCommitCap are
+// returned plus a final line counting the newer ones when more exist.
+func commitsSincePin(store Store, item projectReportItem) ([]string, error) {
+	argv := []string{
+		deps.Executable("git"), "log", "--no-color", "--no-show-signature", "--reverse", "--format=%h %s",
+		item.Pin.PinnedSHA + "..HEAD", "--", "templates/" + item.Template,
+	}
+	result, err := store.runner.Run(
+		context.Background(), argv, deps.RunOptions{Dir: store.Root, Env: storeGitEnv(store.Root)},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = gitExitError{code: result.ExitCode}
+	}
+	if err != nil {
+		return nil, adoptGitFailure("git log", err, string(result.Stderr))
+	}
+	var commits []string
+	for _, line := range strings.Split(strings.TrimSpace(string(result.Stdout)), "\n") {
+		if line != "" {
+			commits = append(commits, line)
+		}
+	}
+	if len(commits) > updatedCommitCap {
+		more := len(commits) - updatedCommitCap
+		commits = append(commits[:updatedCommitCap], fmt.Sprintf(
+			"… and %d newer commit(s) not listed: git log --reverse %s..HEAD -- templates/%s",
+			more, item.Pin.PinnedSHA, item.Template,
+		))
+	}
+	return commits, nil
 }
 
 // renderProjectCheck is the bare `pfm update` post-update report: 0 clean, 1

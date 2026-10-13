@@ -44,7 +44,7 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
@@ -62,6 +62,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip Claude Code themes, source-fetched and bundled")
+	adoptAgents := flags.Bool("adopt-agents", false, "adopt an unowned file at a declared agent's path")
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -131,6 +132,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	}
 	withFlags := func(options installer.Options) installer.Options {
 		options.VSCode = *vscode
+		options.AdoptAgents = *adoptAgents
 		options.InstallThemes = !*skipThemes
 		options.ThemeManifestURL = installer.ThemeManifestURL(version)
 		options.ThemeHTTPClient = installThemeHTTPClientOverride
@@ -215,6 +217,9 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 		if *skipThemes {
 			confirmation += " --skip-themes"
+		}
+		if *adoptAgents {
+			confirmation += " --adopt-agents"
 		}
 		if *configDir != "" {
 			confirmation += " --config-dir " + action.Quote(*configDir)

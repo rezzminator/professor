@@ -298,9 +298,9 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 // A value the example sets away from its default is kept.
 func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
 	claude := installSeedClaude(t, []byte(`{"version":2,"claude":{"helperModel":"claude-custom-1","costLedger":false,`+
-		`"plugins":["agent-effort"],"theme":null}}`))
+		`"plugins":["effort-live-control"],"theme":null}}`))
 	for key, want := range map[string]string{
-		"helperModel": `"claude-custom-1"`, "costLedger": "false", "plugins": `["agent-effort"]`,
+		"helperModel": `"claude-custom-1"`, "costLedger": "false", "plugins": `["effort-live-control"]`,
 	} {
 		if got := strings.Join(strings.Fields(string(claude[key])), ""); got != want {
 			t.Errorf("seed claude.%s = %q, want %q", key, got, want)

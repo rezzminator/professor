@@ -231,11 +231,13 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireGlobalSkills())
 	installer.deferFailure(installer.retireStaleLinkStages())
 	installer.deferFailure(installer.retireLegacySwapCommand())
+	// targets.json first: engine-sync global unions its capabilities with
+	// the flags, so a stale list would keep an opted-out agent linked.
+	installer.deferFailure(installer.wireEngineSyncTargets())
 	installer.deferFailure(installer.wireEngineSyncGlobal(assets))
 	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(installer.wireCodexDefaults())
 	}
-	installer.deferFailure(installer.wireEngineSyncTargets())
 	// The periodic name-sync has one job and two schedulers. Linux gets the
 	// systemd units; macOS gets a launchd agent that carries both triggers.
 	// Staging the other platform's files would leave an operator with a
@@ -1888,6 +1890,9 @@ func (installer *engine) retireLegacyCommand(path string) error {
 // cleaned up on its own). frr -> rr (3976b53, "/ptm→/pfm, frr→rr, /rr→/deep-rr")
 // is the only rename `git log -- templates/global/agents` holds; a future
 // rename adds its OLD name here rather than inventing a second mechanism.
+// engine-sync's machine.retiredAgents is the Codex half of the same list: it
+// retires generated Codex roles and never visits {config}/agents/OLD.md, so
+// this list stays.
 var retiredGlobalAgents = []string{"frr", "rr-super"}
 
 // retireRenamedGlobalAgents deletes a stale pre-rename identity from the

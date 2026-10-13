@@ -5,7 +5,9 @@ tools: Bash, Read, Grep, Glob, Agent, mcp__sub-agent-compact__compact
 skills: [tracer:use]
 model: opus
 effort: medium
-codex-sandbox: workspace-write
+engines:
+  codex:
+    sandbox: workspace-write
 ---
 
 You investigate one external repository's code to answer a caller's numbered questions: distill how it does something, learn its patterns, identify where something lives or when it changed. Your brief carries `Repository:` (the clone URL), `Ref:` when the caller names a branch or tag, `History: yes` when a question asks how the code changed over time, the numbered questions, a `Goal:` line (what the caller wants learned, and why), `OUT-DIR:` when the caller wants the result file in its own directory, and any context lines the caller adds. Budget: 30 tool calls.

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -170,10 +171,12 @@ func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
 		filepath.Join(home, ".cc", "2", "projects"),
 		filepath.Join(home, ".cc", "3", "projects"),
 	})
-	for _, account := range runtime.Config.Accounts {
+	for index, account := range runtime.Config.Accounts {
 		if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
+		// The primary keeps the 1h cache window, the recorded account the 5m one.
+		runtime.Config.Accounts[index].Claude = &config.ClaudePrefs{Cache1H: account.ID == 2}
 	}
 	if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, 2); err != nil {
 		t.Fatal(err)
@@ -192,6 +195,9 @@ func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
 	wantDir := filepath.Join(home, ".cc", "3")
 	if len(tmux.created) != 1 || !strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+action.Quote(wantDir)) {
 		t.Fatalf("created = %+v; want account 3 config %q", tmux.created, wantDir)
+	}
+	if !strings.Contains(tmux.created[0].Run, "CACHE_LIVE_CONTROL_MAIN_TTL="+action.Quote("5m")) {
+		t.Fatalf("created run = %q; want account 3's cache window 5m", tmux.created[0].Run)
 	}
 	launches, err := fleetdb.OpenLaunches(ctx, runtime.Paths)
 	if err != nil {
@@ -425,7 +431,7 @@ func TestOpenIDClearsUnseenSchedule(t *testing.T) {
 	seedUnseenSchedule(t, runtime, id)
 	stubOpenExecutor(t, &fakeOpenTmux{alive: map[string]bool{}})
 	var stdout, stderr bytes.Buffer
-	if code := OpenID(context.Background(), id, &stdout, &stderr, &runtime); code != 0 {
+	if code := OpenID(context.Background(), id, 0, &stdout, &stderr, &runtime); code != 0 {
 		t.Fatalf("OpenID() = %d, stderr %q", code, stderr.String())
 	}
 	requireUnseen(t, runtime, id, false)
@@ -733,5 +739,184 @@ func TestOpenDetachedIDSeesAnArchivedChatGoneThenRestored(t *testing.T) {
 	if err != nil || result.State != "opened" || len(tmux.created) != 1 {
 		t.Fatalf("OpenDetachedID(restored chat) = %#v, %v created = %d, want it resumed once",
 			result, err, len(tmux.created))
+	}
+}
+
+// openAccountRuntime is a jailed three-account Claude fleet whose primary is
+// account 2, holding the chat id; launched (when positive) records the account
+// the chat last ran on.
+func openAccountRuntime(t *testing.T, id string, launched int) config.Runtime {
+	t.Helper()
+	root := testjail.Fleet(t)
+	seedClaudeChat(t, root, id)
+	runtime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	runtime.Config = config.Defaults(home, []string{
+		filepath.Join(home, ".cc", "1", "projects"),
+		filepath.Join(home, ".cc", "2", "projects"),
+		filepath.Join(home, ".cc", "3", "projects"),
+	})
+	for _, account := range runtime.Config.Accounts {
+		if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, 2); err != nil {
+		t.Fatal(err)
+	}
+	if launched > 0 {
+		if err := fleetdb.RecordLaunch(context.Background(), runtime.Paths, fleetdb.Launch{
+			SessionID: id, Engine: pfmengine.Claude, Account: launched,
+		}, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return runtime
+}
+
+// TestOpenIDResumesOnTheAccountItRanOnUnlessToldOtherwise: `chat open` used to
+// resume a chat with no launch record on the primary account without saying
+// so, and took no account flag. The account the chat last ran on wins over the
+// primary, an explicit --account wins over both, no record keeps the primary
+// and names it, and an account that is not configured is refused before
+// anything spawns.
+func TestOpenIDResumesOnTheAccountItRanOnUnlessToldOtherwise(t *testing.T) {
+	cases := []struct {
+		name       string
+		launched   int
+		account    int
+		wantDir    int // 0: nothing may spawn
+		wantCode   int
+		wantStderr string
+		cache1H    map[int]bool // per-account Claude Cache1H; the resume carries the chosen account's
+		wantTTL    string
+	}{
+		{name: "recorded account wins over the primary", launched: 3, wantDir: 3},
+		{name: "explicit account wins over the record", launched: 3, account: 1, wantDir: 1},
+		{name: "explicit account with no record", account: 3, wantDir: 3},
+		{
+			name: "an explicit account resumes with its own cache window, not the primary's", account: 3, wantDir: 3,
+			cache1H: map[int]bool{2: true, 3: false}, wantTTL: "5m",
+		},
+		{
+			name: "a recorded account resumes with its own cache window, not the primary's", launched: 1, wantDir: 1,
+			cache1H: map[int]bool{1: true, 2: false}, wantTTL: "1h",
+		},
+		{
+			name: "no record keeps the primary and names it", wantDir: 2,
+			wantStderr: "no recorded account for %s; resuming on account 2",
+		},
+		{
+			name: "a recorded account that is not configured names the fallback", launched: 7, wantDir: 2,
+			wantStderr: "recorded account 7 of %s is not configured; resuming on account 2",
+		},
+		{
+			name: "an unconfigured account is refused", launched: 3, account: 9, wantCode: 2,
+			wantStderr: "no Claude account 9 is configured (configured: 1, 2, 3)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "e3333333-3333-4333-8333-333333333333"
+			runtime := openAccountRuntime(t, id, tc.launched)
+			for index, account := range runtime.Config.Accounts {
+				if cache, ok := tc.cache1H[account.ID]; ok {
+					runtime.Config.Accounts[index].Claude = &config.ClaudePrefs{Cache1H: cache}
+				}
+			}
+			tmux := &fakeOpenTmux{alive: map[string]bool{}}
+			stubOpenExecutor(t, tmux)
+			var stdout, stderr bytes.Buffer
+			code := OpenID(context.Background(), id, tc.account, &stdout, &stderr, &runtime)
+			if code != tc.wantCode {
+				t.Fatalf("OpenID() = %d, want %d; stderr %q", code, tc.wantCode, stderr.String())
+			}
+			if want := strings.ReplaceAll(tc.wantStderr, "%s", id); !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), want)
+			}
+			if tc.wantDir == 0 {
+				if len(tmux.created) != 0 {
+					t.Fatalf("a refused open spawned %+v", tmux.created)
+				}
+				return
+			}
+			wantDir := filepath.Join(filepath.Join(runtime.Paths.Home, ".cc"), strconv.Itoa(tc.wantDir))
+			if len(tmux.created) != 1 ||
+				!strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+action.Quote(wantDir)) {
+				t.Fatalf("created = %+v; want account %d config %q", tmux.created, tc.wantDir, wantDir)
+			}
+			if tc.wantTTL != "" &&
+				!strings.Contains(tmux.created[0].Run, "CACHE_LIVE_CONTROL_MAIN_TTL="+action.Quote(tc.wantTTL)) {
+				t.Fatalf(
+					"created run = %q; want account %d's cache window %s",
+					tmux.created[0].Run,
+					tc.wantDir,
+					tc.wantTTL,
+				)
+			}
+		})
+	}
+}
+
+// TestResolveOpenAccountRefusesAnAccountThatIsNotAResume: --account names the
+// account a dead chat resumes on; a live seat is attached where it runs and an
+// OpenCode chat has no per-open account, so asking is refused, not ignored.
+func TestResolveOpenAccountRefusesAnAccountThatIsNotAResume(t *testing.T) {
+	machine := config.Defaults("/home", []string{"/home/.cc/1/projects", "/home/.cc/2/projects"})
+	for _, kind := range []compose.Kind{compose.LiveClaude, compose.ResumeOpenCode} {
+		t.Run(kind.String(), func(t *testing.T) {
+			_, _, _, err := resolveOpenAccount(compose.Row{ID: "x", Kind: kind}, 2, machine, 1)
+			if err == nil || !strings.Contains(err.Error(), "--account") {
+				t.Fatalf("resolveOpenAccount(%s, --account 2) error = %v, want a refusal naming --account", kind, err)
+			}
+		})
+	}
+}
+
+// TestParseOpenArgsTakesOneTargetAndAnAccount: `chat open` takes --account N
+// like `chat reload` does, before or after the target; a value that is no
+// account number, or a missing or extra target, stops at the usage line.
+func TestParseOpenArgsTakesOneTargetAndAnAccount(t *testing.T) {
+	good := []struct {
+		name        string
+		args        []string
+		wantAccount int
+	}{
+		{"target only", []string{"seat"}, 0},
+		{"flag after the target", []string{"seat", "--account", "3"}, 3},
+		{"flag before the target", []string{"--account=2", "seat"}, 2},
+	}
+	for _, tc := range good {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			target, account, _, ok := ParseOpenArgs(tc.args, &stderr)
+			if !ok || target != "seat" || account != tc.wantAccount {
+				t.Fatalf("ParseOpenArgs(%q) = %q, %d, ok=%v; stderr %q", tc.args, target, account, ok, stderr.String())
+			}
+		})
+	}
+	refused := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"zero", []string{"seat", "--account", "0"}, "--account takes an account NUMBER, not 0"},
+		{"negative", []string{"--account=-2", "seat"}, "--account takes an account NUMBER, not -2"},
+		{"no target", []string{"--account", "2"}, OpenUsage},
+		{"two targets", []string{"seat", "other"}, OpenUsage},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			if _, _, code, ok := ParseOpenArgs(tc.args, &stderr); ok || code != 2 {
+				t.Fatalf("ParseOpenArgs(%q) ok=%v code=%d, want a refusal with code 2", tc.args, ok, code)
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tc.want)
+			}
+		})
 	}
 }

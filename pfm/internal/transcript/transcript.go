@@ -257,13 +257,19 @@ const claudeInterruptMarker = "[Request interrupted by user"
 // isMeta nor isCompactSummary, so the text is the only mark it carries.
 const handoffInstallMarker = "[sub-agent-compact: handoff]"
 
-// IsHandoffInstall reports whether the entry is that install: the chat's own
-// stored past handed back to it, not a message anyone sent to the chat. It is
-// kept in the record (a reader sees the reset happen); headless.Await, which
-// counts senders, skips it. The prompt counters of the index, meta and
-// LastExchange still read it as a prompt.
+// IsHandoffInstallText reports whether a user record's text is that install:
+// the chat's own stored past handed back to it, not a message anyone sent to
+// the chat. It is the one rule every prompt counter shares.
+func IsHandoffInstallText(text string) bool {
+	return strings.HasPrefix(text, handoffInstallMarker)
+}
+
+// IsHandoffInstall reports whether the entry is that install. It is kept in
+// the record (a reader sees the reset happen) but is nobody's turn:
+// headless.Await, which counts senders, the index, ReadMeta, LastExchange and
+// `chat save` all skip it as a prompt.
 func (entry Entry) IsHandoffInstall() bool {
-	return entry.Role == RoleUser && strings.HasPrefix(entry.Text, handoffInstallMarker)
+	return entry.Role == RoleUser && IsHandoffInstallText(entry.Text)
 }
 
 // interruptedTurn is the entry for a turn its human aborted (Codex's
@@ -476,11 +482,11 @@ func Last(entries []Entry, role string) (Entry, bool) {
 }
 
 // LastExchange isolates the newest human turn and every visible record that
-// followed it. The response may be empty or end in a tool call: callers use
+// followed it; a handoff install is no human turn, and stays in the response. The response may be empty or end in a tool call: callers use
 // that shape to label work as partial instead of pretending it was answered.
 func LastExchange(entries []Entry) (prompt, response []Entry, ok bool) {
 	for index := len(entries) - 1; index >= 0; index-- {
-		if entries[index].Role != RoleUser {
+		if entries[index].Role != RoleUser || entries[index].IsHandoffInstall() {
 			continue
 		}
 		prompt = append([]Entry(nil), entries[index])

@@ -443,6 +443,22 @@ func TestAwaitReadsAHandoffInstallAsNobodysTurn(t *testing.T) {
 			tools:     2,
 		},
 		{
+			// The plugin installs ONE user record; Claude Code names the kept
+			// tail by preservedSegment and never writes it again.
+			name: "install after a boundary that keeps a tail is the same turn",
+			lines: []string{
+				user("my question"),
+				tool("handoff"),
+				`{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preservedSegment":{"headUuid":"h","anchorUuid":"a","tailUuid":"t"}}}`,
+				installed,
+				tool("Read"),
+				assistant("the answer"),
+			},
+			delivered: true,
+			answer:    "the answer",
+			tools:     2,
+		},
+		{
 			name: "a real second sender after the install is still flagged",
 			lines: []string{
 				user("my question"),

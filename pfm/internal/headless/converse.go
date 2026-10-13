@@ -206,12 +206,10 @@ func Await(
 					fmt.Fprintln(options.Progress, line)
 				}
 			}
-			if entry.IsHandoffInstall() && !options.StopOnDelivery {
+			if entry.IsHandoffInstall() {
 				// The plugin's reinstall of the chat's own handoff after a
 				// compaction: nobody spoke, so it is neither a delivery nor a
-				// second sender, and the turn it interrupts goes on. The launch
-				// proof waits for a new chat's first prompt, which no handoff
-				// can precede: there the marker is the person's own text.
+				// second sender, and the turn it interrupts goes on.
 				continue
 			}
 			switch entry.Role {

@@ -425,9 +425,6 @@ func TestAwaitReadsAHandoffInstallAsNobodysTurn(t *testing.T) {
 		superseded bool
 		answer     string
 		tools      int
-		// stopOnDelivery is the launch proof of a new chat, whose first
-		// prompt no handoff can precede.
-		stopOnDelivery bool
 	}{
 		{
 			name: "install mid-turn is the same turn",
@@ -471,20 +468,12 @@ func TestAwaitReadsAHandoffInstallAsNobodysTurn(t *testing.T) {
 			lines:  []string{installed, assistant("old answer")},
 			answer: "old answer",
 		},
-		{
-			name:           "a new chat's first prompt opening with the marker is its delivery",
-			lines:          []string{user("[sub-agent-compact: handoff] pasted from another chat")},
-			delivered:      true,
-			stopOnDelivery: true,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			talk := newConversation(t)
 			talk.say(tc.lines...)
-			options := fastOptions()
-			options.StopOnDelivery = tc.stopOnDelivery
-			turn, err := Await(context.Background(), talk.resolve, options)
+			turn, err := Await(context.Background(), talk.resolve, fastOptions())
 			if err != nil {
 				t.Fatalf("Await() error = %v", err)
 			}

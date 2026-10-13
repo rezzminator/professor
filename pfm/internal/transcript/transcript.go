@@ -259,9 +259,8 @@ const handoffInstallMarker = "[sub-agent-compact: handoff]"
 
 // IsHandoffInstall reports whether the entry is that install: the chat's own
 // stored past handed back to it, not a message anyone sent to the chat. It is
-// kept in the record (a reader sees the reset happen); headless.Await, which
-// counts senders, skips it. The prompt counters of the index, meta and
-// LastExchange still read it as a prompt.
+// kept in the record (a reader sees the reset happen), and a consumer that
+// counts senders skips it.
 func (entry Entry) IsHandoffInstall() bool {
 	return entry.Role == RoleUser && strings.HasPrefix(entry.Text, handoffInstallMarker)
 }

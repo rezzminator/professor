@@ -6,7 +6,7 @@ effort: high
 engines:
   codex:
     model: opus
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

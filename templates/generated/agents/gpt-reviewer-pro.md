@@ -3,7 +3,7 @@
 name: gpt-reviewer-pro
 role: reviewer-pro
 description: reviewer-pro on GPT sol high
-tools: Read, Write, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
+tools: Read, Write, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact
 skills: ['tracer:use']
 model: gpt-6.1-sol[1m]
 effort: high

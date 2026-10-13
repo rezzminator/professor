@@ -10,7 +10,7 @@ engines:
   codex:
     model: sonnet
     effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
+tools: Read, Write, Edit, Bash, Glob, Grep, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

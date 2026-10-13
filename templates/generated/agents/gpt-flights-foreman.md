@@ -8,7 +8,7 @@ effort: high
 engines:
   codex: false
   opencode: false
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__compact
 autoCompact:
   forceAt: 230k
   nudgeFrom: 190k

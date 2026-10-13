@@ -10,7 +10,7 @@ effortControl:
   floor: medium
   ceiling: xhigh
   tripwires: redispatch
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__handoff, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down
 autoCompact:
   forceAt: 350k
   nudgeFrom: 150k

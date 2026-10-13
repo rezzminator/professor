@@ -15,8 +15,9 @@ import (
 )
 
 // agentNesting is what a row says about the agents below its task, at every
-// depth: how many there are, how many are working right now (their own turn
-// is open), and how many could not be read. err is a failure to look (the
+// depth: how many there are, how many are working right now (Claude Code
+// still lists them as running and their own turn is open), and how many could
+// not be read. err is a failure to look (the
 // subagents directory or a meta file could not be read) and renders "?/?",
 // never as "none".
 type agentNesting struct {
@@ -31,8 +32,8 @@ type agentNesting struct {
 // agent spawned by another agent (a main-loop spawn carries none). open caches
 // each agent's own turn state for the render, reads each agent's one pass over
 // its transcript (activity, billing and turn state alike).
-// over and now (judgeLiveness) decide which agents with an open turn really
-// work: a transcript cannot say an agent was killed.
+// live and now (judgeLiveness) decide which agents with an open turn really
+// work: a transcript cannot say an agent finished mid-stream or was killed.
 type agentTree struct {
 	dir      string
 	children map[string][]string
@@ -44,7 +45,7 @@ type agentTree struct {
 	session  string
 	prices   *pricing.Prices
 	ids      []string
-	over     map[string]bool
+	live     map[string]bool
 	now      time.Time
 }
 
@@ -105,10 +106,10 @@ func scanAgentTree(sessionTranscript string, prices *pricing.Prices) *agentTree 
 
 // judgeLiveness gives the tree what a transcript cannot say about an agent
 // whose turn is open: the render's clock, and the tasks Claude Code itself
-// lists as over (completed, failed, killed, error), whose open turn is a
-// leftover, not work. Without it every open turn counts as work.
-func (tree *agentTree) judgeLiveness(now time.Time, over map[string]bool) {
-	tree.now, tree.over = now, over
+// still runs (liveTasks). An agent outside that set is not working, whatever
+// its transcript's last line says. Without it every open turn counts as work.
+func (tree *agentTree) judgeLiveness(now time.Time, live map[string]bool) {
+	tree.now, tree.live = now, live
 }
 
 // terminalStatus is a task status Claude Code gives a task that is over.
@@ -120,22 +121,28 @@ func terminalStatus(status string) bool {
 	return false
 }
 
-// finishedTasks are the ids of every task in the payload Claude Code lists as
-// over, rows it shows nothing for included: an agent it calls over is not
-// working, whatever its transcript's last line says.
-func finishedTasks(tasks []subagentTask) map[string]bool {
-	over := map[string]bool{}
+// liveTasks are the ids of every task in the payload Claude Code lists with a
+// status that is not over, rows it shows nothing for included. Claude Code
+// registers every agent of the session in one task list, whatever its depth,
+// keeps a running agent there until it ends, and drops a finished one within
+// a minute; the payload is that list (Claude Code 2.1.296). So an agent it
+// does not list is not running: a finished agent's last line is often its
+// final text block as the stream wrote it, with no stop_reason, which reads
+// as an open turn.
+func liveTasks(tasks []subagentTask) map[string]bool {
+	live := map[string]bool{}
 	for index := range tasks {
-		if tasks[index].ID != "" && terminalStatus(tasks[index].Status) {
-			over[tasks[index].ID] = true
+		if tasks[index].ID != "" && !terminalStatus(tasks[index].Status) {
+			live[tasks[index].ID] = true
 		}
 	}
-	return over
+	return live
 }
 
 // nesting counts every agent below one task, at any depth, and how many of
-// them are working: their own turn is open. An orchestrator that ended its
-// turn to wait on background workers is not working; its workers are.
+// them are working: Claude Code runs them and their own turn is open. An
+// orchestrator that ended its turn to wait on background workers is not
+// working; its workers are.
 func (tree *agentTree) nesting(id string) agentNesting {
 	if tree.err != nil {
 		return agentNesting{err: tree.err}
@@ -196,6 +203,11 @@ func (tree *agentTree) turn(id string) turnState {
 		return state
 	}
 	state := turnClosed
+	if tree.live != nil && !tree.live[id] {
+		// Claude Code no longer runs it: no transcript read can make it work.
+		tree.open[id] = state
+		return state
+	}
 	// Asked again while its own answer is being worked out (a parentAgentId
 	// cycle the liveness walk goes around), it reads closed: it is not yet
 	// known to work, and the walk must end.
@@ -215,15 +227,15 @@ func (tree *agentTree) turn(id string) turnState {
 	return state
 }
 
-// working says whether an agent whose transcript was read is working now. An
-// open turn counts while it is recent, never for a turn the task list calls
-// over. A turn that called a sub-agent counts however long it has been quiet
-// while any agent it spawned works: it waits on that child, and the child's
-// own turn is what ends or outlives the wait. That holds after the call's own
-// line too: of sub-agents called in parallel, the first to return writes the
-// turn's last entry while the others still work.
+// working says whether an agent Claude Code runs, whose transcript was read,
+// is working now. An open turn counts while it is recent. A turn that called a
+// sub-agent counts however long it has been quiet while any agent it spawned
+// works: it waits on that child, and the child's own turn is what ends or
+// outlives the wait. That holds after the call's own line too: of sub-agents
+// called in parallel, the first to return writes the turn's last entry while
+// the others still work.
 func (tree *agentTree) working(id string, activity *agentActivity) bool {
-	if !activity.turn.open || tree.over[id] {
+	if !activity.turn.open {
 		return false
 	}
 	if tree.now.IsZero() || tree.now.Sub(activity.turn.last) < agentDeadAfter {

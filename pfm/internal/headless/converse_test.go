@@ -443,6 +443,22 @@ func TestAwaitReadsAHandoffInstallAsNobodysTurn(t *testing.T) {
 			tools:     2,
 		},
 		{
+			// The plugin installs ONE user record; Claude Code names the kept
+			// tail by preservedSegment and never writes it again.
+			name: "install after a boundary that keeps a tail is the same turn",
+			lines: []string{
+				user("my question"),
+				tool("handoff"),
+				`{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preservedSegment":{"headUuid":"h","anchorUuid":"a","tailUuid":"t"}}}`,
+				installed,
+				tool("Read"),
+				assistant("the answer"),
+			},
+			delivered: true,
+			answer:    "the answer",
+			tools:     2,
+		},
+		{
 			name: "a real second sender after the install is still flagged",
 			lines: []string{
 				user("my question"),
@@ -495,31 +511,6 @@ func TestAwaitReadsAHandoffInstallAsNobodysTurn(t *testing.T) {
 					tc.delivered, tc.superseded, tc.answer, tc.tools)
 			}
 		})
-	}
-}
-
-// TestAwaitCountsATailCarryingInstallOnce: the plugin's install of a handoff
-// with a kept tail is ONE user record (installHandoff returns brief?, framed,
-// ...tail; the framed message is a single user message) and Claude Code names
-// the kept messages by compactMetadata.preservedSegment, never rewriting them.
-// Whatever the tail is, the turn is one question, one answer, one sender.
-func TestAwaitCountsATailCarryingInstallOnce(t *testing.T) {
-	talk := newConversation(t)
-	talk.say(
-		user("my question"),
-		tool("handoff"),
-		`{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preservedSegment":{"headUuid":"h","anchorUuid":"a","tailUuid":"t"}}}`,
-		user("[sub-agent-compact: handoff] Your context was reset. Below is the handoff you wrote."),
-		tool("Read"),
-		assistant("the answer"),
-	)
-	turn, err := Await(context.Background(), talk.resolve, fastOptions())
-	if err != nil {
-		t.Fatalf("Await() error = %v", err)
-	}
-	if !turn.Delivered || turn.Superseded || turn.Answer != "the answer" || turn.Tools != 2 {
-		t.Fatalf("Delivered=%v Superseded=%v Answer=%q Tools=%d, want true false %q 2",
-			turn.Delivered, turn.Superseded, turn.Answer, turn.Tools, "the answer")
 	}
 }
 

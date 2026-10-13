@@ -632,11 +632,12 @@ func writeJailedCodexAuth(t *testing.T, root string) {
 	}
 }
 
-// Keep the fixture Claude pane alive until cleanup so chat open can attach.
+// Keep a fixture Claude pane (a screen under Claude's name) alive until cleanup.
 func holdClaudeOpen(t *testing.T, root, socket string) func(format string) string {
 	t.Helper()
 	managed := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", "claude")
-	if err := testjail.WriteExecutable(managed, []byte("#!/bin/sh\nexec sleep 120\n"), 0o700); err != nil {
+	fixture := []byte("#!/bin/bash\nprintf 'fixture claude\\n'\nexec -a claude sleep 120\n")
+	if err := testjail.WriteExecutable(managed, fixture, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	socketPath := filepath.Join(root, "tmux", socket)

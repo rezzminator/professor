@@ -344,6 +344,12 @@ func waitForComposer(
 				trace.step("untrusted folder: nothing pressed | %s", screen(capture))
 				return false
 			}
+			if pfmengine.ClaudeTrustDialog(capture) {
+				// Its default row is "No, exit": Enter or Escape ends the chat,
+				// and the key that clears it trusts a folder no human chose.
+				trace.step("held at the folder-trust dialog: nothing pressed | %s", screen(capture))
+				return false
+			}
 			trimmed := strings.TrimSpace(capture)
 			if trimmed != "" && trimmed == previous && dismissals < startupEscapes {
 				key := startupOverlayKey(capture)

@@ -132,8 +132,14 @@ type Options struct {
 	Delay       time.Duration
 	Poll        time.Duration
 	ExitTries   int
-	IdleTries   int
-	ThenTries   int
+	// ExitGraceTries is how many more polls an /exit the chat already
+	// accepted — the composer drawn without the typed /exit, no dialog asking —
+	// may take to end before those polls count against ExitTries: a Claude
+	// flushing its transcript and running its SessionEnd hooks is ending, and
+	// giving up on it strands a pane that dies moments later unrespawned.
+	ExitGraceTries int
+	IdleTries      int
+	ThenTries      int
 	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
 	Clock clock.Clock
 	// Paste delivers a Codex --then as one bracketed paste (then_paste.go).
@@ -162,6 +168,9 @@ func (o *Options) defaults() {
 	}
 	if o.ExitTries == 0 {
 		o.ExitTries = 20
+	}
+	if o.ExitGraceTries == 0 {
+		o.ExitGraceTries = 60
 	}
 	if o.IdleTries == 0 {
 		o.IdleTries = 120
@@ -333,7 +342,8 @@ func Run(
 	dead := false
 	empties := 0
 	dialogSeen := false
-	for i := 0; i < options.ExitTries; i++ {
+	tries, grace := 0, 0
+	for tries < options.ExitTries {
 		panes, listErr := tmux.ListPanes(ctx, request.SocketPath)
 		switch {
 		case listErr != nil:
@@ -351,9 +361,10 @@ func Run(
 			break
 		}
 		capture, captureErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
+		inFlight := false
 		switch {
 		case captureErr != nil:
-			fmt.Fprintf(stderr, "pfm chat reload: confirm /exit submission (try %d): %v\n", i+1, captureErr)
+			fmt.Fprintf(stderr, "pfm chat reload: confirm /exit submission (try %d): %v\n", tries+1, captureErr)
 		case inject.ExitDialogOpen(capture):
 			// Claude Code answers /exit with a confirmation whenever the chat
 			// has background work — a scheduled task, a background shell, a
@@ -375,13 +386,23 @@ func Run(
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("retry /exit submission: %w", err)
 			}
+		case inject.LastComposerLine(capture) != "":
+			// The composer is drawn and no longer holds the typed /exit: the
+			// /exit was taken and the chat is ending, not refusing. A pane
+			// with no composer at all proves nothing and spends a try.
+			inFlight = true
+		}
+		if inFlight && grace < options.ExitGraceTries {
+			grace++
+		} else {
+			tries++
 		}
 		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
 			return Result{}, err
 		}
 	}
 	if !dead {
-		return Result{}, exitIncomplete(ctx, request, options, tmux)
+		return Result{}, exitIncomplete(ctx, request, tmux, tries+grace)
 	}
 	trail.Reach("dead", "pane exited")
 	if request.Engine == pfmengine.Claude && request.SessionID != "" {
@@ -509,65 +530,6 @@ func announcePane(ctx context.Context, request Request, tmux Tmux, stderr io.Wri
 	if err := tmux.Display(ctx, request.SocketPath, request.Pane, message); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: display %q: %v\n", message, err)
 	}
-}
-
-// exitIncomplete names the state a refused /exit leaves behind, because
-// "chat left running" on its own hid the one that mattered: an exit dialog
-// nobody confirmed, or a typed /exit nobody submitted, sits in front of the
-// composer and the harness holds every queued prompt — cron heartbeats,
-// injected steers — behind it until a human clears it. Whatever this worker
-// put on the screen, it takes back off, and the error says whether that was
-// seen to succeed.
-func exitIncomplete(ctx context.Context, request Request, options Options, tmux Tmux) error {
-	cause := fmt.Errorf("/exit did not complete after %d tries; chat left running", options.ExitTries)
-	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
-	if err != nil {
-		return errors.Join(
-			cause,
-			fmt.Errorf(
-				"could not read what the pane shows now — an exit dialog or the typed /exit may still be there, clear it by hand: %w",
-				err,
-			),
-		)
-	}
-	switch {
-	case inject.ExitDialogOpen(capture):
-		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Escape"); err != nil {
-			return errors.Join(
-				cause,
-				fmt.Errorf(
-					"the exit dialog would not confirm and could NOT be dismissed — press Esc in the pane by hand: %w",
-					err,
-				),
-			)
-		}
-		if capture, err = tmux.Capture(ctx, request.SocketPath, request.Pane); err != nil {
-			return errors.Join(
-				cause,
-				fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err),
-			)
-		} else if inject.ExitDialogOpen(capture) {
-			return errors.Join(
-				cause,
-				errors.New(
-					"the exit dialog would not confirm and did not close on Esc — press Esc in the pane by hand",
-				),
-			)
-		}
-		return errors.Join(cause, errors.New("the exit dialog would not confirm; dismissed it (Esc)"))
-	case composerShowsExit(capture):
-		if err := clearTypedExit(ctx, request, tmux); err != nil {
-			return errors.Join(cause, err)
-		}
-		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))
-	}
-	return errors.Join(
-		cause,
-		fmt.Errorf(
-			"the pane shows neither the typed /exit nor an exit dialog (composer shows %q)",
-			inject.ComposerDraftText(capture),
-		),
-	)
 }
 
 func sleepPoll(ctx context.Context, clk clock.Clock, poll time.Duration) error {

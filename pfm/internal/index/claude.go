@@ -67,6 +67,13 @@ func parseClaudeTranscriptFile(
 		if sdkSpawned(record) {
 			transcript.IsBG = true
 		}
+		// The session's directory is the first one any record carries, prompt
+		// worth counting or not: a /clear successor's only record is the
+		// /clear, and a session with no directory opens wherever its opener
+		// stands.
+		if transcript.CWD == "" {
+			transcript.CWD = record.CWD
+		}
 
 		switch record.Type {
 		case "custom-title", "agent-name":
@@ -88,9 +95,6 @@ func parseClaudeTranscriptFile(
 			prompt := claudetranscript.FlattenPromptText(json.RawMessage(record.Message.Content))
 			if prompt == "" || naming.IsJunkPrompt(prompt) {
 				return
-			}
-			if transcript.CWD == "" {
-				transcript.CWD = record.CWD
 			}
 			if transcript.FirstPrompt == "" {
 				transcript.FirstPrompt = prompt

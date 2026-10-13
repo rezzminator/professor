@@ -179,6 +179,11 @@ func runPane(proc *process, engine paneEngine, launchPrompt string, resumed bool
 		}()
 	}
 	loop.keys = readKeys(proc.ctx, proc.stdin)
+	if proc.engine == engineClaude && proc.script.TrustDialog {
+		if code, exited := loop.trustDialog(); exited {
+			return code
+		}
+	}
 	loop.refreshStatus(proc.script.Tokens)
 	loop.paint()
 	if launchPrompt != "" {
@@ -187,6 +192,54 @@ func runPane(proc *process, engine paneEngine, launchPrompt string, resumed bool
 		}
 	}
 	return loop.run()
+}
+
+// claudeTrustFrame is Claude Code's folder-trust dialog for directory; its
+// confirm and exit rows are what internal/engine/trust_dialog.go reads.
+func claudeTrustFrame(directory string) string {
+	return "\x1b[2J\x1b[H" + strings.Join([]string{
+		"Accessing workspace:",
+		"",
+		" " + directory,
+		"",
+		" Quick safety check: Is this a project you created or one you trust?",
+		"",
+		" ❯ 1. Yes, I trust this folder",
+		"   2. No, exit",
+		"",
+		" Enter to confirm · Esc to cancel",
+	}, "\r\n") + "\r\n"
+}
+
+// trustDialogDeclined is the exit code of a pane whose folder-trust dialog
+// was answered "No, exit".
+const trustDialogDeclined = 1
+
+// trustDialog holds the pane at Claude Code's folder-trust dialog until a key
+// answers it. It reports exited when the engine ends there: declined, or its
+// input or context gone.
+func (loop *paneLoop) trustDialog() (int, bool) {
+	if _, err := loop.proc.stdout.Write([]byte(claudeTrustFrame(loop.proc.cwd))); err != nil {
+		warn(loop.proc.stderr, "paint the folder-trust dialog: %v", err)
+		return ExitUsage, true
+	}
+	for {
+		select {
+		case <-loop.proc.ctx.Done():
+			return 0, true
+		case event, ok := <-loop.keys:
+			if !ok {
+				return 0, true
+			}
+			switch {
+			case event.kind == keyRune && event.r == '1':
+				return 0, false
+			case event.kind == keyEnter, event.kind == keyEscape,
+				event.kind == keyRune && event.r == '2':
+				return trustDialogDeclined, true
+			}
+		}
+	}
 }
 
 // paneLoop owns the key loop and the turn machine over one pane.

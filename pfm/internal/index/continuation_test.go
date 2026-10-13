@@ -21,6 +21,9 @@ const (
 	// holds rows whose files will never change again, so only a version bump
 	// makes the new parser read them.
 	preContinuationParserVersion = "3"
+	// preFirstRecordCWDParserVersion is the last parser that took a session's
+	// directory only from a prompt worth counting.
+	preFirstRecordCWDParserVersion = "4"
 )
 
 func continuationJail(t *testing.T) (string, *store.Store, *Indexer) {

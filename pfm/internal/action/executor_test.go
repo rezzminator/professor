@@ -30,6 +30,12 @@ type fakeActionTmux struct {
 	created      []ChatServer
 	onCreate     func()
 	createErr    error
+	// launches is what a freshly created server's pane shows the launch
+	// watch, per socket; a socket without an entry shows a settled chat.
+	launches map[string]fakeLaunch
+	remain   []string
+	// launchReads counts the launch watch's reads of a pane.
+	launchReads int
 }
 
 func (tmux *fakeActionTmux) ListPanes(
@@ -50,7 +56,7 @@ func (tmux *fakeActionTmux) SocketAlive(
 ) bool {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
-	return tmux.alive[socket]
+	return tmux.alive[socket] && !tmux.launches[socket].gone
 }
 
 func (tmux *fakeActionTmux) KillPane(

@@ -134,10 +134,15 @@ type Scenario struct {
 	SessionID string `json:"session_id,omitempty"`
 	Model     string `json:"model,omitempty"`
 	// Reply and BusyMS are the defaults a step or an exhausted list falls back to.
-	Reply        string     `json:"reply,omitempty"`
-	BusyMS       *int       `json:"busy_ms,omitempty"`
-	Tokens       Tokens     `json:"tokens"`
-	Steps        []Step     `json:"steps,omitempty"`
+	Reply  string `json:"reply,omitempty"`
+	BusyMS *int   `json:"busy_ms,omitempty"`
+	Tokens Tokens `json:"tokens"`
+	Steps  []Step `json:"steps,omitempty"`
+	// TrustDialog holds a Claude pane at Claude Code's folder-trust dialog
+	// before its composer, as a real one boots in a folder its account has not
+	// trusted: 1 trusts the folder and boots on; Enter, Escape or 2 — "No,
+	// exit" is the default row — ends the engine.
+	TrustDialog  bool       `json:"trust_dialog,omitempty"`
 	Pane         PaneShapes `json:"pane"`
 	Jail         Jail       `json:"jail"`
 	Quiet        bool       `json:"quiet,omitempty"`

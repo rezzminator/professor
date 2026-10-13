@@ -61,3 +61,22 @@ func TestTrustRefusalNamesTheDialogTheFolderAndTheAttachLine(t *testing.T) {
 		}
 	}
 }
+
+// TestWaitForComposerNeverAnswersTheClaudeFolderTrustDialog is the composer
+// wait before the first prompt meeting Claude Code's folder-trust dialog
+// after boot: its default row is "No, exit", so Enter or Escape ends the
+// chat, and the key that clears it trusts a folder the human never chose — the
+// wait gives up with nothing pressed, however long the dialog holds still.
+func TestWaitForComposerNeverAnswersTheClaudeFolderTrustDialog(t *testing.T) {
+	pane := trustPane{newFakeCodex()}
+	ready := waitForComposer(
+		context.Background(), pane, "cc-1-2-3", "cc-1-2-3", testTimings(), tracer{},
+		func(string) bool { return false },
+	)
+	if ready {
+		t.Fatal("waitForComposer reported a composer on the folder-trust dialog")
+	}
+	if len(pane.keys) != 0 {
+		t.Fatalf("keys sent to the folder-trust dialog: %v", pane.keys)
+	}
+}

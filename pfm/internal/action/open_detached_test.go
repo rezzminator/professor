@@ -320,3 +320,190 @@ func TestOpenHoldsForEnterOnlyWhenAWarningIsAboutToBeCovered(t *testing.T) {
 		})
 	}
 }
+
+// TestOpenWatchesTheLaunch pins what both open doors report about the pane
+// they just created: a pane whose process exits at launch is a failed open
+// carrying the pane's own words (its server killed, never left for a lister
+// to count), a server already gone is a failed open, and a pane met by Claude
+// Code's folder-trust dialog is an open that warns with the attach command
+// while the dialog stays up untouched.
+func TestOpenWatchesTheLaunch(t *testing.T) {
+	const socket = "cc-907-1-1"
+	trustScreen := strings.Join([]string{
+		"Accessing workspace:",
+		"",
+		" /work/resume",
+		"",
+		" Quick safety check: Is this a project you created or one you trust?",
+		"",
+		" ❯ 1. Yes, I trust this folder",
+		"   2. No, exit",
+		"",
+		" Enter to confirm · Esc to cancel",
+	}, "\n")
+	for _, test := range []struct {
+		name        string
+		launch      fakeLaunch
+		wantErr     []string
+		wantWarning []string
+		wantKilled  []string
+		// cancelled: the caller has stopped waiting before the watch reads
+		// the pane, so every context-bound read fails.
+		cancelled bool
+		// processes is the machine's process table; maxReads, when set, is
+		// how many reads of the pane the watch may take before it answers.
+		processes []Process
+		maxReads  int
+		// wantCleared: the pane left alive gets remain-on-exit back off, so a
+		// chat that ends later takes its server with it as before.
+		wantCleared bool
+	}{
+		{
+			name:        "a chat that settles",
+			launch:      fakeLaunch{screen: "Claude Code\n\n> \n", command: "claude"},
+			wantCleared: true,
+		},
+		{
+			name: "the pane's process exits at launch",
+			launch: fakeLaunch{
+				screen: "pfm internal agent-open: refusing the double-resume of " +
+					"66666666-6666-4666-8666-666666666666\n\n[exited]\n",
+				dead: true,
+			},
+			wantErr:    []string{"resumable chat exited at launch", "refusing the double-resume"},
+			wantKilled: []string{socket},
+		},
+		{
+			name:    "the server is gone before the watch reads it",
+			launch:  fakeLaunch{gone: true},
+			wantErr: []string{"resumable chat died at launch", socket, "what it printed was lost"},
+		},
+		{
+			// A resume row's pane runs its compound line under a shell that
+			// never execs, and an agent row's under pfm: the engine is a
+			// child on the pane's terminal, never the pane's own command.
+			name:        "an engine running under the pane's shell",
+			launch:      fakeLaunch{screen: "Claude Code\n\n> \n", command: "bash", tty: "pts/7"},
+			processes:   []Process{{PID: 4242, Argv: []string{"/opt/bin/claude", "--resume"}, TTY: "pts/7"}},
+			maxReads:    2,
+			wantCleared: true,
+		},
+		{
+			name:   "a live server whose pane cannot be read",
+			launch: fakeLaunch{unreadable: true},
+			wantWarning: []string{
+				"pfm could not read resumable chat's launch pane",
+				"tmux -L " + socket + " attach -t " + socket,
+			},
+			wantCleared: true,
+		},
+		{
+			name:      "the caller stops waiting",
+			launch:    fakeLaunch{screen: "Claude Code\n\n> \n", command: "claude"},
+			cancelled: true,
+			wantWarning: []string{
+				"pfm stopped watching resumable chat's launch",
+				"tmux -L " + socket + " attach -t " + socket,
+			},
+			wantCleared: true,
+		},
+		{
+			name:   "Claude Code's folder-trust dialog",
+			launch: fakeLaunch{screen: trustScreen, command: "claude"},
+			wantWarning: []string{
+				"resumable chat is held at Claude Code's folder-trust dialog for /work/resume",
+				"pfm pressed nothing",
+				"tmux -L " + socket + " attach -t " + socket,
+			},
+			wantCleared: true,
+		},
+	} {
+		for _, detached := range []bool{true, false} {
+			door := "attached"
+			if detached {
+				door = "detached"
+			}
+			t.Run(test.name+" ("+door+")", func(t *testing.T) {
+				home := t.TempDir()
+				stageProfessorPrompt(t, home)
+				jailAction(t)
+				t.Cleanup(launchnotice.Replace(strings.NewReader(""), false))
+				var stderr bytes.Buffer
+				tmux := &fakeActionTmux{
+					alive:    map[string]bool{},
+					launches: map[string]fakeLaunch{socket: test.launch},
+				}
+				executor, err := New(Dependencies{
+					Tmux: tmux, Processes: &fakeProcesses{processes: test.processes},
+					Gate: fixedGate(false), Runner: &captureRunner{}, Stderr: &stderr,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				machine := testMachineConfig(home)
+				machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+				request := Request{
+					Row: compose.Row{
+						Kind: compose.ResumeClaude, ID: "66666666-6666-4666-8666-666666666666",
+						CWD: "/work/resume", Name: "resumable chat",
+					},
+					PrimaryAccount: 1, Home: home, FreshSocket: socket, Config: machine,
+				}
+				ctx := context.Background()
+				if test.cancelled {
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					ctx = cancelled
+				}
+				var warnings []string
+				var line string
+				if detached {
+					var result OpenResult
+					result, err = executor.OpenDetached(ctx, request)
+					warnings = result.Warnings
+				} else {
+					line, err = executor.Open(ctx, request)
+					if stderr.Len() > 0 {
+						warnings = []string{stderr.String()}
+					}
+				}
+				if len(test.wantErr) > 0 {
+					if err == nil {
+						t.Fatalf("open reported ok for a launch that died; line %q warnings %q", line, warnings)
+					}
+					for _, want := range test.wantErr {
+						if !strings.Contains(err.Error(), want) {
+							t.Fatalf("error %q lacks %q", err, want)
+						}
+					}
+					if line != "" {
+						t.Fatalf("a failed open still returned the eval line %q", line)
+					}
+				} else if err != nil {
+					t.Fatalf("open failed: %v", err)
+				}
+				joined := strings.Join(warnings, "\n")
+				for _, want := range test.wantWarning {
+					if !strings.Contains(joined, want) {
+						t.Fatalf("warnings %q lack %q", warnings, want)
+					}
+				}
+				if len(test.wantWarning) == 0 && len(test.wantErr) == 0 && joined != "" {
+					t.Fatalf("unexpected warnings %q", warnings)
+				}
+				if !reflect.DeepEqual(tmux.killedServer, test.wantKilled) {
+					t.Fatalf("killed servers = %q, want %q", tmux.killedServer, test.wantKilled)
+				}
+				if test.maxReads > 0 && tmux.launchReads > test.maxReads {
+					t.Fatalf("the watch read the pane %d times, want it up by read %d", tmux.launchReads, test.maxReads)
+				}
+				if test.wantCleared {
+					want := []string{socket + "\ton", socket + "\toff"}
+					if !reflect.DeepEqual(tmux.remain, want) {
+						t.Fatalf("remain-on-exit = %q, want %q", tmux.remain, want)
+					}
+				}
+			})
+		}
+	}
+}

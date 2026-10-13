@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
@@ -201,5 +202,55 @@ func TestPaneCodexRenameEscape(t *testing.T) {
 	})
 	if _, err := os.Stat(filepath.Join(fix.codexHome, codexmeta.SessionIndexFile)); !os.IsNotExist(err) {
 		t.Fatalf("Escape wrote a rename row: %v", err)
+	}
+}
+
+// TestPaneClaudeTrustDialog pins the mock's folder-trust dialog, asked for by
+// its scenario wire key: it is the frame internal/engine reads as the dialog,
+// 1 boots on to the composer, and every key that answers "No, exit" ends the
+// engine with status 1.
+func TestPaneClaudeTrustDialog(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		key      string
+		wantExit int
+		boots    bool
+	}{
+		{name: "1 trusts the folder", key: "1", boots: true},
+		{name: "Enter takes the default No, exit", key: "\r", wantExit: 1},
+		{name: "Escape cancels", key: "\x1b", wantExit: 1},
+		{name: "2 is No, exit", key: "2", wantExit: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fix := newFixture(t)
+			t.Chdir(fix.work)
+			fix.write(Scenario{BusyMS: intPtr(0)})
+			var wire map[string]any
+			if err := json.Unmarshal([]byte(readFile(t, fix.scenario)), &wire); err != nil {
+				t.Fatal(err)
+			}
+			wire["trust_dialog"] = true
+			content, err := json.Marshal(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(fix.scenario, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			session := fix.startTUI("claude", claudeArgs("--session-id", fixtureSession), nil)
+			session.waitFrame("folder-trust dialog", func(frame string) bool {
+				return pfmengine.ClaudeTrustDialog(frame) && strings.Contains(frame, fix.work)
+			})
+			session.typeRaw(test.key)
+			if test.boots {
+				session.waitFrame("composer after trusting", func(frame string) bool {
+					return strings.Contains(frame, "❯") && !pfmengine.ClaudeTrustDialog(frame)
+				})
+				session.typeLine("/exit")
+			}
+			if code := session.waitExit(); code != test.wantExit {
+				t.Fatalf("exit = %d, want %d; frame:\n%s", code, test.wantExit, session.out.frame())
+			}
+		})
 	}
 }

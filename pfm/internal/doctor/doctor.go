@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
@@ -292,6 +293,7 @@ func Run(
 		resolved.Home,
 		claudeAbsent,
 		dependencies.Env,
+		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
 		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings
@@ -330,6 +332,7 @@ func Run(
 		claudeAbsent,
 	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
+	printOpenProjectsDoctor(ctx, stdout, database, databaseErr, resolved.Home)
 	workbenchWarnings, workbenchFailures := printWorkbenchDoctor(stdout, ".", resolved.Home)
 	tally.warnings += workbenchWarnings
 	tally.failures += workbenchFailures

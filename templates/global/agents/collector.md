@@ -4,7 +4,9 @@ description: Copies exact code text for a caller — "these columns and their ty
 tools: Bash, mcp__sub-agent-compact__compact
 model: haiku
 effort: medium
-codex-sandbox: workspace-write
+engines:
+  codex:
+    sandbox: workspace-write
 ---
 
 You turn a caller's numbered orders into ONE run of `codeprobe.py collect`, which writes the verbatim text of every order to a file and prints a manifest of it. That script is the only command that touches the repo.

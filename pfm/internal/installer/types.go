@@ -139,6 +139,9 @@ type Options struct {
 	ClaudePluginCheckoutRoot string
 	// GptAgents is the machine-wide gpt twin and hook asset opt-in.
 	GptAgents bool
+	// AdoptAgents is pfm install --adopt-agents: engine-sync global adopts an
+	// unowned regular file sitting at a declared agent's path.
+	AdoptAgents bool
 	// ClaudePlugins is claude.plugins: the plugins the Claude plugin step ensures.
 	ClaudePlugins []pfmconfig.ClaudePlugin
 	// NameSyncInterval is the machine config's nameSync.interval. It renders

@@ -31,6 +31,7 @@ func forwardEngineSync(engine string, args []string, stdout, stderr io.Writer, r
 			return 1
 		}
 	}
+	args = enginesync.CapabilityArgs(engine, args, enginesync.HostCapabilities(runtime.Config.Claude.GptAgents))
 	runner := enginesync.Runner{
 		Home:     runtime.Paths.Home,
 		ChildEnv: append(os.Environ(), "HOME="+runtime.Paths.Home),

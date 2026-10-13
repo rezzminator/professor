@@ -1,6 +1,6 @@
 [submodule "agent-effort"]
-	path = plugins/agent-effort
-	url = https://github.com/rezzminator/agent-effort.git
+	path = plugins/effort-live-control
+	url = https://github.com/rezzminator/effort-live-control.git
 	branch = develop
 	ignore = dirty
 [submodule "tool-visibility-controller"]

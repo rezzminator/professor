@@ -24,7 +24,7 @@
     "plugins": [
       "cache-live-control",
       "sub-agent-compact",
-      "agent-effort",
+      "effort-live-control",
       "tool-visibility-controller"
     ],
     "costLedger": true,

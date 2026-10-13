@@ -8,13 +8,13 @@ An epic is an initiative-level persistent context at `docs/epics/{name}/`. It su
 docs/epics/{name}/
 ├── manifest.md          ← anchor: frontmatter + narrative + decisions + load index
 ├── update.md            ← work doc: current state + per-area delivered
-├── {topic}.md           ← optional topic files (RND results, RR reports, POC notes), each registered in manifest ## Files
+├── {topic}.md           ← optional topic files (research results, RR reports, POC notes), each registered in manifest ## Files
 └── archive/             ← superseded material (cold — never auto-loaded)
 ```
 
 **Load protocol:** read `manifest.md` + `update.md`, then open topic files from `## Files` (fall back to `ls`) only as the task requires. Never read `archive/`.
 
-**Ownership:** the Professor owns the lifecycle and narrative (`## Vision & Scope`, `status:`, topic files, epic creation/deletion). The main-loop session consolidates shipped work (after a flight lands) and session work (on "save the epic" / at a milestone) into `update.md` + the manifest's working sections per § Consolidation contract.
+**Ownership:** the Professor owns the lifecycle and narrative (`## Vision & Scope`, `status:`, topic files, epic creation/deletion). The main-loop session consolidates shipped work (after a flight lands) and session work (on "save the epic" / at a milestone) into `update.md` + the manifest's working sections per § Consolidation contract; it walks the conversation itself, and a `documenter` it dispatches writes from the consolidated handoff the main loop hands it, never from the conversation.
 
 ## Consolidation contract
 

@@ -307,7 +307,7 @@ func TestInstallUnknownFlagPrintsTheUsage(t *testing.T) {
 		if code := runInstall(args, &stdout, &stderr); code != wantCode {
 			t.Fatalf("args=%q code=%d stderr=%q", args, code, stderr.String())
 		}
-		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]\n"
+		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--adopt-agents] [--config-dir DIR]\n"
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr=%q want=%q", stderr.String(), want)
 		}
@@ -459,6 +459,43 @@ func TestInstallSkipEngineCodexReachesProbeInstallerAndConfirmation(t *testing.T
 			"if you agree, run again: pfm install --yes --skip-harvest --skip-engine codex\n",
 		) {
 		t.Fatalf("skip-engine output=%q", stdout.String())
+	}
+}
+
+func TestInstallAdoptAgentsReachesTheInstallerAndConfirmation(t *testing.T) {
+	savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
+	t.Cleanup(func() {
+		doctor.DependencyProbeOverride = savedProbe
+		runInstaller = savedInstaller
+	})
+	doctor.DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
+		results := make([]deps.Result, 0, len(entries))
+		for _, entry := range entries {
+			results = append(results, deps.Result{Entry: entry, State: deps.StateSkipped, Error: "fixture"})
+		}
+		return results
+	}
+	var captured installer.Options
+	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+		captured = options
+		return installer.Report{}, nil
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
+	for _, adopt := range []bool{false, true} {
+		args := []string{"--skip-harvest"}
+		if adopt {
+			args = append(args, "--adopt-agents")
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runInstall(args, &stdout, &stderr, runtime); code != 0 {
+			t.Fatalf("adopt=%t code=%d stdout=%q stderr=%q", adopt, code, stdout.String(), stderr.String())
+		}
+		if captured.AdoptAgents != adopt {
+			t.Fatalf("adopt=%t: Options.AdoptAgents = %t", adopt, captured.AdoptAgents)
+		}
+		if got := strings.Contains(stdout.String(), "pfm install --yes --skip-harvest --adopt-agents\n"); got != adopt {
+			t.Fatalf("adopt=%t: confirmation = %q", adopt, stdout.String())
+		}
 	}
 }
 

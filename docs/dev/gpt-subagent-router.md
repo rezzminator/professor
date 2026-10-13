@@ -119,9 +119,9 @@ This settles former open question 2 (where the router lives).
 
 A GPT agent exists only in a session started through the router. pfm's launch line sets `ANTHROPIC_BASE_URL` and passes `--agents` with the GPT definitions (W10). Each definition is compiled at launch from the Claude file it twins: the prompt body comes from the file and only `model` is swapped, so no hand-kept copy can drift.
 
-- **General workers:** `sol`, `terra`, `luna`, pinned to the catalog's current Sol, Terra and Luna IDs.
+- **General workers:** `sol`, `luna`, `astra`, pinned to the catalog's current Sol, Luna and Astra IDs.
 - **Fleet roles:** a same-named GPT twin (for example `flights-mechanical-executor`) replaces the file definition, in that session only.
-- **Not a file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails.
+- **Not an ungated file:** a GPT-pinned `.claude/agents/*.md` loads in every session. In a session without the router, its request reaches Anthropic as `gpt-*` and fails. The shipped twins are therefore machine-source `{name}.md` declarations with `from:` that require the `gpt-agents` capability, installed only on a host that sets `claude.gptAgents` ([GPT twins](../design/gpt-twins/gpt-twins.md)).
 - **Not an alias remap:** see W2 and W8.
 
 ### Spawning a GPT agent

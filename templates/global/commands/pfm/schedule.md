@@ -1,5 +1,5 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: pfm:schedule
 description: Arms a wake-up for this chat — repeating `/pfm:schedule {weekly|<N>d|<duration>} [what to do]`, once `/pfm:schedule in <delay> [what]` or `at <time> [what]`, plus `ls`, `rm <id>`; asks like "check this again weekly", "remind me in 30 days", "wake me at 09:00". Returns the schedule id and its next fire time.
 argument-hint: "{weekly|<N>d|<duration>} [what to do] | in <delay> [what to do] | at <time> [what to do] | ls | rm <id>"

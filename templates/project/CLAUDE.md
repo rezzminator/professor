@@ -15,8 +15,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 
 - child CLAUDE.md: a roster entry's own conventions and code placement, beside its agents and skills · `{project}/CLAUDE.md`, `{project}/.claude/`
 - fleet prompt: the main chat's system layer — voice, § Model Selection, § Orchestration — composed at build time by `make -C pfm prompts` into the clone's tracked `composed/`; `pfm install` stages none of it · `{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`
-- guard: the PreToolUse hook gating `.claude/**` and every `CLAUDE.md` · `.claude/scripts/pfm-guard.sh`
-- permanent docs: the main loop's reference docs · `docs/_index.md` and the clusters it links, each roster entry's `{project}/docs/`
+- permanent docs: the reference docs the main loop or the `documenter` agent writes · `docs/_index.md` and the clusters it links, each roster entry's `{project}/docs/`
 - flight directory: a flight's task files and audit trail, kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
 
 <!-- OPTIONAL docs map: add entries like these if the project keeps clustered reference docs, or delete the block.
@@ -47,7 +46,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 ## Local
 
 - Scratch lives in `/tmp/{project}/{purpose}/`, outside the tree: `{project}` is this repo's directory name minus any leading dot, derived, never hardcoded.
-- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/{dev|guard}/`); a scratch path named to a human or a model is absolute.
+- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/{dev}/`); a scratch path named to a human or a model is absolute.
 
 # Rules
 
@@ -57,7 +56,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 - **NEVER edit code on `main`:** worktree branches only, gitter-merged after its gate passes; a change made on `main` by explicit command still gets its gate pass afterwards.
 - **Only gitter writes git:** commit, merge, checkout, branch, stash, reset, push and every other state-changing git are gitter's for every agent; read-only git (status, diff, log, show, rev-parse) is open to all.
 - **NEVER commit broken code or merge before the gate passes.**
-- **Only the main-loop session writes permanent docs,** under the `/quality:doc` Approval gate; `docs/epics/legal/` belongs to `/officer`, `docs/business/` to `/mentor` and `/marketer` (`marketing/`), and `docs/facts/` to the main loop solely on the user's explicit ruling.
+- **Only the main loop or the documenter agent it dispatches writes permanent docs,** under the `/quality:doc` Approval gate; `docs/epics/legal/` belongs to `/officer`, `docs/business/` to `/mentor` and `/marketer` (`marketing/`), and `docs/facts/` to the main loop solely on the user's explicit ruling.
 
 ## Your first move as a sub-agent
 
@@ -98,7 +97,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 <!-- KEEP the next rule only if the roster has a project that owns infra/orchestration (its directory is `{PROJECT}`); drop it for a roster with no such project. -->
 
 - Infra ops go through the owning project's `Makefile` (`make -C {PROJECT}`), not direct `{CONTAINER_RUNTIME} exec` / `{DB_CLI}` / `{CLOUD_CLI} {QUEUE}` calls.
-- Guarded files: the guard gates `.claude/**` and every `CLAUDE.md` — route: `/pcm`; its deny message carries the unlock steps.
+- Prompt files: a task touching `.claude/**` or any `CLAUDE.md` routes to the `pcm` agent (the user's `/pcm` dispatches it), which loads `/quality:prompt` before the first edit.
 - Worktrees are costly: batch a session's related changes into one, and ask before creating one.
 - CI verifies, it does not debug: reproduce and fix locally, then trigger CI.
 

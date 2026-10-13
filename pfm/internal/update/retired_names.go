@@ -116,6 +116,9 @@ var retiredNames = []retiredName{
 	{name: "/documenter", kind: retiredCommand, successor: "/quality:doc", match: matchFamily},
 	{name: "/km", kind: retiredCommand, match: matchExact},
 	{name: "/audit:ai-output", kind: retiredCommand, match: matchExact},
+	// Commit "remove /rnd end to end": the project-scope research command and
+	// its former /rnd:hammer and /rnd:referee sub-commands have no successor.
+	{name: "/rnd", kind: retiredCommand, match: matchFamily},
 	{name: "mono-architect", kind: retiredAgent, match: matchExact},
 	{name: "mono-documenter", kind: retiredAgent, match: matchExact},
 	{name: "mono-planner", kind: retiredAgent, match: matchExact},
@@ -155,6 +158,60 @@ var retiredNames = []retiredName{
 		name: "docs/agents", kind: retiredPath, successor: "docs/_index.md and docs/standards.md",
 		match: matchExact,
 	},
+	// The PreToolUse guard hook is removed with its stamp script: framework
+	// files are edited through /pcm, which dispatches the pcm agent, and no
+	// hook gates the edit. A settings.json hook entry or a script still
+	// naming either one is dead wiring.
+	{name: "pfm-guard.sh", kind: retiredPath, match: matchExact},
+	{name: "guard-stamp.sh", kind: retiredPath, match: matchExact},
+}
+
+// definitionProbes are the root-relative paths whose existence means the
+// project itself still defines the retired name: its own command, agent or
+// skill file, or the retired path itself. A phase, an MCP tool and a command
+// spelled with a space are defined by no project file.
+func (r retiredName) definitionProbes() []string {
+	switch r.kind {
+	case retiredCommand:
+		command := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(r.name, "/"), ":"), ":", "/")
+		if command == "" || strings.ContainsAny(command, " ") {
+			return nil
+		}
+		return []string{".claude/commands/" + command + ".md", ".claude/commands/" + command}
+	case retiredAgent:
+		return []string{".claude/agents/" + r.name + ".md"}
+	case retiredSkill:
+		return []string{".claude/skills/" + strings.TrimSuffix(strings.TrimPrefix(r.name, "skills/"), " skill")}
+	case retiredPath:
+		return []string{r.name}
+	}
+	return nil
+}
+
+// dropDefinedNames removes the hits on a retired name the project defines
+// itself: a project that keeps its own /km command is not naming a retired
+// one. A probe that cannot be statted for any reason but absence leaves the
+// name flagged.
+func dropDefinedNames(root string, hits []professor.RetiredNameHit) []professor.RetiredNameHit {
+	defined := map[string]bool{}
+	for _, retired := range retiredNames {
+		for _, probe := range retired.definitionProbes() {
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(probe))); err == nil {
+				defined[retired.name] = true
+				break
+			}
+		}
+	}
+	if len(defined) == 0 {
+		return hits
+	}
+	kept := make([]professor.RetiredNameHit, 0, len(hits))
+	for _, hit := range hits {
+		if !defined[hit.Name] {
+			kept = append(kept, hit)
+		}
+	}
+	return kept
 }
 
 // retiredSkippedDirs are directory names the scan never enters at any depth:
@@ -190,6 +247,20 @@ func ScanRetiredNames(root string, pinned map[string]bool) professor.RetiredName
 }
 
 func scanRetiredNamesWith(
+	root string,
+	pinned map[string]bool,
+	open func(string) (io.ReadCloser, error),
+) professor.RetiredNameScan {
+	scan := scanRetiredNamesRaw(root, pinned, open)
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		scan.Hits = dropDefinedNames(resolved, scan.Hits)
+	}
+	return scan
+}
+
+// scanRetiredNamesRaw is the scan before the project's own definitions are
+// weighed.
+func scanRetiredNamesRaw(
 	root string,
 	pinned map[string]bool,
 	open func(string) (io.ReadCloser, error),
@@ -434,7 +505,7 @@ func (r retiredName) foundIn(line string) bool {
 			return false
 		}
 		start := offset + index
-		if r.boundedAt(line, start, start+len(r.name)) {
+		if !insideURL(line, start) && r.boundedAt(line, start, start+len(r.name)) {
 			return true
 		}
 		offset = start + 1
@@ -478,6 +549,14 @@ func (r retiredName) boundedAt(line string, start, end int) bool {
 		return r.match == matchFamily
 	}
 	return !isRetiredNameByte(next)
+}
+
+// insideURL: the match sits in a URL — the whitespace-, quote- or
+// bracket-delimited token holding it has a scheme separator before it
+// (`https://opencode.ai/docs/agents/` names a web page, not a project path).
+func insideURL(line string, start int) bool {
+	tokenStart := strings.LastIndexAny(line[:start], " \t`\"'(<[") + 1
+	return strings.Contains(line[tokenStart:start], "://")
 }
 
 func isRetiredNameByte(b byte) bool {

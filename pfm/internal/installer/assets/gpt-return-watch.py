@@ -1,4 +1,4 @@
-"""PreToolUse hook of the gpt-foreman twin: a child's return watch runs in the flights-foreman manual's exact form.
+"""PreToolUse hook of the gpt-flights-foreman twin: a child's return watch runs in the flights-foreman manual's exact form.
 
 Claude Code runs it from the twin's frontmatter `PreToolUse` hook (matcher `Bash`) as `gpt-return-watch.py`. The
 manual's watch is `timeout N bash -c 'until [ -s "$1" ]; do sleep S; done; cat "$1"' _ {flight}/returns/{file}`.

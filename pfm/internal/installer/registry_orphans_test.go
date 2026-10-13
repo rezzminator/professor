@@ -216,6 +216,7 @@ func TestRegistryDeadLinkDoctorRows(t *testing.T) {
 				home,
 				true,
 				&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
+				nil,
 			)
 			var rows []string
 			for _, line := range strings.Split(output.String(), "\n") {

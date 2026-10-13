@@ -4,9 +4,9 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 # Vocabulary
 
-- machine-global tier: agents, commands and skills whose original lives in this clone, symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`; nothing generated is written into the clone · `templates/global/`
+- machine-global tier: agents, commands and skills whose original lives in this clone, symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`; a `from:` declaration renders into the tracked `templates/generated/agents/`, the only generated output in the clone, which the fence gate holds equal to a fresh render · `templates/global/`
 - project tier: templates `pfm init` scaffolds into an adopter once and pins in `{adopter}/.professor/baseline.json`; the adopter's local file is the truth, and pfm never rewrites it after init · `templates/project/`
-- project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for retired references in project files, including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, then `pfm update {adopt|pin|ignore|drop}` · `pfm/internal/update/`
+- project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for retired references in project files, including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, and closes every row with `pfm update {adopt|pin|ignore|drop|accept}` (`pin --keep` records a deliberate non-port, `accept` a retired-name hit that stays) until the report ends `clean` · `pfm/internal/professor/`, `pfm/internal/update/`
 - placeholder: the registered token for a project-specific value in a template · `docs/PLACEHOLDERS.md`
 - specs: the framework's philosophy and generation law · `docs/BLUEPRINT.md`, `docs/SETUP.md`
 - design docs: one directory per family, indexed by its `_index.md` · `docs/design/{family}/`
@@ -25,7 +25,6 @@ This repo is the framework, not an app that uses it: everything under `templates
 - self-hosted manifest: the tracked ledger of this repo's own install, verified (restamped with `--write`) by a repo gate · `.professor/manifest.json`, `infra/check-self-hosted-manifest.sh`
 - retro inbox: the steering ledger `/pcm retro` folds · `.professor/retro.md`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
-- guard: the PreToolUse hook gating `.claude/**` and every `CLAUDE.md`, never a generated `AGENTS.md` · `.claude/scripts/pfm-guard.sh` · design `docs/design/hooks/`
 - engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary plus a Claude plugin from its own repo; pfm execs it and `pfm codex|opencode` forward to it; its stable link `~/.local/share/engine-sync/bin/engine-sync` is off PATH · `plugins/engine-sync/` · design `docs/design/engine-sync/`
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
@@ -57,14 +56,14 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## OpenCode
 
-- Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the guarded-file and non-gitter Git-write denies.
+- Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the non-gitter Git-write denies.
 - engine-sync writes it, run as `pfm opencode build .`; `pfm opencode {check|doctor} .` its checks.
 
 ## Local
 
 - On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` only; `verify`, `test`, `cover`, `all` and `gate` refuse outside the fence.
 - Scratch lives in `/tmp/{project}/{purpose}/`: `{project}` is this repo's directory name minus any leading dot (`.professor` → `professor`), derived, never hardcoded.
-- One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{timing|lanes|guard}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
+- One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{timing|lanes}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
 
 ## Fence
 
@@ -136,9 +135,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Git writes go through registered `gitter`; every other sub-agent is read-only.
 - When `gitter` is unavailable, only the active main Codex chat performs scoped Git writes, and only after the user's explicit authorization in the current turn; publication still needs its own request under § Publication.
 - Commit only code whose tests pass.
-- Guarded files: a task touching `.claude/**`, any `CLAUDE.md` (the source of its `AGENTS.md`) or `templates/**` routes to `/pcm`; the guard admits its files only in a session that has read `~/.claude/commands/quality/prompt.md`, and its deny message carries the unlock steps.
-- Edits to `.claude/**` and any `CLAUDE.md` (never its generated `AGENTS.md`) are the main chat's, under `/pcm`; a sub-agent reports the change it needs.
-- Disabling the guard hook, or routing a sub-agent around it, is a violation.
+- Prompt files: a task touching `.claude/**`, any `CLAUDE.md` (the source of its `AGENTS.md`) or `templates/**` routes to the `pcm` agent (the user's `/pcm` dispatches it), which loads `/quality:prompt` before the first edit and `/quality:claude-md` before a `CLAUDE.md` edit.
 - Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build and test through `.claude/scripts/dev.sh iso`; an executor runs only its affected tests per `.claude/commands/pfm-testing-manual.md`; the full suite is the gate's.
 - Dev and test runs target fence worktrees, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Template, doc, prompt and config-file changes land on `develop` directly, in the main checkout.

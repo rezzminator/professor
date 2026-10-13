@@ -55,6 +55,7 @@ type projectReportItem struct {
 	Diff        string        `json:"diff,omitempty"`
 	DiffError   string        `json:"diffError,omitempty"`
 	DiffSkipped string        `json:"diffSkipped,omitempty"`
+	Commits     []string      `json:"commits,omitempty"`
 	projectMove
 }
 type projectReport struct {
@@ -143,6 +144,7 @@ func buildProjectReport(root, home string) (projectReport, error) {
 				}
 			}
 		}
+		report.addKept(status, local, template, pin)
 		report.Counts[status]++
 		if status != projectCurrent {
 			report.Items = append(
@@ -250,17 +252,14 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 							item.Pin.PinnedSHA,
 							item.Template,
 						)
+						writeUpdatedCommits(stdout, item)
 						for _, line := range strings.Split(strings.TrimRight(item.Diff, "\n"), "\n") {
 							fmt.Fprintf(stdout, "      %s\n", line)
 						}
 					}
 				}
-				fmt.Fprintf(
-					stdout,
-					"      port what applies into %s, keep the project's own edits, then: pfm update pin %s\n",
-					item.Local,
-					item.Local,
-				)
+				writeKeptEarlier(stdout, item)
+				writePortInstruction(stdout, item.Local)
 			case projectNew:
 				fmt.Fprintf(
 					stdout,
@@ -289,7 +288,12 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 			}
 		}
 	}
+	writeKeptHuman(stdout, r)
 	writeRetiredNamesHuman(stdout, r.Retired)
+	writeAcceptedHuman(stdout, r.Retired)
+	if r.reviewRequired() != 0 {
+		writeSessionGuide(stdout)
+	}
 	terminal := projectTerminal(r)
 	if terminal != "clean" {
 		terminal += "; nothing was written."
@@ -324,18 +328,21 @@ func writeProjectUnmanaged(stdout io.Writer, jsonOutput bool) {
 func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	flags := cli.NewFlagSet(
 		"update pin",
-		"usage: pfm update pin <local>... | --all [--template TEMPLATE] [--root DIR]",
+		"usage: pfm update pin <local>... | <local> --keep REASON | <local> --unkeep | --all | "+
+			"--template TEMPLATE <local> [--root DIR]",
 		stderr,
 	)
 	rootFlag := flags.String("root", "", "project root")
 	pinAll := flags.Bool("all", false, "pin every UPDATED file")
+	keepFlag := flags.String("keep", "", "keep the file apart from upstream on purpose, recording this reason")
+	unkeep := flags.Bool("unkeep", false, "drop a named file's recorded keep: its untaken change was ported")
 	templateFlag := flags.String("template", "", "template path for a newly adopted local file")
 	locals, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
-	if (*pinAll && (len(locals) != 0 || *templateFlag != "")) || (*templateFlag != "" && len(locals) != 1) ||
-		(!*pinAll && *templateFlag == "" && len(locals) == 0) {
+	keepReason := strings.TrimSpace(*keepFlag)
+	if pinUsageInvalid(locals, *pinAll, *unkeep, *templateFlag, flagGiven(flags, "keep"), keepReason) {
 		flags.Usage()
 		return 2
 	}
@@ -353,6 +360,9 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 		return 1
 	}
 	selected := locals
+	if keepReason != "" {
+		return runProjectKeep(&report, root, locals, keepReason, stdout, stderr)
+	}
 	if *pinAll {
 		selected = nil
 		for _, item := range report.Items {
@@ -413,6 +423,12 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update pin: %v\n", err)
 				return 1
+			}
+			if *unkeep {
+				if err := dropKeep(&pin, local); err != nil {
+					fmt.Fprintf(stderr, "pfm update pin: %v\n", err)
+					return 1
+				}
 			}
 			pin.TemplateHash = hash
 			pin.PinnedSHA = report.Store.SHA

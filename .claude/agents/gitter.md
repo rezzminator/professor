@@ -6,6 +6,11 @@ tools: Read, Write, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact
 visibility:
   agents:
     include: [conflict-resolver]
+engines:
+  opencode:
+    permission:
+      bash:
+        "git *": allow
 ---
 
 # Gitter Agent

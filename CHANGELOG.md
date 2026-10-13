@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.81.0](releases/v0.81.0.md) — Removes the prompt-guard hook in favour of the pcm agent; adds documenter as a global agent that runs every write from a caller-written handoff; adds project-tier update verbs and a doctor warning for unclosed update rows; retires advisor-cache-gateway (superseded by gpt-gateway, advisor off); removes /rnd; agents keep the compact-only sub-agent-compact mechanism; pins sub-agent-compact v0.4.1 (compact on, handoff off by default), engine-sync v0.3.0, effort-live-control v0.2.0, cache-live-control v0.5.0 and gpt-gateway v0.3.0.
 - [v0.80.1](releases/v0.80.1.md) — gpt-gateway, the local gateway the GPT twins need, published at rezzminator/gpt-gateway (v0.1.0) and pinned as the `plugins/gpt-gateway` submodule
 - [v0.80.0](releases/v0.80.0.md) — tracer redesign (lead + sub-tracers + tracetree kit), unlanded-work protocol, statusline/install fixes, pfm chat watch --no-working, codex-sync ENGINE_SYNC_BIN check, cache-live-control 0.4.1 (agent auto-raise removed), gpt twin agent sources and pfm-managed hook assets (twin linking not yet wired), release-review hardening fixes
 - [v0.79.0](releases/v0.79.0.md) — workbenches (nested sub-projects), the fleet-deck picker, chat reminders, account-sync, flights that land themselves with one lander per flight, and research tiers renamed to rr / rr-pro / rr-pro-max

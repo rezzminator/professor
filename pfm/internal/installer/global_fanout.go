@@ -45,6 +45,7 @@ func ReportGlobalAgents(
 	home string,
 	claudeAbsent bool,
 	env paths.Env,
+	capabilities []string,
 	codexHomes ...string,
 ) (warnings, failures int) {
 	if len(codexHomes) == 0 {
@@ -70,7 +71,7 @@ func ReportGlobalAgents(
 			options.SourceRepo = repo
 		}
 	}
-	runner := enginesync.Runner{Env: env, Home: home}
+	runner := enginesync.Runner{Env: env, Home: home, Capabilities: capabilities}
 	if err := runner.RequireMinimumVersion(context.Background()); err != nil {
 		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
 		return 0, 1

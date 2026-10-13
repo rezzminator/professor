@@ -135,7 +135,7 @@ What the tree rests on, each observed in the lab:
 
 - The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
 - Both agents run on Claude only, by the user's ruling: a generator of GPT role twins must never map `tracer` or `sub-tracer`. Over 85 field runs the twins, `gpt-tracer` on `gpt-6-sol` and `gpt-sub-tracer` on `gpt-6-luna`, cited a line past the file's end on 8.3% of hops against `tracer`'s 0.11%, and had 0.84% of hops rejected against 0.17% ([Field runs](tracer-bench.md#field-runs)).
-- Codex: `tracer` and `sub-tracer` carry `codex-sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not.
+- Codex: `tracer` and `sub-tracer` carry `engines.codex.sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not.
 
 ## Open items
 

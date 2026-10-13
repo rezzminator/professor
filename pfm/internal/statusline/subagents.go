@@ -177,12 +177,15 @@ var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // ServeSubagents answers Claude Code's subagentStatusLine command: stdin's
 // row context in, one {id,content} JSON line per agent-panel row out.
-// Fail-open like the main line — any error prints nothing and exits 0, so
-// every row keeps Claude Code's own body instead of the harness logging a
-// failed command each tick. The price table is the machine's served one
-// (pricing.LoadPrices: the clone file or the embedded copy, the override beside
-// pfmConfigPath merged), never fetched; one that cannot load leaves every
-// row's dollars "$?", its cause on stderr.
+// Fail-open like the main line — it exits 0 even on a fault, so the harness
+// does not log a failed command each tick — but a fault never renders as
+// absence: input that cannot be read in full or rendered turns every task row
+// whose id could be read into a red "pfm statusline: {cause}" row, and the
+// cause goes to stderr. Only input with no readable task id prints no row (a
+// row needs an id) and says so on stderr. The price table is the machine's
+// served one (pricing.LoadPrices: the clone file or the embedded copy, the
+// override beside pfmConfigPath merged), never fetched; one that cannot load
+// leaves every row's dollars "$?", its cause on stderr.
 func ServeSubagents(
 	stdin io.Reader,
 	stdout, stderr io.Writer,
@@ -190,17 +193,15 @@ func ServeSubagents(
 	env paths.Env,
 	pfmConfigPath string,
 ) int {
-	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
+	raw, err := readSubagentInput(stdin)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm statusline --subagents: read input (fail-open): %v\n", err)
-		return 0
+		return failSubagents("input", raw, err, stdout, stderr)
 	}
 	prices := LoadServedPrices(machine.Home, pfmConfigPath, stderr, "pfm statusline --subagents")
 	userAgents := userAgentsDir(machine.Home)
 	rows, err := RenderSubagents(raw, clock.Real.Now(), machine.SIDDir, prices, machine.Home, env, userAgents, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm statusline --subagents: render (fail-open): %v\n", err)
-		return 0
+		return failSubagents("render", raw, err, stdout, stderr)
 	}
 	if _, err := io.WriteString(stdout, rows); err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: write output (fail-open): %v\n", err)

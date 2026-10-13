@@ -217,8 +217,6 @@ def foreman(data, records, entry):
     message = last_text(data, records)
     if '<compact-now>' in message:
         return 'allow-compact', None
-    if '<handoff>' in message:
-        return 'allow-handoff', None
     pending = pending_tasks(records)
     if pending:
         entry['pending'] = pending

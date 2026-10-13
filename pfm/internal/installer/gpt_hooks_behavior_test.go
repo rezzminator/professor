@@ -253,7 +253,6 @@ func TestGptAgentStopForemanBehavior(t *testing.T) {
 		{"command-wait", "Waiting for command", "allow-waiting", []map[string]any{commandCall, command}},
 		{"completed-child", "All done.", "block", []map[string]any{agentCall, launch, notice}},
 		{"compaction", "<compact-now>checkpoint</compact-now>", "allow-compact", nil},
-		{"handoff", "<handoff>units a-b done; next: unit c</handoff>", "allow-handoff", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

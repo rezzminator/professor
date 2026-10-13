@@ -15,7 +15,8 @@
       "gpt-foreman",
       "gpt-lander",
       "rr-super",
-      "terra"
+      "terra",
+      "ultimate"
     ],
     "retiredFiles": [
       ".codex/agents/explorer.toml"

@@ -15,7 +15,7 @@ effortControl:
   floor: medium
   ceiling: xhigh
   tripwires: redispatch
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, Skill
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down, Skill
 autoCompact:
   forceAt: 230k
   nudgeFrom: 190k

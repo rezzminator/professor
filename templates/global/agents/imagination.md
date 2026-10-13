@@ -1,7 +1,7 @@
 ---
 name: imagination
 description: 'IMAGINE-BUILD-ONLY Builds a spec into live work — visual, animated, published; pass the spec.md and brief.md paths, the build directory, the target and its limits. imagine → here → /imagine:build''s look. Returns BUILT, PARTIAL or BLOCKED, the spec lines changed, what was verified and on what, what was not.'
-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, ToolSearch, Artifact, mcp__sub-agent-compact__compact
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill, ToolSearch, Artifact, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: sonnet
 effort: xhigh
 ---

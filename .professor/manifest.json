@@ -95,10 +95,10 @@
     }
   },
   "file_hashes": {
-    ".claude/agents/changelogger.md": "2f0e0aeff57ae98ce3c04f9a0f57cdb853094c28c0560f4bedd2f13826fd36a6",
-    ".claude/agents/gitter.md": "50288f0991dcdf19bb3ebba88474651495704a45c4d0f113db89206a2ab33a77",
-    ".claude/agents/pcm.md": "6540e5573ef38575893446ed439c0dc1b002e846221457516fe88e95b17e0e12",
-    ".claude/agents/releaser.md": "6d8c5ad6a8005b185555656e45106e9add75cc935d8555f382d7e8021ecbf9c7",
+    ".claude/agents/changelogger.md": "58d12e232091259f8d7304e102676a6d6a88494467467a928b086c3607d7c4be",
+    ".claude/agents/gitter.md": "60f810e8e0caa140f2cab4b5df387a9fdd9f875f8e43811cd0728b8628024c52",
+    ".claude/agents/pcm.md": "ac0a9434d570d45eebfd0eaba93cb6012764aca97ca50d1214bcd993474c1cc9",
+    ".claude/agents/releaser.md": "d641b0cca1e582c7e05aebc73ed9e2564164c06c26fbe10907b9b9ed7cba4757",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
     ".claude/commands/pcm.md": "80ed770caa8bfc1b798c17427148e79912880e67609ca5076cd274473f68af9c",

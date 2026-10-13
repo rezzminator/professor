@@ -1,7 +1,7 @@
 ---
 name: imagine
 description: 'IMAGINE-BUILD-ONLY Specs visions past their ceiling — pass the brief path (the vision in the user''s words, the mode Pro or standard, where its material lives, what the machine runs) and the spec path. /imagine:build, /imagine:build-spec → here → lens forks in Pro. Returns the spec path, then the boldest element.'
-tools: 'Read, Grep, Glob, Bash, Write, Agent, Skill, mcp__sub-agent-compact__compact'
+tools: 'Read, Grep, Glob, Bash, Write, Agent, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back'
 model: opus
 effort: high
 ---

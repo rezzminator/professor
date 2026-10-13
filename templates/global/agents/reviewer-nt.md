@@ -2,7 +2,7 @@
 name: reviewer-nt
 from: reviewer
 description: reviewer without tracers on opus high
-tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__compact
+tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 unset:
   - skills
 pins:

@@ -3,7 +3,7 @@ name: gitter
 description: The ONLY agent that writes git. Phases SETUP, COMMIT, MERGE, DOCS-COMMIT, PUSH, PULL; no phase named = freeform git ask. Returns the phase confirmation. Pushes only when the caller's brief orders it.
 model: sonnet
 effort: high
-tools: Read, Write, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact
+tools: Read, Write, Bash, Glob, Grep, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 visibility:
   agents:
     include: [conflict-resolver]

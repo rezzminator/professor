@@ -228,7 +228,7 @@ func runChatSaveContext(
 		return fail("stat target: %v", err)
 	}
 	for _, entry := range entries {
-		if entry.Role == transcript.RoleUser && !entry.IsHandoffInstall() {
+		if entry.Role == transcript.RoleUser {
 			users++
 		}
 	}

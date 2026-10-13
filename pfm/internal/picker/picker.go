@@ -83,7 +83,7 @@ func Run(
 			flags.Usage()
 			return 2
 		}
-		return pfmchat.OpenID(context.Background(), flags.Arg(0), 0, stdout, stderr, &runtime)
+		return pfmchat.OpenID(context.Background(), flags.Arg(0), stdout, stderr, &runtime)
 	}
 
 	view := compose.DefaultView

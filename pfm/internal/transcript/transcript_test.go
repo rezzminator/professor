@@ -237,33 +237,6 @@ func TestLastExchangeIsEngineAgnosticAndKeepsTools(t *testing.T) {
 	}
 }
 
-// TestLastExchangeSkipsAHandoffInstallAndACompactSummary: the newest human
-// turn is the last thing a person said, not the plugin's reinstall of the
-// chat's own handoff (a plain user record opening the marker) and not the CLI's
-// compaction summary. The install stays in the response, a visible record.
-func TestLastExchangeSkipsAHandoffInstallAndACompactSummary(t *testing.T) {
-	content := `{"type":"user","message":{"content":"real question"}}
-{"type":"assistant","message":{"content":"before the reset"}}
-{"type":"user","isCompactSummary":true,"message":{"content":"This session is being continued from a summary"}}
-{"type":"user","message":{"content":"[sub-agent-compact: handoff] Your context was reset. Below is the handoff you wrote."}}
-{"type":"assistant","message":{"content":"after the reset"}}
-`
-	entries, err := All(context.Background(), writeTranscript(t, "install.jsonl", content), "cc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	prompt, response, ok := LastExchange(entries)
-	if !ok || len(prompt) != 1 || Condensed(prompt[0]) != "U real question" {
-		t.Fatalf("prompt=%#v ok=%t, want the real question", prompt, ok)
-	}
-	if len(response) != 3 || !response[1].IsHandoffInstall() || Condensed(response[2]) != "A after the reset" {
-		t.Fatalf("response=%#v, want answer, install, answer", response)
-	}
-	if prompt, _, ok := LastExchange(entries[len(entries)-2:]); ok || prompt != nil {
-		t.Fatalf("an install alone is no human turn: prompt=%#v ok=%t", prompt, ok)
-	}
-}
-
 func TestLastExchangeNamesPartialAndMissingShapesWithoutGuessing(t *testing.T) {
 	prompt, response, ok := LastExchange([]Entry{
 		{Role: RoleAssistant, Text: "orphan answer"},
@@ -480,7 +453,6 @@ func TestReadMetaClaudeCountsOnlyRealHumanPromptsAcrossWholeFile(t *testing.T) {
 `, 12000) + `{"type":"user","isMeta":true,"message":{"content":"metadata prompt"}}
 {"type":"user","isSidechain":true,"message":{"content":"sidechain prompt"}}
 {"type":"user","isCompactSummary":true,"message":{"content":"compact summary"}}
-{"type":"user","message":{"content":"[sub-agent-compact: handoff] Your context was reset. Below is the handoff you wrote."}}
 {"type":"user","message":{"content":"<system-reminder>injected</system-reminder>"}}
 {"type":"user","message":{"content":""}}
 {"type":"assistant","message":{"content":"not a prompt"}}

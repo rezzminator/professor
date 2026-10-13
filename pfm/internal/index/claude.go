@@ -86,7 +86,7 @@ func parseClaudeTranscriptFile(
 				return
 			}
 			prompt := claudetranscript.FlattenPromptText(json.RawMessage(record.Message.Content))
-			if prompt == "" || naming.IsJunkPrompt(prompt) || claudetranscript.IsHandoffInstallText(prompt) {
+			if prompt == "" || naming.IsJunkPrompt(prompt) {
 				return
 			}
 			if transcript.CWD == "" {

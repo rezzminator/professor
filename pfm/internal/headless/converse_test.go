@@ -498,31 +498,6 @@ func TestAwaitReadsAHandoffInstallAsNobodysTurn(t *testing.T) {
 	}
 }
 
-// TestAwaitCountsATailCarryingInstallOnce: the plugin's install of a handoff
-// with a kept tail is ONE user record (installHandoff returns brief?, framed,
-// ...tail; the framed message is a single user message) and Claude Code names
-// the kept messages by compactMetadata.preservedSegment, never rewriting them.
-// Whatever the tail is, the turn is one question, one answer, one sender.
-func TestAwaitCountsATailCarryingInstallOnce(t *testing.T) {
-	talk := newConversation(t)
-	talk.say(
-		user("my question"),
-		tool("handoff"),
-		`{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preservedSegment":{"headUuid":"h","anchorUuid":"a","tailUuid":"t"}}}`,
-		user("[sub-agent-compact: handoff] Your context was reset. Below is the handoff you wrote."),
-		tool("Read"),
-		assistant("the answer"),
-	)
-	turn, err := Await(context.Background(), talk.resolve, fastOptions())
-	if err != nil {
-		t.Fatalf("Await() error = %v", err)
-	}
-	if !turn.Delivered || turn.Superseded || turn.Answer != "the answer" || turn.Tools != 2 {
-		t.Fatalf("Delivered=%v Superseded=%v Answer=%q Tools=%d, want true false %q 2",
-			turn.Delivered, turn.Superseded, turn.Answer, turn.Tools, "the answer")
-	}
-}
-
 // TestAwaitReadsOneTranscriptOnceThroughTwoSpellings: the fleet names a fresh
 // Claude chat's transcript by its hook crumb's spelling until the index has
 // it, then by the index's — and with an account's projects/ symlinked to a

@@ -68,19 +68,15 @@ func runChatOpen(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (exitCode int) {
-	flags := cli.NewFlagSet("chat open", "usage: pfm chat open <target>", stderr)
-	if code, ok := cli.ParseFlags(flags, args); !ok {
+	target, account, code, ok := pfmchat.ParseOpenArgs(args, stderr)
+	if !ok {
 		return code
 	}
-	if flags.NArg() != 1 {
-		flags.Usage()
-		return 2
-	}
-	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtime)
+	chat, code := headlessTarget(context.Background(), target, stdout, stderr, false, runtime)
 	if code != 0 {
 		return code
 	}
-	return pfmchat.OpenID(context.Background(), chat.ID, stdout, stderr, &runtime)
+	return pfmchat.OpenID(context.Background(), chat.ID, account, stdout, stderr, &runtime)
 }
 
 func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (code int) {

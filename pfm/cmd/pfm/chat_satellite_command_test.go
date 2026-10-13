@@ -79,6 +79,31 @@ func TestChatSaveWithoutConfigDirUsesTheConfiguredRoot(t *testing.T) {
 	}
 }
 
+// TestChatSaveCountsOnlyHumanUserRecords: the "(N user records)" line counts
+// what a person said; the sub-agent-compact reinstall of the chat's own
+// handoff is a user record in the transcript but nobody's message.
+func TestChatSaveCountsOnlyHumanUserRecords(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "installed.jsonl")
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"user","message":{"content":"first question"}}`+"\n"+
+			`{"type":"assistant","message":{"content":"answer"}}`+"\n"+
+			`{"type":"user","message":{"content":"[sub-agent-compact: handoff] Your context was reset. Below is the handoff you wrote."}}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "saved.md")
+	var stdout, stderr bytes.Buffer
+	if code := runChatSave([]string{target, transcriptPath}, &stdout, &stderr, nil, commandRuntime{}); code != 0 {
+		t.Fatalf("save code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Appended transcript (1 user records)") {
+		t.Fatalf("stdout = %q, want one user record counted", stdout.String())
+	}
+}
+
 func TestChatSaveDispatchUsesScopedCallerRepository(t *testing.T) {
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "caller.jsonl")

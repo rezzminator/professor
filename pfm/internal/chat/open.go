@@ -3,9 +3,11 @@ package chat
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
@@ -96,10 +98,39 @@ func resolvedKillRequest(chat headless.Chat, exit bool) kill.Request {
 	}
 }
 
+// OpenUsage is the usage line of `pfm chat open`.
+const OpenUsage = "usage: pfm chat open <target> [--account N]"
+
+// ParseOpenArgs reads `pfm chat open`'s arguments: one target and, before or
+// after it, --account N — the configured account a dead chat resumes on (0, the
+// default, leaves the choice to the chat's last account). A value that is no
+// account number, or a missing or extra target, stops at exit code 2.
+func ParseOpenArgs(args []string, stderr io.Writer) (target string, account, exitCode int, ok bool) {
+	flags := cli.NewFlagSet("chat open", OpenUsage, stderr)
+	value := flags.Int("account", 0, "configured account to resume on (default: the account the chat last ran on)")
+	targets, code, parsed := cli.ParseFlagsAnywhere(flags, args)
+	if !parsed {
+		return "", 0, code, false
+	}
+	if len(targets) != 1 {
+		flags.Usage()
+		return "", 0, 2, false
+	}
+	given := false
+	flags.Visit(func(visited *flag.Flag) { given = given || visited.Name == "account" })
+	if given && *value < 1 {
+		fmt.Fprintf(stderr, "pfm chat open: --account takes an account NUMBER, not %d — "+
+			"see `pfm config show` for the configured accounts\n", *value)
+		return "", 0, 2, false
+	}
+	return targets[0], *value, 0, true
+}
+
 // OpenID resolves an indexed chat ID through a read-only fleet scan and opens it.
 func OpenID(
 	ctx context.Context,
 	id string,
+	account int,
 	stdout, stderr io.Writer,
 	runtime *config.Runtime,
 ) (exitCode int) {
@@ -129,10 +160,23 @@ func OpenID(
 				fmt.Fprintf(stderr, "pfm chat open: read primary account: %v\n", primaryErr)
 				return 1
 			}
+			resumed, resumePrimary, note, accountErr := resolveOpenAccount(
+				*row,
+				account,
+				effective.Config,
+				effective.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
+			)
+			if accountErr != nil {
+				fmt.Fprintf(stderr, "pfm chat open: %v\n", accountErr)
+				return 2
+			}
+			if note != "" {
+				fmt.Fprintf(stderr, "pfm chat open: %s\n", note)
+			}
 			return OpenRow(
 				ctx,
-				*row,
-				effective.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
+				resumed,
+				resumePrimary,
 				effective.Config.EffectiveClaude(primary).Cache1H,
 				"",
 				stdout,
@@ -143,6 +187,70 @@ func OpenID(
 	}
 	fmt.Fprintf(stderr, "pfm chat open: chat %q is not indexed\n", id)
 	return 1
+}
+
+// resolveOpenAccount decides the account a dead chat resumes on: the explicit
+// --account when given (it must be configured), else the account the chat last
+// ran on when that is recorded and configured, else the engine's primary — and
+// then note says so, so a resume never lands on an account unannounced. The
+// returned row carries the account (a Claude resume reads it from the row's
+// launch record) and primary is the account the open is requested on. Only a
+// Claude or Codex resume has such a choice: an explicit account for any other
+// row is refused rather than ignored, and those rows open as they were.
+func resolveOpenAccount(
+	row compose.Row,
+	explicit int,
+	machine config.Config,
+	primary int,
+) (resolved compose.Row, account int, note string, err error) {
+	var label string
+	var configured []int
+	var found func(int) bool
+	switch row.Kind {
+	case compose.ResumeClaude:
+		label, configured = "Claude", machine.AccountIDs()
+		found = func(id int) bool { _, ok := machine.Account(id); return ok }
+	case compose.ResumeCodex:
+		label, configured = "Codex", machine.CodexAccountIDs()
+		found = func(id int) bool { _, ok := machine.CodexAccountByID(id); return ok }
+	default:
+		if explicit != 0 {
+			return row, primary, "", fmt.Errorf(
+				"--account %d: chat %s is %s, not a Claude or Codex chat to resume; "+
+					"a live seat runs on the account it was born on",
+				explicit, row.ID, row.Kind,
+			)
+		}
+		return row, primary, "", nil
+	}
+	chosen := primary
+	switch {
+	case explicit != 0:
+		if !found(explicit) {
+			return row, primary, "", fmt.Errorf(
+				"no %s account %d is configured (configured: %s)",
+				label, explicit, joinAccountIDs(configured),
+			)
+		}
+		chosen = explicit
+	case row.Account != 0 && found(row.Account):
+		chosen = row.Account
+	case row.Account != 0:
+		note = fmt.Sprintf("recorded account %d of %s is not configured; resuming on account %d",
+			row.Account, row.ID, primary)
+	default:
+		note = fmt.Sprintf("no recorded account for %s; resuming on account %d", row.ID, primary)
+	}
+	row.Account = chosen
+	return row, chosen, note, nil
+}
+
+func joinAccountIDs(ids []int) string {
+	text := make([]string, 0, len(ids))
+	for _, id := range ids {
+		text = append(text, strconv.Itoa(id))
+	}
+	return strings.Join(text, ", ")
 }
 
 // ErrNotIndexed is OpenDetachedID's answer for an id the fleet scan does not

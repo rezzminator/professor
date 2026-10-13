@@ -20,8 +20,7 @@
   <a href="#install">Install</a> ·
   <a href="#the-discipline-layer-templates">Discipline layer</a> ·
   <a href="#the-fleet-cli-pfm">Fleet CLI</a> ·
-  <a href="#workflows-workflows">Workflows</a> ·
-  <a href="docs/BLUEPRINT.md">Blueprint</a>
+  <a href="#workflows-workflows">Workflows</a>
 </p>
 
 <p align="center">
@@ -169,7 +168,7 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 
 With `"gptAgents": true` under `claude` in the machine config `pfm.config.json`, `pfm install` also renders and links the GPT twins: `gpt-flights-foreman`, `gpt-foreman-pro` (xhigh), `gpt-flights-lander`, `gpt-reviewer`, `gpt-reviewer-pro`, `gpt-flights-mechanical-executor`, and the general-purpose `sol`, `luna`, `astra`. Invoking them requires a gateway serving their model IDs; installation does not. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) is that gateway: a local passthrough that routes the GPT model IDs over your ChatGPT login, installed on its own from its repository. [GPT twin setup and ownership](docs/design/gpt-twins/gpt-twins.md).
 
-Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**
+Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf.
 
 ---
 

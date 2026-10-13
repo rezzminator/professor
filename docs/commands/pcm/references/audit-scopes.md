@@ -33,7 +33,7 @@ Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — incl
 
 ## `templates` — Walk the shipped product
 
-Files: `templates/**`, `docs/{BLUEPRINT,SETUP,PLACEHOLDERS,RELEASE}.md`, `templates/refresh-map.json`, root `README.md`
+Files: `templates/**`, `docs/{SETUP,PLACEHOLDERS,RELEASE}.md`, `templates/refresh-map.json`, root `README.md`
 
 This is the scope with adopters downstream of it — a FAIL here ships.
 
@@ -41,7 +41,7 @@ This is the scope with adopters downstream of it — a FAIL here ships.
 - **Verdict tokens ↔ their writers:** every token a `/flights:*` command (`templates/global/commands/flights/`) cites (`CLAIMED`, `DONE`, `PARTIAL`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `COMA`) is one `flights-foreman`, `flights-mechanical-executor` or `/flights:orchestrate-cross-harness` writes
 - **Placeholder integrity:** every `{TOKEN}` in a template is registered in `PLACEHOLDERS.md`; every registered token is used or knowingly retired; no template carries a source-project value where a token belongs
 - **SETUP coverage:** every file under `templates/` has a write step in `SETUP.md`; every path `SETUP.md` writes has a template
-- **Cast consistency:** `README.md` and `BLUEPRINT.md` agent/command/skill lists match a live `ls` of `templates/project/agents/` and `templates/project/commands/`
+- **Cast consistency:** `README.md` agent/command/skill lists match a live `ls` of `templates/project/agents/` and `templates/project/commands/`
 - **Refresh map:** every mapped template's live source path is stated; UNMAPPED templates are named (`refresh-scope.sh scan` is the mechanical check — run it and report its output verbatim, including whether it ran at all)
 - **Leak sweep:** `scripts/leak-check.sh --files <changed templates>` — brand, PII, machine-absolute paths. Report the command's own exit status; a check that did not run is never a PASS
 - **Size limits:** no command template >35KB, no agent template >15KB

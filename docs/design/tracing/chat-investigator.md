@@ -102,4 +102,3 @@ Two candidates lost on the large rung and were reverted. Barring the investigato
 | The digest it reads through | `pfm transcript` (`pfm/internal/transcript/digest/`) and `templates/global/skills/chatlog/SKILL.md` |
 | The timeline and dollar source | `pfm tokens --timeline` |
 | Name, sub-agent and liveness lookups | `pfm transcript locate`, `pfm transcript agents`, `pfm ls --all --tsv` |
-| The roster line and the chatlog skill's readers | `docs/BLUEPRINT.md` |

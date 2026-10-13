@@ -48,7 +48,7 @@ Tier 1 is the adopter contract; its paths are the only ones a release reviews in
 | --- | --- |
 | `templates` | `templates/`, `pfm/harness-prompts/` |
 | `pfm-update` | `pfm/internal/{update,updatecheck,installer,enginesync,globallink,codexappendix,claudelaunch,harvestpy,doctor,config,professor,codexprompt,picker,mcpserv,harvestmcp}/`; files under `pfm/cmd/pfm/` whose name starts with `install`, `uninstall`, `update`, `init`, `doctor`, `config` or `mcp_serve` |
-| `public` | `README.md`, `INSTALL.md`, `CHANGELOG.md`, `docs/SETUP.md`, `docs/RELEASE.md`, `docs/BLUEPRINT.md`, `docs/PLACEHOLDERS.md` |
+| `public` | `README.md`, `INSTALL.md`, `CHANGELOG.md`, `docs/SETUP.md`, `docs/RELEASE.md`, `docs/PLACEHOLDERS.md` |
 | `gates` | `.github/`, `.githooks/`, `scripts/`, `infra/fence/release-rehearsal.sh`, `infra/check-self-hosted-manifest.sh` |
 
 Everything else is tier 2.

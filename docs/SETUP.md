@@ -44,7 +44,7 @@ claude
 
 Claude runs Phase 1 (questions), Phase 2 (local adaptation), then Phase 3 (smoke test). You answer about 10 questions. Claude does the rest.
 
-**The manual path:** run `pfm init`, read `BLUEPRINT.md` and `PLACEHOLDERS.md`, write the install-time values into the `tokens` object of `.professor/manifest.json` and render them once with `pfm init --render`, then adapt what its `LEFT` lines name and pin any additional template mappings by hand. Slower but doable.
+**The manual path:** run `pfm init`, read `PLACEHOLDERS.md`, write the install-time values into the `tokens` object of `.professor/manifest.json` and render them once with `pfm init --render`, then adapt what its `LEFT` lines name and pin any additional template mappings by hand. Slower but doable.
 
 ---
 
@@ -194,7 +194,7 @@ If no, skip.
 
 > Do you also use OpenAI Codex? (Everything works without it — this adds a second runtime for cheaper implementation.)
 
-If yes: the interview creates `.codex/` as a pointer layer over the project's local Claude sources, then runs `pfm codex build` and `pfm codex check`, which forward to engine-sync, the compiler of the Codex and OpenCode mirrors. `AGENTS.md`, command and skill pointers, and `.codex/agents/*.toml` are generated; `config.toml` and `rules/*.rules` keep their hand-written portions. Claude and Codex read the same Professor contract; the pointer layer translates mechanics, not identity. Either runtime can orchestrate when invoked with the matching command surface.
+If yes: the interview creates `.codex/` as a pointer layer over the project's local Claude sources, then runs `pfm codex build` and `pfm codex check`, which forward to engine-sync, the compiler of the Codex and OpenCode mirrors. `AGENTS.md`, command and skill pointers, and `.codex/agents/*.toml` are generated; `config.toml` and `rules/*.rules` keep their hand-written portions. Claude and Codex read the same Professor contract; the pointer layer translates mechanics, not identity. Either runtime can orchestrate when invoked with the matching command surface. `pfm install` links Professor's engine-sync policy, `templates/global/engine-sync/config.json`, into engine-sync's config directory; a project's own overrides go in `.claude/engine-sync.json`.
 
 If no: skip — the entire Codex layer is omitted. No pipeline operation requires it.
 
@@ -476,7 +476,7 @@ Same for adding a new Tier A archetype if you build one — `/pcm` copies the te
 
 ## After install
 
-- Read `BLUEPRINT.md` § "The five load-bearing walls" — these don't change, ever.
+- Keep the installed root `CLAUDE.md` § Sacred ground as it stands: only `gitter` writes git, code changes on worktree branches only, nothing merges before its gate.
 - Verify the statusline shows model, fleet counts, context %, and git branch in a pfm-launched Claude chat; its command rides the launch settings. `pfm doctor` names missing or displaced host wiring.
 - Run `/flights:spec` for new features, then one of the `/flights:orchestrate-*` commands to fly it. Run `/pcm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
 

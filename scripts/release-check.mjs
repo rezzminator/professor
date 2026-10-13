@@ -85,7 +85,6 @@ const TIER1 = [
       "CHANGELOG.md",
       "docs/SETUP.md",
       "docs/RELEASE.md",
-      "docs/BLUEPRINT.md",
       "docs/PLACEHOLDERS.md",
     ],
   },

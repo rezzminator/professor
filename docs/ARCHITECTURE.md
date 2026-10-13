@@ -1,6 +1,6 @@
 # ARCHITECTURE — source, render, install, update
 
-How Professor's files get from this repo onto a machine, who is allowed to write where, and how the same content serves two harnesses and any number of hosts without forking. `BLUEPRINT.md` is the philosophy; this is the mechanics. Sections marked **(designed)** describe the committed direction not yet fully built; everything else is shipping.
+How Professor's files get from this repo onto a machine, who is allowed to write where, and how the same content serves two harnesses and any number of hosts without forking. Sections marked **(designed)** describe the committed direction not yet fully built; everything else is shipping.
 
 ## Table of contents
 

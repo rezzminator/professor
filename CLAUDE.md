@@ -8,7 +8,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - project tier: templates `pfm init` scaffolds into an adopter once and pins in `{adopter}/.professor/baseline.json`; the adopter's local file is the truth, and pfm never rewrites it after init · `templates/project/`
 - project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for retired references in project files, including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, and closes every row with `pfm update {adopt|pin|ignore|drop|accept}` (`pin --keep` records a deliberate non-port, `accept` a retired-name hit that stays) until the report ends `clean` · `pfm/internal/professor/`, `pfm/internal/update/`
 - placeholder: the registered token for a project-specific value in a template · `docs/PLACEHOLDERS.md`
-- specs: the framework's philosophy and generation law · `docs/BLUEPRINT.md`, `docs/SETUP.md`
+- spec: the adopter install interview and generation law · `docs/SETUP.md`
 - design docs: one directory per family, indexed by its `_index.md` · `docs/design/{family}/`
 - refresh: the `/pfm:release prepare --from {live-project}` pass re-deriving `templates/project/**` from a live project; without it, hand-authored template edits ship as they are · `templates/refresh-map.json`, `scripts/refresh-scope.sh`, `scripts/genericize.sh`
 - public face: the files a visitor or adopter reads first · `README.md`, `INSTALL.md`, `CHANGELOG.md`, `VERSION`, `releases/v{X.Y.Z}.md`
@@ -118,7 +118,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Every check names what its own broken state reports: a gate answering "fine" both healthy and broken is a coincidence detector.
 - An error never renders as absence: "nothing there" and "we failed to look" read differently at the visible surface; logging alone is not sufficient.
 - The judge is never the thing being judged: read the artifact from disk, never a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran, and the parent reports which.
-- Surgical changes: every changed line traces to the task; fix broken things you hit; remove dead code, references and deps end to end, including `README.md`, `docs/BLUEPRINT.md`, `docs/SETUP.md` and `templates/refresh-map.json`.
+- Surgical changes: every changed line traces to the task; fix broken things you hit; remove dead code, references and deps end to end, including `README.md`, `docs/SETUP.md` and `templates/refresh-map.json`.
 - No duplication: grep for the existing rule, section or script and reference it; a near-copy drifts.
 - Twins move together: a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass, the commit message carrying the adopter-facing change; a customization only this repo wants stays local; unsure → ask.
 - Right-size and finish: the simplest thing that works, no speculative abstractions, no stubs or deferred TODOs; where correct and convenient diverge, take correct, even at re-architecting cost.

@@ -173,16 +173,11 @@ func OpenID(
 			if note != "" {
 				fmt.Fprintf(stderr, "pfm chat open: %s\n", note)
 			}
-			// A Claude resume carries the cache window of the account it lands on.
-			cacheAccount := primary
-			if resumed.Kind == compose.ResumeClaude {
-				cacheAccount = resumePrimary
-			}
 			return OpenRow(
 				ctx,
 				resumed,
 				resumePrimary,
-				effective.Config.EffectiveClaude(cacheAccount).Cache1H,
+				effective.Config.EffectiveClaude(primary).Cache1H,
 				"",
 				stdout,
 				stderr,
@@ -213,16 +208,16 @@ func resolveOpenAccount(
 	var found func(int) bool
 	switch row.Kind {
 	case compose.ResumeClaude:
-		label, configured = pfmengine.MustLookup(pfmengine.Claude).Short, machine.AccountIDs()
+		label, configured = "Claude", machine.AccountIDs()
 		found = func(id int) bool { _, ok := machine.Account(id); return ok }
 	case compose.ResumeCodex:
-		label, configured = pfmengine.MustLookup(pfmengine.Codex).Short, machine.CodexAccountIDs()
+		label, configured = "Codex", machine.CodexAccountIDs()
 		found = func(id int) bool { _, ok := machine.CodexAccountByID(id); return ok }
 	default:
 		if explicit != 0 {
 			return row, primary, "", fmt.Errorf(
 				"--account %d: chat %s is %s, not a Claude or Codex chat to resume; "+
-					"only a dead Claude or Codex chat resumes on a chosen account",
+					"a live seat runs on the account it was born on",
 				explicit, row.ID, row.Kind,
 			)
 		}
@@ -416,17 +411,9 @@ func openDetachedRow(
 			row.CWD = effective.Paths.Home
 		}
 	}
-	// A dead Claude chat resumes on the account it ran on (action's
-	// deadClaudeAccount), so its cache window is that account's.
-	cacheAccount := primary
-	if row.Kind == compose.ResumeClaude && row.Account != 0 {
-		if _, found := effective.Config.Account(row.Account); found {
-			cacheAccount = row.Account
-		}
-	}
 	executor, request, claim, err := prepareOpen(
 		ctx,
-		row, primary, effective.Config.EffectiveClaude(cacheAccount).Cache1H, "", stderr, effective,
+		row, primary, effective.Config.EffectiveClaude(primary).Cache1H, "", stderr, effective,
 	)
 	if err != nil {
 		return action.OpenResult{}, err

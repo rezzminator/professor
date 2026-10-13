@@ -171,12 +171,10 @@ func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
 		filepath.Join(home, ".cc", "2", "projects"),
 		filepath.Join(home, ".cc", "3", "projects"),
 	})
-	for index, account := range runtime.Config.Accounts {
+	for _, account := range runtime.Config.Accounts {
 		if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		// The primary keeps the 1h cache window, the recorded account the 5m one.
-		runtime.Config.Accounts[index].Claude = &config.ClaudePrefs{Cache1H: account.ID == 2}
 	}
 	if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, 2); err != nil {
 		t.Fatal(err)
@@ -195,9 +193,6 @@ func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
 	wantDir := filepath.Join(home, ".cc", "3")
 	if len(tmux.created) != 1 || !strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+action.Quote(wantDir)) {
 		t.Fatalf("created = %+v; want account 3 config %q", tmux.created, wantDir)
-	}
-	if !strings.Contains(tmux.created[0].Run, "CACHE_LIVE_CONTROL_MAIN_TTL="+action.Quote("5m")) {
-		t.Fatalf("created run = %q; want account 3's cache window 5m", tmux.created[0].Run)
 	}
 	launches, err := fleetdb.OpenLaunches(ctx, runtime.Paths)
 	if err != nil {
@@ -791,20 +786,10 @@ func TestOpenIDResumesOnTheAccountItRanOnUnlessToldOtherwise(t *testing.T) {
 		wantDir    int // 0: nothing may spawn
 		wantCode   int
 		wantStderr string
-		cache1H    map[int]bool // per-account Claude Cache1H; the resume carries the chosen account's
-		wantTTL    string
 	}{
 		{name: "recorded account wins over the primary", launched: 3, wantDir: 3},
 		{name: "explicit account wins over the record", launched: 3, account: 1, wantDir: 1},
 		{name: "explicit account with no record", account: 3, wantDir: 3},
-		{
-			name: "an explicit account resumes with its own cache window, not the primary's", account: 3, wantDir: 3,
-			cache1H: map[int]bool{2: true, 3: false}, wantTTL: "5m",
-		},
-		{
-			name: "a recorded account resumes with its own cache window, not the primary's", launched: 1, wantDir: 1,
-			cache1H: map[int]bool{1: true, 2: false}, wantTTL: "1h",
-		},
 		{
 			name: "no record keeps the primary and names it", wantDir: 2,
 			wantStderr: "no recorded account for %s; resuming on account 2",
@@ -822,11 +807,6 @@ func TestOpenIDResumesOnTheAccountItRanOnUnlessToldOtherwise(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			const id = "e3333333-3333-4333-8333-333333333333"
 			runtime := openAccountRuntime(t, id, tc.launched)
-			for index, account := range runtime.Config.Accounts {
-				if cache, ok := tc.cache1H[account.ID]; ok {
-					runtime.Config.Accounts[index].Claude = &config.ClaudePrefs{Cache1H: cache}
-				}
-			}
 			tmux := &fakeOpenTmux{alive: map[string]bool{}}
 			stubOpenExecutor(t, tmux)
 			var stdout, stderr bytes.Buffer
@@ -847,15 +827,6 @@ func TestOpenIDResumesOnTheAccountItRanOnUnlessToldOtherwise(t *testing.T) {
 			if len(tmux.created) != 1 ||
 				!strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+action.Quote(wantDir)) {
 				t.Fatalf("created = %+v; want account %d config %q", tmux.created, tc.wantDir, wantDir)
-			}
-			if tc.wantTTL != "" &&
-				!strings.Contains(tmux.created[0].Run, "CACHE_LIVE_CONTROL_MAIN_TTL="+action.Quote(tc.wantTTL)) {
-				t.Fatalf(
-					"created run = %q; want account %d's cache window %s",
-					tmux.created[0].Run,
-					tc.wantDir,
-					tc.wantTTL,
-				)
 			}
 		})
 	}

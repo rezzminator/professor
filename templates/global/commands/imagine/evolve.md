@@ -19,7 +19,7 @@ Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/
 
 ## E2 — Lineage and the user's factors
 
-Spawn two `Agent(subagent_type: "imagine-historian")` in one message, each naming `{run}`, the repository root and the target's files and names: one in mode `LINEAGE`, one in mode `FACTORS`. End your message; the returns arrive. Read `{run}/lineage.md` and `{run}/factors.md` whole: the files are the evidence, the returns claims.
+Spawn two `Agent(subagent_type: "imagine-historian")` in one message, two jobs, each naming `{run}`, the repository root and the target's files and names: one in mode `LINEAGE`, one in mode `FACTORS`. End your message; the returns arrive. Read `{run}/lineage.md` (one line per era) and `{run}/factors.md` whole: the files are the evidence, the returns claims. `{run}/lineage.json` is queried, never read whole; a version's text is its `git_show: {sha}:{path}` coordinate, never a copy.
 
 ## E3 — Choose the metrics
 
@@ -40,11 +40,11 @@ Discover at run time every place that could hold a run of a lineage name; what f
 - pfm's cost ledger
 - the repository's reviewer and agent-optimizer reports
 
-Spawn one `imagine-historian` per source found, mode `MINE {source}`, every one in one message, each naming the source's location, `{run}/lineage.json` and `{run}/metrics.md`. End your message; the returns arrive. Dispatched and returned are counted; a missing return is a source failed to read, named.
+Spawn one `imagine-historian`, mode `MINE`, naming every source found with its location, `{run}/names.json`, `{run}/metrics.md` and `~/.claude/skills/imagine-core/mining.md`: its scripts and readers carry the bulk, so one gatherer covers every source. Split off a second, in the same message, only for a source that cannot fit one context even through scripts and readers — two at most, since each repeats the census and the run join. End your message; the returns arrive. Dispatched and returned are counted; a missing return is its sources failed to read, named.
 
 ## E5 — Reconcile
 
-Spawn one `imagine-historian`, mode `RECONCILE`, naming `{run}`. Read `{run}/versions.json` and `{run}/coverage.md` whole.
+Spawn one `imagine-historian`, mode `RECONCILE`, naming `{run}`, with `effort: "high"`: it resolves conflicting numbers across sources. Read `{run}/versions.json` and `{run}/coverage.md` whole.
 
 ## E6 — See it
 

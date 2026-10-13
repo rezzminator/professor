@@ -18,7 +18,7 @@ Load the `imagine-core` skill first — the Skill tool, or a Read of `~/.claude/
 
 ## Before the build
 
-1. The core's § Live and visual work target proof for an Artifact. One that fails is said now, before anything is built, with one question: build a self-contained HTML file instead?
+1. The target proof of the core's `live.md` (`~/.claude/skills/imagine-core/live.md`) for an Artifact. One that fails is said now, before anything is built, with one question: build a self-contained HTML file instead?
 2. Load the `callmeter` skill (`/callmeter:callmeter`, from the callmeter plugin) for how to open the store: a snapshot copy, read-only, never the live file, never a write. Take the snapshot. If the skill will not load, say so and stop before reading the store.
 3. Explore the snapshot and look at it. Find out what it holds, how the pieces connect, how it changed over the days, what is unusual. Read real rows and real distributions, print samples of structure, and look at the numbers themselves, not only their totals. The idea comes from what the data actually shows: a visualization chosen from the schema alone is a guess.
 

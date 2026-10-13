@@ -22,12 +22,12 @@ You are the one maker of the core's § Make: every unit is yours — the data pi
 ## Before the first file
 
 1. Read the spec and brief whole, once; then the core's § The material on what the spec builds on.
-2. The core's § Live and visual work: its target proof failing, or a target waiting on `/design`, returns `BLOCKED` with the settings file and line, or the command for the user to type.
+2. The core's `live.md` (`~/.claude/skills/imagine-core/live.md`): its target proof failing, or a target waiting on `/design`, returns `BLOCKED` with the settings file and line, or the command for the user to type.
 3. Write `{build directory}/CHECKPOINT.md`: the target, its limits as the type states them, done, left, rulings, facts.
 
 ## Build
 
-Make, look and publish under the core's § Make, § Look and raise, § Live and visual work and § Deliver.
+Make, look and publish under the core's § Make, § Look and raise, `live.md` and § Deliver.
 
 - `CHECKPOINT.md` is updated after every artboard or milestone and before every compaction; resume from it, never from a fresh read of the spec. At a compaction nudge, finish the step in hand, then `mcp__sub-agent-compact__compact` with its `focus`: the checkpoint path, the spec sections in hand, the next step.
 

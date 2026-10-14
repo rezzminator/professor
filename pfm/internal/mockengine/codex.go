@@ -630,7 +630,7 @@ func (session *codexSession) mcp(step Step) error {
 func (session *codexSession) callMCP(step Step) (*mcp.CallToolResult, error) {
 	name := step.Server
 	if name == "" {
-		name = pfmconfig.MCPServerProfessor
+		name = pfmconfig.MCPRegistrationName(pfmconfig.MCPServerChat)
 	}
 	var config struct {
 		Servers map[string]struct {

@@ -1,4 +1,4 @@
-# pfm — the Go fleet engine: one binary that indexes, lists, names, kills, attaches, injects and drives every live and resumable Claude Code and Codex chat on the box
+# pfm — the Go fleet engine: one binary that indexes, lists, names, kills, attaches, calls and drives every live and resumable Claude Code and Codex chat on the box
 
 It reads and writes the user's real chat state: a destructive operation on a live socket is not recoverable by a rerun, so verify the target resolves before acting, and prefer refusing to guessing.
 
@@ -71,7 +71,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - Every Claude launch flag, env value and `--settings` key comes from the launch registry alone; a launch literal elsewhere fails `TestNoLaunchLiteralOutsideRegistry`.
 - A seat is identified by lineage, not file recency: Codex writes subagent threads into `~/.codex/sessions` beside real seats, marked `thread_source: subagent` with a `parent_thread_id`; code reading the rollout tree directly checks those two fields first.
 - Identity is derived where the chat is, not where the message is delivered: a detached process (the `--then` waiter, any dispatcher a chat backgrounds) is reparented, and a Codex tool shell has neither `$TMUX` nor a session id — it derives nothing, and its message goes out unsigned.
-- A chat states its own identity through `CHAT_SENDER_SESSION` / `CHAT_SENDER_LABEL` / `CHAT_SENDER_SID`, which `inject` reads from its own environment only — a chat states who it is, never who somebody else is.
+- A chat states its own identity through `CHAT_SENDER_SESSION` / `CHAT_SENDER_LABEL` / `CHAT_SENDER_SID`, which `call` reads from its own environment only — a chat states who it is, never who somebody else is.
 - A seat driven by `codex app-server` has no tmux ancestry: its identity comes from `CODEX_THREAD_ID` through the fleet's thread→socket binding, the last rung, since that variable is inherited and never renames a process that has a pane of its own.
 - A probe that could not run returns an error, not "nothing found": a pane capture on the wrong socket reads as a quiet chat, and `kill -0` cannot tell a healthy waiter from a reparented deaf one — build the distinguishing signal into the probe; the most common defect class here.
 - Errors wrap with context (`fmt.Errorf("…: %w", err)`): a swallowed error in a gather path renders as a missing chat row, which reads as "no such chat".

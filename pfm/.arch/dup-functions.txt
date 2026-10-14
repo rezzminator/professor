@@ -3,7 +3,7 @@ command: internal/codexappendix/codexappendix.go internal/tmux/tmux.go
 defaults: internal/config/config.go internal/spawn/types.go
 find: internal/chat/find.go internal/stale/stale.go
 load: internal/config/config.go internal/professor/baseline.go internal/theme/theme.go
-new: internal/action/executor.go internal/agentopen/agentopen.go internal/archive/archive.go internal/gather/gather.go internal/harvest/types.go internal/heal/runner.go internal/index/index.go internal/inject/engine.go internal/kill/manager.go internal/reap/runner.go internal/resolve/resolve.go
+new: internal/action/executor.go internal/agentopen/agentopen.go internal/archive/archive.go internal/call/engine.go internal/gather/gather.go internal/harvest/types.go internal/heal/runner.go internal/index/index.go internal/kill/manager.go internal/reap/runner.go internal/resolve/resolve.go
 openreadonly: internal/heal/heal.go internal/sqlitedb/sqlitedb.go
 parse: internal/claudelaunch/parse.go internal/engine/engine.go internal/recovery/recovery.go internal/transcript/transcript.go
 render: internal/claudelaunch/render.go internal/statusline/render.go

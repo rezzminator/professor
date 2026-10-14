@@ -306,16 +306,18 @@ func mcpConfig(home string, machine pfmconfig.Config) map[string]any {
 	for name, entry := range machine.MCP.ThirdParty {
 		servers[name] = entry
 	}
-	if !machine.MCPServers[pfmconfig.MCPServerChat].Enabled &&
-		!machine.MCPServers[pfmconfig.MCPServerHarvester].Enabled {
-		if len(servers) != 0 {
-			return servers
+	for _, family := range []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester} {
+		if !machine.MCPServers[family].Enabled {
+			continue
 		}
-		return nil
+		servers[pfmconfig.MCPRegistrationName(family)] = map[string]any{
+			typeWord:    "stdio",
+			commandWord: filepath.Join(home, ".local", "bin", "pfm"),
+			"args":      []string{knobMCP, "serve", "--stdio", "--family", family},
+		}
 	}
-	servers[pfmconfig.MCPServerProfessor] = map[string]any{
-		typeWord: "stdio", commandWord: filepath.Join(home, ".local", "bin", "pfm"),
-		"args": []string{knobMCP, "serve", "--stdio"},
+	if len(servers) == 0 {
+		return nil
 	}
 	return servers
 }

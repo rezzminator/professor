@@ -17,7 +17,7 @@ For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`
 Operator verbs:
 
 - ls: list or pick fleet chats (`--killed` for the graveyard)
-- chat: operate on one chat — new, open, status, last, read, stream, inject, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, schedule
+- chat: operate on one chat — new, open, status, last, read, stream, call, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, schedule
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
 - index: refresh the transcript index
@@ -58,11 +58,11 @@ engine-sync, the `engine-sync` plugin's binary that `pfm codex build [repo-root]
 
 ## Chat: MCP first, shell for the rest
 
-Inside a chat, the `chat_*` MCP tools are the preferred surface for inject, read, digest, last, find, ls, status, whoami, new, and save (`chat_inject`, `chat_read`, `chat_digest`, `chat_last`, `chat_find`, `chat_ls`, `chat_status`, `chat_whoami`, `chat_new`, `chat_save`). `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat inject` refuses `/compact`: pfm never types a compaction. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
+Inside a chat, the `mcp__chat-professor__*` MCP tools are preferred for `call`, `read`, `digest`, `last`, `find`, `ls`, `status`, `whoami`, `new`, and `save`. `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat call` refuses `/compact`: pfm never types a compaction. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
 
 ## Harvest: MCP first, CLI for batches
 
-Inside a chat, the professor MCP's `harvester_*` tools (`harvester_read` (its `files` field local server only), `harvester_download_file`, `harvester_search_literature`, `harvester_search_web` (only when a search backend is configured)) answer per item; `pfm harvest [--refresh] [--include-content=false] [--ocr-language latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|path|identifier>...`, `pfm harvest download-file [--json] [--header 'Name: value']... <url>...` and `pfm harvest search [--type any|paper|book] [--limit N] [--json] <query>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
+Inside a chat, the `mcp__harvester-professor__*` tools (`mcp__harvester-professor__read` (its `files` field local server only), `mcp__harvester-professor__download_file`, `mcp__harvester-professor__search_literature`, `mcp__harvester-professor__search_web` (only when a search backend is configured)) answer per item; `pfm harvest [--refresh] [--include-content=false] [--ocr-language latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|path|identifier>...`, `pfm harvest download-file [--json] [--header 'Name: value']... <url>...` and `pfm harvest search [--type any|paper|book] [--limit N] [--json] <query>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
 
 ## Config
 

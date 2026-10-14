@@ -17,7 +17,7 @@ const askFixturePage = "https://example.test/ask"
 
 var askSizeLine = regexp.MustCompile(`size: \d+ chars, ~\d+ tokens`)
 
-// TestReadAskAnswersOverTheItems: harvester_read{ask} asks one question over
+// TestReadAskAnswersOverTheItems: read{ask} asks one question over
 // the call's items through a fake Claude binary — defaults claude + haiku,
 // the answer after the item blocks, which carry their size unless
 // include_content is true. engine or model without ask, an unknown engine, an

@@ -6,7 +6,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
-// TestBoundTurnsCarriesToolCalls is a REGRESSION test for chat_read over a
+// TestBoundTurnsCarriesToolCalls is a REGRESSION test for read over a
 // stretch of tool work: transcript.Entry carries a tool call as Tool + Input
 // with an empty Text, and boundTurns copied only Text — so a read of the four
 // newest turns returned four {"role":"tool","text":""} blanks and bytes=0,

@@ -233,7 +233,7 @@ func TestReadMisplacedItemFailsAloneNamingTheField(t *testing.T) {
 		}
 	}
 	for block, want := range map[int]string{
-		3: "put it in urls", 4: "put it in publications", 5: "put it in files", 6: "`harvester_search_literature`",
+		3: "put it in urls", 4: "put it in publications", 5: "put it in files", 6: "`search_literature`",
 	} {
 		if !strings.Contains(blocks[block], want) {
 			t.Errorf("block %d = %q, want it to name %q", block+1, blocks[block], want)
@@ -441,7 +441,7 @@ func TestReadAnswersOneTextBlockPerItem(t *testing.T) {
 				"=== [1/4] https://example.test/partial\n{path}\npartial: login wall; 3 of 9 comments loaded\n" + trimmed,
 				"=== [2/4] /tmp/paper.pdf\nerror: this is a local path; put it in files.",
 				"=== [3/4] " + missing + "\nerror: ",
-				"=== [4/4] a title with spaces\nerror: this looks like a title; find it with `harvester_search_literature`, " +
+				"=== [4/4] a title with spaces\nerror: this looks like a title; find it with `search_literature`, " +
 					"then put its handle in publications.",
 			},
 		},

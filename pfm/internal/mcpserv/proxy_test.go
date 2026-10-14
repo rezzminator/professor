@@ -58,12 +58,12 @@ func proxyTestAddress(server *httptest.Server) string {
 }
 
 func proxyTestDaemon(service *Service) http.Handler {
-	professor, err := NewProfessor(ProfessorOptions{Version: "test", Chat: service})
+	professor, err := NewFamilyServers(FamilyServerOptions{Version: "test", Chat: service})
 	if err != nil {
 		panic(fmt.Sprintf("proxyTestDaemon: %v", err)) // a non-nil chat family never errors
 	}
 	return NewDaemonHandler(DaemonOptions{
-		Version: "test", Endpoint: "test", Professor: professor.Handler(),
+		Version: "test", Endpoint: "test",
 		Chat:                professor.FamilyHandler(pfmconfig.MCPServerChat),
 		ChatRuntimeIdentity: service.RuntimeIdentity(),
 	})
@@ -124,14 +124,14 @@ func TestStdioProxyReinitializesAfterDaemonReplacement(t *testing.T) {
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	harness.write(t, proxyTestToolCall(2, "chat_new", `{"name":"before"}`))
+	harness.write(t, proxyTestToolCall(2, "new", `{"name":"before"}`))
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "old" {
 		t.Fatalf("call before replacement = %v, want old", got)
 	}
 	mutex.Lock()
 	current = proxyTestDaemon(newService)
 	mutex.Unlock()
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"after"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"after"}`))
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "new" {
 		t.Fatalf("call after replacement = %v, want new", got)
 	}
@@ -182,7 +182,7 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryDelay = time.Millisecond
 	proxy.sessionID = oldSession
@@ -195,7 +195,7 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 		go func() {
 			_, err := proxy.sendWithRetry(
 				context.Background(),
-				[]byte(proxyTestToolCall(2, "chat_status", `{"target":"seat"}`)),
+				[]byte(proxyTestToolCall(2, "status", `{"target":"seat"}`)),
 				false,
 			)
 			results <- err
@@ -269,7 +269,7 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 		return response, nil
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -351,7 +351,7 @@ func TestStdioProxyBoundsUnavailableDaemonPerRequest(t *testing.T) {
 	server.Close()
 
 	started := time.Now()
-	harness.write(t, proxyTestToolCall(7, "chat_new", `{"name":"down"}`))
+	harness.write(t, proxyTestToolCall(7, "new", `{"name":"down"}`))
 	response := harness.read(t)
 	if response["id"] != float64(7) {
 		t.Fatalf("bounded error id = %#v, want 7", response["id"])
@@ -390,7 +390,7 @@ func TestStdioProxyDoesNotReplayMutationAfterResponseEOF(t *testing.T) {
 
 	_, err := proxy.sendWithRetry(
 		context.Background(),
-		[]byte(proxyTestToolCall(2, "chat_new", `{"name":"child"}`)),
+		[]byte(proxyTestToolCall(2, "new", `{"name":"child"}`)),
 		false,
 	)
 	if err == nil || !strings.Contains(err.Error(), "was not replayed") {
@@ -426,7 +426,7 @@ func TestStdioProxyDoesNotReplayMutationAfterInvalidSuccessResponse(t *testing.T
 
 			_, err := proxy.sendWithRetry(
 				context.Background(),
-				[]byte(proxyTestToolCall(2, "chat_new", `{"name":"child"}`)),
+				[]byte(proxyTestToolCall(2, "new", `{"name":"child"}`)),
 				false,
 			)
 			if err == nil || !strings.Contains(err.Error(), "was not replayed") {
@@ -454,7 +454,7 @@ func TestStdioProxyAllowsHealthyCallsPastRetryWindow(t *testing.T) {
 	proxy.retryWindow = 30 * time.Millisecond
 	if _, err := proxy.sendWithRetry(
 		context.Background(),
-		[]byte(proxyTestToolCall(2, "chat_status", `{"target":"seat","ask":true}`)),
+		[]byte(proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`)),
 		false,
 	); err != nil {
 		t.Fatalf("healthy request beyond the retry window failed: %v", err)
@@ -480,7 +480,7 @@ func TestStdioProxyAllowsExistingMaximumCaptureResponse(t *testing.T) {
 	}
 	if _, err := proxy.post(
 		context.Background(),
-		[]byte(proxyTestToolCall(2, "chat_last", `{"target":"seat"}`)),
+		[]byte(proxyTestToolCall(2, "last", `{"target":"seat"}`)),
 	); err != nil {
 		t.Fatalf("maximum capture-sized response failed: %v", err)
 	}
@@ -505,7 +505,7 @@ func TestStdioProxyAllowsEscapedMaximumCaptureResponse(t *testing.T) {
 	}
 	if _, err := proxy.post(
 		context.Background(),
-		[]byte(proxyTestToolCall(2, "chat_last", `{"target":"seat"}`)),
+		[]byte(proxyTestToolCall(2, "last", `{"target":"seat"}`)),
 	); err != nil {
 		t.Fatalf("escaped maximum capture-sized response failed: %v", err)
 	}
@@ -570,9 +570,9 @@ func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
 		call       string
 		wantReplay bool
 	}{
-		{name: "chat call refused", call: "chat_new"},
+		{name: "chat call refused", call: "new"},
 		{name: "servicedesk call refused", call: "servicedesk"},
-		{name: "harvester call replayed", call: "harvester_read", wantReplay: true},
+		{name: "harvester call replayed", call: "read", wantReplay: true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			var routeCalls, firstSendProbes atomic.Int32
@@ -608,6 +608,9 @@ func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
 			defer server.Close()
 			proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 			proxy.expectedRuntimeIdentity = "sha256:selected"
+			if row.wantReplay {
+				proxy.family = pfmconfig.MCPServerHarvester
+			}
 			proxy.sessionID = "old-session"
 			proxy.protocol = "2025-06-18"
 			proxy.retryDelay = time.Millisecond
@@ -690,21 +693,21 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	_ = harness.read(t)
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 
-	harness.write(t, proxyTestToolCall(2, "chat_whoami", `{}`))
+	harness.write(t, proxyTestToolCall(2, "whoami", `{}`))
 	whoami := proxyTestStructured(t, harness.read(t))
 	if whoami["status"] != "ok" || whoami["session"] != "cc-seat" || whoami["id"] != "session-id" {
-		t.Fatalf("proxied chat_whoami = %+v", whoami)
+		t.Fatalf("proxied whoami = %+v", whoami)
 	}
-	harness.write(t, proxyTestToolCall(3, "chat_last", `{"target":"self"}`))
+	harness.write(t, proxyTestToolCall(3, "last", `{"target":"self"}`))
 	last := proxyTestStructured(t, harness.read(t))
 	if last["text"] != "daemon self answer" {
 		t.Fatalf("proxied self call = %+v", last)
 	}
-	harness.write(t, proxyTestToolCall(4, "chat_new", `{"name":"child"}`))
+	harness.write(t, proxyTestToolCall(4, "new", `{"name":"child"}`))
 	_ = proxyTestStructured(t, harness.read(t))
 	wantCalls := [][]string{{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", "/work/proxy"}}
 	if !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("proxied chat_new calls = %q, want %q", calls, wantCalls)
+		t.Fatalf("proxied new calls = %q, want %q", calls, wantCalls)
 	}
 }
 
@@ -743,9 +746,9 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 		Pane: "%1", Engine: "claude", ID: "conversation-a",
 	}
 	var output bytes.Buffer
-	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "chat_whoami", `{}`)), &output)
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(2, "whoami", `{}`)), &output)
 	writeCrumb("conversation-b")
-	proxy.forward(context.Background(), []byte(proxyTestToolCall(3, "chat_whoami", `{}`)), &output)
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(3, "whoami", `{}`)), &output)
 	if len(received) != 2 {
 		t.Fatalf("daemon received %d calls, want 2", len(received))
 	}
@@ -760,7 +763,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	if err := os.Remove(crumb); err != nil {
 		t.Fatal(err)
 	}
-	proxy.forward(context.Background(), []byte(proxyTestToolCall(4, "chat_whoami", `{}`)), &output)
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(4, "whoami", `{}`)), &output)
 	missingParams := received[2]["params"].(map[string]any)
 	missingMeta := missingParams["_meta"].(map[string]any)
 	missingIdentity := missingMeta["pfmProxy"].(map[string]any)
@@ -771,7 +774,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(received)
-	proxy.forward(context.Background(), []byte(proxyTestToolCall(5, "chat_whoami", `{}`)), &output)
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(5, "whoami", `{}`)), &output)
 	if len(received) != before || !strings.Contains(output.String(), "refresh Claude caller transcript") {
 		t.Fatalf(
 			"crumb read failure forwarded mutation or lacked named error: received=%d output=%s",
@@ -780,8 +783,11 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 		)
 	}
 	assertHarvesterCallForwarded := func(id int) {
+		previous := proxy.family
+		proxy.family = pfmconfig.MCPServerHarvester
+		defer func() { proxy.family = previous }()
 		t.Helper()
-		proxy.forward(context.Background(), []byte(proxyTestToolCall(id, "harvester_read", `{}`)), &output)
+		proxy.forward(context.Background(), []byte(proxyTestToolCall(id, "read", `{}`)), &output)
 		meta := received[len(received)-1]["params"].(map[string]any)["_meta"].(map[string]any)
 		if len(received) != before+1 || meta["pfmProxy"].(map[string]any)["id"] != "conversation-a" {
 			t.Fatalf("harvester call without a usable crumb: received=%d output=%s",
@@ -797,7 +803,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeCrumb("conversation-c")
-	explicit := `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"_meta":{"threadId":"thread-explicit"},"name":"chat_whoami","arguments":{}}}`
+	explicit := `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"_meta":{"threadId":"thread-explicit"},"name":"whoami","arguments":{}}}`
 	proxy.forward(context.Background(), []byte(explicit), &output)
 	explicitParams := received[len(received)-1]["params"].(map[string]any)
 	explicitMeta := explicitParams["_meta"].(map[string]any)
@@ -808,7 +814,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	if explicitIdentity["id"] != "conversation-a" {
 		t.Fatalf("explicit thread metadata triggered refresh: %+v", explicitIdentity)
 	}
-	proxy.forward(context.Background(), []byte(proxyTestToolCall(7, "chat_whoami", `{}`)), &output)
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(7, "whoami", `{}`)), &output)
 	recoveredParams := received[len(received)-1]["params"].(map[string]any)
 	recoveredMeta := recoveredParams["_meta"].(map[string]any)
 	recoveredIdentity := recoveredMeta["pfmProxy"].(map[string]any)
@@ -830,7 +836,7 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	harness.write(t, proxyTestToolCall(2, "chat_whoami", `{}`))
+	harness.write(t, proxyTestToolCall(2, "whoami", `{}`))
 	whoami := proxyTestStructured(t, harness.read(t))
 	message, _ := whoami["message"].(string)
 	if whoami["status"] != "not_found" || !strings.Contains(message, "cannot derive who is calling") {
@@ -888,7 +894,7 @@ func TestStdioProxyCancelsOutstandingCallAtEOF(t *testing.T) {
 	input, inputWriter := io.Pipe()
 	returned := make(chan error, 1)
 	go func() { returned <- proxy.run(context.Background(), input, io.Discard) }()
-	if _, err := io.WriteString(inputWriter, proxyTestToolCall(2, "chat_whoami", `{}`)+"\n"); err != nil {
+	if _, err := io.WriteString(inputWriter, proxyTestToolCall(2, "whoami", `{}`)+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -919,9 +925,6 @@ func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	address := strings.TrimPrefix(server.URL, "http://")
 	server.Close()
-	foreign := httptest.NewServer(http.NotFoundHandler())
-	foreignAddress := strings.TrimPrefix(foreign.URL, "http://")
-	foreign.Close()
 	assertOwnWarn := func(t *testing.T, recorder *obs.Recorder) {
 		t.Helper()
 		var own []obs.Record
@@ -934,22 +937,8 @@ func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
 			t.Fatalf("own-host records=%v; all records=%s", own, recorder.Raw())
 		}
 	}
-	t.Run("route", func(t *testing.T) {
-		_, recorder := obs.Test(t)
-		if err := probeProfessorRoute(context.Background(), foreignAddress); err == nil {
-			t.Fatal("foreign route unexpectedly succeeded")
-		}
-		if err := probeProfessorRoute(context.Background(), address); err == nil ||
-			!strings.Contains(err.Error(), "probe ") {
-			t.Fatalf("route error=%v", err)
-		}
-		assertOwnWarn(t, recorder)
-	})
 	t.Run("close", func(t *testing.T) {
 		_, recorder := obs.Test(t)
-		if err := probeProfessorRoute(context.Background(), foreignAddress); err == nil {
-			t.Fatal("foreign route unexpectedly succeeded")
-		}
 		var warnings bytes.Buffer
 		proxy := &stdioProxy{
 			endpoint: server.URL, client: obs.WrapClient(&http.Client{}),

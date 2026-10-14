@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless/run"
 	"github.com/rezzminator/professor/pfm/internal/index"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
@@ -421,7 +421,7 @@ func serveStdioProfessor() int {
 			fmt.Fprintf(os.Stderr, "stdio professor: close chat: %v\n", err)
 		}
 	}()
-	professor, err := mcpserv.NewProfessor(mcpserv.ProfessorOptions{Version: "test", Chat: service})
+	professor, err := mcpserv.NewFamilyServers(mcpserv.FamilyServerOptions{Version: "test", Chat: service})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stdio professor: %v\n", err)
 		return 1
@@ -451,7 +451,7 @@ func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeCodexConfig(t, fix, fmt.Sprintf("[mcp_servers.professor]\ncommand = %q\nargs = [%q]\n",
+	writeCodexConfig(t, fix, fmt.Sprintf("[mcp_servers.chat-professor]\ncommand = %q\nargs = [%q]\n",
 		executable, stdioProfessorArg))
 	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0), Steps: []Step{
 		{Type: StepMCP},
@@ -463,8 +463,8 @@ func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
 	session.waitFrame("the reply after the handshake", func(frame string) bool {
 		return strings.Contains(frame, "tools listed")
 	})
-	recorded := waitFile(t, filepath.Join(fix.recordDir, "mcp-professor.json"), func(content string) bool {
-		return strings.Contains(content, "chat_whoami")
+	recorded := waitFile(t, filepath.Join(fix.recordDir, "mcp-chat-professor.json"), func(content string) bool {
+		return strings.Contains(content, "whoami")
 	})
 	var tools []string
 	if err := json.Unmarshal([]byte(recorded), &tools); err != nil {
@@ -484,10 +484,10 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 	}
 	identity := filepath.Join(fix.recordDir, "mcp-identity")
 	command := fmt.Sprintf(`printf '%%s\n' "$TMUX" "$TMUX_PANE" "$CODEX_HOME" "$PWD" > %q; exec "$@"`, identity)
-	writeCodexConfig(t, fix, fmt.Sprintf("[mcp_servers.professor]\ncommand = \"sh\"\nargs = [%q,%q,%q,%q,%q]\n",
+	writeCodexConfig(t, fix, fmt.Sprintf("[mcp_servers.chat-professor]\ncommand = \"sh\"\nargs = [%q,%q,%q,%q,%q]\n",
 		"-c", command, "fixture", executable, verbsStdioProfessorArg))
 	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0)})
-	// chat_find searches Claude transcripts; its fixture must seed that store.
+	// find searches Claude transcripts; its fixture must seed that store.
 	code, _, stderr := runOnce(
 		fix,
 		"claude",
@@ -507,10 +507,10 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 	session.waitFrame("seed reply", func(frame string) bool { return strings.Contains(frame, "⏺ ok") })
 	fix.indexedRollouts()
 	session.typeLine(
-		`query mock-engine: [{"type":"mcp","tool":"chat_find","input":{"excerpt":"violet archive fixture","include_self":true}},{"type":"turn","reply":"MCP finished"}]`,
+		`query mock-engine: [{"type":"mcp","tool":"find","input":{"excerpt":"violet archive fixture","include_self":true}},{"type":"turn","reply":"MCP finished"}]`,
 	)
 	session.waitFrame("MCP reply", func(frame string) bool { return strings.Contains(frame, "⏺ MCP finished") })
-	result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-chat_find.json"))
+	result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-find.json"))
 	if !strings.Contains(result, fixtureSession) || strings.Contains(result, `"isError":true`) {
 		t.Fatalf("pfm tools/call=%s", result)
 	}
@@ -530,7 +530,7 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Type == "function_call" && payload.Name == "chat_find" {
+		if payload.Type == "function_call" && payload.Name == "find" {
 			callID = payload.CallID
 		}
 		if payload.Type == "function_call_output" && payload.CallID == callID &&
@@ -548,7 +548,7 @@ func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 
 func TestCodexMCPFailuresAreRecordedShownAndKeepPaneLive(t *testing.T) {
 	for _, row := range []struct{ name, table, tool, cause string }{
-		{"missing server", "", "chat_find", "professor"},
+		{"missing server", "", "find", "professor"},
 		{"call", "configured", "unknown_fixture_tool", "tools/call"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -561,7 +561,7 @@ func TestCodexMCPFailuresAreRecordedShownAndKeepPaneLive(t *testing.T) {
 					t.Fatal(err)
 				}
 				table = fmt.Sprintf(
-					"[mcp_servers.professor]\ncommand = %q\nargs = [%q]\n",
+					"[mcp_servers.chat-professor]\ncommand = %q\nargs = [%q]\n",
 					executable,
 					verbsStdioProfessorArg,
 				)
@@ -636,7 +636,7 @@ func TestCodexCompactWritesReceiptAndRollout(t *testing.T) {
 	session.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "›") })
 	session.typeLine("/compact")
 	session.waitFrame("compaction busy footer", func(frame string) bool {
-		return inject.IsBusy(frame) && strings.Contains(frame, codexShapes.Busy)
+		return pfmcall.IsBusy(frame) && strings.Contains(frame, codexShapes.Busy)
 	})
 	if frame := session.out.frame(); strings.Contains(frame, codexShapes.Compacted) {
 		t.Fatalf("receipt painted while compaction busy: %s", frame)
@@ -647,7 +647,7 @@ func TestCodexCompactWritesReceiptAndRollout(t *testing.T) {
 	session.waitFrame(
 		"compaction receipt",
 		func(frame string) bool {
-			return strings.Contains(frame, codexShapes.Compacted) && !inject.IsBusy(frame)
+			return strings.Contains(frame, codexShapes.Compacted) && !pfmcall.IsBusy(frame)
 		},
 	)
 	if content := readFile(
@@ -667,11 +667,11 @@ func TestCodexCompactEscapeClearsFooterWithoutReceipt(t *testing.T) {
 	session := fix.startTUI("codex", codexArgs(), nil)
 	session.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "›") })
 	session.typeLine("/compact")
-	session.waitFrame("compaction busy footer", inject.IsBusy)
+	session.waitFrame("compaction busy footer", pfmcall.IsBusy)
 	session.typeRaw("\x1b")
 	session.waitFrame(
 		"cleared footer",
-		func(frame string) bool { return !inject.IsBusy(frame) && strings.Contains(frame, "›") },
+		func(frame string) bool { return !pfmcall.IsBusy(frame) && strings.Contains(frame, "›") },
 	)
 	if frame := session.out.frame(); strings.Contains(frame, codexShapes.Compacted) {
 		t.Fatalf("interrupted compaction painted receipt: %s", frame)
@@ -699,7 +699,7 @@ func TestCodexCompactBusyDuration(t *testing.T) {
 func TestCodexMCPStepNamesATableWithoutCommand(t *testing.T) {
 	fix := newFixture(t)
 	t.Chdir(fix.work)
-	writeCodexConfig(t, fix, "[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/mcp/professor\"\n")
+	writeCodexConfig(t, fix, "[mcp_servers.chat-professor]\nurl = \"http://127.0.0.1:1/mcp/chat-professor\"\n")
 	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0), Steps: []Step{
 		{Type: StepMCP},
 	}})
@@ -707,7 +707,7 @@ func TestCodexMCPStepNamesATableWithoutCommand(t *testing.T) {
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
 	session.typeLine("list the fleet tools")
 	if code := session.waitExit(); code != ExitUnpinned ||
-		!strings.Contains(session.stderr.String(), "has no [mcp_servers.professor] command") {
+		!strings.Contains(session.stderr.String(), "has no [mcp_servers.chat-professor] command") {
 		t.Fatalf("exit=%d stderr=%q, want %d naming the table without a command",
 			code, session.stderr.String(), ExitUnpinned)
 	}

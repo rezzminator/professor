@@ -81,7 +81,7 @@ Multi-agent, Developer tools
 ### Description
 Professor turns your AI coding agents into a disciplined engineering team you can see, message, and hold to the rules.
 - pfm: a Go CLI/TUI fleet picker across every AI coding chat on the machine, with a Limits dashboard and cosmos view
-- Chats message each other via chat_inject and an MCP server, and can reload onto another account while keeping history
+- Chats message each other via `pfm chat call` and an MCP server, and can reload onto another account while keeping history
 - A discipline layer of agents/commands/hooks/rules for Claude Code, compiled to Codex and OpenCode mirrors
 - Harvester: a document fetcher with a multi-rung fallback ladder, exposed over MCP
 

@@ -9,14 +9,14 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-// find is chat_find: chat.Find under the tool's candidate limit (default 10,
+// find is find: chat.Find under the tool's candidate limit (default 10,
 // maximum 50), projected onto the wire candidate. The handler supplies the
 // final caller exclusion; SelfID names what was left out, so an answer is
 // never mistaken for one that looked everywhere. A search that matched
 // nothing is an answer (count 0), not a tool failure.
 func (current *backend) find(ctx context.Context, input FindInput, self string) (FindOutput, error) {
 	if current.chat == nil {
-		return FindOutput{}, fmt.Errorf("chat_find verb is not configured")
+		return FindOutput{}, fmt.Errorf("find verb is not configured")
 	}
 	limit := input.Limit
 	if limit == 0 {
@@ -27,7 +27,7 @@ func (current *backend) find(ctx context.Context, input FindInput, self string) 
 	}
 	matches, err := current.chat.Find(ctx, chat.FindRequest{Excerpt: input.Excerpt, Self: self})
 	if err != nil && !errors.Is(err, chat.ErrNoExcerptMatch) {
-		return FindOutput{}, fmt.Errorf("chat_find: %w", err)
+		return FindOutput{}, fmt.Errorf("find: %w", err)
 	}
 	if len(matches) > limit {
 		matches = matches[:limit]

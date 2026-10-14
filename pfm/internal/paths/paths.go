@@ -423,7 +423,7 @@ func LegacyStateDB(home string) string {
 
 // HarvesterCacheDir is the harvester's one default cache directory (used when
 // harvester.config.json sets no cache.dir): <home>/.professor/.harvester-cache.
-// It holds persistent harvester_read handles, so it lives under the home, never
+// It holds persistent read handles, so it lives under the home, never
 // a temp directory.
 func HarvesterCacheDir(home string) string {
 	return filepath.Join(home, ".professor", ".harvester-cache")

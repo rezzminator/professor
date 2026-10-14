@@ -52,7 +52,7 @@ func Named(text string) DisplayName {
 // actually knows the flavour of, and drops anything it does not into Text.
 //
 // The session name is the STORED key throughout the fleet — the comms ledger
-// is append-only, chat_name renames a chat at will, and a freed label is
+// is append-only, name renames a chat at will, and a freed label is
 // reused by a later chat — so labels here are input and display ONLY, never
 // an identity anything persists.
 type Address struct {
@@ -71,7 +71,7 @@ type Address struct {
 	// into a tmux target.
 	Label string
 	// Text is an identity a caller supplied without saying which namespace
-	// it belongs to — the `chat_inject <target>` argument, the comms
+	// it belongs to — the `call <target>` argument, the comms
 	// ledger's target column. Resolution tries it in every namespace.
 	Text string
 }
@@ -170,7 +170,7 @@ func (directory *Directory[T]) Len() int {
 // session, then label. The second is the UNTYPED sweep: every non-empty
 // string in the query, tried in every namespace. The sweep is what makes
 // resolution total, and it exists because callers genuinely do not always
-// know which flavour they hold: `chat_inject <target>` takes whatever the
+// know which flavour they hold: `call <target>` takes whatever the
 // operator typed, and the ledger's sender_session column has historically
 // been handed a chat UUID. Namespaces are separate key spaces, so a sweep hit
 // means the two strings are literally equal — a match, not a coincidence.

@@ -37,15 +37,15 @@ func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
 	output := callTool[WhoamiOutput](
 		t,
 		client.clientSession,
-		"chat_whoami",
+		"whoami",
 		WhoamiInput{},
 	)
 	if output.Status != "not_found" ||
 		!strings.Contains(output.Message, "not inside tmux") {
-		t.Fatalf("chat_whoami outside tmux = %+v", output)
+		t.Fatalf("whoami outside tmux = %+v", output)
 	}
 	if output.Session != "" {
-		t.Fatalf("chat_whoami invented a session: %+v", output)
+		t.Fatalf("whoami invented a session: %+v", output)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestChatFindRanksByNeedleVotesAndExcludesSelf(t *testing.T) {
 		"  the waiter rides out the compaction to idle",
 		"too short",
 	}, "\n")
-	output := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{
+	output := callTool[FindOutput](t, client.clientSession, "find", FindInput{
 		Excerpt: excerpt,
 	})
 	if len(output.Needles) != 3 {
@@ -136,7 +136,7 @@ func TestChatFindRanksByNeedleVotesAndExcludesSelf(t *testing.T) {
 	}
 
 	// include_self is the escape hatch, and it brings the excluded row back.
-	withSelf := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{
+	withSelf := callTool[FindOutput](t, client.clientSession, "find", FindInput{
 		Excerpt:     excerpt,
 		IncludeSelf: true,
 	})
@@ -151,15 +151,15 @@ func TestChatFindRanksByNeedleVotesAndExcludesSelf(t *testing.T) {
 	}
 }
 
-// TestChatInjectCarriesTheThenArgument proves the steer chain reaches the
+// TestChatCallCarriesTheThenArgument proves the steer chain reaches the
 // engine through the MCP schema, that a /compact PRIMARY is refused outright
-// on chat_inject regardless of a then steer, and that a /compact STEER is still refused by checkSteerChain
+// on call regardless of a then steer, and that a /compact STEER is still refused by checkSteerChain
 // even when the primary is ordinary. Renamed cases from
 // steerless/recursive/unresolved "/compact hold…" primaries: the steerless
 // and legal-steer cases used to differ only in whether `then` carried a
-// steer, which no longer distinguishes anything once chat_inject bans every
-// /compact primary outright — see engine.go's Inject().
-func TestChatInjectCarriesTheThenArgument(t *testing.T) {
+// steer, which no longer distinguishes anything once call bans every
+// /compact primary outright — see engine.go's Call().
+func TestChatCallCarriesTheThenArgument(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
 	defer func() {
@@ -169,31 +169,31 @@ func TestChatInjectCarriesTheThenArgument(t *testing.T) {
 	}()
 	client := connectInMemory(t, service.Server())
 
-	compactPrimary := callTool[InjectOutput](t, client.clientSession, "chat_inject", InjectInput{
+	compactPrimary := callTool[CallOutput](t, client.clientSession, "call", CallInput{
 		Target:  "no-such-chat",
 		Message: "/compact hold: read /tmp/hold.md",
 	})
 	if compactPrimary.Code != 6 ||
 		compactPrimary.Status != "refused" ||
 		compactPrimary.Typed ||
-		!strings.Contains(compactPrimary.Message, "/compact is never injected") {
-		t.Fatalf("compact primary via chat_inject = %+v", compactPrimary)
+		!strings.Contains(compactPrimary.Message, "/compact is never called") {
+		t.Fatalf("compact primary via call = %+v", compactPrimary)
 	}
 
 	// A /compact PRIMARY with a then steer is refused the same way — the ban
 	// is unconditional, not steer-gated.
-	compactPrimaryWithSteer := callTool[InjectOutput](t, client.clientSession, "chat_inject", InjectInput{
+	compactPrimaryWithSteer := callTool[CallOutput](t, client.clientSession, "call", CallInput{
 		Target:  "no-such-chat",
 		Message: "/compact hold: read /tmp/hold.md",
 		Then:    []string{"resume the port"},
 	})
 	if compactPrimaryWithSteer.Code != 6 ||
 		compactPrimaryWithSteer.Typed ||
-		!strings.Contains(compactPrimaryWithSteer.Message, "/compact is never injected") {
-		t.Fatalf("compact primary with steer via chat_inject = %+v", compactPrimaryWithSteer)
+		!strings.Contains(compactPrimaryWithSteer.Message, "/compact is never called") {
+		t.Fatalf("compact primary with steer via call = %+v", compactPrimaryWithSteer)
 	}
 
-	recursive := callTool[InjectOutput](t, client.clientSession, "chat_inject", InjectInput{
+	recursive := callTool[CallOutput](t, client.clientSession, "call", CallInput{
 		Target:  "no-such-chat",
 		Message: "hold: read /tmp/hold.md",
 		Then:    []string{"/compact again"},
@@ -206,7 +206,7 @@ func TestChatInjectCarriesTheThenArgument(t *testing.T) {
 	// With an ordinary primary and a legal steer the chain passes every guard
 	// and dies at resolution instead — proof the Then argument travelled
 	// through the MCP schema into the engine, and that nothing was typed.
-	unresolved := callTool[InjectOutput](t, client.clientSession, "chat_inject", InjectInput{
+	unresolved := callTool[CallOutput](t, client.clientSession, "call", CallInput{
 		Target:  "no-such-chat",
 		Message: "hold: read /tmp/hold.md",
 		Then:    []string{"resume the port"},
@@ -241,7 +241,7 @@ func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
 		{Target: "missing-target", TailLines: captureInt(0)},
 	} {
 		result, err := client.clientSession.CallTool(ctx, &mcp.CallToolParams{
-			Name:      "chat_capture",
+			Name:      "capture",
 			Arguments: input,
 		})
 		if err == nil && (result == nil || !result.IsError) {
@@ -284,9 +284,9 @@ func TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf(t *testing.T) {
 		}
 	}()
 	client := connectInMemory(t, service.Server())
-	output := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{Excerpt: line})
+	output := callTool[FindOutput](t, client.clientSession, "find", FindInput{Excerpt: line})
 	if output.SelfID != "" || output.Count != 1 || output.Candidates[0].ID != "launcher" {
-		t.Fatalf("daemon chat_find = %+v; want the launcher's transcript found and no self_id", output)
+		t.Fatalf("daemon find = %+v; want the launcher's transcript found and no self_id", output)
 	}
 }
 
@@ -314,7 +314,7 @@ func TestChatFindOnTheSharedDaemonExcludesProxyClaudeCaller(t *testing.T) {
 	}
 	want := []chat.FindRequest{{Excerpt: "caller excerpt", Self: callerID}}
 	if !reflect.DeepEqual(verbs.finds, want) || output.SelfID != callerID {
-		t.Fatalf("proxied chat_find requests = %+v output = %+v, want request %+v and self_id %q",
+		t.Fatalf("proxied find requests = %+v output = %+v, want request %+v and self_id %q",
 			verbs.finds, output, want, callerID)
 	}
 }
@@ -438,7 +438,7 @@ func TestChatFindCallerProbeFailureIsAToolError(t *testing.T) {
 		Meta: mcp.Meta{"pfmProxy": map[string]any{
 			"v": ProxyWireVersion, "session": "cc-seat", "engine": "claude", "id": "claude-session",
 		}},
-		Name: "chat_find", Arguments: FindInput{Excerpt: "caller excerpt"},
+		Name: "find", Arguments: FindInput{Excerpt: "caller excerpt"},
 	})
 	message := ""
 	if err != nil {
@@ -482,10 +482,10 @@ func TestChatFindReportsNoMatchAsAnEmptyAnswer(t *testing.T) {
 	output := callTool[FindOutput](
 		t,
 		client.clientSession,
-		"chat_find",
+		"find",
 		FindInput{Excerpt: "a sentence no transcript here holds"},
 	)
 	if output.Count != 0 || len(output.Candidates) != 0 || len(output.Needles) != 1 {
-		t.Fatalf("chat_find with no match = %+v; want count 0 with the needle it searched", output)
+		t.Fatalf("find with no match = %+v; want count 0 with the needle it searched", output)
 	}
 }

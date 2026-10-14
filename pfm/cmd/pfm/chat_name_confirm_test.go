@@ -59,7 +59,7 @@ func TestUnconfirmedClaudeName(t *testing.T) {
 }
 
 // TestApplyChatNameReadsAClaudeRenameBack pins the live-rename door of a
-// Claude chat: `pfm chat name` (and MCP chat_name, which runs it) reports a
+// Claude chat: `pfm chat name` (and MCP name, which runs it) reports a
 // /rename that never reached the transcript instead of claiming it. Fixture:
 // TestApplyChatNameRecordsAChatStateTransition's real tmux probe socket.
 func TestApplyChatNameReadsAClaudeRenameBack(t *testing.T) {

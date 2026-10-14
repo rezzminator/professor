@@ -51,7 +51,7 @@ type FindRequest struct {
 }
 
 // Find is the shared excerpt search behind `pfm chat find`, `pfm chat read
-// <excerpt-file>`, resume-by-excerpt and MCP chat_find: every match, most
+// <excerpt-file>`, resume-by-excerpt and MCP find: every match, most
 // needles first, then by path. Each surface trims the list to its own
 // contract; none re-ranks it.
 func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) ([]TranscriptMatch, error) {

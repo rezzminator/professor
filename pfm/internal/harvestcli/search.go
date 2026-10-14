@@ -18,7 +18,7 @@ const (
 	searchMaxLimit     = 25
 )
 
-// searchTypes are the values --type takes, the harvester_search_literature tool's type.
+// searchTypes are the values --type takes, the search_literature tool's type.
 var searchTypes = []string{"any", "paper", "book"}
 
 // newSearchService builds the harvester service whose literature search
@@ -28,7 +28,7 @@ var newSearchService = func(runtime harvestmcp.Runtime) (*harvestmcp.Service, er
 	return harvestmcp.NewConfiguredHarvester("cli", runtime)
 }
 
-// runSearch is `pfm harvest search <query>...`: the harvester_search_literature
+// runSearch is `pfm harvest search <query>...`: the search_literature
 // tool's own search (Service.SearchLiterature) and text (RenderFind), so the
 // CLI answers exactly what the tool answers — ranked candidates, each with its
 // type and handle, and every discovery source's status.

@@ -299,7 +299,7 @@ func assertOutcome(
 
 // TestResolveFailsLoudWhenTmuxCannotRun is the resolve-ladder half of the
 // deaf-daemon regression: allPanes dropped every list-panes error, so a tmux
-// missing from PATH made every name resolve to "no match" — chat_inject then
+// missing from PATH made every name resolve to "no match" — call then
 // refused a live chat as "matched no live chat". A tmux that never started
 // read no socket, so resolution is an error naming the cause, never a miss.
 func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {

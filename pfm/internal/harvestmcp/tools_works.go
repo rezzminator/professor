@@ -18,7 +18,7 @@ const (
 	workTypeAny                 = "any"
 	workTypePaper               = "paper"
 	workTypeBook                = "book"
-	searchLiteratureDescription = `Finds papers and books — by TITLE or bibliographic query: "find the paper about X", "is there a PDF of <title>". Call harvester_search_literature{query:"Attention Is All You Need", type:"paper"}. Returns a ` + "`=== [n/N] {title}`" + ` block per ranked candidate — handle, type · authors · year, ids, open access; pass the handle unchanged to ` + "`harvester_read`" + ` in publications — then sources:, each one's status. "No candidate works found" with every source answered = nothing matched; a failed source is named, its records missing; an error result = every source failed, retry or read an exact identifier.`
+	searchLiteratureDescription = `Finds papers and books — by TITLE or bibliographic query: "find the paper about X", "is there a PDF of <title>". Call search_literature{query:"Attention Is All You Need", type:"paper"}. Returns a ` + "`=== [n/N] {title}`" + ` block per ranked candidate — handle, type · authors · year, ids, open access; pass the handle unchanged to ` + "`read`" + ` in publications — then sources:, each one's status. "No candidate works found" with every source answered = nothing matched; a failed source is named, its records missing; an error result = every source failed, retry or read an exact identifier.`
 )
 
 // FindInput is search_literature's input.
@@ -43,7 +43,7 @@ type WorkCandidate struct {
 // that failed is named apart from one that answered with nothing.
 type FindSource struct {
 	Source  string `json:"source"`
-	Status  string `json:"status" jsonschema:"answered, partial (some of its requests failed), failed, or timed_out (still running at the harvester_search_literature deadline, cancelled)."`
+	Status  string `json:"status" jsonschema:"answered, partial (some of its requests failed), failed, or timed_out (still running at the search_literature deadline, cancelled)."`
 	Results int    `json:"results"`
 	Error   string `json:"error,omitempty"`
 }
@@ -96,7 +96,7 @@ func (service *Service) SearchLiterature(ctx context.Context, input FindInput) (
 	if err != nil {
 		log.Warn("harvester.search_literature.failed", obs.FieldErr, err.Error())
 		return FindOutput{}, fmt.Errorf(
-			"work discovery failed: every source failed — %s; retry later or read an exact identifier with `harvester_read` (publications)",
+			"work discovery failed: every source failed — %s; retry later or read an exact identifier with `read` (publications)",
 			harvest.FailedText(found.Failed()),
 		)
 	}
@@ -152,7 +152,7 @@ func handleFailure(err error) error {
 	}
 	return fmt.Errorf(
 		"could not prepare the discovered works for retrieval: %v; retrying will not help — "+
-			"read a work's exact identifier with `harvester_read` (publications)",
+			"read a work's exact identifier with `read` (publications)",
 		err,
 	)
 }

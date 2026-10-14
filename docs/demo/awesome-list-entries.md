@@ -23,7 +23,7 @@ PR title: N/A (issue-form submission, not a PR)
 Issue-form body (paste into the web form's description field):
 
 ```
-Professor pairs a Go fleet CLI/TUI (pfm) — fleet picker, Limits dashboard, cosmos view, cross-chat messaging via chat_inject, and account-preserving chat reload — with a discipline layer of Claude Code agents/commands/hooks/rules that also compiles to Codex and OpenCode mirrors. Best fit: Multi-Purpose (touches orchestration, observability, and configuration/rules at once). MIT licensed, Go + Markdown/shell.
+Professor pairs a Go fleet CLI/TUI (pfm) — fleet picker, Limits dashboard, cosmos view, cross-chat messaging via `pfm chat call`, and account-preserving chat reload — with a discipline layer of Claude Code agents/commands/hooks/rules that also compiles to Codex and OpenCode mirrors. Best fit: Multi-Purpose (touches orchestration, observability, and configuration/rules at once). MIT licensed, Go + Markdown/shell.
 ```
 
 ---
@@ -46,7 +46,7 @@ Multi-agent, Developer tools
 
 ### Description
 - Go CLI/TUI (pfm) lists and controls every AI coding chat on the machine across harnesses and accounts (fleet picker, Limits dashboard, cosmos view)
-- Lets chats message each other via chat_inject and an MCP server
+- Lets chats message each other via `pfm chat call` and an MCP server
 - Reloads a chat onto another account while keeping history
 - Discipline layer of agents/commands/hooks/rules for Claude Code, compiled to Codex and OpenCode mirrors
 - Includes Harvester, a document fetcher with a multi-rung fallback ladder, exposed over MCP
@@ -72,7 +72,7 @@ Adds Professor, a fleet control/orchestration layer for Claude Code, Codex and O
 
 - Repo URL: <https://github.com/punkpeye/awesome-mcp-servers>
 - Activity seen: 2026-09-13, 94,918 stars, not archived
-- Section to add to: **🔎 Search & Data Extraction** — for Harvester specifically (the document fetcher with a multi-rung fallback ladder, exposed over MCP). The chat_inject/fleet-messaging MCP server is not a data-extraction server and does not cleanly fit any listed category (not Databases, File Systems, or Code Execution), so it is left out of this submission — only Harvester is proposed here.
+- Section to add to: **🔎 Search & Data Extraction** — for Harvester specifically (the document fetcher with a multi-rung fallback ladder, exposed over MCP). The `pfm chat call`/fleet-messaging MCP server is not a data-extraction server and does not cleanly fit any listed category (not Databases, File Systems, or Code Execution), so it is left out of this submission — only Harvester is proposed here.
 - Rules affecting us: entries need language/scope/OS emoji tags (📇/🐍/etc., ☁️/🏠, 🍎/🪟/🐧) and a description under ~255 characters; no explicit star minimum visible in the README excerpt fetched. Harvester ships inside the Professor monorepo (`pfm/internal/harvest` + `internal/harvestmcp`) rather than as a standalone repo — flag this for the maintainer since some MCP lists prefer a dedicated repo/package per server; link points at the monorepo with a note.
 
 ```

@@ -17,13 +17,12 @@ import (
 // carrying both families, keyed by the obs route each one logs under.
 func professorHandlers(t *testing.T) map[string]http.Handler {
 	t.Helper()
-	professor := newTestProfessor(t, ProfessorOptions{
+	professor := newTestProfessor(t, FamilyServerOptions{
 		Chat: newTestChat(t), Harvester: newTestHarvester(t, harvestmcp.Runtime{}),
 	})
 	return map[string]http.Handler{
-		"professor-mcp":           professor.Handler(),
-		"professor-mcp-chat":      professor.FamilyHandler(pfmconfig.MCPServerChat),
-		"professor-mcp-harvester": professor.FamilyHandler(pfmconfig.MCPServerHarvester),
+		"chat-professor":      professor.FamilyHandler(pfmconfig.MCPServerChat),
+		"harvester-professor": professor.FamilyHandler(pfmconfig.MCPServerHarvester),
 	}
 }
 

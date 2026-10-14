@@ -100,7 +100,7 @@ func (ladder Ladder) Resolve(
 				return Seat{}, CodeUnknown, "raw pane target request identity has no socket", nil
 			}
 		} else if ladder.Env != nil {
-			socket = ladder.Env.Get("CHAT_INJECT_SOCKET")
+			socket = ladder.Env.Get("CHAT_CALL_SOCKET")
 			if socket == "" {
 				socket = socketFromEnvironment(ladder.Env.Get("TMUX"))
 			}

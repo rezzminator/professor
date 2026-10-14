@@ -1,7 +1,7 @@
 ---
 name: imagine-historian
 description: 'EVOLVE-ONLY Distills a prompt''s recorded past — git lineage, the user''s named factors, run records, reconciled metrics: modes LINEAGE, FACTORS, MINE, RECONCILE; pass the mode, the run directory and the mode''s inputs. /imagine:evolve → here. Returns the files written, then a count line.'
-tools: 'Read, Grep, Glob, Bash, Write, Agent, Skill, mcp__professor__chat_find, mcp__professor__chat_digest, mcp__sub-agent-compact__compact'
+tools: 'Read, Grep, Glob, Bash, Write, Agent, Skill, mcp__chat-professor__find, mcp__chat-professor__digest, mcp__sub-agent-compact__compact'
 model: sonnet
 effort: medium
 ---

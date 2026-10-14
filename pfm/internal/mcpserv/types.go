@@ -5,7 +5,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-// LSInput selects the fleet view returned by chat_ls.
+// LSInput selects the fleet view returned by ls.
 type LSInput struct {
 	All     bool   `json:"all,omitempty" jsonschema:"include killed and background rows from every repository; the payload limit below still applies (unlike pfm chat ls --all, which lists live chats only)"`
 	Killed  bool   `json:"killed,omitempty" jsonschema:"return killed rows only"`
@@ -30,7 +30,7 @@ type ChatRow struct {
 	transcriptPath string
 }
 
-// LSOutput is chat_ls's structured response.
+// LSOutput is ls's structured response.
 type LSOutput struct {
 	Rows  []ChatRow `json:"rows"`
 	Count int       `json:"count"`
@@ -67,16 +67,16 @@ type ResolveOutput struct {
 	Candidates string `json:"candidates,omitempty"`
 }
 
-// InjectInput requests guarded live delivery.
-type InjectInput struct {
+// CallInput requests guarded live delivery.
+type CallInput struct {
 	Target   string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
 	Message  string   `json:"message" jsonschema:"message to type and submit"`
 	ForceNow bool     `json:"force_now,omitempty" jsonschema:"interrupt a busy target with Escape before delivery"`
 	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here"`
 }
 
-// InjectOutput is a stable MCP representation of inject.Result.
-type InjectOutput struct {
+// CallOutput is a stable MCP representation of pfmcall.Result.
+type CallOutput struct {
 	Status        string `json:"status"`
 	Code          int    `json:"code"`
 	Message       string `json:"message"`
@@ -105,7 +105,7 @@ type KeysInput struct {
 	Capture bool     `json:"capture,omitempty" jsonschema:"return the pane after the keys land"`
 }
 
-// KeysOutput is the structured receipt for chat_keys.
+// KeysOutput is the structured receipt for keys.
 type KeysOutput struct {
 	Status     string   `json:"status"`
 	Code       int      `json:"code"`
@@ -124,7 +124,7 @@ type CaptureInput struct {
 	MaxBytes  *int   `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 262144 and maximum 4194304"`
 }
 
-// CaptureOutput is chat_capture's structured response.
+// CaptureOutput is capture's structured response.
 type CaptureOutput struct {
 	Status     string `json:"status"`
 	Code       int    `json:"code"`
@@ -174,7 +174,7 @@ type FindCandidate struct {
 	Hits      int    `json:"hits"`
 }
 
-// FindOutput is chat_find's structured response.
+// FindOutput is find's structured response.
 type FindOutput struct {
 	Candidates []FindCandidate `json:"candidates"`
 	Count      int             `json:"count"`
@@ -192,7 +192,7 @@ type ReadInput struct {
 // DigestInput requests the one-line-per-event digest of one transcript. Every
 // optional field maps onto one `pfm transcript show` flag.
 type DigestInput struct {
-	Source     string `json:"source" jsonschema:"chat_find id, Claude, Codex or OpenCode session or agent id (or prefix), transcript path, OpenCode locator {store}#{session id}, or a Claude chat's or OpenCode session's title"`
+	Source     string `json:"source" jsonschema:"find id, Claude, Codex or OpenCode session or agent id (or prefix), transcript path, OpenCode locator {store}#{session id}, or a Claude chat's or OpenCode session's title"`
 	Lines      string `json:"lines,omitempty" jsonschema:"transcript line range FROM-TO, FROM- or one line number; the events those records produced"`
 	Since      string `json:"since,omitempty" jsonschema:"window start: HH:MM[:SS] UTC, an ISO time, +5m from the transcript start, -15m from its end"`
 	Until      string `json:"until,omitempty" jsonschema:"window end, same forms as since"`
@@ -207,7 +207,7 @@ type DigestInput struct {
 	MaxBytes   int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, cut at a line end; default 65536 and maximum 1048576"`
 }
 
-// DigestOutput is chat_digest's bounded digest text.
+// DigestOutput is digest's bounded digest text.
 type DigestOutput struct {
 	Text       string `json:"text"`
 	Bytes      int    `json:"bytes"`
@@ -226,7 +226,7 @@ type Turn struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
-// ReadOutput is chat_read's bounded extraction.
+// ReadOutput is read's bounded extraction.
 type ReadOutput struct {
 	ID        string `json:"id"`
 	Path      string `json:"path"`
@@ -284,7 +284,7 @@ type NameInput struct {
 }
 
 type NewInput struct {
-	Name      string `json:"name,omitempty" jsonschema:"the chat's name in pfm ls and the target chat_inject, chat_status and chat_kill take; inside a workbench, empty takes its next {name}:{n}"`
+	Name      string `json:"name,omitempty" jsonschema:"the chat's name in pfm ls and the target call, status and kill take; inside a workbench, empty takes its next {name}:{n}"`
 	Engine    string `json:"engine,omitempty" jsonschema:"cc/claude, cx/codex or ox/opencode; the caller's engine when empty"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"working directory, relative to the caller's; the caller's directory when empty"`
 	Account   int    `json:"account,omitempty" jsonschema:"account number to launch on; pfm picks when 0"`
@@ -306,7 +306,7 @@ type ActionOutput struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ExitInput is chat_exit's empty argument object: the target is always the
+// ExitInput is exit's empty argument object: the target is always the
 // caller, so any field — a target among them — is refused by the schema.
 type ExitInput struct{}
 
@@ -326,7 +326,7 @@ type SaveInput struct {
 
 // IssueInput is one agent complaint filed against Professor itself. Reporter
 // identity is never accepted here — servicedesk captures it the same
-// way chat_inject captures a sender, so a model can complain but never say
+// way call captures a sender, so a model can complain but never say
 // who is complaining.
 type IssueInput struct {
 	Title    string `json:"title" jsonschema:"short one-line issue title"`

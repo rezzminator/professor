@@ -73,6 +73,15 @@ const chatlogSuccessor = "the chatlog skill"
 // "Global: flights replaces wave", "Project: flights cast replaces
 // per-project developer and qa"), all ordinary words, paths or routes.
 var retiredNames = []retiredName{
+	// chat-call: split family registrations and rename chat delivery.
+	{
+		name:      "mcp__professor__",
+		kind:      retiredTool,
+		successor: "mcp__chat-professor__* / mcp__harvester-professor__*",
+		match:     matchPrefix,
+	},
+	{name: "pfm chat inject", kind: retiredCommand, successor: "pfm chat call", match: matchExact},
+	{name: "chat_inject", kind: retiredTool, successor: "mcp__chat-professor__call", match: matchExact},
 	// releases/v0.78.0.md "Global: flights replaces wave": every /wave:*
 	// command and the wave-builder skill are removed; new work starts with
 	// /flights:spec. The bare /wave pair retired earlier (releases/v0.43.0.md).
@@ -109,11 +118,11 @@ var retiredNames = []retiredName{
 	// releases/v0.78.0.md "→ For: every adopter · per project · MCP tool
 	// names": mcp__chat__* and mcp__harvester__* become their
 	// mcp__professor__ forms.
-	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__professor__chat_*", match: matchPrefix},
-	{name: "mcp__harvester__", kind: retiredTool, successor: "mcp__professor__harvester_*", match: matchPrefix},
+	{name: "mcp__chat__", kind: retiredTool, successor: "mcp__chat-professor__*", match: matchPrefix},
+	{name: "mcp__harvester__", kind: retiredTool, successor: "mcp__harvester-professor__*", match: matchPrefix},
 	// releases/v0.62.0.md "Removed: the host-level /chat:* Claude
 	// slash-command family"; "drive chat through the MCP tools instead".
-	{name: "/chat:", kind: retiredCommand, successor: "mcp__professor__chat_*", match: matchPrefix},
+	{name: "/chat:", kind: retiredCommand, successor: "mcp__chat-professor__*", match: matchPrefix},
 	// releases/v0.78.0.md "Project: retired project surface": /documenter and
 	// /documenter:archive ("Doc consolidation is the main session's work
 	// under /quality:doc"), /km, /audit:ai-output and six agents.

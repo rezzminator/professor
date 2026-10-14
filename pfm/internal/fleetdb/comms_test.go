@@ -17,7 +17,7 @@ func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
 	ctx := context.Background()
 	events := []CommsEvent{
 		{
-			AtNS: 10, Kind: KindInject, SenderSession: "sender-session",
+			AtNS: 10, Kind: KindCall, SenderSession: "sender-session",
 			SenderLabel: "alpha", SenderUUID: "sender-uuid", Target: "beta",
 			ReceiverSocket: "cc-beta", ReceiverPane: "%1", Message: "first\nverbatim",
 		},
@@ -33,7 +33,7 @@ func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
 			ReceiverSocket: "cx-child", Message: "initial prompt",
 		},
 		{
-			AtNS: 30, Kind: KindInject, SenderLabel: "newest tie", Target: "child",
+			AtNS: 30, Kind: KindCall, SenderLabel: "newest tie", Target: "child",
 			Message: "newest row at the same timestamp",
 		},
 	}
@@ -85,7 +85,7 @@ func TestDegradedStoreRejectsCommsWritesAndReads(t *testing.T) {
 
 	if err := state.RecordComms(
 		context.Background(),
-		CommsEvent{Kind: KindInject, Message: "x"},
+		CommsEvent{Kind: KindCall, Message: "x"},
 	); err == nil ||
 		!strings.Contains(err.Error(), "record comms event") {
 		t.Fatalf("degraded RecordComms() error = %v", err)
@@ -133,7 +133,7 @@ func TestCommsVersionMovesWhenAnotherConnectionCommits(t *testing.T) {
 		t.Helper()
 		if err := writer.RecordComms(
 			ctx,
-			CommsEvent{AtNS: at, Kind: KindInject, Target: "t", Message: "m"},
+			CommsEvent{AtNS: at, Kind: KindCall, Target: "t", Message: "m"},
 		); err != nil {
 			t.Fatalf("record comms from the other connection: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestCommsVersionMovesForTheStoresOwnWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the ledger version: %v", err)
 	}
-	if err := state.RecordComms(ctx, CommsEvent{AtNS: 5, Kind: KindInject, Target: "t", Message: "m"}); err != nil {
+	if err := state.RecordComms(ctx, CommsEvent{AtNS: 5, Kind: KindCall, Target: "t", Message: "m"}); err != nil {
 		t.Fatalf("record comms: %v", err)
 	}
 	after, err := state.CommsVersion(ctx)

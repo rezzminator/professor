@@ -1,11 +1,12 @@
 # flights-foreman
 
-The one agent that builds. It takes a request, with a spec (the rulings and requirement rows `/flights:spec` settled with the user) or without one (a problem), reads its scope, designs what no ruling decided, builds it, splits only where ownership splits, and lands the flight through one `flights-lander`. It replaced the planner/executor split of both families: `flights-speccer`, `flights-orchestrator`, the smart and precise executors, and the general family (`general-orchestrator`, `general-foreman`, `general-executor`). Ruled by the maintainer on 2026-10-06.
+The one agent that builds. It takes a request, with a spec (the rulings and requirement rows `/flights:spec` settled with the user) or without one (a problem), reads its scope, designs what no ruling decided, builds it, splits only where ownership splits, and lands the flight through one `flights-lander`. It replaced the planner/executor split of both families: the task-file speccer, `flights-orchestrator`, the smart and precise executors, and the general family (`general-orchestrator`, `general-foreman`, `general-executor`). Ruled by the maintainer on 2026-10-06.
 
 ## Contents
 
 - [Why one agent reads and builds](#why-one-agent-reads-and-builds)
 - [Input](#input)
+- [Novel work](#novel-work)
 - [Code it has not read](#code-it-has-not-read)
 - [Rulings bind](#rulings-bind)
 - [Before the first edit](#before-the-first-edit)
@@ -24,7 +25,7 @@ The one agent that builds. It takes a request, with a spec (the rulings and requ
 
 ## Why one agent reads and builds
 
-The speccer read every file a task touched, wrote what it learned into task files, and an executor read the same files again to build: every handoff paid for the reading twice, and every belief the speccer formed from what it read travelled to the executor as a fact. Measured:
+The task-file speccer read every file a task touched, wrote what it learned into task files, and an executor read the same files again to build: every handoff paid for the reading twice, and every belief the speccer formed from what it read travelled to the executor as a fact. Measured:
 
 - E1, one Go corpus (callmeter walker-followups, 7 tasks, about 650 code lines), blind replay, one judge: the v2 flight read 38.4M tokens for 42 of 44 behaviours met and 3 known traps; one opus builder plus the lander read 35.8M for the same 42 of 44 and 2 traps, 19% cheaper and 10% faster. The flight's extra trap came from its speccer: it pinned "the content is a JSON string" from the one fixture it read, and every executor built to the pin.
 - The audit of 30 standalone `general-foreman` runs: every foreman that briefed an executor paid for an executor re-reading 69 to 99.9% of the bytes the foreman had already read.
@@ -35,7 +36,13 @@ So the reader builds, and the work splits only where one context cannot or shoul
 
 ## Input
 
-A request; its scope (a build unit or a problem); acceptance; each testing manual's path; the worktree; the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`; the project map beside the project's flight directories. With a spec, the request is `requirements.md` in the flight directory: the binding rulings and the requirement rows. A child also gets the frozen interface it builds against. The same agent serves a main chat's "fix X" with no flight directory: it then creates one under the project, so its run log and the lander's files have a home.
+A request; its scope (a build unit or a problem); acceptance; each testing manual's path; the worktree; the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`, which holds every flight artifact the manual names (`run.md`, `agents.tsv`, `design.md` and each child's `design-{unit}.md`, `briefs/`, `returns/`, `tasks/`, `gate.md`, `REVIEW.md`, `UNLANDED.md`), never the worktree; the project map beside the project's flight directories. With a spec, the request is `requirements.md` in the flight directory: the binding rulings and the requirement rows; or a [`flights-speccer`](flights-speccer.md) `spec.md`, whose requirement rows and `## Decisions` bind as rulings. A child also gets the frozen interface it builds against. The same agent serves a main chat's "fix X" with no flight directory: it then creates one under the project, so its run log and the lander's files have a home.
+
+## Novel work
+
+When `run.md` holds no `SPEC` line and a closest-pattern search, by the foreman's own grep or one `tracer` question, finds none to copy (a new subsystem, an integration with a system nothing here talks to, a layout or test suite the quality laws would design from scratch), the root foreman, before its base gate, writes `briefs/speccer-r{round}.md` (its brief, all it holds, the flight directory, the project map and the child-brief return line, the return file `returns/speccer-r{round}.md`), spawns one `flights-speccer` with that path as it spawns a child (the `speccer CLAIMED` line, the `agents.tsv` row, the return watch) and ends its message. A `SPEC` return is recorded in `run.md` and its `spec.md` becomes the request; for a phased spec, the phase the brief names, else the first, the return naming the next. A `PARTIAL` or `BLOCKED` return makes the foreman's first line `BLOCKED {flight}` with the speccer's missing part or question, nothing built. `design.md` cites the spec's `D` ids in place of a comparison of its own and adds only the per-door changes, states and tests. A `D` the code refuses goes back to the same speccer by `SendMessage` with the finding; its revised `spec.md` binds, and a second refusal is `BLOCKED`. The spec's `USER` decisions exist only when the user gave the authority to decide forks, and travel up on the return's `SPEC` line with its path and `COST`.
+
+Root only: a child builds against the root's frozen interface and never fires one. Work with a pattern goes straight to the build: a fifth door on an existing alerter copies the four, and an ideal spec of it costs more than it buys. The speccer is a separate context because novel work's research, dependency map, quality laws and conception are more than a builder should carry into the build, and a wrong design of something new costs a rebuild.
 
 ## Code it has not read
 
@@ -54,7 +61,7 @@ In order, each written to the run log:
 1. The base gate: the scope's check script on the untouched base, and the reds that already exist. Measured: 11 of 12 audited `general-orchestrator` runs met a surprise at the acceptance gate, most of them reds, ratchets or format failures already on the base.
 2. A `GOAL` line and a door list: every producer, consumer and caller of what changes, from a search (for a shared contract, the contract project's own finder), never from memory or a map handed to it (a `/flights:spec` probe map is evidence); every door on the list is opened; behaviour that shows only live is reproduced live before anything changes. Measured: five of the 19 audited foreman runs that shipped a defect missed a code path or caller they never opened.
 3. The data shapes: every shape the work relies on is read from its producer (its docs, code or schema, never only its consumer), plus one probe of real data where real data exists. A value one run printed is evidence for the return, never a requirement; so is the form one sample of outside data took; every form the producer documents or emits is handled, and any other form is reported, never read as absent. Measured: three of the 19 shipped a defect because real data took a form nobody probed (a listing site records 0 bedrooms for every new-build; a filter built on it hid real flats).
-4. A `DECIDE` line when no ruling decided the design: the design and the alternative it rejected. Measured: 2 of 30 audited foremen wrote a decision before building; nothing forced it.
+4. A `DECIDE` line when no ruling decided the design: the design and the alternative it rejected, written out in the design file: the root's `design.md`, a child's `design-{unit}.md`, so children sharing the flight directory never overwrite each other's or the root's. Measured: 2 of 30 audited foremen wrote a decision before building; nothing forced it.
 
 ## Split only at ownership
 
@@ -72,7 +79,7 @@ Freezing first is what makes the work parallel: once the interface exists in the
 
 Once the interface is frozen (for unrelated problems, which share none, at once), one child foreman per other unit or problem, all spawned in one message. Each child gets:
 
-- its requirement rows verbatim, only the rows its unit owns;
+- its requirement rows verbatim, only the rows its unit owns, and with a `spec.md` its path and the `D` ids those rows rest on;
 - the frozen interface's paths, and the files another unit owns: each hot file in the project map has one owning unit, which adds every line to it, so two children never edit it at once;
 - acceptance, its testing manual's path, the worktree, the flight directory.
 
@@ -115,11 +122,11 @@ After every child returned, the root foreman spawns one `flights-lander` for the
 
 ## The run log
 
-`run.md` in the flight directory, written by the foreman that owns the flight (the root): a header with the baseline sha and date; then one line per event — `BASE {unit} {verdict lines}`, `GOAL`, `DECIDE`, `FROZEN {interface paths} {gate line}`, `{unit} CLAIMED · {agent id}`, `{unit} DONE|FAILED|BLOCKED · {check line}`, `gate CLAIMED`, `gate PASS|FIXED|FAIL`, `RETRO {lesson}`. A child writes no file of the parent's; it returns. The lander reads the baseline from the header and the intent from `requirements.md` (or the `GOAL` line when there is no spec); `/flights:audit` reads all of it.
+`run.md` in the flight directory, written by the foreman that owns the flight (the root): a header with the baseline sha and date; then one line per event — `BASE {unit} {verdict lines}`, `GOAL`, `SPEC {spec.md path}`, `DECIDE`, `FROZEN {interface paths} {gate line}`, `{unit} CLAIMED · {agent id}`, `{unit} DONE|FAILED|BLOCKED · {check line}`, `gate CLAIMED`, `gate PASS|FIXED|FAIL`, `RETRO {lesson}`. A child writes no file of the parent's; it returns. The lander reads the baseline from the header and the intent from `spec.md` when the flight has one (it carries every `requirements.md` row verbatim plus its `## Decisions`), else `requirements.md`, else the `GOAL` line; `/flights:audit` reads all of it.
 
 ## Return
 
-First line `DONE {flight}`, `PARTIAL {flight}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`; then one row per unit (owner, verdict, its check line as printed), the doors, `UNPROVEN`, the lander's verdict and residuals, `OUTSIDE`, the cost (calls, tokens read), `RETRO`. A child returns the same shape for its unit.
+First line `DONE {flight}`, `PARTIAL {flight}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`; then the `SPEC` line when a speccer ran (its path, its `USER` ids, the next phase, its cost), one row per unit (owner, verdict, its check line as printed), the doors, `UNPROVEN`, the lander's verdict and residuals, `OUTSIDE`, the cost (calls, tokens read), `RETRO`. A child returns the same shape for its unit.
 
 ## Evidence
 

@@ -40,14 +40,19 @@ func TestSpanLogsEntryExitDurationAndError(t *testing.T) {
 	ctx, recorder := Test(t)
 	end := Span(ctx, "reload.waitIdle")
 	end(nil)
-	failing := Span(ctx, "reload.inject")
+	failing := Span(ctx, "reload.call")
 	failing(errors.New("socket refused"))
 
 	records := recorder.Records()
 	if len(records) != 4 {
 		t.Fatalf("records = %d, want 4 (start/end per span): %s", len(records), recorder.Raw())
 	}
-	wantMessages := []string{"reload.waitIdle.start", "reload.waitIdle.end", "reload.inject.start", "reload.inject.end"}
+	wantMessages := []string{
+		"reload.waitIdle.start",
+		"reload.waitIdle.end",
+		"reload.call.start",
+		"reload.call.end",
+	}
 	for index, want := range wantMessages {
 		if records[index].Message != want {
 			t.Fatalf("record %d message = %q, want %q", index, records[index].Message, want)

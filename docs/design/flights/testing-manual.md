@@ -43,6 +43,7 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 | Reader | Sections | For |
 | --- | --- | --- |
 | `flights-foreman`, `flights-mechanical-executor` | all | Writing the covering tests in the project's pattern; a floor is never a requirement row, it is the lander's |
+| `flights-speccer` | 1, 2, 8 | Designing the spec's `## Tests` per tier, in the owning homes, against the gates |
 | `flights-lander` | all, 5 to 9 most | Running each project's gate with its floors as gate rows, sweeping test validity, raising the project's bug classes |
 
 ## How it reaches a flight

@@ -17,34 +17,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
-// The statements a pfm built from b5604e2c (SchemaVersion 3) runs on hidden,
-// verbatim from its fleetdb.go: Kill, KillUntilPrompt, Unkill, ReassertKill,
-// UnkillIfPayload and KilledRecords. Its open refuses a file whose
-// user_version is newer than 3.
-const (
-	v3SchemaVersion = 3
-	v3Kill          = `
-INSERT INTO hidden(uuid,hidden_at,at_payload) VALUES(?,?,NULL)
-ON CONFLICT(uuid) DO UPDATE SET
-  hidden_at=excluded.hidden_at,
-  at_payload=NULL`
-	v3KillUntilPrompt = `
-INSERT INTO hidden(uuid,hidden_at,at_payload) VALUES(?,?,?)
-ON CONFLICT(uuid) DO UPDATE SET
-  hidden_at=CASE WHEN hidden.at_payload IS NULL THEN hidden.hidden_at ELSE excluded.hidden_at END,
-  at_payload=CASE
-    WHEN hidden.at_payload IS NULL THEN NULL
-    WHEN excluded.at_payload > hidden.at_payload THEN excluded.at_payload
-    ELSE hidden.at_payload
-  END`
-	v3Unkill          = "DELETE FROM hidden WHERE uuid=?"
-	v3ReassertKill    = "UPDATE hidden SET at_payload=NULL WHERE uuid=?"
-	v3UnkillIfPayload = "DELETE FROM hidden WHERE uuid=? AND at_payload=?"
-	v3KilledRecords   = "SELECT uuid, hidden_at, at_payload FROM hidden"
-)
-
 // v3Schema is the schema a version-3 pfm leaves: hidden has no revision.
-var v3Schema = schemaDDL + migrationV2 + migrationV3 + "PRAGMA user_version=3;"
+var v3Schema = strings.Replace(
+	schemaDDL,
+	"'call'",
+	"'inject'",
+	1,
+) + migrationV2 + migrationV3 + "PRAGMA user_version=3;"
 
 // seedSharedState writes a database file the way an older pfm left it.
 func seedSharedState(t *testing.T, path, script string) {
@@ -61,150 +40,54 @@ func seedSharedState(t *testing.T, path, script string) {
 	}
 }
 
-// v3Exec runs one version-3 statement and returns the rows it changed.
-func v3Exec(t *testing.T, db *sql.DB, query string, args ...any) int64 {
-	t.Helper()
-	result, err := db.Exec(query, args...)
-	if err != nil {
-		t.Fatalf("version-3 statement %q%v: %v", query, args, err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		t.Fatalf("version-3 statement %q rows: %v", query, err)
-	}
-	return changed
-}
-
-// v3Kills reads hidden the way a version-3 pfm lists kills: id → hidden_at,
-// with -1 for a clear-kill baseline still pending.
-func v3Kills(t *testing.T, db *sql.DB) map[string]int64 {
-	t.Helper()
-	rows, err := db.Query(v3KilledRecords)
-	if err != nil {
-		t.Fatalf("version-3 kill list: %v", err)
-	}
-	kills := map[string]int64{}
-	for rows.Next() {
-		var id string
-		var killedAt int64
-		var payload sql.NullInt64
-		if err := rows.Scan(&id, &killedAt, &payload); err != nil {
-			t.Fatal(errors.Join(err, rows.Close()))
-		}
-		if payload.Valid {
-			killedAt = -1
-		}
-		kills[id] = killedAt
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		t.Fatal(err)
-	}
-	return kills
-}
-
-// TestSharedStateStaysOpenableByAVersion3Pfm: whatever file this build opens —
-// none yet, version 1, the version-3 file an installed pfm uses, or the
-// version-4 file a pre-fix develop build left — it leaves a user_version a
-// b5604e2c pfm accepts, and that pfm's statements on hidden still succeed
-// against it, on a connection it opened before this build's open as a running
-// MCP server or picker holds one; this build then reads back every kill the
-// older pfm wrote.
-func TestSharedStateStaysOpenableByAVersion3Pfm(t *testing.T) {
+func TestSharedOpenUpgradesSupportedSchemasAndPreservesKills(t *testing.T) {
 	t.Parallel()
-	for _, test := range []struct {
-		name string
-		seed string // empty: no file yet
-		kept bool   // the seed holds the kill "kept" at 77
-	}{
-		{name: "no file yet"},
-		{name: "version 1", seed: schemaDDL + "INSERT INTO hidden(uuid,hidden_at) VALUES('kept',77);", kept: true},
-		{
-			name: "version 3, an installed pfm's file",
-			seed: v3Schema + "INSERT INTO hidden(uuid,hidden_at) VALUES('kept',77);",
-			kept: true,
-		},
-		{
-			name: "version 4, a pre-fix develop build's file",
-			seed: v3Schema + `ALTER TABLE hidden ADD COLUMN revision TEXT NOT NULL DEFAULT '';
-INSERT INTO hidden(uuid,hidden_at,revision) VALUES('kept',77,'pre-fix');
-PRAGMA user_version=4;`,
-			kept: true,
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
+	for _, version := range []int{0, 1, 3, 4} {
+		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pfm.db")
-			db, err := sqlitedb.OpenReadWrite(path, time.Second)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := db.Close(); err != nil {
-					t.Error(err)
+			if version != 0 {
+				seed := schemaDDL
+				if version >= 3 {
+					seed = v3Schema
 				}
-			}()
-			if test.seed != "" {
-				seedSharedState(t, path, test.seed)
-				v3Kills(t, db) // the older pfm's connection has read hidden before this build opens
+				seedSharedState(
+					t,
+					path,
+					seed+fmt.Sprintf(
+						"INSERT INTO hidden(uuid,hidden_at) VALUES('kept',77); PRAGMA user_version=%d;",
+						version,
+					),
+				)
 			}
 			state := OpenSharedState(ctx, paths.Values{StateDB: path})
 			if err := state.Degraded(); err != nil {
-				t.Fatalf("this build's open: %v", err)
-			}
-			revision, err := state.KillWithRevision(ctx, "this-build", 90)
-			if err := errors.Join(err, state.Close()); err != nil || revision == "" {
-				t.Fatalf("this build's kill = %q, %v; want a rollback revision", revision, err)
-			}
-
-			var version int
-			if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 				t.Fatal(err)
 			}
-			if version > v3SchemaVersion {
-				t.Fatalf("a version-3 pfm refuses this file: schema version %d is newer than binary version %d",
-					version, v3SchemaVersion)
+			revision, err := state.KillWithRevision(ctx, "new", 90)
+			if err != nil || revision == "" {
+				t.Fatalf("current kill=%q,%v", revision, err)
 			}
-			for _, step := range []struct {
-				query string
-				args  []any
-			}{
-				{v3Kill, []any{"v3-kill", 100}},
-				{v3Kill, []any{"this-build", 101}},
-				{v3KillUntilPrompt, []any{"v3-clear", 102, 5}},
-				{v3ReassertKill, []any{"v3-clear"}},
-				{v3KillUntilPrompt, []any{"v3-expired", 103, 6}},
-				{v3UnkillIfPayload, []any{"v3-expired", 6}},
-				{v3Unkill, []any{"v3-kill"}},
-			} {
-				if changed := v3Exec(t, db, step.query, step.args...); changed != 1 {
-					t.Fatalf("version-3 statement %q%v changed %d rows, want 1", step.query, step.args, changed)
-				}
+			var got int
+			if err := state.db.QueryRow("PRAGMA user_version").Scan(&got); err != nil || got != SchemaVersion {
+				t.Fatalf("version=%d err=%v", got, err)
 			}
-			want := map[string]int64{"this-build": 101, "v3-clear": 102}
-			if test.kept {
-				want["kept"] = 77
+			if err := state.Close(); err != nil {
+				t.Fatal(err)
 			}
-			if got := v3Kills(t, db); !reflect.DeepEqual(got, want) {
-				t.Fatalf("version-3 kill list = %v, want %v", got, want)
-			}
-
 			again := OpenSharedState(ctx, paths.Values{StateDB: path})
-			if err := again.Degraded(); err != nil {
-				t.Fatalf("this build's reopen: %v", err)
-			}
 			defer func() {
 				if err := again.Close(); err != nil {
 					t.Error(err)
 				}
 			}()
-			records, err := again.KilledAt(ctx)
-			if err != nil || !reflect.DeepEqual(records, want) {
-				t.Fatalf("this build's kills = %v, %v; want %v", records, err, want)
+			want := map[string]int64{"new": 90}
+			if version != 0 {
+				want["kept"] = 77
 			}
-			var check string
-			if err := again.db.QueryRow("PRAGMA quick_check").Scan(&check); err != nil || check != "ok" {
-				t.Fatalf("quick_check = %q, %v", check, err)
+			kills, err := again.KilledAt(ctx)
+			if err != nil || !reflect.DeepEqual(kills, want) {
+				t.Fatalf("preserved current kills=%v,%v want%v", kills, err, want)
 			}
 		})
 	}
@@ -224,7 +107,7 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 		{name: "missing column waits for the lock", seed: v3Schema, waits: true},
 		{
 			name: "a current file opens without it",
-			seed: v3Schema + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
+			seed: v3Schema + migrationV5 + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion) + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -391,7 +274,7 @@ func TestSharedMigrationReopenKeepsBackup(t *testing.T) {
 func TestSharedMigrationRejectsNewerVersion(t *testing.T) {
 	t.Parallel()
 	state, values := openTestStore(t)
-	newer := RetiredSchemaVersion + 1
+	newer := SchemaVersion + 1
 	if _, err := state.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", newer)); err != nil {
 		t.Fatal(err)
 	}
@@ -442,5 +325,68 @@ func TestLockMigrationSerializesOpenersAndRemovesItsFile(t *testing.T) {
 	}
 	if err := again(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSharedMigrationRenamesStoredCalls(t *testing.T) {
+	t.Parallel()
+	for _, version := range []int{3, 4} {
+		t.Run(strconv.Itoa(version), func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "pfm.db")
+			seedSharedState(t, path, v3Schema+fmt.Sprintf("PRAGMA user_version=%d;", version)+`
+INSERT INTO comms(id,at_ns,kind,sender_session,sender_label,sender_uuid,target,receiver_socket,receiver_pane,group_name,members,message)
+VALUES(7,100,'inject','sender','Sender','uuid','target','socket','%1','group','members','full body');
+INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,102,'spawn','spawn body');`)
+			state := OpenSharedState(ctx, paths.Values{StateDB: path})
+			defer func() {
+				if err := state.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err := state.Degraded(); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := state.CommsSince(ctx, 0, 10)
+			want := CommsEvent{
+				ID:             7,
+				AtNS:           100,
+				Kind:           KindCall,
+				SenderSession:  "sender",
+				SenderLabel:    "Sender",
+				SenderUUID:     "uuid",
+				Target:         "target",
+				ReceiverSocket: "socket",
+				ReceiverPane:   "%1",
+				GroupName:      "group",
+				Members:        "members",
+				Message:        "full body",
+			}
+			if err != nil || len(rows) != 3 || rows[2] != want || rows[1].Kind != "group" || rows[0].Kind != KindSpawn {
+				t.Fatalf("migrated comms=%+v,%v want old row%+v", rows, err, want)
+			}
+			if err := state.RecordComms(ctx, CommsEvent{AtNS: 103, Kind: KindCall, Message: "new call"}); err != nil {
+				t.Fatalf("new call after migration: %v", err)
+			}
+			rows, err = state.CommsSince(ctx, 103, 1)
+			if err != nil || len(rows) != 1 || rows[0].Kind != KindCall || rows[0].Message != "new call" {
+				t.Fatalf("new stored call=%+v,%v", rows, err)
+			}
+			var gotVersion int
+			if err := state.db.QueryRow("PRAGMA user_version").
+				Scan(&gotVersion); err != nil ||
+				gotVersion != SchemaVersion {
+				t.Fatalf("version=%d err=%v", gotVersion, err)
+			}
+			backup, err := sqlitedb.OpenReadOnly(path+".bak-before-v"+strconv.Itoa(SchemaVersion), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var originalKind string
+			queryErr := backup.QueryRow("SELECT kind FROM comms WHERE id=7").Scan(&originalKind)
+			if err := errors.Join(queryErr, backup.Close()); err != nil || originalKind != "inject" {
+				t.Fatalf("original backup kind=%q err=%v", originalKind, err)
+			}
+		})
 	}
 }

@@ -12,7 +12,7 @@ func TestOpenCodeMCPToolName(t *testing.T) {
 		want    string
 		wantErr string
 	}{
-		{name: "shared rule", input: "mcp__professor__harvester_read", want: "professor_harvester_read"},
+		{name: "shared rule", input: "mcp__harvester-professor__read", want: "harvester-professor_read"},
 		{name: "sanitizing", input: "mcp__my.server__do-it", want: "my_server_do-it"},
 		{name: "no tool part", input: "mcp__professor", wantErr: `OpenCode MCP tool "mcp__professor" must be mcp__server__tool`},
 		{name: "empty server", input: "mcp____read", wantErr: `OpenCode MCP tool "mcp____read" must be mcp__server__tool`},

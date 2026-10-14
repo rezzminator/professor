@@ -144,7 +144,7 @@ func TestConfigCLIMCPListReportsConfiguredStateAndSource(t *testing.T) {
 	}
 }
 
-func TestConfigCLIMCPStdioRefusesWhenEveryServerIsDisabled(t *testing.T) {
+func TestConfigCLIMCPStdioRefusesADisabledFamily(t *testing.T) {
 	root := jailTest(t)
 	path := writeConfigFixture(t, root, `{
   "version": 1,
@@ -152,11 +152,14 @@ func TestConfigCLIMCPStdioRefusesWhenEveryServerIsDisabled(t *testing.T) {
 }`)
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", path, "mcp", "serve", "--stdio"}, &stdout, &stderr); code != 1 {
+	if code := run(
+		[]string{"--config", path, "mcp", "serve", "--stdio", "--family", "chat"},
+		&stdout,
+		&stderr,
+	); code != 1 {
 		t.Fatalf("run(disabled mcp serve --stdio) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	want := "pfm mcp serve --stdio: every registered server is disabled by config " + path +
-		"; enable at least one with: pfm mcp <server> enable"
+	want := "pfm mcp: chat is disabled; enable with: pfm mcp chat enable"
 	if stdout.Len() != 0 || strings.TrimSpace(stderr.String()) != want {
 		t.Fatalf(
 			"run(disabled mcp serve --stdio) stdout=%q stderr=%q, want actionable message %q",
@@ -168,7 +171,7 @@ func TestConfigCLIMCPStdioRefusesWhenEveryServerIsDisabled(t *testing.T) {
 }
 
 // TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart pins that `pfm mcp
-// serve --stdio` with only the harvester enabled configures it and reaches the
+// serve --stdio --family harvester` with only the harvester enabled configures it and reaches the
 // server start: exit 0, no usage refusal and no harvester configuration error. Stdin is closed immediately so the reachable
 // server terminates instead of blocking the test on stdio framing.
 func TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart(t *testing.T) {
@@ -193,7 +196,11 @@ func TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart(t *testing.T) {
 	}()
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", path, "mcp", "serve", "--stdio"}, &stdout, &stderr); code != 0 ||
+	if code := run(
+		[]string{"--config", path, "mcp", "serve", "--stdio", "--family", "harvester"},
+		&stdout,
+		&stderr,
+	); code != 0 ||
 		strings.Contains(stderr.String(), "configure harvester") {
 		t.Fatalf(
 			"run(mcp serve --stdio) code=%d stdout=%q stderr=%q, want exit 0 from the enabled harvester's server start",
@@ -204,12 +211,12 @@ func TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart(t *testing.T) {
 	}
 }
 
-// Every form outside ls, serve [--stdio] and <server> enable|disable prints
+// Every form outside ls, serve [--stdio --family chat|harvester] and <server> enable|disable prints
 // the usage line and exits 2 — a bare server name included.
 func TestConfigCLIMCPUnknownFormsPrintUsage(t *testing.T) {
 	root := jailTest(t)
 	path := writeConfigFixture(t, root, `{"version": 1}`)
-	const usage = "usage: pfm mcp ls | pfm mcp serve [--stdio] | pfm mcp <server> enable|disable"
+	const usage = "usage: pfm mcp ls | pfm mcp serve [--stdio --family chat|harvester] | pfm mcp <server> enable|disable"
 	for _, args := range [][]string{{"chat"}, {"serve", "--http"}} {
 		var stdout, stderr bytes.Buffer
 		argv := append([]string{"--config", path, "mcp"}, args...)

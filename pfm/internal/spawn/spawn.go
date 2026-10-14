@@ -8,10 +8,10 @@ import (
 	"time"
 	"unicode"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
@@ -342,6 +342,12 @@ func waitForComposer(
 			held = 0
 			if codexFolderUntrusted(capture) && codexFolderTrustKey(capture) == "" {
 				trace.step("untrusted folder: nothing pressed | %s", screen(capture))
+				return false
+			}
+			if pfmengine.ClaudeTrustDialog(capture) {
+				// Its default row is "No, exit": Enter or Escape ends the chat,
+				// and the key that clears it trusts a folder no human chose.
+				trace.step("held at the folder-trust dialog: nothing pressed | %s", screen(capture))
 				return false
 			}
 			trimmed := strings.TrimSpace(capture)
@@ -680,12 +686,12 @@ func composerHolds(capture, needle string) bool {
 	if needle == "" {
 		return false
 	}
-	line := inject.LastComposerLine(capture)
+	line := pfmcall.LastComposerLine(capture)
 	if line == "" {
 		return false
 	}
 	return strings.Contains(flattenComposerText(line), needle) ||
-		inject.HasPastePlaceholder(line)
+		pfmcall.HasPastePlaceholder(line)
 }
 
 // composerReleased is the submit proof: an idle composer row is on screen
@@ -693,7 +699,7 @@ func composerHolds(capture, needle string) bool {
 // nothing — a draft taller than the pane pushes the row off the top, and
 // reading that as "submitted" is what let a typed-but-unsent brief pass.
 func composerReleased(capture, needle string) bool {
-	return inject.ComposerRowShown(capture) && !composerHolds(capture, needle)
+	return pfmcall.ComposerRowShown(capture) && !composerHolds(capture, needle)
 }
 
 func flattenComposerText(value string) string {

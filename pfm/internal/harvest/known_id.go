@@ -260,8 +260,8 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			skipped,
 			SearchHint(
 				h.settings.searchAvailable,
-				"use `harvester_search_web` to find an author preprint or the publisher's page directly.",
-				"find an author preprint or the publisher's page directly, or try harvester_search_literature again with different terms.",
+				"use `search_web` to find an author preprint or the publisher's page directly.",
+				"find an author preprint or the publisher's page directly, or try search_literature again with different terms.",
 			),
 		)
 		return Result{

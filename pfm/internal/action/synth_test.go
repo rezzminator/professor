@@ -722,7 +722,7 @@ func TestLauncherRunCarriesTheMachineMCP(t *testing.T) {
 	if err := json.Unmarshal(payload, &servers); err != nil {
 		t.Fatalf("launcher mcp-config unreadable: %v in %q", err, run)
 	}
-	if _, found := servers.MCPServers[pfmconfig.MCPServerProfessor]; !found {
+	if _, found := servers.MCPServers[pfmconfig.MCPRegistrationName(pfmconfig.MCPServerChat)]; !found {
 		t.Fatalf("launcher drops pfm's professor server: %q", run)
 	}
 	if string(servers.MCPServers["browser"]) != `{"command":"browser-mcp"}` {

@@ -1,10 +1,9 @@
 {
   "tools": {
-    "mcp__professor__chat_new": "spawn",
-    "mcp__professor__chat_inject": "spawn",
-    "mcp__chat__chat_inject": "spawn",
-    "mcp__professor__chat_status": "wait",
-    "mcp__professor__chat_last": "wait"
+    "mcp__chat-professor__new": "spawn",
+    "mcp__chat-professor__call": "spawn",
+    "mcp__chat-professor__status": "wait",
+    "mcp__chat-professor__last": "wait"
   },
   "wrappers": [
     {"program": "dev.sh", "after": ["iso", "run"]},

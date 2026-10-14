@@ -18,12 +18,12 @@ import (
 // recommends a tool the server does not register. Every combination ends with
 // the per-item empty-versus-error rule; search off adds the enable hint.
 func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
-	clause1 := `Read a web page → harvester_read with it in urls`
-	clause2 := `a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or harvester_search_literature handle → harvester_read with it in publications`
-	clause3 := `a local document → harvester_read with its path in files`
-	clause4 := `find papers or books by title → harvester_search_literature`
-	clause5 := `save a file's bytes unparsed → harvester_download_file`
-	clause6 := `search the web for a topic → harvester_search_web`
+	clause1 := `Read a web page → read with it in urls`
+	clause2 := `a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or search_literature handle → read with it in publications`
+	clause3 := `a local document → read with its path in files`
+	clause4 := `find papers or books by title → search_literature`
+	clause5 := `save a file's bytes unparsed → download_file`
+	clause6 := `search the web for a topic → search_web`
 
 	const perItem = ` Answers are text, one "=== [n/N]" block per item: "No … found" is nothing found, an error is a failed lookup.`
 	const searchOff = ` Web search is not configured on this server — set search.searxngURL or search.braveApiKey in harvester.config.json to enable web search.`
@@ -43,8 +43,8 @@ func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := serverInstructions(test.searchAvailable, test.remote)
-			if !test.searchAvailable && strings.Contains(got, "harvester_search_web") {
-				t.Fatalf("search off, instructions name harvester_search_web: %q", got)
+			if !test.searchAvailable && strings.Contains(got, "search_web") {
+				t.Fatalf("search off, instructions name search_web: %q", got)
 			}
 			if got != test.want {
 				t.Fatalf(
@@ -67,7 +67,7 @@ func TestSearchFailureRendersEachBackend(t *testing.T) {
 	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "could not classify") {
 		t.Fatalf("search failure lost safe public message: %q", text)
 	}
-	for _, name := range []string{"harvester_read", "harvester_search_literature", "harvester_download_file"} {
+	for _, name := range []string{"read", "search_literature", "download_file"} {
 		if !strings.Contains(text, name) {
 			t.Fatalf("search failure text %q does not name %q", text, name)
 		}

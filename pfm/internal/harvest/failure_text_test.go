@@ -71,7 +71,7 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 		{
 			"paywall",
 			Result{Error: "the article is behind a paywall"},
-			[]string{"paywall", "never signs in", "harvester_search_literature"},
+			[]string{"paywall", "never signs in", "search_literature"},
 			nil,
 		},
 		{
@@ -140,19 +140,19 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 				Error: "Found DOI 10.1234/x, but no free, legal full text exists in the configured open-access sources. The paper is likely paywalled",
 				Rungs: []string{"oa:unpaywall", "oa:core"},
 			},
-			[]string{"No open copy", "never signs in", "harvester_search_literature", "oa-mirror(2 sources)"},
+			[]string{"No open copy", "never signs in", "search_literature", "oa-mirror(2 sources)"},
 			nil,
 		},
 		{
 			"disabled",
 			Result{ErrorKind: errorKindDisabled},
-			[]string{"disabled on this harvester", "harvester_search_literature"},
+			[]string{"disabled on this harvester", "search_literature"},
 			nil,
 		},
 		{
 			"local missing",
 			Result{Source: "/data/notes/report.odt", ErrorKind: errorKindMissing},
-			[]string{"local file", "harvester_read (files)"},
+			[]string{"local file", "read (files)"},
 			[]string{"/data/notes"},
 		},
 		{
@@ -354,16 +354,16 @@ func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
 			"ambiguous",
 			titleGuessResult("Attention Is All You Need", "Attention Is All You Need"),
 			errorKindAmbiguous,
-			[]string{"title is ambiguous", "harvester_search_literature", "harvester_read"},
+			[]string{"title is ambiguous", "search_literature", "read"},
 		},
 		{
 			"wrong kind",
 			Result{
 				Source: "https://example.test/z",
-				Error:  "This document is an image, not a page — download it with `harvester_download_file`; harvester_read reads pages.",
+				Error:  "This document is an image, not a page — download it with `download_file`; read reads pages.",
 			},
 			errorKindWrongKind,
-			[]string{"not a page", "harvester_download_file", "harvester_read reads pages"},
+			[]string{"not a page", "download_file", "read reads pages"},
 		},
 	}
 	for _, test := range cases {
@@ -388,12 +388,12 @@ func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
 }
 
 // TestAdviceTextNeverDecidesTheErrorKind: the ladder's failure messages end
-// with advice naming harvester_search_literature, and that advice never
+// with advice naming search_literature, and that advice never
 // classifies the failure. Only the title diagnostic is "ambiguous"; LinkedIn's
 // HTTP 999 is a refusal like a 403; a PubMed search URL is an invalid input.
 func TestAdviceTextNeverDecidesTheErrorKind(t *testing.T) {
 	t.Parallel()
-	const advice = "Find an alternative copy with harvester_search_literature or another URL."
+	const advice = "Find an alternative copy with search_literature or another URL."
 	linkedIn := "https://www.linkedin.com/school/example-university/"
 	pubMed := (&Harvester{}).fetchURLWithPolicy(
 		context.Background(), "https://pubmed.ncbi.nlm.nih.gov/?term=example+query", FetchOptions{}, false,
@@ -445,14 +445,14 @@ func TestAdviceTextNeverDecidesTheErrorKind(t *testing.T) {
 			"title diagnostic",
 			titleGuessResult("Attention Is All You Need", "Attention Is All You Need"),
 			errorKindAmbiguous,
-			[]string{"title is ambiguous", "harvester_search_literature"},
+			[]string{"title is ambiguous", "search_literature"},
 			nil,
 		},
 		{
 			"pubmed search url",
 			pubMed,
 			errorKindInvalid,
-			[]string{"PubMed search", "harvester_search_literature", "publications"},
+			[]string{"PubMed search", "search_literature", "publications"},
 			[]string{"ambiguous"},
 		},
 		{
@@ -461,14 +461,14 @@ func TestAdviceTextNeverDecidesTheErrorKind(t *testing.T) {
 				context.Background(), "https://pubmed.ncbi.nlm.nih.gov/?term=democracy", FetchOptions{}, false,
 			),
 			errorKindInvalid,
-			[]string{"PubMed search", "harvester_search_literature"},
+			[]string{"PubMed search", "search_literature"},
 			[]string{"conversion", "ambiguous"},
 		},
 		{
 			"title holding a marker",
 			titleGuessResult("Maximum likelihood estimation", "Maximum likelihood estimation"),
 			errorKindAmbiguous,
-			[]string{"title is ambiguous", "harvester_search_literature"},
+			[]string{"title is ambiguous", "search_literature"},
 			[]string{"too large"},
 		},
 	}

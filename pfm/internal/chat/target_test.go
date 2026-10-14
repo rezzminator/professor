@@ -86,7 +86,7 @@ func TestMatchPrefersTheLiveSeat(t *testing.T) {
 // TestMatchAcceptsAFullSocketPathAndTheBareName covers the second resolver's
 // half of the same normalisation defect the cosmos graph had. A compose.Row
 // carries the BARE socket name tmux is addressed by (-L), while everything the
-// fleet RECORDS is a full -S path: inject writes one into the comms ledger,
+// fleet RECORDS is a full -S path: call writes one into the comms ledger,
 // spawn writes one for every chat it starts, and `pfm chat resolve` prints
 // one. An operator or a script pasting the path it was handed matched nothing,
 // and the miss reported as "no chat named …" — an absence, for a chat that was
@@ -182,7 +182,7 @@ func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	daemonSocket := filepath.Join(values.TmuxDir, "cc-daemon")
-	t.Setenv("CHAT_INJECT_SOCKET", daemonSocket)
+	t.Setenv("CHAT_CALL_SOCKET", daemonSocket)
 	t.Setenv("TMUX", filepath.Join(values.TmuxDir, "cc-other")+",123,0")
 
 	t.Run("scoped socket wins without copying caller identity", func(t *testing.T) {

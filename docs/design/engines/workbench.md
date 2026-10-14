@@ -49,24 +49,24 @@ Claude carries `--system-prompt-file {abs}`. Codex carries the body through `act
 
 `--agent-role` composes onto the explicit harness, else workbench prompt, else fleet prompt. `BasePrompt`, `ResolveSeatPrompt` and `RefreshSeatPrompt` share this base across new seats and reloads. An inherited Claude branch model is kept; absent one, the bench model applies. Sources: `pfm/internal/agentrole/base_prompt.go`, `pfm/internal/agentrole/agentrole.go`, `pfm/internal/action/headless.go`.
 
-An omitted engine in `chat new` / MCP `chat_new` keeps the current engine when enabled with an account, else `PickEngine` chooses the first enabled engine with an account. An explicit disabled engine is refused. Sources: `pfm/internal/workbench/engine_pick.go`, `pfm/cmd/pfm/chat_new_command.go`, `pfm/internal/mcpserv/actions.go`.
+An omitted engine in `chat new` / MCP `new` keeps the current engine when enabled with an account, else `PickEngine` chooses the first enabled engine with an account. An explicit disabled engine is refused. Sources: `pfm/internal/workbench/engine_pick.go`, `pfm/cmd/pfm/chat_new_command.go`, `pfm/internal/mcpserv/actions.go`.
 
 ## Launch doors
 
 | door | mode | source and route |
 | --- | --- | --- |
 | Picker ✦ new Claude | `New` | `pfm/internal/action/persona.go`, `pfm/internal/action/synth.go`: `Executor.Open` / `OpenDetached` → `Synthesize(NewClaude)`. |
-| Picker resume/agent, `chat open`, MCP `chat_open`, schedule | `Resume` | `pfm/internal/chat/open.go`, `pfm/internal/action/executor.go`, `pfm/internal/action/open_detached.go`, `pfm/internal/action/synth.go`: `Synthesize(ResumeClaude, Agent, ResumeCodex, ResumeOpenCode)`. |
+| Picker resume/agent, `chat open`, MCP `open`, schedule | `Resume` | `pfm/internal/chat/open.go`, `pfm/internal/action/executor.go`, `pfm/internal/action/open_detached.go`, `pfm/internal/action/synth.go`: `Synthesize(ResumeClaude, Agent, ResumeCodex, ResumeOpenCode)`. |
 | Picker ✦ new OpenCode | `New` | `pfm/internal/action/persona.go`, `pfm/internal/action/synth.go`: mirror/plugin preparation → `Synthesize(NewOpenCode)`. |
 | Picker ✦ new Codex, bare `cx` | `New` or `Resume` for resume/continue/fork | `pfm/internal/action/persona.go` checks the picker request; `pfm/internal/hookentry/codex_launch.go`: `CodexLaunch` builds the mirror and inserts persona flags. |
 | Bare `claude`, `internal launch`, `internal claude-launch` | `New` or `Resume` for resume/continue/fork | `pfm/internal/hookentry/launch.go`, `pfm/internal/hookentry/claude_launch.go`, `pfm/internal/action/synth.go`, `pfm/internal/claudelaunch/render.go`: `Launch` → `LauncherRunAs`. |
 | agent-open | `Resume` | `pfm/internal/agentopen/real.go`: `ExecCommands.Resume`. |
-| `pfm chat new`, MCP `chat_new` | `New` | `pfm/internal/mcpserv/actions.go`, `pfm/cmd/pfm/chat_new_command.go`: `PlanClaude` / `PlanCodex`. |
+| `pfm chat new`, MCP `new` | `New` | `pfm/internal/mcpserv/actions.go`, `pfm/cmd/pfm/chat_new_command.go`: `PlanClaude` / `PlanCodex`. |
 | `pfm chat reload` prompt | `Resume` | `pfm/internal/agentrole/agentrole.go`: `RefreshSeatPrompt`. |
 | `pfm chat reload` effort, model, mirror | `Resume` | `pfm/internal/reload/reload.go`, `pfm/internal/reload/workbench.go`: `Run` → `applyReloadWorkbench`, before pane locking. |
 | `pfm chat branch` | `Resume` | `pfm/cmd/pfm/chat_satellite_command.go`, `pfm/internal/action/headless.go`: `HeadlessFork`. |
 
-Attaching to an already live seat does not relaunch it. Bare non-session administrative commands pass through. `pfm headless exec`, `PurposeQuery` probes (`reap/busy.go`, agent-open queries, `chat_inject_resume.go`) and `internal/ask` one-shot runs are outside this rule. OpenCode `chat new`, reload and branch remain refused.
+Attaching to an already live seat does not relaunch it. Bare non-session administrative commands pass through. `pfm headless exec`, `PurposeQuery` probes (`reap/busy.go`, agent-open queries, `chat_call_resume.go`) and `internal/ask` one-shot runs are outside this rule. OpenCode `chat new`, reload and branch remain refused.
 
 ## Mirrors
 

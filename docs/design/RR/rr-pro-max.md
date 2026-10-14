@@ -19,7 +19,7 @@
 | --- | --- |
 | Kind | variant of `rr`, declared in `templates/global/agents/rr-pro-max.md` |
 | Model, effort | `opus`, `medium` |
-| Tools | `WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` — `rr.md`'s list plus `Read`, added by `add.tools` in its declaration |
+| Tools | `WebSearch, WebFetch, Read, Write, Agent, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` — `rr.md`'s list plus `Read`, added by `add.tools` in its declaration |
 | Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line; an existing file of the same name is overwritten (§ Read, and the name guard it gives up) |
 | Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |

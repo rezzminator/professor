@@ -52,9 +52,9 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chat to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/status)\" != 000 ]" \
   'lane_daemon_up' ||
-  lane_abort "the professor MCP daemon never answered on :$PORT — a Codex chat's professor stdio server would have no daemon to forward to"
+  lane_abort "the professor MCP daemon never answered on :$PORT — a Codex chat's family stdio server would have no daemon to forward to"
 
 # ─── E2.01 — the spawn ceremony on the Codex home ───────────────────────────
 
@@ -84,7 +84,7 @@ rollout_of() {
   find "$CODEX_HOME/sessions" -type f -name "rollout-*$1*.jsonl" 2>/dev/null | sort | tail -1
 }
 
-# addr — the handle every name-addressed verb (last/inject/ask/watch/capture)
+# addr — the handle every name-addressed verb (last/call/ask/watch/capture)
 # gets: the LIVE row's thread id, read fresh. After E2.03's `--new --hide` the
 # label is held by the hidden thread AND the live one, the exact shape the
 # resolver ledgers as ambiguous (known-gaps.yml E1.26) — the id is unique,
@@ -430,7 +430,7 @@ if requires E2.01-open-seat; then
   fi
 fi
 
-# ─── E2.06 — MCP over stdio: the chat_* tools the Codex session lists ──────
+# ─── E2.06 — MCP over stdio: the chat tools the Codex session lists ──────
 
 beat E2.06-mcp-stdio
 spends cx
@@ -439,16 +439,19 @@ if requires E2.01-open-seat; then
   bad=""
   toml="$CODEX_HOME/config.toml"
   bin="$HOME/.local/bin/pfm"
-  # M34: the professor server wired over stdio inside the installer-owned fence
+  # M34: both family servers wired over stdio inside the installer-owned fence
   # (internal/installer/mcp.go writeMCPCodeConfigAt).
   if [ ! -f "$toml" ]; then
     bad="$bad no $toml — the installer writes the [mcp_servers] fence there;"
   else
     fence="$(sed -n '/^# BEGIN pfm mcp_servers — installer-owned$/,/^# END pfm mcp_servers — installer-owned$/p' "$toml")"
     [ -n "$fence" ] || bad="$bad $toml carries no '# BEGIN/END pfm mcp_servers — installer-owned' fence;"
-    grep -qF '[mcp_servers.professor]' <<<"$fence" || bad="$bad the fence has no [mcp_servers.professor];"
-    grep -qF "command = \"$bin\"" <<<"$fence" || bad="$bad the fence does not point professor's command at $bin: $(one_line "$fence");"
-    grep -qF 'args = ["mcp", "serve", "--stdio"]' <<<"$fence" || bad="$bad the fence does not wire professor's args to [\"mcp\", \"serve\", \"--stdio\"]: $(one_line "$fence");"
+    for family in chat harvester; do
+      section="$(awk -v header="[mcp_servers.$family-professor]" '$0 == header { found = 1; next } found && /^\[/ { exit } found { print }' <<<"$fence")"
+      grep -qF "command = \"$bin\"" <<<"$section" &&
+        grep -qF "args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"$family\"]" <<<"$section" ||
+        bad="$bad the fence lacks the $family-professor stdio command;"
+    done
   fi
   # The served surface: three JSON-RPC frames on stdin to the stdio command
   # itself (initialize, notifications/initialized, tools/list) — the same
@@ -457,21 +460,21 @@ if requires E2.01-open-seat; then
   initd='{"jsonrpc":"2.0","method":"notifications/initialized"}'
   list='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
   # stdin stays open until the id-2 tools/list reply (check-map.sh does the same).
-  mcp_stdio_exchange 2 15 "$(printf '%s\n%s\n%s\n' "$init" "$initd" "$list")" "$bin" mcp serve --stdio 2>/tmp/e2-mcp-stdio.err >/tmp/e2-mcp-stdio.out
+  mcp_stdio_exchange 2 15 "$(printf '%s\n%s\n%s\n' "$init" "$initd" "$list")" "$bin" mcp serve --stdio --family chat 2>/tmp/e2-mcp-stdio.err >/tmp/e2-mcp-stdio.out
   stdio_rc=$?
   out="$(cat /tmp/e2-mcp-stdio.out)"
   tools=""
-  [ "$stdio_rc" -eq 0 ] || bad="$bad pfm mcp serve --stdio did not answer id 2: ${MCP_STDIO_WHY:-exit $stdio_rc};"
+  [ "$stdio_rc" -eq 0 ] || bad="$bad pfm mcp serve --stdio --family chat did not answer id 2: ${MCP_STDIO_WHY:-exit $stdio_rc};"
   if [ -z "$out" ]; then
-    bad="$bad pfm mcp serve --stdio produced no output on the three-frame handshake: $(one_line "$(cat /tmp/e2-mcp-stdio.err 2>/dev/null)");"
+    bad="$bad pfm mcp serve --stdio --family chat produced no output on the three-frame handshake: $(one_line "$(cat /tmp/e2-mcp-stdio.err 2>/dev/null)");"
   elif ! grep -q '"serverInfo"' <<<"$out"; then
     bad="$bad the initialize response over stdio carried no serverInfo: $(one_line "$out" | cut -c1-200);"
   else
-    tools="$(grep '"id":2' <<<"$out" | jq -r '.result.tools[]?.name | select(startswith("chat_") or . == "servicedesk")' 2>/dev/null | sort)"
+    tools="$(grep '"id":2' <<<"$out" | jq -r '.result.tools[]?.name' 2>/dev/null | sort)"
     if [ -z "$tools" ]; then
       bad="$bad tools/list over stdio returned no tool names: $(one_line "$out" | cut -c1-200);"
     else
-      for want in chat_ls chat_status chat_last chat_read chat_inject chat_whoami chat_new chat_kill chat_unkill chat_name; do
+      for want in ls status last read call whoami new kill unkill name; do
         grep -qx "$want" <<<"$tools" || bad="$bad tools/list lacks $want;"
       done
       # Compare the chat server roster, leaving the separate harvester tools
@@ -485,21 +488,21 @@ if requires E2.01-open-seat; then
     fi
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "config.toml fence wires professor's stdio command at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) tools ($(grep -c '^chat_' <<<"$tools") chat_*), matching /status"
+    pass "config.toml fence wires both family stdio commands at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) chat tools, matching /status"
   fi
 fi
 
-# ─── E2.07 — inject, ask, watch on the Codex home ───────────────────────────
+# ─── E2.07 — call, ask, watch on the Codex home ───────────────────────────
 
-beat E2.07-inject-ask-watch
+beat E2.07-call-ask-watch
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
   id="$(addr)"
-  out="$(pfm chat inject --allow-unsigned "$id" INJECT-CX-OK 2>&1)" ||
-    bad="$bad base inject was refused: $(one_line "$out");"
-  [ -n "$bad" ] || wait_prompt "$id" INJECT-CX-OK 240 || bad="$bad the base inject never reached the rollout as a user record (INJECT-CX-OK): ${LANE_WAIT_WHY:-no wait reason recorded};"
+  out="$(pfm chat call --allow-unsigned "$id" CALL-CX-OK 2>&1)" ||
+    bad="$bad base call was refused: $(one_line "$out");"
+  [ -n "$bad" ] || wait_prompt "$id" CALL-CX-OK 240 || bad="$bad the base call never reached the rollout as a user record (CALL-CX-OK): ${LANE_WAIT_WHY:-no wait reason recorded};"
   ask="$(CHAT_SENDER_SESSION=lane-E2 CHAT_SENDER_LABEL=lane-E2 pfm chat ask --timeout 240 "$id" "$(mock_steps '{"type":"turn","reply":"ASK-CX-OK"}')" 2>&1)"
   ask_rc=$?
   if [ "$ask_rc" -ne 0 ]; then
@@ -517,7 +520,7 @@ if requires E2.01-open-seat; then
     bad="$bad watch exited 0 but printed nothing — no transition was reported;"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "inject wrote the user record (INJECT-CX-OK), ask blocked for the scripted reply (ASK-CX-OK), watch --idle-after 10 --once reported: $(one_line "$watch")"
+    pass "call wrote the user record (CALL-CX-OK), ask blocked for the scripted reply (ASK-CX-OK), watch --idle-after 10 --once reported: $(one_line "$watch")"
   fi
 fi
 

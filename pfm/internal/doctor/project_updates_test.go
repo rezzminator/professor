@@ -85,7 +85,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
 		"    scripts/legacy.sh:2   /wave — retired command, now /flights:spec\n",
-		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__professor__chat_*\n",
+		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__chat-professor__*\n",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor --project-updates missing %q:\n%s", want, stdout.String())

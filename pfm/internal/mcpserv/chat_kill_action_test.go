@@ -9,9 +9,9 @@ import (
 )
 
 // TestChatKillSurfacesAKilledButStillAliveFailure is the MCP-side half of the
-// chat_kill fix: the tool must never answer status "ok" while the target's
+// kill fix: the tool must never answer status "ok" while the target's
 // engine process is still running. cliAction already maps a non-zero CLI
-// exit to a tool error (internal/mcpserv/actions.go); this pins that chat_kill
+// exit to a tool error (internal/mcpserv/actions.go); this pins that kill
 // specifically relies on it, so runResolvedChatKillContext's ConfirmExit failure
 // (cmd/pfm/chat_command.go) reaches the caller as a tool error, not "ok".
 func TestChatKillSurfacesAKilledButStillAliveFailure(t *testing.T) {
@@ -93,7 +93,7 @@ func TestChatKillMessageCarriesTheDeListedMechanism(t *testing.T) {
 }
 
 // TestChatKillDispatchesTargetAndExitFlag is the companion positive case:
-// chat_kill{target, exit:true} reaches the CLI as `chat kill <target> --exit`
+// kill{target, exit:true} reaches the CLI as `chat kill <target> --exit`
 // unchanged, and a clean (verified) exit reports status ok.
 func TestChatKillDispatchesTargetAndExitFlag(t *testing.T) {
 	t.Parallel()

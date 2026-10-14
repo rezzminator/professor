@@ -84,15 +84,15 @@ func seedFindDriftTranscripts(t *testing.T, root string, count int) []string {
 	return ids
 }
 
-// TestMCPFindHonorsItsLimitPastFiveCandidates pins chat_find's advertised
+// TestMCPFindHonorsItsLimitPastFiveCandidates pins find's advertised
 // limit (default 10, maximum 50): the shared search used to hand MCP only the
 // CLI's best match plus four runners-up, so no limit above 5 was ever honored.
 func TestMCPFindHonorsItsLimitPastFiveCandidates(t *testing.T) {
 	root := jailTest(t)
 	seedFindDriftTranscripts(t, root, 7)
-	output := callChatTool[mcpserv.FindOutput](t, "chat_find", mcpserv.FindInput{Excerpt: findDriftNeedle, Limit: 7})
+	output := callChatTool[mcpserv.FindOutput](t, "find", mcpserv.FindInput{Excerpt: findDriftNeedle, Limit: 7})
 	if output.Count != 7 {
-		t.Fatalf("chat_find limit 7 over 7 matches = %d candidates", output.Count)
+		t.Fatalf("find limit 7 over 7 matches = %d candidates", output.Count)
 	}
 }
 
@@ -103,17 +103,17 @@ func TestMCPFindIncludesTheAskingSessionOnlyWhenAsked(t *testing.T) {
 	root := jailTest(t)
 	ids := seedFindDriftTranscripts(t, root, 2)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", ids[0])
-	excluded := callChatTool[mcpserv.FindOutput](t, "chat_find", mcpserv.FindInput{Excerpt: findDriftNeedle})
+	excluded := callChatTool[mcpserv.FindOutput](t, "find", mcpserv.FindInput{Excerpt: findDriftNeedle})
 	if excluded.Count != 1 || excluded.Candidates[0].ID != ids[1] {
-		t.Fatalf("chat_find default = %+v; want only the other session", excluded)
+		t.Fatalf("find default = %+v; want only the other session", excluded)
 	}
 	included := callChatTool[mcpserv.FindOutput](
 		t,
-		"chat_find",
+		"find",
 		mcpserv.FindInput{Excerpt: findDriftNeedle, IncludeSelf: true},
 	)
 	if included.Count != 2 {
-		t.Fatalf("chat_find include_self = %+v; want both sessions", included)
+		t.Fatalf("find include_self = %+v; want both sessions", included)
 	}
 }
 
@@ -123,21 +123,21 @@ func TestMCPFindNamesTheSessionItLeftOut(t *testing.T) {
 	root := jailTest(t)
 	ids := seedFindDriftTranscripts(t, root, 2)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", ids[0])
-	excluded := callChatTool[mcpserv.FindOutput](t, "chat_find", mcpserv.FindInput{Excerpt: findDriftNeedle})
+	excluded := callChatTool[mcpserv.FindOutput](t, "find", mcpserv.FindInput{Excerpt: findDriftNeedle})
 	if excluded.SelfID != ids[0] {
-		t.Fatalf("chat_find default self_id = %q; want the excluded %q", excluded.SelfID, ids[0])
+		t.Fatalf("find default self_id = %q; want the excluded %q", excluded.SelfID, ids[0])
 	}
 	included := callChatTool[mcpserv.FindOutput](
 		t,
-		"chat_find",
+		"find",
 		mcpserv.FindInput{Excerpt: findDriftNeedle, IncludeSelf: true},
 	)
 	if included.SelfID != "" {
-		t.Fatalf("chat_find include_self self_id = %q; want none", included.SelfID)
+		t.Fatalf("find include_self self_id = %q; want none", included.SelfID)
 	}
 }
 
-// TestMCPReadDefaultsToTwentyTurns pins chat_read's advertised default
+// TestMCPReadDefaultsToTwentyTurns pins read's advertised default
 // (last_n 20): the shared extraction used to default to the CLI's single turn.
 func TestMCPReadDefaultsToTwentyTurns(t *testing.T) {
 	root := jailTest(t)
@@ -155,8 +155,8 @@ func TestMCPReadDefaultsToTwentyTurns(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, id+".jsonl"), []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	output := callChatTool[mcpserv.ReadOutput](t, "chat_read", mcpserv.ReadInput{Source: id})
+	output := callChatTool[mcpserv.ReadOutput](t, "read", mcpserv.ReadInput{Source: id})
 	if output.Count != 3 || output.Truncated {
-		t.Fatalf("chat_read default = %+v; want all three turns, untruncated", output)
+		t.Fatalf("read default = %+v; want all three turns, untruncated", output)
 	}
 }

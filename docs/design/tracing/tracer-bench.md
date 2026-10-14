@@ -70,7 +70,7 @@ Each setup's share of the `opus` `medium` lead; Sonnet 5.5 `xhigh` is the mean o
 
 The tree — a `sonnet` `high` lead over `haiku` `low` sub-tracers — against the single-agent body it replaced, `sonnet` `high`, on three briefs over this repository's `pfm/`:
 
-- B1, one question: the `chat_exit` MCP tool from its handler down to the operating system — every function, process, tmux, file and database effect, and each failure's text and receiver. A 33-facet key built from the code before any run.
+- B1, one question: the `exit` MCP tool from its handler down to the operating system — every function, process, tmux, file and database effect, and each failure's text and receiver. A 33-facet key built from the code before any run.
 - B3, four questions: every caller of three pricing loaders and what it does with the error, the table served when the price file fails to decode, how a model id finds its price row, and the tests that pin `pfm model-cost --check`. A 21-facet key.
 - B4, two questions: six MCP chat tools each traced to its system effect and failure texts, and the tests that pin each. No key: the two finals were read side by side.
 
@@ -101,7 +101,7 @@ One run per setup unless marked; each version changed several rules at once, so 
 | **v6** | B4 | — | 52/71 | 0.364 | 62% | 9 | 216 | — |
 | v7 | B4 | — | 28/57 | 0.486 | 62% | 12 | 205 | — |
 
-- One setup swings far between runs: v6's two B1 runs score 2.45 and 1.40, mean 1.93 against the single agent's one run at 1.94. On B4 the tree cost 29% less at an equal answer, deeper on `chat_new`, `chat_status` and `chat_inject`, a slightly thinner `chat_new` test list. On B3, which the single agent settles in 7 requests, the two tie on value and the tree costs more.
+- One setup swings far between runs: v6's two B1 runs score 2.45 and 1.40, mean 1.93 against the single agent's one run at 1.94. On B4 the tree cost 29% less at an equal answer, deeper on `new`, `status` and `chat call`, a slightly thinner `new` test list. On B3, which the single agent settles in 7 requests, the two tie on value and the tree costs more.
 - The lead is 60–80% of every tree run's cost: its context written to cache and its synthesis output. A `haiku` `low` sub-tracer costs $0.01–0.02; at `medium` one cost about $0.04, mostly thinking.
 - v1, not in the table: on B3 the lead delegated nothing and read everything itself; on B1 no node spawned a grandchild and each walked about 70 hops alone.
 - v2's printed tree was as large as the code: the lead's peak context reached 61–69K tokens against the single agent's 72K.

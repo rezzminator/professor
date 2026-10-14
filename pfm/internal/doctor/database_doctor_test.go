@@ -264,7 +264,7 @@ func TestPrintCodexPaneDoctor(t *testing.T) {
 func TestDoctorNamesANewerStateDatabaseWithoutTouchingIt(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	path := runtime.Paths.StateDB
-	newer := fleetdb.RetiredSchemaVersion + 1
+	newer := fleetdb.SchemaVersion + 1
 	stageDoctorDatabaseVersion(t, path, newer)
 	before := readDoctorDatabaseFile(t, path)
 

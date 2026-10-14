@@ -17,7 +17,7 @@
 | --- | --- |
 | Kind | variant of `rr`, declared in `templates/global/agents/rr-pro.md` |
 | Model, effort | `opus`, `medium` |
-| Tools | `WebSearch, WebFetch, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` (inherited from `rr.md`) |
+| Tools | `WebSearch, WebFetch, Write, Agent, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web` (inherited from `rr.md`) |
 | Spawns | `sub-rr`, and `clone-distiller` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
 | Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |

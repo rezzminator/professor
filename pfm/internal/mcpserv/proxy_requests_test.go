@@ -52,9 +52,9 @@ func TestStdioProxyAdmitsUnrelatedRequestAfterAdmissionWindow(t *testing.T) {
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.clock = testClock
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(2, "chat_status", `{"target":"seat","ask":true}`))
+	harness.write(t, proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`))
 	<-firstStarted
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"independent"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"independent"}`))
 
 	select {
 	case <-testClock.timerCreated:
@@ -103,9 +103,9 @@ func TestStdioProxyAdmitsPendingRequestBeforeNextFrame(t *testing.T) {
 		close(releaseFirst)
 		server.Close()
 	})
-	harness.write(t, proxyTestToolCall(2, "chat_status", `{"target":"seat","ask":true}`))
+	harness.write(t, proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`))
 	<-firstStarted
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"next-frame"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"next-frame"}`))
 	<-testClock.timerCreated
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/progress","params":{}}`)
 
@@ -146,7 +146,7 @@ func TestStdioProxyForwardsCancellationWhileCallRuns(t *testing.T) {
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(2, "chat_status", `{"target":"seat","ask":true}`))
+	harness.write(t, proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`))
 	<-started
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}`)
 	select {
@@ -194,9 +194,9 @@ func TestStdioProxyCancelsQueuedRequestBeforeDaemonSubmission(t *testing.T) {
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.clock = testClock
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(2, "chat_status", `{"target":"seat","ask":true}`))
+	harness.write(t, proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`))
 	<-started
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"must-not-run"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"must-not-run"}`))
 	<-testClock.timerCreated
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`)
 	select {
@@ -248,9 +248,9 @@ func TestStdioProxyDistinguishesStringAndNumericCancellationIDs(t *testing.T) {
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(2, "chat_status", `{"target":"seat","ask":true}`))
+	harness.write(t, proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`))
 	<-started
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"numeric-id"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"numeric-id"}`))
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"3"}}`)
 	select {
 	case <-cancellationForwarded:
@@ -293,15 +293,15 @@ func TestStdioProxyReusesCancelledRequestIDAfterCleanup(t *testing.T) {
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(2, "chat_status", `{"target":"seat","ask":true}`))
+	harness.write(t, proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`))
 	<-started
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"cancelled"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"cancelled"}`))
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`)
 	close(release)
 	_ = harness.read(t)
 	_ = harness.read(t)
 
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"reused"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"reused"}`))
 	response := harness.read(t)
 	if _, ok := response["result"].(map[string]any); !ok {
 		t.Fatalf("reused request response = %+v, want success", response)
@@ -346,7 +346,7 @@ func TestStdioProxyLateCancellationPrecedesReusedRequestID(t *testing.T) {
 		}
 		server.Close()
 	})
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"first"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"first"}`))
 	if response := harness.read(t); response["result"] == nil {
 		t.Fatalf("first response = %+v, want success", response)
 	}
@@ -369,7 +369,7 @@ func TestStdioProxyLateCancellationPrecedesReusedRequestID(t *testing.T) {
 
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`)
 	<-cancellationStarted
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"reused"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"reused"}`))
 	select {
 	case <-reusedStarted:
 		t.Fatal("reused request reached daemon before late cancellation forwarding completed")

@@ -28,7 +28,7 @@ func (Launcher) ComposerReady(string) bool { return true }
 // argv. spawn.Run's Claude callers both plan it there — `pfm chat new` through
 // action.PlanClaude, `pfm chat branch` through action.HeadlessFork — so a
 // /rename typed here would only repeat it into a composer still settling. A
-// live rename goes through `pfm chat name` or MCP chat_name, which inject
+// live rename goes through `pfm chat name` or MCP name, which inject
 // /rename (internal/chat/target.go DeliverName) and read it back
 // (cmd/pfm/chat_name_confirm.go).
 func (Launcher) Rename(

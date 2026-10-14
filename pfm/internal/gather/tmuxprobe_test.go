@@ -128,7 +128,7 @@ esac
 // MCP daemon going deaf: launchd started it with /usr/bin:/bin:/usr/sbin:/sbin,
 // tmux lives outside that PATH, and every socket's list-panes failed to START.
 // Each failure was filed as a per-socket warning, so the probe returned zero
-// panes and no error — every chat_inject from a Codex chat then read "matched
+// panes and no error — every call from a Codex chat then read "matched
 // no live chat" when the truth was "could not look". A tmux that never ran
 // read no socket at all, so the pass fails whole and names the cause.
 //

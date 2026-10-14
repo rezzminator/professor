@@ -85,6 +85,21 @@ func TestInstallHostGateWarningsProceed(t *testing.T) {
 	if err := os.Chtimes(stale, old, old); err != nil {
 		t.Fatal(err)
 	}
+	registry := filepath.Join(home, ".claude.json")
+	if err := os.WriteFile(
+		registry,
+		[]byte(
+			`{"mcpServers":{"professor":{"type":"stdio","command":"`+filepath.Join(
+				home,
+				".local",
+				"bin",
+				"pfm",
+			)+`","args":["mcp","serve","--stdio"]}}}`,
+		),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	loaded, err := pfmconfig.LoadInstallRuntime("")
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +121,7 @@ func TestInstallHostGateWarningsProceed(t *testing.T) {
 		&errOut,
 		loaded,
 	); code != 0 || !called ||
-		!strings.HasPrefix(out.String(), "pfm install: 1 warnings — run pfm doctor to see them\n") {
+		!strings.HasPrefix(out.String(), "pfm install: 3 warnings — run pfm doctor to see them\n") {
 		t.Fatalf("code=%d called=%t stdout=%q stderr=%q", code, called, out.String(), errOut.String())
 	}
 }

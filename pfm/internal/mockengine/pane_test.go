@@ -8,26 +8,27 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
-	"github.com/rezzminator/professor/pfm/internal/inject"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-func TestPaneRendersWhatInjectMatches(t *testing.T) {
+func TestPaneRendersWhatCallMatches(t *testing.T) {
 	screen := &pane{glyph: "❯"}
 	screen.say("> hello")
 	idle := screen.render()
-	if inject.IsBusy(idle) || inject.SelectorLine(idle) != "" || !strings.Contains(idle, "\x1b[2J\x1b[H") {
+	if pfmcall.IsBusy(idle) || pfmcall.SelectorLine(idle) != "" || !strings.Contains(idle, "\x1b[2J\x1b[H") {
 		t.Fatalf("idle frame reads busy or as a menu:\n%s", idle)
 	}
 	screen.footer = claudeBusyLine(3*time.Second, Tokens{Input: 10, Output: 2})
-	if frame := screen.render(); !inject.IsBusy(frame) {
-		t.Fatalf("busy footer is not what inject.IsBusy matches:\n%s", frame)
+	if frame := screen.render(); !pfmcall.IsBusy(frame) {
+		t.Fatalf("busy footer is not what pfmcall.IsBusy matches:\n%s", frame)
 	}
 	screen.footer = ""
 	screen.menu = &Step{Type: StepMenu, Options: []string{"Yes", "No"}}
 	screen.selected = 2
 	frame := screen.render()
-	if selector := inject.SelectorLine(frame); !strings.Contains(selector, "2. No") {
+	if selector := pfmcall.SelectorLine(frame); !strings.Contains(selector, "2. No") {
 		t.Fatalf("selector = %q for frame:\n%s", selector, frame)
 	}
 	screen.menu = nil
@@ -38,7 +39,7 @@ func TestPaneRendersWhatInjectMatches(t *testing.T) {
 	screen.queued = nil
 	screen.agentRows = []string{"❯ ● tracer  mapping (background)"}
 	frame = screen.render()
-	if inject.SelectorLine(frame) != "" || inject.IsBusy(frame) {
+	if pfmcall.SelectorLine(frame) != "" || pfmcall.IsBusy(frame) {
 		t.Fatalf("agent row read as a menu or a busy turn:\n%s", frame)
 	}
 	for index := 0; index < historyKeep*2; index++ {
@@ -71,13 +72,13 @@ func TestPaneCodexPlaceholderStyling(t *testing.T) {
 	screen := &pane{glyph: "›", placeholder: "Ask Codex to do anything", status: "model · 100%"}
 	idle := screen.render()
 	if !strings.Contains(idle, "› \x1b[2mAsk Codex to do anything\x1b[0m") ||
-		!inject.ComposerIsDimPlaceholder(idle) || !codexComposerFrame(idle) ||
+		!pfmcall.ComposerIsDimPlaceholder(idle) || !codexComposerFrame(idle) ||
 		!codexComposerFrame(ansiEscape.ReplaceAllString(idle, "")) {
 		t.Fatalf("idle Codex frame lacks dim placeholder or spawn proof: %q", idle)
 	}
 	screen.draft.apply(keyEvent{kind: keyRune, r: 'x'})
 	typed := screen.render()
-	if !strings.Contains(typed, "› x\r\n") || inject.ComposerIsDimPlaceholder(typed) ||
+	if !strings.Contains(typed, "› x\r\n") || pfmcall.ComposerIsDimPlaceholder(typed) ||
 		strings.Contains(typed, "\x1b[2mx") {
 		t.Fatalf("typed Codex draft has placeholder styling: %q", typed)
 	}
@@ -201,5 +202,55 @@ func TestPaneCodexRenameEscape(t *testing.T) {
 	})
 	if _, err := os.Stat(filepath.Join(fix.codexHome, codexmeta.SessionIndexFile)); !os.IsNotExist(err) {
 		t.Fatalf("Escape wrote a rename row: %v", err)
+	}
+}
+
+// TestPaneClaudeTrustDialog pins the mock's folder-trust dialog, asked for by
+// its scenario wire key: it is the frame internal/engine reads as the dialog,
+// 1 boots on to the composer, and every key that answers "No, exit" ends the
+// engine with status 1.
+func TestPaneClaudeTrustDialog(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		key      string
+		wantExit int
+		boots    bool
+	}{
+		{name: "1 trusts the folder", key: "1", boots: true},
+		{name: "Enter takes the default No, exit", key: "\r", wantExit: 1},
+		{name: "Escape cancels", key: "\x1b", wantExit: 1},
+		{name: "2 is No, exit", key: "2", wantExit: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fix := newFixture(t)
+			t.Chdir(fix.work)
+			fix.write(Scenario{BusyMS: intPtr(0)})
+			var wire map[string]any
+			if err := json.Unmarshal([]byte(readFile(t, fix.scenario)), &wire); err != nil {
+				t.Fatal(err)
+			}
+			wire["trust_dialog"] = true
+			content, err := json.Marshal(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(fix.scenario, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			session := fix.startTUI("claude", claudeArgs("--session-id", fixtureSession), nil)
+			session.waitFrame("folder-trust dialog", func(frame string) bool {
+				return pfmengine.ClaudeTrustDialog(frame) && strings.Contains(frame, fix.work)
+			})
+			session.typeRaw(test.key)
+			if test.boots {
+				session.waitFrame("composer after trusting", func(frame string) bool {
+					return strings.Contains(frame, "❯") && !pfmengine.ClaudeTrustDialog(frame)
+				})
+				session.typeLine("/exit")
+			}
+			if code := session.waitExit(); code != test.wantExit {
+				t.Fatalf("exit = %d, want %d; frame:\n%s", code, test.wantExit, session.out.frame())
+			}
+		})
 	}
 }

@@ -2516,13 +2516,13 @@
   "name": "head-two-files",
   "covers": "head -N over two files",
   "cwd": "/tmp/demo-proj",
-  "command": "head -15 pfm/internal/inject/engine.go pfm/internal/agentopen/agentopen.go",
+  "command": "head -15 pfm/internal/call/engine.go pfm/internal/agentopen/agentopen.go",
   "parts": [
    {
     "program": "head",
     "args": [
      "-15",
-     "pfm/internal/inject/engine.go",
+     "pfm/internal/call/engine.go",
      "pfm/internal/agentopen/agentopen.go"
     ],
     "status": "ok"

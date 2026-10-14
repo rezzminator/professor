@@ -56,7 +56,7 @@ func TestToolRecordsNameTargetArgumentShapeResultShapeAndDurationNeverAValue(t *
 	ctx, recorder := Test(t)
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
 	var seen toolInput
-	mcp.AddTool(server, &mcp.Tool{Name: "chat_inject"}, Tool("chat_inject",
+	mcp.AddTool(server, &mcp.Tool{Name: "call"}, Tool("call",
 		func(_ context.Context, _ *mcp.CallToolRequest, input toolInput) (*mcp.CallToolResult, toolOutput, error) {
 			seen = input
 			return nil, toolOutput{Status: "delivered"}, nil
@@ -64,7 +64,7 @@ func TestToolRecordsNameTargetArgumentShapeResultShapeAndDurationNeverAValue(t *
 	))
 	session := connectInProcess(t, server)
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "chat_inject",
+		Name: "call",
 		Arguments: map[string]any{
 			"target": "cc-3", "message": "Bearer sk-PROMPTSECRET body", "then": []string{"/next"},
 		},
@@ -83,7 +83,7 @@ func TestToolRecordsNameTargetArgumentShapeResultShapeAndDurationNeverAValue(t *
 	wantField(t, record, FieldComp, "mcp")
 	wantField(t, record, "op", "call")
 	wantField(t, record, "kind", "tool")
-	wantField(t, record, "tool", "chat_inject")
+	wantField(t, record, "tool", "call")
 	wantField(t, record, "target", "cc-3")
 	wantField(t, record, "args", "target:4,message:27,then:9")
 	wantField(t, record, "bytes", float64(len(`{"status":"delivered"}`)))
@@ -101,14 +101,14 @@ func TestToolRecordsAHandlerErrorAtErrorLevelCappedAtTheFieldLimit(t *testing.T)
 	ctx, recorder := Test(t)
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
 	long := strings.Repeat("e", MaxValueBytes+100)
-	mcp.AddTool(server, &mcp.Tool{Name: "chat_last"}, Tool("chat_last",
+	mcp.AddTool(server, &mcp.Tool{Name: "last"}, Tool("last",
 		func(context.Context, *mcp.CallToolRequest, toolInput) (*mcp.CallToolResult, any, error) {
 			return nil, nil, errors.New(long)
 		},
 	))
 	session := connectInProcess(t, server)
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "chat_last", Arguments: map[string]any{"target": "x", "message": ""},
+		Name: "last", Arguments: map[string]any{"target": "x", "message": ""},
 	})
 	if err != nil || !result.IsError {
 		t.Fatalf("a handler error did not become a tool error: %v, %v", result, err)
@@ -134,14 +134,14 @@ func TestToolRecordsAHandlerErrorAtErrorLevelCappedAtTheFieldLimit(t *testing.T)
 func TestToolWarnsWhenTheResultItselfIsAnError(t *testing.T) {
 	ctx, recorder := Test(t)
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "chat_status"}, Tool("chat_status",
+	mcp.AddTool(server, &mcp.Tool{Name: "status"}, Tool("status",
 		func(context.Context, *mcp.CallToolRequest, map[string]any) (*mcp.CallToolResult, any, error) {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "dead"}}}, nil, nil
 		},
 	))
 	session := connectInProcess(t, server)
 	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "chat_status", Arguments: map[string]any{"target": "cc-9", "ask": true},
+		Name: "status", Arguments: map[string]any{"target": "cc-9", "ask": true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -157,13 +157,13 @@ func TestToolWarnsWhenTheResultItselfIsAnError(t *testing.T) {
 func TestToolKeepsTypedOutputBesideAHandlerError(t *testing.T) {
 	ctx, recorder := Test(t)
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "chat_keys"}, Tool("chat_keys",
+	mcp.AddTool(server, &mcp.Tool{Name: "keys"}, Tool("keys",
 		func(context.Context, *mcp.CallToolRequest, toolInput) (*mcp.CallToolResult, toolOutput, error) {
 			return nil, toolOutput{Status: "dead"}, errors.New("send failed")
 		},
 	))
 	result, err := connectInProcess(t, server).CallTool(ctx, &mcp.CallToolParams{
-		Name: "chat_keys", Arguments: map[string]any{"target": "gone", "message": ""},
+		Name: "keys", Arguments: map[string]any{"target": "gone", "message": ""},
 	})
 	if err != nil || !result.IsError || len(result.Content) != 1 {
 		t.Fatalf("call = %+v, %v", result, err)
@@ -192,13 +192,13 @@ func TestToolKeepsTypedOutputBesideAHandlerError(t *testing.T) {
 func TestToolKeepsJSONRPCErrorAsProtocolError(t *testing.T) {
 	ctx, recorder := Test(t)
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "chat_keys"}, Tool("chat_keys",
+	mcp.AddTool(server, &mcp.Tool{Name: "keys"}, Tool("keys",
 		func(context.Context, *mcp.CallToolRequest, toolInput) (*mcp.CallToolResult, toolOutput, error) {
 			return nil, toolOutput{Status: "dead"}, &jsonrpc.Error{Code: -32000, Message: "protocol failed"}
 		},
 	))
 	result, err := connectInProcess(t, server).CallTool(ctx, &mcp.CallToolParams{
-		Name: "chat_keys", Arguments: map[string]any{"target": "gone", "message": ""},
+		Name: "keys", Arguments: map[string]any{"target": "gone", "message": ""},
 	})
 	if err == nil || result != nil {
 		t.Fatalf("call = %+v, %v; want protocol error without result", result, err)
@@ -335,13 +335,13 @@ func TestPromptRecoversAPanicIntoAnErrorRecord(t *testing.T) {
 	}
 }
 
-// TestToolNeverRecordsChatSaveTargetAsAChat is L2-F26: chat_save's Target is
+// TestToolNeverRecordsChatSaveTargetAsAChat is L2-F26: save's Target is
 // a FILE PATH, not a chat — it must never land in the record's target field
 // (the field `pfm log --chat` filters on), only its SIZE through args' shape.
 func TestToolNeverRecordsChatSaveTargetAsAChat(t *testing.T) {
 	ctx, recorder := Test(t)
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "chat_save"}, Tool("chat_save",
+	mcp.AddTool(server, &mcp.Tool{Name: "save"}, Tool("save",
 		func(_ context.Context, _ *mcp.CallToolRequest, _ toolInput) (*mcp.CallToolResult, toolOutput, error) {
 			return nil, toolOutput{Status: "saved"}, nil
 		},
@@ -349,17 +349,17 @@ func TestToolNeverRecordsChatSaveTargetAsAChat(t *testing.T) {
 	session := connectInProcess(t, server)
 	const path = "./notes/private-session-2026.md"
 	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "chat_save", Arguments: map[string]any{"target": path, "message": ""},
+		Name: "save", Arguments: map[string]any{"target": path, "message": ""},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	record := onlyRecord(t, recorder)
 	if _, found := record.Field("target"); found {
-		t.Fatalf("chat_save's file path was recorded as a target: %v", record.Fields)
+		t.Fatalf("save's file path was recorded as a target: %v", record.Fields)
 	}
 	wantField(t, record, "args", "target:"+strconv.Itoa(len(path))+",message:0,then:4")
 	if strings.Contains(recorder.Raw(), "private-session") {
-		t.Fatalf("chat_save's file path leaked into the activity log: %s", recorder.Raw())
+		t.Fatalf("save's file path leaked into the activity log: %s", recorder.Raw())
 	}
 }
 

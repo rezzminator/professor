@@ -84,7 +84,7 @@ func startPreRolloutCodexFixture(
 // A roster name is the fleet's naming judgment. Raw tmux window names are a
 // fallback, so abandoned panes carrying the same historical name cannot veto
 // the one row the roster actually names.
-func TestInjectAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testing.T) {
+func TestCallAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -108,7 +108,7 @@ func TestInjectAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testin
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"chat", "inject", sameNameTarget, "deliver to the named incarnation"}, &stdout, &stderr)
+	code := run([]string{"chat", "call", sameNameTarget, "deliver to the named incarnation"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("inject exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -126,7 +126,7 @@ func TestInjectAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testin
 
 // If the roster itself names two live seats alike, refusing is honest. The
 // refusal has to identify both candidates and name the stable disambiguator.
-func TestInjectRefusesRosterAmbiguityWithThreadIDsAndSockets(t *testing.T) {
+func TestCallRefusesRosterAmbiguityWithThreadIDsAndSockets(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -142,7 +142,7 @@ func TestInjectRefusesRosterAmbiguityWithThreadIDsAndSockets(t *testing.T) {
 	)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"chat", "inject", sameNameTarget, "must refuse"}, &stdout, &stderr)
+	code := run([]string{"chat", "call", sameNameTarget, "must refuse"}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("inject exit=%d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}

@@ -14,7 +14,7 @@ import (
 
 const (
 	maxSearchResults     = 20
-	searchWebDescription = `Searches the web — "search for X", "find pages about X" — never fetching the page itself. Call harvester_search_web{query:"…"}; harvester_search_web{query:"…", lang:"ja"} reaches a non-English literature. Returns a ` + "`=== [n/N] {title}`" + ` block per ranked result: URL, snippet, engine. Pass a URL to ` + "`harvester_read`" + ` in urls for the page. "No results found" = nothing matched (broaden the query); an error result = the search backend failed, retry later. For a paper or book by title use harvester_search_literature.`
+	searchWebDescription = `Searches the web — "search for X", "find pages about X" — never fetching the page itself. Call search_web{query:"…"}; search_web{query:"…", lang:"ja"} reaches a non-English literature. Returns a ` + "`=== [n/N] {title}`" + ` block per ranked result: URL, snippet, engine. Pass a URL to ` + "`read`" + ` in urls for the page. "No results found" = nothing matched (broaden the query); an error result = the search backend failed, retry later. For a paper or book by title use search_literature.`
 )
 
 // SearchInput is search_web's input.

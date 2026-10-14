@@ -8,20 +8,20 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // blockingWaiter never returns until released — the shape of the real waiter
 // for the whole turn it rides out — and records what it was handed.
 type blockingWaiter struct {
 	release chan struct{}
-	got     inject.ThenWait
-	result  inject.Result
+	got     pfmcall.ThenWait
+	result  pfmcall.Result
 }
 
-func (waiter *blockingWaiter) DeliverThen(_ context.Context, wait inject.ThenWait) (inject.Result, error) {
+func (waiter *blockingWaiter) DeliverThen(_ context.Context, wait pfmcall.ThenWait) (pfmcall.Result, error) {
 	waiter.got = wait
 	<-waiter.release
 	return waiter.result, nil
@@ -59,7 +59,7 @@ func swapThenWaiter(t *testing.T, waiter thenWaiter) {
 // never started. The start line goes down BEFORE DeliverThen blocks and says,
 // in the waiter's own words, what it is waiting for.
 func TestThenLogsItsContractBeforeWaiting(t *testing.T) {
-	waiter := &blockingWaiter{release: make(chan struct{}), result: inject.Result{Code: 0, Message: "delivered"}}
+	waiter := &blockingWaiter{release: make(chan struct{}), result: pfmcall.Result{Code: 0, Message: "delivered"}}
 	swapThenWaiter(t, waiter)
 	log := &lockedBuffer{}
 	done := make(chan int, 1)
@@ -103,7 +103,7 @@ func TestThenLogsItsContractBeforeWaiting(t *testing.T) {
 // DeliverThen refuses the steady-idle guess on a Codex pane by that field —
 // and the start line names the engine so the log says which contract held.
 func TestThenHandsTheEngineAndTheContractToTheWaiter(t *testing.T) {
-	waiter := &blockingWaiter{release: make(chan struct{}), result: inject.Result{Code: inject.CodeUndelivered}}
+	waiter := &blockingWaiter{release: make(chan struct{}), result: pfmcall.Result{Code: pfmcall.CodeUndelivered}}
 	close(waiter.release)
 	swapThenWaiter(t, waiter)
 	var log bytes.Buffer
@@ -115,10 +115,10 @@ func TestThenHandsTheEngineAndTheContractToTheWaiter(t *testing.T) {
 		"--steer", "resume the wave",
 	}, &log)
 
-	if code != inject.CodeUndelivered {
-		t.Fatalf("Then = %d, want the waiter's own code %d", code, inject.CodeUndelivered)
+	if code != pfmcall.CodeUndelivered {
+		t.Fatalf("Then = %d, want the waiter's own code %d", code, pfmcall.CodeUndelivered)
 	}
-	want := inject.ThenWait{
+	want := pfmcall.ThenWait{
 		SocketPath: "/tmp/tmux-jail/cx-1-2-3",
 		Target:     "%0",
 		Steers:     []string{"resume the wave"},
@@ -134,11 +134,11 @@ func TestThenHandsTheEngineAndTheContractToTheWaiter(t *testing.T) {
 	}
 }
 
-// The waiter's Codex guard (inject.DeliverThen) compares the canonical id, so
+// The waiter's Codex guard (pfmcall.DeliverThen) compares the canonical id, so
 // a long engine name on --engine must reach it as that id: otherwise the start
 // line promises the Codex contract while the wait types on a steady-idle guess.
 func TestThenCanonicalizesTheEngineBeforeTheWaiterSeesIt(t *testing.T) {
-	waiter := &blockingWaiter{release: make(chan struct{}), result: inject.Result{Code: inject.CodeUndelivered}}
+	waiter := &blockingWaiter{release: make(chan struct{}), result: pfmcall.Result{Code: pfmcall.CodeUndelivered}}
 	close(waiter.release)
 	swapThenWaiter(t, waiter)
 	var log bytes.Buffer
@@ -159,7 +159,7 @@ func TestThenCanonicalizesTheEngineBeforeTheWaiterSeesIt(t *testing.T) {
 }
 
 func TestThenRefusesAnUnknownEngineBeforeWaiting(t *testing.T) {
-	waiter := &blockingWaiter{release: make(chan struct{}), result: inject.Result{Code: inject.CodeUndelivered}}
+	waiter := &blockingWaiter{release: make(chan struct{}), result: pfmcall.Result{Code: pfmcall.CodeUndelivered}}
 	close(waiter.release)
 	swapThenWaiter(t, waiter)
 	var log bytes.Buffer

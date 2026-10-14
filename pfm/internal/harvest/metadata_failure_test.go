@@ -117,7 +117,7 @@ func TestISBNWhoseCataloguesRefuseIsAnHonestBookFailure(t *testing.T) {
 	got := h.FetchPublic(context.Background(), "9780262033848", FetchOptions{Field: "publications"})
 	want := "No open copy of this book was found: the book catalogues that answered list none, and the others " +
 		"refused the harvester (HTTP 403 Forbidden: a bot block or an access rule, which the harvester cannot tell apart; " +
-		"it never signs in). Search for the book with harvester_search_literature, or read a public copy with harvester_read (urls)."
+		"it never signs in). Search for the book with search_literature, or read a public copy with read (urls)."
 	if got.ErrorKind != errorKindForbidden || got.Error != want {
 		t.Fatalf(
 			"ISBN read = kind %q error %q\nwant kind %q error %q",

@@ -35,7 +35,7 @@ func (service *Service) chatLast(
 		return nil, LastOutput{}, fmt.Errorf("target is required")
 	}
 	if service.backend.chat == nil {
-		return nil, LastOutput{}, fmt.Errorf("chat_last verb is not configured")
+		return nil, LastOutput{}, fmt.Errorf("last verb is not configured")
 	}
 	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
@@ -43,11 +43,11 @@ func (service *Service) chatLast(
 	}
 	result, err := service.backend.chat.Last(ctx, chat.LastRequest{Target: target})
 	if err != nil {
-		return nil, LastOutput{}, fmt.Errorf("chat_last: %w", err)
+		return nil, LastOutput{}, fmt.Errorf("last: %w", err)
 	}
 	text := strings.TrimRight(result.Text, "\r\n")
 	if text == "" {
-		return nil, LastOutput{}, fmt.Errorf("chat_last: %q returned an empty answer", target)
+		return nil, LastOutput{}, fmt.Errorf("last: %q returned an empty answer", target)
 	}
 	return nil, LastOutput{Target: input.Target, Text: text}, nil
 }
@@ -67,12 +67,12 @@ func (service *Service) chatStatus(
 	if input.Engine != "" {
 		parsed, err := pfmengine.Parse(input.Engine)
 		if err != nil {
-			return nil, StatusOutput{}, fmt.Errorf("chat_status: %w", err)
+			return nil, StatusOutput{}, fmt.Errorf("status: %w", err)
 		}
 		engine = parsed
 	}
 	if service.backend.chat == nil {
-		return nil, StatusOutput{}, fmt.Errorf("chat_status verb is not configured")
+		return nil, StatusOutput{}, fmt.Errorf("status verb is not configured")
 	}
 	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
@@ -84,7 +84,7 @@ func (service *Service) chatStatus(
 		Engine: engine, Model: input.Model,
 	})
 	if err != nil {
-		return nil, StatusOutput{}, fmt.Errorf("chat_status: %w", err)
+		return nil, StatusOutput{}, fmt.Errorf("status: %w", err)
 	}
 	return nil, statusOutput(status), nil
 }
@@ -112,14 +112,14 @@ func (service *Service) chatNew(
 	}
 	if !caller.valid && caller.present {
 		if refused, detail := service.selfCallerRefusal(caller); refused {
-			return nil, ActionOutput{}, fmt.Errorf("chat_new: resolve caller: %s", detail)
+			return nil, ActionOutput{}, fmt.Errorf("new: resolve caller: %s", detail)
 		}
 	}
 	var self headless.Chat
 	if caller.valid {
 		self, err = service.resolvedSelf(ctx, caller)
 		if err != nil {
-			return nil, ActionOutput{}, fmt.Errorf("chat_new: resolve caller: %w", err)
+			return nil, ActionOutput{}, fmt.Errorf("new: resolve caller: %w", err)
 		}
 		ctx = chat.WithResolvedSelf(ctx, self)
 	}
@@ -127,12 +127,12 @@ func (service *Service) chatNew(
 	if directory != "" && caller.valid && !filepath.IsAbs(directory) {
 		if strings.TrimSpace(self.CWD) == "" {
 			return nil, ActionOutput{}, fmt.Errorf(
-				"chat_new: caller working directory is required to resolve relative cwd %q",
+				"new: caller working directory is required to resolve relative cwd %q",
 				directory,
 			)
 		}
 		if !filepath.IsAbs(self.CWD) {
-			return nil, ActionOutput{}, fmt.Errorf("chat_new: caller working directory %q is not absolute", self.CWD)
+			return nil, ActionOutput{}, fmt.Errorf("new: caller working directory %q is not absolute", self.CWD)
 		}
 		directory = filepath.Join(self.CWD, directory)
 	} else if directory == "" && caller.valid {
@@ -147,7 +147,7 @@ func (service *Service) chatNew(
 		}
 		effective, err := pfmconfig.LoadRuntime("")
 		if err != nil {
-			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
+			return nil, ActionOutput{}, fmt.Errorf("new: name the chat: %w", err)
 		}
 		service.nameMutex.Lock()
 		reserved := make([]string, 0, len(service.pendingNames))
@@ -168,7 +168,7 @@ func (service *Service) chatNew(
 		}
 		service.nameMutex.Unlock()
 		if err != nil {
-			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
+			return nil, ActionOutput{}, fmt.Errorf("new: name the chat: %w", err)
 		}
 		if !found {
 			return nil, ActionOutput{}, fmt.Errorf("name is required outside a workbench")
@@ -180,7 +180,7 @@ func (service *Service) chatNew(
 			if releaseErr := claim.Release(); releaseErr != nil {
 				returnErr = errors.Join(
 					returnErr,
-					fmt.Errorf("chat_new: release automatic name %s: %w", claim.Name, releaseErr),
+					fmt.Errorf("new: release automatic name %s: %w", claim.Name, releaseErr),
 				)
 				output.Status = statusError
 				if output.Code == 0 {
@@ -199,7 +199,7 @@ func (service *Service) chatNew(
 	} else if caller.valid && caller.row.Engine != "" {
 		bench, found, err := workbench.Nearest(directory)
 		if err != nil {
-			return nil, ActionOutput{}, fmt.Errorf("chat_new: resolve workbench: %w", err)
+			return nil, ActionOutput{}, fmt.Errorf("new: resolve workbench: %w", err)
 		}
 		if !found || bench.Err != nil || bench.Enables(caller.row.Engine) {
 			args = append(args, "--engine", string(caller.row.Engine))
@@ -213,7 +213,7 @@ func (service *Service) chatNew(
 	}
 	if input.Cache != "" {
 		if input.Cache != "1h" && input.Cache != "5m" {
-			return nil, ActionOutput{}, fmt.Errorf("chat_new: cache must be 1h|5m")
+			return nil, ActionOutput{}, fmt.Errorf("new: cache must be 1h|5m")
 		}
 		args = append(args, "--cache", input.Cache)
 	}
@@ -247,7 +247,7 @@ func (service *Service) chatNew(
 	result, output, returnErr = service.cliAction(ctx, args...)
 	if nameClaim.Name != "" && returnErr == nil && output.Code == 0 {
 		if commitErr := nameClaim.Commit(); commitErr != nil {
-			returnErr = fmt.Errorf("chat_new: commit automatic name %s: %w", nameClaim.Name, commitErr)
+			returnErr = fmt.Errorf("new: commit automatic name %s: %w", nameClaim.Name, commitErr)
 			output = ActionOutput{Status: statusError, Code: 1, Message: returnErr.Error()}
 		}
 	}
@@ -257,7 +257,7 @@ func (service *Service) chatNew(
 // chatOpen never routes through cliTargetAction/Dispatch: that seam ends in
 // action.Dispatch, whose K1 non-terminal branch only ever prints the eval
 // line for a shell wrapper to `eval` — the MCP daemon has no shell reading
-// its stdout, so the line went nowhere and nothing opened. chat_open instead
+// its stdout, so the line went nowhere and nothing opened. open instead
 // takes chat.OpenDetachedID, the verb layer's own door for a caller with no
 // terminal to attach: the same resolution and the same preparation `pfm chat
 // open` runs, ending in action.Executor.OpenDetached instead of an eval line.
@@ -286,7 +286,7 @@ func (service *Service) chatOpenDetached(
 	// here, exactly as a bare CLI invocation would load it.
 	effective, err := pfmconfig.LoadRuntime("")
 	if err != nil {
-		return nil, ActionOutput{}, fmt.Errorf("chat_open: load machine config: %w", err)
+		return nil, ActionOutput{}, fmt.Errorf("open: load machine config: %w", err)
 	}
 	// Resolved exactly as `pfm chat open` resolves it — by name, id prefix or
 	// socket — because a name is how a caller addresses a chat. A door
@@ -301,17 +301,17 @@ func (service *Service) chatOpenDetached(
 			status, code = statusNotFound, 1
 		}
 		output := ActionOutput{Status: status, Code: code, Message: err.Error()}
-		return nil, output, fmt.Errorf("chat_open: %w", err)
+		return nil, output, fmt.Errorf("open: %w", err)
 	}
 	result, err := chat.OpenDetachedTarget(ctx, resolved, service.backend.warnings, &effective)
 	if err != nil {
 		output := ActionOutput{Status: statusError, Code: 1, Message: err.Error()}
-		return nil, output, fmt.Errorf("chat_open: %w", err)
+		return nil, output, fmt.Errorf("open: %w", err)
 	}
 	return nil, ActionOutput{Status: "ok", Code: 0, Message: openMessage(result)}, nil
 }
 
-// openMessage is what chat_open tells its caller: where the chat lives, how it
+// openMessage is what open tells its caller: where the chat lives, how it
 // was opened, and every warning about it — a caller with no terminal reads
 // nothing else.
 func openMessage(result action.OpenResult) string {
@@ -370,7 +370,7 @@ func (service *Service) chatExit(
 ) (*mcp.CallToolResult, ActionOutput, error) {
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
-		return nil, ActionOutput{}, fmt.Errorf("chat_exit: resolve caller: %w", err)
+		return nil, ActionOutput{}, fmt.Errorf("exit: resolve caller: %w", err)
 	}
 	if !caller.valid {
 		detail := caller.detail
@@ -380,19 +380,19 @@ func (service *Service) chatExit(
 				detail = noAmbientCallerRemedy
 			}
 		}
-		return nil, ActionOutput{}, fmt.Errorf("chat_exit: nothing ended: %s", detail)
+		return nil, ActionOutput{}, fmt.Errorf("exit: nothing ended: %s", detail)
 	}
 	self, err := service.resolvedSelf(ctx, caller)
 	if err != nil {
-		return nil, ActionOutput{}, fmt.Errorf("chat_exit: resolve caller: %w", err)
+		return nil, ActionOutput{}, fmt.Errorf("exit: resolve caller: %w", err)
 	}
 	if service.backend.chat == nil {
-		return nil, ActionOutput{}, fmt.Errorf("chat_exit: chat verb layer is not configured")
+		return nil, ActionOutput{}, fmt.Errorf("exit: chat verb layer is not configured")
 	}
 	outcome, err := service.backend.chat.Exit(ctx, self)
 	if err != nil {
 		output := ActionOutput{Status: statusError, Code: 1, Message: err.Error()}
-		return nil, output, fmt.Errorf("chat_exit: %w", err)
+		return nil, output, fmt.Errorf("exit: %w", err)
 	}
 	return nil, ActionOutput{
 		Status: "ok", Code: 0,
@@ -401,12 +401,12 @@ func (service *Service) chatExit(
 	}, nil
 }
 
-// noCallerIdentityForExit is chat_exit's refusal on a server that would
+// noCallerIdentityForExit is exit's refusal on a server that would
 // otherwise answer "self" from its own process environment (stdio): that
-// environment belongs to whatever launched the server, so chat_exit never
+// environment belongs to whatever launched the server, so exit never
 // reads it.
 const noCallerIdentityForExit = "this MCP request carries no caller identity " +
-	"(_meta.pfmProxy or _meta.threadId), and chat_exit never reads the server " +
+	"(_meta.pfmProxy or _meta.threadId), and exit never reads the server " +
 	"process's own environment; run `pfm chat kill self --exit` from this chat's own shell instead"
 
 func (service *Service) chatUnkill(
@@ -431,7 +431,7 @@ func (service *Service) chatSave(
 	// directory the server happens to sit in. Demand a path shape instead.
 	if !strings.ContainsRune(input.Target, filepath.Separator) {
 		return nil, ActionOutput{}, fmt.Errorf(
-			"chat_save target %q is not a file path: this verb appends a transcript to a FILE, "+
+			"save target %q is not a file path: this verb appends a transcript to a FILE, "+
 				"not to a chat — pass a path such as ./%s.md",
 			input.Target, strings.TrimSpace(input.Target),
 		)
@@ -440,28 +440,28 @@ func (service *Service) chatSave(
 	transcriptPath := input.Transcript
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
-		return nil, ActionOutput{}, fmt.Errorf("chat_save: resolve caller: %w", err)
+		return nil, ActionOutput{}, fmt.Errorf("save: resolve caller: %w", err)
 	}
 	needsCaller := !filepath.IsAbs(target) || transcriptPath == "" || !filepath.IsAbs(transcriptPath)
 	if !caller.valid {
 		if refused, detail := service.selfCallerRefusal(caller); needsCaller && refused {
-			return nil, ActionOutput{}, fmt.Errorf("chat_save: resolve caller: %s", detail)
+			return nil, ActionOutput{}, fmt.Errorf("save: resolve caller: %s", detail)
 		}
 	} else {
 		self, resolveErr := service.resolvedSelf(ctx, caller)
 		if resolveErr != nil {
-			return nil, ActionOutput{}, fmt.Errorf("chat_save: resolve caller: %w", resolveErr)
+			return nil, ActionOutput{}, fmt.Errorf("save: resolve caller: %w", resolveErr)
 		}
 		ctx = chat.WithResolvedSelf(ctx, self)
 		if !filepath.IsAbs(target) || (transcriptPath != "" && !filepath.IsAbs(transcriptPath)) {
 			if strings.TrimSpace(self.CWD) == "" {
 				return nil, ActionOutput{}, fmt.Errorf(
-					"chat_save: caller working directory is required to resolve relative paths",
+					"save: caller working directory is required to resolve relative paths",
 				)
 			}
 			if !filepath.IsAbs(self.CWD) {
 				return nil, ActionOutput{}, fmt.Errorf(
-					"chat_save: caller working directory %q is not absolute",
+					"save: caller working directory %q is not absolute",
 					self.CWD,
 				)
 			}
@@ -475,7 +475,7 @@ func (service *Service) chatSave(
 		if transcriptPath == "" {
 			if strings.TrimSpace(self.Path) == "" {
 				return nil, ActionOutput{}, fmt.Errorf(
-					"chat_save: caller transcript path is required when transcript is omitted",
+					"save: caller transcript path is required when transcript is omitted",
 				)
 			}
 			transcriptPath = self.Path

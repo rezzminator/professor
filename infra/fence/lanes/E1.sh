@@ -43,9 +43,9 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chat to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/status)\" != 000 ]" \
   "lane_daemon_up" ||
-  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat tool"
 
 # ─── E1.01 — the spawn ceremony ─────────────────────────────────────────────
 
@@ -158,19 +158,19 @@ wait_steer() {
 reload_via_pane() {
   local needle="$1"
   shift
-  local out sock reload_log reload_offset inject_rc steer_rc
+  local out sock reload_log reload_offset call_rc steer_rc
   REPLY_WHY=""
   sock="$(live_field "$CHAT" 11)"
   reload_log="$SID_DIR/reload-$sock.log"
   if [ -f "$reload_log" ]; then reload_offset="$(wc -c <"$reload_log")"; else reload_offset=0; fi
-  out="$(pfm chat inject --allow-unsigned "$CHAT" "/reload $* --then \"lane steer $needle\"" 2>&1)"
-  inject_rc=$?
+  out="$(pfm chat call --allow-unsigned "$CHAT" "/reload $* --then \"lane steer $needle\"" 2>&1)"
+  call_rc=$?
   wait_steer "$CHAT" "$needle" 300
   steer_rc=$?
   case "$steer_rc" in
     0) ;;
-    2) REPLY_WHY="$LANE_WAIT_WHY (waiting for $needle; inject rc $inject_rc: $(one_line "$out"))"; return 1 ;;
-    *) REPLY_WHY="steer $needle did not settle in 300s: ${LANE_WAIT_WHY:-timeout}; inject rc $inject_rc: $(one_line "$out")"; return 1 ;;
+    2) REPLY_WHY="$LANE_WAIT_WHY (waiting for $needle; call rc $call_rc: $(one_line "$out"))"; return 1 ;;
+    *) REPLY_WHY="steer $needle did not settle in 300s: ${LANE_WAIT_WHY:-timeout}; call rc $call_rc: $(one_line "$out")"; return 1 ;;
   esac
   if ! wait_for 60 "reload_finished '$reload_log' '$reload_offset'"; then
     REPLY_WHY="the reload worker never logged its end in 60s; ${LANE_WAIT_WHY:-no wait reason recorded}; log tail: $(one_line "$(tail -n 5 "$reload_log" 2>&1)")"
@@ -190,7 +190,7 @@ if requires E1.01-open-seat1 && beat_settle E1.03-reload-account; then
     before="$(live_field "$CHAT" 9)"
     before_id="$(live_field "$CHAT" 2)"
     nonce="E1CONTINUITY$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
-    planted="$(pfm chat inject --allow-unsigned "$CHAT" "Remember the token $nonce." 2>&1)"
+    planted="$(pfm chat call --allow-unsigned "$CHAT" "Remember the token $nonce." 2>&1)"
     if [ "$?" -ne 0 ] || ! wait_prompt "$CHAT" "$nonce" 120; then
       fail "could not plant the continuity token before reload: $(one_line "$planted") ${LANE_WAIT_WHY:-}"
     elif ! settle_chat "$CHAT"; then
@@ -263,16 +263,16 @@ fi
 # for the worker's completion line as well as the new id before another reload.
 NEW_ID="" NEW_NAME=""
 reload_new_on_socket() {
-  local sock="$1" was="$2" out log completed_before inject_rc
+  local sock="$1" was="$2" out log completed_before call_rc
   shift 2
   REPLY_WHY="" NEW_ID="" NEW_NAME=""
   log="$SID_DIR/reload-$sock.log"
   completed_before="$(grep -cF 'rebooted FRESH as requested' "$log" 2>/dev/null || true)"
   completed_before="${completed_before:-0}"
-  out="$(pfm chat inject --allow-unsigned "$CHAT" "/reload $* --then \"lane steer RELOADED-NEW\"" 2>&1)"
-  inject_rc=$?
+  out="$(pfm chat call --allow-unsigned "$CHAT" "/reload $* --then \"lane steer RELOADED-NEW\"" 2>&1)"
+  call_rc=$?
   if ! wait_for 300 "[ -n \"\$(socket_field '$sock' 2)\" ] && [ \"\$(socket_field '$sock' 2)\" != '$was' ]"; then
-    REPLY_WHY="no fresh session id on socket $sock in 300s (it still reads '$(socket_field "$sock" 2)'); ${LANE_WAIT_WHY:-no wait reason recorded}; inject rc $inject_rc: $(one_line "$out")"
+    REPLY_WHY="no fresh session id on socket $sock in 300s (it still reads '$(socket_field "$sock" 2)'); ${LANE_WAIT_WHY:-no wait reason recorded}; call rc $call_rc: $(one_line "$out")"
     return 1
   fi
   if ! wait_for 90 "[ \"\$(grep -cF 'rebooted FRESH as requested' '$log' 2>/dev/null || true)\" -gt '$completed_before' ]"; then
@@ -351,12 +351,12 @@ if requires E1.06-reload-new && beat_settle E1.26-resolver-prefers-live; then
   elif [ -n "${rows_wait:-}" ] || [ "$live_rows" -ne 1 ] || [ "$resume_rows" -lt 1 ]; then
     fail "the shape this beat exists to assert is not present: $live_rows live row(s) and $resume_rows resume row(s) carry '$CHAT' (want exactly 1 live plus at least its own resume row) — nothing was asserted; ${rows_wait:-}"
   else
-    out="$(pfm chat inject --allow-unsigned "$CHAT" "lane resolver RESOLVE-OK" 2>&1)"
+    out="$(pfm chat call --allow-unsigned "$CHAT" "lane resolver RESOLVE-OK" 2>&1)"
     rc=$?
     if [ "$rc" -ne 0 ]; then
       fail "'$CHAT' held by 1 live row and $resume_rows resume row(s) of its own refused (exit $rc): $(one_line "$out") — resolve.ResolveRosterName's unique-live-row rule should have taken the live row"
     elif ! wait_prompt "$CHAT" RESOLVE-OK 240; then
-      fail "the inject was accepted but never landed: ${LANE_WAIT_WHY:-no wait reason recorded}"
+      fail "the call was accepted but never landed: ${LANE_WAIT_WHY:-no wait reason recorded}"
     else
       pass "'$CHAT' resolved to its one live row with $resume_rows resume row(s) of its own beside it"
     fi
@@ -403,9 +403,9 @@ if requires E1.01-open-seat1 && beat_settle E1.09-reload-while-busy; then
   gate="$LANE_OUT_DIR/e1-reload-hold.gate"
   : >"$gate"
   steps="$(jq -cn --arg gate "$gate" '[{type:"hold",until_gone:$gate},{type:"turn",reply:"held"}]')"
-  busy="$(pfm chat inject --allow-unsigned "$CHAT" "/lane hold $(mock_steps "$steps")" 2>&1)"
+  busy="$(pfm chat call --allow-unsigned "$CHAT" "/lane hold $(mock_steps "$steps")" 2>&1)"
   busy_rc=$?
-  [ "$busy_rc" -eq 0 ] || _lane_log_only "   E1.09: the busy-making inject exited $busy_rc: $(one_line "$busy")"
+  [ "$busy_rc" -eq 0 ] || _lane_log_only "   E1.09: the busy-making call exited $busy_rc: $(one_line "$busy")"
   wait_for 30 "grep -qi working <<<\"\$(pfm chat status '$CHAT' 2>/dev/null)\"" ||
     _lane_log_only "   E1.09: held chat never reported working: ${LANE_WAIT_WHY:-}"
   sock="$(live_field "$CHAT" 11)"
@@ -421,7 +421,7 @@ if requires E1.01-open-seat1 && beat_settle E1.09-reload-while-busy; then
     grep -F "pfm chat reload: the chat's turn is still running — holding /exit until it ends" | tail -1)"
   rm -f "$gate"
   if ! wait_steer "$CHAT" BUSY-RELOADED 420; then
-    fail "no BUSY-RELOADED user record after a mid-turn /reload: ${LANE_WAIT_WHY:-timeout}; inject rc $rc: $(one_line "$out")"
+    fail "no BUSY-RELOADED user record after a mid-turn /reload: ${LANE_WAIT_WHY:-timeout}; call rc $rc: $(one_line "$out")"
   elif ! wait_for 60 "reload_finished '$reload_log' '$reload_offset'"; then
     fail "the reload worker never logged its end in 60s; ${LANE_WAIT_WHY:-no wait reason recorded}; log tail: $(one_line "$(tail -n 5 "$reload_log" 2>&1)")"
   elif [ -z "$hold" ] || [ -n "$hold_wait" ]; then
@@ -451,10 +451,10 @@ ROLE
   if [ "$rc" -ne 0 ]; then
     fail "pfm chat new --agent-role lane-role exited $rc: $(one_line "$out")"
   else
-    role_reload="$(pfm chat inject --allow-unsigned "$ROLE_CHAT" "/reload --then \"lane steer ROLE-RELOADED\"" 2>&1)"
+    role_reload="$(pfm chat call --allow-unsigned "$ROLE_CHAT" "/reload --then \"lane steer ROLE-RELOADED\"" 2>&1)"
     role_reload_rc=$?
     if ! wait_steer "$ROLE_CHAT" ROLE-RELOADED 300; then
-      fail "after reload the role steer has no user record: ${LANE_WAIT_WHY:-timeout}; inject rc $role_reload_rc: $(one_line "$role_reload")"
+      fail "after reload the role steer has no user record: ${LANE_WAIT_WHY:-timeout}; call rc $role_reload_rc: $(one_line "$role_reload")"
     else
       sock="$(live_field "$ROLE_CHAT" 11)"
       start="$(tmux -S "$(_lane_tmux_dir)/$sock" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
@@ -487,7 +487,7 @@ if requires E1.01-open-seat1 && beat_settle E1.12-status; then
   mdl="$(pfm chat status "$CHAT" --model haiku --summary 2>&1)" || bad="$bad status --model haiku --summary exited non-zero ($(one_line "$mdl"));"
   # L5: a background sub-agent must keep the chat `working` even while its own
   # pane looks quiet — the sidechain override, read from the operator's side.
-  pfm chat inject --allow-unsigned "$CHAT" \
+  pfm chat call --allow-unsigned "$CHAT" \
     "/lane status $(mock_steps '[{"type":"background_agent","name":"lane-sub"},{"type":"turn","busy_ms":20000}]')" >/dev/null 2>&1 ||
     bad="$bad the scripted background turn was refused;"
   working="" last_state="<unread>"
@@ -592,28 +592,28 @@ if requires E1.01-open-seat1 && beat_settle E1.15-ask; then
   fi
 fi
 
-# ─── E1.16 — inject, every form and both guards ─────────────────────────────
+# ─── E1.16 — call, every form and both guards ─────────────────────────────
 
-beat E1.16-inject
+beat E1.16-call
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.01-open-seat1 && beat_settle E1.16-inject; then
+if requires E1.01-open-seat1 && beat_settle E1.16-call; then
   bad=""
-  pfm chat inject --allow-unsigned "$CHAT" "lane inject INJECT-OK" >/dev/null 2>&1 ||
-    bad="$bad base inject was refused;"
-  wait_prompt "$CHAT" INJECT-OK 240 || bad="$bad the base inject has no user record;"
-  pfm chat inject --allow-unsigned --force-now "$CHAT" "lane inject FORCE-OK" >/dev/null 2>&1 ||
+  pfm chat call --allow-unsigned "$CHAT" "lane call CALL-OK" >/dev/null 2>&1 ||
+    bad="$bad base call was refused;"
+  wait_prompt "$CHAT" CALL-OK 240 || bad="$bad the base call has no user record;"
+  pfm chat call --allow-unsigned --force-now "$CHAT" "lane call FORCE-OK" >/dev/null 2>&1 ||
     bad="$bad --force-now was refused;"
   wait_prompt "$CHAT" FORCE-OK 240 || bad="$bad --force-now has no user record;"
-  printf 'lane inject FILE-OK\n' >/tmp/e1-inject.txt
-  pfm chat inject --allow-unsigned --file /tmp/e1-inject.txt "$CHAT" >/dev/null 2>&1 ||
+  printf 'lane call FILE-OK\n' >/tmp/e1-call.txt
+  pfm chat call --allow-unsigned --file /tmp/e1-call.txt "$CHAT" >/dev/null 2>&1 ||
     bad="$bad --file was refused;"
   wait_prompt "$CHAT" FILE-OK 240 || bad="$bad --file has no user record;"
   then_gate="$LANE_OUT_DIR/e1-then-hold.gate"
   : >"$then_gate"
   then_steps="$(jq -cn --arg gate "$then_gate" '[{type:"hold",until_gone:$gate},{type:"turn",reply:"primary"}]')"
-  then_out="$(CHAT_THEN_IDLE_TRIES=30 pfm chat inject --allow-unsigned --then "/lane inject THEN-CHAIN" "$CHAT" \
-    "/lane inject PRIMARY-OK $(mock_steps "$then_steps")" 2>&1)"
+  then_out="$(CHAT_THEN_IDLE_TRIES=30 pfm chat call --allow-unsigned --then "/lane call THEN-CHAIN" "$CHAT" \
+    "/lane call PRIMARY-OK $(mock_steps "$then_steps")" 2>&1)"
   then_rc=$?
   then_log="$(grep -oE '/tmp/chat-then-[^ )]+' <<<"$then_out" | head -1)"
   if [ "$then_rc" -ne 0 ] || [ -z "$then_log" ]; then
@@ -625,37 +625,37 @@ if requires E1.01-open-seat1 && beat_settle E1.16-inject; then
   wait_prompt "$CHAT" THEN-CHAIN 120 || bad="$bad the --then steer has no user record: ${LANE_WAIT_WHY:-timeout};"
   records="$(pfm chat read "$CHAT" --json --tail 120 2>&1)"
   jq -e '[.entries[] | select(.role == "user") | (.text // "")] as $user |
-    ($user | map(startswith("/lane inject PRIMARY-OK")) | index(true)) as $primary |
-    ($user | index("/lane inject THEN-CHAIN")) as $then |
+    ($user | map(startswith("/lane call PRIMARY-OK")) | index(true)) as $primary |
+    ($user | index("/lane call THEN-CHAIN")) as $then |
     $primary != null and $then != null and $then > $primary' <<<"$records" >/dev/null 2>&1 ||
     bad="$bad --then steer did not follow its primary in pfm chat read;"
   # C37: a bare /compact primary is refused by name, never typed.
-  compact="$(pfm chat inject --allow-unsigned "$CHAT" "/compact" 2>&1)"
+  compact="$(pfm chat call --allow-unsigned "$CHAT" "/compact" 2>&1)"
   compact_rc=$?
   if [ "$compact_rc" -eq 0 ]; then
     bad="$bad a bare /compact primary was ACCEPTED;"
-  elif ! grep -qF 'never injected' <<<"$compact"; then
-    bad="$bad /compact was refused but did not say never injected: $(one_line "$compact");"
+  elif ! grep -qF 'never called' <<<"$compact"; then
+    bad="$bad /compact was refused but did not say never called: $(one_line "$compact");"
   fi
   # L28: an OPEN selector menu refuses delivery by name and types nothing.
-  pfm chat inject --allow-unsigned "$CHAT" \
+  pfm chat call --allow-unsigned "$CHAT" \
     "/lane menu $(mock_steps '{"type":"menu","options":["one","two"],"selected":1}')" >/dev/null 2>&1 ||
     bad="$bad scripted menu step was refused;"
   pfm chat keys --literal "$CHAT" "/" >/dev/null 2>&1
   wait_for 10 'grep -qF "Enter to confirm · Esc to cancel" <<<"$(pane "$CHAT")"' ||
     bad="$bad the selector menu did not open: ${LANE_WAIT_WHY:-no wait reason recorded};"
-  menu="$(pfm chat inject --allow-unsigned "$CHAT" "this must not be typed into an open menu" 2>&1)"
+  menu="$(pfm chat call --allow-unsigned "$CHAT" "this must not be typed into an open menu" 2>&1)"
   menu_rc=$?
   pfm chat keys "$CHAT" Escape >/dev/null 2>&1
   pfm chat keys "$CHAT" C-u >/dev/null 2>&1
   if [ "$menu_rc" -eq 0 ]; then
-    bad="$bad an inject with the slash menu OPEN was accepted (want the named ABORT: OPEN selector menu refusal);"
+    bad="$bad a call with the slash menu OPEN was accepted (want the named ABORT: OPEN selector menu refusal);"
   elif ! grep -qi 'selector menu' <<<"$menu"; then
-    bad="$bad the menu-open inject failed but did not name the open selector menu: $(one_line "$menu");"
+    bad="$bad the menu-open call failed but did not name the open selector menu: $(one_line "$menu");"
   fi
   # The mock's menu step returns without an assistant record; finish its turn
   # after Escape so the next beat cannot inherit a still-working transcript.
-  close_out="$(pfm chat inject --allow-unsigned "$CHAT" "/lane menu closed $(mock_steps '{"type":"turn","reply":"menu closed"}')" 2>&1)"
+  close_out="$(pfm chat call --allow-unsigned "$CHAT" "/lane menu closed $(mock_steps '{"type":"turn","reply":"menu closed"}')" 2>&1)"
   close_rc=$?
   if [ "$close_rc" -ne 0 ]; then
     bad="$bad menu close turn was refused (exit $close_rc): $(one_line "$close_out");"
@@ -678,18 +678,18 @@ if requires E1.01-open-seat1 && beat_settle E1.17-watch; then
   watch_file="$LANE_OUT_DIR/e1-watch.out"
   timeout 120 pfm chat watch "$CHAT" --idle-after 10 --once >"$watch_file" 2>&1 &
   watch_pid=$!
-  # WINDOW: watcher needs its first idle sample before the busy inject — the transition assertion needs it.
+  # WINDOW: watcher needs its first idle sample before the busy call — the transition assertion needs it.
   sleep 1
-  inject_out="$(pfm chat inject --allow-unsigned "$CHAT" "/lane watch $(mock_steps '{"type":"turn","reply":"WATCH-DONE","busy_ms":3000}')" 2>&1)"
-  inject_rc=$?
+  call_out="$(pfm chat call --allow-unsigned "$CHAT" "/lane watch $(mock_steps '{"type":"turn","reply":"WATCH-DONE","busy_ms":3000}')" 2>&1)"
+  call_rc=$?
   wait "$watch_pid"
   rc=$?
   out="$(cat "$watch_file")"
   last_state="$(pfm chat status "$CHAT" 2>/dev/null | awk -F '\t' 'NR == 1 { print $2 }')"
   if [ "$rc" -eq 124 ]; then
-    fail "watch --idle-after 10 --once timed out (last status state: ${last_state:-<unread>}; inject rc $inject_rc: $(one_line "$inject_out"))"
-  elif [ "$inject_rc" -ne 0 ]; then
-    fail "the scripted watch turn was refused (exit $inject_rc): $(one_line "$inject_out"); watch rc $rc: $(one_line "$out")"
+    fail "watch --idle-after 10 --once timed out (last status state: ${last_state:-<unread>}; call rc $call_rc: $(one_line "$call_out"))"
+  elif [ "$call_rc" -ne 0 ]; then
+    fail "the scripted watch turn was refused (exit $call_rc): $(one_line "$call_out"); watch rc $rc: $(one_line "$out")"
   elif [ "$rc" -ne 0 ]; then
     fail "watch exited $rc: $(one_line "$out")"
   elif [ "$(grep -c '^IDLE .* idle_seconds=[0-9][0-9]*$' "$watch_file")" -ne 1 ] ||
@@ -908,9 +908,9 @@ if requires E1.01-open-seat1; then
   pfm chat last NO_SUCH_CHAT_LANE >/dev/null 2>&1
   rc=$?
   [ "$rc" -eq 4 ] || bad="$bad last on a nonexistent chat exited $rc (want 4);"
-  pfm chat inject NO_SUCH_CHAT_LANE "x" >/dev/null 2>&1
+  pfm chat call NO_SUCH_CHAT_LANE "x" >/dev/null 2>&1
   rc=$?
-  [ "$rc" -eq 4 ] || [ "$rc" -eq 6 ] || bad="$bad inject on a nonexistent chat exited $rc (want 4 no-such-chat or 6 not-delivered);"
+  [ "$rc" -eq 4 ] || [ "$rc" -eq 6 ] || bad="$bad call on a nonexistent chat exited $rc (want 4 no-such-chat or 6 not-delivered);"
   pfm chat status >/dev/null 2>&1
   rc=$?
   [ "$rc" -eq 2 ] || bad="$bad status with no target exited $rc (want 2, usage);"

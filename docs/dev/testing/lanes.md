@@ -85,7 +85,7 @@ infra/fence/lanes/run.sh --check-budget E1 700   # the verdict for a recorded wa
 ## Extend it — a new command or MCP tool lands with its beat, in the same commit
 
 1. Add its beat to `infra/fence/lanes/beats.md` under its lane, naming what it asserts and the seat it spends.
-2. Add the `name · lane · beat` row to `infra/fence/lanes/map.tsv`: `name` is the command as typed (`pfm chat new`) or the MCP tool's name (`chat_ls`).
+2. Add the `name · lane · beat` row to `infra/fence/lanes/map.tsv`: `name` is the command as typed (`pfm chat new`) or the family-qualified MCP key (`mcp__chat-professor__ls`). Wire tool names stay bare; the map includes the server namespace so identical verbs in different families are covered separately.
 3. Write the beat in `infra/fence/lanes/<lane>.sh` using `lib.sh`: `beat <id>`, `spends <seat>`, `target <chat>` (or `target_live <chat>` when the beat cannot assert anything without that chat alive), then exactly one of `pass` / `fail` / `known` / `blocked`. Script its prompt with `mock_steps` and verify delivery with `wait_prompt`; assert from pfm's own report or the pane.
 4. Run the gate: `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. It fails on a map row whose beat no lane carries; on any command in `pfm --help` or MCP tool the map does not carry (derived from the binary); and on a row naming a command or tool pfm does not serve (a verb missing from the help tree is asked of pfm's dispatcher). If it cannot build or drive pfm it prints `DERIVE-FAILED: <why>` and exits 2; it never reports clean for a check it could not run.
 

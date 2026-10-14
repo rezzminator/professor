@@ -26,7 +26,7 @@ A builder that tests its own code is biased toward making it pass. The lander ha
 
 From the root foreman's brief, and nothing more:
 
-- the flight directory: `run.md` for the baseline sha, and `requirements.md` (or the root's `GOAL` line when the flight has no spec) as the statement of intent the attack reads against;
+- the flight directory: `run.md` for the baseline sha, and the statement of intent the attack reads against, the same rule for the lander, its reviewer and `/flights:audit`: a [`flights-speccer`](flights-speccer.md) `spec.md` when the flight has one (it carries every `requirements.md` row verbatim plus its `## Decisions`, binding as rulings), else `requirements.md`, else the root's `GOAL` line;
 - the baseline sha from `run.md`'s header, whose `DONE` lines name the done units: the diff is `git diff {baseline}` over the worktree, plus the uncommitted tree;
 - every project the flight touched, each with the path of its [testing manual](testing-manual.md);
 - the standing rules and the worktree or worktrees.
@@ -35,9 +35,9 @@ The agent is pinned `model: opus`, `effort: high`.
 
 ## The run
 
-1. Read every testing manual, `requirements.md` and the diff.
+1. Read every testing manual, the statement of intent, and the diff.
 2. Open each project's gate: its testing manual's static-check command over the flight's files in it, and the full suite with the manual's floors, once each, watched; the projects' gates may run in parallel as background commands. What they report is fixed, rerunning only the failing test until it is green.
-3. One review over the flight's whole diff, every project in it, so both sides of every contract change are read together: BASE the baseline, HEAD `WORKTREE` (the uncommitted tree, its owned untracked files listed), PATHSPECS the owned paths, one per worktree. The lander picks the tier from the sinks the change adds, counted with `reviewer-pro`'s own trust-tracer grep: one hit or more takes `reviewer-pro`, none takes `reviewer`, and `gate.md` records the tier, the count and the size. `reviewer-pro` is `reviewer` plus a trust tracer that walks every sink a hostile shape can reach; on the [reviewer benchmark](../review/reviewer.md#benchmark) it found 16.0 of 27 known defects per four-rung set against `reviewer`'s 11.75, at about a third more per review, while `reviewer` holds the R1 floor (4.5 of 5 against 3.75). Size is recorded, never the switch: the rungs' sizes and sink counts (R1 1,577 production lines and 14 sink hits, R3 843 and 13) do not predict which tier wins, while a change with no sink leaves the pro's added seat nothing to walk. The review runs in the background: the lander ends its turn and takes the findings from its `review.md` at the review's return; a lander that looped over transcript mtimes to guess the review's end waited on a heuristic any busy sibling agent defeats. Every finding inside the flight's files is fixed, an UNCHECKED one or an OPEN thread read to its cause first; one outside them is recorded untouched.
+3. One review over the flight's whole diff, every project in it, so both sides of every contract change are read together: BASE the baseline, HEAD `WORKTREE` (the uncommitted tree, its owned untracked files listed), PATHSPECS the owned paths, the statement of intent as its claims, one per worktree. The lander picks the tier from the sinks the change adds, counted with `reviewer-pro`'s own trust-tracer grep: one hit or more takes `reviewer-pro`, none takes `reviewer`, and `gate.md` records the tier, the count and the size. `reviewer-pro` is `reviewer` plus a trust tracer that walks every sink a hostile shape can reach; on the [reviewer benchmark](../review/reviewer.md#benchmark) it found 16.0 of 27 known defects per four-rung set against `reviewer`'s 11.75, at about a third more per review, while `reviewer` holds the R1 floor (4.5 of 5 against 3.75). Size is recorded, never the switch: the rungs' sizes and sink counts (R1 1,577 production lines and 14 sink hits, R3 843 and 13) do not predict which tier wins, while a change with no sink leaves the pro's added seat nothing to walk. The review runs in the background: the lander ends its turn and takes the findings from its `review.md` at the review's return; a lander that looped over transcript mtimes to guess the review's end waited on a heuristic any busy sibling agent defeats. Every finding inside the flight's files is fixed, an UNCHECKED one or an OPEN thread read to its cause first; one outside them is recorded untouched.
 4. The attack map, closed-world: every changed hunk gets one line — an attack hypothesis (the real product traffic or state that could break this hunk and the wrong behaviour that results), an explicit no-attack justification, or `RETIRE: {tests}`. A hunk absent from the map is uncovered. Attacks drive states the product can reach, never inputs it cannot send.
 5. The validity sweep: every test file the diff adds or touches, read against the placement, tier, economy and validity laws of its own project's manual. Each violation is a finding in its class. Its economy half folds the duplicate tests it finds (a decision tested in two units keeps the test of the unit that makes it, every case the fold removes kept as a case of that test) and deletes the assertions it finds catching nothing (a test id that only exists, an echo of a mock call, copy asserted in every variant or locale, a snapshot of the fixture); finding none, it removes nothing.
 6. Adversarial tests, written into the module that owns the contract, as cases or assertions of its existing test where one fits — there is no lander-owned directory. A test is accepted only after it was watched failing against the code it attacks.
@@ -54,7 +54,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 ## What it does not do
 
 - No nested copy of itself and no `Agent` tool. The adopter's QA handed its fixes to a fresh QA seat; here the closing full-suite run and the watched-failing proof of every new test are the judges of the lander's own fixes.
-- No row-by-row conformance audit: each foreman verified its children's returns against their rows; `requirements.md` is read as the attack's statement of intent.
+- No row-by-row conformance audit: each foreman verified its children's returns against their rows; the statement of intent is read as the attack's.
 - No commit and no merge. `gitter` commits after the lander returns, and lands a committed worktree flight whose every unit is `DONE` on the lander's `PASS` or `FIXED`.
 
 ## Bounds
@@ -91,7 +91,7 @@ A lander certifies its own fixes. The research collected for this design condemn
 | The builder | [`flights-foreman`](flights-foreman.md) | The landing: the lander and the wait on its return file, then `gitter`'s commit and merge; the reaction to `FAIL` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project law the sweep and the gate run against |
 | The audit | [`flights-audit`](flights-audit.md) | `gate.md` and `returns/gate-r{round}.md` as anchors; the review read from the lander's transcript |
-| The family | [`flights.md`](flights.md) | The lander among the three agents and the directory's writers |
+| The family | [`flights.md`](flights.md) | The lander among the four agents and the directory's writers |
 
 ## Evidence
 

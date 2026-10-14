@@ -61,11 +61,11 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 			Line:      3,
 			Name:      "mcp__chat__",
 			Kind:      "tool",
-			Successor: "mcp__professor__chat_*",
+			Successor: "mcp__chat-professor__*",
 		},
 		{
 			Path: ".codex/config.toml", Line: 2, Name: "mcp__harvester__", Kind: "tool",
-			Successor: "mcp__professor__harvester_*",
+			Successor: "mcp__harvester-professor__*",
 		},
 		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
 		{Path: "scripts/legacy.sh", Line: 3, Name: "JC-COMMIT", Kind: "phase", Successor: "COMMIT"},
@@ -90,7 +90,7 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"see ~/.claude/commands/pfm.md and $HOME/.claude/commands/pfm.md",
 		".claude/commands/pcm.md",
 		"/quality:md-forlint check",
-		"mcp__professor__chat_inject and mcp__professor__harvester_read",
+		"mcp__chat-professor__call and mcp__harvester-professor__read",
 		"spawn super-rr",
 		"import x from 'src/wave.js'; /waveform",
 		"/jcx and /pfm:refresher and /qa:lively",
@@ -613,5 +613,35 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		want,
 	) {
 		t.Errorf("hits in a project defining nothing = %v, want %v", got, want)
+	}
+}
+
+func TestChatCallRetiredNames(t *testing.T) {
+	root := t.TempDir()
+	writeRetiredFixture(
+		t,
+		root,
+		map[string]string{
+			"old.md": "mcp__professor__chat_inject\npfm chat inject target message\nchat_inject\n",
+			"new.md": "mcp__chat-professor__call\nmcp__harvester-professor__read\npfm chat call target message\n",
+		},
+	)
+	scan := ScanRetiredNames(root, nil)
+	if len(scan.Failures) != 0 {
+		t.Fatalf("scan failures = %+v", scan.Failures)
+	}
+	want := []professor.RetiredNameHit{
+		{
+			Path:      "old.md",
+			Line:      1,
+			Name:      "mcp__professor__",
+			Kind:      "tool",
+			Successor: "mcp__chat-professor__* / mcp__harvester-professor__*",
+		},
+		{Path: "old.md", Line: 2, Name: "pfm chat inject", Kind: "command", Successor: "pfm chat call"},
+		{Path: "old.md", Line: 3, Name: "chat_inject", Kind: "tool", Successor: "mcp__chat-professor__call"},
+	}
+	if !reflect.DeepEqual(scan.Hits, want) {
+		t.Fatalf("retired hits = %+v, want %+v", scan.Hits, want)
 	}
 }

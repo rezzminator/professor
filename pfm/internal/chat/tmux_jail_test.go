@@ -27,9 +27,9 @@ func TestReviewSplitRenameRetainsAmbiguityGuard(t *testing.T) {
 	if err := os.MkdirAll(values.TmuxDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CHAT_INJECT_POLL", "0.01")
-	t.Setenv("CHAT_INJECT_ENTER_SETTLE", "0.02")
-	t.Setenv("CHAT_INJECT_PROOF_SETTLE", "0.02")
+	t.Setenv("CHAT_CALL_POLL", "0.01")
+	t.Setenv("CHAT_CALL_ENTER_SETTLE", "0.02")
+	t.Setenv("CHAT_CALL_PROOF_SETTLE", "0.02")
 
 	const renameUI = `import os, sys, tty
 tty.setraw(0)

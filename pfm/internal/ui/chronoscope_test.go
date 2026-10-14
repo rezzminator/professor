@@ -182,7 +182,7 @@ func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {
 	snapshot.Rows = rows
 
 	oldEvent := fleetdb.CommsEvent{
-		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: fleetdb.KindCall,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "dying words",
 	}
@@ -359,7 +359,7 @@ func TestNavigatorSelectionCyclesAndReconciles(t *testing.T) {
 
 	newSnapshot := fixtureSnapshot(120)
 	newSnapshot.Cosmos = compose.BuildCosmos(newSnapshot.Rows, []fleetdb.CommsEvent{{
-		AtNS: fixtureNowNS, Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS, Kind: fleetdb.KindCall,
 		SenderUUID: newSnapshot.Rows[1].ID, Target: newSnapshot.Rows[4].Name, ReceiverSocket: "",
 		Message: "unrelated traffic",
 	}}, fixtureNowNS, false)
@@ -473,12 +473,12 @@ func TestNavigatorSpotlightDimsEveryOtherEdge(t *testing.T) {
 	snapshot.NoSky = true // isolate the plain rail Bezier from comet/wind/twinkle noise
 	rows := snapshot.Rows
 	touching := fleetdb.CommsEvent{
-		AtNS: fixtureNowNS - int64(time.Minute), Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS - int64(time.Minute), Kind: fleetdb.KindCall,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "touches the selection",
 	}
 	unrelated := fleetdb.CommsEvent{
-		AtNS: fixtureNowNS - int64(time.Minute), Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS - int64(time.Minute), Kind: fleetdb.KindCall,
 		SenderUUID: rows[4].ID, Target: rows[5].Name,
 		Message: "does not touch the selection",
 	}
@@ -557,7 +557,7 @@ func TestSystemFocusCyclesAndPushesOtherStarsOffFrame(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	rows := snapshot.Rows
 	intraAlpha := fleetdb.CommsEvent{
-		AtNS: fixtureNowNS, Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS, Kind: fleetdb.KindCall,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "inside alpha",
 	}
@@ -913,7 +913,7 @@ func TestNavigatorEnterOpensALiveSplitRowWithNoPaneID(t *testing.T) {
 		t.Fatalf("setup: fixture row 2 must be a LiveSplit row with a socket and no pane ID: %#v", splitRow)
 	}
 	touching := fleetdb.CommsEvent{
-		AtNS: fixtureNowNS, Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS, Kind: fleetdb.KindCall,
 		SenderUUID: rows[0].ID, Target: splitRow.Name, ReceiverSocket: splitRow.Socket,
 		Message: "hello split",
 	}
@@ -965,7 +965,7 @@ func TestCosmosSelectionHUDNamesAllFourLifecycleStates(t *testing.T) {
 	events := []fleetdb.CommsEvent{
 		{
 			AtNS:           fixtureNowNS,
-			Kind:           fleetdb.KindInject,
+			Kind:           fleetdb.KindCall,
 			SenderUUID:     rows[0].ID,
 			Target:         rows[1].Name,
 			ReceiverSocket: rows[1].Socket,
@@ -973,7 +973,7 @@ func TestCosmosSelectionHUDNamesAllFourLifecycleStates(t *testing.T) {
 		},
 		{
 			AtNS:       fixtureNowNS,
-			Kind:       fleetdb.KindInject,
+			Kind:       fleetdb.KindCall,
 			SenderUUID: rows[4].ID,
 			Target:     "resumable reply",
 			Message:    "from a resumable row",
@@ -1152,7 +1152,7 @@ func TestRenderCompactCosmosFocusFiltersEdgesToTheSystem(t *testing.T) {
 			{
 				From:        "chat:name:Aone",
 				To:          "chat:name:Atwo",
-				Kind:        fleetdb.KindInject,
+				Kind:        fleetdb.KindCall,
 				Count:       1,
 				LastNS:      fixtureNowNS,
 				LastMessage: "alpha chatter",
@@ -1160,7 +1160,7 @@ func TestRenderCompactCosmosFocusFiltersEdgesToTheSystem(t *testing.T) {
 			{
 				From:        "chat:name:Bone",
 				To:          "chat:name:Btwo",
-				Kind:        fleetdb.KindInject,
+				Kind:        fleetdb.KindCall,
 				Count:       1,
 				LastNS:      fixtureNowNS,
 				LastMessage: "beta chatter",
@@ -1190,12 +1190,12 @@ func TestNavigatorSpotlightDimsTheCometBurstAndShockwaveRing(t *testing.T) {
 	snapshot.NoSky = false // sky ON: the burst and shockwave passes are sky-only
 	rows := snapshot.Rows
 	givesSelectionItsOwnNode := fleetdb.CommsEvent{
-		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: fleetdb.KindCall,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "old, not mid-comet, gives the selection its own node",
 	}
 	unrelated := fleetdb.CommsEvent{
-		AtNS: fixtureNowNS - int64(300*time.Millisecond), Kind: fleetdb.KindInject,
+		AtNS: fixtureNowNS - int64(300*time.Millisecond), Kind: fleetdb.KindCall,
 		SenderUUID: rows[4].ID, Target: rows[5].Name,
 		Message: "mid-comet, does not touch the selection",
 	}
@@ -1345,7 +1345,7 @@ func TestRenderCompactCosmosEmptyStatesAndHeightBound(t *testing.T) {
 				compose.CosmosNode{Key: to, Label: resolve.Named("to-" + suffix), Home: "alpha"},
 			)
 			edges = append(edges, compose.CosmosEdge{
-				From: from, To: to, Kind: fleetdb.KindInject, Count: 1,
+				From: from, To: to, Kind: fleetdb.KindCall, Count: 1,
 				LastNS: fixtureNowNS - int64(i)*int64(time.Second), LastMessage: "message",
 			})
 		}

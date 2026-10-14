@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -91,21 +91,21 @@ func paneState(engine pfmengine.ID, capture string) string {
 	if heldByDialog(capture) {
 		return headless.StateBlocked
 	}
-	if inject.IsBusyFor(engine, capture) {
+	if pfmcall.IsBusyFor(engine, capture) {
 		return headless.StateWorking
 	}
 	return headless.StateIdle
 }
 
 // heldByDialog is the positive evidence a screen waits on its human: an open
-// numbered selector at the active composer row (inject.SelectorLine — a
+// numbered selector at the active composer row (pfmcall.SelectorLine — a
 // permission dialog, a question, a modal menu) or Claude's folder-trust
 // dialog. The absence of a running-turn footer is NOT that evidence: a
 // request the model server refused retries with no spinner arm IsBusyFor
 // knows, under an empty composer, and read as blocked it sent a seat nobody
 // needed to answer to its human.
 func heldByDialog(screen string) bool {
-	return inject.SelectorLine(screen) != "" || pfmengine.ClaudeTrustDialog(screen)
+	return pfmcall.SelectorLine(screen) != "" || pfmengine.ClaudeTrustDialog(screen)
 }
 
 // readPane captures one live chat's screen through the capture seam (nil is
@@ -120,7 +120,7 @@ func readPane(
 ) (string, error) {
 	if capture == nil {
 		capture = func(ctx context.Context, socketPath, target string) (string, error) {
-			return (inject.TmuxInjector{}).Capture(ctx, socketPath, target, false, inject.FullScrollback)
+			return (pfmcall.TmuxCaller{}).Capture(ctx, socketPath, target, false, pfmcall.FullScrollback)
 		}
 	}
 	values, err := NameResolver{Runtime: runtime}.paths()

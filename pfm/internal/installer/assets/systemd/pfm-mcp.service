@@ -1,5 +1,5 @@
 [Unit]
-Description=Serve pfm's professor MCP (chat and harvester tools) over loopback HTTP
+Description=Serve pfm's chat-professor and harvester-professor MCP servers over loopback HTTP
 
 [Service]
 Type=simple

@@ -562,13 +562,13 @@ func runUntilGoneCommand() {
 	os.Exit(1)
 }
 
-// runMCPExitCommand calls chat_exit{} through `pfm mcp serve --stdio` as the
+// runMCPExitCommand calls exit{} through `pfm mcp serve --stdio` as the
 // chat on <socket> itself — the _meta.pfmProxy identity Claude Code's
 // per-chat proxy stamps on every call — and prints the tool's answer, then
 // whether that pane was still on the socket the moment the answer arrived
 // (the proxy's id field stays empty, as OpenCode's does: the seat's own
 // session id is minted at launch, and the live row supplies it):
-// chat_exit returns once the finisher is spawned, because its caller's pane
+// exit returns once the finisher is spawned, because its caller's pane
 // can close only after the very turn this call belongs to has ended.
 func runMCPExitCommand() {
 	if len(os.Args) != 2 {
@@ -588,7 +588,7 @@ func runMCPExitCommand() {
 	call, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
 		"params": map[string]any{
-			"name": "chat_exit", "arguments": map[string]any{},
+			"name": "exit", "arguments": map[string]any{},
 			"_meta": map[string]any{"pfmProxy": map[string]any{
 				"v":          1,
 				"session":    session,
@@ -604,7 +604,7 @@ func runMCPExitCommand() {
 		fmt.Fprintf(os.Stderr, "mcp-exit: encode the call: %v\n", err)
 		os.Exit(1)
 	}
-	server := exec.Command(os.Getenv(e2eScriptBinaryEnv), "mcp", "serve", "--stdio")
+	server := exec.Command(os.Getenv(e2eScriptBinaryEnv), "mcp", "serve", "--stdio", "--family", "chat")
 	server.Stderr = os.Stderr
 	stdin, err := server.StdinPipe()
 	if err != nil {

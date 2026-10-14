@@ -138,6 +138,58 @@ func (tmux TmuxExecutor) CreateChatServer(
 	})
 }
 
+// LaunchPane reads the pane of the session a chat server was created with
+// (named after its socket): whether its process exited, its foreground
+// command, its terminal, and its screen.
+func (tmux TmuxExecutor) LaunchPane(
+	ctx context.Context,
+	socket string,
+) (LaunchPaneState, error) {
+	target := socket + ":"
+	state, err := tmux.command(
+		ctx, socket, "display-message", "-p", "-t", target,
+		"#{pane_dead}\x1f#{pane_current_command}\x1f#{pane_tty}",
+	).Output()
+	if err != nil {
+		return LaunchPaneState{}, fmt.Errorf("read the launch pane on socket %q: %w", socket, err)
+	}
+	fields := pfmtmux.FormatSplit(strings.TrimSuffix(string(state), "\n"), 3)
+	if len(fields) != 3 {
+		return LaunchPaneState{}, fmt.Errorf("tmux socket %q returned %d launch pane fields", socket, len(fields))
+	}
+	pane := LaunchPaneState{
+		Command: fields[1],
+		TTY:     strings.TrimPrefix(fields[2], "/dev/"),
+		Dead:    fields[0] == "1",
+	}
+	capture := []string{"capture-pane", "-p", "-J", "-t", target}
+	if pane.Dead {
+		// tmux's own "Pane is dead" line can push a dying process's last words
+		// off a short pane into its history; they are read from there too.
+		capture = append(capture, "-S", "-200")
+	}
+	captured, err := tmux.command(ctx, socket, capture...).Output()
+	if err != nil {
+		return LaunchPaneState{}, fmt.Errorf("capture the launch pane on socket %q: %w", socket, err)
+	}
+	pane.Screen = string(captured)
+	return pane, nil
+}
+
+// SetRemainOnExit sets or unsets remain-on-exit on the pane of the session a
+// chat server was created with.
+func (tmux TmuxExecutor) SetRemainOnExit(
+	ctx context.Context,
+	socket string,
+	on bool,
+) error {
+	target := socket + ":"
+	if on {
+		return tmux.command(ctx, socket, "set-option", "-p", "-t", target, "remain-on-exit", "on").Run()
+	}
+	return tmux.command(ctx, socket, "set-option", "-p", "-t", target, "-u", "remain-on-exit").Run()
+}
+
 // socket is the one tmux-addressing wrapper (internal/tmux.Socket).
 func (tmux TmuxExecutor) socket() pfmtmux.Socket {
 	return pfmtmux.Socket{Binary: tmux.Binary, Dir: tmux.TmuxDir}

@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/index"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -264,7 +264,7 @@ func (finisher *Finisher) turnEnded(ctx context.Context, args ExitArgs) (string,
 	for attempt := 0; attempt < finisher.idleAttempts; attempt++ {
 		capture, err := finisher.tmux.Capture(ctx, args.SocketPath, args.PaneID)
 		switch {
-		case err == nil && !inject.IsFooterBusy(args.Engine, capture):
+		case err == nil && !pfmcall.IsFooterBusy(args.Engine, capture):
 			quiet++
 			if quiet >= 2 {
 				return capture, turnOver, nil
@@ -306,14 +306,14 @@ func (finisher *Finisher) exitRefusal(
 		return fmt.Errorf("pane %s was already gone when the turn ended", args.PaneID)
 	case command == "":
 		return fmt.Errorf("pfm cannot prove the %s composer empty", pfmengine.MustLookup(args.Engine).Short)
-	case inject.LastComposerLine(frame) == "":
+	case pfmcall.LastComposerLine(frame) == "":
 		return fmt.Errorf("pane %s drew no composer", args.PaneID)
-	case inject.SelectorLine(frame) != "":
+	case pfmcall.SelectorLine(frame) != "":
 		// A permission prompt or menu parks the turn with an idle footer;
 		// its ❯ row is a selection, not a human's draft.
-		return fmt.Errorf("pane %s shows the open selector %q", args.PaneID, inject.SelectorLine(frame))
+		return fmt.Errorf("pane %s shows the open selector %q", args.PaneID, pfmcall.SelectorLine(frame))
 	}
-	empty, draft, err := inject.ComposerEmpty(frame, func() (string, error) {
+	empty, draft, err := pfmcall.ComposerEmpty(frame, func() (string, error) {
 		return finisher.tmux.CaptureStyled(ctx, args.SocketPath, args.PaneID)
 	})
 	switch {
@@ -321,7 +321,7 @@ func (finisher *Finisher) exitRefusal(
 		return fmt.Errorf("pane %s: %w", args.PaneID, err)
 	case !empty:
 		return fmt.Errorf("pane %s holds the draft %q", args.PaneID, draft)
-	case !inject.ComposerBoxEmpty(frame):
+	case !pfmcall.ComposerBoxEmpty(frame):
 		return fmt.Errorf(
 			"pane %s: the composer box holds text below its marker row or has no closing rule",
 			args.PaneID,
@@ -342,7 +342,7 @@ func (finisher *Finisher) answerExitDialog(args ExitArgs) func(context.Context) 
 		if err != nil {
 			return fmt.Errorf("read pane %s for an exit dialog: %w", args.PaneID, err)
 		}
-		if !inject.ExitDialogOpen(capture) {
+		if !pfmcall.ExitDialogOpen(capture) {
 			return nil
 		}
 		if err := finisher.tmux.SendKey(ctx, args.SocketPath, args.PaneID, "Enter"); err != nil {

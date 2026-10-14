@@ -385,7 +385,7 @@ func TestRunScrubsAmbientIdentity(t *testing.T) {
 	for _, name := range []string{
 		"TMUX",
 		"TMUX_PANE",
-		"CHAT_INJECT_SOCKET",
+		"CHAT_CALL_SOCKET",
 		"CLAUDE_CODE_SESSION_ID",
 		"CODEX_THREAD_ID",
 	} {

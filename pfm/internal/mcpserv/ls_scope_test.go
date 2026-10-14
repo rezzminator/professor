@@ -24,7 +24,7 @@ func (verbs *selectingChatVerbs) List(_ context.Context, request chat.ListReques
 	return chat.Select(verbs.rows, 0, request), nil
 }
 
-// chat_ls scopes to the caller's repository when _meta.threadId resolves the
+// ls scopes to the caller's repository when _meta.threadId resolves the
 // caller, and says it listed every repository when it does not.
 func TestChatLSScopesToTheResolvedCallersRepository(t *testing.T) {
 	t.Parallel()
@@ -72,25 +72,25 @@ func TestChatLSScopesToTheResolvedCallersRepository(t *testing.T) {
 	caller := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "thread-a"}}}
 	_, scoped, err := service.chatLS(context.Background(), caller, LSInput{})
 	if err != nil {
-		t.Fatalf("chat_ls with a resolved caller: %v", err)
+		t.Fatalf("ls with a resolved callEngine: %v", err)
 	}
 	if got, want := ids(scoped), []string{"thread-a", "root-chat"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("chat_ls from a worktree caller listed %v, want the repo's chats %v", got, want)
+		t.Fatalf("ls from a worktree caller listed %v, want the repo's chats %v", got, want)
 	}
 	if scoped.Scope != fixture.Repo || scoped.Elsewhere != 1 {
-		t.Fatalf("scoped chat_ls scope=%q elsewhere=%d, want %q and 1", scoped.Scope, scoped.Elsewhere, fixture.Repo)
+		t.Fatalf("scoped ls scope=%q elsewhere=%d, want %q and 1", scoped.Scope, scoped.Elsewhere, fixture.Repo)
 	}
 
 	_, everywhere, err := service.chatLS(context.Background(), nil, LSInput{})
 	if err != nil {
-		t.Fatalf("chat_ls without a caller: %v", err)
+		t.Fatalf("ls without a callEngine: %v", err)
 	}
 	if got := ids(everywhere); len(got) != 3 {
-		t.Fatalf("chat_ls without a caller listed %v, want every repository", got)
+		t.Fatalf("ls without a caller listed %v, want every repository", got)
 	}
 	if everywhere.Scope != "all repos — caller cwd unknown" || everywhere.Elsewhere != 0 {
 		t.Fatalf(
-			"unresolved chat_ls scope=%q elsewhere=%d, want the unknown-caller line",
+			"unresolved ls scope=%q elsewhere=%d, want the unknown-caller line",
 			everywhere.Scope,
 			everywhere.Elsewhere,
 		)
@@ -99,7 +99,7 @@ func TestChatLSScopesToTheResolvedCallersRepository(t *testing.T) {
 	_, all, err := service.chatLS(context.Background(), caller, LSInput{All: true})
 	if err != nil || len(all.Rows) != 3 || all.Scope != "all repos" {
 		t.Fatalf(
-			"chat_ls all from a resolved caller = %d rows scope %q err %v, want every repository",
+			"ls all from a resolved caller = %d rows scope %q err %v, want every repository",
 			len(all.Rows),
 			all.Scope,
 			err,

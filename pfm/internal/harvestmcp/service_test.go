@@ -32,7 +32,7 @@ func TestStableFourToolSurface(t *testing.T) {
 	}
 	defer func() { _ = service.Close() }()
 	got := listToolNames(t, service)
-	want := []string{"harvester_download_file", "harvester_read", "harvester_search_literature", "harvester_search_web"}
+	want := []string{"download_file", "read", "search_literature", "search_web"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tool names = %#v, want %#v", got, want)
 	}
@@ -73,10 +73,10 @@ func listToolNames(t *testing.T, service *Service) []string {
 	return names
 }
 
-// TestSearchToolHiddenWithoutABackend is the regression for a `harvester_search_web` tool
+// TestSearchToolHiddenWithoutABackend is the regression for a `search_web` tool
 // advertised with nowhere to search: register() used to gate only on
 // !DisableSearch, so a Service with neither SearXNGURL nor BraveAPIKey set
-// still listed `harvester_search_web`, and calling it always failed with a configuration
+// still listed `search_web`, and calling it always failed with a configuration
 // error the caller had no way to see in advance.
 func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 	service, err := NewConfiguredHarvester(
@@ -89,8 +89,8 @@ func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 	defer func() { _ = service.Close() }()
 	names := listToolNames(t, service)
 	for _, name := range names {
-		if name == "harvester_search_web" {
-			t.Fatalf("tool list %v advertises `harvester_search_web` with no backend configured", names)
+		if name == "search_web" {
+			t.Fatalf("tool list %v advertises `search_web` with no backend configured", names)
 		}
 	}
 }

@@ -16,4 +16,5 @@ rename:
   flights-foreman: gpt-flights-foreman
   flights-mechanical-executor: gpt-flights-mechanical-executor
   flights-lander: gpt-flights-lander
+  flights-speccer: gpt-flights-speccer
 ---

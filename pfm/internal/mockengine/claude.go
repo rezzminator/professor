@@ -229,7 +229,7 @@ func (session *claudeSession) busyLine(elapsed time.Duration, usage Tokens) stri
 	return claudeBusyLine(elapsed, usage)
 }
 
-// compactedLine is the receipt internal/inject/guards.go:20 matches
+// compactedLine is the receipt internal/call/guards.go:20 matches
 // ("compacted (" — Claude Code's own wording beyond that regex is not pinned).
 func (session *claudeSession) compactedLine() string {
 	return "✻ Conversation compacted (ctrl+o for history)"
@@ -362,7 +362,7 @@ func (session *claudeSession) rename(name string) error {
 // background starts a sidechain. Its records carry isSidechain and live in
 // the session's subagents/ file, below the two levels index/walk.go:56-63
 // descends, so no reader counts them; the pane shows the agent row
-// internal/inject/guards.go:24 exempts from the composer.
+// internal/call/guards.go:24 exempts from the composer.
 func (session *claudeSession) background(step Step) (string, error) {
 	agentID := "agent-" + newUUID()[:8]
 	sidechain := filepath.Join(strings.TrimSuffix(session.transcript, ".jsonl"), "subagents", agentID+".jsonl")
@@ -428,7 +428,7 @@ func (session *claudeSession) mcp(step Step) error {
 func (session *claudeSession) callMCP(step Step, input json.RawMessage) (*mcp.CallToolResult, error) {
 	name := step.Server
 	if name == "" {
-		name = pfmconfig.MCPServerProfessor
+		name = pfmconfig.MCPRegistrationName(pfmconfig.MCPServerChat)
 	}
 	config := session.call.mcpConfig
 	content := []byte(config)

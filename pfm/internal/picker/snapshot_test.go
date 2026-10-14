@@ -59,7 +59,7 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 	const nowNS = int64(48 * time.Hour)
 	t.Run("healthy", func(t *testing.T) {
 		reader := &fakeCommsReader{events: []fleetdb.CommsEvent{{
-			AtNS: nowNS - 1, Kind: fleetdb.KindInject,
+			AtNS: nowNS - 1, Kind: fleetdb.KindCall,
 			SenderLabel: "Alpha", Target: "Beta", Message: "hello",
 		}}}
 		snapshot := buildSnapshot(
@@ -94,7 +94,7 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 		events := make([]fleetdb.CommsEvent, compose.CosmosEventCap)
 		for index := range events {
 			events[index] = fleetdb.CommsEvent{
-				AtNS: int64(index + 1), Kind: fleetdb.KindInject,
+				AtNS: int64(index + 1), Kind: fleetdb.KindCall,
 				SenderLabel: "Alpha", Target: "Beta", Message: "hello",
 			}
 		}

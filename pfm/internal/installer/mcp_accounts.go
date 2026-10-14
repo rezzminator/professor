@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ClaudeRegistry is one user-scope Claude Code registry (.claude.json) a
@@ -99,4 +101,137 @@ func (installer *engine) dropClaudeMCPOwnership() error {
 		return installer.saveMCPOwnership(ownership)
 	}
 	return nil
+}
+
+// cutOverClaudeMCP reconciles existing user registries; new chats use the
+// launcher's strict MCP config, so an absent registry is never created here.
+func (installer *engine) cutOverClaudeMCP() error {
+	accounts := append([]pfmconfig.Account(nil), installer.options.ClaudeAccounts...)
+	for _, dir := range installer.options.RosterConfigDirs {
+		accounts = append(accounts, pfmconfig.Account{ConfigDir: dir})
+	}
+	if installer.options.ConfigDir != "" {
+		accounts = append(accounts, pfmconfig.Account{ConfigDir: installer.options.ConfigDir})
+	}
+	env := installer.options.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	ambient := env.Get("CLAUDE_CONFIG_DIR")
+	registries := ClaudeMCPRegistries(installer.options.Home, accounts, ambient)
+	seen := map[string]bool{}
+	names := enabledMCPNames(installer.options.MCPEnabled)
+	if installer.options.Mode == ModeUninstall {
+		names = nil
+	}
+	for _, registry := range registries {
+		physical := physicalSettingsPath(registry.Path)
+		if seen[physical] {
+			continue
+		}
+		seen[physical] = true
+		raw, existed, err := readMCPFile(registry.Path)
+		if err != nil {
+			return fmt.Errorf("read Claude MCP registry %s: %w", registry.Path, err)
+		}
+		if !existed {
+			continue
+		}
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &document); err != nil {
+			return fmt.Errorf("parse Claude MCP registry %s: %w", registry.Path, err)
+		}
+		encoded, present := document["mcpServers"]
+		if !present {
+			continue
+		}
+		var servers map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &servers); err != nil {
+			return fmt.Errorf("parse Claude MCP servers %s: %w", registry.Path, err)
+		}
+		owned := false
+		for _, name := range append(append([]string(nil), mcpLegacyNames...), pfmconfig.MCPRegistrationName(chatName), pfmconfig.MCPRegistrationName(mcpServerHarvester)) {
+			entry, present := servers[name]
+			if !present {
+				continue
+			}
+			var shape map[string]any
+			if err := json.Unmarshal(entry, &shape); err != nil {
+				return fmt.Errorf("parse Claude MCP registration %s in %s: %w", name, registry.Path, err)
+			}
+			matches := isPFMLegacyClaudeShape(name, shape, installer.mcpChatCommand(), installer.options.MCPPort)
+			if isFamilyRegistration(name) {
+				matches = isExactStdioShape(shape, installer.mcpChatCommand(), mcpFamilyStdioArgs(name))
+			}
+			if matches {
+				delete(servers, name)
+				owned = true
+			} else if name == professorName {
+				fmt.Fprintf(
+					installer.options.Stdout,
+					"preserve foreign Claude MCP client professor in %s\n",
+					registry.Path,
+				)
+			}
+		}
+		if !owned {
+			continue
+		}
+		for _, name := range names {
+			if _, present := servers[name]; present {
+				return fmt.Errorf(
+					"preserve foreign Claude MCP client %s in %s: cannot cut over owned registration",
+					name,
+					registry.Path,
+				)
+			}
+			encoded, err := json.Marshal(
+				map[string]any{
+					configTypeKey:    stdioProtocol,
+					configCommandKey: installer.mcpChatCommand(),
+					"args":           mcpFamilyStdioArgs(name),
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("encode Claude MCP registration %s: %w", name, err)
+			}
+			servers[name] = encoded
+		}
+		encoded, err = json.Marshal(servers)
+		if err != nil {
+			return fmt.Errorf("encode Claude MCP servers %s: %w", registry.Path, err)
+		}
+		document["mcpServers"] = encoded
+		wanted, err := json.MarshalIndent(document, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode Claude MCP registry %s: %w", registry.Path, err)
+		}
+		wanted = append(wanted, '\n')
+		if bytes.Equal(raw, wanted) {
+			continue
+		}
+		if err := installer.changeMCPFile(
+			"cut over Claude MCP registrations in "+registry.Path,
+			registry.Path,
+			raw,
+			wanted,
+			true,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClaudeMCPRegistries includes the historical default user registry alongside
+// account and ambient registries, deduplicated by physical file.
+func ClaudeMCPRegistries(home string, accounts []pfmconfig.Account, ambient string) []ClaudeRegistry {
+	registries := ClaudeUserRegistries(home, accounts, ambient)
+	fallback := filepath.Join(home, ".claude.json")
+	for _, registry := range registries {
+		if physicalSettingsPath(registry.Path) == physicalSettingsPath(fallback) {
+			return registries
+		}
+	}
+	return append(registries, ClaudeRegistry{Path: fallback, Reason: "default user registry"})
 }

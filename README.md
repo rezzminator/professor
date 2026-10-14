@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat_inject, the comms ledger scrolls underneath" width="900">
+  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat call, the comms ledger scrolls underneath" width="900">
 </p>
 
 <h2 align="center">Professor is a complete, integrated toolbox for everything you want to do — that Anthropic, OpenAI <em>or anyone else</em> will <em>never</em> give you.</h2>
@@ -38,7 +38,7 @@ You already run more than one AI chat. They cannot see each other, they forget t
 | | Without Professor | With Professor |
 | --- | --- | --- |
 | Many chats, many accounts | Scattered terminal tabs; a closed tab is a lost chat | One picker — every chat on every harness, live or resumable |
-| One chat needs another | You copy-paste between windows | `chat_inject` — a signed turn, delivered and acknowledged |
+| One chat needs another | You copy-paste between windows | `pfm chat call` — a signed turn, delivered and acknowledged |
 | The rules, after compaction | Whatever the prompt still remembers | Hooks that refuse, naming the right way in the refusal |
 | A bot-blocked page | A 403, or an empty page reported as content | A seven-rung fetch ladder; a block is reported as a block |
 | Claude and Codex rules | Two files that drift apart | One `CLAUDE.md`, compiled mirrors, drift fails the check |
@@ -67,12 +67,12 @@ Every transcript below is real output from this repository, redacted only of nam
 Two panes, two harnesses. You type one line into the Claude chat on the left; the Codex chat on the right receives it as a signed turn and gets to work.
 
 <p align="center">
-  <img src="docs/img/cards/duo.webp" alt="Cross-harness orchestration: one Claude chat dispatches three workers — a Codex reviewer, an OpenCode docs writer, a Claude test runner — with chat_inject; each ACK and VERDICT flies back into the commanding chat, dispatched 3 · received 3" width="900">
+  <img src="docs/img/cards/duo.webp" alt="Cross-harness orchestration: one Claude chat dispatches three workers — a Codex reviewer, an OpenCode docs writer, a Claude test runner — with chat call; each ACK and VERDICT flies back into the commanding chat, dispatched 3 · received 3" width="900">
 </p>
 
 > The footer on the Codex side is the signature: who spoke (`sid 0a98b7fe`) and the exact command to answer them. A message no sender could be derived for is refused, never delivered anonymously.
 
-`pfm chat inject` is what the Claude chat called — it types a real, signed turn into another chat's pane — under a per-target lock, safe against a busy target (`--force-now`) and shell-hostile payloads (`--file`). `pfm chat ask` waits for the answer, with named exit codes: `0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered · 7 answered, but another message reached the chat mid-wait`. The same verbs are the chat family of the `professor` MCP server (`chat_*` tools), so an agent can spawn, message, read, and retire other chats across all three harnesses — and `servicedesk` lets it file a bug against its own host tool.
+`pfm chat call` is what the Claude chat called — it types a real, signed turn into another chat's pane — under a per-target lock, safe against a busy target (`--force-now`) and shell-hostile payloads (`--file`). `pfm chat ask` waits for the answer, with named exit codes: `0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered · 7 answered, but another message reached the chat mid-wait`. The chat family is registered as `chat-professor`, with bare MCP tool names such as `call`, `ls` and `servicedesk`, so an agent can spawn, message, read, and retire other chats across all three harnesses — and `servicedesk` lets it file a bug against its own host tool.
 
 ### 3. Rules that bite
 
@@ -93,7 +93,7 @@ About one in ten of the world's top 10,000 websites now tells AI crawlers to sta
   <img src="docs/img/cards/harv.webp" alt="Harvester: a fetch climbs the ladder on a live stage — every source it touched lit, every step logged with its reason, the result box with the character count and the trace; then the next scenario" width="900">
 </p>
 
-A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `pfm harvest ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. The whole surface is also the harvester family of the `professor` MCP server (`harvester_*` tools) — one stdio registration, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`. The browser rung never solves anything interactive.
+A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `pfm harvest ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. The same surface is available through the `harvester-professor` MCP server, with bare tools such as `read`, `search_literature` and `search_web`; each client registers it with `pfm mcp serve --stdio --family harvester`, forwarding to `/mcp/harvester-professor`. The browser rung never solves anything interactive.
 
 ### 5. One contract, three runtimes
 
@@ -148,7 +148,7 @@ The checkout is pinned to the latest semantic version tag. A maintainer checkout
 Jumping several versions on one host? [UPGRADING.md](UPGRADING.md) prints the host fixes in apply order with `pfm install --check --plan`, and covers single-account gateway hosts.
 
 > [!WARNING]
-> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `professor` MCP server's two families ship disabled — `mcp.servers.chat.enabled` for chat, `harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
+> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `chat-professor` and `harvester-professor` MCP servers ship disabled — `mcp.servers.chat.enabled` for chat, `harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
 
 ---
 
@@ -166,7 +166,7 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 - **The flight pipeline.** `/flights:spec` writes `requirements.md` and hands it to `flights-foreman`, which builds the request and splits only by build-unit ownership into child foremen; each return is verified against its diff; one `flights-lander` for the whole flight runs every project's checks, one review of the whole diff and adversarial tests, then `gitter` commits. `/flights:audit` re-reads the whole flight from its own artifacts, never from what an agent said it did.
 - **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
 
-With `"gptAgents": true` under `claude` in the machine config `pfm.config.json`, `pfm install` also renders and links the GPT twins: `gpt-flights-foreman`, `gpt-foreman-pro` (xhigh), `gpt-flights-lander`, `gpt-reviewer`, `gpt-reviewer-pro`, `gpt-flights-mechanical-executor`, and the general-purpose `sol`, `luna`, `astra`. Invoking them requires a gateway serving their model IDs; installation does not. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) is that gateway: a local passthrough that routes the GPT model IDs over your ChatGPT login, installed on its own from its repository. [GPT twin setup and ownership](docs/design/gpt-twins/gpt-twins.md).
+With `"gptAgents": true` under `claude` in the machine config `pfm.config.json`, `pfm install` also renders and links the GPT twins: `gpt-flights-foreman`, `gpt-foreman-pro` (xhigh), `gpt-flights-speccer` (xhigh), `gpt-flights-lander`, `gpt-reviewer`, `gpt-reviewer-pro`, `gpt-flights-mechanical-executor`, and the general-purpose `sol`, `luna`, `astra`. Invoking them requires a gateway serving their model IDs; installation does not. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) is that gateway: a local passthrough that routes the GPT model IDs over your ChatGPT login, installed on its own from its repository. [GPT twin setup and ownership](docs/design/gpt-twins/gpt-twins.md).
 
 Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf.
 

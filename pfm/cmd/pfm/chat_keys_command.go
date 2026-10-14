@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 const chatKeysUsage = "usage: pfm chat keys [--delay ms] [--literal] [--capture] <target> <key>..."
@@ -78,7 +78,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 	}
 	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
 
-	tmux := inject.TmuxInjector{}
+	tmux := pfmcall.TmuxCaller{}
 	for index, key := range keys {
 		if index > 0 && *delay > 0 {
 			if err := clk.Sleep(ctx, *delay); err != nil {

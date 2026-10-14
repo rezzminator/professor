@@ -102,8 +102,8 @@ func (fake *fakeChatVerbs) Read(
 	}, fake.read, false, fake.err
 }
 
-// TestChatLastAndStatusReachTheTypedVerbs pins the seam: chat_last and
-// chat_status call the chat verb layer with the target as given — no argv, no
+// TestChatLastAndStatusReachTheTypedVerbs pins the seam: last and
+// status call the chat verb layer with the target as given — no argv, no
 // JSON round trip — and a dead chat comes back as a status, not an error.
 func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 	setupBackendFixture(t)
@@ -130,12 +130,12 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 
 	_, last, err := service.chatLast(context.Background(), nil, LastInput{Target: "MCP_HAMMER_A"})
 	if err != nil || last.Text != "live answer" || last.Target != "MCP_HAMMER_A" {
-		t.Fatalf("chat_last = %+v, err=%v", last, err)
+		t.Fatalf("last = %+v, err=%v", last, err)
 	}
 	_, status, err := service.chatStatus(context.Background(), nil, StatusInput{Target: "MCP_HAMMER_A"})
 	if err != nil || status.State != headless.StateDead || status.SessionID != "thread-a" ||
 		status.Engine != pfmengine.Codex {
-		t.Fatalf("chat_status = %+v, err=%v; want the dead chat as a status", status, err)
+		t.Fatalf("status = %+v, err=%v; want the dead chat as a status", status, err)
 	}
 	if want := []chat.LastRequest{{Target: "MCP_HAMMER_A"}}; !reflect.DeepEqual(verbs.lasts, want) {
 		t.Fatalf("Last calls = %+v, want %+v", verbs.lasts, want)
@@ -254,7 +254,7 @@ func TestCallerScopedRawPaneReachesMutationDispatchOnTheCallerSocket(t *testing.
 	}
 	callerSocket := filepath.Join(values.TmuxDir, "cx-caller")
 	daemonSocket := filepath.Join(values.TmuxDir, "cc-daemon")
-	t.Setenv("CHAT_INJECT_SOCKET", "")
+	t.Setenv("CHAT_CALL_SOCKET", "")
 	t.Setenv("TMUX", daemonSocket+",123,0")
 
 	row := compose.Row{
@@ -412,7 +412,7 @@ func TestChatNewDefaultsEngineFromValidatedCaller(t *testing.T) {
 				"chat", "new", "--name", "child", "--engine", test.engine, "--cwd", "/explicit",
 			}}
 			if !reflect.DeepEqual(calls, want) {
-				t.Fatalf("chat_new calls = %q, want %q", calls, want)
+				t.Fatalf("new calls = %q, want %q", calls, want)
 			}
 		})
 	}
@@ -469,10 +469,10 @@ func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
 		{"chat", "new", "--name", "ambient"},
 	}
 	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("chat_new calls = %q, want %q", calls, want)
+		t.Fatalf("new calls = %q, want %q", calls, want)
 	}
 	if wantIDs := []string{"caller-id", "caller-id", "caller-id", ""}; !reflect.DeepEqual(scopedIDs, wantIDs) {
-		t.Fatalf("chat_new scoped caller ids = %q, want %q", scopedIDs, wantIDs)
+		t.Fatalf("new scoped caller ids = %q, want %q", scopedIDs, wantIDs)
 	}
 
 	failing := newService("test", &backend{
@@ -483,7 +483,7 @@ func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
 		context.Background(), request,
 		NewInput{Name: "explicit", Engine: "codex", CWD: "/chosen"},
 	); err == nil || !strings.Contains(err.Error(), "must not list") {
-		t.Fatalf("fully explicit chat_new caller lookup error = %v", err)
+		t.Fatalf("fully explicit new caller lookup error = %v", err)
 	}
 	for _, test := range []struct {
 		name string
@@ -503,7 +503,7 @@ func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
 				context.Background(), request, NewInput{Name: "child", CWD: "relative"},
 			)
 			if err == nil || !strings.Contains(err.Error(), "caller working directory") {
-				t.Fatalf("chat_new relative cwd error = %v", err)
+				t.Fatalf("new relative cwd error = %v", err)
 			}
 		})
 	}
@@ -524,10 +524,10 @@ func TestChatNewRefusesPresentInvalidCallerMetadata(t *testing.T) {
 		context.Background(), request, NewInput{Name: "must-not-launch", Engine: "codex", CWD: "/chosen"},
 	)
 	if err == nil || !strings.Contains(err.Error(), "missing") {
-		t.Fatalf("chat_new invalid metadata error = %v", err)
+		t.Fatalf("new invalid metadata error = %v", err)
 	}
 	if calls != 0 {
-		t.Fatalf("chat_new invalid metadata dispatched %d calls", calls)
+		t.Fatalf("new invalid metadata dispatched %d calls", calls)
 	}
 }
 
@@ -616,7 +616,7 @@ func TestChatStatusSummaryReachesTheVerbAndReturnsField(t *testing.T) {
 		Summary: "done", SummaryCached: true,
 	}}
 	protocol := connectInMemory(t, newService("test", &backend{chat: verbs}).Server())
-	output := callTool[StatusOutput](t, protocol.clientSession, "chat_status", StatusInput{
+	output := callTool[StatusOutput](t, protocol.clientSession, "status", StatusInput{
 		Target: "seat", Summary: true, Engine: "codex", Model: "test-model",
 	})
 	want := []chat.StatusRequest{{Target: "seat", Summary: true, Engine: pfmengine.Codex, Model: "test-model"}}
@@ -636,7 +636,7 @@ func TestChatStatusAskReachesTheVerbAndReturnsField(t *testing.T) {
 		Name: "seat", State: headless.StateIdle, IdleSeconds: 2, Engine: pfmengine.Claude, Ask: answer,
 	}}
 	protocol := connectInMemory(t, newService("test", &backend{chat: verbs}).Server())
-	output := callTool[StatusOutput](t, protocol.clientSession, "chat_status", StatusInput{
+	output := callTool[StatusOutput](t, protocol.clientSession, "status", StatusInput{
 		Target: "seat", Ask: true, Engine: "codex", Model: "test-model",
 	})
 	want := []chat.StatusRequest{{Target: "seat", Ask: true, Engine: pfmengine.Codex, Model: "test-model"}}
@@ -659,7 +659,7 @@ func TestChatLastAndStatusReportTheVerbsFailureWithItsKind(t *testing.T) {
 	service := newService("test", &backend{chat: verbs})
 	_, _, statusErr := service.chatStatus(context.Background(), nil, StatusInput{Target: "duplicate"})
 	_, _, lastErr := service.chatLast(context.Background(), nil, LastInput{Target: "duplicate"})
-	for name, err := range map[string]error{"chat_status": statusErr, "chat_last": lastErr} {
+	for name, err := range map[string]error{"status": statusErr, "last": lastErr} {
 		var target *chat.TargetError
 		if !errors.As(err, &target) || !strings.Contains(err.Error(), "matches 2 chats") ||
 			strings.Contains(err.Error(), "decode") {
@@ -675,23 +675,23 @@ func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
 	t.Parallel()
 	unwired := newService("test", &backend{})
 	if _, _, err := unwired.chatLast(context.Background(), nil, LastInput{Target: "seat"}); err == nil ||
-		!strings.Contains(err.Error(), "chat_last verb is not configured") {
-		t.Fatalf("chat_last without verbs error = %v", err)
+		!strings.Contains(err.Error(), "last verb is not configured") {
+		t.Fatalf("last without verbs error = %v", err)
 	}
 	if _, _, err := unwired.chatStatus(context.Background(), nil, StatusInput{Target: "seat"}); err == nil ||
-		!strings.Contains(err.Error(), "chat_status verb is not configured") {
-		t.Fatalf("chat_status without verbs error = %v", err)
+		!strings.Contains(err.Error(), "status verb is not configured") {
+		t.Fatalf("status without verbs error = %v", err)
 	}
 	verbs := &fakeChatVerbs{}
 	_, _, err := newService("test", &backend{chat: verbs}).chatStatus(context.Background(), nil, StatusInput{
 		Target: "seat", Summary: true, Engine: "gpt",
 	})
 	if err == nil || !strings.Contains(err.Error(), `unknown engine "gpt"`) || len(verbs.statuses) != 0 {
-		t.Fatalf("chat_status engine=gpt error = %v, calls = %+v; want a refusal before the verb", err, verbs.statuses)
+		t.Fatalf("status engine=gpt error = %v, calls = %+v; want a refusal before the verb", err, verbs.statuses)
 	}
 }
 
-// TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess pins chat_open's
+// TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess pins open's
 // failure shape now that it opens through action.OpenDetached instead of the
 // argv Dispatch seam: a target that is not indexed comes back as a tool
 // error naming the target, never an "ok" ActionOutput with nothing behind
@@ -706,10 +706,10 @@ func TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess(t *testing.T) {
 	}()
 	_, output, err := service.chatOpen(context.Background(), nil, TargetInput{Target: "no-such-chat"})
 	if err == nil || !strings.Contains(err.Error(), "no-such-chat") {
-		t.Fatalf("chat_open unindexed target error = %v, want it to name the target", err)
+		t.Fatalf("open unindexed target error = %v, want it to name the target", err)
 	}
 	if output.Status == "ok" {
-		t.Fatalf("chat_open unindexed target reported ok: %+v", output)
+		t.Fatalf("open unindexed target reported ok: %+v", output)
 	}
 }
 
@@ -746,10 +746,10 @@ func TestChatOpenResolvesATargetByName(t *testing.T) {
 	}()
 	_, output, err := service.chatOpen(context.Background(), nil, TargetInput{Target: name})
 	if errors.Is(err, chat.ErrUnknownChat) || (err != nil && strings.Contains(err.Error(), "not indexed")) {
-		t.Fatalf("chat_open %q = %v; the name never reached the open door", name, err)
+		t.Fatalf("open %q = %v; the name never reached the open door", name, err)
 	}
 	if err != nil && !strings.Contains(err.Error(), "open detached") {
-		t.Fatalf("chat_open %q failed before the open door: %v (output %+v)", name, err, output)
+		t.Fatalf("open %q failed before the open door: %v (output %+v)", name, err, output)
 	}
 }
 
@@ -770,7 +770,7 @@ func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
 	}
 }
 
-// TestChatExitEndsOnlyTheRequestScopedCaller is chat_exit's whole decision
+// TestChatExitEndsOnlyTheRequestScopedCaller is exit's whole decision
 // table. The target is always the caller, and the caller is only ever the
 // request's own identity (_meta.pfmProxy or _meta.threadId): a request that
 // carries none is refused even on a server that allows ambient identity,
@@ -849,7 +849,7 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			result, err := protocol.clientSession.CallTool(ctx, &mcp.CallToolParams{
-				Meta: test.meta, Name: "chat_exit", Arguments: test.arguments,
+				Meta: test.meta, Name: "exit", Arguments: test.arguments,
 			})
 			text := ""
 			switch {
@@ -872,14 +872,14 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 			if test.wantError != "" {
 				if !refused || !strings.Contains(text, test.wantError) {
 					t.Fatalf(
-						"chat_exit answered refused=%v %s, want a refusal naming %q",
+						"exit answered refused=%v %s, want a refusal naming %q",
 						refused, text, test.wantError,
 					)
 				}
 			} else {
 				if refused || !strings.Contains(text, test.wantText) || !strings.Contains(text, `"status":"ok"`) {
 					t.Fatalf(
-						"chat_exit answered refused=%v %s, want status ok naming %q",
+						"exit answered refused=%v %s, want status ok naming %q",
 						refused, text, test.wantText,
 					)
 				}
@@ -888,13 +888,13 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 				t.Fatalf("exit verb calls = %+v, want %+v", verbs.exits, test.wantExits)
 			}
 			if len(dispatched) != 0 {
-				t.Fatalf("chat_exit dispatched %q, want no CLI kill: the exit verb is its only door", dispatched)
+				t.Fatalf("exit dispatched %q, want no CLI kill: the exit verb is its only door", dispatched)
 			}
 		})
 	}
 }
 
-// chat_open's caller has no terminal: the message is the only place it can be
+// open's caller has no terminal: the message is the only place it can be
 // told how the chat opened and that the fleet prompt did not reach it.
 func TestOpenMessageCarriesEveryWarning(t *testing.T) {
 	got := openMessage(action.OpenResult{

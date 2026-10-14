@@ -84,7 +84,7 @@ A — two-way conversation is exercised through a live jailed chat.
 
 **Source:** [pfm/cmd/pfm/same_name_resolution_jail_test.go](../../../pfm/cmd/pfm/same_name_resolution_jail_test.go) line 129 · **Observed:** 2.97s · **Class:** process/tmux
 
-newRunJail; two spawnNamedCodexFixture calls; run chat inject; real candidate sockets.
+newRunJail; two spawnNamedCodexFixture calls; run chat call; real candidate sockets.
 
 A — ambiguity is observed from real jailed Codex panes and CLI resolution.
 
@@ -92,7 +92,7 @@ A — ambiguity is observed from real jailed Codex panes and CLI resolution.
 
 **Source:** [pfm/cmd/pfm/same_name_resolution_jail_test.go](../../../pfm/cmd/pfm/same_name_resolution_jail_test.go) line 87 · **Observed:** 3.92s · **Class:** process/tmux
 
-newRunJail; named Codex fixture plus two pre-rollout tmux fixtures; run chat resolve/inject; pane capture.
+newRunJail; named Codex fixture plus two pre-rollout tmux fixtures; run chat resolve/call; pane capture.
 
 A — roster/raw-window precedence is an end-to-end jailed process behavior.
 
@@ -154,9 +154,9 @@ A — direct real MCP daemon process and pipes are under test.
 
 ### TestJailedThenWaiterDeliversAfterIdleExactlyOnce
 
-**Source:** [pfm/internal/inject/tmux_jail_test.go](../../../pfm/internal/inject/tmux_jail_test.go) line 327 · **Observed:** 3.59s · **Class:** process/tmux
+**Source:** [pfm/internal/call/tmux_jail_test.go](../../../pfm/internal/call/tmux_jail_test.go) line 327 · **Observed:** 3.59s · **Class:** process/tmux
 
-newInjectTmuxJail; Python busy/idle pane via tmux; inject.New with fake resolver/spawner but real TmuxInjector; DeliverThen/capture.
+newCallTmuxJail; Python busy/idle pane via tmux; delivery through the call engine with a fake resolver/spawner and real tmux interaction; call then capture.
 
 A — critical busy-to-idle delivery contract uses a real pane.
 
@@ -164,7 +164,7 @@ A — critical busy-to-idle delivery contract uses a real pane.
 
 **Source:** [pfm/internal/mcpserv/metadata_identity_test.go](../../../pfm/internal/mcpserv/metadata_identity_test.go) line 273 · **Observed:** 3.02s · **Class:** process/tmux plus MCP
 
-metadataIdentityService -> newStdioJail starts tmux/Python rows; in-memory MCP clients call capture/keys/inject.
+metadataIdentityService -> newStdioJail starts tmux/Python rows; in-memory MCP clients call capture/keys/call.
 
 A — MCP transport is in memory, but live seat fixtures are real tmux processes.
 
@@ -208,11 +208,11 @@ newRunJail; muted/deaf Claude stub; run chat new; launch rescue/recording over t
 
 A — proof depends on a real jailed chat and transcript side effect.
 
-### TestChatInjectResolvesUnindexedLiveSessionAcrossProbeSockets
+### TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets
 
-**Source:** [pfm/cmd/pfm/inject_cli_jail_test.go](../../../pfm/cmd/pfm/inject_cli_jail_test.go) line 86 · **Observed:** 2.99s · **Class:** process/tmux/Python
+**Source:** [pfm/cmd/pfm/call_cli_jail_test.go](../../../pfm/cmd/pfm/call_cli_jail_test.go) line 86 · **Observed:** 2.99s · **Class:** process/tmux/Python
 
-creates Python UI scripts; starts three tmux servers with exec.Command; run chat inject; capture/selector/file-backed checks.
+creates Python UI scripts; starts three tmux servers with exec.Command; run chat call; capture/selector/file-backed checks.
 
 A — socket discovery and injection are real process interactions.
 
@@ -268,7 +268,7 @@ A — await behavior is exercised over a real jailed chat.
 
 **Source:** [pfm/internal/mcpserv/metadata_identity_test.go](../../../pfm/internal/mcpserv/metadata_identity_test.go) line 483 · **Observed:** 1.41s · **Class:** process/tmux plus MCP
 
-metadataIdentityService -> real newStdioJail tmux/Python seats; in-memory MCP call; inject capture.
+metadataIdentityService -> real newStdioJail tmux/Python seats; in-memory MCP call; call capture.
 
 A — explicit target/provenance proof resolves and types into a real pane.
 
@@ -306,9 +306,9 @@ A — live pane status is an external process surface.
 
 ### TestJailedLongCompactFocusFiresWithFullTranscript
 
-**Source:** [pfm/internal/inject/tmux_jail_test.go](../../../pfm/internal/inject/tmux_jail_test.go) line 547 · **Observed:** 1.30s · **Class:** process/tmux/Python
+**Source:** [pfm/internal/call/tmux_jail_test.go](../../../pfm/internal/call/tmux_jail_test.go) line 547 · **Observed:** 1.30s · **Class:** process/tmux/Python
 
-newInjectTmuxJail; slow Python transcript pane; real TmuxInjector; long /compact paste and file polling.
+newCallTmuxJail; slow Python transcript pane; real call delivery; long /compact paste and file polling.
 
 A — long paste and focus firing are validated through the real pane.
 

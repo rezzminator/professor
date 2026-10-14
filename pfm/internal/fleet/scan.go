@@ -1,7 +1,7 @@
 // Package fleet takes one snapshot of every chat on the machine: an index
 // delta over transcripts and rollouts, a live gather of tmux panes and engine
 // processes, the Codex pane reconcile, and the composed rows. The picker,
-// `pfm chat ls`, MCP chat_ls and every verb that resolves a chat by name read
+// `pfm chat ls`, MCP ls and every verb that resolves a chat by name read
 // the fleet through Scan, so a chat one surface can see is a chat all of them
 // can address.
 package fleet

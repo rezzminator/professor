@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/inject"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
@@ -47,7 +47,7 @@ var (
 
 // deliverCodexThen pastes request.Then into a Codex composer and proves it
 // left as one submitted message. A nil options.Paste pastes through tmux's
-// own buffer (inject.TmuxInjector.SendPaste) on request.SocketPath.
+// own buffer (pfmcall.TmuxCaller.SendPaste) on request.SocketPath.
 func deliverCodexThen(
 	ctx context.Context,
 	request Request,
@@ -57,7 +57,7 @@ func deliverCodexThen(
 ) error {
 	paste := options.Paste
 	if paste == nil {
-		paste = inject.TmuxInjector{}.SendPaste
+		paste = pfmcall.TmuxCaller{}.SendPaste
 	}
 	if err := paste(ctx, request.SocketPath, request.Pane, request.Then); err != nil {
 		return fmt.Errorf("reload --then: paste prompt into %q: %w", request.Pane, err)
@@ -151,11 +151,11 @@ func thenPasteNeedle(text string) string {
 // the composer glyph, below every turn a resumed session redraws — holds the
 // follow-up: its fingerprint, or the placeholder a long paste collapses into.
 func thenPasteHeld(capture, needle string) bool {
-	line := inject.LastComposerLine(capture)
+	line := pfmcall.LastComposerLine(capture)
 	if line == "" {
 		return false
 	}
-	if inject.HasPastePlaceholder(line) {
+	if pfmcall.HasPastePlaceholder(line) {
 		return true
 	}
 	return needle != "" && strings.Contains(strings.Join(strings.Fields(line), " "), needle)
@@ -165,5 +165,5 @@ func thenPasteHeld(capture, needle string) bool {
 // longer holds the follow-up. A screen with no composer row proves nothing —
 // a draft taller than the pane pushes the row off the top.
 func thenPasteReleased(capture, needle string) bool {
-	return inject.ComposerRowShown(capture) && !thenPasteHeld(capture, needle)
+	return pfmcall.ComposerRowShown(capture) && !thenPasteHeld(capture, needle)
 }

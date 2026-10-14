@@ -30,19 +30,19 @@ func runtimeSearchEnabled(runtime Runtime) bool {
 // that enables it — never naming the unregistered search tool.
 func serverInstructions(searchAvailable, remote bool) string {
 	routes := []string{
-		`Read a web page → harvester_read with it in urls`,
-		`a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or harvester_search_literature handle → harvester_read with it in publications`,
+		`Read a web page → read with it in urls`,
+		`a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or search_literature handle → read with it in publications`,
 	}
 	if !remote {
-		routes = append(routes, `a local document → harvester_read with its path in files`)
+		routes = append(routes, `a local document → read with its path in files`)
 	}
 	routes = append(
 		routes,
-		`find papers or books by title → harvester_search_literature`,
-		`save a file's bytes unparsed → harvester_download_file`,
+		`find papers or books by title → search_literature`,
+		`save a file's bytes unparsed → download_file`,
 	)
 	if searchAvailable {
-		routes = append(routes, `search the web for a topic → harvester_search_web`)
+		routes = append(routes, `search the web for a topic → search_web`)
 	}
 	text := strings.Join(routes, "; ") + "." +
 		` Answers are text, one "=== [n/N]" block per item: "No … found" is nothing found, an error is a failed lookup.`
@@ -73,5 +73,5 @@ func renderSearchFailure(err error) string {
 	// An unclassified backend error keeps its text in the log only: it can
 	// carry a backend URL, and this surface may serve a remote client.
 	return "Web search failed: the configured search backends failed for a reason the harvester could not classify " +
-		"(the details are in its log). Retry later; harvester_read, harvester_search_literature and harvester_download_file do not depend on web search."
+		"(the details are in its log). Retry later; read, search_literature and download_file do not depend on web search."
 }

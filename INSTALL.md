@@ -2,7 +2,7 @@
 
 Two independent things live in this repo. Install what you need.
 
-- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `professor` MCP server (chat and harvester families), multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
+- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `chat-professor` and `harvester-professor` MCP servers, multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
 - **Professor, the discipline layer** — `CLAUDE.md`, agents, commands, the pipeline. Installed into YOUR project through a Claude-guided interview.
 
 Shortest path first.
@@ -234,7 +234,7 @@ One writer per surface — the law that keeps the two installers from fighting o
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, source-fetched and bundled (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json`, `~/.claude/themes/professor-{gold,silver,bronze}.json`, and any other target declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
-| MCP client registration (the one `professor` server) | Claude: managed non-query launches; Codex and OpenCode: `pfm install` | Claude receives `professor` and `mcp.thirdParty` through `--mcp-config` on non-query launches; query launches omit them. Host checks refuse pfm-owned legacy registrations for the operator to remove. Codex receives an owned `[mcp_servers.professor]` fence in `config.toml`; OpenCode receives `mcp.professor` in `opencode.jsonc`. The pfm server is present while either family is enabled. |
+| MCP client registrations (`chat-professor`, `harvester-professor`) | `pfm install` | Claude receives enabled pfm servers and `mcp.thirdParty` through `--mcp-config` on managed non-query launches; query launches omit them. Install also inspects existing account `.claude.json` files found through configured accounts, the account roster, ambient config and default paths; it removes only exact pfm-owned legacy entries and emits or reconciles enabled family registrations. Foreign `professor` entries are preserved and reported; absent registry files stay uncreated. Doctor reuses the inspector and reports account state, foreign entries and unreadable files. Codex receives owned `mcp_servers` entries in `config.toml`; OpenCode receives entries in `opencode.jsonc`. Each server is present only while its family is enabled. |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 

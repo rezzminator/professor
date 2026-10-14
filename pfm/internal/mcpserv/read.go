@@ -7,10 +7,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
-// read is chat_read: chat.ReadEntries under the tool's turn and byte bounds.
+// read is read: chat.ReadEntries under the tool's turn and byte bounds.
 func (current *backend) read(ctx context.Context, input ReadInput) (ReadOutput, error) {
 	if current.chat == nil {
-		return ReadOutput{}, fmt.Errorf("chat_read verb is not configured")
+		return ReadOutput{}, fmt.Errorf("read verb is not configured")
 	}
 	lastN := input.LastN
 	if lastN == 0 {
@@ -28,7 +28,7 @@ func (current *backend) read(ctx context.Context, input ReadInput) (ReadOutput, 
 	}
 	found, entries, truncated, err := current.chat.Read(ctx, input.Source, lastN)
 	if err != nil {
-		return ReadOutput{}, fmt.Errorf("chat_read: %w", err)
+		return ReadOutput{}, fmt.Errorf("read: %w", err)
 	}
 	turns, bytes, budgetTruncated := boundTurns(entries, maxBytes)
 	return ReadOutput{

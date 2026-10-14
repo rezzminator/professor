@@ -207,7 +207,7 @@ func printUsage(w io.Writer) {
 	cli.WriteLines(w, []string{
 		"usage: pfm [--config PATH] <command> [options]", "", "operator commands:",
 		"  ls        list or pick fleet chats",
-		"  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end",
+		"  chat      operate on one chat: new, open, call, ask, read, stream, name, kill, end",
 		"  headless  run Claude or OpenCode through one isolated process interface",
 		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path; download files",
 		"  index     refresh the transcript index",
@@ -255,8 +255,8 @@ func runMCP(
 	if len(args) == 1 && args[0] == serveCommand {
 		return runMCPServe(stdout, stderr, runtime, clock.Real)
 	}
-	if len(args) == 2 && args[0] == serveCommand && args[1] == "--stdio" {
-		return runMCPStdio(stdout, stderr, runtime)
+	if len(args) == 4 && args[0] == serveCommand && args[1] == "--stdio" && args[2] == "--family" {
+		return runMCPStdio(stdout, stderr, runtime, args[3])
 	}
 	if len(args) == 1 && args[0] == "ls" {
 		for _, name := range config.RegisteredMCPServers() {
@@ -272,7 +272,10 @@ func runMCP(
 		return 0
 	}
 	if len(args) != 2 || (args[1] != "enable" && args[1] != "disable") {
-		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp serve [--stdio] | pfm mcp <server> enable|disable")
+		fmt.Fprintln(
+			stderr,
+			"usage: pfm mcp ls | pfm mcp serve [--stdio --family chat|harvester] | pfm mcp <server> enable|disable",
+		)
 		return 2
 	}
 	name, action := args[0], args[1]

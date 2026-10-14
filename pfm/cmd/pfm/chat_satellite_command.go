@@ -243,7 +243,7 @@ func runChatSaveContext(
 }
 
 // runChatLS is `pfm chat ls`: chat.List's live, unkilled chats in the current
-// directory's repository, or with --all in every repository. MCP chat_ls's
+// directory's repository, or with --all in every repository. MCP ls's
 // `all` differs: it adds killed and background rows as well.
 func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
 	clk = defaultClock(clk)

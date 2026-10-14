@@ -140,7 +140,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Dev and test runs target fence worktrees, leaving the live checkout, the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Template, doc, prompt and config-file changes land on `develop` directly, in the main checkout.
 - A fenced flight closes in order: one `flights-lander` for the whole flight (every project's checks, one review of the whole diff, adversarial tests, its own fixes) → the landing's checks → the authorized Git writer commits to `develop` → the host mirror build under § Host.
-- At every milestone, checkpoint the plan to a file, then compact before the next phase; a held turn arms an idle-fired self-inject instead.
+- At every milestone, checkpoint the plan to a file, then compact before the next phase; a held turn arms an idle-fired self-call instead.
 - AskUserQuestion is the user's whole screen: context travels inside the question text; each round simpler and more concrete, never a rephrase.
 
 ## Testing

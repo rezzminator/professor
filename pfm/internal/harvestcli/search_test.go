@@ -11,7 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 )
 
-// fakeDiscovery routes every harvester_search_literature source to a fixture: OpenAlex
+// fakeDiscovery routes every search_literature source to a fixture: OpenAlex
 // answers one paper, every other source answers an empty object. It returns a
 // pointer to the number of services built, so a refused flag proves no search
 // ran.
@@ -48,7 +48,7 @@ func harvestSearch(t *testing.T, args ...string) (int, string, string) {
 }
 
 // TestHarvestSearchPrintsCandidatesWithTypeAndSources: the text answer is the
-// harvester_search_literature tool's — a block per candidate, its title,
+// search_literature tool's — a block per candidate, its title,
 // handle and type, then every source's status.
 func TestHarvestSearchPrintsCandidatesWithTypeAndSources(t *testing.T) {
 	fakeDiscovery(t)

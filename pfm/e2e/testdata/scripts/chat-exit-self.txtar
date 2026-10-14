@@ -1,4 +1,4 @@
-# chat_exit{} from the chat itself, as Claude Code's per-chat proxy stamps the
+# exit{} from the chat itself, as Claude Code's per-chat proxy stamps the
 # call: the tool answers once the finisher is spawned, while the caller's own
 # pane is still up (a caller mid-turn could never close before it answers),
 # then the finisher types /exit and the hidden chat's pane closes.

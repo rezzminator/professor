@@ -154,7 +154,7 @@ func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
 	}
 }
 
-func TestChatNameInjectsThroughTheExactLivePaneNotTranscriptUUID(t *testing.T) {
+func TestChatNameCallsThroughTheExactLivePaneNotTranscriptUUID(t *testing.T) {
 	chat := headless.Chat{
 		ID: "thread-not-indexed", Session: "cx-live-socket", Socket: "cx-live-socket", Pane: "%7",
 	}

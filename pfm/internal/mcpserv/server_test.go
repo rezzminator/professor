@@ -18,8 +18,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -104,49 +104,49 @@ func callTool[T any](t *testing.T, session *mcp.ClientSession, name string, argu
 
 func captureInt(value int) *int { return &value }
 
-type resolveGateInjector struct {
-	target inject.Target
+type resolveGateCaller struct {
+	target pfmcall.Target
 }
 
-func (fake resolveGateInjector) Resolve(context.Context, string) (inject.Target, int, string, error) {
+func (fake resolveGateCaller) Resolve(context.Context, string) (pfmcall.Target, int, string, error) {
 	return fake.target, 0, "", nil
 }
 
-func (fake resolveGateInjector) ResolveEngine(_ context.Context, _, engine string) (inject.Target, int, string, error) {
+func (fake resolveGateCaller) ResolveEngine(_ context.Context, _, engine string) (pfmcall.Target, int, string, error) {
 	if engine != string(pfmengine.Codex) {
-		return inject.Target{}, inject.CodeUnknown, "", nil
+		return pfmcall.Target{}, pfmcall.CodeUnknown, "", nil
 	}
 	return fake.target, 0, "", nil
 }
 
-func (resolveGateInjector) Capture(context.Context, string, int) (inject.Target, string, int, string, error) {
-	return inject.Target{}, "", 0, "", nil
+func (resolveGateCaller) Capture(context.Context, string, int) (pfmcall.Target, string, int, string, error) {
+	return pfmcall.Target{}, "", 0, "", nil
 }
 
-func (resolveGateInjector) Inject(context.Context, inject.Request) (inject.Result, error) {
-	return inject.Result{}, nil
+func (resolveGateCaller) Call(context.Context, pfmcall.Request) (pfmcall.Result, error) {
+	return pfmcall.Result{}, nil
 }
 
-func TestChatResolveEveryKindUsesTheInjectionResolutionGate(t *testing.T) {
+func TestChatResolveEveryKindUsesTheCallResolutionGate(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", t.TempDir())
 	t.Setenv("PFM_SID_DIR", t.TempDir())
 	raw, err := resolve.New(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := inject.Target{SocketPath: "/tmp/tmux-1000/cx-1-2-3", Pane: "%7", Engine: "cx"}
+	want := pfmcall.Target{SocketPath: "/tmp/tmux-1000/cx-1-2-3", Pane: "%7", Engine: "cx"}
 	service := newService("test", &backend{
-		resolver: *raw,
-		injector: resolveGateInjector{target: want},
+		resolver:   *raw,
+		callEngine: resolveGateCaller{target: want},
 	})
 	protocol := connectInMemory(t, service.Server())
 	for _, kind := range []string{"label", "session", "cxwin"} {
-		resolved := callTool[ResolveOutput](t, protocol.clientSession, "chat_resolve", ResolveInput{
+		resolved := callTool[ResolveOutput](t, protocol.clientSession, "resolve", ResolveInput{
 			Kind: kind, Name: "same name",
 		})
 		if resolved.Status != "ok" || resolved.Code != 0 ||
 			resolved.SocketPath != want.SocketPath || resolved.Pane != want.Pane {
-			t.Fatalf("chat_resolve kind %s=%+v, want injection gate target %+v", kind, resolved, want)
+			t.Fatalf("resolve kind %s=%+v, want call gate target %+v", kind, resolved, want)
 		}
 	}
 }
@@ -228,7 +228,16 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	}
 	jail := newStdioJail(t)
 	binary := buildFleetBinary(t)
-	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, jail.root), "mcp", "serve", "--stdio")
+	command := exec.Command(
+		binary,
+		"--config",
+		writeEnabledMCPConfig(t, jail.root),
+		"mcp",
+		"serve",
+		"--stdio",
+		"--family",
+		"chat",
+	)
 	command.Env = jail.environment()
 	var serverStderr bytes.Buffer
 	command.Stderr = &serverStderr
@@ -265,9 +274,9 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Fatalf("tools = %q, want %q", toolNames, wantTools)
 	}
 
-	listed := callTool[LSOutput](t, session, "chat_ls", LSInput{All: true})
+	listed := callTool[LSOutput](t, session, "ls", LSInput{All: true})
 	if listed.Count != 1 {
-		t.Fatalf("chat_ls = %+v", listed)
+		t.Fatalf("ls = %+v", listed)
 	}
 	wantRow := ChatRow{
 		Session: "fixture-session",
@@ -283,10 +292,10 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Pane:    jail.pane,
 	}
 	if !reflect.DeepEqual(listed.Rows[0], wantRow) {
-		t.Fatalf("chat_ls row = %+v, want %+v", listed.Rows[0], wantRow)
+		t.Fatalf("ls row = %+v, want %+v", listed.Rows[0], wantRow)
 	}
 
-	resolved := callTool[ResolveOutput](t, session, "chat_resolve", ResolveInput{
+	resolved := callTool[ResolveOutput](t, session, "resolve", ResolveInput{
 		Kind: "label",
 		Name: "Fixture Label",
 	})
@@ -294,29 +303,29 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		resolved.Code != 0 ||
 		resolved.SocketPath != filepath.Join(jail.tmuxDir, jail.socket) ||
 		resolved.Pane != jail.pane {
-		t.Fatalf("chat_resolve = %+v", resolved)
+		t.Fatalf("resolve = %+v", resolved)
 	}
 
-	captured := callTool[CaptureOutput](t, session, "chat_capture", CaptureInput{
+	captured := callTool[CaptureOutput](t, session, "capture", CaptureInput{
 		Target:    "Fixture Label",
 		TailLines: captureInt(10),
 	})
 	if captured.Status != "ok" ||
 		!strings.Contains(captured.Text, "🔖 Fixture Label") ||
 		!strings.Contains(captured.Text, "❯") {
-		t.Fatalf("chat_capture = %+v", captured)
+		t.Fatalf("capture = %+v", captured)
 	}
 
-	found := callTool[FindOutput](t, session, "chat_find", FindInput{
+	found := callTool[FindOutput](t, session, "find", FindInput{
 		Excerpt: "secret middle",
 	})
 	if found.Count != 1 ||
 		found.Candidates[0].ID != "fixture" ||
 		!found.Candidates[0].Confirmed {
-		t.Fatalf("chat_find = %+v", found)
+		t.Fatalf("find = %+v", found)
 	}
 
-	read := callTool[ReadOutput](t, session, "chat_read", ReadInput{
+	read := callTool[ReadOutput](t, session, "read", ReadInput{
 		Source:   "fixture",
 		LastN:    2,
 		MaxBytes: 1000,
@@ -330,33 +339,33 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	if !reflect.DeepEqual(read.Turns, wantTurns) ||
 		read.Count != 2 ||
 		!read.Truncated {
-		t.Fatalf("chat_read = %+v, want turns %+v", read, wantTurns)
+		t.Fatalf("read = %+v, want turns %+v", read, wantTurns)
 	}
 
-	injected := callTool[InjectOutput](t, session, "chat_inject", InjectInput{
+	called := callTool[CallOutput](t, session, "call", CallInput{
 		Target:  "Fixture Label",
 		Message: "hello fixture",
 	})
-	if injected.Status != "delivered" ||
-		injected.Code != 0 ||
-		!injected.Typed ||
-		!strings.Contains(injected.Proof, "USER:hello fixture") {
-		t.Fatalf("chat_inject = %+v\nstderr:\n%s", injected, serverStderr.String())
+	if called.Status != "delivered" ||
+		called.Code != 0 ||
+		!called.Typed ||
+		!strings.Contains(called.Proof, "USER:hello fixture") {
+		t.Fatalf("call = %+v\nstderr:\n%s", called, serverStderr.String())
 	}
-	after := callTool[CaptureOutput](t, session, "chat_capture", CaptureInput{
+	after := callTool[CaptureOutput](t, session, "capture", CaptureInput{
 		Target: "Fixture Label",
 	})
 	if !strings.Contains(after.Text, "USER:hello fixture") {
-		t.Fatalf("post-inject capture = %+v", after)
+		t.Fatalf("post-call capture = %+v", after)
 	}
 
-	selectorBefore := callTool[CaptureOutput](t, session, "chat_capture",
+	selectorBefore := callTool[CaptureOutput](t, session, "capture",
 		CaptureInput{Target: jail.selectorSession})
-	selector := callTool[InjectOutput](t, session, "chat_inject", InjectInput{
+	selector := callTool[CallOutput](t, session, "call", CallInput{
 		Target:  jail.selectorSession,
 		Message: "must not type",
 	})
-	selectorAfter := callTool[CaptureOutput](t, session, "chat_capture",
+	selectorAfter := callTool[CaptureOutput](t, session, "capture",
 		CaptureInput{Target: jail.selectorSession})
 	if selector.Code != 6 ||
 		selector.Typed ||
@@ -371,11 +380,11 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		)
 	}
 
-	busy := callTool[InjectOutput](t, session, "chat_inject", InjectInput{
+	busy := callTool[CallOutput](t, session, "call", CallInput{
 		Target:  jail.busySession,
 		Message: "wait until idle",
 	})
-	busyAfter := callTool[CaptureOutput](t, session, "chat_capture",
+	busyAfter := callTool[CaptureOutput](t, session, "capture",
 		CaptureInput{Target: jail.busySession})
 	if busy.Code != 0 || busy.Status != "queued" ||
 		!busy.Typed || !busy.Busy ||
@@ -389,11 +398,11 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		)
 	}
 
-	numberedDraft := callTool[InjectOutput](
+	numberedDraft := callTool[CallOutput](
 		t,
 		session,
-		"chat_inject",
-		InjectInput{
+		"call",
+		CallInput{
 			Target:  jail.codexSession,
 			Message: " next",
 		},
@@ -402,11 +411,11 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		!strings.Contains(numberedDraft.Message, "draft that will not stash") {
 		t.Fatalf("numbered Codex draft result=%+v", numberedDraft)
 	}
-	codexLongWithDraft := callTool[InjectOutput](
+	codexLongWithDraft := callTool[CallOutput](
 		t,
 		session,
-		"chat_inject",
-		InjectInput{
+		"call",
+		CallInput{
 			Target:  jail.codexSession,
 			Message: strings.Repeat("x", 1501),
 		},
@@ -421,13 +430,22 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	// A megabyte body now reaches the pane byte-exact through bracketed
 	// paste instead of being replaced by an auto-file pointer: no file is
 	// spilled, and the receipt/proof say PASTE rather than AUTO-FILE. See
-	// TestInjectBodyAboveFormerAbsoluteCapUsesPaste for the byte-exact unit
+	// TestCallBodyAboveFormerAbsoluteCapUsesPaste for the byte-exact unit
 	// coverage; this end-to-end fixture proves the same contract over a
 	// real jailed MCP + tmux round trip.
-	oversizeCommand := exec.Command(binary, "--config", writeEnabledMCPConfig(t, jail.root), "mcp", "serve", "--stdio")
+	oversizeCommand := exec.Command(
+		binary,
+		"--config",
+		writeEnabledMCPConfig(t, jail.root),
+		"mcp",
+		"serve",
+		"--stdio",
+		"--family",
+		"chat",
+	)
 	oversizeCommand.Env = append(jail.environment(),
-		"CHAT_INJECT_ENTER_SETTLE=0.4",
-		"CHAT_INJECT_PROOF_SETTLE=0.5",
+		"CHAT_CALL_ENTER_SETTLE=0.4",
+		"CHAT_CALL_PROOF_SETTLE=0.5",
 	)
 	var oversizeStderr bytes.Buffer
 	oversizeCommand.Stderr = &oversizeStderr
@@ -450,7 +468,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		}
 	}()
 	oversizeBody := strings.Repeat("x", 1<<20)
-	oversize := callTool[InjectOutput](t, oversizeSession, "chat_inject", InjectInput{
+	oversize := callTool[CallOutput](t, oversizeSession, "call", CallInput{
 		Target:  "Fixture Label",
 		Message: oversizeBody,
 	})
@@ -459,7 +477,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		strings.Contains(oversize.Message, "AUTO-FILE") ||
 		!strings.Contains(oversize.Message, "PASTE") ||
 		!strings.Contains(oversize.Proof, strings.Repeat("x", 40)) {
-		t.Fatalf("oversize chat_inject = %+v", oversize)
+		t.Fatalf("oversize call = %+v", oversize)
 	}
 }
 
@@ -480,7 +498,7 @@ func TestChatKeysMCPRejectsUnknownNamesBeforeResolution(t *testing.T) {
 	}()
 	protocol := connectInMemory(t, service.Server())
 	result, err := protocol.clientSession.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      "chat_keys",
+		Name:      "keys",
 		Arguments: KeysInput{Target: "not-used", Keys: []string{"Esc"}},
 	})
 	if err != nil {
@@ -744,12 +762,12 @@ func (jail *stdioJail) environment() []string {
 		// for exactly this shape (a detached or scrubbed caller), so the
 		// fixture states one instead of disabling the guard it shares a code
 		// path with.
-		inject.SenderSessionEnv+"=cc-1700000000-1-1",
-		inject.SenderLabelEnv+"=mcp-jail-fixture",
-		inject.SenderIDEnv+"=00000000-0000-4000-8000-000000000000",
-		"CHAT_INJECT_POLL=0.01",
-		"CHAT_INJECT_ENTER_SETTLE=0.02",
-		"CHAT_INJECT_PROOF_SETTLE=0.02",
+		pfmcall.SenderSessionEnv+"=cc-1700000000-1-1",
+		pfmcall.SenderLabelEnv+"=mcp-jail-fixture",
+		pfmcall.SenderIDEnv+"=00000000-0000-4000-8000-000000000000",
+		"CHAT_CALL_POLL=0.01",
+		"CHAT_CALL_ENTER_SETTLE=0.02",
+		"CHAT_CALL_PROOF_SETTLE=0.02",
 	)
 }
 

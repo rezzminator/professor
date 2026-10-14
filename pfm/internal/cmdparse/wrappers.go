@@ -47,23 +47,64 @@ var wrappers = map[string]wrapper{
 
 var assignWord = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
+// envOp is one change a wrapper makes to the environment of the program it
+// runs.
+type envOp struct {
+	kind        int
+	name, value string
+}
+
+const (
+	envSet = iota
+	envUnset
+	envClear
+)
+
 // unwrapProgram strips wrappers, repeatedly, down to the program they run
 // and its arguments; a program is matched by its base name, so
 // /usr/bin/time is time. runs is false when a wrapper runs nothing that can
 // be named (`command -v X`, a bare `env`); args is then the command as
-// written.
-func unwrapProgram(args []arg) (program []arg, runs bool) {
+// written. ops are the environment changes the wrappers made, in order.
+func unwrapProgram(args []arg) (program []arg, runs bool, ops []envOp) {
 	for {
-		w, ok := wrappers[filepath.Base(args[0].text)]
+		name := filepath.Base(args[0].text)
+		w, ok := wrappers[name]
 		if !ok {
-			return args, true
+			return args, true, ops
 		}
 		skip, lookup := w.skip(args[1:])
 		if lookup || skip >= len(args)-1 {
-			return args, false
+			return args, false, nil
 		}
+		ops = append(ops, w.envOps(name, args[1:1+skip])...)
 		args = args[1+skip:]
 	}
+}
+
+// envOps reads the environment changes in the words a wrapper skipped:
+// NAME=VALUE words, and for env -i/-/--ignore-environment and
+// -u/--unset NAME.
+func (w wrapper) envOps(name string, words []arg) []envOp {
+	var ops []envOp
+	for i := 0; i < len(words); i++ {
+		a := words[i].text
+		switch {
+		case w.assigns && assignWord.MatchString(a):
+			n, v, _ := strings.Cut(a, "=")
+			ops = append(ops, envOp{kind: envSet, name: n, value: v})
+		case name != "env":
+		case a == "-i" || a == "-" || a == "--ignore-environment":
+			ops = append(ops, envOp{kind: envClear})
+		case (a == "-u" || a == "--unset") && i+1 < len(words):
+			i++
+			ops = append(ops, envOp{kind: envUnset, name: words[i].text})
+		case strings.HasPrefix(a, "--unset="):
+			ops = append(ops, envOp{kind: envUnset, name: strings.TrimPrefix(a, "--unset=")})
+		case strings.HasPrefix(a, "-u") && !strings.HasPrefix(a, "--"):
+			ops = append(ops, envOp{kind: envUnset, name: a[2:]})
+		}
+	}
+	return ops
 }
 
 // skip returns how many of a wrapper's arguments precede the program it

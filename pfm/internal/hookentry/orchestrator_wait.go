@@ -52,7 +52,7 @@ func OrchestratorWait(input io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal orchestrator-wait: decode hook payload (fail-open): %v\n", err)
 		return 0
 	}
-	if hook.ToolName != "Bash" {
+	if hook.ToolName != bashTool {
 		return 0
 	}
 	reason := orchestratorWaitReason

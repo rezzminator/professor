@@ -118,7 +118,7 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 	command := hook.ToolInput.Command
-	if hook.ToolName != "Bash" || hook.AgentType == gitGuardExemptAgent ||
+	if hook.ToolName != bashTool || hook.AgentType == gitGuardExemptAgent ||
 		(!strings.Contains(command, "git") && !strings.Contains(command, "worktree.sh")) {
 		return 0
 	}

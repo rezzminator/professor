@@ -43,6 +43,7 @@ func HookTemplates(home string) []Hook {
 		},
 		{Event: hookEventPreToolUse, Matcher: HookExploreMatcher, Command: tracerIntake, Name: hookTracerIntake},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal git-guard", Name: "git-guard"},
+		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal store-guard", Name: "store-guard"},
 		{Event: "SubagentStart", Matcher: HookRRDirMatcher, Command: binary + " internal rr-dir", Name: "rr-dir"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal epic-inject", Name: "epic-inject"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},

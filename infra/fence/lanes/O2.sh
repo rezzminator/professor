@@ -577,6 +577,16 @@ gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git worktree add x"},
 [ -z "$gg" ] || bad="$bad git-guard blocked gitter: $(one_line "$gg");"
 gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | pfm internal git-guard 2>&1)"
 [ -z "$gg" ] || bad="$bad git-guard blocked git status: $(one_line "$gg");"
+# X-store-guard: denies a claude run whose CLAUDE_CONFIG_DIR is the shared store, passes the same call without the override and with an account dir.
+sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.claude claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad store-guard exited $rc: $(one_line "$sg");"
+grep -q '"permissionDecision":"deny"' <<<"$sg" && grep -q 'Drop the CLAUDE_CONFIG_DIR override' <<<"$sg" ||
+  bad="$bad store-guard did not deny a claude run on the store naming the override: $(one_line "$sg");"
+sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
+[ -z "$sg" ] || bad="$bad store-guard blocked claude without an override: $(one_line "$sg");"
+sg="$(printf '{"tool_name":"Bash","tool_input":{"command":"CLAUDE_CONFIG_DIR=$HOME/.cc/3 claude plugin list"},"cwd":"/tmp"}' | env -u CLAUDE_CONFIG_DIR pfm internal store-guard 2>&1)"
+[ -z "$sg" ] || bad="$bad store-guard blocked an account dir: $(one_line "$sg");"
 # X29 explore-deny: denies a non-haiku Explore by name, lets haiku and every other agent through.
 deny="$(printf '{"tool_input":{"subagent_type":"Explore","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
 rc=$?
@@ -683,7 +693,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────

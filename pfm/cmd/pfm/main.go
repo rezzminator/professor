@@ -72,7 +72,7 @@ var internalSubcommands = []string{
 	"codex-launch", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
-	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge",
+	reloadRunCommand, staleCommand, statuslineCommand, "store-guard", thenAction, "tmux-title-renudge",
 	"update-check",
 }
 
@@ -441,8 +441,8 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && (args[0] == "cost-launch" || args[0] == "cost-sink") {
 		return costsink.Main(args, stderr, paths.OSEnv{})
 	}
-	if len(args) != 0 && args[0] == "git-guard" {
-		return hookentry.GitGuard(os.Stdin, stdout, stderr)
+	if len(args) != 0 && (args[0] == "git-guard" || args[0] == "store-guard") {
+		return hookentry.BashGuard(args[0], os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
@@ -522,7 +522,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|schedule-fire|resume-unkill|rr-dir|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

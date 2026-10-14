@@ -317,7 +317,7 @@ checks_templates_mirrors_generate() {
 
 checks_templates_global_variants() {
   local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
-  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown=""
+  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped=""
   local tracked="$REPO_ROOT/templates/generated/agents"
   head_ "templates — global agent variants render"
   # Machine agent .md files with from: declare agents re-emitted from a
@@ -336,7 +336,9 @@ checks_templates_global_variants() {
   # stale, missing or orphan file) is a red line naming the files. The same run
   # also renders every OpenCode twin: an `unknown MCP server` warning means an
   # agent's tools line names a server the twin cannot grant, so the twin loses
-  # the tool, and the warning is a red line naming each server.
+  # the tool, and the warning is a red line naming each server; an `unmapped
+  # OpenCode model alias` warning means a twin lost its model pin, and is a red
+  # line naming each alias.
   if ! need_tool go templates || ! need_tool python3 templates; then
     fail_step "global agent variants NOT RENDERED — the toolchain is missing"
     return
@@ -388,6 +390,7 @@ checks_templates_global_variants() {
   fi
   if (( rc == 0 )); then
     unknown="$(grep -E 'unknown MCP server' "$out" | sort | uniq -c || true)"
+    unmapped="$(grep -E 'unmapped OpenCode model alias' "$out" | sort | uniq -c || true)"
   fi
   if (( rc != 0 )); then
     cat "$out"
@@ -418,6 +421,9 @@ checks_templates_global_variants() {
     elif [[ -n "$unknown" ]]; then
       printf '%s\n' "$unknown"
       fail_step "global agent variants: engine-sync dropped MCP tools from OpenCode twins ($(grep -c 'unknown MCP server' <<<"$unknown") distinct 'unknown MCP server' warning(s), above) — list the server in templates/global/engine-sync/config.json mcp.globalServers, or fix the engine-sync machine path that ignores it"
+    elif [[ -n "$unmapped" ]]; then
+      printf '%s\n' "$unmapped"
+      fail_step "global agent variants: engine-sync omitted the model of an OpenCode twin ($(grep -c 'unmapped OpenCode model alias' <<<"$unmapped") distinct 'unmapped OpenCode model alias' warning(s), above) — add the alias to templates/global/engine-sync/config.json opencode.modelMap, or give the agent an engines.opencode.model alias it maps"
     elif [[ -n "$stale" ]]; then
       printf '%s\n' "$stale"
       fail_step "global agent variants: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents"

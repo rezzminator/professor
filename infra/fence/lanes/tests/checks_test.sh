@@ -700,6 +700,9 @@ case "$1" in
         echo "skip    unknown MCP server in tool $tool in $home/agents/beta.md — no configured or project .mcp.json server serves it; it stays denied"
       done
     fi
+    if [ "${STUB_ES_UNMAPPED:-0}" -ne 0 ]; then # exit 0 with the OpenCode renderer's warning for a model alias its modelMap lacks
+      echo "warn    unmapped OpenCode model alias \"claude-sonnet-5-5\" in $home/agents/beta.md — model omitted"
+    fi
     for n in $STUB_ES_RENDER; do
       printf 'x\n' > "$home/gen-$n.md"; printf 'x\n' > "$home/.codex/agents/$n.toml"; ln -s "$home/gen-$n.md" "$home/.claude/agents/$n.md"
     done
@@ -918,6 +921,12 @@ if grep -Eq '^ *2 skip    unknown MCP server in tool mcp__sub-agent-compact__com
   ! grep -Fq 'variants FAILED to render' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
   ok 'an unknown-MCP-server warning from an exit-0 render is red and names each server and its count, never a clean render'
 else bad 'global variants, unknown MCP server' "$(cat "$T/es.out")"; fi
+es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names" STUB_ES_UNMAPPED=1
+if grep -Fq 'unmapped OpenCode model alias "claude-sonnet-5-5" in ' "$T/es.out" &&
+  grep -Fq 'FAILSTEP global agent variants: engine-sync omitted the model of an OpenCode twin (1 distinct' "$T/es.out" &&
+  ! grep -Fq 'variants FAILED to render' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+  ok 'an unmapped-model-alias warning from an exit-0 render is red and names the alias, never a clean render'
+else bad 'global variants, unmapped model alias' "$(cat "$T/es.out")"; fi
 es_case checks_templates_global_variants STUB_ES_BIN_RC=1
 if [ ! -s "$MIRROR_CALLS" ] &&
   grep -Fxq 'FAILSTEP global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)' "$T/es.out" &&

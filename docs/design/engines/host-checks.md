@@ -217,7 +217,7 @@ Fix:
 
 **Severity:** BLOCK
 
-Looks at each `AccountEntries` entry in `{store}` that is not in `RetiredStoreEntries` (those are `retired-store-entry`'s); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
+Looks at each `AccountEntries` entry in `{store}` that is not in `RetiredStoreEntries` (those are `retired-store-entry`'s) and not `cache` (`storeRebuildableEntries`: a cache is rebuilt, and other tools' hooks write under the store's `cache/`, so a store holding only that raises no row; an account's own `cache` stays an account entry); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
 
 Problem: `{entry} is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)`. pfm launches always set `CLAUDE_CONFIG_DIR` to an account dir, so identity lands in the store only through a launch that points it at the store. For `backups` the problem adds `; a Claude launched without CLAUDE_CONFIG_DIR writes backups here too`: an unscoped Claude's config dir is the store. For `.claude.json`, `.claude.json.backup` and `backups` it ends with the file's birth, `({birth})` — see [Stray state birth](#stray-state-birth).
 

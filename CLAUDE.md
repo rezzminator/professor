@@ -29,7 +29,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
-- plugins: the plugins the marketplace lists, each a git submodule of its own repo on `develop`; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` copies each plugin `claude.plugins` names bare from them when `claude.pluginCheckoutRoot` names this directory · `plugins/{plugin}/`, `.gitmodules`
+- plugins: the plugins the marketplace lists, each a git submodule of its own repo on `develop`; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` copies each plugin `claude.plugins` names bare from them by default, `claude.pluginCheckoutRoot` overriding · `plugins/{plugin}/`, `.gitmodules`
 - CI: GitHub Actions gating pushes and pull requests · `.github/workflows/`, `.github/dependabot.yml`
 
 ## Path vars

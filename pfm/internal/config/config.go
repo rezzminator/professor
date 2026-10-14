@@ -97,7 +97,8 @@ type ClaudePrefs struct {
 	MaxSubagentSpawnDepth  int
 	MaxConcurrentSubagents int
 	// PluginCheckoutRoot is claude.pluginCheckoutRoot, an absolute path; empty
-	// when unset. Machine-wide: an account may not set it.
+	// when unset, and an -alpha install then reads the source clone's plugins/.
+	// Machine-wide: an account may not set it.
 	PluginCheckoutRoot string
 	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
 	CostLedger bool

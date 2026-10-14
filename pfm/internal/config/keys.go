@@ -18,7 +18,8 @@ const DefaultHelperModel = "claude-haiku-5-5"
 
 // KeyClaudePluginCheckoutRoot names the directory holding one checkout per
 // Claude plugin pfm install ensures ({root}/{plugin}/plugins/{plugin}): an
-// -alpha build installs each plugin from a copy of its checkout there.
+// -alpha build installs each plugin from a copy of its checkout there. Unset,
+// that directory is the source clone's plugins/.
 const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
 
 // KeyClaudePlugins names the list of Claude Code plugins pfm install ensures

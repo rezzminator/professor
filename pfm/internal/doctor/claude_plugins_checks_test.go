@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 var doctorPluginIDs = []string{
@@ -300,7 +302,7 @@ func TestClaudePluginsDoctorBareNameNamesItsSource(t *testing.T) {
 	}{
 		{"release", "", ""},
 		{"alpha falls back to GitHub", "0.80.0-alpha", "doctor: claude_plugins agent-efort: alpha build falls back to the GitHub copy" +
-			" agent-efort@agent-efort — claude.pluginCheckoutRoot unset\n"},
+			" agent-efort@agent-efort — claude.pluginCheckoutRoot unset and no source clone\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := t.TempDir()
@@ -423,6 +425,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	names := []string{"cache-live-control", "sub-agent-compact", "effort-live-control", "tool-visibility-controller"}
 	for _, state := range []string{
 		"alpha clean", "alpha duplicate", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release duplicate",
+		"alpha from the default source clone", "alpha source clone moved away",
 	} {
 		t.Run(state, func(t *testing.T) {
 			home := t.TempDir()
@@ -431,8 +434,37 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			build := installer.ClaudePluginBuild{
 				Version: "0.80.0-alpha", Home: home, CheckoutRoot: root, Plugins: pfmconfig.DefaultClaudePlugins(),
 			}
+			if state == "alpha from the default source clone" {
+				// No marker and no key: the clone at the default path holds the checkouts.
+				root = filepath.Join(home, ".professor", "plugins")
+				build = doctorClaudePluginBuild(
+					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
+				)
+			}
 			if state == "alpha fallback" {
-				build.CheckoutRoot = ""
+				// No marker, no key and no clone at the default path: the checkouts under src/ are not looked at.
+				build = doctorClaudePluginBuild(
+					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
+				)
+			}
+			if state == "alpha source clone moved away" {
+				// The -dev copies a prior install enabled stay; the clone it recorded is gone.
+				clone := filepath.Join(home, "moved")
+				if err := os.MkdirAll(clone, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.RemoveAll(clone); err != nil {
+					t.Fatal(err)
+				}
+				build = doctorClaudePluginBuild(
+					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
+				)
+				if build.SourceRepoErr == nil {
+					t.Fatalf("build = %+v, want the moved clone's resolve error", build)
+				}
 			}
 			if state == "release duplicate" {
 				build.Version = "0.80.0"
@@ -507,10 +539,20 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			case "alpha fallback":
 				want = ""
 				for index, name := range names {
+					checkout := filepath.Join(home, ".professor", "plugins", name, "plugins", name)
 					want += "doctor: claude_plugins " + name + ": alpha build falls back to the GitHub copy " +
-						doctorPluginIDs[index] + " — claude.pluginCheckoutRoot unset\n"
+						doctorPluginIDs[index] + " — no checkout at " + filepath.Join(checkout, ".claude-plugin", "plugin.json") +
+						" (the source clone's plugins/; claude.pluginCheckoutRoot unset)\n"
 				}
 				want += "doctor: claude_plugins ok\n"
+			case "alpha source clone moved away":
+				want, warnings = "", len(names)
+				for index, name := range names {
+					want += "doctor: claude_plugins plugin " + name + " cannot be checked: its copy is undecided (" +
+						doctorPluginIDs[index] + " or " + doctorDevIDs[index] +
+						"): source clone unresolved (claude.pluginCheckoutRoot unset): " + build.SourceRepoErr.Error() +
+						" — repair the path named, or run pfm install --yes from inside your Professor clone to record it again\n"
+				}
 			}
 			var out bytes.Buffer
 			tally := &doctorTally{}
@@ -519,5 +561,35 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				t.Fatalf("got %q tally=%+v\nwant %q warnings=%d", out.String(), tally, want, warnings)
 			}
 		})
+	}
+}
+
+// TestDoctorClaudePluginBuild: doctor checks the plugins of the build install
+// ensures — claude.pluginCheckoutRoot and the list from config, and the source
+// clone install recorded in its marker, whose plugins/ an -alpha build reads
+// when the key is unset. The default clone and a recorded clone that moved
+// away are states of TestClaudePluginsDoctorChecksTheBuildsCopies.
+func TestDoctorClaudePluginBuild(t *testing.T) {
+	plugins := []pfmconfig.ClaudePlugin{{ID: "callmeter"}}
+	home := t.TempDir()
+	clone := filepath.Join(home, "src", "professor")
+	if err := os.MkdirAll(clone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The marker is written the way install records its clone.
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	// The marker records the clone's physical path.
+	clone, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := doctorClaudePluginBuild(
+		"0.80.0-alpha", home, pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins},
+	)
+	if build.Version != "0.80.0-alpha" || build.Home != home || build.CheckoutRoot != "/opt/plugins" ||
+		!reflect.DeepEqual(build.Plugins, plugins) || build.SourceRepo != clone || build.SourceRepoErr != nil {
+		t.Fatalf("build = %+v, want source clone %q", build, clone)
 	}
 }

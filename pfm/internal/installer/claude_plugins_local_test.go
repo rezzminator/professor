@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const alphaVersion = "0.80.0-alpha"
@@ -124,6 +126,11 @@ func TestClaudePluginTargets(t *testing.T) {
 			Own:      true,
 		}
 	}
+	undecided := func(p testPlugin, reason string) ClaudePluginTarget {
+		target := github(p, "")
+		target.Undecided = reason
+		return target
+	}
 	local := func(p testPlugin, root string) ClaudePluginTarget {
 		marketplace := filepath.Join(home, ".local", "share", p.Name+"-dev")
 		return ClaudePluginTarget{
@@ -142,22 +149,64 @@ func TestClaudePluginTargets(t *testing.T) {
 		".claude-plugin",
 		"plugin.json",
 	)
+	// A source clone holds every plugin checkout under its plugins/ directory.
+	clone := t.TempDir()
+	cloneRoot := filepath.Join(clone, "plugins")
+	for _, p := range table {
+		writePluginCheckout(t, cloneRoot, p.Name)
+	}
+	partialClone := t.TempDir()
+	for _, index := range []int{0, 2, 3} {
+		writePluginCheckout(t, filepath.Join(partialClone, "plugins"), table[index].Name)
+	}
+	cloneMissing := filepath.Join(
+		partialClone, "plugins", table[1].Name, "plugins", table[1].Name, ".claude-plugin", "plugin.json",
+	)
+	unresolved := errors.New("recorded source repository /gone is not a directory")
 	for _, test := range []struct {
 		name  string
 		build ClaudePluginBuild
 		want  []ClaudePluginTarget
 	}{
-		{"release", ClaudePluginBuild{Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
+		{"release", ClaudePluginBuild{
+			Version: "0.80.0", Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
+		}, []ClaudePluginTarget{
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""),
 		}},
 		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""),
 		}},
-		{"alpha without the key", ClaudePluginBuild{Version: alphaVersion, Home: home, Plugins: defaults}, []ClaudePluginTarget{
-			github(table[0], "claude.pluginCheckoutRoot unset"),
-			github(table[1], "claude.pluginCheckoutRoot unset"),
-			github(table[2], "claude.pluginCheckoutRoot unset"),
-			github(table[3], "claude.pluginCheckoutRoot unset"),
+		{"alpha without the key or a source clone", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, Plugins: defaults,
+		}, []ClaudePluginTarget{
+			github(table[0], "claude.pluginCheckoutRoot unset and no source clone"),
+			github(table[1], "claude.pluginCheckoutRoot unset and no source clone"),
+			github(table[2], "claude.pluginCheckoutRoot unset and no source clone"),
+			github(table[3], "claude.pluginCheckoutRoot unset and no source clone"),
+		}},
+		{"alpha without the key installs from the source clone", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, SourceRepo: clone, Plugins: defaults,
+		}, []ClaudePluginTarget{
+			local(table[0], cloneRoot), local(table[1], cloneRoot), local(table[2], cloneRoot), local(table[3], cloneRoot),
+		}},
+		{"the key wins over the source clone", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
+		}, []ClaudePluginTarget{
+			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
+		}},
+		{"a source clone missing a checkout", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, SourceRepo: partialClone, Plugins: defaults,
+		}, []ClaudePluginTarget{
+			local(table[0], filepath.Join(partialClone, "plugins")),
+			github(table[1], "no checkout at "+cloneMissing+
+				" (the source clone's plugins/; claude.pluginCheckoutRoot unset)"),
+			local(table[2], filepath.Join(partialClone, "plugins")),
+			local(table[3], filepath.Join(partialClone, "plugins")),
+		}},
+		{"an unresolved source clone leaves the copy undecided", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, SourceRepoErr: unresolved, Plugins: defaults[:1],
+		}, []ClaudePluginTarget{
+			undecided(table[0], "source clone unresolved (claude.pluginCheckoutRoot unset): "+unresolved.Error()),
 		}},
 		{"alpha with a checkout missing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: partial, Plugins: defaults}, []ClaudePluginTarget{
 			local(table[0], partial),
@@ -423,34 +472,51 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 }
 
 func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
+	// root is claude.pluginCheckoutRoot (withRoot) or the source clone
+	// (fromClone, its checkouts under plugins/); with neither, the source clone
+	// is the default one under home, which holds no checkout.
 	for _, test := range []struct {
 		name      string
 		version   string
 		withRoot  bool
+		fromClone bool
 		checkouts []int
 		local     []bool
-		reason    func(root string, p testPlugin) string
+		reason    func(root, home string, p testPlugin) string
 	}{
 		{
-			"alpha without the key", alphaVersion, false, nil,
+			"alpha without the key or a clone at the default path", alphaVersion, false, false, nil,
 			[]bool{false, false, false, false},
-			func(string, testPlugin) string { return "claude.pluginCheckoutRoot unset" },
+			func(_, home string, p testPlugin) string {
+				return "no checkout at " + filepath.Join(home, ".professor", "plugins", p.Name, "plugins", p.Name,
+					".claude-plugin", "plugin.json") + " (the source clone's plugins/; claude.pluginCheckoutRoot unset)"
+			},
 		},
 		{
-			"alpha with a checkout missing", alphaVersion, true,
+			"alpha without the key installs from the source clone", alphaVersion, false, true,
+			[]int{0, 1, 2, 3},
+			[]bool{true, true, true, true},
+			nil,
+		},
+		{
+			"alpha with a checkout missing", alphaVersion, true, false,
 			[]int{0, 2, 3},
 			[]bool{true, false, true, true},
-			func(root string, p testPlugin) string {
+			func(root, _ string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(root, p.Name, "plugins", p.Name, ".claude-plugin", "plugin.json") +
 					" (claude.pluginCheckoutRoot)"
 			},
 		},
-		{"release", "0.80.0", true, []int{0, 1, 2, 3}, []bool{false, false, false, false}, nil},
+		{"release", "0.80.0", true, false, []int{0, 1, 2, 3}, []bool{false, false, false, false}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
+			checkoutRoot := root
+			if test.fromClone {
+				checkoutRoot = filepath.Join(root, "plugins")
+			}
 			for _, index := range test.checkouts {
-				writePluginCheckout(t, root, testPlugins[index].Name)
+				writePluginCheckout(t, checkoutRoot, testPlugins[index].Name)
 			}
 			configured := root
 			if !test.withRoot {
@@ -458,6 +524,9 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 			}
 			inst, runner, out, home, first := alphaPluginEngine(t, configured)
 			inst.options.Version = test.version
+			if test.fromClone {
+				inst.options.SourceRepo = root
+			}
 			if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 			}
@@ -485,20 +554,99 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 				if test.reason == nil {
 					continue
 				}
-				if line := fallback + " — " + test.reason(root, p) + "\n"; !strings.Contains(out.String(), line) {
+				if line := fallback + " — " + test.reason(root, home, p) + "\n"; !strings.Contains(out.String(), line) {
 					t.Fatalf("missing %q:\n%s", line, out.String())
 				}
 			}
 			if fmt.Sprint(runner.calls) != fmt.Sprint(want) {
 				t.Fatalf("calls=%v want %v\n%s", runner.calls, want, out.String())
 			}
-			if test.reason == nil {
+			if test.version == "0.80.0" {
 				if strings.Contains(out.String(), "falls back") {
 					t.Fatalf("release build reported a fallback:\n%s", out.String())
 				}
 				if _, err := os.Stat(filepath.Join(home, ".local", "share")); err == nil {
 					t.Fatalf("release build created a -dev marketplace:\n%s", out.String())
 				}
+			}
+		})
+	}
+}
+
+// TestEnsureClaudePluginsUndecidedLeavesBothCopies: an -alpha build that
+// cannot tell where a plugin's checkout is — its source clone moved away, or
+// its checkout cannot be read — decides no copy. It leaves the enabled -dev
+// copy and the disabled GitHub copy as they are, runs no plugin command, and
+// fails the step naming the error, never acting as if no checkout existed.
+func TestEnsureClaudePluginsUndecidedLeavesBothCopies(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		setup  func(t *testing.T, inst *engine, home string)
+		reason func(home string, p testPlugin) string
+	}{
+		{"the recorded source clone moved away", func(t *testing.T, _ *engine, home string) {
+			clone := filepath.Join(home, "src", "professor")
+			if err := os.MkdirAll(clone, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(clone); err != nil {
+				t.Fatal(err)
+			}
+		}, func(string, testPlugin) string { return "source clone unresolved (claude.pluginCheckoutRoot unset)" }},
+		{"a checkout that cannot be read", func(t *testing.T, inst *engine, home string) {
+			root := filepath.Join(home, "checkouts")
+			inst.options.ClaudePluginCheckoutRoot = root
+			for _, p := range testPlugins {
+				manifest := filepath.Join(writePluginCheckout(t, root, p.Name), ".claude-plugin", "plugin.json")
+				if err := os.Remove(manifest); err != nil {
+					t.Fatal(err)
+				}
+				// A manifest that links to itself stats as ELOOP: present, unreadable.
+				if err := os.Symlink(manifest, manifest); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}, func(string, testPlugin) string { return "checkout unreadable (claude.pluginCheckoutRoot)" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			inst, runner, out, home, first := alphaPluginEngine(t, "")
+			test.setup(t, inst, home)
+			enabled := map[string]any{}
+			ids := []string{}
+			for _, p := range testPlugins {
+				enabled[p.ID], enabled[devID(p.Name)] = false, true
+				ids = append(ids, devID(p.Name))
+			}
+			raw, err := json.Marshal(map[string]any{
+				"enabledPlugins": enabled,
+				"pluginConfigs": map[string]any{
+					devID(testPlugins[0].Name): map[string]any{"options": map[string]any{"a": 1}},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings := filepath.Join(first, "settings.json")
+			writeFixture(t, settings, string(raw))
+			writeInstalledPlugins(t, first, ids...)
+			err = inst.ensureClaudePlugins(context.Background())
+			if after := readFixture(t, settings); after != string(raw) {
+				t.Fatalf("settings rewritten on an undecided source:\n%s\n%s", after, out.String())
+			}
+			if len(runner.calls) != 0 {
+				t.Fatalf("calls=%v, want none on an undecided source\n%s", runner.calls, out.String())
+			}
+			for _, p := range testPlugins {
+				if err == nil || !strings.Contains(err.Error(), "claude plugin "+p.Name+" in "+first+": ") ||
+					!strings.Contains(err.Error(), test.reason(home, p)) {
+					t.Fatalf("err = %v, want %s named with %q\n%s", err, p.Name, test.reason(home, p), out.String())
+				}
+			}
+			if strings.Contains(out.String(), "falls back") {
+				t.Fatalf("an undecided source read as a fallback:\n%s", out.String())
 			}
 		})
 	}

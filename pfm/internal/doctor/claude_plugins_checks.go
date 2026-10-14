@@ -12,9 +12,29 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+// doctorClaudePluginBuild is the build doctor checks the plugins of: this
+// pfm's version, home, claude.pluginCheckoutRoot, claude.plugins and the
+// source clone a prior install anchored on (installer.GlobalSourceRepo, the
+// marker else the default path), whose plugins/ an -alpha build copies from
+// when the key is unset. A clone that cannot be resolved rides as
+// SourceRepoErr, named in the fallback line.
+func doctorClaudePluginBuild(version, home string, claude pfmconfig.Claude) installer.ClaudePluginBuild {
+	sourceRepo, sourceRepoErr := installer.GlobalSourceRepo(home)
+	return installer.ClaudePluginBuild{
+		Version:       version,
+		Home:          home,
+		CheckoutRoot:  claude.PluginCheckoutRoot,
+		SourceRepo:    sourceRepo,
+		SourceRepoErr: sourceRepoErr,
+		Plugins:       claude.Plugins,
+	}
+}
+
 // printClaudePluginsDoctor checks the shared store once for the plugins build
 // ensures: the -dev ids and their copies on an -alpha build with checkouts, the
-// GitHub ids otherwise, each fallback named on its own informational line. A
+// GitHub ids otherwise, each fallback named on its own informational line; a
+// bare name whose source clone or checkout cannot be read is one warning
+// naming the error, neither copy checked. A
 // listed id pfm cannot install is one line naming it, its reason and its repair,
 // in place of the "run pfm install --yes" lines that would not close it, even
 // on a store never set up; with the plugin records unreadable, each id that
@@ -42,6 +62,14 @@ func printClaudePluginsDoctor(stdout io.Writer, store string, build installer.Cl
 	resolved := make([]installer.ClaudePluginTarget, 0, len(targets))
 	for index := range targets {
 		target := &targets[index]
+		if target.Undecided != "" {
+			// The build cannot tell which copy it ensures, so neither is checked.
+			cannotInstall = append(cannotInstall, installer.ClaudePluginGap{
+				Problem: "plugin " + target.Name + " cannot be checked: " + target.UndecidedNote(),
+				Fix:     undecidedCopyFix,
+			})
+			continue
+		}
 		if gap, ok := unresolved[target.ID]; ok {
 			cannotInstall = append(cannotInstall, installer.ClaudePluginGap{
 				Problem: "plugin " + target.ID + " cannot be installed: " + gap.Problem, Fix: gap.Fix,
@@ -109,6 +137,9 @@ func printClaudePluginsDoctor(stdout io.Writer, store string, build installer.Cl
 	}
 	printClaudePluginGaps(stdout, gaps, tally)
 }
+
+// undecidedCopyFix is the repair of a bare name whose source clone or checkout could not be read.
+const undecidedCopyFix = "repair the path named, or run pfm install --yes from inside your Professor clone to record it again"
 
 // unreadableRecordsFix is the repair of an id doctor could not check for want of a readable record.
 const unreadableRecordsFix = "repair the unreadable file named above, then run pfm doctor again"

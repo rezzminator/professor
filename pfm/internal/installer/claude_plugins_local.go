@@ -20,7 +20,8 @@ import (
 // An -alpha build installs each bare plugin name from a local marketplace pfm
 // owns, ~/.local/share/{plugin}-dev: its .claude-plugin/marketplace.json names
 // the one plugin at ./plugins/{plugin}, a copy of the checkout's
-// plugins/{plugin} refreshed on every install. A copy, never a symlink: Claude
+// plugins/{plugin} (under claude.pluginCheckoutRoot, else the source clone's
+// plugins/) refreshed on every install. A copy, never a symlink: Claude
 // Code refuses a plugin file that resolves outside its marketplace dir.
 
 // claudePluginOwner is the GitHub owner every bare plugin name's marketplace names.
@@ -33,22 +34,35 @@ func devMarketplaceName(plugin string) string { return plugin + "-dev" }
 func pluginCopySkipped(name string) bool { return name == "node_modules" || name == ".DS_Store" }
 
 // localClaudePluginTarget turns an -alpha build's target local when its
-// checkout exists under build.CheckoutRoot, and otherwise says why not.
+// checkout exists under the checkout root, and otherwise says why not. The
+// root is build.CheckoutRoot when claude.pluginCheckoutRoot is set, else the
+// source clone's plugins/; a fallback names which root it tried. A source
+// clone that cannot be resolved, or a checkout that cannot be read, leaves the
+// target Undecided rather than falling back.
 func localClaudePluginTarget(target ClaudePluginTarget, build ClaudePluginBuild) ClaudePluginTarget {
-	if build.CheckoutRoot == "" {
-		target.Fallback = pfmconfig.KeyClaudePluginCheckoutRoot + " unset"
-		return target
+	root, rootName := build.CheckoutRoot, pfmconfig.KeyClaudePluginCheckoutRoot
+	if root == "" {
+		unset := pfmconfig.KeyClaudePluginCheckoutRoot + " unset"
+		switch {
+		case build.SourceRepoErr != nil:
+			target.Undecided = fmt.Sprintf("source clone unresolved (%s): %v", unset, build.SourceRepoErr)
+			return target
+		case build.SourceRepo == "":
+			target.Fallback = unset + " and no source clone"
+			return target
+		}
+		root, rootName = filepath.Join(build.SourceRepo, "plugins"), "the source clone's plugins/; "+unset
 	}
-	checkout := filepath.Join(build.CheckoutRoot, target.Name, "plugins", target.Name)
+	checkout := filepath.Join(root, target.Name, "plugins", target.Name)
 	manifest := filepath.Join(checkout, ".claude-plugin", "plugin.json")
 	info, err := os.Stat(manifest)
 	switch {
 	case err == nil && info.Mode().IsRegular():
 	case err == nil || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR):
-		target.Fallback = "no checkout at " + manifest + " (" + pfmconfig.KeyClaudePluginCheckoutRoot + ")"
+		target.Fallback = "no checkout at " + manifest + " (" + rootName + ")"
 		return target
 	default:
-		target.Fallback = fmt.Sprintf("checkout unreadable (%s): %v", pfmconfig.KeyClaudePluginCheckoutRoot, err)
+		target.Undecided = fmt.Sprintf("checkout unreadable (%s): %v", rootName, err)
 		return target
 	}
 	marketplace := filepath.Join(build.Home, ".local", "share", devMarketplaceName(target.Name))

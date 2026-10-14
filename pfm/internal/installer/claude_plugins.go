@@ -48,13 +48,16 @@ const ClaudePluginUnresolvedFix = `give its claude.plugins entry a "source" (wha
 	`or run claude plugin marketplace add <source>, then run pfm install --yes`
 
 // ClaudePluginBuild is what decides where each plugin comes from: pfm's own
-// stamped version, the home pfm's paths resolve from, and
-// claude.pluginCheckoutRoot.
+// stamped version, the home pfm's paths resolve from, claude.pluginCheckoutRoot,
+// and the source clone whose plugins/ is the checkout root when that key is
+// unset (SourceRepoErr when the clone could not be resolved).
 type ClaudePluginBuild struct {
-	Version      string
-	Home         string
-	CheckoutRoot string
-	Plugins      []pfmconfig.ClaudePlugin
+	Version       string
+	Home          string
+	CheckoutRoot  string
+	SourceRepo    string
+	SourceRepoErr error
+	Plugins       []pfmconfig.ClaudePlugin
 }
 
 // ClaudePluginTarget is one claude.plugins entry as this build ensures it. ID
@@ -63,7 +66,10 @@ type ClaudePluginBuild struct {
 // the GitHub repository and GitHubID on a release, or on an -alpha build with
 // a checkout (Local) the pfm-owned marketplace dir Marketplace, holding a copy
 // of Checkout, and DevID. Fallback says why an -alpha build ensures the GitHub
-// copy instead; empty on a release.
+// copy instead; empty on a release. Undecided says why an -alpha build could
+// not tell whether a checkout exists (its source clone or checkout could not
+// be read): install and doctor then decide neither copy, never reading the
+// error as a missing checkout.
 type ClaudePluginTarget struct {
 	Name        string
 	ID          string
@@ -74,6 +80,7 @@ type ClaudePluginTarget struct {
 	Marketplace string
 	Checkout    string
 	Fallback    string
+	Undecided   string
 	// Own marks a bare name of ours, which has a GitHub copy and a -dev copy.
 	Own bool
 	// MarketplaceName is the marketplace a full id names; empty for a bare name.
@@ -134,6 +141,11 @@ func BareClaudePluginRepair(name string) string {
 // FallbackNote is the one line install and doctor print for a Fallback.
 func (target ClaudePluginTarget) FallbackNote() string {
 	return target.Name + ": alpha build falls back to the GitHub copy " + target.GitHubID + " — " + target.Fallback
+}
+
+// UndecidedNote names an Undecided target's two copies and why neither is chosen.
+func (target ClaudePluginTarget) UndecidedNote() string {
+	return "its copy is undecided (" + target.GitHubID + " or " + target.DevID + "): " + target.Undecided
 }
 
 // ClaudePluginGap is one plugin problem pfm doctor reports and its repair.
@@ -489,8 +501,9 @@ func pluginEnabled(document map[string]any, id string) bool {
 // roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
 // An -alpha build ensures each bare name with a checkout from its local copy
 // (ClaudePluginTargets); every build then disables the copy of ours it does not
-// ensure. A listed id pfm cannot install is a failure naming it; an id the list
-// does not name is never read or written.
+// ensure. A bare name whose source is undecided is a failure naming the error,
+// both its copies left as they are. A listed id pfm cannot install is a
+// failure naming it; an id the list does not name is never read or written.
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	dir := installer.options.PrimaryConfigDir
 	if dir == "" {
@@ -501,11 +514,16 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 			return installer.pluginStepFailure(dir, err)
 		}
 	}
+	// The clone the global links anchor on is the one whose plugins/ an
+	// -alpha build copies from when claude.pluginCheckoutRoot is unset.
+	sourceRepo, sourceRepoErr := installer.globalSourceRepoRoot()
 	targets := ClaudePluginTargets(ClaudePluginBuild{
-		Version:      installer.options.Version,
-		Home:         installer.options.Home,
-		CheckoutRoot: installer.options.ClaudePluginCheckoutRoot,
-		Plugins:      installer.options.ClaudePlugins,
+		Version:       installer.options.Version,
+		Home:          installer.options.Home,
+		CheckoutRoot:  installer.options.ClaudePluginCheckoutRoot,
+		SourceRepo:    sourceRepo,
+		SourceRepoErr: sourceRepoErr,
+		Plugins:       installer.options.ClaudePlugins,
 	})
 	for index := range targets {
 		target := &targets[index]
@@ -550,6 +568,13 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	}
 	for index := range targets {
 		target := &targets[index]
+		if target.Undecided != "" {
+			// Neither copy is installed, enabled or disabled on an error.
+			failures = append(failures, installer.pluginFailure(
+				dir, target.Name, errors.New(target.UndecidedNote()+"; both left as they are"),
+			))
+			continue
+		}
 		if gap, ok := unresolved[target.ID]; ok {
 			failures = append(
 				failures,

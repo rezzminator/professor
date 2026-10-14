@@ -35,7 +35,7 @@ Design for a reader whose context resets every session: one change lands in one 
 - new file written without a prior search for its concept → 0
 - new violations per change, per check of § Mechanical gates → 0; baselined violations → shrinking
 
-Measure, never estimate. dirs-per-change: `git log --no-merges --name-only` over a stated window — distinct directories per commit, as median · p75 · p90; co-change (step 1) from the same log — file pairs sharing commits. The hop, re-read and search metrics are counted from the agent runtime's session transcripts (its tool-call records: reads, searches, edits; an edit is the `edit` class of `imagine-core/mining.md`) for sessions that edited the target; the owner names where they are kept. A metric with no data source is reported `UNMEASURED — <what is missing>` and its target stands as a design goal; greenfield marks expected co-change "assumed".
+Measure, never estimate. dirs-per-change: `git log --no-merges --name-only` over a stated window — distinct directories per commit, as median · p75 · p90; co-change (step 1) from the same log — file pairs sharing commits. The hop, re-read and search metrics are counted from the agent runtime's session transcripts (its tool-call records: reads, searches, edits) for sessions that edited the target; the owner names where they are kept. A metric with no data source is reported `UNMEASURED — <what is missing>` and its target stands as a design goal; greenfield marks expected co-change "assumed".
 
 ## Procedure
 

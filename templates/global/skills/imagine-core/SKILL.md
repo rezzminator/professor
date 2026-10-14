@@ -1,6 +1,6 @@
 ---
 name: imagine-core
-description: 'IMAGINE-ONLY The imagine family''s law — loaded first by every /imagine:* command, the imagine and imagine-historian agents, and the builders they brief.'
+description: 'IMAGINE-ONLY The imagine family''s law — loaded first by every /imagine:* command, the imagine agent and the builders they brief.'
 user-invocable: false
 ---
 

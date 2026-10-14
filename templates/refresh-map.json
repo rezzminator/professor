@@ -97,9 +97,6 @@
     "global/agents/imagine.md": {
       "curated": true
     },
-    "global/agents/imagine-historian.md": {
-      "curated": true
-    },
     "global/agents/imagination.md": {
       "curated": true
     },
@@ -136,9 +133,6 @@
     "global/commands/imagine/callmeter.md": {
       "curated": true
     },
-    "global/commands/imagine/evolve.md": {
-      "curated": true
-    },
     "global/commands/iterative-improvement.md": {
       "curated": true
     },
@@ -172,16 +166,10 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
-    "global/skills/imagine-core/classify-rules.json": {
-      "curated": true
-    },
     "global/skills/imagine-core/SKILL.md": {
       "curated": true
     },
     "global/skills/imagine-core/live.md": {
-      "curated": true
-    },
-    "global/skills/imagine-core/mining.md": {
       "curated": true
     },
     "global/skills/ultimate/SKILL.md": {

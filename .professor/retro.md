@@ -471,3 +471,13 @@ Resolved:
 Observed: forward-handoff probes replaying foreman donors loaded the live flight directory (state written after the cut), producing WRONG grades (fhf-4, fhf-7) until `donor.py --map` reset each flight dir.
 Amend: every donor replay maps its flight directory to a reset copy; a mapped copy lacks pre-cut files not written by Write/Edit, which reads as "not found", not as wrong.
 Resolved:
+
+## 2026-10-14 — stray identity files in the shared Claude store
+Observed: every stray `~/.claude/.claude.json` (2026-10-13 21:32:29, 22:35:24, 23:32:27; 2026-10-14 14:33:21) was born within a second of a chat running `CLAUDE_CONFIG_DIR=$HOME/.claude claude plugin …` to refresh a dev plugin; no file teaches it, agents improvise it, and `make host-install` refuses until the files are moved aside. Each chat's own config dir already reaches the shared plugin store through its `plugins` and `settings.json` symlinks.
+Amend: a `claude` run never names the shared store as its config dir; plugin refreshes run under the chat's own `CLAUDE_CONFIG_DIR` (store-config-guard flight builds the refusal).
+Resolved:
+
+## 2026-10-14 — a landing pushed an architecture breach
+Observed: clean-sweep's `6f756a92` took `pfm/internal/installer/claude_plugins.go` to 812 lines, over the 800 ceiling; the fence gates ran on the worktree, the push's leak check passed it, and CI Verify went red after the push.
+Amend: `.githooks/pre-push` runs `pfm/scripts/arch-check.sh` on every develop push whose tip is the checked-out HEAD.
+Resolved:

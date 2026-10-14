@@ -27,6 +27,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   if [[ "$local_sha" == "$zero_sha" ]]; then
     continue
   fi
+  if [[ "$remote_ref" == refs/heads/develop ]]; then arch_tip="$local_sha"; fi
 
   # main is release-only: it moves when the develop → main release PR merges
   # (gitter Phase RELEASE), never by a direct push. GitHub's ruleset refuses
@@ -76,6 +77,28 @@ done
 if [[ "$failed" -ne 0 ]]; then
   echo "PUSH BLOCKED: leak-check failed — nothing was pushed" >&2
   exit 1
+fi
+
+# pfm's architecture ratchet (size ceilings, one façade per mechanism, no new
+# twins) — the same check CI's Verify runs, so a breach stops here instead of
+# turning develop red after the push. It reads the working tree, so it runs
+# only when a pushed tip is the checked-out HEAD, and says so when it is not.
+arch="$repo_root/pfm/scripts/arch-check.sh"
+if [[ -n "${arch_tip:-}" ]]; then
+  if [[ ! -f "$arch" ]]; then
+    echo "PUSH BLOCKED: pfm architecture check missing at pfm/scripts/arch-check.sh — nothing was pushed" >&2
+    exit 1
+  elif [[ "$arch_tip" != "$(git rev-parse HEAD)" ]]; then
+    echo "pre-push: architecture check not run — pushed tip $arch_tip is not the checked-out HEAD" >&2
+  elif ! (cd "$repo_root/pfm" && bash scripts/arch-check.sh) > /tmp/pre-push-arch.$$ 2>&1; then
+    grep -E '^CHECK .* (FAIL|ERROR)' /tmp/pre-push-arch.$$ >&2 || cat /tmp/pre-push-arch.$$ >&2
+    rm -f /tmp/pre-push-arch.$$
+    echo "PUSH BLOCKED: pfm architecture check failed — nothing was pushed (make -C pfm arch)" >&2
+    exit 1
+  else
+    rm -f /tmp/pre-push-arch.$$
+    echo "pre-push: pfm architecture check passed" >&2
+  fi
 fi
 
 exit 0

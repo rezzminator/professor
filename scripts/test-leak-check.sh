@@ -558,6 +558,42 @@ else
   bad 'F5: pre-push without a remote name passes no --remote' "rc=$rc; calls=$(cat "$T/hook-calls"); err=$(cat "$T/hook-err")"
 fi
 
+# F10, hook side: a develop push runs pfm's architecture check on the checked-out tree; a red or missing check blocks it, another branch skips it.
+arch_push() { # arch_push <ref>: one new-ref push of HEAD to <ref>
+  : > "$T/hook-calls"
+  printf '%s %s %s %s\n' "$1" "$hook_sha" "$1" 0000000000000000000000000000000000000000 \
+    | (cd "$hook_repo" && bash .githooks/pre-push origin > /dev/null 2> "$T/hook-err")
+  rc=$?
+}
+arch_push refs/heads/develop
+if [[ "$rc" -ne 0 && "$(cat "$T/hook-err")" == *"PUSH BLOCKED: pfm architecture check missing"* ]]; then
+  ok 'F10: a develop push with no architecture check is blocked, never passed'
+else
+  bad 'F10: a develop push with no architecture check is blocked, never passed' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+mkdir -p "$hook_repo/pfm/scripts"
+printf '#!/usr/bin/env bash\necho "CHECK C1-ceiling-src PASS 0 new"\n' > "$hook_repo/pfm/scripts/arch-check.sh"
+arch_push refs/heads/develop
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-err")" == *"pre-push: pfm architecture check passed"* ]]; then
+  ok 'F10: a develop push runs the architecture check and passes on green'
+else
+  bad 'F10: a develop push runs the architecture check and passes on green' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+printf '#!/usr/bin/env bash\necho "CHECK C1-ceiling-src FAIL internal/x.go (new 812)"\nexit 1\n' > "$hook_repo/pfm/scripts/arch-check.sh"
+arch_push refs/heads/develop
+if [[ "$rc" -ne 0 && "$(cat "$T/hook-err")" == *"CHECK C1-ceiling-src FAIL internal/x.go"* && "$(cat "$T/hook-err")" == *"PUSH BLOCKED: pfm architecture check failed"* ]]; then
+  ok 'F10: a red architecture check blocks a develop push and names the failing row'
+else
+  bad 'F10: a red architecture check blocks a develop push and names the failing row' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+arch_push refs/heads/feature
+if [[ "$rc" -eq 0 && "$(cat "$T/hook-err")" != *architecture* ]]; then
+  ok 'F10: a push of another branch does not run the architecture check'
+else
+  bad 'F10: a push of another branch does not run the architecture check' "rc=$rc; err=$(cat "$T/hook-err")"
+fi
+rm -rf "$hook_repo/pfm"
+
 printf '!structural-only\n' > "$T/structural-terms"
 TERMS="$T/structural-terms" run_check clean-1.txt
 if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'PRIVATE COVERAGE SKIPPED'* && "$err" == *'4 structural pattern(s)'* ]]; then

@@ -695,6 +695,11 @@ case "$1" in
     if [ "${STUB_ES_DRIFT:-0}" -ne 0 ]; then # exit 0 with a named drift: the check must still go red
       echo 'SECTION-DRIFT beta-max: beta.md § Budget changed since pinned (pin sha256:a, now sha256:b) — review the override, then run engine-sync variants pin beta-max'
     fi
+    if [ "${STUB_ES_UNKNOWN:-0}" -ne 0 ]; then # exit 0 with the OpenCode renderer's warning for a server it cannot grant
+      for tool in mcp__sub-agent-compact__compact mcp__sub-agent-compact__compact mcp__nosuch__x; do
+        echo "skip    unknown MCP server in tool $tool in $home/agents/beta.md — no configured or project .mcp.json server serves it; it stays denied"
+      done
+    fi
     for n in $STUB_ES_RENDER; do
       printf 'x\n' > "$home/gen-$n.md"; printf 'x\n' > "$home/.codex/agents/$n.toml"; ln -s "$home/gen-$n.md" "$home/.claude/agents/$n.md"
     done
@@ -708,7 +713,8 @@ chmod +x "$T/es-stub"
 es_bin="$TMP_BASE/engine-sync/engine-sync"
 es_case() { # es_case <function> [VAR=value…]: run it with engine_sync_build stubbed; output in $T/es.out
   local fn="$1"; shift
-  : > "$MIRROR_CALLS"; : > "$T/es-build.calls"; : > "$MIRROR_CALLS.policy"; FAILURES=0
+  : > "$MIRROR_CALLS"; : > "$T/es-build.calls"; : > "$T/es-stage.calls"; : > "$MIRROR_CALLS.policy"; FAILURES=0
+  rm -rf "$TMP_BASE/engine-sync/mirror-tree" "$TMP_BASE/engine-sync/mirror-tree.built"
   (
     [ $# -eq 0 ] || export "$@"
     engine_sync_build() {
@@ -716,23 +722,58 @@ es_case() { # es_case <function> [VAR=value…]: run it with engine_sync_build s
       [ "${STUB_ES_BIN_RC:-0}" -eq 0 ] || { echo 'engine-sync: source unavailable: fixture' >&2; return 1; }
       mkdir -p "$(dirname "$1")" && cp "$T/es-stub" "$1"
     }
+    checks_mirror_tree_stage() { # the staging has its own test below; here it only names the tree
+      printf 'stage %s\n' "$1" >> "$T/es-stage.calls"
+      [ "${STUB_ES_STAGE_RC:-0}" -eq 0 ] || { echo 'mirror tree: fixture could not stage' >&2; return 1; }
+      mkdir -p "$1"
+    }
+    # Every mirror gate but the generation reads the tree it built: ready unless a case says otherwise.
+    if [ "$fn" != checks_templates_mirrors_generate ] && [ -z "${MIRROR_UNBUILT:-}" ]; then
+      mkdir -p "$(checks_mirror_tree)" && : > "$(checks_mirror_tree).built"
+    fi
     "$fn"
     echo "FAILURES=$FAILURES"
   ) >"$T/es.out" 2>&1
 }
 es_case checks_templates_mirrors_generate
-if [ "$(cat "$MIRROR_CALLS")" = "check $REPO_ROOT" ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
+if [ "$(cat "$MIRROR_CALLS")" = "build $TMP_BASE/engine-sync/mirror-tree" ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
+  [ "$(cat "$T/es-stage.calls")" = "stage $TMP_BASE/engine-sync/mirror-tree" ] && [ -f "$TMP_BASE/engine-sync/mirror-tree.built" ] &&
   cmp -s "$REPO_ROOT/templates/global/engine-sync/config.json" "$MIRROR_CALLS.policy" &&
-  grep -Fq 'engine mirrors current — nothing generated' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
-  ok 'mirror generation checks both mirrors with the engine-sync it built, and generates nothing when current'
+  grep -Fq 'engine mirrors generated from the tree under test' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
+  ok 'mirror generation stages the tree under test and builds both mirrors there with the engine-sync it built and the tree'"'"'s policy'
 else bad 'mirror generation, current' "$(cat "$T/es-build.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
-es_case checks_templates_mirrors_generate STUB_ES_CHECK_RC=1
-if [ "$(cat "$MIRROR_CALLS")" = "check $REPO_ROOT" ] &&
-  grep -Fq 'STALE AGENTS.md' "$T/es.out" && grep -Fq 'host mirrors STALE' "$T/es.out" &&
-  grep -Fq 'make -C pfm host-install' "$T/es.out" && grep -Fq 'pfm codex build . && pfm opencode build .' "$T/es.out" &&
+es_case checks_templates_mirrors_generate STUB_ES_BUILD_RC=1
+if [ "$(cat "$MIRROR_CALLS")" = "build $TMP_BASE/engine-sync/mirror-tree" ] && [ ! -e "$TMP_BASE/engine-sync/mirror-tree.built" ] &&
+  grep -Fq 'mirror generation FAILED (engine-sync build exit 1)' "$T/es.out" && grep -Fq 'no mirror gate below is a verdict on the tree' "$T/es.out" &&
   grep -Fxq 'FAILURES=1' "$T/es.out"; then
-  ok 'stale host mirrors report their paths and host recovery commands in the read-only fence'
-else bad 'mirror generation, stale' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+  ok 'a tree whose mirrors do not build is one red step, and no later mirror gate reads a half-built tree'
+else bad 'mirror generation, build failure' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_generate STUB_ES_STAGE_RC=1
+if [ ! -s "$MIRROR_CALLS" ] && [ ! -e "$TMP_BASE/engine-sync/mirror-tree.built" ] &&
+  grep -Fq 'mirror generation could not run — the tree under test could not be staged' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'a tree that cannot be staged is named, and engine-sync builds nothing'
+else bad 'mirror generation, staging failure' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+# The staging itself: the tree under test is copied as it is — tracked, deleted-tracked and untracked
+# files — and nothing a host build left in it (the stale mirrors) or a submodule's checkout comes along.
+stage_repo="$T/stage-repo"; rm -rf "$stage_repo"; mkdir -p "$stage_repo/src" "$stage_repo/.codex/agents"
+(
+  cd "$stage_repo" || exit 1
+  git init -q . && git -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m base
+  printf '/AGENTS.md\n.codex/agents/\n' > .gitignore
+  printf 'kept\n' > src/tracked.txt; printf 'gone\n' > src/deleted.txt
+  git add .gitignore src && git -c user.name=t -c user.email=t@example.invalid commit -q -m files
+  git update-index --add --cacheinfo 160000,"$(git rev-parse HEAD)",sub
+  rm src/deleted.txt; printf 'new\n' > src/untracked.txt
+  mkdir -p sub && printf 'foreign\n' > sub/inside.txt
+  printf 'stale host mirror\n' > AGENTS.md; printf 'stale\n' > .codex/agents/old.toml
+) >/dev/null 2>&1
+stage_out="$T/stage.out"; stage_dest="$T/stage-dest"
+if ( REPO_ROOT="$stage_repo"; unset PFM_DEV_REPO_GIT_DIR PFM_DEV_REPO_WORK_TREE; checks_mirror_tree_stage "$stage_dest" ) >"$stage_out" 2>&1 &&
+  [ "$(cat "$stage_dest/src/tracked.txt")" = kept ] && [ "$(cat "$stage_dest/src/untracked.txt")" = new ] &&
+  [ ! -e "$stage_dest/src/deleted.txt" ] && [ ! -e "$stage_dest/AGENTS.md" ] && [ ! -e "$stage_dest/.codex/agents/old.toml" ] &&
+  [ ! -e "$stage_dest/sub" ] && git -C "$stage_dest" ls-files | grep -Fxq src/untracked.txt; then
+  ok 'the mirror tree holds the tree under test as it is: untracked files in, stale host mirrors and submodule checkouts out'
+else bad 'mirror tree staging' "$(cat "$stage_out")" "$(find "$stage_dest" -not -path '*/.git/*' 2>&1)"; fi
 es_case checks_templates_mirrors_generate STUB_ES_BIN_RC=1
 if [ ! -s "$MIRROR_CALLS" ] && grep -Fxq 'engine-sync: source unavailable: fixture' "$T/es.out" &&
   grep -Fxq 'FAILSTEP mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree' "$T/es.out" &&
@@ -771,10 +812,25 @@ roster_case STUB_ROSTER_RC=2
 if grep -Fq 'FAILSTEP agent roster ERROR' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'roster config ERROR remains distinct from a roster mismatch at the gate'
 else bad 'roster config error' "$(cat "$T/es.out")"; fi
+roster_case MIRROR_UNBUILT=1
+if grep -Fq 'FAILSTEP agent roster NOT GENERATED — the mirrors were not generated from the tree under test' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'roster without a generated mirror tree is NOT GENERATED, and reads no host mirror'
+else bad 'roster without a mirror tree' "$(cat "$T/es.out")"; fi
+es_case checks_templates_mirrors_opencode MIRROR_UNBUILT=1
+if [ ! -s "$MIRROR_CALLS" ] && grep -Fxq 'FAILSTEP opencode mirror NOT CHECKED — the mirrors were not generated from the tree under test (see the generation step above)' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'the opencode check without a generated mirror tree is NOT CHECKED, never a pass'
+else bad 'opencode without a mirror tree' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 roster_case STUB_ROSTER_RC=3
 if grep -Fq 'FAILSTEP agent roster NOT GENERATED' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'roster on absent mirrors is NOT GENERATED, never a missing source role'
 else bad 'roster not generated' "$(cat "$T/es.out")"; fi
+for roster_state in '4|GAP install|inventory toolchain gap' '5|SOURCE REJECTED|inventory source rejection'; do
+  IFS='|' read -r roster_rc roster_label roster_reason <<<"$roster_state"
+  roster_case "STUB_ROSTER_RC=$roster_rc"
+  if grep -Fq "FAILSTEP agent roster $roster_label" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+    ok "roster $roster_reason has its own gate classification"
+  else bad "roster $roster_reason" "$(cat "$T/es.out")"; fi
+done
 mv "$REPO_ROOT/templates/global/engine-sync/config.json" "$T/saved-roster-policy.json"
 roster_case
 if grep -Fq 'FAILSTEP agent roster ERROR' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
@@ -856,6 +912,12 @@ if grep -Fq 'SECTION-DRIFT beta-max' "$T/es.out" &&
   grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
   ok 'a SECTION-DRIFT is red and names the variant even when engine-sync exits 0'
 else bad 'global variants, drift' "$(cat "$T/es.out")"; fi
+es_case checks_templates_global_variants "STUB_ES_RENDER=$gv_names" STUB_ES_UNKNOWN=1
+if grep -Eq '^ *2 skip    unknown MCP server in tool mcp__sub-agent-compact__compact in ' "$T/es.out" &&
+  grep -Fq 'FAILSTEP global agent variants: engine-sync dropped MCP tools from OpenCode twins (2 distinct' "$T/es.out" &&
+  ! grep -Fq 'variants FAILED to render' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out" && gv_jailed; then
+  ok 'an unknown-MCP-server warning from an exit-0 render is red and names each server and its count, never a clean render'
+else bad 'global variants, unknown MCP server' "$(cat "$T/es.out")"; fi
 es_case checks_templates_global_variants STUB_ES_BIN_RC=1
 if [ ! -s "$MIRROR_CALLS" ] &&
   grep -Fxq 'FAILSTEP global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)' "$T/es.out" &&
@@ -895,7 +957,7 @@ cp "$lane_agents/blueprint/templates/global/agents/alpha.md" "$lane_agents/home/
 printf -- '---\nname: derived\nengines:\n  codex: false\n---\n' > "$lane_agents/home/.claude/agents/derived.md"
 printf '# Generated by engine-sync from alpha.md\n' > "$lane_agents/home/.codex/agents/alpha.toml"
 sed -n '/^beat A.09-codex-agents$/,/^# .*A.10/p' "${SUT%/*}/lanes/A.sh" > "$lane_agents/beat.sh"
-(
+lane_agents_case() (
   export HOME="$lane_agents/home"
   BLUEPRINT="$lane_agents/blueprint"
   beat() { :; }; spends() { :; }; _lane_log_only() { :; }
@@ -904,22 +966,34 @@ sed -n '/^beat A.09-codex-agents$/,/^# .*A.10/p' "${SUT%/*}/lanes/A.sh" > "$lane
   fail() { printf 'FAIL %s\n' "$*"; }
   pass() { printf 'PASS %s\n' "$*"; }
   source "$lane_agents/beat.sh"
-) > "$T/lane-agents.out" 2>&1
+)
+lane_agents_case > "$T/lane-agents.out" 2>&1
 if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
   ok 'A.09 judges one compiled agent, not a shared file or a Claude-only declaration'
 else bad 'A.09 effective agents' "$(cat "$T/lane-agents.out")"; fi
+cp "$lane_agents/blueprint/scripts/agent-source-inventory.py" "$lane_agents/inventory.py"
+for lane_inventory_failure in '1|agent-source-inventory: ERROR — fixture source rejection' '3|GAP install (agent source inventory is missing: PyYAML)'; do
+  IFS='|' read -r lane_rc lane_error <<<"$lane_inventory_failure"
+  printf 'import sys\nprint(%s, file=sys.stderr)\nsys.exit(%s)\n' "\"$lane_error\"" "$lane_rc" > "$lane_agents/blueprint/scripts/agent-source-inventory.py"
+  lane_agents_case > "$T/lane-agents.out" 2>&1
+  if grep -Fq "FAIL  effective global agents NOT SCANNED: $lane_error;" "$T/lane-agents.out" &&
+    ! grep -Fq 'no effective global Claude agents eligible' "$T/lane-agents.out"; then
+    ok "A.09 failed inventory ($lane_rc) is NOT SCANNED, never empty"
+  else bad "A.09 failed inventory ($lane_rc)" "$(cat "$T/lane-agents.out")"; fi
+done
+cp "$lane_agents/inventory.py" "$lane_agents/blueprint/scripts/agent-source-inventory.py"
 es_case checks_templates_mirrors_opencode
 want="$(printf '%s\n%s' \
-  "opencode check $REPO_ROOT --home $TMP_BASE/engine-sync/opencode-verify-home" \
-  "opencode doctor $REPO_ROOT --home $TMP_BASE/engine-sync/opencode-verify-home")"
+  "opencode check $TMP_BASE/engine-sync/mirror-tree --home $TMP_BASE/engine-sync/opencode-verify-home" \
+  "opencode doctor $TMP_BASE/engine-sync/mirror-tree --home $TMP_BASE/engine-sync/opencode-verify-home")"
 if [ "$(cat "$MIRROR_CALLS")" = "$want" ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
   cmp -s "$REPO_ROOT/templates/global/engine-sync/config.json" "$MIRROR_CALLS.policy" &&
-  grep -Fq 'opencode mirror current and parseable' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
+  grep -Fq 'opencode mirror parseable and current against the tree under test' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
   ok 'the opencode mirror is checked and doctored by the engine-sync it built, under its own scratch home'
 else bad 'opencode mirror' "$(cat "$T/es-build.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 es_case checks_templates_mirrors_opencode STUB_ES_OPENCODE_RC=1
-if grep -Fxq "FAILSTEP opencode mirror FAILED — run: pfm opencode build $REPO_ROOT" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
-  ok 'a failing opencode check names the engine-sync repair'
+if grep -Fxq "FAILSTEP opencode mirror FAILED — the mirror generated from the tree under test does not check (see above)" "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
+  ok 'a failing opencode check names the tree'"'"'s own mirror, not the host'"'"'s'
 else bad 'opencode mirror failure' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 es_case checks_templates_mirrors_opencode STUB_ES_BIN_RC=1
 if [ ! -s "$MIRROR_CALLS" ] &&
@@ -1046,6 +1120,7 @@ marker_gate() { # marker_gate <script body>
     cd "$marker_repo" || exit 1
     head_() { :; }; node_test_suite() { :; }
     ok() { printf 'ok [%s]\n' "$*"; }; fail_step() { printf 'fail [%s]\n' "$*"; }
+    checks_mirror_tree() { echo "$marker_repo"; }; checks_mirror_tree_ready() { return 0; }
     checks_templates_mirrors_marker
   ) 2>&1
 }

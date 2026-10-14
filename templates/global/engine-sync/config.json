@@ -116,7 +116,9 @@
   "mcp": {
     "globalServers": [
       "chat-professor",
-      "harvester-professor"
+      "effort-live-control",
+      "harvester-professor",
+      "sub-agent-compact"
     ],
     "renamed": {}
   },

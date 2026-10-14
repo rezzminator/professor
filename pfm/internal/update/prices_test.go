@@ -17,6 +17,7 @@ import (
 )
 
 func TestRestoreRefreshedPricesPutsOnlyARefreshBackToHead(t *testing.T) {
+	t.Parallel()
 	repo := newUpdateGitFixture(t)
 	file := filepath.Join(repo, filepath.FromSlash(pricing.FileRel))
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
@@ -126,6 +127,7 @@ func TestUpdateRestoresWhatTheBaselineDoctorRefreshedBeforeTheFastForward(t *tes
 // An unstaged edit of the clone's prices.json cannot be told from a refresh,
 // so it is saved before it is discarded, and the progress line names where.
 func TestRestoreRefreshedPricesSavesWhatItDiscardsAndSaysWhere(t *testing.T) {
+	t.Parallel()
 	repo := newUpdateGitFixture(t)
 	file := filepath.Join(repo, filepath.FromSlash(pricing.FileRel))
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
@@ -164,6 +166,7 @@ func TestRestoreRefreshedPricesSavesWhatItDiscardsAndSaysWhere(t *testing.T) {
 // The refresh guard (internal/pricing/modelcost) watches the lock pfm update
 // holds; a drift of either path would turn the guard off silently.
 func TestPriceRefreshGuardWatchesTheLockUpdateHolds(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	want := filepath.Join(installer.ManagedRoot(home), "update.lock")
 	if got := modelcost.UpdateLockPath(home); got != want {
@@ -174,6 +177,7 @@ func TestPriceRefreshGuardWatchesTheLockUpdateHolds(t *testing.T) {
 // The saved copies are bounded: after a save only the newest updateBackupsKept
 // remain, and what else sits in the directory is left alone.
 func TestRestoreRefreshedPricesKeepsOnlyTheNewestSavedCopies(t *testing.T) {
+	t.Parallel()
 	repo := newUpdateGitFixture(t)
 	file := filepath.Join(repo, filepath.FromSlash(pricing.FileRel))
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {

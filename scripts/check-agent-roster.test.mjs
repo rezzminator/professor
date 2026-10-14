@@ -427,8 +427,7 @@ for (const [name, model, effort, role] of twins) {
         assert.ok(text.includes(`subagent_type: "${spawned}"`), `${name}: rename to ${spawned} not applied`);
       assert.doesNotMatch(text, /subagent_type: "flights-/, `${name}: a flights-* spawn survived the renames`);
       const commands = (event) => fm.hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));
-      assert.deepEqual(commands('PreToolUse'), ['pfm internal orchestrator-wait',
-        `python3 -I "${configDir}/hooks/gpt-return-watch.py"`]);
+      assert.deepEqual(commands('PreToolUse'), ['pfm internal orchestrator-wait']);
       assert.deepEqual(commands('Stop'), [`python3 -I "${configDir}/hooks/gpt-agent-stop.py" foreman`]);
     }
   });

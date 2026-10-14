@@ -34,7 +34,7 @@ An anchor that cannot be read is a finding ("failed to look"), never an absence.
 3. Ledger truth: every `DONE` line's unit shows its changes in `git diff {baseline}`, nothing outside its unit; each requirement row has its case or assertion in the owning unit's test, read, and its run in a log or transcript, not in a claim.
 4. Repairs: a red went back to the child that built it; a second red of one child is `BLOCKED`; the parent edited a child's unit only when the cause was the frozen interface; a mechanical executor's `SPEC-DRIFT` was answered by a changed task file.
 5. Conformance spot-check on the highest-stakes rows (protected-data channels, contracts): each row against the code and its test.
-6. Cost and cadence: calls per foreman against its cap; a cap reached returned `FAILED`, never `DONE`; poll chains; a turn ended while a gate or child still ran.
+6. Cost and cadence: calls per foreman against its cap; a cap reached returned `FAILED`, never `DONE`; poll chains, a watcher on a sub-agent's return; a turn ended while a gate or child still ran.
 7. Liveness, in flight only: a transcript still growing, a seat's watch lines, a full-screen capture judged from process evidence.
 8. Landing: one lander per flight; every project's last full run in `gate.md`, passed; each new lander test watched failing; every finding terminal; the commit's diff matches the flight's; a landed sha on its integration branch.
 

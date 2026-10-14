@@ -8,11 +8,6 @@ model: gpt-6.1-sol[1m]
 effort: high
 add:
   hooks:
-    PreToolUse:
-      - matcher: Bash
-        hooks:
-          - type: command
-            command: python3 -I "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/gpt-return-watch.py"
     Stop:
       - hooks:
           - type: command

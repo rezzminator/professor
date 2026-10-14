@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -41,6 +42,10 @@ func HashTemplate(path string) (string, error) {
 }
 
 func ResolveStore(projectRoot, home string) (Store, error) {
+	return resolveStoreWithContext(context.Background(), projectRoot, home)
+}
+
+func resolveStoreWithContext(ctx context.Context, projectRoot, home string) (Store, error) {
 	blueprintRoot := filepath.Join(home, ".professor")
 	manifestPath := filepath.Join(projectRoot, ".professor", "manifest.json")
 	raw, err := readStoreFile(manifestPath)
@@ -55,7 +60,7 @@ func ResolveStore(projectRoot, home string) (Store, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Store{}, fmt.Errorf("UNREADABLE %s: %w", manifestPath, err)
 	}
-	return InspectStoreWithRunner(blueprintRoot, obs.Runner(deps.RealRunner{}))
+	return inspectStoreWithContext(ctx, blueprintRoot, obs.Runner(deps.RealRunner{}))
 }
 
 func InspectStore(root string) (Store, error) {
@@ -63,6 +68,10 @@ func InspectStore(root string) (Store, error) {
 }
 
 func InspectStoreWithRunner(root string, runner deps.Runner) (Store, error) {
+	return inspectStoreWithContext(context.Background(), root, runner)
+}
+
+func inspectStoreWithContext(ctx context.Context, root string, runner deps.Runner) (Store, error) {
 	if runner == nil {
 		return Store{}, errors.New("inspect blueprint store: runner is nil")
 	}
@@ -87,7 +96,7 @@ func InspectStoreWithRunner(root string, runner deps.Runner) (Store, error) {
 	if version == "" {
 		return Store{}, fmt.Errorf("UNREADABLE %s: empty version", versionPath)
 	}
-	sha, err := storeSHAWithRunner(absolute, runner)
+	sha, err := storeSHAWithContext(ctx, absolute, runner)
 	if err != nil {
 		return Store{}, err
 	}
@@ -99,6 +108,12 @@ func storeSHA(root string) (string, error) {
 }
 
 func storeSHAWithRunner(root string, runner deps.Runner) (string, error) {
+	return storeSHAWithContext(context.Background(), root, runner)
+}
+
+func storeSHAWithContext(ctx context.Context, root string, runner deps.Runner) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	if runner == nil {
 		return "", errors.New("UNREADABLE blueprint git state: runner is nil")
 	}
@@ -116,7 +131,7 @@ func storeSHAWithRunner(root string, runner deps.Runner) (string, error) {
 	if useFenceGit {
 		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
 	}
-	result, err := runner.Run(context.Background(), argv, deps.RunOptions{Dir: root, Env: env})
+	result, err := runner.Run(ctx, argv, deps.RunOptions{Dir: root, Env: env})
 	if err != nil {
 		return "", fmt.Errorf(
 			"UNREADABLE blueprint git state %s: %w: %s",

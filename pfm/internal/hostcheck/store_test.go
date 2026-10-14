@@ -175,6 +175,39 @@ func TestAccountDirSymlink(t *testing.T) {
 	}
 }
 
+// A foreign hook writes cache/write-state-sync/x.json under the store: Claude
+// rebuilds a cache, so the store holding only that is no identity and no row,
+// while a real stray (.claude.json) beside it still blocks.
+func TestStoreIdentityIgnoresStoreCache(t *testing.T) {
+	env := fixtureEnv(t)
+	writeFile(t, filepath.Join(env.Store, "cache", "write-state-sync", "x.json"), "{}")
+	assertRows(t, detect(t, "store-identity", env))
+	for _, row := range RunAll(env) {
+		if strings.Contains(row.Path, "cache") {
+			t.Errorf("row names the store cache: %s", row.Render(""))
+		}
+	}
+	cache := filepath.Join(env.Store, "cache")
+	if err := os.RemoveAll(cache); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), cache); err != nil {
+		t.Fatal(err)
+	}
+	if rows := detect(t, "store-identity", env); len(rows) == 0 {
+		t.Errorf("a store cache that is a symbolic link was never inspected")
+	}
+	if err := os.Remove(cache); err != nil {
+		t.Fatal(err)
+	}
+	stray := filepath.Join(env.Store, ".claude.json")
+	writeBorn(t, stray, "data", env.Now)
+	rows := detect(t, "store-identity", env)
+	if len(rows) != 1 || rows[0].Path != stray || rows[0].Severity != Block {
+		t.Fatalf("rows=%+v", rows)
+	}
+}
+
 func TestStoreIdentity(t *testing.T) {
 	for _, present := range []bool{false, true} {
 		t.Run(fmt.Sprint(present), func(t *testing.T) {
@@ -187,6 +220,9 @@ func TestStoreIdentity(t *testing.T) {
 			for _, entry := range installer.AccountEntries {
 				if slices.Contains(installer.RetiredStoreEntries, entry) {
 					continue // retired-store-entry's, a warning
+				}
+				if entry == "cache" {
+					continue // rebuildable, never identity: TestStoreIdentityIgnoresStoreCache
 				}
 				if entry == "state" {
 					entry = "state/mcp-discover-verdicts.json"

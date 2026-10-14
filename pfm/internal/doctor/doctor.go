@@ -332,7 +332,7 @@ func Run(
 		claudeAbsent,
 	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
-	printOpenProjectsDoctor(ctx, stdout, database, databaseErr, resolved.Home)
+	projectWarnings := printOpenProjectsDoctor(ctx, stdout, database, databaseErr, resolved.Home, dependencies.Env)
 	workbenchWarnings, workbenchFailures := printWorkbenchDoctor(stdout, ".", resolved.Home)
 	tally.warnings += workbenchWarnings
 	tally.failures += workbenchFailures
@@ -377,7 +377,11 @@ func Run(
 	case tally.warnings > 0:
 		return 1
 	}
-	fmt.Fprintln(stdout, "doctor: clean")
+	if projectWarnings > 0 {
+		fmt.Fprintf(stdout, "doctor: machine checks clean; project_updates warnings=%d\n", projectWarnings)
+	} else {
+		fmt.Fprintln(stdout, "doctor: clean")
+	}
 	return 0
 }
 

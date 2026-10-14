@@ -46,7 +46,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 ## Local
 
 - Scratch lives in `/tmp/{project}/{purpose}/`, outside the tree: `{project}` is this repo's directory name minus any leading dot, derived, never hardcoded.
-- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/{dev}/`); a scratch path named to a human or a model is absolute.
+- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/dev/`); a scratch path named to a human or a model is absolute.
 
 # Rules
 

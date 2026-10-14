@@ -1,6 +1,7 @@
 package gather
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,11 +10,24 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 const AccountLaunchClaimsName = ".pfm-launches"
+
+// accountBusyGrace is how long install's non-blocking acquire keeps retrying a
+// busy lock before it refuses the account. flock belongs to the open file
+// description, not the descriptor: a process forked by another goroutine
+// between fork and exec holds a copy of every descriptor, so a guard just
+// closed still blocks the next acquire until that child execs. The window is
+// milliseconds; a launch that really owns the account holds it far longer.
+const accountBusyGrace = time.Second
+
+// accountBusyPoll is the pause between those retries.
+const accountBusyPoll = 5 * time.Millisecond
 
 // AccountGuard serializes launch registration and install's activity scan with
 // account rewiring. A launch claim outlives the actor and identifies a process
@@ -31,8 +45,13 @@ type (
 )
 
 // AcquireAccountGuard waits for parent launch registration when launching,
-// while install refuses a busy account visibly. Claims precede process creation.
-func AcquireAccountGuard(dir string, launching bool) (_ *AccountGuard, err error) {
+// while install refuses a busy account visibly once accountBusyGrace passes.
+// Claims precede process creation.
+func AcquireAccountGuard(dir string, launching bool) (*AccountGuard, error) {
+	return acquireAccountGuardWithin(dir, launching, accountBusyGrace)
+}
+
+func acquireAccountGuardWithin(dir string, launching bool, grace time.Duration) (_ *AccountGuard, err error) {
 	if dir == "" {
 		return nil, nil
 	}
@@ -44,7 +63,7 @@ func AcquireAccountGuard(dir string, launching bool) (_ *AccountGuard, err error
 	if !launching {
 		lock |= syscall.LOCK_NB
 	}
-	if err := syscall.Flock(int(file.Fd()), lock); err != nil {
+	if err := flockAccount(file, lock, grace); err != nil {
 		return nil, errors.Join(fmt.Errorf("account ownership %s is busy: %w", dir, err), file.Close())
 	}
 	guard := &AccountGuard{file: file, dir: dir}
@@ -60,6 +79,26 @@ func AcquireAccountGuard(dir string, launching bool) (_ *AccountGuard, err error
 		return nil, errors.Join(fmt.Errorf("prepare account launch claim %s: %w", guard.claim, err), guard.Close())
 	}
 	return guard, nil
+}
+
+// flockAccount takes the lock, retrying an interrupted call and, for a
+// non-blocking request, a busy lock for up to grace.
+func flockAccount(file *os.File, lock int, grace time.Duration) error {
+	deadline := clock.Real.Now().Add(grace)
+	for {
+		err := syscall.Flock(int(file.Fd()), lock)
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, syscall.EINTR):
+		case lock&syscall.LOCK_NB != 0 && errors.Is(err, syscall.EWOULDBLOCK) && clock.Real.Now().Before(deadline):
+			if sleepErr := clock.Real.Sleep(context.Background(), accountBusyPoll); sleepErr != nil {
+				return fmt.Errorf("wait for busy account lock: %w", sleepErr)
+			}
+		default:
+			return err
+		}
+	}
 }
 
 // Record registers the real child's (or exec's) PID while ownership is held.

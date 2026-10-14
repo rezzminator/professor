@@ -16,6 +16,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+// DoctorHostOnlyEnv marks update's doctor children: project review is reported
+// separately after the machine update, never repeated by its health checks.
+const DoctorHostOnlyEnv = "PFM_UPDATE_DOCTOR_HOST_ONLY"
+
 var updateRunner deps.Runner = obs.Runner(deps.RealRunner{})
 
 func currentUpdateRunner() deps.Runner {
@@ -169,8 +173,19 @@ func runUpdateCandidateCommand(
 	args = append(args, commandArgs...)
 	var captured bytes.Buffer
 	stdoutWriter := io.MultiWriter(stdout, &captured)
+	env := updateSourceRepoEnv(sourceRepo)
+	if commandName == doctorCommand {
+		filtered := make([]string, 0, len(env)+1)
+		for _, entry := range env {
+			if !strings.HasPrefix(entry, DoctorHostOnlyEnv+"=") {
+				filtered = append(filtered, entry)
+			}
+		}
+		filtered = append(filtered, DoctorHostOnlyEnv+"=1")
+		env = filtered
+	}
 	process, err := currentUpdateRunner().Start(ctx, append([]string{candidate}, args...), deps.StartOptions{
-		Dir: workingDir, Env: updateSourceRepoEnv(sourceRepo), Stdout: stdoutWriter, Stderr: stderr,
+		Dir: workingDir, Env: env, Stdout: stdoutWriter, Stderr: stderr,
 	})
 	if err != nil {
 		return fmt.Errorf("target candidate %s: %w", commandName, err)

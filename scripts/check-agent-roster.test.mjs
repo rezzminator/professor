@@ -1,5 +1,5 @@
 // Exercise the roster checker against mirrors and effective config from the same compiler.
-import { lstatSync, readdirSync } from "node:fs";
+import { cpSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { before, after, test, assert, execFileSync, spawnSync, copyFileSync, existsSync, mkdirSync, mkdtempSync,
   readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, tmpdir, dirname, join, fileURLToPath } from "./node-test-helpers.mjs";
 
@@ -77,9 +77,9 @@ for (const [name, codex, project, codexCount, openCodeCount, machine, files] of 
 }
 
 for (const [name, path, header, status, message] of [
-  ["project from", ".claude/agents/local.md", "from: general-purpose", 2, /machine scope only/],
-  ["project abstract", ".claude/agents/local.md", "abstract: true", 2, /machine scope only/],
-  ["abstract retired", "templates/global/agents/layer.md", "abstract: true", 2, /abstract is retired/],
+  ["project from", ".claude/agents/local.md", "from: general-purpose", 5, /SOURCE REJECTED — python3 .*machine scope only/],
+  ["project abstract", ".claude/agents/local.md", "abstract: true", 5, /SOURCE REJECTED — python3 .*machine scope only/],
+  ["abstract retired", "templates/global/agents/layer.md", "abstract: true", 5, /SOURCE REJECTED — python3 .*abstract is retired/],
   ["quoted declaration key", "templates/global/agents/derived.md", '"from": general-purpose\nmodel: "smart"', 0, /agent-roster: clean/],
 ]) {
   test(`machine declaration headers: ${name}`, (t) => {
@@ -90,6 +90,43 @@ for (const [name, path, header, status, message] of [
     assert.match(result.out, message);
   });
 }
+
+test("inventory and model failures retain their classification before mirror checks", async (t) => {
+  for (const [name, header, missingMirrors, status, message] of [
+    ["original inline comment", "model: fable # note", false, 1, /frontmatter model "fable # note" is not one bare alias/],
+    ["declaration null", "from: general-purpose\nmodel: null", false, 1, /frontmatter model "null" is not one bare alias/],
+    ["declaration number", "from: general-purpose\nmodel: 42", false, 1, /frontmatter model "42" is not one bare alias/],
+    ["declaration list", "from: general-purpose\nmodel: [smart, fable]", false, 1, /frontmatter model "smart,fable" is not one bare alias/],
+    ["model failure without mirrors", "model: fable # note", true, 3, /frontmatter model "fable # note" is not one bare alias/],
+    ["no model lines without mirrors", "", true, 3, /agent model check read no model line .* the check did not run/],
+  ]) {
+    await t.test(name, (t) => {
+      const f = fixture(t, {}, { version: 1 }, {}, {}, true);
+      const declaration = header.startsWith("from:");
+      const path = declaration ? "templates/global/agents/derived.md" : ".claude/agents/alpha.md";
+      f.put(path, `---\nname: ${declaration ? 'derived' : 'alpha'}\ndescription: Fixture role\n${header}\n---\nRead.\n`);
+      f.put("demo-child/.claude/agents/beta.md", "---\nname: beta\ndescription: Fixture role\n---\nRead.\n");
+      cleanVerdictStub(f);
+      if (missingMirrors) {
+        rmSync(join(f.root, ".codex/agents"), { recursive: true });
+        rmSync(join(f.root, ".opencode/agent"), { recursive: true });
+      }
+      const result = check(f);
+      assert.equal(result.status, status, result.out);
+      assert.match(result.out, message);
+      if (missingMirrors) assert.match(result.out, /agent-roster: NOT GENERATED/);
+    });
+  }
+  await t.test("inventory PyYAML gap", (t) => {
+    const f = fixture(t);
+    f.put("bin/python3", "#!/bin/sh\nprintf '%s\\n' 'GAP install (agent source inventory is missing: PyYAML)' >&2\nexit 3\n");
+    execFileSync("chmod", ["+x", join(f.root, "bin/python3")]);
+    f.env.PATH = `${join(f.root, "bin")}:${f.env.PATH}`;
+    const result = check(f);
+    assert.equal(result.status, 4, result.out);
+    assert.match(result.out, /agent-roster: GAP install .*PyYAML/);
+  });
+});
 
 test("unrunnable binary is a named config ERROR", (t) => {
   const f = fixture(t);
@@ -130,6 +167,14 @@ test("a check that crashes is a named ERROR, not a roster mismatch", (t) => {
   const result = check(f);
   assert.equal(result.status, 1, result.out);
   assert.match(result.out, /compiler:.*(not a directory|ENOTDIR)/);
+});
+
+test("an inventory that crashes with a traceback is a named ERROR, not a rejected source", (t) => {
+  const f = fixture(t);
+  f.put("scripts/agent-source-inventory.py", "raise RuntimeError('invented inventory crash')\n");
+  const result = check(f);
+  assert.equal(result.status, 2, result.out);
+  assert.match(result.out, /agent-roster: ERROR — python3 [^\n]*Traceback[\s\S]*invented inventory crash/);
 });
 
 for (const [name, stdout, exit, message] of [
@@ -308,10 +353,13 @@ function renderShipped(capabilities) {
   const key = capabilities.join(',');
   if (rendered.has(key)) return rendered.get(key);
   const home = mkdtempSync(join(scratch, 'shipped-'));
+  const sourceRoot = join(home, 'source');
+  mkdirSync(sourceRoot);
+  cpSync(join(ROOT, 'templates'), join(sourceRoot, 'templates'), { recursive: true });
   mkdirSync(join(home, '.claude'), { recursive: true });
   mkdirSync(join(home, '.codex'), { recursive: true });
   mkdirSync(join(home, '.config/engine-sync'), { recursive: true });
-  copyFileSync(join(ROOT, 'templates/global/engine-sync/config.json'), join(home, '.config/engine-sync/config.json'));
+  copyFileSync(join(sourceRoot, 'templates/global/engine-sync/config.json'), join(home, '.config/engine-sync/config.json'));
   const env = { ...process.env, HOME: home };
   for (const name of ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'ENGINE_SYNC_HOME', 'ENGINE_SYNC_STATE', 'CODEX_HOME',
     'CLAUDE_CONFIG_DIR']) delete env[name];
@@ -320,9 +368,9 @@ function renderShipped(capabilities) {
     const result = spawnSync(binary, args, { env, encoding: 'utf8', timeout: 120000 });
     return { status: result.status, out: result.stdout + result.stderr };
   };
-  const global = run(['global', '--home', home, '--source-repo', ROOT, '--claude-config-dir', join(home, '.claude'),
+  const global = run(['global', '--home', home, '--source-repo', sourceRoot, '--claude-config-dir', join(home, '.claude'),
     '--codex-home', join(home, '.codex'), ...flags]);
-  const doctor = run(['doctor', '--machine', '--home', home, '--source-repo', ROOT, '--claude-config-dir', join(home, '.claude'),
+  const doctor = run(['doctor', '--machine', '--home', home, '--source-repo', sourceRoot, '--claude-config-dir', join(home, '.claude'),
     '--codex-home', join(home, '.codex'), ...flags]);
   const render = { home, global, doctor };
   rendered.set(key, render);
@@ -357,8 +405,14 @@ test('the shipped variants render with zero errors with and without the gpt-agen
     assert.equal(render.global.status, 0, `engine-sync global (${label}): ${render.global.out}`);
     assert.doesNotMatch(render.global.out, renderErrors, `engine-sync global (${label})`);
     assert.doesNotMatch(render.doctor.out, /SECTION-DRIFT/, `engine-sync doctor --machine (${label})`);
-    for (const name of otherVariants)
+    for (const name of otherVariants) {
       assert.ok(renderedText(render, name), `${label}: ${name} was not rendered`);
+      assert.equal(realpathSync(renderedPath(render, name)),
+        join(render.home, 'source/templates/generated/agents', `${name}.md`),
+        `${label}: ${name} must be rendered into the copied source tree`);
+    }
+    const gitter = parseFrontmatter('gitter', readFileSync(join(render.home, '.config/opencode/agents/gitter.md'), 'utf8'));
+    assert.equal(gitter.permission.bash['git *'], 'allow', `${label}: OpenCode gitter must retain Git write permission`);
   }
 });
 
@@ -395,7 +449,7 @@ for (const [name, model, effort, role] of twins) {
     assert.doesNotMatch(text, /\/(Users|home|root)\/|\/private\//, `${name}: carries a machine-absolute path`);
     assert.ok(!text.includes(render.home), `${name}: carries the render's home directory`);
     for (const stray of filesNamed(render.home, name).filter((path) => !path.startsWith(join(render.home, '.claude/agents'))
-      && !path.includes('/generated/claude-agents/')))
+      && !path.startsWith(`${join(render.home, 'source')}/`) && !path.includes('/generated/claude-agents/')))
       assert.fail(`${name}: ${stray} is a Codex role or an OpenCode agent; a GPT twin is Claude-only`);
     if (!role) {
       assert.equal(fm.role, undefined, `${name}: a general-purpose worker has no role`);
@@ -425,8 +479,10 @@ for (const [name, model, effort, role] of twins) {
       assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-flights-lander']);
     }
     if (role === 'flights-lander') {
-      assert.ok(fm.tools.split(',').map((tool) => tool.trim()).includes('Agent'),
-        `${name}: lander manual requires Agent for review dispatch`);
+      assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),
+        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent', 'mcp__sub-agent-compact__compact',
+         'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back', 'Skill'],
+        `${name}: tools must match the GPT engine's supported role contract (Agent: the lander's review dispatch)`);
       for (const reviewer of ['gpt-reviewer', 'gpt-reviewer-pro'])
         assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
     }

@@ -61,7 +61,7 @@ type RetiredNameFailure struct {
 	Error string `json:"error"`
 }
 
-// RetiredNameScan distinguishes unreadable files from readable text beyond the scan limit.
+// RetiredNameScan distinguishes read failures from incomplete scanner coverage.
 type RetiredNameScan struct {
 	Hits       []RetiredNameHit     `json:"hits"`
 	Failures   []RetiredNameFailure `json:"failures"`

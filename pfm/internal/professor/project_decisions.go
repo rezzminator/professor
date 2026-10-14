@@ -117,6 +117,14 @@ func writeKeptHuman(stdout io.Writer, r projectReport) {
 				"      untaken upstream change: git -C %s diff %s %s -- templates/%s\n",
 				r.Store.Root, item.Pin.Kept.FromSHA, item.Pin.PinnedSHA, item.Template,
 			)
+		} else {
+			fmt.Fprintln(
+				stdout,
+				"      untaken upstream change unavailable: no recorded git history; compare the current template and local file by hand",
+			)
+			fmt.Fprintf(stdout, "      review: diff -u %s %s\n",
+				shellWord(filepath.Join(r.Store.Root, "templates", filepath.FromSlash(item.Template))),
+				shellWord(filepath.Join(r.Root, filepath.FromSlash(item.Local))))
 		}
 		fmt.Fprintf(stdout, "      ported the untaken change after all? pfm update pin %s --unkeep\n", item.Local)
 	}
@@ -366,12 +374,16 @@ func writeKeptEarlier(stdout io.Writer, item projectReportItem) {
 	if item.Pin.Kept == nil {
 		return
 	}
+	provenance := "untaken change has no recorded git history"
+	if gitObjectName.MatchString(item.Pin.Kept.FromSHA) {
+		provenance = "untaken since " + item.Pin.Kept.FromSHA
+	}
 	fmt.Fprintf(
 		stdout,
-		"      kept earlier (%s): %s — untaken since %s\n",
+		"      kept earlier (%s): %s — %s\n",
 		pyvalue.OneLine(item.Pin.Kept.At),
 		pyvalue.OneLine(item.Pin.Kept.Reason),
-		pyvalue.OneLine(item.Pin.Kept.FromSHA),
+		provenance,
 	)
 }
 

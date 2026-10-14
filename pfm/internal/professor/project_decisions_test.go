@@ -1,7 +1,9 @@
 package professor
 
 import (
+	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -68,5 +70,39 @@ func TestPartitionRetiredMovesCoveredHitsOutOfReview(t *testing.T) {
 	want := []RetiredAccepted{{Rule: rules[0], Hits: 2}, {Rule: rules[1], Hits: 0}, {Rule: rules[2], Hits: 1}}
 	if !reflect.DeepEqual(scan.Accepted, want) || scan.AcceptedHits != 2 {
 		t.Fatalf("accepted = %+v (total %d), want %+v (total 2)", scan.Accepted, scan.AcceptedHits, want)
+	}
+}
+
+func TestKeptReportsGitHistoryOrExplicitManualReview(t *testing.T) {
+	for _, row := range []struct{ name, from, pinned, kept, earlier string }{
+		{"git history", "aaa1111", "bbb2222", "untaken upstream change: git -C /blueprint diff aaa1111 bbb2222 -- templates/project/a.md", "untaken since aaa1111"},
+		{"self hosted", UnknownSelfHostedSHA, UnknownSelfHostedSHA, "untaken upstream change unavailable: no recorded git history; compare the current template and local file by hand\n      review: diff -u /blueprint/templates/project/a.md /project/.claude/a.md", "untaken change has no recorded git history"},
+		{"missing earlier history", UnknownSelfHostedSHA, "bbb2222", "untaken upstream change unavailable: no recorded git history; compare the current template and local file by hand\n      review: diff -u /blueprint/templates/project/a.md /project/.claude/a.md", "untaken change has no recorded git history"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			item := projectReportItem{
+				Status:   projectKept,
+				Local:    ".claude/a.md",
+				Template: "project/a.md",
+				Pin: FilePin{
+					PinnedSHA: row.pinned, Kept: &KeptNote{FromSHA: row.from, At: "2026-10-12", Reason: "local tool"},
+				},
+			}
+			report := projectReport{
+				Root:   "/project",
+				Store:  Store{Root: "/blueprint"},
+				Counts: map[projectStatus]int{projectKept: 1},
+				Items:  []projectReportItem{item},
+			}
+			var kept, earlier bytes.Buffer
+			writeKeptHuman(&kept, report)
+			writeKeptEarlier(&earlier, item)
+			if !strings.Contains(kept.String(), row.kept) {
+				t.Errorf("kept output = %q, want %q", kept.String(), row.kept)
+			}
+			if !strings.Contains(earlier.String(), row.earlier) {
+				t.Errorf("earlier output = %q, want %q", earlier.String(), row.earlier)
+			}
+		})
 	}
 }

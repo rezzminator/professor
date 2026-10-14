@@ -13,7 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/update"
@@ -34,7 +35,8 @@ var openProjectDeadline = 60 * time.Second
 // database's transcript and rollout cwds, plus the current directory) gets its
 // report built, and each one with a row no verb has closed prints one warning
 // row naming every such file. The rows are advisory and add nothing to the
-// tally: an unresolved update never changes doctor's exit code. A project whose
+// machine tally: an unresolved update never changes doctor's exit code.
+// The returned advisory count prevents the final line claiming all is clean. A project whose
 // report cannot be built — or a directory that cannot be inspected for any
 // cause but absence — prints its own row, and a chat index that cannot be
 // read says so, never a shorter list.
@@ -44,9 +46,16 @@ func printOpenProjectsDoctor(
 	database *store.Store,
 	databaseErr error,
 	home string,
-) {
+	env paths.Env,
+) (warnings int) {
+	if env.Get(update.DoctorHostOnlyEnv) == "1" {
+		fmt.Fprintf(stdout, "doctor: project_updates skipped (machine-update health check: %s=1)\n",
+			update.DoctorHostOnlyEnv)
+		return 0
+	}
 	var cwds []string
 	if cwd, err := os.Getwd(); err != nil {
+		warnings++
 		fmt.Fprintf(stdout, "doctor: warning project_updates current directory UNREADABLE: %v\n", err)
 	} else {
 		cwds = append(cwds, cwd)
@@ -58,6 +67,11 @@ func printOpenProjectsDoctor(
 		cwds = append(cwds, indexed...)
 	}
 	if indexErr != nil {
+		// A database never created holds no chat: its row stays, but a fresh
+		// host is not an advisory finding that ends doctor short of clean.
+		if !errors.Is(indexErr, fleetdb.ErrAbsent) {
+			warnings++
+		}
 		fmt.Fprintf(
 			stdout,
 			"doctor: warning project_updates chat index unreadable (%v); only the chats it did read are checked, plus the current directory\n",
@@ -82,12 +96,15 @@ func printOpenProjectsDoctor(
 		len(roots)+len(unreadable),
 		open,
 	)
+	return warnings + open
 }
 
 // buildOpenProjectRows builds each root's row on a bounded pool within
 // openProjectDeadline; a root still building then gets a timed-out row and
-// its worker is abandoned, never waited for.
+// its context is cancelled. A blocked filesystem read is not waited for.
 func buildOpenProjectRows(roots []string, home string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), openProjectDeadline)
+	defer cancel()
 	type built struct {
 		index int
 		row   string
@@ -98,21 +115,25 @@ func buildOpenProjectRows(roots []string, home string) []string {
 	go func() {
 		slots := make(chan struct{}, openProjectWorkers)
 		for index, root := range roots {
-			slots <- struct{}{}
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			go func() {
 				defer func() { <-slots }()
-				done <- built{index: index, row: openProjectRow(root, home)}
+				if ctx.Err() == nil {
+					done <- built{index: index, row: openProjectRow(ctx, root, home)}
+				}
 			}()
 		}
 	}()
-	deadline := clock.Real.NewTimer(openProjectDeadline)
-	defer deadline.Stop()
 	for received := 0; received < len(roots); received++ {
 		select {
 		case result := <-done:
 			results[result.index] = result.row
 			finished[result.index] = true
-		case <-deadline.C():
+		case <-ctx.Done():
 			for index, root := range roots {
 				if !finished[index] {
 					results[index] = fmt.Sprintf(
@@ -200,8 +221,11 @@ func unreadableCwdRow(cwd string, err error) string {
 }
 
 // openProjectRow is one project's warning row, or "" when every row is closed.
-func openProjectRow(root, home string) string {
-	rows, err := professor.OpenProjectRows(root, home, update.ScanRetiredNames)
+func openProjectRow(ctx context.Context, root, home string) string {
+	scan := func(root string, pinned map[string]bool) professor.RetiredNameScan {
+		return update.ScanRetiredNamesWithContext(ctx, root, pinned)
+	}
+	rows, err := professor.OpenProjectRowsWithContext(ctx, root, home, scan)
 	if err != nil {
 		return fmt.Sprintf("doctor: warning project_updates root=%s UNREADABLE: %v\n", root, err)
 	}

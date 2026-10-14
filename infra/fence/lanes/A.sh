@@ -784,12 +784,14 @@ bad=""
 # Judge the compiled Claude registry: inherited engine settings are already resolved,
 # unmet capabilities have no linked agent, and shared files are never installed.
 agent_names=""
-if ! agent_names="$(python3 -I "$BLUEPRINT/scripts/agent-source-inventory.py" "$HOME/.claude/agents" --codex --names 2>&1)"; then
+if agent_names="$(python3 -I "$BLUEPRINT/scripts/agent-source-inventory.py" "$HOME/.claude/agents" --codex --names 2>&1)"; then
+  n_md="$(grep -c . <<<"$agent_names" || true)"
+  [ "$n_md" -gt 0 ] || bad="$bad no effective global Claude agents eligible for Codex to compile;"
+else
   bad="$bad effective global agents NOT SCANNED: $agent_names;"
   agent_names=""
+  n_md=0
 fi
-n_md="$(grep -c . <<<"$agent_names" || true)"
-[ "$n_md" -gt 0 ] || bad="$bad no effective global Claude agents eligible for Codex to compile;"
 first="$(pfm codex agents 2>/tmp/lane-a-codex-agents.err)"
 first_rc=$?
 _lane_log_only "   A.09: first run printed $(printf '%s\n' "$first" | grep -c .) line(s); $(printf '%s' "$first" | grep -cE '^(missing|copy|wrong-target) ') link(s) were not yet correct"

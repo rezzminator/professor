@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
@@ -405,7 +406,13 @@ func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, f
 	if carry {
 		configs[target.ID] = options
 	}
-	return message, func() error {
+	return message, writeSettingsDocument(path, document), nil
+}
+
+// writeSettingsDocument is the edit that writes document back through a
+// settings.json symlink, keeping the file's mode.
+func writeSettingsDocument(path string, document map[string]any) func() error {
+	return func() error {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
 			return err
@@ -422,5 +429,47 @@ func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, f
 			return err
 		}
 		return atomicfile.Write(resolved, content.Bytes(), info.Mode().Perm())
-	}, nil
+	}
+}
+
+// retiredClaudePlugins are plugin ids once ours that a successor replaced,
+// keyed by the successor's bare name. Doctor flags each enabled one
+// (ClaudePluginGaps); install disables it, never uninstalls it, once the
+// successor is ensured.
+var retiredClaudePlugins = map[string][]string{
+	"effort-live-control": {"agent-effort@agent-effort", "agent-effort@agent-effort-dev"},
+}
+
+// planRetiredPluginDisable plans the settings.json edit that sets every
+// retired id of target's name false in enabledPlugins when it is enabled. It
+// returns "" when none is enabled or the file is absent.
+func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, func() error, error) {
+	retired := retiredClaudePlugins[target.Name]
+	if len(retired) == 0 {
+		return "", nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil, nil
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var document map[string]any
+	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
+		return "", nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	enabled, _ := document["enabledPlugins"].(map[string]any)
+	var disabled []string
+	for _, id := range retired {
+		if enabled[id] == true {
+			enabled[id] = false
+			disabled = append(disabled, id)
+		}
+	}
+	if len(disabled) == 0 {
+		return "", nil, nil
+	}
+	message := "disable " + strings.Join(disabled, ", ") + " in " + path + ": retired, " + target.ID + " replaces it"
+	return message, writeSettingsDocument(path, document), nil
 }

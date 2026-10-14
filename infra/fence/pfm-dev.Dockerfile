@@ -12,10 +12,13 @@ FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffb
 # libc6-dev are the C toolchain `go test -race` needs (the race runtime is
 # cgo): CGO_ENABLED stays 0 below, so every build stays static, and the gate's
 # race step (infra/fence/checks.sh checks_pfm_race) turns cgo on for itself.
+# shellcheck is the linter the plugins' scripts/gate.sh runs over their shell
+# scripts (apt's release, unpinned like the rest of this line).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 tcpdump \
     libgl1 libglib2.0-0 libxcb1 \
     gcc libc6-dev \
+    shellcheck \
  && rm -rf /var/lib/apt/lists/*
 # Go pinned to pfm/go.mod — bump both together or the fence tests a different compiler.
 ARG GO_VERSION=1.27.1

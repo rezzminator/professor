@@ -29,7 +29,7 @@ func TestInstallManagedCleanup(t *testing.T) {
 			case "keyless":
 				writeFixture(t, path, `{}`)
 			case "correct":
-				writeFixture(t, path, `{"cleanupPeriodDays":36500}`)
+				writeFixture(t, path, `{"cleanupPeriodDays":36500,"prependPlugins":[]}`)
 			case "preview":
 				apply = false
 			case "off":
@@ -75,7 +75,7 @@ func TestInstallManagedCleanup(t *testing.T) {
 			switch scenario {
 			case "absent", "wrong", "keyless", "correct":
 				raw, err := os.ReadFile(path)
-				content := "{\"cleanupPeriodDays\":36500}\n"
+				content := "{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}\n"
 				if scenario == "correct" {
 					content = strings.TrimSuffix(content, "\n")
 				}
@@ -182,7 +182,9 @@ func TestInspectManagedCleanup(t *testing.T) {
 		keyAbsent bool
 	}{
 		{`{"cleanupPeriodDays":30}`, "wrong", 36500, 30, false},
-		{`{"cleanupPeriodDays":36500}`, "ok", 36500, 36500, false},
+		{`{"cleanupPeriodDays":36500,"prependPlugins":[]}`, "ok", 36500, 36500, false},
+		{`{"cleanupPeriodDays":36500,"prependPlugins":null}`, "ok", 36500, 36500, false},
+		{`{"cleanupPeriodDays":36500}`, "no-prepend", 36500, 36500, false},
 		{"{", "unreadable", 36500, 0, false},
 		{`{}`, "wrong", 36500, 0, true},
 		{`{}`, "wrong", 0, 0, true},
@@ -239,7 +241,7 @@ func TestInstallManagedCleanupDeclinedSudo(t *testing.T) {
 	}
 	want := "  warn    managed-cleanup " + path + " not written: permission denied; " + lines[0] + ": permission denied; run: sudo mkdir -p " + shellCommandLine(
 		dir,
-	) + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500}' | sudo tee " + shellCommandLine(
+	) + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}' | sudo tee " + shellCommandLine(
 		path,
 	) + " >/dev/null"
 	if lines[1] != want || installer.report.Changed != 0 {
@@ -354,12 +356,128 @@ func TestInstallManagedCleanupInRun(t *testing.T) {
 				}
 				want := "  warn    managed-cleanup " + path + " not written: permission denied; " + sudo + ": permission denied; run: sudo mkdir -p " + shellCommandLine(
 					dir,
-				) + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500}' | sudo tee " + shellCommandLine(
+				) + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}' | sudo tee " + shellCommandLine(
 					path,
 				) + " >/dev/null\n"
 				if !strings.Contains(output.String(), want) {
 					t.Fatalf("warning missing:\n%s", output.String())
 				}
+			}
+		})
+	}
+}
+
+// TestInstallManagedCleanupPrependPlugins pins the prependPlugins rule: the key
+// is added only when no managed source sets it to a list (Claude Code ignores
+// any other value, and every hidden drop-in), an existing value and every other
+// key survive, and a source that cannot be read is named, never ignored.
+func TestInstallManagedCleanupPrependPlugins(t *testing.T) {
+	const (
+		bothKeys   = `{"cleanupPeriodDays":36500,"prependPlugins":[]}` + "\n"
+		cleanupKey = `{"cleanupPeriodDays":36500}` + "\n"
+	)
+	for _, tc := range []struct {
+		name string
+		// files maps a path under the managed settings' parent to its content.
+		files map[string]string
+		// content is pfm.json after install; unchanged keeps the fixture.
+		content string
+		// output is the install output, with {dir} for the managed directory.
+		output string
+	}{
+		{
+			name:    "key absent is added",
+			files:   map[string]string{"managed-settings.d/pfm.json": `{"cleanupPeriodDays":36500}`},
+			content: bothKeys,
+			output:  "  change  write {dir}/pfm.json\n",
+		},
+		{
+			name: "existing value and other keys are kept",
+			files: map[string]string{
+				"managed-settings.d/pfm.json": `{"cleanupPeriodDays":30,"model":"opus","prependPlugins":["org@market"]}`,
+			},
+			content: `{"cleanupPeriodDays":36500,"model":"opus","prependPlugins":["org@market"]}` + "\n",
+			output:  "  change  write {dir}/pfm.json\n",
+		},
+		{
+			name: "existing null is kept",
+			files: map[string]string{
+				"managed-settings.d/pfm.json": `{"cleanupPeriodDays":36500,"prependPlugins":null}`,
+			},
+			content: "unchanged",
+			output: "  warn    managed-cleanup prependPlugins in {dir}/pfm.json is not a list of plugin ids, " +
+				"which Claude Code ignores; left alone\n  ok      {dir}/pfm.json\n",
+		},
+		{
+			name:    "other drop-in sets it",
+			files:   map[string]string{"managed-settings.d/10-org.json": `{"prependPlugins":["org@market"]}`},
+			content: cleanupKey,
+			output: "  skip    managed-cleanup prependPlugins is set by {dir}/10-org.json; left alone\n" +
+				"  change  write {dir}/pfm.json\n",
+		},
+		{
+			name:    "platform managed-settings.json sets it",
+			files:   map[string]string{"managed-settings.json": `{"prependPlugins":[]}`},
+			content: cleanupKey,
+			output: "  skip    managed-cleanup prependPlugins is set by {root}/managed-settings.json; left alone\n" +
+				"  change  write {dir}/pfm.json\n",
+		},
+		{
+			name: "other source sets it and pfm drop-in is correct",
+			files: map[string]string{
+				"managed-settings.d/pfm.json":    `{"cleanupPeriodDays":36500}`,
+				"managed-settings.d/10-org.json": `{"prependPlugins":["org@market"]}`,
+			},
+			content: "unchanged",
+			output: "  skip    managed-cleanup prependPlugins is set by {dir}/10-org.json; left alone\n" +
+				"  ok      {dir}/pfm.json\n",
+		},
+		{
+			name:    "other drop-in's non-list value does not count",
+			files:   map[string]string{"managed-settings.d/10-org.json": `{"prependPlugins":"org@market"}`},
+			content: bothKeys,
+			output:  "  change  write {dir}/pfm.json\n",
+		},
+		{
+			name:    "hidden drop-in is not a source",
+			files:   map[string]string{"managed-settings.d/.10-org.json": `{"prependPlugins":["org@market"]}`},
+			content: bothKeys,
+			output:  "  change  write {dir}/pfm.json\n",
+		},
+		{
+			name:    "unreadable other source blocks the key",
+			files:   map[string]string{"managed-settings.d/10-org.json": `{`},
+			content: cleanupKey,
+			output: "  warn    managed-cleanup prependPlugins not added: {dir}/10-org.json: " +
+				"unexpected end of JSON input\n  change  write {dir}/pfm.json\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "managed-settings.d")
+			for name, content := range tc.files {
+				writeFixture(t, filepath.Join(root, name), content)
+			}
+			var output bytes.Buffer
+			installer := &engine{
+				apply: true,
+				options: Options{
+					ManagedSettingsDir: dir, CleanupPeriodDays: 36500, RequireManagedCleanup: true, Stdout: &output,
+				},
+			}
+			if err := installer.installManagedCleanup(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := strings.NewReplacer("{dir}", dir, "{root}", root).Replace(tc.output)
+			if output.String() != want {
+				t.Fatalf("output=%q want=%q", output.String(), want)
+			}
+			wantContent := tc.content
+			if wantContent == "unchanged" {
+				wantContent = tc.files["managed-settings.d/pfm.json"]
+			}
+			if raw, err := os.ReadFile(filepath.Join(dir, "pfm.json")); err != nil || string(raw) != wantContent {
+				t.Fatalf("pfm.json=%q err=%v want=%q", raw, err, wantContent)
 			}
 		})
 	}

@@ -273,7 +273,7 @@ func jailHome(base string) (func(), error) {
 	managedDir := filepath.Join(home, "managed-settings.d")
 	if err := os.MkdirAll(managedDir, 0o700); err != nil {
 		warnSetup("create managed settings directory: %v", err)
-	} else if err := os.WriteFile(filepath.Join(managedDir, "pfm.json"), []byte("{\"cleanupPeriodDays\":36500}\n"), 0o600); err != nil {
+	} else if err := os.WriteFile(filepath.Join(managedDir, "pfm.json"), []byte("{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}\n"), 0o600); err != nil {
 		warnSetup("seed managed settings: %v", err)
 	}
 	if err := os.Setenv(paths.EnvManagedSettingsDir, managedDir); err != nil {
@@ -389,7 +389,7 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	}
 	if err := os.WriteFile(
 		filepath.Join(managedDir, "pfm.json"),
-		[]byte("{\"cleanupPeriodDays\":36500}\n"),
+		[]byte("{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}\n"),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -656,7 +656,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	}
 	if err := os.WriteFile(
 		filepath.Join(managedDir, "pfm.json"),
-		[]byte("{\"cleanupPeriodDays\":36500}\n"),
+		[]byte("{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}\n"),
 		0o600,
 	); err != nil {
 		t.Fatal(err)

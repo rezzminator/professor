@@ -178,7 +178,8 @@ func runInstallE2E(t *testing.T) {
 			managedDropIn = "/Library/Application Support/ClaudeCode/managed-settings.d/pfm.json"
 		}
 		if raw, readErr := os.ReadFile(managedDropIn); readErr != nil ||
-			!strings.Contains(string(raw), `"cleanupPeriodDays":`) {
+			!strings.Contains(string(raw), `"cleanupPeriodDays":`) ||
+			!strings.Contains(string(raw), `"prependPlugins":[]`) {
 			t.Fatalf("managed drop-in %s = %q, err=%v", managedDropIn, raw, readErr)
 		}
 		var err error

@@ -447,7 +447,10 @@ func TestCleanHomeStagesOneSessionStoreAndManagedCleanup(t *testing.T) {
 		}
 	}
 	managed := filepath.Join(runtime.Paths.ManagedSettingsDir, "pfm.json")
-	if raw, err := os.ReadFile(managed); err != nil || strings.TrimSpace(string(raw)) != `{"cleanupPeriodDays":36500}` {
+	if raw, err := os.ReadFile(
+		managed,
+	); err != nil ||
+		strings.TrimSpace(string(raw)) != `{"cleanupPeriodDays":36500,"prependPlugins":[]}` {
 		t.Fatalf("managed settings=%q error=%v", raw, err)
 	}
 	if raw, err := os.ReadFile(

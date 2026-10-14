@@ -169,6 +169,9 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
+    "global/skills/imagine-core/classify-rules.json": {
+      "curated": true
+    },
     "global/skills/imagine-core/SKILL.md": {
       "curated": true
     },

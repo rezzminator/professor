@@ -273,7 +273,7 @@ func RenderSubagents(
 		if task.Type == localAgentTask {
 			if tree == nil {
 				tree = scanAgentTree(data.TranscriptPath, prices)
-				tree.judgeLiveness(now, finishedTasks(data.Tasks))
+				tree.judgeLiveness(now, liveTasks(data.Tasks))
 			}
 			read := *tree.read(task.ID)
 			read.noCacheWindow = openAIModel(task.Model) || openAIModel(read.model)

@@ -406,3 +406,43 @@ Resolved:
 ## 2026-10-12 — /ultimate-spec shipped a 7 MB Design artboard that the editor silently dropped
 Observed: the build was published to a Design canvas as one inline artboard (three.js, data and app, 7.3 MB). The editor syncs an artboard only up to 240 KB inline (2 MB as an uploaded blob), so the canvas opened with "no artboards yet" and the user found it by screenshot; a local test under the runtime and the preview CSP had passed. The fix was a 16 KB artboard loading two uploaded script assets by `/_blob/<id>`.
 Amend: templates/global/commands/ultimate-spec.md#U5 — the builder's brief carries the target's own limits (an editor's per-file sync cap, a frame's CSP) and the build is met on the real target, not a stand-in, before its first publish.
+
+## 2026-10-13 — v0.81.0 release: doc units landed before their code
+Observed: documentation units were written before the code they describe settled, so later rounds reworked both.
+Amend: .claude/commands/pfm/release.md — order doc units after the code units they describe.
+Resolved:
+
+## 2026-10-13 — v0.81.0 release: GATE ran while another phase committed to CANDIDATE
+Observed: a GATE ran against a CANDIDATE that another phase was still committing to, so its verdict described a superseded sha and the round repeated.
+Amend: .claude/commands/pfm/release.md — GATE never runs while any phase commits to CANDIDATE.
+Resolved:
+
+## 2026-10-13 — v0.81.0 release: review prose tripped ready rule R1 twice
+Observed: review report prose quoting `status:`, `- **F{n}:` or `F9 · resolved` matched the ready check's R1 grammar; READY failed twice on prose, not on findings.
+Amend: .claude/agents/releaser.md — a REVIEW revise round runs the R1 grammar over its reports before returning DONE.
+Resolved:
+
+## 2026-10-13 — v0.81.0 release: pfm/internal/** and gitlink-only deltas got no area reviewer
+Observed: deltas under pfm/internal/** and plugin gitlink bumps matched no review area, so no reviewer read them.
+Amend: .claude/agents/releaser.md — every changed path maps to a review area; a gitlink delta reviews the plugin's own range.
+Resolved:
+
+## 2026-10-13 — v0.81.0 release: plugin pins do not reach installs
+Observed: `pfm install` takes a plugin from its repo's main with no ref (pfm/internal/installer claude_plugins.go), so the submodule pin is decorative and a plugin main release changes every adopter at once.
+Amend: judgment — pfm install should honour the pinned ref, or the release flow must treat a plugin main release as a publication.
+Resolved:
+
+## 2026-10-13 — v0.81.0 release: leak-check in a release worktree lacked LEAK_TERMS
+Observed: the release worktree has no untracked scripts/leak-terms.txt, so leak-check there ran without the private term list until LEAK_TERMS was passed by hand.
+Amend: .claude/commands/pfm/release.md — the NOTES step names LEAK_TERMS pointing at the main checkout's term list.
+Resolved:
+
+## 2026-10-13 — v0.81.0 release: SUMMARY taken from commit titles
+Observed: SUMMARY wording copied from commit titles described behaviour the code no longer had after reverts.
+Amend: .claude/commands/pfm/release.md — SUMMARY is checked against the candidate's code, never taken from commit titles.
+Resolved:
+
+## 2026-10-13 — v0.81.0 release: a concurrent chat committing to develop forced repeated rounds
+Observed: another chat kept landing on develop during the release, forcing repeated REVIEW/NOTES/GATE rounds until a hold was agreed.
+Amend: .claude/commands/pfm/release.md — the release opens by announcing a develop hold to live chats on the project.
+Resolved:

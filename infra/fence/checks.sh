@@ -28,6 +28,10 @@ checks_templates_demo_serial() {
   run "templates: demo fence self-tests" -- bash -c 'for t in "$1"/infra/demo/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
 }
 
+checks_templates_plugin_logs() {
+  run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
+}
+
 checks_templates_leak() {
   head_ "templates — leak gate"
   run "templates: leak-check self-test" -- bash "$REPO_ROOT/scripts/test-leak-check.sh"
@@ -647,7 +651,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
-  checks_named_template_steps "$add" clone leak placeholders scratch-paths descriptions mirrors \
+  checks_named_template_steps "$add" clone leak plugin-logs placeholders scratch-paths descriptions mirrors \
     global-variants release-check codex-sync refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do

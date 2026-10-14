@@ -115,7 +115,7 @@
     ".claude/scripts/unit-path.sh": "8215db4480427de80aa125c77d9d3f5a1cf76ef14363e81dd86b07eaf0b8ead8",
     ".claude/settings.json": "a597044e71b987be74274cb8f59e44bba33facea60f798ddb57d91ca18770909",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
-    ".gitignore": "80d1ad72eeaed2351f6d938350b77dbfea8c246c452a9d77352a2e1d405772a7",
+    ".gitignore": "1488df56cb9051fee2b92c88a8b1a84625eb872fa7538810ac726085f9b0cbb7",
     "CLAUDE.md": "fc36412c081e1a20a6f9eb705af1896dd3c488e0174774593ec8554eca2019f6",
     "docs/commands/pcm/references/audit-scopes.md": "697602baeda9943ad3299cb7d9b9924fea0d9d8b47144b03af81eec89022a760",
     "docs/commands/pcm/references/refresh.md": "d21e629f15337e2c36c150be0128d05f1782dfc1681aa1fd342ed7e6c7df4038",

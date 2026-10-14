@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,7 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 // indexChatIn records one Claude transcript that ran in cwd in the cache
@@ -106,6 +111,7 @@ func TestDoctorWarnsOncePerProjectNamingEveryUnresolvedRow(t *testing.T) {
 		"pfm doctor --project-updates --root " + open,
 		"doctor: warning project_updates root=" + broken + " UNREADABLE: ",
 		"doctor: project_updates projects=3 unresolved=2 ",
+		"doctor: machine checks clean; project_updates warnings=2\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out)
@@ -133,7 +139,11 @@ func TestDoctorSaysSoWhenTheChatIndexCannotBeRead(t *testing.T) {
 	t.Chdir(open)
 
 	var stdout bytes.Buffer
-	printOpenProjectsDoctor(context.Background(), &stdout, nil, errors.New("pfm.db is locked"), t.TempDir())
+	if warnings := printOpenProjectsDoctor(
+		context.Background(), &stdout, nil, errors.New("pfm.db is locked"), t.TempDir(), &paths.MapEnv{},
+	); warnings < 2 {
+		t.Errorf("warnings=%d, want the unreadable index and the open project counted", warnings)
+	}
 	for _, want := range []string{
 		"doctor: warning project_updates chat index unreadable (pfm.db is locked); ",
 		"doctor: warning project_updates root=" + open + " unresolved=1 — NEW project/commands/added.md",
@@ -142,6 +152,50 @@ func TestDoctorSaysSoWhenTheChatIndexCannotBeRead(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+// TestDoctorAbsentChatIndexIsNoAdvisoryWarning: a fresh host's chat index was
+// never created, so it holds no chat; the row prints, but nothing is counted
+// and doctor still ends `clean`.
+func TestDoctorAbsentChatIndexIsNoAdvisoryWarning(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var stdout bytes.Buffer
+	absent := fmt.Errorf("cache database /x/pfm-cache.db: %w", fleetdb.ErrAbsent)
+	if warnings := printOpenProjectsDoctor(
+		context.Background(),
+		&stdout,
+		nil,
+		absent,
+		t.TempDir(),
+		&paths.MapEnv{},
+	); warnings != 0 {
+		t.Errorf("warnings=%d, want 0 for an absent chat index:\n%s", warnings, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "chat index unreadable (cache database /x/pfm-cache.db: database absent)") {
+		t.Errorf("the absent index row is gone:\n%s", stdout.String())
+	}
+}
+
+// TestDoctorLedgerSkipsInUpdateHealthChild: pfm update's doctor child sets
+// the host-only marker and names the skipped ledger, never a silent absence.
+func TestDoctorLedgerSkipsInUpdateHealthChild(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var stdout bytes.Buffer
+	env := &paths.MapEnv{Values: map[string]string{update.DoctorHostOnlyEnv: "1"}}
+	if warnings := printOpenProjectsDoctor(
+		context.Background(),
+		&stdout,
+		nil,
+		errors.New("pfm.db is locked"),
+		t.TempDir(),
+		env,
+	); warnings != 0 {
+		t.Errorf("warnings=%d, want 0 when the ledger is skipped", warnings)
+	}
+	skipped := "doctor: project_updates skipped (machine-update health check: PFM_UPDATE_DOCTOR_HOST_ONLY=1)\n"
+	if got := stdout.String(); got != skipped {
+		t.Errorf("output=%q, want only the explicit skip line", got)
 	}
 }
 
@@ -189,7 +243,7 @@ func TestDoctorLedgerFoldsSpellingsAndNamesWhatItCannotInspect(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	printOpenProjectsDoctor(context.Background(), &stdout, nil, nil, t.TempDir())
+	printOpenProjectsDoctor(context.Background(), &stdout, nil, nil, t.TempDir(), &paths.MapEnv{})
 	if strings.Count(stdout.String(), "root=") != 1 ||
 		!strings.Contains(stdout.String(), "root="+open+" unresolved=1 ") {
 		t.Errorf("doctor run inside the worktree must name its project once:\n%s", stdout.String())
@@ -227,5 +281,64 @@ func TestDoctorLedgerBoundsAProjectThatNeverAnswers(t *testing.T) {
 	}
 	if rows[1] != "doctor: warning project_updates root="+stuck+" UNREADABLE: report not built within 2s\n" {
 		t.Errorf("the stuck project's row = %q, want the timed-out UNREADABLE row", rows[1])
+	}
+}
+
+func TestDoctorUpdateHealthSkipsOnlyTheHostLedger(t *testing.T) {
+	t.Setenv("PFM_UPDATE_DOCTOR_HOST_ONLY", "1")
+	runtime := buildCleanDoctorHome(t)
+	t.Chdir(t.TempDir())
+	blueprint := newProjectUpdatesStore(t)
+	project := scaffoldAdopter(t, blueprint)
+	writeProjectUpdatesFixture(t, project, "notes.md", "run /wave\n")
+	indexChatIn(t, project)
+	var health, report bytes.Buffer
+	runDoctor(nil, &health, &bytes.Buffer{}, runtime)
+	skipped := "doctor: project_updates skipped (machine-update health check: PFM_UPDATE_DOCTOR_HOST_ONLY=1)\n"
+	if !strings.Contains(health.String(), skipped) {
+		t.Errorf("update health output lacks explicit ledger skip:\n%s", health.String())
+	}
+	code := runDoctor([]string{"--project-updates", "--root", project}, &report, &bytes.Buffer{}, runtime)
+	if code != 1 || !strings.Contains(report.String(), "notes.md:1") ||
+		!strings.Contains(report.String(), "RETIRED-NAME") {
+		t.Fatalf("explicit report code=%d output=%q, want the full retired-name report", code, report.String())
+	}
+}
+
+type ledgerDeadlineRunner struct {
+	deps.Runner
+	cancelled chan error
+	release   chan struct{}
+}
+
+func (runner *ledgerDeadlineRunner) Run(ctx context.Context, _ []string, _ deps.RunOptions) (deps.RunResult, error) {
+	select {
+	case <-ctx.Done():
+		runner.cancelled <- ctx.Err()
+		return deps.RunResult{}, ctx.Err()
+	case <-runner.release:
+		return deps.RunResult{}, errors.New("fixture released")
+	}
+}
+
+func TestDoctorLedgerCancelsGitWithItsDeadline(t *testing.T) {
+	root := scaffoldAdopter(t, newProjectUpdatesStore(t))
+	runner := &ledgerDeadlineRunner{cancelled: make(chan error, 1), release: make(chan struct{})}
+	t.Cleanup(func() { close(runner.release) })
+	t.Cleanup(update.StubRunnerForTest(runner))
+	previous := openProjectDeadline
+	openProjectDeadline = 100 * time.Millisecond
+	t.Cleanup(func() { openProjectDeadline = previous })
+	rows := buildOpenProjectRows([]string{root}, t.TempDir())
+	if len(rows) != 1 || !strings.Contains(rows[0], "UNREADABLE") {
+		t.Fatalf("ledger rows=%q, want an unreadable timed-out project", rows)
+	}
+	select {
+	case err := <-runner.cancelled:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("git cancellation=%v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ledger git context was not cancelled with its deadline")
 	}
 }

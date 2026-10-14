@@ -1,12 +1,14 @@
 package professor
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
@@ -283,4 +285,32 @@ func runStoreGit(t *testing.T, arguments ...string) string {
 		t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+type boundedStoreRunner struct {
+	deps.Runner
+	bounded bool
+}
+
+func (runner *boundedStoreRunner) Run(ctx context.Context, _ []string, _ deps.RunOptions) (deps.RunResult, error) {
+	deadline, ok := ctx.Deadline()
+	runner.bounded = ok && time.Until(deadline) > 0 && time.Until(deadline) <= time.Minute
+	return deps.RunResult{Stdout: []byte("scripted-sha\n")}, nil
+}
+
+func TestStoreSHAWithRunnerBoundsItsGitProbe(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runner := &boundedStoreRunner{}
+	sha, err := storeSHAWithRunner(root, runner)
+	if err != nil || sha != "scripted-sha" || !runner.bounded {
+		t.Fatalf(
+			"store git probe sha=%q err=%v bounded=%v, want scripted-sha under a finite deadline",
+			sha,
+			err,
+			runner.bounded,
+		)
+	}
 }

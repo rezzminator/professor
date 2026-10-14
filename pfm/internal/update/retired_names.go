@@ -1,6 +1,7 @@
 package update
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -148,6 +149,11 @@ var retiredNames = []retiredName{
 	{name: "tracer-pro-max", kind: retiredAgent, successor: "tracer", match: matchExact},
 	// Commit f0c88ffb "tracer-rr is clone-distiller".
 	{name: "tracer-rr", kind: retiredAgent, successor: "clone-distiller", match: matchExact},
+	// Commit 3b401f24: the twin agents take their originals' full names; terra retires.
+	{name: "gpt-foreman", kind: retiredAgent, successor: "gpt-flights-foreman", match: matchExact},
+	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
+	{name: "gpt-executor", kind: retiredAgent, successor: "gpt-flights-mechanical-executor", match: matchExact},
+	{name: "terra", kind: retiredAgent, match: matchExact},
 	// Commit 73f2ae2b "/reminder becomes /pfm:schedule".
 	{name: "pfm chat reminder", kind: retiredCommand, successor: "pfm chat schedule", match: matchExact},
 	{name: "build-codex.mjs", kind: retiredPath, successor: "pfm codex build|check", match: matchExact},
@@ -217,8 +223,8 @@ func ultimateAgentRow(spelling string) retiredName {
 
 // definitionProbes are the root-relative paths whose existence means the
 // project itself still defines the retired name: its own command, agent or
-// skill file, or the retired path itself. A phase, an MCP tool and a command
-// spelled with a space are defined by no project file.
+// skill file. Retired paths, phases, MCP tools and commands spelled with a
+// space are defined by no project file; a legacy path cannot exempt itself.
 func (r retiredName) definitionProbes() []string {
 	if r.probe != "" {
 		return []string{r.probe}
@@ -234,8 +240,6 @@ func (r retiredName) definitionProbes() []string {
 		return []string{".claude/agents/" + r.name + ".md"}
 	case retiredSkill:
 		return []string{".claude/skills/" + strings.TrimSuffix(strings.TrimPrefix(r.name, "skills/"), " skill")}
-	case retiredPath:
-		return []string{r.name}
 	}
 	return nil
 }
@@ -283,8 +287,10 @@ var retiredWalkSkippedDirs = map[string]bool{
 // there marks the file binary and unscanned.
 const retiredBinaryProbe = 8000
 
-// retiredMaxRead is the most of one file the scan reads.
-const retiredMaxRead = 1 << 20
+// retiredMaxLine is the longest line the scan holds in memory. A file with a
+// longer line is scanned up to it and reported INCOMPLETE, never clean, so a
+// newline-free dump costs at most this much whatever its size.
+const retiredMaxLine = 4 << 20
 
 // ScanRetiredNames is the retired-name pass of `pfm doctor --project-updates`:
 // the project's own text files except the ones the caller skips (pinned files
@@ -295,7 +301,13 @@ const retiredMaxRead = 1 << 20
 // root minus the dependency, build and cache directories. A file or
 // directory it cannot read is a Failure, never a clean result.
 func ScanRetiredNames(root string, pinned map[string]bool) professor.RetiredNameScan {
-	return scanRetiredNamesWith(root, pinned, openRetiredFile)
+	return ScanRetiredNamesWithContext(context.Background(), root, pinned)
+}
+
+// ScanRetiredNamesWithContext shares the caller's deadline with git enumeration
+// and stops between regular-file reads when the context is cancelled.
+func ScanRetiredNamesWithContext(ctx context.Context, root string, pinned map[string]bool) professor.RetiredNameScan {
+	return scanRetiredNamesOpening(ctx, root, pinned, openRetiredFile)
 }
 
 func scanRetiredNamesWith(
@@ -303,7 +315,16 @@ func scanRetiredNamesWith(
 	pinned map[string]bool,
 	open func(string) (io.ReadCloser, error),
 ) professor.RetiredNameScan {
-	scan := scanRetiredNamesRaw(root, pinned, open)
+	return scanRetiredNamesOpening(context.Background(), root, pinned, open)
+}
+
+func scanRetiredNamesOpening(
+	ctx context.Context,
+	root string,
+	pinned map[string]bool,
+	open func(string) (io.ReadCloser, error),
+) professor.RetiredNameScan {
+	scan := scanRetiredNamesRaw(ctx, root, pinned, open)
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		scan.Hits = dropDefinedNames(resolved, scan.Hits)
 	}
@@ -313,6 +334,7 @@ func scanRetiredNamesWith(
 // scanRetiredNamesRaw is the scan before the project's own definitions are
 // weighed.
 func scanRetiredNamesRaw(
+	ctx context.Context,
 	root string,
 	pinned map[string]bool,
 	open func(string) (io.ReadCloser, error),
@@ -322,15 +344,9 @@ func scanRetiredNamesRaw(
 		scan.Failures = append(scan.Failures, professor.RetiredNameFailure{Path: relative, Error: err.Error()})
 	}
 	scanFile := func(current, relative string) {
-		hits, incomplete, err := scanRetiredFile(open, current, relative)
-		if incomplete {
-			scan.Incomplete = append(
-				scan.Incomplete,
-				professor.RetiredNameFailure{
-					Path:  relative,
-					Error: fmt.Sprintf("read limit of %d bytes; remaining text was not scanned", retiredMaxRead),
-				},
-			)
+		hits, incomplete, err := scanRetiredFile(ctx, open, current, relative)
+		if incomplete != "" {
+			scan.Incomplete = append(scan.Incomplete, professor.RetiredNameFailure{Path: relative, Error: incomplete})
 		}
 		if err != nil {
 			fail(relative, err)
@@ -351,13 +367,17 @@ func scanRetiredNamesRaw(
 		fail(".", statErr)
 		return scan
 	}
-	listed, inWorkTree, listErr := gitProjectFiles(resolved)
+	listed, inWorkTree, listErr := gitProjectFiles(ctx, resolved)
 	if listErr != nil {
 		fail(".", listErr)
 		return scan
 	}
 	if inWorkTree {
 		for _, relative := range listed {
+			if err := ctx.Err(); err != nil {
+				fail(".", fmt.Errorf("scan project files: %w", err))
+				break
+			}
 			current := filepath.Join(resolved, filepath.FromSlash(relative))
 			if retiredInSkippedDir(relative) || retiredSkippedFile(relative, pinned) {
 				continue
@@ -377,6 +397,9 @@ func scanRetiredNamesRaw(
 		return scan
 	}
 	walkErr := filepath.WalkDir(resolved, func(current string, entry fs.DirEntry, err error) error {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return fmt.Errorf("walk project files: %w", contextErr)
+		}
 		relative, relErr := filepath.Rel(resolved, current)
 		if relErr != nil {
 			fail(current, relErr)
@@ -413,8 +436,7 @@ func scanRetiredNamesRaw(
 // says root is not inside a work tree, where the caller walks instead; any
 // other failure of git, before or during the listing, is an error — a failed
 // enumeration of the project's own text never widens into reading everything.
-func gitProjectFiles(root string) (files []string, inWorkTree bool, err error) {
-	ctx := context.Background()
+func gitProjectFiles(ctx context.Context, root string) (files []string, inWorkTree bool, err error) {
 	// LC_ALL=C keeps git's "not a git repository" message in the one language
 	// it is matched in.
 	probe, err := updateGitCapture(ctx, root, []string{"LC_ALL=C"}, "rev-parse", "--is-inside-work-tree")
@@ -474,44 +496,75 @@ func retiredInSkippedDir(relative string) bool {
 	return false
 }
 
-// scanRetiredFile reads one file through open and returns its hits. It reads
-// the first retiredBinaryProbe bytes to decide the file is binary (a NUL) and
-// stops there; a text file reads at most retiredMaxRead plus one EOF probe, the cap cutting
-// at its last whole line. Reaching the cap is visibly incomplete; hits in the
-// readable prefix are retained, never presented as full coverage.
+// scanRetiredFile probes the first retiredBinaryProbe bytes for binary content,
+// then streams complete logical lines. Memory holds at most retiredMaxLine of
+// one line plus the actual hits; a longer line ends the scan with incomplete
+// naming where the unscanned text starts, the hits before it kept.
 func scanRetiredFile(
+	ctx context.Context,
 	open func(string) (io.ReadCloser, error),
 	current, relative string,
-) (hits []professor.RetiredNameHit, incomplete bool, err error) {
+) (hits []professor.RetiredNameHit, incomplete string, err error) {
 	file, err := open(current)
 	if err != nil {
-		return nil, false, err
+		return nil, "", fmt.Errorf("open %s: %w", relative, err)
 	}
-	defer func() { err = errors.Join(err, file.Close()) }()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close %s: %w", relative, closeErr))
+		}
+	}()
 	content := make([]byte, retiredBinaryProbe)
 	count, err := io.ReadFull(file, content)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return nil, false, err
+		return nil, "", fmt.Errorf("read %s: %w", relative, err)
 	}
 	content = content[:count]
 	if bytes.IndexByte(content, 0) >= 0 {
-		return nil, false, nil
+		return nil, "", nil
 	}
-	if count == retiredBinaryProbe {
-		rest, err := io.ReadAll(io.LimitReader(file, retiredMaxRead-retiredBinaryProbe+1))
-		if err != nil {
-			return nil, false, err
+	reader := bufio.NewReader(io.MultiReader(bytes.NewReader(content), file))
+	for lineNumber := 1; ; lineNumber++ {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return hits, "", fmt.Errorf("scan %s: %w", relative, contextErr)
 		}
-		content = append(content, rest...)
-		if len(content) > retiredMaxRead {
-			content = content[:retiredMaxRead]
-			if cut := bytes.LastIndexByte(content, '\n'); cut >= 0 {
-				content = content[:cut]
+		line, readErr := readRetiredLine(reader)
+		if errors.Is(readErr, errRetiredLineTooLong) {
+			return hits, fmt.Sprintf(
+				"line %d is longer than %d bytes; the text from there on was not scanned", lineNumber, retiredMaxLine,
+			), nil
+		}
+		if readErr == nil || errors.Is(readErr, io.EOF) {
+			for _, hit := range retiredNameHits(relative, line) {
+				hit.Line = lineNumber
+				hits = append(hits, hit)
 			}
-			return retiredNameHits(relative, string(content)), true, nil
+		}
+		if errors.Is(readErr, io.EOF) {
+			return hits, "", nil
+		}
+		if readErr != nil {
+			return hits, "", fmt.Errorf("read %s: %w", relative, readErr)
 		}
 	}
-	return retiredNameHits(relative, string(content)), false, nil
+}
+
+var errRetiredLineTooLong = errors.New("retired-name scan: line over the read bound")
+
+// readRetiredLine reads one line, newline included, refusing one longer than
+// retiredMaxLine before it is held whole.
+func readRetiredLine(reader *bufio.Reader) (string, error) {
+	var line []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if len(line)+len(chunk) > retiredMaxLine {
+			return "", errRetiredLineTooLong
+		}
+		line = append(line, chunk...)
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return string(line), err
+		}
+	}
 }
 
 // retiredSkippedFile: a pinned file (the project-tier diff already covers

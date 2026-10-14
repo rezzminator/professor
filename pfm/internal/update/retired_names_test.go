@@ -2,6 +2,7 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -305,10 +306,12 @@ func TestScanRetiredNamesResolvesAProjectRootReachedThroughASymlink(t *testing.T
 }
 
 // syntheticFile is a file that streams size bytes — lines of text opening with
-// first, and a NUL at nulAt when nulAt >= 0 — and counts what was read of it.
+// first, and a NUL at nulAt when nulAt >= 0, one line after first when
+// oneLine — and counts what was read of it.
 type syntheticFile struct {
 	size, nulAt int
 	first       string
+	oneLine     bool
 	read        int
 }
 
@@ -324,7 +327,7 @@ func (f *syntheticFile) Read(p []byte) (int, error) {
 			p[i] = 0
 		case position < len(f.first):
 			p[i] = f.first[position]
-		case (position-len(f.first))%10 == 9:
+		case !f.oneLine && (position-len(f.first))%10 == 9:
 			p[i] = '\n'
 		default:
 			p[i] = 'x'
@@ -336,15 +339,16 @@ func (f *syntheticFile) Read(p []byte) (int, error) {
 
 func (f *syntheticFile) Close() error { return nil }
 
-// TestScanRetiredNamesNeverReadsPastTheProbeOrTheCap: a binary file is
-// decided by its first retiredBinaryProbe bytes, and a huge text file is read
-// to retiredMaxRead at most — still scanned for the names it holds there.
-func TestScanRetiredNamesNeverReadsPastTheProbeOrTheCap(t *testing.T) {
+// TestScanRetiredNamesBoundsALineAndOnlyProbesBinary reads a large text file
+// in full, stops a newline-free one at the line bound, reported INCOMPLETE
+// with its earlier hits kept, and never reads past a binary file's probe.
+func TestScanRetiredNamesBoundsALineAndOnlyProbesBinary(t *testing.T) {
 	root := t.TempDir()
-	writeRetiredFixture(t, root, map[string]string{"data/dump.bin": "x", "data/huge.log": "x"})
+	writeRetiredFixture(t, root, map[string]string{"data/dump.bin": "x", "data/flat.log": "x", "data/huge.log": "x"})
 	const size = 16 << 20
 	files := map[string]*syntheticFile{
 		"dump.bin": {size: size, nulAt: 100, first: "/wave\n"},
+		"flat.log": {size: size, nulAt: -1, first: "/wave\n", oneLine: true},
 		"huge.log": {size: size, nulAt: -1, first: "/wave\n"},
 	}
 	open := func(path string) (io.ReadCloser, error) {
@@ -359,18 +363,24 @@ func TestScanRetiredNamesNeverReadsPastTheProbeOrTheCap(t *testing.T) {
 	if got := files["dump.bin"].read; got > retiredBinaryProbe {
 		t.Errorf("binary file: %d bytes read, want at most the %d-byte probe", got, retiredBinaryProbe)
 	}
-	if got := files["huge.log"].read; got > retiredMaxRead+1 {
-		t.Errorf("text file: %d bytes read, want at most the %d-byte cap plus one EOF probe", got, retiredMaxRead)
+	if got := files["huge.log"].read; got != size {
+		t.Errorf("text file: %d bytes read, want full %d-byte coverage", got, size)
+	}
+	if got := files["flat.log"].read; got > retiredMaxLine+2*retiredBinaryProbe+4096 {
+		t.Errorf("newline-free file: %d bytes read, want the scan stopped near the %d-byte line bound",
+			got, retiredMaxLine)
 	}
 	encoded, err := json.Marshal(scan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.Failures) != 0 || !strings.Contains(string(encoded), `"incomplete":[{"path":"data/huge.log"`) {
-		t.Errorf("truncated text coverage = %s; want named nonfatal incomplete coverage", encoded)
+	if len(scan.Failures) != 0 || len(scan.Incomplete) != 1 || scan.Incomplete[0].Path != "data/flat.log" ||
+		!strings.Contains(scan.Incomplete[0].Error, "line 2 is longer than") {
+		t.Errorf("text coverage = %s; want one INCOMPLETE row for data/flat.log from line 2", encoded)
 	}
-	if len(scan.Hits) != 1 || scan.Hits[0].Path != "data/huge.log" || scan.Hits[0].Line != 1 {
-		t.Fatalf("hits = %+v, want only the huge text file's first line", scan.Hits)
+	if len(scan.Hits) != 2 || scan.Hits[0].Path != "data/flat.log" || scan.Hits[1].Path != "data/huge.log" ||
+		scan.Hits[0].Line != 1 || scan.Hits[1].Line != 1 {
+		t.Fatalf("hits = %+v, want the first line of each text file", scan.Hits)
 	}
 }
 
@@ -501,15 +511,6 @@ func TestRetiredNameInACurrentPinnedFileIsReported(t *testing.T) {
 	}
 }
 
-func TestScanRetiredNamesExactlyAtCapIsComplete(t *testing.T) {
-	root := t.TempDir()
-	writeRetiredFixture(t, root, map[string]string{"exact.txt": "/wave\n" + strings.Repeat("x", retiredMaxRead-6)})
-	scan := ScanRetiredNames(root, nil)
-	if len(scan.Failures) != 0 || len(scan.Hits) != 1 {
-		t.Fatalf("exact cap scan = %+v; want complete coverage with hit", scan)
-	}
-}
-
 func TestRetiredGitEnumerationReportsWarningsAndDeduplicates(t *testing.T) {
 	for _, warning := range []string{"", "warning: could not open directory 'locked/': Permission denied\n"} {
 		t.Run(warning, func(t *testing.T) {
@@ -525,7 +526,7 @@ func TestRetiredGitEnumerationReportsWarningsAndDeduplicates(t *testing.T) {
 				nil,
 			)
 			t.Cleanup(StubRunnerForTest(fake))
-			files, _, err := gitProjectFiles(t.TempDir())
+			files, _, err := gitProjectFiles(context.Background(), t.TempDir())
 			if warning != "" {
 				if err == nil || !strings.Contains(err.Error(), "locked/") {
 					t.Fatalf("enumeration error=%v, want directory warning", err)
@@ -540,7 +541,7 @@ func TestRetiredGitEnumerationReportsWarningsAndDeduplicates(t *testing.T) {
 }
 
 // TestScanRetiredNamesSkipsANameTheProjectDefines: a project that keeps its own
-// /km command, agent or skill file, or the retired path itself, is not naming
+// /km command, agent or skill file is not naming
 // a retired thing; the same name in a project without that file is a hit.
 func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 	defining := t.TempDir()
@@ -585,6 +586,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 	), []string{
 		"/jc",
 		"JC-UPDATE",
+		"docs/agents",
 		"mcp__chat__",
 	}; !slices.Equal(
 		got,
@@ -643,5 +645,122 @@ func TestChatCallRetiredNames(t *testing.T) {
 	}
 	if !reflect.DeepEqual(scan.Hits, want) {
 		t.Fatalf("retired hits = %+v, want %+v", scan.Hits, want)
+	}
+}
+
+func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
+	for _, row := range []struct{ name, exists string }{
+		{".claude/commands/pfm.md", ".claude/commands/pfm.md"},
+		{".claude/commands/pfm/references/audit-scopes.md", ".claude/commands/pfm/references/audit-scopes.md"},
+		{"docs/agents", "docs/agents/index.md"},
+		{"pfm-guard.sh", "pfm-guard.sh"},
+		{"pfm-guard.sh", ".claude/scripts/pfm-guard.sh"},
+		{"guard-stamp.sh", "guard-stamp.sh"},
+		{"guard-stamp.sh", ".claude/scripts/guard-stamp.sh"},
+		{"build-codex.mjs", "build-codex.mjs"},
+		{"build-codex.mjs", ".claude/scripts/build-codex.mjs"},
+	} {
+		t.Run(row.exists, func(t *testing.T) {
+			root := t.TempDir()
+			writeRetiredFixture(
+				t,
+				root,
+				map[string]string{row.exists: "legacy file\n", "notes.md": "run " + row.name + "\n"},
+			)
+			scan := ScanRetiredNames(root, nil)
+			if len(scan.Failures) != 0 || len(scan.Hits) != 1 || scan.Hits[0].Name != row.name ||
+				scan.Hits[0].Kind != "path" ||
+				scan.Hits[0].Path != "notes.md" {
+				t.Fatalf("existing retired path scan = %+v, want notes.md hit for %s", scan, row.name)
+			}
+		})
+	}
+}
+
+func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
+	for _, row := range []struct{ name, successor string }{
+		{"gpt-foreman", "gpt-flights-foreman"},
+		{"gpt-lander", "gpt-flights-lander"},
+		{"gpt-executor", "gpt-flights-mechanical-executor"},
+		{"terra", ""},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRetiredFixture(t, root, map[string]string{"notes.md": "spawn " + row.name + "\n"})
+			scan := ScanRetiredNames(root, nil)
+			want := []professor.RetiredNameHit{
+				{Path: "notes.md", Line: 1, Name: row.name, Kind: "agent", Successor: row.successor},
+			}
+			if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
+				t.Fatalf("retired agent scan = %+v, want %+v", scan, want)
+			}
+		})
+	}
+}
+
+func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
+	root := newUpdateGitFixture(t)
+	content := "/wave\n" + strings.Repeat(
+		"x",
+		1<<20,
+	) + "\n\n" + strings.Repeat(
+		"y",
+		70<<10,
+	) + " /jc\r\n/quality:forlint"
+	writeRetiredFixture(t, root, map[string]string{"large.txt": content})
+	gitTemp(t, root, "add", "large.txt")
+	scan := ScanRetiredNames(root, nil)
+	want := []professor.RetiredNameHit{
+		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: "/flights:spec"},
+		{Path: "large.txt", Line: 4, Name: "/jc", Kind: "command"},
+		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/quality:md-forlint"},
+	}
+	if len(scan.Failures) != 0 || len(scan.Incomplete) != 0 || !reflect.DeepEqual(scan.Hits, want) {
+		t.Errorf("large tracked scan = %+v, want complete hits %+v", scan, want)
+	}
+	clean := strings.NewReplacer("/wave", "/flights:spec", "/jc", "/pcm", "/quality:forlint", "/quality:md-forlint").
+		Replace(content)
+	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
+	scan = ScanRetiredNames(root, nil)
+	if len(scan.Hits) != 0 || len(scan.Failures) != 0 || len(scan.Incomplete) != 0 {
+		t.Fatalf("edited large tracked file = %+v, want full clean coverage", scan)
+	}
+}
+
+type retiredFailingFile struct {
+	io.Reader
+	readErr, closeErr error
+}
+
+func (file retiredFailingFile) Read(p []byte) (int, error) {
+	n, err := file.Reader.Read(p)
+	if errors.Is(err, io.EOF) && file.readErr != nil {
+		return n, file.readErr
+	}
+	return n, err
+}
+func (file retiredFailingFile) Close() error { return file.closeErr }
+
+func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) {
+	for _, operation := range []string{"read", "close"} {
+		t.Run(operation, func(t *testing.T) {
+			root := t.TempDir()
+			writeRetiredFixture(t, root, map[string]string{"partial.txt": "fixture\n"})
+			open := func(string) (io.ReadCloser, error) {
+				file := retiredFailingFile{Reader: strings.NewReader("/wave\n" + strings.Repeat("x\n", 5000))}
+				if operation == "read" {
+					file.readErr = errors.New("fixture read failed")
+				} else {
+					file.closeErr = errors.New("fixture close failed")
+				}
+				return file, nil
+			}
+			scan := scanRetiredNamesWith(root, nil, open)
+			if len(scan.Hits) != 1 || scan.Hits[0].Line != 1 || scan.Hits[0].Name != "/wave" ||
+				len(scan.Failures) != 1 ||
+				!strings.Contains(scan.Failures[0].Error, "fixture "+operation+" failed") {
+				t.Fatalf("partial scan = %+v, want the completed hit and contextual %s failure", scan, operation)
+			}
+		})
 	}
 }

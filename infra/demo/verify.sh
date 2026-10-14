@@ -119,7 +119,7 @@ check_express() { # five independently counted install-fidelity beats on the ado
     fail express-doctor "pfm doctor exit $rc with failure row: $doctor_bad; full output: $out"
   else
     summary="$(grep -m1 '^doctor: warnings=' "$out" || true)"
-    [ -n "$summary" ] || summary="$(grep -m1 '^doctor: clean$' "$out" || true)"
+    [ -n "$summary" ] || summary="$(grep -m1 -E '^doctor: (clean|machine checks clean; project_updates warnings=[0-9]+)$' "$out" || true)"
     pass express-doctor "pfm doctor exit $rc · ${summary:-no summary line}"
   fi
 

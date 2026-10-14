@@ -1,13 +1,14 @@
 package professor
 
 import (
+	"context"
 	"fmt"
 	"sort"
 )
 
 // OpenRow is one decision a project still owes: Status is the report's row
-// class (UPDATED, NEW, GONE-UPSTREAM, MOVED, LOCAL-DELETED, RETIRED-NAME or
-// UNREADABLE) and Name the file it names — a local path, a template for a NEW
+// class (UPDATED, NEW, GONE-UPSTREAM, MOVED, LOCAL-DELETED, RETIRED-NAME,
+// INCOMPLETE or UNREADABLE) and Name the file it names — a local path, a template for a NEW
 // row, a retired-name file with its hit count.
 type OpenRow struct {
 	Status string
@@ -21,7 +22,17 @@ type OpenRow struct {
 // report ends `clean` only without any of them. An error is a report that could not be
 // built, never an empty list.
 func OpenProjectRows(root, home string, scan RetiredNameScanner) ([]OpenRow, error) {
-	report, err := buildProjectReport(root, home)
+	return OpenProjectRowsWithContext(context.Background(), root, home, scan)
+}
+
+func buildProjectReport(root, home string) (projectReport, error) {
+	return buildProjectReportWithContext(context.Background(), root, home)
+}
+
+// OpenProjectRowsWithContext bounds the blueprint git probe with ctx. A scanner
+// that performs subprocess work must close over the same context.
+func OpenProjectRowsWithContext(ctx context.Context, root, home string, scan RetiredNameScanner) ([]OpenRow, error) {
+	report, err := buildProjectReportWithContext(ctx, root, home)
 	if err != nil {
 		return nil, err
 	}

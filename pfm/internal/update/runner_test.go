@@ -385,3 +385,36 @@ func TestUpdateSourceIgnoresForeignGitSelectors(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateDoctorChildGetsHostOnlyMarker(t *testing.T) {
+	const marker = "PFM_UPDATE_DOCTOR_HOST_ONLY"
+	t.Setenv(marker, "inherited")
+	for _, row := range []struct{ command, want string }{{doctorCommand, "1"}, {"install", "inherited"}} {
+		t.Run(row.command, func(t *testing.T) {
+			var env []string
+			t.Cleanup(StubRunnerForTest(scriptedUpdateRunner{startEnv: &env}))
+			err := runUpdateCandidateCommand(
+				context.Background(),
+				"candidate",
+				"",
+				t.TempDir(),
+				"",
+				io.Discard,
+				io.Discard,
+				row.command,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, entry := range env {
+				if value, ok := strings.CutPrefix(entry, marker+"="); ok {
+					got = value
+				}
+			}
+			if got != row.want {
+				t.Fatalf("%s child marker=%q, want %q", row.command, got, row.want)
+			}
+		})
+	}
+}

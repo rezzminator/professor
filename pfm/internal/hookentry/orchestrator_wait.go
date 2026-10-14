@@ -17,7 +17,12 @@ type orchestratorWaitHookInput struct {
 
 const orchestratorWaitReason = "Waiting needs no command. End your message with one line and no tool call: while an agent you spawned is still running you do not return, and its return wakes you."
 
+const orchestratorWaitReturnWatchReason = "A sub-agent's return needs no watcher. End your message with one line and no tool call: its completion notice wakes you."
+
 var (
+	// orchestratorWaitFileLoop matches a polling loop on a file's existence:
+	// "until [ -s F ]", "while [ ! -f F ]", "until test -e F".
+	orchestratorWaitFileLoop   = regexp.MustCompile(`\b(until|while)\s+(!\s*)?(\[\[?|test)\s+(!\s*)?-[sfe]\s`)
 	orchestratorWaitEchoPrintf = regexp.MustCompile(`^(echo|printf)(\s.*)?$`)
 	orchestratorWaitForbidden  = regexp.MustCompile("[><|;&$`\n]")
 	orchestratorWaitSleep      = regexp.MustCompile(`^sleep\s+\d+(\.\d+)?[smh]?$`)
@@ -26,7 +31,10 @@ var (
 // OrchestratorWait is the fail-open PreToolUse hook. It denies a Bash call
 // whose whole command only waits (a no-op: echo/printf with plain literal
 // arguments, "true", ":", or "sleep N"), so an orchestrator agent ends its
-// message instead of burning a call on a command that changes nothing.
+// message instead of burning a call on a command that changes nothing. It
+// also denies a file-existence polling loop over a "returns/" path: a
+// sub-agent's completion notice wakes its parent, so that loop watches for
+// nothing.
 func OrchestratorWait(input io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(input)
 	if err != nil {
@@ -41,13 +49,26 @@ func OrchestratorWait(input io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal orchestrator-wait: decode hook payload (fail-open): %v\n", err)
 		return 0
 	}
-	if hook.ToolName != "Bash" || !isNoOpWaitCommand(hook.ToolInput.Command) {
+	if hook.ToolName != "Bash" {
 		return 0
 	}
-	if err := json.NewEncoder(stdout).Encode(preToolUseDenyResponse(orchestratorWaitReason)); err != nil {
+	reason := orchestratorWaitReason
+	switch {
+	case isReturnFileWatch(hook.ToolInput.Command):
+		reason = orchestratorWaitReturnWatchReason
+	case !isNoOpWaitCommand(hook.ToolInput.Command):
+		return 0
+	}
+	if err := json.NewEncoder(stdout).Encode(preToolUseDenyResponse(reason)); err != nil {
 		return 1
 	}
 	return 0
+}
+
+// isReturnFileWatch reports whether the command polls a file's existence with
+// an until/while loop and names a "returns/" path.
+func isReturnFileWatch(command string) bool {
+	return strings.Contains(command, "returns/") && orchestratorWaitFileLoop.MatchString(command)
 }
 
 // isNoOpWaitCommand reports whether the whole trimmed command is one simple

@@ -20,7 +20,15 @@ func TestOrchestratorWaitDeniesABashNoOpWait(t *testing.T) {
 		{name: "sleep with surrounding whitespace", payload: `{"tool_name":"Bash","tool_input":{"command":"  sleep 30 "}}`, want: "permissionDecision\":\"deny\""},
 		{name: "sleep with decimal and unit suffix", payload: `{"tool_name":"Bash","tool_input":{"command":"sleep 1.5m"}}`, want: "permissionDecision\":\"deny\""},
 
+		{name: "background watch on a child return file", payload: `{"tool_name":"Bash","tool_input":{"command":"timeout 14400 bash -c 'until [ -s \"$1\" ]; do sleep 20; done; cat \"$1\"' _ /flights/f/returns/unit-r1.md","run_in_background":true}}`, want: "completion notice"},
+		{name: "while-not loop on a returns path", payload: `{"tool_name":"Bash","tool_input":{"command":"while [ ! -f /flights/f/returns/gate-r1.md ]; do sleep 5; done"}}`, want: "completion notice"},
+		{name: "test-form loop on a returns path", payload: `{"tool_name":"Bash","tool_input":{"command":"until test -e flights/f/returns/gate-r1.md; do sleep 5; done"}}`, want: "completion notice"},
+
 		// Pass: each exception.
+		{name: "the same file loop on a command output file", payload: `{"tool_name":"Bash","tool_input":{"command":"timeout 600 bash -c 'until [ -s \"$1\" ]; do sleep 20; done; cat \"$1\"' _ /tmp/professor/gate/out.log"}}`},
+		{name: "listing a returns directory", payload: `{"tool_name":"Bash","tool_input":{"command":"ls -1 /flights/f/returns/"}}`},
+		{name: "reading a return file", payload: `{"tool_name":"Bash","tool_input":{"command":"cat /flights/f/returns/unit-r1.md"}}`},
+		{name: "seat returns monitor loop", payload: `{"tool_name":"Bash","tool_input":{"command":"bash -c 'while :; do now=$(ls -1 $G); comm -13 <(echo \"$seen\") <(echo \"$now\"); sleep 15; done' _ /flights/f/returns/*"}}`},
 		{name: "echo with redirect is not literal", payload: `{"tool_name":"Bash","tool_input":{"command":"echo x > file"}}`},
 		{name: "echo with substitution is not literal", payload: `{"tool_name":"Bash","tool_input":{"command":"echo $X"}}`},
 		{name: "sleep chained with another command", payload: `{"tool_name":"Bash","tool_input":{"command":"sleep 5 && ls"}}`},

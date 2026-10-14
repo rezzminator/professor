@@ -16,10 +16,10 @@ import (
 	config "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestProjectUpdatesReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	before := projectTreeDigest(t, fixture.project)
 	var stdout bytes.Buffer
@@ -49,6 +49,7 @@ func TestProjectUpdatesReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T
 }
 
 func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
 	if code := Run(
@@ -132,6 +133,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 }
 
 func TestProjectUpdatesJSONIsOneObjectCarriesDiffAndUnreadableBaselineFails(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	var stdout bytes.Buffer
 	if code := projectReportNoScan(
@@ -177,6 +179,7 @@ func TestProjectUpdatesJSONIsOneObjectCarriesDiffAndUnreadableBaselineFails(t *t
 }
 
 func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
+	t.Parallel()
 	store := newScaffoldStoreFixture(t)
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
@@ -245,6 +248,7 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 }
 
 func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
+	t.Parallel()
 	store, oldSHA, _ := newAdoptAtStoreFixture(t)
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
@@ -365,6 +369,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 // buildProjectReport's ignored-skip was neutralized (every ignored template
 // still surfaced NEW) — see the RED-first record in the qa report.
 func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
 	if code := Run(
@@ -485,6 +490,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 // baseline.Ignored, so the very file adopt just pinned would still read
 // ignored on the next check).
 func TestUpdateAdoptRemovesNewlyPinnedTemplateFromIgnored(t *testing.T) {
+	t.Parallel()
 	store := newScaffoldStoreFixture(t)
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
@@ -530,6 +536,7 @@ func TestUpdateAdoptRemovesNewlyPinnedTemplateFromIgnored(t *testing.T) {
 // was neutralized (a directory argument was silently accepted and written
 // into Ignored as if it were a template file).
 func TestUpdateIgnoreRefusesDirectoryTemplate(t *testing.T) {
+	t.Parallel()
 	store := newScaffoldStoreFixture(t)
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
@@ -574,6 +581,7 @@ func TestUpdateIgnoreRefusesDirectoryTemplate(t *testing.T) {
 // store both appear on the very first line of stdout, before the per-status
 // tally.
 func TestUpdateAdoptStdoutFirstLineNamesRootAndBlueprint(t *testing.T) {
+	t.Parallel()
 	store := newScaffoldStoreFixture(t)
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
@@ -602,6 +610,7 @@ func TestUpdateAdoptStdoutFirstLineNamesRootAndBlueprint(t *testing.T) {
 // unchanged rather than implying a fresh pin at the current SHA, and leaves
 // baseline.Blueprint untouched either way.
 func TestUpdateAdoptNothingToPinReportsBlueprintPinUnchanged(t *testing.T) {
+	t.Parallel()
 	store := newScaffoldStoreFixture(t)
 	home := t.TempDir()
 	runtime := config.Runtime{Paths: paths.Values{Home: home}}
@@ -682,6 +691,7 @@ func TestUpdateAdoptNothingToPinReportsBlueprintPinUnchanged(t *testing.T) {
 // first match into the diagnostic (the second pinning local was silently
 // dropped from the message, so `pfm update drop` guidance was incomplete).
 func TestUpdateIgnoreRefusalNamesEveryPinningLocal(t *testing.T) {
+	t.Parallel()
 	store := newScaffoldStoreFixture(t)
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
@@ -735,6 +745,7 @@ func TestUpdateIgnoreRefusalNamesEveryPinningLocal(t *testing.T) {
 // already-ignored count rather than reporting every argument as newly
 // ignored.
 func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	writeProjectFixtureFile(t, fixture.store, "templates/project/extra.md", "extra\n")
 
@@ -780,44 +791,6 @@ func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
 	}
 }
 
-// newAdoptAtStoreFixture builds a full planInitCopies-compatible blueprint
-// store (every initTemplatePaths source must exist or planInitCopies fails)
-// with two commits: old has templates/project/commands/dev.md = "old\n";
-// new changes dev.md to "new\n" and adds templates/project/commands/later.md.
-func newAdoptAtStoreFixture(t *testing.T) (store, oldSHA, headSHA string) {
-	t.Helper()
-	root := t.TempDir()
-	for relative, content := range map[string]string{
-		"VERSION":                                                          "0.65.0\n",
-		"templates/project/CLAUDE.md":                                      "# {TOKEN} contract\n",
-		"templates/project/settings.json":                                  "{}\n",
-		"templates/project/rumdl-policy.toml":                              "# fixture rumdl policy\n[global]\n",
-		"templates/project/commands/dev.md":                                "old\n",
-		"templates/project/agents/gitter.md":                               "---\nname: gitter\n---\nbody\n",
-		"templates/project/scripts/dev.sh":                                 "#!/usr/bin/env bash\nset -euo pipefail\n",
-		"templates/project/skills/legal/SKILL.md":                          "---\nname: legal\n---\nbody\n",
-		"templates/project/epics/TEMPLATE.md":                              "# Epic\n",
-		"templates/project/codex/config.toml":                              "model = \"{TOKEN}\"\n",
-		"templates/project/docs-commands/git/references/gitter-history.md": "# Gitter History\n",
-		"templates/project/docs-hub/_index.md":                             "# Documentation Hub\n",
-	} {
-		writeProjectFixtureFile(t, root, relative, content)
-	}
-	gitTemp(t, root, "init", "-q")
-	gitTemp(t, root, "config", "user.email", "fixture.invalid")
-	gitTemp(t, root, "config", "user.name", "fixture-identity")
-	gitTemp(t, root, "add", ".")
-	gitTemp(t, root, "commit", "-qm", "old templates")
-	oldSHA = projectGitShortSHA(t, root)
-
-	writeProjectFixtureFile(t, root, "templates/project/commands/dev.md", "new\n")
-	writeProjectFixtureFile(t, root, "templates/project/commands/later.md", "later\n")
-	gitTemp(t, root, "add", "-A")
-	gitTemp(t, root, "commit", "-qm", "new templates")
-	headSHA = projectGitShortSHA(t, root)
-	return root, oldSHA, headSHA
-}
-
 type projectUpdateFixture struct {
 	project string
 	store   string
@@ -826,33 +799,43 @@ type projectUpdateFixture struct {
 	runtime config.Runtime
 }
 
+// buildProjectUpdateStore writes the blueprint store every project-update
+// fixture starts from: an "old templates" commit, then a "new templates"
+// commit updating two, deleting one and adding one. It returns both short SHAs.
+func buildProjectUpdateStore(t *testing.T, root string) []string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "templates", "project"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFixtureFile(t, root, "VERSION", "0.65.0\n")
+	writeProjectFixtureFile(t, root, "templates/project/current.md", "current\n")
+	writeProjectFixtureFile(t, root, "templates/project/updated-one.md", "old one\n")
+	writeProjectFixtureFile(t, root, "templates/project/updated-two.md", "old two\n")
+	writeProjectFixtureFile(t, root, "templates/project/deleted.md", "deleted local\n")
+	writeProjectFixtureFile(t, root, "templates/project/gone.md", "gone\n")
+	gitTemp(t, root, "init", "-q")
+	gitTemp(t, root, "config", "user.email", "fixture.invalid")
+	gitTemp(t, root, "config", "user.name", "fixture-identity")
+	gitTemp(t, root, "add", ".")
+	gitTemp(t, root, "commit", "-qm", "old templates")
+	oldSHA := projectGitShortSHA(t, root)
+	writeProjectFixtureFile(t, root, "templates/project/updated-one.md", "new one\n")
+	writeProjectFixtureFile(t, root, "templates/project/updated-two.md", "new two\n")
+	if err := os.Remove(filepath.Join(root, "templates", "project", "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFixtureFile(t, root, "templates/project/new.md", "new upstream\n")
+	gitTemp(t, root, "add", "-A")
+	gitTemp(t, root, "commit", "-qm", "new templates")
+	return []string{oldSHA, projectGitShortSHA(t, root)}
+}
+
 func newProjectUpdateFixture(t *testing.T) projectUpdateFixture {
 	t.Helper()
+	template, shas := updateFixtureTemplate(t, "project-update-store", buildProjectUpdateStore)
 	storeRoot := filepath.Join(t.TempDir(), "blueprint")
-	if err := os.MkdirAll(filepath.Join(storeRoot, "templates", "project"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeProjectFixtureFile(t, storeRoot, "VERSION", "0.65.0\n")
-	writeProjectFixtureFile(t, storeRoot, "templates/project/current.md", "current\n")
-	writeProjectFixtureFile(t, storeRoot, "templates/project/updated-one.md", "old one\n")
-	writeProjectFixtureFile(t, storeRoot, "templates/project/updated-two.md", "old two\n")
-	writeProjectFixtureFile(t, storeRoot, "templates/project/deleted.md", "deleted local\n")
-	writeProjectFixtureFile(t, storeRoot, "templates/project/gone.md", "gone\n")
-	gitTemp(t, storeRoot, "init", "-q")
-	gitTemp(t, storeRoot, "config", "user.email", "fixture.invalid")
-	gitTemp(t, storeRoot, "config", "user.name", "fixture-identity")
-	gitTemp(t, storeRoot, "add", ".")
-	gitTemp(t, storeRoot, "commit", "-qm", "old templates")
-	oldSHA := projectGitShortSHA(t, storeRoot)
-	writeProjectFixtureFile(t, storeRoot, "templates/project/updated-one.md", "new one\n")
-	writeProjectFixtureFile(t, storeRoot, "templates/project/updated-two.md", "new two\n")
-	if err := os.Remove(filepath.Join(storeRoot, "templates", "project", "gone.md")); err != nil {
-		t.Fatal(err)
-	}
-	writeProjectFixtureFile(t, storeRoot, "templates/project/new.md", "new upstream\n")
-	gitTemp(t, storeRoot, "add", "-A")
-	gitTemp(t, storeRoot, "commit", "-qm", "new templates")
-	headSHA := projectGitShortSHA(t, storeRoot)
+	copyUpdateFixtureTree(t, template, storeRoot)
+	oldSHA, headSHA := shas[0], shas[1]
 
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".professor"), 0o700); err != nil {
@@ -972,63 +955,4 @@ func projectTreeDigest(t *testing.T, root string) string {
 	}
 	sort.Strings(rows)
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(rows, "\n"))))
-}
-
-func newScaffoldStoreFixture(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	files := map[string]struct {
-		content string
-		mode    os.FileMode
-	}{
-		"VERSION":                         {content: "0.65.0\n", mode: 0o600},
-		"templates/project/CLAUDE.md":     {content: "# {TOKEN} contract\n", mode: 0o600},
-		"templates/project/settings.json": {content: "{}\n", mode: 0o600},
-		"templates/project/rumdl-policy.toml": {
-			content: "# fixture rumdl policy\n[global]\n",
-			mode:    0o600,
-		},
-		"templates/project/commands/dev.md": {
-			content: "---\nname: dev\n---\n{TOKEN}\n",
-			mode:    0o600,
-		},
-		"templates/project/agents/gitter.md": {
-			content: "---\nname: gitter\n---\nbody\n",
-			mode:    0o600,
-		},
-		"templates/project/commands/per-project/testing-manual.md": {
-			content: "---\nname: testing-manual\n---\nbody\n",
-			mode:    0o600,
-		},
-		"templates/project/scripts/dev.sh": {
-			content: "#!/usr/bin/env bash\nset -euo pipefail\n",
-			mode:    0o755,
-		},
-		"templates/project/skills/legal/SKILL.md": {content: "---\nname: legal\n---\nbody\n", mode: 0o600},
-		"templates/project/epics/TEMPLATE.md":     {content: "# Epic\n", mode: 0o600},
-		"templates/project/codex/config.toml": {
-			content: "model = \"{TOKEN}\"\n",
-			mode:    0o600,
-		},
-		"templates/project/docs-commands/git/references/gitter-history.md": {
-			content: "# Gitter History\n",
-			mode:    0o600,
-		},
-		"templates/project/docs-hub/_index.md": {content: "# Documentation Hub\n", mode: 0o600},
-	}
-	for relative, fixture := range files {
-		path := filepath.Join(root, filepath.FromSlash(relative))
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := testjail.WriteExecutable(path, []byte(fixture.content), fixture.mode); err != nil {
-			t.Fatal(err)
-		}
-	}
-	gitTemp(t, root, "init", "-q")
-	gitTemp(t, root, "config", "user.email", "fixture.invalid")
-	gitTemp(t, root, "config", "user.name", "fixture-identity")
-	gitTemp(t, root, "add", ".")
-	gitTemp(t, root, "commit", "-qm", "fixture store")
-	return root
 }

@@ -37,6 +37,7 @@ func writeRetiredFixture(t *testing.T, root string, files map[string]string) {
 // .worktrees, node_modules and a binary file are never scanned, while the
 // hand-written .codex/config.toml is.
 func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRetiredFixture(t, root, map[string]string{
 		"scripts/legacy.sh":            "#!/bin/sh\nclaude -p '/wave:refine the spec'\n# gitter Phase: JC-COMMIT\n",
@@ -83,6 +84,7 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 // command, agent, phase or tool that shares a retired name's prefix, and an
 // ordinary path or URL containing one, is no hit; each retired form is.
 func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
+	t.Parallel()
 	for _, line := range []string{
 		"/pfm:release prepare --from ../live",
 		"/pfm:workbench new",
@@ -142,6 +144,7 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 // still names the removed PreToolUse guard scripts is reported as a retired
 // path with no successor, in the form an adopter writes it.
 func TestRetiredNamesPinTheRemovedGuardScripts(t *testing.T) {
+	t.Parallel()
 	for line, name := range map[string]string{
 		`"command": "bash $CLAUDE_PROJECT_DIR/.claude/scripts/pfm-guard.sh"`: "pfm-guard.sh",
 		"bash .claude/scripts/guard-stamp.sh --read":                         "guard-stamp.sh",
@@ -158,6 +161,7 @@ func TestRetiredNamesPinTheRemovedGuardScripts(t *testing.T) {
 // cannot read, and a root that does not exist, are failures naming the path
 // and the error — never an empty, clean scan.
 func TestScanRetiredNamesReportsAnUnreadableFileAsAFailure(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRetiredFixture(t, root, map[string]string{
 		"scripts/locked.sh": "/wave\n",
@@ -230,6 +234,7 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 // successor, and the live neighbours of those names (their successors, the
 // everyday word, a longer name, the live /ultimate skill) are no hit.
 func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	var content strings.Builder
 	var want []professor.RetiredNameHit
@@ -283,6 +288,7 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 // is a symlink to the project is scanned as the project, and a root that
 // resolves to nothing is a Failure — never a clean scan of zero files.
 func TestScanRetiredNamesResolvesAProjectRootReachedThroughASymlink(t *testing.T) {
+	t.Parallel()
 	project := t.TempDir()
 	writeRetiredFixture(t, project, map[string]string{"scripts/old.sh": "run /wave\n"})
 	link := filepath.Join(t.TempDir(), "app")
@@ -343,9 +349,12 @@ func (f *syntheticFile) Close() error { return nil }
 // in full, stops a newline-free one at the line bound, reported INCOMPLETE
 // with its earlier hits kept, and never reads past a binary file's probe.
 func TestScanRetiredNamesBoundsALineAndOnlyProbesBinary(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRetiredFixture(t, root, map[string]string{"data/dump.bin": "x", "data/flat.log": "x", "data/huge.log": "x"})
-	const size = 16 << 20
+	// Past one line bound: the newline-free file must be stopped there, and the
+	// text file is read in full beyond it.
+	const size = retiredMaxLine + 1<<20
 	files := map[string]*syntheticFile{
 		"dump.bin": {size: size, nulAt: 100, first: "/wave\n"},
 		"flat.log": {size: size, nulAt: -1, first: "/wave\n", oneLine: true},
@@ -405,6 +414,7 @@ func newRetiredGitProject(t *testing.T) string {
 // reads the tracked and the unignored files, and never opens an ignored one;
 // a directory git ignores, even an unreadable one, never fails the report.
 func TestScanRetiredNamesReadsOnlyTheProjectsOwnText(t *testing.T) {
+	t.Parallel()
 	root := newRetiredGitProject(t)
 	locked := filepath.Join(root, "data", "pg")
 	if err := os.Chmod(locked, 0); err != nil {
@@ -445,6 +455,7 @@ func TestScanRetiredNamesReadsOnlyTheProjectsOwnText(t *testing.T) {
 // tree to say what is the project's own, the walk skips the dependency, build
 // and cache directories by name, an unreadable one included.
 func TestScanRetiredNamesSkipsDependencyAndBuildDirsOutsideGit(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	files := map[string]string{"src/own.sh": "run /jc\n"}
 	skipped := []string{".venv", "venv", "target", "dist", "build", "vendor", "__pycache__"}
@@ -469,6 +480,7 @@ func TestScanRetiredNamesSkipsDependencyAndBuildDirsOutsideGit(t *testing.T) {
 // git cannot answer (here a broken repository config), the scan fails by name
 // instead of falling back to reading every file under the root.
 func TestScanRetiredNamesDoesNotWidenToAWalkWhenGitFails(t *testing.T) {
+	t.Parallel()
 	root := newRetiredGitProject(t)
 	if err := os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[[[ broken\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -487,6 +499,7 @@ func TestScanRetiredNamesDoesNotWidenToAWalkWhenGitFails(t *testing.T) {
 // the template diff shows nothing of it — while an UPDATED pin's file, which
 // carries its upstream diff for the adopter to port, is not scanned.
 func TestRetiredNameInACurrentPinnedFileIsReported(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	writeProjectFixtureFile(t, fixture.project, ".claude/current.md", "local truth\nrun /wave\n")
 	writeProjectFixtureFile(t, fixture.project, ".claude/updated-one.md", "local truth\nrun /jc\n")
@@ -544,6 +557,7 @@ func TestRetiredGitEnumerationReportsWarningsAndDeduplicates(t *testing.T) {
 // /km command, agent or skill file is not naming
 // a retired thing; the same name in a project without that file is a hit.
 func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
+	t.Parallel()
 	defining := t.TempDir()
 	writeRetiredFixture(t, defining, map[string]string{
 		".claude/commands/km.md":        "mine\n",
@@ -619,6 +633,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 }
 
 func TestChatCallRetiredNames(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRetiredFixture(
 		t,
@@ -649,6 +664,7 @@ func TestChatCallRetiredNames(t *testing.T) {
 }
 
 func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
+	t.Parallel()
 	for _, row := range []struct{ name, exists string }{
 		{".claude/commands/pfm.md", ".claude/commands/pfm.md"},
 		{".claude/commands/pfm/references/audit-scopes.md", ".claude/commands/pfm/references/audit-scopes.md"},
@@ -678,6 +694,7 @@ func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 }
 
 func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
+	t.Parallel()
 	for _, row := range []struct{ name, successor string }{
 		{"gpt-foreman", "gpt-flights-foreman"},
 		{"gpt-lander", "gpt-flights-lander"},
@@ -699,6 +716,7 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 }
 
 func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
+	t.Parallel()
 	root := newUpdateGitFixture(t)
 	content := "/wave\n" + strings.Repeat(
 		"x",
@@ -742,6 +760,7 @@ func (file retiredFailingFile) Read(p []byte) (int, error) {
 func (file retiredFailingFile) Close() error { return file.closeErr }
 
 func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) {
+	t.Parallel()
 	for _, operation := range []string{"read", "close"} {
 		t.Run(operation, func(t *testing.T) {
 			root := t.TempDir()

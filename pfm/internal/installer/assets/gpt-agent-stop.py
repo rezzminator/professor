@@ -11,11 +11,11 @@ stop with the exact repair; a role's refusals per agent are capped. Every decisi
   exactly `DONE {name}` or `PARTIAL|FAILED|BLOCKED {name}: {text}`, {name} the flight or unit its brief names;
   any other first line is refused (cap 2). A stop while a child runs is a wait, never a return.
 """
+import fcntl
 import hashlib
 import json
 import os
 import re
-import runpy
 import stat
 import sys
 import tempfile
@@ -24,6 +24,9 @@ import time
 LOG_DIR = os.environ.get('GPT_AGENT_STOP_LOG_DIR') or os.path.join(os.environ.get('PFM_HOME') or os.path.expanduser('~'), '.local/state/pfm/gpt-agent-stop')
 TRACETREE = 'python3 ~/.claude/skills/tracetree/tracetree.py'
 CAPS = {'sub-tracer': 3, 'foreman': 2}
+MAX_LOG_BYTES = 256 * 1024
+MAX_COUNTERS = 1024
+COUNTER_DAYS = 7
 RETURN_LINE = re.compile(r'^(?:DONE (?P<done>[\w.-]*\w)|(?:PARTIAL|FAILED|BLOCKED) (?P<other>[\w.-]*\w): \S.*)$')
 LAUNCH = re.compile(r'Async agent launched successfully[\s\S]*?agentId: (\w+)|Command running in background with ID: (\w+)')
 NOTICE = re.compile(r'<task-id>(\w+)</task-id>[\s\S]*?<status>(completed|failed|killed|stopped)</status>')
@@ -34,21 +37,47 @@ def log(role, entry):
     path = os.path.join(LOG_DIR, role + '.jsonl')
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
-        state_helpers()['append_decision_log'](path, entry)
+        append_decision_log(path, entry)
         return True
     except Exception as e:
         print('gpt-agent-stop: cannot write the decision log %s; stop allowed: %r' % (path, e), file=sys.stderr)
         return False
 
 
-_STATE_HELPERS = None
+def append_decision_log(path, entry):
+    encoded = (json.dumps(entry) + '\n').encode()
+    if len(encoded) > MAX_LOG_BYTES:
+        encoded = (json.dumps({'decision': entry.get('decision'), 'error': 'audit entry exceeded byte limit'}) + '\n').encode()
+    with open(path + '.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if os.path.exists(path) and os.path.getsize(path) + len(encoded) > MAX_LOG_BYTES:
+            # Even a preexisting oversized audit leaves at most one bounded backup.
+            with open(path, 'rb') as previous:
+                previous.seek(max(0, os.path.getsize(path) - MAX_LOG_BYTES))
+                tail = previous.read(MAX_LOG_BYTES)
+            if os.path.getsize(path) > MAX_LOG_BYTES:
+                tail = tail.partition(b'\n')[2]
+            with open(path + '.1', 'wb') as backup:
+                backup.write(tail)
+            with open(path, 'wb'):
+                pass
+        with open(path, 'ab') as current:
+            current.write(encoded)
 
 
-def state_helpers():
-    global _STATE_HELPERS
-    if _STATE_HELPERS is None:
-        _STATE_HELPERS = runpy.run_path(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'gpt-return-watch.py'))
-    return _STATE_HELPERS
+def prune_counts(directory):
+    now = time.time()
+    retained = []
+    for entry in os.scandir(directory):
+        if not re.fullmatch(r'[a-f0-9]{64}', entry.name) or not entry.is_file(follow_symlinks=False):
+            continue
+        modified = entry.stat(follow_symlinks=False).st_mtime
+        if now - modified > COUNTER_DAYS * 86400:
+            os.unlink(entry.path)
+        else:
+            retained.append((modified, entry.path))
+    for _, path in sorted(retained)[:max(0, len(retained) - MAX_COUNTERS + 1)]:
+        os.unlink(path)
 
 
 def texts(value):
@@ -99,7 +128,7 @@ def blocks_so_far(role, agent_id):
 def store_block_count(role, agent_id, count):
     path = counter_path(role, agent_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    state_helpers()['prune_counts'](os.path.dirname(path))
+    prune_counts(os.path.dirname(path))
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', dir=os.path.dirname(path), delete=False) as f:

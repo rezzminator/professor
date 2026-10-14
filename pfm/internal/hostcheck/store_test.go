@@ -872,7 +872,7 @@ func TestStaleStateTmpAge(t *testing.T) {
 
 func TestUnclassifiedExcludesKnownAndBackupNames(t *testing.T) {
 	env := fixtureEnv(t)
-	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture", "debug", "daemon.lock", "daemon.status.json", "tmp"} {
+	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture", "debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp"} {
 		writeFile(t, filepath.Join(env.Store, name), "{}")
 	}
 	assertRows(t, detect(t, "unclassified", env))

@@ -92,6 +92,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"debug",
 		"daemon.lock",
 		"daemon.status.json",
+		".claude.json.lock",
 		"tmp",
 		"chrome",
 		"dev-mods",

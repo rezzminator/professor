@@ -26,6 +26,7 @@ func TestOrchestratorWaitDeniesABashNoOpWait(t *testing.T) {
 
 		// Pass: each exception.
 		{name: "the same file loop on a command output file", payload: `{"tool_name":"Bash","tool_input":{"command":"timeout 600 bash -c 'until [ -s \"$1\" ]; do sleep 20; done; cat \"$1\"' _ /tmp/professor/gate/out.log"}}`},
+		{name: "the same file loop on an output file under a *-returns directory", payload: `{"tool_name":"Bash","tool_input":{"command":"timeout 600 bash -c 'until [ -s \"$1\" ]; do sleep 20; done; cat \"$1\"' _ /tmp/acme-returns/gate/out.log"}}`},
 		{name: "listing a returns directory", payload: `{"tool_name":"Bash","tool_input":{"command":"ls -1 /flights/f/returns/"}}`},
 		{name: "reading a return file", payload: `{"tool_name":"Bash","tool_input":{"command":"cat /flights/f/returns/unit-r1.md"}}`},
 		{name: "seat returns monitor loop", payload: `{"tool_name":"Bash","tool_input":{"command":"bash -c 'while :; do now=$(ls -1 $G); comm -13 <(echo \"$seen\") <(echo \"$now\"); sleep 15; done' _ /flights/f/returns/*"}}`},

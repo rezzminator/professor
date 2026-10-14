@@ -260,6 +260,25 @@ func TestGptReturnWatchRetiredHostIsSwept(t *testing.T) {
 			})
 		}
 	}
+	// An account dropped from the config after the old install is no current
+	// hooks directory: only the receipt still names its retired link.
+	t.Run("receipt-historical-account-install", func(t *testing.T) {
+		installer, dirs := gptHooksEngine(t, true)
+		managed, _, links := retiredReturnWatchHost(t, installer, dirs, true)
+		installer.options.ClaudeAccounts = nil
+		assets, err := assetFiles()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := installer.stageAssets(assets); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range append([]string{managed}, links...) {
+			if _, err := os.Lstat(path); !os.IsNotExist(err) {
+				t.Errorf("retired return watch left %s: %v", path, err)
+			}
+		}
+	})
 }
 
 func TestGptReturnWatchRetirementKeepsOperatorEntries(t *testing.T) {

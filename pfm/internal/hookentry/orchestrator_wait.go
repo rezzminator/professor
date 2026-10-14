@@ -22,7 +22,10 @@ const orchestratorWaitReturnWatchReason = "A sub-agent's return needs no watcher
 var (
 	// orchestratorWaitFileLoop matches a polling loop on a file's existence:
 	// "until [ -s F ]", "while [ ! -f F ]", "until test -e F".
-	orchestratorWaitFileLoop   = regexp.MustCompile(`\b(until|while)\s+(!\s*)?(\[\[?|test)\s+(!\s*)?-[sfe]\s`)
+	orchestratorWaitFileLoop = regexp.MustCompile(`\b(until|while)\s+(!\s*)?(\[\[?|test)\s+(!\s*)?-[sfe]\s`)
+	// orchestratorWaitReturnsDir matches a path segment that is exactly
+	// "returns", never one that merely ends in it ("acme-returns/").
+	orchestratorWaitReturnsDir = regexp.MustCompile(`(^|[\s/'"=:])returns/`)
 	orchestratorWaitEchoPrintf = regexp.MustCompile(`^(echo|printf)(\s.*)?$`)
 	orchestratorWaitForbidden  = regexp.MustCompile("[><|;&$`\n]")
 	orchestratorWaitSleep      = regexp.MustCompile(`^sleep\s+\d+(\.\d+)?[smh]?$`)
@@ -66,9 +69,9 @@ func OrchestratorWait(input io.Reader, stdout, stderr io.Writer) int {
 }
 
 // isReturnFileWatch reports whether the command polls a file's existence with
-// an until/while loop and names a "returns/" path.
+// an until/while loop and names a path with a "returns" directory segment.
 func isReturnFileWatch(command string) bool {
-	return strings.Contains(command, "returns/") && orchestratorWaitFileLoop.MatchString(command)
+	return orchestratorWaitReturnsDir.MatchString(command) && orchestratorWaitFileLoop.MatchString(command)
 }
 
 // isNoOpWaitCommand reports whether the whole trimmed command is one simple

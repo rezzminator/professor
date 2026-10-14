@@ -107,10 +107,11 @@ func pluginEngine(home, binary, first, second string, runner deps.Runner, out *b
 	}, apply: apply}
 }
 
-// TestEnsureClaudePluginsRunsOnceThroughPrimaryOrStore: a roster host runs
-// the step in the primary account's dir; a host with no roster, where
-// ~/.claude is an ordinary config dir, keeps running it in Options.ConfigDir.
-func TestEnsureClaudePluginsRunsOnceThroughPrimaryOrStore(t *testing.T) {
+// TestEnsureClaudePluginsRunsOnceThroughPrimaryOrSkipsTheStore: a roster host
+// runs the step in the primary account's dir; a host with no roster, where the
+// only config dir is the store, runs no claude command and prints one named
+// skip line, so nothing writes account identity into the store.
+func TestEnsureClaudePluginsRunsOnceThroughPrimaryOrSkipsTheStore(t *testing.T) {
 	for _, roster := range []bool{false, true} {
 		t.Run(fmt.Sprint(roster), func(t *testing.T) {
 			home, binary, first, account := pluginFixture(t)
@@ -118,27 +119,34 @@ func TestEnsureClaudePluginsRunsOnceThroughPrimaryOrStore(t *testing.T) {
 			var out bytes.Buffer
 			inst := pluginEngine(home, binary, first, account, runner, &out, true)
 			inst.options.PrimaryConfigDir = account
-			dir := account
 			if !roster {
 				inst.options.ClaudeAccounts, inst.options.PrimaryConfigDir = nil, ""
-				dir = inst.options.ConfigDir
 			}
 			if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 				t.Fatal(err)
+			}
+			if !roster {
+				store := inst.options.ConfigDir
+				want := "  skip    claude plugins: not run — no account roster, so the only config dir is the Claude store " +
+					store + ", where a claude process writes account identity; add an account to pfm.config.json and rerun pfm install --yes\n"
+				if out.String() != want || len(runner.calls) != 0 {
+					t.Fatalf("got %q calls=%v, want only %q", out.String(), runner.calls, want)
+				}
+				return
 			}
 			var want []pluginCall
 			for _, p := range testPlugins {
 				want = append(
 					want,
-					pluginCall{"plugin marketplace add " + p.Source, dir},
-					pluginCall{"plugin install " + p.ID + " -y", dir},
+					pluginCall{"plugin marketplace add " + p.Source, account},
+					pluginCall{"plugin install " + p.ID + " -y", account},
 				)
 			}
 			if fmt.Sprint(runner.calls) != fmt.Sprint(want) {
 				t.Fatalf("calls=%v want %v", runner.calls, want)
 			}
 			for _, p := range testPlugins {
-				line := "  change  run CLAUDE_CONFIG_DIR=" + dir + " " + binary + " plugin marketplace add " + p.Source + " && " + binary + " plugin install " + p.ID + " -y\n"
+				line := "  change  run CLAUDE_CONFIG_DIR=" + account + " " + binary + " plugin marketplace add " + p.Source + " && " + binary + " plugin install " + p.ID + " -y\n"
 				if !strings.Contains(out.String(), line) {
 					t.Fatalf("missing %q: %s", line, out.String())
 				}
@@ -620,7 +628,7 @@ func TestEnsureClaudePluginsUnresolvedBinaryIsAVisibleSkip(t *testing.T) {
 }
 
 func TestInstallRunsTheClaudePluginStep(t *testing.T) {
-	home, binary, _, second := pluginFixture(t)
+	home, binary, _, _ := pluginFixture(t)
 	store := filepath.Join(home, ".claude")
 	runner := &pluginRunner{}
 	var out bytes.Buffer
@@ -643,11 +651,14 @@ func TestInstallRunsTheClaudePluginStep(t *testing.T) {
 			installs[call.configDir]++
 		}
 	}
-	if installs[store] != len(testPlugins) || installs[second] != 0 {
+	// A host with no roster has only the store as a config dir: the step runs
+	// no claude command there.
+	if len(installs) != 0 || len(runner.calls) != 0 ||
+		!strings.Contains(out.String(), "  skip    claude plugins: not run — no account roster") {
 		t.Fatalf(
-			"plugin installs per dir=%v, want %d only in the store\n%s",
+			"plugin installs per dir=%v calls=%v, want the named skip and no command\n%s",
 			installs,
-			len(testPlugins),
+			runner.calls,
 			out.String(),
 		)
 	}
@@ -778,7 +789,7 @@ func recordedPIDs(t *testing.T, path string) []int {
 
 func TestClaudePluginCommandTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	home := t.TempDir()
-	account := filepath.Join(home, ".claude")
+	account := filepath.Join(home, ".cc", "1") // not the store: the command then carries CLAUDE_CONFIG_DIR
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -933,6 +944,46 @@ func TestClaudePluginStepGuardsRosterDirs(t *testing.T) {
 			want := "  skip    claude plugins: live chats 4242 on " + liveDir + " — close them and rerun pfm install --yes\n"
 			if output.String() != want || len(runner.calls) != 0 {
 				t.Fatalf("output = %q calls=%v, want %q and no commands", output.String(), runner.calls, want)
+			}
+		})
+	}
+}
+
+func TestClaudePluginGapsNamesEnabledLegacyEffort(t *testing.T) {
+	for _, row := range []struct {
+		id      string
+		enabled bool
+		warning bool
+	}{
+		{"agent-effort@agent-effort", true, true},
+		{"agent-effort@agent-effort-dev", true, true},
+		{"agent-effort@agent-effort", false, false},
+		{"effort-live-control@effort-live-control", true, false},
+	} {
+		t.Run(fmt.Sprintf("%s enabled=%v", row.id, row.enabled), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			raw, err := json.Marshal(map[string]any{"enabledPlugins": map[string]bool{row.id: row.enabled}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gaps, err := ClaudePluginGaps(path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want []ClaudePluginGap
+			if row.warning {
+				want = []ClaudePluginGap{
+					{
+						Problem: "plugin " + row.id + " retired (now effort-live-control) but still enabled in " + path,
+						Fix:     "claude plugin uninstall " + row.id + " --scope user; if claude.plugins still lists it, replace that entry with effort-live-control",
+					},
+				}
+			}
+			if !reflect.DeepEqual(gaps, want) {
+				t.Fatalf("legacy plugin gaps = %+v, want %+v", gaps, want)
 			}
 		})
 	}

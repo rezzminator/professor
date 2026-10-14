@@ -149,7 +149,8 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 // ClaudePluginGaps reads the store's settings.json and names every target id
 // not enabled, every plugin of ours enabled from both its GitHub and its -dev
 // marketplace, every local target whose copy is missing or a symlink, and every
-// other plugin enabled under two or more keys. A
+// other plugin enabled under two or more keys, and every enabled retired
+// default agent-effort copy. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -187,6 +188,15 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			if gap != "" {
 				gaps = append(gaps, ClaudePluginGap{"plugin " + target.DevID + " copy " + gap, ClaudePluginRepair})
 			}
+		}
+	}
+	for _, id := range retiredClaudePlugins["effort-live-control"] {
+		if pluginEnabled(document, id) {
+			gaps = append(gaps, ClaudePluginGap{
+				Problem: "plugin " + id + " retired (now effort-live-control) but still enabled in " + path,
+				Fix: "claude plugin uninstall " + shellCommandLine(id) + " --scope user" +
+					"; if claude.plugins still lists it, replace that entry with effort-live-control",
+			})
 		}
 	}
 	return append(gaps, claudePluginDuplicateGaps(document, path, targets)...), nil
@@ -484,9 +494,10 @@ func pluginEnabled(document map[string]any, id string) bool {
 
 // ensureClaudePlugins installs the shared plugins through the primary account.
 // On a roster host its dir passes the refusal every launch applies, so the
-// Options.ConfigDir fallback (the store) never runs; a host with no roster
-// keeps Options.ConfigDir, there an ordinary config dir. A --config-dir on a
-// roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
+// Options.ConfigDir fallback (the store) never runs. A host with no roster,
+// whose Options.ConfigDir is the store, skips the step with one named line: no
+// claude subprocess runs on the store (it would write .claude.json and backups
+// there). A --config-dir on a roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
 // An -alpha build ensures each bare name with a checkout from its local copy
 // (ClaudePluginTargets); every build then disables the copy of ours it does not
 // ensure. A listed id pfm cannot install is a failure naming it; an id the list
@@ -500,6 +511,14 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 		if err := installer.checkLaunchConfigDir(0, dir); err != nil {
 			return installer.pluginStepFailure(dir, err)
 		}
+	} else if claudelaunch.InspectConfigDir(
+		claudelaunch.ClaudeStore(installer.options.Home), dir,
+	).State == claudelaunch.ConfigDirStore {
+		installer.skip(fmt.Sprintf(
+			"claude plugins: not run — no account roster, so the only config dir is the Claude store %s, where a claude process writes account identity; add an account to pfm.config.json and rerun pfm install --yes",
+			dir,
+		))
+		return nil
 	}
 	targets := ClaudePluginTargets(ClaudePluginBuild{
 		Version:      installer.options.Version,
@@ -604,23 +623,27 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 			// that is touched, and no other id is its twin to retire.
 			continue
 		}
-		message, edit, err := planOtherCopyRetirement(settingsPath, target)
-		if err != nil {
-			failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-			continue
-		}
-		if message == "" {
-			continue
-		}
-		stop, err := blockedByLiveChats()
-		if err != nil {
-			return probeFailed(target.ID, err)
-		}
-		if stop {
-			continue
-		}
-		if err := installer.change(message, edit); err != nil {
-			failures = append(failures, installer.pluginFailure(dir, target.ID, err))
+		for _, plan := range []func(string, *ClaudePluginTarget) (string, func() error, error){
+			planOtherCopyRetirement, planRetiredPluginDisable,
+		} {
+			message, edit, err := plan(settingsPath, target)
+			if err != nil {
+				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
+				break
+			}
+			if message == "" {
+				continue
+			}
+			stop, err := blockedByLiveChats()
+			if err != nil {
+				return probeFailed(target.ID, err)
+			}
+			if stop {
+				break
+			}
+			if err := installer.change(message, edit); err != nil {
+				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
+			}
 		}
 	}
 	return errors.Join(failures...)

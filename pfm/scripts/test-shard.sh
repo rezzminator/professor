@@ -30,8 +30,10 @@ PREFIX = 'github.com/rezzminator/professor/pfm/'
 # Clean plain go test ./... took 75.7 s: cmd/pfm took 55.7 s; no other package exceeded 22 s.
 # History-run medians: three shards 43.8 s, five 43.3 s;
 # four measured 39.2 s then 43.7 s under varying host load.
+# internal/update: 11.9 s alone, nearly all of it ~45 serial Run calls (package-var seams).
 SHARDS = {
     PREFIX + 'cmd/pfm': 4,
+    PREFIX + 'internal/update': 2,
 }
 TERMINALS = {'pass', 'fail', 'skip'}
 

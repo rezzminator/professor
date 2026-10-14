@@ -325,6 +325,9 @@ func TestUpdateSourceIgnoresForeignGitSelectors(t *testing.T) {
 	for _, rollback := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "rollback"}[rollback], func(t *testing.T) {
 			repo, foreign := newUpdateGitFixture(t), newUpdateGitFixture(t)
+			// Both are copies of one template: diverge foreign so a SHA read
+			// through its GIT_DIR differs from repo's own.
+			commitUntaggedFixtureChange(t, foreign, "FOREIGN")
 			previous := updateGitRevision(t, repo, "HEAD")
 			target := updateGitRevision(t, repo, "v0.10.0")
 			foreignPrevious := updateGitRevision(t, foreign, "HEAD")

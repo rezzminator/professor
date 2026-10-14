@@ -95,6 +95,7 @@ func TestUpdateCheckAlias(t *testing.T) {
 }
 
 func TestUpdateCheckAliasReportsRetiredNames(t *testing.T) {
+	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	writeProjectFixtureFile(t, fixture.project, "legacy.md", "Use /wave:refine.\n")
 	var stdout, stderr bytes.Buffer

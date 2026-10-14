@@ -43,7 +43,7 @@ func TestLiveOpenCodeSeatResolvesByNameIDAndSocket(t *testing.T) {
 	}
 }
 
-// liveSeats is the filter inject's name lookup runs first; an addressable
+// liveSeats is the filter call's name lookup runs first; an addressable
 // OpenCode row must survive it, and the engine filter must keep it apart from
 // the other two engines' seats.
 func TestLiveSeatsKeepsALiveOpenCodeRow(t *testing.T) {
@@ -62,7 +62,7 @@ func TestLiveSeatsKeepsALiveOpenCodeRow(t *testing.T) {
 	}
 }
 
-// seatTarget is what inject types into: the OpenCode seat's own socket path
+// seatTarget is what call types into: the OpenCode seat's own socket path
 // and pane, tagged with its own engine so the busy rule and the binary check
 // downstream read the right TUI.
 func TestSeatTargetAddressesTheOpenCodePane(t *testing.T) {

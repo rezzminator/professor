@@ -19,7 +19,7 @@ All train/code work happens in a `git worktree` under `.worktrees/{train-or-wave
 A dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.27, and pinned Node 22) mounts the worktree and behaves as a fresh box:
 
 - Own `$HOME` inside the container — `pfm install --yes` runs against it, doctor runs in it, the shim sources into its zshrc. Ephemeral by default (fresh machine per run); a named volume when a task needs iterative state.
-- Own tmux server, own socket dir — fleet experiments (spawn/inject/capture) run against container-local chats, never the live `cc-*`/`cx-*` sockets. The live-box law gains teeth: it is now physically satisfied, not just promised.
+- Own tmux server, own socket dir — fleet experiments (spawn/call/capture) run against container-local chats, never the live `cc-*`/`cx-*` sockets. The live-box law gains teeth: it is now physically satisfied, not just promised.
 - Own ports — the MCP HTTP daemon binds container-local; nothing publishes to the host unless a task explicitly asks.
 - Builds land in the container's `~/.local/bin`, never the host's.
 

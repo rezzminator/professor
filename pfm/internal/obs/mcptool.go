@@ -21,17 +21,17 @@ import (
 const compMCP = "mcp"
 
 // nonChatTargetTools are the registered tool names whose Target field
-// addresses something other than a chat — chat_save's is a FILE PATH
+// addresses something other than a chat — save's is a FILE PATH
 // (mcpserv.SaveInput's doc comment), the field `pfm log --chat` filters on —
 // so Tool never records their Target value as the log's target field. Their
 // path still reaches the log as a SIZE only, through args' shape
 // (argumentShape already reports target:<byte length> for every field).
 var nonChatTargetTools = map[string]bool{
-	"chat_save": true,
+	"save": true,
 }
 
 // Tool wraps a typed mcp.AddTool handler in the mcp middleware (spec
-// § Middleware): `mcp.AddTool(server, tool, obs.Tool("chat_ls", service.chatLS))`.
+// § Middleware): `mcp.AddTool(server, tool, obs.Tool("ls", service.chatLS))`.
 // One record per call — tool, kind=tool, target (the input's Target or Chat
 // field when it has one and the tool is not in nonChatTargetTools), the
 // argument SHAPE (field names and byte sizes, never a value), the result's

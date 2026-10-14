@@ -42,7 +42,7 @@ func TestCachedFirstFrameDrawsNoStarForAResumableChatWithComms(t *testing.T) {
 	}
 	nowNS := time.Now().UnixNano()
 	comms := &fakeCommsReader{events: []fleetdb.CommsEvent{{
-		AtNS: nowNS - int64(time.Minute), Kind: fleetdb.KindInject,
+		AtNS: nowNS - int64(time.Minute), Kind: fleetdb.KindCall,
 		SenderUUID: first, Target: second, Message: "before the crash",
 	}}}
 	cached, err := scanFleetCached(context.Background(), database, scanRequest{Comms: comms})

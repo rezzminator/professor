@@ -94,7 +94,7 @@ func TestProxyRecoveryTextsMatchTheGoSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := conn.Write(ctx, &jsonrpc.Request{
-		ID: id, Method: "tools/call", Params: json.RawMessage(`{"name":"chat_status"}`),
+		ID: id, Method: "tools/call", Params: json.RawMessage(`{"name":"status"}`),
 	}); err != nil {
 		t.Fatal(err)
 	}

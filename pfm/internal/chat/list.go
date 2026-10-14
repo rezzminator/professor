@@ -47,7 +47,7 @@ type ListResult struct {
 	Home        string
 }
 
-// List is the one fleet listing, behind MCP chat_ls and `pfm chat ls`; each
+// List is the one fleet listing, behind MCP ls and `pfm chat ls`; each
 // entry point only parses its input into a ListRequest and renders the result.
 // A writing scan acts like the picker's — a /clear observed here reconciles
 // the Codex pane it moved.

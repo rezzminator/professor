@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestMatchPrefersTheLiveSeatOverAKilledOne pins rule 1 at every door that
-// resolves through Match (status CLI and MCP chat_status, watch, kill, open):
+// resolves through Match (status CLI and MCP status, watch, kill, open):
 // a killed seat whose pane the roster still lists is dead to its name, so the
 // live chat sharing it is the answer, not an ambiguity.
 func TestMatchPrefersTheLiveSeatOverAKilledOne(t *testing.T) {
@@ -55,8 +55,8 @@ func TestMatchAfterKillTheNameBelongsToTheNewChat(t *testing.T) {
 	}
 }
 
-// TestRosterTargetNamesTheNewestDeadMatch pins rule 2 at the inject doors
-// (CLI and MCP chat_inject): a name only dead rows answer to is a roster miss
+// TestRosterTargetNamesTheNewestDeadMatch pins rule 2 at the call doors
+// (CLI and MCP call): a name only dead rows answer to is a roster miss
 // that names the newest dead chat and says it is dead.
 func TestRosterTargetNamesTheNewestDeadMatch(t *testing.T) {
 	testjail.Fleet(t)
@@ -65,7 +65,7 @@ func TestRosterTargetNamesTheNewestDeadMatch(t *testing.T) {
 		{Kind: compose.ResumeClaude, ID: "new-id", Name: "PFM_SYNC", ActivityNS: 2},
 	}
 	_, code, detail, err := rosterTarget(resolvedPaths(t), rows, "", "PFM_SYNC")
-	if err != nil || code != inject.CodeUnknown || !strings.Contains(detail, "is dead") ||
+	if err != nil || code != pfmcall.CodeUnknown || !strings.Contains(detail, "is dead") ||
 		!strings.Contains(detail, "new-id") || strings.Contains(detail, "old-id") {
 		t.Fatalf("rosterTarget()=(%d,%q,%v), want a miss naming the newest dead chat", code, detail, err)
 	}

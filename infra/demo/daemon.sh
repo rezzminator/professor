@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # daemon.sh — runs INSIDE the demo fence container: keeps the pfm MCP HTTP daemon
 # up. On a real host `pfm install` wires it as a systemd/launchd unit; the fence
-# has no init system: every chat's `pfm mcp serve --stdio` (Claude's carried
+# has no init system: every chat's `pfm mcp serve --stdio --family …` (Claude's carried
 # through --mcp-config) forwards to this daemon; with no daemon each serves in
 # process.
 #
@@ -14,7 +14,7 @@ export PATH="$HOME/.local/bin:$PATH"
 : "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 PORT="$(jq -r '.mcp.http.port // 18377' "$PFM_CONFIG" 2>/dev/null || echo 18377)"
 LOG=/tmp/pfm-mcp.log
-up() { [ "$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$PORT/mcp/professor" || true)" != 000 ]; }
+up() { [ "$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$PORT/status" || true)" != 000 ]; }
 # A daemon started before setup.sh tools rebuilt pfm still runs the OLD binary
 # (go build renames a fresh file over it; the process's exe reads "(deleted)").
 # Restarted here, so a re-run of up.sh after a pfm change serves the new code

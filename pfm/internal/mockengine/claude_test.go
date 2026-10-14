@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless/run"
 	"github.com/rezzminator/professor/pfm/internal/index"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
@@ -52,7 +52,7 @@ func serveVerbsStdioProfessor() int {
 			fmt.Fprintf(os.Stderr, "verbs stdio professor: close chat: %v\n", err)
 		}
 	}()
-	professor, err := mcpserv.NewProfessor(mcpserv.ProfessorOptions{Version: "test", Chat: service})
+	professor, err := mcpserv.NewFamilyServers(mcpserv.FamilyServerOptions{Version: "test", Chat: service})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "verbs stdio professor: %v\n", err)
 		return 1
@@ -140,16 +140,16 @@ func TestClaudeTurnShowsABusyFooterThenAReplyAndWritesTheTranscript(t *testing.T
 	})
 	session := fix.startTUI("claude", claudeArgs(), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	if inject.IsBusy(session.out.frame()) {
+	if pfmcall.IsBusy(session.out.frame()) {
 		t.Fatalf("an idle composer reads busy:\n%s", session.out.frame())
 	}
 	session.typeLine("hello there")
-	session.waitFrame("the busy footer inject.IsBusy matches", inject.IsBusy)
+	session.waitFrame("the busy footer pfmcall.IsBusy matches", pfmcall.IsBusy)
 	frame := session.waitFrame("the reply with the footer gone", func(frame string) bool {
-		return !inject.IsBusy(frame) && strings.Contains(frame, "granite")
+		return !pfmcall.IsBusy(frame) && strings.Contains(frame, "granite")
 	})
-	if inject.SelectorLine(frame) != "" {
-		t.Fatalf("an idle reply frame reads as an open menu: %q", inject.SelectorLine(frame))
+	if pfmcall.SelectorLine(frame) != "" {
+		t.Fatalf("an idle reply frame reads as an open menu: %q", pfmcall.SelectorLine(frame))
 	}
 
 	path := fix.claudeTranscript(fixtureSession)
@@ -188,7 +188,7 @@ func TestClaudeNameFlagAndRenameLandAsCustomTitle(t *testing.T) {
 	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0)})
 	session := fix.startTUI("claude", claudeArgs("--name", "worker 7", "audit the firewall"), nil)
 	session.waitFrame("the launch prompt answered", func(frame string) bool {
-		return strings.Contains(frame, DefaultReply) && !inject.IsBusy(frame)
+		return strings.Contains(frame, DefaultReply) && !pfmcall.IsBusy(frame)
 	})
 	rows := fix.indexedTranscripts()
 	if len(rows) != 1 || rows[0].CustomTitle != "worker 7" || rows[0].FirstPrompt != "audit the firewall" {
@@ -215,18 +215,18 @@ func TestClaudeMenuIsAnOpenSelectorUntilAnswered(t *testing.T) {
 	session := fix.startTUI("claude", claudeArgs(), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 	session.typeLine("do the thing")
-	frame := session.waitFrame("an open menu inject.SelectorLine reads", func(frame string) bool {
-		return inject.SelectorLine(frame) != ""
+	frame := session.waitFrame("an open menu pfmcall.SelectorLine reads", func(frame string) bool {
+		return pfmcall.SelectorLine(frame) != ""
 	})
-	if selector := inject.SelectorLine(frame); !strings.Contains(selector, "1. Yes") {
+	if selector := pfmcall.SelectorLine(frame); !strings.Contains(selector, "1. Yes") {
 		t.Fatalf("selector line = %q, want the preselected first option", selector)
 	}
-	if inject.IsBusy(frame) {
+	if pfmcall.IsBusy(frame) {
 		t.Fatalf("an open menu must not read as a busy turn:\n%s", frame)
 	}
 	session.typeRaw("\r")
 	session.waitFrame("the menu closed", func(frame string) bool {
-		return inject.SelectorLine(frame) == "" && strings.Contains(frame, "❯")
+		return pfmcall.SelectorLine(frame) == "" && strings.Contains(frame, "❯")
 	})
 }
 
@@ -241,11 +241,11 @@ func TestClaudeCompactPrintsTheReceiptAndMarksTheTranscript(t *testing.T) {
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 	session.typeLine("warm up")
 	session.waitFrame("the first reply", func(frame string) bool { return strings.Contains(frame, "first") })
-	if inject.CompactionReceipt(session.out.frame()) {
+	if pfmcall.CompactionReceipt(session.out.frame()) {
 		t.Fatal("a receipt is showing before any compaction")
 	}
 	session.typeLine("/compact")
-	session.waitFrame("the compaction receipt inject.CompactionReceipt matches", inject.CompactionReceipt)
+	session.waitFrame("the compaction receipt pfmcall.CompactionReceipt matches", pfmcall.CompactionReceipt)
 	meta := readMeta(t, fix.claudeTranscript(fixtureSession))
 	if !meta.CompactedAfterUsage || meta.PostCompactTokens != 777 || meta.HumanPrompts != 1 {
 		t.Fatalf("ReadMeta = %+v, want a compaction after usage with 777 post tokens and 1 human prompt", meta)
@@ -265,16 +265,16 @@ func TestClaudeBackgroundAgentIsIdleAndExitAsksToStopIt(t *testing.T) {
 	frame := session.waitFrame("the reply beside an agent row", func(frame string) bool {
 		return strings.Contains(frame, "dispatched") && strings.Contains(frame, "● tracer")
 	})
-	if inject.IsBusy(frame) {
+	if pfmcall.IsBusy(frame) {
 		t.Fatalf("a background agent must leave the main turn idle:\n%s", frame)
 	}
-	if inject.SelectorLine(frame) != "" {
-		t.Fatalf("the agent row read as a menu: %q", inject.SelectorLine(frame))
+	if pfmcall.SelectorLine(frame) != "" {
+		t.Fatalf("the agent row read as a menu: %q", pfmcall.SelectorLine(frame))
 	}
 	session.typeLine("/exit")
-	frame = session.waitFrame("the exit confirmation inject.ExitDialogOpen matches", inject.ExitDialogOpen)
-	if !strings.Contains(inject.SelectorLine(frame), "Exit") {
-		t.Fatalf("selector = %q, want the Exit row preselected", inject.SelectorLine(frame))
+	frame = session.waitFrame("the exit confirmation pfmcall.ExitDialogOpen matches", pfmcall.ExitDialogOpen)
+	if !strings.Contains(pfmcall.SelectorLine(frame), "Exit") {
+		t.Fatalf("selector = %q, want the Exit row preselected", pfmcall.SelectorLine(frame))
 	}
 	session.typeRaw("\r")
 	if code := session.waitExit(); code != 0 {
@@ -297,7 +297,7 @@ func TestClaudeExitWithoutBackgroundWorkQuitsAtOnce(t *testing.T) {
 	if code := session.waitExit(); code != 0 {
 		t.Fatalf("exit code = %d", code)
 	}
-	if inject.ExitDialogOpen(session.out.all()) {
+	if pfmcall.ExitDialogOpen(session.out.all()) {
 		t.Fatal("an exit dialog appeared with no background work to stop")
 	}
 }
@@ -331,16 +331,16 @@ func TestClaudeHoldStaysBusyUntilTheGateFileIsGone(t *testing.T) {
 	session := fix.startTUI("claude", claudeArgs(), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 	session.typeLine("wait for me")
-	session.waitFrame("busy while the gate exists", inject.IsBusy)
+	session.waitFrame("busy while the gate exists", pfmcall.IsBusy)
 	time.Sleep(400 * time.Millisecond)
-	if frame := session.out.frame(); !inject.IsBusy(frame) || strings.Contains(frame, "released") {
+	if frame := session.out.frame(); !pfmcall.IsBusy(frame) || strings.Contains(frame, "released") {
 		t.Fatalf("the hold released before the gate went:\n%s", frame)
 	}
 	if err := os.Remove(gate); err != nil {
 		t.Fatal(err)
 	}
 	session.waitFrame("the reply once the gate is gone", func(frame string) bool {
-		return !inject.IsBusy(frame) && strings.Contains(frame, "released")
+		return !pfmcall.IsBusy(frame) && strings.Contains(frame, "released")
 	})
 }
 
@@ -500,7 +500,7 @@ func TestClaudeInlineTurnsKeepThePositionalCursor(t *testing.T) {
 			prompt := "hi mock-engine: " + row.directive
 			session.typeLine(prompt)
 			frame := session.waitFrame("a completed turn", func(frame string) bool {
-				return !inject.IsBusy(frame) && strings.Contains(frame, "⏺ ")
+				return !pfmcall.IsBusy(frame) && strings.Contains(frame, "⏺ ")
 			})
 			want := "⏺ " + row.reply
 			if row.refused {
@@ -542,7 +542,7 @@ func TestClaudeInlineArrayAndQueuedPromptsHaveTheirOwnSteps(t *testing.T) {
 	first := `first mock-engine: [{"type":"background_agent","name":"a"},{"type":"turn","reply":"R2","busy_ms":500}]`
 	second := `queued mock-engine: {"type":"turn","reply":"queued-reply"}`
 	session.typeLine(first)
-	session.waitFrame("the busy turn", inject.IsBusy)
+	session.waitFrame("the busy turn", pfmcall.IsBusy)
 	session.typeLine(second)
 	session.typeLine("plain queued prompt")
 	session.waitFrame("all queued turns", func(frame string) bool { return strings.Contains(frame, "⏺ positional") })
@@ -622,7 +622,7 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 				t.Fatal(err)
 			}
 			identityFile := filepath.Join(fix.recordDir, "mcp-identity")
-			config := string(mustJSON(t, map[string]any{"mcpServers": map[string]any{"professor": map[string]any{
+			config := string(mustJSON(t, map[string]any{"mcpServers": map[string]any{"chat-professor": map[string]any{
 				"type": "stdio", "command": "sh", "args": []string{
 					"-c",
 					fmt.Sprintf(
@@ -652,13 +652,13 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 			session.waitFrame("the seed reply", func(frame string) bool { return strings.Contains(frame, "⏺ ok") })
 			fix.indexedTranscripts()
 			session.typeLine(
-				`query mock-engine: [{"type":"mcp","tool":"chat_find","input":{"excerpt":"violet archive fixture","include_self":true}},{"type":"turn","reply":"MCP finished"}]`,
+				`query mock-engine: [{"type":"mcp","tool":"find","input":{"excerpt":"violet archive fixture","include_self":true}},{"type":"turn","reply":"MCP finished"}]`,
 			)
 			session.waitFrame(
 				"the MCP reply",
 				func(frame string) bool { return strings.Contains(frame, "⏺ MCP finished") },
 			)
-			result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-chat_find.json"))
+			result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-find.json"))
 			if !strings.Contains(result, fixtureSession) {
 				t.Fatalf("pfm's tools/call answer=%s", result)
 			}
@@ -678,7 +678,7 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, part := range parts {
-					if part.Type == "tool_use" && part.Name == "chat_find" {
+					if part.Type == "tool_use" && part.Name == "find" {
 						uses++
 					}
 					if part.Type == "tool_result" && strings.Contains(part.Content, fixtureSession) && !part.IsError {
@@ -701,9 +701,9 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 
 func TestClaudeMCPFailuresAreToolResultsAndKeepThePaneLive(t *testing.T) {
 	for _, row := range []struct{ name, config, tool, cause string }{
-		{"missing server", `{"mcpServers":{}}`, "chat_find", "professor"},
-		{"broken config", `{`, "chat_find", "decode"},
-		{"spawn", `{"mcpServers":{"professor":{"command":"/tmp/mockengine-command-absent"}}}`, "chat_find", "initialize"},
+		{"missing server", `{"mcpServers":{}}`, "find", "professor"},
+		{"broken config", `{`, "find", "decode"},
+		{"spawn", `{"mcpServers":{"chat-professor":{"command":"/tmp/mockengine-command-absent"}}}`, "find", "initialize"},
 		{"call", "", "unknown_fixture_tool", "tools/call"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -720,7 +720,7 @@ func TestClaudeMCPFailuresAreToolResultsAndKeepThePaneLive(t *testing.T) {
 						t,
 						map[string]any{
 							"mcpServers": map[string]any{
-								"professor": map[string]any{
+								"chat-professor": map[string]any{
 									"command": executable,
 									"args":    []string{verbsStdioProfessorArg},
 								},

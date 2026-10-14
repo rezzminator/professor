@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // The defaults of a two-way turn. The timeout is generous because the thing
@@ -31,7 +31,7 @@ const (
 var askAwaitTimings struct{ Poll, Settle time.Duration }
 
 // runHeadlessAsk is the two-way verb: say something to a running chat and come
-// back with what it said. It is `inject` plus the wait every caller of inject
+// back with what it said. It is `call` plus the wait every caller of call
 // was writing by hand — a poll loop over `last` that cannot tell a new answer
 // from the previous one, which is the bug this verb exists to delete.
 func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
@@ -47,7 +47,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, ru
 	force := flags.Bool("now", false, "interrupt a working chat instead of waiting for it")
 	asJSON := flags.Bool(jsonFormat, false, "emit one JSON object")
 	progress := flags.Bool("progress", false, "print the chat's turns to stderr while waiting")
-	// Only the flags BEFORE the name are parsed, exactly as `inject` does it:
+	// Only the flags BEFORE the name are parsed, exactly as `call` does it:
 	// a message may legitimately start with a dash, and an order silently
 	// eaten as a flag is an order never delivered.
 	if code, ok := cli.ParseFlags(flags, args); !ok {
@@ -76,28 +76,28 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, ru
 		fmt.Fprintf(stderr, "pfm chat ask: %v\n", err)
 		return 1
 	}
-	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
+	engine, err := pfmchat.NewCallEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat ask: %v\n", err)
 		return 1
 	}
-	// Inject queues directly in a working Claude or Codex composer. The retry
+	// Call queues directly in a working Claude or Codex composer. The retry
 	// remains for an engine that cannot expose a safe queue; --timeout bounds
 	// that fallback, and --now interrupts instead of queueing.
 	start := clk.Now()
 	budget := time.Duration(*timeout) * time.Second
-	result, err := engine.Inject(ctx, inject.Request{
+	result, err := engine.Call(ctx, pfmcall.Request{
 		Target:   chat.Socket,
 		Message:  message,
 		ForceNow: *force,
 	})
-	for err == nil && result.Code == inject.CodeBusy &&
+	for err == nil && result.Code == pfmcall.CodeBusy &&
 		(budget == 0 || clk.Now().Sub(start)+busyRetry < budget) {
 		if sleepErr := clk.Sleep(ctx, busyRetry); sleepErr != nil {
 			fmt.Fprintf(stderr, "pfm chat ask: %v\n", sleepErr)
 			return 1
 		}
-		result, err = engine.Inject(ctx, inject.Request{
+		result, err = engine.Call(ctx, pfmcall.Request{
 			Target:   chat.Socket,
 			Message:  message,
 			ForceNow: *force,

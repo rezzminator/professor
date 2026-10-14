@@ -28,7 +28,7 @@ const (
 	downloadURITemplate           = downloadURIPrefix + "{id}"
 	defaultMaxResourceBytes int64 = 25 << 20
 	resourceLinkType              = "resource_link"
-	downloadFileDescription       = `Downloads any file as bytes — 1–50, unparsed: a PDF, zip, image, audio, dataset. Call harvester_download_file{urls:["https://…/data.zip"]}. Returns a ` + "`=== [n/N] {url}`" + ` block per item, input order: kind, content type, bytes, sha256, via, then path (local: take the file there) or url and expiry plus a resource_link (remote: run ` + "`curl -fL -o <file> <url>`" + `, check the sha256, never read it into context; a url dies in 10 minutes or at a server restart, so call again). Reading a page or paper → ` + "`harvester_read`" + `. A failed item is its header and an error: line; the others still return.`
+	downloadFileDescription       = `Downloads any file as bytes — 1–50, unparsed: a PDF, zip, image, audio, dataset. Call download_file{urls:["https://…/data.zip"]}. Returns a ` + "`=== [n/N] {url}`" + ` block per item, input order: kind, content type, bytes, sha256, via, then path (local: take the file there) or url and expiry plus a resource_link (remote: run ` + "`curl -fL -o <file> <url>`" + `, check the sha256, never read it into context; a url dies in 10 minutes or at a server restart, so call again). Reading a page or paper → ` + "`read`" + `. A failed item is its header and an error: line; the others still return.`
 )
 
 // DownloadInput is download_file's input.
@@ -244,13 +244,13 @@ func joinNote(note, more string) string {
 func downloadMisroute(source string) string {
 	switch {
 	case isLocalInput(source):
-		return "this is a local path; harvester_download_file takes URLs — read a local document with `harvester_read` (files)."
+		return "this is a local path; download_file takes URLs — read a local document with `read` (files)."
 	case workNoun(source) != "":
 		return "this is " + workNoun(
 			source,
-		) + "; read it with `harvester_read` (publications), or download the URL of its file."
+		) + "; read it with `read` (publications), or download the URL of its file."
 	case !isWebURL(source):
-		return "this is not a URL; harvester_download_file takes http(s) URLs of files."
+		return "this is not a URL; download_file takes http(s) URLs of files."
 	}
 	return ""
 }

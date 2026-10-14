@@ -28,7 +28,7 @@ var ErrNoTmux = errors.New(
 	"ERROR: this chat is not inside tmux ($TMUX unset, and no ancestor carries it)",
 )
 
-// Identity is who the CALLING process is: the tmux handle another chat injects
+// Identity is who the CALLING process is: the tmux handle another chat calls
 // to, plus whatever engine identity the environment carries.
 type Identity struct {
 	// Session is chat.sh whoami's stdout — this chat's own tmux session name.

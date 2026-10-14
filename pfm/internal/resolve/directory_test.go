@@ -86,7 +86,7 @@ func TestDirectoryResolvesEveryIdentityShapeTheFleetRecords(t *testing.T) {
 }
 
 // TestDirectoryStaleIdentitiesStillResolveAcrossARename pins why the session
-// is the stored key and the label is not: chat_name replaces a label at will,
+// is the stored key and the label is not: name replaces a label at will,
 // and the comms ledger is append-only, so an event recorded under the old
 // name must still find the chat. Addressing by the label the chat has SINCE
 // been given must not reach it through a stale event either.

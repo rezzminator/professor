@@ -6,7 +6,7 @@ exec jail-pfm-rc 4 chat capture absent
 stdout '^absent[\t]not-found$'
 exec jail-pfm-rc 4 chat keys absent Enter
 stdout '^absent[\t]not-found$'
-exec jail-pfm-rc 4 chat inject --allow-unsigned absent hello
+exec jail-pfm-rc 4 chat call --allow-unsigned absent hello
 stderr 'no chat named "absent"'
 ! stdout .
 exec jail-pfm-rc 4 chat ask absent hello

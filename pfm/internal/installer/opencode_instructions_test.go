@@ -382,7 +382,7 @@ func TestOpenCodePendingOwnershipSurvivesFullUninstall(t *testing.T) {
 			Stdout:             io.Discard,
 		},
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{"chat-professor"}); err != nil {
 		t.Fatal(err)
 	}
 	receipt := filepath.Join(e.managedRoot, "opencode-instructions.json")

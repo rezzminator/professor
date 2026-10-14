@@ -23,7 +23,7 @@ const (
 
 var digestResultsForm = regexp.MustCompile(`^(brief|none|full|tail:[1-9]\d*)$`)
 
-// chatDigest is chat_digest: `pfm transcript show` over any Claude, Codex or
+// chatDigest is digest: `pfm transcript show` over any Claude, Codex or
 // OpenCode transcript, run in-process, its digest bounded to max_bytes at a line end.
 func (service *Service) chatDigest(
 	ctx context.Context,
@@ -32,7 +32,7 @@ func (service *Service) chatDigest(
 ) (*mcp.CallToolResult, DigestOutput, error) {
 	flags, maxBytes, err := digestArgs(input)
 	if err != nil {
-		return nil, DigestOutput{}, fmt.Errorf("chat_digest: %w", err)
+		return nil, DigestOutput{}, fmt.Errorf("digest: %w", err)
 	}
 	timeout := service.backend.digestTimeout
 	if timeout <= 0 {
@@ -47,16 +47,16 @@ func (service *Service) chatDigest(
 	switch {
 	case ctx.Err() != nil:
 		return nil, DigestOutput{}, fmt.Errorf(
-			"chat_digest: cancelled before the digest of %q finished: %w",
+			"digest: cancelled before the digest of %q finished: %w",
 			input.Source,
 			ctx.Err(),
 		)
 	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 		return nil, DigestOutput{}, fmt.Errorf(
-			"chat_digest: timed out after %s digesting %q; narrow it with lines, since or last",
+			"digest: timed out after %s digesting %q; narrow it with lines, since or last",
 			timeout.Round(time.Second), input.Source)
 	case code != 0:
-		return nil, DigestOutput{}, fmt.Errorf("chat_digest: %s", strings.TrimSpace(stderr.String()))
+		return nil, DigestOutput{}, fmt.Errorf("digest: %s", strings.TrimSpace(stderr.String()))
 	}
 	text := stdout.String()
 	output := DigestOutput{TotalBytes: len(text)}

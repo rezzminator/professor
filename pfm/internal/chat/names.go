@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"io"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
-// NameResolver is the fleet roster rung of inject's target resolution, shared
-// by `pfm chat inject`, its preview, and MCP chat_inject/capture: one read of
+// NameResolver is the fleet roster rung of call's target resolution, shared
+// by `pfm chat call`, its preview, and MCP call/capture: one read of
 // the composed fleet, reduced to addressable live seats. A roster miss is
-// inject.CodeUnknown so the engine continues through the raw pane fallbacks a
+// pfmcall.CodeUnknown so the engine continues through the raw pane fallbacks a
 // fresh Codex seat needs before it writes its first rollout; a scan that could
 // not run is an error, never a miss.
 type NameResolver struct {
@@ -29,14 +29,14 @@ type NameResolver struct {
 func (resolver NameResolver) ResolveName(
 	ctx context.Context,
 	name, requiredEngine string,
-) (inject.Target, int, string, error) {
+) (pfmcall.Target, int, string, error) {
 	rows, err := Rows(ctx, io.Discard, resolver.Runtime)
 	if err != nil {
-		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("resolve roster name %q: %w", name, err)
+		return pfmcall.Target{}, pfmcall.CodeUndelivered, "", fmt.Errorf("resolve roster name %q: %w", name, err)
 	}
 	values, err := resolver.paths()
 	if err != nil {
-		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("resolve roster name %q: %w", name, err)
+		return pfmcall.Target{}, pfmcall.CodeUndelivered, "", fmt.Errorf("resolve roster name %q: %w", name, err)
 	}
 	return rosterTarget(values, rows, requiredEngine, name)
 }
@@ -49,9 +49,9 @@ func rosterTarget(
 	values paths.Values,
 	rows []compose.Row,
 	requiredEngine, name string,
-) (inject.Target, int, string, error) {
+) (pfmcall.Target, int, string, error) {
 	target, code, detail, err := seatTarget(values, liveSeats(rows, requiredEngine), name)
-	if err != nil || code != inject.CodeUnknown {
+	if err != nil || code != pfmcall.CodeUnknown {
 		return target, code, detail, err
 	}
 	engineRows := make([]compose.Row, 0, len(rows))
@@ -64,20 +64,20 @@ func rosterTarget(
 	if err != nil {
 		var ambiguous *resolve.RosterAmbiguityError
 		if errors.As(err, &ambiguous) {
-			return inject.Target{}, inject.CodeUnknown, fmt.Sprintf(
+			return pfmcall.Target{}, pfmcall.CodeUnknown, fmt.Sprintf(
 				"%q matched no live chat; its dead matches are tied: %s", name, ambiguous.Error(),
 			), nil
 		}
-		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("resolve dead roster name %q: %w", name, err)
+		return pfmcall.Target{}, pfmcall.CodeUndelivered, "", fmt.Errorf("resolve dead roster name %q: %w", name, err)
 	}
 	if !found || dead.Live {
-		return inject.Target{}, inject.CodeUnknown, "", nil
+		return pfmcall.Target{}, pfmcall.CodeUnknown, "", nil
 	}
 	socket := dead.Socket
 	if socket == "" {
 		socket = "none"
 	}
-	return inject.Target{}, inject.CodeUnknown, fmt.Sprintf(
+	return pfmcall.Target{}, pfmcall.CodeUnknown, fmt.Sprintf(
 		"%q matched no live chat; its newest match is dead: thread id %s (socket %s, name %q)",
 		name, dead.ID, socket, dead.Name,
 	), nil
@@ -94,27 +94,27 @@ func (resolver NameResolver) paths() (paths.Values, error) {
 
 // seatTarget is ResolveName over an already-read roster of live seats; the
 // seat's socket is addressed under values' tmux directory.
-func seatTarget(values paths.Values, seats []compose.Row, name string) (inject.Target, int, string, error) {
+func seatTarget(values paths.Values, seats []compose.Row, name string) (pfmcall.Target, int, string, error) {
 	chat, found, err := Match(seats, name)
 	if err != nil {
 		var ambiguous *resolve.RosterAmbiguityError
 		if errors.As(err, &ambiguous) {
-			return inject.Target{}, inject.CodeAmbiguous, ambiguous.Error(), nil
+			return pfmcall.Target{}, pfmcall.CodeAmbiguous, ambiguous.Error(), nil
 		}
-		return inject.Target{}, inject.CodeUndelivered, "", err
+		return pfmcall.Target{}, pfmcall.CodeUndelivered, "", err
 	}
 	if !found {
-		return inject.Target{}, inject.CodeUnknown, "", nil
+		return pfmcall.Target{}, pfmcall.CodeUnknown, "", nil
 	}
 	socketPath, err := values.SocketUnder(chat.Socket)
 	if err != nil {
-		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("roster seat %q socket: %w", chat.Name, err)
+		return pfmcall.Target{}, pfmcall.CodeUndelivered, "", fmt.Errorf("roster seat %q socket: %w", chat.Name, err)
 	}
 	pane := chat.Pane
 	if pane == "" {
 		pane = chat.Session
 	}
-	return inject.Target{
+	return pfmcall.Target{
 		SocketPath: socketPath,
 		Pane:       pane,
 		Engine:     string(chat.Engine),
@@ -125,7 +125,7 @@ func seatTarget(values paths.Values, seats []compose.Row, name string) (inject.T
 }
 
 // SenderName is the roster read backwards for the chat at identity's seat —
-// the name a peer's inject resolves first. found=false is an answer: the seat
+// the name a peer's call resolves first. found=false is an answer: the seat
 // is not in the roster, or its rows disagree.
 func (resolver NameResolver) SenderName(
 	ctx context.Context,

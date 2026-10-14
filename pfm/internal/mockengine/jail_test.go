@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
@@ -37,7 +37,7 @@ func TestClaudeQuietKeepsThePaneAndTranscriptWithoutAnnouncingTheSeat(t *testing
 	session.typeLine("quiet prompt")
 	session.waitFrame(
 		"the quiet reply",
-		func(frame string) bool { return strings.Contains(frame, "⏺ ok") && !inject.IsBusy(frame) },
+		func(frame string) bool { return strings.Contains(frame, "⏺ ok") && !pfmcall.IsBusy(frame) },
 	)
 	session.typeLine("/exit")
 	if code := session.waitExit(); code != 0 {

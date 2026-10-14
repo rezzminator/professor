@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -365,7 +365,7 @@ func Run(
 		switch {
 		case captureErr != nil:
 			fmt.Fprintf(stderr, "pfm chat reload: confirm /exit submission (try %d): %v\n", tries+1, captureErr)
-		case inject.ExitDialogOpen(capture):
+		case pfmcall.ExitDialogOpen(capture):
 			// Claude Code answers /exit with a confirmation whenever the chat
 			// has background work — a scheduled task, a background shell, a
 			// sub-agent — with "Exit and stop tasks" preselected. Nothing the
@@ -386,7 +386,7 @@ func Run(
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("retry /exit submission: %w", err)
 			}
-		case inject.LastComposerLine(capture) != "":
+		case pfmcall.LastComposerLine(capture) != "":
 			// The composer is drawn and no longer holds the typed /exit: the
 			// /exit was taken and the chat is ending, not refusing. A pane
 			// with no composer at all proves nothing and spends a try.
@@ -484,7 +484,7 @@ func waitCallerIdle(
 		showsComposer := composerDrawn(capture)
 		sawComposer = sawComposer || showsComposer
 		switch {
-		case inject.IsFooterBusy(request.Engine, capture):
+		case pfmcall.IsFooterBusy(request.Engine, capture):
 			stable = 0
 			if !announced {
 				announced = true
@@ -698,7 +698,7 @@ ready:
 		// past turn stand in for text that never landed.
 		composer := composerText(capture)
 		hasTail := strings.Contains(squashSpace(composer), squashSpace(needle))
-		hasPlaceholder := inject.HasPastePlaceholder(composer)
+		hasPlaceholder := pfmcall.HasPastePlaceholder(composer)
 		if !haveBaseline {
 			// No baseline means we cannot rule out a placeholder that was
 			// already sitting in the composer before we ever typed (e.g. a

@@ -94,7 +94,7 @@ resume-*)
   echo "adopt: $CHAT died mid-interview — resuming it in place"
   pfm chat open "$CHAT" </dev/null >/dev/null
   sleep 10
-  pfm chat inject --allow-unsigned "$CHAT" "You were interrupted mid-interview. Continue from where your transcript stops and finish every remaining phase; end with one line: INSTALLED plus the count of files you changed." >/dev/null
+  pfm chat call --allow-unsigned "$CHAT" "You were interrupted mid-interview. Continue from where your transcript stops and finish every remaining phase; end with one line: INSTALLED plus the count of files you changed." >/dev/null
   watch_idle || exit 1
   ;;
 *)
@@ -108,7 +108,7 @@ left="$(sweep)"
 if [ -n "$left" ]; then
   # One second round: the chat gets the exact files, as a reviewer would hand them over.
   echo "adopt: $(wc -l <<<"$left" | tr -d ' ') file(s) still carry a registered token — handing the list back to $CHAT once"
-  pfm chat inject --allow-unsigned "$CHAT" "These files still carry unfilled {TOKENS} from /worktree/docs/PLACEHOLDERS.md: $(tr '\n' ' ' <<<"$left"). Fill every one now, then reply with one line: TOKENS FILLED." >/dev/null
+  pfm chat call --allow-unsigned "$CHAT" "These files still carry unfilled {TOKENS} from /worktree/docs/PLACEHOLDERS.md: $(tr '\n' ' ' <<<"$left"). Fill every one now, then reply with one line: TOKENS FILLED." >/dev/null
   sleep 20
   watch_idle || exit 1
   left="$(sweep)"

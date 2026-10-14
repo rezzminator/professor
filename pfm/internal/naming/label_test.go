@@ -41,7 +41,7 @@ func TestBookmarkLabelAcceptsConfiguredAccountEmoji(t *testing.T) {
 // TestBookmarkLabelIgnoresADeliveredFooter is the regression for footer
 // label poisoning, caught live: pane %0 of a chat named W5_TESTER had, in its
 // visible capture, a message footer reading "🔖 W5_BUILDER" — the SENDER's
-// label, written into the RECIPIENT's pane by inject's own signature. Because
+// label, written into the RECIPIENT's pane by call's own signature. Because
 // the LAST 🔖 line wins, that made a chat's resolved identity whatever the
 // most recent message it received claimed its sender was called.
 //

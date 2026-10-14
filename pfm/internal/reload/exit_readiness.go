@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/rezzminator/professor/pfm/internal/inject"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 // exitIncomplete names the state a refused /exit leaves behind, because
@@ -28,7 +28,7 @@ func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) 
 		)
 	}
 	switch {
-	case inject.ExitDialogOpen(capture):
+	case pfmcall.ExitDialogOpen(capture):
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Escape"); err != nil {
 			return errors.Join(
 				cause,
@@ -43,7 +43,7 @@ func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) 
 				cause,
 				fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err),
 			)
-		} else if inject.ExitDialogOpen(capture) {
+		} else if pfmcall.ExitDialogOpen(capture) {
 			return errors.Join(
 				cause,
 				errors.New(
@@ -57,7 +57,7 @@ func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) 
 			return errors.Join(cause, err)
 		}
 		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))
-	case inject.LastComposerLine(capture) == "":
+	case pfmcall.LastComposerLine(capture) == "":
 		return errors.Join(
 			cause,
 			errors.New(
@@ -71,7 +71,7 @@ func exitIncomplete(ctx context.Context, request Request, tmux Tmux, polls int) 
 		fmt.Errorf(
 			"the pane shows neither the typed /exit nor an exit dialog (composer shows %q) — the chat took the "+
 				"/exit and is still ending; when it ends, its pane and server go with it, unrespawned",
-			inject.ComposerDraftText(capture),
+			pfmcall.ComposerDraftText(capture),
 		),
 	)
 }

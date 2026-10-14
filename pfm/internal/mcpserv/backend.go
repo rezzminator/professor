@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -18,7 +19,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -26,18 +26,18 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
-type injectionService interface {
-	Resolve(context.Context, string) (inject.Target, int, string, error)
-	ResolveEngine(context.Context, string, string) (inject.Target, int, string, error)
-	Capture(context.Context, string, int) (inject.Target, string, int, string, error)
-	Inject(context.Context, inject.Request) (inject.Result, error)
+type callService interface {
+	Resolve(context.Context, string) (pfmcall.Target, int, string, error)
+	ResolveEngine(context.Context, string, string) (pfmcall.Target, int, string, error)
+	Capture(context.Context, string, int) (pfmcall.Target, string, int, string, error)
+	Call(context.Context, pfmcall.Request) (pfmcall.Result, error)
 }
 
 type backend struct {
 	clock                clock.Clock
 	database             *store.Store
 	sharedState          *fleetdb.Store
-	injector             injectionService
+	callEngine           callService
 	resolver             resolve.Resolver
 	chat                 ChatVerbs
 	dispatch             Dispatch
@@ -45,9 +45,9 @@ type backend struct {
 	warnings             io.Writer
 	allowAmbientIdentity bool
 	runtimeIdentity      string
-	// runner is the exec seam chat_digest crosses; nil is the real one.
+	// runner is the exec seam digest crosses; nil is the real one.
 	runner deps.Runner
-	// digestTimeout bounds one chat_digest run; zero is digestRunTimeout.
+	// digestTimeout bounds one digest run; zero is digestRunTimeout.
 	digestTimeout time.Duration
 }
 
@@ -89,10 +89,10 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		_ = sharedState.Close()
 		return nil, err
 	}
-	injector, err := inject.New(inject.Dependencies{
+	caller, err := pfmcall.New(pfmcall.Dependencies{
 		Resolver:       resolver,
 		Names:          runtime.Names,
-		Spawner:        inject.CommandThenSpawner{ConfigPath: runtime.ConfigPath},
+		Spawner:        pfmcall.CommandThenSpawner{ConfigPath: runtime.ConfigPath},
 		ClaudeBinary:   runtime.ClaudeBinary,
 		CodexBinary:    runtime.CodexBinary,
 		OpenCodeBinary: runtime.OpenCodeBinary,
@@ -109,7 +109,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		clock:                runtime.Clock,
 		database:             database,
 		sharedState:          sharedState,
-		injector:             injector,
+		callEngine:           caller,
 		resolver:             *resolver,
 		chat:                 runtime.Chat,
 		dispatch:             runtime.Dispatch,
@@ -125,9 +125,9 @@ func (current *backend) close() error {
 }
 
 // engineBinaries is the MCP process's configured engine executables, one entry
-// per REGISTERED engine. The shared resolver and the inject engine read the
+// per REGISTERED engine. The shared resolver and the call engine read the
 // same map: the resolver used to be built from a Claude+Codex literal while
-// inject.New built its own from all three, so an OpenCode pane was resolved
+// pfmcall.New built its own from all three, so an OpenCode pane was resolved
 // here against a table that did not know the engine existed — and the next
 // engine would land half-configured the same way.
 func engineBinaries(runtime Runtime) map[pfmengine.ID]string {
@@ -156,13 +156,13 @@ const (
 	maxChatLSLimit     = 1000
 )
 
-// list is chat_ls: chat.List under the tool's payload contract, projected
+// list is ls: chat.List under the tool's payload contract, projected
 // onto the wire row.
 func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, error) {
 	return current.listProjected(ctx, input, true, "")
 }
 
-// lsScope is public chat_ls's repository scope: the repository of the caller
+// lsScope is public ls's repository scope: the repository of the caller
 // _meta resolves, else none — and the scope line says which, and why.
 func (current *backend) lsScope(
 	ctx context.Context,
@@ -174,7 +174,7 @@ func (current *backend) lsScope(
 	}
 	caller, err := current.callerForRequest(ctx, meta)
 	if err != nil {
-		return "", "", fmt.Errorf("chat_ls: resolve caller scope: %w", err)
+		return "", "", fmt.Errorf("ls: resolve caller scope: %w", err)
 	}
 	if !caller.valid || strings.TrimSpace(caller.row.Dir) == "" {
 		scope = "all repos — caller cwd unknown"
@@ -188,7 +188,7 @@ func (current *backend) lsScope(
 }
 
 // listUnbounded projects every row for an internal identity lookup. Public
-// chat_ls keeps its payload cap; resolving a caller must not turn a row beyond
+// ls keeps its payload cap; resolving a caller must not turn a row beyond
 // that presentation boundary into an absence.
 func (current *backend) listUnbounded(ctx context.Context, input LSInput) (LSOutput, error) {
 	return current.listProjected(ctx, input, false, "")
@@ -201,7 +201,7 @@ func (current *backend) listProjected(
 	repo string,
 ) (LSOutput, error) {
 	if current.chat == nil {
-		return LSOutput{}, fmt.Errorf("chat_ls verb is not configured")
+		return LSOutput{}, fmt.Errorf("ls verb is not configured")
 	}
 	if input.All && input.Killed {
 		return LSOutput{}, fmt.Errorf("all and killed are mutually exclusive")
@@ -255,7 +255,7 @@ func (current *backend) listProjected(
 	}, nil
 }
 
-// chatRowState is the one place a chat_ls row's state is decided.
+// chatRowState is the one place a ls row's state is decided.
 //
 // The killed-but-live arm is the honesty half of the kill fix: a kill that
 // closed nothing still wrote its tombstone, so a row came back asserting BOTH
@@ -267,8 +267,8 @@ func chatRowState(row compose.Row) string {
 	case row.Killed && row.Kind.IsAddressable():
 		return "killed-but-live"
 	case row.Kind == compose.Booting:
-		// A booting chat HAS a socket and already answers chat_inject by
-		// name. Excluding it made chat_ls report a chat that exists as
+		// A booting chat HAS a socket and already answers call by
+		// name. Excluding it made ls report a chat that exists as
 		// simply absent for its first minute.
 		return "booting"
 	case row.Kind.IsAddressable():

@@ -914,7 +914,7 @@ func TestLoadThirdParty(t *testing.T) {
 			"browser": json.RawMessage(`{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}}`),
 			"remote":  json.RawMessage(`{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"invented-token"}}`),
 		}, true},
-		{"professor", `{"thirdParty":{"professor":{"type":"stdio","command":"x"}}}`, "mcp.thirdParty.professor: the name professor is pfm's own server", nil, false},
+		{"chat registration", `{"thirdParty":{"chat-professor":{"type":"stdio","command":"x"}}}`, "mcp.thirdParty.chat-professor: the name chat-professor is pfm's own server", nil, false},
 		{"string", `{"thirdParty":{"x":"y"}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
 		{"null", `{"thirdParty":{"x":null}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
 		{"array", `{"thirdParty":{"x":[]}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},

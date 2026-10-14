@@ -42,7 +42,7 @@ For `/pfm:workbench new docs/scribe` in `/work/acme`:
    ```
 
    Omitted `engines` enables Claude. To enable Codex too, set `"engines": ["claude", "codex"]`, then run `pfm codex build /work/acme/docs/scribe`; step 2's `CLAUDE.md` is its source. For OpenCode, include `"opencode"`, then run `pfm opencode build /work/acme/docs/scribe`.
-5. Run `pfm doctor` from `/work/acme`, read its workbench lines under `check`, then open `pfm ls`. The group is `acme › Scribe`; its ✦ row launches in `docs/scribe`. `pfm chat new --cwd /work/acme/docs/scribe` or `chat_new` with that cwd may omit the name: the first unused `_SCRIBE:{n}` is chosen across live and killed roster names.
+5. Run `pfm doctor` from `/work/acme`, read its workbench lines under `check`, then open `pfm ls`. The group is `acme › Scribe`; its ✦ row launches in `docs/scribe`. `pfm chat new --cwd /work/acme/docs/scribe` or `mcp__chat-professor__new` with that cwd may omit the name: the first unused `_SCRIBE:{n}` is chosen across live and killed roster names.
 
 ## adopt
 
@@ -87,5 +87,5 @@ Write `docs/scribe/CLAUDE.md`, then rerun `pfm codex build /work/acme/docs/scrib
 
 - Discovery walks 1–6 directories below each managed root, including nested git repositories, `.professor/` and `.workbenches/`; it skips other dot-directories (including `.worktrees`), `node_modules`, `vendor`, `venv`, and symlinks. A chat in a linked worktree groups under the main checkout's bench at the same relative path, and launches on the worktree's own copy of that bench: its prompt, manifest and mirror come from the worktree's branch.
 - Codex and OpenCode also load ancestor `AGENTS.md` files: a parent repo's rules reach a workbench seat on those engines. The persona takes the fleet prompt's place and nothing else: `CLAUDE.md`, `AGENTS.md`, Codex's base instructions, OpenCode's provider prompt, environment and your other `instructions` entries stay; it does not isolate the bench from ancestor rules.
-- The ✦ carousel lists enabled engines with accounts. With none, it shows a workbench error notice. An omitted engine in `chat new` / `chat_new` uses the current choice when enabled and usable, else the first enabled engine with an account.
+- The ✦ carousel lists enabled engines with accounts. With none, it shows a workbench error notice. An omitted engine in `chat new` / `mcp__chat-professor__new` uses the current choice when enabled and usable, else the first enabled engine with an account.
 - OpenCode `chat new`, reload and branch remain refused; use its picker ✦ row and resume door. `pfm headless exec`, `PurposeQuery` probes and `internal/ask` one-shot runs are outside the workbench persona rule.

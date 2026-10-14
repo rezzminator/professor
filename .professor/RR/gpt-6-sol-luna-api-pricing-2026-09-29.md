@@ -29,7 +29,7 @@ Source: [OpenAI pricing](https://developers.openai.com/api/docs/pricing), read 2
 Digging ended: quick run, no diggers spawned (user asked for a quick rr)
 
 ## Verification
-The 4 price rows and the uplift sentences were read directly from the page text through harvester_read. WebFetch to developers.openai.com was blocked by the domain check. NOT ON PAGE: reasoning-token billing, effort pricing, the context threshold, and Fast mode rates.
+The 4 price rows and the uplift sentences were read directly from the page text through read. WebFetch to developers.openai.com was blocked by the domain check. NOT ON PAGE: reasoning-token billing, effort pricing, the context threshold, and Fast mode rates.
 
 ## Open rabbit holes
 - undug: the GPT-6 model pages (developers.openai.com/api/docs/models/gpt-6-sol and gpt-6-luna) and the reasoning guide, for reasoning-token billing and effort levels

@@ -2,7 +2,7 @@
 # storm.sh — the cosmos storm, runs INSIDE the demo fence container: N cheap chats
 # across engines (Claude + Codex by default; STORM_ENGINES="cc cx ox" once pfm
 # can spawn OpenCode headless) round-robin, that answer
-# every message they receive with a real chat_inject back to the sender AND a
+# every message they receive with a real mcp__chat-professor__call back to the sender AND a
 # ping to another storm chat, so the sky fills with signed edges and the ledger
 # ticker never stops. Each chat stops on its own after SENDS messages; `stop`
 # ends them early.
@@ -48,13 +48,13 @@ start)
       ox) posture=(--model "openai/$GPT_MODEL" --effort "$GPT_EFFORT"); label="openai/$GPT_MODEL · $GPT_EFFORT" ;;
     esac
     pfm chat new --name "$me" --engine "$engine" "${posture[@]}" --cwd "/work/$project" \
-      "You are $me, one of the storm chats: $roster. This is a live demo of chats messaging each other; nothing here is real work. Rules, every time a message from another chat arrives: (1) reply to its sender with the chat_inject tool, one line under 12 words, an ACK plus an invented status; (2) then chat_inject one OTHER storm chat from the roster (never yourself, vary your pick) with a one-line question under 12 words. Never write files, never run commands, never call any other tool. Count your sends; after $SENDS sends, stop replying entirely. Until the first message arrives, reply 'ready' and wait." >/dev/null
+      "You are $me, one of the storm chats: $roster. This is a live demo of chats messaging each other; nothing here is real work. Rules, every time a message from another chat arrives: (1) reply to its sender with the mcp__chat-professor__call tool, one line under 12 words, an ACK plus an invented status; (2) then mcp__chat-professor__call one OTHER storm chat from the roster (never yourself, vary your pick) with a one-line question under 12 words. Never write files, never run commands, never call any other tool. Count your sends; after $SENDS sends, stop replying entirely. Until the first message arrives, reply 'ready' and wait." >/dev/null
     echo "spawned $me ($engine · $label · $project)"
     sleep 4
   done
   sleep 6
   # Kick: up to three seeds so the storm has three fronts at once. A bare shell
-  # holds no chat identity and pfm refuses an unsigned inject, so each seed is
+  # holds no chat identity and pfm refuses an unsigned call, so each seed is
   # SIGNED as the peer it names — a real edge from the first message on.
   sock_of() { pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$1" '$5 == n {print $11; exit}'; }
   id_of() { pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$1" '$5 == n {print $2; exit}'; }
@@ -62,7 +62,7 @@ start)
     set -- $pair
     [ "${2#STORM_}" -le "$N" ] || continue
     CHAT_SENDER_LABEL="$2" CHAT_SENDER_SESSION="$(sock_of "$2")" CHAT_SENDER_SID="$(id_of "$2")" \
-      pfm chat inject "$1" "Storm is on — reply to me and ping another storm chat; keep the chain going." >/dev/null
+      pfm chat call "$1" "Storm is on — reply to me and ping another storm chat; keep the chain going." >/dev/null
     echo "seeded $2 → $1"
   done
   pfm ls --plain | grep -E 'STORM_' || echo "storm: no STORM rows are live"

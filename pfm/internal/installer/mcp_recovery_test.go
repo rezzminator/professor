@@ -16,8 +16,8 @@ import (
 func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".codex", "config.toml")
-	manual := "[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n"
-	writeFixture(t, path, codexProfessorFence(home)+manual)
+	manual := "[mcp_servers.chat-professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n"
+	writeFixture(t, path, codexChatFence(home)+manual)
 	options := Options{
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{chatName: true},
 		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{nameSyncIdle: true},
@@ -27,7 +27,7 @@ func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatalf("dry run: %v\n%s", err, output.String())
 	}
-	if got := readFixture(t, path); got != codexProfessorFence(home)+manual {
+	if got := readFixture(t, path); got != codexChatFence(home)+manual {
 		t.Fatalf("dry run changed config: %q", got)
 	}
 	options.Mode = ModeApply
@@ -35,7 +35,7 @@ func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "preserve conflicting manual MCP client professor in "+path) {
+	if !strings.Contains(output.String(), "preserve conflicting manual MCP client chat-professor in "+path) {
 		t.Fatalf("missing preserve report:\n%s", output.String())
 	}
 	got := readFixture(t, path)
@@ -60,7 +60,7 @@ func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
 func TestInstallRejectsUnrelatedCodexTOMLDuplicate(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".codex", "config.toml")
-	broken := "model = 'first'\nmodel = 'second'\n" + codexProfessorFence(home)
+	broken := "model = 'first'\nmodel = 'second'\n" + codexChatFence(home)
 	writeFixture(t, path, broken)
 	_, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{chatName: true},
@@ -86,7 +86,7 @@ func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 		apply:   true,
 		stamp:   "fixture",
 	}
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	var document map[string]any
@@ -142,9 +142,9 @@ func codexMCPEngine(home, account string) engine {
 	}
 }
 
-func codexProfessorFence(home string) string {
-	return mcpFenceBegin + "\n[mcp_servers.professor]\ncommand = \"" + home + "/.local/bin/pfm\"\n" +
-		"args = [\"mcp\", \"serve\", \"--stdio\"]\n" + mcpFenceEnd + "\n"
+func codexChatFence(home string) string {
+	return mcpFenceBegin + "\n[mcp_servers.chat-professor]\ncommand = \"" + home + "/.local/bin/pfm\"\n" +
+		"args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"chat\"]\n" + mcpFenceEnd + "\n"
 }
 
 // TestMCPRepairsABrokenCodexFence pins the host repair: the legacy loopback
@@ -158,16 +158,16 @@ func TestMCPRepairsABrokenCodexFence(t *testing.T) {
 	path := filepath.Join(account, "config.toml")
 	writeFixture(t, path, codexHostShape)
 	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	want := codexHostShapeKept + codexProfessorFence(home)
+	want := codexHostShapeKept + codexChatFence(home)
 	if got := readFixture(t, path); got != want {
 		t.Fatalf("repaired Codex config:\n%s\nwant:\n%s", got, want)
 	}
 	var second strings.Builder
 	e.options.Stdout = &second
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, path); got != want {
@@ -189,15 +189,15 @@ func TestMCPReclaimsAnOrphanedCodexProfessorBody(t *testing.T) {
 	path := filepath.Join(account, "config.toml")
 	head := "model = \"personal\"\n"
 	tail := "[desktop]\ndock-icon-preference = \"app-default\"\n"
-	orphan := head + strings.TrimSuffix(codexProfessorFence(home), mcpFenceEnd+"\n") + "\n" + tail
+	orphan := head + strings.TrimSuffix(codexChatFence(home), mcpFenceEnd+"\n") + "\n" + tail
 	writeFixture(t, path, orphan)
 	var out strings.Builder
 	e := codexMCPEngine(home, account)
 	e.options.Stdout = &out
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if want := head + tail + codexProfessorFence(home); readFixture(t, path) != want {
+	if want := head + tail + codexChatFence(home); readFixture(t, path) != want {
 		t.Fatalf("installed Codex config:\n%s\nwant:\n%s", readFixture(t, path), want)
 	}
 	if strings.Contains(out.String(), "preserve conflicting manual MCP client") {
@@ -222,10 +222,10 @@ func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
 	original := "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\nstartup_timeout_sec = 30\n"
 	writeFixture(t, path, original)
 	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFixture(t, path); got != original+codexProfessorFence(home) {
+	if got := readFixture(t, path); got != original+codexChatFence(home) {
 		t.Fatalf("Codex config:\n%s\nwant the extended harvester table kept and the professor fence appended", got)
 	}
 	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
@@ -248,10 +248,10 @@ func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
 		"[mcp_servers.harvester.http_headers]\nX-Team = \"research\"\n"
 	writeFixture(t, path, original)
 	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFixture(t, path); got != original+codexProfessorFence(home) {
+	if got := readFixture(t, path); got != original+codexChatFence(home) {
 		t.Fatalf("Codex config:\n%s\nwant the headed harvester table kept and the professor fence appended", got)
 	}
 	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
@@ -294,7 +294,13 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 			remote := "[mcp_servers.harvester-remote]\nurl = \"https://gateway.example.invalid/mcp\"\n"
 			writeFixture(t, codexPath, readFixture(t, codexPath)+"\n[mcp_servers.chat]\n"+
 				"url = \"http://127.0.0.1:18377/mcp/chat\"\n\n"+remote+mcpFenceEnd+"\n")
-			professor, _ := json.Marshal(openCodeProfessorShape(home))
+			professor, _ := json.Marshal(
+				map[string]any{
+					"type":    "local",
+					"enabled": true,
+					"command": []any{filepath.Join(home, ".local", "bin", "pfm"), "mcp", "serve", "--stdio"},
+				},
+			)
 			writeFixture(t, openCodePath, `{"mcp":{"professor":`+string(professor)+
 				`,"chat":{"type":"remote","url":"http://127.0.0.1:18377/mcp/chat","enabled":true}}}`)
 
@@ -361,10 +367,10 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 		apply:   true,
 		stamp:   "fixture",
 	}
-	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(readFixture(t, target), "mcp_servers.professor") {
+	if !strings.Contains(readFixture(t, target), "mcp_servers.chat-professor") {
 		t.Fatal("physical target was not wired")
 	}
 	if err := e.removeMCPCodeConfig(); err != nil {
@@ -373,7 +379,7 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 	if got, err := os.Readlink(config); err != nil || got != target {
 		t.Fatalf("link=%q err=%v", got, err)
 	}
-	if strings.Contains(readFixture(t, target), "mcp_servers.professor") {
+	if strings.Contains(readFixture(t, target), "mcp_servers.chat-professor") {
 		t.Fatal("owned registration survived removal")
 	}
 }

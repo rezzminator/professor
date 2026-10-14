@@ -3,7 +3,7 @@ package deps
 import "testing"
 
 // TestNohupAppliesToEveryPlatformThatLacksSetsid pins the detach fallback's
-// reason for existing. inject.detachThenWaiter resolves setsid first and falls
+// reason for existing. pfmcall.detachThenWaiter resolves setsid first and falls
 // back to nohup; setsid ships with util-linux and is absent on darwin, so
 // darwin is the ONLY platform that ever reaches the fallback. Gating nohup to
 // linux therefore made Resolve refuse a binary that /usr/bin/nohup provides on

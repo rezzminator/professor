@@ -1,5 +1,5 @@
-// Package harvestmcp exposes the Harvester's four-tool MCP surface: harvester_read,
-// harvester_download_file, harvester_search_literature and harvester_search_web
+// Package harvestmcp exposes the Harvester's four-tool MCP surface: read,
+// download_file, search_literature and search_web
 // (the last only when a search backend is configured; RegisteredToolNames is the list).
 // It registers no MCP prompt: the `fetch` prompt was removed on purpose with the
 // `fetch` tool it wrapped (7b79445d, which also dropped the prompt's tests).
@@ -149,9 +149,12 @@ func NewConfiguredHarvester(version string, runtime Runtime) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	server := mcp.NewServer(&mcp.Implementation{Name: config.MCPServerHarvester, Version: version}, &mcp.ServerOptions{
-		Instructions: serverInstructions(runtimeSearchEnabled(runtime), runtime.Remote),
-	})
+	server := mcp.NewServer(
+		&mcp.Implementation{Name: config.MCPRegistrationName(config.MCPServerHarvester), Version: version},
+		&mcp.ServerOptions{
+			Instructions: serverInstructions(runtimeSearchEnabled(runtime), runtime.Remote),
+		},
+	)
 	resolver := &harvest.Resolver{
 		Client: resolverClient, ContactEmail: runtime.ContactEmail, GoogleBooksAPIKey: runtime.GoogleBooksAPIKey,
 		CoreAPIKey: runtime.CoreAPIKey, SemanticScholarAPIKey: runtime.SemanticScholarAPIKey,
@@ -529,7 +532,7 @@ func (service *Service) RegisterTools(server *mcp.Server) {
 		server.AddResourceTemplate(&mcp.ResourceTemplate{
 			Name:        "download",
 			URITemplate: downloadURITemplate,
-			Description: "A file the harvester_download_file tool fetched, by its sha256; resources/read answers its bytes as a blob.",
+			Description: "A file the download_file tool fetched, by its sha256; resources/read answers its bytes as a blob.",
 		}, service.readDownload)
 	}
 }

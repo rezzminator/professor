@@ -50,7 +50,7 @@ func TestResolveRosterNameLiveCollisionListsOnlyTheLiveSeats(t *testing.T) {
 }
 
 // TestLadderMissCarriesTheRosterDeadDetail pins the inject doors (CLI and MCP
-// chat_inject, chat_resolve): when every rung misses, the roster's account of
+// call, resolve): when every rung misses, the roster's account of
 // a dead match is the answer, never the bare "matched no live chat".
 func TestLadderMissCarriesTheRosterDeadDetail(t *testing.T) {
 	const dead = `"probe" matched no live chat; its newest match is dead: thread id t-2`

@@ -68,7 +68,7 @@ func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing
 			`"harvester":{"type":"remote","url":"http://127.0.0.1:8456/mcp/harvester","enabled":true}}}`,
 	)
 	reports := InspectOpenCodeServers(path, home, 8456, professorName, chatName, mcpServerHarvester)
-	if len(reports) != 3 || reports[0].State != MCPClientPFM || reports[1].State != MCPClientLegacyPFM ||
+	if len(reports) != 3 || reports[0].State != MCPClientLegacyPFM || reports[1].State != MCPClientLegacyPFM ||
 		reports[2].State != MCPClientLegacyPFM {
 		t.Fatalf("reports=%#v, want professor pfm, chat and harvester legacy-pfm", reports)
 	}
@@ -120,7 +120,7 @@ func TestInspectProjectServersClassifiesProfessorAndPFMLegacyEntries(t *testing.
 	for _, testCase := range []struct {
 		name, key, registration, want string
 	}{
-		{"professor stdio", professorName, `{"type":"stdio","command":"` + bin + `","args":["mcp","serve","--stdio"]}`, MCPClientPFM},
+		{"professor stdio", professorName, `{"type":"stdio","command":"` + bin + `","args":["mcp","serve","--stdio"]}`, MCPClientLegacyPFM},
 		{"professor type-less", professorName, `{"command":"` + bin + `","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},
 		{"professor http", professorName, `{"type":"http","url":"http://127.0.0.1:8456/mcp/professor"}`, MCPClientForeignRegistration},
 		{"professor other command", professorName, `{"type":"stdio","command":"manual","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},

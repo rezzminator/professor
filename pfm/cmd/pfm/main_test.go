@@ -197,7 +197,7 @@ func TestChatUnknownVerbIsAUsageError(t *testing.T) {
 		t.Fatalf("chat unknown verb code=%d stdout=%q stderr=%q, want 2", code, stdout.String(), stderr.String())
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), `pfm chat: unknown command "no-such-verb"`) ||
-		!strings.Contains(stderr.String(), "usage: pfm chat") {
+		!strings.Contains(stderr.String(), "usage: pfm chat") || !strings.Contains(stderr.String(), "  call ") {
 		t.Fatalf("chat unknown verb stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

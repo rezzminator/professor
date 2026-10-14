@@ -66,7 +66,7 @@ func TestLadderOrderAndFailureKinds(t *testing.T) {
 		{
 			name: "raw pane", target: "%7", wantPane: "%7",
 			ladder: Ladder{Env: &paths.MapEnv{Values: map[string]string{
-				"CHAT_INJECT_SOCKET": "/tmp/cx-seat",
+				"CHAT_CALL_SOCKET": "/tmp/cx-seat",
 			}}},
 		},
 		{
@@ -174,8 +174,8 @@ func TestLadderRosterMissFallsThroughAndEngineScopeNarrowsRaw(t *testing.T) {
 func TestLadderRawPaneSocketScopeAndAmbientFallback(t *testing.T) {
 	requestSocket := "/tmp/cx-request"
 	ambience := &paths.MapEnv{Values: map[string]string{
-		"CHAT_INJECT_SOCKET": "/tmp/cx-inject",
-		"TMUX":               "/tmp/cx-tmux,12,0",
+		"CHAT_CALL_SOCKET": "/tmp/cx-inject",
+		"TMUX":             "/tmp/cx-tmux,12,0",
 	}}
 
 	t.Run("request socket wins without copying caller identity", func(t *testing.T) {
@@ -214,7 +214,7 @@ func TestLadderRawPaneSocketScopeAndAmbientFallback(t *testing.T) {
 			t.Fatalf("ambient raw pane = seat=%+v code=%d detail=%q err=%v", seat, code, detail, err)
 		}
 
-		ambience.Values["CHAT_INJECT_SOCKET"] = ""
+		ambience.Values["CHAT_CALL_SOCKET"] = ""
 		seat, code, detail, err = (Ladder{Env: ambience}).Resolve(
 			context.Background(), "%3", LadderOptions{},
 		)

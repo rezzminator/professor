@@ -67,7 +67,7 @@ func TestInlineDirectiveParser(t *testing.T) {
 		{"broken JSON", `mock-engine: {"type":`, 0, true, false},
 		{"trailing object", `mock-engine: {"type":"turn"} {}`, 0, true, false},
 		{"unsigned footer", `mock-engine: {"type":"turn","reply":"R"} — UNSIGNED — sender identity underivable; no session id`, 1, false, false},
-		{"signed footer", `mock-engine: [{"type":"turn","reply":"R"}] — sid 1234abcd · to reply: chat_inject lane <message>`, 1, false, false},
+		{"signed footer", `mock-engine: [{"type":"turn","reply":"R"}] — sid 1234abcd · to reply: call lane <message>`, 1, false, false},
 		{"force delivered footer", `mock-engine: {"type":"turn","reply":"R"} — ⚠ FORCE-DELIVERED via Esc (…) — sid 1234abcd`, 1, false, false},
 		{"trailing garbage", `mock-engine: {"type":"turn"} garbage`, 0, true, false},
 		{"null", `mock-engine: null`, 0, true, false},

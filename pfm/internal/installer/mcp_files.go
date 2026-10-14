@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func readMCPFile(path string) ([]byte, bool, error) {
@@ -48,4 +50,23 @@ func (installer *engine) writeMCPFile(path string, original, wanted []byte, exis
 		}
 	}
 	return atomicfile.Write(path, wanted, 0o600)
+}
+
+// enabledMCPNames lists one registration per enabled family.
+func enabledMCPNames(servers map[string]bool) []string {
+	var names []string
+	for _, family := range []string{chatName, mcpServerHarvester} {
+		if servers[family] {
+			names = append(names, pfmconfig.MCPRegistrationName(family))
+		}
+	}
+	return names
+}
+
+func mcpFamilyStdioArgs(name string) []string {
+	return append(append([]string(nil), mcpStdioArgs...), "--family", strings.TrimSuffix(name, "-professor"))
+}
+
+func isFamilyRegistration(name string) bool {
+	return name == pfmconfig.MCPRegistrationName(chatName) || name == pfmconfig.MCPRegistrationName(mcpServerHarvester)
 }

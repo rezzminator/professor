@@ -18,7 +18,7 @@ import (
 )
 
 // TestChatSaveRefusesATargetWithNoPathSeparator is the F7 regression:
-// chat_save's target is a FILE PATH to append a transcript snapshot to, not a
+// save's target is a FILE PATH to append a transcript snapshot to, not a
 // chat — but nothing stopped a caller from passing a bare chat name out of
 // habit, which created a file of that name beside wherever the MCP server
 // process happened to be running and appended a whole transcript to it (this
@@ -358,7 +358,7 @@ func TestChatSaveNamesCallerListingAndTranscriptLookupFailures(t *testing.T) {
 		_, _, err := service.chatSave(context.Background(), request, SaveInput{
 			Target: "./notes/chat.md", Transcript: "/transcripts/chat.jsonl",
 		})
-		if err == nil || !strings.Contains(err.Error(), "chat_save: resolve caller") ||
+		if err == nil || !strings.Contains(err.Error(), "save: resolve caller") ||
 			!strings.Contains(err.Error(), "list live chats") {
 			t.Fatalf("chatSave listing error = %v, want wrapped caller listing failure", err)
 		}
@@ -385,7 +385,7 @@ func TestChatSaveNamesCallerListingAndTranscriptLookupFailures(t *testing.T) {
 			context.Background(), saveProxyRequest("cc-caller", "caller-id"),
 			SaveInput{Target: "/notes/chat.md", Transcript: "/transcripts/chat.jsonl"},
 		)
-		if err == nil || !strings.Contains(err.Error(), "chat_save: resolve caller") ||
+		if err == nil || !strings.Contains(err.Error(), "save: resolve caller") ||
 			!strings.Contains(err.Error(), "resolve MCP self transcript") {
 			t.Fatalf("chatSave transcript error = %v, want wrapped transcript lookup failure", err)
 		}

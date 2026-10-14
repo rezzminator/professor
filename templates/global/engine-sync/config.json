@@ -114,12 +114,10 @@
   },
   "mcp": {
     "globalServers": [
-      "professor"
+      "chat-professor",
+      "harvester-professor"
     ],
-    "renamed": {
-      "harvester": "professor",
-      "chat": "professor"
-    }
+    "renamed": {}
   },
   "workbenchMarker": ".professor/workbench.json",
   "commandDirs": [

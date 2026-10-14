@@ -61,7 +61,7 @@ func parseClaudeTranscriptFile(
 		// Provenance is the only background signal. Claude Code stamps
 		// sessionKind:"bg" on the records of every turn produced while nobody is
 		// attached to the pane, which is exactly how the fleet drives its named
-		// chats through `pfm chat inject`; that marker measures attachment, not
+		// chats through `pfm chat call`; that marker measures attachment, not
 		// who spawned the session, so reading it retroactively reclassified deep
 		// interactive chats as machine work and dropped them from the picker.
 		if sdkSpawned(record) {

@@ -281,8 +281,8 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// ReceiverSocket must be the full socket PATH ("-S" argument tmux
-	// itself takes), not the bare file name: the inject recorder
-	// (internal/inject/engine.go) already records result.SocketPath in
+	// itself takes), not the bare file name: the call recorder
+	// (internal/call/engine.go) already records result.SocketPath in
 	// this same shape, and a spawn recorded any other way cannot resolve
 	// against a live row's own (socket, pane) key
 	// (compose.paneKey/rowsByPane) — the bug that let one dead chat render
@@ -656,13 +656,13 @@ func callJailedChatNew(
 	if result.IsError {
 		content, marshalErr := json.Marshal(result.Content)
 		if marshalErr != nil {
-			t.Fatalf("chat_new returned tool error %#v (encode error: %v)", result.Content, marshalErr)
+			t.Fatalf("new returned tool error %#v (encode error: %v)", result.Content, marshalErr)
 		}
-		t.Fatalf("chat_new returned tool error: %s", content)
+		t.Fatalf("new returned tool error: %s", content)
 	}
 }
 
-// callJailedChatNewResult drives the chat_new MCP tool through the real
+// callJailedChatNewResult drives the new MCP tool through the real
 // in-process CLI dispatcher and hands back whatever the tool answered.
 func callJailedChatNewResult(
 	t *testing.T,
@@ -697,10 +697,10 @@ func callJailedChatNewResult(
 			"v": mcpserv.ProxyWireVersion, "session": row.SessionName, "socketName": row.Socket,
 			"socketPath": filepath.Join(runtime.Paths.TmuxDir, row.Socket), "pane": row.PaneID,
 			"engine": "claude", "id": row.ID,
-		}}, Name: "chat_new", Arguments: input,
+		}}, Name: "new", Arguments: input,
 	})
 	if err != nil {
-		t.Fatalf("chat_new: %v", err)
+		t.Fatalf("new: %v", err)
 	}
 	return result
 }
@@ -982,12 +982,12 @@ func TestMCPChatNewReportsAFirstTurnAPIError(t *testing.T) {
 	})
 	content, err := json.Marshal(result.Content)
 	if err != nil {
-		t.Fatalf("encode chat_new content: %v", err)
+		t.Fatalf("encode new content: %v", err)
 	}
 	if !result.IsError {
-		t.Fatalf("chat_new answered ok for a refused first turn: %s", content)
+		t.Fatalf("new answered ok for a refused first turn: %s", content)
 	}
 	if !strings.Contains(string(content), firstTurnAPIError) {
-		t.Fatalf("chat_new content=%s, want it to name the API error", content)
+		t.Fatalf("new content=%s, want it to name the API error", content)
 	}
 }

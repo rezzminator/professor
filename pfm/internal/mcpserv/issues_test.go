@@ -55,7 +55,7 @@ func TestChatInstructionsRouteComplaintsToServicedesk(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = clientSession.Close() })
 
-	want := "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done, chat_exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_digest; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+	want := "Message a chat → call; list chats → ls; who am I → whoami; start a chat or model run → new, never claude -p or pfm headless exec; kill a run once done, exit this chat; fork this conversation → pfm chat branch; is a chat idle or busy → status; its last answer → last; find, then read an old transcript → find, digest; save my transcript → save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 	got := clientSession.InitializeResult().Instructions
 	if got != want {
 		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", got, want)
@@ -299,7 +299,7 @@ func TestServicedeskCallMissingTitleOrDetailIsToolError(t *testing.T) {
 // TestIssueInputCarriesNoReporterIdentityField is a contract test, not a
 // behavioral one: IssueInput must never grow a field a caller can use to
 // state its own reporter identity — that is captured automatically, the
-// same way chat_inject captures a sender, so a model can complain but never
+// same way call captures a sender, so a model can complain but never
 // forge who is complaining. This fails the moment IssueInput's field set
 // changes at all, which is deliberate: any addition must be reviewed against
 // exactly this invariant before the list below is updated.

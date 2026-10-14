@@ -59,7 +59,7 @@ func TestStdioProxyCancellationStopsUndeliveredRetry(t *testing.T) {
 		}, nil
 	})}
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(2, "chat_new", `{"name":"cancelled-child"}`))
+	harness.write(t, proxyTestToolCall(2, "new", `{"name":"cancelled-child"}`))
 	<-firstAttempt
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}`)
 	<-cancellationForwarded
@@ -122,7 +122,7 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 		}
 	})
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(2, "chat_new", `{"name":"cancelled-at-boundary"}`))
+	harness.write(t, proxyTestToolCall(2, "new", `{"name":"cancelled-at-boundary"}`))
 	<-firstAttempt
 	<-testClock.timerCreated
 	fakeClock.Advance(proxy.retryDelay)
@@ -191,7 +191,7 @@ func TestStdioProxyReusesCancelledStartedRequestID(t *testing.T) {
 		}, nil
 	})}
 	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"cancelled"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"cancelled"}`))
 	<-started
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`)
 	<-cancellationStarted
@@ -202,7 +202,7 @@ func TestStdioProxyReusesCancelledStartedRequestID(t *testing.T) {
 		t.Fatalf("session after request cancellation = %+v, want current session unchanged", session)
 	}
 
-	harness.write(t, proxyTestToolCall(3, "chat_new", `{"name":"reused"}`))
+	harness.write(t, proxyTestToolCall(3, "new", `{"name":"reused"}`))
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`)
 	select {
 	case <-reusedStarted:
@@ -261,7 +261,7 @@ func TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe(t *testing.T)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, sendErr := proxy.sendWithRetry(ctx, []byte(proxyTestToolCall(2, "chat_ls", `{}`)), false)
+		_, sendErr := proxy.sendWithRetry(ctx, []byte(proxyTestToolCall(2, "ls", `{}`)), false)
 		done <- sendErr
 	}()
 	var conn net.Conn

@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const chatRegistrationName = "chat-professor"
+
 func TestJailPinsClaudeConfigDir(t *testing.T) {
 	t.Parallel()
 	const (
@@ -131,7 +133,7 @@ func TestMCPOpenCodeCreatesClientJSONWithoutClaimingABackup(t *testing.T) {
 		options:     Options{Home: home, OpenCodeConfigPath: path, MCPPort: 8377, Stdout: &output},
 		managedRoot: managedRootForHome(home), apply: true, stamp: "fixture",
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "create "+physicalSettingsPath(path)) ||
@@ -219,7 +221,7 @@ func TestMCPOpenCodeWiringPreservesJSONCAndUnownedServers(t *testing.T) {
 		apply:       true,
 		stamp:       "fixture",
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	raw := readFixture(t, configPath)
@@ -232,10 +234,10 @@ func TestMCPOpenCodeWiringPreservesJSONCAndUnownedServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	servers, _ := document["mcp"].(map[string]any)
-	if want := openCodeProfessorShape(home); !sameJSONValue(servers[professorName], want) {
-		t.Fatalf("professor registration=%#v, want %#v", servers[professorName], want)
+	if want := openCodeChatShape(home); !sameJSONValue(servers[chatRegistrationName], want) {
+		t.Fatalf("professor registration=%#v, want %#v", servers[chatRegistrationName], want)
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, configPath); got != raw {
@@ -246,7 +248,7 @@ func TestMCPOpenCodeWiringPreservesJSONCAndUnownedServers(t *testing.T) {
 	dry.apply = false
 	dry.options.Stdout = io.Discard
 	before := readFixture(t, configPath)
-	if err := dry.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := dry.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, configPath); got != before {
@@ -277,16 +279,16 @@ func TestMCPOpenCodeUninstallRemovesOnlyExactOwnedRegistrations(t *testing.T) {
 		servers, _ := document["mcp"].(map[string]any)
 		return servers
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.removeMCPOpenCodeJSON(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := openCodeServers()[professorName]; ok {
+	if _, ok := openCodeServers()[chatRegistrationName]; ok {
 		t.Fatal("uninstall retained PFM-owned professor")
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	// A manual replacement has precedence over the receipt and must survive.
@@ -299,15 +301,15 @@ func TestMCPOpenCodeUninstallRemovesOnlyExactOwnedRegistrations(t *testing.T) {
 	if err := e.removeMCPOpenCodeJSON(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := openCodeServers()[professorName]; !ok {
+	if _, ok := openCodeServers()[chatRegistrationName]; !ok {
 		t.Fatal("uninstall removed a manual replacement of PFM professor")
 	}
 }
 
-func openCodeProfessorShape(home string) map[string]any {
+func openCodeChatShape(home string) map[string]any {
 	return map[string]any{
 		"type": "local", "enabled": true,
-		"command": []any{filepath.Join(home, ".local", "bin", "pfm"), "mcp", "serve", "--stdio"},
+		"command": []any{filepath.Join(home, ".local", "bin", "pfm"), "mcp", "serve", "--stdio", "--family", "chat"},
 	}
 }
 
@@ -335,7 +337,7 @@ func TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed(t *testin
 		apply:       true,
 		stamp:       "fixture",
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	raw := readFixture(t, configPath)
@@ -353,7 +355,7 @@ func TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed(t *testin
 	if _, ok := servers[mcpServerHarvester]; ok {
 		t.Fatalf("legacy remote harvester survived:\n%s", raw)
 	}
-	if servers["manual"] == nil || !sameJSONValue(servers[professorName], openCodeProfessorShape(home)) {
+	if servers["manual"] == nil || !sameJSONValue(servers[chatRegistrationName], openCodeChatShape(home)) {
 		t.Fatalf("servers=%#v, want manual kept and professor in its local stdio shape", servers)
 	}
 }
@@ -373,19 +375,19 @@ func applyChatMCP(t *testing.T, home string) string {
 	return applied.String()
 }
 
-// TestMCPInstallRegistersTheStdioProfessorInAFreshCodexHome pins the one
+// TestMCPInstallRegistersTheStdioChatFamilyInAFreshCodexHome pins the one
 // transport law on Codex: one fence at the end of the file holding the stdio
 // command and args, and no url line.
-func TestMCPInstallRegistersTheStdioProfessorInAFreshCodexHome(t *testing.T) {
+func TestMCPInstallRegistersTheStdioChatFamilyInAFreshCodexHome(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	applyChatMCP(t, home)
 	codexConfig := readFixture(t, filepath.Join(home, ".codex", "config.toml"))
 	want := strings.Join([]string{
 		mcpFenceBegin,
-		"[mcp_servers.professor]",
+		"[mcp_servers.chat-professor]",
 		`command = "` + home + `/.local/bin/pfm"`,
-		`args = ["mcp", "serve", "--stdio"]`,
+		`args = ["mcp", "serve", "--stdio", "--family", "chat"]`,
 		mcpFenceEnd,
 	}, "\n") + "\n"
 	if !strings.HasSuffix(codexConfig, want) || strings.Count(codexConfig, mcpFenceBegin) != 1 {
@@ -438,7 +440,7 @@ func TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine(t *testing.T) {
 		apply:       true,
 		stamp:       "fixture",
 	}
-	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
 	var changeLine string

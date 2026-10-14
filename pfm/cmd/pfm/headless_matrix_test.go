@@ -39,7 +39,7 @@ func TestChatArgumentMatrix(t *testing.T) {
 		{"status without a target", []string{"chat", "status"}, 2},
 		{"read with tail 0", []string{"chat", "read", "x", "--tail", "0"}, 2},
 		{"stream with a bad regexp", []string{"chat", "stream", "x", "--filter", "("}, 2},
-		{"inject without a message", []string{"chat", "inject", "x"}, 2},
+		{"inject without a message", []string{"chat", "call", "x"}, 2},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -153,7 +153,7 @@ func TestUnknownChatIsRc4WithAMachineShape(t *testing.T) {
 		{"last", []string{"chat", "last", "ghost"}},
 		{"read", []string{"chat", "read", "ghost"}},
 		{"stream", []string{"chat", "stream", "ghost"}},
-		{"inject", []string{"chat", "inject", "ghost", "hello"}},
+		{"call", []string{"chat", "call", "ghost", "hello"}},
 		{"watch", []string{"chat", "watch", "ghost"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {

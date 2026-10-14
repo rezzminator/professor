@@ -112,7 +112,7 @@ type PaneShapes struct {
 	Busy      string `json:"busy,omitempty"`
 	Compacted string `json:"compacted,omitempty"`
 	// Composer is the OpenCode composer glyph line; Claude's ❯ and Codex's ›
-	// are pinned by internal/inject/guards.go and need no value here.
+	// are pinned by internal/call/guards.go and need no value here.
 	Composer string `json:"composer,omitempty"`
 }
 

@@ -63,9 +63,9 @@ for project in orbit atlas lumen; do
     lane_abort "no working directory for the chats to live in (/work/$project)"
 done
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/status)\" != 000 ]" \
   'lane_daemon_up' ||
-  lane_abort "the professor MCP daemon never answered on :$PORT — no Codex chat can start and no chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no Codex chat can start and no chat can call a chat tool"
 
 # open_e1_main — E1's own `chat new` line (E1.sh open_main): in the sequence
 # E1.25 ended E1_MAIN, solo there never was one; either way the cross-lane beat
@@ -1108,8 +1108,8 @@ if requires; then
       bad="$bad an ended chat's status exited $rc / '$(one_line "$out")' (want 3 + dead);"
   fi
   # L4 idle: the newest record is the assistant's word; L6: idle_seconds counts only then.
-  pfm chat inject --allow-unsigned "$CC" 'IDLE-PROBE' >/dev/null 2>&1 ||
-    bad="$bad the idle-making inject was refused;"
+  pfm chat call --allow-unsigned "$CC" 'IDLE-PROBE' >/dev/null 2>&1 ||
+    bad="$bad the idle-making call was refused;"
   if wait_prompt "$CC" IDLE-PROBE 30; then
     wait_for 10 "pfm chat status '$CC' --json 2>/dev/null | jq -e '.state == \"idle\" and .idle_seconds >= 1' >/dev/null" ||
       bad="$bad L4/L6 after the assistant answered, state did not reach idle with idle_seconds ≥ 1: $LANE_WAIT_WHY;"
@@ -1128,9 +1128,9 @@ if requires; then
   # L4 working: a turn in flight — the newest record owes an answer; L6: idle_seconds is 0.
   hold_gate="$LANE_OUT_DIR/f-idle-hold"
   : >"$hold_gate"
-  pfm chat inject --allow-unsigned "$CC" \
+  pfm chat call --allow-unsigned "$CC" \
     "F-HOLD-PROBE $(mock_steps "[{\"type\":\"hold\",\"until_gone\":\"$hold_gate\"}]")" >/dev/null 2>&1 ||
-    bad="$bad the busy-making inject was refused;"
+    bad="$bad the busy-making call was refused;"
   wait_prompt "$CC" F-HOLD-PROBE 30 || bad="$bad the hold prompt was not read: ${LANE_WAIT_WHY:-unknown};"
   wait_for 10 "pfm chat status '$CC' --json 2>/dev/null | jq -e '.state == \"working\" and .idle_seconds == 0' >/dev/null" ||
     bad="$bad L4/L6 mid-turn status did not become working with idle_seconds 0: $LANE_WAIT_WHY;"
@@ -1193,7 +1193,7 @@ target_live "$CC"
 if requires; then
   bad=""
   cc_sock="$(sock_base "$CC")"
-  pfm chat inject --allow-unsigned "$CC" \
+  pfm chat call --allow-unsigned "$CC" \
     "F-SUBAGENT-PROBE $(mock_steps '[{"type":"background_agent","name":"lane-f"},{"type":"turn","busy_ms":30000}]')" >/dev/null 2>&1 ||
     bad="$bad the sub-agent stimulus could not be delivered;"
   if wait_for 48 "pfm chat status '$CC' --json 2>/dev/null | jq -e '.state == \"working\"' >/dev/null"; then
@@ -1305,8 +1305,8 @@ if requires; then
   cc_id="$(live_field "$CC" 2)"
   cc_sock="$(sock_base "$CC")"
   # C58: a distinctive scripted answer makes find's match unambiguous.
-  pfm chat inject --allow-unsigned "$CC" "$(mock_steps '[{"type":"turn","reply":"F-FIND-PROBE"}]')" >/dev/null 2>&1 ||
-    bad="$bad C58 could not inject the distinctive find probe;"
+  pfm chat call --allow-unsigned "$CC" "$(mock_steps '[{"type":"turn","reply":"F-FIND-PROBE"}]')" >/dev/null 2>&1 ||
+    bad="$bad C58 could not call the distinctive find probe;"
   wait_last "$CC" F-FIND-PROBE 30 || bad="$bad C58 the find probe was not read: ${LANE_WAIT_WHY:-unknown};"
   excerpt=/tmp/f-excerpt.txt
   pfm chat last "$CC" 2>/dev/null | tail -3 >"$excerpt"
@@ -1438,15 +1438,15 @@ if requires; then
     out="$(pfm chat last "$E1_CHAT" 2>&1)"
     rc=$?
     [ "$rc" -eq 0 ] && [ -n "$out" ] || bad="$bad C28 last exited $rc or printed nothing after the storm;"
-    out="$(pfm chat inject --allow-unsigned "$E1_CHAT" 'STORM-SURVIVED' 2>&1)"
+    out="$(pfm chat call --allow-unsigned "$E1_CHAT" 'STORM-SURVIVED' 2>&1)"
     rc=$?
     if [ "$rc" -ne 0 ]; then
-      bad="$bad C32 inject was refused after the storm (exit $rc): $(one_line "$out");"
+      bad="$bad C32 call was refused after the storm (exit $rc): $(one_line "$out");"
     elif ! wait_prompt "$E1_CHAT" STORM-SURVIVED 30; then
-      bad="$bad C32 the inject never landed: ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$E1_CHAT" 2>&1)");"
+      bad="$bad C32 the call never landed: ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$E1_CHAT" 2>&1)");"
     fi
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "$E1_CHAT answered status, last and a delivered inject after $n_storm storm chats came and went beside it"
+      pass "$E1_CHAT answered status, last and a delivered call after $n_storm storm chats came and went beside it"
     fi
   fi
 fi

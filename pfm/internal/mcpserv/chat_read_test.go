@@ -34,7 +34,7 @@ func TestChatReadBudgetsAndJunkFilter(t *testing.T) {
 		}
 	}()
 	client := connectInMemory(t, service.Server())
-	output := callTool[ReadOutput](t, client.clientSession, "chat_read", ReadInput{
+	output := callTool[ReadOutput](t, client.clientSession, "read", ReadInput{
 		Source:   "budget",
 		LastN:    3,
 		MaxBytes: 30,

@@ -28,7 +28,7 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 		}
 	}()
 	client := connectInMemory(t, service.Server())
-	_ = callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{
+	_ = callTool[FindOutput](t, client.clientSession, "find", FindInput{
 		Excerpt: "alpha unique",
 	})
 	runtime.GC()
@@ -40,7 +40,7 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 		output := callTool[FindOutput](
 			t,
 			client.clientSession,
-			"chat_find",
+			"find",
 			FindInput{Excerpt: "alpha unique"},
 		)
 		if output.Count != 1 || output.Candidates[0].ID != "alpha" {
@@ -110,7 +110,7 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 				result, err := clients[worker].clientSession.CallTool(
 					ctx,
 					&mcp.CallToolParams{
-						Name: "chat_find",
+						Name: "find",
 						Arguments: FindInput{
 							Excerpt: query,
 						},
@@ -170,20 +170,29 @@ func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 	if unknownErr == nil && (unknown == nil || !unknown.IsError) {
 		t.Fatalf("unknown tool returned success: result=%+v error=%v", unknown, unknownErr)
 	}
-	huge := callTool[InjectOutput](t, client.clientSession, "chat_inject", InjectInput{
+	huge := callTool[CallOutput](t, client.clientSession, "call", CallInput{
 		Target:  "missing",
 		Message: strings.Repeat("x", 1<<20),
 	})
 	if huge.Code != 4 || huge.Typed || huge.Status != "refused" ||
 		!strings.Contains(huge.Message, "matched no live chat") {
-		t.Fatalf("huge injection = %+v", huge)
+		t.Fatalf("huge call = %+v", huge)
 	}
 }
 
 func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
 	root := setupBackendFixture(t)
 	binary := buildFleetBinary(t)
-	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, root), "mcp", "serve", "--stdio")
+	command := exec.Command(
+		binary,
+		"--config",
+		writeEnabledMCPConfig(t, root),
+		"mcp",
+		"serve",
+		"--stdio",
+		"--family",
+		"chat",
+	)
 	command.Env = os.Environ()
 	stdin, err := command.StdinPipe()
 	if err != nil {

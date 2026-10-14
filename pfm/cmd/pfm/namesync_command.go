@@ -8,12 +8,12 @@ import (
 	"sort"
 	"strings"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -141,7 +141,7 @@ func verifyRenames(
 	renames []gather.WindowRename,
 	stderr io.Writer,
 ) (converged, unverified int) {
-	reader := inject.TmuxInjector{}
+	reader := pfmcall.TmuxCaller{}
 	for _, rename := range renames {
 		socketPath := filepath.Join(runtime.Paths.TmuxDir, rename.Socket)
 		actual, err := reader.WindowName(ctx, socketPath, rename.WindowID)

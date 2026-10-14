@@ -183,10 +183,14 @@ func classifyOpenCodeRegistration(name string, registration map[string]any, home
 	bin := filepath.Join(home, ".local", "bin", "pfm")
 	command, _ := registration["command"].([]any)
 	switch {
-	case name == professorName:
+	case isFamilyRegistration(name):
 		if registration[configTypeKey] == openCodeLocal &&
-			sameStrings(command, append([]string{bin}, mcpStdioArgs...)) {
+			sameStrings(command, append([]string{bin}, mcpFamilyStdioArgs(name)...)) {
 			return MCPClientPFM
+		}
+	case name == professorName && registration[configTypeKey] == openCodeLocal:
+		if sameStrings(command, append([]string{bin}, mcpStdioArgs...)) {
+			return MCPClientLegacyPFM
 		}
 	case name == chatName && registration[configTypeKey] == openCodeLocal:
 		if sameStrings(command, []string{bin, mcpCommand, chatName, mcpServeCommand}) {
@@ -259,7 +263,8 @@ func inspectProjectMCPServers(path, home string, port int, names ...string) []MC
 			var shape map[string]any
 			decodeErr := json.Unmarshal(encoded, &shape)
 			bin := filepath.Join(home, ".local", "bin", "pfm")
-			if report.State == MCPClientPFM && (decodeErr != nil || !isExactStdioShape(shape, bin, mcpStdioArgs)) {
+			if report.State == MCPClientPFM &&
+				(decodeErr != nil || !isExactStdioShape(shape, bin, mcpFamilyStdioArgs(name))) {
 				report.State = MCPClientForeignRegistration
 			}
 			if report.State == MCPClientLegacyPFM && (decodeErr != nil ||
@@ -327,7 +332,7 @@ func InspectCodexServers(path, home string, port int, names ...string) []MCPClie
 		registration, present := document.Servers[name]
 		if present {
 			report.State = classifyRegistration(name, registration, port)
-			if name == professorName && registration.Command != bin {
+			if (name == professorName || isFamilyRegistration(name)) && registration.Command != bin {
 				report.State = MCPClientForeignRegistration
 			}
 		}
@@ -364,9 +369,14 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 			(typeName == "" || typeName == stdioProtocol) && slices.Equal(registration.Args, want)
 	}
 	switch name {
+	case "chat-professor", "harvester-professor":
+		if stdioArgs(mcpFamilyStdioArgs(name)...) {
+			return MCPClientPFM
+		}
+		return MCPClientForeignRegistration
 	case professorName:
 		if stdioArgs(mcpStdioArgs...) {
-			return MCPClientPFM
+			return MCPClientLegacyPFM
 		}
 		return MCPClientForeignRegistration
 	case chatName, mcpServerHarvester:
@@ -403,4 +413,10 @@ func isRetiredPFMHeaders(headers map[string]string) bool {
 	}
 	token := strings.TrimPrefix(authorization, "Bearer ")
 	return len(token) == 64 && isHex(token)
+}
+
+// InspectClaudeServers applies the same exact ownership checks to a user
+// registry as to the historical project registry.
+func InspectClaudeServers(path, home string, port int, names ...string) []MCPClientCutover {
+	return inspectProjectMCPServers(path, home, port, names...)
 }

@@ -31,7 +31,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `E1.13-last-read-stream` · `last`/`read`/`stream` read the transcript from outside · spends cc:$SEAT
 - `E1.14-capture-keys` · `capture`/`keys` drive the pane directly · spends cc:$SEAT
 - `E1.15-ask` · `ask` waits for a fresh assistant turn · spends cc:$SEAT
-- `E1.16-inject` · `inject` delivers (busy → queued; menu open → refused by name) · spends cc:$SEAT
+- `E1.16-call` · `call` delivers (busy → queued; menu open → refused by name) · spends cc:$SEAT
 - `E1.17-watch` · `watch --idle-after` fires on the idle transition · spends cc:$SEAT
 - `E1.18-name` · `name` converges the label in tmux + statusline together · spends cc:$SEAT
 - `E1.19-kill-unkill` · `kill`/`unkill` toggle the chat's reachability · spends cc:$SEAT
@@ -50,8 +50,8 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `E2.03-reload-matrix` · `/reload` matrix as far as Codex supports it (no UserPromptSubmit hook — the beat asserts the model-relay path) · spends cx
 - `E2.04-recover` · `recover` rebuilds a chat from a rollout · spends cx
 - `E2.05-fleet-prompt` · the fleet prompt reaches the first turn through `developer_instructions` · spends cx
-- `E2.06-mcp-stdio` · MCP over stdio: `chat_*` tools are listed in the Codex session · spends cx
-- `E2.07-inject-ask-watch` · inject/ask/watch on the Codex home · spends cx
+- `E2.06-mcp-stdio` · MCP over stdio: bare chat tools are listed in the Codex session · spends cx
+- `E2.07-call-ask-watch` · call/ask/watch on the Codex home · spends cx
 - `E2.08-kill-self` · `chat kill self/me` alias incl. the tmux-less Codex tool-shell (`CODEX_THREAD_ID`) · spends cx
 - `E2.10-codex-launch` · the Codex launcher accepts no args and forwards Codex args · spends cx
 - `E2.11-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows stay clean while the chat lives · spends cx
@@ -59,8 +59,8 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 ## Lane E3 — OpenCode
 
 - `E3.01-open-seat` · opens one oc chat, label/title/statusline converge on the OpenCode home (same shape as E1) · spends oc
-- `E3.02-mcp-registered` · OpenCode's professor (local stdio, `pfm mcp serve --stdio`) MCP registration and `pfm doctor`'s healthy row · spends none
-- `E3.03-everything-else` · a live OpenCode row reports idle status, named read/last content refusal, capture, inject delivery, rename, kill and unkill · spends oc
+- `E3.02-mcp-registered` · OpenCode's `chat-professor` / `harvester-professor` family-scoped MCP registrations and `pfm doctor`'s healthy row · spends none
+- `E3.03-everything-else` · a live OpenCode row reports idle status, named read/last content refusal, capture, call delivery, rename, kill and unkill · spends oc
 
 ## Lane F — fleet
 
@@ -81,23 +81,23 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `F.15-addressing` · fleet-wide addressing/search: `find`, `save`, `history`, `resolve`, `modal` deny · spends none
 - `F.16-picker-plumbing` · picker plumbing: per-window pane opener, tmux-session shim · spends none
 - `F.17-additional-k-coverage` · additional K-category items this lane also asserts (auto-reconciled) · spends none
-- `F.18-e1-chat-survives-storm` · **cross-lane** — after the storm and kill-storm, E1's named chat still answers `status`/`last`/`inject` (the sequence's first cross-lane state effect) · spends cc:$SEAT
+- `F.18-e1-chat-survives-storm` · **cross-lane** — after the storm and kill-storm, E1's named chat still answers `status`/`last`/`call` (the sequence's first cross-lane state effect) · spends cc:$SEAT
 - `F.19-new-workbench` · `chat new` inside a workbench: auto-named `{name}:{n}`, the workbench prompt, a disabled engine refused · spends cc:$SEAT
 
 ## Lane M — MCP
 
-- `M.01-register-claude` · Claude `--mcp-config` payload carries the professor stdio server (`pfm mcp serve --stdio`); a re-install leaves no pfm server key in the seat's `.claude.json` · spends none
+- `M.01-register-claude` · Claude `--mcp-config` carries enabled family stdio servers (`pfm mcp serve --stdio --family chat|harvester`); reinstall reconciles enabled entries in existing account `.claude.json` registries, removes exact pfm-owned legacy entries, preserves/reports foreign `professor` entries and leaves absent files uncreated; doctor reports account registry state and unreadable files · spends none
 - `M.02-register-codex` · registration per engine: Codex stdio, fenced block preserves a foreign entry · spends none
-- `M.03-register-opencode` · registration per engine: OpenCode — professor local stdio, `pfm doctor`'s healthy row · spends none
+- `M.03-register-opencode` · registration per engine: OpenCode — family-scoped local stdio registrations, `pfm doctor`'s healthy row · spends none
 - `M.04-doctor-mcp` · `pfm doctor` Codex + project-scope cutover rows (`foreign-registration`, `legacy-pfm`, `legacy-standalone`) + daemon reachability + version-skew · spends none
-- `M.05-daemon-core` · daemon: single loopback port, `/mcp/professor` and its family views, health, restart on replaced binary (rebuild in-container, exit-75) · spends none
+- `M.05-daemon-core` · daemon: single loopback port, `/mcp/{chat-professor|harvester-professor}` and its family views, health, restart on replaced binary (rebuild in-container, exit-75) · spends none
 - `M.06-daemon-units` · daemon service units: the container has no user service manager, so doctor gives a named advisory · spends none
-- `M.07-stdio-transports` · `pfm mcp serve --stdio`: forwards to the daemon, serves in process without one, the caller's ambient identity; malformed-frame parse error · spends none
+- `M.07-stdio-transports` · `pfm mcp serve --stdio --family chat|harvester`: forwards only that family to the daemon, serves its family view in process without one, preserves caller identity; malformed-frame parse error · spends none
 - `M.08-mcp-cli` · `pfm mcp` CLI surface: `ls`, `enable`/`disable`, the usage exit, `serve` dispatch · spends none
-- `M.09-chat-tools` · chat family tools driven by a direct MCP client against the loopback daemon's `/mcp/professor`, including dying-pane `chat_keys` reporting dead/3/partial · spends cc:$SEAT
+- `M.09-chat-tools` · chat family tools driven by a direct MCP client against the loopback daemon's `/mcp/chat-professor` and `/mcp/harvester-professor`, including dying-pane `keys` reporting dead/3/partial · spends cc:$SEAT
 - `M.10-chat-tools-gap` · chat family tools with no dedicated test file: open/name/kill/unkill/exit/save/`servicedesk` · spends cc:$SEAT
 - `M.11-harvester-tools` · harvester tools read local content and return named per-item errors for offline public sources; `pfm harvest download-file` is exercised · spends none
-- `M.12-harvester-cache-gate` · harvest local cache (an `include_content: false` `harvester_read` re-read is a cache hit: its artifact's frontmatter `fetched_at` precedes the re-read) + search-backend gating of `harvester_search_web` · spends none
+- `M.12-harvester-cache-gate` · harvest local cache (an `include_content: false` `read` re-read is a cache hit: its artifact's frontmatter `fetched_at` precedes the re-read) + search-backend gating of `search_web` · spends none
 - `M.13-dropped-seat-roster` · a dropped seat's absence shows up in the daemon's own seat roster · spends none
 - `M.14-end-to-end` · mock Claude and Codex chats drive MCP calls through their registered stdio server and report the resulting tool records · spends cc:$SEAT+cx
 - `M.15-live-chats-survive-daemon-restart` · **cross-lane** — after the exit-75 restart, E1's Claude chat (stdio) and E2's Codex chat (stdio) each make their next MCP call successfully · spends cc:$SEAT+cx
@@ -153,7 +153,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives the fixture transcr
 - `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, cost-launch and cost-sink usage and arming, git-guard, epic-inject, title-renudge · spends none
 - `O2.05b-activity-log` · the activity-log reader: `pfm log` shows the lane's own records, a filter narrows, an unknown `--comp`/`--level` and a positional argument exit 2 · spends none
 - `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none
-- `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `inject` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT
+- `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `call` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT
 - `O2.08-dropped-seat-with-live-chat` · **cross-lane** — a seat dropped while a chat lives on it: the chat keeps working and `pfm doctor` names the seat · spends cc:${SPARE:-none}
 - `O2.09-harvester` · `pfm harvest` local content and named offline public-source errors, ask's usage line, and sidecar provisioning · spends cc:$SEAT · linux-arm64 `known-gap`
 - `O2.10-uninstall` · LAST beat of the run: `uninstall` removes everything owned, keeps a foreign hook planted before install, leaves no ledger · spends none

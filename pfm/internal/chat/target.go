@@ -15,12 +15,12 @@ import (
 	"os"
 	"path/filepath"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -107,16 +107,16 @@ func DeliverName(
 	name string,
 	runtime *pfmconfig.Runtime,
 ) (int, string, error) {
-	engine, err := NewInjectEngine(false, runtime)
+	engine, err := NewCallEngine(false, runtime)
 	if err != nil {
 		return 1, "", err
 	}
-	request := inject.Request{
+	request := pfmcall.Request{
 		Target: PaneTarget(chat), Message: "/rename " + name,
 	}
 	if chat.Pane == "" {
-		result, injectErr := engine.Inject(ctx, request)
-		return result.Code, result.Message, injectErr
+		result, callErr := engine.Call(ctx, request)
+		return result.Code, result.Message, callErr
 	}
 	values, err := targetPaths(runtime)
 	if err != nil {
@@ -126,12 +126,12 @@ func DeliverName(
 	if err != nil {
 		return 1, "", err
 	}
-	target := inject.Target{
+	target := pfmcall.Target{
 		SocketPath: socketPath, Pane: chat.Pane, Engine: string(chat.Engine),
 		Name: chat.Name, ID: chat.ID, Session: chat.Session,
 	}
 	request.Target = chat.Pane
-	result, err := engine.InjectTarget(ctx, target, request)
+	result, err := engine.CallTarget(ctx, target, request)
 	return result.Code, result.Message, err
 }
 
@@ -237,7 +237,7 @@ func ResolveIn(
 		Roster: roster, Raw: raw, Self: identifier,
 		CodexSelf:       codexSeatIdentifier{runtime: runtime},
 		RequestIdentity: requestIdentity,
-		Env:             paths.OSEnv{}, Session: inject.TmuxInjector{},
+		Env:             paths.OSEnv{}, Session: pfmcall.TmuxCaller{},
 	}).Resolve(ctx, name, resolve.LadderOptions{})
 	if err != nil {
 		return headless.Chat{}, false, err

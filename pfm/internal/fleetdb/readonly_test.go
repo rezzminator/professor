@@ -56,17 +56,23 @@ func TestOpenSharedStateReadOnlyNeverCreatesOrMigrates(t *testing.T) {
 			var mismatch *SchemaMismatchError
 			return errors.As(err, &mismatch) && mismatch.Found == SchemaVersion-1 && !mismatch.Newer()
 		}},
-		{name: "newer", version: RetiredSchemaVersion + 1, want: func(err error) bool {
+		{name: "newer", version: SchemaVersion + 1, want: func(err error) bool {
 			var mismatch *SchemaMismatchError
-			return errors.As(err, &mismatch) && mismatch.Found == RetiredSchemaVersion+1 && mismatch.Newer()
+			return errors.As(err, &mismatch) && mismatch.Found == SchemaVersion+1 && mismatch.Newer()
 		}},
 		{name: "current", version: SchemaVersion, want: func(err error) bool { return err == nil }},
-		{name: "retired", version: RetiredSchemaVersion, want: func(err error) bool { return err == nil }},
+		{name: "retired", version: RetiredSchemaVersion, want: func(err error) bool {
+			var mismatch *SchemaMismatchError
+			return errors.As(err, &mismatch) && mismatch.Found == RetiredSchemaVersion && !mismatch.Newer()
+		}},
 		{
-			name:    "current, an installed pfm's file without hidden.revision",
-			version: SchemaVersion,
+			name:    "older installed file without hidden.revision",
+			version: 3,
 			seed:    v3Schema + "INSERT INTO hidden(uuid,hidden_at) VALUES('kept-kill',7);",
-			want:    func(err error) bool { return err == nil },
+			want: func(err error) bool {
+				var mismatch *SchemaMismatchError
+				return errors.As(err, &mismatch) && mismatch.Found == 3 && !mismatch.Newer()
+			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -96,7 +102,7 @@ func TestOpenSharedStateReadOnlyNeverCreatesOrMigrates(t *testing.T) {
 			}
 			records, err := state.KilledRecords(context.Background())
 			switch {
-			case test.version == SchemaVersion || test.version == RetiredSchemaVersion:
+			case test.version == SchemaVersion:
 				if err != nil || records["kept-kill"].KilledAt != 7 {
 					t.Fatalf("read-only kills at v%d=%v err=%v", test.version, records, err)
 				}

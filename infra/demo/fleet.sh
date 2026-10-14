@@ -6,7 +6,7 @@
 #
 # Spawns from this bare shell are UNSIGNED (the spawner is derived from tmux-pane
 # ancestry, which a docker-exec shell lacks): the cosmos tab says so in one line.
-# Chats the fleet spawns from inside a chat (chat_new) are signed.
+# Chats the fleet spawns from inside a chat (mcp__chat-professor__new) are signed.
 #
 # Re-running is safe: names already ● live are kept, the rest are (re)spawned.
 #

@@ -29,7 +29,7 @@
 - **pfm wires shared links.** Install creates missing links. A link to existing data outside the store is kept and named for a merge; a dangling link or a link to the wrong store entry is repointed atomically, without touching its old target, only when that account has no live chat. An aliased account is skipped. Doctor checks the store and every account's links.
 - **Unknown entries stay where they are.** A name on neither list reports `UNCLASSIFIED`; pfm does not share or delete it. `EntryClass` also recognises ignored entries: `ide`, `.cc-new-children`, `.cc-pane-children`, `settings.local.json`, and Claude Code's own runtime entries `debug`, `daemon.lock`, `daemon.status.json`, `tmp`. A dir named after an installed plugin is that plugin's and reports nothing.
 - **Settings are shared by link.** Claude layers the shared user settings under project files, launch settings and managed policy. Per-account launch overrides live in `pfm.config.json`.
-- **MCP definitions ride the launch.** `mcp.thirdParty` supplies operator servers beside pfm's `professor` entry. Trust, onboarding and login remain Claude's per-account state.
+- **MCP definitions ride the launch.** `mcp.thirdParty` supplies operator servers beside pfm's `chat-professor` and `harvester-professor` entries. Trust, onboarding and login remain Claude's per-account state.
 - **Retention applies outside pfm too.** The managed `cleanupPeriodDays` protects launches through other paths.
 
 ## How Claude finds its files
@@ -111,9 +111,9 @@ A settings `env` value overrides the shell's value; a flag overrides its setting
 
 ## MCP servers
 
-`--mcp-config` carries every `mcp.thirdParty` entry, plus pfm's `professor` server when `chat` or `harvester` is enabled. Third-party entries remain present when both families are off. The key is a map from server name to a JSON object in Claude's `mcpServers` shape; validation reserves `professor` for pfm.
+`--mcp-config` carries every `mcp.thirdParty` entry, plus pfm's `chat-professor` and/or `harvester-professor` server when the corresponding family is enabled. Third-party entries remain present when both families are off. The key is a map from server name to a JSON object in Claude's `mcpServers` shape; validation reserves both pfm server names.
 
-The intended account `.claude.json` contains no `mcpServers`. Install does not import or strip definitions. A pfm-owned definition outside the launch is a blocking `pfm-mcp` check; another user-level entry is a `third-party-mcp` warning with the edit that puts it in `mcp.thirdParty` and removes it from the state file. The warning covers each account's state file and `~/.claude.json`.
+Install inspects existing account `.claude.json` files found through configured accounts, the account roster, ambient config and default paths. It removes only exact pfm-owned legacy entries, emits or reconciles enabled `chat-professor` and `harvester-professor` entries, preserves and reports foreign `professor` entries, and does not create absent registry files. Doctor reuses this inspector and reports each account's registry state, foreign entries and unreadable files.
 
 ## Launches outside pfm
 

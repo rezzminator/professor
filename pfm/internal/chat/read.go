@@ -10,7 +10,7 @@ import (
 )
 
 // ReadEntries is the transcript tail of one chat, newest last: the shared
-// extraction behind `pfm chat read` and MCP chat_read, so their defaults and
+// extraction behind `pfm chat read` and MCP read, so their defaults and
 // failures are identical. truncated reports a tail cut by transcript.Tail's
 // own window.
 func ReadEntries(

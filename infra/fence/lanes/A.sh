@@ -80,9 +80,9 @@ need "the managed install root $MANAGED" "[ -d '$MANAGED' ] && [ -s '$MANAGED/so
   "(cd '$BLUEPRINT' && pfm install --yes)" ||
   lane_abort "pfm install has never completed in this container (no $MANAGED/source-repo marker)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/status)\" != 000 ]" \
   "lane_daemon_up" ||
-  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat tool"
 need "express adopted at $EXPRESS (pfm init + scripted fill, 'professor: install' committed)" \
   "[ -f '$EXPRESS/.professor/baseline.json' ] && grep -q 'professor: install' <<<\"\$(git -C '$EXPRESS' log --oneline 2>/dev/null)\"" \
   "bash $WORKTREE/infra/fence/lanes/adopt.sh" ||
@@ -697,7 +697,7 @@ else
     # replaced by a rename, as pfm update replaces it.
     holder="" holder_fd=""
     if mkfifo "$BK/a07-holder.in" && exec {holder_fd}<>"$BK/a07-holder.in"; then
-      "$PFM_BIN" mcp serve --stdio <"$BK/a07-holder.in" {holder_fd}>&- >/dev/null 2>&1 &
+      "$PFM_BIN" mcp serve --stdio --family chat <"$BK/a07-holder.in" {holder_fd}>&- >/dev/null 2>&1 &
       holder=$!
       # POLL-STEP: the holder runs pfm once /proc names the owned binary as its exe.
       for _ in {1..50}; do
@@ -706,7 +706,7 @@ else
       done
     fi
     [ -n "$holder" ] && [ "$(readlink "/proc/$holder/exe" 2>/dev/null)" = "$PFM_BIN" ] ||
-      bad="$bad no pfm mcp serve --stdio held $PFM_BIN busy for the restore;"
+      bad="$bad no pfm mcp serve --stdio --family chat held $PFM_BIN busy for the restore;"
     i=0
     for owned in $(jq -r '.paths[]' "$BK/binary-ownership.json"); do
       { cp -p "$BK/pfm-owned-$i" "$owned.lane-restore" && mv -f "$owned.lane-restore" "$owned"; } ||
@@ -925,8 +925,8 @@ else
     : >"$gate"
     result_start="$(wc -l <"$transcript")"
     allow_steps="$(jq -cn --arg file "$EXPRESS/$EDIT_FILE" --arg gate "$gate" '[{type:"tool_call",tool:"Edit",input:{file_path:$file,old_string:"",new_string:"Lane A probe: LANE-A-ALLOW-AGENT"}},{type:"hold",until_gone:$gate},{type:"turn",reply:"ok"}]')"
-    pfm chat inject --allow-unsigned "$CHAT" "A-ALLOW-PROBE $(mock_steps "$allow_steps")" >/dev/null 2>&1 ||
-      bad="$bad the allow stimulus could not be injected;"
+    pfm chat call --allow-unsigned "$CHAT" "A-ALLOW-PROBE $(mock_steps "$allow_steps")" >/dev/null 2>&1 ||
+      bad="$bad the allow stimulus could not be called;"
     wait_prompt "$CHAT" A-ALLOW-PROBE 60 || bad="$bad no allow prompt in 60s (${LANE_WAIT_WHY:-no wait reason});"
     wait_for 60 has_probe_result || bad="$bad no allow tool_result in 60s (${LANE_WAIT_WHY:-no wait reason});"
     allow_result="$(read_probe_result)"

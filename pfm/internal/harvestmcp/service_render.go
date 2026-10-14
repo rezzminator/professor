@@ -19,7 +19,7 @@ type ReadView struct {
 	SizeOnly      bool // include_content:false: a size line stands in for the content
 	Remote        bool // the remote server: no item names a server path
 	InlineCap     int  // the most content characters one item shows; <= 0 is the default
-	SearchEnabled bool // a web search backend is configured, so a failure may name harvester_search_web
+	SearchEnabled bool // a web search backend is configured, so a failure may name search_web
 }
 
 // RenderReadItem is item's text block, n of total in its call:
@@ -95,8 +95,8 @@ func itemFailure(label string, result harvest.Result, view ReadView) string {
 	}
 	hint := harvest.SearchHint(
 		view.SearchEnabled,
-		"Use `harvester_search_web` to find an alternative copy, or `harvester_search_literature` if it is a scholarly title.",
-		"Use `harvester_search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
+		"Use `search_web` to find an alternative copy, or `search_literature` if it is a scholarly title.",
+		"Use `search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
 	)
 	// Size probes never kill an empty extraction behind a zero-sized success;
 	// this wording is part of the Python scheduler contract.
@@ -171,7 +171,7 @@ func readError(err error) *mcp.CallToolResult {
 
 // RenderFind is found as text — the candidates, one block each, and every
 // source's status, since with a failed source no candidate is not proof the
-// work is absent: the harvester_search_literature answer and pfm harvest
+// work is absent: the search_literature answer and pfm harvest
 // search's output.
 func RenderFind(query string, found FindOutput) string {
 	candidates, sources := found.Candidates, found.Sources
@@ -201,12 +201,12 @@ func RenderFind(query string, found FindOutput) string {
 	}
 	if len(candidates) == 0 {
 		return fmt.Sprintf(
-			"No candidate works found for %q. Try harvester_search_web (when configured) or a plain web search, or rephrase — a more exact title helps.",
+			"No candidate works found for %q. Try search_web (when configured) or a plain web search, or rephrase — a more exact title helps.",
 			query,
 		) + footer
 	}
 	blocks := []string{fmt.Sprintf(
-		"%d candidate work(s) for %q — pick one and read it with `harvester_read`, passing its handle in publications:",
+		"%d candidate work(s) for %q — pick one and read it with `read`, passing its handle in publications:",
 		len(candidates), query,
 	)}
 	for index, candidate := range candidates {
@@ -259,7 +259,7 @@ func renderSearch(query string, results []WebResult) string {
 		return fmt.Sprintf("No results found for %q. Try different terms or a broader query.", query)
 	}
 	blocks := []string{fmt.Sprintf(
-		"%d result(s) for %q — read the ones you want with `harvester_read`, in urls:", len(results), query,
+		"%d result(s) for %q — read the ones you want with `read`, in urls:", len(results), query,
 	)}
 	for index, result := range results {
 		lines := []string{

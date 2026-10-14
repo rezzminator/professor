@@ -64,7 +64,7 @@ const historyKeep = 12
 
 // claudeComposerRule is a horizontal rule of Claude Code's input box, drawn
 // above and below its composer row; the kill-exit finisher reads the box down
-// to the closing one (inject.ComposerBoxEmpty). Codex draws no box.
+// to the closing one (pfmcall.ComposerBoxEmpty). Codex draws no box.
 const claudeComposerRule = "────────────────────────────────────────\r\n"
 
 // These dialog strings are read by internal/spawn/spawn.go's Codex birth.
@@ -356,7 +356,7 @@ func (loop *paneLoop) closeMenu(confirmed bool) {
 }
 
 // exitMenuName tags the /exit confirmation Claude Code shows over background
-// work (inject.ExitDialogOpen matches its ❯ row; reload and the kill-exit
+// work (pfmcall.ExitDialogOpen matches its ❯ row; reload and the kill-exit
 // finisher press Enter on it).
 const exitMenuName = "exit-dialog"
 
@@ -644,7 +644,7 @@ func (loop *paneLoop) finish(reason string, code int) int {
 	return code
 }
 
-// claudeBusyLine is the working footer in the words internal/inject/guards.go:13
+// claudeBusyLine is the working footer in the words internal/call/guards.go:13
 // matches: "esc to interrupt", "(Ns ·" and "N tokens" are each a pin.
 func claudeBusyLine(elapsed time.Duration, usage Tokens) string {
 	seconds := int(elapsed.Seconds())

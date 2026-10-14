@@ -5,8 +5,8 @@ exec jail-pfm chat ls --all
 stdout 'worker'
 
 # Unsigned delivery is explicit and is proved in the real tmux pane.
-exec jail-pfm chat inject --allow-unsigned worker hello
-stdout 'injected LIVE'
+exec jail-pfm chat call --allow-unsigned worker hello
+stdout 'called LIVE'
 exec jail-until cc-1700000000-4242-7 cc-1700000000-4242-7 hello
 stdout hello
 exec jail-pfm chat status worker

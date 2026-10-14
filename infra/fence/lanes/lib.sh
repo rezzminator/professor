@@ -791,28 +791,39 @@ need() {
   return 1
 }
 
+# Compare account identity and foreign MCP data across install/uninstall.
+# Family entries are checked separately against the installer's exact shape.
+claude_registry_without_family_entries() {
+  jq -cS '.mcpServers = ((.mcpServers // {}) | del(."chat-professor", ."harvester-professor"))' "$1"
+}
+
 # assert_opencode_mcp_registered <pfm-bin> — M.03 and E3.02 are the same
-# assertion body (OpenCode's opencode.jsonc carries the professor local stdio
-# entry, and doctor's opencode row reads professor=pfm): one shared beat body
+# assertion body (OpenCode's opencode.jsonc carries both family local stdio
+# entries, and doctor's opencode rows report each family registration healthy): one shared beat body
 # so the two lanes can never drift apart on what "MCP registered" means.
 assert_opencode_mcp_registered() {
-  local bin="$1" oc_cfg="$HOME/.config/opencode/opencode.jsonc" bad="" oc_doctor_out oc_row
+  local bin="$1" oc_cfg="$HOME/.config/opencode/opencode.jsonc" bad="" oc_doctor_out oc_rows family server
   _strip_jsonc() { sed 's#//.*$##' "$1"; }
   if [ ! -f "$oc_cfg" ]; then
     bad="$bad no OpenCode MCP config at $oc_cfg — pfm install --yes did not write it;"
   else
-    _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" \
-      '.mcp.professor | .type == "local" and .command == [$bin, "mcp", "serve", "--stdio"] and .enabled == true' >/dev/null 2>&1 ||
-      bad="$bad M36: $oc_cfg mcp.professor is not the local stdio shape {type local, command [$bin mcp serve --stdio], enabled true}: $(one_line "$(_strip_jsonc "$oc_cfg" | jq -c '.mcp.professor' 2>&1)");"
+    for family in chat harvester; do
+      server="$family-professor"
+      _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" --arg family "$family" \
+        '.mcp[$family + "-professor"] | .type == "local" and .command == [$bin, "mcp", "serve", "--stdio", "--family", $family] and .enabled == true' >/dev/null 2>&1 ||
+        bad="$bad M36: $oc_cfg $server is not the enabled local family stdio registration;"
+    done
   fi
   oc_doctor_out="$(pfm doctor 2>&1)"
-  oc_row="$(printf '%s' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
-  grep -qE 'professor=pfm$' <<<"$oc_row" ||
-    bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
+  oc_rows="$(printf '%s' "$oc_doctor_out" | grep -F 'client=opencode')"
+  for server in chat-professor harvester-professor; do
+    grep -qE "$server=pfm($|[[:space:]])" <<<"$oc_rows" ||
+      bad="$bad M36: pfm doctor's opencode $server MCP row is not healthy: $(one_line "${oc_rows:-no client=opencode row at all}");"
+  done
   if [ -n "$bad" ]; then
     fail "$bad"
   else
-    pass "$oc_cfg: professor local stdio ($bin mcp serve --stdio), enabled; pfm doctor's opencode row reads professor=pfm"
+    pass "$oc_cfg: both family servers local, enabled, with family stdio commands; doctor reports each registration healthy"
   fi
 }
 
@@ -1042,18 +1053,18 @@ lane_daemon_up() {
     echo "daemon: pfm mcp serve (pid $stale) runs a replaced binary — restarting it"
     kill "$stale" || { echo "daemon: cannot stop replaced pid $stale" >&2; return 1; }
     for i in {1..10}; do
-      code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+      code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/status" || true)"
       [ "$code" = 000 ] && break
       sleep 0.5
     done
   fi
-  code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/status" || true)"
   if [ -n "$code" ] && [ "$code" != 000 ]; then echo "daemon: pfm mcp serve already answering on :$port"; return 0; fi
   nohup pfm mcp serve >"$log" 2>&1 </dev/null &
   pid=$!
   disown "$pid"
   for i in {1..20}; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/status" || true)"
     if [ -n "$code" ] && [ "$code" != 000 ]; then echo "daemon: pfm mcp serve up on :$port (pid $pid, log $log)"; return 0; fi
     sleep 0.5
   done
@@ -1111,7 +1122,7 @@ lane_storm_start() { # lane_storm_start <n> [sends]
     sock="$(awk -F'\t' -v name="$engine" '$1 ~ /^live-/ && $5 == name {print $11; exit}' <<<"$rows")"
     sid="$(awk -F'\t' -v name="$engine" '$1 ~ /^live-/ && $5 == name {print $2; exit}' <<<"$rows")"
     CHAT_SENDER_LABEL="$engine" CHAT_SENDER_SESSION="$sock" CHAT_SENDER_SID="$sid" \
-      pfm chat inject "$me" 'lane storm seed' >/dev/null || { echo "storm: seed $engine → $me failed" >&2; return 1; }
+      pfm chat call "$me" 'lane storm seed' >/dev/null || { echo "storm: seed $engine → $me failed" >&2; return 1; }
     echo "seeded $engine → $me"
   done
 }

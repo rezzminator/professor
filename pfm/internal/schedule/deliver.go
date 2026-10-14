@@ -11,13 +11,13 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/archive"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -42,7 +42,7 @@ var (
 )
 
 // chatDeliverer wakes a chat and types a schedule into it: a live chat
-// is injected as it stands, a dead one is resumed detached on a fresh tmux
+// is called as it stands, a dead one is resumed detached on a fresh tmux
 // socket and typed into once its composer is up. The seams default to the real
 // doors; a test replaces them.
 type chatDeliverer struct {
@@ -52,7 +52,7 @@ type chatDeliverer struct {
 	tmuxDir string
 	open    func(ctx context.Context, sessionID string) (action.OpenResult, error)
 	capture func(ctx context.Context, socketPath, target string) (string, error)
-	inject  func(ctx context.Context, r fleetdb.Schedule, target, message string) error
+	call    func(ctx context.Context, r fleetdb.Schedule, target, message string) error
 	unhide  func(ctx context.Context, sessionID string) (removed bool, err error)
 
 	// archiveDir is the archive the fire restores a chat from when the index no longer holds it.
@@ -68,9 +68,9 @@ func newChatDeliverer(runtime *pfmconfig.Runtime, stdout, stderr io.Writer) *cha
 		return pfmchat.OpenDetachedID(ctx, sessionID, stderr, runtime)
 	}
 	deliverer.capture = func(ctx context.Context, socketPath, target string) (string, error) {
-		return (inject.TmuxInjector{}).Capture(ctx, socketPath, target, false, scheduleCaptureLines)
+		return (pfmcall.TmuxCaller{}).Capture(ctx, socketPath, target, false, scheduleCaptureLines)
 	}
-	deliverer.inject = deliverer.injectSchedule
+	deliverer.call = deliverer.callSchedule
 	deliverer.unhide = deliverer.unkill
 	return deliverer
 }
@@ -91,7 +91,7 @@ func (deliverer *chatDeliverer) Deliver(ctx context.Context, r fleetdb.Schedule,
 		}
 		target = result.Socket
 	}
-	if err := deliverer.inject(ctx, r, target, message); err != nil {
+	if err := deliverer.call(ctx, r, target, message); err != nil {
 		return err
 	}
 	return deliverer.unhideDelivered(ctx, r.SessionID)
@@ -193,7 +193,7 @@ func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string
 			streak, lastErr = 0, err
 		case pfmengine.ClaudeTrustDialog(capture):
 			return fmt.Errorf("revived chat on %s is held at the folder-trust dialog; nothing typed", socket)
-		case inject.LastComposerLine(capture) != "":
+		case pfmcall.LastComposerLine(capture) != "":
 			streak++
 			if streak >= scheduleComposerReads {
 				return nil
@@ -204,7 +204,7 @@ func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string
 		if !clock.Real.Now().Before(deadline) {
 			failure := fmt.Errorf(
 				"revived chat on socket %s showed no composer within %s; "+
-					"it stays running and the next tick will inject it",
+					"it stays running and the next tick will call it",
 				socket, scheduleComposerWait,
 			)
 			if lastErr != nil {
@@ -218,26 +218,26 @@ func (deliverer *chatDeliverer) awaitComposer(ctx context.Context, socket string
 	}
 }
 
-// injectSchedule types the message the way its setter would have: the
+// callSchedule types the message the way its setter would have: the
 // schedule is a deferred message from that chat, signed as the setter's.
-func (deliverer *chatDeliverer) injectSchedule(
+func (deliverer *chatDeliverer) callSchedule(
 	ctx context.Context,
 	r fleetdb.Schedule,
 	target, message string,
 ) error {
-	engine, err := pfmchat.NewInjectEngine(true, deliverer.runtime)
+	engine, err := pfmchat.NewCallEngine(true, deliverer.runtime)
 	if err != nil {
-		return fmt.Errorf("build injector for %s: %w", target, err)
+		return fmt.Errorf("build caller for %s: %w", target, err)
 	}
 	if r.SetByID != "" {
 		engine = engine.WithIdentity(resolve.Identity{ID: r.SetByID}, r.SetByLabel)
 	}
-	res, err := engine.Inject(ctx, inject.Request{Target: target, Message: message})
+	res, err := engine.Call(ctx, pfmcall.Request{Target: target, Message: message})
 	if err != nil {
-		return fmt.Errorf("inject into %s: %w", target, err)
+		return fmt.Errorf("call into %s: %w", target, err)
 	}
 	if res.Code != 0 || !res.Typed {
-		return fmt.Errorf("inject into %s: code %d: %s", target, res.Code, res.Message)
+		return fmt.Errorf("call into %s: code %d: %s", target, res.Code, res.Message)
 	}
 	return nil
 }

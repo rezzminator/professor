@@ -10,7 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/rezzminator/professor/pfm/internal/inject"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 func TestToolErrorsKeepHandlerOutput(t *testing.T) {
@@ -24,37 +24,42 @@ func TestToolErrorsKeepHandlerOutput(t *testing.T) {
 		fields     map[string]any
 	}{
 		{
-			name: "keys dying pane", tool: "chat_keys",
+			name: "keys dying pane", tool: "keys",
 			arguments: map[string]any{"target": "gone", "keys": []string{"Escape", "Enter"}},
-			backend:   &backend{injector: captureCodeInjector{}, allowAmbientIdentity: true},
+			backend:   &backend{callEngine: captureCodeCaller{}, allowAmbientIdentity: true},
 			prefix:    `send "Escape": `,
 			fields: map[string]any{
-				"status": statusDead, "code": float64(inject.CodeDead), "count": float64(0),
+				"status": statusDead, "code": float64(pfmcall.CodeDead), "count": float64(0),
 				"pane": "%0", "keys": []any{"Escape", "Enter"},
 			},
 		},
 		{
-			name: "keys unknown target", tool: "chat_keys",
+			name: "keys unknown target", tool: "keys",
 			arguments: map[string]any{"target": "gone", "keys": []string{"Escape"}},
 			backend: &backend{
-				injector:             captureCodeInjector{code: inject.CodeUnknown, detail: detail},
+				callEngine:           captureCodeCaller{code: pfmcall.CodeUnknown, detail: detail},
 				allowAmbientIdentity: true,
 			},
 			prefix: `resolve "gone": ` + detail,
-			fields: map[string]any{"status": statusNotFound, "code": float64(inject.CodeUnknown)},
+			fields: map[string]any{"status": statusNotFound, "code": float64(pfmcall.CodeUnknown)},
 		},
 		{
-			name: "capture failed", tool: "chat_capture",
+			name:      "capture failed",
+			tool:      "capture",
 			arguments: map[string]any{"target": "gone"},
 			backend: &backend{
-				injector:             captureCodeInjector{code: inject.CodeCaptureFailed, detail: detail},
+				callEngine:           captureCodeCaller{code: pfmcall.CodeCaptureFailed, detail: detail},
 				allowAmbientIdentity: true,
 			},
-			prefix: "chat_capture: " + detail,
-			fields: map[string]any{"status": statusError, "code": float64(inject.CodeCaptureFailed), "message": detail},
+			prefix: "capture: " + detail,
+			fields: map[string]any{
+				"status":  statusError,
+				"code":    float64(pfmcall.CodeCaptureFailed),
+				"message": detail,
+			},
 		},
 		{
-			name: "name action failed", tool: "chat_name",
+			name: "name action failed", tool: "name",
 			arguments: map[string]any{"target": "fixture", "name": "new-name"},
 			backend: &backend{dispatch: func(_ context.Context, _ []string, _, stderr io.Writer) int {
 				_, _ = io.WriteString(stderr, detail+"\n")
@@ -64,10 +69,10 @@ func TestToolErrorsKeepHandlerOutput(t *testing.T) {
 			fields: map[string]any{"status": statusError, "code": float64(7), "message": detail},
 		},
 		{
-			name: "ls failed", tool: "chat_ls",
+			name: "ls failed", tool: "ls",
 			arguments: map[string]any{"all": true},
 			backend:   &backend{},
-			prefix:    "chat_ls verb is not configured",
+			prefix:    "ls verb is not configured",
 		},
 	}
 	for _, test := range tests {

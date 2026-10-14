@@ -28,13 +28,13 @@ type deliveryRig struct {
 	openErr    error
 	captures   []string
 	captured   int
-	injectErr  error
-	injected   []string
+	callErr    error
+	called     []string
 	socketPath string
 
 	hidden    bool // the chat is hidden until the unhide seam lifts it
 	unhideErr error
-	events    []string // "inject" and "unhide" in the order they ran
+	events    []string // "call" and "unhide" in the order they ran
 	unhides   []string
 	stdout    bytes.Buffer
 }
@@ -65,10 +65,10 @@ func (rig *deliveryRig) deliverer() *chatDeliverer {
 			rig.captured++
 			return rig.captures[index], nil
 		},
-		inject: func(_ context.Context, _ fleetdb.Schedule, target, _ string) error {
-			rig.events = append(rig.events, "inject")
-			rig.injected = append(rig.injected, target)
-			return rig.injectErr
+		call: func(_ context.Context, _ fleetdb.Schedule, target, _ string) error {
+			rig.events = append(rig.events, "call")
+			rig.called = append(rig.called, target)
+			return rig.callErr
 		},
 	}
 }
@@ -84,14 +84,14 @@ var testSchedule = fleetdb.Schedule{
 	ID: 7, SessionID: "sess-7", Label: "seven", SetByID: "setter-id", SetByLabel: "setter",
 }
 
-func TestScheduleDelivererInjectsALiveChatByItsSessionId(t *testing.T) {
+func TestScheduleDelivererCallsALiveChatByItsSessionId(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}}
 	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
-	if len(rig.injected) != 1 || rig.injected[0] != "sess-7" || rig.captured != 0 {
-		t.Fatalf("injected=%v captured=%d, want one inject at the session id and no composer wait",
-			rig.injected, rig.captured)
+	if len(rig.called) != 1 || rig.called[0] != "sess-7" || rig.captured != 0 {
+		t.Fatalf("called=%v captured=%d, want one call at the session id and no composer wait",
+			rig.called, rig.captured)
 	}
 }
 
@@ -101,10 +101,10 @@ func TestScheduleDelivererWaitsForThreeConsecutiveComposerReads(t *testing.T) {
 	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
-	if rig.captured != 6 || len(rig.injected) != 1 || rig.injected[0] != "cc-revived" ||
+	if rig.captured != 6 || len(rig.called) != 1 || rig.called[0] != "cc-revived" ||
 		rig.socketPath != "/tmux/cc-revived" {
-		t.Fatalf("captured=%d injected=%v socket=%q, want 6 reads, inject at the fresh socket",
-			rig.captured, rig.injected, rig.socketPath)
+		t.Fatalf("captured=%d called=%v socket=%q, want 6 reads, call at the fresh socket",
+			rig.captured, rig.called, rig.socketPath)
 	}
 }
 
@@ -112,8 +112,8 @@ func TestScheduleDelivererRefusesAFolderTrustDialog(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := &deliveryRig{state: "opened", captures: []string{"Yes, I trust this folder\nNo, exit\n❯ 1. Yes"}}
 	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
-	if err == nil || !strings.Contains(err.Error(), "folder-trust dialog; nothing typed") || len(rig.injected) != 0 {
-		t.Fatalf("err=%v injected=%v, want the trust-dialog refusal and nothing typed", err, rig.injected)
+	if err == nil || !strings.Contains(err.Error(), "folder-trust dialog; nothing typed") || len(rig.called) != 0 {
+		t.Fatalf("err=%v called=%v, want the trust-dialog refusal and nothing typed", err, rig.called)
 	}
 }
 
@@ -122,30 +122,30 @@ func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
 	rig := &deliveryRig{state: "opened", captures: []string{"still booting"}}
 	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "showed no composer within") ||
-		!strings.Contains(err.Error(), "cc-revived") || len(rig.injected) != 0 {
-		t.Fatalf("err=%v injected=%v", err, rig.injected)
+		!strings.Contains(err.Error(), "cc-revived") || len(rig.called) != 0 {
+		t.Fatalf("err=%v called=%v", err, rig.called)
 	}
 }
 
-func TestScheduleDelivererReportsResolveAndInjectFailures(t *testing.T) {
+func TestScheduleDelivererReportsResolveAndCallFailures(t *testing.T) {
 	rig := &deliveryRig{openErr: errors.New("chat is not indexed")}
 	err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "resolve chat sess-7 (seven)") {
 		t.Fatalf("open failure err=%v", err)
 	}
-	rig = &deliveryRig{state: "live", injectErr: errors.New("pane gone")}
+	rig = &deliveryRig{state: "live", callErr: errors.New("pane gone")}
 	err = rig.deliverer().Deliver(context.Background(), testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "pane gone") {
-		t.Fatalf("inject failure err=%v", err)
+		t.Fatalf("call failure err=%v", err)
 	}
 }
 
-func TestScheduleDelivererUnhidesAHiddenChatAfterTheInject(t *testing.T) {
+func TestScheduleDelivererUnhidesAHiddenChatAfterTheCall(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}, hidden: true}
 	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(rig.events, ","); got != "inject,unhide" || rig.unhides[0] != "sess-7" {
+	if got := strings.Join(rig.events, ","); got != "call,unhide" || rig.unhides[0] != "sess-7" {
 		t.Fatalf("events=%q unhides=%v, want the prompt typed first, then the session id un-hidden", got, rig.unhides)
 	}
 	if want := "unhid chat sess-7\n"; rig.stdout.String() != want {
@@ -158,16 +158,16 @@ func TestScheduleDelivererLeavesAVisibleChatAlone(t *testing.T) {
 	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
-	if rig.stdout.Len() != 0 || len(rig.injected) != 1 {
-		t.Fatalf("stdout=%q injected=%v, want a delivery and no unhid line for a visible chat",
-			rig.stdout.String(), rig.injected)
+	if rig.stdout.Len() != 0 || len(rig.called) != 1 {
+		t.Fatalf("stdout=%q called=%v, want a delivery and no unhid line for a visible chat",
+			rig.stdout.String(), rig.called)
 	}
 }
 
 func TestScheduleDelivererDoesNotUnhideAChatItFailedToDeliverTo(t *testing.T) {
-	rig := &deliveryRig{state: "live", injectErr: errors.New("pane gone"), hidden: true}
+	rig := &deliveryRig{state: "live", callErr: errors.New("pane gone"), hidden: true}
 	if err := rig.deliverer().Deliver(context.Background(), testSchedule, "msg"); err == nil {
-		t.Fatal("want the inject failure")
+		t.Fatal("want the call failure")
 	}
 	if len(rig.unhides) != 0 || !rig.hidden || rig.stdout.Len() != 0 {
 		t.Fatalf(
@@ -219,9 +219,9 @@ func TestScheduleDelivererUnhideFailureStillDeliversAndIsReportedWithIdAndCause(
 			}
 			err := deliverer.Deliver(context.Background(), testSchedule, "msg")
 			var warning *DeliveryWarning
-			if !errors.As(err, &warning) || len(rig.injected) != 1 || rig.stdout.String() != tc.wantStdout {
-				t.Fatalf("err=%v injected=%v stdout=%q, want a delivery warning after one inject and stdout %q",
-					err, rig.injected, rig.stdout.String(), tc.wantStdout)
+			if !errors.As(err, &warning) || len(rig.called) != 1 || rig.stdout.String() != tc.wantStdout {
+				t.Fatalf("err=%v called=%v stdout=%q, want a delivery warning after one call and stdout %q",
+					err, rig.called, rig.stdout.String(), tc.wantStdout)
 			}
 			for _, want := range tc.wantIn {
 				if !strings.Contains(err.Error(), want) {
@@ -287,7 +287,7 @@ type archiveRig struct {
 	indexed  bool  // the index holds the chat whatever the files say
 	hidden   bool  // the chat is hidden until the unhide seam lifts it
 	events   []string
-	injected []string
+	called   []string
 	messages []string
 	stdout   bytes.Buffer
 }
@@ -383,9 +383,9 @@ func (rig *archiveRig) deliverer() *chatDeliverer {
 			return action.OpenResult{State: "opened", Socket: "cc-revived"}, nil
 		},
 		capture: func(context.Context, string, string) (string, error) { return "❯ ", nil },
-		inject: func(_ context.Context, _ fleetdb.Schedule, target, message string) error {
-			rig.events = append(rig.events, "inject")
-			rig.injected = append(rig.injected, target)
+		call: func(_ context.Context, _ fleetdb.Schedule, target, message string) error {
+			rig.events = append(rig.events, "call")
+			rig.called = append(rig.called, target)
 			rig.messages = append(rig.messages, message)
 			return nil
 		},
@@ -405,9 +405,9 @@ func TestScheduleDelivererRestoresAnArchivedChatThenDeliversIt(t *testing.T) {
 	if _, err := os.Stat(rig.original); err != nil {
 		t.Fatalf("the archived chat was not put back at %s: %v", rig.original, err)
 	}
-	if rig.opens != 2 || len(rig.injected) != 1 || rig.injected[0] != "cc-revived" || rig.messages[0] != "msg" {
-		t.Fatalf("opens=%d injected=%v messages=%v, want a restore between two opens and the prompt unchanged",
-			rig.opens, rig.injected, rig.messages)
+	if rig.opens != 2 || len(rig.called) != 1 || rig.called[0] != "cc-revived" || rig.messages[0] != "msg" {
+		t.Fatalf("opens=%d called=%v messages=%v, want a restore between two opens and the prompt unchanged",
+			rig.opens, rig.called, rig.messages)
 	}
 	if want := "restored archived chat " + rig.id + "\n"; rig.stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", rig.stdout.String(), want)
@@ -421,8 +421,8 @@ func TestScheduleDelivererUnhidesAnArchivedChatItRestored(t *testing.T) {
 	if err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if got := strings.Join(rig.events, ","); got != "open,open,inject,unhide" || rig.hidden {
-		t.Fatalf("events=%q hidden=%v, want restore between two opens, then inject, then unhide", got, rig.hidden)
+	if got := strings.Join(rig.events, ","); got != "open,open,call,unhide" || rig.hidden {
+		t.Fatalf("events=%q hidden=%v, want restore between two opens, then call, then unhide", got, rig.hidden)
 	}
 	if want := "restored archived chat " + rig.id + "\nunhid chat " + rig.id + "\n"; rig.stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", rig.stdout.String(), want)
@@ -452,8 +452,8 @@ func TestScheduleDelivererRestoreFailureIsARecordedFailureAndTheScheduleStaysDue
 	if err != nil {
 		t.Fatalf("Fire: %v", err)
 	}
-	if len(report.Fired) != 0 || len(report.Failed) != 1 || len(rig.injected) != 0 {
-		t.Fatalf("report=%+v injected=%v, want one failure and nothing typed", report, rig.injected)
+	if len(report.Fired) != 0 || len(report.Failed) != 1 || len(rig.called) != 0 {
+		t.Fatalf("report=%+v called=%v, want one failure and nothing typed", report, rig.called)
 	}
 	stuck := mustSchedule(t, store, id)
 	for _, want := range []string{"restore archived chat " + rig.id, "archived file for " + rig.id + " is missing"} {
@@ -474,9 +474,9 @@ func TestScheduleDelivererNamesAChatInNeitherTheIndexNorTheArchive(t *testing.T)
 	err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg")
 	if err == nil || !strings.Contains(err.Error(), "resolve chat "+rig.id+" (nine)") ||
 		!strings.Contains(err.Error(), "is not indexed") || !strings.Contains(err.Error(), "not in the archive") ||
-		len(rig.injected) != 0 || rig.stdout.Len() != 0 {
-		t.Fatalf("err=%v injected=%v stdout=%q, want the not-indexed failure that also says not in the archive",
-			err, rig.injected, rig.stdout.String())
+		len(rig.called) != 0 || rig.stdout.Len() != 0 {
+		t.Fatalf("err=%v called=%v stdout=%q, want the not-indexed failure that also says not in the archive",
+			err, rig.called, rig.stdout.String())
 	}
 }
 
@@ -515,8 +515,8 @@ func TestScheduleDelivererRestoredButUnopenedChatDeliversOnTheNextFire(t *testin
 	err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg")
 	restored := "restored archived chat " + rig.id + " but it still cannot be opened"
 	if err == nil || !strings.Contains(err.Error(), restored) ||
-		!strings.Contains(err.Error(), "database is locked") || len(rig.injected) != 0 {
-		t.Fatalf("err=%v injected=%v, want the reopen failure after the restore and nothing typed", err, rig.injected)
+		!strings.Contains(err.Error(), "database is locked") || len(rig.called) != 0 {
+		t.Fatalf("err=%v called=%v, want the reopen failure after the restore and nothing typed", err, rig.called)
 	}
 	if _, statErr := os.Stat(rig.original); statErr != nil {
 		t.Fatalf("the restore was not kept at %s: %v", rig.original, statErr)
@@ -525,8 +525,8 @@ func TestScheduleDelivererRestoredButUnopenedChatDeliversOnTheNextFire(t *testin
 	if err := rig.deliverer().Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
 		t.Fatalf("next fire: %v", err)
 	}
-	if rig.opens != 3 || len(rig.injected) != 1 || rig.stdout.String() != "restored archived chat "+rig.id+"\n" {
-		t.Fatalf("opens=%d injected=%v stdout=%q, want one restore and one delivery on the next fire",
-			rig.opens, rig.injected, rig.stdout.String())
+	if rig.opens != 3 || len(rig.called) != 1 || rig.stdout.String() != "restored archived chat "+rig.id+"\n" {
+		t.Fatalf("opens=%d called=%v stdout=%q, want one restore and one delivery on the next fire",
+			rig.opens, rig.called, rig.stdout.String())
 	}
 }

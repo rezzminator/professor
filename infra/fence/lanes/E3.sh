@@ -62,9 +62,9 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chat to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/status)\" != 000 ]" \
   'lane_daemon_up' ||
-  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat tool"
 
 # make_oc_home — the mock OpenCode CLI creates opencode.db. Its resume rows
 # are found by difference and killed before E3.01 opens the lane's own chat.
@@ -263,11 +263,11 @@ if requires E3.01-open-seat; then
     bad="$bad capture exited $cap_rc without a live pane: $(one_line "$cap");"
   fi
 
-  # inject addresses the live row by its session id.
-  inj="$(pfm chat inject --allow-unsigned "$OC_ID" "reply with exactly one word: OC-INJECT-OK" 2>&1)"
-  inj_rc=$?
-  if [ "$inj_rc" -ne 0 ] || [ -z "$inj" ]; then
-    bad="$bad inject exited $inj_rc without a delivery report: $(one_line "$inj");"
+  # call addresses the live row by its session id.
+  call_out="$(pfm chat call --allow-unsigned "$OC_ID" "reply with exactly one word: OC-CALL-OK" 2>&1)"
+  call_rc=$?
+  if [ "$call_rc" -ne 0 ] || [ -z "$call_out" ]; then
+    bad="$bad call exited $call_rc without a delivery report: $(one_line "$call_out");"
   fi
 
   # name is gated on chat.Live and now changes the live row.
@@ -297,7 +297,7 @@ if requires E3.01-open-seat; then
   if [ -n "$bad" ]; then
     fail "$bad"
   else
-    pass "status(idle)/last+read(OpenCode content unsupported)/capture(live pane)/inject(delivery report)/name(live row)/kill+unkill(killed column) all asserted for live-opencode $OC_ID"
+    pass "status(idle)/last+read(OpenCode content unsupported)/capture(live pane)/call(delivery report)/name(live row)/kill+unkill(killed column) all asserted for live-opencode $OC_ID"
   fi
 fi
 

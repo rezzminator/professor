@@ -25,7 +25,7 @@ func (failingSpawner) Prepare(ExitArgs) error { return nil }
 func (spawner failingSpawner) Spawn(context.Context, ExitArgs) error { return spawner.spawn() }
 
 // TestKillWhoseFinisherCannotStartLeavesTheChatAsItWas is the kill-exit
-// path chat_exit and chat_kill share: a finisher that cannot start must not
+// path exit and kill share: a finisher that cannot start must not
 // leave the chat hidden with its pane still open. A log that cannot be
 // opened fails before the kill row is written; a launch that fails after it
 // rolls back the row this call created and never a row that was already

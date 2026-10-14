@@ -268,12 +268,12 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 	dispatched := 0
 	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
-		Professor: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		Chat: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			dispatched++
 			w.WriteHeader(http.StatusNoContent)
 		}),
 	})
-	browser := httptest.NewRequest(http.MethodPost, config.MCPPathProfessor, http.NoBody)
+	browser := httptest.NewRequest(http.MethodPost, config.MCPFamilyPath(config.MCPServerChat), http.NoBody)
 	browser.Header.Set("Origin", "https://attacker.example")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, browser)
@@ -281,7 +281,7 @@ func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 		t.Fatalf("browser-origin request status=%d dispatched=%d, want 403/0", response.Code, dispatched)
 	}
 
-	local := httptest.NewRequest(http.MethodPost, config.MCPPathProfessor, http.NoBody)
+	local := httptest.NewRequest(http.MethodPost, config.MCPFamilyPath(config.MCPServerChat), http.NoBody)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, local)
 	if response.Code != http.StatusNoContent || dispatched != 1 {
@@ -334,7 +334,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 		}
 	}()
 
-	professor, err := mcpserv.NewProfessor(mcpserv.ProfessorOptions{
+	professor, err := mcpserv.NewFamilyServers(mcpserv.FamilyServerOptions{
 		Version: "test", Chat: chat, Harvester: harvester,
 	})
 	if err != nil {
@@ -342,7 +342,6 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	}
 	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Version: "test", StartedAt: time.Now(), Endpoint: "http://127.0.0.1:8377",
-		Professor: professor.Handler(),
 		Chat:      professor.FamilyHandler(config.MCPServerChat),
 		Harvester: professor.FamilyHandler(config.MCPServerHarvester),
 	})
@@ -351,9 +350,8 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	client := http.DefaultClient
 	ctx := context.Background()
 	for path, want := range map[string][]string{
-		config.MCPPathProfessor:                         {"harvester_read", "chat_whoami", "servicedesk"},
-		config.MCPFamilyPath(config.MCPServerChat):      {"chat_keys", "chat_whoami", "chat_new"},
-		config.MCPFamilyPath(config.MCPServerHarvester): {"harvester_read", "harvester_download_file"},
+		config.MCPFamilyPath(config.MCPServerChat):      {"keys", "whoami", "new"},
+		config.MCPFamilyPath(config.MCPServerHarvester): {"read", "download_file"},
 	} {
 		session, err := connectHTTPMCP(t, ctx, server.URL+path, client)
 		if err != nil {
@@ -378,7 +376,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	}
 
 	// Both families' tools answer over the one combined route.
-	session, err := connectHTTPMCP(t, ctx, server.URL+config.MCPPathProfessor, client)
+	session, err := connectHTTPMCP(t, ctx, server.URL+config.MCPFamilyPath(config.MCPServerChat), client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,25 +385,34 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 			t.Errorf("close session: %v", err)
 		}
 	}()
-	whoami, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "chat_whoami"})
+	whoami, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "whoami"})
 	if err != nil {
-		t.Fatalf("chat_whoami: %v", err)
+		t.Fatalf("whoami: %v", err)
 	}
 	if len(whoami.Content) == 0 {
-		t.Fatalf("chat_whoami answered no content: %+v", whoami)
+		t.Fatalf("whoami answered no content: %+v", whoami)
 	}
-	read, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "harvester_read", Arguments: map[string]any{"publications": []string{"doi:10.1000/never-match"}},
+	harvestSession, err := connectHTTPMCP(t, ctx, server.URL+config.MCPFamilyPath(config.MCPServerHarvester), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := harvestSession.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	read, err := harvestSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "read", Arguments: map[string]any{"publications": []string{"doi:10.1000/never-match"}},
 	})
 	if err != nil {
-		t.Fatalf("harvester_read: %v", err)
+		t.Fatalf("read: %v", err)
 	}
 	if text := toolResultText(read); read.StructuredContent != nil ||
 		!strings.HasPrefix(
 			text,
 			"=== [1/1] doi:10.1000/never-match\nerror: No open copy of this work could be retrieved:",
 		) {
-		t.Fatalf("harvester_read = %q (structuredContent %v), want the public exhausted DOI explanation as text",
+		t.Fatalf("read = %q (structuredContent %v), want the public exhausted DOI explanation as text",
 			text, read.StructuredContent)
 	}
 	seen := map[string]bool{}
@@ -511,7 +518,7 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 // TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate pins the search-gate
 // fix to /status: the harvester's advertised tool list must track
 // harvestmcp.ToolNames for the runtime actually mounted, never a hardcoded
-// tool list that claims `harvester_search_web` whether or not runtimeSearchEnabled
+// tool list that claims `search_web` whether or not runtimeSearchEnabled
 // holds. Before the fix, mcp_serve_command.go's package-level
 // harvesterMCPTools always listed the web search tool; that defect is what this test
 // would have caught.
@@ -538,12 +545,13 @@ func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 					t.Errorf("close harvester: %v", err)
 				}
 			}()
-			professor, err := mcpserv.NewProfessor(mcpserv.ProfessorOptions{Version: "test", Harvester: harvester})
+			professor, err := mcpserv.NewFamilyServers(
+				mcpserv.FamilyServerOptions{Version: "test", Harvester: harvester},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
 			handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
-				Professor:      professor.Handler(),
 				Harvester:      professor.FamilyHandler(config.MCPServerHarvester),
 				HarvesterTools: harvester.ToolNames(),
 			})
@@ -556,7 +564,7 @@ func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 			listed := status.Servers[config.MCPServerHarvester]
 			hasSearch := false
 			for _, name := range listed {
-				if name == "harvester_search_web" {
+				if name == "search_web" {
 					hasSearch = true
 				}
 			}
@@ -769,11 +777,11 @@ func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
 	runtime.Paths.TmuxDir = ""
 
 	var stderr bytes.Buffer
-	professor, closeFamilies, err := newStdioProfessor(&stderr, runtime, mcpRuntime(runtime, true))
+	professor, closeFamilies, err := newStdioFamilies(&stderr, runtime, mcpRuntime(runtime, true))
 	exitCode := 0
 	defer closeFamilies(&exitCode)
 	if err != nil {
-		t.Fatalf("newStdioProfessor error = %v, want a started server whose chat tools answer the error", err)
+		t.Fatalf("newStdioFamilies error = %v, want a started server whose chat tools answer the error", err)
 	}
 	if !strings.Contains(stderr.String(), "configure chat: ") {
 		t.Fatalf("stderr = %q, want the line naming the failed chat family", stderr.String())
@@ -781,7 +789,7 @@ func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := professor.Server().Connect(ctx, serverTransport, nil)
+	serverSession, err := professor.Server(config.MCPServerChat).Connect(ctx, serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -827,16 +835,16 @@ func TestMCPStdioDegradesPerFamily(t *testing.T) {
 				runtime.Config.Harvester.Fetch.ProxyURL = "http://bad host"
 			},
 			failed:      config.MCPServerHarvester,
-			failedCall:  "harvester_read",
+			failedCall:  "read",
 			failedArgs:  map[string]any{"urls": []string{"https://example.com/"}},
 			wantError:   `parse Harvester proxy URL: parse "http://bad host": invalid character " " in host name`,
-			healthyCall: "chat_ls",
+			healthyCall: "ls",
 		},
 		{
 			name:        "chat fails, harvester serves",
 			breakFamily: func(runtime *commandRuntime) { runtime.Paths.TmuxDir = "" },
 			failed:      config.MCPServerChat,
-			failedCall:  "chat_ls",
+			failedCall:  "ls",
 			failedArgs:  map[string]any{},
 			wantError:   "configure chat MCP backend: tmux directory is empty",
 		},
@@ -851,11 +859,11 @@ func TestMCPStdioDegradesPerFamily(t *testing.T) {
 			test.breakFamily(&runtime)
 
 			var stderr bytes.Buffer
-			professor, closeFamilies, err := newStdioProfessor(&stderr, runtime, mcpRuntime(runtime, true))
+			professor, closeFamilies, err := newStdioFamilies(&stderr, runtime, mcpRuntime(runtime, true))
 			exitCode := 0
 			defer closeFamilies(&exitCode)
 			if err != nil {
-				t.Fatalf("newStdioProfessor error = %v, want a degraded start serving the healthy family", err)
+				t.Fatalf("newStdioFamilies error = %v, want a degraded start serving the healthy family", err)
 			}
 			if !strings.Contains(stderr.String(), test.failed) || !strings.Contains(stderr.String(), test.wantError) {
 				t.Fatalf("stderr = %q, want one line naming %s and %q", stderr.String(), test.failed, test.wantError)
@@ -864,7 +872,7 @@ func TestMCPStdioDegradesPerFamily(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			serverTransport, clientTransport := mcp.NewInMemoryTransports()
-			serverSession, err := professor.Server().Connect(ctx, serverTransport, nil)
+			serverSession, err := professor.Server(test.failed).Connect(ctx, serverTransport, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -884,7 +892,10 @@ func TestMCPStdioDegradesPerFamily(t *testing.T) {
 			for _, tool := range tools.Tools {
 				listed[tool.Name] = tool
 			}
-			want := append(mcpserv.ToolNames(), harvestmcp.RegisteredToolNames(harvestRuntime(runtime))...)
+			want := mcpserv.ToolNames()
+			if test.failed == config.MCPServerHarvester {
+				want = harvestmcp.RegisteredToolNames(harvestRuntime(runtime))
+			}
 			for _, name := range want {
 				if listed[name] == nil {
 					t.Fatalf("tools/list lacks %s; listed %d tools", name, len(tools.Tools))
@@ -911,22 +922,57 @@ func TestMCPStdioDegradesPerFamily(t *testing.T) {
 				}
 			}
 
-			if test.healthyCall != "" {
-				healthy, err := session.CallTool(
-					ctx,
-					&mcp.CallToolParams{Name: test.healthyCall, Arguments: map[string]any{}},
-				)
-				if err != nil || healthy.IsError {
-					t.Fatalf("%s = %q, %v; want a normal answer", test.healthyCall, toolResultText(healthy), err)
-				}
-				return
+			healthyFamily := config.MCPServerHarvester
+			if test.failed == config.MCPServerHarvester {
+				healthyFamily = config.MCPServerChat
 			}
-			schema, err := json.Marshal(listed["harvester_read"].InputSchema)
+			healthyServerTransport, healthyClientTransport := mcp.NewInMemoryTransports()
+			healthyServer, err := professor.Server(healthyFamily).Connect(ctx, healthyServerTransport, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(schema), `"urls"`) {
-				t.Fatalf("harvester_read schema = %s, want the healthy family's real schema", schema)
+			defer func() {
+				if err := healthyServer.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			healthyClient := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+			healthySession, err := healthyClient.Connect(ctx, healthyClientTransport, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := healthySession.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			healthyTools, err := healthySession.ListTools(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if healthySession.InitializeResult().ServerInfo.Name != config.MCPRegistrationName(healthyFamily) {
+				t.Fatal("healthy family identity mismatch")
+			}
+			if test.healthyCall != "" {
+				result, err := healthySession.CallTool(
+					ctx,
+					&mcp.CallToolParams{Name: test.healthyCall, Arguments: map[string]any{}},
+				)
+				if err != nil || result.IsError {
+					t.Fatalf("healthy %s = %+v, %v", test.healthyCall, result, err)
+				}
+			} else {
+				for _, tool := range healthyTools.Tools {
+					if tool.Name == "read" {
+						schema, err := json.Marshal(tool.InputSchema)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if !strings.Contains(string(schema), `"urls"`) {
+							t.Fatalf("healthy read schema=%s", schema)
+						}
+					}
+				}
 			}
 		})
 	}

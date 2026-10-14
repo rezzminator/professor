@@ -85,7 +85,7 @@ func TestOpenLogRecordsCarryEveryDeclaredField(t *testing.T) {
 	home := t.TempDir()
 	finish, path := openIn(t, home, Settings{Cmd: "chat", Version: "1.2.3-alpha"})
 	ctx := With(context.Background(), FieldChat, "cc-9", FieldSeat, 1, FieldEngine, "codex", FieldSock, "cc-9")
-	end := Span(ctx, "chat.inject")
+	end := Span(ctx, "chat.call")
 	end(nil)
 	finish(7)
 

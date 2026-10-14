@@ -86,7 +86,7 @@ type issueReporter struct {
 }
 
 // issueReporter derives the calling chat's identity with the same precedence
-// chat_inject signs with: a validated Codex _meta.threadId first, then
+// call signs with: a validated Codex _meta.threadId first, then
 // ambient environment/ancestry recovery ONLY where that is meaningful (the
 // per-chat stdio transport), and the UNIDENTIFIED sentinel when neither
 // applies — which is exactly the shared HTTP daemon's normal case, since its

@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 type paneToldError struct{ cause error }
@@ -42,7 +42,7 @@ func stashDraft(
 	capture string,
 	stderr io.Writer,
 ) error {
-	empty, draft, err := inject.ComposerEmpty(capture, styledCapture(ctx, request, tmux))
+	empty, draft, err := pfmcall.ComposerEmpty(capture, styledCapture(ctx, request, tmux))
 	if err != nil {
 		return fmt.Errorf("%w — /exit was not typed", err)
 	}
@@ -57,7 +57,7 @@ func stashDraft(
 		after, readErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if readErr == nil {
 			var left string
-			empty, left, readErr = inject.ComposerEmpty(after, styledCapture(ctx, request, tmux))
+			empty, left, readErr = pfmcall.ComposerEmpty(after, styledCapture(ctx, request, tmux))
 			if readErr == nil && empty {
 				return nil
 			}
@@ -83,7 +83,7 @@ func stashDraft(
 	return paneToldError{cause}
 }
 
-// styledCapture is inject.ComposerEmpty's styled read of this pane: asked only
+// styledCapture is pfmcall.ComposerEmpty's styled read of this pane: asked only
 // when the plain capture shows a draft, to tell a dim suggestion from text.
 func styledCapture(ctx context.Context, request Request, tmux Tmux) func() (string, error) {
 	return func() (string, error) {
@@ -102,7 +102,7 @@ func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmu
 		case composerShowsExit(capture):
 			return nil
 		default:
-			seen = fmt.Sprintf("composer showed %q", inject.ComposerDraftText(capture))
+			seen = fmt.Sprintf("composer showed %q", pfmcall.ComposerDraftText(capture))
 		}
 		if err := clk.Sleep(ctx, 50*time.Millisecond); err != nil {
 			return err
@@ -132,7 +132,7 @@ func clearTypedExit(ctx context.Context, request Request, tmux Tmux) error {
 	if err != nil {
 		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
 	}
-	empty, left, err := inject.ComposerEmpty(capture, styledCapture(ctx, request, tmux))
+	empty, left, err := pfmcall.ComposerEmpty(capture, styledCapture(ctx, request, tmux))
 	if err != nil {
 		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
 	}

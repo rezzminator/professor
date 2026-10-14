@@ -22,7 +22,7 @@ An anchor that cannot be read is a finding ("failed to look"), never an absence.
 | `tasks/` | the flight directory | Each mechanical bulk edit the foreman fixed |
 | `returns/{unit}-r{round}.md`, `returns/gate-r{round}.md` | the flight directory | Each child's (sub-agent or seat) and each gate round's return as written; a verdict line in `run.md` without its return file is a finding |
 | Git | `git diff {baseline} --stat`, `git diff {baseline} -- {unit}`, `git log {baseline}..HEAD`, `git status --porcelain` | What changed, per unit and outside every unit |
-| Transcripts | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-*.jsonl`, the `.meta.json` beside each naming `agentType` and `spawnDepth`; a seat's session through `chat_read` | Calls per foreman against its cap, peak context, files read, waits, children spawned |
+| Transcripts | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-*.jsonl`, the `.meta.json` beside each naming `agentType` and `spawnDepth`; a seat's session through `read` | Calls per foreman against its cap, peak context, files read, waits, children spawned |
 | The gate | `gate.md` and the lander's transcript | Each project's full runs (a second only after a failed one), the review, the attack map, findings and their terminal state |
 | `REVIEW.md` | the flight directory | The merge-gating report against `gate.md` |
 | Spend | its own run of `pfm tokens --flight {directory}`; `metrics.md` is a claim compared against it | Per agent: calls, context, tokens, price, compactions, over cap |

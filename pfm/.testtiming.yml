@@ -59,7 +59,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/hostfixture: 2
       github.com/rezzminator/professor/pfm/internal/hostcheck: 2
       github.com/rezzminator/professor/pfm/internal/index: 28
-      github.com/rezzminator/professor/pfm/internal/inject: 16
+      github.com/rezzminator/professor/pfm/internal/call: 16
       github.com/rezzminator/professor/pfm/internal/installer: 48
       github.com/rezzminator/professor/pfm/internal/installer/shim: 6
       github.com/rezzminator/professor/pfm/internal/jsvalue: 2

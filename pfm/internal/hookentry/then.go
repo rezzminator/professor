@@ -6,30 +6,30 @@ import (
 	"io"
 	"strings"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // thenWaiter is the one engine verb Then drives, behind a seam so the start
 // line can be tested against a waiter that never returns — the real waiter
 // blocks for the whole turn it rides out.
 type thenWaiter interface {
-	DeliverThen(context.Context, inject.ThenWait) (inject.Result, error)
+	DeliverThen(context.Context, pfmcall.ThenWait) (pfmcall.Result, error)
 }
 
 var newThenWaiter = func(runtime *config.Runtime) (thenWaiter, error) {
-	return pfmchat.NewInjectEngine(false, runtime)
+	return pfmchat.NewCallEngine(false, runtime)
 }
 
-// Then is the detached waiter behind chat inject's follow-up steer chain.
+// Then is the detached waiter behind chat call's follow-up steer chain.
 //
 // stderr IS the waiter's log (CommandThenSpawner.Spawn redirects both streams
 // to the steer log), and the FIRST line on it goes down before anything can
 // block: an operator reading the log while the waiter still waits sees what
-// it is waiting for (inject.WaitingFor), instead of an empty file that reads identically for
+// it is waiting for (pfmcall.WaitingFor), instead of an empty file that reads identically for
 // "waiting" and "never started".
 func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 	flags := cli.NewFlagSet(
@@ -66,7 +66,7 @@ func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 		*target,
 		*socket,
 		len(steers),
-		inject.WaitingFor(engineID),
+		pfmcall.WaitingFor(engineID),
 	)
 	var runtime *config.Runtime
 	if len(runtimes) != 0 {
@@ -77,7 +77,7 @@ func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 		fmt.Fprintf(stderr, "pfm internal then: %v\n", err)
 		return 1
 	}
-	result, err := waiter.DeliverThen(context.Background(), inject.ThenWait{
+	result, err := waiter.DeliverThen(context.Background(), pfmcall.ThenWait{
 		SocketPath: *socket,
 		Target:     *target,
 		Steers:     steers,

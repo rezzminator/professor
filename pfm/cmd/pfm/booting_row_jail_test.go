@@ -114,7 +114,7 @@ func TestPromptlessNamedChatResolvesByItsLaunchName(t *testing.T) {
 // A `pfm chat branch` fork is the next state: Claude has written its crumb
 // but, until its first prompt, no transcript. The fork stays a default-view
 // row under its launch name, and that name resolves to its session id, so
-// `pfm chat open NAME` and chat_resolve reach it.
+// `pfm chat open NAME` and resolve reach it.
 func TestPromptlessForkListsAndResolvesByItsLaunchName(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")

@@ -41,7 +41,7 @@ func TestChatNewCacheChoiceAndValidation(t *testing.T) {
 		{"chat", "new", "--name", "child", "--cache", "1h"},
 	}
 	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("chat_new calls = %q, want %q", calls, want)
+		t.Fatalf("new calls = %q, want %q", calls, want)
 	}
 	if _, _, err := service.chatNew(
 		context.Background(), nil, NewInput{Name: "child", Cache: "on"},
@@ -80,7 +80,7 @@ func TestChatNewTimeoutForwarding(t *testing.T) {
 				NewInput{Name: "child", Await: true, Timeout: test.timeout},
 			)
 			if err != nil || !reflect.DeepEqual(calls, [][]string{test.want}) {
-				t.Fatalf("chat_new timeout = %v, calls %q; want %q", err, calls, test.want)
+				t.Fatalf("new timeout = %v, calls %q; want %q", err, calls, test.want)
 			}
 		})
 	}
@@ -95,7 +95,7 @@ func TestChatNewCacheSchemaEnum(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tool := range listed.Tools {
-		if tool.Name != "chat_new" {
+		if tool.Name != "new" {
 			continue
 		}
 		encoded, err := json.Marshal(tool.InputSchema)
@@ -115,7 +115,7 @@ func TestChatNewCacheSchemaEnum(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("chat_new tool missing")
+	t.Fatal("new tool missing")
 }
 
 func TestChatNewCarriesTheAgentRole(t *testing.T) {
@@ -133,11 +133,11 @@ func TestChatNewCarriesTheAgentRole(t *testing.T) {
 		"--agent-role", "flights-foreman",
 	}}
 	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("chat_new calls = %q, want %q", calls, want)
+		t.Fatalf("new calls = %q, want %q", calls, want)
 	}
 }
 
-// TestChatNewDescriptionRoutesEveryModelRunHere reads chat_new as a caller
+// TestChatNewDescriptionRoutesEveryModelRunHere reads new as a caller
 // does: the description within the 600-rune tool budget, its example call
 // naming only real schema fields, the launchers it replaces and the cleanup
 // named, and every schema field described.
@@ -145,11 +145,11 @@ func TestChatNewDescriptionRoutesEveryModelRunHere(t *testing.T) {
 	tool := listedChatNew(t)
 	description := tool.Description
 	if runes := utf8.RuneCountInString(description); runes > 600 {
-		t.Fatalf("chat_new description is %d runes, over 600: %q", runes, description)
+		t.Fatalf("new description is %d runes, over 600: %q", runes, description)
 	}
-	for _, phrase := range []string{"model run", "pfm headless exec", "claude -p", "chat_kill", "sub-agent"} {
+	for _, phrase := range []string{"model run", "pfm headless exec", "claude -p", "kill", "sub-agent"} {
 		if !strings.Contains(description, phrase) {
-			t.Fatalf("chat_new description lacks %q: %q", phrase, description)
+			t.Fatalf("new description lacks %q: %q", phrase, description)
 		}
 	}
 	encoded, err := json.Marshal(tool.InputSchema)
@@ -164,18 +164,18 @@ func TestChatNewDescriptionRoutesEveryModelRunHere(t *testing.T) {
 	if err := json.Unmarshal(encoded, &schema); err != nil {
 		t.Fatal(err)
 	}
-	example := regexp.MustCompile(`chat_new\{([^}]*)\}`).FindStringSubmatch(description)
+	example := regexp.MustCompile(`new\{([^}]*)\}`).FindStringSubmatch(description)
 	if example == nil {
-		t.Fatalf("chat_new description has no example call: %q", description)
+		t.Fatalf("new description has no example call: %q", description)
 	}
 	for _, key := range regexp.MustCompile(`(\w+):`).FindAllStringSubmatch(example[1], -1) {
 		if _, found := schema.Properties[key[1]]; !found {
-			t.Fatalf("chat_new example names %q, not a schema field: %q", key[1], example[0])
+			t.Fatalf("new example names %q, not a schema field: %q", key[1], example[0])
 		}
 	}
 	for name, property := range schema.Properties {
 		if strings.TrimSpace(property.Description) == "" {
-			t.Fatalf("chat_new schema field %q has no description", name)
+			t.Fatalf("new schema field %q has no description", name)
 		}
 	}
 }
@@ -189,11 +189,11 @@ func listedChatNew(t *testing.T) *mcp.Tool {
 		t.Fatal(err)
 	}
 	for _, tool := range listed.Tools {
-		if tool.Name == "chat_new" {
+		if tool.Name == "new" {
 			return tool
 		}
 	}
-	t.Fatal("chat_new tool missing")
+	t.Fatal("new tool missing")
 	return nil
 }
 
@@ -299,13 +299,13 @@ func TestChatNewWorkbench(t *testing.T) {
 				return
 			}
 			if name == "roster error" {
-				if err == nil || !strings.Contains(err.Error(), "chat_new: name the chat:") || len(calls) != 0 {
+				if err == nil || !strings.Contains(err.Error(), "new: name the chat:") || len(calls) != 0 {
 					t.Fatalf("roster = %v, calls %q", err, calls)
 				}
 				return
 			}
 			if err != nil || !reflect.DeepEqual(calls, [][]string{want}) {
-				t.Fatalf("chat_new = %v, calls %q; want %q", err, calls, want)
+				t.Fatalf("new = %v, calls %q; want %q", err, calls, want)
 			}
 		})
 	}
@@ -440,7 +440,7 @@ func TestChatNewWorkbenchReservations(t *testing.T) {
 			{"chat", "new", "--name", "_SCRIBE:2", "--cwd", dir},
 		}
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("concurrent chat_new calls = %q, want %q", got, want)
+			t.Errorf("concurrent new calls = %q, want %q", got, want)
 		}
 		release()
 		select {
@@ -469,7 +469,7 @@ func TestChatNewWorkbenchReservations(t *testing.T) {
 		_, _, err := service.chatNew(context.Background(), nil, NewInput{CWD: dir})
 		want := []string{"chat", "new", "--name", "_SCRIBE:1", "--cwd", dir}
 		if err != nil || !reflect.DeepEqual(calls, [][]string{want}) {
-			t.Fatalf("chat_new after validation failure = %v, calls %q; want pending name reused", err, calls)
+			t.Fatalf("new after validation failure = %v, calls %q; want pending name reused", err, calls)
 		}
 	})
 	t.Run("success keeps committed name across services", func(t *testing.T) {
@@ -517,7 +517,7 @@ func TestChatNewWorkbenchReservations(t *testing.T) {
 		_, _, err = service.chatNew(context.Background(), nil, NewInput{CWD: dir})
 		want := []string{"chat", "new", "--name", "_SCRIBE:1", "--cwd", dir}
 		if err != nil || !reflect.DeepEqual(calls, [][]string{want, want}) {
-			t.Fatalf("chat_new after failed launch = %v, calls %q; want name reused", err, calls)
+			t.Fatalf("new after failed launch = %v, calls %q; want name reused", err, calls)
 		}
 	})
 }

@@ -19,8 +19,8 @@ import (
 // Transcript is a Claude transcript opened for ONE guarded append: exclusive
 // flock, the whole file read under the lock, a byte-for-byte backup written
 // O_EXCL before the record lands, fsync after. This is the discipline
-// cmd/pfm's appendResumeInjection established for a dormant-session inject
-// (chat_inject_resume.go) and the custom-title record `reload --new` leaves
+// cmd/pfm's appendResumeCall established for a dormant-session inject
+// (chat_call_resume.go) and the custom-title record `reload --new` leaves
 // on the session it abandons (newname.go) — one writer, shared, never a
 // second copy of the lock/backup dance to drift.
 type Transcript struct {

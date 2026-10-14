@@ -89,7 +89,7 @@ Cost = calls × context: every call re-sends everything you hold, and a context 
 Work takes the lowest rung that fits; a higher rung needs its named reason:
 
 1. Direct: the solution is in hand and the work fits about 80 calls — do it yourself, or one sub-agent.
-2. `flights-foreman`: anything larger, or work crossing build units, with a spec or without one — it reads, designs what no ruling decided, builds, splits by ownership itself and lands through one `flights-lander`.
+2. `flights-foreman`: anything larger, or work crossing build units, with a spec or without one — it reads, designs what no ruling decided, builds, splits by ownership itself and lands through one `flights-lander`; for work the codebase has no pattern for it first fires `flights-speccer` for the ideal spec, which any chat may also spawn on its own for a spec without the build.
 3. `/flights:spec` first: the requirements are not yet settled with the user — it grills, writes `requirements.md` and hands it to `flights-foreman`.
 
 ✗ A five-file fix sent through `/flights:spec`: a grill for work whose requirements are already plain. ✓ `flights-foreman` with the problem.

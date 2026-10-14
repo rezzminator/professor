@@ -289,6 +289,7 @@ const twins = [
   ['gpt-flights-foreman', 'gpt-6.1-sol', 'high', 'flights-foreman'],
   ['gpt-foreman-pro', 'gpt-6.1-sol', 'xhigh', 'flights-foreman'],
   ['gpt-flights-lander', 'gpt-6.1-sol', 'high', 'flights-lander'],
+  ['gpt-flights-speccer', 'gpt-6.1-sol', 'xhigh', 'flights-speccer'],
   ['gpt-flights-mechanical-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
   ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
   ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
@@ -361,7 +362,7 @@ test('the shipped variants render with zero errors with and without the gpt-agen
   }
 });
 
-test('the gpt-agents capability decides whether the nine GPT twins are linked', () => {
+test('the gpt-agents capability decides whether the ten GPT twins are linked', () => {
   const on = renderShipped([CAPABILITY]);
   const off = renderShipped([]);
   for (const [name] of twins) {
@@ -401,17 +402,24 @@ for (const [name, model, effort, role] of twins) {
       return;
     }
     assert.equal(fm.role, role);
+    // engine-sync renames every standalone occurrence of a name, quoted or not.
+    const renameStandalone = (names) => original.replace(
+      new RegExp(`(^|[^A-Za-z0-9_./:-])(${names})(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`, 'g'),
+      (_, before, agent) => `${before}gpt-${agent}`);
     const renamed = role === 'flights-foreman'
-      ? original.replaceAll('"flights-foreman"', '"gpt-flights-foreman"').replaceAll('"flights-mechanical-executor"', '"gpt-flights-mechanical-executor"')
-        .replaceAll('"flights-lander"', '"gpt-flights-lander"')
+      ? renameStandalone('flights-mechanical-executor|flights-foreman|flights-lander|flights-speccer')
       : role === 'flights-lander'
-        ? original.replace(/(^|[^A-Za-z0-9_./:-])(reviewer-pro|reviewer)(?![A-Za-z0-9_/-]|\.[A-Za-z0-9])/g,
-          (_, before, agent) => `${before}gpt-${agent}`)
+        ? renameStandalone('reviewer-pro|reviewer')
         : original;
     assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(renamed).trimEnd()), `${name}: the rendered body is not the full ${role} manual`);
     if (role.startsWith('flights-')) {
       assert.ok(text.includes('your parent hears from you only by that return'), `${name}: the return law is not prepended`);
-      assert.ok(text.includes('run.md, briefs, returns/*.md, gate.md, red/*'), `${name}: the return law lost its file list`);
+      // Each role's return law names only the files that role owns: the speccer writes its spec, never a builder's files.
+      const [owned, foreign] = role === 'flights-speccer'
+        ? ['write spec.md and the research and calibration files your manual names in the flight directory', 'run.md, briefs, returns/*.md, gate.md, red/*']
+        : ['run.md, briefs, returns/*.md, gate.md, red/*', 'write spec.md and the research'];
+      assert.ok(text.includes(owned), `${name}: the return law lost its file list`);
+      assert.ok(!text.includes(foreign), `${name}: the return law names files another role owns`);
     } else {
       assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
       assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-flights-lander']);
@@ -423,7 +431,7 @@ for (const [name, model, effort, role] of twins) {
         assert.ok(text.includes(reviewer), `${name}: review dispatch did not rename ${reviewer}`);
     }
     if (role === 'flights-foreman') {
-      for (const spawned of ['gpt-flights-foreman', 'gpt-flights-mechanical-executor', 'gpt-flights-lander'])
+      for (const spawned of ['gpt-flights-foreman', 'gpt-flights-mechanical-executor', 'gpt-flights-lander', 'gpt-flights-speccer'])
         assert.ok(text.includes(`subagent_type: "${spawned}"`), `${name}: rename to ${spawned} not applied`);
       assert.doesNotMatch(text, /subagent_type: "flights-/, `${name}: a flights-* spawn survived the renames`);
       const commands = (event) => fm.hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));

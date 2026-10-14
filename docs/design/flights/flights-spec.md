@@ -35,7 +35,7 @@ A requirement row states what must be true, never how the code does it: an examp
 
 ## S4 — Hand off
 
-Spawn one `flights-foreman` with the path of `requirements.md`, the flight directory, the project map's path, acceptance (what the user confirmed must be true when it lands) and whether the user ordered a commit or merge. End the message; the return arrives once the flight landed or stopped.
+Spawn one `flights-foreman` with the path of `requirements.md`, the flight directory, the project map's path, acceptance (what the user confirmed must be true when it lands) and whether the user ordered a commit or merge. End the message; the return arrives once the flight landed or stopped. Work with no pattern in the codebase reaches `flights-speccer` through the foreman, the rulings binding there too; a fork only the user can settle comes back as the foreman's `BLOCKED` question unless the user gave the authority to decide forks.
 
 ## S5 — The one question
 
@@ -45,7 +45,7 @@ A `BLOCKED` return carries a question: one more round holding that question alon
 
 | Retired | Why |
 | --- | --- |
-| Handing the rulings to `flights-speccer` and presenting an index | No task files exist: the foreman reads and builds ([why](flights-foreman.md#why-one-agent-reads-and-builds)) |
+| Handing the rulings to a task-file planner and presenting an index | No task files exist: the foreman reads and builds ([why](flights-foreman.md#why-one-agent-reads-and-builds)) |
 | Choosing a container (`orchestrate-nested`, `orchestrate-live`) | Nested is the only Claude container; `/flights:orchestrate-cross-harness` stays for seats of another engine |
 | A full area map for a spec writer | The walk stops at what asking needs |
 

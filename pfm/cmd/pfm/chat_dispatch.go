@@ -155,7 +155,7 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  last        the chat's last assistant message")
 	fmt.Fprintln(w, "  read        read the chat's transcript")
 	fmt.Fprintln(w, "  stream      follow the transcript as it is written")
-	fmt.Fprintln(w, "  call      deliver a message to the chat")
+	fmt.Fprintln(w, "  call        deliver a message to the chat")
 	fmt.Fprintln(w, "  ask         deliver a message and wait for the answer")
 	fmt.Fprintln(w, "  watch       block, reporting IDLE / EXIT / DEAD")
 	fmt.Fprintln(w, "  capture     print a live chat's tmux scrollback")

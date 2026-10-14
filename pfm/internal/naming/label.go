@@ -32,6 +32,11 @@ func BookmarkLabel(capture string) string {
 // BookmarkLabelFor skips it.
 const DeliveredFooterMarker = "to reply: call "
 
+// retiredDeliveredFooterMarker opens the footer binaries stamped before
+// `chat inject` became `chat call`; such a footer stays on a live pane until
+// it scrolls away, and is just as foreign to the pane's identity.
+const retiredDeliveredFooterMarker = "to reply: chat_inject "
+
 // BookmarkLabelFor is BookmarkLabel with the configured account emoji set
 // supplied by the caller. Legacy medals remain accepted for old live labels.
 //
@@ -45,7 +50,7 @@ const DeliveredFooterMarker = "to reply: call "
 func BookmarkLabelFor(capture string, configured []string) string {
 	label := ""
 	for _, line := range strings.Split(capture, "\n") {
-		if strings.Contains(line, DeliveredFooterMarker) {
+		if strings.Contains(line, DeliveredFooterMarker) || strings.Contains(line, retiredDeliveredFooterMarker) {
 			continue
 		}
 		if !strings.Contains(line, "🔖") || !ContainsMedalFor(line, configured) {

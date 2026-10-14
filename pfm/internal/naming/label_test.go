@@ -51,15 +51,20 @@ func TestBookmarkLabelAcceptsConfiguredAccountEmoji(t *testing.T) {
 // any footer rendering beside a medal or a configured account emoji defeats
 // it. This pins the actual defence — a line carrying the fleet's own
 // delivered-footer marker is not the pane's own identity, medal or no medal.
+//
+// A footer an older binary delivered before `chat inject` became `chat call`
+// stays on a live pane until it scrolls away, so its marker is skipped too.
 func TestBookmarkLabelIgnoresADeliveredFooter(t *testing.T) {
-	capture := strings.Join([]string{
-		"🥇 │ 🔖 W5_TESTER │ ~/work",
-		"USER: do the thing  — sid abcdef12 · " +
-			DeliveredFooterMarker + "W5_BUILDER <message> 🔖 W5_BUILDER 🥇",
-		"❯ ",
-	}, "\n")
-	if label := BookmarkLabel(capture); label != "W5_TESTER" {
-		t.Fatalf("BookmarkLabel = %q, want the pane's OWN label; a delivered footer overwrote it", label)
+	for _, marker := range []string{DeliveredFooterMarker, "to reply: chat_inject "} {
+		capture := strings.Join([]string{
+			"🥇 │ 🔖 W5_TESTER │ ~/work",
+			"USER: do the thing  — sid abcdef12 · " +
+				marker + "W5_BUILDER <message> 🔖 W5_BUILDER 🥇",
+			"❯ ",
+		}, "\n")
+		if label := BookmarkLabel(capture); label != "W5_TESTER" {
+			t.Fatalf("marker %q: BookmarkLabel = %q, want the pane's OWN label; a footer overwrote it", marker, label)
+		}
 	}
 }
 

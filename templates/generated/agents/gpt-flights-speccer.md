@@ -5,7 +5,7 @@ role: flights-speccer
 description: flights-speccer on GPT sol xhigh
 model: gpt-6.1-sol[1m]
 effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 autoCompact:
   forceAt: 230k
   nudgeFrom: 190k

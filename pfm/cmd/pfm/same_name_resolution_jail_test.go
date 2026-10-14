@@ -110,7 +110,7 @@ func TestCallAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testing.
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "call", sameNameTarget, "deliver to the named incarnation"}, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("inject exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("call exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if got := jail.await(
 		t,
@@ -144,7 +144,7 @@ func TestCallRefusesRosterAmbiguityWithThreadIDsAndSockets(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "call", sameNameTarget, "must refuse"}, &stdout, &stderr)
 	if code != 2 {
-		t.Fatalf("inject exit=%d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("call exit=%d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{first.id, second.id, first.socket, second.socket, "thread id"} {
 		if !strings.Contains(strings.ToLower(stderr.String()), strings.ToLower(want)) {

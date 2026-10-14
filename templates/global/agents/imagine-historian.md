@@ -1,7 +1,7 @@
 ---
 name: imagine-historian
 description: 'EVOLVE-ONLY Distills a prompt''s recorded past — git lineage, the user''s named factors, run records, reconciled metrics: modes LINEAGE, FACTORS, MINE, RECONCILE; pass the mode, the run directory and the mode''s inputs. /imagine:evolve → here. Returns the files written, then a count line.'
-tools: 'Read, Grep, Glob, Bash, Write, Agent, Skill, mcp__chat-professor__find, mcp__chat-professor__digest, mcp__sub-agent-compact__compact'
+tools: 'Read, Grep, Glob, Bash, Write, Agent, Skill, mcp__chat-professor__find, mcp__chat-professor__digest, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back'
 model: sonnet
 effort: medium
 ---
@@ -33,7 +33,7 @@ Write `{run}/lineage.json` — `method` (how a run's time picks its version; pro
 
 Inputs: the repository root, the target's files and names.
 
-1. Find what the user has said matters about the target, its lineage names, or agents of its kind: the census rows with hits — the repository's retro inbox (`.professor/retro.md`), its research reports (`.professor/RR/**`), design docs, and the user's own typed turns in every engine's transcripts, extracted, ranked and read per `mining.md` § FACTORS. `chat_find` serves only an exact phrase. `~/.claude/user-info.md` is the model's opinion of the user, never evidence of what the user ruled.
+1. Find what the user has said matters about the target, its lineage names, or agents of its kind: the census rows with hits — the repository's retro inbox (`.professor/retro.md`), its research reports (`.professor/RR/**`), design docs, and the user's own typed turns in every engine's transcripts, extracted, ranked and read per `mining.md` § FACTORS. `mcp__chat-professor__find` serves only an exact phrase. `~/.claude/user-info.md` is the model's opinion of the user, never evidence of what the user ruled.
 2. Distill each into a measurable factor: a metric name, a one-line definition, the per-run field it needs, and its sources as coordinates only — `{session}:{line} {date}` or `{file}:{line}` — never a gloss of the user's words. The ratio of reads to edits (the `edit` class of `imagine-core/mining.md`) and the hops between a read and the edit it feeds are the shape. A factor no run record can measure stays, marked `unmeasurable` with why.
 
 Write `{run}/factors.md`: metric names, definitions, fields and source coordinates.

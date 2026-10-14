@@ -440,3 +440,20 @@ for (const [name, model, effort, role] of twins) {
     }
   });
 }
+
+// An agent that can compact also hands off forward and reads its transcript from before a compaction:
+// a fixed tools list naming sub-agent-compact's compact names forward_handoff and look_back beside it.
+test('every shipped agent that can compact also holds forward_handoff and look_back', () => {
+  const dirs = ['templates/global/agents', 'templates/generated/agents', 'templates/project/agents', '.claude/agents'];
+  let compacting = 0;
+  for (const dir of dirs.filter((relative) => existsSync(join(ROOT, relative)))) {
+    for (const file of readdirSync(join(ROOT, dir)).filter((entry) => entry.endsWith('.md'))) {
+      const tools = readFileSync(join(ROOT, dir, file), 'utf8').match(/^tools:(.*)$/m)?.[1] ?? '';
+      if (!tools.includes('mcp__sub-agent-compact__compact')) continue;
+      compacting++;
+      for (const tool of ['mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'])
+        assert.ok(tools.includes(tool), `${dir}/${file}: holds compact but not ${tool}`);
+    }
+  }
+  assert.ok(compacting > 0, 'no shipped agent names mcp__sub-agent-compact__compact: the scan read nothing');
+});

@@ -3,7 +3,7 @@ name: flights-speccer
 description: 'Designs novel work, ideally — anything the codebase has no pattern for: a new subsystem, integration, layout or test suite; "spec the ideal", "spec it first". Pass the request, all you hold, flight directory, project map, testing manuals. flights-foreman → here → flights-foreman. Returns the spec.md path, its boldest element, its token price. Not for unsettled requirements → /flights:spec.'
 model: opus
 effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k

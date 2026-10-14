@@ -101,7 +101,7 @@ stop_sampler "$pid" TERM
 after=$(date +%s)
 eq "sampling: the file starts with the contract header" "$HEADER" "$(head -n 1 "$R")"
 lines n "$R"
-if ((n >= 7 && n <= 16)); then ok "sampling: a row about every interval ($((n - 1)) rows in ~1.2 s at 0.1 s)"; else bad "sampling: a row about every interval" "$n lines in $R"; fi
+if ((n <= 16)); then ok "sampling: a row about every interval, not faster ($((n - 1)) rows in ~1.2 s at 0.1 s)"; else bad "sampling: a row about every interval, not faster" "$n lines in $R"; fi
 eq "sampling: every row has the 22 columns" 22 "$(awk -F'\t' '{print NF}' "$R" | sort -u | paste -sd, -)"
 eq "sampling: uptime_s is /proc/uptime field 1" 1000.000000 "$(uniq_col "$R" uptime_s)"
 epoch=$(uniq_col "$R" epoch_s)
@@ -124,6 +124,23 @@ eq "sampling: load1 is /proc/loadavg field 1" 0.52 "$(uniq_col "$R" load1)"
 if [[ $(col "$R" spin_us | grep -Evc '^[0-9]+$') == 0 && $(col "$R" spin_us | sort -n | head -n 1) -gt 0 ]]; then ok "sampling: spin_us is a positive integer in every row"; else bad "sampling: spin_us" "$(col "$R" spin_us | paste -sd, -)"; fi
 eq "sampling: nothing read failed, so there is no resources.err" "no" "$([[ -e $T/s1/resources.err ]] && echo yes || echo no)"
 eq "sampling: nothing on stderr" "" "$(cat "$T/s1.stderr")"
+
+# the interval on the sampler's own clock: uptime_s through a link to the live /proc/uptime moves with time,
+# so the least gap between rows is the interval however few rows a loaded host lets through. A row waits the
+# whole interval, so no gap is under 0.09 s (0.1 s less /proc/uptime's 0.01 s tick); a short spin keeps a
+# sampler that never waits near 0. The TERM row is written when the stop is felt, so it is left out of the gaps
+fixtures
+ln -sf /proc/uptime "$T/proc/uptime"
+R=$T/s3/resources.tsv
+mkdir -p "$T/s3"
+SAMPLER_SPIN_ITERS=1000 bash "$SUT" run --out "$R" 2> /dev/null &
+pid=$!
+wait_lines "$R" 6
+stop_sampler "$pid" TERM
+read -r rows min_gap < <(col "$R" uptime_s | awk '{ u[NR] = $1 } END { r = NR - 1; m = -1; for (i = 2; i <= r; i++) { g = u[i] - u[i - 1]; if (m < 0 || g < m) m = g }; printf "%d %.6f\n", r, m }')
+if ((rows >= 4)) && awk -v g="$min_gap" 'BEGIN { exit !(g >= 0.09 && g <= 0.5) }'; then
+  ok "sampling: a row about every interval (real clock) (least gap ${min_gap} s over $rows rows at 0.1 s)"
+else bad "sampling: a row about every interval (real clock)" "$rows timed rows, least gap ${min_gap} s, want >= 4 rows and 0.09..0.5 s" "file: $R"; fi
 
 # a source read per row follows the file: a counter that rises is read again
 fixtures

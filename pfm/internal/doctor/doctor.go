@@ -294,6 +294,7 @@ func Run(
 		claudeAbsent,
 		dependencies.Env,
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
+		runtime.Config.ClaudeConfigDirs(),
 		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings

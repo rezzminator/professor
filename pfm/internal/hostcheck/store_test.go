@@ -893,6 +893,26 @@ func TestUnclassifiedExcludesKnownAndBackupNames(t *testing.T) {
 	assertRows(t, detect(t, "beside-backup", env), want...)
 }
 
+// TestUnclassifiedSparesStoreMarkdown: a regular *.md file at the store's top
+// level is the user's own material, shared by construction; the same name in an
+// account dir, a *.md dir and an unknown non-md store entry still report.
+func TestUnclassifiedSparesStoreMarkdown(t *testing.T) {
+	env := fixtureEnv(t)
+	account := filepath.Join(env.Accounts[0].ConfigDir, "notes.md")
+	drafts, text := filepath.Join(env.Store, "drafts.md"), filepath.Join(env.Store, "notes.txt")
+	for _, path := range []string{filepath.Join(env.Store, "notes.md"), account, text} {
+		writeFile(t, path, "# notes")
+	}
+	makeDir(t, drafts)
+	var want []Row
+	for _, path := range []string{drafts, text, account} {
+		problem := "UNCLASSIFIED — on neither the shared nor the per-account list"
+		fix := "keep it; pfm doctor names it until a pfm release classifies it"
+		want = append(want, Row{Warn, "unclassified", path, problem, fix})
+	}
+	assertRows(t, detect(t, "unclassified", env), want...)
+}
+
 // TestStoreIdentityFixRunsOnAFirstMigration runs the printed fixes on the
 // shape every pre-account host has: identity in the store and no account 1
 // directory yet. pfm install, which would create it, is refused by these

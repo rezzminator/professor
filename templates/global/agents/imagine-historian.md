@@ -34,7 +34,7 @@ Write `{run}/lineage.json` — `method` (how a run's time picks its version; pro
 Inputs: the repository root, the target's files and names.
 
 1. Find what the user has said matters about the target, its lineage names, or agents of its kind: the census rows with hits — the repository's retro inbox (`.professor/retro.md`), its research reports (`.professor/RR/**`), design docs, and the user's own typed turns in every engine's transcripts, extracted, ranked and read per `mining.md` § FACTORS. `chat_find` serves only an exact phrase. `~/.claude/user-info.md` is the model's opinion of the user, never evidence of what the user ruled.
-2. Distill each into a measurable factor: a metric name, a one-line definition, the per-run field it needs, and its sources as coordinates only — `{session}:{line} {date}` or `{file}:{line}` — never a gloss of the user's words. The ratio of reads to writes and the hops between a read and the write it feeds are the shape. A factor no run record can measure stays, marked `unmeasurable` with why.
+2. Distill each into a measurable factor: a metric name, a one-line definition, the per-run field it needs, and its sources as coordinates only — `{session}:{line} {date}` or `{file}:{line}` — never a gloss of the user's words. The ratio of reads to edits (the `edit` class of `imagine-core/mining.md`) and the hops between a read and the edit it feeds are the shape. A factor no run record can measure stays, marked `unmeasurable` with why.
 
 Write `{run}/factors.md`: metric names, definitions, fields and source coordinates.
 

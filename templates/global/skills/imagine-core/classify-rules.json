@@ -1,0 +1,18 @@
+{
+  "tools": {
+    "mcp__professor__chat_new": "spawn",
+    "mcp__professor__chat_inject": "spawn",
+    "mcp__chat__chat_inject": "spawn",
+    "mcp__professor__chat_status": "wait",
+    "mcp__professor__chat_last": "wait"
+  },
+  "wrappers": [
+    {"program": "dev.sh", "after": ["iso", "run"]},
+    {"program": "dev.sh", "after": ["iso", "sim"]}
+  ],
+  "tests": [
+    {"program": "dev.sh", "args": ["verify", "test", "cover", "all", "gate", "e2e", "build", "typecheck"]},
+    {"program": "run.sh", "args": ["--lanes"]},
+    {"program": "pfm", "args": ["check", "doctor"]}
+  ]
+}

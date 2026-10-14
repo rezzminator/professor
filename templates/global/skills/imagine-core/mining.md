@@ -230,65 +230,59 @@ echo "meta $(wc -l < "$data/runs-meta.tsv") dispatch $(wc -l < "$data/runs-dispa
 
 Columns: `runs-meta.tsv` agent id, type, dispatching `tool_use` id, session, transcript path; `runs-dispatch.tsv` `tool_use` id, type, model override, dispatching transcript, agent id. Compare the id sets (`cut -f1 runs-meta.tsv`, `cut -f5 runs-dispatch.tsv`, `cut -f1 runs-callmeter.tsv`, each `sort`, then `comm`); every id one route holds and another lacks is named in `reach-{source}.json`, and a dispatch row with an empty agent id is a run whose result never returned.
 
-`run-metrics.py {transcript}…` prints one JSON row per transcript, counts only:
+`run-metrics.py {transcript}…` prints one JSON row per transcript, counts only. It extracts each transcript's tool calls and pipes them to `callmeter classify --rules {classify-rules.json}`, which labels every call (callmeter's `callclass` package over its shell and Python parsers); the recipe classifies nothing itself. The rules file, `~/.claude/skills/imagine-core/classify-rules.json`, names this install's own wrappers, test scripts and tool classes; without it callmeter labels by its neutral defaults, and a `dev.sh iso gate` or a chat tool is no longer a `test` or a `spawn`.
 
-- reads: Read, Grep, Glob; writes: Edit, Write, NotebookEdit, MultiEdit.
-- Bash by its command: a redirect outside quotes into a file, `sed -i`, `mv`/`cp`/`rm`/`mkdir`/`tee`, or a writing `git` verb is a write; a command whose every simple command is a known reader is a read; everything else (`python3`, `node`, `make`, a project script) is `ambiguous`, counted apart and never folded into either side.
-- `hops`: the reads since the previous write, recorded at each write; `hops_before_first_write`, and `trailing_reads` after the last write.
+The alphabet, one class per call, the first of the order below that the call holds:
+
+- `edit`: the call authors file content, wherever the file lives: the Edit, Write, MultiEdit and NotebookEdit tools, `apply_patch`, `sed -i` and `perl -i`, a formatter in write mode (`gofmt -w`, `prettier --write`), a Python or Node snippet that opens a file for writing, `echo`/`printf` of literal text or `cat` of a heredoc written into a file, `tee` of such text, a captured temporary moved over its original. Output captured into a file, git state and housekeeping are never edits; an edit made by a helper module or project script the command only calls is not seen.
+- `test`: a test, build, typecheck, lint or gate run, judged by the program executed, never by a substring of the command.
+- `git`: a change of repository state (add, commit, checkout, reset). `housekeeping`: mkdir, rm, mv, cp, chmod, ln, touch. `search`: grep, rg, find. `read`: the Read tool and commands that only print or inspect. `capture`: a command's output redirected into a file it did not author. `wait`: sleep and polling. `spawn`: starting or messaging a sub-agent. `other`: none of these, a script run (`python3 script.py`, a project script) whose body the parse does not see included.
+- A call holding several effects (`sed -i … && go test`) carries each in `has`; its `class` is the first held in the order `edit test git housekeeping search read capture wait spawn other`, so an edit is never hidden behind a test.
+
+Row keys:
+
+- `calls`; `classes`: calls per class; `has`: calls holding each class.
+- `reads`: `read` + `search` calls. `writes`: `edit` calls. `calls_per_write`: `calls` / `writes`, the edits alone as denominator. `read_write`: `reads` / `writes`.
+- `hops`: the reads since the previous edit, recorded at each edit; `hops_before_first_write`, and `trailing_reads` after the last edit.
+- `unclassified`: `other` calls; `unclassified_share`: their share of `calls`. `status`: calls per non-`ok` parse status (`error`, `unparsed`, `script-body`, `python-error`, `python-unavailable`); such a call is labelled from the parts that did parse.
 - `usage`: one API message spans several transcript lines and its usage grows across them, so the last line per `message.id` counts; summing every line overcounts, taking the first undercounts.
 
 ```python
 #!/usr/bin/env python3
-"""run-metrics.py {transcript.jsonl}... — one JSON row per transcript: tool mix, read:write, hops, usage. Counts only.
-An unreadable file prints a row with "failed"; MAX_LINES caps lines per file and the row says "capped"."""
-import json, os, shlex, sys
+"""run-metrics.py {transcript.jsonl}... — one JSON row per transcript: call classes, calls per edit, hops, usage. Counts only.
+An unreadable file or a missing classifier prints a row with "failed"; MAX_LINES caps lines per file and the row says "capped"."""
+import glob, json, os, re, subprocess, sys
 from collections import Counter
 
-READ_TOOLS, WRITE_TOOLS = {"Read", "Grep", "Glob"}, {"Edit", "Write", "NotebookEdit", "MultiEdit"}
-BASH_READ = {"cat", "head", "tail", "less", "grep", "rg", "ls", "find", "wc", "jq", "stat", "file", "tree", "diff", "awk", "cut", "sort", "uniq"}
-BASH_WRITE = {"mv", "cp", "rm", "mkdir", "touch", "tee", "patch", "chmod", "ln"}
-GIT_READ = {"log", "show", "diff", "status", "blame", "grep", "ls-files", "rev-parse", "cat-file"}
-GIT_WRITE = {"add", "commit", "mv", "rm", "apply", "checkout", "reset"}
 MAX_LINES = int(os.environ.get("MAX_LINES", "200000"))
 
-def bash_class(cmd):
-    """read | write | ambiguous from the command text; anything not provably one side is ambiguous."""
-    try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        toks = list(lex)
-    except ValueError:
-        return "ambiguous"
-    for i, t in enumerate(toks):
-        if t in (">", ">>", ">|") and i + 1 < len(toks) and toks[i + 1] != "/dev/null":
-            return "write"
-    kinds, seg = [], []
-    for t in toks + [";"]:
-        if t not in (";", "&&", "||", "|", "&", "(", ")", ";;"):
-            seg.append(t)
+def rules_file():
+    """$CLASSIFY_RULES, else classify-rules.json beside this skill's mining.md."""
+    return os.environ.get("CLASSIFY_RULES") or os.path.expanduser("~/.claude/skills/imagine-core/classify-rules.json")
+
+def classifier(rules):
+    """The callmeter binary whose `classify --rules` accepts the rules file on an empty input: $CALLMETER_BIN, else the newest release bin/{X.Y.Z}/callmeter of the store directory."""
+    xdg = os.environ.get("XDG_STATE_HOME", "")
+    home = os.environ.get("CALLMETER_HOME") or os.path.join(xdg if os.path.isabs(xdg) else os.path.expanduser("~/.local/state"), "callmeter")
+    found = [os.environ["CALLMETER_BIN"]] if os.environ.get("CALLMETER_BIN") else sorted(
+        (p for p in glob.glob(os.path.join(home, "bin", "*", "callmeter")) if re.fullmatch(r"\d+(\.\d+)*", p.split(os.sep)[-2])),
+        key=lambda p: [int(n) for n in p.split(os.sep)[-2].split(".")], reverse=True)
+    tried = []
+    for b in found:
+        try:
+            h = subprocess.run([b, "classify", "--rules", rules], input="", capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError) as e:
+            tried.append(f"{b}: {type(e).__name__} {e}"[:200])
             continue
-        while seg and (seg[0] in ("if", "then", "do", "else", "elif", "!", "{", "}") or ("=" in seg[0] and not seg[0].startswith("-"))):
-            seg = seg[1:]
-        if seg and seg[0] not in ("for", "while", "until", "case", "fi", "done", "esac", "[", "[[", "test", "echo", "printf", "exit", "cd", "true", "set"):
-            kinds.append(simple_class(seg))
-        seg = []
-    if "write" in kinds:
-        return "write"
-    return "read" if kinds and all(k == "read" for k in kinds) else "ambiguous"
+        if h.returncode == 0:
+            return b
+        tried.append(f"{b}: rc={h.returncode} {h.stderr.strip()[:120]}")
+    raise RuntimeError(f"no callmeter accepting `classify --rules {rules}` among {tried or found or home}")
 
-def simple_class(words):
-    prog = os.path.basename(words[0])
-    if prog == "git" and len(words) > 1:
-        return "read" if words[1] in GIT_READ else "write" if words[1] in GIT_WRITE else "ambiguous"
-    if prog == "sed":
-        return "write" if any(w.startswith("-i") for w in words) else "read" if "-n" in words else "ambiguous"
-    if prog == "sqlite3":
-        return "read" if "-readonly" in words else "ambiguous"
-    return "read" if prog in BASH_READ else "write" if prog in BASH_WRITE else "ambiguous"
-
-def one(path):
-    row = {"transcript": os.path.basename(path), "tools": Counter(), "bash": Counter()}
-    seq, usage, lines = [], {}, 0
+def one(path, binary, rules):
+    name = os.path.basename(path)
+    calls, usage, tools, lines = [], {}, Counter(), 0
+    row = {"transcript": name}
     try:
         with open(path, encoding="utf-8") as fh:
             for line in fh:
@@ -303,25 +297,31 @@ def one(path):
                 if msg.get("id") and msg.get("usage"):
                     usage[msg["id"]] = (msg.get("model", "?"), msg["usage"])
                 for c in msg["content"]:
-                    if c.get("type") != "tool_use":
-                        continue
-                    name = c.get("name", "?")
-                    row["tools"][name] += 1
-                    if name in READ_TOOLS:
-                        seq.append("R")
-                    elif name in WRITE_TOOLS:
-                        seq.append("W")
-                    elif name == "Bash":
-                        k = bash_class((c.get("input") or {}).get("command", ""))
-                        row["bash"][k] += 1
-                        seq.append({"read": "R", "write": "W"}.get(k, "?"))
-    except (OSError, ValueError) as e:
-        return {"transcript": os.path.basename(path), "failed": f"{type(e).__name__}: {e}"[:200]}
-    hops, run = [], 0
-    for s in seq:
-        if s == "R":
+                    if c.get("type") == "tool_use":
+                        inp = c.get("input")
+                        cmd = inp.get("command", "") if isinstance(inp, dict) else ""
+                        tools[c.get("name", "?")] += 1
+                        calls.append({"id": str(len(calls)), "tool": c.get("name", "?"), "command": cmd if isinstance(cmd, str) else "", "cwd": ev.get("cwd") or "/"})
+        labels = {}
+        if calls:
+            p = subprocess.run([binary, "classify", "--rules", rules], input="".join(json.dumps(c) + "\n" for c in calls), capture_output=True, text=True, timeout=600)
+            if p.returncode:
+                raise RuntimeError(f"classify rc={p.returncode}: {p.stderr.strip()[:200]}")
+            labels = {r["id"]: r for r in map(json.loads, p.stdout.splitlines())}
+            if set(labels) != {c["id"] for c in calls} or not all(isinstance(r.get("class"), str) and isinstance(r.get("classes"), list) and isinstance(r.get("status"), str) for r in labels.values()):
+                raise RuntimeError(f"classify returned {len(labels)} labels for {len(calls)} calls, or a label without class, classes and status")
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as e:
+        return {"transcript": name, "failed": f"{type(e).__name__}: {e}"[:200]}
+    classes, has, status, hops, run = Counter(), Counter(), Counter(), [], 0
+    for c in calls:
+        r = labels[c["id"]]
+        classes[r["class"]] += 1
+        has.update(set(r["classes"]))
+        if r["status"] != "ok":
+            status[r["status"].split(":")[0]] += 1
+        if r["class"] in ("read", "search"):
             run += 1
-        elif s == "W":
+        elif r["class"] == "edit":
             hops.append(run)
             run = 0
     sums, models = Counter(), Counter()
@@ -329,26 +329,36 @@ def one(path):
         models[model] += 1
         for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"):
             sums[k] += u.get(k) or 0
-    reads, writes = seq.count("R"), seq.count("W")
-    row.update(reads=reads, writes=writes, ambiguous=seq.count("?"), read_write=round(reads / writes, 2) if writes else None,
+    reads, writes, n = classes["read"] + classes["search"], classes["edit"], len(calls)
+    row.update(calls=n, classes=dict(classes), has=dict(has), reads=reads, writes=writes,
+               read_write=round(reads / writes, 2) if writes else None, calls_per_write=round(n / writes, 2) if writes else None,
+               unclassified=classes["other"], unclassified_share=round(classes["other"] / n, 3) if n else None, status=dict(status),
                hops=hops, hops_before_first_write=hops[0] if hops else None, trailing_reads=run,
-               requests=len(usage), lines=lines, usage=dict(sums), models=dict(models),
-               tools=dict(row["tools"]), bash=dict(row["bash"]))
+               requests=len(usage), lines=lines, usage=dict(sums), models=dict(models), tools=dict(tools))
     return row
 
+rules = rules_file()
+try:
+    binary = classifier(rules)
+except RuntimeError as e:
+    for p in sys.argv[1:]:
+        print(json.dumps({"transcript": os.path.basename(p), "failed": f"RuntimeError: {e}"}))
+    sys.exit(1)
 for p in sys.argv[1:]:
-    print(json.dumps(one(p)))
+    print(json.dumps(one(p, binary, rules)))
 ```
+
+The classifier is `$CALLMETER_BIN`, else the newest release `bin/{X.Y.Z}/callmeter` of the store directory that accepts `classify --rules {file}` on an empty input (a directory not named by a release version, such as the user's own build, is never picked); the rules file is `$CLASSIFY_RULES`, else `classify-rules.json` of the installed `imagine-core` skill. With no such binary, or a rules file that is missing or malformed, every row is `failed` and names each binary tried with its exit and message, its timeout or its exec error. Until a callmeter release carries `classify`, no release binary accepts it: build one in the callmeter checkout (`plugins/callmeter` of the Professor clone) with `go build -o {run}/work/callmeter ./cmd/callmeter` and set `$CALLMETER_BIN` to it.
 
 Run it over every transcript `find-runs.sh` found, and take a distribution with `jq`:
 
 ```sh
 cut -f5 {run}/work/runs-meta.tsv | tr '\n' '\0' | xargs -0 python3 {run}/scripts/run-metrics.py > {run}/work/run-metrics.jsonl
-jq -r '.hops[]?' {run}/work/run-metrics.jsonl | sort -n | uniq -c        # reads before each write
+jq -r '.hops[]?' {run}/work/run-metrics.jsonl | sort -n | uniq -c        # reads before each edit
 jq -r '.hops_before_first_write // empty' {run}/work/run-metrics.jsonl | sort -n | uniq -c
 ```
 
-A row with `failed` is that run `failed {cause}`; `ambiguous` above a few percent of a run's calls is named beside its ratio, since the ratio then rests on the unambiguous calls only.
+A row with `failed` is that run `failed {cause}`; `unclassified_share` above a few percent of a run's calls is named beside its ratio, since the ratio then rests on the classified calls only.
 
 Cost:
 

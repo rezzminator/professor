@@ -1,7 +1,7 @@
 ---
 name: reviewer-pro
 description: Deep-reviews a diff range — reviewer plus a hostile-input hunt (symlinks, path escapes, inherited env, repo config), a third pricier; "review pro", "deep review", wherever a miss costs more than the run. Modes pre-merge, post-merge; HEAD WORKTREE for uncommitted work; PATHSPECS; REPORT_PATH. Returns one line, the review file path.
-tools: Read, Write, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Grep, Glob, Bash, Agent, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 skills: [tracer:use]
 model: opus
 effort: high

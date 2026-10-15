@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Fake meter, called as the lab calls pfm: tokens --root R --session S --out F.
+# FAKE_METER_TOTAL (default 0.01), FAKE_METER_UNPRICED, FAKE_METER_NO_TS, FAKE_METER_BAD_LINES (default 0), FAKE_METER_FAIL=1.
+# An absent --root fails as pfm does.
+set -u
+[ "$1" = tokens ] || { echo "fake meter: want tokens, got $1" >&2; exit 2; }
+out='' root=''
+while [ $# -gt 0 ]; do case "$1" in --out) out=$2; shift 2 ;; --root) root=$2; shift 2 ;; *) shift ;; esac; done
+[ -z "$root" ] || [ -d "$root" ] || { echo "fake meter: --root $root is not readable" >&2; exit 1; }
+[ "${FAKE_METER_FAIL:-0}" = 1 ] && { echo 'fake meter: cannot read transcripts' >&2; exit 1; }
+printf '{"total":%s,"calls":3,"scan":{"unpricedCalls":%s,"noTimestamp":%s,"badLines":%s,"readErrors":[]}}\n' \
+  "${FAKE_METER_TOTAL:-0.01}" "${FAKE_METER_UNPRICED:-0}" "${FAKE_METER_NO_TS:-0}" "${FAKE_METER_BAD_LINES:-0}" > "$out"

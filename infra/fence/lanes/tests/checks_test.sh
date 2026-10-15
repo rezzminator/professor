@@ -164,7 +164,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -213,6 +213,9 @@ done
 if grep -Fxq "templates.plugin-logs checks_templates_plugin_logs" "$T/registered.args"; then
   ok 'plugin-logs self-test is a named gate step'
 else bad 'plugin-logs gate registration' "$(cat "$T/registered.args")"; fi
+if grep -Fxq "templates.plugin-lab checks_templates_plugin_lab" "$T/registered.args"; then
+  ok 'plugin-lab self-tests are a named gate step'
+else bad 'plugin-lab gate registration' "$(cat "$T/registered.args")"; fi
 
 # The pfm that pfm.unit prebuilds is kept in <run>/bin: check-map is handed it; the mirrors build engine-sync instead.
 if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then

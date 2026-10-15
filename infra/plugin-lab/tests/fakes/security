@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Fake macOS `security` for the lab self-tests. Every argv is logged to
+# $FAKE_SECURITY_LOG. find-generic-password -w serves $FAKE_SECURITY_JSON for
+# any service, or only for $FAKE_SECURITY_SERVICE when set; 44 is macOS's
+# item-not-found. Without -w it answers presence: present while
+# FAKE_SECURITY_PRESENT=1 and no delete was logged.
+set -u
+[ -n "${FAKE_SECURITY_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_SECURITY_LOG"
+verb=$1; shift
+svc='' want_secret=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -s) svc=$2; shift 2 ;;
+    -w) want_secret=1; shift ;;
+    *) shift ;;
+  esac
+done
+deleted() { [ -n "${FAKE_SECURITY_LOG:-}" ] && grep -qF "delete-generic-password -s $svc" "$FAKE_SECURITY_LOG"; }
+case "$verb" in
+  find-generic-password)
+    if [ "$want_secret" = 1 ]; then
+      if [ -n "${FAKE_SECURITY_SERVICE:-}" ] && [ "$svc" != "$FAKE_SECURITY_SERVICE" ]; then
+        echo 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.' >&2; exit 44
+      fi
+      cat "$FAKE_SECURITY_JSON"; exit 0
+    fi
+    if [ "${FAKE_SECURITY_PRESENT:-0}" = 1 ] && ! deleted; then echo "keychain: \"fake\""; exit 0; fi
+    exit 44 ;;
+  delete-generic-password)
+    [ "${FAKE_SECURITY_DELETE_FAIL:-0}" = 1 ] && { echo 'security: delete refused' >&2; exit 1; }
+    exit 0 ;;
+esac
+echo "fake security: unknown verb $verb" >&2; exit 2

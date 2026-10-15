@@ -1,0 +1,10 @@
+# row	reason (D22): a named gap, no live proof
+R7b	config-dir switch of a live parent is forbidden by ruling; unit tests carry it
+R7d	the refusal branch needs a non-regular file or one over 4 MiB as the agent definition; unit tests carry it
+R7h	the race needs concurrent sessions with logs over 20 MiB; unit tests carry it
+R7i	a failed native compaction cannot be induced without breaking the API path
+R7l	a code verification on HEAD; unit tests carry it
+R7m	prompt files, not runtime
+R2	no fix, by ruling
+R6	managed settings cannot induce the bypass on this host: CLAUDE_CODE_MANAGED_SETTINGS_PATH is not read beside the OS policy folder, so cc-plugin-sec-default@builtin stays not seated (probe-managed, probe-seat); unit tests carry it
+R7c	/reload-plugins keeps an inline plugin's hooks module (no second logger-ready row, probe-reload), so the lost-handoff recovery cannot be induced; unit tests carry it

@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Fake Claude Code for the lab self-tests (bash 3.2-safe: macOS /usr/bin/env
+# finds /bin/bash). It records what it was given under {run}/fake/ — fd 3 only
+# as a sha256 — fires the settings' command hooks with synthetic JSON, writes
+# a transcript and a plugin level log, and answers typed lines like a TUI.
+# FAKE_CLAUDE_MODE: normal leak-env no-input slow touch-live-store bypass-line
+# boundary-without-row no-start no-logger bad-transcript late-projects (the projects
+# folder appears only after the first prompt, as a real first boot writes it).
+# early-stop: a Stop fires before the typed line's turn, as a background agent's
+# notification turn ends while the line waits in the queue. drop-after-slash: the line
+# typed after a local slash command is lost and the screen redrawn, as the composer
+# remounts after /model. A line starting / is a local command: its name and output go to
+# the transcript, no hook fires; an empty line is ignored. `claude plugin …` logs
+# its argv to {run}/fake/plugin-argv and exits FAKE_PLUGIN_RC (default 0).
+set -u
+mode=${FAKE_CLAUDE_MODE:-normal}
+if [ "$mode" = leak-env ] && [ -z "${CLAUDE_FAKE_LEAK:-}" ]; then
+  exec /usr/bin/env CLAUDE_FAKE_LEAK=1 "$0" "$@"
+fi
+run=${CLAUDE_CONFIG_DIR%/config}
+out=$run/fake
+mkdir -p "$out"
+if [ "${1:-}" = plugin ]; then printf '%s\n' "$*" >> "$out/plugin-argv"; exit "${FAKE_PLUGIN_RC:-0}"; fi
+printf '%s\n' "$@" > "$out/argv"
+echo "$$" > "$out/pid"
+if [ -r "/proc/$$/environ" ]; then tr '\0' '\n' < "/proc/$$/environ" | sed 's/=.*//' | LC_ALL=C sort > "$out/env-keys"
+else env | sed 's/=.*//' | LC_ALL=C sort > "$out/env-keys"; fi
+printf '%s\n' "${CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR:-}" > "$out/fd-var"
+token=$(cat <&3 2>/dev/null || true)
+exec 3<&-
+if command -v sha256sum >/dev/null; then printf '%s' "$token" | sha256sum | cut -c1-64 > "$out/fd3.sha"
+else printf '%s' "$token" | shasum -a 256 | cut -c1-64 > "$out/fd3.sha"; fi
+token=''
+settings='' plugin='' debug=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --settings) settings=$2; shift 2 ;;
+    --plugin-dir) plugin=$2; shift 2 ;;
+    --debug-file) debug=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+sid="fake-$$-$(date +%s)"
+proj=$CLAUDE_CONFIG_DIR/projects/-fake-work
+transcript=$proj/$sid.jsonl
+if [ "$mode" != late-projects ]; then mkdir -p "$proj"; : > "$transcript"; fi
+now_iso() { date -u +%Y-%m-%dT%H:%M:%S.000Z; }
+hook() { # <event> <json>
+  local cmd
+  jq -r --arg e "$1" '.hooks[$e][]?.hooks[]?.command' "$settings" | while IFS= read -r cmd; do
+    printf '%s' "$2" | sh -c "$cmd"
+  done
+}
+base() { printf '"session_id":"%s","transcript_path":"%s","hook_event_name":"%s"' "$sid" "$transcript" "$1"; }
+stop() { # the Stop hook, then the stop-hook summary Claude Code writes after it
+  hook Stop "{$(base Stop),\"stop_hook_active\":false}"
+  jq -nc --arg s "$sid" '{type:"system",subtype:"stop_hook_summary",sessionId:$s}' >> "$transcript"
+}
+printf '%s [DEBUG] fake boot\n' "$(now_iso)" > "$debug"
+[ "$mode" = bypass-line ] && printf '%s [DEBUG] sub-agent-compact: session.compact bypassed by cc-plugin-sec-default (tier user)\n' "$(now_iso)" >> "$debug"
+[ "$mode" = plugin-reload ] && printf '%s [DEBUG] hooks module fake-plugin@inline reloaded in 45.9ms; events: session.start\n' "$(now_iso)" >> "$debug"
+name=$(jq -r .name "$plugin/.claude-plugin/plugin.json")
+version=$(jq -r .version "$plugin/.claude-plugin/plugin.json")
+[ -f "$plugin/fake-logger-version" ] && version=$(cat "$plugin/fake-logger-version")
+if [ "$mode" != no-logger ]; then
+  mkdir -p "$PLUGIN_LOG_DIR/$name/decisions"
+  jq -nc --arg ts "$(now_iso)" --arg p "$name" --arg v "$version" \
+    '{ts:$ts,plugin:$p,level:"info",event:"logger-ready",msg:"plugin logger ready",where:"fake",detail:{version:$v,dir_source:"PLUGIN_LOG_DIR"}}' \
+    >> "$PLUGIN_LOG_DIR/$name/info.jsonl"
+  printf '{"event":"start"}\n' >> "$PLUGIN_LOG_DIR/$name/decisions/$sid.jsonl"
+fi
+if [ "$mode" = touch-live-store ]; then mkdir -p "$FAKE_LIVE/projects/x"; : > "$FAKE_LIVE/projects/x/$sid.jsonl"; fi
+[ "$mode" = no-start ] || hook SessionStart "{$(base SessionStart),\"source\":\"startup\"}"
+printf 'fake claude ready\n> '
+drop=''
+while IFS= read -r line; do
+  [ "$mode" = no-input ] && continue
+  if [ "$line" = /exit ]; then hook SessionEnd "{$(base SessionEnd),\"reason\":\"prompt_input_exit\"}"; exit 0; fi
+  [ -z "$line" ] && continue
+  if [ -n "$drop" ]; then drop=''; printf '\033[2J\033[H> '; continue; fi
+  case "$line" in /*)
+    jq -nc --arg c "${line%% *}" --arg a "${line#"${line%% *}"}" --arg s "$sid" \
+      '{type:"user",sessionId:$s,message:{role:"user",content:"<command-name>\($c)</command-name>\n<command-args>\($a | ltrimstr(" "))</command-args>"}}' >> "$transcript"
+    jq -nc --arg s "$sid" --arg o "Set model to ${line#* }" '{type:"user",sessionId:$s,message:{role:"user",content:"<local-command-stdout>\($o)</local-command-stdout>"}}' >> "$transcript"
+    [ "$mode" = drop-after-slash ] && drop=1
+    printf '> '; continue ;;
+  esac
+  hook UserPromptSubmit "{$(base UserPromptSubmit),\"prompt\":$(jq -Rn --arg l "$line" '$l')}"
+  if [ ! -d "$proj" ]; then sleep 1; mkdir -p "$proj"; fi
+  if [ "$mode" = early-stop ]; then stop; sleep 1; fi
+  ctx=10
+  case "$line" in *COMPACT*) ctx=91200 ;; esac
+  jq -nc --arg l "$line" --arg s "$sid" '{type:"user",sessionId:$s,message:{role:"user",content:$l}}' >> "$transcript"
+  jq -nc --arg s "$sid" --argjson c "$ctx" '{type:"assistant",sessionId:$s,message:{model:"claude-haiku-fake",role:"assistant",content:[{type:"text",text:"READY"}],usage:{input_tokens:$c,output_tokens:2}}}' >> "$transcript"
+  [ "$mode" = bad-transcript ] && printf 'not json\n' >> "$transcript"
+  case "$line" in *COMPACT*)
+    printf '{"type":"system","subtype":"compact_boundary","sessionId":"%s","compactMetadata":{"trigger":"auto","preTokens":93000}}\n' "$sid" >> "$transcript"
+    [ "$mode" = boundary-without-row ] || printf '{"event":"session.compact","party":"main","decision":"pass","tokens":91200}\n' >> "$PLUGIN_LOG_DIR/$name/decisions/$sid.jsonl" ;;
+  esac
+  [ "$mode" = slow ] && sleep "${FAKE_SLOW_S:-30}"
+  stop
+  printf 'READY\n> '
+done

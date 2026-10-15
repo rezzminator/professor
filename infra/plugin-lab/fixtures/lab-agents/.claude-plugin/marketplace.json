@@ -1,0 +1,11 @@
+{
+  "name": "lab-fixtures",
+  "owner": { "name": "plugin-lab" },
+  "plugins": [
+    {
+      "name": "lab-agents",
+      "source": "./plugins/lab-agents",
+      "description": "plugin-lab fixture: one namespaced agent for the tool-scoped-nudge scenario"
+    }
+  ]
+}

@@ -480,7 +480,7 @@ for (const [name, model, effort, role] of twins) {
     }
     if (role === 'flights-lander') {
       assert.deepEqual(fm.tools.split(',').map((tool) => tool.trim()),
-        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent', 'mcp__sub-agent-compact__compact',
+        ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Agent',
          'mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back', 'Skill'],
         `${name}: tools must match the GPT engine's supported role contract (Agent: the lander's review dispatch)`);
       for (const reviewer of ['gpt-reviewer', 'gpt-reviewer-pro'])
@@ -497,19 +497,20 @@ for (const [name, model, effort, role] of twins) {
   });
 }
 
-// An agent that can compact also hands off forward and reads its transcript from before a compaction:
-// a fixed tools list naming sub-agent-compact's compact names forward_handoff and look_back beside it.
-test('every shipped agent that can compact also holds forward_handoff and look_back', () => {
+// sub-agent-compact registers `compact` only while forwardHandoffTool is off, and Professor runs it on:
+// a fixed tools list naming the plugin names forward_handoff and look_back, never the unregistered compact.
+test('every shipped agent naming sub-agent-compact holds forward_handoff and look_back, never compact', () => {
   const dirs = ['templates/global/agents', 'templates/generated/agents', 'templates/project/agents', '.claude/agents'];
-  let compacting = 0;
+  let handing = 0;
   for (const dir of dirs.filter((relative) => existsSync(join(ROOT, relative)))) {
     for (const file of readdirSync(join(ROOT, dir)).filter((entry) => entry.endsWith('.md'))) {
       const tools = readFileSync(join(ROOT, dir, file), 'utf8').match(/^tools:(.*)$/m)?.[1] ?? '';
-      if (!tools.includes('mcp__sub-agent-compact__compact')) continue;
-      compacting++;
+      if (!tools.includes('mcp__sub-agent-compact__')) continue;
+      handing++;
+      assert.ok(!tools.includes('mcp__sub-agent-compact__compact'), `${dir}/${file}: names the unregistered compact tool`);
       for (const tool of ['mcp__sub-agent-compact__forward_handoff', 'mcp__sub-agent-compact__look_back'])
-        assert.ok(tools.includes(tool), `${dir}/${file}: holds compact but not ${tool}`);
+        assert.ok(tools.includes(tool), `${dir}/${file}: names sub-agent-compact but not ${tool}`);
     }
   }
-  assert.ok(compacting > 0, 'no shipped agent names mcp__sub-agent-compact__compact: the scan read nothing');
+  assert.ok(handing > 0, 'no shipped agent names a sub-agent-compact tool: the scan read nothing');
 });

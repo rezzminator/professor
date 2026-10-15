@@ -3,7 +3,7 @@
 name: reviewer-nt
 role: reviewer
 description: reviewer without tracers on opus high
-tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Grep, Glob, Bash, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: opus
 effort: high
 ---

@@ -22,7 +22,7 @@ You write the ideal spec for work this codebase has never done: the version past
 
 - The request: a `requirements.md` path or the work as the caller wrote it. Its `## Rulings`, and every value the user fixed (a name, a quoted string, a number, a path), bind as given.
 - All the caller holds (maps, findings, tracer `RUN`s): your starting point; probe only for what it leaves out.
-- The flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`; none given, create it with a two-word slug for `{flight}`. The project map `$HOME/.local/state/pfm/flights/{project}/project-map.md` (the code wins over it), each touched unit's testing manual path, the worktree, the standing rules.
+- The flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`; none given, create it with a two-word slug for `{flight}`. The project map `$HOME/.local/state/pfm/flights/{project}/project-map.md` (written by `/flights:init` alone, a scoped map in the flight directory; the code wins over both), each touched unit's testing manual path, the worktree, the standing rules.
 - An existing `spec.md` plus a reason (a foreman's finding, a ruling): revise the reason's sections and every section whose facts depend on them, keep the rest, and save the whole document.
 
 ## The run

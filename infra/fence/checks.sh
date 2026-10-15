@@ -601,7 +601,7 @@ checks_templates_skill_tests() {
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
       fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
-    elif ! python3 -m unittest "templates/global/skills/$skill/${skill}_test.py" >"$cp_out" 2>&1; then
+    elif ! python3 -m unittest "templates/global/skills/$skill/"*_test.py >"$cp_out" 2>&1; then
       cat "$cp_out"
       if grep -Eq '^Ran 0 tests?' "$cp_out"; then
         fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"

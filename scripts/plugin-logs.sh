@@ -31,64 +31,17 @@ if [ -n "$today" ]; then valid_date "$today" || usage "invalid today date $today
 [ -e "$dir" ] || { printf 'no log folder: %s\n' "$dir"; exit 3; }
 [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || unreadable "$dir" 'directory is not readable/searchable'
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/plugin-logs.XXXXXX") || unreadable "$dir" 'mktemp failed'
-rotate_lock="$dir/.rotate.lock"; owns_rotate_lock=0
 cleanup() {
   local status=$?
-  if [ "$owns_rotate_lock" = 1 ]; then
-    if ! rmdir -- "$rotate_lock" 2> "$scratch/err"; then
-      printf 'rotate lock cleanup failed: %s: %s\n' "$rotate_lock" "$(cat "$scratch/err")" >&2
-      status=4
-    fi
-  fi
   rm -rf -- "$scratch" || status=4
   exit "$status"
 }
 trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-# The selected root and its ancestors are operator-trusted, including aliases.
-resolved_dir=$(cd -- "$dir" 2> "$scratch/err" && pwd -P) || unreadable "$dir" "$(cat "$scratch/err")"
-guard_target() { # resolve an existing target or the nearest parent of a new one
-  local target=$1 parent suffix= resolved
-  if [ -d "$target" ]; then
-    resolved=$(cd -- "$target" 2> "$scratch/err" && pwd -P) || unreadable "$target" "$(cat "$scratch/err")"
-  else
-    parent=$(dirname -- "$target"); suffix="/${target##*/}"
-    while [ ! -e "$parent" ] && [ ! -L "$parent" ]; do
-      suffix="/${parent##*/}$suffix"
-      parent=$(dirname -- "$parent")
-    done
-    resolved=$(cd -- "$parent" 2> "$scratch/err" && pwd -P) || unreadable "$target" "$(cat "$scratch/err")"
-    resolved="${resolved%/}$suffix"
-  fi
-  case "$resolved" in
-    "${resolved_dir%/}/"*) ;;
-    *) unreadable "$target" "resolved target outside log root: $resolved" ;;
-  esac
-}
 read_mtime() {
   if mtime=$(stat -c %Y -- "$1" 2>/dev/null); then :
   elif mtime=$(stat -f %m -- "$1" 2> "$scratch/err"); then :
   else unreadable "$1" "$(cat "$scratch/err")"; fi
 }
-if [ "$mode" = rotate ]; then
-  guard_target "$rotate_lock"
-  [ ! -L "$rotate_lock" ] || unreadable "$rotate_lock" 'symlink rotate lock refused'
-  if mkdir -- "$rotate_lock" 2> "$scratch/err"; then
-    owns_rotate_lock=1
-  elif [ -d "$rotate_lock" ]; then
-    printf 'rotate already running: %s\n' "$rotate_lock" >&2
-    read_mtime "$rotate_lock"
-    now=$(jq -nr 'now | floor')
-    if [ "$((now - mtime))" -gt 3600 ]; then
-      printf 'stale rotate lock: %s (older than 1 hour; remove by hand)\n' "$rotate_lock" >&2
-    fi
-    exit 4
-  else
-    unreadable "$rotate_lock" "$(cat "$scratch/err")"
-  fi
-fi
 if ! git config --file "$root/.gitmodules" --get-regexp '^submodule\..*\.path$' > "$scratch/modules" 2> "$scratch/err"; then
   echo "DERIVE-FAILED: no plugins in .gitmodules ($root/.gitmodules): $(cat "$scratch/err")" >&2; exit 2
 fi
@@ -102,10 +55,8 @@ while read -r key path; do
 done < "$scratch/modules"
 [ -s "$scratch/roster" ] || usage 'DERIVE-FAILED: no plugins in .gitmodules'
 # Also account for a writer whose checkout has left the roster, without hiding its rows.
-find "$resolved_dir" -mindepth 1 -maxdepth 1 -print0 > "$scratch/children" 2> "$scratch/err" || unreadable "$dir" "$(cat "$scratch/err")"
+find "$dir/." -mindepth 1 -maxdepth 1 -print0 > "$scratch/children" 2> "$scratch/err" || unreadable "$dir" "$(cat "$scratch/err")"
 while IFS= read -r -d '' path; do
-  [ "${path##*/}" != .rotate.lock ] || continue
-  [ ! -L "$path" ] || unreadable "$path" 'symlink plugin directory refused'
   [ -d "$path" ] || unreadable "$path" 'unexpected entry in log root'
   plugin=${path##*/}
   [[ "$plugin" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || unreadable "$path" 'invalid plugin name'
@@ -113,12 +64,11 @@ while IFS= read -r -d '' path; do
 done < "$scratch/children"
 LC_ALL=C sort -u "$scratch/roster" > "$scratch/plugins"
 check_dir() {
-  [ ! -L "$1" ] && [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ] || unreadable "$1" 'directory is not readable/searchable or is a symlink'
+  [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ] || unreadable "$1" 'directory is not readable/searchable'
 }
 list_levels() { # one inventory, including same-day archive collision suffixes
   local folder=$1 archived=$2 name
   : > "$scratch/levels"
-  [ ! -L "$folder" ] || unreadable "$folder" 'symlink directory refused'
   [ -e "$folder" ] || return 0
   check_dir "$folder"
   find "$folder" -mindepth 1 -maxdepth 1 -print0 > "$scratch/list" 2> "$scratch/err" || unreadable "$folder" "$(cat "$scratch/err")"
@@ -127,7 +77,7 @@ list_levels() { # one inventory, including same-day archive collision suffixes
     name=${path##*/}
     if [[ "$name" =~ ^(errors|warnings|info)\.jsonl(\.1)?$ ]] ||
        { [ "$archived" = 1 ] && [[ "$name" =~ ^(errors|warnings|info)-[0-9]+\.jsonl(\.1)?$ ]]; }; then
-      [ ! -L "$path" ] && [ -f "$path" ] && [ -r "$path" ] || unreadable "$path" 'level file is unreadable or a symlink'
+      [ -f "$path" ] && [ -r "$path" ] || unreadable "$path" 'level file is unreadable'
       printf '%s\0' "$path" >> "$scratch/levels"
     fi
   done < "$scratch/sorted-list"
@@ -135,12 +85,10 @@ list_levels() { # one inventory, including same-day archive collision suffixes
 archive_dates() { # emits only valid date directories; invalid names are kept, not pruned
   local base=$1 candidate
   : > "$scratch/dates"
-  [ ! -L "$base" ] || unreadable "$base" 'symlink archive directory refused'
   [ -e "$base" ] || return 0
   check_dir "$base"
   find "$base" -mindepth 1 -maxdepth 1 -print0 > "$scratch/archive-list" 2> "$scratch/err" || unreadable "$base" "$(cat "$scratch/err")"
   while IFS= read -r -d '' candidate; do
-    [ ! -L "$candidate" ] || unreadable "$candidate" 'symlink archive entry refused'
     if [ -d "$candidate" ] && valid_date "${candidate##*/}"; then
       printf '%s\n' "${candidate##*/}" >> "$scratch/dates"
     fi
@@ -157,8 +105,6 @@ if [ "$mode" = rotate ]; then
     list_levels "$pdir" 0
     if [ -s "$scratch/levels" ]; then
       dest="$pdir/archive/$today"
-      [ ! -L "$dest" ] || unreadable "$dest" 'symlink archive target refused'
-      guard_target "$dest"
       mkdir -p -- "$dest" 2> "$scratch/err" || unreadable "$dest" "$(cat "$scratch/err")"
       check_dir "$dest"
       while IFS= read -r -d '' path; do
@@ -167,27 +113,22 @@ if [ "$mode" = rotate ]; then
           target="$dest/${name%%.jsonl*}-$n.jsonl${name#*.jsonl}"
           n=$((n + 1))
         done
-        guard_target "$path"
-        guard_target "$target"
         mv -- "$path" "$target" 2> "$scratch/err" || unreadable "$path" "$(cat "$scratch/err")"
       done < "$scratch/levels"
     fi
     while IFS= read -r date; do
       epoch=$(jq -nr --arg d "$date" '$d+"T00:00:00Z"|fromdateiso8601')
       if [ "$epoch" -lt "$cutoff" ]; then
-        guard_target "$pdir/archive/$date"
         rm -rf -- "$pdir/archive/$date" 2> "$scratch/err" || unreadable "$pdir/archive/$date" "$(cat "$scratch/err")"
       fi
     done < "$scratch/dates"
     decisions="$pdir/decisions"
-    [ ! -L "$decisions" ] || unreadable "$decisions" 'symlink decisions directory refused'
     if [ -e "$decisions" ]; then
       check_dir "$decisions"
       find "$decisions" -mindepth 1 -maxdepth 1 -type f -print0 > "$scratch/decisions" 2> "$scratch/err" || unreadable "$decisions" "$(cat "$scratch/err")"
       while IFS= read -r -d '' path; do
         read_mtime "$path"
         if [ "$mtime" -lt "$cutoff" ]; then
-          guard_target "$path"
           rm -- "$path" 2> "$scratch/err" || unreadable "$path" "$(cat "$scratch/err")"
         fi
       done < "$scratch/decisions"
@@ -196,17 +137,14 @@ if [ "$mode" = rotate ]; then
   printf 'rotated: %s · %s\n' "$dir" "$today"
   exit 0
 fi
-: > "$scratch/rows"; : > "$scratch/coverage"; : > "$scratch/contracts"; : > "$scratch/rotates"
-# fromjson is deliberately per line: a broken row is evidence, not a failed whole-file parse.
-read_rows() { # path plugin level -> normalized valid rows and malformed count
-  local file=$1 plugin=$2 level=$3 line part n=0 normalized status
+: > "$scratch/rows"; : > "$scratch/rotates"
+# Normalize valid rows per line; malformed rows are skipped.
+read_rows() { # path plugin level -> normalized valid rows
+  local file=$1 plugin=$2 level=$3 line part normalized status
   exec 9< "$file" 2> "$scratch/err" || unreadable "$file" "$(cat "$scratch/err")"
   while IFS= LC_ALL=C read -r -n 4096 line <&9 || [ -n "$line" ]; do
-    n=$((n + 1))
     if [ "${#line}" -ge 4096 ]; then
       while IFS= LC_ALL=C read -r -n 4096 part <&9 && [ "${#part}" -ge 4096 ]; do :; done
-      malformed=$((malformed + 1))
-      [ -n "$first_bad" ] || first_bad="${file##*/}:$n"
       continue
     fi
     status=0
@@ -230,11 +168,7 @@ read_rows() { # path plugin level -> normalized valid rows and malformed count
     ' 2> "$scratch/err") || status=$?
     if [ "$status" = 0 ]; then
       printf '%s\n' "$normalized" >> "$scratch/rows"
-      valid=$((valid + 1))
-      [[ "$normalized" == *'"event":"logger-ready"'* ]] || active=$((active + 1))
-    elif [ "$status" = 4 ]; then
-      malformed=$((malformed + 1))
-      [ -n "$first_bad" ] || first_bad="${file##*/}:$n"
+    elif [ "$status" = 4 ]; then : # malformed or noncontract row
     else
       unreadable "$file" "jq normalization failed ($status): $(cat "$scratch/err")"
     fi
@@ -242,12 +176,8 @@ read_rows() { # path plugin level -> normalized valid rows and malformed count
   exec 9<&-
 }
 while IFS= read -r plugin; do
-  pdir="$dir/$plugin"; valid=0; active=0; malformed=0; first_bad=
-  if [ ! -e "$pdir" ]; then
-    printf '%s no folder\n' "$plugin" >> "$scratch/coverage"
-    printf '%s 0 malformed\n' "$plugin" >> "$scratch/contracts"
-    continue
-  fi
+  pdir="$dir/$plugin"
+  [ -e "$pdir" ] || continue
   check_dir "$pdir"
   archive_dates "$pdir/archive"
   cat "$scratch/dates" >> "$scratch/rotates"
@@ -259,12 +189,6 @@ while IFS= read -r plugin; do
     case "$name" in errors*) level=error ;; warnings*) level=warning ;; info*) level=info ;; esac
     read_rows "$path" "$plugin" "$level"
   done < "$scratch/levels"
-  state=dark
-  if [ -n "$archive" ] && [ ! -e "$folder" ]; then state="no archive $archive";
-  elif [ "$active" -gt 0 ]; then state=wrote; elif [ "$valid" -gt 0 ]; then state=quiet; fi
-  printf '%s %s\n' "$plugin" "$state" >> "$scratch/coverage"
-  if [ "$malformed" -gt 0 ]; then printf '%s %s (%s)\n' "$plugin" "$malformed" "$first_bad" >> "$scratch/contracts"
-  else printf '%s 0 malformed\n' "$plugin" >> "$scratch/contracts"; fi
 done < "$scratch/plugins"
 span=$(jq -rs 'if length==0 then "none" else sort_by(._time)|.[0].ts+" .. "+.[-1].ts end' "$scratch/rows")
 last=$(LC_ALL=C sort "$scratch/rotates" | tail -1)
@@ -280,25 +204,7 @@ for level in error warning; do
 done
 echo INFO
 jq -rs 'map(select(.level=="info"))|group_by(.plugin)[]|"\(.[0].plugin) \(length)"' "$scratch/rows"
-echo COVERAGE; cat "$scratch/coverage"
-echo CONTRACT; cat "$scratch/contracts"
-echo STRAYS
-if [ -n "${PLUGIN_LOG_DIR:-}" ]; then
-  [ -n "${HOME:-}" ] || unreadable 'HOME' 'cannot inspect fallback directories: HOME unset'
-  while IFS= read -r plugin; do
-    fallback="$HOME/.local/state/$plugin/logs"
-    [ ! -L "$fallback" ] || unreadable "$fallback" 'symlink fallback directory refused'
-    [ -e "$fallback" ] || continue
-    check_dir "$fallback"
-    # A --dir explicitly targeting the fallback itself must not double-count it.
-    if [ -d "$dir/$plugin" ] && [ "$fallback" -ef "$dir/$plugin" ]; then continue; fi
-    list_levels "$fallback" 0
-    count=0
-    while IFS= read -r -d '' path; do
-      cat -- "$path" > "$scratch/input" 2> "$scratch/err" || unreadable "$path" "$(cat "$scratch/err")"
-      rows=$(awk 'END {print NR+0}' "$scratch/input")
-      count=$((count + rows))
-    done < "$scratch/levels"
-    [ "$count" = 0 ] || printf '%s %s rows · %s\n' "$plugin" "$count" "$fallback"
-  done < "$scratch/plugins"
-fi
+jq -rs --rawfile plugins "$scratch/plugins" '
+  ($plugins | split("\n") | map(select(length > 0))) - (map(.plugin) | unique) |
+  "wrote nothing: " + (if length == 0 then "none" else join(", ") end)
+' "$scratch/rows"

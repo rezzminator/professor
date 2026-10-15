@@ -59,7 +59,7 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
 ```
 
 - The directory lives outside the repo, under `$HOME/.local/state/pfm/flights/{project}/` (`{project}` = the repo directory's basename, leading dot stripped), kept across reboots; the audit reads it after the landing.
-- Beside the project's flight directories sits `project-map.md`: the project's static facts — its build units in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. `/flights:init` writes it; a foreman reads it at intake and reports a line it finds wrong. The code wins over it.
+- Beside the project's flight directories sits `project-map.md`: the project's static facts — its build units in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. `/flights:init` alone writes it, a flight's scoped map living in its own flight directory; a foreman reads it at intake and reports a line it finds wrong. The code wins over it.
 - Each writer owns its own files; nobody edits another writer's file.
 
 ## Verdict tokens
@@ -67,7 +67,7 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
 | Token | Written by | Means |
 | --- | --- | --- |
 | `CLAIMED` | the spawning foreman, at spawn | A child or executor holds this unit or task |
-| `DONE` | child → parent, after verification | The unit's requirement rows are met and proven |
+| `DONE` | child → parent, after verification; the root, after a gate `PASS` or `FIXED` | The unit's requirement rows are met and proven; a gate `FAIL` makes the root's `FAILED` or `PARTIAL` |
 | `SPEC` | `flights-speccer` | `spec.md` is written whole; its path follows |
 | `PARTIAL` | root foreman, `flights-speccer` | Some units `DONE`, the rest named with their cause; a spec cut at its cap, the rest in its `## Open` |
 | `FAILED` | any builder | The goal was not reached; the return names the cause or what was read |

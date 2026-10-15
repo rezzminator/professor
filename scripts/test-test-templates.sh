@@ -27,7 +27,7 @@ REC="$T/rec"
 shtest_clean_also "/tmp/$PROJECT"
 USAGE='usage: test-templates.sh ALL | <test file>[::<test id>]...'
 GREEN1='A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.'
-GREEN2='Green. When your work is done, run .claude/scripts/check-templates.sh <your task'"'"'s files> once, then write your return.'
+GREEN2='Green. When your work is done, run .claude/scripts/check-templates.sh <the files you changed> once, then write your return.'
 ODD='templates/global/commands/it'"'"'s $HOME.test.mjs'
 
 # One stub serves every tool and every test script: it records its name and arguments, prints

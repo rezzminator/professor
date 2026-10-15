@@ -284,7 +284,11 @@ func Run(
 	printClaudePluginsDoctor(
 		stdout,
 		installer.ClaudeStore(resolved.Home),
-		doctorClaudePluginBuild(runtime.Version, resolved.Home, runtime.Config.Claude),
+		dependencies.Env,
+		doctorClaudePluginBuild(
+			runtime.Version, resolved.Home, runtime.Config.Claude,
+			runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
+		),
 		tally,
 	)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)

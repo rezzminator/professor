@@ -1518,3 +1518,25 @@ func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
 		}
 	}
 }
+
+// TestInstallSummaryCountsFailures: the summary line names how many FAIL lines
+// the run printed, and reads as before when none did.
+func TestInstallSummaryCountsFailures(t *testing.T) {
+	for _, test := range []struct {
+		report Report
+		want   string
+	}{
+		{Report{Changed: 1, OK: 2, Skipped: 3}, "summary changed=1 ok=2 skipped=3"},
+		{Report{Changed: 0, OK: 5, Skipped: 1, Failed: 2}, "summary changed=0 ok=5 skipped=1 failed=2 (each FAIL line above)"},
+	} {
+		if got := test.report.summary(); got != test.want {
+			t.Fatalf("summary = %q, want %q", got, test.want)
+		}
+	}
+	var out bytes.Buffer
+	inst := &engine{options: Options{Stdout: &out}}
+	_ = inst.fail(errors.New("boom"))
+	if inst.report.Failed != 1 || out.String() != "  FAIL    boom\n" {
+		t.Fatalf("failed=%d out=%q, want 1 and the FAIL line", inst.report.Failed, out.String())
+	}
+}

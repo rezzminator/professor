@@ -149,3 +149,98 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 		}
 	})
 }
+
+// TestClaudePluginGapsNamesEveryCopy: on an -alpha build a plugin of ours has
+// three copies — GitHub, professor, -dev — and any two enabled is one gap; an
+// install-only plugin enabled under any copy is a gap; a local copy whose
+// content is not the checkout's, or cannot be read, is a gap. A plugin left
+// right names nothing.
+func TestClaudePluginGapsNamesEveryCopy(t *testing.T) {
+	checkout := writePluginCheckout(t, t.TempDir(), "bar")
+	marketplace := t.TempDir()
+	mirror := filepath.Join(marketplace, "plugins", "bar")
+	if err := mirrorPluginTree(checkout, mirror); err != nil {
+		t.Fatal(err)
+	}
+	stale := t.TempDir()
+	writeFixture(t, filepath.Join(stale, "plugins", "bar", ".claude-plugin", "plugin.json"), `{"name":"old"}`)
+	dangling := t.TempDir()
+	writeFixture(t, filepath.Join(dangling, "plugins", "bar", ".claude-plugin", "plugin.json"), `{"name":"bar"}`)
+	if err := os.Symlink(
+		filepath.Join(dangling, "gone"),
+		filepath.Join(dangling, "plugins", "bar", "link"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	_, danglingErr := pluginTreeDigest(filepath.Join(dangling, "plugins", "bar"), pluginCopySkipped)
+	if danglingErr == nil {
+		t.Fatal("a dangling link digested without an error")
+	}
+	target := func(market string, installOnly bool) ClaudePluginTarget {
+		return ClaudePluginTarget{
+			Name: "bar", ID: "bar@bar-dev", GitHubID: "bar@bar", ProfessorID: "bar@professor", DevID: "bar@bar-dev",
+			Source: market, Local: true, Marketplace: market, Checkout: checkout, Own: true, InstallOnly: installOnly,
+		}
+	}
+	for _, test := range []struct {
+		name    string
+		target  ClaudePluginTarget
+		enabled []string
+		want    []string
+	}{
+		{"enabled from its -dev copy alone", target(marketplace, false), []string{"bar@bar-dev"}, nil},
+		{
+			"enabled under three copies", target(marketplace, false),
+			[]string{"bar@bar-dev", "bar@bar", "bar@professor"},
+			[]string{"plugin bar enabled 3 times (bar@bar and bar@professor and bar@bar-dev) in {file}"},
+		},
+		{
+			"its professor copy enabled instead", target(marketplace, false),
+			[]string{"bar@professor"},
+			[]string{"plugin bar@bar-dev not enabled in {file}"},
+		},
+		{"install-only and disabled", target(marketplace, true), nil, nil},
+		{
+			"install-only and enabled", target(marketplace, true),
+			[]string{"bar@bar-dev"},
+			[]string{"plugin bar enabled (bar@bar-dev) in {file}, but claude.plugins does not list it"},
+		},
+		{
+			"a copy that differs from its checkout", target(stale, false),
+			[]string{"bar@bar-dev"},
+			[]string{"plugin bar@bar-dev copy " + filepath.Join(stale, "plugins", "bar") + " differs from " + checkout},
+		},
+		{
+			"a copy that cannot be read", target(dangling, false),
+			[]string{"bar@bar-dev"},
+			[]string{"plugin bar@bar-dev copy " + filepath.Join(dangling, "plugins", "bar") + " cannot be compared with " +
+				checkout + ": " + danglingErr.Error()},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "settings.json")
+			enabled := map[string]bool{}
+			for _, id := range test.enabled {
+				enabled[id] = true
+			}
+			raw, _ := json.Marshal(map[string]any{"enabledPlugins": enabled})
+			if err := os.WriteFile(file, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{test.target})
+			var got []string
+			for _, gap := range gaps {
+				got = append(got, gap.Problem)
+				if gap.Fix != ClaudePluginRepair {
+					t.Fatalf("gap %q fix %q, want %q", gap.Problem, gap.Fix, ClaudePluginRepair)
+				}
+			}
+			for index := range test.want {
+				test.want[index] = strings.ReplaceAll(test.want[index], "{file}", file)
+			}
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("got %q, %v want %q", got, err, test.want)
+			}
+		})
+	}
+}

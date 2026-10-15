@@ -424,6 +424,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		writePluginCheckout(t, root, p.Name)
 	}
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "effort-live-control"}}
+	simulateClaude(t, runner)
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{`+
 		`"cache-live-control@cache-live-control":true,"cache-live-control@cache-live-control-dev":true,`+
 		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false,"effort-live-control@effort-live-control":true},`+
@@ -439,11 +440,12 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantEnabled := map[string]any{
-		"cache-live-control@cache-live-control":     true,
-		"cache-live-control@cache-live-control-dev": true,
-		"swift-lsp@claude-plugins-official":         true,
-		"buddy@buddy":                               false,
-		"effort-live-control@effort-live-control":   false,
+		"cache-live-control@cache-live-control":       true,
+		"cache-live-control@cache-live-control-dev":   true,
+		"swift-lsp@claude-plugins-official":           true,
+		"buddy@buddy":                                 false,
+		"effort-live-control@effort-live-control":     false,
+		"effort-live-control@effort-live-control-dev": true,
 	}
 	wantConfigs := map[string]any{
 		"cache-live-control@cache-live-control": map[string]any{"options": map[string]any{"keep": float64(1)}},

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -138,6 +139,19 @@ func TestClaudePluginTargets(t *testing.T) {
 			Local: true, Marketplace: marketplace, Checkout: filepath.Join(root, p.Name, "plugins", p.Name), Own: true,
 		}
 	}
+	// pro gives each own target of an -alpha build its professor-marketplace copy.
+	pro := func(targets ...ClaudePluginTarget) []ClaudePluginTarget {
+		for index := range targets {
+			if targets[index].Own {
+				targets[index].ProfessorID = targets[index].Name + "@professor"
+			}
+		}
+		return targets
+	}
+	installOnly := func(target ClaudePluginTarget) ClaudePluginTarget {
+		target.InstallOnly = true
+		return target
+	}
 	defaults := pfmconfig.DefaultClaudePlugins()
 	extra := testPlugin{Name: "callmeter", Source: "rezzminator/callmeter", ID: "callmeter@callmeter"}
 	writePluginCheckout(t, root, extra.Name)
@@ -178,51 +192,51 @@ func TestClaudePluginTargets(t *testing.T) {
 		}},
 		{"alpha without the key or a source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, Plugins: defaults,
-		}, []ClaudePluginTarget{
+		}, pro(
 			github(table[0], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[1], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[2], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[3], "claude.pluginCheckoutRoot unset and no source clone"),
-		}},
+		)},
 		{"alpha without the key installs from the source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepo: clone, Plugins: defaults,
-		}, []ClaudePluginTarget{
+		}, pro(
 			local(table[0], cloneRoot), local(table[1], cloneRoot), local(table[2], cloneRoot), local(table[3], cloneRoot),
-		}},
+		)},
 		{"the key wins over the source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
-		}, []ClaudePluginTarget{
+		}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
-		}},
+		)},
 		{"a source clone missing a checkout", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepo: partialClone, Plugins: defaults,
-		}, []ClaudePluginTarget{
+		}, pro(
 			local(table[0], filepath.Join(partialClone, "plugins")),
 			github(table[1], "no checkout at "+cloneMissing+
 				" (the source clone's plugins/; claude.pluginCheckoutRoot unset)"),
 			local(table[2], filepath.Join(partialClone, "plugins")),
 			local(table[3], filepath.Join(partialClone, "plugins")),
-		}},
+		)},
 		{"an unresolved source clone leaves the copy undecided", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepoErr: unresolved, Plugins: defaults[:1],
-		}, []ClaudePluginTarget{
+		}, pro(
 			undecided(table[0], "source clone unresolved (claude.pluginCheckoutRoot unset): "+unresolved.Error()),
-		}},
-		{"alpha with a checkout missing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: partial, Plugins: defaults}, []ClaudePluginTarget{
+		)},
+		{"alpha with a checkout missing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: partial, Plugins: defaults}, pro(
 			local(table[0], partial),
 			github(table[1], "no checkout at "+missing+" (claude.pluginCheckoutRoot)"),
 			local(table[2], partial),
 			local(table[3], partial),
-		}},
-		{"alpha with every checkout", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
+		)},
+		{"alpha with every checkout", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
-		}},
+		)},
 		{"the list decides which bare names", ClaudePluginBuild{
 			Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: table[2].Name}},
 		}, []ClaudePluginTarget{github(extra, ""), github(table[2], "")}},
 		{"a bare name beyond the default installs from its checkout", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}},
-		}, []ClaudePluginTarget{local(extra, root)}},
+		}, pro(local(extra, root))},
 		{"full ids are ensured as named, on any build", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{
 				{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, {ID: "effort-live-control@some-market"},
@@ -231,6 +245,21 @@ func TestClaudePluginTargets(t *testing.T) {
 			{Name: "typesafe", ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills", MarketplaceName: "typesafe-ai"},
 			{Name: "effort-live-control", ID: "effort-live-control@some-market", MarketplaceName: "some-market"},
 		}},
+		{"an -alpha build keeps every unlisted marketplace plugin disabled", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, CheckoutRoot: root,
+			Plugins: []pfmconfig.ClaudePlugin{{ID: table[2].Name}}, Unlisted: []string{extra.Name},
+		}, pro(local(table[2], root), installOnly(local(extra, root)))},
+		{"a listed professor id is no copy to retire", ClaudePluginBuild{
+			Version: alphaVersion, Home: home, CheckoutRoot: root,
+			Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: extra.Name + "@professor"}},
+		}, []ClaudePluginTarget{
+			local(extra, root),
+			{Name: extra.Name, ID: extra.Name + "@professor", MarketplaceName: "professor"},
+		}},
+		{"a release plans no unlisted plugin", ClaudePluginBuild{
+			Version: "0.80.0", Home: home, CheckoutRoot: root,
+			Plugins: []pfmconfig.ClaudePlugin{{ID: table[2].Name}}, Unlisted: []string{extra.Name},
+		}, []ClaudePluginTarget{github(table[2], "")}},
 		{"an empty list ensures nothing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{}}, []ClaudePluginTarget{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -245,6 +274,7 @@ func TestClaudePluginTargets(t *testing.T) {
 func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	root := t.TempDir()
 	inst, runner, out, home, first := alphaPluginEngine(t, root)
+	simulateClaude(t, runner)
 	checkouts := map[string]string{}
 	for _, p := range testPlugins {
 		checkouts[p.Name] = writePluginCheckout(t, root, p.Name)
@@ -363,17 +393,19 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 
 func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 	github := func(p testPlugin) string { return p.ID }
+	dev := func(p testPlugin) string { return devID(p.Name) }
+	professor := func(p testPlugin) string { return p.Name + "@professor" }
 	for _, test := range []struct {
 		name      string
 		version   string
 		withRoot  bool
 		kept      func(testPlugin) string
-		other     func(testPlugin) string
+		others    []func(testPlugin) string
 		checkouts bool
 	}{
-		{"alpha keeps -dev", alphaVersion, true, func(p testPlugin) string { return devID(p.Name) }, github, true},
-		{"release keeps GitHub", "0.80.0", true, github, func(p testPlugin) string { return devID(p.Name) }, true},
-		{"alpha fallback keeps GitHub", alphaVersion, false, github, func(p testPlugin) string { return devID(p.Name) }, false},
+		{"alpha keeps -dev", alphaVersion, true, dev, []func(testPlugin) string{github, professor}, true},
+		{"release keeps GitHub", "0.80.0", true, github, []func(testPlugin) string{dev}, true},
+		{"alpha fallback keeps GitHub", alphaVersion, false, github, []func(testPlugin) string{professor, dev}, false},
 	} {
 		for _, apply := range []bool{true, false} {
 			t.Run(fmt.Sprint(test.name, " apply=", apply), func(t *testing.T) {
@@ -391,16 +423,21 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 					if test.checkouts {
 						writePluginCheckout(t, root, p.Name)
 					}
-					enabled[p.ID], enabled[devID(p.Name)] = true, true
+					enabled[test.kept(p)] = true
+					for _, other := range test.others {
+						enabled[other(p)] = true
+					}
 					ids = append(ids, test.kept(p))
 				}
 				zero, one := testPlugins[0], testPlugins[1]
+				// The first other copy holding options is the one carried.
+				carried := test.others[len(test.others)-1]
 				document := map[string]any{
 					"enabledPlugins": enabled,
 					"pluginConfigs": map[string]any{
-						test.other(zero): map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-						test.other(one):  map[string]any{"options": map[string]any{"a": 1}},
-						test.kept(one):   map[string]any{"options": map[string]any{"b": 2}},
+						carried(zero):  map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
+						carried(one):   map[string]any{"options": map[string]any{"a": 1}},
+						test.kept(one): map[string]any{"options": map[string]any{"b": 2}},
 					},
 				}
 				raw, _ := json.Marshal(document)
@@ -412,7 +449,10 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 					t.Fatal(err)
 				}
 				writeInstalledPlugins(t, first, ids...)
-				if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+				err := inst.ensureClaudePlugins(context.Background())
+				// An applied -alpha fallback is a failure: the plugin is not on its -dev copy.
+				if fallback := apply && !test.checkouts && test.version == alphaVersion; fallback != (err != nil) ||
+					fallback && !strings.Contains(err.Error(), "falls back to the GitHub copy") {
 					t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 				}
 				if len(runner.calls) != 0 {
@@ -420,9 +460,21 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 				}
 				path := filepath.Join(first, "settings.json")
 				for _, p := range testPlugins {
-					line := "  change  disable " + test.other(p) + " in " + path + ": " + test.kept(p) + " replaces it"
-					if p.Name == zero.Name {
+					disabled := make([]string, 0, len(test.others))
+					for _, other := range test.others {
+						disabled = append(disabled, other(p))
+					}
+					line := "  change  disable " + strings.Join(
+						disabled,
+						", ",
+					) + " in " + path + ": " + test.kept(
+						p,
+					) + " replaces it"
+					switch {
+					case p.Name == zero.Name && len(disabled) == 1:
 						line += "; copy its pluginConfigs to " + test.kept(p)
+					case p.Name == zero.Name:
+						line += "; copy the pluginConfigs of " + carried(p) + " to " + test.kept(p)
 					}
 					if !strings.Contains(out.String(), line+"\n") {
 						t.Fatalf("missing %q:\n%s", line, out.String())
@@ -447,13 +499,16 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 				}
 				wantEnabled := map[string]any{}
 				for _, p := range testPlugins {
-					wantEnabled[test.other(p)], wantEnabled[test.kept(p)] = false, true
+					wantEnabled[test.kept(p)] = true
+					for _, other := range test.others {
+						wantEnabled[other(p)] = false
+					}
 				}
 				wantConfigs := map[string]any{
-					test.other(zero): map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-					test.kept(zero):  map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-					test.other(one):  map[string]any{"options": map[string]any{"a": float64(1)}},
-					test.kept(one):   map[string]any{"options": map[string]any{"b": float64(2)}},
+					carried(zero):   map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
+					test.kept(zero): map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
+					carried(one):    map[string]any{"options": map[string]any{"a": float64(1)}},
+					test.kept(one):  map[string]any{"options": map[string]any{"b": float64(2)}},
 				}
 				if !reflect.DeepEqual(got["enabledPlugins"], wantEnabled) ||
 					!reflect.DeepEqual(got["pluginConfigs"], wantConfigs) {
@@ -462,7 +517,7 @@ func TestEnsureClaudePluginsDisablesTheOtherCopy(t *testing.T) {
 				out.Reset()
 				if err := inst.ensureClaudePlugins(
 					context.Background(),
-				); err != nil ||
+				); (err != nil) != (!test.checkouts && test.version == alphaVersion) ||
 					strings.Contains(out.String(), "disable") {
 					t.Fatalf("second run err=%v:\n%s", err, out.String())
 				}
@@ -527,7 +582,19 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 			if test.fromClone {
 				inst.options.SourceRepo = root
 			}
-			if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+			simulateClaude(t, runner)
+			err := inst.ensureClaudePlugins(context.Background())
+			// On -alpha each listed plugin left on its GitHub copy is a failure naming the fallback.
+			for index, p := range testPlugins {
+				fallback := test.version == alphaVersion && !test.local[index]
+				named := err != nil && strings.Contains(err.Error(), "claude plugin "+p.ID+" in "+first+
+					": not installed from its -dev copy and enabled after this install: plugin "+p.Name+
+					" falls back to the GitHub copy")
+				if fallback != named {
+					t.Fatalf("%s: fallback=%v, err = %v\n%s", p.Name, fallback, err, out.String())
+				}
+			}
+			if err != nil && (test.version != alphaVersion || !slices.Contains(test.local, false)) {
 				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 			}
 			var want []pluginCall

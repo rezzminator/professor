@@ -103,7 +103,8 @@ func inspectPluginCopy(mirror string) (pluginCopyState, error) {
 	return pluginCopyDir, nil
 }
 
-// claudePluginCopyGap names what is wrong with a local target's copy, or "".
+// claudePluginCopyGap names what is wrong with a local target's copy — absent,
+// not a plain directory, or not the checkout's content — or "".
 func claudePluginCopyGap(target *ClaudePluginTarget) (string, error) {
 	mirror := target.Mirror()
 	state, err := inspectPluginCopy(mirror)
@@ -117,7 +118,11 @@ func claudePluginCopyGap(target *ClaudePluginTarget) (string, error) {
 	case state == pluginCopyNotDir:
 		return mirror + " is not a directory", nil
 	}
-	return "", nil
+	change, err := pluginCopyChange(target.Checkout, mirror)
+	if err != nil || change == "" {
+		return "", err
+	}
+	return mirror + " differs from " + target.Checkout, nil
 }
 
 // ensureClaudePluginCopy writes the local marketplace's manifest when it does
@@ -358,21 +363,37 @@ func mirrorPluginTree(source, target string) error {
 	return os.RemoveAll(aside)
 }
 
-// otherID is the id of ours this build does not ensure: the GitHub id
-// when it ensures the -dev copy, the -dev id otherwise.
-func (target ClaudePluginTarget) otherID() string {
-	if target.ID == target.DevID {
-		return target.GitHubID
+// copyIDs are the ids of a plugin of ours: its GitHub, professor and -dev
+// copies, each one the target has.
+func (target ClaudePluginTarget) copyIDs() []string {
+	var ids []string
+	for _, id := range []string{target.GitHubID, target.ProfessorID, target.DevID} {
+		if id != "" {
+			ids = append(ids, id)
+		}
 	}
-	return target.DevID
+	return ids
+}
+
+// OtherIDs are the ids of ours this build does not ensure: every copy but ID.
+func (target ClaudePluginTarget) OtherIDs() []string {
+	var others []string
+	for _, id := range target.copyIDs() {
+		if id != target.ID {
+			others = append(others, id)
+		}
+	}
+	return others
 }
 
 // planOtherCopyRetirement plans the settings.json edit that leaves only the
-// build's copy loading: the other id (otherID) set false in enabledPlugins
-// when it is enabled (never uninstalled) and its pluginConfigs entry copied to
-// the build's id when that id has none, never overwriting. It returns "" when
-// there is nothing to do. The edit writes through a settings.json symlink and
-// keeps every number exactly.
+// build's copy loading: every other id (OtherIDs) set false in enabledPlugins
+// when it is enabled (never uninstalled), and the pluginConfigs entry of the
+// first other id that has one copied to the build's id when that id has none,
+// never overwriting. An install-only target's own id is set false too:
+// claude.plugins does not list it. It returns "" when there is nothing to do.
+// The edit writes through a settings.json symlink and keeps every number
+// exactly.
 func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, func() error, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -385,26 +406,50 @@ func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, f
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
 		return "", nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	other := target.otherID()
+	others := target.OtherIDs()
 	enabled, _ := document["enabledPlugins"].(map[string]any)
-	disable := enabled[other] == true
-	configs, _ := document["pluginConfigs"].(map[string]any)
-	options, carried := configs[other]
-	_, kept := configs[target.ID]
-	carry := carried && !kept
-	if !disable && !carry {
-		return "", nil, nil
+	var disabled []string
+	if target.InstallOnly && enabled[target.ID] == true {
+		disabled = append(disabled, target.ID)
 	}
-	message := "copy the pluginConfigs of " + other + " to " + target.ID + " in " + path
-	if disable {
-		enabled[other] = false
-		message = "disable " + other + " in " + path + ": " + target.ID + " replaces it"
-		if carry {
-			message += "; copy its pluginConfigs to " + target.ID
+	for _, other := range others {
+		if enabled[other] == true {
+			disabled = append(disabled, other)
 		}
 	}
-	if carry {
-		configs[target.ID] = options
+	configs, _ := document["pluginConfigs"].(map[string]any)
+	carried := ""
+	if _, kept := configs[target.ID]; !kept {
+		for _, other := range others {
+			if _, ok := configs[other]; ok {
+				carried = other
+				break
+			}
+		}
+	}
+	if len(disabled) == 0 && carried == "" {
+		return "", nil, nil
+	}
+	message := "copy the pluginConfigs of " + carried + " to " + target.ID + " in " + path
+	if len(disabled) != 0 {
+		reason := target.ID + " replaces it"
+		if target.InstallOnly {
+			reason = pfmconfig.KeyClaudePlugins + " does not list " + target.Name
+		}
+		for _, id := range disabled {
+			enabled[id] = false
+		}
+		message = "disable " + strings.Join(disabled, ", ") + " in " + path + ": " + reason
+		switch {
+		case carried == "":
+		case len(disabled) == 1 && disabled[0] == carried:
+			message += "; copy its pluginConfigs to " + target.ID
+		default:
+			message += "; copy the pluginConfigs of " + carried + " to " + target.ID
+		}
+	}
+	if carried != "" {
+		configs[target.ID] = configs[carried]
 	}
 	return message, writeSettingsDocument(path, document), nil
 }

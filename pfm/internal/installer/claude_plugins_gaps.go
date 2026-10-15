@@ -27,10 +27,11 @@ type ClaudePluginGap struct {
 var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 
 // ClaudePluginGaps reads the store's settings.json and names every target id
-// not enabled, every plugin of ours enabled from both its GitHub and its -dev
-// marketplace, every local target whose copy is missing or a symlink, and every
-// other plugin enabled under two or more keys, and every enabled retired
-// default agent-effort copy. A
+// not enabled, every plugin of ours enabled under two or more of its copies'
+// ids (GitHub, professor, -dev), every install-only plugin enabled under any,
+// every local target whose copy is missing, not a plain directory or not the
+// checkout's content, every other plugin enabled under two or more keys, and
+// every enabled retired default agent-effort copy. A
 // missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
 // parsed returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
@@ -44,26 +45,46 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 	var gaps []ClaudePluginGap
 	for index := range targets {
 		target := &targets[index]
-		if !pluginEnabled(document, target.ID) {
-			gaps = append(gaps, ClaudePluginGap{"plugin " + target.ID + " not enabled in " + path, ClaudePluginRepair})
+		var enabledCopies []string
+		for _, id := range target.copyIDs() {
+			if pluginEnabled(document, id) {
+				enabledCopies = append(enabledCopies, id)
+			}
 		}
-		if pluginEnabled(document, target.GitHubID) && pluginEnabled(document, target.DevID) {
-			// Every build's install disables the copy it does not ensure.
-			gaps = append(gaps, ClaudePluginGap{
-				fmt.Sprintf(
-					"plugin %s enabled twice (%s and %s) in %s",
-					target.Name,
-					target.GitHubID,
-					target.DevID,
-					path,
-				),
-				ClaudePluginRepair,
-			})
+		if target.InstallOnly {
+			if len(enabledCopies) != 0 {
+				// Every -alpha install disables each copy claude.plugins does not list.
+				gaps = append(gaps, ClaudePluginGap{
+					fmt.Sprintf(
+						"plugin %s enabled (%s) in %s, but %s does not list it",
+						target.Name, strings.Join(enabledCopies, " and "), path, pfmconfig.KeyClaudePlugins,
+					),
+					ClaudePluginRepair,
+				})
+			}
+		} else {
+			if !pluginEnabled(document, target.ID) {
+				gaps = append(
+					gaps,
+					ClaudePluginGap{"plugin " + target.ID + " not enabled in " + path, ClaudePluginRepair},
+				)
+			}
+			if len(enabledCopies) > 1 {
+				// Every build's install disables the copies it does not ensure.
+				gaps = append(gaps, ClaudePluginGap{
+					fmt.Sprintf(
+						"plugin %s enabled %s (%s) in %s",
+						target.Name, timesWord(len(enabledCopies)), strings.Join(enabledCopies, " and "), path,
+					),
+					ClaudePluginRepair,
+				})
+			}
 		}
 		if target.Local {
 			gap, err := claudePluginCopyGap(target)
 			if err != nil {
-				return nil, err
+				// One unreadable tree is that plugin's gap; the rest are still read.
+				gap = target.Mirror() + " cannot be compared with " + target.Checkout + ": " + err.Error()
 			}
 			if gap != "" {
 				gaps = append(gaps, ClaudePluginGap{"plugin " + target.DevID + " copy " + gap, ClaudePluginRepair})
@@ -179,9 +200,9 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 // claudePluginDuplicateGaps names every plugin enabled under two or more
 // name@marketplace keys in document, managed by pfm or not, sorted by name. A
 // plugin whose every enabled key claude.plugins lists is left alone: pfm
-// install enables each listed key again. A plugin of ours enabled as exactly
-// its GitHub and -dev ids is left to ClaudePluginGaps' own duplicate gap, whose
-// repair pfm install owns. A key from the file prints with its control
+// install enables each listed key again. A plugin of ours enabled only under
+// its own copies' ids (GitHub, professor, -dev) is left to ClaudePluginGaps'
+// own gaps, whose repair pfm install owns. A key from the file prints with its control
 // characters escaped.
 func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
@@ -198,9 +219,7 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 	for index := range targets {
 		listed[targets[index].ID] = true
 		if targets[index].Own {
-			pair := []string{targets[index].GitHubID, targets[index].DevID}
-			slices.Sort(pair)
-			managed[targets[index].Name] = pair
+			managed[targets[index].Name] = targets[index].copyIDs()
 		}
 	}
 	var gaps []ClaudePluginGap
@@ -210,7 +229,8 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 			continue
 		}
 		slices.Sort(ids)
-		if slices.Equal(ids, managed[name]) || !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
+		ours := !slices.ContainsFunc(ids, func(id string) bool { return !slices.Contains(managed[name], id) })
+		if ours || !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
 			continue
 		}
 		shown := make([]string, len(ids))

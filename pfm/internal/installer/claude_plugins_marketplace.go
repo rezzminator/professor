@@ -8,7 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // ClaudePluginMarketplaceGaps reads the store's plugins/known_marketplaces.json
@@ -66,10 +70,101 @@ func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]
 				escapeControl(got),
 				target.Source,
 			),
-			"claude plugin marketplace remove " + marketplace + ", then " + ClaudePluginRepair,
+			claudeMarketplaceGapFix(target, marketplace),
 		})
 	}
 	return gaps, nil
+}
+
+// claudeMarketplaceGapFix repairs a marketplace registered from another
+// source: pfm install re-points a local target's own -dev marketplace; any
+// other is removed by hand first.
+func claudeMarketplaceGapFix(target *ClaudePluginTarget, marketplace string) string {
+	if target.Local {
+		return ClaudePluginRepair
+	}
+	return "claude plugin marketplace remove " + marketplace + ", then " + ClaudePluginRepair
+}
+
+// claudeMarketplaceRemoveFix is the repair when a re-point did not take: a
+// remove, which deletes what the marketplace's plugins saved.
+func claudeMarketplaceRemoveFix(marketplace string) string {
+	return "claude plugin marketplace remove " + marketplace +
+		" deletes the saved options and data of its plugins; run it only if they may go, then " + ClaudePluginRepair
+}
+
+// professorMarketplaceName is the marketplace the source clone's own
+// .claude-plugin/marketplace.json registers: {name}@professor is a copy of a
+// plugin of ours.
+const professorMarketplaceName = "professor"
+
+// marketplacePluginName is a plugin name the source clone's marketplace may
+// list: one safe path element, as a bare claude.plugins entry is.
+var marketplacePluginName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// WithMarketplacePlugins resolves an -alpha build's plugins against the source
+// clone's marketplace, {SourceRepo}/.claude-plugin/marketplace.json: with
+// claude.plugins unset (PluginsDefault) Plugins becomes every plugin it lists,
+// in its order, and Unlisted every plugin it lists that claude.plugins names in
+// no form, bare or name@marketplace. A release, and a build with no source
+// clone, is returned as it is; so is an explicit list beside a clone with no
+// marketplace file. A file that cannot be read, parsed or validated, a source
+// clone that could not be resolved, and a default list with no file to read
+// return the build unchanged with the error: install and doctor name it as a
+// failure and still plan the list, never an empty one.
+func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, error) {
+	if !obs.AlphaBuild(build.Version) {
+		return build, nil
+	}
+	if build.SourceRepoErr != nil {
+		return build, fmt.Errorf("marketplace plugin list unread: source clone unresolved: %w", build.SourceRepoErr)
+	}
+	if build.SourceRepo == "" {
+		return build, nil
+	}
+	path := filepath.Join(build.SourceRepo, ".claude-plugin", "marketplace.json")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) && !build.PluginsDefault {
+		return build, nil
+	}
+	if err != nil {
+		return build, fmt.Errorf("read the marketplace plugin list %s: %w", path, err)
+	}
+	var manifest devMarketplaceManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return build, fmt.Errorf("parse the marketplace plugin list %s: %w", path, err)
+	}
+	if len(manifest.Plugins) == 0 {
+		return build, fmt.Errorf("the marketplace plugin list %s lists no plugins", path)
+	}
+	names := make([]string, 0, len(manifest.Plugins))
+	for index, entry := range manifest.Plugins {
+		if !marketplacePluginName.MatchString(entry.Name) {
+			return build, fmt.Errorf("the marketplace plugin list %s: plugins[%d] name %q is not a plugin name",
+				path, index, escapeControl(entry.Name))
+		}
+		if slices.Contains(names, entry.Name) {
+			return build, fmt.Errorf("the marketplace plugin list %s lists %s twice", path, entry.Name)
+		}
+		names = append(names, entry.Name)
+	}
+	if build.PluginsDefault {
+		build.Plugins = make([]pfmconfig.ClaudePlugin, 0, len(names))
+		for _, name := range names {
+			build.Plugins = append(build.Plugins, pfmconfig.ClaudePlugin{ID: name})
+		}
+	}
+	listed := map[string]bool{}
+	for _, plugin := range build.Plugins {
+		listed[plugin.Name()] = true
+	}
+	build.Unlisted = nil
+	for _, name := range names {
+		if !listed[name] {
+			build.Unlisted = append(build.Unlisted, name)
+		}
+	}
+	return build, nil
 }
 
 // claudeMarketplaceRecord is the source Claude Code records for one marketplace

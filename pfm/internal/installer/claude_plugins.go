@@ -25,6 +25,9 @@ import (
 // account's config directory.
 const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
 
+// claudePluginCommand is the claude subcommand every plugin command runs under.
+const claudePluginCommand = "plugin"
+
 // claudePluginCommandTimeout bounds each `claude plugin` command: a plugin
 // command that hangs (a network wait, a prompt) must not stall pfm install.
 const claudePluginCommandTimeout = 2 * time.Minute
@@ -55,6 +58,13 @@ type ClaudePluginBuild struct {
 	SourceRepo    string
 	SourceRepoErr error
 	Plugins       []pfmconfig.ClaudePlugin
+	// PluginsDefault says claude.plugins is unset: an -alpha build then plans
+	// every plugin the source clone's marketplace lists (WithMarketplacePlugins).
+	PluginsDefault bool
+	// Unlisted is every plugin the source clone's marketplace lists that
+	// claude.plugins names in no form: an -alpha build installs each from its
+	// checkout and keeps every copy disabled (WithMarketplacePlugins).
+	Unlisted []string
 }
 
 // ClaudePluginTarget is one claude.plugins entry as this build ensures it. ID
@@ -82,6 +92,13 @@ type ClaudePluginTarget struct {
 	Own bool
 	// MarketplaceName is the marketplace a full id names; empty for a bare name.
 	MarketplaceName string
+	// ProfessorID is a bare name's id in the professor marketplace,
+	// {name}@professor: on an -alpha build a third copy of ours, retired like
+	// the GitHub one; empty on a release and when claude.plugins lists that id.
+	ProfessorID string
+	// InstallOnly marks an -alpha marketplace plugin claude.plugins does not
+	// name: installed from its checkout, every copy kept disabled.
+	InstallOnly bool
 }
 
 // NeedsKnownMarketplace reports whether the target installs only from a
@@ -93,10 +110,16 @@ func (target ClaudePluginTarget) NeedsKnownMarketplace() bool {
 // ClaudePluginTargets plans every claude.plugins entry for build. A bare name is
 // a plugin of ours: its GitHub repository rezzminator/{name} with the id
 // {name}@{name}, or on an -alpha build with a checkout its local -dev copy. A
-// full id is ensured as named, from the entry's source when it has one.
+// full id is ensured as named, from the entry's source when it has one. An
+// -alpha build then plans each of build.Unlisted as a bare name kept disabled
+// (InstallOnly).
 func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 	alpha := obs.AlphaBuild(build.Version)
-	targets := make([]ClaudePluginTarget, 0, len(build.Plugins))
+	targets := make([]ClaudePluginTarget, 0, len(build.Plugins)+len(build.Unlisted))
+	listed := map[string]bool{}
+	for _, plugin := range build.Plugins {
+		listed[plugin.ID] = true
+	}
 	for _, plugin := range build.Plugins {
 		if !plugin.Bare() {
 			targets = append(targets, ClaudePluginTarget{
@@ -107,21 +130,43 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 			})
 			continue
 		}
-		id := plugin.ID + "@" + plugin.ID
-		target := ClaudePluginTarget{
-			Name:     plugin.ID,
-			ID:       id,
-			GitHubID: id,
-			DevID:    plugin.ID + "@" + devMarketplaceName(plugin.ID),
-			Source:   claudePluginOwner + "/" + plugin.ID,
-			Own:      true,
+		targets = append(targets, ownClaudePluginTarget(plugin.ID, build, alpha, listed))
+	}
+	if alpha {
+		for _, name := range build.Unlisted {
+			target := ownClaudePluginTarget(name, build, alpha, listed)
+			target.InstallOnly = true
+			targets = append(targets, target)
 		}
-		if alpha {
-			target = localClaudePluginTarget(target, build)
-		}
-		targets = append(targets, target)
 	}
 	return targets
+}
+
+// ownClaudePluginTarget plans the bare name of a plugin of ours. On an -alpha
+// build its professor-marketplace id is a third copy, unless claude.plugins
+// lists that id itself.
+func ownClaudePluginTarget(
+	name string,
+	build ClaudePluginBuild,
+	alpha bool,
+	listed map[string]bool,
+) ClaudePluginTarget {
+	id := name + "@" + name
+	target := ClaudePluginTarget{
+		Name:     name,
+		ID:       id,
+		GitHubID: id,
+		DevID:    name + "@" + devMarketplaceName(name),
+		Source:   claudePluginOwner + "/" + name,
+		Own:      true,
+	}
+	if !alpha {
+		return target
+	}
+	if professor := name + "@" + professorMarketplaceName; !listed[professor] {
+		target.ProfessorID = professor
+	}
+	return localClaudePluginTarget(target, build)
 }
 
 // BareClaudePluginRepair is the repair install's FAIL line (and pfm doctor)
@@ -135,9 +180,40 @@ func BareClaudePluginRepair(name string) string {
 	)
 }
 
-// FallbackNote is the one line install and doctor print for a Fallback.
+// FallbackNote is the one line install and doctor print for a Fallback. An
+// install-only plugin never falls back: with no checkout it is not installed.
 func (target ClaudePluginTarget) FallbackNote() string {
+	if target.InstallOnly {
+		return target.Name + ": not installed — " + pfmconfig.KeyClaudePlugins +
+			" does not list it and this alpha build has no checkout of it: " + target.Fallback
+	}
 	return target.Name + ": alpha build falls back to the GitHub copy " + target.GitHubID + " — " + target.Fallback
+}
+
+// ClaudePluginFallbackGap is a Fallback as the gap an -alpha install fails a
+// listed plugin on and doctor reports.
+func ClaudePluginFallbackGap(target ClaudePluginTarget) ClaudePluginGap {
+	if target.InstallOnly {
+		return ClaudePluginGap{
+			Problem: "plugin " + target.Name + " is not installed on this alpha build: " +
+				pfmconfig.KeyClaudePlugins + " does not list it and " + target.Fallback,
+			Fix: "check the plugin out where named, or set " + pfmconfig.KeyClaudePluginCheckoutRoot + ", then " +
+				ClaudePluginRepair,
+		}
+	}
+	return ClaudePluginGap{
+		Problem: "plugin " + target.Name + " falls back to the GitHub copy " + target.GitHubID +
+			" on this alpha build: " + target.Fallback,
+		Fix: "check the plugin out where named, or set " + pfmconfig.KeyClaudePluginCheckoutRoot + ", then " +
+			ClaudePluginRepair,
+	}
+}
+
+// ClaudePluginGapNames reports whether problem is about the plugin name: it
+// opens "plugin {name}" followed by a space, an "@" or a colon.
+func ClaudePluginGapNames(problem, name string) bool {
+	rest, ok := strings.CutPrefix(problem, "plugin "+name)
+	return ok && rest != "" && strings.ContainsRune(" @:", rune(rest[0]))
 }
 
 // UndecidedNote names an Undecided target's two copies and why neither is chosen.
@@ -175,10 +251,14 @@ func pluginEnabled(document map[string]any, id string) bool {
 // claude subprocess runs on the store (it would write .claude.json and backups
 // there). A --config-dir on a roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
 // An -alpha build ensures each bare name with a checkout from its local copy
-// (ClaudePluginTargets); every build then disables the copy of ours it does not
-// ensure. A bare name whose source is undecided is a failure naming the error,
-// both its copies left as they are. A listed id pfm cannot install is a
-// failure naming it; an id the list does not name is never read or written.
+// (ClaudePluginTargets), plus every other plugin the source clone's
+// marketplace lists, installed and kept disabled (WithMarketplacePlugins);
+// every build then disables the copies of ours it does not ensure. A bare name
+// whose source is undecided is a failure naming the error, its copies left as
+// they are. A listed id pfm cannot install is a failure naming it; an id the
+// list does not name is never read or written. An applied -alpha install ends
+// by reading every listed plugin of ours back: one not installed from its -dev
+// copy and enabled is a failure (checkListedClaudePlugins).
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	dir := installer.options.PrimaryConfigDir
 	if dir == "" {
@@ -200,148 +280,321 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	// The clone the global links anchor on is the one whose plugins/ an
 	// -alpha build copies from when claude.pluginCheckoutRoot is unset.
 	sourceRepo, sourceRepoErr := installer.globalSourceRepoRoot()
-	targets := ClaudePluginTargets(ClaudePluginBuild{
-		Version:       installer.options.Version,
-		Home:          installer.options.Home,
-		CheckoutRoot:  installer.options.ClaudePluginCheckoutRoot,
-		SourceRepo:    sourceRepo,
-		SourceRepoErr: sourceRepoErr,
-		Plugins:       installer.options.ClaudePlugins,
-	})
+	run := &claudePluginRun{dir: dir, settingsPath: filepath.Join(dir, "settings.json")}
+	build, listErr := ClaudePluginBuild{
+		Version:        installer.options.Version,
+		Home:           installer.options.Home,
+		CheckoutRoot:   installer.options.ClaudePluginCheckoutRoot,
+		SourceRepo:     sourceRepo,
+		SourceRepoErr:  sourceRepoErr,
+		Plugins:        installer.options.ClaudePlugins,
+		PluginsDefault: installer.options.ClaudePluginsDefault,
+	}.WithMarketplacePlugins()
+	if listErr != nil {
+		run.failures = append(run.failures, installer.pluginStepFailure(dir, listErr))
+	}
+	targets := ClaudePluginTargets(build)
 	for index := range targets {
 		target := &targets[index]
 		if target.Fallback != "" {
 			installer.skip("claude plugin " + target.FallbackNote())
 		}
 	}
-	settingsPath := filepath.Join(dir, "settings.json")
-	document, err := readClaudeSettingsDocument(settingsPath)
+	var err error
+	run.document, err = readClaudeSettingsDocument(run.settingsPath)
 	if err != nil {
-		return installer.pluginStepFailure(dir, fmt.Errorf("settings unreadable, state unknown: %w", err))
+		return errors.Join(append(run.failures,
+			installer.pluginStepFailure(dir, fmt.Errorf("settings unreadable, state unknown: %w", err)))...)
 	}
-	missing, err := ClaudePluginsNotInstalled(dir, targets)
+	run.missing, err = ClaudePluginsNotInstalled(dir, targets)
 	if err != nil {
-		return installer.pluginStepFailure(dir, fmt.Errorf("install record unreadable, state unknown: %w", err))
+		return errors.Join(append(run.failures,
+			installer.pluginStepFailure(dir, fmt.Errorf("install record unreadable, state unknown: %w", err)))...)
 	}
 	// An unreadable marketplace record fails only the ids that need it, below.
-	unresolved, unresolvedErr := ClaudePluginsUnresolved(dir, targets)
-	binary, resolveErr := ResolveClaudeBinary(
+	run.unresolved, run.unresolvedErr = ClaudePluginsUnresolved(dir, targets)
+	run.binary, run.resolveErr = ResolveClaudeBinary(
 		installer.options.Home,
 		installer.options.ClaudeBinary,
 		installer.env().Get("PATH"),
 	)
-	var failures []error
-	guarded, blocked := false, false
-	// blockedByLiveChats asks once, before the first command or settings edit.
-	blockedByLiveChats := func() (bool, error) {
-		if guarded {
-			return blocked, nil
-		}
-		guarded = true
-		live, liveErr := installer.pluginLiveChats(dir)
-		blocked = live
-		return live, liveErr
-	}
-	// probeFailed ends the loop at a failed live-chat probe, keeping every
-	// failure an earlier plugin already hit. A live chat itself holds back only
-	// commands and settings edits: every later plugin's copy is still refreshed.
-	probeFailed := func(id string, err error) error {
-		failures = append(failures, installer.pluginFailure(dir, id, err))
-		return errors.Join(failures...)
-	}
+	failed := map[int]bool{}
 	for index := range targets {
-		target := &targets[index]
-		if target.Undecided != "" {
-			// Neither copy is installed, enabled or disabled on an error.
-			failures = append(failures, installer.pluginFailure(
-				dir, target.Name, errors.New(target.UndecidedNote()+"; both left as they are"),
-			))
-			continue
+		before := len(run.failures)
+		installer.ensureClaudePluginTarget(ctx, run, &targets[index])
+		if run.stopped {
+			// A failed live-chat probe ends the pass, keeping every failure an
+			// earlier plugin already hit.
+			return errors.Join(run.failures...)
 		}
-		if gap, ok := unresolved[target.ID]; ok {
-			failures = append(
-				failures,
-				installer.pluginFailure(dir, target.ID, fmt.Errorf("%s — %s", gap.Problem, gap.Fix)),
-			)
-			continue
-		}
-		ensured := pluginEnabled(document, target.ID) && !slices.Contains(missing, target.ID)
-		if unresolvedErr != nil && target.NeedsKnownMarketplace() && !ensured {
-			failures = append(failures, installer.pluginFailure(
-				dir, target.ID, fmt.Errorf("marketplace record unreadable, state unknown: %w", unresolvedErr),
-			))
-			continue
-		}
-		if target.Local {
-			if err := installer.ensureClaudePluginCopy(target); err != nil {
-				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-				continue
-			}
-		}
-		if ensured {
-			installer.ok("claude plugin " + target.ID + " installed and enabled in " + dir)
-		} else {
-			if resolveErr != nil {
-				installer.skip(
-					fmt.Sprintf(
-						"claude plugin %s in %s: real claude binary not resolved: %v",
-						target.ID,
-						dir,
-						resolveErr,
-					),
-				)
-				continue
-			}
-			stop, err := blockedByLiveChats()
-			if err != nil {
-				return probeFailed(target.ID, err)
-			}
-			if stop {
-				continue
-			}
-			if err := installer.installClaudePlugin(ctx, binary, dir, target); err != nil {
-				if target.Own && !target.Local {
-					err = fmt.Errorf("%w — %s", err, BareClaudePluginRepair(target.Name))
-				}
-				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-				continue
-			}
-		}
-		if !target.Own {
-			// A listed full id is ensured as named; its settings entries are all
-			// that is touched, and no other id is its twin to retire.
-			continue
-		}
-		for _, plan := range []func(string, *ClaudePluginTarget) (string, func() error, error){
-			planOtherCopyRetirement, planRetiredPluginDisable,
-		} {
-			message, edit, err := plan(settingsPath, target)
-			if err != nil {
-				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-				break
-			}
-			if message == "" {
-				continue
-			}
-			stop, err := blockedByLiveChats()
-			if err != nil {
-				return probeFailed(target.ID, err)
-			}
-			if stop {
-				break
-			}
-			if err := installer.change(message, edit); err != nil {
-				failures = append(failures, installer.pluginFailure(dir, target.ID, err))
-			}
-		}
+		failed[index] = len(run.failures) > before
 	}
-	return errors.Join(failures...)
+	if installer.apply && obs.AlphaBuild(installer.options.Version) {
+		installer.checkListedClaudePlugins(run, targets, failed)
+	}
+	return errors.Join(run.failures...)
 }
 
-// pluginLiveChats reports whether a live chat on the chosen dir, a passed
-// account or a roster dir holds the plugin commands back, printing the skip
-// line that names them.
-func (installer *engine) pluginLiveChats(dir string) (bool, error) {
+// claudePluginRun is one ensureClaudePlugins pass: the account dir it runs
+// through, what it read before the first plugin, the live chats holding its
+// commands back, and its failures.
+type claudePluginRun struct {
+	dir           string
+	settingsPath  string
+	document      map[string]any
+	missing       []string
+	unresolved    map[string]ClaudePluginGap
+	unresolvedErr error
+	binary        string
+	resolveErr    error
+	// guarded says the live-chat probe ran; liveChats is its line, "" when none.
+	guarded   bool
+	liveChats string
+	// stopped says the live-chat probe failed: the pass ends.
+	stopped  bool
+	failures []error
+}
+
+// ensureClaudePluginTarget ensures one target, appending each failure to run.
+func (installer *engine) ensureClaudePluginTarget(
+	ctx context.Context,
+	run *claudePluginRun,
+	target *ClaudePluginTarget,
+) {
+	fail := func(err error) { run.failures = append(run.failures, installer.pluginFailure(run.dir, target.ID, err)) }
+	if target.Undecided != "" {
+		// No copy is installed, enabled or disabled on an error.
+		run.failures = append(run.failures, installer.pluginFailure(
+			run.dir, target.Name, errors.New(target.UndecidedNote()+"; both left as they are"),
+		))
+		return
+	}
+	if gap, ok := run.unresolved[target.ID]; ok {
+		fail(fmt.Errorf("%s — %s", gap.Problem, gap.Fix))
+		return
+	}
+	installed := !slices.Contains(run.missing, target.ID)
+	// An install-only plugin is ensured once installed: enabling it is no part of it.
+	ensured := installed && (target.InstallOnly || pluginEnabled(run.document, target.ID))
+	if run.unresolvedErr != nil && target.NeedsKnownMarketplace() && !ensured {
+		fail(fmt.Errorf("marketplace record unreadable, state unknown: %w", run.unresolvedErr))
+		return
+	}
+	if target.Local {
+		if target.Name == callmeterPlugin {
+			// The copy's hooks run the binary of its version: it goes first.
+			if err := installer.ensureCallmeterBinary(ctx, target); err != nil {
+				fail(err)
+				return
+			}
+		}
+		if err := installer.ensureClaudePluginCopy(target); err != nil {
+			fail(err)
+			return
+		}
+	}
+	if target.Local && ensured {
+		// An install below runs the same add; an installed copy needs its own.
+		held, err := installer.repointClaudePluginMarketplace(ctx, run, target)
+		if err != nil {
+			fail(err)
+			return
+		}
+		if held || run.stopped {
+			// A held re-point leaves the copy pointing elsewhere: never called ensured.
+			return
+		}
+	}
+	switch {
+	case ensured && target.InstallOnly:
+		line := "claude plugin " + target.ID + " installed in " + run.dir
+		// A copy found enabled is disabled below, or held back by a live chat: never called kept disabled.
+		if !slices.ContainsFunc(target.copyIDs(), func(id string) bool { return pluginEnabled(run.document, id) }) {
+			line += ", kept disabled: " + pfmconfig.KeyClaudePlugins + " does not list " + target.Name
+		}
+		installer.ok(line)
+	case ensured:
+		installer.ok("claude plugin " + target.ID + " installed and enabled in " + run.dir)
+	case run.resolveErr != nil:
+		installer.skip(fmt.Sprintf(
+			"claude plugin %s in %s: real claude binary not resolved: %v", target.ID, run.dir, run.resolveErr,
+		))
+		return
+	case target.InstallOnly && !target.Local:
+		// Unlisted with no checkout: never installed from GitHub; its skip line
+		// is printed above, and a copy found enabled is still disabled below.
+	case installer.pluginCommandsHeld(run, target.ID):
+		return
+	default:
+		if err := installer.installClaudePlugin(ctx, run.binary, run.dir, target); err != nil {
+			if target.Own && !target.Local {
+				err = fmt.Errorf("%w — %s", err, BareClaudePluginRepair(target.Name))
+			}
+			fail(err)
+			return
+		}
+		if target.InstallOnly && !installer.apply {
+			// The install enables it and the edit after it disables it; a preview
+			// reads settings from before the install, so it names that edit here.
+			_ = installer.change("disable "+target.ID+" in "+run.settingsPath+": "+
+				pfmconfig.KeyClaudePlugins+" does not list "+target.Name, nil)
+		}
+	}
+	if !target.Own {
+		// A listed full id is ensured as named; its settings entries are all
+		// that is touched, and no other id is its twin to retire.
+		return
+	}
+	for _, plan := range []func(string, *ClaudePluginTarget) (string, func() error, error){
+		planOtherCopyRetirement, planRetiredPluginDisable,
+	} {
+		message, edit, err := plan(run.settingsPath, target)
+		if err != nil {
+			fail(err)
+			return
+		}
+		if message == "" {
+			continue
+		}
+		if installer.pluginCommandsHeld(run, target.ID) {
+			return
+		}
+		if err := installer.change(message, edit); err != nil {
+			fail(err)
+		}
+	}
+}
+
+// pluginCommandsHeld reports whether a live chat holds plugin commands and
+// settings edits back, probing once, before the first. A live chat holds back
+// only those: every later plugin's copy is still refreshed. A probe that fails
+// is a failure naming id and stops the pass.
+func (installer *engine) pluginCommandsHeld(run *claudePluginRun, id string) bool {
+	if !run.guarded {
+		run.guarded = true
+		live, err := installer.pluginLiveChats(run.dir)
+		if err != nil {
+			run.failures = append(run.failures, installer.pluginFailure(run.dir, id, err))
+			run.stopped = true
+		} else if live != "" {
+			run.liveChats = live
+			installer.skip("claude plugins: " + live + " — close them and rerun pfm install --yes")
+		}
+	}
+	return run.stopped || run.liveChats != ""
+}
+
+// repointClaudePluginMarketplace re-points an installed local target's
+// marketplace that Claude Code knows from another source at the target's own
+// dir: `plugin
+// marketplace add` on a known name re-points it and keeps its plugins and their
+// options, which `plugin marketplace remove` would delete. A live chat holds it
+// back like every command, reported as held; an applied re-point is read back,
+// and a marketplace still pointing elsewhere is an error.
+func (installer *engine) repointClaudePluginMarketplace(
+	ctx context.Context,
+	run *claudePluginRun,
+	target *ClaudePluginTarget,
+) (held bool, err error) {
+	one := []ClaudePluginTarget{*target}
+	gaps, err := ClaudePluginMarketplaceGaps(run.dir, one)
+	if err != nil || len(gaps) == 0 {
+		return false, err
+	}
+	if run.resolveErr != nil {
+		return false, fmt.Errorf("%s, and the real claude binary that re-points it is not resolved: %w",
+			gaps[0].Problem, run.resolveErr)
+	}
+	if installer.pluginCommandsHeld(run, target.ID) {
+		return !run.stopped, nil
+	}
+	add := []string{run.binary, claudePluginCommand, "marketplace", "add", target.Source}
+	message := fmt.Sprintf("run %s=%s %s: %s", claudeConfigDirEnv, run.dir, shellCommandLine(add...), gaps[0].Problem)
+	return false, installer.change(message, func() error {
+		options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir)}
+		if err := runClaudePluginCommand(ctx, installer.processRunner(), add, options); err != nil {
+			return err
+		}
+		after, err := ClaudePluginMarketplaceGaps(run.dir, one)
+		if err != nil {
+			return err
+		}
+		if len(after) != 0 {
+			_, marketplace, _ := strings.Cut(target.ID, "@")
+			return fmt.Errorf("%s after the add — %s", after[0].Problem, claudeMarketplaceRemoveFix(marketplace))
+		}
+		return nil
+	})
+}
+
+// checkListedClaudePlugins reads back, after an applied -alpha pass, every
+// plugin of ours claude.plugins lists that the pass did not already fail: one
+// not installed from its -dev copy and enabled is a failure naming each problem
+// pfm doctor reports for it, and the live chats that held its commands back.
+func (installer *engine) checkListedClaudePlugins(
+	run *claudePluginRun,
+	targets []ClaudePluginTarget,
+	failed map[int]bool,
+) {
+	for index := range targets {
+		target := targets[index]
+		if !target.Own || target.InstallOnly || failed[index] {
+			continue
+		}
+		problems, err := listedClaudePluginProblems(run.dir, target)
+		if err != nil {
+			problems = append(problems, "state unknown: "+err.Error())
+		}
+		if len(problems) == 0 {
+			continue
+		}
+		text := "not installed from its -dev copy and enabled after this install: " + strings.Join(problems, "; ")
+		if run.liveChats != "" {
+			text += "; plugin commands deferred: " + run.liveChats
+		}
+		run.failures = append(run.failures, installer.pluginFailure(run.dir, target.ID, errors.New(text)))
+	}
+}
+
+// listedClaudePluginProblems is every problem of target in the account dir:
+// its fallback, and each settings, install-record and marketplace gap naming it.
+func listedClaudePluginProblems(dir string, target ClaudePluginTarget) ([]string, error) {
+	one := []ClaudePluginTarget{target}
+	var problems []string
+	if target.Fallback != "" {
+		problems = append(problems, ClaudePluginFallbackGap(target).Problem)
+	}
+	settings := filepath.Join(dir, "settings.json")
+	gaps, err := ClaudePluginGaps(settings, one)
+	if errors.Is(err, ErrClaudeSettingsAbsent) {
+		// No settings.json: nothing is enabled.
+		gaps = []ClaudePluginGap{{Problem: "plugin " + target.ID + " not enabled in " + settings + " (no such file)"}}
+	} else if err != nil {
+		return problems, err
+	}
+	marketplaceGaps, err := ClaudePluginMarketplaceGaps(dir, one)
+	if err != nil {
+		return problems, err
+	}
+	missing, err := ClaudePluginsNotInstalled(dir, one)
+	if err != nil {
+		return problems, err
+	}
+	for _, id := range missing {
+		problems = append(problems, "plugin "+id+" not installed in "+dir)
+	}
+	for _, gap := range append(gaps, marketplaceGaps...) {
+		if ClaudePluginGapNames(gap.Problem, target.Name) {
+			problems = append(problems, gap.Problem)
+		}
+	}
+	return problems, nil
+}
+
+// pluginLiveChats names the live chats on the chosen dir, a passed account or
+// a roster dir that hold the plugin commands back — "live chats {pids} on
+// {dirs}" — or "" when there is none.
+func (installer *engine) pluginLiveChats(dir string) (string, error) {
 	dirs := []string{dir}
 	for _, account := range installer.options.ClaudeAccounts {
 		dirs = append(dirs, account.ConfigDir)
@@ -361,7 +614,7 @@ func (installer *engine) pluginLiveChats(dir string) (bool, error) {
 		seen[physical] = true
 		live, err := liveChatPIDs(installer.options.ProcRoot, accountDir)
 		if err != nil {
-			return false, fmt.Errorf("read live chats in %s: %w", accountDir, err)
+			return "", fmt.Errorf("read live chats in %s: %w", accountDir, err)
 		}
 		if len(live) > 0 {
 			liveDirs = append(liveDirs, accountDir)
@@ -372,7 +625,7 @@ func (installer *engine) pluginLiveChats(dir string) (bool, error) {
 		}
 	}
 	if len(pids) == 0 {
-		return false, nil
+		return "", nil
 	}
 	ordered := make([]int, 0, len(pids))
 	for pid := range pids {
@@ -383,14 +636,7 @@ func (installer *engine) pluginLiveChats(dir string) (bool, error) {
 	for _, pid := range ordered {
 		names = append(names, strconv.Itoa(pid))
 	}
-	installer.skip(
-		fmt.Sprintf(
-			"claude plugins: live chats %s on %s — close them and rerun pfm install --yes",
-			strings.Join(names, ","),
-			strings.Join(liveDirs, ","),
-		),
-	)
-	return true, nil
+	return fmt.Sprintf("live chats %s on %s", strings.Join(names, ","), strings.Join(liveDirs, ",")), nil
 }
 
 func (installer *engine) installClaudePlugin(
@@ -398,11 +644,11 @@ func (installer *engine) installClaudePlugin(
 	binary, dir string,
 	target *ClaudePluginTarget,
 ) error {
-	install := []string{binary, "plugin", "install", target.ID, "-y"}
+	install := []string{binary, claudePluginCommand, "install", target.ID, "-y"}
 	var add []string
 	message := fmt.Sprintf("run %s=%s %s", claudeConfigDirEnv, dir, shellCommandLine(install...))
 	if target.Source != "" {
-		add = []string{binary, "plugin", "marketplace", "add", target.Source}
+		add = []string{binary, claudePluginCommand, "marketplace", "add", target.Source}
 		message = fmt.Sprintf(
 			"run %s=%s %s && %s", claudeConfigDirEnv, dir, shellCommandLine(add...), shellCommandLine(install...),
 		)
@@ -440,7 +686,19 @@ func pluginCommandEnvironment(dir string) []string {
 }
 
 func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []string, options deps.RunOptions) error {
-	cmdCtx, cancel := context.WithTimeout(ctx, claudePluginTimeout)
+	return runPluginCommandWithin(ctx, runner, argv, options, claudePluginTimeout)
+}
+
+// runPluginCommandWithin runs argv in its own process group under timeout,
+// any failure an error naming the command, its exit code and its stderr.
+func runPluginCommandWithin(
+	ctx context.Context,
+	runner deps.Runner,
+	argv []string,
+	options deps.RunOptions,
+	timeout time.Duration,
+) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	options.ProcessGroup = true
 	options.WaitDelay = claudePluginWaitDelay
@@ -450,7 +708,7 @@ func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []stri
 			return fmt.Errorf("%s: cancelled: %w", strings.Join(argv[1:], " "), ctx.Err())
 		}
 		return fmt.Errorf(
-			"%s: timed out after %s: %w", strings.Join(argv[1:], " "), claudePluginTimeout, cmdCtx.Err(),
+			"%s: timed out after %s: %w", strings.Join(argv[1:], " "), timeout, cmdCtx.Err(),
 		)
 	}
 	if err != nil {

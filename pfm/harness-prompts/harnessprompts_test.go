@@ -14,10 +14,10 @@ import (
 // baseline would otherwise read as a smaller tree that still passes.
 var expectedParts = []string{
 	"README.md",
-	"claude/baselines/harness-opus-v2.1.280.md",
+	"claude/baselines/harness-opus-v2.1.300.md",
 	"claude/baselines/harness-opus.model",
 	"claude/baselines/harness-opus.sha256",
-	"claude/baselines/harness-original-v2.1.292.md",
+	"claude/baselines/harness-original-v2.1.300.md",
 	"claude/baselines/harness-original.model",
 	"claude/baselines/harness-original.sha256",
 	"claude/professor.md",

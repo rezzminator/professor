@@ -46,6 +46,7 @@ func ReportGlobalAgents(
 	claudeAbsent bool,
 	env paths.Env,
 	capabilities []string,
+	accountDirs []string,
 	codexHomes ...string,
 ) (warnings, failures int) {
 	if len(codexHomes) == 0 {
@@ -76,7 +77,7 @@ func ReportGlobalAgents(
 		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
 		return 0, 1
 	}
-	versionWarnings, versionFailures := ReportEngineSyncVersions(w, home, env)
+	versionWarnings, versionFailures := ReportEngineSyncVersions(w, home, env, accountDirs)
 	warnings += versionWarnings
 	failures += versionFailures
 	rows, err := runner.MachineDoctor(context.Background(), options)

@@ -872,7 +872,7 @@ func TestStaleStateTmpAge(t *testing.T) {
 
 func TestUnclassifiedExcludesKnownAndBackupNames(t *testing.T) {
 	env := fixtureEnv(t)
-	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture", "debug", "daemon.lock", "daemon.status.json", "tmp"} {
+	for _, name := range []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json", "settings.json", ".claude.json", "settings.bak-fixture", "settings.before-fixture", "settings.pre-professor-fixture", "debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp"} {
 		writeFile(t, filepath.Join(env.Store, name), "{}")
 	}
 	assertRows(t, detect(t, "unclassified", env))
@@ -891,6 +891,26 @@ func TestUnclassifiedExcludesKnownAndBackupNames(t *testing.T) {
 		)
 	}
 	assertRows(t, detect(t, "beside-backup", env), want...)
+}
+
+// TestUnclassifiedSparesStoreMarkdown: a regular *.md file at the store's top
+// level is the user's own material, shared by construction; the same name in an
+// account dir, a *.md dir and an unknown non-md store entry still report.
+func TestUnclassifiedSparesStoreMarkdown(t *testing.T) {
+	env := fixtureEnv(t)
+	account := filepath.Join(env.Accounts[0].ConfigDir, "notes.md")
+	drafts, text := filepath.Join(env.Store, "drafts.md"), filepath.Join(env.Store, "notes.txt")
+	for _, path := range []string{filepath.Join(env.Store, "notes.md"), account, text} {
+		writeFile(t, path, "# notes")
+	}
+	makeDir(t, drafts)
+	var want []Row
+	for _, path := range []string{drafts, text, account} {
+		problem := "UNCLASSIFIED — on neither the shared nor the per-account list"
+		fix := "keep it; pfm doctor names it until a pfm release classifies it"
+		want = append(want, Row{Warn, "unclassified", path, problem, fix})
+	}
+	assertRows(t, detect(t, "unclassified", env), want...)
 }
 
 // TestStoreIdentityFixRunsOnAFirstMigration runs the printed fixes on the

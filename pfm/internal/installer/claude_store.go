@@ -72,11 +72,12 @@ var AccountEntries = []string{
 
 // IgnoredEntries are neither shared nor per-account identity: IDE locks, pfm's
 // pane bookkeeping, a project settings name, Claude Code's own runtime scratch
-// (debug logs, the daemon's lock and status, temp files) and the native runtime
-// and user customization paths it keeps in place (chrome, dev-mods, keybindings).
+// (debug logs, the daemon's lock and status, the state file's write lock, temp
+// files) and the native runtime and user customization paths it keeps in place
+// (chrome, dev-mods, keybindings).
 var IgnoredEntries = []string{
 	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
-	"debug", "daemon.lock", "daemon.status.json", "tmp",
+	"debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp",
 	"chrome", "dev-mods", "keybindings.json", "hooks",
 }
 

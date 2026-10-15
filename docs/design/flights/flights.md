@@ -23,7 +23,7 @@ A change lands in the design doc first, then in the template, then in every surf
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
 | `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors; cuts its door list into a spine and segments; data shapes, decision, build; freezes the interface or spine and spawns one child foreman per other build unit, unrelated problem or `CHILD` segment; verifies their returns; lands through the lander | `sonnet`, effort `high` |
-| `flights-speccer` | agent | Writes the ideal `spec.md` for work the codebase has no pattern for: research, dependencies both ways, the quality laws, every decision weighed with its tokens against its worth first; the root foreman's spawn before its base gate on novel work, or any chat's own for a spec without the build | `opus`, effort `xhigh` |
+| `flights-speccer` | agent | Writes `spec.md` for novel, large work the codebase has no pattern for: the simplest design that meets the request, research (an existing tool first), dependencies both ways, the quality laws, every element priced against its real use; the root foreman's spawn before its base gate on novel, large work, or any chat's own for a spec without the build | `opus`, effort `xhigh` |
 | `flights-lander` | agent | The landing's gate, one per flight: every project's gate, one review of the whole diff across every project, adversarial tests, its own fixes; the testing manuals' floors are its gate rows | `opus`, effort `high` |
 | `flights-mechanical-executor` | agent | One bulk edit a foreman fully fixed (a rename across many files), from a task file the foreman writes | `sonnet` |
 | `/flights:init` | command | Readies a project for flights, once: maps its build units inside-out, writes the project map, and gives each unit a testing manual, a test command and a static-check command | the main chat |
@@ -36,8 +36,8 @@ Four agents, four commands. Project law reaches them through the project contrac
 ## The lifecycle
 
 1. Ready. `/flights:init`, once per project: the project map, and each unit's testing manual, test command and static-check command. Re-run, it builds only what is missing and aligns what is stale.
-2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request; a chat that wants only the ideal spec of novel work spawns `flights-speccer` on its own.
-3. Build. One root `flights-foreman`: for work with no pattern in the codebase, first one `flights-speccer`, whose `spec.md` becomes the request; the base gate, the doors; the cut; the data shapes, the decision; the interface frozen in the innermost unit, or the spine inside one; the producer built by the foreman that read it; one child foreman per other unit or segment, in parallel against it; every return verified; the owner repairs its own reds.
+2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request; a chat that wants only the spec of novel, large work spawns `flights-speccer` on its own.
+3. Build. One root `flights-foreman`: for novel, large work with no pattern in the codebase, first one `flights-speccer`, whose `spec.md` becomes the request; the base gate, the doors; the cut; the data shapes, the decision; the interface frozen in the innermost unit, or the spine inside one; the producer built by the foreman that read it; one child foreman per other unit or segment, in parallel against it; every return verified; the owner repairs its own reds.
 4. Land. One `flights-lander` for the whole flight, then, when the caller ordered it, the commit and, for a worktree flight, the merge through the repository's git writer, the lander's `PASS` or `FIXED` being the merge nod.
 5. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
 
@@ -46,7 +46,7 @@ Four agents, four commands. Project law reaches them through the project contrac
 ```text
 $HOME/.local/state/pfm/flights/{project}/{flight}/
   requirements.md the binding rulings and requirement rows   written by /flights:spec
-  spec.md         the ideal spec of novel work               written by flights-speccer
+  spec.md         the spec of novel, large work              written by flights-speccer
   run.md          the ledger of the run                      written by the root flights-foreman
   agents.tsv      one row per spawn: unit, type, agent id, round, time, engine   appended by the root flights-foreman
   briefs/         one brief file per spawn                   written by the spawning foreman

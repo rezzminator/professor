@@ -220,7 +220,7 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 	t.Cleanup(func() { _ = os.Chmod(markerDir, 0o755) })
 
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil)
 	if warnings != 1 || failures != 0 {
 		t.Fatalf("warnings=%d failures=%d, want 1/0\n%s", warnings, failures, output.String())
 	}
@@ -294,6 +294,7 @@ func TestReportGlobalAgentsRendersEngineSyncRows(t *testing.T) {
 				testCase.claudeAbsent,
 				paths.OSEnv{},
 				testCase.capabilities,
+				nil,
 				testCase.codexHomes...)
 			if warnings != 1 || failures != 1 {
 				t.Fatalf("warnings=%d failures=%d, want 1/1\n%s", warnings, failures, output.String())
@@ -319,7 +320,7 @@ func TestReportGlobalAgentsWithoutEngineSyncIsAFailingRow(t *testing.T) {
 	t.Setenv("ENGINE_SYNC_HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil)
 	if warnings != 0 || failures != 1 {
 		t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 	}

@@ -1178,14 +1178,16 @@ else
   bad 'sampler stop waits for armed-trap header and finishes after bootstrap' "rc=$boot_rc" "$(cat "$T/boot/out")"
 fi
 # A tracked templates/generated/agents file no fresh render produces (an
-# orphan, or a render the sources moved past) is a red step naming it.
+# orphan, or a render the sources moved past) is a red step naming it; the
+# hand-written templates/generated/README.md beside agents/ is never compared.
 mkdir -p "$REPO_ROOT/templates/generated/agents"
 printf -- '---\nname: ghost\n---\n' > "$REPO_ROOT/templates/generated/agents/ghost.md"
+printf -- '# templates/generated\n' > "$REPO_ROOT/templates/generated/README.md"
 es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names"
-if grep -Fq 'ghost.md' "$T/es.out" &&
-  grep -Fq 'FAILSTEP generated agents: tracked templates/generated/agents differs from a fresh render' "$T/es.out" &&
+if grep -Fq 'ghost.md' "$T/es.out" && ! grep -Fq 'README.md' "$T/es.out" &&
+  grep -Fq 'FAILSTEP generated agents: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents' "$T/es.out" &&
   grep -Fxq 'FAILURES=1' "$T/es.out" && ga_jailed; then
-  ok "generated agents: a tracked generated agent no fresh render produces is red and named"
+  ok "generated agents: a tracked generated agent no fresh render produces is red and named, the README beside agents/ never"
 else
   bad "generated agents, tracked generated drift" "$(cat "$T/es.out")"
 fi

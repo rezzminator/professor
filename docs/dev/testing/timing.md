@@ -148,7 +148,7 @@ Each change was measured before and after in the fence, on the quantity it targe
 
 The kept schedule's (S4) `STEPS` median is 41.9 s (n=5) against the 54.0 s median of the 17 `iso gate all` captures in `$HOME/.local/state/pfm/flights/professor/test-profiling/slowness-map.md`: −12.1 s, −22.4 %.
 
-The median S5 capture's `gate.tsv`, from `$HOME/.local/state/pfm/flights/professor/test-profiling/measure/10-b/` capture `S5-r2-3` (`run.1X6AoI`; `STEPS PASS`, `BUDGET PASS`, attribution `CODE`, `steps_heavy_jobs 3`):
+The median S5 capture's `gate.tsv`, from `$HOME/.local/state/pfm/flights/professor/test-profiling/measure/10-b/` capture `S5-r2-3` (`run.1X6AoI`; `STEPS PASS`, `BUDGET PASS`, attribution `CODE`, `steps_heavy_jobs 3`), less the two rows of the since-deleted OpenCode writer check:
 
 ```text
 step	verdict	seconds

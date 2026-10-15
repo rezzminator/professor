@@ -244,6 +244,23 @@ func pluginEnabled(document map[string]any, id string) bool {
 	return enabled[id] == true
 }
 
+// claudePluginBuild is the build the plugin step plans from: claude.plugins
+// plus, on an -alpha build, every plugin the marketplace lists.
+func (installer *engine) claudePluginBuild() (ClaudePluginBuild, error) {
+	// The clone the global links anchor on is the one whose plugins/ an
+	// -alpha build copies from when claude.pluginCheckoutRoot is unset.
+	sourceRepo, sourceRepoErr := installer.globalSourceRepoRoot()
+	return ClaudePluginBuild{
+		Version:        installer.options.Version,
+		Home:           installer.options.Home,
+		CheckoutRoot:   installer.options.ClaudePluginCheckoutRoot,
+		SourceRepo:     sourceRepo,
+		SourceRepoErr:  sourceRepoErr,
+		Plugins:        installer.options.ClaudePlugins,
+		PluginsDefault: installer.options.ClaudePluginsDefault,
+	}.WithMarketplacePlugins()
+}
+
 // ensureClaudePlugins installs the shared plugins through the primary account.
 // On a roster host its dir passes the refusal every launch applies, so the
 // Options.ConfigDir fallback (the store) never runs. A host with no roster,
@@ -277,19 +294,8 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 		))
 		return nil
 	}
-	// The clone the global links anchor on is the one whose plugins/ an
-	// -alpha build copies from when claude.pluginCheckoutRoot is unset.
-	sourceRepo, sourceRepoErr := installer.globalSourceRepoRoot()
 	run := &claudePluginRun{dir: dir, settingsPath: filepath.Join(dir, "settings.json")}
-	build, listErr := ClaudePluginBuild{
-		Version:        installer.options.Version,
-		Home:           installer.options.Home,
-		CheckoutRoot:   installer.options.ClaudePluginCheckoutRoot,
-		SourceRepo:     sourceRepo,
-		SourceRepoErr:  sourceRepoErr,
-		Plugins:        installer.options.ClaudePlugins,
-		PluginsDefault: installer.options.ClaudePluginsDefault,
-	}.WithMarketplacePlugins()
+	build, listErr := installer.claudePluginBuild()
 	if listErr != nil {
 		run.failures = append(run.failures, installer.pluginStepFailure(dir, listErr))
 	}

@@ -291,6 +291,21 @@ func Run(
 		),
 		tally,
 	)
+	claudeEnvDir := primary.ConfigDir
+	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
+		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
+	}
+	printClaudeEnvDoctor(
+		stdout,
+		installer.ManagedRoot(resolved.Home),
+		filepath.Join(claudeEnvDir, "settings.json"),
+		runtime.Config.Claude.Env,
+		doctorClaudePluginBuild(
+			runtime.Version, resolved.Home, runtime.Config.Claude,
+			runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
+		),
+		tally,
+	)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(
 		stdout,

@@ -192,7 +192,7 @@ reset
 
 # --- a run that ran no test is red ----------------------------------------------------------------------
 Z=pfm/internal/a/a_test.go
-G2='Green. When your work is done, run .claude/scripts/check-pfm.sh <your task'\''s files> once, then write your return.'
+G2='Green. When your work is done, run .claude/scripts/check-pfm.sh <the files you changed> once, then write your return.'
 rule go '' 0
 run "$R" "$Z"
 expect "a go run that exits 0 with no test line is NO TEST RAN" 1 "test-pfm.sh: NO TEST RAN in $Z"

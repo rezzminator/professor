@@ -120,6 +120,6 @@ CMD+="; exit \"\$rc\""
 rc=0; run_logged iso run "$CMD" || rc=$?
 if [ "$rc" = 0 ]; then
   echo 'A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.'
-  echo "Green. When your work is done, run .claude/scripts/check-templates.sh <your task's files> once, then write your return."
+  echo "Green. When your work is done, run .claude/scripts/check-templates.sh <the files you changed> once, then write your return."
 fi
 exit "$rc"

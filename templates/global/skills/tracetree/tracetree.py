@@ -411,7 +411,7 @@ CUTGATE_BRIEF = re.compile(r"/[^\s'\"`;,()<>]*\.md\b")
 CUTGATE_AGENT_ID = re.compile(r"[A-Za-z0-9_-]+")
 CUTGATE_DENY = {"hookSpecificOutput": {
     "hookEventName": "PreToolUse", "permissionDecision": "deny",
-    "permissionDecisionReason": "cut-gate: step 6 first. Write the doors file (step 3), run python3 "
+    "permissionDecisionReason": "cut-gate: step 4 first. Write the doors file (step 3), run python3 "
     "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}, log its "
     "CUT line in run.md, then edit. Flight-directory writes stay open."}}
 
@@ -506,7 +506,7 @@ def cmd_cutgate():
         sys.stderr.write(f"tracetree cutgate: {cause}\n")
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "additionalContext": f"cut-gate: could not check the cut ({cause}); run step 6's segment before editing"}}))
+            "additionalContext": f"cut-gate: could not check the cut ({cause}); run step 4's segment before editing"}}))
 
     try:
         try:

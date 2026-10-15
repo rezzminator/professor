@@ -164,15 +164,15 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 
 **Function:** `cmd_cutgate` — **Run by:** `flights-foreman`'s frontmatter, carried into its rendered twins: a PreToolUse hook on `Edit|Write|MultiEdit|NotebookEdit`, running `python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate` ([hooks.md](../hooks/hooks.md))
 
-`cutgate` makes step 6 of the foreman's manual, the cut, a mechanism: a code edit is denied until the agent ran `segment` itself.
+`cutgate` makes step 4 of the foreman's manual, the cut, a mechanism: a code edit is denied until the agent ran `segment` itself.
 
 - Any other tool passes untouched and the hook prints nothing.
 - The transcript read is the agent's own, resolved as pfm's `call-cap` hook does (`callCapCount`): a payload naming an `agent_id` whose `transcript_path` is not `agent-{id}.jsonl` reads `agent-{id}.jsonl` in that session's `subagents/` directory. An `agent_id` outside `[A-Za-z0-9_-]+` never becomes a path.
 - The edit passes silently once that transcript holds a Bash call whose command runs `tracetree.py segment` and whose result has a line starting `VERDICT ` other than `VERDICT EMPTY`; the file is streamed and the read stops there. An `EMPTY` cut counts only once a later run printed another verdict.
 - A target under `$HOME/.local/state/pfm/` (the flight directory: `run.md`, the doors file, briefs), `/tmp/` or `/private/tmp/`, its path resolved through symlinks first, passes silently.
 - A child whose parent already cut passes silently: the agent's first message, or a brief file it names under `$HOME/.local/state/pfm/`, holds a line starting `SEGMENT ` or the line `DEPTH 3`. A child's brief is a file whose path is its spawn message, so the file is read as well.
-- Otherwise it denies with `permissionDecision: deny`, its reason naming step 6's `segment` call and that flight-directory writes stay open.
-- A payload, agent id or transcript it cannot read, and any defect of its own, allows the edit with `additionalContext` `cut-gate: could not check the cut ({cause}); run step 6's segment before editing` and the cause on stderr, never a silent pass. It always exits 0.
+- Otherwise it denies with `permissionDecision: deny`, its reason naming step 4's `segment` call and that flight-directory writes stay open.
+- A payload, agent id or transcript it cannot read, and any defect of its own, allows the edit with `additionalContext` `cut-gate: could not check the cut ({cause}); run step 4's segment before editing` and the cause on stderr, never a silent pass. It always exits 0.
 
 ## The check
 

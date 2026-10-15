@@ -2669,7 +2669,7 @@ class BookTest(Repo):
 KIT = "python3 $HOME/.claude/skills/tracetree/tracetree.py segment /w --rev abc123 --seeds /f/doors.txt"
 DENY = {"hookSpecificOutput": {
     "hookEventName": "PreToolUse", "permissionDecision": "deny",
-    "permissionDecisionReason": "cut-gate: step 6 first. Write the doors file (step 3), run python3 "
+    "permissionDecisionReason": "cut-gate: step 4 first. Write the doors file (step 3), run python3 "
     "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}, log its "
     "CUT line in run.md, then edit. Flight-directory writes stay open."}}
 
@@ -2732,7 +2732,7 @@ class CutGateTest(unittest.TestCase):
         spec = json.loads(got.stdout)["hookSpecificOutput"]
         self.assertEqual(set(spec), {"hookEventName", "additionalContext"})
         self.assertTrue(spec["additionalContext"].startswith("cut-gate: could not check the cut ("), spec)
-        self.assertTrue(spec["additionalContext"].endswith("); run step 6's segment before editing"), spec)
+        self.assertTrue(spec["additionalContext"].endswith("); run step 4's segment before editing"), spec)
         self.assertIn(cause, spec["additionalContext"])
         self.assertIn(cause, got.stderr)
 

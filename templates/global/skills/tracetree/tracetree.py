@@ -331,7 +331,8 @@ INTAKE_ROOT = re.compile(r"(?im)^[ \t]*(?:repo(?:sitory)?[ \t]+root\b[^\n]*?|roo
                          r"((?:~/|/)[^\s`'\"()\[\],;]+)")
 INTAKE_RUN = re.compile(r"(?m)^[ \t]*RUN:[ \t]*\S")
 CARD_FIELD = re.compile(r"(?m)^[ \t]*(RUN|ID|QUESTION|REASON):[ \t]*(\S.*?)[ \t]*$")
-RECALL_ANSWERED = re.compile(r"(?m)^ANSWERED Q(\d+)$")
+RECALL_TRACE = re.compile(r"(?m)^TRACE Q(\d+) · (.+)$")
+CARD_KEYS = re.compile(r"(?m)^[ \t]*(?:RUN|ROOT|ID|FUEL|QUESTION|REASON):.*$")
 TT = "python3 $HOME/.claude/skills/tracetree/tracetree.py"
 
 
@@ -412,38 +413,75 @@ def cmd_intake():
         "covers, read now, is paid for twice. /tracer:use has the rest." + recalled, rewritten)
 
 
+def trace_scopes(text):
+    """{n: "none" | "whole question" | [scope items]} of a recall's `TRACE Q{n}` lines, cite paths plain and names
+    backticked."""
+    got = {}
+    for m in RECALL_TRACE.finditer(text):
+        rest = m.group(2)
+        if rest in ("none", "whole question"):
+            got[int(m.group(1))] = rest
+            continue
+        scope = rest.split(" · ", 1)[1] if " · " in rest else ""
+        got[int(m.group(1))] = [x.strip() for x in re.findall(r"`[^`]*`|[^,`]+", scope) if x.strip()]
+    return got
+
+
+def card_names(body, item):
+    """Whether a card's text names a TRACE scope item: a backticked name as a whole word, a path whole or by its file
+    name."""
+    if item.startswith("`"):
+        return bool(holds(body, item.strip("`"), True))
+    base = os.path.basename(item)
+    return item in body or bool(base and re.search(r"(?<![\w-])" + re.escape(base) + r"(?![\w-])", body))
+
+
 def intake_thread(card):
-    """A sub-tracer card whose QUESTION names only questions its RUN's recall.txt marks `ANSWERED Q{n}` is refused: the
-    tracer serves those by quoting their FRESH lines. A card carrying `REASON: {why}` passes, the override logged to
-    intake.log beside the run; every other card passes untouched, and a recall.txt that cannot be read is logged, the card passed."""
+    """A sub-tracer card is held to the `TRACE Q{n}` lines of its RUN's recall.txt: refused when every question its
+    QUESTION names is `TRACE Q{n} · none`, or when one has TRACE rows and the card's other lines (THREAD, FROM) name
+    none of their paths or names, the refusal naming what to scope to. A question with no TRACE line or a `whole
+    question` one passes the card, as does a child card (an ID with a dot), scoped by its parent's. A card carrying
+    `REASON: {why}` passes, the override logged to intake.log beside the run; a recall.txt that cannot be read is
+    logged, the card passed."""
     if not isinstance(card, str):
         return
     fields = {}
     for m in CARD_FIELD.finditer(card):
         fields.setdefault(m.group(1), m.group(2))
     run, nums = fields.get("RUN"), {int(n) for n in re.findall(r"\bQ(\d+)\b", fields.get("QUESTION", ""))}
-    if not run or not nums:
+    node = fields.get("ID", "?")
+    if not run or not nums or "." in node:
         return
     path = os.path.join(run, "recall.txt")
     try:
         with open(path, encoding="utf-8") as f:
-            answered = {int(n) for n in RECALL_ANSWERED.findall(f.read())}
+            scopes = trace_scopes(f.read())
     except FileNotFoundError:
         return
     except (OSError, UnicodeDecodeError) as e:
         intake_log(f"{path} unreadable, sub-tracer card passed unchecked: {e}")
         return
-    if not nums <= answered:
+    asked = [scopes.get(n) for n in sorted(nums)]
+    if any(s in (None, "whole question") for s in asked):
         return
-    qs, node = ", ".join(f"Q{n}" for n in sorted(nums)), fields.get("ID", "?")
+    items = list(dict.fromkeys(x for s in asked if s != "none" for x in s))
+    body = CARD_KEYS.sub("", card)
+    if any(card_names(body, x) for x in items) or (not items and any(s != "none" for s in asked)):
+        return
+    qs = ", ".join(f"Q{n}" for n in sorted(nums))
     if fields.get("REASON"):
-        intake_log(f"{run}: node {node} opened a thread for ANSWERED {qs} — REASON: {fields['REASON']}",
+        intake_log(f"{run}: node {node} opened a thread for {qs} outside its TRACE lines — REASON: {fields['REASON']}",
                    os.path.dirname(os.path.abspath(run)))
         return
+    shown = ", ".join(items[:12]) + (f" (+{len(items) - 12} more)" if len(items) > 12 else "")
+    why = (f"node {node}'s card names none of what {qs} still needs traced: respawn it with its THREAD or FROM on one "
+           f"of {shown} (the TRACE lines of {path}); the rest is served by quoting its FRESH rows verbatim with their "
+           "cites" if items else
+           f"{qs} need no thread: {path} holds every recalled line FRESH — serve them by quoting those rows verbatim "
+           f"with their cites, and leave node {node} out of `tt wait`")
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
-        "permissionDecisionReason": f"tracer intake: {qs} ANSWERED in {path} — serve it by quoting its FRESH lines "
-        f"verbatim, no thread, and leave node {node} out of `tt wait`. A thread it still needs carries "
+        "permissionDecisionReason": f"tracer intake: {why}. A thread for a FRESH row the tree contradicts carries "
         "`REASON: {why}` on its card."}}))
 
 
@@ -2912,13 +2950,13 @@ class Recall:
 
     def place(self, path, line, quotes):
         """(status, new path, new line, reason) of a prior span placed against ROOT now: FRESH at its line, MOVED
-        elsewhere, STALE with the reason the placement gives."""
+        elsewhere, STALE with the reason the placement gives, FAILED when git could not say."""
         k = (path, line, tuple(quotes))
         if k not in self.placed:
             try:
                 got = place_hop(self.files, path, line, quotes)
             except GitUnknown as e:
-                self.placed[k] = ("STALE", path, line, f"git could not say: {e}")
+                self.placed[k] = ("FAILED", path, line, f"git could not say: {e}")
                 return self.placed[k]
             if got["status"] in ("rejected", "badaddr"):
                 self.placed[k] = ("STALE", path, line, f"{path}:{line} {got['reason']}")
@@ -3116,19 +3154,30 @@ def recall_runs(rc, root, since_hours, exclude, before=None):
     return [r[1:] for r in sorted(runs, key=lambda r: r[0], reverse=True)], unreadable
 
 
+def cite_paths(text, theirs):
+    """The distinct paths of a line's [path:N] cites in order, each relative to its run's ROOT, a revision pin dropped."""
+    out = []
+    for m in CITE.finditer(text):
+        p = REV_PIN.sub("", m.group(1))
+        p = os.path.relpath(p, theirs) if os.path.isabs(p) and p.startswith(theirs + os.sep) else p
+        if p not in out:
+            out.append(p)
+    return out
+
+
 def recall_line(rc, run, theirs, base, text, hopset, idents):
     """One prior answer line checked against ROOT now: (kind FRESH | DELTA | STALE | GAP, text with re-addressed
-    cites, notes). STALE: a cite, or any hop its node walked, no longer holds. DELTA: a name it carries changed its
-    occurrence set since BASE, notes the changed names then the `+`/`-` rows, one per changed line however many names it
-    carries. GAP: a closed-world claim naming nothing
-    to witness."""
+    cites, notes, failed, scope). STALE: a cite, or any hop its node walked, no longer holds; failed when git could not
+    say. DELTA: a cited span moved, or a name it carries changed its occurrence set since BASE; notes the head, then the
+    `-`/`+` rows: a moved span at its old and new line, each changed line once however many names it carries; scope
+    the changed names, backticked, and a moved span's old path. GAP: a closed-world claim naming nothing to witness."""
     def rel(p):
         return os.path.relpath(p, theirs) if os.path.isabs(p) and p.startswith(theirs + os.sep) else p
 
     found = list(CITE.finditer(text))
     if not found:
-        return "STALE", text, ["no [path:N] cite to re-check"]
-    out, last, stale, notes = [], 0, [], []
+        return "STALE", text, ["no [path:N] cite to re-check"], False, []
+    out, last, stale, failed, moves = [], 0, [], False, []
     for m in found:
         path, a, b = rel(m.group(1)), int(m.group(2)), int(m.group(3) or m.group(2))
         hop = None
@@ -3146,43 +3195,54 @@ def recall_line(rc, run, theirs, base, text, hopset, idents):
             old = rc.base_lines(base, path)
             if isinstance(old, str):
                 stale.append(f"{path}:{a}: BASE of run {os.path.basename(run)} unusable — {old}")
+                failed = True
                 continue
             if not 1 <= a <= b <= len(old):
                 stale.append(f"{path}:{a}: past the end of {path} at BASE")
                 continue
             hop = (path, a, old[a - 1:b])
         kind, new_path, new_line, reason = rc.place(*hop)
-        if kind == "STALE":
+        if kind in ("STALE", "FAILED"):
             stale.append(reason)
+            failed |= kind == "FAILED"
             continue
         shift = new_line - hop[1]
         span = f"{new_path}:{a + shift}" + (f"-{b + shift}" if m.group(3) else "")
         if kind == "MOVED":
-            notes.append(f"MOVED {m.group(1)}:{m.group(2)} → {new_path}:{a + shift}")
+            at = a - hop[1]
+            was, said = (a, hop[2][at]) if 0 <= at < len(hop[2]) else (hop[1], hop[2][0])
+            moves += [("-", path, was, said.strip()), ("+", new_path, was + shift, said.strip())]
         out.append(text[last:m.start()] + f"[{span}]")
         last = m.end()
     if stale:
-        return "STALE", text, stale
+        return "STALE", text, stale, failed, []
     # the line rests on every hop its node walked, not only the ones it cites; a hop that did not hold at BASE either
     # (or the run has none) changed nothing since
     for h in hopset:
         if not h[3] or REV_PIN.match(h[1]):
             continue
         kind, _, _, reason = rc.place(rel(h[1]), h[2], h[3])
-        if kind == "STALE" and (not base or rc.place(f"{base[:PIN_ABBREV]}:{rel(h[1])}", h[2], h[3])[0] != "STALE"):
-            return "STALE", text, [f"its node's hop {reason}"]
+        if kind == "FAILED":
+            return "STALE", text, [f"its node's hop {reason}"], True, []
+        if kind == "STALE":
+            then = rc.place(f"{base[:PIN_ABBREV]}:{rel(h[1])}", h[2], h[3])[0] if base else None
+            if then != "STALE":
+                return "STALE", text, [f"its node's hop {reason}"], then == "FAILED", []
     text = "".join(out) + text[last:]
     named, cited = line_witnesses(text)
     named |= {i for i in idents if holds(text, i, True)}
     if CLOSED_WORLD.search(BACKTICK.sub(" ", CITE.sub(" ", text))) and not named:
-        return "GAP", text, ["a closed-world claim naming no identifier or path to witness"]
+        return "GAP", text, ["a closed-world claim naming no identifier or path to witness"], False, []
     changed, rows, placed = [], [], set()
+    for sign, p, n, t in moves:
+        placed.add((sign, p, n))
+        rows.append(f"{sign} {p}:{n} {t[:160]}")
     for sym in sorted(named | cited):
         if not base:
-            return "STALE", text, [f"no BASE to witness `{sym}` against"]
+            return "STALE", text, [f"no BASE to witness `{sym}` against"], False, []
         got = rc.delta(sym, base)
         if isinstance(got, str):
-            return "STALE", text, [f"witness `{sym}` unusable for run {os.path.basename(run)} — {got}"]
+            return "STALE", text, [f"witness `{sym}` unusable for run {os.path.basename(run)} — {got}"], True, []
         added, gone = got
         if added or gone:
             changed.append(f"`{sym}`")
@@ -3191,53 +3251,87 @@ def recall_line(rc, run, theirs, base, text, hopset, idents):
                     if (sign, p, n) not in placed:
                         placed.add((sign, p, n))
                         rows.append(f"{sign} {p}:{n} {t[:160]}")
-    if changed:
-        return "DELTA", text, notes + [f"changed since {base[:PIN_ABBREV]}: {', '.join(changed)}"] + rows
-    return "FRESH", text, notes
+    if not (moves or changed):
+        return "FRESH", text, [], False, []
+    head = (["moved"] if moves else []) + ([f"changed since {base[:PIN_ABBREV]}: {', '.join(changed)}"] if changed else [])
+    gone = [p for sign, p, _, _ in moves if sign == "-" and p not in cite_paths(text, theirs)]
+    return "DELTA", text, head + rows, False, changed + list(dict.fromkeys(gone))
 
 
-def recall_capped(units):
-    """The output lines of units [(kind, hits, lines, q, extra)] within RECALL_CAP bytes. A unit of kind None (heads,
-    GAP questions, UNREADABLE, the cover) always stays. Past the cap, fewest anchor hits first and the later unit first
-    on a tie within each step: STALE and GAP rows go, then each DELTA line's occurrence rows shrink to `  +{extra} rows`,
-    then DELTA lines go, then FRESH lines. An ANSWERED unit stays only while every anchor of Q{q} (its extra) is carried
-    by a kept FRESH line of Q{q} (each FRESH unit's extra: the anchors it carries). A `RECALL CUT` line names what went,
-    before the last unit."""
+TRACED = ("FRESH", "DELTA", "STALE", "GAP")
+
+
+def recall_unit(kind, lines, q=None, **more):
+    """One block of recall output: kind None (a head, a GAP question, UNREADABLE, the cover), TRACE (the question's
+    work line, written after the cut) or a checked line's kind; hits (negated anchor hits), carries (the anchors it
+    hits), scope (what tracing it covers), marker (its first cite path), rows (a DELTA line's occurrence rows),
+    pinned (a STALE row naming a git failure: never cut)."""
+    return dict(dict(kind=kind, lines=lines, q=q, hits=0, carries=set(), scope=[], marker=None, rows=0, pinned=False),
+                **more)
+
+
+def recall_capped(units, anchors):
+    """The output lines of units within RECALL_CAP bytes. Kinds None, TRACE and GAP and pinned STALE rows always stay.
+    Past the cap, fewest anchor hits first and the later unit first on a tie within each step: STALE lines collapse,
+    then each DELTA line's occurrence rows shrink to `  +{rows} rows`, then DELTA lines collapse, then FRESH lines go.
+    A collapsed line becomes `CHANGED Q{q} · {its first cite path}`, one per (question, path), never cut, so the cap
+    never hides a changed fact. Each question with checked lines (anchors: {q: its anchors}) gets its TRACE line from
+    what stays: `none` when every line is a kept FRESH one and every anchor is hit by a line, else `{k} rows · {scope}`
+    over its DELTA, STALE, CHANGED and GAP lines and FRESH lines cut, plus each anchor no line hits. A `RECALL CUT`
+    line names what went, before the last unit."""
     def size(lines):
         return sum(len(x.encode()) + 1 for x in lines)
 
-    shown = [list(u[2]) for u in units]
-    keep, total = [True] * len(units), sum(size(x) for x in shown)
+    shown, keep, markers = [list(u["lines"]) for u in units], [True] * len(units), {}
     cut = {"STALE": 0, "trim": 0, "DELTA": 0, "FRESH": 0}
-    for step, kinds in (("STALE", ("STALE", "GAP")), ("trim", ("DELTA",)), ("DELTA", ("DELTA",)), ("FRESH", ("FRESH",))):
-        for i in sorted((i for i, u in enumerate(units) if u[0] in kinds), key=lambda i: (units[i][1], -i)):
-            if total + 128 <= RECALL_CAP:
+    of = {q: [i for i, u in enumerate(units) if u["q"] == q and u["kind"] in TRACED] for q in anchors}
+
+    def trace(q):
+        rows = of[q]
+        todo = [i for i in rows if units[i]["kind"] != "FRESH" or not keep[i]]
+        bare = anchors[q] - set().union(*(units[i]["carries"] for i in rows))
+        scope = dict.fromkeys([s for i in todo for s in units[i]["scope"]] + [f"`{a}`" for a in sorted(bare)])
+        if not todo and not scope:
+            return f"TRACE Q{q} · none"
+        return f"TRACE Q{q} · {len(todo)} rows · {', '.join(scope)}"
+
+    def total():
+        return sum(size([trace(u["q"])]) if u["kind"] == "TRACE" else size(shown[i])
+                   for i, u in enumerate(units) if keep[i])
+
+    for step, kind in (("STALE", "STALE"), ("trim", "DELTA"), ("DELTA", "DELTA"), ("FRESH", "FRESH")):
+        for i in sorted((i for i, u in enumerate(units) if u["kind"] == kind and not u["pinned"]),
+                        key=lambda i: (units[i]["hits"], -i)):
+            if total() + 128 <= RECALL_CAP:
                 break
             if step == "trim":
                 if len(shown[i]) < 2:
                     continue
-                trimmed = shown[i][:1] + [f"  +{units[i][4]} rows"]
-                total, shown[i] = total - size(shown[i]) + size(trimmed), trimmed
+                shown[i] = shown[i][:1] + [f"  +{units[i]['rows']} rows"]
+            elif step == "FRESH":
+                keep[i] = False
             else:
-                keep[i], total = False, total - size(shown[i])
+                at = (units[i]["q"], units[i]["marker"])
+                if at in markers:
+                    keep[i] = False
+                else:
+                    markers[at], shown[i] = i, [f"CHANGED Q{at[0]} · {at[1]}"]
             cut[step] += 1
-    for i, (kind, _, _, q, need) in enumerate(units):
-        if kind == "ANSWERED":
-            carried = set().union(*(u[4] for j, u in enumerate(units) if keep[j] and u[0] == "FRESH" and u[3] == q))
-            keep[i] = need <= carried
-    out = [x for i, lines in enumerate(shown) if keep[i] for x in lines]
+    out = [x for i, u in enumerate(units) if keep[i]
+           for x in ([trace(u["q"])] if u["kind"] == "TRACE" else shown[i])]
     if any(cut.values()):
+        s, d, f = cut["STALE"], cut["DELTA"], cut["FRESH"]
         trim = f" · {cut['trim']} delta lines cut to their head" if cut["trim"] else ""
-        out.insert(len(out) - 1, f"RECALL CUT {cut['STALE'] + cut['DELTA'] + cut['FRESH']} lines past the "
-                   f"{RECALL_CAP // 1024} KB cap · {cut['STALE']} stale/gap, {cut['DELTA']} delta, {cut['FRESH']} fresh{trim}")
+        out.insert(len(out) - 1, f"RECALL CUT {s + d + f} lines past the {RECALL_CAP // 1024} KB cap · {s} stale, "
+                   f"{d} delta, {f} fresh · {s + d} collapsed to {len(markers)} CHANGED{trim}")
     return out
 
 
 def recall(root, asked, since_hours=None, exclude=None, before=None):
-    """The recall of ROOT's questions as output lines: per question a RECALL head, `ANSWERED Q{n}` when every checked
-    line is FRESH and every anchor of the question is carried by one, each matched prior answer line FRESH (cites
-    re-addressed), DELTA (with its occurrence changes) or STALE (with its reason), or GAP; first a line per run that
-    could not be read, last the RECALL COVER line."""
+    """The recall of ROOT's questions as output lines: per question a RECALL head, its TRACE line, each matched prior
+    answer line FRESH (cites re-addressed), DELTA (a moved span or changed occurrences, with its rows) or STALE (with
+    its reason), or GAP, as `recall_capped` keeps them; a GAP question's TRACE line is `whole question`; first a line
+    per run that could not be read, last the RECALL COVER line."""
     rc, out = Recall(root), []
     try:
         runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
@@ -3249,12 +3343,12 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
         out.append(f"RECALL: {root} is in no git repository — candidates are runs on this exact ROOT")
     out.append(f"RECALL {root} · {len(runs)} earlier runs · {len(unreadable)} unreadable")
     out += [f"UNREADABLE {run}: {why}" for run, why in unreadable]
-    units = [(None, 0, out, None, None)]
+    units, checked = [recall_unit(None, out)], {}
     served = stale = delta = gaps = 0
     for n in sorted(asked):
         anchors, idents = recall_anchors(asked[n])
         if not anchors:
-            units.append((None, 0, [f"GAP Q{n} · the question names no anchor"], n, None))
+            units.append(recall_unit(None, [f"GAP Q{n} · the question names no anchor", f"TRACE Q{n} · whole question"]))
             continue
         seen, matched = set(), []
         for order, (run, theirs, base, lines) in enumerate(runs):
@@ -3264,13 +3358,14 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
                     seen.add(text)
                     matched.append((-len(hit), order, run, theirs, base, x, text, hopset, set(hit)))
         if not matched:
-            units.append((None, 0, [f"GAP Q{n} · no earlier answer line names {', '.join(sorted(anchors))}"], n, None))
+            units.append(recall_unit(None, [f"GAP Q{n} · no earlier answer line names {', '.join(sorted(anchors))}",
+                                            f"TRACE Q{n} · whole question"]))
             continue
         matched.sort(key=lambda r: r[:2])
         shown = matched[:RECALL_SHOWN]
-        rows, fresh, ids, carried = [], 0, [], set()
+        rows, fresh, ids = [], 0, []
         for hits, _, run, theirs, base, x, text, hopset, hit in shown:
-            kind, new, notes = recall_line(rc, run, theirs, base, text, hopset, idents)
+            kind, new, notes, failed, scope = recall_line(rc, run, theirs, base, text, hopset, idents)
             rid = os.path.basename(run)
             if rid not in ids:
                 ids.append(rid)
@@ -3278,29 +3373,30 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
             stale += kind == "STALE"
             delta += kind == "DELTA"
             gaps += kind == "GAP"
-            moved = "".join(f" · {s}" for s in notes if s.startswith("MOVED "))
+            paths = cite_paths(new, theirs)
+            more = dict(hits=-hits, carries=hit, marker=paths[0] if paths else "uncited", pinned=failed,
+                        scope=paths + scope if paths or scope else [f"`{a}`" for a in sorted(hit)])
             if kind == "STALE":
-                rows.append((kind, -hits, [f"STALE Q{n} · {notes[0]}"], n, None))
+                rows.append(recall_unit(kind, [f"STALE Q{n} · {notes[0]}"], n, **more))
             elif kind == "GAP":
-                rows.append((kind, -hits, [f"GAP Q{n} · {notes[0]}: {new[:160]}"], n, None))
+                rows.append(recall_unit(kind, [f"GAP Q{n} · {notes[0]}: {new[:160]}"], n, **more))
             elif kind == "FRESH":
-                carried |= hit
-                rows.append((kind, -hits, [f"FRESH {rid} node {x}: {new}{moved}"], n, hit))
+                rows.append(recall_unit(kind, [f"FRESH {rid} node {x}: {new}"], n, **more))
             else:
                 occ = [s for s in notes if s[:2] in ("+ ", "- ")]
-                head = [s for s in notes if not s.startswith("MOVED ") and s[:2] not in ("+ ", "- ")]
-                more = [f"  +{len(occ) - DELTA_ROWS} more"] if len(occ) > DELTA_ROWS else []
-                rows.append((kind, -hits, [f"DELTA {rid} node {x}: {new}{moved} · {'; '.join(head)}"]
-                             + ["  " + s for s in occ[:DELTA_ROWS]] + more, n, len(occ)))
+                head = [s for s in notes if s[:2] not in ("+ ", "- ")]
+                tail = [f"  +{len(occ) - DELTA_ROWS} more"] if len(occ) > DELTA_ROWS else []
+                rows.append(recall_unit(kind, [f"DELTA {rid} node {x}: {new} · {'; '.join(head)}"]
+                                        + ["  " + s for s in occ[:DELTA_ROWS]] + tail, n, rows=len(occ), **more))
         cut = f" · {len(matched) - len(shown)} more matched lines not checked" if len(matched) > len(shown) else ""
-        units.append((None, 0, [f"RECALL Q{n} · {fresh}/{len(shown)} lines fresh · runs {', '.join(ids)}{cut}"], n, None))
-        if fresh == len(shown) and carried >= anchors:
-            units.append(("ANSWERED", 0, [f"ANSWERED Q{n}"], n, anchors))
+        units.append(recall_unit(None, [f"RECALL Q{n} · {fresh}/{len(shown)} lines fresh · runs {', '.join(ids)}{cut}"]))
+        units.append(recall_unit("TRACE", [], n))
         units += rows
+        checked[n] = anchors
         served += fresh > 0
     gap = f" · {gaps} unwitnessed" if gaps else ""
-    units.append((None, 0, [f"RECALL COVER {served}/{len(asked)} · {stale} stale · {delta} delta{gap}"], None, None))
-    return recall_capped(units)
+    units.append(recall_unit(None, [f"RECALL COVER {served}/{len(asked)} · {stale} stale · {delta} delta{gap}"]))
+    return recall_capped(units, checked)
 
 
 def cmd_recall(root, since_hours, before_run=None):

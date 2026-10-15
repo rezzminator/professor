@@ -594,6 +594,55 @@ checks_templates_engine_sync_action_tests() {
 
 }
 
+# skill_unittest_sharded <out> <test file…>: the files' test ids split round-robin over
+# SKILL_TEST_SHARDS parallel unittest processes (default: the cores, at most 8), so a skill suite's
+# serial CPU time no longer sets the step's wall. <out> holds each `SHARD {i}` block, then one
+# aggregate `Ran {n} tests` and `OK`, `OK (skipped={k})` or `FAILED (shards={red}/{all})`; the exit
+# is non-zero when a shard fails, a file cannot load, or no test exists.
+skill_unittest_sharded() {
+  local out="$1"
+  shift
+  python3 - "$@" >"$out" 2>&1 <<'PY'
+import os, re, subprocess, sys, unittest
+
+loader, ids = unittest.TestLoader(), []
+def walk(suite):
+    for test in suite:
+        walk(test) if isinstance(test, unittest.TestSuite) else ids.append(test.id())
+for path in sys.argv[1:]:
+    name = os.path.splitext(os.path.normpath(path))[0].replace(os.sep, ".")
+    try:
+        walk(loader.loadTestsFromName(name))
+    except Exception as exc:
+        print(f"LOAD FAILED {path}: {exc!r}")
+        print("Ran 0 tests\nFAILED (load)")
+        sys.exit(1)
+    if loader.errors:
+        print(f"LOAD FAILED {path}:\n" + "\n".join(loader.errors))
+        print("Ran 0 tests\nFAILED (load)")
+        sys.exit(1)
+if not ids:
+    print("Ran 0 tests")
+    sys.exit(1)
+want = os.environ.get("SKILL_TEST_SHARDS") or str(min(8, os.cpu_count() or 1))
+count = max(1, min(int(want), len(ids)))
+shards = [ids[i::count] for i in range(count)]
+procs = [subprocess.Popen([sys.executable, "-m", "unittest", *chunk], stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True) for chunk in shards]
+ran = skipped = red = 0
+for i, proc in enumerate(procs, 1):
+    text = proc.communicate()[0]
+    print(f"SHARD {i}/{count} rc={proc.returncode} tests={len(shards[i - 1])}\n{text}")
+    got = re.search(r"^Ran (\d+) tests?", text, re.M)
+    ran += int(got.group(1)) if got else 0
+    skipped += sum(int(n) for n in re.findall(r"skipped=(\d+)", text))
+    red += proc.returncode != 0 or not got
+print(f"Ran {ran} tests")
+print(f"FAILED (shards={red}/{count})" if red else f"OK (skipped={skipped})" if skipped else "OK")
+sys.exit(1 if red else 0)
+PY
+}
+
 checks_templates_skill_tests() {
   local skill cp_out
   for skill in codeprobe tracetree; do
@@ -601,7 +650,7 @@ checks_templates_skill_tests() {
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
       fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
-    elif ! python3 -m unittest "templates/global/skills/$skill/"*_test.py >"$cp_out" 2>&1; then
+    elif ! skill_unittest_sharded "$cp_out" "templates/global/skills/$skill/"*_test.py; then
       cat "$cp_out"
       if grep -Eq '^Ran 0 tests?' "$cp_out"; then
         fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
@@ -615,7 +664,7 @@ checks_templates_skill_tests() {
       cat "$cp_out"
       fail_step "$skill tests SKIPPED — a skipped test is a named gap, never a pass"
     else
-      ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
+      ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out" | tail -1))"
     fi
   done
 

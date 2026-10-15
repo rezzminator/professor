@@ -1188,4 +1188,55 @@ else
 fi
 rm -rf "$REPO_ROOT/templates/generated"
 
+# skill_unittest_sharded: the skill suites run in parallel shards; any red shard, a skip or no test stays visible.
+mkdir -p "$T/shard/pkg"
+cat > "$T/shard/pkg/a_test.py" <<'PY'
+import unittest
+class A(unittest.TestCase):
+    def test_1(self): pass
+    def test_2(self): pass
+    def test_3(self): pass
+PY
+cat > "$T/shard/pkg/b_test.py" <<'PY'
+import unittest
+class B(unittest.TestCase):
+    def test_1(self): pass
+    def test_2(self): pass
+PY
+cat > "$T/shard/pkg/red_test.py" <<'PY'
+import unittest
+class R(unittest.TestCase):
+    def test_ok(self): pass
+    def test_red(self): self.fail("planted red")
+PY
+cat > "$T/shard/pkg/skip_test.py" <<'PY'
+import unittest
+class S(unittest.TestCase):
+    def test_ok(self): pass
+    @unittest.skip("planted skip")
+    def test_skip(self): pass
+PY
+printf '' > "$T/shard/pkg/empty_test.py"
+if (cd "$T/shard" && SKILL_TEST_SHARDS=3 skill_unittest_sharded "$T/shard/green.out" pkg/a_test.py pkg/b_test.py) &&
+  [ "$(grep -c '^SHARD ' "$T/shard/green.out")" -eq 3 ] && grep -Fxq 'Ran 5 tests' "$T/shard/green.out" &&
+  [ "$(tail -1 "$T/shard/green.out")" = OK ]; then
+  ok 'skill shards: 5 tests over 3 shards aggregate to Ran 5 tests, OK'
+else bad 'skill shards green' "$(cat "$T/shard/green.out" 2>&1)"; fi
+if ! (cd "$T/shard" && SKILL_TEST_SHARDS=2 skill_unittest_sharded "$T/shard/red.out" pkg/a_test.py pkg/red_test.py) &&
+  grep -Fq 'planted red' "$T/shard/red.out" && [[ "$(tail -1 "$T/shard/red.out")" == 'FAILED (shards='* ]]; then
+  ok 'skill shards: one red test makes the run non-zero, FAILED, with its trace'
+else bad 'skill shards red' "$(cat "$T/shard/red.out" 2>&1)"; fi
+if (cd "$T/shard" && skill_unittest_sharded "$T/shard/skip.out" pkg/skip_test.py) &&
+  grep -Eq 'skipped=[1-9]' "$T/shard/skip.out"; then
+  ok 'skill shards: a skipped test still reads skipped=N for the step to refuse'
+else bad 'skill shards skip' "$(cat "$T/shard/skip.out" 2>&1)"; fi
+if ! (cd "$T/shard" && skill_unittest_sharded "$T/shard/none.out" pkg/empty_test.py) &&
+  grep -Fxq 'Ran 0 tests' "$T/shard/none.out"; then
+  ok 'skill shards: a file with no test is Ran 0 tests and non-zero'
+else bad 'skill shards none' "$(cat "$T/shard/none.out" 2>&1)"; fi
+if ! (cd "$T/shard" && skill_unittest_sharded "$T/shard/missing.out" pkg/nope_test.py) &&
+  ! grep -Fxq OK "$T/shard/missing.out"; then
+  ok 'skill shards: an unimportable test file is red, never OK'
+else bad 'skill shards missing' "$(cat "$T/shard/missing.out" 2>&1)"; fi
+
 shtest_end

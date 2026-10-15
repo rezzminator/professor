@@ -17,7 +17,7 @@ Role-bearing seats support `claude` and `codex`. An `opencode` request returns `
 | The child's brief file | The same file, verbatim, as the seat's first turn through `--prompt-file`, never a later `mcp__chat-professor__call`. Its last item becomes: "your last act writes your return to `{flight directory}/returns/{unit}-r{round}.md` and sends it with `pfm chat call {this chat's name} --file {path}`" — your name from `mcp__chat-professor__whoami`; the return file is the return, and a trailing `**Verdict:**` line in it is ignored |
 | The return watch per child | The returns Monitor's `RETURN {path}` line; the seat's call is a bonus, never the signal |
 | Verify from the return and § Change inventory | The same tracked and untracked inventory; `mcp__chat-professor__last` on the seat when the call arrived cut short |
-| A red back to the child by `SendMessage` | `mcp__chat-professor__call` on the same seat, closing with "continue, then write your return once more" |
+| A red, or an `ESCALATE` answer, back to the child by `SendMessage` | `mcp__chat-professor__call` on the same seat, closing with "continue, then write your return once more"; an `ESCALATE` return is no verdict, so its seat stays alive |
 | The child's session | `pfm chat resolve {flight}-{unit}`, third column, read right after birth while the name resolves; on the `CLAIMED` line and on each verdict line as `transcript {session id}`, always before `mcp__chat-professor__kill`. No third column: `transcript UNRESOLVED · {what resolve printed}` |
 | A question only the user can answer → `BLOCKED` | `AskUserQuestion` now; the answer appended to `requirements.md` `## Rulings`, the seat re-briefed by call |
 | The caller hears from you once | The user is the caller: the return at the end |

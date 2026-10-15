@@ -17,6 +17,12 @@ autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
   nudgeEvery: 60k
+hooks:
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: pfm internal call-cap
 ---
 
 You execute one mechanical task file and report once: its Steps, Decisions and Shapes already hold every edit; you apply them in order and prove them.
@@ -56,7 +62,7 @@ You execute one mechanical task file and report once: its Steps, Decisions and S
 
 ## The cap
 
-150 tool calls. Past it, stop and return `FAILED {id}: cap` with what is done, what is left and the next step.
+150 calls, one model request each. Past it, stop and return `FAILED {id}: cap` with what is done, what is left and the next step.
 
 ## Return
 

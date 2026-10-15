@@ -31,7 +31,9 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `loom.html`, `book.html` | The two page shells: title, tabs or header, and the `/*LOOM_STYLE*/`, `<!--LOOM_PARTS-->` and data slots |
 | `loom_wall.html`, `loom_custody.html`, `loom_hourglass.html`, `loom_key.html`, `book_view.html` | The views, one template and one component each, mounted by the runtime on first show |
 | `loom_dc.html`, `loom.css` | The small component runtime and the style every view shares |
+| `segment.py` | The segment command's cut — blast, cells, spine, segments, ORDER and ESCALATE; imported only by the segment dispatch |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
+| `segment_test.py` | segment's suite, run by the templates skill-tests gate step |
 | `SKILL.md` | The agents' command table and the check, visible to `tracer` and `sub-tracer` only |
 
 ## The run directory

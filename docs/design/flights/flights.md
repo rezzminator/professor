@@ -1,6 +1,6 @@
 # Flights
 
-A flight is one request, built and landed. `/flights:spec` settles the requirements with the user when they are not settled; [`flights-foreman`](flights-foreman.md) reads, designs what no ruling decided (first through [`flights-speccer`](flights-speccer.md) when the codebase has no pattern for the work), builds, splits only at ownership boundaries, and lands the flight through one [`flights-lander`](flights-lander.md). This file holds the decisions shared by the whole family; each member's own decisions live in its file.
+A flight is one request, built and landed. `/flights:spec` settles the requirements with the user when they are not settled; [`flights-foreman`](flights-foreman.md) reads, designs what no ruling decided (first through [`flights-speccer`](flights-speccer.md) when the codebase has no pattern for the work), builds, splits at ownership boundaries or at segments it cuts before reading their code, and lands the flight through one [`flights-lander`](flights-lander.md). This file holds the decisions shared by the whole family; each member's own decisions live in its file.
 
 A change lands in the design doc first, then in the template, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -22,7 +22,7 @@ A change lands in the design doc first, then in the template, then in every surf
 
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
-| `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors, data shapes, decision, build; freezes the interface and spawns one child foreman per other build unit or unrelated problem; verifies their returns; lands through the lander | `sonnet`, effort `high` |
+| `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors, data shapes, decision, build; cuts its door list into a spine and segments; freezes the interface or spine and spawns one child foreman per other build unit, unrelated problem or segment passing the cut's gates; verifies their returns; lands through the lander | `sonnet`, effort `high` |
 | `flights-speccer` | agent | Writes the ideal `spec.md` for work the codebase has no pattern for: research, dependencies both ways, the quality laws, every decision weighed with its tokens against its worth first; the root foreman's spawn before its base gate on novel work, or any chat's own for a spec without the build | `opus`, effort `xhigh` |
 | `flights-lander` | agent | The landing's gate, one per flight: every project's gate, one review of the whole diff across every project, adversarial tests, its own fixes; the testing manuals' floors are its gate rows | `opus`, effort `high` |
 | `flights-mechanical-executor` | agent | One bulk edit a foreman fully fixed (a rename across many files), from a task file the foreman writes | `sonnet` |
@@ -37,7 +37,7 @@ Four agents, four commands. Project law reaches them through the project contrac
 
 1. Ready. `/flights:init`, once per project: the project map, and each unit's testing manual, test command and static-check command. Re-run, it builds only what is missing and aligns what is stale.
 2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request; a chat that wants only the ideal spec of novel work spawns `flights-speccer` on its own.
-3. Build. One root `flights-foreman`: for work with no pattern in the codebase, first one `flights-speccer`, whose `spec.md` becomes the request; the base gate, the doors, the data shapes, the decision; the interface frozen in the innermost unit; the producer built by the foreman that read it; one child foreman per other unit, in parallel against the interface; every return verified; the owner repairs its own reds.
+3. Build. One root `flights-foreman`: for work with no pattern in the codebase, first one `flights-speccer`, whose `spec.md` becomes the request; the base gate, the doors, the data shapes, the decision; the cut; the interface frozen in the innermost unit, or the spine inside one; the producer built by the foreman that read it; one child foreman per other unit or segment, in parallel against it; every return verified; the owner repairs its own reds.
 4. Land. One `flights-lander` for the whole flight, then, when the caller ordered it, the commit and, for a worktree flight, the merge through the repository's git writer, the lander's `PASS` or `FIXED` being the merge nod.
 5. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
 
@@ -90,7 +90,7 @@ A return opens with its token on the first line; the rest is evidence.
 
 | Layer | Reader | Holds |
 | --- | --- | --- |
-| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | Cost = calls × context; one context per build unit with compaction for length; the ladder (direct, `flights-foreman`, `/flights:spec` first when requirements are open, `flights-speccer` first for work with no pattern); a foreman reports once and waits for its children |
+| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | Cost = calls × context; the reader builds, compaction holds length, and work splits at ownership or at a segment briefed unread; the ladder (direct, `flights-foreman`, `/flights:spec` first when requirements are open, `flights-speccer` first for work with no pattern); a foreman reports once and waits for its children |
 | `CLAUDE.md` / `AGENTS.md` | every sub-agent and seat | The project contract |
 | The agent file | the agent | The protocol of one role |
 | The brief | one child or executor | Its requirement rows, the frozen interface's paths, acceptance, the testing manual's path, the worktree, the flight directory |

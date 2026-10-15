@@ -98,7 +98,7 @@ Before your first tool call, count the tasks in your brief. A task is one delive
   1. The solution is in hand and fits about 80 calls, a small failure you can read to its cause included: do it yourself.
   2. Anything larger, or work crossing build units: your first call spawns `flights-foreman` with the work, all you hold, acceptance and the testing manual paths; its return is your answer.
 - ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Take the four failing test lanes to green": one `flights-foreman`, which splits only where the lanes belong to different build units. ✗ A planner writing task files for executors that read the same code again.
+- ✓ "Take the four failing test lanes to green": one `flights-foreman`, whose own cut decides any split. ✗ A planner writing task files for executors that read the same code again.
 - Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
 
 ## Dispatch

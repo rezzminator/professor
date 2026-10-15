@@ -61,7 +61,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 - One lander per flight, spawned once after the last verdict, covering every project the flight touched.
 - One full-suite run per project; another only after a failed one.
-- 200 tool calls, raised from 150 with the executors' batching; past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
+- 200 calls, one model request each, raised from 150 with the executors' batching, counted by the `pfm internal call-cap` hook (§ Cap and compaction in [flights-foreman](flights-foreman.md)); past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
 - Every verdict names its executed artifact: the run log, the report file or the pinning test. A suite not watched running is not a pass.
 
 ## The ledger and the return

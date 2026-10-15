@@ -1,6 +1,6 @@
 # flights-foreman
 
-The one agent that builds. It takes a request, with a spec (the rulings and requirement rows `/flights:spec` settled with the user) or without one (a problem), reads its scope, designs what no ruling decided, builds it, splits only where ownership splits, and lands the flight through one `flights-lander`. It replaced the planner/executor split of both families: the task-file speccer, `flights-orchestrator`, the smart and precise executors, and the general family (`general-orchestrator`, `general-foreman`, `general-executor`). Ruled by the maintainer on 2026-10-06.
+The one agent that builds. It takes a request, with a spec (the rulings and requirement rows `/flights:spec` settled with the user) or without one (a problem), reads its scope, designs what no ruling decided, builds it, splits where ownership splits or where a cut segment can be briefed unread, and lands the flight through one `flights-lander`. It replaced the planner/executor split of both families: the task-file speccer, `flights-orchestrator`, the smart and precise executors, and the general family (`general-orchestrator`, `general-foreman`, `general-executor`). Ruled by the maintainer on 2026-10-06.
 
 ## Contents
 
@@ -10,7 +10,7 @@ The one agent that builds. It takes a request, with a spec (the rulings and requ
 - [Code it has not read](#code-it-has-not-read)
 - [Rulings bind](#rulings-bind)
 - [Before the first edit](#before-the-first-edit)
-- [Split only at ownership](#split-only-at-ownership)
+- [The cut](#the-cut)
 - [Inside-out and the frozen interface](#inside-out-and-the-frozen-interface)
 - [Children](#children)
 - [Mechanical bulk](#mechanical-bulk)
@@ -32,11 +32,11 @@ The task-file speccer read every file a task touched, wrote what it learned into
 - The reason flights split in the first place was one agent passing 100 calls on a large batch and its context growing until every call was expensive. The sub-agent-compact plugin (2026-09-25, four days after flights were built) removed that: arm B's builder ran 223 calls with three compactions at about 125k tokens per request.
 - Published agent frameworks agree: OpenHands scores the same 76.8% on SWE-bench Verified with and without sub-agents, cheaper without; it ships its own context condenser and leaves delegation off by default. Sub-agents win on long-horizon work (Commit0: 62.5% at $4.40 against 56.2% at $7.69), where a context cannot hold the work.
 
-So the reader builds, and the work splits only where one context cannot or should not hold it: at an ownership boundary.
+So the reader builds, and the work splits only where no agent reads what another already read: at an ownership boundary, or at a segment cut before its code is read ([The cut](#the-cut)).
 
 ## Input
 
-A request; its scope (a build unit or a problem); acceptance; each testing manual's path; the worktree; the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`, which holds every flight artifact the manual names (`run.md`, `agents.tsv`, `design.md` and each child's `design-{unit}.md`, `briefs/`, `returns/`, `tasks/`, `gate.md`, `REVIEW.md`, `UNLANDED.md`), never the worktree; the project map beside the project's flight directories. With a spec, the request is `requirements.md` in the flight directory: the binding rulings and the requirement rows; or a [`flights-speccer`](flights-speccer.md) `spec.md`, whose requirement rows and `## Decisions` bind as rulings. A child also gets the frozen interface it builds against. The same agent serves a main chat's "fix X" with no flight directory: it then creates one under the project, so its run log and the lander's files have a home.
+A request; its scope (a build unit or a problem); acceptance; each testing manual's path; the worktree; the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`, which holds every flight artifact the manual names (`run.md`, `agents.tsv`, `design.md` and each child's `design-{unit}.md`, `briefs/`, `returns/`, `tasks/`, `gate.md`, `REVIEW.md`, `UNLANDED.md`), never the worktree; the door list `doors.txt` (a child's `doors-{unit}.txt`) beside them; the project map beside the project's flight directories. With a spec, the request is `requirements.md` in the flight directory: the binding rulings and the requirement rows; or a [`flights-speccer`](flights-speccer.md) `spec.md`, whose requirement rows and `## Decisions` bind as rulings. A child also gets the frozen interface or spine it builds against. The same agent serves a main chat's "fix X" with no flight directory: it then creates one under the project, so its run log and the lander's files have a home.
 
 ## Novel work
 
@@ -63,27 +63,46 @@ In order, each written to the run log:
 3. The data shapes: every shape the work relies on is read from its producer (its docs, code or schema, never only its consumer), plus one probe of real data where real data exists. A value one run printed is evidence for the return, never a requirement; so is the form one sample of outside data took; every form the producer documents or emits is handled, and any other form is reported, never read as absent. Measured: three of the 19 shipped a defect because real data took a form nobody probed (a listing site records 0 bedrooms for every new-build; a filter built on it hid real flats).
 4. A `DECIDE` line when no ruling decided the design: the design and the alternative it rejected, written out in the design file: the root's `design.md`, a child's `design-{unit}.md`, so children sharing the flight directory never overwrite each other's or the root's. Measured: 2 of 30 audited foremen wrote a decision before building; nothing forced it.
 
-## Split only at ownership
+## The cut
 
-A build unit (a project in the project map) or a problem unrelated to the others is the only seam. Inside one unit, whatever its size, one foreman holds it: one context per unit, compaction for length. Related small fixes in one unit stay with one foreman; a batch of unrelated problems (what `general-orchestrator` did) is one child per problem.
+A build unit (a project in the project map) or a problem unrelated to the others splits at once: a batch of unrelated problems (what `general-orchestrator` did) is one child per problem. Inside one unit the foreman cuts, once its door list exists and before it reads any segment's code: `tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}` ([tracetree](../tracing/tracetree.md)) lifts each door named from two or more cells into a `SPINE` of contracts and returns at most four segments, each with an `ORDER` and an `ESCALATE` line, and a `VERDICT SPLIT k`, `SOLO` or `EMPTY`. The kit finds where to cut; what each segment builds comes from the foreman's own design and `DECIDE` line.
 
-E8 is the caution against splitting by planning convenience: one writer for a whole spec read 47% less than the nested planner but mapped worse (100/5/9 against 110/1/3), contradicted a ruling and added two medium defects. Splitting by ownership keeps that benefit, because each child reads only what it owns.
+A segment goes to a child foreman only when it passes five gates:
+
+1. Doors first: it was cut from the step-3 door list, before any of its code was read.
+2. Own write set: no file of it is another segment's; each project-map hot file has one owner.
+3. Spine as code: it reaches the rest only through spine contracts the parent wrote and froze as code, an existing signature or a new one as a compiling stub with its test, never a prose contract.
+4. Briefable: the parent can write its order (each symbol to add or change, its signature or wire key, the rows it meets) from the rows, the door lines and the spine, without reading its bodies.
+5. Pays: its work is about 40 calls or more (roughly 150 changed lines); a spawn costs about 20 calls of intake.
+
+The parent keeps the spine, a whole-file port whose source is its spec, a rewrite of a type the spine exports (every caller breaks at compile time), the tail that compiles only after every segment (deletions, registries, the unit gate) and every segment failing a gate. `VERDICT SOLO`, or one segment left, builds alone.
+
+A segment child returns `BLOCKED {unit}: ESCALATE {question}`, nothing outside its segment changed, when a spine contract must change, a door sits outside its segment, a shape contradicts its order, or it needs a type, helper or fixture another segment would also need; everything else it decides. The parent amends and re-freezes the spine, then answers every affected child by `SendMessage`, which resumes it with its context intact. The escalation rides the `BLOCKED` first line because the GPT foremen's Stop hook (`gpt-agent-stop.py`) admits only `DONE`, `PARTIAL`, `FAILED` and `BLOCKED` returns.
+
+The cut keeps E1's and E8's lesson, that the parent never reads before delegating. E8 is the caution against splitting by planning convenience: one writer for a whole spec read 47% less than the nested planner but mapped worse (100/5/9 against 110/1/3), contradicted a ruling and added two medium defects. A segment child is the only reader of its segment's code, so the split costs no second reading. The audit of ten heavy foreman runs is the new evidence:
+
+- 8 of 8 Claude runs could have split; none weighed it in visible text, and 6 of 8 passed the 250-call cap. Of each run's re-sent context, 10 to 36% belonged to other segments (scout estimates).
+- GPT foremen on the same prose split only at units and froze prose contracts, so children built divergent copies and collided: the spine is frozen as compiling code for that reason.
+- A backtest of the cut at the flights' base commits: door-list seeds agreed with the scouts' counterfactual split at ARI 0.53 against 0.04 for request-text seeds over the same four flights, and the package rule (one segment per top-level directory) scored 0.09 over eight.
 
 ## Inside-out and the frozen interface
 
 The innermost unit is the one the others build against: the shared contract and what generates from it. The root foreman writes the interface there first and freezes it: its files written, that unit's gate green. Then it builds the unit it read to design the interface, the producer, itself. It never hands code it read to another agent to read again.
 
+Inside one unit the spine is frozen the same way, as code: an existing signature, or a new one as a compiling stub with its test.
+
 Freezing first is what makes the work parallel: once the interface exists in the repository, every other unit builds against it at once, with no need for the producer to be finished.
 
 ## Children
 
-Once the interface is frozen (for unrelated problems, which share none, at once), one child foreman per other unit or problem, all spawned in one message. Each child gets:
+Once the interface or spine is frozen (for unrelated problems, which share none, at once), one child foreman per other unit, problem or segment passing the cut's gates, all spawned in one message. Each child gets:
 
 - its requirement rows verbatim, only the rows its unit owns, and with a `spec.md` its path and the `D` ids those rows rest on;
-- the frozen interface's paths, and the files another unit owns: each hot file in the project map has one owning unit, which adds every line to it, so two children never edit it at once;
+- a segment child: its `SEGMENT`, `ORDER` and `ESCALATE` lines verbatim and the parent's order beneath them;
+- the frozen interface's or spine's paths, and the files another unit or segment owns: each hot file in the project map has one owning unit, which adds every line to it, so two children never edit it at once;
 - acceptance, its testing manual's path, the worktree, the flight directory.
 
-Never the parent's beliefs about code the parent did not read, never steps: a belief passed down is the speccer's pinned sample again. Depth is two: a child never spawns a foreman, and never a lander.
+Never the parent's beliefs about code the parent did not read, never steps: a belief passed down is the speccer's pinned sample again. Foremen go three deep: a child cuts its own door list once by the same law and may spawn segment children, briefed with `DEPTH 3`, which build alone; only the root fires a speccer or a lander. A segment child's unit is its parent's unit plus `-S{n}`.
 
 ## Mechanical bulk
 
@@ -118,17 +137,17 @@ After every child returned, the root foreman spawns one `flights-lander` for the
 
 ## Cap and compaction
 
-250 calls, a first value sized to the work (arm B's builder needed 223 for seven tasks of one unit). `autoCompact` 300k forced, nudges from 120k every 60k, the executors' iteration-0 points. A cap reached returns `FAILED {flight}: cap` with the handoff, never `DONE`: one audited foreman ran 64 calls against a 45 cap and still returned `DONE`.
+250 calls, one model request each, a first value sized to the work (arm B's builder needed 223 for seven tasks of one unit). The `pfm internal call-cap` PreToolUse hook on the foreman, the lander and the mechanical executor keeps the count: it counts the agent's model requests from its own transcript, compactions included, against the cap its agent type sets (`transcript.CallCap`: a foreman 250, a lander 200, any other 150), injects the count from four fifths of the cap on, and at the cap orders the stop and the role's cap return, because a count the model holds in its head is lost at every compaction. `autoCompact` 300k forced, nudges from 120k every 60k, the executors' iteration-0 points. A cap reached returns `FAILED {flight}: cap` with the handoff, never `DONE`: one audited foreman ran 64 calls against a 45 cap and still returned `DONE`.
 
 ## The run log
 
-`run.md` in the flight directory, written by the foreman that owns the flight (the root): a header with the baseline sha and date; then one line per event — `BASE {unit} {verdict lines}`, `GOAL`, `SPEC {spec.md path}`, `DECIDE`, `FROZEN {interface paths} {gate line}`, `{unit} CLAIMED · {agent id}`, `{unit} DONE|FAILED|BLOCKED · {check line}`, `gate CLAIMED`, `gate PASS|FIXED|FAIL`, `RETRO {lesson}`. A child writes no file of the parent's; it returns. The lander reads the baseline from the header and the intent from `spec.md` when the flight has one (it carries every `requirements.md` row verbatim plus its `## Decisions`), else `requirements.md`, else the `GOAL` line; `/flights:audit` reads all of it.
+`run.md` in the flight directory, written by the foreman that owns the flight (the root): a header with the baseline sha and date; then one line per event — `BASE {unit} {verdict lines}`, `GOAL`, `SPEC {spec.md path}`, `DECIDE`, `CUT {verdict} · {k} · {spine}`, `FROZEN {interface paths} {gate line}`, `{unit} CLAIMED · {agent id}`, `ESCALATE {unit} · {question} · {answer}`, `{unit} DONE|FAILED|BLOCKED · {check line}`, `gate CLAIMED`, `gate PASS|FIXED|FAIL`, `RETRO {lesson}`. Every foreman appends each spawn it makes to `agents.tsv`, so `pfm tokens --flight` matches a grandchild too; a child writes no other file of the parent's, its `CUT` and `ESCALATE` lines going in its return. The lander reads the baseline from the header and the intent from `spec.md` when the flight has one (it carries every `requirements.md` row verbatim plus its `## Decisions`), else `requirements.md`, else the `GOAL` line; `/flights:audit` reads all of it.
 
 ## Return
 
-First line `DONE {flight}`, `PARTIAL {flight}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`, the root's `DONE` only on the lander's `PASS` or `FIXED` (a `FAIL` returns `FAILED {flight}: gate`, or `PARTIAL` naming the units it sits in); then the `SPEC` line when a speccer ran (its path, its `USER` ids, the next phase, its cost), one row per unit (owner, verdict, its check line as printed), the doors, `UNPROVEN`, the lander's verdict and residuals, `OUTSIDE`, the cost (calls, tokens read), `RETRO`. A child returns the same shape for its unit.
+First line `DONE {flight}`, `PARTIAL {flight}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`, the root's `DONE` only on the lander's `PASS` or `FIXED` (a `FAIL` returns `FAILED {flight}: gate`, or `PARTIAL` naming the units it sits in); then the `SPEC` line when a speccer ran (its path, its `USER` ids, the next phase, its cost), the `CUT` line with each kept segment and escalation, one row per unit (owner, verdict, its check line as printed), the doors, `UNPROVEN`, the lander's verdict and residuals, `OUTSIDE`, the cost (calls, tokens read), `RETRO`. A child returns the same shape for its unit.
 
 ## Evidence
 
-- E1, E7, E8, E9, the v1 baseline, the 30 foreman and 12 orchestrator runs, and the frameworks ranked by their own benchmarks: the maintainer's flight-audit notes, outside this repository; every number this document relies on is quoted above.
+- E1, E7, E8, E9, the v1 baseline, the 30 foreman and 12 orchestrator runs, the ten-run foreman replication audit with its cut backtest, and the frameworks ranked by their own benchmarks: the maintainer's flight-audit notes, outside this repository; every number this document relies on is quoted above.
 - Open: the multi-project form has not been measured; the first cross-project flights are its measurement (calls per unit, re-read share, lander findings).

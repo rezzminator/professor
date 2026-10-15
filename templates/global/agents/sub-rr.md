@@ -1,9 +1,9 @@
 ---
 name: sub-rr
-description: RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro and rr-pro-max, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.
+description: RR-ONLY digs a batch of rabbit holes — spawned by rr, rr-pro, rr-pro-max and their gpt- twins, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.
 visibility:
   visible-to:
-    include: [rr, rr-pro, rr-pro-max]
+    include: [rr, rr-pro, rr-pro-max, gpt-rr, gpt-rr-pro, gpt-rr-pro-max]
 tools: WebSearch, WebFetch, mcp__harvester-professor__read, mcp__harvester-professor__search_literature, mcp__harvester-professor__search_web
 model: haiku
 effort: medium

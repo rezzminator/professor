@@ -338,6 +338,9 @@ const twins = [
   ['gpt-flights-mechanical-executor', 'gpt-6-luna', 'high', 'flights-mechanical-executor'],
   ['gpt-reviewer', 'gpt-6.1-sol', 'high', 'reviewer'],
   ['gpt-reviewer-pro', 'gpt-6.1-sol', 'high', 'reviewer-pro'],
+  ['gpt-rr', 'gpt-6.1-sol', 'low', 'rr'],
+  ['gpt-rr-pro', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro'],
+  ['gpt-rr-pro-max', 'gpt-6.1-sol', 'medium', 'rr', 'rr-pro-max'],
   ['sol', 'gpt-6.1-sol', 'high'],
   ['luna', 'gpt-6-luna', 'medium'],
   ['astra', 'gpt-6-astra', 'high'],
@@ -416,7 +419,7 @@ test('the shipped variants render with zero errors with and without the gpt-agen
   }
 });
 
-test('the gpt-agents capability decides whether the ten GPT twins are linked', () => {
+test('the gpt-agents capability decides whether the GPT twins are linked', () => {
   const on = renderShipped([CAPABILITY]);
   const off = renderShipped([]);
   for (const [name] of twins) {
@@ -429,7 +432,8 @@ test('the gpt-agents capability decides whether the ten GPT twins are linked', (
   }
 });
 
-for (const [name, model, effort, role] of twins) {
+// A fifth field names the rendered variant a twin derives from when it is not the role's own manual.
+for (const [name, model, effort, role, base] of twins) {
   test(`${name} renders its runtime and portable role contract`, () => {
     const render = renderShipped([CAPABILITY]);
     const text = renderedText(render, name);
@@ -465,7 +469,9 @@ for (const [name, model, effort, role] of twins) {
       : role === 'flights-lander'
         ? renameStandalone('reviewer-pro|reviewer')
         : original;
-    assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(renamed).trimEnd()), `${name}: the rendered body is not the full ${role} manual`);
+    const manual = base ? renderedText(render, base) : renamed;
+    assert.ok(manual, `${name}: its base ${base} was not rendered`);
+    assert.ok(bodyOf(text).trimEnd().endsWith(bodyOf(manual).trimEnd()), `${name}: the rendered body is not the full ${base ?? role} manual`);
     if (role.startsWith('flights-')) {
       assert.ok(text.includes('your parent hears from you only by that return'), `${name}: the return law is not prepended`);
       // Each role's return law names only the files that role owns: the speccer writes its spec, never a builder's files.
@@ -474,6 +480,12 @@ for (const [name, model, effort, role] of twins) {
         : ['run.md, briefs, returns/*.md, gate.md, red/*', 'write spec.md and the research'];
       assert.ok(text.includes(owned), `${name}: the return law lost its file list`);
       assert.ok(!text.includes(foreign), `${name}: the return law names files another role owns`);
+    } else if (role === 'rr') {
+      // The research leads keep their diggers on Claude: no rename, and sub-rr admits each twin.
+      assert.doesNotMatch(text, /gpt-sub-rr|gpt-clone-distiller/, `${name}: its diggers must remain Claude agents`);
+      assert.equal(fm.tools, parseFrontmatter(base ?? role, renderedText(render, base ?? role)).tools, `${name}: tools differ from ${base ?? role}`);
+      const digger = parseFrontmatter('sub-rr', renderedText(render, 'sub-rr'));
+      assert.ok(digger.visibility['visible-to'].include.includes(name), `${name}: sub-rr is not visible to it`);
     } else {
       assert.doesNotMatch(text, /gpt-(?:sub-)?tracer/, `${name}: its code readers must remain Claude tracers`);
       assert.deepEqual(fm.visibility['visible-to'].include, ['main', 'gpt-flights-lander']);

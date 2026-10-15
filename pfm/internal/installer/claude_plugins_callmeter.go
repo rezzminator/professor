@@ -167,6 +167,25 @@ func takeCallmeterLock(lock string) error {
 // callmeterCheckoutVersion is the version in the checkout's
 // .claude-plugin/plugin.json, which the copy's wrapper reads too.
 func callmeterCheckoutVersion(checkout string) (string, error) {
+	version, err := ClaudePluginCheckoutVersion(checkout)
+	if err != nil {
+		return "", err
+	}
+	// "." and ".." pass the wrapper's character set but leave bin/{version}/.
+	if !callmeterVersionPattern.MatchString(version) || version == "." || version == ".." {
+		return "", fmt.Errorf(
+			"%s: version %q is not one the callmeter wrapper runs",
+			filepath.Join(checkout, ".claude-plugin", "plugin.json"),
+			escapeControl(version),
+		)
+	}
+	return version, nil
+}
+
+// ClaudePluginCheckoutVersion is the version in a plugin checkout's
+// .claude-plugin/plugin.json, the one its -dev copy is installed at; empty when
+// the file names none. A file that cannot be read or parsed returns its error.
+func ClaudePluginCheckoutVersion(checkout string) (string, error) {
 	path := filepath.Join(checkout, ".claude-plugin", "plugin.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -177,14 +196,6 @@ func callmeterCheckoutVersion(checkout string) (string, error) {
 	}
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return "", fmt.Errorf("parse %s: %w", path, err)
-	}
-	// "." and ".." pass the wrapper's character set but leave bin/{version}/.
-	if !callmeterVersionPattern.MatchString(manifest.Version) || manifest.Version == "." || manifest.Version == ".." {
-		return "", fmt.Errorf(
-			"%s: version %q is not one the callmeter wrapper runs",
-			path,
-			escapeControl(manifest.Version),
-		)
 	}
 	return manifest.Version, nil
 }

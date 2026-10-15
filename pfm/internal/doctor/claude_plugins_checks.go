@@ -147,6 +147,17 @@ func printClaudePluginsDoctor(
 			Problem: "plugin " + id + " not installed in " + store, Fix: installer.ClaudePluginRepair,
 		})
 	}
+	// Claude runs an installed -dev copy from its snapshot, which a refreshed copy does not move;
+	// a target not installed is named above, its install the one repair.
+	installedTargets := slices.DeleteFunc(slices.Clone(targets), func(target installer.ClaudePluginTarget) bool {
+		return slices.Contains(missing, target.ID)
+	})
+	cacheGaps, cacheErr := installer.ClaudePluginCacheGaps(store, installedTargets)
+	if cacheErr != nil {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: claude_plugins could not read the plugin cache: %v\n", cacheErr)
+	}
+	gaps = append(gaps, cacheGaps...)
 	gaps = bareNameInstallFixes(gaps, targets)
 	marketplaceGaps, marketplaceErr := installer.ClaudePluginMarketplaceGaps(store, targets)
 	// An unreadable known_marketplaces.json recordErr already named is one failure, reported once.
@@ -162,7 +173,7 @@ func printClaudePluginsDoctor(
 		}
 	}
 	gaps = append(gaps, cannotInstall...)
-	if len(gaps) == 0 && recordErr == nil && marketplaceErr == nil {
+	if len(gaps) == 0 && recordErr == nil && marketplaceErr == nil && cacheErr == nil {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return
 	}

@@ -278,7 +278,8 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 
 // simulateClaude plays the claude CLI's own writes for the fake runner in the
 // account dir it runs on: an install enables the id in settings.json (through
-// its link) and records it installed; a directory marketplace add records the
+// its link) and records it installed, a directory marketplace's plugin with a
+// snapshot of its copy at its version; a directory marketplace add records the
 // marketplace under the name its manifest gives, re-pointing a known one.
 func simulateClaude(t *testing.T, runner *pluginRunner) {
 	t.Helper()
@@ -323,7 +324,21 @@ func simulateClaude(t *testing.T, runner *pluginRunner) {
 			if err := os.MkdirAll(installPath, 0o700); err != nil {
 				t.Errorf("simulated claude: %v", err)
 			}
-			plugins[fields[2]] = []any{map[string]any{"scope": "user", "installPath": installPath}}
+			entry := map[string]any{"scope": "user", "installPath": installPath}
+			// A directory marketplace's plugin is snapshotted at its plugin.json version.
+			name, marketplace, _ := strings.Cut(fields[2], "@")
+			known := readJSON(filepath.Join(configDir, "plugins", "known_marketplaces.json"))
+			listing, _ := known[marketplace].(map[string]any)
+			source, _ := listing["source"].(map[string]any)
+			if dir, _ := source["path"].(string); source["source"] == "directory" && dir != "" {
+				copyDir := filepath.Join(dir, "plugins", name)
+				version, _ := readJSON(filepath.Join(copyDir, ".claude-plugin", "plugin.json"))["version"].(string)
+				entry["version"] = version
+				if err := mirrorPluginTree(copyDir, installPath); err != nil {
+					t.Errorf("simulated claude: %v", err)
+				}
+			}
+			plugins[fields[2]] = []any{entry}
 			writeJSON(record, installed)
 		case len(fields) == 4 && strings.Join(fields[:3], " ") == "plugin marketplace add" && filepath.IsAbs(fields[3]):
 			manifest := readJSON(filepath.Join(fields[3], ".claude-plugin", "marketplace.json"))
@@ -497,9 +512,8 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 
 // TestEnsureClaudePluginsFailsAListedPluginLeftOff: after an applied -alpha
 // install, a plugin claude.plugins lists that is not installed from its -dev
-// copy and enabled is a FAIL naming the plugin, the account dir and each cause
-// — live chats that deferred its commands included — never a quiet skip. A dry
-// run and a plugin left right fail nothing.
+// copy and enabled is a FAIL naming the plugin, the account dir and each cause,
+// never a quiet skip. A dry run and a plugin left right fail nothing.
 func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
 	const name = "sub-agent-compact"
 	dev := devID(name)
@@ -507,23 +521,17 @@ func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
 		name      string
 		checkout  bool
 		simulate  bool
-		liveChat  bool
 		apply     bool
 		wantCause []string
 	}{
-		{"a live chat deferred its install", true, true, true, true, []string{
-			"plugin " + dev + " not installed in {first}",
-			"plugin " + dev + " not enabled in {first}/settings.json",
-			"plugin commands deferred: live chats 4242 on {second}",
-		}},
-		{"its checkout is missing", false, true, false, true, []string{
+		{"its checkout is missing", false, true, true, []string{
 			"plugin " + name + " falls back to the GitHub copy " + name + "@" + name + " on this alpha build: no checkout at ",
 		}},
-		{"the install left it disabled", true, false, false, true, []string{
+		{"the install left it disabled", true, false, true, []string{
 			"plugin " + dev + " not installed in {first}", "plugin " + dev + " not enabled in {first}/settings.json",
 		}},
-		{"a dry run", true, false, false, false, nil},
-		{"installed and enabled", true, true, false, true, nil},
+		{"a dry run", true, false, false, nil},
+		{"installed and enabled", true, true, true, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			home, binary, first, second := pluginFixture(t)
@@ -539,14 +547,6 @@ func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
 			inst.options.SourceRepo = writeMarketplaceClone(t, []string{name}, checkouts)
 			if test.simulate {
 				simulateClaude(t, runner)
-			}
-			if test.liveChat {
-				proc := filepath.Join(home, "proc")
-				if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				writeFixture(t, filepath.Join(second, "sessions", "4242.json"), "{}")
-				inst.options.ProcRoot = proc
 			}
 			err := inst.ensureClaudePlugins(context.Background())
 			if test.wantCause == nil {
@@ -581,33 +581,28 @@ func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
 }
 
 // TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled: an unlisted
-// marketplace plugin found enabled is never reported kept disabled while a
-// live chat holds its disable back, one with no checkout is never installed
-// from GitHub while its enabled copy is still disabled, and a foreign -dev
-// marketplace the add does not re-point is a failure naming what the remove
-// would delete; one a live chat holds back is never reported ensured.
+// marketplace plugin found enabled is disabled; one with no checkout is never
+// installed from GitHub while its enabled copy is still disabled, and a
+// foreign -dev marketplace the add does not re-point is a failure naming what
+// the remove would delete, never reported ensured.
 func TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled(t *testing.T) {
 	for _, test := range []struct {
 		name       string
-		liveChat   bool
 		foreign    bool
 		noCheckout bool
 		want       []string
 		wantErr    string
 	}{
-		{"a live chat holds the disable back", true, false, false, []string{
+		{"an enabled unlisted plugin is disabled", false, false, []string{
 			"  ok      claude plugin buddy@buddy-dev installed in {first}\n",
-			"  skip    claude plugins: live chats 4242 on {second}",
+			"  change  disable buddy@buddy-dev in {first}/settings.json: claude.plugins does not list buddy\n",
 		}, ""},
-		{"no checkout: never installed from GitHub, its copy still disabled", false, false, true, []string{
+		{"no checkout: never installed from GitHub, its copy still disabled", false, true, []string{
 			"  skip    claude plugin buddy: not installed — claude.plugins does not list it and this alpha build has no checkout of it: no checkout at ",
 			"disable buddy@buddy-dev in {first}/settings.json",
 		}, ""},
-		{"a live chat holds the re-point back", true, true, false, []string{
-			"  skip    claude plugins: live chats 4242 on {second}",
-		}, ""},
 		{
-			"a re-point that does not take", false, true, false, nil,
+			"a re-point that does not take", true, false, nil,
 			"claude plugin buddy@buddy-dev in {first}: plugin buddy@buddy-dev marketplace buddy-dev in " +
 				"{first}/plugins/known_marketplaces.json points at /elsewhere/buddy-dev, want {home}/.local/share/buddy-dev" +
 				" after the add — claude plugin marketplace remove buddy-dev deletes the saved options and data of its plugins",
@@ -643,14 +638,6 @@ func TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeFixture(t, filepath.Join(first, "plugins", "known_marketplaces.json"), string(known))
-			if test.liveChat {
-				proc := filepath.Join(home, "proc")
-				if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				writeFixture(t, filepath.Join(second, "sessions", "4242.json"), "{}")
-				inst.options.ProcRoot = proc
-			}
 			err = inst.ensureClaudePlugins(context.Background())
 			replace := strings.NewReplacer("{first}", first, "{second}", second, "{home}", home)
 			if want := replace.Replace(test.wantErr); want == "" && err != nil ||

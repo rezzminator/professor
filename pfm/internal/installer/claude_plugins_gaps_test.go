@@ -244,3 +244,35 @@ func TestClaudePluginGapsNamesEveryCopy(t *testing.T) {
 		})
 	}
 }
+
+// TestClaudePluginInstalledVersions: every distinct recorded version of an id,
+// in record order; none for an id or a file with no record; a version that is
+// not a string is skipped, never failing the record; an unparsable record is
+// an error.
+func TestClaudePluginInstalledVersions(t *testing.T) {
+	configDir := t.TempDir()
+	if versions, err := ClaudePluginInstalledVersions(configDir, "a@a-dev"); err != nil || versions != nil {
+		t.Fatalf("no record file: versions=%v err=%v, want none", versions, err)
+	}
+	record := filepath.Join(configDir, "plugins", "installed_plugins.json")
+	writeFixture(t, record, `{"version":2,"plugins":{"a@a-dev":[`+
+		`{"scope":"user","version":"1.0.0"},{"scope":"project","version":"0.9.0"},`+
+		`{"scope":"local","version":"1.0.0"},{"scope":"local"}]}}`)
+	versions, err := ClaudePluginInstalledVersions(configDir, "a@a-dev")
+	if err != nil || strings.Join(versions, ",") != "1.0.0,0.9.0" {
+		t.Fatalf("versions=%v err=%v, want 1.0.0,0.9.0", versions, err)
+	}
+	if versions, err := ClaudePluginInstalledVersions(configDir, "b@b-dev"); err != nil || versions != nil {
+		t.Fatalf("unrecorded id: versions=%v err=%v, want none", versions, err)
+	}
+	writeFixture(t, record, `{"plugins":{"a@a-dev":[{"version":7,"installPath":"/x"},{"version":"2.0.0"}]}}`)
+	versions, err = ClaudePluginInstalledVersions(configDir, "a@a-dev")
+	if err != nil || strings.Join(versions, ",") != "2.0.0" {
+		t.Fatalf("non-string version: versions=%v err=%v, want 2.0.0 and the record still read", versions, err)
+	}
+	writeFixture(t, record, `{`)
+	if _, err := ClaudePluginInstalledVersions(configDir, "a@a-dev"); err == nil ||
+		!strings.HasPrefix(err.Error(), "parse "+record) {
+		t.Fatalf("unparsable record err=%v, want a parse error naming %s", err, record)
+	}
+}

@@ -481,3 +481,13 @@ Resolved:
 Observed: clean-sweep's `6f756a92` took `pfm/internal/installer/claude_plugins.go` to 812 lines, over the 800 ceiling; the fence gates ran on the worktree, the push's leak check passed it, and CI Verify went red after the push.
 Amend: `.githooks/pre-push` runs `pfm/scripts/arch-check.sh` on every develop push whose tip is the checked-out HEAD.
 Resolved:
+
+## 2026-10-15 — the templates gate is red on a time budget, and its summary names a step
+Observed: every templates gate in the gate-history ledger since 2026-10-14 00:42 FAILs: `templates.skill-tests` runs the tracetree unit tests at 79.6–81.8 s against an 80 s step limit and a 40 s ×2 gate budget, at host loads 9–52. A run where every step PASSed still exited 1 on the budget, and its summary read "1 step(s) failed or could not run".
+Amend: the tracetree tests get faster or `templates.skill-tests` gets its own measured limit; the gate summary names a budget failure as a budget failure, never as a step.
+Resolved:
+
+## 2026-10-15 — three cost tools price one run three ways
+Observed: the door-alarms speccer r2 run priced $6.74 in `pfm tokens --timeline`, $11.58 in the transcript estimate and $31.21 in the session ledger; the speccer's `## Cost and worth` calibration rests on these numbers.
+Amend: reconcile `pfm tokens`, the transcript estimate and the session ledger on one run until they agree or each names what it excludes.
+Resolved:

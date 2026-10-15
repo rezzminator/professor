@@ -2570,9 +2570,14 @@ def holds(text, anchor, ident):
     return re.search(r"(?<![\w.])" + re.escape(anchor) + r"(?![\w])", text) if ident else anchor in text
 
 
-def recall_runs(rc, root, since_hours, exclude):
+def run_started(run):
+    """When a run started: the time its ROOT file was written, the measure `run_start` dates a BASE-less run by."""
+    return os.path.getmtime(os.path.join(run, "ROOT"))
+
+
+def recall_runs(rc, root, since_hours, exclude, before=None):
     """(runs, unreadable): every earlier run under /tmp/{project}/tracer/ whose ROOT shares ROOT's git common dir (the
-    same ROOT outside git), newest first, each (run, its ROOT, BASE or "", [(node, answer text, hops)]); a run that
+    same ROOT outside git), with `before` only those started strictly before that time, newest first, each (run, its ROOT, BASE or "", [(node, answer text, hops)]); a run that
     cannot be read is (run, reason), never dropped."""
     parent = os.path.join("/tmp", project_name(root), "tracer")
     mine = rc.common(root)
@@ -2589,6 +2594,9 @@ def recall_runs(rc, root, since_hours, exclude):
             continue
         try:
             if since_hours is not None and now - os.path.getmtime(run) > since_hours * 3600:
+                continue
+            started = run_started(run)
+            if before is not None and started >= before:
                 continue
             with open(os.path.join(run, "ROOT"), encoding="utf-8") as f:
                 theirs = f.read().strip()
@@ -2628,8 +2636,8 @@ def recall_runs(rc, root, since_hours, exclude):
         if broken:
             unreadable.append((run, broken))
             continue
-        runs.append((run, theirs, base, lines))
-    return runs, unreadable
+        runs.append((started, run, theirs, base, lines))
+    return [r[1:] for r in sorted(runs, key=lambda r: r[0], reverse=True)], unreadable
 
 
 def recall_line(rc, run, theirs, base, text, hopset, idents):
@@ -2696,17 +2704,17 @@ def recall_line(rc, run, theirs, base, text, hopset, idents):
     return "FRESH", text, notes
 
 
-def recall(root, asked, since_hours=None, exclude=None):
+def recall(root, asked, since_hours=None, exclude=None, before=None):
     """The recall of ROOT's questions as output lines: per question a RECALL head, each matched prior answer line
     FRESH (cites re-addressed), DELTA (with its occurrence changes) or STALE (with its reason), or GAP; first a line
     per run that could not be read, last the RECALL COVER line."""
     rc, out = Recall(root), []
     try:
-        runs, unreadable = recall_runs(rc, root, since_hours, exclude)
+        runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
     except GitUnknown as e:
         out.append(f"RECALL GIT FAILED — {e}: candidates are runs on this exact ROOT")
         rc.commons[root] = None
-        runs, unreadable = recall_runs(rc, root, since_hours, exclude)
+        runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
     if rc.commons.get(root) is None and not out:
         out.append(f"RECALL: {root} is in no git repository — candidates are runs on this exact ROOT")
     out.append(f"RECALL {root} · {len(runs)} earlier runs · {len(unreadable)} unreadable")
@@ -2752,14 +2760,21 @@ def recall(root, asked, since_hours=None, exclude=None):
     return out
 
 
-def cmd_recall(root, since_hours):
+def cmd_recall(root, since_hours, before_run=None):
     root = os.path.abspath(root)
     if not os.path.isdir(root):
         fail(f"repo root {root} is not a directory")
+    before = None
+    if before_run is not None:
+        before_run = os.path.abspath(before_run)
+        try:
+            before = run_started(before_run)
+        except OSError as e:
+            fail(f"--before {before_run} is no run whose start can be read: {e}")
     asked = parse_questions(sys.stdin.read())
     if not asked:
         fail("recall read no numbered question from stdin: start each with `1.`, `1)` or `Q1`")
-    print("\n".join(recall(root, asked, since_hours)))
+    print("\n".join(recall(root, asked, since_hours, exclude=before_run, before=before)))
 
 
 def main():
@@ -2769,20 +2784,24 @@ def main():
     if a == ["cutgate"]:
         return cmd_cutgate()
     if a and a[0] == "recall":
+        usage = "usage: tracetree.py recall ROOT [--since-hours N] [--before RUN] < numbered questions"
+        opts, rest = {"--since-hours": None, "--before": None}, a[1:]
+        while len(rest) > 1 and rest[-2] in opts and opts[rest[-2]] is None:
+            opts[rest[-2]], rest = rest[-1], rest[:-2]
+        if len(rest) != 1 or rest[0].startswith("--"):
+            fail(usage)
         since = None
-        if len(a) == 4 and a[2] == "--since-hours":
+        if opts["--since-hours"] is not None:
             try:
-                since = float(a[3])
+                since = float(opts["--since-hours"])
             except ValueError:
-                fail(f"--since-hours takes a number of hours, got {a[3]!r}")
-        elif len(a) != 2:
-            fail("usage: tracetree.py recall ROOT [--since-hours N] < numbered questions")
-        return cmd_recall(a[1], since)
+                fail(f"--since-hours takes a number of hours, got {opts['--since-hours']!r}")
+        return cmd_recall(rest[0], since, opts["--before"])
     if a and a[0] == "segment":
         import segment
         sys.exit(segment.main(a[1:], fail))
     if not a or a[0] not in ("new", "seek", "start", "check", "wait", "answer", "write", "map", "read", "show", "book") or (len(a) < 2 and a[0] != "book"):
-        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | recall ROOT [--since-hours N] < questions | intake < PreToolUse hook payload | cutgate < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT] | segment ROOT [--rev SHA] --seed SEED...|--seeds FILE [--variant contract|package|cochange|tracer] [--floor LINES] [--read-max SHARE] [--max K] [--json]")
+        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | recall ROOT [--since-hours N] [--before RUN] < questions | intake < PreToolUse hook payload | cutgate < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT] | segment ROOT [--rev SHA] --seed SEED...|--seeds FILE [--variant contract|package|cochange|tracer] [--floor LINES] [--read-max SHARE] [--max K] [--json]")
     if a[0] == "seek":
         if len(a) != 3:
             fail("usage: tracetree.py seek RUN REGEX")

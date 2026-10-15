@@ -2952,6 +2952,16 @@ class RecallTest(unittest.TestCase):
         out = self.recall("1. Where does `Handle` refuse an empty target?\n")
         self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(run)}", out)
 
+    def test_before_keeps_only_runs_started_strictly_before_the_named_run_and_never_the_run_itself(self):
+        older, named, newer = (self.run_with(self.repo, self.HANDLE) for _ in range(3))
+        for run, stamp in ((older, 1000), (named, 2000), (newer, 3000)):
+            os.utime(os.path.join(run, "ROOT"), (stamp, stamp))
+        got = tt(["recall", self.repo, "--before", named], input="1. Where does `Handle` refuse an empty target?\n")
+        self.assertEqual(got.returncode, 0, got.stderr + got.stdout)
+        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(older)}\n", got.stdout)
+        self.assertIn("· 1 earlier runs ·", got.stdout)
+        self.assertIn(f"runs {os.path.basename(newer)}", self.recall("1. Where does `Handle` refuse an empty target?\n"))
+
     def test_a_run_that_cannot_be_read_is_named_never_skipped(self):
         self.run_with(self.repo, self.HANDLE)
         broken = self.run_with(self.repo, self.HANDLE)

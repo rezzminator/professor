@@ -7,8 +7,9 @@ imported by tracetree.py.
 A SEED is a symbol (`ReadLines`), a qualified symbol (`codexgen.Run`, `Row.RatesAt`), a wire key (`custom-title`) or
 a tracked path (`transcript/lines.go`, `pfm/internal/codexgen/`, `tokens/claude.go:461`); `gone=PATH` is a file that
 goes away or moves (its mentions join the blast), `use=NAME` a contract the change calls but never edits (a CONTRACT,
-blasting none of its callers); `ROW=SEED` (or a `ROW:` line head in --seeds FILE) tags it with the requirement row it
-serves. A name under four characters or a common verb (`run`, `load`) is refused as NOTFOUND, never searched.
+blasting none of its callers); `ROW=SEED` (or a `{row}:` line head in --seeds FILE, any name of letters, digits,
+`_`, `.` and `-`) tags it with the requirement row it serves. A name under four characters or a common verb (`run`,
+`load`) is refused as NOTFOUND, never searched.
 
   BLAST     each seed's definition site(s) and the tracked files naming it — one hop, never transitive; vendored,
             generated (`.gitattributes` linguist-generated/-vendored) and fixture trees (testdata, fixtures, ...) left out,
@@ -52,6 +53,7 @@ PATH_EXT = {"go", "py", "js", "mjs", "cjs", "ts", "tsx", "sh", "bash", "md", "js
 IDENT = re.compile(r"[A-Za-z_$][\w$]*")
 KEY = re.compile(r"[A-Za-z_][\w.-]*[\w]")
 ROW = re.compile(r"[A-Z][A-Za-z]*-?\d+[a-z]?")
+ROW_HEAD = re.compile(r"[A-Za-z0-9_.-]+:")  # a seeds-file line's `{row}:` head: never itself a seed
 BROAD_FILES = 60
 MIN_EDGE = 2
 MIN_NAME = 4
@@ -257,7 +259,7 @@ def is_test(path):
 
 
 def parse_seeds(raws, files_text):
-    """[(row, text)] from --seed values (`ROW=SEED`) and --seeds files (`ROW: SEED SEED`, `#` comments)."""
+    """[(row, text)] from --seed values (`ROW=SEED`) and --seeds files (`{row}: SEED SEED`, `#` comments)."""
     out = []
     for raw in raws:
         m = re.fullmatch(r"(" + ROW.pattern + r")=(.+)", raw.strip())
@@ -269,8 +271,11 @@ def parse_seeds(raws, files_text):
                 continue
             row = None
             m = re.match(r"(" + ROW.pattern + r")\s*:\s+(.*)", line)
+            head = line.split(None, 1)
             if m:
                 row, line = m.group(1), m.group(2)
+            elif ROW_HEAD.fullmatch(head[0]):
+                row, line = head[0][:-1], head[1] if len(head) > 1 else ""
             for tok in line.split():
                 out.append((row, tok))
     seen, uniq = set(), []

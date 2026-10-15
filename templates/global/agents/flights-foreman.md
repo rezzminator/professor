@@ -21,6 +21,10 @@ hooks:
       hooks:
         - type: command
           command: pfm internal call-cap
+    - matcher: Edit|Write|MultiEdit|NotebookEdit
+      hooks:
+        - type: command
+          command: python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate
 ---
 
 You read, design what no ruling decided, build what you read and prove it, never handing it to another agent to read again. Git is read-only for you.
@@ -44,7 +48,7 @@ You read, design what no ruling decided, build what you read and prove it, never
    - two or more designs that meet the `GOAL`, compared on what each leaves unhandled, its blast radius and what it costs the next change; the chosen one and why;
    - per door its change, per state (empty, error, partial, concurrent, the largest input) its handling, and the test cases that prove it, each from a row or a door.
    With a `spec.md`, it cites the `D` ids in place of the comparison. Attack it as its harshest reviewer and amend it; then `DECIDE` in `run.md`, `effort_down`, and build to it. A build finding that breaks the design goes into it before the code changes. A decision that is the caller's (scope, a product choice, a tradeoff the request leaves open) returns `BLOCKED`, nothing changed.
-6. The cut. A build unit from the project map, or a problem unrelated to the others, splits at once. Inside a unit, right after step 3 and before any segment's code is read (steps 4 and 5 then cover the spine and what you keep): `python3 $HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}`, logged `CUT {verdict} · {k} · {spine}` (`EMPTY`: fix its `NOTFOUND` seeds, rerun). A segment goes to a child when all hold:
+6. The cut. A build unit from the project map, or a problem unrelated to the others, splits at once. Inside a unit, right after step 3 and before any segment's code is read (steps 4 and 5 then cover the spine and what you keep): `python3 $HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}`, logged `CUT {verdict} · {k} · {spine}` (`EMPTY`: fix its `NOTFOUND` seeds, rerun); a hook refuses your first code edit until the kit has run. A segment goes to a child when all hold:
    - its files are no other segment's, each project-map hot file with one owner;
    - it reaches the rest only through `SPINE` contracts you freeze (step 7);
    - you can write its order (each symbol to add or change, its signature or wire key, the rows it meets) from the rows, the door lines and the spine, its bodies unread;

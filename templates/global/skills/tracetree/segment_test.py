@@ -422,6 +422,20 @@ class SegmentCommandTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertRegex(done.stdout, r"(?m)^SPINE core/core\.go ")
 
+    def test_a_row_head_in_a_seeds_file_ties_its_seeds_and_is_never_a_seed(self):
+        # the doors file's `{row}:` line head, whatever the row's name: `A:`, `R2:`, `door-3:`, `ui.pick:`
+        sha = fixture(self.root)
+        seeds = os.path.join(self.root, "..", os.path.basename(self.root) + "-doors.txt")
+        self.addCleanup(lambda: os.path.exists(seeds) and os.remove(seeds))
+        with open(seeds, "w") as f:
+            f.write("A: Shared\nR2: use=Record\ndoor-3: gone=c/c.go\nui.pick: a/a.go # the alpha caller\nB:\n")
+        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertNotRegex(done.stdout, r"(?m)^NOTFOUND ")
+        got = json.loads(run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--json").stdout)["seeds"]
+        self.assertEqual([(s["row"], s["raw"]) for s in got],
+                         [("A", "Shared"), ("R2", "use=Record"), ("door-3", "gone=c/c.go"), ("ui.pick", "a/a.go")])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,7 +32,7 @@ description: 'MANDATORY for a tracer caller — before sending tracer questions,
 | `tt map {RUN} --json [--from NAME] [--to NAME]` | the map, or that part of it, as data: `components`, `edges`, and `threads` with each thread's `walk` |
 | `tt map {RUN} --html OUT` | the Tracer Loom page: the traced files with every reader's hops, a replay of the run, the chain of custody per question, the hourglass of `--to` / `--from` — only when the user asks to see it |
 | `tt book [--html OUT]` | one line per past run under the runs root, newest first, and with `--html` the swatch book — only when the user asks for the history |
-| `tt segment {ROOT} --seeds {doors file} [--max 4]` | with a door list, when the work may split inside one build unit, before reading any segment's code: `SPLIT k` → freeze the `SPINE` contracts, then hand each child its `SEGMENT` row, `ORDER` and `ESCALATE` lines verbatim; `SOLO` → build alone; `EMPTY` → fix the `NOTFOUND` seeds and run again |
+| `tt segment {worktree} --seeds {doors file} [--max 4]` | with a door list, when the work may split inside one build unit, before reading any segment's code: `SPLIT k` → freeze the `SPINE` contracts, then hand each child its `SEGMENT` row, `ORDER` and `ESCALATE` lines verbatim; `SOLO` → build alone; `EMPTY` → fix the `NOTFOUND` seeds and run again |
 
 NAME is a component id (`path::name`), a function or section name, a file, or a piece of an id; a name matching nothing, or too many, exits 2 and says which. `--all` adds walk-order links.
 

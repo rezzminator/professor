@@ -69,8 +69,7 @@ func mustSettings(t *testing.T, file string) map[string]any {
 
 // TestEnsureClaudePluginsDisablesTheRetiredAgentEffort: the plugin was renamed
 // agent-effort -> effort-live-control; install ensures the successor and then
-// sets each enabled retired id false (never uninstalls it), and a live chat
-// defers the commands and that edit together.
+// sets each enabled retired id false (never uninstalls it).
 func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 	const retiredGitHub, retiredDev = "agent-effort@agent-effort", "agent-effort@agent-effort-dev"
 	settings := `{"enabledPlugins":{"` + retiredGitHub + `":true,"` + retiredDev + `":true,"other@market":true}}`
@@ -112,26 +111,6 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 		if line := "disable " + retiredGitHub + ", " + retiredDev + " in " + filepath.Join(first, "settings.json") +
 			": retired, effort-live-control@effort-live-control replaces it"; !strings.Contains(out.String(), line) {
 			t.Fatalf("no %q line:\n%s", line, out.String())
-		}
-	})
-	t.Run("live chat defers", func(t *testing.T) {
-		home, binary, first, second := pluginFixture(t)
-		writeFixture(t, filepath.Join(first, "settings.json"), settings)
-		proc := filepath.Join(home, "proc")
-		if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		writeFixture(t, filepath.Join(first, "sessions", "4242.json"), "{}")
-		runner := &pluginRunner{}
-		var out bytes.Buffer
-		inst := pluginEngine(home, binary, first, second, runner, &out, true)
-		inst.options.ProcRoot = proc
-		if err := inst.ensureClaudePlugins(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		want := map[string]any{retiredGitHub: true, retiredDev: true, "other@market": true}
-		if got := readEnabled(t, first); !reflect.DeepEqual(got, want) || len(runner.calls) != 0 {
-			t.Fatalf("enabledPlugins=%v calls=%v, want %v untouched", got, runner.calls, want)
 		}
 	})
 	t.Run("a retired id already false changes nothing", func(t *testing.T) {

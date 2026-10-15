@@ -526,3 +526,39 @@ func TestCodexHookLedgerRetiresOwnedClaudeAliasBeforeDroppingReceipt(t *testing.
 		t.Fatalf("retired physical alias handler stranded or operator hook lost: %s", got)
 	}
 }
+
+// TestCodexHooksAliasOfAClaudeSettingsKeepsAChatWriteMadeAfterItsRead: a
+// configured Codex home's hooks.json that links to a Claude settings.json is
+// that file, which every chat of the account writes; the hooks write reads it
+// again just before its rename and re-plans on what a chat wrote since pfm's
+// read, so the chat's key stays beside the resume-unkill handler.
+func TestCodexHooksAliasOfAClaudeSettingsKeepsAChatWriteMadeAfterItsRead(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	settings := filepath.Join(home, ".claude", "settings.json")
+	writeFixture(t, settings, `{"theme":"dark"}`)
+	account := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(settings, filepath.Join(account, "hooks.json")); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	e := resumeUnkillEngine(home, account, "", ModeApply, nil)
+	e.options.Stdout = &chatDuringChange{out: &out, path: settings, content: `{"theme":"dark","model":"opus"}`}
+	if err := e.wireCodexHooks(); err != nil {
+		t.Fatalf("wire: %v\n%s", err, out.String())
+	}
+	got := readFixture(t, settings)
+	var document map[string]any
+	if err := json.Unmarshal([]byte(got), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["model"] != "opus" || hookCommandCount(t, got, "SessionStart", resumeUnkillCommand(home)) != 1 {
+		t.Fatalf(
+			"settings after a chat's write during the hooks write:\n%s\nwant its model key and one resume-unkill handler",
+			got,
+		)
+	}
+}

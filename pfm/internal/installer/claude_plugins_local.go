@@ -395,38 +395,11 @@ func (target ClaudePluginTarget) OtherIDs() []string {
 // The edit writes through a settings.json symlink and keeps every number
 // exactly.
 func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, func() error, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil, nil
+	raw, document, err := readSettingsForEdit(path)
+	if err != nil || document == nil {
+		return "", nil, err
 	}
-	if err != nil {
-		return "", nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var document map[string]any
-	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return "", nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	others := target.OtherIDs()
-	enabled, _ := document["enabledPlugins"].(map[string]any)
-	var disabled []string
-	if target.InstallOnly && enabled[target.ID] == true {
-		disabled = append(disabled, target.ID)
-	}
-	for _, other := range others {
-		if enabled[other] == true {
-			disabled = append(disabled, other)
-		}
-	}
-	configs, _ := document["pluginConfigs"].(map[string]any)
-	carried := ""
-	if _, kept := configs[target.ID]; !kept {
-		for _, other := range others {
-			if _, ok := configs[other]; ok {
-				carried = other
-				break
-			}
-		}
-	}
+	disabled, carried := retireOtherCopies(document, target)
 	if len(disabled) == 0 && carried == "" {
 		return "", nil, nil
 	}
@@ -435,9 +408,6 @@ func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, f
 		reason := target.ID + " replaces it"
 		if target.InstallOnly {
 			reason = pfmconfig.KeyClaudePlugins + " does not list " + target.Name
-		}
-		for _, id := range disabled {
-			enabled[id] = false
 		}
 		message = "disable " + strings.Join(disabled, ", ") + " in " + path + ": " + reason
 		switch {
@@ -448,33 +418,197 @@ func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, f
 			message += "; copy the pluginConfigs of " + carried + " to " + target.ID
 		}
 	}
-	if carried != "" {
-		configs[target.ID] = configs[carried]
-	}
-	return message, writeSettingsDocument(path, document), nil
+	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
+		retireOtherCopies(fresh, target)
+		return nil
+	}), nil
 }
 
-// writeSettingsDocument is the edit that writes document back through a
-// settings.json symlink, keeping the file's mode.
-func writeSettingsDocument(path string, document map[string]any) func() error {
-	return func() error {
-		resolved, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			return err
-		}
-		info, err := os.Stat(resolved)
-		if err != nil {
-			return err
-		}
-		var content bytes.Buffer
-		encoder := json.NewEncoder(&content)
-		encoder.SetEscapeHTML(false)
-		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(document); err != nil {
-			return err
-		}
-		return atomicfile.Write(resolved, content.Bytes(), info.Mode().Perm())
+// retireOtherCopies applies planOtherCopyRetirement's edit to document and
+// names what it changed: the ids it set false and the id whose pluginConfigs
+// entry it carried to the build's id.
+func retireOtherCopies(document map[string]any, target *ClaudePluginTarget) (disabled []string, carried string) {
+	others := target.OtherIDs()
+	enabled, _ := document["enabledPlugins"].(map[string]any)
+	if target.InstallOnly && enabled[target.ID] == true {
+		disabled = append(disabled, target.ID)
 	}
+	for _, other := range others {
+		if enabled[other] == true {
+			disabled = append(disabled, other)
+		}
+	}
+	for _, id := range disabled {
+		enabled[id] = false
+	}
+	configs, _ := document["pluginConfigs"].(map[string]any)
+	if _, kept := configs[target.ID]; !kept {
+		for _, other := range others {
+			if _, ok := configs[other]; ok {
+				carried = other
+				configs[target.ID] = configs[other]
+				break
+			}
+		}
+	}
+	return disabled, carried
+}
+
+// readSettingsForEdit reads path as an edit's base: its bytes, which the edit
+// compares again before its rename, and its document; nil for both when the
+// file is absent.
+func readSettingsForEdit(path string) ([]byte, map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var document map[string]any
+	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
+		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if document == nil {
+		document = map[string]any{}
+	}
+	return raw, document, nil
+}
+
+// settingsEditRetries is how many times an edit re-applies itself to a
+// settings.json another writer changed between its read and its rename.
+const settingsEditRetries = 3
+
+// errSettingsChanged is the precondition failure of a settings.json whose
+// bytes are no longer the ones an edit was planned on.
+var errSettingsChanged = errors.New("changed since pfm read it")
+
+// writeSettingsDocument is the edit that writes document, planned on read,
+// back through a settings.json symlink, keeping the file's mode; read nil
+// plans on an absent file, which the edit creates 0600. A running chat may
+// write the file meanwhile, create or remove it: just before the rename the
+// file is read again, and when its bytes differ apply is re-run on the fresh
+// document (empty for a file now absent or blank), so the other write is
+// kept, and an apply error ends the edit; after settingsEditRetries such
+// retries the edit fails naming the file and its repair.
+func writeSettingsDocument(
+	path string,
+	read []byte,
+	document map[string]any,
+	apply func(map[string]any) error,
+) func() error {
+	return func() error { return commitSettingsDocument(path, read, document, apply, os.ReadFile) }
+}
+
+// commitSettingsDocument is writeSettingsDocument's write; reread reads the
+// file again before each rename.
+func commitSettingsDocument(
+	path string,
+	read []byte,
+	document map[string]any,
+	apply func(map[string]any) error,
+	reread func(string) ([]byte, error),
+) error {
+	resolved, mode, err := settingsEditTarget(path)
+	if err != nil {
+		return err
+	}
+	content, err := encodeSettingsDocument(document)
+	if err != nil {
+		return err
+	}
+	return writeWhileUnchanged(path, resolved, mode, read, content, reread, func(current []byte) ([]byte, bool, error) {
+		var document map[string]any
+		if len(bytes.TrimSpace(current)) > 0 {
+			if err := unmarshalKeepingNumbers(current, &document); err != nil {
+				return nil, false, fmt.Errorf("parse %s: %w", path, err)
+			}
+		}
+		if document == nil {
+			document = map[string]any{}
+		}
+		if err := apply(document); err != nil {
+			return nil, false, fmt.Errorf("%s: %w", path, err)
+		}
+		content, err := encodeSettingsDocument(document)
+		return content, true, err
+	})
+}
+
+// encodeSettingsDocument is document as a settings.json body: two-space
+// indent, HTML characters kept, a trailing newline.
+func encodeSettingsDocument(document map[string]any) ([]byte, error) {
+	var content bytes.Buffer
+	encoder := json.NewEncoder(&content)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(document); err != nil {
+		return nil, err
+	}
+	return content.Bytes(), nil
+}
+
+// writeWhileUnchanged publishes content over resolved, path's physical file,
+// only while reread finds it still holding read (nil: absent). Bytes another
+// writer wrote, created or removed since go to replan (nil for a file now
+// absent), whose content is published in turn, or nothing when it returns
+// false; after settingsEditRetries such retries it fails naming path and its
+// repair, the file left as the other writer left it.
+func writeWhileUnchanged(
+	path, resolved string,
+	mode fs.FileMode,
+	read, content []byte,
+	reread func(string) ([]byte, error),
+	replan func(current []byte) ([]byte, bool, error),
+) error {
+	for retry := 0; ; retry++ {
+		var current []byte
+		err := atomicfile.WriteIf(resolved, content, mode, func() error {
+			now, err := reread(resolved)
+			if errors.Is(err, fs.ErrNotExist) {
+				now, err = nil, nil
+			}
+			if err != nil {
+				return fmt.Errorf("read %s again: %w", path, err)
+			}
+			if !bytes.Equal(now, read) {
+				current = now
+				return errSettingsChanged
+			}
+			return nil
+		})
+		if !errors.Is(err, errSettingsChanged) {
+			return err
+		}
+		if retry == settingsEditRetries {
+			return fmt.Errorf("%s changed under pfm's edit %d times in a row — rerun pfm install", path, retry+1)
+		}
+		read = current
+		next, write, err := replan(current)
+		if err != nil || !write {
+			return err
+		}
+		content = next
+	}
+}
+
+// settingsEditTarget is the file an edit of path publishes, path's symlink
+// resolved, and the mode it keeps; a file absent now, never there or removed
+// since the edit's read, is created at path itself 0600, the re-read before
+// the rename re-applying an edit planned on bytes that are gone.
+func settingsEditTarget(path string) (string, fs.FileMode, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return path, 0o600, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", 0, err
+	}
+	return resolved, info.Mode().Perm(), nil
 }
 
 // retiredClaudePlugins are plugin ids once ours that a successor replaced,
@@ -493,17 +627,24 @@ func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, 
 	if len(retired) == 0 {
 		return "", nil, nil
 	}
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
+	raw, document, err := readSettingsForEdit(path)
+	if err != nil || document == nil {
+		return "", nil, err
+	}
+	disabled := disableRetiredPlugins(document, retired)
+	if len(disabled) == 0 {
 		return "", nil, nil
 	}
-	if err != nil {
-		return "", nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var document map[string]any
-	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return "", nil, fmt.Errorf("parse %s: %w", path, err)
-	}
+	message := "disable " + strings.Join(disabled, ", ") + " in " + path + ": retired, " + target.ID + " replaces it"
+	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
+		disableRetiredPlugins(fresh, retired)
+		return nil
+	}), nil
+}
+
+// disableRetiredPlugins sets every enabled id of retired false in document's
+// enabledPlugins and names them.
+func disableRetiredPlugins(document map[string]any, retired []string) []string {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
 	var disabled []string
 	for _, id := range retired {
@@ -512,9 +653,5 @@ func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, 
 			disabled = append(disabled, id)
 		}
 	}
-	if len(disabled) == 0 {
-		return "", nil, nil
-	}
-	message := "disable " + strings.Join(disabled, ", ") + " in " + path + ": retired, " + target.ID + " replaces it"
-	return message, writeSettingsDocument(path, document), nil
+	return disabled
 }

@@ -2068,8 +2068,8 @@ class IntakeTest(Repo):
         spec = json.loads(self.hook("Root cause: /a/b\n1. What closes the pane?", cwd=self.root))["hookSpecificOutput"]
         self.assertIn("updatedInput", spec, spec["additionalContext"])
         lines = spec["updatedInput"]["prompt"].splitlines()
-        self.assertEqual(lines[1], "Root cause: /a/b")
         run = lines[0][len("RUN: "):]
+        self.assertEqual(lines[1:3], [f"RECALL: {run}/recall.txt", "Root cause: /a/b"])
         with open(os.path.join(run, "ROOT")) as f:
             self.assertEqual(f.read().strip(), self.root)
 
@@ -2113,6 +2113,23 @@ class IntakeTest(Repo):
             f.seek(before)
             self.assertIn("unreadable hook payload", f.read())
 
+
+    def test_intake_writes_the_recall_of_earlier_runs_and_names_it_under_the_run_line(self):
+        first = json.loads(self.hook(f"Repo root: {self.root}\n1. Where is `target is required` returned?\n"))
+        earlier = first["hookSpecificOutput"]["updatedInput"]["prompt"].splitlines()[1][len("RUN: "):]
+        with open(os.path.join(earlier, "1.hops"), "w") as f:
+            f.write(self.good())
+        spec = json.loads(self.hook(f"Repo root: {self.root}\n1. Where is `target is required` returned?\n"))[
+            "hookSpecificOutput"]
+        lines = spec["updatedInput"]["prompt"].splitlines()
+        self.assertTrue(lines[1].startswith("RUN: "), lines)
+        run = lines[1][len("RUN: "):]
+        self.assertEqual(lines[2], f"RECALL: {run}/recall.txt")
+        with open(os.path.join(run, "recall.txt"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(earlier)}", text)
+        self.assertEqual(text.rstrip("\n").splitlines()[-1], "RECALL COVER 1/1 · 0 stale · 0 delta")
+        self.assertIn(f"are in {run}/recall.txt", spec["additionalContext"])
 
 class SeekTest(Repo):
     """`new ROOT --seek REGEX` and `new ROOT --questions`: earlier runs on the same root, and the stored questions."""
@@ -2835,6 +2852,114 @@ class CutGateTest(unittest.TestCase):
         os.mkdir(os.path.join(self.sub, "agent-dir0.jsonl"))
         self.assertAllowedUnchecked(self.hook(agent_id=broken), "agent-dir0.jsonl")
 
+
+class RecallTest(unittest.TestCase):
+    """`recall ROOT`: earlier runs' answer lines matching the questions' anchors, each cite re-checked against ROOT now
+    and each anchor identifier's occurrences witnessed against the run's BASE."""
+
+    GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix=".tracetree-recall-")
+        self.parent = os.path.join("/tmp", os.path.basename(self.repo).lstrip("."), "tracer")
+        for rel, lines in (("app/srv/server.go", SERVER), ("app/kill/kill.go", KILL)):
+            path = os.path.join(self.repo, rel)
+            os.makedirs(os.path.dirname(path))
+            with open(path, "w") as f:
+                f.write("\n".join(lines) + "\n")
+        self.git(self.repo, "init", "-q")
+        self.git(self.repo, "add", "-A")
+        self.git(self.repo, "commit", "-q", "-m", "one")
+
+    def tearDown(self):
+        shutil.rmtree(os.path.dirname(self.parent), ignore_errors=True)
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def git(self, root, *args):
+        done = subprocess.run(["git", *self.GIT, "-C", root, *args], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def run_with(self, root, hops_text):
+        """A finished earlier run on root: opened by `new` (so it holds ROOT and BASE), node 1's hops stored."""
+        got = tt(["new", root])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        run = got.stdout.strip().splitlines()[0]
+        with open(os.path.join(run, "1.hops"), "w") as f:
+            f.write(hops_text)
+        return run
+
+    def recall(self, questions, root=None):
+        got = tt(["recall", root or self.repo], input=questions)
+        self.assertEqual(got.returncode, 0, got.stderr + got.stdout)
+        return got.stdout
+
+    def edit(self, rel, lines):
+        with open(os.path.join(self.repo, rel), "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    HANDLE = hops("1", ["- `Handle` refuses an empty target with `target is required` [app/srv/server.go:5]"],
+                  ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")", "= the refusal"],
+                  ["END returned @ app/srv/server.go:5"])
+    ONLY = hops("1", ["- `kill.Run` has one caller, `Handle` [app/srv/server.go:7]"],
+                ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the only caller"],
+                ["END returned @ app/srv/server.go:7"])
+
+    def test_a_line_whose_span_still_holds_is_served_fresh(self):
+        run = self.run_with(self.repo, self.HANDLE)
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(run)}", out)
+        self.assertIn("FRESH ", out)
+        self.assertIn("[app/srv/server.go:5]", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 1/1 · 0 stale · 0 delta")
+
+    def test_a_line_whose_span_text_changed_is_stale_never_fresh(self):
+        self.run_with(self.repo, self.HANDLE)
+        changed = list(SERVER)
+        changed[4] = "\t\treturn errors.New(\"a pane name is needed\")"
+        self.edit("app/srv/server.go", changed)
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn("RECALL Q1 · 0/1 lines fresh", out)
+        self.assertIn("STALE ", out)
+        self.assertNotIn("FRESH ", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 1 stale · 0 delta")
+
+    def test_a_moved_span_is_re_addressed_and_counted_fresh(self):
+        self.run_with(self.repo, self.HANDLE)
+        self.edit("app/srv/server.go", SERVER[:2] + ["// a", "// b", "// c"] + SERVER[2:])
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn("RECALL Q1 · 1/1 lines fresh", out)
+        self.assertIn("[app/srv/server.go:8]", out)
+        self.assertIn("MOVED app/srv/server.go:5 → app/srv/server.go:8", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 1/1 · 0 stale · 0 delta")
+
+    def test_a_caller_added_after_base_turns_an_only_caller_line_delta(self):
+        self.run_with(self.repo, self.ONLY)
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(t)", "}"])
+        out = self.recall("1. Who calls `kill.Run`?\n")
+        self.assertIn("RECALL Q1 · 0/1 lines fresh", out)
+        self.assertIn("DELTA ", out)
+        self.assertIn("+ app/cli/cli.go:4 return kill.Run(t)", out)
+        self.assertNotIn("FRESH ", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 0 stale · 1 delta")
+
+    def test_a_removed_worktrees_run_is_still_a_candidate_through_the_common_dir(self):
+        wt = os.path.join(self.repo, ".worktrees", "wt")
+        self.git(self.repo, "worktree", "add", "-q", wt)
+        run = self.run_with(wt, self.HANDLE)
+        self.git(self.repo, "worktree", "remove", wt)
+        self.assertFalse(os.path.exists(wt))
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(run)}", out)
+
+    def test_a_run_that_cannot_be_read_is_named_never_skipped(self):
+        self.run_with(self.repo, self.HANDLE)
+        broken = self.run_with(self.repo, self.HANDLE)
+        os.remove(os.path.join(broken, "1.hops"))
+        os.makedirs(os.path.join(broken, "1.hops"))
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertRegex(out, r"(?m)^UNREADABLE " + re.escape(broken) + r": .*1\.hops")
+        self.assertIn("RECALL Q1 · 1/1 lines fresh", out)
 
 if __name__ == "__main__":
     unittest.main()

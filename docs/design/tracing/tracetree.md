@@ -51,6 +51,7 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `{ID}.write.json` | `write`, with the store | One entry per hop: `given`, `path`, `line`, `end`, `how`, `status`, `sha256` |
 | `answers.txt` | `wait` | The full wait view |
 | `map.txt` | `wait` | The text map |
+| `recall.txt` | `intake` | The [recall](#recall) of the brief's questions over the earlier runs, or `RECALL FAILED — {reason}` |
 | `.reads` | `read` | The round's one read; `wait` removes it |
 
 A node ID is dotted numbers, `3` or `3.1`. `.started` with no `.hops` is a node still running; a `.refused` node is still running until its second write.
@@ -87,6 +88,18 @@ Several `>` lines under one `@` quote consecutive lines; `@ path:A-B` addresses 
 **Function:** `cmd_seek` — **Run by:** the lead, in its first call, on a brief carrying `RUN:`
 
 `seek RUN REGEX` prints the run's path, then the `PRIOR` lines `new --seek` prints, for a run that already exists: the run [intake](#intake) opened at the spawn. A RUN with no `ROOT` file, or a REGEX that does not compile, fails.
+
+### recall
+
+**Function:** `cmd_recall`, `recall` — **Run by:** the caller, and [intake](#intake) at every spawn it opens a run for
+
+`recall ROOT [--since-hours N]` reads numbered questions on stdin and serves each from earlier runs' answer lines, every one re-checked against ROOT now. No age limit unless `--since-hours` sets one.
+
+- Candidates: every run under `/tmp/{project}/tracer/` whose ROOT shares ROOT's git common dir, asked from the ROOT's nearest existing directory so a removed worktree's run still qualifies; outside git, the runs on this exact ROOT. Newest first.
+- Anchors per question: backticked text, path-like tokens, and identifiers (CamelCase, snake_case, dotted, a file name excepted). A matched line is a node's ANSWER line naming an anchor, identifiers as whole words; one text is kept once, lines naming more anchors and newer runs first, at most 30 checked per question (`· {k} more matched lines not checked`).
+- Each cite's span text is the quote of the hop that backs it, else `git show {BASE}:{path}` lines A–B, placed by [the resolver](#the-resolver) against ROOT now: at its line it is FRESH, elsewhere it is MOVED, re-addressed and counted fresh, nowhere (or broken after its first lines) it is STALE. A cite no hop backs in a run with no BASE, or whose BASE git cannot show, is STALE naming the run.
+- Symbol witness: for each anchor identifier the line names, `git grep -n -w -F {sym} {BASE}` against `git grep -n -w -F --untracked {sym}` in ROOT, as sets of (path, line text). A difference makes the line DELTA, listing `+ path:N text` and `- path:N text` (at most 20, then `… {k} more`); an unusable witness or a run with no BASE makes it STALE. So an "only caller of X" line is served only while X's occurrence set is unchanged.
+- Output: `UNREADABLE {run}: {reason}` per run that cannot be read, never dropped; per question `RECALL Q{n} · {fresh}/{total} lines fresh · runs {ids}`, then each `FRESH` line (cites re-addressed, `· MOVED {old} → {new}`), `DELTA` line with its occurrences, `STALE` line with `— {reason}`, or `GAP Q{n} · {why}`; last `RECALL COVER {served}/{questions} · {stale} stale · {delta} delta`, a question served when one line is fresh. A git that cannot place ROOT prints `RECALL GIT FAILED — {reason}` and falls back to the exact ROOT.
 
 ### start
 
@@ -153,6 +166,7 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 `intake` reads the hook payload on stdin. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets its run opened, with ROOT taken from the brief's `Repo root:` line or else the hook's cwd, and its questions stored.
 
 - The brief is rewritten to carry `RUN: {run}` after that line (`updatedInput`, `permissionDecision: allow`).
+- [recall](#recall) runs on the questions, the new run excluded; its whole printout goes to `{RUN}/recall.txt`, the brief carries `RECALL: {RUN}/recall.txt` under the RUN line and the caller is told the path. A recall that raises writes `RECALL FAILED — {reason}: trace every question` there; a file that cannot be written leaves no RECALL line, logs to `intake.log` and says why. The spawn is never denied.
 - The caller is told, through `additionalContext`, that the tracer's final is its answer. It is also told that `answer RUN n…` prints a question's raw reader answers once its threads are walked: facts to start work on, never a ruling, since a verdict waits for the final.
 - Every other call passes untouched and the hook prints nothing.
 - A root that is not a directory, or a run that cannot be opened, passes the spawn on unchanged and says why.

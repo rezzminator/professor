@@ -330,14 +330,16 @@ def cmd_seek(run, seek):
 INTAKE_ROOT = re.compile(r"(?im)^[ \t]*(?:repo(?:sitory)?[ \t]+root\b[^\n]*?|root[ \t]*[:=]?[ \t]*[`'\"(]?)"
                          r"((?:~/|/)[^\s`'\"()\[\],;]+)")
 INTAKE_RUN = re.compile(r"(?m)^[ \t]*RUN:[ \t]*\S")
+CARD_FIELD = re.compile(r"(?m)^[ \t]*(RUN|ID|QUESTION|REASON):[ \t]*(\S.*?)[ \t]*$")
+RECALL_ANSWERED = re.compile(r"(?m)^ANSWERED Q(\d+)$")
 TT = "python3 $HOME/.claude/skills/tracetree/tracetree.py"
 
 
-def intake_log(msg):
-    """A hook has no caller to tell when its payload is unreadable: the failure goes to intake.log in the tracer
-    scratch directory of the project the hook runs in, /tmp/{project}/tracer/, and to stderr when even that cannot be
-    written."""
-    folder = os.path.join("/tmp", project_name(os.getcwd()), "tracer")
+def intake_log(msg, folder=None):
+    """A hook has no caller to tell when its payload is unreadable: the failure goes to intake.log in folder, else the
+    tracer scratch directory of the project the hook runs in, /tmp/{project}/tracer/, and to stderr when even that
+    cannot be written."""
+    folder = folder or os.path.join("/tmp", project_name(os.getcwd()), "tracer")
     try:
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "intake.log"), "a", encoding="utf-8") as f:
@@ -349,8 +351,9 @@ def intake_log(msg):
 def cmd_intake():
     """PreToolUse hook on the Agent tool. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets
     its run opened here — ROOT from the brief's `Repo root:` line, else the hook's cwd — the brief rewritten to carry
-    `RUN: {run}` after that line, and the caller told how to pull each answer. Every other call passes untouched; a
-    run that cannot be opened passes the spawn on unchanged and tells the caller why."""
+    `RUN: {run}` after that line, and the caller told how to pull each answer. A `sub-tracer` spawn goes to
+    `intake_thread`. Every other call passes untouched; a run that cannot be opened passes the spawn on unchanged and
+    tells the caller why."""
     raw = sys.stdin.read()
     try:
         event = json.loads(raw)
@@ -360,6 +363,8 @@ def cmd_intake():
         intake_log(f"unreadable hook payload ({e}): {raw[:200]!r}")
         return
     tool, given = event.get("tool_name"), event.get("tool_input") or {}
+    if tool in ("Agent", "Task") and given.get("subagent_type") == "sub-tracer":
+        return intake_thread(given.get("prompt"))
     if tool not in ("Agent", "Task") or given.get("subagent_type") != "tracer":
         return
     brief = given.get("prompt")
@@ -390,7 +395,12 @@ def cmd_intake():
             "its final names it.")
         return
     lines = brief.split("\n")
-    lines.insert(brief[:m.end()].count("\n") + 1 if m else 0, f"RUN: {run}")
+    at = brief[:m.end()].count("\n") + 1 if m else 0
+    lines.insert(at, f"RUN: {run}")
+    recalled = intake_recall(run, root, asked)
+    if recalled.startswith("/"):
+        lines.insert(at + 1, f"RECALL: {recalled}")
+        recalled = f" Earlier runs' answers on these questions, re-checked now, are in {recalled}."
     rewritten = dict(given, prompt="\n".join(lines))
     nums = ", ".join(map(str, sorted(asked)))
     say(f"tracer RUN {run} holds your questions {nums}. Its final, returned when the run ends, is your answer: it "
@@ -399,7 +409,59 @@ def cmd_intake():
         "and prints the readers' raw answers, every cite re-read from disk — facts to build on, never a ruling: a "
         "verdict, a SAFE or a closing claim waits for the final, so end your turn once only the final is left. Until "
         "then work on what no question covers — the testing manual, fixtures, a doc; a file a pending question "
-        "covers, read now, is paid for twice. /tracer:use has the rest.", rewritten)
+        "covers, read now, is paid for twice. /tracer:use has the rest." + recalled, rewritten)
+
+
+def intake_thread(card):
+    """A sub-tracer card whose QUESTION names only questions its RUN's recall.txt marks `ANSWERED Q{n}` is refused: the
+    tracer serves those by quoting their FRESH lines. A card carrying `REASON: {why}` passes, the override logged to
+    intake.log beside the run; every other card passes untouched, and a recall.txt that cannot be read is logged, the card passed."""
+    if not isinstance(card, str):
+        return
+    fields = {}
+    for m in CARD_FIELD.finditer(card):
+        fields.setdefault(m.group(1), m.group(2))
+    run, nums = fields.get("RUN"), {int(n) for n in re.findall(r"\bQ(\d+)\b", fields.get("QUESTION", ""))}
+    if not run or not nums:
+        return
+    path = os.path.join(run, "recall.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            answered = {int(n) for n in RECALL_ANSWERED.findall(f.read())}
+    except FileNotFoundError:
+        return
+    except (OSError, UnicodeDecodeError) as e:
+        intake_log(f"{path} unreadable, sub-tracer card passed unchecked: {e}")
+        return
+    if not nums <= answered:
+        return
+    qs, node = ", ".join(f"Q{n}" for n in sorted(nums)), fields.get("ID", "?")
+    if fields.get("REASON"):
+        intake_log(f"{run}: node {node} opened a thread for ANSWERED {qs} — REASON: {fields['REASON']}",
+                   os.path.dirname(os.path.abspath(run)))
+        return
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": f"tracer intake: {qs} ANSWERED in {path} — serve it by quoting its FRESH lines "
+        f"verbatim, no thread, and leave node {node} out of `tt wait`. A thread it still needs carries "
+        "`REASON: {why}` on its card."}}))
+
+
+def intake_recall(run, root, asked):
+    """RUN/recall.txt, the recall of the questions over earlier runs; a recall that fails writes its failure there.
+    The file's path, else a sentence naming why it could not be written."""
+    try:
+        text = "\n".join(recall(root, asked, exclude=run)) + "\n"
+    except Exception as e:  # the spawn goes on whatever recall hits; the failure is the file's content
+        text = f"RECALL FAILED — {type(e).__name__}: {e}: trace every question\n"
+    path = os.path.join(run, "recall.txt")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError as e:
+        intake_log(f"recall.txt not written for {run}: {e}")
+        return f" No recall: {path} could not be written ({e})."
+    return path
 
 
 CUTGATE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -2809,17 +2871,480 @@ def timed_args(args, defaults):
     return opts, rest
 
 
+RUN_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}")
+RECALL_TOKEN = re.compile(r"[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*")
+RECALL_PATH = re.compile(r"[\w.~-]*/[\w./-]*\w|[\w-]+\.(?:go|py|sh|mjs|js|ts|tsx|md|json|jsonc|toml|ya?ml|txt|rs|java|c|h|sql)\b")
+FILE_EXT = {"go", "py", "sh", "mjs", "js", "ts", "tsx", "md", "json", "jsonc", "toml", "yaml", "yml", "txt", "rs", "java",
+            "c", "h", "sql"}
+RECALL_SHOWN = 30
+DELTA_ROWS = 5
+RECALL_CAP = 12 * 1024
+SHELL_VAR = re.compile(r"\$[A-Za-z_]\w*")
+CLOSED_WORLD = re.compile(r"(?i)\b(?:nothing|no|none|only|every|never|all callers|"
+                          r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) callers?)\b")
+REV_PIN = re.compile(r"^[0-9a-f]{7,40}:")
+
+
+class Recall:
+    """`recall`: one pass over the earlier runs of ROOT's repository, its git lookups cached for the pass."""
+
+    def __init__(self, root):
+        self.root = root
+        self.files = Files(root)
+        self.commons, self.placed, self.witnessed, self.shown_base = {}, {}, {}, {}
+
+    def common(self, path):
+        """The absolute git common dir of the repository holding path, asked from its nearest existing ancestor so a
+        removed worktree answers through the directory it lived in; None outside git. GitUnknown when git cannot say."""
+        if path not in self.commons:
+            at = path
+            while not os.path.isdir(at) and os.path.dirname(at) != at:
+                at = os.path.dirname(at)
+            try:
+                done = subprocess.run(["git", "-C", at, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                      capture_output=True, text=True, timeout=GIT_TIMEOUT)
+            except (OSError, subprocess.SubprocessError) as e:
+                raise GitUnknown(f"git rev-parse could not run in {at}: {type(e).__name__}: {e}")
+            if done.returncode != 0 and "not a git repository" not in done.stderr:
+                raise GitUnknown(f"git rev-parse failed in {at}: {done.stderr.strip()[:120]}")
+            self.commons[path] = os.path.realpath(done.stdout.strip()) if done.returncode == 0 else None
+        return self.commons[path]
+
+    def place(self, path, line, quotes):
+        """(status, new path, new line, reason) of a prior span placed against ROOT now: FRESH at its line, MOVED
+        elsewhere, STALE with the reason the placement gives."""
+        k = (path, line, tuple(quotes))
+        if k not in self.placed:
+            try:
+                got = place_hop(self.files, path, line, quotes)
+            except GitUnknown as e:
+                self.placed[k] = ("STALE", path, line, f"git could not say: {e}")
+                return self.placed[k]
+            if got["status"] in ("rejected", "badaddr"):
+                self.placed[k] = ("STALE", path, line, f"{path}:{line} {got['reason']}")
+            elif got["broke"] is not None:
+                self.placed[k] = ("STALE", path, line, f"{path}:{line} changed after its first {got['broke']} line(s)")
+            else:
+                now = self.files.shown(got["key"], path)
+                same_place = got["got"][0] + 1 == line and got["key"] == self.files.key(path)
+                self.placed[k] = ("FRESH" if same_place else "MOVED", now, got["got"][0] + 1, "")
+        return self.placed[k]
+
+    def base_lines(self, base, path):
+        """The lines of path at commit base, or the reason git cannot show them."""
+        k = (base, path)
+        if k not in self.shown_base:
+            try:
+                code, out, err = git_out(self.files, ["show", f"{base}:./{path}"])
+                self.shown_base[k] = out.split("\n") if code == 0 else f"git show {base[:PIN_ABBREV]}:{path} failed: {err.strip()[:120]}"
+            except GitUnknown as e:
+                self.shown_base[k] = f"git could not say: {e}"
+        return self.shown_base[k]
+
+    def changes(self, base):
+        """[(sign, path, line, text)] of every line added (+) or removed (-) in ROOT's working tree since commit base,
+        each untracked file's lines added; a str naming the failure when git cannot answer."""
+        if base not in self.witnessed:
+            self.witnessed[base] = self.diff(base)
+        return self.witnessed[base]
+
+    def diff(self, base):
+        try:
+            code, out, err = git_out(self.files, ["-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff",
+                                                  "--no-renames", "-U0", base, "--"])
+            if code != 0:
+                return f"git diff {base[:PIN_ABBREV]} failed: {err.strip()[:120]}"
+            code, untracked, err = git_out(self.files, ["ls-files", "-o", "--exclude-standard", "-z"])
+            if code != 0:
+                return f"git ls-files of the untracked files failed: {err.strip()[:120]}"
+        except GitUnknown as e:
+            return f"git could not say: {e}"
+        rows, old_path, new_path, hunk, old, new = [], None, None, False, 0, 0
+        for raw in out.split("\n"):
+            if raw.startswith("diff --git "):
+                hunk = False
+            elif not hunk and raw.startswith("--- "):
+                old_path = raw[6:] if raw.startswith("--- a/") else None
+            elif not hunk and raw.startswith("+++ "):
+                new_path = raw[6:] if raw.startswith("+++ b/") else None
+            elif raw.startswith("@@ "):
+                m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)
+                hunk, old, new = True, int(m.group(1)), int(m.group(2))
+            elif hunk and raw.startswith("+") and new_path:
+                rows.append(("+", new_path, new, raw[1:].strip()))
+                new += 1
+            elif hunk and raw.startswith("-") and old_path:
+                rows.append(("-", old_path, old, raw[1:].strip()))
+                old += 1
+        for path in filter(None, untracked.split("\0")):
+            try:
+                with open(os.path.join(self.root, path), "rb") as f:
+                    data = f.read()
+            except OSError as e:
+                return f"cannot read untracked {path}: {e}"
+            if b"\0" not in data:
+                rows += [("+", path, i, t.strip()) for i, t in enumerate(data.decode("utf-8", "replace").split("\n"), 1)]
+        return rows
+
+    def delta(self, sym, base):
+        """(added, gone) occurrences [(path, line, text)] of sym as a whole word since commit base, as a multiset of
+        (path, text): a line removed and added back unchanged is no occurrence change. A str when git cannot say."""
+        rows = self.changes(base)
+        if isinstance(rows, str):
+            return rows
+        word, seen = re.compile(r"(?<!\w)" + re.escape(sym) + r"(?!\w)"), {}
+        for sign, path, n, text in rows:
+            if sym in text and word.search(text):
+                seen.setdefault((path, text), {"+": [], "-": []})[sign].append(n)
+        added, gone = [], []
+        for (path, text), ns in seen.items():
+            k = len(ns["+"]) - len(ns["-"])
+            added += [(path, n, text) for n in ns["+"][len(ns["+"]) - k:]] if k > 0 else []
+            gone += [(path, n, text) for n in ns["-"][len(ns["-"]) + k:]] if k < 0 else []
+        return sorted(added), sorted(gone)
+
+
+def recall_anchors(question):
+    """(anchors, identifiers) of a question: backticked text, path-like tokens and identifiers (CamelCase,
+    snake_case, dotted, a file name excepted), backticked or not; an identifier also witnesses the lines it matches."""
+    anchors, idents = set(), set()
+    for span in BACKTICK.findall(question):
+        s = span.strip()
+        if len(s) >= 3 and s.lower() not in KEYWORDS:
+            anchors.add(s)
+    for m in RECALL_PATH.finditer(question):
+        if len(m.group(0)) >= 4 and not m.group(0).startswith("/"):
+            anchors.add(m.group(0))
+    for m in RECALL_TOKEN.finditer(question):
+        t = m.group(0)
+        if len(t) < 4 or t.rsplit(".", 1)[-1] in FILE_EXT:
+            continue
+        if "." in t or re.search(r"[A-Za-z0-9]_[A-Za-z0-9]", t) or re.search(r"[a-z0-9][A-Z]", t):
+            anchors.add(t)
+            idents.add(t)
+    return anchors, idents
+
+
+def line_witnesses(text):
+    """(named, cited): the identifiers and path tokens a recalled line names in its prose — identifiers (CamelCase,
+    snake_case, dotted), `$VAR`s, a backticked single token, paths — and its cites' paths besides; each one's
+    occurrence set witnesses the line."""
+    prose = CITE.sub(" ", text)
+    named = {m.group(0) for m in SHELL_VAR.finditer(prose)} | recall_anchors(prose)[1]
+    for span in BACKTICK.findall(prose):
+        s = span.strip()
+        if len(s) >= 2 and s.lower() not in KEYWORDS and re.fullmatch(r"[$\w.-]+", s) and re.search(r"[A-Za-z_]", s):
+            named.add(s)
+    for m in RECALL_PATH.finditer(prose):
+        if len(m.group(0)) >= 4 and not m.group(0).startswith(("/", "~")):
+            named.add(m.group(0))
+    cited = {REV_PIN.sub("", m.group(1)) for m in CITE.finditer(text)}
+    return named, {p for p in cited if not os.path.isabs(p)} - named
+
+
+def holds(text, anchor, ident):
+    return re.search(r"(?<![\w.])" + re.escape(anchor) + r"(?![\w])", text) if ident else anchor in text
+
+
+def run_started(run):
+    """When a run started: the time its ROOT file was written, the measure `run_start` dates a BASE-less run by."""
+    return os.path.getmtime(os.path.join(run, "ROOT"))
+
+
+def recall_runs(rc, root, since_hours, exclude, before=None):
+    """(runs, unreadable): every earlier run under /tmp/{project}/tracer/ whose ROOT shares ROOT's git common dir (the
+    same ROOT outside git), with `before` only those started strictly before that time, newest first, each (run, its ROOT, BASE or "", [(node, answer text, hops)]); a run that
+    cannot be read is (run, reason), never dropped."""
+    parent = os.path.join("/tmp", project_name(root), "tracer")
+    mine = rc.common(root)
+    try:
+        names = sorted((n for n in os.listdir(parent) if RUN_ID.fullmatch(n)), reverse=True)
+    except FileNotFoundError:
+        return [], []
+    except OSError as e:
+        return [], [(parent, f"cannot list the runs: {e}")]
+    runs, unreadable, now = [], [], time.time()
+    for name in names:
+        run = os.path.join(parent, name)
+        if run == exclude or not os.path.isdir(run):
+            continue
+        try:
+            if since_hours is not None and now - os.path.getmtime(run) > since_hours * 3600:
+                continue
+            started = run_started(run)
+            if before is not None and started >= before:
+                continue
+            with open(os.path.join(run, "ROOT"), encoding="utf-8") as f:
+                theirs = f.read().strip()
+        except OSError as e:
+            unreadable.append((run, f"cannot read ROOT: {e}"))
+            continue
+        try:
+            if theirs != root and (mine is None or rc.common(theirs) != mine):
+                continue
+        except GitUnknown as e:
+            unreadable.append((run, f"git could not place its ROOT {theirs}: {e}"))
+            continue
+        try:
+            with open(os.path.join(run, "BASE")) as f:
+                base = f.read().strip()
+        except FileNotFoundError:
+            base = ""
+        except OSError as e:
+            unreadable.append((run, f"cannot read BASE: {e}"))
+            continue
+        lines, broken = [], None
+        try:
+            nodes = sorted((f[:-5] for f in os.listdir(run) if f.endswith(".hops") and NODE_ID.fullmatch(f[:-5])),
+                           key=node_key)
+            for x in nodes:
+                path = os.path.join(run, x + ".hops")
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        recs = parse(f.read())
+                except (OSError, UnicodeDecodeError) as e:
+                    broken = f"cannot read {path}: {e}"
+                    break
+                hopset = [r for r in recs if r[0] == "hop"]
+                lines += [(x, r[1], hopset) for r in recs if r[0] == "answer"]
+        except OSError as e:
+            broken = f"cannot list the run: {e}"
+        if broken:
+            unreadable.append((run, broken))
+            continue
+        runs.append((started, run, theirs, base, lines))
+    return [r[1:] for r in sorted(runs, key=lambda r: r[0], reverse=True)], unreadable
+
+
+def recall_line(rc, run, theirs, base, text, hopset, idents):
+    """One prior answer line checked against ROOT now: (kind FRESH | DELTA | STALE | GAP, text with re-addressed
+    cites, notes). STALE: a cite, or any hop its node walked, no longer holds. DELTA: a name it carries changed its
+    occurrence set since BASE, notes the changed names then the `+`/`-` rows, one per changed line however many names it
+    carries. GAP: a closed-world claim naming nothing
+    to witness."""
+    def rel(p):
+        return os.path.relpath(p, theirs) if os.path.isabs(p) and p.startswith(theirs + os.sep) else p
+
+    found = list(CITE.finditer(text))
+    if not found:
+        return "STALE", text, ["no [path:N] cite to re-check"]
+    out, last, stale, notes = [], 0, [], []
+    for m in found:
+        path, a, b = rel(m.group(1)), int(m.group(2)), int(m.group(3) or m.group(2))
+        hop = None
+        for h in hopset:
+            hp = rel(h[1])
+            end = h[6] or h[2] + max(len(h[3]), 1) - 1
+            same_file = os.path.normpath(hp) == os.path.normpath(path) or hp.endswith("/" + path) or path.endswith("/" + hp)
+            if same_file and h[3] and h[2] - CITE_SLACK <= a and b <= end + CITE_SLACK:
+                hop = (hp, h[2], h[3])
+                break
+        if hop is None:
+            if not base:
+                stale.append(f"{path}:{a}: no hop holds it and the run has no BASE")
+                continue
+            old = rc.base_lines(base, path)
+            if isinstance(old, str):
+                stale.append(f"{path}:{a}: BASE of run {os.path.basename(run)} unusable — {old}")
+                continue
+            if not 1 <= a <= b <= len(old):
+                stale.append(f"{path}:{a}: past the end of {path} at BASE")
+                continue
+            hop = (path, a, old[a - 1:b])
+        kind, new_path, new_line, reason = rc.place(*hop)
+        if kind == "STALE":
+            stale.append(reason)
+            continue
+        shift = new_line - hop[1]
+        span = f"{new_path}:{a + shift}" + (f"-{b + shift}" if m.group(3) else "")
+        if kind == "MOVED":
+            notes.append(f"MOVED {m.group(1)}:{m.group(2)} → {new_path}:{a + shift}")
+        out.append(text[last:m.start()] + f"[{span}]")
+        last = m.end()
+    if stale:
+        return "STALE", text, stale
+    # the line rests on every hop its node walked, not only the ones it cites; a hop that did not hold at BASE either
+    # (or the run has none) changed nothing since
+    for h in hopset:
+        if not h[3] or REV_PIN.match(h[1]):
+            continue
+        kind, _, _, reason = rc.place(rel(h[1]), h[2], h[3])
+        if kind == "STALE" and (not base or rc.place(f"{base[:PIN_ABBREV]}:{rel(h[1])}", h[2], h[3])[0] != "STALE"):
+            return "STALE", text, [f"its node's hop {reason}"]
+    text = "".join(out) + text[last:]
+    named, cited = line_witnesses(text)
+    named |= {i for i in idents if holds(text, i, True)}
+    if CLOSED_WORLD.search(BACKTICK.sub(" ", CITE.sub(" ", text))) and not named:
+        return "GAP", text, ["a closed-world claim naming no identifier or path to witness"]
+    changed, rows, placed = [], [], set()
+    for sym in sorted(named | cited):
+        if not base:
+            return "STALE", text, [f"no BASE to witness `{sym}` against"]
+        got = rc.delta(sym, base)
+        if isinstance(got, str):
+            return "STALE", text, [f"witness `{sym}` unusable for run {os.path.basename(run)} — {got}"]
+        added, gone = got
+        if added or gone:
+            changed.append(f"`{sym}`")
+            for sign, occ in (("+", added), ("-", gone)):
+                for p, n, t in occ:
+                    if (sign, p, n) not in placed:
+                        placed.add((sign, p, n))
+                        rows.append(f"{sign} {p}:{n} {t[:160]}")
+    if changed:
+        return "DELTA", text, notes + [f"changed since {base[:PIN_ABBREV]}: {', '.join(changed)}"] + rows
+    return "FRESH", text, notes
+
+
+def recall_capped(units):
+    """The output lines of units [(kind, hits, lines, q, extra)] within RECALL_CAP bytes. A unit of kind None (heads,
+    GAP questions, UNREADABLE, the cover) always stays. Past the cap, fewest anchor hits first and the later unit first
+    on a tie within each step: STALE and GAP rows go, then each DELTA line's occurrence rows shrink to `  +{extra} rows`,
+    then DELTA lines go, then FRESH lines. An ANSWERED unit stays only while every anchor of Q{q} (its extra) is carried
+    by a kept FRESH line of Q{q} (each FRESH unit's extra: the anchors it carries). A `RECALL CUT` line names what went,
+    before the last unit."""
+    def size(lines):
+        return sum(len(x.encode()) + 1 for x in lines)
+
+    shown = [list(u[2]) for u in units]
+    keep, total = [True] * len(units), sum(size(x) for x in shown)
+    cut = {"STALE": 0, "trim": 0, "DELTA": 0, "FRESH": 0}
+    for step, kinds in (("STALE", ("STALE", "GAP")), ("trim", ("DELTA",)), ("DELTA", ("DELTA",)), ("FRESH", ("FRESH",))):
+        for i in sorted((i for i, u in enumerate(units) if u[0] in kinds), key=lambda i: (units[i][1], -i)):
+            if total + 128 <= RECALL_CAP:
+                break
+            if step == "trim":
+                if len(shown[i]) < 2:
+                    continue
+                trimmed = shown[i][:1] + [f"  +{units[i][4]} rows"]
+                total, shown[i] = total - size(shown[i]) + size(trimmed), trimmed
+            else:
+                keep[i], total = False, total - size(shown[i])
+            cut[step] += 1
+    for i, (kind, _, _, q, need) in enumerate(units):
+        if kind == "ANSWERED":
+            carried = set().union(*(u[4] for j, u in enumerate(units) if keep[j] and u[0] == "FRESH" and u[3] == q))
+            keep[i] = need <= carried
+    out = [x for i, lines in enumerate(shown) if keep[i] for x in lines]
+    if any(cut.values()):
+        trim = f" · {cut['trim']} delta lines cut to their head" if cut["trim"] else ""
+        out.insert(len(out) - 1, f"RECALL CUT {cut['STALE'] + cut['DELTA'] + cut['FRESH']} lines past the "
+                   f"{RECALL_CAP // 1024} KB cap · {cut['STALE']} stale/gap, {cut['DELTA']} delta, {cut['FRESH']} fresh{trim}")
+    return out
+
+
+def recall(root, asked, since_hours=None, exclude=None, before=None):
+    """The recall of ROOT's questions as output lines: per question a RECALL head, `ANSWERED Q{n}` when every checked
+    line is FRESH and every anchor of the question is carried by one, each matched prior answer line FRESH (cites
+    re-addressed), DELTA (with its occurrence changes) or STALE (with its reason), or GAP; first a line per run that
+    could not be read, last the RECALL COVER line."""
+    rc, out = Recall(root), []
+    try:
+        runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
+    except GitUnknown as e:
+        out.append(f"RECALL GIT FAILED — {e}: candidates are runs on this exact ROOT")
+        rc.commons[root] = None
+        runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
+    if rc.commons.get(root) is None and not out:
+        out.append(f"RECALL: {root} is in no git repository — candidates are runs on this exact ROOT")
+    out.append(f"RECALL {root} · {len(runs)} earlier runs · {len(unreadable)} unreadable")
+    out += [f"UNREADABLE {run}: {why}" for run, why in unreadable]
+    units = [(None, 0, out, None, None)]
+    served = stale = delta = gaps = 0
+    for n in sorted(asked):
+        anchors, idents = recall_anchors(asked[n])
+        if not anchors:
+            units.append((None, 0, [f"GAP Q{n} · the question names no anchor"], n, None))
+            continue
+        seen, matched = set(), []
+        for order, (run, theirs, base, lines) in enumerate(runs):
+            for x, text, hopset in lines:
+                hit = [a for a in anchors if holds(text, a, a in idents)]
+                if hit and text not in seen:
+                    seen.add(text)
+                    matched.append((-len(hit), order, run, theirs, base, x, text, hopset, set(hit)))
+        if not matched:
+            units.append((None, 0, [f"GAP Q{n} · no earlier answer line names {', '.join(sorted(anchors))}"], n, None))
+            continue
+        matched.sort(key=lambda r: r[:2])
+        shown = matched[:RECALL_SHOWN]
+        rows, fresh, ids, carried = [], 0, [], set()
+        for hits, _, run, theirs, base, x, text, hopset, hit in shown:
+            kind, new, notes = recall_line(rc, run, theirs, base, text, hopset, idents)
+            rid = os.path.basename(run)
+            if rid not in ids:
+                ids.append(rid)
+            fresh += kind == "FRESH"
+            stale += kind == "STALE"
+            delta += kind == "DELTA"
+            gaps += kind == "GAP"
+            moved = "".join(f" · {s}" for s in notes if s.startswith("MOVED "))
+            if kind == "STALE":
+                rows.append((kind, -hits, [f"STALE Q{n} · {notes[0]}"], n, None))
+            elif kind == "GAP":
+                rows.append((kind, -hits, [f"GAP Q{n} · {notes[0]}: {new[:160]}"], n, None))
+            elif kind == "FRESH":
+                carried |= hit
+                rows.append((kind, -hits, [f"FRESH {rid} node {x}: {new}{moved}"], n, hit))
+            else:
+                occ = [s for s in notes if s[:2] in ("+ ", "- ")]
+                head = [s for s in notes if not s.startswith("MOVED ") and s[:2] not in ("+ ", "- ")]
+                more = [f"  +{len(occ) - DELTA_ROWS} more"] if len(occ) > DELTA_ROWS else []
+                rows.append((kind, -hits, [f"DELTA {rid} node {x}: {new}{moved} · {'; '.join(head)}"]
+                             + ["  " + s for s in occ[:DELTA_ROWS]] + more, n, len(occ)))
+        cut = f" · {len(matched) - len(shown)} more matched lines not checked" if len(matched) > len(shown) else ""
+        units.append((None, 0, [f"RECALL Q{n} · {fresh}/{len(shown)} lines fresh · runs {', '.join(ids)}{cut}"], n, None))
+        if fresh == len(shown) and carried >= anchors:
+            units.append(("ANSWERED", 0, [f"ANSWERED Q{n}"], n, anchors))
+        units += rows
+        served += fresh > 0
+    gap = f" · {gaps} unwitnessed" if gaps else ""
+    units.append((None, 0, [f"RECALL COVER {served}/{len(asked)} · {stale} stale · {delta} delta{gap}"], None, None))
+    return recall_capped(units)
+
+
+def cmd_recall(root, since_hours, before_run=None):
+    root = os.path.abspath(root)
+    if not os.path.isdir(root):
+        fail(f"repo root {root} is not a directory")
+    before = None
+    if before_run is not None:
+        before_run = os.path.abspath(before_run)
+        try:
+            before = run_started(before_run)
+        except OSError as e:
+            fail(f"--before {before_run} is no run whose start can be read: {e}")
+    asked = parse_questions(sys.stdin.read())
+    if not asked:
+        fail("recall read no numbered question from stdin: start each with `1.`, `1)` or `Q1`")
+    print("\n".join(recall(root, asked, since_hours, exclude=before_run, before=before)))
+
+
 def main():
     a = sys.argv[1:]
     if a == ["intake"]:
         return cmd_intake()
     if a == ["cutgate"]:
         return cmd_cutgate()
+    if a and a[0] == "recall":
+        usage = "usage: tracetree.py recall ROOT [--since-hours N] [--before RUN] < numbered questions"
+        opts, rest = {"--since-hours": None, "--before": None}, a[1:]
+        while len(rest) > 1 and rest[-2] in opts and opts[rest[-2]] is None:
+            opts[rest[-2]], rest = rest[-1], rest[:-2]
+        if len(rest) != 1 or rest[0].startswith("--"):
+            fail(usage)
+        since = None
+        if opts["--since-hours"] is not None:
+            try:
+                since = float(opts["--since-hours"])
+            except ValueError:
+                fail(f"--since-hours takes a number of hours, got {opts['--since-hours']!r}")
+        return cmd_recall(rest[0], since, opts["--before"])
     if a and a[0] == "segment":
         import segment
         sys.exit(segment.main(a[1:], fail))
     if not a or a[0] not in ("new", "seek", "start", "check", "wait", "answer", "write", "map", "read", "show", "book") or (len(a) < 2 and a[0] != "book"):
-        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | intake < PreToolUse hook payload | cutgate < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT] | segment ROOT [--rev SHA] --seed SEED...|--seeds FILE [--variant contract|package|cochange|tracer] [--floor LINES] [--read-max SHARE] [--max K] [--json]")
+        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | recall ROOT [--since-hours N] [--before RUN] < questions | intake < PreToolUse hook payload | cutgate < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT] | segment ROOT [--rev SHA] --seed SEED...|--seeds FILE [--variant contract|package|cochange|tracer] [--floor LINES] [--read-max SHARE] [--max K] [--json]")
     if a[0] == "seek":
         if len(a) != 3:
             fail("usage: tracetree.py seek RUN REGEX")

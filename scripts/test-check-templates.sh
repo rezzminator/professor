@@ -73,7 +73,7 @@ checks_templates_scratch_paths() {
 }
 STUB
 for f in docs/a.md scripts/a.sh pfm/internal/a/a.go docs/gone.md; do echo x > "$R/$f"; done
-for f in check-codex-markers check-opencode-writer; do echo x > "$R/scripts/$f.mjs"; done
+echo x > "$R/scripts/check-codex-markers.mjs"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@t commit -qm base
 rm "$R/docs/gone.md"
 cp "$HERE/.claude/scripts/unit-path.sh" "$R/.claude/scripts/unit-path.sh"
@@ -101,7 +101,7 @@ reset; go; chk "usage: no argument prints the usage line, exit 2, no check run" 
 reset; go docs/a.md ''; chk "usage: an empty argument beside a file" rejected "$USAGE"
 
 reset; go docs/a.md
-chk "all green: exit 0 and the verdict lines, one each, in order" bash -c '[ "$1" = 0 ] && [ "$(grep -E "^(PASS|FAIL|SKIP) " <<<"$0" | cut -d" " -f2 | tr "\n" " ")" = "rumdl leak clone placeholders scratch-paths descriptions manifest codex-markers opencode-writer-refs " ] && ! grep -qE "^(FAIL|SKIP) " <<<"$0" && grep -qxF "PASS leak" <<<"$0" && ! grep -q "structural-only" <<<"$0"' "$OUT" "$RC"
+chk "all green: exit 0 and the verdict lines, one each, in order" bash -c '[ "$1" = 0 ] && [ "$(grep -E "^(PASS|FAIL|SKIP) " <<<"$0" | cut -d" " -f2 | tr "\n" " ")" = "rumdl leak clone placeholders scratch-paths descriptions manifest codex-markers " ] && ! grep -qE "^(FAIL|SKIP) " <<<"$0" && grep -qxF "PASS leak" <<<"$0" && ! grep -q "structural-only" <<<"$0"' "$OUT" "$RC"
 
 reset; CWD="$R/docs" go a.md
 chk "path: cwd-relative resolves, rumdl gets the repository path" called "$(want rumdl check --output-format concise docs/a.md)"
@@ -135,7 +135,7 @@ reset; TEST_LEAK_TERMS=/elsewhere/terms.txt go docs/a.md
 chk "leak: a LEAK_TERMS the caller set stands" grep -qxF "leak-check.sh $R LEAK_TERMS=/elsewhere/terms.txt" "$REC/env"
 
 reset; go docs/a.md
-chk "unit-wide: the exact commands, whole" bash -c 'for w in "clone-check.sh" "description-check.sh" "check-self-hosted-manifest.sh '"$R"' templates pfm" "node scripts/check-codex-markers.mjs" "node scripts/check-opencode-writer.mjs"; do grep -qxF "$w" "$0/calls" || { echo "missing: $w" >&2; exit 1; }; done' "$REC"
+chk "unit-wide: the exact commands, whole" bash -c 'for w in "clone-check.sh" "description-check.sh" "check-self-hosted-manifest.sh '"$R"' templates pfm" "node scripts/check-codex-markers.mjs"; do grep -qxF "$w" "$0/calls" || { echo "missing: $w" >&2; exit 1; }; done' "$REC"
 chk "unit-wide: no check is ever given --write, fmt or --fix" bash -c '! grep -qE -- "--write|--fix| fmt" "$0/calls"' "$REC"
 LOGF="$(logfile)"
 chk "shims: the catalogue's checks see REPO_ROOT, the run's private TMP_BASE (log name + .d, existing) and the root as cwd" grep -qxF "ph REPO_ROOT=$R TMP_BASE=${LOGF%.log}.d PWD=$R DIR=1" "$REC/shim"
@@ -150,7 +150,7 @@ chk "shims: a catalogue check that dies is FAIL, never PASS" bash -c 'grep -qx "
 # infra/fence/checks.sh missing: both catalogue checks FAIL, named in the log, every other check still runs.
 reset; mv "$R/infra/fence/checks.sh" "$T/checks.sh.away"; go docs/a.md; LOGF="$(logfile)"
 mv "$T/checks.sh.away" "$R/infra/fence/checks.sh"
-chk "catalogue missing: FAIL placeholders and FAIL scratch-paths, the other seven checks PASS, exit 1" bash -c '[ "$1" = 1 ] && grep -qx "FAIL placeholders" <<<"$0" && grep -qx "FAIL scratch-paths" <<<"$0" && [ "$(grep -c "^PASS " <<<"$0")" = 7 ] && ! grep -q "^SKIP " <<<"$0"' "$OUT" "$RC"
+chk "catalogue missing: FAIL placeholders and FAIL scratch-paths, the other six checks PASS, exit 1" bash -c '[ "$1" = 1 ] && grep -qx "FAIL placeholders" <<<"$0" && grep -qx "FAIL scratch-paths" <<<"$0" && [ "$(grep -c "^PASS " <<<"$0")" = 6 ] && ! grep -q "^SKIP " <<<"$0"' "$OUT" "$RC"
 chk "catalogue missing: the log names infra/fence/checks.sh and the check that did not run" bash -c 'grep -qF "infra/fence/checks.sh could not be sourced — placeholders did not run" "$0" && grep -qF "infra/fence/checks.sh could not be sourced — scratch-paths did not run" "$0"' "$LOGF"
 
 # A directory is no file: FAIL path, the live file beside it still checked, exit 1.
@@ -181,11 +181,11 @@ reset; go --fix
 chk "scratch: a usage exit leaves no scratch directory behind" bash -c 'ls "/tmp/'"$PROJECT"'/check-templates" 2>/dev/null | grep -c "\.d$" | grep -qx 0'
 
 reset; rcseq clone-check.sh 2; go docs/a.md
-chk "each check: one failing check is FAIL and every other still PASSes, exit 1" bash -c '[ "$1" = 1 ] && grep -qx "FAIL clone" <<<"$0" && [ "$(grep -c "^PASS " <<<"$0")" = 8 ]' "$OUT" "$RC"
+chk "each check: one failing check is FAIL and every other still PASSes, exit 1" bash -c '[ "$1" = 1 ] && grep -qx "FAIL clone" <<<"$0" && [ "$(grep -c "^PASS " <<<"$0")" = 7 ]' "$OUT" "$RC"
 reset; for k in rumdl leak-check.sh clone-check.sh description-check.sh check-self-hosted-manifest.sh node; do rcseq "$k" 1 1 1; done; STUB_PH=1 STUB_SP_RC=1 go docs/a.md
-chk "each check: every check fails and every one still ran, nine FAIL lines, exit 1" bash -c '[ "$1" = 1 ] && [ "$(grep -c "^FAIL " <<<"$0")" = 9 ] && ! grep -q "^PASS " <<<"$0"' "$OUT" "$RC"
+chk "each check: every check fails and every one still ran, eight FAIL lines, exit 1" bash -c '[ "$1" = 1 ] && [ "$(grep -c "^FAIL " <<<"$0")" = 8 ] && ! grep -q "^PASS " <<<"$0"' "$OUT" "$RC"
 reset; rcseq node 1; go docs/a.md
-chk "each check: the node checks fail separately (first is codex-markers)" bash -c 'grep -qx "FAIL codex-markers" <<<"$0" && grep -qx "PASS opencode-writer-refs" <<<"$0"' "$OUT"
+chk "each check: the node check fails alone (codex-markers)" bash -c 'grep -qx "FAIL codex-markers" <<<"$0" && [ "$(grep -c "^PASS " <<<"$0")" = 7 ]' "$OUT"
 
 LOGF=; reset; STUB_LINES=3 go docs/a.md; LOGF="$(logfile)"
 chk "log: the path is printed as 'log: /tmp/{project}/check-templates/{UTC}-{pid}.log'" bash -c '[[ "$0" =~ ^/tmp/'"$PROJECT"'/check-templates/[0-9]{8}T[0-9]{6}Z-[0-9]+\.log$ ]]' "$LOGF"

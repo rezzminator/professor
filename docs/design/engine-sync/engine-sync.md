@@ -183,7 +183,6 @@ Every pfm path that writes a Codex or OpenCode artifact from Claude sources. P1 
 | Stop and PostToolUse hooks | `.claude/scripts/codex-sync.sh` via `.claude/settings.json:52,67`; `templates/project/scripts/codex-sync.sh` via `templates/project/settings.json:58` |
 | CI mirror generation | `.github/workflows/verify.yml:46-48`, `.github/workflows/plugin-scan.yml:42-43` |
 | fence mirror generation | `infra/fence/checks.sh:216-221` |
-| single-writer check | `scripts/check-opencode-writer.mjs:34` |
 | dead compiler | `templates/project/scripts/build-codex.mjs`, checked by `scripts/check-codex-markers.mjs` (`infra/fence/checks.sh:235`), claimed by `CLAUDE.md:56` |
 
 The dead compiler has been unwired since v0.58.0 (`releases/v0.58.0.md:14`) and still ships to adopters; it is deleted in P1 whatever else lands.

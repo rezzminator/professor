@@ -6,8 +6,8 @@
 # ...)`, no check run, exit 3 — a missing tool is a gap in this machine, never a failed check (exit 1). rumdl is a host tool
 # (`pfm install`, never the fence image: infra/fence/tools.sh installs only the pinned Go and npm tools). Else one PASS/FAIL/SKIP line per check,
 # every check run even after one fails: file-scoped rumdl (named .md files) and leak (every named file);
-# unit-wide clone, placeholders, scratch-paths, descriptions, manifest, codex-markers,
-# opencode-writer-refs. Output goes to /tmp/{project}/check-templates/{UTC}-{pid}.log (path printed).
+# unit-wide clone, placeholders, scratch-paths, descriptions, manifest, codex-markers.
+# Output goes to /tmp/{project}/check-templates/{UTC}-{pid}.log (path printed).
 # Exit 1 on any FAIL line, else 0. None of these checks builds, serves or reaches the network, so none
 # takes a lock. Its scratch is private to the run: the directory ${log%.log}.d (made after the log name,
 # removed on exit after a run with no FAIL, kept after a run with one so a FAIL line's pointer into it
@@ -126,7 +126,6 @@ done
 run_check descriptions bash scripts/description-check.sh
 run_check manifest bash infra/check-self-hosted-manifest.sh "$ROOT" templates pfm
 run_check codex-markers node scripts/check-codex-markers.mjs
-run_check opencode-writer-refs node scripts/check-opencode-writer.mjs
 
 echo "log: $UNIT_LOG"
 [ "$FAILED" = 0 ]

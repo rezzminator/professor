@@ -198,9 +198,7 @@ templates.flight-index	PASS	0.5
 templates.release-check	PASS	1.6
 templates.refresh-scope	PASS	0.6
 templates.dev-report	PASS	0.3
-templates.opencode-writer-tests	PASS	0.1
 templates.skill-tests	PASS	1.3
-templates.opencode-writer-refs	PASS	0.0
 STEPS	PASS	39.8
 BUDGET	PASS	40
 ```

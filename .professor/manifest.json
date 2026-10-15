@@ -76,7 +76,8 @@
       "github-marketing",
       "pcm",
       "pfm-testing-manual",
-      "pfm:release"
+      "pfm:release",
+      "pfm:update"
     ],
     "scripts": [
       "check-pfm.sh",
@@ -104,6 +105,7 @@
     ".claude/commands/pcm.md": "06b833cff98a086a3efe836df2590a19535889e15668a629e86a3b55383734f8",
     ".claude/commands/pfm-testing-manual.md": "1846bc64b1cc04f12dbe7be11bed11f1bed342d428aaa7cf61691113cfbf60ea",
     ".claude/commands/pfm/release.md": "18bb6c6b52a74875bb95b39fd15f9163e3c73a0fdfc5d7c2b027bbcd3807e24b",
+    ".claude/commands/pfm/update.md": "b6c8d40d83c93b223f995a3fee68297f4f0610d6f03a03d5e4243bc113f83571",
     ".claude/engine-sync.json": "eb620565ae4ec7838e22eb07a41388b6ff7b771fd197b469e3618fac8b166563",
     ".claude/scripts/check-pfm.sh": "500ad9af27942c041da1b751184c24b52a77d237d65d6a4f263002ffe2da9836",
     ".claude/scripts/check-templates.sh": "8f06827a4208d8d8a05443ebed2af8d5e639d2332de8bdec65207e986426eb6d",
@@ -116,7 +118,7 @@
     ".claude/settings.json": "a597044e71b987be74274cb8f59e44bba33facea60f798ddb57d91ca18770909",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "1488df56cb9051fee2b92c88a8b1a84625eb872fa7538810ac726085f9b0cbb7",
-    "CLAUDE.md": "342147b8437167fd052f2ee5b928cc1156b5fd6473f4947beeee8f0bf2da6672",
+    "CLAUDE.md": "d2d89dfbe26aab511e17d97212ab57a16db8950e1d416f0de12cdd4352bee1e6",
     "docs/commands/pcm/references/audit-scopes.md": "697602baeda9943ad3299cb7d9b9924fea0d9d8b47144b03af81eec89022a760",
     "docs/commands/pcm/references/refresh.md": "d21e629f15337e2c36c150be0128d05f1782dfc1681aa1fd342ed7e6c7df4038",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",

@@ -1,5 +1,5 @@
 # S4: PLUGIN_LOG_DIR is refused (mode 500); the setup failure reaches the absolute decision log,
-# which the plugin names per session: {logFile stem}.{sid}.jsonl (R1).
+# which the plugin names per session: {SUB_AGENT_COMPACT_LOG_FILE stem}.{sid}.jsonl (R1).
 # shellcheck shell=bash disable=SC2034
 LAB_PLUGIN=sub-agent-compact
 LAB_ROWS=(R1)
@@ -7,10 +7,10 @@ LAB_MODEL=haiku
 LAB_CAP_USD=0.25
 LAB_EST_USD=0.02
 LAB_WALL_S=300
-LAB_ENV=('PLUGIN_LOG_DIR={run}/logs-ro')
+LAB_ENV=('PLUGIN_LOG_DIR={run}/logs-ro' 'SUB_AGENT_COMPACT_LOG_FILE={run}/decisions.jsonl')
 LAB_LOGGER=no
 LAB_DECISIONS='{run}/decisions.{sid}.jsonl'
-lab_options '{"logFile":"{run}/decisions.jsonl"}'
+lab_options '{}'
 
 lab_scenario() {
   need_dir_mode '{run}/logs-ro' 500

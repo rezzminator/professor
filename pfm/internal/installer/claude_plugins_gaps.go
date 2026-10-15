@@ -110,26 +110,15 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 // file means none is installed; a file that cannot be read or parsed returns
 // its error, never an answer.
 func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) ([]string, error) {
-	path := filepath.Join(configDir, "plugins", "installed_plugins.json")
-	raw, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var record struct {
-		Plugins map[string][]struct {
-			InstallPath string `json:"installPath"`
-		} `json:"plugins"`
-	}
-	if err == nil {
-		if err := json.Unmarshal(raw, &record); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
+	record, err := readClaudePluginInstalls(configDir)
+	if err != nil {
+		return nil, err
 	}
 	var missing []string
 	for index := range targets {
 		target := &targets[index]
 		installed := false
-		for _, entry := range record.Plugins[target.ID] {
+		for _, entry := range record[target.ID] {
 			if info, statErr := os.Stat(entry.InstallPath); entry.InstallPath != "" && statErr == nil && info.IsDir() {
 				installed = true
 				break
@@ -140,6 +129,73 @@ func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) (
 		}
 	}
 	return missing, nil
+}
+
+// claudePluginInstall is one install record Claude Code keeps for a plugin id
+// in plugins/installed_plugins.json: one per scope it is installed in, a
+// project or local one naming its project. Claude Code owns the shape: a
+// scope, projectPath or version that is not a string reads as empty rather
+// than failing the record every other reader needs; installPath stays strict.
+type claudePluginInstall struct {
+	Scope       string
+	ProjectPath string
+	InstallPath string
+	Version     string
+}
+
+// UnmarshalJSON reads one entry, its loose fields as recordString does.
+func (install *claudePluginInstall) UnmarshalJSON(raw []byte) error {
+	var entry struct {
+		Scope       json.RawMessage `json:"scope"`
+		ProjectPath json.RawMessage `json:"projectPath"`
+		InstallPath string          `json:"installPath"`
+		Version     json.RawMessage `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return err
+	}
+	*install = claudePluginInstall{
+		Scope:       recordString(entry.Scope),
+		ProjectPath: recordString(entry.ProjectPath),
+		InstallPath: entry.InstallPath,
+		Version:     recordString(entry.Version),
+	}
+	return nil
+}
+
+// recordString is a raw record value as a string; empty when it is absent or
+// not a JSON string.
+func recordString(raw json.RawMessage) string {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return ""
+	}
+	return text
+}
+
+// version is the record's version string; empty when it names none or names
+// one that is not a JSON string.
+func (install claudePluginInstall) version() string { return install.Version }
+
+// readClaudePluginInstalls reads configDir's plugins/installed_plugins.json,
+// keyed by plugin id. A missing file means none is installed; a file that
+// cannot be read or parsed returns its error, never an answer.
+func readClaudePluginInstalls(configDir string) (map[string][]claudePluginInstall, error) {
+	path := filepath.Join(configDir, "plugins", "installed_plugins.json")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var record struct {
+		Plugins map[string][]claudePluginInstall `json:"plugins"`
+	}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return record.Plugins, nil
 }
 
 // ClaudePluginsUnresolved names every listed full id pfm cannot install: still
@@ -235,12 +291,12 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 		}
 		shown := make([]string, len(ids))
 		for index, id := range ids {
-			shown[index] = escapeControl(id)
+			shown[index] = EscapeControl(id)
 		}
 		gaps = append(gaps, ClaudePluginGap{
 			fmt.Sprintf(
 				"plugin %s enabled %s (%s) in %s",
-				escapeControl(name), timesWord(len(ids)), strings.Join(shown, " and "), path,
+				EscapeControl(name), timesWord(len(ids)), strings.Join(shown, " and "), path,
 			),
 			"keep one copy: claude plugin disable each other key",
 		})
@@ -248,10 +304,10 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 	return gaps
 }
 
-// escapeControl is text read from a file as one printed line: each control
+// EscapeControl is text read from a file as one printed line: each control
 // character escaped as Go spells it, so a newline in a key or a url cannot
 // forge a line of its own.
-func escapeControl(text string) string {
+func EscapeControl(text string) string {
 	if !strings.ContainsFunc(text, unicode.IsControl) {
 		return text
 	}

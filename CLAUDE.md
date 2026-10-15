@@ -7,6 +7,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - machine-global tier: agents, commands and skills whose original lives in this clone, symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`; a `from:` declaration renders into the tracked `templates/generated/agents/`, the only generated output in the clone, which the fence gate holds equal to a fresh render · `templates/global/`
 - project tier: templates `pfm init` scaffolds into an adopter once and pins in `{adopter}/.professor/baseline.json`; the adopter's local file is the truth, and pfm never rewrites it after init · `templates/project/`
 - project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for retired references in project files, including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, and closes every row with `pfm update {adopt|pin|ignore|drop|accept}` (`pin --keep` records a deliberate non-port, `accept` a retired-name hit that stays) until the report ends `clean` · `pfm/internal/professor/`, `pfm/internal/update/`
+- host update: this host's pfm build, `pfm install` and plugin repoint, never the project-tier update · `.claude/commands/pfm/update.md`
 - placeholder: the registered token for a project-specific value in a template · `docs/PLACEHOLDERS.md`
 - spec: the adopter install interview and generation law · `docs/SETUP.md`
 - design docs: one directory per family, indexed by its `_index.md` · `docs/design/{family}/`
@@ -51,13 +52,11 @@ This repo is the framework, not an app that uses it: everything under `templates
 ## Codex
 
 - Reads `AGENTS.md`, whose § Codex adapter comes from `.claude/engine-sync.json` (`codex.rootAdapter`), and `.codex/`.
-- engine-sync writes its mirror, run as `pfm codex build .`; `pfm codex check .` its check.
 - A role is a `.toml` twin `pfm install` (through `engine-sync global`, or `pfm codex agents`) writes as a marker-owned regular file into every Codex home's `{codex-home}/agents/` — Codex refuses a symlinked role — so a role changes at the next `pfm install`.
 
 ## OpenCode
 
 - Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the non-gitter Git-write denies.
-- engine-sync writes it, run as `pfm opencode build .`; `pfm opencode {check|doctor} .` its checks.
 
 ## Local
 
@@ -75,7 +74,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Host
 
-- After a fenced flight lands on `develop`: `make host-install` from `pfm/`, then `pfm install --yes`.
+- Every installation on this host — `make host-install`, `pfm install`, a plugin repoint — loads `/pfm:update` first, MANDATORY: it owns the sequence.
 
 # Rules
 

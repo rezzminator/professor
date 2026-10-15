@@ -27,7 +27,7 @@ Every build, test and gate runs through one script:
 - `templates/**` is shipped source — an adopter's live agent prompts, one clone away. Treat every prompt line as production code.
 - Nothing identifying ships: no private project or client name, no personal data, no machine-absolute path in any tracked file. `scripts/leak-check.sh` is the backstop, not the plan.
 - Template example values are invented placeholders, registered in [`docs/PLACEHOLDERS.md`](docs/PLACEHOLDERS.md).
-- `AGENTS.md`, `.codex/**` and `.opencode/**` are generated from the Claude sources (`pfm codex build`, `pfm opencode build`); edit the source, never the mirror.
+- `AGENTS.md`, `.codex/**` and `.opencode/**` are generated from the Claude sources (`engine-sync codex build`, `engine-sync opencode build`); edit the source, never the mirror.
 - A `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pull request.
 
 ## Reporting

@@ -1,7 +1,7 @@
 name: engine-sync binary
 description: >-
-  Builds engine-sync, the single writer of every Codex and OpenCode artifact
-  (pfm codex|opencode forward to it), from the plugins/engine-sync submodule,
+  Builds engine-sync, the single writer of every Codex and OpenCode artifact,
+  from the plugins/engine-sync submodule,
   stages the shipped machine policy templates/global/engine-sync.json as
   $HOME/.claude/engine-sync.json, the one file engine-sync reads, and exports
   ENGINE_SYNC_BIN to every later step of the job and puts the binary's

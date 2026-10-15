@@ -15,7 +15,7 @@
 # once and given a second settle before the verdict.
 #
 # The install is finished only when the Codex mirror the interview said yes to
-# is real: .codex compiled, `pfm codex build` + `pfm codex check` passing, and no
+# is real: .codex compiled, `engine-sync codex build` + `engine-sync codex check` passing, and no
 # registered token left in CLAUDE.md, AGENTS.md, .claude or .codex. Only then
 # is the 'professor: install' commit written — the marker a re-run skips on.
 #
@@ -118,8 +118,8 @@ echo "adopt: $NAME interview settled · TOKENS-LEFT: $n_left file(s) with an unf
 # The Codex mirror the interview said yes to — the engine-sync plugin's hooks rebuild it
 # at a chat's turn end; the smoke here is the build and check themselves.
 log=/tmp/adopt-codex.log
-if ! { pfm codex build . && pfm codex check .; } >"$log" 2>&1; then
-  echo "adopt: pfm codex build/check failed in $DIR — $log:" >&2; tail -20 "$log" >&2; exit 1
+if ! { engine-sync codex build . && engine-sync codex check .; } >"$log" 2>&1; then
+  echo "adopt: engine-sync codex build/check failed in $DIR — $log:" >&2; tail -20 "$log" >&2; exit 1
 fi
 echo "adopt: Codex mirror compiled — $(grep -E 'CODEX (BUILD|CHECK) PASS' "$log" | tr '\n' ' ')"
 add_rc=0; add_stderr="$(git add -A 2>&1)" || add_rc=$?

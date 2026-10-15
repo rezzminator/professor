@@ -28,7 +28,7 @@ model_reasoning_effort = "{CODEX_REASONING_EFFORT}"
 network_access = true
 
 # ─── MCP servers (OPTIONAL) ───────────────────────────────────────────────
-# `pfm codex build` regenerates a `[mcp_servers.*]` block here from `.mcp.json`
+# `engine-sync codex build` regenerates a `[mcp_servers.*]` block here from `.mcp.json`
 # inside a `# BEGIN mcp_servers … # END mcp_servers` fence and never touches
 # anything outside it — no `.mcp.json`, no fence, nothing generated. Hand-add
 # a table below this comment only for a server that must NOT be driven by

@@ -19,12 +19,12 @@ node_modules/
 # which the leak gate correctly refuses for this repo.
 .claude/skills/
 # Codex command wrappers are tracked so clean checkouts pass mirror checks.
-# OpenCode mirror (`pfm opencode build`): skill symlinks stay untracked like
+# OpenCode mirror (`engine-sync opencode build`): skill symlinks stay untracked like
 # Generated mirrors are never tracked beside their source: their compiler
-# (`pfm codex build` for Codex, `pfm opencode build` for OpenCode)
+# (`engine-sync codex build` for Codex, `engine-sync opencode build` for OpenCode)
 # writes them at install/init time and the Stop hook keeps them current on
 # every later edit. A fresh clone has none of these paths until it generates
-# — `pfm codex build .` + `pfm opencode build .`
+# — `engine-sync codex build .` + `engine-sync opencode build .`
 # — which every gate that reads them runs first (see `scripts/
 # check-agent-roster.mjs`'s NOT GENERATED state and the CI `Generate mirrors`
 # step). Keepers stay tracked and are NOT covered by these rules:
@@ -41,7 +41,7 @@ node_modules/
 .opencode/SECURITY.md
 .opencode/opencode.jsonc
 templates/global/agents/*.toml
-# OpenCode mirror (`pfm opencode build`): skill symlinks stay untracked like
+# OpenCode mirror (`engine-sync opencode build`): skill symlinks stay untracked like
 # .codex/skills/; the goals/ tree is the goal plugin's live session state.
 .opencode/skills/
 .opencode/goals/

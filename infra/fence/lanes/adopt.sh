@@ -71,7 +71,7 @@ step='ignore unscaffolded templates'
 step='scaffolded markdown pins'
 jq -e '[.files | keys[] | select(endswith(".md"))] | length >= 4' .professor/baseline.json >/dev/null
 step='Codex build'
-pfm codex build .
+engine-sync codex build .
 step='clean project updates'
 report="$(pfm doctor --project-updates 2>&1)"
 printf '%s\n' "$report"

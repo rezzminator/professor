@@ -33,7 +33,7 @@ chrome="$(google-chrome-stable --version 2>/dev/null)" || fail "google-chrome-st
 mkdir -p "$HOME/.local/bin"
 go -C /worktree/pfm build -o "$HOME/.local/bin/pfm" ./cmd/pfm >/tmp/sim-build.log 2>&1 ||
   fail "go build ./cmd/pfm from /worktree" /tmp/sim-build.log
-# The Codex/OpenCode compiler pfm install and pfm codex|opencode exec, from the
+# The Codex/OpenCode compiler pfm install execs and the lanes run as engine-sync, from the
 # engine-sync source docker-compose.yml mounts at /engine-sync.
 . /worktree/infra/fence/engine-sync.sh
 export ENGINE_SYNC_BIN="$HOME/.local/libexec/engine-sync/engine-sync"
@@ -41,9 +41,8 @@ engine_sync_build "$ENGINE_SYNC_BIN" >/tmp/sim-engine-sync.log 2>&1 ||
   fail "engine-sync build from /engine-sync" /tmp/sim-engine-sync.log
 
 # The plugin wrapper's stable link, the target of the PATH link pfm install writes.
-engine_sync_stable="$HOME/.local/share/engine-sync/bin/engine-sync"
-{ mkdir -p "$(dirname "$engine_sync_stable")" && ln -sfn "$ENGINE_SYNC_BIN" "$engine_sync_stable"; } ||
-  fail "engine-sync stable link $engine_sync_stable" /dev/null
+engine_sync_link_stable "$ENGINE_SYNC_BIN" 2>/tmp/sim-engine-sync-link.log ||
+  fail "engine-sync stable link" /tmp/sim-engine-sync-link.log
 
 export PFM_CONFIG="${PFM_CONFIG:-$HOME/.local/state/pfm/pfm.config.json}"
 mkdir -p "$(dirname "$PFM_CONFIG")"

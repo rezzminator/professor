@@ -1,0 +1,5 @@
+# 2026-10-16 — lane A could not build in a worktree without submodules, and its develop red was named without a base run
+
+Observed: at the engine-sync-tidy phase-3 gate the flight worktree had no plugin submodules checked out, so lane A's alpha root build failed on every `-dev` plugin copy (`no checkout at /worktree/plugins/{plugin}/…`); the lander proved A.11 instead by running the plugin's `hooks.json` commands with a real engine-sync in `dev.sh iso run`. `templates/global/agents/gitter.md#Phases` (Submodules, Worktree add) already orders `submodule update --init` before the worktree is mounted. Lane A's root build is also red at develop on `claude plugin … records no version string (scope )` for every `-dev` plugin; a lane red was named not the flight's before any run at develop showed it red there.
+
+Amend: templates/global/agents/flights-lander.md#Fixing — a red the lander calls outside the flight is shown red by the same command at the flight's base, its log cited; without that run it is the flight's red. The missing submodules are `judgment`: the gitter rule exists.

@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,8 +41,6 @@ type Runner struct {
 	// Home is the home {engine-sync home} defaults under and every call
 	// passes as --home; "" is Env's home.
 	Home string
-	// ChildEnv is the child's whole environment; nil inherits this process's.
-	ChildEnv []string
 	// Capabilities are the host's capability names (HostCapabilities): a
 	// Runner that sets them passes one --capability flag each on every call
 	// that renders or checks agents; one that leaves them unset (the workbench
@@ -181,41 +178,11 @@ func (runner Runner) run(ctx context.Context, args []string) (deps.RunResult, er
 		obs.Logger(ctx).Error("engine-sync resolve", obs.FieldCmd, strings.Join(args, " "), obs.FieldErr, err)
 		return deps.RunResult{ExitCode: -1}, err
 	}
-	result, err := runner.exec().Run(ctx, append([]string{binary}, args...), deps.RunOptions{Env: runner.childEnv()})
+	result, err := runner.exec().Run(ctx, append([]string{binary}, args...), deps.RunOptions{Env: os.Environ()})
 	if err != nil {
 		wrapped := fmt.Errorf("run %s %s: %w", binary, strings.Join(args, " "), err)
 		obs.Logger(ctx).Error("engine-sync run", obs.FieldCmd, strings.Join(args, " "), obs.FieldErr, wrapped)
 		return result, wrapped
 	}
 	return result, nil
-}
-
-// childEnv preserves the caller's overrides; layered engine-sync policy owns the default marker.
-func (runner Runner) childEnv() []string {
-	if runner.ChildEnv != nil {
-		return runner.ChildEnv
-	}
-	return os.Environ()
-}
-
-// Forward is a retiring pfm command that now belongs to engine-sync: it
-// prints one stderr line naming the engine-sync command, runs it with the
-// same arguments, copies its stdout and stderr through and returns its exit
-// code. An unavailable binary, or one that could not start, prints the cause
-// and is exit 1.
-func (runner Runner) Forward(ctx context.Context, from string, args []string, stdout, stderr io.Writer) int {
-	fmt.Fprintf(stderr, "%s: deprecated, runs engine-sync %s\n", from, strings.Join(args, " "))
-	result, err := runner.run(ctx, args)
-	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", from, err)
-		return 1
-	}
-	if _, err := stdout.Write(result.Stdout); err != nil {
-		fmt.Fprintf(stderr, "%s: copy engine-sync stdout: %v\n", from, err)
-		return 1
-	}
-	if _, err := stderr.Write(result.Stderr); err != nil {
-		return 1
-	}
-	return result.ExitCode
 }

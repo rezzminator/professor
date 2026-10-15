@@ -140,9 +140,9 @@ check_express() { # five independently counted install-fidelity beats on the ado
   fi
 
   out=/tmp/verify-express-codex.log
-  (cd "$root" && pfm codex check .) >"$out" 2>&1; rc=$?
+  (cd "$root" && engine-sync codex check .) >"$out" 2>&1; rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail express-codex "pfm codex check . exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+    fail express-codex "engine-sync codex check . exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
   elif ! grep -q '^CODEX CHECK PASS' "$out"; then
     fail express-codex "exit 0 without CODEX CHECK PASS; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
   else

@@ -59,7 +59,7 @@ This section is the runnable handoff from `pfm init`; no install slash command e
    - `templates/project/commands/per-project/testing-manual.md` → `.claude/commands/{project}-testing-manual.md`, one per roster entry (`testing-manual.md` for a single-project install), its eleven sections filled from that project's real test layout and commands.
 
    Re-running `pfm init --render` lists what is still `LEFT`; it renders nothing already changed.
-4. Verify that no required token remains, every generated agent reference resolves, and scripts preserve executable mode. If Codex is enabled, run `pfm codex build` and `pfm codex check` from the target project after the local Claude files are final.
+4. Verify that no required token remains, every generated agent reference resolves, and scripts preserve executable mode. If Codex is enabled, run `engine-sync codex build` and `engine-sync codex check` from the target project after the local Claude files are final.
 5. **Close by pinning every file deployed by the interview.** For each local created from a roster-only template, run:
 
    ```bash
@@ -194,7 +194,7 @@ If no, skip.
 
 > Do you also use OpenAI Codex? (Everything works without it — this adds a second runtime for cheaper implementation.)
 
-If yes: the interview creates `.codex/` as a pointer layer over the project's local Claude sources, then runs `pfm codex build` and `pfm codex check`, which forward to engine-sync, the compiler of the Codex and OpenCode mirrors. `AGENTS.md`, command and skill pointers, and `.codex/agents/*.toml` are generated; `config.toml` and `rules/*.rules` keep their hand-written portions. Claude and Codex read the same Professor contract; the pointer layer translates mechanics, not identity. Either runtime can orchestrate when invoked with the matching command surface. `pfm install` writes Professor's engine-sync policy, `templates/global/engine-sync.json`, plus the host's `targets` roster, to `~/.claude/engine-sync.json` (mode 0600; a file there without `machine.managedBy: "professor"` is the operator's and stays unchanged); a project's own overrides go in `.claude/engine-sync.json`.
+If yes: the interview creates `.codex/` as a pointer layer over the project's local Claude sources, then runs `engine-sync codex build` and `engine-sync codex check`; engine-sync is the compiler of the Codex and OpenCode mirrors. `AGENTS.md`, command and skill pointers, and `.codex/agents/*.toml` are generated; `config.toml` and `rules/*.rules` keep their hand-written portions. Claude and Codex read the same Professor contract; the pointer layer translates mechanics, not identity. Either runtime can orchestrate when invoked with the matching command surface. `pfm install` writes Professor's engine-sync policy, `templates/global/engine-sync.json`, plus the host's `targets` roster, to `~/.claude/engine-sync.json` (mode 0600; a file there without `machine.managedBy: "professor"` is the operator's and stays unchanged); a project's own overrides go in `.claude/engine-sync.json`.
 
 If no: skip — the entire Codex layer is omitted. No pipeline operation requires it.
 
@@ -288,7 +288,7 @@ Claude takes your answers and:
 
 8a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/build/references/qa-commons.md` → `docs/commands/build/references/qa-commons.md`), so commands that cite a reference doc find it on disk.
 
-8b. **(If Codex opted in)** Creates `.codex/` as a pointer layer over `.claude/` — never a restatement of it. Writes `config.toml` (sandbox reach + the `{CODEX_MODEL}`/`{CODEX_REASONING_EFFORT}` pins) and `rules/repo-law.rules` (the execpolicy door lock for non-gitter roles). Runs `pfm codex build` to compile every root and per-project Claude source into the Codex mirrors, then `pfm codex check` to verify them. Registry changes require a new or reloaded Codex session. If Codex was NOT opted in, this step is skipped entirely.
+8b. **(If Codex opted in)** Creates `.codex/` as a pointer layer over `.claude/` — never a restatement of it. Writes `config.toml` (sandbox reach + the `{CODEX_MODEL}`/`{CODEX_REASONING_EFFORT}` pins) and `rules/repo-law.rules` (the execpolicy door lock for non-gitter roles). Runs `engine-sync codex build` to compile every root and per-project Claude source into the Codex mirrors, then `engine-sync codex check` to verify them. Registry changes require a new or reloaded Codex session. If Codex was NOT opted in, this step is skipped entirely.
 
 9. **Updates `.gitignore`** — adds `.worktrees/`, `tmp/`.
 10. **Maintains `.professor/` state** — `manifest.json` holds the user-owned interview answers, while `baseline.json` holds pfm-owned per-file template pins.
@@ -499,7 +499,7 @@ New Professor versions ship as semver git tags. Each tier stays current from its
 | ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Machine-global commands, agents, and skills | Blueprint originals | Symlink-live. `pfm update` advances the recorded tagged clone, rebuilds the binary, runs `pfm install --yes`, and refreshes registrations. |
 | Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local file, full stop | Scaffolded once by `pfm init`. Upstream changes are reports to review and hand-apply; pfm never rewrites these files during update. |
-| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, engine-sync (`pfm codex build` and `pfm codex check` forward to it), after changing its local sources. |
+| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, `engine-sync codex build` and `engine-sync codex check`, after changing its local sources. |
 
 Before either tier moves, read every release note between the installed and the target version and merge their `#### → For:` actions — the rule lives in `INSTALL.md` § Updating.
 

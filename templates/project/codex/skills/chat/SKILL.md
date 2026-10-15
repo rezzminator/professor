@@ -4,7 +4,7 @@ description: Messages teammates — `pfm chat call {target} '{one line}'` delive
 ---
 
 <!--
-HAND-WRITTEN CARD — no generated marker. `pfm codex build` preserves it because
+HAND-WRITTEN CARD — no generated marker. `engine-sync codex build` preserves it because
 chat is a host-level MCP/CLI surface with no project-local Claude command source.
 This card carries the one page a Codex lane actually needs mid-flight.
 -->

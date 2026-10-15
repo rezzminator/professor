@@ -14,7 +14,7 @@
 # resolves) holds the catalogue's TMP_BASE and this script's own files, so two runs never share
 # a file. GAPS (landing checks the owner places, never run here): the engine mirrors generate/opencode
 # and check-map (they build pfm), agent-roster (scripts/check-agent-roster.mjs: it reads the generated
-# mirrors .codex/agents and .opencode/agent, which `pfm codex|opencode build` writes, and exits 3
+# mirrors .codex/agents and .opencode/agent, which `engine-sync codex|opencode build` writes, and exits 3
 # NOT GENERATED without them), the node/python/shell test suites (test-templates.sh),
 # `dev.sh iso gate templates`.
 # BROKEN STATE: a missing tool is `GAP install` naming it, exit 3, never a PASS or a bare FAIL; a missing unit-path.sh errors on source; a missing infra/fence/checks.sh is FAIL on both

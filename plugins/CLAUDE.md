@@ -23,7 +23,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 ## Codex
 
-- `AGENTS.md` here is generated from this file by engine-sync (`pfm codex build`).
+- `AGENTS.md` here is generated from this file by engine-sync (`engine-sync codex build`).
 
 ## Host
 

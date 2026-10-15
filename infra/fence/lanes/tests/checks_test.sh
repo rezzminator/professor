@@ -961,7 +961,10 @@ lane_agents_case() (
   BLUEPRINT="$lane_agents/blueprint"
   beat() { :; }; spends() { :; }; _lane_log_only() { :; }
   one_line() { tr '\n' ' ' <<<"$1"; }
-  pfm() { printf '%s\nCODEX AGENTS PASS\n' "$HOME/.codex/agents/alpha.toml: 43 B, parses clean"; }
+  engine-sync() {
+    [ -z "${LANE_A09_ERR:-}" ] || printf '%s\n' "$LANE_A09_ERR" >&2
+    printf '%s\nCODEX AGENTS PASS\n' "$HOME/.codex/agents/alpha.toml: 43 B, parses clean"
+  }
   fail() { printf 'FAIL %s\n' "$*"; }
   pass() { printf 'PASS %s\n' "$*"; }
   source "$lane_agents/beat.sh"
@@ -970,6 +973,18 @@ lane_agents_case > "$T/lane-agents.out" 2>&1
 if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
   ok 'A.09 judges one compiled agent, not a shared file or a Claude-only declaration'
 else bad 'A.09 effective agents' "$(cat "$T/lane-agents.out")"; fi
+# A.09's stderr: engine-sync's named SKIPPED warning (a capability the lane host does not declare) is no
+# problem; any other line beside it still fails the beat, and only that line is named.
+a09_skipped='engine-sync codex agents: warning: SKIPPED gpt-only — requires gpt-agents'
+LANE_A09_ERR="$a09_skipped" lane_agents_case > "$T/lane-agents.out" 2>&1
+if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
+  ok "A.09 reads engine-sync's SKIPPED capability warning as no problem"
+else bad 'A.09 SKIPPED warning' "$(cat "$T/lane-agents.out")"; fi
+LANE_A09_ERR="$a09_skipped"$'\n''engine-sync codex agents: conflict /fixture/alpha.toml' lane_agents_case > "$T/lane-agents.out" 2>&1
+if grep -Fq 'problem line(s) on stderr: engine-sync codex agents: conflict /fixture/alpha.toml' "$T/lane-agents.out" &&
+  ! grep -Fq 'SKIPPED gpt-only' "$T/lane-agents.out" && ! grep -q '^PASS' "$T/lane-agents.out"; then
+  ok 'A.09 fails on any other stderr line beside a SKIPPED warning, naming only that line'
+else bad 'A.09 stderr problem beside a SKIPPED warning' "$(cat "$T/lane-agents.out")"; fi
 cp "$lane_agents/blueprint/scripts/agent-source-inventory.py" "$lane_agents/inventory.py"
 for lane_inventory_failure in '1|agent-source-inventory: ERROR — fixture source rejection' '3|GAP install (agent source inventory is missing: PyYAML)'; do
   IFS='|' read -r lane_rc lane_error <<<"$lane_inventory_failure"

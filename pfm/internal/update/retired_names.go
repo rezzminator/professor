@@ -58,6 +58,20 @@ type retiredName struct {
 	probe string
 }
 
+// RetiredPfmCommand answers the dispatch of a retired `pfm {command}`: the
+// retired name and the successor the retired list gives it, read from
+// retiredNames (the one table). ok is false for a command the list does not
+// retire as a command with a successor.
+func RetiredPfmCommand(command string) (name, successor string, ok bool) {
+	name = "pfm " + command
+	for _, retired := range retiredNames {
+		if retired.kind == retiredCommand && retired.name == name && retired.successor != "" {
+			return retired.name, retired.successor, true
+		}
+	}
+	return "", "", false
+}
+
 // chatlogSuccessor is what replaced the /tokens command and the transcript skill.
 const chatlogSuccessor = "the chatlog skill"
 
@@ -157,7 +171,7 @@ var retiredNames = []retiredName{
 	{name: "terra", kind: retiredAgent, match: matchExact},
 	// Commit 73f2ae2b "/reminder becomes /pfm:schedule".
 	{name: "pfm chat reminder", kind: retiredCommand, successor: "pfm chat schedule", match: matchExact},
-	{name: "build-codex.mjs", kind: retiredPath, successor: "pfm codex build|check", match: matchExact},
+	{name: "build-codex.mjs", kind: retiredPath, successor: "engine-sync codex build|check", match: matchExact},
 	{name: "/reminder", kind: retiredCommand, successor: "/pfm:schedule", match: matchFamily},
 	// Commit b9f530c9 "/tokens and the transcript skill become one skill":
 	// chatlog, over `pfm tokens` and `pfm transcript` (both live). The
@@ -170,6 +184,11 @@ var retiredNames = []retiredName{
 	// too, the bare word "close-out" being prose.
 	{name: "/close-out", kind: retiredCommand, successor: "/done-herewith", match: matchFamily},
 	{name: "skills/close-out", kind: retiredSkill, successor: "/done-herewith", match: matchExact},
+	// `pfm codex|opencode` retire for `engine-sync codex|opencode`, which
+	// `pfm install` puts on PATH. The same rows answer the retired dispatch
+	// itself (RetiredPfmCommand).
+	{name: "pfm codex", kind: retiredCommand, successor: "engine-sync codex", match: matchFamily},
+	{name: "pfm opencode", kind: retiredCommand, successor: "engine-sync opencode", match: matchFamily},
 	// Commit abbcf405 "`pfm price` is gone": `pfm model-cost` is the one
 	// price command (a following `s` or `-` is another name, never a hit).
 	{name: "pfm price", kind: retiredCommand, successor: "pfm model-cost", match: matchExact},

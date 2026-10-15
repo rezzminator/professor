@@ -190,6 +190,54 @@ func TestScanRetiredNamesReportsAnUnreadableFileAsAFailure(t *testing.T) {
 	}
 }
 
+// TestRetiredPfmCommandReadsTheRetiredList: the dispatch of a retired `pfm
+// codex|opencode` reads the name and successor from retiredNames, the one
+// table; a command the table does not retire is no answer.
+func TestRetiredPfmCommandReadsTheRetiredList(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct{ command, name, successor string }{
+		{"codex", "pfm codex", "engine-sync codex"},
+		{"opencode", "pfm opencode", "engine-sync opencode"},
+	} {
+		name, successor, ok := RetiredPfmCommand(testCase.command)
+		if !ok || name != testCase.name || successor != testCase.successor {
+			t.Errorf("RetiredPfmCommand(%q) = %q, %q, %v; want %q, %q, true",
+				testCase.command, name, successor, ok, testCase.name, testCase.successor)
+		}
+	}
+	for _, command := range []string{"", "ls", "chat", "no-such-command"} {
+		if name, successor, ok := RetiredPfmCommand(command); ok {
+			t.Errorf("RetiredPfmCommand(%q) = %q, %q, true; want none", command, name, successor)
+		}
+	}
+}
+
+// TestDoctorProjectUpdatesNamesAFileHoldingARetiredPfmCodexCommand: an
+// adopter file holding `pfm codex build .` is a RETIRED-NAME row naming the
+// file, the line and the successor `engine-sync codex`, through the same
+// pass `pfm doctor --project-updates` runs.
+func TestDoctorProjectUpdatesNamesAFileHoldingARetiredPfmCodexCommand(t *testing.T) {
+	t.Parallel()
+	fixture := newProjectUpdateFixture(t)
+	writeRetiredFixture(t, fixture.project, map[string]string{
+		"scripts/mirror.sh": "#!/bin/sh\npfm codex build .\npfm opencode check .\n",
+	})
+	var stdout bytes.Buffer
+	if code := professor.RunProjectUpdates(
+		fixture.project, fixture.runtime.Paths.Home, false, &stdout, ScanRetiredNames,
+	); code != 1 {
+		t.Fatalf("RunProjectUpdates() code=%d, want 1 (review):\n%s", code, stdout.String())
+	}
+	for _, want := range []string{
+		"    scripts/mirror.sh:2   pfm codex — retired command, now engine-sync codex\n",
+		"    scripts/mirror.sh:3   pfm opencode — retired command, now engine-sync opencode\n",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("report missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 // projectReportNoScan runs `pfm doctor --project-updates` without the
 // retired-name scan: project_test.go's status fixtures pin the template
 // statuses alone.
@@ -205,7 +253,10 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"model: tracer-pro-max", "tracer-pro-max", "agent", "tracer"},
 	{"use tracer-rr to read the repo", "tracer-rr", "agent", "clone-distiller"},
 	{"run pfm chat reminder ls", "pfm chat reminder", "command", "pfm chat schedule"},
-	{"node .claude/scripts/build-codex.mjs check", "build-codex.mjs", "path", "pfm codex build|check"},
+	{"node .claude/scripts/build-codex.mjs check", "build-codex.mjs", "path", "engine-sync codex build|check"},
+	{"run pfm codex build . after an edit", "pfm codex", "command", "engine-sync codex"},
+	{"pfm opencode check", "pfm opencode", "command", "engine-sync opencode"},
+	{`"Bash(pfm codex:*)",`, "pfm codex", "command", "engine-sync codex"},
 	{"arm it with /reminder 30d", "/reminder", "command", "/pfm:schedule"},
 	{"run /tokens for the spend", "/tokens", "command", chatlogSuccessor},
 	{"see .claude/skills/transcript/SKILL.md", "skills/transcript", "skill", chatlogSuccessor},
@@ -258,6 +309,7 @@ func TestRetiredNamesPinEveryNameThisReleaseRetires(t *testing.T) {
 		"pfm chat schedule ls and build-codex.mjsx",
 		"spawn tracer and tracer-loom; tracer-product is a word",
 		"pfm model-cost --json and pfm prices",
+		"engine-sync codex build . and engine-sync opencode check; the pfm codexes and pfm codex-sync",
 		"the price of the plan; a price list",
 		"pfm tokens --since 1d and pfm transcript show",
 		"the transcript of the chat; read the transcript",

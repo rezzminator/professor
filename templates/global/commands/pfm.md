@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop|accept`), `pfm codex build|check`, `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → the `pcm` agent.
+description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop|accept`), `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → the `pcm` agent.
 argument-hint: [verb|question]
 ---
 
@@ -34,7 +34,7 @@ Operator verbs:
 - doctor: fleet database and jail health — exit 0 machine checks clean (`project_updates` rows advisory), 1 warnings, 3 failures
 - version: print the pfm version
 
-Wiring verbs (hooks and services call these; you rarely type them): name-sync, statusline, usage-hook, mcp (`ls | serve | <server> enable|disable|serve`), codex.
+Wiring verbs (hooks and services call these; you rarely type them): name-sync, statusline, usage-hook, mcp (`ls | serve | <server> enable|disable|serve`).
 
 ## Adopter update flow
 
@@ -50,7 +50,7 @@ The blueprint never rewrites a project file after `pfm init`; every upstream cha
 
 ## Codex mirror
 
-engine-sync, the `engine-sync` plugin's binary that `pfm codex build [repo-root]` forwards to, is the SINGLE writer of `AGENTS.md`, `.codex/` and `$HOME/.codex/`; `pfm codex check` gates drift (non-zero names each MISSING, STALE, ORPHANed, or CONFLICTing artifact). The engine-sync plugin's hooks run both after any Edit/Write to a Claude source; a Bash-driven write bypasses the hook, so run `pfm codex build . && pfm codex check .` yourself. `pfm codex agents` compiles the machine-global agent `.toml` twins.
+engine-sync, the `engine-sync` plugin's binary (on PATH after `pfm install`), is the SINGLE writer of `AGENTS.md`, `.codex/` and `$HOME/.codex/`: `engine-sync codex build [repo-root]` writes them, `engine-sync codex check` gates drift (non-zero names each MISSING, STALE, ORPHANed, or CONFLICTing artifact). The engine-sync plugin's hooks run both after any Edit/Write to a Claude source; a Bash-driven write bypasses the hook, so run `engine-sync codex build . && engine-sync codex check .` yourself. `engine-sync codex agents` compiles the machine-global agent `.toml` twins. `pfm` has no `codex` or `opencode` verb: either prints one line naming its `engine-sync` successor and exits 2, so port an old script that calls it through `pfm doctor --project-updates`.
 
 ## Host integration
 

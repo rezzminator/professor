@@ -2127,8 +2127,10 @@ class IntakeTest(Repo):
         self.assertEqual(lines[2], f"RECALL: {run}/recall.txt")
         with open(os.path.join(run, "recall.txt"), encoding="utf-8") as f:
             text = f.read()
-        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(earlier)}", text)
-        self.assertEqual(text.rstrip("\n").splitlines()[-1], "RECALL COVER 1/1 · 0 stale · 0 delta")
+        # outside git no occurrence set can witness the line, so it is never served fresh
+        self.assertIn(f"RECALL Q1 · 0/1 lines fresh · runs {os.path.basename(earlier)}", text)
+        self.assertIn("STALE Q1 · no BASE to witness `app/srv/server.go` against", text)
+        self.assertEqual(text.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 1 stale · 0 delta")
         self.assertIn(f"are in {run}/recall.txt", spec["additionalContext"])
 
 class SeekTest(Repo):
@@ -2970,6 +2972,80 @@ class RecallTest(unittest.TestCase):
         out = self.recall("1. Where does `Handle` refuse an empty target?\n")
         self.assertRegex(out, r"(?m)^UNREADABLE " + re.escape(broken) + r": .*1\.hops")
         self.assertIn("RECALL Q1 · 1/1 lines fresh", out)
+
+    def commit(self, rel, lines):
+        os.makedirs(os.path.dirname(os.path.join(self.repo, rel)), exist_ok=True)
+        self.edit(rel, lines)
+        self.git(self.repo, "add", "-A")
+        self.git(self.repo, "commit", "-q", "-m", rel)
+
+    def test_a_closed_world_line_turns_delta_when_a_path_it_names_gains_an_occurrence(self):
+        self.commit("templates/project/codex/README.md",
+                    ["# Codex", "", "Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write."])
+        self.run_with(self.repo, hops("1", [
+            "- Nothing else in templates/project registers codex-sync.sh as a hook; other grep hits are prose in docs "
+            "[templates/project/codex/README.md:3]"],
+            ["@ templates/project/codex/README.md:3",
+             "> Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write.", "= prose"],
+            ["END returned @ templates/project/codex/README.md:3"]))
+        self.edit("templates/project/settings.json",
+                  ['{"hooks": {"Stop": [{"command": ".claude/scripts/codex-sync.sh sync"}]}}'])
+        out = self.recall("1. Quote codex-sync.sh dirty flag readers/writers and symlink handling, plus existing test home.\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertIn("DELTA ", out)
+        self.assertIn('+ templates/project/settings.json:1 {"hooks"', out)
+
+    def test_a_closed_world_line_naming_nothing_to_witness_is_a_gap_never_fresh(self):
+        self.run_with(self.repo, hops("1", ["- Nothing else refuses here [app/srv/server.go:5]"],
+                                      ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")",
+                                       "= the refusal"], ["END returned @ app/srv/server.go:5"]))
+        out = self.recall("1. Where is `target is required` refused, app/srv/server.go?\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertRegex(out, r"(?m)^GAP Q1 · .*Nothing else refuses here")
+
+    def test_a_served_line_whose_prose_names_an_identifier_with_a_new_occurrence_turns_delta(self):
+        self.run_with(self.repo, hops("1", ["- `Handle` refuses an empty target through errors.New [app/srv/server.go:5]"],
+                                      ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")",
+                                       "= the refusal"], ["END returned @ app/srv/server.go:5"]))
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", "", "func Close() error {", "\treturn errors.New(\"closed\")", "}"])
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertIn("DELTA ", out)
+        self.assertIn('+ app/cli/cli.go:4 return errors.New("closed")', out)
+
+    def test_a_line_whose_node_walked_a_hop_that_changed_is_stale_even_when_its_own_cite_holds(self):
+        self.run_with(self.repo, hops("1", ["- `Handle` returns what Run returns [app/srv/server.go:7]"],
+                                      ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the call",
+                                       "@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                                       "= the premise"], ["END returned @ app/srv/server.go:7"]))
+        changed = list(KILL)
+        changed[5] = "\t\treturn nil"
+        self.edit("app/kill/kill.go", changed)
+        out = self.recall("1. What does `Handle` return?\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertRegex(out, r"(?m)^STALE Q1 · .*app/kill/kill\.go:6")
+
+    def test_a_delta_line_shows_five_occurrence_rows_then_the_count_left(self):
+        self.run_with(self.repo, self.ONLY)
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", ""] + [f"func C{i}(t string) error {{ return kill.Run(t) }}" for i in range(8)])
+        out = self.recall("1. Who calls `kill.Run`?\n")
+        self.assertEqual(len(re.findall(r"(?m)^  [+-] app/", out)), 5, out)
+        self.assertIn("  +3 more", out)
+
+    def test_a_recall_past_twelve_kb_keeps_the_highest_match_lines_and_names_the_cut(self):
+        answer = [f"- `Handle` refuses case {i}: " + "word " * 70 + "[app/srv/server.go:5]" for i in range(40)]
+        answer.append("- `Handle` returns `kill.Run` and refuses the empty target: TOPMATCH [app/srv/server.go:5]")
+        self.run_with(self.repo, hops("1", answer, ["@ app/srv/server.go:5",
+                                                    "> \t\treturn errors.New(\"target is required\")", "= the refusal"],
+                                      ["END returned @ app/srv/server.go:5"]))
+        out = self.recall("".join(f"{n}. Where does `Handle` refuse, and is `kill.Run` reached?\n" for n in (1, 2, 3)))
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        self.assertRegex(out, r"(?m)^RECALL CUT [1-9]\d* lines past the 12 KB cap$")
+        self.assertEqual(out.count("TOPMATCH"), 3)
+        self.assertTrue(out.rstrip("\n").splitlines()[-1].startswith("RECALL COVER 3/3 "), out[-300:])
+
 
 if __name__ == "__main__":
     unittest.main()

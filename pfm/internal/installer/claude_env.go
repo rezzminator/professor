@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +42,11 @@ type claudeEnvPlan struct {
 func (plan claudeEnvPlan) changes() bool { return len(plan.set)+len(plan.remove) > 0 }
 
 func (plan claudeEnvPlan) message(display string) string {
+	return "claude.env: " + plan.actions() + " in " + display
+}
+
+// actions names the plan's sets and removes, "no key changed" when it has none.
+func (plan claudeEnvPlan) actions() string {
 	parts := []string{}
 	if len(plan.set) > 0 {
 		parts = append(parts, "set "+strings.Join(plan.set, ", "))
@@ -50,7 +54,10 @@ func (plan claudeEnvPlan) message(display string) string {
 	if len(plan.remove) > 0 {
 		parts = append(parts, "remove "+strings.Join(plan.remove, ", "))
 	}
-	return "claude.env: " + strings.Join(parts, "; ") + " in " + display
+	if len(parts) == 0 {
+		return "no key changed"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func claudeEnvOwnershipPath(managedRoot string) string {
@@ -82,35 +89,44 @@ func readClaudeEnvOwnership(managedRoot string) (claudeEnvOwnership, error) {
 	return ledger, nil
 }
 
-// readClaudeEnvSettings reads a settings file and its env object; an absent file is
-// a nil document, an empty or whitespace-only one an empty document.
-func readClaudeEnvSettings(path string) (map[string]any, map[string]any, error) {
+// readClaudeEnvSettings reads a settings file, its bytes and its env object; an
+// absent file is nil bytes and a nil document, an empty or whitespace-only one
+// an empty document.
+func readClaudeEnvSettings(path string) ([]byte, map[string]any, map[string]any, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, map[string]any{}, nil
+		return nil, nil, map[string]any{}, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	if strings.TrimSpace(string(raw)) == "" {
-		return map[string]any{}, map[string]any{}, nil
+	document := map[string]any{}
+	if strings.TrimSpace(string(raw)) != "" {
+		if err := unmarshalKeepingNumbers(raw, &document); err != nil {
+			return nil, nil, nil, err
+		}
+		if document == nil {
+			document = map[string]any{}
+		}
 	}
-	var document map[string]any
-	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return nil, nil, err
+	env, err := claudeEnvOf(document)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	if document == nil {
-		document = map[string]any{}
-	}
+	return raw, document, env, nil
+}
+
+// claudeEnvOf is document's env object, empty when it has none.
+func claudeEnvOf(document map[string]any) (map[string]any, error) {
 	value, has := document["env"]
 	if !has {
-		return document, map[string]any{}, nil
+		return map[string]any{}, nil
 	}
 	env, ok := value.(map[string]any)
 	if !ok {
-		return nil, nil, errors.New("env is not an object")
+		return nil, errors.New("env is not an object")
 	}
-	return document, env, nil
+	return env, nil
 }
 
 // planClaudeEnv compares one file's env with want and the keys pfm owns
@@ -215,59 +231,76 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) error {
 func (installer *engine) ensureClaudeEnvFile(path, display string, owned, want map[string]string) (
 	map[string]string, error,
 ) {
-	document, env, err := readClaudeEnvSettings(path)
+	plan, edit, err := planClaudeEnvEdit(path, owned, want)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", display, err)
 	}
-	plan := planClaudeEnv(env, owned, want)
+	if edit != nil {
+		planned := *plan
+		if err := installer.change(planned.message(display), edit); err != nil {
+			return nil, fmt.Errorf("write %s: %w", display, err)
+		}
+		// A chat's write the edit found before its rename re-planned it: the
+		// change line above names the first plan, so the one written is named too.
+		if !slices.Equal(plan.set, planned.set) || !slices.Equal(plan.remove, planned.remove) {
+			installer.say("  warn    claude.env: %s changed while pfm wrote it; written instead: %s",
+				display, plan.actions())
+		}
+	}
 	for _, key := range plan.handChanged {
 		installer.say(
 			"  warn    claude.env %s in %s was changed by hand since pfm set it: left in place, no longer pfm's",
 			key, display,
 		)
 	}
-	if !plan.changes() {
-		if len(want) > 0 {
-			installer.ok(fmt.Sprintf("claude.env: %d keys in %s", len(want), display))
-		}
-		return plan.owned, nil
+	if edit == nil && len(want) > 0 {
+		installer.ok(fmt.Sprintf("claude.env: %d keys in %s", len(want), display))
 	}
+	return plan.owned, nil
+}
+
+// planClaudeEnvEdit reads path and plans claude.env's edit of its env: the
+// plan, and the edit applying it, nil when nothing changes. A running chat
+// may write the file between this read and the edit's rename; the edit then
+// plans again on what it finds, so plan is the one written once edit returns.
+func planClaudeEnvEdit(path string, owned, want map[string]string) (*claudeEnvPlan, func() error, error) {
+	raw, document, env, err := readClaudeEnvSettings(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	plan := planClaudeEnv(env, owned, want)
+	if !plan.changes() {
+		return &plan, nil, nil
+	}
+	if document == nil {
+		document = map[string]any{}
+	}
+	applyClaudeEnvPlan(document, env, plan, want)
+	return &plan, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
+		env, err := claudeEnvOf(fresh)
+		if err != nil {
+			return err
+		}
+		plan = planClaudeEnv(env, owned, want)
+		applyClaudeEnvPlan(fresh, env, plan, want)
+		return nil
+	}), nil
+}
+
+// applyClaudeEnvPlan sets plan's keys in env, removes its owned ones, and
+// puts env back into document, dropping an emptied env.
+func applyClaudeEnvPlan(document, env map[string]any, plan claudeEnvPlan, want map[string]string) {
 	for _, key := range plan.set {
 		env[key] = want[key]
 	}
 	for _, key := range plan.remove {
 		delete(env, key)
 	}
-	write := func() error {
-		if document == nil {
-			return createSettingsDocument(path, map[string]any{"env": env})
-		}
-		if len(env) == 0 {
-			delete(document, "env")
-		} else {
-			document["env"] = env
-		}
-		return writeSettingsDocument(path, document)()
+	if len(env) == 0 {
+		delete(document, "env")
+	} else {
+		document["env"] = env
 	}
-	if err := installer.change(plan.message(display), write); err != nil {
-		return nil, fmt.Errorf("write %s: %w", display, err)
-	}
-	return plan.owned, nil
-}
-
-// createSettingsDocument writes a settings file that did not exist, 0600.
-func createSettingsDocument(path string, document map[string]any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	var content bytes.Buffer
-	encoder := json.NewEncoder(&content)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(document); err != nil {
-		return err
-	}
-	return atomicfile.Write(path, content.Bytes(), 0o600)
 }
 
 // writeClaudeEnvOwnership writes the ledger 0600, or removes it when it
@@ -349,7 +382,7 @@ func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]s
 		if path == targetPhysical {
 			display, want = settingsPath, env
 		}
-		_, fileEnv, err := readClaudeEnvSettings(path)
+		_, _, fileEnv, err := readClaudeEnvSettings(path)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", display, err)
 		}

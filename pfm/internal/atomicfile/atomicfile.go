@@ -29,6 +29,16 @@ func Write(path string, content []byte, mode fs.FileMode) (err error) {
 	})
 }
 
+// WriteIf is Write with a precondition checked last: unchanged runs once the
+// scratch is synced and closed, just before the rename, and its error leaves
+// path as it was and no scratch behind, returned wrapped so errors.Is matches.
+func WriteIf(path string, content []byte, mode fs.FileMode, unchanged func() error) error {
+	return publishIf(path, mode, func(scratch *os.File) error {
+		_, err := scratch.Write(content)
+		return err
+	}, unchanged, false)
+}
+
 // Create publishes a complete file only if path is still absent. It never
 // replaces a concurrently created file or follows a destination symlink.
 func Create(path string, content []byte, mode fs.FileMode) error {
@@ -67,7 +77,19 @@ func WriteFrom(path string, r io.Reader, mode fs.FileMode, limit int64) (written
 // publish is the one scratch-then-rename sequence Write and WriteFrom share:
 // fill writes the scratch file, which is then synced, closed and renamed over
 // path; any failure removes the scratch and leaves path as it was.
-func publish(path string, mode fs.FileMode, fill func(*os.File) error, exclusive ...bool) (err error) {
+func publish(path string, mode fs.FileMode, fill func(*os.File) error, exclusive ...bool) error {
+	return publishIf(path, mode, fill, nil, len(exclusive) > 0 && exclusive[0])
+}
+
+// publishIf is publish with unchanged, when set, run after the scratch is
+// closed and before it is published: its error publishes nothing.
+func publishIf(
+	path string,
+	mode fs.FileMode,
+	fill func(*os.File) error,
+	unchanged func() error,
+	exclusive bool,
+) (err error) {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("write %s: create directory: %w", path, err)
@@ -101,7 +123,12 @@ func publish(path string, mode fs.FileMode, fill func(*os.File) error, exclusive
 	if err := scratch.Close(); err != nil {
 		return fmt.Errorf("write %s: close scratch: %w", path, err)
 	}
-	if len(exclusive) > 0 && exclusive[0] {
+	if unchanged != nil {
+		if err := unchanged(); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
+	if exclusive {
 		if err := os.Link(scratchPath, path); err != nil {
 			return fmt.Errorf("create %s: publish: %w", path, err)
 		}

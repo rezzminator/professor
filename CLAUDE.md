@@ -23,7 +23,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - fence: the isolated dev container — fresh machine, own HOME, worktree mounted — with the `pfm-dev` image and the `pfm-sim` real-browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - demo fence: for presentations · `infra/demo/`
 - self-hosted manifest: the tracked ledger of this repo's own install, verified (restamped with `--write`) by a repo gate · `.professor/manifest.json`, `infra/check-self-hosted-manifest.sh`
-- retro inbox: the steering ledger `/pcm retro` folds · `.professor/retro.md`
+- retro inbox: the steering ledger `/pcm retro` folds, one lesson per file · `docs/retro/{owner}/` · format `docs/retro/README.md`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
 - engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary plus a Claude plugin from its own repo; pfm execs it and `pfm codex|opencode` forward to it; its stable link `~/.local/share/engine-sync/bin/engine-sync` is off PATH · `plugins/engine-sync/` · design `docs/design/engine-sync/`
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
@@ -98,7 +98,7 @@ Before your first tool call, count the tasks in your brief. A task is one delive
   1. The solution is in hand and fits about 80 calls, a small failure you can read to its cause included: do it yourself.
   2. Anything larger, or work crossing build units: your first call spawns `flights-foreman` with the work, all you hold, acceptance and the testing manual paths; its return is your answer.
 - ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Take the four failing test lanes to green": one `flights-foreman`, which splits only where the lanes belong to different build units. ✗ A planner writing task files for executors that read the same code again.
+- ✓ "Take the four failing test lanes to green": one `flights-foreman`, whose own cut decides any split. ✗ A planner writing task files for executors that read the same code again.
 - Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
 
 ## Dispatch

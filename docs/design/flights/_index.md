@@ -3,7 +3,7 @@
 | Topic | File | Covers |
 | --- | --- | --- |
 | flights | [flights.md](flights.md) | The family: what a flight is, the four agents and four commands, the lifecycle, the flight directory and its writers, the verdict tokens, the two containers, where each rule lives, the harness settings, and what the family replaced |
-| flights-foreman | [flights-foreman.md](flights-foreman.md) | The one builder: why the reader builds, input, binding rulings, what comes before the first edit, splitting only at ownership, the frozen interface, children, mechanical bulk, waiting, tests, repairs, landing, cap, the run log, the return, the evidence |
+| flights-foreman | [flights-foreman.md](flights-foreman.md) | The one builder: why the reader builds, input, binding rulings, what comes before the first edit, the cut, the frozen interface, children, mechanical bulk, waiting, tests, repairs, landing, cap, the run log, the return, the evidence |
 | flights-speccer | [flights-speccer.md](flights-speccer.md) | The spec of novel, large work: when it fires, cost per worth as the lead axis, the flavour it carries, `spec.md` and its readers, the return, the GPT twin |
 | mechanical-executor | [mechanical-executor.md](mechanical-executor.md) | The bulk-edit hand: apply the Steps a foreman fixed, the listed adaptations, the pre-edit search, one red run and one green run, its situations, its pins |
 | flights-lander | [flights-lander.md](flights-lander.md) | The gate of a flight before its landing, one per flight: every project's gate with the floors as its rows, one review of the whole diff, the attack map, adversarial tests, its own fixes, the bounds, the ledger, the return file |

@@ -31,7 +31,9 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `loom.html`, `book.html` | The two page shells: title, tabs or header, and the `/*LOOM_STYLE*/`, `<!--LOOM_PARTS-->` and data slots |
 | `loom_wall.html`, `loom_custody.html`, `loom_hourglass.html`, `loom_key.html`, `book_view.html` | The views, one template and one component each, mounted by the runtime on first show |
 | `loom_dc.html`, `loom.css` | The small component runtime and the style every view shares |
+| `segment.py` | The segment command's cut — blast, cells, spine, segments, ORDER, ESCALATE and DECIDE; imported only by the segment dispatch |
 | `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
+| `segment_test.py` | segment's suite, run by the templates skill-tests gate step |
 | `SKILL.md` | The agents' command table and the check, visible to `tracer` and `sub-tracer` only |
 
 ## The run directory
@@ -157,6 +159,30 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 - An unreadable payload is logged to `/tmp/{project}/tracer/intake.log`, `{project}` taken from the hook's own working directory, and to stderr when that log cannot be written.
 - python3 is a required install dependency (`deps.Registry`): a missing one stops `pfm install`'s pre-change check with `install python3; the tracer's tracetree kit and its launch hook run on it`.
 - `pfm doctor`'s `doctor: tracer-intake:` rows prove the hook on the host: python3, the kit file, a non-tracer smoke that passes silently and a tracer smoke that returns a `RUN:` line, a FAIL row and exit 3 on any broken need ([hooks.md](../hooks/hooks.md#launch-hook-tracer-intake)).
+
+### segment
+
+**Function:** `segment.main` — **Run by:** `flights-foreman`, step 4, on its doors file
+
+`segment ROOT [--rev SHA] --seeds FILE` cuts the doors' blast area, before any code is read, into a `SPINE` the parent freezes first and child segments, each with its `ORDER`, `ESCALATE` and `DECIDE` lines; the seed forms and the output are in its module docstring and the skill's command table.
+
+- A seed `new=NAME` is a symbol, field, type or file the change creates, tied to its row like any other. It is never searched (a name that does not exist yet can only collide) and never `NOTFOUND`: a file is placed where it will live; anything else sits beside its row's other seeds, owned by the one segment they land in, or listed under `SPINE` as `NEW {name} · rows {r…} · freeze as a compiling stub` when they land in two or more.
+- `DECIDE S{n} CHILD · {reason}` when the segment builds a `new=` seed or its seeds carry three or more distinct rows; `DECIDE S{n} KEEP · {reason}` otherwise, the reason `call-site swaps only` (no definition among its sites), `one function ({name})` (every site in one component) or `{k} row(s), no new symbol`. The foreman spawns every `CHILD` and keeps every `KEEP` ([the cut](../flights/flights-foreman.md#the-cut)).
+- The `VERDICT` line ends `· CHILD n`; `--json` carries `decide` (`cut`, `reason`) per segment and `child` in the result.
+
+### cutgate
+
+**Function:** `cmd_cutgate` — **Run by:** `flights-foreman`'s frontmatter, carried into its rendered twins: a PreToolUse hook on `Edit|Write|MultiEdit|NotebookEdit`, running `python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate` ([hooks.md](../hooks/hooks.md))
+
+`cutgate` makes step 4 of the foreman's manual, the cut, a mechanism: a code edit is denied until the agent ran `segment` itself.
+
+- Any other tool passes untouched and the hook prints nothing.
+- The transcript read is the agent's own, resolved as pfm's `call-cap` hook does (`callCapCount`): a payload naming an `agent_id` whose `transcript_path` is not `agent-{id}.jsonl` reads `agent-{id}.jsonl` in that session's `subagents/` directory. An `agent_id` outside `[A-Za-z0-9_-]+` never becomes a path.
+- The edit passes silently once that transcript holds a Bash call whose command runs `tracetree.py segment` and whose result has a line starting `VERDICT ` other than `VERDICT EMPTY`; the file is streamed and the read stops there. An `EMPTY` cut counts only once a later run printed another verdict.
+- A target under `$HOME/.local/state/pfm/` (the flight directory: `run.md`, the doors file, briefs), `/tmp/` or `/private/tmp/`, its path resolved through symlinks first, passes silently.
+- A child whose parent already cut passes silently: the agent's first message, or a brief file it names under `$HOME/.local/state/pfm/`, holds a line starting `SEGMENT ` or the line `DEPTH 3`. A child's brief is a file whose path is its spawn message, so the file is read as well.
+- Otherwise it denies with `permissionDecision: deny`, its reason naming step 4's `segment` call and that flight-directory writes stay open.
+- A payload, agent id or transcript it cannot read, and any defect of its own, allows the edit with `additionalContext` `cut-gate: could not check the cut ({cause}); run step 4's segment before editing` and the cause on stderr, never a silent pass. It always exits 0.
 
 ## The check
 

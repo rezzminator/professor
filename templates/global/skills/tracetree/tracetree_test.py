@@ -2666,5 +2666,175 @@ class BookTest(Repo):
             self.assertIn("book [--html OUT]", got.stderr)
 
 
+KIT = "python3 $HOME/.claude/skills/tracetree/tracetree.py segment /w --rev abc123 --seeds /f/doors.txt"
+DENY = {"hookSpecificOutput": {
+    "hookEventName": "PreToolUse", "permissionDecision": "deny",
+    "permissionDecisionReason": "cut-gate: step 4 first. Write the doors file (step 3), run python3 "
+    "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}, log its "
+    "CUT line in run.md, then edit. Flight-directory writes stay open."}}
+
+
+def brief(text):
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def bash(tid, command, result, blocks=False):
+    """A Bash call and its result as a transcript holds them; blocks=True stores the result as text blocks."""
+    content = [{"type": "text", "text": result}] if blocks else result
+    return [{"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": command}}]}},
+            {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tid, "content": content}]}}]
+
+
+class CutGateTest(unittest.TestCase):
+    """`cutgate`: the foreman's PreToolUse hook that refuses a code edit until the segment kit has cut."""
+
+    def setUp(self):
+        # HOME sits outside /tmp, so a path under it is no scratch write; the transcripts sit in a scratch directory
+        self.home = "/nonexistent-cutgate-home"
+        self.tmp = tempfile.mkdtemp(prefix="cutgate-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.session = os.path.join(self.tmp, "projects", "p", "sess.jsonl")
+        self.sub = os.path.join(self.tmp, "projects", "p", "sess", "subagents")
+        os.makedirs(self.sub)
+        self.transcript(self.session, [brief("lead the flight")])
+
+    def transcript(self, path, records):
+        with open(path, "w") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in records))
+        return path
+
+    def agent(self, records, agent_id="a1b2c3"):
+        self.transcript(os.path.join(self.sub, f"agent-{agent_id}.jsonl"), records)
+        return agent_id
+
+    def hook(self, tool="Edit", path="/w/pkg/a.go", raw=None, home=None, **fields):
+        if raw is None:
+            key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+            event = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": {key: path},
+                     "transcript_path": self.session, "agent_type": "flights-foreman"}
+            event.update(fields)
+            raw = json.dumps(event)
+        got = subprocess.run([sys.executable, SCRIPT, "cutgate"], input=raw, capture_output=True, text=True,
+                             timeout=30, env=dict(os.environ, HOME=home or self.home))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        return got
+
+    def assertDenied(self, got):
+        self.assertEqual(json.loads(got.stdout), DENY)
+
+    def assertAllowedSilently(self, got):
+        self.assertEqual((got.stdout, got.stderr), ("", ""))
+
+    def assertAllowedUnchecked(self, got, cause):
+        """Allowed, and the agent and stderr both told the cut went unchecked: never a silent pass."""
+        spec = json.loads(got.stdout)["hookSpecificOutput"]
+        self.assertEqual(set(spec), {"hookEventName", "additionalContext"})
+        self.assertTrue(spec["additionalContext"].startswith("cut-gate: could not check the cut ("), spec)
+        self.assertTrue(spec["additionalContext"].endswith("); run step 4's segment before editing"), spec)
+        self.assertIn(cause, spec["additionalContext"])
+        self.assertIn(cause, got.stderr)
+
+    def test_a_code_edit_before_any_kit_run_is_denied(self):
+        aid = self.agent([brief("CHILD f · unit pfm\nbuild it"), *bash("t1", "git status --short", "VERDICT SPLIT 2")])
+        for tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+            with self.subTest(tool=tool):
+                self.assertDenied(self.hook(tool=tool, agent_id=aid))
+
+    def test_a_kit_run_with_a_verdict_opens_the_edits(self):
+        for name, verdict, blocks in (("split", "VERDICT SPLIT 2 — 2 segments share only the spine", False),
+                                      ("solo as text blocks", "VERDICT SOLO — every segment folds", True)):
+            with self.subTest(name):
+                aid = self.agent([brief("build it"), *bash("t1", KIT, f"SEGMENT x\nSEED Shared\n{verdict}\n", blocks)])
+                self.assertAllowedSilently(self.hook(agent_id=aid))
+
+    def test_an_empty_verdict_alone_still_denies_and_a_later_cut_opens(self):
+        empty = bash("t1", KIT, "NOTFOUND A: — not a symbol, a key or a path\nVERDICT EMPTY — no seed reaches a file")
+        aid = self.agent([brief("build it"), *empty])
+        self.assertDenied(self.hook(agent_id=aid))
+        aid = self.agent([brief("build it"), *empty, *bash("t2", KIT, "VERDICT SOLO — every segment folds")])
+        self.assertAllowedSilently(self.hook(agent_id=aid))
+
+    def test_a_verdict_from_another_command_or_an_unanswered_kit_call_is_no_cut(self):
+        unanswered = {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t9", "name": "Bash", "input": {"command": KIT}}]}}
+        for name, records in (("a grep printing a verdict", bash("t1", "grep VERDICT run.md", "VERDICT SPLIT 2")),
+                              ("a kit call with no result yet", [unanswered]),
+                              ("a verdict mid-line", bash("t1", KIT, "the CUT said VERDICT SPLIT 2"))):
+            with self.subTest(name):
+                self.assertDenied(self.hook(agent_id=self.agent([brief("build it"), *records])))
+
+    def test_flight_directory_and_scratch_writes_stay_open(self):
+        aid = self.agent([brief("build it")])
+        state = os.path.join(self.home, ".local", "state", "pfm")
+        for path in (os.path.join(state, "flights", "professor", "f", "run.md"),
+                     os.path.join(state, "flights", "professor", "f", "doors.txt"),
+                     *(os.path.join(scratch, "p", "x", "notes.md") for scratch in ("/tmp", "/private/tmp"))):
+            with self.subTest(path=path):
+                self.assertAllowedSilently(self.hook(path=path, agent_id=aid))
+        for path in (os.path.join(state, *[".."] * 64, "w", "a.go"), os.path.join(state + "-not", "a.go")):
+            with self.subTest(path=path):
+                self.assertDenied(self.hook(path=path, agent_id=aid))
+
+    def test_a_scratch_symlink_into_the_tree_is_no_scratch_write(self):
+        link = os.path.join("/tmp", os.path.basename(self.tmp) + "-link")
+        os.symlink("/w/tree", link)  # resolved even while its target is missing
+        self.addCleanup(os.remove, link)
+        self.assertDenied(self.hook(path=os.path.join(link, "a.go"), agent_id=self.agent([brief("build it")])))
+
+    def test_a_child_whose_parent_already_cut_is_open(self):
+        flight = os.path.join(self.tmp, ".local", "state", "pfm", "flights", "professor", "f", "briefs")
+        os.makedirs(flight)
+        seg = os.path.join(flight, "pfm-S1-r1.md")
+        with open(seg, "w") as f:
+            f.write("CHILD f · unit pfm-S1\nSEGMENT S1 · cells a\nORDER build Alpha\n")
+        for name, first in (("a SEGMENT line", "CHILD f · unit pfm-S1\nSEGMENT S1 · cells a, b\nORDER add X"),
+                            ("a DEPTH 3 line", "CHILD f · unit pfm\nDEPTH 3\nbuild it"),
+                            ("a brief file holding a SEGMENT line", f"Your brief is {seg}; read it and execute it.")):
+            with self.subTest(name):
+                self.assertAllowedSilently(self.hook(agent_id=self.agent([brief(first)]), home=self.tmp))
+        elsewhere = os.path.join(self.tmp, "pfm-S1-r1.md")  # a brief outside the state directory is never read
+        shutil.copy(seg, elsewhere)
+        self.assertDenied(self.hook(agent_id=self.agent([brief(f"Your brief is {elsewhere}.")]), home=self.tmp))
+
+    def test_a_segment_line_after_the_first_message_or_a_depth_2_child_is_no_exemption(self):
+        later = self.agent([brief("CHILD f · unit pfm\nbuild it"), *bash("t1", "cat brief.md", "SEGMENT S1 · cells a")])
+        self.assertDenied(self.hook(agent_id=later))
+        self.assertDenied(self.hook(agent_id=self.agent([brief("CHILD f · unit pfm\nDEPTH 2\nRESEGMENT S1 now")])))
+
+    def test_every_other_tool_passes_untouched(self):
+        aid = self.agent([brief("build it")])
+        for tool in ("Bash", "Read", "Agent", "Grep"):
+            with self.subTest(tool=tool):
+                self.assertAllowedSilently(self.hook(tool=tool, agent_id=aid))
+
+    def test_the_agent_id_picks_its_own_transcript_over_the_session(self):
+        cut = bash("t1", KIT, "VERDICT SPLIT 2")
+        self.transcript(self.session, [brief("lead the flight"), *cut])
+        self.assertDenied(self.hook(agent_id=self.agent([brief("build it")])))  # the session's cut is not its own
+        self.transcript(self.session, [brief("lead the flight")])
+        self.assertAllowedSilently(self.hook(agent_id=self.agent([brief("build it"), *cut])))
+        own = self.agent([brief("build it"), *cut], agent_id="f00d")
+        self.assertAllowedSilently(self.hook(agent_id=own, transcript_path=os.path.join(self.sub, "agent-f00d.jsonl")))
+        self.assertDenied(self.hook())  # no agent_id: the transcript named is the agent's own
+        self.transcript(self.session, [brief("lead the flight"), *cut])
+        self.assertAllowedSilently(self.hook())
+
+    def test_what_it_cannot_read_allows_and_says_so(self):
+        for name, kw, cause in (
+                ("a payload that is no JSON", dict(raw="not a payload"), "unreadable hook payload"),
+                ("a payload that is no object", dict(raw="[1, 2]"), "unreadable hook payload"),
+                ("no transcript_path", dict(transcript_path=""), "names no transcript_path"),
+                ("an agent id that is no id", dict(agent_id="../../etc"), "is no agent id"),
+                ("a missing agent transcript", dict(agent_id="nosuchagent"), "agent-nosuchagent.jsonl")):
+            with self.subTest(name):
+                self.assertAllowedUnchecked(self.hook(**kw), cause)
+        broken = self.agent([brief("build it")], agent_id="dir0")
+        os.remove(os.path.join(self.sub, "agent-dir0.jsonl"))
+        os.mkdir(os.path.join(self.sub, "agent-dir0.jsonl"))
+        self.assertAllowedUnchecked(self.hook(agent_id=broken), "agent-dir0.jsonl")
+
+
 if __name__ == "__main__":
     unittest.main()

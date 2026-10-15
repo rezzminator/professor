@@ -8,6 +8,7 @@ node_modules/
 .env.*
 !.env.example
 /tmp/
+/plugins/tmp/
 .worktrees/
 # Retired build tree created in the clone by an older SETUP.
 /engines/

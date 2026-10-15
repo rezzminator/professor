@@ -21,15 +21,14 @@ const SURFACES = new Map([
 ]);
 const STALE_WRITER = /build-opencode\.mjs/g;
 
-// Paths never reported: release history, the changelog, the steering inbox,
+// Paths never reported: release history, the changelog, the retro ledger,
 // and this checker itself (its own STALE_WRITER pattern names the string).
 const EXCLUDED_PATHS = new Set([
   "CHANGELOG.md",
-  ".professor/retro.md",
   "scripts/check-opencode-writer.mjs",
 ]);
 const isExcludedPath = (path) =>
-  path.startsWith("releases/") || EXCLUDED_PATHS.has(path);
+  path.startsWith("releases/") || path.startsWith("docs/retro/") || EXCLUDED_PATHS.has(path);
 
 let scanned = 0;
 let failures = 0;

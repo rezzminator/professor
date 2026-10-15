@@ -85,7 +85,7 @@ Friction: 47 of 130 flight runs and 18 of 21 general runs put a sentence ("All g
 
 ### The cap
 
-150 tool calls, as for every flight tier, raised from 80 when tasks were batched one executor per project and area. Under the 80-call cap, 41 of 130 audited runs passed it, used 68% of all input tokens, and none returned `FAILED {id}: cap`: a count the model must hold in its head is not held. The body answers with stops it can observe — the pre-edit search, the bounded reds — and never spawns a sub-agent.
+150 calls, one model request each, as for every flight tier, raised from 80 when tasks were batched one executor per project and area. Under the 80-call cap, 41 of 130 audited runs passed it, used 68% of all input tokens, and none returned `FAILED {id}: cap`: a count the model must hold in its head is not held, so the `pfm internal call-cap` hook keeps it (§ Cap and compaction in [flights-foreman](flights-foreman.md)). The body answers with stops it can observe — the pre-edit search, the bounded reds — and never spawns a sub-agent.
 
 ## What the body leaves out
 
@@ -108,7 +108,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A row that makes an error look like absence or contradicts the project contract, read before any test | `SPEC-DRIFT {id}: {row}: {why}`; nothing written for it |
 | A brief naming the full suite, a whole-tree sweep or a review | Refused, named in the return |
 | A decision it cannot make | `BLOCKED {id}: {question}` |
-| 150 tool calls | `FAILED {id}: cap` with what is done, what is left, the next step |
+| 150 calls | `FAILED {id}: cap` with what is done, what is left, the next step |
 
 ## Pins and measurements
 

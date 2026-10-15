@@ -28,6 +28,10 @@ checks_templates_demo_serial() {
   run "templates: demo fence self-tests" -- bash -c 'for t in "$1"/infra/demo/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
 }
 
+checks_templates_plugin_logs() {
+  run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
+}
+
 checks_templates_leak() {
   head_ "templates — leak gate"
   run "templates: leak-check self-test" -- bash "$REPO_ROOT/scripts/test-leak-check.sh"
@@ -144,7 +148,7 @@ checks_templates_scratch_paths() {
     # records that name where a past capture actually landed — rewriting
     # those would misstate history. An exclusion that hides its own work is
     # the next bug, so the count and the list are printed on every run.
-    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|\.professor/retro\.md$|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
+    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|docs/retro/|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
     # grep needs /dev/null as a second operand: BSD xargs runs the utility
     # even on empty input, and a bare `grep PATTERN` then reads stdin and
     # hangs the gate forever instead of reporting an empty sweep.
@@ -597,7 +601,7 @@ checks_templates_skill_tests() {
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
       fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
-    elif ! python3 -m unittest "templates/global/skills/$skill/${skill}_test.py" >"$cp_out" 2>&1; then
+    elif ! python3 -m unittest "templates/global/skills/$skill/"*_test.py >"$cp_out" 2>&1; then
       cat "$cp_out"
       if grep -Eq '^Ran 0 tests?' "$cp_out"; then
         fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
@@ -647,7 +651,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
-  checks_named_template_steps "$add" clone leak placeholders scratch-paths descriptions mirrors \
+  checks_named_template_steps "$add" clone leak plugin-logs placeholders scratch-paths descriptions mirrors \
     global-variants release-check codex-sync refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do

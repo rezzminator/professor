@@ -1,7 +1,7 @@
 ---
 name: pcm
-description: 'USER-ONLY — Dispatches the pcm agent: `/pcm {change request}` edits CLAUDE.md or .claude/**; `/pcm audit [scope|all]` reports framework consistency, read-only; `/pcm retro` folds the .professor/retro.md inbox.'
-argument-hint: "[change request|audit [scope|all]|retro]"
+description: 'USER-ONLY — Dispatches the pcm agent: `/pcm {change request}` edits CLAUDE.md or .claude/**; `/pcm audit [scope|all]` reports framework consistency, read-only; `/pcm retro [owner]` folds the docs/retro/ inbox.'
+argument-hint: "[change request|audit [scope|all]|retro [owner]]"
 disable-model-invocation: true
 ---
 

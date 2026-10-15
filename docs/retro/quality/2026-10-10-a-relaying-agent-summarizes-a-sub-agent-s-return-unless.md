@@ -1,0 +1,5 @@
+# 2026-10-10 — a relaying agent summarizes a sub-agent's return unless told to quote it, and the statuses vanish
+
+Observed: in the conflict-resolver lab (rung C, gitter end to end), the v2 gitter received the resolver's `{path} · {status} · …` rows and reported them as prose bullets in 2 of 2 runs. Every status label was lost, so a `dropped` row (one side's change the merge did not keep) would never have reached the caller. One run also reworded its fixed refusal line. The clause "quote the resolver's return verbatim, never a summary" (c33296bd) held in 3 of 4 runs, including both runs that carried a `dropped` row. Even "verbatim" is retyped: one run introduced a typo and then corrected it below.
+
+Amend: templates/global/commands/quality/prompt.md#Correctness & model behavior — an agent that relays a sub-agent's machine-read return quotes it verbatim, and the prompt gives the reason (the caller parses its statuses). A status that must survive every relay goes in a file the caller reads, not in relayed text.

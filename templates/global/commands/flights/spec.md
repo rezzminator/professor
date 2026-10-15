@@ -10,7 +10,7 @@ One deliverable written by you: `$HOME/.local/state/pfm/flights/{project}/{fligh
 
 ## S1 — Walk only what asking needs
 
-Read the child `CLAUDE.md` of every project the work touches (the root one you already hold) and the project map `$HOME/.local/state/pfm/flights/{project}/project-map.md`: S2 must not re-ask what they settle. A fact a question needs goes to `Agent(subagent_type: "tracer")` as numbered questions, all probes in one message; end your message after spawning, the maps arrive on their own. The walk stops at what a good question needs: the foreman reads the code to build it, so a map built here for it is reading paid twice.
+Read the child `CLAUDE.md` of every project the work touches (the root one you already hold) and the project map `$HOME/.local/state/pfm/flights/{project}/project-map.md` (written by `/flights:init` alone, a scoped map in the flight directory): S2 must not re-ask what they settle. A fact a question needs goes to `Agent(subagent_type: "tracer")` as numbered questions, all probes in one message; end your message after spawning, the maps arrive on their own. The walk stops at what a good question needs: the foreman reads the code to build it, so a map built here for it is reading paid twice.
 
 A referent that does not exist, or two parts of the work that would edit one target, is a question for S2, never a silent fix.
 

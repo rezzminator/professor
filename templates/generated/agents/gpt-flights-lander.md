@@ -16,6 +16,12 @@ autoCompact:
   forceAt: 230k
   nudgeFrom: 190k
   nudgeEvery: 20k
+hooks:
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: pfm internal call-cap
 requires:
   - gpt-agents
 engines:
@@ -59,7 +65,7 @@ Every verdict names its executed artifact: a pass, a coverage figure or a "verif
 
 ## The cap
 
-200 tool calls. Past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
+200 calls, one model request each. Past it, stop and return `FAIL {flight}: cap` with the ledger as it stands.
 
 ## The ledger
 

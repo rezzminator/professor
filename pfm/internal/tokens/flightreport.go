@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/pricing"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // flightTokens is a token count as a metrics row shows it.
@@ -70,7 +71,7 @@ func foldRows(rows []flightRow) flightFold {
 		f.reread += r.rereadN
 		f.contract += r.contractReads
 		f.compact += r.resets
-		if r.calls > callCap(firstText(row.led.agentType, r.agentType)) {
+		if r.calls > float64(transcript.CallCap(firstText(row.led.agentType, r.agentType))) {
 			f.over++
 		}
 		f.peak = math.Max(f.peak, r.ctxPeak)
@@ -239,7 +240,7 @@ func (a *auditor) runFlight(ctx context.Context) (int, error) {
 	stableSort(sorted, func(left, right flightRow) float64 { return right.run.usd - left.run.usd })
 	for _, row := range firstN(sorted, maxRows) {
 		r := row.run
-		limit := callCap(firstText(row.led.agentType, r.agentType))
+		limit := float64(transcript.CallCap(firstText(row.led.agentType, r.agentType)))
 		capText := "ok/" + num(limit)
 		if r.calls > limit {
 			capText = "OVER " + num(limit)
@@ -395,7 +396,7 @@ func (a *auditor) writeFlightOut(dir, startISO, endISO string, total flightFold,
 			set("calls", r.calls).set("wallMs", r.t1-r.t0).set("ctxFirst", r.ctxFirst).set("ctxPeak", r.ctxPeak).
 			set("tok", r.tok.json()).set("usd", cost).set("failedCmds", r.failedCmds).set("pollN", r.pollN).
 			set("rereadN", r.rereadN).set("contractReads", r.contractReads).set("compactions", r.resets).
-			set("overCap", r.calls > callCap(firstText(row.led.agentType, r.agentType)))
+			set("overCap", r.calls > float64(transcript.CallCap(firstText(row.led.agentType, r.agentType))))
 		if r.advisor.calls != 0 {
 			rows[i].set("advisor", r.advisor.json())
 		}

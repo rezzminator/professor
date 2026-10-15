@@ -402,6 +402,138 @@ def cmd_intake():
         "covers, read now, is paid for twice. /tracer:use has the rest.", rewritten)
 
 
+CUTGATE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+CUTGATE_KIT = re.compile(r"tracetree\.py['\"]?\s+segment\b")
+CUTGATE_VERDICT = re.compile(r"(?m)^VERDICT (?!EMPTY\b)\S")
+# a child whose parent already cut: a segment child's `SEGMENT` line or a grandchild's `DEPTH 3` line
+CUTGATE_CHILD = re.compile(r"(?m)^SEGMENT |^DEPTH 3[ \t\r]*$")
+CUTGATE_BRIEF = re.compile(r"/[^\s'\"`;,()<>]*\.md\b")
+CUTGATE_AGENT_ID = re.compile(r"[A-Za-z0-9_-]+")
+CUTGATE_DENY = {"hookSpecificOutput": {
+    "hookEventName": "PreToolUse", "permissionDecision": "deny",
+    "permissionDecisionReason": "cut-gate: step 4 first. Write the doors file (step 3), run python3 "
+    "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}, log its "
+    "CUT line in run.md, then edit. Flight-directory writes stay open."}}
+
+
+def cutgate_text(content):
+    """A message's or a tool result's text: the string itself, or its text blocks joined."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return ""
+
+
+def cutgate_transcript(event):
+    """The calling agent's own transcript, as pfm's call-cap hook resolves it (`callCapCount`): a payload naming an
+    agent_id whose transcript_path is not that agent's `agent-{id}.jsonl` points at the session's file, so the agent's
+    own is `agent-{id}.jsonl` in the session's `subagents/` directory."""
+    path = event.get("transcript_path")
+    if not isinstance(path, str) or not path:
+        raise ValueError("hook payload names no transcript_path")
+    agent = event.get("agent_id") or ""
+    if agent:
+        if not isinstance(agent, str) or not CUTGATE_AGENT_ID.fullmatch(agent):
+            raise ValueError(f"hook payload agent_id {agent!r} is no agent id")
+        base = os.path.basename(path)
+        if not (base.startswith("agent-") and base.endswith(".jsonl") and base[len("agent-"):-len(".jsonl")] == agent):
+            session = path[:-len(".jsonl")] if path.endswith(".jsonl") else path
+            path = os.path.join(session, "subagents", f"agent-{agent}.jsonl")
+    return path
+
+
+def cutgate_under(path, roots):
+    real = os.path.realpath(path)
+    return any(real == r or real.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+
+
+def cutgate_child(first, state):
+    """True when the agent's first message, or a brief file it names inside the state directory, marks a child whose
+    parent already cut. A named file that cannot be read marks nothing: it may be no brief at all."""
+    if CUTGATE_CHILD.search(first):
+        return True
+    for named in CUTGATE_BRIEF.findall(first):
+        if cutgate_under(named, (state,)) and os.path.isfile(named):
+            try:
+                with open(named, encoding="utf-8", errors="replace") as f:
+                    if CUTGATE_CHILD.search(f.read(65536)):
+                        return True
+            except OSError:
+                continue
+    return False
+
+
+def cutgate_cut(path, state):
+    """True once the transcript shows a child whose parent cut, or a Bash call of the segment kit whose result holds a
+    VERDICT other than EMPTY; streamed, stopping at the first. An unreadable transcript raises OSError."""
+    kit, first = set(), None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if first is not None and "tool_use" not in line and "tool_result" not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue  # a line still being written
+            if not isinstance(rec, dict):
+                continue
+            msg = rec.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if first is None and rec.get("type") == "user":
+                first = cutgate_text(content)
+                if cutgate_child(first, state):
+                    return True
+            for b in content if isinstance(content, list) else ():
+                if not isinstance(b, dict):
+                    continue
+                given = b.get("input") if isinstance(b.get("input"), dict) else {}
+                if b.get("type") == "tool_use" and b.get("name") == "Bash" and \
+                        CUTGATE_KIT.search(str(given.get("command", ""))):
+                    kit.add(b.get("id"))
+                elif b.get("type") == "tool_result" and b.get("tool_use_id") in kit and \
+                        CUTGATE_VERDICT.search(cutgate_text(b.get("content"))):
+                    return True
+    return False
+
+
+def cmd_cutgate():
+    """PreToolUse hook on a foreman's Edit, Write, MultiEdit and NotebookEdit: denies a code edit until the agent's own
+    transcript shows its segment kit run printing a verdict (EMPTY alone is no cut). A write under the flight's state
+    directory or /tmp, and a child whose parent already cut, pass silently. A payload or transcript it cannot read
+    allows the edit and says so to the agent and on stderr, never a silent pass."""
+    def unchecked(cause):
+        sys.stderr.write(f"tracetree cutgate: {cause}\n")
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": f"cut-gate: could not check the cut ({cause}); run step 4's segment before editing"}}))
+
+    try:
+        try:
+            event = json.loads(sys.stdin.read())
+            if not isinstance(event, dict):
+                raise ValueError("not a hook payload object")
+        except ValueError as e:
+            return unchecked(f"unreadable hook payload: {e}")
+        tool = event.get("tool_name")
+        if tool not in CUTGATE_TOOLS:
+            return
+        given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+        target = given.get("notebook_path" if tool == "NotebookEdit" else "file_path")
+        home = os.environ.get("HOME") or os.path.expanduser("~")
+        state = os.path.realpath(os.path.join(home, ".local", "state", "pfm"))
+        if isinstance(target, str) and target and \
+                cutgate_under(target, (state, "/tmp", "/private/tmp", os.path.realpath("/tmp"))):
+            return
+        if cutgate_cut(cutgate_transcript(event), state):
+            return
+    except (OSError, ValueError) as e:
+        return unchecked(str(e))
+    except Exception as e:  # a defect of its own still never reads as a pass
+        return unchecked(f"{type(e).__name__}: {e}")
+    print(json.dumps(CUTGATE_DENY))
+
+
 def loose(s):
     return " ".join(s.split())
 
@@ -2305,8 +2437,13 @@ def main():
     a = sys.argv[1:]
     if a == ["intake"]:
         return cmd_intake()
+    if a == ["cutgate"]:
+        return cmd_cutgate()
+    if a and a[0] == "segment":
+        import segment
+        sys.exit(segment.main(a[1:], fail))
     if not a or a[0] not in ("new", "seek", "start", "check", "wait", "answer", "write", "map", "read", "show", "book") or (len(a) < 2 and a[0] != "book"):
-        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | intake < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT]")
+        fail("usage: tracetree.py new ROOT [--seek REGEX] [--questions] | seek RUN REGEX | intake < PreToolUse hook payload | cutgate < PreToolUse hook payload | start RUN ID PATH:LINE [QUESTION] | write RUN ID < hops (a first write with a hop that does not hold is refused once; the same write again stores it) | wait RUN ID... [--timeout S] [--grace S] [--start S] | answer RUN [Q...] [--timeout S] [--grace S] [--start S] | check RUN [--hops [ID] | --full [ID]] | map RUN [--from NAME | --to NAME] [--all] [--json | --html OUT] | read RUN FILE:A-B [FILE:A-B ...] | show RUN FILE:A-B [FILE:A-B ...] | book [--html OUT] | segment ROOT [--rev SHA] --seed SEED...|--seeds FILE [--variant contract|package|cochange|tracer] [--floor LINES] [--read-max SHARE] [--max K] [--json]")
     if a[0] == "seek":
         if len(a) != 3:
             fail("usage: tracetree.py seek RUN REGEX")

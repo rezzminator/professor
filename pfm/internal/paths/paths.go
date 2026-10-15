@@ -142,6 +142,12 @@ var (
 	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
 )
 
+// CallCapTallyDir holds `pfm internal call-cap`'s request tallies, one per
+// transcript, so each hook run reads only what its agent appended since.
+func CallCapTallyDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "call-cap")
+}
+
 // PricesStampPath is the record of the last price check that confirmed the
 // clone's prices.json, kept outside the clone so a check never dirties it.
 func PricesStampPath(home string) string {

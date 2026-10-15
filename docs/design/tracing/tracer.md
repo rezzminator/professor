@@ -21,7 +21,7 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 | --- | --- | --- |
 | Lead | `templates/global/agents/tracer.md` | `sonnet`, `high` |
 | Reader | `templates/global/agents/sub-tracer.md` | `haiku`, `low` |
-| Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `loom.py`, the `loom*.html` and `book*.html` page parts with `loom.css`, `tracetree_test.py`, `SKILL.md` | — |
+| Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `loom.py`, `segment.py`, the `loom*.html` and `book*.html` page parts with `loom.css`, `tracetree_test.py`, `segment_test.py`, `SKILL.md` | — |
 | Caller's manual | `templates/global/commands/tracer/use.md`, preloaded by agent frontmatter `skills: [tracer:use]` | — |
 | Intake hook | the `tracer-intake` row of `HookTemplates`, `pfm/internal/claudelaunch/hooks.go`, running the kit's `intake` | — |
 

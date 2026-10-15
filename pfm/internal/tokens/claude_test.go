@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 func TestBashCategoryNamesRunsNotMentions(t *testing.T) {
@@ -134,6 +136,26 @@ func TestCollectCountsMalformedUndatedAndSyntheticLines(t *testing.T) {
 	if c.order != 1 || c.usage["message:m4"].usage.Output != 12 || c.title != "demo title" || c.cwd != "/w/demo" {
 		t.Errorf("calls %d, m4 output %d, title %q, cwd %q; want one call whose last line counts",
 			c.order, c.usage["message:m4"].usage.Output, c.title, c.cwd)
+	}
+}
+
+// TestCollectCountsTheRequestsTheCallCapHookCounts: collect keeps one call per
+// request the call-cap hook counts with transcript.RequestCount in the same
+// agent transcript; the flight report's later drops (undated, copied,
+// advisor-only, before the window) only lower its count below the hook's.
+func TestCollectCountsTheRequestsTheCallCapHookCounts(t *testing.T) {
+	file := filepath.Join("..", "transcript", "testdata", "compacted-agent.jsonl")
+	hook, err := transcript.RequestCount(file)
+	if err != nil {
+		t.Fatalf("RequestCount: %v", err)
+	}
+	a, _, _ := testAuditor(t)
+	c, err := a.collect(file, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.order != hook || len(c.usage) != hook {
+		t.Fatalf("collect counts %d calls (%d keys), RequestCount %d; want one count", c.order, len(c.usage), hook)
 	}
 }
 

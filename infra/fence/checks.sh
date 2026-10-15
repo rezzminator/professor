@@ -148,7 +148,7 @@ checks_templates_scratch_paths() {
     # records that name where a past capture actually landed — rewriting
     # those would misstate history. An exclusion that hides its own work is
     # the next bug, so the count and the list are printed on every run.
-    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|\.professor/retro\.md$|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
+    local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|docs/retro/|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
     # grep needs /dev/null as a second operand: BSD xargs runs the utility
     # even on empty input, and a bare `grep PATTERN` then reads stdin and
     # hangs the gate forever instead of reporting an empty sweep.

@@ -219,4 +219,4 @@ If the answer itself needs deep thought and there is no tool work, call this fir
 - **`/effort` in a test chat writes the shared settings** (`~/.cc/{1,2,3}/settings.json` → `~/.claude/settings.json`). A test harness changes effort through launch flags only.
 - **agent-effort's README is wrong about Haiku.** It says Haiku takes no effort setting. That is false for `claude-haiku-5-5` on 2.1.296: the hook saw `effort: "low"`, and `/effort high` changed it.
 - **`pfm chat ask` appends a "to reply: call {parent}" line,** and a test chat followed it into the main chat.
-- **My brief capped test chats at 40 in total but set no concurrency limit.** 13 launched at once, the load average hit 137, and the run was killed. The lesson is filed in `.professor/retro.md`.
+- **My brief capped test chats at 40 in total but set no concurrency limit.** 13 launched at once, the load average hit 137, and the run was killed. The lesson is filed in `docs/retro/claude-md/2026-10-11-a-brief-capped-the-total-number-of-test-chats-an-agent.md`.

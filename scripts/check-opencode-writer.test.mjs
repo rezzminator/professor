@@ -71,7 +71,7 @@ test("the exclusions stay silent", (t) => {
   const root = tree({
     "CHANGELOG.md": `- dropped ${STALE}\n`,
     "releases/v1.0.0.md": `- dropped ${STALE}\n`,
-    ".professor/retro.md": `- ${STALE}\n`,
+    "docs/retro/flights/2026-01-01-a-lesson.md": `Observed: ${STALE}\n`,
   });
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const r = check(root);

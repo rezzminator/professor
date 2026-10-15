@@ -15,7 +15,7 @@ lab_scenario() {
   beat ready -- turn 'Reply READY.' 300
   beat again --needs ready -- turn 'Reply AGAIN.' 300
   beat logfile-warned-once --row R7g --needs again -- level_count warnings 'select(.event == "option-error" and (tostring | contains("SUB_AGENT_COMPACT_LOG_FILE")))' -eq 1
-  beat leftover-option-warned-once --row R7n --needs again -- level_count warnings 'select(.event == "warning" and .key == "options-ignored" and (tostring | contains("bogusKey")))' -eq 1
+  beat leftover-option-warned-once --row R7n --needs again -- level_count warnings 'select(.event == "warning" and (.msg | contains("options bogusKey are not read")))' -eq 1
   beat default-log --row R7f --needs ready -- decision_has 'select(.event == "start")'
   beat no-relative-file --row R7f --needs ready -- file_absent '{run}/work/decisions.jsonl'
 }

@@ -96,7 +96,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/tmux: 2
       github.com/rezzminator/professor/pfm/internal/tokens: 6
       github.com/rezzminator/professor/pfm/internal/transcript: 2
-      github.com/rezzminator/professor/pfm/internal/transcript/digest: 8
+      github.com/rezzminator/professor/pfm/internal/transcript/digest: 24
       github.com/rezzminator/professor/pfm/internal/ui: 4
       github.com/rezzminator/professor/pfm/internal/update: 10
       github.com/rezzminator/professor/pfm/internal/updatecheck: 2

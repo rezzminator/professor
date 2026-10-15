@@ -41,8 +41,45 @@ func bareNameFix(name string) string {
 	return "run pfm install --yes; if it keeps failing, " + installer.BareClaudePluginRepair(name)
 }
 
+// writeDoctorCache records id at version in dir's plugins/installed_plugins.json,
+// which writeDoctorInstalledPlugins wrote, its installPath holding files: the
+// snapshot Claude runs it from.
+func writeDoctorCache(t *testing.T, dir, id, version string, files map[string]string) {
+	t.Helper()
+	path := filepath.Join(dir, "plugins", "installed_plugins.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Version int                         `json:"version"`
+		Plugins map[string][]map[string]any `json:"plugins"`
+	}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range record.Plugins[id] {
+		entry["version"] = version
+		installPath, _ := entry["installPath"].(string)
+		for rel, content := range files {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(installPath, rel)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(installPath, rel), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if raw, err = json.Marshal(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // writeDoctorInstalledPlugins records ids in dir's plugins/installed_plugins.json
-// the way claude does, each with an installPath that exists.
+// the way claude does, each a user entry with an installPath that exists.
 func writeDoctorInstalledPlugins(t *testing.T, dir string, ids ...string) {
 	t.Helper()
 	plugins := map[string]any{}
@@ -51,7 +88,7 @@ func writeDoctorInstalledPlugins(t *testing.T, dir string, ids ...string) {
 		if err := os.MkdirAll(installPath, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		plugins[id] = []any{map[string]any{"installPath": installPath}}
+		plugins[id] = []any{map[string]any{"scope": "user", "installPath": installPath}}
 	}
 	raw, err := json.Marshal(map[string]any{"version": 2, "plugins": plugins})
 	if err != nil {
@@ -453,7 +490,8 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	for _, state := range []string{
 		"alpha clean", "alpha duplicate", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release duplicate",
 		"alpha from the default source clone", "alpha source clone moved away", "alpha copy differs",
-		"alpha unlisted plugin disabled", "alpha unlisted plugin enabled",
+		"alpha unlisted plugin disabled", "alpha unlisted plugin enabled", "alpha cache behind", "alpha cache differs",
+		"alpha cache unreadable", "alpha cache unversioned", "alpha cache behind with its snapshot gone",
 	} {
 		t.Run(state, func(t *testing.T) {
 			home := t.TempDir()
@@ -522,13 +560,17 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			}
 			// Each copy holds its checkout's content.
 			for _, name := range append(slices.Clone(names), "buddy") {
+				content := `{"version":"1.0.0"}`
+				if state == "alpha cache unversioned" && name == names[0] {
+					content = "{}"
+				}
 				for _, dir := range []string{filepath.Join(root, name, "plugins", name), mirror(name)} {
 					if err := os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o700); err != nil {
 						t.Fatal(err)
 					}
 					if err := os.WriteFile(
 						filepath.Join(dir, ".claude-plugin", "plugin.json"),
-						[]byte("{}"),
+						[]byte(content),
 						0o600,
 					); err != nil {
 						t.Fatal(err)
@@ -584,6 +626,43 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeDoctorInstalledPlugins(t, store, ensured...)
+			manifest := filepath.Join(".claude-plugin", "plugin.json")
+			for _, id := range ensured {
+				// Claude's snapshot of each -dev copy holds its checkout's content.
+				if name, marketplace, _ := strings.Cut(id, "@"); marketplace == name+"-dev" {
+					writeDoctorCache(t, store, id, "1.0.0", map[string]string{manifest: `{"version":"1.0.0"}`})
+				}
+			}
+			cache := filepath.Join(store, "plugins", "cache", doctorDevIDs[0])
+			checkout := filepath.Join(root, names[0], "plugins", names[0])
+			switch state {
+			case "alpha cache behind", "alpha cache behind with its snapshot gone":
+				// The checkout moved to 2.0.0; Claude still runs its 1.0.0 snapshot.
+				for _, dir := range []string{checkout, mirror(names[0])} {
+					if err := os.WriteFile(
+						filepath.Join(dir, manifest),
+						[]byte(`{"version":"2.0.0"}`),
+						0o600,
+					); err != nil {
+						t.Fatal(err)
+					}
+				}
+				writeDoctorCache(t, store, doctorDevIDs[0], "1.0.0", map[string]string{manifest: `{"version":"2.0.0"}`})
+				if state == "alpha cache behind with its snapshot gone" {
+					// Not installed is the one gap: its install is the repair.
+					if err := os.RemoveAll(cache); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "alpha cache unreadable":
+				if err := os.Symlink(filepath.Join(home, "nowhere"), filepath.Join(cache, "gone")); err != nil {
+					t.Fatal(err)
+				}
+			case "alpha cache differs":
+				writeDoctorCache(t, store, doctorDevIDs[0], "1.0.0", map[string]string{
+					manifest: "{\"old\":1}", filepath.Join("node_modules", "dep.js"): "x", ".orphaned_at": "1",
+				})
+			}
 			want, warnings, failures := "doctor: claude_plugins ok\n", 0, 0
 			twice := "plugin cache-live-control enabled twice (" + doctorPluginIDs[0] + " and " + doctorDevIDs[0] + ") in " + path
 			switch state {
@@ -600,6 +679,30 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			case "alpha copy differs":
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" copy "+mirror(names[0])+
 					" differs from "+filepath.Join(root, names[0], "plugins", names[0])+" — run pfm install --yes\n", 1
+			case "alpha cache behind":
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" cache in "+
+					filepath.Join(
+						store,
+						"plugins",
+						"installed_plugins.json",
+					)+" records version 1.0.0 (scope user), checkout "+
+					checkout+" is 2.0.0 — run pfm install --yes\n", 1
+			case "alpha cache unreadable":
+				want, failures = "doctor: claude_plugins could not read the plugin cache: plugin "+doctorDevIDs[0]+
+					" cache: read cache "+cache+": stat "+filepath.Join(cache, "gone")+": no such file or directory\n", 1
+			case "alpha cache differs":
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" cache "+cache+" differs from "+
+					checkout+" at version 1.0.0 — bump the version in "+filepath.Join(checkout, manifest)+
+					": Claude caches by version; then run pfm install --yes\n", 1
+			case "alpha cache unversioned":
+				record := filepath.Join(store, "plugins", "installed_plugins.json")
+				plugin := filepath.Join(checkout, manifest)
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" cache in "+record+
+					" cannot be checked: "+plugin+" names no version, and Claude caches by version — add a version to "+
+					plugin+", then run pfm install --yes\n", 1
+			case "alpha cache behind with its snapshot gone":
+				want, failures = "doctor: claude_plugins FAIL plugin "+doctorDevIDs[0]+" not installed in "+store+
+					" — run pfm install --yes\n", 1
 			case "alpha unlisted plugin enabled":
 				want, warnings = "doctor: claude_plugins plugin buddy enabled (buddy@buddy-dev) in "+path+
 					", but claude.plugins does not list it — run pfm install --yes\n", 1
@@ -722,6 +825,9 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeDoctorInstalledPlugins(t, store, "callmeter@callmeter-dev")
+			writeDoctorCache(t, store, "callmeter@callmeter-dev", "0.3.0", map[string]string{
+				filepath.Join(".claude-plugin", "plugin.json"): `{"version":"0.3.0"}`,
+			})
 			build := installer.ClaudePluginBuild{
 				Version: "0.80.0-alpha", Home: home, CheckoutRoot: root,
 				Plugins: []pfmconfig.ClaudePlugin{{ID: "callmeter"}},

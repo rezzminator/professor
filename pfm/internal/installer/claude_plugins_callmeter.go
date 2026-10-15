@@ -176,7 +176,7 @@ func callmeterCheckoutVersion(checkout string) (string, error) {
 		return "", fmt.Errorf(
 			"%s: version %q is not one the callmeter wrapper runs",
 			filepath.Join(checkout, ".claude-plugin", "plugin.json"),
-			escapeControl(version),
+			EscapeControl(version),
 		)
 	}
 	return version, nil
@@ -233,24 +233,33 @@ func CallmeterBinaryGap(env paths.Env, home string, target ClaudePluginTarget) (
 	return ClaudePluginGap{Problem: problem, Fix: ClaudePluginRepair}, true
 }
 
-// callmeterBinaryPath is where the callmeter wrapper runs version from: under
-// CALLMETER_HOME, else under XDG_STATE_HOME when absolute or home's
-// .local/state, plus callmeter — bin/{version}/callmeter.
+// callmeterBinaryPath is where the callmeter wrapper runs version from:
+// bin/{version}/callmeter under callmeterHome.
 func callmeterBinaryPath(env paths.Env, home, version string) (string, error) {
-	root := env.Get("CALLMETER_HOME")
-	if root == "" {
-		state := env.Get("XDG_STATE_HOME")
-		if !filepath.IsAbs(state) {
-			if home == "" {
-				return "", errors.New(
-					"callmeter home unresolved: CALLMETER_HOME, XDG_STATE_HOME and the home dir are unset",
-				)
-			}
-			state = filepath.Join(home, ".local", "state")
-		}
-		root = filepath.Join(state, "callmeter")
+	root, err := callmeterHome(env, home)
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(root, "bin", version, "callmeter"), nil
+}
+
+// callmeterHome is the callmeter plugin's home, as callmeter resolves it:
+// CALLMETER_HOME, else XDG_STATE_HOME when absolute or home's .local/state,
+// plus callmeter.
+func callmeterHome(env paths.Env, home string) (string, error) {
+	if root := env.Get("CALLMETER_HOME"); root != "" {
+		return root, nil
+	}
+	state := env.Get("XDG_STATE_HOME")
+	if !filepath.IsAbs(state) {
+		if home == "" {
+			return "", errors.New(
+				"callmeter home unresolved: CALLMETER_HOME, XDG_STATE_HOME and the home dir are unset",
+			)
+		}
+		state = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(state, callmeterPlugin), nil
 }
 
 // callmeterBuildEnvironment is the inherited environment without

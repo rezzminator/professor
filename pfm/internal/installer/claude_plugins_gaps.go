@@ -291,12 +291,12 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 		}
 		shown := make([]string, len(ids))
 		for index, id := range ids {
-			shown[index] = escapeControl(id)
+			shown[index] = EscapeControl(id)
 		}
 		gaps = append(gaps, ClaudePluginGap{
 			fmt.Sprintf(
 				"plugin %s enabled %s (%s) in %s",
-				escapeControl(name), timesWord(len(ids)), strings.Join(shown, " and "), path,
+				EscapeControl(name), timesWord(len(ids)), strings.Join(shown, " and "), path,
 			),
 			"keep one copy: claude plugin disable each other key",
 		})
@@ -304,10 +304,10 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 	return gaps
 }
 
-// escapeControl is text read from a file as one printed line: each control
+// EscapeControl is text read from a file as one printed line: each control
 // character escaped as Go spells it, so a newline in a key or a url cannot
 // forge a line of its own.
-func escapeControl(text string) string {
+func EscapeControl(text string) string {
 	if !strings.ContainsFunc(text, unicode.IsControl) {
 		return text
 	}

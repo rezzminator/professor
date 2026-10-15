@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,6 +16,25 @@ import (
 )
 
 const envKey = "SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL"
+
+// chatDuringChange is install's output that plays a chat writing path the
+// moment a change line is printed: between pfm's read and its rename.
+type chatDuringChange struct {
+	out           *bytes.Buffer
+	path, content string
+	err           error
+}
+
+func (chat *chatDuringChange) Write(line []byte) (int, error) {
+	if chat.content != "" && bytes.Contains(line, []byte("  change  ")) {
+		chat.err = os.WriteFile(chat.path, []byte(chat.content), 0o600)
+		chat.content = ""
+	}
+	if chat.err != nil {
+		return 0, chat.err
+	}
+	return chat.out.Write(line)
+}
 
 // TestEnsureClaudeEnv: claude.env lands in the primary seat's settings.json
 // env through its link, pfm's keys alone recorded in the ownership ledger; a
@@ -41,7 +61,8 @@ func TestEnsureClaudeEnv(t *testing.T) {
 		wantOther     string
 		wantOwned     map[string]map[string]string // nil = no ledger file
 		wantMode      fs.FileMode
-		unreadPlugins bool // the marketplace plugin list fails to read
+		unreadPlugins bool   // the marketplace plugin list fails to read
+		chat          string // the store as a chat rewrites it while pfm's change runs; "" = none
 	}{
 		{
 			name: "set through the seat link keeping mode and unowned keys", apply: true,
@@ -93,6 +114,21 @@ func TestEnsureClaudeEnv(t *testing.T) {
 			},
 			absent:    []string{"  change  "},
 			wantStore: "-",
+		},
+		{
+			name: "a removal a chat overtakes by hand during the write is warned, never claimed", apply: true,
+			env: map[string]string{},
+			given: state{
+				store: `{"env":{"` + envKey + `":"1"}}`, linked: true,
+				ledgerFor: map[string]map[string]string{"{store}": {envKey: "1"}},
+			},
+			chat: `{"env":{"` + envKey + `":"2"}}`,
+			lines: []string{
+				"  change  claude.env: remove " + envKey + " in {seat}",
+				"  warn    claude.env: {seat} changed while pfm wrote it; written instead: no key changed",
+				"  warn    claude.env " + envKey + " in {seat} was changed by hand since pfm set it: left in place, no longer pfm's",
+			},
+			wantStore: `{"` + envKey + `":"2"}`,
 		},
 		{
 			name: "an unowned key with another value is taken over", apply: true,
@@ -257,6 +293,10 @@ func TestEnsureClaudeEnv(t *testing.T) {
 				}
 			}
 			var out bytes.Buffer
+			stdout := io.Writer(&out)
+			if test.chat != "" {
+				stdout = &chatDuringChange{out: &out, path: store, content: test.chat}
+			}
 			inst := &engine{options: Options{
 				Home:             home,
 				ConfigDir:        filepath.Join(home, ".claude"),
@@ -264,7 +304,7 @@ func TestEnsureClaudeEnv(t *testing.T) {
 				Version:          "0.80.0",
 				ClaudePlugins:    pfmconfig.DefaultClaudePlugins(),
 				ClaudeEnv:        test.env,
-				Stdout:           &out,
+				Stdout:           stdout,
 			}, apply: test.apply, managedRoot: managedRoot}
 			if test.unreadPlugins {
 				inst.options.Version, inst.options.SourceRepo = "0.80.0-alpha", home
@@ -378,5 +418,105 @@ func TestEnsureClaudeEnv(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestClaudeEnvEditKeepsAWriteMadeAfterItsRead: a chat may write the
+// settings.json claude.env edits between pfm's read and its rename, creating
+// it too; the edit plans again on what it finds, so the chat's write stays, a
+// key the chat changed by hand is left to it, and the plan is the one written.
+func TestClaudeEnvEditKeepsAWriteMadeAfterItsRead(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		given       string // "" = absent
+		owned, want map[string]string
+		chat        string // "" = the file removed
+		wantDoc     string
+		wantOwned   map[string]string
+	}{
+		{
+			name:      "an existing file",
+			given:     `{"env":{"OTHER":"x"}}`,
+			want:      map[string]string{envKey: "1"},
+			chat:      `{"env":{"OTHER":"x","CHAT":"y"},"theme":"dark"}`,
+			wantDoc:   `{"env":{"CHAT":"y","OTHER":"x","` + envKey + `":"1"},"theme":"dark"}`,
+			wantOwned: map[string]string{envKey: "1"},
+		},
+		{
+			name:      "a file created after the read",
+			want:      map[string]string{envKey: "1"},
+			chat:      `{"theme":"dark"}`,
+			wantDoc:   `{"env":{"` + envKey + `":"1"},"theme":"dark"}`,
+			wantOwned: map[string]string{envKey: "1"},
+		},
+		{
+			name:      "a file removed after the read",
+			given:     `{"env":{"OTHER":"x"}}`,
+			want:      map[string]string{envKey: "1"},
+			wantDoc:   `{"env":{"` + envKey + `":"1"}}`,
+			wantOwned: map[string]string{envKey: "1"},
+		},
+		{
+			name:      "a removal the chat overtook by hand",
+			given:     `{"env":{"` + envKey + `":"1"}}`,
+			owned:     map[string]string{envKey: "1"},
+			chat:      `{"env":{"` + envKey + `":"2"}}`,
+			wantDoc:   `{"env":{"` + envKey + `":"2"}}`,
+			wantOwned: map[string]string{},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			if test.given != "" {
+				writeFixture(t, path, test.given)
+			}
+			plan, edit, err := planClaudeEnvEdit(path, test.owned, test.want)
+			if err != nil || edit == nil {
+				t.Fatalf("plan: edit=%v err=%v, want an edit", edit != nil, err)
+			}
+			// The chat's write, or its removal of the file, lands after pfm's read.
+			if test.chat == "" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeFixture(t, path, test.chat)
+			}
+			if err := edit(); err != nil {
+				t.Fatalf("edit: %v", err)
+			}
+			var got, want any
+			if err := json.Unmarshal([]byte(readFixture(t, path)), &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(test.wantDoc), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("settings %v, want %v", got, want)
+			}
+			if !reflect.DeepEqual(plan.owned, test.wantOwned) {
+				t.Fatalf("owned %v, want %v", plan.owned, test.wantOwned)
+			}
+		})
+	}
+}
+
+// TestClaudeEnvEditFailsOnAnEnvTheChatBroke: when the file a chat wrote after
+// pfm's read holds an env that is not an object, the edit cannot be re-applied:
+// it fails naming the file and leaves the chat's write in place.
+func TestClaudeEnvEditFailsOnAnEnvTheChatBroke(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	writeFixture(t, path, `{"env":{"OTHER":"x"}}`)
+	_, edit, err := planClaudeEnvEdit(path, nil, map[string]string{envKey: "1"})
+	if err != nil || edit == nil {
+		t.Fatalf("plan: edit=%v err=%v, want an edit", edit != nil, err)
+	}
+	writeFixture(t, path, `{"env":"broken"}`)
+	if err := edit(); err == nil || err.Error() != path+": env is not an object" {
+		t.Fatalf("edit err = %v, want %q", err, path+": env is not an object")
+	}
+	if got := readFixture(t, path); got != `{"env":"broken"}` {
+		t.Fatalf("settings %q, want the chat's write untouched", got)
 	}
 }

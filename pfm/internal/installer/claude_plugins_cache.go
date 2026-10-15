@@ -112,18 +112,18 @@ func readClaudePluginCache(configDir string, target ClaudePluginTarget) (claudeP
 // behindGap names an entry recording a version other than the checkout's,
 // with the repair updateDir names for an entry pfm cannot move.
 func (cache claudePluginCache) behindGap(entry claudePluginInstall) ClaudePluginGap {
-	scope := "scope " + escapeControl(entry.Scope)
+	scope := "scope " + EscapeControl(entry.Scope)
 	if entry.ProjectPath != "" {
-		scope += " " + escapeControl(entry.ProjectPath)
+		scope += " " + EscapeControl(entry.ProjectPath)
 	}
-	recorded := "version " + escapeControl(entry.version())
+	recorded := "version " + EscapeControl(entry.version())
 	if entry.version() == "" {
 		recorded = "no version string"
 	}
 	gap := ClaudePluginGap{
 		Problem: fmt.Sprintf("plugin %s cache in %s records %s (%s), checkout %s is %s",
 			cache.target.ID, cache.record, recorded, scope, cache.target.Checkout,
-			escapeControl(cache.want)),
+			EscapeControl(cache.want)),
 		Fix: ClaudePluginRepair,
 	}
 	if _, repair := cache.updateDir(entry); repair != "" {
@@ -152,7 +152,7 @@ func (cache claudePluginCache) unversionedGap() ClaudePluginGap {
 func (cache claudePluginCache) driftGap(entry claudePluginInstall) ClaudePluginGap {
 	return ClaudePluginGap{
 		Problem: fmt.Sprintf("plugin %s cache %s differs from %s at version %s",
-			cache.target.ID, escapeControl(entry.InstallPath), cache.target.Checkout, escapeControl(cache.want)),
+			cache.target.ID, EscapeControl(entry.InstallPath), cache.target.Checkout, EscapeControl(cache.want)),
 		Fix: "bump the version in " + filepath.Join(cache.target.Checkout, ".claude-plugin", "plugin.json") +
 			": Claude caches by version; then " + ClaudePluginRepair,
 	}
@@ -200,7 +200,7 @@ func (cache claudePluginCache) updateDir(entry claudePluginInstall) (dir, repair
 		if info, err := os.Stat(project); filepath.IsAbs(project) && err == nil && info.IsDir() {
 			return project, ""
 		}
-		shown := escapeControl(project)
+		shown := EscapeControl(project)
 		if shown == "" {
 			shown = `""`
 		}
@@ -209,7 +209,7 @@ func (cache claudePluginCache) updateDir(entry claudePluginInstall) (dir, repair
 			shown, cache.target.ID, entry.Scope)
 	default:
 		return "", fmt.Sprintf("claude plugin update takes no scope %s: update it the way it was installed",
-			escapeControl(entry.Scope))
+			EscapeControl(entry.Scope))
 	}
 }
 

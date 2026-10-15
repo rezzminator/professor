@@ -418,8 +418,9 @@ func planOtherCopyRetirement(path string, target *ClaudePluginTarget) (string, f
 			message += "; copy the pluginConfigs of " + carried + " to " + target.ID
 		}
 	}
-	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) {
+	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
 		retireOtherCopies(fresh, target)
+		return nil
 	}), nil
 }
 
@@ -483,16 +484,18 @@ const settingsEditRetries = 3
 var errSettingsChanged = errors.New("changed since pfm read it")
 
 // writeSettingsDocument is the edit that writes document, planned on read,
-// back through a settings.json symlink, keeping the file's mode. A running
-// chat may write the file meanwhile: just before the rename the file is read
-// again, and when its bytes differ apply is re-run on the fresh document, so
-// the other write is kept; after settingsEditRetries such retries the edit
-// fails naming the file and its repair.
+// back through a settings.json symlink, keeping the file's mode; read nil
+// plans on an absent file, which the edit creates 0600. A running chat may
+// write the file meanwhile, create or remove it: just before the rename the
+// file is read again, and when its bytes differ apply is re-run on the fresh
+// document (empty for a file now absent or blank), so the other write is
+// kept, and an apply error ends the edit; after settingsEditRetries such
+// retries the edit fails naming the file and its repair.
 func writeSettingsDocument(
 	path string,
 	read []byte,
 	document map[string]any,
-	apply func(map[string]any),
+	apply func(map[string]any) error,
 ) func() error {
 	return func() error { return commitSettingsDocument(path, read, document, apply, os.ReadFile) }
 }
@@ -503,28 +506,68 @@ func commitSettingsDocument(
 	path string,
 	read []byte,
 	document map[string]any,
-	apply func(map[string]any),
+	apply func(map[string]any) error,
 	reread func(string) ([]byte, error),
 ) error {
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, mode, err := settingsEditTarget(path)
 	if err != nil {
 		return err
 	}
-	info, err := os.Stat(resolved)
+	content, err := encodeSettingsDocument(document)
 	if err != nil {
 		return err
 	}
-	for retry := 0; ; retry++ {
-		var content bytes.Buffer
-		encoder := json.NewEncoder(&content)
-		encoder.SetEscapeHTML(false)
-		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(document); err != nil {
-			return err
+	return writeWhileUnchanged(path, resolved, mode, read, content, reread, func(current []byte) ([]byte, bool, error) {
+		var document map[string]any
+		if len(bytes.TrimSpace(current)) > 0 {
+			if err := unmarshalKeepingNumbers(current, &document); err != nil {
+				return nil, false, fmt.Errorf("parse %s: %w", path, err)
+			}
 		}
+		if document == nil {
+			document = map[string]any{}
+		}
+		if err := apply(document); err != nil {
+			return nil, false, fmt.Errorf("%s: %w", path, err)
+		}
+		content, err := encodeSettingsDocument(document)
+		return content, true, err
+	})
+}
+
+// encodeSettingsDocument is document as a settings.json body: two-space
+// indent, HTML characters kept, a trailing newline.
+func encodeSettingsDocument(document map[string]any) ([]byte, error) {
+	var content bytes.Buffer
+	encoder := json.NewEncoder(&content)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(document); err != nil {
+		return nil, err
+	}
+	return content.Bytes(), nil
+}
+
+// writeWhileUnchanged publishes content over resolved, path's physical file,
+// only while reread finds it still holding read (nil: absent). Bytes another
+// writer wrote, created or removed since go to replan (nil for a file now
+// absent), whose content is published in turn, or nothing when it returns
+// false; after settingsEditRetries such retries it fails naming path and its
+// repair, the file left as the other writer left it.
+func writeWhileUnchanged(
+	path, resolved string,
+	mode fs.FileMode,
+	read, content []byte,
+	reread func(string) ([]byte, error),
+	replan func(current []byte) ([]byte, bool, error),
+) error {
+	for retry := 0; ; retry++ {
 		var current []byte
-		err := atomicfile.WriteIf(resolved, content.Bytes(), info.Mode().Perm(), func() error {
+		err := atomicfile.WriteIf(resolved, content, mode, func() error {
 			now, err := reread(resolved)
+			if errors.Is(err, fs.ErrNotExist) {
+				now, err = nil, nil
+			}
 			if err != nil {
 				return fmt.Errorf("read %s again: %w", path, err)
 			}
@@ -540,15 +583,32 @@ func commitSettingsDocument(
 		if retry == settingsEditRetries {
 			return fmt.Errorf("%s changed under pfm's edit %d times in a row — rerun pfm install", path, retry+1)
 		}
-		read, document = current, nil
-		if err := unmarshalKeepingNumbers(current, &document); err != nil {
-			return fmt.Errorf("parse %s: %w", path, err)
+		read = current
+		next, write, err := replan(current)
+		if err != nil || !write {
+			return err
 		}
-		if document == nil {
-			document = map[string]any{}
-		}
-		apply(document)
+		content = next
 	}
+}
+
+// settingsEditTarget is the file an edit of path publishes, path's symlink
+// resolved, and the mode it keeps; a file absent now, never there or removed
+// since the edit's read, is created at path itself 0600, the re-read before
+// the rename re-applying an edit planned on bytes that are gone.
+func settingsEditTarget(path string) (string, fs.FileMode, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return path, 0o600, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", 0, err
+	}
+	return resolved, info.Mode().Perm(), nil
 }
 
 // retiredClaudePlugins are plugin ids once ours that a successor replaced,
@@ -576,8 +636,9 @@ func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, 
 		return "", nil, nil
 	}
 	message := "disable " + strings.Join(disabled, ", ") + " in " + path + ": retired, " + target.ID + " replaces it"
-	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) {
+	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
 		disableRetiredPlugins(fresh, retired)
+		return nil
 	}), nil
 }
 

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/ask"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -281,14 +283,18 @@ func Run(
 	tally.warnings += depWarnings
 	tally.failures += depFailures
 	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
-	printClaudePluginsDoctor(
+	claudeStore := installer.ClaudeStore(resolved.Home)
+	pluginBuild := doctorClaudePluginBuild(
+		runtime.Version, resolved.Home, runtime.Config.Claude,
+		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
+	)
+	printClaudePluginsDoctor(stdout, claudeStore, dependencies.Env, pluginBuild, tally)
+	printPluginLogsDoctor(
 		stdout,
-		installer.ClaudeStore(resolved.Home),
+		append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...),
+		pluginBuild,
 		dependencies.Env,
-		doctorClaudePluginBuild(
-			runtime.Version, resolved.Home, runtime.Config.Claude,
-			runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
-		),
+		unix.Access,
 		tally,
 	)
 	claudeEnvDir := primary.ConfigDir

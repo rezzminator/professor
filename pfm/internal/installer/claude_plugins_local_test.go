@@ -784,9 +784,10 @@ func TestSettingsEditFailsAfterItsRetries(t *testing.T) {
 	rereads, applied := 0, 0
 	err := commitSettingsDocument(path, []byte(readFixture(t, path)),
 		map[string]any{"enabledPlugins": map[string]any{"old@old": false}},
-		func(document map[string]any) {
+		func(document map[string]any) error {
 			applied++
 			document["enabledPlugins"] = map[string]any{"old@old": false}
+			return nil
 		},
 		func(string) ([]byte, error) {
 			rereads++

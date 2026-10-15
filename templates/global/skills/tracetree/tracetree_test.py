@@ -2974,6 +2974,7 @@ class CutGateBashTest(unittest.TestCase):
                         "printf x | tee ~/.local/state/pfm/flights/professor/f/cut-kit.txt",
                         f"echo x > {T}/p/x.txt", "sed -i s/a/b/ /private/tmp/p/x", f"cp a.go {T}/p/",
                         f"cd {T}/p && echo x > rel.txt", f"{KIT} > {flight}/cut-kit.txt",
+                        f"{KIT} | tee {flight}/cut-kit.txt",
                         f"sed -E -i 's/a/b/' {T}/p/x", f"perl -pi -e 's/a/b/' {T}/p/x", f"cp -t {T}/p a.go b.go"):
             with self.subTest(command=command):
                 self.assertAllowedSilently(self.hook(command, aid))

@@ -27,6 +27,7 @@
       "effort-live-control",
       "tool-visibility-controller"
     ],
+    "env": {},
     "costLedger": true,
     "gptAgents": false
   },

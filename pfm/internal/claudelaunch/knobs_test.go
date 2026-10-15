@@ -104,3 +104,32 @@ func TestKnobHooksCountMatchesRegistry(t *testing.T) {
 	}
 	t.Fatal("no hooks knob in Knobs")
 }
+
+// TestClaudeEnvRefusesLaunchNames: every variable the launch sets, discards or
+// hands the wrapper, and a default plugin's prefix names, is one claude.env
+// refuses; a settings.json env copy of it would override the launch, and no
+// prefix warning would tell.
+func TestClaudeEnvRefusesLaunchNames(t *testing.T) {
+	prefixes := []string{}
+	for _, plugin := range pfmconfig.DefaultClaudePlugins() {
+		prefixes = append(prefixes, strings.ToUpper(strings.ReplaceAll(plugin.Name(), "-", "_"))+"_")
+	}
+	checked := 0
+	for _, knob := range Knobs {
+		if knob.Wire != WireEnv && knob.Wire != WireUnset && knob.Wire != WireWrapperEnv {
+			continue
+		}
+		for _, prefix := range prefixes {
+			if !strings.HasPrefix(knob.Target, prefix) {
+				continue
+			}
+			checked++
+			if _, refused := pfmconfig.ClaudeEnvRefusal(knob.Target); !refused {
+				t.Errorf("claude.env accepts %s, which the launch registry's %s knob owns", knob.Target, knob.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no launch variable carries a default plugin's prefix: the check ran on nothing")
+	}
+}

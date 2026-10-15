@@ -287,6 +287,7 @@ func (installer *engine) install(ctx context.Context) error {
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
 	installer.deferFailure(installer.ensureClaudePlugins(ctx))
+	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
 	installer.deferFailure(installer.wireCodexHooks())
 	if err := installer.removeRetiredNudgeState(); err != nil {
@@ -590,6 +591,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
 	if err := installer.unwireClaudeLauncher(); err != nil {
+		return err
+	}
+	if err := installer.ensureClaudeEnv(true); err != nil {
 		return err
 	}
 	if err := installer.unwireHostOverlays(); err != nil {

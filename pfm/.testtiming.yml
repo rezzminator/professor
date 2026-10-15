@@ -44,7 +44,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/engine/opencode: 2
       github.com/rezzminator/professor/pfm/internal/enginesync: 2
       github.com/rezzminator/professor/pfm/internal/fleet: 6
-      github.com/rezzminator/professor/pfm/internal/fleetdb: 2
+      github.com/rezzminator/professor/pfm/internal/fleetdb: 4
       github.com/rezzminator/professor/pfm/internal/gather: 4
       github.com/rezzminator/professor/pfm/internal/gitroot: 2
       github.com/rezzminator/professor/pfm/internal/globallink: 2

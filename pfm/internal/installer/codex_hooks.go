@@ -459,6 +459,21 @@ func (installer *engine) wireResumeUnkillTrust(account string, carriesHook map[s
 	if err != nil {
 		return err
 	}
+	// A trust Codex already holds for this exact handler is no change, so a
+	// repeat install stays changed=0; a handler its operator disabled is left
+	// alone, as RegisterHookTrust leaves it. Any other state, an unreadable
+	// one included, records the trust again, and that call reports its own error.
+	trusted, stateErr := codexappendix.NativeHookTrustState(
+		context.Background(), installer.options.CodexBinary, account, hook.Command,
+	)
+	switch {
+	case stateErr == nil && trusted:
+		installer.ok("resume-unkill hook trusted in " + account)
+		return nil
+	case errors.Is(stateErr, codexappendix.ErrNativeHookDisabled):
+		installer.skip("resume-unkill hook trust in " + account + ": its operator disabled the handler, left alone")
+		return nil
+	}
 	return installer.change("trust resume-unkill hook "+account, func() error {
 		if err := codexappendix.RegisterHookTrust(
 			context.Background(), installer.options.CodexBinary, account, codexHookEvent, hook.Matcher, hook.Command,

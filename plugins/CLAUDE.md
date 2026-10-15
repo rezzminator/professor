@@ -28,8 +28,9 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 ## Host
 
 - Users install each plugin from its repository's `main`.
-- An alpha `pfm install` copies each plugin `claude.plugins` in `pfm.config.json` names bare from its installable plugin here by default, or under `claude.pluginCheckoutRoot` when set elsewhere, and disables its GitHub copy; a full `name@marketplace` id is installed as named.
-- A plugin listed by full id is never copied: callmeter (`callmeter@callmeter-dev`) has its `-dev` copy refreshed by its own `CLAUDE.md`; buddy installs from its own dev marketplace as `buddy@buddy-dev`.
+- An alpha `pfm install` installs every plugin `.claude-plugin/marketplace.json` lists as `{name}@{name}-dev`, copied from `{name}/plugins/{name}` here (or under `claude.pluginCheckoutRoot` when set) into `~/.local/share/{name}-dev`, and disables its GitHub copies.
+- On alpha, `claude.plugins` in `pfm.config.json` is the enabled set, every marketplace plugin when unset; a plugin it leaves out installs disabled; a full `name@marketplace` id there is installed as named, never copied.
+- On alpha, pfm builds callmeter's binary from its checkout into `{CALLMETER_HOME}/bin/{version}/` before refreshing its plugin copy; its `CLAUDE.md` § Dev install covers a host without pfm.
 - `pfm install` copies no engine-sync: its wrapper downloads the checksum-verified release binary on first run and links the stable path pfm execs; `ENGINE_SYNC_BIN` points pfm at a local build, and the fence builds its own from `engine-sync/`.
 - An open chat loads a refreshed copy on `/reload-plugins`.
 

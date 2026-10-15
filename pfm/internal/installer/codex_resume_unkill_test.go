@@ -21,7 +21,7 @@ while IFS= read -r line; do
     *'"method":"hooks/list"'*)
       status=untrusted
       if grep -q '"method":"config/value/write"' "$LOG"; then status=trusted; fi
-      printf '{"id":1,"result":{"data":[{"hooks":[{"key":"@ACCOUNT@/hooks.json:session_start:0:1","command":"echo personal","sourcePath":"@ACCOUNT@/hooks.json","source":"user","currentHash":"sha256:other","eventName":"sessionStart","matcher":"resume","enabled":true,"trustStatus":"untrusted"},{"key":"@ACCOUNT@/hooks.json:session_start:0:0","command":"@COMMAND@","sourcePath":"@ACCOUNT@/hooks.json","source":"user","currentHash":"sha256:deadbeef","eventName":"sessionStart","matcher":"resume","enabled":true,"trustStatus":"%s"}]}]}}\n' "$status" ;;
+      printf '{"id":1,"result":{"data":[{"hooks":[{"key":"@ACCOUNT@/hooks.json:session_start:0:1","handlerType":"command","command":"echo personal","sourcePath":"@ACCOUNT@/hooks.json","source":"user","currentHash":"sha256:other","eventName":"sessionStart","matcher":"resume","enabled":true,"trustStatus":"untrusted"},{"key":"@ACCOUNT@/hooks.json:session_start:0:0","handlerType":"command","command":"@COMMAND@","sourcePath":"@ACCOUNT@/hooks.json","source":"user","currentHash":"sha256:deadbeef","eventName":"sessionStart","matcher":"resume","enabled":true,"trustStatus":"%s"}]}]}}\n' "$status" ;;
     *'"method":"config/value/write"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
   esac
 done
@@ -163,6 +163,11 @@ func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 	}
 	if got := strings.Count(readFixture(t, requestLog), `"method":"config/value/write"`); got != 1 {
 		t.Fatalf("a trusted hook was written again: %d config/value/write requests", got)
+	}
+	// A trust already recorded is no change: a repeat install stays changed=0.
+	if strings.Contains(again.String(), "change  ") ||
+		!strings.Contains(again.String(), "ok      resume-unkill hook trusted in "+account) {
+		t.Fatalf("a repeat install reported the recorded trust as a change:\n%s", again.String())
 	}
 }
 

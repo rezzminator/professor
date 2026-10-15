@@ -131,17 +131,27 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		err = errors.Join(append([]error{err}, installer.deferred...)...)
 	}
 	installer.say("")
-	installer.say("summary changed=%d ok=%d skipped=%d", installer.report.Changed,
-		installer.report.OK, installer.report.Skipped)
+	installer.say("%s", installer.report.summary())
 	if installer.outputErr != nil {
 		err = errors.Join(err, installer.outputErr)
 	}
 	return installer.report, err
 }
 
+// summary is the run's last line: what changed, what was already right, what
+// was skipped, and — when any step failed — how many FAIL lines name a failure.
+func (report Report) summary() string {
+	line := fmt.Sprintf("summary changed=%d ok=%d skipped=%d", report.Changed, report.OK, report.Skipped)
+	if report.Failed != 0 {
+		line += fmt.Sprintf(" failed=%d (each FAIL line above)", report.Failed)
+	}
+	return line
+}
+
 // fail prints and records a step failure and returns it.
 func (installer *engine) fail(err error) error {
 	installer.say("  FAIL    %s", err)
+	installer.report.Failed++
 	installer.record("fail", err.Error(), err)
 	return err
 }

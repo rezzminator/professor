@@ -42,7 +42,7 @@ Files: `~/.claude/commands/flights/*.md` (machine-global: init, spec, orchestrat
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
 - **Verdict tokens ↔ their writers:** every token a command cites (`CLAIMED`, `DONE`, `PARTIAL`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `COMA`) is one `flights-foreman`, `flights-mechanical-executor` or `/flights:orchestrate-cross-harness` writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** spec → `flights-foreman` (→ `flights-speccer` on work with no pattern) → `flights-lander` → gitter; cross-harness substitutes child seats — no step references an agent from a later phase
+- **Flow integrity:** spec → `flights-foreman` (→ `flights-speccer` on novel, large work) → `flights-lander` → gitter; cross-harness substitutes child seats — no step references an agent from a later phase
 
 ## `scripts` — Walk each script
 

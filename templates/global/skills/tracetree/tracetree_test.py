@@ -2805,7 +2805,7 @@ class CutGateTest(unittest.TestCase):
 
     def test_every_other_tool_passes_untouched(self):
         aid = self.agent([brief("build it")])
-        for tool in ("Bash", "Read", "Agent", "Grep"):
+        for tool in ("Read", "Agent", "Grep"):
             with self.subTest(tool=tool):
                 self.assertAllowedSilently(self.hook(tool=tool, agent_id=aid))
 
@@ -2827,13 +2827,185 @@ class CutGateTest(unittest.TestCase):
                 ("a payload that is no object", dict(raw="[1, 2]"), "unreadable hook payload"),
                 ("no transcript_path", dict(transcript_path=""), "names no transcript_path"),
                 ("an agent id that is no id", dict(agent_id="../../etc"), "is no agent id"),
-                ("a missing agent transcript", dict(agent_id="nosuchagent"), "agent-nosuchagent.jsonl")):
+                ("a missing agent transcript", dict(agent_id="nosuchagent"), "agent-nosuchagent.jsonl"),
+                ("a Bash call naming no command", dict(tool="Bash"), "names no Bash command")):
             with self.subTest(name):
                 self.assertAllowedUnchecked(self.hook(**kw), cause)
         broken = self.agent([brief("build it")], agent_id="dir0")
         os.remove(os.path.join(self.sub, "agent-dir0.jsonl"))
         os.mkdir(os.path.join(self.sub, "agent-dir0.jsonl"))
         self.assertAllowedUnchecked(self.hook(agent_id=broken), "agent-dir0.jsonl")
+
+
+def gitc(cwd, *args):
+    """A git call with an identity and local submodules allowed, failing loudly."""
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always",
+                    "-c", "init.defaultBranch=main", *args], cwd=cwd, check=True, capture_output=True, timeout=60)
+
+
+T = "/tmp"  # scratch paths in the commands below are text the hook parses, never written
+
+
+class CutGateBashTest(unittest.TestCase):
+    """`cutgate` on the foreman's Bash: a write into the tree before the cut is the code edit the Edit hook refuses."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cutgate-bash-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.home = os.path.join(self.tmp, "home")  # writable: the gate keeps its per-agent cache under it
+        self.sub = os.path.join(self.tmp, "projects", "p", "sess", "subagents")
+        os.makedirs(self.sub)
+        self.session = os.path.join(self.tmp, "projects", "p", "sess.jsonl")
+        with open(self.session, "w") as f:
+            f.write(json.dumps(brief("lead the flight")) + "\n")
+        self.n = 0
+
+    def agent(self, *records):
+        self.n += 1
+        aid = f"b{self.n}"
+        with open(os.path.join(self.sub, f"agent-{aid}.jsonl"), "w") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in [brief("build it"), *records]))
+        return aid
+
+    def repo(self):
+        """A committed git tree with a clean status, outside every open root but /tmp."""
+        tree = os.path.join(self.tmp, "tree")
+        os.makedirs(os.path.join(tree, "pkg"))
+        with open(os.path.join(tree, "pkg", "a.go"), "w") as f:
+            f.write("package pkg\n")
+        gitc(tree, "init", "-q")
+        gitc(tree, "add", ".")
+        gitc(tree, "commit", "-qm", "base")
+        return tree
+
+    def hook(self, command, aid, cwd="/w", home=None, env=None):
+        event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command},
+                 "transcript_path": self.session, "agent_type": "flights-foreman", "agent_id": aid, "cwd": cwd}
+        got = subprocess.run([sys.executable, SCRIPT, "cutgate"], input=json.dumps(event), capture_output=True,
+                             text=True, timeout=60, env=dict(os.environ, HOME=home or self.home, **(env or {})))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        return got
+
+    def reason(self, got):
+        spec = json.loads(got.stdout)["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny", spec)
+        return spec["permissionDecisionReason"]
+
+    def assertDeniedLikeAnEdit(self, got):
+        self.assertTrue(self.reason(got).startswith(DENY["hookSpecificOutput"]["permissionDecisionReason"]), got.stdout)
+
+    def assertAllowedSilently(self, got):
+        self.assertEqual((got.stdout, got.stderr), ("", ""))
+
+    def test_a_bash_write_into_the_tree_before_the_cut_is_denied_with_the_edit_steer(self):
+        aid = self.agent(*bash("t1", "git status --short", "VERDICT SPLIT 2"))
+        for command in ("sed -i 's/a/b/' pkg/a.go", "sed -i.bak -e s/a/b/ /w/a.go", "sed -Ei 's/a/b/' a.go",
+                        "perl -pi -e 's/a/b/' a.go", "perl -i.orig -pe 's/x/y/' pkg/a.go", "echo x > a.go",
+                        "printf x >> pkg/a.go", "go doc x 2>/dev/null >a.txt", "echo x | tee pkg/a.go",
+                        f"echo x | tee -a {T}/ok.txt pkg/a.go", "cat > pkg/new.go <<'EOF'\npackage pkg\nEOF",
+                        "cat <<EOF > pkg/new.go\npackage pkg\nEOF\necho done", f"cp {T}/x.go pkg/a.go",
+                        f"mv {T}/x.go /w/pkg/", f"cp -t pkg {T}/x.go", f"git apply {T}/fix.diff",
+                        f"git -C /w apply {T}/fix.diff", f"patch -p1 < {T}/fix.diff", "cd /w/pkg && sed -i s/a/b/ a.go",
+                        "cd /tmp && cd /w && echo x > a.go", "FOO=1 env sed -i s/a/b/ a.go", "echo x &> a.log",
+                        "go test ./... && echo ok > /w/pkg/done.txt"):
+            with self.subTest(command=command):
+                self.assertDeniedLikeAnEdit(self.hook(command, aid))
+
+    def test_read_only_build_and_kit_bash_before_the_cut_is_allowed(self):
+        aid = self.agent()
+        for command in ("grep -rn foo .", "rg -n 'a > b' pkg", "rg -n \"=>\" pkg", "cat a.go", "sed -n 1,20p a.go",
+                        "sed 's/a/b/' a.go", "git status --short", "git diff HEAD", "git log --oneline -3",
+                        "git show HEAD:a.go", "go test ./... 2>&1 | tail -20", "go vet ./... >/dev/null 2>&1",
+                        ".claude/scripts/dev.sh iso test pfm", KIT, KIT + f" > {T}/p/cut.txt 2>&1",
+                        f"git apply --check {T}/fix.diff", f"patch --dry-run -p1 < {T}/fix.diff",
+                        "echo 'a > b'; grep '>>' a.go", "cat <<EOF\n> not a redirect\nEOF",
+                        "perl -MList::Util -e 'print 1' a.go", "wc -l a.go 1>&2", "ls $(pwd) > /dev/null",
+                        f"python3 $HOME/.claude/skills/tracetree/tracetree.py check {T}/p/run --full",
+                        'cd "$SCRATCH" && echo x > rel.txt'):  # a write past an unexpanded cd is the backstop's
+            with self.subTest(command=command):
+                self.assertAllowedSilently(self.hook(command, aid))
+
+    def test_flight_directory_and_scratch_writes_stay_open(self):
+        aid = self.agent()
+        flight = os.path.join(self.home, ".local", "state", "pfm", "flights", "professor", "f")
+        for command in (f"cat > {flight}/run.md <<'EOF'\n# run\nEOF",
+                        "echo 'SEED X' > $HOME/.local/state/pfm/flights/professor/f/doors.txt",
+                        "printf x | tee ~/.local/state/pfm/flights/professor/f/cut-kit.txt",
+                        f"echo x > {T}/p/x.txt", "sed -i s/a/b/ /private/tmp/p/x", f"cp a.go {T}/p/",
+                        f"cd {T}/p && echo x > rel.txt", f"{KIT} > {flight}/cut-kit.txt",
+                        f"sed -E -i 's/a/b/' {T}/p/x", f"perl -pi -e 's/a/b/' {T}/p/x", f"cp -t {T}/p a.go b.go"):
+            with self.subTest(command=command):
+                self.assertAllowedSilently(self.hook(command, aid))
+        self.assertDeniedLikeAnEdit(self.hook(f"echo x > {flight}/{'../' * 64}w/a.go", aid))
+
+    def test_a_dirty_tree_before_the_cut_denies_the_next_bash_naming_its_paths(self):
+        tree = self.repo()
+        aid = self.agent()
+        missed = "python3 - <<'EOF'\nopen('pkg/a.go', 'a').write('// x')\nEOF"
+        self.assertAllowedSilently(self.hook(missed, aid, cwd=tree))  # parsing misses it ...
+        with open(os.path.join(tree, "pkg", "a.go"), "a") as f:
+            f.write("// x\n")
+        with open(os.path.join(tree, "new.go"), "w") as f:
+            f.write("package x\n")
+        reason = self.reason(self.hook("git status --short", aid, cwd=tree))  # ... the tree does not
+        self.assertIn("pkg/a.go", reason)
+        self.assertIn("new.go", reason)
+        self.assertIn("git status", reason)
+        self.assertAllowedSilently(self.hook(KIT, aid, cwd=tree))  # the kit stays open to cut
+        self.assertIn("pkg/a.go", self.reason(self.hook(f"cd {tree} && ls", aid)))  # a cd'd tree is read too
+        self.assertIn("pkg/a.go", self.reason(self.hook(f"git -C {tree}/pkg log -1", aid)))
+
+    def test_dirt_present_before_the_agent_and_dirty_submodules_are_not_its_writes(self):
+        tree = self.repo()
+        sub = os.path.join(self.tmp, "subsrc")
+        os.makedirs(sub)
+        gitc(sub, "init", "-q")
+        gitc(sub, "commit", "-q", "--allow-empty", "-m", "s")
+        gitc(tree, "submodule", "add", "-q", sub, "plug")
+        gitc(tree, "commit", "-qm", "plug")
+        with open(os.path.join(tree, "pkg", "a.go"), "a") as f:
+            f.write("// someone else's edit\n")
+        aid = self.agent()
+        self.assertAllowedSilently(self.hook("git status", aid, cwd=tree))
+        with open(os.path.join(tree, "plug", "dirt.txt"), "w") as f:
+            f.write("x\n")
+        self.assertAllowedSilently(self.hook("git status", aid, cwd=tree))
+        with open(os.path.join(tree, "b.go"), "w") as f:
+            f.write("package x\n")
+        reason = self.reason(self.hook("git status", aid, cwd=tree))
+        self.assertIn("b.go", reason)
+        self.assertNotIn("pkg/a.go", reason)
+        self.assertNotIn("plug", reason)
+
+    def test_after_the_cut_bash_passes_untouched(self):
+        tree = self.repo()
+        cut = bash("t1", KIT, "VERDICT SPLIT 2")
+        for name, aid in (("its own cut", self.agent(*cut)),
+                          ("a segment child", self.agent(brief("CHILD f · unit pfm-S1\nSEGMENT S1 · cells a")))):
+            with self.subTest(name):
+                with open(os.path.join(tree, f"{aid}.go"), "w") as f:
+                    f.write("package x\n")
+                self.assertAllowedSilently(self.hook("sed -i s/a/b/ pkg/a.go", aid, cwd=tree))
+                self.assertAllowedSilently(self.hook("git status && echo x > pkg/a.go", aid, cwd=tree))
+
+    def test_a_git_failure_allows_and_says_so(self):
+        tree = self.repo()
+        aid = self.agent()
+        with open(os.path.join(tree, ".git", "index"), "wb") as f:
+            f.write(b"not an index")
+        got = self.hook("git log -1", aid, cwd=tree)
+        spec = json.loads(got.stdout)["hookSpecificOutput"]
+        self.assertEqual(set(spec), {"hookEventName", "additionalContext"})
+        self.assertTrue(spec["additionalContext"].startswith("cut-gate: could not check the cut (git status"), spec)
+        self.assertIn("git status", got.stderr)
+
+    def test_a_cache_it_cannot_save_allows_and_says_so(self):
+        tree = self.repo()
+        home = os.path.join(self.tmp, "a-file")  # no directory can be made under it
+        open(home, "w").close()
+        got = self.hook("git status", self.agent(), cwd=tree, home=home)
+        self.assertIn("could not check the cut", json.loads(got.stdout)["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("cutgate", got.stderr)
 
 
 if __name__ == "__main__":

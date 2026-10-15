@@ -497,11 +497,380 @@ def cutgate_cut(path, state):
     return False
 
 
+
+CUTGATE_OP = re.compile(r"\d*(?:>>|>\||>&|>|<<<|<<-|<<|<&|<>|<)|&>>|&>|&&|\|\||;;|[;&|()\n]")
+CUTGATE_WRITE_OP = re.compile(r"\d*(?:>>|>\||>&|>)|&>>|&>")
+CUTGATE_SPLIT = {";", "&&", "||", "|", "&", "\n", "(", ")", ";;"}
+CUTGATE_WRAPPERS = {"env", "command", "builtin", "exec", "time", "nice", "nohup", "sudo", "xargs", "timeout", "stdbuf"}
+CUTGATE_ARGOPTS = {"sed": "efl", "tee": "", "cp": "St", "mv": "St", "install": "mogtS", "ln": "St", "rsync": "e",
+                   "rm": "", "touch": "rdt", "truncate": "sr", "patch": "dDipoBrVYzF", "perl": "eE"}
+CUTGATE_ABS = re.compile(r"(?:^|(?<=[\s'\"=(:]))(~?/[^\s'\"`;|&<>()$*?]+)")
+CUTGATE_DIRS = 16
+
+
+def cutgate_tokens(command):
+    """Shell tokens of a Bash command: ("w", word) after quote removal, ("q", word) for a word with a quoted part and
+    ("o", operator); heredoc bodies are dropped and `$(…)`, backticks and process substitutions stay inside one word."""
+    toks, word, quoted, inword, heredocs, delim = [], [], False, False, [], None
+    i, n = 0, len(command)
+
+    def end():
+        nonlocal word, quoted, inword, delim
+        if inword:
+            text = "".join(word)
+            toks.append(("q" if quoted else "w", text))
+            if delim is not None:
+                heredocs.append((text, delim))
+                delim = None
+        word, quoted, inword = [], False, False
+
+    def balanced(j, open_, close):
+        depth = 0
+        while j < n:
+            depth += command[j] == open_
+            depth -= command[j] == close
+            j += 1
+            if depth == 0:
+                break
+        return j
+
+    while i < n:
+        c = command[i]
+        if c == "'":
+            j = command.find("'", i + 1)
+            j = n if j < 0 else j
+            word.append(command[i + 1:j])
+            quoted = inword = True
+            i = j + 1
+        elif c == '"':
+            j, buf = i + 1, []
+            while j < n and command[j] != '"':
+                if command[j] == "\\" and j + 1 < n:
+                    j += 1
+                buf.append(command[j])
+                j += 1
+            word.append("".join(buf))
+            quoted = inword = True
+            i = j + 1
+        elif c == "\\":
+            if command[i + 1:i + 2] != "\n":
+                word.append(command[i + 1:i + 2])
+                inword = True
+            i += 2
+        elif command.startswith("$(", i) or (c in "<>" and command[i + 1:i + 2] == "(" and not inword):
+            j = balanced(i + 1, "(", ")")
+            word.append(command[i:j])
+            inword = True
+            i = j
+        elif c == "`":
+            j = command.find("`", i + 1)
+            j = n if j < 0 else j + 1
+            word.append(command[i:j])
+            inword = True
+            i = j
+        elif c in " \t":
+            end()
+            i += 1
+        elif c == "#" and not inword:
+            j = command.find("\n", i)
+            i = n if j < 0 else j
+        else:
+            m = CUTGATE_OP.match(command, i) if not inword or c in "<>;&|()\n" else None
+            if not m or (inword and m.group()[0].isdigit()):
+                word.append(c)
+                inword = True
+                i += 1
+                continue
+            end()
+            op = m.group()
+            toks.append(("o", op))
+            i = m.end()
+            if op.endswith(("<<", "<<-")):
+                delim = op.endswith("-")
+            elif op == "\n":
+                for tag, strip in heredocs:
+                    while i < n:
+                        j = command.find("\n", i)
+                        line = command[i:n if j < 0 else j]
+                        i = n if j < 0 else j + 1
+                        if (line.lstrip("\t") if strip else line) == tag:
+                            break
+                heredocs = []
+    end()
+    return toks
+
+
+def cutgate_operands(words, argopts):
+    """The words after a command name that are no option and no option's argument."""
+    out, i, rest = [], 0, False
+    while i < len(words):
+        w = words[i]
+        if rest or not w.startswith("-") or w == "-":
+            out.append(w)
+        elif w == "--":
+            rest = True
+        elif not w.startswith("--") and w[-1] in argopts:
+            i += 1
+        i += 1
+    return out
+
+
+def cutgate_option(words, short, long_):
+    """The argument of option -{short} or --{long_} (`--x=v`, `--x v`, `-xv`, `-x v`), or None."""
+    for i, w in enumerate(words):
+        if w == "--":
+            break
+        if long_ and w.startswith(f"--{long_}="):
+            return w.split("=", 1)[1]
+        if w in (f"--{long_}", f"-{short}") and i + 1 < len(words):
+            return words[i + 1]
+        if short and w.startswith(f"-{short}") and not w.startswith("--") and len(w) > 2:
+            return w[2:]
+    return None
+
+
+def cutgate_inplace(name, words):
+    """True when sed or perl edits its files in place."""
+    for w in words:
+        if w == "--" or not w.startswith("-") or w == "-":
+            continue
+        if w.startswith("--"):
+            if w.startswith("--in-place"):
+                return True
+            continue
+        for ch in w[1:]:
+            if ch == "i":
+                return True
+            if ch in ("MmIdDxCleE" if name == "perl" else "efl"):
+                break
+    return False
+
+
+def cutgate_writes(command, cwd, home):
+    """(what, path, dirs) for a Bash command: each file it writes as far as parsing reaches, as (what, path) pairs with
+    each path resolved against the directory its own `cd`s reached, None when it names an unexpanded variable or is
+    relative to a `cd` that did; and every directory it runs in or names (`cd`, `git -C`), for the tree check."""
+    toks, writes, dirs = cutgate_tokens(command), [], [cwd]
+
+    def path(word, base):
+        word = word.replace("${HOME}", home).replace("$HOME", home)
+        if word == "~" or word.startswith("~/"):
+            word = home + word[1:]
+        if "$" in word or "`" in word or (base is None and not word.startswith("/")):
+            return None
+        return os.path.realpath(os.path.join(base or "/", word))
+
+    cmds, cur = [], []
+    for kind, text in toks:
+        if kind == "o" and text in CUTGATE_SPLIT:
+            cmds.append(cur)
+            cur = []
+        else:
+            cur.append((kind, text))
+    cmds.append(cur)
+    for cmd in cmds:
+        words, j = [], 0
+        while j < len(cmd):
+            kind, text = cmd[j]
+            if kind == "o":
+                target = cmd[j + 1][1] if j + 1 < len(cmd) and cmd[j + 1][0] != "o" else ""
+                j += 2
+                if CUTGATE_WRITE_OP.fullmatch(text) and not (text.endswith(">&") and re.fullmatch(r"\d+-?|-", target)):
+                    writes.append((f"redirect {text}", path(target, cwd) if target else None))
+                continue
+            words.append(text)
+            j += 1
+        while words and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+            words.pop(0)
+        while words and os.path.basename(words[0]) in CUTGATE_WRAPPERS:
+            wrapper = os.path.basename(words.pop(0))
+            while words and (words[0].startswith("-") or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", words[0])):
+                words.pop(0)
+            if wrapper == "timeout" and words:
+                words.pop(0)
+        if not words:
+            continue
+        name, args = os.path.basename(words[0]), words[1:]
+        if name in ("cd", "pushd"):
+            cwd = path(args[0], cwd) if args and args[0] != "-" else (home if not args else None)
+            if cwd:
+                dirs.append(cwd)
+            continue
+        ops = cutgate_operands(args, CUTGATE_ARGOPTS.get(name, ""))
+        files = []
+        if name in ("sed", "perl") and cutgate_inplace(name, args):
+            script = r"-[A-Za-z0-9.]*[eE]" if name == "perl" else r"-[A-Za-z0-9.]*[ef]"
+            scripted = any(w.startswith(("--expression", "--file")) or re.fullmatch(script, w) for w in args)
+            files = ops if scripted else ops[1:]
+        elif name in ("tee", "rm", "unlink", "touch", "truncate"):
+            files = ops
+        elif name in ("cp", "mv", "install", "ln", "rsync"):
+            into = cutgate_option(args, "t", "target-directory")
+            files = [into] if into else ops[-1:] if len(ops) > 1 else []
+        elif name == "dd":
+            files = [w[3:] for w in args if w.startswith("of=")]
+        elif name == "patch":
+            if not any(w in ("--dry-run", "-C", "--check") for w in args):
+                into = cutgate_option(args, "d", "directory")
+                files = [os.path.join(into, ".") if into else "."] if not ops else ops[:1]
+        elif name == "git":
+            here, k = cwd, 0
+            while k < len(args) and args[k].startswith("-"):
+                if args[k] in ("-C", "-c") and k + 1 < len(args):
+                    if args[k] == "-C":
+                        here = path(args[k + 1], here)
+                        dirs += [here] if here else []
+                    k += 1
+                elif args[k].startswith("--work-tree="):
+                    here = path(args[k].split("=", 1)[1], here)
+                k += 1
+            sub = args[k:]
+            if sub[:1] == ["apply"] and ("--apply" in sub or
+                                         not any(w in ("--check", "--stat", "--numstat", "--summary") for w in sub)):
+                writes.append(("git apply", here))
+            continue
+        writes.extend((name, path(f, cwd)) for f in files)
+    return writes, dirs
+
+
+class CutgateGitError(Exception):
+    pass
+
+
+def cutgate_git(*args):
+    """A git call's stdout; raises CutgateGitError naming the call and its error."""
+    try:
+        got = subprocess.run(["git", "--no-optional-locks", *args], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise CutgateGitError(f"git {args[-1]}: {e}") from e
+    if got.returncode != 0:
+        err = " ".join(got.stderr.decode("utf-8", "replace").split()) or f"exit {got.returncode}"
+        raise CutgateGitError(f"git {' '.join(args[2:]) or args[-1]}: {err}")
+    return got.stdout.decode("utf-8", "replace")
+
+
+def cutgate_trees(dirs, command):
+    """The git work trees a Bash call runs in or names: its directories, and the nearest existing directory of each
+    absolute path in its text (heredoc bodies included), at most CUTGATE_DIRS of them; a directory in no tree is
+    skipped."""
+    seen, tops = set(), []
+    for found in CUTGATE_ABS.findall(command):
+        dirs.append(os.path.expanduser(found))
+    for d in filter(None, dirs):
+        d = os.path.realpath(d)
+        while d != os.sep and not os.path.isdir(d):
+            d = os.path.dirname(d)
+        if d == os.sep or d in seen:
+            continue
+        seen.add(d)
+        if len(seen) > CUTGATE_DIRS:
+            break
+        try:
+            top = cutgate_git("-C", d, "rev-parse", "--show-toplevel").strip()
+        except CutgateGitError as e:
+            if "not a git repository" in str(e) or "must be run in a work tree" in str(e):
+                continue
+            raise
+        if top and top not in tops:
+            tops.append(top)
+    return tops
+
+
+def cutgate_dirty(top):
+    """The tree's `git status --porcelain` entries, submodules ignored."""
+    out = cutgate_git("-C", top, "status", "--porcelain=v1", "-z", "--ignore-submodules=all")
+    entries, parts, k = [], out.split("\0"), 0
+    while k < len(parts):
+        e = parts[k]
+        k += 1
+        if not e:
+            continue
+        entries.append(e)
+        if e[0] in "RC":
+            k += 1  # a rename's or copy's source path
+    return entries
+
+
+def cutgate_cache_path(event, home):
+    key = event.get("agent_id") or hashlib.sha256(str(event.get("transcript_path")).encode()).hexdigest()[:32]
+    return os.path.join(home, ".local", "state", "pfm", "cutgate", f"{key}.json")
+
+
+def cutgate_cache_save(path, cache):
+    """Saves atomically and prunes caches a week old; an OSError rises to the caller."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(cache, f)
+    os.replace(tmp, path)
+    week = time.time() - 7 * 86400
+    for old in os.listdir(os.path.dirname(path)):
+        full = os.path.join(os.path.dirname(path), old)
+        try:
+            if os.path.getmtime(full) < week:
+                os.remove(full)
+        except OSError:
+            continue
+
+
+def cutgate_bash(event, given, state, home, open_roots):
+    """The Bash half of the gate: None to allow silently, else the deny reason's tail. Before the cut, a write the
+    command parses into a path outside the open roots is refused, and so is any Bash call (bar the kit itself) once a
+    tree it runs in or names has entries in `git status --porcelain` it lacked at this agent's first Bash there: the
+    backstop for writes parsing misses. The first cut seen is cached, so later calls cost one file read."""
+    command = given.get("command")
+    if not isinstance(command, str):
+        raise ValueError("hook payload names no Bash command")
+    cache_path = cutgate_cache_path(event, home)
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+        if not isinstance(cache, dict) or not isinstance(cache.get("trees"), dict):
+            raise ValueError("no cache object")
+    except FileNotFoundError:
+        cache = {"cut": False, "trees": {}}
+    except (OSError, ValueError) as e:
+        sys.stderr.write(f"tracetree cutgate: cache {cache_path} unreadable, starting over: {e}\n")
+        cache = {"cut": False, "trees": {}}
+    if cache.get("cut"):
+        return None
+    cwd = event.get("cwd") if isinstance(event.get("cwd"), str) and event.get("cwd") else os.getcwd()
+    writes, dirs = cutgate_writes(command, cwd, home)
+    refused = [f"{what} {target}" for what, target in writes if target and not cutgate_under(target, open_roots)]
+    try:
+        tops = cutgate_trees(dirs, command)
+        new, changed = [], False
+        for top in tops:
+            dirty = cutgate_dirty(top)
+            if top not in cache["trees"]:
+                cache["trees"][top], changed = dirty, True
+            elif not CUTGATE_KIT.search(command):
+                new += [f"{top}: {e[3:]}" for e in dirty if e not in cache["trees"][top]]
+    except CutgateGitError as e:
+        raise OSError(f"{e} — the tree check did not run") from e
+    reason = None
+    if refused:
+        reason = f" Bash writes into the tree: {'; '.join(refused[:5])}."
+    elif new:
+        reason = (f" The tree changed before the cut (git status --porcelain, submodules ignored): "
+                  f"{', '.join(new[:10])}{' …' if len(new) > 10 else ''}. A Bash write wrote it; the segment kit "
+                  "stays open, a git failure allows with its cause.")
+    if reason and cutgate_cut(cutgate_transcript(event), state):
+        cache["cut"], changed, reason = True, True, None
+    if changed:
+        try:
+            cutgate_cache_save(cache_path, cache)
+        except OSError as e:
+            raise OSError(f"cache {cache_path} unsaved: {e}") from e
+    return reason
+
+
 def cmd_cutgate():
-    """PreToolUse hook on a foreman's Edit, Write, MultiEdit and NotebookEdit: denies a code edit until the agent's own
-    transcript shows its segment kit run printing a verdict (EMPTY alone is no cut). A write under the flight's state
-    directory or /tmp, and a child whose parent already cut, pass silently. A payload or transcript it cannot read
-    allows the edit and says so to the agent and on stderr, never a silent pass."""
+    """PreToolUse hook on a foreman's Bash, Edit, Write, MultiEdit and NotebookEdit: denies a code edit until the
+    agent's own transcript shows its segment kit run printing a verdict (EMPTY alone is no cut); a Bash call is a code
+    edit per cutgate_bash. A write under the flight's state directory or /tmp, and a child whose parent already cut,
+    pass silently. A payload, transcript, cache or git state it cannot read allows the call and says so to the agent and
+    on stderr, never a silent pass."""
     def unchecked(cause):
         sys.stderr.write(f"tracetree cutgate: {cause}\n")
         print(json.dumps({"hookSpecificOutput": {
@@ -516,14 +885,21 @@ def cmd_cutgate():
         except ValueError as e:
             return unchecked(f"unreadable hook payload: {e}")
         tool = event.get("tool_name")
-        if tool not in CUTGATE_TOOLS:
+        if tool not in CUTGATE_TOOLS and tool != "Bash":
             return
         given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
-        target = given.get("notebook_path" if tool == "NotebookEdit" else "file_path")
         home = os.environ.get("HOME") or os.path.expanduser("~")
         state = os.path.realpath(os.path.join(home, ".local", "state", "pfm"))
-        if isinstance(target, str) and target and \
-                cutgate_under(target, (state, "/tmp", "/private/tmp", os.path.realpath("/tmp"))):
+        open_roots = (state, "/tmp", "/private/tmp", os.path.realpath("/tmp"))
+        if tool == "Bash":
+            tail = cutgate_bash(event, given, state, home, open_roots + ("/dev",))
+            if tail:
+                deny = json.loads(json.dumps(CUTGATE_DENY))
+                deny["hookSpecificOutput"]["permissionDecisionReason"] += tail
+                print(json.dumps(deny))
+            return
+        target = given.get("notebook_path" if tool == "NotebookEdit" else "file_path")
+        if isinstance(target, str) and target and cutgate_under(target, open_roots):
             return
         if cutgate_cut(cutgate_transcript(event), state):
             return

@@ -23,7 +23,7 @@ hooks:
       hooks:
         - type: command
           command: pfm internal call-cap
-    - matcher: Edit|Write|MultiEdit|NotebookEdit
+    - matcher: Bash|Edit|Write|MultiEdit|NotebookEdit
       hooks:
         - type: command
           command: python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate

@@ -493,6 +493,8 @@ for (const [name, model, effort, role] of twins) {
       const commands = (event) => fm.hooks[event].flatMap((entry) => entry.hooks.map((hook) => hook.command));
       assert.deepEqual(commands('PreToolUse'),
         ['pfm internal orchestrator-wait', 'pfm internal call-cap', 'python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate']);
+      // the cut gate holds Bash as well as the edit tools: a pre-cut `sed -i` is a code edit
+      assert.deepEqual(fm.hooks.PreToolUse.map((entry) => entry.matcher), ['Bash', '*', 'Bash|Edit|Write|MultiEdit|NotebookEdit']);
       assert.deepEqual(commands('Stop'), [`python3 -I "${configDir}/hooks/gpt-agent-stop.py" foreman`]);
     }
   });

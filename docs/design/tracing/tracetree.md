@@ -172,9 +172,9 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 
 ### cutgate
 
-**Function:** `cmd_cutgate` — **Run by:** `flights-foreman`'s frontmatter, carried into its rendered twins: a PreToolUse hook on `Edit|Write|MultiEdit|NotebookEdit`, running `python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate` ([hooks.md](../hooks/hooks.md))
+**Function:** `cmd_cutgate` — **Run by:** `flights-foreman`'s frontmatter, carried into its rendered twins: a PreToolUse hook on `Bash|Edit|Write|MultiEdit|NotebookEdit`, beside the `Bash` entry running `pfm internal orchestrator-wait`, running `python3 $HOME/.claude/skills/tracetree/tracetree.py cutgate` ([hooks.md](../hooks/hooks.md))
 
-`cutgate` makes step 4 of the foreman's manual, the cut, a mechanism: a code edit is denied until the agent ran `segment` itself.
+`cutgate` makes step 4 of the foreman's manual, the cut, a mechanism: a code edit, by an edit tool or by Bash, is denied until the agent ran `segment` itself.
 
 - Any other tool passes untouched and the hook prints nothing.
 - The transcript read is the agent's own, resolved as pfm's `call-cap` hook does (`callCapCount`): a payload naming an `agent_id` whose `transcript_path` is not `agent-{id}.jsonl` reads `agent-{id}.jsonl` in that session's `subagents/` directory. An `agent_id` outside `[A-Za-z0-9_-]+` never becomes a path.
@@ -182,7 +182,12 @@ The first line is `ANSWER after {t}s` or `ANSWER TIMEOUT after {t}s`, the run, t
 - A target under `$HOME/.local/state/pfm/` (the flight directory: `run.md`, the doors file, briefs), `/tmp/` or `/private/tmp/`, its path resolved through symlinks first, passes silently.
 - A child whose parent already cut passes silently: the agent's first message, or a brief file it names under `$HOME/.local/state/pfm/`, holds a line starting `SEGMENT ` or the line `DEPTH 3`. A child's brief is a file whose path is its spawn message, so the file is read as well.
 - Otherwise it denies with `permissionDecision: deny`, its reason naming step 4's `segment` call and that flight-directory writes stay open.
-- A payload, agent id or transcript it cannot read, and any defect of its own, allows the edit with `additionalContext` `cut-gate: could not check the cut ({cause}); run step 4's segment before editing` and the cause on stderr, never a silent pass. It always exits 0.
+- Bash (`cutgate_bash`) is denied before the cut, with the same reason plus what it found, in two ways:
+  - Parsed writes: the command is tokenized (quotes, heredoc bodies, `$(…)` kept apart) and split into simple commands; a redirect `>`, `>>`, `>|`, `&>`, `&>>` (a `>&N` duplication is none), `sed -i` and `perl -i` (their files), `tee`, `rm`, `touch`, `truncate`, `dd of=`, the destination of `cp`, `mv`, `install`, `ln`, `rsync`, `git apply` (not `--check` or `--stat`) and `patch` (not `--dry-run`) name a write. Each path resolves against the payload's `cwd` as the command's own `cd`s and `git -C`s move it, `$HOME` and `~` expanded; a write under the flight's state directory, `/tmp/`, `/private/tmp/` or `/dev/` passes. A path naming any other variable, or relative to a `cd` that does, is left to the backstop.
+  - Backstop for what parsing misses (`python3 - <<EOF`, `find -exec`): every git work tree the call runs in or names — its `cwd`, its `cd` and `git -C` targets, the nearest existing directory of each absolute path in its text, at most 16 — is read with `git status --porcelain`, submodules ignored. The first Bash call that sees a tree records its entries as that agent's baseline, so dirt present before the agent is not its write; an entry the baseline lacks denies the call, naming the paths. The kit's own call is exempt, so the foreman can still cut.
+  - The baselines and the cut, once seen, are cached per agent under `$HOME/.local/state/pfm/cutgate/` (a week-old cache pruned); after the cut every Bash call costs one cache read and passes silently.
+  - A git call that fails other than on a directory outside any repository, and a cache it cannot save, allow the call with the unchecked context below, never as a clean tree.
+- A payload, agent id, transcript, Bash command or git state it cannot read, and any defect of its own, allows the call with `additionalContext` `cut-gate: could not check the cut ({cause}); run step 4's segment before editing` and the cause on stderr, never a silent pass. It always exits 0.
 
 ## The check
 

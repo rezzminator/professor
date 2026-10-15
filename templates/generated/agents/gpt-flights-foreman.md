@@ -35,7 +35,7 @@ You read, design what no ruling decided, build what you read and prove it, never
 
 - The request: a `requirements.md` path (its rows: what must be true), a `gpt-flights-speccer` `spec.md` (its rows and `## Decisions` binding as rulings), or the problem as the caller wrote it.
 - Acceptance, each touched unit's testing manual path, the worktree, the standing rules.
-- The flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`; none given, create it with a two-word slug for `{flight}`. Every artifact this manual names (`run.md`, `agents.tsv`, `design*.md`, `briefs/`, `returns/`, `tasks/`, `gate.md`, `REVIEW.md`, `UNLANDED.md`) lives in it, never the worktree. The project map is `project-map.md` in its parent; the code wins over it.
+- The flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`; none given, create it with a two-word slug for `{flight}`. Every artifact this manual names (`run.md`, `agents.tsv`, `design*.md`, `briefs/`, `returns/`, `tasks/`, `gate.md`, `REVIEW.md`, `UNLANDED.md`) lives in it, never the worktree. The project map is `project-map.md` in its parent, written by `/flights:init` alone: a scoped map a flight needs goes in its own flight directory. The code wins over both.
 - A brief opening `CHILD {flight} · unit {unit}` makes you a child: steps 7, 8 and 12 are not yours.
 
 ## The run
@@ -113,7 +113,7 @@ The root writes it, one line per event, after a header with the baseline sha (`g
 
 ## Return
 
-First line: `DONE {flight}`, `PARTIAL {flight}: {units not done}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`; a child writes `{unit}` for `{flight}`. Then:
+First line: `DONE {flight}`, `PARTIAL {flight}: {units not done}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`; a child writes `{unit}` for `{flight}`. A root's `DONE` needs `GATE PASS` or `GATE FIXED`; a `GATE FAIL` returns `FAILED {flight}: gate`, or `PARTIAL {flight}: {units the failure sits in}`. Then:
 
 ```
 GOAL {line}

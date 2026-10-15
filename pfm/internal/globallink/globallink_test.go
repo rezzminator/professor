@@ -290,8 +290,8 @@ func TestDescribeStateNamesDanglingByLinkName(t *testing.T) {
 	got := DescribeState(
 		Dangling,
 		"/home/x/.codex/agents/alpha.toml",
-		"/home/x/.local/state/pfm/generated/codex-agents/alpha.toml",
-		"/home/x/.local/state/pfm/generated/codex-agents/alpha.toml",
+		"/home/x/.local/share/engine-sync/gone/alpha.toml",
+		"/home/x/.local/share/engine-sync/gone/alpha.toml",
 	)
 	if !strings.Contains(got, "DANGLING") || !strings.Contains(got, "/home/x/.codex/agents/alpha.toml") {
 		t.Fatalf("DescribeState(dangling) = %q, want it to name DANGLING and the link path", got)

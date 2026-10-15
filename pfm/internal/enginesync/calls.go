@@ -128,7 +128,7 @@ func (runner Runner) Mirror(ctx context.Context, engine, action, repo string) (M
 
 // GlobalOptions are the installer's Codex steps for one run. An empty
 // CodexHomes is the explicit empty roster (--no-codex-home): pfm always names
-// its roster, never leaving engine-sync to read targets.json for it.
+// its roster, never leaving engine-sync to read the global file's targets for it.
 type GlobalOptions struct {
 	// Adopt passes --adopt: an unowned regular file at a declared agent's path
 	// is moved aside into engine-sync's adopted store and replaced.

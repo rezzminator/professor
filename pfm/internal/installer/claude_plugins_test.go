@@ -39,6 +39,7 @@ var testPlugins = []testPlugin{
 		Source: "rezzminator/tool-visibility-controller",
 		ID:     "tool-visibility-controller@tool-visibility-controller",
 	},
+	{Name: "engine-sync", Source: "rezzminator/engine-sync", ID: "engine-sync@engine-sync"},
 }
 
 // pluginCall is one argv the fake runner saw, with the account it ran for.
@@ -243,9 +244,18 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"effort-live-control@effort-live-control":true,"tool-visibility-controller@tool-visibility-controller":true}}`
+		`"sub-agent-compact@sub-agent-compact":true,"effort-live-control@effort-live-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
+		`"engine-sync@engine-sync":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
-	writeInstalledPlugins(t, first, testPlugins[0].ID, testPlugins[1].ID, testPlugins[2].ID, testPlugins[3].ID)
+	writeInstalledPlugins(
+		t,
+		first,
+		testPlugins[0].ID,
+		testPlugins[1].ID,
+		testPlugins[2].ID,
+		testPlugins[3].ID,
+		testPlugins[4].ID,
+	)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	installer := pluginEngine(home, binary, first, second, runner, &out, true)
@@ -477,10 +487,19 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true,"effort-live-control@effort-live-control":true,"tool-visibility-controller@tool-visibility-controller":true}}`
+		`"sub-agent-compact@sub-agent-compact":true,"effort-live-control@effort-live-control":true,"tool-visibility-controller@tool-visibility-controller":true,` +
+		`"engine-sync@engine-sync":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
-	writeInstalledPlugins(t, first, testPlugins[0].ID, testPlugins[1].ID, testPlugins[2].ID, testPlugins[3].ID)
+	writeInstalledPlugins(
+		t,
+		first,
+		testPlugins[0].ID,
+		testPlugins[1].ID,
+		testPlugins[2].ID,
+		testPlugins[3].ID,
+		testPlugins[4].ID,
+	)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
@@ -510,7 +529,7 @@ func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 }
 
 func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
-	all := []string{testPlugins[0].ID, testPlugins[1].ID, testPlugins[2].ID, testPlugins[3].ID}
+	all := []string{testPlugins[0].ID, testPlugins[1].ID, testPlugins[2].ID, testPlugins[3].ID, testPlugins[4].ID}
 	for _, test := range []struct {
 		name    string
 		prepare func(t *testing.T, dir string)

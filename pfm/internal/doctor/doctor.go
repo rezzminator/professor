@@ -38,6 +38,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 const emptySummary = "none"
@@ -289,6 +290,7 @@ func Run(
 		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
 	)
 	printClaudePluginsDoctor(stdout, claudeStore, dependencies.Env, pluginBuild, tally)
+	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
 	printPluginLogsDoctor(
 		stdout,
 		append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...),
@@ -320,6 +322,7 @@ func Run(
 		dependencies.Env,
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
 		runtime.Config.ClaudeConfigDirs(),
+		update.RetiredRegistryNames(),
 		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings

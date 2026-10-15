@@ -103,7 +103,7 @@
     "global/codex/config.toml": {
       "curated": true
     },
-    "global/engine-sync/config.json": {
+    "global/engine-sync.json": {
       "curated": true
     },
     "global/commands/context-audit.md": {
@@ -308,11 +308,6 @@
     "project/scripts/checkpoint.sh": {
       "sources": {
         ".claude/scripts/checkpoint.sh": "8184d92715dd35504d17af80a5111d6ea1989047f59bd50c051f3fe65ec178dc"
-      }
-    },
-    "project/scripts/codex-sync.sh": {
-      "sources": {
-        ".claude/scripts/codex-sync.sh": "09545a041055b9ebb071188b8433aa0913c2a3d19ed7ecab799565d6db2a7abc"
       }
     },
     "project/scripts/dev.sh": {

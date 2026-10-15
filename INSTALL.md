@@ -43,6 +43,8 @@ When required but unavailable, the binary produces `engine-sync binary unavailab
 
 An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@professor`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link; rebuilding pfm does not produce engine-sync.
 
+Once the stable binary exists, `pfm install --yes` also links it onto PATH: `~/.local/bin/engine-sync` -> `~/.local/share/engine-sync/bin/engine-sync`. It writes that link only when the path is absent or already that link; any other entry there stays as it is and `pfm doctor` warns. `pfm uninstall` removes the link only when it is pfm's.
+
 The `claude` and `codex` executables are not installed by `pfm`. Their self-doctors are optional engine diagnostics even when accounts are configured: a broken engine capability stays visible, but it cannot block unrelated host installation. Use `--skip-engine codex` to skip the Codex probe and leave Codex mirror and hook surfaces unmanaged for this run.
 
 ## 1. Binary install — `pfm` only (2 minutes)

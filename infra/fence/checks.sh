@@ -248,10 +248,10 @@ checks_templates_descriptions() {
 
 }
 
-checks_engine_sync_policy() { # <config-home>: stage the shipped machine policy for a compiler's jail
-  local policy="$REPO_ROOT/templates/global/engine-sync/config.json" destination="$1/engine-sync"
-  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/config.json"; then
-    echo "engine-sync: machine policy could not be staged from $policy into $destination/config.json" >&2
+checks_engine_sync_policy() { # <home>: stage the shipped machine policy as the home's ~/.claude/engine-sync.json for a compiler's jail
+  local policy="$REPO_ROOT/templates/global/engine-sync.json" destination="$1/.claude"
+  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/engine-sync.json"; then
+    echo "engine-sync: machine policy could not be staged from $policy into $destination/engine-sync.json" >&2
     return 1
   fi
 }
@@ -311,7 +311,7 @@ checks_mirror_tree_stage() { # <dest>: the tree under test as a scratch git repo
 }
 
 checks_templates_mirrors_generate() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config"
+  local es_bin="$TMP_BASE/engine-sync/engine-sync"
   local tree home="$TMP_BASE/engine-sync/mirror-home"
   tree="$(checks_mirror_tree)"
   head_ "templates — generate the engine mirrors"
@@ -328,13 +328,13 @@ checks_templates_mirrors_generate() {
     fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
   elif ! engine_sync_build "$es_bin"; then
     fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
-  elif ! checks_engine_sync_policy "$config_home"; then
+  elif ! checks_engine_sync_policy "$home"; then
     fail_step "mirror generation could not run — the machine policy could not be staged (see above); no mirror gate below is a verdict on the tree"
   elif ! mkdir -p "$home" || ! checks_mirror_tree_stage "$tree"; then
     fail_step "mirror generation could not run — the tree under test could not be staged (see above); no mirror gate below is a verdict on the tree"
   else
     local report="$TMP_BASE/engine-sync/mirror-build.log" rc=0
-    HOME="$home" XDG_CONFIG_HOME="$config_home" "$es_bin" build "$tree" >"$report" 2>&1 || rc=$?
+    HOME="$home" "$es_bin" build "$tree" >"$report" 2>&1 || rc=$?
     if [ "$rc" -eq 0 ] && : >"$tree.built"; then
       ok "engine mirrors generated from the tree under test ($(tail -n 1 "$report"))"
     else
@@ -408,7 +408,7 @@ checks_templates_generated_agents() {
     return
   fi
   out="$jail/engine-sync-global.out"
-  if ! checks_engine_sync_policy "$home/.config"; then
+  if ! checks_engine_sync_policy "$home"; then
     fail_step "generated agents NOT RENDERED — the machine policy could not be staged in the jail"
     rm -rf "$jail"
     return
@@ -451,10 +451,10 @@ checks_templates_generated_agents() {
       fail_step "generated agents: $rendered of $declared declaration(s) rendered — missing: $missing"
     elif [[ -n "$unknown" ]]; then
       printf '%s\n' "$unknown"
-      fail_step "generated agents: engine-sync dropped MCP tools from OpenCode twins ($(grep -c 'unknown MCP server' <<<"$unknown") distinct 'unknown MCP server' warning(s), above) — list the server in templates/global/engine-sync/config.json mcp.globalServers, or fix the engine-sync machine path that ignores it"
+      fail_step "generated agents: engine-sync dropped MCP tools from OpenCode twins ($(grep -c 'unknown MCP server' <<<"$unknown") distinct 'unknown MCP server' warning(s), above) — list the server in templates/global/engine-sync.json mcp.globalServers, or fix the engine-sync machine path that ignores it"
     elif [[ -n "$unmapped" ]]; then
       printf '%s\n' "$unmapped"
-      fail_step "generated agents: engine-sync omitted the model of an OpenCode twin ($(grep -c 'unmapped OpenCode model alias' <<<"$unmapped") distinct 'unmapped OpenCode model alias' warning(s), above) — add the alias to templates/global/engine-sync/config.json opencode.modelMap, or give the agent an engines.opencode.model alias it maps"
+      fail_step "generated agents: engine-sync omitted the model of an OpenCode twin ($(grep -c 'unmapped OpenCode model alias' <<<"$unmapped") distinct 'unmapped OpenCode model alias' warning(s), above) — add the alias to templates/global/engine-sync.json opencode.modelMap, or give the agent an engines.opencode.model alias it maps"
     elif [[ -n "$stale" ]]; then
       printf '%s\n' "$stale"
       fail_step "generated agents: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents"
@@ -493,13 +493,13 @@ checks_templates_mirrors_marker() {
 }
 
 checks_templates_mirrors_roster() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config" rc
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" mirror_home="$TMP_BASE/engine-sync/mirror-home" rc
   head_ "templates — generated agent rosters"
   if ! checks_mirror_tree_ready; then
     fail_step "agent roster NOT GENERATED — the mirrors were not generated from the tree under test, so no roster was compared (see the generation step above)"
-  elif ! checks_engine_sync_policy "$config_home"; then
+  elif ! checks_engine_sync_policy "$mirror_home"; then
     fail_step "agent roster ERROR — the machine policy could not be staged (see above)"
-  elif (cd "$(checks_mirror_tree)" && ENGINE_SYNC_BIN="$es_bin" XDG_CONFIG_HOME="$config_home" HOME="$TMP_BASE/engine-sync/mirror-home" node scripts/check-agent-roster.mjs); then
+  elif (cd "$(checks_mirror_tree)" && ENGINE_SYNC_BIN="$es_bin" HOME="$mirror_home" node scripts/check-agent-roster.mjs); then
     ok "Codex and OpenCode agent rosters match their Claude sources"
   else
     rc=$?
@@ -546,19 +546,6 @@ checks_templates_worktree_script() {
   fi
 }
 
-checks_templates_codex_sync() {
-  head_ "templates — codex-sync door"
-  local cs_copy
-  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
-    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
-      ok "codex-sync ($cs_copy) forwards each stage, refuses a bad ENGINE_SYNC_BIN by name, and warns of an unavailable compiler only with a pending edit"
-    else
-      fail_step "codex-sync regression FAILED ($cs_copy) — see output"
-    fi
-  done
-
-}
-
 checks_templates_dev_report() {
   head_ "templates — go test report under pipefail"
   if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
@@ -596,12 +583,12 @@ checks_templates_mirrors_opencode() {
   # under a scratch home; verification never depends on or installs a host binary.
   if ! need_tool go templates || ! engine_sync_build "$es_bin"; then
     fail_step "opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)"
-  elif ! checks_engine_sync_policy "$opencode_home/.config"; then
+  elif ! checks_engine_sync_policy "$opencode_home"; then
     fail_step "opencode mirror NOT CHECKED — the machine policy could not be staged (see above)"
   elif ! checks_mirror_tree_ready; then
     fail_step "opencode mirror NOT CHECKED — the mirrors were not generated from the tree under test (see the generation step above)"
-  elif XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode check "$(checks_mirror_tree)" --home "$opencode_home" \
-    && XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode doctor "$(checks_mirror_tree)" --home "$opencode_home"; then
+  elif "$es_bin" opencode check "$(checks_mirror_tree)" --home "$opencode_home" \
+    && "$es_bin" opencode doctor "$(checks_mirror_tree)" --home "$opencode_home"; then
     ok "opencode mirror parseable and current against the tree under test"
   else
     fail_step "opencode mirror FAILED — the mirror generated from the tree under test does not check (see above)"
@@ -713,7 +700,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
-    generated-agents release-check codex-sync refresh-scope worktree-script dev-report \
+    generated-agents release-check refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name"

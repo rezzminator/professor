@@ -64,7 +64,7 @@ Consequences: hooks call a binary at a path that never changes, `{engine-sync ho
 | `pfm codex build\|check\|agents`, `pfm opencode build\|check\|doctor` | OpenCode `instructions` receipt (`opencode_instructions.go`), the fleet prompt's one door |
 | installer Codex role, command and skill fan-out | `resume-unkill`, `codex_hooks.go`, `hook_probe.go`, `codexappendix` |
 | workbench mirror compile (`workbench/mirror.go`) | `codexmeta`, the session reader with 11 runtime importers |
-| `.claude/scripts/codex-sync.sh` and its template twin | workbench OpenCode seat plugin (`workbench/opencode_seat.go`) |
+| the project-tier Stop and PostToolUse hook script and its template twin, replaced by the plugin hooks | workbench OpenCode seat plugin (`workbench/opencode_seat.go`) |
 
 pfm sheds about 6.4k non-test and 5.5k test lines of Go, about 3% of pfm; the gain is scope: pfm stops compiling configuration.
 
@@ -96,7 +96,7 @@ The repository's `CLAUDE.md` follows `plugins/callmeter/CLAUDE.md`: its gates (`
 | `engine-sync check [repo]` | reports drift, writes nothing, exits 1 on any finding | `pfm codex check` + `pfm opencode check` |
 | `engine-sync doctor [repo]` | `check` plus OpenCode surface validation, targets and owned-file state | `pfm opencode doctor` |
 | `engine-sync global [--codex-home H]…` | role TOMLs, global prompts, skills and skill links into each Codex home, and commands and agents into OpenCode's global dir | `pfm codex agents` and the installer's Codex steps |
-| `engine-sync hook claude {mark\|stop\|start}` | the Claude plugin's hooks | `codex-sync.sh mark\|sync` |
+| `engine-sync hook claude {mark\|stop\|start}` | the Claude plugin's hooks | the project-tier hook script |
 | `engine-sync hook {codex\|opencode}` | path-scoped rule injection (P3) | nothing; `rules.md` |
 
 `build` and `check` keep every flag of `pfm/cmd/pfm/codex_command.go:128-136` and the `--home` of `opencodegen/command.go`, with their meanings.
@@ -135,13 +135,13 @@ When the flag is set: `build`, then `check`. The first failure emits `decision: 
 
 Links the stable binary, runs `check` and rebuilds when stale (a `git pull` lands here), and refreshes the machine-level targets.
 
-The `mark` and `stop` behaviour is `.claude/scripts/codex-sync.sh` ported; every case `scripts/test-codex-sync.sh` pins becomes a Go test of `hook claude`. The dirty flag moves from `/tmp/{project}/guard/codex_dirty` to `{engine-sync state}`. `$ENGINE_SYNC_BIN` replaces the fence dev-binary preference (`/tmp/{project}/timing/pfm-dev-bin`).
+The `mark` and `stop` behaviour replaced the project-tier hook script; every case its shell test pinned is a Go test of `hook claude`. The dirty flag moves from `/tmp/{project}/guard/codex_dirty` to `{engine-sync state}`. `$ENGINE_SYNC_BIN` replaces the fence dev-binary preference (`/tmp/{project}/timing/pfm-dev-bin`).
 
 A repository cannot install an external-source plugin for its contributors from its own settings; each Claude account installs it once, and `pfm install` does that for every fleet account.
 
 ## Machine-level writes
 
-`{engine-sync config}/targets.json` lists the Codex homes and the host's capabilities: `{"codexHomes": ["{codex home}", …], "capabilities": […]}`. Either key may be absent: `pfm install` writes it from `config.CodexHomes()` (`pfm/internal/config/accounts.go:15`); without the file, or without `codexHomes`, the targets are `$CODEX_HOME`, else `~/.codex`. OpenCode's global dir is `~/.config/opencode`, as `pfm/internal/installer/mcp.go:445` hardcodes.
+The `targets` object of `~/.claude/engine-sync.json` lists the Codex homes and the host's capabilities: `"targets": {"codexHomes": ["{codex home}", …], "capabilities": […]}`. Either key may be absent: `pfm install` writes it from `config.CodexHomes()` (`pfm/internal/config/accounts.go:15`); without the file, or without `codexHomes`, the targets are `$CODEX_HOME`, else `~/.codex`. OpenCode's global dir is `~/.config/opencode`, as `pfm/internal/installer/mcp.go:445` hardcodes.
 
 `engine-sync global` writes, per Codex home: role TOMLs under `agents/` as marker-owned regular files (Codex refuses a symlinked role), global prompts and skills, and skill links. In P3 it adds the two hook entries and the global rules block of `rules.md`. Into OpenCode's global dir it writes `command/`, the machine-global agents unless their `engines.opencode` is `false`, and, in P3, the rules shim and the `instructions` entry, each with an engine-sync receipt beside pfm's.
 
@@ -152,17 +152,17 @@ Codex hook trust (P3): pfm registers it for the fleet through `codexappendix.Reg
 Each agent's settings live in its own frontmatter, per-engine settings included; engine-sync parses every source kind with one YAML node parser, and a frontmatter that does not parse is `FRONTMATTER-INVALID {file}:{line}`, never body. A header failing strict YAML is retried once with each single-line `key: value` that does not parse on its own read as a literal string, so the single-line values Claude Code accepts (`argument-hint: [pr-number] [priority]`, `description: Review: run the checks`) still parse.
 
 - **`engines:`** — `codex: {model, effort, sandbox}` and `opencode: {model, mode, permission}`; either engine may be `false`, so the agent is not emitted there. A `model` naming a `codex.modelMap` or `opencode.modelMap` key is mapped, any other value is emitted verbatim; `engines.codex.effort` precedes `effort`, and Codex receives `max` as `xhigh`. gitter's OpenCode Git allow is `engines.opencode.permission` in its three `gitter.md` sources. The flat `codex-*` and `opencode-*` keys are refused, naming the `engines.*` path that replaced them.
-- **`requires:`** — capability names; an agent is installed or emitted only when the host holds all of them. The capability set is `--capability NAME` on every rendering verb plus `capabilities` in `targets.json`; names mean nothing inside engine-sync. pfm passes `--capability gpt-agents` when `claude.gptAgents` is true ([GPT twins](../gpt-twins/gpt-twins.md)).
+- **`requires:`** — capability names; an agent is installed or emitted only when the host holds all of them. The capability set is `--capability NAME` on every rendering verb plus `targets.capabilities` in `~/.claude/engine-sync.json`; names mean nothing inside engine-sync. pfm passes `--capability gpt-agents` when `claude.gptAgents` is true ([GPT twins](../gpt-twins/gpt-twins.md)).
 - **Keys** — Claude Code's native sub-agent keys, engine-sync's own `engines`, `requires` and `role`, and the host's `agents.passthroughKeys` (Professor's machine policy lists `autoCompact` and `visibility`); any other key warns `UNKNOWN-KEY`.
 - **Derived agents** — each `templates/global/agents/{name}.md` declaration names `from` (an original, another declaration, or `general-purpose`). Its native frontmatter replaces the base settings; `add` and `unset` adjust them. Body `## Section` overrides carry `pins`, with optional `retitle`; `rename` is simultaneous, and `prepend`/`append` hold YAML block-scalar text. Shared files, below `templates/global/agents/shared/` with no `name`, apply through ordered `extends` paths relative to the declaring file and are never installed or emitted. Declarations are machine-only: project `.claude/agents/` entries carrying a declaration key are named problems. engine-sync stamps `role: {root original}`; a drifted pin fails `SECTION-DRIFT` until `engine-sync variants pin` re-pins it after review. The contract is `plugins/engine-sync/docs/interface.md`; `plugins/engine-sync/docs/agent.schema.json` describes source frontmatter.
 - **Machine doctor** is closed-world per engine: each declared agent is `INSTALLED`, `MISSING`, `STALE`, `SHADOWED`, `SKIPPED` or `BROKEN` (its source or render fails, a failing row that leaves the healthy agents inspected), and an unowned file at an undeclared name in a managed registry is a `STRAY` warning. `engine-sync global --adopt` (`pfm install --adopt-agents`) moves a shadowing hand file under `{XDG state}/engine-sync/adopted/{UTC timestamp}/` and installs the declared agent.
 
 ## pfm after the cut
 
-- **`pfm install`** installs no engine-sync plugin on its own; listing the full id `engine-sync@professor` in `claude.plugins` has it ensured through the primary account like any listed plugin (`pfm/internal/installer/claude_plugins.go`). It writes `targets.json` and runs `engine-sync global --codex-home H` for every home.
+- **`pfm install`** ensures the engine-sync plugin through the primary account: `engine-sync` is in the default `claude.plugins` list (`pfm/internal/config/claude_plugins.go`), and doctor warns when a set list omits it. It writes `~/.claude/engine-sync.json` (the shipped policy plus the `targets` roster, replacing `targets.json`) and runs `engine-sync global --codex-home H` for every home.
 - **Workbench:** `EnsureMirror` and `CheckMirror` (`pfm/internal/workbench/mirror.go:21`) exec `engine-sync build|check {bench}`.
 - **`pfm doctor`** runs `engine-sync doctor` and renders its rows; a missing binary is a failing row, never an absent one.
-- **Forwarders:** for one release `pfm codex build|check|agents` and `pfm opencode build|check|doctor` exec the stable binary with the same arguments, print one stderr line naming the engine-sync command, and pass its exit code through. Without them every adopter's Stop hook calls a `pfm codex` that answers `unknown action`, which `codex-sync.sh` turns into `decision: block` on every Stop.
+- **Forwarders:** for one release `pfm codex build|check|agents` and `pfm opencode build|check|doctor` exec the stable binary with the same arguments, print one stderr line naming the engine-sync command, and pass its exit code through. Without them every adopter's Stop hook calls a `pfm codex` that answers `unknown action`, which the project-tier hook script turned into `decision: block` on every Stop.
 
 ## Doors
 
@@ -180,7 +180,7 @@ Every pfm path that writes a Codex or OpenCode artifact from Claude sources. P1 
 | install role fan-out and retirement | `global_fanout.go`, `global_agent_retire.go` |
 | workbench mirror | `pfm/internal/workbench/mirror.go:21`, called from `pfm/internal/hookentry/codex_launch.go:113` and the chat new, satellite, reload and persona paths |
 | test jail role staging | `pfm/internal/testjail/registry.go` → `RunGlobalAgents` |
-| Stop and PostToolUse hooks | `.claude/scripts/codex-sync.sh` via `.claude/settings.json:52,67`; `templates/project/scripts/codex-sync.sh` via `templates/project/settings.json:58` |
+| Stop and PostToolUse hooks | the engine-sync plugin's `plugins/engine-sync/hooks/hooks.json` (`hook claude mark\|stop\|start`); the project tier registers none |
 | CI mirror generation | `.github/workflows/verify.yml:46-48`, `.github/workflows/plugin-scan.yml:42-43` |
 | fence mirror generation | `infra/fence/checks.sh:216-221` |
 | dead compiler | `templates/project/scripts/build-codex.mjs`, checked by `scripts/check-codex-markers.mjs` (`infra/fence/checks.sh:235`), claimed by `CLAUDE.md:56` |
@@ -198,7 +198,7 @@ The dead compiler has been unwired since v0.58.0 (`releases/v0.58.0.md:14`) and 
 1. `engine-sync build` output equals `pfm codex build` plus `pfm opencode build` output from the cut commit, byte for byte, for this repository and a fixture adopter, project files and jail-home files both.
 2. The tests that move with `codexgen` and `opencodegen` pass in engine-sync's own gate, and `check` reports the same `CONFLICT`, `ORPHAN`, `UNPARSEABLE` and `INVALID` lines for the same broken fixtures.
 3. `engine-sync global --codex-home H` writes what `pfm install`'s Codex steps write today into a jail home.
-4. Every `scripts/test-codex-sync.sh` case passes as a Go test of `hook claude`; `claude plugin validate --strict` passes.
+4. Every case of the retired shell hook test passes as a Go test of `hook claude`; `claude plugin validate --strict` passes.
 5. `go list -deps ./...` in `pfm/` lists neither package; the forwarders keep today's exit codes; `pfm doctor` shows a failing row when the binary is absent.
 6. `.claude/scripts/dev.sh iso gate pfm` and `iso gate templates` pass; every door in the table is gone or execs the binary.
 
@@ -265,7 +265,7 @@ OpenCode's V1 `config` hook can add agents, commands, instructions and MCP serve
 - `docs/SETUP.md` § 7b: the compiler is engine-sync.
 - `CLAUDE.md` § Vocabulary (engine mirrors, plugins) and § Runtime (Codex, OpenCode), through `/pcm`.
 - `plugins/CLAUDE.md`: the plugin list and alpha copies; `README.md`: the plugin list.
-- `.professor/manifest.json`: the `codex-build.json` and `codex-sync.sh` rows; `scripts/arch-check.sh` rows naming the moved packages.
+- `.professor/manifest.json`: the `codex-build.json` row; `scripts/arch-check.sh` rows naming the moved packages.
 
 ## Sources
 

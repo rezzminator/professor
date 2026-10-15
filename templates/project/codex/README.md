@@ -99,7 +99,7 @@ pfm codex build    # reconcile generated outputs
 pfm codex check    # read-only; exit 1 on any finding
 ```
 
-`check` is CI / pre-merge-gate material: a command whose frontmatter changed leaves Codex routing on a stale description until the compiler runs again. The deployed `codex-sync.sh` hook bridge marks Claude-source edits dirty, then runs both commands at turn end; Bash-driven writes remain the audit/check backstop's responsibility.
+`check` is CI / pre-merge-gate material: a command whose frontmatter changed leaves Codex routing on a stale description until the compiler runs again. The engine-sync plugin's hooks mark Claude-source edits dirty, then run both commands at turn end; Bash-driven writes remain the audit/check backstop's responsibility.
 
 ### Hand-written cards
 

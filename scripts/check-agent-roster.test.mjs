@@ -17,7 +17,6 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 function fixture(t, codex = {}, project = { version: 1 }, machine = {}, files = {}, allowBuildFinding = false) {
   const root = mkdtempSync(join(scratch, "project-"));
   const home = join(root, "home");
-  const configHome = join(home, ".config");
   const put = (path, text) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
@@ -28,14 +27,14 @@ function fixture(t, codex = {}, project = { version: 1 }, machine = {}, files = 
   put("demo-child/.claude/agents/beta.md", "---\nname: beta\ndescription: Fixture role\nmodel: smart\n---\nRead the child.\n");
   for (const [path, text] of Object.entries(files)) put(path, text);
   if (project !== null) put(".claude/engine-sync.json", JSON.stringify(project));
-  put("home/.config/engine-sync/config.json", JSON.stringify({ version: 1, codex, ...machine }));
+  put("home/.claude/engine-sync.json", JSON.stringify({ version: 1, codex, ...machine }));
   mkdirSync(join(root, "scripts"));
   copyFileSync(process.env.ROSTER_CHECK_SUT || join(ROOT, "scripts/check-agent-roster.mjs"), join(root, "scripts/check-agent-roster.mjs"));
   if (existsSync(join(ROOT, "scripts/agent-source-inventory.py")))
     copyFileSync(join(ROOT, "scripts/agent-source-inventory.py"), join(root, "scripts/agent-source-inventory.py"));
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: configHome, ENGINE_SYNC_BIN: binary };
+  const env = { ...process.env, HOME: home, ENGINE_SYNC_BIN: binary };
   for (const key of ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "ENGINE_SYNC_HOME", "ENGINE_SYNC_STATE", "ENGINE_SYNC_WORKBENCH_MARKER",
-    "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"])
+    "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"])
     delete env[key];
   const built = spawnSync(binary, ["build", "."], { cwd: root, env, encoding: "utf8" });
   if (!allowBuildFinding) assert.equal(built.status, 0, built.stdout + built.stderr);
@@ -282,7 +281,7 @@ test("a child whose CLAUDE.md lookup fails is a named failure, not an absent pro
 test("a workbench marker lookup that fails is a named failure, not an absent marker", (t) => {
   const f = fixture(t);
   mkdirSync(join(f.root, "demo-child/.bench"));
-  f.put("home/.config/engine-sync/config.json", JSON.stringify({ version: 1, workbenchMarker: `.bench/${"x".repeat(300)}` }));
+  f.put("home/.claude/engine-sync.json", JSON.stringify({ version: 1, workbenchMarker: `.bench/${"x".repeat(300)}` }));
   cleanVerdictStub(f);
   const result = check(f);
   assert.equal(result.status, 1, result.out);
@@ -361,8 +360,7 @@ function renderShipped(capabilities) {
   cpSync(join(ROOT, 'templates'), join(sourceRoot, 'templates'), { recursive: true });
   mkdirSync(join(home, '.claude'), { recursive: true });
   mkdirSync(join(home, '.codex'), { recursive: true });
-  mkdirSync(join(home, '.config/engine-sync'), { recursive: true });
-  copyFileSync(join(sourceRoot, 'templates/global/engine-sync/config.json'), join(home, '.config/engine-sync/config.json'));
+  copyFileSync(join(sourceRoot, 'templates/global/engine-sync.json'), join(home, '.claude/engine-sync.json'));
   const env = { ...process.env, HOME: home };
   for (const name of ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'ENGINE_SYNC_HOME', 'ENGINE_SYNC_STATE', 'CODEX_HOME',
     'CLAUDE_CONFIG_DIR']) delete env[name];

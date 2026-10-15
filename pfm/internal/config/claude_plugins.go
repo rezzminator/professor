@@ -33,6 +33,7 @@ func DefaultClaudePlugins() []ClaudePlugin {
 		{ID: "sub-agent-compact"},
 		{ID: "effort-live-control"},
 		{ID: "tool-visibility-controller"},
+		{ID: "engine-sync"},
 	}
 }
 

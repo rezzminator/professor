@@ -3205,16 +3205,16 @@ class RecallTest(unittest.TestCase):
 
     def test_a_closed_world_line_turns_delta_when_a_path_it_names_gains_an_occurrence(self):
         self.commit("templates/project/codex/README.md",
-                    ["# Codex", "", "Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write."])
+                    ["# Codex", "", "Run `.claude/scripts/sync-hook.sh sync` by hand after a Bash write."])
         self.run_with(self.repo, hops("1", [
-            "- Nothing else in templates/project registers codex-sync.sh as a hook; other grep hits are prose in docs "
+            "- Nothing else in templates/project registers sync-hook.sh as a hook; other grep hits are prose in docs "
             "[templates/project/codex/README.md:3]"],
             ["@ templates/project/codex/README.md:3",
-             "> Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write.", "= prose"],
+             "> Run `.claude/scripts/sync-hook.sh sync` by hand after a Bash write.", "= prose"],
             ["END returned @ templates/project/codex/README.md:3"]))
         self.edit("templates/project/settings.json",
-                  ['{"hooks": {"Stop": [{"command": ".claude/scripts/codex-sync.sh sync"}]}}'])
-        out = self.recall("1. Quote codex-sync.sh dirty flag readers/writers and symlink handling, plus existing test home.\n")
+                  ['{"hooks": {"Stop": [{"command": ".claude/scripts/sync-hook.sh sync"}]}}'])
+        out = self.recall("1. Quote sync-hook.sh dirty flag readers/writers and symlink handling, plus existing test home.\n")
         self.assertNotIn("FRESH ", out)
         self.assertIn("DELTA ", out)
         self.assertIn('+ templates/project/settings.json:1 {"hooks"', out)

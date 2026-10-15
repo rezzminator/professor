@@ -164,7 +164,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -673,15 +673,17 @@ if [ "$FAILURES" -eq 1 ] && [ ! -s "$T/unit.calls" ] && grep -Fxq 'FAILSTEP temp
   ok 'a failed check-map pfm build is one red step and no check-map run'
 else bad 'check-map build failure' "$(cat "$T/unit.calls")" "$(cat "$T/cm-build-fail.out")"; fi
 
-mkdir -p "$REPO_ROOT/templates/global/engine-sync"
-printf '%s\n' '{"version":1,"codex":{"modelMap":{"smart":"fixture-model"}}}' > "$REPO_ROOT/templates/global/engine-sync/config.json"
+mkdir -p "$REPO_ROOT/templates/global"
+printf '%s\n' '{"version":1,"codex":{"modelMap":{"smart":"fixture-model"}}}' > "$REPO_ROOT/templates/global/engine-sync.json"
 # checks_templates_mirrors_generate and _opencode: engine-sync, built from the mounted source onto
 # $TMP_BASE/engine-sync/engine-sync, checks and builds the mirrors; a failed build is its own red line.
 cat > "$T/es-stub" <<'SH'
 #!/bin/sh
 printf '%s\n' "$*" >> "$MIRROR_CALLS"
-if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/engine-sync/config.json" ]; then
-  cat "${XDG_CONFIG_HOME:-$HOME/.config}/engine-sync/config.json" > "$MIRROR_CALLS.policy"
+es_home="$HOME"; es_prev=""
+for es_arg; do [ "$es_prev" != --home ] || es_home="$es_arg"; es_prev="$es_arg"; done
+if [ -f "$es_home/.claude/engine-sync.json" ]; then
+  cat "$es_home/.claude/engine-sync.json" > "$MIRROR_CALLS.policy"
 else printf 'missing\n' > "$MIRROR_CALLS.policy"; fi
 case "$1" in
   check) [ "${STUB_ES_CHECK_RC:-0}" -eq 0 ] || echo "STALE AGENTS.md"; exit "${STUB_ES_CHECK_RC:-0}" ;;
@@ -691,8 +693,8 @@ case "$1" in
     printf 'HOME=%s XDG_CONFIG_HOME=%s XDG_STATE_HOME=%s XDG_DATA_HOME=%s ENGINE_SYNC_HOME=%s ENGINE_SYNC_STATE=%s CODEX_HOME=%s\n' \
       "$HOME" "${XDG_CONFIG_HOME-unset}" "${XDG_STATE_HOME-unset}" "${XDG_DATA_HOME-unset}" \
       "${ENGINE_SYNC_HOME-unset}" "${ENGINE_SYNC_STATE-unset}" "${CODEX_HOME-unset}" > "$MIRROR_CALLS.env"
-    if [ -f "$home/.config/engine-sync/config.json" ]; then
-      cat "$home/.config/engine-sync/config.json" > "$MIRROR_CALLS.policy"
+    if [ -f "$home/.claude/engine-sync.json" ]; then
+      cat "$home/.claude/engine-sync.json" > "$MIRROR_CALLS.policy"
     else printf 'missing\n' > "$MIRROR_CALLS.policy"; fi
     if [ "${STUB_ES_GLOBAL_RC:-0}" -ne 0 ]; then
       echo 'engine-sync global: beta-max.md: variant "beta-max" from beta.md: "replace" text "ghost" occurs 0 times in the body, want exactly 1'
@@ -748,7 +750,7 @@ es_case() { # es_case <function> [VAR=value…]: run it with engine_sync_build s
 es_case checks_templates_mirrors_generate
 if [ "$(cat "$MIRROR_CALLS")" = "build $TMP_BASE/engine-sync/mirror-tree" ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
   [ "$(cat "$T/es-stage.calls")" = "stage $TMP_BASE/engine-sync/mirror-tree" ] && [ -f "$TMP_BASE/engine-sync/mirror-tree.built" ] &&
-  cmp -s "$REPO_ROOT/templates/global/engine-sync/config.json" "$MIRROR_CALLS.policy" &&
+  cmp -s "$REPO_ROOT/templates/global/engine-sync.json" "$MIRROR_CALLS.policy" &&
   grep -Fq 'engine mirrors generated from the tree under test' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
   ok 'mirror generation stages the tree under test and builds both mirrors there with the engine-sync it built and the tree'"'"'s policy'
 else bad 'mirror generation, current' "$(cat "$T/es-build.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
@@ -790,21 +792,21 @@ if [ ! -s "$MIRROR_CALLS" ] && grep -Fxq 'engine-sync: source unavailable: fixtu
   grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'an engine-sync binary that cannot be built is named, and no mirror command runs'
 else bad 'mirror generation, no binary' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
-mv "$REPO_ROOT/templates/global/engine-sync/config.json" "$T/saved-policy.json"
+mv "$REPO_ROOT/templates/global/engine-sync.json" "$T/saved-policy.json"
 es_case checks_templates_mirrors_generate
 if [ ! -s "$MIRROR_CALLS" ] &&
   grep -Fq 'mirror generation could not run — the machine policy could not be staged' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'mirror generation reports an unreadable machine policy before checking mirrors'
 else bad 'mirror generation, unreadable policy' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
-mv "$T/saved-policy.json" "$REPO_ROOT/templates/global/engine-sync/config.json"
+mv "$T/saved-policy.json" "$REPO_ROOT/templates/global/engine-sync.json"
 roster_case() {
   es_case roster_probe "$@"
 }
 roster_probe() {
   node() {
-    printf '%s %s %s\n' "${ENGINE_SYNC_BIN:-unset}" "${XDG_CONFIG_HOME:-unset}" "$*" > "$T/roster.calls"
-    if [ -n "${XDG_CONFIG_HOME:-}" ]; then
-      cp "$XDG_CONFIG_HOME/engine-sync/config.json" "$T/roster.policy" || return 1
+    printf '%s %s %s\n' "${ENGINE_SYNC_BIN:-unset}" "${HOME:-unset}" "$*" > "$T/roster.calls"
+    if [ -f "$HOME/.claude/engine-sync.json" ]; then
+      cp "$HOME/.claude/engine-sync.json" "$T/roster.policy" || return 1
     else printf 'unstaged\n' > "$T/roster.policy"; fi
     return "${STUB_ROSTER_RC:-0}"
   }
@@ -813,10 +815,10 @@ roster_probe() {
 }
 : > "$T/roster.calls"; : > "$T/roster.tests"
 roster_case
-if [ "$(cat "$T/roster.calls")" = "$es_bin $TMP_BASE/engine-sync/project-config scripts/check-agent-roster.mjs" ] &&
-  cmp -s "$REPO_ROOT/templates/global/engine-sync/config.json" "$T/roster.policy" &&
+if [ "$(cat "$T/roster.calls")" = "$es_bin $TMP_BASE/engine-sync/mirror-home scripts/check-agent-roster.mjs" ] &&
+  cmp -s "$REPO_ROOT/templates/global/engine-sync.json" "$T/roster.policy" &&
   grep -Fq 'scripts/check-agent-roster.test.mjs' "$T/roster.tests" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
-  ok 'roster uses the mirror compiler and staged project-config machine policy and runs its regression suite'
+  ok 'roster uses the mirror compiler and staged mirror-home machine policy and runs its regression suite'
 else bad 'roster effective config handoff' "$(cat "$T/roster.calls")" "$(cat "$T/es.out")"; fi
 roster_case STUB_ROSTER_RC=2
 if grep -Fq 'FAILSTEP agent roster ERROR' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
@@ -841,31 +843,12 @@ for roster_state in '4|GAP install|inventory toolchain gap' '5|SOURCE REJECTED|i
     ok "roster $roster_reason has its own gate classification"
   else bad "roster $roster_reason" "$(cat "$T/es.out")"; fi
 done
-mv "$REPO_ROOT/templates/global/engine-sync/config.json" "$T/saved-roster-policy.json"
+mv "$REPO_ROOT/templates/global/engine-sync.json" "$T/saved-roster-policy.json"
 roster_case
 if grep -Fq 'FAILSTEP agent roster ERROR' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'roster reports policy staging failure as ERROR'
 else bad 'roster policy staging error' "$(cat "$T/es.out")"; fi
-mv "$T/saved-roster-policy.json" "$REPO_ROOT/templates/global/engine-sync/config.json"
-# checks_templates_codex_sync: the door test runs once per twin, the project-tier copy first; a red run is one red step
-# naming the twin that failed, and the other twin still runs.
-cs_case() { # cs_case [VAR=value…]: run it with `bash` stubbed to record each test invocation; output in $T/es.out
-  : > "$T/cs.calls"; FAILURES=0
-  (
-    [ $# -eq 0 ] || export "$@"
-    bash() { printf '%s\n' "$*" >> "$T/cs.calls"; [ "${STUB_CS_FAIL:-}" != "$2" ]; }
-    checks_templates_codex_sync
-    echo "FAILURES=$FAILURES"
-  ) >"$T/es.out" 2>&1
-}
-cs_case
-if [ "$(cat "$T/cs.calls")" = "$(printf '%s\n%s\n' "$REPO_ROOT/scripts/test-codex-sync.sh $REPO_ROOT/templates/project/scripts/codex-sync.sh" "$REPO_ROOT/scripts/test-codex-sync.sh $REPO_ROOT/.claude/scripts/codex-sync.sh")" ] && grep -Fxq 'FAILURES=0' "$T/es.out"; then
-  ok 'the codex-sync door test runs against the project-tier copy and then the .claude twin'
-else bad 'codex-sync door runs' "$(cat "$T/cs.calls")" "$(cat "$T/es.out")"; fi
-cs_case "STUB_CS_FAIL=$REPO_ROOT/.claude/scripts/codex-sync.sh"
-if [ "$(wc -l < "$T/cs.calls" | tr -d ' ')" = 2 ] && grep -Fxq 'FAILSTEP codex-sync regression FAILED (.claude/scripts/codex-sync.sh) — see output' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
-  ok 'a red codex-sync door test on one twin is one red step naming it'
-else bad 'codex-sync door failure' "$(cat "$T/cs.calls")" "$(cat "$T/es.out")"; fi
+mv "$T/saved-roster-policy.json" "$REPO_ROOT/templates/global/engine-sync.json"
 # checks_templates_generated_agents: every machine agent-file declaration is rendered by the
 # engine-sync it built into a jail home; a render error, a short count and an unbuilt binary are each one red step.
 mkdir -p "$REPO_ROOT/templates/global/agents"
@@ -893,7 +876,7 @@ if [ "$(wc -l < "$MIRROR_CALLS" | tr -d ' ')" -eq 1 ] && [ "$(cat "$T/es-build.c
   [[ "$(cat "$MIRROR_CALLS")" == "global --home $TMP_BASE/engine-sync/generated-agents."*"/home --source-repo $TMP_BASE/engine-sync/generated-agents."*"/src --claude-config-dir $TMP_BASE/engine-sync/generated-agents."*"/home/.claude --codex-home $TMP_BASE/engine-sync/generated-agents."*"/home/.codex --capability gpt-agents" ]] &&
   [[ "$(cat "$MIRROR_CALLS.env")" == "HOME=$TMP_BASE/engine-sync/generated-agents."*"/home XDG_CONFIG_HOME=unset XDG_STATE_HOME=unset XDG_DATA_HOME=unset ENGINE_SYNC_HOME=unset ENGINE_SYNC_STATE=unset CODEX_HOME=unset" ]] &&
   grep -Fq "all $ga_count generated agent(s) render through engine-sync into a jail home" "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out" &&
-  cmp -s "$MIRROR_CALLS.policy" "$REPO_ROOT/templates/global/engine-sync/config.json" && ga_jailed; then
+  cmp -s "$MIRROR_CALLS.policy" "$REPO_ROOT/templates/global/engine-sync.json" && ga_jailed; then
   ok "generated agents: every declaration renders into a jail home that no caller's HOME, XDG, engine-sync or Codex variable reaches, the count is named, the jail is removed ($ga_count)"
 else bad 'generated agents, rendered' "$(cat "$MIRROR_CALLS")" "$(cat "$MIRROR_CALLS.env")" "$(cat "$T/es.out")"; fi
 es_case checks_templates_generated_agents STUB_ES_GLOBAL_RC=1
@@ -1003,7 +986,7 @@ want="$(printf '%s\n%s' \
   "opencode check $TMP_BASE/engine-sync/mirror-tree --home $TMP_BASE/engine-sync/opencode-verify-home" \
   "opencode doctor $TMP_BASE/engine-sync/mirror-tree --home $TMP_BASE/engine-sync/opencode-verify-home")"
 if [ "$(cat "$MIRROR_CALLS")" = "$want" ] && [ "$(cat "$T/es-build.calls")" = "engine_sync_build $es_bin" ] &&
-  cmp -s "$REPO_ROOT/templates/global/engine-sync/config.json" "$MIRROR_CALLS.policy" &&
+  cmp -s "$REPO_ROOT/templates/global/engine-sync.json" "$MIRROR_CALLS.policy" &&
   grep -Fq 'opencode mirror parseable and current against the tree under test' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
   ok 'the opencode mirror is checked and doctored by the engine-sync it built, under its own scratch home'
 else bad 'opencode mirror' "$(cat "$T/es-build.calls")" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi

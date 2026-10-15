@@ -8,7 +8,7 @@
     ]
   },
   "machine": {
-    "legacyCodexAgentsDir": ".local/state/pfm/generated/codex-agents",
+    "managedBy": "professor",
     "retiredAgents": [
       "frr",
       "gpt-executor",
@@ -21,9 +21,7 @@
     "retiredFiles": [
       ".codex/agents/explorer.toml"
     ],
-    "generatedAgentsDir": ".local/state/pfm/generated/claude-agents",
     "sourceGeneratedAgentsDir": "templates/generated/agents",
-    "claudeAgentsDir": "",
     "sourceAgentsDir": "templates/global/agents",
     "agentMarkerDir": "templates/global/agents"
   },

@@ -22,6 +22,7 @@ var doctorPluginIDs = []string{
 	"sub-agent-compact@sub-agent-compact",
 	"effort-live-control@effort-live-control",
 	"tool-visibility-controller@tool-visibility-controller",
+	"engine-sync@engine-sync",
 }
 
 var doctorDevIDs = []string{
@@ -29,6 +30,7 @@ var doctorDevIDs = []string{
 	"sub-agent-compact@sub-agent-compact-dev",
 	"effort-live-control@effort-live-control-dev",
 	"tool-visibility-controller@tool-visibility-controller-dev",
+	"engine-sync@engine-sync-dev",
 }
 
 var releaseTargets = installer.ClaudePluginTargets(
@@ -235,7 +237,9 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			marketplaces := filepath.Join(store, "plugins", "known_marketplaces.json")
 			switch state {
 			case "uninstalled":
-				writeDoctorInstalledPlugins(t, store, doctorPluginIDs[0], doctorPluginIDs[2], doctorPluginIDs[3])
+				writeDoctorInstalledPlugins(
+					t, store, doctorPluginIDs[0], doctorPluginIDs[2], doctorPluginIDs[3], doctorPluginIDs[4],
+				)
 			case "settings unreadable":
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
@@ -486,7 +490,13 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 // a duplicate, and a marketplace plugin claude.plugins does not list is
 // checked installed with no copy enabled, a warning when enabled.
 func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
-	names := []string{"cache-live-control", "sub-agent-compact", "effort-live-control", "tool-visibility-controller"}
+	names := []string{
+		"cache-live-control",
+		"sub-agent-compact",
+		"effort-live-control",
+		"tool-visibility-controller",
+		"engine-sync",
+	}
 	for _, state := range []string{
 		"alpha clean", "alpha duplicate", "alpha copy symlinked", "alpha copy missing", "alpha fallback", "release duplicate",
 		"alpha from the default source clone", "alpha source clone moved away", "alpha copy differs",
@@ -847,6 +857,44 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 			printClaudePluginsDoctor(&out, store, env, build, tally)
 			if out.String() != want || tally.warnings != 0 || tally.failures != failures {
 				t.Fatalf("got %q tally=%+v\nwant %q failures=%d", out.String(), tally, want, failures)
+			}
+		})
+	}
+}
+
+func TestEngineSyncHookDoctor(t *testing.T) {
+	omitted := "doctor: claude.plugins omits engine-sync — no hook rebuilds the Codex and OpenCode mirrors; " +
+		"add engine-sync to claude.plugins\n"
+	for _, test := range []struct {
+		name     string
+		plugins  []pfmconfig.ClaudePlugin
+		def      bool
+		want     string
+		warnings int
+	}{
+		{"unset list is the default and silent", pfmconfig.DefaultClaudePlugins(), true, "", 0},
+		{"set list without engine-sync warns", []pfmconfig.ClaudePlugin{{ID: "sub-agent-compact"}}, false, omitted, 1},
+		{"set empty list warns", nil, false, omitted, 1},
+		{"set list with a lookalike name warns", []pfmconfig.ClaudePlugin{{ID: "engine-sync-extra"}}, false, omitted, 1},
+		{"set list with bare engine-sync is silent", []pfmconfig.ClaudePlugin{{ID: "engine-sync"}}, false, "", 0},
+		{
+			"set list with engine-sync@market is silent",
+			[]pfmconfig.ClaudePlugin{{ID: "cache-live-control"}, {ID: "engine-sync@market"}},
+			false, "", 0,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var out bytes.Buffer
+			tally := &doctorTally{}
+			printEngineSyncHookDoctor(&out, test.plugins, test.def, tally)
+			if out.String() != test.want || tally.warnings != test.warnings || tally.failures != 0 {
+				t.Fatalf(
+					"got %q tally=%+v\nwant %q warnings=%d failures=0",
+					out.String(),
+					tally,
+					test.want,
+					test.warnings,
+				)
 			}
 		})
 	}

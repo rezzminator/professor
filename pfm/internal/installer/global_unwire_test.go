@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // stageGlobalSource writes one recorded clone's machine-global sources: two
@@ -156,10 +154,10 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 	}
 }
 
-// TestUninstallRemovesGlobalAgentVariantLinks: a
-// variant's link resolves into the pfm-owned generated directory, not the
-// clone, so the ownership-by-target rule has to know that directory too —
-// otherwise uninstall leaves a working super-* agent in the store.
+// TestUninstallRemovesGlobalAgentVariantLinks: a variant's link resolves into
+// the clone's templates/generated/agents, not templates/global/agents, so the
+// ownership-by-target rule has to know that directory too — otherwise
+// uninstall leaves a working super-* agent in the store.
 func TestUninstallRemovesGlobalAgentVariantLinks(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -173,11 +171,11 @@ func TestUninstallRemovesGlobalAgentVariantLinks(t *testing.T) {
 	)
 	accounts := []string{ClaudeStore(home)}
 	codexHomes := []string{filepath.Join(home, ".codex")}
-	generated := paths.GeneratedClaudeAgentsDir(home)
+	generated := filepath.Join(home, ".professor", "templates", "generated", "agents")
 
-	// engine-sync global renders the variant into the generated directory and
-	// links it on install; the jail stages both, so the uninstall below is
-	// pfm's own unwire. Retiring the directory itself is engine-sync's.
+	// engine-sync global renders the variant into the clone's generated
+	// directory and links it on install, so the uninstall below is pfm's own
+	// unwire.
 	writeFixture(t, filepath.Join(generated, "super-lead.md"), "---\nname: super-lead\neffort: medium\n---\n\nbody\n")
 	for _, config := range accounts {
 		symlinkFixture(t, filepath.Join(generated, "super-lead.md"), filepath.Join(config, "agents", "super-lead.md"))

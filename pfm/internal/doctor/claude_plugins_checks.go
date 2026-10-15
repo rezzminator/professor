@@ -39,6 +39,32 @@ func doctorClaudePluginBuild(
 	}
 }
 
+// engineSyncHookOmission is the line printed when a set claude.plugins leaves out engine-sync: the
+// plugin's hooks are the only door that rebuilds the Codex and OpenCode mirrors.
+const engineSyncHookOmission = "doctor: claude.plugins omits engine-sync — no hook rebuilds the Codex and OpenCode " +
+	"mirrors; add engine-sync to claude.plugins\n"
+
+// printEngineSyncHookDoctor warns once when claude.plugins is set (pluginsDefault false) and no entry
+// is the engine-sync plugin, bare or as engine-sync@marketplace. An unset list is the default, which
+// lists it, so nothing prints.
+func printEngineSyncHookDoctor(
+	stdout io.Writer,
+	plugins []pfmconfig.ClaudePlugin,
+	pluginsDefault bool,
+	tally *doctorTally,
+) {
+	if pluginsDefault {
+		return
+	}
+	if slices.ContainsFunc(plugins, func(plugin pfmconfig.ClaudePlugin) bool {
+		return plugin.Name() == "engine-sync"
+	}) {
+		return
+	}
+	tally.warn()
+	fmt.Fprint(stdout, engineSyncHookOmission)
+}
+
 // printClaudePluginsDoctor checks the shared store once for the plugins build
 // ensures: the -dev ids and their copies on an -alpha build with checkouts, the
 // GitHub ids otherwise, each -alpha fallback a gap. An -alpha build also checks

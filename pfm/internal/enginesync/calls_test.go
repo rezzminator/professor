@@ -373,8 +373,8 @@ func TestMachineDoctor(t *testing.T) {
 		{
 			name:    "a configuration error retains its file and key",
 			code:    1,
-			stdout:  `{"ok":false,"rows":[],"configSources":[],"error":"/h/.config/engine-sync/config.json: machine.modelMap is removed; use codex.modelMap"}`,
-			wantErr: "/h/.config/engine-sync/config.json: machine.modelMap is removed; use codex.modelMap",
+			stdout:  `{"ok":false,"rows":[],"configSources":[],"error":"/h/.claude/engine-sync.json: machine.modelMap is removed; use codex.modelMap"}`,
+			wantErr: "/h/.claude/engine-sync.json: machine.modelMap is removed; use codex.modelMap",
 		},
 		{
 			name: "an unknown level is an error", stdout: `{"ok":true,"rows":[{"level":"info","message":"m"}]}`,

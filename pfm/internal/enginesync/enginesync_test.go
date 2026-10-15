@@ -169,28 +169,40 @@ func TestForwardWithoutABinaryIsExitOneNamingTheCause(t *testing.T) {
 	}
 }
 
-func TestTargetsPath(t *testing.T) {
+func TestGlobalConfigPath(t *testing.T) {
+	if got, want := GlobalConfigPath("/h"), "/h/.claude/engine-sync.json"; got != want {
+		t.Fatalf("GlobalConfigPath = %q, want %q", got, want)
+	}
+}
+
+func TestOldConfigDirs(t *testing.T) {
 	cases := []struct {
 		name string
 		env  map[string]string
-		want string
+		want []string
 	}{
-		{name: "under home", want: "/h/.config/engine-sync/targets.json"},
+		{name: "under home", want: []string{"/h/.config/engine-sync"}},
 		{
 			name: "XDG_CONFIG_HOME when absolute",
 			env:  map[string]string{envXDGConfigHome: "/x"},
-			want: "/x/engine-sync/targets.json",
+			want: []string{"/h/.config/engine-sync", "/x/engine-sync"},
+		},
+		{
+			name: "an XDG_CONFIG_HOME equal to the default is one directory",
+			env:  map[string]string{envXDGConfigHome: "/h/.config"},
+			want: []string{"/h/.config/engine-sync"},
 		},
 		{
 			name: "a relative XDG_CONFIG_HOME is ignored",
 			env:  map[string]string{envXDGConfigHome: "x"},
-			want: "/h/.config/engine-sync/targets.json",
+			want: []string{"/h/.config/engine-sync"},
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := TargetsPath(&paths.MapEnv{Values: testCase.env}, "/h"); got != testCase.want {
-				t.Fatalf("TargetsPath = %q, want %q", got, testCase.want)
+			got := OldConfigDirs(&paths.MapEnv{Values: testCase.env}, "/h")
+			if strings.Join(got, "\n") != strings.Join(testCase.want, "\n") {
+				t.Fatalf("OldConfigDirs = %q, want %q", got, testCase.want)
 			}
 		})
 	}

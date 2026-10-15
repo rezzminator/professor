@@ -32,7 +32,7 @@ type engine struct {
 	planErrors  []error
 	deferred    []error
 	// engineSyncAbsent is set when an uninstall found no engine-sync binary:
-	// the targets step then leaves targets.json with the Codex roles.
+	// the global file then stays with the Codex roles, holding their targets.
 	engineSyncAbsent bool
 	// engineSyncExec and engineSyncDeadline are the test seams of the
 	// engine-sync runner: its process runner and the deadline of `global`;
@@ -241,9 +241,12 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireGlobalSkills())
 	installer.deferFailure(installer.retireStaleLinkStages())
 	installer.deferFailure(installer.retireLegacySwapCommand())
-	// targets.json first: engine-sync global unions its capabilities with
-	// the flags, so a stale list would keep an opted-out agent linked.
-	installer.deferFailure(installer.wireEngineSyncTargets())
+	// The global file first: engine-sync global unions its targets'
+	// capabilities with the flags, so a stale list would keep an opted-out
+	// agent linked, and without it engine-sync refuses to start beside the
+	// old config files.
+	installer.deferFailure(installer.wireEngineSyncConfig())
+	installer.deferFailure(installer.wireEngineSyncPathLink())
 	installer.deferFailure(installer.wireEngineSyncGlobal(assets))
 	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(installer.wireCodexDefaults())
@@ -616,8 +619,10 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	// Deferred, as install defers them: a failing engine-sync step must not
 	// leave the launch agent loaded and the machine targets wired.
+	installer.deferFailure(installer.retireOldEngineSyncFiles())
 	installer.deferFailure(installer.wireEngineSyncGlobal(nil))
-	installer.deferFailure(installer.wireEngineSyncTargets())
+	installer.deferFailure(installer.retireEngineSyncFile())
+	installer.deferFailure(installer.unwireEngineSyncPathLink())
 	if schedulerIsLaunchd {
 		if err := installer.unwireLaunchAgent(ctx); err != nil {
 			return err
@@ -1192,7 +1197,7 @@ func (installer *engine) wireCommands(assets []assetFile) error {
 	config := installer.options.ConfigDir
 	installer.say("commands -> %s", filepath.Join(config, "commands"))
 	for _, asset := range assets {
-		target, found := installer.commandTargetIn(config, asset.path)
+		target, found := commandTargetIn(config, asset.path)
 		if !found {
 			continue
 		}
@@ -1210,7 +1215,7 @@ func (installer *engine) unwireCommands(assets []assetFile) error {
 	config := installer.options.ConfigDir
 	installer.say("commands -> %s", filepath.Join(config, "commands"))
 	for _, asset := range assets {
-		target, found := installer.commandTargetIn(config, asset.path)
+		target, found := commandTargetIn(config, asset.path)
 		if !found {
 			continue
 		}
@@ -1227,10 +1232,10 @@ func (installer *engine) unwireCommands(assets []assetFile) error {
 }
 
 func (installer *engine) commandTarget(asset string) (string, bool) {
-	return installer.commandTargetIn(installer.options.ConfigDir, asset)
+	return commandTargetIn(installer.options.ConfigDir, asset)
 }
 
-func (installer *engine) commandTargetIn(config, asset string) (string, bool) {
+func commandTargetIn(config, asset string) (string, bool) {
 	commands := filepath.Join(config, "commands")
 	if asset == "reload.command.md" {
 		return filepath.Join(commands, "reload.md"), true
@@ -1242,7 +1247,7 @@ func (installer *engine) wireSkills(assets []assetFile) error {
 	installer.say("skills -> %s", filepath.Join(installer.options.ConfigDir, "skills"))
 	config := installer.options.ConfigDir
 	for _, asset := range assets {
-		target, found := installer.skillTarget(config, asset.path)
+		target, found := skillTarget(config, asset.path)
 		if !found {
 			continue
 		}
@@ -1260,7 +1265,7 @@ func (installer *engine) unwireSkills(assets []assetFile) error {
 	installer.say("skills -> %s", filepath.Join(installer.options.ConfigDir, "skills"))
 	config := installer.options.ConfigDir
 	for _, asset := range assets {
-		target, found := installer.skillTarget(config, asset.path)
+		target, found := skillTarget(config, asset.path)
 		if !found {
 			continue
 		}
@@ -1280,7 +1285,7 @@ func (installer *engine) unwireSkills(assets []assetFile) error {
 }
 
 // skillTarget names an embedded skill asset in the store skills registry.
-func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
+func skillTarget(configDir, asset string) (string, bool) {
 	skills := filepath.Join(configDir, "skills")
 	if asset == "handoff.skill.md" {
 		return filepath.Join(skills, "handoff", "SKILL.md"), true
@@ -1316,11 +1321,11 @@ func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
 	if _, err := os.Lstat(marker); errors.Is(err, fs.ErrNotExist) {
 		return repos, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("inspect source repository marker for registry dead-link check: %w", err)
+		return nil, fmt.Errorf("inspect source repository marker for registry-ownership check: %w", err)
 	}
 	repo, err := paths.ReadSourceRepoMarker(installer.options.Home)
 	if err != nil {
-		return nil, fmt.Errorf("read source repository marker for registry dead-link check: %w", err)
+		return nil, fmt.Errorf("read source repository marker for registry-ownership check: %w", err)
 	}
 	add(repo)
 	return repos, nil

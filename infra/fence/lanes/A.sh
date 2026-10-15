@@ -3,7 +3,7 @@
 # (`pfm init` + scripted fill, infra/fence/lanes/adopt.sh), walked depth-first from the
 # scaffold roster through the baseline pin, the whole `pfm update` flow against
 # a SECOND blueprint clone inside the container, the self-update preflight and
-# body, the Codex mirror, the codex-sync hooks driven by a scripted chat, express's own
+# body, the Codex mirror, the engine-sync plugin's hooks driven by a scripted chat, express's own
 # suite, the release-notice refresh, and the cross-lane "fleet unchanged by an
 # update" seam. Runs INSIDE a lane container (run.sh), never on a host.
 #
@@ -852,7 +852,24 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "the default store $BLUEPRINT is a link and resolves the worktree's HEAD $WT_SHA; $B reached through $LINK reports the same clean check with the same store sha $B_BASE_SHORT"
 fi
 
-# ─── A.11 — the codex-sync hooks, driven by scripted mock turns in express ────────
+# ─── A.11 — the engine-sync plugin's hooks, driven by scripted mock turns in express ──
+
+# The plugin the hook door belongs to: lanes/container.sh mounts the engine-sync source at /engine-sync. The mock
+# engine reads hooks from settings layers only, so it cannot load a plugin; the lane runs the commands the plugin's
+# hooks.json registers for an event itself, the way Claude Code does — ${CLAUDE_PLUGIN_ROOT} expanded, args
+# appended, the JSON payload on stdin, the chat's project as cwd and CLAUDE_PROJECT_DIR.
+PLUGIN_ROOT="${ENGINE_SYNC_PLUGIN_ROOT:-/engine-sync/plugins/engine-sync}"
+plugin_hook() { # plugin_hook <event> <tool name> <payload json>: output on stdout; non-zero when none ran or one failed
+  local event="$1" tool="$2" payload="$3" line ran=0 rc=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ran=$((ran + 1))
+    (cd "$EXPRESS" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$EXPRESS" bash -c "$line" <<<"$payload") 2>&1 || rc=1
+  done < <(jq -r --arg event "$event" --arg tool "$tool" --arg root "$PLUGIN_ROOT" '
+    .hooks[$event][]? | select((.matcher // "") as $m | $m == "" or ($tool | test("^(" + $m + ")$"))) | .hooks[] |
+    select(.type == "command") | ([.command | gsub("\\$\\{CLAUDE_PLUGIN_ROOT\\}"; $root)] + (.args // [])) | @sh' "$PLUGIN_ROOT/hooks/hooks.json")
+  [ "$ran" -gt 0 ] && [ "$rc" -eq 0 ]
+}
 
 open_main() {
   pfm chat new --name "$CHAT" --engine cc --account "$SEAT" --cwd "$EXPRESS" --await --timeout 300 \
@@ -860,7 +877,7 @@ open_main() {
 }
 lane_reopen 'open_main'
 
-beat A.11-codex-sync-hook
+beat A.11-plugin-hook
 spends "cc:$SEAT"
 target "$CHAT"
 bad=""
@@ -876,14 +893,22 @@ while IFS= read -r cmd; do
 done <<EOF
 $hooks
 EOF
-jq -e '.hooks.Stop[].hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh sync")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
-  bad="$bad no codex-sync.sh sync Stop hook wired;"
-jq -e '.hooks.PostToolUse[] | select(.matcher == "Edit|Write") | .hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh mark")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
-  bad="$bad no codex-sync.sh mark PostToolUse Edit|Write hook wired;"
+# The plugin is the only hook door: its hooks.json registers mark on a Write or Edit, stop on Stop and start on
+# SessionStart, each through its libexec/engine-sync (the static half of the spec's row).
+hooks_json="$PLUGIN_ROOT/hooks/hooks.json"
+for want_hook in 'PostToolUse;Write|Edit;mark' 'Stop;;stop' 'SessionStart;;start'; do
+  IFS=';' read -r want_event want_matcher want_stage <<<"$want_hook"
+  jq -e --arg event "$want_event" --arg matcher "$want_matcher" --arg stage "$want_stage" '
+    .hooks[$event][]? | select((.matcher // "") == $matcher) | .hooks[] |
+    select(.type == "command" and .command == "${CLAUDE_PLUGIN_ROOT}/libexec/engine-sync" and .args == ["hook", "claude", $stage])
+  ' "$hooks_json" >/dev/null 2>&1 ||
+    bad="$bad $hooks_json registers no $want_event hook running engine-sync hook claude $want_stage;"
+done
+[ -x "$PLUGIN_ROOT/libexec/engine-sync" ] || bad="$bad $PLUGIN_ROOT/libexec/engine-sync is absent or not executable;"
 EDIT_FILE=".claude/agents/gitter.md"
 ROOT_FILE="CLAUDE.md"
 if [ -n "$bad" ]; then
-  fail "the express hook wiring is not the shape codex-sync needs:$bad"
+  fail "the hook wiring is not the shape the engine-sync plugin needs:$bad"
 elif [ ! -f "$EXPRESS/$EDIT_FILE" ] || [ ! -f "$EXPRESS/$ROOT_FILE" ]; then
   fail "express has no $EDIT_FILE or no $ROOT_FILE to edit"
 else
@@ -934,16 +959,22 @@ else
     allow_result="$(read_probe_result)"
     jq -e '.is_error != true and .content == "done"' <<<"$allow_result" >/dev/null 2>&1 ||
       bad="$bad the Edit was not admitted: $(one_line "$allow_result");"
+    mark_payload="$(jq -cn --arg file "$EXPRESS/$EDIT_FILE" '{session_id:"lane-a11",tool_name:"Edit",tool_input:{file_path:$file}}')"
+    mark_out="$(plugin_hook PostToolUse Edit "$mark_payload")" ||
+      bad="$bad the plugin's PostToolUse(Edit) hook did not run clean: $(one_line "$mark_out");"
     wait_for 10 "compgen -G '$DIRTY_GLOB' >/dev/null" ||
-      bad="$bad codex-sync.sh mark PostToolUse(Edit|Write) did not set the engine-sync dirty flag $DIRTY_GLOB (${LANE_WAIT_WHY:-no wait reason});"
+      bad="$bad the plugin's hook claude mark on PostToolUse(Edit) did not set the engine-sync dirty flag $DIRTY_GLOB (${LANE_WAIT_WHY:-no wait reason});"
     printf '\nLane A probe: LANE-A-ALLOW-ROOT\n' >>"$EXPRESS/$ROOT_FILE" ||
       bad="$bad the lane could not append the allowed root probe;"
     rm -f "$gate"
+    stop_payload="$(jq -cn '{session_id:"lane-a11",stop_hook_active:false}')"
+    stop_out="$(plugin_hook Stop "" "$stop_payload")" ||
+      bad="$bad the plugin's Stop hook did not run clean: $(one_line "$stop_out");"
     if ! wait_for 180 "grep -qF LANE-A-ALLOW-ROOT '$EXPRESS/AGENTS.md'"; then
-      bad="$bad the Stop hook did not recompile AGENTS.md from the edited CLAUDE.md within 180s (${LANE_WAIT_WHY:-no wait reason}); AGENTS.md hash $(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1 | cut -c1-12) vs before ${agents_before:0:12};"
+      bad="$bad the plugin's hook claude stop did not recompile AGENTS.md from the edited CLAUDE.md within 180s (${LANE_WAIT_WHY:-no wait reason}); AGENTS.md hash $(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1 | cut -c1-12) vs before ${agents_before:0:12};"
     fi
     wait_for 30 "! compgen -G '$DIRTY_GLOB' >/dev/null" ||
-      bad="$bad the engine-sync dirty flag is still set after the turn — codex-sync.sh sync did not clear it (${LANE_WAIT_WHY:-no wait reason});"
+      bad="$bad the engine-sync dirty flag is still set after the turn — hook claude stop did not clear it (${LANE_WAIT_WHY:-no wait reason});"
     # Restore express: the committed files back, the mirror rebuilt from them.
     git -C "$EXPRESS" checkout -q -- "$EDIT_FILE" "$ROOT_FILE" 2>/dev/null || bad="$bad git checkout of $EDIT_FILE/$ROOT_FILE failed;"
     in_express pfm codex build . >/dev/null || bad="$bad the mirror could not be rebuilt after the restore;"
@@ -957,7 +988,7 @@ else
     rm -f "$gate"
     if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after restore: $(one_line "$after");"; fi
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "the Edit of $EDIT_FILE was admitted and the PostToolUse mark set the dirty flag; Stop recompiled AGENTS.md and cleared it; express restored"
+      pass "the plugin registers mark, stop and start; the Edit of $EDIT_FILE was admitted and hook claude mark set the dirty flag; hook claude stop recompiled AGENTS.md and cleared it; express restored"
     fi
   fi
 fi

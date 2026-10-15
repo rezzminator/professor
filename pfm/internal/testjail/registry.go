@@ -10,14 +10,14 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// StageGlobalAgents links original agents and stages generated stand-ins for
-// declarations. Like the jail's fake engine-sync, these are fixtures, not a
-// second compiler: engine-sync's gate proves the rendered manuals and settings.
-// Shared files below a subdirectory are never agents: the inventory never
-// lists them.
+// StageGlobalAgents links every original agent from the checkout's
+// templates/global/agents and every declaration from its tracked
+// templates/generated/agents render, the links engine-sync global writes. Like
+// the jail's fake engine-sync these are fixtures, not a second compiler:
+// engine-sync's gate proves the rendered manuals and settings. Shared files
+// below a subdirectory are never agents: the inventory never lists them.
 func StageGlobalAgents(t *testing.T, home string) {
 	t.Helper()
 	rows, err := globalAgentFixtures()
@@ -25,23 +25,20 @@ func StageGlobalAgents(t *testing.T, home string) {
 		t.Fatalf("inventory global agent fixtures: %v", err)
 	}
 	registry := filepath.Join(home, ".claude", "agents")
-	generated := paths.GeneratedClaudeAgentsDir(home)
-	for _, dir := range []string{registry, generated} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("create agent fixture directory %s: %v", dir, err)
-		}
+	if err := os.MkdirAll(registry, 0o755); err != nil {
+		t.Fatalf("create agent fixture directory %s: %v", registry, err)
 	}
 	for _, row := range rows {
 		target := row.Path
 		if row.Kind == "declaration" {
-			target = filepath.Join(generated, row.Name+".md")
-			role := ""
-			if row.Role != "" {
-				role = "role: " + row.Role + "\n"
-			}
-			data := "---\nname: " + row.Name + "\n" + role + "description: Generated jail agent fixture.\n---\n\nFixture constitution for " + row.Name + ".\n"
-			if err := os.WriteFile(target, []byte(data), 0o644); err != nil {
-				t.Fatalf("write declaration fixture %s: %v", target, err)
+			target = filepath.Join(checkoutRoot(), "templates", "generated", "agents", row.Name+".md")
+			if _, err := os.Stat(target); err != nil {
+				t.Fatalf(
+					"declaration %s has no tracked render at %s (run engine-sync global): %v",
+					row.Name,
+					target,
+					err,
+				)
 			}
 		}
 		link := filepath.Join(registry, row.Name+".md")

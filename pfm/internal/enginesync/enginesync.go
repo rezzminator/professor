@@ -47,7 +47,7 @@ type Runner struct {
 	// Capabilities are the host's capability names (HostCapabilities): a
 	// Runner that sets them passes one --capability flag each on every call
 	// that renders or checks agents; one that leaves them unset (the workbench
-	// mirror) leaves engine-sync to the capabilities in targets.json.
+	// mirror) leaves engine-sync to the capabilities in the global file's targets.
 	Capabilities []string
 }
 
@@ -106,15 +106,25 @@ func DataHome(env paths.Env, home string) string {
 	return filepath.Join(home, ".local", "share", binaryName)
 }
 
-// TargetsPath is {engine-sync config}/targets.json, the machine targets pfm
-// install writes: {engine-sync config} is $XDG_CONFIG_HOME/engine-sync when
-// absolute, else {home}/.config/engine-sync.
-func TargetsPath(env paths.Env, home string) string {
-	config := filepath.Join(home, ".config", binaryName)
+// GlobalConfigPath is {home}/.claude/engine-sync.json, the one machine file
+// engine-sync reads: Professor's policy and, under "targets", the roster
+// `pfm install` ran `engine-sync global` over.
+func GlobalConfigPath(home string) string {
+	return filepath.Join(home, ".claude", "engine-sync.json")
+}
+
+// OldConfigDirs are the directories engine-sync once read its machine config
+// from and now refuses to start beside: {home}/.config/engine-sync and, when
+// $XDG_CONFIG_HOME is absolute, $XDG_CONFIG_HOME/engine-sync. The first
+// entry is the default one; the second appears only when it differs.
+func OldConfigDirs(env paths.Env, home string) []string {
+	dirs := []string{filepath.Join(home, ".config", binaryName)}
 	if dir := env.Get(envXDGConfigHome); filepath.IsAbs(dir) {
-		config = filepath.Join(dir, binaryName)
+		if xdg := filepath.Join(dir, binaryName); xdg != dirs[0] {
+			dirs = append(dirs, xdg)
+		}
 	}
-	return filepath.Join(config, "targets.json")
+	return dirs
 }
 
 // StablePath is {engine-sync home}/bin/engine-sync, the link the plugin

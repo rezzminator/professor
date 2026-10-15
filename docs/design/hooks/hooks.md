@@ -1,6 +1,6 @@
 # hooks
 
-Professor reaches a chat through hooks at two tiers. pfm's thirteen machine-global Claude hooks, one registration each, ride every Claude launch: `claudelaunch.Render` renders them into the `hooks` key of the single `--settings` JSON the chat starts with. `pfm init` scaffolds a project's `.claude/settings.json` from the template, with three hooks over the project's own scripts. Claude merges hooks across its settings layers, so the project's hooks run beside the launch's. Codex carries one pfm hook, `resume-unkill`, which `pfm install` writes into each Codex home's `hooks.json` and trusts; OpenCode carries none. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` checks that prove each pfm hook is in place. The Bash guard over shared git state is designed in [git-guard.md](git-guard.md).
+Professor reaches a chat through hooks at two tiers. pfm's thirteen machine-global Claude hooks, one registration each, ride every Claude launch: `claudelaunch.Render` renders them into the `hooks` key of the single `--settings` JSON the chat starts with. `pfm init` scaffolds a project's `.claude/settings.json` from the template, with one hook over the project's own scripts, `format-md.sh`. Claude merges hooks across its settings layers, so the project's hooks run beside the launch's. Codex carries one pfm hook, `resume-unkill`, which `pfm install` writes into each Codex home's `hooks.json` and trusts; OpenCode carries none. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` checks that prove each pfm hook is in place. The Bash guard over shared git state is designed in [git-guard.md](git-guard.md).
 
 A change lands in this design doc first, then in the code or template, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -36,7 +36,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 | Engine | Tier | Hooks | Installed by |
 | --- | --- | --- | --- |
 | Claude | every interactive launch, `--settings` `hooks` | 13 hooks, 13 registrations (pfm-owned): launcher-repair, resume-unkill, usage, clear-kill, exit-close, explore-deny, tracer-intake, git-guard, store-guard, rr-dir, epic-inject, reload-intercept, exit-intercept | `claudelaunch.Render` |
-| Claude | project `.claude/settings.json` | 6 in the template | `pfm init`, then the adopter |
+| Claude | project `.claude/settings.json` | 1 in the template (`format-md.sh`) | `pfm init`, then the adopter |
 | Claude | operator's own, documented | 2 (memory backup, opt-in) | the adopter, by hand |
 | Codex | `{codex home}/hooks.json` | 1 owned (`resume-unkill`, `SessionStart` matcher `resume`), with recorded trust; 2 retired shapes removed | `pfm install` |
 | OpenCode | none | 0 | none |
@@ -82,10 +82,8 @@ Source `templates/project/settings.json`, scaffolded to `.claude/settings.json` 
 | Script | Event | Matcher | Line | Does | On failure |
 | --- | --- | --- | --- | --- | --- |
 | `format-md.sh` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:19` | Formats the Professor-owned `.md` just written under `.rumdl.toml` (`templates/project/scripts/format-md.sh:4-6`) | Exits 2 with introduced UNFIXED lines against the committed file or a failed step; exits 0 when clean, when only standing issues remain, when jq or rumdl is missing (with a stderr installation hint), or when the file's repository has no `.rumdl.toml` (silent for any repository other than the session's project, a nested one such as a plugin submodule included; a stderr line for the session's own project, or when `CLAUDE_PROJECT_DIR` resolves to no repository) (`format-md.sh:8-24`) |
-| `codex-sync.sh mark` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:23` | Runs `engine-sync hook claude mark`, which marks the Codex and OpenCode mirrors dirty after a Claude source edit (`templates/project/scripts/codex-sync.sh:7-9`) | Silent |
-| `codex-sync.sh sync` | `Stop` | `""`, timeout 60 | `templates/project/settings.json:34` | Runs `engine-sync hook claude stop`, which builds and checks both mirrors when dirty (`templates/project/scripts/codex-sync.sh:10-14`) | Blocks the stop once with the reason, then lets it end with a warning; an unavailable engine-sync binary is a warning (`codex-sync.sh:15-20`) |
 
-This repo's own `.claude/settings.json` carries all three: `format-md.sh` (`.claude/settings.json:28`), `codex-sync.sh mark` (`:32`) and `codex-sync.sh sync` (`:43`). A long-turn notification is the operator's own hook, never a template one.
+The Codex and OpenCode mirror hooks come from the engine-sync Claude plugin, never from a project script (`plugins/engine-sync/hooks/hooks.json`): `PostToolUse` matcher `Write|Edit` runs `engine-sync hook claude mark`, which marks the project's Codex and OpenCode mirrors dirty; `Stop` runs `engine-sync hook claude stop`, which builds and checks both mirrors when dirty and reports a failure as a `systemMessage`; `SessionStart` (async) runs `engine-sync hook claude start`, which rebuilds a stale project and runs `global` when targets exist. pfm's default `claude.plugins` lists `engine-sync`, and `pfm doctor` warns `claude.plugins omits engine-sync` when a set list leaves it out. This repo's own `.claude/settings.json` carries `format-md.sh` only (`PostToolUse`). A long-turn notification is the operator's own hook, never a template one.
 
 The memory-backup hooks are documented for the adopter to install by hand into the account `settings.json`: `memory-wire.sh` on `SessionStart` and `memory-sync.sh` on `SessionEnd` (`docs/references/memory-backup.md:60-63`, `docs/SETUP.md:429-463`). They are the operator's own once installed, and pfm writes no key of that file.
 
@@ -95,7 +93,7 @@ pfm owns one Codex hook, `resume-unkill`: a `SessionStart` handler with matcher 
 
 ## OpenCode
 
-pfm ships no OpenCode hook and no plugin. OpenCode has no appendix hook; the staged prompt reaches it through the `instructions` config array (`pfm/internal/installer/opencode_instructions.go:12-17`). The generated mirrors are protected by a permission deny in `.opencode/opencode.jsonc` instead of a hook (the machine policy `templates/global/engine-sync/config.json` `opencode.permission`).
+pfm ships no OpenCode hook and no plugin. OpenCode has no appendix hook; the staged prompt reaches it through the `instructions` config array (`pfm/internal/installer/opencode_instructions.go:12-17`). The generated mirrors are protected by a permission deny in `.opencode/opencode.jsonc` instead of a hook (the machine policy `templates/global/engine-sync.json` `opencode.permission`).
 
 ## Agent-attached hooks (not machine-global)
 

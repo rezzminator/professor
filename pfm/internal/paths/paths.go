@@ -511,17 +511,6 @@ func Resolve() (Values, error) {
 	}, nil
 }
 
-// GeneratedClaudeAgentsDir is the home store Professor's engine-sync policy
-// rendered `from:` declarations into before they moved into the clone's
-// templates/generated/agents (machine.sourceGeneratedAgentsDir). engine-sync
-// global retires what it owns there; pfm's unwire and orphan sweep still
-// recognise a `{config}/agents/<name>.md` link into it as pfm-owned, and the
-// test jail stages its declaration stand-ins here, since a test never writes
-// into the clone.
-func GeneratedClaudeAgentsDir(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
-}
-
 // ClaudeMCPConfigDir is the private (0700) directory holding each Claude
 // launch's --mcp-config file (claudelaunch.Render): third-party MCP entries
 // carry env values and headers that must never reach argv.

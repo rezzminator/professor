@@ -32,7 +32,7 @@ The RR twins keep their original's effort, tools, save law and body; `gpt-rr-pro
 
 ## Opt-in
 
-The twins install only on a host that opts in with `"gptAgents": true` under `claude` in the machine config `pfm.config.json`: pfm then writes `gpt-agents` into the `capabilities` list of engine-sync's `targets.json`, which every engine-sync call reads, passes `--capability gpt-agents` on its own install and doctor calls, and stages the hook assets below. Without it, check reports each twin `SKIPPED {twin} — requires gpt-agents`, machine doctor prints its `agent SKIPPED all {twin} {path} (requires gpt-agents unmet)` row, and an install retires the twins' links and generated files an earlier opted-in install owned, never a file it does not own.
+The twins install only on a host that opts in with `"gptAgents": true` under `claude` in the machine config `pfm.config.json`: pfm then writes `gpt-agents` into the `targets.capabilities` list of the global `~/.claude/engine-sync.json`, which every engine-sync call reads, passes `--capability gpt-agents` on its own install and doctor calls, and stages the hook assets below. Without it, check reports each twin `SKIPPED {twin} — requires gpt-agents`, machine doctor prints its `agent SKIPPED all {twin} {path} (requires gpt-agents unmet)` row, and an install retires the twins' links and generated files an earlier opted-in install owned, never a file it does not own.
 
 ## Owned hook assets
 

@@ -24,7 +24,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - `.claude/commands/**/*.md`: slash commands (`/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench` are global)
 - `.claude/agents/*.md`: registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md`: reusable skills, source-fetched per `templates/project/skills/sources.json`, never vendored
-- `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh, codex-sync.sh (mirror auto-compile; the compiler itself is `pfm codex build`)
+- `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh, the engine-sync plugin's hooks (`hook claude mark|stop|start`, mirror auto-compile; the compiler itself is `pfm codex build`)
 - `docs/commands/{cmd}/references/`: command-owned reference docs (`$CDOCS/$CMD/$REFS/`); `pcm/references/{audit-scopes,refresh}.md` are yours
 - The shipped product: `templates/**` is an adopter's live framework. A change there ships to every future install; `docs/{SETUP,PLACEHOLDERS}.md` are its spec and `templates/refresh-map.json` maps each template to its live source.
 

@@ -40,10 +40,17 @@ export ENGINE_SYNC_BIN="$HOME/.local/libexec/engine-sync/engine-sync"
 engine_sync_build "$ENGINE_SYNC_BIN" >/tmp/sim-engine-sync.log 2>&1 ||
   fail "engine-sync build from /engine-sync" /tmp/sim-engine-sync.log
 
+# The plugin wrapper's stable link, the target of the PATH link pfm install writes.
+engine_sync_stable="$HOME/.local/share/engine-sync/bin/engine-sync"
+{ mkdir -p "$(dirname "$engine_sync_stable")" && ln -sfn "$ENGINE_SYNC_BIN" "$engine_sync_stable"; } ||
+  fail "engine-sync stable link $engine_sync_stable" /dev/null
+
 export PFM_CONFIG="${PFM_CONFIG:-$HOME/.local/state/pfm/pfm.config.json}"
 mkdir -p "$(dirname "$PFM_CONFIG")"
 pfm install --yes --skip-engine codex --skip-themes >/tmp/sim-install.log 2>&1 ||
   fail "pfm install (converter sidecar into the harvest volume)" /tmp/sim-install.log
+[ "$(command -v engine-sync)" = "$HOME/.local/bin/engine-sync" ] ||
+  fail "engine-sync on PATH after pfm install (got: $(command -v engine-sync || echo none))" /tmp/sim-install.log
 
 printf '{\n  "fetch": {\n    "browser": true\n  }\n}\n' >"$(dirname "$PFM_CONFIG")/harvester.config.json"
 

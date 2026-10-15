@@ -783,3 +783,27 @@ func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) 
 		})
 	}
 }
+
+func TestRetiredRegistryNames(t *testing.T) {
+	t.Parallel()
+	names := RetiredRegistryNames()
+	for kind, want := range map[string][]string{
+		"agent":   {"rndier", "tracer-pro"},
+		"command": {"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint"},
+		"skill":   {"wave-builder", "transcript", "close-out"},
+	} {
+		set := map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills}[kind]
+		for _, name := range want {
+			if !set[name] {
+				t.Errorf("%s %q is not a retired registry name: %v", kind, name, set)
+			}
+		}
+	}
+	for _, phrase := range []string{"pfm chat inject", "transcript skill", "mcp__professor__", "JC-COMMIT", "/wave", "mono-architect/"} {
+		for kind, set := range map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills} {
+			if set[phrase] {
+				t.Errorf("%s set holds %q, which is not one registry entry", kind, phrase)
+			}
+		}
+	}
+}

@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Uninstall removes clone registry links from the machine store. Ownership
@@ -74,14 +72,7 @@ func (installer *engine) unwireGlobalRegistry(registryDir, registry string, repo
 			target = filepath.Join(filepath.Dir(path), target)
 		}
 		target = filepath.Clean(target)
-		owned := ownedGlobalLink(repos, registry, entry.Name(), target)
-		// A variant agent's link resolves into the pfm-owned generated
-		// directory, never the clone — the install wrote it all the same.
-		if registry == globalAgentsRegistry &&
-			withinGlobalSource(target, paths.GeneratedClaudeAgentsDir(installer.options.Home)) {
-			owned = true
-		}
-		if owned {
+		if ownedGlobalLink(repos, registry, entry.Name(), target) {
 			if err := installer.retire(path, "machine-global "+registry+" link"); err != nil {
 				return err
 			}
@@ -99,9 +90,15 @@ func (installer *engine) unwireGlobalRegistry(registryDir, registry string, repo
 }
 
 // ownedGlobalLink reports whether a link resolves inside a clone global registry.
+// An agent link also resolves into the clone's templates/generated/agents,
+// where the rendered `from:` variants live.
 func ownedGlobalLink(repos []string, registry, name, target string) bool {
 	for _, repo := range repos {
 		if withinGlobalSource(target, filepath.Join(repo, "templates", "global", registry)) {
+			return true
+		}
+		if registry == globalAgentsRegistry &&
+			withinGlobalSource(target, filepath.Join(repo, "templates", "generated", "agents")) {
 			return true
 		}
 	}

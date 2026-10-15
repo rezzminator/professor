@@ -2,7 +2,6 @@ package installer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,9 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
-	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -79,22 +76,15 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 	if err != nil {
 		return fmt.Errorf("resolve the engine-sync global source repository: %w", err)
 	}
-	runner, cleanup, err := installer.engineSyncConfig(sourceRepo)
-	if err != nil {
-		return err
-	}
-	defer func() { returnErr = errors.Join(returnErr, cleanup()) }()
+	runner := installer.engineSync()
 	if err := runner.RequireMinimumVersion(context.Background()); err != nil {
 		var unavailable *enginesync.UnavailableError
 		if installer.options.Mode == ModeUninstall {
 			if errors.As(err, &unavailable) {
-				if retireErr := installer.retireEngineSyncConfig(sourceRepo); retireErr != nil {
-					return retireErr
-				}
 				return installer.leaveEngineSyncOwned(err)
 			}
 			installer.deferEngineSyncUninstallFault(err)
-			return installer.retireEngineSyncConfig(sourceRepo)
+			return nil
 		}
 		if errors.As(err, &unavailable) && len(installer.codexHomes()) == 0 {
 			if _, inspectErr := os.Stat(sourceRepo); errors.Is(inspectErr, fs.ErrNotExist) {
@@ -111,6 +101,14 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 			return fmt.Errorf("%w — %s", err, engineSyncMissingRepair)
 		}
 		return err
+	}
+	reason, err := installer.engineSyncPreviewSkip(sourceRepo)
+	if err != nil {
+		return err
+	}
+	if reason != "" {
+		installer.skip(reason)
+		return nil
 	}
 	options := enginesync.GlobalOptions{
 		SourceRepo:       sourceRepo,
@@ -170,27 +168,21 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 	if runErr != nil {
 		var unavailable *enginesync.UnavailableError
 		if options.Uninstall && errors.As(runErr, &unavailable) {
-			if err := installer.retireEngineSyncConfig(sourceRepo); err != nil {
-				return err
-			}
 			return installer.leaveEngineSyncOwned(runErr)
 		}
 		if options.Uninstall {
 			installer.deferEngineSyncUninstallFault(runErr)
-			return installer.retireEngineSyncConfig(sourceRepo)
+			return nil
 		}
 		return runErr
 	}
 	if result.OK {
-		if options.Uninstall {
-			return installer.retireEngineSyncConfig(sourceRepo)
-		}
 		return nil
 	}
 	conflictErr := fmt.Errorf("engine-sync global: %s", strings.Join(conflicts, "; "))
 	if options.Uninstall {
 		installer.deferEngineSyncUninstallFault(conflictErr)
-		return installer.retireEngineSyncConfig(sourceRepo)
+		return nil
 	}
 	if !installer.apply {
 		installer.planErrors = append(installer.planErrors, conflictErr)
@@ -201,9 +193,9 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 
 // engineSyncAbsentText is what an uninstall leaves behind when engine-sync is
 // not installed: pfm tears down everything it owns itself, and only what
-// engine-sync writes (the Codex roles, the global commands) and the targets
-// file that serves it stay for a second uninstall.
-const engineSyncAbsentText = "engine-sync unavailable: Codex roles, global commands and targets.json left in place; config.json policy link is handled by pfm ownership checks; " +
+// engine-sync writes (the Codex roles, the global commands) and the global
+// file whose targets serve it stay for a second uninstall.
+const engineSyncAbsentText = "engine-sync unavailable: Codex roles, global commands and ~/.claude/engine-sync.json left in place; " +
 	"run pfm uninstall again with engine-sync present"
 
 // leaveEngineSyncOwned handles an uninstall whose engine-sync binary is
@@ -218,245 +210,6 @@ func (installer *engine) leaveEngineSyncOwned(cause error) error {
 		return nil
 	}
 	installer.deferFailure(fmt.Errorf("%s: %w", engineSyncAbsentText, cause))
-	return nil
-}
-
-// engineSyncTargets is {engine-sync config}/targets.json: the machine targets
-// `engine-sync hook claude start` refreshes, the same roster this install ran
-// global over.
-type engineSyncTargets struct {
-	CodexHomes       []string `json:"codexHomes"`
-	ClaudeConfigDirs []string `json:"claudeConfigDirs"`
-	SourceRepo       string   `json:"sourceRepo"`
-	// Capabilities are the host's capability names: engine-sync reads them on
-	// every run, including the `hook claude start` refresh pfm does not flag.
-	Capabilities []string `json:"capabilities"`
-}
-
-// wireEngineSyncTargets writes targets.json on install and retires it on
-// uninstall. An empty Codex roster is written as an empty list, never left
-// for engine-sync to default.
-func (installer *engine) wireEngineSyncTargets() error {
-	path := enginesync.TargetsPath(installer.env(), installer.options.Home)
-	if installer.options.Mode == ModeUninstall {
-		if installer.engineSyncAbsent {
-			return nil
-		}
-		return installer.retire(path, "engine-sync machine targets")
-	}
-	sourceRepo, err := installer.globalSourceRepoRoot()
-	if err != nil {
-		return fmt.Errorf("resolve the engine-sync targets source repository: %w", err)
-	}
-	encoded, err := installer.engineSyncTargetsFile(sourceRepo)
-	if err != nil {
-		return err
-	}
-	if sameFile(path, encoded, 0o600) {
-		installer.ok(path)
-		return nil
-	}
-	return installer.change("write "+path, func() error {
-		return atomicfile.Write(path, encoded, 0o600)
-	})
-}
-
-// engineSyncTargetsFile is the targets.json an install writes: its roster,
-// source repository and host capabilities.
-func (installer *engine) engineSyncTargetsFile(sourceRepo string) ([]byte, error) {
-	targets := engineSyncTargets{
-		CodexHomes:       append([]string{}, installer.codexHomes()...),
-		ClaudeConfigDirs: []string{installer.options.ConfigDir},
-		SourceRepo:       sourceRepo,
-		Capabilities:     append([]string{}, enginesync.HostCapabilities(installer.options.GptAgents)...),
-	}
-	encoded, err := json.MarshalIndent(targets, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("encode engine-sync targets: %w", err)
-	}
-	return append(encoded, '\n'), nil
-}
-
-// previewTargets writes the targets.json the install will write into a
-// preview's scratch config home: engine-sync unions their capabilities with
-// its flags, so the recorded list would keep an opted-out capability in force.
-func (installer *engine) previewTargets(configHome, sourceRepo string) error {
-	planned, err := installer.engineSyncTargetsFile(sourceRepo)
-	if err != nil {
-		return err
-	}
-	return atomicfile.Write(filepath.Join(configHome, "engine-sync", "targets.json"), planned, 0o600)
-}
-
-// engineSyncConfig wires Professor's machine policy through the public file
-// surface. A preview reads the future policy from a scratch config directory.
-func (installer *engine) engineSyncConfig(sourceRepo string) (enginesync.Runner, func() error, error) {
-	runner := installer.engineSync()
-	cleanup := func() error { return nil }
-	target := filepath.Join(
-		filepath.Dir(enginesync.TargetsPath(installer.env(), installer.options.Home)),
-		"config.json",
-	)
-	runner.ChildEnv = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Dir(filepath.Dir(target)))
-	source := filepath.Join(sourceRepo, "templates", "global", "engine-sync", "config.json")
-	sourceMissing := false
-	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) {
-		sourceMissing = true
-		installer.say("  engine-sync machine policy source missing: %s", source)
-	} else if err != nil {
-		return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy %s: %w", source, err)
-	}
-	if sourceMissing {
-		owned, err := installer.ownsEngineSyncPolicy(target, sourceRepo)
-		if err != nil {
-			return runner, cleanup, err
-		}
-		if err := installer.retireEngineSyncConfig(sourceRepo); err != nil {
-			return runner, cleanup, err
-		}
-		install := installer.options.Mode != ModeUninstall
-		if !installer.apply && (owned || install) {
-			temporary, err := os.MkdirTemp("", "pfm-engine-sync-plan-")
-			if err != nil {
-				return runner, cleanup, fmt.Errorf("create engine-sync missing-policy preview: %w", err)
-			}
-			cleanup = func() error {
-				if err := os.RemoveAll(temporary); err != nil {
-					return fmt.Errorf("remove engine-sync policy plan root %s: %w", temporary, err)
-				}
-				return nil
-			}
-			// An operator's policy stays the one the preview reads.
-			if !owned {
-				policy, err := readOperatorPolicy(target)
-				if err == nil {
-					err = atomicfile.Write(filepath.Join(temporary, "engine-sync", "config.json"), policy, 0o600)
-					if err != nil {
-						return runner, func() error { return nil }, errors.Join(err, cleanup())
-					}
-				} else if !errors.Is(err, fs.ErrNotExist) {
-					return runner, func() error { return nil }, errors.Join(
-						fmt.Errorf("read engine-sync machine policy: %w", err),
-						cleanup(),
-					)
-				}
-			}
-			if install {
-				if err := installer.previewTargets(temporary, sourceRepo); err != nil {
-					return runner, func() error { return nil }, errors.Join(err, cleanup())
-				}
-			}
-			runner.ChildEnv = append(runner.ChildEnv, "XDG_CONFIG_HOME="+temporary)
-		}
-		return runner, cleanup, nil
-	}
-	if installer.options.Mode == ModeUninstall {
-		if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) {
-			if err := installer.retireEngineSyncConfig(sourceRepo); err != nil {
-				return runner, cleanup, err
-			}
-		} else if err != nil {
-			return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy %s: %w", target, err)
-		}
-		return runner, cleanup, nil
-	}
-	info, inspectErr := os.Lstat(target)
-	if inspectErr != nil && !errors.Is(inspectErr, fs.ErrNotExist) {
-		return runner, cleanup, inspectErr
-	}
-	// The policy the apply leaves engine-sync reading: an operator's regular
-	// file and a conflicting entry stay as they are; every other state ends as
-	// the link to the clone's source.
-	policyPath := source
-	if inspectErr == nil && info.Mode().IsRegular() {
-		policyPath = target
-		installer.skip(target + " is the operator's own engine-sync policy, kept: Professor's machine policy " +
-			source + " is not applied (merge it into the operator file to keep its guards)")
-	} else {
-		state, _, err := globallink.ClassifyLink(target, source, sourceRepo, globallink.File)
-		if err != nil {
-			return runner, cleanup, fmt.Errorf("inspect engine-sync machine policy %s: %w", target, err)
-		}
-		if state == globallink.Conflict {
-			owned, err := installer.ownsEngineSyncPolicy(target, sourceRepo)
-			if err != nil {
-				return runner, cleanup, err
-			}
-			if owned {
-				if err := installer.change("repoint engine-sync machine policy "+target+" -> "+source, func() error {
-					return globallink.Apply(target, source, globallink.WrongTarget)
-				}); err != nil {
-					return runner, cleanup, err
-				}
-			} else {
-				policyPath = target
-				installer.skip("CONFLICT engine-sync machine policy " + target + " is not clone-owned; preserved")
-			}
-		}
-		if state != globallink.Conflict {
-			if err := installer.wireGlobalLink(source, target, sourceRepo, false); err != nil {
-				return runner, cleanup, err
-			}
-		}
-	}
-	if installer.apply {
-		return runner, cleanup, nil
-	}
-	policy, err := os.ReadFile(policyPath)
-	if err != nil {
-		return runner, cleanup, fmt.Errorf("read engine-sync machine policy: %w", err)
-	}
-	temporary, err := os.MkdirTemp("", "pfm-engine-sync-plan-")
-	if err != nil {
-		return runner, cleanup, fmt.Errorf("create engine-sync policy plan root: %w", err)
-	}
-	cleanup = func() error {
-		if err := os.RemoveAll(temporary); err != nil {
-			return fmt.Errorf("remove engine-sync policy plan root %s: %w", temporary, err)
-		}
-		return nil
-	}
-	if err := atomicfile.Write(filepath.Join(temporary, "engine-sync", "config.json"), policy, 0o600); err != nil {
-		return runner, func() error { return nil }, errors.Join(err, cleanup())
-	}
-	// The scratch config home replaces the real one for the preview, so the
-	// machine targets travel with the policy: an install previews against the
-	// targets it will write (engine-sync unions their capabilities with its
-	// flags).
-	if err := installer.previewTargets(temporary, sourceRepo); err != nil {
-		return runner, func() error { return nil }, errors.Join(err, cleanup())
-	}
-	runner.ChildEnv = append(runner.ChildEnv, "XDG_CONFIG_HOME="+temporary)
-	return runner, cleanup, nil
-}
-
-// readOperatorPolicy reads an operator's policy file, following a link, and
-// refuses anything but a regular file: a FIFO there would block the preview.
-func readOperatorPolicy(path string) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: not a regular file", path)
-	}
-	return os.ReadFile(path)
-}
-
-// retireEngineSyncConfig removes only a clone-owned policy link, after the
-// engine has used it to retire its configured machine artifacts.
-func (installer *engine) retireEngineSyncConfig(sourceRepo string) error {
-	target := filepath.Join(
-		filepath.Dir(enginesync.TargetsPath(installer.env(), installer.options.Home)),
-		"config.json",
-	)
-	owned, err := installer.ownsEngineSyncPolicy(target, sourceRepo)
-	if err != nil {
-		return err
-	}
-	if owned {
-		return installer.retire(target, "engine-sync machine configuration")
-	}
 	return nil
 }
 

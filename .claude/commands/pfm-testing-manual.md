@@ -17,6 +17,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - `<file>_test.go` beside the source file, same package; end-to-end jail tests under `pfm/cmd/pfm/`. Extend the owning test file; add one only when none exists.
 - A single-implementation rule (naming precedence, the kill ratchet, row classification, run-string synthesis) gets a table-driven test; an emitted shell line gets a golden file.
+- The plugin lab's hermetic self-tests live in `infra/plugin-lab/tests/` (fence step `templates.plugin-lab`); its live, metered runs of a plugin checkout run on the host through `infra/plugin-lab/lab run`: `docs/dev/testing/plugin-lab.md`.
 
 ## Lanes and registries
 

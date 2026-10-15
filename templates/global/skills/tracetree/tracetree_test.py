@@ -2068,8 +2068,8 @@ class IntakeTest(Repo):
         spec = json.loads(self.hook("Root cause: /a/b\n1. What closes the pane?", cwd=self.root))["hookSpecificOutput"]
         self.assertIn("updatedInput", spec, spec["additionalContext"])
         lines = spec["updatedInput"]["prompt"].splitlines()
-        self.assertEqual(lines[1], "Root cause: /a/b")
         run = lines[0][len("RUN: "):]
+        self.assertEqual(lines[1:3], [f"RECALL: {run}/recall.txt", "Root cause: /a/b"])
         with open(os.path.join(run, "ROOT")) as f:
             self.assertEqual(f.read().strip(), self.root)
 
@@ -2113,6 +2113,47 @@ class IntakeTest(Repo):
             f.seek(before)
             self.assertIn("unreadable hook payload", f.read())
 
+
+    def test_intake_writes_the_recall_of_earlier_runs_and_names_it_under_the_run_line(self):
+        first = json.loads(self.hook(f"Repo root: {self.root}\n1. Where is `target is required` returned?\n"))
+        earlier = first["hookSpecificOutput"]["updatedInput"]["prompt"].splitlines()[1][len("RUN: "):]
+        with open(os.path.join(earlier, "1.hops"), "w") as f:
+            f.write(self.good())
+        spec = json.loads(self.hook(f"Repo root: {self.root}\n1. Where is `target is required` returned?\n"))[
+            "hookSpecificOutput"]
+        lines = spec["updatedInput"]["prompt"].splitlines()
+        self.assertTrue(lines[1].startswith("RUN: "), lines)
+        run = lines[1][len("RUN: "):]
+        self.assertEqual(lines[2], f"RECALL: {run}/recall.txt")
+        with open(os.path.join(run, "recall.txt"), encoding="utf-8") as f:
+            text = f.read()
+        # outside git no occurrence set can witness the line, so it is never served fresh
+        self.assertIn(f"RECALL Q1 · 0/1 lines fresh · runs {os.path.basename(earlier)}", text)
+        self.assertIn("STALE Q1 · no BASE to witness `app/srv/server.go` against", text)
+        self.assertEqual(text.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 1 stale · 0 delta")
+        self.assertIn(f"are in {run}/recall.txt", spec["additionalContext"])
+
+    def test_a_sub_tracer_card_for_an_answered_question_is_refused_unless_it_carries_a_logged_reason(self):
+        spec = json.loads(self.hook(f"Repo root: {self.root}\n1. What closes the pane?\n2. Who calls it?\n"))
+        run = spec["hookSpecificOutput"]["updatedInput"]["prompt"].splitlines()[1][len("RUN: "):]
+        with open(os.path.join(run, "recall.txt"), "w", encoding="utf-8") as f:
+            f.write("RECALL Q1 · 1/1 lines fresh · runs x\nANSWERED Q1\nFRESH x node 1: closes [a.go:1]\n")
+
+        def card(q, reason=""):
+            return (f"RUN: {run}\nROOT: {self.root}\nID: 4\nFUEL: 0\nQUESTION: {q}\n{reason}"
+                    "THREAD: the close path\nFROM: a.go:1 `x`\n")
+
+        refused = json.loads(self.hook(card("Q1"), subagent="sub-tracer"))["hookSpecificOutput"]
+        self.assertEqual(refused["permissionDecision"], "deny")
+        self.assertIn(f"Q1 ANSWERED in {run}/recall.txt", refused["permissionDecisionReason"])
+        self.assertIn("REASON:", refused["permissionDecisionReason"])
+        self.assertEqual(self.hook(card("Q2"), subagent="sub-tracer"), "")
+        self.assertEqual(self.hook(card("Q1, Q2"), subagent="sub-tracer"), "")
+        log = os.path.join(self.parent, "intake.log")
+        self.assertEqual(self.hook(card("Q1", "REASON: the FRESH line omits the error path\n"), subagent="sub-tracer"), "")
+        with open(log, encoding="utf-8") as f:
+            self.assertRegex(f.read(), re.escape(run) + r": node 4 opened a thread for ANSWERED Q1 — REASON: the FRESH "
+                             r"line omits the error path")
 
 class SeekTest(Repo):
     """`new ROOT --seek REGEX` and `new ROOT --questions`: earlier runs on the same root, and the stored questions."""
@@ -2805,7 +2846,7 @@ class CutGateTest(unittest.TestCase):
 
     def test_every_other_tool_passes_untouched(self):
         aid = self.agent([brief("build it")])
-        for tool in ("Bash", "Read", "Agent", "Grep"):
+        for tool in ("Read", "Agent", "Grep"):
             with self.subTest(tool=tool):
                 self.assertAllowedSilently(self.hook(tool=tool, agent_id=aid))
 
@@ -2827,13 +2868,451 @@ class CutGateTest(unittest.TestCase):
                 ("a payload that is no object", dict(raw="[1, 2]"), "unreadable hook payload"),
                 ("no transcript_path", dict(transcript_path=""), "names no transcript_path"),
                 ("an agent id that is no id", dict(agent_id="../../etc"), "is no agent id"),
-                ("a missing agent transcript", dict(agent_id="nosuchagent"), "agent-nosuchagent.jsonl")):
+                ("a missing agent transcript", dict(agent_id="nosuchagent"), "agent-nosuchagent.jsonl"),
+                ("a Bash call naming no command", dict(tool="Bash"), "names no Bash command")):
             with self.subTest(name):
                 self.assertAllowedUnchecked(self.hook(**kw), cause)
         broken = self.agent([brief("build it")], agent_id="dir0")
         os.remove(os.path.join(self.sub, "agent-dir0.jsonl"))
         os.mkdir(os.path.join(self.sub, "agent-dir0.jsonl"))
         self.assertAllowedUnchecked(self.hook(agent_id=broken), "agent-dir0.jsonl")
+
+
+def gitc(cwd, *args):
+    """A git call with an identity and local submodules allowed, failing loudly."""
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always",
+                    "-c", "init.defaultBranch=main", *args], cwd=cwd, check=True, capture_output=True, timeout=60)
+
+
+T = "/tmp"  # scratch paths in the commands below are text the hook parses, never written
+
+
+class CutGateBashTest(unittest.TestCase):
+    """`cutgate` on the foreman's Bash: a write into the tree before the cut is the code edit the Edit hook refuses."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cutgate-bash-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.home = os.path.join(self.tmp, "home")  # writable: the gate keeps its per-agent cache under it
+        self.sub = os.path.join(self.tmp, "projects", "p", "sess", "subagents")
+        os.makedirs(self.sub)
+        self.session = os.path.join(self.tmp, "projects", "p", "sess.jsonl")
+        with open(self.session, "w") as f:
+            f.write(json.dumps(brief("lead the flight")) + "\n")
+        self.n = 0
+
+    def agent(self, *records):
+        self.n += 1
+        aid = f"b{self.n}"
+        with open(os.path.join(self.sub, f"agent-{aid}.jsonl"), "w") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in [brief("build it"), *records]))
+        return aid
+
+    def repo(self):
+        """A committed git tree with a clean status, outside every open root but /tmp."""
+        tree = os.path.join(self.tmp, "tree")
+        os.makedirs(os.path.join(tree, "pkg"))
+        with open(os.path.join(tree, "pkg", "a.go"), "w") as f:
+            f.write("package pkg\n")
+        gitc(tree, "init", "-q")
+        gitc(tree, "add", ".")
+        gitc(tree, "commit", "-qm", "base")
+        return tree
+
+    def hook(self, command, aid, cwd="/w", home=None, env=None):
+        event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command},
+                 "transcript_path": self.session, "agent_type": "flights-foreman", "agent_id": aid, "cwd": cwd}
+        got = subprocess.run([sys.executable, SCRIPT, "cutgate"], input=json.dumps(event), capture_output=True,
+                             text=True, timeout=60, env=dict(os.environ, HOME=home or self.home, **(env or {})))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        return got
+
+    def reason(self, got):
+        spec = json.loads(got.stdout)["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny", spec)
+        return spec["permissionDecisionReason"]
+
+    def assertDeniedLikeAnEdit(self, got):
+        self.assertTrue(self.reason(got).startswith(DENY["hookSpecificOutput"]["permissionDecisionReason"]), got.stdout)
+
+    def assertAllowedSilently(self, got):
+        self.assertEqual((got.stdout, got.stderr), ("", ""))
+
+    def test_a_bash_write_into_the_tree_before_the_cut_is_denied_with_the_edit_steer(self):
+        aid = self.agent(*bash("t1", "git status --short", "VERDICT SPLIT 2"))
+        for command in ("sed -i 's/a/b/' pkg/a.go", "sed -i.bak -e s/a/b/ /w/a.go", "sed -Ei 's/a/b/' a.go",
+                        "perl -pi -e 's/a/b/' a.go", "perl -i.orig -pe 's/x/y/' pkg/a.go", "echo x > a.go",
+                        "printf x >> pkg/a.go", "go doc x 2>/dev/null >a.txt", "echo x | tee pkg/a.go",
+                        f"echo x | tee -a {T}/ok.txt pkg/a.go", "cat > pkg/new.go <<'EOF'\npackage pkg\nEOF",
+                        "cat <<EOF > pkg/new.go\npackage pkg\nEOF\necho done", f"cp {T}/x.go pkg/a.go",
+                        f"mv {T}/x.go /w/pkg/", f"cp -t pkg {T}/x.go", f"git apply {T}/fix.diff",
+                        f"git -C /w apply {T}/fix.diff", f"patch -p1 < {T}/fix.diff", "cd /w/pkg && sed -i s/a/b/ a.go",
+                        "cd /tmp && cd /w && echo x > a.go", "FOO=1 env sed -i s/a/b/ a.go", "echo x &> a.log",
+                        "go test ./... && echo ok > /w/pkg/done.txt"):
+            with self.subTest(command=command):
+                self.assertDeniedLikeAnEdit(self.hook(command, aid))
+
+    def test_read_only_build_and_kit_bash_before_the_cut_is_allowed(self):
+        aid = self.agent()
+        for command in ("grep -rn foo .", "rg -n 'a > b' pkg", "rg -n \"=>\" pkg", "cat a.go", "sed -n 1,20p a.go",
+                        "sed 's/a/b/' a.go", "git status --short", "git diff HEAD", "git log --oneline -3",
+                        "git show HEAD:a.go", "go test ./... 2>&1 | tail -20", "go vet ./... >/dev/null 2>&1",
+                        ".claude/scripts/dev.sh iso test pfm", KIT, KIT + f" > {T}/p/cut.txt 2>&1",
+                        f"git apply --check {T}/fix.diff", f"patch --dry-run -p1 < {T}/fix.diff",
+                        "echo 'a > b'; grep '>>' a.go", "cat <<EOF\n> not a redirect\nEOF",
+                        "perl -MList::Util -e 'print 1' a.go", "wc -l a.go 1>&2", "ls $(pwd) > /dev/null",
+                        f"python3 $HOME/.claude/skills/tracetree/tracetree.py check {T}/p/run --full",
+                        'cd "$SCRATCH" && echo x > rel.txt'):  # a write past an unexpanded cd is the backstop's
+            with self.subTest(command=command):
+                self.assertAllowedSilently(self.hook(command, aid))
+
+    def test_flight_directory_and_scratch_writes_stay_open(self):
+        aid = self.agent()
+        flight = os.path.join(self.home, ".local", "state", "pfm", "flights", "professor", "f")
+        for command in (f"cat > {flight}/run.md <<'EOF'\n# run\nEOF",
+                        "echo 'SEED X' > $HOME/.local/state/pfm/flights/professor/f/doors.txt",
+                        "printf x | tee ~/.local/state/pfm/flights/professor/f/cut-kit.txt",
+                        f"echo x > {T}/p/x.txt", "sed -i s/a/b/ /private/tmp/p/x", f"cp a.go {T}/p/",
+                        f"cd {T}/p && echo x > rel.txt", f"{KIT} > {flight}/cut-kit.txt",
+                        f"sed -E -i 's/a/b/' {T}/p/x", f"perl -pi -e 's/a/b/' {T}/p/x", f"cp -t {T}/p a.go b.go"):
+            with self.subTest(command=command):
+                self.assertAllowedSilently(self.hook(command, aid))
+        self.assertDeniedLikeAnEdit(self.hook(f"echo x > {flight}/{'../' * 64}w/a.go", aid))
+
+    def test_a_dirty_tree_before_the_cut_denies_the_next_bash_naming_its_paths(self):
+        tree = self.repo()
+        aid = self.agent()
+        missed = "python3 - <<'EOF'\nopen('pkg/a.go', 'a').write('// x')\nEOF"
+        self.assertAllowedSilently(self.hook(missed, aid, cwd=tree))  # parsing misses it ...
+        with open(os.path.join(tree, "pkg", "a.go"), "a") as f:
+            f.write("// x\n")
+        with open(os.path.join(tree, "new.go"), "w") as f:
+            f.write("package x\n")
+        reason = self.reason(self.hook("git status --short", aid, cwd=tree))  # ... the tree does not
+        self.assertIn("pkg/a.go", reason)
+        self.assertIn("new.go", reason)
+        self.assertIn("git status", reason)
+        self.assertAllowedSilently(self.hook(KIT, aid, cwd=tree))  # the kit stays open to cut
+        self.assertIn("pkg/a.go", self.reason(self.hook(f"cd {tree} && ls", aid)))  # a cd'd tree is read too
+        self.assertIn("pkg/a.go", self.reason(self.hook(f"git -C {tree}/pkg log -1", aid)))
+
+    def test_dirt_present_before_the_agent_and_dirty_submodules_are_not_its_writes(self):
+        tree = self.repo()
+        sub = os.path.join(self.tmp, "subsrc")
+        os.makedirs(sub)
+        gitc(sub, "init", "-q")
+        gitc(sub, "commit", "-q", "--allow-empty", "-m", "s")
+        gitc(tree, "submodule", "add", "-q", sub, "plug")
+        gitc(tree, "commit", "-qm", "plug")
+        with open(os.path.join(tree, "pkg", "a.go"), "a") as f:
+            f.write("// someone else's edit\n")
+        aid = self.agent()
+        self.assertAllowedSilently(self.hook("git status", aid, cwd=tree))
+        with open(os.path.join(tree, "plug", "dirt.txt"), "w") as f:
+            f.write("x\n")
+        self.assertAllowedSilently(self.hook("git status", aid, cwd=tree))
+        with open(os.path.join(tree, "b.go"), "w") as f:
+            f.write("package x\n")
+        reason = self.reason(self.hook("git status", aid, cwd=tree))
+        self.assertIn("b.go", reason)
+        self.assertNotIn("pkg/a.go", reason)
+        self.assertNotIn("plug", reason)
+
+    def test_after_the_cut_bash_passes_untouched(self):
+        tree = self.repo()
+        cut = bash("t1", KIT, "VERDICT SPLIT 2")
+        for name, aid in (("its own cut", self.agent(*cut)),
+                          ("a segment child", self.agent(brief("CHILD f · unit pfm-S1\nSEGMENT S1 · cells a")))):
+            with self.subTest(name):
+                with open(os.path.join(tree, f"{aid}.go"), "w") as f:
+                    f.write("package x\n")
+                self.assertAllowedSilently(self.hook("sed -i s/a/b/ pkg/a.go", aid, cwd=tree))
+                self.assertAllowedSilently(self.hook("git status && echo x > pkg/a.go", aid, cwd=tree))
+
+    def test_a_git_failure_allows_and_says_so(self):
+        tree = self.repo()
+        aid = self.agent()
+        with open(os.path.join(tree, ".git", "index"), "wb") as f:
+            f.write(b"not an index")
+        got = self.hook("git log -1", aid, cwd=tree)
+        spec = json.loads(got.stdout)["hookSpecificOutput"]
+        self.assertEqual(set(spec), {"hookEventName", "additionalContext"})
+        self.assertTrue(spec["additionalContext"].startswith("cut-gate: could not check the cut (git status"), spec)
+        self.assertIn("git status", got.stderr)
+
+    def test_a_cache_it_cannot_save_allows_and_says_so(self):
+        tree = self.repo()
+        home = os.path.join(self.tmp, "a-file")  # no directory can be made under it
+        open(home, "w").close()
+        got = self.hook("git status", self.agent(), cwd=tree, home=home)
+        self.assertIn("could not check the cut", json.loads(got.stdout)["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("cutgate", got.stderr)
+
+
+class RecallTest(unittest.TestCase):
+    """`recall ROOT`: earlier runs' answer lines matching the questions' anchors, each cite re-checked against ROOT now
+    and each anchor identifier's occurrences witnessed against the run's BASE."""
+
+    GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix=".tracetree-recall-")
+        self.parent = os.path.join("/tmp", os.path.basename(self.repo).lstrip("."), "tracer")
+        for rel, lines in (("app/srv/server.go", SERVER), ("app/kill/kill.go", KILL)):
+            path = os.path.join(self.repo, rel)
+            os.makedirs(os.path.dirname(path))
+            with open(path, "w") as f:
+                f.write("\n".join(lines) + "\n")
+        self.git(self.repo, "init", "-q")
+        self.git(self.repo, "add", "-A")
+        self.git(self.repo, "commit", "-q", "-m", "one")
+
+    def tearDown(self):
+        shutil.rmtree(os.path.dirname(self.parent), ignore_errors=True)
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def git(self, root, *args):
+        done = subprocess.run(["git", *self.GIT, "-C", root, *args], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def run_with(self, root, hops_text):
+        """A finished earlier run on root: opened by `new` (so it holds ROOT and BASE), node 1's hops stored."""
+        got = tt(["new", root])
+        self.assertEqual(got.returncode, 0, got.stderr)
+        run = got.stdout.strip().splitlines()[0]
+        with open(os.path.join(run, "1.hops"), "w") as f:
+            f.write(hops_text)
+        return run
+
+    def recall(self, questions, root=None):
+        got = tt(["recall", root or self.repo], input=questions)
+        self.assertEqual(got.returncode, 0, got.stderr + got.stdout)
+        return got.stdout
+
+    def edit(self, rel, lines):
+        with open(os.path.join(self.repo, rel), "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    HANDLE = hops("1", ["- `Handle` refuses an empty target with `target is required` [app/srv/server.go:5]"],
+                  ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")", "= the refusal"],
+                  ["END returned @ app/srv/server.go:5"])
+    ONLY = hops("1", ["- `kill.Run` has one caller, `Handle` [app/srv/server.go:7]"],
+                ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the only caller"],
+                ["END returned @ app/srv/server.go:7"])
+
+    def test_a_line_whose_span_still_holds_is_served_fresh(self):
+        run = self.run_with(self.repo, self.HANDLE)
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(run)}", out)
+        self.assertIn("FRESH ", out)
+        self.assertIn("[app/srv/server.go:5]", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 1/1 · 0 stale · 0 delta")
+
+    def test_a_line_whose_span_text_changed_is_stale_never_fresh(self):
+        self.run_with(self.repo, self.HANDLE)
+        changed = list(SERVER)
+        changed[4] = "\t\treturn errors.New(\"a pane name is needed\")"
+        self.edit("app/srv/server.go", changed)
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn("RECALL Q1 · 0/1 lines fresh", out)
+        self.assertIn("STALE ", out)
+        self.assertNotIn("FRESH ", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 1 stale · 0 delta")
+
+    def test_a_moved_span_is_re_addressed_and_counted_fresh(self):
+        self.run_with(self.repo, self.HANDLE)
+        self.edit("app/srv/server.go", SERVER[:2] + ["// a", "// b", "// c"] + SERVER[2:])
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn("RECALL Q1 · 1/1 lines fresh", out)
+        self.assertIn("[app/srv/server.go:8]", out)
+        self.assertIn("MOVED app/srv/server.go:5 → app/srv/server.go:8", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 1/1 · 0 stale · 0 delta")
+
+    def test_a_caller_added_after_base_turns_an_only_caller_line_delta(self):
+        self.run_with(self.repo, self.ONLY)
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(t)", "}"])
+        out = self.recall("1. Who calls `kill.Run`?\n")
+        self.assertIn("RECALL Q1 · 0/1 lines fresh", out)
+        self.assertIn("DELTA ", out)
+        self.assertIn("+ app/cli/cli.go:4 return kill.Run(t)", out)
+        self.assertNotIn("FRESH ", out)
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 0 stale · 1 delta")
+
+    def test_a_removed_worktrees_run_is_still_a_candidate_through_the_common_dir(self):
+        wt = os.path.join(self.repo, ".worktrees", "wt")
+        self.git(self.repo, "worktree", "add", "-q", wt)
+        run = self.run_with(wt, self.HANDLE)
+        self.git(self.repo, "worktree", "remove", wt)
+        self.assertFalse(os.path.exists(wt))
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(run)}", out)
+
+    def test_before_keeps_only_runs_started_strictly_before_the_named_run_and_never_the_run_itself(self):
+        older, named, newer = (self.run_with(self.repo, self.HANDLE) for _ in range(3))
+        for run, stamp in ((older, 1000), (named, 2000), (newer, 3000)):
+            os.utime(os.path.join(run, "ROOT"), (stamp, stamp))
+        got = tt(["recall", self.repo, "--before", named], input="1. Where does `Handle` refuse an empty target?\n")
+        self.assertEqual(got.returncode, 0, got.stderr + got.stdout)
+        self.assertIn(f"RECALL Q1 · 1/1 lines fresh · runs {os.path.basename(older)}\n", got.stdout)
+        self.assertIn("· 1 earlier runs ·", got.stdout)
+        self.assertIn(f"runs {os.path.basename(newer)}", self.recall("1. Where does `Handle` refuse an empty target?\n"))
+
+    def test_a_run_that_cannot_be_read_is_named_never_skipped(self):
+        self.run_with(self.repo, self.HANDLE)
+        broken = self.run_with(self.repo, self.HANDLE)
+        os.remove(os.path.join(broken, "1.hops"))
+        os.makedirs(os.path.join(broken, "1.hops"))
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertRegex(out, r"(?m)^UNREADABLE " + re.escape(broken) + r": .*1\.hops")
+        self.assertIn("RECALL Q1 · 1/1 lines fresh", out)
+
+    def commit(self, rel, lines):
+        os.makedirs(os.path.dirname(os.path.join(self.repo, rel)), exist_ok=True)
+        self.edit(rel, lines)
+        self.git(self.repo, "add", "-A")
+        self.git(self.repo, "commit", "-q", "-m", rel)
+
+    def test_a_closed_world_line_turns_delta_when_a_path_it_names_gains_an_occurrence(self):
+        self.commit("templates/project/codex/README.md",
+                    ["# Codex", "", "Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write."])
+        self.run_with(self.repo, hops("1", [
+            "- Nothing else in templates/project registers codex-sync.sh as a hook; other grep hits are prose in docs "
+            "[templates/project/codex/README.md:3]"],
+            ["@ templates/project/codex/README.md:3",
+             "> Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write.", "= prose"],
+            ["END returned @ templates/project/codex/README.md:3"]))
+        self.edit("templates/project/settings.json",
+                  ['{"hooks": {"Stop": [{"command": ".claude/scripts/codex-sync.sh sync"}]}}'])
+        out = self.recall("1. Quote codex-sync.sh dirty flag readers/writers and symlink handling, plus existing test home.\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertIn("DELTA ", out)
+        self.assertIn('+ templates/project/settings.json:1 {"hooks"', out)
+
+    def test_a_closed_world_line_naming_nothing_to_witness_is_a_gap_never_fresh(self):
+        self.run_with(self.repo, hops("1", ["- Nothing else refuses here [app/srv/server.go:5]"],
+                                      ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")",
+                                       "= the refusal"], ["END returned @ app/srv/server.go:5"]))
+        out = self.recall("1. Where is `target is required` refused, app/srv/server.go?\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertRegex(out, r"(?m)^GAP Q1 · .*Nothing else refuses here")
+
+    def test_a_served_line_whose_prose_names_an_identifier_with_a_new_occurrence_turns_delta(self):
+        self.run_with(self.repo, hops("1", ["- `Handle` refuses an empty target through errors.New [app/srv/server.go:5]"],
+                                      ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")",
+                                       "= the refusal"], ["END returned @ app/srv/server.go:5"]))
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", "", "func Close() error {", "\treturn errors.New(\"closed\")", "}"])
+        out = self.recall("1. Where does `Handle` refuse an empty target?\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertIn("DELTA ", out)
+        self.assertIn('+ app/cli/cli.go:4 return errors.New("closed")', out)
+
+    def test_a_line_whose_node_walked_a_hop_that_changed_is_stale_even_when_its_own_cite_holds(self):
+        self.run_with(self.repo, hops("1", ["- `Handle` returns what Run returns [app/srv/server.go:7]"],
+                                      ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the call",
+                                       "@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                                       "= the premise"], ["END returned @ app/srv/server.go:7"]))
+        changed = list(KILL)
+        changed[5] = "\t\treturn nil"
+        self.edit("app/kill/kill.go", changed)
+        out = self.recall("1. What does `Handle` return?\n")
+        self.assertNotIn("FRESH ", out)
+        self.assertRegex(out, r"(?m)^STALE Q1 · .*app/kill/kill\.go:6")
+
+    def test_a_delta_line_shows_five_occurrence_rows_then_the_count_left(self):
+        self.run_with(self.repo, self.ONLY)
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", ""] + [f"func C{i}(t string) error {{ return kill.Run(t) }}" for i in range(8)])
+        out = self.recall("1. Who calls `kill.Run`?\n")
+        self.assertEqual(len(re.findall(r"(?m)^  [+-] app/", out)), 5, out)
+        self.assertIn("  +3 more", out)
+
+    def test_a_recall_past_twelve_kb_keeps_the_highest_match_lines_and_names_the_cut(self):
+        answer = [f"- `Handle` refuses case {i}: " + "word " * 70 + "[app/srv/server.go:5]" for i in range(40)]
+        answer.append("- `Handle` returns `kill.Run` and refuses the empty target: TOPMATCH [app/srv/server.go:5]")
+        self.run_with(self.repo, hops("1", answer, ["@ app/srv/server.go:5",
+                                                    "> \t\treturn errors.New(\"target is required\")", "= the refusal"],
+                                      ["END returned @ app/srv/server.go:5"]))
+        out = self.recall("".join(f"{n}. Where does `Handle` refuse, and is `kill.Run` reached?\n" for n in (1, 2, 3)))
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        self.assertRegex(out, r"(?m)^RECALL CUT [1-9]\d* lines past the 12 KB cap · ")
+        self.assertEqual(out.count("TOPMATCH"), 3)
+        self.assertTrue(out.rstrip("\n").splitlines()[-1].startswith("RECALL COVER 3/3 "), out[-300:])
+
+    def test_past_the_cap_stale_rows_then_delta_lines_go_before_any_fresh_line(self):
+        fresh = [f"- `Handle` refuses case {i}: " + "word " * 150 + "[app/srv/server.go:5]" for i in range(8)]
+        delta = [f"- `Handle` hands `kill.Run` variant {i}: " + "word " * 70 + "[app/srv/server.go:7]" for i in range(14)]
+        run = self.run_with(self.repo, hops("1", fresh + delta, [
+            "@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")", "= the refusal",
+            "@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the call"],
+            ["END returned @ app/srv/server.go:7"]))
+        with open(os.path.join(run, "2.hops"), "w") as f:
+            f.write(hops("2", [f"- `Handle` reaches `kill.Run` premise {i} [app/kill/kill.go:6]" for i in range(6)],
+                         ["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                          "= the premise"], ["END returned @ app/kill/kill.go:6"]))
+        changed = list(KILL)
+        changed[5] = "\t\treturn nil"
+        self.edit("app/kill/kill.go", changed)
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(t)", "}"])
+        out = self.recall("1. Where does `Handle` refuse, and is `kill.Run` reached?\n")
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        self.assertEqual(len(re.findall(r"(?m)^FRESH ", out)), 8, out)
+        self.assertNotRegex(out, r"(?m)^STALE ")
+        self.assertLess(len(re.findall(r"(?m)^DELTA ", out)), 14)
+        self.assertRegex(out, r"(?m)^RECALL CUT \d+ lines past the 12 KB cap · 6 stale/gap, [1-9]\d* delta, 0 fresh")
+
+    def test_two_witnessed_names_on_one_changed_line_give_one_occurrence_row(self):
+        self.run_with(self.repo, self.ONLY)
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(Handle(t))", "}"])
+        out = self.recall("1. Who calls `kill.Run`?\n")
+        self.assertIn("DELTA ", out)
+        self.assertEqual(out.count("+ app/cli/cli.go:4 "), 1, out)
+
+    def test_answered_needs_every_anchor_on_a_fresh_line_and_no_delta_stale_or_gap_row(self):
+        handle_and_run = hops("1", ["- `Handle` refuses the empty target, else hands it to `kill.Run` [app/srv/server.go:7]"],
+                              ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the call"],
+                              ["END returned @ app/srv/server.go:7"])
+        q = "1. Where does `Handle` refuse, and is `kill.Run` reached?\n2. Where does `Handle` refuse?\n"
+        self.run_with(self.repo, handle_and_run)
+        out = self.recall(q)
+        self.assertRegex(out, r"(?m)^ANSWERED Q1$")
+        self.assertRegex(out, r"(?m)^ANSWERED Q2$")
+        shutil.rmtree(self.parent)
+        self.run_with(self.repo, self.HANDLE)
+        out = self.recall(q)
+        self.assertNotRegex(out, r"(?m)^ANSWERED Q1\b", "kill.Run is carried by no FRESH line")
+        self.assertRegex(out, r"(?m)^ANSWERED Q2$")
+        run = self.run_with(self.repo, handle_and_run)
+        with open(os.path.join(run, "2.hops"), "w") as f:
+            f.write(hops("2", ["- `Handle` reaches the pane through a premise [app/kill/kill.go:6]"],
+                         ["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                          "= the premise"], ["END returned @ app/kill/kill.go:6"]))
+        changed = list(KILL)
+        changed[5] = "\t\treturn nil"
+        self.edit("app/kill/kill.go", changed)
+        out = self.recall(q)
+        self.assertRegex(out, r"(?m)^STALE Q1 ")
+        self.assertNotRegex(out, r"(?m)^ANSWERED Q\d", "a STALE row of the question rules ANSWERED out")
+        self.edit("app/kill/kill.go", KILL)
+        shutil.rmtree(self.parent)
+        self.run_with(self.repo, handle_and_run)
+        os.makedirs(os.path.join(self.repo, "app", "cli"))
+        self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(t)", "}"])
+        out = self.recall(q)
+        self.assertRegex(out, r"(?m)^DELTA ")
+        self.assertNotRegex(out, r"(?m)^ANSWERED Q1\b", "a DELTA row of the question rules ANSWERED out")
+        shutil.rmtree(os.path.join(self.repo, "app", "cli"))
+        shutil.rmtree(self.parent)
+        self.run_with(self.repo, hops("1", ["- `Handle` refuses the empty target [app/srv/server.go:5]",
+                                            "- Nothing else refuses here [app/srv/server.go:5]"],
+                                      ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")",
+                                       "= the refusal"], ["END returned @ app/srv/server.go:5"]))
+        out = self.recall("1. Where does `Handle` refuse, app/srv/server.go?\n")
+        self.assertRegex(out, r"(?m)^GAP Q1 · ")
+        self.assertNotIn("ANSWERED", out, "a GAP row of the question rules ANSWERED out")
 
 
 if __name__ == "__main__":

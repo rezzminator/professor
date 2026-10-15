@@ -32,6 +32,32 @@ checks_templates_plugin_logs() {
   run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
 }
 
+# The plugin lab's hermetic half: its shell linted at warning level
+# (infra/plugin-lab/.shellcheckrc), then every self-test it ships side by side —
+# each file owns its temp root and private tmux sockets — so the slowest suite, not
+# their sum, sets the step's wall.
+# The live half spends money and runs on the host: docs/dev/testing/plugin-lab.md.
+checks_templates_plugin_lab() {
+  local lab="$REPO_ROOT/infra/plugin-lab"
+  if ! need_tool shellcheck templates; then
+    fail_step "plugin-lab shell NOT LINTED — shellcheck is missing"
+  else
+    run "templates: plugin-lab shellcheck" -- bash -c 'cd "$1" && shellcheck -x -S warning lab lib/*.sh hooks/*.sh scenarios/*/*.sh tests/*.sh tests/*/*_test.sh tests/fakes/* tests/fixtures/scenarios/*/*.sh' _ "$lab"
+  fi
+  run "templates: plugin-lab self-tests" -- bash -c 'out=$(mktemp -d) || exit 1; trap "rm -rf \"\$out\"" EXIT; n=0
+    for t in "$1"/tests/lib/*_test.sh "$1"/tests/hooks/*_test.sh "$1"/tests/*_test.sh; do
+      [[ -f "$t" ]] || { echo "NOT RUN: no suite matches $t"; exit 1; }
+      n=$((n + 1)); printf "%s\n" "$t" > "$out/$n.name"; bash "$t" > "$out/$n.log" 2>&1 & echo $! > "$out/$n.pid"
+    done
+    red=0
+    for i in $(seq 1 "$n"); do
+      wait "$(cat "$out/$i.pid")"; rc=$?
+      echo "== $(cat "$out/$i.name") rc=$rc"; cat "$out/$i.log"
+      (( rc == 0 )) || red=$((red + 1))
+    done
+    echo "plugin-lab self-tests: $n suites, $red red"; (( red == 0 ))' _ "$lab"
+}
+
 checks_templates_leak() {
   head_ "templates — leak gate"
   run "templates: leak-check self-test" -- bash "$REPO_ROOT/scripts/test-leak-check.sh"
@@ -594,6 +620,55 @@ checks_templates_engine_sync_action_tests() {
 
 }
 
+# skill_unittest_sharded <out> <test file…>: the files' test ids split round-robin over
+# SKILL_TEST_SHARDS parallel unittest processes (default: the cores, at most 8), so a skill suite's
+# serial CPU time no longer sets the step's wall. <out> holds each `SHARD {i}` block, then one
+# aggregate `Ran {n} tests` and `OK`, `OK (skipped={k})` or `FAILED (shards={red}/{all})`; the exit
+# is non-zero when a shard fails, a file cannot load, or no test exists.
+skill_unittest_sharded() {
+  local out="$1"
+  shift
+  python3 - "$@" >"$out" 2>&1 <<'PY'
+import os, re, subprocess, sys, unittest
+
+loader, ids = unittest.TestLoader(), []
+def walk(suite):
+    for test in suite:
+        walk(test) if isinstance(test, unittest.TestSuite) else ids.append(test.id())
+for path in sys.argv[1:]:
+    name = os.path.splitext(os.path.normpath(path))[0].replace(os.sep, ".")
+    try:
+        walk(loader.loadTestsFromName(name))
+    except Exception as exc:
+        print(f"LOAD FAILED {path}: {exc!r}")
+        print("Ran 0 tests\nFAILED (load)")
+        sys.exit(1)
+    if loader.errors:
+        print(f"LOAD FAILED {path}:\n" + "\n".join(loader.errors))
+        print("Ran 0 tests\nFAILED (load)")
+        sys.exit(1)
+if not ids:
+    print("Ran 0 tests")
+    sys.exit(1)
+want = os.environ.get("SKILL_TEST_SHARDS") or str(min(8, os.cpu_count() or 1))
+count = max(1, min(int(want), len(ids)))
+shards = [ids[i::count] for i in range(count)]
+procs = [subprocess.Popen([sys.executable, "-m", "unittest", *chunk], stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True) for chunk in shards]
+ran = skipped = red = 0
+for i, proc in enumerate(procs, 1):
+    text = proc.communicate()[0]
+    print(f"SHARD {i}/{count} rc={proc.returncode} tests={len(shards[i - 1])}\n{text}")
+    got = re.search(r"^Ran (\d+) tests?", text, re.M)
+    ran += int(got.group(1)) if got else 0
+    skipped += sum(int(n) for n in re.findall(r"skipped=(\d+)", text))
+    red += proc.returncode != 0 or not got
+print(f"Ran {ran} tests")
+print(f"FAILED (shards={red}/{count})" if red else f"OK (skipped={skipped})" if skipped else "OK")
+sys.exit(1 if red else 0)
+PY
+}
+
 checks_templates_skill_tests() {
   local skill cp_out
   for skill in codeprobe tracetree; do
@@ -601,7 +676,7 @@ checks_templates_skill_tests() {
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
       fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
-    elif ! python3 -m unittest "templates/global/skills/$skill/"*_test.py >"$cp_out" 2>&1; then
+    elif ! skill_unittest_sharded "$cp_out" "templates/global/skills/$skill/"*_test.py; then
       cat "$cp_out"
       if grep -Eq '^Ran 0 tests?' "$cp_out"; then
         fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
@@ -615,7 +690,7 @@ checks_templates_skill_tests() {
       cat "$cp_out"
       fail_step "$skill tests SKIPPED — a skipped test is a named gap, never a pass"
     else
-      ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
+      ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out" | tail -1))"
     fi
   done
 
@@ -651,7 +726,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
-  checks_named_template_steps "$add" clone leak plugin-logs placeholders scratch-paths descriptions mirrors \
+  checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
     global-variants release-check codex-sync refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do

@@ -164,7 +164,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.global-variants,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.engine-sync-action-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -213,6 +213,9 @@ done
 if grep -Fxq "templates.plugin-logs checks_templates_plugin_logs" "$T/registered.args"; then
   ok 'plugin-logs self-test is a named gate step'
 else bad 'plugin-logs gate registration' "$(cat "$T/registered.args")"; fi
+if grep -Fxq "templates.plugin-lab checks_templates_plugin_lab" "$T/registered.args"; then
+  ok 'plugin-lab self-tests are a named gate step'
+else bad 'plugin-lab gate registration' "$(cat "$T/registered.args")"; fi
 
 # The pfm that pfm.unit prebuilds is kept in <run>/bin: check-map is handed it; the mirrors build engine-sync instead.
 if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then
@@ -1187,5 +1190,56 @@ else
   bad "global variants, tracked generated drift" "$(cat "$T/es.out")"
 fi
 rm -rf "$REPO_ROOT/templates/generated"
+
+# skill_unittest_sharded: the skill suites run in parallel shards; any red shard, a skip or no test stays visible.
+mkdir -p "$T/shard/pkg"
+cat > "$T/shard/pkg/a_test.py" <<'PY'
+import unittest
+class A(unittest.TestCase):
+    def test_1(self): pass
+    def test_2(self): pass
+    def test_3(self): pass
+PY
+cat > "$T/shard/pkg/b_test.py" <<'PY'
+import unittest
+class B(unittest.TestCase):
+    def test_1(self): pass
+    def test_2(self): pass
+PY
+cat > "$T/shard/pkg/red_test.py" <<'PY'
+import unittest
+class R(unittest.TestCase):
+    def test_ok(self): pass
+    def test_red(self): self.fail("planted red")
+PY
+cat > "$T/shard/pkg/skip_test.py" <<'PY'
+import unittest
+class S(unittest.TestCase):
+    def test_ok(self): pass
+    @unittest.skip("planted skip")
+    def test_skip(self): pass
+PY
+printf '' > "$T/shard/pkg/empty_test.py"
+if (cd "$T/shard" && SKILL_TEST_SHARDS=3 skill_unittest_sharded "$T/shard/green.out" pkg/a_test.py pkg/b_test.py) &&
+  [ "$(grep -c '^SHARD ' "$T/shard/green.out")" -eq 3 ] && grep -Fxq 'Ran 5 tests' "$T/shard/green.out" &&
+  [ "$(tail -1 "$T/shard/green.out")" = OK ]; then
+  ok 'skill shards: 5 tests over 3 shards aggregate to Ran 5 tests, OK'
+else bad 'skill shards green' "$(cat "$T/shard/green.out" 2>&1)"; fi
+if ! (cd "$T/shard" && SKILL_TEST_SHARDS=2 skill_unittest_sharded "$T/shard/red.out" pkg/a_test.py pkg/red_test.py) &&
+  grep -Fq 'planted red' "$T/shard/red.out" && [[ "$(tail -1 "$T/shard/red.out")" == 'FAILED (shards='* ]]; then
+  ok 'skill shards: one red test makes the run non-zero, FAILED, with its trace'
+else bad 'skill shards red' "$(cat "$T/shard/red.out" 2>&1)"; fi
+if (cd "$T/shard" && skill_unittest_sharded "$T/shard/skip.out" pkg/skip_test.py) &&
+  grep -Eq 'skipped=[1-9]' "$T/shard/skip.out"; then
+  ok 'skill shards: a skipped test still reads skipped=N for the step to refuse'
+else bad 'skill shards skip' "$(cat "$T/shard/skip.out" 2>&1)"; fi
+if ! (cd "$T/shard" && skill_unittest_sharded "$T/shard/none.out" pkg/empty_test.py) &&
+  grep -Fxq 'Ran 0 tests' "$T/shard/none.out"; then
+  ok 'skill shards: a file with no test is Ran 0 tests and non-zero'
+else bad 'skill shards none' "$(cat "$T/shard/none.out" 2>&1)"; fi
+if ! (cd "$T/shard" && skill_unittest_sharded "$T/shard/missing.out" pkg/nope_test.py) &&
+  ! grep -Fxq OK "$T/shard/missing.out"; then
+  ok 'skill shards: an unimportable test file is red, never OK'
+else bad 'skill shards missing' "$(cat "$T/shard/missing.out" 2>&1)"; fi
 
 shtest_end

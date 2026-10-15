@@ -1,7 +1,7 @@
 ---
 name: chat-investigator
 description: 'Answers a question from other chats'' transcripts — "read my chat with X", "what went wrong in that run", "did that agent really do Y". Pass the mission, any names, ids, paths or time window, and your own session id. Returns the answer, then evidence by transcript line, NOT READ.'
-tools: Read, Grep, Glob, Bash, Agent, mcp__chat-professor__ls, mcp__chat-professor__find, mcp__chat-professor__status, mcp__chat-professor__last, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Grep, Glob, Bash, Agent, mcp__chat-professor__ls, mcp__chat-professor__find, mcp__chat-professor__status, mcp__chat-professor__last, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: sonnet
 effort: high
 ---

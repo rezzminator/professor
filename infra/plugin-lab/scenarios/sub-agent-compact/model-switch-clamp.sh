@@ -8,11 +8,11 @@ LAB_MODEL=sonnet
 LAB_CAP_USD=1.00
 LAB_EST_USD=0.45
 LAB_WALL_S=2400
-LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000)
+LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000 SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT=600k)
 LAB_ALLOW=(Read)
 LAB_DENY=(Bash Grep Glob)
 LAB_LOGGER=yes
-lab_options '{"mainAutoCompact":"600k"}'
+lab_options '{}'
 
 lab_scenario() {
   for n in 01 02 03 04 05; do need_corpus "block-$n" 15000; done

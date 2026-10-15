@@ -1,0 +1,144 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ae93ece..6b73b1d 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,11 @@
+ 
+ Every release of effort-live-control (named agent-effort through 0.1.3). Versions follow [semantic versioning](https://semver.org); each release is the `main` commit tagged `effort-live-control--v<version>` (`agent-effort--v<version>` through 0.1.3), with a GitHub release carrying the section below.
+ 
++## [Unreleased]
++
++### Fixed
++- A failed plugin-log write also reaches the decision log (event `plugin-log-failed`, once per failing streak), not only the screen.
++
+ ## [0.3.2] — 2026-10-15
+ 
+ ### Fixed
+diff --git a/README.md b/README.md
+index cc8605d..a58e61b 100644
+--- a/README.md
++++ b/README.md
+@@ -7,7 +7,7 @@
+ [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://docs.claude.com/en/docs/claude-code/plugins)
+ [![Version](https://img.shields.io/badge/version-0.3.3-blue)](./CHANGELOG.md)
+ [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+-[![Tests](https://img.shields.io/badge/tests-554%20passing-brightgreen)](#development)
++[![Tests](https://img.shields.io/badge/tests-556%20passing-brightgreen)](#development)
+ [![Built with Professor](https://img.shields.io/badge/built%20with-Professor-8A2BE2)](https://github.com/rezzminator/professor)
+ 
+ </div>
+@@ -174,13 +174,13 @@ Set under the plugin's settings. A bad value is reported once at the first hook
+ 
+ ## 📜 Decision log
+ 
+-`logFile` holds one JSONL file per session, the newest 5,000 rows. Every row has `ts`, `event`, `agent` (an id, or `main`) and `type`. Rows: `step` for every steered request (`model`, `requested`, `sent`, `struggle`), `tag` (`tag`, `effort`; `home` and `clamped` for a steered agent), `tag-ignored`, `judge` (`tripwire`, `p`, `from`, `to`, `reason`, `ms`, `usage`), `judge-failed`, `judge-stale`, `judge-busy`, `mechanical` (`tripwire`, `from`, `to`; `busy` when it replaced a stale judge call), `resolved` (`from`, `to`, `requests`, `why`: `resolved` or `decay`), `landing`, `button`, `button-refused`, `model-gated`, `not-steered`, `end`, and option, tool-registration and resolution errors. The main chat adds `prompt` (`p`, `level`, `home`, `ms`, `usage`, `casebook`: core rows shown, `casebookSource`: `file` or `bundled`, `precedents`; `casebookError` when the file could not be read) and, when the reader gave no decision, `reader-timeout`, `reader-failed` (`error`), `reader-unparsed` and `reader-gated` (a model outside `models`); its steered requests are `step` rows with `agent: main`. No prompt, brief, reply or tool-result text is written, except the judge's and the reader's `packet` and `answer` when `logPackets` is on.
++`logFile` holds one JSONL file per session, the newest 5,000 rows. Every row has `ts`, `event`, `agent` (an id, or `main`) and `type`. Rows: `step` for every steered request (`model`, `requested`, `sent`, `struggle`), `tag` (`tag`, `effort`; `home` and `clamped` for a steered agent), `tag-ignored`, `judge` (`tripwire`, `p`, `from`, `to`, `reason`, `ms`, `usage`), `judge-failed`, `judge-stale`, `judge-busy`, `mechanical` (`tripwire`, `from`, `to`; `busy` when it replaced a stale judge call), `resolved` (`from`, `to`, `requests`, `why`: `resolved` or `decay`), `landing`, `button`, `button-refused`, `model-gated`, `not-steered`, `end`, `plugin-log-failed` (`error`: a level-log append failed, once per failing streak), and option, tool-registration and resolution errors. The main chat adds `prompt` (`p`, `level`, `home`, `ms`, `usage`, `casebook`: core rows shown, `casebookSource`: `file` or `bundled`, `precedents`; `casebookError` when the file could not be read) and, when the reader gave no decision, `reader-timeout`, `reader-failed` (`error`), `reader-unparsed` and `reader-gated` (a model outside `models`); its steered requests are `step` rows with `agent: main`. No prompt, brief, reply or tool-result text is written, except the judge's and the reader's `packet` and `answer` when `logPackets` is on.
+ 
+ ## Logs
+ 
+ Errors, warnings and effort changes are also appended to `errors.jsonl`, `warnings.jsonl` and `info.jsonl` under `$PLUGIN_LOG_DIR/effort-live-control/`. Without `PLUGIN_LOG_DIR`, they use `$HOME/.local/state/effort-live-control/logs/`. Rows contain timestamps, event names, stable code locations and optional session ids; no prompt, transcript or tool-input bodies are added to these files, even with `logPackets` enabled.
+ 
+-Rows are capped at 4096 bytes. A level file over 20 MiB moves to `.1` and emits a `log-capped` warning. Directories and files are created privately. A failed append gives one screen notice per failing streak, re-armed after a successful write, without changing the plugin's result. Existing screen notices and `logFile` decision logs are unchanged. Appending needs the CLI's `$.process.run` and `/bin/sh`; when unavailable, the screen notice names the failure.
++Rows are capped at 4096 bytes. A level file over 20 MiB moves to `.1` and emits a `log-capped` warning. Directories and files are created privately. A failed append gives one screen notice and one `plugin-log-failed` decision row per failing streak, re-armed after a successful write, without changing the plugin's result. Appending needs the CLI's `$.process.run` and `/bin/sh`; when unavailable, the screen notice names the failure.
+ 
+ ## ❓ FAQ
+ 
+diff --git a/plugins/effort-live-control/hooks/effort-live-control.ts b/plugins/effort-live-control/hooks/effort-live-control.ts
+index 04bc83a..c44868f 100644
+--- a/plugins/effort-live-control/hooks/effort-live-control.ts
++++ b/plugins/effort-live-control/hooks/effort-live-control.ts
+@@ -179,7 +179,10 @@ async function flushPlugin(rt: Runtime, $: EngineInterface): Promise<void> {
+     try { return await $.process.run(argv, init); }
+     catch (error) { throw new Error(`$.process.run failed: ${message(error)}`); }
+   });
+-  if (out.error !== undefined) logFallback($, `effort-live-control: ${out.error}`);
++  if (out.error !== undefined) {
++    logFallback($, `effort-live-control: ${out.error}`);
++    record(rt, $, 'main', 'plugin', { event: 'plugin-log-failed', error: out.error });
++  }
+ }
+ 
+ // Only the metadata preparation is queued here; subprocesses have their own
+@@ -651,6 +654,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
+   on('session.end', async ($, e, next) => {
+     await rt.pluginWriting;
+     await rt.pluginFlushing;
++    // The last flush may queue a decision row (a failed append's plugin-log-failed): it is on disk before the session ends.
++    // A write failure's notice has queued its level row before a throwing screen rejected the chain; the session still ends.
++    await rt.writing.catch((error) => logFallback($, `effort-live-control: finishing the decision log failed: ${message(error)}`));
+     return next(e);
+   });
+ 
+diff --git a/tests/adapter.test.ts b/tests/adapter.test.ts
+index 328f196..aa31c78 100644
+--- a/tests/adapter.test.ts
++++ b/tests/adapter.test.ts
+@@ -21,6 +21,10 @@ function deferred<T>() {
+ type Opts = {
+   /** Files the stand-in file system holds: absolute path → text. */
+   files?: Record<string, string>;
++  /** A write lands only after a timer turn, as a real disk write does: what is not awaited is not on disk. */
++  slowWrite?: boolean;
++  /** The screen door throws, as an engine without a UI may. */
++  uiThrows?: boolean;
+   options?: Record<string, unknown>;
+   env?: Record<string, string | undefined>;
+   run?: (argv: readonly string[], init?: { timeoutMs?: number }) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+@@ -63,7 +67,7 @@ function engine(state = new Map<string, unknown>(), opts: Opts = {}) {
+           signal?.addEventListener('abort', cancel, { once: true });
+         }),
+     },
+-    ui: { log: (line: string) => logs.push(line) },
++    ui: { log: (line: string) => { if (opts.uiThrows) throw new Error('no screen'); logs.push(line); } },
+     ...(opts.noProcess ? {} : { process: { run: opts.run ?? (async () => ({ exitCode: 0, stdout: '', stderr: '' })) } }),
+     agent: { list: async () => [...statuses].map(([id, status]) => ({ id, status, type: 'general-purpose', description: '' })) },
+     fs: {
+@@ -74,7 +78,10 @@ function engine(state = new Map<string, unknown>(), opts: Opts = {}) {
+         if (text === undefined) throw new Error('ENOENT');
+         return text;
+       },
+-      write: async (path: string, text: string) => void (files.set(path, text), mtimes.set(path, (mtimes.get(path) ?? 0) + 1)),
++      write: async (path: string, text: string) => {
++        if (opts.slowWrite) await new Promise((resolve) => setTimeout(resolve, 5));
++        files.set(path, text); mtimes.set(path, (mtimes.get(path) ?? 0) + 1);
++      },
+       stat: async (path: string) => {
+         if (!files.has(path)) throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+         return { kind: 'file', size: 0, mtimeMs: mtimes.get(path) ?? 0, isLink: false };
+@@ -176,7 +183,7 @@ function engine(state = new Map<string, unknown>(), opts: Opts = {}) {
+     const text = files.get('/fixture-home/t/.local/state/effort-live-control/decisions.sess1.jsonl') ?? '';
+     return text.split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as Record<string, any>);
+   };
+-  const sessionEnd = async () => { if (hooks.has('session.end')) await hooks.get('session.end')!($, {}, async () => ({})); };
++  const sessionEnd = async (next = async () => ({})) => { if (hooks.has('session.end')) await hooks.get('session.end')!($, {}, next); };
+   return { $, state, statuses, touch, step, mainStep, prompt, completeMain, spawn, spawned, complete, tool, sessionStart, sessionEnd, describeTool, fireTimers, tick, logs, timers, files, judgeCalls, registered, rows };
+ }
+ 
+@@ -1763,6 +1770,27 @@ suite('plugin log adapter', () => {
+     expect(notices()).toHaveLength(2);
+   });
+ 
++  it('a failing plugin-log write also reaches the decision log, once per failing streak', async () => {
++    // The invalid floor's option-error warning is the level-log write that fails.
++    const x = engine(undefined, { slowWrite: true, env: { PLUGIN_LOG_DIR: '/fixture-logs' }, options: { floor: 'invalid', logFile: '/fixture-home/t/elc.jsonl' }, run: async () => ({ exitCode: 1, stdout: '', stderr: 'chmod: --: No such file or directory' }) });
++    await x.sessionStart(); await x.sessionEnd();
++    // No tick after session.end: the row the final flush queues is on disk when the session ends.
++    const text = x.files.get('/fixture-home/t/elc.sess1.jsonl') ?? '';
++    const failed = text.split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter((row) => row.event === 'plugin-log-failed');
++    expect(failed).toHaveLength(1);
++    expect(failed[0].error).toContain('chmod: --: No such file or directory');
++    expect(x.logs.filter((line) => line.includes('plugin log'))).toHaveLength(1);
++  });
++
++  it('session.end still ends when the decision-log write fails and the screen door throws', async () => {
++    const path = '/fixture-home/t/elc.sess1.jsonl';
++    const x = engine(undefined, { uiThrows: true, broken: [path], files: { [path]: '' }, env: { PLUGIN_LOG_DIR: '/fixture-logs' }, options: { logFile: '/fixture-home/t/elc.jsonl' } });
++    await x.sessionStart();
++    let ended = false;
++    await x.sessionEnd(async () => { ended = true; return {}; });
++    expect(ended).toBe(true);
++  });
++
+   it.each(['no-process', 'no-home'])('keeps work unchanged and gives visible logger fallback for %s', async (mode) => {
+     const dir = await fresh();
+     const x = engine(undefined, { env: mode === 'no-home' ? { HOME: undefined, PLUGIN_LOG_DIR: undefined } : { PLUGIN_LOG_DIR: dir }, noProcess: mode === 'no-process', options: { floor: 'invalid', logFile: '', mainChat: 'tripwires', casebookFile: '' } });

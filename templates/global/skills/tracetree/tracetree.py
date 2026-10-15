@@ -330,14 +330,16 @@ def cmd_seek(run, seek):
 INTAKE_ROOT = re.compile(r"(?im)^[ \t]*(?:repo(?:sitory)?[ \t]+root\b[^\n]*?|root[ \t]*[:=]?[ \t]*[`'\"(]?)"
                          r"((?:~/|/)[^\s`'\"()\[\],;]+)")
 INTAKE_RUN = re.compile(r"(?m)^[ \t]*RUN:[ \t]*\S")
+CARD_FIELD = re.compile(r"(?m)^[ \t]*(RUN|ID|QUESTION|REASON):[ \t]*(\S.*?)[ \t]*$")
+RECALL_ANSWERED = re.compile(r"(?m)^ANSWERED Q(\d+)$")
 TT = "python3 $HOME/.claude/skills/tracetree/tracetree.py"
 
 
-def intake_log(msg):
-    """A hook has no caller to tell when its payload is unreadable: the failure goes to intake.log in the tracer
-    scratch directory of the project the hook runs in, /tmp/{project}/tracer/, and to stderr when even that cannot be
-    written."""
-    folder = os.path.join("/tmp", project_name(os.getcwd()), "tracer")
+def intake_log(msg, folder=None):
+    """A hook has no caller to tell when its payload is unreadable: the failure goes to intake.log in folder, else the
+    tracer scratch directory of the project the hook runs in, /tmp/{project}/tracer/, and to stderr when even that
+    cannot be written."""
+    folder = folder or os.path.join("/tmp", project_name(os.getcwd()), "tracer")
     try:
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "intake.log"), "a", encoding="utf-8") as f:
@@ -349,8 +351,9 @@ def intake_log(msg):
 def cmd_intake():
     """PreToolUse hook on the Agent tool. A `tracer` spawn whose brief holds numbered questions and no `RUN:` line gets
     its run opened here — ROOT from the brief's `Repo root:` line, else the hook's cwd — the brief rewritten to carry
-    `RUN: {run}` after that line, and the caller told how to pull each answer. Every other call passes untouched; a
-    run that cannot be opened passes the spawn on unchanged and tells the caller why."""
+    `RUN: {run}` after that line, and the caller told how to pull each answer. A `sub-tracer` spawn goes to
+    `intake_thread`. Every other call passes untouched; a run that cannot be opened passes the spawn on unchanged and
+    tells the caller why."""
     raw = sys.stdin.read()
     try:
         event = json.loads(raw)
@@ -360,6 +363,8 @@ def cmd_intake():
         intake_log(f"unreadable hook payload ({e}): {raw[:200]!r}")
         return
     tool, given = event.get("tool_name"), event.get("tool_input") or {}
+    if tool in ("Agent", "Task") and given.get("subagent_type") == "sub-tracer":
+        return intake_thread(given.get("prompt"))
     if tool not in ("Agent", "Task") or given.get("subagent_type") != "tracer":
         return
     brief = given.get("prompt")
@@ -405,6 +410,41 @@ def cmd_intake():
         "verdict, a SAFE or a closing claim waits for the final, so end your turn once only the final is left. Until "
         "then work on what no question covers — the testing manual, fixtures, a doc; a file a pending question "
         "covers, read now, is paid for twice. /tracer:use has the rest." + recalled, rewritten)
+
+
+def intake_thread(card):
+    """A sub-tracer card whose QUESTION names only questions its RUN's recall.txt marks `ANSWERED Q{n}` is refused: the
+    tracer serves those by quoting their FRESH lines. A card carrying `REASON: {why}` passes, the override logged to
+    intake.log beside the run; every other card passes untouched, and a recall.txt that cannot be read is logged, the card passed."""
+    if not isinstance(card, str):
+        return
+    fields = {}
+    for m in CARD_FIELD.finditer(card):
+        fields.setdefault(m.group(1), m.group(2))
+    run, nums = fields.get("RUN"), {int(n) for n in re.findall(r"\bQ(\d+)\b", fields.get("QUESTION", ""))}
+    if not run or not nums:
+        return
+    path = os.path.join(run, "recall.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            answered = {int(n) for n in RECALL_ANSWERED.findall(f.read())}
+    except FileNotFoundError:
+        return
+    except (OSError, UnicodeDecodeError) as e:
+        intake_log(f"{path} unreadable, sub-tracer card passed unchecked: {e}")
+        return
+    if not nums <= answered:
+        return
+    qs, node = ", ".join(f"Q{n}" for n in sorted(nums)), fields.get("ID", "?")
+    if fields.get("REASON"):
+        intake_log(f"{run}: node {node} opened a thread for ANSWERED {qs} — REASON: {fields['REASON']}",
+                   os.path.dirname(os.path.abspath(run)))
+        return
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": f"tracer intake: {qs} ANSWERED in {path} — serve it by quoting its FRESH lines "
+        f"verbatim, no thread, and leave node {node} out of `tt wait`. A thread it still needs carries "
+        "`REASON: {why}` on its card."}}))
 
 
 def intake_recall(run, root, asked):
@@ -2703,7 +2743,8 @@ def recall_runs(rc, root, since_hours, exclude, before=None):
 def recall_line(rc, run, theirs, base, text, hopset, idents):
     """One prior answer line checked against ROOT now: (kind FRESH | DELTA | STALE | GAP, text with re-addressed
     cites, notes). STALE: a cite, or any hop its node walked, no longer holds. DELTA: a name it carries changed its
-    occurrence set since BASE, notes the changed names then the `+`/`-` rows. GAP: a closed-world claim naming nothing
+    occurrence set since BASE, notes the changed names then the `+`/`-` rows, one per changed line however many names it
+    carries. GAP: a closed-world claim naming nothing
     to witness."""
     def rel(p):
         return os.path.relpath(p, theirs) if os.path.isabs(p) and p.startswith(theirs + os.sep) else p
@@ -2759,7 +2800,7 @@ def recall_line(rc, run, theirs, base, text, hopset, idents):
     named |= {i for i in idents if holds(text, i, True)}
     if CLOSED_WORLD.search(BACKTICK.sub(" ", CITE.sub(" ", text))) and not named:
         return "GAP", text, ["a closed-world claim naming no identifier or path to witness"]
-    changed, rows = [], []
+    changed, rows, placed = [], [], set()
     for sym in sorted(named | cited):
         if not base:
             return "STALE", text, [f"no BASE to witness `{sym}` against"]
@@ -2769,34 +2810,58 @@ def recall_line(rc, run, theirs, base, text, hopset, idents):
         added, gone = got
         if added or gone:
             changed.append(f"`{sym}`")
-            rows += [f"+ {p}:{n} {t[:160]}" for p, n, t in added] + [f"- {p}:{n} {t[:160]}" for p, n, t in gone]
+            for sign, occ in (("+", added), ("-", gone)):
+                for p, n, t in occ:
+                    if (sign, p, n) not in placed:
+                        placed.add((sign, p, n))
+                        rows.append(f"{sign} {p}:{n} {t[:160]}")
     if changed:
         return "DELTA", text, notes + [f"changed since {base[:PIN_ABBREV]}: {', '.join(changed)}"] + rows
     return "FRESH", text, notes
 
 
 def recall_capped(units):
-    """The output lines of units [(rank or None, lines)] within RECALL_CAP bytes: an unranked unit always stays, ranked
-    ones are cut lowest rank first, and a `RECALL CUT` line names how many before the last unit."""
-    size = sum(len(x.encode()) + 1 for _, lines in units for x in lines)
-    keep, cut = [True] * len(units), 0
-    order = sorted((i for i, (r, _) in enumerate(units) if r is not None), key=lambda i: (units[i][0], -i))
-    for i in order:
-        if size + 64 <= RECALL_CAP:
-            break
-        keep[i] = False
-        size -= sum(len(x.encode()) + 1 for x in units[i][1])
-        cut += 1
-    out = [x for i, (_, lines) in enumerate(units) if keep[i] for x in lines]
-    if cut:
-        out.insert(len(out) - 1, f"RECALL CUT {cut} lines past the {RECALL_CAP // 1024} KB cap")
+    """The output lines of units [(kind, hits, lines, q, extra)] within RECALL_CAP bytes. A unit of kind None (heads,
+    GAP questions, UNREADABLE, the cover) always stays. Past the cap, fewest anchor hits first and the later unit first
+    on a tie within each step: STALE and GAP rows go, then each DELTA line's occurrence rows shrink to `  +{extra} rows`,
+    then DELTA lines go, then FRESH lines. An ANSWERED unit stays only while every anchor of Q{q} (its extra) is carried
+    by a kept FRESH line of Q{q} (each FRESH unit's extra: the anchors it carries). A `RECALL CUT` line names what went,
+    before the last unit."""
+    def size(lines):
+        return sum(len(x.encode()) + 1 for x in lines)
+
+    shown = [list(u[2]) for u in units]
+    keep, total = [True] * len(units), sum(size(x) for x in shown)
+    cut = {"STALE": 0, "trim": 0, "DELTA": 0, "FRESH": 0}
+    for step, kinds in (("STALE", ("STALE", "GAP")), ("trim", ("DELTA",)), ("DELTA", ("DELTA",)), ("FRESH", ("FRESH",))):
+        for i in sorted((i for i, u in enumerate(units) if u[0] in kinds), key=lambda i: (units[i][1], -i)):
+            if total + 128 <= RECALL_CAP:
+                break
+            if step == "trim":
+                if len(shown[i]) < 2:
+                    continue
+                trimmed = shown[i][:1] + [f"  +{units[i][4]} rows"]
+                total, shown[i] = total - size(shown[i]) + size(trimmed), trimmed
+            else:
+                keep[i], total = False, total - size(shown[i])
+            cut[step] += 1
+    for i, (kind, _, _, q, need) in enumerate(units):
+        if kind == "ANSWERED":
+            carried = set().union(*(u[4] for j, u in enumerate(units) if keep[j] and u[0] == "FRESH" and u[3] == q))
+            keep[i] = need <= carried
+    out = [x for i, lines in enumerate(shown) if keep[i] for x in lines]
+    if any(cut.values()):
+        trim = f" · {cut['trim']} delta lines cut to their head" if cut["trim"] else ""
+        out.insert(len(out) - 1, f"RECALL CUT {cut['STALE'] + cut['DELTA'] + cut['FRESH']} lines past the "
+                   f"{RECALL_CAP // 1024} KB cap · {cut['STALE']} stale/gap, {cut['DELTA']} delta, {cut['FRESH']} fresh{trim}")
     return out
 
 
 def recall(root, asked, since_hours=None, exclude=None, before=None):
-    """The recall of ROOT's questions as output lines: per question a RECALL head, each matched prior answer line
-    FRESH (cites re-addressed), DELTA (with its occurrence changes) or STALE (with its reason), or GAP; first a line
-    per run that could not be read, last the RECALL COVER line."""
+    """The recall of ROOT's questions as output lines: per question a RECALL head, `ANSWERED Q{n}` when every checked
+    line is FRESH and every anchor of the question is carried by one, each matched prior answer line FRESH (cites
+    re-addressed), DELTA (with its occurrence changes) or STALE (with its reason), or GAP; first a line per run that
+    could not be read, last the RECALL COVER line."""
     rc, out = Recall(root), []
     try:
         runs, unreadable = recall_runs(rc, root, since_hours, exclude, before)
@@ -2808,12 +2873,12 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
         out.append(f"RECALL: {root} is in no git repository — candidates are runs on this exact ROOT")
     out.append(f"RECALL {root} · {len(runs)} earlier runs · {len(unreadable)} unreadable")
     out += [f"UNREADABLE {run}: {why}" for run, why in unreadable]
-    units = [(None, out)]
+    units = [(None, 0, out, None, None)]
     served = stale = delta = gaps = 0
     for n in sorted(asked):
         anchors, idents = recall_anchors(asked[n])
         if not anchors:
-            units.append((None, [f"GAP Q{n} · the question names no anchor"]))
+            units.append((None, 0, [f"GAP Q{n} · the question names no anchor"], n, None))
             continue
         seen, matched = set(), []
         for order, (run, theirs, base, lines) in enumerate(runs):
@@ -2821,14 +2886,14 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
                 hit = [a for a in anchors if holds(text, a, a in idents)]
                 if hit and text not in seen:
                     seen.add(text)
-                    matched.append((-len(hit), order, run, theirs, base, x, text, hopset))
+                    matched.append((-len(hit), order, run, theirs, base, x, text, hopset, set(hit)))
         if not matched:
-            units.append((None, [f"GAP Q{n} · no earlier answer line names {', '.join(sorted(anchors))}"]))
+            units.append((None, 0, [f"GAP Q{n} · no earlier answer line names {', '.join(sorted(anchors))}"], n, None))
             continue
         matched.sort(key=lambda r: r[:2])
         shown = matched[:RECALL_SHOWN]
-        rows, fresh, ids = [], 0, []
-        for hits, _, run, theirs, base, x, text, hopset in shown:
+        rows, fresh, ids, carried = [], 0, [], set()
+        for hits, _, run, theirs, base, x, text, hopset, hit in shown:
             kind, new, notes = recall_line(rc, run, theirs, base, text, hopset, idents)
             rid = os.path.basename(run)
             if rid not in ids:
@@ -2839,22 +2904,26 @@ def recall(root, asked, since_hours=None, exclude=None, before=None):
             gaps += kind == "GAP"
             moved = "".join(f" · {s}" for s in notes if s.startswith("MOVED "))
             if kind == "STALE":
-                rows.append((-hits, [f"STALE Q{n} · {notes[0]}"]))
+                rows.append((kind, -hits, [f"STALE Q{n} · {notes[0]}"], n, None))
             elif kind == "GAP":
-                rows.append((-hits, [f"GAP Q{n} · {notes[0]}: {new[:160]}"]))
+                rows.append((kind, -hits, [f"GAP Q{n} · {notes[0]}: {new[:160]}"], n, None))
             elif kind == "FRESH":
-                rows.append((-hits, [f"FRESH {rid} node {x}: {new}{moved}"]))
+                carried |= hit
+                rows.append((kind, -hits, [f"FRESH {rid} node {x}: {new}{moved}"], n, hit))
             else:
                 occ = [s for s in notes if s[:2] in ("+ ", "- ")]
                 head = [s for s in notes if not s.startswith("MOVED ") and s[:2] not in ("+ ", "- ")]
                 more = [f"  +{len(occ) - DELTA_ROWS} more"] if len(occ) > DELTA_ROWS else []
-                rows.append((-hits, [f"DELTA {rid} node {x}: {new}{moved} · {'; '.join(head)}"]
-                             + ["  " + s for s in occ[:DELTA_ROWS]] + more))
+                rows.append((kind, -hits, [f"DELTA {rid} node {x}: {new}{moved} · {'; '.join(head)}"]
+                             + ["  " + s for s in occ[:DELTA_ROWS]] + more, n, len(occ)))
         cut = f" · {len(matched) - len(shown)} more matched lines not checked" if len(matched) > len(shown) else ""
-        units += [(None, [f"RECALL Q{n} · {fresh}/{len(shown)} lines fresh · runs {', '.join(ids)}{cut}"])] + rows
+        units.append((None, 0, [f"RECALL Q{n} · {fresh}/{len(shown)} lines fresh · runs {', '.join(ids)}{cut}"], n, None))
+        if fresh == len(shown) and carried >= anchors:
+            units.append(("ANSWERED", 0, [f"ANSWERED Q{n}"], n, anchors))
+        units += rows
         served += fresh > 0
     gap = f" · {gaps} unwitnessed" if gaps else ""
-    units.append((None, [f"RECALL COVER {served}/{len(asked)} · {stale} stale · {delta} delta{gap}"]))
+    units.append((None, 0, [f"RECALL COVER {served}/{len(asked)} · {stale} stale · {delta} delta{gap}"], None, None))
     return recall_capped(units)
 
 

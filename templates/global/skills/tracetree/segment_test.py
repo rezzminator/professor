@@ -203,7 +203,7 @@ class SegmentCommandTest(unittest.TestCase):
         bad_run = tempfile.mkdtemp(prefix="segment-run-")
         self.addCleanup(shutil.rmtree, bad_run, True)
         with open(os.path.join(bad_run, "ROOT"), "wb") as f:
-            f.write("/tmp/r\u00e9po\n".encode("cp1252"))
+            f.write((self.root + "-r\u00e9po\n").encode("cp1252"))  # a ROOT path git never wrote
         cases = [
             ("a tracer run whose ROOT is not UTF-8", ["--rev", sha, "--seed", "Shared", "--variant", "tracer", "--run",
                                                       bad_run], "UnicodeDecodeError"),

@@ -92,8 +92,9 @@ lab_ledger_lock() { # <ledger>: one ledger writer at a time across runs ({ledger
   local l=$1 err i
   mkdir -p "$(dirname "$l")" 2>/dev/null || { printf 'ERROR ledger cannot create %s\n' "$(dirname "$l")" >&2; return 2; }
   for (( i = 0; i < 100; i++ )); do
-    err=$(mkdir "$l.lock" 2>&1) && return 0
-    [[ -d $l.lock ]] || { printf 'ERROR ledger cannot lock %s.lock: %s\n' "$l" "${err%%$'\n'*}" >&2; return 2; }
+    err=$(LC_ALL=C mkdir "$l.lock" 2>&1) && return 0
+    # an EEXIST whose holder released before this recheck is retried, never an error
+    [[ -d $l.lock || $err == *'File exists'* ]] || { printf 'ERROR ledger cannot lock %s.lock: %s\n' "$l" "${err%%$'\n'*}" >&2; return 2; }
     sleep 0.1
   done
   printf 'ERROR ledger locked %s.lock for over 10 s (remove it when no lab run is writing)\n' "$l" >&2

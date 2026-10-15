@@ -9,7 +9,8 @@ a tracked path (`transcript/lines.go`, `pfm/internal/codexgen/`, `tokens/claude.
 goes away or moves (its mentions join the blast), `use=NAME` a contract the change calls but never edits (a CONTRACT,
 blasting none of its callers); `ROW=SEED` (or a `{row}:` line head in --seeds FILE, any name of letters, digits,
 `_`, `.` and `-`) tags it with the requirement row it serves. A name under four characters or a common verb (`run`,
-`load`) is refused as NOTFOUND, never searched.
+`load`) is refused as NOTFOUND, never searched. `new=NAME` is a symbol, field, type or file the change creates: never
+searched and never NOTFOUND, a file placed where it will live, anything else beside its row's other seeds.
 
   BLAST     each seed's definition site(s) and the tracked files naming it — one hop, never transitive; vendored,
             generated (`.gitattributes` linguist-generated/-vendored) and fixture trees (testdata, fixtures, ...) left out,
@@ -17,17 +18,21 @@ blasting none of its callers); `ROW=SEED` (or a `{row}:` line head in --seeds FI
   CELLS     blast files by directory (a `test`/`tests` directory joins its parent) — the smallest unit with its own
             test home
   SPINE     every seed defined in the blast and named from two or more cells: its definition is the contract the
-            parent writes and freezes first; the spine files and their cells' tests that name them stay with the parent
+            parent writes and freezes first; the spine files and their cells' tests that name them stay with the parent;
+            a `new=` seed whose row reaches two or more segments is a NEW contract the parent stubs first
   SEGMENTS  components of the cell graph without the spine (variant contract: a cell naming a component another cell
             changes; cochange: plus cells that changed together in the last N commits; tracer: a RUN's verified links;
             package: one segment per top-level directory, no spine); a segment under --floor estimated lines, or whose
             ORDER costs the parent more than --read-max of its weight in lines read, folds back into the parent
 
+  DECIDE    per segment: CHILD when it builds a `new=` seed or its seeds carry three or more rows, else KEEP
+
 Weight is the lines of the components holding a seed hit (a path seed: its whole file); READ is what the parent reads to
 write a child's ORDER: the door lines (each hit, two lines either side) and the contracts' signatures.
 
-Exit 0 with a VERDICT SPLIT or SOLO; exit 1 with VERDICT EMPTY when no seed reaches a file to change, every seed then
-on a NOTFOUND line with its reason; exit 2 with `TRACETREE FAILED — {reason}`. Python 3 standard library only; git is read, never written.
+Exit 0 with a VERDICT SPLIT or SOLO ending `· CHILD n`; exit 1 with VERDICT EMPTY when no seed reaches a file to change,
+every seed then on a NOTFOUND line with its reason; exit 2 with `TRACETREE FAILED — {reason}`. Python 3 standard library
+only; git is read, never written.
 """
 import fnmatch
 import json
@@ -297,12 +302,26 @@ def resolve(row, raw, files, dirs, basenames):
     elif s.startswith("use="):
         s = s[4:]
         seed["use"] = True
+    elif s.startswith("new="):
+        s = s[4:]
+        seed["create"] = True
+        if not s:
+            seed.update(kind="bad", name=s, why="new= names nothing")
+            return seed
     m = re.fullmatch(r"(.+?):(\d+)(?:[-,/:]\d+)*", s)
     if m and ("/" in m.group(1) or "." in m.group(1)):
         s, line = m.group(1), int(m.group(2))
     slash = "/" in s  # `dir/` is a path even once its slash is trimmed
     s = s.rstrip("/")
     ext = s.rsplit(".", 1)[-1] if "." in os.path.basename(s) else ""
+    if seed.get("create"):
+        # a file the change creates is placed by place_new (or, unplaced, sits with its row); anything else sits with
+        # its row: never searched, since a name it does not have yet can only collide
+        if slash or ext in PATH_EXT:
+            seed.update(kind="path", name=s, line=line, paths=[s] if s in files else [])
+        else:
+            seed.update(kind="new", name=s)
+        return seed
     if slash or ext in PATH_EXT:
         hits = resolve_path(s, files, dirs, basenames)
         seed.update(kind="path", name=s, line=line, paths=hits)
@@ -617,12 +636,16 @@ def segment(repo, raws, seed_files=(), within=(), variant="contract", run=None, 
     for p, i in new_files.items():
         repo.texts[p] = []
         hits.setdefault(p, []).append((1, i, True))
+    for s in seeds:
+        if s.get("create") and s["kind"] == "path" and not s["paths"]:
+            s["kind"] = "new"  # a file place_new could not place sits with its row
     res = {"root": repo.top, "rev": repo.rev or "worktree", "variant": variant, "within": scope, "seeds": seeds,
            "blast": sorted(hits), "floor": floor, "read_max": read_max, "max": max_k}
     if not hits:
         for i, s in enumerate(seeds):
             if not s["why"]:
                 s["why"] = ("it names a contract the segments call (use=); it changes no file of its own" if i in use
+                            else "no other seed reaches a file for it to sit beside" if s.get("create")
                             else "it reaches no file to change")
         res.update(verdict="EMPTY", reason=f"no seed reaches a file to change ({len(seeds)} seeds, each NOTFOUND above)",
                    cells={}, spine=[], parent={}, segments=[], files={})
@@ -722,6 +745,9 @@ def segment(repo, raws, seed_files=(), within=(), variant="contract", run=None, 
         (folded if g.get("folded") else kept).append(g)
     for n, g in enumerate(kept, 1):
         g["id"] = f"S{n}"
+    place_rows(seeds, kept, spine)
+    for g in kept:
+        g["decide"] = decide(g, seeds)
     pfiles = sorted(parent_files | {f for g in folded for f in g["files"]})
     parent = {"files": pfiles, "cells": sorted({info[p]["cell"] for p in pfiles}),
               "weight": sum(span(info[p]["touched"]) for p in pfiles),
@@ -738,8 +764,55 @@ def segment(repo, raws, seed_files=(), within=(), variant="contract", run=None, 
     else:
         verdict, reason = "SOLO", "every segment folds into the parent (" + "; ".join(sorted({g["folded"].split(" (")[0].split(",")[0] for g in folded})) + ")" if folded else "the blast is the spine alone"
     res.update(verdict=verdict, reason=reason, k=len(kept) if verdict == "SPLIT" else 0, spine=spine, parent=parent,
+               child=sum(g["decide"]["cut"] == "CHILD" for g in kept),
                segments=kept, cells={c: sorted(fs) for c, fs in cells.items()}, files=info, edges=dict(edges))
     return res
+
+
+def place_rows(seeds, kept, spine):
+    """Each `new=` seed with no file sits beside its row's other seeds: the one segment they land in owns it; two or
+    more make it a NEW spine contract every one of them joins; none leave it with the parent."""
+    for g in kept:
+        g["new"] = []
+    joint = {}
+    for i, s in enumerate(seeds):
+        if s["kind"] != "new":
+            continue
+        holders = [g for g in kept if s["row"] and s["row"] in g["rows"]]
+        if len(holders) == 1:
+            holders[0]["new"].append(i)
+            s["home"] = holders[0]["id"]
+            continue
+        s["home"] = "SPINE" if holders else "PARENT"
+        if not holders:
+            continue
+        x = joint.get(s["name"])
+        if not x:
+            x = joint[s["name"]] = {"seed": i, "name": s["name"], "path": None, "line": 0, "new": True, "rows": [],
+                                    "signature": f"NEW {s['name']}", "lines": 1, "cells": []}
+            spine.append(x)
+        x["rows"] = sorted(set(x["rows"]) | {s["row"]})
+        x["cells"] = sorted(set(x["cells"]) | {c for g in holders for c in g["cells"]})
+        for g in holders:
+            if s["name"] not in g["contracts"]:
+                g["contracts"].append(s["name"])
+
+
+def decide(g, seeds):
+    """CHILD when the segment builds a `new=` seed or its seeds carry three or more rows; else KEEP, naming why."""
+    built = [seeds[i]["raw"] for i in g["seed_ids"] + g["new"] if seeds[i].get("create")]
+    rows = g["rows"]
+    why = (["builds " + ", ".join(built)] if built else []) + (
+        [f"{len(rows)} rows ({', '.join(rows)})"] if len(rows) >= 3 else [])
+    if why:
+        return {"cut": "CHILD", "reason": "; ".join(why)}
+    sites = [x for v in g["sites"].values() for x in v]
+    if not any(is_def for _, _, _, is_def in sites):
+        return {"cut": "KEEP", "reason": "call-site swaps only"}
+    comps = {(p, c) for p, _, c, _ in sites}
+    if len(comps) == 1 and all(c for _, c in comps):
+        return {"cut": "KEEP", "reason": f"one function ({next(iter(comps))[1]})"}
+    return {"cut": "KEEP", "reason": f"{len(rows)} row{'' if len(rows) == 1 else 's'}, no new symbol"}
 
 
 def users(repo, s, path, text, info):
@@ -1008,6 +1081,7 @@ def order_line(g, seeds):
         if defs:
             txt += " · owns its definition " + ", ".join(sorted({f"{p}:{ln}" for p, ln, _, _ in defs}))
         parts.append(txt)
+    parts += [f"{seeds[i]['raw']}: create it" for i in g["new"]]
     out = " | ".join(parts)
     if g["contracts"]:
         out += " · contracts " + ", ".join(sorted(set(g["contracts"])))
@@ -1035,6 +1109,9 @@ def render(res):
         if s["why"]:
             out.append(f"NOTFOUND {s['raw']} — {s['why']}")
             continue
+        if s["kind"] == "new":
+            out.append(f"SEED {s['raw']} · new · home {s['home']}" + (f" · row {s['row']}" if s["row"] else ""))
+            continue
         defs = ", ".join(sorted({f"{p}:{ln}" if ln else p for p, ln, _ in s["defs"]})[:4]) or "none"
         if len(s["defs"]) > 4:
             defs += f" +{len(s['defs']) - 4}"
@@ -1051,8 +1128,12 @@ def render(res):
     sp = res["spine"]
     if sp:
         fs = sorted({x["path"] for x in sp if x["path"]})
-        out.append(f"SPINE {', '.join(fs) or '(keys only)'} · {', '.join(sorted({x['name'] for x in sp}))}")
+        out.append(f"SPINE {', '.join(fs) or ('(new only)' if all(x.get('rows') for x in sp) else '(keys only)')} · "
+                   f"{', '.join(sorted({x['name'] for x in sp}))}")
         for x in sp:
+            if x.get("rows"):
+                out.append(f"  NEW {x['name']} · rows {', '.join(x['rows'])} · freeze as a compiling stub")
+                continue
             at = f"{x['path']}:{x['line']}" if x["path"] else ("not written yet" if x.get("new") else "no definition (a key)")
             out.append(f"  CONTRACT {x['name']} · {at} · `{x['signature']}` · used by {', '.join(x['used_by']) or '-'}")
     else:
@@ -1069,10 +1150,11 @@ def render(res):
                    f"{g['read']} of {g['total']} lines ({pct(g['read'], g['weight'])} of its weight)")
         out.append(f"  ORDER {g['id']} · {order_line(g, seeds)}")
         out.append(f"  ESCALATE {g['id']} · {escalate_line(g)}")
+        out.append(f"  DECIDE {g['id']} {g['decide']['cut']} · {g['decide']['reason']}")
     if res["verdict"] == "SPLIT":
-        out.append(f"VERDICT SPLIT {res['k']} — {res['reason']}")
+        out.append(f"VERDICT SPLIT {res['k']} — {res['reason']} · CHILD {res['child']}")
     else:
-        out.append(f"VERDICT SOLO — {res['reason']}")
+        out.append(f"VERDICT SOLO — {res['reason']} · CHILD {res['child']}")
     return "\n".join(out) + "\n"
 
 
@@ -1080,14 +1162,15 @@ def as_json(res):
     seeds = [{"raw": s["raw"], "row": s["row"], "kind": s["kind"],
               "defs": [f"{p}:{ln}" if ln else p for p, ln, _ in s["defs"]], "refs": sorted(s["refs"]),
               "broad": s["broad"], "notfound": s["why"] or None} for s in res["seeds"]]
-    segs = [{k: v for k, v in g.items() if k not in ("sites", "seed_ids")} for g in res["segments"]]
+    segs = [{k: v for k, v in g.items() if k not in ("sites", "seed_ids", "new")} for g in res["segments"]]
     for g, src in zip(segs, res["segments"]):
         g["order"] = order_line(src, res["seeds"])
         g["escalate"] = escalate_line(src)
     return json.dumps({"root": res["root"], "rev": res["rev"], "variant": res["variant"], "within": res["within"],
                        "seeds": seeds, "blast": res["blast"],
                        "cells": res.get("cells", {}), "spine": res["spine"], "parent": res["parent"],
-                       "segments": segs, "verdict": res["verdict"], "k": res.get("k", 0), "reason": res["reason"]},
+                       "segments": segs, "verdict": res["verdict"], "k": res.get("k", 0), "child": res.get("child", 0),
+                       "reason": res["reason"]},
                       indent=1, ensure_ascii=False, default=list)
 
 

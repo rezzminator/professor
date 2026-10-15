@@ -22,7 +22,7 @@ A change lands in the design doc first, then in the template, then in every surf
 
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
-| `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors; cuts its door list into a spine and segments; data shapes, decision, build; freezes the interface or spine and spawns one child foreman per other build unit, unrelated problem or segment passing the cut's gates; verifies their returns; lands through the lander | `sonnet`, effort `high` |
+| `flights-foreman` | agent | Builds one request with or without a spec: base gate, doors; cuts its door list into a spine and segments; data shapes, decision, build; freezes the interface or spine and spawns one child foreman per other build unit, unrelated problem or `CHILD` segment; verifies their returns; lands through the lander | `sonnet`, effort `high` |
 | `flights-speccer` | agent | Writes the ideal `spec.md` for work the codebase has no pattern for: research, dependencies both ways, the quality laws, every decision weighed with its tokens against its worth first; the root foreman's spawn before its base gate on novel work, or any chat's own for a spec without the build | `opus`, effort `xhigh` |
 | `flights-lander` | agent | The landing's gate, one per flight: every project's gate, one review of the whole diff across every project, adversarial tests, its own fixes; the testing manuals' floors are its gate rows | `opus`, effort `high` |
 | `flights-mechanical-executor` | agent | One bulk edit a foreman fully fixed (a rename across many files), from a task file the foreman writes | `sonnet` |

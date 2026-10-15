@@ -436,6 +436,82 @@ class SegmentCommandTest(unittest.TestCase):
         self.assertEqual([(s["row"], s["raw"]) for s in got],
                          [("A", "Shared"), ("R2", "use=Record"), ("door-3", "gone=c/c.go"), ("ui.pick", "a/a.go")])
 
+    def seeds_file(self, text):
+        path = os.path.join(self.root, "..", os.path.basename(self.root) + "-decide.txt")
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def decide(self, out):
+        """{segment cells: (CHILD|KEEP, reason)} from the text output."""
+        cells = dict(re.findall(r"(?m)^SEGMENT (S\d+) · ([^·]+) · ", out))
+        return {cells[sid].strip(): (cut, why) for sid, cut, why in
+                re.findall(r"(?m)^  DECIDE (S\d+) (CHILD|KEEP) · (.+)$", out)}
+
+    def test_a_new_seed_is_row_tied_placed_and_never_notfound(self):
+        sha = fixture(self.root)
+        seeds = self.seeds_file("A: new=Foo\n")
+        got = json.loads(run(self.root, "--rev", sha, "--seeds", seeds, "--seed", "R1=new=Id", "--seed", "R1=a/a.go",
+                             "--floor", "0", "--json").stdout)["seeds"]
+        self.assertEqual([(s["row"], s["raw"], s["kind"], s["notfound"]) for s in got],
+                         [("R1", "new=Id", "new", None), ("R1", "a/a.go", "path", None), ("A", "new=Foo", "new", None)])
+
+    def test_a_segment_building_a_new_seed_is_a_child_and_one_without_is_kept(self):
+        sha = fixture(self.root)
+        seeds = self.seeds_file("R1: a/a.go new=AlphaCache\nR2: b/b.go\nR3: new=c/cache.go\n")
+        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertNotRegex(done.stdout, r"(?m)^NOTFOUND ")
+        self.assertEqual(self.decide(done.stdout), {"a": ("CHILD", "builds new=AlphaCache"),
+                                                    "b": ("KEEP", "1 row, no new symbol"),
+                                                    "c": ("CHILD", "builds new=c/cache.go")})
+        self.assertRegex(done.stdout, r"(?m)^  ORDER S\d · .*new=AlphaCache: create it")
+        self.assertRegex(done.stdout, r"(?m)^VERDICT SPLIT 3 — .* · CHILD 2$")
+        for sid in re.findall(r"(?m)^SEGMENT (S\d+) ", done.stdout):  # each DECIDE right after its ESCALATE
+            self.assertRegex(done.stdout, rf"(?m)^  ESCALATE {sid} · .*\n  DECIDE {sid} ")
+        doc = json.loads(run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1",
+                             "--json").stdout)
+        self.assertEqual(doc["child"], 2)
+        self.assertEqual({g["cells"][0]: g["decide"]["cut"] for g in doc["segments"]},
+                         {"a": "CHILD", "b": "KEEP", "c": "CHILD"})
+        self.assertEqual([g["decide"]["reason"] for g in doc["segments"] if g["cells"] == ["a"]],
+                         ["builds new=AlphaCache"])
+
+    def test_a_segment_carrying_three_rows_is_a_child(self):
+        sha = fixture(self.root)
+        seeds = self.seeds_file("R1: Alpha\nR2: AlphaTwo\nR3: alphaLocal\nR4: b/b.go\n")
+        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.decide(done.stdout), {"a": ("CHILD", "3 rows (R1, R2, R3)"),
+                                                    "b": ("KEEP", "1 row, no new symbol")})
+        self.assertRegex(done.stdout, r"(?m)^VERDICT SPLIT 2 — .* · CHILD 1$")
+
+    def test_call_site_swaps_or_one_function_are_kept(self):
+        sha = fixture(self.root)
+        done = run(self.root, "--rev", sha, "--seed", "Shared", "--floor", "0", "--read-max", "1")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.decide(done.stdout), {c: ("KEEP", "call-site swaps only") for c in ("a", "b", "docs")})
+        self.assertRegex(done.stdout, r"(?m)^VERDICT SPLIT 3 — .* · CHILD 0$")
+        one = run(self.root, "--rev", sha, "--seed", "Gamma", "--floor", "0", "--read-max", "1")
+        self.assertEqual(self.decide(one.stdout), {"c": ("KEEP", "one function (Gamma)")})
+        self.assertRegex(one.stdout, r"(?m)^VERDICT SOLO — .* · CHILD 0$")
+
+    def test_a_new_seed_whose_row_spans_two_segments_is_spine(self):
+        sha = fixture(self.root)
+        seeds = self.seeds_file("R1: a/a.go b/b.go new=Ledger\n")
+        done = run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertRegex(done.stdout, r"(?m)^SPINE .*Ledger")
+        self.assertRegex(done.stdout, r"(?m)^  NEW Ledger · rows R1 · freeze as a compiling stub$")
+        self.assertEqual(self.decide(done.stdout), {"a": ("KEEP", "1 row, no new symbol"),
+                                                    "b": ("KEEP", "1 row, no new symbol")})
+        self.assertRegex(done.stdout, r"(?m)^VERDICT SPLIT 2 — .* · CHILD 0$")
+        spine = json.loads(run(self.root, "--rev", sha, "--seeds", seeds, "--floor", "0", "--read-max", "1",
+                               "--json").stdout)["spine"]
+        self.assertEqual([(x["name"], x["rows"], x["used_by"]) for x in spine if x.get("new")],
+                         [("Ledger", ["R1"], ["S1", "S2"])])
+
 
 if __name__ == "__main__":
     unittest.main()

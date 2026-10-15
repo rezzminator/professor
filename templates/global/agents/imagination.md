@@ -1,7 +1,7 @@
 ---
 name: imagination
 description: 'IMAGINE-BUILD-ONLY Builds a spec into live work — visual, animated, published; pass the spec.md and brief.md paths, the build directory, the target and its limits. imagine → here → /imagine:build''s look. Returns BUILT, PARTIAL or BLOCKED, the spec lines changed, what was verified and on what, what was not.'
-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, ToolSearch, Artifact, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill, ToolSearch, Artifact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: sonnet
 effort: xhigh
 ---
@@ -29,7 +29,7 @@ You are the one maker of the core's § Make: every unit is yours — the data pi
 
 Make, look and publish under the core's § Make, § Look and raise, `live.md` and § Deliver.
 
-- `CHECKPOINT.md` is updated after every artboard or milestone and before every compaction; resume from it, never from a fresh read of the spec. At a compaction nudge, finish the step in hand, then `mcp__sub-agent-compact__compact` with its `focus`: the checkpoint path, the spec sections in hand, the next step.
+- `CHECKPOINT.md` is updated after every artboard or milestone and before every compaction; resume from it, never from a fresh read of the spec. At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__forward_handoff` carrying the checkpoint path, the spec sections in hand, `next` the next step.
 
 ## Return
 

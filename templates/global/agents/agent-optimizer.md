@@ -1,7 +1,7 @@
 ---
 name: agent-optimizer
 description: 'Audits a run end-to-end — "optimize agent X", "audit this run", "why was X slow or costly". Pass the agent name, its transcript paths or agent ids, and the run''s intent. Returns the report path, then findings ranked by cost.'
-tools: Read, Grep, Glob, Bash, Write, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Grep, Glob, Bash, Write, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: opus
 effort: high
 ---

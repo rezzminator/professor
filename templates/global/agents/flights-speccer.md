@@ -3,7 +3,7 @@ name: flights-speccer
 description: 'Specs novel, large work — anything the codebase has no pattern for that research must settle: a new subsystem, integration, layout or test suite; "spec it first". Pass the request, all you hold, flight directory, project map, testing manuals. flights-foreman → here → flights-foreman. Returns the spec.md path and its token price. Not for unsettled requirements → /flights:spec.'
 model: opus
 effort: xhigh
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
@@ -64,7 +64,7 @@ Decisions, never code; exact text only where copied from code, the user or a run
 - A call carries all the work it can: independent reads and searches in one message, dependent no-judgment steps chained in one shell call, every glob quoted.
 - Waiting is one call or none: after a spawn round, end your message with one line; each return arrives on its own. A spawn's missing return is named in `## Open`, never filled from memory.
 - The project contract is already in your context: never open a `CLAUDE.md` or `AGENTS.md` for its rules.
-- At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__compact`, its `focus`: the request, the numbered outcomes, the tracer `RUN`s, report paths and law outputs, the decisions taken, the sections written, the next step.
+- At a compaction nudge, finish the step in hand, then call `mcp__sub-agent-compact__forward_handoff` carrying the request, the numbered outcomes, the tracer `RUN`s, report paths and law outputs, the decisions taken, the sections written, `next` the next step.
 - 150 calls; a spawn's calls are its own. Past it, write what stands, mark the rest in `## Open`, and return `PARTIAL`.
 
 ## Return

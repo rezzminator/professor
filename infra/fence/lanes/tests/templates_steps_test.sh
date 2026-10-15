@@ -29,6 +29,18 @@ grep -Fxq "bash $REPO_ROOT/scripts/test-plugin-logs.sh" <<< "$plugin_log_command
   echo 'FAIL templates steps: plugin logs self-test is not invoked' >&2; exit 1;
 }
 
+# The plugin lab's step lints its shell, then runs every self-test it ships.
+plugin_lab_commands="$( (
+  run() { shift 2; printf '%s\n' "$*"; }
+  need_tool() { :; }
+  checks_templates_plugin_lab
+) )" || { echo 'FAIL templates steps: plugin-lab step did not run' >&2; exit 1; }
+grep -Fq "shellcheck -x" <<< "$plugin_lab_commands" &&
+  grep -Fq "$REPO_ROOT/infra/plugin-lab" <<< "$plugin_lab_commands" &&
+  grep -Fq '_test.sh' <<< "$plugin_lab_commands" || {
+  echo 'FAIL templates steps: plugin-lab shellcheck and self-tests are not invoked' >&2; exit 1;
+}
+
 # Keep the real coordinators and mirror group; replace only leaf checks.
 while read -r _ _ name; do
   case "$name" in

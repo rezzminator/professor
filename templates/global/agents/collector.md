@@ -1,7 +1,7 @@
 ---
 name: collector
 description: Copies exact code text for a caller — "these columns and their types", "this function's signature", "lines N–M of F", "the line an insert goes after", "the test names in T that assert X". Pass the repo root and numbered orders. Read-only. Returns a manifest per order, MISS with why, and the path of the verbatim text. A question → tracer.
-tools: Bash, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
+tools: Bash, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back
 model: haiku
 effort: medium
 engines:

@@ -32,6 +32,32 @@ checks_templates_plugin_logs() {
   run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
 }
 
+# The plugin lab's hermetic half: its shell linted at warning level
+# (infra/plugin-lab/.shellcheckrc), then every self-test it ships side by side —
+# each file owns its temp root and private tmux sockets — so the slowest suite, not
+# their sum, sets the step's wall.
+# The live half spends money and runs on the host: docs/dev/testing/plugin-lab.md.
+checks_templates_plugin_lab() {
+  local lab="$REPO_ROOT/infra/plugin-lab"
+  if ! need_tool shellcheck templates; then
+    fail_step "plugin-lab shell NOT LINTED — shellcheck is missing"
+  else
+    run "templates: plugin-lab shellcheck" -- bash -c 'cd "$1" && shellcheck -x -S warning lab lib/*.sh hooks/*.sh scenarios/*/*.sh tests/*.sh tests/*/*_test.sh tests/fakes/* tests/fixtures/scenarios/*/*.sh' _ "$lab"
+  fi
+  run "templates: plugin-lab self-tests" -- bash -c 'out=$(mktemp -d) || exit 1; trap "rm -rf \"\$out\"" EXIT; n=0
+    for t in "$1"/tests/lib/*_test.sh "$1"/tests/hooks/*_test.sh "$1"/tests/*_test.sh; do
+      [[ -f "$t" ]] || { echo "NOT RUN: no suite matches $t"; exit 1; }
+      n=$((n + 1)); printf "%s\n" "$t" > "$out/$n.name"; bash "$t" > "$out/$n.log" 2>&1 & echo $! > "$out/$n.pid"
+    done
+    red=0
+    for i in $(seq 1 "$n"); do
+      wait "$(cat "$out/$i.pid")"; rc=$?
+      echo "== $(cat "$out/$i.name") rc=$rc"; cat "$out/$i.log"
+      (( rc == 0 )) || red=$((red + 1))
+    done
+    echo "plugin-lab self-tests: $n suites, $red red"; (( red == 0 ))' _ "$lab"
+}
+
 checks_templates_leak() {
   head_ "templates — leak gate"
   run "templates: leak-check self-test" -- bash "$REPO_ROOT/scripts/test-leak-check.sh"
@@ -700,7 +726,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
-  checks_named_template_steps "$add" clone leak plugin-logs placeholders scratch-paths descriptions mirrors \
+  checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
     global-variants release-check codex-sync refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do

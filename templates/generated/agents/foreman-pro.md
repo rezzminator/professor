@@ -8,7 +8,7 @@ effort: high
 engines:
   codex:
     model: opus
-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__compact, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down
+tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage, Skill, mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back, mcp__effort-live-control__effort_up, mcp__effort-live-control__effort_down
 autoCompact:
   forceAt: 300k
   nudgeFrom: 120k
@@ -110,7 +110,7 @@ The root's log, one line per event, after a header with the baseline sha (`git r
 - A command you must wait for runs in the foreground with an explicit timeout; one longer than a call allows runs in the background writing its output to a file, watched by `timeout {seconds} bash -c 'until [ -s "$1" ]; do sleep 20; done; cat "$1"' _ {output file}`. Never a `sleep` chain or a backgrounded command left behind.
 - The project contract is already in your context: never open a `CLAUDE.md` or `AGENTS.md`. A log is read through `tail` or a search.
 - A call carries all the work it can: independent reads, searches and commands go out together in one message; dependent steps whose next move needs no judgment chain into one shell call; every glob is quoted.
-- At a compaction nudge, finish the step in hand (✗ compacting between reading code and editing it), then call `mcp__sub-agent-compact__compact`, its `focus`: the request, the tracer `RUN`, the `GOAL`, `DECIDE`, `CUT` and door lines, the units done and in flight, the red and green log paths, the next step.
+- At a compaction nudge, finish the step in hand (✗ compacting between reading code and editing it), then call `mcp__sub-agent-compact__forward_handoff` carrying the request, the tracer `RUN`, the `GOAL`, `DECIDE`, `CUT` and door lines, the units done and in flight, the red and green log paths, `next` the next step.
 
 ## The cap
 

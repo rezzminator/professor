@@ -2,8 +2,15 @@ package transcript
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
@@ -224,4 +231,180 @@ func stringMember(raw json.RawMessage) (string, bool) {
 		return "", true
 	}
 	return pyvalue.String(raw)
+}
+
+// NotARequest reports an assistant record's usage as no model request: a
+// harness-made <synthetic> message, or a usage block that bills nothing and
+// carries no advisor. It is the one rule tokens and RequestCount share.
+func NotARequest(model string, block *pricing.UsageBlock) bool {
+	usage, _ := block.Billed()
+	return model == "<synthetic>" || usage == (pricing.ClaudeUsage{}) && len(block.Advisors()) == 0
+}
+
+// assistantMarker is a byte every assistant record line carries, so a line
+// without it skips the decode.
+var assistantMarker = []byte(`"` + RoleAssistant + `"`)
+
+// RequestCount is the number of model requests path's Claude transcript
+// records: the distinct ResponseKey of every assistant record whose usage is a
+// request (NotARequest). A compaction neither resets nor adds to it, so it
+// spans every compaction one agent's file holds; a line that is no record, a
+// malformed usage block and a half-written tail count nothing.
+func RequestCount(path string) (int, error) {
+	var tally RequestTally
+	count, _, err := tally.Resume(path)
+	return count, err
+}
+
+// tallyHeadBytes is how much of a transcript's start a RequestTally hashes to
+// tell the file it read from a file rewritten under the same path.
+const tallyHeadBytes = 4096
+
+// RequestTally is RequestCount's fold, kept between reads of one append-only
+// transcript: Offset is the end of the last complete line read, Lines the
+// complete lines before it, Head the hex sha256 of the file's first
+// min(Offset, tallyHeadBytes) bytes, Keys the requests' ResponseKeys.
+type RequestTally struct {
+	Offset int64           `json:"offset"`
+	Lines  int             `json:"lines"`
+	Head   string          `json:"head"`
+	Keys   map[string]bool `json:"keys"`
+}
+
+// Resume counts path's model requests as RequestCount does, reading only the
+// bytes after the tally's Offset; a file shorter than Offset, or whose head no
+// longer hashes to Head, is counted from its start, as is a tally whose Offset
+// or Lines is negative (damaged outside Resume). Complete lines fold into
+// the tally; a half-written tail counts toward this count alone. bytesRead is
+// every byte read past the head check.
+func (t *RequestTally) Resume(path string) (count int, bytesRead int64, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count model requests: %w", &OpenError{Path: path, Err: err})
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close %q: %w", path, closeErr))
+		}
+	}()
+	info, err := file.Stat()
+	if err != nil {
+		return 0, 0, fmt.Errorf("count model requests: stat %q: %w", path, err)
+	}
+	if t.Offset > 0 {
+		head, err := tallyHead(file, t.Offset)
+		if err != nil {
+			return 0, 0, fmt.Errorf("count model requests: %w", err)
+		}
+		if info.Size() < t.Offset || head != t.Head {
+			*t = RequestTally{}
+		}
+	}
+	if t.Offset <= 0 || t.Lines < 0 {
+		*t = RequestTally{}
+		noteWholeRead(path)
+	}
+	if t.Keys == nil {
+		t.Keys = map[string]bool{}
+	}
+	if _, err := file.Seek(t.Offset, io.SeekStart); err != nil {
+		return 0, 0, fmt.Errorf("count model requests: seek %q to %d: %w", path, t.Offset, err)
+	}
+	tail := ""
+	parsedOffset, bytesRead, err := ScanLines(file, t.Offset, func(line []byte, complete bool) {
+		number := t.Lines + 1
+		if complete {
+			t.Lines++
+		}
+		key := requestKey(line, number)
+		switch {
+		case key == "":
+		case complete:
+			t.Keys[key] = true
+		default:
+			tail = key
+		}
+	})
+	if err != nil {
+		return 0, bytesRead, fmt.Errorf("count model requests: read %q: %w", path, err)
+	}
+	if t.Offset < tallyHeadBytes && parsedOffset != t.Offset {
+		if t.Head, err = tallyHead(file, parsedOffset); err != nil {
+			return 0, bytesRead, fmt.Errorf("count model requests: %w", err)
+		}
+	}
+	t.Offset = parsedOffset
+	count = len(t.Keys)
+	if tail != "" && !t.Keys[tail] {
+		count++
+	}
+	return count, bytesRead, nil
+}
+
+// tallyHead is the hex sha256 of file's first min(offset, tallyHeadBytes) bytes.
+func tallyHead(file *os.File, offset int64) (string, error) {
+	sum := sha256.New()
+	if _, err := io.Copy(sum, io.NewSectionReader(file, 0, min(offset, tallyHeadBytes))); err != nil {
+		return "", fmt.Errorf("hash the head of %q: %w", file.Name(), err)
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+// requestKey is the ResponseKey of the model request a transcript line
+// records, line number holding the place of a record with no id; "" for a
+// line that records none.
+func requestKey(line []byte, number int) string {
+	if !bytes.Contains(line, assistantMarker) {
+		return ""
+	}
+	record, ok := DecodeClaudeRecord(line)
+	if !ok {
+		return ""
+	}
+	if kind, _ := record.Kind(); kind != RoleAssistant {
+		return ""
+	}
+	message := record.DecodeMessage()
+	if message == nil {
+		return ""
+	}
+	block, err := message.UsageBlock()
+	if err != nil || block == nil {
+		return ""
+	}
+	model, _ := stringMember(message.Model)
+	if NotARequest(model, block) {
+		return ""
+	}
+	messageID, _ := stringMember(message.ID)
+	requestID, _ := stringMember(record.RequestID)
+	uuid, _ := stringMember(record.UUID)
+	return ResponseKey(messageID, requestID, uuid, "line:"+strconv.Itoa(number))
+}
+
+// CallCapRole names the role whose cap an agent type's name carries:
+// "foreman", "lander", or "" for every other agent. CallCap and the call-cap
+// hook's stop read this one classification.
+func CallCapRole(agentType string) string {
+	name := strings.ToLower(agentType)
+	switch {
+	case strings.Contains(name, "foreman"):
+		return "foreman"
+	case strings.Contains(name, "lander"):
+		return "lander"
+	}
+	return ""
+}
+
+// CallCap is the cap on the model requests (RequestCount) an agent type's
+// name sets: a foreman 250, a lander 200, everything else 150. The flight
+// report flags a run past it, and the call-cap hook stops an agent at it.
+func CallCap(agentType string) int {
+	switch CallCapRole(agentType) {
+	case "foreman":
+		return 250
+	case "lander":
+		return 200
+	}
+	return 150
 }

@@ -7,14 +7,6 @@ import (
 	"testing"
 )
 
-func TestCallCapByAgentType(t *testing.T) {
-	for agentType, want := range map[string]float64{"flights-foreman": 250, "Flights-Lander": 200, "tracer": 150, "": 150} {
-		if got := callCap(agentType); got != want {
-			t.Errorf("callCap(%q) = %v, want %v", agentType, got, want)
-		}
-	}
-}
-
 func TestRoleMatchNamesOneJob(t *testing.T) {
 	cases := []struct {
 		left, right string

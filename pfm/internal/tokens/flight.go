@@ -61,8 +61,6 @@ var (
 	claimedLine   = jsRegexp(`^(\S+)\s+CLAIMED\s+·\s+(.*)$`)
 	requestedTail = jsRegexp(`\s+requested.*$`)
 	nonAlnum      = regexp.MustCompile(`[^a-z0-9]+`)
-	foremanType   = regexp.MustCompile(`(?i)foreman`)
-	landerType    = regexp.MustCompile(`(?i)lander`)
 )
 
 // loadFlightPlan reads --flight DIR's ledger and sets the window from it.
@@ -230,18 +228,6 @@ func (plan *flightPlan) readRunLog(dir string, loc *time.Location) error {
 		)
 	}
 	return nil
-}
-
-// callCap is the call cap an agent type's name sets: a foreman 250, a lander
-// 200, everything else 150.
-func callCap(agentType string) float64 {
-	switch {
-	case foremanType.MatchString(agentType):
-		return 250
-	case landerType.MatchString(agentType):
-		return 200
-	}
-	return 150
 }
 
 func normRole(text string) string {

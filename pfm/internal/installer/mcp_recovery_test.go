@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -429,179 +430,173 @@ func TestMCPWriteReportsPreimageState(t *testing.T) {
 	}
 }
 
+// Pause backup publication at its native-lock validation boundary. This
+// controls the same lock lifetime without relying on an unsafe FIFO read.
 func TestClaudeMCPLockProtectsSlowBackup(t *testing.T) {
 	for _, state := range []string{"refresh", "missing", "replaced", "modified", "restored"} {
 		t.Run(state, func(t *testing.T) {
-			t.Setenv("CLAUDE_CONFIG_DIR", "")
-			home := t.TempDir()
-			path := filepath.Join(home, ".claude.json")
+			path := filepath.Join(t.TempDir(), ".claude.json")
 			lock := path + ".lock"
-			original := fmt.Sprintf(
-				`{"mcpServers":{"professor":{"type":"stdio","command":%q,"args":["mcp","serve","--stdio"]}}}`,
-				filepath.Join(home, ".local", "bin", "pfm"),
-			)
-			if err := syscall.Mkfifo(path, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			e := engine{
-				options: Options{Home: home, Stdout: io.Discard, MCPEnabled: map[string]bool{"chat": true}},
-				apply:   true, stamp: "fixture",
-			}
-			done := make(chan error, 1)
-			go func() { done <- e.cutOverClaudeMCP() }()
-			finished := false
-			t.Cleanup(func() {
-				if !finished {
-					select {
-					case <-done:
-					case <-time.After(2 * time.Second):
-						t.Error("slow-backup writer did not stop after fixture closed")
+			writeFixture(t, path, "original")
+			inst := &engine{stamp: "fixture"}
+			err := withClaudeMCPLocks([]string{path}, func(check func() error) error {
+				calls := 0
+				return inst.writeMCPFileIf(path, []byte("original"), []byte("pfm"), true, func() error {
+					calls++
+					if calls == 2 {
+						before, err := os.Stat(lock)
+						if err != nil {
+							return err
+						}
+						switch state {
+						case "refresh":
+							deadline := time.NewTimer(8 * time.Second)
+							defer deadline.Stop()
+							ticker := time.NewTicker(20 * time.Millisecond)
+							defer ticker.Stop()
+						refresh:
+							for {
+								select {
+								case <-deadline.C:
+									return fmt.Errorf("native lock mtime was not refreshed during slow backup")
+								case <-ticker.C:
+									now, err := os.Stat(lock)
+									if err != nil {
+										return err
+									}
+									if now.ModTime().After(before.ModTime()) {
+										break refresh
+									}
+								}
+							}
+							if err := os.Mkdir(lock, 0o700); !errors.Is(err, os.ErrExist) {
+								t.Fatalf("native writer acquired refreshed lock: %v", err)
+							}
+						case "missing", "replaced":
+							if err := os.Remove(lock); err != nil {
+								return err
+							}
+							if state == "replaced" {
+								writeFixture(t, filepath.Join(lock, "native-owner"), "keep")
+							}
+						case "modified", "restored":
+							if err := os.Chtimes(
+								lock,
+								before.ModTime().Add(time.Minute),
+								before.ModTime().Add(time.Minute),
+							); err != nil {
+								return err
+							}
+							if state == "restored" {
+								<-time.After(6 * time.Second)
+								if err := os.Chtimes(lock, before.ModTime(), before.ModTime()); err != nil {
+									return err
+								}
+							}
+						}
 					}
-				}
+					return check()
+				})
 			})
-			var activeWriter *os.File
-			defer func() {
-				if activeWriter != nil {
-					if err := activeWriter.Close(); err != nil {
-						t.Errorf("close slow-backup fixture writer: %v", err)
-					}
-				}
-			}()
-			// Planning, authoritative read, and backup are separate opens. The
-			// third writer holds backup open so the test controls publication.
-			for read := 0; read < 3; read++ {
-				writer, err := os.OpenFile(path, os.O_WRONLY, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
-				activeWriter = writer
-				if _, err := writer.WriteString(original); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Remove(path); err != nil {
-					t.Fatal(err)
-				}
-				if read < 2 {
-					if err := syscall.Mkfifo(path, 0o600); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					writeFixture(t, path, original)
-					before, err := os.Stat(lock)
-					if err != nil {
-						t.Fatal(err)
-					}
-					switch state {
-					case "refresh":
-						deadline := time.NewTimer(8 * time.Second)
-						t.Cleanup(func() { deadline.Stop() })
-						ticker := time.NewTicker(20 * time.Millisecond)
-						t.Cleanup(ticker.Stop)
-					refresh:
-						for {
-							select {
-							case <-deadline.C:
-								t.Fatal("native lock mtime was not refreshed during slow backup")
-							case <-ticker.C:
-								now, err := os.Stat(lock)
-								if err != nil {
-									t.Fatal(err)
-								}
-								if now.ModTime().After(before.ModTime()) {
-									break refresh
-								}
-							}
-						}
-						if err := os.Mkdir(lock, 0o700); !errors.Is(err, os.ErrExist) {
-							t.Fatalf("native writer could acquire refreshed lock: %v", err)
-						}
-					case "missing", "replaced":
-						if err := os.Remove(lock); err != nil {
-							t.Fatal(err)
-						}
-						if state == "replaced" {
-							writeFixture(t, filepath.Join(lock, "native-owner"), "keep")
-						}
-					case "modified", "restored":
-						mtime := before.ModTime().Add(time.Minute)
-						if err := os.Chtimes(lock, mtime, mtime); err != nil {
-							t.Fatal(err)
-						}
-						if state == "restored" {
-							// A heartbeat must latch compromise, even when the
-							// directory looks unchanged again before publication.
-							<-time.After(6 * time.Second)
-							if err := os.Chtimes(lock, before.ModTime(), before.ModTime()); err != nil {
-								t.Fatal(err)
-							}
-						}
-					}
-				}
-				if err := writer.Close(); err != nil {
-					t.Fatal(err)
-				}
-				activeWriter = nil
-			}
-			err := <-done
-			finished = true
 			if state == "refresh" {
-				if err != nil || !strings.Contains(readFixture(t, path), "chat-professor") {
-					t.Fatalf("refreshed write failed: %v", err)
+				if err != nil || readFixture(t, path) != "pfm" {
+					t.Fatalf("refreshed save failed: %v", err)
 				}
 				if _, err := os.Lstat(lock); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("refreshed lock not released: %v", err)
+					t.Fatalf("lock not released: %v", err)
 				}
 			} else {
-				if got := readFixture(t, path); got != original {
+				if got := readFixture(t, path); got != "original" {
 					t.Fatalf("lost native lock still published registry: %s; error=%v", got, err)
 				}
 				if err == nil || !strings.Contains(err.Error(), lock) {
 					t.Fatalf("lock loss not reported: %v", err)
 				}
 				if state == "replaced" && readFixture(t, filepath.Join(lock, "native-owner")) != "keep" {
-					t.Fatal("native replacement lock not preserved")
+					t.Fatal("replacement lock not preserved")
 				}
 			}
 		})
 	}
 }
 
-// A FIFO synchronizes the two reads without a scheduler-dependent race: the
-// client's replacement lands while the backup read is open, before it sees EOF.
+// A concurrent edit while the backup is being published must survive the save.
 func TestMCPWritePreservesAnEditDuringBackup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeFixture(t, path, "original")
 	inst := &engine{stamp: "fixture"}
-	done := make(chan error, 1)
-	go func() { done <- inst.writeMCPFile(path, []byte("original"), []byte("pfm"), true) }()
-	for read := 0; read < 2; read++ {
-		writer, err := os.OpenFile(path, os.O_WRONLY, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := writer.WriteString("original"); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
-		if read == 0 {
-			if err := syscall.Mkfifo(path, 0o600); err != nil {
-				t.Fatal(err)
-			}
-		} else {
+	calls := 0
+	err := inst.writeMCPFileIf(path, []byte("original"), []byte("pfm"), true, func() error {
+		calls++
+		if calls == 2 {
 			writeFixture(t, path, "client edit")
 		}
-		if err := writer.Close(); err != nil {
-			t.Fatal(err)
-		}
+		return nil
+	})
+	if got := readFixture(t, newestBackup(path)); got != "original" {
+		t.Fatalf("backup = %q", got)
 	}
-	if err := <-done; err == nil || !strings.Contains(err.Error(), "changed while planning install") {
+	if err == nil || !strings.Contains(err.Error(), "changed while planning install") {
 		t.Fatalf("late MCP edit was not rejected: %v", err)
 	}
 	if got := readFixture(t, path); got != "client edit" {
 		t.Fatalf("client edit overwritten: %q", got)
+	}
+}
+
+// A hostile registry must not leave an installer renewing its native lock
+// forever. Subprocesses bound the blocked-open regression without leaking it.
+func TestMCPReadsRejectFIFO(t *testing.T) {
+	if source := os.Getenv("PFM_TEST_FIFO_SOURCE"); source != "" {
+		var err error
+		switch os.Getenv("PFM_TEST_FIFO_READ") {
+		case "backup":
+			err = copyBackup(source, source+".backup")
+		case "save":
+			inst := &engine{stamp: "fixture"}
+			err = withClaudeMCPLocks([]string{source}, func(check func() error) error {
+				if err := os.Remove(source); err != nil {
+					return err
+				}
+				if err := syscall.Mkfifo(source, 0o600); err != nil {
+					return err
+				}
+				return inst.writeMCPFileIf(source, []byte("original"), []byte("pfm"), true, check)
+			})
+			if _, lockErr := os.Lstat(source + ".lock"); !errors.Is(lockErr, os.ErrNotExist) {
+				t.Fatalf("hostile registry left native lock held: %v", lockErr)
+			}
+		default:
+			_, _, err = readMCPFile(source)
+		}
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("want non-regular rejection for %s, got %v", source, err)
+		}
+		return
+	}
+	for _, reader := range []string{"registry", "backup", "save"} {
+		t.Run(reader, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "registry.json")
+			if reader == "save" {
+				writeFixture(t, path, "original")
+			} else if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, executable, "-test.run=^TestMCPReadsRejectFIFO$")
+			command.Env = append(os.Environ(), "PFM_TEST_FIFO_SOURCE="+path, "PFM_TEST_FIFO_READ="+reader)
+			output, err := command.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("%s blocked on a FIFO: %v", reader, ctx.Err())
+			}
+			if err != nil {
+				t.Fatalf("%s: %v\n%s", reader, err, output)
+			}
+		})
 	}
 }

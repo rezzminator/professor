@@ -18,7 +18,7 @@ import (
 )
 
 func readMCPFile(path string) ([]byte, bool, error) {
-	raw, err := os.ReadFile(path)
+	raw, _, err := readRegularFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 			return nil, false, fmt.Errorf("MCP config is a dangling symlink: %s", path)
@@ -75,11 +75,17 @@ func (installer *engine) writeRegistryFileIf(
 			return err
 		}
 		path = target
-		if err := copyBackup(path, availableBackup(path, installer.stamp)); err != nil {
+		if err := copyBackup(path, availableBackup(path, installer.stamp), check); err != nil {
 			return err
 		}
 	}
 	return atomicfile.WriteIf(path, wanted, mode, func() error {
+		// Refuse a lost lock before touching a potentially replaced registry.
+		if check != nil {
+			if err := check(); err != nil {
+				return err
+			}
+		}
 		latest, present, err := readMCPFile(path)
 		if err != nil {
 			return fmt.Errorf("recheck MCP config %s before write: %w", path, err)

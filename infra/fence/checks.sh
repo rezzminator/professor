@@ -847,6 +847,7 @@ internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
 internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
 internal/harvestmcp TestServiceChaos
 internal/installer TestClaudeMCPLockProtectsSlowBackup
+internal/installer TestMCPWritePreservesAnEditDuringBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence'
 
 # checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo

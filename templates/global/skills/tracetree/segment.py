@@ -1179,7 +1179,8 @@ USAGE = ("usage: tracetree.py segment ROOT [--rev SHA] --seed SEED... [--seeds F
          "[--json]")
 
 
-def main(argv, fail):
+def main(argv, fail, stamp=None):
+    """The command's exit code; stamp, when given, rewrites a SPLIT or SOLO text printout before it is written."""
     opts = {"--rev": None, "--run": None, "--history": "300", "--floor": "150", "--read-max": "0.5", "--max": "4",
             "--variant": "contract"}
     raws, files, within, roots, js, i = [], [], [], [], False, 0
@@ -1227,5 +1228,7 @@ def main(argv, fail):
     except Exception as e:  # a crash is a failed answer, never the EMPTY exit 1
         at = traceback.extract_tb(e.__traceback__)[-1]
         fail(f"segment crashed at {os.path.basename(at.filename)}:{at.lineno}: {type(e).__name__}: {e}")
+    if stamp and not js and res["verdict"] != "EMPTY":
+        out = stamp(out)
     sys.stdout.write(out)
     return 1 if res["verdict"] == "EMPTY" else 0

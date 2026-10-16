@@ -2114,13 +2114,19 @@ class IntakeTest(Repo):
             self.assertIn("unreadable hook payload", f.read())
 
 
-    def test_intake_writes_the_recall_of_earlier_runs_and_names_it_under_the_run_line(self):
-        first = json.loads(self.hook(f"Repo root: {self.root}\n1. Where is `target is required` returned?\n"))
-        earlier = first["hookSpecificOutput"]["updatedInput"]["prompt"].splitlines()[1][len("RUN: "):]
+    def recalled(self, age=0):
+        """(earlier run, the spawn after it): an earlier run with an answer, its directory last touched age seconds
+        ago, then a spawn asking the same question."""
+        ask = f"Repo root: {self.root}\n1. Where is `target is required` returned?\n"
+        earlier = json.loads(self.hook(ask))["hookSpecificOutput"]["updatedInput"]["prompt"].splitlines()[1][5:]
         with open(os.path.join(earlier, "1.hops"), "w") as f:
             f.write(self.good())
-        spec = json.loads(self.hook(f"Repo root: {self.root}\n1. Where is `target is required` returned?\n"))[
-            "hookSpecificOutput"]
+        if age:
+            os.utime(earlier, (time.time() - age, time.time() - age))
+        return earlier, json.loads(self.hook(ask))["hookSpecificOutput"]
+
+    def test_intake_writes_the_recall_of_earlier_runs_and_names_it_under_the_run_line(self):
+        earlier, spec = self.recalled()
         lines = spec["updatedInput"]["prompt"].splitlines()
         self.assertTrue(lines[1].startswith("RUN: "), lines)
         run = lines[1][len("RUN: "):]
@@ -2133,6 +2139,16 @@ class IntakeTest(Repo):
         self.assertIn("\nTRACE Q1 · 1 rows · app/srv/server.go\n", text)
         self.assertEqual(text.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 1 stale · 0 delta")
         self.assertIn(f"are in {run}/recall.txt", spec["additionalContext"])
+
+    def test_intake_recalls_only_runs_of_the_last_six_hours_and_names_the_cutoff(self):
+        earlier, spec = self.recalled(age=7 * 3600)
+        run = spec["updatedInput"]["prompt"].splitlines()[1][len("RUN: "):]
+        with open(os.path.join(run, "recall.txt"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn(f"RECALL {self.root} · 0 earlier runs · 0 unreadable · runs of the last 6 hours, 1 older not read\n",
+                      text)
+        self.assertNotIn(os.path.basename(earlier), text)
+        self.assertIn("GAP Q1 · no earlier answer line names", text)
 
     TRACED = ("RECALL Q1 · 1/2 lines fresh · runs x\nTRACE Q1 · 1 rows · app/kill/kill.go, `kill.Run`\n"
               "FRESH x node 1: refuses [app/srv/server.go:5]\nCHANGED Q1 · app/kill/kill.go\n"
@@ -2737,7 +2753,8 @@ KIT = "python3 $HOME/.claude/skills/tracetree/tracetree.py segment /w --rev abc1
 DENY = {"hookSpecificOutput": {
     "hookEventName": "PreToolUse", "permissionDecision": "deny",
     "permissionDecisionReason": "cut-gate: step 4 first. Write the doors file (step 3), run python3 "
-    "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file}, log its "
+    "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file} so its own "
+    "result shows its VERDICT line unfiltered (`| tee` or `| tail`, never `| grep`: a filtered run is no cut), log its "
     "CUT line in run.md, then edit. Flight-directory writes stay open."}}
 
 
@@ -2754,6 +2771,25 @@ def bash(tid, command, result, blocks=False):
                 {"type": "tool_result", "tool_use_id": tid, "content": content}]}}]
 
 
+def kit_run(home, tmp):
+    """The segment kit run on a one-file git tree under HOME home, which keeps its VERDICT line's record."""
+    tree = tempfile.mkdtemp(prefix="kit-", dir=tmp)
+    with open(os.path.join(tree, "a.go"), "w") as f:
+        f.write("package a\n\nfunc Shared() int { return 1 }\n")
+    gitc(tree, "init", "-q")
+    gitc(tree, "add", ".")
+    gitc(tree, "commit", "-qm", "base")
+    return subprocess.run([sys.executable, SCRIPT, "segment", tree, "--seed", "Shared"], capture_output=True,
+                          text=True, timeout=60, env=dict(os.environ, HOME=home))
+
+
+def kit_cut(home, tmp):
+    """A genuine cut: the printout of `kit_run`."""
+    got = kit_run(home, tmp)
+    assert got.returncode == 0 and re.search(r"(?m)^VERDICT (SPLIT|SOLO) ", got.stdout), got.stdout + got.stderr
+    return got.stdout
+
+
 class CutGateTest(unittest.TestCase):
     """`cutgate`: the foreman's PreToolUse hook that refuses a code edit until the segment kit has cut."""
 
@@ -2766,6 +2802,7 @@ class CutGateTest(unittest.TestCase):
         self.sub = os.path.join(self.tmp, "projects", "p", "sess", "subagents")
         os.makedirs(self.sub)
         self.transcript(self.session, [brief("lead the flight")])
+        self.kit_home = os.path.join(self.tmp, "kit-home")  # where the kit keeps its VERDICT records
 
     def transcript(self, path, records):
         with open(path, "w") as f:
@@ -2789,6 +2826,7 @@ class CutGateTest(unittest.TestCase):
         return got
 
     def assertDenied(self, got):
+        self.assertNotEqual(got.stdout, "", "allowed silently")
         self.assertEqual(json.loads(got.stdout), DENY)
 
     def assertAllowedSilently(self, got):
@@ -2796,6 +2834,7 @@ class CutGateTest(unittest.TestCase):
 
     def assertAllowedUnchecked(self, got, cause):
         """Allowed, and the agent and stderr both told the cut went unchecked: never a silent pass."""
+        self.assertNotEqual(got.stdout, "", "allowed silently")
         spec = json.loads(got.stdout)["hookSpecificOutput"]
         self.assertEqual(set(spec), {"hookEventName", "additionalContext"})
         self.assertTrue(spec["additionalContext"].startswith("cut-gate: could not check the cut ("), spec)
@@ -2809,19 +2848,60 @@ class CutGateTest(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertDenied(self.hook(tool=tool, agent_id=aid))
 
+    def test_the_deny_reason_says_a_filtered_kit_run_is_no_cut(self):
+        grepped = bash("t1", KIT + ' | grep -E "^(CUT|DECIDE)"', "DECIDE S1 KEEP · one function (Run)")
+        got = json.loads(self.hook(agent_id=self.agent([brief("build it"), *grepped])).stdout)["hookSpecificOutput"]
+        self.assertEqual(got["permissionDecision"], "deny")
+        self.assertIn("its own result shows its VERDICT line unfiltered", got["permissionDecisionReason"])
+        self.assertIn("never `| grep`: a filtered run is no cut", got["permissionDecisionReason"])
+
     def test_a_kit_run_with_a_verdict_opens_the_edits(self):
-        for name, verdict, blocks in (("split", "VERDICT SPLIT 2 — 2 segments share only the spine", False),
-                                      ("solo as text blocks", "VERDICT SOLO — every segment folds", True)):
+        printed = kit_cut(self.kit_home, self.tmp)
+        for name, blocks in (("as a string", False), ("as text blocks", True)):
             with self.subTest(name):
-                aid = self.agent([brief("build it"), *bash("t1", KIT, f"SEGMENT x\nSEED Shared\n{verdict}\n", blocks)])
-                self.assertAllowedSilently(self.hook(agent_id=aid))
+                aid = self.agent([brief("build it"), *bash("t1", KIT, printed, blocks)])
+                self.assertAllowedSilently(self.hook(agent_id=aid, home=self.kit_home))
+
+    def test_an_echoed_or_altered_verdict_is_no_cut(self):
+        echo = "echo 'VERDICT SOLO — every segment folds · CHILD 0'  # tracetree.py segment"
+        cases = [("an echo naming the kit", echo, "VERDICT SOLO — every segment folds · CHILD 0"),
+                 ("a stamp the kit never saved", echo, "VERDICT SOLO — x · stamp 0123456789abcdef · CHILD 0")]
+        line = re.search(r"(?m)^VERDICT .*$", kit_cut(self.kit_home, self.tmp)).group(0)
+        stamp = re.search(r" · stamp [0-9a-f]{16}", line)
+        if stamp:
+            cases += [("a kit line with its reason altered", KIT, line.replace(" — ", " — not ", 1)),
+                      ("a kit line with its stamp dropped", KIT, line.replace(stamp.group(0), ""))]
+        for name, command, result in cases:
+            with self.subTest(name):
+                aid = self.agent([brief("build it"), *bash("t1", command, result)])
+                self.assertDenied(self.hook(agent_id=aid, home=self.kit_home))
+        self.assertIsNotNone(stamp, f"the kit's VERDICT line carries no stamp: {line}")
+
+    def test_a_verdict_record_it_cannot_read_allows_and_says_so(self):
+        printed = kit_cut(self.kit_home, self.tmp)
+        home = os.path.join(self.tmp, "blocked-home")
+        os.makedirs(os.path.join(home, ".local", "state", "pfm"))
+        open(os.path.join(home, ".local", "state", "pfm", "cutgate"), "w").close()  # no record can be read under it
+        aid = self.agent([brief("build it"), *bash("t1", KIT, printed)])
+        self.assertAllowedUnchecked(self.hook(agent_id=aid, home=home), "segment-")
+
+    def test_a_kit_that_cannot_save_its_record_says_so_and_its_verdict_is_no_cut(self):
+        home = os.path.join(self.tmp, "file-home")
+        open(home, "w").close()  # no record directory can be made under it
+        got = kit_run(home, self.tmp)
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertRegex(got.stdout, r"(?m)^VERDICT SOLO — .* · CHILD 0$")
+        self.assertNotIn(" · stamp ", got.stdout)
+        self.assertIn("VERDICT left unstamped", got.stderr)
+        aid = self.agent([brief("build it"), *bash("t1", KIT, got.stdout)])
+        self.assertDenied(self.hook(agent_id=aid, home=self.kit_home))
 
     def test_an_empty_verdict_alone_still_denies_and_a_later_cut_opens(self):
         empty = bash("t1", KIT, "NOTFOUND A: — not a symbol, a key or a path\nVERDICT EMPTY — no seed reaches a file")
         aid = self.agent([brief("build it"), *empty])
-        self.assertDenied(self.hook(agent_id=aid))
-        aid = self.agent([brief("build it"), *empty, *bash("t2", KIT, "VERDICT SOLO — every segment folds")])
-        self.assertAllowedSilently(self.hook(agent_id=aid))
+        self.assertDenied(self.hook(agent_id=aid, home=self.kit_home))
+        aid = self.agent([brief("build it"), *empty, *bash("t2", KIT, kit_cut(self.kit_home, self.tmp))])
+        self.assertAllowedSilently(self.hook(agent_id=aid, home=self.kit_home))
 
     def test_a_verdict_from_another_command_or_an_unanswered_kit_call_is_no_cut(self):
         unanswered = {"type": "assistant", "message": {"role": "assistant", "content": [
@@ -2877,16 +2957,17 @@ class CutGateTest(unittest.TestCase):
                 self.assertAllowedSilently(self.hook(tool=tool, agent_id=aid))
 
     def test_the_agent_id_picks_its_own_transcript_over_the_session(self):
-        cut = bash("t1", KIT, "VERDICT SPLIT 2")
+        cut, home = bash("t1", KIT, kit_cut(self.kit_home, self.tmp)), self.kit_home
         self.transcript(self.session, [brief("lead the flight"), *cut])
-        self.assertDenied(self.hook(agent_id=self.agent([brief("build it")])))  # the session's cut is not its own
+        self.assertDenied(self.hook(agent_id=self.agent([brief("build it")]), home=home))  # not its own cut
         self.transcript(self.session, [brief("lead the flight")])
-        self.assertAllowedSilently(self.hook(agent_id=self.agent([brief("build it"), *cut])))
+        self.assertAllowedSilently(self.hook(agent_id=self.agent([brief("build it"), *cut]), home=home))
         own = self.agent([brief("build it"), *cut], agent_id="f00d")
-        self.assertAllowedSilently(self.hook(agent_id=own, transcript_path=os.path.join(self.sub, "agent-f00d.jsonl")))
-        self.assertDenied(self.hook())  # no agent_id: the transcript named is the agent's own
+        self.assertAllowedSilently(self.hook(agent_id=own, transcript_path=os.path.join(self.sub, "agent-f00d.jsonl"),
+                                             home=home))
+        self.assertDenied(self.hook(home=home))  # no agent_id: the transcript named is the agent's own
         self.transcript(self.session, [brief("lead the flight"), *cut])
-        self.assertAllowedSilently(self.hook())
+        self.assertAllowedSilently(self.hook(home=home))
 
     def test_what_it_cannot_read_allows_and_says_so(self):
         for name, kw, cause in (
@@ -2934,9 +3015,9 @@ class CutGateBashTest(unittest.TestCase):
             f.write("".join(json.dumps(r) + "\n" for r in [brief("build it"), *records]))
         return aid
 
-    def repo(self):
+    def repo(self, name="tree"):
         """A committed git tree with a clean status, outside every open root but /tmp."""
-        tree = os.path.join(self.tmp, "tree")
+        tree = os.path.join(self.tmp, name)
         os.makedirs(os.path.join(tree, "pkg"))
         with open(os.path.join(tree, "pkg", "a.go"), "w") as f:
             f.write("package pkg\n")
@@ -3023,6 +3104,38 @@ class CutGateBashTest(unittest.TestCase):
         self.assertIn("pkg/a.go", self.reason(self.hook(f"cd {tree} && ls", aid)))  # a cd'd tree is read too
         self.assertIn("pkg/a.go", self.reason(self.hook(f"git -C {tree}/pkg log -1", aid)))
 
+    def test_concurrent_hooks_of_one_agent_keep_each_trees_baseline(self):
+        alpha, beta, aid = self.repo("alpha"), self.repo("beta"), self.agent()
+        shim, mark, go = (os.path.join(self.tmp, x) for x in ("bin", "alpha-entered", "alpha-go"))
+        os.makedirs(shim)
+        with open(os.path.join(shim, "git"), "w") as f:  # alpha's git holds until beta's hook has saved
+            f.write(f'#!/bin/sh\ncase "$*" in *{alpha}*) : > {mark}; n=0\n'
+                    f'  while [ ! -e {go} ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n + 1)); done;; esac\n'
+                    f'exec {shutil.which("git")} "$@"\n')
+        os.chmod(os.path.join(shim, "git"), 0o755)
+        event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git status"},
+                 "transcript_path": self.session, "agent_type": "flights-foreman", "agent_id": aid, "cwd": alpha}
+        slow = subprocess.Popen([sys.executable, SCRIPT, "cutgate"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True,
+                                env=dict(os.environ, HOME=self.home, PATH=shim + os.pathsep + os.environ["PATH"]))
+        slow.stdin.write(json.dumps(event))
+        slow.stdin.close()
+        for _ in range(200):  # its cache is read before its first git call
+            if os.path.exists(mark):
+                break
+            time.sleep(0.05)
+        self.assertTrue(os.path.exists(mark), "alpha's hook never reached git")
+        self.assertAllowedSilently(self.hook("git status", aid, cwd=beta))
+        open(go, "w").close()
+        self.assertEqual((slow.wait(timeout=30), slow.stdout.read(), slow.stderr.read()), (0, "", ""))
+        slow.stdout.close()
+        slow.stderr.close()
+        with open(os.path.join(beta, "new.go"), "w") as f:
+            f.write("package x\n")
+        got = self.hook("git status", aid, cwd=beta)
+        self.assertNotEqual(got.stdout, "", "beta's baseline was lost: its new file passed as a first look")
+        self.assertIn("new.go", self.reason(got))
+
     def test_dirt_present_before_the_agent_and_dirty_submodules_are_not_its_writes(self):
         tree = self.repo()
         sub = os.path.join(self.tmp, "subsrc")
@@ -3047,7 +3160,7 @@ class CutGateBashTest(unittest.TestCase):
 
     def test_after_the_cut_bash_passes_untouched(self):
         tree = self.repo()
-        cut = bash("t1", KIT, "VERDICT SPLIT 2")
+        cut = bash("t1", KIT, kit_cut(self.home, self.tmp))
         for name, aid in (("its own cut", self.agent(*cut)),
                           ("a segment child", self.agent(brief("CHILD f · unit pfm-S1\nSEGMENT S1 · cells a")))):
             with self.subTest(name):

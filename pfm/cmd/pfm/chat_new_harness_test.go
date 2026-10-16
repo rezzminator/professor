@@ -49,6 +49,12 @@ func TestChatNewHarnessPromptLaunchesOnTheFileAndRecordsItForReload(t *testing.T
 	if err != nil || !found || recorded != harness {
 		t.Fatalf("harness record = %q found %v error %v", recorded, found, err)
 	}
+	// N4: `chat new --name` stores the exact name for the Herdr reporter.
+	if got := branchTmuxOutput(
+		t, filepath.Join(jail.tmuxDir, "cc-harness"), "show-options", "-v", "-t", "cc-harness", "@pfm_chat_name",
+	); got != "alt" {
+		t.Fatalf("@pfm_chat_name = %q, want the --name value alt", got)
+	}
 }
 
 func TestChatNewHarnessPromptRefusalsHappenBeforeSpawnAndWriteNothing(t *testing.T) {

@@ -77,8 +77,16 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 		Matcher: "resume",
 		Command: filepath.Join(home, ".local", "bin", "pfm") + " internal resume-unkill",
 	}
-	if len(owned) != 1 || owned[resumeUnkill] != 1 {
-		t.Fatalf("Codex hook ownership=%#v, want exactly the resume-unkill hook owned once", owned)
+	want := settingsHookCounts{resumeUnkill: 1}
+	for _, hook := range codexHerdrHooks(home) {
+		want[settingsHookKey{Event: hook.Event, Matcher: hook.Matcher, Command: hook.Command}] = 1
+	}
+	if !reflect.DeepEqual(owned, want) {
+		t.Fatalf(
+			"Codex hook ownership=%#v, want the resume-unkill hook and the Herdr handlers owned once: %#v",
+			owned,
+			want,
+		)
 	}
 	if got := hookCommandCount(t, string(updated), "SessionStart", canonical); got != 0 {
 		t.Fatalf("canonical clear-kill count=%d, want zero:\n%s", got, updated)

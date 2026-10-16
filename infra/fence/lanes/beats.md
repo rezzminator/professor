@@ -150,7 +150,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives the fixture transcr
 - `O2.02-archive` · `pfm archive` (apply / subagents / restore / prune-orphans) over fixture transcript history · spends none
 - `O2.03-index` · `pfm index` · spends none
 - `O2.04-headless` · headless Claude selector returns a cc envelope; the codex selector runs through OpenCode's server and returns an ox envelope with usage · spends cc:$SEAT+cx
-- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, cost-launch and cost-sink usage and arming, git-guard, store-guard, epic-inject, title-renudge · spends none
+- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, cost-launch and cost-sink usage and arming, git-guard, store-guard, epic-inject, herdr-state (a silent exit-0 no-op outside a Herdr pane, on a payload and on garbage), title-renudge · spends none
 - `O2.05b-activity-log` · the activity-log reader: `pfm log` shows the lane's own records, a filter narrows, an unknown `--comp`/`--level` and a positional argument exit 2 · spends none
 - `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none
 - `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `call` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT

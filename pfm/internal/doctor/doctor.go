@@ -307,6 +307,10 @@ func Run(
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
 	tally.failures += printTracerIntakeDoctor(ctx, stdout, resolved.Home, dependencies)
+	herdrWarnings, herdrFailures := printHerdrDoctor(ctx, stdout, dependencies)
+	tally.warnings += herdrWarnings
+	tally.failures += herdrFailures
+	tally.warnings += printHerdrReporterErrors(stdout, paths.HerdrLockDir(resolved.Home), dependencies.Clock.Now())
 	hostWarnings, hostFailures := printHostChecks(stdout, runtime, dependencies.Clock.Now())
 	tally.warnings += hostWarnings
 	tally.failures += hostFailures + printClaudeStoreChecks(stdout, runtime)

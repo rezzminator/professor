@@ -45,6 +45,8 @@ type listedHook struct {
 	Enabled     bool   `json:"enabled"`
 }
 
+var ownHandler = Handler{Event: "sessionStart", Matcher: "resume", Command: trustCommand}
+
 func registerOwn(binary, account string) error {
 	return RegisterHookTrust(context.Background(), binary, account, "sessionStart", "resume", trustCommand)
 }
@@ -101,6 +103,44 @@ func writeRequests(t *testing.T, requestLog string) []string {
 		}
 	}
 	return writes
+}
+
+// TestRegisterHookTrustAppServerDropsTheHerdrPane: the trust registration talks
+// to `codex app-server` and runs no turn, so it is never the chat bound to the
+// parent's Herdr pane; CODEX_HOME still points at the account.
+func TestRegisterHookTrustAppServerDropsTheHerdrPane(t *testing.T) {
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "w1:p1")
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
+	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
+	t.Setenv("CODEX_HOME", "/elsewhere")
+	account, binary, _ := stageTrustAccount(t, func(account string) []listedHook {
+		return []listedHook{ownHook(account, "untrusted")}
+	})
+	envLog := filepath.Join(t.TempDir(), "env.log")
+	raw, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := strings.Replace(string(raw), "#!/bin/sh\n", "#!/bin/sh\n/usr/bin/env > '"+envLog+"'\n", 1)
+	if err := testjail.WriteExecutable(binary, []byte(wrapped), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := registerOwn(binary, account); err != nil {
+		t.Fatalf("RegisterHookTrust: %v", err)
+	}
+	seen, err := os.ReadFile(envLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(seen), "CODEX_HOME="+account+"\n") {
+		t.Errorf("CODEX_HOME not pointed at %s: %s", account, seen)
+	}
+	for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+		if strings.Contains("\n"+string(seen), "\n"+name+"=") {
+			t.Errorf("%s reached the app-server: %s", name, seen)
+		}
+	}
 }
 
 func TestRegisterHookTrustPicksOnlyItsOwnHandlerAmongPersonalOnes(t *testing.T) {
@@ -336,7 +376,10 @@ func TestHookTrustStateReportsUnknownNativeTrust(t *testing.T) {
 			); err != nil {
 				t.Fatal(err)
 			}
-			recorded, err := HookTrustState(account, "owned")
+			recorded, err := HookTrustState(
+				account,
+				Handler{Event: "sessionStart", Matcher: "resume", Command: "owned"},
+			)
 			if recorded || err == nil || !strings.Contains(err.Error(), "native trust") {
 				t.Fatalf("historical receipt presented native trust as healthy: recorded=%v err=%v", recorded, err)
 			}
@@ -427,7 +470,7 @@ func TestNativeHookTrustState(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			trusted, err := NativeHookTrustState(t.Context(), binary, account, trustCommand)
+			trusted, err := NativeHookTrustState(t.Context(), binary, account, ownHandler)
 			if variant == "disabled" && !errors.Is(err, ErrNativeHookDisabled) {
 				t.Fatalf("disabled state indistinguishable from repairable trust: %v", err)
 			}
@@ -450,5 +493,143 @@ func TestNativeHookTrustState(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Handlers of events other than SessionStart: Codex spells the event
+// camelCase in hooks/list and snake_case in the native key, and the Herdr
+// reporter's handlers carry no matcher.
+var (
+	promptHandler = Handler{
+		Event:   "userPromptSubmit",
+		Command: "/home/x/.local/bin/pfm internal herdr-state --engine codex working",
+	}
+	permitHandler = Handler{
+		Event:   "permissionRequest",
+		Command: "/home/x/.local/bin/pfm internal herdr-state --engine codex blocked",
+	}
+)
+
+func listedHandler(account, snakeEvent string, handler Handler, status string) listedHook {
+	return listedHook{
+		Key: account + "/hooks.json:" + snakeEvent + ":0:0", Command: handler.Command,
+		SourcePath: account + "/hooks.json", Source: "user", CurrentHash: "sha256:" + snakeEvent,
+		HandlerType: "command", EventName: handler.Event, Matcher: handler.Matcher, TrustStatus: status, Enabled: true,
+	}
+}
+
+func writeOwnedHooksFile(t *testing.T, account string) {
+	t.Helper()
+	raw := `{"hooks":{"SessionStart":[{"matcher":"resume","hooks":[{"command":"` + trustCommand + `"}]}],` +
+		`"UserPromptSubmit":[{"hooks":[{"command":"` + promptHandler.Command + `"}]}],` +
+		`"PermissionRequest":[{"hooks":[{"command":"` + permitHandler.Command + `"}]}]}}`
+	if err := os.WriteFile(filepath.Join(account, "hooks.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func listRequests(t *testing.T, requestLog string) int {
+	t.Helper()
+	raw, err := os.ReadFile(requestLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Count(string(raw), `"method":"hooks/list"`)
+}
+
+func TestRegisterHookTrustsTrustsEveryHandlerWithOneDiscovery(t *testing.T) {
+	account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
+		return []listedHook{
+			ownHook(account, "untrusted"),
+			listedHandler(account, "user_prompt_submit", promptHandler, "untrusted"),
+			listedHandler(account, "permission_request", permitHandler, "untrusted"),
+		}
+	})
+	writeOwnedHooksFile(t, account)
+	if err := RegisterHookTrusts(
+		t.Context(),
+		binary,
+		account,
+		[]Handler{ownHandler, promptHandler, permitHandler},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if lists := listRequests(t, requestLog); lists != 1 {
+		t.Fatalf("hooks/list requests=%d, want one discovery for all three handlers", lists)
+	}
+	if writes := writeRequests(t, requestLog); len(writes) != 3 {
+		t.Fatalf("writes=%v, want one per handler", writes)
+	}
+	raw, err := os.ReadFile(filepath.Join(account, ".professor-hook-trust.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt map[string]string
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"session_start", "user_prompt_submit", "permission_request"} {
+		if receipt[account+"/hooks.json:"+key+":0:0"] == "" {
+			t.Fatalf("receipt=%v lacks the %s handler", receipt, key)
+		}
+	}
+}
+
+func TestRegisterHookTrustsTrustsTheRestWhenOneHandlerIsNotListed(t *testing.T) {
+	account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
+		return []listedHook{
+			ownHook(account, "untrusted"),
+			listedHandler(account, "permission_request", permitHandler, "untrusted"),
+		}
+	})
+	writeOwnedHooksFile(t, account)
+	err := RegisterHookTrusts(t.Context(), binary, account, []Handler{ownHandler, promptHandler, permitHandler})
+	if err == nil || !strings.Contains(err.Error(), promptHandler.Command) {
+		t.Fatalf("err=%v, want one naming the unlisted prompt handler", err)
+	}
+	if writes := writeRequests(t, requestLog); len(writes) != 2 {
+		t.Fatalf("writes=%v, want the two listed handlers trusted", writes)
+	}
+}
+
+func TestNativeHookTrustStatesJudgeEachHandlerFromOneDiscovery(t *testing.T) {
+	account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
+		return []listedHook{
+			ownHook(account, "trusted"),
+			listedHandler(account, "user_prompt_submit", promptHandler, "untrusted"),
+			listedHandler(account, "permission_request", permitHandler, "trusted"),
+		}
+	})
+	writeOwnedHooksFile(t, account)
+	// The receipt records the resume-unkill and the permission handlers, not the prompt one.
+	writeReceiptFile(t, account,
+		`{"`+account+`/hooks.json:session_start:0:0":"`+trustHash+`",`+
+			`"`+account+`/hooks.json:permission_request:0:0":"sha256:permission_request"}`)
+	states := NativeHookTrustStates(t.Context(), binary, account, []Handler{ownHandler, promptHandler, permitHandler})
+	if len(states) != 3 {
+		t.Fatalf("states=%v", states)
+	}
+	if !states[0].Trusted || states[0].Err != nil {
+		t.Fatalf("resume-unkill state=%+v, want trusted", states[0])
+	}
+	if states[1].Trusted || states[1].Err != nil {
+		t.Fatalf("prompt handler the receipt does not name = %+v, want not recorded (false, nil)", states[1])
+	}
+	if !states[2].Trusted || states[2].Err != nil {
+		t.Fatalf("permission handler state=%+v, want trusted", states[2])
+	}
+	if lists := listRequests(t, requestLog); lists != 1 {
+		t.Fatalf("hooks/list requests=%d, want one", lists)
+	}
+}
+
+func TestNativeHookTrustStatesNameAReceiptThatRecordsNoOwnedHandler(t *testing.T) {
+	account, binary, _ := stageTrustAccount(t, func(string) []listedHook { return nil })
+	writeOwnedHooksFile(t, account)
+	writeReceiptFile(t, account, `{"`+account+`/hooks.json:stop:0:0":"sha256:stop"}`)
+	for _, state := range NativeHookTrustStates(t.Context(), binary, account, []Handler{ownHandler, promptHandler}) {
+		if state.Trusted || state.Err == nil || !strings.Contains(state.Err.Error(), "no valid handler fingerprint") {
+			t.Fatalf("state=%+v, want the receipt named unreadable for every handler", state)
+		}
 	}
 }

@@ -24,6 +24,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -710,9 +711,9 @@ func setEnvironment(
 	target *[]string,
 ) {
 	dropped := map[string]struct{}{"TMUX": {}, "TMUX_PANE": {}}
-	names := claudelaunch.Hygiene()
+	names := append(herdr.Env(), claudelaunch.Hygiene()...) // only the interactive chat reports to its pane
 	if explicit {
-		names = claudelaunch.IdentityHygiene()
+		names = append(herdr.Env(), claudelaunch.IdentityHygiene()...)
 	}
 	for _, name := range names {
 		// Preserve the non-Claude doors' existing environment contract.

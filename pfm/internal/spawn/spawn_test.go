@@ -518,6 +518,9 @@ func TestClaudeNeedsNoChoreography(t *testing.T) {
 		session.Window != "worker" || session.CWD != "/work/alpha" {
 		t.Fatalf("session spec = %#v", session)
 	}
+	if session.ChatName != "worker" {
+		t.Fatalf("session ChatName = %q, want the request's exact name", session.ChatName)
+	}
 	if session.Width != 220 || session.Height != 50 {
 		t.Fatalf("headless geometry = %dx%d, want 220x50", session.Width, session.Height)
 	}

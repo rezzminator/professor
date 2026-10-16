@@ -18,6 +18,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -355,13 +356,20 @@ func (tmux TmuxProbe) CapturePane(
 // sets pane_title, never the window name.) The latch is WINDOW-scoped on
 // purpose — it protects the windows pfm addresses the fleet by, and leaves the
 // operator's own windows and their global setting alone.
+//
+// A writer that knows the chat's exact name (rename.ChatName) states it in the
+// SAME tmux command, set BEFORE the rename: the window-renamed hook that the
+// rename fires reads herdr.ChatNameOption, and the window name is only the
+// clipped form. A writer that does not know it sets nothing.
 func (tmux TmuxProbe) RenameWindow(
 	ctx context.Context,
 	rename WindowRename,
 ) error {
-	command := tmux.probeCommand(
-		ctx,
-		rename.Socket,
+	var arguments []string
+	if rename.ChatName != "" {
+		arguments = append(ChatNameCommand(rename.WindowID, rename.ChatName), ";")
+	}
+	arguments = append(arguments,
 		"rename-window",
 		"-t",
 		rename.WindowID,
@@ -373,6 +381,7 @@ func (tmux TmuxProbe) RenameWindow(
 		"allow-rename",
 		"off",
 	)
+	command := tmux.probeCommand(ctx, rename.Socket, arguments...)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf(
 			"rename tmux window %s %s to %q: %w: %s",
@@ -385,6 +394,26 @@ func (tmux TmuxProbe) RenameWindow(
 	}
 	return nil
 }
+
+// ChatNameCommand is the tmux command that stores a chat's exact name on the
+// session target addresses — the one spelling every window-name writer
+// chains, with `;`, into its own command. tmux reads an argument ending in `;`
+// as a command separator and drops the `;`, unless a backslash precedes it,
+// which tmux removes: the name's last character is protected here.
+func ChatNameCommand(target, chatName string) []string {
+	if strings.HasSuffix(chatName, ";") {
+		chatName = chatName[:len(chatName)-1] + `\;`
+	}
+	return []string{tmuxSetOption, "-t", target, herdr.ChatNameOption, chatName}
+}
+
+// ChatRenameCommand is ChatNameCommand followed, in the same tmux command, by
+// the rename of target's window to the chat name's clipped WindowNameFor form.
+func ChatRenameCommand(target, chatName string) []string {
+	return append(ChatNameCommand(target, chatName), ";", "rename-window", "-t", target, WindowNameFor(chatName))
+}
+
+const tmuxSetOption = "set-option"
 
 // ShowGlobalOption reads one global tmux option's raw value off a live
 // server, the same `show -gv` read tmux-title-renudge performs. tmux always

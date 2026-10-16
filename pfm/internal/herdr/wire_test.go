@@ -1,0 +1,287 @@
+package herdr
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestReportLineIsExactlyHerdrsRequest(t *testing.T) {
+	line, err := Report{
+		Pane: "w1:p1", Agent: "claude", State: StateBlocked, Message: "needs\napproval",
+		SessionID: "s1", ResumeArgv: []string{"pfm", "chat", "open", "s1"}, Seq: 42,
+	}.Line()
+	want := `{"id":"pfm-42","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","state":"blocked","message":"needs approval","agent_session_id":"s1","resume_argv":["pfm","chat","open","s1"],"seq":42}}`
+	if err != nil || string(line) != want {
+		t.Fatalf("Line = %s, %v\nwant   %s", line, err, want)
+	}
+	bare, err := Report{Pane: "w1:p1", Agent: "codex", State: StateIdle, Seq: 7}.Line()
+	wantBare := `{"id":"pfm-7","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"codex","state":"idle","seq":7}}`
+	if err != nil || string(bare) != wantBare {
+		t.Fatalf("Line = %s, %v\nwant   %s", bare, err, wantBare)
+	}
+	for _, report := range []Report{{Agent: "a", State: StateIdle}, {Pane: "p", State: StateIdle}, {Pane: "p", Agent: "a"}} {
+		if line, err := report.Line(); err == nil {
+			t.Errorf("Line(%+v) = %s, want an error for a missing pane, agent or state", report, line)
+		}
+	}
+}
+
+func TestReleaseLineIsExactlyHerdrsRequest(t *testing.T) {
+	line, err := Release{Pane: "w1:p1", Agent: "opencode", Seq: 9}.Line()
+	want := `{"id":"pfm-9","method":"pane.release_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","seq":9}}`
+	if err != nil || string(line) != want {
+		t.Fatalf("Line = %s, %v\nwant   %s", line, err, want)
+	}
+	if line, err := (Release{Agent: "a"}).Line(); err == nil {
+		t.Errorf("Line without a pane = %s, want an error", line)
+	}
+}
+
+func TestMessageIsCappedAtTwoHundredFortyRunes(t *testing.T) {
+	line, err := Report{Pane: "p", Agent: "a", State: StateBlocked, Message: strings.Repeat("é", 500), Seq: 1}.Line()
+	if err != nil || !strings.Contains(string(line), strings.Repeat("é", 239)+"…") ||
+		strings.Contains(string(line), strings.Repeat("é", 240)) {
+		t.Fatalf("Line = %s, %v, want 239 runes and an ellipsis", line, err)
+	}
+}
+
+func serve(t *testing.T, respond func(request string) string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "h.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = conn.Close() }()
+				reader := bufio.NewReader(conn)
+				for {
+					line, err := reader.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if _, err := conn.Write([]byte(respond(strings.TrimSuffix(line, "\n")) + "\n")); err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+	return path
+}
+
+func TestSendDeliversEachLineAndReadsItsResponse(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	path := serve(t, func(request string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, request)
+		return `{"id":"x","result":{"type":"ok"}}`
+	})
+	if err := Send(context.Background(), path, []byte("one"), []byte("two")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(seen, "|") != "one|two" {
+		t.Fatalf("server saw %q, want one|two", seen)
+	}
+}
+
+func TestSendNamesAHerdrRefusal(t *testing.T) {
+	path := serve(t, func(string) string {
+		return `{"id":"x","error":{"code":"resume_not_accepted","message":"source does not hold the pane"}}`
+	})
+	err := Send(context.Background(), path, []byte(`{"id":"x"}`))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "resume_not_accepted" || !RefusedResume(err) {
+		t.Fatalf("Send = %v, want a Refusal with code resume_not_accepted that RefusedResume recognises", err)
+	}
+	other := serve(t, func(string) string { return `{"id":"x","error":{"code":"pane_not_found","message":"no pane"}}` })
+	if err := Send(
+		context.Background(),
+		other,
+		[]byte("x"),
+	); err == nil || RefusedResume(err) ||
+		!strings.Contains(err.Error(), "pane_not_found") {
+		t.Fatalf("Send = %v, want a pane_not_found refusal that is not a resume refusal", err)
+	}
+}
+
+func TestSendReportsEveryTransportFailure(t *testing.T) {
+	if err := Send(
+		context.Background(),
+		filepath.Join(t.TempDir(), "missing.sock"),
+		[]byte("x"),
+	); err == nil ||
+		!strings.Contains(err.Error(), "dial") {
+		t.Errorf("Send to a missing socket = %v, want a dial error naming the socket", err)
+	}
+	garbage := serve(t, func(string) string { return "not json" })
+	if err := Send(
+		context.Background(),
+		garbage,
+		[]byte("x"),
+	); err == nil ||
+		!strings.Contains(err.Error(), "decode response") {
+		t.Errorf("Send with an unparseable response = %v, want a decode error", err)
+	}
+}
+
+// rawServe runs handle on every connection to a fresh Herdr socket.
+func rawServe(t *testing.T, handle func(net.Conn)) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "h.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = conn.Close() }()
+				handle(conn)
+			}()
+		}
+	}()
+	return path
+}
+
+// A hook's whole budget is its context: a silent Herdr ends the exchange at
+// the context's deadline, and a response that never ends a line stops at the
+// read cap, not at the I/O deadline.
+func TestSendIsBoundedByItsContextAndAResponseCap(t *testing.T) {
+	silent := rawServe(t, func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err := Send(ctx, silent, []byte("x")); err == nil || time.Since(started) > 500*time.Millisecond {
+		t.Errorf(
+			"Send to a silent Herdr = %v after %s, want an error at the 50ms context deadline",
+			err,
+			time.Since(started),
+		)
+	}
+	endless := rawServe(t, func(conn net.Conn) {
+		chunk := []byte(strings.Repeat("x", 4096))
+		for {
+			if _, err := conn.Write(chunk); err != nil {
+				return
+			}
+		}
+	})
+	err := Send(context.Background(), endless, []byte("x"))
+	if err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("Send with an endless response = %v, want the read cap to end it before the I/O deadline", err)
+	}
+}
+
+func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
+	long := strings.Repeat("é", 100)
+	for _, test := range []struct {
+		name string
+		line func() ([]byte, error)
+		want string
+	}{
+		{"agent.list", AgentList{Seq: 3}.Line, `{"id":"pfm-3","method":"agent.list","params":{}}`},
+		{"agent.rename", AgentRename{Target: "w1:p1", Name: "my-chat", Seq: 4}.Line, `{"id":"pfm-4","method":"agent.rename","params":{"target":"w1:p1","name":"my-chat"}}`},
+		{"title", Metadata{Pane: "w1:p1", Title: " Her\tDer\nChat ", Seq: 5}.Line, `{"id":"pfm-5","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm","title":"Her Der Chat"}}`},
+		{"title capped on a rune boundary", Metadata{Pane: "p", Title: long, Seq: 6}.Line, `{"id":"pfm-6","method":"pane.report_metadata","params":{"pane_id":"p","source":"pfm","title":"` + strings.Repeat("é", 80) + `"}}`},
+		{"clear_title", Metadata{Pane: "w1:p1", ClearTitle: true, Seq: 7}.Line, `{"id":"pfm-7","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm","clear_title":true}}`},
+		{"pane.list", PaneList{Seq: 8}.Line, `{"id":"pfm-8","method":"pane.list","params":{}}`},
+		{"pane.process_info", ProcessInfo{Pane: "w2:p1", Seq: 9}.Line, `{"id":"pfm-9","method":"pane.process_info","params":{"pane_id":"w2:p1"}}`},
+	} {
+		if line, err := test.line(); err != nil || string(line) != test.want {
+			t.Errorf("%s: Line = %s, %v\nwant %s", test.name, line, err, test.want)
+		}
+	}
+	for name, line := range map[string]func() ([]byte, error){
+		"rename without a name":   AgentRename{Target: "p"}.Line,
+		"title of only controls":  Metadata{Pane: "p", Title: " \n\t "}.Line,
+		"metadata without a pane": Metadata{Title: "x"}.Line,
+		"process info no pane":    ProcessInfo{}.Line,
+	} {
+		if got, err := line(); err == nil {
+			t.Errorf("%s: Line = %s, want an error", name, got)
+		}
+	}
+}
+
+func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
+	agents, err := ParseAgentList(
+		json.RawMessage(
+			`{"type":"agent_list","agents":[{"name":null,"pane_id":"w1:p1"},{"name":"chat-a","pane_id":"w1:p2","agent":"claude"}]}`,
+		),
+	)
+	if err != nil || len(agents) != 2 || agents[0] != (Agent{PaneID: "w1:p1"}) ||
+		agents[1] != (Agent{PaneID: "w1:p2", Name: "chat-a"}) {
+		t.Errorf("ParseAgentList = %+v, %v, want an unnamed and a named agent", agents, err)
+	}
+	panes, err := ParsePanes(
+		json.RawMessage(`{"type":"pane_list","panes":[{"pane_id":"w6:p3","terminal_id":"term_1","focused":true}]}`),
+	)
+	if err != nil || len(panes) != 1 || panes[0] != (Pane{PaneID: "w6:p3", TerminalID: "term_1"}) {
+		t.Errorf("ParsePanes = %+v, %v", panes, err)
+	}
+	pids, err := ParseProcessInfo(
+		json.RawMessage(
+			`{"type":"pane_process_info","process_info":{"pane_id":"w1:p1","foreground_processes":[{"pid":4242,"name":"tmux"},{"pid":7,"name":"x"}]}}`,
+		),
+	)
+	if err != nil || len(pids) != 2 || pids[0] != 4242 || pids[1] != 7 {
+		t.Errorf("ParseProcessInfo = %v, %v", pids, err)
+	}
+	for name, parse := range map[string]func() error{
+		"agents of another type": func() error { _, err := ParseAgentList(json.RawMessage(`{"type":"ok"}`)); return err },
+		"panes of another type":  func() error { _, err := ParsePanes(json.RawMessage(`{"type":"agent_list"}`)); return err },
+		"process info garbage":   func() error { _, err := ParseProcessInfo(json.RawMessage(`[1]`)); return err },
+		"process info of another type": func() error {
+			_, err := ParseProcessInfo(json.RawMessage(`{"type":"ok","process_info":{"foreground_processes":[{"pid":7,"name":"x"}]}}`))
+			return err
+		},
+		"panes without a result": func() error { _, err := ParsePanes(nil); return err },
+	} {
+		if err := parse(); err == nil {
+			t.Errorf("%s: parsed without an error", name)
+		}
+	}
+}
+
+func TestCallReturnsEachResultInRequestOrder(t *testing.T) {
+	path := serve(
+		t,
+		func(request string) string { return `{"id":"x","result":{"type":"echo","line":"` + request + `"}}` },
+	)
+	results, err := Call(context.Background(), path, []byte("one"), []byte("two"))
+	if err != nil || len(results) != 2 || !strings.Contains(string(results[0]), `"one"`) ||
+		!strings.Contains(string(results[1]), `"two"`) {
+		t.Fatalf("Call = %s, %v, want the results of one then two", results, err)
+	}
+	big := serve(t, func(string) string { return `{"id":"x","result":{"pad":"` + strings.Repeat("p", 200<<10) + `"}}` })
+	if results, err := Call(context.Background(), big, []byte("x")); err != nil || len(results) != 1 {
+		t.Fatalf("Call of a 200 KiB answer = %d results, %v, want it read whole (a big pane.list)", len(results), err)
+	}
+}

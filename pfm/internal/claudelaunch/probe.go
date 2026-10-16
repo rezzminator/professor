@@ -1,6 +1,10 @@
 package claudelaunch
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+)
 
 // ProbeEnv isolates the doctor's harness-prompt capture from the live chat.
 // Nonessential traffic is switched off so remote feature flags keep their
@@ -13,6 +17,10 @@ func ProbeEnv(environ []string, sinkURL, configDir string) []string {
 	}
 	stripped["CLAUDE_CODE_USE_BEDROCK"] = true
 	stripped["CLAUDE_CODE_USE_VERTEX"] = true
+	// The capture runs no turn: it is never the chat bound to the parent's Herdr pane.
+	for _, name := range herdr.Env() {
+		stripped[name] = true
+	}
 	result := make([]string, 0, len(environ)+6)
 	for _, entry := range environ {
 		name, _, _ := strings.Cut(entry, "=")

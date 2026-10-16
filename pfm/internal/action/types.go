@@ -34,6 +34,9 @@ type Request struct {
 	LaunchName string
 	// OpenCodePlugin is the staged seat plugin an OpenCode persona launch loads.
 	OpenCodePlugin string
+	// OpenCodeHerdrPlugin is the staged Herdr reporter plugin every OpenCode
+	// launch loads, persona or not; empty loads none.
+	OpenCodeHerdrPlugin string
 	// OpenCodeFleetPrompt is the composed fleet prompt an OpenCode persona launch
 	// removes, empty when no clone is recorded.
 	OpenCodeFleetPrompt string

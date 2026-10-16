@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -74,8 +75,10 @@ func ReadCodexRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome 
 	child, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	command := exec.CommandContext(child, deps.Executable(binary), "app-server")
+	// The App Server runs no turn: it is never the chat bound to the parent's Herdr pane.
+	command.Env = herdr.StripPane(os.Environ())
 	if codexHome != "" {
-		command.Env = replaceCommandEnv(os.Environ(), "CODEX_HOME", codexHome)
+		command.Env = replaceCommandEnv(command.Env, "CODEX_HOME", codexHome)
 	}
 	return readCodexRateLimitsCommand(child, command)
 }

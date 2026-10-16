@@ -410,6 +410,18 @@ func OpenCodeWorkbenchPlugin(home string) string {
 	return filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-workbench-plugin.mjs")
 }
 
+// HerdrLockDir holds the per-chat-session lock files the Herdr reporter
+// serializes on.
+func HerdrLockDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "herdr")
+}
+
+// OpenCodeHerdrPlugin is the Herdr reporter plugin staged beside the fleet
+// cache; every pfm OpenCode chat loads it.
+func OpenCodeHerdrPlugin(home string) string {
+	return filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-herdr-plugin.mjs")
+}
+
 func DefaultCacheDB(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
 }

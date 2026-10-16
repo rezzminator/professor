@@ -27,7 +27,7 @@ const (
 	// host overlay rows use.
 	stateMissing = string(HostOverlayMissing)
 	// stateUntrusted is a pfm Codex hook present with no recorded Codex trust:
-	// Codex may refuse to run an untrusted hook. A warning.
+	// Codex refuses to run an untrusted hook. A failure.
 	stateUntrusted = "untrusted"
 	// stateNativeTrustUnknown is a readable historical receipt without native
 	// readback. It is a warning, never evidence that current trust is healthy.
@@ -101,8 +101,9 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		)
 	} else {
 		seen := map[string]bool{}
-		// The ledger row of the one hook pfm owns in a Codex hooks.json is
-		// expected, not drift; probeCodexHooks judges that hook itself.
+		// The ledger rows of the hooks pfm owns in a Codex hooks.json are
+		// expected, not drift; probeCodexHooks judges the resume-unkill hook
+		// itself.
 		var ownedCodexHook *ExpectedHook
 		if hook, hookErr := codexResumeUnkillHook(home); hookErr == nil {
 			ownedCodexHook = &hook
@@ -114,8 +115,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 			}
 			seen[path] = true
 			for _, key := range sortedHookKeys(ownership[path]) {
-				if ownedCodexHook != nil && key.Event == ownedCodexHook.Event &&
-					key.Matcher == ownedCodexHook.Matcher && key.Command == ownedCodexHook.Command {
+				if ownedCodexHook != nil && codexOwnedHookKey(key, *ownedCodexHook, home) {
 					continue
 				}
 				results = append(results, HookProbeResult{
@@ -174,16 +174,17 @@ func executableVerdict(path string) string {
 	return ""
 }
 
-// probeCodexHooks reads every configured Codex home's hooks.json for the one
-// hook pfm owns there and for pfm residue. It writes no file and starts no
-// model turn: native trust is read through Codex app-server hooks/list. An
-// absent file or a missing SessionStart "resume" resume-unkill handler
-// is a MISSING row, a handler with no recorded hook trust an UNTRUSTED row
-// naming `pfm install --yes`, a healthy account none; STALE and UNREADABLE
+// probeCodexHooks reads every configured Codex home's hooks.json for the
+// handlers pfm owns there (resume-unkill and the Herdr reporter's) and for pfm
+// residue. It writes no file and starts no model turn: native trust is read
+// through Codex app-server hooks/list, once per account. An absent file or a
+// missing owned handler is a MISSING row, a handler with no recorded hook
+// trust an UNTRUSTED row naming `pfm install --yes` — a failure, since
+// Codex refuses to run it; a healthy account none; STALE and UNREADABLE
 // rows report residue and files that could not be read.
 func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []HookProbeResult {
 	var results []HookProbeResult
-	expected, err := codexResumeUnkillHook(home)
+	owned, err := codexOwnedHooks(home)
 	if err != nil {
 		return []HookProbeResult{{
 			Hook:  ExpectedHook{Target: hookTargetCodex, Name: codexResumeUnkillHookName},
@@ -199,8 +200,10 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 		}
 		seen[physical] = true
 		target := fmt.Sprintf("%s[%d]", hookTargetCodex, account.ID)
-		expectedHook := expected
-		expectedHook.Target, expectedHook.File = target, path
+		located := func(hook ExpectedHook) ExpectedHook {
+			hook.Target, hook.File = target, path
+			return hook
+		}
 		unreadable := func(err error) {
 			results = append(results, HookProbeResult{
 				Hook: ExpectedHook{Target: target, File: path}, State: stateUnreadable, Error: err.Error(),
@@ -212,7 +215,7 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 			continue
 		}
 		if absent {
-			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
+			results = append(results, HookProbeResult{Hook: located(owned[0]), State: stateMissing})
 			continue
 		}
 		var document map[string]any
@@ -224,38 +227,51 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 			unreadable(err)
 			continue
 		}
-		switch {
-		case codexHookHandlerCount(document, expected) == 0:
-			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
-		default:
-			recorded, err := codexappendix.NativeHookTrustState(
-				context.Background(),
-				config.EffectiveCodex(account.ID).Binary,
-				account.Home,
-				expected.Command,
+		var present []ExpectedHook
+		var handlers []codexappendix.Handler
+		for _, hook := range owned {
+			if codexHookHandlerCount(document, hook) == 0 {
+				results = append(results, HookProbeResult{Hook: located(hook), State: stateMissing})
+				continue
+			}
+			present = append(present, hook)
+			handlers = append(handlers, codexHandler(hook))
+		}
+		if len(present) > 0 {
+			states := codexappendix.NativeHookTrustStates(
+				context.Background(), config.EffectiveCodex(account.ID).Binary, account.Home, handlers,
 			)
-			switch {
-			case errors.Is(err, codexappendix.ErrNativeHookDisabled):
-				results = append(
-					results,
-					HookProbeResult{Hook: expectedHook, State: stateHookDisabled, Error: err.Error()},
-				)
-			case errors.Is(err, codexappendix.ErrNativeHookUntrusted):
-				results = append(
-					results,
-					HookProbeResult{Hook: expectedHook, State: stateUntrusted, Error: err.Error()},
-				)
-			case errors.Is(err, codexappendix.ErrNativeHookTrustUnknown):
-				results = append(results, HookProbeResult{
-					Hook: expectedHook, State: stateNativeTrustUnknown, Error: err.Error(),
-				})
-			case err != nil:
-				unreadable(err)
-			case !recorded:
-				results = append(results, HookProbeResult{
-					Hook: expectedHook, State: stateUntrusted,
-					Error: "no Codex trust is recorded for the hook, so Codex may refuse to run it",
-				})
+			reported := map[string]bool{}
+			for index, state := range states {
+				expectedHook := located(present[index])
+				switch {
+				case errors.Is(state.Err, codexappendix.ErrNativeHookDisabled):
+					results = append(
+						results,
+						HookProbeResult{Hook: expectedHook, State: stateHookDisabled, Error: state.Err.Error()},
+					)
+				case errors.Is(state.Err, codexappendix.ErrNativeHookUntrusted):
+					results = append(
+						results,
+						HookProbeResult{Hook: expectedHook, State: stateUntrusted, Error: state.Err.Error()},
+					)
+				case errors.Is(state.Err, codexappendix.ErrNativeHookTrustUnknown):
+					results = append(results, HookProbeResult{
+						Hook: expectedHook, State: stateNativeTrustUnknown, Error: state.Err.Error(),
+					})
+				case state.Err != nil:
+					// One discovery serves every handler: a failure of it is
+					// one row, not one per handler.
+					if !reported[state.Err.Error()] {
+						reported[state.Err.Error()] = true
+						unreadable(state.Err)
+					}
+				case !state.Trusted:
+					results = append(results, HookProbeResult{
+						Hook: expectedHook, State: stateUntrusted,
+						Error: "no Codex trust is recorded for the hook, so Codex may refuse to run it",
+					})
+				}
 			}
 		}
 		for _, key := range sortedHookKeys(countSettingsHookCommands(document)) {
@@ -369,7 +385,7 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool
 			warnings++
 			fmt.Fprintf(stdout, "%s DISABLED — operator choice preserved; re-enable in Codex only if wanted\n", prefix)
 		case stateUntrusted:
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "%s UNTRUSTED %s — run pfm install --yes\n", prefix, result.Error)
 		case stateNativeTrustUnknown:
 			warnings++

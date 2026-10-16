@@ -496,7 +496,7 @@ func runChatBranch(
 		branchWarnings = append(branchWarnings, spawned.Warnings...)
 	} else {
 		err = tmux.NewSession(context.Background(), spawn.SessionSpec{
-			Socket: socket, Session: socket, Window: spawn.WindowName(name),
+			Socket: socket, Session: socket, Window: spawn.WindowName(name), ChatName: name,
 			CWD: cwd, Run: plan.Run, Binary: plan.Binary,
 			Width: action.HeadlessWidth, Height: action.HeadlessHeight,
 		})

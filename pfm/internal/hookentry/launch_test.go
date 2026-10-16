@@ -642,3 +642,66 @@ func TestLaunchPassthroughDecidesTheCostLedgerOfASessionOnly(t *testing.T) {
 		})
 	}
 }
+
+// A print, help or non-interactive-subcommand run is never the chat bound to
+// the parent's Herdr pane, so its environment loses the four Herdr names; the
+// forced pass-through and the one inside a pfm socket are the launches of a
+// chat that owns a pane, and keep them.
+func TestLaunchPassthroughDropsTheHerdrPaneOfAHeadlessRunOnly(t *testing.T) {
+	previousExec, previousArm := LaunchExec, armCostLedger
+	t.Cleanup(func() { LaunchExec, armCostLedger = previousExec, previousArm })
+	armCostLedger = func(environ []string, _ paths.Env, _ bool, _ io.Writer) ([]string, string) { return environ, "off" }
+	herdrEnv := []string{
+		"HERDR_ENV=1", "HERDR_PANE_ID=w1:p1", "HERDR_SOCKET_PATH=/tmp/h.sock", "HERDR_BIN_PATH=/usr/local/bin/herdr",
+	}
+	for _, test := range []struct {
+		name, tmux, forced string
+		args               []string
+		stripped           bool
+	}{
+		{"print", "", "", []string{"-p", "hi"}, true},
+		{"output format", "", "", []string{"--output-format=json", "hi"}, true},
+		{"non-interactive subcommand", "", "", []string{"mcp", "list"}, true},
+		{"help", "", "", []string{"--help"}, true},
+		{"version", "", "", []string{"--version"}, true},
+		{"forced pass-through", "", "1", []string{"--resume", "X"}, false},
+		{"forced pass-through of a print run", "", "1", []string{"-p", "hi"}, false},
+		{"inside a pfm socket", "/tmp/tmux-1000/cc-1-2-3,123,0", "", []string{"--resume", "X"}, false},
+		{"print inside a pfm socket", "/tmp/tmux-1000/cc-1-2-3,123,0", "", []string{"-p", "hi"}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+			t.Setenv("TMUX", test.tmux)
+			t.Setenv("TMUX_PANE", "%1")
+			t.Setenv("PFM_LAUNCH_PASSTHROUGH", test.forced)
+			for _, entry := range herdrEnv {
+				name, value, _ := strings.Cut(entry, "=")
+				t.Setenv(name, value)
+			}
+			var got []string
+			LaunchExec = func(_ string, _, environment []string) error {
+				got = append([]string(nil), environment...)
+				return nil
+			}
+			var stderr bytes.Buffer
+			if code := Launch(
+				append([]string{"--real", "/bin/echo", "--"}, test.args...),
+				&bytes.Buffer{}, &stderr, config.Runtime{}, paths.OSEnv{},
+			); code != 0 {
+				t.Fatalf("Launch code=%d stderr=%q", code, stderr.String())
+			}
+			for _, entry := range herdrEnv {
+				want := 1
+				if test.stripped {
+					want = 0
+				}
+				if count := countEnvironmentEntry(got, entry); count != want {
+					t.Errorf("%q occurs %d times in the exec env, want %d", entry, count, want)
+				}
+			}
+			if countEnvironmentEntry(got, "TMUX_PANE=%1") != 1 {
+				t.Errorf("TMUX_PANE left the exec env: only the Herdr names are stripped here: %q", got)
+			}
+		})
+	}
+}

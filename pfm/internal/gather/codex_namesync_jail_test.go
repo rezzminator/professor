@@ -110,6 +110,10 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	if len(renames) != 1 || renames[0].TargetName != "INDEX_TWIN" {
 		t.Fatalf("renames=%#v", renames)
 	}
+	// N2: the Codex half states the thread's exact name for the Herdr reporter.
+	if renames[0].ChatName != "INDEX_TWIN" {
+		t.Fatalf("rename ChatName = %q, want the thread name INDEX_TWIN", renames[0].ChatName)
+	}
 	if err := (TmuxProbe{TmuxTmpDir: root}).RenameWindow(
 		context.Background(), renames[0],
 	); err != nil {
@@ -125,5 +129,16 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(output)); got != "INDEX_TWIN" {
 		t.Fatalf("window name=%q, want INDEX_TWIN", got)
+	}
+	readOption := exec.Command(
+		"tmux", "-L", socket, "show-options", "-v", "-t", socket, "@pfm_chat_name",
+	)
+	readOption.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
+	optionOutput, err := readOption.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(optionOutput)); got != "INDEX_TWIN" {
+		t.Fatalf("@pfm_chat_name=%q, want INDEX_TWIN", got)
 	}
 }

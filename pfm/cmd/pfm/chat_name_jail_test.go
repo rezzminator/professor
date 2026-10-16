@@ -89,6 +89,9 @@ func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
 	if got := strings.TrimSpace(string(output)); got != "after" {
 		t.Fatalf("window name=%q, want after", got)
 	}
+	if got := branchTmuxOutput(t, socketPath, "show-options", "-v", "-t", session, "@pfm_chat_name"); got != "after" {
+		t.Fatalf("@pfm_chat_name=%q, want after", got)
+	}
 }
 
 // TestRenameChatWindowClipsNamesLongerThanWindowNameRunes pins a
@@ -151,6 +154,10 @@ func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
 	want := gather.WindowNameFor(name)
 	if got := strings.TrimSpace(string(output)); got != want {
 		t.Fatalf("window name=%q, want clipped %q", got, want)
+	}
+	// The chat's exact name rides in the same tmux command, unclipped (N3).
+	if got := branchTmuxOutput(t, socketPath, "show-options", "-v", "-t", session, "@pfm_chat_name"); got != name {
+		t.Fatalf("@pfm_chat_name=%q, want the exact name %q", got, name)
 	}
 }
 

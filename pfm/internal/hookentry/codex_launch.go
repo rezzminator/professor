@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -23,6 +24,44 @@ const (
 	helpFlag    = "--help"
 	versionFlag = "--version"
 )
+
+// codexPassthrough lists the arguments that make a Codex run no session: the launcher adds no persona.
+var codexPassthrough = map[string]bool{
+	"login": true, "logout": true, "mcp": true, "mcp-server": true, "app-server": true, "completion": true,
+	"sandbox": true, "debug": true, codexApplyCommand: true, "cloud": true, "features": true, "help": true,
+	versionFlag: true, "-V": true, helpFlag: true, "-h": true,
+}
+
+// codexValueFlags are Codex's top-level options that take the next argument as their value, so a
+// value spelled like a subcommand (`--cd sandbox`, `-m review`) is never read as one.
+var codexValueFlags = map[string]bool{
+	"-c": true, "--config": true, "--enable": true, "--disable": true, "-i": true, "--image": true,
+	"-m": true, "--model": true, "-p": true, "--profile": true, "-s": true, "--sandbox": true,
+	"-a": true, "--ask-for-approval": true, "-C": true, "--cd": true, "--add-dir": true,
+	"--local-provider": true,
+}
+
+// codexRunsAsInteractiveChat reports whether a Codex launch is the interactive chat of its pane. A
+// help or version flag, or a pass-through subcommand, starts no chat; exec and review run
+// non-interactive turns that fire the Codex hooks. The subcommand is the first positional argument
+// (any other one is the prompt).
+func codexRunsAsInteractiveChat(args []string) bool {
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == helpFlag || arg == "-h" || arg == versionFlag || arg == "-V":
+			return false
+		case arg == "--":
+			return true
+		case codexValueFlags[arg]:
+			index++
+		case strings.HasPrefix(arg, "-"):
+		default:
+			return !codexPassthrough[arg] && arg != "exec" && arg != "review"
+		}
+	}
+	return true
+}
 
 // CodexLaunch applies the current primary account's Codex policy at launch time.
 func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
@@ -63,6 +102,11 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 			env = append(env, entry)
 		}
 	}
+	if !codexRunsAsInteractiveChat(args) {
+		// A subcommand or a non-interactive turn is never the chat bound to the pane: its hooks must
+		// not find the parent's Herdr pane, by Herdr name or by tmux pane.
+		env = herdr.StripReporter(env)
+	}
 	if err := LaunchExec(binary, argv, env); err != nil {
 		fmt.Fprintf(stderr, "launch Codex: %v\n", err)
 		return 1
@@ -78,25 +122,10 @@ func codexWorkbenchArgs(args []string, home string) ([]string, error) {
 	mode := workbench.New
 	var model, effort, prompt bool
 	for _, arg := range args {
-		switch arg {
-		case "login",
-			"logout",
-			"mcp",
-			"mcp-server",
-			"app-server",
-			"completion",
-			"sandbox",
-			"debug",
-			codexApplyCommand,
-			"cloud",
-			"features",
-			"help",
-			versionFlag,
-			"-V",
-			helpFlag,
-			"-h":
+		if codexPassthrough[arg] {
 			return nil, nil
-		case "resume", "fork":
+		}
+		if arg == "resume" || arg == "fork" {
 			mode = workbench.Resume
 		}
 		model = model || arg == "-m" || arg == "--model" || strings.HasPrefix(arg, "--model=")

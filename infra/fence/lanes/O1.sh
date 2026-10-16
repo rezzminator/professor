@@ -146,6 +146,9 @@ else
       grep -q -- "$verb" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $verb;"
     done
     grep -q 'usage-hook' "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template usage-hook;"
+    for row in herdr-start herdr-working-prompt herdr-working-tool herdr-notification herdr-idle herdr-end; do
+      grep -q -- "\"$row\"" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $row;"
+    done
     if [ -f "$CODEX_HOME/config.toml" ]; then
       grep -q '^developer_instructions = ' "$CODEX_HOME/config.toml" ||
         missing="$missing codex fleet prompt absent from developer_instructions in $CODEX_HOME/config.toml;"

@@ -38,7 +38,61 @@ var codexValueFlags = map[string]bool{
 	"-c": true, "--config": true, "--enable": true, "--disable": true, "-i": true, "--image": true,
 	"-m": true, "--model": true, "-p": true, "--profile": true, "-s": true, "--sandbox": true,
 	"-a": true, "--ask-for-approval": true, "-C": true, "--cd": true, "--add-dir": true,
-	"--local-provider": true,
+	"--local-provider": true, "--remote": true, "--remote-auth-token-env": true,
+}
+
+// codexNonTUISubcommands are codex-cli 0.162.1's subcommands (aliases included) that open no TUI:
+// the pass-through ones and these; `resume` and `fork` open one. `agents` browses the shared
+// daemon's sessions, so it never runs in-process.
+var codexNonTUISubcommands = func() map[string]bool {
+	set := map[string]bool{
+		"agents": true, "exec": true, "e": true, "review": true, "plugin": true, "remote-control": true,
+		"app": true, "update": true, "doctor": true, "a": true, "queue": true, "archive": true,
+		"delete": true, "migrate-rollouts": true, "unarchive": true, "exec-server": true,
+	}
+	for name := range codexPassthrough {
+		set[name] = true
+	}
+	return set
+}()
+
+// codexTransportFlags are the options that pick a Codex session's transport themselves: an explicit
+// in-process run, or a remote app-server (codex-cli 0.162.1 refuses --no-daemon beside --remote, and
+// a repeated --no-daemon).
+var codexTransportFlags = map[string]bool{
+	pfmengine.CodexNoDaemon: true, "--remote": true, "--remote-auth-token-env": true,
+}
+
+// CodexTransportArgs is the transport a Codex launch with these arguments gets from pfm: --no-daemon
+// when it opens the TUI (no subcommand, a prompt, `resume` or `fork`) and the arguments before any
+// "--" name no transport of their own; nothing otherwise. On the shared daemon a session's hooks run
+// in the daemon, whose environment names no pane, so pfm could report none of its states.
+func CodexTransportArgs(args []string) []string {
+	subcommand, help := codexSubcommand(args)
+	if help || codexNonTUISubcommands[subcommand] {
+		return nil
+	}
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		name, _, _ := strings.Cut(arg, "=")
+		if codexTransportFlags[name] {
+			return nil
+		}
+	}
+	return []string{pfmengine.CodexNoDaemon}
+}
+
+// CodexTransport prints CodexTransportArgs, one argument per line, for the shell's `codex` function.
+func CodexTransport(args []string, stdout, stderr io.Writer) int {
+	for _, arg := range CodexTransportArgs(args) {
+		if _, err := fmt.Fprintln(stdout, arg); err != nil {
+			fmt.Fprintf(stderr, "pfm internal codex-transport: write %q: %v\n", arg, err)
+			return 1
+		}
+	}
+	return 0
 }
 
 // codexRunsAsInteractiveChat reports whether a Codex launch is the interactive chat of its pane. A
@@ -87,7 +141,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 		fmt.Fprintf(stderr, "resolve Codex binary: %v\n", err)
 		return 1
 	}
-	argv := []string{binary}
+	argv := append([]string{binary}, CodexTransportArgs(args)...)
 	if policy.Yolo {
 		argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
 	}

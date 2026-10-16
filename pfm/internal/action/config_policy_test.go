@@ -113,7 +113,7 @@ func TestHeadlessRunUsesConfiguredClaudeAndCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun(Codex) error = %v", err)
 	}
-	if !strings.Contains(codex.Run, Quote(machine.Codex.Binary)+" --sandbox workspace-write") {
+	if !strings.Contains(codex.Run, Quote(machine.Codex.Binary)+" --no-daemon --sandbox workspace-write") {
 		t.Fatalf("headless Codex plan = %q", codex.Run)
 	}
 	if strings.Contains(codex.Run, "dangerously-bypass-approvals-and-sandbox") {

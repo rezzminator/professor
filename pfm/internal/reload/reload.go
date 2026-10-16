@@ -585,7 +585,8 @@ func codexRun(request Request) (string, error) {
 	if binary != pfmengine.MustLookup(pfmengine.Codex).Binary {
 		binary = action.Quote(binary)
 	}
-	parts = append(parts, binary)
+	// The respawned chat runs in-process, so its hooks reach its pane.
+	parts = append(parts, binary, pfmengine.CodexNoDaemon)
 	if request.CodexYolo {
 		parts = append(parts, "--dangerously-bypass-approvals-and-sandbox")
 	} else {

@@ -283,7 +283,8 @@ func computeWindowRenames(
 		if !found {
 			continue
 		}
-		target := WindowNameFor(codexWindowName(live, resolveRollout, resolveID))
+		chatName := codexWindowName(live, resolveRollout, resolveID)
+		target := WindowNameFor(chatName)
 		if target == "" || pane.WindowName == target || pane.WindowID == "" {
 			continue
 		}
@@ -298,6 +299,7 @@ func computeWindowRenames(
 			WindowID:    pane.WindowID,
 			CurrentName: pane.WindowName,
 			TargetName:  target,
+			ChatName:    chatName,
 		})
 	}
 	planned = append(

@@ -17,8 +17,12 @@ type SessionSpec struct {
 	Socket  string
 	Session string
 	Window  string
-	CWD     string
-	Run     string
+	// ChatName is the chat's exact name when the door knows it; NewSession
+	// sets herdr.ChatNameOption to it in the same tmux command that creates
+	// the session. Empty for an unnamed chat: nothing is set.
+	ChatName string
+	CWD      string
+	Run      string
 	// Binary is the executable word Run launches, stated so NewSession can
 	// prove it is reachable BEFORE a server is created around it. A pane
 	// whose command cannot resolve dies at launch and takes the fresh server

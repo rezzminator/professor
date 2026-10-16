@@ -11,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // pfm takes over a host-level surface when it sets the title options, so the
@@ -138,5 +139,42 @@ func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
 	})
 	if got := showOption(t, socketPath, "display-message", "-p", "-t", socket, "#{window_name}"); got != "Claude" {
 		t.Fatalf("window name = %q, want the name the door gave it", got)
+	}
+}
+
+// A chat born with a name carries that name EXACT in @pfm_chat_name, set in the
+// same tmux command that creates the session; the window name stays the clipped
+// WindowName form. A chat born unnamed carries no option (D6).
+func TestNewSessionStoresTheExactChatNameInTheSameCommand(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root := testjail.ShortRoot(t)
+	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
+	t.Setenv(paths.EnvTmuxConf, "/dev/null")
+	tmux := TmuxSpawner{TmuxDir: tmuxDir}
+	exact := "HerDer_Ultimate_Integration; with \"quotes\" and 界 " + strings.Repeat("x", 40) + ";"
+	for socket, spec := range map[string]SessionSpec{
+		"probe-cc-1800000015-1-1": {Window: "Herder window", ChatName: exact},
+		"probe-cc-1800000016-1-1": {Window: WindowName("")},
+	} {
+		spec.Socket, spec.Session, spec.CWD, spec.Run = socket, socket, root, "sleep 120"
+		if err := tmux.NewSession(context.Background(), spec); err != nil {
+			t.Fatalf("create chat server %s: %v", socket, err)
+		}
+		socketPath := filepath.Join(tmuxDir, socket)
+		t.Cleanup(func() {
+			kill := exec.Command("tmux", "-S", socketPath, "kill-server")
+			kill.Env = append(os.Environ(), "TMUX=")
+			_ = kill.Run()
+		})
+		got := showOption(t, socketPath, "show-options", "-qv", "-t", socket, "@pfm_chat_name")
+		if got != spec.ChatName {
+			t.Fatalf("%s: @pfm_chat_name = %q, want %q", socket, got, spec.ChatName)
+		}
+		name := showOption(t, socketPath, "display-message", "-p", "-t", socket, "#{window_name}")
+		if name != spec.Window {
+			t.Fatalf("%s: window name = %q, want %q", socket, name, spec.Window)
+		}
 	}
 }

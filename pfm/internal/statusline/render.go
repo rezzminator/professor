@@ -544,9 +544,9 @@ const windowConvergeTimeout = 750 * time.Millisecond
 // and the timer remains the backstop for everything this path cannot see (a
 // chat whose statusline is not rendering, a name a second writer took back).
 //
-// Cost discipline: a converged chat forks NOTHING. The last applied label is
-// cached per session beside the cache-window anchor, and a render whose label
-// still matches the cache returns before touching tmux at all.
+// Cost discipline: a converged chat forks NOTHING. The last applied exact name
+// is cached per session beside the cache-window anchor, and a render whose
+// name still matches the cache returns before touching tmux at all.
 func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	// Claude only: a codex window follows its thread's indexed name, applied
 	// by name-sync's own half, and a subagent's statusline is not the window's
@@ -571,7 +571,11 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 		key = socket
 	}
 	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-window-"+key)
-	if cached, err := os.ReadFile(cachePath); err == nil && string(cached) == label {
+	// The cache holds the server ($TMUX: socket, server pid, session) beside
+	// the name: a resumed chat keeps its session id and name on a NEW server,
+	// which lacks the window name and @pfm_chat_name until this render sets them.
+	stamp := runtime.getenv("TMUX") + "\n" + data.SessionName
+	if cached, err := os.ReadFile(cachePath); err == nil && string(cached) == stamp {
 		return
 	}
 	commandContext, cancel := context.WithTimeout(ctx, windowConvergeTimeout)
@@ -595,18 +599,20 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	if !found || panes != "1" {
 		return
 	}
-	if current != label {
-		rename := gather.WindowRename{
-			Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
-		}
-		client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
-		if err := client.RenameWindow(commandContext, rename); err != nil {
-			return
-		}
+	// The cache keys on the EXACT name: a name that differs only past the clip
+	// is still a rename for the Herdr reporter, so the combined rename-window +
+	// chat-name command runs even when the window already carries the label.
+	rename := gather.WindowRename{
+		Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
+		ChatName: data.SessionName,
 	}
-	// Written only after the window provably carries the label, so a failed
+	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
+	if err := client.RenameWindow(commandContext, rename); err != nil {
+		return
+	}
+	// Written only after the window provably carries the name, so a failed
 	// rename is retried on the next render instead of being cached as done.
-	_ = atomicfile.Write(cachePath, []byte(label), 0o600)
+	_ = atomicfile.Write(cachePath, []byte(stamp), 0o600)
 }
 
 // pfmSocket resolves the fleet socket this render is running inside, or

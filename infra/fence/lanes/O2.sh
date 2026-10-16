@@ -599,6 +599,18 @@ allow="$(printf '{"tool_input":{"subagent_type":"Explore","model":"haiku"}}' | p
 [ -z "$allow" ] || bad="$bad explore-deny blocked a haiku Explore: $(one_line "$allow");"
 other="$(printf '{"tool_input":{"subagent_type":"tracer","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
 [ -z "$other" ] || bad="$bad explore-deny blocked a tracer dispatch: $(one_line "$other");"
+# herdr-state: outside a Herdr pane (HERDR_ENV unset) every event is a silent exit-0 no-op, whatever arrives on stdin.
+for hs_event in start working blocked idle end notification attach sync; do
+  hs_out="$(printf '{"session_id":"lane-no-such-session","hook_event_name":"Stop","message":"x"}' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine claude "$hs_event" 2>"$int_err")"
+  rc=$?
+  [ "$rc" -eq 0 ] || bad="$bad herdr-state $hs_event outside Herdr exited $rc (want 0): $(one_line "$(cat "$int_err")");"
+  [ -z "$hs_out" ] || bad="$bad herdr-state $hs_event outside Herdr printed '$(one_line "$hs_out")' on stdout (want nothing);"
+  [ ! -s "$int_err" ] || bad="$bad herdr-state $hs_event outside Herdr wrote to stderr (want silence): $(one_line "$(cat "$int_err")");"
+done
+hs_out="$(printf 'not json' | env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH pfm internal herdr-state --engine codex idle 2>"$int_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad herdr-state on garbage stdin exited $rc (want 0, a hook exit 2 blocks Claude): $(one_line "$(cat "$int_err")");"
+[ -z "$hs_out" ] && [ ! -s "$int_err" ] || bad="$bad herdr-state on garbage stdin outside Herdr was not silent: $(one_line "$hs_out$(cat "$int_err")");"
 # X30 kill-exit: the pane-death finisher refuses to run without its full address.
 pfm internal kill-exit >/dev/null 2>"$int_err"
 rc=$?
@@ -693,7 +705,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · herdr-state outside Herdr exits 0 silent on every event and on garbage · cost-launch arms a sink and execs, cost-sink/cost-launch refuse no arguments · git-guard denies a main-chat worktree add, passes gitter and git status · store-guard denies a claude run on the store, passes no override and an account dir · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────

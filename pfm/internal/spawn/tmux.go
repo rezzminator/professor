@@ -129,6 +129,12 @@ func (tmux TmuxSpawner) NewSession(
 		return fmt.Errorf("create chat server (%s): %w", runShape(spec), err)
 	}
 	arguments = append(arguments, launch.Command)
+	// An exact chat name rides in the same tmux command as the session, so the
+	// Herdr reporter reads it from the first client attach; an unnamed chat
+	// sets nothing.
+	if spec.ChatName != "" {
+		arguments = append(append(arguments, ";"), gather.ChatNameCommand(spec.Session, spec.ChatName)...)
+	}
 	command, err := tmux.newSessionCommand(
 		ctx,
 		spec.Socket,
@@ -163,7 +169,7 @@ func (tmux TmuxSpawner) NewSession(
 			return tmux.terminateUnrecorded(guard, spec.Socket, recordErr)
 		}
 	}
-	for _, options := range pfmconfig.ChatServerOptions(tmux.Titles) {
+	for _, options := range pfmconfig.ChatServerOptions(tmux.Titles, tmux.pfmBinary()) {
 		if output, err := tmux.command(
 			ctx,
 			spec.Socket,
@@ -311,4 +317,18 @@ func (tmux TmuxSpawner) command(
 	arguments ...string,
 ) *pfmtmux.Cmd {
 	return tmux.socket().Command(ctx, socket, arguments...)
+}
+
+// pfmBinary is the installed pfm launcher the chat server's client-attached
+// hook runs, the same path every launch-time hook uses.
+func (tmux TmuxSpawner) pfmBinary() string {
+	env := tmux.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	home, err := paths.HomeFrom(env)
+	if err != nil {
+		return "pfm"
+	}
+	return filepath.Join(home, ".local", "bin", "pfm")
 }

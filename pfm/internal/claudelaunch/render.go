@@ -12,6 +12,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -78,6 +79,10 @@ func CheckConfigDir(account int, dir string) error {
 func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	prefs := machine.EffectiveClaude(request.Account)
 	result := Launch{Unset: Hygiene(), Binary: prefs.Binary, Cache1H: prefs.Cache1H, SessionID: request.SessionID}
+	if request.Purpose == PurposeQuery {
+		// A query child is never the chat bound to the parent's Herdr pane.
+		result.Unset = append(result.Unset, herdr.Env()...)
+	}
 	if request.Binary != "" {
 		result.Binary = request.Binary
 	}

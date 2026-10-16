@@ -108,7 +108,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		ctx,
 		titlesTmux,
 		liveSockets(live.Panes),
-		environment.Config.Tmux.Titles,
+		environment.Config.Tmux.Titles, filepath.Join(environment.Paths.Home, ".local", "bin", "pfm"),
 		stdout,
 		stderr,
 	)
@@ -205,12 +205,12 @@ func convergeChatServerOptions(
 	ctx context.Context,
 	tmux gather.TmuxProbe,
 	sockets []string,
-	titles pfmconfig.TmuxTitles,
+	titles pfmconfig.TmuxTitles, pfmBinary string,
 	stdout, stderr io.Writer,
 ) (unverified int) {
 	converged := 0
 	for _, socket := range sockets {
-		transitions, err := tmux.ConvergeGlobalOptions(ctx, socket, pfmconfig.ChatServerOptions(&titles))
+		transitions, err := tmux.ConvergeGlobalOptions(ctx, socket, pfmconfig.ChatServerOptions(&titles, pfmBinary))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm name-sync: tmux options %s: %v\n", socket, err)
 			unverified++

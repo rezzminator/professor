@@ -502,9 +502,6 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 }
 
 func renameChatWindow(ctx context.Context, socket, target, name string) error {
-	// Every window-name writer clips through WindowNameFor, or the writers
-	// rename the window back and forth (see its doc).
-	name = gather.WindowNameFor(name)
 	socketPath, err := chatSocketPath(socket)
 	if err != nil {
 		return err
@@ -512,7 +509,10 @@ func renameChatWindow(ctx context.Context, socket, target, name string) error {
 	if target == "" {
 		target = socket
 	}
-	command := pfmtmux.Exec(ctx, "", socketPath, "rename-window", "-t", target, name)
+	// The exact name is stored and the window renamed to its clipped form in
+	// one tmux command; every window-name writer clips through WindowNameFor,
+	// or the writers rename the window back and forth (see its doc).
+	command := pfmtmux.Exec(ctx, "", socketPath, gather.ChatRenameCommand(target, name)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-window: %w: %s", err, strings.TrimSpace(string(output)))
 	}

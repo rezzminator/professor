@@ -3,6 +3,7 @@ package claudelaunch
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -189,7 +190,13 @@ func parseHooks(raw any) ([]Hook, error) {
 				async, _ := command["async"].(bool)
 				result = append(
 					result,
-					Hook{Event: event, Matcher: matcher, Command: text, Name: parsedHookName(text), Async: async},
+					Hook{
+						Event:   event,
+						Matcher: matcher,
+						Command: text,
+						Name:    parsedHookName(event, text),
+						Async:   async,
+					},
 				)
 			}
 		}
@@ -199,14 +206,27 @@ func parseHooks(raw any) ([]Hook, error) {
 
 // parsedHookName is a rendered command's registry name: its last word, read
 // before a fail-open wrapper's " || { … }" tail, where the registry spells two
-// rows apart from that word.
-func parsedHookName(command string) string {
+// rows apart from that word. A Herdr reporter row is "herdr-" plus its state
+// word, and its two working rows share one command, so their event tells them
+// apart.
+func parsedHookName(event, command string) string {
 	head, _, _ := strings.Cut(command, " || { ")
 	words := strings.Fields(head)
 	if len(words) == 0 {
 		return ""
 	}
-	switch name := words[len(words)-1]; name {
+	name := words[len(words)-1]
+	if slices.Contains(words, "herdr-state") {
+		switch event {
+		case HookEventUserPromptSubmit:
+			return "herdr-" + name + "-prompt"
+		case "PostToolUse":
+			return "herdr-" + name + "-tool"
+		default:
+			return "herdr-" + name
+		}
+	}
+	switch name {
 	case "usage-hook":
 		return "usage"
 	case "intake":

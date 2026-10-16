@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -36,7 +37,24 @@ func applyWorkbench(request *Request) error {
 	}
 	request.Persona = persona
 	request.OpenCodePlugin = ""
+	request.OpenCodeHerdrPlugin = ""
 	request.OpenCodeFleetPrompt = ""
+	if engine == pfmengine.OpenCode {
+		// The Herdr reporter is optional: a staging failure is logged and the
+		// chat launches without it, never fails.
+		path := paths.OpenCodeHerdrPlugin(request.Home)
+		if err := workbench.StageOpenCodeHerdrPlugin(
+			path,
+			filepath.Join(request.Home, ".local", "bin", "pfm"),
+		); err != nil {
+			obs.Logger(context.Background()).Error(
+				"OpenCode chat launches without the Herdr reporter plugin",
+				"path", path, obs.FieldErr, err,
+			)
+		} else {
+			request.OpenCodeHerdrPlugin = path
+		}
+	}
 	if !persona.Applies() {
 		return nil
 	}
@@ -98,20 +116,35 @@ func claudePersonaSpawn(
 	}
 }
 
+// openCodePersonaEnv is the environment an OpenCode launch adds: the plugin
+// list of OPENCODE_CONFIG_CONTENT — the workbench seat plugin for a persona,
+// the Herdr reporter plugin for every chat — and, for a persona, its system
+// and fleet prompt files.
 func openCodePersonaEnv(request Request) (string, error) {
-	if request.Persona.Prompt == "" {
+	hasPersona := request.Persona.Prompt != ""
+	var plugins []string
+	if hasPersona {
+		plugins = append(plugins, (&url.URL{Scheme: "file", Path: request.OpenCodePlugin}).String())
+	}
+	if request.OpenCodeHerdrPlugin != "" {
+		plugins = append(plugins, (&url.URL{Scheme: "file", Path: request.OpenCodeHerdrPlugin}).String())
+	}
+	if len(plugins) == 0 {
 		return "", nil
 	}
-	pluginURL := (&url.URL{Scheme: "file", Path: request.OpenCodePlugin}).String()
-	body, err := json.Marshal(map[string]any{
-		"instructions": []string{request.Persona.Prompt},
-		"plugin":       []string{pluginURL},
-	})
+	config := map[string]any{"plugin": plugins}
+	if hasPersona {
+		config["instructions"] = []string{request.Persona.Prompt}
+	}
+	body, err := json.Marshal(config)
 	if err != nil {
-		obs.Logger(context.Background()).Error("OpenCode workbench config", obs.FieldErr, err)
+		obs.Logger(context.Background()).Error("OpenCode launch config", obs.FieldErr, err)
 		return "", err
 	}
 	env := " OPENCODE_CONFIG_CONTENT=" + Quote(string(body))
+	if !hasPersona {
+		return env, nil
+	}
 	if request.OpenCodeFleetPrompt != "" {
 		env += " PFM_OPENCODE_FLEET_FILE=" + Quote(request.OpenCodeFleetPrompt)
 	}

@@ -181,3 +181,50 @@ func TestRenameWindowLatchSurvivesAScreenTitleEscape(t *testing.T) {
 		t.Fatalf("window name = %q, want WANTED — the latch did not hold", got)
 	}
 }
+
+// A rename that knows the chat's exact name states it in the SAME tmux command
+// as the rename, set BEFORE the rename so the window-renamed hook that fires on
+// it already reads the exact name. The window name stays the clipped form; a
+// writer that does not know the name (ChatName empty) leaves the option unset.
+func TestRenameWindowSetsTheExactChatNameInTheSameCommand(t *testing.T) {
+	socket, windowID, _ := startRenameProbeServer(t, "chatname")
+	hookLog := fmt.Sprintf("/tmp/%s-hook.log", socket)
+	t.Cleanup(func() { _ = os.Remove(hookLog) })
+	renameProbeTmux(t, socket, "set-hook", "-g", "window-renamed[50]",
+		fmt.Sprintf(`run-shell "printf '%%s\n' '#{@pfm_chat_name}' >> %s"`, hookLog))
+
+	// A trailing `;` is the one character tmux would read as a command separator.
+	exact := "界" + strings.Repeat("x", 40) + ";"
+	probe := TmuxProbe{TmuxTmpDir: "/tmp"}
+	if err := probe.RenameWindow(context.Background(), WindowRename{
+		Socket: socket, WindowID: windowID, CurrentName: "before",
+		TargetName: WindowNameFor(exact), ChatName: exact,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := renameProbeTmux(t, socket, "show-options", "-v", "-t", socket, "@pfm_chat_name"); got != exact {
+		t.Fatalf("@pfm_chat_name = %q, want the exact name %q", got, exact)
+	}
+	if got := renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}"); got != WindowNameFor(exact) {
+		t.Fatalf("window name = %q, want the clipped %q", got, WindowNameFor(exact))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if logged, _ := os.ReadFile(hookLog); strings.TrimSpace(string(logged)) == exact {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("window-renamed hook saw @pfm_chat_name %q, want %q set before the rename", logged, exact)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// An unnamed writer sets nothing and does not clear a name already stored.
+	if err := probe.RenameWindow(context.Background(), WindowRename{
+		Socket: socket, WindowID: windowID, CurrentName: WindowNameFor(exact), TargetName: "other",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := renameProbeTmux(t, socket, "show-options", "-v", "-t", socket, "@pfm_chat_name"); got != exact {
+		t.Fatalf("@pfm_chat_name after a nameless rename = %q, want it kept as %q", got, exact)
+	}
+}

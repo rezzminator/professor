@@ -64,7 +64,7 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 					fleetEnv = " PFM_OPENCODE_FLEET_FILE=" + Quote(request.OpenCodeFleetPrompt)
 				}
 				words = []string{
-					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `"]}'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
+					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
 						prompt,
 					) + " opencode",
 				}
@@ -408,6 +408,8 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 			prompt := filepath.Join(dir, ".professor", "scribe.md")
 			want := `OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(
 				request.Home,
+			) + `","file://` + paths.OpenCodeHerdrPlugin(
+				request.Home,
 			) + `"]}'`
 			if marker == "clone recorded" {
 				want += " PFM_OPENCODE_FLEET_FILE=" + Quote(paths.ComposedHarnessPromptIn(clone, pfmengine.OpenCode))
@@ -415,6 +417,79 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 			want += " PFM_OPENCODE_SYSTEM_FILE=" + Quote(prompt) + " opencode"
 			if !strings.Contains(run, want) {
 				t.Fatalf("run lacks %q: %s", want, run)
+			}
+		})
+	}
+}
+
+// TestExecutorOpenCodeHerdrPlugin: every pfm OpenCode chat loads the Herdr
+// reporter plugin staged with the absolute pfm binary, a chat without a
+// persona included; a Claude chat stages none.
+func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
+	for _, test := range []struct {
+		name, manifest string
+		kind           compose.Kind
+		want           string
+	}{
+		{"persona chat", `{"prompt":"scribe.md","engines":["opencode"]}`, compose.NewOpenCode, "persona"},
+		{"no persona, fresh, outside a workbench", `{"prompt":"scribe.md"}`, compose.NewOpenCode, "plain"},
+		{"no persona, resume", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "plain"},
+		{"claude chat", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeClaude, "none"},
+		// The reporter is optional: a staging failure launches the chat
+		// without it.
+		{"staging fails", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "unstaged"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, dir := actionWorkbenchFixture(t, test.manifest)
+			request.Row.Kind = test.kind
+			if test.want == "unstaged" {
+				if err := os.MkdirAll(paths.OpenCodeHerdrPlugin(request.Home), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.Contains(test.name, "outside a workbench") {
+				request.Row.CWD, request.Row.Workbench = filepath.Dir(filepath.Dir(dir)), ""
+			}
+			tmux := &fakeActionTmux{alive: map[string]bool{}}
+			executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := executor.Open(context.Background(), request); err != nil {
+				t.Fatal(err)
+			}
+			if len(tmux.created) != 1 {
+				t.Fatalf("created=%d", len(tmux.created))
+			}
+			run := tmux.created[0].Run
+			plugin := paths.OpenCodeHerdrPlugin(request.Home)
+			herdrURL := `"file://` + plugin + `"`
+			staged, stageErr := os.ReadFile(plugin)
+			switch test.want {
+			case "unstaged":
+				if strings.Contains(run, plugin) || strings.Contains(run, "OPENCODE_CONFIG_CONTENT") {
+					t.Fatalf("a chat whose Herdr plugin failed to stage loads it: %s", run)
+				}
+				return
+			case "none":
+				if stageErr == nil || strings.Contains(run, plugin) {
+					t.Fatalf("a Claude chat staged or loaded the OpenCode Herdr plugin: %v\n%s", stageErr, run)
+				}
+				return
+			case "plain":
+				want := `OPENCODE_CONFIG_CONTENT='{"plugin":[` + herdrURL + `]}'`
+				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE") {
+					t.Fatalf("run lacks %q or carries a persona env: %s", want, run)
+				}
+			case "persona":
+				want := `"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(request.Home) + `",` + herdrURL + `]}'`
+				if !strings.Contains(run, want) {
+					t.Fatalf("run lacks %q: %s", want, run)
+				}
+			}
+			binary := filepath.Join(request.Home, ".local", "bin", "pfm")
+			if stageErr != nil || !strings.Contains(string(staged), `const PFM_BINARY = "`+binary+`"`) {
+				t.Fatalf("staged plugin %s does not carry the pfm binary %s: %v", plugin, binary, stageErr)
 			}
 		})
 	}

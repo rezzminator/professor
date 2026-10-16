@@ -55,6 +55,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/headless: 4
       github.com/rezzminator/professor/pfm/internal/headless/run: 8
       github.com/rezzminator/professor/pfm/internal/heal: 12
+      github.com/rezzminator/professor/pfm/internal/herdr: 2
       github.com/rezzminator/professor/pfm/internal/hookentry: 18
       github.com/rezzminator/professor/pfm/internal/hostfixture: 2
       github.com/rezzminator/professor/pfm/internal/hostcheck: 2

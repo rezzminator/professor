@@ -27,6 +27,7 @@ func TestCodexAppServerRegistersAndReadsNativeHookTrust(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	binary := filepath.Join(fix.bin, "codex")
+	handler := codexappendix.Handler{Event: "sessionStart", Matcher: "resume", Command: "printf fixture"}
 	if err := codexappendix.RegisterHookTrust(
 		ctx,
 		binary,
@@ -37,7 +38,7 @@ func TestCodexAppServerRegistersAndReadsNativeHookTrust(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	trusted, err := codexappendix.NativeHookTrustState(ctx, binary, fix.codexHome, "printf fixture")
+	trusted, err := codexappendix.NativeHookTrustState(ctx, binary, fix.codexHome, handler)
 	if err != nil || !trusted {
 		t.Fatalf("native readback trusted=%v err=%v", trusted, err)
 	}
@@ -54,7 +55,7 @@ func TestCodexAppServerRegistersAndReadsNativeHookTrust(t *testing.T) {
 		ctx,
 		binary,
 		fix.codexHome,
-		"printf fixture",
+		handler,
 	); err == nil ||
 		trusted {
 		t.Fatalf("changed handler trusted=%v err=%v", trusted, err)
@@ -66,7 +67,7 @@ func TestCodexAppServerRegistersAndReadsNativeHookTrust(t *testing.T) {
 		ctx,
 		binary,
 		fix.codexHome,
-		"printf fixture",
+		handler,
 	); err == nil ||
 		trusted {
 		t.Fatalf("malformed hook source trusted=%v err=%v", trusted, err)

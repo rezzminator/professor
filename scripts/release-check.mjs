@@ -69,6 +69,7 @@ const TIER1 = [
           "picker",
           "mcpserv",
           "harvestmcp",
+          "herdr",
         ],
       },
       {

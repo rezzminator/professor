@@ -17,6 +17,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -589,7 +590,7 @@ func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, deps.ProbeTimeout)
 	defer cancel()
 	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, []string{path, "--version"}, deps.RunOptions{
-		Env:       home.Env(os.Environ()),
+		Env:       home.Env(herdr.StripPane(os.Environ())),
 		WaitDelay: time.Second,
 	})
 	if err != nil {

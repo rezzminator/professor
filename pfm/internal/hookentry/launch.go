@@ -26,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -53,14 +54,22 @@ var nonInteractiveClaudeSubcommands = map[string]bool{
 }
 
 func launchPassThrough(arguments []string, tmux string, forced bool) bool {
-	if forced {
-		return true
+	return forced || launchInsidePfmSocket(tmux) || launchRunsNonInteractive(arguments)
+}
+
+// launchInsidePfmSocket reports a launch from inside a pfm-managed tmux socket.
+func launchInsidePfmSocket(tmux string) bool {
+	socketPath, _, _ := strings.Cut(tmux, ",")
+	if socketPath == "" {
+		return false
 	}
-	if socketPath, _, _ := strings.Cut(tmux, ","); socketPath != "" {
-		if _, ok := pfmengine.FromSocket(filepath.Base(socketPath)); ok {
-			return true
-		}
-	}
+	_, ok := pfmengine.FromSocket(filepath.Base(socketPath))
+	return ok
+}
+
+// launchRunsNonInteractive reports a run its arguments make no chat: print mode, help, a version
+// query or a non-interactive subcommand.
+func launchRunsNonInteractive(arguments []string) bool {
 	for _, argument := range arguments {
 		switch argument {
 		case "-p", "--print", "--output-format", "-h", helpFlag, versionFlag, "-v":
@@ -138,8 +147,13 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm claude launcher re-entered itself via %s; refusing to loop\n", *realBinary)
 		return 127
 	}
-	if launchPassThrough(arguments, env.Get("TMUX"), env.Get("PFM_LAUNCH_PASSTHROUGH") == "1") {
+	forcedPassThrough := env.Get("PFM_LAUNCH_PASSTHROUGH") == "1"
+	if launchPassThrough(arguments, env.Get("TMUX"), forcedPassThrough) {
 		environment := os.Environ()
+		if !forcedPassThrough && !launchInsidePfmSocket(env.Get("TMUX")) {
+			// A print, help or subcommand run is never the chat bound to the parent's Herdr pane.
+			environment = herdr.StripPane(environment)
+		}
 		if launchStartsSession(arguments) {
 			prefs := runtime.Config.Claude
 			configDir := config.AmbientClaudeConfigDir()

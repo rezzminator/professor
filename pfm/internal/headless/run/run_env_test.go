@@ -170,3 +170,27 @@ func TestClaudeEnvironmentDropsTheLoginDefaultSentinel(t *testing.T) {
 		}
 	}
 }
+
+// Only the interactive chat bound to a Herdr pane reports to it: every
+// headless or nested engine door drops the Herdr variables, whatever the
+// engine and whether the caller supplied the environment.
+func TestHeadlessEnvironmentDropsTheHerdrPaneForEveryEngine(t *testing.T) {
+	inherited := []string{
+		"HERDR_ENV=1", "HERDR_PANE_ID=w1:p2", "HERDR_SOCKET_PATH=/run/herdr.sock", "HERDR_BIN_PATH=/usr/bin/herdr",
+		"PATH=/usr/bin",
+	}
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode} {
+		for _, explicit := range []bool{false, true} {
+			var got []string
+			setEnvironment(inherited, engine, "", explicit, &got)
+			for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+				if value := lastEnvironmentValue(got, name); value != "" {
+					t.Errorf("%s explicit=%t: %s leaked as %q in %q", engine, explicit, name, value, got)
+				}
+			}
+			if lastEnvironmentValue(got, "PATH") != "/usr/bin" {
+				t.Errorf("%s explicit=%t: PATH lost in %q", engine, explicit, got)
+			}
+		}
+	}
+}

@@ -15,6 +15,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -164,7 +165,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 13 {
+	if len(parsed.Hooks) != 19 {
 		t.Errorf("hooks=%d", len(parsed.Hooks))
 	}
 	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
@@ -398,6 +399,23 @@ func TestRenderLauncher(t *testing.T) {
 	}
 }
 
+// A query child is never the chat bound to the parent's Herdr pane; every
+// interactive purpose keeps the variables its pane reports through.
+func TestRenderUnsetsTheHerdrPaneOnlyForAQuery(t *testing.T) {
+	home, machine := renderMachine(t)
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
+		launch, err := Render(Request{Purpose: purpose, Home: home}, machine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range herdr.Env() {
+			if got := slices.Contains(launch.Unset, name); got != (purpose == PurposeQuery) {
+				t.Errorf("purpose %d: Unset holds %s = %t", purpose, name, got)
+			}
+		}
+	}
+}
+
 func TestRenderQuery(t *testing.T) {
 	home, machine := renderMachine(t)
 	launch, parsed := renderParsed(
@@ -405,7 +423,7 @@ func TestRenderQuery(t *testing.T) {
 		Request{Purpose: PurposeQuery, Home: home, Args: []string{"agents", "--json"}},
 		machine,
 	)
-	if len(launch.Unset) != 23 || parsed.Settings["outputStyle"] != "default" ||
+	if len(launch.Unset) != 23+len(herdr.Env()) || parsed.Settings["outputStyle"] != "default" ||
 		parsed.Settings["cleanupPeriodDays"] == nil ||
 		parsed.Settings["env"] == nil {
 		t.Errorf("query settings=%#v", parsed.Settings)

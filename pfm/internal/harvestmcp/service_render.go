@@ -19,6 +19,7 @@ type ReadView struct {
 	SizeOnly      bool // include_content:false: a size line stands in for the content
 	Remote        bool // the remote server: no item names a server path
 	InlineCap     int  // the most content characters one item shows; <= 0 is the default
+	TokenCap      int  // the most estimated content tokens one item shows; <= 0 is no cap (contentTokenCaps)
 	SearchEnabled bool // a web search backend is configured, so a failure may name search_web
 }
 
@@ -54,14 +55,7 @@ func RenderReadItem(n, total int, item string, result harvest.Result, view ReadV
 		lines = append(lines, fmt.Sprintf("size: %d chars, ~%d tokens", result.Chars, result.Tokens))
 		return strings.Join(lines, "\n"), false
 	}
-	content, cut := strings.CutSuffix(result.Content, harvest.InlineTruncationNote)
-	limit := view.InlineCap
-	if limit <= 0 {
-		limit = defaultInlineChars
-	}
-	if runes := []rune(content); len(runes) > limit {
-		content, cut = string(runes[:limit]), true
-	}
+	content, cut := viewContent(result, view)
 	if shown := len([]rune(strings.TrimSpace(content))); cut && shown < result.Chars {
 		truncated := fmt.Sprintf("truncated: %d of %d chars", shown, result.Chars)
 		if path != "" {
@@ -70,6 +64,39 @@ func RenderReadItem(n, total int, item string, result harvest.Result, view ReadV
 		lines = append(lines, truncated)
 	}
 	return strings.Join(append(lines, strings.TrimRight(content, " \t\r\n")), "\n"), false
+}
+
+// viewContent is the content an item shows inline: its stored content cut
+// to view's character cap, then to its token cap; cut reports either cut.
+func viewContent(result harvest.Result, view ReadView) (string, bool) {
+	content, cut := strings.CutSuffix(result.Content, harvest.InlineTruncationNote)
+	limit := view.InlineCap
+	if limit <= 0 {
+		limit = defaultInlineChars
+	}
+	if runes := []rune(content); len(runes) > limit {
+		content, cut = string(runes[:limit]), true
+	}
+	if view.TokenCap > 0 && harvest.EstimateTokens(content) > view.TokenCap {
+		content, cut = prefixWithinTokens(content, view.TokenCap), true
+	}
+	return content, cut
+}
+
+// prefixWithinTokens is the longest rune prefix of content a binary search
+// finds within limit estimated tokens.
+func prefixWithinTokens(content string, limit int) string {
+	runes := []rune(content)
+	low, high := 0, len(runes)
+	for low < high {
+		middle := (low + high + 1) / 2
+		if harvest.EstimateTokens(string(runes[:middle])) <= limit {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return string(runes[:low])
 }
 
 // itemHeader opens item's block, n of total in its call.

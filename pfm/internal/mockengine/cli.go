@@ -22,7 +22,27 @@ func answerCLI(proc *process) (int, bool) {
 	}
 	switch {
 	case len(args) == 4 && args[1] == "marketplace" && args[2] == "add":
-		fmt.Fprintf(proc.stdout, "mock-engine: claude plugin marketplace add %s — fixture, nothing fetched\n", args[3])
+		configDir := claudeConfigDir(proc)
+		name, err := recordClaudeMarketplace(configDir, args[3])
+		if err != nil {
+			fmt.Fprintf(proc.stderr, "mock-engine: %v\n", err)
+			return ExitUsage, true
+		}
+		if name == "" {
+			fmt.Fprintf(
+				proc.stdout,
+				"mock-engine: claude plugin marketplace add %s — fixture, nothing fetched\n",
+				args[3],
+			)
+			return 0, true
+		}
+		fmt.Fprintf(
+			proc.stdout,
+			"mock-engine: claude plugin marketplace add %s — fixture, recorded directory marketplace %s in %s\n",
+			args[3],
+			name,
+			configDir,
+		)
 		return 0, true
 	case (len(args) == 3 || len(args) == 4 && args[3] == "-y") && args[1] == "install":
 		configDir := claudeConfigDir(proc)
@@ -33,6 +53,20 @@ func answerCLI(proc *process) (int, bool) {
 		fmt.Fprintf(
 			proc.stdout,
 			"mock-engine: claude plugin install %s — fixture, recorded installed and enabled in %s\n",
+			args[2],
+			configDir,
+		)
+		return 0, true
+	case len(args) == 6 && args[1] == "update" && args[3] == "--scope" && args[4] == claudeUserScope &&
+		args[5] == "-y":
+		configDir := claudeConfigDir(proc)
+		if err := updateClaudePlugin(configDir, args[2]); err != nil {
+			fmt.Fprintf(proc.stderr, "mock-engine: %v\n", err)
+			return ExitUsage, true
+		}
+		fmt.Fprintf(
+			proc.stdout,
+			"mock-engine: claude plugin update %s — fixture, recorded its checkout version in %s\n",
 			args[2],
 			configDir,
 		)
@@ -68,6 +102,172 @@ func readPluginDocument(path string) (map[string]any, error) {
 	return document, nil
 }
 
+// The fixture plays Claude Code's plugin record: `plugin marketplace add` of
+// an absolute directory holding .claude-plugin/marketplace.json records it in
+// plugins/known_marketplaces.json; `plugin install` (user scope) of a plugin
+// from such a marketplace snapshots its directory into
+// plugins/cache/{marketplace}/{name}/{version} and records scope, installPath
+// and version in plugins/installed_plugins.json; `plugin update --scope user`
+// moves that entry to the directory's current version. A marketplace the
+// fixture cannot read (a GitHub source) fetches nothing: its install records an
+// empty snapshot at plugins/cache/{id} with no version.
+
+const (
+	claudeUserScope        = "user"
+	claudeSourceKey        = "source"
+	claudeDirectorySource  = "directory"
+	claudeUnknownVersion   = "unknown"
+	claudeMarketplaceFile  = "marketplace.json"
+	claudePluginManifest   = "plugin.json"
+	claudeManifestDir      = ".claude-plugin"
+	claudeKnownMarketplace = "known_marketplaces.json"
+)
+
+// writePluginDocument writes document as indented JSON, mode 0600.
+func writePluginDocument(path string, document map[string]any) error {
+	data, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// recordClaudeMarketplace records source as a directory marketplace under its
+// manifest's name and returns that name; "" when source is not an absolute
+// directory holding a marketplace manifest, which records nothing.
+func recordClaudeMarketplace(configDir, source string) (string, error) {
+	if !filepath.IsAbs(source) {
+		return "", nil
+	}
+	manifest, err := readPluginDocument(filepath.Join(source, claudeManifestDir, claudeMarketplaceFile))
+	if err != nil {
+		return "", err
+	}
+	name, _ := manifest["name"].(string)
+	if name == "" {
+		return "", nil
+	}
+	path := filepath.Join(configDir, "plugins", claudeKnownMarketplace)
+	known, err := readPluginDocument(path)
+	if err != nil {
+		return "", err
+	}
+	known[name] = map[string]any{
+		claudeSourceKey:   map[string]any{claudeSourceKey: claudeDirectorySource, "path": source},
+		"installLocation": source,
+	}
+	return name, writePluginDocument(path, known)
+}
+
+// claudePluginSource is the directory a recorded directory marketplace serves
+// plugin name from and that plugin's version; ok false when the marketplace is
+// not a recorded directory.
+func claudePluginSource(configDir, marketplace, name string) (dir, version string, ok bool, err error) {
+	known, err := readPluginDocument(filepath.Join(configDir, "plugins", claudeKnownMarketplace))
+	if err != nil {
+		return "", "", false, err
+	}
+	entry, _ := known[marketplace].(map[string]any)
+	source, _ := entry[claudeSourceKey].(map[string]any)
+	root, _ := source["path"].(string)
+	if source[claudeSourceKey] != claudeDirectorySource || root == "" {
+		return "", "", false, nil
+	}
+	manifestPath := filepath.Join(root, claudeManifestDir, claudeMarketplaceFile)
+	manifest, err := readPluginDocument(manifestPath)
+	if err != nil {
+		return "", "", false, err
+	}
+	plugins, _ := manifest["plugins"].([]any)
+	for _, raw := range plugins {
+		plugin, _ := raw.(map[string]any)
+		if plugin["name"] != name {
+			continue
+		}
+		relative, isString := plugin[claudeSourceKey].(string)
+		if !isString || filepath.IsAbs(relative) {
+			return "", "", false, fmt.Errorf("%s: plugin %s source is not a relative path", manifestPath, name)
+		}
+		dir = filepath.Join(root, relative)
+		pluginManifest, err := readPluginDocument(filepath.Join(dir, claudeManifestDir, claudePluginManifest))
+		if err != nil {
+			return "", "", false, err
+		}
+		for _, candidate := range []any{pluginManifest["version"], plugin["version"], claudeUnknownVersion} {
+			if text, _ := candidate.(string); text != "" {
+				return dir, text, true, nil
+			}
+		}
+	}
+	return "", "", false, fmt.Errorf("%s names no plugin %s", manifestPath, name)
+}
+
+// claudePluginSnapshot is the user-scope install entry for id: a copy of a
+// directory marketplace's plugin at its version, made once per version, or an
+// empty snapshot with no version for a marketplace the fixture cannot read.
+func claudePluginSnapshot(configDir, id string) (map[string]any, error) {
+	name, marketplace, _ := strings.Cut(id, "@")
+	dir, version, ok, err := claudePluginSource(configDir, marketplace, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		cachePath := filepath.Join(configDir, "plugins", "cache", id)
+		if err := os.MkdirAll(cachePath, 0o700); err != nil {
+			return nil, fmt.Errorf("create %s: %w", cachePath, err)
+		}
+		return map[string]any{"scope": claudeUserScope, "installPath": cachePath}, nil
+	}
+	snapshot := filepath.Join(configDir, "plugins", "cache", marketplace, name, version)
+	if _, err := os.Stat(snapshot); os.IsNotExist(err) {
+		staging := snapshot + ".partial"
+		if err := os.RemoveAll(staging); err != nil {
+			return nil, fmt.Errorf("clear %s: %w", staging, err)
+		}
+		if err := os.CopyFS(staging, os.DirFS(dir)); err != nil {
+			return nil, fmt.Errorf("copy %s to %s: %w", dir, staging, err)
+		}
+		if err := os.Rename(staging, snapshot); err != nil {
+			return nil, fmt.Errorf("rename %s: %w", staging, err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("inspect %s: %w", snapshot, err)
+	}
+	return map[string]any{"scope": claudeUserScope, "installPath": snapshot, "version": version}, nil
+}
+
+// setClaudePluginEntry replaces id's user-scope entry in the install record
+// with entry, keeping every other scope's; with mustExist, an id without a
+// user-scope entry is an error.
+func setClaudePluginEntry(installed map[string]any, id string, entry map[string]any, mustExist bool) error {
+	plugins, _ := installed["plugins"].(map[string]any)
+	if plugins == nil {
+		plugins = map[string]any{}
+	}
+	entries, _ := plugins[id].([]any)
+	kept := []any{}
+	found := false
+	for _, raw := range entries {
+		if existing, _ := raw.(map[string]any); existing["scope"] == claudeUserScope {
+			found = true
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	if mustExist && !found {
+		return fmt.Errorf("plugin %s is not installed in scope %s", id, claudeUserScope)
+	}
+	plugins[id] = append(kept, entry)
+	installed["plugins"] = plugins
+	return nil
+}
+
 func recordClaudePlugin(configDir, id string) error {
 	settingsPath := filepath.Join(configDir, "settings.json")
 	installedPath := filepath.Join(configDir, "plugins", "installed_plugins.json")
@@ -85,29 +285,33 @@ func recordClaudePlugin(configDir, id string) error {
 	}
 	enabled[id] = true
 	settings["enabledPlugins"] = enabled
-	plugins, _ := installed["plugins"].(map[string]any)
-	if plugins == nil {
-		plugins = map[string]any{}
-	}
-	cachePath := filepath.Join(configDir, "plugins", "cache", id)
-	plugins[id] = []map[string]string{{"installPath": cachePath}}
-	installed["plugins"] = plugins
-	settingsData, err := json.MarshalIndent(settings, "", "  ")
+	entry, err := claudePluginSnapshot(configDir, id)
 	if err != nil {
-		return fmt.Errorf("encode %s: %w", settingsPath, err)
+		return err
 	}
-	installedData, err := json.MarshalIndent(installed, "", "  ")
+	if err := setClaudePluginEntry(installed, id, entry, false); err != nil {
+		return err
+	}
+	if err := writePluginDocument(settingsPath, settings); err != nil {
+		return err
+	}
+	return writePluginDocument(installedPath, installed)
+}
+
+// updateClaudePlugin moves id's user-scope entry to its marketplace's current
+// version.
+func updateClaudePlugin(configDir, id string) error {
+	installedPath := filepath.Join(configDir, "plugins", "installed_plugins.json")
+	installed, err := readPluginDocument(installedPath)
 	if err != nil {
-		return fmt.Errorf("encode %s: %w", installedPath, err)
+		return err
 	}
-	if err := os.MkdirAll(cachePath, 0o700); err != nil {
-		return fmt.Errorf("create %s: %w", cachePath, err)
+	entry, err := claudePluginSnapshot(configDir, id)
+	if err != nil {
+		return err
 	}
-	if err := os.WriteFile(settingsPath, append(settingsData, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", settingsPath, err)
+	if err := setClaudePluginEntry(installed, id, entry, true); err != nil {
+		return err
 	}
-	if err := os.WriteFile(installedPath, append(installedData, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", installedPath, err)
-	}
-	return nil
+	return writePluginDocument(installedPath, installed)
 }

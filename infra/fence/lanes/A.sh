@@ -764,7 +764,8 @@ printf '\nLane A probe: stale %s\n' "$LANE_STAMP" >>"$EXPRESS/AGENTS.md"
 stale="$(in_express engine-sync codex check .)"
 stale_rc=$?
 [ "$stale_rc" -eq 1 ] || bad="$bad check over a hand-edited AGENTS.md exited $stale_rc, want 1;"
-grep -qF "engine-sync codex: STALE $EXPRESS/AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE $EXPRESS/AGENTS.md': $(one_line "$stale");"
+# engine-sync names a mirror by its path relative to the project root.
+grep -qF "engine-sync codex: STALE AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE AGENTS.md': $(one_line "$stale");"
 grep -qxF 'CODEX CHECK PASS' <<<"$stale" && bad="$bad check printed CODEX CHECK PASS over a stale mirror;"
 rebuilt="$(in_express engine-sync codex build .)"
 rebuilt_rc=$?
@@ -804,8 +805,12 @@ n_clean="$(printf '%s' "$second" | grep -c '\.toml: [0-9]* B, parses clean$')"
 not_correct="$(printf '%s' "$second" | grep -E '^(missing|copy|wrong-target|conflict|stale|owned-link|foreign) ' | head -3)"
 [ -z "$not_correct" ] || bad="$bad on the second run a registry entry is still not settled: $(one_line "$not_correct");"
 # A role whose capability the host does not declare (gpt-agents, off in the lane) is engine-sync's named
-# SKIPPED warning, not a problem; any other stderr line is.
-problem_lines="$(grep -v -E '^engine-sync codex agents: warning: SKIPPED [^ ]+ — requires [a-z-]+$' /tmp/lane-a-codex-agents.err || true)"
+# SKIPPED warning, and a Claude tool with no OpenCode equivalent (ToolSearch) its named unmapped-tool
+# warning (the tool stays denied there); neither is a problem, any other stderr line is.
+problem_lines="$(grep -v -E \
+  -e '^engine-sync codex agents: warning: SKIPPED [^ ]+ — requires [a-z-]+$' \
+  -e '^engine-sync codex agents: warning: unmapped Claude tool [A-Za-z]+ in [^ ]+ — no OpenCode equivalent; it stays denied$' \
+  /tmp/lane-a-codex-agents.err || true)"
 [ -z "$problem_lines" ] || bad="$bad problem line(s) on stderr: $(one_line "$problem_lines" | cut -c1-200);"
 # A role must be a REGULAR FILE: Codex opens it with O_NOFOLLOW and rejects a
 # symlink as "agent type is currently not available", so a linked registry
@@ -1052,7 +1057,8 @@ chk_rc=$?
   bad="$bad engine-sync opencode check exited $chk_rc without 'OPENCODE CHECK PASS' ($(one_line "$chk")); the build it just ran should have left check clean;"
 doc="$(in_express engine-sync opencode doctor .)"
 doc_rc=$?
-[ "$doc_rc" -eq 0 ] && [[ "$(printf '%s\n' "$doc" | tail -1)" == 'OPENCODE DOCTOR PASS'* ]] ||
+# Human doctor prints its CONFIG provenance rows after the verdict line.
+[ "$doc_rc" -eq 0 ] && [[ "$(printf '%s\n' "$doc" | grep -v '^CONFIG ' | tail -1)" == 'OPENCODE DOCTOR PASS'* ]] ||
   bad="$bad engine-sync opencode doctor exited $doc_rc without 'OPENCODE DOCTOR PASS' ($(one_line "$doc"));"
 [ -f "$EXPRESS/.opencode/opencode.jsonc" ] || bad="$bad no $EXPRESS/.opencode/opencode.jsonc after a passing build;"
 [ -d "$EXPRESS/.opencode/agent" ] && [ -n "$(find "$EXPRESS/.opencode/agent" -name '*.md' 2>/dev/null | head -1)" ] ||

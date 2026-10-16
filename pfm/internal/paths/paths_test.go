@@ -121,6 +121,16 @@ func TestDevRepoGitDirLogsPhysicalResolutionFailureBeforeCleanFallback(t *testin
 	}
 }
 
+// Every pfm service unit and the theme follower run on this one search path:
+// pfm and claude in ~/.local/bin, tmux in Homebrew (Apple silicon, then Intel),
+// then the system directories launchd's bare default holds.
+func TestServicePathIsTheOneServiceSearchPath(t *testing.T) {
+	want := "/h/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	if got := ServicePath("/h"); got != want {
+		t.Fatalf("ServicePath(/h) = %q, want %q", got, want)
+	}
+}
+
 // The state and cache databases have distinct names in the pfm state directory.
 func TestResolveStateAndCacheDefaults(t *testing.T) {
 	testRoot := t.TempDir()

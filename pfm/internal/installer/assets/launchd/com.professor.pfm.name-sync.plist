@@ -18,7 +18,7 @@
   __PFM_HOME__ is substituted at install time — launchd has no %h.
 
   PATH is rendered at install from the one service search path every pfm unit
-  shares (installer servicePath): launchd's bare PATH cannot see Homebrew's
+  shares (paths.ServicePath): launchd's bare PATH cannot see Homebrew's
   tmux, and without it every run probed nothing and renamed nothing while
   reporting success.
 

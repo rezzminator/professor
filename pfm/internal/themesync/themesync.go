@@ -141,6 +141,9 @@ type Env struct {
 	Runner deps.Runner
 	// Tmux reaches pfm's chat servers.
 	Tmux TmuxServers
+	// LaunchdJob is the launchd job label this process runs as (its
+	// XPC_SERVICE_NAME), "" outside launchd.
+	LaunchdJob string
 	// systemApps is the system Applications directory ("" is /Applications);
 	// tests point it into their own tree.
 	systemApps string

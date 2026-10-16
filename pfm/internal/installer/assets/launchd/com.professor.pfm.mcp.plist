@@ -4,7 +4,7 @@
   Serve pfm's chat-professor and harvester-professor MCP servers over loopback HTTP (pfm mcp serve).
 
   PATH is rendered at install from the one service
-  search path every pfm unit shares (installer servicePath): launchd starts
+  search path every pfm unit shares (paths.ServicePath): launchd starts
   agents on /usr/bin:/bin:/usr/sbin:/sbin, which cannot see ~/.local/bin (pfm,
   claude) or Homebrew — where tmux lives — and without it every chat tool a
   Codex chat calls over the daemon answers as if no chat were live.

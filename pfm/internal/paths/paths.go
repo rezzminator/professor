@@ -399,6 +399,26 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
+// ServicePath is the ONE search path every pfm service runs on — the
+// installer's launchd agents and systemd units, and the theme follower. A
+// service manager starts jobs on a bare PATH (launchd: /usr/bin:/bin:/usr/sbin:/sbin)
+// that sees neither ~/.local/bin (pfm, claude, herdr) nor Homebrew
+// (/opt/homebrew/bin on Apple silicon, /usr/local/bin on Intel), where tmux
+// lives — so a daemon that probes the fleet finds no tmux, and a fleet it
+// cannot see reads as empty. Every unit renders it from here; none spells a
+// PATH of its own.
+func ServicePath(home string) string {
+	return strings.Join([]string{
+		filepath.Join(home, ".local", "bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	}, ":")
+}
+
 // Resolve returns the standard host paths with all K4 test-jail overrides
 // applied. It only computes pathnames; it does not access the filesystem.
 func DefaultStateDB(home string) string {

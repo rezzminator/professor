@@ -6,7 +6,7 @@ Type=oneshot
 # The fire exits 1 while a schedule stays due, so this service may read "failed"
 # between ticks; the timer still starts it on the next tick, and an overlapping
 # tick is a no-op under the fire's flock. PATH is the one service search path
-# every pfm unit shares (installer servicePath), so the tmux the fire calls
+# every pfm unit shares (paths.ServicePath), so the tmux the fire calls
 # through is found under every service manager.
 Environment=PATH=__PFM_SERVICE_PATH__
 ExecStart=%h/.local/bin/pfm internal schedule-fire

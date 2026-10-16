@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
+umask 002
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SHTEST_TAG=plugin-logs-test
 source "$ROOT/scripts/shtest.sh"
 shtest_isolate_host
+mkdir -m 700 "$T/tmp"
+export TMPDIR="$T/tmp"
 # The mounted worktree's .git points at a host path. Even git config --file
 # discovers it from cwd; fixture commands must start outside that repository.
 cd "$T" || exit 2
@@ -61,6 +64,13 @@ TMPDIR="$T/temp-root" PATH="$T/scratch-bin:$PATH" REAL_MKTEMP="$REAL_MKTEMP" SCR
   bash "$SUT" report --dir "$T/logs" --root "$T/.fixture-project" > "$T/out" 2> "$T/err" || RC=$?
 allocated=$(cat "$T/scratch-record")
 expect 'scratch is project-scoped and cleaned after report' '[ "$RC" = 0 ] && [[ "$allocated" == "$T/temp-root/fixture-project/plugin-logs/run."* ]] && [ -d "${allocated%/*}" ] && [ ! -e "$allocated" ] && grep -Fxq "callmeter 1" "$T/out"'
+# Other tools create the user's project/purpose scratch dirs under umask 002.
+mkdir -p "$T/mode775/root/plugin-logs" "$T/empty-logs"
+chmod 775 "$T/mode775/root" "$T/mode775/root/plugin-logs"
+for operation in report rotate; do
+  TMPDIR="$T/mode775" run_sut "$operation" --dir "$T/empty-logs"
+  expect "$operation accepts user-owned mode 775 scratch ancestry" '[ "$RC" = 0 ]'
+done
 # Pre-existing scratch ancestry is a trust boundary, including when run as root.
 for hostile in project-symlink purpose-symlink project-writable purpose-writable; do
   base="$T/hostile-$hostile"
@@ -108,7 +118,7 @@ expect 'archive traversal is usage failure' '[ "$RC" = 2 ] && grep -q date "$T/e
 run_sut rotate --dir "$T/logs" --today 2026-02-30
 expect 'impossible date is usage failure' '[ "$RC" = 2 ] && grep -q date "$T/err"'
 # Exercise permission denial as nobody even though the fence itself is root.
-mkdir -p "$T/denied"; chmod 500 "$T/denied"
+mkdir -p "$T/denied"; chmod 000 "$T/denied"
 if [ "$(id -u)" != 0 ]; then
   run_sut report --dir "$T/denied"
   expect 'unreadable folder exits 4' '[ "$RC" = 4 ] && grep -q "folder unreadable:" "$T/out"'

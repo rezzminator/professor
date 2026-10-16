@@ -34,7 +34,8 @@ project=$(basename -- "$root"); project=${project#.}
 scratch_root="${TMPDIR:-/tmp}/$project/plugin-logs"
 # A private run is not private if another user can replace its ancestry.
 # Resolve the platform temp alias first (for example /var on macOS), then
-# accept only trusted owners and non-writable or sticky ancestors.
+# accept only trusted owners and non-world-writable or sticky ancestors.
+# User-owned group-writable scratch is normal under umask 002.
 temp_root=$(cd -- "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
   unreadable "$dir" "cannot create scratch folder: $scratch_root"
 check_scratch_dir() {
@@ -45,11 +46,11 @@ check_scratch_dir() {
     unreadable "$dir" "cannot inspect scratch folder: $path"
   read -r owner permissions <<< "$metadata"
   if [ "$private" = 1 ]; then
-    [ "$owner" = "$EUID" ] && (( (8#$permissions & 0022) == 0 )) ||
+    [ "$owner" = "$EUID" ] && (( (8#$permissions & 0002) == 0 || (8#$permissions & 01000) != 0 )) ||
       unreadable "$dir" "untrusted scratch folder: $path"
   else
     { [ "$owner" = 0 ] || [ "$owner" = "$EUID" ]; } &&
-      (( (8#$permissions & 0022) == 0 || (8#$permissions & 01000) != 0 )) ||
+      (( (8#$permissions & 0002) == 0 || (8#$permissions & 01000) != 0 )) ||
       unreadable "$dir" "untrusted scratch folder: $path"
   fi
 }

@@ -1,8 +1,13 @@
 package hookentry
 
 import (
+	"os"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 func (rig *chatRig) wantRegistry(want map[string]herdrClient) {
@@ -387,6 +392,93 @@ func TestHerdrStateEventsReachOnlyLiveRegisteredClients(t *testing.T) {
 		rig.wantCalls(append([]string{listCall}, releaseCalls("w1:p1")...)...)
 		rig.wantRegistry(map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")})
 	})
+}
+
+// A session end empties the chat server's set-titles-string, so the last outer
+// title tmux writes before the server dies is empty and Herdr's terminal title
+// clears with the release; a session swap or a detach keeps the chat's title,
+// and an engine ending in the user's own tmux, or a reload's /exit whose
+// engine respawns on the same server, or an engine whose server keeps another
+// pane, leaves that live server's titles alone; a reload probe or a pane list
+// that cannot run leaves them too, and says so. Every end still releases.
+func TestHerdrStateEndBlanksTheTmuxTitle(t *testing.T) {
+	const blank = "socket=" + rigSocket + " set-option -g set-titles-string "
+	const exit = `{"session_id":"s1","reason":"prompt_input_exit"}`
+	for _, test := range []struct {
+		name   string
+		run    func(rig *chatRig) herdrRun
+		blanks int
+		warns  string
+		// releases: the end still releases the client's pane.
+		releases bool
+	}{
+		{"an exit", func(rig *chatRig) herdrRun {
+			return rig.engine("end", exit)
+		}, 1, "", true},
+		{"a /clear swap", func(rig *chatRig) herdrRun {
+			return rig.engine("end", `{"session_id":"s1","reason":"clear"}`)
+		}, 0, "", false},
+		{"a resume swap", func(rig *chatRig) herdrRun {
+			return rig.engine("end", `{"session_id":"s1","reason":"resume"}`)
+		}, 0, "", false},
+		{"a detach", func(rig *chatRig) herdrRun { return rig.hook("detach", "--client", "4242") }, 0, "", false},
+		{"an exit in the user's own tmux", func(rig *chatRig) herdrRun {
+			rig.env["TMUX"] = "/private/tmp/tmux-501/default,1,0"
+			return rig.engine("end", exit)
+		}, 0, "", true},
+		{"a reload's /exit", func(rig *chatRig) herdrRun {
+			rig.holdReload("cc-1", "%0")
+			return rig.engine("end", exit)
+		}, 0, "", true},
+		{"a reload probe that cannot run", func(rig *chatRig) herdrRun {
+			if err := os.Mkdir(reload.LockPath(rig.jail.sidDir, "cc-1", "%0"), 0o700); err != nil {
+				rig.t.Fatal(err)
+			}
+			return rig.engine("end", exit)
+		}, 0, "outer terminal title left as is at session end: probe the reload of cc-1 %0", true},
+		{"an exit beside another pane of the server", func(rig *chatRig) herdrRun {
+			rig.tmux.panes = []string{"%0", "%1"}
+			return rig.engine("end", exit)
+		}, 0, "", true},
+		{"a pane list that cannot be read", func(rig *chatRig) herdrRun {
+			rig.tmux.failOn = "list-panes"
+			return rig.engine("end", exit)
+		}, 0, "outer terminal title left as is at session end: list the panes of cc-1", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newChatRig(t)
+			rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+			if got := test.run(rig); test.warns == "" {
+				rig.wantQuiet(got)
+			} else if got.rc != 0 || !strings.Contains(got.stderr, test.warns) {
+				t.Fatalf("rc=%d stderr=%q, want exit 0 warning %q", got.rc, got.stderr, test.warns)
+			}
+			calls := rig.tmux.allCalls()
+			blanks := slices.DeleteFunc(slices.Clone(calls), func(call string) bool {
+				return !strings.Contains(call, " set-titles-string")
+			})
+			if got := len(blanks); got != test.blanks || (got == 1 && blanks[0] != blank) {
+				t.Fatalf("tmux calls =\n  %s\nwant %d of %q", strings.Join(calls, "\n  "), test.blanks, blank)
+			}
+			if test.releases {
+				rig.wantCalls(append([]string{listCall}, releaseCalls("w1:p1")...)...)
+			}
+		})
+	}
+}
+
+// holdReload takes the reload pane mutex the way reload.Run holds it across
+// the whole reboot of that pane.
+func (rig *chatRig) holdReload(socketName, pane string) {
+	rig.t.Helper()
+	lock, err := os.OpenFile(reload.LockPath(rig.jail.sidDir, socketName, pane), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		rig.t.Fatal(err)
+	}
+	rig.t.Cleanup(func() { _ = lock.Close() })
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		rig.t.Fatal(err)
+	}
 }
 
 // The tmux hook verbs are not fired by an engine: a nested-engine guard that

@@ -184,6 +184,7 @@ func (service *Service) readMany(ctx context.Context, jobs []readJob, request re
 		blocks = append(blocks, answer)
 		isError = isError || failed
 	}
+	blocks = fitAnswerBudget(blocks, jobs, results, failedItems, view)
 	return textResult(strings.Join(blocks, "\n\n"), isError)
 }
 

@@ -406,7 +406,8 @@ func (h *Harvester) fetchURLWithPolicy(
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
 		// A reader rung speaks to the reader, not the target: its status and
 		// Retry-After are never the site's (noteRungOutcome, retry_after.go).
-		body, status, _, err := getBody(withoutRetryAfterNote(ctx), h.jina, target, h.userAgent, h.options.MaxBytes)
+		answer := h.jinaRead(withoutRetryAfterNote(ctx), target, options.Refresh)
+		body, status, err := answer.body, answer.status, answer.err
 		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
 		if err == nil && status < 400 && !isChallenge(body, status) && jinaTargetError(body) == 0 {
 			// Jina Reader already returns clean Markdown. Feeding it back into an
@@ -415,7 +416,9 @@ func (h *Harvester) fetchURLWithPolicy(
 			converted, convErr := quoraReaderPage(source, pageText(stripJinaEnvelope(string(body)))), error(nil)
 			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) && !loaders.readerGateOnly(source, converted) {
-				stored := h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders)
+				checked := h.readerPageChecked(ctx, source, converted, answer.headers)
+				checked.checks = joinReasons(checked.checks, answer.stale)
+				stored := checked.withGaps(converted, gaps, loaders)
 				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
 			}
 		}
@@ -437,7 +440,7 @@ func (h *Harvester) fetchURLWithPolicy(
 					source,
 					kindHTML,
 					"defuddle-reader",
-					h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders),
+					h.readerPageChecked(ctx, source, converted, nil).withGaps(converted, gaps, loaders),
 					int64(len(body)),
 					status,
 					rungs,

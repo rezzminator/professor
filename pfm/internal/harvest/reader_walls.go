@@ -33,12 +33,21 @@ const readerHTMLFormat = "X-Return-Format"
 // none to name. A check that could not run is named on the page
 // (wallCheckFailed, readerChecksFailed), never stored as a clean page. A wall
 // an earlier rung saw travels in the carried gaps (carriedGaps.wall) either way.
-func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown string) convertedPage {
+// readerHeaders are the extra headers the markdown was asked with (jinaRead),
+// so the HTML checked is of the same render.
+func (h *Harvester) readerPageChecked(
+	ctx context.Context,
+	source, markdown string,
+	readerHeaders map[string]string,
+) convertedPage {
 	page := readerPage(source, markdown)
 	wallAsked := paywallCallPattern.MatchString(markdown) || loginWalledHost(source)
 	target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
-	body, status, _, err := getBodyWithHeaders(ctx, h.jina, target, h.userAgent,
-		map[string]string{readerHTMLFormat: "html"}, h.options.MaxBytes)
+	headers := map[string]string{readerHTMLFormat: "html"}
+	for name, value := range readerHeaders { // the HTML checked is of the render the markdown came from
+		headers[name] = value
+	}
+	body, status, _, err := getBodyWithHeaders(ctx, h.jina, target, h.userAgent, headers, h.options.MaxBytes)
 	// why the reader's HTML is no page to check, safe to repeat (errorReasonClass). The
 	// checks always ask the jina reader, whichever rung stored the page, so why speaks of
 	// "it" and the reasons below name the jina reader: an unnamed "the reader" reads as
@@ -107,4 +116,17 @@ func wallCheckFailed(why string) string {
 	return "the page asks for a subscription or a sign-in and its wall check could not run " +
 		"(the page's HTML from the jina reader: " + why +
 		"): it may be only the preview the site serves signed-out"
+}
+
+// stripDefuddleEnvelope drops the YAML block defuddle.md prefixes
+// (`title:/source:/word_count:`) so it cannot masquerade as the artifact's own
+// frontmatter when the body is cached.
+func stripDefuddleEnvelope(text string) string {
+	if !strings.HasPrefix(text, "---") {
+		return text
+	}
+	if end := strings.Index(text[3:], "\n---"); end >= 0 {
+		return strings.TrimLeft(text[3+end+4:], "\r\n")
+	}
+	return text
 }

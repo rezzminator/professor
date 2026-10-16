@@ -4,6 +4,10 @@ import (
 	"path/filepath"
 )
 
+// CodexNoDaemon is the Codex CLI flag (codex-cli 0.162.1) that runs a session in the TUI's own
+// process instead of on the shared app-server daemon, so its hooks run under the pane that started it.
+const CodexNoDaemon = "--no-daemon"
+
 func init() {
 	Register(Descriptor{
 		ID: Claude, Name: "Claude Code", Short: "Claude", LongName: "claude",

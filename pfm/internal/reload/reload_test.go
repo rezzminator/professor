@@ -582,7 +582,7 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	}
 	for _, want := range []string{
 		"CODEX_HOME='/jail/codex/9'",
-		"'/opt/codex safe' --sandbox workspace-write",
+		"'/opt/codex safe' --no-daemon --sandbox workspace-write",
 		"resume '019ff700-0000-7000-8000-000000000001'",
 	} {
 		if !strings.Contains(run, want) {
@@ -600,6 +600,9 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	roleless, err := codexRun(Request{SessionID: "019ff700-0000-7000-8000-000000000001"})
 	if err != nil || strings.Contains(roleless, "developer_instructions") {
 		t.Fatalf("roleless Codex reload changed: run=%q error=%v", roleless, err)
+	}
+	if !strings.Contains(roleless, " codex --no-daemon --sandbox workspace-write resume ") {
+		t.Fatalf("Codex reload runs the respawned chat on the shared daemon: %q", roleless)
 	}
 }
 

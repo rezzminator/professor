@@ -204,7 +204,7 @@ func TestHeadlessCodexTakesNeitherNameNorPrompt(t *testing.T) {
 	}
 	if !strings.HasSuffix(
 		plan.Run,
-		" codex --dangerously-bypass-approvals-and-sandbox",
+		" codex --no-daemon --dangerously-bypass-approvals-and-sandbox",
 	) {
 		t.Fatalf("unexpected codex command: %s", plan.Run)
 	}

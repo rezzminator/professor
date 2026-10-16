@@ -819,3 +819,50 @@ func TestLauncherRunCarriesTheChatLabel(t *testing.T) {
 		t.Fatal("an unlabelled launcher run carries --name")
 	}
 }
+
+// Every action door that starts a Codex TUI runs it in-process, off the shared app-server daemon whose
+// hooks reach no pane: chat new and the MCP new tool (PlanCodex), chat open, the picker's and FleetView's
+// resume and Herdr's agent_resume (ResumeCodex), chat branch (HeadlessFork). The flag sits right after
+// the binary word; these doors carry only pfm-built arguments, so no user transport can arrive.
+func TestCodexDoorsRunInProcess(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	machine.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
+	machine.Codex.Yolo = false
+	newPlan, err := HeadlessRun(HeadlessRequest{
+		Engine: pfmengine.Codex, Name: "worker", CWD: "/work", Home: home, PrimaryAccount: 1, Config: machine,
+	})
+	if err != nil {
+		t.Fatalf("PlanCodex: %v", err)
+	}
+	resume := stressRequests(home)[0]
+	resume.Config = machine
+	resume.Row = compose.Row{
+		Kind: compose.ResumeCodex,
+		CWD:  "/work/project",
+		ID:   "44444444-4444-4444-8444-444444444444",
+	}
+	resumePlan, err := Synthesize(resume)
+	if err != nil {
+		t.Fatalf("ResumeCodex: %v", err)
+	}
+	forkPlan, err := HeadlessFork(HeadlessForkRequest{
+		Engine: pfmengine.Codex, SessionID: "thread-123", Name: "branch", CWD: "/work",
+		Home: home, PrimaryAccount: 1, Config: machine,
+	})
+	if err != nil {
+		t.Fatalf("HeadlessFork: %v", err)
+	}
+	for _, door := range []struct{ name, run string }{
+		{"PlanCodex (chat new)", newPlan.Run},
+		{"ResumeCodex (chat open)", resumePlan.Run},
+		{"HeadlessFork (chat branch)", forkPlan.Run},
+	} {
+		if !strings.Contains(door.run, " codex --no-daemon --sandbox workspace-write") {
+			t.Errorf("%s runs Codex on the shared daemon: %q", door.name, door.run)
+		}
+		if strings.Count(door.run, "--no-daemon") != 1 {
+			t.Errorf("%s carries --no-daemon %d times: %q", door.name, strings.Count(door.run, "--no-daemon"), door.run)
+		}
+	}
+}

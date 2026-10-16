@@ -235,7 +235,7 @@ The `SessionStart` hook `launcher-repair` re-links a displaced launcher. Version
 
 ## The zsh shim
 
-`~/.zshrc` sources `{clone}/pfm/internal/installer/assets/shim/pfm.zsh` directly; the file is static — nothing is rendered into it at install. It exports `CLAUDE_DISABLE_ADOPT=1`, `CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF=1`, `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=2` into the interactive shell, and defines `claude()`, which calls `~/.local/bin/claude` and closes the terminal after a TUI session, and `cx()`, which hands off to `pfm internal codex-launch`. The Codex launch reads each account's yolo setting from `pfm.config.json` and strips the registry's hygiene rows in Go; the shim carries no env list of its own.
+`~/.zshrc` sources `{clone}/pfm/internal/installer/assets/shim/pfm.zsh` directly; the file is static — nothing is rendered into it at install. It exports `CLAUDE_DISABLE_ADOPT=1`, `CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF=1`, `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=2` into the interactive shell, and defines `claude()`, which calls `~/.local/bin/claude` and closes the terminal after a TUI session, `codex()`, which runs `command codex` with the transport `pfm internal codex-transport` answers (`--no-daemon` for a TUI; [Codex pane registry](../hooks/hooks.md#herdr-reporter)) and closes the terminal the same way, and `cx()`, which hands off to `pfm internal codex-launch`. The Codex launch reads each account's yolo setting from `pfm.config.json` and strips the registry's hygiene rows in Go; the shim carries no env list of its own.
 
 ## Long launch lines
 

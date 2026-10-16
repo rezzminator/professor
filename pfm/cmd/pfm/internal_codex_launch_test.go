@@ -38,7 +38,7 @@ func TestCodexLaunchPolicyAndHygiene(t *testing.T) {
 			called := false
 			hookentry.LaunchExec = func(path string, args, env []string) error {
 				called = true
-				want := []string{binary}
+				want := []string{binary, "--no-daemon"}
 				if enabled {
 					want = append(want, "--dangerously-bypass-approvals-and-sandbox")
 				}
@@ -88,6 +88,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			args := []string{}
 			personaArgs := append([]string{"--model", "gpt-x"}, action.CodexEffortArg("xhigh")...)
 			personaArgs = append(personaArgs, action.CodexDeveloperInstructionsArg("You are duo.")...)
+			transport := []string{"--no-daemon"}
 			wantError := ""
 			mirror := true
 			mirrorRecord := testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
@@ -161,6 +162,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				dir = scribe
 				args = []string{scenario}
 				personaArgs = nil
+				transport = nil
 				mirror = false
 			}
 			t.Chdir(dir)
@@ -172,7 +174,8 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				if wantError != "" {
 					t.Fatal("refusal reached exec")
 				}
-				want := append([]string{binary, "--dangerously-bypass-approvals-and-sandbox"}, personaArgs...)
+				want := append(append([]string{binary}, transport...), "--dangerously-bypass-approvals-and-sandbox")
+				want = append(want, personaArgs...)
 				want = append(want, args...)
 				if path != binary || !reflect.DeepEqual(argv, want) {
 					t.Fatalf("persona argv = %q, want %q", argv, want)
@@ -220,7 +223,7 @@ func TestCodexLaunchBinaryAndNoArguments(t *testing.T) {
 			binary = filepath.Join(pathDir, "codex")
 		}
 		hookentry.LaunchExec = func(path string, args, _ []string) error {
-			if path != binary || !reflect.DeepEqual(args, []string{binary}) {
+			if path != binary || !reflect.DeepEqual(args, []string{binary, "--no-daemon"}) {
 				t.Fatalf("exec = %q %q", path, args)
 			}
 			return errors.New("exec intercepted")
@@ -266,7 +269,7 @@ func TestCodexLaunchUsesSelectedPrimaryAccount(t *testing.T) {
 	previous := hookentry.LaunchExec
 	t.Cleanup(func() { hookentry.LaunchExec = previous })
 	hookentry.LaunchExec = func(path string, args, env []string) error {
-		if path != binary || !reflect.DeepEqual(args, []string{binary}) {
+		if path != binary || !reflect.DeepEqual(args, []string{binary, "--no-daemon"}) {
 			t.Fatalf("selected primary argv=%q", args)
 		}
 		return errors.New("exec intercepted")
@@ -275,5 +278,23 @@ func TestCodexLaunchUsesSelectedPrimaryAccount(t *testing.T) {
 	code := hookentry.CodexLaunch(nil, &stderr, pfmconfig.Runtime{Config: machine, Paths: values})
 	if code != 1 || !strings.Contains(stderr.String(), "exec intercepted") {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+// The shell's codex() asks this verb on every typed `codex` and hands Codex its answer.
+func TestInternalCodexTransportPrintsTheTransport(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"resume", "--last"}, "--no-daemon\n"},
+		{[]string{"--remote", "ws://127.0.0.1:4500"}, ""},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := runInternal(append([]string{"codex-transport"}, test.args...), &stdout, &stderr, commandRuntime{})
+		if code != 0 || stdout.String() != test.want || stderr.Len() != 0 {
+			t.Fatalf("internal codex-transport %q code=%d stdout=%q stderr=%q, want 0, %q and no stderr",
+				test.args, code, stdout.String(), stderr.String(), test.want)
+		}
 	}
 }

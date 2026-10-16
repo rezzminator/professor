@@ -649,6 +649,8 @@ func codexCommandWithAccount(
 		pfmengine.MustLookup(pfmengine.Codex).Binary,
 		policy.Binary != "" && policy.Binary != pfmengine.MustLookup(pfmengine.Codex).Binary,
 	))
+	// Every door here opens the TUI on pfm-built arguments: in-process, so its hooks reach its pane.
+	command.WriteString(" " + pfmengine.CodexNoDaemon)
 	if policy.Yolo {
 		command.WriteString(" --dangerously-bypass-approvals-and-sandbox")
 	} else {

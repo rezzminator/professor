@@ -96,3 +96,96 @@ func TestCodexLaunchDropsThePaneOfAChildThatIsNoInteractiveChat(t *testing.T) {
 		})
 	}
 }
+
+// Every Codex chat pfm starts runs in-process, off the shared app-server daemon, whose hooks reach
+// no pane: a launch that opens the TUI gets --no-daemon, unless the user's own arguments already pick
+// a transport (codex-cli 0.162.1 refuses --no-daemon beside --remote, and twice). A call that opens no
+// TUI gets nothing — `agents` browses the daemon itself.
+func TestCodexTransportArgs(t *testing.T) {
+	inProcess := []string{"--no-daemon"}
+	for _, test := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"bare chat", nil, inProcess},
+		{"a prompt", []string{"fix the build"}, inProcess},
+		{"options and a prompt", []string{"-m", "gpt-5", "--cd", "/work", "fix it"}, inProcess},
+		{"a model named like a subcommand", []string{"-m", "review", "fix it"}, inProcess},
+		{"resume", []string{"resume", "--last"}, inProcess},
+		{"fork", []string{"fork", "019ff700-0000-7000-8000-000000000001"}, inProcess},
+		{"a prompt after --", []string{"--", "agents"}, inProcess},
+		{"--remote after -- is a prompt", []string{"--", "--remote"}, inProcess},
+		{"the user's own --no-daemon", []string{"--no-daemon"}, nil},
+		{"the user's own --no-daemon after resume", []string{"resume", "--last", "--no-daemon"}, nil},
+		{"--remote ADDR", []string{"--remote", "ws://127.0.0.1:4500"}, nil},
+		{"--remote=ADDR", []string{"--remote=unix:///tmp/codex.sock"}, nil},
+		{"--remote on resume", []string{"resume", "--remote", "ws://h:1", "--last"}, nil},
+		{"--remote-auth-token-env", []string{"--remote-auth-token-env", "TOKEN", "--remote", "wss://h"}, nil},
+		{"--remote-auth-token-env=ENV", []string{"--remote-auth-token-env=TOKEN"}, nil},
+		{"agents browses the daemon", []string{"agents"}, nil},
+		{"exec", []string{"exec", "say hi"}, nil},
+		{"exec alias", []string{"e", "say hi"}, nil},
+		{"review", []string{"review", "--uncommitted"}, nil},
+		{"login", []string{"login"}, nil},
+		{"app-server", []string{"app-server"}, nil},
+		{"remote-control", []string{"remote-control"}, nil},
+		{"apply alias", []string{"a"}, nil},
+		{"features", []string{"features", "list"}, nil},
+		{"version", []string{"--version"}, nil},
+		{"help flag", []string{"-h"}, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := CodexTransportArgs(test.args); !slices.Equal(got, test.want) {
+				t.Fatalf("CodexTransportArgs(%q) = %q, want %q", test.args, got, test.want)
+			}
+		})
+	}
+}
+
+// `cx` (and so the picker's fresh Codex chat) execs Codex with the transport decision right after the
+// binary, before every other argument; the user's own transport reaches Codex untouched.
+func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
+	root := testjail.ShortRoot(t)
+	binDir := filepath.Join(root, "bin")
+	binary := filepath.Join(binDir, "codex")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	t.Setenv("PATH", binDir)
+	previous := LaunchExec
+	t.Cleanup(func() { LaunchExec = previous })
+	for _, test := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"resume", []string{"resume", "--last"}, []string{binary, "--no-daemon", "resume", "--last"}},
+		{"the user's remote", []string{"--remote", "ws://h:1"}, []string{binary, "--remote", "ws://h:1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var gotArgv []string
+			LaunchExec = func(_ string, argv, _ []string) error {
+				gotArgv = append([]string(nil), argv...)
+				return nil
+			}
+			runtime := config.Runtime{Paths: paths.Values{
+				Home:    root,
+				StateDB: filepath.Join(root, "state", "pfm.db"),
+				SIDDir:  filepath.Join(root, "sid"),
+				TmuxDir: filepath.Join(root, "tmux"),
+			}}
+			var stderr bytes.Buffer
+			if code := CodexLaunch(test.args, &stderr, runtime); code != 0 {
+				t.Fatalf("CodexLaunch code=%d stderr=%q", code, stderr.String())
+			}
+			if !slices.Equal(gotArgv, test.want) {
+				t.Fatalf("CodexLaunch(%q) exec argv = %q, want %q", test.args, gotArgv, test.want)
+			}
+		})
+	}
+}

@@ -2,10 +2,19 @@ package hookentry
 
 import (
 	"context"
+	"path/filepath"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
+
+// themeOn reports whether the reporter marks its tmux server with the agent
+// state: only a pfm chat server carries the theme, and only while its sync is on.
+func (reporter *herdrReporter) themeOn() bool {
+	return reporter.deps.stateDir != "" && gather.IsChatSocketName(filepath.Base(reporter.options.socket)) &&
+		themesync.SyncOn(reporter.deps.stateDir)
+}
 
 // themeAgentState is the agent state the theme's colours show for one event:
 // the state the Herdr plan reports, except a finished turn (Stop) is "done" —

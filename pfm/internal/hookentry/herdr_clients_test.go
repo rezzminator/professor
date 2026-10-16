@@ -397,7 +397,8 @@ func TestHerdrStateEventsReachOnlyLiveRegisteredClients(t *testing.T) {
 // A session end empties the chat server's set-titles-string, so the last outer
 // title tmux writes before the server dies is empty and Herdr's terminal title
 // clears with the release; a session swap or a detach keeps the chat's title,
-// and an engine ending in the user's own tmux, or a reload's /exit whose
+// a stale snapshot $TMUX blanks the true pane's server, and an engine ending
+// in the user's own tmux, or a reload's /exit whose
 // engine respawns on the same server, or an engine whose server keeps another
 // pane, leaves that live server's titles alone; a reload probe or a pane list
 // that cannot run leaves them too, and says so. Every end still releases.
@@ -440,6 +441,13 @@ func TestHerdrStateEndBlanksTheTmuxTitle(t *testing.T) {
 			rig.tmux.panes = []string{"%0", "%1"}
 			return rig.engine("end", exit)
 		}, 0, "", true},
+		{"an exit under a stale snapshot $TMUX, its true pane the server's only one", func(rig *chatRig) herdrRun {
+			rig.env["TMUX"], rig.env["TMUX_PANE"] = staleTmux, "%0"
+			rig.jail.procs = map[int]fakeProc{100: {90, "pfm"}, 90: {50, "zsh"}, 50: {40, "claude"}, 40: {1, "tmux"}}
+			rig.jail.paneEnv = map[int]map[string]string{50: {"TMUX": rigSocket + ",40,0", "TMUX_PANE": "%3"}}
+			rig.tmux.panes = []string{"%3"}
+			return rig.engine("end", exit)
+		}, 1, "", true},
 		{"a pane list that cannot be read", func(rig *chatRig) herdrRun {
 			rig.tmux.failOn = "list-panes"
 			return rig.engine("end", exit)

@@ -19,7 +19,7 @@ func (reporter *herdrReporter) title(ctx context.Context, session string, payloa
 	if title == "" {
 		return errors.New("title event with an empty title (skipped)")
 	}
-	pane := reporter.deps.getenv("TMUX_PANE")
+	pane := reporter.tmuxPane
 	if pane == "" {
 		return errors.New("title event with no $TMUX_PANE to rename the window of (skipped)")
 	}

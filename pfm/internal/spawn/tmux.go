@@ -16,6 +16,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
+	"github.com/rezzminator/professor/pfm/internal/themetmux"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -38,6 +40,9 @@ type TmuxSpawner struct {
 	// config keeps today's behaviour instead of silently handing the title to
 	// the host.
 	Titles *pfmconfig.TmuxTitles
+	// applyTheme puts the theme on a born server; nil is themesync.ApplyTmuxServer.
+	// A test injects a recorder here.
+	applyTheme func(ctx context.Context, servers themesync.TmuxServers, stateDir, socket string) error
 	// Env is the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env)
 	// serviceScopeCommand reads INVOCATION_ID through; nil defaults to
 	// paths.OSEnv{}.
@@ -192,7 +197,26 @@ func (tmux TmuxSpawner) NewSession(
 			)}
 		}
 	}
+	tmux.themeBornServer(ctx, spec.Socket)
 	return nil
+}
+
+// themeBornServer puts the pfm theme on the server just created, when
+// `pfm theme` has the sync on. The theme is cosmetic, so a failure is logged
+// and the spawn stands: a chat must open even when its colours could not be set.
+func (tmux TmuxSpawner) themeBornServer(ctx context.Context, socket string) {
+	home, err := tmux.home()
+	if err != nil {
+		obs.Logger(ctx).Warn("tmux theme at birth skipped: no home", "socket", socket, "err", err)
+		return
+	}
+	apply := tmux.applyTheme
+	if apply == nil {
+		apply = themesync.ApplyTmuxServer
+	}
+	if err := apply(ctx, themetmux.AtDir(tmux.TmuxDir), themesync.DefaultStateDir(home), socket); err != nil {
+		obs.Logger(ctx).Warn("tmux theme at birth failed", "socket", socket, "err", err)
+	}
 }
 
 // terminateUnrecorded keeps protection if the child could still be alive.
@@ -322,13 +346,18 @@ func (tmux TmuxSpawner) command(
 // pfmBinary is the installed pfm launcher the chat server's client-attached
 // hook runs, the same path every launch-time hook uses.
 func (tmux TmuxSpawner) pfmBinary() string {
-	env := tmux.Env
-	if env == nil {
-		env = paths.OSEnv{}
-	}
-	home, err := paths.HomeFrom(env)
+	home, err := tmux.home()
 	if err != nil {
 		return "pfm"
 	}
 	return filepath.Join(home, ".local", "bin", "pfm")
+}
+
+// home is the user's home directory the spawner's environment resolves.
+func (tmux TmuxSpawner) home() (string, error) {
+	env := tmux.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	return paths.HomeFrom(env)
 }

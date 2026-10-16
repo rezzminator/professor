@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/themecmd"
 )
 
 // runNameSync converges every live chat's tmux WINDOW name — the fleet's DNS
@@ -71,11 +72,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 1
 	}
 	// Only an explicit --apply lets the gather pass perform its planned renames.
-	live, err := fleet.Gather(ctx, database, environment, data,
-		!*apply,
-		fleet.PrintWarn(stderr),
-		stderr,
-	)
+	live, err := fleet.Gather(ctx, database, environment, data, !*apply, fleet.PrintWarn(stderr), stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
@@ -105,13 +102,10 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	}
 	titlesTmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
 	titlesUnverified := convergeChatServerOptions(
-		ctx,
-		titlesTmux,
-		liveSockets(live.Panes),
-		environment.Config.Tmux.Titles, filepath.Join(environment.Paths.Home, ".local", "bin", "pfm"),
-		stdout,
-		stderr,
+		ctx, titlesTmux, liveSockets(live.Panes), environment.Config.Tmux.Titles,
+		filepath.Join(environment.Paths.Home, ".local", "bin", "pfm"), stdout, stderr,
 	)
+	titlesUnverified += themecmd.ConvergeTmux(ctx, environment.Paths, liveSockets(live.Panes), stdout, stderr)
 	if titlesUnverified != 0 {
 		fmt.Fprintf(stdout, "tmux options unverified: %d\n", titlesUnverified)
 	}

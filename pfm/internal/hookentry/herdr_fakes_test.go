@@ -363,6 +363,9 @@ type herdrJail struct {
 	hookPID  int
 	onPath   bool
 	logFails error
+	// stateDir is the `pfm theme` state directory the reporter reads; empty
+	// leaves the theme door out of the run.
+	stateDir string
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -422,7 +425,8 @@ func runHerdrIn(
 			}
 			return "", errors.New("not found on PATH")
 		},
-		lockDir: jail.lockDir,
+		lockDir:  jail.lockDir,
+		stateDir: jail.stateDir,
 		logError: func(session string, at time.Time, message string) error {
 			if jail.logFails != nil {
 				return jail.logFails

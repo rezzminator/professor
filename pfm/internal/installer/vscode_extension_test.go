@@ -981,7 +981,9 @@ func runVSCodeExtensionDriver(t *testing.T, mode string) []byte {
 		t.Fatal(err)
 	}
 
-	output, err := exec.Command(node, driverPath, extensionPath, mode).Output()
+	command := exec.Command(node, driverPath, extensionPath, mode)
+	command.Env = append(os.Environ(), "HOME="+t.TempDir()) // theme.js reads ~/.local/state/pfm/theme
+	output, err := command.Output()
 	if err != nil {
 		var stderr []byte
 		var exitErr *exec.ExitError

@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 func TestNameSyncDefaultsToPreview(t *testing.T) {
@@ -157,4 +158,74 @@ func readProbe(t *testing.T, socketPath string, arguments ...string) string {
 		t.Fatalf("tmux %s: %v: %s", strings.Join(arguments, " "), err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+// name-sync --apply carries the theme to every live chat server through the
+// theme's own door: nothing is said or touched while `pfm theme` has never
+// been set, and with the sync on each live socket is named, applied or refused.
+func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root := testjail.Fleet(t)
+	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
+	t.Setenv(paths.EnvTmuxDir, tmuxDir)
+	resolved := jailPaths(t)
+	const socket = "cc-1800000098-42-1"
+	start := exec.Command(
+		"tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "W", "sleep 120",
+	)
+	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
+	if output, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("start server: %v: %s", err, output)
+	}
+	t.Cleanup(func() {
+		kill := exec.Command("tmux", "-S", filepath.Join(tmuxDir, socket), "kill-server")
+		kill.Env = append(os.Environ(), "TMUX=")
+		_ = kill.Run()
+	})
+	runtime := commandRuntime{
+		Paths: resolved,
+		Config: pfmconfig.Defaults(
+			resolved.Home,
+			resolved.Roots[pfmengine.Claude],
+			resolved.FirstRoot(pfmengine.Codex),
+		),
+	}
+
+	var off, offErr bytes.Buffer
+	runNameSync([]string{"--apply"}, &off, &offErr, runtime)
+	if strings.Contains(off.String()+offErr.String(), "tmux theme") {
+		t.Fatalf(
+			"name-sync mentioned the theme with the sync never set:\nstdout=%q\nstderr=%q",
+			off.String(),
+			offErr.String(),
+		)
+	}
+
+	stateDir := themesync.DefaultStateDir(resolved.Home)
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(stateDir, themesync.StateFileName),
+		[]byte(`{"enabled":true}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var on, onErr bytes.Buffer
+	code := runNameSync([]string{"--apply"}, &on, &onErr, runtime)
+	applied := strings.Contains(on.String(), "tmux theme applied: 1")
+	refused := strings.Contains(onErr.String(), "pfm name-sync: tmux theme "+socket+":")
+	if applied == refused {
+		t.Fatalf(
+			"with the sync on, name-sync must report the server applied or refused:\nstdout=%q\nstderr=%q",
+			on.String(),
+			onErr.String(),
+		)
+	}
+	if refused != (code == 1) {
+		t.Fatalf("exit %d with refused=%v: a refused theme must fail the pass, an applied one must not", code, refused)
+	}
 }

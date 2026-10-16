@@ -128,6 +128,7 @@ pfm mcp serve	M	M.08-mcp-cli
 pfm name-sync	F	F.13-name-sync
 pfm opencode	A	A.13-opencode-layer
 pfm model-cost	O1	O1.15-model-cost
+pfm theme	O1	O1.18-theme
 pfm tokens	O1	O1.16-tokens
 pfm transcript	O1	O1.17-transcript
 pfm reap	O2	O2.01-reap

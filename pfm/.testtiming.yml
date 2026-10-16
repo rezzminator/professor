@@ -94,6 +94,9 @@ suites:
       github.com/rezzminator/professor/pfm/internal/store: 10
       github.com/rezzminator/professor/pfm/internal/testjail: 12
       github.com/rezzminator/professor/pfm/internal/theme: 2
+      github.com/rezzminator/professor/pfm/internal/themecmd: 2
+      github.com/rezzminator/professor/pfm/internal/themesync: 6
+      github.com/rezzminator/professor/pfm/internal/themetmux: 2
       github.com/rezzminator/professor/pfm/internal/tmux: 2
       github.com/rezzminator/professor/pfm/internal/tokens: 6
       github.com/rezzminator/professor/pfm/internal/transcript: 2

@@ -70,6 +70,7 @@ const TIER1 = [
           "mcpserv",
           "harvestmcp",
           "herdr",
+          "themesync",
         ],
       },
       {

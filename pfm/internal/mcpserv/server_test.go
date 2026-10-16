@@ -278,7 +278,13 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	if listed.Count != 1 {
 		t.Fatalf("ls = %+v", listed)
 	}
+	// The presence is the host's own (a dash without Herdr, else what its
+	// Herdr says); the stdio path must carry one, whatever it reads.
+	if listed.Rows[0].Herdr == "" {
+		t.Fatalf("ls row = %+v, want a herdr presence string over stdio", listed.Rows[0])
+	}
 	wantRow := ChatRow{
+		Herdr:   listed.Rows[0].Herdr,
 		Session: "fixture-session",
 		ID:      "fixture",
 		Engine:  "cc",

@@ -275,9 +275,9 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 		return 1
 	}
 	if all {
-		fmt.Fprintln(stdout, "live chats everywhere (name · session · state · dir · last activity):")
+		fmt.Fprintln(stdout, "live chats everywhere (name · session · state · herdr · dir · last activity):")
 	} else {
-		fmt.Fprintln(stdout, "live chats in this repo (name · session · state · last activity):")
+		fmt.Fprintln(stdout, "live chats in this repo (name · session · state · herdr · last activity):")
 	}
 	for index := range listed.Rows {
 		row := &listed.Rows[index]
@@ -295,9 +295,9 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 		if row.SessionName != "" {
 			handle = row.SessionName
 		}
-		location := ""
+		location := listed.PresenceOf(index) + "  "
 		if all {
-			location = strings.Replace(row.CWD, listed.Home, "~", 1) + "  "
+			location += strings.Replace(row.CWD, listed.Home, "~", 1) + "  "
 		}
 		fmt.Fprintf(
 			stdout, "  %-28s %-24s %-7s %s%s\n",

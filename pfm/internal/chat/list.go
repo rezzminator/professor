@@ -5,13 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // ListRequest selects fleet rows: one compose view, an optional Project filter
@@ -37,9 +44,12 @@ type ListRequest struct {
 // report: Matched is every row the view and filters selected, Truncated says
 // Rows stopped short of it, KilledCount is the scan's killed tally (under
 // LiveOnly, the killed live chats skipped), Elsewhere the rows outside Repo.
-// Home is the scanned home directory, for rendering a cwd.
+// Home is the scanned home directory, for rendering a cwd. Herdr holds one
+// presence string per row of Rows, in order (herdr.Probe.Presence), which List
+// fills and a caller that builds a result by hand may leave empty.
 type ListResult struct {
 	Rows        []compose.Row
+	Herdr       []string
 	Matched     int
 	Truncated   bool
 	KilledCount int
@@ -74,7 +84,72 @@ func List(
 	}
 	result = Select(scan.Output.Rows, scan.Output.KilledCount, request)
 	result.Home = scan.Env.Paths.Home
+	result.Herdr = rowsPresence(ctx, realHerdrProbe(warn), scan.Env.Paths, result.Rows)
 	return result, nil
+}
+
+// realHerdrProbe is the probe on the host's own environment, tmux and Herdr
+// sockets; every failed lookup is also written to warn.
+func realHerdrProbe(warn io.Writer) herdr.Probe {
+	return herdr.Probe{
+		Getenv:   paths.OSEnv{}.Get,
+		LookPath: deps.RealRunner{}.LookPath,
+		Tmux:     runTmux,
+		Call:     herdr.Call,
+		Warn:     warn,
+	}
+}
+
+// runTmux runs one read against a chat's tmux server within
+// gather.ProbeTimeout, as the fleet scan's probe does: a stopped or wedged
+// server is this row's error, never a hang of the whole listing.
+func runTmux(ctx context.Context, socketPath string, args ...string) (string, error) {
+	readCtx, cancel := context.WithTimeout(ctx, gather.ProbeTimeout)
+	defer cancel()
+	var stderr strings.Builder
+	command := tmux.Exec(readCtx, "", socketPath, args...)
+	command.Stderr = &stderr
+	command.WaitDelay = time.Second
+	output, err := command.Output()
+	if err != nil && ctx.Err() == nil && errors.Is(readCtx.Err(), context.DeadlineExceeded) {
+		return "", fmt.Errorf(
+			"tmux %s: %w within %s: %s", strings.Join(args, " "), gather.ErrServerUnresponsive, gather.ProbeTimeout,
+			socketPath,
+		)
+	}
+	if err != nil {
+		return "", fmt.Errorf("tmux %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return string(output), nil
+}
+
+// rowsPresence is the Herdr presence of each row's chat: the row's tmux server
+// socket under values' tmux directory and its session. A row with no socket has
+// no live tmux server; a socket that cannot be addressed is the row's error.
+func rowsPresence(ctx context.Context, probe herdr.Probe, values paths.Values, rows []compose.Row) []string {
+	seats := make([]herdr.Seat, len(rows))
+	for index := range rows {
+		row := &rows[index]
+		if row.Socket == "" {
+			continue
+		}
+		socketPath, err := values.SocketUnder(row.Socket)
+		if err != nil {
+			seats[index].Err = fmt.Errorf("resolve tmux socket %q of %s: %w", row.Socket, row.Name, err)
+			continue
+		}
+		seats[index] = herdr.Seat{SocketPath: socketPath, Session: row.SessionName, Pane: row.PaneID}
+	}
+	return probe.Presence(ctx, seats)
+}
+
+// PresenceOf is row index's Herdr presence. A result whose presence was never
+// read says so: an empty string would read as "no Herdr".
+func (result ListResult) PresenceOf(index int) string {
+	if index < 0 || index >= len(result.Herdr) {
+		return "herdr error: the presence of row " + strconv.Itoa(index) + " was not read"
+	}
+	return result.Herdr[index]
 }
 
 // Select applies a ListRequest's filters to composed rows. The picker's "start

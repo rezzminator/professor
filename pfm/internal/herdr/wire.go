@@ -32,7 +32,9 @@ const (
 // Report is one pane.report_agent request: the state, and when the session is
 // known the session reference and the command that resumes it.
 type Report struct {
-	Pane       string
+	Pane string
+	// Source is the reporter Herdr keys the pane's state by; empty is Source.
+	Source     string
 	Agent      string
 	State      State
 	Message    string
@@ -79,7 +81,7 @@ func (report Report) Line() ([]byte, error) {
 		ID:     fmt.Sprintf("pfm-%d", report.Seq),
 		Method: "pane.report_agent",
 		Params: reportParams{
-			PaneID: report.Pane, Source: Source, Agent: report.Agent, State: report.State,
+			PaneID: report.Pane, Source: sourceOr(report.Source), Agent: report.Agent, State: report.State,
 			Message: capRunes(report.Message), SessionID: report.SessionID,
 			ResumeArgv: report.ResumeArgv, Seq: report.Seq,
 		},
@@ -88,9 +90,11 @@ func (report Report) Line() ([]byte, error) {
 
 // Release is one pane.release_agent request: the user quit.
 type Release struct {
-	Pane  string
-	Agent string
-	Seq   uint64
+	Pane string
+	// Source is the reporter whose state is released; empty is Source.
+	Source string
+	Agent  string
+	Seq    uint64
 }
 
 // Line renders the pane.release_agent request line (no trailing newline).
@@ -101,8 +105,18 @@ func (release Release) Line() ([]byte, error) {
 	return json.Marshal(request{
 		ID:     fmt.Sprintf("pfm-%d", release.Seq),
 		Method: "pane.release_agent",
-		Params: releaseParams{PaneID: release.Pane, Source: Source, Agent: release.Agent, Seq: release.Seq},
+		Params: releaseParams{
+			PaneID: release.Pane, Source: sourceOr(release.Source), Agent: release.Agent, Seq: release.Seq,
+		},
 	})
+}
+
+// sourceOr is source, or the chat reporter's Source when empty.
+func sourceOr(source string) string {
+	if source == "" {
+		return Source
+	}
+	return source
 }
 
 // AgentList is one agent.list request: every agent Herdr knows by name, so a
@@ -120,11 +134,16 @@ func (list AgentList) Line() ([]byte, error) {
 	})
 }
 
-// Agent is one agent.list entry: the pane it runs in and the name it holds,
-// empty when it holds none.
+// Agent is one agent.list entry: the pane it runs in, its workspace and tab,
+// the agent label and state Herdr shows, and the name it holds, empty when it
+// holds none.
 type Agent struct {
-	PaneID string
-	Name   string
+	PaneID      string
+	WorkspaceID string
+	TabID       string
+	Agent       string
+	Status      string
+	Name        string
 }
 
 // ParseAgentList decodes an agent.list result ({"type":"agent_list","agents":[…]});
@@ -133,8 +152,12 @@ func ParseAgentList(result json.RawMessage) ([]Agent, error) {
 	var decoded struct {
 		Type   string `json:"type"`
 		Agents []struct {
-			Name   *string `json:"name"`
-			PaneID string  `json:"pane_id"`
+			Name        *string `json:"name"`
+			PaneID      string  `json:"pane_id"`
+			WorkspaceID string  `json:"workspace_id"`
+			TabID       string  `json:"tab_id"`
+			Agent       string  `json:"agent"`
+			Status      string  `json:"agent_status"`
 		} `json:"agents"`
 	}
 	if err := json.Unmarshal(result, &decoded); err != nil {
@@ -145,7 +168,13 @@ func ParseAgentList(result json.RawMessage) ([]Agent, error) {
 	}
 	agents := make([]Agent, 0, len(decoded.Agents))
 	for _, agent := range decoded.Agents {
-		entry := Agent{PaneID: agent.PaneID}
+		entry := Agent{
+			PaneID:      agent.PaneID,
+			WorkspaceID: agent.WorkspaceID,
+			TabID:       agent.TabID,
+			Agent:       agent.Agent,
+			Status:      agent.Status,
+		}
 		if agent.Name != nil {
 			entry.Name = *agent.Name
 		}
@@ -215,6 +244,24 @@ func ParsePanes(result json.RawMessage) ([]Pane, error) {
 		panes = append(panes, Pane{PaneID: pane.PaneID, TerminalID: pane.TerminalID})
 	}
 	return panes, nil
+}
+
+// ParseShellPID decodes a pane.process_info result into the pid of the pane's
+// own shell (0 when Herdr names none).
+func ParseShellPID(result json.RawMessage) (int, error) {
+	var decoded struct {
+		Type        string `json:"type"`
+		ProcessInfo struct {
+			ShellPID int `json:"shell_pid"`
+		} `json:"process_info"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return 0, fmt.Errorf("herdr pane.process_info: decode result %q: %w", result, err)
+	}
+	if decoded.Type != "pane_process_info" {
+		return 0, fmt.Errorf("herdr pane.process_info: result type %q, want pane_process_info", decoded.Type)
+	}
+	return decoded.ProcessInfo.ShellPID, nil
 }
 
 // ProcessInfo is one pane.process_info request: the processes in the pane's
@@ -347,8 +394,8 @@ func RefusedResume(err error) bool {
 	return errors.As(err, &refusal) && (refusal.Code == "invalid_resume_argv" || refusal.Code == "resume_not_accepted")
 }
 
-// Send writes each request line to the Herdr socket in turn and reads its
-// response line. A Herdr error response (invalid_resume_argv,
+// Send writes each request line to the Herdr socket in turn, one connection
+// per line, and reads its response line. A Herdr error response (invalid_resume_argv,
 // resume_not_accepted, ...) is returned with the request method and the code,
 // so a refusal never reads as success.
 func Send(ctx context.Context, socket string, lines ...[]byte) error {
@@ -357,12 +404,27 @@ func Send(ctx context.Context, socket string, lines ...[]byte) error {
 }
 
 // Call is Send that also returns each response's "result" object, in request
-// order, so a query (agent.list) can be answered over the same connection that
-// then renames or reports.
+// order. Herdr's socket answers one request per connection and then closes it
+// (a second line on the same connection is never read: EOF or a broken pipe),
+// so every line is its own dial, write and read; a failure on line k stops
+// there and names line k.
 func Call(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
+	results := make([]json.RawMessage, 0, len(lines))
+	for _, line := range lines {
+		result, err := callOne(ctx, socket, line)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+// callOne is one request over one connection.
+func callOne(ctx context.Context, socket string, line []byte) (json.RawMessage, error) {
 	conn, err := deps.DialUnix(ctx, socket, dialTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("herdr socket %s: dial: %w", socket, err)
+		return nil, fmt.Errorf("herdr socket %s: dial for %s: %w", socket, requestName(line), err)
 	}
 	defer func() { _ = conn.Close() }()
 	// The exchange ends at the I/O timeout or the caller's deadline, whichever
@@ -374,36 +436,52 @@ func Call(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessag
 	if err := conn.SetDeadline(deadline); err != nil {
 		return nil, fmt.Errorf("herdr socket %s: set deadline: %w", socket, err)
 	}
-	reader := bufio.NewReader(io.LimitReader(conn, maxResponse))
-	results := make([]json.RawMessage, 0, len(lines))
-	for _, line := range lines {
-		if _, err := conn.Write(append(append([]byte{}, line...), '\n')); err != nil {
-			return nil, fmt.Errorf("herdr socket %s: write %s: %w", socket, line, err)
-		}
-		response, err := reader.ReadBytes('\n')
-		if err != nil {
-			return nil, fmt.Errorf("herdr socket %s: read response to %s: %w", socket, line, err)
-		}
-		var decoded struct {
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(response, &decoded); err != nil {
-			return nil, fmt.Errorf(
-				"herdr socket %s: decode response %q to %s: %w",
-				socket,
-				strings.TrimSpace(string(response)),
-				line,
-				err,
-			)
-		}
-		if decoded.Error != nil {
-			return nil, &Refusal{Request: string(line), Code: decoded.Error.Code, Message: decoded.Error.Message}
-		}
-		results = append(results, decoded.Result)
+	if _, err := conn.Write(append(append([]byte{}, line...), '\n')); err != nil {
+		return nil, fmt.Errorf("herdr socket %s: write %s: %w", socket, requestName(line), err)
 	}
-	return results, nil
+	response, err := bufio.NewReader(io.LimitReader(conn, maxResponse)).ReadBytes('\n')
+	if err != nil {
+		return nil, fmt.Errorf("herdr socket %s: read response to %s: %w", socket, requestName(line), err)
+	}
+	var decoded struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response, &decoded); err != nil {
+		return nil, fmt.Errorf(
+			"herdr socket %s: decode response %q to %s: %w",
+			socket,
+			strings.TrimSpace(string(response)),
+			requestName(line),
+			err,
+		)
+	}
+	if decoded.Error != nil {
+		return nil, &Refusal{Request: requestName(line), Code: decoded.Error.Code, Message: decoded.Error.Message}
+	}
+	return decoded.Result, nil
+}
+
+// requestName names a request in an error by its method, id and pane, never
+// its params: a report's message can carry a command line the user typed, and
+// every error lands in a log on disk that pfm doctor prints.
+func requestName(line []byte) string {
+	var request struct {
+		ID     string `json:"id"`
+		Method string `json:"method"`
+		Params struct {
+			PaneID string `json:"pane_id"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(line, &request); err != nil {
+		return fmt.Sprintf("a request of %d bytes pfm cannot decode (%v)", len(line), err)
+	}
+	name := strings.TrimSpace(request.Method + " " + request.ID)
+	if request.Params.PaneID != "" {
+		name += " pane " + request.Params.PaneID
+	}
+	return name
 }

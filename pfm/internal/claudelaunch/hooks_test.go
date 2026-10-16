@@ -17,8 +17,8 @@ import (
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
 	hooks := HookTemplates(home)
-	if len(hooks) != 19 {
-		t.Fatalf("registrations=%d, want 19", len(hooks))
+	if len(hooks) != 20 {
+		t.Fatalf("registrations=%d, want 20", len(hooks))
 	}
 	for _, hook := range hooks {
 		if hook.Name == hookTracerIntake {
@@ -261,7 +261,8 @@ func TestStoreGuardRidesBesideGitGuardOnBash(t *testing.T) {
 
 // The Herdr reporter rides every Claude launch: one row per lifecycle event,
 // the per-turn and per-tool state flips async so a turn never waits on Herdr,
-// and the Notification row selects only the types the reporter maps.
+// PermissionRequest reports blocked with the tool it names, and the
+// Notification row selects only the types the reporter maps.
 func TestHerdrReporterRowsCoverTheClaudeLifecycle(t *testing.T) {
 	home := t.TempDir()
 	binary := home + "/.local/bin/pfm internal herdr-state --engine claude "
@@ -269,6 +270,7 @@ func TestHerdrReporterRowsCoverTheClaudeLifecycle(t *testing.T) {
 		{Event: "SessionStart", Command: binary + "start", Name: "herdr-start"},
 		{Event: "UserPromptSubmit", Command: binary + "working", Name: "herdr-working-prompt", Async: true},
 		{Event: "PostToolUse", Command: binary + "working", Name: "herdr-working-tool", Async: true},
+		{Event: "PermissionRequest", Command: binary + "blocked", Name: "herdr-blocked", Async: true},
 		{
 			Event: "Notification", Matcher: "permission_prompt|elicitation_dialog|idle_prompt",
 			Command: binary + "notification", Name: "herdr-notification", Async: true,

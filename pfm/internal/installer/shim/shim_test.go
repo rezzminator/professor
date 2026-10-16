@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -578,6 +579,103 @@ printf 'tmux %s TMUX=[%s]\n' "$*" "$TMUX" >> "$SHIM_TMUX_LOG"
 					"shell survived=%v, want %v: the picker's terminal stayed at a prompt after its chat ended: %q",
 					got, testCase.wantShell, output,
 				)
+			}
+		})
+	}
+}
+
+// fakeShellReporterPFM logs every `pfm internal herdr-shell` call, one argv
+// element per bracket, the shell's own pid as [PID] and the shell clock after
+// --at as [AT] when it is one.
+const fakeShellReporterPFM = `#!/bin/sh
+[ "$1 $2" = "internal herdr-shell" ] || exit 0
+shift 2
+line= previous=
+for arg; do
+  if [ "$arg" = "$FAKE_SHELL_PID" ]; then arg=PID; fi
+  if [ "$previous" = --at ] && printf '%s' "$arg" | grep -Eq '^[0-9]+\.[0-9]+$'; then arg=AT; fi
+  line="$line[$arg]"
+  previous=$arg
+done
+printf '%s\n' "$line" >> "$FAKE_PFM_LOG"
+`
+
+// A plain shell in a Herdr pane hands a command that ran at least the
+// threshold to pfm when it finishes: the command, its exit status and its
+// duration, under the shell's pid; the next command releases it. A pfm chat's
+// tmux pane, an opt-out, a short command and a shell outside Herdr hand
+// nothing.
+func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	const reported = "[done][--pid][PID][--at][AT][--command][make test][--exit][3][--seconds][0]\n" +
+		"[release][--pid][PID][--at][AT]\n"
+	// state is the shell's own record, read synchronously before the next
+	// command: whether the hook is installed and whether the finished command
+	// was handed over, so a case that hands nothing needs no wait.
+	for name, test := range map[string]struct {
+		environ []string
+		want    string
+		state   string
+	}{
+		"long command reports done, next command releases": {want: reported, state: "hooked=1 reported=1"},
+		"short command reports nothing": {
+			environ: []string{"PFM_HERDR_LONG_COMMAND_SECS=100"}, state: "hooked=1 reported=",
+		},
+		"a threshold that is no number is the default": {
+			environ: []string{"PFM_HERDR_LONG_COMMAND_SECS=junk"}, state: "hooked=1 reported=",
+		},
+		"opt-out reports nothing": {environ: []string{"PFM_HERDR_SHELL_REPORT=0"}, state: "hooked=1 reported="},
+		"a pfm chat's tmux pane reports nothing": {
+			environ: []string{"TMUX=/tmp/tmux-1/cc-1,1,0"}, state: "hooked=0",
+		},
+		"outside Herdr reports nothing": {environ: []string{"HERDR_ENV="}, state: "hooked=0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			binDir := filepath.Join(home, ".local", "bin")
+			if err := os.MkdirAll(binDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeShimFile(t, filepath.Join(binDir, "pfm"), fakeShellReporterPFM)
+			log := filepath.Join(home, "pfm.log")
+			// The driver plays one long command, waits for its report (handed
+			// over in the background), then starts the next command.
+			script := "source " + quoteZsh(embeddedShimPath(t)) + "\n" +
+				"export FAKE_SHELL_PID=$$\n" +
+				"state=\"hooked=$+functions[_pfm_herdr_precmd]\"\n" +
+				"if (( $+functions[_pfm_herdr_precmd] )); then\n" +
+				"  _pfm_herdr_preexec 'make test'; (exit 3); _pfm_herdr_precmd\n" +
+				"  state+=\" reported=$_pfm_herdr_reported\"\n" +
+				"  [[ -z $_pfm_herdr_reported ]] || for i in {1..50}; do [[ -s $FAKE_PFM_LOG ]] && break; sleep 0.1; done\n" +
+				"  _pfm_herdr_preexec 'ls'\n" +
+				"fi\n" +
+				"print -r -- \"STATE[$state]\"\n"
+			environ := append([]string{
+				"HERDR_ENV=1", "TMUX=", "PFM_HERDR_LONG_COMMAND_SECS=0", "PFM_HERDR_SHELL_REPORT=",
+				"FAKE_PFM_LOG=" + log,
+			}, test.environ...)
+			command := jailedZshCommand(zsh, script, home, environ...)
+			command.Args = append([]string{command.Args[0], "-i"}, command.Args[1:]...)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("driver: %v: %s", err, output)
+			}
+			if !strings.Contains(string(output), "STATE["+test.state+"]") {
+				t.Fatalf("shell state: %s\nwant STATE[%s]", output, test.state)
+			}
+			got := ""
+			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+				content, _ := os.ReadFile(log)
+				got = string(content)
+				if got == test.want || time.Now().After(deadline) {
+					break
+				}
+			}
+			if got != test.want {
+				t.Fatalf("pfm herdr-shell calls:\n%s\nwant:\n%s", got, test.want)
 			}
 		})
 	}

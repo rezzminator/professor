@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
@@ -44,12 +45,17 @@ func (reporter *herdrReporter) liveClients(
 
 // releaseAll releases the panes of clients that detached or vanished; each
 // pane is resolved first, so a moved chat's current pane is the one released.
+// A client whose pane is already gone is expected, not an error: nothing is
+// sent for it and no error row is written.
 func (reporter *herdrReporter) releaseAll(ctx context.Context, engine string, clients map[string]herdrClient) error {
 	var errs []error
 	for _, pid := range sortedClientPIDs(clients) {
 		client, _, err := reporter.currentPane(ctx, pid, clients[pid])
 		if err != nil {
-			errs = append(errs, err)
+			// A pane that is already gone has nothing left to release.
+			if !isPaneGone(err) {
+				errs = append(errs, err)
+			}
 			continue
 		}
 		errs = append(errs, reporter.send(
@@ -94,6 +100,17 @@ func (reporter *herdrReporter) listPanes(ctx context.Context, socket string) ([]
 	return listing.panes, listing.err
 }
 
+// paneGoneError is a client whose pane Herdr no longer lists: the pane closed
+// while its chat lived on, which a release treats as already done.
+type paneGoneError struct{ reason string }
+
+func (gone paneGoneError) Error() string { return gone.reason }
+
+func isPaneGone(err error) bool {
+	var gone paneGoneError
+	return errors.As(err, &gone)
+}
+
 // currentPane resolves a registered client to the pane its terminal is in NOW:
 // a Herdr pane move keeps the terminal and assigns a new pane id, and the old
 // id answers not_found (or, reused, belongs to another chat). With no recorded
@@ -106,18 +123,18 @@ func (reporter *herdrReporter) currentPane(
 	pid string,
 	client herdrClient,
 ) (herdrClient, bool, error) {
-	fail := func(format string, args ...any) (herdrClient, bool, error) {
+	fail := func(cause error) (herdrClient, bool, error) {
 		return client, false, fmt.Errorf(
-			"resolve pane of client %s (recorded %s, terminal %q): %s",
+			"resolve pane of client %s (recorded %s, terminal %q): %w",
 			pid,
 			client.Pane,
 			client.Terminal,
-			fmt.Sprintf(format, args...),
+			cause,
 		)
 	}
 	panes, err := reporter.listPanes(ctx, client.Socket)
 	if err != nil {
-		return fail("%v", err)
+		return fail(err)
 	}
 	resolved := client
 	if client.Terminal != "" {
@@ -127,7 +144,7 @@ func (reporter *herdrReporter) currentPane(
 				return resolved, resolved.Pane != client.Pane, nil
 			}
 		}
-		return fail("terminal %s is in no pane", client.Terminal)
+		return fail(paneGoneError{fmt.Sprintf("terminal %s is in no pane", client.Terminal)})
 	}
 	for _, pane := range panes {
 		if pane.PaneID == client.Pane {
@@ -137,13 +154,13 @@ func (reporter *herdrReporter) currentPane(
 	}
 	pane, found, err := reporter.paneRunning(ctx, client.Socket, pid, panes, "")
 	if err != nil {
-		return fail("%v", err)
+		return fail(err)
 	}
 	if found {
 		resolved.Pane, resolved.Terminal = pane.PaneID, pane.TerminalID
 		return resolved, true, nil
 	}
-	return fail("pane %s is gone and no pane runs the client pid", client.Pane)
+	return fail(paneGoneError{fmt.Sprintf("pane %s is gone and no pane runs the client pid", client.Pane)})
 }
 
 // paneRunning returns the listed pane whose foreground processes hold pid,
@@ -188,8 +205,9 @@ func (reporter *herdrReporter) paneRunning(
 // resolveClients resolves every registered client in place. It returns the
 // clients it can send to, the pids whose pane id changed (they get the state,
 // name and title again) and whether the registry changed and must be stored.
-// A client it cannot resolve stays in the registry for the next run.
-func (reporter *herdrReporter) resolveClients(ctx context.Context, state *herdrStored) (
+// A client it cannot resolve stays in the registry for the next run; when the
+// caller is releasing, one whose pane is gone is no error.
+func (reporter *herdrReporter) resolveClients(ctx context.Context, state *herdrStored, releasing bool) (
 	resolved map[string]herdrClient, moved map[string]bool, changed bool, err error,
 ) {
 	resolved, moved = map[string]herdrClient{}, map[string]bool{}
@@ -197,7 +215,10 @@ func (reporter *herdrReporter) resolveClients(ctx context.Context, state *herdrS
 	for _, pid := range sortedClientPIDs(state.Clients) {
 		client, panesDiffer, err := reporter.currentPane(ctx, pid, state.Clients[pid])
 		if err != nil {
-			errs = append(errs, err)
+			// A release has nothing to send to a pane that is already gone.
+			if !releasing || !isPaneGone(err) {
+				errs = append(errs, err)
+			}
 			continue
 		}
 		if client != state.Clients[pid] {
@@ -268,6 +289,9 @@ func (reporter *herdrReporter) attach(ctx context.Context, session string, state
 		state.Clients = map[string]herdrClient{}
 	}
 	state.Clients[reporter.options.client] = client
+	if state.State == "" {
+		reporter.idleAtLaunch(session, &state)
+	}
 	if err := reporter.writeState(ctx, session, state); err != nil {
 		return errors.Join(append(errs, err)...)
 	}
@@ -276,6 +300,19 @@ func (reporter *herdrReporter) attach(ctx context.Context, session string, state
 	}
 	errs = append(errs, reporter.nameSync(ctx, session, state, clientTargets(state.Clients), []herdrTarget{target}))
 	return errors.Join(errs...)
+}
+
+// idleAtLaunch gives a chat nothing has reported for yet the idle state of the
+// engine that owns its session name: Codex fires SessionStart only at its first
+// turn, so without it a fresh chat is invisible in Herdr until prompted. The
+// seq stays untouched, so any engine event still wins; a session no engine owns
+// reports nothing.
+func (reporter *herdrReporter) idleAtLaunch(session string, state *herdrStored) {
+	id, owned := pfmengine.FromSocket(session)
+	if !owned {
+		return
+	}
+	state.Engine, state.State = herdr.Label(id), string(herdr.StateIdle)
 }
 
 // sync is a client's resize: a registered client is re-bound when its pane
@@ -295,7 +332,7 @@ func (reporter *herdrReporter) sync(ctx context.Context, session string, state h
 // rebind resolves every registered client; a client whose pane moved gets the
 // stored state, name and title at its new pane, and nothing else changes.
 func (reporter *herdrReporter) rebind(ctx context.Context, session string, state herdrStored) error {
-	clients, moved, changed, err := reporter.resolveClients(ctx, &state)
+	clients, moved, changed, err := reporter.resolveClients(ctx, &state, false)
 	errs := []error{err}
 	if changed {
 		if err := reporter.writeState(ctx, session, state); err != nil {

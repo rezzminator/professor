@@ -69,6 +69,12 @@ func HookTemplates(home string) []Hook {
 			Async:   true,
 		},
 		{
+			Event:   "PermissionRequest",
+			Command: herdrCommand(binary, herdr.EventBlocked),
+			Name:    "herdr-blocked",
+			Async:   true,
+		},
+		{
 			Event:   "Notification",
 			Matcher: HookHerdrNotificationMatcher,
 			Command: herdrCommand(binary, herdr.EventNotification),

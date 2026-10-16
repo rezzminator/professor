@@ -20,8 +20,16 @@ type selectingChatVerbs struct {
 	rows []compose.Row
 }
 
+// herdrOf is the fixture presence of a row: derived from its id so a test can
+// tell that every listed row carries its own.
+func herdrOf(row compose.Row) string { return "pane-of-" + row.ID }
+
 func (verbs *selectingChatVerbs) List(_ context.Context, request chat.ListRequest) (chat.ListResult, error) {
-	return chat.Select(verbs.rows, 0, request), nil
+	listed := chat.Select(verbs.rows, 0, request)
+	for index := range listed.Rows {
+		listed.Herdr = append(listed.Herdr, herdrOf(listed.Rows[index]))
+	}
+	return listed, nil
 }
 
 // ls scopes to the caller's repository when _meta.threadId resolves the
@@ -76,6 +84,11 @@ func TestChatLSScopesToTheResolvedCallersRepository(t *testing.T) {
 	}
 	if got, want := ids(scoped), []string{"thread-a", "root-chat"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ls from a worktree caller listed %v, want the repo's chats %v", got, want)
+	}
+	for _, row := range scoped.Rows {
+		if want := "pane-of-" + row.ID; row.Herdr != want {
+			t.Fatalf("scoped row %s herdr = %q, want %q (its own, after the scope filter)", row.ID, row.Herdr, want)
+		}
 	}
 	if scoped.Scope != fixture.Repo || scoped.Elsewhere != 1 {
 		t.Fatalf("scoped ls scope=%q elsewhere=%d, want %q and 1", scoped.Scope, scoped.Elsewhere, fixture.Repo)

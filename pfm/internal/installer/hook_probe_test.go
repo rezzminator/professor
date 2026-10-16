@@ -100,8 +100,8 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codex}}}
 	var output bytes.Buffer
 	warnings, failures := ReportHooks(&output, home, machine, false)
-	// Six failures: the stale clear-hide handler and the five Herdr handlers the receipt does not record.
-	if warnings != 2 || failures != 6 ||
+	// Seven failures: the stale clear-hide handler and the six Herdr handlers the receipt does not record.
+	if warnings != 2 || failures != 7 ||
 		!strings.Contains(output.String(), "native trust is unknown") ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json SessionStart clear-hide STALE") {
 		t.Fatalf("failures=%d output=%s", failures, output.String())
@@ -170,9 +170,9 @@ func TestProbeCodexHooksReportsTheResumeUnkillHookMissing(t *testing.T) {
 		rows int
 	}{
 		"no hooks.json":     {"", 1},
-		"no resume handler": {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`, 6},
+		"no resume handler": {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`, 7},
 		"wrong matcher": {`{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[` +
-			`{"type":"command","command":"@CMD@"}]}]}}`, 6},
+			`{"type":"command","command":"@CMD@"}]}]}}`, 7},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -236,7 +236,7 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 	var output bytes.Buffer
 	warnings, failures := ReportHooks(&output, home, machine, false)
 	// The one warning is the missing Claude config of this machine config.
-	if warnings != 1 || failures != 6 ||
+	if warnings != 1 || failures != 7 ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json SessionStart resume-unkill UNTRUSTED") ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json Stop herdr-idle-Stop UNTRUSTED") ||
 		!strings.Contains(output.String(), "pfm install --yes") {
@@ -260,7 +260,7 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 	if rows := codexProbeRows(
 		home,
 		machine,
-	); len(rows) != 6 || rows[0].Hook.Name != "resume-unkill" || rows[0].State != "native-trust-unknown" ||
+	); len(rows) != 7 || rows[0].Hook.Name != "resume-unkill" || rows[0].State != "native-trust-unknown" ||
 		!strings.Contains(rows[0].Error, "native trust is unknown") {
 		t.Fatalf("historical trust must stay visibly unknown: %+v", rows)
 	}
@@ -272,7 +272,7 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 			unknownLine = line
 		}
 	}
-	if warnings != 2 || failures != 5 || unknownLine == "" || strings.Contains(unknownLine, "pfm install --yes") {
+	if warnings != 2 || failures != 6 || unknownLine == "" || strings.Contains(unknownLine, "pfm install --yes") {
 		t.Fatalf(
 			"unknown native trust must be an explicit warning, without promising readback: warnings=%d failures=%d output=%s",
 			warnings,

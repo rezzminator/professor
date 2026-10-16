@@ -53,10 +53,10 @@ func TestHerdrStateReportsTheExactRequestLines(t *testing.T) {
 		},
 		{
 			"working",
-			[]string{"--engine", "codex", "working"},
+			[]string{"--engine", "opencode", "working"},
 			payload,
 			"",
-			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"codex","state":"working",` + resume + `,"seq":1001000}}`},
+			[]string{`{"id":"pfm-1001000","method":"pane.report_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","state":"working",` + resume + `,"seq":1001000}}`},
 		},
 		{
 			"idle",

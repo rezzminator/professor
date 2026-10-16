@@ -413,7 +413,16 @@ func TestHerdrWatchIsFailOpen(t *testing.T) {
 	}
 	t.Run("a Codex block starts no watch", func(t *testing.T) {
 		rig := newWatchRig(t)
+		// Codex TUI pid 50 is the chat pane's process, registered by its SessionStart.
+		rig.jail.procs = map[int]fakeProc{100: {50, "pfm"}, 50: {1, "codex"}}
+		rig.jail.argv = map[int][]string{50: {"codex"}}
+		rig.jail.paneEnv = map[int]map[string]string{50: {"TMUX": rigSocket + ",1,0", "TMUX_PANE": "%0"}}
+		rig.wantQuiet(rig.run([]string{"--engine", "codex", "start"}, `{"session_id":"s1","source":"startup"}`))
+		calls := len(rig.herdr.calls())
 		rig.wantQuiet(rig.run([]string{"--engine", "codex", "blocked"}, rig.blockedPayload("Bash", rig.transcript)))
+		if len(rig.herdr.calls()) == calls {
+			t.Fatalf("herdr requests = %q, want the block reported", rig.herdr.calls())
+		}
 		if len(rig.spawned) != 0 {
 			t.Fatalf("spawned %q, want no watch for Codex", rig.spawned)
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -407,6 +408,11 @@ type herdrJail struct {
 	spawn func(argv []string) error
 	// paneEnv is each process's own environment; a pid it lacks cannot be read.
 	paneEnv map[int]map[string]string
+	// argv is each process's command line; a pid it lacks cannot be read.
+	argv map[int][]string
+	// procFails is each live process whose table entry cannot be read; a pid
+	// procs lacks is a process that is gone.
+	procFails map[int]error
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -460,13 +466,23 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 			return herdr.AppendError(jail.lockDir, session, at, message)
 		},
 		procInfo: func(pid int) (int, string, error) {
+			if err := jail.procFails[pid]; err != nil {
+				return 0, "", fmt.Errorf("fake process table cannot read pid %d: %w", pid, err)
+			}
 			proc, ok := jail.procs[pid]
 			if !ok {
-				return 0, "", fmt.Errorf("fake process table has no pid %d", pid)
+				return 0, "", fmt.Errorf("fake process table has no pid %d: %w", pid, fs.ErrNotExist)
 			}
 			return proc.parent, proc.command, nil
 		},
 		getpid: func() int { return jail.hookPID },
+		cmdline: func(pid int) ([]string, error) {
+			argv, ok := jail.argv[pid]
+			if !ok {
+				return nil, fmt.Errorf("fake process table has no command line for pid %d", pid)
+			}
+			return argv, nil
+		},
 		environ: func(pid int) (map[string]string, error) {
 			environment, ok := jail.paneEnv[pid]
 			if !ok {

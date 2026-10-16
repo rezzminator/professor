@@ -2,6 +2,7 @@ package installer
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -79,6 +80,19 @@ func ensureCodexHerdrHooks(document map[string]any, home string) bool {
 // timeoutSeconds, and reports whether one differed.
 func setCodexHookTimeout(document map[string]any, hook ExpectedHook, timeoutSeconds int) bool {
 	changed := false
+	for _, handler := range codexHookHandlers(document, hook) {
+		if !codexTimeoutIs(handler["timeout"], timeoutSeconds) {
+			handler["timeout"] = timeoutSeconds
+			changed = true
+		}
+	}
+	return changed
+}
+
+// codexHookHandlers are the handlers carrying the hook's command, in an entry
+// of the hook's event whose matcher is the hook's.
+func codexHookHandlers(document map[string]any, hook ExpectedHook) []map[string]any {
+	var found []map[string]any
 	for _, entry := range hookEntries(document, hook.Event, false) {
 		if matcher, _ := entry["matcher"].(string); matcher != hook.Matcher {
 			continue
@@ -86,16 +100,52 @@ func setCodexHookTimeout(document map[string]any, hook ExpectedHook, timeoutSeco
 		handlers, _ := entry["hooks"].([]any)
 		for _, handlerValue := range handlers {
 			handler, _ := handlerValue.(map[string]any)
-			if command, _ := handler[configCommandKey].(string); command != hook.Command {
-				continue
-			}
-			if !codexTimeoutIs(handler["timeout"], timeoutSeconds) {
-				handler["timeout"] = timeoutSeconds
-				changed = true
+			if command, _ := handler[configCommandKey].(string); command == hook.Command {
+				found = append(found, handler)
 			}
 		}
 	}
-	return changed
+	return found
+}
+
+// codexTimeoutDrift is an installed Herdr handler whose timeout is not the one
+// pfm writes for its event.
+type codexTimeoutDrift struct {
+	hook ExpectedHook
+	want int
+	got  string
+}
+
+// codexHerdrTimeoutDrifts are the Herdr handlers of the document whose
+// timeout differs from their row's in codexHerdrHookRows, the writer's own
+// table: what `pfm install` would rewrite.
+func codexHerdrTimeoutDrifts(document map[string]any, home string) []codexTimeoutDrift {
+	var drifts []codexTimeoutDrift
+	for index, hook := range codexHerdrHooks(home) {
+		want := codexHerdrHookRows[index].timeout
+		for _, handler := range codexHookHandlers(document, hook) {
+			if value := handler["timeout"]; !codexTimeoutIs(value, want) {
+				drifts = append(drifts, codexTimeoutDrift{hook: hook, want: want, got: codexTimeoutText(value)})
+			}
+		}
+	}
+	return drifts
+}
+
+// codexTimeoutText is a handler's timeout as hooks.json spells it, "absent"
+// for none.
+func codexTimeoutText(value any) string {
+	switch value := value.(type) {
+	case nil:
+		return "absent"
+	case json.Number:
+		return value.String()
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case string:
+		return strconv.Quote(value)
+	}
+	return fmt.Sprint(value)
 }
 
 // codexOwnedHookKey reports whether key is a hook pfm owns in a Codex

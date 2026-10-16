@@ -8,6 +8,10 @@
     ]
   },
   "opencode": {
+    "mirrorFiles": [
+      "LICENSE",
+      "SECURITY.md"
+    ],
     "agentPreamble": "You are the {{.Name}} role in the Professor repo, running as a native OpenCode subagent.\nFirst action: read the repo root AGENTS.md in full — its laws bind you (only gitter may write Git) and its § OpenCode adapter maps any Claude-harness mechanic named below. Then execute the protocol below exactly; your mode/task comes from the dispatch prompt.\nStamp every deliverable, report, or verdict you produce with: Executor: opencode-subagent/{{.Name}}\n\n"
   }
 }

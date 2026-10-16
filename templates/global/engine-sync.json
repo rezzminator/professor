@@ -55,10 +55,6 @@
       "fable": "openai/gpt-6.1-sol"
     },
     "agentPreamble": "You are the {{.Name}} role in this repository, running as a native OpenCode subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\n",
-    "mirrorFiles": [
-      "LICENSE",
-      "SECURITY.md"
-    ],
     "permission": {
       "*": "allow",
       "bash": {

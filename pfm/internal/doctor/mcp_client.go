@@ -17,7 +17,8 @@ import (
 // .mcp.json, distinguishing pfm's legacy entries from user-owned ones. It also
 // checks each Codex account's config.toml and the OpenCode config for family
 // registrations and legacy entries. Claude receives family registrations both
-// in its account registry at install and through --mcp-config at launch.
+// at install only in account registries already holding a pfm-owned entry,
+// and through --mcp-config at launch.
 func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 	warnings := printClaudeMCPRows(stdout, runtime)
 
@@ -107,7 +108,7 @@ func printOpenCodeFamilyRow(stdout io.Writer, home string, port int, name string
 		fmt.Fprintln(stdout, base)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path, state, name))
+		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path, state, enabled, name))
 		return 1
 	}
 }
@@ -203,15 +204,15 @@ func professorState(reports []installer.MCPClientCutover, names ...string) (stat
 // reinstall there would be advice that can never fix what it named. A ledger
 // that could not be read says so rather than passing for "no user-owned entry
 // here".
-func openCodeRemediation(home, path, state string, names ...string) string {
+func openCodeRemediation(home, path, state string, enabled bool, names ...string) string {
 	name := "professor"
 	if len(names) > 0 {
 		name = names[0]
 	}
 	const reinstall = "remediation=run pfm install --yes"
-	if state == installer.MCPClientPFM {
-		// pfm's own professor shape needs no replacing; only the legacy
-		// entries remain, and install removes those whoever wrote them.
+	if state == installer.MCPClientPFM && enabled {
+		// An enabled family in pfm's shape needs no replacing; only the
+		// legacy entries remain, and install removes those whoever wrote them.
 		return reinstall
 	}
 	unowned, err := installer.OpenCodeUnownedEntries(home, path, name)
@@ -275,6 +276,10 @@ func printClaudeMCPRows(stdout io.Writer, runtime config.Runtime) int {
 			fmt.Fprintf(stdout, "doctor: mcp client=claude config=%s %s=%s", registry.Path, report.Name, report.State)
 			switch report.State {
 			case installer.MCPClientPFM:
+				if !runtime.Config.MCPServers[strings.TrimSuffix(report.Name, "-professor")].Enabled {
+					fmt.Fprint(stdout, " remediation=run pfm install --yes")
+					warnings++
+				}
 			case installer.MCPClientLegacyPFM:
 				fmt.Fprint(stdout, " remediation=run pfm install --yes")
 				warnings++

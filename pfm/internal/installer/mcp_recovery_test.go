@@ -4,24 +4,29 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
 func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
+	repo := t.TempDir()
+	writeFixture(t, engineSyncPolicySource(repo), engineSyncTemplate)
 	home := t.TempDir()
 	path := filepath.Join(home, ".codex", "config.toml")
 	manual := "[mcp_servers.chat-professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n"
 	writeFixture(t, path, codexChatFence(home)+manual)
 	options := Options{
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{chatName: true},
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{nameSyncIdle: true},
+		SourceRepo: repo, Mode: ModeDryRun, Home: home, Runner: &fakeRunner{nameSyncIdle: true},
 	}
 	var output bytes.Buffer
 	options.Stdout = &output
@@ -273,12 +278,15 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 	for name, mode := range map[string]Mode{"both disabled": ModeApply, "uninstall": ModeUninstall} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			repo := t.TempDir()
+			writeFixture(t, engineSyncPolicySource(repo), engineSyncTemplate)
 			home := t.TempDir()
 			canonical := filepath.Join(home, ".claude")
 			writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
 			openCodePath := OpenCodeConfigPath(home)
 			options := Options{
 				Mode:               ModeApply,
+				SourceRepo:         repo,
 				Home:               home,
 				ConfigDir:          canonical,
 				OpenCodeConfigPath: openCodePath,
@@ -382,6 +390,179 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 	}
 	if strings.Contains(readFixture(t, target), "mcp_servers.chat-professor") {
 		t.Fatal("owned registration survived removal")
+	}
+}
+
+func TestMCPWriteReportsPreimageState(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		directory bool
+		original  string
+		wantError string
+	}{
+		{name: "unreadable", directory: true, wantError: "read MCP config"},
+		{name: "changed", original: "old", wantError: "changed while planning install"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if tc.directory {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeFixture(t, path, "client edit")
+			}
+			inst := &engine{stamp: "fixture"}
+			err := inst.writeMCPFile(path, []byte(tc.original), []byte("pfm"), true)
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) || !strings.Contains(err.Error(), path) {
+				t.Fatalf("write error=%v; want %q with path %s", err, tc.wantError, path)
+			}
+			if tc.directory {
+				var readError *os.PathError
+				if !errors.As(err, &readError) || readError.Op != "read" || readError.Path != path {
+					t.Fatalf("write error lost the underlying read failure: %v", err)
+				}
+			} else if got := readFixture(t, path); got != "client edit" {
+				t.Fatalf("changed config overwritten: %q", got)
+			}
+		})
+	}
+}
+
+func TestClaudeMCPLockProtectsSlowBackup(t *testing.T) {
+	for _, state := range []string{"refresh", "missing", "replaced", "modified", "restored"} {
+		t.Run(state, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			home := t.TempDir()
+			path := filepath.Join(home, ".claude.json")
+			lock := path + ".lock"
+			original := fmt.Sprintf(
+				`{"mcpServers":{"professor":{"type":"stdio","command":%q,"args":["mcp","serve","--stdio"]}}}`,
+				filepath.Join(home, ".local", "bin", "pfm"),
+			)
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			e := engine{
+				options: Options{Home: home, Stdout: io.Discard, MCPEnabled: map[string]bool{"chat": true}},
+				apply:   true, stamp: "fixture",
+			}
+			done := make(chan error, 1)
+			go func() { done <- e.cutOverClaudeMCP() }()
+			finished := false
+			t.Cleanup(func() {
+				if !finished {
+					select {
+					case <-done:
+					case <-time.After(2 * time.Second):
+						t.Error("slow-backup writer did not stop after fixture closed")
+					}
+				}
+			})
+			var activeWriter *os.File
+			defer func() {
+				if activeWriter != nil {
+					if err := activeWriter.Close(); err != nil {
+						t.Errorf("close slow-backup fixture writer: %v", err)
+					}
+				}
+			}()
+			// Planning, authoritative read, and backup are separate opens. The
+			// third writer holds backup open so the test controls publication.
+			for read := 0; read < 3; read++ {
+				writer, err := os.OpenFile(path, os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				activeWriter = writer
+				if _, err := writer.WriteString(original); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if read < 2 {
+					if err := syscall.Mkfifo(path, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					writeFixture(t, path, original)
+					before, err := os.Stat(lock)
+					if err != nil {
+						t.Fatal(err)
+					}
+					switch state {
+					case "refresh":
+						deadline := time.NewTimer(8 * time.Second)
+						t.Cleanup(func() { deadline.Stop() })
+						ticker := time.NewTicker(20 * time.Millisecond)
+						t.Cleanup(ticker.Stop)
+					refresh:
+						for {
+							select {
+							case <-deadline.C:
+								t.Fatal("native lock mtime was not refreshed during slow backup")
+							case <-ticker.C:
+								now, err := os.Stat(lock)
+								if err != nil {
+									t.Fatal(err)
+								}
+								if now.ModTime().After(before.ModTime()) {
+									break refresh
+								}
+							}
+						}
+						if err := os.Mkdir(lock, 0o700); !errors.Is(err, os.ErrExist) {
+							t.Fatalf("native writer could acquire refreshed lock: %v", err)
+						}
+					case "missing", "replaced":
+						if err := os.Remove(lock); err != nil {
+							t.Fatal(err)
+						}
+						if state == "replaced" {
+							writeFixture(t, filepath.Join(lock, "native-owner"), "keep")
+						}
+					case "modified", "restored":
+						mtime := before.ModTime().Add(time.Minute)
+						if err := os.Chtimes(lock, mtime, mtime); err != nil {
+							t.Fatal(err)
+						}
+						if state == "restored" {
+							// A heartbeat must latch compromise, even when the
+							// directory looks unchanged again before publication.
+							<-time.After(6 * time.Second)
+							if err := os.Chtimes(lock, before.ModTime(), before.ModTime()); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				activeWriter = nil
+			}
+			err := <-done
+			finished = true
+			if state == "refresh" {
+				if err != nil || !strings.Contains(readFixture(t, path), "chat-professor") {
+					t.Fatalf("refreshed write failed: %v", err)
+				}
+				if _, err := os.Lstat(lock); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("refreshed lock not released: %v", err)
+				}
+			} else {
+				if got := readFixture(t, path); got != original {
+					t.Fatalf("lost native lock still published registry: %s; error=%v", got, err)
+				}
+				if err == nil || !strings.Contains(err.Error(), lock) {
+					t.Fatalf("lock loss not reported: %v", err)
+				}
+				if state == "replaced" && readFixture(t, filepath.Join(lock, "native-owner")) != "keep" {
+					t.Fatal("native replacement lock not preserved")
+				}
+			}
+		})
 	}
 }
 

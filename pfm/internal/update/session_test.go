@@ -339,9 +339,12 @@ func TestStaleAcceptRuleHintUndoesItsOwnRule(t *testing.T) {
 // acceptance cannot claim the unscanned text, and undo restores the warning.
 func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 	t.Parallel()
-	for _, row := range []struct{ name, content string }{
-		{"line limit without hits", strings.Repeat("x", retiredMaxLine+1)},
-		{"byte limit with earlier hit", "/jc\n" + strings.Repeat(strings.Repeat("x", 1023)+"\n", retiredMaxRead/1024)},
+	for _, row := range []struct {
+		name, content string
+		hit           bool
+	}{
+		{"line limit without hits", strings.Repeat("x", retiredMaxLine+1), false},
+		{"byte limit with earlier hit", "/jc\n" + strings.Repeat(strings.Repeat("x", 1023)+"\n", retiredMaxRead/1024), true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			fixture := newProjectUpdateFixture(t)
@@ -373,6 +376,7 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 			if code, stdout, stderr := fixture.sessionVerb(
 				"accept",
 				"docs",
+				"--coverage",
 				"--reason",
 				"reviewed archive coverage",
 			); code != 0 {
@@ -380,8 +384,21 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 			}
 			baseline, err := professor.Load(fixture.project)
 			if err != nil || len(baseline.RetiredAccepted) != 1 || baseline.RetiredAccepted[0].Path != "docs" ||
-				baseline.RetiredAccepted[0].Reason != "reviewed archive coverage" {
+				baseline.RetiredAccepted[0].Reason != "reviewed archive coverage" ||
+				!baseline.RetiredAccepted[0].Coverage || baseline.Version != professor.BaselineCoverageVersion {
 				t.Fatalf("persistent coverage rule = %+v, err=%v", baseline.RetiredAccepted, err)
+			}
+			if row.hit {
+				_, report := fixture.sessionReport()
+				rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+				if err != nil || len(rows) != 1 || !strings.Contains(report, "RETIRED-NAME  1") {
+					t.Fatalf("coverage must leave earlier hit open: rows=%+v err=%v report=%s", rows, err, report)
+				}
+				if code, stdout, stderr := fixture.sessionVerb(
+					"accept", path, "--name", "/jc", "--reason", "historical mention stays",
+				); code != 0 {
+					t.Fatalf("separate hit accept code=%d stdout=%q stderr=%q", code, stdout, stderr)
+				}
 			}
 			code, report := fixture.sessionReport()
 			if code != 0 || !strings.HasSuffix(strings.TrimSpace(report), "\nclean") ||
@@ -412,7 +429,7 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 			var out, errOut bytes.Buffer
 			if code := professor.RunProjectUpdate(
 				"accept",
-				[]string{"docs", "--reason", "reviewed", "--root", fixture.project},
+				[]string{"docs", "--coverage", "--reason", "reviewed", "--root", fixture.project},
 				&out,
 				&errOut,
 				fixture.runtime,
@@ -420,8 +437,19 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 			); code != 1 {
 				t.Fatalf("read failure was accepted: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
-			if code, stdout, stderr := fixture.sessionVerb("accept", "--undo", "docs"); code != 0 {
+			if code, stdout, stderr := fixture.sessionVerb("accept", "--undo", "--coverage", "docs"); code != 0 {
 				t.Fatalf("undo code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			baseline, err = professor.Load(fixture.project)
+			wantRules, wantVersion := 0, professor.BaselineVersion
+			if row.hit {
+				wantRules, wantVersion = 1, professor.BaselineDecisionsVersion
+			}
+			if err != nil || len(baseline.RetiredAccepted) != wantRules || baseline.Version != wantVersion {
+				t.Fatalf("coverage undo removed wrong scope: baseline=%+v err=%v", baseline, err)
+			}
+			if row.hit && (baseline.RetiredAccepted[0].Coverage || baseline.RetiredAccepted[0].Name != "/jc") {
+				t.Fatalf("coverage undo lost hit decision: %+v", baseline.RetiredAccepted)
 			}
 			_, report = fixture.sessionReport()
 			if !strings.Contains(report, "INCOMPLETE") || strings.HasSuffix(strings.TrimSpace(report), "\nclean") {

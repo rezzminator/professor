@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,43 +110,67 @@ func TestReadPluginLogEnv(t *testing.T) {
 }
 
 func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
-	t.Run("preexisting shared log policy", func(t *testing.T) {
-		home := t.TempDir()
-		store := filepath.Join(home, ".claude")
-		logDir := filepath.Join(home, ".local", "state", "pfm", "plugin-logs")
-		writeFixture(
-			t,
-			filepath.Join(store, "settings.json"),
-			`{"env":{"PLUGIN_LOG_DIR":"`+filepath.ToSlash(logDir)+`"}}`,
-		)
-		inst := &engine{
-			options:     Options{Home: home, ConfigDir: store, Version: alphaVersion, Stdout: &bytes.Buffer{}},
-			managedRoot: managedRootForHome(home), apply: true,
-		}
-		if err := inst.ensureClaudeEnv(false); err != nil {
-			t.Fatal(err)
-		}
-		ledger, err := readClaudeEnvOwnership(inst.managedRoot)
-		if err != nil || ledger.PluginLogDir != logDir || len(ledger.Files) != 0 {
-			t.Fatalf("policy lost or user value claimed: %+v, %v", ledger, err)
-		}
-		if gaps, err := ClaudeEnvGaps(inst.managedRoot, inst.claudeEnvTarget(), nil); err != nil || len(gaps) != 0 {
-			t.Fatalf("matching user-owned policy is stale: %v, %v", gaps, err)
-		}
-		writeFixture(t, filepath.Join(store, "settings.json"), `{"env":{"PLUGIN_LOG_DIR":"/changed-by-user"}}`)
-		if gaps, err := ClaudeEnvGaps(inst.managedRoot, inst.claudeEnvTarget(), nil); err != nil || len(gaps) != 1 {
-			t.Fatalf("user-owned policy drift was hidden: %v, %v", gaps, err)
-		}
-		if err := inst.ensureClaudeEnv(true); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(claudeEnvOwnershipPath(inst.managedRoot)); !os.IsNotExist(err) {
-			t.Fatalf("uninstall retained policy-only ledger: %v", err)
-		}
-		if got := ReadPluginLogEnv([]string{store}); len(got) != 1 || got[0].Value != "/changed-by-user" {
-			t.Fatalf("uninstall removed user-owned value: %+v", got)
-		}
-	})
+	for _, tc := range []struct {
+		name            string
+		value           any
+		explicit        bool
+		previouslyOwned bool
+	}{
+		{name: "default-equal operator value", value: "{default}"},
+		{name: "custom operator value", value: "/operator-logs"},
+		{name: "changed owned value becomes operator-owned", value: "/operator-logs", previouslyOwned: true},
+		{name: "empty operator value", value: ""},
+		{name: "malformed operator value", value: 7},
+		{name: "explicit config does not adopt operator value", value: "/operator-logs", explicit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			store := filepath.Join(home, ".claude")
+			logDir := filepath.Join(home, ".local", "state", "pfm", "plugin-logs")
+			value := tc.value
+			if value == "{default}" {
+				value = logDir
+			}
+			raw, err := json.Marshal(map[string]any{"env": map[string]any{PluginLogDirEnv: value}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(store, "settings.json")
+			writeFixture(t, path, string(raw))
+			inst := &engine{
+				options:     Options{Home: home, ConfigDir: store, Version: alphaVersion, Stdout: &bytes.Buffer{}},
+				managedRoot: managedRootForHome(home), apply: true,
+			}
+			if tc.explicit {
+				inst.options.ClaudeEnv = map[string]string{PluginLogDirEnv: filepath.Join(home, "configured-logs")}
+			}
+			if tc.previouslyOwned {
+				if err := writeClaudeEnvOwnership(inst.managedRoot, claudeEnvOwnership{
+					Version:      1,
+					PluginLogDir: logDir,
+					Files:        map[string]map[string]string{path: {PluginLogDirEnv: logDir}},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, phase := range []string{"install", "reinstall", "release", "uninstall"} {
+				if phase == "release" {
+					inst.options.Version = "0.82.0"
+				}
+				if err := inst.ensureClaudeEnv(phase == "uninstall"); err != nil {
+					t.Fatal(err)
+				}
+				if got := readFixture(t, path); got != string(raw) {
+					t.Fatalf("%s overwrote operator PLUGIN_LOG_DIR: %s, want %s", phase, got, raw)
+				}
+				ledger, err := readClaudeEnvOwnership(inst.managedRoot)
+				if err != nil || len(ledger.Files) != 0 {
+					t.Fatalf("%s adopted operator PLUGIN_LOG_DIR: %+v, %v", phase, ledger, err)
+				}
+			}
+		})
+	}
+
 	home := t.TempDir()
 	store, first, second := filepath.Join(
 		home,
@@ -227,8 +252,8 @@ func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
 		t.Fatalf("changed explicit log policy was hidden by the installed ledger: %v, %v", gaps, err)
 	} else {
 		for _, gap := range gaps {
-			if !strings.Contains(gap, inst.options.ClaudeEnv[PluginLogDirEnv]) {
-				t.Fatalf("gap does not name the current source policy: %s", gap)
+			if !strings.Contains(gap.Problem, inst.options.ClaudeEnv[PluginLogDirEnv]) {
+				t.Fatalf("gap does not name the current source policy: %s", gap.Problem)
 			}
 		}
 	}

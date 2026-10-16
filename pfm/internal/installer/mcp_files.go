@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -35,8 +39,22 @@ func (installer *engine) changeMCPFile(message, path string, original, wanted []
 // writeMCPFile rechecks the planned preimage before preserving a backup and
 // atomically writing the physical file. Native clients may update their registry.
 func (installer *engine) writeMCPFile(path string, original, wanted []byte, existed bool) error {
+	return installer.writeMCPFileIf(path, original, wanted, existed, nil)
+}
+
+// writeMCPFileIf checks the native lock before reading and immediately before
+// atomic publication, so losing it during a slow backup cannot publish a save.
+func (installer *engine) writeMCPFileIf(path string, original, wanted []byte, existed bool, check func() error) error {
+	if check != nil {
+		if err := check(); err != nil {
+			return err
+		}
+	}
 	latest, present, err := readMCPFile(path)
-	if err != nil || present != existed || !bytes.Equal(latest, original) {
+	if err != nil {
+		return fmt.Errorf("read MCP config %s before write: %w", path, err)
+	}
+	if present != existed || !bytes.Equal(latest, original) {
 		return fmt.Errorf("MCP config changed while planning install: %s; retry", path)
 	}
 	if existed {
@@ -57,8 +75,109 @@ func (installer *engine) writeMCPFile(path string, original, wanted []byte, exis
 		if present != existed || !bytes.Equal(latest, original) {
 			return fmt.Errorf("MCP config changed while planning install: %s; retry", path)
 		}
+		if check != nil {
+			return check()
+		}
 		return nil
 	})
+}
+
+// withClaudeMCPLocks interoperates with Claude's proper-lockfile protocol:
+// mkdir <config>.lock, refresh mtime every five seconds (ten-second stale
+// threshold), then rmdir. Never reclaim an existing lock: report it for retry.
+// Explicit lockfilePath in Claude preserves file aliases; resolve parents only.
+func withClaudeMCPLocks(paths []string, write func(check func() error) error) (result error) {
+	unique := map[string]bool{}
+	for _, path := range paths {
+		parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+		if err != nil {
+			return fmt.Errorf("resolve Claude MCP lock parent %s: %w", path, err)
+		}
+		unique[filepath.Join(parent, filepath.Base(path))+".lock"] = true
+	}
+	var names []string
+	for name := range unique {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	owned := map[string]os.FileInfo{}
+	defer func() {
+		for name, original := range owned {
+			current, err := os.Lstat(name)
+			if err == nil && (!os.SameFile(original, current) || !original.ModTime().Equal(current.ModTime())) {
+				err = fmt.Errorf("lock replaced or modified; kept replacement")
+			}
+			if err == nil {
+				err = os.Remove(name)
+			}
+			if err != nil {
+				result = errors.Join(result, fmt.Errorf("release Claude MCP lock %s: %w", name, err))
+			}
+		}
+	}()
+	for _, name := range names {
+		if err := os.Mkdir(name, 0o700); err != nil {
+			return fmt.Errorf("acquire Claude MCP lock %s; close the native writer and retry: %w", name, err)
+		}
+		info, err := os.Lstat(name)
+		if err != nil {
+			return fmt.Errorf("inspect acquired Claude MCP lock %s: %w", name, err)
+		}
+		owned[name] = info
+	}
+	var mutex sync.Mutex
+	var compromised error
+	validate := func(refresh *time.Time) error {
+		mutex.Lock()
+		defer mutex.Unlock()
+		if compromised != nil {
+			return compromised
+		}
+		for name, original := range owned {
+			current, err := os.Lstat(name)
+			if err == nil && (!os.SameFile(original, current) || !original.ModTime().Equal(current.ModTime())) {
+				err = fmt.Errorf("lock replaced or modified")
+			}
+			if err == nil && refresh != nil {
+				err = os.Chtimes(name, *refresh, *refresh)
+				if err == nil {
+					var updated os.FileInfo
+					updated, err = os.Lstat(name)
+					if err == nil {
+						owned[name] = updated
+					}
+				}
+			}
+			if err != nil {
+				compromised = fmt.Errorf("validate Claude MCP lock %s: %w", name, err)
+				return compromised
+			}
+		}
+		return nil
+	}
+	stop := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		ticker := clock.Real.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				done <- validate(nil)
+				return
+			case now := <-ticker.C():
+				if err := validate(&now); err != nil {
+					done <- err
+					return
+				}
+			}
+		}
+	}()
+	defer func() {
+		close(stop)
+		result = errors.Join(result, <-done)
+	}()
+	return write(func() error { return validate(nil) })
 }
 
 // enabledMCPNames lists one registration per enabled family.

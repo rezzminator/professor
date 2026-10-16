@@ -193,14 +193,15 @@ func TestWireEngineSyncConfigWithoutTheTemplate(t *testing.T) {
 	if err := os.Symlink(oldPolicy, oldLink); err != nil {
 		t.Fatal(err)
 	}
-	if err := installer.wireEngineSyncConfig(); err != nil {
-		t.Fatal(err)
-	}
-	want := "  engine-sync machine policy source missing: " + engineSyncPolicySource(
+	want := "  skip    engine-sync machine policy source missing: " + engineSyncPolicySource(
 		installer.options.SourceRepo,
-	) + "\n"
-	if output.String() != want {
-		t.Fatalf("transcript: %s; want %s", output.String(), want)
+	)
+	if err := installer.wireEngineSyncConfig(); err != nil {
+		t.Fatalf("optional policy blocked install: %v; transcript: %s", err, output.String())
+	}
+	if installer.report.Skipped != 1 || !strings.Contains(output.String(), want+"\n") {
+		t.Fatalf("missing policy must be one counted, visible skip: report=%+v; transcript: %s",
+			installer.report, output.String())
 	}
 	if _, err := os.Lstat(enginesync.GlobalConfigPath(home)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a global file was written without a template: %v", err)

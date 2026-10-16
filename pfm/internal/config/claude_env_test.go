@@ -67,22 +67,22 @@ func TestClaudeEnvKey(t *testing.T) {
 		{
 			name:    "a variable the launch sets from claude.cache1h",
 			content: `{"version":2,"claude":{"env":{"CACHE_LIVE_CONTROL_MAIN_TTL":"1h"}}}`,
-			want:    map[string]string{"CACHE_LIVE_CONTROL_MAIN_TTL": "1h"}, source: SourceFile,
+			err:     `claude.env.CACHE_LIVE_CONTROL_MAIN_TTL is set on every launch from claude.cache1h: set that key instead`,
 		},
 		{
 			name:    "a variable the launch discards as inherited state",
 			content: `{"version":2,"claude":{"env":{"CACHE_LIVE_CONTROL_AGENTS_TTL":"1h"}}}`,
-			want:    map[string]string{"CACHE_LIVE_CONTROL_AGENTS_TTL": "1h"}, source: SourceFile,
+			err:     `claude.env.CACHE_LIVE_CONTROL_AGENTS_TTL is discarded on every launch as inherited state: set CACHE_LIVE_CONTROL_SUBAGENT_TTL instead`,
 		},
 		{
 			name:    "a home pfm resolves from its own environment",
 			content: `{"version":2,"claude":{"env":{"CALLMETER_HOME":"/x"}}}`,
-			want:    map[string]string{"CALLMETER_HOME": "/x"}, source: SourceFile,
+			err:     `claude.env.CALLMETER_HOME is read by pfm itself, which builds callmeter's binary under it: export it where pfm runs instead`,
 		},
 		{
 			name:    "engine-sync's home",
 			content: `{"version":2,"claude":{"env":{"ENGINE_SYNC_HOME":"/x"}}}`,
-			want:    map[string]string{"ENGINE_SYNC_HOME": "/x"}, source: SourceFile,
+			err:     `claude.env.ENGINE_SYNC_HOME is read by pfm itself, which runs engine-sync from it: export it where pfm runs instead`,
 		},
 		{
 			name: "not an object", content: `{"version":2,"claude":{"env":["A=1"]}}`,

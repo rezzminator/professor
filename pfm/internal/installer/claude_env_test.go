@@ -185,6 +185,25 @@ func TestEnsureClaudeEnv(t *testing.T) {
 			wantMode:  0o644,
 		},
 		{
+			name: "the documented plugin log knob is known", apply: true,
+			env:       map[string]string{PluginLogDirEnv: "/logs"},
+			given:     state{store: `{}`, linked: true},
+			lines:     []string{"  change  claude.env: set PLUGIN_LOG_DIR in {seat}"},
+			absent:    []string{"warn"},
+			wantStore: `{"PLUGIN_LOG_DIR":"/logs"}`,
+			wantOwned: map[string]map[string]string{"{store}": {PluginLogDirEnv: "/logs"}},
+			wantMode:  0o644,
+		},
+		{
+			name: "a chat hand-sets its log folder during another env write", apply: true,
+			env:       map[string]string{envKey: "1", PluginLogDirEnv: "/logs"},
+			given:     state{store: `{}`, linked: true},
+			chat:      `{"env":{"PLUGIN_LOG_DIR":"/operator-logs"}}`,
+			wantStore: `{"PLUGIN_LOG_DIR":"/operator-logs","` + envKey + `":"1"}`,
+			wantOwned: map[string]map[string]string{"{store}": {envKey: "1"}},
+			wantMode:  0o644,
+		},
+		{
 			name: "a former primary seat's keys are removed", apply: true,
 			env: map[string]string{envKey: "1"},
 			given: state{

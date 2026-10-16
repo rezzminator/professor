@@ -210,13 +210,26 @@ func (installer *engine) cutOverClaudeMCP() error {
 		if bytes.Equal(raw, wanted) {
 			continue
 		}
-		if err := installer.changeMCPFile(
-			"cut over Claude MCP registrations in "+registry.Path,
-			registry.Path,
-			raw,
-			wanted,
-			true,
-		); err != nil {
+		// Claude explicitly locks the lexical config path, even for a symlink.
+		// The registry list is physically deduplicated, so recover every alias.
+		aliases := []string{registry.Path, physical, filepath.Join(installer.options.Home, ".claude.json")}
+		for _, account := range accounts {
+			aliases = append(aliases, filepath.Join(account.ConfigDir, ".claude.json"))
+		}
+		if strings.TrimSpace(ambient) != "" {
+			aliases = append(aliases, filepath.Join(ambient, ".claude.json"))
+		}
+		var locks []string
+		for _, alias := range aliases {
+			if physicalSettingsPath(alias) == physical {
+				locks = append(locks, alias)
+			}
+		}
+		if err := installer.change("cut over Claude MCP registrations in "+registry.Path, func() error {
+			return withClaudeMCPLocks(locks, func(check func() error) error {
+				return installer.writeMCPFileIf(registry.Path, raw, wanted, true, check)
+			})
+		}); err != nil {
 			return err
 		}
 	}

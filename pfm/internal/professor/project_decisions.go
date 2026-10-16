@@ -47,8 +47,8 @@ func keepPin(pin FilePin, hash, storeSHA, reason, today string) FilePin {
 // into scan.Accepted's counts. An accepted hit is a decision, so it no longer
 // counts as review. Each rule counts every hit it covers, so a narrower rule
 // inside a wider one is never reported as matching nothing; AcceptedHits
-// counts each accepted hit once. Path-wide rules also accept incomplete coverage,
-// preserving its diagnostic on the rule. Failures are never partitioned.
+// counts each accepted hit once. Only explicit coverage rules accept incomplete
+// coverage, preserving its diagnostic on the rule. Failures are never partitioned.
 func partitionRetired(scan *RetiredNameScan, rules []RetiredRule) {
 	if len(rules) == 0 {
 		return
@@ -75,7 +75,7 @@ func partitionRetired(scan *RetiredNameScan, rules []RetiredRule) {
 	for _, partial := range scan.Incomplete {
 		accepted := false
 		for index, rule := range rules {
-			// A named rule says nothing about names in unscanned text.
+			// Only a coverage rule acknowledges unscanned text, not its names.
 			if rule.Covers(partial.Path, "") {
 				partials[index] = append(partials[index], partial)
 				accepted = true
@@ -158,13 +158,17 @@ func writeAcceptedHuman(stdout io.Writer, scan *RetiredNameScan) {
 	)
 	for _, accepted := range scan.Accepted {
 		name := "any retired name"
-		if accepted.Rule.Name != "" {
+		if accepted.Rule.Coverage {
+			name = "incomplete coverage"
+		} else if accepted.Rule.Name != "" {
 			name = accepted.Rule.Name
 		}
 		stale := ""
 		if accepted.Hits == 0 && len(accepted.Incomplete) == 0 {
 			stale = " — matches nothing now: pfm update accept --undo " + shellWord(accepted.Rule.Path)
-			if accepted.Rule.Name != "" {
+			if accepted.Rule.Coverage {
+				stale += " --coverage"
+			} else if accepted.Rule.Name != "" {
 				stale += " --name " + shellWord(accepted.Rule.Name)
 			}
 		}
@@ -208,7 +212,7 @@ func writeSessionGuide(stdout io.Writer) {
 	fmt.Fprintln(stdout, "    · RETIRED-NAME    edit the line to its successor; a mention that must stay: "+
 		"pfm update accept <path> --reason \"<why>\" [--name <name>]")
 	fmt.Fprintln(stdout, "    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: "+
-		"pfm update accept <path> --reason \"<why>\" (no --name); read failures must be fixed")
+		"pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed")
 	fmt.Fprintln(stdout, "  run the verbs one at a time: each rewrites .professor/baseline.json")
 }
 
@@ -220,19 +224,20 @@ func runProjectAccept(
 ) int {
 	flags := cli.NewFlagSet(
 		"update accept",
-		"usage: pfm update accept <path>... --reason TEXT [--name RETIRED-NAME] [--undo] [--root DIR]",
+		"usage: pfm update accept <path>... --reason TEXT [--name RETIRED-NAME | --coverage] [--undo] [--root DIR]",
 		stderr,
 	)
 	rootFlag := flags.String("root", "", "project root")
 	reason := flags.String("reason", "", "why these mentions or incomplete coverage are accepted (required)")
 	name := flags.String("name", "", "accept only this retired name at the path")
+	coverage := flags.Bool("coverage", false, "accept only reviewed incomplete scan coverage, not hits")
 	undo := flags.Bool("undo", false, "remove the recorded rule")
 	paths, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
 	text := strings.TrimSpace(*reason)
-	if len(paths) == 0 || (!*undo && text == "") {
+	if len(paths) == 0 || (!*undo && text == "") || (*coverage && *name != "") {
 		flags.Usage()
 		return 2
 	}
@@ -279,7 +284,7 @@ func runProjectAccept(
 		if *undo {
 			kept := make([]RetiredRule, 0, len(rules))
 			for _, rule := range rules {
-				if rule.Path == path && rule.Name == *name {
+				if rule.Path == path && rule.Name == *name && rule.Coverage == *coverage {
 					changed++
 					continue
 				}
@@ -292,7 +297,7 @@ func runProjectAccept(
 			rules = kept
 			continue
 		}
-		rule := RetiredRule{Path: path, Name: *name, Reason: text}
+		rule := RetiredRule{Path: path, Name: *name, Coverage: *coverage, Reason: text}
 		covered := 0
 		for _, hit := range hits {
 			if rule.Covers(hit.Path, hit.Name) {
@@ -322,8 +327,10 @@ func runProjectAccept(
 	}
 	if *undo {
 		fmt.Fprintf(stdout, "removed %d retired-name rule(s)\n", changed)
+	} else if *coverage {
+		fmt.Fprintf(stdout, "accepted incomplete coverage under %d path(s)\n", changed)
 	} else {
-		fmt.Fprintf(stdout, "accepted retired-name hits or incomplete coverage under %d path(s)\n", changed)
+		fmt.Fprintf(stdout, "accepted retired-name hits under %d path(s)\n", changed)
 	}
 	return 0
 }

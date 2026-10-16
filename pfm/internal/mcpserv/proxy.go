@@ -318,30 +318,6 @@ func (professor *FamilyServers) runStdioTransport(
 	return proxy.run(ctx, reader, serialized)
 }
 
-// probeFamilyRoute catches old daemons whose status advertises the family but
-// whose routes predate its current path. A bare GET may be refused by MCP;
-// only a 404 means the route is absent. An incomplete probe is an error.
-func probeFamilyRoute(ctx context.Context, address, family string) error {
-	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	endpoint := "http://" + address + pfmconfig.MCPFamilyPath(family)
-	request, err := http.NewRequestWithContext(obs.Presence(probeCtx), http.MethodGet, endpoint, http.NoBody)
-	if err != nil {
-		return fmt.Errorf("build family route probe for %s: %w", endpoint, err)
-	}
-	response, err := obs.WrapClient(&http.Client{}).Do(request)
-	if err != nil {
-		return fmt.Errorf("probe family route %s: %w", endpoint, err)
-	}
-	if closeErr := response.Body.Close(); closeErr != nil {
-		return fmt.Errorf("close family route probe response from %s: %w", endpoint, closeErr)
-	}
-	if response.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("%s answered HTTP 404", endpoint)
-	}
-	return nil
-}
-
 func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writer) {
 	var frame proxyFrame
 	if err := json.Unmarshal(raw, &frame); err != nil {

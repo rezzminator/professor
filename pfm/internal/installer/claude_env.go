@@ -139,10 +139,21 @@ func claudeEnvOf(document map[string]any) (map[string]any, error) {
 // over: claude.env wins); an unowned key already holding the wanted value
 // stays the user's, pfm never having written it; an owned key no longer
 // wanted is removed while it holds the value pfm set, and forgotten when
-// changed by hand.
+// changed by hand. PluginLogDirEnv only fills an absent or untouched owned
+// value: an operator value is never overwritten or adopted, even during replan.
 func planClaudeEnv(env map[string]any, owned, want map[string]string) claudeEnvPlan {
 	plan := claudeEnvPlan{owned: map[string]string{}}
 	for _, key := range slices.Sorted(maps.Keys(want)) {
+		if key == PluginLogDirEnv {
+			current, present := env[key]
+			previous, wasOwned := owned[key]
+			if present && (!wasOwned || current != previous) {
+				if wasOwned {
+					plan.handChanged = append(plan.handChanged, key)
+				}
+				continue
+			}
+		}
 		if value, ok := env[key].(string); !ok || value != want[key] {
 			plan.set = append(plan.set, key)
 			plan.owned[key] = want[key]
@@ -420,6 +431,9 @@ func writeClaudeEnvOwnership(managedRoot string, ledger claudeEnvOwnership) erro
 // warnUnknownClaudeEnvKeys warns for each key no plugin pfm installs names
 // by its prefix; the key is still set.
 func (installer *engine) warnUnknownClaudeEnvKeys(env map[string]string) {
+	if len(ClaudeEnvUnknownKeys(env, nil)) == 0 {
+		return
+	}
 	build, err := installer.claudePluginBuild()
 	if err != nil {
 		installer.say("  warn    claude.env: the plugin list is unread, so no key's prefix was checked: %v", err)
@@ -432,10 +446,11 @@ func (installer *engine) warnUnknownClaudeEnvKeys(env map[string]string) {
 
 // ClaudeEnvUnknownKeys lists, sorted, each key of env that no target's name
 // names: the name upper-snaked is the key, or the key's prefix before "_".
+// PluginLogDirEnv is shared policy, known independently of a plugin target.
 func ClaudeEnvUnknownKeys(env map[string]string, targets []ClaudePluginTarget) []string {
 	var unknown []string
 	for _, key := range slices.Sorted(maps.Keys(env)) {
-		known := false
+		known := key == PluginLogDirEnv
 		for index := range targets {
 			prefix := strings.ToUpper(strings.ReplaceAll(targets[index].Name, "-", "_"))
 			if key == prefix || strings.HasPrefix(key, prefix+"_") {
@@ -450,11 +465,18 @@ func ClaudeEnvUnknownKeys(env map[string]string, targets []ClaudePluginTarget) [
 	return unknown
 }
 
+// ClaudeEnvGap is one settings drift and its effective repair. Missing is
+// semantic metadata so the alpha plugin_logs check can own missing-log readiness.
+type ClaudeEnvGap struct {
+	Key, Problem, Fix string
+	Missing           bool
+}
+
 // ClaudeEnvGaps compares claude.env with the settings file it lands in
 // (settingsPath) and with every other file the ledger under managedRoot
 // names; each gap is one line naming the key and the file. An unreadable
 // ledger or settings file is the error, never an empty list.
-func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]string, error) {
+func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]ClaudeEnvGap, error) {
 	ledger, err := readClaudeEnvOwnership(managedRoot)
 	if err != nil {
 		return nil, err
@@ -472,7 +494,7 @@ func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]s
 		pluginLogDir = ledger.PluginLogDir
 	}
 	targetPhysical := physicalSettingsPath(settingsPath)
-	var gaps []string
+	var gaps []ClaudeEnvGap
 	paths := slices.Sorted(maps.Keys(ledger.Files))
 	if !slices.Contains(paths, targetPhysical) {
 		paths = append(paths, targetPhysical)
@@ -495,15 +517,34 @@ func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]s
 		}
 		plan := planClaudeEnv(fileEnv, ledger.Files[path], want)
 		for _, key := range plan.set {
-			if value, has := fileEnv[key]; has {
-				gaps = append(gaps, fmt.Sprintf("%s in %s env is %s; claude.env sets %q", key, display,
-					claudeEnvValueText(value), want[key]))
+			value, has := fileEnv[key]
+			gap := ClaudeEnvGap{Key: key, Missing: !has, Fix: "run pfm install --yes"}
+			if has {
+				gap.Problem = fmt.Sprintf("%s in %s env is %s; claude.env sets %q", key, display,
+					claudeEnvValueText(value), want[key])
 			} else {
-				gaps = append(gaps, fmt.Sprintf("%s missing from %s env; claude.env sets %q", key, display, want[key]))
+				gap.Problem = fmt.Sprintf("%s missing from %s env; claude.env sets %q", key, display, want[key])
+			}
+			gaps = append(gaps, gap)
+		}
+		// The default is not a mandate on operator settings. An explicit
+		// conflicting config still needs a repair, but install cannot replace it.
+		if explicit := env[PluginLogDirEnv]; explicit != "" {
+			if value, has := fileEnv[PluginLogDirEnv]; has && value != explicit &&
+				!slices.Contains(plan.set, PluginLogDirEnv) {
+				gaps = append(gaps, ClaudeEnvGap{
+					Key: PluginLogDirEnv,
+					Problem: fmt.Sprintf("%s in %s env is %s; claude.env sets %q", PluginLogDirEnv, display,
+						claudeEnvValueText(value), explicit),
+					Fix: "set env." + PluginLogDirEnv + " in " + display + " to the claude.env value; pfm preserves hand-set values",
+				})
 			}
 		}
 		for _, key := range plan.remove {
-			gaps = append(gaps, fmt.Sprintf("%s left in %s env after its removal from claude.env", key, display))
+			gaps = append(gaps, ClaudeEnvGap{
+				Key: key, Problem: fmt.Sprintf("%s left in %s env after its removal from claude.env", key, display),
+				Fix: "run pfm install --yes",
+			})
 		}
 	}
 	return gaps, nil

@@ -2754,7 +2754,8 @@ DENY = {"hookSpecificOutput": {
     "hookEventName": "PreToolUse", "permissionDecision": "deny",
     "permissionDecisionReason": "cut-gate: step 4 first. Write the doors file (step 3), run python3 "
     "$HOME/.claude/skills/tracetree/tracetree.py segment {worktree} --rev {baseline} --seeds {doors file} so its own "
-    "result shows its VERDICT line unfiltered (`| tee` or `| tail`, never `| grep`: a filtered run is no cut), log its "
+    "result shows its VERDICT line unfiltered (`| tee {file} | tail`: the file keeps the full printout, the tail shows its "
+    "last lines, VERDICT included; never `| grep`: a filtered run is no cut), log its "
     "CUT line in run.md, then edit. Flight-directory writes stay open."}}
 
 
@@ -2854,6 +2855,7 @@ class CutGateTest(unittest.TestCase):
         self.assertEqual(got["permissionDecision"], "deny")
         self.assertIn("its own result shows its VERDICT line unfiltered", got["permissionDecisionReason"])
         self.assertIn("never `| grep`: a filtered run is no cut", got["permissionDecisionReason"])
+        self.assertIn("`| tee {file} | tail`", got["permissionDecisionReason"])
 
     def test_a_kit_run_with_a_verdict_opens_the_edits(self):
         printed = kit_cut(self.kit_home, self.tmp)

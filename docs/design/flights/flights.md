@@ -67,9 +67,9 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
 | Token | Written by | Means |
 | --- | --- | --- |
 | `CLAIMED` | the spawning foreman, at spawn | A child or executor holds this unit or task |
-| `DONE` | child → parent, after verification; the root, after a gate `PASS` or `FIXED` | The unit's requirement rows are met and proven; a gate `FAIL` makes the root's `FAILED` or `PARTIAL` |
+| `DONE` | child → parent, after verification; the root, after a gate `PASS` or `FIXED` | The unit's requirement rows are met and proven, with no `UNBUILT` requested element; a gate `FAIL` makes the root's `FAILED` or `PARTIAL` |
 | `SPEC` | `flights-speccer` | `spec.md` is written whole; its path follows |
-| `PARTIAL` | root foreman, `flights-speccer` | Some units `DONE`, the rest named with their cause; a spec cut at its cap, the rest in its `## Open` |
+| `PARTIAL` | root foreman, `flights-speccer` | Some units `DONE`, the rest named with their cause, including each requested element marked `UNBUILT` in the spec's `## Open`; a spec cut at its cap, the rest in its `## Open` |
 | `FAILED` | any builder | The goal was not reached; the return names the cause or what was read |
 | `SPEC-DRIFT` | `flights-mechanical-executor` | Its task file contradicts the tree; nothing guessed |
 | `BLOCKED` | any foreman, `flights-speccer` | A question only the user can answer, or a ruling contradicted; both sides quoted. A speccer's `PARTIAL` or `BLOCKED` becomes the root foreman's own first-line `BLOCKED`, nothing built |

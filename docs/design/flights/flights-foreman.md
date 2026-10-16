@@ -143,7 +143,7 @@ After every child returned, the root foreman spawns one `flights-lander` for the
 
 ## Return
 
-First line `DONE {flight}`, `PARTIAL {flight}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`, the root's `DONE` only on the lander's `PASS` or `FIXED` (a `FAIL` returns `FAILED {flight}: gate`, or `PARTIAL` naming the units it sits in); then the `SPEC` line when a speccer ran (its path, its `USER` ids, the next phase, its cost), the `CUT` line with its `CHILD` count, each `OVERRIDE` and escalation, one row per unit (owner, verdict, its check line as printed), the doors, `UNPROVEN`, the lander's verdict and residuals, `OUTSIDE`, the cost (calls, tokens read), `RETRO`. A child returns the same shape for its unit.
+First line `DONE {flight}`, `PARTIAL {flight}`, `FAILED {flight}: {why}` or `BLOCKED {flight}: {question}`, the root's `DONE` only on the lander's `PASS` or `FIXED` and no `UNBUILT` item (otherwise `PARTIAL` names every unbuilt requested element; a `FAIL` returns `FAILED {flight}: gate`, or `PARTIAL` naming the units it sits in); then the `SPEC` line when a speccer ran (its path, its `USER` ids, the next phase, its cost), the `CUT` line with its `CHILD` count, each `OVERRIDE` and escalation, one row per unit (owner, verdict, its check line as printed), the doors, `UNPROVEN`, the lander's verdict and residuals, `OPEN` carrying every item from the spec's `## Open` with `UNBUILT` first, `OUTSIDE`, the cost (calls, tokens read), `RETRO`. A child returns the same shape for its unit.
 
 ## Evidence
 

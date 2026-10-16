@@ -51,4 +51,4 @@ A `BLOCKED` return carries a question. Put it to the user in one round holding t
 
 ## Present
 
-The foreman's return as it came: its first line, the `UNITS` and `GATE` rows, `UNPROVEN`, `OUTSIDE`, and the flight directory's path for `/flights:audit`.
+The foreman's return as it came: its first line (a `PARTIAL` included), the `UNITS` and `GATE` rows, every `OPEN` item, `UNPROVEN`, `OUTSIDE`, and the flight directory's path for `/flights:audit`.

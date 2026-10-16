@@ -333,3 +333,110 @@ func TestClaudeMarketplaceWritesNothing(t *testing.T) {
 		t.Fatalf("entries=%v err=%v", entries, err)
 	}
 }
+
+// writePluginVersion writes the plugin's manifest at version with one file.
+func writePluginVersion(t *testing.T, dir, name, version string) {
+	t.Helper()
+	files := map[string]string{
+		".claude-plugin/plugin.json": `{"name":"` + name + `","version":"` + version + `"}`,
+		"commands/hello.md":          "hello " + version + "\n",
+	}
+	for rel, content := range files {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestClaudeDirectoryMarketplaceCacheContract plays an -alpha install of a
+// directory marketplace the way pfm runs it and reads the result with pfm's
+// own readers: the record Claude Code keeps is what the installer reads back.
+// The account starts fresh, or knowing the -dev marketplace from another
+// source, which pfm's re-point answers with the same `marketplace add`.
+func TestClaudeDirectoryMarketplaceCacheContract(t *testing.T) {
+	for _, known := range []string{
+		"",
+		`{"example-dev":{"source":{"source":"github","repo":"example/example"},"installLocation":"/elsewhere"}}`,
+	} {
+		t.Run(fmt.Sprint(known != ""), func(t *testing.T) { claudeDirectoryMarketplaceCase(t, known) })
+	}
+}
+
+func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
+	fix := newFixture(t)
+	if known != "" {
+		path := filepath.Join(fix.configDir, "plugins", "known_marketplaces.json")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(known), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marketplace := filepath.Join(fix.home, ".local", "share", "example-dev")
+	manifest := filepath.Join(marketplace, ".claude-plugin", "marketplace.json")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte(
+		`{"name":"example-dev","plugins":[{"name":"example","source":"./plugins/example"}]}`,
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(marketplace, "plugins", "example")
+	writePluginVersion(t, checkout, "example", "1.2.3")
+	targets := []installer.ClaudePluginTarget{{
+		Name: "example", ID: "example@example-dev", Source: marketplace, Local: true,
+		Marketplace: marketplace, Checkout: checkout,
+	}}
+	gaps := func(step string) []installer.ClaudePluginGap {
+		t.Helper()
+		cache, err := installer.ClaudePluginCacheGaps(fix.configDir, targets)
+		if err != nil {
+			t.Fatalf("%s: cache gaps err=%v", step, err)
+		}
+		missing, err := installer.ClaudePluginsNotInstalled(fix.configDir, targets)
+		if err != nil || len(missing) != 0 {
+			t.Fatalf("%s: missing=%v err=%v", step, missing, err)
+		}
+		known, err := installer.ClaudePluginMarketplaceGaps(fix.configDir, targets)
+		if err != nil || len(known) != 0 {
+			t.Fatalf("%s: marketplace gaps=%v err=%v", step, known, err)
+		}
+		return cache
+	}
+	wantStale := 0
+	if known != "" {
+		wantStale = 1
+	}
+	if stale, err := installer.ClaudePluginMarketplaceGaps(fix.configDir, targets); err != nil ||
+		len(stale) != wantStale {
+		t.Fatalf("before add marketplace gaps=%v err=%v, want one only for a known stale source", stale, err)
+	}
+	for _, args := range [][]string{
+		{"plugin", "marketplace", "add", marketplace},
+		{"plugin", "install", "example@example-dev", "-y"},
+	} {
+		if code, msg := pluginCLI(t, fix, fix.configDir, args...); code != 0 {
+			t.Fatalf("%v exit=%d %s", args, code, msg)
+		}
+	}
+	if got := gaps("install"); len(got) != 0 {
+		t.Fatalf("after install gaps=%v, want none", got)
+	}
+	writePluginVersion(t, checkout, "example", "1.2.4")
+	if got := gaps("bump"); len(got) != 1 || !strings.Contains(got[0].Problem, "records version 1.2.3 (scope user)") {
+		t.Fatalf("after bump gaps=%v, want the 1.2.3 user entry behind", got)
+	}
+	if code, msg := pluginCLI(t, fix, fix.configDir,
+		"plugin", "update", "example@example-dev", "--scope", "user", "-y"); code != 0 {
+		t.Fatalf("update exit=%d %s", code, msg)
+	}
+	if got := gaps("update"); len(got) != 0 {
+		t.Fatalf("after update gaps=%v, want none", got)
+	}
+}

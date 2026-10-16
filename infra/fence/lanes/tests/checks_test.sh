@@ -980,6 +980,12 @@ LANE_A09_ERR="$a09_skipped" lane_agents_case > "$T/lane-agents.out" 2>&1
 if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
   ok "A.09 reads engine-sync's SKIPPED capability warning as no problem"
 else bad 'A.09 SKIPPED warning' "$(cat "$T/lane-agents.out")"; fi
+# A Claude tool with no OpenCode equivalent is engine-sync's named unmapped-tool warning, no problem either.
+a09_unmapped='engine-sync codex agents: warning: unmapped Claude tool ToolSearch in /fixture/agents/alpha.md — no OpenCode equivalent; it stays denied'
+LANE_A09_ERR="$a09_unmapped" lane_agents_case > "$T/lane-agents.out" 2>&1
+if grep -Fq 'PASS 1 global agents compiled to parsing .toml roles' "$T/lane-agents.out"; then
+  ok "A.09 reads engine-sync's unmapped-tool warning as no problem"
+else bad 'A.09 unmapped-tool warning' "$(cat "$T/lane-agents.out")"; fi
 LANE_A09_ERR="$a09_skipped"$'\n''engine-sync codex agents: conflict /fixture/alpha.toml' lane_agents_case > "$T/lane-agents.out" 2>&1
 if grep -Fq 'problem line(s) on stderr: engine-sync codex agents: conflict /fixture/alpha.toml' "$T/lane-agents.out" &&
   ! grep -Fq 'SKIPPED gpt-only' "$T/lane-agents.out" && ! grep -q '^PASS' "$T/lane-agents.out"; then

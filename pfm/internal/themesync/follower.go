@@ -18,6 +18,9 @@ const (
 	launchctlBinary  = "launchctl"
 	followerLabel    = "com.professor.pfm.theme"
 	followerInterval = 60
+	// followerThrottle is launchd's minimum gap between two runs, one second:
+	// a rename-replaced settings.json and its watch event land within it.
+	followerThrottle = 1
 )
 
 func followerEscape(text string) string {
@@ -26,9 +29,34 @@ func followerEscape(text string) string {
 	return buffer.String()
 }
 
-// followerPlist is the launch agent that runs `pfm theme sync` whenever macOS
-// rewrites its global preferences, with a one-minute backstop and at load, on
-// the one service PATH (launchd's bare default holds neither tmux nor herdr).
+// followerWatchPaths are the files whose change runs the follower: each
+// account's settings.json by real path, each distinct real themes dir once
+// and the macOS global preferences. An unlistable account set watches the
+// preferences alone; the one-minute backstop still runs.
+func followerWatchPaths(home string) []string {
+	var watch []string
+	seen := map[string]bool{}
+	add := func(path string) {
+		if !seen[path] {
+			seen[path] = true
+			watch = append(watch, path)
+		}
+	}
+	settings, err := accountSettings(home)
+	if err == nil {
+		for _, path := range settings {
+			add(path)
+			add(themesDir(filepath.Dir(path)))
+		}
+	}
+	add(globalPreferences(home))
+	return watch
+}
+
+// followerPlist is the launch agent that runs `pfm theme sync` whenever a
+// Claude account's settings.json or themes dir changes or macOS rewrites its
+// global preferences, with a one-minute backstop and at load, on the one
+// service PATH (launchd's bare default holds neither tmux nor herdr).
 func followerPlist(pfm, home, stateDir string) string {
 	stringItems := func(values ...string) string {
 		var out strings.Builder
@@ -49,7 +77,9 @@ func followerPlist(pfm, home, stateDir string) string {
 ` + stringItems(pfm, "theme", "sync") + `	</array>
 	<key>WatchPaths</key>
 	<array>
-` + stringItems(filepath.Join(home, "Library", "Preferences", ".GlobalPreferences.plist")) + `	</array>
+` + stringItems(followerWatchPaths(home)...) + `	</array>
+	<key>ThrottleInterval</key>
+	<integer>` + fmt.Sprint(followerThrottle) + `</integer>
 	<key>StartInterval</key>
 	<integer>` + fmt.Sprint(followerInterval) + `</integer>
 	<key>RunAtLoad</key>
@@ -136,19 +166,8 @@ var errFollowerReloadDue = errors.New(
 // followerInOwnJob says whether this process is the follower's launchd job.
 func (s *session) followerInOwnJob() bool { return s.env.LaunchdJob == followerLabel }
 
-func (s *session) followerNotNeeded() string {
-	return fmt.Sprintf("mode %s: the appearance follower is not needed", s.state.Mode)
-}
-
 func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 	path := s.followerPath()
-	if s.state.Mode != ModeAuto {
-		if _, err := s.followerRetire(ctx); err != nil {
-			return s.failed(surfaceFollower, path, err)
-		}
-		s.setDue(surfaceFollower, false)
-		return s.absent(surfaceFollower, path, s.followerNotNeeded())
-	}
 	if s.env.PfmBinary == "" {
 		return s.failed(
 			surfaceFollower,
@@ -192,9 +211,6 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 
 func (s *session) readFollower(ctx context.Context) SurfaceResult {
 	path := s.followerPath()
-	if s.state.Mode != ModeAuto {
-		return s.absent(surfaceFollower, path, s.followerNotNeeded())
-	}
 	current, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):

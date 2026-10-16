@@ -24,24 +24,20 @@ type herdrSnapshot struct {
 	Created bool   `json:"created,omitempty"`
 }
 
-// ghosttySnapshot is the exact text appended to the user's Ghostty config.
-type ghosttySnapshot struct {
-	Config string `json:"config"`
-	Added  string `json:"added"`
-	Backup string `json:"backup"`
-}
-
-// themeState is state.json: what is in force, at which generation, and one
-// snapshot per user file the sync edited.
+// themeState is state.json: what is in force, at which generation, the
+// derived theme, and one snapshot per user file the sync edited. A field the
+// struct no longer names (the retired palette, mode and claude) is ignored on
+// read and dropped on the next write.
 type themeState struct {
 	Enabled    bool              `json:"enabled"`
-	Palette    string            `json:"palette"`
-	Mode       Mode              `json:"mode"`
 	Appearance Appearance        `json:"appearance"`
 	Generation int               `json:"generation"`
-	Claude     map[string]string `json:"claude,omitempty"`
+	Source     *SourceInfo       `json:"source,omitempty"`
+	Accounts   map[string]string `json:"accounts,omitempty"`
+	Applied    *Applied          `json:"applied,omitempty"`
+	LastFlip   *Flip             `json:"lastFlip,omitempty"`
+	LastLog    string            `json:"lastLog,omitempty"`
 	Herdr      *herdrSnapshot    `json:"herdr,omitempty"`
-	Ghostty    *ghosttySnapshot  `json:"ghostty,omitempty"`
 	VSCode     map[string]string `json:"vscode,omitempty"`
 	Due        map[string]bool   `json:"due,omitempty"`
 	// OffPending marks an off that left a surface unrestored, a tmux server or

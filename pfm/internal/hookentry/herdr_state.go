@@ -679,11 +679,12 @@ func (reporter *herdrReporter) event(
 	if action == nil || state.Seq > reporter.seq || keepsStored(reporter.options.event, payload, state) {
 		return nil
 	}
-	gone, err := reporter.liveClients(ctx, session, &state)
+	split, err := reporter.liveClients(ctx, session, &state, !action.release)
 	if err != nil {
 		return err
 	}
 	clients, moved, _, resolveErr := reporter.resolveClients(ctx, &state, action.release)
+	split.markMoved(clients, moved)
 	next := action.stored
 	next.Seq = reporter.seq
 	next.Name = state.Name
@@ -691,8 +692,8 @@ func (reporter *herdrReporter) event(
 	if err := reporter.writeState(ctx, session, next); err != nil {
 		return err
 	}
-	errs := []error{resolveErr, reporter.blankTitle(ctx, action), reporter.watch(session, next, payload)}
-	errs = append(errs, reporter.releaseAll(ctx, reporter.engineLabel(state), gone))
+	errs := []error{split.errs, resolveErr, reporter.blankTitle(ctx, action), reporter.watch(session, next, payload)}
+	errs = append(errs, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone))
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]
 		errs = append(errs, reporter.send(

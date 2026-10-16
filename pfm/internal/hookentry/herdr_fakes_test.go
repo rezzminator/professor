@@ -261,14 +261,13 @@ func (server *fakeHerdr) calls() []string {
 	return calls
 }
 
-// fakeTmux plays the one chat server a hook sees: its session environment, the
+// fakeTmux plays the one chat server a hook sees: its one session, the
 // pid of the pane process, the attached client pids, the stored @pfm_herdr
 // option and the chat's name.
 type fakeTmux struct {
 	mu       sync.Mutex
 	session  string
 	panePID  string
-	env      string
 	stored   string
 	chatName string
 	window   string
@@ -318,8 +317,8 @@ func (tmux *fakeTmux) command(args []string) (string, error) {
 	switch args[0] {
 	case "display-message":
 		return tmux.session + "\t" + tmux.panePID + "\n", nil
-	case "show-environment":
-		return tmux.env, nil
+	case "list-sessions":
+		return tmux.session + "\n", nil
 	case "set-option":
 		switch args[len(args)-2] {
 		case herdrStoredOption:

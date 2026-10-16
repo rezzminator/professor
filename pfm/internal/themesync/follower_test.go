@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -46,7 +47,7 @@ func TestFollowerPlistEscapesXML(t *testing.T) {
 // run outside launchd reloads it.
 func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 	h := newHarness(t)
-	h.set("tokyo-night", ModeAuto)
+	h.on()
 	plist := "Library/LaunchAgents/com.professor.pfm.theme.plist"
 	h.write(plist, "<plist>stale render</plist>\n")
 	h.env.LaunchdJob = "com.professor.pfm.theme"
@@ -91,8 +92,7 @@ func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 
 // A rewritten follower plist owes launchd a reload until a bootstrap succeeds:
 // a failed bootout keeps it due (never IN-SYNC while the old definition runs),
-// the own-job guard never blocks a bootstrap that needs no bootout, and a
-// retire for a forced mode settles any reload still owed.
+// and the own-job guard never blocks a bootstrap that needs no bootout.
 func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 	plist := "Library/LaunchAgents/com.professor.pfm.theme.plist"
 	launchctlVerbs := func(h *harness, from int) string {
@@ -106,7 +106,7 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 	}
 	t.Run("a failed bootout stays due", func(t *testing.T) {
 		h := newHarness(t)
-		h.set("tokyo-night", ModeAuto)
+		h.on()
 		h.write(plist, "<plist>stale render</plist>\n")
 		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), followerLabel)
 		h.runner.Script(
@@ -137,7 +137,7 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 	})
 	t.Run("own job with the agent unloaded bootstraps", func(t *testing.T) {
 		h := newHarness(t)
-		h.set("tokyo-night", ModeAuto)
+		h.on()
 		h.write(plist, "<plist>stale render</plist>\n")
 		h.launchctlPrintFail = true
 		h.rearm()
@@ -150,22 +150,47 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 			t.Errorf("an unloaded agent inside its job ran launchctl %q, want bootstrap alone", got)
 		}
 	})
-	t.Run("retire clears a reload still owed", func(t *testing.T) {
-		h := newHarness(t)
-		h.set("tokyo-night", ModeAuto)
-		h.write(plist, "<plist>stale render</plist>\n")
-		h.env.LaunchdJob = followerLabel
-		if _, err := Sync(context.Background(), h.env, false); err != nil {
+}
+
+// The follower watches what moves the source: each account's real
+// settings.json, each distinct real themes dir once, and the macOS global
+// preferences; a symlinked account is watched by its real path.
+func TestFollowerWatchesRealSettingsThemesDirsAndTheGlobalPreferences(t *testing.T) {
+	home := t.TempDir()
+	for _, rel := range []string{".claude", ".claude2"} {
+		if err := os.MkdirAll(filepath.Join(home, rel, "themes"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		h.env.LaunchdJob = ""
-		h.set("tokyo-night", ModeDark)
-		state, _, err := (stateStore{dir: h.stateDir}).load()
+		if err := os.WriteFile(filepath.Join(home, rel, "settings.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".cc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, ".claude2"), filepath.Join(home, ".cc", "2")); err != nil {
+		t.Fatal(err)
+	}
+	canonical := func(rel string) string {
+		resolved, err := filepath.EvalSymlinks(filepath.Join(home, rel))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.Due[surfaceFollower] {
-			t.Errorf("mode dark retired the follower but left it due: %v", state.Due)
+		return resolved
+	}
+	want := []string{
+		canonical(".claude/settings.json"), canonical(".claude/themes"),
+		canonical(".claude2/settings.json"), canonical(".claude2/themes"),
+		filepath.Join(home, "Library", "Preferences", ".GlobalPreferences.plist"),
+	}
+	got := followerWatchPaths(home)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("watch paths = %v, want %v", got, want)
+	}
+	plist := followerPlist("/opt/pfm", home, "/s")
+	for _, path := range want {
+		if !strings.Contains(plist, "<string>"+path+"</string>") {
+			t.Errorf("plist does not watch %s:\n%s", path, plist)
 		}
-	})
+	}
 }

@@ -1,10 +1,11 @@
-// Package themesync is `pfm theme`: one pfm-owned palette, rendered into the
-// native format of every surface the user looks at — Claude Code's custom
-// theme files, pfm's per-chat tmux servers, Herdr's config, Ghostty's config
-// and the pfm VS Code extension — applied live, read back from each surface,
-// and stamped with one generation number so "in sync" is a fact the status
-// matrix proves rather than a claim. Nothing here runs until `pfm theme set`
-// writes the state file: every door other packages call is a no-op without it.
+// Package themesync is `pfm theme`: Claude Code's `theme` setting is the one
+// read-only source, derived into a Variant (or, for `auto`, two) and rendered
+// into the native format of every surface the user looks at — pfm's per-chat
+// tmux servers, Herdr's config and the pfm VS Code extension — applied live,
+// read back from each surface and stamped with one generation number so "in
+// sync" is a fact the status matrix proves rather than a claim. No Claude file
+// is ever written. Nothing here runs until `pfm theme on` writes the state
+// file: every door other packages call is a no-op without it.
 package themesync
 
 import (
@@ -20,15 +21,9 @@ import (
 // Appearance is the resolved light/dark side a render uses.
 type Appearance string
 
-// Mode is what the user asked for: follow macOS, or hold one side.
-type Mode string
-
 const (
-	Dark      Appearance = "dark"
-	Light     Appearance = "light"
-	ModeAuto  Mode       = "auto"
-	ModeDark  Mode       = "dark"
-	ModeLight Mode       = "light"
+	Dark  Appearance = "dark"
+	Light Appearance = "light"
 )
 
 // StateColors are the four agent states, one hex each, identical on every
@@ -40,9 +35,9 @@ type StateColors struct {
 	Idle    string `json:"idle"`
 }
 
-// Variant is one side (dark or light) of a palette: the terminal colours
-// (ANSI 0–15, background, foreground, cursor, selection), the UI roles the
-// non-terminal surfaces draw with, and the state colours.
+// Variant is one side of a derived theme: the terminal colours (ANSI 0–15,
+// background, foreground, cursor, selection), the UI roles the non-terminal
+// surfaces draw with, and the state colours.
 type Variant struct {
 	Background          string      `json:"background"`
 	Foreground          string      `json:"foreground"`
@@ -53,27 +48,52 @@ type Variant struct {
 	Overlay             string      `json:"overlay"`
 	Muted               string      `json:"muted"`
 	Accent              string      `json:"accent"`
+	Orange              string      `json:"orange"`
 	ANSI                [16]string  `json:"ansi"`
 	State               StateColors `json:"state"`
 }
 
-// Palette is one theme: both variants plus the Herdr built-in names its
-// custom tokens layer onto.
-type Palette struct {
-	Name       string
-	Title      string
-	Dark       Variant
-	Light      Variant
-	HerdrDark  string
-	HerdrLight string
+// Applied is the derived theme in force: the Claude `theme` value it came
+// from and its Variant — for `auto` both sides, the dark one primary. It is
+// persisted in state.json so a surface born later (a tmux server at spawn)
+// renders it without reading the source.
+type Applied struct {
+	Value     string     `json:"value"`
+	Title     string     `json:"title"`
+	Auto      bool       `json:"auto,omitempty"`
+	Side      Appearance `json:"side"`
+	Primary   Variant    `json:"primary"`
+	Alternate *Variant   `json:"alternate,omitempty"`
 }
 
-// Variant returns the side a resolved appearance selects.
-func (palette Palette) Variant(appearance Appearance) Variant {
-	if appearance == Light {
-		return palette.Light
+// variant is the side a single-variant surface (tmux, VS Code) draws: the
+// light alternate of an auto theme under a light appearance, else the primary.
+func (applied Applied) variant(appearance Appearance) Variant {
+	if applied.Auto && appearance == Light && applied.Alternate != nil {
+		return *applied.Alternate
 	}
-	return palette.Dark
+	return applied.Primary
+}
+
+// SourceInfo names the governing Claude account and the theme it set.
+type SourceInfo struct {
+	Account string     `json:"account"`
+	Path    string     `json:"path"`
+	Value   string     `json:"value"`
+	Title   string     `json:"title"`
+	Side    Appearance `json:"side"`
+}
+
+// Flip is the measured latency of the last source change: seconds from the
+// source file's mtime (At) to each surface's apply, and to the VS Code
+// extension's ack when it has acknowledged the generation.
+type Flip struct {
+	At     string   `json:"at"`
+	Source string   `json:"source"`
+	Tmux   float64  `json:"tmux,omitempty"`
+	Herdr  float64  `json:"herdr,omitempty"`
+	VSCode float64  `json:"vscode,omitempty"`
+	Ack    *float64 `json:"ack,omitempty"`
 }
 
 // Verdict is one surface's row in the sync matrix.
@@ -87,6 +107,7 @@ const (
 	VerdictAbsent   Verdict = "ABSENT"
 	VerdictError    Verdict = "ERROR"
 	VerdictRestored Verdict = "RESTORED"
+	VerdictSource   Verdict = "SOURCE"
 )
 
 // SurfaceResult is one surface's outcome: the generation the surface itself
@@ -101,14 +122,18 @@ type SurfaceResult struct {
 	Detail     string  `json:"detail"`
 }
 
-// Report is one set/sync/status/off run.
+// Report is one on/sync/status/off run.
 type Report struct {
-	Enabled    bool            `json:"enabled"`
-	Palette    string          `json:"palette"`
-	Mode       Mode            `json:"mode"`
-	Appearance Appearance      `json:"appearance"`
-	Generation int             `json:"generation"`
-	Surfaces   []SurfaceResult `json:"surfaces"`
+	Enabled    bool        `json:"enabled"`
+	Source     *SourceInfo `json:"source,omitempty"`
+	Appearance Appearance  `json:"appearance"`
+	Generation int         `json:"generation"`
+	LastFlip   *Flip       `json:"lastFlip,omitempty"`
+	// Changed says this run applied a surface; Servers counts the tmux
+	// servers it reached. The quiet follower line is built from them.
+	Changed  bool            `json:"-"`
+	Servers  int             `json:"-"`
+	Surfaces []SurfaceResult `json:"surfaces"`
 }
 
 // OK reports whether no surface is in DRIFT or ERROR.
@@ -135,25 +160,19 @@ type Env struct {
 	Home string
 	// StateDir is DefaultStateDir(Home) unless a test points it elsewhere.
 	StateDir string
-	// PfmBinary is the pfm the appearance follower's launch agent runs.
+	// PfmBinary is the pfm the follower's launch agent runs.
 	PfmBinary string
-	// Runner runs defaults, herdr, ghostty, ps, kill and launchctl.
+	// Runner runs defaults, herdr, ps and launchctl.
 	Runner deps.Runner
 	// Tmux reaches pfm's chat servers.
 	Tmux TmuxServers
 	// LaunchdJob is the launchd job label this process runs as (its
 	// XPC_SERVICE_NAME), "" outside launchd.
 	LaunchdJob string
-	// systemApps is the system Applications directory ("" is /Applications);
-	// tests point it into their own tree.
-	systemApps string
 }
 
-// Request is `pfm theme set`.
-type Request struct {
-	Palette string
-	Mode    Mode
-}
+// FollowerLabel is the launchd job label of the follower's launch agent.
+const FollowerLabel = followerLabel
 
 // tmuxStateName is the server option the agent-state hook sets and the
 // theme's state-colour formats read; off unsets it with the theme's own.
@@ -179,7 +198,7 @@ func DefaultStateDir(home string) string {
 // StateFileName is the sync's state file inside the state dir.
 const StateFileName = "state.json"
 
-// SyncOn reports whether a `pfm theme set` is in force. A state file that
+// SyncOn reports whether a `pfm theme on` is in force. A state file that
 // exists but cannot be read or parsed reports enabled, so a door errs on
 // the side of running and surfacing the error rather than silently skipping.
 func SyncOn(stateDir string) bool {
@@ -209,6 +228,5 @@ func RestorePending(stateDir string) bool {
 	if err != nil {
 		return true // the off this gates surfaces the error
 	}
-	return found && (state.Enabled || state.OffPending || len(state.Claude) > 0 || state.Herdr != nil ||
-		state.Ghostty != nil || len(state.VSCode) > 0)
+	return found && (state.Enabled || state.OffPending || state.Herdr != nil || len(state.VSCode) > 0)
 }

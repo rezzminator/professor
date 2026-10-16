@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -86,7 +87,7 @@ func TestRowsPresenceAddressesEachRowsTmuxServerAndNamesItsFailure(t *testing.T)
 		LookPath: func(string) (string, error) { return "", errors.New("unused") },
 		Tmux: func(_ context.Context, socketPath string, args ...string) (string, error) {
 			ran = append(ran, socketPath+" "+strings.Join(args, " "))
-			if filepath.Base(socketPath) == "cc-1" {
+			if filepath.Base(socketPath) == "cc-1" && args[0] == "show-options" {
 				return string(stored), nil
 			}
 			return "", nil
@@ -99,8 +100,8 @@ func TestRowsPresenceAddressesEachRowsTmuxServerAndNamesItsFailure(t *testing.T)
 	if len(got) != len(rows) {
 		t.Fatalf("rowsPresence = %q, want one entry per row", got)
 	}
-	if !strings.HasPrefix(got[0], "herdr error: ") || !strings.Contains(got[0], "refused") {
-		t.Errorf("registered row with an unreachable Herdr = %q, want herdr error naming the refusal", got[0])
+	if !strings.HasPrefix(got[0], "herdr unreachable: ") || !strings.Contains(got[0], "refused") {
+		t.Errorf("registered row with an unreachable Herdr = %q, want herdr unreachable naming the refusal", got[0])
 	}
 	if got[1] != herdr.PresenceNotInHerdr {
 		t.Errorf("resumable row = %q, want %q", got[1], herdr.PresenceNotInHerdr)
@@ -113,7 +114,9 @@ func TestRowsPresenceAddressesEachRowsTmuxServerAndNamesItsFailure(t *testing.T)
 	}
 	wantRan := []string{
 		filepath.Join(tmuxDir, "cc-1") + " show-options -qv -t sess-1 @pfm_herdr",
+		filepath.Join(tmuxDir, "cc-1") + " list-clients -t sess-1 -F #{client_pid}",
 		filepath.Join(tmuxDir, "cc-3") + " show-options -qv -t sess-3 @pfm_herdr",
+		filepath.Join(tmuxDir, "cc-3") + " list-clients -t sess-3 -F #{client_pid}",
 	}
 	if strings.Join(ran, "|") != strings.Join(wantRan, "|") {
 		t.Errorf("tmux commands = %q, want %q", ran, wantRan)
@@ -179,4 +182,86 @@ func TestPresenceTmuxReadGivesUpOnAFrozenServer(t *testing.T) {
 			gather.ProbeTimeout+5*time.Second,
 		)
 	}
+}
+
+// argvProc is a process table of fixed argv per pid.
+type argvProc struct {
+	gather.ProcFS
+	argv map[int][]string
+}
+
+func (proc argvProc) Cmdline(pid int) ([]string, error) {
+	argv, found := proc.argv[pid]
+	if !found {
+		return nil, errors.New("no such process")
+	}
+	return argv, nil
+}
+
+// TestHooklessLaunchReadsTheEnginesSettingsAsTheSpawnAuditDoes pins the
+// presence layer's "launched without Herdr hooks" read: known only when the
+// pane's Claude argv carries a --settings payload (or none and is not a resume),
+// unknown — never guessed — when the launch cannot be read.
+func TestHooklessLaunchReadsTheEnginesSettingsAsTheSpawnAuditDoes(t *testing.T) {
+	herdrHook := func(event herdr.Event) string {
+		return `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":` +
+			jsonQuote(herdr.HookCommand("/h/.local/bin/pfm", pfmengine.Claude, event)) + `}]}]}}`
+	}
+	const usageOnly = `{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command",` +
+		`"command":"/h/.local/bin/pfm usage-hook"}]}]}}`
+	cases := []struct {
+		name         string
+		pids         []int
+		argv         map[int][]string
+		wantHookless bool
+		wantKnown    bool
+	}{
+		{
+			name: "payload without a Herdr hook", pids: []int{10},
+			argv:         map[int][]string{10: {"/opt/claude", "--settings", usageOnly}},
+			wantHookless: true, wantKnown: true,
+		},
+		{
+			name: "payload with the Herdr hooks", pids: []int{10},
+			argv:      map[int][]string{10: {"/opt/claude", "--settings", herdrHook(herdr.EventIdle)}},
+			wantKnown: true,
+		},
+		{
+			name: "file-backed settings are unverified", pids: []int{10},
+			argv: map[int][]string{10: {"/opt/claude", "--settings", "/etc/settings.json"}},
+		},
+		{
+			name: "resumed argv with no payload is unverified", pids: []int{10},
+			argv: map[int][]string{10: {"/opt/claude", "--resume", "abc"}},
+		},
+		{
+			name: "no Claude process in the pane", pids: []int{10},
+			argv: map[int][]string{10: {"/bin/zsh"}},
+		},
+		{name: "no pane process", pids: nil},
+		{
+			name: "an unparsable payload is unverified", pids: []int{10},
+			argv: map[int][]string{10: {"/opt/claude", "--settings", "{not json"}},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			read := hooklessLaunch(argvProc{argv: test.argv}, "/opt/claude")
+			hookless, known := read(herdr.Seat{PanePIDs: test.pids})
+			if hookless != test.wantHookless || known != test.wantKnown {
+				t.Fatalf(
+					"hooklessLaunch = hookless %v known %v, want %v %v",
+					hookless, known, test.wantHookless, test.wantKnown,
+				)
+			}
+		})
+	}
+}
+
+func jsonQuote(text string) string {
+	encoded, err := json.Marshal(text)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
 }

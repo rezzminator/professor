@@ -1,6 +1,7 @@
 package hookentry
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -23,6 +24,26 @@ func (rig *chatRig) wantRegistry(want map[string]herdrClient) {
 	}
 }
 
+// clientEnv gives tmux client pid the environment of a terminal Herdr started in
+// pane: the variables its own process holds, the only place the reporter reads
+// them from.
+func (rig *chatRig) clientEnv(pid int, pane string) {
+	rig.t.Helper()
+	if rig.jail.paneEnv == nil {
+		rig.jail.paneEnv = map[int]map[string]string{}
+	}
+	rig.jail.paneEnv[pid] = herdrPaneEnv(rig.herdr, pane)
+}
+
+// outsideHerdr gives tmux client pid the environment of a terminal without Herdr.
+func (rig *chatRig) outsideHerdr(pid int) {
+	rig.t.Helper()
+	if rig.jail.paneEnv == nil {
+		rig.jail.paneEnv = map[int]map[string]string{}
+	}
+	rig.jail.paneEnv[pid] = map[string]string{"TERM": "xterm"}
+}
+
 func (rig *chatRig) namesNothingOf(pane string, from int) {
 	rig.t.Helper()
 	for _, call := range rig.herdr.calls()[from:] {
@@ -41,7 +62,7 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 		state.Message, state.Seq, state.Engine = "approve?", 12000, "claude"
 		rig.seed(state)
 		rig.tmux.clients = []string{"4242"}
-		rig.sessionEnv("w1:p1")
+		rig.clientEnv(4242, "w1:p1")
 		rig.wantQuiet(rig.hook("attach", "--client", "4242"))
 		rig.wantCalls(listCall, `pane.process_info {"pane_id":"w1:p1"}`, reportCall("w1:p1", "blocked", "approve?"))
 		rig.wantRegistry(map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")})
@@ -54,18 +75,20 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 			}
 		}
 	})
-	for name, env := range map[string]string{
-		"pane variable removed":           "HERDR_ENV=1\n-HERDR_PANE_ID\nHERDR_SOCKET_PATH=SOCKET\n",
-		"a terminal without Herdr":        "-HERDR_ENV\n-HERDR_PANE_ID\n-HERDR_SOCKET_PATH\n-HERDR_BIN_PATH\n",
-		"socket variable removed":         "HERDR_ENV=1\nHERDR_PANE_ID=w1:p1\n-HERDR_SOCKET_PATH\n",
-		"marker not set to the Herdr one": "HERDR_ENV=0\nHERDR_PANE_ID=w1:p1\nHERDR_SOCKET_PATH=SOCKET\n",
+	// The client's OWN environment decides: one without the Herdr marker runs
+	// outside Herdr and is skipped with no row; one that names no pane id is
+	// still found by the pane that runs its pid; the marker without a socket
+	// is a named error, never "outside Herdr".
+	for name, env := range map[string]map[string]string{
+		"a terminal without Herdr":        {"TERM": "xterm"},
+		"marker not set to the Herdr one": {"HERDR_ENV": "0", "HERDR_PANE_ID": "w1:p1", "HERDR_SOCKET_PATH": "/x"},
 	} {
-		t.Run(name+": nothing registered, nothing sent", func(t *testing.T) {
+		t.Run(name+": nothing registered, nothing sent, no row", func(t *testing.T) {
 			rig := newChatRig(t)
 			rig.seed(rig.registered("working", nil))
 			before := rig.tmux.stored
 			rig.tmux.clients = []string{"4242"}
-			rig.tmux.env = strings.ReplaceAll(env, "=SOCKET\n", "="+rig.herdr.path+"\n")
+			rig.jail.paneEnv = map[int]map[string]string{4242: env}
 			rig.wantQuiet(rig.hook("attach", "--client", "4242"))
 			rig.wantCalls()
 			if rig.tmux.stored != before || len(rig.tmux.setOptionCalls()) != 0 {
@@ -73,6 +96,30 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 			}
 		})
 	}
+	t.Run("a client environment without the pane variable is found by the pane running its pid", func(t *testing.T) {
+		rig := newChatRig(t)
+		rig.seed(rig.registered("working", nil))
+		rig.tmux.clients = []string{"4242"}
+		environment := herdrPaneEnv(rig.herdr, "")
+		delete(environment, "HERDR_PANE_ID")
+		rig.jail.paneEnv = map[int]map[string]string{4242: environment}
+		rig.wantQuiet(rig.hook("attach", "--client", "4242"))
+		rig.wantRegistry(map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")})
+	})
+	t.Run("the Herdr marker without a socket registers nothing and is a named error", func(t *testing.T) {
+		rig := newChatRig(t)
+		rig.seed(rig.registered("working", nil))
+		before := rig.tmux.stored
+		rig.tmux.clients = []string{"4242"}
+		rig.jail.paneEnv = map[int]map[string]string{4242: {"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1"}}
+		got := rig.hook("attach", "--client", "4242")
+		if got.rc != 0 || !strings.Contains(got.stderr, "4242") || !strings.Contains(got.stderr, "HERDR_SOCKET_PATH") {
+			t.Fatalf("rc=%d stderr=%q, want exit 0 naming the client and the missing socket", got.rc, got.stderr)
+		}
+		if rig.tmux.stored != before {
+			t.Fatalf("stored = %q (was %q), want it untouched", rig.tmux.stored, before)
+		}
+	})
 	// An engine that reports its session only at the first turn (Codex) is
 	// invisible in Herdr until prompted: an attach with nothing stored yet
 	// reports idle under the engine whose socket prefix the session carries, and
@@ -83,7 +130,7 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 		t.Run("nothing reported yet in "+test.session+": idle is reported under "+test.agent, func(t *testing.T) {
 			rig := newChatRig(t)
 			rig.tmux.clients = []string{"4242"}
-			rig.sessionEnv("w1:p1")
+			rig.clientEnv(4242, "w1:p1")
 			rig.wantQuiet(rig.run(
 				[]string{"attach", "--socket", rigSocket, "--session", test.session, "--client", "4242"}, "",
 			))
@@ -101,7 +148,7 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 	t.Run("nothing reported yet in a session no engine owns: registered, no state", func(t *testing.T) {
 		rig := newChatRig(t)
 		rig.tmux.clients = []string{"4242"}
-		rig.sessionEnv("w1:p1")
+		rig.clientEnv(4242, "w1:p1")
 		args := []string{"attach", "--socket", rigSocket, "--session", "zz-1", "--client", "4242"}
 		rig.wantQuiet(rig.run(args, ""))
 		rig.wantCalls(listCall, `pane.process_info {"pane_id":"w1:p1"}`)
@@ -113,7 +160,7 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 	t.Run("an engine event after the fallback idle wins over it", func(t *testing.T) {
 		rig := newChatRig(t)
 		rig.tmux.clients = []string{"4242"}
-		rig.sessionEnv("w1:p1")
+		rig.clientEnv(4242, "w1:p1")
 		rig.wantQuiet(rig.hook("attach", "--client", "4242"))
 		rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
 		if stored := rig.tmux.storedState(t); stored.State != "working" || stored.SessionID != "s1" {
@@ -132,7 +179,8 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 		rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
 		before := rig.tmux.stored
 		rig.tmux.clients = []string{"4242", "777"}
-		rig.sessionEnv("w1:p1")
+		rig.clientEnv(4242, "w1:p1")
+		rig.outsideHerdr(777)
 		rig.wantQuiet(rig.hook("sync", "--client", "777"))
 		rig.wantRegistry(map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")})
 		for _, call := range rig.herdr.calls() {
@@ -157,7 +205,7 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 			}
 			rig.seed(rig.registered("idle", nil))
 			rig.tmux.clients = []string{"4343"}
-			rig.sessionEnv("w2:p1")
+			rig.clientEnv(4343, "w2:p1")
 			rig.wantQuiet(rig.hook("attach", "--client", "4343"))
 			rig.wantRegistry(map[string]herdrClient{"4343": rig.client("w6:p3", "term_2")})
 			for _, call := range rig.herdr.calls() {
@@ -178,9 +226,9 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 		rig.seed(rig.registered("working", nil))
 		before := rig.tmux.stored
 		rig.tmux.clients = []string{"777"}
-		rig.sessionEnv("w1:p1")
+		rig.clientEnv(777, "w1:p1")
 		got := rig.hook("attach", "--client", "777")
-		if got.rc != 0 || !strings.Contains(got.stderr, "777") || !strings.Contains(got.stderr, "no Herdr pane runs") {
+		if got.rc != 0 || !strings.Contains(got.stderr, "777") || !strings.Contains(got.stderr, "runs in no pane") {
 			t.Fatalf("rc=%d stderr=%q, want exit 0 naming the client and the cause", got.rc, got.stderr)
 		}
 		if rig.tmux.stored != before {
@@ -195,7 +243,6 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 	for _, verb := range []string{"attach", "sync"} {
 		t.Run(verb+" without --client is a named error", func(t *testing.T) {
 			rig := newChatRig(t)
-			rig.sessionEnv("w1:p1")
 			got := rig.hook(verb)
 			if got.rc != 0 || !strings.Contains(got.stderr, verb+" needs --client") {
 				t.Fatalf("rc=%d stderr=%q, want exit 0 and --client named", got.rc, got.stderr)
@@ -293,7 +340,7 @@ func TestHerdrStateDetachReleasesTheClientsPane(t *testing.T) {
 	t.Run("an end event whose terminal is in no pane: nothing sent, no error row", func(t *testing.T) {
 		rig := goneClient(t)
 		rig.wantQuiet(rig.engine("end", `{"session_id":"s1","reason":"prompt_input_exit"}`))
-		rig.wantCalls(listCall)
+		rig.wantCalls(listCall, `pane.process_info {"pane_id":"w1:p1"}`)
 		if logged := rig.jail.logged("cc-1"); logged != "" {
 			t.Fatalf("cc-1.log = %q, want no error row for a gone pane", logged)
 		}
@@ -329,6 +376,7 @@ func TestHerdrStateDetachReleasesTheClientsPane(t *testing.T) {
 		rig := newChatRig(t)
 		rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
 		rig.wantQuiet(rig.hook("detach", "--client", "4242"))
+		rig.tmux.clients = nil // the detached client left tmux
 		sent := len(rig.herdr.calls())
 		rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
 		if got := rig.herdr.calls(); len(got) != sent {
@@ -340,22 +388,27 @@ func TestHerdrStateDetachReleasesTheClientsPane(t *testing.T) {
 	})
 }
 
-// Each attached client keeps its own pane: a client attaching from another pane
-// gets its own report and leaves the other pane's alone.
+// Each attached client keeps its own pane, decided by its own environment: the
+// client that attaches is bound to the pane its pid runs in, never to the pane
+// of another client (the last one to attach).
 func TestHerdrStateAnotherClientBindsToItsOwnPane(t *testing.T) {
 	rig := newChatRig(t)
 	rig.herdr.addPane("w2:p3", "term_3", 5151)
-	rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+	rig.seed(rig.registered("working", nil))
 	rig.tmux.clients = []string{"4242", "5151"}
-	rig.sessionEnv("w2:p3")
+	rig.clientEnv(4242, "w1:p1")
+	rig.clientEnv(5151, "w2:p3")
 	rig.wantQuiet(rig.hook("attach", "--client", "5151"))
-	rig.wantCalls(listCall, `pane.process_info {"pane_id":"w2:p3"}`, reportCall("w2:p3", "working", ""))
+	rig.wantCalls(
+		listCall, `pane.process_info {"pane_id":"w1:p1"}`, `pane.process_info {"pane_id":"w2:p3"}`,
+		reportCall("w1:p1", "working", ""), reportCall("w2:p3", "working", ""),
+	)
 	rig.wantRegistry(map[string]herdrClient{
 		"4242": rig.client("w1:p1", "term_1"),
 		"5151": rig.client("w2:p3", "term_3"),
 	})
 	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
-	got := rig.herdr.calls()[3:]
+	got := rig.herdr.calls()[5:]
 	want := []string{listCall, reportCall("w1:p1", "idle", ""), reportCall("w2:p3", "idle", "")}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf(
@@ -366,9 +419,10 @@ func TestHerdrStateAnotherClientBindsToItsOwnPane(t *testing.T) {
 	}
 }
 
-// An event with no live registered client sends nothing; a client that vanished
-// without a detach hook is released at the next event.
-func TestHerdrStateEventsReachOnlyLiveRegisteredClients(t *testing.T) {
+// An event reaches every live client that runs in a Herdr pane, registered or
+// not (the registry adopts it); with none it sends nothing, and a client that
+// vanished without a detach hook is released at the next event.
+func TestHerdrStateEventsReachEveryLiveClientInAHerdrPane(t *testing.T) {
 	t.Run("no registered client: stored, nothing sent", func(t *testing.T) {
 		rig := newChatRig(t)
 		rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
@@ -488,7 +542,7 @@ func TestHerdrStateTmuxHookVerbsSkipTheNestedEngineGuard(t *testing.T) {
 	rig.jail.procs = map[int]fakeProc{}
 	rig.seed(rig.registered("working", nil))
 	rig.tmux.clients = []string{"4242"}
-	rig.sessionEnv("w1:p1")
+	rig.clientEnv(4242, "w1:p1")
 	rig.wantQuiet(rig.hook("attach", "--client", "4242"))
 	rig.wantQuiet(rig.hook("sync", "--client", "4242"))
 	rig.wantQuiet(rig.hook("detach", "--client", "4242"))
@@ -558,7 +612,6 @@ func TestHerdrStateFollowsAPaneMove(t *testing.T) {
 	for _, verb := range []string{"attach", "sync"} {
 		t.Run("a registered client's "+verb+" re-binds it without tmux copying anything", func(t *testing.T) {
 			rig := moved(t)
-			rig.tmux.env = "-HERDR_ENV\n-HERDR_PANE_ID\n-HERDR_SOCKET_PATH\n"
 			rig.wantQuiet(rig.hook(verb, "--client", "4343"))
 			rig.wantCalls(
 				listCall, reportCall("w6:p3", "idle", ""),
@@ -595,7 +648,7 @@ func TestHerdrStateFollowsAPaneMove(t *testing.T) {
 		if logged := rig.jail.logged("cc-1"); !strings.Contains(logged, "term_2") {
 			t.Fatalf("cc-1.log = %q, want the unresolved terminal", logged)
 		}
-		rig.wantCalls(listCall)
+		rig.wantCalls(listCall, `pane.process_info {"pane_id":"w1:p1"}`)
 		rig.wantRegistry(map[string]herdrClient{"4343": rig.client("w2:p1", "term_2")})
 	})
 	t.Run("a failing pane.list: nothing sent, the cause named and logged", func(t *testing.T) {
@@ -611,5 +664,203 @@ func TestHerdrStateFollowsAPaneMove(t *testing.T) {
 			t.Fatalf("cc-1.log = %q, want the refusal", logged)
 		}
 		rig.wantCalls(listCall)
+	})
+}
+
+// A live tmux client whose own environment runs in a Herdr pane is adopted on
+// ANY run, not only at its attach: a record born before the hooks, across a
+// Herdr restart or never attached reaches the pane at the next event, sync or
+// name.
+func TestHerdrStateEventAdoptsAnUnregisteredLiveClient(t *testing.T) {
+	adopting := func(t *testing.T) *chatRig {
+		t.Helper()
+		rig := newChatRig(t)
+		rig.herdr.addPane("w6:p3", "term_6", 67673)
+		rig.seed(rig.registered("idle", nil))
+		rig.tmux.clients = []string{"67673"}
+		rig.clientEnv(67673, "w2:p1")
+		return rig
+	}
+	t.Run("a working event reaches the client's pane and registers it", func(t *testing.T) {
+		rig := adopting(t)
+		rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
+		rig.wantCalls(
+			listCall, `pane.process_info {"pane_id":"w1:p1"}`, `pane.process_info {"pane_id":"w6:p3"}`,
+			reportCall("w6:p3", "working", ""),
+		)
+		rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_6")})
+	})
+	t.Run("the adopted pane is named and titled", func(t *testing.T) {
+		rig := adopting(t)
+		rig.tmux.chatName = "Heal Me"
+		rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
+		calls := rig.herdr.calls()
+		if got := calls[len(calls)-3:]; strings.Join(got, "\n") !=
+			strings.Join(
+				[]string{`agent.list {}`, renameCall("w6:p3", "heal-me"), titleCall("w6:p3", "Heal Me")},
+				"\n",
+			) {
+			t.Fatalf("requests = %q, want the adopted pane named after the chat last", calls)
+		}
+	})
+	for _, verb := range []string{"sync", "name"} {
+		t.Run("a "+verb+" adopts the client and brings its pane up to date", func(t *testing.T) {
+			rig := adopting(t)
+			rig.wantQuiet(rig.hook(verb, "--client", "67673"))
+			rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_6")})
+			calls := rig.herdr.calls()
+			if got := calls[len(calls)-1]; got != reportCall("w6:p3", "idle", "") {
+				t.Fatalf("requests = %q, want the stored idle state reported to w6:p3", calls)
+			}
+		})
+	}
+	t.Run("a second client outside Herdr is skipped with no row and no request", func(t *testing.T) {
+		rig := adopting(t)
+		rig.tmux.clients = []string{"67673", "777"}
+		rig.outsideHerdr(777)
+		rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
+		rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_6")})
+		if logged := rig.jail.logged("cc-1"); logged != "" {
+			t.Fatalf("cc-1.log = %q, want no row for a client outside Herdr", logged)
+		}
+		for _, call := range rig.herdr.calls() {
+			if strings.Contains(call, "777") {
+				t.Fatalf("request %q names the client outside Herdr", call)
+			}
+		}
+	})
+	t.Run("a client whose pane cannot be found is a named row and the others are still reached", func(t *testing.T) {
+		rig := adopting(t)
+		rig.tmux.clients = []string{"67673", "888"}
+		rig.clientEnv(888, "w1:p1")
+		got := rig.engine("working", `{"session_id":"s1"}`)
+		if got.rc != 0 || !strings.Contains(got.stderr, "client 888 runs in no pane") {
+			t.Fatalf("rc=%d stderr=%q, want exit 0 naming client 888", got.rc, got.stderr)
+		}
+		rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_6")})
+	})
+	t.Run("a watch report adopts too", func(t *testing.T) {
+		rig := adopting(t)
+		state := rig.registered("blocked", nil)
+		state.Seq = 700
+		rig.seed(state)
+		rig.tmux.clients = []string{"67673"}
+		rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
+		rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_6")})
+	})
+	t.Run("the steady state adds no tmux call beyond list-clients", func(t *testing.T) {
+		rig := adopting(t)
+		rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
+		before := len(rig.tmux.allCalls())
+		rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
+		added := 0
+		for _, call := range rig.tmux.allCalls()[before:] {
+			if strings.Contains(call, " list-clients ") {
+				added++
+			}
+		}
+		if added != 1 {
+			t.Fatalf("tmux calls of a settled event = %q, want exactly one list-clients", rig.tmux.allCalls()[before:])
+		}
+	})
+}
+
+// A registered client whose terminal vanished from the pane listing (Herdr
+// restarted: fresh terminals) is re-bound to the pane whose foreground runs
+// its pid, and that pane gets the state, name and title again.
+func TestHerdrStateRebindsAClientWhoseTerminalVanished(t *testing.T) {
+	rig := newChatRig(t)
+	rig.herdr.addPane("w6:p3", "term_9", 67673)
+	rig.seed(rig.registered("idle", map[string]herdrClient{"67673": rig.client("w2:p1", "T9")}))
+	rig.tmux.chatName = "Back Again"
+	rig.wantQuiet(rig.engine("working", `{"session_id":"s1"}`))
+	rig.wantCalls(
+		listCall, `pane.process_info {"pane_id":"w1:p1"}`, `pane.process_info {"pane_id":"w6:p3"}`,
+		reportCall("w6:p3", "working", ""),
+		`agent.list {}`, renameCall("w6:p3", "back-again"), titleCall("w6:p3", "Back Again"),
+	)
+	rig.wantRegistry(map[string]herdrClient{"67673": rig.client("w6:p3", "term_9")})
+	if logged := rig.jail.logged("cc-1"); logged != "" || strings.Contains(rig.tmux.stored, "in no pane") {
+		t.Fatalf("cc-1.log = %q, want no row reading that the terminal is in no pane", logged)
+	}
+}
+
+// A chat nothing reported for (no @pfm_herdr, or a record with no engine) is
+// re-announced as `unknown` under the engine its socket prefix names, and its
+// name goes out as the name path sends it.
+func TestHerdrStateReannounceReportsUnknownWithoutAnEngineEvent(t *testing.T) {
+	unknownReport := func(pane string) string {
+		return `pane.report_agent {"pane_id":"` + pane + `","source":"pfm","agent":"claude","state":"unknown"}`
+	}
+	reannounce := func(rig *chatRig) ([]string, error) {
+		clock := rig.clock
+		deps := rig.jail.deps(rig.env, &clock)
+		deps.tmux = rig.tmux.run
+		return reannounceOn(context.Background(), rigSocket, deps)
+	}
+	for _, test := range []struct {
+		name  string
+		state *herdrStored
+	}{
+		{"no @pfm_herdr at all", nil},
+		{"an all-empty record with a name", &herdrStored{Name: "BACKGROUNDS"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newChatRig(t)
+			rig.tmux.clients = []string{"4242"}
+			rig.clientEnv(4242, "w9:p9")
+			rig.tmux.chatName = "BACKGROUNDS"
+			if test.state != nil {
+				rig.seed(*test.state)
+				rig.tmux.clients = []string{"4242"}
+			}
+			panes, err := reannounce(rig)
+			if err != nil || !slices.Equal(panes, []string{"w1:p1"}) {
+				t.Fatalf("reached = %q, err = %v, want [w1:p1] and no error", panes, err)
+			}
+			calls := rig.herdr.calls()
+			if !slices.Contains(calls, unknownReport("w1:p1")) {
+				t.Fatalf("requests = %q, want %s", calls, unknownReport("w1:p1"))
+			}
+			if !slices.Contains(calls, renameCall("w1:p1", "backgrounds")) {
+				t.Fatalf("requests = %q, want the pane named after the chat", calls)
+			}
+			rig.wantRegistry(map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")})
+			if state := rig.tmux.storedState(
+				t,
+			); state.State != "unknown" || state.Engine != "claude" ||
+				state.Seq != 0 {
+				t.Fatalf("stored = %q, want unknown under claude with the seq untouched", rig.tmux.stored)
+			}
+		})
+	}
+	t.Run("a stored state is reported as it is, an engine event wins afterwards", func(t *testing.T) {
+		rig := newChatRig(t)
+		rig.seed(rig.registered("blocked", nil))
+		rig.tmux.clients = []string{"4242"}
+		rig.clientEnv(4242, "w1:p1")
+		if panes, err := reannounce(rig); err != nil || !slices.Equal(panes, []string{"w1:p1"}) {
+			t.Fatalf("reached = %q, err = %v, want [w1:p1]", panes, err)
+		}
+		if calls := rig.herdr.calls(); !slices.Contains(calls, reportCall("w1:p1", "blocked", "")) {
+			t.Fatalf("requests = %q, want the stored blocked state", calls)
+		}
+	})
+	t.Run("a host without Herdr reaches nothing", func(t *testing.T) {
+		rig := newChatRig(t)
+		clock := rig.clock
+		deps := rig.jail.deps(map[string]string{}, &clock)
+		deps.tmux = rig.tmux.run
+		if panes, err := reannounceOn(context.Background(), rigSocket, deps); err != nil || len(panes) != 0 {
+			t.Fatalf("reached = %q, err = %v, want nothing and no error", panes, err)
+		}
+	})
+	t.Run("a socket no engine owns is an error", func(t *testing.T) {
+		rig := newChatRig(t)
+		clock := rig.clock
+		deps := rig.jail.deps(rig.env, &clock)
+		if _, err := reannounceOn(context.Background(), "/tmp/tmux-1/other", deps); err == nil {
+			t.Fatal("want an error for a socket no engine owns")
+		}
 	})
 }

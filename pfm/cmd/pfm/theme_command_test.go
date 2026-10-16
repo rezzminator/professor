@@ -7,7 +7,7 @@ import (
 )
 
 // TestThemeStatusInAFreshHomeIsOff: `pfm theme` routes to the theme verb, which
-// in a home that never ran `pfm theme set` says it is off and exits 0 without
+// in a home that never ran `pfm theme on` says it is off and exits 0 without
 // touching any surface.
 func TestThemeStatusInAFreshHomeIsOff(t *testing.T) {
 	jailTest(t)
@@ -16,7 +16,7 @@ func TestThemeStatusInAFreshHomeIsOff(t *testing.T) {
 		if code := run(args, &stdout, &stderr); code != 0 {
 			t.Fatalf("run(%q) code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
-		if want := "pfm theme: off — pfm theme set <palette> turns it on\n"; stdout.String() != want {
+		if want := "pfm theme: off — pfm theme on turns it on\n"; stdout.String() != want {
 			t.Fatalf("run(%q) stdout = %q, want %q", args, stdout.String(), want)
 		}
 	}

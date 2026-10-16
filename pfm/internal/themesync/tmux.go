@@ -48,19 +48,19 @@ func tmuxStateFormat(state StateColors) string {
 
 // tmuxOptions renders the 8 styles then the 13 @pfm-* user options for one
 // appearance at one generation.
-func (palette Palette) tmuxOptions(appearance Appearance, generation int) []tmuxOption {
-	variant := palette.Variant(appearance)
+func tmuxOptions(applied Applied, appearance Appearance, generation int) []tmuxOption {
+	variant := applied.variant(appearance)
 	format := tmuxStateFormat(variant.State)
 	options := []tmuxOption{
 		{"status-style", "bg=" + variant.Surface + ",fg=" + variant.Foreground},
 		{"window-status-style", "fg=" + variant.Muted},
 		{"window-status-current-style", "fg=" + format + ",bold"},
-		{"pane-border-style", "fg=" + variant.Overlay},
+		{"pane-border-style", "fg=" + variant.Muted},
 		{"pane-active-border-style", "fg=" + format},
 		{"message-style", "bg=" + variant.Overlay + ",fg=" + variant.Foreground},
 		{"message-command-style", "bg=" + variant.Surface + ",fg=" + variant.Accent},
 		{"mode-style", "bg=" + variant.SelectionBackground + ",fg=" + variant.SelectionForeground},
-		{"@pfm-theme", palette.Name},
+		{"@pfm-theme", applied.Value},
 		{tmuxGenerationKey, strconv.Itoa(generation)},
 		{"@pfm-c-bg", variant.Background},
 		{"@pfm-c-fg", variant.Foreground},
@@ -88,7 +88,7 @@ func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 	mark, markErr := s.servers.Show(ctx, socket, tmuxGenerationKey)
 	themed := markErr == nil && mark != ""
 	var commands [][]string
-	options := s.palette.tmuxOptions(s.state.Appearance, s.state.Generation)
+	options := tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation)
 	for _, option := range options {
 		if themed || strings.HasPrefix(option.Name, "@") {
 			continue
@@ -147,6 +147,7 @@ func (s *session) applyTmux(ctx context.Context) SurfaceResult {
 	if len(sockets) == 0 {
 		return s.absent(surfaceTmux, "", "no live pfm chat servers")
 	}
+	s.serverCount = len(sockets)
 	var failures []string
 	for _, socket := range sockets {
 		if err := s.tmuxApplySocket(ctx, socket); err != nil {
@@ -168,7 +169,8 @@ func (s *session) readTmux(ctx context.Context) SurfaceResult {
 	if len(sockets) == 0 {
 		return s.absent(surfaceTmux, "", "no live pfm chat servers")
 	}
-	options := s.palette.tmuxOptions(s.state.Appearance, s.state.Generation)
+	s.serverCount = len(sockets)
+	options := tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation)
 	var errs, drift []string
 	generation := 0
 	for _, socket := range sockets {
@@ -217,7 +219,7 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 		}
 		commands = append(commands, []string{tmuxSetOption, tmuxUnset, tmuxPriorName(name)})
 	}
-	for _, option := range s.palette.tmuxOptions(s.state.Appearance, s.state.Generation) {
+	for _, option := range tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation) {
 		if strings.HasPrefix(option.Name, "@") {
 			commands = append(commands, []string{tmuxSetOption, tmuxUnset, option.Name})
 		}

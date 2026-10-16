@@ -21,6 +21,14 @@ import (
 // its own PostToolUse, or its PostToolUseFailure. Every event that is no tool's
 // (a prompt, Stop, the idle prompt, the deny watch's idle, a new request)
 // leaves it as before.
+//
+// The request is named by tool and input, never by the tool_use_id: Claude Code
+// 2.1.301 builds its PermissionRequest hook input from tool_name, tool_input,
+// permission_suggestions and the mcp server, and only the PostToolUse and
+// PostToolUseFailure inputs carry tool_use_id (binary probe, `hook_event_name:
+// "PermissionRequest"` against `hook_event_name:"PostToolUse"` ... tool_use_id),
+// so the id cannot pair the two. Two identical calls of one batch therefore
+// share a hold until one finishes.
 
 // keepsStored reports whether the stored state outlives this event unchanged:
 // nothing is stored, sent or watched anew.

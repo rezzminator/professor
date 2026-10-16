@@ -7,13 +7,22 @@ import (
 )
 
 func TestVscodeContractKeysAndValues(t *testing.T) {
-	palette := tokyoNight(t)
-	contract := palette.vscodeContract(ModeAuto, Dark, 4)
-	if !contract.Enabled || contract.Generation != 4 || contract.Palette != "tokyo-night" ||
-		contract.Title != "Tokyo Night" ||
-		contract.Mode != "auto" ||
-		contract.Appearance != "dark" {
+	applied := goldApplied(t)
+	contract := applied.vscodeContract(Dark, 4)
+	if !contract.Enabled || contract.Generation != 4 || contract.Palette != "custom:professor-gold" ||
+		contract.Title != "Professor Gold · Tokyo Night" || contract.Mode != "dark" || contract.Appearance != "dark" {
 		t.Fatalf("contract = %+v", contract)
+	}
+	if contract.Colors["terminal.background"] != "#1a1b26" || contract.Colors["terminal.ansiRed"] != "#f7768e" {
+		t.Fatalf("colors = %v", contract.Colors)
+	}
+	auto, err := resolveValue("auto", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := auto.Applied.vscodeContract(Light, 2); got.Mode != "auto" || got.Appearance != "light" ||
+		got.Colors["terminal.background"] != "#ffffff" {
+		t.Fatalf("auto contract under a light appearance = %+v", got)
 	}
 	wantKeys := []string{
 		"terminal.background",
@@ -46,7 +55,7 @@ func TestVscodeContractKeysAndValues(t *testing.T) {
 			t.Errorf("colors lacks %s", key)
 		}
 	}
-	variant := palette.Dark
+	variant := applied.Primary
 	if contract.Colors["terminal.ansiRed"] != variant.ANSI[1] ||
 		contract.Colors["terminal.ansiBrightWhite"] != variant.ANSI[15] ||
 		contract.Colors["terminal.tab.activeBorder"] != variant.Accent ||
@@ -99,12 +108,28 @@ func TestVscodeVerdictMatrix(t *testing.T) {
 			VerdictPending,
 			"waiting for the extension",
 		},
-		{"stale ack after the grace window", vscodeAck{Generation: 3}, true, true, stale, VerdictDrift, "generation 3"},
-		{"no ack after the grace window", vscodeAck{}, false, true, stale, VerdictDrift, "no ack"},
+		{
+			"no ack ever after the grace window",
+			vscodeAck{},
+			false,
+			true,
+			stale,
+			VerdictPending,
+			"reload a VS Code window once: no Professor extension has acknowledged a theme yet (/s/vscode-ack.json absent)",
+		},
+		{
+			"older generation after the grace window",
+			vscodeAck{Generation: 2},
+			true,
+			true,
+			stale,
+			VerdictDrift,
+			"generation 2, want 4",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			verdict, detail := vscodeVerdict(tc.ack, tc.haveAck, 4, tc.running, tc.age)
+			verdict, detail := vscodeVerdict(tc.ack, tc.haveAck, 4, tc.running, tc.age, "/s/vscode-ack.json")
 			if verdict != tc.want || !strings.Contains(detail, tc.detail) {
 				t.Fatalf("vscodeVerdict = %s %q, want %s containing %q", verdict, detail, tc.want, tc.detail)
 			}

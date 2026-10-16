@@ -101,21 +101,33 @@ func healthyHerdr(t *testing.T) *herdrFake {
 	})
 }
 
-// fakeTmux answers show-options per session with its stored JSON (or error)
-// and counts every call.
+// fakeTmux answers show-options per session with its stored JSON (or error),
+// list-clients per session with its attached client pids (one per line), and
+// counts every call.
 type fakeTmux struct {
-	stored map[string]string
-	errs   map[string]error
-	calls  int
+	stored  map[string]string
+	clients map[string]string
+	errs    map[string]error
+	calls   int
 }
 
 func (tmux *fakeTmux) run(_ context.Context, socketPath string, args ...string) (string, error) {
 	tmux.calls++
-	session := args[len(args)-2]
-	if err := tmux.errs[session]; err != nil {
-		return "", err
+	switch args[0] {
+	case "show-options":
+		session := args[len(args)-2]
+		if err := tmux.errs[session]; err != nil {
+			return "", err
+		}
+		return tmux.stored[socketPath+"|"+session], nil
+	case "list-clients":
+		session := args[len(args)-3]
+		if err := tmux.errs["clients:"+session]; err != nil {
+			return "", err
+		}
+		return tmux.clients[socketPath+"|"+session], nil
 	}
-	return tmux.stored[socketPath+"|"+session], nil
+	return "", errors.New("fakeTmux: unexpected command " + strings.Join(args, " "))
 }
 
 func storedWith(clients map[string]Client) string {
@@ -331,10 +343,16 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 		"names no session",
 		"must be one relative",
 	}
+	// A Herdr socket that could not be read is unreachable; every other failure
+	// stays a herdr error.
+	leads := []string{
+		"herdr unreachable: ", "herdr unreachable: ", "herdr unreachable: ",
+		"herdr error: ", "herdr error: ", "herdr error: ", "herdr error: ", "herdr error: ",
+	}
 	for offset, cause := range causes {
 		text := got[offset+1]
-		if !strings.HasPrefix(text, "herdr error: ") || !strings.Contains(text, cause) {
-			t.Errorf("seat %d Presence = %q, want %q naming %q", offset+1, text, "herdr error: …", cause)
+		if !strings.HasPrefix(text, leads[offset]) || !strings.Contains(text, cause) {
+			t.Errorf("seat %d Presence = %q, want %q naming %q", offset+1, text, leads[offset]+"…", cause)
 		}
 		if text == PresenceNotInHerdr {
 			t.Errorf("seat %d failed lookup read as %q", offset+1, PresenceNotInHerdr)
@@ -342,5 +360,206 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 	}
 	if lines := strings.Count(warn.String(), "\n"); lines != len(causes) {
 		t.Errorf("warn lines = %d, want one per failed seat (%d):\n%s", lines, len(causes), warn.String())
+	}
+}
+
+// liveHerdr is a Herdr whose pane w6:p2 runs the tmux client 66597 and holds an
+// agent Herdr reports `unknown` (the reporter hooks never ran), and whose pane
+// wA:p1 runs client 77001 (its fake answers the same foreground for every pane,
+// so a client is placed by the pane its HERDR_PANE_ID names, asked first).
+func liveHerdr(t *testing.T) *herdrFake {
+	t.Helper()
+	return serveHerdr(t, map[string]string{
+		"pane.list": panesJSON,
+		"agent.list": `{"type":"agent_list","agents":[` +
+			`{"pane_id":"w6:p2","workspace_id":"w6","agent":"claude","agent_status":"unknown","name":"KEYS"},` +
+			`{"pane_id":"wA:p1","workspace_id":"wA","agent":"claude","agent_status":"idle","name":null}]}`,
+		"workspace.list": workspacesJSON,
+		"pane.process_info": `{"type":"pane_process_info","process_info":` +
+			`{"foreground_processes":[{"pid":66597},{"pid":77001}]}}`,
+	})
+}
+
+// clientEnv is a tmux client's environment: inside Herdr on socket with
+// HERDR_PANE_ID pane, or outside Herdr when socket is empty.
+func clientEnv(socket, pane string) map[string]string {
+	if socket == "" {
+		return map[string]string{"TERM": "xterm"}
+	}
+	return map[string]string{EnvMarker: "1", EnvSocket: socket, EnvPane: pane}
+}
+
+func TestPresenceResolvesAnUnregisteredClientLive(t *testing.T) {
+	fake := liveHerdr(t)
+	tmux := &fakeTmux{
+		// No @pfm_herdr option: the reporter never registered the client.
+		clients: map[string]string{"/t/cc-keys|KEYS": "66597\n"},
+	}
+	var warn strings.Builder
+	probe := probeFor(tmux, true, &warn)
+	probe.Environ = func(pid int) (map[string]string, error) {
+		if pid != 66597 {
+			t.Errorf("Environ(%d), want only the live client 66597", pid)
+		}
+		return clientEnv(fake.path, "w6:p2"), nil
+	}
+	hooklessAsked := 0
+	probe.Hookless = func(seat Seat) (bool, bool) {
+		hooklessAsked++
+		if seat.Name != "KEYS" || len(seat.PanePIDs) != 1 || seat.PanePIDs[0] != 5150 {
+			t.Errorf("Hookless seat = %+v, want the chat KEYS with its pane pid", seat)
+		}
+		return true, true
+	}
+	seat := Seat{SocketPath: "/t/cc-keys", Session: "KEYS", Name: "KEYS", PanePIDs: []int{5150}}
+	got := probe.Presence(context.Background(), []Seat{seat})
+	want := "w6:p2 .professor unknown KEYS · launched without Herdr hooks: pfm chat reload KEYS"
+	if got[0] != want {
+		t.Fatalf("Presence of an unregistered live client = %q, want %q", got[0], want)
+	}
+	if hooklessAsked != 1 || warn.Len() != 0 {
+		t.Errorf("Hookless asked %d times, warn %q; want once and silent", hooklessAsked, warn.String())
+	}
+	// The cost of a live read per chat: two tmux reads (the registry, the
+	// clients), one process-info request for the one pane its environment
+	// names, and the three listings once per Herdr socket.
+	if tmux.calls != 2 || fake.count("pane.process_info") != 1 || fake.total() != 4 {
+		t.Errorf("a live read cost %d tmux calls and %d Herdr requests (%d process_info), want 2 and 4 (1)",
+			tmux.calls, fake.total(), fake.count("pane.process_info"))
+	}
+}
+
+func TestPresenceLiveClientCases(t *testing.T) {
+	fake := liveHerdr(t)
+	unknownHookless := func(known, hookless bool) func(Seat) (bool, bool) {
+		return func(Seat) (bool, bool) { return hookless, known }
+	}
+	cases := []struct {
+		name     string
+		clients  string
+		envs     map[int]map[string]string
+		hookless func(Seat) (bool, bool)
+		want     string
+	}{
+		{name: "no client", clients: "", want: PresenceNotInHerdr},
+		{
+			name: "a client outside Herdr", clients: "123\n",
+			envs: map[int]map[string]string{123: clientEnv("", "")},
+			want: PresenceAttachedOutside,
+		},
+		{
+			name: "two clients, both panes comma-joined by pid", clients: "77001\n66597\n",
+			envs: map[int]map[string]string{
+				66597: clientEnv(fake.path, "w6:p2"), 77001: clientEnv(fake.path, "wA:p1"),
+			},
+			hookless: unknownHookless(true, false),
+			want:     "w6:p2 .professor unknown KEYS, wA:p1 wA idle",
+		},
+		{
+			name: "one inside and one outside Herdr shows the pane", clients: "66597\n123\n",
+			envs: map[int]map[string]string{
+				66597: clientEnv(fake.path, "w6:p2"), 123: clientEnv("", ""),
+			},
+			hookless: unknownHookless(true, false),
+			want:     "w6:p2 .professor unknown KEYS",
+		},
+		{
+			name: "hookless unreadable leaves the detail out", clients: "66597\n",
+			envs:     map[int]map[string]string{66597: clientEnv(fake.path, "w6:p2")},
+			hookless: unknownHookless(false, true),
+			want:     "w6:p2 .professor unknown KEYS",
+		},
+		{
+			name: "a chat launched with the hooks has no detail", clients: "66597\n",
+			envs:     map[int]map[string]string{66597: clientEnv(fake.path, "w6:p2")},
+			hookless: unknownHookless(true, false),
+			want:     "w6:p2 .professor unknown KEYS",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			tmux := &fakeTmux{clients: map[string]string{"/t/cc-keys|KEYS": test.clients}}
+			var warn strings.Builder
+			probe := probeFor(tmux, true, &warn)
+			probe.Environ = func(pid int) (map[string]string, error) { return test.envs[pid], nil }
+			probe.Hookless = test.hookless
+			seat := Seat{SocketPath: "/t/cc-keys", Session: "KEYS", Name: "KEYS"}
+			if got := probe.Presence(context.Background(), []Seat{seat}); got[0] != test.want {
+				t.Fatalf("Presence = %q, want %q (warn %q)", got[0], test.want, warn.String())
+			}
+		})
+	}
+}
+
+func TestPresenceNamesAHerdrReadFailure(t *testing.T) {
+	healthy := liveHerdr(t)
+	refusing := serveHerdr(t, map[string]string{
+		"pane.list": "error:forbidden", "agent.list": agentsJSON, "workspace.list": workspacesJSON,
+	})
+	deadSocket := filepath.Join(t.TempDir(), "dead.sock")
+	envs := map[int]map[string]string{
+		1: clientEnv(refusing.path, "w6:p2"),
+		2: clientEnv(deadSocket, "w6:p2"),
+		3: clientEnv(healthy.path, "w6:p2"),
+		4: clientEnv(healthy.path, "w9:p9"),
+	}
+	// Clients 3 and 4 are in Herdr, but no pane's foreground holds their pids.
+	tmux := &fakeTmux{
+		clients: map[string]string{
+			"/t/cc-a|a": "1\n", "/t/cc-b|b": "2\n", "/t/cc-c|c": "3\n", "/t/cc-d|d": "4\n",
+		},
+		errs: map[string]error{"clients:e": errors.New("tmux list-clients: no server running")},
+	}
+	probe := probeFor(tmux, true, nil)
+	probe.Environ = func(pid int) (map[string]string, error) { return envs[pid], nil }
+	seats := []Seat{
+		{SocketPath: "/t/cc-a", Session: "a"},
+		{SocketPath: "/t/cc-b", Session: "b"},
+		{SocketPath: "/t/cc-c", Session: "c"},
+		{SocketPath: "/t/cc-d", Session: "d"},
+		{SocketPath: "/t/cc-e", Session: "e"},
+	}
+	var warn strings.Builder
+	probe.Warn = &warn
+	got := probe.Presence(context.Background(), seats)
+	wants := []struct{ lead, cause string }{
+		{"herdr unreachable: ", "forbidden"},
+		{"herdr unreachable: ", "dial"},
+		{"herdr error: ", "client 3 runs in no pane of " + healthy.path},
+		{"herdr error: ", "client 4 runs in no pane of " + healthy.path},
+		{"herdr error: ", "list tmux clients of e"},
+	}
+	for index, want := range wants {
+		if !strings.HasPrefix(got[index], want.lead) || !strings.Contains(got[index], want.cause) {
+			t.Errorf("seat %d Presence = %q, want %q naming %q", index, got[index], want.lead+"…", want.cause)
+		}
+	}
+	if lines := strings.Count(warn.String(), "\n"); lines != len(seats) {
+		t.Errorf("warn lines = %d, want one per failed seat (%d):\n%s", lines, len(seats), warn.String())
+	}
+}
+
+func TestPresenceRegisteredAndLiveClientsAreEachShownOnce(t *testing.T) {
+	fake := liveHerdr(t)
+	tmux := &fakeTmux{
+		stored: map[string]string{
+			"/t/cc-1|s1": storedWith(
+				map[string]Client{"77001": {Pane: "wA:p1", Terminal: "term_b", Socket: fake.path}},
+			),
+		},
+		// 77001 is registered and live (shown once, from its registration); 66597 is live only.
+		clients: map[string]string{"/t/cc-1|s1": "77001\n66597\n"},
+	}
+	var warn strings.Builder
+	probe := probeFor(tmux, true, &warn)
+	probe.Environ = func(pid int) (map[string]string, error) {
+		if pid != 66597 {
+			t.Errorf("Environ(%d), want only the unregistered live client", pid)
+		}
+		return clientEnv(fake.path, "w6:p2"), nil
+	}
+	got := probe.Presence(context.Background(), []Seat{{SocketPath: "/t/cc-1", Session: "s1", Name: "s1"}})
+	if want := "w6:p2 .professor unknown KEYS, wA:p1 wA idle"; got[0] != want {
+		t.Fatalf("Presence = %q, want %q (warn %q)", got[0], want, warn.String())
 	}
 }

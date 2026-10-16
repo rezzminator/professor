@@ -220,7 +220,8 @@ func TestHerdrStateSessionStartNamesThePanes(t *testing.T) {
 		rig := carriedRig(t)
 		rig.herdr.addPane("w2:p3", "term_3", 5151)
 		rig.tmux.clients = []string{"4242", "5151"}
-		rig.sessionEnv("w2:p3")
+		rig.clientEnv(5151, "w2:p3")
+		rig.outsideHerdr(4242)
 		rig.wantQuiet(rig.hook("attach", "--client", "5151"))
 		rig.wantCalls(
 			listCall, `pane.process_info {"pane_id":"w2:p3"}`, reportCall("w2:p3", "idle", ""),

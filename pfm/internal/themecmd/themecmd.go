@@ -1,7 +1,9 @@
-// Package themecmd is the `pfm theme` verb (status, ls, set, sync, off) and the
+// Package themecmd is the `pfm theme` verb (status, sync, on, off) and the
 // name-sync convergence door of the theme: it parses the verb, hands the work
-// to themesync, and draws the sync matrix the user looks at — one row per
-// surface with its verdict named, never a bare exit code.
+// to themesync, and draws the sync matrix the user looks at — the Claude
+// source and one row per surface with its verdict named, never a bare exit
+// code. Under the follower's launchd job a sync prints only what it changed
+// or what failed.
 package themecmd
 
 import (
@@ -18,34 +20,32 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/themetmux"
 )
 
 const (
 	verbStatus = "status"
-	verbLs     = "ls"
-	verbSet    = "set"
 	verbSync   = "sync"
+	verbOn     = "on"
 	verbOff    = "off"
 )
 
-const usage = `usage: pfm theme [status|ls|set|sync|off] [options]
-  status             the sync matrix: one row per surface, its verdict and generation (default; --json)
-  ls                 every palette with its dark and light swatches; the current one is marked *
-  set <palette>      theme every surface now and keep them in sync (--appearance auto|dark|light, --json)
-  sync               follow the system appearance now (--force re-applies; --json)
+const usage = `usage: pfm theme [status|sync|on|off] [options]
+  status             the sync matrix: the Claude source, one row per surface, its verdict and generation (default; --json)
+  sync               follow Claude Code's theme now (--force re-applies; --json)
+  on                 follow Claude Code's theme: install the follower and theme every surface (--json)
   off                restore every surface exactly as it was and stop syncing (--json)`
 
 // Ops is themesync as the verb calls it; tests inject fakes.
 type Ops struct {
-	Set           func(context.Context, themesync.Env, themesync.Request) (themesync.Report, error)
-	Sync          func(ctx context.Context, env themesync.Env, force bool) (themesync.Report, error)
-	ReadBack      func(context.Context, themesync.Env) (themesync.Report, error)
-	Off           func(context.Context, themesync.Env) (themesync.Report, error)
-	Palettes      func() []themesync.Palette
-	PaletteByName func(string) (themesync.Palette, error)
-	SyncOn        func(stateDir string) bool
+	On       func(context.Context, themesync.Env) (themesync.Report, error)
+	Sync     func(ctx context.Context, env themesync.Env, force bool) (themesync.Report, error)
+	ReadBack func(context.Context, themesync.Env) (themesync.Report, error)
+	Off      func(context.Context, themesync.Env) (themesync.Report, error)
+	SyncOn   func(stateDir string) bool
+	LogOnce  func(env themesync.Env, line string) (fresh bool, err error)
 }
 
 // Deps is everything a run touches.
@@ -60,8 +60,8 @@ type Deps struct {
 // RealOps is themesync itself.
 func RealOps() Ops {
 	return Ops{
-		Set: themesync.Set, Sync: themesync.Sync, ReadBack: themesync.ReadBack, Off: themesync.Off,
-		Palettes: themesync.Palettes, PaletteByName: themesync.PaletteByName, SyncOn: themesync.SyncOn,
+		On: themesync.On, Sync: themesync.Sync, ReadBack: themesync.ReadBack, Off: themesync.Off,
+		SyncOn: themesync.SyncOn, LogOnce: themesync.LogOnce,
 	}
 }
 
@@ -111,10 +111,8 @@ func RunVerb(ctx context.Context, args []string, d Deps, stdout, stderr io.Write
 	}
 	run := runner{ctx: ctx, deps: d, stdout: stdout, stderr: stderr}
 	switch verb {
-	case verbStatus, verbLs, verbSync, verbOff:
+	case verbStatus, verbSync, verbOn, verbOff:
 		return run.flagged(verb, args)
-	case verbSet:
-		return run.set(args)
 	case "help":
 		fmt.Fprintln(stdout, usage)
 		return 0
@@ -158,13 +156,14 @@ func (run runner) flagged(verb string, args []string) int {
 	if err != nil {
 		return run.fail(err)
 	}
-	if verb == verbLs {
-		return run.ls(env)
-	}
+	quiet := verb == verbSync && env.LaunchdJob == themesync.FollowerLabel && !*asJSON
 	// A sync that was never switched on has nothing to read, follow or
 	// re-apply: say so, never fail. (off still runs: it restores whatever a
-	// half-finished earlier run left.)
-	if verb != verbOff && !run.deps.Ops.SyncOn(env.StateDir) {
+	// half-finished earlier run left; on turns it on.)
+	if verb != verbOff && verb != verbOn && !run.deps.Ops.SyncOn(env.StateDir) {
+		if quiet {
+			return 0
+		}
 		return run.printReport(themesync.Report{}, *asJSON)
 	}
 	var report themesync.Report
@@ -173,8 +172,13 @@ func (run runner) flagged(verb string, args []string) int {
 		report, err = run.deps.Ops.ReadBack(run.ctx, env)
 	case verbSync:
 		report, err = run.deps.Ops.Sync(run.ctx, env, *force)
+	case verbOn:
+		report, err = run.deps.Ops.On(run.ctx, env)
 	default:
 		report, err = run.deps.Ops.Off(run.ctx, env)
+	}
+	if quiet {
+		return run.quiet(env, report, err)
 	}
 	if err != nil {
 		return run.fail(err)
@@ -182,52 +186,46 @@ func (run runner) flagged(verb string, args []string) int {
 	return run.printReport(report, *asJSON)
 }
 
-func (run runner) set(args []string) int {
-	flags := cli.NewFlagSet("pfm theme set", usage, run.stderr)
-	asJSON := flags.Bool("json", false, "print the report as JSON")
-	appearance := flags.String("appearance", string(themesync.ModeAuto), "auto, dark or light")
-	positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
-	if !ok {
-		if code == 0 {
-			fmt.Fprintln(run.stdout, usage)
+// quiet is the follower's sync: nothing printed when nothing changed and
+// every surface reads back; one line per apply; one line per failure, the
+// same failure twice printed once (themesync.LogOnce keeps the last line).
+func (run runner) quiet(env themesync.Env, report themesync.Report, runErr error) int {
+	line, failed := "", false
+	switch {
+	case runErr != nil:
+		line, failed = "theme sync: "+pyvalue.OneLine(runErr.Error()), true
+	case !report.OK():
+		var bad []string
+		for _, surface := range report.Surfaces {
+			if surface.Verdict == themesync.VerdictDrift || surface.Verdict == themesync.VerdictError {
+				bad = append(bad, surface.Surface+" "+string(surface.Verdict)+" "+pyvalue.OneLine(surface.Detail))
+			}
 		}
-		return code
+		line = fmt.Sprintf("theme sync gen %d failed: %s", report.Generation, strings.Join(bad, "; "))
+		failed = true
+	case report.Changed && report.Source != nil:
+		line = fmt.Sprintf("theme sync gen %d: %s (%s) from %s · tmux %d · herdr · vscode contract",
+			report.Generation, report.Source.Value, report.Appearance, report.Source.Path, report.Servers)
 	}
-	if len(positional) != 1 {
-		fmt.Fprintf(run.stderr, "usage: pfm theme set <palette> [--appearance auto|dark|light] [--json]\n")
-		return 2
+	record := ""
+	if failed {
+		record = line
 	}
-	mode := themesync.Mode(*appearance)
-	if mode != themesync.ModeAuto && mode != themesync.ModeDark && mode != themesync.ModeLight {
-		fmt.Fprintf(run.stderr, "pfm theme set: appearance %q is not one of auto, dark or light\n", *appearance)
-		return 2
-	}
-	if _, err := run.deps.Ops.PaletteByName(positional[0]); err != nil {
-		names := make([]string, 0, 8)
-		palettes := run.deps.Ops.Palettes()
-		for i := range palettes {
-			names = append(names, palettes[i].Name)
-		}
-		if len(names) == 0 {
-			return run.fail(err)
-		}
-		fmt.Fprintf(
-			run.stderr,
-			"pfm theme set: unknown palette %q — known: %s\n",
-			positional[0],
-			strings.Join(names, ", "),
-		)
-		return 2
-	}
-	env, err := run.deps.Env()
+	fresh, err := run.deps.Ops.LogOnce(env, record)
 	if err != nil {
-		return run.fail(err)
+		fmt.Fprintf(run.stderr, "pfm theme: record the follower log line: %v\n", err)
+		return 1
 	}
-	report, err := run.deps.Ops.Set(run.ctx, env, themesync.Request{Palette: positional[0], Mode: mode})
-	if err != nil {
-		return run.fail(err)
+	switch {
+	case failed && fresh:
+		fmt.Fprintln(run.stderr, line)
+	case !failed && line != "":
+		fmt.Fprintln(run.stdout, line)
 	}
-	return run.printReport(report, *asJSON)
+	if failed {
+		return 1
+	}
+	return 0
 }
 
 // printReport draws one report and answers the exit code its verdicts earn.

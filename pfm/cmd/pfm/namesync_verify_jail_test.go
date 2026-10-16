@@ -160,6 +160,15 @@ func readProbe(t *testing.T, socketPath string, arguments ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
+// namesyncThemeState is a state.json a `pfm theme on` left: enabled, one
+// derived dark theme applied at generation 1.
+const namesyncThemeState = `{"enabled":true,"appearance":"dark","generation":1,"applied":{"value":"custom:professor-gold",` +
+	`"title":"Professor Gold","side":"dark","primary":{"background":"#1a1b26","foreground":"#c0caf5","cursor":"#c0caf5",` +
+	`"selectionBackground":"#283457","selectionForeground":"#c0caf5","surface":"#1f2335","overlay":"#292e42",` +
+	`"muted":"#565f89","accent":"#7aa2f7","orange":"#ec937b","ansi":["#1a1b26","#f7768e","#9ece6a","#e0af68","#7aa2f7",` +
+	`"#bb9af7","#7dcfff","#c0caf5","#565f89","#f7768e","#9ece6a","#e0af68","#7aa2f7","#bb9af7","#7dcfff","#c0caf5"],` +
+	`"state":{"blocked":"#bb9af7","working":"#7aa2f7","done":"#9ece6a","idle":"#7b84af"}}}}`
+
 // name-sync --apply carries the theme to every live chat server through the
 // theme's own door: nothing is said or touched while `pfm theme` has never
 // been set, and with the sync on each live server is themed and counted.
@@ -209,7 +218,7 @@ func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(stateDir, themesync.StateFileName),
-		[]byte(`{"enabled":true,"palette":"tokyo-night","mode":"dark","appearance":"dark","generation":1}`),
+		[]byte(namesyncThemeState),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -220,7 +229,13 @@ func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
 		t.Fatalf("with the sync on, name-sync must theme the live server: code=%d\nstdout=%q\nstderr=%q",
 			code, on.String(), onErr.String())
 	}
-	if got := readProbe(t, filepath.Join(tmuxDir, socket), "show", "-gv", "@pfm-theme"); got != "tokyo-night" {
-		t.Fatalf("server @pfm-theme = %q, want tokyo-night", got)
+	if got := readProbe(
+		t,
+		filepath.Join(tmuxDir, socket),
+		"show",
+		"-gv",
+		"@pfm-theme",
+	); got != "custom:professor-gold" {
+		t.Fatalf("server @pfm-theme = %q, want custom:professor-gold", got)
 	}
 }

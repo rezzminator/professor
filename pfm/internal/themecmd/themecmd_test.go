@@ -13,18 +13,19 @@ import (
 
 // call records what the verb asked of themesync.
 type call struct {
-	verb    string
-	palette string
-	mode    themesync.Mode
-	force   bool
+	verb  string
+	force bool
 }
 
 type fakeThemesync struct {
-	on       bool
-	report   themesync.Report
-	err      error
-	palettes []themesync.Palette
-	calls    []call
+	on      bool
+	report  themesync.Report
+	err     error
+	job     string
+	calls   []call
+	logged  []string
+	seen    map[string]bool
+	logFail error
 }
 
 func (fake *fakeThemesync) deps(color bool) Deps {
@@ -33,55 +34,37 @@ func (fake *fakeThemesync) deps(color bool) Deps {
 		return fake.report, fake.err
 	}
 	return Deps{
-		Env:   func() (themesync.Env, error) { return themesync.Env{StateDir: "/state"}, nil },
+		Env:   func() (themesync.Env, error) { return themesync.Env{StateDir: "/state", LaunchdJob: fake.job}, nil },
 		Color: color,
 		Ops: Ops{
-			Set: func(_ context.Context, _ themesync.Env, request themesync.Request) (themesync.Report, error) {
-				fake.calls = append(fake.calls, call{verb: "set", palette: request.Palette, mode: request.Mode})
-				return fake.report, fake.err
-			},
+			On: func(context.Context, themesync.Env) (themesync.Report, error) { return record("on") },
 			Sync: func(_ context.Context, _ themesync.Env, force bool) (themesync.Report, error) {
 				fake.calls = append(fake.calls, call{verb: "sync", force: force})
 				return fake.report, fake.err
 			},
 			ReadBack: func(context.Context, themesync.Env) (themesync.Report, error) { return record("status") },
 			Off:      func(context.Context, themesync.Env) (themesync.Report, error) { return record("off") },
-			Palettes: func() []themesync.Palette { return fake.palettes },
-			PaletteByName: func(name string) (themesync.Palette, error) {
-				for i := range fake.palettes {
-					palette := fake.palettes[i]
-					if palette.Name == name {
-						return palette, nil
-					}
+			SyncOn:   func(string) bool { return fake.on },
+			LogOnce: func(_ themesync.Env, line string) (bool, error) {
+				fake.logged = append(fake.logged, line)
+				if fake.seen == nil {
+					fake.seen = map[string]bool{}
 				}
-				return themesync.Palette{}, errors.New("unknown palette")
+				fresh := !fake.seen[line]
+				fake.seen = map[string]bool{line: true}
+				return fresh, fake.logFail
 			},
-			SyncOn: func(string) bool { return fake.on },
 		},
-	}
-}
-
-func variant(base string) themesync.Variant {
-	value := themesync.Variant{
-		Background: "#" + base + "0000", Foreground: "#00" + base + "00", Accent: "#0000" + base,
-		State: themesync.StateColors{Blocked: "#ff0000", Working: "#ffaa00", Done: "#00ff00", Idle: "#888888"},
-	}
-	for index := range value.ANSI {
-		value.ANSI[index] = "#" + base + base + base
-	}
-	return value
-}
-
-func twoPalettes() []themesync.Palette {
-	return []themesync.Palette{
-		{Name: "tokyo", Title: "Tokyo Night", Dark: variant("11"), Light: variant("ee")},
-		{Name: "gold", Title: "Professor Gold", Dark: variant("22"), Light: variant("dd")},
 	}
 }
 
 func matrix(verdicts ...themesync.Verdict) themesync.Report {
 	report := themesync.Report{
-		Enabled: true, Palette: "tokyo", Mode: themesync.ModeAuto, Appearance: themesync.Dark, Generation: 7,
+		Enabled: true, Appearance: themesync.Dark, Generation: 7,
+		Source: &themesync.SourceInfo{
+			Account: "~/.claude", Path: "/h/.claude/settings.json", Value: "custom:professor-gold",
+			Title: "Professor Gold · Tokyo Night", Side: themesync.Dark,
+		},
 	}
 	for index, verdict := range verdicts {
 		report.Surfaces = append(report.Surfaces, themesync.SurfaceResult{
@@ -104,27 +87,27 @@ func TestRunVerbs(t *testing.T) {
 	}{
 		{
 			name: "bare theme is status", args: nil,
-			fake:     fakeThemesync{on: true, report: matrix(themesync.VerdictInSync, themesync.VerdictInSync)},
+			fake:     fakeThemesync{on: true, report: matrix(themesync.VerdictSource, themesync.VerdictInSync)},
 			wantCode: 0, wantCalls: []call{{verb: "status"}},
 			wantStdout: []string{
-				"pfm theme · tokyo · auto → dark · gen 7",
-				"claude", "IN-SYNC", "/p/IN-SYNC", "d-IN-SYNC",
-				"in sync · 2 of 2 surfaces at gen 7",
+				"pfm theme · custom:professor-gold (Professor Gold · Tokyo Night) · dark · gen 7",
+				"claude", "SOURCE", "tmux", "IN-SYNC", "/p/IN-SYNC", "d-IN-SYNC",
+				"in sync · 1 of 1 surfaces at gen 7",
 			},
 		},
 		{
 			name: "status with the sync off prints the off line and reads nothing", args: []string{"status"},
 			fake:     fakeThemesync{on: false},
-			wantCode: 0, wantStdout: []string{"pfm theme: off — pfm theme set <palette> turns it on"},
+			wantCode: 0, wantStdout: []string{"pfm theme: off — pfm theme on turns it on"},
 		},
 		{
 			name: "status exits 1 on drift and names the surface", args: []string{"status"},
-			fake:     fakeThemesync{on: true, report: matrix(themesync.VerdictInSync, themesync.VerdictDrift)},
+			fake:     fakeThemesync{on: true, report: matrix(themesync.VerdictSource, themesync.VerdictDrift)},
 			wantCode: 1, wantCalls: []call{{verb: "status"}},
 			wantStdout: []string{"DRIFT", "OUT OF SYNC · tmux DRIFT"},
 		},
 		{
-			name:       "status exits 1 on error",
+			name:       "a source error is an ERROR row and exits 1",
 			args:       []string{"status"},
 			fake:       fakeThemesync{on: true, report: matrix(themesync.VerdictError)},
 			wantCode:   1,
@@ -134,7 +117,7 @@ func TestRunVerbs(t *testing.T) {
 		{
 			name: "pending and absent keep exit 0 and are named", args: []string{"status"},
 			fake: fakeThemesync{on: true, report: matrix(
-				themesync.VerdictInSync, themesync.VerdictPending, themesync.VerdictAbsent)},
+				themesync.VerdictSource, themesync.VerdictInSync, themesync.VerdictPending, themesync.VerdictAbsent)},
 			wantCode: 0, wantCalls: []call{{verb: "status"}},
 			wantStdout: []string{"PENDING", "ABSENT", "in sync · 1 of 3 surfaces at gen 7 · 1 pending · 1 absent"},
 		},
@@ -144,59 +127,23 @@ func TestRunVerbs(t *testing.T) {
 			wantCode: 1, wantCalls: []call{{verb: "status"}}, wantStderr: []string{"pfm theme: state unreadable"},
 		},
 		{
-			name: "set defaults to auto", args: []string{"set", "tokyo"},
-			fake:     fakeThemesync{palettes: twoPalettes(), report: matrix(themesync.VerdictApplied)},
-			wantCode: 0, wantCalls: []call{{verb: "set", palette: "tokyo", mode: themesync.ModeAuto}},
-			wantStdout: []string{"APPLIED"},
+			name: "on follows the source", args: []string{"on"},
+			fake:     fakeThemesync{report: matrix(themesync.VerdictSource, themesync.VerdictInSync)},
+			wantCode: 0, wantCalls: []call{{verb: "on"}}, wantStdout: []string{"IN-SYNC"},
 		},
 		{
-			name:       "set takes the appearance flag after the palette",
-			args:       []string{"set", "gold", "--appearance", "light"},
-			fake:       fakeThemesync{palettes: twoPalettes(), report: matrix(themesync.VerdictApplied)},
-			wantCode:   0,
-			wantCalls:  []call{{verb: "set", palette: "gold", mode: themesync.ModeLight}},
-			wantStdout: []string{"APPLIED"},
-		},
-		{
-			name:       "set takes the appearance flag before the palette",
-			args:       []string{"set", "--appearance=dark", "gold"},
-			fake:       fakeThemesync{palettes: twoPalettes(), report: matrix(themesync.VerdictApplied)},
-			wantCode:   0,
-			wantCalls:  []call{{verb: "set", palette: "gold", mode: themesync.ModeDark}},
-			wantStdout: []string{"APPLIED"},
-		},
-		{
-			name: "unknown palette names the known ones and exits 2", args: []string{"set", "nope"},
-			fake:     fakeThemesync{palettes: twoPalettes()},
-			wantCode: 2, wantStderr: []string{`unknown palette "nope"`, "known: tokyo, gold"},
-		},
-		{
-			name: "set without a palette is usage",
-			args: []string{"set"},
+			name: "on failure exits 1 with the cause",
+			args: []string{"on"},
 			fake: fakeThemesync{
-				palettes: twoPalettes(),
+				err: errors.New("custom theme gold: open /h/.claude/themes/gold.json: no such file or directory"),
 			},
-			wantCode:   2,
-			wantStderr: []string{"usage: pfm theme set <palette>"},
-		},
-		{
-			name: "bad appearance exits 2",
-			args: []string{"set", "tokyo", "--appearance", "dusk"},
-			fake: fakeThemesync{
-				palettes: twoPalettes(),
-			},
-			wantCode:   2,
-			wantStderr: []string{`appearance "dusk"`, "auto, dark or light"},
-		},
-		{
-			name: "set failure exits 1 with the cause", args: []string{"set", "tokyo"},
-			fake:     fakeThemesync{palettes: twoPalettes(), err: errors.New("herdr config is read-only")},
-			wantCode: 1, wantCalls: []call{{verb: "set", palette: "tokyo", mode: themesync.ModeAuto}},
-			wantStderr: []string{"pfm theme: herdr config is read-only"},
+			wantCode:   1,
+			wantCalls:  []call{{verb: "on"}},
+			wantStderr: []string{"pfm theme: custom theme gold"},
 		},
 		{
 			name: "sync", args: []string{"sync"},
-			fake:     fakeThemesync{on: true, report: matrix(themesync.VerdictInSync)},
+			fake:     fakeThemesync{on: true, report: matrix(themesync.VerdictSource, themesync.VerdictInSync)},
 			wantCode: 0, wantCalls: []call{{verb: "sync"}}, wantStdout: []string{"IN-SYNC"},
 		},
 		{
@@ -226,6 +173,15 @@ func TestRunVerbs(t *testing.T) {
 			name: "off failure exits 1", args: []string{"off"},
 			fake:     fakeThemesync{err: errors.New("snapshot missing")},
 			wantCode: 1, wantCalls: []call{{verb: "off"}}, wantStderr: []string{"pfm theme: snapshot missing"},
+		},
+		{
+			name: "the retired set verb is an unknown subcommand", args: []string{"set", "tokyo-night"},
+			fake: fakeThemesync{}, wantCode: 2,
+			wantStderr: []string{`unknown subcommand "set"`, "usage: pfm theme [status|sync|on|off]"},
+		},
+		{
+			name: "the retired ls verb is an unknown subcommand", args: []string{"ls"},
+			fake: fakeThemesync{}, wantCode: 2, wantStderr: []string{`unknown subcommand "ls"`},
 		},
 		{
 			name: "unknown verb is usage", args: []string{"paint"},

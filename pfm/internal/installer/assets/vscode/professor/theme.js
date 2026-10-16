@@ -1,4 +1,4 @@
-// `pfm theme` inside VS Code. pfm (pfm/internal/themesync) renders one palette into every surface
+// `pfm theme` inside VS Code. pfm (pfm/internal/themesync) renders Claude Code's theme into every surface
 // the user looks at; VS Code's is the integrated terminal. pfm writes the contract
 // {stateDir}/current.json — {enabled, generation, palette, title, mode, appearance, colors} — and
 // this module merges `colors` into the user's GLOBAL workbench.colorCustomizations, touching no
@@ -139,7 +139,7 @@ async function applyContract(dir) {
         if (err.code !== 'ENOENT') throw new Error(`read ${recordPath}: ${err.message}`);
       }
       // A generation applies once: another window, or this one restarting, finds it done, and a
-      // colour the user set by hand since stays theirs until the next `pfm theme set` or sync.
+      // colour the user set by hand since stays theirs until the next `pfm theme on` or sync.
       if (contract.enabled && ack.generation !== null && record.generation === ack.generation) return;
       const workbench = vscode.workspace.getConfiguration('workbench');
       const global = workbench.inspect('colorCustomizations')?.globalValue || {};
@@ -158,7 +158,7 @@ async function applyContract(dir) {
 }
 
 // startThemeSync watches the contract (polling: the file and its directory may not exist until
-// the first `pfm theme set`) and applies it at start and on every change, one apply at a time. It
+// the first `pfm theme on`) and applies it at start and on every change, one apply at a time. It
 // returns the disposable for activate's subscriptions and syncTheme, the extension's exported API.
 function startThemeSync() {
   const dir = stateDir();

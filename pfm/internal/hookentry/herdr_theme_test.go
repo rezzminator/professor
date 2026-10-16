@@ -11,7 +11,7 @@ import (
 )
 
 // themeOn switches the `pfm theme` sync on in the rig's jail the way
-// `pfm theme set` leaves it: a state file that says enabled.
+// `pfm theme on` leaves it: a state file that says enabled.
 func (rig *chatRig) themeOn() {
 	rig.t.Helper()
 	rig.jail.stateDir = filepath.Join(testjail.ShortRoot(rig.t), "theme")

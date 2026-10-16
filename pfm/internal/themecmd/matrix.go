@@ -5,18 +5,19 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
-const offLine = "pfm theme: off — pfm theme set <palette> turns it on"
+const offLine = "pfm theme: off — pfm theme on turns it on"
 
 // verdictColor is the SGR code a verdict is drawn in: green for a surface that
 // agrees, yellow for one still to catch up, dim for one that is not installed,
 // red for one that disagrees or failed.
 func verdictColor(verdict themesync.Verdict) string {
 	switch verdict {
-	case themesync.VerdictInSync, themesync.VerdictApplied, themesync.VerdictRestored:
+	case themesync.VerdictInSync, themesync.VerdictApplied, themesync.VerdictRestored, themesync.VerdictSource:
 		return "32"
 	case themesync.VerdictPending:
 		return "33"
@@ -41,12 +42,11 @@ func drawMatrix(out io.Writer, report themesync.Report, color bool) {
 		fmt.Fprintln(out, offLine)
 		return
 	}
-	if report.Enabled {
+	if report.Enabled || report.Source != nil {
 		fmt.Fprintf(
 			out,
-			"pfm theme · %s · %s → %s · gen %d\n",
-			report.Palette,
-			report.Mode,
+			"pfm theme · %s · %s · gen %d\n",
+			sourceTitle(report.Source),
 			report.Appearance,
 			report.Generation,
 		)
@@ -79,13 +79,44 @@ func drawMatrix(out io.Writer, report themesync.Report, color bool) {
 	if report.Enabled {
 		fmt.Fprintln(out, proofLine(report, color))
 	}
+	if report.LastFlip != nil {
+		fmt.Fprintln(out, flipLine(*report.LastFlip))
+	}
+}
+
+// sourceTitle names the theme the header follows.
+func sourceTitle(source *themesync.SourceInfo) string {
+	switch {
+	case source == nil:
+		return "no source"
+	case source.Title == "" || source.Title == source.Value:
+		return source.Value
+	}
+	return source.Value + " (" + source.Title + ")"
+}
+
+// flipLine is the measured latency of the last source change (D23).
+func flipLine(flip themesync.Flip) string {
+	at := flip.At
+	if parsed, err := time.Parse(time.RFC3339Nano, flip.At); err == nil {
+		at = parsed.UTC().Format(time.RFC3339)
+	}
+	parts := []string{
+		fmt.Sprintf("tmux +%.2f s", flip.Tmux), fmt.Sprintf("herdr +%.2f s", flip.Herdr),
+		fmt.Sprintf("vscode contract +%.2f s", flip.VSCode),
+	}
+	line := fmt.Sprintf("last flip %s %s: %s", at, flip.Source, strings.Join(parts, " · "))
+	if flip.Ack != nil {
+		line += fmt.Sprintf(", ack +%.2f s", *flip.Ack)
+	}
+	return line
 }
 
 // proofLine is the one sentence the matrix closes on: every surface at the
 // same generation, or exactly which surfaces are not.
 func proofLine(report themesync.Report, color bool) string {
 	var bad []string
-	agree, pending, absent := 0, 0, 0
+	agree, pending, absent, sources := 0, 0, 0, 0
 	for _, surface := range report.Surfaces {
 		switch surface.Verdict {
 		case themesync.VerdictDrift, themesync.VerdictError:
@@ -94,6 +125,8 @@ func proofLine(report themesync.Report, color bool) string {
 			pending++
 		case themesync.VerdictAbsent:
 			absent++
+		case themesync.VerdictSource:
+			sources++
 		default:
 			agree++
 		}
@@ -101,7 +134,7 @@ func proofLine(report themesync.Report, color bool) string {
 	if len(bad) != 0 {
 		return paint("OUT OF SYNC · "+strings.Join(bad, ", "), "31", color)
 	}
-	line := fmt.Sprintf("in sync · %d of %d surfaces at gen %d", agree, len(report.Surfaces), report.Generation)
+	line := fmt.Sprintf("in sync · %d of %d surfaces at gen %d", agree, len(report.Surfaces)-sources, report.Generation)
 	if pending != 0 {
 		line += fmt.Sprintf(" · %d pending", pending)
 	}
@@ -112,89 +145,4 @@ func proofLine(report themesync.Report, color bool) string {
 		return paint(line, "32", color)
 	}
 	return paint(line, "33", color)
-}
-
-// hexRGB parses #rrggbb.
-func hexRGB(hex string) (red, green, blue int, ok bool) {
-	if len(hex) != 7 || hex[0] != '#' {
-		return 0, 0, 0, false
-	}
-	value, err := strconv.ParseUint(hex[1:], 16, 32)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	return int(value >> 16 & 0xff), int(value >> 8 & 0xff), int(value & 0xff), true
-}
-
-// block is two cells of the colour; with no truecolor or a malformed colour it
-// is the hex text, so a colour is never silently missing.
-func block(hex string, color bool) string {
-	red, green, blue, ok := hexRGB(hex)
-	if !color || !ok {
-		return hex
-	}
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm  \x1b[0m", red, green, blue)
-}
-
-// sample is "Aa" in the variant's foreground on its background.
-func sample(variant themesync.Variant, color bool) string {
-	fr, fg, fb, fOK := hexRGB(variant.Foreground)
-	br, bg, bb, bOK := hexRGB(variant.Background)
-	if !color || !fOK || !bOK {
-		return "bg " + variant.Background + " fg " + variant.Foreground
-	}
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm Aa \x1b[0m", fr, fg, fb, br, bg, bb)
-}
-
-func drawVariant(out io.Writer, label string, variant themesync.Variant, color bool) {
-	parts := []string{sample(variant, color)}
-	if color {
-		ansi := make([]string, 0, 8)
-		for _, hex := range variant.ANSI[:8] {
-			ansi = append(ansi, block(hex, true))
-		}
-		parts = append(parts, strings.Join(ansi, ""))
-	} else {
-		parts = append(parts, "accent "+variant.Accent)
-	}
-	for _, state := range []struct{ name, hex string }{
-		{"blocked", variant.State.Blocked},
-		{"working", variant.State.Working},
-		{"done", variant.State.Done},
-		{"idle", variant.State.Idle},
-	} {
-		if color {
-			parts = append(parts, block(state.hex, true)+" "+state.name)
-		} else {
-			parts = append(parts, state.name+" "+state.hex)
-		}
-	}
-	fmt.Fprintf(out, "    %-5s %s\n", label, strings.Join(parts, "  "))
-}
-
-// ls prints every palette with both variants' swatches, the current one marked.
-func (run runner) ls(env themesync.Env) int {
-	palettes := run.deps.Ops.Palettes()
-	if len(palettes) == 0 {
-		return run.fail(fmt.Errorf("no palettes are built in"))
-	}
-	current := ""
-	if run.deps.Ops.SyncOn(env.StateDir) {
-		report, err := run.deps.Ops.ReadBack(run.ctx, env)
-		if err != nil {
-			fmt.Fprintf(run.stderr, "pfm theme: current palette unknown: %v\n", err)
-		}
-		current = report.Palette
-	}
-	for i := range palettes {
-		palette := &palettes[i]
-		marker := " "
-		if palette.Name == current {
-			marker = "*"
-		}
-		fmt.Fprintf(run.stdout, "%s %s  %s\n", marker, palette.Name, palette.Title)
-		drawVariant(run.stdout, "dark", palette.Dark, run.deps.Color)
-		drawVariant(run.stdout, "light", palette.Light, run.deps.Color)
-	}
-	return 0
 }

@@ -34,29 +34,34 @@ var (
 // herdrToken is one `[theme.custom]` token.
 type herdrToken struct{ name, value string }
 
-// herdrTokens maps a variant onto Herdr's 19 documented custom tokens.
+// Herdr's built-in themes the custom tokens layer onto, one per side.
+const (
+	herdrDarkName  = "tokyo-night"
+	herdrLightName = "tokyo-night-day"
+)
+
+// herdrTokens maps a variant onto Herdr's 19 documented custom tokens (D11).
 func (variant Variant) herdrTokens() []herdrToken {
-	ansi := variant.ANSI
 	return []herdrToken{
 		{"accent", variant.Accent},
 		{"panel_bg", variant.Background},
 		{"sidebar_bg", variant.Surface},
-		{"active_row_bg", mixHex(variant.Surface, variant.Accent, 0.18)},
+		{"active_row_bg", variant.SelectionBackground},
 		{"selection_bg", variant.SelectionBackground},
 		{"surface0", variant.Surface},
-		{"surface1", mixHex(variant.Surface, variant.Foreground, 0.08)},
-		{"surface_dim", mixHex(variant.Background, variant.Surface, 0.6)},
-		{"overlay0", variant.Overlay},
-		{"overlay1", mixHex(variant.Overlay, variant.Foreground, 0.2)},
-		{tokenText, variant.Foreground},
-		{"subtext0", mixHex(variant.Foreground, variant.Background, 0.25)},
-		{"mauve", ansi[5]},
-		{"green", ansi[2]},
-		{"yellow", ansi[3]},
-		{"red", ansi[1]},
-		{"blue", ansi[4]},
-		{"teal", ansi[6]},
-		{"peach", mixHex(ansi[1], ansi[3], 0.5)},
+		{"surface1", variant.Overlay},
+		{"surface_dim", variant.Surface},
+		{"overlay0", variant.Muted},
+		{"overlay1", variant.State.Idle},
+		{"text", variant.Foreground},
+		{"subtext0", variant.State.Idle},
+		{"mauve", variant.ANSI[5]},
+		{"green", variant.State.Idle},
+		{"yellow", variant.State.Working},
+		{"red", variant.State.Blocked},
+		{"blue", variant.State.Done},
+		{"teal", variant.State.Done},
+		{"peach", variant.Orange},
 	}
 }
 
@@ -68,24 +73,27 @@ func herdrWriteTokens(out *strings.Builder, table string, variant Variant) {
 }
 
 // herdrRender is the marker-fenced block that replaces the user's [theme]
-// tables: name / auto_switch (mode auto) / dark_name / light_name and every
-// custom token, dark values in [theme.custom], light in [theme.custom.light].
-func herdrRender(palette Palette, mode Mode, generation int) string {
+// tables: name / auto_switch (an auto source) / dark_name / light_name and
+// every custom token, the primary variant in [theme.custom], an auto source's
+// light one in [theme.custom.light].
+func herdrRender(applied Applied, generation int) string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "%s · %s · gen %d >>>\n[%s]\n", herdrBlockOpen, palette.Name, generation, herdrThemeTable)
-	switch mode {
-	case ModeAuto:
+	fmt.Fprintf(&out, "%s · %s · gen %d >>>\n[%s]\n", herdrBlockOpen,
+		strings.Join(strings.Fields(applied.Value), "-"), generation, herdrThemeTable)
+	switch {
+	case applied.Auto && applied.Alternate != nil:
 		fmt.Fprintf(&out, "name = %q\nauto_switch = true\ndark_name = %q\nlight_name = %q\n\n",
-			palette.HerdrDark, palette.HerdrDark, palette.HerdrLight)
-		herdrWriteTokens(&out, "theme.custom", palette.Dark)
+			herdrDarkName, herdrDarkName, herdrLightName)
+		herdrWriteTokens(&out, "theme.custom", applied.Primary)
 		out.WriteString("\n")
-		herdrWriteTokens(&out, "theme.custom.light", palette.Light)
-	case ModeLight:
-		fmt.Fprintf(&out, "name = %q\nauto_switch = false\n\n", palette.HerdrLight)
-		herdrWriteTokens(&out, "theme.custom", palette.Light)
+		herdrWriteTokens(&out, "theme.custom.light", *applied.Alternate)
 	default:
-		fmt.Fprintf(&out, "name = %q\nauto_switch = false\n\n", palette.HerdrDark)
-		herdrWriteTokens(&out, "theme.custom", palette.Dark)
+		name := herdrDarkName
+		if applied.Side == Light {
+			name = herdrLightName
+		}
+		fmt.Fprintf(&out, "name = %q\nauto_switch = false\n\n", name)
+		herdrWriteTokens(&out, "theme.custom", applied.Primary)
 	}
 	out.WriteString(herdrBlockClose + "\n")
 	return out.String()
@@ -264,7 +272,7 @@ func (s *session) applyHerdr(ctx context.Context) SurfaceResult {
 	} else if err != nil {
 		return s.failed(surfaceHerdr, path, fmt.Errorf("themesync: read %s: %w", path, err))
 	}
-	block := herdrRender(s.palette, s.state.Mode, s.state.Generation)
+	block := herdrRender(s.theme(), s.state.Generation)
 	updated, replaced := herdrReplace(string(original), block)
 	if !replaced {
 		var snapshot herdrSnapshot
@@ -310,7 +318,7 @@ func (s *session) readHerdr(_ context.Context) SurfaceResult {
 	switch {
 	case !found:
 		return s.in(surfaceHerdr, VerdictDrift, path, "pfm block missing from "+path, 0)
-	case block != herdrRender(s.palette, s.state.Mode, generation) || generation != s.state.Generation:
+	case block != herdrRender(s.theme(), generation) || generation != s.state.Generation:
 		return s.in(
 			surfaceHerdr,
 			VerdictDrift,

@@ -33,6 +33,10 @@ const (
 	codexAppServer = "app-server"
 )
 
+// errCodexUnregistered is a lookup of a session with no registry record: the
+// session is not one a TUI of this host registered.
+var errCodexUnregistered = errors.New("no pane is registered for the Codex session")
+
 // codexPane is one registered Codex session: its TUI process, and the tmux
 // pane or the Herdr pane it reports to. A record with neither is a run with
 // nowhere to report (a plain terminal, `codex exec`): its events stay silent.
@@ -62,7 +66,10 @@ func (reporter *herdrReporter) runCodex(ctx context.Context, payload herdrPayloa
 	}
 	pane, path, err := reporter.codexPane(payload)
 	if err != nil {
-		if !reporter.hostHasHerdr() {
+		// A session no TUI registered (the shared daemon's thread, another
+		// chat's) is the normal case, not a fault: it reports nothing and logs
+		// nothing. Every other failure keeps its row on a host with Herdr.
+		if errors.Is(err, errCodexUnregistered) || !reporter.hostHasHerdr() {
 			return nil
 		}
 		return err
@@ -218,7 +225,7 @@ func (reporter *herdrReporter) codexProcess() (pid int, command string, err erro
 func (reporter *herdrReporter) lookupCodexPane(session, path string) (codexPane, error) {
 	pane, err := readCodexPane(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return codexPane{}, fmt.Errorf("no pane is registered for Codex session %s (unmapped, skipped)", session)
+		return codexPane{}, fmt.Errorf("%w %s (unmapped, skipped)", errCodexUnregistered, session)
 	}
 	if err != nil {
 		return codexPane{}, fmt.Errorf("read the pane of Codex session %s (skipped): %w", session, err)

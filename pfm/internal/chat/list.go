@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -84,19 +85,58 @@ func List(
 	}
 	result = Select(scan.Output.Rows, scan.Output.KilledCount, request)
 	result.Home = scan.Env.Paths.Home
-	result.Herdr = rowsPresence(ctx, realHerdrProbe(warn), scan.Env.Paths, result.Rows)
+	result.Herdr = rowsPresence(
+		ctx, realHerdrProbe(warn, scan.Env.Paths, scan.Env.Config.Claude.Binary), scan.Env.Paths, result.Rows,
+	)
 	return result, nil
 }
 
 // realHerdrProbe is the probe on the host's own environment, tmux and Herdr
-// sockets; every failed lookup is also written to warn.
-func realHerdrProbe(warn io.Writer) herdr.Probe {
+// sockets and process table (under values' proc root, the Claude binary being
+// what a chat's pane runs); every failed lookup is also written to warn.
+func realHerdrProbe(warn io.Writer, values paths.Values, claudeBinary string) herdr.Probe {
+	proc := gather.NewProcFS(values.ProcRoot)
 	return herdr.Probe{
 		Getenv:   paths.OSEnv{}.Get,
 		LookPath: deps.RealRunner{}.LookPath,
 		Tmux:     runTmux,
 		Call:     herdr.Call,
+		Environ:  proc.Environ,
+		Hookless: hooklessLaunch(proc, claudeBinary),
 		Warn:     warn,
+	}
+}
+
+// herdrHookPrefix leads the registry name of every Herdr reporter hook a Claude
+// launch carries in its --settings (claudelaunch.Parse names them).
+const herdrHookPrefix = "herdr-"
+
+// hooklessLaunch reads, from the argv of the Claude process in a seat's tmux
+// pane, whether the chat was launched without the Herdr reporter hooks, as the
+// spawn audit reads a launch payload: known is false when no pane process is
+// Claude, its argv cannot be read or parsed, its settings are file-backed, or
+// it is a resumed argv with no payload — the original launch is then
+// unverified and nothing is guessed.
+func hooklessLaunch(proc gather.ProcFS, claudeBinary string) func(herdr.Seat) (hookless, known bool) {
+	return func(seat herdr.Seat) (hookless, known bool) {
+		for _, pid := range seat.PanePIDs {
+			argv, err := proc.Cmdline(pid)
+			if err != nil || !gather.IsClaudeCommand(argv, claudeBinary) {
+				continue
+			}
+			parsed, err := claudelaunch.Parse(argv)
+			if err != nil || parsed.SettingsFile != "" ||
+				((parsed.Resumed || parsed.Resume != "") && parsed.Settings == nil) {
+				return false, false
+			}
+			for _, hook := range parsed.Hooks {
+				if strings.HasPrefix(hook.Name, herdrHookPrefix) {
+					return false, true
+				}
+			}
+			return true, true
+		}
+		return false, false
 	}
 }
 
@@ -138,7 +178,9 @@ func rowsPresence(ctx context.Context, probe herdr.Probe, values paths.Values, r
 			seats[index].Err = fmt.Errorf("resolve tmux socket %q of %s: %w", row.Socket, row.Name, err)
 			continue
 		}
-		seats[index] = herdr.Seat{SocketPath: socketPath, Session: row.SessionName, Pane: row.PaneID}
+		seats[index] = herdr.Seat{
+			SocketPath: socketPath, Session: row.SessionName, Pane: row.PaneID, Name: row.Name, PanePIDs: row.PanePIDs,
+		}
 	}
 	return probe.Presence(ctx, seats)
 }

@@ -59,8 +59,12 @@ type vscodeAck struct {
 }
 
 // vscodeContract renders the terminal colour keys for one appearance.
-func (palette Palette) vscodeContract(mode Mode, appearance Appearance, generation int) vscodeContract {
-	variant := palette.Variant(appearance)
+func (applied Applied) vscodeContract(appearance Appearance, generation int) vscodeContract {
+	variant := applied.variant(appearance)
+	mode := string(applied.Side)
+	if applied.Auto {
+		mode = "auto"
+	}
 	colors := map[string]string{
 		"terminal.background": variant.Background, "terminal.foreground": variant.Foreground,
 		"terminalCursor.foreground": variant.Cursor, "terminal.selectionBackground": variant.SelectionBackground,
@@ -88,8 +92,8 @@ func (palette Palette) vscodeContract(mode Mode, appearance Appearance, generati
 		colors["terminal.ansi"+name] = variant.ANSI[index]
 	}
 	return vscodeContract{
-		Enabled: true, Generation: generation, Palette: palette.Name, Title: palette.Title,
-		Mode: string(mode), Appearance: string(appearance), Colors: colors,
+		Enabled: true, Generation: generation, Palette: applied.Value, Title: applied.Title,
+		Mode: mode, Appearance: string(appearance), Colors: colors,
 	}
 }
 
@@ -99,7 +103,13 @@ func vscodeOffContract(generation int) vscodeContract {
 }
 
 // vscodeVerdict judges the extension's ack against the generation in force.
-func vscodeVerdict(ack vscodeAck, haveAck bool, generation int, running bool, age time.Duration) (Verdict, string) {
+// With no ack ever while VS Code runs past the grace the verdict is PENDING:
+// the extension is the single writer of settings.json and acknowledges only
+// after a window reload (D20). An ack for another generation past the grace
+// is DRIFT.
+func vscodeVerdict(
+	ack vscodeAck, haveAck bool, generation int, running bool, age time.Duration, ackPath string,
+) (Verdict, string) {
 	switch {
 	case haveAck && ack.Error != "":
 		return VerdictError, "extension reported: " + ack.Error
@@ -112,7 +122,8 @@ func vscodeVerdict(ack vscodeAck, haveAck bool, generation int, running bool, ag
 	case haveAck:
 		return VerdictDrift, fmt.Sprintf("extension ack is at generation %d, want %d", ack.Generation, generation)
 	default:
-		return VerdictDrift, fmt.Sprintf("no ack from the extension for generation %d", generation)
+		return VerdictPending, fmt.Sprintf("reload a VS Code window once: no Professor extension has acknowledged "+
+			"a theme yet (%s absent)", ackPath)
 	}
 }
 
@@ -198,7 +209,7 @@ func (s *session) applyVscode(_ context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
 	}
-	contract := s.palette.vscodeContract(s.state.Mode, s.state.Appearance, s.state.Generation)
+	contract := s.theme().vscodeContract(s.state.Appearance, s.state.Generation)
 	if err := s.writeVscodeContract(contract); err != nil {
 		return s.failed(surfaceVscode, s.vscodeContractPath(), err)
 	}
@@ -229,21 +240,13 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 		return s.failed(surfaceVscode, path, fmt.Errorf("themesync: read %s: %w", vscodeContractFile, err))
 	}
 	var current vscodeContract
-	want := s.palette.vscodeContract(s.state.Mode, s.state.Appearance, s.state.Generation)
+	want := s.theme().vscodeContract(s.state.Appearance, s.state.Generation)
 	if err := json.Unmarshal(content, &current); err != nil || fmt.Sprint(current) != fmt.Sprint(want) {
 		return s.in(surfaceVscode, VerdictDrift, path, vscodeContractFile+" differs from the render", 0)
 	}
-	var ack vscodeAck
-	haveAck := false
-	switch raw, readErr := os.ReadFile(filepath.Join(s.store.dir, vscodeAckFile)); {
-	case errors.Is(readErr, os.ErrNotExist):
-	case readErr != nil:
-		return s.failed(surfaceVscode, path, fmt.Errorf("themesync: read %s: %w", vscodeAckFile, readErr))
-	default:
-		if err := json.Unmarshal(raw, &ack); err != nil {
-			return s.failed(surfaceVscode, path, fmt.Errorf("themesync: parse %s: %w", vscodeAckFile, err))
-		}
-		haveAck = true
+	ack, haveAck, err := s.readAck()
+	if err != nil {
+		return s.failed(surfaceVscode, path, err)
 	}
 	result, err := s.env.Runner.Run(ctx, []string{"ps", "-axo", "args="}, deps.RunOptions{})
 	if err != nil || result.ExitCode != 0 {
@@ -258,12 +261,27 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 		return s.failed(surfaceVscode, path, fmt.Errorf("themesync: stat %s: %w", path, err))
 	}
 	verdict, detail := vscodeVerdict(ack, haveAck, s.state.Generation, vscodeRunning(string(result.Stdout)),
-		wallClock.Now().Sub(info.ModTime()))
+		wallClock.Now().Sub(info.ModTime()), filepath.Join(s.store.dir, vscodeAckFile))
 	generation := 0
 	if verdict == VerdictInSync {
 		generation = ack.Generation
 	}
 	return s.in(surfaceVscode, verdict, path, detail, generation)
+}
+
+// readAck reads the extension's ack; none written yet is (zero, false, nil).
+func (s *session) readAck() (ack vscodeAck, found bool, err error) {
+	raw, readErr := os.ReadFile(filepath.Join(s.store.dir, vscodeAckFile))
+	switch {
+	case errors.Is(readErr, os.ErrNotExist):
+		return ack, false, nil
+	case readErr != nil:
+		return ack, false, fmt.Errorf("themesync: read %s: %w", vscodeAckFile, readErr)
+	}
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		return ack, false, fmt.Errorf("themesync: parse %s: %w", vscodeAckFile, err)
+	}
+	return ack, true, nil
 }
 
 func (s *session) restoreVscode(_ context.Context) SurfaceResult {

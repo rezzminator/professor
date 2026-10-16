@@ -4,33 +4,49 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
-
-// surfaceClaude is the Claude Code theme surface, named after its engine.
-var surfaceClaude = pfmengine.MustLookup(pfmengine.Claude).LongName
 
 const (
 	surfaceTmux     = "tmux"
 	surfaceHerdr    = "herdr"
-	surfaceGhostty  = "ghostty"
 	surfaceVscode   = "vscode"
 	surfaceFollower = "follower"
 )
 
+// flipClock is the time seam of the latency measurement: read once after each
+// surface's apply.
+var flipClock clock.Clock = clock.Real
+
+// flipOrigin is where a flip is measured from: the file whose mtime the user's
+// change left, and when.
+type flipOrigin struct {
+	path string
+	at   time.Time
+}
+
 // session is one locked run over the state: the environment, the state being
-// edited, the palette in force and the tmux seam.
+// edited, the source row, the tmux seam and the latency being measured.
 type session struct {
 	env     Env
 	store   stateStore
 	state   themeState
-	palette Palette
 	servers TmuxServers
+	// source is the claude row: the governing account and its theme, or the
+	// error that stopped the run before any surface was written.
+	source      SurfaceResult
+	serverCount int
+	origin      *flipOrigin
+	offsets     map[string]float64
+	applied     bool
 }
 
 // surfaceOps is one surface's three verbs, in the matrix's row order.
@@ -41,13 +57,27 @@ type surfaceOps struct {
 
 func (s *session) surfaces() []surfaceOps {
 	return []surfaceOps{
-		{surfaceClaude, s.applyClaude, s.readClaude, s.restoreClaude},
+		{surfaceClaude, s.sourceRow, s.sourceRow, s.restoreSource},
 		{surfaceTmux, s.applyTmux, s.readTmux, s.restoreTmux},
 		{surfaceHerdr, s.applyHerdr, s.readHerdr, s.restoreHerdr},
-		{surfaceGhostty, s.applyGhostty, s.readGhostty, s.restoreGhostty},
 		{surfaceVscode, s.applyVscode, s.readVscode, s.restoreVscode},
 		{surfaceFollower, s.applyFollower, s.readFollower, s.restoreFollower},
 	}
+}
+
+// theme is the derived theme in force; the zero Applied before any apply.
+func (s *session) theme() Applied {
+	if s.state.Applied == nil {
+		return Applied{}
+	}
+	return *s.state.Applied
+}
+
+func (s *session) sourceRow(context.Context) SurfaceResult { return s.source }
+
+// restoreSource is the claude row of an off: Claude's files are only read.
+func (s *session) restoreSource(context.Context) SurfaceResult {
+	return s.result(surfaceClaude, VerdictSource, "", "never written")
 }
 
 func (s *session) in(surface string, verdict Verdict, path, detail string, generation int) SurfaceResult {
@@ -198,6 +228,7 @@ func (s *session) applyAll(ctx context.Context) []SurfaceResult {
 	for _, ops := range s.surfaces() {
 		rows = append(rows, s.applyOne(ctx, ops))
 	}
+	s.applied = true
 	return rows
 }
 
@@ -212,6 +243,7 @@ func (s *session) applyDrifted(ctx context.Context, rows []SurfaceResult) []Surf
 			continue
 		}
 		out = append(out, s.applyOne(ctx, ops))
+		s.applied = true
 	}
 	return out
 }
@@ -221,11 +253,34 @@ func (s *session) applyOne(ctx context.Context, ops surfaceOps) SurfaceResult {
 	if applied.Verdict != VerdictApplied {
 		return applied
 	}
+	s.stamp(ops.name)
 	read := s.readOne(ctx, ops)
 	if read.Verdict == VerdictInSync && applied.Detail != "" {
 		read.Verdict, read.Detail = VerdictApplied, applied.Detail
 	}
 	return read
+}
+
+// stamp records how long after the flip's origin a surface finished applying.
+func (s *session) stamp(surface string) {
+	if s.origin == nil || (surface != surfaceTmux && surface != surfaceHerdr && surface != surfaceVscode) {
+		return
+	}
+	if s.offsets == nil {
+		s.offsets = map[string]float64{}
+	}
+	s.offsets[surface] = math.Round(flipClock.Now().Sub(s.origin.at).Seconds()*100) / 100
+}
+
+// recordFlip keeps the offsets this run measured as the last flip.
+func (s *session) recordFlip() {
+	if s.origin == nil || len(s.offsets) == 0 {
+		return
+	}
+	s.state.LastFlip = &Flip{
+		At: s.origin.at.UTC().Format(time.RFC3339Nano), Source: s.origin.path,
+		Tmux: s.offsets[surfaceTmux], Herdr: s.offsets[surfaceHerdr], VSCode: s.offsets[surfaceVscode],
+	}
 }
 
 func (s *session) restoreAll(ctx context.Context) []SurfaceResult {
@@ -238,15 +293,16 @@ func (s *session) restoreAll(ctx context.Context) []SurfaceResult {
 
 func (s *session) report(rows []SurfaceResult) Report {
 	return Report{
-		Enabled: s.state.Enabled, Palette: s.state.Palette, Mode: s.state.Mode,
-		Appearance: s.state.Appearance, Generation: s.state.Generation, Surfaces: rows,
+		Enabled: s.state.Enabled, Source: s.state.Source, Appearance: s.state.Appearance,
+		Generation: s.state.Generation, LastFlip: s.state.LastFlip, Changed: s.applied,
+		Servers: s.serverCount, Surfaces: rows,
 	}
 }
 
-// errInert marks a run with no state file: nothing was ever set, so nothing is touched.
-var errInert = errors.New("themesync: no theme set")
+// errInert marks a run with no state file: nothing was ever turned on, so nothing is touched.
+var errInert = errors.New("themesync: no theme sync on")
 
-// beginActive is begin for a verb that needs a prior Set; with no state file
+// beginActive is begin for a verb that needs a prior On; with no state file
 // it returns errInert before the state directory is created or locked.
 func beginActive(env Env) (stateStore, func() error, error) {
 	dir := env.withStateDir().StateDir
@@ -261,11 +317,7 @@ func begin(env Env) (stateStore, func() error, error) {
 	if env.Runner == nil {
 		return stateStore{}, nil, errors.New("themesync: Env.Runner is nil")
 	}
-	dir := env.StateDir
-	if dir == "" {
-		dir = DefaultStateDir(env.Home)
-	}
-	store := stateStore{dir: dir}
+	store := stateStore{dir: env.withStateDir().StateDir}
 	release, err := store.lock()
 	return store, release, err
 }
@@ -277,88 +329,154 @@ func (env Env) withStateDir() Env {
 	return env
 }
 
-func newSession(env Env, store stateStore, state themeState, palette Palette) *session {
-	return &session{env: env.withStateDir(), store: store, state: state, palette: palette, servers: env.Tmux}
+func newSession(env Env, store stateStore, state themeState) *session {
+	return &session{env: env.withStateDir(), store: store, state: state, servers: env.Tmux}
 }
 
-func resolveMode(mode Mode) (Mode, error) {
-	switch mode {
-	case "", ModeAuto:
-		return ModeAuto, nil
-	case ModeDark, ModeLight:
-		return mode, nil
+// sourceState is the read-only source resolved for one run.
+type sourceState struct {
+	info    SourceInfo
+	applied Applied
+	memory  map[string]string
+	origin  *flipOrigin
+}
+
+// shortHome writes a path under home as ~/…
+func shortHome(home, path string) string {
+	if rel, err := filepath.Rel(home, path); err == nil && !strings.HasPrefix(rel, "..") {
+		return filepath.Join("~", rel)
 	}
-	return "", fmt.Errorf("themesync: unknown mode %q (known: auto, dark, light)", mode)
+	return path
 }
 
-func resolveAppearance(ctx context.Context, env Env, mode Mode) (Appearance, error) {
-	switch mode {
-	case ModeDark:
-		return Dark, nil
-	case ModeLight:
-		return Light, nil
+// resolveSource reads the accounts, picks the governing one (D9) and derives
+// its theme. Any failure names the file; the run then writes no surface.
+func resolveSource(env Env, state themeState) (sourceState, error) {
+	accounts, err := readAccounts(env.Home)
+	if err != nil {
+		return sourceState{}, err
+	}
+	previous := ""
+	if state.Source != nil {
+		previous = state.Source.Path
+	}
+	governing, memory := govern(state.Accounts, previous, accounts)
+	theme, err := resolveValue(governing.Value, governing.dir())
+	if err != nil {
+		return sourceState{}, fmt.Errorf("%s: %w", governing.Path, err)
+	}
+	origin := &flipOrigin{path: governing.Path, at: governing.ModTime}
+	if theme.ThemeFile != "" && theme.ThemeTime.After(origin.at) {
+		origin = &flipOrigin{path: theme.ThemeFile, at: theme.ThemeTime}
+	}
+	return sourceState{
+		info: SourceInfo{
+			Account: shortHome(env.Home, governing.dir()), Path: governing.Path,
+			Value: theme.Applied.Value, Title: theme.Applied.Title, Side: theme.Applied.Side,
+		},
+		applied: theme.Applied, memory: memory, origin: origin,
+	}, nil
+}
+
+// sourceResult is the claude row of a resolved source, or of its failure.
+func sourceResult(info *SourceInfo, err error) SurfaceResult {
+	if err != nil {
+		return SurfaceResult{Surface: surfaceClaude, Verdict: VerdictError, Detail: err.Error()}
+	}
+	return SurfaceResult{
+		Surface: surfaceClaude, Verdict: VerdictSource, Path: info.Path,
+		Detail: info.Account + " · " + info.Value + " · " + info.Title,
+	}
+}
+
+// appearanceFor is the side the single-variant surfaces draw: the system's for
+// an auto theme, the theme's own otherwise.
+func appearanceFor(ctx context.Context, env Env, applied Applied) (Appearance, error) {
+	if !applied.Auto {
+		return applied.Side, nil
 	}
 	return DetectAppearance(ctx, env.Runner)
 }
 
-// Set renders the palette into every present surface, reloads each live and
-// reads each back. The first Set snapshots every user file it edits.
-func Set(ctx context.Context, env Env, request Request) (report Report, err error) {
-	palette, err := PaletteByName(request.Palette)
+type convergeMode int
+
+const (
+	convergeSync convergeMode = iota
+	convergeForce
+	convergeOn
+)
+
+// globalPreferences is the macOS preferences file whose rewrite flips the system appearance.
+func globalPreferences(home string) string {
+	return filepath.Join(home, "Library", "Preferences", ".GlobalPreferences.plist")
+}
+
+// converge resolves the source and brings every surface to it: it applies all
+// of them when the theme or the appearance changed (a new generation), only
+// the drifted ones otherwise, and writes nothing when everything reads back.
+func converge(ctx context.Context, env Env, store stateStore, state themeState, mode convergeMode) (Report, error) {
+	env = env.withStateDir()
+	source, srcErr := resolveSource(env, state)
+	sess := newSession(env, store, state)
+	if srcErr != nil {
+		sess.source = sourceResult(nil, srcErr)
+		return sess.report([]SurfaceResult{sess.source}), nil
+	}
+	appearance, err := appearanceFor(ctx, env, source.applied)
 	if err != nil {
 		return Report{}, err
 	}
-	mode, err := resolveMode(request.Mode)
-	if err != nil {
-		return Report{}, err
-	}
-	for _, appearance := range []Appearance{Dark, Light} {
-		if err := palette.Variant(appearance).validate(); err != nil {
-			return Report{}, fmt.Errorf("themesync: palette %s %s: %w", palette.Name, appearance, err)
+	known := state.Enabled && state.Applied != nil
+	sourceMoved := !known || !reflect.DeepEqual(*state.Applied, source.applied)
+	changed := sourceMoved || state.Appearance != appearance
+	sess.state.Enabled, sess.state.Source, sess.state.Accounts = true, &source.info, source.memory
+	sess.source = sourceResult(&source.info, nil)
+	if changed {
+		sess.state.Generation++
+		sess.state.Appearance, sess.state.Applied = appearance, &source.applied
+		sess.origin = source.origin
+		if !sourceMoved {
+			sess.origin = nil
+			if info, err := os.Stat(globalPreferences(env.Home)); err == nil {
+				sess.origin = &flipOrigin{path: globalPreferences(env.Home), at: info.ModTime()}
+			}
 		}
 	}
-	if env.Runner == nil {
-		return Report{}, errors.New("themesync: Env.Runner is nil")
+	if changed || mode == convergeOn || mode == convergeForce {
+		if err := sess.persist(); err != nil {
+			return Report{}, err
+		}
+		rows := sess.applyAll(ctx)
+		sess.recordFlip()
+		return sess.report(rows), sess.persist()
 	}
-	appearance, err := resolveAppearance(ctx, env, mode)
-	if err != nil {
-		return Report{}, err
+	rows := sess.readAll(ctx)
+	if (Report{Surfaces: rows}).OK() {
+		return sess.report(rows), sess.persist() // nothing changed and nothing drifted: persist only what moved
 	}
+	rows = sess.applyDrifted(ctx, rows)
+	return sess.report(rows), sess.persist()
+}
+
+// On turns the sync on: it reads the source, writes the state, installs the
+// follower and applies every present surface. The first On snapshots every
+// user file it edits.
+func On(ctx context.Context, env Env) (report Report, err error) {
 	store, release, err := begin(env)
 	if err != nil {
 		return Report{}, err
 	}
 	defer func() { err = errors.Join(err, release()) }()
-	state, found, err := store.load()
+	state, _, err := store.load()
 	if err != nil {
 		return Report{}, err
 	}
-	if !found || !state.Enabled || state.Palette != palette.Name || state.Mode != mode ||
-		state.Appearance != appearance {
-		state.Generation++
-	}
-	state.Enabled, state.Palette, state.Mode, state.Appearance = true, palette.Name, mode, appearance
-	sess := newSession(env, store, state, palette)
-	if err := sess.persist(); err != nil {
-		return Report{}, err
-	}
-	rows := sess.applyAll(ctx)
-	return sess.report(rows), sess.persist()
+	return converge(ctx, env, store, state, convergeOn)
 }
 
-// loadActive loads the state of a running sync: a missing or disabled state is
-// (zero, false, nil) so every caller stays inert.
-func loadActive(store stateStore) (themeState, Palette, bool, error) {
-	state, found, err := store.load()
-	if err != nil || !found || !state.Enabled {
-		return state, Palette{}, false, err
-	}
-	palette, err := PaletteByName(state.Palette)
-	return state, palette, err == nil, err
-}
-
-// Sync re-resolves the appearance and re-applies when it (or force) says so;
-// with nothing changed it writes nothing and reports the read-back.
+// Sync follows the source now: a changed theme or appearance (or force)
+// re-applies every surface; with nothing changed it writes nothing and
+// reports the read-back. A sync that was never turned on is inert.
 func Sync(ctx context.Context, env Env, force bool) (report Report, err error) {
 	store, release, err := beginActive(env)
 	if errors.Is(err, errInert) {
@@ -368,45 +486,68 @@ func Sync(ctx context.Context, env Env, force bool) (report Report, err error) {
 		return Report{}, err
 	}
 	defer func() { err = errors.Join(err, release()) }()
-	state, palette, active, err := loadActive(store)
-	if err != nil || !active {
+	state, _, err := store.load()
+	if err != nil || !state.Enabled {
 		return Report{Generation: state.Generation}, err
 	}
-	appearance, err := resolveAppearance(ctx, env, state.Mode)
-	if err != nil {
-		return Report{}, err
-	}
-	sess := newSession(env, store, state, palette)
-	if appearance != state.Appearance {
-		sess.state.Appearance = appearance
-		sess.state.Generation++
-		if err := sess.persist(); err != nil {
-			return Report{}, err
-		}
-		return sess.report(sess.applyAll(ctx)), sess.persist()
-	}
-	rows := sess.readAll(ctx)
+	mode := convergeSync
 	if force {
-		return sess.report(sess.applyAll(ctx)), sess.persist()
+		mode = convergeForce
 	}
-	if (Report{Surfaces: rows}).OK() {
-		return sess.report(rows), nil // nothing changed and nothing drifted: write nothing
-	}
-	return sess.report(sess.applyDrifted(ctx, rows)), sess.persist()
+	return converge(ctx, env, store, state, mode)
 }
 
-// ReadBack reads every surface back against the state's generation.
+// ReadBack reads every surface back against the state's generation; a source
+// that moved since the last sync is drawn as drift without being applied.
 func ReadBack(ctx context.Context, env Env) (Report, error) {
 	if env.Runner == nil {
 		return Report{}, errors.New("themesync: Env.Runner is nil")
 	}
-	store := stateStore{dir: env.withStateDir().StateDir}
-	state, palette, active, err := loadActive(store)
-	if err != nil || !active {
+	env = env.withStateDir()
+	store := stateStore{dir: env.StateDir}
+	state, found, err := store.load()
+	if err != nil || !found || !state.Enabled {
 		return Report{Generation: state.Generation}, err
 	}
-	sess := newSession(env, store, state, palette)
-	return sess.report(sess.readAll(ctx)), nil
+	sess := newSession(env, store, state)
+	source, srcErr := resolveSource(env, state)
+	sess.source = sourceResult(state.Source, srcErr)
+	if srcErr == nil {
+		sess.source = sourceResult(&source.info, nil)
+		sess.state.Source = &source.info
+		appearance, err := appearanceFor(ctx, env, source.applied)
+		if err != nil {
+			return Report{}, err
+		}
+		if state.Applied == nil || !reflect.DeepEqual(*state.Applied, source.applied) ||
+			state.Appearance != appearance {
+			sess.state.Generation++
+			sess.state.Appearance, sess.state.Applied = appearance, &source.applied
+		}
+	}
+	report := sess.report(sess.readAll(ctx))
+	report.LastFlip = sess.flipWithAck()
+	return report, nil
+}
+
+// flipWithAck is the stored last flip plus the extension's ack offset when it
+// has acknowledged the generation in force.
+func (s *session) flipWithAck() *Flip {
+	if s.state.LastFlip == nil {
+		return nil
+	}
+	flip := *s.state.LastFlip
+	ack, haveAck, err := s.readAck()
+	if err != nil || !haveAck || ack.Error != "" || ack.Generation != s.state.Generation {
+		return &flip
+	}
+	appliedAt, appliedErr := time.Parse(time.RFC3339Nano, ack.AppliedAt)
+	origin, originErr := time.Parse(time.RFC3339Nano, flip.At)
+	if appliedErr == nil && originErr == nil {
+		offset := math.Round(appliedAt.Sub(origin).Seconds()*100) / 100
+		flip.Ack = &offset
+	}
+	return &flip
 }
 
 // Off restores every surface from its snapshot and disables the sync.
@@ -423,31 +564,51 @@ func Off(ctx context.Context, env Env) (report Report, err error) {
 	if err != nil || !found {
 		return Report{}, err
 	}
-	palette, paletteErr := PaletteByName(state.Palette)
-	if paletteErr != nil {
-		palette = embeddedPalettes[0] // restoring needs only option names, not colours
-	}
 	if state.Enabled {
 		state.Generation++
 	}
 	state.Enabled = false
-	sess := newSession(env, store, state, palette)
+	sess := newSession(env, store, state)
 	if err := sess.persist(); err != nil {
 		return Report{}, err
 	}
 	rows := sess.restoreAll(ctx)
-	sess.state.Due = nil
-	sess.state.OffPending = false
+	sess.state.Due, sess.state.OffPending = nil, false
+	sess.state.Source, sess.state.Accounts, sess.state.Applied, sess.state.LastFlip = nil, nil, nil, nil
 	for _, row := range rows {
 		sess.state.OffPending = sess.state.OffPending || row.Verdict == VerdictError
 	}
 	return sess.report(rows), sess.persist()
 }
 
+// LogOnce records the line a follower run printed so the same failure on the
+// next run stays silent; "" clears it (a clean run). It reports whether the
+// line is new, so the caller prints only then.
+func LogOnce(env Env, line string) (fresh bool, err error) {
+	store, release, err := beginActive(env)
+	if errors.Is(err, errInert) {
+		return true, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	defer func() { err = errors.Join(err, release()) }()
+	state, found, err := store.load()
+	if err != nil || !found {
+		return true, err
+	}
+	if state.LastLog == line {
+		return false, nil
+	}
+	state.LastLog = line
+	return true, store.save(state)
+}
+
 // ApplyTmuxServer puts the current theme on one chat server (capturing each
-// option's prior value on that server first); a no-op when the sync is off.
-// The state is read and the server themed under the theme lock, so an apply
-// never lands after an Off that already restored the same server.
+// option's prior value on that server first); a no-op when the sync is off or
+// has not applied a theme yet. The state is read and the server themed under
+// the theme lock, so an apply never lands after an Off that already restored
+// the same server. It reads the stored Applied, never the Claude source.
 func ApplyTmuxServer(ctx context.Context, servers TmuxServers, stateDir, socket string) (err error) {
 	if !SyncOn(stateDir) {
 		return nil
@@ -458,38 +619,10 @@ func ApplyTmuxServer(ctx context.Context, servers TmuxServers, stateDir, socket 
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
-	state, palette, active, err := loadActive(store)
-	if err != nil || !active {
+	state, found, err := store.load()
+	if err != nil || !found || !state.Enabled || state.Applied == nil {
 		return err
 	}
-	sess := &session{store: store, state: state, palette: palette, servers: servers}
+	sess := &session{store: store, state: state, servers: servers}
 	return sess.tmuxApplySocket(ctx, socket)
-}
-
-// HoldsClaudeTheme reports whether the sync currently owns a Claude Code
-// theme file, so pfm install leaves it alone until `pfm theme off`.
-func HoldsClaudeTheme(stateDir, target string) bool {
-	if !SyncOn(stateDir) {
-		return false
-	}
-	state, found, err := stateStore{dir: stateDir}.load()
-	if err != nil {
-		return true // an unreadable state errs toward not clobbering a held file
-	}
-	if !found {
-		return false
-	}
-	resolved, resolveErr := filepath.EvalSymlinks(target)
-	for held := range state.Claude {
-		if filepath.Clean(held) == filepath.Clean(target) {
-			return true
-		}
-		if heldResolved, err := filepath.EvalSymlinks(
-			held,
-		); resolveErr == nil && err == nil &&
-			heldResolved == resolved {
-			return true
-		}
-	}
-	return false
 }

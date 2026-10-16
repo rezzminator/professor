@@ -82,7 +82,7 @@ func TestHerdrCodexReportsOnlyToTheRegisteredPane(t *testing.T) {
 			run: func(rig *chatRig) []herdrRun {
 				return []herdrRun{rig.codex("start", "x1", `,"source":"startup"`), rig.codex("idle", "x1")}
 			},
-			logs: []string{"not an interactive Codex TUI", "no pane is registered for Codex session x1"},
+			logs: []string{"not an interactive Codex TUI"},
 		},
 		{
 			name: "a SessionStart whose hook runs under no Codex process registers nothing",
@@ -94,7 +94,7 @@ func TestHerdrCodexReportsOnlyToTheRegisteredPane(t *testing.T) {
 			run: func(rig *chatRig) []herdrRun {
 				return []herdrRun{rig.codex("start", "x1", `,"source":"startup"`), rig.codex("idle", "x1")}
 			},
-			logs: []string{"is no Codex process", "no pane is registered for Codex session x1"},
+			logs: []string{"is no Codex process"},
 		},
 		{
 			name: "a session id that is no plain name registers nothing",
@@ -106,7 +106,6 @@ func TestHerdrCodexReportsOnlyToTheRegisteredPane(t *testing.T) {
 		{
 			name: "an unmapped Stop is dropped",
 			run:  func(rig *chatRig) []herdrRun { return []herdrRun{rig.codex("idle", "x1")} },
-			logs: []string{"no pane is registered for Codex session x1"},
 		},
 		{
 			name: "another thread's Stop while the pane's session is registered is dropped",
@@ -114,7 +113,6 @@ func TestHerdrCodexReportsOnlyToTheRegisteredPane(t *testing.T) {
 				return []herdrRun{rig.codex("start", "x1", `,"source":"startup"`), rig.codex("idle", "t2")}
 			},
 			calls:   []string{codexReportCall("w1:p1", "idle", "x1", "")},
-			logs:    []string{"no pane is registered for Codex session t2"},
 			records: []string{"x1"},
 		},
 		{
@@ -132,7 +130,6 @@ func TestHerdrCodexReportsOnlyToTheRegisteredPane(t *testing.T) {
 				codexReportCall("w1:p1", "idle", "x2", ""),
 				codexReportCall("w1:p1", "working", "x2", ""),
 			},
-			logs:    []string{"no pane is registered for Codex session x1"},
 			records: []string{"x2"},
 		},
 		{
@@ -149,7 +146,6 @@ func TestHerdrCodexReportsOnlyToTheRegisteredPane(t *testing.T) {
 				`pane.release_agent {"pane_id":"w1:p1","source":"pfm","agent":"codex"}`,
 				`pane.report_metadata {"pane_id":"w1:p1","source":"pfm","clear_title":true}`,
 			},
-			logs: []string{"no pane is registered for Codex session x1"},
 		},
 		{
 			name: "a SessionEnd that swaps the session keeps the registration",
@@ -349,4 +345,31 @@ func codexRecords(t *testing.T, lockDir string) []string {
 		}
 	}
 	return sessions
+}
+
+// A Codex event of a session no TUI registered (the shared daemon's thread,
+// another chat's) is the normal case on a host with Herdr: it exits 0 and
+// writes no row. A record that exists but cannot be read still writes its row.
+func TestCodexEventWithoutARegistrationIsSilent(t *testing.T) {
+	t.Run("no codex-{id}.pane: exit 0, quiet, no row in no-session.log", func(t *testing.T) {
+		rig := codexRig(t)
+		rig.wantQuiet(rig.codex("idle", "x1"))
+		rig.wantCalls()
+		if logged := rig.jail.logged(herdrNoSession); logged != "" {
+			t.Fatalf("no-session.log = %q, want no row for a session nothing registered", logged)
+		}
+	})
+	t.Run("an unreadable record still writes its row", func(t *testing.T) {
+		rig := codexRig(t)
+		if err := os.MkdirAll(codexPanePath(rig.jail.lockDir, "x1"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		got := rig.codex("idle", "x1")
+		if got.rc != 0 || !strings.Contains(got.stderr, "read the pane of Codex session x1") {
+			t.Fatalf("rc=%d stderr=%q, want exit 0 naming the unreadable record", got.rc, got.stderr)
+		}
+		if logged := rig.jail.logged(herdrNoSession); !strings.Contains(logged, "read the pane of Codex session x1") {
+			t.Fatalf("no-session.log = %q, want the unreadable record's row", logged)
+		}
+	})
 }

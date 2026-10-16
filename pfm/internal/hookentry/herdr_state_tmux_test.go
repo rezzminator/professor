@@ -2,18 +2,21 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -123,6 +126,8 @@ func TestHerdrStateFollowsTheClientThatAttachedOnARealTmuxServer(t *testing.T) {
 					return proc.parent, proc.command, nil
 				},
 				getpid: func() int { return 100 },
+				// The tmux client's own environment, read from the real process.
+				environ: gather.NewProcFS("").Environ,
 			},
 		)
 		return herdrRun{rc: rc, stderr: stderr.String()}
@@ -244,6 +249,31 @@ func TestHerdrStateFollowsTheClientThatAttachedOnARealTmuxServer(t *testing.T) {
 	}
 	detach()
 
+	// A client that attached while no hook ran for it (a chat born before the
+	// hooks, or across a Herdr restart) is adopted by the next event: its own
+	// environment says Herdr, the pane running its pid is the pane reported to.
+	detach = attach(herdrEnv("w7:p3")...)
+	fourth := clientPID()
+	server.foreground("w7:p3", atoi(t, fourth))
+	before = len(calls())
+	if got := report("--engine", "claude", "working"); got.rc != 0 || got.stderr != "" {
+		t.Fatalf("working event with %s unregistered: rc=%d stderr=%q", fourth, got.rc, got.stderr)
+	}
+	if got := calls()[before:]; len(got) != 3 || got[0] != listCall || !strings.Contains(got[2], `"pane_id":"w7:p3"`) ||
+		!strings.Contains(got[2], `"state":"working"`) {
+		t.Fatalf(
+			"event with an unregistered client: requests = %q, want pane.list, its pane probed and w7:p3 reported",
+			got,
+		)
+	}
+	if got := registry()[fourth]; got.Pane != "w7:p3" || got.Terminal != "term_7" {
+		t.Fatalf("registry[%s] = %+v, want the adopted pane w7:p3 of terminal term_7", fourth, got)
+	}
+	detach()
+	if got := report("detach"); got.rc != 0 || got.stderr != "" {
+		t.Fatalf("detach sweep after %s left: rc=%d stderr=%q", fourth, got.rc, got.stderr)
+	}
+
 	// The hooks tmux itself ran: an attach (and a resize's sync) carries the
 	// client's pid, a detach cannot
 	// (tmux expands #{client_pid} to nothing once the client is gone), and the
@@ -310,4 +340,55 @@ func atoi(t *testing.T, text string) int {
 		t.Fatalf("parse %q as a pid: %v", text, err)
 	}
 	return value
+}
+
+// The cost the adoption adds to every reporter run when the registry holds no
+// client for a live one (D2): one tmux list-clients and one environment read
+// of the unregistered client, measured on a real tmux server and a real
+// process. The logged median is what the docs print; the bound is the D2 flip
+// (20 ms) with room for a loaded fence.
+func TestHerdrStateAdoptionCostPerEvent(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root := testjail.ShortRoot(t)
+	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
+	tmux := func(args ...string) string {
+		t.Helper()
+		command := exec.Command("tmux", append([]string{"-L", "cc-herdr-cost"}, args...)...)
+		command.Env = environment
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("tmux %v: %v: %s", args, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	tmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-herdr-cost", "sleep", "120")
+	t.Cleanup(func() {
+		kill := exec.Command("tmux", "-L", "cc-herdr-cost", "kill-server")
+		kill.Env = environment
+		_ = kill.Run()
+	})
+	socket := tmux("display-message", "-p", "-t", "cc-herdr-cost", "#{socket_path}")
+	environ := gather.NewProcFS("").Environ
+	const runs = 21
+	took := make([]time.Duration, 0, runs)
+	for range runs {
+		start := time.Now()
+		if _, err := runTmuxForHerdr(
+			context.Background(), socket, "list-clients", "-t", "cc-herdr-cost", "-F", "#{client_pid}",
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := environ(os.Getpid()); err != nil {
+			t.Fatalf("read the environment of the test process: %v", err)
+		}
+		took = append(took, time.Since(start))
+	}
+	slices.Sort(took)
+	median := took[runs/2]
+	t.Logf("adoption cost per event, median of %d: %v (list-clients + one environment read)", runs, median)
+	if median > 100*time.Millisecond {
+		t.Fatalf("adoption cost per event = %v, want well under the 20 ms D2 flip", median)
+	}
 }

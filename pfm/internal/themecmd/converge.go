@@ -11,7 +11,7 @@ import (
 )
 
 // ConvergeTmux is name-sync's theme door: it puts the current theme on every
-// live chat server, so a server born before `pfm theme set` (or one whose
+// live chat server, so a server born before `pfm theme on` (or one whose
 // options a restart reset) joins the sync. It prints nothing and touches
 // nothing while the sync is off. A server that refuses is named on stderr and
 // counted in the return, which name-sync folds into its unverified count and

@@ -232,7 +232,7 @@ func printUsage(w io.Writer) {
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
 		"  model-cost the model price table, refreshed daily: MODEL_ID --all --check --json --force",
 		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --flight DIR, --timeline FILE)",
-		"  theme     one palette for Claude Code, tmux, Herdr, Ghostty and VS Code: status, ls, set, sync, off",
+		"  theme     Claude Code's theme rendered into tmux, Herdr and VS Code: status, sync, on, off",
 		"  transcript digest one Claude, Codex or OpenCode transcript: show, counts, types, locate, agents",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",

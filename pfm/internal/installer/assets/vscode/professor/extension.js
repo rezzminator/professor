@@ -1,6 +1,6 @@
 // Professor — the framework's assistant inside VS Code. pfm installs it (`pfm install --vscode`)
 // and links it into every VS Code extensions directory on the host. Its two surfaces: the
-// Professor terminal (below) and the `pfm theme` terminal palette (theme.js, started in activate).
+// Professor terminal (below) and the `pfm theme` terminal colours (theme.js, started in activate).
 //
 // Its first surface is the Professor terminal profile: a login shell that opens the pfm chat
 // fleet, whose tab carries the attached chat's live name, and which puts you in the terminal
@@ -105,7 +105,7 @@ function activate(context) {
     vscode.commands.registerCommand('workbench.action.terminal.new', (args) =>
       openTerminal(args?.config ? args : { config: professorProfile(context), location: args?.location })),
   );
-  // Its second surface is `pfm theme`: the terminal follows the stack's one palette (theme.js).
+  // Its second surface is `pfm theme`: the terminal follows Claude Code's theme (theme.js).
   // syncTheme is the extension's exported API: apply the contract now, resolved once applied.
   const theme = startThemeSync();
   context.subscriptions.push(theme.disposable);

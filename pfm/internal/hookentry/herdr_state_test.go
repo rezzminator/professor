@@ -3,7 +3,6 @@ package hookentry
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -342,13 +341,6 @@ func (rig *chatRig) seed(state herdrStored) {
 // attached from the given clients.
 func (rig *chatRig) registered(state string, clients map[string]herdrClient) herdrStored {
 	return herdrStored{Engine: "claude", SessionID: "s1", State: state, Seq: 500, Clients: clients}
-}
-
-func (rig *chatRig) sessionEnv(pane string) {
-	rig.tmux.env = fmt.Sprintf(
-		"HERDR_ENV=1\nHERDR_PANE_ID=%s\nHERDR_SOCKET_PATH=%s\nHERDR_BIN_PATH=/opt/herdr\nTERM=xterm\n",
-		pane, rig.herdr.path,
-	)
 }
 
 func (rig *chatRig) run(args []string, stdin string) herdrRun {

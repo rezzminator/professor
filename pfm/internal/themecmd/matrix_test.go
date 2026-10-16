@@ -36,11 +36,10 @@ func TestStatusColoursVerdictsOnlyOnAColourTerminal(t *testing.T) {
 }
 
 func TestJSONPrintsTheReport(t *testing.T) {
-	for _, args := range [][]string{{"status", "--json"}, {"set", "tokyo", "--json"}, {"sync", "--json"}, {"off", "--json"}} {
+	for _, args := range [][]string{{"status", "--json"}, {"on", "--json"}, {"sync", "--json"}, {"off", "--json"}} {
 		fake := fakeThemesync{
-			on:       true,
-			palettes: twoPalettes(),
-			report:   matrix(themesync.VerdictInSync, themesync.VerdictDrift),
+			on:     true,
+			report: matrix(themesync.VerdictInSync, themesync.VerdictDrift),
 		}
 		var stdout, stderr bytes.Buffer
 		code := RunVerb(context.Background(), args, fake.deps(true), &stdout, &stderr)
@@ -67,56 +66,110 @@ func TestStatusJSONWithTheSyncOff(t *testing.T) {
 	}
 }
 
-func TestLsShowsEveryPaletteWithItsSwatches(t *testing.T) {
-	fake := fakeThemesync{on: true, palettes: twoPalettes(), report: matrix()}
-	var stdout, stderr bytes.Buffer
-	if code := RunVerb(context.Background(), []string{"ls"}, fake.deps(true), &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d: %s", code, stderr.String())
+func TestStatusEndsOnTheMeasuredLastFlip(t *testing.T) {
+	ack := 1.5
+	report := matrix(themesync.VerdictSource, themesync.VerdictInSync)
+	report.LastFlip = &themesync.Flip{
+		At:     "2026-10-16T03:00:00.250Z",
+		Source: "/h/.claude/settings.json",
+		Tmux:   0.25,
+		Herdr:  0.5,
+		VSCode: 0.75,
+		Ack:    &ack,
 	}
-	out := stdout.String()
-	for _, want := range []string{
-		"* tokyo", "Tokyo Night", "  gold", "Professor Gold", "dark", "light",
-		"blocked", "working", "done", "idle",
-		"\x1b[38;2;0;17;0;48;2;17;0;0m", // tokyo dark foreground #001100 on background #110000
-		"\x1b[48;2;255;0;0m",            // the blocked state colour
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("ls lacks %q:\n%s", want, out)
+	fake := fakeThemesync{on: true, report: report}
+	var stdout, stderr bytes.Buffer
+	RunVerb(context.Background(), []string{"status"}, fake.deps(false), &stdout, &stderr)
+	want := "last flip 2026-10-16T03:00:00Z /h/.claude/settings.json: tmux +0.25 s · herdr +0.50 s · " +
+		"vscode contract +0.75 s, ack +1.50 s\n"
+	if !strings.HasSuffix(stdout.String(), want) {
+		t.Fatalf("status does not end on %q:\n%s", want, stdout.String())
+	}
+	report.LastFlip.Ack = nil
+	fake = fakeThemesync{on: true, report: report}
+	stdout.Reset()
+	RunVerb(context.Background(), []string{"status"}, fake.deps(false), &stdout, &stderr)
+	if strings.Contains(stdout.String(), "ack") {
+		t.Errorf("a flip without an ack names one:\n%s", stdout.String())
+	}
+}
+
+// The follower's launchd job runs `sync` quietly: nothing when nothing changed,
+// one line per apply, one line per failure and the same failure printed once.
+func TestQuietFollowerSync(t *testing.T) {
+	changed := matrix(themesync.VerdictSource, themesync.VerdictInSync)
+	changed.Changed, changed.Servers = true, 2
+	drifted := matrix(themesync.VerdictSource, themesync.VerdictDrift)
+	cases := []struct {
+		name       string
+		fake       fakeThemesync
+		wantCode   int
+		wantStdout string
+		wantStderr string
+		wantLogged []string
+	}{
+		{name: "sync off prints nothing and records nothing", fake: fakeThemesync{on: false}},
+		{
+			name: "nothing changed prints nothing and clears the log line",
+			fake: fakeThemesync{
+				on:     true,
+				report: matrix(themesync.VerdictSource, themesync.VerdictInSync),
+			},
+			wantLogged: []string{""},
+		},
+		{
+			name:       "an apply prints one line",
+			fake:       fakeThemesync{on: true, report: changed},
+			wantStdout: "theme sync gen 7: custom:professor-gold (dark) from /h/.claude/settings.json · tmux 2 · herdr · vscode contract\n",
+			wantLogged: []string{""},
+		},
+		{
+			name: "a drifted surface fails once", fake: fakeThemesync{on: true, report: drifted}, wantCode: 1,
+			wantStderr: "theme sync gen 7 failed: tmux DRIFT d-DRIFT\n",
+			wantLogged: []string{"theme sync gen 7 failed: tmux DRIFT d-DRIFT"},
+		},
+		{
+			name:       "a run error fails once",
+			fake:       fakeThemesync{on: true, err: errors.New("no Claude account\nsettings.json")},
+			wantCode:   1,
+			wantStderr: "theme sync: no Claude account settings.json\n",
+			wantLogged: []string{"theme sync: no Claude account settings.json"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := tc.fake
+			fake.job = themesync.FollowerLabel
+			var stdout, stderr bytes.Buffer
+			code := RunVerb(context.Background(), []string{"sync"}, fake.deps(false), &stdout, &stderr)
+			if code != tc.wantCode || stdout.String() != tc.wantStdout || stderr.String() != tc.wantStderr ||
+				strings.Join(fake.logged, "|") != strings.Join(tc.wantLogged, "|") {
+				t.Fatalf("exit %d stdout %q stderr %q logged %q", code, stdout.String(), stderr.String(), fake.logged)
+			}
+		})
+	}
+	t.Run("the same failure twice prints once", func(t *testing.T) {
+		fake := fakeThemesync{on: true, report: drifted, job: themesync.FollowerLabel}
+		var firstOut, firstErr, secondOut, secondErr bytes.Buffer
+		deps := fake.deps(false)
+		RunVerb(context.Background(), []string{"sync"}, deps, &firstOut, &firstErr)
+		code := RunVerb(context.Background(), []string{"sync"}, deps, &secondOut, &secondErr)
+		if firstErr.Len() == 0 || secondErr.Len() != 0 || secondOut.Len() != 0 || code != 1 {
+			t.Fatalf(
+				"first stderr %q; second exit %d stdout %q stderr %q",
+				firstErr.String(),
+				code,
+				secondOut.String(),
+				secondErr.String(),
+			)
 		}
-	}
-}
-
-func TestLsPlainStreamCarriesHexInsteadOfEscapes(t *testing.T) {
-	fake := fakeThemesync{palettes: twoPalettes()}
-	var stdout, stderr bytes.Buffer
-	if code := RunVerb(context.Background(), []string{"ls"}, fake.deps(false), &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d: %s", code, stderr.String())
-	}
-	out := stdout.String()
-	if strings.Contains(out, "\x1b[") || !strings.Contains(out, "#110000") ||
-		!strings.Contains(out, "blocked #ff0000") {
-		t.Fatalf("plain ls:\n%q", out)
-	}
-	if strings.Contains(out, "* ") {
-		t.Errorf("a current marker without a sync on: %q", out)
-	}
-}
-
-func TestLsWithNoPalettesIsAnError(t *testing.T) {
-	fake := fakeThemesync{}
-	var stdout, stderr bytes.Buffer
-	code := RunVerb(context.Background(), []string{"ls"}, fake.deps(false), &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "no palettes") {
-		t.Fatalf("exit %d, stderr %q", code, stderr.String())
-	}
-}
-
-func TestLsNamesAFailedCurrentLookup(t *testing.T) {
-	fake := fakeThemesync{on: true, palettes: twoPalettes(), err: errors.New("state unreadable")}
-	var stdout, stderr bytes.Buffer
-	code := RunVerb(context.Background(), []string{"ls"}, fake.deps(false), &stdout, &stderr)
-	if code != 0 || !strings.Contains(stdout.String(), "tokyo") ||
-		!strings.Contains(stderr.String(), "current palette unknown: state unreadable") {
-		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout.String(), stderr.String())
-	}
+	})
+	t.Run("a shell run is not quiet", func(t *testing.T) {
+		fake := fakeThemesync{on: true, report: matrix(themesync.VerdictSource, themesync.VerdictInSync)}
+		var stdout, stderr bytes.Buffer
+		RunVerb(context.Background(), []string{"sync"}, fake.deps(false), &stdout, &stderr)
+		if !strings.Contains(stdout.String(), "IN-SYNC") || len(fake.logged) != 0 {
+			t.Fatalf("stdout %q logged %v", stdout.String(), fake.logged)
+		}
+	})
 }

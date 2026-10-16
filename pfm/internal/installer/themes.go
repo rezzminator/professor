@@ -23,7 +23,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
@@ -118,23 +117,11 @@ func (installer *engine) installThemes(ctx context.Context) {
 		loads[name] = result
 		return result
 	}
-	held := installer.options.claudeThemeHeld
-	if held == nil {
-		held = themesync.HoldsClaudeTheme
-	}
-	themeStateDir := themesync.DefaultStateDir(installer.options.Home)
 	for _, name := range sortedThemeNames(sources) {
 		source := sources[name]
 		target, targetErr := themeTarget(installer.options.Home, source.Target)
 		if targetErr != nil {
 			installer.skip("theme " + name + " manifest target invalid: " + targetErr.Error())
-			continue
-		}
-		// `pfm theme set` renders its palette into this file and restores the
-		// file's own bytes on `pfm theme off`; a write here would be undone by
-		// the next sync and lost from off's snapshot, so the hold wins.
-		if held(themeStateDir, target) {
-			installer.ok("theme " + name + " held by pfm theme; pfm theme off restores it")
 			continue
 		}
 		existing, exists, readErr := readOptionalRegularFile(target)

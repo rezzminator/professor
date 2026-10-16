@@ -21,7 +21,9 @@ func TestNoEngineLiteralOutsideEnginePackage(t *testing.T) {
 	root := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
 	allow := map[string]string{
 		"cmd/pfm/engines.go": "(b) the composition root is the one permitted engine wiring roster",
-		"internal/themesync/claude.go": "(c) Claude Code's theme schema names its brand token \"claude\": " +
+		"internal/themesync/builtin.go": "(c) Claude Code's theme schema names its brand token \"claude\": " +
+			"a theme token key the producer fixes, not an engine id",
+		"internal/themesync/derive.go": "(c) Claude Code's theme schema names its brand token \"claude\": " +
 			"a theme token key the producer fixes, not an engine id",
 	}
 	literals := []string{

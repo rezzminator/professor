@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,34 +19,101 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
+// clientSplit is the tmux clients of a chat session set against its registry.
+type clientSplit struct {
+	// gone are the registered clients that vanished without a detach hook, now
+	// removed from the registry; the caller releases their panes.
+	gone map[string]herdrClient
+	// adopted are the live clients that were unregistered and run in a Herdr
+	// pane, now in the registry.
+	adopted []string
+	// errs are the live clients whose pane could not be resolved (named, never
+	// read as "outside Herdr"); a client outside Herdr is no error.
+	errs error
+}
+
+// markMoved counts every adopted client that resolved as moved: its pane has
+// not been told the state, name and title yet.
+func (split clientSplit) markMoved(resolved map[string]herdrClient, moved map[string]bool) {
+	for _, pid := range split.adopted {
+		if _, ok := resolved[pid]; ok {
+			moved[pid] = true
+		}
+	}
+}
+
 // liveClients splits the registered clients into those still attached and
-// those that vanished without a detach hook; the latter are released.
+// those that vanished without a detach hook; the latter are removed from the
+// registry. With adopt, every live client not yet registered whose own
+// environment runs in a Herdr pane joins the registry (the one resolver
+// decides the pane), so a record born before the hooks, across a Herdr restart
+// or never attached heals on any run. The one tmux call is the steady state's
+// already: a registry with clients lists them anyway.
 func (reporter *herdrReporter) liveClients(
 	ctx context.Context,
 	session string,
 	state *herdrStored,
-) (gone map[string]herdrClient, err error) {
-	if len(state.Clients) == 0 {
-		return nil, nil
+	adopt bool,
+) (split clientSplit, err error) {
+	if len(state.Clients) == 0 && !adopt {
+		return clientSplit{}, nil
 	}
 	output, err := reporter.deps.tmux(
 		ctx, reporter.options.socket, "list-clients", "-t", session, "-F", "#{client_pid}",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list tmux clients of %s: %w", session, err)
+		return clientSplit{}, fmt.Errorf("list tmux clients of %s: %w", session, err)
 	}
 	live := map[string]bool{}
 	for _, pid := range strings.Fields(output) {
 		live[pid] = true
 	}
-	gone = map[string]herdrClient{}
+	split.gone = map[string]herdrClient{}
 	for pid, client := range state.Clients {
 		if !live[pid] {
-			gone[pid] = client
+			split.gone[pid] = client
 			delete(state.Clients, pid)
 		}
 	}
-	return gone, nil
+	if !adopt {
+		return split, nil
+	}
+	var errs []error
+	resolver := reporter.resolver()
+	for _, pid := range slices.Sorted(maps.Keys(live)) {
+		if _, registered := state.Clients[pid]; registered {
+			continue
+		}
+		number, err := strconv.Atoi(pid)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("tmux client %q of %s is no pid: %w", pid, session, err))
+			continue
+		}
+		location, found, err := resolver.Resolve(ctx, number)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("adopt tmux client %s of %s (nothing registered): %w", pid, session, err))
+			continue
+		}
+		if !found {
+			continue
+		}
+		if state.Clients == nil {
+			state.Clients = map[string]herdrClient{}
+		}
+		state.Clients[pid] = herdrClient{Pane: location.Pane, Terminal: location.Terminal, Socket: location.Socket}
+		split.adopted = append(split.adopted, pid)
+	}
+	split.errs = errors.Join(errs...)
+	return split, nil
+}
+
+// resolver is the one rule for "which Herdr pane runs this client": the
+// client's own environment, this run's cached pane listing and one
+// pane.process_info per candidate pane.
+func (reporter *herdrReporter) resolver() herdr.Resolver {
+	resolver := herdr.WireResolver(reporter.deps.environ, herdr.Call, reporter.nextSent)
+	resolver.Panes = reporter.listPanes
+	return resolver
 }
 
 // releaseAll releases the panes of clients that detached or vanished; each
@@ -53,7 +123,7 @@ func (reporter *herdrReporter) liveClients(
 func (reporter *herdrReporter) releaseAll(ctx context.Context, engine string, clients map[string]herdrClient) error {
 	var errs []error
 	for _, pid := range sortedClientPIDs(clients) {
-		client, _, err := reporter.currentPane(ctx, pid, clients[pid])
+		client, _, err := reporter.currentPane(ctx, pid, clients[pid], false)
 		if err != nil {
 			// A pane that is already gone has nothing left to release.
 			if !isPaneGone(err) {
@@ -116,15 +186,17 @@ func isPaneGone(err error) bool {
 
 // currentPane resolves a registered client to the pane its terminal is in NOW:
 // a Herdr pane move keeps the terminal and assigns a new pane id, and the old
-// id answers pane_not_found (or, reused, belongs to another chat). With no recorded
-// terminal (an attach whose pane.list failed) the recorded id binds one when it
-// is still listed, else the pane whose foreground holds the client pid does.
-// A client it cannot resolve is an error and nothing is sent to it: the stale
-// id is never the fallback.
+// id answers pane_not_found (or, reused, belongs to another chat). A terminal
+// no pane lists any more (a Herdr restart assigns fresh terminals) and an entry
+// with no recorded terminal and a gone pane id are resolved by the pane whose
+// foreground holds the client pid, when walk allows the walk: a client already
+// gone from tmux holds no pane. A client it cannot resolve is an error and
+// nothing is sent to it: the stale id is never the fallback.
 func (reporter *herdrReporter) currentPane(
 	ctx context.Context,
 	pid string,
 	client herdrClient,
+	walk bool,
 ) (herdrClient, bool, error) {
 	fail := func(cause error) (herdrClient, bool, error) {
 		return client, false, fmt.Errorf(
@@ -140,6 +212,7 @@ func (reporter *herdrReporter) currentPane(
 		return fail(err)
 	}
 	resolved := client
+	gone := fmt.Sprintf("pane %s is gone and no pane runs the client pid", client.Pane)
 	if client.Terminal != "" {
 		for _, pane := range panes {
 			if pane.TerminalID == client.Terminal {
@@ -147,62 +220,31 @@ func (reporter *herdrReporter) currentPane(
 				return resolved, resolved.Pane != client.Pane, nil
 			}
 		}
-		return fail(paneGoneError{fmt.Sprintf("terminal %s is in no pane", client.Terminal)})
-	}
-	for _, pane := range panes {
-		if pane.PaneID == client.Pane {
-			resolved.Terminal = pane.TerminalID
-			return resolved, false, nil
+		gone = fmt.Sprintf("terminal %s is in no pane and no pane runs the client pid", client.Terminal)
+		if !walk {
+			return fail(paneGoneError{fmt.Sprintf("terminal %s is in no pane", client.Terminal)})
 		}
-	}
-	pane, found, err := reporter.paneRunning(ctx, client.Socket, pid, panes, "")
-	if err != nil {
-		return fail(err)
-	}
-	if found {
-		resolved.Pane, resolved.Terminal = pane.PaneID, pane.TerminalID
-		return resolved, true, nil
-	}
-	return fail(paneGoneError{fmt.Sprintf("pane %s is gone and no pane runs the client pid", client.Pane)})
-}
-
-// paneRunning returns the listed pane whose foreground processes hold pid,
-// asking about the pane first names before the others. A pane whose process
-// info cannot be read is skipped.
-func (reporter *herdrReporter) paneRunning(
-	ctx context.Context,
-	socket, pid string,
-	panes []herdr.Pane,
-	first string,
-) (herdr.Pane, bool, error) {
-	ordered := make([]herdr.Pane, 0, len(panes))
-	for _, pane := range panes {
-		if pane.PaneID == first {
-			ordered = append([]herdr.Pane{pane}, ordered...)
-		} else {
-			ordered = append(ordered, pane)
-		}
-	}
-	for _, pane := range ordered {
-		line, err := herdr.ProcessInfo{Pane: pane.PaneID, Seq: reporter.nextSent()}.Line()
-		if err != nil {
-			return herdr.Pane{}, false, err
-		}
-		results, err := herdr.Call(ctx, socket, line)
-		if err != nil {
-			continue
-		}
-		pids, err := herdr.ParseProcessInfo(results[0])
-		if err != nil {
-			continue
-		}
-		for _, foreground := range pids {
-			if strconv.Itoa(foreground) == pid {
-				return pane, true, nil
+	} else {
+		for _, pane := range panes {
+			if pane.PaneID == client.Pane {
+				resolved.Terminal = pane.TerminalID
+				return resolved, false, nil
 			}
 		}
 	}
-	return herdr.Pane{}, false, nil
+	number, err := strconv.Atoi(pid)
+	if err != nil {
+		return fail(fmt.Errorf("the client is no pid: %w", err))
+	}
+	pane, found, err := reporter.resolver().PaneRunning(ctx, client.Socket, number, panes, "")
+	if err != nil {
+		return fail(err)
+	}
+	if !found {
+		return fail(paneGoneError{gone})
+	}
+	resolved.Pane, resolved.Terminal = pane.PaneID, pane.TerminalID
+	return resolved, true, nil
 }
 
 // resolveClients resolves every registered client in place. It returns the
@@ -216,7 +258,7 @@ func (reporter *herdrReporter) resolveClients(ctx context.Context, state *herdrS
 	resolved, moved = map[string]herdrClient{}, map[string]bool{}
 	var errs []error
 	for _, pid := range sortedClientPIDs(state.Clients) {
-		client, panesDiffer, err := reporter.currentPane(ctx, pid, state.Clients[pid])
+		client, panesDiffer, err := reporter.currentPane(ctx, pid, state.Clients[pid], true)
 		if err != nil {
 			// A release has nothing to send to a pane that is already gone.
 			if !releasing || !isPaneGone(err) {
@@ -244,65 +286,17 @@ func movedClients(clients map[string]herdrClient, moved map[string]bool) map[str
 	return only
 }
 
-// attach registers the tmux client that just attached, when it attached from a
-// Herdr pane, and re-reports the stored state to that pane. tmux copied the
-// Herdr variables of THIS client into the session environment (and removes
-// them for a client without them); a client without them changes nothing. A
-// client already registered is only resolved again, as a pane move happens
-// without tmux copying anything: it re-binds and re-sends if its pane changed.
-// The copied pane id is the one the pane's shell started with, stale after a
-// pane move, and the environment is the LAST attaching client's: a client is
-// registered only under the pane whose foreground runs its pid, asked first
-// about the copied id; a client no Herdr pane runs is an error, never sent to.
+// attach brings the pane of a tmux client that just attached up to date: the
+// one client pass (reconcile) adopts it when its own environment runs in a
+// Herdr pane, and re-reports the stored state, name and title to it. The pane
+// is the one whose foreground runs the client pid, asked first about the pane
+// the client's own HERDR_PANE_ID names; a client outside Herdr changes
+// nothing, a client no Herdr pane runs is an error and is never sent to.
 func (reporter *herdrReporter) attach(ctx context.Context, session string, state herdrStored) error {
 	if reporter.options.client == "" {
 		return fmt.Errorf("attach needs --client {tmux client pid}")
 	}
-	gone, err := reporter.liveClients(ctx, session, &state)
-	if err != nil {
-		return err
-	}
-	errs := []error{reporter.releaseAll(ctx, reporter.engineLabel(state), gone)}
-	if len(gone) > 0 {
-		errs = append(errs, reporter.writeState(ctx, session, state))
-	}
-	if _, registered := state.Clients[reporter.options.client]; registered {
-		return errors.Join(append(errs, reporter.rebind(ctx, session, state))...)
-	}
-	target, err := reporter.sessionTarget(ctx, session)
-	if err != nil || !target.ok() {
-		return errors.Join(append(errs, err)...)
-	}
-	panes, err := reporter.listPanes(ctx, target.socket)
-	if err != nil {
-		return errors.Join(append(errs, fmt.Errorf("attach client %s: %w", reporter.options.client, err))...)
-	}
-	pane, found, err := reporter.paneRunning(ctx, target.socket, reporter.options.client, panes, target.pane)
-	if err == nil && !found {
-		err = fmt.Errorf("no Herdr pane runs it (the session environment names %s)", target.pane)
-	}
-	if err != nil {
-		return errors.Join(append(errs, fmt.Errorf(
-			"attach client %s (nothing registered): %w", reporter.options.client, err,
-		))...)
-	}
-	target.pane = pane.PaneID
-	client := herdrClient{Pane: pane.PaneID, Terminal: pane.TerminalID, Socket: target.socket}
-	if state.Clients == nil {
-		state.Clients = map[string]herdrClient{}
-	}
-	state.Clients[reporter.options.client] = client
-	if state.State == "" {
-		reporter.idleAtLaunch(session, &state)
-	}
-	if err := reporter.writeState(ctx, session, state); err != nil {
-		return errors.Join(append(errs, err)...)
-	}
-	if state.State != "" {
-		errs = append(errs, reporter.send(ctx, target, &herdrAction{stored: state}, reporter.nextSent()))
-	}
-	errs = append(errs, reporter.nameSync(ctx, session, state, clientTargets(state.Clients), []herdrTarget{target}))
-	return errors.Join(errs...)
+	return reporter.reconcile(ctx, session, state, true)
 }
 
 // idleAtLaunch gives a chat nothing has reported for yet the idle state of the
@@ -318,26 +312,40 @@ func (reporter *herdrReporter) idleAtLaunch(session string, state *herdrStored) 
 	state.Engine, state.State = herdr.Label(id), string(herdr.StateIdle)
 }
 
-// sync is a client's resize: a registered client is re-bound when its pane
-// moved; a client never registered changes nothing, since the session
-// environment holds the Herdr variables of the last client that attached, not
-// of this one.
+// sync is a client's resize: the client pass adopts the client when it runs in
+// a Herdr pane and re-binds every registered client whose pane moved, as a pane
+// move happens without tmux copying anything.
 func (reporter *herdrReporter) sync(ctx context.Context, session string, state herdrStored) error {
 	if reporter.options.client == "" {
 		return fmt.Errorf("sync needs --client {tmux client pid}")
 	}
-	if _, registered := state.Clients[reporter.options.client]; !registered {
-		return nil
-	}
-	return reporter.rebind(ctx, session, state)
+	return reporter.reconcile(ctx, session, state, false)
 }
 
-// rebind resolves every registered client; a client whose pane moved gets the
-// stored state, name and title at its new pane, and nothing else changes.
-func (reporter *herdrReporter) rebind(ctx context.Context, session string, state herdrStored) error {
-	clients, moved, changed, err := reporter.resolveClients(ctx, &state, false)
-	errs := []error{err}
-	if changed {
+// reconcile is the one client pass of the tmux-fired verbs (attach, sync,
+// name): release the clients tmux no longer lists, adopt the live ones that
+// run in a Herdr pane, resolve every registered client to its pane now, and
+// bring each new or moved pane up to date with the stored state, name and
+// title. With atLaunch (an attach), a chat nothing reported for yet is stored
+// idle under its socket's engine first (idleAtLaunch).
+func (reporter *herdrReporter) reconcile(
+	ctx context.Context,
+	session string,
+	state herdrStored,
+	atLaunch bool,
+) error {
+	split, err := reporter.liveClients(ctx, session, &state, true)
+	if err != nil {
+		return err
+	}
+	clients, moved, changed, resolveErr := reporter.resolveClients(ctx, &state, false)
+	split.markMoved(clients, moved)
+	errs := []error{split.errs, resolveErr, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone)}
+	if atLaunch && len(split.adopted) > 0 && state.State == "" {
+		reporter.idleAtLaunch(session, &state)
+		changed = true
+	}
+	if changed || len(split.gone) > 0 || len(split.adopted) > 0 {
 		if err := reporter.writeState(ctx, session, state); err != nil {
 			return errors.Join(append(errs, err)...)
 		}
@@ -386,23 +394,6 @@ func clientTargets(clients map[string]herdrClient) []herdrTarget {
 		targets = append(targets, herdrTarget{pane: clients[pid].Pane, socket: clients[pid].Socket})
 	}
 	return targets
-}
-
-func (reporter *herdrReporter) sessionTarget(ctx context.Context, session string) (herdrTarget, error) {
-	output, err := reporter.deps.tmux(ctx, reporter.options.socket, "show-environment", "-t", session)
-	if err != nil {
-		return herdrTarget{}, fmt.Errorf("read tmux session environment of %s (show-environment): %w", session, err)
-	}
-	values := map[string]string{}
-	for _, line := range strings.Split(output, "\n") {
-		if name, value, found := strings.Cut(line, "="); found {
-			values[name] = value
-		}
-	}
-	if values[herdr.EnvMarker] != "1" {
-		return herdrTarget{}, nil
-	}
-	return herdrTarget{pane: values[herdr.EnvPane], socket: values[herdr.EnvSocket]}, nil
 }
 
 // blankTitle empties the chat server's set-titles-string at a session end. The
@@ -456,12 +447,111 @@ func (reporter *herdrReporter) blankTitle(ctx context.Context, action *herdrActi
 
 // sweep releases and forgets the registered clients tmux no longer lists.
 func (reporter *herdrReporter) sweep(ctx context.Context, session string, state herdrStored) error {
-	gone, err := reporter.liveClients(ctx, session, &state)
-	if err != nil || len(gone) == 0 {
+	split, err := reporter.liveClients(ctx, session, &state, false)
+	if err != nil || len(split.gone) == 0 {
 		return err
 	}
 	if err := reporter.writeState(ctx, session, state); err != nil {
 		return err
 	}
-	return reporter.releaseAll(ctx, reporter.engineLabel(state), gone)
+	return reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone)
+}
+
+// herdrStateUnknown is the state of a pane whose chat no engine hook has
+// reported for: Herdr's own "unknown", an honest "not known" over a guessed idle.
+const herdrStateUnknown = "unknown"
+
+// HerdrReannounce brings the chat server at socket back onto Herdr: for each
+// session it adopts every live tmux client whose own environment runs in a
+// Herdr pane, then re-reports the stored state (unknown when no engine event
+// ever stored one, the engine named by the socket's prefix) and the name to
+// every live client, returning the pane ids reached. `pfm name-sync --apply`
+// calls it per chat server, so a chat that predates the hooks or a Herdr
+// restart heals without being re-opened. A host with no Herdr reaches nothing
+// and says so with no error.
+func HerdrReannounce(ctx context.Context, socket string) ([]string, error) {
+	return reannounceOn(ctx, socket, realHerdrDeps())
+}
+
+func reannounceOn(ctx context.Context, socket string, deps herdrDeps) ([]string, error) {
+	engine, owned := pfmengine.FromSocket(filepath.Base(socket))
+	if !owned {
+		return nil, fmt.Errorf("herdr re-announce %s: not a chat server socket (no engine owns its prefix)", socket)
+	}
+	reporter := &herdrReporter{
+		deps:    deps,
+		stderr:  io.Discard,
+		options: herdrOptions{engine: engine, event: herdr.EventSync, socket: socket},
+		seq:     uint64(deps.now().UnixNano()),
+	}
+	if !reporter.hostHasHerdr() {
+		return nil, nil
+	}
+	output, err := deps.tmux(ctx, socket, "list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		return nil, fmt.Errorf("herdr re-announce %s: list the sessions: %w", socket, err)
+	}
+	var (
+		errs    []error
+		reached = map[string]bool{}
+	)
+	for _, session := range strings.Fields(output) {
+		panes, err := reporter.reannounceSession(ctx, session)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("herdr re-announce %s session %s: %w", socket, session, err))
+		}
+		for _, pane := range panes {
+			reached[pane] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(reached)), errors.Join(errs...)
+}
+
+// reannounceSession is one session's re-announce, under the session lock: the
+// client pass (adopt, re-bind, release) and then the state and the name to
+// every live client. It returns the panes the state reached.
+func (reporter *herdrReporter) reannounceSession(ctx context.Context, session string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, herdrDeadline)
+	defer cancel()
+	reporter.session = session
+	unlock, err := reporter.lock(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	state, err := reporter.readState(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	split, err := reporter.liveClients(ctx, session, &state, true)
+	if err != nil {
+		return nil, err
+	}
+	clients, _, rebound, resolveErr := reporter.resolveClients(ctx, &state, false)
+	errs := []error{split.errs, resolveErr, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone)}
+	changed := rebound || len(split.gone) > 0 || len(split.adopted) > 0
+	if state.State == "" {
+		state.Engine, state.State, changed = herdr.Label(reporter.options.engine), herdrStateUnknown, true
+	}
+	if state.Engine == "" {
+		state.Engine, changed = herdr.Label(reporter.options.engine), true
+	}
+	if changed {
+		if err := reporter.writeState(ctx, session, state); err != nil {
+			return nil, errors.Join(append(errs, err)...)
+		}
+	}
+	var reached []string
+	for _, pid := range sortedClientPIDs(clients) {
+		client := clients[pid]
+		target := herdrTarget{pane: client.Pane, socket: client.Socket}
+		if err := reporter.send(ctx, target, &herdrAction{stored: state}, reporter.nextSent()); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		reached = append(reached, client.Pane)
+	}
+	every := clientTargets(clients)
+	errs = append(errs, reporter.nameSync(ctx, session, state, every, every))
+	return reached, errors.Join(errs...)
 }

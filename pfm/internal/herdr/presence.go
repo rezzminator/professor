@@ -3,46 +3,77 @@ package herdr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 // What `pfm chat ls` and the chat MCP's ls show of a chat's Herdr presence,
 // when it is not a pane: NoHerdr on a host without Herdr, NotInHerdr for a chat
-// no Herdr pane holds. A failed lookup is never either: it reads
-// "herdr error: {cause}" (PresenceError).
+// no tmux client of it sits in a Herdr pane, AttachedOutside for a chat whose
+// every tmux client runs outside Herdr. A failed lookup is never any of them:
+// it reads "herdr unreachable: {cause}" when the Herdr socket could not be read
+// (PresenceUnreachable) and "herdr error: {cause}" otherwise (PresenceError).
 const (
-	PresenceNoHerdr    = "—"
-	PresenceNotInHerdr = "not in herdr"
-	presenceErrorLead  = "herdr error: "
+	PresenceNoHerdr         = "—"
+	PresenceNotInHerdr      = "not in herdr"
+	PresenceAttachedOutside = "attached outside Herdr"
+	presenceErrorLead       = "herdr error: "
+	presenceUnreachableLead = "herdr unreachable: "
+	// hooklessLead leads the detail a pane whose agent Herdr reports `unknown`
+	// carries when its chat was launched without the Herdr reporter hooks.
+	hooklessLead = " · launched without Herdr hooks: pfm chat reload "
 )
 
 // PresenceError is the presence of a chat whose Herdr lookup failed.
 func PresenceError(cause error) string { return presenceErrorLead + cause.Error() }
 
+// PresenceUnreachable is the presence of a chat whose Herdr socket answered
+// nothing usable.
+func PresenceUnreachable(cause error) string { return presenceUnreachableLead + cause.Error() }
+
+// unreachableError is a Herdr socket that could not be read: the cause of a
+// PresenceUnreachable text, kept distinct through every wrap of the resolver.
+type unreachableError struct{ err error }
+
+func (unreachable *unreachableError) Error() string { return unreachable.err.Error() }
+
+func (unreachable *unreachableError) Unwrap() error { return unreachable.err }
+
 // Seat is one chat whose presence is asked: the tmux server socket path and
-// the session of the chat (Pane when the row names no session). An empty
-// SocketPath is a chat with no live tmux server. Err, when set, is why the
-// seat could not be addressed at all.
+// the session of the chat (Pane when the row names no session), its name and
+// the pids of the processes in its tmux pane. An empty SocketPath is a chat
+// with no live tmux server. Err, when set, is why the seat could not be
+// addressed at all.
 type Seat struct {
 	SocketPath string
 	Session    string
 	Pane       string
+	Name       string
+	PanePIDs   []int
 	Err        error
 }
 
-// Probe reads chats' Herdr presence. Getenv, LookPath, Tmux and Call are the
-// seams the real tmux and Herdr sit behind; Warn receives the full context of
-// every failed lookup.
+// Probe reads chats' Herdr presence. Getenv, LookPath, Tmux, Call and Environ
+// are the seams the real tmux, Herdr and process table sit behind; Warn
+// receives the full context of every failed lookup.
 type Probe struct {
 	Getenv   func(name string) string
 	LookPath func(name string) (string, error)
 	// Tmux runs one tmux command against the server at socketPath.
 	Tmux func(ctx context.Context, socketPath string, args ...string) (string, error)
 	Call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
-	Warn io.Writer
+	// Environ reads another process's environment (gather's ProcFS.Environ):
+	// how a tmux client no hook registered is found to run in Herdr.
+	Environ func(pid int) (map[string]string, error)
+	// Hookless says whether the chat of a seat was launched without the Herdr
+	// reporter hooks; known is false when its launch cannot be read, and the
+	// detail is then left out, never guessed.
+	Hookless func(seat Seat) (hookless, known bool)
+	Warn     io.Writer
 }
 
 // hostHasHerdr is the reporter's rule: HERDR_BIN_PATH set, or herdr on PATH.
@@ -59,11 +90,13 @@ func (probe Probe) hostHasHerdr() bool {
 
 // Presence returns one presence string per seat, in order. On a host with no
 // Herdr every seat reads PresenceNoHerdr and no tmux or socket call is made.
-// Otherwise a seat reads PresenceNotInHerdr (no live tmux server, or no
-// registered client pane left), or "{pane id} {workspace} {agent status}
-// {agent name}" per registered client joined with ", " ("{pane id}
-// {workspace} no-agent" for a pane Herdr lists no agent on), or its failure. Each
-// Herdr socket is asked once for all seats.
+// Otherwise a seat reads, for its registered clients plus every live tmux
+// client of its session, "{pane id} {workspace} {agent status} {agent name}"
+// per client joined with ", " ("{pane id} {workspace} no-agent" for a pane
+// Herdr lists no agent on; an `unknown` agent of a chat launched without the
+// reporter hooks gains the reload hint); else PresenceAttachedOutside when its
+// clients run outside Herdr, PresenceNotInHerdr when no client sits in a pane,
+// or its failure. Each Herdr socket is asked once for all seats.
 func (probe Probe) Presence(ctx context.Context, seats []Seat) []string {
 	presence := make([]string, len(seats))
 	if !probe.hostHasHerdr() {
@@ -77,7 +110,12 @@ func (probe Probe) Presence(ctx context.Context, seats []Seat) []string {
 		text, err := probe.seatPresence(ctx, seat, sockets)
 		if err != nil {
 			probe.warn("pfm chat ls: herdr presence of %+v: %v", seat, err)
-			text = PresenceError(err)
+			var unreachable *unreachableError
+			if errors.As(err, &unreachable) {
+				text = PresenceUnreachable(err)
+			} else {
+				text = PresenceError(err)
+			}
 		}
 		presence[index] = text
 	}
@@ -115,47 +153,187 @@ func (probe Probe) seatPresence(ctx context.Context, seat Seat, sockets map[stri
 	if err != nil {
 		return "", fmt.Errorf("read %s of %s: %w", StoredOption, target, err)
 	}
-	raw := strings.TrimSpace(output)
-	if raw == "" {
+	var stored Stored
+	if raw := strings.TrimSpace(output); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+			return "", fmt.Errorf("decode %s of %s (%q): %w", StoredOption, target, raw, err)
+		}
+	}
+	live, err := probe.liveClients(ctx, seat, target)
+	if err != nil {
+		return "", err
+	}
+	pids := clientPIDs(stored, live)
+	if len(pids) == 0 {
 		return PresenceNotInHerdr, nil
 	}
-	var stored Stored
-	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return "", fmt.Errorf("decode %s of %s (%q): %w", StoredOption, target, raw, err)
+	resolver := probe.resolver(sockets)
+	var shown []string
+	outside := 0
+	hooklessKnown, hookless := false, false
+	for _, pid := range pids {
+		var hit presenceHit
+		var found bool
+		if client, registered := stored.Clients[pid]; registered {
+			if client.Socket == "" || (client.Pane == "" && client.Terminal == "") {
+				return "", fmt.Errorf(
+					"%s of %s: client %s names no pane or no Herdr socket: %+v",
+					StoredOption,
+					target,
+					pid,
+					client,
+				)
+			}
+			view := probe.socketViewOf(ctx, client.Socket, sockets)
+			if view.err != nil {
+				return "", view.err
+			}
+			hit, found = view.describe(client)
+			if !found && live[pid] {
+				// The registered pane is gone, but the client is still attached:
+				// find where it runs now.
+				hit, found, outside, err = probe.resolveLive(ctx, resolver, sockets, pid, outside)
+				if err != nil {
+					return "", err
+				}
+			}
+		} else {
+			hit, found, outside, err = probe.resolveLive(ctx, resolver, sockets, pid, outside)
+			if err != nil {
+				return "", err
+			}
+		}
+		if !found {
+			continue
+		}
+		text := hit.text
+		if hit.status == "unknown" && seat.Name != "" && probe.Hookless != nil {
+			if !hooklessKnown {
+				hookless, hooklessKnown = probe.Hookless(seat)
+			}
+			if hooklessKnown && hookless {
+				text += hooklessLead + seat.Name
+			}
+		}
+		shown = append(shown, text)
 	}
-	pids := make([]string, 0, len(stored.Clients))
+	switch {
+	case len(shown) > 0:
+		return strings.Join(shown, ", "), nil
+	case outside > 0:
+		return PresenceAttachedOutside, nil
+	default:
+		return PresenceNotInHerdr, nil
+	}
+}
+
+// resolveLive finds the Herdr pane the live tmux client pid runs in and
+// describes it; a client running outside Herdr is counted in outside, a client
+// Herdr cannot place is the error.
+func (probe Probe) resolveLive(
+	ctx context.Context,
+	resolver Resolver,
+	sockets map[string]*socketView,
+	pid string,
+	outside int,
+) (hit presenceHit, found bool, outsideNow int, err error) {
+	number, err := strconv.Atoi(pid)
+	if err != nil {
+		return presenceHit{}, false, outside, fmt.Errorf("tmux client pid %q is not a number: %w", pid, err)
+	}
+	if resolver.Environ == nil {
+		return presenceHit{}, false, outside, fmt.Errorf("no process reader to place tmux client %s", pid)
+	}
+	location, inHerdr, err := resolver.Resolve(ctx, number)
+	if err != nil {
+		return presenceHit{}, false, outside, fmt.Errorf("place tmux client %s: %w", pid, err)
+	}
+	if !inHerdr {
+		return presenceHit{}, false, outside + 1, nil
+	}
+	view := probe.socketViewOf(ctx, location.Socket, sockets)
+	if view.err != nil {
+		return presenceHit{}, false, outside, view.err
+	}
+	hit, found = view.describe(Client{Pane: location.Pane, Terminal: location.Terminal, Socket: location.Socket})
+	return hit, found, outside, nil
+}
+
+// liveClients is the pids of the tmux clients attached to target now.
+func (probe Probe) liveClients(ctx context.Context, seat Seat, target string) (map[string]bool, error) {
+	output, err := probe.Tmux(ctx, seat.SocketPath, "list-clients", "-t", target, "-F", "#{client_pid}")
+	if err != nil {
+		return nil, fmt.Errorf("list tmux clients of %s: %w", target, err)
+	}
+	live := map[string]bool{}
+	for _, word := range strings.Fields(output) {
+		if _, err := strconv.Atoi(word); err != nil {
+			return nil, fmt.Errorf("list tmux clients of %s: client pid %q is not a number: %w", target, word, err)
+		}
+		live[word] = true
+	}
+	return live, nil
+}
+
+// clientPIDs is the registered clients' keys plus the live clients' pids, each
+// once, in pid order.
+func clientPIDs(stored Stored, live map[string]bool) []string {
+	seen := map[string]bool{}
+	var pids []string
 	for pid := range stored.Clients {
+		seen[pid] = true
 		pids = append(pids, pid)
 	}
-	sort.Strings(pids)
-	var shown []string
-	for _, pid := range pids {
-		client := stored.Clients[pid]
-		if client.Socket == "" || (client.Pane == "" && client.Terminal == "") {
-			return "", fmt.Errorf(
-				"%s of %s: client %s names no pane or no Herdr socket: %+v",
-				StoredOption,
-				target,
-				pid,
-				client,
-			)
-		}
-		view, ok := sockets[client.Socket]
-		if !ok {
-			view = probe.look(ctx, client.Socket)
-			sockets[client.Socket] = view
-		}
-		if view.err != nil {
-			return "", view.err
-		}
-		if text, found := view.describe(client); found {
-			shown = append(shown, text)
+	for pid := range live {
+		if !seen[pid] {
+			pids = append(pids, pid)
 		}
 	}
-	if len(shown) == 0 {
-		return PresenceNotInHerdr, nil
+	sort.Slice(pids, func(left, right int) bool {
+		leftNumber, leftErr := strconv.Atoi(pids[left])
+		rightNumber, rightErr := strconv.Atoi(pids[right])
+		if leftErr == nil && rightErr == nil {
+			return leftNumber < rightNumber
+		}
+		return pids[left] < pids[right]
+	})
+	return pids
+}
+
+// resolver is the shared pane rule over this probe's seams: the pane listing
+// comes from the cached socket view, the process info from the Herdr socket.
+func (probe Probe) resolver(sockets map[string]*socketView) Resolver {
+	var sequence uint64
+	next := func() uint64 {
+		sequence++
+		return sequence
 	}
-	return strings.Join(shown, ", "), nil
+	wire := WireResolver(probe.Environ, probe.Call, next)
+	return Resolver{
+		Environ: probe.Environ,
+		Panes: func(ctx context.Context, socket string) ([]Pane, error) {
+			view := probe.socketViewOf(ctx, socket, sockets)
+			if view.err != nil {
+				return nil, view.err
+			}
+			panes := make([]Pane, len(view.panes))
+			for index, pane := range view.panes {
+				panes[index] = Pane{PaneID: pane.PaneID, TerminalID: pane.TerminalID}
+			}
+			return panes, nil
+		},
+		Foreground: wire.Foreground,
+	}
+}
+
+// socketViewOf is the cached view of one Herdr socket.
+func (probe Probe) socketViewOf(ctx context.Context, socket string, sockets map[string]*socketView) *socketView {
+	view, ok := sockets[socket]
+	if !ok {
+		view = probe.look(ctx, socket)
+		sockets[socket] = view
+	}
+	return view
 }
 
 // socketView is what one Herdr socket answered for a listing: its panes, the
@@ -177,7 +355,7 @@ type presencePane struct {
 func (probe Probe) look(ctx context.Context, socket string) *socketView {
 	view := &socketView{agents: map[string]Agent{}, workspaces: map[string]string{}}
 	fail := func(err error) *socketView {
-		view.err = fmt.Errorf("herdr socket %s: %w", socket, err)
+		view.err = &unreachableError{fmt.Errorf("herdr socket %s: %w", socket, err)}
 		return view
 	}
 	if probe.Call == nil {
@@ -218,10 +396,17 @@ func (probe Probe) look(ctx context.Context, socket string) *socketView {
 	return view
 }
 
-// describe renders one registered client: its current pane (found by the
-// terminal id, which survives a pane move), workspace, agent status and name;
-// found is false when no such pane exists any more.
-func (view *socketView) describe(client Client) (text string, found bool) {
+// presenceHit is one client's pane as shown: its text and the agent status the
+// text carries ("" for a pane with no agent).
+type presenceHit struct {
+	text   string
+	status string
+}
+
+// describe renders one client's pane (found by the terminal id, which survives
+// a pane move): pane, workspace, agent status and name; found is false when no
+// such pane exists any more.
+func (view *socketView) describe(client Client) (hit presenceHit, found bool) {
 	for _, pane := range view.panes {
 		matches := pane.PaneID == client.Pane
 		if client.Terminal != "" {
@@ -236,17 +421,19 @@ func (view *socketView) describe(client Client) (text string, found bool) {
 		}
 		fields := []string{pane.PaneID, workspace}
 		agent, hasAgent := view.agents[pane.PaneID]
+		status := ""
 		if !hasAgent {
 			fields = append(fields, "no-agent")
 		} else {
+			status = agent.Status
 			fields = append(fields, agent.Status)
 			if agent.Name != "" {
 				fields = append(fields, agent.Name)
 			}
 		}
-		return strings.Join(fields, " "), true
+		return presenceHit{text: strings.Join(fields, " "), status: status}, true
 	}
-	return "", false
+	return presenceHit{}, false
 }
 
 func parsePresencePanes(result json.RawMessage) ([]presencePane, error) {

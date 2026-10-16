@@ -526,40 +526,36 @@ if [ -n "$bad" ]; then fail "$bad"; else
 fi
 
 # ─── O1.18 — theme offline surface ─────────────────────────────────────────
-# No host app is present in the lane: the verb's own surface only — the palette
-# listing, the off line of a home that never ran `pfm theme set`, and its refusals.
+# No host app is present in the lane: the verb's own surface only — the off
+# line of a home that never ran `pfm theme on`, the retired verbs' refusals and
+# `on` refusing a home with no Claude account.
 beat O1.18-theme
 spends none
 bad=""
-ls_out="$(pfm theme ls 2>&1)"; ls_rc=$?
-if [ "$ls_rc" -ne 0 ]; then
-  bad="$bad pfm theme ls exited $ls_rc: $(one_line "$ls_out");"
-else
-  for palette in tokyo-night solarized catppuccin; do
-    grep -qE "^[ *] $palette " <<<"$ls_out" || bad="$bad pfm theme ls does not list palette $palette: $(one_line "$ls_out");"
-  done
-  for want in dark light blocked working "done" idle; do
-    grep -qw -- "$want" <<<"$ls_out" || bad="$bad pfm theme ls names no $want swatch;"
-  done
-fi
 status_out="$(pfm theme status 2>&1)"; status_rc=$?
-if [ "$status_rc" -ne 0 ] || [ "$status_out" != "pfm theme: off — pfm theme set <palette> turns it on" ]; then
-  bad="$bad pfm theme status in a home that never ran set exited $status_rc, want 0 and the off line: $(one_line "$status_out");"
+if [ "$status_rc" -ne 0 ] || [ "$status_out" != "pfm theme: off — pfm theme on turns it on" ]; then
+  bad="$bad pfm theme status in a home that never ran on exited $status_rc, want 0 and the off line: $(one_line "$status_out");"
 fi
 bare_out="$(pfm theme 2>&1)"; bare_rc=$?
 if [ "$bare_rc" -ne 0 ] || [ "$bare_out" != "$status_out" ]; then
   bad="$bad bare pfm theme is not pfm theme status (exit $bare_rc): $(one_line "$bare_out");"
 fi
-set_out="$(pfm theme set no-such-palette 2>&1)"; set_rc=$?
-if [ "$set_rc" -ne 2 ] || ! grep -qF 'tokyo-night' <<<"$set_out"; then
-  bad="$bad pfm theme set no-such-palette exited $set_rc, want 2 naming the known palettes: $(one_line "$set_out");"
-fi
+for retired in ls set; do
+  retired_out="$(pfm theme "$retired" 2>&1)"; retired_rc=$?
+  if [ "$retired_rc" -ne 2 ] || ! grep -qF "unknown subcommand \"$retired\"" <<<"$retired_out"; then
+    bad="$bad pfm theme $retired exited $retired_rc, want 2 naming the unknown subcommand: $(one_line "$retired_out");"
+  fi
+done
 verb_out="$(pfm theme paint 2>&1)"; verb_rc=$?
 if [ "$verb_rc" -ne 2 ] || ! grep -qF 'unknown subcommand "paint"' <<<"$verb_out"; then
   bad="$bad pfm theme paint exited $verb_rc, want 2 naming the unknown subcommand: $(one_line "$verb_out");"
 fi
+sync_out="$(pfm theme sync 2>&1)"; sync_rc=$?
+if [ "$sync_rc" -ne 0 ] || [ "$sync_out" != "$status_out" ]; then
+  bad="$bad pfm theme sync with the sync never on exited $sync_rc, want 0 and the off line: $(one_line "$sync_out");"
+fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "theme ls lists tokyo-night, solarized and catppuccin with their swatches; status with no state prints the off line (exit 0), bare theme is status; an unknown palette and an unknown verb exit 2"
+  pass "status and sync with no state print the off line (exit 0), bare theme is status; the retired ls and set verbs and an unknown verb exit 2"
 fi
 
 lane_end

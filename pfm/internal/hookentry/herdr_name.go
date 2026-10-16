@@ -37,31 +37,9 @@ func (reporter *herdrReporter) title(ctx context.Context, session string, payloa
 
 // name re-sends the chat's name to every live registered pane: the tmux
 // window-renamed hook runs it, and every name writer ends in a window rename.
+// It is the client pass too, so a client not yet registered is adopted.
 func (reporter *herdrReporter) name(ctx context.Context, session string, state herdrStored) error {
-	gone, err := reporter.liveClients(ctx, session, &state)
-	if err != nil {
-		return err
-	}
-	clients, moved, changed, resolveErr := reporter.resolveClients(ctx, &state, false)
-	errs := []error{resolveErr, reporter.releaseAll(ctx, reporter.engineLabel(state), gone)}
-	if changed || len(gone) > 0 {
-		if err := reporter.writeState(ctx, session, state); err != nil {
-			return errors.Join(append(errs, err)...)
-		}
-	}
-	for _, pid := range sortedClientPIDs(movedClients(clients, moved)) {
-		if state.State != "" {
-			errs = append(errs, reporter.send(
-				ctx,
-				herdrTarget{pane: clients[pid].Pane, socket: clients[pid].Socket},
-				&herdrAction{stored: state},
-				reporter.nextSent(),
-			))
-		}
-	}
-	fresh := clientTargets(movedClients(clients, moved))
-	errs = append(errs, reporter.nameSync(ctx, session, state, clientTargets(clients), fresh))
-	return errors.Join(errs...)
+	return reporter.reconcile(ctx, session, state, false)
 }
 
 // nameSync is the one name sync: read the chat's name from the session

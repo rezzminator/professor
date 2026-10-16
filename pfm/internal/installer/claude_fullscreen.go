@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
@@ -140,7 +139,18 @@ func (installer *engine) clearFullscreenAutoDisable() error {
 		}
 		if err := installer.change(
 			"clear Claude's fullscreen auto-disable in "+physical,
-			func() error { return atomicfile.Write(physical, cleared, mode) },
+			func() error {
+				locks := []string{path, physical}
+				for _, candidate := range installer.options.ClaudeAccounts {
+					alias := ClaudeRegistryFor(installer.options.Home, candidate)
+					if physicalSettingsPath(alias) == physical {
+						locks = append(locks, alias)
+					}
+				}
+				return withClaudeMCPLocks(locks, func(check func() error) error {
+					return installer.writeRegistryFileIf(path, raw, cleared, true, mode, check)
+				})
+			},
 		); err != nil {
 			failures = append(failures, installer.fail(fmt.Errorf(
 				"clear claude fullscreen auto-disable in %s: %w", physical, err,

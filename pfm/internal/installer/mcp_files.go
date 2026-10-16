@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,6 +46,17 @@ func (installer *engine) writeMCPFile(path string, original, wanted []byte, exis
 // writeMCPFileIf checks the native lock before reading and immediately before
 // atomic publication, so losing it during a slow backup cannot publish a save.
 func (installer *engine) writeMCPFileIf(path string, original, wanted []byte, existed bool, check func() error) error {
+	return installer.writeRegistryFileIf(path, original, wanted, existed, 0o600, check)
+}
+
+// writeRegistryFileIf shares the guarded registry save while retaining the caller's file permissions.
+func (installer *engine) writeRegistryFileIf(
+	path string,
+	original, wanted []byte,
+	existed bool,
+	mode fs.FileMode,
+	check func() error,
+) error {
 	if check != nil {
 		if err := check(); err != nil {
 			return err
@@ -67,7 +79,7 @@ func (installer *engine) writeMCPFileIf(path string, original, wanted []byte, ex
 			return err
 		}
 	}
-	return atomicfile.WriteIf(path, wanted, 0o600, func() error {
+	return atomicfile.WriteIf(path, wanted, mode, func() error {
 		latest, present, err := readMCPFile(path)
 		if err != nil {
 			return fmt.Errorf("recheck MCP config %s before write: %w", path, err)

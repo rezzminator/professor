@@ -1,0 +1,393 @@
+package hookentry
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"io/fs"
+	"math"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+)
+
+// The plain-shell reporter: the shim's Herdr hook hands it a long command a
+// shell in a Herdr pane finished, and the next command's start, so a shell or
+// server pane rises in Herdr's agent panel the way a chat does.
+const (
+	herdrShellCommand = "pfm internal herdr-shell"
+	herdrShellDone    = "done"
+	herdrShellRelease = "release"
+	// herdrShellSource is the source the shell's state lives under in Herdr,
+	// apart from the chat reporter's; herdrShellLog names its error log.
+	herdrShellSource = "pfm-shell"
+	herdrShellAgent  = "shell"
+	herdrShellLog    = "pfm-shell"
+)
+
+// herdrShellOptions are one herdr-shell run: the verb, the shell's pid, the
+// shell's clock when its hook ran (at, $EPOCHREALTIME; 0 when not given), and
+// for done the command, its exit status and its duration in seconds.
+type herdrShellOptions struct {
+	verb, command      string
+	pid, exit, seconds int
+	at                 float64
+}
+
+// errNoShellPane is a run that found no Herdr pane whose shell, or one of
+// whose foreground processes, is the shell.
+type errNoShellPane struct{ pid int }
+
+func (missing errNoShellPane) Error() string {
+	return fmt.Sprintf("no Herdr pane runs shell %d", missing.pid)
+}
+
+// HerdrShell is `pfm internal herdr-shell done --pid P [--at T] --command C
+// --exit RC --seconds S | release --pid P [--at T]`. done reports working, then
+// idle with "{command} exit {RC} · {S}s" (Herdr shows that as done until the
+// pane is viewed); release clears it, and a done whose T is older than a
+// release's reports nothing. The pane is the one running shell P, found by
+// that identity because a Herdr pane move gives the pane a new id. The shim
+// runs it in the background with its output discarded, so every failure is a
+// line in the pfm-shell error log `pfm doctor` reads; a release that finds no
+// pane running the shell has nothing left to release.
+func HerdrShell(args []string, stderr io.Writer) int {
+	return reportShellRun(args, stderr, realHerdrDeps())
+}
+
+func reportShellRun(args []string, stderr io.Writer, deps herdrDeps) int {
+	options, err := parseHerdrShellOptions(args)
+	if err != nil {
+		logHerdrShell(stderr, deps, err.Error())
+		return 2
+	}
+	if deps.getenv(herdr.EnvMarker) != "1" {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), herdr.ReportDeadline)
+	defer cancel()
+	if err := reportShell(ctx, deps, options); err != nil {
+		logHerdrShell(
+			stderr, deps,
+			fmt.Sprintf("%s %s (shell %d): %v", herdrShellCommand, options.verb, options.pid, err),
+		)
+	}
+	return 0
+}
+
+func parseHerdrShellOptions(args []string) (herdrShellOptions, error) {
+	var options herdrShellOptions
+	if len(args) != 0 {
+		options.verb = args[0]
+	}
+	if options.verb != herdrShellDone && options.verb != herdrShellRelease {
+		return options, fmt.Errorf(
+			"%s: verb %q, want %s or %s", herdrShellCommand, options.verb, herdrShellDone, herdrShellRelease,
+		)
+	}
+	flags := flag.NewFlagSet(herdrShellCommand, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.IntVar(&options.pid, "pid", 0, "the shell's pid")
+	flags.Float64Var(&options.at, "at", 0, "the shell's clock when its hook ran")
+	if options.verb == herdrShellDone {
+		flags.StringVar(&options.command, "command", "", "the command line")
+		flags.IntVar(&options.exit, "exit", 0, "its exit status")
+		flags.IntVar(&options.seconds, "seconds", 0, "its duration")
+	}
+	if err := flags.Parse(args[1:]); err != nil {
+		return options, fmt.Errorf("%s %s: %w", herdrShellCommand, options.verb, err)
+	}
+	if flags.NArg() != 0 {
+		return options, fmt.Errorf("%s %s: unexpected arguments %q", herdrShellCommand, options.verb, flags.Args())
+	}
+	set := map[string]bool{}
+	flags.Visit(func(given *flag.Flag) { set[given.Name] = true })
+	if set["at"] && (!(options.at > 0) || math.IsInf(options.at, 1)) {
+		return options, fmt.Errorf("%s %s: --at %v is no time", herdrShellCommand, options.verb, options.at)
+	}
+	if options.verb == herdrShellRelease && (!set["pid"] || options.pid <= 0) {
+		return options, fmt.Errorf("%s release: --pid is required", herdrShellCommand)
+	}
+	if options.verb == herdrShellDone &&
+		(!set["pid"] || options.pid <= 0 || options.command == "" || !set["exit"] || !set["seconds"]) {
+		return options, fmt.Errorf(
+			"%s done: --pid, --command, --exit and --seconds are all required", herdrShellCommand,
+		)
+	}
+	return options, nil
+}
+
+// logHerdrShell writes one error line to stderr and appends it to the
+// pfm-shell error log; a log that cannot be written is itself written to
+// stderr.
+func logHerdrShell(stderr io.Writer, deps herdrDeps, message string) {
+	fmt.Fprintln(stderr, message)
+	if deps.logError == nil {
+		return
+	}
+	if err := deps.logError(herdrShellLog, deps.now(), message); err != nil {
+		fmt.Fprintf(stderr, "%s: log error: %v\n", herdrShellCommand, err)
+	}
+}
+
+func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions) error {
+	socket := deps.getenv(herdr.EnvSocket)
+	if socket == "" {
+		return fmt.Errorf("no %s in the shell's environment", herdr.EnvSocket)
+	}
+	unlock, err := (&herdrReporter{deps: deps}).lock(ctx, fmt.Sprintf("%s-%d", herdrShellSource, options.pid))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	superseded, err := shellSuperseded(deps.lockDir, options)
+	if err != nil || superseded {
+		return err
+	}
+	var last uint64
+	next := func() uint64 {
+		seq := uint64(deps.now().UnixNano())
+		if seq <= last {
+			seq = last + 1
+		}
+		last = seq
+		return seq
+	}
+	record := filepath.Join(deps.lockDir, fmt.Sprintf("%s-%d.pane", herdrShellSource, options.pid))
+	pane, nested, err := shellPane(ctx, socket, options.pid, deps.getenv(herdr.EnvPane), next)
+	if options.verb == herdrShellRelease {
+		var missing errNoShellPane
+		if errors.As(err, &missing) {
+			pane, err = recordedShellPane(ctx, socket, record, next)
+		}
+		if err != nil {
+			return err
+		}
+		if pane == "" {
+			return removeShellRecord(record)
+		}
+		line, err := herdr.Release{Pane: pane, Source: herdrShellSource, Agent: herdrShellAgent, Seq: next()}.Line()
+		if err != nil {
+			return err
+		}
+		// A failed release keeps the record, so the next release still finds
+		// the pane.
+		if err := releaseSettled(herdr.Send(ctx, socket, line)); err != nil {
+			return err
+		}
+		return removeShellRecord(record)
+	}
+	if err != nil {
+		return err
+	}
+	command := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(options.command)
+	working, err := herdr.Report{
+		Pane: pane, Source: herdrShellSource, Agent: herdrShellAgent, State: herdr.StateWorking, Seq: next(),
+	}.Line()
+	if err != nil {
+		return err
+	}
+	idle, err := herdr.Report{
+		Pane: pane, Source: herdrShellSource, Agent: herdrShellAgent, State: herdr.StateIdle,
+		Message: shellDoneMessage(command, options.exit, options.seconds), Seq: next(),
+	}.Line()
+	if err != nil {
+		return err
+	}
+	// Herdr shows a lone idle report on a pane with no agent as nothing;
+	// working first makes the idle a finished run.
+	if err := herdr.Send(ctx, socket, working, idle); err != nil {
+		return err
+	}
+	if !nested {
+		return nil
+	}
+	return recordShellPane(ctx, socket, record, pane, next)
+}
+
+// recordShellPane keeps the terminal of the pane a nested shell's done went
+// to: the next command takes the foreground from the nested shell, so its
+// release finds the shell in no pane and goes to this terminal's pane instead.
+func recordShellPane(ctx context.Context, socket, record, pane string, next func() uint64) error {
+	panes, err := listShellPanes(ctx, socket, next)
+	if err != nil {
+		return fmt.Errorf("record the pane of a nested shell: %w", err)
+	}
+	for _, listed := range panes {
+		if listed.PaneID != pane {
+			continue
+		}
+		data, err := json.Marshal(listed)
+		if err != nil {
+			return fmt.Errorf("record pane %s of a nested shell: %w", pane, err)
+		}
+		if err := os.WriteFile(record, data, 0o600); err != nil {
+			return fmt.Errorf("record pane %s of a nested shell: %w", pane, err)
+		}
+		return nil
+	}
+	return nil
+}
+
+// recordedShellPane is the current pane of the terminal a nested shell's done
+// recorded, found by terminal id because a pane move changes the pane id;
+// with no record, or a terminal in no pane, there is nothing to release ("").
+func recordedShellPane(ctx context.Context, socket, record string, next func() uint64) (string, error) {
+	data, err := os.ReadFile(record)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the recorded pane of a nested shell: %w", err)
+	}
+	var recorded herdr.Pane
+	if err := json.Unmarshal(data, &recorded); err != nil || recorded.TerminalID == "" {
+		return "", fmt.Errorf("read the recorded pane of a nested shell from %s (%q): %v", record, data, err)
+	}
+	panes, err := listShellPanes(ctx, socket, next)
+	if err != nil {
+		return "", err
+	}
+	for _, pane := range panes {
+		if pane.TerminalID == recorded.TerminalID {
+			return pane.PaneID, nil
+		}
+	}
+	return "", nil
+}
+
+// removeShellRecord drops a nested shell's recorded pane once its release ran.
+func removeShellRecord(record string) error {
+	if err := os.Remove(record); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove the recorded pane of a nested shell: %w", err)
+	}
+	return nil
+}
+
+func listShellPanes(ctx context.Context, socket string, next func() uint64) ([]herdr.Pane, error) {
+	line, err := herdr.PaneList{Seq: next()}.Line()
+	if err != nil {
+		return nil, err
+	}
+	results, err := herdr.Call(ctx, socket, line)
+	if err != nil {
+		return nil, err
+	}
+	return herdr.ParsePanes(results[0])
+}
+
+// shellDoneMessage is "{command} exit {rc} · {s}s" within
+// herdr.MaxMessageRunes: a long command line is cut, never the exit status and
+// duration that tell a failed run from a good one.
+func shellDoneMessage(command string, exit, seconds int) string {
+	suffix := fmt.Sprintf(" exit %d · %ds", exit, seconds)
+	room := herdr.MaxMessageRunes - utf8.RuneCountInString(suffix)
+	if runes := []rune(command); len(runes) > room {
+		command = string(runes[:room-1]) + "…"
+	}
+	return command + suffix
+}
+
+// shellSuperseded keeps a done from outliving the next command's release: the
+// shell starts the two in order as background runs, and nothing else orders
+// them. Under the shell's lock, a release records the shell clock it was
+// started at, and a done started before a recorded release is superseded and
+// reports nothing. An older shell that had the same pid recorded an earlier
+// time, so its record supersedes nothing; a run without --at is never ordered.
+func shellSuperseded(lockDir string, options herdrShellOptions) (bool, error) {
+	if options.at == 0 {
+		return false, nil
+	}
+	path := filepath.Join(lockDir, fmt.Sprintf("%s-%d.released", herdrShellSource, options.pid))
+	if options.verb == herdrShellRelease {
+		if err := os.WriteFile(path, []byte(strconv.FormatFloat(options.at, 'f', -1, 64)), 0o600); err != nil {
+			return false, fmt.Errorf("record the release of shell %d: %w", options.pid, err)
+		}
+		return false, nil
+	}
+	recorded, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the last release of shell %d: %w", options.pid, err)
+	}
+	released, err := strconv.ParseFloat(strings.TrimSpace(string(recorded)), 64)
+	if err != nil {
+		return false, fmt.Errorf("read the last release of shell %d from %s (%q): %w", options.pid, path, recorded, err)
+	}
+	return released > options.at, nil
+}
+
+// shellPane is the pane running the shell pid: the pane the shell was born in
+// (born) when it still runs it, else the first listed pane that does; nested
+// says pid is one of the pane's foreground processes, not its own shell. A
+// pane that closed between the listing and its question is skipped.
+func shellPane(ctx context.Context, socket string, pid int, born string, next func() uint64) (string, bool, error) {
+	if born != "" {
+		runs, nested, err := paneRunsShell(ctx, socket, born, pid, next())
+		if err != nil && !isHerdrNotFound(err) {
+			return "", false, err
+		}
+		if runs {
+			return born, nested, nil
+		}
+	}
+	panes, err := listShellPanes(ctx, socket, next)
+	if err != nil {
+		return "", false, err
+	}
+	for _, pane := range panes {
+		if pane.PaneID == born {
+			continue
+		}
+		runs, nested, err := paneRunsShell(ctx, socket, pane.PaneID, pid, next())
+		if err != nil && !isHerdrNotFound(err) {
+			return "", false, err
+		}
+		if runs {
+			return pane.PaneID, nested, nil
+		}
+	}
+	return "", false, errNoShellPane{pid: pid}
+}
+
+// paneRunsShell reports whether the pane's own shell, or one of its foreground
+// processes (a nested shell, nested true), is pid.
+func paneRunsShell(ctx context.Context, socket, pane string, pid int, seq uint64) (runs, nested bool, err error) {
+	line, err := herdr.ProcessInfo{Pane: pane, Seq: seq}.Line()
+	if err != nil {
+		return false, false, err
+	}
+	results, err := herdr.Call(ctx, socket, line)
+	if err != nil {
+		return false, false, err
+	}
+	shell, err := herdr.ParseShellPID(results[0])
+	if err != nil {
+		return false, false, err
+	}
+	if shell == pid {
+		return true, false, nil
+	}
+	foreground, err := herdr.ParseProcessInfo(results[0])
+	if err != nil {
+		return false, false, err
+	}
+	runs = slices.Contains(foreground, pid)
+	return runs, runs, nil
+}
+
+// isHerdrNotFound is Herdr's not_found refusal: the pane id names no pane.
+func isHerdrNotFound(err error) bool {
+	var refusal *herdr.Refusal
+	return errors.As(err, &refusal) && refusal.Code == herdrNotFound
+}

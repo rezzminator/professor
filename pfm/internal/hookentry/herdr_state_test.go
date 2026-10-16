@@ -675,3 +675,66 @@ func TestPayloadHookRoutesEachVerbToItsEntry(t *testing.T) {
 		t.Fatalf("explore-deny: rc=%d stdout=%q, want its deny answer", rc, stdout.String())
 	}
 }
+
+// Claude's PermissionRequest hook (blocked, async) names the tool; the
+// Notification that follows it carries Claude's generic text and never replaces
+// a stored message that names a tool. The generic text stands only when no tool
+// name is known.
+func TestHerdrStateKeepsAToolNamedBlockedMessage(t *testing.T) {
+	const generic = "Claude needs your permission to use Bash"
+	const permission = `{"session_id":"s1","notification_type":"permission_prompt","message":"` + generic + `"}`
+	bashRequest := `{"session_id":"s1","hook_event_name":"PermissionRequest","tool_name":"Bash"}`
+	idleRig := func(t *testing.T) *chatRig {
+		t.Helper()
+		rig := newChatRig(t)
+		rig.seed(rig.registered("idle", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+		return rig
+	}
+	t.Run("blocked(tool Bash) then the generic permission notification: tool name stays", func(t *testing.T) {
+		rig := idleRig(t)
+		rig.wantQuiet(rig.engine("blocked", bashRequest))
+		rig.wantCalls(listCall, reportCall("w1:p1", "blocked", "waiting for approval: Bash"))
+		sent := len(rig.herdr.calls())
+		rig.wantQuiet(rig.engine("notification", permission))
+		if got := rig.herdr.calls()[sent:]; len(got) != 0 {
+			t.Fatalf("requests after the notification = %q, want none: the pane keeps its message", got)
+		}
+		state := rig.tmux.storedState(t)
+		if state.State != "blocked" || state.Message != "waiting for approval: Bash" {
+			t.Fatalf("stored = %q, want blocked and the tool-named message", rig.tmux.stored)
+		}
+	})
+	t.Run("the permission notification alone: its own message", func(t *testing.T) {
+		rig := idleRig(t)
+		rig.wantQuiet(rig.engine("notification", permission))
+		rig.wantCalls(listCall, reportCall("w1:p1", "blocked", generic))
+	})
+	t.Run("idle after the kept message: idle", func(t *testing.T) {
+		rig := idleRig(t)
+		rig.wantQuiet(rig.engine("blocked", bashRequest))
+		rig.wantQuiet(rig.engine("notification", permission))
+		rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
+		if got := rig.herdr.calls(); got[len(got)-1] != reportCall("w1:p1", "idle", "") {
+			t.Fatalf("requests = %q, want the idle report last", got)
+		}
+		if state := rig.tmux.storedState(t); state.State != "idle" || state.Message != "" {
+			t.Fatalf("stored = %q, want idle and no message", rig.tmux.stored)
+		}
+	})
+	t.Run("a blocked with no tool name is replaced by the notification's text", func(t *testing.T) {
+		rig := idleRig(t)
+		rig.wantQuiet(rig.engine("blocked", `{"session_id":"s1"}`))
+		rig.wantQuiet(rig.engine("notification", permission))
+		if got := rig.herdr.calls(); got[len(got)-1] != reportCall("w1:p1", "blocked", generic) {
+			t.Fatalf("requests = %q, want the notification's report last", got)
+		}
+	})
+	t.Run("a second tool request replaces the first tool's message", func(t *testing.T) {
+		rig := idleRig(t)
+		rig.wantQuiet(rig.engine("blocked", bashRequest))
+		rig.wantQuiet(rig.engine("blocked", `{"session_id":"s1","tool_name":"Edit"}`))
+		if got := rig.herdr.calls(); got[len(got)-1] != reportCall("w1:p1", "blocked", "waiting for approval: Edit") {
+			t.Fatalf("requests = %q, want the Edit report last", got)
+		}
+	})
+}

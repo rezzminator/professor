@@ -241,7 +241,7 @@ func (current *backend) listProjected(
 			Session: session, ID: row.ID, Engine: compose.EngineForKind(row.Kind),
 			State: chatRowState(*row), Dir: row.CWD, Project: row.Project, Name: row.Name,
 			Account: account, Kind: row.Kind.String(), Killed: row.Killed,
-			Socket: row.Socket, Pane: row.PaneID, transcriptPath: row.Path,
+			Socket: row.Socket, Pane: row.PaneID, Herdr: listed.PresenceOf(index), transcriptPath: row.Path,
 		})
 	}
 	scope := "all repos"

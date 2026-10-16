@@ -21,17 +21,20 @@ import (
 )
 
 // fakePane is a pane in the fake Herdr's table: its id, the terminal that
-// outlives a move, and the foreground process pids pane.process_info reports.
+// outlives a move, the foreground process pids pane.process_info reports, and
+// the pane's own shell (0: none reported).
 type fakePane struct {
 	id, terminal string
 	pids         []int
+	shell        int
 }
 
 type fakeAgent struct{ name, pane string }
 
 // fakeHerdr is a Herdr socket: it records every request line and answers each
 // from its pane table and agent list, with the configured error for a method
-// (or for a rename to one name), and with not_found for a vacated pane id.
+// (or for a rename to one name), and with not_found for a vacated pane id. As
+// Herdr does, it serves ONE request per connection, then closes it.
 type fakeHerdr struct {
 	path         string
 	mu           sync.Mutex
@@ -74,6 +77,13 @@ func (server *fakeHerdr) addPane(id, terminal string, pids ...int) {
 	server.panes = append(server.panes, fakePane{id: id, terminal: terminal, pids: pids})
 }
 
+// addShellPane adds a pane whose own shell is pid shell.
+func (server *fakeHerdr) addShellPane(id, terminal string, shell int, pids ...int) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.panes = append(server.panes, fakePane{id: id, terminal: terminal, pids: pids, shell: shell})
+}
+
 // runIn makes pid a foreground process of the pane with id.
 func (server *fakeHerdr) runIn(id string, pid int) {
 	server.mu.Lock()
@@ -81,6 +91,18 @@ func (server *fakeHerdr) runIn(id string, pid int) {
 	for index := range server.panes {
 		if server.panes[index].id == id {
 			server.panes[index].pids = append(server.panes[index].pids, pid)
+		}
+	}
+}
+
+// foreground replaces the foreground processes of the pane with id: a nested
+// shell's next command takes the foreground from it.
+func (server *fakeHerdr) foreground(id string, pids ...int) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	for index := range server.panes {
+		if server.panes[index].id == id {
+			server.panes[index].pids = pids
 		}
 	}
 }
@@ -114,33 +136,35 @@ func (server *fakeHerdr) setAgents(agents ...fakeAgent) {
 
 func (server *fakeHerdr) serve(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	reader := bufio.NewReader(conn)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return
-		}
-		line = strings.TrimSuffix(line, "\n")
-		var request struct {
-			ID     string `json:"id"`
-			Method string `json:"method"`
-			Params struct {
-				PaneID string `json:"pane_id"`
-				Target string `json:"target"`
-				Name   string `json:"name"`
-			} `json:"params"`
-		}
-		_ = json.Unmarshal([]byte(line), &request)
-		server.mu.Lock()
-		server.lines = append(server.lines, line)
-		code, result := server.answer(request.Method, request.Params.PaneID, request.Params.Target, request.Params.Name)
-		server.mu.Unlock()
-		if code != "" {
-			fmt.Fprintf(conn, `{"id":%q,"error":{"code":%q,"message":"refused by fake herdr"}}`+"\n", request.ID, code)
-			continue
-		}
-		fmt.Fprintf(conn, `{"id":%q,"result":%s}`+"\n", request.ID, result)
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return
 	}
+	line = strings.TrimSuffix(line, "\n")
+	var request struct {
+		ID     string `json:"id"`
+		Method string `json:"method"`
+		Params struct {
+			PaneID string `json:"pane_id"`
+			Target string `json:"target"`
+			Name   string `json:"name"`
+			State  string `json:"state"`
+		} `json:"params"`
+	}
+	_ = json.Unmarshal([]byte(line), &request)
+	server.mu.Lock()
+	server.lines = append(server.lines, line)
+	code, result := server.answer(request.Method, request.Params.PaneID, request.Params.Target, request.Params.Name)
+	// refuse also takes "{method} {state}": one report state refused alone.
+	if refused := server.refuse[request.Method+" "+request.Params.State]; request.Params.State != "" && refused != "" {
+		code = refused
+	}
+	server.mu.Unlock()
+	if code != "" {
+		fmt.Fprintf(conn, `{"id":%q,"error":{"code":%q,"message":"refused by fake herdr"}}`+"\n", request.ID, code)
+		return
+	}
+	fmt.Fprintf(conn, `{"id":%q,"result":%s}`+"\n", request.ID, result)
 }
 
 // answer is called with the lock held.
@@ -190,10 +214,11 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 			for _, pid := range candidate.pids {
 				foreground = append(foreground, map[string]any{"pid": pid, "name": "proc"})
 			}
-			return "", mustJSON(map[string]any{
-				"type":         "pane_process_info",
-				"process_info": map[string]any{"pane_id": pane, "foreground_processes": foreground},
-			})
+			info := map[string]any{"pane_id": pane, "foreground_processes": foreground}
+			if candidate.shell != 0 {
+				info["shell_pid"] = candidate.shell
+			}
+			return "", mustJSON(map[string]any{"type": "pane_process_info", "process_info": info})
 		}
 		return "not_found", ""
 	}
@@ -389,28 +414,10 @@ func (jail *herdrJail) lockFiles() []string {
 	return files
 }
 
-type herdrRun struct {
-	rc     int
-	stderr string
-}
-
-func runHerdr(t *testing.T, env map[string]string, tmux *fakeTmux, clock *int64, args []string, stdin string) herdrRun {
-	t.Helper()
-	return runHerdrIn(t, newHerdrJail(t), env, tmux, clock, args, stdin)
-}
-
-func runHerdrIn(
-	t *testing.T,
-	jail *herdrJail,
-	env map[string]string,
-	tmux *fakeTmux,
-	clock *int64,
-	args []string,
-	stdin string,
-) herdrRun {
-	t.Helper()
-	var stderr bytes.Buffer
-	deps := herdrDeps{
+// deps are the reporter's seams over the jail: env as the environment, a
+// clock that steps 1µs per read.
+func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
+	return herdrDeps{
 		getenv: func(name string) string { return env[name] },
 		now: func() time.Time {
 			*clock += 1000
@@ -438,6 +445,30 @@ func runHerdrIn(
 		},
 		getpid: func() int { return jail.hookPID },
 	}
+}
+
+type herdrRun struct {
+	rc     int
+	stderr string
+}
+
+func runHerdr(t *testing.T, env map[string]string, tmux *fakeTmux, clock *int64, args []string, stdin string) herdrRun {
+	t.Helper()
+	return runHerdrIn(t, newHerdrJail(t), env, tmux, clock, args, stdin)
+}
+
+func runHerdrIn(
+	t *testing.T,
+	jail *herdrJail,
+	env map[string]string,
+	tmux *fakeTmux,
+	clock *int64,
+	args []string,
+	stdin string,
+) herdrRun {
+	t.Helper()
+	var stderr bytes.Buffer
+	deps := jail.deps(env, clock)
 	if tmux != nil {
 		deps.tmux = tmux.run
 	}

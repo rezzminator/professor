@@ -29,6 +29,11 @@ func TestReportLineIsExactlyHerdrsRequest(t *testing.T) {
 	if err != nil || string(bare) != wantBare {
 		t.Fatalf("Line = %s, %v\nwant   %s", bare, err, wantBare)
 	}
+	shell, err := Report{Pane: "w1:p3", Source: "pfm-shell", Agent: "shell", State: StateWorking, Seq: 8}.Line()
+	wantShell := `{"id":"pfm-8","method":"pane.report_agent","params":{"pane_id":"w1:p3","source":"pfm-shell","agent":"shell","state":"working","seq":8}}`
+	if err != nil || string(shell) != wantShell {
+		t.Fatalf("Line = %s, %v\nwant   %s", shell, err, wantShell)
+	}
 	for _, report := range []Report{{Agent: "a", State: StateIdle}, {Pane: "p", State: StateIdle}, {Pane: "p", Agent: "a"}} {
 		if line, err := report.Line(); err == nil {
 			t.Errorf("Line(%+v) = %s, want an error for a missing pane, agent or state", report, line)
@@ -41,6 +46,11 @@ func TestReleaseLineIsExactlyHerdrsRequest(t *testing.T) {
 	want := `{"id":"pfm-9","method":"pane.release_agent","params":{"pane_id":"w1:p1","source":"pfm","agent":"opencode","seq":9}}`
 	if err != nil || string(line) != want {
 		t.Fatalf("Line = %s, %v\nwant   %s", line, err, want)
+	}
+	shell, err := Release{Pane: "w1:p3", Source: "pfm-shell", Agent: "shell", Seq: 10}.Line()
+	wantShell := `{"id":"pfm-10","method":"pane.release_agent","params":{"pane_id":"w1:p3","source":"pfm-shell","agent":"shell","seq":10}}`
+	if err != nil || string(shell) != wantShell {
+		t.Fatalf("Line = %s, %v\nwant   %s", shell, err, wantShell)
 	}
 	if line, err := (Release{Agent: "a"}).Line(); err == nil {
 		t.Errorf("Line without a pane = %s, want an error", line)
@@ -85,6 +95,58 @@ func serve(t *testing.T, respond func(request string) string) string {
 		}
 	}()
 	return path
+}
+
+// serveOnePerConnection is Herdr's real socket: it reads one request line,
+// answers it and closes the connection (a second line on it is never read).
+func serveOnePerConnection(t *testing.T, connections *int, mu *sync.Mutex) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "h.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			*connections++
+			mu.Unlock()
+			go func() {
+				defer func() { _ = conn.Close() }()
+				line, err := bufio.NewReader(conn).ReadString('\n')
+				if err != nil {
+					return
+				}
+				request := strings.TrimSuffix(line, "\n")
+				_, _ = conn.Write([]byte(`{"id":"x","result":{"type":"echo","line":"` + request + `"}}` + "\n"))
+			}()
+		}
+	}()
+	return path
+}
+
+func TestCallOpensOneConnectionPerRequestLikeHerdr(t *testing.T) {
+	var mu sync.Mutex
+	connections := 0
+	path := serveOnePerConnection(t, &connections, &mu)
+	results, err := Call(context.Background(), path, []byte("release"), []byte("clear-title"), []byte("third"))
+	if err != nil {
+		t.Fatalf("Call over a one-request-per-connection socket: %v, want every line answered", err)
+	}
+	if len(results) != 3 || !strings.Contains(string(results[0]), `"release"`) ||
+		!strings.Contains(string(results[1]), `"clear-title"`) || !strings.Contains(string(results[2]), `"third"`) {
+		t.Fatalf("Call = %s, want the results of release, clear-title, third in order", results)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if connections != 3 {
+		t.Fatalf("Call dialed %d connections for 3 lines, want 3", connections)
+	}
 }
 
 func TestSendDeliversEachLineAndReadsItsResponse(t *testing.T) {
@@ -233,11 +295,14 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	agents, err := ParseAgentList(
 		json.RawMessage(
-			`{"type":"agent_list","agents":[{"name":null,"pane_id":"w1:p1"},{"name":"chat-a","pane_id":"w1:p2","agent":"claude"}]}`,
+			`{"type":"agent_list","agents":[{"name":null,"pane_id":"w1:p1"},{"name":"chat-a","pane_id":"w1:p2",` +
+				`"workspace_id":"w1","tab_id":"w1:t2","agent":"claude","agent_status":"working"}]}`,
 		),
 	)
 	if err != nil || len(agents) != 2 || agents[0] != (Agent{PaneID: "w1:p1"}) ||
-		agents[1] != (Agent{PaneID: "w1:p2", Name: "chat-a"}) {
+		agents[1] != (Agent{
+			PaneID: "w1:p2", WorkspaceID: "w1", TabID: "w1:t2", Agent: "claude", Status: "working", Name: "chat-a",
+		}) {
 		t.Errorf("ParseAgentList = %+v, %v, want an unnamed and a named agent", agents, err)
 	}
 	panes, err := ParsePanes(
@@ -254,7 +319,21 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	if err != nil || len(pids) != 2 || pids[0] != 4242 || pids[1] != 7 {
 		t.Errorf("ParseProcessInfo = %v, %v", pids, err)
 	}
+	// The shape a live Herdr answered for a plain zsh pane.
+	shellPID, err := ParseShellPID(json.RawMessage(
+		`{"type":"pane_process_info","process_info":{"foreground_process_group_id":51234,"foreground_processes":` +
+			`[{"argv":["-zsh"],"argv0":"-zsh","cmdline":"-zsh","cwd":"/tmp","name":"zsh","pid":51234}],` +
+			`"pane_id":"wD:p2","shell_pid":51234}}`,
+	))
+	if err != nil || shellPID != 51234 {
+		t.Errorf("ParseShellPID = %d, %v, want 51234", shellPID, err)
+	}
 	for name, parse := range map[string]func() error{
+		"shell pid of another type": func() error {
+			_, err := ParseShellPID(json.RawMessage(`{"type":"ok","process_info":{"shell_pid":7}}`))
+			return err
+		},
+		"shell pid garbage":      func() error { _, err := ParseShellPID(json.RawMessage(`[1]`)); return err },
 		"agents of another type": func() error { _, err := ParseAgentList(json.RawMessage(`{"type":"ok"}`)); return err },
 		"panes of another type":  func() error { _, err := ParsePanes(json.RawMessage(`{"type":"agent_list"}`)); return err },
 		"process info garbage":   func() error { _, err := ParseProcessInfo(json.RawMessage(`[1]`)); return err },

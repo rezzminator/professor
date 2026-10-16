@@ -2,6 +2,7 @@ package mcpserv
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -34,6 +35,7 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 				},
 				{ID: "claude-b", Kind: compose.ResumeClaude, Killed: true},
 			},
+			Herdr:   []string{"w6:p2 .professor idle pfm-1", "not in herdr"},
 			Matched: 5, Truncated: true, KilledCount: 1,
 		},
 		found: []chat.TranscriptMatch{
@@ -71,6 +73,13 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 	}
 	if killed.Session != "claude-b" || killed.State != "resumable" || !killed.Killed {
 		t.Fatalf("killed resumable row = %+v, want its id as the session", killed)
+	}
+	if live.Herdr != "w6:p2 .professor idle pfm-1" || killed.Herdr != "not in herdr" {
+		t.Fatalf("herdr presence = %q and %q, want each row's own presence string", live.Herdr, killed.Herdr)
+	}
+	encoded, err := json.Marshal(live)
+	if err != nil || !strings.Contains(string(encoded), `"herdr":"w6:p2 .professor idle pfm-1"`) {
+		t.Fatalf("live row JSON = %s, %v, want the herdr field", encoded, err)
 	}
 
 	_, find, err := service.chatFind(ctx, nil, FindInput{Excerpt: "a literal chat name", Limit: 2, IncludeSelf: true})

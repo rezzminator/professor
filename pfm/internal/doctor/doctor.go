@@ -14,8 +14,6 @@ import (
 	"strings"
 	"syscall"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/ask"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -297,18 +295,15 @@ func Run(
 		tally,
 	)
 	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
-	printPluginLogsDoctor(
-		stdout,
-		append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...),
-		pluginBuild,
-		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
-		unix.Access,
-		tally,
-	)
 	claudeEnvDir := primary.ConfigDir
 	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
 		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
 	}
+	printManagedPluginLogsDoctor(
+		stdout, append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...), pluginBuild,
+		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
+		installer.ManagedRoot(resolved.Home), filepath.Join(claudeEnvDir, "settings.json"), tally,
+	)
 	printClaudeEnvDoctor(
 		stdout,
 		installer.ManagedRoot(resolved.Home),

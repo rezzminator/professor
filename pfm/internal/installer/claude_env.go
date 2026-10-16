@@ -495,10 +495,7 @@ func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]C
 	}
 	targetPhysical := physicalSettingsPath(settingsPath)
 	var gaps []ClaudeEnvGap
-	paths := slices.Sorted(maps.Keys(ledger.Files))
-	if !slices.Contains(paths, targetPhysical) {
-		paths = append(paths, targetPhysical)
-	}
+	paths := ownedClaudeEnvSettingsPaths(ledger, settingsPath)
 	for _, path := range paths {
 		display, want := path, map[string]string(nil)
 		if path == targetPhysical {
@@ -572,4 +569,26 @@ func ClaudeEnvSettingsPath(managedRoot, fallback string) (string, error) {
 		return ledger.Target, nil
 	}
 	return fallback, nil
+}
+
+// ClaudeEnvSettingsPaths returns exactly the physical settings files checked by
+// ClaudeEnvGaps, including a custom target and historical ledger-only files.
+func ClaudeEnvSettingsPaths(managedRoot, fallback string) ([]string, error) {
+	ledger, err := readClaudeEnvOwnership(managedRoot)
+	if err != nil {
+		return nil, err
+	}
+	return ownedClaudeEnvSettingsPaths(ledger, fallback), nil
+}
+
+func ownedClaudeEnvSettingsPaths(ledger claudeEnvOwnership, fallback string) []string {
+	if ledger.Target != "" {
+		fallback = ledger.Target
+	}
+	target := physicalSettingsPath(fallback)
+	paths := slices.Sorted(maps.Keys(ledger.Files))
+	if !slices.Contains(paths, target) {
+		paths = append(paths, target)
+	}
+	return paths
 }

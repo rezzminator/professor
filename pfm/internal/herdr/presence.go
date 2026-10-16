@@ -94,7 +94,8 @@ func (probe Probe) hostHasHerdr() bool {
 // client of its session, "{pane id} {workspace} {agent status} {agent name}"
 // per client joined with ", " ("{pane id} {workspace} no-agent" for a pane
 // Herdr lists no agent on; an `unknown` agent of a chat launched without the
-// reporter hooks gains the reload hint); else PresenceAttachedOutside when its
+// reporter hooks gains the reload hint; a live client Herdr cannot place is
+// named after the panes shown as its failure text); else PresenceAttachedOutside when its
 // clients run outside Herdr, PresenceNotInHerdr when no client sits in a pane,
 // or its failure. Each Herdr socket is asked once for all seats.
 func (probe Probe) Presence(ctx context.Context, seats []Seat) []string {
@@ -110,16 +111,21 @@ func (probe Probe) Presence(ctx context.Context, seats []Seat) []string {
 		text, err := probe.seatPresence(ctx, seat, sockets)
 		if err != nil {
 			probe.warn("pfm chat ls: herdr presence of %+v: %v", seat, err)
-			var unreachable *unreachableError
-			if errors.As(err, &unreachable) {
-				text = PresenceUnreachable(err)
-			} else {
-				text = PresenceError(err)
-			}
+			text = presenceFailure(err)
 		}
 		presence[index] = text
 	}
 	return presence
+}
+
+// presenceFailure is the text of a failed presence read: unreachable when a
+// Herdr socket answered nothing usable, else the error.
+func presenceFailure(err error) string {
+	var unreachable *unreachableError
+	if errors.As(err, &unreachable) {
+		return PresenceUnreachable(err)
+	}
+	return PresenceError(err)
 }
 
 func (probe Probe) warn(format string, args ...any) {
@@ -169,6 +175,7 @@ func (probe Probe) seatPresence(ctx context.Context, seat Seat, sockets map[stri
 	}
 	resolver := probe.resolver(sockets)
 	var shown []string
+	var unplaced []error
 	outside := 0
 	hooklessKnown, hookless := false, false
 	for _, pid := range pids {
@@ -194,13 +201,15 @@ func (probe Probe) seatPresence(ctx context.Context, seat Seat, sockets map[stri
 				// find where it runs now.
 				hit, found, outside, err = probe.resolveLive(ctx, resolver, sockets, pid, outside)
 				if err != nil {
-					return "", err
+					unplaced = append(unplaced, err)
+					continue
 				}
 			}
 		} else {
 			hit, found, outside, err = probe.resolveLive(ctx, resolver, sockets, pid, outside)
 			if err != nil {
-				return "", err
+				unplaced = append(unplaced, err)
+				continue
 			}
 		}
 		if !found {
@@ -216,6 +225,16 @@ func (probe Probe) seatPresence(ctx context.Context, seat Seat, sockets map[stri
 			}
 		}
 		shown = append(shown, text)
+	}
+	// A live client Herdr cannot place fails the seat alone; beside a placed
+	// one it is named after the panes shown, as the reporter still serves them.
+	if len(unplaced) > 0 {
+		failure := errors.Join(unplaced...)
+		if len(shown) == 0 {
+			return "", failure
+		}
+		probe.warn("pfm chat ls: herdr presence of %+v: %v", seat, failure)
+		shown = append(shown, presenceFailure(failure))
 	}
 	switch {
 	case len(shown) > 0:

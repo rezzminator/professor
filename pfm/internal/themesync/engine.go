@@ -435,7 +435,13 @@ func converge(ctx context.Context, env Env, store stateStore, state themeState, 
 		sess.state.Generation++
 		sess.state.Appearance, sess.state.Applied = appearance, &source.applied
 		sess.origin = source.origin
-		if !sourceMoved {
+		switch {
+		case !known:
+			// A first apply (or the first over an old-shaped state) replaces
+			// nothing the surfaces showed: it is no flip, and the source's
+			// mtime, however old, is no latency.
+			sess.origin = nil
+		case !sourceMoved:
 			sess.origin = nil
 			if info, err := os.Stat(globalPreferences(env.Home)); err == nil {
 				sess.origin = &flipOrigin{path: globalPreferences(env.Home), at: info.ModTime()}

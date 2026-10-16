@@ -47,8 +47,9 @@ func (split clientSplit) markMoved(resolved map[string]herdrClient, moved map[st
 // registry. With adopt, every live client not yet registered whose own
 // environment runs in a Herdr pane joins the registry (the one resolver
 // decides the pane), so a record born before the hooks, across a Herdr restart
-// or never attached heals on any run. The one tmux call is the steady state's
-// already: a registry with clients lists them anyway.
+// or never attached heals on any run. The one tmux call is the one a registry
+// with clients makes anyway; a session with an empty registry pays it on every
+// run too.
 func (reporter *herdrReporter) liveClients(
 	ctx context.Context,
 	session string,
@@ -296,20 +297,27 @@ func (reporter *herdrReporter) attach(ctx context.Context, session string, state
 	if reporter.options.client == "" {
 		return fmt.Errorf("attach needs --client {tmux client pid}")
 	}
-	return reporter.reconcile(ctx, session, state, true)
+	return reporter.reconcile(ctx, session, state)
 }
 
-// idleAtLaunch gives a chat nothing has reported for yet the idle state of the
-// engine that owns its session name: Codex fires SessionStart only at its first
-// turn, so without it a fresh chat is invisible in Herdr until prompted. The
-// seq stays untouched, so any engine event still wins; a session no engine owns
-// reports nothing.
-func (reporter *herdrReporter) idleAtLaunch(session string, state *herdrStored) {
+// launchFallback gives a chat nothing has reported for yet, once a tmux verb
+// adopts its first Herdr client, the state its socket's engine stands for:
+// Codex fires SessionStart only at its first turn, so without it a fresh chat
+// is invisible in Herdr until prompted and is stored idle. Claude reports at
+// SessionStart, so a Claude chat with nothing stored is one launched without
+// the Herdr hooks (D4): stored unknown, never a guessed idle, which carries the
+// presence reload hint. The seq stays untouched, so any engine event still
+// wins; a session no engine owns reports nothing.
+func (reporter *herdrReporter) launchFallback(session string, state *herdrStored) {
 	id, owned := pfmengine.FromSocket(session)
 	if !owned {
 		return
 	}
-	state.Engine, state.State = herdr.Label(id), string(herdr.StateIdle)
+	fallback := string(herdr.StateIdle)
+	if id == pfmengine.Claude {
+		fallback = herdrStateUnknown
+	}
+	state.Engine, state.State = herdr.Label(id), fallback
 }
 
 // sync is a client's resize: the client pass adopts the client when it runs in
@@ -319,20 +327,20 @@ func (reporter *herdrReporter) sync(ctx context.Context, session string, state h
 	if reporter.options.client == "" {
 		return fmt.Errorf("sync needs --client {tmux client pid}")
 	}
-	return reporter.reconcile(ctx, session, state, false)
+	return reporter.reconcile(ctx, session, state)
 }
 
 // reconcile is the one client pass of the tmux-fired verbs (attach, sync,
 // name): release the clients tmux no longer lists, adopt the live ones that
 // run in a Herdr pane, resolve every registered client to its pane now, and
 // bring each new or moved pane up to date with the stored state, name and
-// title. With atLaunch (an attach), a chat nothing reported for yet is stored
-// idle under its socket's engine first (idleAtLaunch).
+// title. Whichever verb adopts a client of a chat nothing reported for yet,
+// the chat is stored under its socket's engine first (launchFallback), as
+// tmux orders no attach, resize and rename hooks around one attach.
 func (reporter *herdrReporter) reconcile(
 	ctx context.Context,
 	session string,
 	state herdrStored,
-	atLaunch bool,
 ) error {
 	split, err := reporter.liveClients(ctx, session, &state, true)
 	if err != nil {
@@ -341,8 +349,8 @@ func (reporter *herdrReporter) reconcile(
 	clients, moved, changed, resolveErr := reporter.resolveClients(ctx, &state, false)
 	split.markMoved(clients, moved)
 	errs := []error{split.errs, resolveErr, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone)}
-	if atLaunch && len(split.adopted) > 0 && state.State == "" {
-		reporter.idleAtLaunch(session, &state)
+	if len(split.adopted) > 0 && state.State == "" {
+		reporter.launchFallback(session, &state)
 		changed = true
 	}
 	if changed || len(split.gone) > 0 || len(split.adopted) > 0 {
@@ -530,7 +538,9 @@ func (reporter *herdrReporter) reannounceSession(ctx context.Context, session st
 	clients, _, rebound, resolveErr := reporter.resolveClients(ctx, &state, false)
 	errs := []error{split.errs, resolveErr, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone)}
 	changed := rebound || len(split.gone) > 0 || len(split.adopted) > 0
-	if state.State == "" {
+	// The unknown fallback is stored only for a client it reaches: on a server
+	// no Herdr pane shows, it would make a later Herdr attach skip launchFallback.
+	if state.State == "" && len(clients) > 0 {
 		state.Engine, state.State, changed = herdr.Label(reporter.options.engine), herdrStateUnknown, true
 	}
 	if state.Engine == "" {

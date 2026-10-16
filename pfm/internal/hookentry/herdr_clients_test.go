@@ -121,29 +121,43 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 		}
 	})
 	// An engine that reports its session only at the first turn (Codex) is
-	// invisible in Herdr until prompted: an attach with nothing stored yet
-	// reports idle under the engine whose socket prefix the session carries, and
-	// stores it with the seq untouched so any engine event still wins.
-	for _, test := range []struct{ session, agent string }{
-		{"cc-1", "claude"}, {"cx-1", "codex"}, {"ox-1", "opencode"},
-	} {
-		t.Run("nothing reported yet in "+test.session+": idle is reported under "+test.agent, func(t *testing.T) {
-			rig := newChatRig(t)
-			rig.tmux.clients = []string{"4242"}
-			rig.clientEnv(4242, "w1:p1")
-			rig.wantQuiet(rig.run(
-				[]string{"attach", "--socket", rigSocket, "--session", test.session, "--client", "4242"}, "",
-			))
-			rig.wantCalls(
-				listCall, `pane.process_info {"pane_id":"w1:p1"}`,
-				`pane.report_agent {"pane_id":"w1:p1","source":"pfm","agent":"`+test.agent+`","state":"idle"}`,
+	// invisible in Herdr until prompted: whichever tmux verb adopts the first
+	// client of a chat with nothing stored yet reports idle under the engine
+	// whose socket prefix the session carries. Claude reports at SessionStart,
+	// so a Claude chat with nothing stored was launched without the Herdr hooks
+	// and reads unknown, never a guessed idle (D4). Either is stored with the
+	// seq untouched so any engine event still wins.
+	for _, verb := range []string{"attach", "sync", "name"} {
+		for _, test := range []struct{ session, agent, state string }{
+			{"cc-1", "claude", "unknown"}, {"cx-1", "codex", "idle"}, {"ox-1", "opencode", "idle"},
+		} {
+			t.Run(
+				verb+" with nothing reported yet in "+test.session+": "+test.state+" under "+test.agent,
+				func(t *testing.T) {
+					rig := newChatRig(t)
+					rig.tmux.clients = []string{"4242"}
+					rig.clientEnv(4242, "w1:p1")
+					rig.wantQuiet(rig.run(
+						[]string{verb, "--socket", rigSocket, "--session", test.session, "--client", "4242"}, "",
+					))
+					report := `pane.report_agent {"pane_id":"w1:p1","source":"pfm","agent":"` + test.agent +
+						`","state":"` + test.state + `"}`
+					if calls := rig.herdr.calls(); !slices.Contains(calls, report) {
+						t.Fatalf("requests = %q, want %s", calls, report)
+					}
+					rig.wantRegistry(map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")})
+					stored := rig.tmux.storedState(t)
+					if stored.Engine != test.agent || stored.State != test.state || stored.Seq != 0 {
+						t.Fatalf(
+							"stored = %q, want engine %s, state %s and seq 0",
+							rig.tmux.stored,
+							test.agent,
+							test.state,
+						)
+					}
+				},
 			)
-			rig.wantRegistry(map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")})
-			stored := rig.tmux.storedState(t)
-			if stored.Engine != test.agent || stored.State != "idle" || stored.Seq != 0 {
-				t.Fatalf("stored = %q, want engine %s, state idle and seq 0", rig.tmux.stored, test.agent)
-			}
-		})
+		}
 	}
 	t.Run("nothing reported yet in a session no engine owns: registered, no state", func(t *testing.T) {
 		rig := newChatRig(t)
@@ -157,7 +171,7 @@ func TestHerdrStateAttachRegistersTheClientThatAttached(t *testing.T) {
 			t.Fatalf("stored = %q, want no state", rig.tmux.stored)
 		}
 	})
-	t.Run("an engine event after the fallback idle wins over it", func(t *testing.T) {
+	t.Run("an engine event after the launch fallback wins over it", func(t *testing.T) {
 		rig := newChatRig(t)
 		rig.tmux.clients = []string{"4242"}
 		rig.clientEnv(4242, "w1:p1")
@@ -846,6 +860,36 @@ func TestHerdrStateReannounceReportsUnknownWithoutAnEngineEvent(t *testing.T) {
 			t.Fatalf("requests = %q, want the stored blocked state", calls)
 		}
 	})
+	t.Run(
+		"a Codex server with no Herdr client stores no state, so a later Herdr attach still reports idle",
+		func(t *testing.T) {
+			rig := newChatRig(t)
+			rig.tmux.session = "cx-1"
+			clock := rig.clock
+			deps := rig.jail.deps(rig.env, &clock)
+			deps.tmux = rig.tmux.run
+			if panes, err := reannounceOn(
+				context.Background(),
+				"/tmp/tmux-1/cx-1",
+				deps,
+			); err != nil ||
+				len(panes) != 0 {
+				t.Fatalf("reached = %q, err = %v, want nothing and no error", panes, err)
+			}
+			if strings.Contains(rig.tmux.stored, herdrStateUnknown) {
+				t.Fatalf("stored = %q, want no state stored for a server no Herdr pane shows", rig.tmux.stored)
+			}
+			rig.tmux.clients = []string{"4242"}
+			rig.clientEnv(4242, "w1:p1")
+			rig.wantQuiet(rig.run(
+				[]string{"attach", "--socket", "/tmp/tmux-1/cx-1", "--session", "cx-1", "--client", "4242"}, "",
+			))
+			idle := `pane.report_agent {"pane_id":"w1:p1","source":"pfm","agent":"codex","state":"idle"}`
+			if calls := rig.herdr.calls(); !slices.Contains(calls, idle) {
+				t.Fatalf("requests = %q, want the attach to report idle", calls)
+			}
+		},
+	)
 	t.Run("a host without Herdr reaches nothing", func(t *testing.T) {
 		rig := newChatRig(t)
 		clock := rig.clock

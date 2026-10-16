@@ -39,7 +39,7 @@ func (reporter *herdrReporter) title(ctx context.Context, session string, payloa
 // window-renamed hook runs it, and every name writer ends in a window rename.
 // It is the client pass too, so a client not yet registered is adopted.
 func (reporter *herdrReporter) name(ctx context.Context, session string, state herdrStored) error {
-	return reporter.reconcile(ctx, session, state, false)
+	return reporter.reconcile(ctx, session, state)
 }
 
 // nameSync is the one name sync: read the chat's name from the session

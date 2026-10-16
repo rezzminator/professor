@@ -205,7 +205,19 @@ func resolveValue(value, configDir string) (resolved, error) {
 
 func resolveCustom(value, configDir string) (resolved, error) {
 	name := strings.TrimPrefix(value, customPrefix)
+	if name == "" || strings.ContainsAny(name, `/\`) {
+		return resolved{}, fmt.Errorf(
+			"custom theme %s: the name is empty or holds a path separator (a theme is a file directly in %s)",
+			name, filepath.Join(configDir, "themes"),
+		)
+	}
 	path := filepath.Join(configDir, "themes", name+".json")
+	// A FIFO or device in place of the file would block the read, and the
+	// follower holds the theme lock while it reads; a file Stat cannot see is
+	// named by the read's own error below.
+	if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
+		return resolved{}, fmt.Errorf("custom theme %s: %s is not a regular file (%s)", name, path, info.Mode().Type())
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return resolved{}, fmt.Errorf("custom theme %s: %w", name, err)

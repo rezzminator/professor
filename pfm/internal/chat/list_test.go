@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -215,6 +216,7 @@ func TestHooklessLaunchReadsTheEnginesSettingsAsTheSpawnAuditDoes(t *testing.T) 
 		argv         map[int][]string
 		wantHookless bool
 		wantKnown    bool
+		wantWarn     string
 	}{
 		{
 			name: "payload without a Herdr hook", pids: []int{10},
@@ -240,19 +242,33 @@ func TestHooklessLaunchReadsTheEnginesSettingsAsTheSpawnAuditDoes(t *testing.T) 
 		},
 		{name: "no pane process", pids: nil},
 		{
-			name: "an unparsable payload is unverified", pids: []int{10},
-			argv: map[int][]string{10: {"/opt/claude", "--settings", "{not json"}},
+			name: "an unreadable pane process is warned and skipped", pids: []int{9, 10},
+			argv:         map[int][]string{10: {"/opt/claude", "--settings", usageOnly}},
+			wantHookless: true, wantKnown: true, wantWarn: "pid 9: no such process",
+		},
+		{
+			name: "an unparsable payload is unverified and warned", pids: []int{10},
+			argv:     map[int][]string{10: {"/opt/claude", "--settings", "{not json"}},
+			wantWarn: "pid 10:",
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			read := hooklessLaunch(argvProc{argv: test.argv}, "/opt/claude")
-			hookless, known := read(herdr.Seat{PanePIDs: test.pids})
+			var warn bytes.Buffer
+			read := hooklessLaunch(&warn, argvProc{argv: test.argv}, "/opt/claude")
+			hookless, known := read(herdr.Seat{Name: "w1", PanePIDs: test.pids})
 			if hookless != test.wantHookless || known != test.wantKnown {
 				t.Fatalf(
 					"hooklessLaunch = hookless %v known %v, want %v %v",
 					hookless, known, test.wantHookless, test.wantKnown,
 				)
+			}
+			if test.wantWarn == "" && warn.Len() != 0 {
+				t.Fatalf("hooklessLaunch warned %q on a readable launch", warn.String())
+			}
+			if test.wantWarn != "" &&
+				(!strings.Contains(warn.String(), test.wantWarn) || !strings.Contains(warn.String(), "w1")) {
+				t.Fatalf("hooklessLaunch warn = %q, want the seat and %q", warn.String(), test.wantWarn)
 			}
 		})
 	}

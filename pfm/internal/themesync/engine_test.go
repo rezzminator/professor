@@ -452,16 +452,24 @@ func TestLastFlipRecordsEverySurfaceOffsetFromTheSourceMtime(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	previous := flipClock
+	flipClock = &scriptedClock{times: []time.Time{origin.Add(72 * time.Hour)}}
+	t.Cleanup(func() { flipClock = previous })
+	// A first On applies a theme nothing was showing before: it is no flip,
+	// and the source's hour-old mtime is no latency.
+	h.on()
+	if flip := h.state().LastFlip; flip != nil {
+		t.Fatalf("a first On recorded lastFlip %+v, want none", flip)
+	}
+
+	h.write(settingsRel, `{"theme":"light"}`)
 	if err := os.Chtimes(h.path(settingsRel), origin, origin); err != nil {
 		t.Fatal(err)
 	}
-	previous := flipClock
 	flipClock = &scriptedClock{times: []time.Time{
 		origin.Add(410 * time.Millisecond), origin.Add(630 * time.Millisecond), origin.Add(640 * time.Millisecond),
 	}}
-	t.Cleanup(func() { flipClock = previous })
-
-	h.on()
+	h.sync(false)
 	flip := h.state().LastFlip
 	if flip == nil || flip.Tmux != 0.41 || flip.Herdr != 0.63 || flip.VSCode != 0.64 ||
 		flip.Source != h.path(settingsRel) || flip.At != origin.Format(time.RFC3339Nano) {
@@ -473,7 +481,7 @@ func TestLastFlipRecordsEverySurfaceOffsetFromTheSourceMtime(t *testing.T) {
 		)
 	}
 	h.write(".local/state/pfm/theme/vscode-ack.json",
-		`{"generation":1,"appliedAt":"2026-10-16T21:00:01.2Z","keys":[],"error":""}`)
+		`{"generation":2,"appliedAt":"2026-10-16T21:00:01.2Z","keys":[],"error":""}`)
 	if got := h.status().LastFlip; got == nil || got.Ack == nil || *got.Ack != 1.2 {
 		t.Fatalf("status lastFlip = %+v, want the ack at +1.2 s", got)
 	}

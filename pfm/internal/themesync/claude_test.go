@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -109,6 +110,35 @@ func TestResolveValueErrorsNameTheFile(t *testing.T) {
 	}
 	if _, err := resolveValue("custom:badcolour", dir); err == nil || !containsAll(err.Error(), "claude", "purple") {
 		t.Fatalf("bad colour error = %v", err)
+	}
+	// A name is a file directly in themes/: one holding a path separator names
+	// no theme, even when the file it points at parses.
+	if err := os.WriteFile(filepath.Join(dir, "escape.json"),
+		[]byte(`{"name":"x","base":"dark","overrides":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveValue("custom:../escape", dir); err == nil ||
+		!containsAll(err.Error(), "custom theme ../escape", "path separator") {
+		t.Fatalf("a theme name outside themes/ = %v, want an error naming the separator", err)
+	}
+	// A FIFO in place of a theme file is an error, never a read that blocks the
+	// follower under the theme lock.
+	fifo := filepath.Join(dir, "themes", "pipe.json")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := resolveValue("custom:pipe", dir)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !containsAll(err.Error(), "custom theme pipe", fifo, "not a regular file") {
+			t.Fatalf("a FIFO theme file = %v, want an error naming it", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reading a FIFO theme file blocked: the follower would hang under the theme lock")
 	}
 }
 

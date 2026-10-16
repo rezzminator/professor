@@ -102,7 +102,7 @@ func realHerdrProbe(warn io.Writer, values paths.Values, claudeBinary string) he
 		Tmux:     runTmux,
 		Call:     herdr.Call,
 		Environ:  proc.Environ,
-		Hookless: hooklessLaunch(proc, claudeBinary),
+		Hookless: hooklessLaunch(warn, proc, claudeBinary),
 		Warn:     warn,
 	}
 }
@@ -116,16 +116,37 @@ const herdrHookPrefix = "herdr-"
 // spawn audit reads a launch payload: known is false when no pane process is
 // Claude, its argv cannot be read or parsed, its settings are file-backed, or
 // it is a resumed argv with no payload — the original launch is then
-// unverified and nothing is guessed.
-func hooklessLaunch(proc gather.ProcFS, claudeBinary string) func(herdr.Seat) (hookless, known bool) {
+// unverified and nothing is guessed. A pane process whose argv cannot be read,
+// or a Claude argv that cannot be parsed, is written to warn.
+func hooklessLaunch(warn io.Writer, proc gather.ProcFS, claudeBinary string) func(herdr.Seat) (hookless, known bool) {
 	return func(seat herdr.Seat) (hookless, known bool) {
 		for _, pid := range seat.PanePIDs {
 			argv, err := proc.Cmdline(pid)
-			if err != nil || !gather.IsClaudeCommand(argv, claudeBinary) {
+			if err != nil {
+				_, _ = fmt.Fprintf(
+					warn,
+					"pfm chat ls: herdr hookless read of seat %s: argv of pid %d: %v\n",
+					seat.Name,
+					pid,
+					err,
+				)
+				continue
+			}
+			if !gather.IsClaudeCommand(argv, claudeBinary) {
 				continue
 			}
 			parsed, err := claudelaunch.Parse(argv)
-			if err != nil || parsed.SettingsFile != "" ||
+			if err != nil {
+				_, _ = fmt.Fprintf(
+					warn,
+					"pfm chat ls: herdr hookless read of seat %s: parse launch of pid %d: %v\n",
+					seat.Name,
+					pid,
+					err,
+				)
+				return false, false
+			}
+			if parsed.SettingsFile != "" ||
 				((parsed.Resumed || parsed.Resume != "") && parsed.Settings == nil) {
 				return false, false
 			}

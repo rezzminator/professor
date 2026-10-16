@@ -464,6 +464,16 @@ func TestPresenceLiveClientCases(t *testing.T) {
 			want:     "w6:p2 .professor unknown KEYS",
 		},
 		{
+			name:    "one placed and one in no pane shows the pane and names the failure",
+			clients: "66597\n88001\n",
+			envs: map[int]map[string]string{
+				66597: clientEnv(fake.path, "w6:p2"), 88001: clientEnv(fake.path, "w6:p2"),
+			},
+			hookless: unknownHookless(true, false),
+			want: "w6:p2 .professor unknown KEYS, herdr error: place tmux client 88001: client 88001 runs in no pane of " +
+				fake.path,
+		},
+		{
 			name: "hookless unreadable leaves the detail out", clients: "66597\n",
 			envs:     map[int]map[string]string{66597: clientEnv(fake.path, "w6:p2")},
 			hookless: unknownHookless(false, true),

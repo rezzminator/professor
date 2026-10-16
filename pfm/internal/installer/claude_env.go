@@ -40,8 +40,8 @@ type claudeEnvOwnership struct {
 // keys to remove, the owned keys changed by hand since pfm set them, and the
 // keys pfm owns there once the plan is applied.
 type claudeEnvPlan struct {
-	set, remove, handChanged []string
-	owned                    map[string]string
+	set, remove, handChanged, preserved []string
+	owned                               map[string]string
 }
 
 func (plan claudeEnvPlan) changes() bool { return len(plan.set)+len(plan.remove) > 0 }
@@ -148,6 +148,9 @@ func planClaudeEnv(env map[string]any, owned, want map[string]string) claudeEnvP
 			current, present := env[key]
 			previous, wasOwned := owned[key]
 			if present && (!wasOwned || current != previous) {
+				if current != want[key] {
+					plan.preserved = append(plan.preserved, key)
+				}
 				if wasOwned {
 					plan.handChanged = append(plan.handChanged, key)
 				}
@@ -355,7 +358,12 @@ func (installer *engine) ensureClaudeEnvFile(path, display string, owned, want m
 			key, display,
 		)
 	}
-	if edit == nil && len(want) > 0 {
+	for _, key := range plan.preserved {
+		installer.skip(
+			fmt.Sprintf("claude.env %s in %s: kept hand-set value; configured value not applied", key, display),
+		)
+	}
+	if edit == nil && len(want) > 0 && len(plan.preserved) == 0 {
 		installer.ok(fmt.Sprintf("claude.env: %d keys in %s", len(want), display))
 	}
 	return plan.owned, nil

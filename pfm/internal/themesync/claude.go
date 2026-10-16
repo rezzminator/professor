@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -208,6 +209,13 @@ func (s *session) applyClaude(_ context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceClaude, s.claudeThemesDir(), err)
 	}
+	// A held file the user deleted is let go: the sync cannot render a file
+	// that is not there, and off must not bring it back.
+	for held := range s.state.Claude {
+		if !slices.Contains(targets, held) {
+			delete(s.state.Claude, held)
+		}
+	}
 	if len(targets) == 0 {
 		return s.absent(surfaceClaude, s.claudeThemesDir(), "no "+claudeOwnedGlob+" in "+s.claudeThemesDir())
 	}
@@ -294,14 +302,25 @@ func (s *session) claudeAccountThemes() (others []string, selects bool, err erro
 
 func (s *session) readClaude(_ context.Context) SurfaceResult {
 	dir := s.claudeThemesDir()
-	if len(s.state.Claude) == 0 {
-		return s.absent(surfaceClaude, dir, "no "+claudeOwnedGlob+" held in "+dir)
+	targets, err := s.claudeTargets()
+	if err != nil {
+		return s.failed(surfaceClaude, dir, err)
+	}
+	if len(s.state.Claude) == 0 && len(targets) == 0 {
+		return s.absent(surfaceClaude, dir, "no "+claudeOwnedGlob+" in "+dir)
+	}
+	var drift []string
+	// A professor-* file that appeared after the last apply (an install after
+	// set, a release adding a theme) is not themed until the next sync.
+	for _, target := range targets {
+		if s.state.Claude[target] == "" {
+			drift = append(drift, filepath.Base(target)+" is not themed")
+		}
 	}
 	tokens, base, err := s.claudeTokens()
 	if err != nil {
 		return s.failed(surfaceClaude, dir, err)
 	}
-	var drift []string
 	for target := range s.state.Claude {
 		desired, err := s.claudeDesired(target, tokens, base)
 		if err != nil {

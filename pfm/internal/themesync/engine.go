@@ -149,18 +149,36 @@ func (s *session) readAll(ctx context.Context) []SurfaceResult {
 func (s *session) applyAll(ctx context.Context) []SurfaceResult {
 	var rows []SurfaceResult
 	for _, ops := range s.surfaces() {
-		applied := ops.apply(ctx)
-		if applied.Verdict != VerdictApplied {
-			rows = append(rows, applied)
-			continue
-		}
-		read := s.readOne(ctx, ops)
-		if read.Verdict == VerdictInSync && applied.Detail != "" {
-			read.Verdict, read.Detail = VerdictApplied, applied.Detail
-		}
-		rows = append(rows, read)
+		rows = append(rows, s.applyOne(ctx, ops))
 	}
 	return rows
+}
+
+// applyDrifted re-applies only the surfaces whose read-back row is DRIFT or
+// ERROR, keeping every other row as read: a surface out of sync costs its own
+// apply, never every surface's (each chat server's options) once a minute.
+func (s *session) applyDrifted(ctx context.Context, rows []SurfaceResult) []SurfaceResult {
+	out := make([]SurfaceResult, 0, len(rows))
+	for index, ops := range s.surfaces() {
+		if row := rows[index]; row.Verdict != VerdictDrift && row.Verdict != VerdictError {
+			out = append(out, row)
+			continue
+		}
+		out = append(out, s.applyOne(ctx, ops))
+	}
+	return out
+}
+
+func (s *session) applyOne(ctx context.Context, ops surfaceOps) SurfaceResult {
+	applied := ops.apply(ctx)
+	if applied.Verdict != VerdictApplied {
+		return applied
+	}
+	read := s.readOne(ctx, ops)
+	if read.Verdict == VerdictInSync && applied.Detail != "" {
+		read.Verdict, read.Detail = VerdictApplied, applied.Detail
+	}
+	return read
 }
 
 func (s *session) restoreAll(ctx context.Context) []SurfaceResult {
@@ -321,10 +339,13 @@ func Sync(ctx context.Context, env Env, force bool) (report Report, err error) {
 		return sess.report(sess.applyAll(ctx)), sess.persist()
 	}
 	rows := sess.readAll(ctx)
-	if !force && (Report{Surfaces: rows}).OK() {
+	if force {
+		return sess.report(sess.applyAll(ctx)), sess.persist()
+	}
+	if (Report{Surfaces: rows}).OK() {
 		return sess.report(rows), nil // nothing changed and nothing drifted: write nothing
 	}
-	return sess.report(sess.applyAll(ctx)), sess.persist()
+	return sess.report(sess.applyDrifted(ctx, rows)), sess.persist()
 }
 
 // ReadBack reads every surface back against the state's generation.
@@ -374,15 +395,23 @@ func Off(ctx context.Context, env Env) (report Report, err error) {
 
 // ApplyTmuxServer puts the current theme on one chat server (capturing each
 // option's prior value on that server first); a no-op when the sync is off.
-func ApplyTmuxServer(ctx context.Context, servers TmuxServers, stateDir, socket string) error {
+// The state is read and the server themed under the theme lock, so an apply
+// never lands after an Off that already restored the same server.
+func ApplyTmuxServer(ctx context.Context, servers TmuxServers, stateDir, socket string) (err error) {
 	if !SyncOn(stateDir) {
 		return nil
 	}
-	state, palette, active, err := loadActive(stateStore{dir: stateDir})
+	store := stateStore{dir: stateDir}
+	release, err := store.lock()
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, release()) }()
+	state, palette, active, err := loadActive(store)
 	if err != nil || !active {
 		return err
 	}
-	sess := &session{store: stateStore{dir: stateDir}, state: state, palette: palette, servers: servers}
+	sess := &session{store: store, state: state, palette: palette, servers: servers}
 	return sess.tmuxApplySocket(ctx, socket)
 }
 

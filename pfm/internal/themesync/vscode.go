@@ -212,9 +212,11 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 	path := s.vscodeContractPath()
 	present := false
 	for _, settings := range s.vscodeSettings() {
-		if _, err := os.Stat(settings); err == nil {
-			present = true
+		_, err := os.Stat(settings)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return s.failed(surfaceVscode, settings, fmt.Errorf("themesync: stat %s: %w", settings, err))
 		}
+		present = present || err == nil
 	}
 	if !present {
 		return s.vscodeAbsent()

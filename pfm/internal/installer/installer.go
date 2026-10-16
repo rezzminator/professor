@@ -581,6 +581,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.uninstallHarvest(); err != nil {
 		return err
 	}
+	if err := installer.themeSyncOff(ctx); err != nil {
+		return err
+	}
 	installer.uninstallThemes()
 	if err := installer.removeRumdlUserConfig(); err != nil {
 		return err

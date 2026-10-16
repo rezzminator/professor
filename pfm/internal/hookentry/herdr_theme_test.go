@@ -28,7 +28,7 @@ func (rig *chatRig) themeOn() {
 func (rig *chatRig) themeStateCalls() []string {
 	var calls []string
 	for _, call := range rig.tmux.setOptionCalls() {
-		if strings.Contains(call, " @pfm-state ") {
+		if strings.Contains(call, " @pfm-state ") || strings.HasSuffix(call, " -gu @pfm-state") {
 			calls = append(calls, call)
 		}
 	}
@@ -51,7 +51,8 @@ func TestHerdrStateMarksTheServersAgentStateWhileTheThemeIsOn(t *testing.T) {
 		{"a finished turn is done", "idle", `{"session_id":"s1"}`, "done"},
 		{"the idle prompt fades done to idle", "notification", `{"session_id":"s1","notification_type":"idle_prompt"}`, "idle"},
 		{"a compaction restart changes nothing", "start", `{"session_id":"s1","source":"compact"}`, ""},
-		{"a session end changes nothing", "end", `{"session_id":"s1","reason":"logout"}`, ""},
+		{"a session end clears the state", "end", `{"session_id":"s1","reason":"logout"}`, "-gu"},
+		{"a /clear session swap changes nothing", "end", `{"session_id":"s1","reason":"clear"}`, ""},
 		{"an unrelated notification changes nothing", "notification", `{"session_id":"s1","notification_type":"auth_success"}`, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -66,6 +67,9 @@ func TestHerdrStateMarksTheServersAgentStateWhileTheThemeIsOn(t *testing.T) {
 				return
 			}
 			want := "socket=" + rigSocket + " set-option -g @pfm-state " + test.want
+			if test.want == "-gu" {
+				want = "socket=" + rigSocket + " set-option -gu @pfm-state"
+			}
 			if len(calls) != 1 || calls[0] != want {
 				t.Fatalf("@pfm-state calls = %v, want exactly [%s]", calls, want)
 			}

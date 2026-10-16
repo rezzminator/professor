@@ -27,9 +27,25 @@ const LOCK_WAIT_MS = 100;
 const LOCK_TRIES = 100;
 
 // themesync.DefaultStateDir(home): the same path pfm writes, unless the user points elsewhere.
+// Only the user's own value counts: the setting is machine-scoped, and a workspace value is
+// ignored, so no repo's .vscode/settings.json can feed the global settings a contract of its own.
 function stateDir() {
-  const configured = vscode.workspace.getConfiguration('professor.theme').get('stateDir');
+  const configured = vscode.workspace.getConfiguration('professor.theme').inspect('stateDir')?.globalValue;
   return configured || path.join(os.homedir(), '.local', 'state', 'pfm', 'theme');
+}
+
+// The keys pfm renders (themesync/vscode.go) are the integrated terminal's; a contract key
+// outside them, or a value that is not a hex colour, is never written.
+const COLOR_KEY = /^terminal(Cursor)?\./;
+const COLOR_VALUE = /^#[0-9a-fA-F]{3,8}$/;
+
+function terminalColors(colors) {
+  const out = {};
+  if (!colors || typeof colors !== 'object') return out;
+  for (const [key, value] of Object.entries(colors)) {
+    if (COLOR_KEY.test(key) && typeof value === 'string' && COLOR_VALUE.test(value)) out[key] = value;
+  }
+  return out;
 }
 
 function readJSON(file) {
@@ -106,7 +122,7 @@ async function applyContract(dir) {
     });
     return;
   }
-  const want = contract.enabled && contract.colors && typeof contract.colors === 'object' ? contract.colors : {};
+  const want = contract.enabled ? terminalColors(contract.colors) : {};
   const ack = { generation: Number.isInteger(contract.generation) ? contract.generation : null, appliedAt: '', keys: Object.keys(want).sort(), error: '' };
   try {
     await withLock(dir, async () => {

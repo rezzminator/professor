@@ -54,27 +54,27 @@ func TestGhosttyRenderFilesPerMode(t *testing.T) {
 
 func TestGhosttyIncludeRoundTripWithAndWithoutTrailingNewline(t *testing.T) {
 	for _, original := range []string{"", "font-size = 13\n", "font-size = 13", "a = 1\n\n\n", "# only a comment"} {
-		updated, added := ghosttyInclude(original)
-		if !strings.HasSuffix(updated, "config-file = ?pfm-theme.ghostty\n") ||
-			strings.Count(updated, "config-file = ?pfm-theme.ghostty") != 1 {
+		updated, added := ghosttyInclude(original, "/cfg")
+		if !strings.HasSuffix(updated, "config-file = ?/cfg/pfm-theme.ghostty\n") ||
+			strings.Count(updated, "config-file = ?") != 1 {
 			t.Fatalf("%q: updated = %q", original, updated)
 		}
 		if !strings.HasPrefix(updated, original) {
 			t.Fatalf("%q: the user's bytes must stay a prefix, got %q", original, updated)
 		}
-		if again, addedAgain := ghosttyInclude(updated); again != updated || addedAgain != "" {
+		if again, addedAgain := ghosttyInclude(updated, "/cfg"); again != updated || addedAgain != "" {
 			t.Fatalf("%q: a second include must change nothing, got %q / %q", original, again, addedAgain)
 		}
-		if got := ghosttyExclude(updated, added); got != original {
+		if got := ghosttyExclude(updated, added, "/cfg"); got != original {
 			t.Fatalf("%q: exclude = %q", original, got)
 		}
 	}
 }
 
 func TestGhosttyExcludeWhenTheUserMovedTheLines(t *testing.T) {
-	_, added := ghosttyInclude("a = 1\n")
-	moved := "# pfm theme (managed: pfm theme off removes these two lines)\nconfig-file = ?pfm-theme.ghostty\na = 1\nb = 2\n"
-	if got := ghosttyExclude(moved, added); got != "a = 1\nb = 2\n" {
+	_, added := ghosttyInclude("a = 1\n", "/cfg")
+	moved := "# pfm theme (managed: pfm theme off removes these two lines)\nconfig-file = ?/cfg/pfm-theme.ghostty\na = 1\nb = 2\n"
+	if got := ghosttyExclude(moved, added, "/cfg"); got != "a = 1\nb = 2\n" {
 		t.Fatalf("exclude of a moved pair = %q", got)
 	}
 }

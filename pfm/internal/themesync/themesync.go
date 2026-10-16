@@ -141,6 +141,9 @@ type Env struct {
 	Runner deps.Runner
 	// Tmux reaches pfm's chat servers.
 	Tmux TmuxServers
+	// systemApps is the system Applications directory ("" is /Applications);
+	// tests point it into their own tree.
+	systemApps string
 }
 
 // Request is `pfm theme set`.
@@ -157,6 +160,12 @@ const tmuxStateName = "@pfm-state"
 // server, which the theme's state-colour formats read.
 func TmuxStateOption(state string) []string {
 	return []string{"set-option", "-g", tmuxStateName, state}
+}
+
+// TmuxStateClear is the option vector a session end sets: the state unset, so
+// a server that outlives its engine shows no agent state.
+func TmuxStateClear() []string {
+	return []string{"set-option", "-gu", tmuxStateName}
 }
 
 // DefaultStateDir is where the sync keeps its state, contract and backups.

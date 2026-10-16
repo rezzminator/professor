@@ -36,7 +36,7 @@
           "default": ["terminal.ansiRed", "terminal.ansiGreen", "terminal.ansiYellow", "terminal.ansiBlue", "terminal.ansiMagenta", "terminal.ansiCyan"],
           "description": "Theme colours cycled beside the icons on the same counter, so a pair repeats only every least-common-multiple of the two list lengths."
         },
-        "professor.theme.stateDir": { "type": "string", "default": "", "description": "Directory pfm theme writes its contract (current.json) to; empty means ~/.local/state/pfm/theme. The terminal follows that palette only after pfm theme set." }
+        "professor.theme.stateDir": { "type": "string", "default": "", "scope": "machine", "description": "Directory pfm theme writes its contract (current.json) to; empty means ~/.local/state/pfm/theme. The terminal follows that palette only after pfm theme set." }
       }
     }
   }

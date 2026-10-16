@@ -24,7 +24,7 @@
 | `status` | `themesync.ReadBack`: reads every surface back; writes nothing |
 | `ls` | every palette with its dark and light swatches (sample, ANSI 0-7, four state colours); the palette in force is marked `*` |
 | `set <palette>` | `themesync.Set`: the first call turns the sync on; a later call changes palette or appearance |
-| `sync` | `themesync.Sync`: re-resolves the appearance and re-applies when it changed; `--force` re-applies regardless |
+| `sync` | `themesync.Sync`: re-resolves the appearance and re-applies every surface when it changed; otherwise re-applies only the surfaces whose read-back is DRIFT or ERROR, writing nothing (`state.json` included) when none is; `--force` re-applies every surface regardless |
 | `off` | `themesync.Off`: restores every surface from its snapshot and disables the sync |
 
 Exit codes: `0` ok; `1` when any surface reads DRIFT or ERROR (`Report.OK`) or a run failed (error on stderr as `pfm theme: …`); `2` usage: an unknown subcommand, a stray positional argument, a bad `--appearance`, or an unknown palette, whose message names every known palette (`pfm theme set: unknown palette "x" — known: tokyo-night, solarized, catppuccin`). PENDING, ABSENT, APPLIED, IN-SYNC and RESTORED never raise the exit code.
@@ -123,7 +123,7 @@ Render: each existing `professor-*.json` is re-rendered as `{name, base, overrid
 
 Snapshot: the first apply copies each file to `backups/claude/{file}` and records it in `state.claude`.
 
-Read-back: re-renders from the snapshot and compares bytes; a differing file is DRIFT. It also reads `~/.cc/*/settings.json` and `~/.claude/settings.json`: accounts whose `theme` is not `custom:professor-*` are listed in `detail` as `accounts not following`; that alone leaves IN-SYNC while at least one account selects a professor theme, and is DRIFT when none does or a file also differs. No `professor-*.json` present: ABSENT.
+Read-back: re-renders from the snapshot and compares bytes; a differing file is DRIFT, and so is a `professor-*.json` present now but not held (installed after `set`: `{file} is not themed`), which the next sync themes and snapshots. A held file the user deleted is let go at the next apply, so `off` does not bring it back. It also reads `~/.cc/*/settings.json` and `~/.claude/settings.json`: accounts whose `theme` is not `custom:professor-*` are listed in `detail` as `accounts not following`; that alone leaves IN-SYNC while at least one account selects a professor theme, and is DRIFT when none does or a file also differs. No `professor-*.json` present and none held: ABSENT.
 
 Off: writes the snapshot bytes back; RESTORED with `{n} themes`.
 
@@ -133,11 +133,11 @@ Off: writes the snapshot bytes back; RESTORED with `{n} themes`.
 
 Render (`tmuxOptions`): 8 style options (`status-style`, `window-status-style`, `window-status-current-style`, `pane-border-style`, `pane-active-border-style`, `message-style`, `message-command-style`, `mode-style`) and 13 user options: `@pfm-theme`, `@pfm-theme-generation`, `@pfm-c-{bg,fg,surface,overlay,muted,accent}`, `@pfm-state-{blocked,working,done,idle}` and `@pfm-state-colour`. The current-window and active-border styles use `tmuxStateFormat`, a conditional format on `@pfm-state` that picks the state colour (`blocked`, `working`, `done`, else the idle colour).
 
-Apply (`tmuxApplySocket`): probe liveness (`status-style`; a dead socket is an error naming it), capture each style's prior value once as `@pfm-theme-prior-{option}` (stored as `v:{value}` so an empty prior still reads as captured), then set every option in one apply per server. A partial failure reports `{n} of {k} servers failed`.
+Apply (`tmuxApplySocket`): probe liveness (`status-style`; a dead socket is an error naming it), capture each style's prior value as `@pfm-theme-prior-{option}` on a server not yet carrying `@pfm-theme-generation` (stored as `v:{value}` so an empty prior still reads as captured; a themed server's priors are never read again, so a failed read cannot overwrite one with a themed value), then set every option in one apply per server. A partial failure reports `{n} of {k} servers failed`.
 
 Read-back: every option on every server against the render; a value mismatch is DRIFT, an unreadable option ERROR; the generation reported is `@pfm-theme-generation`. No live server: ABSENT (`no live pfm chat servers`).
 
-Off: restores each style to its captured prior (unsets it when none was captured), unsets the prior options and every `@pfm-*` option, the hook's `@pfm-state` included; RESTORED with the server count.
+Off: restores each style to its captured prior (unsets it when none was captured on a server carrying `@pfm-theme-generation`; a server the theme never reached, one born after an earlier off, keeps its own styles), unsets the prior options and every `@pfm-*` option, the hook's `@pfm-state` included; RESTORED with the server count.
 
 ### surfaceHerdr
 
@@ -157,13 +157,13 @@ Off: puts the replaced span back (or removes the appended text; deletes a file t
 
 **Surface:** `ghostty` — **Files:** the first existing of `~/Library/Application Support/com.mitchellh.ghostty/{config.ghostty,config}` and `~/.config/ghostty/{config.ghostty,config}` — **Live reload:** `SIGUSR2`
 
-Render (`ghosttyRender`): two lines appended to the user's config (`# pfm theme (managed: pfm theme off removes these two lines)` and `config-file = ?pfm-theme.ghostty`), and three files beside it: `pfm-theme.ghostty` (`# pfm theme · {palette} · gen {N} · mode {mode}` plus `theme = light:{file},dark:{file}` for auto, or the one side's file) and `pfm-theme/{palette}-dark`, `pfm-theme/{palette}-light` (background, foreground, cursor, selection, `palette = {0-15}=…`). Files of a palette no longer in force under `pfm-theme/` are deleted. The user's config is backed up beside itself and the appended text snapshotted in `state.ghostty`.
+Render (`ghosttyRender`): two lines appended to the user's config (`# pfm theme (managed: pfm theme off removes these two lines)` and `config-file = ?{config dir}/pfm-theme.ghostty`, absolute, so a config kept as a symlink into another directory still finds the include), and three files beside it: `pfm-theme.ghostty` (`# pfm theme · {palette} · gen {N} · mode {mode}` plus `theme = light:{file},dark:{file}` for auto, or the one side's file) and `pfm-theme/{palette}-dark`, `pfm-theme/{palette}-light` (background, foreground, cursor, selection, `palette = {0-15}=…`). Files of a palette no longer in force under `pfm-theme/` are deleted. The user's config is backed up beside itself and the appended text snapshotted in `state.ghostty`.
 
-Reload: `ghostty +validate-config` runs first (the binary of a running Ghostty, else `/Applications/Ghostty.app/Contents/MacOS/ghostty`); a rejected config is an ERROR. Then `SIGUSR2` goes to each running Ghostty main process (found via `ps -axo pid=,args=`: the app binary alone, no arguments, and `ps -o comm= -p {pid}`, the executable's path, equal to that binary), after re-reading that pid's args and executable immediately before the kill; the validating binary is taken from such a process only. No process: APPLIED with `applies when Ghostty starts`.
+Reload: `ghostty +validate-config` runs first, with the first binary found: a running Ghostty's, `/Applications/Ghostty.app/Contents/MacOS/ghostty`, `~/Applications/Ghostty.app/Contents/MacOS/ghostty`, then `ghostty` on PATH. None found: the row stands on the file read-back alone, with the detail `not validated: Ghostty binary not found (tried …)`, never ERROR and never a re-apply. A found binary that rejects the config or will not run is an ERROR. Then `SIGUSR2` goes to each running Ghostty main process (found via `ps -axo pid=,args=`: the app binary alone, no arguments, and `ps -o comm= -p {pid}`, the executable's path, equal to that binary), after re-reading that pid's args and executable immediately before the kill; the validating binary is taken from such a process only. No process: APPLIED with `applies when Ghostty starts`.
 
-Read-back: include line present, the three owned files equal to the render, and the config validates; otherwise DRIFT (or ERROR when validation cannot run). No config file: ABSENT, listing the paths looked for.
+Read-back: the absolute include line present, the three owned files equal to the render, and the config validates; otherwise DRIFT (or ERROR when validation cannot run). No config file: ABSENT, listing the paths looked for; a candidate that cannot be looked at (a stat failure other than not-exist) is ERROR naming it, and so is a stale `pfm-theme/` file the apply cannot list or remove.
 
-Off: removes the appended text (or the two lines wherever the user moved them), deletes `pfm-theme.ghostty` and `pfm-theme/`, signals Ghostty; RESTORED.
+Off: removes the appended text (or the two lines wherever the user moved them) and any legacy relative `config-file = ?pfm-theme.ghostty` line an earlier pfm wrote, deletes `pfm-theme.ghostty` and `pfm-theme/`, signals Ghostty; RESTORED.
 
 ### surfaceVscode
 
@@ -171,11 +171,11 @@ Off: removes the appended text (or the two lines wherever the user moved them), 
 
 Pfm never edits VS Code settings itself. It writes the contract `current.json` (`vscodeContract`: `enabled`, `generation`, `palette`, `title`, `mode`, `appearance`, `colors`; the colours are `terminal.background`, `terminal.foreground`, `terminalCursor.foreground`, `terminal.selectionBackground`, `terminal.tab.activeBorder` and the 16 `terminal.ansi*` keys). Before the first set it copies each existing `settings.json` of `Code`, `Code - Insiders`, `VSCodium` and `Cursor` (`~/Library/Application Support/{product}/User/`) beside itself. None present: ABSENT.
 
-The extension polls the contract every 2000 ms (`professor.theme.stateDir` overrides the directory), merges `colors` into the user's global `workbench.colorCustomizations` touching no other key, and writes `vscode-ack.json` (`generation`, `appliedAt`, `keys`, `error`). A generation applies once: another window or a restart finds it recorded in `vscode-applied.json` and skips it, so a colour the user changed by hand since stays theirs until the next `set` or `sync`. Each key set is recorded with the value it replaced; a key the next generation drops, or every key when the contract is `enabled: false`, goes back to its prior value unless the user changed it since. Windows serialise on the `vscode-apply.lock` directory (stale after 30 s). With no contract file the extension writes nothing.
+The extension polls the contract every 2000 ms (`professor.theme.stateDir` overrides the directory; the setting is `machine`-scoped and only its user value is read, so no workspace can point it elsewhere), merges the contract's terminal colours (`terminal.*` and `terminalCursor.*` keys with hex values; any other key or value is dropped) into the user's global `workbench.colorCustomizations` touching no other key, and writes `vscode-ack.json` (`generation`, `appliedAt`, `keys`, `error`). A generation applies once: another window or a restart finds it recorded in `vscode-applied.json` and skips it, so a colour the user changed by hand since stays theirs until the next `set` or `sync`. Each key set is recorded with the value it replaced; a key the next generation drops, or every key when the contract is `enabled: false`, goes back to its prior value unless the user changed it since. Windows serialise on the `vscode-apply.lock` directory (stale after 30 s). With no contract file the extension writes nothing.
 
 ### vscodeVerdict
 
-Read-back judges the ack against the state's generation, in order: an ack with `error` is ERROR (`extension reported: …`); an ack at the generation is IN-SYNC; no VS Code process running is PENDING (`applies when VS Code starts`); a contract younger than 10 s (`vscodeGrace`) is PENDING (`waiting for the extension to apply generation {N}`); a stale ack is DRIFT; no ack is DRIFT. A contract that differs from the render is DRIFT.
+Read-back is ABSENT when no VS Code `User/settings.json` exists, and ERROR naming the path when one cannot be looked at. It judges the ack against the state's generation, in order: an ack with `error` is ERROR (`extension reported: …`); an ack at the generation is IN-SYNC; no VS Code process running is PENDING (`applies when VS Code starts`); a contract younger than 10 s (`vscodeGrace`) is PENDING (`waiting for the extension to apply generation {N}`); a stale ack is DRIFT; no ack is DRIFT. A contract that differs from the render is DRIFT.
 
 Off: writes a disabled contract (`enabled` false, no colours, bumped generation); the row reads APPLIED with `the extension clears the colours when it next reads current.json`, and the snapshot is dropped.
 
@@ -193,7 +193,7 @@ Three doors put the theme on a chat tmux server outside `set`/`sync`. Each is a 
 
 ### themeBornServer
 
-`spawn.TmuxSpawner` calls it after configuring a newly created chat server: `themesync.ApplyTmuxServer` puts the current theme on that socket, capturing each style's prior first. Failure is logged and the spawn stands; a chat opens even when its colours could not be set.
+`spawn.TmuxSpawner` calls it after configuring a newly created chat server: `themesync.ApplyTmuxServer` puts the current theme on that socket, capturing each style's prior first; it reads the state and applies under the theme lock, so it never lands after an `off` that already restored the server. Failure is logged and the spawn stands; a chat opens even when its colours could not be set.
 
 ### ConvergeTmux
 
@@ -201,10 +201,12 @@ Three doors put the theme on a chat tmux server outside `set`/`sync`. Each is a 
 
 ### themeState
 
-The `pfm internal herdr-state` hook, with the sync on, sets `@pfm-state` on the chat's own tmux server (`themesync.TmuxStateOption`; a pfm chat server only, so an engine in the user's own tmux leaves that server unmarked) from each event: `working`, `blocked` or `idle` as the Herdr plan reports it, except the idle event (a finished turn) which writes `done`. Events that change no state (a release, a compaction restart, a tmux-fired verb) write nothing. Failure is logged and the Herdr report goes on. The option is what `tmuxStateFormat` reads to colour the window and the active pane border.
+The `pfm internal herdr-state` hook, with the sync on, sets `@pfm-state` on the chat's own tmux server (`themesync.TmuxStateOption`; a pfm chat server only, so an engine in the user's own tmux leaves that server unmarked) from each event: `working`, `blocked` or `idle` as the Herdr plan reports it, except the idle event (a finished turn) which writes `done`. A session end (a release; not `/clear` or resume) unsets `@pfm-state` (`themesync.TmuxStateClear`), so a server that outlives its engine shows no agent state. Events that change no state (a compaction restart, a tmux-fired verb) write nothing. Failure is logged and the Herdr report goes on. The option is what `tmuxStateFormat` reads to colour the window and the active pane border.
 
 ## Install hold
 
 ### HoldsClaudeTheme
 
 `themesync.HoldsClaudeTheme(stateDir, target)` is true when the sync is on and `state.claude` holds `target` (compared as a cleaned path and by resolved symlink; an unreadable state also holds). `pfm install` calls it per Claude theme file and, when held, reports `theme {name} held by pfm theme; pfm theme off restores it` and writes nothing, since `set` renders into that file and `off` restores its snapshot.
+
+`pfm uninstall` with the sync on (`themesync.SyncOn`) runs `pfm theme off` (`themesync.Off`: every surface restored, `com.professor.pfm.theme` booted out, the state disabled) before it removes the themes; its plan pass prints `would run pfm theme off`, and an off that fails, or leaves a surface ERROR, stops the uninstall with `uninstall: pfm theme off: …`.

@@ -71,6 +71,7 @@ const TIER1 = [
           "harvestmcp",
           "herdr",
           "themesync",
+          "themetmux",
         ],
       },
       {

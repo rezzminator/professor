@@ -815,7 +815,7 @@ const executed = [];
 const vscodeStub = {
   workspace: {
     getConfiguration() {
-      return { get: (key) => defaults[key] };
+      return { get: (key) => defaults[key], inspect: () => undefined };
     },
   },
   window: {

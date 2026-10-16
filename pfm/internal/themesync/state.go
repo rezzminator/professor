@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,13 +73,18 @@ func (store stateStore) load() (themeState, bool, error) {
 	return state, true, nil
 }
 
-// save replaces state.json atomically.
+// save replaces state.json atomically; a state already on disk byte for byte
+// is not written again.
 func (store stateStore) save(state themeState) error {
 	content, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("themesync: encode state: %w", err)
 	}
-	if err := atomicfile.Write(store.statePath(), append(content, '\n'), 0o600); err != nil {
+	content = append(content, '\n')
+	if current, readErr := os.ReadFile(store.statePath()); readErr == nil && bytes.Equal(current, content) {
+		return nil
+	}
+	if err := atomicfile.Write(store.statePath(), content, 0o600); err != nil {
 		return fmt.Errorf("themesync: write %s: %w", store.statePath(), err)
 	}
 	return nil

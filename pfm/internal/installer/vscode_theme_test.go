@@ -50,7 +50,15 @@ const vscodeStub = {
           },
         };
       }
-      if (section === 'professor.theme') return { get: (key) => (key === 'stateDir' ? (mode === 'default-dir' ? '' : stateDir) : undefined) };
+      if (section === 'professor.theme') {
+        // get is the merged value, workspace over user; a workspace-dir run sets
+        // the directory only in the workspace layer, where a cloned repo can.
+        const layers = mode === 'default-dir' ? {} : mode === 'workspace-dir' ? { workspaceValue: stateDir } : { globalValue: stateDir };
+        return {
+          get: (key) => (key === 'stateDir' ? layers.workspaceValue ?? layers.globalValue ?? '' : undefined),
+          inspect: (key) => (key === 'stateDir' ? { defaultValue: '', ...layers } : undefined),
+        };
+      }
       return { get: () => undefined };
     },
   },
@@ -79,7 +87,7 @@ const api = require(extensionPath).activate(context);
 // An extension without the theme API applies nothing; the steps below then
 // report what it left, so the test fails on what it asserts, not on a crash.
 const syncTheme = (api && api.syncTheme) || (() => Promise.resolve());
-if (mode === 'default-dir') {
+if (mode === 'default-dir' || mode === 'workspace-dir') {
   process.stdout.write(JSON.stringify(watched));
   process.exit(0);
 }
@@ -88,7 +96,7 @@ const current = path.join(stateDir, 'current.json');
 const contract = (generation, enabled, palette) => JSON.stringify({ enabled, generation, palette: 'solarized', title: 'Solarized', mode: 'auto', appearance: 'dark', colors: palette });
 const steps = [
   ['inert', null],
-  ['set', contract(1, true, { 'terminal.background': '#111111', 'terminal.foreground': '#eeeeee', 'terminal.tab.activeBorder': '#222222' })],
+  ['set', contract(1, true, { 'terminal.background': '#111111', 'terminal.foreground': '#eeeeee', 'terminal.tab.activeBorder': '#222222', 'editor.background': '#ff0000', 'terminal.ansiRed': 'red; url(x)' })],
   ['same-generation', null],
   ['new-generation', contract(2, true, { 'terminal.background': '#333333', 'terminal.foreground': '#dddddd' })],
   ['user-edit', null],
@@ -228,21 +236,25 @@ func TestVSCodeExtensionFollowsThePfmThemeContract(t *testing.T) {
 }
 
 // TestVSCodeExtensionThemeStateDirDefaultsToPfmsAndActivatesAtStartup: an
-// empty professor.theme.stateDir watches themesync.DefaultStateDir(home), and
-// the manifest activates at startup so a window follows without a terminal.
+// empty professor.theme.stateDir, or one only a workspace sets, watches
+// themesync.DefaultStateDir(home); the setting is machine-scoped, so no
+// workspace can point it elsewhere; and the manifest activates at startup so a
+// window follows without a terminal.
 func TestVSCodeExtensionThemeStateDirDefaultsToPfmsAndActivatesAtStartup(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	var watched []string
-	if err := json.Unmarshal(
-		runVSCodeThemeDriver(t, "default-dir", "", []string{"HOME=" + home}),
-		&watched,
-	); err != nil {
-		t.Fatalf("decode default-dir output: %v", err)
-	}
 	want := []string{filepath.Join(home, ".local", "state", "pfm", "theme", "current.json")}
-	if !reflect.DeepEqual(watched, want) {
-		t.Fatalf("watched %v, want %v", watched, want)
+	for _, mode := range []string{"default-dir", "workspace-dir"} {
+		var watched []string
+		if err := json.Unmarshal(
+			runVSCodeThemeDriver(t, mode, filepath.Join(t.TempDir(), "repo-controlled"), []string{"HOME=" + home}),
+			&watched,
+		); err != nil {
+			t.Fatalf("decode %s output: %v", mode, err)
+		}
+		if !reflect.DeepEqual(watched, want) {
+			t.Errorf("%s: watched %v, want %v", mode, watched, want)
+		}
 	}
 	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/package.json")
 	if err != nil {
@@ -262,8 +274,15 @@ func TestVSCodeExtensionThemeStateDirDefaultsToPfmsAndActivatesAtStartup(t *test
 	if !slices.Contains(manifest.ActivationEvents, "onStartupFinished") {
 		t.Fatalf("activationEvents %v missing onStartupFinished", manifest.ActivationEvents)
 	}
-	if _, ok := manifest.Contributes.Configuration.Properties["professor.theme.stateDir"]; !ok {
+	var setting struct {
+		Scope string `json:"scope"`
+	}
+	raw, ok := manifest.Contributes.Configuration.Properties["professor.theme.stateDir"]
+	if !ok {
 		t.Fatalf("package.json contributes no professor.theme.stateDir setting")
+	}
+	if err := json.Unmarshal(raw, &setting); err != nil || setting.Scope != "machine" {
+		t.Fatalf("professor.theme.stateDir scope = %q (%v), want machine", setting.Scope, err)
 	}
 }
 

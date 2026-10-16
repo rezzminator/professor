@@ -78,16 +78,19 @@ func (palette Palette) tmuxOptions(appearance Appearance, generation int) []tmux
 }
 
 // tmuxApplySocket themes one chat server: liveness first (a dead socket is an
-// error naming it), each style's prior captured once, then every option set in
-// one apply.
+// error naming it), each style's prior captured once — on a server not yet
+// themed, so a failed read of a captured prior never overwrites it with a
+// themed value — then every option set in one apply.
 func (s *session) tmuxApplySocket(ctx context.Context, socket string) error {
 	if _, err := s.servers.Show(ctx, socket, tmuxLivenessProbe); err != nil {
 		return fmt.Errorf("tmux %s: %w", socket, err)
 	}
+	mark, markErr := s.servers.Show(ctx, socket, tmuxGenerationKey)
+	themed := markErr == nil && mark != ""
 	var commands [][]string
 	options := s.palette.tmuxOptions(s.state.Appearance, s.state.Generation)
 	for _, option := range options {
-		if strings.HasPrefix(option.Name, "@") {
+		if themed || strings.HasPrefix(option.Name, "@") {
 			continue
 		}
 		current, err := s.servers.Show(ctx, socket, option.Name)
@@ -194,18 +197,22 @@ func (s *session) readTmux(ctx context.Context) SurfaceResult {
 	}
 }
 
-// tmuxRestoreSocket puts each style's prior back (or unsets it when none was
-// captured) and removes every @pfm-* theme option from one server.
+// tmuxRestoreSocket puts each style's prior back (or, on a server the theme
+// reached, unsets it when none was captured) and removes every @pfm-* theme
+// option from one server. A server the theme never reached — one born after an
+// earlier off — keeps its own styles.
 func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 	if _, err := s.servers.Show(ctx, socket, tmuxLivenessProbe); err != nil {
 		return fmt.Errorf("tmux %s: %w", socket, err)
 	}
+	mark, markErr := s.servers.Show(ctx, socket, tmuxGenerationKey)
+	themed := markErr == nil && mark != ""
 	var commands [][]string
 	for _, name := range tmuxStyleNames {
 		raw, err := s.servers.Show(ctx, socket, tmuxPriorName(name))
 		if value, ok := tmuxPriorParse(raw); err == nil && ok {
 			commands = append(commands, []string{tmuxSetOption, tmuxGlobal, name, value})
-		} else {
+		} else if themed {
 			commands = append(commands, []string{tmuxSetOption, tmuxUnset, name})
 		}
 		commands = append(commands, []string{tmuxSetOption, tmuxUnset, tmuxPriorName(name)})

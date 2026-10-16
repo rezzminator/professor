@@ -2,6 +2,7 @@ package themesync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,10 +15,10 @@ import (
 const (
 	ghosttyIncludeFile    = "pfm-theme.ghostty"
 	ghosttyThemeDir       = "pfm-theme"
-	ghosttyIncludeLine    = "config-file = ?pfm-theme.ghostty\n"
+	ghosttyLegacyInclude  = "config-file = ?pfm-theme.ghostty\n" // the relative form an earlier pfm wrote
 	ghosttyMarkerLine     = "# pfm theme (managed: pfm theme off removes these two lines)\n"
 	ghosttyAppSuffix      = "/Ghostty.app/Contents/MacOS/ghostty"
-	ghosttyDefaultBinary  = "/Applications/Ghostty.app/Contents/MacOS/ghostty"
+	ghosttySystemApps     = "/Applications"
 	ghosttyDeferred       = "applies when Ghostty starts"
 	ghosttyPaletteEntries = 16
 )
@@ -87,31 +88,41 @@ func ghosttyRender(palette Palette, mode Mode, generation int, dir string) map[s
 	}
 }
 
-// ghosttyInclude appends the include pair to the user's config; added is the
-// exact text appended ("" when the pair is already there).
-func ghosttyInclude(original string) (updated, added string) {
-	if strings.Contains(original, ghosttyIncludeLine) ||
-		strings.HasSuffix(original, strings.TrimSuffix(ghosttyIncludeLine, "\n")) {
+// ghosttyIncludeLine names the include file pfm writes in dir by its absolute
+// path, so a config kept as a symlink into another directory still finds it.
+func ghosttyIncludeLine(dir string) string {
+	return "config-file = ?" + filepath.Join(dir, ghosttyIncludeFile) + "\n"
+}
+
+// ghosttyInclude appends the include pair for dir to the user's config; added
+// is the exact text appended ("" when the pair is already there).
+func ghosttyInclude(original, dir string) (updated, added string) {
+	line := ghosttyIncludeLine(dir)
+	if strings.Contains(original, line) || strings.HasSuffix(original, strings.TrimSuffix(line, "\n")) {
 		return original, ""
 	}
 	prefix := ""
 	if original != "" && !strings.HasSuffix(original, "\n") {
 		prefix = "\n"
 	}
-	added = prefix + ghosttyMarkerLine + ghosttyIncludeLine
+	added = prefix + ghosttyMarkerLine + line
 	return original + added, added
 }
 
 // ghosttyExclude undoes ghosttyInclude: the exact appended text when it is
-// still there, else the two lines wherever the user moved them.
-func ghosttyExclude(current, added string) string {
+// still there, else the two lines wherever the user moved them; either way the
+// legacy relative include line an earlier pfm wrote goes too.
+func ghosttyExclude(current, added, dir string) string {
 	if added == "" {
 		return current
 	}
 	if strings.Contains(current, added) {
-		return strings.Replace(current, added, "", 1)
+		current = strings.Replace(current, added, "", 1)
+	} else {
+		current = strings.Replace(strings.Replace(current, ghosttyMarkerLine, "", 1), ghosttyIncludeLine(dir), "", 1)
 	}
-	return strings.Replace(strings.Replace(current, ghosttyMarkerLine, "", 1), ghosttyIncludeLine, "", 1)
+	return strings.ReplaceAll(strings.ReplaceAll(current, ghosttyMarkerLine+ghosttyLegacyInclude, ""),
+		ghosttyLegacyInclude, "")
 }
 
 // ghosttyProcesses picks the Ghostty main processes out of `ps -axo pid=,args=`:
@@ -135,15 +146,20 @@ func ghosttyProcesses(psOutput string) []ghosttyProcess {
 	return found
 }
 
-// ghosttyConfig is the first existing Ghostty config file, or "" with every path looked for.
-func (s *session) ghosttyConfig() (string, []string) {
+// ghosttyConfig is the first existing Ghostty config file, or "" with every path looked for;
+// a candidate that cannot be looked at is an error, never a missing config.
+func (s *session) ghosttyConfig() (string, []string, error) {
 	candidates := ghosttyCandidates(s.env.Home)
 	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
-			return candidate, candidates
+		info, err := os.Stat(candidate)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", candidates, fmt.Errorf("themesync: stat %s: %w", candidate, err)
+		}
+		if err == nil && info.Mode().IsRegular() {
+			return candidate, candidates, nil
 		}
 	}
-	return "", candidates
+	return "", candidates, nil
 }
 
 func (s *session) ghosttyAbsent(candidates []string) SurfaceResult {
@@ -183,21 +199,55 @@ func (s *session) ghosttyExecuting(ctx context.Context, process ghosttyProcess) 
 	return true
 }
 
-// ghosttyValidate runs `ghostty +validate-config` over the default config files.
-func (s *session) ghosttyValidate(ctx context.Context, processes []ghosttyProcess) error {
-	binary := ghosttyDefaultBinary
+// ghosttyBinaryPath is the Ghostty binary to validate with: the running
+// process's, else the app in the system or the user's Applications, else
+// `ghostty` on PATH; "" with every place tried when there is none.
+func (s *session) ghosttyBinaryPath(processes []ghosttyProcess) (string, []string, error) {
 	if len(processes) > 0 {
-		binary = processes[0].Binary
+		return processes[0].Binary, nil, nil
+	}
+	system := s.env.systemApps
+	if system == "" {
+		system = ghosttySystemApps
+	}
+	var tried []string
+	for _, apps := range []string{system, filepath.Join(s.env.Home, "Applications")} {
+		candidate := apps + ghosttyAppSuffix
+		info, err := os.Stat(candidate)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", tried, fmt.Errorf("themesync: stat %s: %w", candidate, err)
+		}
+		if err == nil && info.Mode().IsRegular() {
+			return candidate, tried, nil
+		}
+		tried = append(tried, candidate)
+	}
+	if path, err := s.env.Runner.LookPath("ghostty"); err == nil {
+		return path, tried, nil
+	}
+	return "", append(tried, "ghostty on PATH"), nil
+}
+
+// ghosttyValidate runs `ghostty +validate-config` over the default config
+// files; with no Ghostty binary anywhere it returns the note saying so, and
+// the row stands on the file read-back alone.
+func (s *session) ghosttyValidate(ctx context.Context, processes []ghosttyProcess) (string, error) {
+	binary, tried, err := s.ghosttyBinaryPath(processes)
+	if err != nil {
+		return "", err
+	}
+	if binary == "" {
+		return "not validated: Ghostty binary not found (tried " + strings.Join(tried, ", ") + ")", nil
 	}
 	result, err := s.env.Runner.Run(ctx, []string{binary, "+validate-config"}, deps.RunOptions{})
 	if err != nil {
-		return fmt.Errorf("themesync: ghostty +validate-config: %w", err)
+		return "", fmt.Errorf("themesync: ghostty +validate-config: %w", err)
 	}
 	if result.ExitCode != 0 {
-		return fmt.Errorf("themesync: ghostty +validate-config exited %d: %s", result.ExitCode,
+		return "", fmt.Errorf("themesync: ghostty +validate-config exited %d: %s", result.ExitCode,
 			strings.TrimSpace(string(result.Stdout)+" "+string(result.Stderr)))
 	}
-	return nil
+	return "", nil
 }
 
 // ghosttySignal sends SIGUSR2 (reload) to each process that, re-read right
@@ -224,7 +274,10 @@ func (s *session) ghosttySignal(ctx context.Context, processes []ghosttyProcess)
 }
 
 func (s *session) applyGhostty(ctx context.Context) SurfaceResult {
-	config, candidates := s.ghosttyConfig()
+	config, candidates, err := s.ghosttyConfig()
+	if err != nil {
+		return s.failed(surfaceGhostty, "", err)
+	}
 	if config == "" {
 		return s.ghosttyAbsent(candidates)
 	}
@@ -235,7 +288,7 @@ func (s *session) applyGhostty(ctx context.Context) SurfaceResult {
 	}
 	changed := false
 	files := ghosttyRender(s.palette, s.state.Mode, s.state.Generation, dir)
-	if updated, added := ghosttyInclude(string(original)); added != "" {
+	if updated, added := ghosttyInclude(string(original), dir); added != "" {
 		backup, err := s.backupBeside(config, original)
 		if err != nil {
 			return s.failed(surfaceGhostty, config, err)
@@ -256,44 +309,63 @@ func (s *session) applyGhostty(ctx context.Context) SurfaceResult {
 		}
 		changed = true
 	}
-	if stale := s.ghosttyStale(dir, files); stale > 0 {
+	stale, err := s.ghosttyStale(dir, files)
+	if err != nil {
+		return s.failed(surfaceGhostty, config, err)
+	}
+	if stale > 0 {
 		changed = true
 	}
 	processes, err := s.ghosttyRunning(ctx)
+	note := ""
 	if err == nil {
-		err = s.ghosttyValidate(ctx, processes)
+		note, err = s.ghosttyValidate(ctx, processes)
 	}
 	if err != nil {
 		s.setDue(surfaceGhostty, true)
 		return s.failed(surfaceGhostty, config, err)
 	}
 	if !s.reloadDue(surfaceGhostty, changed) {
-		return s.result(surfaceGhostty, VerdictApplied, config, "")
+		return s.result(surfaceGhostty, VerdictApplied, config, note)
 	}
 	if len(processes) == 0 {
-		return s.settle(surfaceGhostty, config, ghosttyDeferred, nil)
+		deferred := ghosttyDeferred
+		if note != "" {
+			deferred += "; " + note
+		}
+		return s.settle(surfaceGhostty, config, deferred, nil)
 	}
 	return s.settle(surfaceGhostty, config, "", s.ghosttySignal(ctx, processes))
 }
 
 // ghosttyStale deletes pfm-theme/ files of a palette no longer in force and reports how many.
-func (s *session) ghosttyStale(dir string, wanted map[string]string) int {
-	entries, err := os.ReadDir(filepath.Join(dir, ghosttyThemeDir))
+func (s *session) ghosttyStale(dir string, wanted map[string]string) (int, error) {
+	themes := filepath.Join(dir, ghosttyThemeDir)
+	entries, err := os.ReadDir(themes)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("themesync: list %s: %w", themes, err)
 	}
 	removed := 0
+	var failures []error
 	for _, entry := range entries {
-		path := filepath.Join(dir, ghosttyThemeDir, entry.Name())
-		if _, keep := wanted[path]; !keep && os.Remove(path) == nil {
-			removed++
+		path := filepath.Join(themes, entry.Name())
+		if _, keep := wanted[path]; keep {
+			continue
 		}
+		if err := os.Remove(path); err != nil {
+			failures = append(failures, fmt.Errorf("themesync: remove stale %s: %w", path, err))
+			continue
+		}
+		removed++
 	}
-	return removed
+	return removed, errors.Join(failures...)
 }
 
 func (s *session) readGhostty(ctx context.Context) SurfaceResult {
-	config, candidates := s.ghosttyConfig()
+	config, candidates, err := s.ghosttyConfig()
+	if err != nil {
+		return s.failed(surfaceGhostty, "", err)
+	}
 	if config == "" && s.state.Ghostty == nil {
 		return s.ghosttyAbsent(candidates)
 	}
@@ -305,7 +377,7 @@ func (s *session) readGhostty(ctx context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceGhostty, config, fmt.Errorf("themesync: read %s: %w", config, err))
 	}
-	if !strings.Contains(string(user), strings.TrimSuffix(ghosttyIncludeLine, "\n")) {
+	if !strings.Contains(string(user), strings.TrimSuffix(ghosttyIncludeLine(dir), "\n")) {
 		return s.in(surfaceGhostty, VerdictDrift, config, "include line missing from "+config, 0)
 	}
 	for path, want := range ghosttyRender(s.palette, s.state.Mode, s.state.Generation, dir) {
@@ -315,19 +387,20 @@ func (s *session) readGhostty(ctx context.Context) SurfaceResult {
 		}
 	}
 	processes, err := s.ghosttyRunning(ctx)
+	note := ""
 	if err == nil {
-		err = s.ghosttyValidate(ctx, processes)
+		note, err = s.ghosttyValidate(ctx, processes)
 	}
 	if err != nil {
 		return s.failed(surfaceGhostty, config, err)
 	}
-	return s.in(surfaceGhostty, VerdictInSync, config, "", s.state.Generation)
+	return s.in(surfaceGhostty, VerdictInSync, config, note, s.state.Generation)
 }
 
 func (s *session) restoreGhostty(ctx context.Context) SurfaceResult {
 	snapshot := s.state.Ghostty
-	config, _ := s.ghosttyConfig()
 	if snapshot == nil {
+		config, _, _ := s.ghosttyConfig() // the row's path only: nothing was applied either way
 		return s.absent(surfaceGhostty, config, "nothing applied")
 	}
 	dir := filepath.Dir(snapshot.Config)
@@ -335,7 +408,7 @@ func (s *session) restoreGhostty(ctx context.Context) SurfaceResult {
 	if err != nil {
 		return s.failed(surfaceGhostty, snapshot.Config, fmt.Errorf("themesync: read %s: %w", snapshot.Config, err))
 	}
-	if err := s.replaceFile(snapshot.Config, []byte(ghosttyExclude(string(current), snapshot.Added))); err != nil {
+	if err := s.replaceFile(snapshot.Config, []byte(ghosttyExclude(string(current), snapshot.Added, dir))); err != nil {
 		return s.failed(surfaceGhostty, snapshot.Config, err)
 	}
 	for _, owned := range []string{filepath.Join(dir, ghosttyIncludeFile), filepath.Join(dir, ghosttyThemeDir)} {

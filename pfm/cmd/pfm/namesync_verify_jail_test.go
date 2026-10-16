@@ -162,7 +162,7 @@ func readProbe(t *testing.T, socketPath string, arguments ...string) string {
 
 // name-sync --apply carries the theme to every live chat server through the
 // theme's own door: nothing is said or touched while `pfm theme` has never
-// been set, and with the sync on each live socket is named, applied or refused.
+// been set, and with the sync on each live server is themed and counted.
 func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -209,23 +209,18 @@ func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(stateDir, themesync.StateFileName),
-		[]byte(`{"enabled":true}`),
+		[]byte(`{"enabled":true,"palette":"tokyo-night","mode":"dark","appearance":"dark","generation":1}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
 	}
 	var on, onErr bytes.Buffer
-	code := runNameSync([]string{"--apply"}, &on, &onErr, runtime)
-	applied := strings.Contains(on.String(), "tmux theme applied: 1")
-	refused := strings.Contains(onErr.String(), "pfm name-sync: tmux theme "+socket+":")
-	if applied == refused {
-		t.Fatalf(
-			"with the sync on, name-sync must report the server applied or refused:\nstdout=%q\nstderr=%q",
-			on.String(),
-			onErr.String(),
-		)
+	if code := runNameSync([]string{"--apply"}, &on, &onErr, runtime); code != 0 ||
+		!strings.Contains(on.String(), "tmux theme applied: 1") {
+		t.Fatalf("with the sync on, name-sync must theme the live server: code=%d\nstdout=%q\nstderr=%q",
+			code, on.String(), onErr.String())
 	}
-	if refused != (code == 1) {
-		t.Fatalf("exit %d with refused=%v: a refused theme must fail the pass, an applied one must not", code, refused)
+	if got := readProbe(t, filepath.Join(tmuxDir, socket), "show", "-gv", "@pfm-theme"); got != "tokyo-night" {
+		t.Fatalf("server @pfm-theme = %q, want tokyo-night", got)
 	}
 }

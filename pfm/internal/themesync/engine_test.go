@@ -195,7 +195,10 @@ func (h *harness) rearm() {
 	}
 	runner.Script([]string{"launchctl", "print"}, printResult, nil)
 	h.runner = runner
-	h.env = Env{Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux}
+	h.env = Env{
+		Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux,
+		systemApps: h.path("SystemApplications"),
+	}
 }
 
 func (h *harness) set(palette string, mode Mode) Report {
@@ -290,7 +293,8 @@ func TestSetReadBackOffRoundTripIsByteIdentical(t *testing.T) {
 		t.Fatalf("herdr block missing:\n%s", h.read(".config/herdr/config.toml"))
 	}
 	ghosttyCfg := h.read("Library/Application Support/com.mitchellh.ghostty/config.ghostty")
-	if !strings.HasSuffix(ghosttyCfg, "config-file = ?pfm-theme.ghostty\n") ||
+	include := h.path("Library/Application Support/com.mitchellh.ghostty/pfm-theme.ghostty")
+	if !strings.HasSuffix(ghosttyCfg, "config-file = ?"+include+"\n") ||
 		!strings.HasPrefix(ghosttyCfg, fixtureGhostty) {
 		t.Fatalf("ghostty config:\n%q", ghosttyCfg)
 	}
@@ -392,6 +396,18 @@ func TestSetReadBackOffRoundTripIsByteIdentical(t *testing.T) {
 	backups, _ := filepath.Glob(h.path("Library/Application Support/Code/User/settings.json.pfm-theme-") + "*")
 	if len(backups) != 1 || h.read("Library/Application Support/Code/User/settings.json") != fixtureVscode {
 		t.Fatalf("VS Code settings or backup changed: %v", backups)
+	}
+
+	// A second off, with a chat server born after the first, changes no
+	// server: only a server carrying the theme has styles to restore.
+	h.tmux.addServer("cc-c")
+	if _, err := Off(context.Background(), h.env); err != nil {
+		t.Fatal(err)
+	}
+	for _, socket := range []string{"cc-a", "cc-b", "cc-c"} {
+		if fmt.Sprint(h.tmux.servers[socket]) != fmt.Sprint(original) {
+			t.Errorf("%s after a second Off = %v, want the original %v", socket, h.tmux.servers[socket], original)
+		}
 	}
 }
 

@@ -12,7 +12,7 @@ const (
 	HookEventUserPromptSubmit = "UserPromptSubmit"
 	HookExploreMatcher        = "Agent|Task"
 	hookTracerIntake          = "tracer-intake"
-	HookRRDirMatcher          = "rr|rr-pro|rr-pro-max"
+	HookRRDirMatcher          = "rr|rr-pro|rr-pro-max|gpt-rr|gpt-rr-pro|gpt-rr-pro-max"
 	// HookHerdrNotificationMatcher selects the Notification types the Herdr
 	// reporter maps (blocked on a permission or elicitation dialog, idle on
 	// idle_prompt); every other notification spawns nothing.

@@ -31,7 +31,7 @@ A change lands in this file first, then in the templates, then in every surface 
 | `rr-pro-max` | variant of `rr` | As `rr-pro`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [rr-pro-max.md](rr-pro-max.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | mechanical (`sonnet`), effort `low` | [sub-rr.md](sub-rr.md) |
 | `clone-distiller` | agent | The general repository digger, the code lane of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [clone-distiller.md](../clone-distiller/clone-distiller.md) |
-| `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max` | `pfm internal rr-dir` | this file |
+| `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max\|gpt-rr\|gpt-rr-pro\|gpt-rr-pro-max` | `pfm internal rr-dir` | this file |
 
 The leads differ in their caps and in the repository lane, which sends a sub-area whose answer lives in a repository's code to `clone-distiller` ([clone-distiller.md](../clone-distiller/clone-distiller.md), § Who spawns it); every other line of the body is `rr.md`'s:
 

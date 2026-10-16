@@ -16,11 +16,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/format-md.sh"
+            "command": "export CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel 2>/dev/null || printf %s \"$CLAUDE_PROJECT_DIR\")\"; \"$CLAUDE_PROJECT_DIR/.claude/scripts/format-md.sh\""
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh mark"
+            "command": "export CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel 2>/dev/null || printf %s \"$CLAUDE_PROJECT_DIR\")\"; \"$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh\" mark"
           }
         ]
       }
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh sync",
+            "command": "export CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel 2>/dev/null || printf %s \"$CLAUDE_PROJECT_DIR\")\"; \"$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh\" sync",
             "timeout": 60
           }
         ]

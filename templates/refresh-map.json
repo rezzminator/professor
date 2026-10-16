@@ -61,6 +61,15 @@
     "global/agents/gpt-reviewer.md": {
       "curated": true
     },
+    "global/agents/gpt-rr-pro-max.md": {
+      "curated": true
+    },
+    "global/agents/gpt-rr-pro.md": {
+      "curated": true
+    },
+    "global/agents/gpt-rr.md": {
+      "curated": true
+    },
     "global/agents/luna.md": {
       "curated": true
     },
@@ -146,6 +155,9 @@
       "curated": true
     },
     "global/commands/quality/claude-md.md": {
+      "curated": true
+    },
+    "global/commands/quality/claude-selector.md": {
       "curated": true
     },
     "global/commands/quality/description.md": {

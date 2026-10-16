@@ -876,9 +876,9 @@ while IFS= read -r cmd; do
 done <<EOF
 $hooks
 EOF
-jq -e '.hooks.Stop[].hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh sync")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
+jq -e '.hooks.Stop[].hooks[] | select(.type == "command" and .command == "export CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel 2>/dev/null || printf %s \"$CLAUDE_PROJECT_DIR\")\"; \"$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh\" sync")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
   bad="$bad no codex-sync.sh sync Stop hook wired;"
-jq -e '.hooks.PostToolUse[] | select(.matcher == "Edit|Write") | .hooks[] | select(.type == "command" and .command == "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh mark")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
+jq -e '.hooks.PostToolUse[] | select(.matcher == "Edit|Write") | .hooks[] | select(.type == "command" and .command == "export CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel 2>/dev/null || printf %s \"$CLAUDE_PROJECT_DIR\")\"; \"$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh\" mark")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
   bad="$bad no codex-sync.sh mark PostToolUse Edit|Write hook wired;"
 EDIT_FILE=".claude/agents/gitter.md"
 ROOT_FILE="CLAUDE.md"

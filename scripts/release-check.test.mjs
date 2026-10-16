@@ -151,6 +151,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
       "templates/global/skills/dead/ref.md": "b\n",
       "templates/global/skills/alive/SKILL.md": "a\n",
       "templates/global/skills/alive/extra.md": "b\n",
+      "docs/BLUEPRINT.md": "public blueprint\n",
       "docs/moved.md": "one\ntwo\nthree\nfour\n",
       "pfm/cmd/pfm/install_command.go": "package main\n",
       "pfm/cmd/pfm/chat_command.go": "package main\n",
@@ -166,6 +167,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
       "templates/global/skills/dead/SKILL.md": null,
       "templates/global/skills/dead/ref.md": null,
       "templates/global/skills/alive/extra.md": null,
+      "docs/BLUEPRINT.md": null,
       "docs/moved.md": null,
       "docs/renamed.md": "one\ntwo\nthree\nfour\n",
       "pfm/cmd/pfm/install_command.go": "package main\n\nfunc x() {}\n",
@@ -179,8 +181,9 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     const r = await run(r0, "scope", "--base", base, "--head", "HEAD");
     assertClean(r, "scope");
     const out = r.out;
-    assert.match(out, new RegExp(`^RANGE ${base.slice(0, 7)}\\.\\.${head.slice(0, 7)} COMMITS 2 FILES 13 HUNKS \\d+$`, "m"));
+    assert.match(out, new RegExp(`^RANGE ${base.slice(0, 7)}\\.\\.${head.slice(0, 7)} COMMITS 2 FILES 14 HUNKS \\d+$`, "m"));
     for (const line of [
+      "FILE D 1 tier1 public docs/BLUEPRINT.md",
       "FILE R 0 tier2 - docs/renamed.md",
       "FILE M 1 tier1 pfm-update pfm/cmd/pfm/install_command.go",
       "FILE M 1 tier2 - pfm/cmd/pfm/chat_command.go",
@@ -192,6 +195,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
       "AREA templates 5 5 templates/ pfm/harness-prompts/",
       "AREA gates 1 1 .github/ .githooks/ scripts/ infra/fence/release-rehearsal.sh infra/check-self-hosted-manifest.sh",
       "TIER2 4 5",
+      "REMOVED docs/BLUEPRINT.md",
       "REMOVED docs/moved.md",
       "REMOVED templates/global/skills/alive/extra.md",
       "REMOVED-ROLE agent old-agent",
@@ -200,6 +204,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
       "REMOVED-ROLE skill dead",
     ])
       assert.ok(out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${out}`);
+    assert.match(out, /^AREA public 2 2 .*docs\/BLUEPRINT\.md/m);
     assert.match(out, /^AREA pfm-update 1 1 .*:\(glob\)pfm\/cmd\/pfm\/install\*/m);
     assert.doesNotMatch(out, /REMOVED-ROLE skill alive/, "a skill with files left is not removed");
   });

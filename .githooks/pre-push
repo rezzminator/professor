@@ -79,26 +79,55 @@ if [[ "$failed" -ne 0 ]]; then
   exit 1
 fi
 
-# pfm's architecture ratchet (size ceilings, one façade per mechanism, no new
-# twins) — the same check CI's Verify runs, so a breach stops here instead of
-# turning develop red after the push. It reads the working tree, so it runs
-# only when a pushed tip is the checked-out HEAD, and says so when it is not.
-arch="$repo_root/pfm/scripts/arch-check.sh"
+# pfm's architecture ratchet judges the exact commit being pushed to develop,
+# not working, staged or untracked content (nor necessarily the current HEAD).
 if [[ -n "${arch_tip:-}" ]]; then
-  if [[ ! -f "$arch" ]]; then
-    echo "PUSH BLOCKED: pfm architecture check missing at pfm/scripts/arch-check.sh — nothing was pushed" >&2
+  arch_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)" || {
+    echo "PUSH BLOCKED: cannot locate project for architecture scratch — nothing was pushed" >&2
     exit 1
-  elif [[ "$arch_tip" != "$(git rev-parse HEAD)" ]]; then
-    echo "pre-push: architecture check not run — pushed tip $arch_tip is not the checked-out HEAD" >&2
-  elif ! (cd "$repo_root/pfm" && bash scripts/arch-check.sh) > /tmp/pre-push-arch.$$ 2>&1; then
-    grep -E '^CHECK .* (FAIL|ERROR)' /tmp/pre-push-arch.$$ >&2 || cat /tmp/pre-push-arch.$$ >&2
-    rm -f /tmp/pre-push-arch.$$
+  }
+  arch_project="$(basename "$(dirname "$arch_common_dir")")"
+  arch_project="${arch_project#.}"
+  arch_purpose="${TMPDIR:-/tmp}/$arch_project/pre-push"
+  if [[ -z "$arch_project" ]] || ! mkdir -p "$arch_purpose"; then
+    echo "PUSH BLOCKED: cannot create project architecture scratch — nothing was pushed" >&2
+    exit 1
+  fi
+  arch_scratch="$(mktemp -d "$arch_purpose/run.XXXXXX")" || {
+    echo "PUSH BLOCKED: cannot allocate architecture snapshot — nothing was pushed" >&2
+    exit 1
+  }
+  trap 'rm -rf "$arch_scratch"' EXIT
+  arch_git_dir="$(git rev-parse --absolute-git-dir)" || {
+    echo "PUSH BLOCKED: cannot locate architecture snapshot objects — nothing was pushed" >&2
+    exit 1
+  }
+  arch_git_vars="$(git rev-parse --local-env-vars)" || {
+    echo "PUSH BLOCKED: cannot enumerate Git environment for architecture snapshot — nothing was pushed" >&2
+    exit 1
+  }
+  if ! (
+    # Keep the original object database, but never its index or working tree.
+    while IFS= read -r var; do unset "$var"; done <<< "$arch_git_vars"
+    export GIT_DIR="$arch_git_dir" GIT_WORK_TREE="$arch_scratch/tree" GIT_INDEX_FILE="$arch_scratch/index"
+    export PFM="$GIT_WORK_TREE/pfm"
+    export PFM_DEV_REPO_GIT_DIR="$GIT_DIR" PFM_DEV_REPO_WORK_TREE="$GIT_WORK_TREE"
+    if ! git read-tree "$arch_tip" || ! mkdir -p "$GIT_WORK_TREE" ||
+       ! git checkout-index --all --prefix="$GIT_WORK_TREE/"; then
+      echo "CHECK snapshot ERROR cannot export pushed tip $arch_tip" >&2
+      exit 1
+    fi
+    if [[ ! -f "$PFM/scripts/arch-check.sh" ]]; then
+      echo "CHECK snapshot ERROR pfm architecture check missing at pfm/scripts/arch-check.sh" >&2
+      exit 1
+    fi
+    cd "$PFM" && bash scripts/arch-check.sh
+  ) > "$arch_scratch/check.log" 2>&1; then
+    grep -E '^CHECK .* (FAIL|ERROR)' "$arch_scratch/check.log" >&2 || cat "$arch_scratch/check.log" >&2
     echo "PUSH BLOCKED: pfm architecture check failed — nothing was pushed (make -C pfm arch)" >&2
     exit 1
-  else
-    rm -f /tmp/pre-push-arch.$$
-    echo "pre-push: pfm architecture check passed" >&2
   fi
+  echo "pre-push: pfm architecture check passed" >&2
 fi
 
 exit 0

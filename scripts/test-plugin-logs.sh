@@ -43,14 +43,17 @@ row tool-visibility-controller info started 2026-10-14T15:19:31.123Z started > "
 run_sut report --dir "$T/logs"
 expect 'report groups event and where with exact count, first/last and last message' '[ "$RC" = 0 ] && grep -Fxq "store-failed · internal/hookentry/callmeter.go#store · 2 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:21:31.123Z · still locked" "$T/out"'
 expect 'report fixed section ordering and exact info count' '[ "$(grep -E "^(ERRORS|WARNINGS|INFO)$" "$T/out" | paste -sd, -)" = ERRORS,WARNINGS,INFO ] && grep -Fxq "callmeter 1" "$T/out"'
-expect 'wrote nothing lists roster plugins with zero actual rows' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
-expect 'header states real span, no rotate and folder' 'grep -Fq "$T/logs" "$T/out" && grep -Fq "2026-10-14T15:19:31.123Z .. 2026-10-14T15:22:31.123Z" "$T/out" && grep -Fq "last rotate: none" "$T/out"'
+expect 'no valid rows lists roster plugins with zero actual rows' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'header states real span, no rotate and folder' 'grep -Fq "$T/logs" "$T/out" && grep -Fq "2026-10-14T15:19:31.123Z .. 2026-10-14T15:22:31.123Z" "$T/out" && grep -Fq "last rotate: none" "$T/out" && grep -Fq "contract-skipped: 0" "$T/out"'
 printf '\n{bad json}\n' > "$T/logs/buddy/warnings.jsonl"
+for filter in '.level="WARN"' '.extra=true' '.ts="not-a-date"'; do
+  row buddy warning degraded 2026-10-14T15:20:31.123Z invalid | jq -c "$filter" >> "$T/logs/buddy/warnings.jsonl"
+done
 run_sut report --dir "$T/logs"
-expect 'malformed rows leave the roster plugin without valid rows' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'contract-skipped count distinguishes malformed input from silence' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out" && grep -Fq "contract-skipped: 5" "$T/out"'
 row buddy warning degraded 2026-10-14T15:20:31.123Z fallback >> "$T/logs/buddy/warnings.jsonl"
 run_sut report --dir "$T/logs"
-expect 'a valid row after malformed rows contributes to grouping and roster activity' '[ "$RC" = 0 ] && grep -Fxq "degraded · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · fallback" "$T/out" && grep -Fxq "wrote nothing: effort-live-control, engine-sync, gpt-gateway" "$T/out"'
+expect 'a valid row after malformed rows contributes to grouping and roster activity' '[ "$RC" = 0 ] && grep -Fxq "degraded · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · fallback" "$T/out" && grep -Fxq "no valid rows: effort-live-control, engine-sync, gpt-gateway" "$T/out"'
 row callmeter warning capped 2026-10-14T15:23:31.123Z capped > "$T/logs/callmeter/warnings.jsonl.1"
 run_sut report --dir "$T/logs"
 expect 'report includes capped .1 rows' 'grep -Fq "capped · internal/hookentry/callmeter.go#store · 1" "$T/out"'
@@ -114,12 +117,15 @@ git -C "$T/ignore" init -q
 if git -C "$T/ignore" check-ignore -q --no-index plugins/tmp/logs/x/errors.jsonl; then ok 'plugins/tmp logs are ignored'; else bad 'plugins/tmp logs are ignored'; fi
 mkdir -p "$T/report/callmeter"
 run_sut report --dir "$T/report" --archive 2026-10-01
-expect 'selected archive with no rows lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+expect 'missing selected archive is named rather than reported as empty' '[ "$RC" = 0 ] && grep -Fxq "no archive 2026-10-01" "$T/out" && grep -Fxq "no valid rows: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+mkdir -p "$T/report/callmeter/archive/2026-10-01"
+run_sut report --dir "$T/report" --archive 2026-10-01
+expect 'existing empty archive has a distinct visible state' '[ "$RC" = 0 ] && grep -Fxq "archive: 2026-10-01" "$T/out" && grep -Fq "span: none" "$T/out"'
 mkdir -p "$T/bin"; REAL_JQ=$(command -v jq)
 printf '%140000s\n' x > "$T/report/callmeter/errors.jsonl"
 row callmeter error store-failed 2026-10-14T15:20:31.123Z recovered >> "$T/report/callmeter/errors.jsonl"
 run_sut report --dir "$T/report"
-expect 'valid row after oversized input is grouped exactly once' '[ "$RC" = 0 ] && grep -Fxq "store-failed · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · recovered" "$T/out"'
+expect 'valid row after oversized input is grouped exactly once' '[ "$RC" = 0 ] && grep -Fxq "store-failed · internal/hookentry/callmeter.go#store · 1 · 2026-10-14T15:20:31.123Z · 2026-10-14T15:20:31.123Z · recovered" "$T/out" && grep -Fq "contract-skipped: 1" "$T/out"'
 printf '#!/usr/bin/env bash\nif [ "${1:-}" = -cen ]; then echo "injected jq operational failure" >&2; exit 3; fi\nexec %q "$@"\n' "$REAL_JQ" > "$T/bin/jq"; chmod 700 "$T/bin/jq"
 row callmeter error store-failed 2026-10-14T15:20:31.123Z broken > "$T/report/callmeter/errors.jsonl"
 PATH="$T/bin:$PATH" run_sut report --dir "$T/report"
@@ -143,11 +149,40 @@ mkdir -p "$T/empty-rotation"
 run_sut rotate --dir "$T/empty-rotation" --today 2026-10-16
 expect 'empty rotation succeeds' '[ "$RC" = 0 ] && grep -Fxq "rotated: $T/empty-rotation · 2026-10-16" "$T/out"'
 run_sut report --dir "$T/empty-rotation"
-expect 'empty live period lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
+expect 'empty live period lists the full roster' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, callmeter, effort-live-control, engine-sync, gpt-gateway, tool-visibility-controller" "$T/out"'
 for plugin in buddy callmeter effort-live-control engine-sync gpt-gateway tool-visibility-controller; do
   mkdir -p "$T/empty-rotation/$plugin"
   row "$plugin" info started 2026-10-14T15:20:31.123Z started > "$T/empty-rotation/$plugin/info.jsonl"
 done
 run_sut report --dir "$T/empty-rotation"
-expect 'a period where every roster plugin wrote prints none' '[ "$RC" = 0 ] && grep -Fxq "wrote nothing: none" "$T/out"'
+expect 'a period where every roster plugin wrote prints none' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: none" "$T/out"'
+# A writer's cap rename can happen after find or immediately before our mv.
+mkdir -p "$T/race-bin"
+REAL_MV=$(command -v mv); REAL_FIND=$(command -v find)
+cat > "$T/race-bin/mv" <<'EOF'
+#!/usr/bin/env bash
+if [ "$RACE_PHASE" = move ] && [ "${2:-}" = "$RACE_SOURCE" ]; then
+  "$REAL_MV" -- "$RACE_SOURCE" "$RACE_SOURCE.1" || exit $?
+fi
+exec "$REAL_MV" "$@"
+EOF
+cat > "$T/race-bin/find" <<'EOF'
+#!/usr/bin/env bash
+"$REAL_FIND" "$@" || exit $?
+if [ "$RACE_PHASE" = list ] && [ "${1:-}" = "${RACE_SOURCE%/*}" ]; then
+  "$REAL_MV" -- "$RACE_SOURCE" "$RACE_SOURCE.1" || exit $?
+fi
+EOF
+chmod +x "$T/race-bin/mv" "$T/race-bin/find"
+for phase in move list; do
+  race="$T/race-$phase"; mkdir -p "$race/callmeter"
+  row callmeter error store-failed 2026-10-14T15:20:31.123Z raced > "$race/callmeter/errors.jsonl"
+  row callmeter warning degraded 2026-10-14T15:20:31.123Z preserved > "$race/callmeter/warnings.jsonl"
+  PATH="$T/race-bin:$PATH" RACE_PHASE="$phase" RACE_SOURCE="$race/callmeter/errors.jsonl" REAL_MV="$REAL_MV" REAL_FIND="$REAL_FIND" run_sut rotate --dir "$race" --today 2026-10-16
+  expect "rotate names writer rename during $phase and continues other files" '[ "$RC" = 0 ] && grep -Fxq "skipped vanished level file: $race/callmeter/errors.jsonl" "$T/out" && grep -Fq preserved "$race/callmeter/archive/2026-10-16/warnings.jsonl" && grep -Fq raced "$race/callmeter/errors.jsonl.1"'
+done
+# A report-stage failure happens after read_rows has opened a real level file.
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = -rs ]; then echo "injected report jq failure" >&2; exit 3; fi\nexec %q "$@"\n' "$REAL_JQ" > "$T/bin/jq"
+PATH="$T/bin:$PATH" run_sut report --dir "$T/report"
+expect 'report-stage errors remain visible on caller stderr' '[ "$RC" = 3 ] && grep -Fxq "injected report jq failure" "$T/err"'
 shtest_end

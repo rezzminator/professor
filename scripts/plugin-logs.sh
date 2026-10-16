@@ -66,6 +66,13 @@ LC_ALL=C sort -u "$scratch/roster" > "$scratch/plugins"
 check_dir() {
   [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ] || unreadable "$1" 'directory is not readable/searchable'
 }
+vanished_level() {
+  if [ ! -e "$1" ] && [ ! -L "$1" ]; then
+    printf 'skipped vanished level file: %s\n' "$1"
+    return 0
+  fi
+  return 1
+}
 list_levels() { # one inventory, including same-day archive collision suffixes
   local folder=$1 archived=$2 name
   : > "$scratch/levels"
@@ -77,7 +84,10 @@ list_levels() { # one inventory, including same-day archive collision suffixes
     name=${path##*/}
     if [[ "$name" =~ ^(errors|warnings|info)\.jsonl(\.1)?$ ]] ||
        { [ "$archived" = 1 ] && [[ "$name" =~ ^(errors|warnings|info)-[0-9]+\.jsonl(\.1)?$ ]]; }; then
-      [ -f "$path" ] && [ -r "$path" ] || unreadable "$path" 'level file is unreadable'
+      if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+        if [ "$mode" = rotate ] && vanished_level "$path"; then continue; fi
+        unreadable "$path" 'level file is unreadable'
+      fi
       printf '%s\0' "$path" >> "$scratch/levels"
     fi
   done < "$scratch/sorted-list"
@@ -113,7 +123,10 @@ if [ "$mode" = rotate ]; then
           target="$dest/${name%%.jsonl*}-$n.jsonl${name#*.jsonl}"
           n=$((n + 1))
         done
-        mv -- "$path" "$target" 2> "$scratch/err" || unreadable "$path" "$(cat "$scratch/err")"
+        if ! mv -- "$path" "$target" 2> "$scratch/err"; then
+          if vanished_level "$path"; then continue; fi
+          unreadable "$path" "$(cat "$scratch/err")"
+        fi
       done < "$scratch/levels"
     fi
     while IFS= read -r date; do
@@ -138,13 +151,15 @@ if [ "$mode" = rotate ]; then
   exit 0
 fi
 : > "$scratch/rows"; : > "$scratch/rotates"
+skipped=0; archive_found=0
 # Normalize valid rows per line; malformed rows are skipped.
 read_rows() { # path plugin level -> normalized valid rows
   local file=$1 plugin=$2 level=$3 line part normalized status
-  exec 9< "$file" 2> "$scratch/err" || unreadable "$file" "$(cat "$scratch/err")"
+  { exec 9< "$file"; } 2> "$scratch/err" || unreadable "$file" "$(cat "$scratch/err")"
   while IFS= LC_ALL=C read -r -n 4096 line <&9 || [ -n "$line" ]; do
     if [ "${#line}" -ge 4096 ]; then
       while IFS= LC_ALL=C read -r -n 4096 part <&9 && [ "${#part}" -ge 4096 ]; do :; done
+      skipped=$((skipped + 1))
       continue
     fi
     status=0
@@ -168,7 +183,8 @@ read_rows() { # path plugin level -> normalized valid rows
     ' 2> "$scratch/err") || status=$?
     if [ "$status" = 0 ]; then
       printf '%s\n' "$normalized" >> "$scratch/rows"
-    elif [ "$status" = 4 ]; then : # malformed or noncontract row
+    elif [ "$status" = 4 ]; then
+      skipped=$((skipped + 1)) # malformed or noncontract row
     else
       unreadable "$file" "jq normalization failed ($status): $(cat "$scratch/err")"
     fi
@@ -182,7 +198,10 @@ while IFS= read -r plugin; do
   archive_dates "$pdir/archive"
   cat "$scratch/dates" >> "$scratch/rotates"
   folder=$pdir; archived=0
-  if [ -n "$archive" ]; then folder="$pdir/archive/$archive"; archived=1; fi
+  if [ -n "$archive" ]; then
+    folder="$pdir/archive/$archive"; archived=1
+    if [ -e "$folder" ]; then check_dir "$folder"; archive_found=1; fi
+  fi
   list_levels "$folder" "$archived"
   while IFS= read -r -d '' path; do
     name=${path##*/}
@@ -192,7 +211,11 @@ while IFS= read -r plugin; do
 done < "$scratch/plugins"
 span=$(jq -rs 'if length==0 then "none" else sort_by(._time)|.[0].ts+" .. "+.[-1].ts end' "$scratch/rows")
 last=$(LC_ALL=C sort "$scratch/rotates" | tail -1)
-printf 'plugin logs: %s · span: %s · last rotate: %s\n' "$dir" "$span" "${last:-none}"
+printf 'plugin logs: %s · span: %s · last rotate: %s · contract-skipped: %s\n' "$dir" "$span" "${last:-none}" "$skipped"
+if [ -n "$archive" ]; then
+  if [ "$archive_found" = 1 ]; then printf 'archive: %s\n' "$archive";
+  else printf 'no archive %s\n' "$archive"; fi
+fi
 for level in error warning; do
   if [ "$level" = error ]; then echo ERRORS; else echo WARNINGS; fi
   jq -rs --arg l "$level" '
@@ -206,5 +229,5 @@ echo INFO
 jq -rs 'map(select(.level=="info"))|group_by(.plugin)[]|"\(.[0].plugin) \(length)"' "$scratch/rows"
 jq -rs --rawfile plugins "$scratch/plugins" '
   ($plugins | split("\n") | map(select(length > 0))) - (map(.plugin) | unique) |
-  "wrote nothing: " + (if length == 0 then "none" else join(", ") end)
+  "no valid rows: " + (if length == 0 then "none" else join(", ") end)
 ' "$scratch/rows"

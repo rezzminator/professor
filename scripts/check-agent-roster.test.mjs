@@ -168,6 +168,15 @@ test("a check that crashes is a named ERROR, not a roster mismatch", (t) => {
   assert.match(result.out, /compiler:.*(not a directory|ENOTDIR)/);
 });
 
+test("an inventory lookup failure is a named ERROR, not a rejected source", (t) => {
+  const f = fixture(t);
+  symlinkSync("vanished-source.md", join(f.root, ".claude/agents/dangling.md"));
+  const result = check(f);
+  assert.equal(result.status, 2, result.out);
+  assert.match(result.out, /agent-roster: ERROR — python3 .*agent-source-inventory: ERROR/);
+  assert.match(result.out, /dangling\.md/);
+});
+
 test("an inventory that crashes with a traceback is a named ERROR, not a rejected source", (t) => {
   const f = fixture(t);
   f.put("scripts/agent-source-inventory.py", "raise RuntimeError('invented inventory crash')\n");

@@ -39,7 +39,7 @@ Spawn one `flights-foreman` with the path of `requirements.md`, the flight direc
 
 ## S5 — The one question
 
-A `BLOCKED` return carries a question: one more round holding that question alone, the ruling appended to `requirements.md`, and the same foreman continued by `SendMessage`. At most one such round per flight; a second means S2 was skipped.
+A `BLOCKED` return carries a question: one more round holding that question alone, or under god speed the main chat's own ruling, never a question to the user; the ruling appended to `requirements.md`, and the same foreman continued by `SendMessage`. At most one such round per flight; a second means S2 was skipped.
 
 ## What it no longer does
 

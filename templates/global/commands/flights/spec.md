@@ -47,7 +47,7 @@ Spawn one `Agent(subagent_type: "flights-foreman")` whose prompt names `requirem
 
 ## S5 — The one question
 
-A `BLOCKED` return carries a question. Put it to the user in one round holding that question alone, append the ruling to `## Rulings`, and send it to the same foreman by `SendMessage`, closing with "continue, then return once more in the return shape". At most one such round per flight; a second means S2 was skipped.
+A `BLOCKED` return carries a question. Put it to the user in one round holding that question alone; under god speed, rule it yourself, never sending it to the user. Append the ruling to `## Rulings` and send it to the same foreman by `SendMessage`, closing with "continue, then return once more in the return shape". At most one such round per flight; a second means S2 was skipped.
 
 ## Present
 

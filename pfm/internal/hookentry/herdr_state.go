@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -70,6 +71,10 @@ type herdrDeps struct {
 	// the hook process.
 	procInfo func(pid int) (parent int, command string, err error)
 	getpid   func() int
+	// stateDir is the `pfm theme` state directory: while its sync is on, the
+	// reporter marks the chat's own tmux server with the agent state the
+	// theme's colours read. Empty means no theme door.
+	stateDir string
 }
 
 func realHerdrDeps() herdrDeps {
@@ -81,6 +86,7 @@ func realHerdrDeps() herdrDeps {
 	home, err := paths.HomeFrom(env)
 	if err == nil {
 		deps.lockDir = paths.HerdrLockDir(home)
+		deps.stateDir = themesync.DefaultStateDir(home)
 	}
 	deps.logError = func(session string, at time.Time, message string) error {
 		if err != nil {
@@ -390,7 +396,11 @@ func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) er
 	if reporter.options.socket == "" {
 		return reporter.apply(ctx, payload, reporter.processTarget())
 	}
-	if !reporter.hostHasHerdr() {
+	// Only a pfm chat server carries the theme; an engine in the user's own
+	// tmux leaves that server unmarked.
+	themeOn := reporter.deps.stateDir != "" && gather.IsChatSocketName(filepath.Base(reporter.options.socket)) &&
+		themesync.SyncOn(reporter.deps.stateDir)
+	if !themeOn && !reporter.hostHasHerdr() {
 		return nil
 	}
 	session, panePID, err := reporter.tmuxSession(ctx)
@@ -402,6 +412,12 @@ func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) er
 		if ok, err := reporter.paneEngineFired(panePID); err != nil || !ok {
 			return err
 		}
+	}
+	if themeOn {
+		reporter.themeState(ctx, payload)
+	}
+	if !reporter.hostHasHerdr() {
+		return nil
 	}
 	if reporter.options.event == herdr.EventTitle {
 		return reporter.title(ctx, session, payload)

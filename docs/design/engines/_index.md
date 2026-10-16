@@ -10,3 +10,4 @@
 | Claude config dir | [claude-config-dir.md](claude-config-dir.md) | The shared store in `~/.claude`, identity-only accounts, all shared-entry links, settings layers, MCP config, install build and doctor checks |
 | Claude project tier | [claude-project.md](claude-project.md) | Project `.claude/settings.json` here and in the template, `settings-global.json`, the `outputStyle` gate, SETUP.md's manual steps |
 | Host checks | [host-checks.md](host-checks.md) | Read-only detectors, install refusal, doctor rows and operator fixes |
+| Theme sync | [theme-sync.md](theme-sync.md) | `pfm theme`: the verb and its exit codes, the three palettes, `~/.local/state/pfm/theme/`, the six surfaces (claude, tmux, herdr, ghostty, vscode, follower) with render, live reload, read-back and off, the generation stamp and verdicts, the three tmux doors, the install hold |

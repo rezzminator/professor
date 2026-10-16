@@ -80,7 +80,13 @@ type Options struct {
 	CleanupPeriodDays     int
 	RequireManagedCleanup bool
 	// writeManaged is the atomic managed-drop-in writer; nil uses atomicfile.Write.
-	writeManaged     func(string, []byte) error
+	writeManaged func(string, []byte) error
+	// claudeThemeHeld reports whether `pfm theme` holds a Claude theme file
+	// (stateDir, target); nil uses themesync.HoldsClaudeTheme.
+	claudeThemeHeld func(stateDir, target string) bool
+	// themeOff runs `pfm theme off` for home before an uninstall while the
+	// theme sync is on; nil uses themesync.Off over the real runner and tmux.
+	themeOff         func(ctx context.Context, home string) error
 	Home             string
 	StateDB          string
 	ConfigDir        string

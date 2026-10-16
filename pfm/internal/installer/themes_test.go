@@ -574,3 +574,60 @@ func TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients(t *test
 		t.Fatalf("the query string reached the activity log: %s", recorder.Raw())
 	}
 }
+
+// TestThemeHeldByPfmThemeIsLeftAloneUntilReleased: while `pfm theme` holds a
+// Claude theme file (themesync.HoldsClaudeTheme), install never rewrites it —
+// even when its source changed and the ledger still matches — and names the
+// hold; once released, the next install takes the new source again.
+func TestThemeHeldByPfmThemeIsLeftAloneUntilReleased(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sourceRepo := t.TempDir()
+	recordFixtureSourceRepo(t, home, sourceRepo)
+	writeFixture(t, filepath.Join(sourceRepo, themeManifestRelative),
+		`{"bundled":{"professor-gold":{"file":"professor-gold.json","target":"~/.claude/themes/professor-gold.json"}}}`)
+	sourceFile := filepath.Join(sourceRepo, "templates", "themes", "professor-gold.json")
+	target := filepath.Join(home, ".claude", "themes", "professor-gold.json")
+	first := `{"name":"Gold","base":"dark","overrides":{"claude":"#ffd60a"}}`
+	second := `{"name":"Gold","base":"dark","overrides":{"claude":"#ffcc00"}}`
+	var asked []string
+	run := func(held bool) (Report, string) {
+		var output bytes.Buffer
+		report, err := Run(context.Background(), Options{
+			MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: sourceRepo,
+			Stdout: &output, Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{},
+			InstallThemes: true,
+			claudeThemeHeld: func(stateDir, path string) bool {
+				asked = append(asked, stateDir+" "+path)
+				return held
+			},
+		})
+		if err != nil {
+			t.Fatalf("theme install held=%v: %v\n%s", held, err, output.String())
+		}
+		return report, output.String()
+	}
+	writeFixture(t, sourceFile, first)
+	run(false)
+	writeFixture(t, sourceFile, second)
+
+	heldReport, heldOutput := run(true)
+	if got := readFixture(t, target); got != first {
+		t.Fatalf("held theme rewritten to %q, want it left at %q\n%s", got, first, heldOutput)
+	}
+	if !strings.Contains(heldOutput, "theme professor-gold held by pfm theme; pfm theme off restores it") {
+		t.Fatalf("held theme row missing:\n%s", heldOutput)
+	}
+	if heldReport.Changed != 0 {
+		t.Fatalf("held run changed=%d, want 0\n%s", heldReport.Changed, heldOutput)
+	}
+	wantAsk := filepath.Join(home, ".local", "state", "pfm", "theme") + " " + target
+	if len(asked) == 0 || asked[len(asked)-1] != wantAsk {
+		t.Fatalf("hold asked %q, want last ask %q", asked, wantAsk)
+	}
+
+	_, releasedOutput := run(false)
+	if got := readFixture(t, target); got != second {
+		t.Fatalf("released theme=%q, want the new source %q\n%s", got, second, releasedOutput)
+	}
+}

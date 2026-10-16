@@ -1,13 +1,13 @@
 {
   "name": "professor",
   "displayName": "Professor",
-  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked.",
-  "version": "0.1.0",
+  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked, and paints the terminal in the stack's one `pfm theme` palette.",
+  "version": "0.2.0",
   "publisher": "professor",
   "engines": { "vscode": "^1.90.0" },
   "extensionKind": ["workspace", "ui"],
   "main": "./extension.js",
-  "activationEvents": ["onTerminalProfile:professor.terminal", "onCommand:workbench.action.terminal.new"],
+  "activationEvents": ["onStartupFinished", "onTerminalProfile:professor.terminal", "onCommand:workbench.action.terminal.new"],
   "contributes": {
     "terminal": {
       "profiles": [
@@ -35,7 +35,8 @@
           "type": "array",
           "default": ["terminal.ansiRed", "terminal.ansiGreen", "terminal.ansiYellow", "terminal.ansiBlue", "terminal.ansiMagenta", "terminal.ansiCyan"],
           "description": "Theme colours cycled beside the icons on the same counter, so a pair repeats only every least-common-multiple of the two list lengths."
-        }
+        },
+        "professor.theme.stateDir": { "type": "string", "default": "", "scope": "machine", "description": "Directory pfm theme writes its contract (current.json) to; empty means ~/.local/state/pfm/theme. The terminal follows that palette only after pfm theme set." }
       }
     }
   }

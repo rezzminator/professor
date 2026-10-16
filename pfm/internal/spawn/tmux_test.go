@@ -12,7 +12,10 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
+	"github.com/rezzminator/professor/pfm/internal/themetmux"
 )
 
 // fakeTmuxBinary plays tmux: exits 0 and prints nothing.
@@ -292,5 +295,95 @@ func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
 				t.Fatalf("terminated launch claim remained: %v %v", live, claimErr)
 			}
 		})
+	}
+}
+
+// themeBirthCase is one birth of a chat server with the theme door observed.
+type themeBirthCase struct {
+	name       string
+	env        paths.Env
+	applyErr   error
+	wantCalled bool
+	wantWarn   string
+}
+
+// TestNewSessionThemesTheBornServerNonFatally: a born server gets the theme
+// through themesync.ApplyTmuxServer (which is itself a no-op while the sync is
+// off), on the spawner's own socket directory and the state directory its home
+// resolves; a theme failure is a warning in the activity log and the spawn
+// still succeeds, and a spawner with no home skips the door with a warning.
+func TestNewSessionThemesTheBornServerNonFatally(t *testing.T) {
+	home := t.TempDir()
+	cases := []themeBirthCase{
+		{name: "applied", env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: home}}, wantCalled: true},
+		{
+			name: "failure is a warning", env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: home}},
+			applyErr: errors.New("tmux refused the option"), wantCalled: true, wantWarn: "tmux theme at birth failed",
+		},
+		{
+			name: "no home skips with a warning", env: &paths.MapEnv{HomeErr: errors.New("no home")},
+			wantWarn: "tmux theme at birth skipped: no home",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, recorder := obs.Test(t)
+			dir := t.TempDir()
+			var gotState, gotSocket string
+			called := false
+			tmux := TmuxSpawner{Binary: fakeTmuxBinary(t), TmuxDir: dir, Env: tc.env}
+			tmux.applyTheme = func(_ context.Context, servers themesync.TmuxServers, stateDir, socket string) error {
+				called, gotState, gotSocket = true, stateDir, socket
+				if adapter, ok := servers.(themetmux.Servers); !ok || adapter.TmuxDir != dir {
+					t.Errorf("servers = %#v, want the themetmux adapter over %s", servers, dir)
+				}
+				return tc.applyErr
+			}
+			err := tmux.NewSession(ctx, SessionSpec{
+				Socket: "cc-1800000099-1-1", Session: "s", Window: "w", CWD: dir, Run: "claude", Width: 80, Height: 24,
+			})
+			if err != nil {
+				t.Fatalf("a theme outcome must never fail the spawn: %v", err)
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("applyTheme called = %v, want %v", called, tc.wantCalled)
+			}
+			if tc.wantCalled && (gotState != themesync.DefaultStateDir(home) || gotSocket != "cc-1800000099-1-1") {
+				t.Fatalf(
+					"applyTheme(stateDir=%q, socket=%q), want the home's state dir and the spawn socket",
+					gotState,
+					gotSocket,
+				)
+			}
+			warned := ""
+			for _, record := range recorder.Records() {
+				if record.Level == "WARN" {
+					warned = record.Message
+				}
+			}
+			if warned != tc.wantWarn {
+				t.Fatalf("warning = %q, want %q; log: %s", warned, tc.wantWarn, recorder.Raw())
+			}
+		})
+	}
+}
+
+// TestNewSessionLeavesTheThemeOffWithoutState: the default door (no injected
+// applier) and a home with no state file runs no tmux call naming the theme.
+func TestNewSessionLeavesTheThemeOffWithoutState(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	dir := t.TempDir()
+	home := t.TempDir()
+	tmux := TmuxSpawner{
+		Binary: fakeTmuxBinary(t), TmuxDir: dir,
+		Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: home}},
+	}
+	if err := tmux.NewSession(ctx, SessionSpec{
+		Socket: "cc-1800000098-1-1", Session: "s", Window: "w", CWD: dir, Run: "claude", Width: 80, Height: 24,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(recorder.Raw(), "@pfm-theme") {
+		t.Fatalf("a theme option was set with the sync off: %s", recorder.Raw())
 	}
 }

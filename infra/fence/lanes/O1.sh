@@ -525,4 +525,41 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "transcript help names its verbs; an unknown verb exits 2; a fixture digests; an id nothing holds exits 1 NOT FOUND"
 fi
 
+# ─── O1.18 — theme offline surface ─────────────────────────────────────────
+# No host app is present in the lane: the verb's own surface only — the palette
+# listing, the off line of a home that never ran `pfm theme set`, and its refusals.
+beat O1.18-theme
+spends none
+bad=""
+ls_out="$(pfm theme ls 2>&1)"; ls_rc=$?
+if [ "$ls_rc" -ne 0 ]; then
+  bad="$bad pfm theme ls exited $ls_rc: $(one_line "$ls_out");"
+else
+  for palette in tokyo-night solarized catppuccin; do
+    grep -qE "^[ *] $palette " <<<"$ls_out" || bad="$bad pfm theme ls does not list palette $palette: $(one_line "$ls_out");"
+  done
+  for want in dark light blocked working done idle; do
+    grep -qw -- "$want" <<<"$ls_out" || bad="$bad pfm theme ls names no $want swatch;"
+  done
+fi
+status_out="$(pfm theme status 2>&1)"; status_rc=$?
+if [ "$status_rc" -ne 0 ] || [ "$status_out" != "pfm theme: off — pfm theme set <palette> turns it on" ]; then
+  bad="$bad pfm theme status in a home that never ran set exited $status_rc, want 0 and the off line: $(one_line "$status_out");"
+fi
+bare_out="$(pfm theme 2>&1)"; bare_rc=$?
+if [ "$bare_rc" -ne 0 ] || [ "$bare_out" != "$status_out" ]; then
+  bad="$bad bare pfm theme is not pfm theme status (exit $bare_rc): $(one_line "$bare_out");"
+fi
+set_out="$(pfm theme set no-such-palette 2>&1)"; set_rc=$?
+if [ "$set_rc" -ne 2 ] || ! grep -qF 'tokyo-night' <<<"$set_out"; then
+  bad="$bad pfm theme set no-such-palette exited $set_rc, want 2 naming the known palettes: $(one_line "$set_out");"
+fi
+verb_out="$(pfm theme paint 2>&1)"; verb_rc=$?
+if [ "$verb_rc" -ne 2 ] || ! grep -qF 'unknown subcommand "paint"' <<<"$verb_out"; then
+  bad="$bad pfm theme paint exited $verb_rc, want 2 naming the unknown subcommand: $(one_line "$verb_out");"
+fi
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "theme ls lists tokyo-night, solarized and catppuccin with their swatches; status with no state prints the off line (exit 0), bare theme is status; an unknown palette and an unknown verb exit 2"
+fi
+
 lane_end

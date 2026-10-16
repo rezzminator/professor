@@ -272,8 +272,11 @@ type fakeTmux struct {
 	chatName string
 	window   string
 	clients  []string
-	calls    []string
-	failOn   string
+	// panes are the server's pane ids list-panes -a answers; nil is the
+	// chat's one pane, %0.
+	panes  []string
+	calls  []string
+	failOn string
 	// beforeWrite runs before a write of @pfm_herdr, outside the fake's lock.
 	beforeWrite func(value string)
 }
@@ -339,6 +342,11 @@ func (tmux *fakeTmux) command(args []string) (string, error) {
 		return tmux.stored + "\n", nil
 	case "list-clients":
 		return strings.Join(tmux.clients, "\n") + "\n", nil
+	case "list-panes":
+		if tmux.panes == nil {
+			return "%0\n", nil
+		}
+		return strings.Join(tmux.panes, "\n") + "\n", nil
 	}
 	return "", fmt.Errorf("fake tmux: unexpected %v", args)
 }
@@ -392,6 +400,8 @@ type herdrJail struct {
 	// stateDir is the `pfm theme` state directory the reporter reads; empty
 	// leaves the theme door out of the run.
 	stateDir string
+	// sidDir holds the reload pane mutexes the end event probes.
+	sidDir string
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -400,6 +410,7 @@ func newHerdrJail(t *testing.T) *herdrJail {
 	t.Helper()
 	return &herdrJail{
 		lockDir: filepath.Join(testjail.ShortRoot(t), "lock"),
+		sidDir:  t.TempDir(),
 		hookPID: 100,
 		procs:   map[int]fakeProc{100: {50, "pfm"}, 50: {1, "claude"}},
 	}
@@ -435,6 +446,7 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 		},
 		lockDir:  jail.lockDir,
 		stateDir: jail.stateDir,
+		sidDir:   jail.sidDir,
 		logError: func(session string, at time.Time, message string) error {
 			if jail.logFails != nil {
 				return jail.logFails

@@ -15,13 +15,15 @@ import (
 )
 
 // codexHerdrRows are the handlers Codex's hooks.json carries for the Herdr
-// reporter: Codex's SessionEnd releases the pane when the chat exits.
+// reporter: Codex's SessionEnd releases the pane when the chat exits, and its
+// Interrupt (an Esc denial or an aborted turn, which fires no Stop) reports idle.
 var codexHerdrRows = []struct{ event, verb string }{
 	{"SessionStart", "start"},
 	{"UserPromptSubmit", "working"},
 	{"PostToolUse", "working"},
 	{"PermissionRequest", "blocked"},
 	{"Stop", "idle"},
+	{"Interrupt", "idle"},
 	{"SessionEnd", "end"},
 }
 

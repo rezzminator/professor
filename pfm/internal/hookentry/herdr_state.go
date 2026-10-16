@@ -75,6 +75,9 @@ type herdrDeps struct {
 	// reporter marks the chat's own tmux server with the agent state the
 	// theme's colours read. Empty means no theme door.
 	stateDir string
+	// sidDir holds the reload pane mutexes (reload.LockPath): an end event
+	// during a reload's /exit leaves the chat server's title alone.
+	sidDir string
 }
 
 func realHerdrDeps() herdrDeps {
@@ -82,6 +85,7 @@ func realHerdrDeps() herdrDeps {
 	deps := herdrDeps{
 		getenv: env.Get, tmux: runTmuxForHerdr, now: clock.Real.Now, lookPath: hostdeps.RealRunner{}.LookPath,
 		procInfo: realProcInfo(gather.NewProcFS(env.Get(paths.EnvProcRoot))), getpid: os.Getpid,
+		sidDir: paths.SIDDirFrom(env),
 	}
 	home, err := paths.HomeFrom(env)
 	if err == nil {
@@ -690,7 +694,8 @@ func (reporter *herdrReporter) event(
 	if err := reporter.writeState(ctx, session, next); err != nil {
 		return err
 	}
-	errs := []error{resolveErr, reporter.releaseAll(ctx, reporter.engineLabel(state), gone)}
+	errs := []error{resolveErr, reporter.blankTitle(ctx, action)}
+	errs = append(errs, reporter.releaseAll(ctx, reporter.engineLabel(state), gone))
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]
 		errs = append(errs, reporter.send(

@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 // liveClients splits the registered clients into those still attached and
@@ -400,6 +403,55 @@ func (reporter *herdrReporter) sessionTarget(ctx context.Context, session string
 		return herdrTarget{}, nil
 	}
 	return herdrTarget{pane: values[herdr.EnvPane], socket: values[herdr.EnvSocket]}, nil
+}
+
+// blankTitle empties the chat server's set-titles-string at a session end. The
+// outer title a tmux client writes (a Herdr pane's terminal title) is that
+// format, and the engine's pane title empties as it exits, so tmux's last write
+// would leave "⬢ " behind it; blanked, tmux writes the empty title at once and
+// every later render stays empty until the server dies, or until name-sync
+// rewrites the option on a server that outlived its end (Claude's /logout, an
+// OpenCode dispose). Under set-titles off the string is inert. Only a server
+// that ends with its chat is blanked: an engine in the user's own tmux leaves
+// that live server's titles alone, and so does a reload's /exit, whose engine
+// respawns on the same server (reload.InFlight), and an engine whose server
+// keeps another pane. A reload or a pane that cannot be ruled out leaves the
+// title as it is.
+func (reporter *herdrReporter) blankTitle(ctx context.Context, action *herdrAction) error {
+	socketName := filepath.Base(reporter.options.socket)
+	if !action.release || !gather.IsChatSocketName(socketName) {
+		return nil
+	}
+	pane := reporter.deps.getenv("TMUX_PANE")
+	if pane == "" || reporter.deps.sidDir == "" {
+		return fmt.Errorf(
+			"outer terminal title left as is at session end: no pane (%q) or SID directory (%q) to probe a reload with",
+			pane, reporter.deps.sidDir,
+		)
+	}
+	inFlight, err := reload.InFlight(reporter.deps.sidDir, socketName, pane)
+	if err != nil {
+		return fmt.Errorf("outer terminal title left as is at session end: probe the reload of %s %s: %w",
+			socketName, pane, err)
+	}
+	if inFlight {
+		return nil
+	}
+	panes, err := reporter.deps.tmux(ctx, reporter.options.socket, "list-panes", "-a", "-F", "#{pane_id}")
+	if err != nil {
+		return fmt.Errorf("outer terminal title left as is at session end: list the panes of %s: %w", socketName, err)
+	}
+	for _, other := range strings.Fields(panes) {
+		if other != pane {
+			return nil
+		}
+	}
+	if _, err := reporter.deps.tmux(
+		ctx, reporter.options.socket, "set-option", "-g", "set-titles-string", "",
+	); err != nil {
+		return fmt.Errorf("blank the outer terminal title at session end (set-titles-string): %w", err)
+	}
+	return nil
 }
 
 // sweep releases and forgets the registered clients tmux no longer lists.

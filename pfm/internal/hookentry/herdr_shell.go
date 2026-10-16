@@ -16,6 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
@@ -55,7 +56,9 @@ func (missing errNoShellPane) Error() string {
 // idle with "{command} exit {RC} · {S}s", and sets the same text as the pane's
 // title (Herdr drops the agent report within a second on a bare shell and keeps
 // the title); release releases the agent and clears the title, and a done whose
-// T is older than a release's reports nothing. The pane is the one running
+// T is older than a release's reports nothing. A pane's latest done holds its
+// title against any shell: a release started before it leaves the title up and
+// an older done reports nothing over it. The pane is the one running
 // shell P, found by that identity because a Herdr pane move gives the pane a
 // new id. The shim runs it in the background with its output discarded, so
 // every failure is a line in the pfm-shell error log `pfm doctor` reads; a
@@ -75,11 +78,14 @@ func reportShellRun(args []string, stderr io.Writer, deps herdrDeps) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), herdr.ReportDeadline)
 	defer cancel()
-	if err := reportShell(ctx, deps, options); err != nil {
+	logRun := func(err error) {
 		logHerdrShell(
 			stderr, deps,
 			fmt.Sprintf("%s %s (shell %d): %v", herdrShellCommand, options.verb, options.pid, err),
 		)
+	}
+	if err := reportShell(ctx, deps, options, logRun); err != nil {
+		logRun(err)
 	}
 	return 0
 }
@@ -139,7 +145,8 @@ func logHerdrShell(stderr io.Writer, deps herdrDeps, message string) {
 	}
 }
 
-func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions) error {
+// reportShell runs one verb; warn takes a failure the run reports past.
+func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions, warn func(error)) error {
 	socket := deps.getenv(herdr.EnvSocket)
 	if socket == "" {
 		return fmt.Errorf("no %s in the shell's environment", herdr.EnvSocket)
@@ -175,22 +182,48 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions)
 		if pane == "" {
 			return removeShellRecord(record)
 		}
+		unlockPane, err := lockShellPane(ctx, deps, pane)
+		if err != nil {
+			return err
+		}
+		defer unlockPane()
+		titled, err := shellTitleLater(deps.lockDir, pane, options.at, warn)
+		if err != nil {
+			return err
+		}
 		line, err := herdr.Release{Pane: pane, Source: herdrShellSource, Agent: herdrShellAgent, Seq: next()}.Line()
 		if err != nil {
 			return err
 		}
-		clearTitle, err := herdr.Metadata{Pane: pane, Source: herdrShellSource, ClearTitle: true, Seq: next()}.Line()
-		if err != nil {
-			return err
+		lines := [][]byte{line}
+		if !titled {
+			clearTitle, err := herdr.Metadata{
+				Pane:       pane,
+				Source:     herdrShellSource,
+				ClearTitle: true,
+				Seq:        next(),
+			}.Line()
+			if err != nil {
+				return err
+			}
+			lines = append(lines, clearTitle)
 		}
 		// A failed release keeps the record, so the next release still finds
 		// the pane.
-		if err := releaseSettled(herdr.Send(ctx, socket, line, clearTitle)); err != nil {
+		if err := releaseSettled(herdr.Send(ctx, socket, lines...)); err != nil {
 			return err
 		}
 		return removeShellRecord(record)
 	}
 	if err != nil {
+		return err
+	}
+	unlockPane, err := lockShellPane(ctx, deps, pane)
+	if err != nil {
+		return err
+	}
+	defer unlockPane()
+	if later, err := shellTitleLater(deps.lockDir, pane, options.at, warn); err != nil || later {
 		return err
 	}
 	command := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(options.command)
@@ -218,6 +251,12 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions)
 	// drops any report within a second once the bare shell holds the
 	// foreground again: working then idle mark the run finished, and the
 	// title, which Herdr keeps on a bare shell, carries it to the next command.
+	// The record comes first and outlives a send error: a send that timed out
+	// may have reached Herdr, and an older release must never erase a title
+	// that may be showing; a refused one leaves at worst an older title up.
+	if err := recordShellTitle(deps.lockDir, pane, options.at); err != nil {
+		return err
+	}
 	if err := herdr.Send(ctx, socket, working, idle, title); err != nil {
 		return err
 	}
@@ -340,6 +379,67 @@ func shellSuperseded(lockDir string, options herdrShellOptions) (bool, error) {
 		return false, fmt.Errorf("read the last release of shell %d from %s (%q): %w", options.pid, path, recorded, err)
 	}
 	return released > options.at, nil
+}
+
+// lockShellPane orders the shells that report to one pane: a nested shell and
+// its parent hold different shell locks, and a title carries no seq, so the
+// last title request Herdr gets is the one the pane shows. The shell's lock is
+// always taken first.
+func lockShellPane(ctx context.Context, deps herdrDeps, pane string) (func(), error) {
+	return (&herdrReporter{deps: deps}).lock(ctx, fmt.Sprintf("%s-pane-%s", herdrShellSource, pane))
+}
+
+// shellTitleLater says a done started after at, from any shell, holds the
+// pane's title: a release started earlier leaves it up (a nested shell left
+// by Ctrl-D releases from its exit hook while its parent reports the nested
+// run done), and an earlier done reports nothing over it. Under the pane's
+// lock; a run without --at is never ordered. A record holding no shell clock
+// (a write cut short, a value no shell gives) would order every later run
+// against nothing for good: it is a warning, dropped, and the run goes on
+// unordered.
+func shellTitleLater(lockDir, pane string, at float64, warn func(error)) (bool, error) {
+	if at == 0 {
+		return false, nil
+	}
+	path := shellTitlePath(lockDir, pane)
+	recorded, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the last done title of pane %s: %w", pane, err)
+	}
+	titled, err := strconv.ParseFloat(strings.TrimSpace(string(recorded)), 64)
+	if err == nil && !(titled > 0 && !math.IsInf(titled, 1)) {
+		err = errors.New("no shell clock")
+	}
+	if err != nil {
+		warn(errors.Join(
+			fmt.Errorf("drop the unreadable last done title of pane %s at %s (%q): %w", pane, path, recorded, err),
+			os.Remove(path),
+		))
+		return false, nil
+	}
+	return titled > at, nil
+}
+
+// recordShellTitle records the shell clock of the done whose title the pane
+// shows or may show, under the pane's lock, before the title is sent, in one
+// rename, so a write cut short never
+// leaves a record holding no clock.
+func recordShellTitle(lockDir, pane string, at float64) error {
+	if at == 0 {
+		return nil
+	}
+	path := shellTitlePath(lockDir, pane)
+	if err := atomicfile.Write(path, []byte(strconv.FormatFloat(at, 'f', -1, 64)), 0o600); err != nil {
+		return fmt.Errorf("record the done title of pane %s at %s: %w", pane, path, err)
+	}
+	return nil
+}
+
+func shellTitlePath(lockDir, pane string) string {
+	return filepath.Join(lockDir, fmt.Sprintf("%s-pane-%s.title", herdrShellSource, pane))
 }
 
 // shellPane is the pane running the shell pid: the pane the shell was born in

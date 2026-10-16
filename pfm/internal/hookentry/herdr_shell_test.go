@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -312,5 +314,133 @@ func TestHerdrShellReleasesANestedShellAtThePaneItsDoneWentTo(t *testing.T) {
 	want := `pane.release_agent {"pane_id":"wU:p5","source":"pfm-shell","agent":"shell"}`
 	if got := server.calls()[before:]; !slices.Contains(got, want) {
 		t.Fatalf("release calls after a refused one = %q, want %q among them", got, want)
+	}
+}
+
+// A nested shell left by Ctrl-D releases from its exit hook while its parent
+// shell, back at its prompt, reports the nested shell's own run as done: two
+// shells, two locks, one pane, and a title that carries no seq. A release
+// started before the latest done on its pane leaves that done's title up; the
+// parent's next command still clears it.
+func TestHerdrShellAnExitedNestedShellNeverClearsALaterDoneTitle(t *testing.T) {
+	const untitle = `pane.report_metadata {"pane_id":"wT:p1","source":"pfm-shell","clear_title":true}`
+	server := newFakeHerdr(t)
+	server.addShellPane("wT:p1", "t1", 7, 4242)
+	jail := newHerdrJail(t)
+	clock := int64(1_000_000)
+	deps := jail.deps(herdrPaneEnv(server, "wT:p1"), &clock)
+	run := func(args ...string) []string {
+		t.Helper()
+		before := len(server.calls())
+		var stderr bytes.Buffer
+		if rc := reportShellRun(args, &stderr, deps); rc != 0 || stderr.Len() != 0 {
+			t.Fatalf("%q: rc=%d stderr=%q, want a quiet run", args, rc, stderr.String())
+		}
+		return server.calls()[before:]
+	}
+	run("done", "--pid", "4242", "--at", "1760000010.5", "--command", "sleep 12", "--exit", "0", "--seconds", "12")
+	const parentTitle = `pane.report_metadata {"pane_id":"wT:p1","source":"pfm-shell",` +
+		`"title":"zsh -i exit 0 · 19s"}`
+	parent := run("done", "--pid", "7", "--at", "1760000012.5", "--command", "zsh -i", "--exit", "0", "--seconds", "19")
+	if !slices.Contains(parent, parentTitle) {
+		t.Fatalf("parent done calls = %q, want %q among them", parent, parentTitle)
+	}
+	// The nested shell's own last done, started before the parent's, reaching
+	// the pane lock after it: it reports nothing over the later title.
+	late := run("done", "--pid", "4242", "--at", "1760000011", "--command", "make", "--exit", "0", "--seconds", "13")
+	for _, call := range late {
+		if strings.HasPrefix(call, "pane.report_") {
+			t.Fatalf("an older done's calls = %q, want no report under the parent's later done", late)
+		}
+	}
+	server.foreground("wT:p1")
+	if got := run("release", "--pid", "4242", "--at", "1760000012.1"); slices.Contains(got, untitle) {
+		t.Fatalf("exited nested shell's release calls = %q, want no %q under the parent's later done", got, untitle)
+	}
+	if got := run("release", "--pid", "7", "--at", "1760000020.5"); !slices.Contains(got, untitle) {
+		t.Fatalf("parent's next command release calls = %q, want %q among them", got, untitle)
+	}
+}
+
+// A pane's title record that holds no time (a write cut short, or a value no
+// shell clock gives) never stops the pane's reports for good: the run reports
+// as if no done held the title, its error row names the record, and the record
+// is rewritten or dropped, so the next run is quiet.
+func TestHerdrShellADamagedTitleRecordNeverStopsThePane(t *testing.T) {
+	const (
+		title   = `pane.report_metadata {"pane_id":"wT:p1","source":"pfm-shell","title":"make exit 0 · 12s"}`
+		untitle = `pane.report_metadata {"pane_id":"wT:p1","source":"pfm-shell","clear_title":true}`
+	)
+	done := []string{
+		"done", "--pid", "4242", "--at", "1760000010.5", "--command", "make", "--exit", "0", "--seconds", "12",
+	}
+	release := []string{"release", "--pid", "4242", "--at", "1760000020.5"}
+	for _, record := range []string{"", "garbage", "Inf", "NaN"} {
+		for name, test := range map[string]struct {
+			args []string
+			want string
+		}{"done": {done, title}, "release": {release, untitle}} {
+			t.Run(fmt.Sprintf("%s over %q", name, record), func(t *testing.T) {
+				server := newFakeHerdr(t)
+				server.addShellPane("wT:p1", "t1", 4242)
+				jail := newHerdrJail(t)
+				clock := int64(1_000_000)
+				deps := jail.deps(herdrPaneEnv(server, "wT:p1"), &clock)
+				if err := os.MkdirAll(jail.lockDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(jail.lockDir, "pfm-shell-pane-wT:p1.title")
+				if err := os.WriteFile(path, []byte(record), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				var stderr bytes.Buffer
+				if rc := reportShellRun(test.args, &stderr, deps); rc != 0 {
+					t.Fatalf("rc=%d stderr=%q, want 0", rc, stderr.String())
+				}
+				if got := server.calls(); !slices.Contains(got, test.want) {
+					t.Fatalf("calls over a damaged record = %q, want %q among them", got, test.want)
+				}
+				if logged := jail.logged(herdrShellLog); !strings.Contains(logged, path) {
+					t.Fatalf("error log = %q, want a row naming %s", logged, path)
+				}
+				stderr.Reset()
+				if rc := reportShellRun(release, &stderr, deps); rc != 0 || stderr.Len() != 0 {
+					t.Fatalf("next run: rc=%d stderr=%q, want a quiet run", rc, stderr.String())
+				}
+			})
+		}
+	}
+}
+
+// A done whose send errors may still have reached Herdr (a timed-out answer),
+// so it holds the pane's title like one Herdr took: an older release, here the
+// exited nested shell's, never clears a title that may be showing.
+func TestHerdrShellADoneWhoseSendErrorsStillHoldsThePaneTitle(t *testing.T) {
+	const untitle = `pane.report_metadata {"pane_id":"wT:p1","source":"pfm-shell","clear_title":true}`
+	server := newFakeHerdr(t)
+	server.addShellPane("wT:p1", "t1", 7, 4242)
+	jail := newHerdrJail(t)
+	clock := int64(1_000_000)
+	deps := jail.deps(herdrPaneEnv(server, "wT:p1"), &clock)
+	var stderr bytes.Buffer
+	run := func(args ...string) []string {
+		t.Helper()
+		before := len(server.calls())
+		stderr.Reset()
+		if rc := reportShellRun(args, &stderr, deps); rc != 0 {
+			t.Fatalf("%q: rc=%d stderr=%q, want 0", args, rc, stderr.String())
+		}
+		return server.calls()[before:]
+	}
+	run("done", "--pid", "4242", "--at", "1760000010.5", "--command", "sleep 12", "--exit", "0", "--seconds", "12")
+	server.refuse["pane.report_metadata"] = "internal"
+	run("done", "--pid", "7", "--at", "1760000012.5", "--command", "zsh -i", "--exit", "0", "--seconds", "19")
+	if !strings.Contains(stderr.String(), "pane.report_metadata") {
+		t.Fatalf("parent done stderr = %q, want the refused title named", stderr.String())
+	}
+	delete(server.refuse, "pane.report_metadata")
+	server.foreground("wT:p1")
+	if got := run("release", "--pid", "4242", "--at", "1760000012.1"); slices.Contains(got, untitle) {
+		t.Fatalf("an older release after a done whose send errored = %q, want no %q", got, untitle)
 	}
 }

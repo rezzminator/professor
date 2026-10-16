@@ -316,7 +316,9 @@ const MaxTitleRunes = 80
 // Metadata is one pane.report_metadata request: the chat's title on its pane,
 // or with ClearTitle the title withdrawn.
 type Metadata struct {
-	Pane       string
+	Pane string
+	// Source is the reporter whose title this is; empty is Source.
+	Source     string
 	Title      string
 	ClearTitle bool
 	Seq        uint64
@@ -334,7 +336,7 @@ func (metadata Metadata) Line() ([]byte, error) {
 		Source     string `json:"source"`
 		Title      string `json:"title,omitempty"`
 		ClearTitle bool   `json:"clear_title,omitempty"`
-	}{PaneID: metadata.Pane, Source: Source}
+	}{PaneID: metadata.Pane, Source: sourceOr(metadata.Source)}
 	if metadata.ClearTitle {
 		params.ClearTitle = true
 	} else {

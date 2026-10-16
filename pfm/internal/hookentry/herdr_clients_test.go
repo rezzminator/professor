@@ -246,7 +246,7 @@ func TestHerdrStateDetachReleasesTheClientsPane(t *testing.T) {
 	})
 	// A pane closed before the detach is the expected end of a chat in a pane:
 	// nothing more is sent and no error row is written. A dial or pane.list
-	// failure, or any refusal other than not_found, stays an error row.
+	// failure, or any refusal other than a pane not found, stays an error row.
 	goneClient := func(t *testing.T) *chatRig {
 		t.Helper()
 		rig := newChatRig(t)
@@ -272,16 +272,19 @@ func TestHerdrStateDetachReleasesTheClientsPane(t *testing.T) {
 			t.Fatalf("cc-1.log = %q, want no error row for a gone pane", logged)
 		}
 	})
-	t.Run("a release Herdr refuses as not_found: nothing more is sent, no error row", func(t *testing.T) {
-		rig := newChatRig(t)
-		rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
-		rig.herdr.refuse["pane.release_agent"] = "not_found"
-		rig.wantQuiet(rig.hook("detach", "--client", "4242"))
-		rig.wantCalls(listCall, releaseCalls("w1:p1")[0])
-		if logged := rig.jail.logged("cc-1"); logged != "" {
-			t.Fatalf("cc-1.log = %q, want no error row for a gone pane", logged)
-		}
-	})
+	// pane_not_found is live Herdr 0.9.5's code, not_found the socket-api docs'.
+	for _, code := range []string{"pane_not_found", "not_found"} {
+		t.Run("a release Herdr refuses as "+code+": nothing more is sent, no error row", func(t *testing.T) {
+			rig := newChatRig(t)
+			rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+			rig.herdr.refuse["pane.release_agent"] = code
+			rig.wantQuiet(rig.hook("detach", "--client", "4242"))
+			rig.wantCalls(listCall, releaseCalls("w1:p1")[0])
+			if logged := rig.jail.logged("cc-1"); logged != "" {
+				t.Fatalf("cc-1.log = %q, want no error row for a gone pane", logged)
+			}
+		})
+	}
 	t.Run("an end event whose terminal is in no pane: nothing sent, no error row", func(t *testing.T) {
 		rig := goneClient(t)
 		rig.wantQuiet(rig.engine("end", `{"session_id":"s1","reason":"prompt_input_exit"}`))

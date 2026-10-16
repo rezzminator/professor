@@ -45,9 +45,12 @@ const (
 	// SessionEnd reasons on which the session swaps inside the same process.
 	herdrReasonClear  = "clear"
 	herdrReasonResume = "resume"
-	// herdrNotFound is the error code Herdr answers for a pane it does not know
-	// (socket-api: {"code":"not_found","message":"pane not found"}).
-	herdrNotFound = "not_found"
+	// herdrPaneNotFound is the error code Herdr 0.9.5 answers for a pane it does
+	// not know, on pane.release_agent, report_agent, report_metadata and
+	// process_info alike ({"code":"pane_not_found","message":"pane wX:p9 not
+	// found"}, probed live); herdrNotFound is the socket-api docs' spelling.
+	herdrPaneNotFound = "pane_not_found"
+	herdrNotFound     = "not_found"
 )
 
 // herdrDeps are the reporter's seams: the process environment, one tmux call
@@ -744,15 +747,21 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 	return err
 }
 
-// releaseSettled turns Herdr's not_found for a release (the pane closed since
-// it was resolved: "pane not found") into success, as the pane has nothing left
-// to release; any other error stays one.
+// releaseSettled turns Herdr's pane-not-found for a release (the pane closed
+// since it was resolved) into success, as the pane has nothing left to release;
+// any other error stays one.
 func releaseSettled(err error) error {
-	var refusal *herdr.Refusal
-	if errors.As(err, &refusal) && refusal.Code == herdrNotFound {
+	if isHerdrNotFound(err) {
 		return nil
 	}
 	return err
+}
+
+// isHerdrNotFound is Herdr refusing a request because its pane id names no
+// pane, in either spelling of the code.
+func isHerdrNotFound(err error) bool {
+	var refusal *herdr.Refusal
+	return errors.As(err, &refusal) && (refusal.Code == herdrPaneNotFound || refusal.Code == herdrNotFound)
 }
 
 // PayloadHook runs the hook entries that read an engine's payload on stdin and

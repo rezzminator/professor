@@ -172,7 +172,7 @@ On macOS, make the same filesystem moves, then log in once on account 1 with `CL
 [Herdr](https://herdr.dev) is a terminal multiplexer for coding agents. A pfm chat pane runs `tmux attach`, so Herdr alone sees `tmux`; inside a Herdr pane pfm reports each chat's state (working, blocked, idle), session and resume command itself, for Claude, Codex and OpenCode alike. There is nothing to install: `pfm install --yes` already carries the reporter, and outside Herdr it does nothing.
 
 - If Herdr's own bundled integrations are installed, they compete with pfm's report for the same pane. `pfm doctor` prints a FAIL row per installed one with its fix; run each line it prints, for example `herdr integration uninstall claude`, and likewise `codex` and `opencode`.
-- A plain shell pane in Herdr reports a command that ran at least 10 seconds when it finishes, so the pane rises in Herdr's agent panel until you view it. `PFM_HERDR_LONG_COMMAND_SECS` sets the threshold; `PFM_HERDR_SHELL_REPORT=0` turns it off.
+- A plain shell pane in Herdr reports a command that ran at least 10 seconds when it finishes: the pane's title shows the command, its exit status and duration until the next command. `PFM_HERDR_LONG_COMMAND_SECS` sets the threshold; `PFM_HERDR_SHELL_REPORT=0` turns it off.
 - Herdr resumes a restored pane with `pfm chat open {session id}`. To opt out, set `resume_agents_on_restore = false` under `[session]` in Herdr's own config.
 
 ---

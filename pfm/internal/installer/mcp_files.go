@@ -152,6 +152,10 @@ func withClaudeMCPLocks(paths []string, write func(check func() error) error) (r
 			return compromised
 		}
 		for name, original := range owned {
+			if clock.Real.Now().Sub(original.ModTime()) > claudeMCPLockStale {
+				compromised = fmt.Errorf("validate Claude MCP lock %s: ownership exceeded native stale window", name)
+				return compromised
+			}
 			current, err := os.Lstat(name)
 			if err == nil && (!os.SameFile(original, current) || !original.ModTime().Equal(current.ModTime())) {
 				err = fmt.Errorf("lock replaced or modified")
@@ -161,6 +165,12 @@ func withClaudeMCPLocks(paths []string, write func(check func() error) error) (r
 				if err == nil {
 					var updated os.FileInfo
 					updated, err = os.Lstat(name)
+					if err == nil && !os.SameFile(original, updated) {
+						err = fmt.Errorf("lock replaced during refresh")
+					}
+					if err == nil && clock.Real.Now().Sub(original.ModTime()) > claudeMCPLockStale {
+						err = fmt.Errorf("refresh exceeded native stale window")
+					}
 					if err == nil {
 						owned[name] = updated
 					}

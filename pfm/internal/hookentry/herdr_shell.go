@@ -21,7 +21,7 @@ import (
 
 // The plain-shell reporter: the shim's Herdr hook hands it a long command a
 // shell in a Herdr pane finished, and the next command's start, so a shell or
-// server pane rises in Herdr's agent panel the way a chat does.
+// server pane shows that run in its title until the next command.
 const (
 	herdrShellCommand = "pfm internal herdr-shell"
 	herdrShellDone    = "done"
@@ -52,13 +52,14 @@ func (missing errNoShellPane) Error() string {
 
 // HerdrShell is `pfm internal herdr-shell done --pid P [--at T] --command C
 // --exit RC --seconds S | release --pid P [--at T]`. done reports working, then
-// idle with "{command} exit {RC} · {S}s" (Herdr shows that as done until the
-// pane is viewed); release clears it, and a done whose T is older than a
-// release's reports nothing. The pane is the one running shell P, found by
-// that identity because a Herdr pane move gives the pane a new id. The shim
-// runs it in the background with its output discarded, so every failure is a
-// line in the pfm-shell error log `pfm doctor` reads; a release that finds no
-// pane running the shell has nothing left to release.
+// idle with "{command} exit {RC} · {S}s", and sets the same text as the pane's
+// title (Herdr drops the agent report within a second on a bare shell and keeps
+// the title); release releases the agent and clears the title, and a done whose
+// T is older than a release's reports nothing. The pane is the one running
+// shell P, found by that identity because a Herdr pane move gives the pane a
+// new id. The shim runs it in the background with its output discarded, so
+// every failure is a line in the pfm-shell error log `pfm doctor` reads; a
+// release that finds no pane running the shell has nothing left to release.
 func HerdrShell(args []string, stderr io.Writer) int {
 	return reportShellRun(args, stderr, realHerdrDeps())
 }
@@ -178,9 +179,13 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions)
 		if err != nil {
 			return err
 		}
+		clearTitle, err := herdr.Metadata{Pane: pane, Source: herdrShellSource, ClearTitle: true, Seq: next()}.Line()
+		if err != nil {
+			return err
+		}
 		// A failed release keeps the record, so the next release still finds
 		// the pane.
-		if err := releaseSettled(herdr.Send(ctx, socket, line)); err != nil {
+		if err := releaseSettled(herdr.Send(ctx, socket, line, clearTitle)); err != nil {
 			return err
 		}
 		return removeShellRecord(record)
@@ -197,14 +202,23 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions)
 	}
 	idle, err := herdr.Report{
 		Pane: pane, Source: herdrShellSource, Agent: herdrShellAgent, State: herdr.StateIdle,
-		Message: shellDoneMessage(command, options.exit, options.seconds), Seq: next(),
+		Message: shellDoneMessage(command, options.exit, options.seconds, herdr.MaxMessageRunes), Seq: next(),
 	}.Line()
 	if err != nil {
 		return err
 	}
-	// Herdr shows a lone idle report on a pane with no agent as nothing;
-	// working first makes the idle a finished run.
-	if err := herdr.Send(ctx, socket, working, idle); err != nil {
+	title, err := herdr.Metadata{
+		Pane: pane, Source: herdrShellSource, Seq: next(),
+		Title: shellDoneMessage(command, options.exit, options.seconds, herdr.MaxTitleRunes),
+	}.Line()
+	if err != nil {
+		return err
+	}
+	// Herdr shows a lone idle report on a pane with no agent as nothing, and
+	// drops any report within a second once the bare shell holds the
+	// foreground again: working then idle mark the run finished, and the
+	// title, which Herdr keeps on a bare shell, carries it to the next command.
+	if err := herdr.Send(ctx, socket, working, idle, title); err != nil {
 		return err
 	}
 	if !nested {
@@ -284,12 +298,13 @@ func listShellPanes(ctx context.Context, socket string, next func() uint64) ([]h
 	return herdr.ParsePanes(results[0])
 }
 
-// shellDoneMessage is "{command} exit {rc} · {s}s" within
-// herdr.MaxMessageRunes: a long command line is cut, never the exit status and
-// duration that tell a failed run from a good one.
-func shellDoneMessage(command string, exit, seconds int) string {
+// shellDoneMessage is "{command} exit {rc} · {s}s" within limit runes (the
+// report's herdr.MaxMessageRunes, the title's herdr.MaxTitleRunes): a long
+// command line is cut, never the exit status and duration that tell a failed
+// run from a good one.
+func shellDoneMessage(command string, exit, seconds, limit int) string {
 	suffix := fmt.Sprintf(" exit %d · %ds", exit, seconds)
-	room := herdr.MaxMessageRunes - utf8.RuneCountInString(suffix)
+	room := limit - utf8.RuneCountInString(suffix)
 	if runes := []rune(command); len(runes) > room {
 		command = string(runes[:room-1]) + "…"
 	}
@@ -384,10 +399,4 @@ func paneRunsShell(ctx context.Context, socket, pane string, pid int, seq uint64
 	}
 	runs = slices.Contains(foreground, pid)
 	return runs, runs, nil
-}
-
-// isHerdrNotFound is Herdr's not_found refusal: the pane id names no pane.
-func isHerdrNotFound(err error) bool {
-	var refusal *herdr.Refusal
-	return errors.As(err, &refusal) && refusal.Code == herdrNotFound
 }

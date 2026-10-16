@@ -619,8 +619,14 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 		environ []string
 		want    string
 		state   string
+		// exits ends the shell after the report instead of starting a next
+		// command: a nested zsh left by Ctrl-D runs no preexec.
+		exits bool
 	}{
 		"long command reports done, next command releases": {want: reported, state: "hooked=1 reported=1"},
+		"long command reports done, the shell's exit releases": {
+			want: reported, state: "hooked=1 reported=1", exits: true,
+		},
 		"short command reports nothing": {
 			environ: []string{"PFM_HERDR_LONG_COMMAND_SECS=100"}, state: "hooked=1 reported=",
 		},
@@ -642,7 +648,7 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 			writeShimFile(t, filepath.Join(binDir, "pfm"), fakeShellReporterPFM)
 			log := filepath.Join(home, "pfm.log")
 			// The driver plays one long command, waits for its report (handed
-			// over in the background), then starts the next command.
+			// over in the background), then starts the next command or exits.
 			script := "source " + quoteZsh(embeddedShimPath(t)) + "\n" +
 				"export FAKE_SHELL_PID=$$\n" +
 				"state=\"hooked=$+functions[_pfm_herdr_precmd]\"\n" +
@@ -650,9 +656,11 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 				"  _pfm_herdr_preexec 'make test'; (exit 3); _pfm_herdr_precmd\n" +
 				"  state+=\" reported=$_pfm_herdr_reported\"\n" +
 				"  [[ -z $_pfm_herdr_reported ]] || for i in {1..50}; do [[ -s $FAKE_PFM_LOG ]] && break; sleep 0.1; done\n" +
-				"  _pfm_herdr_preexec 'ls'\n" +
 				"fi\n" +
 				"print -r -- \"STATE[$state]\"\n"
+			if !test.exits {
+				script += "(( ! $+functions[_pfm_herdr_preexec] )) || _pfm_herdr_preexec 'ls'\n"
+			}
 			environ := append([]string{
 				"HERDR_ENV=1", "TMUX=", "PFM_HERDR_LONG_COMMAND_SECS=0", "PFM_HERDR_SHELL_REPORT=",
 				"FAKE_PFM_LOG=" + log,

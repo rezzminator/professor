@@ -47,7 +47,7 @@ lab_meta() { # <jq update>: edits meta.json in place
 }
 
 lab_cmd_run() {
-  local spec=${1:-} plugin='' ledger='' budget=10.00 budget_set='' claude='' file name authline budgetline ids=() rc
+  local spec=${1:-} plugin='' ledger='' budget=10.00 budget_set='' claude='' file name authline budgetline ids=() rc prefix e
   [[ -n $spec ]] || lab_die 2 'ERROR usage: lab run {plugin}/{scenario} --plugin DIR'
   shift
   LAB_AUTH_FROM=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
@@ -70,6 +70,13 @@ lab_cmd_run() {
   LAB_PLUGIN_VERSION=$(jq -r '.version // empty' "$LAB_PLUGIN_DIR/.claude-plugin/plugin.json")
   lab_load_scenario "$file"
   [[ $LAB_PLUGIN == "$name" ]] || lab_die 2 "ERROR plugin-mismatch scenario wants $LAB_PLUGIN, --plugin holds ${name:-no name}"
+  # A LAB_ENV variable in the plugin's own namespace that its files name nowhere is read by nobody: the run would test the defaults
+  prefix=$(tr 'a-z-' 'A-Z_' <<< "$LAB_PLUGIN")_
+  for e in "${LAB_ENV[@]}"; do
+    [[ ${e%%=*} == "$prefix"* ]] || continue
+    grep -rqwF --exclude-dir=node_modules -- "${e%%=*}" "$LAB_PLUGIN_DIR"; rc=$?
+    (( rc == 0 )) || lab_die 2 "ERROR option-unknown ${e%%=*}: $( ((rc == 1)) && echo "named nowhere in $LAB_PLUGIN_DIR" || echo "could-not-look: grep exited $rc in $LAB_PLUGIN_DIR")"
+  done
   LAB_SCENARIO=${spec##*/} LAB_CAP=$LAB_CAP_USD LAB_REAL_HOME=$HOME
   LAB_CLAUDE=$(lab_resolve_claude "$claude") || exit 2
   LAB_JQ_DIR=$(dirname "$(command -v jq)") || lab_die 2 'ERROR jq-not-found'

@@ -31,6 +31,24 @@ git -C "$T/plugin" checkout -q -- README.md
 # the engine hot-reloads a --plugin-dir hooks module on any edit: an already-dirty file edited again changes the content hash (S7 live)
 FAKE_MODE=plugin-reload runlab hello
 expect_has 'L16 hot reload is tree-changed' "$(row passport/identity)" $'FAIL\ttree-changed hot-reload'
+# an option still passed as pluginConfigs JSON: the plugin's options-ignored rows (decision log and warnings.jsonl) fail the run loudly
+runlab stale-options
+expect_eq 'stale options exit 1' "$RC" 1
+expect_has 'vital/options-ignored FAIL on stale options' "$(row vital/options-ignored)" $'FAIL\t2 rows, the scenario\'s options were not applied: logs/fake-plugin/'
+expect_has 'the stale keys are named' "$(row vital/options-ignored)" 'options forwardHandoffTool, mainAutoCompact are not read'
+# the same options as SUB_AGENT_COMPACT_* variables: the plugin reports nothing ignored, the vital passes
+runlab env-options
+expect_eq 'env options run exits 0' "$RC" 0
+expect_has 'env options reach claude' "$(tr '\n' ' ' < "$RUN/fake/env-keys")" 'SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT'
+expect_has 'vital/options-ignored PASS on env options' "$(row vital/options-ignored)" $'PASS\t0 options-ignored rows'
+# a LAB_ENV value the plugin refuses runs its default: the vital fails it, unless the scenario declares the option-error
+FAKE_OPTION=FAKE_PLUGIN_FLAG=bogus runlab hello
+expect_eq 'refused env value exits 1' "$RC" 1
+expect_has 'vital/options-ignored FAIL on a refused value' "$(row vital/options-ignored)" 'env FAKE_PLUGIN_FLAG is invalid'
+FAKE_OPTION=FAKE_PLUGIN_FLAG=bogus FAKE_EXPECT=option-error runlab hello
+expect_eq 'declared option-error exits 0' "$RC" 0
+expect_has 'vital/options-ignored PASS on a declared option-error' "$(row vital/options-ignored)" $'PASS\t0 options-ignored rows'
+
 FAKE_MODE=old-rows runlab hello
 expect_has 'L11 no row since the start' "$(row vital/first-row)" $'FAIL\tno row since'
 FAKE_SECURITY_PRESENT=1 runlab hello

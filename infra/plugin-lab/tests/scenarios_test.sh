@@ -14,7 +14,11 @@ for f in "${files[@]}"; do
     lab_options() { LAB_OPTIONS=$1; }
     # shellcheck source=/dev/null
     source "$f"
+    LAB_OPTIONS=${LAB_OPTIONS:-\{\}}
     jq -en --arg o "$LAB_OPTIONS" '$o | fromjson' >/dev/null || echo 'BAD options'
+    # sub-agent-compact reads no options JSON: its options are SUB_AGENT_COMPACT_* variables in LAB_ENV, each held at run
+    # time to the plugin under test (lab's ERROR option-unknown)
+    [[ $LAB_PLUGIN != sub-agent-compact || $LAB_OPTIONS == '{}' ]] || echo 'BAD options JSON for sub-agent-compact'
     declare -F lab_scenario >/dev/null || echo 'BAD no lab_scenario'
     printf '%s|%s|%s|%s|%s|%s|%s\n' "$LAB_PLUGIN" "${LAB_ROWS[*]}" "$LAB_MODEL" "$LAB_CAP_USD" "$LAB_EST_USD" "$LAB_WALL_S" "$LAB_LOGGER"
     declare -f lab_scenario

@@ -6,10 +6,9 @@ LAB_MODEL=haiku
 LAB_CAP_USD=0.50
 LAB_EST_USD=0.05
 LAB_WALL_S=1200
-LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000)
+LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000 SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL=1)
 LAB_ALLOW=(Read Task mcp__sub-agent-compact__forward_handoff)
 LAB_LOGGER=yes
-lab_options '{"forwardHandoffTool":true}'
 
 lab_scenario() {
   need_agent lab-haiku-reader haiku 'Read, mcp__sub-agent-compact__forward_handoff' '{nudgeFrom: 15k, nudgeEvery: 5k, forceAt: 40k}'

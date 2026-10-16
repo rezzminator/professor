@@ -4,7 +4,7 @@
 # as a sha256 — fires the settings' command hooks with synthetic JSON, writes
 # a transcript and a plugin level log, and answers typed lines like a TUI.
 # FAKE_CLAUDE_MODE: normal leak-env no-input slow touch-live-store bypass-line
-# boundary-without-row no-start no-logger bad-transcript late-projects (the projects
+# boundary-without-row no-start no-logger settings-blind bad-transcript late-projects (the projects
 # folder appears only after the first prompt, as a real first boot writes it).
 # early-stop: a Stop fires before the typed line's turn, as a background agent's
 # notification turn ends while the line waits in the queue. drop-after-slash: the line
@@ -64,6 +64,25 @@ if [ "$mode" != no-logger ]; then
   mkdir -p "$PLUGIN_LOG_DIR/$name/decisions"
   ts=$(now_iso); [ "$mode" = old-rows ] && ts=2000-01-01T00:00:00.000Z
   printf '{"ts":"%s","event":"start"}\n' "$ts" >> "$PLUGIN_LOG_DIR/$name/decisions/$sid.jsonl"
+  # like sub-agent-compact 0.8: options left in the settings' pluginConfigs are read by nobody, and the plugin says so
+  keys=$(jq -r --arg n "$name@inline" '.pluginConfigs[$n].options // {} | keys | join(", ")' "$settings")
+  if [ -n "$keys" ]; then
+    line="$name: options $keys are not read; set SUB_AGENT_COMPACT_* environment variables instead (README, Central options); their values are not applied"
+    jq -nc --arg ts "$ts" --arg line "$line" '{ts:$ts,event:"warning",key:"options-ignored",line:$line}' >> "$PLUGIN_LOG_DIR/$name/decisions/$sid.jsonl"
+    jq -nc --arg ts "$ts" --arg p "$name" --arg s "$sid" --arg line "$line" '{ts:$ts,plugin:$p,level:"warning",event:"warning",msg:$line,session:$s}' >> "$PLUGIN_LOG_DIR/$name/warnings.jsonl"
+  fi
+  # like sub-agent-compact 0.8: a variable of the plugin's whose value it cannot take is named, and its default applies
+  for v in $(env | sed -n 's/^\(FAKE_PLUGIN_[A-Z_]*\)=bogus$/\1/p'); do
+    line="$name: env $v is invalid (not a flag: bogus); using the default off"
+    jq -nc --arg ts "$ts" --arg line "$line" '{ts:$ts,event:"option-error",line:$line}' >> "$PLUGIN_LOG_DIR/$name/decisions/$sid.jsonl"
+    jq -nc --arg ts "$ts" --arg p "$name" --arg s "$sid" --arg line "$line" '{ts:$ts,plugin:$p,level:"warning",event:"option-error",msg:$line,session:$s}' >> "$PLUGIN_LOG_DIR/$name/warnings.jsonl"
+  done
+  # settings-blind: like sub-agent-compact 0.8 when $.settings.read fails for a source, so a leftover option there goes unnamed
+  if [ "$mode" = settings-blind ]; then
+    line="reading the user settings failed: EACCES: permission denied; a leftover pluginConfigs entry there goes unnamed"
+    jq -nc --arg ts "$ts" --arg line "$line" '{ts:$ts,event:"said",line:$line,shown:true}' >> "$PLUGIN_LOG_DIR/$name/decisions/$sid.jsonl"
+    jq -nc --arg ts "$ts" --arg p "$name" --arg s "$sid" --arg line "$line" '{ts:$ts,plugin:$p,level:"warning",event:"said",msg:$line,session:$s}' >> "$PLUGIN_LOG_DIR/$name/warnings.jsonl"
+  fi
 fi
 if [ "$mode" = touch-live-store ]; then mkdir -p "$FAKE_LIVE/projects/x"; : > "$FAKE_LIVE/projects/x/$sid.jsonl"; fi
 [ "$mode" = no-start ] || hook SessionStart "{$(base SessionStart),\"source\":\"startup\"}"

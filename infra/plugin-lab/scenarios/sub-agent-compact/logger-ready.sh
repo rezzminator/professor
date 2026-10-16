@@ -8,7 +8,6 @@ LAB_EST_USD=0.02
 LAB_WALL_S=300
 LAB_ENV=()
 LAB_LOGGER=yes
-lab_options '{}'
 
 lab_scenario() {
   beat ready -- turn 'Reply with the word READY.' 300

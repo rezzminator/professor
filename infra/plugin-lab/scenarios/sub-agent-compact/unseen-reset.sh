@@ -7,13 +7,12 @@ LAB_MODEL=sonnet
 LAB_CAP_USD=1.20
 LAB_EST_USD=0.55
 LAB_WALL_S=600
-LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000)
+LAB_ENV=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000 SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL=1 SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT_NUDGE_START=30k SUB_AGENT_COMPACT_MAIN_AUTO_COMPACT_NUDGE_EVERY=10k)
 LAB_ALLOW=(Read mcp__sub-agent-compact__forward_handoff)
 LAB_DENY=(Bash Grep Glob)
 LAB_MANAGED='{"cleanupPeriodDays":36500}'
 LAB_GAP_IF_NOT_INDUCED='CLAUDE_CODE_MANAGED_SETTINGS_PATH is not read beside an OS policy folder; cc-plugin-sec-default@builtin not seated'
 LAB_LOGGER=yes
-lab_options '{"forwardHandoffTool":true,"mainAutoCompactNudgeStart":"30k","mainAutoCompactNudgeEvery":"10k"}'
 
 lab_scenario() {
   expect_bypass sub-agent-compact session.compact

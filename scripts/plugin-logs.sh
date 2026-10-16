@@ -30,7 +30,43 @@ if [ -n "$archive" ]; then valid_date "$archive" || usage "invalid archive date 
 if [ -n "$today" ]; then valid_date "$today" || usage "invalid today date $today"; fi
 [ -e "$dir" ] || { printf 'no log folder: %s\n' "$dir"; exit 3; }
 [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || unreadable "$dir" 'directory is not readable/searchable'
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/plugin-logs.XXXXXX") || unreadable "$dir" 'mktemp failed'
+project=$(basename -- "$root"); project=${project#.}
+scratch_root="${TMPDIR:-/tmp}/$project/plugin-logs"
+# A private run is not private if another user can replace its ancestry.
+# Resolve the platform temp alias first (for example /var on macOS), then
+# accept only trusted owners and non-writable or sticky ancestors.
+temp_root=$(cd -- "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
+  unreadable "$dir" "cannot create scratch folder: $scratch_root"
+check_scratch_dir() {
+  local path=$1 private=$2 metadata owner permissions
+  [ -d "$path" ] && [ ! -L "$path" ] || unreadable "$dir" "untrusted scratch folder: $path"
+  metadata=$(stat -c '%u %a' -- "$path" 2>/dev/null) ||
+    metadata=$(stat -f '%u %Lp' -- "$path" 2>/dev/null) ||
+    unreadable "$dir" "cannot inspect scratch folder: $path"
+  read -r owner permissions <<< "$metadata"
+  if [ "$private" = 1 ]; then
+    [ "$owner" = "$EUID" ] && (( (8#$permissions & 0022) == 0 )) ||
+      unreadable "$dir" "untrusted scratch folder: $path"
+  else
+    { [ "$owner" = 0 ] || [ "$owner" = "$EUID" ]; } &&
+      (( (8#$permissions & 0022) == 0 || (8#$permissions & 01000) != 0 )) ||
+      unreadable "$dir" "untrusted scratch folder: $path"
+  fi
+}
+ancestor=$temp_root
+while :; do
+  check_scratch_dir "$ancestor" 0
+  [ "$ancestor" != / ] || break
+  ancestor=$(dirname -- "$ancestor")
+done
+for scratch_parent in "$temp_root/$project" "$temp_root/$project/plugin-logs"; do
+  if [ ! -e "$scratch_parent" ] && [ ! -L "$scratch_parent" ]; then
+    mkdir -- "$scratch_parent" || unreadable "$dir" "cannot create scratch folder: $scratch_parent"
+  fi
+  check_scratch_dir "$scratch_parent" 1
+done
+scratch_root="$temp_root/$project/plugin-logs"
+scratch=$(mktemp -d "$scratch_root/run.XXXXXX") || unreadable "$dir" "mktemp failed under $scratch_root"
 cleanup() {
   local status=$?
   rm -rf -- "$scratch" || status=4

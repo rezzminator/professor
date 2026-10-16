@@ -45,6 +45,39 @@ expect 'report groups event and where with exact count, first/last and last mess
 expect 'report fixed section ordering and exact info count' '[ "$(grep -E "^(ERRORS|WARNINGS|INFO)$" "$T/out" | paste -sd, -)" = ERRORS,WARNINGS,INFO ] && grep -Fxq "callmeter 1" "$T/out"'
 expect 'no valid rows lists roster plugins with zero actual rows' '[ "$RC" = 0 ] && grep -Fxq "no valid rows: buddy, effort-live-control, engine-sync, gpt-gateway" "$T/out"'
 expect 'header states real span, no rotate and folder' 'grep -Fq "$T/logs" "$T/out" && grep -Fq "2026-10-14T15:19:31.123Z .. 2026-10-14T15:22:31.123Z" "$T/out" && grep -Fq "last rotate: none" "$T/out" && grep -Fq "contract-skipped: 0" "$T/out"'
+# Observe the real allocation without inventing a test-only production knob.
+mkdir -p "$T/scratch-bin" "$T/temp-root" "$T/.fixture-project"
+cp "$T/root/.gitmodules" "$T/.fixture-project/.gitmodules"
+REAL_MKTEMP=$(command -v mktemp)
+cat > "$T/scratch-bin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+made=$("$REAL_MKTEMP" "$@") || exit $?
+printf '%s\n' "$made" >> "$SCRATCH_RECORD"
+printf '%s\n' "$made"
+EOF
+chmod +x "$T/scratch-bin/mktemp"
+RC=0
+TMPDIR="$T/temp-root" PATH="$T/scratch-bin:$PATH" REAL_MKTEMP="$REAL_MKTEMP" SCRATCH_RECORD="$T/scratch-record" \
+  bash "$SUT" report --dir "$T/logs" --root "$T/.fixture-project" > "$T/out" 2> "$T/err" || RC=$?
+allocated=$(cat "$T/scratch-record")
+expect 'scratch is project-scoped and cleaned after report' '[ "$RC" = 0 ] && [[ "$allocated" == "$T/temp-root/fixture-project/plugin-logs/run."* ]] && [ -d "${allocated%/*}" ] && [ ! -e "$allocated" ] && grep -Fxq "callmeter 1" "$T/out"'
+# Pre-existing scratch ancestry is a trust boundary, including when run as root.
+for hostile in project-symlink purpose-symlink project-writable purpose-writable; do
+  base="$T/hostile-$hostile"
+  mkdir -p "$base" "$T/scratch-victim"
+  case "$hostile" in
+    project-symlink) ln -s "$T/scratch-victim" "$base/root" ;;
+    purpose-symlink) mkdir "$base/root"; ln -s "$T/scratch-victim" "$base/root/plugin-logs" ;;
+    project-writable) mkdir -m 777 "$base/root" ;;
+    purpose-writable) mkdir "$base/root"; mkdir -m 777 "$base/root/plugin-logs" ;;
+  esac
+  TMPDIR="$base" run_sut report --dir "$T/logs"
+  expect "reject $hostile scratch ancestry" '[ "$RC" = 4 ] && grep -Fq "untrusted scratch folder:" "$T/out"'
+done
+expect 'untrusted scratch symlinks never allocate in the victim' '[ -z "$(find "$T/scratch-victim" -mindepth 1 -print -quit)" ]'
+printf blocked > "$T/blocked-temp"
+TMPDIR="$T/blocked-temp" run_sut report --dir "$T/logs"
+expect 'scratch parent creation failure is visible' '[ "$RC" = 4 ] && grep -Fq "cannot create scratch folder: $T/blocked-temp/root/plugin-logs" "$T/out"'
 printf '\n{bad json}\n' > "$T/logs/buddy/warnings.jsonl"
 for filter in '.level="WARN"' '.extra=true' '.ts="not-a-date"'; do
   row buddy warning degraded 2026-10-14T15:20:31.123Z invalid | jq -c "$filter" >> "$T/logs/buddy/warnings.jsonl"

@@ -379,12 +379,17 @@ checks_templates_generated_agents() {
   elif [[ ! -d "$sources" ]]; then
     fail_step "generated agents NOT RENDERED — $sources is missing, so nothing was looked up"
     return
-  elif ! names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
-    # The inventory's exit 3 is a missing PyYAML, a toolchain gap, never a parse failure.
-    if [[ "$names" == "GAP install"* ]]; then
+  elif names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
+    : # The parsed inventory is counted below.
+  else
+    rc=$?
+    # Only the producer's exit 1 REJECTED is a source parse failure.
+    if [[ "$rc" -eq 3 && "$names" == "GAP install"* ]]; then
       fail_step "generated agents NOT RENDERED — $names"
-    else
+    elif [[ "$rc" -eq 1 && "$names" == "agent-source-inventory: REJECTED"* ]]; then
       fail_step "generated agents NOT RENDERED — agent sources do not parse: $names"
+    else
+      fail_step "generated agents NOT RENDERED — agent source lookup failed (exit $rc): $names"
     fi
     return
   fi
@@ -841,6 +846,7 @@ internal/harvest TestFetchRefreshThatReadsClearsTheCachedFailure
 internal/harvest TestCallerHeadersShareTheirFailureAcrossCalls
 internal/harvest TestLegacyConcurrentFailuresShareOneInFlightFetch
 internal/harvestmcp TestServiceChaos
+internal/installer TestClaudeMCPLockProtectsSlowBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence'
 
 # checks_pfm_race <pfm dir> <run dir>: CHECKS_PFM_RACE_TESTS under the race detector, which needs cgo

@@ -127,13 +127,7 @@ func (installer *engine) clearFullscreenAutoDisable() error {
 		if err := installer.change(
 			"clear Claude's fullscreen auto-disable in "+physical,
 			func() error {
-				locks := []string{path, physical}
-				for _, candidate := range installer.options.ClaudeAccounts {
-					alias := ClaudeRegistryFor(installer.options.Home, candidate)
-					if physicalSettingsPath(alias) == physical {
-						locks = append(locks, alias)
-					}
-				}
+				locks := installer.claudeMCPLockAliases(path, physical)
 				return withClaudeMCPLocks(locks, func(check func() error) error {
 					return installer.writeRegistryFileIf(path, raw, cleared, true, info.Mode().Perm(), check)
 				})

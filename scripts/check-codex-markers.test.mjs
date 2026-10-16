@@ -78,7 +78,7 @@ test("no generated mirror on disk is named, never a quiet clean claim", () => {
   const { code, output } = runCheck("plain.md", "no marker here\n", () => {});
   assert.equal(code, 0, output);
   assert.match(output, /WARN generated mirrors: none present on disk/);
-  assert.match(output, /generate them first: pfm codex build \. and pfm opencode build \./);
+  assert.match(output, /generate them first: engine-sync codex build \. and engine-sync opencode build \./);
   assert.doesNotMatch(output, /engine-sync build/);
   assert.match(output, /0 marked file\(s\) \(0 tracked, 0 generated mirror\)/);
 });

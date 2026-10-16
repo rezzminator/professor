@@ -2130,30 +2130,56 @@ class IntakeTest(Repo):
         # outside git no occurrence set can witness the line, so it is never served fresh
         self.assertIn(f"RECALL Q1 · 0/1 lines fresh · runs {os.path.basename(earlier)}", text)
         self.assertIn("STALE Q1 · no BASE to witness `app/srv/server.go` against", text)
+        self.assertIn("\nTRACE Q1 · 1 rows · app/srv/server.go\n", text)
         self.assertEqual(text.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 1 stale · 0 delta")
         self.assertIn(f"are in {run}/recall.txt", spec["additionalContext"])
 
-    def test_a_sub_tracer_card_for_an_answered_question_is_refused_unless_it_carries_a_logged_reason(self):
-        spec = json.loads(self.hook(f"Repo root: {self.root}\n1. What closes the pane?\n2. Who calls it?\n"))
+    TRACED = ("RECALL Q1 · 1/2 lines fresh · runs x\nTRACE Q1 · 1 rows · app/kill/kill.go, `kill.Run`\n"
+              "FRESH x node 1: refuses [app/srv/server.go:5]\nCHANGED Q1 · app/kill/kill.go\n"
+              "RECALL Q2 · 1/1 lines fresh · runs x\nTRACE Q2 · none\nFRESH x node 1: closes [app/srv/server.go:7]\n"
+              "GAP Q3 · no earlier answer line names `Close`\nTRACE Q3 · whole question\n")
+
+    def traced_run(self):
+        """A run whose recall.txt holds a question with TRACE rows (Q1), one all FRESH (Q2) and a GAP question (Q3),
+        and a card maker for it."""
+        spec = json.loads(self.hook(f"Repo root: {self.root}\n1. Who refuses?\n2. What closes?\n3. Who calls `Close`?\n"))
         run = spec["hookSpecificOutput"]["updatedInput"]["prompt"].splitlines()[1][len("RUN: "):]
         with open(os.path.join(run, "recall.txt"), "w", encoding="utf-8") as f:
-            f.write("RECALL Q1 · 1/1 lines fresh · runs x\nANSWERED Q1\nFRESH x node 1: closes [a.go:1]\n")
+            f.write(self.TRACED)
 
-        def card(q, reason=""):
-            return (f"RUN: {run}\nROOT: {self.root}\nID: 4\nFUEL: 0\nQUESTION: {q}\n{reason}"
-                    "THREAD: the close path\nFROM: a.go:1 `x`\n")
+        def card(q, thread="the refusal", src="app/srv/server.go:5 `x`", node="4", reason=""):
+            return (f"RUN: {run}\nROOT: {self.root}\nID: {node}\nFUEL: 0\nQUESTION: {q}\n{reason}"
+                    f"THREAD: {thread}\nFROM: {src}\n")
+        return run, card
 
-        refused = json.loads(self.hook(card("Q1"), subagent="sub-tracer"))["hookSpecificOutput"]
+    def test_a_sub_tracer_card_naming_none_of_its_trace_scope_is_refused_and_a_scoped_or_gap_card_passes(self):
+        run, card = self.traced_run()
+        for q in ("Q1", "Q1, Q2"):
+            with self.subTest(q):
+                refused = json.loads(self.hook(card(q), subagent="sub-tracer"))["hookSpecificOutput"]
+                self.assertEqual(refused["permissionDecision"], "deny")
+                self.assertIn("app/kill/kill.go, `kill.Run`", refused["permissionDecisionReason"])
+                self.assertIn(f"{run}/recall.txt", refused["permissionDecisionReason"])
+        for name, given in (("a TRACE path in FROM", card("Q1", src="app/kill/kill.go:6 `x`")),
+                            ("a TRACE name in THREAD", card("Q1", thread="every caller of kill.Run")),
+                            ("a GAP question", card("Q3")), ("a GAP question beside a scoped one", card("Q1, Q3")),
+                            ("a child card", card("Q1", node="4.1"))):
+            with self.subTest(name):
+                self.assertEqual(self.hook(given, subagent="sub-tracer"), "")
+
+    def test_a_sub_tracer_card_whose_questions_all_trace_none_is_refused_unless_it_carries_a_logged_reason(self):
+        run, card = self.traced_run()
+        refused = json.loads(self.hook(card("Q2"), subagent="sub-tracer"))["hookSpecificOutput"]
         self.assertEqual(refused["permissionDecision"], "deny")
-        self.assertIn(f"Q1 ANSWERED in {run}/recall.txt", refused["permissionDecisionReason"])
+        self.assertIn("Q2 need no thread", refused["permissionDecisionReason"])
+        self.assertIn("`tt wait`", refused["permissionDecisionReason"])
         self.assertIn("REASON:", refused["permissionDecisionReason"])
-        self.assertEqual(self.hook(card("Q2"), subagent="sub-tracer"), "")
-        self.assertEqual(self.hook(card("Q1, Q2"), subagent="sub-tracer"), "")
         log = os.path.join(self.parent, "intake.log")
-        self.assertEqual(self.hook(card("Q1", "REASON: the FRESH line omits the error path\n"), subagent="sub-tracer"), "")
+        self.assertEqual(self.hook(card("Q2", reason="REASON: the FRESH line omits the error path\n"),
+                                   subagent="sub-tracer"), "")
         with open(log, encoding="utf-8") as f:
-            self.assertRegex(f.read(), re.escape(run) + r": node 4 opened a thread for ANSWERED Q1 — REASON: the FRESH "
-                             r"line omits the error path")
+            self.assertRegex(f.read(), re.escape(run) + r": node 4 opened a thread for Q2 outside its TRACE lines — "
+                             r"REASON: the FRESH line omits the error path")
 
 class SeekTest(Repo):
     """`new ROOT --seek REGEX` and `new ROOT --questions`: earlier runs on the same root, and the stored questions."""
@@ -2974,6 +3000,7 @@ class CutGateBashTest(unittest.TestCase):
                         "printf x | tee ~/.local/state/pfm/flights/professor/f/cut-kit.txt",
                         f"echo x > {T}/p/x.txt", "sed -i s/a/b/ /private/tmp/p/x", f"cp a.go {T}/p/",
                         f"cd {T}/p && echo x > rel.txt", f"{KIT} > {flight}/cut-kit.txt",
+                        f"{KIT} | tee {flight}/cut-kit.txt",
                         f"sed -E -i 's/a/b/' {T}/p/x", f"perl -pi -e 's/a/b/' {T}/p/x", f"cp -t {T}/p a.go b.go"):
             with self.subTest(command=command):
                 self.assertAllowedSilently(self.hook(command, aid))
@@ -3119,14 +3146,17 @@ class RecallTest(unittest.TestCase):
         self.assertNotIn("FRESH ", out)
         self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 1 stale · 0 delta")
 
-    def test_a_moved_span_is_re_addressed_and_counted_fresh(self):
+    def test_a_moved_span_is_a_delta_with_its_old_and_new_rows_never_fresh(self):
         self.run_with(self.repo, self.HANDLE)
         self.edit("app/srv/server.go", SERVER[:2] + ["// a", "// b", "// c"] + SERVER[2:])
         out = self.recall("1. Where does `Handle` refuse an empty target?\n")
-        self.assertIn("RECALL Q1 · 1/1 lines fresh", out)
-        self.assertIn("[app/srv/server.go:8]", out)
-        self.assertIn("MOVED app/srv/server.go:5 → app/srv/server.go:8", out)
-        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 1/1 · 0 stale · 0 delta")
+        self.assertIn("RECALL Q1 · 0/1 lines fresh", out)
+        self.assertNotIn("FRESH ", out)
+        self.assertRegex(out, r"(?m)^DELTA .*\[app/srv/server\.go:8\]")
+        self.assertIn('\n  - app/srv/server.go:5 return errors.New("target is required")\n', out)
+        self.assertIn('\n  + app/srv/server.go:8 return errors.New("target is required")\n', out)
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 1 rows · app/srv/server\.go$")
+        self.assertEqual(out.rstrip("\n").splitlines()[-1], "RECALL COVER 0/1 · 0 stale · 1 delta")
 
     def test_a_caller_added_after_base_turns_an_only_caller_line_delta(self):
         self.run_with(self.repo, self.ONLY)
@@ -3175,16 +3205,16 @@ class RecallTest(unittest.TestCase):
 
     def test_a_closed_world_line_turns_delta_when_a_path_it_names_gains_an_occurrence(self):
         self.commit("templates/project/codex/README.md",
-                    ["# Codex", "", "Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write."])
+                    ["# Codex", "", "Run `.claude/scripts/sync-hook.sh sync` by hand after a Bash write."])
         self.run_with(self.repo, hops("1", [
-            "- Nothing else in templates/project registers codex-sync.sh as a hook; other grep hits are prose in docs "
+            "- Nothing else in templates/project registers sync-hook.sh as a hook; other grep hits are prose in docs "
             "[templates/project/codex/README.md:3]"],
             ["@ templates/project/codex/README.md:3",
-             "> Run `.claude/scripts/codex-sync.sh sync` by hand after a Bash write.", "= prose"],
+             "> Run `.claude/scripts/sync-hook.sh sync` by hand after a Bash write.", "= prose"],
             ["END returned @ templates/project/codex/README.md:3"]))
         self.edit("templates/project/settings.json",
-                  ['{"hooks": {"Stop": [{"command": ".claude/scripts/codex-sync.sh sync"}]}}'])
-        out = self.recall("1. Quote codex-sync.sh dirty flag readers/writers and symlink handling, plus existing test home.\n")
+                  ['{"hooks": {"Stop": [{"command": ".claude/scripts/sync-hook.sh sync"}]}}'])
+        out = self.recall("1. Quote sync-hook.sh dirty flag readers/writers and symlink handling, plus existing test home.\n")
         self.assertNotIn("FRESH ", out)
         self.assertIn("DELTA ", out)
         self.assertIn('+ templates/project/settings.json:1 {"hooks"', out)
@@ -3240,28 +3270,108 @@ class RecallTest(unittest.TestCase):
         self.assertEqual(out.count("TOPMATCH"), 3)
         self.assertTrue(out.rstrip("\n").splitlines()[-1].startswith("RECALL COVER 3/3 "), out[-300:])
 
-    def test_past_the_cap_stale_rows_then_delta_lines_go_before_any_fresh_line(self):
-        fresh = [f"- `Handle` refuses case {i}: " + "word " * 150 + "[app/srv/server.go:5]" for i in range(8)]
-        delta = [f"- `Handle` hands `kill.Run` variant {i}: " + "word " * 70 + "[app/srv/server.go:7]" for i in range(14)]
-        run = self.run_with(self.repo, hops("1", fresh + delta, [
-            "@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")", "= the refusal",
-            "@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the call"],
-            ["END returned @ app/srv/server.go:7"]))
-        with open(os.path.join(run, "2.hops"), "w") as f:
-            f.write(hops("2", [f"- `Handle` reaches `kill.Run` premise {i} [app/kill/kill.go:6]" for i in range(6)],
-                         ["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
-                          "= the premise"], ["END returned @ app/kill/kill.go:6"]))
-        changed = list(KILL)
-        changed[5] = "\t\treturn nil"
-        self.edit("app/kill/kill.go", changed)
+    H5 = ["@ app/srv/server.go:5", "> \t\treturn errors.New(\"target is required\")", "= the refusal"]
+    H7 = ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the call"]
+    BOTH = "1. Where does `Handle` refuse, and is `kill.Run` reached?\n"
+
+    def crowded(self, fresh, words, delta=0, stale=0):
+        """A run whose node 1 holds `fresh` lines of `words` words that stay FRESH and `delta` lines a new `kill.Run`
+        caller turns DELTA, and whose node 2 holds `stale` lines on a kill.go premise that no longer holds."""
+        lines = [f"- `Handle` refuses case {i}: " + "word " * words + "[app/srv/server.go:5]" for i in range(fresh)]
+        lines += [f"- `Handle` hands `kill.Run` variant {i}: " + "word " * 70 + "[app/srv/server.go:7]" for i in range(delta)]
+        run = self.run_with(self.repo, hops("1", lines, self.H5 + self.H7, ["END returned @ app/srv/server.go:7"]))
+        if stale:
+            with open(os.path.join(run, "2.hops"), "w") as f:
+                f.write(hops("2", [f"- `Handle` reaches `kill.Run` premise {i} [app/kill/kill.go:6]" for i in range(stale)],
+                             ["@ app/kill/kill.go:6", "> \t\treturn fmt.Errorf(\"kill pane %s: %w\", target, err)",
+                              "= the premise"], ["END returned @ app/kill/kill.go:6"]))
+            changed = list(KILL)
+            changed[5] = "\t\treturn nil"
+            self.edit("app/kill/kill.go", changed)
+        if delta:
+            os.makedirs(os.path.join(self.repo, "app", "cli"))
+            self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(t)", "}"])
+        return run
+
+    def cut(self, out):
+        """(stale, delta, fresh, collapsed, markers) of the RECALL CUT line."""
+        m = re.search(r"(?m)^RECALL CUT (\d+) lines past the 12 KB cap · (\d+) stale, (\d+) delta, (\d+) fresh · "
+                      r"(\d+) collapsed to (\d+) CHANGED", out)
+        self.assertIsNotNone(m, out)
+        n, s, d, f, c, k = map(int, m.groups())
+        self.assertEqual((n, c), (s + d + f, s + d), m.group(0))
+        return s, d, f, c, k
+
+    def test_past_the_cap_a_delta_line_collapses_to_one_changed_marker_per_question_and_path(self):
+        self.crowded(fresh=12, words=150, delta=6)
+        out = self.recall(self.BOTH)
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        s, d, f, c, k = self.cut(out)
+        self.assertEqual((s, f, k), (0, 0, 1), out)
+        self.assertGreater(d, 0, out)
+        self.assertEqual(len(re.findall(r"(?m)^DELTA ", out)), 6 - d, out)
+        self.assertEqual(re.findall(r"(?m)^CHANGED .*", out), ["CHANGED Q1 · app/srv/server.go"], out)
+        self.assertEqual(len(re.findall(r"(?m)^FRESH ", out)), 12, out)
+
+    def test_past_the_cap_a_stale_line_collapses_to_a_changed_marker_never_vanishes(self):
+        self.crowded(fresh=8, words=265, stale=20)
+        out = self.recall(self.BOTH)
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        s, d, f, c, k = self.cut(out)
+        self.assertEqual((d, f, k), (0, 0, 1), out)
+        self.assertGreater(s, 0, out)
+        self.assertEqual(len(re.findall(r"(?m)^STALE Q1 ", out)), 20 - s, out)
+        self.assertEqual(re.findall(r"(?m)^CHANGED .*", out), ["CHANGED Q1 · app/kill/kill.go"], out)
+        self.assertEqual(len(re.findall(r"(?m)^FRESH ", out)), 8, out)
+
+    def test_past_the_cap_gap_rows_are_never_cut(self):
+        lines = [f"- `target is required` is returned for case {i}: " + "word " * 265 + "[app/srv/server.go:5]"
+                 for i in range(14)] + [f"- Nothing else refuses here {i} [app/srv/server.go:5]" for i in range(10)]
+        self.run_with(self.repo, hops("1", lines, self.H5, ["END returned @ app/srv/server.go:5"]))
+        out = self.recall("1. Where is `target is required` refused, app/srv/server.go?\n")
+        self.assertEqual(len(re.findall(r"(?m)^GAP Q1 · .*Nothing else refuses here", out)), 10, out)
+        s, d, f, c, k = self.cut(out)
+        self.assertGreater(f, 0, out)
+        self.assertEqual(len(re.findall(r"(?m)^FRESH ", out)), 14 - f, out)
+
+    def test_changed_markers_survive_when_fresh_lines_must_be_cut(self):
+        self.crowded(fresh=14, words=265, delta=6, stale=6)
+        out = self.recall(self.BOTH)
+        self.assertLessEqual(len(out.encode()), 12 * 1024)
+        self.assertEqual(self.cut(out)[:2] + self.cut(out)[3:], (6, 6, 12, 2), out)
+        self.assertEqual(sorted(re.findall(r"(?m)^CHANGED .*", out)),
+                         ["CHANGED Q1 · app/kill/kill.go", "CHANGED Q1 · app/srv/server.go"], out)
+        self.assertNotRegex(out, r"(?m)^(STALE|DELTA) ")
+        kept = len(re.findall(r"(?m)^FRESH ", out))
+        self.assertTrue(0 < kept < 14, out)
+        self.assertRegex(out, rf"(?m)^TRACE Q1 · {26 - kept} rows · ")
+
+    def test_a_stale_row_naming_a_git_failure_is_never_cut(self):
+        self.crowded(fresh=14, words=265)
+        broken = self.run_with(self.repo, hops("1", [f"- `Handle` refuses unchecked case {i} [app/srv/server.go:5]"
+                                                     for i in range(6)], self.H5, ["END returned @ app/srv/server.go:5"]))
+        with open(os.path.join(broken, "BASE"), "w") as f:
+            f.write("0" * 40 + "\n")
+        out = self.recall("1. Where does `Handle` refuse?\n")
+        self.assertEqual(len(re.findall(r"(?m)^STALE Q1 · witness `Handle` unusable for run .* failed", out)), 6, out)
+        self.assertNotRegex(out, r"(?m)^CHANGED ")
+        self.assertGreater(self.cut(out)[2], 0, out)
+
+    def test_each_question_gets_a_trace_line_naming_what_is_left_to_trace(self):
+        self.run_with(self.repo, self.HANDLE)
+        self.run_with(self.repo, self.ONLY)
+        q = ("1. Where does `Handle` refuse an empty target?\n2. Who calls `kill.Run`?\n"
+             "3. Where is `NoSuchThing` handled?\n4. Where does `Handle` refuse, and is `close_pane` reached?\n")
+        out = self.recall(q)
+        self.assertRegex(out, r"(?m)^RECALL Q1 · 2/2 lines fresh · .*\nTRACE Q1 · none$")
+        self.assertRegex(out, r"(?m)^RECALL Q2 · 1/1 lines fresh · .*\nTRACE Q2 · none$")
+        self.assertRegex(out, r"(?m)^GAP Q3 · .*\nTRACE Q3 · whole question$")
+        self.assertRegex(out, r"(?m)^TRACE Q4 · 0 rows · `close_pane`$")
         os.makedirs(os.path.join(self.repo, "app", "cli"))
         self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(t)", "}"])
-        out = self.recall("1. Where does `Handle` refuse, and is `kill.Run` reached?\n")
-        self.assertLessEqual(len(out.encode()), 12 * 1024)
-        self.assertEqual(len(re.findall(r"(?m)^FRESH ", out)), 8, out)
-        self.assertNotRegex(out, r"(?m)^STALE ")
-        self.assertLess(len(re.findall(r"(?m)^DELTA ", out)), 14)
-        self.assertRegex(out, r"(?m)^RECALL CUT \d+ lines past the 12 KB cap · 6 stale/gap, [1-9]\d* delta, 0 fresh")
+        out = self.recall(q)
+        self.assertRegex(out, r"(?m)^TRACE Q2 · 1 rows · app/srv/server\.go, `kill\.Run`$")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 1 rows · app/srv/server\.go, `kill\.Run`$")
 
     def test_two_witnessed_names_on_one_changed_line_give_one_occurrence_row(self):
         self.run_with(self.repo, self.ONLY)
@@ -3271,20 +3381,20 @@ class RecallTest(unittest.TestCase):
         self.assertIn("DELTA ", out)
         self.assertEqual(out.count("+ app/cli/cli.go:4 "), 1, out)
 
-    def test_answered_needs_every_anchor_on_a_fresh_line_and_no_delta_stale_or_gap_row(self):
+    def test_trace_none_needs_every_anchor_on_a_fresh_line_and_no_delta_stale_or_gap_row(self):
         handle_and_run = hops("1", ["- `Handle` refuses the empty target, else hands it to `kill.Run` [app/srv/server.go:7]"],
                               ["@ app/srv/server.go:7", "> \treturn kill.Run(req.Target)", "= the call"],
                               ["END returned @ app/srv/server.go:7"])
         q = "1. Where does `Handle` refuse, and is `kill.Run` reached?\n2. Where does `Handle` refuse?\n"
         self.run_with(self.repo, handle_and_run)
         out = self.recall(q)
-        self.assertRegex(out, r"(?m)^ANSWERED Q1$")
-        self.assertRegex(out, r"(?m)^ANSWERED Q2$")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · none$")
+        self.assertRegex(out, r"(?m)^TRACE Q2 · none$")
         shutil.rmtree(self.parent)
         self.run_with(self.repo, self.HANDLE)
         out = self.recall(q)
-        self.assertNotRegex(out, r"(?m)^ANSWERED Q1\b", "kill.Run is carried by no FRESH line")
-        self.assertRegex(out, r"(?m)^ANSWERED Q2$")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 0 rows · `kill\.Run`$", "kill.Run is carried by no line")
+        self.assertRegex(out, r"(?m)^TRACE Q2 · none$")
         run = self.run_with(self.repo, handle_and_run)
         with open(os.path.join(run, "2.hops"), "w") as f:
             f.write(hops("2", ["- `Handle` reaches the pane through a premise [app/kill/kill.go:6]"],
@@ -3295,7 +3405,7 @@ class RecallTest(unittest.TestCase):
         self.edit("app/kill/kill.go", changed)
         out = self.recall(q)
         self.assertRegex(out, r"(?m)^STALE Q1 ")
-        self.assertNotRegex(out, r"(?m)^ANSWERED Q\d", "a STALE row of the question rules ANSWERED out")
+        self.assertNotRegex(out, r"(?m)^TRACE Q\d · none$", "a STALE row of the question needs a trace")
         self.edit("app/kill/kill.go", KILL)
         shutil.rmtree(self.parent)
         self.run_with(self.repo, handle_and_run)
@@ -3303,7 +3413,7 @@ class RecallTest(unittest.TestCase):
         self.edit("app/cli/cli.go", ["package cli", "", "func Close(t string) error {", "\treturn kill.Run(t)", "}"])
         out = self.recall(q)
         self.assertRegex(out, r"(?m)^DELTA ")
-        self.assertNotRegex(out, r"(?m)^ANSWERED Q1\b", "a DELTA row of the question rules ANSWERED out")
+        self.assertNotRegex(out, r"(?m)^TRACE Q1 · none$", "a DELTA row of the question needs a trace")
         shutil.rmtree(os.path.join(self.repo, "app", "cli"))
         shutil.rmtree(self.parent)
         self.run_with(self.repo, hops("1", ["- `Handle` refuses the empty target [app/srv/server.go:5]",
@@ -3312,7 +3422,7 @@ class RecallTest(unittest.TestCase):
                                        "= the refusal"], ["END returned @ app/srv/server.go:5"]))
         out = self.recall("1. Where does `Handle` refuse, app/srv/server.go?\n")
         self.assertRegex(out, r"(?m)^GAP Q1 · ")
-        self.assertNotIn("ANSWERED", out, "a GAP row of the question rules ANSWERED out")
+        self.assertRegex(out, r"(?m)^TRACE Q1 · 1 rows · app/srv/server\.go$", "a GAP row of the question needs a trace")
 
 
 if __name__ == "__main__":

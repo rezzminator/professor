@@ -3,8 +3,10 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -94,5 +96,72 @@ func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing
 	}
 	if !strings.Contains(err.Error(), "refuse to strand owned hooks") || !strings.Contains(err.Error(), hooks) {
 		t.Fatalf("uninstall error did not name the stranded ownership at %s: %v", hooks, err)
+	}
+}
+
+// TestRecordedClaudeHooksRetirementKeepsAWriteMadeAfterItsRead: retiring the
+// hooks pfm recorded in a Claude settings file re-reads it before the rename,
+// so a chat's write after pfm's read stays, the recorded handler still goes,
+// and the file as pfm found it at the write is backed up; a file the chat
+// removed meanwhile has nothing left to retire and is not created again.
+func TestRecordedClaudeHooksRetirementKeepsAWriteMadeAfterItsRead(t *testing.T) {
+	const recorded, kept = "/pfm/hook stop", "/user/hook stop"
+	given := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"` + recorded + `"},` +
+		`{"type":"command","command":"` + kept + `"}]}]}}`
+	for _, test := range []struct {
+		name, chat, want string // chat "" = the file removed; want "" = no file
+	}{
+		{
+			name: "a chat's write after the read",
+			chat: strings.Replace(given, `{"hooks":{`, `{"theme":"dark","hooks":{`, 1),
+			want: `{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"` + kept + `"}]}]}}`,
+		},
+		{name: "a file removed after the read"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			writeFixture(t, path, given)
+			edit, err := planRecordedClaudeHooksRetirement(
+				path,
+				settingsHookCounts{{Event: "Stop", Command: recorded}: 1},
+				"s1",
+			)
+			if err != nil || edit == nil {
+				t.Fatalf("plan: edit=%v err=%v, want an edit", edit != nil, err)
+			}
+			// The chat's write, or its removal of the file, lands after pfm's read.
+			if test.chat == "" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeFixture(t, path, test.chat)
+			}
+			backup := availableBackup(path, "s1")
+			if err := edit(); err != nil {
+				t.Fatalf("edit: %v", err)
+			}
+			if test.want == "" {
+				for _, gone := range []string{path, backup} {
+					if _, err := os.Lstat(gone); !os.IsNotExist(err) {
+						t.Fatalf("%s after the edit of a removed file: %v, want none", gone, err)
+					}
+				}
+				return
+			}
+			var got, want any
+			if err := json.Unmarshal([]byte(readFixture(t, path)), &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(test.want), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("settings %v, want %v", got, want)
+			}
+			if got := readFixture(t, backup); got != test.chat {
+				t.Fatalf("backup %q, want the file before pfm's write %q", got, test.chat)
+			}
+		})
 	}
 }

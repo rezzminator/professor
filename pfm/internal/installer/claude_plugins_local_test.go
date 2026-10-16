@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,15 +26,26 @@ const alphaVersion = "0.80.0-alpha"
 func writePluginCheckout(t *testing.T, root, name string) string {
 	t.Helper()
 	plugin := filepath.Join(root, name, "plugins", name)
-	writeFixture(t, filepath.Join(plugin, ".claude-plugin", "plugin.json"), `{"name":"`+name+`","version":"9.9.9"}`)
-	writeFixture(t, filepath.Join(plugin, "hooks", "hook.ts"), "export const hook = '"+name+"'\n")
-	if err := os.Chmod(filepath.Join(plugin, "hooks", "hook.ts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writePluginFiles(t, plugin, name)
 	writeFixture(t, filepath.Join(plugin, "node_modules", "dep", "index.js"), "module.exports = 1\n")
 	writeFixture(t, filepath.Join(plugin, ".DS_Store"), "finder")
 	writeFixture(t, filepath.Join(plugin, "hooks", ".DS_Store"), "finder")
 	return plugin
+}
+
+// checkoutVersion is the version writePluginFiles gives every plugin.json.
+const checkoutVersion = "9.9.9"
+
+// writePluginFiles writes the files of name's plugin at checkoutVersion into
+// dir: what a checkout holds and what Claude snapshots into its cache.
+func writePluginFiles(t *testing.T, dir, name string) {
+	t.Helper()
+	writeFixture(t, filepath.Join(dir, ".claude-plugin", "plugin.json"),
+		`{"name":"`+name+`","version":"`+checkoutVersion+`"}`)
+	writeFixture(t, filepath.Join(dir, "hooks", "hook.ts"), "export const hook = '"+name+"'\n")
+	if err := os.Chmod(filepath.Join(dir, "hooks", "hook.ts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // pluginTreeFiles maps every regular file under root to its mode and content.
@@ -85,28 +97,7 @@ func alphaPluginEngine(
 func devID(name string) string { return name + "@" + name + "-dev" }
 
 func TestClaudePluginTargets(t *testing.T) {
-	table := []testPlugin{
-		{
-			Name:   "cache-live-control",
-			Source: "rezzminator/cache-live-control",
-			ID:     "cache-live-control@cache-live-control",
-		},
-		{
-			Name:   "sub-agent-compact",
-			Source: "rezzminator/sub-agent-compact",
-			ID:     "sub-agent-compact@sub-agent-compact",
-		},
-		{
-			Name:   "effort-live-control",
-			Source: "rezzminator/effort-live-control",
-			ID:     "effort-live-control@effort-live-control",
-		},
-		{
-			Name:   "tool-visibility-controller",
-			Source: "rezzminator/tool-visibility-controller",
-			ID:     "tool-visibility-controller@tool-visibility-controller",
-		},
-	}
+	table := testPlugins
 	home := t.TempDir()
 	root := t.TempDir()
 	for _, p := range table {
@@ -116,6 +107,7 @@ func TestClaudePluginTargets(t *testing.T) {
 	writePluginCheckout(t, partial, table[0].Name)
 	writePluginCheckout(t, partial, table[2].Name)
 	writePluginCheckout(t, partial, table[3].Name)
+	writePluginCheckout(t, partial, table[4].Name)
 	github := func(p testPlugin, fallback string) ClaudePluginTarget {
 		return ClaudePluginTarget{
 			Name:     p.Name,
@@ -170,7 +162,7 @@ func TestClaudePluginTargets(t *testing.T) {
 		writePluginCheckout(t, cloneRoot, p.Name)
 	}
 	partialClone := t.TempDir()
-	for _, index := range []int{0, 2, 3} {
+	for _, index := range []int{0, 2, 3, 4} {
 		writePluginCheckout(t, filepath.Join(partialClone, "plugins"), table[index].Name)
 	}
 	cloneMissing := filepath.Join(
@@ -185,10 +177,10 @@ func TestClaudePluginTargets(t *testing.T) {
 		{"release", ClaudePluginBuild{
 			Version: "0.80.0", Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
 		}, []ClaudePluginTarget{
-			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""),
+			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
 		}},
 		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root, Plugins: defaults}, []ClaudePluginTarget{
-			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""),
+			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
 		}},
 		{"alpha without the key or a source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, Plugins: defaults,
@@ -197,16 +189,19 @@ func TestClaudePluginTargets(t *testing.T) {
 			github(table[1], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[2], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[3], "claude.pluginCheckoutRoot unset and no source clone"),
+			github(table[4], "claude.pluginCheckoutRoot unset and no source clone"),
 		)},
 		{"alpha without the key installs from the source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			local(table[0], cloneRoot), local(table[1], cloneRoot), local(table[2], cloneRoot), local(table[3], cloneRoot),
+			local(table[4], cloneRoot),
 		)},
 		{"the key wins over the source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
+			local(table[4], root),
 		)},
 		{"a source clone missing a checkout", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepo: partialClone, Plugins: defaults,
@@ -216,6 +211,7 @@ func TestClaudePluginTargets(t *testing.T) {
 				" (the source clone's plugins/; claude.pluginCheckoutRoot unset)"),
 			local(table[2], filepath.Join(partialClone, "plugins")),
 			local(table[3], filepath.Join(partialClone, "plugins")),
+			local(table[4], filepath.Join(partialClone, "plugins")),
 		)},
 		{"an unresolved source clone leaves the copy undecided", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepoErr: unresolved, Plugins: defaults[:1],
@@ -227,9 +223,11 @@ func TestClaudePluginTargets(t *testing.T) {
 			github(table[1], "no checkout at "+missing+" (claude.pluginCheckoutRoot)"),
 			local(table[2], partial),
 			local(table[3], partial),
+			local(table[4], partial),
 		)},
 		{"alpha with every checkout", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
+			local(table[4], root),
 		)},
 		{"the list decides which bare names", ClaudePluginBuild{
 			Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: table[2].Name}},
@@ -541,7 +539,7 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 	}{
 		{
 			"alpha without the key or a clone at the default path", alphaVersion, false, false, nil,
-			[]bool{false, false, false, false},
+			[]bool{false, false, false, false, false},
 			func(_, home string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(home, ".professor", "plugins", p.Name, "plugins", p.Name,
 					".claude-plugin", "plugin.json") + " (the source clone's plugins/; claude.pluginCheckoutRoot unset)"
@@ -549,20 +547,20 @@ func TestEnsureClaudePluginsAlphaFallsBackToGitHub(t *testing.T) {
 		},
 		{
 			"alpha without the key installs from the source clone", alphaVersion, false, true,
-			[]int{0, 1, 2, 3},
-			[]bool{true, true, true, true},
+			[]int{0, 1, 2, 3, 4},
+			[]bool{true, true, true, true, true},
 			nil,
 		},
 		{
 			"alpha with a checkout missing", alphaVersion, true, false,
-			[]int{0, 2, 3},
-			[]bool{true, false, true, true},
+			[]int{0, 2, 3, 4},
+			[]bool{true, false, true, true, true},
 			func(root, _ string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(root, p.Name, "plugins", p.Name, ".claude-plugin", "plugin.json") +
 					" (claude.pluginCheckoutRoot)"
 			},
 		},
-		{"release", "0.80.0", true, false, []int{0, 1, 2, 3}, []bool{false, false, false, false}, nil},
+		{"release", "0.80.0", true, false, []int{0, 1, 2, 3, 4}, []bool{false, false, false, false, false}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -716,5 +714,76 @@ func TestEnsureClaudePluginsUndecidedLeavesBothCopies(t *testing.T) {
 				t.Fatalf("an undecided source read as a fallback:\n%s", out.String())
 			}
 		})
+	}
+}
+
+// TestSettingsEditKeepsAWriteMadeAfterItsRead: a chat may write settings.json
+// between pfm's read and its rename; pfm re-reads before the rename and
+// re-applies its edit to that content, so neither write is lost.
+func TestSettingsEditKeepsAWriteMadeAfterItsRead(t *testing.T) {
+	const name = "effort-live-control"
+	target := &ClaudePluginTarget{
+		Name: name, ID: devID(name), DevID: devID(name), GitHubID: name + "@" + name,
+	}
+	for _, test := range []struct {
+		name     string
+		plan     func(string, *ClaudePluginTarget) (string, func() error, error)
+		disabled string
+	}{
+		{"other copy retirement", planOtherCopyRetirement, name + "@" + name},
+		{"retired plugin disable", planRetiredPluginDisable, "agent-effort@agent-effort"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			writeFixture(t, path, `{"enabledPlugins":{"`+test.disabled+`":true}}`)
+			message, edit, err := test.plan(path, target)
+			if err != nil || message == "" {
+				t.Fatalf("plan = %q, %v; want an edit", message, err)
+			}
+			// The chat's write lands after pfm's read.
+			writeFixture(t, path, `{"enabledPlugins":{"`+test.disabled+`":true,"chat@chat":true},"theme":"dark"}`)
+			if err := edit(); err != nil {
+				t.Fatalf("edit: %v", err)
+			}
+			var got struct {
+				EnabledPlugins map[string]bool `json:"enabledPlugins"`
+				Theme          string          `json:"theme"`
+			}
+			if err := json.Unmarshal([]byte(readFixture(t, path)), &got); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]bool{test.disabled: false, "chat@chat": true}
+			if !maps.Equal(got.EnabledPlugins, want) || got.Theme != "dark" {
+				t.Fatalf("settings %+v, want enabledPlugins %v and theme dark", got, want)
+			}
+		})
+	}
+}
+
+// TestSettingsEditFailsAfterItsRetries: a settings.json that changes again
+// before every rename is re-applied settingsEditRetries times, then the edit
+// fails naming the file and its repair, leaving the file as the other writer
+// left it.
+func TestSettingsEditFailsAfterItsRetries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	writeFixture(t, path, `{"enabledPlugins":{"old@old":true}}`)
+	rereads, applied := 0, 0
+	err := commitSettingsDocument(path, []byte(readFixture(t, path)),
+		map[string]any{"enabledPlugins": map[string]any{"old@old": false}},
+		func(document map[string]any) error {
+			applied++
+			document["enabledPlugins"] = map[string]any{"old@old": false}
+			return nil
+		},
+		func(string) ([]byte, error) {
+			rereads++
+			return fmt.Appendf(nil, `{"enabledPlugins":{"old@old":true},"write":%d}`, rereads), nil
+		})
+	want := path + " changed under pfm's edit 4 times in a row — rerun pfm install"
+	if err == nil || err.Error() != want || rereads != 4 || applied != 3 {
+		t.Fatalf("err = %v after %d re-reads and %d re-applies, want %q after 4 and 3", err, rereads, applied, want)
+	}
+	if got := readFixture(t, path); got != `{"enabledPlugins":{"old@old":true}}` {
+		t.Fatalf("settings %q, want the file untouched", got)
 	}
 }

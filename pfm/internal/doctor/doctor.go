@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/ask"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -36,6 +38,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 const emptySummary = "none"
@@ -281,10 +284,30 @@ func Run(
 	tally.warnings += depWarnings
 	tally.failures += depFailures
 	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
-	printClaudePluginsDoctor(
+	claudeStore := installer.ClaudeStore(resolved.Home)
+	pluginBuild := doctorClaudePluginBuild(
+		runtime.Version, resolved.Home, runtime.Config.Claude,
+		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
+	)
+	printClaudePluginsDoctor(stdout, claudeStore, dependencies.Env, pluginBuild, tally)
+	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
+	printPluginLogsDoctor(
 		stdout,
-		installer.ClaudeStore(resolved.Home),
+		append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...),
+		pluginBuild,
 		dependencies.Env,
+		unix.Access,
+		tally,
+	)
+	claudeEnvDir := primary.ConfigDir
+	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
+		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
+	}
+	printClaudeEnvDoctor(
+		stdout,
+		installer.ManagedRoot(resolved.Home),
+		filepath.Join(claudeEnvDir, "settings.json"),
+		runtime.Config.Claude.Env,
 		doctorClaudePluginBuild(
 			runtime.Version, resolved.Home, runtime.Config.Claude,
 			runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
@@ -299,6 +322,7 @@ func Run(
 		dependencies.Env,
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
 		runtime.Config.ClaudeConfigDirs(),
+		update.RetiredRegistryNames(),
 		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings

@@ -26,37 +26,50 @@ export -f go
 const ABSENT = "::error::engine-sync machine policy absent or unreadable: ";
 const UNSTAGED = "::error::engine-sync machine policy could not be staged from ";
 
+const FOREIGN = "::error::engine-sync global file exists with other content, not overwritten: ";
+
 test("the action stages and exports the machine policy, or names the failure before any build", async (t) => {
-  for (const [state, expected] of [["present", null], ["missing", ABSENT], ["symlink loop", ABSENT], ["staging blocked", UNSTAGED]]) {
+  for (const [state, expected] of [["present", null], ["already staged", null], ["missing", ABSENT], ["symlink loop", ABSENT],
+    ["staging blocked", UNSTAGED], ["another file in place", FOREIGN]]) {
     await t.test(state, (t) => {
       const root = mkdtempSync(join(tmpdir(), "ci-engine-sync-"));
       t.after(() => rmSync(root, { recursive: true, force: true }));
-      const policy = join(root, "templates/global/engine-sync/config.json");
+      const policy = join(root, "templates/global/engine-sync.json");
       const runner = join(root, "runner");
       const envFile = join(root, "github-env");
+      const pathFile = join(root, "github-path");
       for (const path of [dirname(policy), join(root, "plugins/engine-sync"), runner, join(root, "home")])
         mkdirSync(path, { recursive: true });
       writeFileSync(join(root, "plugins/engine-sync/go.mod"), "module fixture\n");
       writeFileSync(envFile, "");
+      writeFileSync(pathFile, "");
       const bytes = '{"version":1,"codex":{"suffixMode":"none"}}\n';
-      if (state === "symlink loop") symlinkSync("config.json", policy);
+      const destination = join(root, "home/.claude/engine-sync.json");
+      if (state === "symlink loop") symlinkSync("engine-sync.json", policy);
       else if (state !== "missing") writeFileSync(policy, bytes);
-      if (state === "staging blocked") writeFileSync(join(runner, "engine-sync-config"), "blocked\n");
+      if (state === "staging blocked") writeFileSync(join(root, "home/.claude"), "blocked\n");
+      if (state === "already staged" || state === "another file in place") {
+        mkdirSync(dirname(destination), { recursive: true });
+        writeFileSync(destination, state === "already staged" ? bytes : '{"version":1}\n');
+      }
       const r = spawnSync("bash", ["-c", COMPILER + "set -e\n" + RUNS.join("\n")], {
-        cwd: root, env: { PATH: process.env.PATH, HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "empty-config"),
-          GITHUB_WORKSPACE: root, RUNNER_TEMP: runner, GITHUB_ENV: envFile }, encoding: "utf8",
+        cwd: root, env: { PATH: process.env.PATH, HOME: join(root, "home"),
+          GITHUB_WORKSPACE: root, RUNNER_TEMP: runner, GITHUB_ENV: envFile, GITHUB_PATH: pathFile }, encoding: "utf8",
       });
       const output = r.stdout + r.stderr;
       if (expected === null) {
         assert.equal(r.status, 0, output);
         assert.equal(readFileSync(envFile, "utf8"),
-          `ENGINE_SYNC_BIN=${runner}/engine-sync/engine-sync\nXDG_CONFIG_HOME=${runner}/engine-sync-config\n`);
-        assert.equal(readFileSync(join(runner, "engine-sync-config/engine-sync/config.json"), "utf8"), bytes);
+          `ENGINE_SYNC_BIN=${runner}/engine-sync/engine-sync\n`);
+        assert.equal(readFileSync(destination, "utf8"), bytes);
+        assert.equal(readFileSync(pathFile, "utf8"), `${runner}/engine-sync\n`);
         return;
       }
       assert.equal(r.status, 1, output);
-      assert.ok(output.includes(expected + policy), output);
+      assert.ok(output.includes(expected + (expected === FOREIGN ? destination : policy)), output);
+      if (expected === FOREIGN) assert.equal(readFileSync(destination, "utf8"), '{"version":1}\n');
       assert.equal(readFileSync(envFile, "utf8"), "", "a failed staging exports nothing");
+      assert.equal(readFileSync(pathFile, "utf8"), "", "a failed staging puts nothing on PATH");
       assert.equal(existsSync(join(runner, "engine-sync/engine-sync")), false, "the policy fails before the compiler builds");
     });
   }

@@ -1,13 +1,14 @@
 name: engine-sync binary
 description: >-
-  Builds engine-sync, the single writer of every Codex and OpenCode artifact
-  (pfm codex|opencode forward to it), from the plugins/engine-sync submodule,
-  stages the shipped machine policy templates/global/engine-sync/config.json
-  under $RUNNER_TEMP/engine-sync-config, and exports ENGINE_SYNC_BIN and
-  XDG_CONFIG_HOME to every later step of the job (git, Go and pip then read
-  their user config from that directory too). An absent source, or a policy
-  absent, unreadable or unstageable, fails the job naming it, never a skipped
-  or neutral mirror step. Needs Go set up and the repository checked out.
+  Builds engine-sync, the single writer of every Codex and OpenCode artifact,
+  from the plugins/engine-sync submodule,
+  stages the shipped machine policy templates/global/engine-sync.json as
+  $HOME/.claude/engine-sync.json, the one file engine-sync reads, and exports
+  ENGINE_SYNC_BIN to every later step of the job and puts the binary's
+  directory on PATH. An absent source, a policy
+  absent, unreadable or unstageable, or a different file already at the
+  destination, fails the job naming it, never a skipped or neutral mirror
+  step. Needs Go set up and the repository checked out.
 
 runs:
   using: composite
@@ -16,14 +17,19 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        policy="$GITHUB_WORKSPACE/templates/global/engine-sync/config.json"
-        config_home="$RUNNER_TEMP/engine-sync-config"
+        policy="$GITHUB_WORKSPACE/templates/global/engine-sync.json"
+        destination="$HOME/.claude/engine-sync.json"
         if [ ! -f "$policy" ] || [ ! -r "$policy" ]; then
           echo "::error::engine-sync machine policy absent or unreadable: $policy"
           exit 1
         fi
-        if ! mkdir -p "$config_home/engine-sync" || ! cp "$policy" "$config_home/engine-sync/config.json"; then
-          echo "::error::engine-sync machine policy could not be staged from $policy into $config_home/engine-sync/config.json"
+        if [ -e "$destination" ] || [ -L "$destination" ]; then
+          if ! cmp -s "$policy" "$destination"; then
+            echo "::error::engine-sync global file exists with other content, not overwritten: $destination"
+            exit 1
+          fi
+        elif ! mkdir -p "$HOME/.claude" || ! cp "$policy" "$destination"; then
+          echo "::error::engine-sync machine policy could not be staged from $policy into $destination"
           exit 1
         fi
         src="$GITHUB_WORKSPACE/plugins/engine-sync"
@@ -38,4 +44,5 @@ runs:
         bin="$RUNNER_TEMP/engine-sync/engine-sync"
         go -C "$src" build -o "$bin" ./cmd/engine-sync
         "$bin" version
-        printf 'ENGINE_SYNC_BIN=%s\nXDG_CONFIG_HOME=%s\n' "$bin" "$config_home" >> "$GITHUB_ENV"
+        printf 'ENGINE_SYNC_BIN=%s\n' "$bin" >> "$GITHUB_ENV"
+        dirname "$bin" >> "$GITHUB_PATH"

@@ -29,6 +29,11 @@ const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
 // Unset, it is DefaultClaudePlugins; machine-wide, an account may not set it.
 const KeyClaudePlugins = "claude.plugins"
 
+// KeyClaudeEnv names the machine-wide map of environment variables pfm
+// install writes into the primary seat's settings.json env: each name upper
+// snake, each value a string. pfm owns only the names it wrote.
+const KeyClaudeEnv = "claude.env"
+
 // KeyClaudeCostLedger is the machine-wide switch of the per-call cost ledger:
 // false launches Claude without the OTel knobs and starts no cost sink.
 const KeyClaudeCostLedger = "claude.costLedger"
@@ -67,6 +72,7 @@ func Keys() []KeyDefault {
 		{"claude.maxConcurrentSubagents", nil},
 		{KeyClaudePluginCheckoutRoot, nil},
 		{KeyClaudePlugins, defaultClaudePluginIDs()},
+		{KeyClaudeEnv, map[string]any{}},
 		{KeyClaudeCostLedger, true},
 		{KeyClaudeGptAgents, false},
 		{"codex.yolo", true},

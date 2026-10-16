@@ -71,7 +71,8 @@ func installDefaultEngineSync(dir string) error {
 
 // FakeEngineSync points ENGINE_SYNC_BIN, for this test, at an engine-sync
 // stand-in that appends each call's argv as one line to the returned record,
-// writes its HOME to record+".home", prints reply on stdout and a usage line
+// writes its HOME to record+".home", copies the global file
+// {home}/.claude/engine-sync.json (home: --home, else HOME) to record+".config", prints reply on stdout and a usage line
 // on stderr, and exits with code. The test stays serial (t.Setenv).
 func FakeEngineSync(t *testing.T, reply string, code int) string {
 	t.Helper()
@@ -79,7 +80,7 @@ func FakeEngineSync(t *testing.T, reply string, code int) string {
 	binary := filepath.Join(dir, "engine-sync")
 	record := filepath.Join(dir, "argv")
 	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'engine-sync 9.0.0-testjail'; exit 0; fi\nprintf '%s\\n' \"$*\" >> '" + record + "'\nprintf '%s\\n' \"$HOME\" > '" + record +
-		".home'\nprintf '%s\n' \"$ENGINE_SYNC_WORKBENCH_MARKER\" > '" + record + ".marker'\nhome=\"$HOME\"; prev=\"\"\nfor arg; do [ \"$prev\" != --home ] || home=\"$arg\"; prev=\"$arg\"; done\nconfig=\"${XDG_CONFIG_HOME:-$home/.config}/engine-sync/config.json\"\nif [ -f \"$config\" ]; then cat \"$config\" > '" + record + ".config'; fi\nif [ -f \"${config%/*}/targets.json\" ]; then cat \"${config%/*}/targets.json\" > '" + record + ".targets'; fi\ncat <<'REPLY'\n" + reply + "\nREPLY\nprintf 'usage: engine-sync\\n' >&2\nexit " +
+		".home'\nprintf '%s\n' \"$ENGINE_SYNC_WORKBENCH_MARKER\" > '" + record + ".marker'\nhome=\"$HOME\"; prev=\"\"\nfor arg; do [ \"$prev\" != --home ] || home=\"$arg\"; prev=\"$arg\"; done\nconfig=\"$home/.claude/engine-sync.json\"\nif [ -f \"$config\" ]; then cat \"$config\" > '" + record + ".config'; fi\ncat <<'REPLY'\n" + reply + "\nREPLY\nprintf 'usage: engine-sync\\n' >&2\nexit " +
 		strconv.Itoa(
 			code,
 		) + "\n"

@@ -154,6 +154,9 @@ type Options struct {
 	// default: an -alpha install then ensures every plugin the source clone's
 	// marketplace lists.
 	ClaudePluginsDefault bool
+	// ClaudeEnv is claude.env: the plugin options as environment variables
+	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
+	ClaudeEnv map[string]string
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches

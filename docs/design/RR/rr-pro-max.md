@@ -36,7 +36,7 @@ Description, verbatim: `Maps a query exhaustively — tier 3, the ultimate: rr-p
 | § Spawning | the shared file `shared/repo-lane.md`: `sub-rr` for the web, `clone-distiller` for a sub-area whose answer lives in a repository's code — the full text is in `clone-distiller.md`, § Who spawns it |
 
 - Each override carries the sha256 pin of the `rr.md` section it replaces. An edit to `rr.md`'s § Budget or § Spawning fails the render with `SECTION-DRIFT rr-pro-max: rr.md § {heading} changed since pinned …` until the override is reviewed and `engine-sync variants pin rr-pro-max` re-pins it; a renamed or deleted heading fails with `SECTION-MISSING`. The procedure's steps cite § Budget and § Spawning by name, so an override changes the caps or the lane without touching a step.
-- The fence's `templates.global-variants` step (`infra/fence/checks.sh`, `checks_templates_global_variants`) renders the shipped declaration and agent bodies through the built engine-sync binary, so a drifted pin fails before an install does.
+- The fence's `templates.generated-agents` step (`infra/fence/checks.sh`, `checks_templates_generated_agents`) renders the shipped declaration and agent bodies through the built engine-sync binary, so a drifted pin fails before an install does.
 - An installed engine-sync older than `0.3.0-alpha.2` cannot compile declaration files, and `pfm install` refuses. The fix is the host mirror build, never an edit to the declaration.
 
 ## No round ceiling

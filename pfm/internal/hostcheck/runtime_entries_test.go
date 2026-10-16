@@ -12,7 +12,7 @@ func TestUnclassifiedPreservesEvidencedRuntimeEntries(t *testing.T) {
 	for _, scenario := range []string{"regular", "symlink", "new output", "zsh"} {
 		t.Run(scenario, func(t *testing.T) {
 			env := fixtureEnv(t)
-			for _, name := range []string{"debug", "daemon.lock", "daemon.status.json", "tmp", "chrome", "dev-mods", "keybindings.json", "fixture-plugin", "custom-hook.log", "future-entry"} {
+			for _, name := range []string{"debug", "daemon.lock", "daemon.status.json", "tmp", "chrome", "dev-mods", "keybindings.json", "engine-sync.json", "fixture-plugin", "custom-hook.log", "future-entry"} {
 				writeFile(t, filepath.Join(env.Store, name), "data")
 			}
 			scripts := filepath.Join(env.Store, "scripts")

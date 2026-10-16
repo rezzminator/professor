@@ -76,6 +76,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			KeyClaudePlugins,
 		)
 	}
+	if claudeEnvSet(raw.Env) && index >= 0 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.env is machine-wide: set %s",
+			path,
+			configScope(scope, index),
+			KeyClaudeEnv,
+		)
+	}
 	if raw.GptAgents != nil && index >= 0 {
 		return ClaudePrefs{}, fmt.Errorf(
 			"config %s: %s.gptAgents is machine-wide: set %s",
@@ -136,7 +144,7 @@ func copyClaudeLaunchPrefs(target *ClaudePrefs, source ClaudePrefs) {
 
 // applyClaudeMachinePrefs sets the top-level claude keys no account may carry
 // (decodeClaudePrefs refuses them there): the plugin checkout root, the plugin
-// list and the cost ledger switch.
+// list, the env map and the cost ledger switch.
 func applyClaudeMachinePrefs(
 	target *ClaudePrefs, raw rawClaude, home, path string, sources map[string]Source,
 ) error {
@@ -155,6 +163,14 @@ func applyClaudeMachinePrefs(
 		}
 		target.Plugins = plugins
 		sources[KeyClaudePlugins] = SourceFile
+	}
+	if claudeEnvSet(raw.Env) {
+		env, err := decodeClaudeEnv(raw.Env)
+		if err != nil {
+			return fmt.Errorf("config %s: %w", path, err)
+		}
+		target.Env = env
+		sources[KeyClaudeEnv] = SourceFile
 	}
 	if raw.GptAgents != nil {
 		target.GptAgents = *raw.GptAgents
@@ -199,7 +215,7 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 }
 
 // marshalClaude is the machine claude block. The keys a pfm of the last release (v0.79.0) does
-// not know — helperModel, pluginCheckoutRoot, plugins, costLedger — are written only when the file
+// not know — helperModel, pluginCheckoutRoot, plugins, env, costLedger — are written only when the file
 // set them or the value differs from the default, so `pfm config init` writes a file that pfm still
 // decodes: its loader refuses an unknown key. An unset value loads as its default either way.
 func marshalClaude(config Config) map[string]any {
@@ -224,6 +240,13 @@ func marshalClaude(config Config) map[string]any {
 	}
 	if set(KeyClaudePlugins) || !slices.Equal(config.Claude.Plugins, DefaultClaudePlugins()) {
 		value["plugins"] = marshalClaudePlugins(config.Claude.Plugins)
+	}
+	if set(KeyClaudeEnv) || len(config.Claude.Env) != 0 {
+		env := make(map[string]any, len(config.Claude.Env))
+		for name, value := range config.Claude.Env {
+			env[name] = value
+		}
+		value["env"] = env
 	}
 	if set(KeyClaudeCostLedger) || !config.Claude.CostLedger {
 		value["costLedger"] = config.Claude.CostLedger

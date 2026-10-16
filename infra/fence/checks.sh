@@ -248,10 +248,10 @@ checks_templates_descriptions() {
 
 }
 
-checks_engine_sync_policy() { # <config-home>: stage the shipped machine policy for a compiler's jail
-  local policy="$REPO_ROOT/templates/global/engine-sync/config.json" destination="$1/engine-sync"
-  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/config.json"; then
-    echo "engine-sync: machine policy could not be staged from $policy into $destination/config.json" >&2
+checks_engine_sync_policy() { # <home>: stage the shipped machine policy as the home's ~/.claude/engine-sync.json for a compiler's jail
+  local policy="$REPO_ROOT/templates/global/engine-sync.json" destination="$1/.claude"
+  if ! mkdir -p "$destination" || ! cp "$policy" "$destination/engine-sync.json"; then
+    echo "engine-sync: machine policy could not be staged from $policy into $destination/engine-sync.json" >&2
     return 1
   fi
 }
@@ -311,7 +311,7 @@ checks_mirror_tree_stage() { # <dest>: the tree under test as a scratch git repo
 }
 
 checks_templates_mirrors_generate() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config"
+  local es_bin="$TMP_BASE/engine-sync/engine-sync"
   local tree home="$TMP_BASE/engine-sync/mirror-home"
   tree="$(checks_mirror_tree)"
   head_ "templates — generate the engine mirrors"
@@ -328,13 +328,13 @@ checks_templates_mirrors_generate() {
     fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
   elif ! engine_sync_build "$es_bin"; then
     fail_step "mirror generation could not run — the engine-sync binary could not be built (see above); no mirror gate below is a verdict on the tree"
-  elif ! checks_engine_sync_policy "$config_home"; then
+  elif ! checks_engine_sync_policy "$home"; then
     fail_step "mirror generation could not run — the machine policy could not be staged (see above); no mirror gate below is a verdict on the tree"
   elif ! mkdir -p "$home" || ! checks_mirror_tree_stage "$tree"; then
     fail_step "mirror generation could not run — the tree under test could not be staged (see above); no mirror gate below is a verdict on the tree"
   else
     local report="$TMP_BASE/engine-sync/mirror-build.log" rc=0
-    HOME="$home" XDG_CONFIG_HOME="$config_home" "$es_bin" build "$tree" >"$report" 2>&1 || rc=$?
+    HOME="$home" "$es_bin" build "$tree" >"$report" 2>&1 || rc=$?
     if [ "$rc" -eq 0 ] && : >"$tree.built"; then
       ok "engine mirrors generated from the tree under test ($(tail -n 1 "$report"))"
     else
@@ -345,21 +345,22 @@ checks_templates_mirrors_generate() {
 
 }
 
-checks_templates_global_variants() {
+checks_templates_generated_agents() {
   local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
   local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped=""
   local tracked="$REPO_ROOT/templates/generated/agents"
-  head_ "templates — global agent variants render"
-  # Machine agent .md files with from: declare agents re-emitted from a
-  # source agent with swapped body text; shared files below a subdirectory are layers, not agents. A swap whose text drifted from its
+  head_ "templates — generated agents render"
+  # A machine agent .md file carrying from: is a declaration: engine-sync renders
+  # it as a generated agent, the source agent with swapped body text; a shared file
+  # below a subdirectory is never an agent. A swap whose text drifted from its
   # source fails only when engine-sync renders it, which an adopter's install
-  # does: this step renders every declared variant with the real binary, built
+  # does: this step renders every declaration with the real binary, built
   # from the mounted source, into a jail home and Codex home (the real $HOME is
   # never read or written). Its own broken state is a red line: a declaration
-  # that cannot be read, one that declares nothing, a render error, or a
+  # that cannot be read, no declaration at all, a render error, or a
   # rendered count that differs from the declared count (a lookup that found
   # nothing would otherwise read as clean). The jail declares the gpt-agents
-  # capability, so the opt-in variants render too; the render without it is
+  # capability, so the opt-in declarations render too; the render without it is
   # scripts/check-agent-roster.test.mjs's. The policy renders declarations into
   # the clone's templates/generated/agents, which is tracked: the render runs
   # on a copy of templates/, and any difference from the tracked directory (a
@@ -370,31 +371,31 @@ checks_templates_global_variants() {
   # OpenCode model alias` warning means a twin lost its model pin, and is a red
   # line naming each alias.
   if ! need_tool go templates || ! need_tool python3 templates; then
-    fail_step "global agent variants NOT RENDERED — the toolchain is missing"
+    fail_step "generated agents NOT RENDERED — the toolchain is missing"
     return
   elif ! engine_sync_build "$es_bin"; then
-    fail_step "global agent variants NOT RENDERED — the engine-sync binary could not be built (see above)"
+    fail_step "generated agents NOT RENDERED — the engine-sync binary could not be built (see above)"
     return
   elif [[ ! -d "$sources" ]]; then
-    fail_step "global agent variants NOT RENDERED — $sources is missing, so nothing was looked up"
+    fail_step "generated agents NOT RENDERED — $sources is missing, so nothing was looked up"
     return
   elif ! names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
     # The inventory's exit 3 is a missing PyYAML, a toolchain gap, never a parse failure.
     if [[ "$names" == "GAP install"* ]]; then
-      fail_step "global agent variants NOT RENDERED — $names"
+      fail_step "generated agents NOT RENDERED — $names"
     else
-      fail_step "global agent variants NOT RENDERED — agent sources do not parse: $names"
+      fail_step "generated agents NOT RENDERED — agent sources do not parse: $names"
     fi
     return
   fi
   declared=$(grep -c . <<<"$names" || true)
   if (( declared == 0 )); then
-    fail_step "global agent variants NOT RENDERED — agent sources declare no variant, so nothing could render"
+    fail_step "generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render"
     return
   fi
   mkdir -p "$TMP_BASE/engine-sync"
-  if ! jail="$(mktemp -d "$TMP_BASE/engine-sync/global-variants.XXXXXX")"; then
-    fail_step "global agent variants NOT RENDERED — the jail home could not be created under $TMP_BASE/engine-sync"
+  if ! jail="$(mktemp -d "$TMP_BASE/engine-sync/generated-agents.XXXXXX")"; then
+    fail_step "generated agents NOT RENDERED — the jail home could not be created under $TMP_BASE/engine-sync"
     return
   fi
   home="$jail/home"
@@ -402,13 +403,13 @@ checks_templates_global_variants() {
   mkdir -p "$home/.claude" "$home/.codex" "$src"
   # The copy drops the tracked render so an orphan or a stale file shows.
   if ! cp -a "$REPO_ROOT/templates" "$src/templates" || ! rm -rf "$src/templates/generated"; then
-    fail_step "global agent variants NOT RENDERED — templates/ could not be copied into the jail"
+    fail_step "generated agents NOT RENDERED — templates/ could not be copied into the jail"
     rm -rf "$jail"
     return
   fi
   out="$jail/engine-sync-global.out"
-  if ! checks_engine_sync_policy "$home/.config"; then
-    fail_step "global agent variants NOT RENDERED — the machine policy could not be staged in the jail"
+  if ! checks_engine_sync_policy "$home"; then
+    fail_step "generated agents NOT RENDERED — the machine policy could not be staged in the jail"
     rm -rf "$jail"
     return
   fi
@@ -427,10 +428,10 @@ checks_templates_global_variants() {
     while IFS= read -r name; do
       if grep -qE "variant \"$name\"|(SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING) $name:" "$out"; then named="${named:+$named, }$name"; fi
     done <<<"$names"
-    fail_step "global agent variants FAILED to render (engine-sync global exit $rc; variant named in the error: ${named:-none — read the output above})"
+    fail_step "generated agents FAILED to render (engine-sync global exit $rc; declaration named in the error: ${named:-none — read the output above})"
   else
     while IFS= read -r name; do
-      # A variant whose rendered engines block turns Codex off (`codex: false`) has no Codex role by design.
+      # A declaration whose rendered engines block turns Codex off (`codex: false`) has no Codex role by design.
       if [[ -L "$home/.claude/agents/$name.md" && -s "$home/.claude/agents/$name.md" ]] &&
         { [[ -f "$home/.codex/agents/$name.toml" ]] || grep -Eq '^  codex: false$' "$home/.claude/agents/$name.md"; }; then
         rendered=$((rendered + 1))
@@ -447,18 +448,18 @@ checks_templates_global_variants() {
     fi
     if (( rendered != declared )); then
       cat "$out"
-      fail_step "global agent variants: $rendered of $declared declared variant(s) rendered — missing: $missing"
+      fail_step "generated agents: $rendered of $declared declaration(s) rendered — missing: $missing"
     elif [[ -n "$unknown" ]]; then
       printf '%s\n' "$unknown"
-      fail_step "global agent variants: engine-sync dropped MCP tools from OpenCode twins ($(grep -c 'unknown MCP server' <<<"$unknown") distinct 'unknown MCP server' warning(s), above) — list the server in templates/global/engine-sync/config.json mcp.globalServers, or fix the engine-sync machine path that ignores it"
+      fail_step "generated agents: engine-sync dropped MCP tools from OpenCode twins ($(grep -c 'unknown MCP server' <<<"$unknown") distinct 'unknown MCP server' warning(s), above) — list the server in templates/global/engine-sync.json mcp.globalServers, or fix the engine-sync machine path that ignores it"
     elif [[ -n "$unmapped" ]]; then
       printf '%s\n' "$unmapped"
-      fail_step "global agent variants: engine-sync omitted the model of an OpenCode twin ($(grep -c 'unmapped OpenCode model alias' <<<"$unmapped") distinct 'unmapped OpenCode model alias' warning(s), above) — add the alias to templates/global/engine-sync/config.json opencode.modelMap, or give the agent an engines.opencode.model alias it maps"
+      fail_step "generated agents: engine-sync omitted the model of an OpenCode twin ($(grep -c 'unmapped OpenCode model alias' <<<"$unmapped") distinct 'unmapped OpenCode model alias' warning(s), above) — add the alias to templates/global/engine-sync.json opencode.modelMap, or give the agent an engines.opencode.model alias it maps"
     elif [[ -n "$stale" ]]; then
       printf '%s\n' "$stale"
-      fail_step "global agent variants: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents"
+      fail_step "generated agents: tracked templates/generated/agents differs from a fresh render — run pfm install and commit templates/generated/agents"
     else
-      ok "all $declared global agent variant(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
+      ok "all $declared generated agent(s) render through engine-sync into a jail home ($(paste -sd, - <<<"$names" | sed 's/,/, /g'))"
     fi
   fi
   rm -rf "$jail"
@@ -492,13 +493,13 @@ checks_templates_mirrors_marker() {
 }
 
 checks_templates_mirrors_roster() {
-  local es_bin="$TMP_BASE/engine-sync/engine-sync" config_home="$TMP_BASE/engine-sync/project-config" rc
+  local es_bin="$TMP_BASE/engine-sync/engine-sync" mirror_home="$TMP_BASE/engine-sync/mirror-home" rc
   head_ "templates — generated agent rosters"
   if ! checks_mirror_tree_ready; then
     fail_step "agent roster NOT GENERATED — the mirrors were not generated from the tree under test, so no roster was compared (see the generation step above)"
-  elif ! checks_engine_sync_policy "$config_home"; then
+  elif ! checks_engine_sync_policy "$mirror_home"; then
     fail_step "agent roster ERROR — the machine policy could not be staged (see above)"
-  elif (cd "$(checks_mirror_tree)" && ENGINE_SYNC_BIN="$es_bin" XDG_CONFIG_HOME="$config_home" HOME="$TMP_BASE/engine-sync/mirror-home" node scripts/check-agent-roster.mjs); then
+  elif (cd "$(checks_mirror_tree)" && ENGINE_SYNC_BIN="$es_bin" HOME="$mirror_home" node scripts/check-agent-roster.mjs); then
     ok "Codex and OpenCode agent rosters match their Claude sources"
   else
     rc=$?
@@ -545,19 +546,6 @@ checks_templates_worktree_script() {
   fi
 }
 
-checks_templates_codex_sync() {
-  head_ "templates — codex-sync door"
-  local cs_copy
-  for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
-    if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
-      ok "codex-sync ($cs_copy) forwards each stage, refuses a bad ENGINE_SYNC_BIN by name, and warns of an unavailable compiler only with a pending edit"
-    else
-      fail_step "codex-sync regression FAILED ($cs_copy) — see output"
-    fi
-  done
-
-}
-
 checks_templates_dev_report() {
   head_ "templates — go test report under pipefail"
   if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
@@ -595,22 +583,16 @@ checks_templates_mirrors_opencode() {
   # under a scratch home; verification never depends on or installs a host binary.
   if ! need_tool go templates || ! engine_sync_build "$es_bin"; then
     fail_step "opencode mirror NOT CHECKED — the engine-sync binary could not be built (see above)"
-  elif ! checks_engine_sync_policy "$opencode_home/.config"; then
+  elif ! checks_engine_sync_policy "$opencode_home"; then
     fail_step "opencode mirror NOT CHECKED — the machine policy could not be staged (see above)"
   elif ! checks_mirror_tree_ready; then
     fail_step "opencode mirror NOT CHECKED — the mirrors were not generated from the tree under test (see the generation step above)"
-  elif XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode check "$(checks_mirror_tree)" --home "$opencode_home" \
-    && XDG_CONFIG_HOME="$opencode_home/.config" "$es_bin" opencode doctor "$(checks_mirror_tree)" --home "$opencode_home"; then
+  elif "$es_bin" opencode check "$(checks_mirror_tree)" --home "$opencode_home" \
+    && "$es_bin" opencode doctor "$(checks_mirror_tree)" --home "$opencode_home"; then
     ok "opencode mirror parseable and current against the tree under test"
   else
     fail_step "opencode mirror FAILED — the mirror generated from the tree under test does not check (see above)"
   fi
-
-}
-
-checks_templates_opencode_writer_tests() {
-  head_ "templates — OpenCode writer check tests"
-  node_test_suite "opencode-writer check" "$TMP_BASE/templates/opencode-writer.tap" scripts/check-opencode-writer.test.mjs
 
 }
 
@@ -696,15 +678,6 @@ checks_templates_skill_tests() {
 
 }
 
-checks_templates_opencode_writer_refs() {
-  head_ "templates — OpenCode writer references"
-  if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then
-    ok "live surfaces name the native writer, none the deleted one"
-  else
-    fail_step "OpenCode writer reference FAILED — every named surface names engine-sync, the native writer, and none the deleted one (see output)"
-  fi
-}
-
 checks_templates_mirrors_manifest() {
   head_ "templates — self-hosted manifest"
   if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm; then
@@ -727,12 +700,12 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
-    global-variants release-check codex-sync refresh-scope worktree-script dev-report \
+    generated-agents release-check refresh-scope worktree-script dev-report \
     format-md flight-templates
   for name in check-pfm check-templates test-pfm test-templates unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name"
   done
-  checks_named_template_steps "$add" opencode-writer-tests engine-sync-action-tests skill-tests opencode-writer-refs
+  checks_named_template_steps "$add" engine-sync-action-tests skill-tests
 }
 
 checks_templates_step_serial() { shift; "$@"; }

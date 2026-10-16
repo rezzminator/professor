@@ -67,7 +67,7 @@ func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]
 				target.ID,
 				marketplace,
 				path,
-				escapeControl(got),
+				EscapeControl(got),
 				target.Source,
 			),
 			claudeMarketplaceGapFix(target, marketplace),
@@ -102,6 +102,39 @@ const professorMarketplaceName = "professor"
 // list: one safe path element, as a bare claude.plugins entry is.
 var marketplacePluginName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
+// MarketplacePluginNames reads the plugin names the source clone's
+// marketplace, {sourceRepo}/.claude-plugin/marketplace.json, lists, in its
+// order, and returns that path beside them. A file that cannot be read returns
+// its error wrapped, so a missing file still matches fs.ErrNotExist; a file
+// that cannot be parsed, lists no plugins or lists a name twice or one that is
+// not a plugin name returns its error, never a partial list.
+func MarketplacePluginNames(sourceRepo string) (string, []string, error) {
+	path := filepath.Join(sourceRepo, ".claude-plugin", "marketplace.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return path, nil, fmt.Errorf("read the marketplace plugin list %s: %w", path, err)
+	}
+	var manifest devMarketplaceManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return path, nil, fmt.Errorf("parse the marketplace plugin list %s: %w", path, err)
+	}
+	if len(manifest.Plugins) == 0 {
+		return path, nil, fmt.Errorf("the marketplace plugin list %s lists no plugins", path)
+	}
+	names := make([]string, 0, len(manifest.Plugins))
+	for index, entry := range manifest.Plugins {
+		if !marketplacePluginName.MatchString(entry.Name) {
+			return path, nil, fmt.Errorf("the marketplace plugin list %s: plugins[%d] name %q is not a plugin name",
+				path, index, EscapeControl(entry.Name))
+		}
+		if slices.Contains(names, entry.Name) {
+			return path, nil, fmt.Errorf("the marketplace plugin list %s lists %s twice", path, entry.Name)
+		}
+		names = append(names, entry.Name)
+	}
+	return path, names, nil
+}
+
 // WithMarketplacePlugins resolves an -alpha build's plugins against the source
 // clone's marketplace, {SourceRepo}/.claude-plugin/marketplace.json: with
 // claude.plugins unset (PluginsDefault) Plugins becomes every plugin it lists,
@@ -122,31 +155,12 @@ func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, erro
 	if build.SourceRepo == "" {
 		return build, nil
 	}
-	path := filepath.Join(build.SourceRepo, ".claude-plugin", "marketplace.json")
-	raw, err := os.ReadFile(path)
+	_, names, err := MarketplacePluginNames(build.SourceRepo)
 	if errors.Is(err, fs.ErrNotExist) && !build.PluginsDefault {
 		return build, nil
 	}
 	if err != nil {
-		return build, fmt.Errorf("read the marketplace plugin list %s: %w", path, err)
-	}
-	var manifest devMarketplaceManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return build, fmt.Errorf("parse the marketplace plugin list %s: %w", path, err)
-	}
-	if len(manifest.Plugins) == 0 {
-		return build, fmt.Errorf("the marketplace plugin list %s lists no plugins", path)
-	}
-	names := make([]string, 0, len(manifest.Plugins))
-	for index, entry := range manifest.Plugins {
-		if !marketplacePluginName.MatchString(entry.Name) {
-			return build, fmt.Errorf("the marketplace plugin list %s: plugins[%d] name %q is not a plugin name",
-				path, index, escapeControl(entry.Name))
-		}
-		if slices.Contains(names, entry.Name) {
-			return build, fmt.Errorf("the marketplace plugin list %s lists %s twice", path, entry.Name)
-		}
-		names = append(names, entry.Name)
+		return build, err
 	}
 	if build.PluginsDefault {
 		build.Plugins = make([]pfmconfig.ClaudePlugin, 0, len(names))

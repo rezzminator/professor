@@ -70,11 +70,11 @@ Attaching to an already live seat does not relaunch it. Bare non-session adminis
 
 ## Mirrors
 
-A workbench owns its own CLAUDE.md: pfm codex build {dir} compiles it into {dir}/AGENTS.md, and without it every Codex launch in the workbench is refused.
+A workbench owns its own CLAUDE.md: engine-sync codex build {dir} compiles it into {dir}/AGENTS.md, and without it every Codex launch in the workbench is refused.
 
 `EnsureMirror` builds Codex/OpenCode before a persona launch; a compiler failure refuses it as `build the {engine} mirror of workbench {dir}: {error}`. `CheckMirror` returns every mirror problem, split into rebuildable outputs and failures, with compiler errors returned separately. Claude needs no mirror. Source: `pfm/internal/workbench/mirror.go`.
 
-engine-sync's Codex and OpenCode compilers skip a child marked by a workbench manifest whether discovered or explicitly listed: each bench builds as its own root. An unreadable manifest is an error; a symlinked manifest or `.professor` directory is no workbench. `pfm codex build` without a root inside a bench resolves that bench rather than its git/managed parent. Builds at a bench write no home-level Codex skills/prompts or OpenCode commands. Sources (under `plugins/engine-sync/internal/`): `target/codex/project_discovery.go`, `target/codex/target.go`, `target/opencode/target.go`, `reconcile/reconcile.go`, `cli/codex.go`.
+engine-sync's Codex and OpenCode compilers skip a child marked by a workbench manifest whether discovered or explicitly listed: each bench builds as its own root. An unreadable manifest is an error; a symlinked manifest or `.professor` directory is no workbench. `engine-sync codex build` without a root inside a bench resolves that bench rather than its git/managed parent. Builds at a bench write no home-level Codex skills/prompts or OpenCode commands. Sources (under `plugins/engine-sync/internal/`): `target/codex/project_discovery.go`, `target/codex/target.go`, `target/opencode/target.go`, `reconcile/reconcile.go`, `cli/codex.go`.
 
 Codex `.codex/agents/` is generated only from the bench's own `.claude/agents/*.md`. A bench without roles gets no empty agents directory: the role lookup can continue to the managed root. Codex and OpenCode also load ancestor `AGENTS.md` files, so the parent repo's rules reach their workbench seats. Sources: `plugins/engine-sync/internal/target/codex/agents.go`, `pfm/internal/agentrole/agentrole.go` (`roleLadderRoot`).
 

@@ -68,9 +68,6 @@ pfm chat unkill	E1	E1.19-kill-unkill
 pfm chat watch	E1	E1.17-watch
 pfm chat watch	E2	E2.07-call-ask-watch
 pfm chat whoami	O1	O1.13-misc-ops
-pfm codex agents	A	A.09-codex-agents
-pfm codex build	A	A.08-codex-mirror
-pfm codex check	A	A.08-codex-mirror
 pfm config init	O1	O1.13-misc-ops
 pfm config show	O1	O1.13-misc-ops
 pfm config validate	O1	O1.13-misc-ops
@@ -126,7 +123,6 @@ pfm mcp serve	M	M.05-daemon-core
 pfm mcp serve	M	M.07-stdio-transports
 pfm mcp serve	M	M.08-mcp-cli
 pfm name-sync	F	F.13-name-sync
-pfm opencode	A	A.13-opencode-layer
 pfm model-cost	O1	O1.15-model-cost
 pfm theme	O1	O1.18-theme
 pfm tokens	O1	O1.16-tokens

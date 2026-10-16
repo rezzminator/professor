@@ -82,4 +82,4 @@ Read the usage before the findings: `tool_uses: 0` beside a claim is a fabricate
 
 - `templates/global/skills/codeprobe/{codeprobe.py,SKILL.md}`
 - `templates/global/agents/collector.md`
-- The Codex and OpenCode mirrors, by `pfm codex build` and `pfm opencode build`
+- The Codex and OpenCode mirrors, by `engine-sync codex build` and `engine-sync opencode build`

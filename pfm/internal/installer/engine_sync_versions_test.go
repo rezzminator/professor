@@ -31,7 +31,7 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 			t.Setenv("XDG_DATA_HOME", "")
 			t.Setenv("ENGINE_SYNC_HOME", "")
 			esHome := filepath.Join(home, ".local", "share", "engine-sync")
-			stableVersion := "0.3.0-alpha.4"
+			stableVersion := "0.4.0-alpha"
 			if name == "older required" {
 				stableVersion = "0.1.0"
 			}
@@ -120,7 +120,7 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 				version := "0.1.0"
 				switch name {
 				case "backwards stable":
-					version = "0.3.0"
+					version = "0.4.0"
 				case "leading-zero cache":
 					version = "0.3.0-01"
 				}
@@ -141,7 +141,7 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 			text := output.String()
 			switch name {
 			case "older required":
-				if failures == 0 || !strings.Contains(text, "engine-sync 0.1.0 is older than required 0.3.0-alpha.4") {
+				if failures == 0 || !strings.Contains(text, "engine-sync 0.1.0 is older than required 0.4.0-alpha") {
 					t.Fatalf("doctor %d/%d: %s", warnings, failures, text)
 				}
 			case "two versions", "two versions partial", "two versions unreadable seat", "two versions fifo seat":
@@ -161,7 +161,7 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 					seatFailure != "" && (failures == 0 || !strings.Contains(text, seatFailure)) {
 					t.Fatalf("doctor %d/%d, want seat failure %q: %s", warnings, failures, seatFailure, text)
 				}
-				want := "two versions can write the same roots: stable 0.3.0-alpha.4 at " + binary +
+				want := "two versions can write the same roots: stable 0.4.0-alpha at " + binary +
 					"; plugin cache 0.1.0 at " + filepath.Join(esHome, "versions", "0.1.0", "engine-sync") +
 					"; seats running the plugin without ENGINE_SYNC_BIN on the stable binary: " + seat +
 					" — set ENGINE_SYNC_BIN to the stable binary for the plugin seat or disable that seat on this development host\n"
@@ -180,7 +180,7 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 				}
 			case "backwards stable":
 				if warnings == 0 || !strings.Contains(text, "stable link moved backwards") ||
-					!strings.Contains(text, "0.3.0") ||
+					!strings.Contains(text, "0.4.0") ||
 					!strings.Contains(
 						text,
 						"start a new Claude session so the engine-sync plugin wrapper moves the stable link forward",

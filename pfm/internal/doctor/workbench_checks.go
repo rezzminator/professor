@@ -59,7 +59,7 @@ func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failu
 			for _, problem := range check.Failing {
 				fmt.Fprintf(
 					stdout,
-					"doctor: workbench %s %s mirror FAILED: %s — the next launch there fails; fix it, then run pfm %s build %s\n",
+					"doctor: workbench %s %s mirror FAILED: %s — the next launch there fails; fix it, then run engine-sync %s build %s\n",
 					bench.Dir,
 					name,
 					problem,
@@ -72,7 +72,7 @@ func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failu
 				repair := "the next launch there rebuilds it"
 				if len(check.Failing) != 0 {
 					repair = fmt.Sprintf(
-						"rebuilt by pfm %s build %s once the failures are fixed",
+						"rebuilt by engine-sync %s build %s once the failures are fixed",
 						name,
 						bench.Dir,
 					)

@@ -105,6 +105,12 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 			// Version needs no config while the operator applies doctor's fix.
 			return runVersion(args[1:], stdout, stderr)
 		}
+		// A retired command's answer reads no config: it names its successor
+		// whatever state the machine config is in.
+		if len(args) > 0 && (args[0] == pfmengine.MustLookup(pfmengine.Codex).LongName ||
+			args[0] == pfmengine.MustLookup(pfmengine.OpenCode).LongName) {
+			return runRetiredCommand(args[0], stderr)
+		}
 		// Stale reads no config while the operator applies doctor's fix.
 		if len(args) > 1 && args[0] == internalCommand && args[1] == staleCommand {
 			return stale.Run(args[2:], stdout, stderr)
@@ -190,10 +196,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runIssues(args[1:], stdout, stderr, runtime)
 	case "mcp":
 		return runMCP(args[1:], stdout, stderr, runtime)
-	case pfmengine.MustLookup(pfmengine.Codex).LongName:
-		return runCodex(args[1:], stdout, stderr, runtime)
-	case pfmengine.MustLookup(pfmengine.OpenCode).LongName:
-		return runOpenCode(args[1:], stdout, stderr, runtime)
+	case pfmengine.MustLookup(pfmengine.Codex).LongName, pfmengine.MustLookup(pfmengine.OpenCode).LongName:
+		return runRetiredCommand(args[0], stderr)
 	case "internal":
 		return runInternal(args[1:], stdout, stderr, runtime)
 	case "help", "-h", "--help":
@@ -235,8 +239,6 @@ func printUsage(w io.Writer) {
 		"  statusline render the native Claude status line",
 		"  usage-hook the fail-open usage-limit prompt hook",
 		"  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)",
-		"  codex     forwards to engine-sync codex (retiring: run engine-sync)",
-		"  opencode  forwards to engine-sync opencode (retiring: run engine-sync)",
 	})
 }
 

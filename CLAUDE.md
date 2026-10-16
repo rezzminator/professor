@@ -4,9 +4,10 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 # Vocabulary
 
-- machine-global tier: agents, commands and skills whose original lives in this clone, symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`; a `from:` declaration renders into the tracked `templates/generated/agents/`, the only generated output in the clone, which the fence gate holds equal to a fresh render · `templates/global/`
+- machine-global tier: agents, commands and skills symlinked into `~/.claude/{agents,commands,skills}` by `pfm install`, except `templates/global/codex/config.toml` (Codex defaults merged into each Codex home, existing settings winning) and `templates/global/engine-sync.json` (engine-sync's policy, rendered with this host's targets into `~/.claude/engine-sync.json`); a `from:` declaration renders into `templates/generated/agents/`, the fence gate holding it equal to a fresh render · `templates/global/`, `templates/generated/README.md`
 - project tier: templates `pfm init` scaffolds into an adopter once and pins in `{adopter}/.professor/baseline.json`; the adopter's local file is the truth, and pfm never rewrites it after init · `templates/project/`
 - project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for retired references in project files, including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, and closes every row with `pfm update {adopt|pin|ignore|drop|accept}` (`pin --keep` records a deliberate non-port, `accept` a retired-name hit that stays) until the report ends `clean` · `pfm/internal/professor/`, `pfm/internal/update/`
+- host update: this host's pfm build, `pfm install` and plugin repoint, never the project-tier update · `.claude/commands/pfm/update.md`
 - placeholder: the registered token for a project-specific value in a template · `docs/PLACEHOLDERS.md`
 - spec: the adopter install interview and generation law · `docs/SETUP.md`
 - design docs: one directory per family, indexed by its `_index.md` · `docs/design/{family}/`
@@ -25,7 +26,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - self-hosted manifest: the tracked ledger of this repo's own install, verified (restamped with `--write`) by a repo gate · `.professor/manifest.json`, `infra/check-self-hosted-manifest.sh`
 - retro inbox: the steering ledger `/pcm retro` folds, one lesson per file · `docs/retro/{owner}/` · format `docs/retro/README.md`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
-- engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary plus a Claude plugin from its own repo; pfm execs it and `pfm codex|opencode` forward to it; its stable link `~/.local/share/engine-sync/bin/engine-sync` is off PATH · `plugins/engine-sync/` · design `docs/design/engine-sync/`
+- engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary and Claude plugin; pfm execs it, and `pfm install` links it as `~/.local/bin/engine-sync` · `plugins/engine-sync/` · design `docs/design/engine-sync/`
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
@@ -43,21 +44,19 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Claude
 
-- `CLAUDE.md` is the one hand-edited orientation file; `AGENTS.md` is compiled from it, never hand-edited, never a symlink; each engine's adapter translates mechanics, never identity or protocol.
+- `CLAUDE.md` is the one hand-edited orientation file; `AGENTS.md` is compiled from it, never a symlink; each engine's adapter translates mechanics, never identity or protocol.
 - Every `.claude/agents/*.md` role compiles for Codex and OpenCode.
 - Saving a machine-global template is the deploy (symlink-live); on this host `~/.professor` is this checkout.
-- The `Stop` hook (`.claude/scripts/codex-sync.sh sync`) recompiles and checks both engine mirrors; after a Bash-driven write bypassed it: `pfm codex build . && pfm codex check .` then `pfm opencode build . && pfm opencode doctor .`
+- The engine-sync plugin's Stop hook recompiles and checks both mirrors; after a Bash-driven write: `engine-sync codex build . && engine-sync codex check .` then `engine-sync opencode build . && engine-sync opencode doctor .`
 
 ## Codex
 
 - Reads `AGENTS.md`, whose § Codex adapter comes from `.claude/engine-sync.json` (`codex.rootAdapter`), and `.codex/`.
-- engine-sync writes its mirror, run as `pfm codex build .`; `pfm codex check .` its check.
-- A role is a `.toml` twin `pfm install` (through `engine-sync global`, or `pfm codex agents`) writes as a marker-owned regular file into every Codex home's `{codex-home}/agents/` — Codex refuses a symlinked role — so a role changes at the next `pfm install`.
+- A role is a `.toml` twin `pfm install` (through `engine-sync global`, or `engine-sync codex agents`) writes as a marker-owned regular file (Codex refuses a symlink) into each Codex home's agent directory, so a role changes at install.
 
 ## OpenCode
 
 - Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the non-gitter Git-write denies.
-- engine-sync writes it, run as `pfm opencode build .`; `pfm opencode {check|doctor} .` its checks.
 
 ## Local
 
@@ -75,7 +74,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Host
 
-- After a fenced flight lands on `develop`: `make host-install` from `pfm/`, then `pfm install --yes`.
+- Every installation on this host — `make host-install`, `pfm install`, a plugin repoint — loads `/pfm:update` first, MANDATORY: it owns the sequence.
 
 # Rules
 

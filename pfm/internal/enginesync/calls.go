@@ -128,7 +128,7 @@ func (runner Runner) Mirror(ctx context.Context, engine, action, repo string) (M
 
 // GlobalOptions are the installer's Codex steps for one run. An empty
 // CodexHomes is the explicit empty roster (--no-codex-home): pfm always names
-// its roster, never leaving engine-sync to read targets.json for it.
+// its roster, never leaving engine-sync to read the global file's targets for it.
 type GlobalOptions struct {
 	// Adopt passes --adopt: an unowned regular file at a declared agent's path
 	// is moved aside into engine-sync's adopted store and replaced.
@@ -341,47 +341,4 @@ func capabilityFlags(capabilities []string) []string {
 		flags = append(flags, flagCapability, name)
 	}
 	return flags
-}
-
-// forwardedCapabilityVerbs are the forwarded verbs that render or check agents,
-// per engine: only these accept --capability.
-var forwardedCapabilityVerbs = map[string][]string{
-	EngineCodex:    {"build", "check", "agents"},
-	EngineOpenCode: {"build", "check", "doctor"},
-}
-
-// CapabilityArgs adds the host's --capability flags to a forwarded
-// `engine-sync {engine} {verb} …` argument list (args after the engine) when
-// the verb renders or checks agents, right after the verb, so a trailing
-// value flag such as --home never takes one as its value; any other verb is
-// returned as given.
-func CapabilityArgs(engine string, args, capabilities []string) []string {
-	if len(capabilities) == 0 || len(args) == 0 {
-		return args
-	}
-	for _, verb := range forwardedCapabilityVerbs[engine] {
-		if args[0] == verb {
-			forwarded := append([]string{verb}, capabilityFlags(capabilities)...)
-			return append(forwarded, args[1:]...)
-		}
-	}
-	return args
-}
-
-// SourceArgs supplies a recorded clone before the forwarding flag sentinel.
-func SourceArgs(args []string, source string) []string {
-	return insertFlags(args, "--source-repo", source)
-}
-
-func insertFlags(args []string, flags ...string) []string {
-	split := len(args)
-	for index, value := range args {
-		if value == "--" {
-			split = index
-			break
-		}
-	}
-	forwarded := append([]string(nil), args[:split]...)
-	forwarded = append(forwarded, flags...)
-	return append(forwarded, args[split:]...)
 }

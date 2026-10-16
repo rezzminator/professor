@@ -18,7 +18,7 @@ import (
 // that would have fixed the tree, and every upgrade across the retirement
 // fails with the link's own resolution error.
 //
-// TestInspectDeadRegistryLinks proves the prune
+// TestRetireDeadRegistryLinks proves the prune
 // itself, but runs ModeApply, where future=!apply is false and the preview path
 // never executes — the gap this test closes.
 func TestCommandPreviewSurvivesDanglingGlobalCommandLink(t *testing.T) {

@@ -39,7 +39,7 @@ You run one phase of a release and return its verdict to `/pfm:release`. You jud
 
 ## GATE
 
-1. The fence mounts a tree read-only and the engine mirrors are untracked, so first generate them in each tree a lane runs in: `pfm codex build {tree} && pfm opencode build {tree}`. Then each lane — `.claude/scripts/dev.sh iso all templates`, `iso all pfm`, `iso e2e` — in the background, unpiped into `DIR/gate/candidate-{templates|pfm|e2e}.log`, closed by the shell with the command's own status: `; echo "EXIT $? @$(git rev-parse HEAD)" >> {log}`. End your message to wait; each lane's exit wakes you.
+1. The fence mounts a tree read-only and the engine mirrors are untracked, so first generate them in each tree a lane runs in: `engine-sync codex build {tree} && engine-sync opencode build {tree}`. Then each lane — `.claude/scripts/dev.sh iso all templates`, `iso all pfm`, `iso e2e` — in the background, unpiped into `DIR/gate/candidate-{templates|pfm|e2e}.log`, closed by the shell with the command's own status: `; echo "EXIT $? @$(git rev-parse HEAD)" >> {log}`. End your message to wait; each lane's exit wakes you.
 2. A red lane runs again in `STABLE` into `DIR/gate/stable-{lane}.log`, closed the same way. Red there too is inherited: named, never a candidate verdict. A green candidate lane needs no stable run.
 3. `DIR/gate.md`: line one `GATE PASS {sha}` or `GATE FAIL {sha}`; a line per lane with its exit and its verdict line quoted.
 4. Return `DONE GATE`, or `FIX GATE: {n}` with a row per new red naming the failing test.

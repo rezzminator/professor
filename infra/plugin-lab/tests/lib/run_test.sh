@@ -46,6 +46,18 @@ mkdir "$ledger.lock"; (sleep 0.3; rmdir "$ledger.lock") &
 lab_ledger_lock "$ledger"; rc=$?; wait
 expect_eq 'a held ledger lock is waited for' "$rc $([[ -d $ledger.lock ]] && echo held)" '0 held'
 lab_ledger_unlock "$ledger"
+# the holder's rmdir lands between mkdir's EEXIST and the recheck: retried, never an error
+fakebin=$T/fakebin; mkdir -p "$fakebin"; realmkdir=$(command -v mkdir)
+cat > "$fakebin/mkdir" <<EOF
+#!/usr/bin/env bash
+# the first lock attempt fails as if another run held the lock and released it at once
+if [[ \${1-} == "$ledger.lock" && ! -e "$T/raced" ]]; then : > "$T/raced"; echo "mkdir: cannot create directory '\$1': File exists" >&2; exit 1; fi
+exec "$realmkdir" "\$@"
+EOF
+chmod +x "$fakebin/mkdir"
+PATH=$fakebin:$PATH lab_ledger_lock "$ledger" 2>/dev/null; rc=$?
+expect_eq 'a lock released before the recheck is retried' "$rc $([[ -d $ledger.lock ]] && echo held)" '0 held'
+lab_ledger_unlock "$ledger"
 lab_ledger_append "$T/l2/ledger.tsv" r1 s p rev dirty PASS 0.02 0.25 2026-01-01T00:00:00Z 9 lab-reports/r1.md
 expect_eq 'ledger append is one tab row' "$(cat "$T/l2/ledger.tsv")" "$(printf 'r1\ts\tp\trev\tdirty\tPASS\t0.02\t0.25\t2026-01-01T00:00:00Z\t9\tlab-reports/r1.md')"
 

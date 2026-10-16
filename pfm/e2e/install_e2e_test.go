@@ -203,16 +203,6 @@ func runInstallE2E(t *testing.T) {
 		result := harness.pfm(freshHome, "init", project)
 		harness.requireSuccess("init", result)
 		harness.assertInit(project, repo)
-		harness.requireSuccess(
-			"init Codex build",
-			harness.pfm(freshHome, "codex", "build", "--home", freshHome, project),
-		)
-		harness.requireSuccess(
-			"init Codex check",
-			harness.pfm(freshHome, "codex", "check", "--home", freshHome, project),
-		)
-		// The AGENTS.md those forwarders reach engine-sync to compile is
-		// engine-sync's to prove; the jail's stand-in writes none.
 	})
 
 	t.Run("launcher", func(t *testing.T) {

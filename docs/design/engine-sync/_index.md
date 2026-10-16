@@ -2,4 +2,4 @@
 
 | Topic | File | Covers |
 | --- | --- | --- |
-| engine-sync | [engine-sync.md](engine-sync.md) | The Go binary and Claude plugin cut out of pfm's `codexgen` and `opencodegen`: decisions, engine facts, the split line with pfm, layout, CLI, binary resolution, the plugin's hooks, machine-level writes, every door, phases P1–P4 with acceptance, checks, rejected alternatives, open items |
+| engine-sync | [engine-sync.md](engine-sync.md) | Current state: status and version, the layout pointer into the plugin's docs, the doors (binary on PATH, verbs, plugin hooks, retired pfm subcommands), config files and precedence, registry ownership and the `registry-ownership` doctor rows, vocabulary |

@@ -17,14 +17,14 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 - **The adopter owns the file.** `pfm init` scaffolds `templates/project/settings.json` into `.claude/settings.json` once and pins it in `.professor/baseline.json`; `pfm doctor --project-updates` reports upstream changes for the adopter's session to hand-apply, then `pfm update {adopt|pin|ignore|drop}` manages the pins. The `"project/settings.json"` row in `templates/refresh-map.json` maps the template to its live source for `/pfm:release --from`.
 - **Project settings carry permissions and project hooks only.** No MCP server ships with Professor; a personal server is the adopter's own registration. Output style, status line and machine hooks ride each launch's `--settings` ([claude-launch.md](claude-launch.md#how-claude-layers-its-settings)).
-- **Hooks run project scripts.** Every project hook command is `$CLAUDE_PROJECT_DIR/.claude/scripts/…`; the six are inventoried in `docs/design/hooks/hooks.md`.
+- **Hooks run project scripts.** Every project hook command is `$CLAUDE_PROJECT_DIR/.claude/scripts/…`; it is inventoried in `docs/design/hooks/hooks.md`.
 
 ## This repo
 
 `.claude/settings.json` — two keys:
 
-- **`permissions.allow`** (no `deny`): the repo gates `Bash(.claude/scripts/dev.sh:*)`, `Bash(scripts/leak-check.sh:*)`, `Bash(scripts/refresh-scope.sh:*)`; `Bash(pfm codex:*)`; read-only git (`status`, `diff`, `log`, `show`, `rev-parse`); `go vet`, `go build`, `go test`; `Read(*)`, `Grep(*)`, `Glob(*)` (`.claude/settings.json:2-18`).
-- **`hooks`**: `PreToolUse`, `PostToolUse`, `Stop` — four matcher groups, six commands (`:21`).
+- **`permissions.allow`** (no `deny`): the repo gates `Bash(.claude/scripts/dev.sh:*)`, `Bash(scripts/leak-check.sh:*)`, `Bash(scripts/refresh-scope.sh:*)`; `Bash(engine-sync codex:*)`; read-only git (`status`, `diff`, `log`, `show`, `rev-parse`); `go vet`, `go build`, `go test`; `Read(*)`, `Grep(*)`, `Glob(*)` (`.claude/settings.json:2-18`).
+- **`hooks`**: `PostToolUse`, one matcher group, one command: `format-md.sh` (`:21`).
 
 `.claude/settings.local.json` is untracked and holds `disabledMcpjsonServers: ["playwright"]`.
 
@@ -40,7 +40,7 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 | Key | This repo | Template |
 | --- | --- | --- |
 | `permissions.allow` | narrow: named scripts, read-only git, Go, read tools | wildcards: every Bash, web, Workflow, Write |
-| `hooks` | 6 | the same 6 |
+| `hooks` | `format-md.sh` | the same |
 
 ## settings-global.json
 

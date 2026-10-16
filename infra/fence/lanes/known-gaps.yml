@@ -13,5 +13,5 @@ gaps:
     why: "the harvestpy pinned Python conversion sidecar has no verified provisioning path on linux-arm64"
     owner: GOD
     date: 2026-09-17
-    expires: 2026-10-22
+    expires: 2026-10-29
     arch: linux-arm64

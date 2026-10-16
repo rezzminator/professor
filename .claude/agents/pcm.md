@@ -24,7 +24,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - `.claude/commands/**/*.md`: slash commands (`/quality:*`, `/context-meter`, `/context-audit`, `/pfm`, `/pfm:workbench` are global)
 - `.claude/agents/*.md`: registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md`: reusable skills, source-fetched per `templates/project/skills/sources.json`, never vendored
-- `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh, codex-sync.sh (mirror auto-compile; the compiler itself is `pfm codex build`)
+- `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh, the engine-sync plugin's hooks (`hook claude mark|stop|start`, mirror auto-compile; the compiler itself is `engine-sync codex build`)
 - `docs/commands/{cmd}/references/`: command-owned reference docs (`$CDOCS/$CMD/$REFS/`); `pcm/references/{audit-scopes,refresh}.md` are yours
 - The shipped product: `templates/**` is an adopter's live framework. A change there ships to every future install; `docs/{SETUP,PLACEHOLDERS}.md` are its spec and `templates/refresh-map.json` maps each template to its live source.
 
@@ -52,7 +52,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 
 - `CLAUDE.md`; `.claude/agents/*.md`, `.claude/commands/**/*.md`, `.claude/skills/*/SKILL.md`, `.claude/scripts/*.{sh,mjs}`, `.claude/settings.json`
 - The shipped blueprint `templates/**` with its spec and `refresh-map.json`; `/pfm:release` publishes it, you edit it.
-- The Codex and OpenCode mirrors (`.codex/`, `.opencode/`, `AGENTS.md`): generated from the Claude sources by `pfm codex build` and `pfm opencode build`, never edited by hand. The `Stop` hook recompiles after an Edit/Write; after a Bash-driven write run `pfm codex build . && pfm codex check .` and `pfm opencode build . && pfm opencode doctor .`. Hand-written keepers: `.codex/config.toml` (except its generated `mcp_servers` fence).
+- The Codex and OpenCode mirrors (`.codex/`, `.opencode/`, `AGENTS.md`): generated from the Claude sources by `engine-sync codex build` and `engine-sync opencode build`, never edited by hand. The `Stop` hook recompiles after an Edit/Write; after a Bash-driven write run `engine-sync codex build . && engine-sync codex check .` and `engine-sync opencode build . && engine-sync opencode doctor .`. Hand-written keepers: `.codex/config.toml` (except its generated `mcp_servers` fence).
 - `docs/commands/pcm/references/`
 
 ## Logging
@@ -101,7 +101,7 @@ Group changes into breaking (atomic) and non-breaking (independent). Route by th
 3. Every `subagent_type` named anywhere has a file in `.claude/agents/`
 4. Every `/command` referenced in a shipped or installed file has a file; every `.claude/commands/**/*.md` has a `description:`
 5. Script and reference-doc paths exist as stated
-6. `pfm codex check .` and `pfm opencode doctor .` are clean
+6. `engine-sync codex check .` and `engine-sync opencode doctor .` are clean
 
 ### 6 Report
 
@@ -119,7 +119,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 ## Special operations
 
 - Full rename: grep all occurrences (`templates/**`, `README.md`, `docs/SETUP.md`, `refresh-map.json` included), update agents, then `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
-- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back` unless it is an rr-family agent), compile with `pfm codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
+- New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__sub-agent-compact__forward_handoff, mcp__sub-agent-compact__look_back` unless it is an rr-family agent), compile with `engine-sync codex build .`, decide whether it ships as `templates/project/agents/{name}.md`.
 - New skill: create `.claude/skills/{name}/SKILL.md`; a skill for adopters is registered in `templates/project/skills/sources.json` and lives in its own public repo.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` only as a non-obvious routing decision.
 

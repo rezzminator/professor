@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -106,5 +107,78 @@ func TestRetiredPathsWithoutAccountsCannotJudgeAccountDirs(t *testing.T) {
 	rows := RetiredPaths(env)
 	if len(rows) != 1 || rows[0].Severity != Block || rows[0].Check != "dead-account-dir" {
 		t.Fatalf("rows=%+v, want one dead-account-dir BLOCK", rows)
+	}
+}
+
+// TestRetiredPathsNameTheOldEngineSyncConfig pins the engine-sync detector:
+// engine-sync exits 2 beside {config}/engine-sync/config.json or targets.json
+// while ~/.claude/engine-sync.json is absent, in the default directory and in an
+// absolute XDG_CONFIG_HOME's; a BLOCK naming pfm install and the move then, a
+// WARN once it exists that claims no exit, nothing for a clean home or a
+// relative XDG_CONFIG_HOME.
+func TestRetiredPathsNameTheOldEngineSyncConfig(t *testing.T) {
+	env := retiredPathEnv(t)
+	successor := filepath.Join(env.Home, ".claude", "engine-sync.json")
+	xdg := filepath.Join(env.Home, "xdg")
+	env.Environ = []string{"XDG_CONFIG_HOME=" + xdg}
+	if row, ok := rowFor(RetiredPaths(env), successor); ok {
+		t.Fatalf("a clean home raised %+v", row)
+	}
+	olds := []string{
+		filepath.Join(env.Home, ".config", "engine-sync", "config.json"),
+		filepath.Join(env.Home, ".config", "engine-sync", "targets.json"),
+		filepath.Join(xdg, "engine-sync", "config.json"),
+		filepath.Join(xdg, "engine-sync", "targets.json"),
+	}
+	for _, path := range olds {
+		writeRetired(t, path)
+	}
+	rows := RetiredPaths(env)
+	for _, path := range olds {
+		row, ok := rowFor(rows, path)
+		if !ok || row.Severity != Block || row.Check != "engine-sync-old-config" ||
+			!strings.Contains(row.Problem, "awaits its move to "+successor) ||
+			!strings.Contains(row.Fix, "run pfm install --yes") ||
+			!strings.Contains(row.Fix, "move its keys into "+successor) {
+			t.Fatalf("held %s: row=%+v ok=%v", path, row, ok)
+		}
+	}
+	writeRetired(t, successor)
+	rows = RetiredPaths(env)
+	for _, path := range olds {
+		if row, ok := rowFor(rows, path); !ok || row.Severity != Warn || row.Check != "engine-sync-old-config" ||
+			strings.Contains(row.Problem, "exits 2") {
+			t.Fatalf("successor present %s: row=%+v ok=%v", path, row, ok)
+		}
+	}
+	env.Environ = []string{"XDG_CONFIG_HOME=relative"}
+	rows = RetiredPaths(env)
+	if _, ok := rowFor(rows, olds[2]); ok {
+		t.Fatalf("a relative XDG_CONFIG_HOME was read: %+v", rows)
+	}
+	if _, ok := rowFor(rows, olds[0]); !ok {
+		t.Fatalf("the default old config dir was not checked: %+v", rows)
+	}
+}
+
+// TestRetiredPathsNameTheRetiredGeneratedStore pins the home stores engine-sync
+// once rendered agents into: each that still exists is a WARN row of kind
+// retired-generated-store naming the directory (the purge moves it); an absent one
+// is no row.
+func TestRetiredPathsNameTheRetiredGeneratedStore(t *testing.T) {
+	env := retiredPathEnv(t)
+	stores := installer.RetiredGeneratedStores(env.Home)
+	writeRetired(t, filepath.Join(stores[1], "rr.toml"))
+	rows := RetiredPaths(env)
+	row, ok := rowFor(rows, stores[1])
+	if !ok || row.Severity != Warn || row.Check != "retired-generated-store" {
+		t.Fatalf("codex-agents store: row=%+v ok=%v rows=%+v", row, ok, rows)
+	}
+	if absent, found := rowFor(rows, stores[0]); found {
+		t.Fatalf("absent claude-agents store reported: %+v", absent)
+	}
+	writeRetired(t, filepath.Join(stores[0], "astra.md"))
+	if row, ok := rowFor(RetiredPaths(env), stores[0]); !ok || row.Check != "retired-generated-store" {
+		t.Fatalf("claude-agents store: row=%+v ok=%v", row, ok)
 	}
 }

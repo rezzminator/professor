@@ -109,7 +109,7 @@ The unit's testing manual names the test command as the only way to run its test
 
 ## I8 — Engine copies
 
-A repository keeps engine copies of its commands when `.codex/` or `.opencode/` sits at its root; each is regenerated after the manuals change (`pfm codex build .`, `pfm opencode build .`), so every engine reads the same manual.
+A repository keeps engine copies of its commands when `.codex/` or `.opencode/` sits at its root; each is regenerated after the manuals change (`engine-sync codex build .`, `engine-sync opencode build .`), so every engine reads the same manual.
 
 ## I9 — Verify
 

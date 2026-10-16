@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -22,6 +23,14 @@ const (
 	checkLegacyConfigDir = "legacy-config-dir"
 	checkInstallBackup   = "install-backup"
 	checkDeadAccountDir  = "dead-account-dir"
+	// checkEngineSyncOldConfig is the old machine config engine-sync now
+	// refuses to start beside (installer/engine_sync_config.go retires the
+	// files pfm owns).
+	checkEngineSyncOldConfig = "engine-sync-old-config"
+	// checkRetiredGeneratedStore is a home store engine-sync once rendered
+	// agents into (installer.RetiredGeneratedStores, the one copy of the paths).
+	checkRetiredGeneratedStore = "retired-generated-store"
+	engineSyncConfigFile       = "config.json"
 	// installBackupMarker is the name availableBackup gives every copy pfm
 	// install sets aside (installer/files.go).
 	installBackupMarker = ".pre-professor-"
@@ -64,6 +73,14 @@ func RetiredPathDetectors() []Detector {
 		}},
 		{"dead-registry-link", staleDeadRegistryLinks},
 		{checkDeadAccountDir, staleDeadAccountDirs},
+		{checkEngineSyncOldConfig, staleEngineSyncOldConfig},
+		{checkRetiredGeneratedStore, func(env Env) ([]Row, error) {
+			return stalePresent(
+				checkRetiredGeneratedStore,
+				"home store engine-sync no longer renders agents into",
+				installer.RetiredGeneratedStores(env.Home)...,
+			), nil
+		}},
 	}
 }
 
@@ -170,6 +187,42 @@ func staleHarvesterCache(env Env) ([]Row, error) {
 	return append(rows, staleRow(check, path, "pre-rename harvester cache dir")), nil
 }
 
+// staleEngineSyncOldConfig: engine-sync read {config}/engine-sync/config.json
+// and targets.json until it moved its machine config into
+// ~/.claude/engine-sync.json, and now exits 2 beside either. pfm install
+// removes the files it owns; one still here is the operator's, a BLOCK while
+// the global file is absent (its keys await the move) and a WARN once the
+// file exists.
+func staleEngineSyncOldConfig(env Env) ([]Row, error) {
+	var rows []Row
+	successor := enginesync.GlobalConfigPath(env.Home)
+	successorAbsent := inspectPath(&rows, checkEngineSyncOldConfig, successor) == nil
+	values := map[string]string{}
+	for _, entry := range env.Environ {
+		if key, value, found := strings.Cut(entry, "="); found && key == "XDG_CONFIG_HOME" {
+			values[key] = value
+		}
+	}
+	for _, dir := range enginesync.OldConfigDirs(&paths.MapEnv{Values: values}, env.Home) {
+		for _, name := range []string{engineSyncConfigFile, "targets.json"} {
+			path := filepath.Join(dir, name)
+			if inspectPath(&rows, checkEngineSyncOldConfig, path) == nil {
+				continue
+			}
+			if successorAbsent {
+				rows = append(rows, heldRow(checkEngineSyncOldConfig, path, successor,
+					"run pfm install --yes, which writes "+successor+" and retires the old file when it is pfm's; "+
+						"else move its keys into "+successor+" (engine-sync exits 2 while "+path+" exists and "+
+						successor+" is absent)"))
+				continue
+			}
+			rows = append(rows, staleRow(checkEngineSyncOldConfig, path,
+				"old engine-sync machine config, no longer read while "+successor+" exists"))
+		}
+	}
+	return rows, nil
+}
+
 // staleInstallBackups: every copy pfm install set aside beside a file it
 // replaced — Claude dirs, ~/.zshrc, the launchd plists, the systemd units.
 func staleInstallBackups(env Env) ([]Row, error) {
@@ -218,24 +271,18 @@ func staleStateBackups(env Env) ([]Row, error) {
 	return rows, nil
 }
 
-// staleDeadRegistryLinks reuses install's dead-link rule with the repo set
-// doctor's registry check passes it.
+// staleDeadRegistryLinks lists the DEAD class of install's registry-ownership
+// scan; STORE and ORPHAN links are doctor's failure rows and install retires them.
 func staleDeadRegistryLinks(env Env) ([]Row, error) {
-	repo, err := installer.GlobalSourceRepo(env.Home)
-	if err != nil {
-		return nil, fmt.Errorf("resolve the global source repo for dead registry links: %w", err)
-	}
-	repos := []string{repo}
-	if fallback := filepath.Join(env.Home, ".professor"); repo != fallback {
-		repos = append(repos, fallback)
-	}
-	dead, err := installer.InspectDeadRegistryLinks(env.Home, env.Store, repos)
+	result, err := installer.ScanRegistryOwnership(env.Home, env.Store, installer.RetiredRegistryNames{})
 	if err != nil {
 		return nil, fmt.Errorf("inspect dead registry links: %w", err)
 	}
-	rows := make([]Row, 0, len(dead))
-	for _, link := range dead {
-		rows = append(rows, staleRow("dead-registry-link", link.Path, "pfm link to a target gone: "+link.Target))
+	var rows []Row
+	for _, link := range result.Findings {
+		if link.Class == installer.RegistryDead {
+			rows = append(rows, staleRow("dead-registry-link", link.Path, "pfm link to a target gone: "+link.Target))
+		}
 	}
 	return rows, nil
 }

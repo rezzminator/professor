@@ -395,12 +395,12 @@ func TestConfigShowDistinguishesInputAndEffectiveSchema(t *testing.T) {
 }
 
 // TestConfigShowReportsClaudePlugins: config show lists claude.plugins entry by entry with the
-// source of the list: the four of today when the key is unset, "none" for an empty list.
+// source of the list: the five defaults when the key is unset, "none" for an empty list.
 func TestConfigShowReportsClaudePlugins(t *testing.T) {
 	for _, test := range []struct{ name, content, want string }{
 		{
 			"unset", `{"version":2}`,
-			"config claude.plugins=cache-live-control,sub-agent-compact,effort-live-control,tool-visibility-controller (default)",
+			"config claude.plugins=cache-live-control,sub-agent-compact,effort-live-control,tool-visibility-controller,engine-sync (default)",
 		},
 		{
 			"listed",

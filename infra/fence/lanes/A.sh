@@ -3,7 +3,7 @@
 # (`pfm init` + scripted fill, infra/fence/lanes/adopt.sh), walked depth-first from the
 # scaffold roster through the baseline pin, the whole `pfm update` flow against
 # a SECOND blueprint clone inside the container, the self-update preflight and
-# body, the Codex mirror, the codex-sync hooks driven by a scripted chat, express's own
+# body, the Codex mirror, the engine-sync plugin's hooks driven by a scripted chat, express's own
 # suite, the release-notice refresh, and the cross-lane "fleet unchanged by an
 # update" seam. Runs INSIDE a lane container (run.sh), never on a host.
 #
@@ -746,31 +746,32 @@ beat A.08-codex-mirror
 spends none
 expect-log 'STALE'
 bad=""
-chk="$(in_express pfm codex check .)"
+chk="$(in_express engine-sync codex check .)"
 chk_rc=$?
 [ "$chk_rc" -eq 0 ] && [ "$(printf '%s\n' "$chk" | tail -1)" = 'CODEX CHECK PASS' ] ||
-  bad="$bad pfm codex check exited $chk_rc without 'CODEX CHECK PASS' ($(one_line "$(printf '%s' "$chk" | grep -E '(pfm|engine-sync) codex' | head -2)"));"
+  bad="$bad engine-sync codex check exited $chk_rc without 'CODEX CHECK PASS' ($(one_line "$(printf '%s' "$chk" | grep -E 'engine-sync codex' | head -2)"));"
 agents_hash="$(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1)"
 [ -n "$agents_hash" ] || bad="$bad no $EXPRESS/AGENTS.md to compile into;"
-bld="$(in_express pfm codex build .)"
+bld="$(in_express engine-sync codex build .)"
 bld_rc=$?
 [ "$bld_rc" -eq 0 ] && [ "$(printf '%s\n' "$bld" | tail -1)" = 'CODEX BUILD PASS' ] ||
-  bad="$bad pfm codex build exited $bld_rc without 'CODEX BUILD PASS' ($(one_line "$bld"));"
+  bad="$bad engine-sync codex build exited $bld_rc without 'CODEX BUILD PASS' ($(one_line "$bld"));"
 [ "$(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1)" = "$agents_hash" ] ||
   bad="$bad a build over a PASSing mirror changed AGENTS.md — build and check disagree about what is compiled;"
 # The broken state: a hand edit to a compiled file is STALE to check (exit 1)
 # and build puts it back.
 printf '\nLane A probe: stale %s\n' "$LANE_STAMP" >>"$EXPRESS/AGENTS.md"
-stale="$(in_express pfm codex check .)"
+stale="$(in_express engine-sync codex check .)"
 stale_rc=$?
 [ "$stale_rc" -eq 1 ] || bad="$bad check over a hand-edited AGENTS.md exited $stale_rc, want 1;"
-grep -qF "engine-sync codex: STALE $EXPRESS/AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE $EXPRESS/AGENTS.md': $(one_line "$stale");"
+# engine-sync names a mirror by its path relative to the project root.
+grep -qF "engine-sync codex: STALE AGENTS.md" <<<"$stale" || bad="$bad check did not name 'STALE AGENTS.md': $(one_line "$stale");"
 grep -qxF 'CODEX CHECK PASS' <<<"$stale" && bad="$bad check printed CODEX CHECK PASS over a stale mirror;"
-rebuilt="$(in_express pfm codex build .)"
+rebuilt="$(in_express engine-sync codex build .)"
 rebuilt_rc=$?
 [ "$rebuilt_rc" -eq 0 ] || bad="$bad the repairing build exited $rebuilt_rc ($(one_line "$rebuilt"));"
 [ "$(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1)" = "$agents_hash" ] || bad="$bad build did not restore AGENTS.md to its compiled content;"
-in_express pfm codex check . >/dev/null 2>&1 || bad="$bad check does not PASS after the repairing build;"
+in_express engine-sync codex check . >/dev/null 2>&1 || bad="$bad check does not PASS after the repairing build;"
 if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state: $(one_line "$after");"; fi
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "CODEX CHECK PASS and CODEX BUILD PASS (build idempotent over AGENTS.md); a hand edit to AGENTS.md is 'STALE' to check (exit 1) and the next build puts the compiled content back"
@@ -792,18 +793,25 @@ else
   agent_names=""
   n_md=0
 fi
-first="$(pfm codex agents 2>/tmp/lane-a-codex-agents.err)"
+first="$(engine-sync codex agents 2>/tmp/lane-a-codex-agents.err)"
 first_rc=$?
 _lane_log_only "   A.09: first run printed $(printf '%s\n' "$first" | grep -c .) line(s); $(printf '%s' "$first" | grep -cE '^(missing|copy|wrong-target) ') link(s) were not yet correct"
-second="$(pfm codex agents 2>>/tmp/lane-a-codex-agents.err)"
+second="$(engine-sync codex agents 2>>/tmp/lane-a-codex-agents.err)"
 second_rc=$?
-[ "$first_rc" -eq 0 ] && [ "$second_rc" -eq 0 ] || bad="$bad pfm codex agents exited $first_rc then $second_rc ($(one_line "$(cat /tmp/lane-a-codex-agents.err)"));"
+[ "$first_rc" -eq 0 ] && [ "$second_rc" -eq 0 ] || bad="$bad engine-sync codex agents exited $first_rc then $second_rc ($(one_line "$(cat /tmp/lane-a-codex-agents.err)"));"
 [ "$(printf '%s\n' "$second" | tail -1)" = 'CODEX AGENTS PASS' ] || bad="$bad no CODEX AGENTS PASS terminal: $(one_line "$second" | cut -c1-160);"
 n_clean="$(printf '%s' "$second" | grep -c '\.toml: [0-9]* B, parses clean$')"
 [ "$n_clean" -ge "$n_md" ] || bad="$bad $n_clean '.toml: N B, parses clean' line(s) for $n_md agent source(s);"
 not_correct="$(printf '%s' "$second" | grep -E '^(missing|copy|wrong-target|conflict|stale|owned-link|foreign) ' | head -3)"
 [ -z "$not_correct" ] || bad="$bad on the second run a registry entry is still not settled: $(one_line "$not_correct");"
-[ -s /tmp/lane-a-codex-agents.err ] && bad="$bad problem line(s) on stderr: $(one_line "$(cat /tmp/lane-a-codex-agents.err)" | cut -c1-200);"
+# A role whose capability the host does not declare (gpt-agents, off in the lane) is engine-sync's named
+# SKIPPED warning, and a Claude tool with no OpenCode equivalent (ToolSearch) its named unmapped-tool
+# warning (the tool stays denied there); neither is a problem, any other stderr line is.
+problem_lines="$(grep -v -E \
+  -e '^engine-sync codex agents: warning: SKIPPED [^ ]+ — requires [a-z-]+$' \
+  -e '^engine-sync codex agents: warning: unmapped Claude tool [A-Za-z]+ in [^ ]+ — no OpenCode equivalent; it stays denied$' \
+  /tmp/lane-a-codex-agents.err || true)"
+[ -z "$problem_lines" ] || bad="$bad problem line(s) on stderr: $(one_line "$problem_lines" | cut -c1-200);"
 # A role must be a REGULAR FILE: Codex opens it with O_NOFOLLOW and rejects a
 # symlink as "agent type is currently not available", so a linked registry
 # passes every stat-shaped check while no global agent can spawn at all.
@@ -852,7 +860,24 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "the default store $BLUEPRINT is a link and resolves the worktree's HEAD $WT_SHA; $B reached through $LINK reports the same clean check with the same store sha $B_BASE_SHORT"
 fi
 
-# ─── A.11 — the codex-sync hooks, driven by scripted mock turns in express ────────
+# ─── A.11 — the engine-sync plugin's hooks, driven by scripted mock turns in express ──
+
+# The plugin the hook door belongs to: lanes/container.sh mounts the engine-sync source at /engine-sync. The mock
+# engine reads hooks from settings layers only, so it cannot load a plugin; the lane runs the commands the plugin's
+# hooks.json registers for an event itself, the way Claude Code does — ${CLAUDE_PLUGIN_ROOT} expanded, args
+# appended, the JSON payload on stdin, the chat's project as cwd and CLAUDE_PROJECT_DIR.
+PLUGIN_ROOT="${ENGINE_SYNC_PLUGIN_ROOT:-/engine-sync/plugins/engine-sync}"
+plugin_hook() { # plugin_hook <event> <tool name> <payload json>: output on stdout; non-zero when none ran or one failed
+  local event="$1" tool="$2" payload="$3" line ran=0 rc=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ran=$((ran + 1))
+    (cd "$EXPRESS" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$EXPRESS" bash -c "$line" <<<"$payload") 2>&1 || rc=1
+  done < <(jq -r --arg event "$event" --arg tool "$tool" --arg root "$PLUGIN_ROOT" '
+    .hooks[$event][]? | select((.matcher // "") as $m | $m == "" or ($tool | test("^(" + $m + ")$"))) | .hooks[] |
+    select(.type == "command") | ([.command | gsub("\\$\\{CLAUDE_PLUGIN_ROOT\\}"; $root)] + (.args // [])) | @sh' "$PLUGIN_ROOT/hooks/hooks.json")
+  [ "$ran" -gt 0 ] && [ "$rc" -eq 0 ]
+}
 
 open_main() {
   pfm chat new --name "$CHAT" --engine cc --account "$SEAT" --cwd "$EXPRESS" --await --timeout 300 \
@@ -860,7 +885,7 @@ open_main() {
 }
 lane_reopen 'open_main'
 
-beat A.11-codex-sync-hook
+beat A.11-plugin-hook
 spends "cc:$SEAT"
 target "$CHAT"
 bad=""
@@ -876,14 +901,22 @@ while IFS= read -r cmd; do
 done <<EOF
 $hooks
 EOF
-jq -e '.hooks.Stop[].hooks[] | select(.type == "command" and .command == "export CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel 2>/dev/null || printf %s \"$CLAUDE_PROJECT_DIR\")\"; \"$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh\" sync")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
-  bad="$bad no codex-sync.sh sync Stop hook wired;"
-jq -e '.hooks.PostToolUse[] | select(.matcher == "Edit|Write") | .hooks[] | select(.type == "command" and .command == "export CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel 2>/dev/null || printf %s \"$CLAUDE_PROJECT_DIR\")\"; \"$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh\" mark")' "$EXPRESS/.claude/settings.json" >/dev/null 2>&1 ||
-  bad="$bad no codex-sync.sh mark PostToolUse Edit|Write hook wired;"
+# The plugin is the only hook door: its hooks.json registers mark on a Write or Edit, stop on Stop and start on
+# SessionStart, each through its libexec/engine-sync (the static half of the spec's row).
+hooks_json="$PLUGIN_ROOT/hooks/hooks.json"
+for want_hook in 'PostToolUse;Write|Edit;mark' 'Stop;;stop' 'SessionStart;;start'; do
+  IFS=';' read -r want_event want_matcher want_stage <<<"$want_hook"
+  jq -e --arg event "$want_event" --arg matcher "$want_matcher" --arg stage "$want_stage" '
+    .hooks[$event][]? | select((.matcher // "") == $matcher) | .hooks[] |
+    select(.type == "command" and .command == "${CLAUDE_PLUGIN_ROOT}/libexec/engine-sync" and .args == ["hook", "claude", $stage])
+  ' "$hooks_json" >/dev/null 2>&1 ||
+    bad="$bad $hooks_json registers no $want_event hook running engine-sync hook claude $want_stage;"
+done
+[ -x "$PLUGIN_ROOT/libexec/engine-sync" ] || bad="$bad $PLUGIN_ROOT/libexec/engine-sync is absent or not executable;"
 EDIT_FILE=".claude/agents/gitter.md"
 ROOT_FILE="CLAUDE.md"
 if [ -n "$bad" ]; then
-  fail "the express hook wiring is not the shape codex-sync needs:$bad"
+  fail "the hook wiring is not the shape the engine-sync plugin needs:$bad"
 elif [ ! -f "$EXPRESS/$EDIT_FILE" ] || [ ! -f "$EXPRESS/$ROOT_FILE" ]; then
   fail "express has no $EDIT_FILE or no $ROOT_FILE to edit"
 else
@@ -934,19 +967,25 @@ else
     allow_result="$(read_probe_result)"
     jq -e '.is_error != true and .content == "done"' <<<"$allow_result" >/dev/null 2>&1 ||
       bad="$bad the Edit was not admitted: $(one_line "$allow_result");"
+    mark_payload="$(jq -cn --arg file "$EXPRESS/$EDIT_FILE" '{session_id:"lane-a11",tool_name:"Edit",tool_input:{file_path:$file}}')"
+    mark_out="$(plugin_hook PostToolUse Edit "$mark_payload")" ||
+      bad="$bad the plugin's PostToolUse(Edit) hook did not run clean: $(one_line "$mark_out");"
     wait_for 10 "compgen -G '$DIRTY_GLOB' >/dev/null" ||
-      bad="$bad codex-sync.sh mark PostToolUse(Edit|Write) did not set the engine-sync dirty flag $DIRTY_GLOB (${LANE_WAIT_WHY:-no wait reason});"
+      bad="$bad the plugin's hook claude mark on PostToolUse(Edit) did not set the engine-sync dirty flag $DIRTY_GLOB (${LANE_WAIT_WHY:-no wait reason});"
     printf '\nLane A probe: LANE-A-ALLOW-ROOT\n' >>"$EXPRESS/$ROOT_FILE" ||
       bad="$bad the lane could not append the allowed root probe;"
     rm -f "$gate"
+    stop_payload="$(jq -cn '{session_id:"lane-a11",stop_hook_active:false}')"
+    stop_out="$(plugin_hook Stop "" "$stop_payload")" ||
+      bad="$bad the plugin's Stop hook did not run clean: $(one_line "$stop_out");"
     if ! wait_for 180 "grep -qF LANE-A-ALLOW-ROOT '$EXPRESS/AGENTS.md'"; then
-      bad="$bad the Stop hook did not recompile AGENTS.md from the edited CLAUDE.md within 180s (${LANE_WAIT_WHY:-no wait reason}); AGENTS.md hash $(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1 | cut -c1-12) vs before ${agents_before:0:12};"
+      bad="$bad the plugin's hook claude stop did not recompile AGENTS.md from the edited CLAUDE.md within 180s (${LANE_WAIT_WHY:-no wait reason}); AGENTS.md hash $(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1 | cut -c1-12) vs before ${agents_before:0:12};"
     fi
     wait_for 30 "! compgen -G '$DIRTY_GLOB' >/dev/null" ||
-      bad="$bad the engine-sync dirty flag is still set after the turn — codex-sync.sh sync did not clear it (${LANE_WAIT_WHY:-no wait reason});"
+      bad="$bad the engine-sync dirty flag is still set after the turn — hook claude stop did not clear it (${LANE_WAIT_WHY:-no wait reason});"
     # Restore express: the committed files back, the mirror rebuilt from them.
     git -C "$EXPRESS" checkout -q -- "$EDIT_FILE" "$ROOT_FILE" 2>/dev/null || bad="$bad git checkout of $EDIT_FILE/$ROOT_FILE failed;"
-    in_express pfm codex build . >/dev/null || bad="$bad the mirror could not be rebuilt after the restore;"
+    in_express engine-sync codex build . >/dev/null || bad="$bad the mirror could not be rebuilt after the restore;"
     if [ "$opencode_backup_ok" -eq 1 ]; then
       rm -rf "$EXPRESS/.opencode"
       if [ "$opencode_had" -eq 1 ]; then
@@ -957,7 +996,7 @@ else
     rm -f "$gate"
     if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after restore: $(one_line "$after");"; fi
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "the Edit of $EDIT_FILE was admitted and the PostToolUse mark set the dirty flag; Stop recompiled AGENTS.md and cleared it; express restored"
+      pass "the plugin registers mark, stop and start; the Edit of $EDIT_FILE was admitted and hook claude mark set the dirty flag; hook claude stop recompiled AGENTS.md and cleared it; express restored"
     fi
   fi
 fi
@@ -1008,25 +1047,26 @@ fi
 beat A.13-opencode-layer
 spends none
 bad=""
-bld="$(in_express pfm opencode build .)"
+bld="$(in_express engine-sync opencode build .)"
 bld_rc=$?
 [ "$bld_rc" -eq 0 ] && [[ "$(printf '%s\n' "$bld" | tail -1)" == 'OPENCODE BUILD PASS'* ]] ||
-  bad="$bad pfm opencode build exited $bld_rc without 'OPENCODE BUILD PASS' ($(one_line "$bld"));"
-chk="$(in_express pfm opencode check .)"
+  bad="$bad engine-sync opencode build exited $bld_rc without 'OPENCODE BUILD PASS' ($(one_line "$bld"));"
+chk="$(in_express engine-sync opencode check .)"
 chk_rc=$?
 [ "$chk_rc" -eq 0 ] && [[ "$(printf '%s\n' "$chk" | tail -1)" == 'OPENCODE CHECK PASS'* ]] ||
-  bad="$bad pfm opencode check exited $chk_rc without 'OPENCODE CHECK PASS' ($(one_line "$chk")); the build it just ran should have left check clean;"
-doc="$(in_express pfm opencode doctor .)"
+  bad="$bad engine-sync opencode check exited $chk_rc without 'OPENCODE CHECK PASS' ($(one_line "$chk")); the build it just ran should have left check clean;"
+doc="$(in_express engine-sync opencode doctor .)"
 doc_rc=$?
-[ "$doc_rc" -eq 0 ] && [[ "$(printf '%s\n' "$doc" | tail -1)" == 'OPENCODE DOCTOR PASS'* ]] ||
-  bad="$bad pfm opencode doctor exited $doc_rc without 'OPENCODE DOCTOR PASS' ($(one_line "$doc"));"
+# Human doctor prints its CONFIG provenance rows after the verdict line.
+[ "$doc_rc" -eq 0 ] && [[ "$(printf '%s\n' "$doc" | grep -v '^CONFIG ' | tail -1)" == 'OPENCODE DOCTOR PASS'* ]] ||
+  bad="$bad engine-sync opencode doctor exited $doc_rc without 'OPENCODE DOCTOR PASS' ($(one_line "$doc"));"
 [ -f "$EXPRESS/.opencode/opencode.jsonc" ] || bad="$bad no $EXPRESS/.opencode/opencode.jsonc after a passing build;"
 [ -d "$EXPRESS/.opencode/agent" ] && [ -n "$(find "$EXPRESS/.opencode/agent" -name '*.md' 2>/dev/null | head -1)" ] ||
   bad="$bad no $EXPRESS/.opencode/agent/*.md after a passing build;"
 [ -d "$EXPRESS/.opencode/command" ] && [ -n "$(find "$EXPRESS/.opencode/command" -name '*.md' 2>/dev/null | head -1)" ] ||
   bad="$bad no $EXPRESS/.opencode/command/*.md after a passing build;"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "pfm opencode build|check|doctor all PASS over $EXPRESS: .opencode/{opencode.jsonc,agent/*.md,command/*.md} present"
+  pass "engine-sync opencode build|check|doctor all PASS over $EXPRESS: .opencode/{opencode.jsonc,agent/*.md,command/*.md} present"
 fi
 
 # ─── A.14 — the picker's cached release notice, refreshed by the internal verb

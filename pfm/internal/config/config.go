@@ -107,6 +107,10 @@ type ClaudePrefs struct {
 	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
 	// Machine-wide: an account may not set it.
 	Plugins []ClaudePlugin
+	// Env is claude.env: environment variables pfm install writes into the
+	// primary seat's settings.json env, owning only those names; nil when
+	// unset. Machine-wide: an account may not set it.
+	Env map[string]string
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -307,6 +311,8 @@ type rawClaude struct {
 	GptAgents              *bool   `json:"gptAgents,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
+	// Env is claude.env; decodeClaudeEnv validates each name and value.
+	Env json.RawMessage `json:"env,omitempty"`
 }
 
 type rawOpenCode struct {

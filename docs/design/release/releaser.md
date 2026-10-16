@@ -64,7 +64,7 @@ A range too large for the areas' reviewers is split by the script, never by the 
 
 ## GATE
 
-1. In `CANDIDATE`, after the untracked engine mirrors are generated on the host (`pfm codex build`, `pfm opencode build` — the fence mounts the tree read-only, so the templates lane cannot write them), the three lanes — `.claude/scripts/dev.sh iso all templates`, `iso all pfm`, `iso e2e` — each in the background, unpiped into `DIR/gate/candidate-{lane}.log`, the log closed by the shell with `EXIT {code} @{sha}` from the command's own exit status. The agent ends its message; each background command's exit re-invokes it (probed: a sub-agent's background Bash wakes it on exit).
+1. In `CANDIDATE`, after the untracked engine mirrors are generated on the host (`engine-sync codex build`, `engine-sync opencode build` — the fence mounts the tree read-only, so the templates lane cannot write them), the three lanes — `.claude/scripts/dev.sh iso all templates`, `iso all pfm`, `iso e2e` — each in the background, unpiped into `DIR/gate/candidate-{lane}.log`, the log closed by the shell with `EXIT {code} @{sha}` from the command's own exit status. The agent ends its message; each background command's exit re-invokes it (probed: a sub-agent's background Bash wakes it on exit).
 2. A red lane runs again in `STABLE` into `DIR/gate/stable-{lane}.log`. Red on both is inherited: named, not a candidate verdict. Red only on the candidate is new.
 3. `DIR/gate.md`: line one `GATE PASS {sha}` or `GATE FAIL {sha}`, then a line per lane with its exit and its verdict line quoted.
 4. Return `DONE GATE` or `FIX GATE: {n}`, one row per new red with the failing test named.

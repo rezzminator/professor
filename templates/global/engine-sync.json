@@ -8,7 +8,7 @@
     ]
   },
   "machine": {
-    "legacyCodexAgentsDir": ".local/state/pfm/generated/codex-agents",
+    "managedBy": "professor",
     "retiredAgents": [
       "frr",
       "gpt-executor",
@@ -21,9 +21,7 @@
     "retiredFiles": [
       ".codex/agents/explorer.toml"
     ],
-    "generatedAgentsDir": ".local/state/pfm/generated/claude-agents",
     "sourceGeneratedAgentsDir": "templates/generated/agents",
-    "claudeAgentsDir": "",
     "sourceAgentsDir": "templates/global/agents",
     "agentMarkerDir": "templates/global/agents"
   },
@@ -35,7 +33,7 @@
       "haiku": "gpt-6-luna",
       "fable": "gpt-6.1-sol"
     },
-    "rootAdapter": "\n## Codex adapter — reading this file in the Codex harness\n\nThis file is compiled from CLAUDE.md by pfm codex build; model aliases are already mapped to Codex models. Translate harness mechanics to the matching Codex command or role, and treat generated files as read-only: edit CLAUDE.md and rebuild.\n",
+    "rootAdapter": "\n## Codex adapter — reading this file in the Codex harness\n\nThis file is compiled from CLAUDE.md by engine-sync codex build; model aliases are already mapped to Codex models. Translate harness mechanics to the matching Codex command or role, and treat generated files as read-only: edit CLAUDE.md and rebuild.\n",
     "agentPreamble": "You are the {{.Name}} role in this repository, running as a native Codex subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\n",
     "excludeDirs": [],
     "excludeProjects": [],
@@ -57,10 +55,6 @@
       "fable": "openai/gpt-6.1-sol"
     },
     "agentPreamble": "You are the {{.Name}} role in this repository, running as a native OpenCode subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\n",
-    "mirrorFiles": [
-      "LICENSE",
-      "SECURITY.md"
-    ],
     "permission": {
       "*": "allow",
       "bash": {

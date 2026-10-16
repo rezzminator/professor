@@ -174,3 +174,44 @@ func TestSymlinkPublishesWholeAndPreservesForeignDirectoryOnFailure(t *testing.T
 		t.Fatalf("operator data %q: %v", got, err)
 	}
 }
+
+// TestWriteIfPublishesOnlyWhenItsPreconditionHolds: WriteIf runs its
+// precondition after the scratch is written, and the precondition's error
+// keeps the old content, leaves no scratch and comes back matchable.
+func TestWriteIfPublishesOnlyWhenItsPreconditionHolds(t *testing.T) {
+	changed := errors.New("changed underneath")
+	for _, test := range []struct {
+		name      string
+		unchanged error
+		want      string
+	}{
+		{"holds", nil, "new\n"},
+		{"fails", changed, "old\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			path := filepath.Join(directory, "settings.json")
+			if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			scratches := 0
+			err := WriteIf(path, []byte("new\n"), 0o600, func() error {
+				entries, err := os.ReadDir(directory)
+				if err != nil {
+					return err
+				}
+				scratches = len(entries) - 1
+				return test.unchanged
+			})
+			if !errors.Is(err, test.unchanged) || (test.unchanged == nil) != (err == nil) {
+				t.Fatalf("WriteIf = %v, want %v", err, test.unchanged)
+			}
+			if content, _ := os.ReadFile(path); string(content) != test.want || scratches != 1 {
+				t.Fatalf("content %q with %d scratch files at the check, want %q with 1", content, scratches, test.want)
+			}
+			if entries, err := os.ReadDir(directory); err != nil || len(entries) != 1 {
+				t.Fatalf("directory holds %v, %v; want the target alone", entries, err)
+			}
+		})
+	}
+}

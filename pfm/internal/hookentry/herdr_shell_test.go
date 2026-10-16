@@ -12,15 +12,18 @@ import (
 // A plain shell's long command reports to the Herdr pane whose shell (or one
 // of whose foreground processes) is the shell's pid, found by that identity
 // because a pane move changes the pane id: working, then idle with the
-// command, its exit status and its duration (Herdr shows that as done), under
-// the source pfm-shell and the agent shell; release clears it. A failure is an
+// command, its exit status and its duration, under the source pfm-shell and the
+// agent shell, and the same text as the pane's title, the one report Herdr
+// keeps once the bare shell holds the foreground again; release clears both. A failure is an
 // error row in the pfm-shell log pfm doctor reads; a release that finds no pane
 // running the shell has nothing left to release.
 func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 	const (
 		working = `pane.report_agent {"pane_id":"%s","source":"pfm-shell","agent":"shell","state":"working"}`
 		idle    = `pane.report_agent {"pane_id":"%s","source":"pfm-shell","agent":"shell","state":"idle","message":"%s"}`
+		title   = `pane.report_metadata {"pane_id":"%s","source":"pfm-shell","title":"%s"}`
 		release = `pane.release_agent {"pane_id":"%s","source":"pfm-shell","agent":"shell"}`
+		untitle = `pane.report_metadata {"pane_id":"%s","source":"pfm-shell","clear_title":true}`
 		info    = `pane.process_info {"pane_id":"%s"}`
 		listing = `pane.list {}`
 	)
@@ -40,6 +43,7 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 			args:  []string{"done", "--pid", "4242", "--command", "make test", "--exit", "3", "--seconds", "12"},
 			want: []string{
 				sprintf(info, "wT:p1"), sprintf(working, "wT:p1"), sprintf(idle, "wT:p1", "make test exit 3 · 12s"),
+				sprintf(title, "wT:p1", "make test exit 3 · 12s"),
 			},
 		},
 		"a multi-line command reports on one line": {
@@ -50,6 +54,7 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 			want: []string{
 				sprintf(info, "wT:p1"), sprintf(working, "wT:p1"),
 				sprintf(idle, "wT:p1", "for i in 1 2 do sleep 6 done exit 0 · 12s"),
+				sprintf(title, "wT:p1", "for i in 1 2 do sleep 6 done exit 0 · 12s"),
 			},
 		},
 		"a command too long for one message keeps its exit status and duration": {
@@ -60,6 +65,7 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 			want: []string{
 				sprintf(info, "wT:p1"), sprintf(working, "wT:p1"),
 				sprintf(idle, "wT:p1", strings.Repeat("x", 226)+"… exit 3 · 12s"),
+				sprintf(title, "wT:p1", strings.Repeat("x", 66)+"… exit 3 · 12s"),
 			},
 		},
 		"a pane moved away is found by its shell": {
@@ -72,6 +78,7 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 			want: []string{
 				sprintf(info, "wT:p1"), listing, sprintf(info, "wU:p3"),
 				sprintf(working, "wU:p3"), sprintf(idle, "wU:p3", "make test exit 3 · 12s"),
+				sprintf(title, "wU:p3", "make test exit 3 · 12s"),
 			},
 		},
 		"a pane id another shell now holds is skipped": {
@@ -80,12 +87,12 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 				server.addShellPane("wU:p3", "t1", 4242)
 			},
 			args: []string{"release", "--pid", "4242"},
-			want: []string{sprintf(info, "wT:p1"), listing, sprintf(info, "wU:p3"), sprintf(release, "wU:p3")},
+			want: []string{sprintf(info, "wT:p1"), listing, sprintf(info, "wU:p3"), sprintf(release, "wU:p3"), sprintf(untitle, "wU:p3")},
 		},
 		"a nested shell is found among the foreground processes": {
 			setup: func(server *fakeHerdr) { server.addShellPane("wT:p1", "t1", 7, 4242) },
 			args:  []string{"release", "--pid", "4242"},
-			want:  []string{sprintf(info, "wT:p1"), sprintf(release, "wT:p1")},
+			want:  []string{sprintf(info, "wT:p1"), sprintf(release, "wT:p1"), sprintf(untitle, "wT:p1")},
 		},
 		"a release with no pane running the shell sends nothing": {
 			setup: func(server *fakeHerdr) { server.addShellPane("wT:p1", "t1", 7) },
@@ -106,6 +113,31 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 			args:     []string{"done", "--pid", "4242", "--command", "make test", "--exit", "3", "--seconds", "12"},
 			want:     []string{sprintf(info, "wT:p1"), sprintf(working, "wT:p1")},
 			errorLog: "invalid_state",
+		},
+		"a refused title is an error row that never carries the command": {
+			setup: func(server *fakeHerdr) {
+				server.addShellPane("wT:p1", "t1", 4242)
+				server.refuse["pane.report_metadata"] = "invalid_params"
+			},
+			args: []string{
+				"done", "--pid", "4242", "--command", "psql postgres://u:SECRET@db", "--exit", "0", "--seconds", "12",
+			},
+			want: []string{
+				sprintf(info, "wT:p1"), sprintf(working, "wT:p1"),
+				sprintf(idle, "wT:p1", "psql postgres://u:SECRET@db exit 0 · 12s"),
+				sprintf(title, "wT:p1", "psql postgres://u:SECRET@db exit 0 · 12s"),
+			},
+			errorLog: "pane.report_metadata",
+			hidden:   "SECRET",
+		},
+		"a release whose title clear Herdr refuses is an error row": {
+			setup: func(server *fakeHerdr) {
+				server.addShellPane("wT:p1", "t1", 4242)
+				server.refuse["pane.report_metadata"] = "internal"
+			},
+			args:     []string{"release", "--pid", "4242"},
+			want:     []string{sprintf(info, "wT:p1"), sprintf(release, "wT:p1"), sprintf(untitle, "wT:p1")},
+			errorLog: "pane.report_metadata",
 		},
 		"a refused report logs the request, never the command it carried": {
 			setup: func(server *fakeHerdr) {
@@ -188,7 +220,9 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 				if err := json.Unmarshal([]byte(line), &request); err != nil {
 					t.Fatalf("undecodable request %q: %v", line, err)
 				}
-				if strings.HasPrefix(request.Method, "pane.re") {
+				// A title carries no seq: the shell's lock orders a done before
+				// the release that clears it.
+				if strings.HasPrefix(request.Method, "pane.re") && request.Method != "pane.report_metadata" {
 					if request.Params.Seq <= last {
 						t.Fatalf(
 							"seq %d after %d: Herdr ignores a report whose seq is not above the last",
@@ -222,9 +256,9 @@ func TestHerdrShellDoneNeverOutlivesALaterRelease(t *testing.T) {
 		args    []string
 		reports int
 	}{
-		{[]string{"release", "--pid", "4242", "--at", "1760000020.000002"}, 1},
+		{[]string{"release", "--pid", "4242", "--at", "1760000020.000002"}, 2},
 		{done("1760000020.000001"), 0},
-		{done("1760000030.5"), 2},
+		{done("1760000030.5"), 3},
 	} {
 		before := len(server.calls())
 		var stderr bytes.Buffer

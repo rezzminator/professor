@@ -273,6 +273,7 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 		{"title", Metadata{Pane: "w1:p1", Title: " Her\tDer\nChat ", Seq: 5}.Line, `{"id":"pfm-5","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm","title":"Her Der Chat"}}`},
 		{"title capped on a rune boundary", Metadata{Pane: "p", Title: long, Seq: 6}.Line, `{"id":"pfm-6","method":"pane.report_metadata","params":{"pane_id":"p","source":"pfm","title":"` + strings.Repeat("é", 80) + `"}}`},
 		{"clear_title", Metadata{Pane: "w1:p1", ClearTitle: true, Seq: 7}.Line, `{"id":"pfm-7","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm","clear_title":true}}`},
+		{"title under its own source", Metadata{Pane: "w1:p1", Source: "pfm-shell", Title: "make exit 0 · 12s", Seq: 8}.Line, `{"id":"pfm-8","method":"pane.report_metadata","params":{"pane_id":"w1:p1","source":"pfm-shell","title":"make exit 0 · 12s"}}`},
 		{"pane.list", PaneList{Seq: 8}.Line, `{"id":"pfm-8","method":"pane.list","params":{}}`},
 		{"pane.process_info", ProcessInfo{Pane: "w2:p1", Seq: 9}.Line, `{"id":"pfm-9","method":"pane.process_info","params":{"pane_id":"w2:p1"}}`},
 	} {

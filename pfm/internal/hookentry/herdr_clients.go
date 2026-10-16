@@ -113,7 +113,7 @@ func isPaneGone(err error) bool {
 
 // currentPane resolves a registered client to the pane its terminal is in NOW:
 // a Herdr pane move keeps the terminal and assigns a new pane id, and the old
-// id answers not_found (or, reused, belongs to another chat). With no recorded
+// id answers pane_not_found (or, reused, belongs to another chat). With no recorded
 // terminal (an attach whose pane.list failed) the recorded id binds one when it
 // is still listed, else the pane whose foreground holds the client pid does.
 // A client it cannot resolve is an error and nothing is sent to it: the stale

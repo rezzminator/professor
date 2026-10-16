@@ -33,8 +33,9 @@ type fakeAgent struct{ name, pane string }
 
 // fakeHerdr is a Herdr socket: it records every request line and answers each
 // from its pane table and agent list, with the configured error for a method
-// (or for a rename to one name), and with not_found for a vacated pane id. As
-// Herdr does, it serves ONE request per connection, then closes it.
+// (or for a rename to one name), and with pane_not_found (live Herdr 0.9.5's
+// code) for a vacated pane id. As Herdr does, it serves ONE request per
+// connection, then closes it.
 type fakeHerdr struct {
 	path         string
 	mu           sync.Mutex
@@ -108,7 +109,7 @@ func (server *fakeHerdr) foreground(id string, pids ...int) {
 }
 
 // move is Herdr's pane.move: the terminal keeps living under a new pane id and
-// the old id answers not_found.
+// the old id answers pane_not_found.
 func (server *fakeHerdr) move(oldID, newID string) {
 	server.mu.Lock()
 	defer server.mu.Unlock()
@@ -177,7 +178,7 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 	}
 	for _, id := range []string{pane, target} {
 		if id != "" && server.vacated[id] {
-			return "not_found", ""
+			return "pane_not_found", ""
 		}
 	}
 	switch method {
@@ -220,7 +221,7 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 			}
 			return "", mustJSON(map[string]any{"type": "pane_process_info", "process_info": info})
 		}
-		return "not_found", ""
+		return "pane_not_found", ""
 	}
 	return "", `{"type":"ok"}`
 }

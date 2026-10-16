@@ -719,7 +719,7 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 		threads[index].RolloutPath = path
 		writeLines(t, path,
 			`{"type":"session_meta","payload":{"id":"`+threads[index].ID+
-				`","thread_source":"user","cwd":"`+threads[index].CWD+`"}}`,
+				`","source":`+strconv.Quote(threads[index].Source)+`,"thread_source":"user","cwd":"`+threads[index].CWD+`"}}`,
 			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":`+
 				strconv.Quote(threads[index].FirstUserMessage)+`}]}}`,
 		)

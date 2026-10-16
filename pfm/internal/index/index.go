@@ -14,7 +14,7 @@ import (
 
 const (
 	codexParserVersionKey = "codex_parser_version"
-	codexParserVersion    = "4"
+	codexParserVersion    = "5"
 
 	claudeParserVersionKey = "claude_parser_version"
 	claudeParserVersion    = "5"

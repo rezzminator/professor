@@ -373,7 +373,7 @@ func (installer *engine) ensureClaudePluginTarget(
 		return
 	}
 	if target.Local {
-		if target.Name == callmeterPlugin {
+		if target.Name == callmeterPlugin && !target.InstallOnly {
 			// The copy's hooks run the binary of its version: it goes first.
 			if err := installer.ensureCallmeterBinary(ctx, target); err != nil {
 				fail(err)

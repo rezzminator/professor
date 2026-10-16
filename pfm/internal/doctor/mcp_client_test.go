@@ -31,6 +31,55 @@ func TestDoctorMCPClientChecksSupportedClientsWithUnreadableClaudeRegistry(t *te
 	}
 }
 
+func TestDoctorMCPClientPreservesUnrelatedRegistrations(t *testing.T) {
+	root := jailTest(t)
+	home := filepath.Join(root, "home")
+	for _, tc := range []struct {
+		client, name, relative, content string
+		warnings                        int
+	}{
+		{"claude", "chat", ".claude.json", `{"mcpServers":{"chat":{"command":"other-server"}}}`, 0},
+		{"claude", "harvester", ".claude.json", `{"mcpServers":{"harvester":{"command":"other-server"}}}`, 0},
+		{"claude", "professor", ".claude.json", `{"mcpServers":{"professor":{"command":"other-server"}}}`, 0},
+		{"codex", "professor", ".codex/config.toml", "[mcp_servers.professor]\ncommand = \"other-server\"\n", 0},
+		{"opencode", "professor", ".config/opencode/opencode.jsonc", `{"mcp":{"professor":{"type":"local","command":["other-server"]}}}`, 0},
+		{"claude", "chat-professor", ".claude.json", `{"mcpServers":{"chat-professor":{"command":"other-server"}}}`, 1},
+	} {
+		t.Run(tc.client+"/"+tc.name, func(t *testing.T) {
+			path := filepath.Join(home, tc.relative)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			})
+			runtime, err := pfmconfig.LoadRuntime("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtime.Paths.Home = home
+			runtime.Config.MCPServers = map[string]pfmconfig.MCPServer{}
+			runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
+			var output bytes.Buffer
+			warnings := PrintMCPClientCutover(&output, runtime)
+			label := "info="
+			if tc.warnings != 0 {
+				label = "warning="
+			}
+			want := "client=" + tc.client + " config=" + path + " " + tc.name +
+				"=foreign-registration " + label + "user-owned entry preserved"
+			if warnings != tc.warnings || !strings.Contains(output.String(), want) {
+				t.Fatalf("warnings=%d output=%s; want %d warnings and %q", warnings, output.String(), tc.warnings, want)
+			}
+		})
+	}
+}
+
 func TestDoctorMCPClientReportsOpenCodeStates(t *testing.T) {
 	root := jailTest(t)
 	home := filepath.Join(root, "home")
@@ -202,6 +251,7 @@ func TestDoctorMCPClientReportsCodexProfessorStates(t *testing.T) {
 		warnings     int
 	}{
 		{"present", fenced, true, row + "pfm\n", 0},
+		{"present while disabled", fenced, false, row + "pfm" + reinstall + "\n", 1},
 		{"absent while enabled", "", true, row + "absent" + reinstall + "\n", 1},
 		{"absent while disabled", "", false, row + "absent\n", 0},
 		{

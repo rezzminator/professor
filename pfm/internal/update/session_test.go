@@ -334,3 +334,99 @@ func TestStaleAcceptRuleHintUndoesItsOwnRule(t *testing.T) {
 			baseline.RetiredAccepted, baseline.Version, err)
 	}
 }
+
+// Reviewed scanner limits are decisions, not permanent open rows. A name-only
+// acceptance cannot claim the unscanned text, and undo restores the warning.
+func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
+	t.Parallel()
+	for _, row := range []struct{ name, content string }{
+		{"line limit without hits", strings.Repeat("x", retiredMaxLine+1)},
+		{"byte limit with earlier hit", "/jc\n" + strings.Repeat(strings.Repeat("x", 1023)+"\n", retiredMaxRead/1024)},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			fixture := newProjectUpdateFixture(t)
+			for _, step := range [][]string{
+				{"pin", ".claude/updated-one.md", ".claude/updated-two.md"},
+				{"drop", ".claude/gone.md", ".claude/deleted.md"},
+				{"ignore", "project/new.md", "project/deleted.md"},
+			} {
+				if code, stdout, stderr := fixture.sessionVerb(step...); code != 0 {
+					t.Fatalf("setup %v code=%d stdout=%q stderr=%q", step, code, stdout, stderr)
+				}
+			}
+			const path = "docs/archive.txt"
+			writeProjectFixtureFile(t, fixture.project, path, row.content)
+			_, before := fixture.sessionReport()
+			if !strings.Contains(before, "INCOMPLETE") {
+				t.Fatalf("opening report lacks coverage warning:\n%s", before)
+			}
+			if code, stdout, stderr := fixture.sessionVerb(
+				"accept",
+				path,
+				"--name",
+				"/wave",
+				"--reason",
+				"reviewed",
+			); code != 1 {
+				t.Fatalf("named rule accepted unseen content: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			if code, stdout, stderr := fixture.sessionVerb(
+				"accept",
+				"docs",
+				"--reason",
+				"reviewed archive coverage",
+			); code != 0 {
+				t.Fatalf("reviewed coverage accept code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			baseline, err := professor.Load(fixture.project)
+			if err != nil || len(baseline.RetiredAccepted) != 1 || baseline.RetiredAccepted[0].Path != "docs" ||
+				baseline.RetiredAccepted[0].Reason != "reviewed archive coverage" {
+				t.Fatalf("persistent coverage rule = %+v, err=%v", baseline.RetiredAccepted, err)
+			}
+			code, report := fixture.sessionReport()
+			if code != 0 || !strings.HasSuffix(strings.TrimSpace(report), "\nclean") ||
+				!strings.Contains(report, "accepted incomplete coverage: "+path) ||
+				strings.Contains(report, "matches nothing now") {
+				t.Fatalf("accepted coverage must be explicit and close review: code=%d\n%s", code, report)
+			}
+			rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+			if err != nil || len(rows) != 0 {
+				t.Fatalf("accepted coverage remains open: rows=%+v err=%v", rows, err)
+			}
+			failure := func(string, map[string]bool) professor.RetiredNameScan {
+				return professor.RetiredNameScan{
+					Failures: []professor.RetiredNameFailure{{Path: path, Error: "read failed"}},
+				}
+			}
+			var failed bytes.Buffer
+			if code := professor.RunProjectUpdates(
+				fixture.project,
+				fixture.runtime.Paths.Home,
+				false,
+				&failed,
+				failure,
+			); code != 3 ||
+				!strings.Contains(failed.String(), "read failed") {
+				t.Fatalf("accepted path hid failure: code=%d report=%s", code, failed.String())
+			}
+			var out, errOut bytes.Buffer
+			if code := professor.RunProjectUpdate(
+				"accept",
+				[]string{"docs", "--reason", "reviewed", "--root", fixture.project},
+				&out,
+				&errOut,
+				fixture.runtime,
+				failure,
+			); code != 1 {
+				t.Fatalf("read failure was accepted: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if code, stdout, stderr := fixture.sessionVerb("accept", "--undo", "docs"); code != 0 {
+				t.Fatalf("undo code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			_, report = fixture.sessionReport()
+			if !strings.Contains(report, "INCOMPLETE") || strings.HasSuffix(strings.TrimSpace(report), "\nclean") {
+				t.Fatalf("undo did not reopen coverage:\n%s", report)
+			}
+		})
+	}
+}

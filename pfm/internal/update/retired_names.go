@@ -168,10 +168,21 @@ var retiredNames = []retiredName{
 	{name: "gpt-foreman", kind: retiredAgent, successor: "gpt-flights-foreman", match: matchExact},
 	{name: "gpt-lander", kind: retiredAgent, successor: "gpt-flights-lander", match: matchExact},
 	{name: "gpt-executor", kind: retiredAgent, successor: "gpt-flights-mechanical-executor", match: matchExact},
-	{name: "terra", kind: retiredAgent, match: matchExact},
+	retiredAgentRow("terra", "", `subagent_type: "terra"`),
+	retiredAgentRow("terra", "", `subagent_type:"terra"`),
+	retiredAgentRow("terra", "", `subagent_type: 'terra'`),
+	retiredAgentRow("terra", "", "subagent_type: terra"),
+	retiredAgentRow("terra", "", `subagent_type="terra"`),
+	retiredAgentRow("terra", "", `subagent_type": "terra"`),
+	retiredAgentRow("terra", "", `subagent_type":"terra"`),
+	retiredAgentRow("terra", "", "agents/terra.md"),
+	retiredAgentRow("terra", "", "`terra` agent"),
+	retiredAgentRow("terra", "", "`terra` sub-agent"),
+	retiredAgentRow("terra", "", "`terra` subagent"),
 	// Commit 73f2ae2b "/reminder becomes /pfm:schedule".
 	{name: "pfm chat reminder", kind: retiredCommand, successor: "pfm chat schedule", match: matchExact},
 	{name: "build-codex.mjs", kind: retiredPath, successor: "engine-sync codex build|check", match: matchExact},
+	{name: "scripts/codex-sync.sh", kind: retiredPath, successor: "engine-sync codex", match: matchExact},
 	{name: "/reminder", kind: retiredCommand, successor: "/pfm:schedule", match: matchFamily},
 	// Commit b9f530c9 "/tokens and the transcript skill become one skill":
 	// chatlog, over `pfm tokens` and `pfm transcript` (both live). The
@@ -218,26 +229,25 @@ var retiredNames = []retiredName{
 	// One row per spelling an agent reference takes: the Agent tool's
 	// subagent_type in YAML, call, keyword and JSON form, the agent file's path,
 	// and the backticked name beside the word agent or sub-agent.
-	ultimateAgentRow(`subagent_type: "ultimate"`),
-	ultimateAgentRow(`subagent_type:"ultimate"`),
-	ultimateAgentRow(`subagent_type: 'ultimate'`),
-	ultimateAgentRow("subagent_type: ultimate"),
-	ultimateAgentRow(`subagent_type="ultimate"`),
-	ultimateAgentRow(`subagent_type": "ultimate"`),
-	ultimateAgentRow(`subagent_type":"ultimate"`),
-	ultimateAgentRow("agents/ultimate.md"),
-	ultimateAgentRow("`ultimate` agent"),
-	ultimateAgentRow("`ultimate` sub-agent"),
-	ultimateAgentRow("`ultimate` subagent"),
+	retiredAgentRow("ultimate", "imagine", `subagent_type: "ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type:"ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type: 'ultimate'`),
+	retiredAgentRow("ultimate", "imagine", "subagent_type: ultimate"),
+	retiredAgentRow("ultimate", "imagine", `subagent_type="ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type": "ultimate"`),
+	retiredAgentRow("ultimate", "imagine", `subagent_type":"ultimate"`),
+	retiredAgentRow("ultimate", "imagine", "agents/ultimate.md"),
+	retiredAgentRow("ultimate", "imagine", "`ultimate` agent"),
+	retiredAgentRow("ultimate", "imagine", "`ultimate` sub-agent"),
+	retiredAgentRow("ultimate", "imagine", "`ultimate` subagent"),
 }
 
-// ultimateAgentRow is one spelling of a reference to the retired ultimate
-// agent. Its definition probe is the agent file: a project keeping its own
-// ultimate agent is not naming the retired one.
-func ultimateAgentRow(spelling string) retiredName {
+// retiredAgentRow is one contextual spelling of a retired agent reference.
+// A project keeping its own agent definition is not naming the retired one.
+func retiredAgentRow(name, successor, spelling string) retiredName {
 	return retiredName{
-		name: spelling, kind: retiredAgent, successor: "imagine", match: matchExact,
-		probe: ".claude/agents/ultimate.md",
+		name: spelling, kind: retiredAgent, successor: successor, match: matchExact,
+		probe: ".claude/agents/" + name + ".md",
 	}
 }
 
@@ -307,8 +317,11 @@ var retiredWalkSkippedDirs = map[string]bool{
 // there marks the file binary and unscanned.
 const retiredBinaryProbe = 8000
 
+// retiredMaxRead bounds bytes scanned per file; one extra byte detects a gap.
+const retiredMaxRead = 8 << 20
+
 // retiredMaxLine is the longest line the scan holds in memory. A file with a
-// longer line is scanned up to it and reported INCOMPLETE, never clean, so a
+// longer line is scanned up to it and reported INCOMPLETE until accepted, so a
 // newline-free dump costs at most this much whatever its size.
 const retiredMaxLine = 4 << 20
 
@@ -535,7 +548,8 @@ func scanRetiredFile(
 		}
 	}()
 	content := make([]byte, retiredBinaryProbe)
-	count, err := io.ReadFull(file, content)
+	limited := &io.LimitedReader{R: file, N: retiredMaxRead + 1}
+	count, err := io.ReadFull(limited, content)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, "", fmt.Errorf("read %s: %w", relative, err)
 	}
@@ -543,7 +557,8 @@ func scanRetiredFile(
 	if bytes.IndexByte(content, 0) >= 0 {
 		return nil, "", nil
 	}
-	reader := bufio.NewReader(io.MultiReader(bytes.NewReader(content), file))
+	reader := bufio.NewReader(io.MultiReader(bytes.NewReader(content), limited))
+	scanned := 0
 	for lineNumber := 1; ; lineNumber++ {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return hits, "", fmt.Errorf("scan %s: %w", relative, contextErr)
@@ -555,6 +570,14 @@ func scanRetiredFile(
 			), nil
 		}
 		if readErr == nil || errors.Is(readErr, io.EOF) {
+			scanned += len(line)
+			if scanned > retiredMaxRead {
+				return hits, fmt.Sprintf(
+					"%d-byte scan limit reached; line %d and the text from there on were not scanned",
+					retiredMaxRead,
+					lineNumber,
+				), nil
+			}
 			for _, hit := range retiredNameHits(relative, line) {
 				hit.Line = lineNumber
 				hits = append(hits, hit)
@@ -702,6 +725,9 @@ func RetiredRegistryNames() installer.RetiredRegistryNames {
 	}
 	for _, retired := range retiredNames {
 		name := retired.name
+		if retired.kind == retiredAgent && retired.probe != "" {
+			name = strings.TrimSuffix(path.Base(retired.probe), ".md")
+		}
 		if strings.ContainsAny(name, " ") {
 			continue
 		}
@@ -712,7 +738,7 @@ func RetiredRegistryNames() installer.RetiredRegistryNames {
 			}
 		case retiredCommand:
 			if command, found := strings.CutPrefix(name, "/"); found && command != "" {
-				names.Commands[strings.ReplaceAll(command, ":", "/")] = true
+				names.Commands[strings.ReplaceAll(strings.TrimSuffix(command, ":"), ":", "/")] = true
 			}
 		case retiredSkill:
 			skill := strings.TrimPrefix(name, "skills/")

@@ -787,3 +787,22 @@ func TestSettingsEditFailsAfterItsRetries(t *testing.T) {
 		t.Fatalf("settings %q, want the file untouched", got)
 	}
 }
+
+func TestSettingsEditPreservesDanglingSymlink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.Symlink("missing.json", path); err != nil {
+		t.Fatal(err)
+	}
+	err := writeSettingsDocument(
+		path,
+		nil,
+		map[string]any{"theme": "dark"},
+		func(map[string]any) error { return nil },
+	)()
+	if err == nil || !strings.Contains(err.Error(), "dangling symlink") {
+		t.Fatalf("want actionable dangling symlink error, got %v", err)
+	}
+	if target, err := os.Readlink(path); err != nil || target != "missing.json" {
+		t.Fatalf("settings link changed: %q, %v", target, err)
+	}
+}

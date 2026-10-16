@@ -20,11 +20,12 @@ import (
 // is a recorded decision, never review.
 const projectKept projectStatus = "KEPT"
 
-// RetiredAccepted is one recorded rule and how many of the scan's hits it
-// covers; a rule covering none is stale and says so.
+// RetiredAccepted is one recorded rule and the hits and incomplete coverage
+// it accepts; a rule covering neither is stale and says so.
 type RetiredAccepted struct {
-	Rule RetiredRule `json:"rule"`
-	Hits int         `json:"hits"`
+	Rule       RetiredRule          `json:"rule"`
+	Hits       int                  `json:"hits"`
+	Incomplete []RetiredNameFailure `json:"incomplete,omitempty"`
 }
 
 // keepPin is pin acknowledged at the store's current template with the
@@ -46,12 +47,14 @@ func keepPin(pin FilePin, hash, storeSHA, reason, today string) FilePin {
 // into scan.Accepted's counts. An accepted hit is a decision, so it no longer
 // counts as review. Each rule counts every hit it covers, so a narrower rule
 // inside a wider one is never reported as matching nothing; AcceptedHits
-// counts each accepted hit once.
+// counts each accepted hit once. Path-wide rules also accept incomplete coverage,
+// preserving its diagnostic on the rule. Failures are never partitioned.
 func partitionRetired(scan *RetiredNameScan, rules []RetiredRule) {
 	if len(rules) == 0 {
 		return
 	}
 	counts := make([]int, len(rules))
+	partials := make([][]RetiredNameFailure, len(rules))
 	open := make([]RetiredNameHit, 0, len(scan.Hits))
 	for _, hit := range scan.Hits {
 		accepted := false
@@ -68,9 +71,24 @@ func partitionRetired(scan *RetiredNameScan, rules []RetiredRule) {
 		}
 	}
 	scan.Hits = open
+	incomplete := make([]RetiredNameFailure, 0, len(scan.Incomplete))
+	for _, partial := range scan.Incomplete {
+		accepted := false
+		for index, rule := range rules {
+			// A named rule says nothing about names in unscanned text.
+			if rule.Covers(partial.Path, "") {
+				partials[index] = append(partials[index], partial)
+				accepted = true
+			}
+		}
+		if !accepted {
+			incomplete = append(incomplete, partial)
+		}
+	}
+	scan.Incomplete = incomplete
 	scan.Accepted = make([]RetiredAccepted, len(rules))
 	for index, rule := range rules {
-		scan.Accepted[index] = RetiredAccepted{Rule: rule, Hits: counts[index]}
+		scan.Accepted[index] = RetiredAccepted{Rule: rule, Hits: counts[index], Incomplete: partials[index]}
 	}
 }
 
@@ -144,7 +162,7 @@ func writeAcceptedHuman(stdout io.Writer, scan *RetiredNameScan) {
 			name = accepted.Rule.Name
 		}
 		stale := ""
-		if accepted.Hits == 0 {
+		if accepted.Hits == 0 && len(accepted.Incomplete) == 0 {
 			stale = " — matches nothing now: pfm update accept --undo " + shellWord(accepted.Rule.Path)
 			if accepted.Rule.Name != "" {
 				stale += " --name " + shellWord(accepted.Rule.Name)
@@ -159,6 +177,10 @@ func writeAcceptedHuman(stdout io.Writer, scan *RetiredNameScan) {
 			pyvalue.OneLine(accepted.Rule.Reason),
 			stale,
 		)
+		for _, partial := range accepted.Incomplete {
+			fmt.Fprintf(stdout, "      accepted incomplete coverage: %s — %s\n",
+				pyvalue.OneLine(partial.Path), pyvalue.OneLine(partial.Error))
+		}
 	}
 }
 
@@ -185,6 +207,8 @@ func writeSessionGuide(stdout io.Writer) {
 	)
 	fmt.Fprintln(stdout, "    · RETIRED-NAME    edit the line to its successor; a mention that must stay: "+
 		"pfm update accept <path> --reason \"<why>\" [--name <name>]")
+	fmt.Fprintln(stdout, "    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: "+
+		"pfm update accept <path> --reason \"<why>\" (no --name); read failures must be fixed")
 	fmt.Fprintln(stdout, "  run the verbs one at a time: each rewrites .professor/baseline.json")
 }
 
@@ -200,7 +224,7 @@ func runProjectAccept(
 		stderr,
 	)
 	rootFlag := flags.String("root", "", "project root")
-	reason := flags.String("reason", "", "why these mentions stay (required)")
+	reason := flags.String("reason", "", "why these mentions or incomplete coverage are accepted (required)")
 	name := flags.String("name", "", "accept only this retired name at the path")
 	undo := flags.Bool("undo", false, "remove the recorded rule")
 	paths, code, ok := cli.ParseFlagsAnywhere(flags, args)
@@ -227,6 +251,7 @@ func runProjectAccept(
 	}
 	rules := report.Baseline.RetiredAccepted
 	var hits []RetiredNameHit
+	var incomplete []RetiredNameFailure
 	if !*undo {
 		if scan == nil {
 			fmt.Fprintln(
@@ -242,6 +267,7 @@ func runProjectAccept(
 			return 1
 		}
 		hits = result.Hits
+		incomplete = result.Incomplete
 	}
 	changed := 0
 	for _, value := range paths {
@@ -273,8 +299,17 @@ func runProjectAccept(
 				covered++
 			}
 		}
+		for _, partial := range incomplete {
+			if rule.Covers(partial.Path, "") {
+				covered++
+			}
+		}
 		if covered == 0 {
-			fmt.Fprintf(stderr, "pfm update accept: %s covers no retired-name hit; nothing to accept\n", path)
+			fmt.Fprintf(
+				stderr,
+				"pfm update accept: %s covers no retired-name hit or incomplete coverage; nothing to accept\n",
+				path,
+			)
 			return 1
 		}
 		rules = append(rules, rule)
@@ -288,7 +323,7 @@ func runProjectAccept(
 	if *undo {
 		fmt.Fprintf(stdout, "removed %d retired-name rule(s)\n", changed)
 	} else {
-		fmt.Fprintf(stdout, "accepted retired-name hits under %d path(s)\n", changed)
+		fmt.Fprintf(stdout, "accepted retired-name hits or incomplete coverage under %d path(s)\n", changed)
 	}
 	return 0
 }

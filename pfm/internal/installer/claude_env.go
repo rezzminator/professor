@@ -10,14 +10,17 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // claude.env is pfm's map of plugin options as environment variables. pfm
-// writes it into the env of the primary seat's settings.json, which every seat
-// shares through its link, and owns only the keys it wrote: the ownership
-// ledger records, per physical settings file, each key and the value pfm set.
+// writes it into the chosen settings.json (normally the primary seat), plus
+// alpha plugin-log policy into every managed config dir. It owns only keys
+// it wrote: the ledger records each physical file's keys and values, the
+// chosen target, and generated log policy separately from user claude.env.
 
 const (
 	claudeEnvOwnershipName    = "claude-env-ownership.json"
@@ -27,8 +30,10 @@ const (
 // claudeEnvOwnership is the ledger: Files maps a physical settings.json path
 // to the keys pfm set there and the value each was set to.
 type claudeEnvOwnership struct {
-	Version int                          `json:"version"`
-	Files   map[string]map[string]string `json:"files"`
+	Target       string                       `json:"target,omitempty"`
+	PluginLogDir string                       `json:"pluginLogDir,omitempty"`
+	Version      int                          `json:"version"`
+	Files        map[string]map[string]string `json:"files"`
 }
 
 // claudeEnvPlan is what one settings file needs: the keys to set, the owned
@@ -176,8 +181,34 @@ func (installer *engine) claudeEnvTarget() string {
 // removes from every file the ledger names the keys pfm set there and no
 // longer wants; uninstall wants none. An unreadable ledger or settings file
 // fails the step, nothing written to it.
-func (installer *engine) ensureClaudeEnv(uninstall bool) error {
-	want := installer.options.ClaudeEnv
+func (installer *engine) ensureClaudeEnv(uninstall bool) (result error) {
+	if installer.apply {
+		// The parent directory is a stable lock inode even when uninstall
+		// retires the managed root. No lock file keeps that root non-empty.
+		path := filepath.Dir(installer.managedRoot)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return installer.fail(fmt.Errorf("create claude.env lock directory: %w", err))
+		}
+		lock, err := os.Open(path)
+		if err != nil {
+			return installer.fail(fmt.Errorf("open claude.env lock %s: %w", path, err))
+		}
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			return installer.fail(
+				fmt.Errorf(
+					"lock claude.env ownership %s (another installer may be running; retry): %w",
+					path,
+					errors.Join(err, lock.Close()),
+				),
+			)
+		}
+		defer func() {
+			if err := errors.Join(syscall.Flock(int(lock.Fd()), syscall.LOCK_UN), lock.Close()); err != nil {
+				result = errors.Join(result, installer.fail(fmt.Errorf("release claude.env lock %s: %w", path, err)))
+			}
+		}()
+	}
+	want := maps.Clone(installer.options.ClaudeEnv)
 	if uninstall {
 		want = nil
 	}
@@ -185,32 +216,92 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) error {
 	if err != nil {
 		return installer.fail(fmt.Errorf("claude.env: %w", err))
 	}
-	if len(want) == 0 && len(ledger.Files) == 0 {
+	if !uninstall && len(want) > 0 {
+		installer.warnUnknownClaudeEnvKeys(want)
+	}
+	target := installer.claudeEnvTarget()
+	targetPhysical := physicalSettingsPath(target)
+	wants := map[string]map[string]string{}
+	var pluginLogDir string
+	if !uninstall {
+		wants[targetPhysical] = want
+		if obs.AlphaBuild(installer.options.Version) {
+			logDir := want[PluginLogDirEnv]
+			if logDir == "" {
+				logDir = filepath.Join(installer.options.Home, ".local", "state", "pfm", "plugin-logs")
+			}
+			pluginLogDir = logDir
+			if !filepath.IsAbs(logDir) {
+				return installer.fail(fmt.Errorf("%s must be absolute: %q", PluginLogDirEnv, logDir))
+			}
+			if info, err := os.Stat(logDir); errors.Is(err, fs.ErrNotExist) {
+				if err := installer.change(
+					"ensure plugin log directory "+logDir,
+					func() error { return os.MkdirAll(logDir, 0o700) },
+				); err != nil {
+					return err
+				}
+			} else if err != nil {
+				return installer.fail(fmt.Errorf("inspect plugin log directory %s: %w", logDir, err))
+			} else if !info.IsDir() {
+				return installer.fail(fmt.Errorf("plugin log directory %s is not a directory", logDir))
+			}
+			if want == nil {
+				want = map[string]string{}
+				wants[targetPhysical] = want
+			}
+			want[PluginLogDirEnv] = logDir
+			dirs := append(
+				[]string{ClaudeStore(installer.options.Home), installer.options.ConfigDir},
+				installer.options.RosterConfigDirs...)
+			for _, account := range installer.options.ClaudeAccounts {
+				dirs = append(dirs, account.ConfigDir)
+			}
+			for _, dir := range dirs {
+				if dir == "" {
+					continue
+				}
+				path := physicalSettingsPath(filepath.Join(dir, "settings.json"))
+				if wants[path] == nil {
+					wants[path] = map[string]string{}
+				}
+				wants[path][PluginLogDirEnv] = logDir
+			}
+		}
+	}
+	if len(want) == 0 && len(ledger.Files) == 0 && ledger.Target == "" && ledger.PluginLogDir == "" {
 		if !uninstall {
 			installer.ok("claude.env: empty, and pfm set no key earlier")
 		}
 		return nil
 	}
-	if len(want) > 0 {
-		installer.warnUnknownClaudeEnvKeys(want)
-	}
-	target := installer.claudeEnvTarget()
-	targetPhysical := physicalSettingsPath(target)
 	paths := slices.Sorted(maps.Keys(ledger.Files))
-	if !uninstall && !slices.Contains(paths, targetPhysical) {
-		paths = append(paths, targetPhysical)
+	for _, path := range slices.Sorted(maps.Keys(wants)) {
+		if !slices.Contains(paths, path) {
+			paths = append(paths, path)
+		}
 	}
-	next := claudeEnvOwnership{Version: claudeEnvOwnershipVersion, Files: maps.Clone(ledger.Files)}
+	next := claudeEnvOwnership{
+		Version:      claudeEnvOwnershipVersion,
+		Files:        maps.Clone(ledger.Files),
+		PluginLogDir: pluginLogDir,
+	}
+	if !uninstall && len(installer.options.ClaudeEnv) > 0 {
+		next.Target = ledger.Target
+	}
 	var failures []error
 	for _, path := range paths {
-		display, fileWant := path, map[string]string(nil)
+		display, fileWant := path, wants[path]
 		if path == targetPhysical && !uninstall {
-			display, fileWant = target, want
+			display = target
 		}
 		owned, err := installer.ensureClaudeEnvFile(path, display, ledger.Files[path], fileWant)
 		if err != nil {
 			failures = append(failures, installer.fail(fmt.Errorf("claude.env: %w", err)))
 			continue
+		}
+		if path == targetPhysical && !uninstall && len(installer.options.ClaudeEnv) > 0 {
+			next.Target = targetPhysical
 		}
 		if len(owned) == 0 {
 			delete(next.Files, path)
@@ -304,10 +395,10 @@ func applyClaudeEnvPlan(document, env map[string]any, plan claudeEnvPlan, want m
 }
 
 // writeClaudeEnvOwnership writes the ledger 0600, or removes it when it
-// records no key.
+// records neither a key, an active claude.env target nor plugin-log policy.
 func writeClaudeEnvOwnership(managedRoot string, ledger claudeEnvOwnership) error {
 	path := claudeEnvOwnershipPath(managedRoot)
-	if len(ledger.Files) == 0 {
+	if len(ledger.Files) == 0 && ledger.Target == "" && ledger.PluginLogDir == "" {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("remove the ownership ledger %s: %w", path, err)
 		}
@@ -368,8 +459,17 @@ func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	if len(env) == 0 && len(ledger.Files) == 0 {
+	if ledger.Target != "" {
+		settingsPath = ledger.Target
+	}
+	if len(env) == 0 && len(ledger.Files) == 0 && ledger.PluginLogDir == "" {
 		return nil, nil
+	}
+	// Current explicit source policy supersedes the installed default in
+	// every managed file, not just the primary claude.env target.
+	pluginLogDir := env[PluginLogDirEnv]
+	if pluginLogDir == "" {
+		pluginLogDir = ledger.PluginLogDir
 	}
 	targetPhysical := physicalSettingsPath(settingsPath)
 	var gaps []string
@@ -381,6 +481,13 @@ func ClaudeEnvGaps(managedRoot, settingsPath string, env map[string]string) ([]s
 		display, want := path, map[string]string(nil)
 		if path == targetPhysical {
 			display, want = settingsPath, env
+		}
+		if pluginLogDir != "" {
+			want = maps.Clone(want)
+			if want == nil {
+				want = map[string]string{}
+			}
+			want[PluginLogDirEnv] = pluginLogDir
 		}
 		_, _, fileEnv, err := readClaudeEnvSettings(path)
 		if err != nil {
@@ -411,4 +518,17 @@ func claudeEnvValueText(value any) string {
 		return fmt.Sprintf("%v", value)
 	}
 	return string(raw)
+}
+
+// ClaudeEnvSettingsPath returns the last install's actual claude.env target;
+// pre-target ledgers and uninstalled homes retain the caller's fallback.
+func ClaudeEnvSettingsPath(managedRoot, fallback string) (string, error) {
+	ledger, err := readClaudeEnvOwnership(managedRoot)
+	if err != nil {
+		return "", err
+	}
+	if ledger.Target != "" {
+		return ledger.Target, nil
+	}
+	return fallback, nil
 }

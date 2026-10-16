@@ -36,6 +36,12 @@ func printClaudeEnvDoctor(
 			}
 		}
 	}
+	settingsPath, err := installer.ClaudeEnvSettingsPath(managedRoot, settingsPath)
+	if err != nil {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: claude_env FAIL %v — repair it, then run pfm install --yes\n", err)
+		return
+	}
 	gaps, err := installer.ClaudeEnvGaps(managedRoot, settingsPath, env)
 	if err != nil {
 		tally.fail()

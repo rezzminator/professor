@@ -289,13 +289,19 @@ func Run(
 		runtime.Version, resolved.Home, runtime.Config.Claude,
 		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
 	)
-	printClaudePluginsDoctor(stdout, claudeStore, dependencies.Env, pluginBuild, tally)
+	printClaudePluginsDoctor(
+		stdout,
+		claudeStore,
+		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
+		pluginBuild,
+		tally,
+	)
 	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
 	printPluginLogsDoctor(
 		stdout,
 		append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...),
 		pluginBuild,
-		dependencies.Env,
+		installer.ClaudePluginEnvironment(dependencies.Env, runtime.Config.Claude.Env),
 		unix.Access,
 		tally,
 	)

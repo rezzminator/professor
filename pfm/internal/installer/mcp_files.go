@@ -49,7 +49,16 @@ func (installer *engine) writeMCPFile(path string, original, wanted []byte, exis
 			return err
 		}
 	}
-	return atomicfile.Write(path, wanted, 0o600)
+	return atomicfile.WriteIf(path, wanted, 0o600, func() error {
+		latest, present, err := readMCPFile(path)
+		if err != nil {
+			return fmt.Errorf("recheck MCP config %s before write: %w", path, err)
+		}
+		if present != existed || !bytes.Equal(latest, original) {
+			return fmt.Errorf("MCP config changed while planning install: %s; retry", path)
+		}
+		return nil
+	})
 }
 
 // enabledMCPNames lists one registration per enabled family.

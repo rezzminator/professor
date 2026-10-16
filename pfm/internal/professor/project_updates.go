@@ -66,8 +66,8 @@ type RetiredNameScan struct {
 	Hits       []RetiredNameHit     `json:"hits"`
 	Failures   []RetiredNameFailure `json:"failures"`
 	Incomplete []RetiredNameFailure `json:"incomplete,omitempty"`
-	// Accepted are the baseline's recorded rules and the hits each covers;
-	// those hits are absent from Hits.
+	// Accepted are the baseline's recorded rules and the hits and incomplete
+	// coverage each covers; those entries are absent from Hits and Incomplete.
 	Accepted []RetiredAccepted `json:"accepted,omitempty"`
 	// AcceptedHits counts the hits the rules took out of Hits, each once
 	// however many rules cover it.

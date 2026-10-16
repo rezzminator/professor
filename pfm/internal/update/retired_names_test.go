@@ -397,16 +397,15 @@ func (f *syntheticFile) Read(p []byte) (int, error) {
 
 func (f *syntheticFile) Close() error { return nil }
 
-// TestScanRetiredNamesBoundsALineAndOnlyProbesBinary reads a large text file
-// in full, stops a newline-free one at the line bound, reported INCOMPLETE
-// with its earlier hits kept, and never reads past a binary file's probe.
+// TestScanRetiredNamesBoundsALineAndOnlyProbesBinary bounds multi-line and
+// newline-free files, preserves earlier hits and probes only binary files.
 func TestScanRetiredNamesBoundsALineAndOnlyProbesBinary(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	writeRetiredFixture(t, root, map[string]string{"data/dump.bin": "x", "data/flat.log": "x", "data/huge.log": "x"})
-	// Past one line bound: the newline-free file must be stopped there, and the
-	// text file is read in full beyond it.
-	const size = retiredMaxLine + 1<<20
+	// Multi-line files stop at the byte cap, newline-free ones at the line cap.
+	const readCap = 8 << 20
+	const size = readCap + 1<<20
 	files := map[string]*syntheticFile{
 		"dump.bin": {size: size, nulAt: 100, first: "/wave\n"},
 		"flat.log": {size: size, nulAt: -1, first: "/wave\n", oneLine: true},
@@ -424,8 +423,8 @@ func TestScanRetiredNamesBoundsALineAndOnlyProbesBinary(t *testing.T) {
 	if got := files["dump.bin"].read; got > retiredBinaryProbe {
 		t.Errorf("binary file: %d bytes read, want at most the %d-byte probe", got, retiredBinaryProbe)
 	}
-	if got := files["huge.log"].read; got != size {
-		t.Errorf("text file: %d bytes read, want full %d-byte coverage", got, size)
+	if got := files["huge.log"].read; got != readCap+1 {
+		t.Errorf("text file: %d bytes read, want the %d-byte cap plus one sentinel", got, readCap)
 	}
 	if got := files["flat.log"].read; got > retiredMaxLine+2*retiredBinaryProbe+4096 {
 		t.Errorf("newline-free file: %d bytes read, want the scan stopped near the %d-byte line bound",
@@ -435,13 +434,27 @@ func TestScanRetiredNamesBoundsALineAndOnlyProbesBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.Failures) != 0 || len(scan.Incomplete) != 1 || scan.Incomplete[0].Path != "data/flat.log" ||
-		!strings.Contains(scan.Incomplete[0].Error, "line 2 is longer than") {
-		t.Errorf("text coverage = %s; want one INCOMPLETE row for data/flat.log from line 2", encoded)
+	if len(scan.Failures) != 0 || len(scan.Incomplete) != 2 || scan.Incomplete[0].Path != "data/flat.log" ||
+		!strings.Contains(scan.Incomplete[0].Error, "line 2 is longer than") ||
+		scan.Incomplete[1].Path != "data/huge.log" || !strings.Contains(scan.Incomplete[1].Error, "8388608-byte scan limit") {
+		t.Errorf("text coverage = %s; want line-bound and byte-bound INCOMPLETE rows", encoded)
 	}
 	if len(scan.Hits) != 2 || scan.Hits[0].Path != "data/flat.log" || scan.Hits[1].Path != "data/huge.log" ||
 		scan.Hits[0].Line != 1 || scan.Hits[1].Line != 1 {
 		t.Fatalf("hits = %+v, want the first line of each text file", scan.Hits)
+	}
+	for _, size := range []int{0, readCap, readCap + 1} {
+		file := &syntheticFile{size: size, nulAt: -1, first: "/wave\n"}
+		hits, incomplete, err := scanRetiredFile(context.Background(), func(string) (io.ReadCloser, error) {
+			return file, nil
+		}, "boundary.txt", "boundary.txt")
+		wantHits := 1
+		if size == 0 {
+			wantHits = 0
+		}
+		if err != nil || len(hits) != wantHits || (incomplete != "") != (size > readCap) || file.read != size {
+			t.Errorf("size %d: hits=%+v incomplete=%q err=%v read=%d", size, hits, incomplete, err, file.read)
+		}
 	}
 }
 
@@ -727,6 +740,8 @@ func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 		{"guard-stamp.sh", ".claude/scripts/guard-stamp.sh"},
 		{"build-codex.mjs", "build-codex.mjs"},
 		{"build-codex.mjs", ".claude/scripts/build-codex.mjs"},
+		{"scripts/codex-sync.sh", "scripts/codex-sync.sh"},
+		{"scripts/codex-sync.sh", ".claude/scripts/codex-sync.sh"},
 	} {
 		t.Run(row.exists, func(t *testing.T) {
 			root := t.TempDir()
@@ -741,26 +756,49 @@ func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 				scan.Hits[0].Path != "notes.md" {
 				t.Fatalf("existing retired path scan = %+v, want notes.md hit for %s", scan, row.name)
 			}
+			if row.name == "scripts/codex-sync.sh" && scan.Hits[0].Successor != "engine-sync codex" {
+				t.Fatalf("codex sync successor = %q, want engine-sync codex", scan.Hits[0].Successor)
+			}
 		})
 	}
 }
 
 func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 	t.Parallel()
-	for _, row := range []struct{ name, successor string }{
-		{"gpt-foreman", "gpt-flights-foreman"},
-		{"gpt-lander", "gpt-flights-lander"},
-		{"gpt-executor", "gpt-flights-mechanical-executor"},
-		{"terra", ""},
+	for _, row := range []struct{ line, name, successor, definition string }{
+		{"spawn gpt-foreman", "gpt-foreman", "gpt-flights-foreman", ""},
+		{"spawn gpt-lander", "gpt-lander", "gpt-flights-lander", ""},
+		{"spawn gpt-executor", "gpt-executor", "gpt-flights-mechanical-executor", ""},
+		{`subagent_type: "terra"`, `subagent_type: "terra"`, "", ""},
+		{`subagent_type:"terra"`, `subagent_type:"terra"`, "", ""},
+		{`subagent_type: 'terra'`, `subagent_type: 'terra'`, "", ""},
+		{"subagent_type: terra", "subagent_type: terra", "", ""},
+		{`subagent_type="terra"`, `subagent_type="terra"`, "", ""},
+		{`{"subagent_type": "terra"}`, `subagent_type": "terra"`, "", ""},
+		{`{"subagent_type":"terra"}`, `subagent_type":"terra"`, "", ""},
+		{".claude/agents/terra.md", "agents/terra.md", "", ""},
+		{"the `terra` agent", "`terra` agent", "", ""},
+		{"the `terra` sub-agent", "`terra` sub-agent", "", ""},
+		{"the `terra` subagent", "`terra` subagent", "", ""},
+		{"terra firma and terra incognita", "", "", ""},
+		{"terrestrial prose and terra-cotta; /terra and `terra` skill", "", "", ""},
+		{`subagent_type: "terra" and .claude/agents/terra.md`, "", "", ".claude/agents/terra.md"},
 	} {
-		t.Run(row.name, func(t *testing.T) {
+		t.Run(row.line, func(t *testing.T) {
 			root := t.TempDir()
-			writeRetiredFixture(t, root, map[string]string{"notes.md": "spawn " + row.name + "\n"})
-			scan := ScanRetiredNames(root, nil)
-			want := []professor.RetiredNameHit{
-				{Path: "notes.md", Line: 1, Name: row.name, Kind: "agent", Successor: row.successor},
+			files := map[string]string{"notes.md": row.line + "\n"}
+			if row.definition != "" {
+				files[row.definition] = "mine\n"
 			}
-			if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
+			writeRetiredFixture(t, root, files)
+			scan := ScanRetiredNames(root, nil)
+			var want []professor.RetiredNameHit
+			if row.name != "" {
+				want = []professor.RetiredNameHit{
+					{Path: "notes.md", Line: 1, Name: row.name, Kind: "agent", Successor: row.successor},
+				}
+			}
+			if len(scan.Failures) != 0 || !slices.Equal(scan.Hits, want) {
 				t.Fatalf("retired agent scan = %+v, want %+v", scan, want)
 			}
 		})
@@ -840,8 +878,8 @@ func TestRetiredRegistryNames(t *testing.T) {
 	t.Parallel()
 	names := RetiredRegistryNames()
 	for kind, want := range map[string][]string{
-		"agent":   {"rndier", "tracer-pro"},
-		"command": {"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint"},
+		"agent":   {"rndier", "tracer-pro", "ultimate", "terra"},
+		"command": {"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint", "chat"},
 		"skill":   {"wave-builder", "transcript", "close-out"},
 	} {
 		set := map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills}[kind]
@@ -851,7 +889,7 @@ func TestRetiredRegistryNames(t *testing.T) {
 			}
 		}
 	}
-	for _, phrase := range []string{"pfm chat inject", "transcript skill", "mcp__professor__", "JC-COMMIT", "/wave", "mono-architect/"} {
+	for _, phrase := range []string{`subagent_type="ultimate"`, "pfm chat inject", "transcript skill", "mcp__professor__", "JC-COMMIT", "/wave", "mono-architect/"} {
 		for kind, set := range map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills} {
 			if set[phrase] {
 				t.Errorf("%s set holds %q, which is not one registry entry", kind, phrase)

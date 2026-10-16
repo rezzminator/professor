@@ -104,14 +104,14 @@ func TestRegistryDeadLinksUninstall(t *testing.T) {
 }
 
 // TestRegistryOwnershipUninstall: an uninstall plans nothing, so every owned
-// link left in a registry goes — a live link into the clone and one into the
+// link left in a registry goes — a live legacy-workflows link and one into the
 // retired store included — while a foreign link stays.
 func TestRegistryOwnershipUninstall(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	store := ClaudeStore(home)
 	clone := filepath.Join(home, ".professor")
-	live := filepath.Join(clone, "docs", "left.md")
+	live := filepath.Join(clone, "workflows", "left.md")
 	writeFixture(t, live, "exists")
 	retiredStore := filepath.Join(RetiredGeneratedStores(home)[1], "role.md")
 	writeFixture(t, retiredStore, "rendered")
@@ -255,7 +255,7 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 			home := t.TempDir()
 			store := ClaudeStore(home)
 			root := filepath.Join(home, ".agents", "skills")
-			target := filepath.Join(home, ".professor", "retired-skills")
+			target := filepath.Join(home, ".professor", "workflows", "retired-skills")
 			if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
 				t.Fatal(err)
 			}

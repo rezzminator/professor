@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -381,5 +382,45 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 	}
 	if strings.Contains(readFixture(t, target), "mcp_servers.chat-professor") {
 		t.Fatal("owned registration survived removal")
+	}
+}
+
+// A FIFO synchronizes the two reads without a scheduler-dependent race: the
+// client's replacement lands while the backup read is open, before it sees EOF.
+func TestMCPWritePreservesAnEditDuringBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inst := &engine{stamp: "fixture"}
+	done := make(chan error, 1)
+	go func() { done <- inst.writeMCPFile(path, []byte("original"), []byte("pfm"), true) }()
+	for read := 0; read < 2; read++ {
+		writer, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.WriteString("original"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if read == 0 {
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			writeFixture(t, path, "client edit")
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "changed while planning install") {
+		t.Fatalf("late MCP edit was not rejected: %v", err)
+	}
+	if got := readFixture(t, path); got != "client edit" {
+		t.Fatalf("client edit overwritten: %q", got)
 	}
 }

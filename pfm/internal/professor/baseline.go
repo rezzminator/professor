@@ -71,6 +71,7 @@ type KeptNote struct {
 
 // RetiredRule accepts every retired-name hit at Path (a file, or a directory
 // and everything under it) and, when Name is set, only that retired name.
+// A path-wide rule also accepts incomplete coverage, never read failures.
 type RetiredRule struct {
 	Path   string `json:"path"`
 	Name   string `json:"name,omitempty"`

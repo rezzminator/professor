@@ -277,9 +277,11 @@ func (scan RegistryScan) link(result *RegistryOwnership, path, kind string, regi
 			return nil
 		}
 	}
-	owned := withinGlobalSource(target, managedRootForHome(scan.Home))
+	owned := withinGlobalSource(target, managedRootForHome(scan.Home)) ||
+		ownedGlobalLink(scan.Roots, kind, filepath.Base(path), target)
 	for _, root := range scan.Roots {
-		owned = owned || withinGlobalSource(target, filepath.Clean(root))
+		// Legacy skill installs linked workflows before templates/global/skills.
+		owned = owned || withinGlobalSource(target, filepath.Join(root, "workflows"))
 	}
 	if !owned {
 		return nil

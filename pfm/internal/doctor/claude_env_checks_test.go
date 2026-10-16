@@ -39,6 +39,13 @@ func TestClaudeEnvDoctor(t *testing.T) {
 			lines:    []string{"doctor: claude_env ok — 1 keys in {settings}"},
 		},
 		{
+			name:     "explicit install target differs from primary",
+			env:      map[string]string{key: "1"},
+			settings: `{"env":{"` + key + `":"wrong-primary"}}`,
+			ledger:   `{"version":1,"target":"{custom}","files":{"{custom}":{"` + key + `":"1"}}}`,
+			lines:    []string{"doctor: claude_env ok — 1 keys in {custom}"},
+		},
+		{
 			name:     "a key missing",
 			env:      map[string]string{key: "1"},
 			settings: `{"env":{}}`,
@@ -105,7 +112,13 @@ func TestClaudeEnvDoctor(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, ".cc", "1", "settings.json")
-			expand := func(text string) string { return strings.ReplaceAll(text, "{settings}", settings) }
+			custom := filepath.Join(home, "custom", "settings.json")
+			expand := func(text string) string {
+				return strings.NewReplacer("{settings}", settings, "{custom}", custom).Replace(text)
+			}
+			if strings.Contains(test.ledger, "{custom}") {
+				writePluginLogsFile(t, custom, `{"env":{"`+key+`":"1"}}`)
+			}
 			if test.settings != "" {
 				if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
 					t.Fatal(err)

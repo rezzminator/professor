@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -217,14 +219,14 @@ func TestEnsureClaudeEnv(t *testing.T) {
 			wantMode:  0o644,
 		},
 		{
-			name: "an empty claude.env removing owned keys checks no prefix", apply: true,
+			name: "uninstall removing owned keys checks no prefix", apply: true, uninstall: true,
 			unreadPlugins: true,
 			env:           map[string]string{},
 			given: state{
 				store: `{"env":{"` + envKey + `":"1"}}`, linked: true,
 				ledgerFor: map[string]map[string]string{"{store}": {envKey: "1"}},
 			},
-			lines:     []string{"  change  claude.env: remove " + envKey + " in {seat}"},
+			lines:     []string{"  change  claude.env: remove " + envKey + " in {store}"},
 			absent:    []string{"prefix was checked"},
 			wantStore: "",
 		},
@@ -395,6 +397,17 @@ func TestEnsureClaudeEnv(t *testing.T) {
 				if string(raw) != before[ledgerPath] {
 					t.Fatalf("ledger was written: %s", raw)
 				}
+			case want == nil && len(test.env) > 0 && !test.uninstall:
+				var got claudeEnvOwnership
+				if err != nil {
+					t.Fatalf("target ledger absent: %v", err)
+				}
+				if err := json.Unmarshal(raw, &got); err != nil {
+					t.Fatal(err)
+				}
+				if got.Target != physicalSettingsPath(seat) || len(got.Files) != 0 {
+					t.Fatalf("target-only ledger: %+v", got)
+				}
 			case want == nil:
 				if !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("ledger left behind: %s %v", raw, err)
@@ -518,5 +531,105 @@ func TestClaudeEnvEditFailsOnAnEnvTheChatBroke(t *testing.T) {
 	}
 	if got := readFixture(t, path); got != `{"env":"broken"}` {
 		t.Fatalf("settings %q, want the chat's write untouched", got)
+	}
+}
+
+func TestClaudeEnvTransactionRejectsConcurrentInstaller(t *testing.T) {
+	for _, uninstall := range []bool{false, true} {
+		t.Run(fmt.Sprint(uninstall), func(t *testing.T) {
+			home := t.TempDir()
+			managed := managedRootForHome(home)
+			path := filepath.Join(home, ".claude", "settings.json")
+			writeFixture(t, path, `{"env":{"OTHER":"keep"}}`)
+			writeFixture(t, claudeEnvOwnershipPath(managed), fmt.Sprintf(`{"version":1,"target":%q,"files":{}}`, path))
+			lock, err := os.Open(filepath.Dir(managed))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := lock.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+				t.Fatal(err)
+			}
+			inst := &engine{
+				options: Options{
+					Home:      home,
+					ConfigDir: filepath.Dir(path),
+					ClaudeEnv: map[string]string{envKey: "1"},
+					Stdout:    io.Discard,
+				},
+				managedRoot: managed,
+				apply:       true,
+			}
+			err = inst.ensureClaudeEnv(uninstall)
+			if err == nil || !strings.Contains(err.Error(), "another installer") {
+				t.Fatalf("concurrent env transaction was not rejected: %v", err)
+			}
+			if got := readFixture(t, path); got != `{"env":{"OTHER":"keep"}}` {
+				t.Fatalf("busy transaction changed settings: %s", got)
+			}
+			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+				t.Fatal(err)
+			}
+			if err := inst.ensureClaudeEnv(uninstall); err != nil {
+				t.Fatalf("released transaction: %v", err)
+			}
+			if !uninstall {
+				ledger, err := readClaudeEnvOwnership(managed)
+				if err != nil || ledger.Files[path][envKey] != "1" {
+					t.Fatalf("ownership lost: %+v, %v", ledger, err)
+				}
+			} else {
+				entries, err := os.ReadDir(managed)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf(
+						"uninstall left ownership artifacts blocking managed-root retirement: %v, %v",
+						entries,
+						err,
+					)
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeEnvRecordsExplicitInstallTarget(t *testing.T) {
+	home := t.TempDir()
+	custom := filepath.Join(home, "custom", "settings.json")
+	writeFixture(t, custom, `{"env":{"SUB_AGENT_COMPACT_FORWARD_HANDOFF_TOOL":"1"}}`)
+	inst := &engine{
+		options: Options{
+			Home:      home,
+			ConfigDir: filepath.Dir(custom),
+			ClaudeEnv: map[string]string{envKey: "1"},
+			Stdout:    io.Discard,
+		},
+		managedRoot: managedRootForHome(home),
+		apply:       true,
+	}
+	if err := inst.ensureClaudeEnv(false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(claudeEnvOwnershipPath(inst.managedRoot))
+	var ledger map[string]any
+	if err != nil {
+		t.Fatalf("install target not recorded: %v", err)
+	}
+	if err := json.Unmarshal(raw, &ledger); err != nil {
+		t.Fatal(err)
+	}
+	if ledger["target"] != custom {
+		t.Fatalf("install target missing: %s", raw)
+	}
+	if gaps, err := ClaudeEnvGaps(
+		inst.managedRoot,
+		filepath.Join(home, "primary", "settings.json"),
+		inst.options.ClaudeEnv,
+	); err != nil ||
+		len(gaps) > 0 {
+		t.Fatalf("doctor rejected explicit target: %v, %v", gaps, err)
 	}
 }

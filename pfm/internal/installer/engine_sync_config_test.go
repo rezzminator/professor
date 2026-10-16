@@ -184,6 +184,15 @@ func TestWireEngineSyncConfigLeavesAnUnownedFile(t *testing.T) {
 
 func TestWireEngineSyncConfigWithoutTheTemplate(t *testing.T) {
 	installer, output, home := engineSyncGlobalEngine(t, ModeApply, nil)
+	oldDir := filepath.Join(home, ".config", "engine-sync")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	oldPolicy := filepath.Join(installer.options.SourceRepo, "templates", "global", "engine-sync", "config.json")
+	oldLink := filepath.Join(oldDir, "config.json")
+	oldTargets := filepath.Join(oldDir, "targets.json")
+	writeFixture(t, oldTargets, `{"sourceRepo":"`+installer.options.SourceRepo+`"}`)
+	if err := os.Symlink(oldPolicy, oldLink); err != nil {
+		t.Fatal(err)
+	}
 	if err := installer.wireEngineSyncConfig(); err != nil {
 		t.Fatal(err)
 	}
@@ -191,10 +200,15 @@ func TestWireEngineSyncConfigWithoutTheTemplate(t *testing.T) {
 		installer.options.SourceRepo,
 	) + "\n"
 	if output.String() != want {
-		t.Fatalf("transcript:\n%s\nwant:\n%s", output.String(), want)
+		t.Fatalf("transcript: %s; want %s", output.String(), want)
 	}
 	if _, err := os.Lstat(enginesync.GlobalConfigPath(home)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a global file was written without a template: %v", err)
+	}
+	for _, path := range []string{oldLink, oldTargets} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Errorf("missing template retired legacy config %s: %v", path, err)
+		}
 	}
 }
 

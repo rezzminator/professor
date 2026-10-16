@@ -144,3 +144,49 @@ func TestPrintDependenciesCountsAnUnknownProbeStateLikeMissing(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctorCallmeterUsesClaudeEnvHome(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	home := runtime.Paths.Home
+	clone := filepath.Join(home, "clone")
+	root := filepath.Join(clone, "plugins")
+	writePluginLogsFile(
+		t,
+		filepath.Join(clone, ".claude-plugin", "marketplace.json"),
+		`{"name":"professor","plugins":[{"name":"callmeter","source":"./plugins/callmeter/plugins/callmeter"}]}`,
+	)
+	writePluginLogsFile(
+		t,
+		filepath.Join(root, "callmeter", "plugins", "callmeter", ".claude-plugin", "plugin.json"),
+		`{"name":"callmeter","version":"0.4.0"}`,
+	)
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Version = "0.82.0-alpha"
+	runtime.Config.Claude.PluginCheckoutRoot = root
+	runtime.Config.Claude.Env = map[string]string{"CALLMETER_HOME": filepath.Join(home, "configured")}
+	writePluginLogsFile(
+		t,
+		filepath.Join(home, ".claude", "settings.json"),
+		fmt.Sprintf(
+			`{"enabledPlugins":{"callmeter@callmeter-dev":true},"env":{"PLUGIN_LOG_DIR":%q}}`,
+			filepath.Join(home, "shared-logs"),
+		),
+	)
+	writeDoctorInstalledPlugins(t, filepath.Join(home, ".claude"), "callmeter@callmeter-dev")
+	t.Setenv("CALLMETER_HOME", filepath.Join(home, "ambient"))
+	writePluginLogsFile(t, filepath.Join(home, "configured", "logs", "events.jsonl"), "{}\n")
+	writePluginLogsFile(t, filepath.Join(home, "ambient", "logs", "events.jsonl"), "{}\n{}\n")
+	var stdout, stderr bytes.Buffer
+	runDoctor(nil, &stdout, &stderr, runtime)
+	want := filepath.Join(home, "configured", "bin", "0.4.0", "callmeter") + " missing"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("doctor did not inspect claude.env home %s:\n%s", want, stdout.String())
+	}
+	wantFallback := "1 rows stranded in its fallback " + filepath.Join(home, "configured", "logs")
+	if !strings.Contains(stdout.String(), wantFallback) ||
+		strings.Contains(stdout.String(), filepath.Join(home, "ambient", "logs")) {
+		t.Fatalf("doctor fallback audit ignored effective claude.env home:\n%s", stdout.String())
+	}
+}

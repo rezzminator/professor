@@ -70,6 +70,26 @@ func RealOps() Ops {
 // or test binary.
 func pfmLauncher(home string) string { return filepath.Join(home, ".local", "bin", "pfm") }
 
+// launchdJobVariable is the variable launchd sets to a job's label in every
+// process it starts for the job.
+const launchdJobVariable = "XPC_SERVICE_NAME"
+
+// surfaceEnv is the themesync environment over the real runner and pfm's
+// tmux servers, naming the launchd job this process runs as.
+func surfaceEnv(values paths.Values, env paths.Env) (themesync.Env, error) {
+	if values.Home == "" {
+		return themesync.Env{}, fmt.Errorf("no home directory resolved")
+	}
+	return themesync.Env{
+		Home:       values.Home,
+		StateDir:   themesync.DefaultStateDir(values.Home),
+		PfmBinary:  pfmLauncher(values.Home),
+		Runner:     obs.Runner(deps.RealRunner{}),
+		Tmux:       themetmux.AtDir(values.TmuxDir),
+		LaunchdJob: env.Get(launchdJobVariable),
+	}, nil
+}
+
 // Main runs `pfm theme` against the real home, tmux directory and terminal.
 func Main(args []string, stdout, stderr io.Writer, values paths.Values) int {
 	file, isFile := stdout.(interface{ Fd() uintptr })
@@ -78,18 +98,7 @@ func Main(args []string, stdout, stderr io.Writer, values paths.Values) int {
 	return RunVerb(context.Background(), args, Deps{
 		Ops:   RealOps(),
 		Color: color,
-		Env: func() (themesync.Env, error) {
-			if values.Home == "" {
-				return themesync.Env{}, fmt.Errorf("no home directory resolved")
-			}
-			return themesync.Env{
-				Home:      values.Home,
-				StateDir:  themesync.DefaultStateDir(values.Home),
-				PfmBinary: pfmLauncher(values.Home),
-				Runner:    obs.Runner(deps.RealRunner{}),
-				Tmux:      themetmux.AtDir(values.TmuxDir),
-			}, nil
-		},
+		Env:   func() (themesync.Env, error) { return surfaceEnv(values, env) },
 	}, stdout, stderr)
 }
 

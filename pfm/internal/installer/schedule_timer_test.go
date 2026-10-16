@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The schedule tick is fixed at five minutes: the systemd timer and the launchd
@@ -67,7 +69,7 @@ func TestScheduleServiceAssetFiresAndStagesWithoutMarkers(t *testing.T) {
 	if strings.Contains(string(content), "__PFM_") {
 		t.Fatalf("staged schedule service keeps an unrendered marker:\n%s", content)
 	}
-	if !strings.Contains(string(content), "Environment=PATH="+servicePath(home)) {
+	if !strings.Contains(string(content), "Environment=PATH="+paths.ServicePath(home)) {
 		t.Fatalf("staged schedule service does not carry the service PATH:\n%s", content)
 	}
 }

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -25,7 +27,8 @@ func followerEscape(text string) string {
 }
 
 // followerPlist is the launch agent that runs `pfm theme sync` whenever macOS
-// rewrites its global preferences, with a one-minute backstop and at load.
+// rewrites its global preferences, with a one-minute backstop and at load, on
+// the one service PATH (launchd's bare default holds neither tmux nor herdr).
 func followerPlist(pfm, home, stateDir string) string {
 	stringItems := func(values ...string) string {
 		var out strings.Builder
@@ -51,6 +54,11 @@ func followerPlist(pfm, home, stateDir string) string {
 	<integer>` + fmt.Sprint(followerInterval) + `</integer>
 	<key>RunAtLoad</key>
 	<true/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>` + followerEscape(paths.ServicePath(home)) + `</string>
+	</dict>
 	<key>StandardOutPath</key>
 	<string>` + followerEscape(logPath) + `</string>
 	<key>StandardErrorPath</key>
@@ -111,6 +119,23 @@ func (s *session) followerRetire(ctx context.Context) (bool, error) {
 	return existed, nil
 }
 
+// errFollowerSelfReload is the follower's row when its plist changed inside
+// its own launchd job: bootout there would make launchd stop the running sync
+// before bootstrap, leaving no agent, so the reload waits for a run outside.
+var errFollowerSelfReload = errors.New(
+	"themesync: launch agent plist rewritten; the agent cannot reload itself from inside launchd: run `pfm theme sync` in a shell",
+)
+
+// errFollowerReloadDue is the follower's read-back while a rewritten plist
+// still owes launchd its reload (refused inside the job, or a launchctl step
+// that failed): the loaded agent runs the old definition.
+var errFollowerReloadDue = errors.New(
+	"themesync: launch agent plist rewritten but the loaded agent was not reloaded: run `pfm theme sync` in a shell",
+)
+
+// followerInOwnJob says whether this process is the follower's launchd job.
+func (s *session) followerInOwnJob() bool { return s.env.LaunchdJob == followerLabel }
+
 func (s *session) followerNotNeeded() string {
 	return fmt.Sprintf("mode %s: the appearance follower is not needed", s.state.Mode)
 }
@@ -121,6 +146,7 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 		if _, err := s.followerRetire(ctx); err != nil {
 			return s.failed(surfaceFollower, path, err)
 		}
+		s.setDue(surfaceFollower, false)
 		return s.absent(surfaceFollower, path, s.followerNotNeeded())
 	}
 	if s.env.PfmBinary == "" {
@@ -137,13 +163,18 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 		if err := s.replaceFile(path, []byte(want)); err != nil {
 			return s.failed(surfaceFollower, path, err)
 		}
+		s.setDue(surfaceFollower, true) // owed until a bootstrap succeeds
 	}
 	loaded, err := s.followerLoaded(ctx)
 	if err != nil {
 		return s.failed(surfaceFollower, path, err)
 	}
-	if loaded && !changed {
+	if loaded && !s.reloadDue(surfaceFollower, changed) {
 		return s.result(surfaceFollower, VerdictApplied, path, "")
+	}
+	if loaded && s.followerInOwnJob() {
+		s.setDue(surfaceFollower, true)
+		return s.failed(surfaceFollower, path, errFollowerSelfReload)
 	}
 	if loaded {
 		if err := s.followerBootout(ctx); err != nil {
@@ -156,7 +187,7 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 		return s.failed(surfaceFollower, path, fmt.Errorf("themesync: launchctl bootstrap: %v (exit %d): %s",
 			err, result.ExitCode, strings.TrimSpace(string(result.Stderr))))
 	}
-	return s.result(surfaceFollower, VerdictApplied, path, "")
+	return s.settle(surfaceFollower, path, "", nil)
 }
 
 func (s *session) readFollower(ctx context.Context) SurfaceResult {
@@ -179,6 +210,8 @@ func (s *session) readFollower(ctx context.Context) SurfaceResult {
 		return s.failed(surfaceFollower, path, err)
 	case !loaded:
 		return s.in(surfaceFollower, VerdictDrift, path, "launch agent is not loaded in "+s.followerTarget(), 0)
+	case s.state.Due[surfaceFollower]:
+		return s.failed(surfaceFollower, path, errFollowerReloadDue)
 	}
 	return s.in(surfaceFollower, VerdictInSync, path, "", 0)
 }

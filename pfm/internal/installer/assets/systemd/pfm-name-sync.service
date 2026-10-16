@@ -5,7 +5,7 @@ Description=Converge every live chat's tmux window name (pfm name-sync)
 Type=oneshot
 # The engine, not a shell satellite: window naming has exactly one writer, and
 # it is the same gather pass the picker runs. PATH is the one service search
-# path every pfm unit shares (installer servicePath), so the tmux it probes is
+# path every pfm unit shares (paths.ServicePath), so the tmux it probes is
 # found under every service manager.
 Environment=PATH=__PFM_SERVICE_PATH__
 ExecStart=%h/.local/bin/pfm name-sync --apply

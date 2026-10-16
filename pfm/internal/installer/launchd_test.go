@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 var plistEnvironmentPath = regexp.MustCompile(
@@ -74,9 +76,9 @@ func TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux(t *testing.T) {
 
 // TestEveryServiceUnitTakesTheOneServicePath keeps the search path ONE
 // implementation: every launchd agent and systemd unit that starts pfm takes
-// its PATH from the servicePath marker — never a PATH spelled by hand, which
+// its PATH from the servicePathMarker — never a PATH spelled by hand, which
 // is how the systemd unit had one and its launchd twins had none — and the
-// rendered unit carries servicePath exactly.
+// rendered unit carries paths.ServicePath exactly.
 func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -106,8 +108,8 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 		if err != nil {
 			return fmt.Errorf("render %s: %w", relative, err)
 		}
-		if got := strings.Count(string(rendered), servicePath(home)); got != 1 {
-			t.Errorf("%s renders servicePath %d times, want once:\n%s", relative, got, rendered)
+		if got := strings.Count(string(rendered), paths.ServicePath(home)); got != 1 {
+			t.Errorf("%s renders paths.ServicePath %d times, want once:\n%s", relative, got, rendered)
 		}
 		return nil
 	})
@@ -149,7 +151,7 @@ func TestNameSyncLaunchAgentGivesTheJobAPathThatFindsTmux(t *testing.T) {
 			written,
 		)
 	}
-	if want := servicePath(home); string(match[1]) != want {
+	if want := paths.ServicePath(home); string(match[1]) != want {
 		t.Fatalf("name-sync PATH = %q, want the one service path %q", match[1], want)
 	}
 }

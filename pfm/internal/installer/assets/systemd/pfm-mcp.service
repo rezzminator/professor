@@ -10,7 +10,7 @@ Type=simple
 # see ~/.local/bin — where user-installed engine CLIs (claude, pfm itself)
 # live. Without this line every chat this daemon spawns dies at launch on
 # "command not found". The PATH below is the one service search path
-# every pfm unit shares, rendered at install (installer servicePath). A machine
+# every pfm unit shares, rendered at install (paths.ServicePath). A machine
 # whose engines live elsewhere pins absolute <engine>.binary paths in the pfm
 # machine config instead.
 Environment=PATH=__PFM_SERVICE_PATH__

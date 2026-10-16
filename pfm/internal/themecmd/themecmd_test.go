@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
@@ -285,5 +286,32 @@ func TestEnvFailureExits1(t *testing.T) {
 	); code != 1 ||
 		!strings.Contains(stderr.String(), "pfm theme: no home") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+}
+
+// The theme verb tells themesync which launchd job it runs as, so the
+// follower's own job never boots itself out.
+func TestSurfaceEnvCarriesTheLaunchdJob(t *testing.T) {
+	values := paths.Values{Home: "/h", TmuxDir: "/h/tmux"}
+	for _, tc := range []struct{ name, job string }{
+		{"in the follower job", "com.professor.pfm.theme"},
+		{"in a shell", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := &paths.MapEnv{Values: map[string]string{}}
+			if tc.job != "" {
+				env.Values["XPC_SERVICE_NAME"] = tc.job
+			}
+			got, err := surfaceEnv(values, env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.LaunchdJob != tc.job {
+				t.Errorf("LaunchdJob = %q, want %q", got.LaunchdJob, tc.job)
+			}
+			if got.PfmBinary != "/h/.local/bin/pfm" || got.StateDir != themesync.DefaultStateDir("/h") {
+				t.Errorf("surfaceEnv = %+v", got)
+			}
+		})
 	}
 }

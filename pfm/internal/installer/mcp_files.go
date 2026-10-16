@@ -102,7 +102,7 @@ func (installer *engine) writeRegistryFileIf(
 
 // withClaudeMCPLocks interoperates with Claude's proper-lockfile protocol:
 // mkdir <config>.lock, refresh mtime every five seconds (ten-second stale
-// threshold), then rmdir. Never reclaim an existing lock: report it for retry.
+// threshold), then rmdir. Reclaim stale empty directories just as Claude does.
 // Explicit lockfilePath in Claude preserves file aliases; resolve parents only.
 func withClaudeMCPLocks(paths []string, write func(check func() error) error) (result error) {
 	unique := map[string]bool{}
@@ -134,8 +134,8 @@ func withClaudeMCPLocks(paths []string, write func(check func() error) error) (r
 		}
 	}()
 	for _, name := range names {
-		if err := os.Mkdir(name, 0o700); err != nil {
-			return fmt.Errorf("acquire Claude MCP lock %s; close the native writer and retry: %w", name, err)
+		if err := acquireClaudeMCPLock(name); err != nil {
+			return err
 		}
 		info, err := os.Lstat(name)
 		if err != nil {
@@ -196,6 +196,42 @@ func withClaudeMCPLocks(paths []string, write func(check func() error) error) (r
 		result = errors.Join(result, <-done)
 	}()
 	return write(func() error { return validate(nil) })
+}
+
+// Claude's proper-lockfile default is stale: 10000 milliseconds; its stale
+// takeover is rmdir followed by a single mkdir, never recursive removal.
+const claudeMCPLockStale = 10 * time.Second
+
+func acquireClaudeMCPLock(name string) error {
+	if err := os.Mkdir(name, 0o700); err == nil {
+		return nil
+	} else if !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("acquire Claude MCP lock %s: %w", name, err)
+	}
+	info, err := os.Lstat(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// The native owner released it after mkdir failed; retry only once.
+	case err != nil:
+		return fmt.Errorf("inspect Claude MCP lock %s: %w", name, err)
+	default:
+		if !info.ModTime().Before(clock.Real.Now().Add(-claudeMCPLockStale)) {
+			return fmt.Errorf(
+				"acquire Claude MCP lock %s: native lock is active; retry after the writer releases it",
+				name,
+			)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("reclaim stale Claude MCP lock %s: not a lock directory", name)
+		}
+		if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("reclaim stale Claude MCP lock %s: %w", name, err)
+		}
+	}
+	if err := os.Mkdir(name, 0o700); err != nil {
+		return fmt.Errorf("acquire Claude MCP lock %s after stale-lock retry: %w", name, err)
+	}
+	return nil
 }
 
 // enabledMCPNames lists one registration per enabled family.

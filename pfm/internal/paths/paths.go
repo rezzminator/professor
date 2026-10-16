@@ -431,7 +431,7 @@ func OpenCodeWorkbenchPlugin(home string) string {
 }
 
 // HerdrLockDir holds the per-chat-session lock files the Herdr reporter
-// serializes on.
+// serializes on, its error logs and the Codex pane registry.
 func HerdrLockDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "herdr")
 }

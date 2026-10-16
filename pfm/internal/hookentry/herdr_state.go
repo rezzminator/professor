@@ -61,7 +61,8 @@ type herdrDeps struct {
 	getenv func(string) string
 	tmux   func(ctx context.Context, socket string, args ...string) (string, error)
 	now    func() time.Time
-	// lookPath finds a program on PATH; lockDir holds the per-session lock files.
+	// lookPath finds a program on PATH; lockDir holds the per-session lock
+	// files and the Codex pane registry (herdr_codex.go).
 	lookPath func(string) (string, error)
 	lockDir  string
 	spawn    func(argv []string) error
@@ -72,8 +73,9 @@ type herdrDeps struct {
 	// the hook process.
 	procInfo func(pid int) (parent int, command string, err error)
 	getpid   func() int
-	// environ reads one process's environment: the pane process's own
-	// TMUX and TMUX_PANE when the hook's are stale (tmuxOrigin).
+	// cmdline and environ read one process's command line and environment:
+	// the Codex TUI's own, which name the pane it runs in (herdr_codex.go).
+	cmdline func(pid int) ([]string, error)
 	environ func(pid int) (map[string]string, error)
 	// stateDir is the `pfm theme` state directory: while its sync is on, the
 	// reporter marks the chat's own tmux server with the agent state the
@@ -89,7 +91,7 @@ func realHerdrDeps() herdrDeps {
 	procfs := gather.NewProcFS(env.Get(paths.EnvProcRoot))
 	deps := herdrDeps{
 		getenv: env.Get, tmux: runTmuxForHerdr, now: clock.Real.Now, lookPath: hostdeps.RealRunner{}.LookPath,
-		procInfo: realProcInfo(procfs), getpid: os.Getpid, environ: procfs.Environ,
+		procInfo: realProcInfo(procfs), getpid: os.Getpid, cmdline: procfs.Cmdline, environ: procfs.Environ,
 		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch,
 	}
 	home, err := paths.HomeFrom(env)
@@ -259,7 +261,8 @@ type herdrReporter struct {
 	sent uint64
 	// session is the chat session once known: the name its error log carries.
 	session string
-	// tmuxPane is the engine's tmux pane (tmuxOrigin), empty outside tmux.
+	// tmuxPane is the engine's tmux pane (tmuxOrigin, or a Codex session's
+	// registered one), empty outside tmux.
 	tmuxPane string
 	// panes caches one pane.list per Herdr socket for this run.
 	panes map[string]paneListing
@@ -376,17 +379,24 @@ func (reporter *herdrReporter) hostHasHerdr() bool {
 	return err == nil
 }
 
-// run resolves the pane, then reports. Inside a pfm chat tmux server the
+// run resolves the pane, then reports. A Codex event reports to the pane
+// registered for its session (runCodex). Inside a pfm chat tmux server the
 // pane belongs to the tmux CLIENT that attached from a Herdr pane, never to
 // the process environment.
 func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) error {
-	// tmux.Exec always names its socket.
-	if err := reporter.tmuxOrigin(); err != nil {
-		return err
+	if reporter.options.engine == pfmengine.Codex && reporter.firedByEngine() {
+		return reporter.runCodex(ctx, payload)
 	}
+	reporter.tmuxOrigin()
 	if reporter.options.socket == "" {
 		return reporter.apply(ctx, payload, reporter.processTarget())
 	}
+	return reporter.runTmux(ctx, payload)
+}
+
+// runTmux reports through the chat's tmux server, whose socket
+// options.socket names (tmux.Exec always names its socket).
+func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload) error {
 	// Only a pfm chat server carries the theme; an engine in the user's own
 	// tmux leaves that server unmarked.
 	themeOn := reporter.themeOn()

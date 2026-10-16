@@ -274,6 +274,13 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 				}
 			}
 		}
+		drifts := codexHerdrTimeoutDrifts(document, home)
+		for index := range drifts {
+			results = append(results, HookProbeResult{
+				Hook: located(drifts[index].hook), State: stateHookDrift,
+				What: "timeout", Want: strconv.Itoa(drifts[index].want), Got: drifts[index].got,
+			})
+		}
 		for _, key := range sortedHookKeys(countSettingsHookCommands(document)) {
 			if stale, found := staleHookResult(target, path, key, pfmBinary, home, true); found {
 				results = append(results, stale)

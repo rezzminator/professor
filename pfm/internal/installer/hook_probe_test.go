@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -336,5 +337,93 @@ func TestDoctorDisabledHookDoesNotPromiseInstallRepair(t *testing.T) {
 	if warnings != 1 || failures != 0 || !strings.Contains(output.String(), "DISABLED") ||
 		strings.Contains(output.String(), "pfm install") {
 		t.Fatalf("disabled advice warnings=%d failures=%d: %s", warnings, failures, output.String())
+	}
+}
+
+// withHerdrTimeout is a pfm-owned hooks.json whose Herdr handler of event
+// carries timeout instead of the one pfm writes; nil removes the key.
+func withHerdrTimeout(t *testing.T, home, event string, timeout any) string {
+	t.Helper()
+	var document map[string]any
+	if err := json.Unmarshal([]byte(ownedHooksBody(t, home, "")), &document); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ := document["hooks"].(map[string]any)
+	entries, _ := hooks[event].([]any)
+	edited := false
+	for _, entryValue := range entries {
+		entry, _ := entryValue.(map[string]any)
+		handlers, _ := entry["hooks"].([]any)
+		for _, handlerValue := range handlers {
+			handler, _ := handlerValue.(map[string]any)
+			if command, _ := handler["command"].(string); !strings.Contains(command, "herdr-state") {
+				continue
+			}
+			if timeout == nil {
+				delete(handler, "timeout")
+			} else {
+				handler["timeout"] = timeout
+			}
+			edited = true
+		}
+	}
+	if !edited {
+		t.Fatalf("no Herdr handler of %s in the owned hooks.json", event)
+	}
+	body, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// An installed Herdr handler whose timeout is not the one pfm writes is a
+// drift row naming the event, the timeout found and the one expected; a
+// healthy file has none, and a file that cannot be read stays UNREADABLE.
+func TestProbeCodexHooksReportsAHerdrHandlerTimeoutDrift(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		body func(t *testing.T, home string) string
+		want []string
+	}{
+		"healthy": {func(t *testing.T, home string) string { return ownedHooksBody(t, home, "") }, nil},
+		"an Interrupt timeout of 5": {
+			func(t *testing.T, home string) string { return withHerdrTimeout(t, home, "Interrupt", 5) },
+			[]string{"doctor: hook codex[1] hooks.json Interrupt herdr-idle-Interrupt DRIFT what=timeout want=3 got=5"},
+		},
+		"a Stop timeout of 3": {
+			func(t *testing.T, home string) string { return withHerdrTimeout(t, home, "Stop", 3) },
+			[]string{"doctor: hook codex[1] hooks.json Stop herdr-idle-Stop DRIFT what=timeout want=5 got=3"},
+		},
+		"a SessionEnd with no timeout": {
+			func(t *testing.T, home string) string { return withHerdrTimeout(t, home, "SessionEnd", nil) },
+			[]string{"doctor: hook codex[1] hooks.json SessionEnd herdr-end-SessionEnd DRIFT what=timeout want=3 got=absent"},
+		},
+		"an unreadable file": {
+			func(*testing.T, string) string { return `{"hooks":` },
+			[]string{"doctor: hook codex[1] hooks.json UNREADABLE"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			home, machine, hooksPath := stageCodexProbeHome(t, "")
+			writeFixture(t, hooksPath, test.body(t, home))
+			var output bytes.Buffer
+			ReportHooks(&output, home, machine, false)
+			var drifts []string
+			for _, line := range strings.Split(output.String(), "\n") {
+				if strings.Contains(line, "what=timeout") || strings.Contains(line, "UNREADABLE") {
+					drifts = append(drifts, line)
+				}
+			}
+			if len(drifts) != len(test.want) {
+				t.Fatalf("timeout and unreadable rows = %q, want %q:\n%s", drifts, test.want, output.String())
+			}
+			for index, want := range test.want {
+				if !strings.HasPrefix(drifts[index], want) {
+					t.Fatalf("row %q, want it to open %q", drifts[index], want)
+				}
+			}
+		})
 	}
 }

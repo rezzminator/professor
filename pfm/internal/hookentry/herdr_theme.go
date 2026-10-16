@@ -12,8 +12,13 @@ import (
 // themeOn reports whether the reporter marks its tmux server with the agent
 // state: only a pfm chat server carries the theme, and only while its sync is on.
 func (reporter *herdrReporter) themeOn() bool {
-	return reporter.deps.stateDir != "" && gather.IsChatSocketName(filepath.Base(reporter.options.socket)) &&
-		themesync.SyncOn(reporter.deps.stateDir)
+	return gather.IsChatSocketName(filepath.Base(reporter.options.socket)) && reporter.themeSyncOn()
+}
+
+// themeSyncOn reports whether the `pfm theme` sync is on, whatever server
+// the reporter runs in.
+func (reporter *herdrReporter) themeSyncOn() bool {
+	return reporter.deps.stateDir != "" && themesync.SyncOn(reporter.deps.stateDir)
 }
 
 // themeAgentState is the agent state the theme's colours show for one event:

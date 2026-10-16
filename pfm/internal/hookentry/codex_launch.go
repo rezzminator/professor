@@ -46,21 +46,28 @@ var codexValueFlags = map[string]bool{
 // non-interactive turns that fire the Codex hooks. The subcommand is the first positional argument
 // (any other one is the prompt).
 func codexRunsAsInteractiveChat(args []string) bool {
+	subcommand, help := codexSubcommand(args)
+	return !help && !codexPassthrough[subcommand] && subcommand != "exec" && subcommand != "review"
+}
+
+// codexSubcommand is a Codex launch's first positional argument, empty for none or past a "--";
+// help reports a help or version flag before it.
+func codexSubcommand(args []string) (subcommand string, help bool) {
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		switch {
 		case arg == helpFlag || arg == "-h" || arg == versionFlag || arg == "-V":
-			return false
+			return "", true
 		case arg == "--":
-			return true
+			return "", false
 		case codexValueFlags[arg]:
 			index++
 		case strings.HasPrefix(arg, "-"):
 		default:
-			return !codexPassthrough[arg] && arg != "exec" && arg != "review"
+			return arg, false
 		}
 	}
-	return true
+	return "", false
 }
 
 // CodexLaunch applies the current primary account's Codex policy at launch time.

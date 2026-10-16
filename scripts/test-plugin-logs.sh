@@ -80,6 +80,37 @@ for operation in report rotate; do
   TMPDIR="$T/mode775" run_sut "$operation" --dir "$T/empty-logs"
   expect "$operation accepts user-owned mode 775 scratch ancestry" '[ "$RC" = 0 ]'
 done
+# The losing mkdir must validate and accept a concurrently created directory.
+REAL_MKDIR=$(command -v mkdir)
+mkdir -p "$T/mkdir-bin" "$T/race-scratch-victim"
+cat > "$T/mkdir-bin/mkdir" <<'SH'
+#!/usr/bin/env bash
+if [ "${*: -1}" = "$RACE_PARENT" ] && [ ! -e "$RACE_PARENT" ] && [ ! -L "$RACE_PARENT" ]; then
+  case "$RACE_KIND" in
+    trusted) "$REAL_MKDIR" -m 700 -- "$RACE_PARENT" || exit $? ;;
+    writable) "$REAL_MKDIR" -m 777 -- "$RACE_PARENT" || exit $? ;;
+    symlink) ln -s "$RACE_VICTIM" "$RACE_PARENT" || exit $? ;;
+  esac
+  echo 'mkdir: concurrent creator won' >&2
+  exit 1
+fi
+exec "$REAL_MKDIR" "$@"
+SH
+chmod +x "$T/mkdir-bin/mkdir"
+for phase in project purpose; do
+  for kind in trusted writable symlink; do
+    base="$T/create-race-$phase-$kind"
+    mkdir -p "$base"
+    parent="$base/root"
+    if [ "$phase" = purpose ]; then mkdir "$parent"; parent="$parent/plugin-logs"; fi
+    TMPDIR="$base" PATH="$T/mkdir-bin:$PATH" REAL_MKDIR="$REAL_MKDIR" RACE_PARENT="$parent" RACE_KIND="$kind" RACE_VICTIM="$T/race-scratch-victim" run_sut report --dir "$T/logs"
+    if [ "$kind" = trusted ]; then
+      expect "accept concurrent $phase scratch creator" '[ "$RC" = 0 ]'
+    else
+      expect "reject concurrent $phase $kind scratch replacement" '[ "$RC" = 4 ] && grep -Fq "untrusted scratch folder:" "$T/out"'
+    fi
+  done
+done
 # Pre-existing scratch ancestry is a trust boundary, including when run as root.
 for hostile in project-symlink purpose-symlink project-writable purpose-writable; do
   base="$T/hostile-$hostile"

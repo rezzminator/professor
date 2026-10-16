@@ -63,7 +63,9 @@ while :; do
 done
 for scratch_parent in "$temp_root/$project" "$temp_root/$project/plugin-logs"; do
   if [ ! -e "$scratch_parent" ] && [ ! -L "$scratch_parent" ]; then
-    mkdir -- "$scratch_parent" || unreadable "$dir" "cannot create scratch folder: $scratch_parent"
+    if ! mkdir -- "$scratch_parent" 2>/dev/null && [ ! -e "$scratch_parent" ] && [ ! -L "$scratch_parent" ]; then
+      unreadable "$dir" "cannot create scratch folder: $scratch_parent"
+    fi
   fi
   check_scratch_dir "$scratch_parent" 1
 done
